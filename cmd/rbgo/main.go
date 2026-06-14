@@ -1,0 +1,82 @@
+// Command rbgo is the CLI front-end for the embedded-ruby interpreter.
+//
+// Phase 0 supports a single mode:
+//
+//	rbgo run <file.rb>     compile in memory and interpret
+//	rbgo run -e "<code>"   run a one-liner
+//	rbgo <file.rb>         shorthand for `rbgo run`
+//
+// `rbgo build` (single static binary) and `repl` arrive in later phases
+// (plan-rbgo.md §12, §17).
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/go-embedded-ruby/ruby/internal/compiler"
+	"github.com/go-embedded-ruby/ruby/internal/parser"
+	"github.com/go-embedded-ruby/ruby/internal/vm"
+)
+
+func main() {
+	args := os.Args[1:]
+	if len(args) == 0 {
+		usage()
+	}
+
+	cmd := args[0]
+	switch cmd {
+	case "run":
+		runCmd(args[1:])
+	case "-h", "--help", "help":
+		usage()
+	default:
+		// Shorthand: `rbgo file.rb`.
+		runCmd(args)
+	}
+}
+
+func runCmd(args []string) {
+	var src, name string
+	switch {
+	case len(args) == 2 && args[0] == "-e":
+		src, name = args[1], "-e"
+	case len(args) == 1:
+		b, err := os.ReadFile(args[0])
+		if err != nil {
+			fatal("rbgo: %v", err)
+		}
+		src, name = string(b), args[0]
+	default:
+		usage()
+	}
+
+	if err := run(src, name); err != nil {
+		fatal("%v", err)
+	}
+}
+
+func run(src, name string) error {
+	prog, err := parser.Parse(src)
+	if err != nil {
+		return err
+	}
+	iseq, err := compiler.Compile(prog)
+	if err != nil {
+		return err
+	}
+	iseq.Name = name
+	_, err = vm.New(os.Stdout).Run(iseq)
+	return err
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: rbgo run <file.rb> | rbgo run -e \"<code>\" | rbgo <file.rb>")
+	os.Exit(2)
+}
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}

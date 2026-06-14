@@ -1,0 +1,454 @@
+# Implementation plan — Ruby in pure Go (`go-embedded-ruby`, CLI `rbgo`)
+
+> Goal: an implementation of Ruby written in **pure Go (no cgo)** that produces a
+> **single static binary** embedding compiled code while preserving Ruby's
+> **full dynamism** (dynamic dispatch, monkey-patching, `eval`, runtime
+> `require`, metaprogramming).
+
+This document is the reference roadmap. It is amended at the end of every phase
+(exit criteria met, decisions settled, risks updated). A standalone critique of
+the original draft is folded into the relevant sections and summarised in
+**§15 Risk register** and **§16 Decision journal**.
+
+## 1. Vision & constraints
+
+- **No cgo.** Everything is pure Go → trivial cross-compilation (`GOOS`/`GOARCH`),
+  static binary by default.
+- **Bytecode VM** (mruby model), not transpilation to Go. The front-end (lexer +
+  parser + compiler) is **embedded** in the binary so dynamic `eval`/`require`
+  work.
+- **Dynamism = a live object model.** Dispatch goes through mutable method tables
+  (our `objc_msgSend`).
+- **Reuse the GC.** Ruby objects are Go heap objects; Go's GC collects them. We
+  do not write a GC.
+- **Build-time selection.** Embed only the subset of the stdlib that is needed
+  (require-graph scan + config + build tags), not the whole distribution.
+
+### Target & scope
+- **Reference semantics: Ruby 3.4** (pattern matching, endless methods, `it`,
+  numbered params, beginless/endless ranges, safe navigation).
+- **In scope:** the language core, embedded pure-Ruby stdlib, extension leaves
+  reimplemented in Go.
+- **Out of scope (assumed):** third-party C extensions (gems with `.so`), 100%
+  MRI compatibility. We target a well-defined subset that **grows** (mruby
+  philosophy), validated by conformance tests.
+
+## 2. Overall architecture
+
+```
+source.rb
+   │  (lexer: stateful)
+   ▼ tokens
+   │  (parser: recursive descent + Pratt, locals table)
+   ▼ AST
+   │  (compiler: local resolution, catch tables)
+   ▼ bytecode (ISeq)
+   ▼
+┌──────────────────────────────────────────────┐
+│ VM (interpretation loop)                      │
+│  • object model (RClass/RModule/RObject)      │
+│  • mutable method tables → dispatch           │
+│  • frames, env (closures), catch tables       │
+│  • Fiber ↔ goroutine                          │
+│  • Go core + embedded pure-Ruby stdlib        │
+└──────────────────────────────────────────────┘
+```
+
+Two execution modes:
+- `rbgo run app.rb` — compile in memory and interpret (development).
+- `rbgo build app.rb -o app` — produce the single static binary (see §12).
+
+## 3. Repository layout
+
+```
+ruby/
+  cmd/rbgo/            CLI: run | build | compile | repl
+  internal/
+    token/             token kinds (rich: tUMINUS vs tMINUS, tLABEL, …)
+    lexer/             stateful lexer: lexState, spaceSeen, heredoc queue, literal stack
+    ast/               AST nodes
+    parser/            recursive descent + Pratt; scope stack (locals)
+    compiler/          AST → ISeq; local resolution; catch tables
+    bytecode/          ISA, ISeq, (de)serialization
+    vm/                interpretation loop, frames, exceptions, super
+    object/            object model: Value, RClass, RModule, RObject, Method
+      core/            Go core types: integer, float, string, array, hash, symbol, proc, range
+    builtin/           Kernel/Object/Module/BasicObject + metaprogramming floor
+    fiber/             Fiber ↔ goroutine bridge
+    encoding/          String encodings (UTF-8, ASCII-8BIT, transcoding)
+    regexp/            adapter onto the standalone go-onigmo/regexp module
+    loader/            require resolution over embedded FS + bytecode cache
+    stdlib/
+      ruby/            upstream *.rb embedded (comparable.rb, enumerable.rb, set.rb, …) via //go:embed
+      native/          Go leaves: json, digest, zlib, securerandom, base64, …
+  oracle/              test harness: fixtures generated from MRI/Prism (dev only)
+  testdata/
+  spec/                imported subset of ruby/spec
+```
+
+## 4. Value representation
+
+Starting decision: `Value` is an **interface** with concrete types. Go's GC
+manages everything.
+
+```go
+type Value interface {
+    RClass(*VM) *RClass   // dynamic class → used by dispatch
+}
+```
+
+**Critique — this is the project's central tension, not a Phase 8 footnote.** An
+`Integer` behind an interface is a heap allocation plus an interface method call
+and a map lookup on every dispatch. The two ways MRI avoids this — **tagged /
+NaN-boxed immediates** (fixnums, flonums, `nil`/`true`/`false`) — *fight Go's
+GC*, which must statically know which words are pointers. So you largely cannot
+do MRI-style immediates in safe Go. Consequences to accept up front:
+
+- Position the project as **deployment/embedding convenience, not raw speed**
+  (numeric loops will be several× MRI).
+- Even so, **split `Fixnum` and `Bignum`** so the common integer does not carry a
+  nil `*big.Int` word, and add a small-int cache (−128..255, like CRuby) early.
+
+Principle: **immutable → value types**; **mutable → pointers**. `object_id` is
+stable via a **weak-keyed** table (pointer → id); `equal?` is pointer identity
+for reference types. Note `ObjectSpace._id2ref` / `each_object` are effectively
+**incompatible** with reusing Go's GC (they need a registry that pins
+everything) — stub them, do not promise them.
+
+Phase 0 ships a minimal `Value` (Integer `int64`, Float, String, Bool, Nil,
+Main) without `RClass`; the object model lands in Phase 1.
+
+## 5. Object model (the heart of dynamism)
+
+```go
+type RClass struct {
+    name      string
+    super     *RClass
+    methods   map[Symbol]*Method   // MUTABLE → monkey-patching, define_method
+    consts    map[Symbol]Value
+    ancestors []*RClass            // cached linearization (include/prepend)
+    isSingleton bool
+}
+type Method struct {
+    name    Symbol
+    iseq    *ISeq      // Ruby method…
+    native  NativeFn   // …or implemented in Go
+    owner   *RClass
+    visibility Visibility
+}
+```
+
+Dispatch (our `objc_msgSend`) walks the ancestor chain, falling back to
+`method_missing`. From this fall out **for free**: monkey-patching (mutate
+`methods`), `define_method` (insert), `method_missing` (fallback), `send`
+(computed selector), reflection (read the tables), singleton classes
+(`RClass{isSingleton:true}` spliced into the chain).
+
+## 6. Bytecode & VM
+
+**Stack ISA (YARV-style).** Literal pushes, locals (`getlocal`/`setlocal` with
+depth+index), ivars/consts/cvars, calls (`send{mid, argc, flags, blockiseq}`,
+`invokesuper`, `invokeblock`), compound literals, control (`jump`, `branchif`,
+`branchunless`, `branchnil`), definition (`definemethod`, `defineclass`), stack
+ops, and non-local exit (`leave`, `throw{type}`).
+
+```go
+type ISeq struct {
+    Insns  []Instr
+    Consts []Value
+    Locals []Symbol
+    Catch  []CatchEntry  // rescue / ensure / break / next / redo / retry
+    Arity  Arity
+    Name   string
+    Source SourceMap     // for backtraces
+}
+```
+
+The **catch table** is the single mechanism for `rescue`/`ensure`/`retry` **and**
+non-local `break`/`next`/`redo`/`return` from blocks — exactly like YARV.
+
+**Critique — native-frame unwinding.** A clean "status return, never panic" for
+control flow (see §8) has a hole: when a Go-implemented method (e.g. `Array#each`)
+calls back a Ruby block that does `break` or `raise`, the **native Go frame must
+unwind** — you cannot return a status *through* a Go `for` loop. Plan for a
+**hybrid**: status returns for VM-internal flow, but `panic`/`recover` at the
+native↔Ruby callback boundary. Design that boundary in Phase 1.
+
+Phase 0 recurses on the Go stack (so `fib(20)` just works); explicit `Frame`/`Env`
+objects, catch tables, and Fiber arrive in Phases 1–3.
+
+## 7. Closures, blocks, Fiber
+
+- **Blocks/Procs** compile to child ISeqs capturing `env` + `self`; `yield` is
+  `invokeblock`. `lambda` vs `proc` is a flag (`return`/arity semantics).
+- **Fiber ↔ goroutine**: each `Fiber.new` runs a goroutine on a VM loop,
+  synchronised by two channels (resume/yield) in strict cooperative handoff.
+- **Enumerator#next** (external iteration) is built on Fiber — load-bearing for
+  `loop`, `lazy`, and `each` without a block.
+
+**Critique — Fiber cost (raise to Medium-High).** Idiomatic Ruby spawns
+enumerators constantly. Each is a goroutine (≥8 KB stack) with ~hundreds-of-ns
+channel handoff per `#next`, exactly where Ruby leans hardest; and an unfinished
+enumerator is a **leaked goroutine** blocked on its channel forever — needs
+finalizer-based teardown.
+
+## 8. Exceptions & control flow
+
+- Exception hierarchy partly definable in Ruby; `raise`/`rescue`/`ensure`/
+  `retry`/backtrace/`cause` are primitive.
+- **Unwinding mechanism**: return a *status* (`ThrowState{type,value,target}`)
+  from the dispatch loop rather than Go `panic`/`recover` for normal flow; reserve
+  `panic` for **internal** VM bugs — modulo the native-frame boundary in §6.
+- `break`/`next`/`redo`/`return` from a block = `throw` targeting the right frame
+  via the catch table. `StopIteration` is load-bearing for `Enumerator`/`loop`.
+
+Phase 0 has no `rescue` yet, so runtime errors are fatal and travel as a
+`panic(RubyError)` recovered at the `Run` boundary; this converges to the
+status-return design when exceptions land in Phase 3.
+
+## 9. GC & memory semantics
+
+- Reuse Go's GC (Ruby objects = Go heap objects). **No GC to write.**
+- `object_id`: a **weak-keyed** pointer→id table (Go ≥1.24 `weak` package +
+  finalizers) so it does not pin objects.
+- Finalizers: `runtime.SetFinalizer` with care; `ObjectSpace` largely stubbed
+  (`_id2ref`/`each_object` permanently out — see §4).
+- `WeakRef`: via Go's `weak` package.
+
+## 10. Front-end (the biggest piece)
+
+> Prism itself is a hand-written recursive-descent parser. We reimplement the
+> same family. The "no cgo" constraint applies to the *shipped binary*;
+> **MRI/Ripper/Prism are an offline test oracle** (§13).
+
+**Lexer** — where the difficulty lives: `lexState` (mirrors MRI `EXPR_*`),
+`spaceSeen` (`foo -1` ≠ `foo - 1`), a literal stack for re-entrant `"#{…}"`
+interpolation, and a heredoc queue (`<<~`/`<<-`/`<<"…"`, several per line).
+
+**Parser** — recursive descent + **Pratt** for expressions; a **scope stack**
+resolves variable-vs-method-call: each `ident = …` registers a local, each bare
+identifier consults `scope.isLocal(name)`.
+
+**Incremental grammar growth**: subset first, then interpolation → heredocs →
+`%`-literals → multiple assignment/splat → keyword args → pattern matching
+(`case/in`) → endless methods → beginless/endless ranges → safe navigation →
+numbered params/`it`.
+
+**Critique — this is risk #1, ahead of regexp, and there is an escape hatch.**
+The grammar is the largest cumulative effort and is currently sequenced as a
+single late phase (Phase 5); that is the schedule trap. Consider **Prism compiled
+to WASM, run under a pure-Go WASM runtime ([wazero](https://github.com/tetratelabs/wazero))** —
+a production-grade, upstream-tracking parser that stays inside the no-cgo
+constraint, deleting most front-end risk (cost: a ~MB WASM blob; loses the
+hand-written-parser learning goal). Tracked as an open decision in §16.
+
+## 11. Go core vs embedded Ruby (the minimal floor)
+
+**In Go (incompressible):** object model, dispatch, exceptions/unwinding, Fiber,
+`eval`/`require`, the metaprogramming floor (`send`, `respond_to?`,
+`define_method`, `instance_variable_*`, `const_*`, hooks), and a **small kernel
+per type**: Integer/Float (arith + `math/big` promotion), String (`[]byte`+enc,
+`pack`/`unpack`), Array (`each`+indexing), **ordered Hash keyed by `hash`/`eql?`**
+(not a Go `map`), Symbol (interning + `to_proc`), Proc/Method (`call`), Range
+(`each` via `succ`).
+
+**In embedded Ruby (big win):** **Comparable** (from `<=>`) and **Enumerable**
+(from `each`) — written once, inherited by every conforming type. Then upstream
+pure-Ruby stdlib: `set`, `ostruct`, `forwardable`, `optparse`, `logger`,
+`delegate`, `singleton`…
+
+**Go leaves** (C extensions in MRI): `json` (`encoding/json`), `digest`
+(`crypto/*`), `zlib` (`compress/zlib`), `securerandom`/`base64`, sockets/IO
+(`net`/`os`), `time`, `math/big`.
+
+Note (Symbol): a monotonically-growing global intern table is a memory-exhaustion
+vector under `"x#{i}".to_sym`; Ruby 2.2+ GCs dynamic symbols — track as a known
+limitation.
+
+## 12. Build chain & single binary
+
+`rbgo build app.rb -o app`:
+1. **Scan the `require` graph** (literal strings) + explicit include config for
+   dynamic requires.
+2. **Stdlib selection**: only reached libs are kept (`.rb` embedded + Go leaves
+   via **build tags**, so the Go linker drops the rest).
+3. **Compile** app + selected stdlib to bytecode.
+4. **Emit a Go file** embedding the bytecode (`//go:embed`) + registration of the
+   chosen libs.
+5. `go build` → **one static binary**.
+
+The binary contains: VM + core + selected stdlib + app bytecode + the
+**front-end** (for `eval`). **Closed-world mode** (opt-in, no
+`eval`/dynamic-require/unknown `const_get`) drops the front-end and enables
+aggressive DCE → smaller binary. Precedent: mruby's **mrbgems**, selected at
+build time via `build_config.rb`.
+
+## 13. Test & oracle strategy
+
+- **Unit tests** per package.
+- **Golden AST**: expected ASTs generated offline from MRI (Ripper/Prism), frozen
+  as fixtures.
+- **Behavioural conformance**: an `oracle/` harness runs snippets in MRI **and**
+  `rbgo` and compares stdout/result. *(Phase 0 already does this against MRI.)*
+- **Upstream suites**: embed a stdlib lib and run **its own test suite** → each
+  red test points at a missing primitive.
+- **ruby/spec**: import subsets progressively (the conformance gold standard).
+- **Add differential fuzzing** of the parser against Prism (random valid-ish
+  Ruby → compare ASTs); fixed goldens miss lexer-state bugs.
+- **Performance is tested too, systematically** — see §13a.
+
+## 13a. Performance, go-asmgen acceleration & multi-architecture validation
+
+Performance is a first-class, continuous concern, not a Phase 8 afterthought.
+
+- **Systematic benchmarks against the reference Ruby** (MRI/CRuby). The same
+  corpus that validates behaviour in the `oracle/` harness is reused as a perf
+  corpus: each snippet is timed in MRI and in `rbgo`, and the ratio is tracked
+  over time. Microbenchmarks (`go test -bench`) cover hot primitives (dispatch,
+  integer/float arithmetic, String/Array ops, Hash probing); macrobenchmarks
+  cover representative programs. Notable regressions are gated in CI.
+- **Use [go-asmgen](https://github.com/go-asmgen/asmgen) to accelerate the hot
+  computations.** go-asmgen generates Plan 9 SIMD assembly in pure Go with
+  `CGO_ENABLED=0`, so it stays inside the no-cgo constraint. Candidate fast
+  paths: String/byte scanning, comparison and `pack`/`unpack`, UTF-8 validation
+  and transcoding, the ordered Hash's hashing, bignum kernels, and bulk Array
+  operations. Every go-asmgen-backed path sits behind the **same byte-identical
+  tests** as its scalar fallback (prototype, then *measure* before/after).
+- **Validate on all six supported 64-bit architectures**: **amd64, arm64,
+  riscv64, loong64, ppc64le, s390x** — natively on amd64/arm64 and under qemu for
+  the rest (note: amd64-AVX2 needs a full x86_64 VM, not Rosetta or
+  docker-qemu-user). Both correctness and the perf matrix run across all six, the
+  same target set go-asmgen itself covers.
+
+## 14. Phasing
+
+Principle: **vertical slice first** (de-risk the whole chain thin), then deepen.
+
+### Phase 0 — Skeleton & vertical slice — ✅ DONE
+Lexer+parser+compiler+VM for a tiny subset: integers, arithmetic, locals,
+`if`/`while`, `def`/call, `puts`, basic String.
+**Exit (met):** `puts 1 + 2` and a recursive `fib(n)` run end to end; the whole
+chain exists (thin). Also shipped: floats, `unless`/`until`, statement modifiers,
+floor division, `print`/`p`, ~92% coverage (object 100%), MRI differential tests.
+
+### Phase 1 — Object model & dispatch
+Classes, modules, method tables, `self`, ivars, `new`/`initialize`, `include`,
+`send`, `respond_to?`, `method_missing`, singleton classes, blocks & `yield`,
+`Proc`/`lambda`. Generalise the Phase 0 arithmetic fast paths into `send`.
+**Exit:** real OO code; `map(&:foo)`; blocks.
+
+### Phase 2 — Go core types + Ruby mixins
+Integer (bignum), Float, **String (bytes+encoding)**, Symbol, Array, **ordered
+Hash**, Range, `pack`/`unpack`. **Comparable** & **Enumerable** in Ruby.
+**Exit:** most "ordinary" Ruby runs.
+
+### Phase 3 — Control flow & exceptions
+Exception hierarchy, `raise`/`rescue`/`ensure`/`retry`, non-local
+`break`/`next`/`redo`/`return` via catch tables, `StopIteration`, **Fiber +
+Enumerator + `loop` + `lazy`**.
+
+### Phase 4 — Full metaprogramming
+`define_method`, `instance_eval`/`instance_exec`, `class_eval`, constant
+machinery, hooks (`included`/`inherited`/`method_added`/…),
+`define_singleton_method`, **string `eval`**. (Refinements: deferred.)
+
+### Phase 5 — Complete front-end
+Full grammar: heredocs, interpolation, `%`-literals, multiple assignment, keyword
+args, pattern matching, endless methods, beginless/endless ranges, safe
+navigation, numbered params/`it`. *(Or adopt Prism-on-wazero — see §16.)*
+
+### Phase 6 — Standard library
+IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
+pure-Ruby libs; implement Go leaves (json, digest, zlib, securerandom, base64).
+Run upstream suites.
+
+### Phase 7 — Build toolchain
+`rbgo build`, require-graph scan, selection (build tags), `//go:embed`, single
+static binary, closed-world mode.
+
+### Phase 8 — Conformance & performance
+ruby/spec subset; optimisations: dispatch **inline caches** (key = class), fixnum
+cache, reduced boxing. (JIT out of initial scope — Go does not help with runtime
+native codegen.)
+
+## 15. Risk register
+
+| Risk | Severity | Mitigation |
+|---|---|---|
+| **Parser scope / front-end effort** | **Highest** | Subset-first + oracle; **evaluate Prism→WASM on wazero (§16)** to delete most risk; test-driven growth |
+| **Regexp** (Onigmo vs RE2: no backrefs/lookbehind in Go `regexp`) | High | Pure-Go Onigmo reimpl., standalone module (`go-onigmo/regexp`); ReDoS via memoization + timeout |
+| **Native-frame unwinding** at the Go↔Ruby callback boundary | High | Hybrid: status returns internally + `panic`/`recover` at native callbacks; design in Phase 1 |
+| **String/encodings** (mutable, multi-encoding) | High | `[]byte`+encoding tag from Phase 2; incremental transcoding |
+| **Value boxing vs Go GC** (no MRI-style immediates) | High | Position as embedding-not-speed; split Fixnum/Bignum + fixnum cache early; inline caches Phase 8 |
+| **Fiber/Enumerator cost & goroutine leaks** | Medium-High | Finalizer teardown; consider pooling; document the perf cliff |
+| **Thread/Ractor model** baked late | Medium | Decide early (§16); single-thread + Fiber to start; Ractor needs early design |
+| **Marshal / ObjectSpace** | Low | Stub; `_id2ref`/`each_object` permanently out |
+| **C-extension gems** | — | Out of scope (pure Ruby + Go leaves only) |
+
+## 16. Decision journal / open questions
+
+1. **Value representation** — interface + concrete types (start) → split
+   Fixnum/Bignum + fixnum cache (early) → inline caches (Phase 8). *Settled:
+   interface first; accept the perf positioning.*
+2. **Regexp engine** — *settled* → **pure-Go reimplementation of Onigmo**
+   (Ruby's engine), faithful backtracking VM, as a **standalone reusable Go
+   module** in the sibling org `go-onigmo` (repo `regexp`; see
+   `go-onigmo/regexp/docs/plan-regexp.md`). ReDoS handled by memoization +
+   `Regexp.timeout` (as Ruby ≥3.2).
+3. **Front-end strategy** — *OPEN* → hand-written lexer/parser (learning goal,
+   full control) **vs Prism→WASM under pure-Go wazero** (production-grade,
+   upstream-tracking, deletes most risk). Decide before investing heavily in
+   Phase 5. This reshapes Phases 0/5/13.
+4. **Native↔Ruby unwinding** — *settled* → hybrid (status internally +
+   panic/recover at native callbacks); design the boundary in Phase 1.
+5. **Thread model** — emulated GVL (MRI semantics) vs real parallelism vs
+   **Ractor** (its shareable/non-shareable split already isolates state, and fits
+   Go's goroutines). *Start single-thread + Fiber; decide by Phase 6, but note
+   Ractor must be designed in early or it is permanently out.*
+6. **Target version** — **Ruby 3.4** semantics.
+7. **Oracle tool** — Ripper and/or Prism offline (dev only, not linked).
+8. **Performance & multi-arch** — *settled* → benchmark **systematically against
+   reference Ruby (MRI)** from the start (reuse the oracle corpus as a perf
+   corpus, gate regressions in CI); use **go-asmgen** to accelerate hot
+   computations (CGO=0 SIMD) behind byte-identical tests; **validate correctness
+   and performance on all six 64-bit arches** — amd64, arm64, riscv64, loong64,
+   ppc64le, s390x (see §13a).
+
+## 17. First concrete steps (session 1) — done in Phase 0
+
+`go mod init` · `internal/` tree · `token/` · `lexer/` (with `spaceSeen` and a
+minimal `lexState` from the start) · `oracle`-style fixtures · `ast/` · `parser/`
+(Pratt + scope stack) · `compiler/` · `vm/` · `cmd/rbgo run`.
+**Exit criterion (met):** `puts 1 + 2` and `fib(20)` run.
+
+## 18. Prior art & neighbours
+
+- **`goruby/goruby`** (~600★, MIT) — the notable "Ruby in Go", but a
+  **tree-walking** interpreter (Thorsten Ball lineage), partial, learning-oriented.
+- **`towski/goruby`** — a small pedagogical **bytecode** interpreter; close to our
+  approach, worth reading.
+- **`goby-lang/goby`** — a Ruby-*inspired* OO language, not a compatible
+  implementation.
+- **cgo bindings** (out of scope: cgo) — `go-mruby`, `go-oniguruma`/`rubex`.
+
+**Positioning of go-embedded-ruby:**
+
+| Axis | `goruby/goruby` | `go-embedded-ruby` |
+|---|---|---|
+| Execution model | AST-walking | **Bytecode VM** + embedded front-end |
+| Single binary / tree-shaking | No | **Yes** (build-time selection, build tags) |
+| Dynamic `eval`/`require` | No | **Yes** (embedded front-end) |
+| Regexp | Absent | **Pure-Go Onigmo** (`go-onigmo/regexp`) |
+| Stdlib strategy | — | Go core + embedded Ruby |
+| Compatibility target | Partial subset | **Ruby 3.4 semantics**, test-driven growth |
+
+Reusable as reference (MIT): the lexer/parser/object model of `goruby/goruby`;
+the bytecode approach of `towski/goruby`. To study, not to copy — our VM diverges
+from the compiler onward.
+
+### Naming decisions
+- Org **`go-embedded-ruby`** (consistent with the `go-*` org convention;
+  "embedded" names the zero-cgo embeddability USP better than a bare name). Main
+  repo **`ruby`** (module `github.com/go-embedded-ruby/ruby`), CLI **`rbgo`**.
+- Regexp engine in its own org **`go-onigmo`**, repo **`regexp`** — reusable
+  beyond Ruby.

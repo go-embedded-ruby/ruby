@@ -1,0 +1,9 @@
+# Built CLI binary
+/rbgo
+
+# Coverage profiles
+*.out
+cov.out
+
+# Editor / OS noise
+.DS_Store

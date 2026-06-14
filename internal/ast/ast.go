@@ -1,0 +1,105 @@
+// Package ast defines the Phase 0 abstract syntax tree.
+//
+// Everything in Ruby is an expression, so there is no statement/expression
+// split: a body is a slice of Node and its value is the value of its last node.
+package ast
+
+// Node is any AST node.
+type Node interface{ node() }
+
+// Program is the top-level sequence of expressions.
+type Program struct{ Body []Node }
+
+// IntLit is an integer literal.
+type IntLit struct{ Value int64 }
+
+// FloatLit is a floating-point literal.
+type FloatLit struct{ Value float64 }
+
+// StringLit is a (Phase 0: non-interpolated) string literal.
+type StringLit struct{ Value string }
+
+// BoolLit is true or false.
+type BoolLit struct{ Value bool }
+
+// NilLit is nil.
+type NilLit struct{}
+
+// SelfLit is self.
+type SelfLit struct{}
+
+// VarRef references a local variable known to the current scope.
+type VarRef struct{ Name string }
+
+// Assign is `Name = Value` (local assignment).
+type Assign struct {
+	Name  string
+	Value Node
+}
+
+// BinaryExpr is `Left Op Right` for the Phase 0 fast-path operators.
+type BinaryExpr struct {
+	Op    string
+	Left  Node
+	Right Node
+}
+
+// UnaryExpr is `Op Operand` (- or !).
+type UnaryExpr struct {
+	Op      string
+	Operand Node
+}
+
+// Call is a method call. Recv is nil for a self/funcall (e.g. `puts x`, `fib(n)`).
+type Call struct {
+	Recv Node
+	Name string
+	Args []Node
+}
+
+// If is an if/elsif/else expression.
+type If struct {
+	Cond   Node
+	Then   []Node
+	Elsifs []Elsif
+	Else   []Node // nil if absent
+}
+
+// Elsif is one elsif branch.
+type Elsif struct {
+	Cond Node
+	Body []Node
+}
+
+// While is a while loop. Its value is nil.
+type While struct {
+	Cond Node
+	Body []Node
+}
+
+// MethodDef defines a method on the current self.
+type MethodDef struct {
+	Name   string
+	Params []string
+	Body   []Node
+}
+
+// Return is an explicit return.
+type Return struct{ Value Node } // Value may be nil
+
+func (*Program) node()    {}
+func (*IntLit) node()     {}
+func (*FloatLit) node()   {}
+func (*StringLit) node()  {}
+func (*BoolLit) node()    {}
+func (*NilLit) node()     {}
+func (*SelfLit) node()    {}
+func (*VarRef) node()     {}
+func (*Assign) node()     {}
+func (*BinaryExpr) node() {}
+func (*UnaryExpr) node()  {}
+func (*Call) node()       {}
+func (*If) node()         {}
+func (*While) node()      {}
+func (*MethodDef) node()  {}
+func (*Return) node()     {}

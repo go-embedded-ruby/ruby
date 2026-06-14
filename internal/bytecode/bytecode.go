@@ -1,0 +1,90 @@
+// Package bytecode defines the instruction set and the compiled unit (ISeq).
+//
+// Phase 0 is a stack VM in the YARV lineage (plan-rbgo.md §6), kept minimal.
+// Arithmetic and comparison have dedicated opcodes as a fast path; Phase 1
+// generalizes them to OpSend over the real object model so that monkey-patching
+// Integer#+ works. Until then there is no method dispatch on receivers.
+package bytecode
+
+import "github.com/go-embedded-ruby/ruby/internal/object"
+
+// Op is a single opcode.
+type Op uint8
+
+const (
+	OpNop Op = iota
+
+	OpPushConst // A = index into Consts
+	OpPushNil
+	OpPushTrue
+	OpPushFalse
+	OpPushSelf
+
+	OpPop
+	OpDup
+
+	OpGetLocal // A = local slot
+	OpSetLocal // A = local slot (leaves the value on the stack)
+
+	// Arithmetic / comparison fast paths (binary: pop b, pop a, push a OP b).
+	OpAdd
+	OpSub
+	OpMul
+	OpDiv
+	OpMod
+	OpLt
+	OpGt
+	OpLe
+	OpGe
+	OpEq
+	OpNeq
+
+	// Unary (pop a, push OP a).
+	OpNeg
+	OpNot
+
+	OpJump         // A = target pc
+	OpBranchIf     // A = target pc; pops, jumps if truthy
+	OpBranchUnless // A = target pc; pops, jumps unless truthy
+
+	OpCall         // A = index into Names, B = argc; pops args, pushes result
+	OpDefineMethod // A = index into Names, B = index into Children
+	OpReturn       // returns top of stack from the current ISeq
+)
+
+var opNames = map[Op]string{
+	OpNop: "nop", OpPushConst: "push_const", OpPushNil: "push_nil",
+	OpPushTrue: "push_true", OpPushFalse: "push_false", OpPushSelf: "push_self",
+	OpPop: "pop", OpDup: "dup", OpGetLocal: "get_local", OpSetLocal: "set_local",
+	OpAdd: "add", OpSub: "sub", OpMul: "mul", OpDiv: "div", OpMod: "mod",
+	OpLt: "lt", OpGt: "gt", OpLe: "le", OpGe: "ge", OpEq: "eq", OpNeq: "neq",
+	OpNeg: "neg", OpNot: "not", OpJump: "jump", OpBranchIf: "branch_if",
+	OpBranchUnless: "branch_unless", OpCall: "call", OpDefineMethod: "define_method",
+	OpReturn: "return",
+}
+
+func (o Op) String() string {
+	if s, ok := opNames[o]; ok {
+		return s
+	}
+	return "op?"
+}
+
+// Instr is one instruction. A and B are operands whose meaning depends on Op.
+type Instr struct {
+	Op   Op
+	A, B int
+}
+
+// ISeq is a compiled instruction sequence: a method body, or the program top
+// level. Catch tables, full arity, and source maps (plan §6) arrive with the
+// later phases.
+type ISeq struct {
+	Name      string
+	Insns     []Instr
+	Consts    []object.Value // literal pool: integers, floats, strings
+	Names     []string       // method-call and definition names
+	Params    []string       // parameter names (Phase 0: required only)
+	NumLocals int            // total local slots (params first, then assigns)
+	Children  []*ISeq        // nested ISeqs (method bodies defined here)
+}
