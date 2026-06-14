@@ -59,7 +59,7 @@ func TestHashOps(t *testing.T) {
 	if _, ok := h.Get(Symbol("z")); ok {
 		t.Fatal("missing key should be absent")
 	}
-	if h.Inspect() != `{:a=>9, "b"=>2}` {
+	if h.Inspect() != `{a: 9, "b" => 2}` {
 		t.Fatalf("inspect = %q", h.Inspect())
 	}
 }

@@ -146,7 +146,13 @@ func (h *Hash) repr() string {
 			b.WriteString(", ")
 		}
 		v := h.vals[k]
-		b.WriteString(k.Inspect() + "=>" + v.Inspect())
+		// Ruby 4.0 (since 3.4) inspect: symbol keys use the label form
+		// `name: value`; all other keys use `key => value` with spaces.
+		if sym, ok := k.(Symbol); ok {
+			b.WriteString(string(sym) + ": " + v.Inspect())
+		} else {
+			b.WriteString(k.Inspect() + " => " + v.Inspect())
+		}
 	}
 	b.WriteByte('}')
 	return b.String()

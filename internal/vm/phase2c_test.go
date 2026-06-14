@@ -7,14 +7,14 @@ import (
 
 func TestHashes(t *testing.T) {
 	tests := []struct{ name, src, want string }{
-		{"literal_inspect", `p({ :a => 1, "b" => 2 })`, "{:a=>1, \"b\"=>2}\n"},
+		{"literal_inspect", `p({ :a => 1, "b" => 2 })`, "{a: 1, \"b\" => 2}\n"},
 		{"empty_literal", `p({})`, "{}\n"},
-		{"trailing_comma", `p({ :a => 1, })`, "{:a=>1}\n"},
-		{"int_keys", `p({ 1 => "one", 2 => "two" })`, "{1=>\"one\", 2=>\"two\"}\n"},
+		{"trailing_comma", `p({ :a => 1, })`, "{a: 1}\n"},
+		{"int_keys", `p({ 1 => "one", 2 => "two" })`, "{1 => \"one\", 2 => \"two\"}\n"},
 		{"index_get", "h = { :a => 1 }\nputs h[:a]", "1\n"},
 		{"index_missing", "h = { :a => 1 }\np h[:z]", "nil\n"},
-		{"index_set_new", "h = {}\nh[:a] = 5\np h", "{:a=>5}\n"},
-		{"index_set_update", "h = { :a => 1 }\nh[:a] = 9\np h", "{:a=>9}\n"},
+		{"index_set_new", "h = {}\nh[:a] = 5\np h", "{a: 5}\n"},
+		{"index_set_update", "h = { :a => 1 }\nh[:a] = 9\np h", "{a: 9}\n"},
 		{"index_assign_value", "h = {}\nputs(h[:a] = 7)", "7\n"},
 		{"size", `puts({ :a => 1, :b => 2 }.size)`, "2\n"},
 		{"length", `puts({ :a => 1 }.length)`, "1\n"},
