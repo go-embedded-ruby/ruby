@@ -5,7 +5,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
-[![Phase](https://img.shields.io/badge/phase-0%20vertical%20slice-1a7f37)](https://go-embedded-ruby.github.io/docs/phases/phase0/)
+[![Phase](https://img.shields.io/badge/phase-0%2B1%20object%20model-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
 
 **A pure-Go implementation of Ruby — one static binary, full dynamism, zero cgo.**
 
@@ -18,9 +18,9 @@ monkey-patching, `define_method` and `method_missing` free.
 
 > 🌐 [Website](https://go-embedded-ruby.github.io) · 📚 [Documentation](https://go-embedded-ruby.github.io/docs/) · 🧭 [Roadmap](docs/plan-rbgo.md)
 
-## Status — Phase 0 (vertical slice)
+## Status — Phases 0 & 1
 
-The whole chain exists, thin. Supported today:
+Supported today:
 
 - integers (`int64`), floats, strings; `true`/`false`/`nil`; `self`
 - local variables; arithmetic (`+ - * / %`, **Ruby floor division**),
@@ -29,9 +29,14 @@ The whole chain exists, thin. Supported today:
   (`x if cond`)
 - `def` with required parameters, recursion, implicit and explicit `return`
 - `puts` / `print` / `p`
+- **classes with inheritance**, `@ivars`, `new`/`initialize`, constants
+- **dynamic dispatch** via mutable per-class method tables, `method_missing`
+- **modules + `include` (mixins)** and **`super`** (bare/`super()`/`super(args)`)
 
-Behaviour is **differential-tested against MRI**; the `object` package is at
-100% coverage and the suite covers the interpreter end to end.
+Behaviour is **differential-tested against MRI**; **100% coverage** enforced in
+CI across all six 64-bit targets. Next: blocks & `yield`, then Phase 2 (Symbols,
+real String/Array/Hash). See the
+[roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
 
 ## Quick start
 
