@@ -18,13 +18,15 @@ func (vm *VM) bootstrap() {
 	vm.cString = newClass("String", vm.cObject)
 	vm.cSymbol = newClass("Symbol", vm.cObject)
 	vm.cArray = newClass("Array", vm.cObject)
+	vm.cHash = newClass("Hash", vm.cObject)
 	vm.cTrueClass = newClass("TrueClass", vm.cObject)
 	vm.cFalseClass = newClass("FalseClass", vm.cObject)
 	vm.cNilClass = newClass("NilClass", vm.cObject)
 
 	for _, c := range []*RClass{
 		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
-		vm.cFloat, vm.cString, vm.cSymbol, vm.cArray, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
+		vm.cFloat, vm.cString, vm.cSymbol, vm.cArray, vm.cHash,
+		vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
 	} {
 		vm.consts[c.name] = c
 	}
@@ -148,6 +150,60 @@ func (vm *VM) bootstrap() {
 			out[i] = vm.callBlock(blk, []object.Value{e})
 		}
 		return &object.Array{Elems: out}
+	})
+
+	// Hash.
+	vm.cHash.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if v, ok := self.(*object.Hash).Get(args[0]); ok {
+			return v
+		}
+		return object.NilV
+	})
+	vm.cHash.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		self.(*object.Hash).Set(args[0], args[1])
+		return args[1]
+	})
+	vm.cHash.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(self.(*object.Hash).Len())
+	})
+	vm.cHash.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(self.(*object.Hash).Len())
+	})
+	vm.cHash.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*object.Hash).Len() == 0)
+	})
+	hashKeyP := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		_, ok := self.(*object.Hash).Get(args[0])
+		return object.Bool(ok)
+	}
+	vm.cHash.define("key?", hashKeyP)
+	vm.cHash.define("has_key?", hashKeyP)
+	vm.cHash.define("include?", hashKeyP)
+	vm.cHash.define("keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		ks := make([]object.Value, len(h.Keys))
+		copy(ks, h.Keys)
+		return &object.Array{Elems: ks}
+	})
+	vm.cHash.define("values", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		vs := make([]object.Value, 0, len(h.Keys))
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			vs = append(vs, v)
+		}
+		return &object.Array{Elems: vs}
+	})
+	vm.cHash.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each)")
+		}
+		h := self.(*object.Hash)
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			vm.callBlock(blk, []object.Value{k, v})
+		}
+		return h
 	})
 
 	// Class.

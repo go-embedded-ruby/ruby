@@ -110,6 +110,51 @@ func (a *Array) ToS() string     { return a.repr() }
 func (a *Array) Inspect() string { return a.repr() }
 func (a *Array) Truthy() bool    { return true }
 
+// Hash is an insertion-ordered map (as in Ruby). Keys are compared by Go value
+// equality, which matches Ruby eql?/hash for the immutable key types used in
+// Phase 2 (Integer/Float/String/Symbol/Bool/Nil). It is a reference type.
+type Hash struct {
+	Keys []Value // insertion order
+	vals map[Value]Value
+}
+
+// NewHash returns an empty hash.
+func NewHash() *Hash { return &Hash{vals: map[Value]Value{}} }
+
+// Get returns the value for k and whether it is present.
+func (h *Hash) Get(k Value) (Value, bool) { v, ok := h.vals[k]; return v, ok }
+
+// Set inserts or updates k→v, preserving first-insertion order.
+func (h *Hash) Set(k, v Value) {
+	if _, ok := h.vals[k]; !ok {
+		h.Keys = append(h.Keys, k)
+	}
+	h.vals[k] = v
+}
+
+// Len returns the number of entries.
+func (h *Hash) Len() int { return len(h.Keys) }
+
+func (h *Hash) repr() string {
+	if len(h.Keys) == 0 {
+		return "{}"
+	}
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, k := range h.Keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		v := h.vals[k]
+		b.WriteString(k.Inspect() + "=>" + v.Inspect())
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+func (h *Hash) ToS() string     { return h.repr() }
+func (h *Hash) Inspect() string { return h.repr() }
+func (h *Hash) Truthy() bool    { return true }
+
 // Bool is true or false.
 type Bool bool
 

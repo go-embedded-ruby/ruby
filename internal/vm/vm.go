@@ -40,7 +40,7 @@ type VM struct {
 
 	cBasicObject, cObject, cModule, cClass *RClass
 	cInteger, cFloat, cString, cSymbol     *RClass
-	cArray                                 *RClass
+	cArray, cHash                          *RClass
 	cTrueClass, cFalseClass, cNilClass     *RClass
 }
 
@@ -103,6 +103,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			copy(elems, stack[len(stack)-n:])
 			stack = stack[:len(stack)-n]
 			push(&object.Array{Elems: elems})
+		case bytecode.OpNewHash:
+			n := in.A * 2
+			region := stack[len(stack)-n:]
+			h := object.NewHash()
+			for i := 0; i < n; i += 2 {
+				h.Set(region[i], region[i+1])
+			}
+			stack = stack[:len(stack)-n]
+			push(h)
 		case bytecode.OpPop:
 			pop()
 		case bytecode.OpDup:

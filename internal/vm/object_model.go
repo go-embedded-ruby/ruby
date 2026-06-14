@@ -116,6 +116,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cSymbol
 	case *object.Array:
 		return vm.cArray
+	case *object.Hash:
+		return vm.cHash
 	case object.Bool:
 		if x {
 			return vm.cTrueClass

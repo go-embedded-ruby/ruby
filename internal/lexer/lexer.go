@@ -148,6 +148,11 @@ func (l *Lexer) next() token.Token {
 			l.state = exprBegin
 			return mk(token.EQ, "==")
 		}
+		if l.peek() == '>' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.HASHROCKET, "=>")
+		}
 		l.state = exprBegin
 		return mk(token.ASSIGN, "=")
 	case '!':

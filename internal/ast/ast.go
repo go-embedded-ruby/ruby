@@ -25,6 +25,12 @@ type SymbolLit struct{ Name string }
 // ArrayLit is an array literal [a, b, c].
 type ArrayLit struct{ Elems []Node }
 
+// HashLit is a hash literal {k => v, …}; Keys[i] maps to Values[i].
+type HashLit struct {
+	Keys   []Node
+	Values []Node
+}
+
 // BoolLit is true or false.
 type BoolLit struct{ Value bool }
 
@@ -146,6 +152,7 @@ func (*FloatLit) node()   {}
 func (*StringLit) node()  {}
 func (*SymbolLit) node()  {}
 func (*ArrayLit) node()   {}
+func (*HashLit) node()    {}
 func (*BoolLit) node()    {}
 func (*NilLit) node()     {}
 func (*SelfLit) node()    {}

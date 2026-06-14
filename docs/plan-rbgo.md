@@ -361,6 +361,10 @@ Hash**, Range, `pack`/`unpack`. **Comparable** & **Enumerable** in Ruby.
 closing the Phase 1 String compromise). **Array** — literals `[…]`, indexing
 `a[i]`/`a[i]=v` (negative indices), `length`/`size`/`push`/`first`/`last`/
 `empty?`/`include?`/`each`/`map`, element-wise `==`, and `puts` array-flattening.
+**ordered Hash** — literals `{k => v}` (insertion-ordered), `h[k]`/`h[k]=v`,
+`size`/`length`/`empty?`/`key?`/`keys`/`values`/`each`, `==`. (Hash#inspect uses
+the Ruby ≤3.3 `{:a=>1}` form, matching the 2.6 differential oracle; the 3.4
+`{a: 1}` form is a deferred conformance item.)
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions

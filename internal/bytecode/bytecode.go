@@ -20,6 +20,7 @@ const (
 	OpPushFalse
 	OpPushSelf
 	OpNewArray // A = element count; pops that many values into a new array
+	OpNewHash  // A = pair count; pops 2*A values (k0,v0,…) into a new hash
 
 	OpPop
 	OpDup
@@ -64,7 +65,7 @@ const (
 var opNames = map[Op]string{
 	OpNop: "nop", OpPushConst: "push_const", OpPushNil: "push_nil",
 	OpPushTrue: "push_true", OpPushFalse: "push_false", OpPushSelf: "push_self",
-	OpNewArray: "new_array",
+	OpNewArray: "new_array", OpNewHash: "new_hash",
 	OpPop: "pop", OpDup: "dup", OpGetLocal: "get_local", OpSetLocal: "set_local",
 	OpAdd: "add", OpSub: "sub", OpMul: "mul", OpDiv: "div", OpMod: "mod",
 	OpLt: "lt", OpGt: "gt", OpLe: "le", OpGe: "ge", OpEq: "eq", OpNeq: "neq",

@@ -433,6 +433,28 @@ func (p *Parser) parseArrayLiteral() ast.Node {
 	return &ast.ArrayLit{Elems: elems}
 }
 
+// parseHashLiteral parses `{ k => v, … }` (hashrocket form). A `{` only reaches
+// here at expression-start; a `{` after a call is a block (see parsePostfix).
+func (p *Parser) parseHashLiteral() ast.Node {
+	p.expect(token.LBRACE)
+	h := &ast.HashLit{}
+	p.skipNewlines()
+	for !p.is(token.RBRACE) {
+		k := p.parseExprOrAssign()
+		p.expect(token.HASHROCKET)
+		v := p.parseExprOrAssign()
+		h.Keys = append(h.Keys, k)
+		h.Values = append(h.Values, v)
+		p.skipNewlines()
+		if !p.accept(token.COMMA) {
+			break
+		}
+		p.skipNewlines()
+	}
+	p.expect(token.RBRACE)
+	return h
+}
+
 // parseBlock parses `{ [|params|] body }`.
 func (p *Parser) parseBlock() *ast.Block {
 	p.expect(token.LBRACE)
@@ -505,6 +527,8 @@ func (p *Parser) parsePrimary() ast.Node {
 		return &ast.SymbolLit{Name: t.Lit}
 	case token.LBRACKET:
 		return p.parseArrayLiteral()
+	case token.LBRACE:
+		return p.parseHashLiteral()
 	case token.TRUE:
 		p.advance()
 		return &ast.BoolLit{Value: true}

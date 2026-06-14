@@ -170,6 +170,19 @@ func valueEqual(a, b object.Value) bool {
 			}
 		}
 		return true
+	case *object.Hash:
+		bv, ok := b.(*object.Hash)
+		if !ok || av.Len() != bv.Len() {
+			return false
+		}
+		for _, k := range av.Keys {
+			ae, _ := av.Get(k)
+			be, present := bv.Get(k)
+			if !present || !valueEqual(ae, be) {
+				return false
+			}
+		}
+		return true
 	case object.Bool:
 		bv, ok := b.(object.Bool)
 		return ok && av == bv

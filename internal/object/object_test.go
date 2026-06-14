@@ -22,6 +22,7 @@ func TestToSAndInspect(t *testing.T) {
 		{Symbol("hi"), "hi", ":hi", true},
 		{&Array{}, "[]", "[]", true},
 		{&Array{Elems: []Value{Integer(1), String("x"), Symbol("y")}}, `[1, "x", :y]`, `[1, "x", :y]`, true},
+		{NewHash(), "{}", "{}", true},
 		{String("a\"b\\c\nd\te"), "a\"b\\c\nd\te", `"a\"b\\c\nd\te"`, true},
 		{Bool(true), "true", "true", true},
 		{Bool(false), "false", "false", false},
@@ -38,6 +39,28 @@ func TestToSAndInspect(t *testing.T) {
 		if got := tc.v.Truthy(); got != tc.truthy {
 			t.Errorf("%#v Truthy = %v, want %v", tc.v, got, tc.truthy)
 		}
+	}
+}
+
+func TestHashOps(t *testing.T) {
+	h := NewHash()
+	if h.Len() != 0 || h.repr() != "{}" {
+		t.Fatal("empty hash")
+	}
+	h.Set(Symbol("a"), Integer(1))
+	h.Set(String("b"), Integer(2))
+	h.Set(Symbol("a"), Integer(9)) // update keeps order, no new key
+	if h.Len() != 2 {
+		t.Fatalf("len = %d want 2", h.Len())
+	}
+	if v, ok := h.Get(Symbol("a")); !ok || v != Integer(9) {
+		t.Fatalf("get a = %v,%v", v, ok)
+	}
+	if _, ok := h.Get(Symbol("z")); ok {
+		t.Fatal("missing key should be absent")
+	}
+	if h.Inspect() != `{:a=>9, "b"=>2}` {
+		t.Fatalf("inspect = %q", h.Inspect())
 	}
 }
 
