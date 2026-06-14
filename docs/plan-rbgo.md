@@ -25,7 +25,7 @@ the original draft is folded into the relevant sections and summarised in
   (require-graph scan + config + build tags), not the whole distribution.
 
 ### Target & scope
-- **Reference semantics: Ruby 3.4** (pattern matching, endless methods, `it`,
+- **Reference semantics: Ruby 4.0** (pattern matching, endless methods, `it`,
   numbered params, beginless/endless ranges, safe navigation).
 - **In scope:** the language core, embedded pure-Ruby stdlib, extension leaves
   reimplemented in Go.
@@ -430,7 +430,7 @@ native codegen.)
    **Ractor** (its shareable/non-shareable split already isolates state, and fits
    Go's goroutines). *Start single-thread + Fiber; decide by Phase 6, but note
    Ractor must be designed in early or it is permanently out.*
-6. **Target version** — **Ruby 3.4** semantics.
+6. **Target version** — **Ruby 4.0** semantics.
 7. **Oracle tool** — Ripper and/or Prism offline (dev only, not linked).
 8. **Performance & multi-arch** — *settled* → benchmark **systematically against
    reference Ruby (MRI)** from the start (reuse the oracle corpus as a perf
@@ -465,7 +465,7 @@ minimal `lexState` from the start) · `oracle`-style fixtures · `ast/` · `pars
 | Dynamic `eval`/`require` | No | **Yes** (embedded front-end) |
 | Regexp | Absent | **Pure-Go Onigmo** (`go-onigmo/regexp`) |
 | Stdlib strategy | — | Go core + embedded Ruby |
-| Compatibility target | Partial subset | **Ruby 3.4 semantics**, test-driven growth |
+| Compatibility target | Partial subset | **Ruby 4.0 semantics**, test-driven growth |
 
 Reusable as reference (MIT): the lexer/parser/object model of `goruby/goruby`;
 the bytecode approach of `towski/goruby`. To study, not to copy — our VM diverges
