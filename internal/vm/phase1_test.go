@@ -22,7 +22,7 @@ func TestObjectModel(t *testing.T) {
 		{"ivar_assign_returns_value",
 			"class R\n  def s\n    @v = 9\n  end\nend\nputs R.new.s", "9\n"},
 		{"method_missing_override",
-			"class G\n  def method_missing(n)\n    \"got \" + n\n  end\nend\nputs G.new.zzz", "got zzz\n"},
+			"class G\n  def method_missing(n)\n    \"got \" + n.to_s\n  end\nend\nputs G.new.zzz", "got zzz\n"},
 		{"const_ref_to_class",
 			"class K\nend\nputs K", "K\n"},
 		// Top-level @ivars live on `main`, which has no ivar storage in Phase 1:

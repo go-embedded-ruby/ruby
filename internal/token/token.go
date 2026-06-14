@@ -16,9 +16,10 @@ const (
 	INT
 	FLOAT
 	STRING
-	IDENT // local variable or method name (lowercase / _ leading)
-	CONST // Capitalized identifier
-	IVAR  // @instance_variable
+	IDENT  // local variable or method name (lowercase / _ leading)
+	CONST  // Capitalized identifier
+	IVAR   // @instance_variable
+	SYMBOL // :name
 
 	// Keywords.
 	DEF
@@ -66,7 +67,7 @@ const (
 
 var typeNames = map[Type]string{
 	EOF: "EOF", ILLEGAL: "ILLEGAL", NEWLINE: "NEWLINE", INT: "INT", FLOAT: "FLOAT",
-	STRING: "STRING", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR",
+	STRING: "STRING", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR", SYMBOL: "SYMBOL",
 	DEF: "def", CLASS: "class", MODULE: "module", END: "end",
 	IF: "if", ELSIF: "elsif", ELSE: "else", UNLESS: "unless", WHILE: "while",
 	UNTIL: "until", RETURN: "return",

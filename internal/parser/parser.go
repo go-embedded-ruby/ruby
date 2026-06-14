@@ -461,6 +461,9 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.STRING:
 		p.advance()
 		return &ast.StringLit{Value: t.Lit}
+	case token.SYMBOL:
+		p.advance()
+		return &ast.SymbolLit{Name: t.Lit}
 	case token.TRUE:
 		p.advance()
 		return &ast.BoolLit{Value: true}
@@ -550,7 +553,7 @@ func (p *Parser) canStartCommandArg() bool {
 		return false
 	}
 	switch t.Type {
-	case token.INT, token.FLOAT, token.STRING, token.IDENT, token.CONST,
+	case token.INT, token.FLOAT, token.STRING, token.SYMBOL, token.IDENT, token.CONST,
 		token.IVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG, token.LPAREN:
 		return true
 	case token.MINUS, token.PLUS:

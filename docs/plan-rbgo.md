@@ -353,9 +353,12 @@ receives the name as a String; becomes a Symbol with Phase 2.)
 **Exit (met for core):** define classes, subclass, instantiate, call methods,
 use ivars, override `method_missing`.
 
-### Phase 2 — Go core types + Ruby mixins
+### Phase 2 — Go core types + Ruby mixins — 🚧 in progress
 Integer (bignum), Float, **String (bytes+encoding)**, Symbol, Array, **ordered
 Hash**, Range, `pack`/`unpack`. **Comparable** & **Enumerable** in Ruby.
+**Started:** **Symbol** literals (`:name`, `:name?`/`:name!`), the `Symbol` class
+(`to_s`/`to_sym`/`==`), and `method_missing` now receives a Symbol (matching MRI,
+closing the Phase 1 String compromise).
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions

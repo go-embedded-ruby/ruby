@@ -19,6 +19,9 @@ type FloatLit struct{ Value float64 }
 // StringLit is a (Phase 0: non-interpolated) string literal.
 type StringLit struct{ Value string }
 
+// SymbolLit is a symbol literal (:name); Name excludes the leading colon.
+type SymbolLit struct{ Name string }
+
 // BoolLit is true or false.
 type BoolLit struct{ Value bool }
 
@@ -138,6 +141,7 @@ func (*Program) node()    {}
 func (*IntLit) node()     {}
 func (*FloatLit) node()   {}
 func (*StringLit) node()  {}
+func (*SymbolLit) node()  {}
 func (*BoolLit) node()    {}
 func (*NilLit) node()     {}
 func (*SelfLit) node()    {}

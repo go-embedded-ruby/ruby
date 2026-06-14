@@ -82,6 +82,14 @@ func (s String) Inspect() string {
 }
 func (s String) Truthy() bool { return true }
 
+// Symbol is an interned name (:foo). It is an immutable value type, so equality
+// and use as a hash key are just value comparison.
+type Symbol string
+
+func (s Symbol) ToS() string     { return string(s) }
+func (s Symbol) Inspect() string { return ":" + string(s) }
+func (s Symbol) Truthy() bool    { return true }
+
 // Bool is true or false.
 type Bool bool
 

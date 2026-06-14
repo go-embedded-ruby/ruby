@@ -16,13 +16,14 @@ func (vm *VM) bootstrap() {
 	vm.cInteger = newClass("Integer", vm.cObject)
 	vm.cFloat = newClass("Float", vm.cObject)
 	vm.cString = newClass("String", vm.cObject)
+	vm.cSymbol = newClass("Symbol", vm.cObject)
 	vm.cTrueClass = newClass("TrueClass", vm.cObject)
 	vm.cFalseClass = newClass("FalseClass", vm.cObject)
 	vm.cNilClass = newClass("NilClass", vm.cObject)
 
 	for _, c := range []*RClass{
 		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
-		vm.cFloat, vm.cString, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
+		vm.cFloat, vm.cString, vm.cSymbol, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
 	} {
 		vm.consts[c.name] = c
 	}
@@ -59,6 +60,11 @@ func (vm *VM) bootstrap() {
 			target.includes = append(target.includes, a.(*RClass))
 		}
 		return target
+	})
+
+	// Symbol.
+	vm.cSymbol.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
 	})
 
 	// Class.

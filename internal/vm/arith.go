@@ -156,6 +156,9 @@ func valueEqual(a, b object.Value) bool {
 	case object.String:
 		bv, ok := b.(object.String)
 		return ok && av == bv
+	case object.Symbol:
+		bv, ok := b.(object.Symbol)
+		return ok && av == bv
 	case object.Bool:
 		bv, ok := b.(object.Bool)
 		return ok && av == bv

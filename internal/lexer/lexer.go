@@ -93,6 +93,8 @@ func (l *Lexer) next() token.Token {
 		return l.lexString(spaceBefore, line, col)
 	case c == '@':
 		return l.lexIvar(spaceBefore, line, col)
+	case c == ':' && isIdentStart(l.peek2()):
+		return l.lexSymbol(spaceBefore, line, col)
 	}
 
 	// Operators and delimiters.
@@ -238,6 +240,21 @@ func (l *Lexer) lexIdent(spaceBefore bool, line, col int) token.Token {
 		l.state = exprBegin
 	}
 	return token.Token{Type: tt, Lit: lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// lexSymbol lexes :name (the leading ':' is at the cursor and the next byte is
+// known to start an identifier). Lit holds the name without the colon.
+func (l *Lexer) lexSymbol(spaceBefore bool, line, col int) token.Token {
+	l.advance() // ':'
+	start := l.pos
+	for isIdentPart(l.peek()) {
+		l.advance()
+	}
+	if c := l.peek(); c == '?' || c == '!' { // :empty?, :save!
+		l.advance()
+	}
+	l.state = exprEnd
+	return token.Token{Type: token.SYMBOL, Lit: string(l.src[start:l.pos]), Line: line, Col: col, SpaceBefore: spaceBefore}
 }
 
 func (l *Lexer) lexIvar(spaceBefore bool, line, col int) token.Token {

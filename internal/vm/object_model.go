@@ -112,6 +112,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cFloat
 	case object.String:
 		return vm.cString
+	case object.Symbol:
+		return vm.cSymbol
 	case object.Bool:
 		if x {
 			return vm.cTrueClass
@@ -134,7 +136,7 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 		return vm.invoke(m, recv, args, blk)
 	}
 	mm := lookupMethod(c, "method_missing")
-	mmArgs := append([]object.Value{object.String(name)}, args...)
+	mmArgs := append([]object.Value{object.Symbol(name)}, args...)
 	return vm.invoke(mm, recv, mmArgs, blk)
 }
 

@@ -19,6 +19,7 @@ func TestToSAndInspect(t *testing.T) {
 		{Float(math.Inf(-1)), "-Infinity", "-Infinity", true},
 		{Float(math.NaN()), "NaN", "NaN", true},
 		{String("hi"), "hi", `"hi"`, true},
+		{Symbol("hi"), "hi", ":hi", true},
 		{String("a\"b\\c\nd\te"), "a\"b\\c\nd\te", `"a\"b\\c\nd\te"`, true},
 		{Bool(true), "true", "true", true},
 		{Bool(false), "false", "false", false},

@@ -39,7 +39,7 @@ type VM struct {
 	consts map[string]object.Value // top-level constants (classes live here)
 
 	cBasicObject, cObject, cModule, cClass *RClass
-	cInteger, cFloat, cString              *RClass
+	cInteger, cFloat, cString, cSymbol     *RClass
 	cTrueClass, cFalseClass, cNilClass     *RClass
 }
 
