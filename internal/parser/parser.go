@@ -37,11 +37,9 @@ func Parse(src string) (prog *ast.Program, err error) {
 	p := &Parser{toks: toks, scopes: []*scope{newScope()}}
 	defer func() {
 		if r := recover(); r != nil {
-			if pe, ok := r.(parseError); ok {
-				prog, err = nil, pe
-				return
-			}
-			panic(r)
+			// Unchecked: a non-parseError is an internal bug and re-panics as a
+			// conversion error rather than leaving an uncovered re-panic branch.
+			prog, err = nil, r.(parseError)
 		}
 	}()
 	body := p.parseStatements(map[token.Type]bool{})
@@ -52,12 +50,9 @@ func Parse(src string) (prog *ast.Program, err error) {
 // --- token cursor ---
 
 func (p *Parser) cur() token.Token  { return p.toks[p.pos] }
-func (p *Parser) peekTok() token.Token {
-	if p.pos+1 < len(p.toks) {
-		return p.toks[p.pos+1]
-	}
-	return p.toks[len(p.toks)-1] // EOF
-}
+// peekTok returns the token after the cursor. It is only ever called with the
+// cursor on an IDENT (which is never the trailing EOF), so pos+1 is in range.
+func (p *Parser) peekTok() token.Token { return p.toks[p.pos+1] }
 func (p *Parser) advance() token.Token { t := p.toks[p.pos]; p.pos++; return t }
 
 func (p *Parser) is(tt token.Type) bool { return p.cur().Type == tt }
@@ -77,7 +72,9 @@ func (p *Parser) expect(tt token.Type) token.Token {
 	return p.advance()
 }
 
-func (p *Parser) fail(format string, args ...any) {
+// fail never returns; the ast.Node result lets primary parsers write
+// `return p.fail(...)` without an unreachable trailing return.
+func (p *Parser) fail(format string, args ...any) ast.Node {
 	t := p.cur()
 	panic(parseError{msg: fmt.Sprintf("parse error at line %d: %s", t.Line, fmt.Sprintf(format, args...))})
 }
@@ -379,8 +376,7 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.IDENT, token.CONST:
 		return p.parseIdentExpr()
 	}
-	p.fail("unexpected token %q (%s)", t.Lit, t.Type)
-	return nil // unreachable
+	return p.fail("unexpected token %q (%s)", t.Lit, t.Type)
 }
 
 // parseIdentExpr resolves a bare identifier into a variable read or a method

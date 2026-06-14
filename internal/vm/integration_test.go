@@ -110,9 +110,27 @@ func TestRuntimeErrors(t *testing.T) {
 }
 
 func TestParseErrors(t *testing.T) {
-	for _, src := range []string{`def`, `if 1`, `puts (1`, `1 +`} {
+	for _, src := range []string{
+		`def`, `if 1`, `puts (1`, `1 +`,
+		`@`,    // illegal character → lexer ILLEGAL token
+		`1.`,   // trailing dot: float lookahead hits EOF, then '.' has no method
+		`1 2`,  // two primaries with no separator
+	} {
 		if _, err := parser.Parse(src); err == nil {
 			t.Errorf("expected parse error for %q", src)
+		}
+	}
+}
+
+func TestCommandAndParenArgs(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`puts -1`, "-1\n"},                                   // command call with unary-minus arg
+		{"def s(a, b)\n  a + b\nend\nputs s(1, 2)", "3\n"},    // paren call, multiple args
+		{"puts self", "main\n"},                               // self (push_self) at top level
+	}
+	for _, tc := range cases {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("src=%q got=%q want=%q", tc.src, got, tc.want)
 		}
 	}
 }

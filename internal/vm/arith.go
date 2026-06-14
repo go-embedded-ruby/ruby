@@ -33,8 +33,7 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return floatOp(op, af, bf)
 	}
 
-	raise("TypeError", "%s can't be coerced for %s", b.Inspect(), op)
-	return nil
+	return raise("TypeError", "%s can't be coerced for %s", b.Inspect(), op)
 }
 
 func intOp(op bytecode.Op, a, b int64) object.Value {
@@ -64,8 +63,7 @@ func intOp(op bytecode.Op, a, b int64) object.Value {
 	case bytecode.OpGe:
 		return object.Bool(a >= b)
 	}
-	raise("VMError", "bad integer op %s", op)
-	return nil
+	return raise("VMError", "bad integer op %s", op)
 }
 
 func floatOp(op bytecode.Op, a, b float64) object.Value {
@@ -89,8 +87,7 @@ func floatOp(op bytecode.Op, a, b float64) object.Value {
 	case bytecode.OpGe:
 		return object.Bool(a >= b)
 	}
-	raise("VMError", "bad float op %s", op)
-	return nil
+	return raise("VMError", "bad float op %s", op)
 }
 
 func stringOp(op bytecode.Op, a object.String, b object.Value) object.Value {
@@ -130,8 +127,7 @@ func stringOp(op bytecode.Op, a object.String, b object.Value) object.Value {
 			return object.Bool(a >= bs)
 		}
 	}
-	raise("NoMethodError", "undefined method '%s' for a String", op)
-	return nil
+	return raise("NoMethodError", "undefined method '%s' for a String", op)
 }
 
 func negate(v object.Value) object.Value {
@@ -141,8 +137,7 @@ func negate(v object.Value) object.Value {
 	case object.Float:
 		return object.Float(-n)
 	}
-	raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
-	return nil
+	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
 
 func valueEqual(a, b object.Value) bool {

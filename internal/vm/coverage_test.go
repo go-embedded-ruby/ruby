@@ -34,6 +34,27 @@ func TestStringEscapes(t *testing.T) {
 	if out != want {
 		t.Errorf("escapes: got %q want %q", out, want)
 	}
+	// \n \t \\ \" — the remaining escape arms.
+	out = eval(t, `print "a\nb\tc\\d\"e"`)
+	want = "a\nb\tc\\d\"e"
+	if out != want {
+		t.Errorf("escapes2: got %q want %q", out, want)
+	}
+}
+
+// Parser-only corners (these need not run): integer overflow, the LPAREN
+// command-arg arm, and the "space then non-argument token" path of
+// canStartCommandArg.
+func TestParserCorners(t *testing.T) {
+	if _, err := parser.Parse(`99999999999999999999999`); err == nil {
+		t.Error("expected overflow parse error")
+	}
+	if _, err := parser.Parse("foo * 2"); err != nil { // command arg declined → foo() * 2
+		t.Errorf("unexpected error parsing command/operator ambiguity: %v", err)
+	}
+	if got := eval(t, `puts (1)`); got != "1\n" { // LPAREN starts a command argument
+		t.Errorf("puts (1) = %q", got)
+	}
 }
 
 // Compile-time errors (receiver method calls are out of Phase 0 scope).

@@ -9,6 +9,8 @@ import (
 // the core Phase 0 table does not reach.
 func TestNumericAndStringOps(t *testing.T) {
 	tests := []struct{ src, want string }{
+		{`puts 1.0 + 2.0`, "3.0\n"}, // float add
+		{`puts(2 <= 2)`, "true\n"},  // integer <=
 		{`puts 5.0 - 1.5`, "3.5\n"},
 		{`puts 2.0 * 3.0`, "6.0\n"},
 		{`puts 7.5 % 2.0`, "1.5\n"},

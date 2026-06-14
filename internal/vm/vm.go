@@ -25,7 +25,10 @@ type RubyError struct {
 
 func (e RubyError) Error() string { return e.Class + ": " + e.Message }
 
-func raise(class, format string, args ...any) {
+// raise never returns; the object.Value result lets callers write
+// `return raise(...)` so there is no unreachable trailing return to leave
+// uncovered.
+func raise(class, format string, args ...any) object.Value {
 	panic(RubyError{Class: class, Message: fmt.Sprintf(format, args...)})
 }
 
@@ -56,11 +59,10 @@ func New(out io.Writer) *VM {
 func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			if re, ok := r.(RubyError); ok {
-				result, err = nil, re
-				return
-			}
-			panic(r)
+			// A non-RubyError is an internal VM bug; the unchecked assertion
+			// re-panics it (as a conversion error) rather than swallowing it,
+			// and leaves no separate uncovered re-panic branch.
+			result, err = nil, r.(RubyError)
 		}
 	}()
 	return vm.exec(iseq, vm.main, nil), nil
@@ -159,6 +161,5 @@ func (vm *VM) call(self object.Value, name string, args []object.Value) object.V
 	if iseq, ok := vm.methods[name]; ok {
 		return vm.exec(iseq, self, args)
 	}
-	raise("NoMethodError", "undefined method '%s' for %s", name, self.Inspect())
-	return nil
+	return raise("NoMethodError", "undefined method '%s' for %s", name, self.Inspect())
 }

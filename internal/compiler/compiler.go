@@ -109,11 +109,9 @@ type Compiler struct {
 func Compile(prog *ast.Program) (iseq *bytecode.ISeq, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			if ce, ok := r.(compileError); ok {
-				iseq, err = nil, ce
-				return
-			}
-			panic(r)
+			// Unchecked: a non-compileError is an internal bug and re-panics as a
+			// conversion error rather than leaving an uncovered re-panic branch.
+			iseq, err = nil, r.(compileError)
 		}
 	}()
 	c := &Compiler{}
