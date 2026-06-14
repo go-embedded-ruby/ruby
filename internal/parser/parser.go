@@ -459,7 +459,7 @@ func (p *Parser) canStartCommandArg() bool {
 	}
 	switch t.Type {
 	case token.INT, token.FLOAT, token.STRING, token.IDENT, token.CONST,
-		token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG, token.LPAREN:
+		token.IVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG, token.LPAREN:
 		return true
 	case token.MINUS, token.PLUS:
 		// Unary-style argument: `foo -1` (operand hugs the sign), not `foo - 1`.
