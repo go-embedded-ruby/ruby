@@ -32,10 +32,12 @@ Supported today:
 - **classes with inheritance**, `@ivars`, `new`/`initialize`, constants
 - **dynamic dispatch** via mutable per-class method tables, `method_missing`
 - **modules + `include` (mixins)** and **`super`** (bare/`super()`/`super(args)`)
+- **blocks & `yield`** — real closures (`{ |x| … }`), `block_given?`, and
+  `Integer#times`
 
 Behaviour is **differential-tested against MRI**; **100% coverage** enforced in
-CI across all six 64-bit targets. Next: blocks & `yield`, then Phase 2 (Symbols,
-real String/Array/Hash). See the
+CI across all six 64-bit targets. Next: Phase 2 (Symbols, real
+String/Array/Hash). See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
 
 ## Quick start
