@@ -127,6 +127,12 @@ func (l *Lexer) next() token.Token {
 	case '}':
 		l.state = exprEnd
 		return mk(token.RBRACE, "}")
+	case '[':
+		l.state = exprBegin
+		return mk(token.LBRACKET, "[")
+	case ']':
+		l.state = exprEnd
+		return mk(token.RBRACKET, "]")
 	case '|':
 		l.state = exprBegin
 		return mk(token.PIPE, "|")

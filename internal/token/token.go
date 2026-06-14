@@ -60,6 +60,8 @@ const (
 	RPAREN
 	LBRACE
 	RBRACE
+	LBRACKET
+	RBRACKET
 	PIPE
 	COMMA
 	DOT
@@ -75,7 +77,8 @@ var typeNames = map[Type]string{
 	SUPER: "super", YIELD: "yield",
 	PLUS: "+", MINUS: "-", STAR: "*", SLASH: "/", PERCENT: "%", ASSIGN: "=",
 	EQ: "==", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
-	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", PIPE: "|", COMMA: ",", DOT: ".",
+	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
+	PIPE: "|", COMMA: ",", DOT: ".",
 }
 
 func (t Type) String() string {

@@ -19,6 +19,7 @@ const (
 	OpPushTrue
 	OpPushFalse
 	OpPushSelf
+	OpNewArray // A = element count; pops that many values into a new array
 
 	OpPop
 	OpDup
@@ -63,6 +64,7 @@ const (
 var opNames = map[Op]string{
 	OpNop: "nop", OpPushConst: "push_const", OpPushNil: "push_nil",
 	OpPushTrue: "push_true", OpPushFalse: "push_false", OpPushSelf: "push_self",
+	OpNewArray: "new_array",
 	OpPop: "pop", OpDup: "dup", OpGetLocal: "get_local", OpSetLocal: "set_local",
 	OpAdd: "add", OpSub: "sub", OpMul: "mul", OpDiv: "div", OpMod: "mod",
 	OpLt: "lt", OpGt: "gt", OpLe: "le", OpGe: "ge", OpEq: "eq", OpNeq: "neq",

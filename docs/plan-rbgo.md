@@ -358,7 +358,9 @@ Integer (bignum), Float, **String (bytes+encoding)**, Symbol, Array, **ordered
 Hash**, Range, `pack`/`unpack`. **Comparable** & **Enumerable** in Ruby.
 **Started:** **Symbol** literals (`:name`, `:name?`/`:name!`), the `Symbol` class
 (`to_s`/`to_sym`/`==`), and `method_missing` now receives a Symbol (matching MRI,
-closing the Phase 1 String compromise).
+closing the Phase 1 String compromise). **Array** — literals `[…]`, indexing
+`a[i]`/`a[i]=v` (negative indices), `length`/`size`/`push`/`first`/`last`/
+`empty?`/`include?`/`each`/`map`, element-wise `==`, and `puts` array-flattening.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions

@@ -181,6 +181,11 @@ func (c *Compiler) compileNode(n ast.Node) {
 		b.emit(bytecode.OpPushConst, b.addConst(object.String(v.Value)), 0)
 	case *ast.SymbolLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(v.Name)), 0)
+	case *ast.ArrayLit:
+		for _, e := range v.Elems {
+			c.compileNode(e)
+		}
+		b.emit(bytecode.OpNewArray, len(v.Elems), 0)
 	case *ast.BoolLit:
 		if v.Value {
 			b.emit(bytecode.OpPushTrue, 0, 0)

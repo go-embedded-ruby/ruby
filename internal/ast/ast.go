@@ -22,6 +22,9 @@ type StringLit struct{ Value string }
 // SymbolLit is a symbol literal (:name); Name excludes the leading colon.
 type SymbolLit struct{ Name string }
 
+// ArrayLit is an array literal [a, b, c].
+type ArrayLit struct{ Elems []Node }
+
 // BoolLit is true or false.
 type BoolLit struct{ Value bool }
 
@@ -142,6 +145,7 @@ func (*IntLit) node()     {}
 func (*FloatLit) node()   {}
 func (*StringLit) node()  {}
 func (*SymbolLit) node()  {}
+func (*ArrayLit) node()   {}
 func (*BoolLit) node()    {}
 func (*NilLit) node()     {}
 func (*SelfLit) node()    {}

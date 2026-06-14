@@ -90,6 +90,26 @@ func (s Symbol) ToS() string     { return string(s) }
 func (s Symbol) Inspect() string { return ":" + string(s) }
 func (s Symbol) Truthy() bool    { return true }
 
+// Array is a mutable, ordered list. It is a reference type (used as *Array), so
+// aliasing and in-place mutation (push, []=) behave as in Ruby.
+type Array struct{ Elems []Value }
+
+func (a *Array) repr() string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, e := range a.Elems {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(e.Inspect())
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+func (a *Array) ToS() string     { return a.repr() }
+func (a *Array) Inspect() string { return a.repr() }
+func (a *Array) Truthy() bool    { return true }
+
 // Bool is true or false.
 type Bool bool
 

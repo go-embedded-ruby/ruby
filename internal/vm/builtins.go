@@ -17,13 +17,14 @@ func (vm *VM) bootstrap() {
 	vm.cFloat = newClass("Float", vm.cObject)
 	vm.cString = newClass("String", vm.cObject)
 	vm.cSymbol = newClass("Symbol", vm.cObject)
+	vm.cArray = newClass("Array", vm.cObject)
 	vm.cTrueClass = newClass("TrueClass", vm.cObject)
 	vm.cFalseClass = newClass("FalseClass", vm.cObject)
 	vm.cNilClass = newClass("NilClass", vm.cObject)
 
 	for _, c := range []*RClass{
 		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
-		vm.cFloat, vm.cString, vm.cSymbol, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
+		vm.cFloat, vm.cString, vm.cSymbol, vm.cArray, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
 	} {
 		vm.consts[c.name] = c
 	}
@@ -67,6 +68,88 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 
+	// Array.
+	vm.cArray.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(len(self.(*object.Array).Elems))
+	})
+	vm.cArray.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(len(self.(*object.Array).Elems))
+	})
+	vm.cArray.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(len(self.(*object.Array).Elems) == 0)
+	})
+	vm.cArray.define("first", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		if len(a.Elems) == 0 {
+			return object.NilV
+		}
+		return a.Elems[0]
+	})
+	vm.cArray.define("last", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		if len(a.Elems) == 0 {
+			return object.NilV
+		}
+		return a.Elems[len(a.Elems)-1]
+	})
+	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		a.Elems = append(a.Elems, args...)
+		return a
+	})
+	vm.cArray.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		for _, e := range self.(*object.Array).Elems {
+			if valueEqual(e, args[0]) {
+				return object.True
+			}
+		}
+		return object.False
+	})
+	vm.cArray.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		if i, ok := arrayIndex(a, intArg(args[0])); ok {
+			return a.Elems[i]
+		}
+		return object.NilV
+	})
+	vm.cArray.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		i, n := intArg(args[0]), int64(len(a.Elems))
+		if i < 0 {
+			i += n
+		}
+		if i < 0 || i > n {
+			raise("IndexError", "index %d out of array", intArg(args[0]))
+		}
+		if i == n {
+			a.Elems = append(a.Elems, args[1])
+		} else {
+			a.Elems[i] = args[1]
+		}
+		return args[1]
+	})
+	vm.cArray.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each)")
+		}
+		a := self.(*object.Array)
+		for _, e := range a.Elems {
+			vm.callBlock(blk, []object.Value{e})
+		}
+		return a
+	})
+	vm.cArray.define("map", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (map)")
+		}
+		a := self.(*object.Array)
+		out := make([]object.Value, len(a.Elems))
+		for i, e := range a.Elems {
+			out[i] = vm.callBlock(blk, []object.Value{e})
+		}
+		return &object.Array{Elems: out}
+	})
+
 	// Class.
 	vm.cClass.define("new", nativeNew)
 
@@ -92,15 +175,49 @@ func nativeNew(vm *VM, self object.Value, args []object.Value, blk *Proc) object
 	return obj
 }
 
+// intArg coerces an argument used as an array index to int64, or raises.
+func intArg(v object.Value) int64 {
+	if i, ok := v.(object.Integer); ok {
+		return int64(i)
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", v.Inspect())
+	return 0
+}
+
+// arrayIndex normalizes a (possibly negative) index and reports whether it is in
+// range.
+func arrayIndex(a *object.Array, i int64) (int, bool) {
+	n := int64(len(a.Elems))
+	if i < 0 {
+		i += n
+	}
+	if i < 0 || i >= n {
+		return 0, false
+	}
+	return int(i), true
+}
+
 func nativePuts(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 	if len(args) == 0 {
 		fmt.Fprintln(vm.out)
 		return object.NilV
 	}
 	for _, a := range args {
-		fmt.Fprintln(vm.out, a.ToS())
+		putsValue(vm, a)
 	}
 	return object.NilV
+}
+
+// putsValue prints one value the way Kernel#puts does: arrays are flattened (an
+// empty array prints nothing), everything else prints its to_s plus a newline.
+func putsValue(vm *VM, v object.Value) {
+	if arr, ok := v.(*object.Array); ok {
+		for _, e := range arr.Elems {
+			putsValue(vm, e)
+		}
+		return
+	}
+	fmt.Fprintln(vm.out, v.ToS())
 }
 
 func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {

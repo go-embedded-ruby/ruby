@@ -40,6 +40,7 @@ type VM struct {
 
 	cBasicObject, cObject, cModule, cClass *RClass
 	cInteger, cFloat, cString, cSymbol     *RClass
+	cArray                                 *RClass
 	cTrueClass, cFalseClass, cNilClass     *RClass
 }
 
@@ -96,6 +97,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			push(object.False)
 		case bytecode.OpPushSelf:
 			push(self)
+		case bytecode.OpNewArray:
+			n := in.A
+			elems := make([]object.Value, n)
+			copy(elems, stack[len(stack)-n:])
+			stack = stack[:len(stack)-n]
+			push(&object.Array{Elems: elems})
 		case bytecode.OpPop:
 			pop()
 		case bytecode.OpDup:

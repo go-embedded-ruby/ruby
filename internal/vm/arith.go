@@ -159,6 +159,17 @@ func valueEqual(a, b object.Value) bool {
 	case object.Symbol:
 		bv, ok := b.(object.Symbol)
 		return ok && av == bv
+	case *object.Array:
+		bv, ok := b.(*object.Array)
+		if !ok || len(av.Elems) != len(bv.Elems) {
+			return false
+		}
+		for i := range av.Elems {
+			if !valueEqual(av.Elems[i], bv.Elems[i]) {
+				return false
+			}
+		}
+		return true
 	case object.Bool:
 		bv, ok := b.(object.Bool)
 		return ok && av == bv

@@ -20,6 +20,8 @@ func TestToSAndInspect(t *testing.T) {
 		{Float(math.NaN()), "NaN", "NaN", true},
 		{String("hi"), "hi", `"hi"`, true},
 		{Symbol("hi"), "hi", ":hi", true},
+		{&Array{}, "[]", "[]", true},
+		{&Array{Elems: []Value{Integer(1), String("x"), Symbol("y")}}, `[1, "x", :y]`, `[1, "x", :y]`, true},
 		{String("a\"b\\c\nd\te"), "a\"b\\c\nd\te", `"a\"b\\c\nd\te"`, true},
 		{Bool(true), "true", "true", true},
 		{Bool(false), "false", "false", false},

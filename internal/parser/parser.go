@@ -326,7 +326,17 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 		p.expect(token.ASSIGN)
 		return &ast.IvarAssign{Name: name, Value: p.parseExprOrAssign()}
 	}
-	return p.parseBinary(0)
+	left := p.parseBinary(0)
+	// Index assignment: recv[i] = v  →  recv.[]=(i, v).
+	if p.is(token.ASSIGN) {
+		if call, ok := left.(*ast.Call); ok && call.Name == "[]" && call.Recv != nil {
+			p.advance()
+			call.Name = "[]="
+			call.Args = append(call.Args, p.parseExprOrAssign())
+			return call
+		}
+	}
+	return left
 }
 
 // Binding powers for infix operators (higher binds tighter).
@@ -374,17 +384,28 @@ func (p *Parser) parseUnary() ast.Node {
 
 func (p *Parser) parsePostfix() ast.Node {
 	node := p.parsePrimary()
-	for p.is(token.DOT) {
-		p.advance()
-		name := p.methodName()
-		var args []ast.Node
-		if p.is(token.LPAREN) && !p.cur().SpaceBefore {
+	for {
+		switch {
+		case p.is(token.DOT):
 			p.advance()
-			args = p.parseCallArgs(token.RPAREN)
-			p.expect(token.RPAREN)
+			name := p.methodName()
+			var args []ast.Node
+			if p.is(token.LPAREN) && !p.cur().SpaceBefore {
+				p.advance()
+				args = p.parseCallArgs(token.RPAREN)
+				p.expect(token.RPAREN)
+			}
+			node = &ast.Call{Recv: node, Name: name, Args: args}
+		case p.is(token.LBRACKET): // index: recv[args] → recv.[](args)
+			p.advance()
+			args := p.parseCallArgs(token.RBRACKET)
+			p.expect(token.RBRACKET)
+			node = &ast.Call{Recv: node, Name: "[]", Args: args}
+		default:
+			goto done
 		}
-		node = &ast.Call{Recv: node, Name: name, Args: args}
 	}
+done:
 	// A brace block binds to the immediately preceding method call. (Phase 1
 	// supports `{ … }` blocks; `do … end` arrives once its looser precedence vs
 	// `while/until do` is handled.)
@@ -392,6 +413,24 @@ func (p *Parser) parsePostfix() ast.Node {
 		call.Block = p.parseBlock()
 	}
 	return node
+}
+
+// parseArrayLiteral parses `[a, b, c]` (a trailing comma and newlines are
+// allowed).
+func (p *Parser) parseArrayLiteral() ast.Node {
+	p.expect(token.LBRACKET)
+	var elems []ast.Node
+	p.skipNewlines()
+	for !p.is(token.RBRACKET) {
+		elems = append(elems, p.parseExprOrAssign())
+		p.skipNewlines()
+		if !p.accept(token.COMMA) {
+			break
+		}
+		p.skipNewlines()
+	}
+	p.expect(token.RBRACKET)
+	return &ast.ArrayLit{Elems: elems}
 }
 
 // parseBlock parses `{ [|params|] body }`.
@@ -464,6 +503,8 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.SYMBOL:
 		p.advance()
 		return &ast.SymbolLit{Name: t.Lit}
+	case token.LBRACKET:
+		return p.parseArrayLiteral()
 	case token.TRUE:
 		p.advance()
 		return &ast.BoolLit{Value: true}
@@ -554,7 +595,8 @@ func (p *Parser) canStartCommandArg() bool {
 	}
 	switch t.Type {
 	case token.INT, token.FLOAT, token.STRING, token.SYMBOL, token.IDENT, token.CONST,
-		token.IVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG, token.LPAREN:
+		token.IVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG,
+		token.LPAREN, token.LBRACKET:
 		return true
 	case token.MINUS, token.PLUS:
 		// Unary-style argument: `foo -1` (operand hugs the sign), not `foo - 1`.
