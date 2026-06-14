@@ -20,9 +20,15 @@ type parseError struct{ msg string }
 
 func (e parseError) Error() string { return e.msg }
 
-type scope struct{ locals map[string]bool }
+// scope tracks declared locals. A hard scope is a method/class/module/top-level
+// boundary that local lookup does not cross; a soft scope (a block) chains to
+// its enclosing scope, so a block sees and can assign the enclosing locals.
+type scope struct {
+	locals map[string]bool
+	hard   bool
+}
 
-func newScope() *scope { return &scope{locals: map[string]bool{}} }
+func newScope(hard bool) *scope { return &scope{locals: map[string]bool{}, hard: hard} }
 
 // Parser holds parsing state.
 type Parser struct {
@@ -34,7 +40,7 @@ type Parser struct {
 // Parse lexes and parses src into a Program.
 func Parse(src string) (prog *ast.Program, err error) {
 	toks := lexer.New(src).Tokenize()
-	p := &Parser{toks: toks, scopes: []*scope{newScope()}}
+	p := &Parser{toks: toks, scopes: []*scope{newScope(true)}}
 	defer func() {
 		if r := recover(); r != nil {
 			// Unchecked: a non-parseError is an internal bug and re-panics as a
@@ -88,10 +94,25 @@ func (p *Parser) skipNewlines() {
 // --- scope ---
 
 func (p *Parser) scope() *scope         { return p.scopes[len(p.scopes)-1] }
-func (p *Parser) pushScope()            { p.scopes = append(p.scopes, newScope()) }
+func (p *Parser) pushScope()            { p.scopes = append(p.scopes, newScope(true)) }
+func (p *Parser) pushBlockScope()       { p.scopes = append(p.scopes, newScope(false)) }
 func (p *Parser) popScope()             { p.scopes = p.scopes[:len(p.scopes)-1] }
 func (p *Parser) declareLocal(n string) { p.scope().locals[n] = true }
-func (p *Parser) isLocal(n string) bool { return p.scope().locals[n] }
+
+// isLocal reports whether n is a visible local: it searches the scope chain but
+// does not cross a hard (method/class/module/top-level) boundary, while block
+// scopes (soft) chain to their enclosing scope.
+func (p *Parser) isLocal(n string) bool {
+	for i := len(p.scopes) - 1; i >= 0; i-- {
+		if p.scopes[i].locals[n] {
+			return true
+		}
+		if p.scopes[i].hard {
+			break
+		}
+	}
+	return false
+}
 
 // --- statements ---
 
@@ -364,7 +385,46 @@ func (p *Parser) parsePostfix() ast.Node {
 		}
 		node = &ast.Call{Recv: node, Name: name, Args: args}
 	}
+	// A brace block binds to the immediately preceding method call. (Phase 1
+	// supports `{ … }` blocks; `do … end` arrives once its looser precedence vs
+	// `while/until do` is handled.)
+	if call, ok := node.(*ast.Call); ok && p.is(token.LBRACE) {
+		call.Block = p.parseBlock()
+	}
 	return node
+}
+
+// parseBlock parses `{ [|params|] body }`.
+func (p *Parser) parseBlock() *ast.Block {
+	p.expect(token.LBRACE)
+	p.pushBlockScope()
+	var params []string
+	if p.accept(token.PIPE) {
+		params = p.parseParamNames(token.PIPE)
+		p.expect(token.PIPE)
+	}
+	for _, prm := range params {
+		p.declareLocal(prm)
+	}
+	body := p.parseStatements(map[token.Type]bool{token.RBRACE: true})
+	p.popScope()
+	p.expect(token.RBRACE)
+	return &ast.Block{Params: params, Body: body}
+}
+
+// parseYield parses `yield`, `yield(...)`, or `yield args`.
+func (p *Parser) parseYield() ast.Node {
+	p.expect(token.YIELD)
+	if p.is(token.LPAREN) && !p.cur().SpaceBefore {
+		p.advance()
+		args := p.parseCallArgs(token.RPAREN)
+		p.expect(token.RPAREN)
+		return &ast.Yield{Args: args}
+	}
+	if p.canStartCommandArg() {
+		return &ast.Yield{Args: p.parseCommandArgs()}
+	}
+	return &ast.Yield{}
 }
 
 // methodName reads a method name after a '.': an identifier, a constant, or a
@@ -415,6 +475,8 @@ func (p *Parser) parsePrimary() ast.Node {
 		return &ast.SelfLit{}
 	case token.SUPER:
 		return p.parseSuper()
+	case token.YIELD:
+		return p.parseYield()
 	case token.LPAREN:
 		p.advance()
 		p.skipNewlines()

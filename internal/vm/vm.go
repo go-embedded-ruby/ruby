@@ -38,9 +38,9 @@ type VM struct {
 	main   object.Value
 	consts map[string]object.Value // top-level constants (classes live here)
 
-	cBasicObject, cObject, cModule, cClass        *RClass
-	cInteger, cFloat, cString                      *RClass
-	cTrueClass, cFalseClass, cNilClass             *RClass
+	cBasicObject, cObject, cModule, cClass *RClass
+	cInteger, cFloat, cString              *RClass
+	cTrueClass, cFalseClass, cNilClass     *RClass
 }
 
 // New returns a VM writing program output to out.
@@ -57,21 +57,21 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			result, err = nil, r.(RubyError)
 		}
 	}()
-	return vm.exec(iseq, vm.main, nil, vm.cObject, ""), nil
+	return vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil), nil
 }
 
 // exec runs one ISeq. definee is the class that `def` targets in this frame;
 // methodName is the name of the running method ("" at top level / class bodies),
 // used to resolve `super`.
-func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string) object.Value {
+func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block *Proc) object.Value {
 	if len(args) != len(iseq.Params) {
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %d)", len(args), len(iseq.Params))
 	}
-	locals := make([]object.Value, iseq.NumLocals)
-	for i := range locals {
-		locals[i] = object.NilV
+	env := &Env{slots: make([]object.Value, iseq.NumLocals), parent: parentEnv}
+	for i := range env.slots {
+		env.slots[i] = object.NilV
 	}
-	copy(locals, args)
+	copy(env.slots, args)
 
 	stack := make([]object.Value, 0, 16)
 	push := func(v object.Value) { stack = append(stack, v) }
@@ -101,9 +101,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		case bytecode.OpDup:
 			push(stack[len(stack)-1])
 		case bytecode.OpGetLocal:
-			push(locals[in.A])
+			push(env.ancestor(in.B).slots[in.A])
 		case bytecode.OpSetLocal:
-			locals[in.A] = stack[len(stack)-1]
+			env.ancestor(in.B).slots[in.A] = stack[len(stack)-1]
 		case bytecode.OpGetIvar:
 			push(getIvar(self, iseq.Names[in.A]))
 		case bytecode.OpSetIvar:
@@ -144,7 +144,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			copy(callArgs, stack[len(stack)-argc:])
 			stack = stack[:len(stack)-argc]
 			recv := pop()
-			push(vm.send(recv, iseq.Names[in.A], callArgs))
+			var blk *Proc
+			if in.C > 0 { // a literal block: capture this frame's env + self
+				blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self}
+			}
+			push(vm.send(recv, iseq.Names[in.A], callArgs, blk))
 		case bytecode.OpDefineMethod:
 			definee.methods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
 			push(object.NilV)
@@ -161,7 +165,17 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				copy(superArgs, stack[len(stack)-in.A:])
 				stack = stack[:len(stack)-in.A]
 			}
-			push(vm.invokeSuper(self, definee, methodName, superArgs))
+			push(vm.invokeSuper(self, definee, methodName, superArgs, block))
+		case bytecode.OpInvokeBlock:
+			if block == nil {
+				raise("LocalJumpError", "no block given (yield)")
+			}
+			yargs := make([]object.Value, in.A)
+			copy(yargs, stack[len(stack)-in.A:])
+			stack = stack[:len(stack)-in.A]
+			push(vm.callBlock(block, yargs))
+		case bytecode.OpBlockGiven:
+			push(object.Bool(block != nil))
 		case bytecode.OpReturn:
 			return pop()
 		default:
@@ -190,7 +204,7 @@ func (vm *VM) defineClass(name string, body *bytecode.ISeq) object.Value {
 		class = newClass(name, super)
 		vm.consts[name] = class
 	}
-	return vm.exec(body, class, nil, class, "")
+	return vm.exec(body, class, nil, class, "", nil, nil)
 }
 
 // defineModule creates or reopens a module and runs its body with self = the
@@ -204,12 +218,13 @@ func (vm *VM) defineModule(name string, body *bytecode.ISeq) object.Value {
 		mod.isModule = true
 		vm.consts[name] = mod
 	}
-	return vm.exec(body, mod, nil, mod, "")
+	return vm.exec(body, mod, nil, mod, "", nil, nil)
 }
 
 // invokeSuper dispatches `super`: it finds methodName starting above the current
-// method's owner (its superclass chain, including their mixins) and invokes it.
-func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string, args []object.Value) object.Value {
+// method's owner (its superclass chain, including their mixins) and invokes it,
+// forwarding the current block.
+func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string, args []object.Value, blk *Proc) object.Value {
 	if methodName == "" {
 		raise("RuntimeError", "super called outside of method")
 	}
@@ -217,5 +232,5 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 	if m == nil {
 		raise("NoMethodError", "super: no superclass method '%s'", methodName)
 	}
-	return vm.invoke(m, self, args)
+	return vm.invoke(m, self, args, blk)
 }

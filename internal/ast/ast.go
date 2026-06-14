@@ -51,9 +51,23 @@ type UnaryExpr struct {
 }
 
 // Call is a method call. Recv is nil for a self/funcall (e.g. `puts x`, `fib(n)`).
+// Block is an optional literal block ({…} or do…end) attached to the call.
 type Call struct {
-	Recv Node
-	Name string
+	Recv  Node
+	Name  string
+	Args  []Node
+	Block *Block
+}
+
+// Block is a literal block: parameters and a body. It is a closure over the
+// scope in which it appears.
+type Block struct {
+	Params []string
+	Body   []Node
+}
+
+// Yield invokes the block passed to the enclosing method.
+type Yield struct {
 	Args []Node
 }
 
@@ -142,3 +156,4 @@ func (*IvarAssign) node() {}
 func (*ClassDef) node()   {}
 func (*ModuleDef) node()  {}
 func (*Super) node()      {}
+func (*Yield) node()      {}

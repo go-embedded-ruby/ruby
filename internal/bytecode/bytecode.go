@@ -55,6 +55,8 @@ const (
 	OpDefineModule // A = Names index, B = Children index; defines/reopens a module
 	OpDefineMethod // A = Names index, B = Children index; defines on the current class
 	OpInvokeSuper  // A = argc, B = 1 to forward the frame's args (bare super) else 0
+	OpInvokeBlock  // A = argc; yields to the block passed to the current method
+	OpBlockGiven   // pushes true if a block was passed to the current method
 	OpReturn       // returns top of stack from the current ISeq
 )
 
@@ -68,7 +70,8 @@ var opNames = map[Op]string{
 	OpBranchUnless: "branch_unless", OpSend: "send", OpGetIvar: "get_ivar",
 	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpDefineClass: "define_class",
 	OpDefineModule: "define_module", OpDefineMethod: "define_method",
-	OpInvokeSuper: "invoke_super", OpReturn: "return",
+	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
+	OpBlockGiven: "block_given", OpReturn: "return",
 }
 
 func (o Op) String() string {
@@ -78,10 +81,12 @@ func (o Op) String() string {
 	return "op?"
 }
 
-// Instr is one instruction. A and B are operands whose meaning depends on Op.
+// Instr is one instruction. A, B and C are operands whose meaning depends on Op.
+// For OpSend, C is the block: 0 means none, otherwise Children[C-1] is the
+// literal block compiled for the call.
 type Instr struct {
-	Op   Op
-	A, B int
+	Op      Op
+	A, B, C int
 }
 
 // ISeq is a compiled instruction sequence: a method body, or the program top

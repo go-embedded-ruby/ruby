@@ -18,7 +18,9 @@ type compileError struct{ msg string }
 
 func (e compileError) Error() string { return e.msg }
 
-// builder accumulates a single ISeq under construction.
+// builder accumulates a single ISeq under construction. For a block, parent
+// links to the enclosing builder and isBlock is true, so local resolution can
+// reach enclosing locals by depth.
 type builder struct {
 	name     string
 	insns    []bytecode.Instr
@@ -28,6 +30,8 @@ type builder struct {
 	locals   []string
 	params   []string
 	children []*bytecode.ISeq
+	parent   *builder
+	isBlock  bool
 }
 
 func newBuilder(name string, params []string) *builder {
@@ -36,6 +40,27 @@ func newBuilder(name string, params []string) *builder {
 		b.localSlot(p) // params occupy slots 0..n-1, in order
 	}
 	return b
+}
+
+func newBlockBuilder(name string, params []string, parent *builder) *builder {
+	b := newBuilder(name, params)
+	b.parent = parent
+	b.isBlock = true
+	return b
+}
+
+// resolve finds a local by walking block scopes outward; depth 0 is the current
+// builder. It stops at the first non-block (method/class/top) boundary.
+func (b *builder) resolve(name string) (depth, index int, ok bool) {
+	for cur, d := b, 0; cur != nil; cur, d = cur.parent, d+1 {
+		if i, found := cur.localLookup(name); found {
+			return d, i, true
+		}
+		if !cur.isBlock {
+			break
+		}
+	}
+	return 0, 0, false
 }
 
 func (b *builder) emit(op bytecode.Op, a, bb int) int {
@@ -67,13 +92,10 @@ func (b *builder) addName(n string) int {
 	return len(b.names) - 1
 }
 
-// localSlot returns the slot for name, allocating one if new.
+// localSlot allocates a fresh slot for name and returns its index. It is only
+// called for names known to be new in this scope (parameters, or an assignment
+// that did not resolve to an existing local), so it does not deduplicate.
 func (b *builder) localSlot(name string) int {
-	for i, n := range b.locals {
-		if n == name {
-			return i
-		}
-	}
 	b.locals = append(b.locals, name)
 	return len(b.locals) - 1
 }
@@ -168,14 +190,20 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.SelfLit:
 		b.emit(bytecode.OpPushSelf, 0, 0)
 	case *ast.VarRef:
-		slot, ok := b.localLookup(v.Name)
+		depth, slot, ok := b.resolve(v.Name)
 		if !ok {
 			c.fail("undefined local variable %q", v.Name)
 		}
-		b.emit(bytecode.OpGetLocal, slot, 0)
+		b.emit(bytecode.OpGetLocal, slot, depth)
 	case *ast.Assign:
 		c.compileNode(v.Value)
-		b.emit(bytecode.OpSetLocal, b.localSlot(v.Name), 0)
+		// Assign to an enclosing local if one is visible; otherwise create a
+		// new local in the current scope.
+		if depth, slot, ok := b.resolve(v.Name); ok {
+			b.emit(bytecode.OpSetLocal, slot, depth)
+		} else {
+			b.emit(bytecode.OpSetLocal, b.localSlot(v.Name), 0)
+		}
 	case *ast.UnaryExpr:
 		c.compileNode(v.Operand)
 		switch v.Op {
@@ -203,6 +231,11 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileModule(v)
 	case *ast.Super:
 		c.compileSuper(v)
+	case *ast.Yield:
+		for _, a := range v.Args {
+			c.compileNode(a)
+		}
+		b.emit(bytecode.OpInvokeBlock, len(v.Args), 0)
 	case *ast.If:
 		c.compileIf(v)
 	case *ast.While:
@@ -251,6 +284,11 @@ func binOp(op string) bytecode.Op {
 
 func (c *Compiler) compileCall(v *ast.Call) {
 	b := c.cur()
+	// block_given? is a frame intrinsic, not a real dispatch.
+	if v.Recv == nil && v.Block == nil && v.Name == "block_given?" && len(v.Args) == 0 {
+		b.emit(bytecode.OpBlockGiven, 0, 0)
+		return
+	}
 	if v.Recv != nil {
 		c.compileNode(v.Recv)
 	} else {
@@ -259,7 +297,24 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	for _, a := range v.Args {
 		c.compileNode(a)
 	}
-	b.emit(bytecode.OpSend, b.addName(v.Name), len(v.Args))
+	at := b.emit(bytecode.OpSend, b.addName(v.Name), len(v.Args))
+	if v.Block != nil {
+		b.insns[at].C = c.compileBlock(v.Block) + 1 // C-1 indexes Children
+	}
+}
+
+// compileBlock compiles a literal block into a child ISeq of the current
+// builder and returns its index. The child is a block builder, so its body can
+// reach the enclosing locals by depth.
+func (c *Compiler) compileBlock(blk *ast.Block) int {
+	parent := c.cur()
+	c.push(newBlockBuilder("<block>", blk.Params, parent))
+	c.compileBody(blk.Body)
+	c.cur().emit(bytecode.OpReturn, 0, 0)
+	child := c.pop().build()
+	idx := len(parent.children)
+	parent.children = append(parent.children, child)
+	return idx
 }
 
 func (c *Compiler) compileClass(v *ast.ClassDef) {

@@ -39,6 +39,7 @@ const (
 	NIL
 	SELF
 	SUPER
+	YIELD
 
 	// Operators and delimiters.
 	PLUS
@@ -56,6 +57,9 @@ const (
 	BANG
 	LPAREN
 	RPAREN
+	LBRACE
+	RBRACE
+	PIPE
 	COMMA
 	DOT
 )
@@ -67,10 +71,10 @@ var typeNames = map[Type]string{
 	IF: "if", ELSIF: "elsif", ELSE: "else", UNLESS: "unless", WHILE: "while",
 	UNTIL: "until", RETURN: "return",
 	THEN: "then", DO: "do", TRUE: "true", FALSE: "false", NIL: "nil", SELF: "self",
-	SUPER: "super",
+	SUPER: "super", YIELD: "yield",
 	PLUS: "+", MINUS: "-", STAR: "*", SLASH: "/", PERCENT: "%", ASSIGN: "=",
 	EQ: "==", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
-	LPAREN: "(", RPAREN: ")", COMMA: ",", DOT: ".",
+	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", PIPE: "|", COMMA: ",", DOT: ".",
 }
 
 func (t Type) String() string {
@@ -87,6 +91,7 @@ var Keywords = map[string]Type{
 	"unless": UNLESS, "while": WHILE, "until": UNTIL, "return": RETURN,
 	"then": THEN, "do": DO,
 	"true": TRUE, "false": FALSE, "nil": NIL, "self": SELF, "super": SUPER,
+	"yield": YIELD,
 }
 
 // Token is a single lexed token.

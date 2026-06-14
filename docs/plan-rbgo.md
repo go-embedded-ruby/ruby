@@ -341,12 +341,15 @@ BasicObject→Object→{Module→Class}, plus Integer/Float/String/True/False/Ni
 Kernel on Object: `puts`/`print`/`p`/`class`/`to_s`/`inspect`/`nil?`. 100%
 coverage, CI green on 6 arches.
 **Done since:** modules (`module … end`), `include` (mixins, via the ancestor
-walk over each class's included modules), and `super` (bare/forwarding,
-`super()`, `super(args)`, `super arg`).
-**Still to come in Phase 1:** blocks & `yield`, `Proc`/`lambda`, singleton
-classes, `respond_to?`, and routing the arithmetic fast paths through `send`.
-(`method_missing` currently receives the name as a String; becomes a Symbol with
-Phase 2.)
+walk over each class's included modules), `super` (bare/forwarding, `super()`,
+`super(args)`, `super arg`), and **blocks & `yield`** — real closures via an
+`Env` parent chain with depth-addressed locals, `{ |params| … }` blocks, `yield`
+(with args), `block_given?`, lenient block arity, and `Integer#times` as the
+first block-driven iterator.
+**Still to come in Phase 1:** `Proc`/`lambda` and `&block` (reifying a block as a
+first-class value), `do…end` block syntax, singleton classes, `respond_to?`, and
+routing the arithmetic fast paths through `send`. (`method_missing` currently
+receives the name as a String; becomes a Symbol with Phase 2.)
 **Exit (met for core):** define classes, subclass, instantiate, call methods,
 use ivars, override `method_missing`.
 
