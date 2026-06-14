@@ -19,10 +19,12 @@ type Method struct {
 // RClass is a class (the live, mutable method table that makes monkey-patching,
 // define_method and method_missing fall out for free).
 type RClass struct {
-	name    string
-	super   *RClass
-	methods map[string]*Method
-	consts  map[string]object.Value
+	name     string
+	super    *RClass
+	methods  map[string]*Method
+	consts   map[string]object.Value
+	includes []*RClass // modules mixed in via include (most recent last)
+	isModule bool
 }
 
 func newClass(name string, super *RClass) *RClass {
@@ -48,10 +50,23 @@ func (o *RObject) ToS() string     { return "#<" + o.class.name + ">" }
 func (o *RObject) Inspect() string { return o.ToS() }
 func (o *RObject) Truthy() bool    { return true }
 
-// lookupMethod walks the ancestor chain.
+// lookupMethod walks the ancestor chain: at each class, its own methods then
+// its included modules (most-recently-included first), then up to its super.
 func lookupMethod(c *RClass, name string) *Method {
 	for ; c != nil; c = c.super {
-		if m, ok := c.methods[name]; ok {
+		if m := lookupOwnOrIncluded(c, name); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
+func lookupOwnOrIncluded(c *RClass, name string) *Method {
+	if m, ok := c.methods[name]; ok {
+		return m
+	}
+	for i := len(c.includes) - 1; i >= 0; i-- {
+		if m := lookupOwnOrIncluded(c.includes[i], name); m != nil {
 			return m
 		}
 	}
@@ -101,7 +116,7 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value) object.V
 	if m.native != nil {
 		return m.native(vm, self, args)
 	}
-	return vm.exec(m.iseq, self, args, m.owner)
+	return vm.exec(m.iseq, self, args, m.owner, m.name)
 }
 
 func getIvar(self object.Value, name string) object.Value {

@@ -106,6 +106,20 @@ type ClassDef struct {
 	Body  []Node
 }
 
+// ModuleDef defines or reopens a module.
+type ModuleDef struct {
+	Name string
+	Body []Node
+}
+
+// Super calls the same-named method in the ancestor chain. Forward is true for a
+// bare `super` (passes the enclosing method's own arguments); otherwise Args are
+// the explicit arguments of `super(...)`.
+type Super struct {
+	Args    []Node
+	Forward bool
+}
+
 func (*Program) node()    {}
 func (*IntLit) node()     {}
 func (*FloatLit) node()   {}
@@ -126,3 +140,5 @@ func (*ConstRef) node()   {}
 func (*IvarRef) node()    {}
 func (*IvarAssign) node() {}
 func (*ClassDef) node()   {}
+func (*ModuleDef) node()  {}
+func (*Super) node()      {}

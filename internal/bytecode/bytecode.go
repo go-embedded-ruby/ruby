@@ -52,7 +52,9 @@ const (
 	OpSetIvar      // A = Names index; sets @name on self, leaves the value
 	OpGetConst     // A = Names index; pushes the named constant
 	OpDefineClass  // A = Names index, B = Children index; defines/reopens a class
+	OpDefineModule // A = Names index, B = Children index; defines/reopens a module
 	OpDefineMethod // A = Names index, B = Children index; defines on the current class
+	OpInvokeSuper  // A = argc, B = 1 to forward the frame's args (bare super) else 0
 	OpReturn       // returns top of stack from the current ISeq
 )
 
@@ -65,7 +67,8 @@ var opNames = map[Op]string{
 	OpNeg: "neg", OpNot: "not", OpJump: "jump", OpBranchIf: "branch_if",
 	OpBranchUnless: "branch_unless", OpSend: "send", OpGetIvar: "get_ivar",
 	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpDefineClass: "define_class",
-	OpDefineMethod: "define_method", OpReturn: "return",
+	OpDefineModule: "define_module", OpDefineMethod: "define_method",
+	OpInvokeSuper: "invoke_super", OpReturn: "return",
 }
 
 func (o Op) String() string {

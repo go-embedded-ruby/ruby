@@ -199,6 +199,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 		b.emit(bytecode.OpSetIvar, b.addName(v.Name), 0)
 	case *ast.ClassDef:
 		c.compileClass(v)
+	case *ast.ModuleDef:
+		c.compileModule(v)
+	case *ast.Super:
+		c.compileSuper(v)
 	case *ast.If:
 		c.compileIf(v)
 	case *ast.While:
@@ -269,6 +273,30 @@ func (c *Compiler) compileClass(v *ast.ClassDef) {
 	childIdx := len(parent.children)
 	parent.children = append(parent.children, child)
 	parent.emit(bytecode.OpDefineClass, parent.addName(v.Name), childIdx)
+}
+
+func (c *Compiler) compileModule(v *ast.ModuleDef) {
+	c.push(newBuilder("<module:"+v.Name+">", nil))
+	c.compileBody(v.Body)
+	c.cur().emit(bytecode.OpReturn, 0, 0)
+	child := c.pop().build()
+
+	parent := c.cur()
+	childIdx := len(parent.children)
+	parent.children = append(parent.children, child)
+	parent.emit(bytecode.OpDefineModule, parent.addName(v.Name), childIdx)
+}
+
+func (c *Compiler) compileSuper(v *ast.Super) {
+	b := c.cur()
+	if v.Forward {
+		b.emit(bytecode.OpInvokeSuper, 0, 1) // forward the frame's own args
+		return
+	}
+	for _, a := range v.Args {
+		c.compileNode(a)
+	}
+	b.emit(bytecode.OpInvokeSuper, len(v.Args), 0)
 }
 
 func (c *Compiler) compileIf(v *ast.If) {

@@ -123,6 +123,8 @@ func (p *Parser) parseStatement() ast.Node {
 		return p.parseDef()
 	case token.CLASS:
 		return p.parseClass()
+	case token.MODULE:
+		return p.parseModule()
 	case token.IF:
 		return p.parseIf()
 	case token.UNLESS:
@@ -175,6 +177,16 @@ func (p *Parser) parseClass() ast.Node {
 	p.popScope()
 	p.expect(token.END)
 	return &ast.ClassDef{Name: name, Super: super, Body: body}
+}
+
+func (p *Parser) parseModule() ast.Node {
+	p.expect(token.MODULE)
+	name := p.expect(token.CONST).Lit
+	p.pushScope() // a module body has its own local scope
+	body := p.parseStatements(bodyEnd)
+	p.popScope()
+	p.expect(token.END)
+	return &ast.ModuleDef{Name: name, Body: body}
 }
 
 func (p *Parser) parseDef() ast.Node {
@@ -401,6 +413,8 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.SELF:
 		p.advance()
 		return &ast.SelfLit{}
+	case token.SUPER:
+		return p.parseSuper()
 	case token.LPAREN:
 		p.advance()
 		p.skipNewlines()
@@ -418,6 +432,22 @@ func (p *Parser) parsePrimary() ast.Node {
 		return &ast.IvarRef{Name: t.Lit}
 	}
 	return p.fail("unexpected token %q (%s)", t.Lit, t.Type)
+}
+
+// parseSuper parses `super`, `super(...)`, or `super args`. A bare `super`
+// forwards the enclosing method's arguments.
+func (p *Parser) parseSuper() ast.Node {
+	p.expect(token.SUPER)
+	if p.is(token.LPAREN) && !p.cur().SpaceBefore {
+		p.advance()
+		args := p.parseCallArgs(token.RPAREN)
+		p.expect(token.RPAREN)
+		return &ast.Super{Args: args}
+	}
+	if p.canStartCommandArg() {
+		return &ast.Super{Args: p.parseCommandArgs()}
+	}
+	return &ast.Super{Forward: true}
 }
 
 // parseIdentExpr resolves a bare identifier into a variable read or a method

@@ -57,11 +57,13 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			result, err = nil, r.(RubyError)
 		}
 	}()
-	return vm.exec(iseq, vm.main, nil, vm.cObject), nil
+	return vm.exec(iseq, vm.main, nil, vm.cObject, ""), nil
 }
 
-// exec runs one ISeq. definee is the class that `def` targets in this frame.
-func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass) object.Value {
+// exec runs one ISeq. definee is the class that `def` targets in this frame;
+// methodName is the name of the running method ("" at top level / class bodies),
+// used to resolve `super`.
+func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string) object.Value {
 	if len(args) != len(iseq.Params) {
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %d)", len(args), len(iseq.Params))
 	}
@@ -148,6 +150,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			push(object.NilV)
 		case bytecode.OpDefineClass:
 			push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
+		case bytecode.OpDefineModule:
+			push(vm.defineModule(iseq.Names[in.A], iseq.Children[in.B]))
+		case bytecode.OpInvokeSuper:
+			var superArgs []object.Value
+			if in.B == 1 { // bare super forwards the frame's own arguments
+				superArgs = args
+			} else {
+				superArgs = make([]object.Value, in.A)
+				copy(superArgs, stack[len(stack)-in.A:])
+				stack = stack[:len(stack)-in.A]
+			}
+			push(vm.invokeSuper(self, definee, methodName, superArgs))
 		case bytecode.OpReturn:
 			return pop()
 		default:
@@ -176,5 +190,32 @@ func (vm *VM) defineClass(name string, body *bytecode.ISeq) object.Value {
 		class = newClass(name, super)
 		vm.consts[name] = class
 	}
-	return vm.exec(body, class, nil, class)
+	return vm.exec(body, class, nil, class, "")
+}
+
+// defineModule creates or reopens a module and runs its body with self = the
+// module.
+func (vm *VM) defineModule(name string, body *bytecode.ISeq) object.Value {
+	var mod *RClass
+	if existing, ok := vm.consts[name]; ok {
+		mod = existing.(*RClass) // reopen
+	} else {
+		mod = newClass(name, nil)
+		mod.isModule = true
+		vm.consts[name] = mod
+	}
+	return vm.exec(body, mod, nil, mod, "")
+}
+
+// invokeSuper dispatches `super`: it finds methodName starting above the current
+// method's owner (its superclass chain, including their mixins) and invokes it.
+func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string, args []object.Value) object.Value {
+	if methodName == "" {
+		raise("RuntimeError", "super called outside of method")
+	}
+	m := lookupMethod(definee.super, methodName)
+	if m == nil {
+		raise("NoMethodError", "super: no superclass method '%s'", methodName)
+	}
+	return vm.invoke(m, self, args)
 }

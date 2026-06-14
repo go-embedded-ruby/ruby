@@ -52,6 +52,15 @@ func (vm *VM) bootstrap() {
 		return raise("NoMethodError", "undefined method '%s' for %s", name, vm.classOf(self).name)
 	})
 
+	// Module (Class inherits these).
+	vm.cModule.define("include", func(_ *VM, self object.Value, args []object.Value) object.Value {
+		target := self.(*RClass)
+		for _, a := range args {
+			target.includes = append(target.includes, a.(*RClass))
+		}
+		return target
+	})
+
 	// Class.
 	vm.cClass.define("new", nativeNew)
 }

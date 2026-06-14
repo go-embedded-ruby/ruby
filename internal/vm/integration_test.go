@@ -116,6 +116,8 @@ func TestParseErrors(t *testing.T) {
 		`$`,    // unknown character → ILLEGAL from the main lexer switch
 		`1.`,   // trailing dot: float lookahead hits EOF, then '.' has no method
 		`1 2`,  // two primaries with no separator
+		`module`, // module without a name
+		`class`,  // class without a name
 	} {
 		if _, err := parser.Parse(src); err == nil {
 			t.Errorf("expected parse error for %q", src)
