@@ -112,7 +112,8 @@ func TestRuntimeErrors(t *testing.T) {
 func TestParseErrors(t *testing.T) {
 	for _, src := range []string{
 		`def`, `if 1`, `puts (1`, `1 +`,
-		`@`,    // illegal character → lexer ILLEGAL token
+		`@`,    // bare @ → ILLEGAL from lexIvar
+		`$`,    // unknown character → ILLEGAL from the main lexer switch
 		`1.`,   // trailing dot: float lookahead hits EOF, then '.' has no method
 		`1 2`,  // two primaries with no separator
 	} {

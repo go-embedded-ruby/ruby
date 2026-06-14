@@ -190,6 +190,15 @@ func (c *Compiler) compileNode(n ast.Node) {
 		b.emit(binOp(v.Op), 0, 0)
 	case *ast.Call:
 		c.compileCall(v)
+	case *ast.ConstRef:
+		b.emit(bytecode.OpGetConst, b.addName(v.Name), 0)
+	case *ast.IvarRef:
+		b.emit(bytecode.OpGetIvar, b.addName(v.Name), 0)
+	case *ast.IvarAssign:
+		c.compileNode(v.Value)
+		b.emit(bytecode.OpSetIvar, b.addName(v.Name), 0)
+	case *ast.ClassDef:
+		c.compileClass(v)
 	case *ast.If:
 		c.compileIf(v)
 	case *ast.While:
@@ -237,14 +246,29 @@ func binOp(op string) bytecode.Op {
 }
 
 func (c *Compiler) compileCall(v *ast.Call) {
-	if v.Recv != nil {
-		c.fail("method calls on a receiver are not supported in Phase 0 (got .%s)", v.Name)
-	}
 	b := c.cur()
+	if v.Recv != nil {
+		c.compileNode(v.Recv)
+	} else {
+		b.emit(bytecode.OpPushSelf, 0, 0) // implicit receiver: self
+	}
 	for _, a := range v.Args {
 		c.compileNode(a)
 	}
-	b.emit(bytecode.OpCall, b.addName(v.Name), len(v.Args))
+	b.emit(bytecode.OpSend, b.addName(v.Name), len(v.Args))
+}
+
+func (c *Compiler) compileClass(v *ast.ClassDef) {
+	c.push(newBuilder("<class:"+v.Name+">", nil))
+	c.compileBody(v.Body)
+	c.cur().emit(bytecode.OpReturn, 0, 0)
+	child := c.pop().build()
+	child.Super = v.Super
+
+	parent := c.cur()
+	childIdx := len(parent.children)
+	parent.children = append(parent.children, child)
+	parent.emit(bytecode.OpDefineClass, parent.addName(v.Name), childIdx)
 }
 
 func (c *Compiler) compileIf(v *ast.If) {

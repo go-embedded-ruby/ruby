@@ -59,6 +59,21 @@ func TestValueEqualBranches(t *testing.T) {
 	}
 }
 
+// foreignValue is an object.Value the VM's classOf does not know about, used to
+// exercise the defensive default branch.
+type foreignValue struct{}
+
+func (foreignValue) ToS() string     { return "" }
+func (foreignValue) Inspect() string { return "" }
+func (foreignValue) Truthy() bool    { return true }
+
+func TestClassOfUnknown(t *testing.T) {
+	vm := New(io.Discard)
+	if c := vm.classOf(foreignValue{}); c != nil {
+		t.Fatalf("classOf(unknown) = %v, want nil", c)
+	}
+}
+
 func TestFloatModSign(t *testing.T) {
 	if got := floatMod(-7.5, 2.0); got != 0.5 {
 		t.Errorf("floatMod(-7.5,2.0)=%v want 0.5", got)

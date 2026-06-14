@@ -47,8 +47,12 @@ const (
 	OpBranchIf     // A = target pc; pops, jumps if truthy
 	OpBranchUnless // A = target pc; pops, jumps unless truthy
 
-	OpCall         // A = index into Names, B = argc; pops args, pushes result
-	OpDefineMethod // A = index into Names, B = index into Children
+	OpSend         // A = Names index (selector), B = argc; stack: recv, args… → result
+	OpGetIvar      // A = Names index; pushes @name from self (nil if unset)
+	OpSetIvar      // A = Names index; sets @name on self, leaves the value
+	OpGetConst     // A = Names index; pushes the named constant
+	OpDefineClass  // A = Names index, B = Children index; defines/reopens a class
+	OpDefineMethod // A = Names index, B = Children index; defines on the current class
 	OpReturn       // returns top of stack from the current ISeq
 )
 
@@ -59,8 +63,9 @@ var opNames = map[Op]string{
 	OpAdd: "add", OpSub: "sub", OpMul: "mul", OpDiv: "div", OpMod: "mod",
 	OpLt: "lt", OpGt: "gt", OpLe: "le", OpGe: "ge", OpEq: "eq", OpNeq: "neq",
 	OpNeg: "neg", OpNot: "not", OpJump: "jump", OpBranchIf: "branch_if",
-	OpBranchUnless: "branch_unless", OpCall: "call", OpDefineMethod: "define_method",
-	OpReturn: "return",
+	OpBranchUnless: "branch_unless", OpSend: "send", OpGetIvar: "get_ivar",
+	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpDefineClass: "define_class",
+	OpDefineMethod: "define_method", OpReturn: "return",
 }
 
 func (o Op) String() string {
@@ -86,5 +91,6 @@ type ISeq struct {
 	Names     []string       // method-call and definition names
 	Params    []string       // parameter names (Phase 0: required only)
 	NumLocals int            // total local slots (params first, then assigns)
-	Children  []*ISeq        // nested ISeqs (method bodies defined here)
+	Children  []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
+	Super     string         // for a class body: the superclass name ("" → Object)
 }

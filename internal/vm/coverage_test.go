@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-embedded-ruby/ruby/internal/compiler"
 	"github.com/go-embedded-ruby/ruby/internal/parser"
 )
 
@@ -57,12 +56,13 @@ func TestParserCorners(t *testing.T) {
 	}
 }
 
-// Compile-time errors (receiver method calls are out of Phase 0 scope).
-func TestCompileErrors(t *testing.T) {
-	for _, src := range []string{`1.foo`, `1.foo(2)`, `x = 1; x.bar(3)`} {
+// Sending an unknown selector to a built-in value routes to method_missing,
+// whose default raises NoMethodError.
+func TestUnknownMethod(t *testing.T) {
+	for _, src := range []string{`1.foo`, `1.bar(2)`, "x = \"s\"\nx.nope"} {
 		err := runErr(t, src)
-		if err == nil || !strings.Contains(err.Error(), "Phase 0") {
-			t.Errorf("src=%q: got %v, want a Phase 0 compile error", src, err)
+		if err == nil || !strings.Contains(err.Error(), "NoMethodError") {
+			t.Errorf("src=%q: got %v, want NoMethodError", src, err)
 		}
 	}
 }
@@ -73,12 +73,7 @@ func TestErrorMessages(t *testing.T) {
 	if err == nil || err.Error() == "" {
 		t.Fatal("expected non-empty parse error")
 	}
-	prog, perr := parser.Parse(`1.foo`)
-	if perr != nil {
-		t.Fatalf("unexpected parse error: %v", perr)
-	}
-	_, cerr := compiler.Compile(prog)
-	if cerr == nil || !strings.Contains(cerr.Error(), "compile error") {
-		t.Fatalf("expected compile error, got %v", cerr)
+	if e := runErr(t, `1.foo`); e == nil || e.Error() != "NoMethodError: undefined method 'foo' for Integer" {
+		t.Fatalf("runtime error message = %v", e)
 	}
 }

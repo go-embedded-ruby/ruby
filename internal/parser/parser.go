@@ -121,6 +121,8 @@ func (p *Parser) parseStatement() ast.Node {
 	switch p.cur().Type {
 	case token.DEF:
 		return p.parseDef()
+	case token.CLASS:
+		return p.parseClass()
 	case token.IF:
 		return p.parseIf()
 	case token.UNLESS:
@@ -160,6 +162,20 @@ func (p *Parser) applyModifiers(node ast.Node) ast.Node {
 }
 
 func not(n ast.Node) ast.Node { return &ast.UnaryExpr{Op: "!", Operand: n} }
+
+func (p *Parser) parseClass() ast.Node {
+	p.expect(token.CLASS)
+	name := p.expect(token.CONST).Lit
+	super := ""
+	if p.accept(token.LT) {
+		super = p.expect(token.CONST).Lit
+	}
+	p.pushScope() // a class body has its own local scope
+	body := p.parseStatements(bodyEnd)
+	p.popScope()
+	p.expect(token.END)
+	return &ast.ClassDef{Name: name, Super: super, Body: body}
+}
 
 func (p *Parser) parseDef() ast.Node {
 	p.expect(token.DEF)
@@ -271,6 +287,12 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 		p.declareLocal(name)
 		return &ast.Assign{Name: name, Value: val}
 	}
+	// Instance-variable assignment: @name '=' expr.
+	if p.is(token.IVAR) && p.peekTok().Type == token.ASSIGN {
+		name := p.advance().Lit
+		p.expect(token.ASSIGN)
+		return &ast.IvarAssign{Name: name, Value: p.parseExprOrAssign()}
+	}
 	return p.parseBinary(0)
 }
 
@@ -321,10 +343,7 @@ func (p *Parser) parsePostfix() ast.Node {
 	node := p.parsePrimary()
 	for p.is(token.DOT) {
 		p.advance()
-		if !p.is(token.IDENT) && !p.is(token.CONST) {
-			p.fail("expected method name after '.'")
-		}
-		name := p.advance().Lit
+		name := p.methodName()
 		var args []ast.Node
 		if p.is(token.LPAREN) && !p.cur().SpaceBefore {
 			p.advance()
@@ -334,6 +353,22 @@ func (p *Parser) parsePostfix() ast.Node {
 		node = &ast.Call{Recv: node, Name: name, Args: args}
 	}
 	return node
+}
+
+// methodName reads a method name after a '.': an identifier, a constant, or a
+// keyword used as a method (e.g. `obj.class`, `x.then`, `a.nil?`).
+func (p *Parser) methodName() string {
+	t := p.cur()
+	if t.Type == token.IDENT || t.Type == token.CONST {
+		p.advance()
+		return t.Lit
+	}
+	if _, isKeyword := token.Keywords[t.Lit]; isKeyword {
+		p.advance()
+		return t.Lit
+	}
+	p.fail("expected method name after '.'")
+	return ""
 }
 
 func (p *Parser) parsePrimary() ast.Node {
@@ -373,8 +408,14 @@ func (p *Parser) parsePrimary() ast.Node {
 		p.skipNewlines()
 		p.expect(token.RPAREN)
 		return e
-	case token.IDENT, token.CONST:
+	case token.IDENT:
 		return p.parseIdentExpr()
+	case token.CONST:
+		p.advance()
+		return &ast.ConstRef{Name: t.Lit}
+	case token.IVAR:
+		p.advance()
+		return &ast.IvarRef{Name: t.Lit}
 	}
 	return p.fail("unexpected token %q (%s)", t.Lit, t.Type)
 }

@@ -18,9 +18,11 @@ const (
 	STRING
 	IDENT // local variable or method name (lowercase / _ leading)
 	CONST // Capitalized identifier
+	IVAR  // @instance_variable
 
 	// Keywords.
 	DEF
+	CLASS
 	END
 	IF
 	ELSIF
@@ -58,7 +60,8 @@ const (
 
 var typeNames = map[Type]string{
 	EOF: "EOF", ILLEGAL: "ILLEGAL", NEWLINE: "NEWLINE", INT: "INT", FLOAT: "FLOAT",
-	STRING: "STRING", IDENT: "IDENT", CONST: "CONST", DEF: "def", END: "end",
+	STRING: "STRING", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR",
+	DEF: "def", CLASS: "class", END: "end",
 	IF: "if", ELSIF: "elsif", ELSE: "else", UNLESS: "unless", WHILE: "while",
 	UNTIL: "until", RETURN: "return",
 	THEN: "then", DO: "do", TRUE: "true", FALSE: "false", NIL: "nil", SELF: "self",
@@ -76,7 +79,7 @@ func (t Type) String() string {
 
 // Keywords maps reserved words to their token type.
 var Keywords = map[string]Type{
-	"def": DEF, "end": END, "if": IF, "elsif": ELSIF, "else": ELSE,
+	"def": DEF, "class": CLASS, "end": END, "if": IF, "elsif": ELSIF, "else": ELSE,
 	"unless": UNLESS, "while": WHILE, "until": UNTIL, "return": RETURN,
 	"then": THEN, "do": DO,
 	"true": TRUE, "false": FALSE, "nil": NIL, "self": SELF,

@@ -87,6 +87,25 @@ type MethodDef struct {
 // Return is an explicit return.
 type Return struct{ Value Node } // Value may be nil
 
+// ConstRef references a constant (e.g. a class name) by name.
+type ConstRef struct{ Name string }
+
+// IvarRef reads an instance variable (@name) of self.
+type IvarRef struct{ Name string }
+
+// IvarAssign is `@Name = Value`.
+type IvarAssign struct {
+	Name  string
+	Value Node
+}
+
+// ClassDef defines or reopens a class. Super is the optional superclass name.
+type ClassDef struct {
+	Name  string
+	Super string // "" if none
+	Body  []Node
+}
+
 func (*Program) node()    {}
 func (*IntLit) node()     {}
 func (*FloatLit) node()   {}
@@ -103,3 +122,7 @@ func (*If) node()         {}
 func (*While) node()      {}
 func (*MethodDef) node()  {}
 func (*Return) node()     {}
+func (*ConstRef) node()   {}
+func (*IvarRef) node()    {}
+func (*IvarAssign) node() {}
+func (*ClassDef) node()   {}

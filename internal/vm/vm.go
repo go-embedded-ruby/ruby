@@ -1,12 +1,13 @@
 // Package vm interprets bytecode.
 //
-// Phase 0 is a straightforward stack machine. Each Ruby call recurses into a Go
-// function (so the Go stack is the call stack and fib(20) just works); explicit
-// frame objects, catch tables, and Fiber arrive in later phases (plan §6–§8).
+// Phase 1 adds the live object model (plan §5): values dispatch through mutable
+// per-class method tables (the project's objc_msgSend), so monkey-patching,
+// define_method, method_missing, classes, instances and ivars all work. The
+// arithmetic/comparison opcodes remain a fast path; method calls go through
+// OpSend → send().
 //
-// Runtime errors are fatal in Phase 0 (no rescue yet), so they travel as a
-// panic(RubyError) recovered at the Run boundary. Once exceptions land
-// (Phase 3) normal control flow switches to the status-return design of plan §8.
+// Runtime errors are still fatal in Phase 1 (rescue arrives in Phase 3) and
+// travel as panic(RubyError) recovered at the Run boundary.
 package vm
 
 import (
@@ -26,49 +27,41 @@ type RubyError struct {
 func (e RubyError) Error() string { return e.Class + ": " + e.Message }
 
 // raise never returns; the object.Value result lets callers write
-// `return raise(...)` so there is no unreachable trailing return to leave
-// uncovered.
+// `return raise(...)` without an unreachable trailing return.
 func raise(class, format string, args ...any) object.Value {
 	panic(RubyError{Class: class, Message: fmt.Sprintf(format, args...)})
 }
 
-// NativeFn is a builtin implemented in Go.
-type NativeFn func(vm *VM, self object.Value, args []object.Value) object.Value
-
-// VM holds the global method tables and I/O.
+// VM holds I/O, the top-level self, the constant table and the base classes.
 type VM struct {
-	methods  map[string]*bytecode.ISeq // user-defined methods (Phase 1: real method tables)
-	builtins map[string]NativeFn
-	out      io.Writer
-	main     object.Value
+	out    io.Writer
+	main   object.Value
+	consts map[string]object.Value // top-level constants (classes live here)
+
+	cBasicObject, cObject, cModule, cClass        *RClass
+	cInteger, cFloat, cString                      *RClass
+	cTrueClass, cFalseClass, cNilClass             *RClass
 }
 
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
-	vm := &VM{
-		methods:  map[string]*bytecode.ISeq{},
-		builtins: map[string]NativeFn{},
-		out:      out,
-		main:     object.Main{},
-	}
-	vm.registerBuiltins()
+	vm := &VM{out: out, main: object.Main{}, consts: map[string]object.Value{}}
+	vm.bootstrap()
 	return vm
 }
 
-// Run executes the top-level ISeq and returns its value.
+// Run executes the top-level ISeq (self = main, default definee = Object).
 func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// A non-RubyError is an internal VM bug; the unchecked assertion
-			// re-panics it (as a conversion error) rather than swallowing it,
-			// and leaves no separate uncovered re-panic branch.
 			result, err = nil, r.(RubyError)
 		}
 	}()
-	return vm.exec(iseq, vm.main, nil), nil
+	return vm.exec(iseq, vm.main, nil, vm.cObject), nil
 }
 
-func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value) object.Value {
+// exec runs one ISeq. definee is the class that `def` targets in this frame.
+func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass) object.Value {
 	if len(args) != len(iseq.Params) {
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %d)", len(args), len(iseq.Params))
 	}
@@ -76,7 +69,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value) 
 	for i := range locals {
 		locals[i] = object.NilV
 	}
-	copy(locals, args) // params occupy the first slots
+	copy(locals, args)
 
 	stack := make([]object.Value, 0, 16)
 	push := func(v object.Value) { stack = append(stack, v) }
@@ -108,7 +101,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value) 
 		case bytecode.OpGetLocal:
 			push(locals[in.A])
 		case bytecode.OpSetLocal:
-			locals[in.A] = stack[len(stack)-1] // assignment is an expression: leave value
+			locals[in.A] = stack[len(stack)-1]
+		case bytecode.OpGetIvar:
+			push(getIvar(self, iseq.Names[in.A]))
+		case bytecode.OpSetIvar:
+			setIvar(self, iseq.Names[in.A], stack[len(stack)-1])
+		case bytecode.OpGetConst:
+			name := iseq.Names[in.A]
+			v, ok := vm.consts[name]
+			if !ok {
+				raise("NameError", "uninitialized constant %s", name)
+			}
+			push(v)
 		case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
 			bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
 			bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:
@@ -132,16 +136,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value) 
 				pc = in.A
 				continue
 			}
-		case bytecode.OpCall:
-			name := iseq.Names[in.A]
+		case bytecode.OpSend:
 			argc := in.B
 			callArgs := make([]object.Value, argc)
 			copy(callArgs, stack[len(stack)-argc:])
 			stack = stack[:len(stack)-argc]
-			push(vm.call(self, name, callArgs))
+			recv := pop()
+			push(vm.send(recv, iseq.Names[in.A], callArgs))
 		case bytecode.OpDefineMethod:
-			vm.methods[iseq.Names[in.A]] = iseq.Children[in.B]
-			push(object.NilV) // def evaluates to a value (Phase 1: the method name symbol)
+			definee.methods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
+			push(object.NilV)
+		case bytecode.OpDefineClass:
+			push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
 		case bytecode.OpReturn:
 			return pop()
 		default:
@@ -152,14 +158,23 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value) 
 	return object.NilV
 }
 
-// call dispatches a self/funcall: builtins first, then user methods.
-// Phase 1 replaces this with real method-table lookup on the receiver's class.
-func (vm *VM) call(self object.Value, name string, args []object.Value) object.Value {
-	if fn, ok := vm.builtins[name]; ok {
-		return fn(vm, self, args)
+// defineClass creates or reopens a class, runs its body with self = the class,
+// and returns the body's value.
+func (vm *VM) defineClass(name string, body *bytecode.ISeq) object.Value {
+	var class *RClass
+	if existing, ok := vm.consts[name]; ok {
+		class = existing.(*RClass) // reopen
+	} else {
+		super := vm.cObject
+		if body.Super != "" {
+			sc, ok := vm.consts[body.Super]
+			if !ok {
+				raise("NameError", "uninitialized constant %s", body.Super)
+			}
+			super = sc.(*RClass)
+		}
+		class = newClass(name, super)
+		vm.consts[name] = class
 	}
-	if iseq, ok := vm.methods[name]; ok {
-		return vm.exec(iseq, self, args)
-	}
-	return raise("NoMethodError", "undefined method '%s' for %s", name, self.Inspect())
+	return vm.exec(body, class, nil, class)
 }

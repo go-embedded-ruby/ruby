@@ -91,6 +91,8 @@ func (l *Lexer) next() token.Token {
 		return l.lexIdent(spaceBefore, line, col)
 	case c == '"':
 		return l.lexString(spaceBefore, line, col)
+	case c == '@':
+		return l.lexIvar(spaceBefore, line, col)
 	}
 
 	// Operators and delimiters.
@@ -227,6 +229,19 @@ func (l *Lexer) lexIdent(spaceBefore bool, line, col int) token.Token {
 		l.state = exprBegin
 	}
 	return token.Token{Type: tt, Lit: lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+func (l *Lexer) lexIvar(spaceBefore bool, line, col int) token.Token {
+	l.advance() // '@'
+	start := l.pos
+	for isIdentPart(l.peek()) {
+		l.advance()
+	}
+	if start == l.pos { // a bare '@' with no name is illegal
+		return token.Token{Type: token.ILLEGAL, Lit: "@", Line: line, Col: col, SpaceBefore: spaceBefore}
+	}
+	l.state = exprEnd
+	return token.Token{Type: token.IVAR, Lit: "@" + string(l.src[start:l.pos]), Line: line, Col: col, SpaceBefore: spaceBefore}
 }
 
 func (l *Lexer) lexString(spaceBefore bool, line, col int) token.Token {

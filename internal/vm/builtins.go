@@ -6,15 +6,65 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// registerBuiltins installs the Phase 0 Kernel methods. Phase 1 moves these
-// onto the Kernel module in the real object model.
-func (vm *VM) registerBuiltins() {
-	vm.builtins["puts"] = builtinPuts
-	vm.builtins["print"] = builtinPrint
-	vm.builtins["p"] = builtinP
+// bootstrap builds the base class hierarchy and installs the Phase 1 kernel.
+// Kernel methods live on Object so every value answers them.
+func (vm *VM) bootstrap() {
+	vm.cBasicObject = newClass("BasicObject", nil)
+	vm.cObject = newClass("Object", vm.cBasicObject)
+	vm.cModule = newClass("Module", vm.cObject)
+	vm.cClass = newClass("Class", vm.cModule)
+	vm.cInteger = newClass("Integer", vm.cObject)
+	vm.cFloat = newClass("Float", vm.cObject)
+	vm.cString = newClass("String", vm.cObject)
+	vm.cTrueClass = newClass("TrueClass", vm.cObject)
+	vm.cFalseClass = newClass("FalseClass", vm.cObject)
+	vm.cNilClass = newClass("NilClass", vm.cObject)
+
+	for _, c := range []*RClass{
+		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
+		vm.cFloat, vm.cString, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
+	} {
+		vm.consts[c.name] = c
+	}
+
+	// Kernel (on Object).
+	vm.cObject.define("puts", nativePuts)
+	vm.cObject.define("print", nativePrint)
+	vm.cObject.define("p", nativeP)
+	vm.cObject.define("class", func(vm *VM, self object.Value, _ []object.Value) object.Value {
+		return vm.classOf(self)
+	})
+	vm.cObject.define("to_s", func(_ *VM, self object.Value, _ []object.Value) object.Value {
+		return object.String(self.ToS())
+	})
+	vm.cObject.define("inspect", func(_ *VM, self object.Value, _ []object.Value) object.Value {
+		return object.String(self.Inspect())
+	})
+	vm.cObject.define("nil?", func(_ *VM, self object.Value, _ []object.Value) object.Value {
+		_, isNil := self.(object.Nil)
+		return object.Bool(isNil)
+	})
+	vm.cObject.define("initialize", func(_ *VM, _ object.Value, _ []object.Value) object.Value {
+		return object.NilV
+	})
+	vm.cObject.define("method_missing", func(vm *VM, self object.Value, args []object.Value) object.Value {
+		name := args[0].ToS()
+		return raise("NoMethodError", "undefined method '%s' for %s", name, vm.classOf(self).name)
+	})
+
+	// Class.
+	vm.cClass.define("new", nativeNew)
 }
 
-func builtinPuts(vm *VM, _ object.Value, args []object.Value) object.Value {
+// nativeNew allocates an instance of the receiver class and runs initialize.
+func nativeNew(vm *VM, self object.Value, args []object.Value) object.Value {
+	class := self.(*RClass)
+	obj := &RObject{class: class, ivars: map[string]object.Value{}}
+	vm.send(obj, "initialize", args)
+	return obj
+}
+
+func nativePuts(vm *VM, _ object.Value, args []object.Value) object.Value {
 	if len(args) == 0 {
 		fmt.Fprintln(vm.out)
 		return object.NilV
@@ -25,14 +75,14 @@ func builtinPuts(vm *VM, _ object.Value, args []object.Value) object.Value {
 	return object.NilV
 }
 
-func builtinPrint(vm *VM, _ object.Value, args []object.Value) object.Value {
+func nativePrint(vm *VM, _ object.Value, args []object.Value) object.Value {
 	for _, a := range args {
 		fmt.Fprint(vm.out, a.ToS())
 	}
 	return object.NilV
 }
 
-func builtinP(vm *VM, _ object.Value, args []object.Value) object.Value {
+func nativeP(vm *VM, _ object.Value, args []object.Value) object.Value {
 	for _, a := range args {
 		fmt.Fprintln(vm.out, a.Inspect())
 	}
@@ -42,7 +92,6 @@ func builtinP(vm *VM, _ object.Value, args []object.Value) object.Value {
 	case 1:
 		return args[0]
 	default:
-		// Ruby returns the argument array here; arrays arrive in Phase 2.
-		return object.NilV
+		return object.NilV // Ruby returns the args array; arrays arrive in Phase 2
 	}
 }

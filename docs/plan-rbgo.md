@@ -331,11 +331,21 @@ Lexer+parser+compiler+VM for a tiny subset: integers, arithmetic, locals,
 chain exists (thin). Also shipped: floats, `unless`/`until`, statement modifiers,
 floor division, `print`/`p`, ~92% coverage (object 100%), MRI differential tests.
 
-### Phase 1 — Object model & dispatch
-Classes, modules, method tables, `self`, ivars, `new`/`initialize`, `include`,
-`send`, `respond_to?`, `method_missing`, singleton classes, blocks & `yield`,
-`Proc`/`lambda`. Generalise the Phase 0 arithmetic fast paths into `send`.
-**Exit:** real OO code; `map(&:foo)`; blocks.
+### Phase 1 — Object model & dispatch — ✅ DONE (core)
+Live object model: `RClass`/`RObject`/`Method` with **mutable per-class method
+tables**, dynamic dispatch (`send`) walking the ancestor chain, **classes with
+inheritance** (`class … < …`), `@ivars`, `new`/`initialize`, constants, and
+**user-overridable `method_missing`** (default raises `NoMethodError`). Calls are
+now receiver-aware `OpSend`; top-level `def` defines on `Object`. Base hierarchy:
+BasicObject→Object→{Module→Class}, plus Integer/Float/String/True/False/Nil.
+Kernel on Object: `puts`/`print`/`p`/`class`/`to_s`/`inspect`/`nil?`. 100%
+coverage, CI green on 6 arches.
+**Still to come in Phase 1:** blocks & `yield`, `Proc`/`lambda`, modules &
+`include`, singleton classes, `super`, `respond_to?`, and routing the arithmetic
+fast paths through `send`. (`method_missing` currently receives the name as a
+String; becomes a Symbol with Phase 2.)
+**Exit (met for core):** define classes, subclass, instantiate, call methods,
+use ivars, override `method_missing`.
 
 ### Phase 2 — Go core types + Ruby mixins
 Integer (bignum), Float, **String (bytes+encoding)**, Symbol, Array, **ordered
