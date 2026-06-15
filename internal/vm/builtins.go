@@ -429,6 +429,9 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.runMatch(strMatchRegexp(args[0]), strOf(self))
 	})
+	vm.cString.define("scan", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.scan(scanRegexp(args[0]), strOf(self), self, blk)
+	})
 	vm.cString.define("sub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.String(strings.Replace(strOf(self), strArg(args[0]), strArg(args[1]), 1))
 	})

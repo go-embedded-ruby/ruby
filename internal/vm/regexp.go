@@ -160,6 +160,102 @@ func byteToChar(s string, byteOff int) int {
 	return utf8.RuneCountInString(s[:byteOff])
 }
 
+// scanRegexp coerces the argument of String#scan into a Regexp: a Regexp passes
+// through; a String is matched literally (its metacharacters are escaped, as
+// Ruby does); anything else raises TypeError.
+func scanRegexp(v object.Value) *Regexp {
+	switch x := v.(type) {
+	case *Regexp:
+		return x
+	case object.String:
+		// The escaped literal is always a well-formed pattern, so compilation
+		// cannot fail here (the engine even accepts raw, non-UTF-8 bytes).
+		src := regexpEscapeLiteral(string(x))
+		re, _ := onig.Compile(src)
+		return &Regexp{re: re, source: src}
+	default:
+		raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
+		return nil
+	}
+}
+
+// regexpEscapeLiteral backslash-escapes the regexp metacharacters in s so it
+// matches literally. Only the operators special at top level are escaped (the
+// engine rejects superfluous escapes such as \-); control and other bytes are
+// emitted verbatim, which the byte-oriented engine matches literally.
+func regexpEscapeLiteral(s string) string {
+	const meta = `.*+?()[]{}|^$\`
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if strings.IndexByte(meta, c) >= 0 {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// scan implements String#scan: it finds every non-overlapping match of re in
+// subject left to right. With no capture groups each result element is the
+// whole match; with one or more groups each element is the array of that
+// match's captures (nil for a non-participating group). When blk is non-nil
+// each element is yielded and the receiver string is returned; otherwise the
+// elements are collected into an Array.
+//
+// After an empty match the scan advances by one character (Ruby semantics) so
+// it terminates; a non-empty match advances past its end.
+func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) object.Value {
+	var results []object.Value
+	pos := 0
+	for pos <= len(subject) {
+		md := re.re.Match(subject[pos:])
+		if md == nil {
+			break
+		}
+		elem := scanElement(md)
+		if blk != nil {
+			vm.callBlock(blk, []object.Value{elem})
+		} else {
+			results = append(results, elem)
+		}
+		matchEnd := md.End(0) // byte offset within subject[pos:]
+		if matchEnd == md.Begin(0) {
+			// Empty match: emit here, then step one character forward.
+			pos += matchEnd
+			if pos >= len(subject) {
+				break
+			}
+			_, w := utf8.DecodeRuneInString(subject[pos:])
+			pos += w
+		} else {
+			pos += matchEnd
+		}
+	}
+	if blk != nil {
+		return self
+	}
+	return &object.Array{Elems: results}
+}
+
+// scanElement builds one String#scan result element from a match: the whole
+// match (no groups) or the array of captures (one or more groups).
+func scanElement(md *onig.MatchData) object.Value {
+	n := md.NGroups()
+	if n == 0 {
+		return object.String(md.Str(0))
+	}
+	caps := make([]object.Value, n)
+	for i := 1; i <= n; i++ {
+		if md.Begin(i) < 0 {
+			caps[i-1] = object.NilV
+		} else {
+			caps[i-1] = object.String(md.Str(i))
+		}
+	}
+	return &object.Array{Elems: caps}
+}
+
 // namedGroups returns the names of (?<name>…) capture groups in source, in
 // order of appearance (duplicates kept; resolution to indices is delegated to
 // the engine). Escaped parens and the (?<=…)/(?<!…) look-behind forms are
