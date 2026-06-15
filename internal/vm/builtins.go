@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -300,6 +301,120 @@ func (vm *VM) bootstrap() {
 			out[i] = vm.callBlock(blk, []object.Value{e})
 		}
 		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("reverse", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		out := make([]object.Value, len(a.Elems))
+		for i, e := range a.Elems {
+			out[len(a.Elems)-1-i] = e
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("uniq", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		var out []object.Value
+		for _, e := range self.(*object.Array).Elems {
+			dup := false
+			for _, k := range out {
+				if valueEqual(e, k) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				out = append(out, e)
+			}
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("compact", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		var out []object.Value
+		for _, e := range self.(*object.Array).Elems {
+			if _, isNil := e.(object.Nil); !isNil {
+				out = append(out, e)
+			}
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("flatten", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Array{Elems: flattenArray(self.(*object.Array))}
+	})
+	vm.cArray.define("join", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		sep := ""
+		if len(args) > 0 {
+			sep = strArg(args[0])
+		}
+		return object.String(joinArray(self.(*object.Array), sep))
+	})
+	vm.cArray.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		for i, e := range self.(*object.Array).Elems {
+			if valueEqual(e, args[0]) {
+				return object.Integer(i)
+			}
+		}
+		return object.NilV
+	})
+	vm.cArray.define("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		n := int(intArg(args[0]))
+		if n < 0 {
+			raise("ArgumentError", "attempt to take negative size")
+		}
+		if n > len(a.Elems) {
+			n = len(a.Elems)
+		}
+		out := make([]object.Value, n)
+		copy(out, a.Elems[:n])
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		n := int(intArg(args[0]))
+		if n < 0 {
+			raise("ArgumentError", "attempt to drop negative size")
+		}
+		if n > len(a.Elems) {
+			n = len(a.Elems)
+		}
+		out := make([]object.Value, len(a.Elems)-n)
+		copy(out, a.Elems[n:])
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("sort", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		out := make([]object.Value, len(a.Elems))
+		copy(out, a.Elems)
+		sort.SliceStable(out, func(i, j int) bool { return vm.spaceship(out[i], out[j]) < 0 })
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("sort_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (sort_by)")
+		}
+		a := self.(*object.Array)
+		out := make([]object.Value, len(a.Elems))
+		copy(out, a.Elems)
+		keys := make([]object.Value, len(out))
+		for i, e := range out {
+			keys[i] = vm.callBlock(blk, []object.Value{e})
+		}
+		sort.SliceStable(out, func(i, j int) bool { return vm.spaceship(keys[i], keys[j]) < 0 })
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("min_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		return vm.arrayByExtreme(self.(*object.Array), blk, "min_by", -1)
+	})
+	vm.cArray.define("max_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		return vm.arrayByExtreme(self.(*object.Array), blk, "max_by", 1)
+	})
+	vm.cArray.define("each_with_object", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each_with_object)")
+		}
+		memo := args[0]
+		for _, e := range self.(*object.Array).Elems {
+			vm.callBlock(blk, []object.Value{e, memo})
+		}
+		return memo
 	})
 
 	// Hash.
@@ -895,6 +1010,77 @@ func strArg(v object.Value) string {
 // pair (matching Ruby).
 func hashPair(k, v object.Value) *object.Array {
 	return &object.Array{Elems: []object.Value{k, v}}
+}
+
+// spaceship compares two values via their <=> method, raising ArgumentError if
+// they are incomparable (a nil result).
+func (vm *VM) spaceship(a, b object.Value) int {
+	r := vm.send(a, "<=>", []object.Value{b}, nil)
+	n, ok := r.(object.Integer)
+	if !ok {
+		raise("ArgumentError", "comparison of %s with %s failed", vm.classOf(a).name, vm.classOf(b).name)
+	}
+	return int(n)
+}
+
+// arrayByExtreme implements min_by/max_by: the element whose block key is
+// smallest (want=-1) or largest (want=1). nil for an empty array.
+func (vm *VM) arrayByExtreme(a *object.Array, blk *Proc, name string, want int) object.Value {
+	if blk == nil {
+		raise("LocalJumpError", "no block given (%s)", name)
+	}
+	if len(a.Elems) == 0 {
+		return object.NilV
+	}
+	best := a.Elems[0]
+	bestKey := vm.callBlock(blk, []object.Value{best})
+	for _, e := range a.Elems[1:] {
+		k := vm.callBlock(blk, []object.Value{e})
+		if sign(vm.spaceship(k, bestKey)) == want {
+			best, bestKey = e, k
+		}
+	}
+	return best
+}
+
+func sign(n int) int {
+	switch {
+	case n < 0:
+		return -1
+	case n > 0:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// flattenArray recursively flattens nested arrays into one slice.
+func flattenArray(a *object.Array) []object.Value {
+	var out []object.Value
+	for _, e := range a.Elems {
+		if sub, ok := e.(*object.Array); ok {
+			out = append(out, flattenArray(sub)...)
+		} else {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// joinArray renders an array as a string, recursively joining nested arrays.
+func joinArray(a *object.Array, sep string) string {
+	var b strings.Builder
+	for i, e := range a.Elems {
+		if i > 0 {
+			b.WriteString(sep)
+		}
+		if sub, ok := e.(*object.Array); ok {
+			b.WriteString(joinArray(sub, sep))
+		} else {
+			b.WriteString(e.ToS())
+		}
+	}
+	return b.String()
 }
 
 // absInt is the absolute value of an int64.
