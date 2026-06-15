@@ -398,7 +398,10 @@ start+len, Range) — rune-aware where it matters. Mutating forms and regexp
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
 `to_f`/`to_i`/`to_int`/`ceil`/`floor`/`round`/`nan?`/`finite?`/`infinite?`. The
 prelude mixes **Comparable into Integer, Float, and String**, so `between?`
-/`clamp` work on them.
+/`clamp` work on them, and **Enumerable into Array and Range**, so both inherit
+`select`/`reject`/`find`/`reduce`/`sum`/`any?`/`all?`/`none?`/`each_with_index`
+on top of their native `each` (native methods win where both exist; Hash awaits
+block auto-splat for its `[k, v]` pairs).
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
