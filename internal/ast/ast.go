@@ -186,6 +186,9 @@ type WhenClause struct {
 	Body  []Node
 }
 
+// Retry restarts the enclosing begin body from inside a rescue clause.
+type Retry struct{}
+
 // Begin is `begin BODY (rescue …)* [else …] [ensure …] end`.
 type Begin struct {
 	Body       []Node
@@ -235,3 +238,4 @@ func (*OpAssign) node()   {}
 func (*Begin) node()      {}
 func (*StrInterp) node()  {}
 func (*Case) node()       {}
+func (*Retry) node()      {}

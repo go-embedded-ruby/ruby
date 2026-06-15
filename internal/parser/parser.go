@@ -166,6 +166,9 @@ func (p *Parser) parseStatement() ast.Node {
 		return p.applyModifiers(p.parseBreak())
 	case token.NEXT:
 		return p.applyModifiers(p.parseNext())
+	case token.RETRY:
+		p.advance()
+		return p.applyModifiers(&ast.Retry{})
 	default:
 		return p.applyModifiers(p.parseExprOrAssign())
 	}

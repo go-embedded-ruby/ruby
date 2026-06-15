@@ -124,7 +124,8 @@ func (b *builder) build() *bytecode.ISeq {
 
 // Compiler walks the AST, maintaining a stack of builders.
 type Compiler struct {
-	ctxs []*loopCtx // innermost-last stack of break/next targets
+	ctxs         []*loopCtx // innermost-last stack of break/next targets
+	retryTargets []int      // innermost-last stack of begin-body PCs for `retry`
 	stack []*builder
 }
 
@@ -238,6 +239,11 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileBegin(v)
 	case *ast.Case:
 		c.compileCase(v)
+	case *ast.Retry:
+		if len(c.retryTargets) == 0 {
+			c.fail("Invalid retry")
+		}
+		b.emit(bytecode.OpJump, c.retryTargets[len(c.retryTargets)-1], 0)
 	case *ast.OpAssign:
 		// Allocate the slot before the read so a fresh `x ||= v` sees nil
 		// rather than failing to resolve.
@@ -605,6 +611,7 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 	}
 	done := []int{b.emit(bytecode.OpJump, 0, 0)}
 	b.patch(h, b.here()) // RESCUE: the exception object is on the stack
+	c.retryTargets = append(c.retryTargets, h) // `retry` re-enters the begin body
 	for _, clause := range v.Rescues {
 		var matched []int
 		if len(clause.Classes) == 0 {
@@ -636,6 +643,7 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 		done = append(done, b.emit(bytecode.OpJump, 0, 0))
 		b.patch(skip, b.here())
 	}
+	c.retryTargets = c.retryTargets[:len(c.retryTargets)-1]
 	b.emit(bytecode.OpReThrow, 0, 0) // no clause matched
 	for _, d := range done {
 		b.patch(d, b.here())
