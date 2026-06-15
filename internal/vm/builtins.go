@@ -180,6 +180,10 @@ func (vm *VM) bootstrap() {
 	// Integer/Float, strings lexically, and a mismatched type yields nil.
 	vm.cInteger.define("<=>", spaceshipNumeric)
 	vm.cFloat.define("<=>", spaceshipNumeric)
+	vm.cInteger.define("**", powNumeric)
+	vm.cInteger.define("pow", powNumeric)
+	vm.cFloat.define("**", powNumeric)
+	vm.cFloat.define("pow", powNumeric)
 	vm.cString.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(object.String)
 		b, ok := args[0].(object.String)
@@ -1479,6 +1483,30 @@ func makePad(pad string, n int) string {
 		out[i] = runes[i%len(runes)]
 	}
 	return string(out)
+}
+
+// powNumeric implements ** / pow: integer base and non-negative integer
+// exponent stay integer; a negative integer exponent or any float yields a
+// float (no Rational in this phase).
+func powNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	if bi, ok := self.(object.Integer); ok {
+		if ei, ok := args[0].(object.Integer); ok {
+			if ei < 0 {
+				return object.Float(math.Pow(float64(bi), float64(ei)))
+			}
+			res := int64(1)
+			for i := int64(0); i < int64(ei); i++ {
+				res *= int64(bi)
+			}
+			return object.Integer(res)
+		}
+	}
+	a, _ := toFloat(self)
+	b, ok := toFloat(args[0])
+	if !ok {
+		raise("TypeError", "%s can't be coerced for **", args[0].Inspect())
+	}
+	return object.Float(math.Pow(a, b))
 }
 
 // absInt is the absolute value of an int64.

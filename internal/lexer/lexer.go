@@ -120,6 +120,11 @@ func (l *Lexer) next() token.Token {
 		l.state = exprBegin
 		return mk(token.MINUS, "-")
 	case '*':
+		if l.peek() == '*' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.POW, "**")
+		}
 		if l.peek() == '=' {
 			l.advance()
 			l.state = exprBegin

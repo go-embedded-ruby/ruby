@@ -564,6 +564,8 @@ func binBP(tt token.Type) int {
 		return 30
 	case token.STAR, token.SLASH, token.PERCENT:
 		return 40
+	case token.POW:
+		return 50
 	}
 	return 0
 }
@@ -576,7 +578,11 @@ func (p *Parser) parseBinary(minBP int) ast.Node {
 			return left
 		}
 		op := p.advance().Lit
-		right := p.parseBinary(bp) // left-associative: same-precedence stops here
+		rbp := bp
+		if op == "**" { // exponentiation is right-associative
+			rbp = bp - 1
+		}
+		right := p.parseBinary(rbp)
 		left = &ast.BinaryExpr{Op: op, Left: left, Right: right}
 	}
 }

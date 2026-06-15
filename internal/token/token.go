@@ -58,6 +58,7 @@ const (
 	PLUS
 	MINUS
 	STAR
+	POW // **
 	SLASH
 	PERCENT
 	ASSIGN
@@ -98,7 +99,7 @@ var typeNames = map[Type]string{
 	UNTIL: "until", RETURN: "return", BREAK: "break", NEXT: "next", BEGIN: "begin", RESCUE: "rescue", ENSURE: "ensure", CASE: "case", WHEN: "when", RETRY: "retry",
 	THEN: "then", DO: "do", TRUE: "true", FALSE: "false", NIL: "nil", SELF: "self",
 	SUPER: "super", YIELD: "yield",
-	PLUS: "+", MINUS: "-", STAR: "*", SLASH: "/", PERCENT: "%", ASSIGN: "=",
+	PLUS: "+", MINUS: "-", STAR: "*", POW: "**", SLASH: "/", PERCENT: "%", ASSIGN: "=",
 	EQ: "==", EQQ: "===", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
 	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=", QUESTION: "?", COLON: ":",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
