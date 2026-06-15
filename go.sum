@@ -1,2 +1,2 @@
-github.com/go-onigmo/regexp v0.0.0-20260615205117-42bb68ca0815 h1:r08p7GCTH4+ndd3VshiSq/aqpHhekKtG0NVVOPPWkXc=
-github.com/go-onigmo/regexp v0.0.0-20260615205117-42bb68ca0815/go.mod h1:wTr40dRA2FxVeYniivGngyZUR8mzgiDPNT6GNMFwa8I=
+github.com/go-onigmo/regexp v0.0.0-20260615221512-b6bfa2d3a931 h1:j5y/wSdFis0poMunT0A22TjD9xHDBGJHScpkpoSLwWM=
+github.com/go-onigmo/regexp v0.0.0-20260615221512-b6bfa2d3a931/go.mod h1:wTr40dRA2FxVeYniivGngyZUR8mzgiDPNT6GNMFwa8I=

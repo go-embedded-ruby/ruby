@@ -519,9 +519,11 @@ Run upstream suites.
 `MatchData#begin`/`#end` and `=~` report **character** offsets; the bridge
 converts (`byteToChar`). Matched substrings are representation-independent.
 Differential-tested against MRI (Ruby 4.0.5): offset-exact on ASCII, substring
-comparison for multibyte. The engine is currently **byte-oriented** (a bare `.`
-matches one byte, not one character), so multibyte `.`-class patterns are out of
-scope until go-onigmo gains UTF-8 character classes.
+comparison for multibyte. Since go-onigmo's encoding-aware cursor (engine
+`b6bfa2d`), a bare `.` and the byte-oriented classes advance by a whole UTF-8
+**character** in the default UTF-8 mode, so `/./` matches `é` and
+`"café".scan(/./)` yields four characters — matching MRI. (Literal multi-byte
+*class members* like `[é]`/`[à-ï]` are the remaining engine-side item.)
 
 **Deferred:** the `$~`/`$1`.. match globals, `Regexp.new` from a string, the
 `(?'name')` named-group spelling (unsupported by the engine), and the
