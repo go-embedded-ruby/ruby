@@ -367,11 +367,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					if in.C > 0 { // a literal block: capture this frame's env, self, block
 						blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
 					}
-					if blk != nil {
-						push(vm.sendCatchBreak(recv, iseq.Names[in.A], callArgs, blk))
-					} else {
-						push(vm.send(recv, iseq.Names[in.A], callArgs, nil))
-					}
+					push(vm.dispatchSend(recv, iseq.Names[in.A], callArgs, blk))
+				case bytecode.OpSendBlockArg:
+					blockVal := pop()
+					argc := in.B
+					callArgs := make([]object.Value, argc)
+					copy(callArgs, stack[len(stack)-argc:])
+					stack = stack[:len(stack)-argc]
+					recv := pop()
+					push(vm.dispatchSend(recv, iseq.Names[in.A], callArgs, vm.toBlock(blockVal)))
 				case bytecode.OpDefineMethod:
 					definee.methods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
 					push(object.NilV)
@@ -437,11 +441,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					if in.C > 0 {
 						blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
 					}
-					if blk != nil {
-						push(vm.sendCatchBreak(recv, iseq.Names[in.A], argsArr.Elems, blk))
-					} else {
-						push(vm.send(recv, iseq.Names[in.A], argsArr.Elems, nil))
-					}
+					push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
+				case bytecode.OpSendArrayBlockArg:
+					blockVal := pop()
+					argsArr := pop().(*object.Array)
+					recv := pop()
+					push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, vm.toBlock(blockVal)))
 				default:
 					raise("VMError", "unknown opcode %s", in.Op)
 				}

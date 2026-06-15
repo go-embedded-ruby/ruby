@@ -72,6 +72,8 @@ const (
 	OpKwGiven      // A = keyword-param index; pushes true if that keyword was supplied
 	OpHashSetPair  // stack acc,k,v → acc with k→v set (incremental hash build)
 	OpHashMerge    // stack acc,other → acc with other (a Hash) merged in (** splat)
+	OpSendBlockArg // like OpSend but a &block-pass value sits on top of the args
+	OpSendArrayBlockArg // like OpSendArray with a &block-pass value on top
 )
 
 var opNames = map[Op]string{
@@ -90,6 +92,7 @@ var opNames = map[Op]string{
 	OpPushHandler: "push_handler", OpPopHandler: "pop_handler", OpReThrow: "rethrow",
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
+	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
 }
 
 func (o Op) String() string {

@@ -398,18 +398,38 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	} else {
 		b.emit(bytecode.OpPushSelf, 0, 0) // implicit receiver: self
 	}
-	if hasSplat(v.Args) { // dynamic argument count: build an array and splat-send
-		c.compileSplatItems(v.Args)
+	// A trailing `&expr` block-pass is carried as the last arg; pull it out so
+	// the ordinary args compile cleanly and the block value lands on top.
+	args := v.Args
+	var blockPass ast.Node
+	if n := len(args); n > 0 {
+		if bp, ok := args[n-1].(*ast.BlockPass); ok {
+			blockPass = bp.Value
+			args = args[:n-1]
+		}
+	}
+	if hasSplat(args) { // dynamic argument count: build an array and splat-send
+		c.compileSplatItems(args)
+		if blockPass != nil {
+			c.compileNode(blockPass)
+			b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+			return
+		}
 		at := b.emit(bytecode.OpSendArray, b.addName(v.Name), 0)
 		if v.Block != nil {
 			b.insns[at].C = c.compileBlock(v.Block) + 1
 		}
 		return
 	}
-	for _, a := range v.Args {
+	for _, a := range args {
 		c.compileNode(a)
 	}
-	at := b.emit(bytecode.OpSend, b.addName(v.Name), len(v.Args))
+	if blockPass != nil {
+		c.compileNode(blockPass)
+		b.emit(bytecode.OpSendBlockArg, b.addName(v.Name), len(args))
+		return
+	}
+	at := b.emit(bytecode.OpSend, b.addName(v.Name), len(args))
 	if v.Block != nil {
 		b.insns[at].C = c.compileBlock(v.Block) + 1 // C-1 indexes Children
 	}

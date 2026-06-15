@@ -38,6 +38,10 @@ type Proc struct {
 	// reaches the enclosing method's block, which is what lets Enumerable
 	// methods iterate via `each { ... yield ... }`.
 	block *Proc
+	// native, when non-nil, makes this a synthesized Proc (e.g. Symbol#to_proc)
+	// whose body is Go rather than an ISeq; nativeArity backs Proc#arity for it.
+	native      func(vm *VM, args []object.Value) object.Value
+	nativeArity int
 }
 
 func (p *Proc) ToS() string     { return "#<Proc>" }
@@ -167,7 +171,46 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 
 // callBlock invokes a captured block with args. Block arity is lenient: extra
 // arguments are dropped and missing ones default to nil (Ruby semantics).
+// arityVal backs Proc#arity: a synthesized proc reports nativeArity; an ISeq
+// block reports its parameter count.
+func (p *Proc) arityVal() int {
+	if p.native != nil {
+		return p.nativeArity
+	}
+	return len(p.iseq.Params)
+}
+
+// toBlock coerces a &block-pass value into a *Proc: nil for nil, the Proc
+// itself, else whatever its to_proc returns (which must be a Proc).
+func (vm *VM) toBlock(v object.Value) *Proc {
+	switch p := v.(type) {
+	case object.Nil:
+		return nil
+	case *Proc:
+		return p
+	default:
+		conv := vm.send(v, "to_proc", nil, nil)
+		cp, ok := conv.(*Proc)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(v).name)
+		}
+		return cp
+	}
+}
+
+// dispatchSend sends, routing a literal/passed block through sendCatchBreak so a
+// `break` unwinds to the call site.
+func (vm *VM) dispatchSend(recv object.Value, name string, args []object.Value, blk *Proc) object.Value {
+	if blk != nil {
+		return vm.sendCatchBreak(recv, name, args, blk)
+	}
+	return vm.send(recv, name, args, nil)
+}
+
 func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
+	if p.native != nil {
+		return p.native(vm, args)
+	}
 	np := len(p.iseq.Params)
 	// Auto-splat: a block with multiple parameters called with a single Array
 	// destructures it (Ruby semantics), so `{ |a, b| }` binds element-wise over

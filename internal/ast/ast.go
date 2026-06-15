@@ -205,6 +205,10 @@ type Retry struct{}
 // into the surrounding argument list / array.
 type SplatArg struct{ Value Node }
 
+// BlockPass is a `&expr` argument: its value is coerced to a Proc (via to_proc)
+// and passed as the call's block. It only ever appears last in a Call's args.
+type BlockPass struct{ Value Node }
+
 // Begin is `begin BODY (rescue …)* [else …] [ensure …] end`.
 type Begin struct {
 	Body       []Node
@@ -256,3 +260,4 @@ func (*StrInterp) node()  {}
 func (*Case) node()       {}
 func (*Retry) node()      {}
 func (*SplatArg) node()   {}
+func (*BlockPass) node()  {}

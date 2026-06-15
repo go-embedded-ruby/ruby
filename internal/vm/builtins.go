@@ -47,7 +47,14 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("[]", procCall)
 	vm.cProc.define("yield", procCall)
 	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(self.(*Proc).iseq.Params))
+		return object.Integer(self.(*Proc).arityVal())
+	})
+	vm.cSymbol.define("to_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		name := string(self.(object.Symbol))
+		// :sym.to_proc is { |recv, *rest| recv.sym(*rest) } — arity -2 as in MRI.
+		return &Proc{nativeArity: -2, native: func(vm *VM, args []object.Value) object.Value {
+			return vm.send(args[0], name, args[1:], nil)
+		}}
 	})
 
 	// Exception hierarchy. Each is registered as a constant so it can be raised

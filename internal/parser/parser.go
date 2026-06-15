@@ -1008,6 +1008,10 @@ func (p *Parser) parseCallArgs(until token.Type) []ast.Node {
 // parseOneCallArg parses a single call argument, routing `*splat` and positional
 // expressions into args, and `label: value` / `expr => value` pairs into kw.
 func (p *Parser) parseOneCallArg(args *[]ast.Node, kw **ast.HashLit) {
+	if p.accept(token.AMPER) { // &expr — block-pass (coerced to a Proc)
+		*args = append(*args, &ast.BlockPass{Value: p.parseExprOrAssign()})
+		return
+	}
 	if p.accept(token.POW) { // **expr — double-splat into the keyword hash
 		p.addKwPair(kw, nil, p.parseExprOrAssign())
 		return
