@@ -432,8 +432,13 @@ Enumerator + `loop` + `lazy`**.
 RuntimeError + the built-in error classes with correct superclasses), Exception
 `#initialize`/`#message`/`#to_s`, `Object#is_a?`/`#kind_of?`/`#instance_of?`, and
 `Kernel#raise` (string → RuntimeError, class → instantiated, instance →
-re-raised, class + message). `RubyError` carries the Ruby exception object so
-`begin`/`rescue`/`ensure` (next) can bind and match it.
+re-raised, class + message). **`begin`/`rescue`/`ensure`/`else`** via a
+re-entrant exec loop with a per-frame handler stack (`OpPushHandler`/
+`OpPopHandler`, a deferred recover that resumes at the rescue dispatch and lets
+non-exception panics through); rescue matches by class with `is_a?` (bare =
+StandardError), class lists, `=> var` binding, and `OpReThrow` on no match;
+`else` on the clean path, `ensure` on both normal and propagating paths;
+internal raises (`1/0`, NoMethodError, …) are rescuable; bare `raise` re-raises.
 
 ### Phase 4 — Full metaprogramming
 `define_method`, `instance_eval`/`instance_exec`, `class_eval`, constant
