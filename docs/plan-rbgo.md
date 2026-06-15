@@ -371,6 +371,17 @@ closing the Phase 1 String compromise). **Array** — literals `[…]`, indexing
 raising, and `cover?` works on numeric and string ranges), `min`/`max`,
 `size`/`count`, `to_a`/`each`/`map`, and `==`. Integer ranges iterate; Float
 ranges raise `TypeError` ("can't iterate from Float") as in MRI.
+**Comparable & Enumerable** — written *in embedded Ruby* via a go:embed'd
+prelude that `VM.New` runs after the native bootstrap (the org's USP: each is
+built on a single primitive — `<=>` and `each`). Enabling machinery: the `<=>`
+and `<<` operators; operator method definitions (`def <=>`, `def ==`, `def []`
+/`[]=`, …); comparison operators dispatch as methods when the receiver isn't a
+built-in ordered type (numeric/string keep the inline fast path); native `<=>`
+on Integer/Float/String/Object and a default identity `Object#==`; and blocks
+made transparent to `yield` (a block reaches its enclosing method's block) so
+`each { … yield … }` works. Comparable gives `<`/`<=`/`>`/`>=`/`==`/`between?`
+/`clamp`; Enumerable gives map/select/reject/find/include?/to_a/count/sum/min
+/max/reduce/any?/all?/none?/each_with_index.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
