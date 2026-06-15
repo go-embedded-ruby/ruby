@@ -273,6 +273,66 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(strOf(self))
 	})
+	vm.cString.define("ljust", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.String(padString(strOf(self), args, 'l'))
+	})
+	vm.cString.define("rjust", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.String(padString(strOf(self), args, 'r'))
+	})
+	vm.cString.define("center", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.String(padString(strOf(self), args, 'c'))
+	})
+	vm.cString.define("tr", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		from := expandCharSet(strArg(args[0]))
+		to := expandCharSet(strArg(args[1]))
+		out := make([]byte, 0, len(strOf(self)))
+		for i := 0; i < len(strOf(self)); i++ {
+			b := strOf(self)[i]
+			if idx := byteIndex(from, b); idx >= 0 {
+				if len(to) == 0 {
+					continue // empty replacement deletes
+				}
+				if idx >= len(to) {
+					idx = len(to) - 1
+				}
+				out = append(out, to[idx])
+			} else {
+				out = append(out, b)
+			}
+		}
+		return object.String(out)
+	})
+	vm.cString.define("count", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		set := expandCharSet(strArg(args[0]))
+		n := 0
+		for i := 0; i < len(strOf(self)); i++ {
+			if byteIndex(set, strOf(self)[i]) >= 0 {
+				n++
+			}
+		}
+		return object.Integer(n)
+	})
+	vm.cString.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		set := expandCharSet(strArg(args[0]))
+		out := make([]byte, 0, len(strOf(self)))
+		for i := 0; i < len(strOf(self)); i++ {
+			if byteIndex(set, strOf(self)[i]) < 0 {
+				out = append(out, strOf(self)[i])
+			}
+		}
+		return object.String(out)
+	})
+	vm.cString.define("squeeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		str := strOf(self)
+		out := make([]byte, 0, len(str))
+		for i := 0; i < len(str); i++ {
+			if i > 0 && str[i] == str[i-1] {
+				continue
+			}
+			out = append(out, str[i])
+		}
+		return object.String(out)
+	})
 	vm.cString.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return stringIndex(strOf(self), args)
 	})
@@ -1328,6 +1388,70 @@ func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
 		}
 	}
 	return cur
+}
+
+// expandCharSet expands a tr/count/delete character set, turning `a-z` ranges
+// into their bytes (ASCII).
+func expandCharSet(s string) []byte {
+	var out []byte
+	for i := 0; i < len(s); i++ {
+		if i+2 < len(s) && s[i+1] == '-' {
+			for ch := s[i]; ch <= s[i+2]; ch++ {
+				out = append(out, ch)
+			}
+			i += 2
+		} else {
+			out = append(out, s[i])
+		}
+	}
+	return out
+}
+
+// byteIndex returns the index of b in set, or -1.
+func byteIndex(set []byte, b byte) int {
+	for i, c := range set {
+		if c == b {
+			return i
+		}
+	}
+	return -1
+}
+
+// padString implements ljust/rjust/center ('l'/'r'/'c'): pad s with the pad
+// string (default " ") to a rune width. Extra padding for center goes right.
+func padString(s string, args []object.Value, side byte) string {
+	width := int(intArg(args[0]))
+	pad := " "
+	if len(args) > 1 {
+		pad = strArg(args[1])
+	}
+	if pad == "" {
+		raise("ArgumentError", "zero width padding")
+	}
+	n := utf8.RuneCountInString(s)
+	if n >= width {
+		return s
+	}
+	total := width - n
+	switch side {
+	case 'r':
+		return makePad(pad, total) + s
+	case 'c':
+		left := total / 2
+		return makePad(pad, left) + s + makePad(pad, total-left)
+	default: // 'l'
+		return s + makePad(pad, total)
+	}
+}
+
+// makePad builds n runes from the (non-empty) pad string, repeating/truncating.
+func makePad(pad string, n int) string {
+	runes := []rune(pad)
+	out := make([]rune, n)
+	for i := 0; i < n; i++ {
+		out[i] = runes[i%len(runes)]
+	}
+	return string(out)
 }
 
 // absInt is the absolute value of an int64.
