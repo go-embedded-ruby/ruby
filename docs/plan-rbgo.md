@@ -365,6 +365,12 @@ closing the Phase 1 String compromise). **Array** — literals `[…]`, indexing
 `size`/`length`/`empty?`/`key?`/`keys`/`values`/`each`, `==`, and the **Ruby 4.0
 `Hash#inspect`** form (`{a: 1, "b" => 2}` — label form for symbol keys, spaced
 `=>` otherwise), verified against a local Ruby 4.0.5 oracle.
+**Range** — literals `1..5`/`1...5`, the `Range` class with
+`begin`/`end`/`first`/`last`/`exclude_end?`, comparison-based
+`include?`/`cover?`/`member?` (incomparable members return false rather than
+raising, and `cover?` works on numeric and string ranges), `min`/`max`,
+`size`/`count`, `to_a`/`each`/`map`, and `==`. Integer ranges iterate; Float
+ranges raise `TypeError` ("can't iterate from Float") as in MRI.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
