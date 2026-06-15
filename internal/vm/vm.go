@@ -22,6 +22,7 @@ import (
 type RubyError struct {
 	Class   string
 	Message string
+	Obj     object.Value // the Ruby exception object, when raised from Ruby (else nil)
 }
 
 func (e RubyError) Error() string { return e.Class + ": " + e.Message }
@@ -66,6 +67,7 @@ type VM struct {
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cArray, cHash, cRange                  *RClass
 	cTrueClass, cFalseClass, cNilClass     *RClass
+	cException                             *RClass
 }
 
 // New returns a VM writing program output to out.

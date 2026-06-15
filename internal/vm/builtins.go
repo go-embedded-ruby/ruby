@@ -38,6 +38,49 @@ func (vm *VM) bootstrap() {
 		vm.consts[c.name] = c
 	}
 
+	// Exception hierarchy. Each is registered as a constant so it can be raised
+	// and matched by rescue (rescue lands in a later increment).
+	exc := func(name, super string) *RClass {
+		c := newClass(name, vm.consts[super].(*RClass))
+		vm.consts[name] = c
+		return c
+	}
+	cException := newClass("Exception", vm.cObject)
+	vm.consts["Exception"] = cException
+	vm.cException = cException
+	exc("StandardError", "Exception")
+	exc("RuntimeError", "StandardError")
+	exc("ArgumentError", "StandardError")
+	exc("TypeError", "StandardError")
+	exc("NameError", "StandardError")
+	exc("NoMethodError", "NameError")
+	exc("ZeroDivisionError", "StandardError")
+	exc("RangeError", "StandardError")
+	exc("IndexError", "StandardError")
+	exc("KeyError", "IndexError")
+	exc("StopIteration", "IndexError")
+	exc("LocalJumpError", "StandardError")
+	exc("NotImplementedError", "StandardError")
+	exc("FrozenError", "RuntimeError")
+	exc("IOError", "StandardError")
+
+	// Exception instance protocol: initialize stores @message; message/to_s
+	// return it (or the class name when unset).
+	cException.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 0 {
+			self.(*RObject).ivars["@message"] = object.String(args[0].ToS())
+		}
+		return object.NilV
+	})
+	excMessage := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if m := getIvar(self, "@message"); m != object.NilV {
+			return m
+		}
+		return object.String(vm.classOf(self).name)
+	}
+	cException.define("message", excMessage)
+	cException.define("to_s", excMessage)
+
 	// Kernel (on Object).
 	vm.cObject.define("puts", nativePuts)
 	vm.cObject.define("print", nativePrint)
@@ -62,6 +105,15 @@ func (vm *VM) bootstrap() {
 		name := args[0].ToS()
 		return raise("NoMethodError", "undefined method '%s' for %s", name, vm.classOf(self).name)
 	})
+	isAFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(classIsA(vm.classOf(self), classArg(args[0])))
+	}
+	vm.cObject.define("is_a?", isAFn)
+	vm.cObject.define("kind_of?", isAFn)
+	vm.cObject.define("instance_of?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(vm.classOf(self) == classArg(args[0]))
+	})
+	vm.cObject.define("raise", nativeRaise)
 	// Default equality: object identity for instances, structural for value
 	// types (Comparable#== and user-defined == override this via dispatch).
 	vm.cObject.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -1081,6 +1133,64 @@ func joinArray(a *object.Array, sep string) string {
 		}
 	}
 	return b.String()
+}
+
+// classArg coerces an argument expected to be a class/module, else TypeError.
+func classArg(v object.Value) *RClass {
+	if c, ok := v.(*RClass); ok {
+		return c
+	}
+	raise("TypeError", "class or module required")
+	return nil
+}
+
+// classIsA reports whether class c is, inherits from, or includes target.
+func classIsA(c, target *RClass) bool {
+	for ; c != nil; c = c.super {
+		if c == target {
+			return true
+		}
+		for _, m := range c.includes {
+			if classIsA(m, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// excError builds the RubyError carrying a raised Ruby exception object.
+func (vm *VM) excError(exc object.Value) RubyError {
+	cls := vm.classOf(exc)
+	msg := cls.name
+	if m := getIvar(exc, "@message"); m != object.NilV {
+		msg = m.ToS()
+	}
+	return RubyError{Class: cls.name, Message: msg, Obj: exc}
+}
+
+// nativeRaise implements Kernel#raise: a message string (RuntimeError), an
+// exception class (instantiated), an exception instance (re-raised), or a
+// class + message pair.
+func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	switch len(args) {
+	case 0:
+		panic(vm.excError(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
+			[]object.Value{object.String("unhandled exception")}, nil)))
+	case 1:
+		switch a := args[0].(type) {
+		case object.String:
+			panic(vm.excError(vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{a}, nil)))
+		case *RClass:
+			panic(vm.excError(vm.send(a, "new", nil, nil)))
+		case *RObject:
+			panic(vm.excError(a))
+		}
+		raise("TypeError", "exception class/object expected")
+		return object.NilV
+	default:
+		panic(vm.excError(vm.send(classArg(args[0]), "new", []object.Value{args[1]}, nil)))
+	}
 }
 
 // absInt is the absolute value of an int64.
