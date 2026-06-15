@@ -54,6 +54,7 @@ type Method struct {
 	name   string
 	native NativeFn
 	iseq   *bytecode.ISeq
+	proc   *Proc // for define_method: a block-backed method body
 	owner  *RClass
 }
 
@@ -190,6 +191,11 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 	if m.native != nil {
 		return m.native(vm, self, args, blk)
 	}
+	if m.proc != nil {
+		// A define_method body runs the block with self rebound to the receiver,
+		// keeping its closure environment.
+		return vm.callBlockSelf(m.proc, self, args)
+	}
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
 }
 
@@ -232,6 +238,12 @@ func (vm *VM) dispatchSend(recv object.Value, name string, args []object.Value, 
 }
 
 func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
+	return vm.callBlockSelf(p, p.self, args)
+}
+
+// callBlockSelf is callBlock with an explicit self, used by define_method to
+// rebind the block's self to the method's receiver.
+func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) object.Value {
 	if p.native != nil {
 		return p.native(vm, args)
 	}
@@ -252,7 +264,7 @@ func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
 			bargs[i] = object.NilV
 		}
 	}
-	return vm.exec(p.iseq, p.self, bargs, vm.cObject, "", p.env, p.block, p)
+	return vm.exec(p.iseq, self, bargs, vm.cObject, "", p.env, p.block, p)
 }
 
 func getIvar(self object.Value, name string) object.Value {

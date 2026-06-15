@@ -280,6 +280,23 @@ func (vm *VM) bootstrap() {
 		defineAttrs(self.(*RClass), args, true, true)
 		return object.NilV
 	})
+	vm.cModule.define("define_method", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		body := blk
+		if body == nil {
+			if len(args) > 1 {
+				p, ok := args[1].(*Proc)
+				if !ok {
+					raise("TypeError", "wrong argument type %s (expected Proc)", classNameOf(args[1]))
+				}
+				body = p
+			} else {
+				raise("ArgumentError", "tried to create a method without a block")
+			}
+		}
+		name := args[0].ToS()
+		self.(*RClass).methods[name] = &Method{name: name, proc: body, owner: self.(*RClass)}
+		return object.Symbol(name)
+	})
 
 	// Symbol.
 	vm.cSymbol.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
