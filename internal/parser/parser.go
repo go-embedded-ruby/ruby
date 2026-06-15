@@ -456,7 +456,7 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 		rhs := p.parseExprOrAssign()
 		return &ast.IvarAssign{Name: name, Value: &ast.BinaryExpr{Op: op, Left: &ast.IvarRef{Name: name}, Right: rhs}}
 	}
-	left := p.parseRange()
+	left := p.parseTernary()
 	// Compound index assignment: recv[i] OP= v → recv[i] = recv[i] OP v.
 	if p.is(token.OPASSIGN) {
 		if call, ok := left.(*ast.Call); ok && call.Name == "[]" && call.Recv != nil {
@@ -478,6 +478,20 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 		}
 	}
 	return left
+}
+
+// parseTernary handles `cond ? then : else`, binding looser than ranges/binary
+// operators but tighter than assignment, and right-associative. It desugars to
+// an If expression.
+func (p *Parser) parseTernary() ast.Node {
+	cond := p.parseRange()
+	if !p.accept(token.QUESTION) {
+		return cond
+	}
+	then := p.parseTernary()
+	p.expect(token.COLON)
+	els := p.parseTernary()
+	return &ast.If{Cond: cond, Then: []ast.Node{then}, Else: []ast.Node{els}}
 }
 
 // parseRange handles `lo..hi` / `lo...hi`, binding looser than the binary

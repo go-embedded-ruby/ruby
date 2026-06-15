@@ -263,6 +263,12 @@ func (l *Lexer) next() token.Token {
 		}
 		l.state = exprBegin
 		return mk(token.GT, ">")
+	case '?':
+		l.state = exprBegin
+		return mk(token.QUESTION, "?")
+	case ':':
+		l.state = exprBegin
+		return mk(token.COLON, ":")
 	}
 	return mk(token.ILLEGAL, string(c))
 }
