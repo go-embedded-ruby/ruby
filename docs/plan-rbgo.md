@@ -409,6 +409,8 @@ once; `===` lexed via a new EQQ token).
 `tr`/`count`/`delete`/`squeeze` (with `a-z` range expansion).
 **`**` exponentiation** (right-associative, tighter than `*`/`/`) + Integer
 /Float `**`/`pow`.
+**Beginless/endless ranges** (`..5`, `1..`, `arr[2..]`; nil endpoints, open in
+===/cover?/include?), Array range + `start,len` slicing (shared `sliceRange`).
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
