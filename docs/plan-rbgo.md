@@ -362,9 +362,11 @@ closing the Phase 1 String compromise). **Array** — literals `[…]`, indexing
 `a[i]`/`a[i]=v` (negative indices), `length`/`size`/`push`/`first`/`last`/
 `empty?`/`include?`/`each`/`map`, element-wise `==`, and `puts` array-flattening.
 **ordered Hash** — literals `{k => v}` (insertion-ordered), `h[k]`/`h[k]=v`,
-`size`/`length`/`empty?`/`key?`/`keys`/`values`/`each`, `==`, and the **Ruby 4.0
-`Hash#inspect`** form (`{a: 1, "b" => 2}` — label form for symbol keys, spaced
-`=>` otherwise), verified against a local Ruby 4.0.5 oracle.
+`size`/`length`/`empty?`/`key?`/`keys`/`values`/`each`/`select`/`reject`, `==`,
+the **Ruby 4.0 `Hash#inspect`** form (`{a: 1, "b" => 2}` — label form for symbol
+keys, spaced `=>` otherwise), plus `merge`/`fetch`/`dig`/`values_at`/
+`transform_values`/`transform_keys`/`invert`/`to_h`/`store`/`delete`/`has_value?`
+/`each_pair`, verified against a local Ruby 4.0.5 oracle.
 **Range** — literals `1..5`/`1...5`, the `Range` class with
 `begin`/`end`/`first`/`last`/`exclude_end?`, comparison-based
 `include?`/`cover?`/`member?` (incomparable members return false rather than
