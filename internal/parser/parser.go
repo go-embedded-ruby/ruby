@@ -252,6 +252,12 @@ func (p *Parser) parseDef() ast.Node {
 		// paren-less params: def foo a, b  /  def foo a:, b: 2  /  def foo &blk
 		params, defaults, splat, kwParams, kwRest, blockParam = p.parseDefParams(token.NEWLINE)
 	}
+	// Endless method definition: def name(params) = expr (no body/end).
+	if p.accept(token.ASSIGN) {
+		body := []ast.Node{p.parseExprOrAssign()}
+		p.popScope()
+		return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, SplatIndex: splat, KwParams: kwParams, KwRest: kwRest, BlockParam: blockParam, Singleton: singleton, Body: body}
+	}
 	body := p.parseStatements(beginBodyEnd)
 	// A method body may carry rescue/ensure clauses without an explicit begin.
 	if p.is(token.RESCUE) || p.is(token.ELSE) || p.is(token.ENSURE) {
