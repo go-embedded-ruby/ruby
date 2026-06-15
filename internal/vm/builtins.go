@@ -115,6 +115,55 @@ func (vm *VM) bootstrap() {
 		return object.Bool(vm.classOf(self) == classArg(args[0]))
 	})
 	vm.cObject.define("raise", nativeRaise)
+	vm.cObject.define("Integer", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		switch v := args[0].(type) {
+		case object.Integer:
+			return v
+		case object.Float:
+			return object.Integer(int64(v))
+		case object.String:
+			base := 10
+			if len(args) > 1 {
+				base = int(intArg(args[1]))
+			}
+			n, err := strconv.ParseInt(strings.TrimSpace(string(v)), base, 64)
+			if err != nil {
+				raise("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
+			}
+			return object.Integer(n)
+		}
+		raise("TypeError", "can't convert %s into Integer", args[0].Inspect())
+		return object.NilV
+	})
+	vm.cObject.define("Float", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		switch v := args[0].(type) {
+		case object.Float:
+			return v
+		case object.Integer:
+			return object.Float(float64(v))
+		case object.String:
+			f, err := strconv.ParseFloat(strings.TrimSpace(string(v)), 64)
+			if err != nil {
+				raise("ArgumentError", "invalid value for Float(): %s", v.Inspect())
+			}
+			return object.Float(f)
+		}
+		raise("TypeError", "can't convert %s into Float", args[0].Inspect())
+		return object.NilV
+	})
+	vm.cObject.define("String", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.send(args[0], "to_s", nil, nil)
+	})
+	vm.cObject.define("Array", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		switch v := args[0].(type) {
+		case object.Nil:
+			return &object.Array{}
+		case *object.Array:
+			return v
+		default:
+			return &object.Array{Elems: []object.Value{v}}
+		}
+	})
 	vm.cObject.define("send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.send(self, args[0].ToS(), args[1:], blk)
 	})

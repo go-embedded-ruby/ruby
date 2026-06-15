@@ -812,6 +812,12 @@ func (p *Parser) parsePrimary() ast.Node {
 		return p.parseIdentExpr()
 	case token.CONST:
 		p.advance()
+		if p.is(token.LPAREN) && !p.cur().SpaceBefore { // capitalized method call, e.g. Integer("42")
+			p.advance()
+			args := p.parseCallArgs(token.RPAREN)
+			p.expect(token.RPAREN)
+			return &ast.Call{Name: t.Lit, Args: args}
+		}
 		return &ast.ConstRef{Name: t.Lit}
 	case token.IVAR:
 		p.advance()
