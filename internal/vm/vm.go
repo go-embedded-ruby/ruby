@@ -88,6 +88,7 @@ type VM struct {
 	cBasicObject, cObject, cModule, cClass *RClass
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cArray, cHash, cRange                  *RClass
+	cProc                                  *RClass
 	cTrueClass, cFalseClass, cNilClass     *RClass
 	cException                             *RClass
 	curExc                                 object.Value // most recently rescued exception (for bare `raise`)
@@ -223,6 +224,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				rest.Set(k, v)
 			}
 			env.slots[iseq.KwRestSlot] = rest
+		}
+	}
+	// &block reifies the method's block as a Proc (nil → no block given).
+	if iseq.BlockSlot >= 0 {
+		if block != nil {
+			env.slots[iseq.BlockSlot] = block
+		} else {
+			env.slots[iseq.BlockSlot] = object.NilV
 		}
 	}
 

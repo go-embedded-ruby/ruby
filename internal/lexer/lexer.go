@@ -200,6 +200,8 @@ func (l *Lexer) next() token.Token {
 			l.state = exprBegin
 			return mk(token.ANDAND, "&&")
 		}
+		l.state = exprBegin
+		return mk(token.AMPER, "&")
 	case ',':
 		l.state = exprBegin
 		return mk(token.COMMA, ",")

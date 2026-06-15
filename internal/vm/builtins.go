@@ -27,6 +27,7 @@ func (vm *VM) bootstrap() {
 	vm.cArray = newClass("Array", vm.cObject)
 	vm.cHash = newClass("Hash", vm.cObject)
 	vm.cRange = newClass("Range", vm.cObject)
+	vm.cProc = newClass("Proc", vm.cObject)
 	vm.cTrueClass = newClass("TrueClass", vm.cObject)
 	vm.cFalseClass = newClass("FalseClass", vm.cObject)
 	vm.cNilClass = newClass("NilClass", vm.cObject)
@@ -34,10 +35,20 @@ func (vm *VM) bootstrap() {
 	for _, c := range []*RClass{
 		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
 		vm.cFloat, vm.cString, vm.cSymbol, vm.cArray, vm.cHash, vm.cRange,
-		vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
+		vm.cProc, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
 	} {
 		vm.consts[c.name] = c
 	}
+
+	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.callBlock(self.(*Proc), args)
+	}
+	vm.cProc.define("call", procCall)
+	vm.cProc.define("[]", procCall)
+	vm.cProc.define("yield", procCall)
+	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(len(self.(*Proc).iseq.Params))
+	})
 
 	// Exception hierarchy. Each is registered as a constant so it can be raised
 	// and matched by rescue.

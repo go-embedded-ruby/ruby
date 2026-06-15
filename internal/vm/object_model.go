@@ -27,8 +27,8 @@ func (e *Env) ancestor(depth int) *Env {
 }
 
 // Proc is a captured block: its compiled body, the env it closes over, and the
-// self it runs against. It is passed to methods as an out-of-band block, not yet
-// reified as a first-class Ruby value (that arrives with Proc/lambda/&block).
+// self it runs against. It is also a first-class Ruby value (implements
+// object.Value), so a `&block` param can reify it and Proc#call can invoke it.
 type Proc struct {
 	iseq *bytecode.ISeq
 	env  *Env
@@ -39,6 +39,10 @@ type Proc struct {
 	// methods iterate via `each { ... yield ... }`.
 	block *Proc
 }
+
+func (p *Proc) ToS() string     { return "#<Proc>" }
+func (p *Proc) Inspect() string { return "#<Proc>" }
+func (p *Proc) Truthy() bool    { return true }
 
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
 type Method struct {
@@ -126,6 +130,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cHash
 	case *object.Range:
 		return vm.cRange
+	case *Proc:
+		return vm.cProc
 	case object.Bool:
 		if x {
 			return vm.cTrueClass

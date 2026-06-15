@@ -34,13 +34,14 @@ type builder struct {
 	kwNames     []string
 	kwRequired  []bool
 	kwRestSlot  int
+	blockSlot   int
 	children []*bytecode.ISeq
 	parent   *builder
 	isBlock  bool
 }
 
 func newBuilder(name string, params []string) *builder {
-	b := &builder{name: name, constIdx: map[object.Value]int{}, params: params, numRequired: len(params), splatIndex: -1, kwRestSlot: -1}
+	b := &builder{name: name, constIdx: map[object.Value]int{}, params: params, numRequired: len(params), splatIndex: -1, kwRestSlot: -1, blockSlot: -1}
 	for _, p := range params {
 		b.localSlot(p) // params occupy slots 0..n-1, in order
 	}
@@ -127,6 +128,7 @@ func (b *builder) build() *bytecode.ISeq {
 		KwNames:     b.kwNames,
 		KwRequired:  b.kwRequired,
 		KwRestSlot:  b.kwRestSlot,
+		BlockSlot:   b.blockSlot,
 		NumLocals: len(b.locals),
 		Children:  b.children,
 	}
@@ -771,6 +773,9 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	}
 	if v.KwRest != "" {
 		b.kwRestSlot = b.localSlot(v.KwRest)
+	}
+	if v.BlockParam != "" {
+		b.blockSlot = b.localSlot(v.BlockParam)
 	}
 	nreq := len(v.Params)
 	if v.SplatIndex >= 0 {
