@@ -115,6 +115,33 @@ func (vm *VM) bootstrap() {
 		return object.Bool(vm.classOf(self) == classArg(args[0]))
 	})
 	vm.cObject.define("raise", nativeRaise)
+	vm.cObject.define("send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(self, args[0].ToS(), args[1:], blk)
+	})
+	vm.cObject.define("public_send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(self, args[0].ToS(), args[1:], blk)
+	})
+	vm.cObject.define("respond_to?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(lookupMethod(vm.classOf(self), args[0].ToS()) != nil)
+	})
+	vm.cObject.define("itself", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cObject.define("tap", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (tap)")
+		}
+		vm.callBlock(blk, []object.Value{self})
+		return self
+	})
+	thenFn := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (then)")
+		}
+		return vm.callBlock(blk, []object.Value{self})
+	}
+	vm.cObject.define("then", thenFn)
+	vm.cObject.define("yield_self", thenFn)
 	// Default equality: object identity for instances, structural for value
 	// types (Comparable#== and user-defined == override this via dispatch).
 	vm.cObject.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
