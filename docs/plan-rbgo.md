@@ -400,8 +400,12 @@ start+len, Range) — rune-aware where it matters. Mutating forms and regexp
 prelude mixes **Comparable into Integer, Float, and String**, so `between?`
 /`clamp` work on them, and **Enumerable into Array and Range**, so both inherit
 `select`/`reject`/`find`/`reduce`/`sum`/`any?`/`all?`/`none?`/`each_with_index`
-on top of their native `each` (native methods win where both exist; Hash awaits
-block auto-splat for its `[k, v]` pairs).
+on top of their native `each` (native methods win where both exist).
+**Block auto-splat**: a multi-parameter block called with a single Array
+destructures it (`[[1,2]].each { |a,b| }`), which also makes **Hash
+Enumerable** — `Hash#each` yields a `[k, v]` pair, so map/find/count/any?/all?
+/none?/to_a operate on pairs (a one-param block sees the pair); `select`/`reject`
+stay native since they return a Hash.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
