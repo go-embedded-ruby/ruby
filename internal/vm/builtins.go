@@ -2,7 +2,10 @@ package vm
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -94,6 +97,121 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 		return object.Integer(strings.Compare(string(a), string(b)))
+	})
+
+	// String. A read-only slice of methods over the immutable Phase 2 String
+	// (byte-based; length/chars/index are rune-aware for UTF-8). Mutating forms
+	// (<<, gsub!, …) await the mutable byte+encoding representation.
+	strOf := func(self object.Value) string { return string(self.(object.String)) }
+	vm.cString.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(utf8.RuneCountInString(strOf(self)))
+	})
+	vm.cString.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(utf8.RuneCountInString(strOf(self)))
+	})
+	vm.cString.define("bytesize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(len(strOf(self)))
+	})
+	vm.cString.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(len(strOf(self)) == 0)
+	})
+	vm.cString.define("upcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(strings.ToUpper(strOf(self)))
+	})
+	vm.cString.define("downcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(strings.ToLower(strOf(self)))
+	})
+	vm.cString.define("capitalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(capitalizeStr(strOf(self)))
+	})
+	vm.cString.define("swapcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(swapcaseStr(strOf(self)))
+	})
+	vm.cString.define("reverse", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(reverseStr(strOf(self)))
+	})
+	vm.cString.define("strip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(strings.Trim(strOf(self), wsCutset))
+	})
+	vm.cString.define("lstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(strings.TrimLeft(strOf(self), wsCutset))
+	})
+	vm.cString.define("rstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(strings.TrimRight(strOf(self), wsCutset))
+	})
+	vm.cString.define("chomp", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(chompStr(strOf(self)))
+	})
+	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.String(chopStr(strOf(self)))
+	})
+	vm.cString.define("chars", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		var out []object.Value
+		for _, r := range strOf(self) {
+			out = append(out, object.String(string(r)))
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cString.define("bytes", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := strOf(self)
+		out := make([]object.Value, len(s))
+		for i := 0; i < len(s); i++ {
+			out[i] = object.Integer(s[i])
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cString.define("split", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		var parts []string
+		if len(args) == 0 {
+			parts = strings.Fields(strOf(self)) // runs of whitespace, no empties
+		} else {
+			parts = strings.Split(strOf(self), strArg(args[0]))
+		}
+		out := make([]object.Value, len(parts))
+		for i, p := range parts {
+			out[i] = object.String(p)
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cString.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(strings.Contains(strOf(self), strArg(args[0])))
+	})
+	vm.cString.define("start_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(strings.HasPrefix(strOf(self), strArg(args[0])))
+	})
+	vm.cString.define("end_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(strings.HasSuffix(strOf(self), strArg(args[0])))
+	})
+	vm.cString.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		byteIdx := strings.Index(strOf(self), strArg(args[0]))
+		if byteIdx < 0 {
+			return object.NilV
+		}
+		return object.Integer(utf8.RuneCountInString(strOf(self)[:byteIdx]))
+	})
+	vm.cString.define("sub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.String(strings.Replace(strOf(self), strArg(args[0]), strArg(args[1]), 1))
+	})
+	vm.cString.define("gsub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.String(strings.ReplaceAll(strOf(self), strArg(args[0]), strArg(args[1])))
+	})
+	vm.cString.define("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(parseLeadingInt(strOf(self)))
+	})
+	vm.cString.define("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Float(parseLeadingFloat(strOf(self)))
+	})
+	vm.cString.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cString.define("to_str", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cString.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Symbol(strOf(self))
+	})
+	vm.cString.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return stringIndex(strOf(self), args)
 	})
 
 	// Array.
@@ -411,6 +529,183 @@ func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value 
 	}
 }
 
+
+// wsCutset is the whitespace stripped by String#strip and friends, matching
+// Ruby (space, tab, newline, carriage return, form feed, vertical tab, NUL).
+const wsCutset = " \t\n\r\f\v\x00"
+
+func capitalizeStr(s string) string {
+	if s == "" {
+		return ""
+	}
+	r := []rune(strings.ToLower(s))
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
+}
+
+func swapcaseStr(s string) string {
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		switch {
+		case unicode.IsUpper(r):
+			out = append(out, unicode.ToLower(r))
+		case unicode.IsLower(r):
+			out = append(out, unicode.ToUpper(r))
+		default:
+			out = append(out, r)
+		}
+	}
+	return string(out)
+}
+
+func reverseStr(s string) string {
+	r := []rune(s)
+	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
+		r[i], r[j] = r[j], r[i]
+	}
+	return string(r)
+}
+
+// chompStr removes one trailing line ending (\r\n, \n, or \r), as in Ruby.
+func chompStr(s string) string {
+	if strings.HasSuffix(s, "\r\n") {
+		return s[:len(s)-2]
+	}
+	if strings.HasSuffix(s, "\n") || strings.HasSuffix(s, "\r") {
+		return s[:len(s)-1]
+	}
+	return s
+}
+
+// chopStr removes the last character (\r\n counts as one), as in Ruby.
+func chopStr(s string) string {
+	if strings.HasSuffix(s, "\r\n") {
+		return s[:len(s)-2]
+	}
+	r := []rune(s)
+	if len(r) == 0 {
+		return ""
+	}
+	return string(r[:len(r)-1])
+}
+
+// parseLeadingInt mimics String#to_i: optional whitespace and sign, then digits;
+// 0 when there is no leading integer.
+func parseLeadingInt(s string) int64 {
+	s = strings.TrimLeft(s, wsCutset)
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	j := i
+	for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+		j++
+	}
+	if j == i {
+		return 0
+	}
+	n, err := strconv.ParseInt(s[:j], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// parseLeadingFloat mimics String#to_f: parse the longest leading float, 0.0 if
+// none.
+func parseLeadingFloat(s string) float64 {
+	s = strings.TrimLeft(s, wsCutset)
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i < len(s) && s[i] == '.' {
+		i++
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		j := i + 1
+		if j < len(s) && (s[j] == '+' || s[j] == '-') {
+			j++
+		}
+		k := j
+		for k < len(s) && s[k] >= '0' && s[k] <= '9' {
+			k++
+		}
+		if k > j {
+			i = k
+		}
+	}
+	f, err := strconv.ParseFloat(s[:i], 64)
+	if err != nil {
+		return 0
+	}
+	return f
+}
+
+// stringIndex implements String#[]: s[i], s[i, len], and s[range], all
+// rune-indexed, returning nil for an out-of-range start.
+func stringIndex(s string, args []object.Value) object.Value {
+	r := []rune(s)
+	n := len(r)
+	if len(args) == 2 {
+		start := normIndex(intArg(args[0]), n)
+		length := intArg(args[1])
+		if start < 0 || start > n || length < 0 {
+			return object.NilV
+		}
+		end := start + int(length)
+		if end > n {
+			end = n
+		}
+		return object.String(string(r[start:end]))
+	}
+	if rng, ok := args[0].(*object.Range); ok {
+		lo := normIndex(intArg(rng.Lo), n)
+		if lo < 0 || lo > n {
+			return object.NilV
+		}
+		hi := normIndex(intArg(rng.Hi), n)
+		if !rng.Exclusive {
+			hi++
+		}
+		if hi > n {
+			hi = n
+		}
+		if hi < lo {
+			hi = lo
+		}
+		return object.String(string(r[lo:hi]))
+	}
+	i := normIndex(intArg(args[0]), n)
+	if i < 0 || i >= n {
+		return object.NilV
+	}
+	return object.String(string(r[i]))
+}
+
+// normIndex resolves a possibly-negative index against length n (no clamping of
+// the upper bound; callers range-check).
+func normIndex(i int64, n int) int {
+	if i < 0 {
+		return int(i) + n
+	}
+	return int(i)
+}
+
+// strArg coerces a String argument, raising TypeError otherwise.
+func strArg(v object.Value) string {
+	if s, ok := v.(object.String); ok {
+		return string(s)
+	}
+	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
+	return ""
+}
 
 // rubyEqual is the default Object#== : pointer identity for instances, and
 // structural equality for the immutable value types.
