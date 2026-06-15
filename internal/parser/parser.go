@@ -560,22 +560,22 @@ func (p *Parser) parsePostfix() ast.Node {
 			args := p.parseCallArgs(token.RBRACKET)
 			p.expect(token.RBRACKET)
 			node = &ast.Call{Recv: node, Name: "[]", Args: args}
+		case p.is(token.LBRACE) || (p.is(token.DO) && !p.noDo):
+			// A block binds to the immediately preceding method call; chaining
+			// then continues (`recv.map { … }.join`).
+			call, ok := node.(*ast.Call)
+			if !ok || call.Block != nil {
+				return node
+			}
+			if p.is(token.LBRACE) {
+				call.Block = p.parseBraceBlock()
+			} else {
+				call.Block = p.parseDoBlock()
+			}
 		default:
-			goto done
+			return node
 		}
 	}
-done:
-	// A brace block binds to the immediately preceding method call. (Phase 1
-	// supports `{ … }` blocks; `do … end` arrives once its looser precedence vs
-	// `while/until do` is handled.)
-	if call, ok := node.(*ast.Call); ok {
-		if p.is(token.LBRACE) {
-			call.Block = p.parseBraceBlock()
-		} else if p.is(token.DO) && !p.noDo {
-			call.Block = p.parseDoBlock()
-		}
-	}
-	return node
 }
 
 // parseArrayLiteral parses `[a, b, c]` (a trailing comma and newlines are
