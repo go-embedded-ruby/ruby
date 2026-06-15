@@ -450,7 +450,8 @@ re-entrant exec loop with a per-frame handler stack (`OpPushHandler`/
 non-exception panics through); rescue matches by class with `is_a?` (bare =
 StandardError), class lists, `=> var` binding, and `OpReThrow` on no match;
 `else` on the clean path, `ensure` on both normal and propagating paths;
-internal raises (`1/0`, NoMethodError, …) are rescuable; bare `raise` re-raises.
+internal raises (`1/0`, NoMethodError, …) are rescuable; bare `raise` re-raises;
+**`retry`** re-enters the begin body from a rescue (ensure still runs once).
 
 ### Phase 4 — Full metaprogramming
 `define_method`, `instance_eval`/`instance_exec`, `class_eval`, constant
