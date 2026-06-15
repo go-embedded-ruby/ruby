@@ -347,6 +347,42 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
+	vm.cString.define("lines", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		segs := splitLines(strOf(self))
+		out := make([]object.Value, len(segs))
+		for i, seg := range segs {
+			out[i] = object.String(seg)
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cString.define("each_line", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each_line)")
+		}
+		for _, seg := range splitLines(strOf(self)) {
+			vm.callBlock(blk, []object.Value{object.String(seg)})
+		}
+		return self
+	})
+	vm.cString.define("each_char", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each_char)")
+		}
+		for _, r := range strOf(self) {
+			vm.callBlock(blk, []object.Value{object.String(string(r))})
+		}
+		return self
+	})
+	vm.cString.define("each_byte", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each_byte)")
+		}
+		s := strOf(self)
+		for i := 0; i < len(s); i++ {
+			vm.callBlock(blk, []object.Value{object.Integer(s[i])})
+		}
+		return self
+	})
 	vm.cString.define("split", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		var parts []string
 		if len(args) == 0 {
@@ -1766,6 +1802,23 @@ func absInt(n int64) int64 {
 		return -n
 	}
 	return n
+}
+
+// splitLines splits on "\n", keeping each separator attached to its line (Ruby
+// String#lines semantics). An empty string yields no lines.
+func splitLines(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			out = append(out, s[start:i+1])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		out = append(out, s[start:])
+	}
+	return out
 }
 
 // gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.
