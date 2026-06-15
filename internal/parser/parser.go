@@ -659,10 +659,31 @@ func (p *Parser) parseBinary(minBP int) ast.Node {
 	}
 }
 
+// negateLiteral returns the negation of a numeric literal node. It is only
+// called with an *ast.IntLit or *ast.FloatLit (the two numeric primaries).
+func negateLiteral(n ast.Node) ast.Node {
+	if il, ok := n.(*ast.IntLit); ok {
+		return &ast.IntLit{Value: -il.Value}
+	}
+	fl := n.(*ast.FloatLit)
+	return &ast.FloatLit{Value: -fl.Value}
+}
+
 func (p *Parser) parseUnary() ast.Node {
 	switch p.cur().Type {
 	case token.MINUS:
 		p.advance()
+		// A minus directly before a numeric literal forms a negative literal:
+		// -2.abs is (-2).abs, but ** binds tighter so -2**x means -(2**x).
+		if p.is(token.INT) || p.is(token.FLOAT) {
+			lit := p.parsePrimary()
+			if p.is(token.POW) {
+				p.advance()
+				right := p.parseBinary(binBP(token.POW) - 1)
+				return &ast.UnaryExpr{Op: "-", Operand: &ast.BinaryExpr{Op: "**", Left: lit, Right: right}}
+			}
+			return p.parsePostfixTail(negateLiteral(lit))
+		}
 		return &ast.UnaryExpr{Op: "-", Operand: p.parseUnary()}
 	case token.PLUS:
 		p.advance()
@@ -675,7 +696,13 @@ func (p *Parser) parseUnary() ast.Node {
 }
 
 func (p *Parser) parsePostfix() ast.Node {
-	node := p.parsePrimary()
+	return p.parsePostfixTail(p.parsePrimary())
+}
+
+// parsePostfixTail applies postfix operators (.method, [index], block) to an
+// already-parsed primary. Split out so a negative numeric literal can carry its
+// own postfix chain (e.g. -2.abs == (-2).abs).
+func (p *Parser) parsePostfixTail(node ast.Node) ast.Node {
 	for {
 		switch {
 		case p.is(token.DOT):
