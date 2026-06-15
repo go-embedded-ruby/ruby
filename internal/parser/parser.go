@@ -241,7 +241,11 @@ func (p *Parser) parseDef() ast.Node {
 	for _, prm := range params {
 		p.declareLocal(prm)
 	}
-	body := p.parseStatements(bodyEnd)
+	body := p.parseStatements(beginBodyEnd)
+	// A method body may carry rescue/ensure clauses without an explicit begin.
+	if p.is(token.RESCUE) || p.is(token.ELSE) || p.is(token.ENSURE) {
+		body = []ast.Node{p.parseRescueTail(body)}
+	}
 	p.popScope()
 	p.expect(token.END)
 	return &ast.MethodDef{Name: name, Params: params, Body: body}
@@ -383,7 +387,16 @@ func (p *Parser) atStatementEnd() bool {
 // [ensure BODY] end`.
 func (p *Parser) parseBegin() ast.Node {
 	p.expect(token.BEGIN)
-	node := &ast.Begin{Body: p.parseStatements(beginBodyEnd)}
+	node := p.parseRescueTail(p.parseStatements(beginBodyEnd))
+	p.expect(token.END)
+	return node
+}
+
+// parseRescueTail parses the `(rescue …)* [else …] [ensure …]` clauses that
+// follow an already-parsed body, returning a Begin. The caller consumes `end`.
+// It is shared by `begin … end` and method-level rescue (`def … rescue … end`).
+func (p *Parser) parseRescueTail(body []ast.Node) *ast.Begin {
+	node := &ast.Begin{Body: body}
 	for p.is(token.RESCUE) {
 		p.advance()
 		clause := ast.RescueClause{}
@@ -407,7 +420,6 @@ func (p *Parser) parseBegin() ast.Node {
 	if p.accept(token.ENSURE) {
 		node.EnsureBody = p.parseStatements(bodyEnd)
 	}
-	p.expect(token.END)
 	return node
 }
 
