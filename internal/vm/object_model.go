@@ -162,6 +162,14 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 // arguments are dropped and missing ones default to nil (Ruby semantics).
 func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
 	np := len(p.iseq.Params)
+	// Auto-splat: a block with multiple parameters called with a single Array
+	// destructures it (Ruby semantics), so `{ |a, b| }` binds element-wise over
+	// `[[1, 2]].each` and over Hash#each's [k, v] pairs.
+	if np > 1 && len(args) == 1 {
+		if arr, ok := args[0].(*object.Array); ok {
+			args = arr.Elems
+		}
+	}
 	bargs := make([]object.Value, np)
 	for i := range bargs {
 		if i < len(args) {

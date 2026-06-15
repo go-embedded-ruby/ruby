@@ -351,9 +351,39 @@ func (vm *VM) bootstrap() {
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
-			vm.callBlock(blk, []object.Value{k, v})
+			vm.callBlock(blk, []object.Value{hashPair(k, v)})
 		}
 		return h
+	})
+	// select/reject return a Hash (unlike Enumerable's Array forms), so they are
+	// native rather than inherited.
+	vm.cHash.define("select", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (select)")
+		}
+		h := self.(*object.Hash)
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			if vm.callBlock(blk, []object.Value{hashPair(k, v)}).Truthy() {
+				out.Set(k, v)
+			}
+		}
+		return out
+	})
+	vm.cHash.define("reject", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (reject)")
+		}
+		h := self.(*object.Hash)
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			if !vm.callBlock(blk, []object.Value{hashPair(k, v)}).Truthy() {
+				out.Set(k, v)
+			}
+		}
+		return out
 	})
 
 	// Range.
@@ -858,6 +888,13 @@ func strArg(v object.Value) string {
 	}
 	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
 	return ""
+}
+
+// hashPair builds the [key, value] array Hash#each yields; block auto-splat then
+// binds a two-parameter block element-wise, while a one-parameter block sees the
+// pair (matching Ruby).
+func hashPair(k, v object.Value) *object.Array {
+	return &object.Array{Elems: []object.Value{k, v}}
 }
 
 // absInt is the absolute value of an int64.

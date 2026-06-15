@@ -195,3 +195,10 @@ end
 class Range
   include Enumerable
 end
+
+# Hash is Enumerable too: Hash#each yields a [key, value] pair, so map/find/count
+# /any?/all?/none?/to_a operate on pairs. select/reject are native (they return a
+# Hash, not an Array).
+class Hash
+  include Enumerable
+end
