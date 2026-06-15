@@ -267,6 +267,14 @@ func (l *Lexer) lexIdent(spaceBefore bool, line, col int) token.Token {
 	for isIdentPart(l.peek()) {
 		l.advance()
 	}
+	// A plain identifier immediately followed by a single ':' is a hash label
+	// (`name:`), as in Ruby. The ':' is consumed; Lit holds the name.
+	if l.peek() == ':' && l.peek2() != ':' {
+		lit := string(l.src[start:l.pos])
+		l.advance() // ':'
+		l.state = exprBegin
+		return token.Token{Type: token.LABEL, Lit: lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+	}
 	// Trailing ? or ! is part of a method name (e.g. empty?, save!).
 	if c := l.peek(); c == '?' || c == '!' {
 		l.advance()

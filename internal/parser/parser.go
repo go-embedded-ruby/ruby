@@ -496,9 +496,16 @@ func (p *Parser) parseHashLiteral() ast.Node {
 	h := &ast.HashLit{}
 	p.skipNewlines()
 	for !p.is(token.RBRACE) {
-		k := p.parseExprOrAssign()
-		p.expect(token.HASHROCKET)
-		v := p.parseExprOrAssign()
+		var k, v ast.Node
+		if p.is(token.LABEL) {
+			// `name: value` — the label is sugar for a symbol key.
+			k = &ast.SymbolLit{Name: p.advance().Lit}
+			v = p.parseExprOrAssign()
+		} else {
+			k = p.parseExprOrAssign()
+			p.expect(token.HASHROCKET)
+			v = p.parseExprOrAssign()
+		}
 		h.Keys = append(h.Keys, k)
 		h.Values = append(h.Values, v)
 		p.skipNewlines()
