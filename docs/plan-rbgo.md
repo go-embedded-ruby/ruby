@@ -413,7 +413,9 @@ once; `===` lexed via a new EQQ token).
 ===/cover?/include?), Array range + `start,len` slicing (shared `sliceRange`).
 **Optional/default method parameters** (`def f(a, b = expr)`; default compiled
 into the prologue via OpArgGiven, may reference earlier params; ISeq.NumRequired
-+ range arity error).
++ range arity error). **Splat parameter** `def f(a, *rest)` (also `*all`, and
+combined with optionals) — collects the remaining args into an array
+(ISeq.SplatIndex; `expected N+` arity error).
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
