@@ -415,7 +415,9 @@ once; `===` lexed via a new EQQ token).
 into the prologue via OpArgGiven, may reference earlier params; ISeq.NumRequired
 + range arity error). **Splat parameter** `def f(a, *rest)` (also `*all`, and
 combined with optionals) — collects the remaining args into an array
-(ISeq.SplatIndex; `expected N+` arity error).
+(ISeq.SplatIndex; `expected N+` arity error). **Splat arguments** `f(*arr)` /
+`[*a, *b]` — splice an array into a call's args or an array literal (runtime
+arg-array build via OpSplatToArray/OpConcatArray + OpSendArray).
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
