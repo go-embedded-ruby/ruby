@@ -118,6 +118,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cArray
 	case *object.Hash:
 		return vm.cHash
+	case *object.Range:
+		return vm.cRange
 	case object.Bool:
 		if x {
 			return vm.cTrueClass

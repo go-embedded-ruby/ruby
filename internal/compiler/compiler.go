@@ -192,6 +192,14 @@ func (c *Compiler) compileNode(n ast.Node) {
 			c.compileNode(v.Values[i])
 		}
 		b.emit(bytecode.OpNewHash, len(v.Keys), 0)
+	case *ast.RangeLit:
+		c.compileNode(v.Lo)
+		c.compileNode(v.Hi)
+		excl := 0
+		if v.Exclusive {
+			excl = 1
+		}
+		b.emit(bytecode.OpNewRange, excl, 0)
 	case *ast.BoolLit:
 		if v.Value {
 			b.emit(bytecode.OpPushTrue, 0, 0)

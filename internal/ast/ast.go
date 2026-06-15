@@ -31,6 +31,12 @@ type HashLit struct {
 	Values []Node
 }
 
+// RangeLit is a range literal: Lo..Hi (inclusive) or Lo...Hi (Exclusive).
+type RangeLit struct {
+	Lo, Hi    Node
+	Exclusive bool
+}
+
 // BoolLit is true or false.
 type BoolLit struct{ Value bool }
 
@@ -153,6 +159,7 @@ func (*StringLit) node()  {}
 func (*SymbolLit) node()  {}
 func (*ArrayLit) node()   {}
 func (*HashLit) node()    {}
+func (*RangeLit) node()   {}
 func (*BoolLit) node()    {}
 func (*NilLit) node()     {}
 func (*SelfLit) node()    {}

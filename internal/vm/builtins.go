@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -19,13 +20,14 @@ func (vm *VM) bootstrap() {
 	vm.cSymbol = newClass("Symbol", vm.cObject)
 	vm.cArray = newClass("Array", vm.cObject)
 	vm.cHash = newClass("Hash", vm.cObject)
+	vm.cRange = newClass("Range", vm.cObject)
 	vm.cTrueClass = newClass("TrueClass", vm.cObject)
 	vm.cFalseClass = newClass("FalseClass", vm.cObject)
 	vm.cNilClass = newClass("NilClass", vm.cObject)
 
 	for _, c := range []*RClass{
 		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
-		vm.cFloat, vm.cString, vm.cSymbol, vm.cArray, vm.cHash,
+		vm.cFloat, vm.cString, vm.cSymbol, vm.cArray, vm.cHash, vm.cRange,
 		vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
 	} {
 		vm.consts[c.name] = c
@@ -206,6 +208,89 @@ func (vm *VM) bootstrap() {
 		return h
 	})
 
+	// Range.
+	vm.cRange.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self.(*object.Range).Lo
+	})
+	vm.cRange.define("first", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self.(*object.Range).Lo
+	})
+	vm.cRange.define("end", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self.(*object.Range).Hi
+	})
+	vm.cRange.define("last", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self.(*object.Range).Hi
+	})
+	vm.cRange.define("exclude_end?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*object.Range).Exclusive)
+	})
+	rangeCover := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		r := self.(*object.Range)
+		v := args[0]
+		// cover? is comparison-based: an incomparable member is simply not
+		// covered (Ruby returns false rather than raising).
+		lc, lok := rangeCmp(v, r.Lo)
+		hc, hok := rangeCmp(v, r.Hi)
+		if !lok || !hok || lc < 0 {
+			return object.False
+		}
+		if r.Exclusive {
+			return object.Bool(hc < 0)
+		}
+		return object.Bool(hc <= 0)
+	}
+	vm.cRange.define("include?", rangeCover)
+	vm.cRange.define("cover?", rangeCover)
+	vm.cRange.define("member?", rangeCover)
+	vm.cRange.define("min", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		r := self.(*object.Range)
+		lo, _, _ := rangeInts(r)
+		if rangeSize(r) == 0 {
+			return object.NilV
+		}
+		return object.Integer(lo)
+	})
+	vm.cRange.define("max", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		r := self.(*object.Range)
+		_, hi, _ := rangeInts(r)
+		if rangeSize(r) == 0 {
+			return object.NilV
+		}
+		if r.Exclusive {
+			return object.Integer(hi - 1)
+		}
+		return object.Integer(hi)
+	})
+	rangeSizeFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(rangeSize(self.(*object.Range)))
+	}
+	vm.cRange.define("size", rangeSizeFn)
+	vm.cRange.define("count", rangeSizeFn)
+	vm.cRange.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Array{Elems: rangeElems(self.(*object.Range))}
+	})
+	vm.cRange.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each)")
+		}
+		r := self.(*object.Range)
+		for _, e := range rangeElems(r) {
+			vm.callBlock(blk, []object.Value{e})
+		}
+		return r
+	})
+	vm.cRange.define("map", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (map)")
+		}
+		elems := rangeElems(self.(*object.Range))
+		out := make([]object.Value, len(elems))
+		for i, e := range elems {
+			out[i] = vm.callBlock(blk, []object.Value{e})
+		}
+		return &object.Array{Elems: out}
+	})
+
 	// Class.
 	vm.cClass.define("new", nativeNew)
 
@@ -295,4 +380,78 @@ func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value 
 	default:
 		return object.NilV // Ruby returns the args array; arrays arrive in Phase 2
 	}
+}
+
+
+// rangeCmp orders two values for Range membership tests: numerics compare
+// numerically, strings lexically; any other pairing is incomparable (ok=false,
+// mirroring Ruby's <=> returning nil).
+func rangeCmp(a, b object.Value) (ord int, ok bool) {
+	if af, aok := toFloat(a); aok {
+		if bf, bok := toFloat(b); bok {
+			switch {
+			case af < bf:
+				return -1, true
+			case af > bf:
+				return 1, true
+			default:
+				return 0, true
+			}
+		}
+		return 0, false
+	}
+	as, aok := a.(object.String)
+	bs, bok := b.(object.String)
+	if aok && bok {
+		return strings.Compare(string(as), string(bs)), true
+	}
+	return 0, false
+}
+
+// rangeInts extracts integer endpoints. ok is false when either endpoint is not
+// an Integer (string/float ranges are not iterable in this phase).
+func rangeInts(r *object.Range) (lo, hi int64, ok bool) {
+	li, lok := r.Lo.(object.Integer)
+	hi2, hok := r.Hi.(object.Integer)
+	if !lok || !hok {
+		return 0, 0, false
+	}
+	return int64(li), int64(hi2), true
+}
+
+// rangeSize is the element count of an integer range (0 if empty or
+// non-integer), matching Ruby's Range#size.
+func rangeSize(r *object.Range) int64 {
+	lo, hi, ok := rangeInts(r)
+	if !ok {
+		raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+	}
+	n := hi - lo
+	if !r.Exclusive {
+		n++
+	}
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// rangeElems materializes an integer range to a slice, raising TypeError on
+// non-integer endpoints (Ruby: "can't iterate from String").
+func rangeElems(r *object.Range) []object.Value {
+	lo, hi, ok := rangeInts(r)
+	if !ok {
+		raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+	}
+	if r.Exclusive {
+		hi--
+	}
+	if hi < lo {
+		return nil
+	}
+	out := make([]object.Value, 0, hi-lo+1)
+	for i := lo; i <= hi; i++ {
+		out = append(out, object.Integer(i))
+	}
+	return out
 }

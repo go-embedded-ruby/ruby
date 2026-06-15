@@ -326,7 +326,7 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 		p.expect(token.ASSIGN)
 		return &ast.IvarAssign{Name: name, Value: p.parseExprOrAssign()}
 	}
-	left := p.parseBinary(0)
+	left := p.parseRange()
 	// Index assignment: recv[i] = v  →  recv.[]=(i, v).
 	if p.is(token.ASSIGN) {
 		if call, ok := left.(*ast.Call); ok && call.Name == "[]" && call.Recv != nil {
@@ -335,6 +335,18 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 			call.Args = append(call.Args, p.parseExprOrAssign())
 			return call
 		}
+	}
+	return left
+}
+
+// parseRange handles `lo..hi` / `lo...hi`, binding looser than the binary
+// operators but tighter than assignment.
+func (p *Parser) parseRange() ast.Node {
+	left := p.parseBinary(0)
+	if p.is(token.DOTDOT) || p.is(token.DOTDOTDOT) {
+		excl := p.is(token.DOTDOTDOT)
+		p.advance()
+		return &ast.RangeLit{Lo: left, Hi: p.parseBinary(0), Exclusive: excl}
 	}
 	return left
 }

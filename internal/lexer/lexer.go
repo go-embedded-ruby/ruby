@@ -140,6 +140,16 @@ func (l *Lexer) next() token.Token {
 		l.state = exprBegin
 		return mk(token.COMMA, ",")
 	case '.':
+		if l.peek() == '.' {
+			l.advance()
+			if l.peek() == '.' {
+				l.advance()
+				l.state = exprBegin
+				return mk(token.DOTDOTDOT, "...")
+			}
+			l.state = exprBegin
+			return mk(token.DOTDOT, "..")
+		}
 		l.state = exprBegin
 		return mk(token.DOT, ".")
 	case '=':

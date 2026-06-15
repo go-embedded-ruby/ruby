@@ -161,6 +161,22 @@ func (h *Hash) ToS() string     { return h.repr() }
 func (h *Hash) Inspect() string { return h.repr() }
 func (h *Hash) Truthy() bool    { return true }
 
+// Range is Lo..Hi (Exclusive ? "...". A reference type; immutable in practice.
+type Range struct {
+	Lo, Hi    Value
+	Exclusive bool
+}
+
+func (r *Range) sep() string {
+	if r.Exclusive {
+		return "..."
+	}
+	return ".."
+}
+func (r *Range) ToS() string     { return r.Lo.ToS() + r.sep() + r.Hi.ToS() }
+func (r *Range) Inspect() string { return r.Lo.Inspect() + r.sep() + r.Hi.Inspect() }
+func (r *Range) Truthy() bool    { return true }
+
 // Bool is true or false.
 type Bool bool
 

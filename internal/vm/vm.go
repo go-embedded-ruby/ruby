@@ -40,7 +40,7 @@ type VM struct {
 
 	cBasicObject, cObject, cModule, cClass *RClass
 	cInteger, cFloat, cString, cSymbol     *RClass
-	cArray, cHash                          *RClass
+	cArray, cHash, cRange                  *RClass
 	cTrueClass, cFalseClass, cNilClass     *RClass
 }
 
@@ -112,6 +112,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			}
 			stack = stack[:len(stack)-n]
 			push(h)
+		case bytecode.OpNewRange:
+			hi := pop()
+			lo := pop()
+			push(&object.Range{Lo: lo, Hi: hi, Exclusive: in.A == 1})
 		case bytecode.OpPop:
 			pop()
 		case bytecode.OpDup:

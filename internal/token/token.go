@@ -66,6 +66,8 @@ const (
 	HASHROCKET // =>
 	COMMA
 	DOT
+	DOTDOT    // ..
+	DOTDOTDOT // ...
 )
 
 var typeNames = map[Type]string{
@@ -79,7 +81,7 @@ var typeNames = map[Type]string{
 	PLUS: "+", MINUS: "-", STAR: "*", SLASH: "/", PERCENT: "%", ASSIGN: "=",
 	EQ: "==", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
-	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".",
+	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
 }
 
 func (t Type) String() string {
