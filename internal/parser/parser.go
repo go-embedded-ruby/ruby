@@ -581,15 +581,25 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 		return &ast.IvarAssign{Name: name, Value: &ast.BinaryExpr{Op: op, Left: &ast.IvarRef{Name: name}, Right: rhs}}
 	}
 	left := p.parseTernary()
-	// Compound index assignment: recv[i] OP= v → recv[i] = recv[i] OP v.
 	if p.is(token.OPASSIGN) {
-		if call, ok := left.(*ast.Call); ok && call.Name == "[]" && call.Recv != nil {
-			op := p.advance().Lit
-			rhs := p.parseExprOrAssign()
-			read := &ast.Call{Recv: call.Recv, Name: "[]", Args: call.Args}
-			newVal := &ast.BinaryExpr{Op: op, Left: read, Right: rhs}
-			args := append(append([]ast.Node{}, call.Args...), newVal)
-			return &ast.Call{Recv: call.Recv, Name: "[]=", Args: args}
+		if call, ok := left.(*ast.Call); ok && call.Recv != nil {
+			// Compound index assignment: recv[i] OP= v → recv[i] = recv[i] OP v.
+			if call.Name == "[]" {
+				op := p.advance().Lit
+				rhs := p.parseExprOrAssign()
+				read := &ast.Call{Recv: call.Recv, Name: "[]", Args: call.Args}
+				newVal := &ast.BinaryExpr{Op: op, Left: read, Right: rhs}
+				args := append(append([]ast.Node{}, call.Args...), newVal)
+				return &ast.Call{Recv: call.Recv, Name: "[]=", Args: args}
+			}
+			// Compound attribute assignment: recv.a OP= v → recv.a = recv.a OP v.
+			if len(call.Args) == 0 && call.Block == nil {
+				op := p.advance().Lit
+				rhs := p.parseExprOrAssign()
+				read := &ast.Call{Recv: call.Recv, Name: call.Name}
+				newVal := &ast.BinaryExpr{Op: op, Left: read, Right: rhs}
+				return &ast.Call{Recv: call.Recv, Name: call.Name + "=", Args: []ast.Node{newVal}}
+			}
 		}
 	}
 	if p.is(token.ASSIGN) {

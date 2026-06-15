@@ -268,6 +268,18 @@ func (vm *VM) bootstrap() {
 		}
 		return target
 	})
+	vm.cModule.define("attr_reader", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		defineAttrs(self.(*RClass), args, true, false)
+		return object.NilV
+	})
+	vm.cModule.define("attr_writer", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		defineAttrs(self.(*RClass), args, false, true)
+		return object.NilV
+	})
+	vm.cModule.define("attr_accessor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		defineAttrs(self.(*RClass), args, true, true)
+		return object.NilV
+	})
 
 	// Symbol.
 	vm.cSymbol.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -1832,6 +1844,28 @@ func splitLines(s string) []string {
 		out = append(out, s[start:])
 	}
 	return out
+}
+
+// defineAttrs installs reader and/or writer accessors on cls for each named
+// attribute (the symbols/strings passed to attr_reader/writer/accessor).
+func defineAttrs(cls *RClass, names []object.Value, reader, writer bool) {
+	for _, n := range names {
+		ivar := "@" + n.ToS()
+		if reader {
+			cls.define(n.ToS(), func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+				if v, ok := self.(*RObject).ivars[ivar]; ok {
+					return v
+				}
+				return object.NilV
+			})
+		}
+		if writer {
+			cls.define(n.ToS()+"=", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+				self.(*RObject).ivars[ivar] = a[0]
+				return a[0]
+			})
+		}
+	}
 }
 
 // gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.
