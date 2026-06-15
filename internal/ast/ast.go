@@ -168,6 +168,22 @@ type OpAssign struct {
 	Value Node
 }
 
+// Begin is `begin BODY (rescue …)* [else …] [ensure …] end`.
+type Begin struct {
+	Body       []Node
+	Rescues    []RescueClause
+	ElseBody   []Node // nil if no else
+	EnsureBody []Node // nil if no ensure
+}
+
+// RescueClause is one `rescue [Classes] [=> Var] BODY`. Empty Classes means
+// rescue StandardError.
+type RescueClause struct {
+	Classes []Node
+	Var     string
+	Body    []Node
+}
+
 func (*Program) node()    {}
 func (*IntLit) node()     {}
 func (*FloatLit) node()   {}
@@ -198,3 +214,4 @@ func (*Yield) node()      {}
 func (*Break) node()      {}
 func (*Next) node()       {}
 func (*OpAssign) node()   {}
+func (*Begin) node()      {}

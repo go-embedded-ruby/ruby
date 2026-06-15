@@ -39,7 +39,7 @@ func (vm *VM) bootstrap() {
 	}
 
 	// Exception hierarchy. Each is registered as a constant so it can be raised
-	// and matched by rescue (rescue lands in a later increment).
+	// and matched by rescue.
 	exc := func(name, super string) *RClass {
 		c := newClass(name, vm.consts[super].(*RClass))
 		vm.consts[name] = c
@@ -63,6 +63,7 @@ func (vm *VM) bootstrap() {
 	exc("NotImplementedError", "StandardError")
 	exc("FrozenError", "RuntimeError")
 	exc("IOError", "StandardError")
+	exc("Math::DomainError", "StandardError")
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
@@ -1175,6 +1176,11 @@ func (vm *VM) excError(exc object.Value) RubyError {
 func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 	switch len(args) {
 	case 0:
+		// Bare `raise` re-raises the exception currently being handled, else a
+		// fresh RuntimeError.
+		if vm.curExc != nil {
+			panic(vm.excError(vm.curExc))
+		}
 		panic(vm.excError(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
 			[]object.Value{object.String("unhandled exception")}, nil)))
 	case 1:

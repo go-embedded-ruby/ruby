@@ -226,6 +226,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 		} else {
 			b.emit(bytecode.OpSetLocal, b.localSlot(v.Name), 0)
 		}
+	case *ast.Begin:
+		c.compileBegin(v)
 	case *ast.OpAssign:
 		// Allocate the slot before the read so a fresh `x ||= v` sees nil
 		// rather than failing to resolve.
@@ -511,6 +513,81 @@ func (c *Compiler) compileBreakValue(val ast.Node) {
 		c.compileNode(val)
 	} else {
 		c.cur().emit(bytecode.OpPushNil, 0, 0)
+	}
+}
+
+// compileBegin compiles begin/rescue/else/ensure. When an ensure clause is
+// present it wraps the rescue handling in a second handler that runs ensure on
+// both the normal and the propagating paths.
+func (c *Compiler) compileBegin(v *ast.Begin) {
+	if v.EnsureBody == nil {
+		c.compileBeginRescue(v)
+		return
+	}
+	b := c.cur()
+	h := b.emit(bytecode.OpPushHandler, 0, 0)
+	c.compileBeginRescue(v)
+	b.emit(bytecode.OpPopHandler, 0, 0)
+	c.compileBody(v.EnsureBody)
+	b.emit(bytecode.OpPop, 0, 0) // discard ensure value; the begin value remains
+	skip := b.emit(bytecode.OpJump, 0, 0)
+	b.patch(h, b.here()) // ENSURE-on-exception: exception is on the stack
+	c.compileBody(v.EnsureBody)
+	b.emit(bytecode.OpPop, 0, 0)
+	b.emit(bytecode.OpReThrow, 0, 0)
+	b.patch(skip, b.here())
+}
+
+// compileBeginRescue compiles the body + rescue clauses + else (no ensure).
+func (c *Compiler) compileBeginRescue(v *ast.Begin) {
+	b := c.cur()
+	if len(v.Rescues) == 0 {
+		c.compileBody(v.Body)
+		return
+	}
+	h := b.emit(bytecode.OpPushHandler, 0, 0)
+	c.compileBody(v.Body)
+	b.emit(bytecode.OpPopHandler, 0, 0)
+	if v.ElseBody != nil { // else runs only with no exception, and is not protected
+		b.emit(bytecode.OpPop, 0, 0)
+		c.compileBody(v.ElseBody)
+	}
+	done := []int{b.emit(bytecode.OpJump, 0, 0)}
+	b.patch(h, b.here()) // RESCUE: the exception object is on the stack
+	for _, clause := range v.Rescues {
+		var matched []int
+		if len(clause.Classes) == 0 {
+			b.emit(bytecode.OpDup, 0, 0)
+			b.emit(bytecode.OpGetConst, b.addName("StandardError"), 0)
+			b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+			matched = append(matched, b.emit(bytecode.OpBranchIf, 0, 0))
+		} else {
+			for _, ce := range clause.Classes {
+				b.emit(bytecode.OpDup, 0, 0)
+				c.compileNode(ce)
+				b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+				matched = append(matched, b.emit(bytecode.OpBranchIf, 0, 0))
+			}
+		}
+		skip := b.emit(bytecode.OpJump, 0, 0) // no class matched → next clause
+		for _, m := range matched {
+			b.patch(m, b.here())
+		}
+		if clause.Var != "" { // bind the exception (reusing an existing slot)
+			if depth, slot, ok := b.resolve(clause.Var); ok {
+				b.emit(bytecode.OpSetLocal, slot, depth)
+			} else {
+				b.emit(bytecode.OpSetLocal, b.localSlot(clause.Var), 0)
+			}
+		}
+		b.emit(bytecode.OpPop, 0, 0) // drop the exception
+		c.compileBody(clause.Body)
+		done = append(done, b.emit(bytecode.OpJump, 0, 0))
+		b.patch(skip, b.here())
+	}
+	b.emit(bytecode.OpReThrow, 0, 0) // no clause matched
+	for _, d := range done {
+		b.patch(d, b.here())
 	}
 }
 

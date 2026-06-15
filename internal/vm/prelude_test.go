@@ -54,6 +54,16 @@ func TestLoadPreludePanicsOnBadSource(t *testing.T) {
 	bareVM().loadPrelude("def")
 }
 
+// An internal raise whose class name isn't registered falls back to a
+// StandardError-classed object (so a bare rescue still catches it).
+func TestExceptionObjectFallback(t *testing.T) {
+	vm := bareVM() // bootstrap registers the exception classes
+	obj := vm.exceptionObject(RubyError{Class: "NoSuchError", Message: "x"})
+	if got := vm.classOf(obj).name; got != "StandardError" {
+		t.Fatalf("fallback class = %q, want StandardError", got)
+	}
+}
+
 func TestRubyEqualValueTypes(t *testing.T) {
 	if !rubyEqual(object.Integer(5), object.Integer(5)) {
 		t.Error("5 == 5 should be true")

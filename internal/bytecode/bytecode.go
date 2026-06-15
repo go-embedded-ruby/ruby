@@ -62,6 +62,9 @@ const (
 	OpBlockGiven   // pushes true if a block was passed to the current method
 	OpReturn       // returns top of stack from the current ISeq
 	OpBreak        // unwinds a block `break`: pops the value, signals the call site
+	OpPushHandler  // A = rescue handler pc; pushes a begin/rescue handler
+	OpPopHandler   // pops the innermost handler (begin body completed normally)
+	OpReThrow      // re-raises the exception object on top of the stack
 )
 
 var opNames = map[Op]string{
@@ -77,6 +80,7 @@ var opNames = map[Op]string{
 	OpDefineModule: "define_module", OpDefineMethod: "define_method",
 	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
 	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break",
+	OpPushHandler: "push_handler", OpPopHandler: "pop_handler", OpReThrow: "rethrow",
 }
 
 func (o Op) String() string {

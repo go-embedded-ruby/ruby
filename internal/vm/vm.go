@@ -57,6 +57,27 @@ func (vm *VM) sendCatchBreak(recv object.Value, name string, args []object.Value
 	return vm.send(recv, name, args, blk)
 }
 
+// handlerFrame is an active begin/rescue handler: where to resume and the
+// operand-stack depth to restore.
+type handlerFrame struct {
+	pc int
+	sp int
+}
+
+// exceptionObject returns the Ruby exception object for a RubyError, building
+// one from the class name + message when the error did not originate from a
+// Ruby `raise` (internal raises carry no object).
+func (vm *VM) exceptionObject(e RubyError) object.Value {
+	if e.Obj != nil {
+		return e.Obj
+	}
+	cls, ok := vm.consts[e.Class].(*RClass)
+	if !ok {
+		cls = vm.consts["StandardError"].(*RClass)
+	}
+	return &RObject{class: cls, ivars: map[string]object.Value{"@message": object.String(e.Message)}}
+}
+
 // VM holds I/O, the top-level self, the constant table and the base classes.
 type VM struct {
 	out    io.Writer
@@ -68,6 +89,7 @@ type VM struct {
 	cArray, cHash, cRange                  *RClass
 	cTrueClass, cFalseClass, cNilClass     *RClass
 	cException                             *RClass
+	curExc                                 object.Value // most recently rescued exception (for bare `raise`)
 }
 
 // New returns a VM writing program output to out.
@@ -110,133 +132,166 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	}
 
 	pc := 0
-	for pc < len(iseq.Insns) {
-		in := iseq.Insns[pc]
-		switch in.Op {
-		case bytecode.OpNop:
-		case bytecode.OpPushConst:
-			push(iseq.Consts[in.A])
-		case bytecode.OpPushNil:
-			push(object.NilV)
-		case bytecode.OpPushTrue:
-			push(object.True)
-		case bytecode.OpPushFalse:
-			push(object.False)
-		case bytecode.OpPushSelf:
-			push(self)
-		case bytecode.OpNewArray:
-			n := in.A
-			elems := make([]object.Value, n)
-			copy(elems, stack[len(stack)-n:])
-			stack = stack[:len(stack)-n]
-			push(&object.Array{Elems: elems})
-		case bytecode.OpNewHash:
-			n := in.A * 2
-			region := stack[len(stack)-n:]
-			h := object.NewHash()
-			for i := 0; i < n; i += 2 {
-				h.Set(region[i], region[i+1])
+	var handlers []handlerFrame
+	result := object.Value(object.NilV)
+	finished := false
+	for !finished {
+		func() {
+			defer func() {
+				r := recover()
+				if r == nil {
+					return
+				}
+				rerr, ok := r.(RubyError)
+				if !ok || len(handlers) == 0 {
+					panic(r) // not a Ruby exception, or no handler in this frame
+				}
+				h := handlers[len(handlers)-1]
+				handlers = handlers[:len(handlers)-1]
+				stack = stack[:h.sp]
+				exc := vm.exceptionObject(rerr)
+				vm.curExc = exc
+				push(exc)
+				pc = h.pc
+			}()
+			for pc < len(iseq.Insns) {
+				in := iseq.Insns[pc]
+				switch in.Op {
+				case bytecode.OpNop:
+				case bytecode.OpPushConst:
+					push(iseq.Consts[in.A])
+				case bytecode.OpPushNil:
+					push(object.NilV)
+				case bytecode.OpPushTrue:
+					push(object.True)
+				case bytecode.OpPushFalse:
+					push(object.False)
+				case bytecode.OpPushSelf:
+					push(self)
+				case bytecode.OpNewArray:
+					n := in.A
+					elems := make([]object.Value, n)
+					copy(elems, stack[len(stack)-n:])
+					stack = stack[:len(stack)-n]
+					push(&object.Array{Elems: elems})
+				case bytecode.OpNewHash:
+					n := in.A * 2
+					region := stack[len(stack)-n:]
+					h := object.NewHash()
+					for i := 0; i < n; i += 2 {
+						h.Set(region[i], region[i+1])
+					}
+					stack = stack[:len(stack)-n]
+					push(h)
+				case bytecode.OpNewRange:
+					hi := pop()
+					lo := pop()
+					push(&object.Range{Lo: lo, Hi: hi, Exclusive: in.A == 1})
+				case bytecode.OpPop:
+					pop()
+				case bytecode.OpDup:
+					push(stack[len(stack)-1])
+				case bytecode.OpGetLocal:
+					push(env.ancestor(in.B).slots[in.A])
+				case bytecode.OpSetLocal:
+					env.ancestor(in.B).slots[in.A] = stack[len(stack)-1]
+				case bytecode.OpGetIvar:
+					push(getIvar(self, iseq.Names[in.A]))
+				case bytecode.OpSetIvar:
+					setIvar(self, iseq.Names[in.A], stack[len(stack)-1])
+				case bytecode.OpGetConst:
+					name := iseq.Names[in.A]
+					v, ok := vm.consts[name]
+					if !ok {
+						raise("NameError", "uninitialized constant %s", name)
+					}
+					push(v)
+				case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
+					bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
+					bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:
+					b := pop()
+					a := pop()
+					push(vm.binaryOp(in.Op, a, b))
+				case bytecode.OpNeg:
+					push(negate(pop()))
+				case bytecode.OpNot:
+					push(object.Bool(!pop().Truthy()))
+				case bytecode.OpJump:
+					pc = in.A
+					continue
+				case bytecode.OpBranchIf:
+					if pop().Truthy() {
+						pc = in.A
+						continue
+					}
+				case bytecode.OpBranchUnless:
+					if !pop().Truthy() {
+						pc = in.A
+						continue
+					}
+				case bytecode.OpSend:
+					argc := in.B
+					callArgs := make([]object.Value, argc)
+					copy(callArgs, stack[len(stack)-argc:])
+					stack = stack[:len(stack)-argc]
+					recv := pop()
+					var blk *Proc
+					if in.C > 0 { // a literal block: capture this frame's env, self, block
+						blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+					}
+					if blk != nil {
+						push(vm.sendCatchBreak(recv, iseq.Names[in.A], callArgs, blk))
+					} else {
+						push(vm.send(recv, iseq.Names[in.A], callArgs, nil))
+					}
+				case bytecode.OpDefineMethod:
+					definee.methods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
+					push(object.NilV)
+				case bytecode.OpDefineClass:
+					push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
+				case bytecode.OpDefineModule:
+					push(vm.defineModule(iseq.Names[in.A], iseq.Children[in.B]))
+				case bytecode.OpInvokeSuper:
+					var superArgs []object.Value
+					if in.B == 1 { // bare super forwards the frame's own arguments
+						superArgs = args
+					} else {
+						superArgs = make([]object.Value, in.A)
+						copy(superArgs, stack[len(stack)-in.A:])
+						stack = stack[:len(stack)-in.A]
+					}
+					push(vm.invokeSuper(self, definee, methodName, superArgs, block))
+				case bytecode.OpInvokeBlock:
+					if block == nil {
+						raise("LocalJumpError", "no block given (yield)")
+					}
+					yargs := make([]object.Value, in.A)
+					copy(yargs, stack[len(stack)-in.A:])
+					stack = stack[:len(stack)-in.A]
+					push(vm.callBlock(block, yargs))
+				case bytecode.OpBlockGiven:
+					push(object.Bool(block != nil))
+				case bytecode.OpReturn:
+					result = pop()
+					finished = true
+					return
+				case bytecode.OpBreak:
+					panic(breakSignal{owner: selfBlock, value: pop()})
+				case bytecode.OpPushHandler:
+					handlers = append(handlers, handlerFrame{pc: in.A, sp: len(stack)})
+				case bytecode.OpPopHandler:
+					handlers = handlers[:len(handlers)-1]
+				case bytecode.OpReThrow:
+					panic(vm.excError(pop()))
+				default:
+					raise("VMError", "unknown opcode %s", in.Op)
+				}
+				pc++
 			}
-			stack = stack[:len(stack)-n]
-			push(h)
-		case bytecode.OpNewRange:
-			hi := pop()
-			lo := pop()
-			push(&object.Range{Lo: lo, Hi: hi, Exclusive: in.A == 1})
-		case bytecode.OpPop:
-			pop()
-		case bytecode.OpDup:
-			push(stack[len(stack)-1])
-		case bytecode.OpGetLocal:
-			push(env.ancestor(in.B).slots[in.A])
-		case bytecode.OpSetLocal:
-			env.ancestor(in.B).slots[in.A] = stack[len(stack)-1]
-		case bytecode.OpGetIvar:
-			push(getIvar(self, iseq.Names[in.A]))
-		case bytecode.OpSetIvar:
-			setIvar(self, iseq.Names[in.A], stack[len(stack)-1])
-		case bytecode.OpGetConst:
-			name := iseq.Names[in.A]
-			v, ok := vm.consts[name]
-			if !ok {
-				raise("NameError", "uninitialized constant %s", name)
-			}
-			push(v)
-		case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
-			bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
-			bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:
-			b := pop()
-			a := pop()
-			push(vm.binaryOp(in.Op, a, b))
-		case bytecode.OpNeg:
-			push(negate(pop()))
-		case bytecode.OpNot:
-			push(object.Bool(!pop().Truthy()))
-		case bytecode.OpJump:
-			pc = in.A
-			continue
-		case bytecode.OpBranchIf:
-			if pop().Truthy() {
-				pc = in.A
-				continue
-			}
-		case bytecode.OpBranchUnless:
-			if !pop().Truthy() {
-				pc = in.A
-				continue
-			}
-		case bytecode.OpSend:
-			argc := in.B
-			callArgs := make([]object.Value, argc)
-			copy(callArgs, stack[len(stack)-argc:])
-			stack = stack[:len(stack)-argc]
-			recv := pop()
-			var blk *Proc
-			if in.C > 0 { // a literal block: capture this frame's env, self, block
-				blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
-			}
-			if blk != nil {
-				push(vm.sendCatchBreak(recv, iseq.Names[in.A], callArgs, blk))
-			} else {
-				push(vm.send(recv, iseq.Names[in.A], callArgs, nil))
-			}
-		case bytecode.OpDefineMethod:
-			definee.methods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
-			push(object.NilV)
-		case bytecode.OpDefineClass:
-			push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
-		case bytecode.OpDefineModule:
-			push(vm.defineModule(iseq.Names[in.A], iseq.Children[in.B]))
-		case bytecode.OpInvokeSuper:
-			var superArgs []object.Value
-			if in.B == 1 { // bare super forwards the frame's own arguments
-				superArgs = args
-			} else {
-				superArgs = make([]object.Value, in.A)
-				copy(superArgs, stack[len(stack)-in.A:])
-				stack = stack[:len(stack)-in.A]
-			}
-			push(vm.invokeSuper(self, definee, methodName, superArgs, block))
-		case bytecode.OpInvokeBlock:
-			if block == nil {
-				raise("LocalJumpError", "no block given (yield)")
-			}
-			yargs := make([]object.Value, in.A)
-			copy(yargs, stack[len(stack)-in.A:])
-			stack = stack[:len(stack)-in.A]
-			push(vm.callBlock(block, yargs))
-		case bytecode.OpBlockGiven:
-			push(object.Bool(block != nil))
-		case bytecode.OpReturn:
-			return pop()
-		case bytecode.OpBreak:
-			panic(breakSignal{owner: selfBlock, value: pop()})
-		default:
-			raise("VMError", "unknown opcode %s", in.Op)
-		}
-		pc++
+			finished = true
+		}()
 	}
-	return object.NilV
+	return result
 }
 
 // defineClass creates or reopens a class, runs its body with self = the class,

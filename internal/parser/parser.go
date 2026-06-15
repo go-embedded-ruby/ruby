@@ -122,6 +122,7 @@ func (p *Parser) isLocal(n string) bool {
 
 var (
 	bodyEnd      = map[token.Type]bool{token.END: true}
+	beginBodyEnd = map[token.Type]bool{token.RESCUE: true, token.ELSE: true, token.ENSURE: true, token.END: true}
 	ifBodyEnd    = map[token.Type]bool{token.END: true, token.ELSE: true, token.ELSIF: true}
 )
 
@@ -372,6 +373,38 @@ func (p *Parser) atStatementEnd() bool {
 		return true
 	}
 	return false
+}
+
+// parseBegin parses `begin BODY (rescue [Classes] [=> var] BODY)* [else BODY]
+// [ensure BODY] end`.
+func (p *Parser) parseBegin() ast.Node {
+	p.expect(token.BEGIN)
+	node := &ast.Begin{Body: p.parseStatements(beginBodyEnd)}
+	for p.is(token.RESCUE) {
+		p.advance()
+		clause := ast.RescueClause{}
+		if !p.is(token.NEWLINE) && !p.is(token.HASHROCKET) && !p.is(token.THEN) {
+			clause.Classes = append(clause.Classes, p.parseExprOrAssign())
+			for p.accept(token.COMMA) {
+				clause.Classes = append(clause.Classes, p.parseExprOrAssign())
+			}
+		}
+		if p.accept(token.HASHROCKET) {
+			clause.Var = p.expect(token.IDENT).Lit
+			p.declareLocal(clause.Var)
+		}
+		p.accept(token.THEN)
+		clause.Body = p.parseStatements(beginBodyEnd)
+		node.Rescues = append(node.Rescues, clause)
+	}
+	if p.accept(token.ELSE) {
+		node.ElseBody = p.parseStatements(beginBodyEnd)
+	}
+	if p.accept(token.ENSURE) {
+		node.EnsureBody = p.parseStatements(bodyEnd)
+	}
+	p.expect(token.END)
+	return node
 }
 
 // --- expressions ---
@@ -692,6 +725,8 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.IVAR:
 		p.advance()
 		return &ast.IvarRef{Name: t.Lit}
+	case token.BEGIN:
+		return p.parseBegin()
 	}
 	return p.fail("unexpected token %q (%s)", t.Lit, t.Type)
 }
