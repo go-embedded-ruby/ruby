@@ -427,7 +427,10 @@ the method block as a first-class Proc (call/[]/yield/arity/lambda?); call-site
 Procs); `proc`/`lambda` constructors; and the stabby lambda `->(x){…}`. **`String#%`/`format`/`sprintf`** — Ruby's format
 engine (d/i/s/f/e/g/x/X/o/b/c + flags/width/precision), Go-fmt backed. **Integer** `lcm`/`bit_length`/`digits(base)`. **String**
 `lines`/`each_line`/`each_char`/`each_byte`. **Parser**: negative-numeric-literal
-precedence (`-2.abs`==2, `-2**2`==-4).
+precedence (`-2.abs`==2, `-2**2`==-4). **Class methods** `def self.foo` (singleton-method
+chain, inherited). **Constant assignment** `NAME = v` and **attribute assignment**
+`recv.attr = v` + setter defs `def name=`. **Struct** `Struct.new(:a,:b)`
+(accessors, to_a/to_h/members/[]/==/size).
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
