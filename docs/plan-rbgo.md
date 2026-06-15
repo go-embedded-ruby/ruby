@@ -383,7 +383,7 @@ on Integer/Float/String/Object and a default identity `Object#==`; and blocks
 made transparent to `yield` (a block reaches its enclosing method's block) so
 `each { … yield … }` works. Comparable gives `<`/`<=`/`>`/`>=`/`==`/`between?`
 /`clamp`; Enumerable gives map/select/reject/find/include?/to_a/count/sum/min
-/max/reduce/any?/all?/none?/each_with_index.
+/max/reduce/any?/all?/none?/each_with_index/flat_map/partition/group_by/tally/zip.
 **Short-circuit `&&` / `||`** with Ruby value semantics (yield the deciding
 operand; the right side runs only when the left doesn't decide), compiled with
 a conditional branch over a duplicated operand.
@@ -466,7 +466,8 @@ clauses without an explicit `begin` (shared `parseRescueTail`).
 machinery, hooks (`included`/`inherited`/`method_added`/…),
 `define_singleton_method`, **string `eval`**. (Refinements: deferred.)
 **Started:** reflection/dispatch — `send`/`public_send` (forwarding the block),
-`respond_to?`, `itself`, `tap`, `then`/`yield_self`.
+`respond_to?`, `itself`, `tap`, `then`/`yield_self`; Kernel conversion methods
+`Integer`/`Float`/`String`/`Array` (capitalized `Name(...)` now parses as a call).
 
 ### Phase 5 — Complete front-end
 Full grammar: heredocs, interpolation, `%`-literals, multiple assignment, keyword
