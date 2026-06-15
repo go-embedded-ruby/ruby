@@ -347,9 +347,9 @@ walk over each class's included modules), `super` (bare/forwarding, `super()`,
 (with args), `block_given?`, lenient block arity, and `Integer#times` as the
 first block-driven iterator.
 **Still to come in Phase 1:** `Proc`/`lambda` and `&block` (reifying a block as a
-first-class value), `do…end` block syntax, singleton classes, `respond_to?`, and
-routing the arithmetic fast paths through `send`. (`method_missing` currently
-receives the name as a String; becomes a Symbol with Phase 2.)
+first-class value), singleton classes, `respond_to?`, and routing the
+arithmetic fast paths through `send`. (`do…end` block syntax landed in Phase 2;
+`method_missing` now receives a Symbol as of Phase 2.)
 **Exit (met for core):** define classes, subclass, instantiate, call methods,
 use ivars, override `method_missing`.
 
@@ -385,6 +385,8 @@ made transparent to `yield` (a block reaches its enclosing method's block) so
 **Short-circuit `&&` / `||`** with Ruby value semantics (yield the deciding
 operand; the right side runs only when the left doesn't decide), compiled with
 a conditional branch over a duplicated operand.
+**`do…end` blocks** alongside `{ … }`, with the `do` after a while/until
+condition correctly bound to the loop, not to a call in the condition.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
