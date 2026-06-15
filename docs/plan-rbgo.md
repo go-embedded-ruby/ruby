@@ -425,7 +425,9 @@ call-site last-hash sugar; the VM validates unknown/missing keywords
 the method block as a first-class Proc (call/[]/yield/arity/lambda?); call-site
 `&proc` block-pass + `Symbol#to_proc` (the `&:sym` shorthand, via native-bodied
 Procs); `proc`/`lambda` constructors; and the stabby lambda `->(x){…}`. **`String#%`/`format`/`sprintf`** — Ruby's format
-engine (d/i/s/f/e/g/x/X/o/b/c + flags/width/precision), Go-fmt backed.
+engine (d/i/s/f/e/g/x/X/o/b/c + flags/width/precision), Go-fmt backed. **Integer** `lcm`/`bit_length`/`digits(base)`. **String**
+`lines`/`each_line`/`each_char`/`each_byte`. **Parser**: negative-numeric-literal
+precedence (`-2.abs`==2, `-2**2`==-4).
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
