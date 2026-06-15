@@ -61,6 +61,7 @@ const (
 	OpInvokeBlock  // A = argc; yields to the block passed to the current method
 	OpBlockGiven   // pushes true if a block was passed to the current method
 	OpReturn       // returns top of stack from the current ISeq
+	OpArgGiven     // A = param index; pushes true if that argument was supplied
 	OpBreak        // unwinds a block `break`: pops the value, signals the call site
 	OpPushHandler  // A = rescue handler pc; pushes a begin/rescue handler
 	OpPopHandler   // pops the innermost handler (begin body completed normally)
@@ -79,7 +80,7 @@ var opNames = map[Op]string{
 	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpDefineClass: "define_class",
 	OpDefineModule: "define_module", OpDefineMethod: "define_method",
 	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
-	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break",
+	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break", OpArgGiven: "arg_given",
 	OpPushHandler: "push_handler", OpPopHandler: "pop_handler", OpReThrow: "rethrow",
 }
 
@@ -106,7 +107,8 @@ type ISeq struct {
 	Insns     []Instr
 	Consts    []object.Value // literal pool: integers, floats, strings
 	Names     []string       // method-call and definition names
-	Params    []string       // parameter names (Phase 0: required only)
+	Params    []string       // parameter names
+	NumRequired int          // count of required (non-defaulted) leading params
 	NumLocals int            // total local slots (params first, then assigns)
 	Children  []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
 	Super     string         // for a class body: the superclass name ("" → Object)

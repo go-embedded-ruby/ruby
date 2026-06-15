@@ -232,17 +232,15 @@ func (p *Parser) parseDef() ast.Node {
 	if !ok {
 		p.fail("expected method name after def")
 	}
+	p.pushScope() // params (and their defaults) live in the method scope
 	var params []string
+	var defaults []ast.Node
 	if p.accept(token.LPAREN) {
-		params = p.parseParamNames(token.RPAREN)
+		params, defaults = p.parseDefParams(token.RPAREN)
 		p.expect(token.RPAREN)
 	} else if p.is(token.IDENT) && !p.is(token.NEWLINE) {
 		// paren-less params: def foo a, b
-		params = p.parseParamNames(token.NEWLINE)
-	}
-	p.pushScope()
-	for _, prm := range params {
-		p.declareLocal(prm)
+		params, defaults = p.parseDefParams(token.NEWLINE)
 	}
 	body := p.parseStatements(beginBodyEnd)
 	// A method body may carry rescue/ensure clauses without an explicit begin.
@@ -251,7 +249,7 @@ func (p *Parser) parseDef() ast.Node {
 	}
 	p.popScope()
 	p.expect(token.END)
-	return &ast.MethodDef{Name: name, Params: params, Body: body}
+	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, Body: body}
 }
 
 // parseDefName reads the name in a `def`: an identifier/constant, an operator
@@ -272,6 +270,30 @@ func (p *Parser) parseDefName() (string, bool) {
 		return "[]", true
 	}
 	return "", false
+}
+
+// parseDefParams parses a method's parameter list, each optionally `name =
+// default`. Each parameter is declared before its (and later) defaults are
+// parsed, so a default may reference earlier parameters. defaults is parallel to
+// params, nil for a required parameter.
+func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []ast.Node) {
+	if p.is(until) || p.is(token.NEWLINE) {
+		return params, defaults
+	}
+	for {
+		name := p.expect(token.IDENT).Lit
+		params = append(params, name)
+		p.declareLocal(name)
+		if p.accept(token.ASSIGN) {
+			defaults = append(defaults, p.parseExprOrAssign())
+		} else {
+			defaults = append(defaults, nil)
+		}
+		if !p.accept(token.COMMA) {
+			break
+		}
+	}
+	return params, defaults
 }
 
 func (p *Parser) parseParamNames(until token.Type) []string {

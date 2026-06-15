@@ -112,7 +112,8 @@ type While struct {
 // MethodDef defines a method on the current self.
 type MethodDef struct {
 	Name   string
-	Params []string
+	Params   []string
+	Defaults []Node // parallel to Params; nil for a required param
 	Body   []Node
 }
 

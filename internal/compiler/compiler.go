@@ -28,14 +28,15 @@ type builder struct {
 	constIdx map[object.Value]int
 	names    []string
 	locals   []string
-	params   []string
+	params      []string
+	numRequired int
 	children []*bytecode.ISeq
 	parent   *builder
 	isBlock  bool
 }
 
 func newBuilder(name string, params []string) *builder {
-	b := &builder{name: name, constIdx: map[object.Value]int{}, params: params}
+	b := &builder{name: name, constIdx: map[object.Value]int{}, params: params, numRequired: len(params)}
 	for _, p := range params {
 		b.localSlot(p) // params occupy slots 0..n-1, in order
 	}
@@ -116,7 +117,8 @@ func (b *builder) build() *bytecode.ISeq {
 		Insns:     b.insns,
 		Consts:    b.consts,
 		Names:     b.names,
-		Params:    b.params,
+		Params:      b.params,
+		NumRequired: b.numRequired,
 		NumLocals: len(b.locals),
 		Children:  b.children,
 	}
@@ -679,6 +681,24 @@ func (c *Compiler) compileWhile(v *ast.While) {
 
 func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	c.push(newBuilder(v.Name, v.Params))
+	b := c.cur()
+	nreq := len(v.Params)
+	for i, d := range v.Defaults {
+		if d == nil {
+			continue
+		}
+		if i < nreq {
+			nreq = i // first optional param marks the required count
+		}
+		// if argument i was not supplied, evaluate its default into the slot
+		b.emit(bytecode.OpArgGiven, i, 0)
+		skip := b.emit(bytecode.OpBranchIf, 0, 0)
+		c.compileNode(d)
+		b.emit(bytecode.OpSetLocal, i, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		b.patch(skip, b.here())
+	}
+	b.numRequired = nreq
 	savedCtxs := c.ctxs
 	c.ctxs = nil
 	c.compileBody(v.Body)

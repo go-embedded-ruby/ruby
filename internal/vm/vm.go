@@ -114,8 +114,12 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 // methodName is the name of the running method ("" at top level / class bodies),
 // used to resolve `super`.
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc) object.Value {
-	if len(args) != len(iseq.Params) {
-		raise("ArgumentError", "wrong number of arguments (given %d, expected %d)", len(args), len(iseq.Params))
+	if len(args) < iseq.NumRequired || len(args) > len(iseq.Params) {
+		expected := fmt.Sprintf("%d", iseq.NumRequired)
+		if iseq.NumRequired != len(iseq.Params) {
+			expected = fmt.Sprintf("%d..%d", iseq.NumRequired, len(iseq.Params))
+		}
+		raise("ArgumentError", "wrong number of arguments (given %d, expected %s)", len(args), expected)
 	}
 	env := &Env{slots: make([]object.Value, iseq.NumLocals), parent: parentEnv}
 	for i := range env.slots {
@@ -271,6 +275,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(vm.callBlock(block, yargs))
 				case bytecode.OpBlockGiven:
 					push(object.Bool(block != nil))
+				case bytecode.OpArgGiven:
+					push(object.Bool(in.A < len(args)))
 				case bytecode.OpReturn:
 					result = pop()
 					finished = true
