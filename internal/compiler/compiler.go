@@ -211,6 +211,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpNewArray, len(v.Elems), 0)
 		}
 	case *ast.HashLit:
+		if hasHashSplat(v) {
+			c.compileHashWithSplat(v)
+			break
+		}
 		for i := range v.Keys {
 			c.compileNode(v.Keys[i])
 			c.compileNode(v.Values[i])
@@ -433,6 +437,33 @@ func (c *Compiler) compileSplatItems(items []ast.Node) {
 			b.emit(bytecode.OpNewArray, 1, 0)
 		}
 		b.emit(bytecode.OpConcatArray, 0, 0)
+	}
+}
+
+// hasHashSplat reports whether any hash entry is a **splat (key == nil).
+func hasHashSplat(v *ast.HashLit) bool {
+	for _, k := range v.Keys {
+		if k == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// compileHashWithSplat builds a Hash incrementally so that **splat entries
+// (key == nil) merge their hash in order, matching Ruby's last-wins semantics.
+func (c *Compiler) compileHashWithSplat(v *ast.HashLit) {
+	b := c.cur()
+	b.emit(bytecode.OpNewHash, 0, 0) // accumulator
+	for i, k := range v.Keys {
+		if k == nil { // **splat
+			c.compileNode(v.Values[i])
+			b.emit(bytecode.OpHashMerge, 0, 0)
+			continue
+		}
+		c.compileNode(k)
+		c.compileNode(v.Values[i])
+		b.emit(bytecode.OpHashSetPair, 0, 0)
 	}
 }
 

@@ -731,6 +731,17 @@ func (p *Parser) parseHashLiteral() ast.Node {
 	p.skipNewlines()
 	for !p.is(token.RBRACE) {
 		var k, v ast.Node
+		if p.accept(token.POW) {
+			// `**expr` — a double-splat entry (nil key signals a merge).
+			h.Keys = append(h.Keys, nil)
+			h.Values = append(h.Values, p.parseExprOrAssign())
+			p.skipNewlines()
+			if !p.accept(token.COMMA) {
+				break
+			}
+			p.skipNewlines()
+			continue
+		}
 		if p.is(token.LABEL) {
 			// `name: value` — the label is sugar for a symbol key.
 			k = &ast.SymbolLit{Name: p.advance().Lit}
@@ -992,6 +1003,10 @@ func (p *Parser) parseCallArgs(until token.Type) []ast.Node {
 // parseOneCallArg parses a single call argument, routing `*splat` and positional
 // expressions into args, and `label: value` / `expr => value` pairs into kw.
 func (p *Parser) parseOneCallArg(args *[]ast.Node, kw **ast.HashLit) {
+	if p.accept(token.POW) { // **expr — double-splat into the keyword hash
+		p.addKwPair(kw, nil, p.parseExprOrAssign())
+		return
+	}
 	if p.is(token.LABEL) {
 		key := &ast.SymbolLit{Name: p.advance().Lit}
 		p.addKwPair(kw, key, p.parseExprOrAssign())

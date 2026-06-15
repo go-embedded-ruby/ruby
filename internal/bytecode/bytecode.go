@@ -70,6 +70,8 @@ const (
 	OpConcatArray  // pops two Arrays b,a; pushes a concatenated with b
 	OpSendArray    // like OpSend but args come from an Array: stack recv, argsArray
 	OpKwGiven      // A = keyword-param index; pushes true if that keyword was supplied
+	OpHashSetPair  // stack acc,k,v → acc with k→v set (incremental hash build)
+	OpHashMerge    // stack acc,other → acc with other (a Hash) merged in (** splat)
 )
 
 var opNames = map[Op]string{
@@ -87,7 +89,7 @@ var opNames = map[Op]string{
 	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break", OpArgGiven: "arg_given",
 	OpPushHandler: "push_handler", OpPopHandler: "pop_handler", OpReThrow: "rethrow",
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
-	OpKwGiven: "kw_given",
+	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 }
 
 func (o Op) String() string {

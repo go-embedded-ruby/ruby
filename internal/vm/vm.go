@@ -286,6 +286,22 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					}
 					stack = stack[:len(stack)-n]
 					push(h)
+				case bytecode.OpHashSetPair:
+					v := pop()
+					k := pop()
+					// the accumulator hash is now on top of the stack; mutate in place.
+					stack[len(stack)-1].(*object.Hash).Set(k, v)
+				case bytecode.OpHashMerge:
+					val := pop()
+					other, ok := val.(*object.Hash)
+					if !ok {
+						raise("TypeError", "no implicit conversion of %s into Hash", vm.classOf(val).name)
+					}
+					acc := stack[len(stack)-1].(*object.Hash)
+					for _, k := range other.Keys {
+						v, _ := other.Get(k)
+						acc.Set(k, v)
+					}
 				case bytecode.OpNewRange:
 					hi := pop()
 					lo := pop()
