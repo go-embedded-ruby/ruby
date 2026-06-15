@@ -406,6 +406,8 @@ destructures it (`[[1,2]].each { |a,b| }`), which also makes **Hash
 Enumerable** — `Hash#each` yields a `[k, v]` pair, so map/find/count/any?/all?
 /none?/to_a operate on pairs (a one-param block sees the pair); `select`/`reject`
 stay native since they return a Hash.
+**Label hash literals**: `{ name: value }` lexes `name:` as a LABEL and is sugar
+for `{ :name => value }`, mixable with the hashrocket form.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
