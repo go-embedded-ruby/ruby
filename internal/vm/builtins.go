@@ -764,6 +764,43 @@ func (vm *VM) bootstrap() {
 		}
 		return out
 	})
+	vm.cHash.define("merge!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		other, ok := args[0].(*object.Hash)
+		if !ok {
+			raise("TypeError", "no implicit conversion into Hash")
+		}
+		for _, k := range other.Keys {
+			v, _ := other.Get(k)
+			h.Set(k, v)
+		}
+		return h
+	})
+	vm.cHash.define("slice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		out := object.NewHash()
+		for _, k := range args {
+			if v, ok := h.Get(k); ok {
+				out.Set(k, v)
+			}
+		}
+		return out
+	})
+	vm.cHash.define("except", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		drop := map[object.Value]bool{}
+		for _, k := range args {
+			drop[k] = true
+		}
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			if !drop[k] {
+				v, _ := h.Get(k)
+				out.Set(k, v)
+			}
+		}
+		return out
+	})
 	vm.cHash.define("fetch", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if v, ok := self.(*object.Hash).Get(args[0]); ok {
 			return v
