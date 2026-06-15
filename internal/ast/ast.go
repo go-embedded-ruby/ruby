@@ -142,6 +142,9 @@ type Return struct{ Value Node } // Value may be nil
 // ConstRef references a constant (e.g. a class name) by name.
 type ConstRef struct{ Name string }
 
+// GVarRef references a global variable by name ("$~", "$1", "$stdout", …).
+type GVarRef struct{ Name string }
+
 // ConstAssign assigns to a constant: NAME = value.
 type ConstAssign struct {
 	Name  string
@@ -262,6 +265,7 @@ func (*MethodDef) node()  {}
 func (*Return) node()     {}
 func (*ConstRef) node()   {}
 func (*ConstAssign) node() {}
+func (*GVarRef) node()    {}
 func (*IvarRef) node()    {}
 func (*IvarAssign) node() {}
 func (*ClassDef) node()   {}

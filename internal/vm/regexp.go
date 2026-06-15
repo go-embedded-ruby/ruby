@@ -144,13 +144,63 @@ func strMatchRegexp(v object.Value) *Regexp {
 	}
 }
 
-// runMatch matches re against subject, returning a MatchData value or nil.
+// runMatch matches re against subject, returning a MatchData value or nil. It
+// also records the result as $~ (the last match).
 func (vm *VM) runMatch(re *Regexp, subject string) object.Value {
 	md := re.re.Match(subject)
 	if md == nil {
+		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	return &MatchData{md: md, subject: subject, re: re}
+	m := &MatchData{md: md, subject: subject, re: re}
+	vm.lastMatch = m
+	return m
+}
+
+// gvar reads a global variable. The match-data specials derive from $~ (the
+// last match); any other name reads as nil (uninitialised global).
+func (vm *VM) gvar(name string) object.Value {
+	last := vm.lastMatch
+	if last == nil {
+		last = object.NilV
+	}
+	if name == "$~" {
+		return last
+	}
+	md, ok := last.(*MatchData)
+	switch name {
+	case "$&":
+		if ok {
+			return object.String(md.md.Str(0))
+		}
+	case "$`":
+		if ok {
+			return object.String(md.md.Pre())
+		}
+	case "$'":
+		if ok {
+			return object.String(md.md.Post())
+		}
+	default:
+		if n, isGroup := gvarGroup(name); isGroup {
+			if ok && n <= md.md.NGroups() {
+				return groupValue(md, n)
+			}
+		}
+	}
+	return object.NilV
+}
+
+// gvarGroup parses "$N" (N a positive integer) into its group number.
+func gvarGroup(name string) (int, bool) {
+	if len(name) < 2 || name[1] < '1' || name[1] > '9' {
+		return 0, false
+	}
+	n := 0
+	for _, c := range name[1:] {
+		n = n*10 + int(c-'0')
+	}
+	return n, true
 }
 
 // byteToChar converts a non-negative byte offset into the character offset Ruby
@@ -661,8 +711,10 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 	}
 	md := re.re.Match(s)
 	if md == nil {
+		vm.lastMatch = object.NilV
 		return object.NilV
 	}
+	vm.lastMatch = &MatchData{md: md, subject: s, re: re}
 	return object.Integer(byteToChar(s, md.Begin(0)))
 }
 

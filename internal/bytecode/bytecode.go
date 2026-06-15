@@ -54,6 +54,7 @@ const (
 	OpGetIvar      // A = Names index; pushes @name from self (nil if unset)
 	OpSetIvar      // A = Names index; sets @name on self, leaves the value
 	OpGetConst     // A = Names index; pushes the named constant
+	OpGetGVar      // A = Names index; pushes the named global (match-data specials)
 	OpSetConst     // A = Names index; sets the named constant to top of stack (kept)
 	OpDefineClass  // A = Names index, B = Children index; defines/reopens a class
 	OpDefineModule // A = Names index, B = Children index; defines/reopens a module
@@ -88,7 +89,7 @@ var opNames = map[Op]string{
 	OpLt: "lt", OpGt: "gt", OpLe: "le", OpGe: "ge", OpEq: "eq", OpNeq: "neq",
 	OpNeg: "neg", OpNot: "not", OpJump: "jump", OpBranchIf: "branch_if",
 	OpBranchUnless: "branch_unless", OpSend: "send", OpGetIvar: "get_ivar",
-	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpSetConst: "set_const", OpDefineClass: "define_class",
+	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpSetConst: "set_const", OpGetGVar: "get_gvar", OpDefineClass: "define_class",
 	OpDefineModule: "define_module", OpDefineMethod: "define_method", OpDefineSMethod: "define_smethod",
 	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
 	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break", OpArgGiven: "arg_given",

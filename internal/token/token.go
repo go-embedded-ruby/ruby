@@ -22,6 +22,7 @@ const (
 	IDENT  // local variable or method name (lowercase / _ leading)
 	CONST  // Capitalized identifier
 	IVAR   // @instance_variable
+	GVAR   // $global / $~ / $1
 	SYMBOL // :name
 	LABEL  // name: in a hash literal
 	REGEXP // /pattern/flags (Lit = pattern source, Flags = matched flag letters)
@@ -97,7 +98,7 @@ const (
 
 var typeNames = map[Type]string{
 	EOF: "EOF", ILLEGAL: "ILLEGAL", NEWLINE: "NEWLINE", INT: "INT", FLOAT: "FLOAT",
-	STRING: "STRING", STRBEG: "STRBEG", STRMID: "STRMID", STREND: "STREND", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR", SYMBOL: "SYMBOL", LABEL: "LABEL", REGEXP: "REGEXP",
+	STRING: "STRING", STRBEG: "STRBEG", STRMID: "STRMID", STREND: "STREND", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR", GVAR: "GVAR", SYMBOL: "SYMBOL", LABEL: "LABEL", REGEXP: "REGEXP",
 	DEF: "def", CLASS: "class", MODULE: "module", END: "end",
 	IF: "if", ELSIF: "elsif", ELSE: "else", UNLESS: "unless", WHILE: "while",
 	UNTIL: "until", RETURN: "return", BREAK: "break", NEXT: "next", BEGIN: "begin", RESCUE: "rescue", ENSURE: "ensure", CASE: "case", WHEN: "when", RETRY: "retry",

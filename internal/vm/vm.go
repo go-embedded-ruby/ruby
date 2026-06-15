@@ -89,6 +89,7 @@ type VM struct {
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
+	lastMatch                              object.Value // $~: last regexp MatchData (or nil)
 	cTrueClass, cFalseClass, cNilClass     *RClass
 	cRegexp, cMatchData                    *RClass
 	cException                             *RClass
@@ -338,6 +339,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				case bytecode.OpSetConst:
 					// Assignment is an expression: set the constant, keep its value.
 					vm.consts[iseq.Names[in.A]] = stack[len(stack)-1]
+				case bytecode.OpGetGVar:
+					push(vm.gvar(iseq.Names[in.A]))
 				case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
 					bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
 					bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:

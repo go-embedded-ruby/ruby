@@ -996,6 +996,9 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.IVAR:
 		p.advance()
 		return &ast.IvarRef{Name: t.Lit}
+	case token.GVAR:
+		p.advance()
+		return &ast.GVarRef{Name: t.Lit}
 	case token.BEGIN:
 		return p.parseBegin()
 	case token.CASE:
@@ -1061,7 +1064,7 @@ func (p *Parser) canStartCommandArg() bool {
 	}
 	switch t.Type {
 	case token.INT, token.FLOAT, token.STRING, token.STRBEG, token.SYMBOL, token.IDENT, token.CONST,
-		token.IVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG,
+		token.IVAR, token.GVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG,
 		token.LPAREN, token.LBRACKET, token.ARROW:
 		return true
 	case token.MINUS, token.PLUS:
