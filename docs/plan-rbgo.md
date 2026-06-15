@@ -421,7 +421,10 @@ arg-array build via OpSplatToArray/OpConcatArray + OpSendArray). **Keyword argum
 params (required and optional, defaults may reference earlier params) plus the
 call-site last-hash sugar; the VM validates unknown/missing keywords
 (ArgumentError, singular/plural). **Array** sum/each_slice/rotate + flatten(depth);
-**Hash** slice/except/merge!.
+**Hash** slice/except/merge!. **Blocks/Procs/lambdas**: `&block` params reify
+the method block as a first-class Proc (call/[]/yield/arity/lambda?); call-site
+`&proc` block-pass + `Symbol#to_proc` (the `&:sym` shorthand, via native-bodied
+Procs); `proc`/`lambda` constructors; and the stabby lambda `->(x){…}`.
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
