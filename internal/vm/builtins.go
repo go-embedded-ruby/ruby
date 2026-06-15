@@ -1281,6 +1281,7 @@ func (vm *VM) bootstrap() {
 	})
 
 	vm.installRegexp()
+	setupStruct(vm)
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,
