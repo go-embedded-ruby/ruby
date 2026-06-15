@@ -125,6 +125,9 @@ var (
 	beginBodyEnd = map[token.Type]bool{token.RESCUE: true, token.ELSE: true, token.ENSURE: true, token.END: true}
 	caseBodyEnd  = map[token.Type]bool{token.WHEN: true, token.ELSE: true, token.END: true}
 	ifBodyEnd    = map[token.Type]bool{token.END: true, token.ELSE: true, token.ELSIF: true}
+	// rangeHiEnds marks tokens that cannot begin a range's high endpoint, making
+	// the range endless (`1..`, `arr[2..]`).
+	rangeHiEnds = map[token.Type]bool{token.RBRACKET: true, token.RPAREN: true, token.RBRACE: true, token.NEWLINE: true, token.EOF: true, token.COMMA: true, token.END: true, token.THEN: true, token.DO: true}
 )
 
 func (p *Parser) parseStatements(stop map[token.Type]bool) []ast.Node {
@@ -538,11 +541,20 @@ func (p *Parser) parseTernary() ast.Node {
 // parseRange handles `lo..hi` / `lo...hi`, binding looser than the binary
 // operators but tighter than assignment.
 func (p *Parser) parseRange() ast.Node {
+	if p.is(token.DOTDOT) || p.is(token.DOTDOTDOT) { // beginless: ..hi / ...hi
+		excl := p.is(token.DOTDOTDOT)
+		p.advance()
+		return &ast.RangeLit{Hi: p.parseBinary(0), Exclusive: excl}
+	}
 	left := p.parseBinary(0)
 	if p.is(token.DOTDOT) || p.is(token.DOTDOTDOT) {
 		excl := p.is(token.DOTDOTDOT)
 		p.advance()
-		return &ast.RangeLit{Lo: left, Hi: p.parseBinary(0), Exclusive: excl}
+		var hi ast.Node // endless when nothing can follow the dots
+		if !rangeHiEnds[p.cur().Type] {
+			hi = p.parseBinary(0)
+		}
+		return &ast.RangeLit{Lo: left, Hi: hi, Exclusive: excl}
 	}
 	return left
 }

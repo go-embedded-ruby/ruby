@@ -189,8 +189,19 @@ func (r *Range) sep() string {
 	}
 	return ".."
 }
-func (r *Range) ToS() string     { return r.Lo.ToS() + r.sep() + r.Hi.ToS() }
-func (r *Range) Inspect() string { return r.Lo.Inspect() + r.sep() + r.Hi.Inspect() }
+func (r *Range) ToS() string     { return rangeEnd(r.Lo, false) + r.sep() + rangeEnd(r.Hi, false) }
+func (r *Range) Inspect() string { return rangeEnd(r.Lo, true) + r.sep() + rangeEnd(r.Hi, true) }
+
+// rangeEnd renders one endpoint, or "" for a nil (beginless/endless) bound.
+func rangeEnd(v Value, inspect bool) string {
+	if _, ok := v.(Nil); ok {
+		return ""
+	}
+	if inspect {
+		return v.Inspect()
+	}
+	return v.ToS()
+}
 func (r *Range) Truthy() bool    { return true }
 
 // Bool is true or false.

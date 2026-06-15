@@ -412,6 +412,29 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		if rng, ok := args[0].(*object.Range); ok {
+			start, length, ok := sliceRange(len(a.Elems), rng)
+			if !ok {
+				return object.NilV
+			}
+			out := make([]object.Value, length)
+			copy(out, a.Elems[start:start+length])
+			return &object.Array{Elems: out}
+		}
+		if len(args) == 2 { // a[start, len]
+			start := normIndex(intArg(args[0]), len(a.Elems))
+			length := int(intArg(args[1]))
+			if start < 0 || start > len(a.Elems) || length < 0 {
+				return object.NilV
+			}
+			end := start + length
+			if end > len(a.Elems) {
+				end = len(a.Elems)
+			}
+			out := make([]object.Value, end-start)
+			copy(out, a.Elems[start:end])
+			return &object.Array{Elems: out}
+		}
 		if i, ok := arrayIndex(a, intArg(args[0])); ok {
 			return a.Elems[i]
 		}
@@ -769,10 +792,18 @@ func (vm *VM) bootstrap() {
 		r := self.(*object.Range)
 		v := args[0]
 		// cover? is comparison-based: an incomparable member is simply not
-		// covered (Ruby returns false rather than raising).
-		lc, lok := rangeCmp(v, r.Lo)
+		// covered (Ruby returns false rather than raising). A nil bound is open.
+		if _, isNil := r.Lo.(object.Nil); !isNil {
+			lc, lok := rangeCmp(v, r.Lo)
+			if !lok || lc < 0 {
+				return object.False
+			}
+		}
+		if _, isNil := r.Hi.(object.Nil); isNil {
+			return object.True
+		}
 		hc, hok := rangeCmp(v, r.Hi)
-		if !lok || !hok || lc < 0 {
+		if !hok {
 			return object.False
 		}
 		if r.Exclusive {
@@ -1213,27 +1244,44 @@ func stringIndex(s string, args []object.Value) object.Value {
 		return object.String(string(r[start:end]))
 	}
 	if rng, ok := args[0].(*object.Range); ok {
-		lo := normIndex(intArg(rng.Lo), n)
-		if lo < 0 || lo > n {
+		start, length, ok := sliceRange(n, rng)
+		if !ok {
 			return object.NilV
 		}
-		hi := normIndex(intArg(rng.Hi), n)
-		if !rng.Exclusive {
-			hi++
-		}
-		if hi > n {
-			hi = n
-		}
-		if hi < lo {
-			hi = lo
-		}
-		return object.String(string(r[lo:hi]))
+		return object.String(string(r[start : start+length]))
 	}
 	i := normIndex(intArg(args[0]), n)
 	if i < 0 || i >= n {
 		return object.NilV
 	}
 	return object.String(string(r[i]))
+}
+
+// sliceRange resolves a Range against a collection of length n into a start
+// index and length. Beginless/endless bounds (nil) default to 0 and n. ok is
+// false when the start is out of range (Ruby returns nil).
+func sliceRange(n int, r *object.Range) (int, int, bool) {
+	lo := 0
+	if _, isNil := r.Lo.(object.Nil); !isNil {
+		lo = normIndex(intArg(r.Lo), n)
+		if lo < 0 || lo > n {
+			return 0, 0, false
+		}
+	}
+	hi := n
+	if _, isNil := r.Hi.(object.Nil); !isNil {
+		hi = normIndex(intArg(r.Hi), n)
+		if !r.Exclusive {
+			hi++
+		}
+		if hi > n {
+			hi = n
+		}
+	}
+	if hi < lo {
+		hi = lo
+	}
+	return lo, hi - lo, true
 }
 
 // normIndex resolves a possibly-negative index against length n (no clamping of

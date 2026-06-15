@@ -203,8 +203,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 		}
 		b.emit(bytecode.OpNewHash, len(v.Keys), 0)
 	case *ast.RangeLit:
-		c.compileNode(v.Lo)
-		c.compileNode(v.Hi)
+		c.compileRangeEnd(v.Lo) // nil → beginless/endless bound
+		c.compileRangeEnd(v.Hi)
 		excl := 0
 		if v.Exclusive {
 			excl = 1
@@ -527,6 +527,15 @@ func (c *Compiler) compileNext(v *ast.Next) {
 func (c *Compiler) compileBreakValue(val ast.Node) {
 	if val != nil {
 		c.compileNode(val)
+	} else {
+		c.cur().emit(bytecode.OpPushNil, 0, 0)
+	}
+}
+
+// compileRangeEnd pushes a range endpoint, or nil for a beginless/endless bound.
+func (c *Compiler) compileRangeEnd(end ast.Node) {
+	if end != nil {
+		c.compileNode(end)
 	} else {
 		c.cur().emit(bytecode.OpPushNil, 0, 0)
 	}
