@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -559,8 +560,59 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
-	vm.cArray.define("flatten", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: flattenArray(self.(*object.Array))}
+	vm.cArray.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		depth := -1
+		if len(args) > 0 {
+			depth = int(intArg(args[0]))
+		}
+		return &object.Array{Elems: flattenDepth(self.(*object.Array).Elems, depth)}
+	})
+	vm.cArray.define("sum", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		acc := object.Value(object.Integer(0))
+		if len(args) > 0 {
+			acc = args[0]
+		}
+		for _, e := range self.(*object.Array).Elems {
+			acc = vm.binaryOp(bytecode.OpAdd, acc, e)
+		}
+		return acc
+	})
+	vm.cArray.define("each_slice", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each_slice)")
+		}
+		n := int(intArg(args[0]))
+		if n <= 0 {
+			raise("ArgumentError", "invalid slice size")
+		}
+		a := self.(*object.Array)
+		for i := 0; i < len(a.Elems); i += n {
+			end := i + n
+			if end > len(a.Elems) {
+				end = len(a.Elems)
+			}
+			slice := make([]object.Value, end-i)
+			copy(slice, a.Elems[i:end])
+			vm.callBlock(blk, []object.Value{&object.Array{Elems: slice}})
+		}
+		return object.NilV
+	})
+	vm.cArray.define("rotate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		n := len(a.Elems)
+		if n == 0 {
+			return &object.Array{}
+		}
+		shift := 1
+		if len(args) > 0 {
+			shift = int(intArg(args[0]))
+		}
+		shift = ((shift % n) + n) % n
+		out := make([]object.Value, n)
+		for i := 0; i < n; i++ {
+			out[i] = a.Elems[(i+shift)%n]
+		}
+		return &object.Array{Elems: out}
 	})
 	vm.cArray.define("join", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		sep := ""
@@ -1400,12 +1452,12 @@ func sign(n int) int {
 	}
 }
 
-// flattenArray recursively flattens nested arrays into one slice.
-func flattenArray(a *object.Array) []object.Value {
+// flattenDepth flattens nested arrays up to depth levels (-1 = fully).
+func flattenDepth(elems []object.Value, depth int) []object.Value {
 	var out []object.Value
-	for _, e := range a.Elems {
-		if sub, ok := e.(*object.Array); ok {
-			out = append(out, flattenArray(sub)...)
+	for _, e := range elems {
+		if sub, ok := e.(*object.Array); ok && depth != 0 {
+			out = append(out, flattenDepth(sub.Elems, depth-1)...)
 		} else {
 			out = append(out, e)
 		}
