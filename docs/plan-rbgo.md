@@ -393,6 +393,10 @@ condition correctly bound to the loop, not to a call in the condition.
 (string patterns), to_i/to_f/to_s/to_str/to_sym, and `[]` slicing (index,
 start+len, Range) — rune-aware where it matters. Mutating forms and regexp
 `sub`/`gsub` await the mutable byte+encoding String / regexp bridge.
+**String interpolation** `"…#{expr}…"`: the lexer emits STRBEG/STRMID/STREND so
+the embedded expression lexes in the outer scope (a `#{x}` reads the local `x`),
+with per-interpolation brace tracking for nested `{}` and nesting; parts are
+coerced with `to_s` and concatenated.
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
