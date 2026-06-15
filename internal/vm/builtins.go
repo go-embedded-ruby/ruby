@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -438,6 +439,158 @@ func (vm *VM) bootstrap() {
 		return &object.Array{Elems: out}
 	})
 
+	// Integer methods.
+	intOf := func(self object.Value) int64 { return int64(self.(object.Integer)) }
+	vm.cInteger.define("abs", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(absInt(intOf(self)))
+	})
+	vm.cInteger.define("even?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(intOf(self)%2 == 0)
+	})
+	vm.cInteger.define("odd?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(intOf(self)%2 != 0)
+	})
+	vm.cInteger.define("zero?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(intOf(self) == 0)
+	})
+	vm.cInteger.define("positive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(intOf(self) > 0)
+	})
+	vm.cInteger.define("negative?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(intOf(self) < 0)
+	})
+	intSucc := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(intOf(self) + 1)
+	}
+	vm.cInteger.define("succ", intSucc)
+	vm.cInteger.define("next", intSucc)
+	vm.cInteger.define("pred", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(intOf(self) - 1)
+	})
+	vm.cInteger.define("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cInteger.define("to_int", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cInteger.define("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Float(float64(intOf(self)))
+	})
+	vm.cInteger.define("to_s", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		base := int64(10)
+		if len(args) > 0 {
+			base = intArg(args[0])
+		}
+		if base < 2 || base > 36 {
+			raise("ArgumentError", "invalid radix %d", base)
+		}
+		return object.String(strconv.FormatInt(intOf(self), int(base)))
+	})
+	vm.cInteger.define("gcd", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := absInt(intOf(self)), absInt(intArg(args[0]))
+		for b != 0 {
+			a, b = b, a%b
+		}
+		return object.Integer(a)
+	})
+	vm.cInteger.define("divmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := intOf(self), intArg(args[0])
+		if b == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		return &object.Array{Elems: []object.Value{object.Integer(floorDiv(a, b)), object.Integer(floorMod(a, b))}}
+	})
+	vm.cInteger.define("digits", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		n := intOf(self)
+		if n < 0 {
+			raise("Math::DomainError", "out of domain")
+		}
+		if n == 0 {
+			return &object.Array{Elems: []object.Value{object.Integer(0)}}
+		}
+		var out []object.Value
+		for n > 0 {
+			out = append(out, object.Integer(n%10))
+			n /= 10
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cInteger.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		n := intOf(self)
+		if n < 0 || n > 255 {
+			raise("RangeError", "%d out of char range", n)
+		}
+		return object.String(string([]byte{byte(n)}))
+	})
+	vm.cInteger.define("upto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (upto)")
+		}
+		for i := intOf(self); i <= intArg(args[0]); i++ {
+			vm.callBlock(blk, []object.Value{object.Integer(i)})
+		}
+		return self
+	})
+	vm.cInteger.define("downto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (downto)")
+		}
+		for i := intOf(self); i >= intArg(args[0]); i-- {
+			vm.callBlock(blk, []object.Value{object.Integer(i)})
+		}
+		return self
+	})
+
+	// Float methods.
+	floatOf := func(self object.Value) float64 { return float64(self.(object.Float)) }
+	vm.cFloat.define("abs", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Float(math.Abs(floatOf(self)))
+	})
+	vm.cFloat.define("zero?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(floatOf(self) == 0)
+	})
+	vm.cFloat.define("positive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(floatOf(self) > 0)
+	})
+	vm.cFloat.define("negative?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(floatOf(self) < 0)
+	})
+	vm.cFloat.define("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cFloat.define("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(int64(floatOf(self)))
+	})
+	vm.cFloat.define("to_int", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(int64(floatOf(self)))
+	})
+	vm.cFloat.define("ceil", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(int64(math.Ceil(floatOf(self))))
+	})
+	vm.cFloat.define("floor", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(int64(math.Floor(floatOf(self))))
+	})
+	vm.cFloat.define("round", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(int64(math.Round(floatOf(self))))
+	})
+	vm.cFloat.define("nan?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(math.IsNaN(floatOf(self)))
+	})
+	vm.cFloat.define("finite?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		f := floatOf(self)
+		return object.Bool(!math.IsInf(f, 0) && !math.IsNaN(f))
+	})
+	vm.cFloat.define("infinite?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		f := floatOf(self)
+		if math.IsInf(f, 1) {
+			return object.Integer(1)
+		}
+		if math.IsInf(f, -1) {
+			return object.Integer(-1)
+		}
+		return object.NilV
+	})
+
 	// Class.
 	vm.cClass.define("new", nativeNew)
 
@@ -705,6 +858,14 @@ func strArg(v object.Value) string {
 	}
 	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
 	return ""
+}
+
+// absInt is the absolute value of an int64.
+func absInt(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // rubyEqual is the default Object#== : pointer identity for instances, and

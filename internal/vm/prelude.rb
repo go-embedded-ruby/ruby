@@ -166,3 +166,19 @@ module Enumerable
     self
   end
 end
+
+# The built-in ordered types are Comparable: each defines <=> natively, so they
+# pick up <, <=, >, >=, between?, and clamp from the module above. (The
+# comparison operators still take the VM's inline fast path; between?/clamp route
+# through <=>.)
+class Integer
+  include Comparable
+end
+
+class Float
+  include Comparable
+end
+
+class String
+  include Comparable
+end
