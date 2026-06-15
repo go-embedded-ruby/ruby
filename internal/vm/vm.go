@@ -308,6 +308,32 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					handlers = handlers[:len(handlers)-1]
 				case bytecode.OpReThrow:
 					panic(vm.excError(pop()))
+				case bytecode.OpSplatToArray:
+					v := pop()
+					if arr, ok := v.(*object.Array); ok {
+						push(arr)
+					} else {
+						push(&object.Array{Elems: []object.Value{v}})
+					}
+				case bytecode.OpConcatArray:
+					b2 := pop().(*object.Array)
+					a2 := pop().(*object.Array)
+					elems := make([]object.Value, 0, len(a2.Elems)+len(b2.Elems))
+					elems = append(elems, a2.Elems...)
+					elems = append(elems, b2.Elems...)
+					push(&object.Array{Elems: elems})
+				case bytecode.OpSendArray:
+					argsArr := pop().(*object.Array)
+					recv := pop()
+					var blk *Proc
+					if in.C > 0 {
+						blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+					}
+					if blk != nil {
+						push(vm.sendCatchBreak(recv, iseq.Names[in.A], argsArr.Elems, blk))
+					} else {
+						push(vm.send(recv, iseq.Names[in.A], argsArr.Elems, nil))
+					}
 				default:
 					raise("VMError", "unknown opcode %s", in.Op)
 				}

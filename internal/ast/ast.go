@@ -191,6 +191,10 @@ type WhenClause struct {
 // Retry restarts the enclosing begin body from inside a rescue clause.
 type Retry struct{}
 
+// SplatArg is a `*expr` argument or array element: its (array) value is spliced
+// into the surrounding argument list / array.
+type SplatArg struct{ Value Node }
+
 // Begin is `begin BODY (rescue …)* [else …] [ensure …] end`.
 type Begin struct {
 	Body       []Node
@@ -241,3 +245,4 @@ func (*Begin) node()      {}
 func (*StrInterp) node()  {}
 func (*Case) node()       {}
 func (*Retry) node()      {}
+func (*SplatArg) node()   {}

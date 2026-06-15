@@ -196,10 +196,14 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.SymbolLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(v.Name)), 0)
 	case *ast.ArrayLit:
-		for _, e := range v.Elems {
-			c.compileNode(e)
+		if hasSplat(v.Elems) {
+			c.compileSplatItems(v.Elems)
+		} else {
+			for _, e := range v.Elems {
+				c.compileNode(e)
+			}
+			b.emit(bytecode.OpNewArray, len(v.Elems), 0)
 		}
-		b.emit(bytecode.OpNewArray, len(v.Elems), 0)
 	case *ast.HashLit:
 		for i := range v.Keys {
 			c.compileNode(v.Keys[i])
@@ -382,12 +386,47 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	} else {
 		b.emit(bytecode.OpPushSelf, 0, 0) // implicit receiver: self
 	}
+	if hasSplat(v.Args) { // dynamic argument count: build an array and splat-send
+		c.compileSplatItems(v.Args)
+		at := b.emit(bytecode.OpSendArray, b.addName(v.Name), 0)
+		if v.Block != nil {
+			b.insns[at].C = c.compileBlock(v.Block) + 1
+		}
+		return
+	}
 	for _, a := range v.Args {
 		c.compileNode(a)
 	}
 	at := b.emit(bytecode.OpSend, b.addName(v.Name), len(v.Args))
 	if v.Block != nil {
 		b.insns[at].C = c.compileBlock(v.Block) + 1 // C-1 indexes Children
+	}
+}
+
+// hasSplat reports whether any item is a *splat.
+func hasSplat(items []ast.Node) bool {
+	for _, it := range items {
+		if _, ok := it.(*ast.SplatArg); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// compileSplatItems leaves one Array on the stack holding all items, with
+// *splat elements spliced in.
+func (c *Compiler) compileSplatItems(items []ast.Node) {
+	b := c.cur()
+	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
+	for _, it := range items {
+		if sp, ok := it.(*ast.SplatArg); ok {
+			c.compileNode(sp.Value)
+			b.emit(bytecode.OpSplatToArray, 0, 0)
+		} else {
+			c.compileNode(it)
+			b.emit(bytecode.OpNewArray, 1, 0)
+		}
+		b.emit(bytecode.OpConcatArray, 0, 0)
 	}
 }
 

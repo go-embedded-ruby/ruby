@@ -689,7 +689,7 @@ func (p *Parser) parseArrayLiteral() ast.Node {
 	var elems []ast.Node
 	p.skipNewlines()
 	for !p.is(token.RBRACKET) {
-		elems = append(elems, p.parseExprOrAssign())
+		elems = append(elems, p.parseArg())
 		p.skipNewlines()
 		if !p.accept(token.COMMA) {
 			break
@@ -937,16 +937,24 @@ func (p *Parser) parseCommandArgs() []ast.Node {
 	return args
 }
 
+// parseArg parses one argument or array element, which may be a `*splat`.
+func (p *Parser) parseArg() ast.Node {
+	if p.accept(token.STAR) {
+		return &ast.SplatArg{Value: p.parseExprOrAssign()}
+	}
+	return p.parseExprOrAssign()
+}
+
 func (p *Parser) parseCallArgs(until token.Type) []ast.Node {
 	var args []ast.Node
 	p.skipNewlines()
 	if p.is(until) {
 		return args
 	}
-	args = append(args, p.parseExprOrAssign())
+	args = append(args, p.parseArg())
 	for p.accept(token.COMMA) {
 		p.skipNewlines()
-		args = append(args, p.parseExprOrAssign())
+		args = append(args, p.parseArg())
 	}
 	p.skipNewlines()
 	return args
