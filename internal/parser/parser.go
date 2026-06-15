@@ -35,6 +35,10 @@ type Parser struct {
 	toks   []token.Token
 	pos    int
 	scopes []*scope
+	// noDo suppresses `do…end` block attachment while parsing a while/until
+	// condition, so the `do` there belongs to the loop, not to a call in the
+	// condition.
+	noDo bool
 }
 
 // Parse lexes and parses src into a Program.
@@ -304,17 +308,27 @@ func (p *Parser) parseUnless() ast.Node {
 
 func (p *Parser) parseWhile() ast.Node {
 	p.expect(token.WHILE)
-	cond := p.parseExprOrAssign()
+	cond := p.parseLoopCond()
 	p.accept(token.DO)
 	body := p.parseStatements(bodyEnd)
 	p.expect(token.END)
 	return &ast.While{Cond: cond, Body: body}
 }
 
+// parseLoopCond parses a while/until condition with `do…end` attachment
+// suppressed, so a trailing `do` is the loop's, not a call block's.
+func (p *Parser) parseLoopCond() ast.Node {
+	saved := p.noDo
+	p.noDo = true
+	cond := p.parseExprOrAssign()
+	p.noDo = saved
+	return cond
+}
+
 // parseUntil desugars `until c ... end` to `while !c ... end`.
 func (p *Parser) parseUntil() ast.Node {
 	p.expect(token.UNTIL)
-	cond := p.parseExprOrAssign()
+	cond := p.parseLoopCond()
 	p.accept(token.DO)
 	body := p.parseStatements(bodyEnd)
 	p.expect(token.END)
@@ -447,8 +461,12 @@ done:
 	// A brace block binds to the immediately preceding method call. (Phase 1
 	// supports `{ … }` blocks; `do … end` arrives once its looser precedence vs
 	// `while/until do` is handled.)
-	if call, ok := node.(*ast.Call); ok && p.is(token.LBRACE) {
-		call.Block = p.parseBlock()
+	if call, ok := node.(*ast.Call); ok {
+		if p.is(token.LBRACE) {
+			call.Block = p.parseBraceBlock()
+		} else if p.is(token.DO) && !p.noDo {
+			call.Block = p.parseDoBlock()
+		}
 	}
 	return node
 }
@@ -493,9 +511,22 @@ func (p *Parser) parseHashLiteral() ast.Node {
 	return h
 }
 
-// parseBlock parses `{ [|params|] body }`.
-func (p *Parser) parseBlock() *ast.Block {
+// parseBraceBlock parses `{ [|params|] body }`.
+func (p *Parser) parseBraceBlock() *ast.Block {
 	p.expect(token.LBRACE)
+	return p.parseBlockRest(map[token.Type]bool{token.RBRACE: true}, token.RBRACE)
+}
+
+// parseDoBlock parses `do [|params|] body end`.
+func (p *Parser) parseDoBlock() *ast.Block {
+	p.expect(token.DO)
+	return p.parseBlockRest(bodyEnd, token.END)
+}
+
+// parseBlockRest parses a block's optional `|params|` and body, having already
+// consumed the opener. end is the closing token; stop marks where the body
+// stops.
+func (p *Parser) parseBlockRest(stop map[token.Type]bool, end token.Type) *ast.Block {
 	p.pushBlockScope()
 	var params []string
 	if p.accept(token.PIPE) {
@@ -505,9 +536,9 @@ func (p *Parser) parseBlock() *ast.Block {
 	for _, prm := range params {
 		p.declareLocal(prm)
 	}
-	body := p.parseStatements(map[token.Type]bool{token.RBRACE: true})
+	body := p.parseStatements(stop)
 	p.popScope()
-	p.expect(token.RBRACE)
+	p.expect(end)
 	return &ast.Block{Params: params, Body: body}
 }
 
