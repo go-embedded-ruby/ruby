@@ -236,6 +236,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 		}
 	case *ast.Begin:
 		c.compileBegin(v)
+	case *ast.Case:
+		c.compileCase(v)
 	case *ast.OpAssign:
 		// Allocate the slot before the read so a fresh `x ||= v` sees nil
 		// rather than failing to resolve.
@@ -521,6 +523,47 @@ func (c *Compiler) compileBreakValue(val ast.Node) {
 		c.compileNode(val)
 	} else {
 		c.cur().emit(bytecode.OpPushNil, 0, 0)
+	}
+}
+
+// compileCase compiles case/when. With a subject, each when-condition matches
+// via `cond === subject` (the subject evaluated once into a hidden slot);
+// without one, each condition is tested for truthiness.
+func (c *Compiler) compileCase(v *ast.Case) {
+	b := c.cur()
+	slot := -1
+	if v.Subject != nil {
+		slot = b.localSlot("")
+		c.compileNode(v.Subject)
+		b.emit(bytecode.OpSetLocal, slot, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+	}
+	var endJumps []int
+	for _, clause := range v.Whens {
+		var bodyJumps []int
+		for _, cond := range clause.Conds {
+			c.compileNode(cond)
+			if slot >= 0 { // cond === subject
+				b.emit(bytecode.OpGetLocal, slot, 0)
+				b.emit(bytecode.OpSend, b.addName("==="), 1)
+			}
+			bodyJumps = append(bodyJumps, b.emit(bytecode.OpBranchIf, 0, 0))
+		}
+		skip := b.emit(bytecode.OpJump, 0, 0) // no condition matched → next clause
+		for _, j := range bodyJumps {
+			b.patch(j, b.here())
+		}
+		c.compileBody(clause.Body)
+		endJumps = append(endJumps, b.emit(bytecode.OpJump, 0, 0))
+		b.patch(skip, b.here())
+	}
+	if v.Else != nil {
+		c.compileBody(v.Else)
+	} else {
+		b.emit(bytecode.OpPushNil, 0, 0)
+	}
+	for _, j := range endJumps {
+		b.patch(j, b.here())
 	}
 }
 

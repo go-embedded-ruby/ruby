@@ -214,6 +214,11 @@ func (l *Lexer) next() token.Token {
 	case '=':
 		if l.peek() == '=' {
 			l.advance()
+			if l.peek() == '=' {
+				l.advance()
+				l.state = exprBegin
+				return mk(token.EQQ, "===")
+			}
 			l.state = exprBegin
 			return mk(token.EQ, "==")
 		}

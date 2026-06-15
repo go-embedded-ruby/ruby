@@ -42,6 +42,8 @@ const (
 	BEGIN
 	RESCUE
 	ENSURE
+	CASE
+	WHEN
 	THEN
 	DO
 	TRUE
@@ -59,6 +61,7 @@ const (
 	PERCENT
 	ASSIGN
 	EQ
+	EQQ // ===
 	NEQ
 	LT
 	GT
@@ -91,11 +94,11 @@ var typeNames = map[Type]string{
 	STRING: "STRING", STRBEG: "STRBEG", STRMID: "STRMID", STREND: "STREND", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR", SYMBOL: "SYMBOL", LABEL: "LABEL",
 	DEF: "def", CLASS: "class", MODULE: "module", END: "end",
 	IF: "if", ELSIF: "elsif", ELSE: "else", UNLESS: "unless", WHILE: "while",
-	UNTIL: "until", RETURN: "return", BREAK: "break", NEXT: "next", BEGIN: "begin", RESCUE: "rescue", ENSURE: "ensure",
+	UNTIL: "until", RETURN: "return", BREAK: "break", NEXT: "next", BEGIN: "begin", RESCUE: "rescue", ENSURE: "ensure", CASE: "case", WHEN: "when",
 	THEN: "then", DO: "do", TRUE: "true", FALSE: "false", NIL: "nil", SELF: "self",
 	SUPER: "super", YIELD: "yield",
 	PLUS: "+", MINUS: "-", STAR: "*", SLASH: "/", PERCENT: "%", ASSIGN: "=",
-	EQ: "==", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
+	EQ: "==", EQQ: "===", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
 	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=", QUESTION: "?", COLON: ":",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
 	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
@@ -115,6 +118,7 @@ var Keywords = map[string]Type{
 	"unless": UNLESS, "while": WHILE, "until": UNTIL, "return": RETURN,
 	"break": BREAK, "next": NEXT,
 	"begin": BEGIN, "rescue": RESCUE, "ensure": ENSURE,
+	"case": CASE, "when": WHEN,
 	"then": THEN, "do": DO,
 	"true": TRUE, "false": FALSE, "nil": NIL, "self": SELF, "super": SUPER,
 	"yield": YIELD,

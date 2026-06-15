@@ -127,6 +127,14 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
+	// Case equality. Object#=== defaults to ==; Module/Class#=== is is_a?;
+	// Range#=== is membership. These drive `case`/`when`.
+	vm.cObject.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(vm.send(self, "==", []object.Value{args[0]}, nil).Truthy())
+	})
+	vm.cModule.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(classIsA(vm.classOf(args[0]), self.(*RClass)))
+	})
 
 	// Module (Class inherits these).
 	vm.cModule.define("include", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -588,6 +596,7 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("include?", rangeCover)
 	vm.cRange.define("cover?", rangeCover)
 	vm.cRange.define("member?", rangeCover)
+	vm.cRange.define("===", rangeCover)
 	vm.cRange.define("min", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
 		lo, _, _ := rangeInts(r)

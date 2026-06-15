@@ -123,6 +123,7 @@ func (p *Parser) isLocal(n string) bool {
 var (
 	bodyEnd      = map[token.Type]bool{token.END: true}
 	beginBodyEnd = map[token.Type]bool{token.RESCUE: true, token.ELSE: true, token.ENSURE: true, token.END: true}
+	caseBodyEnd  = map[token.Type]bool{token.WHEN: true, token.ELSE: true, token.END: true}
 	ifBodyEnd    = map[token.Type]bool{token.END: true, token.ELSE: true, token.ELSIF: true}
 )
 
@@ -425,6 +426,31 @@ func (p *Parser) parseInterpString() ast.Node {
 	return &ast.StrInterp{Parts: parts}
 }
 
+// parseCase parses `case [subject] (when c[, c…] [then] body)* [else body] end`.
+func (p *Parser) parseCase() ast.Node {
+	p.expect(token.CASE)
+	node := &ast.Case{}
+	if !p.is(token.NEWLINE) {
+		node.Subject = p.parseExprOrAssign()
+	}
+	p.skipNewlines()
+	for p.is(token.WHEN) {
+		p.advance()
+		clause := ast.WhenClause{Conds: []ast.Node{p.parseExprOrAssign()}}
+		for p.accept(token.COMMA) {
+			clause.Conds = append(clause.Conds, p.parseExprOrAssign())
+		}
+		p.accept(token.THEN)
+		clause.Body = p.parseStatements(caseBodyEnd)
+		node.Whens = append(node.Whens, clause)
+	}
+	if p.accept(token.ELSE) {
+		node.Else = p.parseStatements(bodyEnd)
+	}
+	p.expect(token.END)
+	return node
+}
+
 // --- expressions ---
 
 func (p *Parser) parseExprOrAssign() ast.Node {
@@ -513,7 +539,7 @@ func binBP(tt token.Type) int {
 		return 4
 	case token.ANDAND:
 		return 6
-	case token.EQ, token.NEQ, token.SPACESHIP:
+	case token.EQ, token.EQQ, token.NEQ, token.SPACESHIP:
 		return 10
 	case token.LT, token.GT, token.LE, token.GE:
 		return 20
@@ -759,6 +785,8 @@ func (p *Parser) parsePrimary() ast.Node {
 		return &ast.IvarRef{Name: t.Lit}
 	case token.BEGIN:
 		return p.parseBegin()
+	case token.CASE:
+		return p.parseCase()
 	case token.STRBEG:
 		return p.parseInterpString()
 	}

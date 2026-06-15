@@ -172,6 +172,20 @@ type OpAssign struct {
 // literals and embedded expressions, all coerced with to_s and concatenated.
 type StrInterp struct{ Parts []Node }
 
+// Case is `case [Subject] (when …)* [else …] end`. With a Subject each `when`
+// matches via `cond === Subject`; without one, each `when` is a boolean test.
+type Case struct {
+	Subject Node // nil for the condition form
+	Whens   []WhenClause
+	Else    []Node // nil if no else
+}
+
+// WhenClause is one `when COND[, COND…] [then] BODY`.
+type WhenClause struct {
+	Conds []Node
+	Body  []Node
+}
+
 // Begin is `begin BODY (rescue …)* [else …] [ensure …] end`.
 type Begin struct {
 	Body       []Node
@@ -220,3 +234,4 @@ func (*Next) node()       {}
 func (*OpAssign) node()   {}
 func (*Begin) node()      {}
 func (*StrInterp) node()  {}
+func (*Case) node()       {}
