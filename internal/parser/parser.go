@@ -391,7 +391,32 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 		p.expect(token.ASSIGN)
 		return &ast.IvarAssign{Name: name, Value: p.parseExprOrAssign()}
 	}
+	// Compound assignment to a local / ivar: LHS OP= expr → LHS = LHS OP expr.
+	if p.is(token.IDENT) && p.peekTok().Type == token.OPASSIGN {
+		name := p.advance().Lit
+		op := p.advance().Lit
+		rhs := p.parseExprOrAssign()
+		p.declareLocal(name)
+		return &ast.OpAssign{Name: name, Op: op, Value: rhs}
+	}
+	if p.is(token.IVAR) && p.peekTok().Type == token.OPASSIGN {
+		name := p.advance().Lit
+		op := p.advance().Lit
+		rhs := p.parseExprOrAssign()
+		return &ast.IvarAssign{Name: name, Value: &ast.BinaryExpr{Op: op, Left: &ast.IvarRef{Name: name}, Right: rhs}}
+	}
 	left := p.parseRange()
+	// Compound index assignment: recv[i] OP= v → recv[i] = recv[i] OP v.
+	if p.is(token.OPASSIGN) {
+		if call, ok := left.(*ast.Call); ok && call.Name == "[]" && call.Recv != nil {
+			op := p.advance().Lit
+			rhs := p.parseExprOrAssign()
+			read := &ast.Call{Recv: call.Recv, Name: "[]", Args: call.Args}
+			newVal := &ast.BinaryExpr{Op: op, Left: read, Right: rhs}
+			args := append(append([]ast.Node{}, call.Args...), newVal)
+			return &ast.Call{Recv: call.Recv, Name: "[]=", Args: args}
+		}
+	}
 	// Index assignment: recv[i] = v  →  recv.[]=(i, v).
 	if p.is(token.ASSIGN) {
 		if call, ok := left.(*ast.Call); ok && call.Name == "[]" && call.Recv != nil {

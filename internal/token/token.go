@@ -59,6 +59,7 @@ const (
 	LE
 	GE
 	SPACESHIP // <=>
+	OPASSIGN  // compound assignment (+=, -=, ||=, …); Lit holds the operator
 	SHOVEL    // <<
 	ANDAND    // &&
 	OROR      // ||
@@ -87,7 +88,7 @@ var typeNames = map[Type]string{
 	SUPER: "super", YIELD: "yield",
 	PLUS: "+", MINUS: "-", STAR: "*", SLASH: "/", PERCENT: "%", ASSIGN: "=",
 	EQ: "==", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
-	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||",
+	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
 	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
 }

@@ -101,18 +101,43 @@ func (l *Lexer) next() token.Token {
 	l.advance()
 	switch c {
 	case '+':
+		if l.peek() == '=' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.OPASSIGN, "+")
+		}
 		l.state = exprBegin
 		return mk(token.PLUS, "+")
 	case '-':
+		if l.peek() == '=' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.OPASSIGN, "-")
+		}
 		l.state = exprBegin
 		return mk(token.MINUS, "-")
 	case '*':
+		if l.peek() == '=' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.OPASSIGN, "*")
+		}
 		l.state = exprBegin
 		return mk(token.STAR, "*")
 	case '/':
+		if l.peek() == '=' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.OPASSIGN, "/")
+		}
 		l.state = exprBegin
 		return mk(token.SLASH, "/")
 	case '%':
+		if l.peek() == '=' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.OPASSIGN, "%")
+		}
 		l.state = exprBegin
 		return mk(token.PERCENT, "%")
 	case '(':
@@ -136,6 +161,11 @@ func (l *Lexer) next() token.Token {
 	case '|':
 		if l.peek() == '|' {
 			l.advance()
+			if l.peek() == '=' {
+				l.advance()
+				l.state = exprBegin
+				return mk(token.OPASSIGN, "||")
+			}
 			l.state = exprBegin
 			return mk(token.OROR, "||")
 		}
@@ -144,6 +174,11 @@ func (l *Lexer) next() token.Token {
 	case '&':
 		if l.peek() == '&' {
 			l.advance()
+			if l.peek() == '=' {
+				l.advance()
+				l.state = exprBegin
+				return mk(token.OPASSIGN, "&&")
+			}
 			l.state = exprBegin
 			return mk(token.ANDAND, "&&")
 		}
@@ -195,8 +230,13 @@ func (l *Lexer) next() token.Token {
 			l.state = exprBegin
 			return mk(token.LE, "<=")
 		}
-		if l.peek() == '<' { // <<
+		if l.peek() == '<' { // << or <<=
 			l.advance()
+			if l.peek() == '=' {
+				l.advance()
+				l.state = exprBegin
+				return mk(token.OPASSIGN, "<<")
+			}
 			l.state = exprBegin
 			return mk(token.SHOVEL, "<<")
 		}

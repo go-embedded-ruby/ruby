@@ -226,6 +226,15 @@ func (c *Compiler) compileNode(n ast.Node) {
 		} else {
 			b.emit(bytecode.OpSetLocal, b.localSlot(v.Name), 0)
 		}
+	case *ast.OpAssign:
+		// Allocate the slot before the read so a fresh `x ||= v` sees nil
+		// rather than failing to resolve.
+		depth, slot, ok := b.resolve(v.Name)
+		if !ok {
+			slot, depth = b.localSlot(v.Name), 0
+		}
+		c.compileNode(&ast.BinaryExpr{Op: v.Op, Left: &ast.VarRef{Name: v.Name}, Right: v.Value})
+		b.emit(bytecode.OpSetLocal, slot, depth)
 	case *ast.UnaryExpr:
 		c.compileNode(v.Operand)
 		switch v.Op {

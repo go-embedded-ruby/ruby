@@ -160,6 +160,14 @@ type Break struct{ Value Node }
 // nil.
 type Next struct{ Value Node }
 
+// OpAssign is compound assignment to a local: `Name Op= Value` (e.g. x += 1,
+// x ||= 5). Compiled so a fresh local is allocated before its read.
+type OpAssign struct {
+	Name  string
+	Op    string
+	Value Node
+}
+
 func (*Program) node()    {}
 func (*IntLit) node()     {}
 func (*FloatLit) node()   {}
@@ -189,3 +197,4 @@ func (*Super) node()      {}
 func (*Yield) node()      {}
 func (*Break) node()      {}
 func (*Next) node()       {}
+func (*OpAssign) node()   {}
