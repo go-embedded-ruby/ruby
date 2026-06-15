@@ -122,6 +122,7 @@ func (p *Parser) isLocal(n string) bool {
 
 var (
 	bodyEnd      = map[token.Type]bool{token.END: true}
+	braceBlockEnd = map[token.Type]bool{token.RBRACE: true}
 	beginBodyEnd = map[token.Type]bool{token.RESCUE: true, token.ELSE: true, token.ENSURE: true, token.END: true}
 	caseBodyEnd  = map[token.Type]bool{token.WHEN: true, token.ELSE: true, token.END: true}
 	ifBodyEnd    = map[token.Type]bool{token.END: true, token.ELSE: true, token.ELSIF: true}
@@ -768,6 +769,32 @@ func (p *Parser) parseHashLiteral() ast.Node {
 	return h
 }
 
+// parseLambda parses a stabby lambda `->(params) { body }` / `-> { body }` /
+// `->(params) do body end`, desugaring it to `lambda { |params| body }`.
+func (p *Parser) parseLambda() ast.Node {
+	p.expect(token.ARROW)
+	p.pushBlockScope()
+	var params []string
+	if p.accept(token.LPAREN) {
+		params = p.parseParamNames(token.RPAREN)
+		p.expect(token.RPAREN)
+	}
+	for _, prm := range params {
+		p.declareLocal(prm)
+	}
+	var body []ast.Node
+	if p.accept(token.DO) {
+		body = p.parseStatements(bodyEnd)
+		p.expect(token.END)
+	} else {
+		p.expect(token.LBRACE)
+		body = p.parseStatements(braceBlockEnd)
+		p.expect(token.RBRACE)
+	}
+	p.popScope()
+	return &ast.Call{Name: "lambda", Block: &ast.Block{Params: params, Body: body}}
+}
+
 // parseBraceBlock parses `{ [|params|] body }`.
 func (p *Parser) parseBraceBlock() *ast.Block {
 	p.expect(token.LBRACE)
@@ -855,6 +882,8 @@ func (p *Parser) parsePrimary() ast.Node {
 		return p.parseArrayLiteral()
 	case token.LBRACE:
 		return p.parseHashLiteral()
+	case token.ARROW:
+		return p.parseLambda()
 	case token.TRUE:
 		p.advance()
 		return &ast.BoolLit{Value: true}
@@ -958,7 +987,7 @@ func (p *Parser) canStartCommandArg() bool {
 	switch t.Type {
 	case token.INT, token.FLOAT, token.STRING, token.STRBEG, token.SYMBOL, token.IDENT, token.CONST,
 		token.IVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG,
-		token.LPAREN, token.LBRACKET:
+		token.LPAREN, token.LBRACKET, token.ARROW:
 		return true
 	case token.MINUS, token.PLUS:
 		// Unary-style argument: `foo -1` (operand hugs the sign), not `foo - 1`.

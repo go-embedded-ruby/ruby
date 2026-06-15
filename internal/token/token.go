@@ -90,6 +90,7 @@ const (
 	DOTDOT    // ..
 	DOTDOTDOT // ...
 	AMPER     // & (block-pass / block param)
+	ARROW     // -> (stabby lambda)
 )
 
 var typeNames = map[Type]string{
@@ -105,7 +106,7 @@ var typeNames = map[Type]string{
 	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=", QUESTION: "?", COLON: ":",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
 	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
-	AMPER: "&",
+	AMPER: "&", ARROW: "->",
 }
 
 func (t Type) String() string {

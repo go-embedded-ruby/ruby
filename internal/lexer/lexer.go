@@ -117,6 +117,11 @@ func (l *Lexer) next() token.Token {
 			l.state = exprBegin
 			return mk(token.OPASSIGN, "-")
 		}
+		if l.peek() == '>' { // -> stabby lambda
+			l.advance()
+			l.state = exprBegin
+			return mk(token.ARROW, "->")
+		}
 		l.state = exprBegin
 		return mk(token.MINUS, "-")
 	case '*':
