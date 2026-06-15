@@ -397,6 +397,8 @@ start+len, Range) — rune-aware where it matters. Mutating forms and regexp
 the embedded expression lexes in the outer scope (a `#{x}` reads the local `x`),
 with per-interpolation brace tracking for nested `{}` and nesting; parts are
 coerced with `to_s` and concatenated.
+**Ternary** `cond ? a : b` (looser than ranges/binary, tighter than assignment,
+right-associative) desugars to an If expression.
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
