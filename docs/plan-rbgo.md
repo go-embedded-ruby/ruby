@@ -393,6 +393,12 @@ condition correctly bound to the loop, not to a call in the condition.
 (string patterns), to_i/to_f/to_s/to_str/to_sym, and `[]` slicing (index,
 start+len, Range) — rune-aware where it matters. Mutating forms and regexp
 `sub`/`gsub` await the mutable byte+encoding String / regexp bridge.
+**Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
+`positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
+/`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
+`to_f`/`to_i`/`to_int`/`ceil`/`floor`/`round`/`nan?`/`finite?`/`infinite?`. The
+prelude mixes **Comparable into Integer, Float, and String**, so `between?`
+/`clamp` work on them.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
