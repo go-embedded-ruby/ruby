@@ -531,6 +531,102 @@ func (vm *VM) bootstrap() {
 		}
 		return h
 	})
+	vm.cHash.methods["each_pair"] = vm.cHash.methods["each"]
+	vm.cHash.define("merge", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		other, ok := args[0].(*object.Hash)
+		if !ok {
+			raise("TypeError", "no implicit conversion into Hash")
+		}
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			out.Set(k, v)
+		}
+		for _, k := range other.Keys {
+			v, _ := other.Get(k)
+			out.Set(k, v)
+		}
+		return out
+	})
+	vm.cHash.define("fetch", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if v, ok := self.(*object.Hash).Get(args[0]); ok {
+			return v
+		}
+		if len(args) > 1 {
+			return args[1]
+		}
+		raise("KeyError", "key not found: %s", args[0].Inspect())
+		return object.NilV
+	})
+	vm.cHash.define("dig", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.digValue(self, args)
+	})
+	vm.cHash.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		out := make([]object.Value, len(args))
+		for i, k := range args {
+			v, _ := h.Get(k)
+			out[i] = v
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cHash.define("transform_values", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (transform_values)")
+		}
+		h := self.(*object.Hash)
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			out.Set(k, vm.callBlock(blk, []object.Value{v}))
+		}
+		return out
+	})
+	vm.cHash.define("transform_keys", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (transform_keys)")
+		}
+		h := self.(*object.Hash)
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			out.Set(vm.callBlock(blk, []object.Value{k}), v)
+		}
+		return out
+	})
+	vm.cHash.define("invert", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			out.Set(v, k)
+		}
+		return out
+	})
+	vm.cHash.define("to_h", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cHash.define("store", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		self.(*object.Hash).Set(args[0], args[1])
+		return args[1]
+	})
+	vm.cHash.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		v, _ := self.(*object.Hash).Delete(args[0])
+		return v
+	})
+	hashHasValue := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			if valueEqual(v, args[0]) {
+				return object.True
+			}
+		}
+		return object.False
+	}
+	vm.cHash.define("has_value?", hashHasValue)
+	vm.cHash.define("value?", hashHasValue)
 	// select/reject return a Hash (unlike Enumerable's Array forms), so they are
 	// native rather than inherited.
 	vm.cHash.define("select", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -1206,6 +1302,32 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 	default:
 		panic(vm.excError(vm.send(classArg(args[0]), "new", []object.Value{args[1]}, nil)))
 	}
+}
+
+// digValue implements Hash#dig: walk nested Hashes/Arrays by successive keys,
+// returning nil as soon as a step is missing.
+func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
+	for _, k := range keys {
+		switch c := cur.(type) {
+		case object.Nil:
+			return object.NilV
+		case *object.Hash:
+			v, ok := c.Get(k)
+			if !ok {
+				return object.NilV
+			}
+			cur = v
+		case *object.Array:
+			if i, ok := arrayIndex(c, intArg(k)); ok {
+				cur = c.Elems[i]
+			} else {
+				cur = object.NilV
+			}
+		default:
+			raise("TypeError", "%s does not have #dig method", vm.classOf(cur).name)
+		}
+	}
+	return cur
 }
 
 // absInt is the absolute value of an int64.

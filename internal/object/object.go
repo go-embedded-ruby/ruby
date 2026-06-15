@@ -135,6 +135,22 @@ func (h *Hash) Set(k, v Value) {
 // Len returns the number of entries.
 func (h *Hash) Len() int { return len(h.Keys) }
 
+// Delete removes k, returning its value and whether it was present.
+func (h *Hash) Delete(k Value) (Value, bool) {
+	v, ok := h.vals[k]
+	if !ok {
+		return NilV, false
+	}
+	delete(h.vals, k)
+	for i, key := range h.Keys {
+		if key == k {
+			h.Keys = append(h.Keys[:i], h.Keys[i+1:]...)
+			break
+		}
+	}
+	return v, true
+}
+
 func (h *Hash) repr() string {
 	if len(h.Keys) == 0 {
 		return "{}"
