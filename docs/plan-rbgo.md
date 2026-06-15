@@ -525,7 +525,8 @@ comparison for multibyte. Since go-onigmo's encoding-aware cursor (engine
 `"café".scan(/./)` yields four characters — matching MRI. (Literal multi-byte
 *class members* like `[é]`/`[à-ï]` are the remaining engine-side item.)
 
-**Deferred:** the `$~`/`$1`.. match globals, `Regexp.new` from a string, the
+The `$~`/`$1`..`$N`/`$&`/`` $` ``/`$'` match globals are now supported
+(VM-global last match). **Still deferred:** `Regexp.new` from a string, the
 `(?'name')` named-group spelling (unsupported by the engine), and the
 `sub`/`gsub` enumerator and Hash-replacement forms.
 
