@@ -21,3 +21,22 @@ func TestRegexpDotCharAdvance(t *testing.T) {
 		})
 	}
 }
+
+// TestRegexpMultibyteClassMembers covers literal non-ASCII character-class
+// members (since the go-onigmo multibyte-class release): [é]/[à-ï] match code
+// points, and mixed ASCII/non-ASCII classes combine.
+func TestRegexpMultibyteClassMembers(t *testing.T) {
+	tests := []struct{ name, src, want string }{
+		{"mixed_class", `p "café".scan(/[a-zé]/)`, "[\"c\", \"a\", \"f\", \"é\"]\n"},
+		{"mb_range", `p "résumé".scan(/[à-ï]/)`, "[\"é\", \"é\"]\n"},
+		{"greek_set", `p "αβγδ".scan(/[αβγ]/)`, "[\"α\", \"β\", \"γ\"]\n"},
+		{"negated_mb", `p "héllo".scan(/[^l]/)`, "[\"h\", \"é\", \"o\"]\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q got=%q want=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
