@@ -405,6 +405,8 @@ right-associative) desugars to an If expression.
 is `==`, Module/Class#=== is `is_a?`, Range#=== is membership — so `when
 Integer`, `when 80..89`, `when 2` all dispatch correctly (subject evaluated
 once; `===` lexed via a new EQQ token).
+**More String methods**: `ljust`/`rjust`/`center` (rune-width padding) and
+`tr`/`count`/`delete`/`squeeze` (with `a-z` range expansion).
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
