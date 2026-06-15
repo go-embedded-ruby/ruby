@@ -1093,11 +1093,26 @@ func (vm *VM) bootstrap() {
 		return object.String(strconv.FormatInt(intOf(self), int(base)))
 	})
 	vm.cInteger.define("gcd", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := absInt(intOf(self)), absInt(intArg(args[0]))
-		for b != 0 {
-			a, b = b, a%b
+		return object.Integer(gcdInt(intOf(self), intArg(args[0])))
+	})
+	vm.cInteger.define("lcm", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := intOf(self), intArg(args[0])
+		if a == 0 || b == 0 {
+			return object.Integer(0)
 		}
-		return object.Integer(a)
+		return object.Integer(absInt(a/gcdInt(a, b) * b))
+	})
+	vm.cInteger.define("bit_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		n := intOf(self)
+		if n < 0 {
+			n = ^n
+		}
+		var c int64
+		for n > 0 {
+			c++
+			n >>= 1
+		}
+		return object.Integer(c)
 	})
 	vm.cInteger.define("divmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := intOf(self), intArg(args[0])
@@ -1106,8 +1121,15 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: []object.Value{object.Integer(floorDiv(a, b)), object.Integer(floorMod(a, b))}}
 	})
-	vm.cInteger.define("digits", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cInteger.define("digits", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
+		base := int64(10)
+		if len(args) > 0 {
+			base = intArg(args[0])
+			if base < 2 {
+				raise("ArgumentError", "invalid radix %d", base)
+			}
+		}
 		if n < 0 {
 			raise("Math::DomainError", "out of domain")
 		}
@@ -1116,8 +1138,8 @@ func (vm *VM) bootstrap() {
 		}
 		var out []object.Value
 		for n > 0 {
-			out = append(out, object.Integer(n%10))
-			n /= 10
+			out = append(out, object.Integer(n%base))
+			n /= base
 		}
 		return &object.Array{Elems: out}
 	})
@@ -1744,6 +1766,15 @@ func absInt(n int64) int64 {
 		return -n
 	}
 	return n
+}
+
+// gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.
+func gcdInt(a, b int64) int64 {
+	a, b = absInt(a), absInt(b)
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // rubyEqual is the default Object#== : pointer identity for instances, and
