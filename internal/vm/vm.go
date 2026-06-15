@@ -335,6 +335,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						raise("NameError", "uninitialized constant %s", name)
 					}
 					push(v)
+				case bytecode.OpSetConst:
+					// Assignment is an expression: set the constant, keep its value.
+					vm.consts[iseq.Names[in.A]] = stack[len(stack)-1]
 				case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
 					bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
 					bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:

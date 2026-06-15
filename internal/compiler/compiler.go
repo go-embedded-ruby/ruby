@@ -304,6 +304,9 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileCall(v)
 	case *ast.ConstRef:
 		b.emit(bytecode.OpGetConst, b.addName(v.Name), 0)
+	case *ast.ConstAssign:
+		c.compileNode(v.Value)
+		b.emit(bytecode.OpSetConst, b.addName(v.Name), 0)
 	case *ast.IvarRef:
 		b.emit(bytecode.OpGetIvar, b.addName(v.Name), 0)
 	case *ast.IvarAssign:

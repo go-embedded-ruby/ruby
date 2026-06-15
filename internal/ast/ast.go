@@ -142,6 +142,12 @@ type Return struct{ Value Node } // Value may be nil
 // ConstRef references a constant (e.g. a class name) by name.
 type ConstRef struct{ Name string }
 
+// ConstAssign assigns to a constant: NAME = value.
+type ConstAssign struct {
+	Name  string
+	Value Node
+}
+
 // IvarRef reads an instance variable (@name) of self.
 type IvarRef struct{ Name string }
 
@@ -255,6 +261,7 @@ func (*While) node()      {}
 func (*MethodDef) node()  {}
 func (*Return) node()     {}
 func (*ConstRef) node()   {}
+func (*ConstAssign) node() {}
 func (*IvarRef) node()    {}
 func (*IvarAssign) node() {}
 func (*ClassDef) node()   {}

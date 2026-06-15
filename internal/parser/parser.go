@@ -266,7 +266,15 @@ func (p *Parser) parseDef() ast.Node {
 // method (`<=>`, `<`, `==`, `+`, `<<`, …), or the index methods `[]` / `[]=`.
 func (p *Parser) parseDefName() (string, bool) {
 	switch p.cur().Type {
-	case token.IDENT, token.CONST,
+	case token.IDENT:
+		name := p.advance().Lit
+		// Setter method: def name=(value) — the '=' hugs the name (no space).
+		if p.is(token.ASSIGN) && !p.cur().SpaceBefore {
+			p.advance()
+			name += "="
+		}
+		return name, true
+	case token.CONST,
 		token.SPACESHIP, token.LT, token.GT, token.LE, token.GE,
 		token.EQ, token.NEQ, token.SHOVEL, token.PLUS, token.MINUS,
 		token.STAR, token.SLASH, token.PERCENT:
@@ -546,6 +554,12 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 		p.declareLocal(name)
 		return &ast.Assign{Name: name, Value: val}
 	}
+	// Constant assignment: NAME '=' expr.
+	if p.is(token.CONST) && p.peekTok().Type == token.ASSIGN {
+		name := p.advance().Lit
+		p.expect(token.ASSIGN)
+		return &ast.ConstAssign{Name: name, Value: p.parseExprOrAssign()}
+	}
 	// Instance-variable assignment: @name '=' expr.
 	if p.is(token.IVAR) && p.peekTok().Type == token.ASSIGN {
 		name := p.advance().Lit
@@ -578,13 +592,22 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 			return &ast.Call{Recv: call.Recv, Name: "[]=", Args: args}
 		}
 	}
-	// Index assignment: recv[i] = v  →  recv.[]=(i, v).
 	if p.is(token.ASSIGN) {
-		if call, ok := left.(*ast.Call); ok && call.Name == "[]" && call.Recv != nil {
-			p.advance()
-			call.Name = "[]="
-			call.Args = append(call.Args, p.parseExprOrAssign())
-			return call
+		if call, ok := left.(*ast.Call); ok && call.Recv != nil {
+			// Index assignment: recv[i] = v  →  recv.[]=(i, v).
+			if call.Name == "[]" {
+				p.advance()
+				call.Name = "[]="
+				call.Args = append(call.Args, p.parseExprOrAssign())
+				return call
+			}
+			// Attribute assignment: recv.attr = v  →  recv.attr=(v).
+			if len(call.Args) == 0 && call.Block == nil {
+				p.advance()
+				call.Name += "="
+				call.Args = []ast.Node{p.parseExprOrAssign()}
+				return call
+			}
 		}
 	}
 	return left
