@@ -31,11 +31,14 @@ func (vm *VM) bootstrap() {
 	vm.cTrueClass = newClass("TrueClass", vm.cObject)
 	vm.cFalseClass = newClass("FalseClass", vm.cObject)
 	vm.cNilClass = newClass("NilClass", vm.cObject)
+	vm.cRegexp = newClass("Regexp", vm.cObject)
+	vm.cMatchData = newClass("MatchData", vm.cObject)
 
 	for _, c := range []*RClass{
 		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
 		vm.cFloat, vm.cString, vm.cSymbol, vm.cArray, vm.cHash, vm.cRange,
 		vm.cProc, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
+		vm.cRegexp, vm.cMatchData,
 	} {
 		vm.consts[c.name] = c
 	}
@@ -107,6 +110,7 @@ func (vm *VM) bootstrap() {
 	exc("NotImplementedError", "StandardError")
 	exc("FrozenError", "RuntimeError")
 	exc("IOError", "StandardError")
+	exc("RegexpError", "StandardError")
 	exc("Math::DomainError", "StandardError")
 
 	// Exception instance protocol: initialize stores @message; message/to_s
@@ -411,6 +415,19 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 		return object.Integer(utf8.RuneCountInString(strOf(self)[:byteIdx]))
+	})
+	vm.cString.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		re, ok := args[0].(*Regexp)
+		if !ok {
+			raise("TypeError", "type mismatch: %s given", classNameOf(args[0]))
+		}
+		return vm.regexpMatchIndex(re, self)
+	})
+	vm.cString.define("match?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(strMatchRegexp(args[0]).re.MatchString(strOf(self)))
+	})
+	vm.cString.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.runMatch(strMatchRegexp(args[0]), strOf(self))
 	})
 	vm.cString.define("sub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.String(strings.Replace(strOf(self), strArg(args[0]), strArg(args[1]), 1))
@@ -1269,6 +1286,8 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
+
+	vm.installRegexp()
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,

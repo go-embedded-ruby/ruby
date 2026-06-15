@@ -142,6 +142,10 @@ func classNameOf(v object.Value) string {
 		return "Array"
 	case *object.Hash:
 		return "Hash"
+	case *Regexp:
+		return "Regexp"
+	case *MatchData:
+		return "MatchData"
 	case object.Nil:
 		return "nil"
 	default:

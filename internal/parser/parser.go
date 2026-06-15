@@ -626,7 +626,7 @@ func binBP(tt token.Type) int {
 		return 4
 	case token.ANDAND:
 		return 6
-	case token.EQ, token.EQQ, token.NEQ, token.SPACESHIP:
+	case token.EQ, token.EQQ, token.NEQ, token.SPACESHIP, token.MATCH:
 		return 10
 	case token.LT, token.GT, token.LE, token.GE:
 		return 20
@@ -905,6 +905,9 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.SYMBOL:
 		p.advance()
 		return &ast.SymbolLit{Name: t.Lit}
+	case token.REGEXP:
+		p.advance()
+		return &ast.RegexpLit{Source: t.Lit, Flags: t.Flags}
 	case token.LBRACKET:
 		return p.parseArrayLiteral()
 	case token.LBRACE:

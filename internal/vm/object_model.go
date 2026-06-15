@@ -137,6 +137,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cRange
 	case *Proc:
 		return vm.cProc
+	case *Regexp:
+		return vm.cRegexp
+	case *MatchData:
+		return vm.cMatchData
 	case object.Bool:
 		if x {
 			return vm.cTrueClass

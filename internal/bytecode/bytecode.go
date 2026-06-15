@@ -74,6 +74,7 @@ const (
 	OpHashMerge    // stack acc,other → acc with other (a Hash) merged in (** splat)
 	OpSendBlockArg // like OpSend but a &block-pass value sits on top of the args
 	OpSendArrayBlockArg // like OpSendArray with a &block-pass value on top
+	OpRegexp            // A = Names index (source), B = Names index (flags); pushes a compiled Regexp
 )
 
 var opNames = map[Op]string{
@@ -93,6 +94,7 @@ var opNames = map[Op]string{
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
+	OpRegexp: "regexp",
 }
 
 func (o Op) String() string {

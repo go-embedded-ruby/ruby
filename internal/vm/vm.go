@@ -90,6 +90,7 @@ type VM struct {
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
 	cTrueClass, cFalseClass, cNilClass     *RClass
+	cRegexp, cMatchData                    *RClass
 	cException                             *RClass
 	curExc                                 object.Value // most recently rescued exception (for bare `raise`)
 }
@@ -420,6 +421,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					handlers = handlers[:len(handlers)-1]
 				case bytecode.OpReThrow:
 					panic(vm.excError(pop()))
+				case bytecode.OpRegexp:
+					push(vm.compileRegexp(iseq.Names[in.A], iseq.Names[in.B]))
 				case bytecode.OpSplatToArray:
 					v := pop()
 					if arr, ok := v.(*object.Array); ok {

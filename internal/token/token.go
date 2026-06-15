@@ -24,6 +24,7 @@ const (
 	IVAR   // @instance_variable
 	SYMBOL // :name
 	LABEL  // name: in a hash literal
+	REGEXP // /pattern/flags (Lit = pattern source, Flags = matched flag letters)
 
 	// Keywords.
 	DEF
@@ -64,6 +65,7 @@ const (
 	ASSIGN
 	EQ
 	EQQ // ===
+	MATCH // =~
 	NEQ
 	LT
 	GT
@@ -95,14 +97,14 @@ const (
 
 var typeNames = map[Type]string{
 	EOF: "EOF", ILLEGAL: "ILLEGAL", NEWLINE: "NEWLINE", INT: "INT", FLOAT: "FLOAT",
-	STRING: "STRING", STRBEG: "STRBEG", STRMID: "STRMID", STREND: "STREND", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR", SYMBOL: "SYMBOL", LABEL: "LABEL",
+	STRING: "STRING", STRBEG: "STRBEG", STRMID: "STRMID", STREND: "STREND", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR", SYMBOL: "SYMBOL", LABEL: "LABEL", REGEXP: "REGEXP",
 	DEF: "def", CLASS: "class", MODULE: "module", END: "end",
 	IF: "if", ELSIF: "elsif", ELSE: "else", UNLESS: "unless", WHILE: "while",
 	UNTIL: "until", RETURN: "return", BREAK: "break", NEXT: "next", BEGIN: "begin", RESCUE: "rescue", ENSURE: "ensure", CASE: "case", WHEN: "when", RETRY: "retry",
 	THEN: "then", DO: "do", TRUE: "true", FALSE: "false", NIL: "nil", SELF: "self",
 	SUPER: "super", YIELD: "yield",
 	PLUS: "+", MINUS: "-", STAR: "*", POW: "**", SLASH: "/", PERCENT: "%", ASSIGN: "=",
-	EQ: "==", EQQ: "===", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
+	EQ: "==", EQQ: "===", MATCH: "=~", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
 	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=", QUESTION: "?", COLON: ":",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
 	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
@@ -133,6 +135,7 @@ var Keywords = map[string]Type{
 type Token struct {
 	Type        Type
 	Lit         string
+	Flags       string // regexp flag letters (i, m, x), only set for REGEXP tokens
 	Line        int
 	Col         int
 	SpaceBefore bool // whitespace immediately preceded this token (MRI spaceSeen)

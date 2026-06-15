@@ -22,6 +22,13 @@ type StringLit struct{ Value string }
 // SymbolLit is a symbol literal (:name); Name excludes the leading colon.
 type SymbolLit struct{ Name string }
 
+// RegexpLit is a regexp literal /source/flags. Flags holds the subset of the
+// flag letters i, m, x that were present.
+type RegexpLit struct {
+	Source string
+	Flags  string
+}
+
 // ArrayLit is an array literal [a, b, c].
 type ArrayLit struct{ Elems []Node }
 
@@ -230,6 +237,7 @@ func (*IntLit) node()     {}
 func (*FloatLit) node()   {}
 func (*StringLit) node()  {}
 func (*SymbolLit) node()  {}
+func (*RegexpLit) node()  {}
 func (*ArrayLit) node()   {}
 func (*HashLit) node()    {}
 func (*RangeLit) node()   {}

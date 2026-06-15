@@ -203,6 +203,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 		}
 	case *ast.SymbolLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(v.Name)), 0)
+	case *ast.RegexpLit:
+		// The source and flags travel in the name pool; the VM compiles the
+		// pattern (translating the Ruby flags to an inline prefix) at runtime.
+		b.emit(bytecode.OpRegexp, b.addName(v.Source), b.addName(v.Flags))
 	case *ast.ArrayLit:
 		if hasSplat(v.Elems) {
 			c.compileSplatItems(v.Elems)

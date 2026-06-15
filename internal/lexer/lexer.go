@@ -84,6 +84,10 @@ func (l *Lexer) next() token.Token {
 	switch {
 	case c == 0:
 		return mk(token.EOF, "")
+	case c == '/' && l.state == exprBegin:
+		// At expression-begin position a '/' opens a regexp literal, not division
+		// (the same disambiguation MRI uses via its lexer state).
+		return l.lexRegexp(spaceBefore, line, col)
 	case c == '\n' || c == ';':
 		l.advance()
 		l.state = exprBegin
@@ -238,6 +242,11 @@ func (l *Lexer) next() token.Token {
 			l.advance()
 			l.state = exprBegin
 			return mk(token.HASHROCKET, "=>")
+		}
+		if l.peek() == '~' { // =~ match operator
+			l.advance()
+			l.state = exprBegin
+			return mk(token.MATCH, "=~")
 		}
 		l.state = exprBegin
 		return mk(token.ASSIGN, "=")
@@ -394,6 +403,55 @@ func (l *Lexer) lexIvar(spaceBefore bool, line, col int) token.Token {
 	}
 	l.state = exprEnd
 	return token.Token{Type: token.IVAR, Lit: "@" + string(l.src[start:l.pos]), Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// lexRegexp lexes a /pattern/flags regexp literal. The opening '/' is at the
+// cursor. Escapes are preserved verbatim into the source (so \d, \. and the
+// like reach the engine untouched) except that an escaped delimiter \/ becomes
+// a literal '/'. Trailing flag letters i, m, x are collected into Flags; any
+// other trailing letters are ignored gracefully (consumed but not recorded).
+func (l *Lexer) lexRegexp(spaceBefore bool, line, col int) token.Token {
+	l.advance() // opening '/'
+	var src []byte
+	for {
+		c := l.peek()
+		if c == 0 {
+			break // unterminated; emit what we have (parser will still build a literal)
+		}
+		if c == '/' {
+			l.advance() // closing '/'
+			break
+		}
+		if c == '\\' {
+			l.advance()
+			esc := l.peek()
+			if esc == 0 {
+				src = append(src, '\\')
+				break
+			}
+			l.advance()
+			if esc == '/' {
+				src = append(src, '/') // \/ → literal slash
+			} else {
+				src = append(src, '\\', esc) // keep the escape for the engine
+			}
+			continue
+		}
+		src = append(src, l.advance())
+	}
+	var flags []byte
+	for {
+		c := l.peek()
+		if c < 'a' || c > 'z' {
+			break
+		}
+		l.advance()
+		if c == 'i' || c == 'm' || c == 'x' {
+			flags = append(flags, c)
+		}
+	}
+	l.state = exprEnd
+	return token.Token{Type: token.REGEXP, Lit: string(src), Flags: string(flags), Line: line, Col: col, SpaceBefore: spaceBefore}
 }
 
 func (l *Lexer) lexString(spaceBefore bool, line, col int) token.Token {

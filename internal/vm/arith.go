@@ -240,6 +240,9 @@ func valueEqual(a, b object.Value) bool {
 	case *object.Range:
 		bv, ok := b.(*object.Range)
 		return ok && av.Exclusive == bv.Exclusive && valueEqual(av.Lo, bv.Lo) && valueEqual(av.Hi, bv.Hi)
+	case *Regexp:
+		bv, ok := b.(*Regexp)
+		return ok && av.source == bv.source && orderFlags(av.flags) == orderFlags(bv.flags)
 	case object.Bool:
 		bv, ok := b.(object.Bool)
 		return ok && av == bv
