@@ -182,3 +182,16 @@ end
 class String
   include Comparable
 end
+
+# Array and Range are Enumerable: each defines `each` natively, so they pick up
+# select/reject/find/reduce/sum/any?/all?/none?/each_with_index from the module
+# above. Their own native methods (map, include?, min, max, count, …) take
+# precedence over the module's where both exist. (Hash also wants Enumerable but
+# needs block auto-splat for its [k, v] pairs first.)
+class Array
+  include Enumerable
+end
+
+class Range
+  include Enumerable
+end
