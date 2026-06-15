@@ -50,7 +50,7 @@ func TestValueEqualBranches(t *testing.T) {
 		{object.Bool(true), object.Integer(1), false},
 		{object.NilV, object.NilV, true},
 		{object.NilV, object.Integer(1), false},
-		{object.Main{}, object.Integer(1), false},
+		{object.NewMain(), object.Integer(1), false},
 	}
 	for _, c := range cases {
 		if got := valueEqual(c.a, c.b); got != c.want {

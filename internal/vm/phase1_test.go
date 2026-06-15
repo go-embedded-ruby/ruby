@@ -25,9 +25,8 @@ func TestObjectModel(t *testing.T) {
 			"class G\n  def method_missing(n)\n    \"got \" + n.to_s\n  end\nend\nputs G.new.zzz", "got zzz\n"},
 		{"const_ref_to_class",
 			"class K\nend\nputs K", "K\n"},
-		// Top-level @ivars live on `main`, which has no ivar storage in Phase 1:
-		// the set is a no-op and the read is nil. (Documented quirk.)
-		{"toplevel_ivar_quirk", "@t = 5\np @t", "nil\n"},
+		// Top-level @ivars live on `main`, which now has its own ivar table.
+		{"toplevel_ivar", "@t = 5\np @t", "5\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

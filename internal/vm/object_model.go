@@ -132,7 +132,7 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cFalseClass
 	case object.Nil:
 		return vm.cNilClass
-	case object.Main:
+	case *object.Main:
 		return vm.cObject
 	}
 	return nil // unreachable for the closed set of value types
@@ -182,8 +182,8 @@ func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
 }
 
 func getIvar(self object.Value, name string) object.Value {
-	if ro, ok := self.(*RObject); ok {
-		if v, ok := ro.ivars[name]; ok {
+	if t := ivarTable(self); t != nil {
+		if v, ok := t[name]; ok {
 			return v
 		}
 	}
@@ -191,7 +191,19 @@ func getIvar(self object.Value, name string) object.Value {
 }
 
 func setIvar(self object.Value, name string, v object.Value) {
-	if ro, ok := self.(*RObject); ok {
-		ro.ivars[name] = v
+	if t := ivarTable(self); t != nil {
+		t[name] = v
 	}
+}
+
+// ivarTable returns the instance-variable map backing self, or nil for values
+// (Integer, String, …) that cannot hold ivars in this phase.
+func ivarTable(self object.Value) map[string]object.Value {
+	switch o := self.(type) {
+	case *RObject:
+		return o.ivars
+	case *object.Main:
+		return o.IvarTable()
+	}
+	return nil
 }

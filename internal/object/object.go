@@ -204,9 +204,17 @@ var (
 )
 
 // Main is the top-level self ("main" object) used while executing the program
-// body. Phase 1 promotes this to a real Object instance of class Object.
-type Main struct{}
+// body. It is a real object with its own instance-variable table, so top-level
+// @ivars persist (and are shared with top-level method bodies, whose self is
+// also main).
+type Main struct{ ivars map[string]Value }
 
-func (Main) ToS() string     { return "main" }
-func (Main) Inspect() string { return "main" }
-func (Main) Truthy() bool    { return true }
+// NewMain returns the top-level self with an empty instance-variable table.
+func NewMain() *Main { return &Main{ivars: map[string]Value{}} }
+
+func (m *Main) ToS() string     { return "main" }
+func (m *Main) Inspect() string { return "main" }
+func (m *Main) Truthy() bool    { return true }
+
+// IvarTable exposes main's instance variables to the VM.
+func (m *Main) IvarTable() map[string]Value { return m.ivars }

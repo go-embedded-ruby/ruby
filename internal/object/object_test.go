@@ -30,7 +30,7 @@ func TestToSAndInspect(t *testing.T) {
 		{Bool(true), "true", "true", true},
 		{Bool(false), "false", "false", false},
 		{Nil{}, "", "nil", false},
-		{Main{}, "main", "main", true},
+		{NewMain(), "main", "main", true},
 	}
 	for _, tc := range tests {
 		if got := tc.v.ToS(); got != tc.toS {

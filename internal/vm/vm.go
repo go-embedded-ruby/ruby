@@ -70,7 +70,7 @@ type VM struct {
 
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
-	vm := &VM{out: out, main: object.Main{}, consts: map[string]object.Value{}}
+	vm := &VM{out: out, main: object.NewMain(), consts: map[string]object.Value{}}
 	vm.bootstrap()
 	vm.loadPrelude(preludeSource)
 	return vm
