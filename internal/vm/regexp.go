@@ -238,6 +238,128 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 	return &object.Array{Elems: results}
 }
 
+// stringSub backs String#sub (global=false) and String#gsub (global=true). The
+// first argument is the pattern (a Regexp, or a String matched literally). A
+// replacement is given either as a second String argument (with backref
+// templates) or as a block (yielded each match). The enumerator and Hash
+// replacement forms are not yet supported.
+func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global bool) object.Value {
+	re := scanRegexp(args[0])
+	if blk != nil {
+		return vm.gsub(re, subject, "", blk, global)
+	}
+	if len(args) < 2 {
+		raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
+	}
+	return vm.gsub(re, subject, strArg(args[1]), nil, global)
+}
+
+// gsub implements String#sub (global=false) and String#gsub (global=true) over
+// a Regexp. Each match is replaced either by expanding a replacement template
+// (with \0/\&, \1..\9, \k<name>, \`, \' backrefs) or by the to_s of a block's
+// result (the block is yielded the matched substring). Returns the new string.
+//
+// Empty matches advance one character (Ruby semantics); a non-empty match
+// advances past its end. With global=false only the first match is replaced.
+func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) object.Value {
+	var b strings.Builder
+	pos := 0    // byte cursor into subject (start of the not-yet-emitted tail)
+	search := 0 // byte cursor where the next search begins
+	for search <= len(subject) {
+		md := re.re.Match(subject[search:])
+		if md == nil {
+			break
+		}
+		mBegin := search + md.Begin(0)
+		mEnd := search + md.End(0)
+		b.WriteString(subject[pos:mBegin]) // literal text before the match
+		if blk != nil {
+			res := vm.callBlock(blk, []object.Value{object.String(md.Str(0))})
+			b.WriteString(vm.send(res, "to_s", nil, nil).ToS())
+		} else {
+			// Prematch/postmatch are taken from the whole subject so \` and \'
+			// span text already consumed by earlier matches (Ruby semantics).
+			b.WriteString(expandReplacement(repl, md, subject[:mBegin], subject[mEnd:]))
+		}
+		pos = mEnd
+		if mEnd == mBegin { // empty match: emit one char, step forward
+			if mEnd >= len(subject) {
+				search = mEnd
+				break
+			}
+			_, w := utf8.DecodeRuneInString(subject[mEnd:])
+			b.WriteString(subject[mEnd : mEnd+w])
+			pos = mEnd + w
+			search = mEnd + w
+		} else {
+			search = mEnd
+		}
+		if !global {
+			break
+		}
+	}
+	b.WriteString(subject[pos:]) // remaining tail
+	return object.String(b.String())
+}
+
+// expandReplacement expands a sub/gsub replacement template against a match:
+// \0 and \& insert the whole match; \1..\9 a numbered group (empty when the
+// group did not participate or is out of range); \k<name> a named group
+// (IndexError for an unknown name); \` the pre-match and \' the post-match; \\
+// a literal backslash. A backslash before any other character (or at the end)
+// is kept literally with that character.
+func expandReplacement(tmpl string, md *onig.MatchData, pre, post string) string {
+	var b strings.Builder
+	for i := 0; i < len(tmpl); i++ {
+		c := tmpl[i]
+		if c != '\\' || i+1 >= len(tmpl) {
+			b.WriteByte(c)
+			continue
+		}
+		n := tmpl[i+1]
+		switch {
+		case n >= '0' && n <= '9':
+			idx := int(n - '0')
+			if idx <= md.NGroups() && md.Begin(idx) >= 0 {
+				b.WriteString(md.Str(idx))
+			}
+			i++
+		case n == '&':
+			b.WriteString(md.Str(0))
+			i++
+		case n == '`':
+			b.WriteString(pre)
+			i++
+		case n == '\'':
+			b.WriteString(post)
+			i++
+		case n == '\\':
+			b.WriteByte('\\')
+			i++
+		case n == 'k' && i+2 < len(tmpl) && tmpl[i+2] == '<':
+			j := i + 3
+			for j < len(tmpl) && tmpl[j] != '>' {
+				j++
+			}
+			if j >= len(tmpl) { // \k< without a closing '>'
+				raise("RuntimeError", "invalid group name reference format")
+			}
+			name := tmpl[i+3 : j]
+			gi := md.IndexOfName(name)
+			if gi < 0 {
+				raise("IndexError", "undefined group name reference: %s", name)
+			}
+			if md.Begin(gi) >= 0 {
+				b.WriteString(md.Str(gi))
+			}
+			i = j
+		default: // \ followed by an ordinary char: keep the backslash and the char
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 // scanElement builds one String#scan result element from a match: the whole
 // match (no groups) or the array of captures (one or more groups).
 func scanElement(md *onig.MatchData) object.Value {

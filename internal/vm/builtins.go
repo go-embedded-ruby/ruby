@@ -432,11 +432,11 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("scan", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.scan(scanRegexp(args[0]), strOf(self), self, blk)
 	})
-	vm.cString.define("sub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.String(strings.Replace(strOf(self), strArg(args[0]), strArg(args[1]), 1))
+	vm.cString.define("sub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.stringSub(strOf(self), args, blk, false)
 	})
-	vm.cString.define("gsub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.String(strings.ReplaceAll(strOf(self), strArg(args[0]), strArg(args[1])))
+	vm.cString.define("gsub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.stringSub(strOf(self), args, blk, true)
 	})
 	vm.cString.define("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(parseLeadingInt(strOf(self)))
