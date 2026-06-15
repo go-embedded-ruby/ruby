@@ -165,6 +165,59 @@ module Enumerable
     }
     self
   end
+
+  def flat_map
+    r = []
+    each { |x|
+      v = yield(x)
+      if v.is_a?(Array)
+        v.each { |e| r << e }
+      else
+        r << v
+      end
+    }
+    r
+  end
+
+  def partition
+    yes = []
+    no = []
+    each { |x|
+      if yield(x)
+        yes << x
+      else
+        no << x
+      end
+    }
+    [yes, no]
+  end
+
+  def group_by
+    h = {}
+    each { |x|
+      k = yield(x)
+      (h[k] ||= []) << x
+    }
+    h
+  end
+
+  def tally
+    h = {}
+    each { |x|
+      h[x] = (h[x] || 0) + 1
+    }
+    h
+  end
+
+  def zip(other)
+    r = []
+    i = 0
+    each { |x|
+      r << [x, other[i]]
+      i = i + 1
+    }
+    r
+  end
 end
 
 # The built-in ordered types are Comparable: each defines <=> natively, so they
