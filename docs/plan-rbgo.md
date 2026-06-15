@@ -408,6 +408,12 @@ Enumerable** — `Hash#each` yields a `[k, v]` pair, so map/find/count/any?/all?
 stay native since they return a Hash.
 **Label hash literals**: `{ name: value }` lexes `name:` as a LABEL and is sugar
 for `{ :name => value }`, mixable with the hashrocket form.
+**`break` / `next`**: a compiler context stack resolves them to the innermost
+block or loop. `next [v]` returns from a block frame or continues a loop;
+`break [v]` exits a loop or terminates the iterator a block was passed to — and
+unwinds to the correct call site even through a Ruby-level iterator (`map { break
+}` returns from `map`), via an OpBreak panic tagged with the executing block's
+identity.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
