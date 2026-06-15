@@ -238,6 +238,145 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 	return &object.Array{Elems: results}
 }
 
+// stringSplit backs String#split. With no pattern, a nil pattern, or the single
+// space string " ", it splits on runs of whitespace (awk-style: leading
+// whitespace is ignored and no empty fields are produced). Otherwise it splits
+// on a Regexp (a String is matched literally), interpolating any captured
+// groups between the pieces and dropping non-participating captures.
+//
+// An optional Integer limit caps the number of fields: a positive limit stops
+// splitting once limit-1 fields have been taken (the last field is the unsplit
+// remainder); a limit <= 0 keeps trailing empty fields, while the absent or
+// zero limit strips them.
+func (vm *VM) stringSplit(subject string, args []object.Value) object.Value {
+	limit := 0
+	if len(args) >= 2 {
+		limit = int(intArg(args[1]))
+	}
+	if splitOnWhitespace(args) {
+		return splitWhitespace(subject, limit)
+	}
+	re := scanRegexp(args[0])
+	return splitRegexp(re, subject, limit)
+}
+
+// splitOnWhitespace reports whether the split should use awk-style whitespace
+// mode: no pattern, a nil pattern, or the literal single space " ".
+func splitOnWhitespace(args []object.Value) bool {
+	if len(args) == 0 {
+		return true
+	}
+	switch p := args[0].(type) {
+	case object.Nil:
+		return true
+	case object.String:
+		return string(p) == " "
+	default:
+		return false
+	}
+}
+
+// splitWhitespace implements awk-style whitespace splitting with an optional
+// field limit.
+func splitWhitespace(subject string, limit int) object.Value {
+	var out []object.Value
+	i := 0
+	n := len(subject)
+	for i < n {
+		for i < n && isASCIISpace(subject[i]) { // skip leading whitespace
+			i++
+		}
+		if i >= n {
+			break
+		}
+		if limit > 0 && len(out)+1 == limit {
+			out = append(out, object.String(subject[i:]))
+			return &object.Array{Elems: out}
+		}
+		start := i
+		for i < n && !isASCIISpace(subject[i]) {
+			i++
+		}
+		out = append(out, object.String(subject[start:i]))
+	}
+	return &object.Array{Elems: out}
+}
+
+func isASCIISpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'
+}
+
+// splitRegexp splits subject on matches of re, interpolating captured groups
+// and honouring the field limit (see stringSplit).
+func splitRegexp(re *Regexp, subject string, limit int) object.Value {
+	if subject == "" {
+		return &object.Array{Elems: []object.Value{}}
+	}
+	var out []object.Value
+	last := 0    // byte offset of the start of the current field
+	search := 0  // where the next match search begins
+	pieces := 0  // count of delimiter-separated fields emitted (limit applies here)
+	for search <= len(subject) {
+		if limit > 0 && pieces+1 == limit {
+			break
+		}
+		md := re.re.Match(subject[search:])
+		if md == nil {
+			break
+		}
+		mBegin := search + md.Begin(0)
+		mEnd := search + md.End(0)
+		if mEnd == mBegin {
+			// Empty match: an empty match at the very start is skipped; otherwise
+			// it ends the current character field. Advance one character.
+			if mBegin >= len(subject) {
+				break
+			}
+			if mBegin == last {
+				_, w := utf8.DecodeRuneInString(subject[mBegin:])
+				search = mBegin + w
+				continue
+			}
+			out = append(out, object.String(subject[last:mBegin]))
+			out = append(out, captureFields(md)...)
+			pieces++
+			last = mBegin
+			_, w := utf8.DecodeRuneInString(subject[mBegin:])
+			search = mBegin + w
+			continue
+		}
+		out = append(out, object.String(subject[last:mBegin]))
+		out = append(out, captureFields(md)...)
+		pieces++
+		last = mEnd
+		search = mEnd
+	}
+	out = append(out, object.String(subject[last:]))
+	if limit == 0 {
+		// Strip trailing empty fields (the default behaviour).
+		for len(out) > 0 {
+			if s, ok := out[len(out)-1].(object.String); ok && s == "" {
+				out = out[:len(out)-1]
+				continue
+			}
+			break
+		}
+	}
+	return &object.Array{Elems: out}
+}
+
+// captureFields returns the participating capture groups of a split delimiter
+// match, in order. Non-participating groups are dropped (Ruby omits them).
+func captureFields(md *onig.MatchData) []object.Value {
+	var out []object.Value
+	for i := 1; i <= md.NGroups(); i++ {
+		if md.Begin(i) >= 0 {
+			out = append(out, object.String(md.Str(i)))
+		}
+	}
+	return out
+}
+
 // stringSub backs String#sub (global=false) and String#gsub (global=true). The
 // first argument is the pattern (a Regexp, or a String matched literally). A
 // replacement is given either as a second String argument (with backref

@@ -387,18 +387,8 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cString.define("split", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		var parts []string
-		if len(args) == 0 {
-			parts = strings.Fields(strOf(self)) // runs of whitespace, no empties
-		} else {
-			parts = strings.Split(strOf(self), strArg(args[0]))
-		}
-		out := make([]object.Value, len(parts))
-		for i, p := range parts {
-			out[i] = object.String(p)
-		}
-		return &object.Array{Elems: out}
+	vm.cString.define("split", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringSplit(strOf(self), args)
 	})
 	vm.cString.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(strings.Contains(strOf(self), strArg(args[0])))
