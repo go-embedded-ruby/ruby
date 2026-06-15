@@ -387,6 +387,12 @@ operand; the right side runs only when the left doesn't decide), compiled with
 a conditional branch over a duplicated operand.
 **`do…end` blocks** alongside `{ … }`, with the `do` after a while/until
 condition correctly bound to the loop, not to a call in the condition.
+**String methods** (read-only over the immutable String): length/size/bytesize
+/empty?, upcase/downcase/capitalize/swapcase/reverse, strip/lstrip/rstrip/chomp
+/chop, chars/bytes/split, include?/start_with?/end_with?/index, sub/gsub
+(string patterns), to_i/to_f/to_s/to_str/to_sym, and `[]` slicing (index,
+start+len, Range) — rune-aware where it matters. Mutating forms and regexp
+`sub`/`gsub` await the mutable byte+encoding String / regexp bridge.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
