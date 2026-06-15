@@ -496,6 +496,34 @@ IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
 pure-Ruby libs; implement Go leaves (json, digest, zlib, securerandom, base64).
 Run upstream suites.
 
+**Regexp bridge — 🚧 landed (6a–6d):** the `go-onigmo/regexp` engine is wired in
+(CGO=0).
+- **6a** — `/re/imx` literals (lexer disambiguates `/` via the value/operand
+  state), the `=~` operator, a vm-level `Regexp` value + `cRegexp`
+  (`source`/`to_s`/`inspect`/`match`/`match?`/`=~`/`===`), a `MatchData` value +
+  `cMatchData` (`[]` by index or name, `pre_match`/`post_match`/`to_a`/`captures`/
+  `begin`/`end`/`named_captures`/`size`), and `String#=~`/`match`/`match?`. Ruby
+  flags are translated to an inline `(?imx)` prefix; `RegexpError` for bad
+  patterns.
+- **6b** — `String#scan` (whole matches, or capture arrays when groups are
+  present; block form yields each).
+- **6c** — `String#sub`/`gsub` over a Regexp: replacement templates
+  (`\0`/`\&`, `\1`..`\9`, `\k<name>`, `\``, `\'`) or a block.
+- **6d** — `String#split` over a Regexp: interpolated captures, field `limit`,
+  and the awk-style whitespace mode (no arg / `nil` / `" "`).
+
+**Byte vs character offsets:** go-onigmo reports **byte** offsets, while Ruby's
+`MatchData#begin`/`#end` and `=~` report **character** offsets; the bridge
+converts (`byteToChar`). Matched substrings are representation-independent.
+Differential-tested against MRI (Ruby 4.0.5): offset-exact on ASCII, substring
+comparison for multibyte. The engine is currently **byte-oriented** (a bare `.`
+matches one byte, not one character), so multibyte `.`-class patterns are out of
+scope until go-onigmo gains UTF-8 character classes.
+
+**Deferred:** the `$~`/`$1`.. match globals, `Regexp.new` from a string, the
+`(?'name')` named-group spelling (unsupported by the engine), and the
+`sub`/`gsub` enumerator and Hash-replacement forms.
+
 ### Phase 7 — Build toolchain
 `rbgo build`, require-graph scan, selection (build tags), `//go:embed`, single
 static binary, closed-world mode.
