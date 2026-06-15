@@ -57,6 +57,18 @@ func (vm *VM) bootstrap() {
 		name := args[0].ToS()
 		return raise("NoMethodError", "undefined method '%s' for %s", name, vm.classOf(self).name)
 	})
+	// Default equality: object identity for instances, structural for value
+	// types (Comparable#== and user-defined == override this via dispatch).
+	vm.cObject.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(rubyEqual(self, args[0]))
+	})
+	// Default <=>: 0 when equal (by ==), nil otherwise — the MRI Object#<=>.
+	vm.cObject.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if vm.send(self, "==", []object.Value{args[0]}, nil).Truthy() {
+			return object.Integer(0)
+		}
+		return object.NilV
+	})
 
 	// Module (Class inherits these).
 	vm.cModule.define("include", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -70,6 +82,18 @@ func (vm *VM) bootstrap() {
 	// Symbol.
 	vm.cSymbol.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
+	})
+	// Spaceship (<=>) for the built-in ordered types; numerics compare across
+	// Integer/Float, strings lexically, and a mismatched type yields nil.
+	vm.cInteger.define("<=>", spaceshipNumeric)
+	vm.cFloat.define("<=>", spaceshipNumeric)
+	vm.cString.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(object.String)
+		b, ok := args[0].(object.String)
+		if !ok {
+			return object.NilV
+		}
+		return object.Integer(strings.Compare(string(a), string(b)))
 	})
 
 	// Array.
@@ -99,6 +123,11 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		a.Elems = append(a.Elems, args...)
+		return a
+	})
+	vm.cArray.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		a.Elems = append(a.Elems, args[0])
 		return a
 	})
 	vm.cArray.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -382,6 +411,34 @@ func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value 
 	}
 }
 
+
+// rubyEqual is the default Object#== : pointer identity for instances, and
+// structural equality for the immutable value types.
+func rubyEqual(a, b object.Value) bool {
+	if ao, ok := a.(*RObject); ok {
+		bo, ok := b.(*RObject)
+		return ok && ao == bo
+	}
+	return valueEqual(a, b)
+}
+
+// spaceshipNumeric implements Integer#<=> and Float#<=>: -1/0/1 across the
+// numeric tower, nil for a non-numeric argument.
+func spaceshipNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	a, _ := toFloat(self)
+	b, ok := toFloat(args[0])
+	if !ok {
+		return object.NilV
+	}
+	switch {
+	case a < b:
+		return object.Integer(-1)
+	case a > b:
+		return object.Integer(1)
+	default:
+		return object.Integer(0)
+	}
+}
 
 // rangeCmp orders two values for Range membership tests: numerics compare
 // numerically, strings lexically; any other pairing is incomparable (ok=false,

@@ -36,6 +36,58 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 	return raise("TypeError", "%s can't be coerced for %s", b.Inspect(), op)
 }
 
+// binaryOp evaluates an operator opcode. Arithmetic and numeric/string
+// comparisons keep the Phase 0 fast path; everything else dispatches as a
+// method so user classes (and the embedded-Ruby Comparable mixin) can define
+// `<`, `<=`, `>`, `>=` and `==`.
+func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
+	switch op {
+	case bytecode.OpEq, bytecode.OpNeq:
+		// Objects dispatch `==` (so Object identity, a user `==`, or
+		// Comparable#== all apply); value types keep structural equality.
+		if _, isObj := a.(*RObject); isObj {
+			eq := vm.send(a, "==", []object.Value{b}, nil).Truthy()
+			if op == bytecode.OpNeq {
+				eq = !eq
+			}
+			return object.Bool(eq)
+		}
+		return binary(op, a, b)
+	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
+		if hasFastOrdering(a) {
+			return binary(op, a, b)
+		}
+		return vm.send(a, compareOpName(op), []object.Value{b}, nil)
+	default:
+		return binary(op, a, b)
+	}
+}
+
+// hasFastOrdering reports whether the receiver is a built-in ordered type.
+// Those keep the Phase 0 inline comparison (including its own coercion errors
+// for a bad right operand); anything else dispatches `<`/`<=`/`>`/`>=`.
+func hasFastOrdering(a object.Value) bool {
+	switch a.(type) {
+	case object.Integer, object.Float, object.String:
+		return true
+	}
+	return false
+}
+
+// compareOpName names the ordering operator behind an opcode for method
+// dispatch. Only the four ordering opcodes reach it.
+func compareOpName(op bytecode.Op) string {
+	switch op {
+	case bytecode.OpLt:
+		return "<"
+	case bytecode.OpGt:
+		return ">"
+	case bytecode.OpLe:
+		return "<="
+	}
+	return ">=" // bytecode.OpGe
+}
+
 func intOp(op bytecode.Op, a, b int64) object.Value {
 	switch op {
 	case bytecode.OpAdd:

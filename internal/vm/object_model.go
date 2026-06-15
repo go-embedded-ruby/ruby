@@ -32,6 +32,11 @@ type Proc struct {
 	iseq *bytecode.ISeq
 	env  *Env
 	self object.Value
+	// block is the method-level block in scope where this block literal was
+	// written. Blocks are transparent to `yield`: a `yield` inside a block
+	// reaches the enclosing method's block, which is what lets Enumerable
+	// methods iterate via `each { ... yield ... }`.
+	block *Proc
 }
 
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
@@ -165,7 +170,7 @@ func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
 			bargs[i] = object.NilV
 		}
 	}
-	return vm.exec(p.iseq, p.self, bargs, vm.cObject, "", p.env, nil)
+	return vm.exec(p.iseq, p.self, bargs, vm.cObject, "", p.env, p.block)
 }
 
 func getIvar(self object.Value, name string) object.Value {

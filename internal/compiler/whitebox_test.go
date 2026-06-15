@@ -8,13 +8,13 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 )
 
-func TestBinOpUnknownPanics(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("expected binOp to panic on an unknown operator")
-		}
-	}()
-	binOp("?")
+func TestFastBinOpUnknown(t *testing.T) {
+	if _, ok := fastBinOp("?"); ok {
+		t.Fatal("expected fastBinOp to report no fast-path opcode for an unknown operator")
+	}
+	if op, ok := fastBinOp("+"); !ok || op != bytecode.OpAdd {
+		t.Fatalf("fastBinOp(+) = %v,%v want OpAdd,true", op, ok)
+	}
 }
 
 // compileNode's default fires for a node it does not handle (e.g. *ast.Program,

@@ -176,8 +176,18 @@ func (l *Lexer) next() token.Token {
 	case '<':
 		if l.peek() == '=' {
 			l.advance()
+			if l.peek() == '>' { // <=>
+				l.advance()
+				l.state = exprBegin
+				return mk(token.SPACESHIP, "<=>")
+			}
 			l.state = exprBegin
 			return mk(token.LE, "<=")
+		}
+		if l.peek() == '<' { // <<
+			l.advance()
+			l.state = exprBegin
+			return mk(token.SHOVEL, "<<")
 		}
 		l.state = exprBegin
 		return mk(token.LT, "<")

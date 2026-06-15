@@ -48,6 +48,7 @@ type VM struct {
 func New(out io.Writer) *VM {
 	vm := &VM{out: out, main: object.Main{}, consts: map[string]object.Value{}}
 	vm.bootstrap()
+	vm.loadPrelude(preludeSource)
 	return vm
 }
 
@@ -140,7 +141,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:
 			b := pop()
 			a := pop()
-			push(binary(in.Op, a, b))
+			push(vm.binaryOp(in.Op, a, b))
 		case bytecode.OpNeg:
 			push(negate(pop()))
 		case bytecode.OpNot:
@@ -165,8 +166,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			stack = stack[:len(stack)-argc]
 			recv := pop()
 			var blk *Proc
-			if in.C > 0 { // a literal block: capture this frame's env + self
-				blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self}
+			if in.C > 0 { // a literal block: capture this frame's env, self, block
+				blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
 			}
 			push(vm.send(recv, iseq.Names[in.A], callArgs, blk))
 		case bytecode.OpDefineMethod:

@@ -212,10 +212,10 @@ func (p *Parser) parseModule() ast.Node {
 
 func (p *Parser) parseDef() ast.Node {
 	p.expect(token.DEF)
-	if !p.is(token.IDENT) && !p.is(token.CONST) {
+	name, ok := p.parseDefName()
+	if !ok {
 		p.fail("expected method name after def")
 	}
-	name := p.advance().Lit
 	var params []string
 	if p.accept(token.LPAREN) {
 		params = p.parseParamNames(token.RPAREN)
@@ -232,6 +232,26 @@ func (p *Parser) parseDef() ast.Node {
 	p.popScope()
 	p.expect(token.END)
 	return &ast.MethodDef{Name: name, Params: params, Body: body}
+}
+
+// parseDefName reads the name in a `def`: an identifier/constant, an operator
+// method (`<=>`, `<`, `==`, `+`, `<<`, …), or the index methods `[]` / `[]=`.
+func (p *Parser) parseDefName() (string, bool) {
+	switch p.cur().Type {
+	case token.IDENT, token.CONST,
+		token.SPACESHIP, token.LT, token.GT, token.LE, token.GE,
+		token.EQ, token.NEQ, token.SHOVEL, token.PLUS, token.MINUS,
+		token.STAR, token.SLASH, token.PERCENT:
+		return p.advance().Lit, true
+	case token.LBRACKET:
+		p.advance()
+		p.expect(token.RBRACKET)
+		if p.accept(token.ASSIGN) {
+			return "[]=", true
+		}
+		return "[]", true
+	}
+	return "", false
 }
 
 func (p *Parser) parseParamNames(until token.Type) []string {
@@ -354,10 +374,12 @@ func (p *Parser) parseRange() ast.Node {
 // Binding powers for infix operators (higher binds tighter).
 func binBP(tt token.Type) int {
 	switch tt {
-	case token.EQ, token.NEQ:
+	case token.EQ, token.NEQ, token.SPACESHIP:
 		return 10
 	case token.LT, token.GT, token.LE, token.GE:
 		return 20
+	case token.SHOVEL:
+		return 25
 	case token.PLUS, token.MINUS:
 		return 30
 	case token.STAR, token.SLASH, token.PERCENT:

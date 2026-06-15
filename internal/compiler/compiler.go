@@ -236,7 +236,14 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.BinaryExpr:
 		c.compileNode(v.Left)
 		c.compileNode(v.Right)
-		b.emit(binOp(v.Op), 0, 0)
+		if op, ok := fastBinOp(v.Op); ok {
+			b.emit(op, 0, 0)
+		} else {
+			// Operators without a fast-path opcode (e.g. <=>, <<) dispatch as
+			// ordinary method calls so user classes can define them. Stack is
+			// [recv, arg]: OpSend pops the arg then the receiver.
+			b.emit(bytecode.OpSend, b.addName(v.Op), 1)
+		}
 	case *ast.Call:
 		c.compileCall(v)
 	case *ast.ConstRef:
@@ -275,32 +282,34 @@ func (c *Compiler) compileNode(n ast.Node) {
 	}
 }
 
-func binOp(op string) bytecode.Op {
+// fastBinOp maps an operator to its fast-path opcode. ok is false for operators
+// that must dispatch as method calls (e.g. <=>, <<).
+func fastBinOp(op string) (bytecode.Op, bool) {
 	switch op {
 	case "+":
-		return bytecode.OpAdd
+		return bytecode.OpAdd, true
 	case "-":
-		return bytecode.OpSub
+		return bytecode.OpSub, true
 	case "*":
-		return bytecode.OpMul
+		return bytecode.OpMul, true
 	case "/":
-		return bytecode.OpDiv
+		return bytecode.OpDiv, true
 	case "%":
-		return bytecode.OpMod
+		return bytecode.OpMod, true
 	case "<":
-		return bytecode.OpLt
+		return bytecode.OpLt, true
 	case ">":
-		return bytecode.OpGt
+		return bytecode.OpGt, true
 	case "<=":
-		return bytecode.OpLe
+		return bytecode.OpLe, true
 	case ">=":
-		return bytecode.OpGe
+		return bytecode.OpGe, true
 	case "==":
-		return bytecode.OpEq
+		return bytecode.OpEq, true
 	case "!=":
-		return bytecode.OpNeq
+		return bytecode.OpNeq, true
 	}
-	panic(compileError{msg: "unknown binary operator " + op})
+	return 0, false
 }
 
 func (c *Compiler) compileCall(v *ast.Call) {

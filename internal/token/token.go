@@ -55,6 +55,8 @@ const (
 	GT
 	LE
 	GE
+	SPACESHIP // <=>
+	SHOVEL    // <<
 	BANG
 	LPAREN
 	RPAREN
@@ -80,6 +82,7 @@ var typeNames = map[Type]string{
 	SUPER: "super", YIELD: "yield",
 	PLUS: "+", MINUS: "-", STAR: "*", SLASH: "/", PERCENT: "%", ASSIGN: "=",
 	EQ: "==", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
+	SPACESHIP: "<=>", SHOVEL: "<<",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
 	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
 }
