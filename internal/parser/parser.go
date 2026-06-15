@@ -235,13 +235,14 @@ func (p *Parser) parseDef() ast.Node {
 	p.pushScope() // params (and their defaults) live in the method scope
 	var params []string
 	var defaults []ast.Node
+	var kwParams []ast.KwParam
 	splat := -1
 	if p.accept(token.LPAREN) {
-		params, defaults, splat = p.parseDefParams(token.RPAREN)
+		params, defaults, splat, kwParams = p.parseDefParams(token.RPAREN)
 		p.expect(token.RPAREN)
-	} else if p.is(token.IDENT) && !p.is(token.NEWLINE) {
-		// paren-less params: def foo a, b
-		params, defaults, splat = p.parseDefParams(token.NEWLINE)
+	} else if (p.is(token.IDENT) || p.is(token.LABEL)) && !p.is(token.NEWLINE) {
+		// paren-less params: def foo a, b  /  def foo a:, b: 2
+		params, defaults, splat, kwParams = p.parseDefParams(token.NEWLINE)
 	}
 	body := p.parseStatements(beginBodyEnd)
 	// A method body may carry rescue/ensure clauses without an explicit begin.
@@ -250,7 +251,7 @@ func (p *Parser) parseDef() ast.Node {
 	}
 	p.popScope()
 	p.expect(token.END)
-	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, SplatIndex: splat, Body: body}
+	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, SplatIndex: splat, KwParams: kwParams, Body: body}
 }
 
 // parseDefName reads the name in a `def`: an identifier/constant, an operator
@@ -277,18 +278,34 @@ func (p *Parser) parseDefName() (string, bool) {
 // default`. Each parameter is declared before its (and later) defaults are
 // parsed, so a default may reference earlier parameters. defaults is parallel to
 // params, nil for a required parameter.
-func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []ast.Node, splat int) {
+func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []ast.Node, splat int, kwParams []ast.KwParam) {
 	splat = -1
 	if p.is(until) || p.is(token.NEWLINE) {
-		return params, defaults, splat
+		return params, defaults, splat, kwParams
 	}
 	for {
-		if p.accept(token.STAR) { // *rest splat param (must be last)
+		if p.is(token.LABEL) { // keyword param: `a:` (required) or `a: default`
+			name := p.advance().Lit
+			p.declareLocal(name)
+			var def ast.Node
+			if !p.is(token.COMMA) && !p.is(until) && !p.is(token.NEWLINE) {
+				def = p.parseExprOrAssign()
+			}
+			kwParams = append(kwParams, ast.KwParam{Name: name, Default: def})
+			if !p.accept(token.COMMA) {
+				break
+			}
+			continue
+		}
+		if p.accept(token.STAR) { // *rest splat param
 			splat = len(params)
 			params = append(params, p.expect(token.IDENT).Lit)
 			defaults = append(defaults, nil)
 			p.declareLocal(params[splat])
-			break
+			if !p.accept(token.COMMA) {
+				break
+			}
+			continue
 		}
 		name := p.expect(token.IDENT).Lit
 		params = append(params, name)
@@ -302,7 +319,7 @@ func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []a
 			break
 		}
 	}
-	return params, defaults, splat
+	return params, defaults, splat, kwParams
 }
 
 func (p *Parser) parseParamNames(until token.Type) []string {
@@ -947,15 +964,51 @@ func (p *Parser) parseArg() ast.Node {
 
 func (p *Parser) parseCallArgs(until token.Type) []ast.Node {
 	var args []ast.Node
+	var kw *ast.HashLit
 	p.skipNewlines()
 	if p.is(until) {
 		return args
 	}
-	args = append(args, p.parseArg())
+	p.parseOneCallArg(&args, &kw)
 	for p.accept(token.COMMA) {
 		p.skipNewlines()
-		args = append(args, p.parseArg())
+		p.parseOneCallArg(&args, &kw)
 	}
 	p.skipNewlines()
+	// Trailing `key: value` / `key => value` pairs collapse into one implicit
+	// Hash argument (Ruby's keyword/last-hash sugar): foo(1, a: 2) → foo(1, {a:2}).
+	if kw != nil {
+		args = append(args, kw)
+	}
 	return args
+}
+
+// parseOneCallArg parses a single call argument, routing `*splat` and positional
+// expressions into args, and `label: value` / `expr => value` pairs into kw.
+func (p *Parser) parseOneCallArg(args *[]ast.Node, kw **ast.HashLit) {
+	if p.is(token.LABEL) {
+		key := &ast.SymbolLit{Name: p.advance().Lit}
+		p.addKwPair(kw, key, p.parseExprOrAssign())
+		return
+	}
+	if p.accept(token.STAR) {
+		*args = append(*args, &ast.SplatArg{Value: p.parseExprOrAssign()})
+		return
+	}
+	node := p.parseExprOrAssign()
+	if p.accept(token.HASHROCKET) {
+		p.addKwPair(kw, node, p.parseExprOrAssign())
+		return
+	}
+	*args = append(*args, node)
+}
+
+// addKwPair appends a key/value pair to the implicit trailing-hash argument,
+// allocating it on first use.
+func (p *Parser) addKwPair(kw **ast.HashLit, k, v ast.Node) {
+	if *kw == nil {
+		*kw = &ast.HashLit{}
+	}
+	(*kw).Keys = append((*kw).Keys, k)
+	(*kw).Values = append((*kw).Values, v)
 }

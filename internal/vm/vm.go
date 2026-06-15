@@ -13,6 +13,7 @@ package vm
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -113,7 +114,59 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 // exec runs one ISeq. definee is the class that `def` targets in this frame;
 // methodName is the name of the running method ("" at top level / class bodies),
 // used to resolve `super`.
+// bindKeywords peels the trailing keyword hash off args (Ruby's last-hash
+// convention), validates it against the method's keyword params (raising on
+// unknown/missing keywords), and returns it (never nil). It shortens *args by
+// the consumed hash so positional arity is checked on the remaining args.
+func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Hash {
+	kwargs := object.NewHash()
+	if a := *args; len(a) > 0 {
+		if h, ok := a[len(a)-1].(*object.Hash); ok {
+			kwargs = h
+			*args = a[:len(a)-1]
+		}
+	}
+	valid := make(map[object.Symbol]bool, len(iseq.KwNames))
+	for _, kn := range iseq.KwNames {
+		valid[object.Symbol(kn)] = true
+	}
+	var unknown []string
+	for _, k := range kwargs.Keys {
+		if sym, ok := k.(object.Symbol); ok && valid[sym] {
+			continue
+		}
+		unknown = append(unknown, k.Inspect())
+	}
+	if len(unknown) > 0 {
+		raise("ArgumentError", "unknown keyword%s: %s", plural(len(unknown)), strings.Join(unknown, ", "))
+	}
+	var missing []string
+	for i, kn := range iseq.KwNames {
+		if iseq.KwRequired[i] {
+			if _, ok := kwargs.Get(object.Symbol(kn)); !ok {
+				missing = append(missing, ":"+kn)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		raise("ArgumentError", "missing keyword%s: %s", plural(len(missing)), strings.Join(missing, ", "))
+	}
+	return kwargs
+}
+
+// plural returns "s" when n > 1, for "keyword"/"keywords" in error messages.
+func plural(n int) string {
+	if n > 1 {
+		return "s"
+	}
+	return ""
+}
+
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc) object.Value {
+	var kwargs *object.Hash
+	if len(iseq.KwNames) > 0 {
+		kwargs = vm.bindKeywords(iseq, &args)
+	}
 	if len(args) < iseq.NumRequired || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
 		var expected string
 		switch {
@@ -126,7 +179,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		}
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %s)", len(args), expected)
 	}
-	env := &Env{slots: make([]object.Value, iseq.NumLocals), parent: parentEnv}
+	env := &Env{slots: make([]object.Value, iseq.NumLocals), parent: parentEnv, kwargs: kwargs}
 	for i := range env.slots {
 		env.slots[i] = object.NilV
 	}
@@ -144,6 +197,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		env.slots[si] = &object.Array{Elems: rest}
 	} else {
 		copy(env.slots, args)
+	}
+	// Supplied keyword args bind into the slots right after the positionals; the
+	// prologue fills defaults for any absent optional ones.
+	if kwargs != nil {
+		base := len(iseq.Params)
+		for i, kn := range iseq.KwNames {
+			if v, ok := kwargs.Get(object.Symbol(kn)); ok {
+				env.slots[base+i] = v
+			}
+		}
 	}
 
 	stack := make([]object.Value, 0, 16)
@@ -296,6 +359,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(object.Bool(block != nil))
 				case bytecode.OpArgGiven:
 					push(object.Bool(in.A < len(args)))
+				case bytecode.OpKwGiven:
+					_, ok := env.kwargs.Get(object.Symbol(iseq.KwNames[in.A]))
+					push(object.Bool(ok))
 				case bytecode.OpReturn:
 					result = pop()
 					finished = true

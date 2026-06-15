@@ -69,6 +69,7 @@ const (
 	OpSplatToArray // pops a value; pushes it if an Array else wrapped in a 1-array
 	OpConcatArray  // pops two Arrays b,a; pushes a concatenated with b
 	OpSendArray    // like OpSend but args come from an Array: stack recv, argsArray
+	OpKwGiven      // A = keyword-param index; pushes true if that keyword was supplied
 )
 
 var opNames = map[Op]string{
@@ -86,6 +87,7 @@ var opNames = map[Op]string{
 	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break", OpArgGiven: "arg_given",
 	OpPushHandler: "push_handler", OpPopHandler: "pop_handler", OpReThrow: "rethrow",
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
+	OpKwGiven: "kw_given",
 }
 
 func (o Op) String() string {
@@ -114,6 +116,8 @@ type ISeq struct {
 	Params    []string       // parameter names
 	NumRequired int          // count of required (non-defaulted) leading params
 	SplatIndex  int          // index of the *splat param, or -1
+	KwNames     []string     // keyword-param names; slots follow the positionals
+	KwRequired  []bool       // parallel to KwNames; true = required (no default)
 	NumLocals int            // total local slots (params first, then assigns)
 	Children  []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
 	Super     string         // for a class body: the superclass name ("" → Object)

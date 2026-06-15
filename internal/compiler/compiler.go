@@ -31,6 +31,8 @@ type builder struct {
 	params      []string
 	numRequired int
 	splatIndex  int
+	kwNames     []string
+	kwRequired  []bool
 	children []*bytecode.ISeq
 	parent   *builder
 	isBlock  bool
@@ -121,6 +123,8 @@ func (b *builder) build() *bytecode.ISeq {
 		Params:      b.params,
 		NumRequired: b.numRequired,
 		SplatIndex:  b.splatIndex,
+		KwNames:     b.kwNames,
+		KwRequired:  b.kwRequired,
 		NumLocals: len(b.locals),
 		Children:  b.children,
 	}
@@ -724,6 +728,14 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	c.push(newBuilder(v.Name, v.Params))
 	b := c.cur()
 	b.splatIndex = v.SplatIndex
+	// Keyword params get local slots right after the positionals, so the body
+	// resolves them by name; record their names/required flags for the VM.
+	kwBase := len(v.Params)
+	for _, kp := range v.KwParams {
+		b.localSlot(kp.Name)
+		b.kwNames = append(b.kwNames, kp.Name)
+		b.kwRequired = append(b.kwRequired, kp.Default == nil)
+	}
 	nreq := len(v.Params)
 	if v.SplatIndex >= 0 {
 		nreq = v.SplatIndex // the splat and anything after it are not required
@@ -744,6 +756,19 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 		b.patch(skip, b.here())
 	}
 	b.numRequired = nreq
+	// Optional keyword params: the VM binds the supplied ones natively, so the
+	// prologue only fills in defaults for the absent ones.
+	for i, kp := range v.KwParams {
+		if kp.Default == nil {
+			continue
+		}
+		b.emit(bytecode.OpKwGiven, i, 0)
+		skip := b.emit(bytecode.OpBranchIf, 0, 0)
+		c.compileNode(kp.Default)
+		b.emit(bytecode.OpSetLocal, kwBase+i, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		b.patch(skip, b.here())
+	}
 	savedCtxs := c.ctxs
 	c.ctxs = nil
 	c.compileBody(v.Body)

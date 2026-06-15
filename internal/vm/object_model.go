@@ -15,6 +15,7 @@ type NativeFn func(vm *VM, self object.Value, args []object.Value, blk *Proc) ob
 type Env struct {
 	slots  []object.Value
 	parent *Env
+	kwargs *object.Hash // keyword arguments bound for this frame (nil if none)
 }
 
 // ancestor returns the env depth levels up the parent chain.
