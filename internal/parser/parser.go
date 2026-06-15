@@ -374,6 +374,10 @@ func (p *Parser) parseRange() ast.Node {
 // Binding powers for infix operators (higher binds tighter).
 func binBP(tt token.Type) int {
 	switch tt {
+	case token.OROR:
+		return 4
+	case token.ANDAND:
+		return 6
 	case token.EQ, token.NEQ, token.SPACESHIP:
 		return 10
 	case token.LT, token.GT, token.LE, token.GE:

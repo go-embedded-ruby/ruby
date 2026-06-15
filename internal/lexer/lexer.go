@@ -134,8 +134,19 @@ func (l *Lexer) next() token.Token {
 		l.state = exprEnd
 		return mk(token.RBRACKET, "]")
 	case '|':
+		if l.peek() == '|' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.OROR, "||")
+		}
 		l.state = exprBegin
 		return mk(token.PIPE, "|")
+	case '&':
+		if l.peek() == '&' {
+			l.advance()
+			l.state = exprBegin
+			return mk(token.ANDAND, "&&")
+		}
 	case ',':
 		l.state = exprBegin
 		return mk(token.COMMA, ",")

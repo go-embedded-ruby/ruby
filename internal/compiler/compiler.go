@@ -234,6 +234,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpNot, 0, 0)
 		}
 	case *ast.BinaryExpr:
+		if v.Op == "&&" || v.Op == "||" {
+			c.compileLogical(v)
+			return
+		}
 		c.compileNode(v.Left)
 		c.compileNode(v.Right)
 		if op, ok := fastBinOp(v.Op); ok {
@@ -280,6 +284,24 @@ func (c *Compiler) compileNode(n ast.Node) {
 	default:
 		c.fail("cannot compile %T", n)
 	}
+}
+
+// compileLogical emits short-circuiting && / ||. The result is the operand that
+// decided the outcome (Ruby semantics): `a && b` yields a when a is falsy, else
+// b; `a || b` yields a when a is truthy, else b.
+func (c *Compiler) compileLogical(v *ast.BinaryExpr) {
+	b := c.cur()
+	c.compileNode(v.Left)
+	b.emit(bytecode.OpDup, 0, 0)
+	var short int
+	if v.Op == "&&" {
+		short = b.emit(bytecode.OpBranchUnless, 0, 0) // left falsy → keep left
+	} else {
+		short = b.emit(bytecode.OpBranchIf, 0, 0) // left truthy → keep left
+	}
+	b.emit(bytecode.OpPop, 0, 0) // left decided nothing: drop it, value is right
+	c.compileNode(v.Right)
+	b.patch(short, b.here())
 }
 
 // fastBinOp maps an operator to its fast-path opcode. ok is false for operators
