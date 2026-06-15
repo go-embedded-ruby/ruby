@@ -417,7 +417,11 @@ into the prologue via OpArgGiven, may reference earlier params; ISeq.NumRequired
 combined with optionals) — collects the remaining args into an array
 (ISeq.SplatIndex; `expected N+` arity error). **Splat arguments** `f(*arr)` /
 `[*a, *b]` — splice an array into a call's args or an array literal (runtime
-arg-array build via OpSplatToArray/OpConcatArray + OpSendArray).
+arg-array build via OpSplatToArray/OpConcatArray + OpSendArray). **Keyword arguments** `def f(a:, b: 2)` and `f(a: 1)` — keyword
+params (required and optional, defaults may reference earlier params) plus the
+call-site last-hash sugar; the VM validates unknown/missing keywords
+(ArgumentError, singular/plural). **Array** sum/each_slice/rotate + flatten(depth);
+**Hash** slice/except/merge!.
 **Integer/Float numeric methods**: Integer `abs`/`even?`/`odd?`/`zero?`/
 `positive?`/`negative?`/`succ`/`next`/`pred`/`to_i`/`to_int`/`to_f`/`to_s(base)`
 /`gcd`/`divmod`/`digits`/`chr`/`upto`/`downto`; Float `abs`/sign predicates/
