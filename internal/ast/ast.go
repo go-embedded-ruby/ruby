@@ -116,6 +116,7 @@ type MethodDef struct {
 	Defaults   []Node // parallel to Params; nil for a required param
 	SplatIndex int    // index of the *splat param in Params, or -1
 	KwParams   []KwParam // keyword parameters (a:, b: default), after positionals
+	KwRest     string    // name of the **rest keyword-splat param, or "" if none
 	Body   []Node
 }
 

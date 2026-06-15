@@ -130,15 +130,18 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 	for _, kn := range iseq.KwNames {
 		valid[object.Symbol(kn)] = true
 	}
-	var unknown []string
-	for _, k := range kwargs.Keys {
-		if sym, ok := k.(object.Symbol); ok && valid[sym] {
-			continue
+	// With a **rest param, surplus keywords are captured rather than rejected.
+	if iseq.KwRestSlot < 0 {
+		var unknown []string
+		for _, k := range kwargs.Keys {
+			if sym, ok := k.(object.Symbol); ok && valid[sym] {
+				continue
+			}
+			unknown = append(unknown, k.Inspect())
 		}
-		unknown = append(unknown, k.Inspect())
-	}
-	if len(unknown) > 0 {
-		raise("ArgumentError", "unknown keyword%s: %s", plural(len(unknown)), strings.Join(unknown, ", "))
+		if len(unknown) > 0 {
+			raise("ArgumentError", "unknown keyword%s: %s", plural(len(unknown)), strings.Join(unknown, ", "))
+		}
 	}
 	var missing []string
 	for i, kn := range iseq.KwNames {
@@ -164,7 +167,7 @@ func plural(n int) string {
 
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc) object.Value {
 	var kwargs *object.Hash
-	if len(iseq.KwNames) > 0 {
+	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
 		kwargs = vm.bindKeywords(iseq, &args)
 	}
 	if len(args) < iseq.NumRequired || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
@@ -202,10 +205,24 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// prologue fills defaults for any absent optional ones.
 	if kwargs != nil {
 		base := len(iseq.Params)
+		named := make(map[object.Symbol]bool, len(iseq.KwNames))
 		for i, kn := range iseq.KwNames {
+			named[object.Symbol(kn)] = true
 			if v, ok := kwargs.Get(object.Symbol(kn)); ok {
 				env.slots[base+i] = v
 			}
+		}
+		// **rest captures every keyword not bound to a named param.
+		if iseq.KwRestSlot >= 0 {
+			rest := object.NewHash()
+			for _, k := range kwargs.Keys {
+				if sym, ok := k.(object.Symbol); ok && named[sym] {
+					continue
+				}
+				v, _ := kwargs.Get(k)
+				rest.Set(k, v)
+			}
+			env.slots[iseq.KwRestSlot] = rest
 		}
 	}
 

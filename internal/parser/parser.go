@@ -236,13 +236,14 @@ func (p *Parser) parseDef() ast.Node {
 	var params []string
 	var defaults []ast.Node
 	var kwParams []ast.KwParam
+	var kwRest string
 	splat := -1
 	if p.accept(token.LPAREN) {
-		params, defaults, splat, kwParams = p.parseDefParams(token.RPAREN)
+		params, defaults, splat, kwParams, kwRest = p.parseDefParams(token.RPAREN)
 		p.expect(token.RPAREN)
 	} else if (p.is(token.IDENT) || p.is(token.LABEL)) && !p.is(token.NEWLINE) {
 		// paren-less params: def foo a, b  /  def foo a:, b: 2
-		params, defaults, splat, kwParams = p.parseDefParams(token.NEWLINE)
+		params, defaults, splat, kwParams, kwRest = p.parseDefParams(token.NEWLINE)
 	}
 	body := p.parseStatements(beginBodyEnd)
 	// A method body may carry rescue/ensure clauses without an explicit begin.
@@ -251,7 +252,7 @@ func (p *Parser) parseDef() ast.Node {
 	}
 	p.popScope()
 	p.expect(token.END)
-	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, SplatIndex: splat, KwParams: kwParams, Body: body}
+	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, SplatIndex: splat, KwParams: kwParams, KwRest: kwRest, Body: body}
 }
 
 // parseDefName reads the name in a `def`: an identifier/constant, an operator
@@ -278,12 +279,17 @@ func (p *Parser) parseDefName() (string, bool) {
 // default`. Each parameter is declared before its (and later) defaults are
 // parsed, so a default may reference earlier parameters. defaults is parallel to
 // params, nil for a required parameter.
-func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []ast.Node, splat int, kwParams []ast.KwParam) {
+func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []ast.Node, splat int, kwParams []ast.KwParam, kwRest string) {
 	splat = -1
 	if p.is(until) || p.is(token.NEWLINE) {
-		return params, defaults, splat, kwParams
+		return params, defaults, splat, kwParams, kwRest
 	}
 	for {
+		if p.accept(token.POW) { // **rest keyword-splat param (always last)
+			kwRest = p.expect(token.IDENT).Lit
+			p.declareLocal(kwRest)
+			break
+		}
 		if p.is(token.LABEL) { // keyword param: `a:` (required) or `a: default`
 			name := p.advance().Lit
 			p.declareLocal(name)
@@ -319,7 +325,7 @@ func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []a
 			break
 		}
 	}
-	return params, defaults, splat, kwParams
+	return params, defaults, splat, kwParams, kwRest
 }
 
 func (p *Parser) parseParamNames(until token.Type) []string {
