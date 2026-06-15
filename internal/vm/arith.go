@@ -163,6 +163,8 @@ func stringOp(op bytecode.Op, a object.String, b object.Value) object.Value {
 			out = append(out, a...)
 		}
 		return object.String(out)
+	case bytecode.OpMod:
+		return object.String(formatString(string(a), formatArgs(b)))
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
 		bs, ok := b.(object.String)
 		if !ok {

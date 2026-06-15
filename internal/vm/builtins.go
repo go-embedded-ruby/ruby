@@ -52,6 +52,15 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Proc).isLambda)
 	})
+	formatFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		fmtStr, ok := args[0].(object.String)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
+		}
+		return object.String(formatString(string(fmtStr), args[1:]))
+	}
+	vm.cObject.define("format", formatFn)
+	vm.cObject.define("sprintf", formatFn)
 	vm.cObject.define("proc", func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("ArgumentError", "tried to create Proc object without a block")
