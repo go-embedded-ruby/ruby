@@ -382,6 +382,9 @@ made transparent to `yield` (a block reaches its enclosing method's block) so
 `each { … yield … }` works. Comparable gives `<`/`<=`/`>`/`>=`/`==`/`between?`
 /`clamp`; Enumerable gives map/select/reject/find/include?/to_a/count/sum/min
 /max/reduce/any?/all?/none?/each_with_index.
+**Short-circuit `&&` / `||`** with Ruby value semantics (yield the deciding
+operand; the right side runs only when the left doesn't decide), compiled with
+a conditional branch over a duplicated operand.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
