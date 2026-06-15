@@ -42,6 +42,7 @@ type Proc struct {
 	// whose body is Go rather than an ISeq; nativeArity backs Proc#arity for it.
 	native      func(vm *VM, args []object.Value) object.Value
 	nativeArity int
+	isLambda    bool // true for lambda { } / ->(){}: backs Proc#lambda?
 }
 
 func (p *Proc) ToS() string     { return "#<Proc>" }

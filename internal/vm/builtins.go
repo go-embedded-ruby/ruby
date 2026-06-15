@@ -49,6 +49,22 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(self.(*Proc).arityVal())
 	})
+	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*Proc).isLambda)
+	})
+	vm.cObject.define("proc", func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("ArgumentError", "tried to create Proc object without a block")
+		}
+		return blk
+	})
+	vm.cObject.define("lambda", func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("ArgumentError", "tried to create Proc object without a block")
+		}
+		blk.isLambda = true
+		return blk
+	})
 	vm.cSymbol.define("to_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		name := string(self.(object.Symbol))
 		// :sym.to_proc is { |recv, *rest| recv.sym(*rest) } — arity -2 as in MRI.
