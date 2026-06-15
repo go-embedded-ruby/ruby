@@ -34,6 +34,8 @@ const (
 	WHILE
 	UNTIL
 	RETURN
+	BREAK
+	NEXT
 	THEN
 	DO
 	TRUE
@@ -102,6 +104,7 @@ var Keywords = map[string]Type{
 	"def": DEF, "class": CLASS, "module": MODULE, "end": END,
 	"if": IF, "elsif": ELSIF, "else": ELSE,
 	"unless": UNLESS, "while": WHILE, "until": UNTIL, "return": RETURN,
+	"break": BREAK, "next": NEXT,
 	"then": THEN, "do": DO,
 	"true": TRUE, "false": FALSE, "nil": NIL, "self": SELF, "super": SUPER,
 	"yield": YIELD,

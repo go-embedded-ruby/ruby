@@ -124,6 +124,7 @@ func (b *builder) build() *bytecode.ISeq {
 
 // Compiler walks the AST, maintaining a stack of builders.
 type Compiler struct {
+	ctxs []*loopCtx // innermost-last stack of break/next targets
 	stack []*builder
 }
 
@@ -281,6 +282,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 			c.compileNode(v.Value)
 		}
 		b.emit(bytecode.OpReturn, 0, 0)
+	case *ast.Break:
+		c.compileBreak(v)
+	case *ast.Next:
+		c.compileNext(v)
 	default:
 		c.fail("cannot compile %T", n)
 	}
@@ -361,7 +366,9 @@ func (c *Compiler) compileCall(v *ast.Call) {
 func (c *Compiler) compileBlock(blk *ast.Block) int {
 	parent := c.cur()
 	c.push(newBlockBuilder("<block>", blk.Params, parent))
+	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
 	c.compileBody(blk.Body)
+	c.ctxs = c.ctxs[:len(c.ctxs)-1]
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	child := c.pop().build()
 	idx := len(parent.children)
@@ -371,7 +378,10 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 
 func (c *Compiler) compileClass(v *ast.ClassDef) {
 	c.push(newBuilder("<class:"+v.Name+">", nil))
+	savedCtxs := c.ctxs
+	c.ctxs = nil
 	c.compileBody(v.Body)
+	c.ctxs = savedCtxs
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	child := c.pop().build()
 	child.Super = v.Super
@@ -384,7 +394,10 @@ func (c *Compiler) compileClass(v *ast.ClassDef) {
 
 func (c *Compiler) compileModule(v *ast.ModuleDef) {
 	c.push(newBuilder("<module:"+v.Name+">", nil))
+	savedCtxs := c.ctxs
+	c.ctxs = nil
 	c.compileBody(v.Body)
+	c.ctxs = savedCtxs
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	child := c.pop().build()
 
@@ -432,21 +445,90 @@ func (c *Compiler) compileIf(v *ast.If) {
 	}
 }
 
+// ctxKind distinguishes a loop (break/next are jumps) from a block (break
+// unwinds via OpBreak, next returns from the block frame).
+type ctxKind int
+
+const (
+	ctxLoop ctxKind = iota
+	ctxBlock
+)
+
+// loopCtx is one entry on the break/next target stack.
+type loopCtx struct {
+	kind       ctxKind
+	contTarget int   // loop: jump here on `next` (re-evaluate the condition)
+	breaks     []int // loop: OpJump placeholders patched to the loop exit
+}
+
+func (c *Compiler) innerCtx() *loopCtx {
+	if len(c.ctxs) == 0 {
+		return nil
+	}
+	return c.ctxs[len(c.ctxs)-1]
+}
+
+func (c *Compiler) compileBreak(v *ast.Break) {
+	b := c.cur()
+	ctx := c.innerCtx()
+	if ctx == nil {
+		c.fail("Invalid break")
+	}
+	if ctx.kind == ctxBlock {
+		c.compileBreakValue(v.Value)
+		b.emit(bytecode.OpBreak, 0, 0)
+		return
+	}
+	ctx.breaks = append(ctx.breaks, b.emit(bytecode.OpJump, 0, 0))
+}
+
+func (c *Compiler) compileNext(v *ast.Next) {
+	b := c.cur()
+	ctx := c.innerCtx()
+	if ctx == nil {
+		c.fail("Invalid next")
+	}
+	if ctx.kind == ctxBlock {
+		c.compileBreakValue(v.Value)
+		b.emit(bytecode.OpReturn, 0, 0)
+		return
+	}
+	b.emit(bytecode.OpJump, ctx.contTarget, 0)
+}
+
+// compileBreakValue pushes a break/next argument, or nil when there is none.
+func (c *Compiler) compileBreakValue(val ast.Node) {
+	if val != nil {
+		c.compileNode(val)
+	} else {
+		c.cur().emit(bytecode.OpPushNil, 0, 0)
+	}
+}
+
 func (c *Compiler) compileWhile(v *ast.While) {
 	b := c.cur()
 	start := b.here()
 	c.compileNode(v.Cond)
 	exit := b.emit(bytecode.OpBranchUnless, 0, 0)
+	ctx := &loopCtx{kind: ctxLoop, contTarget: start}
+	c.ctxs = append(c.ctxs, ctx)
 	c.compileBody(v.Body)
+	c.ctxs = c.ctxs[:len(c.ctxs)-1]
 	b.emit(bytecode.OpPop, 0, 0) // discard each iteration's value
 	b.emit(bytecode.OpJump, start, 0)
 	b.patch(exit, b.here())
+	for _, j := range ctx.breaks { // break lands on the loop's nil value
+		b.patch(j, b.here())
+	}
 	b.emit(bytecode.OpPushNil, 0, 0) // while evaluates to nil
 }
 
 func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	c.push(newBuilder(v.Name, v.Params))
+	savedCtxs := c.ctxs
+	c.ctxs = nil
 	c.compileBody(v.Body)
+	c.ctxs = savedCtxs
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	child := c.pop().build()
 

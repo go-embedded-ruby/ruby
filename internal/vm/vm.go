@@ -32,6 +32,30 @@ func raise(class, format string, args ...any) object.Value {
 	panic(RubyError{Class: class, Message: fmt.Sprintf(format, args...)})
 }
 
+// breakSignal unwinds a block `break` to the method the block was passed to.
+// owner identifies the executing block so the matching call site catches it
+// (and a break through a Ruby-level iterator like Enumerable#map lands on the
+// outer call, not the inner each).
+type breakSignal struct {
+	owner *Proc
+	value object.Value
+}
+
+// sendCatchBreak performs a send carrying a literal block, turning a `break`
+// raised by that block into the call's result.
+func (vm *VM) sendCatchBreak(recv object.Value, name string, args []object.Value, blk *Proc) (result object.Value) {
+	defer func() {
+		if r := recover(); r != nil {
+			if sig, ok := r.(breakSignal); ok && sig.owner == blk {
+				result = sig.value
+				return
+			}
+			panic(r)
+		}
+	}()
+	return vm.send(recv, name, args, blk)
+}
+
 // VM holds I/O, the top-level self, the constant table and the base classes.
 type VM struct {
 	out    io.Writer
@@ -59,13 +83,13 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			result, err = nil, r.(RubyError)
 		}
 	}()
-	return vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil), nil
+	return vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil), nil
 }
 
 // exec runs one ISeq. definee is the class that `def` targets in this frame;
 // methodName is the name of the running method ("" at top level / class bodies),
 // used to resolve `super`.
-func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block *Proc) object.Value {
+func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc) object.Value {
 	if len(args) != len(iseq.Params) {
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %d)", len(args), len(iseq.Params))
 	}
@@ -169,7 +193,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			if in.C > 0 { // a literal block: capture this frame's env, self, block
 				blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
 			}
-			push(vm.send(recv, iseq.Names[in.A], callArgs, blk))
+			if blk != nil {
+				push(vm.sendCatchBreak(recv, iseq.Names[in.A], callArgs, blk))
+			} else {
+				push(vm.send(recv, iseq.Names[in.A], callArgs, nil))
+			}
 		case bytecode.OpDefineMethod:
 			definee.methods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
 			push(object.NilV)
@@ -199,6 +227,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			push(object.Bool(block != nil))
 		case bytecode.OpReturn:
 			return pop()
+		case bytecode.OpBreak:
+			panic(breakSignal{owner: selfBlock, value: pop()})
 		default:
 			raise("VMError", "unknown opcode %s", in.Op)
 		}
@@ -225,7 +255,7 @@ func (vm *VM) defineClass(name string, body *bytecode.ISeq) object.Value {
 		class = newClass(name, super)
 		vm.consts[name] = class
 	}
-	return vm.exec(body, class, nil, class, "", nil, nil)
+	return vm.exec(body, class, nil, class, "", nil, nil, nil)
 }
 
 // defineModule creates or reopens a module and runs its body with self = the
@@ -239,7 +269,7 @@ func (vm *VM) defineModule(name string, body *bytecode.ISeq) object.Value {
 		mod.isModule = true
 		vm.consts[name] = mod
 	}
-	return vm.exec(body, mod, nil, mod, "", nil, nil)
+	return vm.exec(body, mod, nil, mod, "", nil, nil, nil)
 }
 
 // invokeSuper dispatches `super`: it finds methodName starting above the current

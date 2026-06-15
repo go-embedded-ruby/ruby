@@ -160,6 +160,10 @@ func (p *Parser) parseStatement() ast.Node {
 		return p.parseUntil()
 	case token.RETURN:
 		return p.applyModifiers(p.parseReturn())
+	case token.BREAK:
+		return p.applyModifiers(p.parseBreak())
+	case token.NEXT:
+		return p.applyModifiers(p.parseNext())
 	default:
 		return p.applyModifiers(p.parseExprOrAssign())
 	}
@@ -341,6 +345,33 @@ func (p *Parser) parseReturn() ast.Node {
 		return &ast.Return{}
 	}
 	return &ast.Return{Value: p.parseExprOrAssign()}
+}
+
+func (p *Parser) parseBreak() ast.Node {
+	p.expect(token.BREAK)
+	if p.atStatementEnd() {
+		return &ast.Break{}
+	}
+	return &ast.Break{Value: p.parseExprOrAssign()}
+}
+
+func (p *Parser) parseNext() ast.Node {
+	p.expect(token.NEXT)
+	if p.atStatementEnd() {
+		return &ast.Next{}
+	}
+	return &ast.Next{Value: p.parseExprOrAssign()}
+}
+
+// atStatementEnd reports whether the cursor is at a point where a value-less
+// break/next ends: a terminator, a block/body close, or a trailing modifier.
+func (p *Parser) atStatementEnd() bool {
+	switch p.cur().Type {
+	case token.NEWLINE, token.EOF, token.END, token.ELSE, token.ELSIF, token.RBRACE,
+		token.IF, token.UNLESS, token.WHILE, token.UNTIL:
+		return true
+	}
+	return false
 }
 
 // --- expressions ---

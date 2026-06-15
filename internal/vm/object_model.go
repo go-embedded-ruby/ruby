@@ -155,7 +155,7 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 	if m.native != nil {
 		return m.native(vm, self, args, blk)
 	}
-	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk)
+	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
 }
 
 // callBlock invokes a captured block with args. Block arity is lenient: extra
@@ -178,7 +178,7 @@ func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
 			bargs[i] = object.NilV
 		}
 	}
-	return vm.exec(p.iseq, p.self, bargs, vm.cObject, "", p.env, p.block)
+	return vm.exec(p.iseq, p.self, bargs, vm.cObject, "", p.env, p.block, p)
 }
 
 func getIvar(self object.Value, name string) object.Value {

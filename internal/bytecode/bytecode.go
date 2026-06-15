@@ -61,6 +61,7 @@ const (
 	OpInvokeBlock  // A = argc; yields to the block passed to the current method
 	OpBlockGiven   // pushes true if a block was passed to the current method
 	OpReturn       // returns top of stack from the current ISeq
+	OpBreak        // unwinds a block `break`: pops the value, signals the call site
 )
 
 var opNames = map[Op]string{
@@ -75,7 +76,7 @@ var opNames = map[Op]string{
 	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpDefineClass: "define_class",
 	OpDefineModule: "define_module", OpDefineMethod: "define_method",
 	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
-	OpBlockGiven: "block_given", OpReturn: "return",
+	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break",
 }
 
 func (o Op) String() string {

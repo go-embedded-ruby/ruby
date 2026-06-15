@@ -152,6 +152,14 @@ type Super struct {
 	Forward bool
 }
 
+// Break exits the innermost block (terminating its iterator) or loop. Value may
+// be nil.
+type Break struct{ Value Node }
+
+// Next skips to the next iteration of the innermost block or loop. Value may be
+// nil.
+type Next struct{ Value Node }
+
 func (*Program) node()    {}
 func (*IntLit) node()     {}
 func (*FloatLit) node()   {}
@@ -179,3 +187,5 @@ func (*ClassDef) node()   {}
 func (*ModuleDef) node()  {}
 func (*Super) node()      {}
 func (*Yield) node()      {}
+func (*Break) node()      {}
+func (*Next) node()       {}
