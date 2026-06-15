@@ -114,9 +114,14 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 // methodName is the name of the running method ("" at top level / class bodies),
 // used to resolve `super`.
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc) object.Value {
-	if len(args) < iseq.NumRequired || len(args) > len(iseq.Params) {
-		expected := fmt.Sprintf("%d", iseq.NumRequired)
-		if iseq.NumRequired != len(iseq.Params) {
+	if len(args) < iseq.NumRequired || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
+		var expected string
+		switch {
+		case iseq.SplatIndex >= 0:
+			expected = fmt.Sprintf("%d+", iseq.NumRequired)
+		case iseq.NumRequired == len(iseq.Params):
+			expected = fmt.Sprintf("%d", iseq.NumRequired)
+		default:
 			expected = fmt.Sprintf("%d..%d", iseq.NumRequired, len(iseq.Params))
 		}
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %s)", len(args), expected)
@@ -125,7 +130,21 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	for i := range env.slots {
 		env.slots[i] = object.NilV
 	}
-	copy(env.slots, args)
+	if iseq.SplatIndex >= 0 {
+		si := iseq.SplatIndex
+		nbind := len(args)
+		if nbind > si {
+			nbind = si
+		}
+		copy(env.slots[:nbind], args[:nbind])
+		rest := []object.Value{}
+		if len(args) > si {
+			rest = append(rest, args[si:]...)
+		}
+		env.slots[si] = &object.Array{Elems: rest}
+	} else {
+		copy(env.slots, args)
+	}
 
 	stack := make([]object.Value, 0, 16)
 	push := func(v object.Value) { stack = append(stack, v) }

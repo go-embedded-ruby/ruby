@@ -113,7 +113,8 @@ type While struct {
 type MethodDef struct {
 	Name   string
 	Params   []string
-	Defaults []Node // parallel to Params; nil for a required param
+	Defaults   []Node // parallel to Params; nil for a required param
+	SplatIndex int    // index of the *splat param in Params, or -1
 	Body   []Node
 }
 

@@ -235,12 +235,13 @@ func (p *Parser) parseDef() ast.Node {
 	p.pushScope() // params (and their defaults) live in the method scope
 	var params []string
 	var defaults []ast.Node
+	splat := -1
 	if p.accept(token.LPAREN) {
-		params, defaults = p.parseDefParams(token.RPAREN)
+		params, defaults, splat = p.parseDefParams(token.RPAREN)
 		p.expect(token.RPAREN)
 	} else if p.is(token.IDENT) && !p.is(token.NEWLINE) {
 		// paren-less params: def foo a, b
-		params, defaults = p.parseDefParams(token.NEWLINE)
+		params, defaults, splat = p.parseDefParams(token.NEWLINE)
 	}
 	body := p.parseStatements(beginBodyEnd)
 	// A method body may carry rescue/ensure clauses without an explicit begin.
@@ -249,7 +250,7 @@ func (p *Parser) parseDef() ast.Node {
 	}
 	p.popScope()
 	p.expect(token.END)
-	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, Body: body}
+	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, SplatIndex: splat, Body: body}
 }
 
 // parseDefName reads the name in a `def`: an identifier/constant, an operator
@@ -276,11 +277,19 @@ func (p *Parser) parseDefName() (string, bool) {
 // default`. Each parameter is declared before its (and later) defaults are
 // parsed, so a default may reference earlier parameters. defaults is parallel to
 // params, nil for a required parameter.
-func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []ast.Node) {
+func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []ast.Node, splat int) {
+	splat = -1
 	if p.is(until) || p.is(token.NEWLINE) {
-		return params, defaults
+		return params, defaults, splat
 	}
 	for {
+		if p.accept(token.STAR) { // *rest splat param (must be last)
+			splat = len(params)
+			params = append(params, p.expect(token.IDENT).Lit)
+			defaults = append(defaults, nil)
+			p.declareLocal(params[splat])
+			break
+		}
 		name := p.expect(token.IDENT).Lit
 		params = append(params, name)
 		p.declareLocal(name)
@@ -293,7 +302,7 @@ func (p *Parser) parseDefParams(until token.Type) (params []string, defaults []a
 			break
 		}
 	}
-	return params, defaults
+	return params, defaults, splat
 }
 
 func (p *Parser) parseParamNames(until token.Type) []string {

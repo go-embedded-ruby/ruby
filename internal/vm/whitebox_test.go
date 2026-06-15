@@ -85,7 +85,8 @@ func TestFloatModSign(t *testing.T) {
 func TestExecCraftedOpcodes(t *testing.T) {
 	vm := New(io.Discard)
 	iseq := &bytecode.ISeq{
-		Consts: []object.Value{object.Integer(7)},
+		SplatIndex: -1,
+		Consts:     []object.Value{object.Integer(7)},
 		Insns: []bytecode.Instr{
 			{Op: bytecode.OpNop},
 			{Op: bytecode.OpPushSelf},
@@ -111,7 +112,7 @@ func TestExecCraftedOpcodes(t *testing.T) {
 // An ISeq that runs off the end without an explicit return yields nil.
 func TestExecFallsOffEnd(t *testing.T) {
 	vm := New(io.Discard)
-	got, err := vm.Run(&bytecode.ISeq{Insns: []bytecode.Instr{{Op: bytecode.OpNop}}})
+	got, err := vm.Run(&bytecode.ISeq{SplatIndex: -1, Insns: []bytecode.Instr{{Op: bytecode.OpNop}}})
 	if err != nil || got != object.NilV {
 		t.Fatalf("got (%v,%v) want (nil,<nil>)", got, err)
 	}
@@ -119,7 +120,7 @@ func TestExecFallsOffEnd(t *testing.T) {
 
 func TestExecUnknownOpcode(t *testing.T) {
 	vm := New(io.Discard)
-	_, err := vm.Run(&bytecode.ISeq{Insns: []bytecode.Instr{{Op: bytecode.Op(254)}}})
+	_, err := vm.Run(&bytecode.ISeq{SplatIndex: -1, Insns: []bytecode.Instr{{Op: bytecode.Op(254)}}})
 	if err == nil || err.(RubyError).Class != "VMError" {
 		t.Fatalf("expected VMError, got %v", err)
 	}
@@ -134,5 +135,5 @@ func TestRunPropagatesInternalPanic(t *testing.T) {
 		}
 	}()
 	vm := New(io.Discard)
-	vm.Run(&bytecode.ISeq{Insns: []bytecode.Instr{{Op: bytecode.OpGetLocal, A: 5}}})
+	vm.Run(&bytecode.ISeq{SplatIndex: -1, Insns: []bytecode.Instr{{Op: bytecode.OpGetLocal, A: 5}}})
 }

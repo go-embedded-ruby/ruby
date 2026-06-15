@@ -30,13 +30,14 @@ type builder struct {
 	locals   []string
 	params      []string
 	numRequired int
+	splatIndex  int
 	children []*bytecode.ISeq
 	parent   *builder
 	isBlock  bool
 }
 
 func newBuilder(name string, params []string) *builder {
-	b := &builder{name: name, constIdx: map[object.Value]int{}, params: params, numRequired: len(params)}
+	b := &builder{name: name, constIdx: map[object.Value]int{}, params: params, numRequired: len(params), splatIndex: -1}
 	for _, p := range params {
 		b.localSlot(p) // params occupy slots 0..n-1, in order
 	}
@@ -119,6 +120,7 @@ func (b *builder) build() *bytecode.ISeq {
 		Names:     b.names,
 		Params:      b.params,
 		NumRequired: b.numRequired,
+		SplatIndex:  b.splatIndex,
 		NumLocals: len(b.locals),
 		Children:  b.children,
 	}
@@ -682,7 +684,11 @@ func (c *Compiler) compileWhile(v *ast.While) {
 func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	c.push(newBuilder(v.Name, v.Params))
 	b := c.cur()
+	b.splatIndex = v.SplatIndex
 	nreq := len(v.Params)
+	if v.SplatIndex >= 0 {
+		nreq = v.SplatIndex // the splat and anything after it are not required
+	}
 	for i, d := range v.Defaults {
 		if d == nil {
 			continue

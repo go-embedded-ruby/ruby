@@ -109,6 +109,7 @@ type ISeq struct {
 	Names     []string       // method-call and definition names
 	Params    []string       // parameter names
 	NumRequired int          // count of required (non-defaulted) leading params
+	SplatIndex  int          // index of the *splat param, or -1
 	NumLocals int            // total local slots (params first, then assigns)
 	Children  []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
 	Super     string         // for a class body: the superclass name ("" → Object)
