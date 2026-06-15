@@ -457,10 +457,12 @@ internal raises (`1/0`, NoMethodError, …) are rescuable; bare `raise` re-raise
 **method-level rescue/ensure** — a `def` body carries rescue/else/ensure
 clauses without an explicit `begin` (shared `parseRescueTail`).
 
-### Phase 4 — Full metaprogramming
+### Phase 4 — Full metaprogramming — 🚧 in progress
 `define_method`, `instance_eval`/`instance_exec`, `class_eval`, constant
 machinery, hooks (`included`/`inherited`/`method_added`/…),
 `define_singleton_method`, **string `eval`**. (Refinements: deferred.)
+**Started:** reflection/dispatch — `send`/`public_send` (forwarding the block),
+`respond_to?`, `itself`, `tap`, `then`/`yield_self`.
 
 ### Phase 5 — Complete front-end
 Full grammar: heredocs, interpolation, `%`-literals, multiple assignment, keyword
