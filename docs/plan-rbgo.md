@@ -417,6 +417,8 @@ identity.
 **Compound assignment**: `+= -= *= /= %= <<= ||= &&=` desugar to `lhs = lhs OP
 rhs` for locals (a fresh-slot-aware OpAssign node so `x ||= v` defines `x`),
 ivars, and `recv[i] OP= v`.
+**Top-level `@ivars`**: `main` is now a real object with its own ivar table,
+shared with top-level method bodies (closing the Phase 1 no-op-set quirk).
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
