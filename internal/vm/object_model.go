@@ -63,13 +63,14 @@ type RClass struct {
 	name     string
 	super    *RClass
 	methods  map[string]*Method
+	smethods map[string]*Method // singleton (class) methods: def self.foo
 	consts   map[string]object.Value
 	includes []*RClass // modules mixed in via include (most recent last)
 	isModule bool
 }
 
 func newClass(name string, super *RClass) *RClass {
-	return &RClass{name: name, super: super, methods: map[string]*Method{}, consts: map[string]object.Value{}}
+	return &RClass{name: name, super: super, methods: map[string]*Method{}, smethods: map[string]*Method{}, consts: map[string]object.Value{}}
 }
 
 func (c *RClass) ToS() string     { return c.name }
@@ -96,6 +97,17 @@ func (o *RObject) Truthy() bool    { return true }
 func lookupMethod(c *RClass, name string) *Method {
 	for ; c != nil; c = c.super {
 		if m := lookupOwnOrIncluded(c, name); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
+// lookupSMethod finds a singleton (class) method, walking the superclass chain
+// so a subclass inherits its ancestors' class methods.
+func lookupSMethod(c *RClass, name string) *Method {
+	for ; c != nil; c = c.super {
+		if m, ok := c.smethods[name]; ok {
 			return m
 		}
 	}
@@ -158,6 +170,13 @@ func (vm *VM) classOf(v object.Value) *RClass {
 // receiver's class chain, else route to method_missing (Object's default
 // raises NoMethodError). blk is the block passed to the call (nil if none).
 func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Proc) object.Value {
+	// A class receiver consults its singleton-method chain (def self.foo, and
+	// inherited class methods) before the generic Class instance methods.
+	if cls, ok := recv.(*RClass); ok {
+		if m := lookupSMethod(cls, name); m != nil {
+			return vm.invoke(m, recv, args, blk)
+		}
+	}
 	c := vm.classOf(recv)
 	if m := lookupMethod(c, name); m != nil {
 		return vm.invoke(m, recv, args, blk)

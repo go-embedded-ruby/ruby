@@ -229,6 +229,12 @@ func (p *Parser) parseModule() ast.Node {
 
 func (p *Parser) parseDef() ast.Node {
 	p.expect(token.DEF)
+	singleton := false
+	if p.is(token.SELF) && p.peekTok().Type == token.DOT {
+		p.advance() // self
+		p.advance() // .
+		singleton = true
+	}
 	name, ok := p.parseDefName()
 	if !ok {
 		p.fail("expected method name after def")
@@ -253,7 +259,7 @@ func (p *Parser) parseDef() ast.Node {
 	}
 	p.popScope()
 	p.expect(token.END)
-	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, SplatIndex: splat, KwParams: kwParams, KwRest: kwRest, BlockParam: blockParam, Body: body}
+	return &ast.MethodDef{Name: name, Params: params, Defaults: defaults, SplatIndex: splat, KwParams: kwParams, KwRest: kwRest, BlockParam: blockParam, Singleton: singleton, Body: body}
 }
 
 // parseDefName reads the name in a `def`: an identifier/constant, an operator

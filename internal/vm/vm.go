@@ -380,6 +380,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				case bytecode.OpDefineMethod:
 					definee.methods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
 					push(object.NilV)
+				case bytecode.OpDefineSMethod:
+					definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
+					push(object.NilV)
 				case bytecode.OpDefineClass:
 					push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
 				case bytecode.OpDefineModule:

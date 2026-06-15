@@ -125,6 +125,7 @@ type MethodDef struct {
 	KwParams   []KwParam // keyword parameters (a:, b: default), after positionals
 	KwRest     string    // name of the **rest keyword-splat param, or "" if none
 	BlockParam string    // name of the &block param, or "" if none
+	Singleton  bool      // def self.foo — a singleton (class) method
 	Body   []Node
 }
 

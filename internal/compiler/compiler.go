@@ -844,5 +844,9 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	parent := c.cur()
 	childIdx := len(parent.children)
 	parent.children = append(parent.children, child)
-	parent.emit(bytecode.OpDefineMethod, parent.addName(v.Name), childIdx)
+	op := bytecode.OpDefineMethod
+	if v.Singleton {
+		op = bytecode.OpDefineSMethod
+	}
+	parent.emit(op, parent.addName(v.Name), childIdx)
 }
