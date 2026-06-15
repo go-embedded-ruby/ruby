@@ -168,6 +168,10 @@ type OpAssign struct {
 	Value Node
 }
 
+// StrInterp is an interpolated double-quoted string: the parts alternate string
+// literals and embedded expressions, all coerced with to_s and concatenated.
+type StrInterp struct{ Parts []Node }
+
 // Begin is `begin BODY (rescue …)* [else …] [ensure …] end`.
 type Begin struct {
 	Body       []Node
@@ -215,3 +219,4 @@ func (*Break) node()      {}
 func (*Next) node()       {}
 func (*OpAssign) node()   {}
 func (*Begin) node()      {}
+func (*StrInterp) node()  {}

@@ -26,6 +26,9 @@ type Lexer struct {
 	line  int
 	col   int
 	state lexState
+	// interpBraces tracks open '{' counts per active string interpolation, so a
+	// '}' that closes an interpolation is distinguished from a hash/block brace.
+	interpBraces []int
 }
 
 func New(src string) *Lexer {
@@ -148,8 +151,18 @@ func (l *Lexer) next() token.Token {
 		return mk(token.RPAREN, ")")
 	case '{':
 		l.state = exprBegin
+		if n := len(l.interpBraces); n > 0 {
+			l.interpBraces[n-1]++
+		}
 		return mk(token.LBRACE, "{")
 	case '}':
+		if n := len(l.interpBraces); n > 0 {
+			if l.interpBraces[n-1] == 0 {
+				l.interpBraces = l.interpBraces[:n-1] // this '}' closes the interpolation
+				return l.continueString(line, col)
+			}
+			l.interpBraces[n-1]--
+		}
 		l.state = exprEnd
 		return mk(token.RBRACE, "}")
 	case '[':
@@ -362,11 +375,46 @@ func (l *Lexer) lexIvar(spaceBefore bool, line, col int) token.Token {
 
 func (l *Lexer) lexString(spaceBefore bool, line, col int) token.Token {
 	l.advance() // opening quote
+	lit, interp := l.scanStringSegment()
+	if !interp {
+		l.state = exprEnd
+		return token.Token{Type: token.STRING, Lit: lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+	}
+	l.interpBraces = append(l.interpBraces, 0)
+	l.state = exprBegin
+	return token.Token{Type: token.STRBEG, Lit: lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// continueString resumes lexing a string after an interpolation's closing '}',
+// returning STRMID if another interpolation follows or STREND at the close.
+func (l *Lexer) continueString(line, col int) token.Token {
+	lit, interp := l.scanStringSegment()
+	if interp {
+		l.interpBraces = append(l.interpBraces, 0)
+		l.state = exprBegin
+		return token.Token{Type: token.STRMID, Lit: lit, Line: line, Col: col}
+	}
+	l.state = exprEnd
+	return token.Token{Type: token.STREND, Lit: lit, Line: line, Col: col}
+}
+
+// scanStringSegment reads a run of string content (with escapes) up to the
+// closing quote (consumed) or an unescaped "#{" (consumed); the bool reports
+// whether an interpolation follows.
+func (l *Lexer) scanStringSegment() (string, bool) {
 	var b []byte
 	for {
 		c := l.peek()
 		if c == 0 || c == '"' {
-			break
+			if c == '"' {
+				l.advance()
+			}
+			return string(b), false
+		}
+		if c == '#' && l.peek2() == '{' {
+			l.advance()
+			l.advance()
+			return string(b), true
 		}
 		if c == '\\' {
 			l.advance()
@@ -393,11 +441,6 @@ func (l *Lexer) lexString(spaceBefore bool, line, col int) token.Token {
 		}
 		b = append(b, l.advance())
 	}
-	if l.peek() == '"' {
-		l.advance() // closing quote
-	}
-	l.state = exprEnd
-	return token.Token{Type: token.STRING, Lit: string(b), Line: line, Col: col, SpaceBefore: spaceBefore}
 }
 
 func isDigit(c byte) bool      { return c >= '0' && c <= '9' }

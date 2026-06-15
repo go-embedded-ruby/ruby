@@ -16,6 +16,9 @@ const (
 	INT
 	FLOAT
 	STRING
+	STRBEG // "…#{  (start of an interpolated string; Lit = literal prefix)
+	STRMID // }…#{  (literal between two interpolations)
+	STREND // }…"   (literal suffix ending an interpolated string)
 	IDENT  // local variable or method name (lowercase / _ leading)
 	CONST  // Capitalized identifier
 	IVAR   // @instance_variable
@@ -83,7 +86,7 @@ const (
 
 var typeNames = map[Type]string{
 	EOF: "EOF", ILLEGAL: "ILLEGAL", NEWLINE: "NEWLINE", INT: "INT", FLOAT: "FLOAT",
-	STRING: "STRING", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR", SYMBOL: "SYMBOL", LABEL: "LABEL",
+	STRING: "STRING", STRBEG: "STRBEG", STRMID: "STRMID", STREND: "STREND", IDENT: "IDENT", CONST: "CONST", IVAR: "IVAR", SYMBOL: "SYMBOL", LABEL: "LABEL",
 	DEF: "def", CLASS: "class", MODULE: "module", END: "end",
 	IF: "if", ELSIF: "elsif", ELSE: "else", UNLESS: "unless", WHILE: "while",
 	UNTIL: "until", RETURN: "return", BREAK: "break", NEXT: "next", BEGIN: "begin", RESCUE: "rescue", ENSURE: "ensure",

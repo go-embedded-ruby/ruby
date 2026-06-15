@@ -407,6 +407,24 @@ func (p *Parser) parseBegin() ast.Node {
 	return node
 }
 
+// parseInterpString assembles an interpolated string from the lexer's
+// STRBEG (literal …#{) / expr / STRMID (}…#{) / … / STREND (}…") sequence.
+func (p *Parser) parseInterpString() ast.Node {
+	parts := []ast.Node{&ast.StringLit{Value: p.advance().Lit}} // STRBEG
+	for {
+		parts = append(parts, p.parseExprOrAssign())
+		t := p.advance()
+		parts = append(parts, &ast.StringLit{Value: t.Lit})
+		if t.Type == token.STREND {
+			break
+		}
+		if t.Type != token.STRMID {
+			p.fail("malformed string interpolation")
+		}
+	}
+	return &ast.StrInterp{Parts: parts}
+}
+
 // --- expressions ---
 
 func (p *Parser) parseExprOrAssign() ast.Node {
@@ -727,6 +745,8 @@ func (p *Parser) parsePrimary() ast.Node {
 		return &ast.IvarRef{Name: t.Lit}
 	case token.BEGIN:
 		return p.parseBegin()
+	case token.STRBEG:
+		return p.parseInterpString()
 	}
 	return p.fail("unexpected token %q (%s)", t.Lit, t.Type)
 }
@@ -785,7 +805,7 @@ func (p *Parser) canStartCommandArg() bool {
 		return false
 	}
 	switch t.Type {
-	case token.INT, token.FLOAT, token.STRING, token.SYMBOL, token.IDENT, token.CONST,
+	case token.INT, token.FLOAT, token.STRING, token.STRBEG, token.SYMBOL, token.IDENT, token.CONST,
 		token.IVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG,
 		token.LPAREN, token.LBRACKET:
 		return true

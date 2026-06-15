@@ -11,12 +11,12 @@ func TestNodeMarkers(t *testing.T) {
 		&If{}, &While{}, &MethodDef{}, &Return{},
 		&ConstRef{}, &IvarRef{}, &IvarAssign{}, &ClassDef{},
 		&ModuleDef{}, &Super{}, &Yield{}, &SymbolLit{}, &ArrayLit{}, &HashLit{}, &RangeLit{},
-		&Break{}, &Next{}, &OpAssign{}, &Begin{},
+		&Break{}, &Next{}, &OpAssign{}, &Begin{}, &StrInterp{},
 	}
 	for _, n := range nodes {
 		n.node()
 	}
-	if len(nodes) != 31 {
-		t.Fatalf("expected 31 node kinds, got %d", len(nodes))
+	if len(nodes) != 32 {
+		t.Fatalf("expected 32 node kinds, got %d", len(nodes))
 	}
 }
