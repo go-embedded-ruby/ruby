@@ -414,6 +414,9 @@ block or loop. `next [v]` returns from a block frame or continues a loop;
 unwinds to the correct call site even through a Ruby-level iterator (`map { break
 }` returns from `map`), via an OpBreak panic tagged with the executing block's
 identity.
+**Compound assignment**: `+= -= *= /= %= <<= ||= &&=` desugar to `lhs = lhs OP
+rhs` for locals (a fresh-slot-aware OpAssign node so `x ||= v` defines `x`),
+ivars, and `recv[i] OP= v`.
 **Exit:** most "ordinary" Ruby runs.
 
 ### Phase 3 — Control flow & exceptions
