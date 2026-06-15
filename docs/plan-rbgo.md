@@ -424,10 +424,16 @@ shared with top-level method bodies (closing the Phase 1 no-op-set quirk).
 ordering goes through `<=>`.
 **Exit:** most "ordinary" Ruby runs.
 
-### Phase 3 — Control flow & exceptions
+### Phase 3 — Control flow & exceptions — 🚧 in progress
 Exception hierarchy, `raise`/`rescue`/`ensure`/`retry`, non-local
 `break`/`next`/`redo`/`return` via catch tables, `StopIteration`, **Fiber +
 Enumerator + `loop` + `lazy`**.
+**Started:** the **exception hierarchy** (Exception → StandardError →
+RuntimeError + the built-in error classes with correct superclasses), Exception
+`#initialize`/`#message`/`#to_s`, `Object#is_a?`/`#kind_of?`/`#instance_of?`, and
+`Kernel#raise` (string → RuntimeError, class → instantiated, instance →
+re-raised, class + message). `RubyError` carries the Ruby exception object so
+`begin`/`rescue`/`ensure` (next) can bind and match it.
 
 ### Phase 4 — Full metaprogramming
 `define_method`, `instance_eval`/`instance_exec`, `class_eval`, constant
