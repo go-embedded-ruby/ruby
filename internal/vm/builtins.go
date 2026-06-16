@@ -884,13 +884,20 @@ func (vm *VM) bootstrap() {
 			raise("LocalJumpError", "no block given (sort_by)")
 		}
 		a := self.(*object.Array)
-		out := make([]object.Value, len(a.Elems))
-		copy(out, a.Elems)
-		keys := make([]object.Value, len(out))
-		for i, e := range out {
+		keys := make([]object.Value, len(a.Elems))
+		for i, e := range a.Elems {
 			keys[i] = vm.callBlock(blk, []object.Value{e})
 		}
-		sort.SliceStable(out, func(i, j int) bool { return vm.spaceship(keys[i], keys[j]) < 0 })
+		// Sort an index permutation so each element stays paired with its key.
+		idx := make([]int, len(a.Elems))
+		for i := range idx {
+			idx[i] = i
+		}
+		sort.SliceStable(idx, func(i, j int) bool { return vm.spaceship(keys[idx[i]], keys[idx[j]]) < 0 })
+		out := make([]object.Value, len(idx))
+		for i, k := range idx {
+			out[i] = a.Elems[k]
+		}
 		return &object.Array{Elems: out}
 	})
 	vm.cArray.define("min_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -1193,7 +1200,25 @@ func (vm *VM) bootstrap() {
 		return object.Integer(rangeSize(self.(*object.Range)))
 	}
 	vm.cRange.define("size", rangeSizeFn)
-	vm.cRange.define("count", rangeSizeFn)
+	vm.cRange.define("count", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// Bare count is the range size; with a block or argument it counts
+		// matching elements (Enumerable#count).
+		if blk == nil && len(args) == 0 {
+			return rangeSizeFn(vm, self, args, blk)
+		}
+		arr := vm.send(self, "to_a", nil, nil).(*object.Array)
+		var n int64
+		for _, e := range arr.Elems {
+			if blk != nil {
+				if vm.callBlock(blk, []object.Value{e}).Truthy() {
+					n++
+				}
+			} else if valueEqual(e, args[0]) {
+				n++
+			}
+		}
+		return object.Integer(n)
+	})
 	vm.cRange.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Array{Elems: rangeElems(self.(*object.Range))}
 	})

@@ -67,8 +67,22 @@ module Enumerable
 
   def count
     n = 0
-    each { |x| n = n + 1 }
+    each { |x| n = n + 1 if !block_given? || yield(x) }
     n
+  end
+
+  # min_by / max_by / sort_by delegate to Array's native implementations via the
+  # pair/element list, so any Enumerable (Hash, Range, Struct, …) gains them.
+  def min_by
+    to_a.min_by { |x| yield(x) }
+  end
+
+  def max_by
+    to_a.max_by { |x| yield(x) }
+  end
+
+  def sort_by
+    to_a.sort_by { |x| yield(x) }
   end
 
   def select
@@ -99,9 +113,9 @@ module Enumerable
     found
   end
 
-  def sum
-    total = 0
-    each { |x| total = total + x }
+  def sum(init = 0)
+    total = init
+    each { |x| total = total + (block_given? ? yield(x) : x) }
     total
   end
 
