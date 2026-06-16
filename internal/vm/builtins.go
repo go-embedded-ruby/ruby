@@ -55,6 +55,17 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Proc).isLambda)
 	})
+	dupFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return dupValue(self)
+	}
+	vm.cObject.define("dup", dupFn)
+	vm.cObject.define("clone", dupFn)
+	vm.cObject.define("freeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cObject.define("frozen?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(isFrozen(self))
+	})
 	vm.cObject.define("instance_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return getIvar(self, args[0].ToS())
 	})
@@ -1924,6 +1935,43 @@ func defineAttrs(cls *RClass, names []object.Value, reader, writer bool) {
 			})
 		}
 	}
+}
+
+// dupValue shallow-copies a value (Object#dup/#clone). Reference types get a
+// fresh container with the same elements; immutable value types are their own
+// copy.
+func dupValue(v object.Value) object.Value {
+	switch x := v.(type) {
+	case *object.Array:
+		elems := make([]object.Value, len(x.Elems))
+		copy(elems, x.Elems)
+		return &object.Array{Elems: elems}
+	case *object.Hash:
+		h := object.NewHash()
+		for _, k := range x.Keys {
+			val, _ := x.Get(k)
+			h.Set(k, val)
+		}
+		return h
+	case *RObject:
+		ivars := make(map[string]object.Value, len(x.ivars))
+		for k, val := range x.ivars {
+			ivars[k] = val
+		}
+		return &RObject{class: x.class, ivars: ivars}
+	default:
+		return v
+	}
+}
+
+// isFrozen backs Object#frozen?: the immutable value types report frozen,
+// everything mutable reports not-frozen (we do not track explicit freezes).
+func isFrozen(v object.Value) bool {
+	switch v.(type) {
+	case object.Integer, object.Float, object.Symbol, object.Bool, object.Nil:
+		return true
+	}
+	return false
 }
 
 // gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.
