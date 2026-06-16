@@ -271,6 +271,11 @@ end
 # needs block auto-splat for its [k, v] pairs first.)
 class Array
   include Enumerable
+  # The deconstruct protocol for case/in array patterns: an Array deconstructs
+  # to itself.
+  def deconstruct
+    self
+  end
 end
 
 class Range

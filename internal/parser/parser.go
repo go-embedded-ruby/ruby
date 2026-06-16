@@ -125,6 +125,7 @@ var (
 	braceBlockEnd = map[token.Type]bool{token.RBRACE: true}
 	beginBodyEnd = map[token.Type]bool{token.RESCUE: true, token.ELSE: true, token.ENSURE: true, token.END: true}
 	caseBodyEnd  = map[token.Type]bool{token.WHEN: true, token.ELSE: true, token.END: true}
+	inBodyEnd    = map[token.Type]bool{token.IN: true, token.ELSE: true, token.END: true}
 	ifBodyEnd    = map[token.Type]bool{token.END: true, token.ELSE: true, token.ELSIF: true}
 	// rangeHiEnds marks tokens that cannot begin a range's high endpoint, making
 	// the range endless (`1..`, `arr[2..]`).
@@ -524,14 +525,20 @@ func (p *Parser) parseInterpString() ast.Node {
 	return &ast.StrInterp{Parts: parts}
 }
 
-// parseCase parses `case [subject] (when c[, c…] [then] body)* [else body] end`.
+// parseCase parses either `case [subj] (when …)* [else] end` or the pattern
+// form `case subj (in PATTERN [guard])* [else] end`. The first clause keyword
+// (when vs in) selects the form.
 func (p *Parser) parseCase() ast.Node {
 	p.expect(token.CASE)
-	node := &ast.Case{}
+	var subject ast.Node
 	if !p.is(token.NEWLINE) {
-		node.Subject = p.parseExprOrAssign()
+		subject = p.parseExprOrAssign()
 	}
 	p.skipNewlines()
+	if p.is(token.IN) {
+		return p.parseCaseIn(subject)
+	}
+	node := &ast.Case{Subject: subject}
 	for p.is(token.WHEN) {
 		p.advance()
 		clause := ast.WhenClause{Conds: []ast.Node{p.parseExprOrAssign()}}
@@ -547,6 +554,157 @@ func (p *Parser) parseCase() ast.Node {
 	}
 	p.expect(token.END)
 	return node
+}
+
+// parseCaseIn parses the `(in PATTERN [guard])* [else body] end` tail of a
+// pattern-matching case, with the subject already consumed.
+func (p *Parser) parseCaseIn(subject ast.Node) ast.Node {
+	node := &ast.CaseIn{Subject: subject}
+	for p.is(token.IN) {
+		p.advance()
+		clause := ast.InClause{Pattern: p.parsePattern()}
+		switch {
+		case p.accept(token.IF):
+			clause.Guard = p.parseExprOrAssign()
+		case p.accept(token.UNLESS):
+			clause.Guard = p.parseExprOrAssign()
+			clause.GuardNeg = true
+		}
+		p.accept(token.THEN)
+		clause.Body = p.parseStatements(inBodyEnd)
+		node.Clauses = append(node.Clauses, clause)
+	}
+	if p.accept(token.ELSE) {
+		node.Else = p.parseStatements(bodyEnd)
+	}
+	p.expect(token.END)
+	return node
+}
+
+// parsePattern parses a top-level pattern. The top level also accepts a bare
+// comma-separated array pattern (`in a, b`, `in *a, b`), the implicit array
+// form.
+func (p *Parser) parsePattern() ast.Pattern {
+	first := p.parseArrayPatternElem()
+	if !first.splat && !p.is(token.COMMA) {
+		return first.pat
+	}
+	// Implicit (un-bracketed) array pattern: `in a, b` ≡ `in [a, b]`.
+	return p.parseArrayPatternRest(nil, first)
+}
+
+// parsePatternPrimary parses a single pattern element, applying a trailing
+// `=> name` binding suffix.
+func (p *Parser) parsePatternPrimary() ast.Pattern {
+	pat := p.parsePatternAtom()
+	if p.accept(token.HASHROCKET) {
+		name := p.expect(token.IDENT).Lit
+		p.declareLocal(name)
+		pat = &ast.BindingPattern{Sub: pat, Name: name}
+	}
+	return pat
+}
+
+// parsePatternAtom parses one pattern without the `=> name` suffix.
+func (p *Parser) parsePatternAtom() ast.Pattern {
+	switch p.cur().Type {
+	case token.LBRACKET:
+		return p.parseArrayPattern(nil)
+	case token.IDENT:
+		// A bare lowercase identifier binds the subject (the wildcard `_`
+		// included; it binds in MRI too).
+		name := p.advance().Lit
+		p.declareLocal(name)
+		return &ast.BindPattern{Name: name}
+	case token.CONST:
+		c := &ast.ConstRef{Name: p.advance().Lit}
+		// Point[...] — a constant followed (no space) by `[` is a const array
+		// pattern; otherwise the constant is a class match.
+		if p.is(token.LBRACKET) {
+			return p.parseArrayPattern(c)
+		}
+		return &ast.ConstPattern{Const: c}
+	default:
+		// Everything else is a value pattern matched with `===`: literals and
+		// ranges (true/false/nil/Integer/Float/String/Symbol/range).
+		return &ast.ValuePattern{Value: p.parsePatternValue()}
+	}
+}
+
+// parsePatternValue parses the expression behind a value pattern: a literal or
+// a range of literals (`1..5`, `..10`, `1..`).
+func (p *Parser) parsePatternValue() ast.Node {
+	return p.parseRange()
+}
+
+// parseArrayPattern parses `[pat, …]`, with an optional leading constant.
+func (p *Parser) parseArrayPattern(constName ast.Node) ast.Pattern {
+	p.expect(token.LBRACKET)
+	ap := &ast.ArrayPattern{Const: constName}
+	if p.accept(token.RBRACKET) {
+		return ap
+	}
+	p.appendArrayElem(ap, p.parseArrayPatternElem())
+	for p.accept(token.COMMA) {
+		if p.is(token.RBRACKET) { // trailing comma
+			break
+		}
+		p.appendArrayElem(ap, p.parseArrayPatternElem())
+	}
+	p.expect(token.RBRACKET)
+	return ap
+}
+
+// parseArrayPatternRest builds an implicit (top-level, un-bracketed) array
+// pattern from an already-parsed first element and the comma-separated tail,
+// terminating at a clause boundary rather than a bracket.
+func (p *Parser) parseArrayPatternRest(constName ast.Node, first arrayElem) ast.Pattern {
+	ap := &ast.ArrayPattern{Const: constName}
+	p.appendArrayElem(ap, first)
+	for p.accept(token.COMMA) {
+		p.appendArrayElem(ap, p.parseArrayPatternElem())
+	}
+	return ap
+}
+
+// arrayElem is one parsed array-pattern element: an ordinary sub-pattern, or a
+// `*[name]` splat marker (splat true, with the optional capture name).
+type arrayElem struct {
+	pat   ast.Pattern
+	splat bool
+	name  string
+}
+
+// parseArrayPatternElem parses one element of an array pattern, which may be a
+// `*[name]` splat.
+func (p *Parser) parseArrayPatternElem() arrayElem {
+	if p.accept(token.STAR) {
+		name := ""
+		if p.is(token.IDENT) {
+			name = p.advance().Lit
+			p.declareLocal(name)
+		}
+		return arrayElem{splat: true, name: name}
+	}
+	return arrayElem{pat: p.parsePatternPrimary()}
+}
+
+// appendArrayElem places one element into ap, recording a splat in the dedicated
+// fields rather than the Pre/Post slices.
+func (p *Parser) appendArrayElem(ap *ast.ArrayPattern, elem arrayElem) {
+	if elem.splat {
+		if ap.HasSplat {
+			p.fail("unexpected second * in array pattern")
+		}
+		ap.HasSplat = true
+		ap.SplatName = elem.name
+		return
+	}
+	if ap.HasSplat {
+		ap.Post = append(ap.Post, elem.pat)
+	} else {
+		ap.Pre = append(ap.Pre, elem.pat)
+	}
 }
 
 // --- expressions ---

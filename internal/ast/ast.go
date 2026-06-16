@@ -224,6 +224,57 @@ type WhenClause struct {
 	Body  []Node
 }
 
+// CaseIn is `case Subject (in PATTERN [guard]; BODY)* [else BODY] end` — Ruby
+// pattern matching. Unlike Case, each clause matches the subject against a
+// structural Pattern (deconstruction + binding), and a failed match with no
+// else raises NoMatchingPatternError.
+type CaseIn struct {
+	Subject Node
+	Clauses []InClause
+	Else    []Node // nil if no else
+}
+
+// InClause is one `in PATTERN [if cond | unless cond] [then] BODY`. GuardNeg is
+// true for an `unless` guard. Guard is nil when there is no guard.
+type InClause struct {
+	Pattern  Pattern
+	Guard    Node
+	GuardNeg bool
+	Body     []Node
+}
+
+// Pattern is any case/in pattern node.
+type Pattern interface{ pattern() }
+
+// ValuePattern matches when `Value === subject` (literals, ranges, pinned
+// expressions): the subject is tested but not destructured.
+type ValuePattern struct{ Value Node }
+
+// BindPattern binds the whole subject to a local (`in x`, the wildcard `in _`).
+type BindPattern struct{ Name string }
+
+// ConstPattern matches when `subject.is_a?(Const)` (`in Integer`, `in String`).
+type ConstPattern struct{ Const Node }
+
+// BindingPattern is `SubPattern => name`: it matches SubPattern, then binds the
+// subject to name.
+type BindingPattern struct {
+	Sub  Pattern
+	Name string
+}
+
+// ArrayPattern matches an array-like subject via the deconstruct protocol.
+// Pre are the patterns before the splat, Post those after; HasSplat indicates a
+// `*[name]` is present, with SplatName the (possibly empty) capture name. Const,
+// when non-nil, additionally requires `subject.is_a?(Const)` (`in Point[x, y]`).
+type ArrayPattern struct {
+	Const     Node
+	Pre       []Pattern
+	HasSplat  bool
+	SplatName string
+	Post      []Pattern
+}
+
 // Retry restarts the enclosing begin body from inside a rescue clause.
 type Retry struct{}
 
@@ -291,3 +342,10 @@ func (*Case) node()       {}
 func (*Retry) node()      {}
 func (*SplatArg) node()   {}
 func (*BlockPass) node()  {}
+func (*CaseIn) node()     {}
+
+func (*ValuePattern) pattern()   {}
+func (*BindPattern) pattern()    {}
+func (*ConstPattern) pattern()   {}
+func (*BindingPattern) pattern() {}
+func (*ArrayPattern) pattern()   {}

@@ -12,12 +12,25 @@ func TestNodeMarkers(t *testing.T) {
 		&ConstRef{}, &IvarRef{}, &IvarAssign{}, &ClassDef{},
 		&ModuleDef{}, &Super{}, &Yield{}, &SymbolLit{}, &ArrayLit{}, &HashLit{}, &RangeLit{},
 		&Break{}, &Next{}, &OpAssign{}, &Begin{}, &StrInterp{}, &Case{}, &Retry{}, &SplatArg{},
-		&BlockPass{}, &ConstAssign{}, &GVarRef{}, &MultiAssign{},
+		&BlockPass{}, &ConstAssign{}, &GVarRef{}, &MultiAssign{}, &CaseIn{},
 	}
 	for _, n := range nodes {
 		n.node()
 	}
-	if len(nodes) != 39 {
-		t.Fatalf("expected 39 node kinds, got %d", len(nodes))
+	if len(nodes) != 40 {
+		t.Fatalf("expected 40 node kinds, got %d", len(nodes))
+	}
+}
+
+// TestPatternMarkers exercises the no-op pattern() marker methods.
+func TestPatternMarkers(t *testing.T) {
+	pats := []Pattern{
+		&ValuePattern{}, &BindPattern{}, &ConstPattern{}, &BindingPattern{}, &ArrayPattern{},
+	}
+	for _, p := range pats {
+		p.pattern()
+	}
+	if len(pats) != 5 {
+		t.Fatalf("expected 5 pattern kinds, got %d", len(pats))
 	}
 }

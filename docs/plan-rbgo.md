@@ -405,6 +405,21 @@ right-associative) desugars to an If expression.
 is `==`, Module/Class#=== is `is_a?`, Range#=== is membership — so `when
 Integer`, `when 80..89`, `when 2` all dispatch correctly (subject evaluated
 once; `===` lexed via a new EQQ token).
+**Pattern matching `case`/`in`** (Ruby 4.0): the subject is deconstructed and
+bound rather than tested with `===`. `in` is a contextual keyword (the clause
+opener; no `for…in` in the grammar to conflict). Implemented forms: value
+patterns (literals/ranges, matched with `===`), variable binding (`in x`, the
+wildcard `_`), class/constant patterns (`in Integer`, via `is_a?`), the
+`pat => name` binding suffix, and array patterns `[a, b]` / `[1, x]` / `[a,
+*rest]` / `[*init, last]` / nested — using the **deconstruct** protocol
+(`respond_to?(:deconstruct)`, Array#deconstruct returns self, Struct#deconstruct
+its values; length + element checks). A leading constant gives a const array
+pattern `Point[x, y]` (adds an `is_a?` guard). Guards (`in pat if cond` /
+`unless cond`) gate a matched clause. With no matching clause and no `else`,
+`OpRaiseNoMatch` raises **NoMatchingPatternError** (a StandardError subclass).
+Compiled by `compileCaseIn`/`compilePattern`: the subject is evaluated once into
+a hidden slot, each pattern leaves a boolean and performs its bindings as a side
+effect, `OpTruthy` normalizes `===`/`is_a?` results.
 **More String methods**: `ljust`/`rjust`/`center` (rune-width padding) and
 `tr`/`count`/`delete`/`squeeze` (with `a-z` range expansion).
 **`**` exponentiation** (right-associative, tighter than `*`/`/`) + Integer

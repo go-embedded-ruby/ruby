@@ -164,6 +164,8 @@ func (vm *VM) bootstrap() {
 	exc("FrozenError", "RuntimeError")
 	exc("IOError", "StandardError")
 	exc("RegexpError", "StandardError")
+	exc("NoMatchingPatternError", "StandardError")
+	exc("NoMatchingPatternKeyError", "NoMatchingPatternError")
 	exc("Math::DomainError", "StandardError")
 
 	// Exception instance protocol: initialize stores @message; message/to_s

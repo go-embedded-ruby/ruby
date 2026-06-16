@@ -351,6 +351,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(negate(pop()))
 				case bytecode.OpNot:
 					push(object.Bool(!pop().Truthy()))
+				case bytecode.OpTruthy:
+					push(object.Bool(pop().Truthy()))
+				case bytecode.OpRaiseNoMatch:
+					subj := pop()
+					raise("NoMatchingPatternError", "%s", subj.Inspect())
 				case bytecode.OpJump:
 					pc = in.A
 					continue

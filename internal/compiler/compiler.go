@@ -294,6 +294,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileBegin(v)
 	case *ast.Case:
 		c.compileCase(v)
+	case *ast.CaseIn:
+		c.compileCaseIn(v)
 	case *ast.Retry:
 		if len(c.retryTargets) == 0 {
 			c.fail("Invalid retry")
@@ -737,6 +739,198 @@ func (c *Compiler) compileCase(v *ast.Case) {
 	}
 	for _, j := range endJumps {
 		b.patch(j, b.here())
+	}
+}
+
+// compileCaseIn compiles pattern matching (`case … in …`). The subject is
+// evaluated once into a hidden slot; each clause tests its pattern (and guard)
+// against that slot, branching to the clause body on a match. When no clause
+// matches and there is no else, a NoMatchingPatternError is raised.
+func (c *Compiler) compileCaseIn(v *ast.CaseIn) {
+	b := c.cur()
+	subj := b.localSlot("")
+	c.compileNode(v.Subject)
+	b.emit(bytecode.OpSetLocal, subj, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+
+	var endJumps []int
+	for _, clause := range v.Clauses {
+		c.compilePattern(clause.Pattern, subj)
+		if clause.Guard != nil {
+			// Pattern match AND guard: only evaluate the guard when the pattern
+			// matched (the pattern's bindings are visible to the guard).
+			ok := b.emit(bytecode.OpBranchUnless, 0, 0)
+			c.compileNode(clause.Guard)
+			if clause.GuardNeg {
+				b.emit(bytecode.OpNot, 0, 0)
+			}
+			matched := b.emit(bytecode.OpBranchIf, 0, 0)
+			skipNoGuard := b.emit(bytecode.OpJump, 0, 0)
+			b.patch(ok, b.here())
+			// Pattern failed → fall through to the next clause.
+			noMatch := b.emit(bytecode.OpJump, 0, 0)
+			b.patch(matched, b.here())
+			c.compileBody(clause.Body)
+			endJumps = append(endJumps, b.emit(bytecode.OpJump, 0, 0))
+			b.patch(skipNoGuard, b.here())
+			b.patch(noMatch, b.here())
+			continue
+		}
+		skip := b.emit(bytecode.OpBranchUnless, 0, 0)
+		c.compileBody(clause.Body)
+		endJumps = append(endJumps, b.emit(bytecode.OpJump, 0, 0))
+		b.patch(skip, b.here())
+	}
+	if v.Else != nil {
+		c.compileBody(v.Else)
+	} else {
+		// No clause matched and no else: raise NoMatchingPatternError, inspecting
+		// the subject for the message (MRI reports the subject).
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		b.emit(bytecode.OpRaiseNoMatch, 0, 0)
+	}
+	for _, j := range endJumps {
+		b.patch(j, b.here())
+	}
+}
+
+// compilePattern emits code that tests the value in local slot subj against pat
+// and leaves a single boolean (match success) on the stack, performing variable
+// bindings as a side effect.
+func (c *Compiler) compilePattern(pat ast.Pattern, subj int) {
+	b := c.cur()
+	switch p := pat.(type) {
+	case *ast.BindPattern:
+		// Bind the whole subject; always matches.
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		c.storeLocal(p.Name)
+		b.emit(bytecode.OpPop, 0, 0)
+		b.emit(bytecode.OpPushTrue, 0, 0)
+	case *ast.ValuePattern:
+		// value === subject
+		c.compileNode(p.Value)
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		b.emit(bytecode.OpSend, b.addName("==="), 1)
+		b.emit(bytecode.OpTruthy, 0, 0)
+	case *ast.ConstPattern:
+		// subject.is_a?(Const)
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		c.compileNode(p.Const)
+		b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+		b.emit(bytecode.OpTruthy, 0, 0)
+	case *ast.BindingPattern:
+		// Match the sub-pattern, then bind the subject to name on success.
+		c.compilePattern(p.Sub, subj)
+		skip := b.emit(bytecode.OpBranchUnless, 0, 0)
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		c.storeLocal(p.Name)
+		b.emit(bytecode.OpPop, 0, 0)
+		b.emit(bytecode.OpPushTrue, 0, 0)
+		end := b.emit(bytecode.OpJump, 0, 0)
+		b.patch(skip, b.here())
+		b.emit(bytecode.OpPushFalse, 0, 0)
+		b.patch(end, b.here())
+	case *ast.ArrayPattern:
+		c.compileArrayPattern(p, subj)
+	default:
+		c.fail("cannot compile pattern %T", pat)
+	}
+}
+
+// compileArrayPattern emits the deconstruct-protocol match for an array pattern.
+// It checks the optional constant, that the subject responds to :deconstruct,
+// the resulting Array's length, then each element against its sub-pattern.
+func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
+	b := c.cur()
+	arr := b.localSlot("") // the deconstructed Array
+	// Result accumulator: start true, AND each test, short-circuiting via jumps
+	// to a shared failure label.
+	var fails []int
+	// Optional constant guard: subject.is_a?(Const).
+	if p.Const != nil {
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		c.compileNode(p.Const)
+		b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	}
+	// respond_to?(:deconstruct)
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct")), 0)
+	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
+	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	// arr = subject.deconstruct
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpSend, b.addName("deconstruct"), 0)
+	b.emit(bytecode.OpSetLocal, arr, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	// Length check: == (pre+post) without splat, >= (pre+post) with.
+	b.emit(bytecode.OpGetLocal, arr, 0)
+	b.emit(bytecode.OpSend, b.addName("length"), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Pre)+len(p.Post)))), 0)
+	if p.HasSplat {
+		b.emit(bytecode.OpGe, 0, 0)
+	} else {
+		b.emit(bytecode.OpEq, 0, 0)
+	}
+	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	// Pre elements: arr[i].
+	for i, sub := range p.Pre {
+		elem := b.localSlot("")
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(i))), 0)
+		b.emit(bytecode.OpSend, b.addName("[]"), 1)
+		b.emit(bytecode.OpSetLocal, elem, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		c.compilePattern(sub, elem)
+		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	}
+	// Post elements: arr[length-post+i], computed at runtime.
+	for i, sub := range p.Post {
+		elem := b.localSlot("")
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		// index = arr.length - post + i
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		b.emit(bytecode.OpSend, b.addName("length"), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Post)-i))), 0)
+		b.emit(bytecode.OpSub, 0, 0)
+		b.emit(bytecode.OpSend, b.addName("[]"), 1)
+		b.emit(bytecode.OpSetLocal, elem, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		c.compilePattern(sub, elem)
+		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	}
+	// Splat capture: arr[pre...length-post] bound to SplatName (if named).
+	if p.HasSplat && p.SplatName != "" {
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Pre)))), 0)
+		// length - post
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		b.emit(bytecode.OpSend, b.addName("length"), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Post)))), 0)
+		b.emit(bytecode.OpSub, 0, 0)
+		b.emit(bytecode.OpNewRange, 1, 0) // exclusive: pre...(length-post)
+		b.emit(bytecode.OpSend, b.addName("[]"), 1)
+		c.storeLocal(p.SplatName)
+		b.emit(bytecode.OpPop, 0, 0)
+	}
+	// All checks passed.
+	b.emit(bytecode.OpPushTrue, 0, 0)
+	end := b.emit(bytecode.OpJump, 0, 0)
+	for _, f := range fails {
+		b.patch(f, b.here())
+	}
+	b.emit(bytecode.OpPushFalse, 0, 0)
+	b.patch(end, b.here())
+}
+
+// storeLocal emits a SetLocal for name, resolving an existing local or
+// allocating a fresh slot, mirroring ast.Assign.
+func (c *Compiler) storeLocal(name string) {
+	b := c.cur()
+	if depth, slot, ok := b.resolve(name); ok {
+		b.emit(bytecode.OpSetLocal, slot, depth)
+	} else {
+		b.emit(bytecode.OpSetLocal, b.localSlot(name), 0)
 	}
 }
 

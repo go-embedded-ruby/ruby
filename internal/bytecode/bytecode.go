@@ -80,6 +80,8 @@ const (
 	OpSendBlockArg // like OpSend but a &block-pass value sits on top of the args
 	OpSendArrayBlockArg // like OpSendArray with a &block-pass value on top
 	OpRegexp            // A = Names index (source), B = Names index (flags); pushes a compiled Regexp
+	OpTruthy            // pops a value, pushes true if it is truthy else false (normalize a === / is_a? result)
+	OpRaiseNoMatch      // pops the subject value, raises NoMatchingPatternError naming it (case/in fell through)
 )
 
 var opNames = map[Op]string{
@@ -100,7 +102,7 @@ var opNames = map[Op]string{
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
-	OpRegexp: "regexp",
+	OpRegexp: "regexp", OpTruthy: "truthy", OpRaiseNoMatch: "raise_no_match",
 }
 
 func (o Op) String() string {

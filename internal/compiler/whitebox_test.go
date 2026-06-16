@@ -34,6 +34,23 @@ func TestCompileNodeDefault(t *testing.T) {
 	c.compileNode(&ast.Program{})
 }
 
+// compilePattern's default fires for a pattern it does not handle; a nil
+// ast.Pattern (which no parser produces) exercises that safety net.
+func TestCompilePatternDefault(t *testing.T) {
+	c := &Compiler{}
+	c.push(newBuilder("t", nil))
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected compilePattern to panic on an unhandled pattern")
+		}
+		if _, ok := r.(compileError); !ok {
+			t.Fatalf("expected compileError, got %#v", r)
+		}
+	}()
+	c.compilePattern(nil, 0)
+}
+
 func TestCompileUndefinedLocal(t *testing.T) {
 	_, err := Compile(&ast.Program{Body: []ast.Node{&ast.VarRef{Name: "ghost"}}})
 	if err == nil || !strings.Contains(err.Error(), "undefined local") {
