@@ -511,7 +511,8 @@ StandardError), class lists, `=> var` binding, and `OpReThrow` on no match;
 internal raises (`1/0`, NoMethodError, …) are rescuable; bare `raise` re-raises;
 **`retry`** re-enters the begin body from a rescue (ensure still runs once);
 **method-level rescue/ensure** — a `def` body carries rescue/else/ensure
-clauses without an explicit `begin` (shared `parseRescueTail`).
+clauses without an explicit `begin` (shared `parseRescueTail`); and
+**`Kernel#loop`** (block-driven infinite loop, terminated by `break`).
 
 ### Phase 4 — Full metaprogramming — 🚧 in progress
 `define_method`, `instance_eval`/`instance_exec`, `class_eval`, constant
@@ -521,10 +522,16 @@ machinery, hooks (`included`/`inherited`/`method_added`/…),
 `respond_to?`, `itself`, `tap`, `then`/`yield_self`; Kernel conversion methods
 `Integer`/`Float`/`String`/`Array` (capitalized `Name(...)` now parses as a call).
 
-### Phase 5 — Complete front-end
+### Phase 5 — Complete front-end — 🚧 in progress
 Full grammar: heredocs, interpolation, `%`-literals, multiple assignment, keyword
 args, pattern matching, endless methods, beginless/endless ranges, safe
 navigation, numbered params/`it`. *(Or adopt Prism-on-wazero — see §16.)*
+**Landed:** interpolation, keyword args, multiple assignment / destructuring,
+**full pattern matching `case`/`in`** (value/bind/class/array/hash/find/pin/
+alternative patterns, guards, one-line `=>`/`in`, `deconstruct`/
+`deconstruct_keys`), endless methods, beginless/endless ranges, **safe
+navigation `&.`**, and **numbered params (`_1`/`_2`) + `it`**. **Still ahead:**
+heredocs and `%`-literals.
 
 ### Phase 6 — Standard library
 IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
