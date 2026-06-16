@@ -434,8 +434,9 @@ of binding; **alternative** `p1 | p2 | …` matches if any branch does
 (short-circuiting). **One-line patterns**: `subject => pattern` (rightward
 assignment — binds, or raises NoMatchingPatternError) and `subject in pattern`
 (a boolean test), parsed at statement level or in parentheses (`r = (v in P)`),
-with `=` binding tighter. *Deferred:* the find pattern `[*, x, *]` (needs a
-scanning-loop matcher).
+with `=` binding tighter. The **find pattern** `[*pre, mid…, *post]` scans
+for the first matching window (compileFindPattern's scanning loop). Pattern
+matching is **complete**.
 **More String methods**: `ljust`/`rjust`/`center` (rune-width padding) and
 `tr`/`count`/`delete`/`squeeze` (with `a-z` range expansion).
 **`**` exponentiation** (right-associative, tighter than `*`/`/`) + Integer
