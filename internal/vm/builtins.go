@@ -63,6 +63,11 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("freeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
+	vm.cObject.define("equal?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Object identity: reference types compare by pointer, the immutable
+		// value types by value (Go interface equality gives exactly this).
+		return object.Bool(self == args[0])
+	})
 	vm.cObject.define("frozen?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(isFrozen(self))
 	})

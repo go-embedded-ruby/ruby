@@ -28,3 +28,23 @@ func TestDupCloneFreeze(t *testing.T) {
 		})
 	}
 }
+
+func TestEqualIdentity(t *testing.T) {
+	tests := []struct{ name, src, want string }{
+		{"same_array", "a = [1, 2]\np a.equal?(a)", "true\n"},
+		{"diff_array", "p [1, 2].equal?([1, 2])", "false\n"},
+		{"same_int", `p 5.equal?(5)`, "true\n"},
+		{"same_symbol", `p :s.equal?(:s)`, "true\n"},
+		{"same_nil", `p nil.equal?(nil)`, "true\n"},
+		{"same_hash", "h = {x: 1}\np h.equal?(h)", "true\n"},
+		{"same_object", "o = Object.new\np o.equal?(o)", "true\n"},
+		{"diff_object", "p Object.new.equal?(Object.new)", "false\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q got=%q want=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
