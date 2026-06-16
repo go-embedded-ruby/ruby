@@ -70,6 +70,7 @@ const (
 	OpPushHandler  // A = rescue handler pc; pushes a begin/rescue handler
 	OpPopHandler   // pops the innermost handler (begin body completed normally)
 	OpReThrow      // re-raises the exception object on top of the stack
+	OpExpandArray  // A=pre, B=post, C=hasSplat; pops an Array, pushes the multi-assign target values in reverse order
 	OpSplatToArray // pops a value; pushes it if an Array else wrapped in a 1-array
 	OpConcatArray  // pops two Arrays b,a; pushes a concatenated with b
 	OpSendArray    // like OpSend but args come from an Array: stack recv, argsArray
@@ -95,6 +96,7 @@ var opNames = map[Op]string{
 	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
 	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break", OpArgGiven: "arg_given",
 	OpPushHandler: "push_handler", OpPopHandler: "pop_handler", OpReThrow: "rethrow",
+	OpExpandArray: "expand_array",
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",

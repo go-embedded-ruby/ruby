@@ -551,7 +551,61 @@ func (p *Parser) parseCase() ast.Node {
 
 // --- expressions ---
 
+// looksLikeMlhs scans ahead (without consuming) for a multiple-assignment left
+// side: `[*]IDENT (, [*]IDENT)+ =` — at least one comma, every target a local
+// name. It deliberately does not handle ivar/const/attribute targets.
+func (p *Parser) looksLikeMlhs() bool {
+	i := p.pos
+	sawComma := false
+	for {
+		if p.toks[i].Type == token.STAR {
+			i++
+		}
+		if p.toks[i].Type != token.IDENT {
+			return false
+		}
+		i++
+		switch p.toks[i].Type {
+		case token.COMMA:
+			sawComma = true
+			i++
+		case token.ASSIGN:
+			return sawComma
+		default:
+			return false
+		}
+	}
+}
+
+// parseMlhs parses a multiple assignment whose targets are local names, with at
+// most one *splat target.
+func (p *Parser) parseMlhs() ast.Node {
+	var names []string
+	splat := -1
+	for {
+		if p.accept(token.STAR) {
+			splat = len(names)
+		}
+		name := p.expect(token.IDENT).Lit
+		names = append(names, name)
+		p.declareLocal(name)
+		if !p.accept(token.COMMA) {
+			break
+		}
+	}
+	p.expect(token.ASSIGN)
+	values := []ast.Node{p.parseTernary()}
+	for p.accept(token.COMMA) {
+		values = append(values, p.parseTernary())
+	}
+	return &ast.MultiAssign{Names: names, SplatIndex: splat, Values: values}
+}
+
 func (p *Parser) parseExprOrAssign() ast.Node {
+	// Multiple assignment to local targets: a, b = … / a, *b = … .
+	if p.looksLikeMlhs() {
+		return p.parseMlhs()
+	}
 	// Simple local assignment: IDENT '=' expr (right-associative, chainable).
 	if p.is(token.IDENT) && p.peekTok().Type == token.ASSIGN {
 		name := p.advance().Lit

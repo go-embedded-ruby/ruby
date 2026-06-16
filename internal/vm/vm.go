@@ -444,6 +444,49 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					} else {
 						push(&object.Array{Elems: []object.Value{v}})
 					}
+				case bytecode.OpExpandArray:
+					elems := pop().(*object.Array).Elems
+					n := len(elems)
+					pre, post, hasSplat := in.A, in.B, in.C == 1
+					vals := make([]object.Value, 0, pre+post+1)
+					if hasSplat && n >= pre+post {
+						// Enough elements: the splat takes the middle, post the tail.
+						for i := 0; i < pre; i++ {
+							vals = append(vals, elems[i])
+						}
+						mid := make([]object.Value, n-pre-post)
+						copy(mid, elems[pre:n-post])
+						vals = append(vals, &object.Array{Elems: mid})
+						for i := 0; i < post; i++ {
+							vals = append(vals, elems[n-post+i])
+						}
+					} else {
+						// Too short (or no splat): fill targets left-to-right, the
+						// splat is empty, and missing targets get nil.
+						idx := 0
+						nextVal := func() object.Value {
+							if idx < n {
+								v := elems[idx]
+								idx++
+								return v
+							}
+							idx++
+							return object.NilV
+						}
+						for i := 0; i < pre; i++ {
+							vals = append(vals, nextVal())
+						}
+						if hasSplat {
+							vals = append(vals, &object.Array{})
+						}
+						for i := 0; i < post; i++ {
+							vals = append(vals, nextVal())
+						}
+					}
+					// Push in reverse so the first target's value is on top.
+					for i := len(vals) - 1; i >= 0; i-- {
+						push(vals[i])
+					}
 				case bytecode.OpConcatArray:
 					b2 := pop().(*object.Array)
 					a2 := pop().(*object.Array)

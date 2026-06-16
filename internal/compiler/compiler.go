@@ -259,6 +259,37 @@ func (c *Compiler) compileNode(n ast.Node) {
 		} else {
 			b.emit(bytecode.OpSetLocal, b.localSlot(v.Name), 0)
 		}
+	case *ast.MultiAssign:
+		// Build the right-hand side as one Array (a single value is splatted into
+		// its elements; multiple values are collected).
+		if len(v.Values) == 1 {
+			c.compileNode(v.Values[0])
+			b.emit(bytecode.OpSplatToArray, 0, 0)
+		} else {
+			for _, val := range v.Values {
+				c.compileNode(val)
+			}
+			b.emit(bytecode.OpNewArray, len(v.Values), 0)
+		}
+		b.emit(bytecode.OpDup, 0, 0) // keep the array as the expression's value
+		pre, post, splat := len(v.Names), 0, 0
+		if v.SplatIndex >= 0 {
+			pre = v.SplatIndex
+			post = len(v.Names) - v.SplatIndex - 1
+			splat = 1
+		}
+		at := b.emit(bytecode.OpExpandArray, pre, post)
+		b.insns[at].C = splat
+		// OpExpandArray pushed the target values with Names[0]'s on top; store
+		// each (OpSetLocal leaves the value, so pop it).
+		for _, name := range v.Names {
+			if depth, slot, ok := b.resolve(name); ok {
+				b.emit(bytecode.OpSetLocal, slot, depth)
+			} else {
+				b.emit(bytecode.OpSetLocal, b.localSlot(name), 0)
+			}
+			b.emit(bytecode.OpPop, 0, 0)
+		}
 	case *ast.Begin:
 		c.compileBegin(v)
 	case *ast.Case:
