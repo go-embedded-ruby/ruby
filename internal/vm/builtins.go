@@ -640,19 +640,31 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(self.(*object.Array).Elems) == 0)
 	})
-	vm.cArray.define("first", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		if len(a.Elems) == 0 {
-			return object.NilV
+		if len(args) == 0 {
+			if len(a.Elems) == 0 {
+				return object.NilV
+			}
+			return a.Elems[0]
 		}
-		return a.Elems[0]
+		n := clampCount(intArg(args[0]), len(a.Elems))
+		out := make([]object.Value, n)
+		copy(out, a.Elems[:n])
+		return &object.Array{Elems: out}
 	})
-	vm.cArray.define("last", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		if len(a.Elems) == 0 {
-			return object.NilV
+		if len(args) == 0 {
+			if len(a.Elems) == 0 {
+				return object.NilV
+			}
+			return a.Elems[len(a.Elems)-1]
 		}
-		return a.Elems[len(a.Elems)-1]
+		n := clampCount(intArg(args[0]), len(a.Elems))
+		out := make([]object.Value, n)
+		copy(out, a.Elems[len(a.Elems)-n:])
+		return &object.Array{Elems: out}
 	})
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
@@ -1246,14 +1258,50 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*object.Range).Lo
 	})
-	vm.cRange.define("first", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*object.Range).Lo
+	vm.cRange.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		r := self.(*object.Range)
+		if len(args) == 0 {
+			return r.Lo
+		}
+		n := int(intArg(args[0]))
+		if n < 0 {
+			raise("ArgumentError", "negative array size")
+		}
+		// An endless range generates its first n elements directly; a bounded one
+		// caps the count to its materialised size.
+		if _, isNil := r.Hi.(object.Nil); isNil {
+			lo, ok := r.Lo.(object.Integer)
+			if !ok {
+				raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+			}
+			out := make([]object.Value, n)
+			for i := range out {
+				out[i] = object.Integer(int64(lo) + int64(i))
+			}
+			return &object.Array{Elems: out}
+		}
+		elems := rangeElems(r)
+		n = clampCount(int64(n), len(elems))
+		out := make([]object.Value, n)
+		copy(out, elems[:n])
+		return &object.Array{Elems: out}
 	})
 	vm.cRange.define("end", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*object.Range).Hi
 	})
-	vm.cRange.define("last", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*object.Range).Hi
+	vm.cRange.define("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		r := self.(*object.Range)
+		if _, isNil := r.Hi.(object.Nil); isNil {
+			raise("RangeError", "cannot get the last element of endless range")
+		}
+		if len(args) == 0 {
+			return r.Hi
+		}
+		elems := rangeElems(r)
+		n := clampCount(intArg(args[0]), len(elems))
+		out := make([]object.Value, n)
+		copy(out, elems[len(elems)-n:])
+		return &object.Array{Elems: out}
 	})
 	vm.cRange.define("exclude_end?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Range).Exclusive)
@@ -1570,6 +1618,19 @@ func intArg(v object.Value) int64 {
 	}
 	raise("TypeError", "no implicit conversion of %s into Integer", v.Inspect())
 	return 0
+}
+
+// clampCount validates a `first(n)`/`last(n)` count: it must be non-negative
+// (Ruby raises ArgumentError otherwise) and is capped to max so callers can
+// slice safely.
+func clampCount(n int64, max int) int {
+	if n < 0 {
+		raise("ArgumentError", "negative array size")
+	}
+	if n > int64(max) {
+		return max
+	}
+	return int(n)
 }
 
 // arrayIndex normalizes a (possibly negative) index and reports whether it is in
