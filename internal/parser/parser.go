@@ -939,17 +939,61 @@ func (p *Parser) parseDoBlock() *ast.Block {
 func (p *Parser) parseBlockRest(stop map[token.Type]bool, end token.Type) *ast.Block {
 	p.pushBlockScope()
 	var params []string
+	var prepends []ast.Node
 	if p.accept(token.PIPE) {
-		params = p.parseParamNames(token.PIPE)
+		params, prepends = p.parseBlockParams(token.PIPE)
 		p.expect(token.PIPE)
-	}
-	for _, prm := range params {
-		p.declareLocal(prm)
 	}
 	body := p.parseStatements(stop)
 	p.popScope()
 	p.expect(end)
+	// A `(a, b)` group param destructures its (array) argument: it becomes a
+	// synthetic param plus a leading multiple-assignment at the top of the body.
+	if len(prepends) > 0 {
+		body = append(prepends, body...)
+	}
 	return &ast.Block{Params: params, Body: body}
+}
+
+// parseBlockParams parses a block's `|...|` parameter list, where each parameter
+// is either a plain name or a destructuring group `(a, b)` / `(a, *b)`. A group
+// yields a synthetic flat parameter and an mlhs prepend that unpacks it.
+func (p *Parser) parseBlockParams(until token.Type) (names []string, prepends []ast.Node) {
+	if p.is(until) || p.is(token.NEWLINE) {
+		return names, prepends
+	}
+	group := 0
+	for {
+		if p.accept(token.LPAREN) {
+			var gnames []string
+			gsplat := -1
+			for {
+				if p.accept(token.STAR) {
+					gsplat = len(gnames)
+				}
+				gn := p.expect(token.IDENT).Lit
+				gnames = append(gnames, gn)
+				p.declareLocal(gn)
+				if !p.accept(token.COMMA) {
+					break
+				}
+			}
+			p.expect(token.RPAREN)
+			syn := "(" + strconv.Itoa(group) + ")"
+			group++
+			names = append(names, syn)
+			p.declareLocal(syn)
+			prepends = append(prepends, &ast.MultiAssign{Names: gnames, SplatIndex: gsplat, Values: []ast.Node{&ast.VarRef{Name: syn}}})
+		} else {
+			name := p.expect(token.IDENT).Lit
+			names = append(names, name)
+			p.declareLocal(name)
+		}
+		if !p.accept(token.COMMA) {
+			break
+		}
+	}
+	return names, prepends
 }
 
 // parseYield parses `yield`, `yield(...)`, or `yield args`.
