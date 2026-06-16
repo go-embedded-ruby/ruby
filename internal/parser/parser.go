@@ -662,10 +662,16 @@ func (p *Parser) parsePatternAtom() ast.Pattern {
 		return &ast.BindPattern{Name: name}
 	case token.CONST:
 		c := &ast.ConstRef{Name: p.advance().Lit}
-		// Point[...] — a constant followed (no space) by `[` is a const array
-		// pattern; otherwise the constant is a class match.
+		// Point[...] is a const array pattern (deconstruct); Point(x:, y:) is a
+		// const hash pattern (deconstruct_keys); otherwise the constant is a class
+		// match.
 		if p.is(token.LBRACKET) {
 			return p.parseArrayPattern(c)
+		}
+		if p.accept(token.LPAREN) {
+			hp := p.parseHashPatternBody(c, token.RPAREN)
+			p.expect(token.RPAREN)
+			return hp
 		}
 		return &ast.ConstPattern{Const: c}
 	default:
