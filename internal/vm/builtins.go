@@ -770,7 +770,49 @@ func (vm *VM) bootstrap() {
 			copy(slice, a.Elems[i:end])
 			vm.callBlock(blk, []object.Value{&object.Array{Elems: slice}})
 		}
-		return object.NilV
+		return self
+	})
+	vm.cArray.define("each_cons", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each_cons)")
+		}
+		n := int(intArg(args[0]))
+		if n <= 0 {
+			raise("ArgumentError", "invalid size")
+		}
+		a := self.(*object.Array)
+		for i := 0; i+n <= len(a.Elems); i++ {
+			window := make([]object.Value, n)
+			copy(window, a.Elems[i:i+n])
+			vm.callBlock(blk, []object.Value{&object.Array{Elems: window}})
+		}
+		return self
+	})
+	vm.cArray.define("take_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (take_while)")
+		}
+		var out []object.Value
+		for _, e := range self.(*object.Array).Elems {
+			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
+				break
+			}
+			out = append(out, e)
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("drop_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (drop_while)")
+		}
+		a := self.(*object.Array)
+		i := 0
+		for i < len(a.Elems) && vm.callBlock(blk, []object.Value{a.Elems[i]}).Truthy() {
+			i++
+		}
+		out := make([]object.Value, len(a.Elems)-i)
+		copy(out, a.Elems[i:])
+		return &object.Array{Elems: out}
 	})
 	vm.cArray.define("rotate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
