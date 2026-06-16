@@ -602,6 +602,30 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return stringIndex(strOf(self), args)
 	})
+	vm.cString.define("slice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return stringIndex(strOf(self), args)
+	})
+	vm.cString.define("ord", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := strOf(self)
+		if s == "" {
+			raise("ArgumentError", "empty string")
+		}
+		return object.Integer([]rune(s)[0])
+	})
+	vm.cString.define("partition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s, sep := strOf(self), strArg(args[0])
+		if i := strings.Index(s, sep); i >= 0 {
+			return &object.Array{Elems: []object.Value{object.String(s[:i]), object.String(sep), object.String(s[i+len(sep):])}}
+		}
+		return &object.Array{Elems: []object.Value{object.String(s), object.String(""), object.String("")}}
+	})
+	vm.cString.define("rpartition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s, sep := strOf(self), strArg(args[0])
+		if i := strings.LastIndex(s, sep); i >= 0 {
+			return &object.Array{Elems: []object.Value{object.String(s[:i]), object.String(sep), object.String(s[i+len(sep):])}}
+		}
+		return &object.Array{Elems: []object.Value{object.String(""), object.String(""), object.String(s)}}
+	})
 
 	// Array.
 	vm.cArray.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
