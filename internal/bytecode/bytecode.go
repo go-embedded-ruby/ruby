@@ -49,6 +49,7 @@ const (
 	OpJump         // A = target pc
 	OpBranchIf     // A = target pc; pops, jumps if truthy
 	OpBranchUnless // A = target pc; pops, jumps unless truthy
+	OpBranchNil    // A = target pc; pops, jumps if the value is nil (safe nav)
 
 	OpSend         // A = Names index (selector), B = argc; stack: recv, args… → result
 	OpGetIvar      // A = Names index; pushes @name from self (nil if unset)
@@ -88,7 +89,7 @@ var opNames = map[Op]string{
 	OpAdd: "add", OpSub: "sub", OpMul: "mul", OpDiv: "div", OpMod: "mod",
 	OpLt: "lt", OpGt: "gt", OpLe: "le", OpGe: "ge", OpEq: "eq", OpNeq: "neq",
 	OpNeg: "neg", OpNot: "not", OpJump: "jump", OpBranchIf: "branch_if",
-	OpBranchUnless: "branch_unless", OpSend: "send", OpGetIvar: "get_ivar",
+	OpBranchUnless: "branch_unless", OpBranchNil: "branch_nil", OpSend: "send", OpGetIvar: "get_ivar",
 	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpSetConst: "set_const", OpGetGVar: "get_gvar", OpDefineClass: "define_class",
 	OpDefineModule: "define_module", OpDefineMethod: "define_method", OpDefineSMethod: "define_smethod",
 	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",

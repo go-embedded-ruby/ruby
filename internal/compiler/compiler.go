@@ -407,6 +407,18 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	} else {
 		b.emit(bytecode.OpPushSelf, 0, 0) // implicit receiver: self
 	}
+	// Safe navigation (recv&.m): if the receiver is nil, skip the send and leave
+	// nil as the result. The guard branches past whichever send is emitted below.
+	safeBranch := -1
+	if v.Safe {
+		b.emit(bytecode.OpDup, 0, 0)
+		safeBranch = b.emit(bytecode.OpBranchNil, 0, 0)
+	}
+	patchSafe := func() {
+		if safeBranch >= 0 {
+			b.patch(safeBranch, b.here())
+		}
+	}
 	// A trailing `&expr` block-pass is carried as the last arg; pull it out so
 	// the ordinary args compile cleanly and the block value lands on top.
 	args := v.Args
@@ -422,12 +434,14 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		if blockPass != nil {
 			c.compileNode(blockPass)
 			b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+			patchSafe()
 			return
 		}
 		at := b.emit(bytecode.OpSendArray, b.addName(v.Name), 0)
 		if v.Block != nil {
 			b.insns[at].C = c.compileBlock(v.Block) + 1
 		}
+		patchSafe()
 		return
 	}
 	for _, a := range args {
@@ -436,12 +450,14 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	if blockPass != nil {
 		c.compileNode(blockPass)
 		b.emit(bytecode.OpSendBlockArg, b.addName(v.Name), len(args))
+		patchSafe()
 		return
 	}
 	at := b.emit(bytecode.OpSend, b.addName(v.Name), len(args))
 	if v.Block != nil {
 		b.insns[at].C = c.compileBlock(v.Block) + 1 // C-1 indexes Children
 	}
+	patchSafe()
 }
 
 // hasSplat reports whether any item is a *splat.

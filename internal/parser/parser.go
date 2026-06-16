@@ -750,8 +750,8 @@ func (p *Parser) parsePostfix() ast.Node {
 func (p *Parser) parsePostfixTail(node ast.Node) ast.Node {
 	for {
 		switch {
-		case p.is(token.DOT):
-			p.advance()
+		case p.is(token.DOT) || p.is(token.SAFEDOT):
+			safe := p.advance().Type == token.SAFEDOT
 			name := p.methodName()
 			var args []ast.Node
 			if p.is(token.LPAREN) && !p.cur().SpaceBefore {
@@ -759,7 +759,7 @@ func (p *Parser) parsePostfixTail(node ast.Node) ast.Node {
 				args = p.parseCallArgs(token.RPAREN)
 				p.expect(token.RPAREN)
 			}
-			node = &ast.Call{Recv: node, Name: name, Args: args}
+			node = &ast.Call{Recv: node, Name: name, Args: args, Safe: safe}
 		case p.is(token.LBRACKET): // index: recv[args] → recv.[](args)
 			p.advance()
 			args := p.parseCallArgs(token.RBRACKET)

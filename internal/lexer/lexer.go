@@ -211,6 +211,11 @@ func (l *Lexer) next() token.Token {
 			l.state = exprBegin
 			return mk(token.ANDAND, "&&")
 		}
+		if l.peek() == '.' { // &. safe navigation
+			l.advance()
+			l.state = exprBegin
+			return mk(token.SAFEDOT, "&.")
+		}
 		l.state = exprBegin
 		return mk(token.AMPER, "&")
 	case ',':

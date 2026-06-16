@@ -82,6 +82,7 @@ type Call struct {
 	Name  string
 	Args  []Node
 	Block *Block
+	Safe  bool // &. safe navigation: nil receiver short-circuits to nil
 }
 
 // Block is a literal block: parameters and a body. It is a closure over the

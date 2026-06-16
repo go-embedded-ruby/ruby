@@ -364,6 +364,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						pc = in.A
 						continue
 					}
+				case bytecode.OpBranchNil:
+					if _, isNil := pop().(object.Nil); isNil {
+						pc = in.A
+						continue
+					}
 				case bytecode.OpSend:
 					argc := in.B
 					callArgs := make([]object.Value, argc)
