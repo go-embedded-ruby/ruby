@@ -834,6 +834,20 @@ func (c *Compiler) compilePattern(pat ast.Pattern, subj int) {
 		c.compileArrayPattern(p, subj)
 	case *ast.HashPattern:
 		c.compileHashPattern(p, subj)
+	case *ast.AltPattern:
+		// Alternative: true if any branch matches (short-circuit on the first).
+		var hits []int
+		for _, alt := range p.Alts {
+			c.compilePattern(alt, subj)
+			hits = append(hits, b.emit(bytecode.OpBranchIf, 0, 0))
+		}
+		b.emit(bytecode.OpPushFalse, 0, 0)
+		done := b.emit(bytecode.OpJump, 0, 0)
+		for _, h := range hits {
+			b.patch(h, b.here())
+		}
+		b.emit(bytecode.OpPushTrue, 0, 0)
+		b.patch(done, b.here())
 	default:
 		c.fail("cannot compile pattern %T", pat)
 	}

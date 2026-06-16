@@ -96,6 +96,7 @@ const (
 	AMPER     // & (block-pass / block param)
 	SAFEDOT   // &. (safe navigation)
 	ARROW     // -> (stabby lambda)
+	CARET     // ^ (pattern-matching pin operator)
 )
 
 var typeNames = map[Type]string{
@@ -111,7 +112,7 @@ var typeNames = map[Type]string{
 	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=", QUESTION: "?", COLON: ":",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
 	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
-	AMPER: "&", SAFEDOT: "&.", ARROW: "->",
+	AMPER: "&", SAFEDOT: "&.", ARROW: "->", CARET: "^",
 }
 
 func (t Type) String() string {

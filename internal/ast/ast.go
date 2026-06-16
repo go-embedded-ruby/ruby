@@ -290,6 +290,11 @@ type ArrayPattern struct {
 	Post      []Pattern
 }
 
+// AltPattern is `p1 | p2 | …`: it matches when any alternative matches. Ruby
+// forbids variable bindings inside alternatives, so the alternatives are value/
+// constant/structural patterns tested without binding.
+type AltPattern struct{ Alts []Pattern }
+
 // Retry restarts the enclosing begin body from inside a rescue clause.
 type Retry struct{}
 
@@ -365,3 +370,4 @@ func (*ConstPattern) pattern()   {}
 func (*BindingPattern) pattern() {}
 func (*ArrayPattern) pattern()   {}
 func (*HashPattern) pattern()    {}
+func (*AltPattern) pattern()     {}

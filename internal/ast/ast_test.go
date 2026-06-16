@@ -26,12 +26,12 @@ func TestNodeMarkers(t *testing.T) {
 func TestPatternMarkers(t *testing.T) {
 	pats := []Pattern{
 		&ValuePattern{}, &BindPattern{}, &ConstPattern{}, &BindingPattern{}, &ArrayPattern{},
-		&HashPattern{},
+		&HashPattern{}, &AltPattern{},
 	}
 	for _, p := range pats {
 		p.pattern()
 	}
-	if len(pats) != 6 {
-		t.Fatalf("expected 6 pattern kinds, got %d", len(pats))
+	if len(pats) != 7 {
+		t.Fatalf("expected 7 pattern kinds, got %d", len(pats))
 	}
 }

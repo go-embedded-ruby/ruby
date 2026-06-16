@@ -302,6 +302,9 @@ func (l *Lexer) next() token.Token {
 	case ':':
 		l.state = exprBegin
 		return mk(token.COLON, ":")
+	case '^':
+		l.state = exprBegin
+		return mk(token.CARET, "^")
 	}
 	return mk(token.ILLEGAL, string(c))
 }

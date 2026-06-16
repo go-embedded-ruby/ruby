@@ -600,6 +600,21 @@ func (p *Parser) parsePattern() ast.Pattern {
 // parsePatternPrimary parses a single pattern element, applying a trailing
 // `=> name` binding suffix.
 func (p *Parser) parsePatternPrimary() ast.Pattern {
+	first := p.parsePatternSuffixed()
+	if !p.is(token.PIPE) {
+		return first
+	}
+	// `p1 | p2 | …` — alternative pattern (matches if any alternative does).
+	alts := []ast.Pattern{first}
+	for p.accept(token.PIPE) {
+		alts = append(alts, p.parsePatternSuffixed())
+	}
+	return &ast.AltPattern{Alts: alts}
+}
+
+// parsePatternSuffixed parses one pattern atom with an optional trailing
+// `=> name` binding suffix.
+func (p *Parser) parsePatternSuffixed() ast.Pattern {
 	pat := p.parsePatternAtom()
 	if p.accept(token.HASHROCKET) {
 		name := p.expect(token.IDENT).Lit
@@ -612,6 +627,16 @@ func (p *Parser) parsePatternPrimary() ast.Pattern {
 // parsePatternAtom parses one pattern without the `=> name` suffix.
 func (p *Parser) parsePatternAtom() ast.Pattern {
 	switch p.cur().Type {
+	case token.CARET:
+		// Pin: `^name` / `^(expr)` matches the subject against an existing value
+		// (with ===), instead of binding — i.e. a value pattern over that expr.
+		p.advance()
+		if p.accept(token.LPAREN) {
+			e := p.parseExprOrAssign()
+			p.expect(token.RPAREN)
+			return &ast.ValuePattern{Value: e}
+		}
+		return &ast.ValuePattern{Value: &ast.VarRef{Name: p.expect(token.IDENT).Lit}}
 	case token.LBRACKET:
 		return p.parseArrayPattern(nil)
 	case token.LBRACE:
