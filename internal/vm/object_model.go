@@ -247,10 +247,22 @@ func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) obj
 	if p.native != nil {
 		return p.native(vm, args)
 	}
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.cObject, "", p.env, p.block, p)
+}
+
+// classEval runs a block as class_eval/module_eval would: self and the method
+// definition target are both cls, so a `def` inside the block adds an instance
+// method to cls.
+func (vm *VM) classEval(cls *RClass, p *Proc, args []object.Value) object.Value {
+	// class_eval/module_eval always receive a literal (ISeq) block, never a
+	// synthesized native Proc, so no native fast path is needed here.
+	return vm.exec(p.iseq, cls, vm.bindBlockArgs(p, args), cls, "", p.env, p.block, p)
+}
+
+// bindBlockArgs maps call args onto a block's parameters, with the auto-splat a
+// multi-parameter block applies to a single Array argument.
+func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
 	np := len(p.iseq.Params)
-	// Auto-splat: a block with multiple parameters called with a single Array
-	// destructures it (Ruby semantics), so `{ |a, b| }` binds element-wise over
-	// `[[1, 2]].each` and over Hash#each's [k, v] pairs.
 	if np > 1 && len(args) == 1 {
 		if arr, ok := args[0].(*object.Array); ok {
 			args = arr.Elems
@@ -264,7 +276,7 @@ func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) obj
 			bargs[i] = object.NilV
 		}
 	}
-	return vm.exec(p.iseq, self, bargs, vm.cObject, "", p.env, p.block, p)
+	return bargs
 }
 
 func getIvar(self object.Value, name string) object.Value {

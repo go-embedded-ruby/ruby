@@ -307,6 +307,20 @@ func (vm *VM) bootstrap() {
 		defineAttrs(self.(*RClass), args, true, true)
 		return object.NilV
 	})
+	classEvalFn := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (yield)")
+		}
+		return vm.classEval(self.(*RClass), blk, nil)
+	}
+	vm.cModule.define("class_eval", classEvalFn)
+	vm.cModule.define("module_eval", classEvalFn)
+	vm.cModule.define("class_exec", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (yield)")
+		}
+		return vm.classEval(self.(*RClass), blk, args)
+	})
 	vm.cModule.define("define_method", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		body := blk
 		if body == nil {
