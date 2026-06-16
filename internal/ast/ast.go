@@ -263,6 +263,21 @@ type BindingPattern struct {
 	Name string
 }
 
+// HashPattern matches a hash-like subject via the deconstruct_keys protocol.
+// Keys[i] is the symbol key; Values[i] is its sub-pattern, or nil for the
+// shorthand `{name:}` that binds local `name`. RestNil requires no extra keys
+// (`**nil`); RestName captures the remaining keys into a Hash (`**rest`);
+// HasRest distinguishes `**rest` from no double-splat. Const, when non-nil,
+// additionally requires `subject.is_a?(Const)` (`in Point(x:, y:)`).
+type HashPattern struct {
+	Const    Node
+	Keys     []string
+	Values   []Pattern
+	HasRest  bool
+	RestName string
+	RestNil  bool
+}
+
 // ArrayPattern matches an array-like subject via the deconstruct protocol.
 // Pre are the patterns before the splat, Post those after; HasSplat indicates a
 // `*[name]` is present, with SplatName the (possibly empty) capture name. Const,
@@ -349,3 +364,4 @@ func (*BindPattern) pattern()    {}
 func (*ConstPattern) pattern()   {}
 func (*BindingPattern) pattern() {}
 func (*ArrayPattern) pattern()   {}
+func (*HashPattern) pattern()    {}

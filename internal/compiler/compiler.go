@@ -832,6 +832,8 @@ func (c *Compiler) compilePattern(pat ast.Pattern, subj int) {
 		b.patch(end, b.here())
 	case *ast.ArrayPattern:
 		c.compileArrayPattern(p, subj)
+	case *ast.HashPattern:
+		c.compileHashPattern(p, subj)
 	default:
 		c.fail("cannot compile pattern %T", pat)
 	}
@@ -914,6 +916,80 @@ func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
 		b.emit(bytecode.OpPop, 0, 0)
 	}
 	// All checks passed.
+	b.emit(bytecode.OpPushTrue, 0, 0)
+	end := b.emit(bytecode.OpJump, 0, 0)
+	for _, f := range fails {
+		b.patch(f, b.here())
+	}
+	b.emit(bytecode.OpPushFalse, 0, 0)
+	b.patch(end, b.here())
+}
+
+// compileHashPattern emits the deconstruct_keys-protocol match for a hash
+// pattern. It checks the optional constant, that the subject responds to
+// :deconstruct_keys, then for each key that it is present and its value matches
+// the sub-pattern (or binds it). `**nil` forbids extra keys; `**name` captures
+// them.
+func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
+	b := c.cur()
+	h := b.localSlot("") // the deconstructed Hash
+	var fails []int
+	// respond_to?(:deconstruct_keys)
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct_keys")), 0)
+	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
+	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	// h = subject.deconstruct_keys(nil) — we pass nil (full hash) for simplicity,
+	// which is always a valid request under the protocol.
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpPushNil, 0, 0)
+	b.emit(bytecode.OpSend, b.addName("deconstruct_keys"), 1)
+	b.emit(bytecode.OpSetLocal, h, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	// `**nil`, or the empty pattern `{}`: the hash must have exactly the named
+	// keys and no extras (an empty `{}` thus matches only an empty hash).
+	if p.RestNil || (len(p.Keys) == 0 && !p.HasRest) {
+		b.emit(bytecode.OpGetLocal, h, 0)
+		b.emit(bytecode.OpSend, b.addName("size"), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Keys)))), 0)
+		b.emit(bytecode.OpEq, 0, 0)
+		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	}
+	for i, key := range p.Keys {
+		// h.key?(:key)
+		b.emit(bytecode.OpGetLocal, h, 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+		b.emit(bytecode.OpSend, b.addName("key?"), 1)
+		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+		// value = h[:key]
+		if p.Values[i] == nil {
+			// Shorthand `{key:}` binds local key to the value.
+			b.emit(bytecode.OpGetLocal, h, 0)
+			b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+			b.emit(bytecode.OpSend, b.addName("[]"), 1)
+			c.storeLocal(key)
+			b.emit(bytecode.OpPop, 0, 0)
+		} else {
+			elem := b.localSlot("")
+			b.emit(bytecode.OpGetLocal, h, 0)
+			b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+			b.emit(bytecode.OpSend, b.addName("[]"), 1)
+			b.emit(bytecode.OpSetLocal, elem, 0)
+			b.emit(bytecode.OpPop, 0, 0)
+			c.compilePattern(p.Values[i], elem)
+			fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+		}
+	}
+	// `**rest` captures the keys not named in the pattern: h.except(:k1, …).
+	if p.HasRest && p.RestName != "" {
+		b.emit(bytecode.OpGetLocal, h, 0)
+		for _, key := range p.Keys {
+			b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+		}
+		b.emit(bytecode.OpSend, b.addName("except"), len(p.Keys))
+		c.storeLocal(p.RestName)
+		b.emit(bytecode.OpPop, 0, 0)
+	}
 	b.emit(bytecode.OpPushTrue, 0, 0)
 	end := b.emit(bytecode.OpJump, 0, 0)
 	for _, f := range fails {

@@ -585,6 +585,10 @@ func (p *Parser) parseCaseIn(subject ast.Node) ast.Node {
 // comma-separated array pattern (`in a, b`, `in *a, b`), the implicit array
 // form.
 func (p *Parser) parsePattern() ast.Pattern {
+	// A leading label is an implicit (brace-less) hash pattern: `in a:, b:`.
+	if p.is(token.LABEL) || p.is(token.POW) {
+		return p.parseHashPatternBody(nil, token.NEWLINE)
+	}
 	first := p.parseArrayPatternElem()
 	if !first.splat && !p.is(token.COMMA) {
 		return first.pat
@@ -610,6 +614,8 @@ func (p *Parser) parsePatternAtom() ast.Pattern {
 	switch p.cur().Type {
 	case token.LBRACKET:
 		return p.parseArrayPattern(nil)
+	case token.LBRACE:
+		return p.parseHashPattern(nil)
 	case token.IDENT:
 		// A bare lowercase identifier binds the subject (the wildcard `_`
 		// included; it binds in MRI too).
@@ -653,6 +659,53 @@ func (p *Parser) parseArrayPattern(constName ast.Node) ast.Pattern {
 	}
 	p.expect(token.RBRACKET)
 	return ap
+}
+
+// parseHashPattern parses a braced hash pattern `{ key: [pat], …, **rest }`,
+// with an optional leading constant.
+func (p *Parser) parseHashPattern(constName ast.Node) ast.Pattern {
+	p.expect(token.LBRACE)
+	hp := p.parseHashPatternBody(constName, token.RBRACE)
+	p.expect(token.RBRACE)
+	return hp
+}
+
+// parseHashPatternBody parses the comma-separated entries of a hash pattern up
+// to (but not consuming) end. Entries are `label: [value-pattern]` or the
+// double-splat `**name` / `**nil`.
+func (p *Parser) parseHashPatternBody(constName ast.Node, end token.Type) *ast.HashPattern {
+	hp := &ast.HashPattern{Const: constName}
+	for !p.is(end) && !p.is(token.NEWLINE) && !p.is(token.THEN) && !p.is(token.IF) && !p.is(token.UNLESS) {
+		if p.accept(token.POW) { // **rest / **nil
+			if hp.HasRest || hp.RestNil {
+				p.fail("unexpected ** in hash pattern")
+			}
+			if p.accept(token.NIL) {
+				hp.RestNil = true
+			} else {
+				hp.HasRest = true
+				if p.is(token.IDENT) {
+					hp.RestName = p.advance().Lit
+					p.declareLocal(hp.RestName)
+				}
+			}
+		} else {
+			key := p.expect(token.LABEL).Lit
+			hp.Keys = append(hp.Keys, key)
+			// `name:` with no following pattern binds local `name`; otherwise the
+			// value is a sub-pattern. A clause/entry boundary means no value.
+			if p.is(token.COMMA) || p.is(end) || p.is(token.NEWLINE) || p.is(token.THEN) || p.is(token.IF) || p.is(token.UNLESS) {
+				p.declareLocal(key)
+				hp.Values = append(hp.Values, nil)
+			} else {
+				hp.Values = append(hp.Values, p.parsePatternPrimary())
+			}
+		}
+		if !p.accept(token.COMMA) {
+			break
+		}
+	}
+	return hp
 }
 
 // parseArrayPatternRest builds an implicit (top-level, un-bracketed) array

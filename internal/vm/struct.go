@@ -78,14 +78,18 @@ func (vm *VM) newStructClass(parent *RClass, names []string) *RClass {
 	}
 	sub.define("size", sizeFn)
 	sub.define("length", sizeFn)
-	sub.define("to_h", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	toH := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := object.NewHash()
 		vals := values(self)
 		for i, nm := range names {
 			h.Set(object.Symbol(nm), vals[i])
 		}
 		return h
-	})
+	}
+	sub.define("to_h", toH)
+	// deconstruct_keys backs case/in hash patterns; the requested-key list is
+	// advisory, so we return the full member hash.
+	sub.define("deconstruct_keys", toH)
 	sub.define("[]", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
 		vals := values(self)
 		switch k := a[0].(type) {

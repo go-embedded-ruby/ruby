@@ -420,6 +420,14 @@ pattern `Point[x, y]` (adds an `is_a?` guard). Guards (`in pat if cond` /
 Compiled by `compileCaseIn`/`compilePattern`: the subject is evaluated once into
 a hidden slot, each pattern leaves a boolean and performs its bindings as a side
 effect, `OpTruthy` normalizes `===`/`is_a?` results.
+**Hash patterns** use the **deconstruct_keys** protocol (`respond_to?`, then
+`deconstruct_keys(nil)`; Hash and Struct both return their member hash): `in
+{name:, age:}` (shorthand binding), `{status: "active"}` (value sub-pattern),
+`{a: x}` (renaming), `{a:, **rest}` (`except`-captures the unnamed keys),
+`{a:, **nil}` (forbids extras), and the empty `{}` (matches only an empty hash).
+A key absent from the deconstructed hash fails the match. The brace-less
+top-level form `in a:, b:` is accepted too. compileHashPattern emits the
+per-key `key?` + `[]` checks.
 **More String methods**: `ljust`/`rjust`/`center` (rune-width padding) and
 `tr`/`count`/`delete`/`squeeze` (with `a-z` range expansion).
 **`**` exponentiation** (right-associative, tighter than `*`/`/`) + Integer

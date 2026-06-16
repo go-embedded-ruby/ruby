@@ -287,4 +287,9 @@ end
 # Hash, not an Array).
 class Hash
   include Enumerable
+  # The deconstruct_keys protocol for case/in hash patterns: a Hash returns
+  # itself (the requested key list is advisory, so we ignore it).
+  def deconstruct_keys(keys)
+    self
+  end
 end
