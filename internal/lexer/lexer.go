@@ -102,7 +102,7 @@ func (l *Lexer) next() token.Token {
 		return l.lexIvar(spaceBefore, line, col)
 	case c == '$':
 		return l.lexGvar(spaceBefore, line, col)
-	case c == ':' && isIdentStart(l.peek2()):
+	case c == ':' && (isIdentStart(l.peek2()) || l.peek2() == '@' || l.peek2() == '$'):
 		return l.lexSymbol(spaceBefore, line, col)
 	}
 
@@ -384,6 +384,16 @@ func (l *Lexer) lexIdent(spaceBefore bool, line, col int) token.Token {
 func (l *Lexer) lexSymbol(spaceBefore bool, line, col int) token.Token {
 	l.advance() // ':'
 	start := l.pos
+	// Variable-name symbols: :@ivar, :@@cvar, :$global.
+	switch l.peek() {
+	case '@':
+		l.advance()
+		if l.peek() == '@' {
+			l.advance()
+		}
+	case '$':
+		l.advance()
+	}
 	for isIdentPart(l.peek()) {
 		l.advance()
 	}

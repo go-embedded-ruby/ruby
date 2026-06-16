@@ -55,6 +55,33 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Proc).isLambda)
 	})
+	vm.cObject.define("instance_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return getIvar(self, args[0].ToS())
+	})
+	vm.cObject.define("instance_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		setIvar(self, args[0].ToS(), args[1])
+		return args[1]
+	})
+	vm.cObject.define("instance_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		t := ivarTable(self)
+		if t == nil {
+			return object.False
+		}
+		_, ok := t[args[0].ToS()]
+		return object.Bool(ok)
+	})
+	vm.cObject.define("instance_eval", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (yield)")
+		}
+		return vm.callBlockSelf(blk, self, nil)
+	})
+	vm.cObject.define("instance_exec", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (yield)")
+		}
+		return vm.callBlockSelf(blk, self, args)
+	})
 	formatFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		fmtStr, ok := args[0].(object.String)
 		if !ok {
