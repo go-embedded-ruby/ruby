@@ -427,7 +427,15 @@ effect, `OpTruthy` normalizes `===`/`is_a?` results.
 `{a:, **nil}` (forbids extras), and the empty `{}` (matches only an empty hash).
 A key absent from the deconstructed hash fails the match. The brace-less
 top-level form `in a:, b:` is accepted too. compileHashPattern emits the
-per-key `key?` + `[]` checks.
+per-key `key?` + `[]` checks. A leading constant gives a **const hash pattern**
+`Point(x:, y:)` (the paren form; adds the `is_a?` guard, via deconstruct_keys).
+**Pin** `^name` / `^(expr)` matches against an existing value with `===` instead
+of binding; **alternative** `p1 | p2 | …` matches if any branch does
+(short-circuiting). **One-line patterns**: `subject => pattern` (rightward
+assignment — binds, or raises NoMatchingPatternError) and `subject in pattern`
+(a boolean test), parsed at statement level or in parentheses (`r = (v in P)`),
+with `=` binding tighter. *Deferred:* the find pattern `[*, x, *]` (needs a
+scanning-loop matcher).
 **More String methods**: `ljust`/`rjust`/`center` (rune-width padding) and
 `tr`/`count`/`delete`/`squeeze` (with `a-z` range expansion).
 **`**` exponentiation** (right-associative, tighter than `*`/`/`) + Integer
