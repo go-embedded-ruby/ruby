@@ -243,6 +243,16 @@ type InClause struct {
 	Body     []Node
 }
 
+// MatchPattern is a one-line pattern match: `Subject => Pattern` (Bool false:
+// rightward assignment — binds on success, raises NoMatchingPatternError on
+// failure) or `Subject in Pattern` (Bool true: a boolean test — true/false,
+// binding on success).
+type MatchPattern struct {
+	Subject Node
+	Pattern Pattern
+	Bool    bool
+}
+
 // Pattern is any case/in pattern node.
 type Pattern interface{ pattern() }
 
@@ -347,6 +357,7 @@ func (*ConstRef) node()   {}
 func (*ConstAssign) node() {}
 func (*GVarRef) node()    {}
 func (*MultiAssign) node() {}
+func (*MatchPattern) node() {}
 func (*IvarRef) node()    {}
 func (*IvarAssign) node() {}
 func (*ClassDef) node()   {}

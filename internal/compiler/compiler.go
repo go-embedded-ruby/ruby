@@ -296,6 +296,22 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileCase(v)
 	case *ast.CaseIn:
 		c.compileCaseIn(v)
+	case *ast.MatchPattern:
+		// One-line match: store the subject, test it against the pattern.
+		subj := b.localSlot("")
+		c.compileNode(v.Subject)
+		b.emit(bytecode.OpSetLocal, subj, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		c.compilePattern(v.Pattern, subj) // leaves a boolean
+		if v.Bool {
+			break // `in`: the boolean is the result
+		}
+		// `=>`: nil on success, NoMatchingPatternError on failure.
+		ok := b.emit(bytecode.OpBranchIf, 0, 0)
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		b.emit(bytecode.OpRaiseNoMatch, 0, 0)
+		b.patch(ok, b.here())
+		b.emit(bytecode.OpPushNil, 0, 0)
 	case *ast.Retry:
 		if len(c.retryTargets) == 0 {
 			c.fail("Invalid retry")

@@ -175,8 +175,21 @@ func (p *Parser) parseStatement() ast.Node {
 		p.advance()
 		return p.applyModifiers(&ast.Retry{})
 	default:
-		return p.applyModifiers(p.parseExprOrAssign())
+		return p.applyModifiers(p.parseOneLineMatch(p.parseExprOrAssign()))
 	}
+}
+
+// parseOneLineMatch wraps a statement-level expression in a one-line pattern
+// match when followed by `=> pattern` (rightward assignment) or `in pattern`
+// (boolean test). `=` binds tighter than these, so `x = v in P` is `(x=v) in P`.
+func (p *Parser) parseOneLineMatch(subject ast.Node) ast.Node {
+	switch {
+	case p.accept(token.HASHROCKET):
+		return &ast.MatchPattern{Subject: subject, Pattern: p.parsePattern()}
+	case p.accept(token.IN):
+		return &ast.MatchPattern{Subject: subject, Pattern: p.parsePattern(), Bool: true}
+	}
+	return subject
 }
 
 // applyModifiers wraps a statement in trailing `if/unless/while/until` modifiers
@@ -1312,7 +1325,7 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.LPAREN:
 		p.advance()
 		p.skipNewlines()
-		e := p.parseExprOrAssign()
+		e := p.parseOneLineMatch(p.parseExprOrAssign())
 		p.skipNewlines()
 		p.expect(token.RPAREN)
 		return e
