@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/ast"
 	"github.com/go-embedded-ruby/ruby/internal/lexer"
@@ -1388,6 +1389,17 @@ func (p *Parser) parsePrimary() ast.Node {
 	case token.REGEXP:
 		p.advance()
 		return &ast.RegexpLit{Source: t.Lit, Flags: t.Flags}
+	case token.WORDS, token.SYMBOLS:
+		p.advance()
+		elems := []ast.Node{}
+		for _, w := range strings.Fields(t.Lit) {
+			if t.Type == token.SYMBOLS {
+				elems = append(elems, &ast.SymbolLit{Name: w})
+			} else {
+				elems = append(elems, &ast.StringLit{Value: w})
+			}
+		}
+		return &ast.ArrayLit{Elems: elems}
 	case token.LBRACKET:
 		return p.parseArrayLiteral()
 	case token.LBRACE:

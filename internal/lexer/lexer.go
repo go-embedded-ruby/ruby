@@ -88,6 +88,9 @@ func (l *Lexer) next() token.Token {
 		// At expression-begin position a '/' opens a regexp literal, not division
 		// (the same disambiguation MRI uses via its lexer state).
 		return l.lexRegexp(spaceBefore, line, col)
+	case c == '%' && l.state == exprBegin && l.atPercentArray():
+		// %w[…] / %i[…] word- and symbol-array literals.
+		return l.lexPercentArray(spaceBefore, line, col)
 	case c == '\n' || c == ';':
 		l.advance()
 		l.state = exprBegin
@@ -496,6 +499,73 @@ func (l *Lexer) lexRegexp(spaceBefore bool, line, col int) token.Token {
 	}
 	l.state = exprEnd
 	return token.Token{Type: token.REGEXP, Lit: string(src), Flags: string(flags), Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// percentDelimClose returns the closing delimiter for a %-literal opener: the
+// mate of a bracket pair, or the same character for a symmetric delimiter.
+func percentDelimClose(open byte) byte {
+	switch open {
+	case '[':
+		return ']'
+	case '(':
+		return ')'
+	case '{':
+		return '}'
+	case '<':
+		return '>'
+	}
+	return open
+}
+
+// atPercentArray reports whether the cursor (positioned at '%') begins a
+// %w/%i array literal: the kind letter must be followed by a delimiter.
+func (l *Lexer) atPercentArray() bool {
+	k := l.peek2()
+	if k != 'w' && k != 'i' {
+		return false
+	}
+	if l.pos+2 >= len(l.src) {
+		return false
+	}
+	switch l.src[l.pos+2] {
+	case '[', '(', '{', '<', '|', '!', '/':
+		return true
+	}
+	return false
+}
+
+// lexPercentArray lexes a %w[…]/%i[…] literal into a single WORDS/SYMBOLS token
+// whose Lit is the raw whitespace-separated content; the parser splits it.
+// Bracket delimiters nest; %W/%I (interpolating) are not supported.
+func (l *Lexer) lexPercentArray(spaceBefore bool, line, col int) token.Token {
+	l.advance() // %
+	kind := l.advance()
+	open := l.advance()
+	closing := percentDelimClose(open)
+	depth := 1
+	var content []byte
+	for {
+		c := l.peek()
+		if c == 0 {
+			return token.Token{Type: token.ILLEGAL, Lit: "unterminated %-array literal", Line: line, Col: col, SpaceBefore: spaceBefore}
+		}
+		if open != closing && c == open {
+			depth++
+		} else if c == closing {
+			depth--
+			if depth == 0 {
+				l.advance() // closing delimiter
+				break
+			}
+		}
+		content = append(content, l.advance())
+	}
+	l.state = exprEnd
+	tt := token.WORDS
+	if kind == 'i' {
+		tt = token.SYMBOLS
+	}
+	return token.Token{Type: tt, Lit: string(content), Line: line, Col: col, SpaceBefore: spaceBefore}
 }
 
 func (l *Lexer) lexString(spaceBefore bool, line, col int) token.Token {
