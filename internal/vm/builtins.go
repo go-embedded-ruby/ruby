@@ -726,6 +726,77 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
+	vm.cArray.define("map!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (map!)")
+		}
+		a := self.(*object.Array)
+		for i := range a.Elems {
+			a.Elems[i] = vm.callBlock(blk, []object.Value{a.Elems[i]})
+		}
+		return self
+	})
+	vm.cArray.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		for i, j := 0, len(a.Elems)-1; i < j; i, j = i+1, j-1 {
+			a.Elems[i], a.Elems[j] = a.Elems[j], a.Elems[i]
+		}
+		return self
+	})
+	vm.cArray.define("sort!", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		sort.SliceStable(a.Elems, func(i, j int) bool { return vm.spaceship(a.Elems[i], a.Elems[j]) < 0 })
+		return self
+	})
+	selectBang := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given")
+		}
+		return arrayKeepIf(vm, self.(*object.Array), blk, true)
+	}
+	vm.cArray.define("select!", selectBang)
+	vm.cArray.define("filter!", selectBang)
+	vm.cArray.define("reject!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (reject!)")
+		}
+		return arrayKeepIf(vm, self.(*object.Array), blk, false)
+	})
+	vm.cArray.define("compact!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		var out []object.Value
+		for _, e := range a.Elems {
+			if _, isNil := e.(object.Nil); !isNil {
+				out = append(out, e)
+			}
+		}
+		if len(out) == len(a.Elems) {
+			return object.NilV
+		}
+		a.Elems = out
+		return self
+	})
+	vm.cArray.define("uniq!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		var out []object.Value
+		for _, e := range a.Elems {
+			dup := false
+			for _, k := range out {
+				if valueEqual(e, k) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				out = append(out, e)
+			}
+		}
+		if len(out) == len(a.Elems) {
+			return object.NilV
+		}
+		a.Elems = out
+		return self
+	})
 	vm.cArray.define("compact", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		var out []object.Value
 		for _, e := range self.(*object.Array).Elems {
@@ -2044,6 +2115,23 @@ func isFrozen(v object.Value) bool {
 		return true
 	}
 	return false
+}
+
+// arrayKeepIf mutates a in place, keeping the elements for which the block's
+// truthiness equals keep (select!/reject!). It returns the array, or nil when
+// nothing was removed (Ruby's "no change" signal).
+func arrayKeepIf(vm *VM, a *object.Array, blk *Proc, keep bool) object.Value {
+	var out []object.Value
+	for _, e := range a.Elems {
+		if vm.callBlock(blk, []object.Value{e}).Truthy() == keep {
+			out = append(out, e)
+		}
+	}
+	if len(out) == len(a.Elems) {
+		return object.NilV
+	}
+	a.Elems = out
+	return a
 }
 
 // gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.
