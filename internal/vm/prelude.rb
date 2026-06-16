@@ -193,6 +193,20 @@ module Enumerable
     r
   end
 
+  def each_with_object(memo)
+    each { |x| yield(x, memo) }
+    memo
+  end
+
+  def filter_map
+    r = []
+    each { |x|
+      v = yield(x)
+      r << v if v
+    }
+    r
+  end
+
   def partition
     yes = []
     no = []
