@@ -28,6 +28,11 @@ func TestFirstLastCount(t *testing.T) {
 		{"range_end_endless", `p((1..).end)`, "nil\n"},
 		{"endless_first_n", `p((1..).first(4))`, "[1, 2, 3, 4]\n"},
 		{"endless_first_0", `p((1..).first(0))`, "[]\n"},
+		{"range_take", `p((1..5).take(2))`, "[1, 2]\n"},
+		{"endless_take", `p((1..).take(3))`, "[1, 2, 3]\n"},
+		{"range_drop", `p((1..5).drop(2))`, "[3, 4, 5]\n"},
+		{"range_take_over", `p((1...5).take(9))`, "[1, 2, 3, 4]\n"},
+		{"range_drop_over", `p((1..5).drop(9))`, "[]\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,6 +52,9 @@ func TestFirstLastErrors(t *testing.T) {
 		{"endless_last", `(1..).last`, "cannot get the last element of endless range"},
 		{"endless_last_n", `(1..).last(2)`, "cannot get the last element of endless range"},
 		{"endless_first_noninteger", `("a"..).first(2)`, "can't iterate from"},
+		{"range_take_neg", `(1..5).take(-1)`, "attempt to take negative size"},
+		{"range_drop_neg", `(1..5).drop(-1)`, "attempt to drop negative size"},
+		{"endless_take_noninteger", `("a"..).take(2)`, "can't iterate from"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1378,6 +1378,44 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Array{Elems: rangeElems(self.(*object.Range))}
 	})
+	// take(n) mirrors first(n) (it works on endless ranges); drop(n) needs the
+	// full materialised range, so it is bounded only.
+	vm.cRange.define("take", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		r := self.(*object.Range)
+		n := int(intArg(args[0]))
+		if n < 0 {
+			raise("ArgumentError", "attempt to take negative size")
+		}
+		if _, isNil := r.Hi.(object.Nil); isNil {
+			lo, ok := r.Lo.(object.Integer)
+			if !ok {
+				raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+			}
+			out := make([]object.Value, n)
+			for i := range out {
+				out[i] = object.Integer(int64(lo) + int64(i))
+			}
+			return &object.Array{Elems: out}
+		}
+		elems := rangeElems(r)
+		n = clampCount(int64(n), len(elems))
+		out := make([]object.Value, n)
+		copy(out, elems[:n])
+		return &object.Array{Elems: out}
+	})
+	vm.cRange.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		elems := rangeElems(self.(*object.Range))
+		n := int(intArg(args[0]))
+		if n < 0 {
+			raise("ArgumentError", "attempt to drop negative size")
+		}
+		if n > len(elems) {
+			n = len(elems)
+		}
+		out := make([]object.Value, len(elems)-n)
+		copy(out, elems[n:])
+		return &object.Array{Elems: out}
+	})
 	vm.cRange.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (each)")
