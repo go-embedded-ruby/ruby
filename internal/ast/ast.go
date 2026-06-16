@@ -4,14 +4,19 @@
 // split: a body is a slice of Node and its value is the value of its last node.
 package ast
 
+import "math/big"
+
 // Node is any AST node.
 type Node interface{ node() }
 
 // Program is the top-level sequence of expressions.
 type Program struct{ Body []Node }
 
-// IntLit is an integer literal.
+// IntLit is an integer literal that fits in int64.
 type IntLit struct{ Value int64 }
+
+// BignumLit is an integer literal too large for int64 (held as a *big.Int).
+type BignumLit struct{ Val *big.Int }
 
 // FloatLit is a floating-point literal.
 type FloatLit struct{ Value float64 }
@@ -345,6 +350,7 @@ type RescueClause struct {
 
 func (*Program) node()    {}
 func (*IntLit) node()     {}
+func (*BignumLit) node()  {}
 func (*FloatLit) node()   {}
 func (*StringLit) node()  {}
 func (*SymbolLit) node()  {}

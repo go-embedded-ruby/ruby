@@ -9,6 +9,7 @@ package parser
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 
 	"github.com/go-embedded-ruby/ruby/internal/ast"
@@ -1303,8 +1304,10 @@ func (p *Parser) parsePrimary() ast.Node {
 		p.advance()
 		n, err := strconv.ParseInt(t.Lit, 10, 64)
 		if err != nil {
-			// Phase 2 promotes to Bignum; for now report the overflow.
-			p.fail("integer literal out of int64 range: %s", t.Lit)
+			// The lexer only ever emits decimal digits, so the sole ParseInt
+			// failure is int64 overflow → promote to a Bignum literal.
+			z, _ := new(big.Int).SetString(t.Lit, 10)
+			return &ast.BignumLit{Val: z}
 		}
 		return &ast.IntLit{Value: n}
 	case token.FLOAT:

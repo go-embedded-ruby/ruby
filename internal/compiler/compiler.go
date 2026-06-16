@@ -189,6 +189,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 	switch v := n.(type) {
 	case *ast.IntLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(v.Value)), 0)
+	case *ast.BignumLit:
+		b.emit(bytecode.OpPushConst, b.addConst(&object.Bignum{I: v.Val}), 0)
 	case *ast.FloatLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.Float(v.Value)), 0)
 	case *ast.StringLit:

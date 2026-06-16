@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-embedded-ruby/ruby/internal/ast"
 	"github.com/go-embedded-ruby/ruby/internal/parser"
 )
 
@@ -41,12 +42,15 @@ func TestStringEscapes(t *testing.T) {
 	}
 }
 
-// Parser-only corners (these need not run): integer overflow, the LPAREN
+// Parser-only corners (these need not run): a Bignum literal, the LPAREN
 // command-arg arm, and the "space then non-argument token" path of
 // canStartCommandArg.
 func TestParserCorners(t *testing.T) {
-	if _, err := parser.Parse(`99999999999999999999999`); err == nil {
-		t.Error("expected overflow parse error")
+	prog, err := parser.Parse(`99999999999999999999999`)
+	if err != nil {
+		t.Errorf("unexpected error parsing bignum literal: %v", err)
+	} else if _, ok := prog.Body[0].(*ast.BignumLit); !ok {
+		t.Errorf("expected *ast.BignumLit, got %T", prog.Body[0])
 	}
 	if _, err := parser.Parse("foo * 2"); err != nil { // command arg declined → foo() * 2
 		t.Errorf("unexpected error parsing command/operator ambiguity: %v", err)
