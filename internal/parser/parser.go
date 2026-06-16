@@ -690,19 +690,18 @@ func (p *Parser) parsePatternValue() ast.Node {
 // parseArrayPattern parses `[pat, …]`, with an optional leading constant.
 func (p *Parser) parseArrayPattern(constName ast.Node) ast.Pattern {
 	p.expect(token.LBRACKET)
-	ap := &ast.ArrayPattern{Const: constName}
-	if p.accept(token.RBRACKET) {
-		return ap
-	}
-	p.appendArrayElem(ap, p.parseArrayPatternElem())
-	for p.accept(token.COMMA) {
-		if p.is(token.RBRACKET) { // trailing comma
-			break
+	var elems []arrayElem
+	if !p.accept(token.RBRACKET) {
+		elems = append(elems, p.parseArrayPatternElem())
+		for p.accept(token.COMMA) {
+			if p.is(token.RBRACKET) { // trailing comma
+				break
+			}
+			elems = append(elems, p.parseArrayPatternElem())
 		}
-		p.appendArrayElem(ap, p.parseArrayPatternElem())
+		p.expect(token.RBRACKET)
 	}
-	p.expect(token.RBRACKET)
-	return ap
+	return p.buildArrayOrFind(constName, elems)
 }
 
 // parseHashPattern parses a braced hash pattern `{ key: [pat], …, **rest }`,
@@ -756,12 +755,11 @@ func (p *Parser) parseHashPatternBody(constName ast.Node, end token.Type) *ast.H
 // pattern from an already-parsed first element and the comma-separated tail,
 // terminating at a clause boundary rather than a bracket.
 func (p *Parser) parseArrayPatternRest(constName ast.Node, first arrayElem) ast.Pattern {
-	ap := &ast.ArrayPattern{Const: constName}
-	p.appendArrayElem(ap, first)
+	elems := []arrayElem{first}
 	for p.accept(token.COMMA) {
-		p.appendArrayElem(ap, p.parseArrayPatternElem())
+		elems = append(elems, p.parseArrayPatternElem())
 	}
-	return ap
+	return p.buildArrayOrFind(constName, elems)
 }
 
 // arrayElem is one parsed array-pattern element: an ordinary sub-pattern, or a
@@ -786,22 +784,38 @@ func (p *Parser) parseArrayPatternElem() arrayElem {
 	return arrayElem{pat: p.parsePatternPrimary()}
 }
 
-// appendArrayElem places one element into ap, recording a splat in the dedicated
-// fields rather than the Pre/Post slices.
-func (p *Parser) appendArrayElem(ap *ast.ArrayPattern, elem arrayElem) {
-	if elem.splat {
-		if ap.HasSplat {
-			p.fail("unexpected second * in array pattern")
+// buildArrayOrFind turns the parsed elements into an array pattern, or a find
+// pattern when exactly two splats bracket the elements (`[*pre, mid…, *post]`).
+func (p *Parser) buildArrayOrFind(constName ast.Node, elems []arrayElem) ast.Pattern {
+	splats := 0
+	for _, e := range elems {
+		if e.splat {
+			splats++
 		}
-		ap.HasSplat = true
-		ap.SplatName = elem.name
-		return
 	}
-	if ap.HasSplat {
-		ap.Post = append(ap.Post, elem.pat)
-	} else {
-		ap.Pre = append(ap.Pre, elem.pat)
+	if splats == 2 && len(elems) > 2 && elems[0].splat && elems[len(elems)-1].splat {
+		fp := &ast.FindPattern{Const: constName, PreName: elems[0].name, PostName: elems[len(elems)-1].name}
+		for _, e := range elems[1 : len(elems)-1] {
+			fp.Mid = append(fp.Mid, e.pat)
+		}
+		return fp
 	}
+	if splats > 1 {
+		p.fail("unexpected multiple * in array pattern")
+	}
+	ap := &ast.ArrayPattern{Const: constName}
+	for _, e := range elems {
+		switch {
+		case e.splat:
+			ap.HasSplat = true
+			ap.SplatName = e.name
+		case ap.HasSplat:
+			ap.Post = append(ap.Post, e.pat)
+		default:
+			ap.Pre = append(ap.Pre, e.pat)
+		}
+	}
+	return ap
 }
 
 // --- expressions ---

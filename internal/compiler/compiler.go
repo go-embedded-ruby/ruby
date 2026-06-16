@@ -850,6 +850,8 @@ func (c *Compiler) compilePattern(pat ast.Pattern, subj int) {
 		c.compileArrayPattern(p, subj)
 	case *ast.HashPattern:
 		c.compileHashPattern(p, subj)
+	case *ast.FindPattern:
+		c.compileFindPattern(p, subj)
 	case *ast.AltPattern:
 		// Alternative: true if any branch matches (short-circuit on the first).
 		var hits []int
@@ -960,6 +962,119 @@ func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
 // :deconstruct_keys, then for each key that it is present and its value matches
 // the sub-pattern (or binds it). `**nil` forbids extra keys; `**name` captures
 // them.
+// compileFindPattern emits the array find pattern `[*pre, mid…, *post]`: it
+// deconstructs the subject, then scans for the first window where every Mid
+// matches, binding pre/post. It leaves a boolean (matched) on the stack.
+func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
+	b := c.cur()
+	arr := b.localSlot("")
+	var fails []int
+	if p.Const != nil {
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		c.compileNode(p.Const)
+		b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	}
+	// respond_to?(:deconstruct), then arr = subject.deconstruct.
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct")), 0)
+	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
+	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpSend, b.addName("deconstruct"), 0)
+	b.emit(bytecode.OpSetLocal, arr, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	// n = arr.length
+	n := b.localSlot("")
+	b.emit(bytecode.OpGetLocal, arr, 0)
+	b.emit(bytecode.OpSend, b.addName("length"), 0)
+	b.emit(bytecode.OpSetLocal, n, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	k := len(p.Mid)
+	// i = 0; matched = false
+	i := b.localSlot("")
+	matched := b.localSlot("")
+	c.setLocalInt(i, 0)
+	b.emit(bytecode.OpPushFalse, 0, 0)
+	b.emit(bytecode.OpSetLocal, matched, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	// loop while i + k <= n
+	loopTop := b.here()
+	b.emit(bytecode.OpGetLocal, i, 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(k))), 0)
+	b.emit(bytecode.OpAdd, 0, 0)
+	b.emit(bytecode.OpGetLocal, n, 0)
+	b.emit(bytecode.OpLe, 0, 0)
+	loopExhausted := b.emit(bytecode.OpBranchUnless, 0, 0)
+	// Test the window arr[i .. i+k): every Mid must match.
+	var winFails []int
+	for j, mid := range p.Mid {
+		elem := b.localSlot("")
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		b.emit(bytecode.OpGetLocal, i, 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(j))), 0)
+		b.emit(bytecode.OpAdd, 0, 0)
+		b.emit(bytecode.OpSend, b.addName("[]"), 1)
+		b.emit(bytecode.OpSetLocal, elem, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		c.compilePattern(mid, elem)
+		winFails = append(winFails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	}
+	// Window matched: bind pre = arr[0...i] and post = arr[(i+k)...n].
+	if p.PreName != "" {
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(0)), 0)
+		b.emit(bytecode.OpGetLocal, i, 0)
+		b.emit(bytecode.OpNewRange, 1, 0)
+		b.emit(bytecode.OpSend, b.addName("[]"), 1)
+		c.storeLocal(p.PreName)
+		b.emit(bytecode.OpPop, 0, 0)
+	}
+	if p.PostName != "" {
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		b.emit(bytecode.OpGetLocal, i, 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(k))), 0)
+		b.emit(bytecode.OpAdd, 0, 0)
+		b.emit(bytecode.OpGetLocal, n, 0)
+		b.emit(bytecode.OpNewRange, 1, 0)
+		b.emit(bytecode.OpSend, b.addName("[]"), 1)
+		c.storeLocal(p.PostName)
+		b.emit(bytecode.OpPop, 0, 0)
+	}
+	b.emit(bytecode.OpPushTrue, 0, 0)
+	b.emit(bytecode.OpSetLocal, matched, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	doneFromMatch := b.emit(bytecode.OpJump, 0, 0)
+	// Window failed: advance i and retry.
+	for _, wf := range winFails {
+		b.patch(wf, b.here())
+	}
+	b.emit(bytecode.OpGetLocal, i, 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Integer(1)), 0)
+	b.emit(bytecode.OpAdd, 0, 0)
+	b.emit(bytecode.OpSetLocal, i, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	b.patch(b.emit(bytecode.OpJump, 0, 0), loopTop)
+	// Loop finished (exhausted or matched).
+	b.patch(loopExhausted, b.here())
+	b.patch(doneFromMatch, b.here())
+	b.emit(bytecode.OpGetLocal, matched, 0)
+	endJump := b.emit(bytecode.OpJump, 0, 0)
+	for _, f := range fails {
+		b.patch(f, b.here())
+	}
+	b.emit(bytecode.OpPushFalse, 0, 0)
+	b.patch(endJump, b.here())
+}
+
+// setLocalInt sets a local slot to an integer constant (and discards the value).
+func (c *Compiler) setLocalInt(slot int, v int64) {
+	b := c.cur()
+	b.emit(bytecode.OpPushConst, b.addConst(object.Integer(v)), 0)
+	b.emit(bytecode.OpSetLocal, slot, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+}
+
 func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 	b := c.cur()
 	h := b.localSlot("") // the deconstructed Hash

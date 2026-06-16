@@ -305,6 +305,17 @@ type ArrayPattern struct {
 // constant/structural patterns tested without binding.
 type AltPattern struct{ Alts []Pattern }
 
+// FindPattern is the array find pattern `[*pre, mid…, *post]`: it scans the
+// deconstructed array for the first window where every Mid sub-pattern matches
+// consecutively, binding PreName to the elements before it and PostName to those
+// after. Const, when non-nil, additionally requires subject.is_a?(Const).
+type FindPattern struct {
+	Const    Node
+	PreName  string
+	Mid      []Pattern
+	PostName string
+}
+
 // Retry restarts the enclosing begin body from inside a rescue clause.
 type Retry struct{}
 
@@ -382,3 +393,4 @@ func (*BindingPattern) pattern() {}
 func (*ArrayPattern) pattern()   {}
 func (*HashPattern) pattern()    {}
 func (*AltPattern) pattern()     {}
+func (*FindPattern) pattern()    {}
