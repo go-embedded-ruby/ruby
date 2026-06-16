@@ -5,7 +5,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
-[![Phase](https://img.shields.io/badge/phase-0%2B1%20object%20model-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
+[![Phase](https://img.shields.io/badge/phases-1--6%20active-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
 
 **A pure-Go implementation of Ruby — one static binary, full dynamism, zero cgo.**
 
@@ -18,27 +18,46 @@ monkey-patching, `define_method` and `method_missing` free.
 
 > 🌐 [Website](https://go-embedded-ruby.github.io) · 📚 [Documentation](https://go-embedded-ruby.github.io/docs/) · 🧭 [Roadmap](docs/plan-rbgo.md)
 
-## Status — Phases 0 & 1
+## Status
 
-Supported today:
+Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 
-- integers (`int64`), floats, strings; `true`/`false`/`nil`; `self`
-- local variables; arithmetic (`+ - * / %`, **Ruby floor division**),
-  comparison, equality, unary `-`/`!`
-- `if`/`elsif`/`else`, `unless`, `while`/`until`, statement modifiers
-  (`x if cond`)
-- `def` with required parameters, recursion, implicit and explicit `return`
-- `puts` / `print` / `p`
-- **classes with inheritance**, `@ivars`, `new`/`initialize`, constants
-- **dynamic dispatch** via mutable per-class method tables, `method_missing`
-- **modules + `include` (mixins)** and **`super`** (bare/`super()`/`super(args)`)
-- **blocks & `yield`** — real closures (`{ |x| … }`), `block_given?`, and
-  `Integer#times`
+- **Values:** integers (`int64`), floats, strings, symbols, arrays, hashes,
+  ranges (incl. beginless/endless), `true`/`false`/`nil`, `self`, `Proc`/lambda,
+  `Regexp`/`MatchData`, `Struct`.
+- **Operators:** arithmetic (`+ - * / %`, **Ruby floor division**, `**`),
+  comparison/`<=>`, `==`/`===`, `<<`, `&&`/`||`, ternary, ranges; correct
+  negative-literal precedence (`-2.abs == 2`, `-2**2 == -4`).
+- **Control flow:** `if`/`elsif`/`else`, `unless`, `while`/`until`,
+  `case`/`when`, statement modifiers, `begin`/`rescue`/`ensure`/`retry`,
+  `break`/`next`.
+- **Methods:** required / optional / `*splat` / **keyword** (`a:`, `b: 2`) /
+  `**rest` / `&block` parameters, setter defs (`def name=`), **endless methods**
+  (`def foo = expr`), recursion, `return`, `super`.
+- **Blocks / Procs / lambdas:** `{ }` / `do…end` closures, `yield`,
+  `block_given?`, `&block` capture, `Proc`/`lambda`/**stabby `->(){}`**, `&proc`
+  block-pass and `Symbol#to_proc` (the `&:sym` shorthand).
+- **Classes & modules:** inheritance, `@ivars`, `new`/`initialize`, constants and
+  constant assignment, **class methods** (`def self.foo`), modules + `include`
+  (mixins), `super`, **`attr_accessor`/`reader`/`writer`**, **`Struct.new`**.
+- **Metaprogramming:** dynamic dispatch via mutable method tables,
+  `method_missing`, `send`/`public_send`, `respond_to?`, **`define_method`**,
+  **`instance_eval`/`instance_exec`**, **`class_eval`/`module_eval`/`class_exec`**,
+  `instance_variable_get`/`set`/`defined?`.
+- **Strings:** interpolation, `%`/`format`/`sprintf`, case/strip/`split`/
+  `each_char`/`lines` and friends.
+- **Regular expressions:** `/re/imx` literals, `Regexp`/`MatchData`, `=~` /
+  `match` / `match?` / `scan` / `gsub` / `sub` / `split`, and the match globals
+  `$~` / `$1`..`$N` / `$&` / `` $` `` / `$'` — running on the standalone pure-Go
+  [go-onigmo](https://github.com/go-onigmo/regexp) engine, so the build stays
+  **CGO=0**.
+- **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/…)
+  and `Comparable`, both written once in embedded Ruby.
 
-Behaviour is **differential-tested against MRI**; **100% coverage** enforced in
-CI across all six 64-bit targets. Next: Phase 2 (Symbols, real
-String/Array/Hash). See the
-[roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
+**100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
+riscv64, loong64, ppc64le, s390x) and three OSes. See the
+[roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
+(mutable String, pattern matching `case/in`, Fiber, bignum).
 
 ## Quick start
 
