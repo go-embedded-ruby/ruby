@@ -27,9 +27,68 @@ func (e parseError) Error() string { return e.msg }
 type scope struct {
 	locals map[string]bool
 	hard   bool
+	// Implicit block-parameter tracking (numbered params _1.._9 and `it`),
+	// only meaningful for a block scope that declared no explicit |params|.
+	explicitParams bool
+	maxNum         int  // highest _N referenced in the block body (0 = none)
+	usedIt         bool // bare `it` referenced in the block body
 }
 
 func newScope(hard bool) *scope { return &scope{locals: map[string]bool{}, hard: hard} }
+
+// numberedParam returns N for a numbered block parameter name "_1".."_9", or 0.
+func numberedParam(name string) int {
+	if len(name) == 2 && name[0] == '_' && name[1] >= '1' && name[1] <= '9' {
+		return int(name[1] - '0')
+	}
+	return 0
+}
+
+// implicitParamScope returns the innermost scope if it is a block that may host
+// implicit numbered/`it` parameters (a soft scope with no explicit |params|),
+// or nil. Implicit parameters bind to the innermost block and never cross a
+// method/class boundary.
+func (p *Parser) implicitParamScope() *scope {
+	s := p.scope()
+	if s.hard || s.explicitParams {
+		return nil
+	}
+	return s
+}
+
+// finishImplicitParams resolves the parameter list of a freshly-parsed block.
+// With explicit params it returns them unchanged; otherwise it synthesises the
+// numbered (_1.._maxNum) or `it` parameters its body referenced. A body may not
+// mix the two forms.
+func (p *Parser) finishImplicitParams(s *scope, explicit []string) []string {
+	if len(explicit) > 0 {
+		return explicit
+	}
+	if s.maxNum > 0 && s.usedIt {
+		p.fail("`it` is not allowed together with numbered parameters")
+	}
+	if s.maxNum > 0 {
+		// Numbered parameters may not nest: an enclosing block (up to the nearest
+		// method/class boundary) that also uses them is a Ruby SyntaxError.
+		for i := len(p.scopes) - 2; i >= 0; i-- {
+			if p.scopes[i].maxNum > 0 {
+				p.fail("numbered parameter is already used in outer block")
+			}
+			if p.scopes[i].hard {
+				break
+			}
+		}
+		names := make([]string, s.maxNum)
+		for i := range names {
+			names[i] = "_" + string(rune('1'+i))
+		}
+		return names
+	}
+	if s.usedIt {
+		return []string{"it"}
+	}
+	return explicit
+}
 
 // Parser holds parsing state.
 type Parser struct {
@@ -1174,10 +1233,12 @@ func (p *Parser) parseLambda() ast.Node {
 	if p.accept(token.LPAREN) {
 		params = p.parseParamNames(token.RPAREN)
 		p.expect(token.RPAREN)
+		p.scope().explicitParams = true
 	}
 	for _, prm := range params {
 		p.declareLocal(prm)
 	}
+	bs := p.scope()
 	var body []ast.Node
 	if p.accept(token.DO) {
 		body = p.parseStatements(bodyEnd)
@@ -1187,6 +1248,7 @@ func (p *Parser) parseLambda() ast.Node {
 		body = p.parseStatements(braceBlockEnd)
 		p.expect(token.RBRACE)
 	}
+	params = p.finishImplicitParams(bs, params)
 	p.popScope()
 	return &ast.Call{Name: "lambda", Block: &ast.Block{Params: params, Body: body}}
 }
@@ -1213,8 +1275,11 @@ func (p *Parser) parseBlockRest(stop map[token.Type]bool, end token.Type) *ast.B
 	if p.accept(token.PIPE) {
 		params, prepends = p.parseBlockParams(token.PIPE)
 		p.expect(token.PIPE)
+		p.scope().explicitParams = true
 	}
+	bs := p.scope()
 	body := p.parseStatements(stop)
+	params = p.finishImplicitParams(bs, params)
 	p.popScope()
 	p.expect(end)
 	// A `(a, b)` group param destructures its (array) argument: it becomes a
@@ -1416,10 +1481,29 @@ func (p *Parser) parseIdentExpr() ast.Node {
 		return &ast.VarRef{Name: name}
 	}
 
+	// Numbered implicit block parameter (_1.._9) inside a param-less block.
+	if n := numberedParam(name); n > 0 {
+		if s := p.implicitParamScope(); s != nil {
+			if n > s.maxNum {
+				s.maxNum = n
+			}
+			p.advance()
+			return &ast.VarRef{Name: name}
+		}
+	}
+
 	// Otherwise it is a method call on self.
 	p.advance()
 	if p.canStartCommandArg() {
 		return &ast.Call{Name: name, Args: p.parseCommandArgs()}
+	}
+	// Bare `it` (no receiver, no args) inside a param-less block is the implicit
+	// single parameter (Ruby 3.4). With args/parens it stays a method call.
+	if name == "it" {
+		if s := p.implicitParamScope(); s != nil {
+			s.usedIt = true
+			return &ast.VarRef{Name: name}
+		}
 	}
 	return &ast.Call{Name: name}
 }
