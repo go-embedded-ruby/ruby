@@ -2,6 +2,7 @@ package vm
 
 import (
 	"io"
+	"math/big"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
@@ -28,6 +29,7 @@ func wantRaise(t *testing.T, class string, fn func()) {
 func TestOperatorDefaults(t *testing.T) {
 	wantRaise(t, "VMError", func() { intOp(bytecode.OpNop, 1, 1) })
 	wantRaise(t, "VMError", func() { floatOp(bytecode.OpNop, 1, 1) })
+	wantRaise(t, "VMError", func() { bigOp(bytecode.OpNop, big.NewInt(1), big.NewInt(1)) })
 	wantRaise(t, "NoMethodError", func() { stringOp(bytecode.OpNop, "a", object.NilV) })
 	wantRaise(t, "NoMethodError", func() { negate(object.True) })
 	wantRaise(t, "TypeError", func() { binary(bytecode.OpAdd, object.True, object.True) })

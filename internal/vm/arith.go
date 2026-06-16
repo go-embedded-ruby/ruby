@@ -1,9 +1,14 @@
 package vm
 
 import (
+	"math"
+	"math/big"
+
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+const minInt64 = math.MinInt64
 
 // binary applies a Phase 0 fast-path operator. Integer⊕Integer stays integer;
 // any Float makes it float. Phase 1 reroutes these through method dispatch so
@@ -27,6 +32,13 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return intOp(op, int64(ai), int64(bi))
 	}
 
+	// Bignum, or an Integer/Bignum mix → arbitrary-precision arithmetic.
+	if abig, ok := object.BigOf(a); ok {
+		if bbig, ok := object.BigOf(b); ok {
+			return bigOp(op, abig, bbig)
+		}
+	}
+
 	af, aIsNum := toFloat(a)
 	bf, bIsNum := toFloat(b)
 	if aIsNum && bIsNum {
@@ -34,6 +46,39 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 	}
 
 	return raise("TypeError", "%s can't be coerced for %s", b.Inspect(), op)
+}
+
+// bigOp performs an arbitrary-precision integer operation, normalizing the
+// result back to an Integer when it fits. big.Int Div/Mod are Euclidean, which
+// matches Ruby's floored division (a non-negative modulus).
+func bigOp(op bytecode.Op, a, b *big.Int) object.Value {
+	switch op {
+	case bytecode.OpAdd:
+		return object.NormInt(new(big.Int).Add(a, b))
+	case bytecode.OpSub:
+		return object.NormInt(new(big.Int).Sub(a, b))
+	case bytecode.OpMul:
+		return object.NormInt(new(big.Int).Mul(a, b))
+	case bytecode.OpDiv:
+		if b.Sign() == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		return object.NormInt(new(big.Int).Div(a, b))
+	case bytecode.OpMod:
+		if b.Sign() == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		return object.NormInt(new(big.Int).Mod(a, b))
+	case bytecode.OpLt:
+		return object.Bool(a.Cmp(b) < 0)
+	case bytecode.OpGt:
+		return object.Bool(a.Cmp(b) > 0)
+	case bytecode.OpLe:
+		return object.Bool(a.Cmp(b) <= 0)
+	case bytecode.OpGe:
+		return object.Bool(a.Cmp(b) >= 0)
+	}
+	return raise("VMError", "bad integer op %s", op)
 }
 
 // binaryOp evaluates an operator opcode. Arithmetic and numeric/string
@@ -68,7 +113,7 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 // for a bad right operand); anything else dispatches `<`/`<=`/`>`/`>=`.
 func hasFastOrdering(a object.Value) bool {
 	switch a.(type) {
-	case object.Integer, object.Float, object.String:
+	case object.Integer, object.Float, object.String, *object.Bignum:
 		return true
 	}
 	return false
@@ -91,11 +136,20 @@ func compareOpName(op bytecode.Op) string {
 func intOp(op bytecode.Op, a, b int64) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		return object.Integer(a + b)
+		if c := a + b; (c >= a) == (b >= 0) { // no signed overflow
+			return object.Integer(c)
+		}
+		return object.NormInt(new(big.Int).Add(big.NewInt(a), big.NewInt(b)))
 	case bytecode.OpSub:
-		return object.Integer(a - b)
+		if c := a - b; (c <= a) == (b >= 0) {
+			return object.Integer(c)
+		}
+		return object.NormInt(new(big.Int).Sub(big.NewInt(a), big.NewInt(b)))
 	case bytecode.OpMul:
-		return object.Integer(a * b)
+		if c := a * b; a == 0 || (c/a == b && !(a == -1 && b == minInt64)) {
+			return object.Integer(c)
+		}
+		return object.NormInt(new(big.Int).Mul(big.NewInt(a), big.NewInt(b)))
 	case bytecode.OpDiv:
 		if b == 0 {
 			raise("ZeroDivisionError", "divided by 0")
@@ -187,9 +241,14 @@ func stringOp(op bytecode.Op, a object.String, b object.Value) object.Value {
 func negate(v object.Value) object.Value {
 	switch n := v.(type) {
 	case object.Integer:
+		if n == minInt64 { // -minInt64 overflows int64 → promote
+			return object.NormInt(new(big.Int).Neg(big.NewInt(int64(n))))
+		}
 		return object.Integer(-n)
 	case object.Float:
 		return object.Float(-n)
+	case *object.Bignum:
+		return object.NormInt(new(big.Int).Neg(n.I))
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
@@ -206,6 +265,12 @@ func valueEqual(a, b object.Value) bool {
 	case object.Float:
 		if bf, ok := toFloat(b); ok {
 			return float64(av) == bf
+		}
+	case *object.Bignum:
+		// A Bignum is, by construction, outside int64 range, so it can only equal
+		// another Bignum of the same magnitude.
+		if bv, ok := b.(*object.Bignum); ok {
+			return av.I.Cmp(bv.I) == 0
 		}
 	case object.String:
 		bv, ok := b.(object.String)
@@ -250,7 +315,9 @@ func valueEqual(a, b object.Value) bool {
 		_, ok := b.(object.Nil)
 		return ok
 	}
-	return false
+	// Reference types not handled above (classes, procs, …) compare by identity,
+	// which is Ruby's default Object#==.
+	return a == b
 }
 
 func toFloat(v object.Value) (float64, bool) {
@@ -259,6 +326,9 @@ func toFloat(v object.Value) (float64, bool) {
 		return float64(n), true
 	case object.Float:
 		return float64(n), true
+	case *object.Bignum:
+		f, _ := new(big.Float).SetInt(n.I).Float64()
+		return f, true
 	}
 	return 0, false
 }

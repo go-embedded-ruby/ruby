@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -1352,32 +1353,40 @@ func (vm *VM) bootstrap() {
 	})
 
 	// Integer methods.
-	intOf := func(self object.Value) int64 { return int64(self.(object.Integer)) }
+	// intOf coerces a receiver to int64; a Bignum is genuinely out of range for
+	// the methods that need a machine int (raising rather than panicking).
+	intOf := func(self object.Value) int64 {
+		if i, ok := self.(object.Integer); ok {
+			return int64(i)
+		}
+		raise("RangeError", "bignum too big to convert into `long'")
+		return 0
+	}
 	vm.cInteger.define("abs", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(absInt(intOf(self)))
+		return object.NormInt(new(big.Int).Abs(bigVal(self)))
 	})
 	vm.cInteger.define("even?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(intOf(self)%2 == 0)
+		return object.Bool(bigVal(self).Bit(0) == 0)
 	})
 	vm.cInteger.define("odd?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(intOf(self)%2 != 0)
+		return object.Bool(bigVal(self).Bit(0) == 1)
 	})
 	vm.cInteger.define("zero?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(intOf(self) == 0)
+		return object.Bool(bigVal(self).Sign() == 0)
 	})
 	vm.cInteger.define("positive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(intOf(self) > 0)
+		return object.Bool(bigVal(self).Sign() > 0)
 	})
 	vm.cInteger.define("negative?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(intOf(self) < 0)
+		return object.Bool(bigVal(self).Sign() < 0)
 	})
 	intSucc := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(intOf(self) + 1)
+		return object.NormInt(new(big.Int).Add(bigVal(self), big.NewInt(1)))
 	}
 	vm.cInteger.define("succ", intSucc)
 	vm.cInteger.define("next", intSucc)
 	vm.cInteger.define("pred", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(intOf(self) - 1)
+		return object.NormInt(new(big.Int).Sub(bigVal(self), big.NewInt(1)))
 	})
 	vm.cInteger.define("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
@@ -1386,7 +1395,8 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cInteger.define("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Float(float64(intOf(self)))
+		f, _ := toFloat(self)
+		return object.Float(f)
 	})
 	vm.cInteger.define("to_s", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		base := int64(10)
@@ -1396,7 +1406,7 @@ func (vm *VM) bootstrap() {
 		if base < 2 || base > 36 {
 			raise("ArgumentError", "invalid radix %d", base)
 		}
-		return object.String(strconv.FormatInt(intOf(self), int(base)))
+		return object.String(bigVal(self).Text(int(base)))
 	})
 	vm.cInteger.define("gcd", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Integer(gcdInt(intOf(self), intArg(args[0])))
@@ -2049,16 +2059,14 @@ func makePad(pad string, n int) string {
 // exponent stay integer; a negative integer exponent or any float yields a
 // float (no Rational in this phase).
 func powNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-	if bi, ok := self.(object.Integer); ok {
+	if base, ok := object.BigOf(self); ok {
 		if ei, ok := args[0].(object.Integer); ok {
 			if ei < 0 {
-				return object.Float(math.Pow(float64(bi), float64(ei)))
+				bf, _ := toFloat(self)
+				return object.Float(math.Pow(bf, float64(ei)))
 			}
-			res := int64(1)
-			for i := int64(0); i < int64(ei); i++ {
-				res *= int64(bi)
-			}
-			return object.Integer(res)
+			// Arbitrary-precision exponentiation, demoting if it fits int64.
+			return object.NormInt(new(big.Int).Exp(base, big.NewInt(int64(ei)), nil))
 		}
 	}
 	a, _ := toFloat(self)
@@ -2170,6 +2178,12 @@ func arrayKeepIf(vm *VM, a *object.Array, blk *Proc, keep bool) object.Value {
 	return a
 }
 
+// bigVal returns an integer receiver (Integer or Bignum) as a *big.Int.
+func bigVal(v object.Value) *big.Int {
+	b, _ := object.BigOf(v)
+	return b
+}
+
 // gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.
 func gcdInt(a, b int64) int64 {
 	a, b = absInt(a), absInt(b)
@@ -2192,18 +2206,45 @@ func rubyEqual(a, b object.Value) bool {
 // spaceshipNumeric implements Integer#<=> and Float#<=>: -1/0/1 across the
 // numeric tower, nil for a non-numeric argument.
 func spaceshipNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// Compare two integers (Integer or Bignum) exactly; only fall back to float
+	// when one side is a Float (where the precision loss is intrinsic).
+	if ai, ok := self.(object.Integer); ok {
+		if bi, ok := args[0].(object.Integer); ok {
+			return object.Integer(int64(cmpInt64(int64(ai), int64(bi))))
+		}
+	}
+	if ab, ok := object.BigOf(self); ok {
+		if bb, ok := object.BigOf(args[0]); ok {
+			return object.Integer(int64(ab.Cmp(bb)))
+		}
+	}
 	a, _ := toFloat(self)
 	b, ok := toFloat(args[0])
 	if !ok {
 		return object.NilV
 	}
+	return object.Integer(int64(cmpFloat(a, b)))
+}
+
+func cmpInt64(a, b int64) int {
 	switch {
 	case a < b:
-		return object.Integer(-1)
+		return -1
 	case a > b:
-		return object.Integer(1)
+		return 1
 	default:
-		return object.Integer(0)
+		return 0
+	}
+}
+
+func cmpFloat(a, b float64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
 	}
 }
 

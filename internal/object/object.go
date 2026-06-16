@@ -9,6 +9,7 @@ package object
 
 import (
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -24,13 +25,42 @@ type Value interface {
 	Truthy() bool
 }
 
-// Integer is a 64-bit integer. Phase 2 will introduce a separate Bignum type
-// backed by math/big and promote on overflow.
+// Integer is a 64-bit integer (the common case). Arithmetic that overflows
+// int64 promotes to a Bignum; both report their class as Integer, so the
+// Fixnum/Bignum split is transparent (as in Ruby 4.0).
 type Integer int64
 
 func (i Integer) ToS() string     { return strconv.FormatInt(int64(i), 10) }
 func (i Integer) Inspect() string { return i.ToS() }
 func (i Integer) Truthy() bool    { return true }
+
+// Bignum is an arbitrary-precision integer (the int64 overflow case). It is held
+// immutably: results are always fresh big.Ints, never mutated in place.
+type Bignum struct{ I *big.Int }
+
+func (b *Bignum) ToS() string     { return b.I.String() }
+func (b *Bignum) Inspect() string { return b.I.String() }
+func (b *Bignum) Truthy() bool    { return true }
+
+// NormInt returns an Integer when z fits in int64, else a Bignum — so a result
+// that shrinks back into range demotes automatically.
+func NormInt(z *big.Int) Value {
+	if z.IsInt64() {
+		return Integer(z.Int64())
+	}
+	return &Bignum{I: z}
+}
+
+// BigOf returns the big.Int value of an Integer or Bignum (ok=false otherwise).
+func BigOf(v Value) (*big.Int, bool) {
+	switch x := v.(type) {
+	case Integer:
+		return big.NewInt(int64(x)), true
+	case *Bignum:
+		return x.I, true
+	}
+	return nil, false
+}
 
 // Float is a 64-bit float.
 type Float float64

@@ -136,6 +136,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cClass
 	case object.Integer:
 		return vm.cInteger
+	case *object.Bignum:
+		return vm.cInteger
 	case object.Float:
 		return vm.cFloat
 	case object.String:
