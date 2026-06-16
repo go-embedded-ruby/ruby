@@ -120,6 +120,18 @@ func (vm *VM) newStructClass(parent *RClass, names []string) *RClass {
 		}
 		return object.True
 	})
+	// Struct is Enumerable: each yields the member values in order, and the
+	// Enumerable mixin then supplies map/select/min/sum/… on top of it.
+	sub.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each)")
+		}
+		for _, v := range values(self) {
+			vm.callBlock(blk, []object.Value{v})
+		}
+		return self
+	})
+	sub.includes = append(sub.includes, vm.consts["Enumerable"].(*RClass))
 	return sub
 }
 
