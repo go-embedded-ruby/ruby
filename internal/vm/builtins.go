@@ -63,6 +63,16 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("freeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
+	vm.cObject.define("loop", func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (loop)")
+		}
+		// Runs forever; a `break` in the block unwinds to the call site (its
+		// value becomes loop's result) via the enclosing sendCatchBreak.
+		for {
+			vm.callBlock(blk, nil)
+		}
+	})
 	vm.cObject.define("equal?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Object identity: reference types compare by pointer, the immutable
 		// value types by value (Go interface equality gives exactly this).
