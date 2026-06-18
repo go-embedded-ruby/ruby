@@ -62,6 +62,9 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("dup", dupFn)
 	vm.cObject.define("clone", dupFn)
 	vm.cObject.define("freeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if s, ok := self.(*object.String); ok {
+			s.Frozen = true
+		}
 		return self
 	})
 	vm.cObject.define("loop", func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -627,6 +630,106 @@ func (vm *VM) bootstrap() {
 			return &object.Array{Elems: []object.Value{object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):])}}
 		}
 		return &object.Array{Elems: []object.Value{object.NewString(""), object.NewString(""), object.NewString(s)}}
+	})
+
+	// String mutation (in-place). Every mutator guards against a frozen receiver.
+	// `<<` and concat append each argument: a String contributes its bytes, an
+	// Integer its UTF-8 code point.
+	strConcatFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		checkFrozen(s)
+		for _, a := range args {
+			s.B = append(s.B, strAppendBytes(a)...)
+		}
+		return s
+	}
+	vm.cString.define("<<", strConcatFn)
+	vm.cString.define("concat", strConcatFn)
+	vm.cString.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		checkFrozen(s)
+		s.B = []byte(strArg(args[0]))
+		return s
+	})
+	vm.cString.define("prepend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		checkFrozen(s)
+		var head []byte
+		for _, a := range args {
+			head = append(head, strAppendBytes(a)...)
+		}
+		s.B = append(head, s.B...)
+		return s
+	})
+	vm.cString.define("insert", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		checkFrozen(s)
+		r := []rune(s.Str())
+		at := int(intArg(args[0]))
+		if at < 0 {
+			at += len(r) + 1
+		}
+		if at < 0 || at > len(r) {
+			raise("IndexError", "index %d out of string", intArg(args[0]))
+		}
+		ins := []rune(strArg(args[1]))
+		out := append(append(append([]rune{}, r[:at]...), ins...), r[at:]...)
+		s.B = []byte(string(out))
+		return s
+	})
+	vm.cString.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		checkFrozen(s)
+		s.B = s.B[:0]
+		return s
+	})
+	vm.cString.define("upcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, strings.ToUpper)
+	})
+	vm.cString.define("downcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, strings.ToLower)
+	})
+	vm.cString.define("capitalize!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, capitalizeStr)
+	})
+	vm.cString.define("swapcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, swapcaseStr)
+	})
+	vm.cString.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		checkFrozen(s)
+		s.B = []byte(reverseStr(s.Str()))
+		return s
+	})
+	vm.cString.define("strip!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, func(x string) string { return strings.Trim(x, wsCutset) })
+	})
+	vm.cString.define("lstrip!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, func(x string) string { return strings.TrimLeft(x, wsCutset) })
+	})
+	vm.cString.define("rstrip!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, func(x string) string { return strings.TrimRight(x, wsCutset) })
+	})
+	vm.cString.define("chomp!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, chompStr)
+	})
+	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, chopStr)
+	})
+	vm.cString.define("squeeze!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strBang(self, squeezeStr)
+	})
+	vm.cString.define("sub!", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.strSubBang(self, args, blk, false)
+	})
+	vm.cString.define("gsub!", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.strSubBang(self, args, blk, true)
+	})
+	vm.cString.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return stringIndexAssign(self.(*object.String), args)
+	})
+	vm.cString.define("slice!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return stringSliceBang(self.(*object.String), args)
 	})
 
 	// Array.
@@ -1911,6 +2014,153 @@ func normIndex(i int64, n int) int {
 		return int(i) + n
 	}
 	return int(i)
+}
+
+// checkFrozen raises FrozenError when a mutator is applied to a frozen string.
+func checkFrozen(s *object.String) {
+	if s.Frozen {
+		raise("FrozenError", "can't modify frozen String: %s", s.Inspect())
+	}
+}
+
+// strAppendBytes is the byte contribution of a `<<`/concat/prepend argument: a
+// String contributes its bytes, an Integer its UTF-8 code point.
+func strAppendBytes(a object.Value) []byte {
+	switch v := a.(type) {
+	case *object.String:
+		return v.B
+	case object.Integer:
+		return []byte(string(rune(v)))
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(a))
+	return nil
+}
+
+// strBang applies a pure transform to the receiver in place. As a Ruby bang
+// method it returns the (mutated) receiver when the content changed, else nil.
+func strBang(self object.Value, fn func(string) string) object.Value {
+	s := self.(*object.String)
+	checkFrozen(s)
+	out := fn(s.Str())
+	if out == string(s.B) {
+		return object.NilV
+	}
+	s.B = []byte(out)
+	return s
+}
+
+// squeezeStr collapses each run of identical bytes to a single byte.
+func squeezeStr(s string) string {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if i > 0 && s[i] == s[i-1] {
+			continue
+		}
+		out = append(out, s[i])
+	}
+	return string(out)
+}
+
+// strSubBang backs String#sub!/#gsub!: it applies the same substitution as
+// sub/gsub and writes the result back, returning the receiver when it changed
+// and nil otherwise.
+func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, global bool) object.Value {
+	s := self.(*object.String)
+	checkFrozen(s)
+	res := vm.stringSub(s.Str(), args, blk, global).(*object.String)
+	if string(res.B) == string(s.B) {
+		return object.NilV
+	}
+	s.B = res.B
+	return s
+}
+
+// stringIndexAssign backs String#[]=: it replaces the indexed slice (an index,
+// a start+length, or a Range) with the replacement string and returns the
+// replacement (Ruby's result for an assignment).
+func stringIndexAssign(s *object.String, args []object.Value) object.Value {
+	checkFrozen(s)
+	r := []rune(s.Str())
+	n := len(r)
+	rhs := args[len(args)-1]
+	repl := strArg(rhs)
+	start, length := stringAssignSpan(args, n)
+	out := append(append(append([]rune{}, r[:start]...), []rune(repl)...), r[start+length:]...)
+	s.B = []byte(string(out))
+	return rhs
+}
+
+// stringAssignSpan resolves the [index] / [start, len] / [range] target of a
+// String#[]= into a (start, length) span, raising the IndexError/RangeError
+// Ruby raises for an out-of-range target.
+func stringAssignSpan(args []object.Value, n int) (start, length int) {
+	if len(args) == 3 {
+		start = normIndex(intArg(args[0]), n)
+		length = int(intArg(args[1]))
+		if start < 0 || start > n {
+			raise("IndexError", "index %d out of string", intArg(args[0]))
+		}
+		if length < 0 {
+			raise("IndexError", "negative length %d", length)
+		}
+		if start+length > n {
+			length = n - start
+		}
+		return start, length
+	}
+	if rng, ok := args[0].(*object.Range); ok {
+		st, ln, ok := sliceRange(n, rng)
+		if !ok {
+			raise("RangeError", "%s out of range", rng.Inspect())
+		}
+		return st, ln
+	}
+	start = normIndex(intArg(args[0]), n)
+	if start < 0 || start >= n {
+		raise("IndexError", "index %d out of string", intArg(args[0]))
+	}
+	return start, 1
+}
+
+// stringSliceBang backs String#slice!: it removes the indexed slice from the
+// receiver and returns it (nil when the index does not select anything).
+func stringSliceBang(s *object.String, args []object.Value) object.Value {
+	checkFrozen(s)
+	r := []rune(s.Str())
+	n := len(r)
+	start, length, ok := sliceSpan(args, n)
+	if !ok {
+		return object.NilV
+	}
+	removed := string(r[start : start+length])
+	out := append(append([]rune{}, r[:start]...), r[start+length:]...)
+	s.B = []byte(string(out))
+	return object.NewString(removed)
+}
+
+// sliceSpan resolves the [index] / [start, len] / [range] argument of slice!
+// into a (start, length) span, reporting ok=false for an out-of-range selector
+// (slice! then returns nil rather than raising).
+func sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
+	if len(args) == 2 {
+		start = normIndex(intArg(args[0]), n)
+		length = int(intArg(args[1]))
+		if start < 0 || start > n || length < 0 {
+			return 0, 0, false
+		}
+		if start+length > n {
+			length = n - start
+		}
+		return start, length, true
+	}
+	if rng, isR := args[0].(*object.Range); isR {
+		return sliceRange(n, rng)
+	}
+	start = normIndex(intArg(args[0]), n)
+	if start < 0 || start >= n {
+		return 0, 0, false
+	}
+	return start, 1, true
 }
 
 // strArg coerces a String argument, raising TypeError otherwise.
