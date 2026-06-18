@@ -325,6 +325,11 @@ func (l *Lexer) next() token.Token {
 			l.state = exprBegin
 			return mk(token.GE, ">=")
 		}
+		if l.peek() == '>' { // >> (right shift)
+			l.advance()
+			l.state = exprBegin
+			return mk(token.RSHIFT, ">>")
+		}
 		l.state = exprBegin
 		return mk(token.GT, ">")
 	case '?':
@@ -336,6 +341,9 @@ func (l *Lexer) next() token.Token {
 	case '^':
 		l.state = exprBegin
 		return mk(token.CARET, "^")
+	case '~':
+		l.state = exprBegin
+		return mk(token.TILDE, "~")
 	}
 	return mk(token.ILLEGAL, string(c))
 }

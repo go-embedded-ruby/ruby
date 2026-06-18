@@ -100,6 +100,9 @@ type Parser struct {
 	// condition, so the `do` there belongs to the loop, not to a call in the
 	// condition.
 	noDo bool
+	// patternDepth > 0 while parsing a pattern atom, where a top-level `|` is the
+	// alternation separator rather than the bitwise-or operator.
+	patternDepth int
 }
 
 // Parse lexes and parses src into a Program.
@@ -689,7 +692,9 @@ func (p *Parser) parsePatternPrimary() ast.Pattern {
 // parsePatternSuffixed parses one pattern atom with an optional trailing
 // `=> name` binding suffix.
 func (p *Parser) parsePatternSuffixed() ast.Pattern {
+	p.patternDepth++
 	pat := p.parsePatternAtom()
+	p.patternDepth--
 	if p.accept(token.HASHROCKET) {
 		name := p.expect(token.IDENT).Lit
 		p.declareLocal(name)
@@ -1059,7 +1064,11 @@ func binBP(tt token.Type) int {
 		return 10
 	case token.LT, token.GT, token.LE, token.GE:
 		return 20
-	case token.SHOVEL:
+	case token.PIPE, token.CARET:
+		return 22
+	case token.AMPER:
+		return 24
+	case token.SHOVEL, token.RSHIFT:
 		return 25
 	case token.PLUS, token.MINUS:
 		return 30
@@ -1074,7 +1083,13 @@ func binBP(tt token.Type) int {
 func (p *Parser) parseBinary(minBP int) ast.Node {
 	left := p.parseUnary()
 	for {
-		bp := binBP(p.cur().Type)
+		tt := p.cur().Type
+		bp := binBP(tt)
+		// Inside a pattern, a top-level `|` separates alternatives rather than
+		// being the bitwise-or operator.
+		if p.patternDepth > 0 && tt == token.PIPE {
+			bp = 0
+		}
 		if bp == 0 || bp <= minBP {
 			return left
 		}
@@ -1120,6 +1135,9 @@ func (p *Parser) parseUnary() ast.Node {
 	case token.BANG:
 		p.advance()
 		return &ast.UnaryExpr{Op: "!", Operand: p.parseUnary()}
+	case token.TILDE:
+		p.advance()
+		return &ast.UnaryExpr{Op: "~", Operand: p.parseUnary()}
 	}
 	return p.parsePostfix()
 }
@@ -1530,7 +1548,7 @@ func (p *Parser) canStartCommandArg() bool {
 	}
 	switch t.Type {
 	case token.INT, token.FLOAT, token.STRING, token.STRBEG, token.SYMBOL, token.IDENT, token.CONST,
-		token.IVAR, token.GVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG,
+		token.IVAR, token.GVAR, token.TRUE, token.FALSE, token.NIL, token.SELF, token.BANG, token.TILDE,
 		token.LPAREN, token.LBRACKET, token.ARROW:
 		return true
 	case token.MINUS, token.PLUS:

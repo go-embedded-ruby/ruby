@@ -1596,6 +1596,26 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewString(bigVal(self).Text(int(base)))
 	})
+	// Bitwise / shift operators (arbitrary precision via big.Int, so a left shift
+	// promotes to a Bignum and bitwise ops work on Bignums too).
+	vm.cInteger.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return shiftInt(bigVal(self), intArg(args[0]))
+	})
+	vm.cInteger.define(">>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return shiftInt(bigVal(self), -intArg(args[0]))
+	})
+	vm.cInteger.define("&", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NormInt(new(big.Int).And(bigVal(self), bigArg(args[0])))
+	})
+	vm.cInteger.define("|", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NormInt(new(big.Int).Or(bigVal(self), bigArg(args[0])))
+	})
+	vm.cInteger.define("^", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NormInt(new(big.Int).Xor(bigVal(self), bigArg(args[0])))
+	})
+	vm.cInteger.define("~", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NormInt(new(big.Int).Not(bigVal(self)))
+	})
 	vm.cInteger.define("gcd", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Integer(gcdInt(intOf(self), intArg(args[0])))
 	})
@@ -2539,6 +2559,25 @@ func arrayKeepIf(vm *VM, a *object.Array, blk *Proc, keep bool) object.Value {
 func bigVal(v object.Value) *big.Int {
 	b, _ := object.BigOf(v)
 	return b
+}
+
+// bigArg returns an integer argument as a *big.Int, raising TypeError when the
+// argument is not an Integer/Bignum (as Ruby's bitwise operators do).
+func bigArg(v object.Value) *big.Int {
+	if b, ok := object.BigOf(v); ok {
+		return b
+	}
+	raise("TypeError", "%s can't be coerced into Integer", classNameOf(v))
+	return nil
+}
+
+// shiftInt shifts a left by n bits (right by -n when n is negative), promoting
+// to a Bignum as needed and demoting a result that fits back into an Integer.
+func shiftInt(a *big.Int, n int64) object.Value {
+	if n >= 0 {
+		return object.NormInt(new(big.Int).Lsh(a, uint(n)))
+	}
+	return object.NormInt(new(big.Int).Rsh(a, uint(-n)))
 }
 
 // gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.

@@ -99,6 +99,8 @@ const (
 	SAFEDOT   // &. (safe navigation)
 	ARROW     // -> (stabby lambda)
 	CARET     // ^ (pattern-matching pin operator)
+	RSHIFT    // >>
+	TILDE     // ~ (bitwise complement)
 )
 
 var typeNames = map[Type]string{
@@ -114,7 +116,7 @@ var typeNames = map[Type]string{
 	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=", QUESTION: "?", COLON: ":",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
 	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
-	AMPER: "&", SAFEDOT: "&.", ARROW: "->", CARET: "^",
+	AMPER: "&", SAFEDOT: "&.", ARROW: "->", CARET: "^", RSHIFT: ">>", TILDE: "~",
 }
 
 func (t Type) String() string {

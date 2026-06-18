@@ -335,6 +335,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpNeg, 0, 0)
 		case "!":
 			b.emit(bytecode.OpNot, 0, 0)
+		default:
+			// `~` (bitwise complement) dispatches as a method so a user class can
+			// define it; the operand is already the receiver on the stack.
+			b.emit(bytecode.OpSend, b.addName(v.Op), 0)
 		}
 	case *ast.BinaryExpr:
 		if v.Op == "&&" || v.Op == "||" {
