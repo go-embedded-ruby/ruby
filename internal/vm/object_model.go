@@ -140,7 +140,7 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cInteger
 	case object.Float:
 		return vm.cFloat
-	case object.String:
+	case *object.String:
 		return vm.cString
 	case object.Symbol:
 		return vm.cSymbol

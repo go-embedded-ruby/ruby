@@ -71,7 +71,7 @@ func (m *MatchData) Truthy() bool    { return true }
 // groups).
 func matchDataInspect(m *MatchData) string {
 	var b strings.Builder
-	b.WriteString(object.String(m.md.Str(0)).Inspect())
+	b.WriteString(object.NewString(m.md.Str(0)).Inspect())
 	idxToName := indexToName(m)
 	for i := 1; i <= m.md.NGroups(); i++ {
 		b.WriteByte(' ')
@@ -132,12 +132,12 @@ func strMatchRegexp(v object.Value) *Regexp {
 	switch x := v.(type) {
 	case *Regexp:
 		return x
-	case object.String:
-		re, err := onig.Compile(string(x))
+	case *object.String:
+		re, err := onig.Compile(x.Str())
 		if err != nil {
-			raise("RegexpError", "%s: /%s/", err.Error(), string(x))
+			raise("RegexpError", "%s: /%s/", err.Error(), x.Str())
 		}
-		return &Regexp{re: re, source: string(x)}
+		return &Regexp{re: re, source: x.Str()}
 	default:
 		raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
 		return nil
@@ -171,15 +171,15 @@ func (vm *VM) gvar(name string) object.Value {
 	switch name {
 	case "$&":
 		if ok {
-			return object.String(md.md.Str(0))
+			return object.NewString(md.md.Str(0))
 		}
 	case "$`":
 		if ok {
-			return object.String(md.md.Pre())
+			return object.NewString(md.md.Pre())
 		}
 	case "$'":
 		if ok {
-			return object.String(md.md.Post())
+			return object.NewString(md.md.Post())
 		}
 	default:
 		if n, isGroup := gvarGroup(name); isGroup {
@@ -217,10 +217,10 @@ func scanRegexp(v object.Value) *Regexp {
 	switch x := v.(type) {
 	case *Regexp:
 		return x
-	case object.String:
+	case *object.String:
 		// The escaped literal is always a well-formed pattern, so compilation
 		// cannot fail here (the engine even accepts raw, non-UTF-8 bytes).
-		src := regexpEscapeLiteral(string(x))
+		src := regexpEscapeLiteral(x.Str())
 		re, _ := onig.Compile(src)
 		return &Regexp{re: re, source: src}
 	default:
@@ -319,8 +319,8 @@ func splitOnWhitespace(args []object.Value) bool {
 	switch p := args[0].(type) {
 	case object.Nil:
 		return true
-	case object.String:
-		return string(p) == " "
+	case *object.String:
+		return p.Str() == " "
 	default:
 		return false
 	}
@@ -340,14 +340,14 @@ func splitWhitespace(subject string, limit int) object.Value {
 			break
 		}
 		if limit > 0 && len(out)+1 == limit {
-			out = append(out, object.String(subject[i:]))
+			out = append(out, object.NewString(subject[i:]))
 			return &object.Array{Elems: out}
 		}
 		start := i
 		for i < n && !isASCIISpace(subject[i]) {
 			i++
 		}
-		out = append(out, object.String(subject[start:i]))
+		out = append(out, object.NewString(subject[start:i]))
 	}
 	return &object.Array{Elems: out}
 }
@@ -387,7 +387,7 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 				search = mBegin + w
 				continue
 			}
-			out = append(out, object.String(subject[last:mBegin]))
+			out = append(out, object.NewString(subject[last:mBegin]))
 			out = append(out, captureFields(md)...)
 			pieces++
 			last = mBegin
@@ -395,17 +395,17 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 			search = mBegin + w
 			continue
 		}
-		out = append(out, object.String(subject[last:mBegin]))
+		out = append(out, object.NewString(subject[last:mBegin]))
 		out = append(out, captureFields(md)...)
 		pieces++
 		last = mEnd
 		search = mEnd
 	}
-	out = append(out, object.String(subject[last:]))
+	out = append(out, object.NewString(subject[last:]))
 	if limit == 0 {
 		// Strip trailing empty fields (the default behaviour).
 		for len(out) > 0 {
-			if s, ok := out[len(out)-1].(object.String); ok && s == "" {
+			if s, ok := out[len(out)-1].(*object.String); ok && len(s.B) == 0 {
 				out = out[:len(out)-1]
 				continue
 			}
@@ -421,7 +421,7 @@ func captureFields(md *onig.MatchData) []object.Value {
 	var out []object.Value
 	for i := 1; i <= md.NGroups(); i++ {
 		if md.Begin(i) >= 0 {
-			out = append(out, object.String(md.Str(i)))
+			out = append(out, object.NewString(md.Str(i)))
 		}
 	}
 	return out
@@ -463,7 +463,7 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 		mEnd := search + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
 		if blk != nil {
-			res := vm.callBlock(blk, []object.Value{object.String(md.Str(0))})
+			res := vm.callBlock(blk, []object.Value{object.NewString(md.Str(0))})
 			b.WriteString(vm.send(res, "to_s", nil, nil).ToS())
 		} else {
 			// Prematch/postmatch are taken from the whole subject so \` and \'
@@ -488,7 +488,7 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 		}
 	}
 	b.WriteString(subject[pos:]) // remaining tail
-	return object.String(b.String())
+	return object.NewString(b.String())
 }
 
 // expandReplacement expands a sub/gsub replacement template against a match:
@@ -554,14 +554,14 @@ func expandReplacement(tmpl string, md *onig.MatchData, pre, post string) string
 func scanElement(md *onig.MatchData) object.Value {
 	n := md.NGroups()
 	if n == 0 {
-		return object.String(md.Str(0))
+		return object.NewString(md.Str(0))
 	}
 	caps := make([]object.Value, n)
 	for i := 1; i <= n; i++ {
 		if md.Begin(i) < 0 {
 			caps[i-1] = object.NilV
 		} else {
-			caps[i-1] = object.String(md.Str(i))
+			caps[i-1] = object.NewString(md.Str(i))
 		}
 	}
 	return &object.Array{Elems: caps}
@@ -602,7 +602,7 @@ func groupValue(m *MatchData, i int) object.Value {
 	if m.md.Begin(i) < 0 {
 		return object.NilV
 	}
-	return object.String(m.md.Str(i))
+	return object.NewString(m.md.Str(i))
 }
 
 // installRegexp registers the Regexp and MatchData method tables. It runs at the
@@ -611,13 +611,13 @@ func (vm *VM) installRegexp() {
 	reArg := func(v object.Value) *Regexp { return v.(*Regexp) }
 
 	vm.cRegexp.define("source", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(reArg(self).source)
+		return object.NewString(reArg(self).source)
 	})
 	vm.cRegexp.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(reArg(self).ToS())
+		return object.NewString(reArg(self).ToS())
 	})
 	vm.cRegexp.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(reArg(self).Inspect())
+		return object.NewString(reArg(self).Inspect())
 	})
 	vm.cRegexp.define("match?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if _, isNil := args[0].(object.Nil); isNil {
@@ -645,16 +645,16 @@ func (vm *VM) installRegexp() {
 	mdArg := func(v object.Value) *MatchData { return v.(*MatchData) }
 
 	vm.cMatchData.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(mdArg(self).md.Str(0))
+		return object.NewString(mdArg(self).md.Str(0))
 	})
 	vm.cMatchData.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(mdArg(self).Inspect())
+		return object.NewString(mdArg(self).Inspect())
 	})
 	vm.cMatchData.define("pre_match", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(mdArg(self).md.Pre())
+		return object.NewString(mdArg(self).md.Pre())
 	})
 	vm.cMatchData.define("post_match", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(mdArg(self).md.Post())
+		return object.NewString(mdArg(self).md.Post())
 	})
 	vm.cMatchData.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(mdArg(self).md.NGroups() + 1)
@@ -688,7 +688,7 @@ func (vm *VM) installRegexp() {
 		m := mdArg(self)
 		h := object.NewHash()
 		for _, name := range namedGroups(m.re.source) {
-			h.Set(object.String(name), groupValue(m, m.md.IndexOfName(name)))
+			h.Set(object.NewString(name), groupValue(m, m.md.IndexOfName(name)))
 		}
 		return h
 	})
@@ -722,8 +722,8 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 // types Ruby's Regexp matching coerces), and whether it was one.
 func stringLike(v object.Value) (string, bool) {
 	switch x := v.(type) {
-	case object.String:
-		return string(x), true
+	case *object.String:
+		return x.Str(), true
 	case object.Symbol:
 		return string(x), true
 	default:
@@ -760,8 +760,8 @@ func (m *MatchData) at(key object.Value) object.Value {
 			return object.NilV
 		}
 		return groupValue(m, idx)
-	case object.String:
-		return m.byName(string(k))
+	case *object.String:
+		return m.byName(k.Str())
 	case object.Symbol:
 		return m.byName(string(k))
 	default:

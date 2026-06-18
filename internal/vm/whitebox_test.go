@@ -30,7 +30,7 @@ func TestOperatorDefaults(t *testing.T) {
 	wantRaise(t, "VMError", func() { intOp(bytecode.OpNop, 1, 1) })
 	wantRaise(t, "VMError", func() { floatOp(bytecode.OpNop, 1, 1) })
 	wantRaise(t, "VMError", func() { bigOp(bytecode.OpNop, big.NewInt(1), big.NewInt(1)) })
-	wantRaise(t, "NoMethodError", func() { stringOp(bytecode.OpNop, "a", object.NilV) })
+	wantRaise(t, "NoMethodError", func() { stringOp(bytecode.OpNop, object.NewString("a"), object.NilV) })
 	wantRaise(t, "NoMethodError", func() { negate(object.True) })
 	wantRaise(t, "TypeError", func() { binary(bytecode.OpAdd, object.True, object.True) })
 	wantRaise(t, "ZeroDivisionError", func() { intOp(bytecode.OpMod, 1, 0) })
@@ -43,11 +43,11 @@ func TestValueEqualBranches(t *testing.T) {
 	}{
 		{object.Integer(2), object.Integer(2), true},
 		{object.Integer(2), object.Float(2), true},
-		{object.Integer(2), object.String("x"), false},
+		{object.Integer(2), object.NewString("x"), false},
 		{object.Float(2), object.Integer(2), true},
-		{object.Float(2), object.String("x"), false},
-		{object.String("a"), object.String("a"), true},
-		{object.String("a"), object.Integer(1), false},
+		{object.Float(2), object.NewString("x"), false},
+		{object.NewString("a"), object.NewString("a"), true},
+		{object.NewString("a"), object.Integer(1), false},
 		{object.Bool(true), object.Bool(true), true},
 		{object.Bool(true), object.Integer(1), false},
 		{object.NilV, object.NilV, true},

@@ -116,8 +116,8 @@ func toFormatChar(v object.Value) string {
 	switch x := v.(type) {
 	case object.Integer:
 		return string(rune(x))
-	case object.String:
-		for _, r := range string(x) {
+	case *object.String:
+		for _, r := range x.Str() {
 			return string(r)
 		}
 		return ""
@@ -134,7 +134,7 @@ func classNameOf(v object.Value) string {
 		return "Integer"
 	case object.Float:
 		return "Float"
-	case object.String:
+	case *object.String:
 		return "String"
 	case object.Symbol:
 		return "Symbol"

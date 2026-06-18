@@ -110,11 +110,11 @@ func (vm *VM) bootstrap() {
 		return vm.callBlockSelf(blk, self, args)
 	})
 	formatFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fmtStr, ok := args[0].(object.String)
+		fmtStr, ok := args[0].(*object.String)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 		}
-		return object.String(formatString(string(fmtStr), args[1:]))
+		return object.NewString(formatString(fmtStr.Str(), args[1:]))
 	}
 	vm.cObject.define("format", formatFn)
 	vm.cObject.define("sprintf", formatFn)
@@ -173,7 +173,7 @@ func (vm *VM) bootstrap() {
 	// return it (or the class name when unset).
 	cException.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) > 0 {
-			self.(*RObject).ivars["@message"] = object.String(args[0].ToS())
+			self.(*RObject).ivars["@message"] = object.NewString(args[0].ToS())
 		}
 		return object.NilV
 	})
@@ -181,7 +181,7 @@ func (vm *VM) bootstrap() {
 		if m := getIvar(self, "@message"); m != object.NilV {
 			return m
 		}
-		return object.String(vm.classOf(self).name)
+		return object.NewString(vm.classOf(self).name)
 	}
 	cException.define("message", excMessage)
 	cException.define("to_s", excMessage)
@@ -194,10 +194,10 @@ func (vm *VM) bootstrap() {
 		return vm.classOf(self)
 	})
 	vm.cObject.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(self.ToS())
+		return object.NewString(self.ToS())
 	})
 	vm.cObject.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(self.Inspect())
+		return object.NewString(self.Inspect())
 	})
 	vm.cObject.define("nil?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		_, isNil := self.(object.Nil)
@@ -225,12 +225,12 @@ func (vm *VM) bootstrap() {
 			return v
 		case object.Float:
 			return object.Integer(int64(v))
-		case object.String:
+		case *object.String:
 			base := 10
 			if len(args) > 1 {
 				base = int(intArg(args[1]))
 			}
-			n, err := strconv.ParseInt(strings.TrimSpace(string(v)), base, 64)
+			n, err := strconv.ParseInt(strings.TrimSpace(v.Str()), base, 64)
 			if err != nil {
 				raise("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
 			}
@@ -245,8 +245,8 @@ func (vm *VM) bootstrap() {
 			return v
 		case object.Integer:
 			return object.Float(float64(v))
-		case object.String:
-			f, err := strconv.ParseFloat(strings.TrimSpace(string(v)), 64)
+		case *object.String:
+			f, err := strconv.ParseFloat(strings.TrimSpace(v.Str()), 64)
 			if err != nil {
 				raise("ArgumentError", "invalid value for Float(): %s", v.Inspect())
 			}
@@ -381,18 +381,17 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("**", powNumeric)
 	vm.cFloat.define("pow", powNumeric)
 	vm.cString.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(object.String)
-		b, ok := args[0].(object.String)
+		a := self.(*object.String)
+		b, ok := args[0].(*object.String)
 		if !ok {
 			return object.NilV
 		}
-		return object.Integer(strings.Compare(string(a), string(b)))
+		return object.Integer(strings.Compare(a.Str(), b.Str()))
 	})
 
-	// String. A read-only slice of methods over the immutable Phase 2 String
-	// (byte-based; length/chars/index are rune-aware for UTF-8). Mutating forms
-	// (<<, gsub!, …) await the mutable byte+encoding representation.
-	strOf := func(self object.Value) string { return string(self.(object.String)) }
+	// String. Methods over the mutable byte-based String (length/chars/index are
+	// rune-aware for UTF-8). strOf reads the receiver's current contents.
+	strOf := func(self object.Value) string { return self.(*object.String).Str() }
 	vm.cString.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(utf8.RuneCountInString(strOf(self)))
 	})
@@ -406,39 +405,39 @@ func (vm *VM) bootstrap() {
 		return object.Bool(len(strOf(self)) == 0)
 	})
 	vm.cString.define("upcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(strings.ToUpper(strOf(self)))
+		return object.NewString(strings.ToUpper(strOf(self)))
 	})
 	vm.cString.define("downcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(strings.ToLower(strOf(self)))
+		return object.NewString(strings.ToLower(strOf(self)))
 	})
 	vm.cString.define("capitalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(capitalizeStr(strOf(self)))
+		return object.NewString(capitalizeStr(strOf(self)))
 	})
 	vm.cString.define("swapcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(swapcaseStr(strOf(self)))
+		return object.NewString(swapcaseStr(strOf(self)))
 	})
 	vm.cString.define("reverse", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(reverseStr(strOf(self)))
+		return object.NewString(reverseStr(strOf(self)))
 	})
 	vm.cString.define("strip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(strings.Trim(strOf(self), wsCutset))
+		return object.NewString(strings.Trim(strOf(self), wsCutset))
 	})
 	vm.cString.define("lstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(strings.TrimLeft(strOf(self), wsCutset))
+		return object.NewString(strings.TrimLeft(strOf(self), wsCutset))
 	})
 	vm.cString.define("rstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(strings.TrimRight(strOf(self), wsCutset))
+		return object.NewString(strings.TrimRight(strOf(self), wsCutset))
 	})
 	vm.cString.define("chomp", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(chompStr(strOf(self)))
+		return object.NewString(chompStr(strOf(self)))
 	})
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.String(chopStr(strOf(self)))
+		return object.NewString(chopStr(strOf(self)))
 	})
 	vm.cString.define("chars", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		var out []object.Value
 		for _, r := range strOf(self) {
-			out = append(out, object.String(string(r)))
+			out = append(out, object.NewString(string(r)))
 		}
 		return &object.Array{Elems: out}
 	})
@@ -454,7 +453,7 @@ func (vm *VM) bootstrap() {
 		segs := splitLines(strOf(self))
 		out := make([]object.Value, len(segs))
 		for i, seg := range segs {
-			out[i] = object.String(seg)
+			out[i] = object.NewString(seg)
 		}
 		return &object.Array{Elems: out}
 	})
@@ -463,7 +462,7 @@ func (vm *VM) bootstrap() {
 			raise("LocalJumpError", "no block given (each_line)")
 		}
 		for _, seg := range splitLines(strOf(self)) {
-			vm.callBlock(blk, []object.Value{object.String(seg)})
+			vm.callBlock(blk, []object.Value{object.NewString(seg)})
 		}
 		return self
 	})
@@ -472,7 +471,7 @@ func (vm *VM) bootstrap() {
 			raise("LocalJumpError", "no block given (each_char)")
 		}
 		for _, r := range strOf(self) {
-			vm.callBlock(blk, []object.Value{object.String(string(r))})
+			vm.callBlock(blk, []object.Value{object.NewString(string(r))})
 		}
 		return self
 	})
@@ -543,13 +542,13 @@ func (vm *VM) bootstrap() {
 		return object.Symbol(strOf(self))
 	})
 	vm.cString.define("ljust", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.String(padString(strOf(self), args, 'l'))
+		return object.NewString(padString(strOf(self), args, 'l'))
 	})
 	vm.cString.define("rjust", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.String(padString(strOf(self), args, 'r'))
+		return object.NewString(padString(strOf(self), args, 'r'))
 	})
 	vm.cString.define("center", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.String(padString(strOf(self), args, 'c'))
+		return object.NewString(padString(strOf(self), args, 'c'))
 	})
 	vm.cString.define("tr", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		from := expandCharSet(strArg(args[0]))
@@ -569,7 +568,7 @@ func (vm *VM) bootstrap() {
 				out = append(out, b)
 			}
 		}
-		return object.String(out)
+		return &object.String{B: out}
 	})
 	vm.cString.define("count", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		set := expandCharSet(strArg(args[0]))
@@ -589,7 +588,7 @@ func (vm *VM) bootstrap() {
 				out = append(out, strOf(self)[i])
 			}
 		}
-		return object.String(out)
+		return &object.String{B: out}
 	})
 	vm.cString.define("squeeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		str := strOf(self)
@@ -600,7 +599,7 @@ func (vm *VM) bootstrap() {
 			}
 			out = append(out, str[i])
 		}
-		return object.String(out)
+		return &object.String{B: out}
 	})
 	vm.cString.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return stringIndex(strOf(self), args)
@@ -618,16 +617,16 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("partition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s, sep := strOf(self), strArg(args[0])
 		if i := strings.Index(s, sep); i >= 0 {
-			return &object.Array{Elems: []object.Value{object.String(s[:i]), object.String(sep), object.String(s[i+len(sep):])}}
+			return &object.Array{Elems: []object.Value{object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):])}}
 		}
-		return &object.Array{Elems: []object.Value{object.String(s), object.String(""), object.String("")}}
+		return &object.Array{Elems: []object.Value{object.NewString(s), object.NewString(""), object.NewString("")}}
 	})
 	vm.cString.define("rpartition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s, sep := strOf(self), strArg(args[0])
 		if i := strings.LastIndex(s, sep); i >= 0 {
-			return &object.Array{Elems: []object.Value{object.String(s[:i]), object.String(sep), object.String(s[i+len(sep):])}}
+			return &object.Array{Elems: []object.Value{object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):])}}
 		}
-		return &object.Array{Elems: []object.Value{object.String(""), object.String(""), object.String(s)}}
+		return &object.Array{Elems: []object.Value{object.NewString(""), object.NewString(""), object.NewString(s)}}
 	})
 
 	// Array.
@@ -956,7 +955,7 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			sep = strArg(args[0])
 		}
-		return object.String(joinArray(self.(*object.Array), sep))
+		return object.NewString(joinArray(self.(*object.Array), sep))
 	})
 	vm.cArray.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		for i, e := range self.(*object.Array).Elems {
@@ -1492,7 +1491,7 @@ func (vm *VM) bootstrap() {
 		if base < 2 || base > 36 {
 			raise("ArgumentError", "invalid radix %d", base)
 		}
-		return object.String(bigVal(self).Text(int(base)))
+		return object.NewString(bigVal(self).Text(int(base)))
 	})
 	vm.cInteger.define("gcd", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Integer(gcdInt(intOf(self), intArg(args[0])))
@@ -1550,7 +1549,7 @@ func (vm *VM) bootstrap() {
 		if n < 0 || n > 255 {
 			raise("RangeError", "%d out of char range", n)
 		}
-		return object.String(string([]byte{byte(n)}))
+		return object.NewString(string([]byte{byte(n)}))
 	})
 	vm.cInteger.define("upto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -1862,20 +1861,20 @@ func stringIndex(s string, args []object.Value) object.Value {
 		if end > n {
 			end = n
 		}
-		return object.String(string(r[start:end]))
+		return object.NewString(string(r[start:end]))
 	}
 	if rng, ok := args[0].(*object.Range); ok {
 		start, length, ok := sliceRange(n, rng)
 		if !ok {
 			return object.NilV
 		}
-		return object.String(string(r[start : start+length]))
+		return object.NewString(string(r[start : start+length]))
 	}
 	i := normIndex(intArg(args[0]), n)
 	if i < 0 || i >= n {
 		return object.NilV
 	}
-	return object.String(string(r[i]))
+	return object.NewString(string(r[i]))
 }
 
 // sliceRange resolves a Range against a collection of length n into a start
@@ -1916,8 +1915,8 @@ func normIndex(i int64, n int) int {
 
 // strArg coerces a String argument, raising TypeError otherwise.
 func strArg(v object.Value) string {
-	if s, ok := v.(object.String); ok {
-		return string(s)
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
 	}
 	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
 	return ""
@@ -2047,10 +2046,10 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 			panic(vm.excError(vm.curExc))
 		}
 		panic(vm.excError(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
-			[]object.Value{object.String("unhandled exception")}, nil)))
+			[]object.Value{object.NewString("unhandled exception")}, nil)))
 	case 1:
 		switch a := args[0].(type) {
-		case object.String:
+		case *object.String:
 			panic(vm.excError(vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{a}, nil)))
 		case *RClass:
 			panic(vm.excError(vm.send(a, "new", nil, nil)))
@@ -2228,6 +2227,8 @@ func defineAttrs(cls *RClass, names []object.Value, reader, writer bool) {
 // copy.
 func dupValue(v object.Value) object.Value {
 	switch x := v.(type) {
+	case *object.String:
+		return x.Dup()
 	case *object.Array:
 		elems := make([]object.Value, len(x.Elems))
 		copy(elems, x.Elems)
@@ -2253,9 +2254,11 @@ func dupValue(v object.Value) object.Value {
 // isFrozen backs Object#frozen?: the immutable value types report frozen,
 // everything mutable reports not-frozen (we do not track explicit freezes).
 func isFrozen(v object.Value) bool {
-	switch v.(type) {
+	switch x := v.(type) {
 	case object.Integer, object.Float, object.Symbol, object.Bool, object.Nil:
 		return true
+	case *object.String:
+		return x.Frozen
 	}
 	return false
 }
@@ -2364,10 +2367,10 @@ func rangeCmp(a, b object.Value) (ord int, ok bool) {
 		}
 		return 0, false
 	}
-	as, aok := a.(object.String)
-	bs, bok := b.(object.String)
+	as, aok := a.(*object.String)
+	bs, bok := b.(*object.String)
 	if aok && bok {
-		return strings.Compare(string(as), string(bs)), true
+		return strings.Compare(as.Str(), bs.Str()), true
 	}
 	return 0, false
 }

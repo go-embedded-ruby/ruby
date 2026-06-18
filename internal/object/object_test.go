@@ -18,15 +18,15 @@ func TestToSAndInspect(t *testing.T) {
 		{Float(math.Inf(1)), "Infinity", "Infinity", true},
 		{Float(math.Inf(-1)), "-Infinity", "-Infinity", true},
 		{Float(math.NaN()), "NaN", "NaN", true},
-		{String("hi"), "hi", `"hi"`, true},
+		{NewString("hi"), "hi", `"hi"`, true},
 		{Symbol("hi"), "hi", ":hi", true},
 		{&Array{}, "[]", "[]", true},
-		{&Array{Elems: []Value{Integer(1), String("x"), Symbol("y")}}, `[1, "x", :y]`, `[1, "x", :y]`, true},
+		{&Array{Elems: []Value{Integer(1), NewString("x"), Symbol("y")}}, `[1, "x", :y]`, `[1, "x", :y]`, true},
 		{NewHash(), "{}", "{}", true},
 		{&Range{Lo: Integer(1), Hi: Integer(5)}, "1..5", "1..5", true},
 		{&Range{Lo: Integer(1), Hi: Integer(5), Exclusive: true}, "1...5", "1...5", true},
-		{&Range{Lo: String("a"), Hi: String("c")}, "a..c", `"a".."c"`, true},
-		{String("a\"b\\c\nd\te"), "a\"b\\c\nd\te", `"a\"b\\c\nd\te"`, true},
+		{&Range{Lo: NewString("a"), Hi: NewString("c")}, "a..c", `"a".."c"`, true},
+		{NewString("a\"b\\c\nd\te"), "a\"b\\c\nd\te", `"a\"b\\c\nd\te"`, true},
 		{Bool(true), "true", "true", true},
 		{Bool(false), "false", "false", false},
 		{Nil{}, "", "nil", false},
@@ -51,7 +51,7 @@ func TestHashOps(t *testing.T) {
 		t.Fatal("empty hash")
 	}
 	h.Set(Symbol("a"), Integer(1))
-	h.Set(String("b"), Integer(2))
+	h.Set(NewString("b"), Integer(2))
 	h.Set(Symbol("a"), Integer(9)) // update keeps order, no new key
 	if h.Len() != 2 {
 		t.Fatalf("len = %d want 2", h.Len())

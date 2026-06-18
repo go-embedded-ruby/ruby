@@ -194,10 +194,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.FloatLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.Float(v.Value)), 0)
 	case *ast.StringLit:
-		b.emit(bytecode.OpPushConst, b.addConst(object.String(v.Value)), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.NewString(v.Value)), 0)
 	case *ast.StrInterp:
 		// Concatenate each part coerced with to_s onto a growing string.
-		b.emit(bytecode.OpPushConst, b.addConst(object.String("")), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)
 		for _, part := range v.Parts {
 			c.compileNode(part)
 			b.emit(bytecode.OpSend, b.addName("to_s"), 0)

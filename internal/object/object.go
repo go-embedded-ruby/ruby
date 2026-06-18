@@ -85,15 +85,33 @@ func (f Float) ToS() string {
 func (f Float) Inspect() string { return f.ToS() }
 func (f Float) Truthy() bool    { return true }
 
-// String is a Ruby string. Phase 2 replaces this with a []byte + *Encoding
-// representation that supports mutation and multi-encoding (see plan §4, §11).
-type String string
+// String is a Ruby string: a mutable, reference-typed byte sequence (always used
+// as *String), so aliasing and in-place mutation (<<, []=, replace, the bang
+// methods) behave as in Ruby. Frozen marks a string that may not be mutated
+// (Hash keys are frozen snapshots; a frozen literal raises on mutation).
+type String struct {
+	B      []byte
+	Frozen bool
+}
 
-func (s String) ToS() string { return string(s) }
-func (s String) Inspect() string {
+// NewString builds a String from a Go string.
+func NewString(s string) *String { return &String{B: []byte(s)} }
+
+// Str returns the string's contents as a Go string.
+func (s *String) Str() string { return string(s.B) }
+
+// Dup returns an unfrozen shallow copy with its own backing array.
+func (s *String) Dup() *String {
+	b := make([]byte, len(s.B))
+	copy(b, s.B)
+	return &String{B: b}
+}
+
+func (s *String) ToS() string { return string(s.B) }
+func (s *String) Inspect() string {
 	var b strings.Builder
 	b.WriteByte('"')
-	for _, r := range string(s) {
+	for _, r := range string(s.B) {
 		switch r {
 		case '"':
 			b.WriteString(`\"`)
@@ -110,7 +128,7 @@ func (s String) Inspect() string {
 	b.WriteByte('"')
 	return b.String()
 }
-func (s String) Truthy() bool { return true }
+func (s *String) Truthy() bool { return true }
 
 // Symbol is an interned name (:foo). It is an immutable value type, so equality
 // and use as a hash key are just value comparison.
@@ -140,26 +158,51 @@ func (a *Array) ToS() string     { return a.repr() }
 func (a *Array) Inspect() string { return a.repr() }
 func (a *Array) Truthy() bool    { return true }
 
-// Hash is an insertion-ordered map (as in Ruby). Keys are compared by Go value
-// equality, which matches Ruby eql?/hash for the immutable key types used in
-// Phase 2 (Integer/Float/String/Symbol/Bool/Nil). It is a reference type.
+// Hash is an insertion-ordered map (as in Ruby). Keys are normalised by hashKey:
+// a String keys by its byte content (Ruby dups+freezes string keys, so a stored
+// key is a frozen snapshot), every other value keys by itself — value types by
+// value, reference types by identity. It is a reference type.
 type Hash struct {
-	Keys []Value // insertion order
-	vals map[Value]Value
+	Keys []Value // insertion order (string keys held as frozen snapshots)
+	vals map[any]Value
+}
+
+// strKey is the comparable map key for a Ruby String, distinct from a Symbol of
+// the same name (different dynamic type ⇒ no collision in an `any` map key).
+type strKey string
+
+// hashKey normalises a key to its comparable map form.
+func hashKey(k Value) any {
+	if s, ok := k.(*String); ok {
+		return strKey(s.B)
+	}
+	return k
+}
+
+// snapshotKey is the value remembered in Keys for iteration/inspect: a string
+// key is stored as a frozen copy so mutating the original does not change it.
+func snapshotKey(k Value) Value {
+	if s, ok := k.(*String); ok {
+		d := s.Dup()
+		d.Frozen = true
+		return d
+	}
+	return k
 }
 
 // NewHash returns an empty hash.
-func NewHash() *Hash { return &Hash{vals: map[Value]Value{}} }
+func NewHash() *Hash { return &Hash{vals: map[any]Value{}} }
 
 // Get returns the value for k and whether it is present.
-func (h *Hash) Get(k Value) (Value, bool) { v, ok := h.vals[k]; return v, ok }
+func (h *Hash) Get(k Value) (Value, bool) { v, ok := h.vals[hashKey(k)]; return v, ok }
 
 // Set inserts or updates k→v, preserving first-insertion order.
 func (h *Hash) Set(k, v Value) {
-	if _, ok := h.vals[k]; !ok {
-		h.Keys = append(h.Keys, k)
+	hk := hashKey(k)
+	if _, ok := h.vals[hk]; !ok {
+		h.Keys = append(h.Keys, snapshotKey(k))
 	}
-	h.vals[k] = v
+	h.vals[hk] = v
 }
 
 // Len returns the number of entries.
@@ -167,13 +210,14 @@ func (h *Hash) Len() int { return len(h.Keys) }
 
 // Delete removes k, returning its value and whether it was present.
 func (h *Hash) Delete(k Value) (Value, bool) {
-	v, ok := h.vals[k]
+	hk := hashKey(k)
+	v, ok := h.vals[hk]
 	if !ok {
 		return NilV, false
 	}
-	delete(h.vals, k)
+	delete(h.vals, hk)
 	for i, key := range h.Keys {
-		if key == k {
+		if hashKey(key) == hk {
 			h.Keys = append(h.Keys[:i], h.Keys[i+1:]...)
 			break
 		}
@@ -191,7 +235,7 @@ func (h *Hash) repr() string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		v := h.vals[k]
+		v := h.vals[hashKey(k)]
 		// Ruby 4.0 (since 3.4) inspect: symbol keys use the label form
 		// `name: value`; all other keys use `key => value` with spaces.
 		if sym, ok := k.(Symbol); ok {

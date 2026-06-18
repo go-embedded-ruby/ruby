@@ -76,7 +76,7 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 	if !ok {
 		cls = vm.consts["StandardError"].(*RClass)
 	}
-	return &RObject{class: cls, ivars: map[string]object.Value{"@message": object.String(e.Message)}}
+	return &RObject{class: cls, ivars: map[string]object.Value{"@message": object.NewString(e.Message)}}
 }
 
 // VM holds I/O, the top-level self, the constant table and the base classes.
@@ -273,7 +273,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				switch in.Op {
 				case bytecode.OpNop:
 				case bytecode.OpPushConst:
-					push(iseq.Consts[in.A])
+					// A string literal evaluates to a fresh mutable object each time
+					// (Ruby semantics), so clone string constants on push; every other
+					// constant is immutable and can be shared.
+					if s, ok := iseq.Consts[in.A].(*object.String); ok {
+						push(s.Dup())
+					} else {
+						push(iseq.Consts[in.A])
+					}
 				case bytecode.OpPushNil:
 					push(object.NilV)
 				case bytecode.OpPushTrue:

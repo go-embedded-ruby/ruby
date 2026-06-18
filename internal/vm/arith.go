@@ -21,8 +21,8 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return object.Bool(!valueEqual(a, b))
 	}
 
-	// String fast paths: "a" + "b" and "a" * 3. Phase 2 fleshes out String.
-	if as, ok := a.(object.String); ok {
+	// String fast paths: "a" + "b" and "a" * 3.
+	if as, ok := a.(*object.String); ok {
 		return stringOp(op, as, b)
 	}
 
@@ -113,7 +113,7 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 // for a bad right operand); anything else dispatches `<`/`<=`/`>`/`>=`.
 func hasFastOrdering(a object.Value) bool {
 	switch a.(type) {
-	case object.Integer, object.Float, object.String, *object.Bignum:
+	case object.Integer, object.Float, *object.String, *object.Bignum:
 		return true
 	}
 	return false
@@ -196,14 +196,16 @@ func floatOp(op bytecode.Op, a, b float64) object.Value {
 	return raise("VMError", "bad float op %s", op)
 }
 
-func stringOp(op bytecode.Op, a object.String, b object.Value) object.Value {
+func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		bs, ok := b.(object.String)
+		bs, ok := b.(*object.String)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", b.Inspect())
 		}
-		return a + bs
+		out := make([]byte, 0, len(a.B)+len(bs.B))
+		out = append(append(out, a.B...), bs.B...)
+		return &object.String{B: out}
 	case bytecode.OpMul:
 		n, ok := b.(object.Integer)
 		if !ok {
@@ -212,27 +214,28 @@ func stringOp(op bytecode.Op, a object.String, b object.Value) object.Value {
 		if n < 0 {
 			raise("ArgumentError", "negative argument")
 		}
-		out := make([]byte, 0, len(a)*int(n))
+		out := make([]byte, 0, len(a.B)*int(n))
 		for i := int64(0); i < int64(n); i++ {
-			out = append(out, a...)
+			out = append(out, a.B...)
 		}
-		return object.String(out)
+		return &object.String{B: out}
 	case bytecode.OpMod:
-		return object.String(formatString(string(a), formatArgs(b)))
+		return object.NewString(formatString(a.Str(), formatArgs(b)))
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
-		bs, ok := b.(object.String)
+		bs, ok := b.(*object.String)
 		if !ok {
 			raise("ArgumentError", "comparison of String with %s failed", b.Inspect())
 		}
+		as, bsv := a.Str(), bs.Str()
 		switch op {
 		case bytecode.OpLt:
-			return object.Bool(a < bs)
+			return object.Bool(as < bsv)
 		case bytecode.OpGt:
-			return object.Bool(a > bs)
+			return object.Bool(as > bsv)
 		case bytecode.OpLe:
-			return object.Bool(a <= bs)
+			return object.Bool(as <= bsv)
 		default:
-			return object.Bool(a >= bs)
+			return object.Bool(as >= bsv)
 		}
 	}
 	return raise("NoMethodError", "undefined method '%s' for a String", op)
@@ -272,9 +275,9 @@ func valueEqual(a, b object.Value) bool {
 		if bv, ok := b.(*object.Bignum); ok {
 			return av.I.Cmp(bv.I) == 0
 		}
-	case object.String:
-		bv, ok := b.(object.String)
-		return ok && av == bv
+	case *object.String:
+		bv, ok := b.(*object.String)
+		return ok && string(av.B) == string(bv.B)
 	case object.Symbol:
 		bv, ok := b.(object.Symbol)
 		return ok && av == bv

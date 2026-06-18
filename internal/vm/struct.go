@@ -104,8 +104,8 @@ func (vm *VM) newStructClass(parent *RClass, names []string) *RClass {
 			return vals[idx]
 		case object.Symbol:
 			return structMember(string(k), names, vals)
-		case object.String:
-			return structMember(string(k), names, vals)
+		case *object.String:
+			return structMember(k.Str(), names, vals)
 		default:
 			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
 			return object.NilV
