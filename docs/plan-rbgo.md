@@ -389,12 +389,13 @@ operand; the right side runs only when the left doesn't decide), compiled with
 a conditional branch over a duplicated operand.
 **`do…end` blocks** alongside `{ … }`, with the `do` after a while/until
 condition correctly bound to the loop, not to a call in the condition.
-**String methods** (read-only over the immutable String): length/size/bytesize
+**String methods**: length/size/bytesize
 /empty?, upcase/downcase/capitalize/swapcase/reverse, strip/lstrip/rstrip/chomp
 /chop, chars/bytes/split, include?/start_with?/end_with?/index, sub/gsub
 (string patterns), to_i/to_f/to_s/to_str/to_sym, and `[]` slicing (index,
-start+len, Range) — rune-aware where it matters. Mutating forms and regexp
-`sub`/`gsub` await the mutable byte+encoding String / regexp bridge.
+start+len, Range) — rune-aware where it matters. **String is mutable** (a
+reference type): `<<`/concat/replace/prepend/insert/`[]=`/slice!/clear, the
+bang transforms (`upcase!`…`gsub!`), and `freeze`/`FrozenError`.
 **String interpolation** `"…#{expr}…"`: the lexer emits STRBEG/STRMID/STREND so
 the embedded expression lexes in the outer scope (a `#{x}` reads the local `x`),
 with per-interpolation brace tracking for nested `{}` and nesting; parts are

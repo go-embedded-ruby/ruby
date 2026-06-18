@@ -54,8 +54,10 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `method_missing`, `send`/`public_send`, `respond_to?`, **`define_method`**,
   **`instance_eval`/`instance_exec`**, **`class_eval`/`module_eval`/`class_exec`**,
   `instance_variable_get`/`set`/`defined?`.
-- **Strings:** interpolation, `%`/`format`/`sprintf`, case/strip/`split`/
-  `each_char`/`lines` and friends.
+- **Strings:** mutable (reference semantics) with `<<`/concat/replace/prepend/
+  insert/`[]=`/slice!/the bang methods and `freeze`/`FrozenError`;
+  interpolation, `%w`/`%i` literals, `%`/`format`/`sprintf`,
+  case/strip/`split`/`each_char`/`lines` and friends.
 - **Regular expressions:** `/re/imx` literals, `Regexp`/`MatchData`, `=~` /
   `match` / `match?` / `scan` / `gsub` / `sub` / `split`, and the match globals
   `$~` / `$1`..`$N` / `$&` / `` $` `` / `$'` — running on the standalone pure-Go
@@ -70,8 +72,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(mutable String, Fiber/Enumerator/lazy, hooks and string `eval`, the
-`rbgo build` toolchain).
+(Fiber/Enumerator/lazy, hooks and string `eval`, the `rbgo build`
+toolchain).
 
 ## Quick start
 
