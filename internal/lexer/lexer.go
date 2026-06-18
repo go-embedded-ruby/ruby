@@ -7,6 +7,8 @@
 package lexer
 
 import (
+	"strings"
+
 	"github.com/go-embedded-ruby/ruby/internal/token"
 )
 
@@ -29,6 +31,15 @@ type Lexer struct {
 	// interpBraces tracks open '{' counts per active string interpolation, so a
 	// '}' that closes an interpolation is distinguished from a hash/block brace.
 	interpBraces []int
+	// pending holds tokens produced ahead of the cursor (a heredoc value is lexed
+	// where `<<ID` appears, then drained before the rest of the line continues).
+	pending []token.Token
+	// htResume, when > 0, is where the cursor jumps after the current line's
+	// newline: past the heredoc body lines consumed out of band (and the start of
+	// the next heredoc's body when several share a line). htLines counts the
+	// source lines those bodies span, to keep l.line correct after the jump.
+	htResume int
+	htLines  int
 }
 
 func New(src string) *Lexer {
@@ -74,6 +85,12 @@ func (l *Lexer) Tokenize() []token.Token {
 }
 
 func (l *Lexer) next() token.Token {
+	// Drain any tokens produced ahead of the cursor (a spliced heredoc value).
+	if len(l.pending) > 0 {
+		t := l.pending[0]
+		l.pending = l.pending[1:]
+		return t
+	}
 	spaceBefore := l.skipSpaceAndComments()
 	line, col := l.line, l.col+1
 	mk := func(tt token.Type, lit string) token.Token {
@@ -94,6 +111,14 @@ func (l *Lexer) next() token.Token {
 	case c == '\n' || c == ';':
 		l.advance()
 		l.state = exprBegin
+		// A newline that ends a line carrying heredoc(s) skips past their bodies,
+		// which were already consumed when the `<<ID` was lexed.
+		if c == '\n' && l.htResume > 0 {
+			l.pos = l.htResume
+			l.line += l.htLines
+			l.col = 0
+			l.htResume, l.htLines = 0, 0
+		}
 		return mk(token.NEWLINE, "\\n")
 	case isDigit(c):
 		return l.lexNumber(spaceBefore, line, col)
@@ -279,12 +304,15 @@ func (l *Lexer) next() token.Token {
 			l.state = exprBegin
 			return mk(token.LE, "<=")
 		}
-		if l.peek() == '<' { // << or <<=
+		if l.peek() == '<' { // <<, <<= or a heredoc
 			l.advance()
 			if l.peek() == '=' {
 				l.advance()
 				l.state = exprBegin
 				return mk(token.OPASSIGN, "<<")
+			}
+			if l.atHeredoc(spaceBefore) {
+				return l.lexHeredoc(spaceBefore, line, col)
 			}
 			l.state = exprBegin
 			return mk(token.SHOVEL, "<<")
@@ -566,6 +594,239 @@ func (l *Lexer) lexPercentArray(spaceBefore bool, line, col int) token.Token {
 		tt = token.SYMBOLS
 	}
 	return token.Token{Type: tt, Lit: string(content), Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// atHeredoc reports whether the `<<` just consumed begins a heredoc rather than
+// the shift/append operator. A heredoc is recognised only where a value is
+// expected (expression-begin, or a command argument signalled by a space before
+// `<<`); the marker must be a quote, or — for the bare `<<ID` form — an
+// uppercase/underscore-led identifier (the `<<-`/`<<~` forms accept any
+// identifier). This keeps `a << b` a shift while accepting the usual `<<HEREDOC`,
+// `puts <<~SQL`, etc.
+func (l *Lexer) atHeredoc(spaceBefore bool) bool {
+	if l.state != exprBegin && !spaceBefore {
+		return false
+	}
+	p := l.pos
+	if p < len(l.src) && (l.src[p] == '-' || l.src[p] == '~') {
+		p++
+		if p >= len(l.src) {
+			return false
+		}
+		c := l.src[p]
+		return c == '"' || c == '\'' || isIdentStart(c)
+	}
+	if p >= len(l.src) {
+		return false
+	}
+	c := l.src[p]
+	return c == '"' || c == '\'' || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+// lexHeredoc lexes a heredoc starting just after `<<`. It parses the marker
+// (optional `-`/`~`, optional quoting, the terminator), collects the body from
+// the following lines, applies squiggly dedent, and yields the string value: a
+// single STRING for a non-interpolating (`'TERM'`) body, or the tokens of the
+// equivalent double-quoted string (spliced through l.pending) for an
+// interpolating one. The body source is skipped when the current line's newline
+// is reached.
+func (l *Lexer) lexHeredoc(spaceBefore bool, line, col int) token.Token {
+	squiggly := false
+	indented := false
+	if c := l.peek(); c == '-' || c == '~' {
+		l.advance()
+		indented = true
+		squiggly = c == '~'
+	}
+	interp := true
+	var quote byte
+	if c := l.peek(); c == '"' || c == '\'' {
+		quote = l.advance()
+		interp = quote != '\''
+	}
+	var term []byte
+	for {
+		c := l.peek()
+		if c == 0 || c == '\n' {
+			break
+		}
+		if quote != 0 {
+			if c == quote {
+				l.advance()
+				break
+			}
+		} else if !isIdentPart(c) {
+			break
+		}
+		term = append(term, l.advance())
+	}
+	terminator := string(term)
+
+	bodyStart := l.htResume
+	if bodyStart == 0 {
+		bodyStart = l.indexAfterNextNewline(l.pos)
+	}
+	body, postHeredoc := collectHeredoc(l.src, bodyStart, terminator, indented)
+	if squiggly {
+		body = squiggleDedent(body)
+	}
+	l.htLines += countByte(l.src[bodyStart:postHeredoc], '\n')
+	l.htResume = postHeredoc
+
+	l.state = exprEnd
+	if !interp {
+		return token.Token{Type: token.STRING, Lit: body, Line: line, Col: col, SpaceBefore: spaceBefore}
+	}
+	// Interpolating: lex the body as the equivalent double-quoted string and
+	// splice its tokens (dropping the trailing EOF) ahead of the cursor.
+	hts := New(`"` + wrapHeredocDQ(body) + `"`).Tokenize()
+	first := hts[0]
+	first.Line, first.Col, first.SpaceBefore = line, col, spaceBefore
+	rest := hts[1:]
+	for len(rest) > 0 && rest[len(rest)-1].Type == token.EOF {
+		rest = rest[:len(rest)-1]
+	}
+	l.pending = append(l.pending, rest...)
+	return first
+}
+
+// indexAfterNextNewline returns the index just past the next '\n' at or after p,
+// or len(src) when there is none (the heredoc body runs to end of input).
+func (l *Lexer) indexAfterNextNewline(p int) int {
+	for i := p; i < len(l.src); i++ {
+		if l.src[i] == '\n' {
+			return i + 1
+		}
+	}
+	return len(l.src)
+}
+
+// collectHeredoc gathers body lines from start until a line equal to terminator
+// (leading whitespace allowed when indented). It returns the body text (the
+// body lines with their newlines) and the index just past the terminator line.
+func collectHeredoc(src []byte, start int, terminator string, indented bool) (string, int) {
+	i := start
+	var b []byte
+	for i < len(src) {
+		j := i
+		for j < len(src) && src[j] != '\n' {
+			j++
+		}
+		if isTerminatorLine(src[i:j], terminator, indented) {
+			if j < len(src) {
+				j++ // skip the terminator's own newline
+			}
+			return string(b), j
+		}
+		b = append(b, src[i:j]...)
+		if j < len(src) {
+			b = append(b, '\n')
+		}
+		if j >= len(src) {
+			break
+		}
+		i = j + 1
+	}
+	return string(b), len(src)
+}
+
+// isTerminatorLine reports whether line is the heredoc terminator (after
+// stripping leading whitespace when indented, and tolerating a trailing CR).
+func isTerminatorLine(line []byte, terminator string, indented bool) bool {
+	s := line
+	if indented {
+		k := 0
+		for k < len(s) && (s[k] == ' ' || s[k] == '\t') {
+			k++
+		}
+		s = s[k:]
+	}
+	if len(s) > 0 && s[len(s)-1] == '\r' {
+		s = s[:len(s)-1]
+	}
+	return string(s) == terminator
+}
+
+// squiggleDedent removes the common leading whitespace of the non-blank body
+// lines (the `<<~` form), as Ruby does.
+func squiggleDedent(body string) string {
+	lines := strings.Split(body, "\n")
+	minIndent := -1
+	for _, ln := range lines {
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		ind := len(ln) - len(strings.TrimLeft(ln, " \t"))
+		if minIndent < 0 || ind < minIndent {
+			minIndent = ind
+		}
+	}
+	if minIndent <= 0 {
+		return body
+	}
+	for i, ln := range lines {
+		if len(ln) >= minIndent {
+			lines[i] = ln[minIndent:]
+		} else {
+			lines[i] = strings.TrimLeft(ln, " \t")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapHeredocDQ escapes a heredoc body for embedding inside `"..."`: backslash
+// escapes are preserved, and only a `"` that sits in literal text (outside an
+// `#{…}` interpolation) is escaped — a `"` inside an interpolation belongs to
+// the embedded expression and must pass through so the body lexes exactly like
+// a double-quoted string.
+func wrapHeredocDQ(body string) string {
+	var b strings.Builder
+	depth := 0    // brace nesting inside an active #{ … }
+	escaped := false // the previous byte was a backslash escaping this one
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if depth > 0 {
+			switch c {
+			case '{':
+				depth++
+			case '}':
+				depth--
+			}
+			b.WriteByte(c)
+			continue
+		}
+		switch {
+		case c == '\\':
+			escaped = true
+			b.WriteByte(c)
+		case c == '#' && i+1 < len(body) && body[i+1] == '{':
+			b.WriteString("#{")
+			i++
+			depth = 1
+		case c == '"':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// countByte counts occurrences of b in s.
+func countByte(s []byte, b byte) int {
+	n := 0
+	for _, c := range s {
+		if c == b {
+			n++
+		}
+	}
+	return n
 }
 
 func (l *Lexer) lexString(spaceBefore bool, line, col int) token.Token {

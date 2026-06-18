@@ -111,8 +111,9 @@ func (s *String) ToS() string { return string(s.B) }
 func (s *String) Inspect() string {
 	var b strings.Builder
 	b.WriteByte('"')
-	for _, r := range string(s.B) {
-		switch r {
+	rs := []rune(string(s.B))
+	for i := 0; i < len(rs); i++ {
+		switch r := rs[i]; r {
 		case '"':
 			b.WriteString(`\"`)
 		case '\\':
@@ -121,6 +122,14 @@ func (s *String) Inspect() string {
 			b.WriteString(`\n`)
 		case '\t':
 			b.WriteString(`\t`)
+		case '#':
+			// Escape `#` only before the interpolation sigils, as Ruby does, so the
+			// inspected form round-trips.
+			if i+1 < len(rs) && (rs[i+1] == '{' || rs[i+1] == '$' || rs[i+1] == '@') {
+				b.WriteString(`\#`)
+			} else {
+				b.WriteByte('#')
+			}
 		default:
 			b.WriteRune(r)
 		}

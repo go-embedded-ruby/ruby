@@ -1806,7 +1806,12 @@ func putsValue(vm *VM, v object.Value) {
 		}
 		return
 	}
-	fmt.Fprintln(vm.out, v.ToS())
+	// puts does not double a trailing newline already present in the string.
+	if s := v.ToS(); strings.HasSuffix(s, "\n") {
+		fmt.Fprint(vm.out, s)
+	} else {
+		fmt.Fprintln(vm.out, s)
+	}
 }
 
 func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
