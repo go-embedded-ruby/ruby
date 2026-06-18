@@ -531,8 +531,9 @@ navigation, numbered params/`it`. *(Or adopt Prism-on-wazero — see §16.)*
 **full pattern matching `case`/`in`** (value/bind/class/array/hash/find/pin/
 alternative patterns, guards, one-line `=>`/`in`, `deconstruct`/
 `deconstruct_keys`), endless methods, beginless/endless ranges, **safe
-navigation `&.`**, and **numbered params (`_1`/`_2`) + `it`**. **Still ahead:**
-heredocs and `%`-literals.
+navigation `&.`**, **numbered params (`_1`/`_2`) + `it`**, **heredocs**
+(`<<`/`<<-`/`<<~`, interpolating and literal), and **`%w`/`%i` arrays**. **Still
+ahead:** `%q`/`%Q`/`%W`/`%I` literals.
 
 ### Phase 6 — Standard library
 IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed

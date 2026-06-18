@@ -27,8 +27,9 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   arrays, hashes, ranges (incl. beginless/endless), `true`/`false`/`nil`,
   `self`, `Proc`/lambda, `Regexp`/`MatchData`, `Struct`.
 - **Operators:** arithmetic (`+ - * / %`, **Ruby floor division**, `**`),
-  comparison/`<=>`, `==`/`===`, `<<`, `&&`/`||`, ternary, ranges; correct
-  negative-literal precedence (`-2.abs == 2`, `-2**2 == -4`).
+  comparison/`<=>`, `==`/`===`, bitwise/shift (`<< >> & | ^ ~`, arbitrary
+  precision), `&&`/`||`, ternary, ranges; correct negative-literal precedence
+  (`-2.abs == 2`, `-2**2 == -4`).
 - **Control flow:** `if`/`elsif`/`else`, `unless`, `while`/`until`,
   `case`/`when`, statement modifiers, `begin`/`rescue`/`else`/`ensure`/`retry`,
   `break`/`next`, `Kernel#loop`.
@@ -56,8 +57,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `instance_variable_get`/`set`/`defined?`.
 - **Strings:** mutable (reference semantics) with `<<`/concat/replace/prepend/
   insert/`[]=`/slice!/the bang methods and `freeze`/`FrozenError`;
-  interpolation, `%w`/`%i` literals, `%`/`format`/`sprintf`,
-  case/strip/`split`/`each_char`/`lines` and friends.
+  interpolation, heredocs (`<<`/`<<-`/`<<~`), `%w`/`%i` literals,
+  `%`/`format`/`sprintf`, case/strip/`split`/`each_char`/`lines` and friends.
 - **Regular expressions:** `/re/imx` literals, `Regexp`/`MatchData`, `=~` /
   `match` / `match?` / `scan` / `gsub` / `sub` / `split`, and the match globals
   `$~` / `$1`..`$N` / `$&` / `` $` `` / `$'` — running on the standalone pure-Go
