@@ -1015,7 +1015,22 @@ func (p *Parser) parseExprOrAssign() ast.Node {
 			}
 		}
 	}
-	return left
+	return p.withRescueModifier(left)
+}
+
+// withRescueModifier consumes a trailing `rescue FALLBACK` on the same line (the
+// modifier form: `risky rescue default`), wrapping node so a StandardError it
+// raises yields FALLBACK instead. It binds tighter than `=` because it is
+// applied here, to an assignment's right-hand side, before the Assign is built.
+// A clause `rescue` (in a begin/def body) always starts a new line, so the
+// preceding NEWLINE keeps it from being read as a modifier. Left-associative.
+func (p *Parser) withRescueModifier(node ast.Node) ast.Node {
+	for p.is(token.RESCUE) {
+		p.advance()
+		fallback := p.parseTernary()
+		node = &ast.Begin{Body: []ast.Node{node}, Rescues: []ast.RescueClause{{Body: []ast.Node{fallback}}}}
+	}
+	return node
 }
 
 // parseTernary handles `cond ? then : else`, binding looser than ranges/binary
