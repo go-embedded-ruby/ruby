@@ -184,6 +184,14 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 	if m := lookupMethod(c, name); m != nil {
 		return vm.invoke(m, recv, args, blk)
 	}
+	// The arithmetic/comparison operators are a compiler fast path rather than
+	// real methods, so send(:+, x), reduce(:+) and respond_to-style dispatch
+	// route them through the same operator logic here.
+	if len(args) == 1 {
+		if op, ok := operatorOpcode(name); ok {
+			return vm.binaryOp(op, recv, args[0])
+		}
+	}
 	mm := lookupMethod(c, "method_missing")
 	mmArgs := append([]object.Value{object.Symbol(name)}, args...)
 	return vm.invoke(mm, recv, mmArgs, blk)

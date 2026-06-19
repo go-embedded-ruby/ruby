@@ -147,10 +147,38 @@ module Enumerable
     result
   end
 
-  def reduce(initial)
-    acc = initial
-    each { |x| acc = yield(acc, x) }
+  def reduce(*args)
+    # Forms: reduce { |a, b| }, reduce(init) { }, reduce(:op), reduce(init, :op).
+    sym = nil
+    has_init = false
+    init = nil
+    if args.length == 2
+      init = args[0]
+      sym = args[1]
+      has_init = true
+    elsif args.length == 1 && args[0].is_a?(Symbol)
+      sym = args[0]
+    elsif args.length == 1
+      init = args[0]
+      has_init = true
+    end
+    acc = init
+    started = has_init
+    each do |x|
+      if !started
+        acc = x
+        started = true
+      elsif sym
+        acc = acc.send(sym, x)
+      else
+        acc = yield(acc, x)
+      end
+    end
     acc
+  end
+
+  def inject(*args, &blk)
+    reduce(*args, &blk)
   end
 
   def any?

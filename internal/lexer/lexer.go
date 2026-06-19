@@ -132,6 +132,9 @@ func (l *Lexer) next() token.Token {
 		return l.lexGvar(spaceBefore, line, col)
 	case c == ':' && (isIdentStart(l.peek2()) || l.peek2() == '@' || l.peek2() == '$'):
 		return l.lexSymbol(spaceBefore, line, col)
+	case c == ':' && symbolOpAt(l.src, l.pos+1) != "":
+		// Operator-method symbol: :+, :<<, :[]=, …
+		return l.lexSymbol(spaceBefore, line, col)
 	}
 
 	// Operators and delimiters.
@@ -485,8 +488,37 @@ func (l *Lexer) lexIdent(spaceBefore bool, line, col int) token.Token {
 
 // lexSymbol lexes :name (the leading ':' is at the cursor and the next byte is
 // known to start an identifier). Lit holds the name without the colon.
+// symbolOps are the operator method names that can appear as a symbol (`:+`,
+// `:[]=`, …), ordered so the first prefix match is the longest.
+var symbolOps = []string{
+	"[]=", "<=>", "===", "[]", "==", "=~", "!=", "<<", ">>", "<=", ">=", "**",
+	"+@", "-@", "+", "-", "*", "/", "%", "<", ">", "&", "|", "^", "~", "!",
+}
+
+// symbolOpAt returns the operator-symbol name starting at src[i], or "".
+func symbolOpAt(src []byte, i int) string {
+	if i >= len(src) {
+		return ""
+	}
+	rest := src[i:]
+	for _, op := range symbolOps {
+		if len(rest) >= len(op) && string(rest[:len(op)]) == op {
+			return op
+		}
+	}
+	return ""
+}
+
 func (l *Lexer) lexSymbol(spaceBefore bool, line, col int) token.Token {
 	l.advance() // ':'
+	// Operator-method symbols: :+, :<=>, :[]=, …
+	if op := symbolOpAt(l.src, l.pos); op != "" {
+		for range op {
+			l.advance()
+		}
+		l.state = exprEnd
+		return token.Token{Type: token.SYMBOL, Lit: op, Line: line, Col: col, SpaceBefore: spaceBefore}
+	}
 	start := l.pos
 	// Variable-name symbols: :@ivar, :@@cvar, :$global.
 	switch l.peek() {

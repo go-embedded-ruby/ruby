@@ -108,6 +108,29 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 	}
 }
 
+// operatorOpcode maps a binary-operator method name to its opcode, for the
+// fast-path operators that have no method-table entry. The ordering operators
+// (< <= > >=) come from the Comparable prelude and == from Object#==, so those
+// are reached by normal lookup; only the arithmetic operators (no method) and
+// != (no method anywhere) fall through to here.
+func operatorOpcode(name string) (bytecode.Op, bool) {
+	switch name {
+	case "+":
+		return bytecode.OpAdd, true
+	case "-":
+		return bytecode.OpSub, true
+	case "*":
+		return bytecode.OpMul, true
+	case "/":
+		return bytecode.OpDiv, true
+	case "%":
+		return bytecode.OpMod, true
+	case "!=":
+		return bytecode.OpNeq, true
+	}
+	return 0, false
+}
+
 // hasFastOrdering reports whether the receiver is a built-in ordered type.
 // Those keep the Phase 0 inline comparison (including its own coercion errors
 // for a bad right operand); anything else dispatches `<`/`<=`/`>`/`>=`.
