@@ -135,6 +135,9 @@ func (l *Lexer) next() token.Token {
 	case c == ':' && symbolOpAt(l.src, l.pos+1) != "":
 		// Operator-method symbol: :+, :<<, :[]=, …
 		return l.lexSymbol(spaceBefore, line, col)
+	case c == ':' && l.peek2() == '"':
+		// Quoted symbol, possibly interpolated: :"foo bar", :"a#{x}".
+		return l.lexSymbol(spaceBefore, line, col)
 	}
 
 	// Operators and delimiters.
@@ -511,6 +514,10 @@ func symbolOpAt(src []byte, i int) string {
 
 func (l *Lexer) lexSymbol(spaceBefore bool, line, col int) token.Token {
 	l.advance() // ':'
+	// Quoted symbols: :"foo bar" (and the interpolated :"a#{x}" form).
+	if l.peek() == '"' {
+		return l.lexQuotedSymbol(spaceBefore, line, col)
+	}
 	// Operator-method symbols: :+, :<=>, :[]=, …
 	if op := symbolOpAt(l.src, l.pos); op != "" {
 		for range op {
@@ -533,11 +540,80 @@ func (l *Lexer) lexSymbol(spaceBefore bool, line, col int) token.Token {
 	for isIdentPart(l.peek()) {
 		l.advance()
 	}
-	if c := l.peek(); c == '?' || c == '!' { // :empty?, :save!
+	switch c := l.peek(); {
+	case c == '?' || c == '!': // :empty?, :save!
 		l.advance()
+	case c == '=' && l.peek2() != '=' && l.peek2() != '~' && l.peek2() != '>':
+		l.advance() // setter symbol :name= (but not :foo== / :foo=~ / :foo=>)
 	}
 	l.state = exprEnd
 	return token.Token{Type: token.SYMBOL, Lit: string(l.src[start:l.pos]), Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// lexQuotedSymbol lexes a :"…" symbol (cursor on the opening quote). With no
+// interpolation it is a single SYMBOL whose value is the escape-processed body;
+// an interpolated body becomes a spliced `"…".to_sym`.
+func (l *Lexer) lexQuotedSymbol(spaceBefore bool, line, col int) token.Token {
+	content, ok := l.scanQuotedRaw()
+	l.state = exprEnd
+	if !ok {
+		return token.Token{Type: token.ILLEGAL, Lit: "unterminated symbol", Line: line, Col: col, SpaceBefore: spaceBefore}
+	}
+	// Re-lex the body as a double-quoted string (the raw bytes already form a
+	// valid one, since the closing quote was found respecting escapes and #{}).
+	var body []token.Token
+	for _, t := range New(`"` + content + `"`).Tokenize() {
+		if t.Type != token.EOF {
+			body = append(body, t)
+		}
+	}
+	if len(body) == 1 && body[0].Type == token.STRING {
+		return token.Token{Type: token.SYMBOL, Lit: body[0].Lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+	}
+	body[0].Line, body[0].Col, body[0].SpaceBefore = line, col, spaceBefore
+	rest := append(body[1:],
+		token.Token{Type: token.DOT, Lit: "."},
+		token.Token{Type: token.IDENT, Lit: "to_sym"})
+	l.pending = append(l.pending, rest...)
+	return body[0]
+}
+
+// scanQuotedRaw reads a double-quoted body (cursor on the opening quote) and
+// returns its raw bytes (escapes and #{…} left intact), consuming the closing
+// quote. ok is false if the input ends first. A quote inside an escape or an
+// interpolation does not close the literal.
+func (l *Lexer) scanQuotedRaw() (string, bool) {
+	l.advance() // opening quote
+	var buf []byte
+	depth := 0
+	for {
+		c := l.peek()
+		switch {
+		case c == 0:
+			return string(buf), false
+		case depth == 0 && c == '"':
+			l.advance()
+			return string(buf), true
+		case c == '\\':
+			buf = append(buf, l.advance())
+			if l.peek() != 0 {
+				buf = append(buf, l.advance())
+			}
+		case c == '#' && l.peek2() == '{':
+			depth++
+			buf = append(buf, l.advance(), l.advance())
+		default:
+			if depth > 0 {
+				switch c {
+				case '{':
+					depth++
+				case '}':
+					depth--
+				}
+			}
+			buf = append(buf, l.advance())
+		}
+	}
 }
 
 // lexGvar lexes a global variable: $name, the match-data specials $~ $& $` $',

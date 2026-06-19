@@ -143,9 +143,57 @@ func (s *String) Truthy() bool { return true }
 // and use as a hash key are just value comparison.
 type Symbol string
 
-func (s Symbol) ToS() string     { return string(s) }
-func (s Symbol) Inspect() string { return ":" + string(s) }
-func (s Symbol) Truthy() bool    { return true }
+func (s Symbol) ToS() string { return string(s) }
+func (s Symbol) Inspect() string {
+	if isPlainSymbol(string(s)) {
+		return ":" + string(s)
+	}
+	// A symbol that is not a bare identifier/operator is quoted like a string.
+	return ":" + NewString(string(s)).Inspect()
+}
+func (s Symbol) Truthy() bool { return true }
+
+// plainOperatorSymbols are the operator names a symbol prints bare (`:+`).
+var plainOperatorSymbols = map[string]bool{
+	"+": true, "-": true, "*": true, "/": true, "%": true, "**": true,
+	"==": true, "===": true, "!=": true, "<": true, ">": true, "<=": true,
+	">=": true, "<=>": true, "<<": true, ">>": true, "&": true, "|": true,
+	"^": true, "~": true, "!": true, "[]": true, "[]=": true, "+@": true,
+	"-@": true, "=~": true,
+}
+
+// isPlainSymbol reports whether s prints as a bare `:name` rather than a quoted
+// `:"…"`: an operator name, or an identifier (optionally @/@@/$-prefixed, with a
+// single trailing ? ! or =).
+func isPlainSymbol(s string) bool {
+	if s == "" {
+		return false
+	}
+	if plainOperatorSymbols[s] {
+		return true
+	}
+	i := 0
+	switch {
+	case strings.HasPrefix(s, "@@"):
+		i = 2
+	case s[0] == '@' || s[0] == '$':
+		i = 1
+	}
+	if i >= len(s) || !(isSymLetter(s[i]) || s[i] == '_') {
+		return false
+	}
+	for i++; i < len(s); i++ {
+		c := s[i]
+		if isSymLetter(c) || (c >= '0' && c <= '9') || c == '_' {
+			continue
+		}
+		// A trailing ? ! or = is allowed only as the final character.
+		return (c == '?' || c == '!' || c == '=') && i == len(s)-1
+	}
+	return true
+}
+
+func isSymLetter(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') }
 
 // Array is a mutable, ordered list. It is a reference type (used as *Array), so
 // aliasing and in-place mutation (push, []=) behave as in Ruby.
@@ -248,7 +296,13 @@ func (h *Hash) repr() string {
 		// Ruby 4.0 (since 3.4) inspect: symbol keys use the label form
 		// `name: value`; all other keys use `key => value` with spaces.
 		if sym, ok := k.(Symbol); ok {
-			b.WriteString(string(sym) + ": " + v.Inspect())
+			// A plain symbol key uses the bare label `name:`; one that needs
+			// quoting uses the quoted label `"name":`.
+			if isPlainSymbol(string(sym)) {
+				b.WriteString(string(sym) + ": " + v.Inspect())
+			} else {
+				b.WriteString(NewString(string(sym)).Inspect() + ": " + v.Inspect())
+			}
 		} else {
 			b.WriteString(k.Inspect() + " => " + v.Inspect())
 		}
