@@ -645,8 +645,9 @@ func percentDelimClose(open byte) byte {
 // atPercentArray reports whether the cursor (positioned at '%') begins a
 // %w/%i array literal: the kind letter must be followed by a delimiter.
 func (l *Lexer) atPercentArray() bool {
-	k := l.peek2()
-	if k != 'w' && k != 'i' {
+	switch l.peek2() {
+	case 'w', 'i', 'W', 'I':
+	default:
 		return false
 	}
 	if l.pos+2 >= len(l.src) {
@@ -659,9 +660,10 @@ func (l *Lexer) atPercentArray() bool {
 	return false
 }
 
-// lexPercentArray lexes a %w[…]/%i[…] literal into a single WORDS/SYMBOLS token
-// whose Lit is the raw whitespace-separated content; the parser splits it.
-// Bracket delimiters nest; %W/%I (interpolating) are not supported.
+// lexPercentArray lexes a %w/%i/%W/%I array literal. The non-interpolating
+// %w/%i forms become a single WORDS/SYMBOLS token whose Lit the parser splits.
+// The interpolating %W/%I forms are spliced into the equivalent array of
+// (interpolated) string/symbol elements. Bracket delimiters nest.
 func (l *Lexer) lexPercentArray(spaceBefore bool, line, col int) token.Token {
 	l.advance() // %
 	kind := l.advance()
@@ -686,11 +688,82 @@ func (l *Lexer) lexPercentArray(spaceBefore bool, line, col int) token.Token {
 		content = append(content, l.advance())
 	}
 	l.state = exprEnd
+	if kind == 'W' || kind == 'I' {
+		return l.splicePercentInterp(string(content), kind == 'I', spaceBefore, line, col)
+	}
 	tt := token.WORDS
 	if kind == 'i' {
 		tt = token.SYMBOLS
 	}
 	return token.Token{Type: tt, Lit: string(content), Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// splicePercentInterp turns a %W/%I body into the tokens of the equivalent
+// array literal: each whitespace-separated word becomes an interpolated string
+// (for %W) or, for %I, a plain symbol when it has no interpolation else a
+// `"…".to_sym`. The first token (`[`) is returned; the rest are queued.
+func (l *Lexer) splicePercentInterp(content string, symbols, spaceBefore bool, line, col int) token.Token {
+	toks := []token.Token{{Type: token.LBRACKET, Lit: "[", Line: line, Col: col, SpaceBefore: spaceBefore}}
+	for wi, w := range splitPercentWords(content) {
+		if wi > 0 {
+			toks = append(toks, token.Token{Type: token.COMMA, Lit: ",", Line: line, Col: col})
+		}
+		if symbols && !strings.Contains(w, "#{") {
+			toks = append(toks, token.Token{Type: token.SYMBOL, Lit: w, Line: line, Col: col})
+			continue
+		}
+		for _, t := range New(`"` + wrapHeredocDQ(w) + `"`).Tokenize() {
+			if t.Type != token.EOF {
+				toks = append(toks, t)
+			}
+		}
+		if symbols {
+			toks = append(toks,
+				token.Token{Type: token.DOT, Lit: ".", Line: line, Col: col},
+				token.Token{Type: token.IDENT, Lit: "to_sym", Line: line, Col: col})
+		}
+	}
+	toks = append(toks, token.Token{Type: token.RBRACKET, Lit: "]", Line: line, Col: col})
+	l.pending = append(l.pending, toks[1:]...)
+	return toks[0]
+}
+
+// splitPercentWords splits a %W/%I body on whitespace, keeping whitespace that
+// falls inside a #{…} interpolation as part of the word.
+func splitPercentWords(s string) []string {
+	var words []string
+	var cur []byte
+	depth := 0
+	flush := func() {
+		if len(cur) > 0 {
+			words = append(words, string(cur))
+			cur = nil
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if depth == 0 && (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') {
+			flush()
+			continue
+		}
+		if c == '#' && i+1 < len(s) && s[i+1] == '{' {
+			depth++
+			cur = append(cur, '#', '{')
+			i++
+			continue
+		}
+		if depth > 0 {
+			switch c {
+			case '{':
+				depth++
+			case '}':
+				depth--
+			}
+		}
+		cur = append(cur, c)
+	}
+	flush()
+	return words
 }
 
 // atHeredoc reports whether the `<<` just consumed begins a heredoc rather than
