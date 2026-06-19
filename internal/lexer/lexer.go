@@ -375,6 +375,15 @@ func (l *Lexer) skipSpaceAndComments() bool {
 }
 
 func (l *Lexer) lexNumber(spaceBefore bool, line, col int) token.Token {
+	// Radix-prefixed integer literals: 0x/0X (hex), 0o/0O (octal), 0b/0B
+	// (binary), 0d/0D (explicit decimal). A bare leading zero (0NN) is octal and
+	// is handled by base-0 decoding in the parser, so it needs no special lexing.
+	if l.peek() == '0' {
+		switch l.peek2() {
+		case 'x', 'X', 'o', 'O', 'b', 'B', 'd', 'D':
+			return l.lexRadixInt(spaceBefore, line, col)
+		}
+	}
 	start := l.pos
 	for isDigit(l.peek()) || l.peek() == '_' {
 		l.advance()
@@ -394,6 +403,54 @@ func (l *Lexer) lexNumber(spaceBefore bool, line, col int) token.Token {
 		tt = token.FLOAT
 	}
 	return token.Token{Type: tt, Lit: lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// lexRadixInt lexes a prefixed integer literal (cursor on the leading '0'). The
+// emitted Lit keeps a Go-recognisable lowercase prefix (0x/0o/0b) so the parser
+// can decode it with base 0; an explicit-decimal 0d literal drops its prefix.
+// Underscores between digits are allowed. With no digits after the prefix it
+// returns ILLEGAL.
+func (l *Lexer) lexRadixInt(spaceBefore bool, line, col int) token.Token {
+	l.advance() // '0'
+	kind := l.advance() | 0x20 // letter, lower-cased
+	ok := radixDigit(kind)
+	var digits []byte
+	for {
+		c := l.peek()
+		if c == '_' {
+			l.advance()
+			continue
+		}
+		if !ok(c) {
+			break
+		}
+		digits = append(digits, l.advance())
+	}
+	l.state = exprEnd
+	if len(digits) == 0 {
+		return token.Token{Type: token.ILLEGAL, Lit: "invalid numeric literal", Line: line, Col: col, SpaceBefore: spaceBefore}
+	}
+	lit := string(digits)
+	if kind != 'd' {
+		lit = "0" + string(kind) + lit
+	}
+	return token.Token{Type: token.INT, Lit: lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// radixDigit returns the digit-membership test for a radix prefix letter.
+func radixDigit(kind byte) func(byte) bool {
+	switch kind {
+	case 'x':
+		return func(c byte) bool {
+			return isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+		}
+	case 'o':
+		return func(c byte) bool { return c >= '0' && c <= '7' }
+	case 'b':
+		return func(c byte) bool { return c == '0' || c == '1' }
+	default: // 'd'
+		return isDigit
+	}
 }
 
 func (l *Lexer) lexIdent(spaceBefore bool, line, col int) token.Token {

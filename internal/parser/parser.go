@@ -1386,12 +1386,14 @@ func (p *Parser) parsePrimary() ast.Node {
 	switch t.Type {
 	case token.INT:
 		p.advance()
-		n, err := strconv.ParseInt(t.Lit, 10, 64)
+		// Base 0 decodes the radix prefix (0x/0o/0b) and treats a bare leading
+		// zero as octal, matching Ruby.
+		n, err := strconv.ParseInt(t.Lit, 0, 64)
 		if err != nil {
-			// The lexer only ever emits decimal digits, so the sole ParseInt
-			// failure is int64 overflow → promote to a Bignum literal.
-			z, _ := new(big.Int).SetString(t.Lit, 10)
-			return &ast.BignumLit{Val: z}
+			if z, ok := new(big.Int).SetString(t.Lit, 0); ok {
+				return &ast.BignumLit{Val: z} // valid digits, out of int64 range
+			}
+			p.fail("invalid integer literal: %s", t.Lit) // e.g. an invalid octal 08
 		}
 		return &ast.IntLit{Value: n}
 	case token.FLOAT:
