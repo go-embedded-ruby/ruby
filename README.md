@@ -23,15 +23,19 @@ monkey-patching, `define_method` and `method_missing` free.
 Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 
 - **Values:** integers (`int64`, with automatic **Bignum** promotion on int64
-  overflow and arbitrary-precision integer literals), floats, strings, symbols,
-  arrays, hashes, ranges (incl. beginless/endless), `true`/`false`/`nil`,
-  `self`, `Proc`/lambda, `Regexp`/`MatchData`, `Struct`.
+  overflow and arbitrary-precision integer literals, **radix literals** `0x`/`0o`/
+  bare-`0`-octal/`0b`/`0d` with underscores), floats, strings, symbols (incl.
+  **operator-method symbols** `:+`/`:<<`/`:[]=`/`:<=>`, usable with
+  `reduce(:+)`/`inject`/`send(:+, x)`), arrays, hashes, ranges (incl.
+  beginless/endless), `true`/`false`/`nil`, `self`, `Proc`/lambda,
+  `Regexp`/`MatchData`, `Struct`.
 - **Operators:** arithmetic (`+ - * / %`, **Ruby floor division**, `**`),
   comparison/`<=>`, `==`/`===`, bitwise/shift (`<< >> & | ^ ~`, arbitrary
   precision), `&&`/`||`, ternary, ranges; correct negative-literal precedence
   (`-2.abs == 2`, `-2**2 == -4`).
 - **Control flow:** `if`/`elsif`/`else`, `unless`, `while`/`until`,
-  `case`/`when`, statement modifiers, `begin`/`rescue`/`else`/`ensure`/`retry`,
+  `case`/`when`, statement modifiers (incl. modifier `rescue`,
+  `expr rescue fallback`), `begin`/`rescue`/`else`/`ensure`/`retry`,
   `break`/`next`, `Kernel#loop`.
 - **Pattern matching (`case`/`in`):** value, variable-binding, class/constant,
   array (incl. splat and nested), hash (`deconstruct_keys`, `**rest`/`**nil`),
@@ -46,8 +50,9 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `**rest` / `&block` parameters, setter defs (`def name=`), **endless methods**
   (`def foo = expr`), recursion, `return`, `super`.
 - **Blocks / Procs / lambdas:** `{ }` / `do…end` closures, `yield`,
-  `block_given?`, `&block` capture, `Proc`/`lambda`/**stabby `->(){}`**, `&proc`
-  block-pass and `Symbol#to_proc` (the `&:sym` shorthand).
+  `block_given?`, `&block` capture, **numbered params (`_1`/`_2`) and `it`**,
+  `Proc`/`lambda`/**stabby `->(){}`**, `&proc` block-pass and `Symbol#to_proc`
+  (the `&:sym` shorthand).
 - **Classes & modules:** inheritance, `@ivars`, `new`/`initialize`, constants and
   constant assignment, **class methods** (`def self.foo`), modules + `include`
   (mixins), `super`, **`attr_accessor`/`reader`/`writer`**, **`Struct.new`**.
