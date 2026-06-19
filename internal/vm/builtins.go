@@ -877,6 +877,30 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
+	// Set intersection (&) and union (|): both deduplicate, keeping first-seen
+	// order, matching Ruby.
+	vm.cArray.define("&", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		b := arrArg(args[0])
+		var out []object.Value
+		for _, e := range a.Elems {
+			if arrayIncludes(b.Elems, e) && !arrayIncludes(out, e) {
+				out = append(out, e)
+			}
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("|", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		b := arrArg(args[0])
+		var out []object.Value
+		for _, e := range append(append([]object.Value{}, a.Elems...), b.Elems...) {
+			if !arrayIncludes(out, e) {
+				out = append(out, e)
+			}
+		}
+		return &object.Array{Elems: out}
+	})
 	vm.cArray.define("map!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (map!)")
@@ -2189,6 +2213,15 @@ func sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
 }
 
 // strArg coerces a String argument, raising TypeError otherwise.
+// arrArg coerces an argument to an *Array, raising TypeError otherwise.
+func arrArg(v object.Value) *object.Array {
+	if a, ok := v.(*object.Array); ok {
+		return a
+	}
+	raise("TypeError", "no implicit conversion of %s into Array", v.Inspect())
+	return nil
+}
+
 func strArg(v object.Value) string {
 	if s, ok := v.(*object.String); ok {
 		return s.Str()

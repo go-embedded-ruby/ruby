@@ -26,6 +26,11 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return stringOp(op, as, b)
 	}
 
+	// Array fast paths: [1] + [2], [1, 2, 1] - [1], [1, 2] * 3 / [1, 2] * ",".
+	if aa, ok := a.(*object.Array); ok {
+		return arrayOp(op, aa, b)
+	}
+
 	ai, aok := a.(object.Integer)
 	bi, bok := b.(object.Integer)
 	if aok && bok {
@@ -262,6 +267,61 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		}
 	}
 	return raise("NoMethodError", "undefined method '%s' for a String", op)
+}
+
+// arrayOp applies a fast-path operator with an Array receiver: + concatenates,
+// - removes (set difference, keeping order/duplicates of the left), and * either
+// repeats (Integer) or joins (String).
+func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
+	switch op {
+	case bytecode.OpAdd:
+		bb, ok := b.(*object.Array)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into Array", b.Inspect())
+		}
+		out := make([]object.Value, 0, len(a.Elems)+len(bb.Elems))
+		out = append(append(out, a.Elems...), bb.Elems...)
+		return &object.Array{Elems: out}
+	case bytecode.OpSub:
+		bb, ok := b.(*object.Array)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into Array", b.Inspect())
+		}
+		var out []object.Value
+		for _, e := range a.Elems {
+			if !arrayIncludes(bb.Elems, e) {
+				out = append(out, e)
+			}
+		}
+		return &object.Array{Elems: out}
+	case bytecode.OpMul:
+		if sep, ok := b.(*object.String); ok {
+			return object.NewString(joinArray(a, sep.Str()))
+		}
+		n, ok := b.(object.Integer)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into Integer", b.Inspect())
+		}
+		if n < 0 {
+			raise("ArgumentError", "negative argument")
+		}
+		out := make([]object.Value, 0, len(a.Elems)*int(n))
+		for i := int64(0); i < int64(n); i++ {
+			out = append(out, a.Elems...)
+		}
+		return &object.Array{Elems: out}
+	}
+	return raise("NoMethodError", "undefined method '%s' for an Array", op)
+}
+
+// arrayIncludes reports whether v is in elems (by Ruby ==).
+func arrayIncludes(elems []object.Value, v object.Value) bool {
+	for _, e := range elems {
+		if valueEqual(e, v) {
+			return true
+		}
+	}
+	return false
 }
 
 func negate(v object.Value) object.Value {
