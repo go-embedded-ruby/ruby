@@ -1768,8 +1768,21 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("floor", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(int64(math.Floor(floatOf(self))))
 	})
-	vm.cFloat.define("round", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(math.Round(floatOf(self))))
+	vm.cFloat.define("round", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		f := floatOf(self)
+		ndigits := 0
+		if len(args) > 0 {
+			ndigits = int(intArg(args[0]))
+		}
+		// ndigits > 0 rounds to that many decimals and stays a Float; ndigits <= 0
+		// rounds to an integer (or a power of ten) and returns an Integer — MRI's
+		// Float#round contract.
+		pow := math.Pow(10, float64(ndigits))
+		r := math.Round(f*pow) / pow
+		if ndigits > 0 {
+			return object.Float(r)
+		}
+		return object.Integer(int64(r))
 	})
 	vm.cFloat.define("nan?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(math.IsNaN(floatOf(self)))

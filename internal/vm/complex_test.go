@@ -25,14 +25,16 @@ func TestComplex(t *testing.T) {
 		{`p Complex(1, 2).abs2`, "5\n"},
 		{`p Complex(3, 4).abs`, "5.0\n"},
 		{`p Complex(3, 4).magnitude`, "5.0\n"},
-		{`p Complex(0, 1).arg`, "1.5707963267948966\n"},
-		{`p Complex(0, 1).angle`, "1.5707963267948966\n"},
-		{`p Complex(0, 1).phase`, "1.5707963267948966\n"},
+		// arg/angle/phase are atan2-based; round to keep the assertion stable across
+		// architectures (qemu libm differs in the last ULP).
+		{`p Complex(0, 1).arg.round(9)`, "1.570796327\n"},
+		{`p Complex(0, 1).angle.round(9)`, "1.570796327\n"},
+		{`p Complex(0, 1).phase.round(9)`, "1.570796327\n"},
 		{`p Complex(1, 2).conjugate`, "(1-2i)\n"},
 		{`p Complex(1, 2).conj`, "(1-2i)\n"},
 		{`p Complex(1, 2).rectangular`, "[1, 2]\n"},
 		{`p Complex(1, 2).rect`, "[1, 2]\n"},
-		{`p Complex(3, 4).polar`, "[5.0, 0.9272952180016122]\n"},
+		{`p Complex(3, 4).polar.map { |x| x.round(9) }`, "[5.0, 0.927295218]\n"},
 		{`p Complex(1, 2).to_s`, "\"1+2i\"\n"},
 		{`p Complex(1, 2).inspect`, "\"(1+2i)\"\n"},
 		// Arithmetic — exact on integer components for +/-/*, float for /.
