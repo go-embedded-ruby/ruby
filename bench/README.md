@@ -126,5 +126,6 @@ and the require-graph/closed-world *single-binary* half of `rbgo build`.
 
 ## Known issues surfaced by benchmarking
 
-- `Hash.new(0)` (a default-valued hash) is not implemented and currently raises
-  a Go-level panic instead of working or raising a Ruby error — to be fixed.
+- _(none open)_ — `Hash.new(0)` / `Hash.new { … }` default-valued hashes, which
+  previously crashed with a Go-level panic, now work (default value and default
+  proc, with the MRI arity guards).

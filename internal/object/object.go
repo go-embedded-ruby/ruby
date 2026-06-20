@@ -222,6 +222,12 @@ func (a *Array) Truthy() bool    { return true }
 type Hash struct {
 	Keys []Value // insertion order (string keys held as frozen snapshots)
 	vals map[any]Value
+	// Default is the value returned for a missing key (Hash.new(default)); nil
+	// means none. DefaultProc, when set, is a Proc (held as a Value to avoid an
+	// import cycle) called with (hash, key) on a miss (Hash.new { … }); it takes
+	// precedence over Default. Both nil ⇒ a missing key reads as nil.
+	Default     Value
+	DefaultProc Value
 }
 
 // strKey is the comparable map key for a Ruby String, distinct from a Symbol of

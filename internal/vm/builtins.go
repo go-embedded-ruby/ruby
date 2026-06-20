@@ -1164,11 +1164,29 @@ func (vm *VM) bootstrap() {
 	})
 
 	// Hash.
-	vm.cHash.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if v, ok := self.(*object.Hash).Get(args[0]); ok {
+	// Hash.new — Hash.new, Hash.new(default), or Hash.new { |hash, key| … }.
+	vm.cHash.smethods["new"] = &Method{name: "new", owner: vm.cHash,
+		native: func(_ *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+			h := object.NewHash()
+			switch {
+			case blk != nil:
+				if len(args) != 0 {
+					raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+				}
+				h.DefaultProc = blk
+			case len(args) == 1:
+				h.Default = args[0]
+			case len(args) > 1:
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+			}
+			return h
+		}}
+	vm.cHash.define("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		if v, ok := h.Get(args[0]); ok {
 			return v
 		}
-		return object.NilV
+		return vm.hashDefault(h, args[0])
 	})
 	vm.cHash.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		self.(*object.Hash).Set(args[0], args[1])
@@ -1793,6 +1811,18 @@ func nativeNew(vm *VM, self object.Value, args []object.Value, blk *Proc) object
 	obj := &RObject{class: class, ivars: map[string]object.Value{}}
 	vm.send(obj, "initialize", args, blk)
 	return obj
+}
+
+// hashDefault returns the value a missing key reads as: the default proc's
+// result (called with the hash and key), else the static default, else nil.
+func (vm *VM) hashDefault(h *object.Hash, key object.Value) object.Value {
+	if h.DefaultProc != nil {
+		return vm.callBlock(h.DefaultProc.(*Proc), []object.Value{h, key})
+	}
+	if h.Default != nil {
+		return h.Default
+	}
+	return object.NilV
 }
 
 // intArg coerces an argument used as an array index to int64, or raises.
