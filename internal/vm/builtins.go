@@ -46,6 +46,7 @@ func (vm *VM) bootstrap() {
 	}
 
 	vm.registerComplex()
+	vm.registerFFT()
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)

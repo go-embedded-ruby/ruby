@@ -1,2 +1,4 @@
+github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb h1:kDAxBx5Tvd3PfDIqCgV3J4cpXejsJOOsiKGYQiDTJB4=
+github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb/go.mod h1:KcAewzZmZpMxeylWZGp0/R9p03sInnPQW8B4ttL6WCc=
 github.com/go-onigmo/regexp v0.0.0-20260615223128-d636c03e5b82 h1:W1Jg0B0zS6nKCcQD3VEvHnrR9TGFF+oOTLZQry4lzj8=
 github.com/go-onigmo/regexp v0.0.0-20260615223128-d636c03e5b82/go.mod h1:wTr40dRA2FxVeYniivGngyZUR8mzgiDPNT6GNMFwa8I=

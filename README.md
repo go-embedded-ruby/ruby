@@ -27,8 +27,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   bare-`0`-octal/`0b`/`0d` with underscores), floats, strings, symbols (incl.
   **operator-method symbols** `:+`/`:<<`/`:[]=`/`:<=>`, usable with
   `reduce(:+)`/`inject`/`send(:+, x)`), arrays, hashes, ranges (incl.
-  beginless/endless), `true`/`false`/`nil`, `self`, `Proc`/lambda,
-  `Regexp`/`MatchData`, `Struct`.
+  beginless/endless), **`Complex`** numbers, `true`/`false`/`nil`, `self`,
+  `Proc`/lambda, `Regexp`/`MatchData`, `Struct`.
 - **Operators:** arithmetic (`+ - * / %`, **Ruby floor division**, `**`),
   comparison/`<=>`, `==`/`===`, bitwise/shift (`<< >> & | ^ ~`, arbitrary
   precision), `&&`/`||`, ternary, ranges; correct negative-literal precedence
@@ -74,6 +74,10 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`).
 - **Objects:** `dup`/`clone`/`freeze`/`frozen?`, `equal?`,
   `instance_variable_get`/`set`.
+- **FFT:** an `FFT` module (`fft`/`ifft`/`rfft`/`irfft`/`fftfreq`/`rfftfreq`)
+  binding the pure-Go [go-fft](https://github.com/go-fft/fft) library — a
+  `numpy.fft`-style transform with **no cgo / no FFTW**, returning `Complex`
+  spectra.
 
 - **AOT compiler (`rbgo build`):** lowers a program's methods to native Go and
   links a specialised binary. Pure integer methods become unboxed `int64`
