@@ -77,6 +77,15 @@ func floatArray(fs []float64) object.Value {
 	return &object.Array{Elems: out}
 }
 
+// float2DArray marshals [][]float64 into a Ruby Array of Arrays of Float.
+func float2DArray(rows [][]float64) object.Value {
+	out := make([]object.Value, len(rows))
+	for i, r := range rows {
+		out[i] = floatArray(r)
+	}
+	return &object.Array{Elems: out}
+}
+
 // sampleSpacing reads an optional trailing spacing argument (numpy's `d`),
 // defaulting to 1.0.
 func sampleSpacing(args []object.Value, idx int) float64 {
@@ -185,4 +194,27 @@ func (vm *VM) registerFFT() {
 	window("blackman", gofft.Blackman)
 	window("blackman_harris", gofft.BlackmanHarris)
 	window("bartlett", gofft.Bartlett)
+
+	// Spectral helpers: one-sided power spectral density and a windowed
+	// spectrogram (an array of per-segment PSD frames).
+	def("psd", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return floatArray(gofft.PSD(floatSlice(args[0]), sampleSpacing(args, 1)))
+	})
+	def("spectrogram", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		signal := floatSlice(args[0])
+		segment, overlap := int(intArg(args[1])), int(intArg(args[2]))
+		win := floatSlice(args[3])
+		// Validate go-fft's constraints up front so a bad call raises a Ruby
+		// error instead of panicking the VM.
+		if segment <= 0 {
+			raise("ArgumentError", "segment length must be positive")
+		}
+		if len(win) != segment {
+			raise("ArgumentError", "window length must equal segment length")
+		}
+		if overlap < 0 || overlap >= segment {
+			raise("ArgumentError", "overlap must satisfy 0 <= overlap < segment")
+		}
+		return float2DArray(gofft.Spectrogram(signal, segment, overlap, win, sampleSpacing(args, 4)))
+	})
 }

@@ -78,10 +78,11 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   trig and hyperbolic functions, `atan2`/`hypot`/`pow`) with `Math::PI`/`Math::E`.
 - **FFT:** an `FFT` module — 1-D (`fft`/`ifft`/`rfft`/`irfft`), N-D and 2-D
   (`fftn`/`ifftn`/`fft2`/`ifft2`), bin-frequency helpers
-  (`fftfreq`/`rfftfreq`), and window functions
-  (`hann`/`hamming`/`blackman`/`blackman_harris`/`bartlett`) — binding the
-  pure-Go [go-fft](https://github.com/go-fft/fft) library, a `numpy.fft`-style
-  transform with **no cgo / no FFTW**, returning `Complex` spectra.
+  (`fftfreq`/`rfftfreq`), window functions
+  (`hann`/`hamming`/`blackman`/`blackman_harris`/`bartlett`), and spectral
+  helpers (`psd`/`spectrogram`) — binding the pure-Go
+  [go-fft](https://github.com/go-fft/fft) library, a `numpy.fft`-style transform
+  with **no cgo / no FFTW**, returning `Complex` spectra.
 
 - **AOT compiler (`rbgo build`):** lowers a program's methods to native Go and
   links a specialised binary. Pure integer methods become unboxed `int64`

@@ -47,6 +47,10 @@ func TestFFTMultiDimAndWindows(t *testing.T) {
 		{`p FFT.hamming(1)`, "[1.0]\n"},
 		{`p FFT.blackman(1)`, "[1.0]\n"},
 		{`p FFT.blackman_harris(1)`, "[1.0]\n"},
+		// PSD of a constant → all power in the DC bin (one-sided, N/2+1 bins).
+		{`p FFT.psd([1.0, 1.0, 1.0, 1.0], 1.0).map { |x| x.round(6) }`, "[4.0, 0.0, 0.0]\n"},
+		// Spectrogram: 8 samples, segment 4, overlap 2 → 3 frames of 3 bins each.
+		{"w = FFT.hann(4)\nsg = FFT.spectrogram([1, 2, 3, 4, 5, 6, 7, 8].map { |x| x.to_f }, 4, 2, w, 1.0)\np [sg.length, sg[0].length]", "[3, 3]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -67,6 +71,9 @@ func TestFFTErrors(t *testing.T) {
 		{`FFT.fftn([1], [])`, "ArgumentError"},        // empty shape
 		{`FFT.fftn([1], [0])`, "ArgumentError"},       // non-positive dimension
 		{`FFT.fft2([1, 2, 3], 2, 2)`, "ArgumentError"}, // product != data length
+		{`FFT.spectrogram([1.0, 2.0], 0, 0, [], 1.0)`, "ArgumentError"},                  // segment <= 0
+		{`FFT.spectrogram([1.0, 2.0, 3.0, 4.0], 4, 0, [1.0, 1.0], 1.0)`, "ArgumentError"}, // window != segment
+		{`FFT.spectrogram([1.0, 2.0, 3.0, 4.0], 4, 4, FFT.hann(4), 1.0)`, "ArgumentError"}, // overlap >= segment
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)
