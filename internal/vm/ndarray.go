@@ -184,6 +184,44 @@ func (vm *VM) registerNDArray() {
 	d("dot", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return mustArray(self(v).Dot(ndArg(args[0]).a))
 	})
+
+	// Element-wise unary ufuncs (each returns a new array).
+	unary := func(name string, f func(*nd.Array) *nd.Array) {
+		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+			return &NDArray{a: f(self(v))}
+		})
+	}
+	unary("sqrt", (*nd.Array).Sqrt)
+	unary("exp", (*nd.Array).Exp)
+	unary("log", (*nd.Array).Log)
+	unary("sin", (*nd.Array).Sin)
+	unary("cos", (*nd.Array).Cos)
+	unary("abs", (*nd.Array).Abs)
+	unary("neg", (*nd.Array).Neg)
+	unary("transpose", (*nd.Array).Transpose)
+	unary("flatten", (*nd.Array).Flatten)
+
+	d("prod", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Float(self(v).Prod())
+	})
+	argReduce := func(name string, f func(*nd.Array) (int, error)) {
+		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+			i, err := f(self(v))
+			if err != nil {
+				raise("ArgumentError", "%s", err.Error())
+			}
+			return object.Integer(i)
+		})
+	}
+	argReduce("argmax", (*nd.Array).ArgMax)
+	argReduce("argmin", (*nd.Array).ArgMin)
+
+	// Element access: a.at(i, j) / a[i, j] returns the scalar at the index.
+	at := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Float(self(v).At(shapeArgs(args)...))
+	}
+	d("at", at)
+	d("[]", at)
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).String())
 	})

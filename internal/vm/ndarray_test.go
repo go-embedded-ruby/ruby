@@ -45,6 +45,22 @@ func TestNDArray(t *testing.T) {
 		{`p NDArray.from([1, 2, 3, 4], [2, 2]).inspect`, "\"Array(shape=[2 2], data=[1 2 3 4])\"\n"},
 		{`p NDArray.from([1, 2], [2]).to_s`, "\"Array(shape=[2], data=[1 2])\"\n"},
 		{`p NDArray.zeros(2).class`, "NDArray\n"},
+		// Unary ufuncs, prod, argmax/argmin, element access.
+		{`p NDArray.from([1, 4, 9, 16], [4]).sqrt.to_a`, "[1.0, 2.0, 3.0, 4.0]\n"},
+		{`p NDArray.from([0, 1, 2], [3]).exp.to_a.map { |x| x.round(4) }`, "[1.0, 2.7183, 7.3891]\n"},
+		{`p NDArray.from([1, -2, 3], [3]).abs.to_a`, "[1.0, 2.0, 3.0]\n"},
+		{`p NDArray.from([1, 2, 3, 4, 5, 6], [2, 3]).transpose.shape`, "[3, 2]\n"},
+		{`p NDArray.from([1, 2, 3, 4, 5, 6], [2, 3]).transpose.to_a`, "[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]\n"},
+		{`p NDArray.from([1, 2, 3, 4], [2, 2]).flatten.shape`, "[4]\n"},
+		{`p NDArray.from([1, 2, 3, 4], [4]).prod`, "24.0\n"},
+		{`p NDArray.from([3, 1, 4, 1, 5], [5]).argmax`, "4\n"},
+		{`p NDArray.from([3, 1, 4, 1, 5], [5]).argmin`, "1\n"},
+		{`p NDArray.from([1, 2, 3, 4], [2, 2]).at(1, 0)`, "3.0\n"},
+		{`p NDArray.from([1, 2, 3, 4], [2, 2])[0, 1]`, "2.0\n"},
+		{`p NDArray.from([1, 2], [2]).neg.to_a`, "[-1.0, -2.0]\n"},
+		{`p NDArray.from([1, 100], [2]).log.to_a.map { |x| x.round(4) }`, "[0.0, 4.6052]\n"},
+		{`p NDArray.from([0], [1]).sin.to_a`, "[0.0]\n"},
+		{`p NDArray.from([0], [1]).cos.to_a`, "[1.0]\n"},
 		// The Go Value-interface methods: p → Inspect, puts → ToS, ?: → Truthy.
 		{`p NDArray.zeros(2)`, "Array(shape=[2], data=[0 0])\n"},
 		{`puts NDArray.zeros(2)`, "Array(shape=[2], data=[0 0])\n"},
@@ -69,6 +85,7 @@ func TestNDArrayErrors(t *testing.T) {
 		{`true + NDArray.zeros(2)`, "TypeError"},
 		{`NDArray.zeros(2) % NDArray.zeros(2)`, "NoMethodError"},
 		{`NDArray.zeros(2) % 2`, "NoMethodError"},
+		{`NDArray.zeros(0).argmax`, "ArgumentError"}, // empty arg-reduction
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)

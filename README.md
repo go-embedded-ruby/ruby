@@ -76,10 +76,12 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `instance_variable_get`/`set`.
 - **Math:** the `Math` module (`sqrt`/`cbrt`/`exp`/`log`/`log2`/`log10`, the
   trig and hyperbolic functions, `atan2`/`hypot`/`pow`) with `Math::PI`/`Math::E`.
-- **NDArray:** a NumPy-style n-dimensional array (`zeros`/`ones`/`full`/`arange`/
-  `from`, element-wise `+ - * /` with scalar broadcasting, `sum`/`mean`/`max`/
-  `min`, `matmul`/`dot`, `reshape`/`shape`/`to_a`) binding the pure-Go
-  [go-ndarray](https://github.com/go-ndarray/ndarray) library — **no cgo / no
+- **NDArray:** a NumPy-style n-dimensional array — `zeros`/`ones`/`full`/`arange`/
+  `from`, element-wise `+ - * /` with scalar broadcasting, ufuncs
+  (`sqrt`/`exp`/`log`/`sin`/`cos`/`abs`), reductions (`sum`/`mean`/`max`/`min`/
+  `prod`/`argmax`/`argmin`), `matmul`/`dot`, `transpose`/`reshape`/`flatten`,
+  `shape`/`to_a`/`[]` — binding the pure-Go
+  [go-ndarray](https://github.com/go-ndarray/ndarray) library, **no cgo / no
   NumPy**.
 - **FFT:** an `FFT` module — 1-D (`fft`/`ifft`/`rfft`/`irfft`), N-D and 2-D
   (`fftn`/`ifftn`/`fft2`/`ifft2`), bin-frequency helpers
