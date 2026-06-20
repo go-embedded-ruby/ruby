@@ -52,11 +52,12 @@ func (p *Proc) Truthy() bool    { return true }
 
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
 type Method struct {
-	name   string
-	native NativeFn
-	iseq   *bytecode.ISeq
-	proc   *Proc // for define_method: a block-backed method body
-	owner  *RClass
+	name     string
+	native   NativeFn
+	iseq     *bytecode.ISeq
+	proc     *Proc          // for define_method: a block-backed method body
+	compiled CompiledMethod // AOT-lowered native body (rbgo build); preferred when set
+	owner    *RClass
 }
 
 // RClass is a class (the live, mutable method table that makes monkey-patching,
@@ -199,6 +200,9 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 }
 
 func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {
+	if m.compiled != nil {
+		return m.compiled(vm, self, args, blk)
+	}
 	if m.native != nil {
 		return m.native(vm, self, args, blk)
 	}

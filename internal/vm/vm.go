@@ -420,7 +420,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					recv := pop()
 					push(vm.dispatchSend(recv, iseq.Names[in.A], callArgs, vm.toBlock(blockVal)))
 				case bytecode.OpDefineMethod:
-					definee.methods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
+					name := iseq.Names[in.A]
+					m := &Method{name: name, iseq: iseq.Children[in.B], owner: definee}
+					// Attach the AOT-compiled body only on the first definition of
+					// this name; a redefinition gets a fresh, interpreted Method
+					// (deopt), since the compiled body matched the original source.
+					if _, redef := definee.methods[name]; !redef {
+						m.compiled = compiledFor(definee.name, name)
+					}
+					definee.methods[name] = m
 					push(object.NilV)
 				case bytecode.OpDefineSMethod:
 					definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
