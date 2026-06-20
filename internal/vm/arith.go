@@ -31,6 +31,19 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return arrayOp(op, aa, b)
 	}
 
+	// Complex fast paths, both Complex⊕x and x⊕Complex (a real number coerces to
+	// a Complex with zero imaginary part).
+	if ac, ok := a.(*object.Complex); ok {
+		return complexOp(op, ac, b)
+	}
+	if bc, ok := b.(*object.Complex); ok {
+		ac, ok := asComplexVal(a)
+		if !ok {
+			return raise("TypeError", "%s can't be coerced into Complex", a.Inspect())
+		}
+		return complexOp(op, ac, bc)
+	}
+
 	ai, aok := a.(object.Integer)
 	bi, bok := b.(object.Integer)
 	if aok && bok {
@@ -335,11 +348,21 @@ func negate(v object.Value) object.Value {
 		return object.Float(-n)
 	case *object.Bignum:
 		return object.NormInt(new(big.Int).Neg(n.I))
+	case *object.Complex:
+		return &object.Complex{Re: negate(n.Re), Im: negate(n.Im)}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
 
 func valueEqual(a, b object.Value) bool {
+	// Complex compares component-wise, and equals a real number when its
+	// imaginary part is zero (Complex(2, 0) == 2), in either operand order.
+	if ac, ok := a.(*object.Complex); ok {
+		return complexEqual(ac, b)
+	}
+	if bc, ok := b.(*object.Complex); ok {
+		return complexEqual(bc, a)
+	}
 	switch av := a.(type) {
 	case object.Integer:
 		if bv, ok := b.(object.Integer); ok {

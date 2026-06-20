@@ -85,6 +85,28 @@ func (f Float) ToS() string {
 func (f Float) Inspect() string { return f.ToS() }
 func (f Float) Truthy() bool    { return true }
 
+// Complex is a Ruby Complex number. Its real and imaginary parts are themselves
+// numeric Values (Integer/Bignum/Float), so Complex(1, 2) keeps Integer parts
+// and renders "(1+2i)" while Complex(1.5, 2) renders "(1.5+2i)", matching MRI.
+// (Rational components are not supported — there is no Rational type — so exact
+// division of integer components yields Float parts instead.)
+type Complex struct{ Re, Im Value }
+
+func (c *Complex) ToS() string     { return c.Re.ToS() + imagPart(c.Im) }
+func (c *Complex) Inspect() string { return "(" + c.ToS() + ")" }
+func (c *Complex) Truthy() bool    { return true }
+
+// imagPart renders the imaginary term with its sign, e.g. "+2i" or "-2.0i". The
+// component's own ToS already carries a leading "-" when negative, so the sign
+// is taken from it directly (no negation, which keeps Bignum/edge values exact).
+func imagPart(im Value) string {
+	s := im.ToS()
+	if strings.HasPrefix(s, "-") {
+		return s + "i"
+	}
+	return "+" + s + "i"
+}
+
 // String is a Ruby string: a mutable, reference-typed byte sequence (always used
 // as *String), so aliasing and in-place mutation (<<, []=, replace, the bang
 // methods) behave as in Ruby. Frozen marks a string that may not be mutated
