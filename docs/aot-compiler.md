@@ -130,11 +130,15 @@ shippable on its own:
    hand-written level-3 prototype (1.77 ms) and **beating MRI+YJIT (7.5 ms) by
    ~4×**. The deopt edges are proven against MRI: integer overflow promotes to
    the identical Bignum, a non-Integer argument falls back through level-1, and
-   divide-by-zero raises `ZeroDivisionError`.
+   divide-by-zero raises `ZeroDivisionError`. Iterative kernels qualify too: a
+   `while`-loop integer method (e.g. factorial) lowers to an unboxed loop, and an
+   overflow mid-loop deopts and re-runs from the original arguments into the
+   identical Bignum (`25! = 15511210043330985984000000`, MRI-verified).
 
 The prototype (`aot_proto_test.go`) stays as the regression that pins the
 target: level-1 must keep beating the MRI interpreter, level-3 must keep beating
 YJIT. `BenchmarkAOTGeneratedL3Fib` pins the *generated* kernel to that same bar.
 
-Still interpreted (left to future stages): methods with loops that yield a `nil`
-value (`while`), optional/keyword/splat parameters, and non-integer kernels.
+Still interpreted (left to future stages): optional/keyword/splat parameters,
+non-integer (Float / mixed) kernels, and calls to methods other than the one
+being compiled (no cross-method devirtualisation yet).

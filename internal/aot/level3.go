@@ -126,6 +126,14 @@ func emitKernel(iseq *bytecode.ISeq, goName, rubyName string, depth []int) (stri
 			line("l%d = k%d", in.A, d-1)
 		case bytecode.OpPushSelf:
 			isSelf[d] = true // the receiver of a self-recursive call; no int64 value
+		case bytecode.OpPushNil:
+			// The only nil an integer kernel tolerates is a loop's discarded value
+			// (`while … end` evaluates to nil), which the compiler immediately pops.
+			// A nil that is used or returned is not an int64, so leave it to level 1.
+			if pc+1 >= len(iseq.Insns) || iseq.Insns[pc+1].Op != bytecode.OpPop {
+				return "", false
+			}
+			line("k%d = 0", d) // placeholder int64; the next OpPop discards it
 		case bytecode.OpPop:
 			// abandon the slot
 		case bytecode.OpAdd:

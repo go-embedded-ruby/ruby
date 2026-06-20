@@ -431,6 +431,160 @@ func (vm *VM) e2eFloatDeopt(self object.Value, args []object.Value, block *Proc)
 	return object.Integer(vm.e2eFloatDeopt_k(int64(i0)))
 }
 
+func (vm *VM) e2eFact_l1(self object.Value, args []object.Value, block *Proc) object.Value {
+	var l0, l1 object.Value
+	l0 = args[0]
+	_ = l0
+	_ = l1
+	_ = self
+	_ = args
+	_ = block
+	var s0, s1 object.Value
+	s0 = object.Integer(1)
+	l1 = s0
+L3:
+	s0 = l0
+	s1 = object.Integer(1)
+	s0 = vm.binaryOp(bytecode.OpGt, s0, s1)
+	if !s0.Truthy() { goto L18 }
+	s0 = l1
+	s1 = l0
+	s0 = vm.binaryOp(bytecode.OpMul, s0, s1)
+	l1 = s0
+	s0 = l0
+	s1 = object.Integer(1)
+	s0 = vm.binaryOp(bytecode.OpSub, s0, s1)
+	l0 = s0
+	goto L3
+L18:
+	s0 = object.NilV
+	s0 = l1
+	return s0
+}
+
+func (vm *VM) e2eFact_k(l0 int64) int64 {
+	var l1 int64
+	_ = l0
+	_ = l1
+	var k0, k1 int64
+	k0 = 1
+	l1 = k0
+L3:
+	k0 = l0
+	k1 = 1
+	if !(k0 > k1) { goto L18 }
+	k0 = l1
+	k1 = l0
+	k0 = aotMul(k0, k1)
+	l1 = k0
+	k0 = l0
+	k1 = 1
+	k0 = aotSub(k0, k1)
+	l0 = k0
+	goto L3
+L18:
+	k0 = 0
+	k0 = l1
+	return k0
+}
+
+func (vm *VM) e2eFact(self object.Value, args []object.Value, block *Proc) (res object.Value) {
+	i0, ok0 := args[0].(object.Integer)
+	if !ok0 {
+		return vm.e2eFact_l1(self, args, block)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, d := r.(aotDeopt); d {
+				res = vm.e2eFact_l1(self, args, block)
+				return
+			}
+			panic(r)
+		}
+	}()
+	_ = self
+	_ = args
+	_ = block
+	return object.Integer(vm.e2eFact_k(int64(i0)))
+}
+
+func (vm *VM) e2eFactBig_l1(self object.Value, args []object.Value, block *Proc) object.Value {
+	var l0, l1 object.Value
+	l0 = args[0]
+	_ = l0
+	_ = l1
+	_ = self
+	_ = args
+	_ = block
+	var s0, s1 object.Value
+	s0 = object.Integer(1)
+	l1 = s0
+L3:
+	s0 = l0
+	s1 = object.Integer(1)
+	s0 = vm.binaryOp(bytecode.OpGt, s0, s1)
+	if !s0.Truthy() { goto L18 }
+	s0 = l1
+	s1 = l0
+	s0 = vm.binaryOp(bytecode.OpMul, s0, s1)
+	l1 = s0
+	s0 = l0
+	s1 = object.Integer(1)
+	s0 = vm.binaryOp(bytecode.OpSub, s0, s1)
+	l0 = s0
+	goto L3
+L18:
+	s0 = object.NilV
+	s0 = l1
+	return s0
+}
+
+func (vm *VM) e2eFactBig_k(l0 int64) int64 {
+	var l1 int64
+	_ = l0
+	_ = l1
+	var k0, k1 int64
+	k0 = 1
+	l1 = k0
+L3:
+	k0 = l0
+	k1 = 1
+	if !(k0 > k1) { goto L18 }
+	k0 = l1
+	k1 = l0
+	k0 = aotMul(k0, k1)
+	l1 = k0
+	k0 = l0
+	k1 = 1
+	k0 = aotSub(k0, k1)
+	l0 = k0
+	goto L3
+L18:
+	k0 = 0
+	k0 = l1
+	return k0
+}
+
+func (vm *VM) e2eFactBig(self object.Value, args []object.Value, block *Proc) (res object.Value) {
+	i0, ok0 := args[0].(object.Integer)
+	if !ok0 {
+		return vm.e2eFactBig_l1(self, args, block)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, d := r.(aotDeopt); d {
+				res = vm.e2eFactBig_l1(self, args, block)
+				return
+			}
+			panic(r)
+		}
+	}()
+	_ = self
+	_ = args
+	_ = block
+	return object.Integer(vm.e2eFactBig_k(int64(i0)))
+}
+
 // aotE2ECases pairs each compiled method with the reference MRI output
 // for the same program, baked at generation time. See aot_e2e_test.go.
 var aotE2ECases = []struct {
@@ -452,4 +606,6 @@ var aotE2ECases = []struct {
 	{"e2eDiv", func(vm *VM) object.Value { return vm.e2eDiv(vm.main, []object.Value{object.Integer(17), object.Integer(5)}, nil) }, "def m(a, b) = a / b\np m(17, 5)\n", "3"},
 	{"e2eMulOverflow", func(vm *VM) object.Value { return vm.e2eMulOverflow(vm.main, []object.Value{object.Integer(1000000000000), object.Integer(1000000000000)}, nil) }, "def m(a, b) = a * b\np m(1000000000000, 1000000000000)\n", "1000000000000000000000000"},
 	{"e2eFloatDeopt", func(vm *VM) object.Value { return vm.e2eFloatDeopt(vm.main, []object.Value{object.Float(1.5)}, nil) }, "def m(a) = a + 1\np m(1.5)\n", "2.5"},
+	{"e2eFact", func(vm *VM) object.Value { return vm.e2eFact(vm.main, []object.Value{object.Integer(10)}, nil) }, "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\np m(10)\n", "3628800"},
+	{"e2eFactBig", func(vm *VM) object.Value { return vm.e2eFactBig(vm.main, []object.Value{object.Integer(25)}, nil) }, "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\np m(25)\n", "15511210043330985984000000"},
 }

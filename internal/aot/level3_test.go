@@ -29,6 +29,7 @@ func TestL3Supported(t *testing.T) {
 		{"cmp_ne", "def m(a) = a != 0 ? 1 : 2\nm(1)", "k0 != k1"},
 		{"no_param", "def m = 5\nm", "f_k()"},
 		{"extra_local", "def m(n)\n  x = n + 1\n  x + x\nend\nm(1)", "l1 = k"},
+		{"while_loop", "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\nm(3)", "goto L"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -55,6 +56,7 @@ func TestL3Bails(t *testing.T) {
 		{"branch_without_compare", "def m(a) = a ? 1 : 2\nm(1)"}, // truthiness branch, no compare
 		{"non_self_send", "def m(a) = a.abs\nm(-1)"},        // a send that is not self-recursion
 		{"return_self", "def m = self\nm"},                  // returns self, not an int64
+		{"nil_escapes", "def m(n)\n  while n > 0\n    n = n - 1\n  end\nend\nm(1)"}, // while value (nil) is returned
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

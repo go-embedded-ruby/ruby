@@ -65,6 +65,8 @@ var cases = []aotCase{
 	{"e2eDiv", "m", "def m(a, b) = a / b", "17, 5", "object.Integer(17), object.Integer(5)"},                          // floor division
 	{"e2eMulOverflow", "m", "def m(a, b) = a * b", "1000000000000, 1000000000000", "object.Integer(1000000000000), object.Integer(1000000000000)"}, // overflow → deopt → Bignum
 	{"e2eFloatDeopt", "m", "def m(a) = a + 1", "1.5", "object.Float(1.5)"},                                            // non-Integer arg → guard deopt
+	{"e2eFact", "m", "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend", "10", "object.Integer(10)"},          // while-loop kernel
+	{"e2eFactBig", "m", "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend", "25", "object.Integer(25)"},        // overflows mid-loop → deopt → Bignum
 }
 
 func main() {
