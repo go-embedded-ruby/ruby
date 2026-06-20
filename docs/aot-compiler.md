@@ -101,9 +101,13 @@ At `rbgo build`, for each compiled method ISeq:
 Each stage is gated by the 100 %-coverage + MRI-differential suite, and each is
 shippable on its own:
 
-1. **Codegen skeleton** — lower a restricted opcode subset (push/local/branch/
-   integer-arith/known-send/return) to level-1 Go for a single method; verify it
-   produces MRI-identical output and the measured speedup.
+1. **Codegen skeleton** — ✅ **done** (`internal/aot`). Lowers a method ISeq to
+   level-1 Go using depth-indexed stack variables and `goto` for control flow,
+   with a self-send to the method becoming a direct recursive call; an
+   unsupported opcode/constant/parameter-shape leaves the method to the
+   interpreter (`Compile` returns ok=false). The generated `fib` compiles, runs
+   MRI-identically (`fib(30) = 832040`), and clocks the prototype's level-1 speed
+   (~36 ms — beating the MRI interpreter). 100% covered.
 2. **Whole-method level-1** — cover every opcode (with interpreter fall-back for
    the few hard ones), so any method can be compiled soundly.
 3. **`rbgo build` integration** — generate, compile and link emitted Go into the
