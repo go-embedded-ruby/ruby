@@ -29,6 +29,13 @@ func Compile(iseq *bytecode.ISeq, goName, rubyName string) (string, bool) {
 	if iseq.SplatIndex >= 0 || len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 || iseq.BlockSlot >= 0 {
 		return "", false
 	}
+	// Optional parameters need the arg_given/default-value machinery, which the
+	// prologue (which binds every param from args[i]) does not model; leave them
+	// to the interpreter. With splat/kw already excluded, len(Params) > NumRequired
+	// means optional positionals are present.
+	if len(iseq.Params) != iseq.NumRequired {
+		return "", false
+	}
 	if len(iseq.Insns) == 0 || iseq.Insns[len(iseq.Insns)-1].Op != bytecode.OpReturn {
 		return "", false
 	}
@@ -42,7 +49,7 @@ func Compile(iseq *bytecode.ISeq, goName, rubyName string) (string, bool) {
 	targets := jumpTargets(iseq)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "func (vm *VM) %s(self object.Value, args []object.Value) object.Value {\n", goName)
+	fmt.Fprintf(&b, "func (vm *VM) %s(self object.Value, args []object.Value, block *Proc) object.Value {\n", goName)
 	if iseq.NumLocals > 0 {
 		fmt.Fprintf(&b, "\tvar %s object.Value\n", localDecls(iseq.NumLocals))
 		for i := 0; i < len(iseq.Params); i++ {
@@ -52,8 +59,9 @@ func Compile(iseq *bytecode.ISeq, goName, rubyName string) (string, bool) {
 			fmt.Fprintf(&b, "\t_ = l%d\n", i) // a local may be unread (e.g. an unused param)
 		}
 	}
-	fmt.Fprintf(&b, "\t_ = self\n") // self/args may be unused in a leaf method
+	fmt.Fprintf(&b, "\t_ = self\n") // self/args/block may be unused in a leaf method
 	fmt.Fprintf(&b, "\t_ = args\n")
+	fmt.Fprintf(&b, "\t_ = block\n")
 	// The body ends in OpReturn, which pops a value, so the operand stack is used
 	// (maxDepth ≥ 1) and the declaration is always non-empty.
 	fmt.Fprintf(&b, "\tvar %s object.Value\n", stackDecls(maxDepth))
@@ -151,10 +159,49 @@ func (g *gen) emit(pc int) (string, bool) {
 		}
 		argsExpr := "[]object.Value{" + strings.Join(argList, ", ") + "}"
 		if g.isSelf[recvSlot] && name == g.rubyName {
-			// Self-send to the method being compiled → direct recursive call.
-			return line("s%d = vm.%s(self, %s)", recvSlot, g.goName, argsExpr), true
+			// Self-send to the method being compiled → direct recursive call (a
+			// plain send carries no block).
+			return line("s%d = vm.%s(self, %s, nil)", recvSlot, g.goName, argsExpr), true
 		}
 		return line("s%d = vm.dispatchSend(s%d, %q, %s, nil)", recvSlot, recvSlot, name, argsExpr), true
+	case bytecode.OpNewArray:
+		return line("s%d = &object.Array{Elems: []object.Value{%s}}", d-in.A, slotRange(d-in.A, in.A)), true
+	case bytecode.OpNewHash:
+		n := in.A * 2
+		base := d - n
+		var sb strings.Builder
+		sb.WriteString("\t{\n\t\th := object.NewHash()\n")
+		for i := 0; i < n; i += 2 {
+			fmt.Fprintf(&sb, "\t\th.Set(s%d, s%d)\n", base+i, base+i+1)
+		}
+		fmt.Fprintf(&sb, "\t\ts%d = h\n\t}\n", base)
+		return sb.String(), true
+	case bytecode.OpNewRange:
+		excl := "false"
+		if in.A == 1 {
+			excl = "true"
+		}
+		return line("s%d = &object.Range{Lo: s%d, Hi: s%d, Exclusive: %s}", d-2, d-2, d-1, excl), true
+	case bytecode.OpGetIvar:
+		return line("s%d = getIvar(self, %q)", d, g.iseq.Names[in.A]), true
+	case bytecode.OpSetIvar:
+		return line("setIvar(self, %q, s%d)", g.iseq.Names[in.A], d-1), true
+	case bytecode.OpGetConst:
+		return line("s%d = vm.aotConst(%q)", d, g.iseq.Names[in.A]), true
+	case bytecode.OpSetConst:
+		return line("vm.consts[%q] = s%d", g.iseq.Names[in.A], d-1), true
+	case bytecode.OpGetGVar:
+		return line("s%d = vm.gvar(%q)", d, g.iseq.Names[in.A]), true
+	case bytecode.OpSplatToArray:
+		return line("s%d = aotSplat(s%d)", d-1, d-1), true
+	case bytecode.OpConcatArray:
+		return line("s%d = aotConcat(s%d, s%d)", d-2, d-2, d-1), true
+	case bytecode.OpRegexp:
+		return line("s%d = vm.compileRegexp(%q, %q)", d, g.iseq.Names[in.A], g.iseq.Names[in.B]), true
+	case bytecode.OpBlockGiven:
+		return line("s%d = object.Bool(block != nil)", d), true
+	case bytecode.OpInvokeBlock:
+		return line("s%d = vm.aotYield(block, []object.Value{%s})", d-in.A, slotRange(d-in.A, in.A)), true
 	case bytecode.OpReturn:
 		return line("return s%d", d-1), true
 	}
@@ -207,18 +254,25 @@ func stackDepths(iseq *bytecode.ISeq) (depth []int, max int, known []bool) {
 func delta(in bytecode.Instr) int {
 	switch in.Op {
 	case bytecode.OpPushConst, bytecode.OpPushNil, bytecode.OpPushTrue,
-		bytecode.OpPushFalse, bytecode.OpPushSelf, bytecode.OpGetLocal, bytecode.OpDup:
+		bytecode.OpPushFalse, bytecode.OpPushSelf, bytecode.OpGetLocal, bytecode.OpDup,
+		bytecode.OpGetIvar, bytecode.OpGetConst, bytecode.OpGetGVar, bytecode.OpRegexp,
+		bytecode.OpBlockGiven:
 		return 1
 	case bytecode.OpPop, bytecode.OpBranchIf, bytecode.OpBranchUnless,
-		bytecode.OpBranchNil, bytecode.OpReturn,
+		bytecode.OpBranchNil, bytecode.OpReturn, bytecode.OpNewRange, bytecode.OpConcatArray,
 		bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
 		bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
 		bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:
 		return -1
-	case bytecode.OpSetLocal, bytecode.OpJump, bytecode.OpNeg, bytecode.OpNot, bytecode.OpTruthy:
+	case bytecode.OpSetLocal, bytecode.OpJump, bytecode.OpNeg, bytecode.OpNot, bytecode.OpTruthy,
+		bytecode.OpSetIvar, bytecode.OpSetConst, bytecode.OpSplatToArray:
 		return 0
 	case bytecode.OpSend:
 		return -in.B // pop argc args + recv, push result
+	case bytecode.OpNewArray, bytecode.OpInvokeBlock:
+		return 1 - in.A
+	case bytecode.OpNewHash:
+		return 1 - 2*in.A
 	}
 	return 0
 }
@@ -250,6 +304,15 @@ func constExpr(v object.Value) (string, bool) {
 		return "object.Symbol(" + strconv.Quote(string(x)) + ")", true
 	}
 	return "", false
+}
+
+// slotRange returns the comma-separated stack slots s<from> … s<from+count-1>.
+func slotRange(from, count int) string {
+	parts := make([]string, count)
+	for i := range parts {
+		parts[i] = "s" + strconv.Itoa(from+i)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func localDecls(n int) string {

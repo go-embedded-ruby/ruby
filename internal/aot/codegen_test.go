@@ -62,6 +62,22 @@ func TestCompileSupported(t *testing.T) {
 		{"stringc", "def m = \"hi\"\nm", "m", "object.NewString"},
 		{"symbolc", "def m = :sym\nm", "m", "object.Symbol"},
 		{"while", "def m(a)\n  while a > 0\n    a -= 1\n  end\n  a\nend\nm(3)", "m", "goto L"},
+		{"array", "def m(a, b, c) = [a, b, c]\nm(1, 2, 3)", "m", "object.Array{Elems"},
+		{"empty_array", "def m = []\nm", "m", "object.Array{Elems: []object.Value{}}"},
+		{"hash", "def m(a, b) = {x: a, y: b}\nm(1, 2)", "m", "h.Set("},
+		{"empty_hash", "def m = {}\nm", "m", "object.NewHash()"},
+		{"range", "def m(a) = (1..a)\nm(5)", "m", "object.Range{Lo"},
+		{"range_excl", "def m(a) = (1...a)\nm(5)", "m", "Exclusive: true"},
+		{"getivar", "def m = @x\nm", "m", "getIvar(self,"},
+		{"setivar", "def m(a)\n  @x = a\nend\nm(1)", "m", "setIvar(self,"},
+		{"getconst", "def m = Foo\nm", "m", "vm.aotConst("},
+		{"setconst", "def m\n  X = 1\n  X\nend\nm", "m", "vm.consts["},
+		{"getgvar", "def m = $g\nm", "m", "vm.gvar("},
+		{"splat_concat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotConcat("},
+		{"splat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotSplat("},
+		{"regexp", "def m = /ab/\nm", "m", "compileRegexp("},
+		{"block_given", "def m = block_given?\nm", "m", "object.Bool(block != nil)"},
+		{"invoke_block", "def m\n  yield 1\nend\nm", "m", "aotYield(block,"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -100,9 +116,10 @@ func TestCompileBails(t *testing.T) {
 		{"splat", "def m(*a) = a\nm"},
 		{"keyword", "def m(a:) = a\nm(a: 1)"},
 		{"block_param", "def m(&b) = b\nm"},
+		{"optional_param", "def m(a = 5) = a\nm"}, // optional positionals need default-value machinery
 		{"send_with_block", "def m(a) = a.each { |x| x }\nm(1)"},
 		{"bignum_const", "def m = 99999999999999999999999\nm"},
-		{"unsupported_opcode", "def m = [1, 2]\nm"}, // OpNewArray
+		{"unsupported_opcode", "def m\n  a, b = 1, 2\n  a\nend\nm"}, // OpExpandArray
 		// case/in emits OpTruthy (covered before the bail) then an unsupported
 		// OpRaiseNoMatch.
 		{"case_in", "def m(x)\n  case x\n  in 1 then 1\n  end\nend\nm(1)"},
