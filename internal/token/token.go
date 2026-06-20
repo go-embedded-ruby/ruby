@@ -83,6 +83,7 @@ const (
 	BANG
 	QUESTION // ?
 	COLON    // : (ternary separator)
+	SCOPE    // :: (constant scope resolution)
 	LPAREN
 	RPAREN
 	LBRACE
@@ -113,7 +114,7 @@ var typeNames = map[Type]string{
 	SUPER: "super", YIELD: "yield",
 	PLUS: "+", MINUS: "-", STAR: "*", POW: "**", SLASH: "/", PERCENT: "%", ASSIGN: "=",
 	EQ: "==", EQQ: "===", MATCH: "=~", NEQ: "!=", LT: "<", GT: ">", LE: "<=", GE: ">=", BANG: "!",
-	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=", QUESTION: "?", COLON: ":",
+	SPACESHIP: "<=>", SHOVEL: "<<", ANDAND: "&&", OROR: "||", OPASSIGN: "op=", QUESTION: "?", COLON: ":", SCOPE: "::",
 	LPAREN: "(", RPAREN: ")", LBRACE: "{", RBRACE: "}", LBRACKET: "[", RBRACKET: "]",
 	PIPE: "|", HASHROCKET: "=>", COMMA: ",", DOT: ".", DOTDOT: "..", DOTDOTDOT: "...",
 	AMPER: "&", SAFEDOT: "&.", ARROW: "->", CARET: "^", RSHIFT: ">>", TILDE: "~",

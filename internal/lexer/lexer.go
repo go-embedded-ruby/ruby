@@ -342,6 +342,11 @@ func (l *Lexer) next() token.Token {
 		l.state = exprBegin
 		return mk(token.QUESTION, "?")
 	case ':':
+		if l.peek() == ':' { // :: constant scope resolution
+			l.advance()
+			l.state = exprBegin
+			return mk(token.SCOPE, "::")
+		}
 		l.state = exprBegin
 		return mk(token.COLON, ":")
 	case '^':

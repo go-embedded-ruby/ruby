@@ -148,6 +148,13 @@ type Return struct{ Value Node } // Value may be nil
 // ConstRef references a constant (e.g. a class name) by name.
 type ConstRef struct{ Name string }
 
+// ScopedConst is a constant looked up through ::, e.g. Math::PI or Foo::BAR.
+// Recv evaluates to the module/class whose constant table is consulted.
+type ScopedConst struct {
+	Recv Node
+	Name string
+}
+
 // GVarRef references a global variable by name ("$~", "$1", "$stdout", …).
 type GVarRef struct{ Name string }
 
@@ -348,7 +355,8 @@ type RescueClause struct {
 	Body    []Node
 }
 
-func (*Program) node()    {}
+func (*Program) node()     {}
+func (*ScopedConst) node() {}
 func (*IntLit) node()     {}
 func (*BignumLit) node()  {}
 func (*FloatLit) node()   {}

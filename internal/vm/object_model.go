@@ -106,6 +106,23 @@ func lookupMethod(c *RClass, name string) *Method {
 	return nil
 }
 
+// scopedConst resolves Recv::name. It searches the class/module's own constant
+// table up the superclass chain; failing that it falls back to the global
+// constant table (constants are currently stored flat there), so both a native
+// module constant like Math::PI and a user Foo::BAR resolve.
+func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
+	for c := cls; c != nil; c = c.super {
+		if v, ok := c.consts[name]; ok {
+			return v
+		}
+	}
+	if v, ok := vm.consts[name]; ok {
+		return v
+	}
+	raise("NameError", "uninitialized constant %s::%s", cls.name, name)
+	return object.NilV
+}
+
 // lookupSMethod finds a singleton (class) method, walking the superclass chain
 // so a subclass inherits its ancestors' class methods.
 func lookupSMethod(c *RClass, name string) *Method {

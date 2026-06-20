@@ -1177,6 +1177,21 @@ func (p *Parser) parsePostfixTail(node ast.Node) ast.Node {
 				p.expect(token.RPAREN)
 			}
 			node = &ast.Call{Recv: node, Name: name, Args: args, Safe: safe}
+		case p.is(token.SCOPE):
+			p.advance()
+			if p.is(token.CONST) { // Math::PI — a scoped constant
+				node = &ast.ScopedConst{Recv: node, Name: p.advance().Lit}
+				break
+			}
+			// Foo::bar(args) — a method call, like the dot form.
+			name := p.methodName()
+			var args []ast.Node
+			if p.is(token.LPAREN) && !p.cur().SpaceBefore {
+				p.advance()
+				args = p.parseCallArgs(token.RPAREN)
+				p.expect(token.RPAREN)
+			}
+			node = &ast.Call{Recv: node, Name: name, Args: args}
 		case p.is(token.LBRACKET): // index: recv[args] → recv.[](args)
 			p.advance()
 			args := p.parseCallArgs(token.RBRACKET)

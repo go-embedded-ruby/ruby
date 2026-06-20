@@ -31,8 +31,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `Proc`/lambda, `Regexp`/`MatchData`, `Struct`.
 - **Operators:** arithmetic (`+ - * / %`, **Ruby floor division**, `**`),
   comparison/`<=>`, `==`/`===`, bitwise/shift (`<< >> & | ^ ~`, arbitrary
-  precision), `&&`/`||`, ternary, ranges; correct negative-literal precedence
-  (`-2.abs == 2`, `-2**2 == -4`).
+  precision), `&&`/`||`, ternary, ranges, **`::` constant scope** (`Math::PI`,
+  `Foo::BAR`); correct negative-literal precedence (`-2.abs == 2`, `-2**2 == -4`).
 - **Control flow:** `if`/`elsif`/`else`, `unless`, `while`/`until`,
   `case`/`when`, statement modifiers (incl. modifier `rescue`,
   `expr rescue fallback`), `begin`/`rescue`/`else`/`ensure`/`retry`,
@@ -74,6 +74,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`).
 - **Objects:** `dup`/`clone`/`freeze`/`frozen?`, `equal?`,
   `instance_variable_get`/`set`.
+- **Math:** the `Math` module (`sqrt`/`cbrt`/`exp`/`log`/`log2`/`log10`, the
+  trig and hyperbolic functions, `atan2`/`hypot`/`pow`) with `Math::PI`/`Math::E`.
 - **FFT:** an `FFT` module (`fft`/`ifft`/`rfft`/`irfft`/`fftfreq`/`rfftfreq`)
   binding the pure-Go [go-fft](https://github.com/go-fft/fft) library — a
   `numpy.fft`-style transform with **no cgo / no FFTW**, returning `Complex`
