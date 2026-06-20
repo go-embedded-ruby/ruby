@@ -53,6 +53,14 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return rationalOp(op, a, b)
 	}
 
+	// NDArray element-wise / scalar arithmetic, in either operand order.
+	if _, ok := a.(*NDArray); ok {
+		return ndarrayOp(op, a, b)
+	}
+	if _, ok := b.(*NDArray); ok {
+		return ndarrayOp(op, a, b)
+	}
+
 	ai, aok := a.(object.Integer)
 	bi, bok := b.(object.Integer)
 	if aok && bok {

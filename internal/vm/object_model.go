@@ -163,6 +163,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cComplex
 	case *object.Rational:
 		return vm.cRational
+	case *NDArray:
+		return vm.cNDArray
 	case *object.String:
 		return vm.cString
 	case object.Symbol:
