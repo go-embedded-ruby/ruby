@@ -1,13 +1,13 @@
 // Command rbgo is the CLI front-end for the embedded-ruby interpreter.
 //
-// Phase 0 supports a single mode:
+//	rbgo run <file.rb>            compile in memory and interpret
+//	rbgo run -e "<code>"          run a one-liner
+//	rbgo <file.rb>                shorthand for `rbgo run`
+//	rbgo build [-o out] <file.rb> AOT-compile the program's lowerable methods to
+//	                             native Go and link a specialised binary (see
+//	                             internal/aot and docs/aot-compiler.md)
 //
-//	rbgo run <file.rb>     compile in memory and interpret
-//	rbgo run -e "<code>"   run a one-liner
-//	rbgo <file.rb>         shorthand for `rbgo run`
-//
-// `rbgo build` (single static binary) and `repl` arrive in later phases
-// (plan-rbgo.md §12, §17).
+// `repl` arrives in a later phase (plan-rbgo.md §17).
 package main
 
 import (

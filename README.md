@@ -75,11 +75,16 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 - **Objects:** `dup`/`clone`/`freeze`/`frozen?`, `equal?`,
   `instance_variable_get`/`set`.
 
+- **AOT compiler (`rbgo build`):** lowers a program's methods to native Go and
+  links a specialised binary. Pure integer methods become unboxed `int64`
+  kernels with an overflow/`÷0` deopt back to the interpreter — the generated
+  `fib(30)` runs **~4× faster than MRI+YJIT** while staying correct for every
+  input. See [docs/aot-compiler.md](docs/aot-compiler.md).
+
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(Fiber/Enumerator/lazy, hooks and string `eval`, the `rbgo build`
-toolchain).
+(Fiber/Enumerator/lazy, hooks and string `eval`).
 
 ## Quick start
 
@@ -105,12 +110,17 @@ go run ./cmd/rbgo run fib.rb                  # => 6765
 # build the CLI
 go build -o rbgo ./cmd/rbgo
 ./rbgo fib.rb
+
+# AOT-compile a program's methods to native code and link a specialised binary
+./rbgo build -o fib fib.rb                    # fib (the method) becomes native int64
+./fib fib.rb                                  # => 6765
 ```
 
 ## Layout
 
 ```
-cmd/rbgo/            CLI: run (build | repl arrive later)
+cmd/rbgo/            CLI: run, build (repl arrives later)
+cmd/aotgen/          regenerates the AOT differential suite (go:generate)
 internal/
   token/             token kinds (carry SpaceBefore = MRI's spaceSeen)
   lexer/             stateful lexer (lexState seed, SpaceBefore)
@@ -119,8 +129,9 @@ internal/
   compiler/          AST → bytecode (ISeq), local-slot resolution
   bytecode/          instruction set + ISeq
   vm/                stack-machine interpreter, arithmetic, builtins
+  aot/               AOT compiler: bytecode → Go (level-1 + level-3 kernels)
   object/            Value interface + concrete value types
-docs/                plan-rbgo.md (the roadmap)
+docs/                plan-rbgo.md (the roadmap), aot-compiler.md
 ```
 
 ## Testing
