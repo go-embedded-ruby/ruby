@@ -185,7 +185,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		}
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %s)", len(args), expected)
 	}
-	env := &Env{slots: make([]object.Value, iseq.NumLocals), parent: parentEnv, kwargs: kwargs}
+	env := &Env{parent: parentEnv, kwargs: kwargs}
+	if iseq.NumLocals <= len(env.inline) {
+		env.slots = env.inline[:iseq.NumLocals]
+	} else {
+		env.slots = make([]object.Value, iseq.NumLocals)
+	}
 	for i := range env.slots {
 		env.slots[i] = object.NilV
 	}
