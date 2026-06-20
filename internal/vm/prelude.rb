@@ -288,6 +288,10 @@ class Float
   include Comparable
 end
 
+class Rational
+  include Comparable
+end
+
 class String
   include Comparable
 end

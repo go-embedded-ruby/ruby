@@ -96,6 +96,15 @@ func (c *Complex) ToS() string     { return c.Re.ToS() + imagPart(c.Im) }
 func (c *Complex) Inspect() string { return "(" + c.ToS() + ")" }
 func (c *Complex) Truthy() bool    { return true }
 
+// Rational is an exact ratio of two integers (Ruby Rational), held as a
+// normalised math/big.Rat — always reduced, with a positive denominator — so
+// Rational(4, 2) prints "2/1" and Rational(1, -2) prints "-1/2", matching MRI.
+type Rational struct{ R *big.Rat }
+
+func (r *Rational) ToS() string     { return r.R.Num().String() + "/" + r.R.Denom().String() }
+func (r *Rational) Inspect() string { return "(" + r.ToS() + ")" }
+func (r *Rational) Truthy() bool    { return true }
+
 // imagPart renders the imaginary term with its sign, e.g. "+2i" or "-2.0i". The
 // component's own ToS already carries a leading "-" when negative, so the sign
 // is taken from it directly (no negation, which keeps Bignum/edge values exact).

@@ -24,6 +24,7 @@ func (vm *VM) bootstrap() {
 	vm.cInteger = newClass("Integer", vm.cObject)
 	vm.cFloat = newClass("Float", vm.cObject)
 	vm.cComplex = newClass("Complex", vm.cObject)
+	vm.cRational = newClass("Rational", vm.cObject)
 	vm.cString = newClass("String", vm.cObject)
 	vm.cSymbol = newClass("Symbol", vm.cObject)
 	vm.cArray = newClass("Array", vm.cObject)
@@ -38,7 +39,7 @@ func (vm *VM) bootstrap() {
 
 	for _, c := range []*RClass{
 		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
-		vm.cFloat, vm.cComplex, vm.cString, vm.cSymbol, vm.cArray, vm.cHash, vm.cRange,
+		vm.cFloat, vm.cComplex, vm.cRational, vm.cString, vm.cSymbol, vm.cArray, vm.cHash, vm.cRange,
 		vm.cProc, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
 		vm.cRegexp, vm.cMatchData,
 	} {
@@ -46,6 +47,7 @@ func (vm *VM) bootstrap() {
 	}
 
 	vm.registerComplex()
+	vm.registerRational()
 	vm.registerMath()
 	vm.registerFFT()
 

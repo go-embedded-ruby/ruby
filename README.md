@@ -27,8 +27,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   bare-`0`-octal/`0b`/`0d` with underscores), floats, strings, symbols (incl.
   **operator-method symbols** `:+`/`:<<`/`:[]=`/`:<=>`, usable with
   `reduce(:+)`/`inject`/`send(:+, x)`), arrays, hashes, ranges (incl.
-  beginless/endless), **`Complex`** numbers, `true`/`false`/`nil`, `self`,
-  `Proc`/lambda, `Regexp`/`MatchData`, `Struct`.
+  beginless/endless), **`Complex`** and **`Rational`** numbers, `true`/`false`/
+  `nil`, `self`, `Proc`/lambda, `Regexp`/`MatchData`, `Struct`.
 - **Operators:** arithmetic (`+ - * / %`, **Ruby floor division**, `**`),
   comparison/`<=>`, `==`/`===`, bitwise/shift (`<< >> & | ^ ~`, arbitrary
   precision), `&&`/`||`, ternary, ranges, **`::` constant scope** (`Math::PI`,

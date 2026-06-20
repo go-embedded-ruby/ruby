@@ -44,6 +44,15 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return complexOp(op, ac, bc)
 	}
 
+	// Rational fast paths. A Float operand makes the result Float (Float wins the
+	// numeric tower); an Integer/Bignum stays exact.
+	if _, ok := a.(*object.Rational); ok {
+		return rationalOp(op, a, b)
+	}
+	if _, ok := b.(*object.Rational); ok {
+		return rationalOp(op, a, b)
+	}
+
 	ai, aok := a.(object.Integer)
 	bi, bok := b.(object.Integer)
 	if aok && bok {
@@ -350,6 +359,8 @@ func negate(v object.Value) object.Value {
 		return object.NormInt(new(big.Int).Neg(n.I))
 	case *object.Complex:
 		return &object.Complex{Re: negate(n.Re), Im: negate(n.Im)}
+	case *object.Rational:
+		return &object.Rational{R: new(big.Rat).Neg(n.R)}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
@@ -362,6 +373,12 @@ func valueEqual(a, b object.Value) bool {
 	}
 	if bc, ok := b.(*object.Complex); ok {
 		return complexEqual(bc, a)
+	}
+	if ar, ok := a.(*object.Rational); ok {
+		return rationalEqual(ar, b)
+	}
+	if br, ok := b.(*object.Rational); ok {
+		return rationalEqual(br, a)
 	}
 	switch av := a.(type) {
 	case object.Integer:
@@ -437,6 +454,9 @@ func toFloat(v object.Value) (float64, bool) {
 		return float64(n), true
 	case *object.Bignum:
 		f, _ := new(big.Float).SetInt(n.I).Float64()
+		return f, true
+	case *object.Rational:
+		f, _ := n.R.Float64()
 		return f, true
 	}
 	return 0, false
