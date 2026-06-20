@@ -32,7 +32,12 @@ func CompileProgram(top *bytecode.ISeq) (content string, keys []string, ok bool)
 		}
 		child := top.Children[in.B]
 		goName := "aotm" + strconv.Itoa(len(keys))
-		src, lowered := Compile(child, goName, name)
+		// Prefer the level-3 integer-kernel specialisation; fall back to the
+		// sound level-1 lowering for everything else.
+		src, lowered := CompileSpecialized(child, goName, name)
+		if !lowered {
+			src, lowered = Compile(child, goName, name)
+		}
 		if !lowered {
 			continue
 		}

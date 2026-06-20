@@ -108,13 +108,33 @@ shippable on its own:
    interpreter (`Compile` returns ok=false). The generated `fib` compiles, runs
    MRI-identically (`fib(30) = 832040`), and clocks the prototype's level-1 speed
    (~36 ms — beating the MRI interpreter). 100% covered.
-2. **Whole-method level-1** — cover every opcode (with interpreter fall-back for
-   the few hard ones), so any method can be compiled soundly.
-3. **`rbgo build` integration** — generate, compile and link emitted Go into the
-   static binary; method dispatch prefers the compiled entry.
-4. **Level-2 specialisation + deopt** — type guards, inline primitives, the
-   method-state generation counter and deopt edges.
+2. **Whole-method level-1** — ✅ **done**. Covers arrays, hashes, ranges, ivar
+   get/set, const get/set, global read, regexp, `block_given?`/`yield`, and
+   splat/concat, each through a runtime helper (`internal/vm/aot_runtime.go`)
+   when it needs interpreter state. A generated-method differential suite
+   (`cmd/aotgen` → `aot_e2e_*_test.go`) diffs ten compiled methods against MRI.
+3. **`rbgo build` integration** — ✅ **done**. `internal/aot.CompileProgram`
+   lowers a program's top-level methods to one `package vm` Go file (a function
+   per method + an `init()` registering them via the dispatch seam,
+   `RegisterCompiled`); `rbgo build` injects it with `go build -overlay` and
+   links a specialised binary. `invoke()` prefers a method's compiled entry; a
+   redefinition deopts to the interpreter. `go tool nm` confirms the compiled
+   symbols are linked.
+4. **Level-3 integer-kernel specialisation + deopt** — ✅ **done**
+   (`internal/aot/level3.go`). A method that is pure integer arithmetic /
+   comparison on Integer parameters (with self-recursion) is lowered to an
+   unboxed `int64` kernel; the boxed entry guards the args are Integer and a
+   `recover` turns an overflow / divide-by-zero (`aotDeopt`) into the level-1
+   result, so it stays correct for every input. The overflow conditions mirror
+   `intOp` exactly. The **generated** `fib(30)` clocks **1.86 ms** — matching the
+   hand-written level-3 prototype (1.77 ms) and **beating MRI+YJIT (7.5 ms) by
+   ~4×**. The deopt edges are proven against MRI: integer overflow promotes to
+   the identical Bignum, a non-Integer argument falls back through level-1, and
+   divide-by-zero raises `ZeroDivisionError`.
 
 The prototype (`aot_proto_test.go`) stays as the regression that pins the
-target: level-1 must keep beating the MRI interpreter, level-2 must keep matching
-YJIT.
+target: level-1 must keep beating the MRI interpreter, level-3 must keep beating
+YJIT. `BenchmarkAOTGeneratedL3Fib` pins the *generated* kernel to that same bar.
+
+Still interpreted (left to future stages): methods with loops that yield a `nil`
+value (`while`), optional/keyword/splat parameters, and non-integer kernels.

@@ -6,7 +6,7 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-func (vm *VM) e2eArith(self object.Value, args []object.Value, block *Proc) object.Value {
+func (vm *VM) e2eArith_l1(self object.Value, args []object.Value, block *Proc) object.Value {
 	var l0, l1 object.Value
 	l0 = args[0]
 	l1 = args[1]
@@ -28,6 +28,48 @@ func (vm *VM) e2eArith(self object.Value, args []object.Value, block *Proc) obje
 	s1 = vm.binaryOp(bytecode.OpMod, s1, s2)
 	s0 = vm.binaryOp(bytecode.OpSub, s0, s1)
 	return s0
+}
+
+func (vm *VM) e2eArith_k(l0, l1 int64) int64 {
+	_ = l0
+	_ = l1
+	var k0, k1, k2 int64
+	k0 = l0
+	k1 = l1
+	k0 = aotMul(k0, k1)
+	k1 = l0
+	k2 = l1
+	k1 = aotDiv(k1, k2)
+	k0 = aotAdd(k0, k1)
+	k1 = l0
+	k2 = l1
+	k1 = aotMod(k1, k2)
+	k0 = aotSub(k0, k1)
+	return k0
+}
+
+func (vm *VM) e2eArith(self object.Value, args []object.Value, block *Proc) (res object.Value) {
+	i0, ok0 := args[0].(object.Integer)
+	if !ok0 {
+		return vm.e2eArith_l1(self, args, block)
+	}
+	i1, ok1 := args[1].(object.Integer)
+	if !ok1 {
+		return vm.e2eArith_l1(self, args, block)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, d := r.(aotDeopt); d {
+				res = vm.e2eArith_l1(self, args, block)
+				return
+			}
+			panic(r)
+		}
+	}()
+	_ = self
+	_ = args
+	_ = block
+	return object.Integer(vm.e2eArith_k(int64(i0), int64(i1)))
 }
 
 func (vm *VM) e2eCmp(self object.Value, args []object.Value, block *Proc) object.Value {
@@ -174,7 +216,7 @@ func (vm *VM) e2eIvar(self object.Value, args []object.Value, block *Proc) objec
 	return s0
 }
 
-func (vm *VM) e2eFib(self object.Value, args []object.Value, block *Proc) object.Value {
+func (vm *VM) e2eFib_l1(self object.Value, args []object.Value, block *Proc) object.Value {
 	var l0 object.Value
 	l0 = args[0]
 	_ = l0
@@ -193,15 +235,200 @@ L6:
 	s1 = l0
 	s2 = object.Integer(1)
 	s1 = vm.binaryOp(bytecode.OpSub, s1, s2)
-	s0 = vm.e2eFib(self, []object.Value{s1}, nil)
+	s0 = vm.e2eFib_l1(self, []object.Value{s1}, nil)
 	s1 = self
 	s2 = l0
 	s3 = object.Integer(2)
 	s2 = vm.binaryOp(bytecode.OpSub, s2, s3)
-	s1 = vm.e2eFib(self, []object.Value{s2}, nil)
+	s1 = vm.e2eFib_l1(self, []object.Value{s2}, nil)
 	s0 = vm.binaryOp(bytecode.OpAdd, s0, s1)
 L17:
 	return s0
+}
+
+func (vm *VM) e2eFib_k(l0 int64) int64 {
+	_ = l0
+	var k0, k1, k2, k3 int64
+	k0 = l0
+	k1 = 2
+	if !(k0 < k1) { goto L6 }
+	k0 = l0
+	goto L17
+L6:
+	k1 = l0
+	k2 = 1
+	k1 = aotSub(k1, k2)
+	k0 = vm.e2eFib_k(k1)
+	k2 = l0
+	k3 = 2
+	k2 = aotSub(k2, k3)
+	k1 = vm.e2eFib_k(k2)
+	k0 = aotAdd(k0, k1)
+L17:
+	return k0
+}
+
+func (vm *VM) e2eFib(self object.Value, args []object.Value, block *Proc) (res object.Value) {
+	i0, ok0 := args[0].(object.Integer)
+	if !ok0 {
+		return vm.e2eFib_l1(self, args, block)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, d := r.(aotDeopt); d {
+				res = vm.e2eFib_l1(self, args, block)
+				return
+			}
+			panic(r)
+		}
+	}()
+	_ = self
+	_ = args
+	_ = block
+	return object.Integer(vm.e2eFib_k(int64(i0)))
+}
+
+func (vm *VM) e2eDiv_l1(self object.Value, args []object.Value, block *Proc) object.Value {
+	var l0, l1 object.Value
+	l0 = args[0]
+	l1 = args[1]
+	_ = l0
+	_ = l1
+	_ = self
+	_ = args
+	_ = block
+	var s0, s1 object.Value
+	s0 = l0
+	s1 = l1
+	s0 = vm.binaryOp(bytecode.OpDiv, s0, s1)
+	return s0
+}
+
+func (vm *VM) e2eDiv_k(l0, l1 int64) int64 {
+	_ = l0
+	_ = l1
+	var k0, k1 int64
+	k0 = l0
+	k1 = l1
+	k0 = aotDiv(k0, k1)
+	return k0
+}
+
+func (vm *VM) e2eDiv(self object.Value, args []object.Value, block *Proc) (res object.Value) {
+	i0, ok0 := args[0].(object.Integer)
+	if !ok0 {
+		return vm.e2eDiv_l1(self, args, block)
+	}
+	i1, ok1 := args[1].(object.Integer)
+	if !ok1 {
+		return vm.e2eDiv_l1(self, args, block)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, d := r.(aotDeopt); d {
+				res = vm.e2eDiv_l1(self, args, block)
+				return
+			}
+			panic(r)
+		}
+	}()
+	_ = self
+	_ = args
+	_ = block
+	return object.Integer(vm.e2eDiv_k(int64(i0), int64(i1)))
+}
+
+func (vm *VM) e2eMulOverflow_l1(self object.Value, args []object.Value, block *Proc) object.Value {
+	var l0, l1 object.Value
+	l0 = args[0]
+	l1 = args[1]
+	_ = l0
+	_ = l1
+	_ = self
+	_ = args
+	_ = block
+	var s0, s1 object.Value
+	s0 = l0
+	s1 = l1
+	s0 = vm.binaryOp(bytecode.OpMul, s0, s1)
+	return s0
+}
+
+func (vm *VM) e2eMulOverflow_k(l0, l1 int64) int64 {
+	_ = l0
+	_ = l1
+	var k0, k1 int64
+	k0 = l0
+	k1 = l1
+	k0 = aotMul(k0, k1)
+	return k0
+}
+
+func (vm *VM) e2eMulOverflow(self object.Value, args []object.Value, block *Proc) (res object.Value) {
+	i0, ok0 := args[0].(object.Integer)
+	if !ok0 {
+		return vm.e2eMulOverflow_l1(self, args, block)
+	}
+	i1, ok1 := args[1].(object.Integer)
+	if !ok1 {
+		return vm.e2eMulOverflow_l1(self, args, block)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, d := r.(aotDeopt); d {
+				res = vm.e2eMulOverflow_l1(self, args, block)
+				return
+			}
+			panic(r)
+		}
+	}()
+	_ = self
+	_ = args
+	_ = block
+	return object.Integer(vm.e2eMulOverflow_k(int64(i0), int64(i1)))
+}
+
+func (vm *VM) e2eFloatDeopt_l1(self object.Value, args []object.Value, block *Proc) object.Value {
+	var l0 object.Value
+	l0 = args[0]
+	_ = l0
+	_ = self
+	_ = args
+	_ = block
+	var s0, s1 object.Value
+	s0 = l0
+	s1 = object.Integer(1)
+	s0 = vm.binaryOp(bytecode.OpAdd, s0, s1)
+	return s0
+}
+
+func (vm *VM) e2eFloatDeopt_k(l0 int64) int64 {
+	_ = l0
+	var k0, k1 int64
+	k0 = l0
+	k1 = 1
+	k0 = aotAdd(k0, k1)
+	return k0
+}
+
+func (vm *VM) e2eFloatDeopt(self object.Value, args []object.Value, block *Proc) (res object.Value) {
+	i0, ok0 := args[0].(object.Integer)
+	if !ok0 {
+		return vm.e2eFloatDeopt_l1(self, args, block)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, d := r.(aotDeopt); d {
+				res = vm.e2eFloatDeopt_l1(self, args, block)
+				return
+			}
+			panic(r)
+		}
+	}()
+	_ = self
+	_ = args
+	_ = block
+	return object.Integer(vm.e2eFloatDeopt_k(int64(i0)))
 }
 
 // aotE2ECases pairs each compiled method with the reference MRI output
@@ -222,4 +449,7 @@ var aotE2ECases = []struct {
 	{"e2eSplat", func(vm *VM) object.Value { return vm.e2eSplat(vm.main, []object.Value{object.Integer(1), object.Integer(2)}, nil) }, "def m(a, b) = [a, *[b, b]]\np m(1, 2)\n", "[1, 2, 2]"},
 	{"e2eIvar", func(vm *VM) object.Value { return vm.e2eIvar(vm.main, []object.Value{object.Integer(41)}, nil) }, "def m(a)\n  @x = a\n  @x + 1\nend\np m(41)\n", "42"},
 	{"e2eFib", func(vm *VM) object.Value { return vm.e2eFib(vm.main, []object.Value{object.Integer(10)}, nil) }, "def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)\np fib(10)\n", "55"},
+	{"e2eDiv", func(vm *VM) object.Value { return vm.e2eDiv(vm.main, []object.Value{object.Integer(17), object.Integer(5)}, nil) }, "def m(a, b) = a / b\np m(17, 5)\n", "3"},
+	{"e2eMulOverflow", func(vm *VM) object.Value { return vm.e2eMulOverflow(vm.main, []object.Value{object.Integer(1000000000000), object.Integer(1000000000000)}, nil) }, "def m(a, b) = a * b\np m(1000000000000, 1000000000000)\n", "1000000000000000000000000"},
+	{"e2eFloatDeopt", func(vm *VM) object.Value { return vm.e2eFloatDeopt(vm.main, []object.Value{object.Float(1.5)}, nil) }, "def m(a) = a + 1\np m(1.5)\n", "2.5"},
 }

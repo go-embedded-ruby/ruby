@@ -44,22 +44,27 @@ func mriOutput(prog string) string {
 }
 
 // a case: a Ruby method `m` (or `fib`), the Go name to compile it under, the
-// Ruby method name (for self-recursion lowering), and the literal call args.
+// Ruby method name (for self-recursion lowering), the Ruby literal call args
+// (for the MRI oracle) and the matching boxed Go argument expressions.
 type aotCase struct {
-	goName, rubyName, def, args string
+	goName, rubyName, def, rubyArgs, goArgs string
 }
 
 var cases = []aotCase{
-	{"e2eArith", "m", "def m(a, b) = a * b + a / b - a % b", "20, 6"},
-	{"e2eCmp", "m", "def m(a, b) = a < b == (a >= b)", "3, 5"},
-	{"e2eArray", "m", "def m(a, b, c) = [a, b, c]", "1, 2, 3"},
-	{"e2eNestArray", "m", "def m(a) = [a, [a, a]]", "5"},
-	{"e2eRange", "m", "def m(a) = (1..a)", "5"},
-	{"e2eRangeExcl", "m", "def m(a) = (1...a)", "5"},
-	{"e2eHash", "m", "def m(a, b) = {x: a, y: b}", "1, 2"},
-	{"e2eSplat", "m", "def m(a, b) = [a, *[b, b]]", "1, 2"},
-	{"e2eIvar", "m", "def m(a)\n  @x = a\n  @x + 1\nend", "41"},
-	{"e2eFib", "fib", "def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)", "10"},
+	{"e2eArith", "m", "def m(a, b) = a * b + a / b - a % b", "20, 6", "object.Integer(20), object.Integer(6)"},
+	{"e2eCmp", "m", "def m(a, b) = a < b == (a >= b)", "3, 5", "object.Integer(3), object.Integer(5)"},
+	{"e2eArray", "m", "def m(a, b, c) = [a, b, c]", "1, 2, 3", "object.Integer(1), object.Integer(2), object.Integer(3)"},
+	{"e2eNestArray", "m", "def m(a) = [a, [a, a]]", "5", "object.Integer(5)"},
+	{"e2eRange", "m", "def m(a) = (1..a)", "5", "object.Integer(5)"},
+	{"e2eRangeExcl", "m", "def m(a) = (1...a)", "5", "object.Integer(5)"},
+	{"e2eHash", "m", "def m(a, b) = {x: a, y: b}", "1, 2", "object.Integer(1), object.Integer(2)"},
+	{"e2eSplat", "m", "def m(a, b) = [a, *[b, b]]", "1, 2", "object.Integer(1), object.Integer(2)"},
+	{"e2eIvar", "m", "def m(a)\n  @x = a\n  @x + 1\nend", "41", "object.Integer(41)"},
+	// Level-3 integer kernels and their deopt edges:
+	{"e2eFib", "fib", "def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)", "10", "object.Integer(10)"},                 // unboxed kernel
+	{"e2eDiv", "m", "def m(a, b) = a / b", "17, 5", "object.Integer(17), object.Integer(5)"},                          // floor division
+	{"e2eMulOverflow", "m", "def m(a, b) = a * b", "1000000000000, 1000000000000", "object.Integer(1000000000000), object.Integer(1000000000000)"}, // overflow → deopt → Bignum
+	{"e2eFloatDeopt", "m", "def m(a) = a + 1", "1.5", "object.Float(1.5)"},                                            // non-Integer arg → guard deopt
 }
 
 func main() {
@@ -90,21 +95,22 @@ func main() {
 		if err != nil {
 			fail("compile %s: %v", c.goName, err)
 		}
-		src, ok := aot.Compile(iseq.Children[0], c.goName, c.rubyName)
+		// Prefer the level-3 integer-kernel specialisation (with its deopt edges);
+		// fall back to the sound level-1 lowering, matching `rbgo build`.
+		src, ok := aot.CompileSpecialized(iseq.Children[0], c.goName, c.rubyName)
+		if !ok {
+			src, ok = aot.Compile(iseq.Children[0], c.goName, c.rubyName)
+		}
 		if !ok {
 			fail("Compile(%s) bailed — cannot emit", c.goName)
 		}
 		b.WriteString(src)
 		b.WriteString("\n")
 
-		var argExprs []string
-		for _, a := range strings.Split(c.args, ",") {
-			argExprs = append(argExprs, "object.Integer("+strings.TrimSpace(a)+")")
-		}
-		ruby := c.def + "\np " + c.rubyName + "(" + c.args + ")\n"
+		ruby := c.def + "\np " + c.rubyName + "(" + c.rubyArgs + ")\n"
 		want := mriOutput(ruby)
 		fmt.Fprintf(&slice, "\t{%q, func(vm *VM) object.Value { return vm.%s(vm.main, []object.Value{%s}, nil) }, %q, %q},\n",
-			c.goName, c.goName, strings.Join(argExprs, ", "), ruby, want)
+			c.goName, c.goName, c.goArgs, ruby, want)
 	}
 	slice.WriteString("}\n")
 	b.WriteString(slice.String())
