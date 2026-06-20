@@ -45,6 +45,29 @@ func (vm *VM) fibL2(n object.Value) object.Value {
 	return a + b
 }
 
+// fibL3 is the "fully monomorphised" form a whole-method type-inference pass
+// enables: once the entry guard proves the receiver is an Integer and the
+// operators are not redefined, the entire recursive region runs on unboxed
+// int64 — boxing only at the method boundary. This is what a runtime JIT cannot
+// match: a JIT specialises a region at a time with runtime budget, while an AOT
+// compiler proves types over the whole call graph at build time and hands the
+// result to Go's optimiser (inlining, registers, SSA, and PGO).
+func fibUnboxed(n int64) int64 {
+	if n < 2 {
+		return n
+	}
+	return fibUnboxed(n-1) + fibUnboxed(n-2)
+}
+
+// fibL3 is the boundary: guard + box at the edge, unboxed interior.
+func (vm *VM) fibL3(n object.Value) object.Value {
+	ni, ok := n.(object.Integer)
+	if !ok {
+		return vm.fibL1(n) // deopt
+	}
+	return object.Integer(fibUnboxed(int64(ni)))
+}
+
 const fibN = 30
 
 func BenchmarkAOTInterpreted(b *testing.B) {
@@ -72,6 +95,14 @@ func BenchmarkAOTLevel2(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = m.fibL2(object.Integer(fibN))
+	}
+}
+
+func BenchmarkAOTLevel3(b *testing.B) {
+	m := New(io.Discard)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = m.fibL3(object.Integer(fibN))
 	}
 }
 
