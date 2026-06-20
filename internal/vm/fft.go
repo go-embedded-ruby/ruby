@@ -90,6 +90,35 @@ func sampleSpacing(args []object.Value, idx int) float64 {
 	return d
 }
 
+// intSlice marshals a Ruby Array of integers into []int.
+func intSlice(v object.Value) []int {
+	a := arrayArg(v)
+	out := make([]int, len(a.Elems))
+	for i, e := range a.Elems {
+		out[i] = int(intArg(e))
+	}
+	return out
+}
+
+// checkShape validates that shape is non-empty with positive dimensions whose
+// product is n, raising ArgumentError otherwise — so go-fft's panic-on-bad-shape
+// surfaces as a Ruby error rather than crashing the VM.
+func checkShape(n int, shape []int) {
+	if len(shape) == 0 {
+		raise("ArgumentError", "empty shape")
+	}
+	prod := 1
+	for _, d := range shape {
+		if d <= 0 {
+			raise("ArgumentError", "invalid shape dimension %d", d)
+		}
+		prod *= d
+	}
+	if prod != n {
+		raise("ArgumentError", "shape product %d does not match data length %d", prod, n)
+	}
+}
+
 // registerFFT installs the FFT module and its transform functions.
 func (vm *VM) registerFFT() {
 	mod := newClass("FFT", nil)
@@ -119,4 +148,41 @@ func (vm *VM) registerFFT() {
 	def("rfftfreq", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return floatArray(gofft.RFFTFreq(int(intArg(args[0])), sampleSpacing(args, 1)))
 	})
+
+	// N-dimensional transforms over flat row-major data plus an explicit shape.
+	def("fftn", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		data, shape := complexSlice(args[0]), intSlice(args[1])
+		checkShape(len(data), shape)
+		return complexArray(gofft.FFTN(data, shape))
+	})
+	def("ifftn", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		data, shape := complexSlice(args[0]), intSlice(args[1])
+		checkShape(len(data), shape)
+		return complexArray(gofft.IFFTN(data, shape))
+	})
+	// 2-D transforms over flat row-major data of shape rows×cols.
+	def("fft2", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		data := complexSlice(args[0])
+		rows, cols := int(intArg(args[1])), int(intArg(args[2]))
+		checkShape(len(data), []int{rows, cols})
+		return complexArray(gofft.FFT2(data, [2]int{rows, cols}))
+	})
+	def("ifft2", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		data := complexSlice(args[0])
+		rows, cols := int(intArg(args[1])), int(intArg(args[2]))
+		checkShape(len(data), []int{rows, cols})
+		return complexArray(gofft.IFFT2(data, [2]int{rows, cols}))
+	})
+
+	// Window functions (numpy/scipy conventions): length n → []float64.
+	window := func(name string, f func(int) []float64) {
+		def(name, func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			return floatArray(f(int(intArg(args[0]))))
+		})
+	}
+	window("hann", gofft.Hann)
+	window("hamming", gofft.Hamming)
+	window("blackman", gofft.Blackman)
+	window("blackman_harris", gofft.BlackmanHarris)
+	window("bartlett", gofft.Bartlett)
 }

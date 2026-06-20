@@ -34,14 +34,39 @@ func TestFFT(t *testing.T) {
 	}
 }
 
+// TestFFTMultiDimAndWindows covers the N-dimensional / 2-D transforms (via
+// round-trips and the fft2≡fftn identity) and the window functions (against
+// known numpy/scipy values).
+func TestFFTMultiDimAndWindows(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p FFT.ifft2(FFT.fft2([1, 2, 3, 4, 5, 6], 2, 3), 2, 3).map { |c| c.real.round(6) }`, "[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]\n"},
+		{`p FFT.ifftn(FFT.fftn([1, 2, 3, 4], [2, 2]), [2, 2]).map { |c| c.real.round(6) }`, "[1.0, 2.0, 3.0, 4.0]\n"},
+		{`p FFT.fft2([1, 2, 3, 4, 5, 6], 2, 3) == FFT.fftn([1, 2, 3, 4, 5, 6], [2, 3])`, "true\n"},
+		{`p FFT.hann(4).map { |x| x.round(6) }`, "[0.0, 0.75, 0.75, 0.0]\n"},
+		{`p FFT.bartlett(5).map { |x| x.round(6) }`, "[0.0, 0.5, 1.0, 0.5, 0.0]\n"},
+		{`p FFT.hamming(1)`, "[1.0]\n"},
+		{`p FFT.blackman(1)`, "[1.0]\n"},
+		{`p FFT.blackman_harris(1)`, "[1.0]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestFFTErrors covers the marshalling guards: a non-Array argument, a
-// non-numeric element (complex and real paths), and a non-numeric spacing.
+// non-numeric element (complex and real paths), a non-numeric spacing, and the
+// shape validation (empty, non-positive dimension, product mismatch).
 func TestFFTErrors(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
 		{`FFT.fft(5)`, "TypeError"},
 		{`FFT.fft([1, "x"])`, "TypeError"},
 		{`FFT.rfft([1.0, "x"])`, "TypeError"},
 		{`FFT.fftfreq(4, "x")`, "TypeError"},
+		{`FFT.fftn([1], [])`, "ArgumentError"},        // empty shape
+		{`FFT.fftn([1], [0])`, "ArgumentError"},       // non-positive dimension
+		{`FFT.fft2([1, 2, 3], 2, 2)`, "ArgumentError"}, // product != data length
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)
