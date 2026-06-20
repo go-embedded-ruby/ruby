@@ -38,12 +38,17 @@ module Comparable
     end
   end
 
-  def clamp(min, max)
-    if self < min
-      min
-    elsif self > max
-      max
+  def clamp(min, max = nil)
+    if min.is_a?(Range)
+      raise ArgumentError, "cannot clamp with an exclusive range" if min.exclude_end?
+      lo = min.begin
+      hi = min.end
+      return lo if !lo.nil? && self < lo
+      return hi if !hi.nil? && self > hi
+      self
     else
+      return min if !min.nil? && self < min
+      return max if !max.nil? && self > max
       self
     end
   end

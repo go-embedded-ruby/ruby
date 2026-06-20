@@ -2515,6 +2515,22 @@ func makePad(pad string, n int) string {
 // exponent stay integer; a negative integer exponent or any float yields a
 // float (no Rational in this phase).
 func powNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// Integer#pow(exp, mod) is modular exponentiation: base**exp mod m.
+	if len(args) > 1 {
+		base, ok1 := object.BigOf(self)
+		e, ok2 := object.BigOf(args[0])
+		m, ok3 := object.BigOf(args[1])
+		if !ok1 || !ok2 || !ok3 {
+			raise("TypeError", "Integer#pow with a modulus requires integer arguments")
+		}
+		if e.Sign() < 0 {
+			raise("RangeError", "Integer#pow() 1st argument cannot be negative when 2nd argument specified")
+		}
+		if m.Sign() == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		return object.NormInt(new(big.Int).Exp(base, e, m))
+	}
 	if base, ok := object.BigOf(self); ok {
 		if ei, ok := args[0].(object.Integer); ok {
 			if ei < 0 {
