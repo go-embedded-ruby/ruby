@@ -2,24 +2,31 @@
 
 Performance is tracked **differentially against the reference implementation
 (MRI)** — every benchmark program is first checked for identical output under
-`rbgo` and MRI, then timed under three runtimes:
+each runtime, then timed under four:
 
 - **rbgo** — this interpreter (`go build -ldflags="-s -w" -o rbgo ./cmd/rbgo`)
+- **rbgo+AOT** — a native binary from `rbgo build`, which compiles the program's
+  lowerable methods to Go and links them in (see
+  [docs/aot-compiler.md](../docs/aot-compiler.md))
 - **MRI** — the reference CRuby interpreter (oracle: Ruby 4.0.5)
 - **MRI+YJIT** — CRuby with its JIT enabled (`ruby --yjit`)
 
-The goal is to **at least match the reference interpreter** on every workload.
+The interpreter aims to **at least match** the reference; the AOT path aims to
+**beat YJIT** on compute-bound code (and does — see below).
 
 ## Running
 
 ```bash
 go build -ldflags="-s -w" -o rbgo ./cmd/rbgo
 RUBY=ruby RBGO=./rbgo bash bench/run.sh 5      # best of 5 runs each
+AOT=0 RUBY=ruby RBGO=./rbgo bash bench/run.sh 5 # skip the AOT column
 ```
 
 `bench/run.sh` checks output parity first (a program whose output differs is
 reported and skipped), then reports the best wall-clock time of N runs (best,
-not mean, to suppress scheduler noise) and the rbgo/MRI and rbgo/YJIT ratios.
+not mean, to suppress scheduler noise) and the AOT/MRI and AOT/YJIT ratios. The
+AOT column builds a specialised native binary per program with `rbgo build`
+(needs the Go toolchain + a module checkout); set `AOT=0` to skip it.
 
 There is also a Go micro-benchmark suite for profiling the execution loop in
 isolation (parse + compile + prelude excluded):
@@ -31,27 +38,34 @@ go test ./internal/vm/ -run=NONE -bench=Fib -cpuprofile=cpu.prof   # then: go to
 
 ## Workloads
 
-| File | Exercises |
-| --- | --- |
-| `fib.rb` | recursion + method dispatch (call-bound) |
-| `loop.rb` | tight integer `while` loop (arithmetic + locals) |
-| `blocks.rb` | block iteration (`Integer#times`) |
-| `array.rb` | `map`/`select`/`reduce` pipeline |
-| `hash.rb` | Hash insertion + lookup |
-| `strings.rb` | string interpolation + `join` |
-| `wordcount.rb` | split + hash counting + sum (mixed) |
+| File | Exercises | AOT-eligible |
+| --- | --- | --- |
+| `fib.rb` | recursion + method dispatch (call-bound) | yes (integer kernel) |
+| `loop.rb` | tight integer `while` loop in a method | yes (integer kernel) |
+| `blocks.rb` | block iteration (`Integer#times`) | no (block dispatch) |
+| `array.rb` | `map`/`select`/`reduce` pipeline | no (Enumerable) |
+| `hash.rb` | Hash insertion + lookup | no |
+| `strings.rb` | string interpolation + `join` | no |
+| `wordcount.rb` | split + hash counting + sum (mixed) | no |
 
-## Current results (Apple M-series, Ruby 4.0.5)
+## Current results (Apple M-series, Ruby 4.0.5, best of 3)
 
-| Benchmark | rbgo | MRI | MRI+YJIT | rbgo/MRI | rbgo/YJIT |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| array | 0.35s | 0.09s | 0.06s | 3.89× | 5.83× |
-| blocks | 0.84s | 0.25s | 0.23s | 3.36× | 3.65× |
-| fib | 0.86s | 0.14s | 0.04s | 6.14× | 21.50× |
-| hash | 0.26s | 0.09s | 0.09s | 2.89× | 2.89× |
-| loop | 1.34s | 0.37s | 0.37s | 3.62× | 3.62× |
-| strings | 0.04s | 0.04s | 0.04s | 1.00× | 1.00× |
-| wordcount | 0.13s | 0.09s | 0.08s | 1.44× | 1.62× |
+| Benchmark | rbgo | rbgo+AOT | MRI | MRI+YJIT | AOT/MRI | AOT/YJIT |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| array | 0.34s | 0.35s | 0.09s | 0.06s | 3.89× | 5.83× |
+| blocks | 0.87s | 0.87s | 0.25s | 0.23s | 3.48× | 3.78× |
+| **fib** | 3.48s | **0.02s** | 0.49s | 0.11s | **0.04×** | **0.18×** |
+| hash | 0.26s | 0.25s | 0.09s | 0.09s | 2.78× | 2.78× |
+| **loop** | 1.36s | **0.01s** | 0.37s | 0.36s | **0.03×** | **0.03×** |
+| strings | 0.04s | 0.04s | 0.04s | 0.04s | 1.00× | 1.00× |
+| wordcount | 0.12s | 0.12s | 0.09s | 0.08s | 1.33× | 1.50× |
+
+The two method-based integer workloads (`fib`, `loop`) compile to unboxed
+`int64` kernels: **`fib` is ~25× faster than MRI and ~5.5× faster than YJIT;
+`loop` is ~36× faster than both.** The interpreter-bound rows (`array`/`blocks`/
+`hash`/`strings`/`wordcount`) define no hot methods, so the AOT binary is the
+same interpreter — `rbgo+AOT ≈ rbgo`, as expected (nothing was lowered). Those
+rows still run on the interpreter at ~3–6× MRI, the clean-Go-interpreter floor.
 
 rbgo also starts faster than MRI (~0 vs ~30 ms: a single static binary with no
 gem/`$LOAD_PATH` scan), which is why string/IO-bound scripts already match.
@@ -82,25 +96,33 @@ overhead inherent to a clean, interface-based Go bytecode VM.
 and a monomorphic send fast path. Both are small (~5 %); the interpreter is at
 its clean-design floor of ~3–6× MRI on compute-bound code.
 
-## The real lever: build-time compilation (AOT "JIT")
+## The real lever: build-time compilation (AOT) — shipped
 
 Matching CRuby's C interpreter — let alone YJIT, which *is* a JIT — on
-compute-bound code is not achievable for a clean Go interpreter. The right
-architecture, and a natural fit for this project (which already links a single
-static binary through the Go toolchain), is to **compile Ruby methods to Go
-source at `rbgo build` time** and let the Go compiler lower them to native code:
+compute-bound code is not achievable for a clean Go interpreter. The lever that
+*does* reach it, and a natural fit for a project that already links a single
+static binary through the Go toolchain, is to **compile Ruby methods to Go at
+`rbgo build` time** and let the Go compiler lower them to native code. This is
+**implemented** (`internal/aot`, [docs/aot-compiler.md](../docs/aot-compiler.md)):
 
-- Specialise hot methods to typed Go (e.g. `Integer#+`, loops, known sends),
-  guarded by a method-state check, with a **deopt fall-back to the interpreter**
-  for the dynamic cases (redefinition, `method_missing`, `eval`).
-- This is the build-time analogue of YJIT's runtime specialisation, and is the
-  path that can reach — and on tree-shaken static code, beat — MRI.
+- **Level 1** lowers any method's bytecode to straight-line Go (locals as Go
+  variables, a direct call for self-recursion); semantics stay identical because
+  operators still go through the runtime. This alone beats the MRI interpreter.
+- **Level 3** specialises a pure-integer method (arithmetic/comparison on Integer
+  parameters, recursion *and* `while` loops) to an **unboxed `int64` kernel**,
+  with a type guard at the boundary and a **deopt** edge that recovers any
+  overflow / divide-by-zero by re-running the sound interpreted body — so it
+  stays correct for every input (overflow still promotes to the identical
+  Bignum). This is what the `fib`/`loop` rows above measure: **~25× MRI / ~5.5×
+  YJIT on `fib`, ~36× on `loop`.**
 
-It is a major, multi-stage effort; the first concrete step is a **feasibility
-prototype**: AOT-compile one constrained kernel (integer arithmetic + a counted
-loop) end to end and measure it against MRI to validate the approach before
-committing to the full compiler. Every stage stays gated by the 100 %-coverage +
-MRI-differential suite.
+The dynamic cases (redefinition, `method_missing`, `eval`, non-integer or
+polymorphic methods) fall back to the interpreter, so correctness is never at
+risk. Every stage is gated by the 100 %-coverage + MRI-differential suite;
+`BenchmarkAOTGeneratedL3Fib` pins the generated kernel to the YJIT-beating bar.
+
+Still ahead for AOT: Float/mixed-type kernels, cross-method devirtualisation,
+and the require-graph/closed-world *single-binary* half of `rbgo build`.
 
 ## Known issues surfaced by benchmarking
 
