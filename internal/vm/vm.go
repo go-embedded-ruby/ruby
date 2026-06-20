@@ -392,11 +392,25 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					copy(callArgs, stack[len(stack)-argc:])
 					stack = stack[:len(stack)-argc]
 					recv := pop()
-					var blk *Proc
-					if in.C > 0 { // a literal block: capture this frame's env, self, block
-						blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+					name := iseq.Names[in.A]
+					if in.C == 0 {
+						// No literal block: take the monomorphic fast path that resolves
+						// and invokes the method directly, skipping the dispatchSend→send
+						// layers. A class receiver (singleton dispatch) or an unresolved
+						// name (operator fallback / method_missing) falls back to send.
+						if _, isClass := recv.(*RClass); !isClass {
+							if m := lookupMethod(vm.classOf(recv), name); m != nil {
+								push(vm.invoke(m, recv, callArgs, nil))
+								pc++
+								continue
+							}
+						}
+						push(vm.dispatchSend(recv, name, callArgs, nil))
+					} else {
+						// A literal block: capture this frame's env, self, block.
+						blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+						push(vm.dispatchSend(recv, name, callArgs, blk))
 					}
-					push(vm.dispatchSend(recv, iseq.Names[in.A], callArgs, blk))
 				case bytecode.OpSendBlockArg:
 					blockVal := pop()
 					argc := in.B
