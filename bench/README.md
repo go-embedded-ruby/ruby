@@ -60,32 +60,47 @@ gem/`$LOAD_PATH` scan), which is why string/IO-bound scripts already match.
 
 Profiling (and a `GOGC=off` control, which makes things *slower*) shows the gap
 is **not** garbage collection — it is per-instruction and per-call interpreter
-overhead. The reference interpreter wins because of two structural advantages
-this VM does not yet have:
+overhead inherent to a clean, interface-based Go bytecode VM.
 
-1. **Tagged Fixnums.** CRuby encodes small integers in the pointer, so integer
-   arithmetic allocates nothing. Here every `object.Integer` result boxes into a
-   Go interface (a heap word for values outside Go's 0–255 cache). This is the
-   single biggest item for `fib`/`loop`.
-2. **A register-resident dispatch loop + inline caches.** The execution loop
-   keeps its operand stack and program counter on the heap (they must survive
-   the panic/recover used for `raise`), so every push/pop/local access is a
-   pointer indirection; and each call site re-resolves the method.
+**What the experiments ruled out (measured, not assumed):**
 
-**Roadmap (ordered by expected impact):**
+- **Allocation / boxing is not the bottleneck.** A flyweight that removed 260k
+  integer boxings from `loop` left its time unchanged (20.2 vs 20.6 ms), and
+  `GOGC=off` makes things *slower*. So a tagged-`Value`/Fixnum refactor — a huge
+  change — would **not** close the gap. This experiment was run *before*
+  committing to that refactor, and saved it.
+- **De-closuring the dispatch loop has no clean form.** A throwaway micro-test
+  confirmed the closure+`defer` wrapper costs ~6× over plain locals, so the
+  lever is real. But: a *duplicated* fast loop (local operand stack) does reach
+  that speed (fib −24 %) yet leaves the handler loop's opcode cases uncovered —
+  which the 100 %-coverage rule forbids — and duplicates ~250 lines. A *single*
+  shared loop over a heap frame keeps coverage but its per-call frame allocation
+  and method-call push/pop **regress** the call-heavy cases (fib/blocks) while
+  only helping `loop`. Neither is acceptable, so the interpreter stays as is.
 
-- [ ] A non-`raise` fast path for the execution loop (operand stack + `pc` as
-      registers when the frame installs no exception handler), so the common
-      method body runs without heap indirection.
-- [ ] Monomorphic inline caches at call sites, with a global method-state
-      generation counter for invalidation.
-- [ ] A tagged `Value` representation (Fixnum without boxing) — the largest
-      change, and what ultimately matches MRI on compute-bound code.
-- [ ] Streamlined call path (fuse `dispatchSend`→`send`→`invoke`; avoid the
-      per-send argument-slice allocation once retention is provably safe).
+**Safe interpreter wins already landed:** Env-slot inlining (−33 % allocations)
+and a monomorphic send fast path. Both are small (~5 %); the interpreter is at
+its clean-design floor of ~3–6× MRI on compute-bound code.
 
-Each step is gated by the existing 100%-coverage + MRI-differential test suite,
-so correctness never regresses for speed.
+## The real lever: build-time compilation (AOT "JIT")
+
+Matching CRuby's C interpreter — let alone YJIT, which *is* a JIT — on
+compute-bound code is not achievable for a clean Go interpreter. The right
+architecture, and a natural fit for this project (which already links a single
+static binary through the Go toolchain), is to **compile Ruby methods to Go
+source at `rbgo build` time** and let the Go compiler lower them to native code:
+
+- Specialise hot methods to typed Go (e.g. `Integer#+`, loops, known sends),
+  guarded by a method-state check, with a **deopt fall-back to the interpreter**
+  for the dynamic cases (redefinition, `method_missing`, `eval`).
+- This is the build-time analogue of YJIT's runtime specialisation, and is the
+  path that can reach — and on tree-shaken static code, beat — MRI.
+
+It is a major, multi-stage effort; the first concrete step is a **feasibility
+prototype**: AOT-compile one constrained kernel (integer arithmetic + a counted
+loop) end to end and measure it against MRI to validate the approach before
+committing to the full compiler. Every stage stays gated by the 100 %-coverage +
+MRI-differential suite.
 
 ## Known issues surfaced by benchmarking
 
