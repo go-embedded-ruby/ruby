@@ -29,6 +29,8 @@ func main() {
 	switch cmd {
 	case "run":
 		runCmd(args[1:])
+	case "build":
+		buildCmd(args[1:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -73,6 +75,7 @@ func run(src, name string) error {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: rbgo run <file.rb> | rbgo run -e \"<code>\" | rbgo <file.rb>")
+	fmt.Fprintln(os.Stderr, "       rbgo build [-o out] <file.rb>   AOT-compile methods and link a native binary")
 	os.Exit(2)
 }
 
