@@ -73,6 +73,53 @@ func TestSet(t *testing.T) {
 		{`p Set.new([1, 2]).send(:==, 42)`, "false\n"},                 // method, non-Set
 		// merge (mutating, accepts several enumerables).
 		{`s = Set.new([1]); s.merge([2, 3], Set.new([4])); p s`, "#<Set: {1, 2, 3, 4}>\n"},
+		// map / collect: yield each member, results into a (deterministic-sorted) Array.
+		{`p Set.new([1, 2, 3]).map { |x| x * x }.sort`, "[1, 4, 9]\n"},
+		{`p Set.new([1, 2, 3]).collect { |x| x + 1 }.sort`, "[2, 3, 4]\n"},
+		{`p Set.new([1, 2, 3]).map { |x| x }.class`, "Array\n"}, // returns an Array, not a Set
+		{`p Set.new.map { |x| x }`, "[]\n"},                     // empty
+		// select / filter / reject: new Sets (assert via sorted to_a).
+		{`p Set.new([1, 2, 3, 4]).select { |x| x.even? }.to_a.sort`, "[2, 4]\n"},
+		{`p Set.new([1, 2, 3, 4]).filter { |x| x.even? }.to_a.sort`, "[2, 4]\n"},
+		{`p Set.new([1, 2, 3, 4]).reject { |x| x.even? }.to_a.sort`, "[1, 3]\n"},
+		{`p Set.new([1, 2, 3]).select { |x| x > 1 }.class`, "Set\n"},
+		{`p Set.new([1, 2]).reject { |x| true }.to_a`, "[]\n"}, // all rejected
+		// find / detect: first truthy member, else nil.
+		{`p Set.new([1, 2, 3]).find { |x| x > 1 }`, "2\n"},
+		{`p Set.new([1, 2, 3]).detect { |x| x > 1 }`, "2\n"},
+		{`p Set.new([1, 2, 3]).find { |x| x > 9 }`, "nil\n"}, // none match
+		// all? / any? / none? over the block.
+		{`p Set.new([2, 4, 6]).all? { |x| x.even? }`, "true\n"},
+		{`p Set.new([2, 3, 6]).all? { |x| x.even? }`, "false\n"},
+		{`p Set.new([1, 2, 3]).any? { |x| x > 2 }`, "true\n"},
+		{`p Set.new([1, 2, 3]).any? { |x| x > 9 }`, "false\n"},
+		{`p Set.new([1, 2, 3]).none? { |x| x > 9 }`, "true\n"},
+		{`p Set.new([1, 2, 3]).none? { |x| x > 2 }`, "false\n"},
+		// empty-set semantics for all? / any? / none?.
+		{`p Set.new.all? { |x| x > 0 }`, "true\n"},
+		{`p Set.new.any? { |x| x > 0 }`, "false\n"},
+		{`p Set.new.none? { |x| x > 0 }`, "true\n"},
+		// ^: symmetric difference (members in exactly one operand).
+		{`p((Set.new([1, 2]) ^ Set.new([2, 3])).to_a.sort)`, "[1, 3]\n"},
+		{`p((Set.new([1, 2, 3]) ^ Set.new([1, 2, 3])).to_a)`, "[]\n"}, // identical → empty
+		{`p((Set.new([1, 2]) ^ Set.new([3, 4])).to_a.sort)`, "[1, 2, 3, 4]\n"},
+		// disjoint? / intersect?.
+		{`p Set.new([1, 2]).disjoint?(Set.new([3, 4]))`, "true\n"},
+		{`p Set.new([1, 2]).disjoint?(Set.new([2, 3]))`, "false\n"},
+		{`p Set.new([1, 2]).intersect?(Set.new([2, 3]))`, "true\n"},
+		{`p Set.new([1, 2]).intersect?(Set.new([3, 4]))`, "false\n"},
+		// proper subset / superset (< / >).
+		{`p(Set.new([1, 2]) < Set.new([1, 2, 3]))`, "true\n"},
+		{`p(Set.new([1, 2]) < Set.new([1, 2]))`, "false\n"}, // equal → not proper
+		{`p(Set.new([1, 2, 3]) < Set.new([1, 2]))`, "false\n"},
+		{`p(Set.new([1, 2, 3]) > Set.new([1, 2]))`, "true\n"},
+		{`p(Set.new([1, 2]) > Set.new([1, 2]))`, "false\n"}, // equal → not proper
+		{`p(Set.new([1, 2]) > Set.new([1, 2, 3]))`, "false\n"},
+		// dup / clone: shallow copy, independent of the original.
+		{`p Set.new([1, 2, 3]).dup`, "#<Set: {1, 2, 3}>\n"},
+		{`p Set.new([1, 2, 3]).clone`, "#<Set: {1, 2, 3}>\n"},
+		{`s = Set.new([1, 2]); c = s.dup; c.add(3); p s.to_a.sort`, "[1, 2]\n"},      // original untouched
+		{`s = Set.new([1, 2]); c = s.clone; c.add(3); p c.to_a.sort`, "[1, 2, 3]\n"}, // copy mutated
 		// truthiness + class.
 		{`p(Set.new ? "y" : "n")`, "\"y\"\n"},
 		{`p Set.new.class`, "Set\n"},
@@ -100,6 +147,23 @@ func TestSetErrors(t *testing.T) {
 		{`Set.new([1]) + 2`, "TypeError"},                // + operator, non-Set right operand
 		{`Set.new([1]) - 2`, "TypeError"},                // - operator, non-Set right operand
 		{`Set.new([1]) * Set.new([2])`, "NoMethodError"}, // unsupported operator
+		// Block-taking methods without a block raise LocalJumpError (like each).
+		{`Set.new([1, 2]).map`, "LocalJumpError"},
+		{`Set.new([1, 2]).collect`, "LocalJumpError"},
+		{`Set.new([1, 2]).select`, "LocalJumpError"},
+		{`Set.new([1, 2]).filter`, "LocalJumpError"},
+		{`Set.new([1, 2]).reject`, "LocalJumpError"},
+		{`Set.new([1, 2]).find`, "LocalJumpError"},
+		{`Set.new([1, 2]).detect`, "LocalJumpError"},
+		{`Set.new([1, 2]).all?`, "LocalJumpError"},
+		{`Set.new([1, 2]).any?`, "LocalJumpError"},
+		{`Set.new([1, 2]).none?`, "LocalJumpError"},
+		// Set-argument methods raise TypeError on a non-Set operand.
+		{`Set.new([1]) ^ [2]`, "TypeError"},
+		{`Set.new([1]).disjoint?(3)`, "TypeError"},
+		{`Set.new([1]).intersect?(3)`, "TypeError"},
+		{`Set.new([1]) < 3`, "TypeError"},
+		{`Set.new([1]) > 3`, "TypeError"},
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)

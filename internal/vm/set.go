@@ -145,6 +145,16 @@ func fromKeys(keys goset.Interface, a, b *Set) *Set {
 	return out
 }
 
+// copy returns a shallow clone: a new Set holding the same members in the same
+// insertion order (the Ruby values are shared, as MRI's Set#dup does).
+func (s *Set) copy() *Set {
+	out := newSet()
+	for _, k := range s.order {
+		out.add(s.vals[k])
+	}
+	return out
+}
+
 // toArray materialises the Set into a Ruby Array in insertion order.
 func (s *Set) toArray() object.Value {
 	out := make([]object.Value, len(s.order))
@@ -307,6 +317,151 @@ func (vm *VM) registerSet() {
 		}
 		return s
 	})
+
+	// map / collect: yield each member, collect the block results into a new
+	// Array (MRI's Set#map/#collect return an Array, not a Set).
+	mapFn := func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (map)")
+		}
+		s := self(v)
+		out := make([]object.Value, 0, len(s.order))
+		for _, k := range s.order {
+			out = append(out, vm.callBlock(blk, []object.Value{s.vals[k]}))
+		}
+		return &object.Array{Elems: out}
+	}
+	d("map", mapFn)
+	d("collect", mapFn)
+
+	// select / filter: a new Set of the members for which the block is truthy.
+	selectFn := func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (select)")
+		}
+		s := self(v)
+		out := newSet()
+		for _, k := range s.order {
+			if vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+				out.add(s.vals[k])
+			}
+		}
+		return out
+	}
+	d("select", selectFn)
+	d("filter", selectFn)
+
+	// reject: a new Set of the members for which the block is falsy.
+	d("reject", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (reject)")
+		}
+		s := self(v)
+		out := newSet()
+		for _, k := range s.order {
+			if !vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+				out.add(s.vals[k])
+			}
+		}
+		return out
+	})
+
+	// find / detect: the first member (insertion order) for which the block is
+	// truthy, or nil when none match.
+	findFn := func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (find)")
+		}
+		s := self(v)
+		for _, k := range s.order {
+			if vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+				return s.vals[k]
+			}
+		}
+		return object.NilV
+	}
+	d("find", findFn)
+	d("detect", findFn)
+
+	// all?: true when the block is truthy for every member (true on the empty set).
+	d("all?", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (all?)")
+		}
+		s := self(v)
+		for _, k := range s.order {
+			if !vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+				return object.False
+			}
+		}
+		return object.True
+	})
+
+	// any?: true when the block is truthy for some member (false on the empty set).
+	d("any?", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (any?)")
+		}
+		s := self(v)
+		for _, k := range s.order {
+			if vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+				return object.True
+			}
+		}
+		return object.False
+	})
+
+	// none?: true when the block is truthy for no member (true on the empty set).
+	d("none?", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (none?)")
+		}
+		s := self(v)
+		for _, k := range s.order {
+			if vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+				return object.False
+			}
+		}
+		return object.True
+	})
+
+	// ^: symmetric difference — a new Set of the members in exactly one operand,
+	// computed as (a | b) - (a & b).
+	d("^", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := self(v), setArg(args[0])
+		union := a.s.Union(b.s)
+		inter := a.s.Intersection(b.s)
+		return fromKeys(union.Difference(inter), a, b)
+	})
+
+	// disjoint?: true when the two sets share no member.
+	d("disjoint?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := self(v), setArg(args[0])
+		return object.Bool(a.s.Intersection(b.s).IsEmpty())
+	})
+	// intersect?: the negation of disjoint? (the sets share at least one member).
+	d("intersect?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := self(v), setArg(args[0])
+		return object.Bool(!a.s.Intersection(b.s).IsEmpty())
+	})
+
+	// <: proper subset — a subset of the argument and not equal to it.
+	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := self(v), setArg(args[0])
+		return object.Bool(a.s.IsSubset(b.s) && !a.s.Equal(b.s))
+	})
+	// >: proper superset — the argument is a proper subset of the receiver.
+	d(">", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := self(v), setArg(args[0])
+		return object.Bool(b.s.IsSubset(a.s) && !a.s.Equal(b.s))
+	})
+
+	// dup / clone: a shallow copy with the same members in insertion order.
+	dupFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self(v).copy()
+	}
+	d("dup", dupFn)
+	d("clone", dupFn)
 
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).repr())
