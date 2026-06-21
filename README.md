@@ -48,17 +48,19 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   the `deconstruct`/`deconstruct_keys` protocols.
 - **Assignment:** multiple assignment / destructuring (`a, b = 1, 2`, swap,
   `x, *rest = …`, `*init, last = …`), compound assignment
-  (`+= -= *= /= %= <<= ||= &&=`).
+  (`+= -= *= /= %= <<= ||= &&=`), **global variables** (`$g`, plain and compound).
 - **Methods:** required / optional / `*splat` / **keyword** (`a:`, `b: 2`) /
   `**rest` / `&block` parameters, setter defs (`def name=`), **endless methods**
-  (`def foo = expr`), recursion, `return`, `super`.
+  (`def foo = expr`), **singleton method defs on any object** (`def obj.foo` /
+  `def Const.foo`), recursion, `return`, `super`.
 - **Blocks / Procs / lambdas:** `{ }` / `do…end` closures, `yield`,
   `block_given?`, `&block` capture, **numbered params (`_1`/`_2`) and `it`**,
   `Proc`/`lambda`/**stabby `->(){}`**, `&proc` block-pass and `Symbol#to_proc`
   (the `&:sym` shorthand).
-- **Classes & modules:** inheritance, `@ivars`, `new`/`initialize`, constants and
-  constant assignment, **class methods** (`def self.foo`), modules + `include`
-  (mixins), `super`, **`attr_accessor`/`reader`/`writer`**, **`Struct.new`**.
+- **Classes & modules:** inheritance, `@ivars`, **`@@class variables`** (shared
+  down the superclass hierarchy), `new`/`initialize`, constants and constant
+  assignment, **class methods** (`def self.foo`), modules + `include` (mixins),
+  `super`, **`attr_accessor`/`reader`/`writer`**, **`Struct.new`**.
 - **Metaprogramming:** dynamic dispatch via mutable method tables,
   `method_missing`, `send`/`public_send`, `respond_to?`, **`define_method`**,
   **`instance_eval`/`instance_exec`**, **`class_eval`/`module_eval`/`class_exec`**,
@@ -79,7 +81,13 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   **CGO=0**.
 - **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/…)
   and `Comparable`, both written once in embedded Ruby; Array **bang methods**
-  (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`).
+  (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`);
+  **`Range#step`/`Integer#step`** (integer and float walks, both directions).
+- **Enumerator:** every blockless iterator (`each`/`map`/`select`/`reject`/
+  `each_slice`/`each_cons`/`each_with_index`/`times`/`upto`/`each_char`/…) returns
+  an `Enumerator` (MRI semantics) with `next`/`peek`/`rewind`/`size`/`to_a`,
+  `with_index`/`each_with_index`, `Kernel#enum_for`/`to_enum`, and full
+  `Enumerable` chaining (`[1,2,3].map.with_index { |x, i| … }`).
 - **Objects:** `dup`/`clone`/`freeze`/`frozen?`, `equal?`,
   `instance_variable_get`/`set`.
 - **Math:** the `Math` module (`sqrt`/`cbrt`/`exp`/`log`/`log2`/`log10`, the
@@ -134,7 +142,7 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(Fiber/Enumerator/lazy).
+(Fiber/lazy enumerators).
 
 ## Quick start
 
