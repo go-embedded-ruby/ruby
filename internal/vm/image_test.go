@@ -1,6 +1,8 @@
 package vm_test
 
 import (
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -42,17 +44,26 @@ func TestImage(t *testing.T) {
 		{`p Image.new(2, 2).inspect`, "\"#<Image 2x2>\"\n"},
 		{`p Image.new(2, 2).to_s`, "\"#<Image 2x2>\"\n"},
 		{`p(Image.new(2, 2) ? "y" : "n")`, "\"y\"\n"},
-		// Save → Load PNG round-trip preserves dimensions and pixels.
-		{`i = Image.new(3, 2)
-i.set(1, 1, 99, 88, 77)
-i.save("/tmp/rbgo_imgtest.png")
-j = Image.load("/tmp/rbgo_imgtest.png")
-p [j.width, j.height, j.get(1, 1)]`, "[3, 2, [99, 88, 77, 255]]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
+	}
+}
+
+// TestImageSaveLoad checks a PNG save→load round-trip preserves dimensions and
+// pixels. The path is built in Go (forward-slashed, so it is valid in a Ruby
+// string on every OS including Windows).
+func TestImageSaveLoad(t *testing.T) {
+	path := filepath.ToSlash(filepath.Join(t.TempDir(), "rt.png"))
+	src := `i = Image.new(3, 2)
+i.set(1, 1, 99, 88, 77)
+i.save(` + strconv.Quote(path) + `)
+j = Image.load(` + strconv.Quote(path) + `)
+p [j.width, j.height, j.get(1, 1)]`
+	if got := eval(t, src); got != "[3, 2, [99, 88, 77, 255]]\n" {
+		t.Errorf("round-trip got=%q", got)
 	}
 }
 
