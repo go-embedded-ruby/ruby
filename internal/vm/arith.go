@@ -66,6 +66,13 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return timeOp(op, at, b)
 	}
 
+	// BigDecimal arithmetic: +/-/*/ delegate to the go-composites bigfloat
+	// (exact 256-bit decimal). The left operand drives the fast path; a numeric
+	// right operand is coerced to BigDecimal.
+	if ab, ok := a.(*BigDecimal); ok {
+		return bigDecimalOp(op, ab, b)
+	}
+
 	// NDArray element-wise / scalar arithmetic, in either operand order.
 	if _, ok := a.(*NDArray); ok {
 		return ndarrayOp(op, a, b)
@@ -382,6 +389,8 @@ func negate(v object.Value) object.Value {
 		return &object.Complex{Re: negate(n.Re), Im: negate(n.Im)}
 	case *object.Rational:
 		return &object.Rational{R: new(big.Rat).Neg(n.R)}
+	case *BigDecimal:
+		return &BigDecimal{f: payloadBigFloat(n.f.Neg())}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
@@ -400,6 +409,14 @@ func valueEqual(a, b object.Value) bool {
 	}
 	if br, ok := b.(*object.Rational); ok {
 		return rationalEqual(br, a)
+	}
+	// BigDecimal compares by value, coercing a numeric operand (2 == BigDecimal("2")),
+	// in either operand order.
+	if ab, ok := a.(*BigDecimal); ok {
+		return bigDecimalEqual(ab, b)
+	}
+	if bb, ok := b.(*BigDecimal); ok {
+		return bigDecimalEqual(bb, a)
 	}
 	switch av := a.(type) {
 	case object.Integer:
