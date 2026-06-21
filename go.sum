@@ -30,6 +30,8 @@ github.com/go-onigmo/regexp v0.0.0-20260615223128-d636c03e5b82 h1:W1Jg0B0zS6nKCc
 github.com/go-onigmo/regexp v0.0.0-20260615223128-d636c03e5b82/go.mod h1:wTr40dRA2FxVeYniivGngyZUR8mzgiDPNT6GNMFwa8I=
 github.com/go-ruby-parser/parser v0.0.0-20260621180820-fd3eae0c021a h1:Rvbd3PPDPv9++xUUUaL1799Mw6ayhdiYN8B8iQdCkLM=
 github.com/go-ruby-parser/parser v0.0.0-20260621180820-fd3eae0c021a/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
+github.com/go-ruby-parser/parser v0.0.0-20260621202338-cf99d5112899 h1:gKNsmojcZcvrEwrmEiJ9FbWin9/i4j4h+ZPUwKwqWNk=
+github.com/go-ruby-parser/parser v0.0.0-20260621202338-cf99d5112899/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=
 github.com/go-task/slim-sprig/v3 v3.0.0/go.mod h1:W848ghGpv3Qj3dhTPRyJypKRiqCdHZiAzKg9hl15HA8=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
