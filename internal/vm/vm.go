@@ -394,6 +394,34 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				case bytecode.OpSetGVar:
 					// Assignment is an expression: set the global, keep its value.
 					vm.globals[iseq.Names[in.A]] = stack[len(stack)-1]
+				case bytecode.OpGetCVar:
+					name := iseq.Names[in.A]
+					vm.checkCVarScope(definee)
+					if c := cvarOwner(definee, name); c != nil {
+						push(c.cvars[name])
+					} else {
+						raise("NameError", "uninitialized class variable %s in %s", name, definee.name)
+					}
+				case bytecode.OpGetCVarQuiet:
+					// The read side of @@name ||= …: an undefined class variable is
+					// nil here rather than a NameError (Ruby's ||=/&&= semantics).
+					name := iseq.Names[in.A]
+					vm.checkCVarScope(definee)
+					if c := cvarOwner(definee, name); c != nil {
+						push(c.cvars[name])
+					} else {
+						push(object.NilV)
+					}
+				case bytecode.OpSetCVar:
+					// Set where the variable already lives in the hierarchy, else
+					// define it on the current class. Assignment keeps its value.
+					name := iseq.Names[in.A]
+					vm.checkCVarScope(definee)
+					if c := cvarOwner(definee, name); c != nil {
+						c.cvars[name] = stack[len(stack)-1]
+					} else {
+						definee.cvars[name] = stack[len(stack)-1]
+					}
 				case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
 					bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
 					bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:

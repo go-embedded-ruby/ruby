@@ -71,12 +71,13 @@ type RClass struct {
 	methods  map[string]*Method
 	smethods map[string]*Method // singleton (class) methods: def self.foo
 	consts   map[string]object.Value
-	includes []*RClass // modules mixed in via include (most recent last)
+	cvars    map[string]object.Value // class variables (@@name), shared down the hierarchy
+	includes []*RClass               // modules mixed in via include (most recent last)
 	isModule bool
 }
 
 func newClass(name string, super *RClass) *RClass {
-	return &RClass{name: name, super: super, methods: map[string]*Method{}, smethods: map[string]*Method{}, consts: map[string]object.Value{}}
+	return &RClass{name: name, super: super, methods: map[string]*Method{}, smethods: map[string]*Method{}, consts: map[string]object.Value{}, cvars: map[string]object.Value{}}
 }
 
 func (c *RClass) ToS() string     { return c.name }
@@ -137,6 +138,27 @@ func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
 	}
 	raise("NameError", "uninitialized constant %s::%s", cls.name, name)
 	return object.NilV
+}
+
+// checkCVarScope rejects class-variable access whose lexical class is Object —
+// i.e. at the top level or in a method defined directly on Object. MRI raises a
+// RuntimeError there rather than treating Object as the owning class.
+func (vm *VM) checkCVarScope(definee *RClass) {
+	if definee == vm.cObject {
+		raise("RuntimeError", "class variable access from toplevel")
+	}
+}
+
+// cvarOwner returns the nearest class in c's superclass chain that already
+// defines the class variable name, or nil if none does — class variables are
+// shared down the hierarchy.
+func cvarOwner(c *RClass, name string) *RClass {
+	for ; c != nil; c = c.super {
+		if _, ok := c.cvars[name]; ok {
+			return c
+		}
+	}
+	return nil
 }
 
 // lookupSMethod finds a singleton (class) method, walking the superclass chain

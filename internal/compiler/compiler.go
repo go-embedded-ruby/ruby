@@ -370,6 +370,31 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.GVarAssign:
 		c.compileNode(v.Value)
 		b.emit(bytecode.OpSetGVar, b.addName(v.Name), 0)
+	case *ast.CVarRef:
+		b.emit(bytecode.OpGetCVar, b.addName(v.Name), 0)
+	case *ast.CVarAssign:
+		// `@@x ||= rhs` / `@@x &&= rhs` desugar to `@@x = (@@x op rhs)`. Reading an
+		// undefined class variable normally raises, so the short-circuit read here
+		// uses the quiet variant (nil for unset) to match Ruby's ||=/&&= semantics.
+		if be, ok := v.Value.(*ast.BinaryExpr); ok && (be.Op == "||" || be.Op == "&&") {
+			if ref, ok := be.Left.(*ast.CVarRef); ok && ref.Name == v.Name {
+				b.emit(bytecode.OpGetCVarQuiet, b.addName(v.Name), 0)
+				b.emit(bytecode.OpDup, 0, 0)
+				var short int
+				if be.Op == "&&" {
+					short = b.emit(bytecode.OpBranchUnless, 0, 0)
+				} else {
+					short = b.emit(bytecode.OpBranchIf, 0, 0)
+				}
+				b.emit(bytecode.OpPop, 0, 0)
+				c.compileNode(be.Right)
+				b.patch(short, b.here())
+				b.emit(bytecode.OpSetCVar, b.addName(v.Name), 0)
+				return
+			}
+		}
+		c.compileNode(v.Value)
+		b.emit(bytecode.OpSetCVar, b.addName(v.Name), 0)
 	case *ast.IvarRef:
 		b.emit(bytecode.OpGetIvar, b.addName(v.Name), 0)
 	case *ast.IvarAssign:
