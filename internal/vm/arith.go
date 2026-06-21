@@ -79,6 +79,13 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return dateOp(op, ad, b)
 	}
 
+	// Bag (multiset) algebra: + (Sum, additive union) and - (Difference) reach
+	// the operator fast path; the other combinators — & | — dispatch as methods.
+	// The right operand must be a Bag.
+	if ab, ok := a.(*Bag); ok {
+		return bagOp(op, ab, b)
+	}
+
 	// NDArray element-wise / scalar arithmetic, in either operand order.
 	if _, ok := a.(*NDArray); ok {
 		return ndarrayOp(op, a, b)
@@ -478,6 +485,9 @@ func valueEqual(a, b object.Value) bool {
 	case *Set:
 		bv, ok := b.(*Set)
 		return ok && av.s.Equal(bv.s)
+	case *Bag:
+		bv, ok := b.(*Bag)
+		return ok && av.b.Equal(bv.b)
 	case *Time:
 		return timeEqual(av, b)
 	case *Date:

@@ -3,6 +3,7 @@ module github.com/go-embedded-ruby/ruby
 go 1.26.4
 
 require (
+	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
 	github.com/go-composites/bigfloat v0.0.0-20260621063224-9b6bd10c7789
 	github.com/go-composites/date v0.0.0-20260621165615-4d7c6c9e19f2
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
@@ -15,7 +16,7 @@ require (
 )
 
 require (
-	github.com/go-composites/array v0.0.0-20260620184536-bfe15364f583 // indirect
+	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
 )

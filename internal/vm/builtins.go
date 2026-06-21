@@ -56,6 +56,7 @@ func (vm *VM) bootstrap() {
 	vm.registerTime()
 	vm.registerBigDecimal()
 	vm.registerDate()
+	vm.registerBag()
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)
