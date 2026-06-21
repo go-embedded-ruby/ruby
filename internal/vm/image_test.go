@@ -44,6 +44,12 @@ func TestImage(t *testing.T) {
 		{`p Image.new(2, 2).inspect`, "\"#<Image 2x2>\"\n"},
 		{`p Image.new(2, 2).to_s`, "\"#<Image 2x2>\"\n"},
 		{`p(Image.new(2, 2) ? "y" : "n")`, "\"y\"\n"},
+		// In-memory PNG encode→decode round-trip (no filesystem — browser-ready).
+		{`i = Image.new(3, 2); i.set(1, 1, 99, 88, 77)
+j = Image.decode(i.to_png)
+p [j.width, j.height, j.get(1, 1)]`, "[3, 2, [99, 88, 77, 255]]\n"},
+		// JPEG encodes (lossy, so just confirm a decodable image of the right size).
+		{`p Image.decode(Image.new(8, 8).to_jpeg).width`, "8\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -75,6 +81,8 @@ func TestImageErrors(t *testing.T) {
 		{`Image.load("/nonexistent-rbgo.png")`, "ArgumentError"},
 		{`Image.new(4, 4).crop(0, 0, 99, 99)`, "ArgumentError"},
 		{`Image.new(2, 2).save("/no/such/dir/x.png")`, "ArgumentError"},
+		{`Image.decode("not an image")`, "ArgumentError"},
+		{`Image.decode(123)`, "TypeError"},
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)

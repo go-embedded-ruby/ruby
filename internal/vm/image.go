@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
@@ -57,6 +58,20 @@ func (vm *VM) registerImage() {
 			}
 			return &Image{img: img}
 		}}
+	// Image.decode(bytes) decodes an in-memory PNG/JPEG String — no filesystem,
+	// so it works in a browser (wasm) where the program is handed image bytes.
+	vm.cImage.smethods["decode"] = &Method{name: "decode", owner: vm.cImage,
+		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			s, ok := args[0].(*object.String)
+			if !ok {
+				raise("TypeError", "Image.decode expects a String of image bytes")
+			}
+			img, err := goimg.Decode(bytes.NewReader(s.B))
+			if err != nil {
+				raise("ArgumentError", "%s", err.Error())
+			}
+			return &Image{img: img}
+		}}
 
 	d := func(name string, fn NativeFn) { vm.cImage.define(name, fn) }
 
@@ -86,6 +101,17 @@ func (vm *VM) registerImage() {
 		}
 		return object.NilV
 	})
+	// to_png / to_jpeg encode to an in-memory byte String (browser-friendly: hand
+	// the bytes to JS for a canvas/Blob). Encoding to a buffer cannot fail.
+	encode := func(name string, format goimg.Format) {
+		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+			var buf bytes.Buffer
+			_ = goimg.Encode(&buf, imgOf(v), format)
+			return &object.String{B: buf.Bytes()}
+		})
+	}
+	encode("to_png", goimg.PNG)
+	encode("to_jpeg", goimg.JPEG)
 
 	// Operations with no error: image → image.
 	unary := func(name string, f func(image.Image) *image.RGBA) {
