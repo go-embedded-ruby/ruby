@@ -57,6 +57,7 @@ func (vm *VM) bootstrap() {
 	vm.registerBigDecimal()
 	vm.registerDate()
 	vm.registerBag()
+	vm.registerEval()
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)
@@ -185,6 +186,10 @@ func (vm *VM) bootstrap() {
 	exc("NoMatchingPatternError", "StandardError")
 	exc("NoMatchingPatternKeyError", "NoMatchingPatternError")
 	exc("Math::DomainError", "StandardError")
+	// ScriptError / SyntaxError sit under Exception (NOT StandardError), so a bare
+	// `rescue` does not catch them — matching MRI. eval raises SyntaxError.
+	exc("ScriptError", "Exception")
+	exc("SyntaxError", "ScriptError")
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
