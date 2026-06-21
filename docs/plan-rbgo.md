@@ -527,6 +527,10 @@ runtime against the caller's `self` (sees `self`/ivars/methods/constants; `def`
 lands in the caller's context; fresh local scope — Binding/local capture is the
 remaining piece). Parse/compile errors raise `SyntaxError` (now under
 `ScriptError`→`Exception`, not `StandardError`); non-String arg → `TypeError`.
+**Class/module hooks** — `inherited` (on subclassing), `included` (on `include`)
+and `method_added` (per instance-method def), each looked up as a singleton
+method so it fires only when defined. (`extended`/`prepended` wait on
+`extend`/`prepend`.)
 
 ### Phase 5 — Complete front-end — 🚧 in progress
 Full grammar: heredocs, interpolation, `%`-literals, multiple assignment, keyword
