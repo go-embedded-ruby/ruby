@@ -186,6 +186,11 @@ func (vm *VM) gvar(name string) object.Value {
 			if ok && n <= md.md.NGroups() {
 				return groupValue(md, n)
 			}
+			return object.NilV
+		}
+		// Any other name is an ordinary user global: nil until assigned.
+		if v, set := vm.globals[name]; set {
+			return v
 		}
 	}
 	return object.NilV

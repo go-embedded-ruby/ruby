@@ -100,6 +100,7 @@ type VM struct {
 	cMethod                                *RClass
 	cEnumerator                            *RClass
 	lastMatch                              object.Value // $~: last regexp MatchData (or nil)
+	globals                                map[string]object.Value // user-assigned $globals
 	cTrueClass, cFalseClass, cNilClass     *RClass
 	cRegexp, cMatchData                    *RClass
 	cException                             *RClass
@@ -111,7 +112,7 @@ type VM struct {
 
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
-	vm := &VM{out: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}}
+	vm := &VM{out: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
 	vm.bootstrap()
 	vm.loadPrelude(preludeSource)
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
@@ -390,6 +391,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.consts[iseq.Names[in.A]] = stack[len(stack)-1]
 				case bytecode.OpGetGVar:
 					push(vm.gvar(iseq.Names[in.A]))
+				case bytecode.OpSetGVar:
+					// Assignment is an expression: set the global, keep its value.
+					vm.globals[iseq.Names[in.A]] = stack[len(stack)-1]
 				case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
 					bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
 					bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:
