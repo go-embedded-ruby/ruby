@@ -11,10 +11,16 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// builtinFeatures are standard-library names already provided by the embedded VM
-// (as built-in classes), so `require "name"` is satisfied without a file.
-var builtinFeatures = map[string]bool{
-	"set": true, "date": true, "time": true, "bigdecimal": true, "bag": true,
+// preloadedFeatures are already loaded at startup (like MRI 4.x's preloaded
+// gems), so require returns false.
+var preloadedFeatures = map[string]bool{"set": true}
+
+// providedFeatures are standard-library names the VM supplies as built-in
+// classes; the file never needs loading, but require still returns true on the
+// first call and false afterwards, matching a normal gem load.
+var providedFeatures = map[string]bool{
+	"date": true, "time": true, "bigdecimal": true, "bag": true,
+	"base64": true, "digest": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
@@ -39,10 +45,19 @@ func requireName(vm *VM, args []object.Value) string {
 }
 
 func (vm *VM) doRequire(name string, relative bool) object.Value {
-	// A built-in feature (e.g. "set") is already provided by the VM — like the
-	// default gems MRI 4.x preloads, so require returns false (already loaded).
-	if !relative && builtinFeatures[name] {
-		return object.Bool(false)
+	// Features the VM provides as built-in classes need no file.
+	if !relative {
+		if preloadedFeatures[name] {
+			return object.Bool(false) // already loaded at startup
+		}
+		if providedFeatures[name] {
+			key := "feature:" + name
+			if vm.loaded[key] {
+				return object.Bool(false)
+			}
+			vm.loaded[key] = true
+			return object.Bool(true)
+		}
 	}
 
 	file := name
