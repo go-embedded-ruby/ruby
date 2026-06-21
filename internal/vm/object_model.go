@@ -205,6 +205,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cRange
 	case *Proc:
 		return vm.cProc
+	case *BoundMethod:
+		return vm.cMethod
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:

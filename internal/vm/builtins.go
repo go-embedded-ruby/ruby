@@ -60,6 +60,7 @@ func (vm *VM) bootstrap() {
 	vm.registerEval()
 	vm.registerRequire()
 	vm.registerSingleton()
+	vm.registerMethod()
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)

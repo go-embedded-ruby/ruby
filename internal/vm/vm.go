@@ -97,6 +97,7 @@ type VM struct {
 	cBag                                   *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
+	cMethod                                *RClass
 	lastMatch                              object.Value // $~: last regexp MatchData (or nil)
 	cTrueClass, cFalseClass, cNilClass     *RClass
 	cRegexp, cMatchData                    *RClass
