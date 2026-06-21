@@ -1621,6 +1621,18 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
+	vm.cRange.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "step", args...)
+		}
+		step := object.Value(object.Integer(1))
+		if len(args) > 0 {
+			step = args[0]
+		}
+		r := self.(*object.Range)
+		vm.numericStep(blk, r.Lo, r.Hi, step, r.Exclusive)
+		return r
+	})
 
 	// Integer methods.
 	// intOf coerces a receiver to int64; a Bignum is genuinely out of range for
@@ -1846,6 +1858,21 @@ func (vm *VM) bootstrap() {
 
 	// Class.
 	vm.cClass.define("new", nativeNew)
+
+	vm.cInteger.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		if blk == nil {
+			return enumFor(self, "step", args...)
+		}
+		step := object.Value(object.Integer(1))
+		if len(args) > 1 {
+			step = args[1]
+		}
+		vm.numericStep(blk, self, args[0], step, false)
+		return self
+	})
 
 	// Integer#times — the first block-driven iterator.
 	vm.cInteger.define("times", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -2852,4 +2879,58 @@ func rangeElems(r *object.Range) []object.Value {
 		out = append(out, object.Integer(i))
 	}
 	return out
+}
+
+// numericStep drives Range#step / Integer#step: it yields lo, lo+step, … toward
+// hi (inclusive unless exclusive). All-integer operands keep an integer walk
+// (exact); any float operand switches to an index-based float walk that avoids
+// accumulated drift. step must be non-zero.
+func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive bool) {
+	li, loInt := loV.(object.Integer)
+	hi2, hiInt := hiV.(object.Integer)
+	si, stepInt := stepV.(object.Integer)
+	if loInt && hiInt && stepInt {
+		step := int64(si)
+		if step == 0 {
+			raise("ArgumentError", "step can't be 0")
+		}
+		lo, hi := int64(li), int64(hi2)
+		for i := lo; stepInRange(float64(i), float64(hi), float64(step), exclusive); i += step {
+			vm.callBlock(blk, []object.Value{object.Integer(i)})
+		}
+		return
+	}
+	lo, ok1 := toFloat(loV)
+	hi, ok2 := toFloat(hiV)
+	step, ok3 := toFloat(stepV)
+	if !ok1 || !ok2 || !ok3 {
+		raise("TypeError", "can't iterate from %s", loV.Inspect())
+	}
+	if step == 0 {
+		raise("ArgumentError", "step can't be 0")
+	}
+	for i := 0; ; i++ {
+		v := lo + float64(i)*step
+		if !stepInRange(v, hi, step, exclusive) {
+			break
+		}
+		vm.callBlock(blk, []object.Value{object.Float(v)})
+	}
+}
+
+// stepInRange reports whether v has not yet passed hi when walking by step. A
+// small epsilon tolerates float accumulation so an inclusive endpoint that lands
+// exactly on hi is still yielded.
+func stepInRange(v, hi, step float64, exclusive bool) bool {
+	const eps = 1e-12
+	if step > 0 {
+		if exclusive {
+			return v < hi
+		}
+		return v <= hi+eps
+	}
+	if exclusive {
+		return v > hi
+	}
+	return v >= hi-eps
 }
