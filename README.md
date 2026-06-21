@@ -106,6 +106,21 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `union`(`|`)/`intersection`(`&`)/`difference`(`-`), `each`/`to_a`/`to_set` —
   binding the pure-Go
   [go-composites/set](https://github.com/go-composites/set) library.
+- **Time:** Ruby's `Time` — `now`/`at`/`parse`, arithmetic (`+`/`-`/`<=>`),
+  `strftime`/`strptime`, `year`/`month`/`mday`/`hour`/`min`/`sec`/`wday`, weekday
+  predicates (`monday?`…`sunday?`), `utc`/`getutc`/`zone`, `to_i`/`to_f` —
+  binding [go-composites/time](https://github.com/go-composites/time).
+- **Date:** Ruby's `Date` — `new`/`parse`, `+`/`-`/`<<`/`>>` and
+  `next_day`/`prev_day`/`next_month`/`prev_month`,
+  `year`/`month`/`mday`/`wday`/`yday`/`cwday`, `leap?`, comparisons — binding
+  [go-composites/date](https://github.com/go-composites/date).
+- **BigDecimal:** arbitrary-precision decimal — `+ - * / **`,
+  `sqrt`/`abs`/`ceil`/`floor`/`round`/`pow`, `to_f`/`to_i`, `zero?`, comparisons
+  — binding [go-composites/bigfloat](https://github.com/go-composites/bigfloat).
+- **Bag:** a multiset / counter (element → multiplicity) — `add`(`<<`)/`delete`,
+  `count`/`size`/`distinct`/`most_common`, `union`/`difference`/`intersection`,
+  `include?`/`each`/`to_a` — binding
+  [go-composites/bag](https://github.com/go-composites/bag).
 
 - **AOT compiler (`rbgo build`):** lowers a program's methods to native Go and
   links a specialised binary. Pure integer methods become unboxed `int64`
