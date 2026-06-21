@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-embedded-ruby/ruby/internal/ast"
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-ruby-parser/parser/ast"
 )
 
 func TestFastBinOpUnknown(t *testing.T) {

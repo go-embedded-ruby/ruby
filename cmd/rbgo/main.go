@@ -15,8 +15,8 @@ import (
 	"os"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
 	"github.com/go-embedded-ruby/ruby/internal/vm"
+	"github.com/go-ruby-parser/parser"
 )
 
 func main() {

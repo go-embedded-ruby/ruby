@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
 	"github.com/go-embedded-ruby/ruby/internal/object"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
+	"github.com/go-ruby-parser/parser"
 )
 
 // runSrc runs a Ruby program through a fresh VM and returns its stdout trimmed.

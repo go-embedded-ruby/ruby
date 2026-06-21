@@ -16,7 +16,7 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/aot"
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
+	"github.com/go-ruby-parser/parser"
 )
 
 // referenceRubyCandidates is the oracle whose output is baked into the cases.
@@ -61,12 +61,12 @@ var cases = []aotCase{
 	{"e2eSplat", "m", "def m(a, b) = [a, *[b, b]]", "1, 2", "object.Integer(1), object.Integer(2)"},
 	{"e2eIvar", "m", "def m(a)\n  @x = a\n  @x + 1\nend", "41", "object.Integer(41)"},
 	// Level-3 integer kernels and their deopt edges:
-	{"e2eFib", "fib", "def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)", "10", "object.Integer(10)"},                 // unboxed kernel
-	{"e2eDiv", "m", "def m(a, b) = a / b", "17, 5", "object.Integer(17), object.Integer(5)"},                          // floor division
+	{"e2eFib", "fib", "def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)", "10", "object.Integer(10)"},                                              // unboxed kernel
+	{"e2eDiv", "m", "def m(a, b) = a / b", "17, 5", "object.Integer(17), object.Integer(5)"},                                                       // floor division
 	{"e2eMulOverflow", "m", "def m(a, b) = a * b", "1000000000000, 1000000000000", "object.Integer(1000000000000), object.Integer(1000000000000)"}, // overflow → deopt → Bignum
-	{"e2eFloatDeopt", "m", "def m(a) = a + 1", "1.5", "object.Float(1.5)"},                                            // non-Integer arg → guard deopt
-	{"e2eFact", "m", "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend", "10", "object.Integer(10)"},          // while-loop kernel
-	{"e2eFactBig", "m", "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend", "25", "object.Integer(25)"},        // overflows mid-loop → deopt → Bignum
+	{"e2eFloatDeopt", "m", "def m(a) = a + 1", "1.5", "object.Float(1.5)"},                                                                         // non-Integer arg → guard deopt
+	{"e2eFact", "m", "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend", "10", "object.Integer(10)"},                // while-loop kernel
+	{"e2eFactBig", "m", "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend", "25", "object.Integer(25)"},             // overflows mid-loop → deopt → Bignum
 }
 
 func main() {

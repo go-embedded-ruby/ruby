@@ -7,7 +7,7 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
 	"github.com/go-embedded-ruby/ruby/internal/object"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
+	"github.com/go-ruby-parser/parser"
 )
 
 // AOT-compiler feasibility prototype. It hand-writes the Go code that a build-

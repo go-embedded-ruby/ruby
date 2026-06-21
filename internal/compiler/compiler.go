@@ -9,9 +9,9 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/go-embedded-ruby/ruby/internal/ast"
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
+	"github.com/go-ruby-parser/parser/ast"
 )
 
 type compileError struct{ msg string }
@@ -22,12 +22,12 @@ func (e compileError) Error() string { return e.msg }
 // links to the enclosing builder and isBlock is true, so local resolution can
 // reach enclosing locals by depth.
 type builder struct {
-	name     string
-	insns    []bytecode.Instr
-	consts   []object.Value
-	constIdx map[object.Value]int
-	names    []string
-	locals   []string
+	name        string
+	insns       []bytecode.Instr
+	consts      []object.Value
+	constIdx    map[object.Value]int
+	names       []string
+	locals      []string
 	params      []string
 	numRequired int
 	splatIndex  int
@@ -35,9 +35,9 @@ type builder struct {
 	kwRequired  []bool
 	kwRestSlot  int
 	blockSlot   int
-	children []*bytecode.ISeq
-	parent   *builder
-	isBlock  bool
+	children    []*bytecode.ISeq
+	parent      *builder
+	isBlock     bool
 }
 
 func newBuilder(name string, params []string) *builder {
@@ -118,10 +118,10 @@ func (b *builder) localLookup(name string) (int, bool) {
 
 func (b *builder) build() *bytecode.ISeq {
 	return &bytecode.ISeq{
-		Name:      b.name,
-		Insns:     b.insns,
-		Consts:    b.consts,
-		Names:     b.names,
+		Name:        b.name,
+		Insns:       b.insns,
+		Consts:      b.consts,
+		Names:       b.names,
 		Params:      b.params,
 		NumRequired: b.numRequired,
 		SplatIndex:  b.splatIndex,
@@ -129,8 +129,8 @@ func (b *builder) build() *bytecode.ISeq {
 		KwRequired:  b.kwRequired,
 		KwRestSlot:  b.kwRestSlot,
 		BlockSlot:   b.blockSlot,
-		NumLocals: len(b.locals),
-		Children:  b.children,
+		NumLocals:   len(b.locals),
+		Children:    b.children,
 	}
 }
 
@@ -138,7 +138,7 @@ func (b *builder) build() *bytecode.ISeq {
 type Compiler struct {
 	ctxs         []*loopCtx // innermost-last stack of break/next targets
 	retryTargets []int      // innermost-last stack of begin-body PCs for `retry`
-	stack []*builder
+	stack        []*builder
 }
 
 // Compile lowers a Program into the top-level ISeq.
@@ -157,7 +157,7 @@ func Compile(prog *ast.Program) (iseq *bytecode.ISeq, err error) {
 	return c.pop().build(), nil
 }
 
-func (c *Compiler) cur() *builder  { return c.stack[len(c.stack)-1] }
+func (c *Compiler) cur() *builder   { return c.stack[len(c.stack)-1] }
 func (c *Compiler) push(b *builder) { c.stack = append(c.stack, b) }
 func (c *Compiler) pop() *builder {
 	b := c.stack[len(c.stack)-1]
@@ -1201,7 +1201,7 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 		c.compileBody(v.ElseBody)
 	}
 	done := []int{b.emit(bytecode.OpJump, 0, 0)}
-	b.patch(h, b.here()) // RESCUE: the exception object is on the stack
+	b.patch(h, b.here())                       // RESCUE: the exception object is on the stack
 	c.retryTargets = append(c.retryTargets, h) // `retry` re-enters the begin body
 	for _, clause := range v.Rescues {
 		var matched []int

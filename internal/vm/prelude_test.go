@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-embedded-ruby/ruby/internal/ast"
 	"github.com/go-embedded-ruby/ruby/internal/object"
+	"github.com/go-ruby-parser/parser/ast"
 )
 
 // bareVM builds a bootstrapped VM without loading the prelude, so prelude

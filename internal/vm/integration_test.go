@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
 	"github.com/go-embedded-ruby/ruby/internal/vm"
+	"github.com/go-ruby-parser/parser"
 )
 
 // eval runs src through the full pipeline and returns captured stdout.
@@ -112,11 +112,11 @@ func TestRuntimeErrors(t *testing.T) {
 func TestParseErrors(t *testing.T) {
 	for _, src := range []string{
 		`def`, `if 1`, `puts (1`, `1 +`,
-		`@`,    // bare @ → ILLEGAL from lexIvar
-		`$`,    // bare $ (no name) → ILLEGAL from lexGvar
-		"`",    // backtick: unknown character → ILLEGAL from the main lexer switch
-		`1.`,   // trailing dot: float lookahead hits EOF, then '.' has no method
-		`1 2`,  // two primaries with no separator
+		`@`,      // bare @ → ILLEGAL from lexIvar
+		`$`,      // bare $ (no name) → ILLEGAL from lexGvar
+		"`",      // backtick: unknown character → ILLEGAL from the main lexer switch
+		`1.`,     // trailing dot: float lookahead hits EOF, then '.' has no method
+		`1 2`,    // two primaries with no separator
 		`module`, // module without a name
 		`class`,  // class without a name
 	} {
@@ -128,9 +128,9 @@ func TestParseErrors(t *testing.T) {
 
 func TestCommandAndParenArgs(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{`puts -1`, "-1\n"},                                   // command call with unary-minus arg
-		{"def s(a, b)\n  a + b\nend\nputs s(1, 2)", "3\n"},    // paren call, multiple args
-		{"puts self", "main\n"},                               // self (push_self) at top level
+		{`puts -1`, "-1\n"}, // command call with unary-minus arg
+		{"def s(a, b)\n  a + b\nend\nputs s(1, 2)", "3\n"}, // paren call, multiple args
+		{"puts self", "main\n"},                            // self (push_self) at top level
 	}
 	for _, tc := range cases {
 		if got := eval(t, tc.src); got != tc.want {

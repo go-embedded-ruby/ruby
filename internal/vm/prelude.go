@@ -3,9 +3,9 @@ package vm
 import (
 	_ "embed"
 
-	"github.com/go-embedded-ruby/ruby/internal/ast"
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
+	"github.com/go-ruby-parser/parser"
+	"github.com/go-ruby-parser/parser/ast"
 )
 
 // preludeSource is the embedded-Ruby standard library loaded at VM startup

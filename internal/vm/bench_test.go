@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
 	"github.com/go-embedded-ruby/ruby/internal/vm"
+	"github.com/go-ruby-parser/parser"
 )
 
 // benchProgram compiles src once and runs it b.N times on a reused VM, so the

@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
 	"github.com/go-embedded-ruby/ruby/internal/object"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
 	"github.com/go-embedded-ruby/ruby/internal/vm"
+	"github.com/go-ruby-parser/parser"
 )
 
 // runProg parses, compiles and runs src on a fresh VM seeded with the given

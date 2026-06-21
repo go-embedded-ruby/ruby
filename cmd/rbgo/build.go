@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/aot"
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
+	"github.com/go-ruby-parser/parser"
 )
 
 // buildCmd implements `rbgo build [-o out] <file.rb>`: it AOT-compiles the

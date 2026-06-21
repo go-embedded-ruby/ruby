@@ -9,9 +9,12 @@
 
 **A pure-Go implementation of Ruby — one static binary, full dynamism, zero cgo.**
 
-This repository is the interpreter: a lexer, parser and compiler that lower Ruby
-to bytecode, and a stack VM (mruby/YARV lineage) that runs it. The front-end is
-**embedded in the binary**, so `eval` and runtime `require` keep working. Ruby
+This repository is the interpreter: a compiler that lowers Ruby to bytecode, and
+a stack VM (mruby/YARV lineage) that runs it. The Ruby **front-end** (lexer,
+parser, AST) is the standalone pure-Go
+[go-ruby-parser](https://github.com/go-ruby-parser/parser) module, which this
+interpreter imports. The front-end is **embedded in the binary**, so `eval` and
+runtime `require` keep working. Ruby
 objects are Go heap objects, so **Go's garbage collector is reused**. Dispatch
 goes through **mutable per-class method tables**, which is what makes
 monkey-patching, `define_method` and `method_missing` free.
@@ -164,10 +167,6 @@ cmd/wasm/            GOOS=js GOARCH=wasm front-end (see web/) + native build stu
 cmd/aotgen/          regenerates the AOT differential suite (go:generate)
 web/                 browser playground: index.html, build.sh (rbgoEval/rbgoImage)
 internal/
-  token/             token kinds (carry SpaceBefore = MRI's spaceSeen)
-  lexer/             stateful lexer (lexState seed, SpaceBefore)
-  ast/               AST nodes
-  parser/            recursive descent + Pratt; scope stack for locals
   compiler/          AST → bytecode (ISeq), local-slot resolution
   bytecode/          instruction set + ISeq
   vm/                stack-machine interpreter, arithmetic, builtins

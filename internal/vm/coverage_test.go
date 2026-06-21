@@ -4,21 +4,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-embedded-ruby/ruby/internal/ast"
-	"github.com/go-embedded-ruby/ruby/internal/parser"
+	"github.com/go-ruby-parser/parser"
+	"github.com/go-ruby-parser/parser/ast"
 )
 
 // Covers grammar/compile corners not reached by the main behavioural table.
 func TestGrammarCorners(t *testing.T) {
 	tests := []struct{ src, want string }{
-		{`puts(+5)`, "5\n"},                                   // unary plus
-		{"i = 0\ni = i + 1 until i >= 3\nputs i", "3\n"},      // until modifier
-		{"def add a, b\n  a + b\nend\nputs add 1, 2", "3\n"},  // paren-less params + command call
-		{"def nine()\n  9\nend\nputs nine()", "9\n"},          // empty parens both sides
-		{"def empty?\n  true\nend\nputs empty?", "true\n"},    // ? in method name
-		{"def go!\n  1\nend\nputs go!", "1\n"},                // ! in method name
-		{"def h\n  return\nend\np h", "nil\n"},                // bare return
-		{"x = 5\ndef f\n  3\nend\nputs f\nputs x", "3\n5\n"},  // def is a hard scope boundary
+		{`puts(+5)`, "5\n"}, // unary plus
+		{"i = 0\ni = i + 1 until i >= 3\nputs i", "3\n"},     // until modifier
+		{"def add a, b\n  a + b\nend\nputs add 1, 2", "3\n"}, // paren-less params + command call
+		{"def nine()\n  9\nend\nputs nine()", "9\n"},         // empty parens both sides
+		{"def empty?\n  true\nend\nputs empty?", "true\n"},   // ? in method name
+		{"def go!\n  1\nend\nputs go!", "1\n"},               // ! in method name
+		{"def h\n  return\nend\np h", "nil\n"},               // bare return
+		{"x = 5\ndef f\n  3\nend\nputs f\nputs x", "3\n5\n"}, // def is a hard scope boundary
 	}
 	for _, tc := range tests {
 		if got := eval(t, tc.src); got != tc.want {

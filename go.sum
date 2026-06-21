@@ -1,7 +1,5 @@
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/go-composites/array v0.0.0-20260620184536-bfe15364f583 h1:9DcZ5PEnfZIot7JoTbGr5Y4S1N9Op3KvnrJbuMQmloA=
-github.com/go-composites/array v0.0.0-20260620184536-bfe15364f583/go.mod h1:QVSECxCzpi4QANnAmuAwjp9rOmjutEggIHvx8m2aWZo=
 github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 h1:gJG8ekSggliP8pmp4R+VCqq2nGq5BLiyEoO0BHDOYl4=
 github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6/go.mod h1:hhWmL0cQYEqlwbktG0uhz17sTRDcq1Gtgs1FO9aI+gU=
 github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62 h1:HcBdYJtXHSQ8AoGdyfpN5CU19d3dZ11kv13IxXWpcd8=
@@ -30,6 +28,8 @@ github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3 h1:oqUg3BkpFqPq
 github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3/go.mod h1:CZPf0P3FjwYlphONFD0ZAjE+/eaixCZYvYhm6QqmqsU=
 github.com/go-onigmo/regexp v0.0.0-20260615223128-d636c03e5b82 h1:W1Jg0B0zS6nKCcQD3VEvHnrR9TGFF+oOTLZQry4lzj8=
 github.com/go-onigmo/regexp v0.0.0-20260615223128-d636c03e5b82/go.mod h1:wTr40dRA2FxVeYniivGngyZUR8mzgiDPNT6GNMFwa8I=
+github.com/go-ruby-parser/parser v0.0.0-20260621180820-fd3eae0c021a h1:Rvbd3PPDPv9++xUUUaL1799Mw6ayhdiYN8B8iQdCkLM=
+github.com/go-ruby-parser/parser v0.0.0-20260621180820-fd3eae0c021a/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=
 github.com/go-task/slim-sprig/v3 v3.0.0/go.mod h1:W848ghGpv3Qj3dhTPRyJypKRiqCdHZiAzKg9hl15HA8=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

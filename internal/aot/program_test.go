@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	rparser "github.com/go-embedded-ruby/ruby/internal/parser"
+	rparser "github.com/go-ruby-parser/parser"
 )
 
 // topISeq compiles a whole program and returns its top-level ISeq.
