@@ -83,6 +83,12 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `shape`/`to_a`/`[]` — binding the pure-Go
   [go-ndarray](https://github.com/go-ndarray/ndarray) library, **no cgo / no
   NumPy**.
+- **Image:** a scikit-image-style image processor — `Image.new`/`load`/`save`,
+  pixel `get`/`set`, filters (`gaussian_blur`/`box_blur`/`median`/`sharpen`),
+  edges (`sobel`/`prewitt`/`scharr`/`laplacian`/`canny`), morphology
+  (`erode`/`dilate`), geometry (`resize`/`rotate90`/`crop`/`flip_*`), colour
+  (`grayscale`/`invert`/`rgb_to_hsv`/`otsu`) — binding the pure-Go
+  [go-images](https://github.com/go-images/images) library, **no cgo**.
 - **FFT:** an `FFT` module — 1-D (`fft`/`ifft`/`rfft`/`irfft`), N-D and 2-D
   (`fftn`/`ifftn`/`fft2`/`ifft2`), bin-frequency helpers
   (`fftfreq`/`rfftfreq`), window functions

@@ -165,6 +165,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cRational
 	case *NDArray:
 		return vm.cNDArray
+	case *Image:
+		return vm.cImage
 	case *object.String:
 		return vm.cString
 	case object.Symbol:
