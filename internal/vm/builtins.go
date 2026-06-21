@@ -53,6 +53,7 @@ func (vm *VM) bootstrap() {
 	vm.registerNDArray()
 	vm.registerImage()
 	vm.registerSet()
+	vm.registerTime()
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)

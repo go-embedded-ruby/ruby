@@ -90,6 +90,7 @@ type VM struct {
 	cComplex, cRational                    *RClass
 	cNDArray, cImage                       *RClass
 	cSet                                   *RClass
+	cTime                                  *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
 	lastMatch                              object.Value // $~: last regexp MatchData (or nil)

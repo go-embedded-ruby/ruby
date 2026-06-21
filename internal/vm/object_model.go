@@ -172,6 +172,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cImage
 	case *Set:
 		return vm.cSet
+	case *Time:
+		return vm.cTime
 	case *object.String:
 		return vm.cString
 	case object.Symbol:

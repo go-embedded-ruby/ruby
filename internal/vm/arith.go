@@ -60,6 +60,12 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return setOp(op, as, b)
 	}
 
+	// Time arithmetic: t + secs / t - secs (shift by a Duration) and t - other
+	// (the seconds between two instants) reach the operator fast path.
+	if at, ok := a.(*Time); ok {
+		return timeOp(op, at, b)
+	}
+
 	// NDArray element-wise / scalar arithmetic, in either operand order.
 	if _, ok := a.(*NDArray); ok {
 		return ndarrayOp(op, a, b)
@@ -449,6 +455,8 @@ func valueEqual(a, b object.Value) bool {
 	case *Set:
 		bv, ok := b.(*Set)
 		return ok && av.s.Equal(bv.s)
+	case *Time:
+		return timeEqual(av, b)
 	case *Regexp:
 		bv, ok := b.(*Regexp)
 		return ok && av.source == bv.source && orderFlags(av.flags) == orderFlags(bv.flags)
