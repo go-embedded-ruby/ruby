@@ -88,10 +88,23 @@ func (c *RClass) define(name string, fn NativeFn) {
 	c.methods[name] = &Method{name: name, native: fn, owner: c}
 }
 
-// RObject is an ordinary instance: a class plus instance variables.
+// RObject is an ordinary instance: a class plus instance variables, and an
+// optional singleton class holding per-object methods (def obj.x,
+// define_singleton_method, extend).
 type RObject struct {
-	class *RClass
-	ivars map[string]object.Value
+	class     *RClass
+	ivars     map[string]object.Value
+	singleton *RClass // lazily created; its super is `class`
+}
+
+// singletonClass returns o's singleton class, creating it on first use. Its
+// super is the object's class, so a normal method lookup through it finds the
+// per-object methods first, then the class chain.
+func (vm *VM) singletonClass(o *RObject) *RClass {
+	if o.singleton == nil {
+		o.singleton = newClass("", o.class)
+	}
+	return o.singleton
 }
 
 func (o *RObject) ToS() string     { return "#<" + o.class.name + ">" }
@@ -221,6 +234,11 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 		}
 	}
 	c := vm.classOf(recv)
+	// An object with a singleton class dispatches through it first (per-object
+	// methods + extended modules), then its class chain (the singleton's super).
+	if o, ok := recv.(*RObject); ok && o.singleton != nil {
+		c = o.singleton
+	}
 	if m := lookupMethod(c, name); m != nil {
 		return vm.invoke(m, recv, args, blk)
 	}
