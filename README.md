@@ -72,13 +72,19 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `true`/`false` return) — the embedded front-end loading code at runtime.
 - **Strings:** mutable (reference semantics) with `<<`/concat/replace/prepend/
   insert/`[]=`/slice!/the bang methods and `freeze`/`FrozenError`;
-  interpolation, heredocs (`<<`/`<<-`/`<<~`), `%w`/`%i` literals,
+  interpolation, heredocs (`<<`/`<<-`/`<<~`), `%w`/`%i` and `%q`/`%Q`/`%W`/`%I`
+  literals, the `\a`/`\b`/`\v`/`\f`/`\s`/`\n`/`\t`/`\r`/`\e`/`\0` escapes,
   `%`/`format`/`sprintf`, case/strip/`split`/`each_char`/`lines` and friends.
 - **Regular expressions:** `/re/imx` literals, `Regexp`/`MatchData`, `=~` /
   `match` / `match?` / `scan` / `gsub` / `sub` / `split`, and the match globals
   `$~` / `$1`..`$N` / `$&` / `` $` `` / `$'` — running on the standalone pure-Go
   [go-onigmo](https://github.com/go-onigmo/regexp) engine, so the build stays
   **CGO=0**.
+- **Standard library leaves:** **`JSON`** (`generate`/`dump`/`pretty_generate`/
+  `parse` + `Object#to_json`, with object key order preserved and MRI-matching
+  number/escape formatting), **`Digest`** (`MD5`/`SHA1`/`SHA256`/`SHA512` —
+  `hexdigest`/`digest`/`base64digest`) and **`Base64`** — each `require`-able and
+  pure-Go.
 - **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/…)
   and `Comparable`, both written once in embedded Ruby; Array **bang methods**
   (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`);
