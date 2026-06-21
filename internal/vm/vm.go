@@ -89,6 +89,7 @@ type VM struct {
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cComplex, cRational                    *RClass
 	cNDArray, cImage                       *RClass
+	cSet                                   *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
 	lastMatch                              object.Value // $~: last regexp MatchData (or nil)

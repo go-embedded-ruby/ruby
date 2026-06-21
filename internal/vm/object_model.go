@@ -15,8 +15,8 @@ type NativeFn func(vm *VM, self object.Value, args []object.Value, blk *Proc) ob
 type Env struct {
 	slots  []object.Value
 	parent *Env
-	kwargs *object.Hash      // keyword arguments bound for this frame (nil if none)
-	inline [4]object.Value   // backs slots for the common small-frame case (no 2nd alloc)
+	kwargs *object.Hash    // keyword arguments bound for this frame (nil if none)
+	inline [4]object.Value // backs slots for the common small-frame case (no 2nd alloc)
 }
 
 // ancestor returns the env depth levels up the parent chain.
@@ -167,6 +167,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cNDArray
 	case *Image:
 		return vm.cImage
+	case *Set:
+		return vm.cSet
 	case *object.String:
 		return vm.cString
 	case object.Symbol:

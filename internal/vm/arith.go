@@ -53,6 +53,13 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return rationalOp(op, a, b)
 	}
 
+	// Set algebra: + (union) and - (difference) reach the operator fast path
+	// (the other combinators — & | << — dispatch as methods). The right operand
+	// must be a Set.
+	if as, ok := a.(*Set); ok {
+		return setOp(op, as, b)
+	}
+
 	// NDArray element-wise / scalar arithmetic, in either operand order.
 	if _, ok := a.(*NDArray); ok {
 		return ndarrayOp(op, a, b)
@@ -439,6 +446,9 @@ func valueEqual(a, b object.Value) bool {
 	case *object.Range:
 		bv, ok := b.(*object.Range)
 		return ok && av.Exclusive == bv.Exclusive && valueEqual(av.Lo, bv.Lo) && valueEqual(av.Hi, bv.Hi)
+	case *Set:
+		bv, ok := b.(*Set)
+		return ok && av.s.Equal(bv.s)
 	case *Regexp:
 		bv, ok := b.(*Regexp)
 		return ok && av.source == bv.source && orderFlags(av.flags) == orderFlags(bv.flags)

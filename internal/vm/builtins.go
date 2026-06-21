@@ -52,6 +52,7 @@ func (vm *VM) bootstrap() {
 	vm.registerFFT()
 	vm.registerNDArray()
 	vm.registerImage()
+	vm.registerSet()
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)
@@ -1675,7 +1676,7 @@ func (vm *VM) bootstrap() {
 		if a == 0 || b == 0 {
 			return object.Integer(0)
 		}
-		return object.Integer(absInt(a/gcdInt(a, b) * b))
+		return object.Integer(absInt(a / gcdInt(a, b) * b))
 	})
 	vm.cInteger.define("bit_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
@@ -1930,7 +1931,6 @@ func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value 
 		return object.NilV // Ruby returns the args array; arrays arrive in Phase 2
 	}
 }
-
 
 // wsCutset is the whitespace stripped by String#strip and friends, matching
 // Ruby (space, tab, newline, carriage return, form feed, vertical tab, NUL).
