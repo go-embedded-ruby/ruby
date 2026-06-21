@@ -507,6 +507,21 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				case bytecode.OpDefineSMethod:
 					definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
 					push(object.NilV)
+				case bytecode.OpDefineSingletonMethod:
+					// def recv.foo: a class receiver gains a class method; any other
+					// object gains a method on its singleton class.
+					name := iseq.Names[in.A]
+					recv := pop()
+					switch t := recv.(type) {
+					case *RClass:
+						t.smethods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: t}
+					case *RObject:
+						sc := vm.singletonClass(t)
+						sc.methods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: sc}
+					default:
+						raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
+					}
+					push(object.NilV)
 				case bytecode.OpDefineClass:
 					push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
 				case bytecode.OpDefineModule:

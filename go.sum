@@ -38,6 +38,8 @@ github.com/go-ruby-parser/parser v0.0.0-20260621211959-b599cfbf4395 h1:ezLBNrUZA
 github.com/go-ruby-parser/parser v0.0.0-20260621211959-b599cfbf4395/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-parser/parser v0.0.0-20260621212656-2ec3245278c5 h1:h4RCOMLh/EoXtM9fUbo6Nl4QbNzBtAVdZ4qCzox9gyQ=
 github.com/go-ruby-parser/parser v0.0.0-20260621212656-2ec3245278c5/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
+github.com/go-ruby-parser/parser v0.0.0-20260621213827-34d380e5d1fb h1:ko/ijJQvHaMn4SsmgSG01HYaxGsnem5cfd1zOZTq8nw=
+github.com/go-ruby-parser/parser v0.0.0-20260621213827-34d380e5d1fb/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=
 github.com/go-task/slim-sprig/v3 v3.0.0/go.mod h1:W848ghGpv3Qj3dhTPRyJypKRiqCdHZiAzKg9hl15HA8=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

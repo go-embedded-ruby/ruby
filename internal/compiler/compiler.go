@@ -1348,6 +1348,12 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	parent := c.cur()
 	childIdx := len(parent.children)
 	parent.children = append(parent.children, child)
+	// def recv.foo: evaluate the receiver, then define a singleton method on it.
+	if v.Recv != nil {
+		c.compileNode(v.Recv)
+		parent.emit(bytecode.OpDefineSingletonMethod, parent.addName(v.Name), childIdx)
+		return
+	}
 	op := bytecode.OpDefineMethod
 	if v.Singleton {
 		op = bytecode.OpDefineSMethod
