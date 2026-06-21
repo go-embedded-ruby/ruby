@@ -73,6 +73,12 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return bigDecimalOp(op, ab, b)
 	}
 
+	// Date arithmetic: d + n / d - n (shift by a whole number of days) and
+	// d - other (the day count between two dates) reach the operator fast path.
+	if ad, ok := a.(*Date); ok {
+		return dateOp(op, ad, b)
+	}
+
 	// NDArray element-wise / scalar arithmetic, in either operand order.
 	if _, ok := a.(*NDArray); ok {
 		return ndarrayOp(op, a, b)
@@ -474,6 +480,8 @@ func valueEqual(a, b object.Value) bool {
 		return ok && av.s.Equal(bv.s)
 	case *Time:
 		return timeEqual(av, b)
+	case *Date:
+		return dateEqual(av, b)
 	case *Regexp:
 		bv, ok := b.(*Regexp)
 		return ok && av.source == bv.source && orderFlags(av.flags) == orderFlags(bv.flags)

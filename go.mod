@@ -4,7 +4,8 @@ go 1.26.4
 
 require (
 	github.com/go-composites/bigfloat v0.0.0-20260621063224-9b6bd10c7789
-	github.com/go-composites/result v0.0.0-20260621061851-32adc2fb3ac2
+	github.com/go-composites/date v0.0.0-20260621165615-4d7c6c9e19f2
+	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/set v0.0.0-20260620192142-23f1a50c2b92
 	github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb

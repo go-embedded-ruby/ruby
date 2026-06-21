@@ -176,6 +176,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cTime
 	case *BigDecimal:
 		return vm.cBigDecimal
+	case *Date:
+		return vm.cDate
 	case *object.String:
 		return vm.cString
 	case object.Symbol:
