@@ -20,7 +20,7 @@ var preloadedFeatures = map[string]bool{"set": true}
 // first call and false afterwards, matching a normal gem load.
 var providedFeatures = map[string]bool{
 	"date": true, "time": true, "bigdecimal": true, "bag": true,
-	"base64": true, "digest": true,
+	"base64": true, "digest": true, "json": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
