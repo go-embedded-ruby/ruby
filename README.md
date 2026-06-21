@@ -65,6 +65,9 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `instance_variable_get`/`set`/`defined?`, **string `eval`** (the embedded
   front-end compiling Ruby at runtime), and the class/module **hooks**
   `inherited`/`included`/`method_added`.
+- **Runtime loading:** **`require`/`require_relative`** load, compile and run a
+  `.rb` file once (relative + search-path resolution, `LoadError` on miss,
+  `true`/`false` return) — the embedded front-end loading code at runtime.
 - **Strings:** mutable (reference semantics) with `<<`/concat/replace/prepend/
   insert/`[]=`/slice!/the bang methods and `freeze`/`FrozenError`;
   interpolation, heredocs (`<<`/`<<-`/`<<~`), `%w`/`%i` literals,
