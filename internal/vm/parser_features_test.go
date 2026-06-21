@@ -23,6 +23,13 @@ func TestParserFeatures(t *testing.T) {
 		// adjacent string-literal concatenation.
 		{`p "a" "b" "c"`, "\"abc\"\n"},
 		{`puts "hello " "world"`, "hello world\n"},
+		// explicit operator-method calls.
+		{`p 1.+(2)`, "3\n"},
+		{`p 10.-(3)`, "7\n"},
+		{`p (3.<=>(5))`, "-1\n"},
+		// multi-value return.
+		{"def m; return 1, 2; end\np m", "[1, 2]\n"},
+		{"def f(x); return x, x * 2; end\na, b = f(5)\np [a, b]", "[5, 10]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
