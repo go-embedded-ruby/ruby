@@ -56,14 +56,15 @@ func TestRanges(t *testing.T) {
 }
 
 func TestRangeEachNoBlock(t *testing.T) {
-	if err := runErr(t, `(1..3).each`); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-		t.Fatalf("got %v want LocalJumpError", err)
+	// Range#each / #map with no block return an Enumerator (MRI semantics).
+	if got := eval(t, `p (1..3).each.to_a`); got != "[1, 2, 3]\n" {
+		t.Fatalf("each: got %q", got)
 	}
 }
 
 func TestRangeMapNoBlock(t *testing.T) {
-	if err := runErr(t, `(1..3).map`); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-		t.Fatalf("got %v want LocalJumpError", err)
+	if got := eval(t, `p (1..3).map.with_index { |x, i| x * i }`); got != "[0, 2, 6]\n" {
+		t.Fatalf("map: got %q", got)
 	}
 }
 

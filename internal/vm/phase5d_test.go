@@ -1,9 +1,6 @@
 package vm_test
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestStringIterationBatch(t *testing.T) {
 	tests := []struct{ name, src, want string }{
@@ -28,9 +25,15 @@ func TestStringIterationBatch(t *testing.T) {
 }
 
 func TestStringIterationNoBlock(t *testing.T) {
-	for _, src := range []string{`"x".each_char`, `"x".each_byte`, `"x".each_line`} {
-		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-			t.Fatalf("src=%q got %v want LocalJumpError", src, err)
+	// String iterators with no block return an Enumerator (MRI semantics).
+	cases := map[string]string{
+		`p "xy".each_char.to_a`: "[\"x\", \"y\"]\n",
+		`p "xy".each_byte.to_a`: "[120, 121]\n",
+		`p "x\ny".each_line.to_a`: "[\"x\\n\", \"y\"]\n",
+	}
+	for src, want := range cases {
+		if got := eval(t, src); got != want {
+			t.Errorf("src=%q got %q want %q", src, got, want)
 		}
 	}
 }

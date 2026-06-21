@@ -29,10 +29,8 @@ func TestArrayWindowBatch(t *testing.T) {
 
 func TestArrayWindowErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
-		{"cons_no_block", `[1, 2].each_cons(2)`, "LocalJumpError"},
+		{"cons_no_arg", `[1, 2].each_cons`, "ArgumentError"},
 		{"cons_bad_size", `[1, 2].each_cons(0) { |a| a }`, "invalid size"},
-		{"take_while_no_block", `[1, 2].take_while`, "LocalJumpError"},
-		{"drop_while_no_block", `[1, 2].drop_while`, "LocalJumpError"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,5 +38,9 @@ func TestArrayWindowErrors(t *testing.T) {
 				t.Fatalf("src=%q got %v want %q", tc.src, err, tc.want)
 			}
 		})
+	}
+	// each_cons(n) with no block returns an Enumerator (MRI semantics).
+	if got := eval(t, `p [1, 2, 3].each_cons(2).to_a`); got != "[[1, 2], [2, 3]]\n" {
+		t.Errorf("each_cons(2).to_a got %q", got)
 	}
 }

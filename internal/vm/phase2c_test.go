@@ -1,7 +1,6 @@
 package vm_test
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -45,7 +44,8 @@ func TestHashes(t *testing.T) {
 }
 
 func TestHashEachNoBlock(t *testing.T) {
-	if err := runErr(t, `({}).each`); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-		t.Fatalf("got %v want LocalJumpError", err)
+	// Hash#each with no block returns an Enumerator (MRI semantics).
+	if got := eval(t, `p({a: 1, b: 2}.each.to_a)`); got != "[[:a, 1], [:b, 2]]\n" {
+		t.Fatalf("got %q", got)
 	}
 }

@@ -46,8 +46,6 @@ func TestHashMethodErrors(t *testing.T) {
 		{"fetch_missing", `({a: 1}).fetch(:z)`, "KeyError"},
 		{"merge_non_hash", `({a: 1}).merge(5)`, "TypeError"},
 		{"dig_non_digable", `({a: 1}).dig(:a, :b)`, "TypeError"},
-		{"transform_values_no_block", `({a: 1}).transform_values`, "LocalJumpError"},
-		{"transform_keys_no_block", `({a: 1}).transform_keys`, "LocalJumpError"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

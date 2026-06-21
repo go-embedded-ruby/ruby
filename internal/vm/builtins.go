@@ -493,7 +493,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("each_line", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each_line)")
+			return enumFor(self, "each_line")
 		}
 		for _, seg := range splitLines(strOf(self)) {
 			vm.callBlock(blk, []object.Value{object.NewString(seg)})
@@ -502,7 +502,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("each_char", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each_char)")
+			return enumFor(self, "each_char")
 		}
 		for _, r := range strOf(self) {
 			vm.callBlock(blk, []object.Value{object.NewString(string(r))})
@@ -511,7 +511,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("each_byte", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each_byte)")
+			return enumFor(self, "each_byte")
 		}
 		s := strOf(self)
 		for i := 0; i < len(s); i++ {
@@ -865,7 +865,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each)")
+			return enumFor(self, "each")
 		}
 		a := self.(*object.Array)
 		for _, e := range a.Elems {
@@ -875,7 +875,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("map", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (map)")
+			return enumFor(self, "map")
 		}
 		a := self.(*object.Array)
 		out := make([]object.Value, len(a.Elems))
@@ -934,7 +934,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("map!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (map!)")
+			return enumFor(self, "map!")
 		}
 		a := self.(*object.Array)
 		for i := range a.Elems {
@@ -956,7 +956,7 @@ func (vm *VM) bootstrap() {
 	})
 	selectBang := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given")
+			return enumFor(self, "select!")
 		}
 		return arrayKeepIf(vm, self.(*object.Array), blk, true)
 	}
@@ -964,7 +964,7 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("filter!", selectBang)
 	vm.cArray.define("reject!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (reject!)")
+			return enumFor(self, "reject!")
 		}
 		return arrayKeepIf(vm, self.(*object.Array), blk, false)
 	})
@@ -1030,8 +1030,11 @@ func (vm *VM) bootstrap() {
 		return acc
 	})
 	vm.cArray.define("each_slice", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each_slice)")
+			return enumFor(self, "each_slice", args...)
 		}
 		n := int(intArg(args[0]))
 		if n <= 0 {
@@ -1050,8 +1053,11 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.define("each_cons", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each_cons)")
+			return enumFor(self, "each_cons", args...)
 		}
 		n := int(intArg(args[0]))
 		if n <= 0 {
@@ -1067,7 +1073,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("take_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (take_while)")
+			return enumFor(self, "take_while")
 		}
 		var out []object.Value
 		for _, e := range self.(*object.Array).Elems {
@@ -1080,7 +1086,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("drop_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (drop_while)")
+			return enumFor(self, "drop_while")
 		}
 		a := self.(*object.Array)
 		i := 0
@@ -1158,7 +1164,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("sort_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (sort_by)")
+			return enumFor(self, "sort_by")
 		}
 		a := self.(*object.Array)
 		keys := make([]object.Value, len(a.Elems))
@@ -1184,8 +1190,11 @@ func (vm *VM) bootstrap() {
 		return vm.arrayByExtreme(self.(*object.Array), blk, "max_by", 1)
 	})
 	vm.cArray.define("each_with_object", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each_with_object)")
+			return enumFor(self, "each_with_object", args...)
 		}
 		memo := args[0]
 		for _, e := range self.(*object.Array).Elems {
@@ -1256,7 +1265,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each)")
+			return enumFor(self, "each")
 		}
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
@@ -1344,7 +1353,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("transform_values", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (transform_values)")
+			return enumFor(self, "transform_values")
 		}
 		h := self.(*object.Hash)
 		out := object.NewHash()
@@ -1356,7 +1365,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("transform_keys", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (transform_keys)")
+			return enumFor(self, "transform_keys")
 		}
 		h := self.(*object.Hash)
 		out := object.NewHash()
@@ -1402,7 +1411,7 @@ func (vm *VM) bootstrap() {
 	// native rather than inherited.
 	vm.cHash.define("select", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (select)")
+			return enumFor(self, "select")
 		}
 		h := self.(*object.Hash)
 		out := object.NewHash()
@@ -1416,7 +1425,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("reject", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (reject)")
+			return enumFor(self, "reject")
 		}
 		h := self.(*object.Hash)
 		out := object.NewHash()
@@ -1593,7 +1602,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cRange.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (each)")
+			return enumFor(self, "each")
 		}
 		r := self.(*object.Range)
 		for _, e := range rangeElems(r) {
@@ -1603,7 +1612,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cRange.define("map", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (map)")
+			return enumFor(self, "map")
 		}
 		elems := rangeElems(self.(*object.Range))
 		out := make([]object.Value, len(elems))
@@ -1748,8 +1757,11 @@ func (vm *VM) bootstrap() {
 		return object.NewString(string([]byte{byte(n)}))
 	})
 	vm.cInteger.define("upto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
 		if blk == nil {
-			raise("LocalJumpError", "no block given (upto)")
+			return enumFor(self, "upto", args...)
 		}
 		for i := intOf(self); i <= intArg(args[0]); i++ {
 			vm.callBlock(blk, []object.Value{object.Integer(i)})
@@ -1757,8 +1769,11 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cInteger.define("downto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
 		if blk == nil {
-			raise("LocalJumpError", "no block given (downto)")
+			return enumFor(self, "downto", args...)
 		}
 		for i := intOf(self); i >= intArg(args[0]); i-- {
 			vm.callBlock(blk, []object.Value{object.Integer(i)})
@@ -1835,7 +1850,7 @@ func (vm *VM) bootstrap() {
 	// Integer#times — the first block-driven iterator.
 	vm.cInteger.define("times", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (times)")
+			return enumFor(self, "times")
 		}
 		n := int64(self.(object.Integer))
 		for i := int64(0); i < n; i++ {
@@ -2325,7 +2340,7 @@ func (vm *VM) spaceship(a, b object.Value) int {
 // smallest (want=-1) or largest (want=1). nil for an empty array.
 func (vm *VM) arrayByExtreme(a *object.Array, blk *Proc, name string, want int) object.Value {
 	if blk == nil {
-		raise("LocalJumpError", "no block given (%s)", name)
+		return enumFor(a, name)
 	}
 	if len(a.Elems) == 0 {
 		return object.NilV

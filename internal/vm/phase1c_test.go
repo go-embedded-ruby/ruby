@@ -43,12 +43,15 @@ func TestBlocksAndYield(t *testing.T) {
 
 func TestBlockErrors(t *testing.T) {
 	tests := []struct{ src, want string }{
-		{"def f\n  yield\nend\nf", "LocalJumpError"},   // yield without a block
-		{`5.times`, "LocalJumpError"},                   // times without a block
+		{"def f\n  yield\nend\nf", "LocalJumpError"}, // yield without a block
 	}
 	for _, tc := range tests {
 		if err := runErr(t, tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("src=%q got %v want %q", tc.src, err, tc.want)
 		}
+	}
+	// times without a block returns an Enumerator (MRI semantics).
+	if got := eval(t, `p 5.times.to_a`); got != "[0, 1, 2, 3, 4]\n" {
+		t.Errorf("5.times.to_a got %q", got)
 	}
 }

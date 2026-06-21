@@ -76,8 +76,6 @@ func TestNumericErrors(t *testing.T) {
 		{"divmod_zero", `1.divmod(0)`, "ZeroDivisionError"},
 		{"digits_negative", `(-5).digits`, "Math::DomainError"},
 		{"chr_out_of_range", `9999.chr`, "RangeError"},
-		{"upto_no_block", `1.upto(3)`, "LocalJumpError"},
-		{"downto_no_block", `3.downto(1)`, "LocalJumpError"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,5 +83,12 @@ func TestNumericErrors(t *testing.T) {
 				t.Fatalf("got %v want %s", err, tc.want)
 			}
 		})
+	}
+	// upto/downto with no block return an Enumerator (MRI semantics).
+	if got := eval(t, `p 1.upto(3).to_a`); got != "[1, 2, 3]\n" {
+		t.Errorf("upto.to_a got %q", got)
+	}
+	if got := eval(t, `p 3.downto(1).to_a`); got != "[3, 2, 1]\n" {
+		t.Errorf("downto.to_a got %q", got)
 	}
 }

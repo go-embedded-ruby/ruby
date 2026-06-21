@@ -31,7 +31,7 @@ func TestArrayBatch(t *testing.T) {
 
 func TestEachSliceErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
-		{"no_block", `[1, 2].each_slice(1)`, "LocalJumpError"},
+		{"no_arg", `[1, 2].each_slice`, "ArgumentError"},
 		{"bad_size", `[1, 2].each_slice(0) { |s| s }`, "ArgumentError"},
 	}
 	for _, tc := range cases {
@@ -40,5 +40,9 @@ func TestEachSliceErrors(t *testing.T) {
 				t.Fatalf("src=%q got %v want %s", tc.src, err, tc.want)
 			}
 		})
+	}
+	// each_slice(n) with no block returns an Enumerator (MRI semantics).
+	if got := eval(t, `p [1, 2].each_slice(1).to_a`); got != "[[1], [2]]\n" {
+		t.Errorf("each_slice(1).to_a got %q", got)
 	}
 }

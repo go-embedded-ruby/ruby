@@ -98,6 +98,7 @@ type VM struct {
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
 	cMethod                                *RClass
+	cEnumerator                            *RClass
 	lastMatch                              object.Value // $~: last regexp MatchData (or nil)
 	cTrueClass, cFalseClass, cNilClass     *RClass
 	cRegexp, cMatchData                    *RClass
@@ -113,6 +114,7 @@ func New(out io.Writer) *VM {
 	vm := &VM{out: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}}
 	vm.bootstrap()
 	vm.loadPrelude(preludeSource)
+	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	return vm
 }
 

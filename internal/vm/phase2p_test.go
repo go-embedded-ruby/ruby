@@ -46,9 +46,7 @@ func TestArrayMethods(t *testing.T) {
 func TestArrayMethodErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
 		{"sort_incomparable", `[1, "x"].sort`, "ArgumentError"},
-		{"sort_by_no_block", `[1].sort_by`, "LocalJumpError"},
-		{"min_by_no_block", `[1].min_by`, "LocalJumpError"},
-		{"each_with_object_no_block", `[1].each_with_object([])`, "LocalJumpError"},
+		{"each_with_object_no_arg", `[1].each_with_object`, "ArgumentError"},
 		{"take_negative", `[1].take(-1)`, "ArgumentError"},
 		{"drop_negative", `[1].drop(-1)`, "ArgumentError"},
 	}

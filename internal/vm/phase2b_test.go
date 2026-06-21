@@ -53,8 +53,6 @@ func TestArrays(t *testing.T) {
 
 func TestArrayErrors(t *testing.T) {
 	tests := []struct{ src, want string }{
-		{`[].each`, "LocalJumpError"},
-		{`[].map`, "LocalJumpError"},
 		{"a = [1]\na[5] = 9", "IndexError"},
 		{"a = [1]\na[-5] = 9", "IndexError"},
 		{`p [1]["x"]`, "TypeError"},

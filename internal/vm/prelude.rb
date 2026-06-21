@@ -65,9 +65,26 @@ module Enumerable
   end
 
   def map
+    return enum_for(:map) unless block_given?
     r = []
     each { |x| r << yield(x) }
     r
+  end
+
+  # collect/filter/detect are the classic aliases of map/select/find.
+  def collect(&blk)
+    return enum_for(:collect) unless block_given?
+    map(&blk)
+  end
+
+  def filter(&blk)
+    return enum_for(:filter) unless block_given?
+    select(&blk)
+  end
+
+  def detect(&blk)
+    return enum_for(:detect) unless block_given?
+    find(&blk)
   end
 
   def count
@@ -79,30 +96,36 @@ module Enumerable
   # min_by / max_by / sort_by delegate to Array's native implementations via the
   # pair/element list, so any Enumerable (Hash, Range, Struct, …) gains them.
   def min_by
+    return enum_for(:min_by) unless block_given?
     to_a.min_by { |x| yield(x) }
   end
 
   def max_by
+    return enum_for(:max_by) unless block_given?
     to_a.max_by { |x| yield(x) }
   end
 
   def sort_by
+    return enum_for(:sort_by) unless block_given?
     to_a.sort_by { |x| yield(x) }
   end
 
   def select
+    return enum_for(:select) unless block_given?
     r = []
     each { |x| r << x if yield(x) }
     r
   end
 
   def reject
+    return enum_for(:reject) unless block_given?
     r = []
     each { |x| r << x unless yield(x) }
     r
   end
 
   def find
+    return enum_for(:find) unless block_given?
     result = nil
     each { |x|
       if result == nil
@@ -205,6 +228,7 @@ module Enumerable
   end
 
   def each_with_index
+    return enum_for(:each_with_index) unless block_given?
     i = 0
     each { |x|
       yield(x, i)
@@ -214,6 +238,7 @@ module Enumerable
   end
 
   def flat_map
+    return enum_for(:flat_map) unless block_given?
     r = []
     each { |x|
       v = yield(x)
@@ -227,11 +252,13 @@ module Enumerable
   end
 
   def each_with_object(memo)
+    return enum_for(:each_with_object, memo) unless block_given?
     each { |x| yield(x, memo) }
     memo
   end
 
   def filter_map
+    return enum_for(:filter_map) unless block_given?
     r = []
     each { |x|
       v = yield(x)
@@ -241,6 +268,7 @@ module Enumerable
   end
 
   def partition
+    return enum_for(:partition) unless block_given?
     yes = []
     no = []
     each { |x|
@@ -254,6 +282,7 @@ module Enumerable
   end
 
   def group_by
+    return enum_for(:group_by) unless block_given?
     h = {}
     each { |x|
       k = yield(x)

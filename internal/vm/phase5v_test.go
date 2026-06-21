@@ -1,9 +1,6 @@
 package vm_test
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestArrayBangMethods(t *testing.T) {
 	tests := []struct{ name, src, want string }{
@@ -31,9 +28,14 @@ func TestArrayBangMethods(t *testing.T) {
 }
 
 func TestArrayBangNoBlock(t *testing.T) {
-	for _, src := range []string{`[1].map!`, `[1].select!`, `[1].reject!`} {
-		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-			t.Fatalf("src=%q got %v want LocalJumpError", src, err)
+	// The mutating iterators with no block return an Enumerator (MRI semantics);
+	// driving it with a block performs the mutation.
+	if got := eval(t, "a = [1, 2, 3]\na.map!.with_index { |x, i| x + i }\np a"); got != "[1, 3, 5]\n" {
+		t.Errorf("map! enum got %q", got)
+	}
+	for _, src := range []string{`p [1].map!.to_a`, `p [1].select!.to_a`, `p [1].reject!.to_a`} {
+		if got := eval(t, src); got != "[1]\n" {
+			t.Errorf("src=%q got %q", src, got)
 		}
 	}
 }

@@ -1,9 +1,6 @@
 package vm_test
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 // Block auto-splat: a multi-parameter block called with a single Array
 // destructures it element-wise.
@@ -53,9 +50,10 @@ func TestHashEnumerable(t *testing.T) {
 }
 
 func TestHashSelectRejectNoBlock(t *testing.T) {
-	for _, src := range []string{`({:a => 1}).select`, `({:a => 1}).reject`} {
-		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-			t.Fatalf("src=%q got %v want LocalJumpError", src, err)
+	// select/reject with no block return an Enumerator (MRI semantics).
+	for _, src := range []string{`p({a: 1}.select.to_a)`, `p({a: 1}.reject.to_a)`} {
+		if got := eval(t, src); got != "[[:a, 1]]\n" {
+			t.Fatalf("src=%q got %q", src, got)
 		}
 	}
 }
