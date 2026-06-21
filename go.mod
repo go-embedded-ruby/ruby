@@ -4,8 +4,8 @@ go 1.26.4
 
 require (
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
-	github.com/go-composites/bigfloat v0.0.0-20260621063224-9b6bd10c7789
-	github.com/go-composites/date v0.0.0-20260621165615-4d7c6c9e19f2
+	github.com/go-composites/bigfloat v0.0.0-20260621182601-a3f86ca9330d
+	github.com/go-composites/date v0.0.0-20260621182336-3423c9afe5fe
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/set v0.0.0-20260620192142-23f1a50c2b92
 	github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0

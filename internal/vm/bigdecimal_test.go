@@ -44,6 +44,37 @@ func TestBigDecimal(t *testing.T) {
 		{`puts BigDecimal("2.5").send(:-@).to_s`, "-2.5\n"}, // explicit -@ method
 		// to_f.
 		{`p BigDecimal("2.5").to_f`, "2.5\n"},
+		// to_i / to_int (→ ToInt64): truncate toward zero to an Integer.
+		{`p BigDecimal("1.5").to_i`, "1\n"},
+		{`p BigDecimal("-1.9").to_i`, "-1\n"}, // truncates toward zero, not floor
+		{`p BigDecimal("42").to_int`, "42\n"},
+		{`p BigDecimal("2.5").to_i.class`, "Integer\n"},
+		// zero? (→ IsZero).
+		{`p BigDecimal("0").zero?`, "true\n"},
+		{`p BigDecimal("0.0").zero?`, "true\n"},
+		{`p BigDecimal("1.5").zero?`, "false\n"},
+		{`p BigDecimal("-0.1").zero?`, "false\n"},
+		// floor / ceil / round (no-arg integer rounding); round halves away from zero.
+		{`puts BigDecimal("2.4").floor.to_s`, "2\n"},
+		{`puts BigDecimal("-2.4").floor.to_s`, "-3\n"},
+		{`puts BigDecimal("2.4").ceil.to_s`, "3\n"},
+		{`puts BigDecimal("-2.4").ceil.to_s`, "-2\n"},
+		{`puts BigDecimal("2.5").round.to_s`, "3\n"},
+		{`puts BigDecimal("2.4").round.to_s`, "2\n"},
+		{`puts BigDecimal("-2.5").round.to_s`, "-3\n"}, // half away from zero
+		{`p BigDecimal("2.5").round.class`, "BigDecimal\n"},
+		// ** / pow (→ Power): Integer exponent; negative exponent is the reciprocal;
+		// 0**0 is 1. Dispatches as a method send (no power opcode).
+		{`puts (BigDecimal("2") ** 10).to_s`, "1024\n"},
+		{`puts BigDecimal("2").pow(10).to_s`, "1024\n"},
+		{`puts (BigDecimal("3") ** 0).to_s`, "1\n"},
+		{`puts (BigDecimal("0") ** 0).to_s`, "1\n"},    // 0**0 is 1
+		{`puts (BigDecimal("2") ** -1).to_s`, "0.5\n"}, // reciprocal
+		{`puts BigDecimal("2").send(:**, 3).to_s`, "8\n"},
+		// sqrt (→ Sqrt).
+		{`puts BigDecimal("9").sqrt.to_s`, "3\n"},
+		{`puts BigDecimal("2").sqrt.to_s`, "1.4142135623730950488016887242096980785696718753769480731766797379907324784621\n"},
+		{`puts BigDecimal("0").sqrt.to_s`, "0\n"},
 		// Comparison: <=> and the boolean operators (numeric operand coerces).
 		{`p(BigDecimal("1") <=> BigDecimal("2"))`, "-1\n"},
 		{`p(BigDecimal("2") <=> BigDecimal("1"))`, "1\n"},
@@ -109,6 +140,10 @@ func TestBigDecimalErrors(t *testing.T) {
 		{`BigDecimal("1") >= "x"`, "TypeError"},                // >= non-numeric
 		{`BigDecimal("1") % BigDecimal("1")`, "NoMethodError"}, // unsupported operator
 		{`BigDecimal([])`, "TypeError"},                        // non-convertible constructor arg
+		{`BigDecimal("0") ** -1`, "ZeroDivisionError"},         // 0 to a negative power
+		{`BigDecimal("0").pow(-2)`, "ZeroDivisionError"},       // pow form, same error
+		{`BigDecimal("2") ** "x"`, "TypeError"},                // non-Integer exponent
+		{`BigDecimal("-1").sqrt`, "Math::DomainError"},         // sqrt of a negative
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)

@@ -217,6 +217,45 @@ func (vm *VM) registerDate() {
 	d("next_day", dayOffset(1))
 	d("prev_day", dayOffset(-1))
 
+	// leap? → IsLeapYear (a plain Boolean); yday → DayOfYear, the 1-based day of
+	// the year (1–366), matching MRI's Date#leap? / Date#yday.
+	d("leap?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).d.IsLeapYear())
+	})
+	d("yday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(self(v).d.DayOfYear())
+	})
+
+	// next_month(n=1) / prev_month(n=1): shift forward / back by n calendar months
+	// (→ AddMonths), with MRI's day-of-month normalisation (31 Jan >> 1 → 28 Feb).
+	// AddMonths on a concrete Date never fails, so its Result always carries the
+	// payload.
+	monthShift := func(d *Date, n int) object.Value {
+		return &Date{d: d.d.AddMonths(n).Payload().(godate.Interface)}
+	}
+	monthOffset := func(sign int) NativeFn {
+		return func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+			n := 1
+			if len(args) > 0 {
+				n = dateDays(args[0])
+			}
+			return monthShift(self(v), sign*n)
+		}
+	}
+	d("next_month", monthOffset(1))
+	d("prev_month", monthOffset(-1))
+
+	// >> n / << n: MRI's month-shift operators. The VM has no shift opcode, so
+	// these dispatch as ordinary method sends (like Integer#<< / Rational#**); the
+	// right operand is an Integer month count (dateDays raises TypeError
+	// otherwise). >> shifts forward, << shifts back.
+	d(">>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return monthShift(self(v), dateDays(args[0]))
+	})
+	d("<<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return monthShift(self(v), -dateDays(args[0]))
+	})
+
 	// Comparison: <=> via Before/After/Equal (nil for a non-Date, as in MRI), and
 	// the boolean operators / == built on it.
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {

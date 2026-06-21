@@ -44,6 +44,31 @@ func TestDate(t *testing.T) {
 		{`puts Date.new(2026, 6, 21).next_day(5).to_s`, "2026-06-26\n"},
 		{`puts Date.new(2026, 6, 21).prev_day.to_s`, "2026-06-20\n"},
 		{`puts Date.new(2026, 6, 21).prev_day(2).to_s`, "2026-06-19\n"},
+		// leap? (→ IsLeapYear): 2024 is a leap year, 2026 is not, 2000 is (÷400),
+		// 1900 is not (÷100 but not ÷400).
+		{`p Date.new(2024, 1, 1).leap?`, "true\n"},
+		{`p Date.new(2026, 1, 1).leap?`, "false\n"},
+		{`p Date.new(2000, 1, 1).leap?`, "true\n"},
+		{`p Date.new(1900, 1, 1).leap?`, "false\n"},
+		// yday (→ DayOfYear): 1-based day of year. Jan 1 = 1; Mar 15 2026 = 74
+		// (31 + 28 + 15, 2026 not a leap year); Dec 31 2024 = 366 (leap year).
+		{`p Date.new(2026, 1, 1).yday`, "1\n"},
+		{`p Date.new(2026, 3, 15).yday`, "74\n"},
+		{`p Date.new(2024, 12, 31).yday`, "366\n"},
+		// next_month / prev_month (default 1, explicit n) → AddMonths. MRI's
+		// day-of-month normalisation: 31 Jan + 1 month → 3 Mar (Feb has no 31st).
+		{`puts Date.new(2026, 6, 21).next_month.to_s`, "2026-07-21\n"},
+		{`puts Date.new(2026, 6, 21).next_month(3).to_s`, "2026-09-21\n"},
+		{`puts Date.new(2026, 6, 21).prev_month.to_s`, "2026-05-21\n"},
+		{`puts Date.new(2026, 6, 21).prev_month(2).to_s`, "2026-04-21\n"},
+		{`puts Date.new(2026, 1, 31).next_month.to_s`, "2026-03-03\n"}, // overflow normalised
+		// >> n / << n: month-shift operators (dispatch as method sends; no opcode).
+		{`puts (Date.new(2026, 1, 31) >> 1).to_s`, "2026-03-03\n"},
+		{`puts (Date.new(2026, 6, 21) >> 6).to_s`, "2026-12-21\n"},
+		{`puts (Date.new(2026, 6, 21) << 6).to_s`, "2025-12-21\n"},
+		{`puts (Date.new(2026, 6, 21) >> -1).to_s`, "2026-05-21\n"}, // negative shift
+		{`puts Date.new(2026, 6, 21).send(:">>", 1).to_s`, "2026-07-21\n"},
+		{`puts Date.new(2026, 6, 21).send(:"<<", 1).to_s`, "2026-05-21\n"},
 		// Parse (ISO).
 		{`puts Date.parse("2026-02-14")`, "2026-02-14\n"},
 		{`p Date.parse("2026-02-14").class`, "Date\n"},
@@ -96,6 +121,11 @@ func TestDateErrors(t *testing.T) {
 		{`Date.new(2026, 6, 21) - "x"`, "TypeError"},                       // - non-Integer, non-Date
 		{`Date.new(2026, 6, 21).next_day("x")`, "TypeError"},               // next_day non-Integer
 		{`Date.new(2026, 6, 21).prev_day("x")`, "TypeError"},               // prev_day non-Integer
+		{`Date.new(2026, 6, 21).next_month("x")`, "TypeError"},             // next_month non-Integer
+		{`Date.new(2026, 6, 21).prev_month("x")`, "TypeError"},             // prev_month non-Integer
+		{`Date.new(2026, 6, 21) >> "x"`, "TypeError"},                      // >> non-Integer month count
+		{`Date.new(2026, 6, 21) << "x"`, "TypeError"},                      // << non-Integer month count
+		{`Date.new(2026, 6, 21) >> 1.5`, "TypeError"},                      // >> Float (months must be whole)
 		{`Date.new(2026, 6, 21) < 5`, "TypeError"},                         // ordering against a non-Date
 		{`Date.new(2026, 6, 21) > 5`, "TypeError"},                         // ordering against a non-Date
 		{`Date.new(2026, 6, 21) <= 5`, "TypeError"},                        // ordering against a non-Date

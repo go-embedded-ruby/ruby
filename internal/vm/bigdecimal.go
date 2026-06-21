@@ -181,6 +181,59 @@ func (vm *VM) registerBigDecimal() {
 	d("to_f", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(self(v).f.ToFloat64())
 	})
+	// to_i / to_int (→ ToInt64): the value truncated toward zero as an Integer.
+	// object.Integer is int64, matching ToInt64's range.
+	toIFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(self(v).f.ToInt64())
+	}
+	d("to_i", toIFn)
+	d("to_int", toIFn)
+	// zero? (→ IsZero): true exactly when the value is 0.
+	d("zero?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).f.IsZero())
+	})
+
+	// floor / ceil / round → Floor / Ceil / Round, each the integer-valued
+	// BigDecimal nearest in the named direction (round halves away from zero).
+	// MRI's floor/ceil/round take an optional digits argument; this binding is the
+	// documented no-arg, integer-rounding subset go-composites/bigfloat supports.
+	// On a concrete BigFloat these Results never fail, so the payload is always
+	// present.
+	d("floor", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &BigDecimal{f: payloadBigFloat(self(v).f.Floor())}
+	})
+	d("ceil", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &BigDecimal{f: payloadBigFloat(self(v).f.Ceil())}
+	})
+	d("round", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &BigDecimal{f: payloadBigFloat(self(v).f.Round())}
+	})
+
+	// ** / pow (n) → Power(n): the receiver raised to an Integer exponent. The VM
+	// has no power opcode, so ** dispatches as an ordinary method send (like
+	// Integer#** / Rational#**). A negative exponent yields the reciprocal; 0**0 is
+	// 1; 0 raised to a negative power surfaces the composite's error Result as a
+	// Ruby ZeroDivisionError. The exponent must be an Integer (intArg raises
+	// TypeError otherwise).
+	powFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		r := self(v).f.Power(int(intArg(args[0])))
+		if r.HasError() {
+			raise("ZeroDivisionError", "%s", r.Error().Message())
+		}
+		return &BigDecimal{f: r.Payload().(bigfloat.Interface)}
+	}
+	d("**", powFn)
+	d("pow", powFn)
+	// sqrt → Sqrt: the square root. A negative receiver surfaces the composite's
+	// error Result as a Ruby Math::DomainError (MRI raises the same for
+	// Math.sqrt of a negative).
+	d("sqrt", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		r := self(v).f.Sqrt()
+		if r.HasError() {
+			raise("Math::DomainError", "%s", r.Error().Message())
+		}
+		return &BigDecimal{f: r.Payload().(bigfloat.Interface)}
+	})
 	// to_s / inspect: the clean decimal string (see repr — plain decimal, not
 	// MRI's "0.3e1" scientific form).
 	toSFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
