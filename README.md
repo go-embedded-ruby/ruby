@@ -96,6 +96,11 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   helpers (`psd`/`spectrogram`) — binding the pure-Go
   [go-fft](https://github.com/go-fft/fft) library, a `numpy.fft`-style transform
   with **no cgo / no FFTW**, returning `Complex` spectra.
+- **Set:** Ruby's `Set` — `new`/`[]`, `add`(`<<`)/`add?`/`delete`/`merge`/`clear`,
+  `include?`/`member?`/`size`/`length`/`count`/`empty?`, `subset?`/`superset?`,
+  `union`(`|`)/`intersection`(`&`)/`difference`(`-`), `each`/`to_a`/`to_set` —
+  binding the pure-Go
+  [go-composites/set](https://github.com/go-composites/set) library.
 
 - **AOT compiler (`rbgo build`):** lowers a program's methods to native Go and
   links a specialised binary. Pure integer methods become unboxed `int64`
@@ -138,11 +143,26 @@ go build -o rbgo ./cmd/rbgo
 ./fib fib.rb                                  # => 6765
 ```
 
+### Browser playground (WebAssembly)
+
+The interpreter, the numeric stack and the cgo-free image pipeline also compile
+to `GOOS=js GOARCH=wasm` and run **entirely in the browser** — no server-side
+code. A self-contained playground (Ruby REPL + a load→`gaussian_blur`/`sobel`/
+`canny`→render image demo) lives in [`web/`](web):
+
+```bash
+./web/build.sh serve        # build web/rbgo.wasm and serve http://localhost:8080
+```
+
+See [web/README.md](web/README.md) for the JS bridge (`rbgoEval`, `rbgoImage`).
+
 ## Layout
 
 ```
 cmd/rbgo/            CLI: run, build (repl arrives later)
+cmd/wasm/            GOOS=js GOARCH=wasm front-end (see web/) + native build stub
 cmd/aotgen/          regenerates the AOT differential suite (go:generate)
+web/                 browser playground: index.html, build.sh (rbgoEval/rbgoImage)
 internal/
   token/             token kinds (carry SpaceBefore = MRI's spaceSeen)
   lexer/             stateful lexer (lexState seed, SpaceBefore)
