@@ -463,10 +463,85 @@ func (vm *VM) registerSet() {
 	d("dup", dupFn)
 	d("clone", dupFn)
 
+	// sort: a new Array of the members ordered by <=>. Materialise into an Array
+	// and reuse the VM's Array#sort (which folds through spaceship), so mixed
+	// incomparable members raise the very ArgumentError Array#sort raises.
+	d("sort", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.send(self(v).toArray(), "sort", nil, nil)
+	})
+
+	// min / max: the smallest / largest member by <=> (nil on the empty set, as
+	// MRI's Enumerable#min/#max). The fold uses the VM's spaceship helper.
+	d("min", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return setExtreme(vm, self(v), -1)
+	})
+	d("max", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return setExtreme(vm, self(v), 1)
+	})
+
+	// sum(init=0): fold the members with + starting from init, reusing the VM's
+	// add (binaryOp OpAdd) — so it agrees with Array#sum / numeric coercions.
+	d("sum", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		acc := object.Value(object.Integer(0))
+		if len(args) > 0 {
+			acc = args[0]
+		}
+		s := self(v)
+		for _, k := range s.order {
+			acc = vm.binaryOp(bytecode.OpAdd, acc, s.vals[k])
+		}
+		return acc
+	})
+
+	// reduce / inject: Enumerable reduce with a block {|acc, x| ...}. An optional
+	// initial value seeds the accumulator; without one the first member seeds it
+	// (and reduce of the empty set with no initial value is nil, as in MRI). This
+	// is the documented block-form subset — the symbol-operator form is omitted.
+	reduceFn := func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (reduce)")
+		}
+		s := self(v)
+		var acc object.Value
+		i := 0
+		if len(args) > 0 {
+			acc = args[0]
+		} else {
+			if len(s.order) == 0 {
+				return object.NilV
+			}
+			acc = s.vals[s.order[0]]
+			i = 1
+		}
+		for ; i < len(s.order); i++ {
+			acc = vm.callBlock(blk, []object.Value{acc, s.vals[s.order[i]]})
+		}
+		return acc
+	}
+	d("reduce", reduceFn)
+	d("inject", reduceFn)
+
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).repr())
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).repr())
 	})
+}
+
+// setExtreme folds the members of s to the minimum (want=-1) or maximum
+// (want=1) by the VM's spaceship (<=>), returning nil for the empty set. Mixed
+// incomparable members surface the ArgumentError spaceship raises.
+func setExtreme(vm *VM, s *Set, want int) object.Value {
+	if len(s.order) == 0 {
+		return object.NilV
+	}
+	best := s.vals[s.order[0]]
+	for _, k := range s.order[1:] {
+		cur := s.vals[k]
+		if cmp := vm.spaceship(cur, best); (want < 0 && cmp < 0) || (want > 0 && cmp > 0) {
+			best = cur
+		}
+	}
+	return best
 }

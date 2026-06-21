@@ -78,6 +78,37 @@ func TestBag(t *testing.T) {
 	}
 }
 
+// TestBagMostCommon covers most_common: all pairs most-common-first (no arg or
+// explicit nil), the top n (Integer arg), ties broken by the inspected member,
+// and the n edge cases (n larger than the distinct count, zero, negative).
+func TestBagMostCommon(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		// No arg → all distinct [item, count] pairs, descending by count.
+		{`p Bag.new(["a", "a", "b", "c", "c", "c"]).most_common`, `[["c", 3], ["a", 2], ["b", 1]]` + "\n"},
+		// Explicit nil behaves like no arg.
+		{`p Bag.new(["a", "a", "b", "c", "c", "c"]).most_common(nil)`, `[["c", 3], ["a", 2], ["b", 1]]` + "\n"},
+		// Integer n → the top n only.
+		{`p Bag.new(["a", "a", "b", "c", "c", "c"]).most_common(2)`, `[["c", 3], ["a", 2]]` + "\n"},
+		{`p Bag.new(["a", "a", "b", "c", "c", "c"]).most_common(1)`, `[["c", 3]]` + "\n"},
+		// Ties broken by the inspected member (ascending): equal counts → "a" before "b".
+		{`p Bag.new(["b", "a"]).most_common`, `[["a", 1], ["b", 1]]` + "\n"},
+		// n larger than the distinct count returns everything.
+		{`p Bag.new(["a", "b"]).most_common(10)`, `[["a", 1], ["b", 1]]` + "\n"},
+		// n == 0 and n < 0 both yield an empty Array.
+		{`p Bag.new(["a", "b"]).most_common(0)`, "[]\n"},
+		{`p Bag.new(["a", "b"]).most_common(-1)`, "[]\n"},
+		// Empty Bag → empty Array, with and without an arg.
+		{`p Bag.new.most_common`, "[]\n"},
+		{`p Bag.new.most_common(3)`, "[]\n"},
+		// Integer members (count descending, ties by inspected member).
+		{`p Bag.new([1, 1, 1, 2, 2, 3]).most_common`, `[[1, 3], [2, 2], [3, 1]]` + "\n"},
+	} {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestBagErrors covers the raising paths: a non-comparable member, a non-Bag
 // operand to a combinator, a non-enumerable seed argument, and each without a
 // block.

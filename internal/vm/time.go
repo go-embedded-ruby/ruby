@@ -140,6 +140,26 @@ func (vm *VM) registerTime() {
 	d("min", field("4"))
 	d("sec", field("5"))
 
+	// wday → day of week 0..6 (Sunday=0), derived from the instant by formatting
+	// the weekday name ("Mon", … via the Mon directive) and mapping it to MRI's
+	// numbering. Following the year/month/… accessors, this stays Format-driven.
+	d("wday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(weekday(self(v)))
+	})
+	// Weekday predicates: sunday? … saturday?, booleans off wday.
+	weekdayPred := func(want int64) NativeFn {
+		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+			return object.Bool(weekday(self(v)) == want)
+		}
+	}
+	d("sunday?", weekdayPred(0))
+	d("monday?", weekdayPred(1))
+	d("tuesday?", weekdayPred(2))
+	d("wednesday?", weekdayPred(3))
+	d("thursday?", weekdayPred(4))
+	d("friday?", weekdayPred(5))
+	d("saturday?", weekdayPred(6))
+
 	// utc / getutc → UTC (same instant, UTC location).
 	utcFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Time{t: self(v).t.UTC()}
@@ -216,6 +236,16 @@ func timeShift(t *Time, sec int64) object.Value {
 	r := t.t.Add(goduration.FromSeconds(sec))
 	return &Time{t: r.Payload().(gotime.Interface)}
 }
+
+// weekdayNum maps the abbreviated weekday name produced by the "Mon" Format
+// directive to MRI's wday numbering (Sunday=0 … Saturday=6).
+var weekdayNum = map[string]int64{
+	"Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6,
+}
+
+// weekday derives a Time's day-of-week (0..6, Sunday=0) from the underlying
+// instant via the "Mon" Format directive, mirroring the year/month/… accessors.
+func weekday(t *Time) int64 { return weekdayNum[t.t.Format("Mon")] }
 
 // timeCmp returns -1/0/1 ordering two Times through Before/After/Equal.
 func timeCmp(a, b *Time) int64 {

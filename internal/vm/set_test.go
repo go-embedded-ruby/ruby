@@ -131,6 +131,59 @@ func TestSet(t *testing.T) {
 	}
 }
 
+// TestSetAggregates covers the Enumerable aggregates: sort, min/max, sum (with
+// and without an init), and reduce/inject (block form, with and without an
+// initial value), every value asserted against MRI's Set / Enumerable.
+func TestSetAggregates(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		// sort → a new Array ordered by <=> (mixed-comparable numerics coerce).
+		{`p Set.new([3, 1, 2]).sort`, "[1, 2, 3]\n"},
+		{`p Set.new([3, 1, 2]).sort.class`, "Array\n"},
+		{`p Set.new.sort`, "[]\n"},
+		{`p Set.new(["b", "a", "c"]).sort`, "[\"a\", \"b\", \"c\"]\n"},
+		{`p Set.new([3, 1.5, 2]).sort`, "[1.5, 2, 3]\n"}, // Integer/Float coercion
+		// min / max by <=>; nil on the empty set.
+		{`p Set.new([3, 1, 2]).min`, "1\n"},
+		{`p Set.new([3, 1, 2]).max`, "3\n"},
+		{`p Set.new([1]).min`, "1\n"},
+		{`p Set.new([1]).max`, "1\n"},
+		{`p Set.new.min`, "nil\n"},
+		{`p Set.new.max`, "nil\n"},
+		// sum: default init 0, and an explicit init (numeric and String).
+		{`p Set.new([1, 2, 3]).sum`, "6\n"},
+		{`p Set.new([1, 2, 3]).sum(10)`, "16\n"},
+		{`p Set.new.sum`, "0\n"},
+		{`p Set.new.sum(5)`, "5\n"},
+		{`p Set.new([1.5, 2.5]).sum`, "4.0\n"},
+		// reduce / inject: with an initial value, and without (first member seeds).
+		{`p Set.new([1, 2, 3]).reduce(0) { |a, x| a + x }`, "6\n"},
+		{`p Set.new([1, 2, 3]).reduce { |a, x| a + x }`, "6\n"},
+		{`p Set.new([1, 2, 3]).inject(100) { |a, x| a + x }`, "106\n"},
+		{`p Set.new([4]).reduce { |a, x| a + x }`, "4\n"}, // single member, no init
+		{`p Set.new.reduce { |a, x| a + x }`, "nil\n"},    // empty, no init → nil
+		{`p Set.new.reduce(0) { |a, x| a + x }`, "0\n"},   // empty, with init
+	} {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestSetAggregateErrors covers the raising paths of the aggregates: sorting
+// mixed-incomparable members (the Array#sort ArgumentError) and reduce/inject
+// without a block.
+func TestSetAggregateErrors(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		{`Set.new([1, "a"]).sort`, "ArgumentError"}, // Integer vs String incomparable
+		{`Set.new([1, 2]).reduce`, "LocalJumpError"},
+		{`Set.new([1, 2]).inject`, "LocalJumpError"},
+	} {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)
+		}
+	}
+}
+
 // TestSetErrors covers the raising paths: a non-comparable member, a non-Set
 // operand to an algebraic combinator, a non-enumerable seed/merge argument, and
 // each without a block.

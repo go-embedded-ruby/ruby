@@ -81,6 +81,43 @@ func TestTime(t *testing.T) {
 	}
 }
 
+// TestTimeWeekday covers wday and the seven weekday predicates, anchored on the
+// Unix epoch (1970-01-01, a Thursday → wday 4) and stepped one day at a time
+// (86400 s) so every weekday number and predicate is asserted deterministically.
+func TestTimeWeekday(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		// wday across a full week, epoch + N days (Thu, Fri, Sat, Sun, Mon, Tue, Wed).
+		{`p Time.at(0).wday`, "4\n"},         // Thursday
+		{`p Time.at(86400).wday`, "5\n"},     // Friday
+		{`p Time.at(86400 * 2).wday`, "6\n"}, // Saturday
+		{`p Time.at(86400 * 3).wday`, "0\n"}, // Sunday
+		{`p Time.at(86400 * 4).wday`, "1\n"}, // Monday
+		{`p Time.at(86400 * 5).wday`, "2\n"}, // Tuesday
+		{`p Time.at(86400 * 6).wday`, "3\n"}, // Wednesday
+		{`p Time.at(86400 * 7).wday`, "4\n"}, // back to Thursday
+		// Each predicate true on its day and false on the epoch (Thursday) for
+		// the non-Thursday ones — so every predicate is exercised both ways.
+		{`p Time.at(86400 * 3).sunday?`, "true\n"},
+		{`p Time.at(0).sunday?`, "false\n"},
+		{`p Time.at(86400 * 4).monday?`, "true\n"},
+		{`p Time.at(0).monday?`, "false\n"},
+		{`p Time.at(86400 * 5).tuesday?`, "true\n"},
+		{`p Time.at(0).tuesday?`, "false\n"},
+		{`p Time.at(86400 * 6).wednesday?`, "true\n"},
+		{`p Time.at(0).wednesday?`, "false\n"},
+		{`p Time.at(0).thursday?`, "true\n"},
+		{`p Time.at(86400).thursday?`, "false\n"},
+		{`p Time.at(86400).friday?`, "true\n"},
+		{`p Time.at(0).friday?`, "false\n"},
+		{`p Time.at(86400 * 2).saturday?`, "true\n"},
+		{`p Time.at(0).saturday?`, "false\n"},
+	} {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestTimeNow checks Time.now: it is non-deterministic by nature (Go's wall
 // clock fed to the composite's FromUnix), so we only assert it yields a positive
 // instant whose class is Time — the deterministic seam is exercised in the

@@ -339,6 +339,47 @@ func (vm *VM) registerBag() {
 		return object.Bool(self(v).b.Equal(b.b))
 	})
 
+	// most_common(n=nil): an Array of [item, count] pairs ordered by count
+	// descending (ties broken by the inspected member, ascending, for
+	// determinism). With an Integer n, only the top n pairs; without an arg (or
+	// nil), all of them. This is Python's Counter.most_common, exposed as a Bag
+	// extension rather than a Ruby-core method.
+	d("most_common", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		bag := self(v)
+		type entry struct {
+			ins   string
+			val   object.Value
+			count int
+		}
+		entries := make([]entry, 0, len(bag.vals))
+		for k, val := range bag.vals {
+			entries = append(entries, entry{ins: val.Inspect(), val: val, count: bag.b.Count(k)})
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].count != entries[j].count {
+				return entries[i].count > entries[j].count
+			}
+			return entries[i].ins < entries[j].ins
+		})
+		// An Integer n caps the result; a missing arg or explicit nil keeps all.
+		if len(args) > 0 {
+			if _, isNil := args[0].(object.Nil); !isNil {
+				n := int(intArg(args[0]))
+				if n < 0 {
+					n = 0
+				}
+				if n < len(entries) {
+					entries = entries[:n]
+				}
+			}
+		}
+		out := make([]object.Value, len(entries))
+		for i, e := range entries {
+			out[i] = &object.Array{Elems: []object.Value{e.val, object.Integer(e.count)}}
+		}
+		return &object.Array{Elems: out}
+	})
+
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).repr())
 	})
