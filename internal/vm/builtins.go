@@ -339,10 +339,16 @@ func (vm *VM) bootstrap() {
 	})
 
 	// Module (Class inherits these).
-	vm.cModule.define("include", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cModule.define("include", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		target := self.(*RClass)
 		for _, a := range args {
-			target.includes = append(target.includes, a.(*RClass))
+			mod := a.(*RClass)
+			target.includes = append(target.includes, mod)
+			// Hook: module.included(base), fired per included module if it defines
+			// the hook (singleton method).
+			if hook := lookupSMethod(mod, "included"); hook != nil {
+				vm.invoke(hook, mod, []object.Value{target}, nil)
+			}
 		}
 		return target
 	})

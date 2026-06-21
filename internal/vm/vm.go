@@ -450,6 +450,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						m.compiled = compiledFor(definee.name, name)
 					}
 					definee.methods[name] = m
+					// Hook: definee.method_added(:name) for instance-method defs, if
+					// the class/module defines the hook (singleton method).
+					if hook := lookupSMethod(definee, "method_added"); hook != nil {
+						vm.invoke(hook, definee, []object.Value{object.Symbol(name)}, nil)
+					}
 					push(object.NilV)
 				case bytecode.OpDefineSMethod:
 					definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
@@ -595,6 +600,11 @@ func (vm *VM) defineClass(name string, body *bytecode.ISeq) object.Value {
 		}
 		class = newClass(name, super)
 		vm.consts[name] = class
+		// Hook: superclass.inherited(subclass), fired when the class is created
+		// (before its body runs) if the superclass defines the hook.
+		if hook := lookupSMethod(super, "inherited"); hook != nil {
+			vm.invoke(hook, super, []object.Value{class}, nil)
+		}
 	}
 	return vm.exec(body, class, nil, class, "", nil, nil, nil)
 }
