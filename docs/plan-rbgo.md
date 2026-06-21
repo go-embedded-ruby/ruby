@@ -518,10 +518,15 @@ clauses without an explicit `begin` (shared `parseRescueTail`); and
 ### Phase 4 — Full metaprogramming — 🚧 in progress
 `define_method`, `instance_eval`/`instance_exec`, `class_eval`, constant
 machinery, hooks (`included`/`inherited`/`method_added`/…),
-`define_singleton_method`, **string `eval`**. (Refinements: deferred.)
+`define_singleton_method`. (Refinements: deferred.)
 **Started:** reflection/dispatch — `send`/`public_send` (forwarding the block),
 `respond_to?`, `itself`, `tap`, `then`/`yield_self`; Kernel conversion methods
 `Integer`/`Float`/`String`/`Array` (capitalized `Name(...)` now parses as a call).
+**Landed:** **string `eval`** — `Kernel#eval(str)` compiles and runs Ruby at
+runtime against the caller's `self` (sees `self`/ivars/methods/constants; `def`
+lands in the caller's context; fresh local scope — Binding/local capture is the
+remaining piece). Parse/compile errors raise `SyntaxError` (now under
+`ScriptError`→`Exception`, not `StandardError`); non-String arg → `TypeError`.
 
 ### Phase 5 — Complete front-end — 🚧 in progress
 Full grammar: heredocs, interpolation, `%`-literals, multiple assignment, keyword
