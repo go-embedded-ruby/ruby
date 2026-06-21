@@ -69,7 +69,11 @@ func run(src, name string) error {
 		return err
 	}
 	iseq.Name = name
-	_, err = vm.New(os.Stdout).Run(iseq)
+	machine := vm.New(os.Stdout)
+	if name != "-e" {
+		machine.SetScriptPath(name) // so require/require_relative resolve relative to the script
+	}
+	_, err = machine.Run(iseq)
 	return err
 }
 

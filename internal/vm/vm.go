@@ -13,6 +13,7 @@ package vm
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
@@ -101,14 +102,26 @@ type VM struct {
 	cRegexp, cMatchData                    *RClass
 	cException                             *RClass
 	curExc                                 object.Value // most recently rescued exception (for bare `raise`)
+
+	loaded      map[string]bool // require/require_relative: features loaded once
+	requireDirs []string        // stack of directories of the files currently being required
 }
 
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
-	vm := &VM{out: out, main: object.NewMain(), consts: map[string]object.Value{}}
+	vm := &VM{out: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}}
 	vm.bootstrap()
 	vm.loadPrelude(preludeSource)
 	return vm
+}
+
+// SetScriptPath records the path of the top-level program so require_relative
+// (and a path-relative require) can resolve against its directory. Hosts call it
+// before Run; with no script set, resolution falls back to the process CWD.
+func (vm *VM) SetScriptPath(path string) {
+	if path != "" {
+		vm.requireDirs = []string{filepath.Dir(path)}
+	}
 }
 
 // SetConst installs v as a top-level constant, visible to a subsequently-run

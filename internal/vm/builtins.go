@@ -58,6 +58,7 @@ func (vm *VM) bootstrap() {
 	vm.registerDate()
 	vm.registerBag()
 	vm.registerEval()
+	vm.registerRequire()
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)
@@ -190,6 +191,7 @@ func (vm *VM) bootstrap() {
 	// `rescue` does not catch them — matching MRI. eval raises SyntaxError.
 	exc("ScriptError", "Exception")
 	exc("SyntaxError", "ScriptError")
+	exc("LoadError", "ScriptError")
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
