@@ -126,6 +126,8 @@ func (l *Lexer) next() token.Token {
 		return l.lexIdent(spaceBefore, line, col)
 	case c == '"':
 		return l.lexString(spaceBefore, line, col)
+	case c == '\'':
+		return l.lexSingleQuote(spaceBefore, line, col)
 	case c == '@':
 		return l.lexIvar(spaceBefore, line, col)
 	case c == '$':
@@ -405,6 +407,22 @@ func (l *Lexer) lexNumber(spaceBefore bool, line, col int) token.Token {
 		l.advance() // '.'
 		for isDigit(l.peek()) || l.peek() == '_' {
 			l.advance()
+		}
+	}
+	// Exponent: e/E with an optional sign and digits. An exponent always makes
+	// the literal a Float, even without a fractional part (Ruby: 1e3 == 1000.0).
+	if c := l.peek(); c == 'e' || c == 'E' {
+		n := l.peek2()
+		expDigits := isDigit(n) || ((n == '+' || n == '-') && l.pos+2 < len(l.src) && isDigit(l.src[l.pos+2]))
+		if expDigits {
+			isFloat = true
+			l.advance() // e/E
+			if l.peek() == '+' || l.peek() == '-' {
+				l.advance()
+			}
+			for isDigit(l.peek()) || l.peek() == '_' {
+				l.advance()
+			}
 		}
 	}
 	lit := stripUnderscores(string(l.src[start:l.pos]))
@@ -1090,6 +1108,33 @@ func (l *Lexer) lexString(spaceBefore bool, line, col int) token.Token {
 	l.interpBraces = append(l.interpBraces, 0)
 	l.state = exprBegin
 	return token.Token{Type: token.STRBEG, Lit: lit, Line: line, Col: col, SpaceBefore: spaceBefore}
+}
+
+// lexSingleQuote lexes a single-quoted string. It does not interpolate; the
+// only escapes are \' (a literal quote) and \\ (a literal backslash) — every
+// other character, including a backslash before anything else, is taken
+// verbatim, exactly as in MRI. It emits a finished STRING token.
+func (l *Lexer) lexSingleQuote(spaceBefore bool, line, col int) token.Token {
+	l.advance() // opening quote
+	var b []byte
+	for {
+		c := l.peek()
+		if c == 0 {
+			return token.Token{Type: token.ILLEGAL, Lit: "unterminated string literal", Line: line, Col: col, SpaceBefore: spaceBefore}
+		}
+		if c == '\'' {
+			l.advance() // closing quote
+			break
+		}
+		if c == '\\' && (l.peek2() == '\'' || l.peek2() == '\\') {
+			l.advance() // backslash
+			b = append(b, l.advance())
+			continue
+		}
+		b = append(b, l.advance())
+	}
+	l.state = exprEnd
+	return token.Token{Type: token.STRING, Lit: string(b), Line: line, Col: col, SpaceBefore: spaceBefore}
 }
 
 // continueString resumes lexing a string after an interpolation's closing '}',
