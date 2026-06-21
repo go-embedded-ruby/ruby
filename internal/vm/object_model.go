@@ -1,6 +1,9 @@
 package vm
 
 import (
+	"fmt"
+	"runtime"
+
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -226,12 +229,30 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 	return vm.invoke(mm, recv, mmArgs, blk)
 }
 
+// callNative runs a Go-implemented method, converting a genuine Go runtime
+// fault (e.g. a binding indexing past a missing argument) into a rescuable Ruby
+// ArgumentError so arbitrary input from an embedding host — the wasm playground
+// REPL, say — can never crash the process. Ruby-level raises (RubyError) and
+// control-flow signals (break/return) pass through untouched, and a broken VM
+// invariant still panics elsewhere so real bugs stay loud.
+func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk *Proc) (res object.Value) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(runtime.Error); ok {
+				panic(RubyError{Class: "ArgumentError", Message: fmt.Sprintf("%s: %v", m.name, r)})
+			}
+			panic(r)
+		}
+	}()
+	return m.native(vm, self, args, blk)
+}
+
 func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {
 	if m.compiled != nil {
 		return m.compiled(vm, self, args, blk)
 	}
 	if m.native != nil {
-		return m.native(vm, self, args, blk)
+		return vm.callNative(m, self, args, blk)
 	}
 	if m.proc != nil {
 		// A define_method body runs the block with self rebound to the receiver,

@@ -1,6 +1,10 @@
 # Built CLI binary
 /rbgo
 
+# Built wasm playground artifacts (regenerate with web/build.sh)
+/web/rbgo.wasm
+/web/wasm_exec.js
+
 # Coverage profiles
 *.out
 cov.out

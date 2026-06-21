@@ -107,6 +107,12 @@ func New(out io.Writer) *VM {
 	return vm
 }
 
+// SetConst installs v as a top-level constant, visible to a subsequently-run
+// program as a bare constant reference. Embedding hosts use it to seed a run —
+// the wasm playground binds INPUT to the raw bytes of an image before
+// evaluating Ruby that processes it.
+func (vm *VM) SetConst(name string, v object.Value) { vm.consts[name] = v }
+
 // Run executes the top-level ISeq (self = main, default definee = Object).
 func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 	defer func() {
