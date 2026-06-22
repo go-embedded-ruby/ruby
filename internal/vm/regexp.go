@@ -467,6 +467,10 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 		mBegin := search + md.Begin(0)
 		mEnd := search + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
+		// Expose this match through $~ / $1.. so a replacement block (and MRI's
+		// post-sub $~) sees the captures. md's offsets are relative to the slice
+		// it matched, so the MatchData's subject must be that same slice.
+		vm.lastMatch = &MatchData{md: md, subject: subject[search:], re: re}
 		if blk != nil {
 			res := vm.callBlock(blk, []object.Value{object.NewString(md.Str(0))})
 			b.WriteString(vm.send(res, "to_s", nil, nil).ToS())
