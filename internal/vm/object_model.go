@@ -281,6 +281,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Random"].(*RClass)
 	case *Fiber:
 		return vm.consts["Fiber"].(*RClass)
+	case *RThread:
+		return vm.consts["Thread"].(*RClass)
+	case *RMutex:
+		return vm.consts["Mutex"].(*RClass)
+	case *RQueue:
+		return vm.consts["Queue"].(*RClass)
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:

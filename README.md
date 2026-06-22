@@ -41,6 +41,12 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `expr rescue fallback`), `begin`/`rescue`/`else`/`ensure`/`retry`,
   `break`/`next`, `Kernel#loop`, and **`Fiber`** (cooperative coroutines —
   `Fiber.new`/`resume`/`Fiber.yield`/`alive?`).
+- **Concurrency:** **`Thread`** (`new`/`start`/`join`/`value`/`status`/`current`/
+  `main`/`list`/`pass`, thread-locals via `[]`/`[]=`, exception propagation on
+  join), **`Mutex`** (`lock`/`unlock`/`try_lock`/`synchronize`/`owned?`) and
+  **`Queue`** (blocking `push`/`pop`, `close`), on an **emulated GVL** — one Ruby
+  thread runs at a time, matching MRI's memory model (race-free under the Go
+  race detector).
 - **Pattern matching (`case`/`in`):** value, variable-binding, class/constant,
   array (incl. splat and nested), hash (`deconstruct_keys`, `**rest`/`**nil`),
   find (`[*pre, x, *post]`), pin (`^x`) and alternative (`a | b`) patterns;
@@ -169,7 +175,7 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(`Thread`, fuller `IO`).
+(fuller `IO`, `Binding`, the `rbgo build` toolchain).
 
 ## Quick start
 

@@ -15,6 +15,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -100,7 +101,7 @@ type VM struct {
 	cMethod                                *RClass
 	cEnumerator                            *RClass
 	cLazy                                  *RClass
-	lastMatch                              object.Value // $~: last regexp MatchData (or nil)
+	lastMatch                              object.Value            // $~: last regexp MatchData (or nil)
 	globals                                map[string]object.Value // user-assigned $globals
 	cTrueClass, cFalseClass, cNilClass     *RClass
 	cRegexp, cMatchData                    *RClass
@@ -110,12 +111,27 @@ type VM struct {
 	loaded        map[string]bool // require/require_relative: features loaded once
 	requireDirs   []string        // stack of directories of the files currently being required
 	defaultRandom *RandomObj      // process-wide generator for Kernel#rand / #srand
-	currentFiber  *Fiber         // the fiber currently running (nil at the root), for Fiber.yield
+	currentFiber  *Fiber          // the fiber currently running (nil at the root), for Fiber.yield
+
+	// Concurrency: an emulated GVL (one Ruby thread executes VM code at a time).
+	// The running goroutine holds gvl; it is released only inside blocking native
+	// methods (Thread#join, Mutex#lock, Queue#pop, sleep, Thread.pass), where the
+	// thread's execution context is saved and the next runnable thread's restored.
+	gvl           sync.Mutex
+	currentThread *RThread   // the thread holding the GVL
+	mainThread    *RThread   // the root thread
+	threads       []*RThread // all live threads, for Thread.list (GVL-guarded)
 }
 
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
 	vm := &VM{out: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
+	// The main thread holds the GVL for the VM's lifetime, releasing it only at
+	// blocking points so spawned Ruby threads can run (see thread.go).
+	vm.gvl.Lock()
+	vm.mainThread = &RThread{status: "run", done: make(chan struct{}), locals: map[object.Value]object.Value{}, parked: true}
+	vm.currentThread = vm.mainThread
+	vm.threads = []*RThread{vm.mainThread}
 	vm.bootstrap()
 	vm.loadPrelude(preludeSource)
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
