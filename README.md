@@ -61,9 +61,10 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   (`def foo = expr`), **singleton method defs on any object** (`def obj.foo` /
   `def Const.foo`), recursion, `return`, `super`.
 - **Blocks / Procs / lambdas:** `{ }` / `do…end` closures, `yield`,
-  `block_given?`, `&block` capture, **numbered params (`_1`/`_2`) and `it`**,
-  `Proc`/`lambda`/**stabby `->(){}`**, `&proc` block-pass and `Symbol#to_proc`
-  (the `&:sym` shorthand).
+  `block_given?`, `&block` capture, **block params** with destructuring
+  (`|(a, b)|`) and **rest** (`|*rest|`, `|head, *rest|`), **numbered params
+  (`_1`/`_2`) and `it`**, `Proc`/`lambda`/**stabby `->(){}`**, `&proc` block-pass
+  and `Symbol#to_proc` (the `&:sym` shorthand).
 - **Classes & modules:** inheritance, `@ivars`, **`@@class variables`** (shared
   down the superclass hierarchy), `new`/`initialize`, constants and constant
   assignment, **class methods** (`def self.foo`), modules + **`include`/`prepend`**
