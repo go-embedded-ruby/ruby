@@ -438,6 +438,39 @@ module Enumerable
     chunks << cur
     chunks
   end
+
+  # chunk groups consecutive elements sharing the block's value into
+  # [value, [elements...]] runs.
+  def chunk
+    result = []
+    __each_packed { |x|
+      k = yield(x)
+      if result.empty? || result[-1][0] != k
+        result << [k, [x]]
+      else
+        result[-1][1] << x
+      end
+    }
+    result
+  end
+
+  def minmax_by
+    [min_by { |x| yield(x) }, max_by { |x| yield(x) }]
+  end
+
+  # cycle(n) yields every element n times (forever when n is nil — use break to
+  # stop). With no block it returns an Enumerator (finite only when n is given).
+  def cycle(n = nil)
+    return enum_for(:cycle, n) unless block_given?
+    a = to_a
+    return nil if a.empty?
+    if n.nil?
+      loop { a.each { |x| yield(x) } }
+    else
+      n.times { a.each { |x| yield(x) } }
+    end
+    nil
+  end
 end
 
 # The built-in ordered types are Comparable: each defines <=> natively, so they

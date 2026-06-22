@@ -608,7 +608,19 @@ func (vm *VM) bootstrap() {
 		return object.Bool(strings.Contains(strOf(self), strArg(args[0])))
 	})
 	vm.cString.define("start_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(strings.HasPrefix(strOf(self), strArg(args[0])))
+		s := strOf(self)
+		for _, a := range args { // true if any prefix matches; a Regexp must match at offset 0
+			if re, ok := a.(*Regexp); ok {
+				if md := re.re.Match(s); md != nil && md.Begin(0) == 0 {
+					return object.True
+				}
+				continue
+			}
+			if strings.HasPrefix(s, strArg(a)) {
+				return object.True
+			}
+		}
+		return object.False
 	})
 	vm.cString.define("end_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(strings.HasSuffix(strOf(self), strArg(args[0])))
