@@ -469,6 +469,55 @@ func (vm *VM) bootstrap() {
 	vm.cSymbol.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
+	symStr := func(self object.Value) string { return string(self.(object.Symbol)) }
+	symLen := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(int64(utf8.RuneCountInString(symStr(self))))
+	}
+	vm.cSymbol.define("length", symLen)
+	vm.cSymbol.define("size", symLen)
+	vm.cSymbol.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(symStr(self) == "")
+	})
+	vm.cSymbol.define("upcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Symbol(strings.ToUpper(symStr(self)))
+	})
+	vm.cSymbol.define("downcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Symbol(strings.ToLower(symStr(self)))
+	})
+	vm.cSymbol.define("capitalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Symbol(capitalizeStr(symStr(self)))
+	})
+	vm.cSymbol.define("swapcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Symbol(swapcaseStr(symStr(self)))
+	})
+	symSucc := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Symbol(succString(symStr(self)))
+	}
+	vm.cSymbol.define("succ", symSucc)
+	vm.cSymbol.define("next", symSucc)
+	symIndex := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return stringIndex(symStr(self), args) // [] / slice yield a String, like MRI
+	}
+	vm.cSymbol.define("[]", symIndex)
+	vm.cSymbol.define("slice", symIndex)
+	vm.cSymbol.define("start_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := symStr(self)
+		for _, a := range args {
+			if strings.HasPrefix(s, strArg(a)) {
+				return object.True
+			}
+		}
+		return object.False
+	})
+	vm.cSymbol.define("end_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := symStr(self)
+		for _, a := range args {
+			if strings.HasSuffix(s, strArg(a)) {
+				return object.True
+			}
+		}
+		return object.False
+	})
 	// Spaceship (<=>) for the built-in ordered types; numerics compare across
 	// Integer/Float, strings lexically, and a mismatched type yields nil.
 	vm.cInteger.define("<=>", spaceshipNumeric)
@@ -1431,6 +1480,37 @@ func (vm *VM) bootstrap() {
 		vm.sortSlice(out, blk)
 		return &object.Array{Elems: out}
 	})
+	vm.cArray.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array).Elems
+		b, ok := args[0].(*object.Array)
+		if !ok {
+			return object.NilV
+		}
+		be := b.Elems
+		n := len(a)
+		if len(be) < n {
+			n = len(be)
+		}
+		for i := 0; i < n; i++ {
+			c, ok := vm.send(a[i], "<=>", []object.Value{be[i]}, nil).(object.Integer)
+			if !ok {
+				return object.NilV // an incomparable pair makes the arrays incomparable
+			}
+			if c != 0 {
+				return c
+			}
+		}
+		switch { // equal prefixes: the shorter array sorts first
+		case len(a) < len(be):
+			return object.Integer(-1)
+		case len(a) > len(be):
+			return object.Integer(1)
+		}
+		return object.Integer(0)
+	})
+	vm.cNilClass.define("to_a", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Array{}
+	})
 	vm.cArray.define("sort_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "sort_by")
@@ -2070,6 +2150,33 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cInteger.define("fdiv", fdiv)
 	vm.cFloat.define("fdiv", fdiv)
+	coerce := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		other := args[0]
+		_, selfInt := self.(object.Integer)
+		_, otherInt := other.(object.Integer)
+		if selfInt && otherInt {
+			return &object.Array{Elems: []object.Value{other, self}}
+		}
+		sf, _ := toFloat(self) // self is always numeric here
+		of, ok := toFloat(other)
+		if !ok { // MRI coerces via Float(other), so mirror its errors
+			if s, isStr := other.(*object.String); isStr {
+				raise("ArgumentError", "invalid value for Float(): %s", s.Inspect())
+			}
+			// MRI names nil/true/false by value, everything else by class.
+			name := vm.classOf(other).name
+			switch other.(type) {
+			case object.Nil:
+				name = "nil"
+			case object.Bool:
+				name = other.ToS()
+			}
+			raise("TypeError", "can't convert %s into Float", name)
+		}
+		return &object.Array{Elems: []object.Value{object.Float(of), object.Float(sf)}}
+	}
+	vm.cInteger.define("coerce", coerce)
+	vm.cFloat.define("coerce", coerce)
 	vm.cInteger.define("bit_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
 		if n < 0 {
