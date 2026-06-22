@@ -99,6 +99,7 @@ type VM struct {
 	cProc                                  *RClass
 	cMethod                                *RClass
 	cEnumerator                            *RClass
+	cLazy                                  *RClass
 	lastMatch                              object.Value // $~: last regexp MatchData (or nil)
 	globals                                map[string]object.Value // user-assigned $globals
 	cTrueClass, cFalseClass, cNilClass     *RClass
@@ -116,6 +117,7 @@ func New(out io.Writer) *VM {
 	vm.bootstrap()
 	vm.loadPrelude(preludeSource)
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
+	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
 	return vm
 }
 

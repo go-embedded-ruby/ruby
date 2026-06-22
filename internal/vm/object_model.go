@@ -275,6 +275,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cMethod
 	case *Enumerator:
 		return vm.cEnumerator
+	case *LazyEnum:
+		return vm.cLazy
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:

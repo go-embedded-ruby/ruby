@@ -52,6 +52,9 @@ func (vm *VM) bootstrap() {
 	} {
 		vm.consts[c.name] = c
 	}
+	// Float::INFINITY / Float::NAN.
+	vm.cFloat.consts["INFINITY"] = object.Float(math.Inf(1))
+	vm.cFloat.consts["NAN"] = object.Float(math.NaN())
 
 	vm.registerComplex()
 	vm.registerRational()
