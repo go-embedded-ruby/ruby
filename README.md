@@ -121,10 +121,11 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 - **`Dir`:** `entries`/`children`/`glob`/`[]`, `exist?`/`empty?`, `pwd`/`home`,
   `mkdir`/`rmdir`/`chdir` (block-scoped), `each_child`/`foreach`, raising
   `Errno::ENOENT`/`Errno::EEXIST` as MRI does.
-- **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/…)
-  and `Comparable`, both written once in embedded Ruby; Array **bang methods**
-  (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`);
-  **`Range#step`/`Integer#step`** (integer and float walks, both directions).
+- **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/
+  `minmax`/…) and `Comparable`, both written once in embedded Ruby; Array **bang
+  methods** (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`),
+  **structural/combinatorial ops** (`transpose`/`product`/`combination`/`to_h`),
+  and **`Range#step`/`Integer#step`** (integer and float walks, both directions).
 - **Enumerator:** every blockless iterator (`each`/`map`/`select`/`reject`/
   `each_slice`/`each_cons`/`each_with_index`/`times`/`upto`/`each_char`/…) returns
   an `Enumerator` (MRI semantics) with `next`/`peek`/`rewind`/`size`/`to_a`,
@@ -137,7 +138,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `Numeric` (carrying `Comparable`); `Module#ancestors`/`include?`,
   `Class#superclass`.
 - **Objects:** `dup`/`clone`/`freeze`/`frozen?`, `equal?`,
-  `instance_variable_get`/`set`.
+  `object_id`/`__id__` (MRI's deterministic immediate-value ids, stable per
+  reference object), `instance_variable_get`/`set`.
 - **Math:** the `Math` module (`sqrt`/`cbrt`/`exp`/`log`/`log2`/`log10`, the
   trig and hyperbolic functions, `atan2`/`hypot`/`pow`) with `Math::PI`/`Math::E`.
 - **NDArray:** a NumPy-style n-dimensional array — `zeros`/`ones`/`full`/`arange`/
