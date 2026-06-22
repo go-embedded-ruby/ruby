@@ -107,8 +107,9 @@ type VM struct {
 	cException                             *RClass
 	curExc                                 object.Value // most recently rescued exception (for bare `raise`)
 
-	loaded      map[string]bool // require/require_relative: features loaded once
-	requireDirs []string        // stack of directories of the files currently being required
+	loaded        map[string]bool // require/require_relative: features loaded once
+	requireDirs   []string        // stack of directories of the files currently being required
+	defaultRandom *RandomObj      // process-wide generator for Kernel#rand / #srand
 }
 
 // New returns a VM writing program output to out.

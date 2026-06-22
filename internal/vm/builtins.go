@@ -74,6 +74,7 @@ func (vm *VM) bootstrap() {
 	vm.registerBase64()
 	vm.registerDigest()
 	vm.registerJSON()
+	vm.registerRandom()
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)
