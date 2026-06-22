@@ -600,8 +600,11 @@ loads from its frozen bytecode (`embeddedPrelude`, kept in sync with prelude.rb 
 a deep-equal drift test) instead of being parsed at startup. A require-graph scan
 (`internal/aot.FrontendUses`) reports any `eval`/`require` the program makes so the
 user knows what would raise. The result: a smaller, self-contained binary that
-runs with no source file. (Future: finer per-class stdlib tree-shaking beyond the
-front-end.)
+runs with no source file. (Per-class stdlib tree-shaking beyond the front-end was
+measured and intentionally skipped: the Go-implemented bindings are small pure-Go
+libraries — go-fft ~7 KiB, go-ndarray ~20 KiB, go-images ~40 KiB, regexp ~57 KiB
+of symbols — so dropping all of them would save under 2% of a binary dominated by
+the Go runtime. The front-end drop is where the size comes from.)
 
 ### Phase 8 — Conformance & performance
 ruby/spec subset; optimisations: dispatch **inline caches** (key = class), fixnum
