@@ -513,6 +513,11 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("reverse", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(reverseStr(strOf(self)))
 	})
+	succStr := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(succString(strOf(self)))
+	}
+	vm.cString.define("succ", succStr)
+	vm.cString.define("next", succStr)
 	vm.cString.define("strip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(strings.Trim(strOf(self), wsCutset))
 	})
@@ -1385,6 +1390,44 @@ func (vm *VM) bootstrap() {
 				h.Default = args[0]
 			case len(args) > 1:
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+			}
+			return h
+		}}
+	vm.cHash.smethods["[]"] = &Method{name: "[]", owner: vm.cHash,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			h := object.NewHash()
+			// Hash[[[k,v],…]] / Hash[existing_hash] / Hash[k1,v1,k2,v2,…].
+			if len(args) == 1 {
+				switch a := args[0].(type) {
+				case *object.Array:
+					for i, e := range a.Elems {
+						pair, ok := e.(*object.Array)
+						if !ok {
+							raise("ArgumentError", "wrong element type %s at %d (expected array)", vm.classOf(e).name, i)
+						}
+						if len(pair.Elems) < 1 || len(pair.Elems) > 2 {
+							raise("ArgumentError", "invalid number of elements (%d for 1..2)", len(pair.Elems))
+						}
+						v := object.Value(object.NilV)
+						if len(pair.Elems) == 2 {
+							v = pair.Elems[1]
+						}
+						h.Set(pair.Elems[0], v)
+					}
+					return h
+				case *object.Hash:
+					for _, k := range a.Keys {
+						v, _ := a.Get(k)
+						h.Set(k, v)
+					}
+					return h
+				}
+			}
+			if len(args)%2 != 0 {
+				raise("ArgumentError", "odd number of arguments for Hash")
+			}
+			for i := 0; i < len(args); i += 2 {
+				h.Set(args[i], args[i+1])
 			}
 			return h
 		}}
@@ -3053,6 +3096,12 @@ func rangeSize(r *object.Range) int64 {
 // rangeElems materializes an integer range to a slice, raising TypeError on
 // non-integer endpoints (Ruby: "can't iterate from String").
 func rangeElems(r *object.Range) []object.Value {
+	// String ranges iterate by String#succ from begin up to end (MRI semantics).
+	if loS, ok := r.Lo.(*object.String); ok {
+		if hiS, ok := r.Hi.(*object.String); ok {
+			return strRangeElems(loS.Str(), hiS.Str(), r.Exclusive)
+		}
+	}
 	lo, hi, ok := rangeInts(r)
 	if !ok {
 		raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
@@ -3068,6 +3117,91 @@ func rangeElems(r *object.Range) []object.Value {
 		out = append(out, object.Integer(i))
 	}
 	return out
+}
+
+// strRangeElems materialises a String range (begin..end / begin...end): it yields
+// begin, begin.succ, … (byte-wise comparison, like String#<=>) and stops once the
+// value passes end or — after the next succ — grows longer than end. That post-
+// succ length guard is what makes ("aa".."b") yield just ["aa"] (MRI semantics).
+func strRangeElems(lo, hi string, exclusive bool) []object.Value {
+	var out []object.Value
+	cur := lo
+	for {
+		cmp := strings.Compare(cur, hi)
+		if cmp > 0 {
+			break
+		}
+		if !(exclusive && cmp == 0) {
+			out = append(out, object.NewString(cur))
+		}
+		if cmp == 0 {
+			break
+		}
+		next := succString(cur)
+		if len(next) > len(hi) || next == cur { // overshoots / no progress
+			break
+		}
+		cur = next
+	}
+	return out
+}
+
+func isAlnumByte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// succString implements String#succ/#next: increment the rightmost alphanumeric
+// with carry (9->0, z->a, Z->A) propagating left; a full carry inserts a fresh
+// '1'/'a'/'A' at the leftmost alphanumeric ("zz" -> "aaa", "Zz" -> "AAa",
+// "99" -> "100"). With no alphanumeric, the rightmost byte is incremented with
+// carry. Matches MRI.
+func succString(s string) string {
+	if s == "" {
+		return ""
+	}
+	b := []byte(s)
+	leftmost := -1
+	var carry byte
+	done := false
+	for i := len(b) - 1; i >= 0; i-- {
+		c := b[i]
+		if !isAlnumByte(c) {
+			continue
+		}
+		leftmost = i
+		switch c {
+		case '9':
+			b[i], carry = '0', '1'
+		case 'z':
+			b[i], carry = 'a', 'a'
+		case 'Z':
+			b[i], carry = 'A', 'A'
+		default:
+			b[i], done = c+1, true
+		}
+		if done {
+			break
+		}
+	}
+	if done {
+		return string(b)
+	}
+	if leftmost >= 0 { // full alphanumeric carry: insert the carry char
+		out := make([]byte, 0, len(b)+1)
+		out = append(out, b[:leftmost]...)
+		out = append(out, carry)
+		out = append(out, b[leftmost:]...)
+		return string(out)
+	}
+	// No alphanumeric: increment the rightmost byte, carrying on 0xff.
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] != 0xff {
+			b[i]++
+			return string(b)
+		}
+		b[i] = 0
+	}
+	return string(append([]byte{1}, b...)) // every byte overflowed
 }
 
 // numericStep drives Range#step / Integer#step: it yields lo, lo+step, … toward

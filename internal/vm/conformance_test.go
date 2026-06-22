@@ -93,3 +93,48 @@ func TestConformanceCluster2(t *testing.T) {
 		}
 	}
 }
+
+// TestConformanceCluster3: String#succ/#next, String-range iteration (built on
+// succ), and Hash[...]. Asserted against MRI Ruby 4.0.5.
+func TestConformanceCluster3(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// String#succ / #next: carry, full-carry insertion, mixed and non-alnum.
+		{`p ["az".succ, "zz".succ, "a9".succ, "Zz".succ, "99".succ, "Az".succ, "z".succ]`,
+			`["ba", "aaa", "b0", "AAa", "100", "Ba", "aa"]` + "\n"},
+		{`p ["abc".next, "1.9".succ, "<<koala>>".succ, "##".succ, "".succ]`,
+			`["abd", "2.0", "<<koalb>>", "\#$", ""]` + "\n"},
+		// String ranges iterate via succ (comparison-first, post-succ length guard).
+		{`p ("a".."e").to_a`, `["a", "b", "c", "d", "e"]` + "\n"},
+		{`p ("a"..."d").to_a`, `["a", "b", "c"]` + "\n"},
+		{`p ("az".."bb").to_a`, `["az", "ba", "bb"]` + "\n"},
+		{`p ("aa".."b").to_a`, `["aa"]` + "\n"},     // post-succ length guard
+		{`p ("y".."aaa").to_a`, "[]\n"},             // begin already past end
+		{`p ("a".."A").to_a`, "[]\n"},               // reversed
+		{`p ("".."b").to_a`, `[""]` + "\n"},         // no-progress (empty succ)
+		{`p ("a".."zz").to_a.length`, "702\n"},      // 26 + 26*26
+		{`p ("a".."e").map { |c| c.upcase }`, `["A", "B", "C", "D", "E"]` + "\n"},
+		// Hash[...]: array-of-pairs, key/value list, hash copy, short pair.
+		{`p Hash[[[:a, 1], [:b, 2]]]`, "{a: 1, b: 2}\n"},
+		{`p Hash[:a, 1, :b, 2]`, "{a: 1, b: 2}\n"},
+		{`p Hash["x", 9]`, `{"x" => 9}` + "\n"},
+		{`p Hash[[[:a]]]`, "{a: nil}\n"},
+		{`h = {a: 1}; p Hash[h]`, "{a: 1}\n"},
+		{`p Hash[]`, "{}\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+
+	errs := []struct{ src, want string }{
+		{`Hash[:a]`, "odd number of arguments for Hash"},
+		{`Hash[[5]]`, "wrong element type Integer at 0 (expected array)"},
+		{`Hash[[[1, 2, 3]]]`, "invalid number of elements (3 for 1..2)"},
+	}
+	for _, c := range errs {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q err=%v, want substring %q", c.src, err, c.want)
+		}
+	}
+}
