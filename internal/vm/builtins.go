@@ -507,6 +507,20 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("downcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(strings.ToLower(strOf(self)))
 	})
+	vm.cString.define("casecmp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := args[0].(*object.String)
+		if !ok { // like <=>, a non-String operand compares to nil
+			return object.NilV
+		}
+		return object.Integer(int64(strings.Compare(strings.ToLower(strOf(self)), strings.ToLower(o.Str()))))
+	})
+	vm.cString.define("casecmp?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := args[0].(*object.String)
+		if !ok {
+			return object.NilV
+		}
+		return object.Bool(strings.EqualFold(strOf(self), o.Str()))
+	})
 	vm.cString.define("capitalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(capitalizeStr(strOf(self)))
 	})
@@ -840,6 +854,50 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(self.(*object.Array).Elems) == 0)
+	})
+	vm.cArray.smethods["new"] = &Method{name: "new", owner: vm.cArray,
+		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+			// Array.new / Array.new(other) / Array.new(n[, val]) / Array.new(n) { |i| }
+			if len(args) == 0 {
+				return &object.Array{}
+			}
+			if len(args) == 1 {
+				if a, ok := args[0].(*object.Array); ok {
+					return &object.Array{Elems: append([]object.Value{}, a.Elems...)}
+				}
+			}
+			n := intArg(args[0])
+			if n < 0 {
+				raise("ArgumentError", "negative array size")
+			}
+			out := make([]object.Value, n)
+			for i := range out {
+				switch {
+				case blk != nil:
+					out[i] = vm.callBlock(blk, []object.Value{object.Integer(int64(i))})
+				case len(args) >= 2:
+					out[i] = args[1]
+				default:
+					out[i] = object.NilV
+				}
+			}
+			return &object.Array{Elems: out}
+		}}
+	vm.cArray.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array).Elems
+		out := make([]object.Value, len(args))
+		for i, idxV := range args {
+			idx := int(intArg(idxV))
+			if idx < 0 {
+				idx += len(a)
+			}
+			if idx >= 0 && idx < len(a) {
+				out[i] = a[idx]
+			} else {
+				out[i] = object.NilV
+			}
+		}
+		return &object.Array{Elems: out}
 	})
 	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)

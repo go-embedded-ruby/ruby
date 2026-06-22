@@ -73,6 +73,18 @@ module Enumerable
     r
   end
 
+  # to_h: each element (or each yield of the block) must be a [key, value] pair.
+  def to_h
+    h = {}
+    __each_packed { |x|
+      pair = block_given? ? yield(x) : x
+      raise TypeError, "wrong element type #{pair.class} (expected array)" unless pair.is_a?(Array)
+      raise ArgumentError, "element has wrong array length (expected 2, was #{pair.length})" unless pair.length == 2
+      h[pair[0]] = pair[1]
+    }
+    h
+  end
+
   def map
     return enum_for(:map) unless block_given?
     r = []
