@@ -42,11 +42,19 @@ go test ./internal/vm/ -run=NONE -bench=Fib -cpuprofile=cpu.prof   # then: go to
 | --- | --- | --- |
 | `fib.rb` | recursion + method dispatch (call-bound) | yes (integer kernel) |
 | `loop.rb` | tight integer `while` loop in a method | yes (integer kernel) |
+| `dispatch.rb` | monomorphic method calls into an object | no (call-bound) |
+| `alloc.rb` | short-lived object allocation + GC pressure | no |
+| `proc.rb` | `Proc#call` invocation in a loop | no (proc dispatch) |
 | `blocks.rb` | block iteration (`Integer#times`) | no (block dispatch) |
 | `array.rb` | `map`/`select`/`reduce` pipeline | no (Enumerable) |
 | `hash.rb` | Hash insertion + lookup | no |
 | `strings.rb` | string interpolation + `join` | no |
 | `wordcount.rb` | split + hash counting + sum (mixed) | no |
+| `mandelbrot.rb` | benchmarks-game float kernel (compute-bound) | not yet (float) |
+
+The formalized parity report — methodology, the full rbgo / MRI / MRI+YJIT
+table, root-cause analysis and action items — lives in
+[`../BENCHMARKS.md`](../BENCHMARKS.md).
 
 ## Current results (Apple M-series, Ruby 4.0.5, best of 3)
 
