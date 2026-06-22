@@ -140,8 +140,8 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:        "<module:Enumerable>",
-				Insns:       []bytecode.Instr{{Op: 43}, {Op: 9}, {Op: 43, A: 1, B: 1}, {Op: 9}, {Op: 43, A: 2, B: 2}, {Op: 9}, {Op: 43, A: 3, B: 3}, {Op: 9}, {Op: 43, A: 4, B: 4}, {Op: 9}, {Op: 43, A: 5, B: 5}, {Op: 9}, {Op: 43, A: 6, B: 6}, {Op: 9}, {Op: 43, A: 7, B: 7}, {Op: 9}, {Op: 43, A: 8, B: 8}, {Op: 9}, {Op: 43, A: 9, B: 9}, {Op: 9}, {Op: 43, A: 10, B: 10}, {Op: 9}, {Op: 43, A: 11, B: 11}, {Op: 9}, {Op: 43, A: 12, B: 12}, {Op: 9}, {Op: 43, A: 13, B: 13}, {Op: 9}, {Op: 43, A: 14, B: 14}, {Op: 9}, {Op: 43, A: 15, B: 15}, {Op: 9}, {Op: 43, A: 16, B: 16}, {Op: 9}, {Op: 43, A: 17, B: 17}, {Op: 9}, {Op: 43, A: 18, B: 18}, {Op: 9}, {Op: 43, A: 19, B: 19}, {Op: 9}, {Op: 43, A: 20, B: 20}, {Op: 9}, {Op: 43, A: 21, B: 21}, {Op: 9}, {Op: 43, A: 22, B: 22}, {Op: 9}, {Op: 43, A: 23, B: 23}, {Op: 9}, {Op: 43, A: 24, B: 24}, {Op: 9}, {Op: 43, A: 25, B: 25}, {Op: 9}, {Op: 43, A: 26, B: 26}, {Op: 9}, {Op: 43, A: 27, B: 27}, {Op: 9}, {Op: 43, A: 28, B: 28}, {Op: 9}, {Op: 43, A: 29, B: 29}, {Op: 49}},
-				Names:       []string{"to_a", "map", "collect", "filter", "detect", "count", "min_by", "max_by", "sort_by", "select", "reject", "find", "include?", "sum", "min", "max", "minmax", "reduce", "inject", "any?", "all?", "none?", "each_with_index", "flat_map", "each_with_object", "filter_map", "partition", "group_by", "tally", "zip"},
+				Insns:       []bytecode.Instr{{Op: 43}, {Op: 9}, {Op: 43, A: 1, B: 1}, {Op: 9}, {Op: 43, A: 2, B: 2}, {Op: 9}, {Op: 43, A: 3, B: 3}, {Op: 9}, {Op: 43, A: 4, B: 4}, {Op: 9}, {Op: 43, A: 5, B: 5}, {Op: 9}, {Op: 43, A: 6, B: 6}, {Op: 9}, {Op: 43, A: 7, B: 7}, {Op: 9}, {Op: 43, A: 8, B: 8}, {Op: 9}, {Op: 43, A: 9, B: 9}, {Op: 9}, {Op: 43, A: 10, B: 10}, {Op: 9}, {Op: 43, A: 11, B: 11}, {Op: 9}, {Op: 43, A: 12, B: 12}, {Op: 9}, {Op: 43, A: 13, B: 13}, {Op: 9}, {Op: 43, A: 14, B: 14}, {Op: 9}, {Op: 43, A: 15, B: 15}, {Op: 9}, {Op: 43, A: 16, B: 16}, {Op: 9}, {Op: 43, A: 17, B: 17}, {Op: 9}, {Op: 43, A: 18, B: 18}, {Op: 9}, {Op: 43, A: 19, B: 19}, {Op: 9}, {Op: 43, A: 20, B: 20}, {Op: 9}, {Op: 43, A: 21, B: 21}, {Op: 9}, {Op: 43, A: 22, B: 22}, {Op: 9}, {Op: 43, A: 23, B: 23}, {Op: 9}, {Op: 43, A: 24, B: 24}, {Op: 9}, {Op: 43, A: 25, B: 25}, {Op: 9}, {Op: 43, A: 26, B: 26}, {Op: 9}, {Op: 43, A: 27, B: 27}, {Op: 9}, {Op: 43, A: 28, B: 28}, {Op: 9}, {Op: 43, A: 29, B: 29}, {Op: 9}, {Op: 43, A: 30, B: 30}, {Op: 49}},
+				Names:       []string{"__each_packed", "to_a", "map", "collect", "filter", "detect", "count", "min_by", "max_by", "sort_by", "select", "reject", "find", "include?", "sum", "min", "max", "minmax", "reduce", "inject", "any?", "all?", "none?", "each_with_index", "flat_map", "each_with_object", "filter_map", "partition", "group_by", "tally", "zip"},
 				NumRequired: 0,
 				SplatIndex:  -1,
 				KwRestSlot:  -1,
@@ -149,9 +149,39 @@ func embeddedPrelude() *bytecode.ISeq {
 				NumLocals:   0,
 				Children: []*bytecode.ISeq{
 					&bytecode.ISeq{
+						Name:        "__each_packed",
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30, C: 1}, {Op: 49}},
+						Names:       []string{"each"},
+						NumRequired: 0,
+						SplatIndex:  -1,
+						KwRestSlot:  -1,
+						BlockSlot:   -1,
+						NumLocals:   0,
+						Children: []*bytecode.ISeq{
+							&bytecode.ISeq{
+								Name:  "<block>",
+								Insns: []bytecode.Instr{{Op: 11}, {Op: 30}, {Op: 1}, {Op: 22}, {Op: 28, A: 9}, {Op: 11}, {Op: 1, A: 1}, {Op: 30, A: 1, B: 1}, {Op: 26, A: 10}, {Op: 11}, {Op: 47, A: 1}, {Op: 49}},
+								Consts: []object.Value{
+									object.Integer(1),
+									object.Integer(0),
+								},
+								Names:       []string{"size", "[]"},
+								Params:      []string{"a"},
+								NumRequired: 0,
+								SplatIndex:  0,
+								KwRestSlot:  -1,
+								BlockSlot:   -1,
+								NumLocals:   1,
+								Locals:      []string{"a"},
+								Super:       "",
+							},
+						},
+						Super: "",
+					},
+					&bytecode.ISeq{
 						Name:        "to_a",
 						Insns:       []bytecode.Instr{{Op: 6}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11}, {Op: 49}},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -181,7 +211,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("map"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -256,7 +286,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Integer(0),
 						},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -372,7 +402,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("select"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -402,7 +432,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("reject"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -432,7 +462,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("find"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -458,7 +488,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					&bytecode.ISeq{
 						Name:        "include?",
 						Insns:       []bytecode.Instr{{Op: 4}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 49}},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						Params:      []string{"value"},
 						NumRequired: 1,
 						SplatIndex:  -1,
@@ -488,7 +518,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Integer(0),
 						},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						Params:      []string{"init"},
 						NumRequired: 0,
 						SplatIndex:  -1,
@@ -515,7 +545,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					&bytecode.ISeq{
 						Name:        "min",
 						Insns:       []bytecode.Instr{{Op: 2}, {Op: 12}, {Op: 9}, {Op: 3}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11}, {Op: 49}},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -541,7 +571,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					&bytecode.ISeq{
 						Name:        "max",
 						Insns:       []bytecode.Instr{{Op: 2}, {Op: 12}, {Op: 9}, {Op: 3}, {Op: 12, A: 1}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11}, {Op: 49}},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -583,7 +613,7 @@ func embeddedPrelude() *bytecode.ISeq {
 							object.Integer(0),
 							object.Integer(1),
 						},
-						Names:       []string{"length", "[]", "Symbol", "is_a?", "each"},
+						Names:       []string{"length", "[]", "Symbol", "is_a?", "__each_packed"},
 						Params:      []string{"args"},
 						NumRequired: 0,
 						SplatIndex:  0,
@@ -624,7 +654,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					&bytecode.ISeq{
 						Name:        "any?",
 						Insns:       []bytecode.Instr{{Op: 4}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11}, {Op: 49}},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -650,7 +680,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					&bytecode.ISeq{
 						Name:        "all?",
 						Insns:       []bytecode.Instr{{Op: 3}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11}, {Op: 49}},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -676,7 +706,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					&bytecode.ISeq{
 						Name:        "none?",
 						Insns:       []bytecode.Instr{{Op: 3}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11}, {Op: 49}},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -706,7 +736,7 @@ func embeddedPrelude() *bytecode.ISeq {
 							object.Symbol("each_with_index"),
 							object.Integer(0),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -738,7 +768,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("flat_map"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -783,7 +813,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("each_with_object"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						Params:      []string{"memo"},
 						NumRequired: 1,
 						SplatIndex:  -1,
@@ -813,7 +843,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("filter_map"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -843,7 +873,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("partition"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -873,7 +903,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Symbol("group_by"),
 						},
-						Names:       []string{"enum_for", "each"},
+						Names:       []string{"enum_for", "__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -900,7 +930,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					&bytecode.ISeq{
 						Name:        "tally",
 						Insns:       []bytecode.Instr{{Op: 7}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11}, {Op: 49}},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -934,7 +964,7 @@ func embeddedPrelude() *bytecode.ISeq {
 						Consts: []object.Value{
 							object.Integer(0),
 						},
-						Names:       []string{"each"},
+						Names:       []string{"__each_packed"},
 						Params:      []string{"other"},
 						NumRequired: 1,
 						SplatIndex:  -1,

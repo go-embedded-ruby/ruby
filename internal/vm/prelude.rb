@@ -58,16 +58,25 @@ end
 # defines `each`; map/select/reduce/min/… all follow. (Without break/&& yet, the
 # scanning forms below visit every element — correct, if not short-circuiting.)
 module Enumerable
+  # __each_packed iterates #each, packing each yield into a single value: a lone
+  # value stays scalar, but a multi-value yield (e.g. each_with_index's element +
+  # index) becomes an Array. Every Enumerable method iterates through this, so a
+  # multi-parameter block downstream (`map { |x, i| }`) auto-splats the packed
+  # Array exactly as MRI does — without each method handling arity itself.
+  def __each_packed
+    each { |*a| yield(a.size == 1 ? a[0] : a) }
+  end
+
   def to_a
     r = []
-    each { |x| r << x }
+    __each_packed { |x| r << x }
     r
   end
 
   def map
     return enum_for(:map) unless block_given?
     r = []
-    each { |x| r << yield(x) }
+    __each_packed { |x| r << yield(x) }
     r
   end
 
@@ -89,7 +98,7 @@ module Enumerable
 
   def count
     n = 0
-    each { |x| n = n + 1 if !block_given? || yield(x) }
+    __each_packed { |x| n = n + 1 if !block_given? || yield(x) }
     n
   end
 
@@ -113,21 +122,21 @@ module Enumerable
   def select
     return enum_for(:select) unless block_given?
     r = []
-    each { |x| r << x if yield(x) }
+    __each_packed { |x| r << x if yield(x) }
     r
   end
 
   def reject
     return enum_for(:reject) unless block_given?
     r = []
-    each { |x| r << x unless yield(x) }
+    __each_packed { |x| r << x unless yield(x) }
     r
   end
 
   def find
     return enum_for(:find) unless block_given?
     result = nil
-    each { |x|
+    __each_packed { |x|
       if result == nil
         result = x if yield(x)
       end
@@ -137,20 +146,20 @@ module Enumerable
 
   def include?(value)
     found = false
-    each { |x| found = true if x == value }
+    __each_packed { |x| found = true if x == value }
     found
   end
 
   def sum(init = 0)
     total = init
-    each { |x| total = total + (block_given? ? yield(x) : x) }
+    __each_packed { |x| total = total + (block_given? ? yield(x) : x) }
     total
   end
 
   def min
     result = nil
     first = true
-    each { |x|
+    __each_packed { |x|
       if first
         result = x
         first = false
@@ -164,7 +173,7 @@ module Enumerable
   def max
     result = nil
     first = true
-    each { |x|
+    __each_packed { |x|
       if first
         result = x
         first = false
@@ -196,7 +205,7 @@ module Enumerable
     end
     acc = init
     started = has_init
-    each do |x|
+    __each_packed do |x|
       if !started
         acc = x
         started = true
@@ -215,26 +224,26 @@ module Enumerable
 
   def any?
     result = false
-    each { |x| result = true if yield(x) }
+    __each_packed { |x| result = true if yield(x) }
     result
   end
 
   def all?
     result = true
-    each { |x| result = false unless yield(x) }
+    __each_packed { |x| result = false unless yield(x) }
     result
   end
 
   def none?
     result = true
-    each { |x| result = false if yield(x) }
+    __each_packed { |x| result = false if yield(x) }
     result
   end
 
   def each_with_index
     return enum_for(:each_with_index) unless block_given?
     i = 0
-    each { |x|
+    __each_packed { |x|
       yield(x, i)
       i = i + 1
     }
@@ -244,7 +253,7 @@ module Enumerable
   def flat_map
     return enum_for(:flat_map) unless block_given?
     r = []
-    each { |x|
+    __each_packed { |x|
       v = yield(x)
       if v.is_a?(Array)
         v.each { |e| r << e }
@@ -257,14 +266,14 @@ module Enumerable
 
   def each_with_object(memo)
     return enum_for(:each_with_object, memo) unless block_given?
-    each { |x| yield(x, memo) }
+    __each_packed { |x| yield(x, memo) }
     memo
   end
 
   def filter_map
     return enum_for(:filter_map) unless block_given?
     r = []
-    each { |x|
+    __each_packed { |x|
       v = yield(x)
       r << v if v
     }
@@ -275,7 +284,7 @@ module Enumerable
     return enum_for(:partition) unless block_given?
     yes = []
     no = []
-    each { |x|
+    __each_packed { |x|
       if yield(x)
         yes << x
       else
@@ -288,7 +297,7 @@ module Enumerable
   def group_by
     return enum_for(:group_by) unless block_given?
     h = {}
-    each { |x|
+    __each_packed { |x|
       k = yield(x)
       (h[k] ||= []) << x
     }
@@ -297,7 +306,7 @@ module Enumerable
 
   def tally
     h = {}
-    each { |x|
+    __each_packed { |x|
       h[x] = (h[x] || 0) + 1
     }
     h
@@ -306,7 +315,7 @@ module Enumerable
   def zip(other)
     r = []
     i = 0
-    each { |x|
+    __each_packed { |x|
       r << [x, other[i]]
       i = i + 1
     }
