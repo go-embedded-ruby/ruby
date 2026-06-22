@@ -86,7 +86,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   insert/`[]=`/slice!/the bang methods and `freeze`/`FrozenError`;
   interpolation, heredocs (`<<`/`<<-`/`<<~`), `%w`/`%i` and `%q`/`%Q`/`%W`/`%I`
   literals, the `\a`/`\b`/`\v`/`\f`/`\s`/`\n`/`\t`/`\r`/`\e`/`\0` escapes,
-  `%`/`format`/`sprintf`, case/strip/`split`/`each_char`/`lines` and friends.
+  `%`/`format`/`sprintf`, case/strip/`split`/`each_char`/`lines`/`succ`(`next`)
+  and friends.
 - **Regular expressions:** `/re/imx` literals, `Regexp`/`MatchData`, `=~` /
   `match` / `match?` / `scan` / `gsub` / `sub` / `split`, and the match globals
   `$~` / `$1`..`$N` / `$&` / `` $` `` / `$'` — running on the standalone pure-Go
@@ -125,7 +126,9 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `minmax`/…) and `Comparable`, both written once in embedded Ruby; Array **bang
   methods** (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`),
   **structural/combinatorial ops** (`transpose`/`product`/`combination`/`to_h`),
-  and **`Range#step`/`Integer#step`** (integer and float walks, both directions).
+  the **`Hash[…]`** constructor, **String ranges** (`("a".."e")` iterating via
+  `String#succ`), and **`Range#step`/`Integer#step`** (integer and float walks,
+  both directions).
 - **Enumerator:** every blockless iterator (`each`/`map`/`select`/`reject`/
   `each_slice`/`each_cons`/`each_with_index`/`times`/`upto`/`each_char`/…) returns
   an `Enumerator` (MRI semantics) with `next`/`peek`/`rewind`/`size`/`to_a`,
