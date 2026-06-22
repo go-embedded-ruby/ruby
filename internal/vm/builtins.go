@@ -614,7 +614,30 @@ func (vm *VM) bootstrap() {
 		return object.Bool(strings.HasSuffix(strOf(self), strArg(args[0])))
 	})
 	vm.cString.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		byteIdx := strings.Index(strOf(self), strArg(args[0]))
+		s, needle := strOf(self), strArg(args[0])
+		r := []rune(s)
+		start := 0
+		if len(args) > 1 { // optional character offset (negative counts from the end)
+			start = int(intArg(args[1]))
+			if start < 0 {
+				start += len(r)
+			}
+			if start < 0 {
+				return object.NilV
+			}
+		}
+		if start > len(r) {
+			return object.NilV
+		}
+		byteStart := len(string(r[:start]))
+		byteIdx := strings.Index(s[byteStart:], needle)
+		if byteIdx < 0 {
+			return object.NilV
+		}
+		return object.Integer(utf8.RuneCountInString(s[:byteStart+byteIdx]))
+	})
+	vm.cString.define("rindex", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		byteIdx := strings.LastIndex(strOf(self), strArg(args[0]))
 		if byteIdx < 0 {
 			return object.NilV
 		}
@@ -1077,9 +1100,8 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cArray.define("sort!", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
-		sort.SliceStable(a.Elems, func(i, j int) bool { return vm.spaceship(a.Elems[i], a.Elems[j]) < 0 })
+	vm.cArray.define("sort!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		vm.sortSlice(self.(*object.Array).Elems, blk)
 		return self
 	})
 	selectBang := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -1390,11 +1412,11 @@ func (vm *VM) bootstrap() {
 		copy(out, a.Elems[n:])
 		return &object.Array{Elems: out}
 	})
-	vm.cArray.define("sort", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("sort", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		out := make([]object.Value, len(a.Elems))
 		copy(out, a.Elems)
-		sort.SliceStable(out, func(i, j int) bool { return vm.spaceship(out[i], out[j]) < 0 })
+		vm.sortSlice(out, blk)
 		return &object.Array{Elems: out}
 	})
 	vm.cArray.define("sort_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -2509,6 +2531,12 @@ func stringIndex(s string, args []object.Value) object.Value {
 		}
 		return object.NewString(string(r[start : start+length]))
 	}
+	if sub, ok := args[0].(*object.String); ok { // s[substr] -> the substring if present, else nil
+		if strings.Contains(s, sub.Str()) {
+			return object.NewString(sub.Str())
+		}
+		return object.NilV
+	}
 	i := normIndex(intArg(args[0]), n)
 	if i < 0 || i >= n {
 		return object.NilV
@@ -2733,6 +2761,26 @@ func (vm *VM) spaceship(a, b object.Value) int {
 		raise("ArgumentError", "comparison of %s with %s failed", vm.classOf(a).name, vm.classOf(b).name)
 	}
 	return int(n)
+}
+
+// sortSlice stably sorts out in place: by <=> when blk is nil, otherwise using
+// blk as an MRI comparator (it returns a negative/zero/positive Integer; a
+// non-Integer result raises ArgumentError).
+func (vm *VM) sortSlice(out []object.Value, blk *Proc) {
+	if blk == nil {
+		sort.SliceStable(out, func(i, j int) bool { return vm.spaceship(out[i], out[j]) < 0 })
+		return
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		r := vm.callBlock(blk, []object.Value{out[i], out[j]})
+		c, ok := r.(object.Integer)
+		if !ok {
+			// MRI compares the block's result against 0, so a non-Integer fails as
+			// "comparison of <result class> with 0 failed".
+			raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(r).name)
+		}
+		return c < 0
+	})
 }
 
 // arrayByExtreme implements min_by/max_by: the element whose block key is
