@@ -50,3 +50,46 @@ func TestConformanceCluster(t *testing.T) {
 		}
 	}
 }
+
+// TestConformanceCluster2 covers a second probe batch: Integer/Float#fdiv and
+// Array#transpose / #product / #combination. Asserted against MRI Ruby 4.0.5.
+func TestConformanceCluster2(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// fdiv on Integer, Float and Bignum.
+		{`p [5.fdiv(2), 10.fdiv(4), 3.14.fdiv(2)]`, "[2.5, 2.5, 1.57]\n"},
+		{`p (10 ** 20).fdiv(2) > 0`, "true\n"},
+		// transpose.
+		{`p [[1, 2], [3, 4]].transpose`, "[[1, 3], [2, 4]]\n"},
+		{`p [[1, 2, 3], [4, 5, 6]].transpose`, "[[1, 4], [2, 5], [3, 6]]\n"},
+		{`p [].transpose`, "[]\n"},
+		// product: variadic, and the lone-receiver form.
+		{`p [1, 2, 3].product([4, 5])`, "[[1, 4], [1, 5], [2, 4], [2, 5], [3, 4], [3, 5]]\n"},
+		{`p [1, 2].product([3, 4], [5, 6]).length`, "8\n"},
+		{`p [1, 2].product`, "[[1], [2]]\n"},
+		// combination: enumerator (no block), block form, and the edge sizes.
+		{`p [1, 2, 3, 4].combination(2).to_a`, "[[1, 2], [1, 3], [1, 4], [2, 3], [2, 4], [3, 4]]\n"},
+		{`p [1, 2, 3].combination(0).to_a`, "[[]]\n"},
+		{`p [1, 2, 3].combination(3).to_a`, "[[1, 2, 3]]\n"},
+		{`p [1, 2, 3].combination(5).to_a`, "[]\n"},      // k > length
+		{`p [1, 2, 3].combination(-1).to_a`, "[]\n"},     // negative
+		{`r = []; [1, 2, 3].combination(2) { |c| r << c.sum }; p r`, "[3, 4, 5]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+
+	errs := []struct{ src, want string }{
+		{`5.fdiv("x")`, "String can't be coerced into Integer"},
+		{`3.14.fdiv("x")`, "String can't be coerced into Float"},
+		{`[1, 2].transpose`, "no implicit conversion of Integer into Array"},
+		{`[[1, 2], [3]].transpose`, "element size differs (1 should be 2)"},
+		{`[1, 2].product(3)`, "no implicit conversion of Integer into Array"},
+	}
+	for _, c := range errs {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q err=%v, want substring %q", c.src, err, c.want)
+		}
+	}
+}

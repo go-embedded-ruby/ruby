@@ -1151,6 +1151,93 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
+	vm.cArray.define("transpose", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		rows := self.(*object.Array).Elems
+		if len(rows) == 0 {
+			return &object.Array{}
+		}
+		var width int
+		for i, r := range rows {
+			ra, ok := r.(*object.Array)
+			if !ok {
+				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(r).name)
+			}
+			if i == 0 {
+				width = len(ra.Elems)
+			} else if len(ra.Elems) != width {
+				raise("IndexError", "element size differs (%d should be %d)", len(ra.Elems), width)
+			}
+		}
+		out := make([]object.Value, width)
+		for j := 0; j < width; j++ {
+			col := make([]object.Value, len(rows))
+			for i, r := range rows {
+				col[i] = r.(*object.Array).Elems[j]
+			}
+			out[j] = &object.Array{Elems: col}
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		lists := [][]object.Value{self.(*object.Array).Elems}
+		for _, a := range args {
+			la, ok := a.(*object.Array)
+			if !ok {
+				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(a).name)
+			}
+			lists = append(lists, la.Elems)
+		}
+		// Cartesian product, last list varying fastest (MRI order).
+		out := []object.Value{&object.Array{}}
+		for _, list := range lists {
+			var next []object.Value
+			for _, prefix := range out {
+				for _, e := range list {
+					row := append(append([]object.Value{}, prefix.(*object.Array).Elems...), e)
+					next = append(next, &object.Array{Elems: row})
+				}
+			}
+			out = next
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cArray.define("combination", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		k := int(intArg(args[0]))
+		elems := self.(*object.Array).Elems
+		var combos []object.Value
+		if k >= 0 && k <= len(elems) {
+			idx := make([]int, k)
+			for i := range idx {
+				idx[i] = i
+			}
+			for {
+				pick := make([]object.Value, k)
+				for i, j := range idx {
+					pick[i] = elems[j]
+				}
+				combos = append(combos, &object.Array{Elems: pick})
+				// advance the index combination (lexicographic)
+				i := k - 1
+				for i >= 0 && idx[i] == i+len(elems)-k {
+					i--
+				}
+				if i < 0 {
+					break
+				}
+				idx[i]++
+				for j := i + 1; j < k; j++ {
+					idx[j] = idx[j-1] + 1
+				}
+			}
+		}
+		if blk == nil {
+			return enumFor(&object.Array{Elems: combos}, "each")
+		}
+		for _, c := range combos {
+			vm.callBlock(blk, []object.Value{c})
+		}
+		return self
+	})
 	vm.cArray.define("take_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "take_while")
@@ -1800,6 +1887,18 @@ func (vm *VM) bootstrap() {
 		}
 		return object.Integer(absInt(a / gcdInt(a, b) * b))
 	})
+	fdiv := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a, _ := toFloat(self)
+		b, ok := toFloat(args[0])
+		if !ok {
+			// MRI names the receiver's class in the coercion error (Integer#fdiv
+			// reports "into Integer", Float#fdiv "into Float").
+			raise("TypeError", "%s can't be coerced into %s", vm.classOf(args[0]).name, vm.classOf(self).name)
+		}
+		return object.Float(a / b)
+	}
+	vm.cInteger.define("fdiv", fdiv)
+	vm.cFloat.define("fdiv", fdiv)
 	vm.cInteger.define("bit_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
 		if n < 0 {
