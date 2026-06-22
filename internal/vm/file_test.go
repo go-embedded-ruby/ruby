@@ -35,12 +35,14 @@ func TestFilePath(t *testing.T) {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}
-	// expand_path with no base resolves against the working directory (absolute).
-	if got := eval(t, `p File.expand_path("x").start_with?("/")`); got != "true\n" {
+	// expand_path with no base resolves against the working directory (the result
+	// ends with the joined component; checked this way to stay portable to the
+	// Windows drive-letter form C:/…/x).
+	if got := eval(t, `p File.expand_path("x").end_with?("/x")`); got != "true\n" {
 		t.Errorf("expand_path cwd: got %q", got)
 	}
-	// expand_path("~") expands to an absolute home-directory path.
-	if got := eval(t, `p File.expand_path("~").start_with?("/")`); got != "true\n" {
+	// expand_path("~") expands the tilde away to a longer absolute path.
+	if got := eval(t, `p(File.expand_path("~") != "~" && File.expand_path("~").include?("/"))`); got != "true\n" {
 		t.Errorf("expand_path ~: got %q", got)
 	}
 	// A non-String path raises TypeError.

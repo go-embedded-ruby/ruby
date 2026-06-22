@@ -2,11 +2,14 @@ package vm
 
 import (
 	"os"
-	"path/filepath"
+	"path" // always '/'-separated, as Ruby's File is — not path/filepath
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// toSlash converts an OS-native path (Windows uses '\') to Ruby's '/' form.
+func toSlash(s string) string { return strings.ReplaceAll(s, "\\", "/") }
 
 // registerFile installs the File class — the common path manipulation helpers
 // (basename/dirname/extname/join/split/expand_path) and filesystem operations
@@ -29,7 +32,7 @@ func (vm *VM) registerFile() {
 	def := func(name string, fn NativeFn) { cFile.smethods[name] = &Method{name: name, owner: cFile, native: fn} }
 
 	def("basename", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		base := filepath.Base(strArg(args[0]))
+		base := path.Base(strArg(args[0]))
 		if len(args) > 1 {
 			suf := strArg(args[1])
 			if suf == ".*" {
@@ -43,14 +46,14 @@ func (vm *VM) registerFile() {
 		return object.NewString(base)
 	})
 	def("dirname", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(filepath.Dir(strArg(args[0])))
+		return object.NewString(path.Dir(strArg(args[0])))
 	})
 	def("extname", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExt(filepath.Base(strArg(args[0]))))
+		return object.NewString(fileExt(path.Base(strArg(args[0]))))
 	})
 	def("split", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := strArg(args[0])
-		return &object.Array{Elems: []object.Value{object.NewString(filepath.Dir(p)), object.NewString(filepath.Base(p))}}
+		return &object.Array{Elems: []object.Value{object.NewString(path.Dir(p)), object.NewString(path.Base(p))}}
 	})
 	def("join", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		parts := make([]string, len(args))
@@ -145,20 +148,20 @@ func fileJoin(parts []string) string {
 // fileExpand implements File.expand_path: ~ expands to the home directory, a
 // relative path is resolved against the optional base (default: the working
 // directory), and the result is cleaned (so .. and . collapse).
-func fileExpand(path string, rest []object.Value) string {
-	if path == "~" || strings.HasPrefix(path, "~/") {
+func fileExpand(p string, rest []object.Value) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
-			path = home + strings.TrimPrefix(path, "~")
+			p = toSlash(home) + strings.TrimPrefix(p, "~")
 		}
 	}
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
+	if path.IsAbs(p) {
+		return path.Clean(p)
 	}
 	base := ""
 	if len(rest) > 0 {
 		base = fileExpand(strArg(rest[0]), nil)
 	} else if wd, err := os.Getwd(); err == nil {
-		base = wd
+		base = toSlash(wd)
 	}
-	return filepath.Clean(filepath.Join(base, path))
+	return path.Clean(path.Join(base, p))
 }
