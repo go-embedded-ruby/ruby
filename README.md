@@ -5,7 +5,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
-[![Phase](https://img.shields.io/badge/phases-1--6%20active-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
+[![Phase](https://img.shields.io/badge/phases-1--7%20active-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
 
 **A pure-Go implementation of Ruby — one static binary, full dynamism, zero cgo.**
 
