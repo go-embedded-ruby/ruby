@@ -88,6 +88,13 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   number/escape formatting), **`Digest`** (`MD5`/`SHA1`/`SHA256`/`SHA512` —
   `hexdigest`/`digest`/`base64digest`), **`Base64`**, and **`Zlib`** (`crc32`/
   `adler32` + `Deflate`/`Inflate`) — each `require`-able and pure-Go.
+- **`Marshal`** (`dump`/`load`/`restore` + `MAJOR_VERSION`/`MINOR_VERSION`) —
+  Ruby's binary serialization, **byte-for-byte identical to MRI** across
+  Integer/Bignum, Float, Symbol, String, Array, Hash (incl. defaults), and the
+  symbol/object-link tables (shared objects and cycles round-trip). Runs on the
+  standalone pure-Go
+  [go-ruby-marshal](https://github.com/go-ruby-marshal/marshal) engine, so the
+  build stays **CGO=0**.
 - **File & Random:** **`File`** — path helpers (`basename`/`dirname`/`extname`/
   `join`/`split`/`expand_path`) and filesystem ops (`read`/`write`/`exist?`/
   `file?`/`directory?`/`size`/`delete`), raising `Errno::ENOENT` for missing
@@ -162,7 +169,7 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(`Thread`, `Marshal`, fuller `IO`).
+(`Thread`, fuller `IO`).
 
 ## Quick start
 
