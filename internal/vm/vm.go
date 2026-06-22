@@ -84,6 +84,7 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 // VM holds I/O, the top-level self, the constant table and the base classes.
 type VM struct {
 	out    io.Writer
+	errOut io.Writer // $stderr/STDERR sink; defaults to out (no separate stream)
 	main   object.Value
 	consts map[string]object.Value // top-level constants (classes live here)
 
@@ -125,7 +126,7 @@ type VM struct {
 
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
-	vm := &VM{out: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
+	vm := &VM{out: out, errOut: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
 	// The main thread holds the GVL for the VM's lifetime, releasing it only at
 	// blocking points so spawned Ruby threads can run (see thread.go).
 	vm.gvl.Lock()

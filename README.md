@@ -106,6 +106,13 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `file?`/`directory?`/`size`/`delete`), raising `Errno::ENOENT` for missing
   paths; **`Random`** — a bit-exact reimplementation of MRI's seeded MT19937, so
   `Random.new(seed)` / `srand`+`rand` reproduce MRI's sequence.
+- **IO:** **`IO`** with `$stdout`/`$stderr`/`STDOUT`/`STDERR`/`$stdin` as real
+  objects (`write`/`<<`/`print`/`puts`/`printf`/`putc`/`sync`/`flush`/`close`),
+  **`StringIO`** (`require "stringio"`) — an in-memory IO with the full read side
+  (`read`/`gets`/`getc`/`readline`/`readlines`/`each_line`/`each_char`,
+  `pos`/`seek`/`rewind`/`truncate`/`eof?`/`string`), and `Kernel#warn`.
+  `Kernel#puts`/`print`/`p` write through the current `$stdout`, so reassigning
+  it to a `StringIO` captures output, as in MRI.
 - **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/…)
   and `Comparable`, both written once in embedded Ruby; Array **bang methods**
   (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`);
@@ -175,7 +182,7 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(fuller `IO`, `Binding`, the `rbgo build` toolchain).
+(`Dir`/file streams, `Binding`, the `rbgo build` toolchain).
 
 ## Quick start
 

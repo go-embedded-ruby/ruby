@@ -287,6 +287,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Mutex"].(*RClass)
 	case *RQueue:
 		return vm.consts["Queue"].(*RClass)
+	case *IOObj:
+		return x.cls
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:

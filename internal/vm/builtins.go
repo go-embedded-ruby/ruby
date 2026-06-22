@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -201,6 +200,7 @@ func (vm *VM) bootstrap() {
 	exc("NotImplementedError", "StandardError")
 	exc("FrozenError", "RuntimeError")
 	exc("IOError", "StandardError")
+	exc("EOFError", "IOError")
 	exc("RegexpError", "StandardError")
 	exc("NoMatchingPatternError", "StandardError")
 	exc("NoMatchingPatternKeyError", "NoMatchingPatternError")
@@ -212,6 +212,7 @@ func (vm *VM) bootstrap() {
 	exc("LoadError", "ScriptError")
 
 	vm.registerFile()   // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerIO()     // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
 	vm.registerZlib()   // needs the exception hierarchy (Zlib::Error < StandardError)
 	vm.registerFiber()  // needs the exception hierarchy (FiberError < StandardError)
 	vm.registerThread() // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
@@ -2004,44 +2005,26 @@ func arrayIndex(a *object.Array, i int64) (int, bool) {
 	return int(i), true
 }
 
+// Kernel#puts/print/p write through the current $stdout (an IOObj), so a host
+// or program that reassigns $stdout — e.g. to a StringIO — captures the output,
+// as in MRI. The puts array-flattening/newline logic lives in io.go (ioPuts).
 func nativePuts(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-	if len(args) == 0 {
-		fmt.Fprintln(vm.out)
-		return object.NilV
-	}
-	for _, a := range args {
-		putsValue(vm, a)
-	}
+	ioPuts(vm.curStdout(), args)
 	return object.NilV
 }
 
-// putsValue prints one value the way Kernel#puts does: arrays are flattened (an
-// empty array prints nothing), everything else prints its to_s plus a newline.
-func putsValue(vm *VM, v object.Value) {
-	if arr, ok := v.(*object.Array); ok {
-		for _, e := range arr.Elems {
-			putsValue(vm, e)
-		}
-		return
-	}
-	// puts does not double a trailing newline already present in the string.
-	if s := v.ToS(); strings.HasSuffix(s, "\n") {
-		fmt.Fprint(vm.out, s)
-	} else {
-		fmt.Fprintln(vm.out, s)
-	}
-}
-
 func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	o := vm.curStdout()
 	for _, a := range args {
-		fmt.Fprint(vm.out, a.ToS())
+		o.writeStr(a.ToS())
 	}
 	return object.NilV
 }
 
 func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	o := vm.curStdout()
 	for _, a := range args {
-		fmt.Fprintln(vm.out, a.Inspect())
+		o.writeStr(a.Inspect() + "\n")
 	}
 	switch len(args) {
 	case 0:

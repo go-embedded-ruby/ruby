@@ -12,7 +12,8 @@ import (
 // bareVM builds a bootstrapped VM without loading the prelude, so prelude
 // loader behaviour can be exercised in isolation.
 func bareVM() *VM {
-	vm := &VM{out: io.Discard, main: object.NewMain(), consts: map[string]object.Value{}}
+	vm := &VM{out: io.Discard, errOut: io.Discard, main: object.NewMain(),
+		consts: map[string]object.Value{}, globals: map[string]object.Value{}, loaded: map[string]bool{}}
 	vm.bootstrap()
 	return vm
 }
