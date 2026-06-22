@@ -85,8 +85,13 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 - **Standard library leaves:** **`JSON`** (`generate`/`dump`/`pretty_generate`/
   `parse` + `Object#to_json`, with object key order preserved and MRI-matching
   number/escape formatting), **`Digest`** (`MD5`/`SHA1`/`SHA256`/`SHA512` —
-  `hexdigest`/`digest`/`base64digest`) and **`Base64`** — each `require`-able and
-  pure-Go.
+  `hexdigest`/`digest`/`base64digest`), **`Base64`**, and **`Zlib`** (`crc32`/
+  `adler32` + `Deflate`/`Inflate`) — each `require`-able and pure-Go.
+- **File & Random:** **`File`** — path helpers (`basename`/`dirname`/`extname`/
+  `join`/`split`/`expand_path`) and filesystem ops (`read`/`write`/`exist?`/
+  `file?`/`directory?`/`size`/`delete`), raising `Errno::ENOENT` for missing
+  paths; **`Random`** — a bit-exact reimplementation of MRI's seeded MT19937, so
+  `Random.new(seed)` / `srand`+`rand` reproduce MRI's sequence.
 - **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/…)
   and `Comparable`, both written once in embedded Ruby; Array **bang methods**
   (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`);
@@ -95,7 +100,13 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `each_slice`/`each_cons`/`each_with_index`/`times`/`upto`/`each_char`/…) returns
   an `Enumerator` (MRI semantics) with `next`/`peek`/`rewind`/`size`/`to_a`,
   `with_index`/`each_with_index`, `Kernel#enum_for`/`to_enum`, and full
-  `Enumerable` chaining (`[1,2,3].map.with_index { |x, i| … }`).
+  `Enumerable` chaining (`[1,2,3].map.with_index { |x, i| … }`); plus
+  **`Enumerator::Lazy`** (`lazy`) — deferred `map`/`select`/`reject`/`filter_map`/
+  `take`/`take_while`/`drop`/`drop_while` over finite or **infinite**
+  (`(1..Float::INFINITY).lazy`) sources, materialised by `first`/`to_a`/`force`.
+- **Numeric tower:** `Integer`/`Float`/`Rational`/`Complex` under a shared
+  `Numeric` (carrying `Comparable`); `Module#ancestors`/`include?`,
+  `Class#superclass`.
 - **Objects:** `dup`/`clone`/`freeze`/`frozen?`, `equal?`,
   `instance_variable_get`/`set`.
 - **Math:** the `Math` module (`sqrt`/`cbrt`/`exp`/`log`/`log2`/`log10`, the
