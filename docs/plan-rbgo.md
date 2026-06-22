@@ -76,7 +76,7 @@ ruby/
     builtin/           Kernel/Object/Module/BasicObject + metaprogramming floor
     fiber/             Fiber ↔ goroutine bridge
     encoding/          String encodings (UTF-8, ASCII-8BIT, transcoding)
-    regexp/            adapter onto the standalone go-onigmo/regexp module
+    regexp/            adapter onto the standalone go-ruby-regexp/regexp module
     loader/            require resolution over embedded FS + bytecode cache
     stdlib/
       ruby/            upstream *.rb embedded (comparable.rb, enumerable.rb, set.rb, …) via //go:embed
@@ -549,7 +549,7 @@ IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
 pure-Ruby libs; implement Go leaves (json, digest, zlib, securerandom, base64).
 Run upstream suites.
 
-**Regexp bridge — 🚧 landed (6a–6d):** the `go-onigmo/regexp` engine is wired in
+**Regexp bridge — 🚧 landed (6a–6d):** the `go-ruby-regexp/regexp` engine is wired in
 (CGO=0).
 - **6a** — `/re/imx` literals (lexer disambiguates `/` via the value/operand
   state), the `=~` operator, a vm-level `Regexp` value + `cRegexp`
@@ -565,11 +565,11 @@ Run upstream suites.
 - **6d** — `String#split` over a Regexp: interpolated captures, field `limit`,
   and the awk-style whitespace mode (no arg / `nil` / `" "`).
 
-**Byte vs character offsets:** go-onigmo reports **byte** offsets, while Ruby's
+**Byte vs character offsets:** go-ruby-regexp reports **byte** offsets, while Ruby's
 `MatchData#begin`/`#end` and `=~` report **character** offsets; the bridge
 converts (`byteToChar`). Matched substrings are representation-independent.
 Differential-tested against MRI (Ruby 4.0.5): offset-exact on ASCII, substring
-comparison for multibyte. Since go-onigmo's encoding-aware cursor (engine
+comparison for multibyte. Since go-ruby-regexp's encoding-aware cursor (engine
 `b6bfa2d`), a bare `.` and the byte-oriented classes advance by a whole UTF-8
 **character** in the default UTF-8 mode, so `/./` matches `é` and
 `"café".scan(/./)` yields four characters — matching MRI. (Literal multi-byte
@@ -594,7 +594,7 @@ native codegen.)
 | Risk | Severity | Mitigation |
 |---|---|---|
 | **Parser scope / front-end effort** | **Highest** | Subset-first + oracle; **evaluate Prism→WASM on wazero (§16)** to delete most risk; test-driven growth |
-| **Regexp** (Onigmo vs RE2: no backrefs/lookbehind in Go `regexp`) | High | Pure-Go Onigmo reimpl., standalone module (`go-onigmo/regexp`); ReDoS via memoization + timeout |
+| **Regexp** (Onigmo vs RE2: no backrefs/lookbehind in Go `regexp`) | High | Pure-Go Onigmo reimpl., standalone module (`go-ruby-regexp/regexp`); ReDoS via memoization + timeout |
 | **Native-frame unwinding** at the Go↔Ruby callback boundary | High | Hybrid: status returns internally + `panic`/`recover` at native callbacks; design in Phase 1 |
 | **String/encodings** (mutable, multi-encoding) | High | `[]byte`+encoding tag from Phase 2; incremental transcoding |
 | **Value boxing vs Go GC** (no MRI-style immediates) | High | Position as embedding-not-speed; split Fixnum/Bignum + fixnum cache early; inline caches Phase 8 |
@@ -610,8 +610,8 @@ native codegen.)
    interface first; accept the perf positioning.*
 2. **Regexp engine** — *settled* → **pure-Go reimplementation of Onigmo**
    (Ruby's engine), faithful backtracking VM, as a **standalone reusable Go
-   module** in the sibling org `go-onigmo` (repo `regexp`; see
-   `go-onigmo/regexp/docs/plan-regexp.md`). ReDoS handled by memoization +
+   module** in the sibling org `go-ruby-regexp` (repo `regexp`; see
+   `go-ruby-regexp/regexp/docs/plan-regexp.md`). ReDoS handled by memoization +
    `Regexp.timeout` (as Ruby ≥3.2).
 3. **Front-end strategy** — *OPEN* → hand-written lexer/parser (learning goal,
    full control) **vs Prism→WASM under pure-Go wazero** (production-grade,
@@ -656,7 +656,7 @@ minimal `lexState` from the start) · `oracle`-style fixtures · `ast/` · `pars
 | Execution model | AST-walking | **Bytecode VM** + embedded front-end |
 | Single binary / tree-shaking | No | **Yes** (build-time selection, build tags) |
 | Dynamic `eval`/`require` | No | **Yes** (embedded front-end) |
-| Regexp | Absent | **Pure-Go Onigmo** (`go-onigmo/regexp`) |
+| Regexp | Absent | **Pure-Go Onigmo** (`go-ruby-regexp/regexp`) |
 | Stdlib strategy | — | Go core + embedded Ruby |
 | Compatibility target | Partial subset | **Ruby 4.0 semantics**, test-driven growth |
 
@@ -668,5 +668,5 @@ from the compiler onward.
 - Org **`go-embedded-ruby`** (consistent with the `go-*` org convention;
   "embedded" names the zero-cgo embeddability USP better than a bare name). Main
   repo **`ruby`** (module `github.com/go-embedded-ruby/ruby`), CLI **`rbgo`**.
-- Regexp engine in its own org **`go-onigmo`**, repo **`regexp`** — reusable
+- Regexp engine in its own org **`go-ruby-regexp`**, repo **`regexp`** — reusable
   beyond Ruby.

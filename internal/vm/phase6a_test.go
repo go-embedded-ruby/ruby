@@ -8,7 +8,7 @@ import (
 // Phase 6a: Regexp literals, the Regexp class, MatchData, and the String
 // regex-matching methods (=~, match, match?). Behaviour is pinned against MRI
 // (Ruby 4.0). Offsets are character-based (Ruby semantics); the underlying
-// go-onigmo engine reports byte offsets which this package converts.
+// go-ruby-regexp engine reports byte offsets which this package converts.
 
 func TestRegexpBasics(t *testing.T) {
 	tests := []struct{ name, src, want string }{

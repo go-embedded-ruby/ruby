@@ -12,8 +12,8 @@ require (
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
 	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
-	github.com/go-onigmo/regexp v0.0.0-20260615223128-d636c03e5b82
 	github.com/go-ruby-parser/parser v0.0.0-20260621220101-d8d7312d4e78
+	github.com/go-ruby-regexp/regexp v0.0.0-20260622075631-3a277cf71b81
 )
 
 require (

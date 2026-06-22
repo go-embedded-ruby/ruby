@@ -80,7 +80,7 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 - **Regular expressions:** `/re/imx` literals, `Regexp`/`MatchData`, `=~` /
   `match` / `match?` / `scan` / `gsub` / `sub` / `split`, and the match globals
   `$~` / `$1`..`$N` / `$&` / `` $` `` / `$'` — running on the standalone pure-Go
-  [go-onigmo](https://github.com/go-onigmo/regexp) engine, so the build stays
+  [go-ruby-regexp](https://github.com/go-ruby-regexp/regexp) engine, so the build stays
   **CGO=0**.
 - **Standard library leaves:** **`JSON`** (`generate`/`dump`/`pretty_generate`/
   `parse` + `Object#to_json`, with object key order preserved and MRI-matching
@@ -238,7 +238,7 @@ See **[docs/plan-rbgo.md](docs/plan-rbgo.md)** for the full architecture, the
 9-phase plan (Phase 0 vertical slice → Phase 8 conformance & performance), the
 risk register, and the decision journal. The regexp engine is developed
 separately as a pure-Go reimplementation of Onigmo in
-[go-onigmo/regexp](https://github.com/go-onigmo/regexp).
+[go-ruby-regexp/regexp](https://github.com/go-ruby-regexp/regexp).
 
 ## License
 

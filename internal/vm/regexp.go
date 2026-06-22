@@ -5,15 +5,15 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	onig "github.com/go-onigmo/regexp"
+	onig "github.com/go-ruby-regexp/regexp"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// Regexp is a compiled Ruby regular expression. It wraps the pure-Go go-onigmo
+// Regexp is a compiled Ruby regular expression. It wraps the pure-Go go-ruby-regexp
 // engine so the interpreter stays CGO-free. flags holds the subset of the flag
 // letters i, m, x that were present on the literal, in that canonical order.
 //
-// Byte-vs-character offsets: go-onigmo reports BYTE offsets, but Ruby's
+// Byte-vs-character offsets: go-ruby-regexp reports BYTE offsets, but Ruby's
 // MatchData#begin/#end and String#=~ report CHARACTER offsets. The conversion
 // happens in this package (byteToChar); matched substrings are
 // representation-independent and are returned verbatim.
@@ -53,7 +53,7 @@ func orderFlags(flags string) string {
 	return out
 }
 
-// MatchData is the result of a successful match: it wraps the go-onigmo
+// MatchData is the result of a successful match: it wraps the go-ruby-regexp
 // MatchData and remembers the subject string and source Regexp (for named
 // captures and offset conversion).
 type MatchData struct {
@@ -99,7 +99,7 @@ func indexToName(m *MatchData) map[int]string {
 }
 
 // compileRegexp builds a Regexp value from a literal's source and flag letters,
-// translating the Ruby flags to an inline (?imx) prefix that go-onigmo accepts.
+// translating the Ruby flags to an inline (?imx) prefix that go-ruby-regexp accepts.
 func (vm *VM) compileRegexp(source, flags string) object.Value {
 	prefix := ""
 	if imx := sortIMX(flags); imx != "" {

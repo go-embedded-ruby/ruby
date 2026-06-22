@@ -3,7 +3,7 @@ package vm_test
 import "testing"
 
 // TestRegexpDotCharAdvance covers the engine's UTF-8 char-advancing dot (since
-// the go-onigmo encoding-aware cursor): a bare `.` consumes a whole character.
+// the go-ruby-regexp encoding-aware cursor): a bare `.` consumes a whole character.
 func TestRegexpDotCharAdvance(t *testing.T) {
 	tests := []struct{ name, src, want string }{
 		{"dot_matches_char", `p("é" =~ /./)`, "0\n"},
@@ -23,7 +23,7 @@ func TestRegexpDotCharAdvance(t *testing.T) {
 }
 
 // TestRegexpMultibyteClassMembers covers literal non-ASCII character-class
-// members (since the go-onigmo multibyte-class release): [é]/[à-ï] match code
+// members (since the go-ruby-regexp multibyte-class release): [é]/[à-ï] match code
 // points, and mixed ASCII/non-ASCII classes combine.
 func TestRegexpMultibyteClassMembers(t *testing.T) {
 	tests := []struct{ name, src, want string }{
