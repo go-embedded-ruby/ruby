@@ -5,7 +5,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
-[![Phase](https://img.shields.io/badge/phases-1--7%20active-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
+[![Phase](https://img.shields.io/badge/phases-1--8%20active-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
 
 **A pure-Go implementation of Ruby — one static binary, full dynamism, zero cgo.**
 
@@ -195,9 +195,11 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   is no front-end left to compile source at runtime.
 
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
-riscv64, loong64, ppc64le, s390x) and three OSes. With closed-world builds in
-place, the [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) work that
-remains is conformance and representation/perf tuning (Phase 8).
+riscv64, loong64, ppc64le, s390x) and three OSes. Phase 8 (conformance and
+representation/perf tuning) is now under way: small-integer interning and
+capture-tracked frame-environment recycling have cut call-path allocations (a
+small-int loop from ~245k allocations to 1; recursion's call allocations halved,
+~14% faster). See the [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
 
 ## Quick start
 
