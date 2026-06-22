@@ -208,6 +208,8 @@ func (vm *VM) bootstrap() {
 	exc("SyntaxError", "ScriptError")
 	exc("LoadError", "ScriptError")
 
+	vm.registerFile() // needs the exception hierarchy (Errno::ENOENT < StandardError)
+
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
 	cException.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
