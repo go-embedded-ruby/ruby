@@ -459,6 +459,20 @@ func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
 			args = arr.Elems
 		}
 	}
+	if p.iseq.SplatIndex >= 0 {
+		// A *rest block param has variable arity: pad up to the required
+		// positionals, then pass every argument through so exec's splat binding
+		// collects the rest (instead of the fixed-arity truncation below).
+		if len(args) < p.iseq.NumRequired {
+			padded := make([]object.Value, p.iseq.NumRequired)
+			copy(padded, args)
+			for i := len(args); i < len(padded); i++ {
+				padded[i] = object.NilV
+			}
+			args = padded
+		}
+		return args
+	}
 	bargs := make([]object.Value, np)
 	for i := range bargs {
 		if i < len(args) {

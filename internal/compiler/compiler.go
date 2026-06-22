@@ -648,6 +648,12 @@ func (c *Compiler) compileHashWithSplat(v *ast.HashLit) {
 func (c *Compiler) compileBlock(blk *ast.Block) int {
 	parent := c.cur()
 	c.push(newBlockBuilder("<block>", blk.Params, parent))
+	if blk.SplatIndex >= 0 {
+		// A top-level *rest block param lowers like a method's *splat: the splat
+		// and everything after it are not required.
+		c.cur().splatIndex = blk.SplatIndex
+		c.cur().numRequired = blk.SplatIndex
+	}
 	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
 	c.compileBody(blk.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
