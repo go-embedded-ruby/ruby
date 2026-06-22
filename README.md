@@ -113,6 +113,9 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `pos`/`seek`/`rewind`/`truncate`/`eof?`/`string`), and `Kernel#warn`.
   `Kernel#puts`/`print`/`p` write through the current `$stdout`, so reassigning
   it to a `StringIO` captures output, as in MRI.
+- **`Dir`:** `entries`/`children`/`glob`/`[]`, `exist?`/`empty?`, `pwd`/`home`,
+  `mkdir`/`rmdir`/`chdir` (block-scoped), `each_child`/`foreach`, raising
+  `Errno::ENOENT`/`Errno::EEXIST` as MRI does.
 - **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/…)
   and `Comparable`, both written once in embedded Ruby; Array **bang methods**
   (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`);
@@ -182,7 +185,7 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(`Dir`/file streams, `Binding`, the `rbgo build` toolchain).
+(file streams via `File.open`, `Binding`, the `rbgo build` toolchain).
 
 ## Quick start
 

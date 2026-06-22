@@ -213,6 +213,7 @@ func (vm *VM) bootstrap() {
 
 	vm.registerFile()   // needs the exception hierarchy (Errno::ENOENT < StandardError)
 	vm.registerIO()     // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
+	vm.registerDir()    // Dir (reuses the Errno module set up by registerFile)
 	vm.registerZlib()   // needs the exception hierarchy (Zlib::Error < StandardError)
 	vm.registerFiber()  // needs the exception hierarchy (FiberError < StandardError)
 	vm.registerThread() // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
