@@ -122,6 +122,39 @@ type VM struct {
 	currentThread *RThread   // the thread holding the GVL
 	mainThread    *RThread   // the root thread
 	threads       []*RThread // all live threads, for Thread.list (GVL-guarded)
+
+	// envFree recycles per-call frame environments. exec checks one out at entry
+	// and returns it at normal exit unless a closure captured it (see Env.captured
+	// / markEnvCaptured). Touched only while the GVL is held, so it needs no lock.
+	envFree []*Env
+}
+
+// envFreeMax caps the env free-list so a deep call burst doesn't pin memory.
+const envFreeMax = 1024
+
+// getEnv returns a recycled frame env, or a fresh one if the free-list is empty.
+func (vm *VM) getEnv() *Env {
+	n := len(vm.envFree)
+	if n == 0 {
+		return &Env{}
+	}
+	e := vm.envFree[n-1]
+	vm.envFree = vm.envFree[:n-1]
+	return e
+}
+
+// putEnv returns an env to the free-list, but only if no closure captured it (so
+// recycling can never alias a live env) and the list has room. References are
+// cleared so a pooled env pins nothing for the GC.
+func (vm *VM) putEnv(e *Env) {
+	if e.captured || len(vm.envFree) >= envFreeMax {
+		return
+	}
+	e.parent = nil
+	e.kwargs = nil
+	e.slots = nil
+	e.inline = [4]object.Value{}
+	vm.envFree = append(vm.envFree, e)
 }
 
 // New returns a VM writing program output to out.
@@ -236,7 +269,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		}
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %s)", len(args), expected)
 	}
-	env := &Env{parent: parentEnv, kwargs: kwargs}
+	env := vm.getEnv()
+	env.parent, env.kwargs, env.captured = parentEnv, kwargs, false
 	if iseq.NumLocals <= len(env.inline) {
 		env.slots = env.inline[:iseq.NumLocals]
 	} else {
@@ -498,6 +532,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						push(vm.dispatchSend(recv, name, callArgs, nil))
 					} else {
 						// A literal block: capture this frame's env, self, block.
+						markEnvCaptured(env)
 						blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
 						push(vm.dispatchSend(recv, name, callArgs, blk))
 					}
@@ -568,6 +603,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				case bytecode.OpBlockGiven:
 					push(object.Bool(block != nil))
 				case bytecode.OpBinding:
+					markEnvCaptured(env)
 					push(&Binding{env: env, self: self, definee: definee, names: append([]string(nil), iseq.Locals...)})
 				case bytecode.OpArgGiven:
 					push(object.Bool(in.A < len(args)))
@@ -650,6 +686,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					recv := pop()
 					var blk *Proc
 					if in.C > 0 {
+						markEnvCaptured(env)
 						blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
 					}
 					push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
@@ -666,6 +703,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			finished = true
 		}()
 	}
+	// Recycle this frame's env on normal completion (putEnv is a no-op if a
+	// closure captured it). An exception unwinding past here skips recycling and
+	// leaves the env to the GC — correct, just not pooled.
+	vm.putEnv(env)
 	return result
 }
 

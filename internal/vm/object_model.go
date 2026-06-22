@@ -20,6 +20,22 @@ type Env struct {
 	parent *Env
 	kwargs *object.Hash    // keyword arguments bound for this frame (nil if none)
 	inline [4]object.Value // backs slots for the common small-frame case (no 2nd alloc)
+	// captured is set when a Proc or Binding closes over this env (or a lexical
+	// descendant whose chain reaches it), meaning the env outlives its frame and
+	// must NOT be returned to the env free-list when exec finishes. A frame that
+	// creates no escaping closure (e.g. plain recursion like fib) stays false and
+	// is recycled. See markEnvCaptured.
+	captured bool
+}
+
+// markEnvCaptured marks e and its lexical ancestors as captured, so none of them
+// is recycled. Block envs chain to their defining env, so a closure created deep
+// inside nested blocks pins the whole enclosing chain; method envs have no parent
+// and stop the walk.
+func markEnvCaptured(e *Env) {
+	for ; e != nil && !e.captured; e = e.parent {
+		e.captured = true
+	}
 }
 
 // ancestor returns the env depth levels up the parent chain.
