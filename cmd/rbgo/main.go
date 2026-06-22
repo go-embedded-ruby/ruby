@@ -1,4 +1,10 @@
+//go:build !rbgo_closed
+
 // Command rbgo is the CLI front-end for the embedded-ruby interpreter.
+//
+// A closed-world binary (produced by `rbgo build --closed`) instead uses the
+// generated main in closed_main.go, which runs a single embedded program with no
+// front-end linked — so this CLI is excluded from that build.
 //
 //	rbgo run <file.rb>            compile in memory and interpret
 //	rbgo run -e "<code>"          run a one-liner

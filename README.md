@@ -187,10 +187,17 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `fib(30)` runs **~4× faster than MRI+YJIT** while staying correct for every
   input. See [docs/aot-compiler.md](docs/aot-compiler.md).
 
+- **Closed-world binary (`rbgo build --closed`):** bakes the whole program in as
+  bytecode (and loads the prelude from frozen bytecode), then **drops the
+  lexer/parser/compiler** from the link. The result runs with no source file and
+  no front-end — a smaller, self-contained binary. `rbgo build` reports which
+  `eval`/`require` calls (if any) would raise in the closed binary, since there
+  is no front-end left to compile source at runtime.
+
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
-riscv64, loong64, ppc64le, s390x) and three OSes. See the
-[roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(the closed-world `rbgo build` toolchain).
+riscv64, loong64, ppc64le, s390x) and three OSes. With closed-world builds in
+place, the [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) work that
+remains is conformance and representation/perf tuning (Phase 8).
 
 ## Quick start
 
@@ -220,6 +227,10 @@ go build -o rbgo ./cmd/rbgo
 # AOT-compile a program's methods to native code and link a specialised binary
 ./rbgo build -o fib fib.rb                    # fib (the method) becomes native int64
 ./fib fib.rb                                  # => 6765
+
+# closed-world: bake the program in as bytecode and drop the front-end
+./rbgo build --closed -o fib fib.rb           # no lexer/parser/compiler linked
+./fib                                          # => 6765  (runs with no source file)
 ```
 
 ### Browser playground (WebAssembly)
@@ -238,15 +249,17 @@ See [web/README.md](web/README.md) for the JS bridge (`rbgoEval`, `rbgoImage`).
 ## Layout
 
 ```
-cmd/rbgo/            CLI: run, build (repl arrives later)
+cmd/rbgo/            CLI: run, build (+ build --closed; repl arrives later)
 cmd/wasm/            GOOS=js GOARCH=wasm front-end (see web/) + native build stub
 cmd/aotgen/          regenerates the AOT differential suite (go:generate)
+cmd/freeze-prelude/  regenerates the frozen prelude bytecode (go:generate)
 web/                 browser playground: index.html, build.sh (rbgoEval/rbgoImage)
 internal/
   compiler/          AST → bytecode (ISeq), local-slot resolution
   bytecode/          instruction set + ISeq
   vm/                stack-machine interpreter, arithmetic, builtins
-  aot/               AOT compiler: bytecode → Go (level-1 + level-3 kernels)
+                     (front-end isolated behind the rbgo_closed build tag)
+  aot/               AOT compiler: bytecode → Go (level-1/3 kernels, FreezeISeq)
   object/            Value interface + concrete value types
 docs/                plan-rbgo.md (the roadmap), aot-compiler.md
 ```

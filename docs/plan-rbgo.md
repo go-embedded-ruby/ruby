@@ -524,9 +524,14 @@ machinery, hooks (`included`/`inherited`/`method_added`/…),
 `Integer`/`Float`/`String`/`Array` (capitalized `Name(...)` now parses as a call).
 **Landed:** **string `eval`** — `Kernel#eval(str)` compiles and runs Ruby at
 runtime against the caller's `self` (sees `self`/ivars/methods/constants; `def`
-lands in the caller's context; fresh local scope — Binding/local capture is the
-remaining piece). Parse/compile errors raise `SyntaxError` (now under
-`ScriptError`→`Exception`, not `StandardError`); non-String arg → `TypeError`.
+lands in the caller's context; fresh local scope). Parse/compile errors raise
+`SyntaxError` (now under `ScriptError`→`Exception`, not `StandardError`);
+non-String arg → `TypeError`. **`Binding`** — `binding` captures the live frame
+(`OpBinding`: env/self/definee + the ISeq's local names); `Binding#eval(str)` and
+`eval(str, binding)` compile the string as a child block scope seeded with the
+binding's locals, so eval'd code reads and writes them (locals it newly
+introduces are scratch). Plus `local_variable_get`/`set`/`defined?`,
+`local_variables` (MRI's injected-first ordering) and `receiver`.
 **Class/module hooks** — `inherited` (on subclassing), `included` (on `include`)
 and `method_added` (per instance-method def), each looked up as a singleton
 method so it fires only when defined. (`extended`/`prepended` wait on
@@ -583,6 +588,20 @@ The `$~`/`$1`..`$N`/`$&`/`` $` ``/`$'` match globals are now supported
 ### Phase 7 — Build toolchain
 `rbgo build`, require-graph scan, selection (build tags), `//go:embed`, single
 static binary, closed-world mode.
+
+**Landed.** AOT method compilation (see [aot-compiler.md](aot-compiler.md)) plus
+**closed-world builds**: `rbgo build --closed` freezes the program's compiled
+bytecode to Go literals (`internal/aot.FreezeISeq`), injects it via `go build
+-overlay`, and builds under the `rbgo_closed` tag. That tag drops the
+lexer/parser/compiler from the link — the front-end is isolated behind a single
+`parseCompileFn` seam (frontend_open.go / frontend_closed.go), `eval`/`require`
+of source raise `NotImplementedError`, `Binding#eval` is stubbed, and the prelude
+loads from its frozen bytecode (`embeddedPrelude`, kept in sync with prelude.rb by
+a deep-equal drift test) instead of being parsed at startup. A require-graph scan
+(`internal/aot.FrontendUses`) reports any `eval`/`require` the program makes so the
+user knows what would raise. The result: a smaller, self-contained binary that
+runs with no source file. (Future: finer per-class stdlib tree-shaking beyond the
+front-end.)
 
 ### Phase 8 — Conformance & performance
 ruby/spec subset; optimisations: dispatch **inline caches** (key = class), fixnum

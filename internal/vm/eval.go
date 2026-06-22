@@ -1,9 +1,6 @@
 package vm
 
 import (
-	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-ruby-parser/parser"
-
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -28,11 +25,7 @@ func (vm *VM) registerEval() {
 		if !ok {
 			return raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
 		}
-		prog, perr := parser.Parse(string(s.B))
-		if perr != nil {
-			return raise("SyntaxError", "%s", perr.Error())
-		}
-		iseq, cerr := compiler.Compile(prog)
+		iseq, cerr := parseCompileFn(string(s.B))
 		if cerr != nil {
 			return raise("SyntaxError", "%s", cerr.Error())
 		}

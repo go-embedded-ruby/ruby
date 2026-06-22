@@ -134,7 +134,7 @@ func New(out io.Writer) *VM {
 	vm.currentThread = vm.mainThread
 	vm.threads = []*RThread{vm.mainThread}
 	vm.bootstrap()
-	vm.loadPrelude(preludeSource)
+	vm.installPrelude()
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
 	return vm

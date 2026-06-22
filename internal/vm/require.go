@@ -5,9 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-ruby-parser/parser"
-
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -75,11 +72,7 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		if vm.loaded[abs] {
 			return object.Bool(false)
 		}
-		prog, perr := parser.Parse(string(src))
-		if perr != nil {
-			return raise("SyntaxError", "%s", perr.Error())
-		}
-		iseq, cerr := compiler.Compile(prog)
+		iseq, cerr := parseCompileFn(string(src))
 		if cerr != nil {
 			return raise("SyntaxError", "%s", cerr.Error())
 		}

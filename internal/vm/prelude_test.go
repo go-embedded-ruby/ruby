@@ -1,3 +1,5 @@
+//go:build !rbgo_closed
+
 package vm
 
 import (
