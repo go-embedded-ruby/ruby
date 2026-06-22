@@ -39,6 +39,14 @@ func BenchmarkLoopSum(b *testing.B) {
 	benchProgram(b, "s = 0\ni = 0\nwhile i < 300000\n  s += i\n  i += 1\nend")
 }
 
+// BenchmarkSmallIntLoop is arithmetic-bound on small integers (counters and a
+// modulo that stay within the interned range). It pins the small-integer cache
+// win: with interning the inner loop allocates nothing; without it, every `+`/`%`
+// boxes a fresh Integer (~250k allocs here).
+func BenchmarkSmallIntLoop(b *testing.B) {
+	benchProgram(b, "r = 0\no = 0\nwhile o < 1000\n  i = 0\n  while i < 500\n    i += 1\n    r = i % 7\n  end\n  o += 1\nend")
+}
+
 func BenchmarkBlockEach(b *testing.B) {
 	benchProgram(b, "t = 0\n100000.times { |i| t += i }")
 }

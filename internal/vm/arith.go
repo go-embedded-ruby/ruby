@@ -228,29 +228,29 @@ func intOp(op bytecode.Op, a, b int64) object.Value {
 	switch op {
 	case bytecode.OpAdd:
 		if c := a + b; (c >= a) == (b >= 0) { // no signed overflow
-			return object.Integer(c)
+			return object.IntValue(c)
 		}
 		return object.NormInt(new(big.Int).Add(big.NewInt(a), big.NewInt(b)))
 	case bytecode.OpSub:
 		if c := a - b; (c <= a) == (b >= 0) {
-			return object.Integer(c)
+			return object.IntValue(c)
 		}
 		return object.NormInt(new(big.Int).Sub(big.NewInt(a), big.NewInt(b)))
 	case bytecode.OpMul:
 		if c := a * b; a == 0 || (c/a == b && !(a == -1 && b == minInt64)) {
-			return object.Integer(c)
+			return object.IntValue(c)
 		}
 		return object.NormInt(new(big.Int).Mul(big.NewInt(a), big.NewInt(b)))
 	case bytecode.OpDiv:
 		if b == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return object.Integer(floorDiv(a, b))
+		return object.IntValue(floorDiv(a, b))
 	case bytecode.OpMod:
 		if b == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return object.Integer(floorMod(a, b))
+		return object.IntValue(floorMod(a, b))
 	case bytecode.OpLt:
 		return object.Bool(a < b)
 	case bytecode.OpGt:

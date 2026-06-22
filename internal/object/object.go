@@ -46,7 +46,7 @@ func (b *Bignum) Truthy() bool    { return true }
 // that shrinks back into range demotes automatically.
 func NormInt(z *big.Int) Value {
 	if z.IsInt64() {
-		return Integer(z.Int64())
+		return IntValue(z.Int64())
 	}
 	return &Bignum{I: z}
 }
