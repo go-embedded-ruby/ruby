@@ -39,7 +39,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 - **Control flow:** `if`/`elsif`/`else`, `unless`, `while`/`until`,
   `case`/`when`, statement modifiers (incl. modifier `rescue`,
   `expr rescue fallback`), `begin`/`rescue`/`else`/`ensure`/`retry`,
-  `break`/`next`, `Kernel#loop`.
+  `break`/`next`, `Kernel#loop`, and **`Fiber`** (cooperative coroutines —
+  `Fiber.new`/`resume`/`Fiber.yield`/`alive?`).
 - **Pattern matching (`case`/`in`):** value, variable-binding, class/constant,
   array (incl. splat and nested), hash (`deconstruct_keys`, `**rest`/`**nil`),
   find (`[*pre, x, *post]`), pin (`^x`) and alternative (`a | b`) patterns;
@@ -161,7 +162,7 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(Fiber/lazy enumerators).
+(`Thread`, `Marshal`, fuller `IO`).
 
 ## Quick start
 
