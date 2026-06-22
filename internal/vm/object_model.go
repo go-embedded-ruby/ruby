@@ -73,6 +73,7 @@ type RClass struct {
 	consts   map[string]object.Value
 	cvars    map[string]object.Value // class variables (@@name), shared down the hierarchy
 	includes []*RClass               // modules mixed in via include (most recent last)
+	prepends []*RClass               // modules mixed in via prepend (most recent last), ahead of own methods
 	isModule bool
 }
 
@@ -173,6 +174,13 @@ func lookupSMethod(c *RClass, name string) *Method {
 }
 
 func lookupOwnOrIncluded(c *RClass, name string) *Method {
+	// Prepended modules take priority over the class's own methods; own methods
+	// take priority over included modules (Ruby's ancestor order).
+	for i := len(c.prepends) - 1; i >= 0; i-- {
+		if m := lookupOwnOrIncluded(c.prepends[i], name); m != nil {
+			return m
+		}
+	}
 	if m, ok := c.methods[name]; ok {
 		return m
 	}
@@ -182,6 +190,42 @@ func lookupOwnOrIncluded(c *RClass, name string) *Method {
 		}
 	}
 	return nil
+}
+
+// ancestors returns c's method-resolution order: for each class up the
+// superclass chain, its prepended modules (most-recent first) before the class
+// itself, then its included modules — every module expanded for its own
+// prepends/includes, and each ancestor appearing once (first occurrence wins).
+// This is the basis of both Module#ancestors and super.
+func (vm *VM) ancestors(c *RClass) []*RClass {
+	var out []*RClass
+	seen := map[*RClass]bool{}
+	push := func(k *RClass) {
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	var addTree func(m *RClass)
+	addTree = func(m *RClass) {
+		for i := len(m.prepends) - 1; i >= 0; i-- {
+			addTree(m.prepends[i])
+		}
+		push(m)
+		for i := len(m.includes) - 1; i >= 0; i-- {
+			addTree(m.includes[i])
+		}
+	}
+	for k := c; k != nil; k = k.super {
+		for i := len(k.prepends) - 1; i >= 0; i-- {
+			addTree(k.prepends[i])
+		}
+		push(k)
+		for i := len(k.includes) - 1; i >= 0; i-- {
+			addTree(k.includes[i])
+		}
+	}
+	return out
 }
 
 // classOf returns the dynamic class of any value — the basis of dispatch.

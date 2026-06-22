@@ -37,11 +37,18 @@ func (vm *VM) bootstrap() {
 	vm.cRegexp = newClass("Regexp", vm.cObject)
 	vm.cMatchData = newClass("MatchData", vm.cObject)
 
+	// Kernel is a module included into Object — its methods are defined directly
+	// on Object below, but modelling the module makes it appear in ancestors and
+	// satisfies is_a?(Kernel)/Object.include?(Kernel), as in MRI.
+	kernel := newClass("Kernel", nil)
+	kernel.isModule = true
+	vm.cObject.includes = append(vm.cObject.includes, kernel)
+
 	for _, c := range []*RClass{
 		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
 		vm.cFloat, vm.cComplex, vm.cRational, vm.cString, vm.cSymbol, vm.cArray, vm.cHash, vm.cRange,
 		vm.cProc, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
-		vm.cRegexp, vm.cMatchData,
+		vm.cRegexp, vm.cMatchData, kernel,
 	} {
 		vm.consts[c.name] = c
 	}
@@ -358,6 +365,39 @@ func (vm *VM) bootstrap() {
 			}
 		}
 		return target
+	})
+	vm.cModule.define("prepend", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		target := self.(*RClass)
+		for _, a := range args {
+			mod := a.(*RClass)
+			target.prepends = append(target.prepends, mod)
+			// Hook: module.prepended(base), mirroring included.
+			if hook := lookupSMethod(mod, "prepended"); hook != nil {
+				vm.invoke(hook, mod, []object.Value{target}, nil)
+			}
+		}
+		return target
+	})
+	vm.cModule.define("ancestors", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		anc := vm.ancestors(self.(*RClass))
+		out := make([]object.Value, len(anc))
+		for i, k := range anc {
+			out[i] = k
+		}
+		return &object.Array{Elems: out}
+	})
+	vm.cModule.define("include?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod, ok := args[0].(*RClass)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
+		}
+		me := self.(*RClass)
+		for _, k := range vm.ancestors(me) {
+			if k == mod && k != me { // a module never includes itself
+				return object.Bool(true)
+			}
+		}
+		return object.Bool(false)
 	})
 	vm.cModule.define("attr_reader", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		defineAttrs(self.(*RClass), args, true, false)
@@ -2433,13 +2473,19 @@ func classArg(v object.Value) *RClass {
 	return nil
 }
 
-// classIsA reports whether class c is, inherits from, or includes target.
+// classIsA reports whether class c is, inherits from, or includes/prepends
+// target.
 func classIsA(c, target *RClass) bool {
 	for ; c != nil; c = c.super {
 		if c == target {
 			return true
 		}
 		for _, m := range c.includes {
+			if classIsA(m, target) {
+				return true
+			}
+		}
+		for _, m := range c.prepends {
 			if classIsA(m, target) {
 				return true
 			}

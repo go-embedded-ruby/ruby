@@ -693,9 +693,28 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 	if methodName == "" {
 		raise("RuntimeError", "super called outside of method")
 	}
-	m := lookupMethod(definee.super, methodName)
-	if m == nil {
-		raise("NoMethodError", "super: no superclass method '%s'", methodName)
+	// super resolves to the next definition of methodName after the current
+	// method's owner (definee) in the receiver's ancestor chain — so it walks
+	// prepended and included modules, not just the superclass.
+	anc := vm.ancestors(vm.classOf(self))
+	start := -1
+	for i, k := range anc {
+		if k == definee {
+			start = i
+			break
+		}
 	}
-	return vm.invoke(m, self, args, blk)
+	if start >= 0 {
+		for _, k := range anc[start+1:] {
+			if m, ok := k.methods[methodName]; ok {
+				return vm.invoke(m, self, args, blk)
+			}
+		}
+	} else if m := lookupSMethod(definee.super, methodName); m != nil {
+		// definee is outside the receiver's ancestry: this is a class-method
+		// super (def self.foo), so walk the singleton-method chain.
+		return vm.invoke(m, self, args, blk)
+	}
+	raise("NoMethodError", "super: no superclass method '%s'", methodName)
+	return object.NilV
 }
