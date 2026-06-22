@@ -210,8 +210,9 @@ func (vm *VM) bootstrap() {
 	exc("SyntaxError", "ScriptError")
 	exc("LoadError", "ScriptError")
 
-	vm.registerFile() // needs the exception hierarchy (Errno::ENOENT < StandardError)
-	vm.registerZlib() // needs the exception hierarchy (Zlib::Error < StandardError)
+	vm.registerFile()  // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerZlib()  // needs the exception hierarchy (Zlib::Error < StandardError)
+	vm.registerFiber() // needs the exception hierarchy (FiberError < StandardError)
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).

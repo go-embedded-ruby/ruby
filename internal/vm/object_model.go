@@ -279,6 +279,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cLazy
 	case *RandomObj:
 		return vm.consts["Random"].(*RClass)
+	case *Fiber:
+		return vm.consts["Fiber"].(*RClass)
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:

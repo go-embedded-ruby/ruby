@@ -110,6 +110,7 @@ type VM struct {
 	loaded        map[string]bool // require/require_relative: features loaded once
 	requireDirs   []string        // stack of directories of the files currently being required
 	defaultRandom *RandomObj      // process-wide generator for Kernel#rand / #srand
+	currentFiber  *Fiber         // the fiber currently running (nil at the root), for Fiber.yield
 }
 
 // New returns a VM writing program output to out.
