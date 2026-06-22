@@ -2,6 +2,7 @@ package vm
 
 import (
 	"io"
+	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -13,14 +14,16 @@ import (
 // in-memory byte buffer with a read/write cursor. The two share the write path
 // so puts/print/printf/<< work uniformly, and StringIO adds the read methods.
 type IOObj struct {
-	cls    *RClass // IO or StringIO — so classOf/is_a? are exact
-	w      io.Writer
-	buf    []byte // StringIO content
-	pos    int    // StringIO read/write cursor
-	isStr  bool   // StringIO vs real IO
-	sync   bool
-	closed bool
-	label  string // "STDOUT"/"STDERR"/"STDIN" for inspect
+	cls      *RClass // IO, StringIO or File — so classOf/is_a? are exact
+	w        io.Writer
+	buf      []byte // StringIO / File content (buffered in memory)
+	pos      int    // read/write cursor
+	isStr    bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
+	sync     bool
+	closed   bool
+	label    string // "STDOUT"/"STDERR"/"STDIN" for inspect
+	path     string // backing file path for a File stream (else "")
+	writable bool   // a File opened for writing — flush the buffer on flush/close
 }
 
 func (o *IOObj) ToS() string {
@@ -58,6 +61,7 @@ func (vm *VM) registerIO() {
 	cIO := newClass("IO", vm.cObject)
 	vm.consts["IO"] = cIO
 	defIOWrite(cIO)
+	defStringIORead(cIO) // IO carries the read protocol too ($stdin, File streams)
 
 	cStringIO := newClass("StringIO", vm.cObject)
 	vm.consts["StringIO"] = cStringIO
@@ -89,6 +93,84 @@ func (vm *VM) registerIO() {
 		}
 		return object.NilV
 	})
+
+	// File streams: File.open returns a buffered, file-backed IO carrying the
+	// same read+write protocol (File acts as an IO subtype). The block form
+	// flushes and closes afterwards, returning the block's value.
+	cFile := vm.consts["File"].(*RClass)
+	cFile.super = cIO // File < IO, inheriting the read+write protocol; is_a?(IO) holds
+	cFile.smethods["open"] = &Method{name: "open", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		o := openFileIO(cFile, strArg(args[0]), fileMode(args))
+		if blk != nil {
+			defer ioFlushClose(o)
+			return vm.callBlock(blk, []object.Value{o})
+		}
+		return o
+	}}
+	cFile.smethods["readlines"] = &Method{name: "readlines", owner: cFile, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		o := openFileIO(cFile, strArg(args[0]), "r")
+		var lines []object.Value
+		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
+			lines = append(lines, v)
+		}
+		return &object.Array{Elems: lines}
+	}}
+	cFile.smethods["foreach"] = &Method{name: "foreach", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		o := openFileIO(cFile, strArg(args[0]), "r")
+		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
+			vm.callBlock(blk, []object.Value{v})
+		}
+		return object.NilV
+	}}
+}
+
+// fileMode returns the access mode argument of File.open (default "r").
+func fileMode(args []object.Value) string {
+	if len(args) > 1 {
+		return strArg(args[1])
+	}
+	return "r"
+}
+
+// openFileIO opens path into a buffered, file-backed IOObj per mode (r/w/a, with
+// an optional "+" making a read mode writable). The file's bytes are read into
+// the buffer; writes accumulate there and are flushed back on flush/close.
+func openFileIO(cls *RClass, p, mode string) *IOObj {
+	if mode == "" {
+		raise("ArgumentError", "invalid access mode %s", mode)
+	}
+	o := &IOObj{cls: cls, isStr: true, path: p}
+	switch mode[0] {
+	case 'r':
+		b, err := os.ReadFile(p)
+		if err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
+		}
+		o.buf, o.writable = b, strings.Contains(mode, "+")
+	case 'w':
+		o.writable = true // empty buffer; flush truncates the file
+	case 'a':
+		b, _ := os.ReadFile(p) // append to the existing content (or a new file)
+		o.buf, o.pos, o.writable = b, len(b), true
+	default:
+		raise("ArgumentError", "invalid access mode %s", mode)
+	}
+	return o
+}
+
+// ioFlush writes a writable file stream's buffer back to disk.
+func ioFlush(o *IOObj) {
+	if o.writable && o.path != "" {
+		if err := os.WriteFile(o.path, o.buf, 0o644); err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", o.path)
+		}
+	}
+}
+
+// ioFlushClose flushes then marks the stream closed (the File.open block exit).
+func ioFlushClose(o *IOObj) {
+	ioFlush(o)
+	o.closed = true
 }
 
 // curStdout / curStderr / curStdin return the IO currently bound to the global,
@@ -159,7 +241,10 @@ func defIOWrite(cls *RClass) {
 		}
 		return args[0]
 	})
-	cls.define("flush", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
+	cls.define("flush", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		ioFlush(self.(*IOObj))
+		return self
+	})
 	cls.define("fsync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Integer(0) })
 	cls.define("sync", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*IOObj).sync)
@@ -169,7 +254,9 @@ func defIOWrite(cls *RClass) {
 		return args[0]
 	})
 	cls.define("close", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).closed = true
+		o := self.(*IOObj)
+		ioFlush(o)
+		o.closed = true
 		return object.NilV
 	})
 	cls.define("closed?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {

@@ -112,7 +112,9 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   (`read`/`gets`/`getc`/`readline`/`readlines`/`each_line`/`each_char`,
   `pos`/`seek`/`rewind`/`truncate`/`eof?`/`string`), and `Kernel#warn`.
   `Kernel#puts`/`print`/`p` write through the current `$stdout`, so reassigning
-  it to a `StringIO` captures output, as in MRI.
+  it to a `StringIO` captures output, as in MRI. **`File.open`** (modes `r`/`w`/
+  `a`/`r+`, block-scoped auto-close) returns a file-backed IO (`File` **< `IO`**)
+  with the same read/write protocol, plus `File.readlines`/`File.foreach`.
 - **`Dir`:** `entries`/`children`/`glob`/`[]`, `exist?`/`empty?`, `pwd`/`home`,
   `mkdir`/`rmdir`/`chdir` (block-scoped), `each_child`/`foreach`, raising
   `Errno::ENOENT`/`Errno::EEXIST` as MRI does.
@@ -185,7 +187,8 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(file streams via `File.open`, `Binding`, the `rbgo build` toolchain).
+(`Binding` for `eval` local-variable capture, the closed-world `rbgo build`
+toolchain).
 
 ## Quick start
 
