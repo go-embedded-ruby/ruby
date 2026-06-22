@@ -140,8 +140,8 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:        "<module:Enumerable>",
-				Insns:       []bytecode.Instr{{Op: 43}, {Op: 9}, {Op: 43, A: 1, B: 1}, {Op: 9}, {Op: 43, A: 2, B: 2}, {Op: 9}, {Op: 43, A: 3, B: 3}, {Op: 9}, {Op: 43, A: 4, B: 4}, {Op: 9}, {Op: 43, A: 5, B: 5}, {Op: 9}, {Op: 43, A: 6, B: 6}, {Op: 9}, {Op: 43, A: 7, B: 7}, {Op: 9}, {Op: 43, A: 8, B: 8}, {Op: 9}, {Op: 43, A: 9, B: 9}, {Op: 9}, {Op: 43, A: 10, B: 10}, {Op: 9}, {Op: 43, A: 11, B: 11}, {Op: 9}, {Op: 43, A: 12, B: 12}, {Op: 9}, {Op: 43, A: 13, B: 13}, {Op: 9}, {Op: 43, A: 14, B: 14}, {Op: 9}, {Op: 43, A: 15, B: 15}, {Op: 9}, {Op: 43, A: 16, B: 16}, {Op: 9}, {Op: 43, A: 17, B: 17}, {Op: 9}, {Op: 43, A: 18, B: 18}, {Op: 9}, {Op: 43, A: 19, B: 19}, {Op: 9}, {Op: 43, A: 20, B: 20}, {Op: 9}, {Op: 43, A: 21, B: 21}, {Op: 9}, {Op: 43, A: 22, B: 22}, {Op: 9}, {Op: 43, A: 23, B: 23}, {Op: 9}, {Op: 43, A: 24, B: 24}, {Op: 9}, {Op: 43, A: 25, B: 25}, {Op: 9}, {Op: 43, A: 26, B: 26}, {Op: 9}, {Op: 43, A: 27, B: 27}, {Op: 9}, {Op: 43, A: 28, B: 28}, {Op: 49}},
-				Names:       []string{"to_a", "map", "collect", "filter", "detect", "count", "min_by", "max_by", "sort_by", "select", "reject", "find", "include?", "sum", "min", "max", "reduce", "inject", "any?", "all?", "none?", "each_with_index", "flat_map", "each_with_object", "filter_map", "partition", "group_by", "tally", "zip"},
+				Insns:       []bytecode.Instr{{Op: 43}, {Op: 9}, {Op: 43, A: 1, B: 1}, {Op: 9}, {Op: 43, A: 2, B: 2}, {Op: 9}, {Op: 43, A: 3, B: 3}, {Op: 9}, {Op: 43, A: 4, B: 4}, {Op: 9}, {Op: 43, A: 5, B: 5}, {Op: 9}, {Op: 43, A: 6, B: 6}, {Op: 9}, {Op: 43, A: 7, B: 7}, {Op: 9}, {Op: 43, A: 8, B: 8}, {Op: 9}, {Op: 43, A: 9, B: 9}, {Op: 9}, {Op: 43, A: 10, B: 10}, {Op: 9}, {Op: 43, A: 11, B: 11}, {Op: 9}, {Op: 43, A: 12, B: 12}, {Op: 9}, {Op: 43, A: 13, B: 13}, {Op: 9}, {Op: 43, A: 14, B: 14}, {Op: 9}, {Op: 43, A: 15, B: 15}, {Op: 9}, {Op: 43, A: 16, B: 16}, {Op: 9}, {Op: 43, A: 17, B: 17}, {Op: 9}, {Op: 43, A: 18, B: 18}, {Op: 9}, {Op: 43, A: 19, B: 19}, {Op: 9}, {Op: 43, A: 20, B: 20}, {Op: 9}, {Op: 43, A: 21, B: 21}, {Op: 9}, {Op: 43, A: 22, B: 22}, {Op: 9}, {Op: 43, A: 23, B: 23}, {Op: 9}, {Op: 43, A: 24, B: 24}, {Op: 9}, {Op: 43, A: 25, B: 25}, {Op: 9}, {Op: 43, A: 26, B: 26}, {Op: 9}, {Op: 43, A: 27, B: 27}, {Op: 9}, {Op: 43, A: 28, B: 28}, {Op: 9}, {Op: 43, A: 29, B: 29}, {Op: 49}},
+				Names:       []string{"to_a", "map", "collect", "filter", "detect", "count", "min_by", "max_by", "sort_by", "select", "reject", "find", "include?", "sum", "min", "max", "minmax", "reduce", "inject", "any?", "all?", "none?", "each_with_index", "flat_map", "each_with_object", "filter_map", "partition", "group_by", "tally", "zip"},
 				NumRequired: 0,
 				SplatIndex:  -1,
 				KwRestSlot:  -1,
@@ -563,6 +563,17 @@ func embeddedPrelude() *bytecode.ISeq {
 							},
 						},
 						Super: "",
+					},
+					&bytecode.ISeq{
+						Name:        "minmax",
+						Insns:       []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 5}, {Op: 30, A: 1}, {Op: 6, A: 2}, {Op: 49}},
+						Names:       []string{"min", "max"},
+						NumRequired: 0,
+						SplatIndex:  -1,
+						KwRestSlot:  -1,
+						BlockSlot:   -1,
+						NumLocals:   0,
+						Super:       "",
 					},
 					&bytecode.ISeq{
 						Name:  "reduce",

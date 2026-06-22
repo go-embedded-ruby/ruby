@@ -116,6 +116,11 @@ func (vm *VM) bootstrap() {
 		// value types by value (Go interface equality gives exactly this).
 		return object.Bool(self == args[0])
 	})
+	objectIDFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.objectID(self)
+	}
+	vm.cObject.define("object_id", objectIDFn)
+	vm.cObject.define("__id__", objectIDFn)
 	vm.cObject.define("frozen?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(isFrozen(self))
 	})
@@ -1074,15 +1079,35 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: flattenDepth(self.(*object.Array).Elems, depth)}
 	})
-	vm.cArray.define("sum", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("sum", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		acc := object.Value(object.Integer(0))
 		if len(args) > 0 {
 			acc = args[0]
 		}
 		for _, e := range self.(*object.Array).Elems {
+			if blk != nil { // sum { |x| ... } maps each element before adding
+				e = vm.callBlock(blk, []object.Value{e})
+			}
 			acc = vm.binaryOp(bytecode.OpAdd, acc, e)
 		}
 		return acc
+	})
+	vm.cArray.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		h := object.NewHash()
+		for i, e := range self.(*object.Array).Elems {
+			if blk != nil { // to_h { |x| [k, v] } maps each element to a pair
+				e = vm.callBlock(blk, []object.Value{e})
+			}
+			pair, ok := e.(*object.Array)
+			if !ok {
+				raise("TypeError", "wrong element type %s at %d (expected array)", vm.classOf(e).name, i)
+			}
+			if len(pair.Elems) != 2 {
+				raise("ArgumentError", "wrong array length at %d (expected 2, was %d)", i, len(pair.Elems))
+			}
+			h.Set(pair.Elems[0], pair.Elems[1])
+		}
+		return h
 	})
 	vm.cArray.define("each_slice", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) < 1 {
@@ -1871,11 +1896,11 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("to_int", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(int64(floatOf(self)))
 	})
-	vm.cFloat.define("ceil", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(math.Ceil(floatOf(self))))
+	vm.cFloat.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return floatRound(floatOf(self), args, math.Ceil)
 	})
-	vm.cFloat.define("floor", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(math.Floor(floatOf(self))))
+	vm.cFloat.define("floor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return floatRound(floatOf(self), args, math.Floor)
 	})
 	vm.cFloat.define("round", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		f := floatOf(self)
@@ -1979,6 +2004,22 @@ func intArg(v object.Value) int64 {
 	}
 	raise("TypeError", "no implicit conversion of %s into Integer", v.Inspect())
 	return 0
+}
+
+// floatRound applies Float#floor/#ceil (and shares Float#round's contract): with
+// no argument or ndigits <= 0 it returns an Integer; with ndigits > 0 it rounds
+// to that many decimals and stays a Float. fn is math.Floor or math.Ceil.
+func floatRound(f float64, args []object.Value, fn func(float64) float64) object.Value {
+	ndigits := 0
+	if len(args) > 0 {
+		ndigits = int(intArg(args[0]))
+	}
+	pow := math.Pow(10, float64(ndigits))
+	r := fn(f*pow) / pow
+	if ndigits > 0 {
+		return object.Float(r)
+	}
+	return object.Integer(int64(r))
 }
 
 // clampCount validates a `first(n)`/`last(n)` count: it must be non-negative

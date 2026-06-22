@@ -175,6 +175,10 @@ module Enumerable
     result
   end
 
+  def minmax
+    [min, max]
+  end
+
   def reduce(*args)
     # Forms: reduce { |a, b| }, reduce(init) { }, reduce(:op), reduce(init, :op).
     sym = nil

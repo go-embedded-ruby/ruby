@@ -13,6 +13,7 @@ package vm
 import (
 	"fmt"
 	"io"
+	"math/big"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -127,6 +128,41 @@ type VM struct {
 	// and returns it at normal exit unless a closure captured it (see Env.captured
 	// / markEnvCaptured). Touched only while the GVL is held, so it needs no lock.
 	envFree []*Env
+
+	// objIDs assigns stable object_id/__id__ values to symbols and reference
+	// objects (value types get a deterministic id from their value); nextObjID is
+	// the counter for the next reference id. Lazily initialised; GVL-guarded.
+	objIDs    map[object.Value]int64
+	nextObjID int64
+}
+
+// objectID returns the receiver's object_id / __id__. Immediate values get the
+// deterministic ids MRI uses (fixnum n -> 2n+1, nil -> 4, true -> 20,
+// false -> 0); symbols and reference objects get a stable id memoised in objIDs
+// (so the same object always reports the same id, distinct objects differ).
+func (vm *VM) objectID(self object.Value) object.Value {
+	switch v := self.(type) {
+	case object.Integer:
+		// Fixnum id is 2n+1 (matches MRI up to its 62-bit fixnum range). Bignums
+		// are heap objects in MRI, so they fall through to the memoised path below.
+		return object.NormInt(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(int64(v)), 1), big.NewInt(1)))
+	case object.Bool:
+		if v {
+			return object.Integer(20)
+		}
+		return object.Integer(0)
+	case object.Nil:
+		return object.Integer(4)
+	}
+	if vm.objIDs == nil {
+		vm.objIDs = map[object.Value]int64{}
+	}
+	if id, ok := vm.objIDs[self]; ok {
+		return object.Integer(id)
+	}
+	vm.nextObjID += 8 // even ids, never colliding with the odd fixnum ids
+	vm.objIDs[self] = vm.nextObjID
+	return object.Integer(vm.nextObjID)
 }
 
 // envFreeMax caps the env free-list so a deep call burst doesn't pin memory.
