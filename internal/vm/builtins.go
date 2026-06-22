@@ -21,10 +21,11 @@ func (vm *VM) bootstrap() {
 	vm.cObject = newClass("Object", vm.cBasicObject)
 	vm.cModule = newClass("Module", vm.cObject)
 	vm.cClass = newClass("Class", vm.cModule)
-	vm.cInteger = newClass("Integer", vm.cObject)
-	vm.cFloat = newClass("Float", vm.cObject)
-	vm.cComplex = newClass("Complex", vm.cObject)
-	vm.cRational = newClass("Rational", vm.cObject)
+	cNumeric := newClass("Numeric", vm.cObject) // Integer/Float/Complex/Rational < Numeric
+	vm.cInteger = newClass("Integer", cNumeric)
+	vm.cFloat = newClass("Float", cNumeric)
+	vm.cComplex = newClass("Complex", cNumeric)
+	vm.cRational = newClass("Rational", cNumeric)
 	vm.cString = newClass("String", vm.cObject)
 	vm.cSymbol = newClass("Symbol", vm.cObject)
 	vm.cArray = newClass("Array", vm.cObject)
@@ -45,7 +46,7 @@ func (vm *VM) bootstrap() {
 	vm.cObject.includes = append(vm.cObject.includes, kernel)
 
 	for _, c := range []*RClass{
-		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, vm.cInteger,
+		vm.cBasicObject, vm.cObject, vm.cModule, vm.cClass, cNumeric, vm.cInteger,
 		vm.cFloat, vm.cComplex, vm.cRational, vm.cString, vm.cSymbol, vm.cArray, vm.cHash, vm.cRange,
 		vm.cProc, vm.cTrueClass, vm.cFalseClass, vm.cNilClass,
 		vm.cRegexp, vm.cMatchData, kernel,
@@ -1905,6 +1906,12 @@ func (vm *VM) bootstrap() {
 
 	// Class.
 	vm.cClass.define("new", nativeNew)
+	vm.cClass.define("superclass", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if c := self.(*RClass); c.super != nil {
+			return c.super
+		}
+		return object.NilV
+	})
 
 	vm.cInteger.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) < 1 {

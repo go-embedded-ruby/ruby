@@ -313,16 +313,9 @@ end
 # The built-in ordered types are Comparable: each defines <=> natively, so they
 # pick up <, <=, >, >=, between?, and clamp from the module above. (The
 # comparison operators still take the VM's inline fast path; between?/clamp route
-# through <=>.)
-class Integer
-  include Comparable
-end
-
-class Float
-  include Comparable
-end
-
-class Rational
+# through <=>.) Numeric carries Comparable for the whole numeric tower
+# (Integer/Float/Rational/Complex inherit it); String mixes it in directly.
+class Numeric
   include Comparable
 end
 
