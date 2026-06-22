@@ -59,14 +59,16 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   (the `&:sym` shorthand).
 - **Classes & modules:** inheritance, `@ivars`, **`@@class variables`** (shared
   down the superclass hierarchy), `new`/`initialize`, constants and constant
-  assignment, **class methods** (`def self.foo`), modules + `include` (mixins),
-  `super`, **`attr_accessor`/`reader`/`writer`**, **`Struct.new`**.
+  assignment, **class methods** (`def self.foo`), modules + **`include`/`prepend`**
+  (mixins, with full **ancestor-chain `super`** through included/prepended
+  modules and the singleton chain), `Module#ancestors`/`include?`,
+  **`attr_accessor`/`reader`/`writer`**, **`Struct.new`**.
 - **Metaprogramming:** dynamic dispatch via mutable method tables,
   `method_missing`, `send`/`public_send`, `respond_to?`, **`define_method`**,
   **`instance_eval`/`instance_exec`**, **`class_eval`/`module_eval`/`class_exec`**,
   `instance_variable_get`/`set`/`defined?`, **string `eval`** (the embedded
   front-end compiling Ruby at runtime), and the class/module **hooks**
-  `inherited`/`included`/`method_added`.
+  `inherited`/`included`/`prepended`/`method_added`/`extended`.
 - **Runtime loading:** **`require`/`require_relative`** load, compile and run a
   `.rb` file once (relative + search-path resolution, `LoadError` on miss,
   `true`/`false` return) — the embedded front-end loading code at runtime.
