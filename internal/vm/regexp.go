@@ -727,6 +727,23 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 	return object.Integer(byteToChar(s, md.Begin(0)))
 }
 
+// stringRegexpIndex implements String#[] / #slice with a Regexp argument: the
+// whole match (no extra arg) or the numbered/named capture group, and nil when
+// the pattern does not match. $~ is updated, as in MRI.
+func (vm *VM) stringRegexpIndex(s string, re *Regexp, rest []object.Value) object.Value {
+	md := re.re.Match(s)
+	if md == nil {
+		vm.lastMatch = object.NilV
+		return object.NilV
+	}
+	m := &MatchData{md: md, subject: s, re: re}
+	vm.lastMatch = m
+	if len(rest) == 0 {
+		return object.NewString(md.Str(0))
+	}
+	return m.at(rest[0])
+}
+
 // stringLike returns the Go string for a String or Symbol receiver (the two
 // types Ruby's Regexp matching coerces), and whether it was one.
 func stringLike(v object.Value) (string, bool) {

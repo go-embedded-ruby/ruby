@@ -717,12 +717,14 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.String{B: out}
 	})
-	vm.cString.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if re, ok := args[0].(*Regexp); ok { // s[/re/] / s[/re/, group]
+			return vm.stringRegexpIndex(strOf(self), re, args[1:])
+		}
 		return stringIndex(strOf(self), args)
-	})
-	vm.cString.define("slice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return stringIndex(strOf(self), args)
-	})
+	}
+	vm.cString.define("[]", strIndexFn)
+	vm.cString.define("slice", strIndexFn)
 	vm.cString.define("ord", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := strOf(self)
 		if s == "" {
@@ -1789,17 +1791,47 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("cover?", rangeCover)
 	vm.cRange.define("member?", rangeCover)
 	vm.cRange.define("===", rangeCover)
-	vm.cRange.define("min", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cRange.define("min", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
-		lo, _, _ := rangeInts(r)
+		if len(args) > 0 { // min(n): the n smallest (the range is ascending)
+			elems := rangeElems(r)
+			n := clampCount(intArg(args[0]), len(elems))
+			out := make([]object.Value, n)
+			copy(out, elems[:n])
+			return &object.Array{Elems: out}
+		}
+		lo, _, ok := rangeInts(r)
+		if !ok { // non-integer (e.g. String) range: the first iterated element
+			elems := rangeElems(r)
+			if len(elems) == 0 {
+				return object.NilV
+			}
+			return elems[0]
+		}
 		if rangeSize(r) == 0 {
 			return object.NilV
 		}
 		return object.Integer(lo)
 	})
-	vm.cRange.define("max", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cRange.define("max", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
-		_, hi, _ := rangeInts(r)
+		if len(args) > 0 { // max(n): the n largest, descending
+			elems := rangeElems(r)
+			n := clampCount(intArg(args[0]), len(elems))
+			out := make([]object.Value, n)
+			for i := 0; i < n; i++ {
+				out[i] = elems[len(elems)-1-i]
+			}
+			return &object.Array{Elems: out}
+		}
+		_, hi, ok := rangeInts(r)
+		if !ok { // non-integer range: the last iterated element
+			elems := rangeElems(r)
+			if len(elems) == 0 {
+				return object.NilV
+			}
+			return elems[len(elems)-1]
+		}
 		if rangeSize(r) == 0 {
 			return object.NilV
 		}

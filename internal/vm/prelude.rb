@@ -168,7 +168,8 @@ module Enumerable
     total
   end
 
-  def min
+  def min(n = nil)
+    return to_a.sort.first(n) unless n.nil? # min(n): the n smallest, ascending
     result = nil
     first = true
     __each_packed { |x|
@@ -182,7 +183,8 @@ module Enumerable
     result
   end
 
-  def max
+  def max(n = nil)
+    return to_a.sort.last(n).reverse unless n.nil? # max(n): the n largest, descending
     result = nil
     first = true
     __each_packed { |x|
@@ -324,11 +326,13 @@ module Enumerable
     h
   end
 
-  def zip(other)
+  def zip(*others)
     r = []
     i = 0
     __each_packed { |x|
-      r << [x, other[i]]
+      row = [x]
+      others.each { |o| row << o[i] }
+      r << row
       i = i + 1
     }
     r
