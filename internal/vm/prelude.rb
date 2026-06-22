@@ -321,6 +321,107 @@ module Enumerable
     }
     r
   end
+
+  # find_index(value) / find_index { |x| } — the index of the first match, or nil.
+  def find_index(*args)
+    idx = nil
+    i = 0
+    __each_packed { |x|
+      idx = i if idx.nil? && (args.empty? ? yield(x) : x == args[0])
+      i = i + 1
+    }
+    idx
+  end
+
+  def find_all(&blk)
+    return enum_for(:find_all) unless block_given?
+    select(&blk)
+  end
+
+  def take_while
+    return enum_for(:take_while) unless block_given?
+    r = []
+    taking = true
+    __each_packed { |x|
+      taking = false if taking && !yield(x)
+      r << x if taking
+    }
+    r
+  end
+
+  def drop_while
+    return enum_for(:drop_while) unless block_given?
+    r = []
+    dropping = true
+    __each_packed { |x|
+      dropping = false if dropping && !yield(x)
+      r << x unless dropping
+    }
+    r
+  end
+
+  def each_slice(n)
+    return enum_for(:each_slice, n) unless block_given?
+    a = to_a
+    i = 0
+    while i < a.length
+      yield(a[i, n])
+      i = i + n
+    end
+    nil
+  end
+
+  def each_cons(n)
+    return enum_for(:each_cons, n) unless block_given?
+    a = to_a
+    i = 0
+    while i + n <= a.length
+      yield(a[i, n])
+      i = i + 1
+    end
+    nil
+  end
+
+  # chunk_while / slice_when split the element stream into runs at each pair where
+  # the block (does not) hold. They return the Array of runs (MRI returns a lazy
+  # Enumerator; the materialised values match).
+  def chunk_while
+    a = to_a
+    return [] if a.empty?
+    chunks = []
+    cur = [a[0]]
+    i = 1
+    while i < a.length
+      if yield(a[i - 1], a[i])
+        cur << a[i]
+      else
+        chunks << cur
+        cur = [a[i]]
+      end
+      i = i + 1
+    end
+    chunks << cur
+    chunks
+  end
+
+  def slice_when
+    a = to_a
+    return [] if a.empty?
+    chunks = []
+    cur = [a[0]]
+    i = 1
+    while i < a.length
+      if yield(a[i - 1], a[i])
+        chunks << cur
+        cur = [a[i]]
+      else
+        cur << a[i]
+      end
+      i = i + 1
+    end
+    chunks << cur
+    chunks
+  end
 end
 
 # The built-in ordered types are Comparable: each defines <=> natively, so they
