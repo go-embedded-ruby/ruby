@@ -377,6 +377,7 @@ func (vm *VM) bootstrap() {
 		for _, a := range args {
 			mod := a.(*RClass)
 			target.includes = append(target.includes, mod)
+			bumpMethodSerial()
 			// Hook: module.included(base), fired per included module if it defines
 			// the hook (singleton method).
 			if hook := lookupSMethod(mod, "included"); hook != nil {
@@ -390,6 +391,7 @@ func (vm *VM) bootstrap() {
 		for _, a := range args {
 			mod := a.(*RClass)
 			target.prepends = append(target.prepends, mod)
+			bumpMethodSerial()
 			// Hook: module.prepended(base), mirroring included.
 			if hook := lookupSMethod(mod, "prepended"); hook != nil {
 				vm.invoke(hook, mod, []object.Value{target}, nil)
@@ -459,6 +461,7 @@ func (vm *VM) bootstrap() {
 		}
 		name := args[0].ToS()
 		self.(*RClass).methods[name] = &Method{name: name, proc: body, owner: self.(*RClass)}
+		bumpMethodSerial()
 		return object.Symbol(name)
 	})
 
@@ -1485,6 +1488,7 @@ func (vm *VM) bootstrap() {
 		return h
 	})
 	vm.cHash.methods["each_pair"] = vm.cHash.methods["each"]
+	bumpMethodSerial()
 	vm.cHash.define("merge", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		other, ok := args[0].(*object.Hash)
@@ -2108,8 +2112,15 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "times")
 		}
 		n := int64(self.(object.Integer))
+		// One reused arg slice across the whole loop: callBlock → exec copies the
+		// args into the block's env slots synchronously before any user code runs
+		// (and before the next iteration overwrites elem[0]), so the backing array
+		// can be shared — this removes the per-iteration slice allocation on the
+		// hot times-block path.
+		arg := make([]object.Value, 1)
 		for i := int64(0); i < n; i++ {
-			vm.callBlock(blk, []object.Value{object.Integer(i)})
+			arg[0] = object.Integer(i)
+			vm.callBlock(blk, arg)
 		}
 		return self
 	})

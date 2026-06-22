@@ -9,5 +9,8 @@
 *.out
 cov.out
 
+# Go test binaries (e.g. `go test -c`)
+*.test
+
 # Editor / OS noise
 .DS_Store

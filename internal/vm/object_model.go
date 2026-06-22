@@ -104,6 +104,7 @@ func (c *RClass) Truthy() bool    { return true }
 // define installs a native method on the class.
 func (c *RClass) define(name string, fn NativeFn) {
 	c.methods[name] = &Method{name: name, native: fn, owner: c}
+	bumpMethodSerial()
 }
 
 // RObject is an ordinary instance: a class plus instance variables, and an
@@ -390,6 +391,27 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
 }
 
+// invokeInPlace is invoke for the OpSend fast path, where args is a live region
+// of the caller's operand stack rather than a private copy. The interpreted /
+// AOT / define_method bodies consume args synchronously (exec copies them into
+// the callee's env slots before the call returns, so the caller's later reuse of
+// the region is safe). A native body, by contrast, can retain its args slice
+// (e.g. Array#push stores them), so only that case copies into a fresh slice.
+func (vm *VM) invokeInPlace(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {
+	if m.native != nil {
+		cp := make([]object.Value, len(args))
+		copy(cp, args)
+		return vm.callNative(m, self, cp, blk)
+	}
+	if m.compiled != nil {
+		return m.compiled(vm, self, args, blk)
+	}
+	if m.proc != nil {
+		return vm.callBlockSelf(m.proc, self, args)
+	}
+	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
+}
+
 // callBlock invokes a captured block with args. Block arity is lenient: extra
 // arguments are dropped and missing ones default to nil (Ruby semantics).
 // arityVal backs Proc#arity: a synthesized proc reports nativeArity; an ISeq
@@ -471,6 +493,13 @@ func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
 			}
 			args = padded
 		}
+		return args
+	}
+	// Exact arity (the common case, e.g. a 1-param each block): the caller's args
+	// already have the right shape, so hand them straight to exec (which copies
+	// them into the block's env slots and never mutates the slice). This skips the
+	// per-yield rebind allocation on the hot block path.
+	if len(args) == np {
 		return args
 	}
 	bargs := make([]object.Value, np)

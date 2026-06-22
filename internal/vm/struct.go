@@ -136,6 +136,7 @@ func (vm *VM) newStructClass(parent *RClass, names []string) *RClass {
 		return self
 	})
 	sub.includes = append(sub.includes, vm.consts["Enumerable"].(*RClass))
+	bumpMethodSerial()
 	return sub
 }
 

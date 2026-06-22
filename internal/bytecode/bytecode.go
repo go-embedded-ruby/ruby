@@ -51,44 +51,44 @@ const (
 	OpBranchUnless // A = target pc; pops, jumps unless truthy
 	OpBranchNil    // A = target pc; pops, jumps if the value is nil (safe nav)
 
-	OpSend         // A = Names index (selector), B = argc; stack: recv, args… → result
-	OpGetIvar      // A = Names index; pushes @name from self (nil if unset)
-	OpSetIvar      // A = Names index; sets @name on self, leaves the value
-	OpGetConst     // A = Names index; pushes the named constant
-	OpGetScopedConst // A = Names index; pops a module/class, pushes its named constant
-	OpGetGVar      // A = Names index; pushes the named global (match-data specials + user globals)
-	OpSetGVar      // A = Names index; sets the named global to top of stack (kept)
-	OpGetCVar      // A = Names index; pushes the class variable @@name (NameError if unset)
-	OpGetCVarQuiet // A = Names index; like OpGetCVar but pushes nil (no NameError) if unset — for @@name ||= …
-	OpSetCVar      // A = Names index; sets the class variable @@name to top of stack (kept)
-	OpSetConst     // A = Names index; sets the named constant to top of stack (kept)
-	OpDefineClass  // A = Names index, B = Children index; defines/reopens a class
-	OpDefineModule // A = Names index, B = Children index; defines/reopens a module
-	OpDefineMethod // A = Names index, B = Children index; defines on the current class
-	OpDefineSMethod // A = Names index, B = Children index; defines a singleton (class) method
+	OpSend                  // A = Names index (selector), B = argc; stack: recv, args… → result
+	OpGetIvar               // A = Names index; pushes @name from self (nil if unset)
+	OpSetIvar               // A = Names index; sets @name on self, leaves the value
+	OpGetConst              // A = Names index; pushes the named constant
+	OpGetScopedConst        // A = Names index; pops a module/class, pushes its named constant
+	OpGetGVar               // A = Names index; pushes the named global (match-data specials + user globals)
+	OpSetGVar               // A = Names index; sets the named global to top of stack (kept)
+	OpGetCVar               // A = Names index; pushes the class variable @@name (NameError if unset)
+	OpGetCVarQuiet          // A = Names index; like OpGetCVar but pushes nil (no NameError) if unset — for @@name ||= …
+	OpSetCVar               // A = Names index; sets the class variable @@name to top of stack (kept)
+	OpSetConst              // A = Names index; sets the named constant to top of stack (kept)
+	OpDefineClass           // A = Names index, B = Children index; defines/reopens a class
+	OpDefineModule          // A = Names index, B = Children index; defines/reopens a module
+	OpDefineMethod          // A = Names index, B = Children index; defines on the current class
+	OpDefineSMethod         // A = Names index, B = Children index; defines a singleton (class) method
 	OpDefineSingletonMethod // A = Names index, B = Children index; pops a receiver, defines a singleton method on it (def recv.foo)
-	OpInvokeSuper  // A = argc, B = 1 to forward the frame's args (bare super) else 0
-	OpInvokeBlock  // A = argc; yields to the block passed to the current method
-	OpBlockGiven   // pushes true if a block was passed to the current method
-	OpReturn       // returns top of stack from the current ISeq
-	OpArgGiven     // A = param index; pushes true if that argument was supplied
-	OpBreak        // unwinds a block `break`: pops the value, signals the call site
-	OpPushHandler  // A = rescue handler pc; pushes a begin/rescue handler
-	OpPopHandler   // pops the innermost handler (begin body completed normally)
-	OpReThrow      // re-raises the exception object on top of the stack
-	OpExpandArray  // A=pre, B=post, C=hasSplat; pops an Array, pushes the multi-assign target values in reverse order
-	OpSplatToArray // pops a value; pushes it if an Array else wrapped in a 1-array
-	OpConcatArray  // pops two Arrays b,a; pushes a concatenated with b
-	OpSendArray    // like OpSend but args come from an Array: stack recv, argsArray
-	OpKwGiven      // A = keyword-param index; pushes true if that keyword was supplied
-	OpHashSetPair  // stack acc,k,v → acc with k→v set (incremental hash build)
-	OpHashMerge    // stack acc,other → acc with other (a Hash) merged in (** splat)
-	OpSendBlockArg // like OpSend but a &block-pass value sits on top of the args
-	OpSendArrayBlockArg // like OpSendArray with a &block-pass value on top
-	OpRegexp            // A = Names index (source), B = Names index (flags); pushes a compiled Regexp
-	OpTruthy            // pops a value, pushes true if it is truthy else false (normalize a === / is_a? result)
-	OpRaiseNoMatch      // pops the subject value, raises NoMatchingPatternError naming it (case/in fell through)
-	OpBinding           // pushes a Binding capturing the current frame (locals, self, definee)
+	OpInvokeSuper           // A = argc, B = 1 to forward the frame's args (bare super) else 0
+	OpInvokeBlock           // A = argc; yields to the block passed to the current method
+	OpBlockGiven            // pushes true if a block was passed to the current method
+	OpReturn                // returns top of stack from the current ISeq
+	OpArgGiven              // A = param index; pushes true if that argument was supplied
+	OpBreak                 // unwinds a block `break`: pops the value, signals the call site
+	OpPushHandler           // A = rescue handler pc; pushes a begin/rescue handler
+	OpPopHandler            // pops the innermost handler (begin body completed normally)
+	OpReThrow               // re-raises the exception object on top of the stack
+	OpExpandArray           // A=pre, B=post, C=hasSplat; pops an Array, pushes the multi-assign target values in reverse order
+	OpSplatToArray          // pops a value; pushes it if an Array else wrapped in a 1-array
+	OpConcatArray           // pops two Arrays b,a; pushes a concatenated with b
+	OpSendArray             // like OpSend but args come from an Array: stack recv, argsArray
+	OpKwGiven               // A = keyword-param index; pushes true if that keyword was supplied
+	OpHashSetPair           // stack acc,k,v → acc with k→v set (incremental hash build)
+	OpHashMerge             // stack acc,other → acc with other (a Hash) merged in (** splat)
+	OpSendBlockArg          // like OpSend but a &block-pass value sits on top of the args
+	OpSendArrayBlockArg     // like OpSendArray with a &block-pass value on top
+	OpRegexp                // A = Names index (source), B = Names index (flags); pushes a compiled Regexp
+	OpTruthy                // pops a value, pushes true if it is truthy else false (normalize a === / is_a? result)
+	OpRaiseNoMatch          // pops the subject value, raises NoMatchingPatternError naming it (case/in fell through)
+	OpBinding               // pushes a Binding capturing the current frame (locals, self, definee)
 )
 
 var opNames = map[Op]string{
@@ -105,7 +105,7 @@ var opNames = map[Op]string{
 	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
 	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break", OpArgGiven: "arg_given",
 	OpPushHandler: "push_handler", OpPopHandler: "pop_handler", OpReThrow: "rethrow",
-	OpExpandArray: "expand_array",
+	OpExpandArray:  "expand_array",
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
@@ -132,19 +132,40 @@ type Instr struct {
 // level. Catch tables, full arity, and source maps (plan §6) arrive with the
 // later phases.
 type ISeq struct {
-	Name      string
-	Insns     []Instr
-	Consts    []object.Value // literal pool: integers, floats, strings
-	Names     []string       // method-call and definition names
-	Params    []string       // parameter names
-	NumRequired int          // count of required (non-defaulted) leading params
-	SplatIndex  int          // index of the *splat param, or -1
-	KwNames     []string     // keyword-param names; slots follow the positionals
-	KwRequired  []bool       // parallel to KwNames; true = required (no default)
-	KwRestSlot  int          // slot of the **rest keyword-splat param, or -1
-	BlockSlot   int          // slot of the &block param, or -1
-	NumLocals int            // total local slots (params first, then assigns)
-	Locals    []string       // local-variable names by slot (for Binding); "" for anonymous slots
-	Children  []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
-	Super     string         // for a class body: the superclass name ("" → Object)
+	Name        string
+	Insns       []Instr
+	Consts      []object.Value // literal pool: integers, floats, strings
+	Names       []string       // method-call and definition names
+	Params      []string       // parameter names
+	NumRequired int            // count of required (non-defaulted) leading params
+	SplatIndex  int            // index of the *splat param, or -1
+	KwNames     []string       // keyword-param names; slots follow the positionals
+	KwRequired  []bool         // parallel to KwNames; true = required (no default)
+	KwRestSlot  int            // slot of the **rest keyword-splat param, or -1
+	BlockSlot   int            // slot of the &block param, or -1
+	NumLocals   int            // total local slots (params first, then assigns)
+	Locals      []string       // local-variable names by slot (for Binding); "" for anonymous slots
+	Children    []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
+	Super       string         // for a class body: the superclass name ("" → Object)
+
+	// Caches backs the per-call-site inline method caches, one slot per
+	// instruction (only OpSend slots are ever used). It is opaque to this package
+	// — the vm package allocates it and gives it meaning — so the field is typed
+	// `any` to keep bytecode free of a vm import (vm imports bytecode, not the
+	// reverse). The vm fills it lazily on first execution of the ISeq.
+	Caches any
+
+	// handlerState memoises whether this ISeq contains any rescue handler
+	// (OpPushHandler): 0 = not scanned, 1 = none, 2 = has one. The vm reads it to
+	// skip the per-frame recover defer for the common no-rescue method. Lazily
+	// filled under the GVL via the accessors below.
+	handlerState uint8
 }
+
+// HandlerState reports the memoised rescue-handler flag (0/1/2; see the field).
+func (s *ISeq) HandlerState() uint8 { return s.handlerState }
+
+// SetHandlerState records the rescue-handler flag computed by the vm. Kept off
+// the exported field set so the AOT freeze emitter (which writes only the
+// source-level fields) is unaffected.
+func (s *ISeq) SetHandlerState(v uint8) { s.handlerState = v }

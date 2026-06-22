@@ -48,6 +48,19 @@ func TestAOTDispatchPrefersCompiled(t *testing.T) {
 	}
 }
 
+// TestAOTDispatchViaSend reaches a compiled body through Object#send rather than
+// the OpSend fast path: `send(:name)` routes dispatchSend -> send -> invoke, so
+// this exercises invoke()'s compiled-method branch (the fast path uses
+// invokeInPlace instead). Same sentinel proof as the direct-call test.
+func TestAOTDispatchViaSend(t *testing.T) {
+	register(t, "Object#sentinel2", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(777)
+	})
+	if got := runSrc(t, "def sentinel2 = 1\np send(:sentinel2)"); got != "777" {
+		t.Errorf("compiled body via send not preferred: got %q, want 777", got)
+	}
+}
+
 // TestAOTDispatchRealCodegen wires the actual AOT-generated fib body (e2eFib,
 // emitted by aotgen) into normal method dispatch and confirms it computes the
 // reference result — real lowered Go running through the interpreter's seam.

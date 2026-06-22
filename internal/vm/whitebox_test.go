@@ -89,7 +89,7 @@ func TestExecCraftedOpcodes(t *testing.T) {
 	iseq := &bytecode.ISeq{
 		SplatIndex: -1,
 		KwRestSlot: -1,
-		BlockSlot: -1,
+		BlockSlot:  -1,
 		Consts:     []object.Value{object.Integer(7)},
 		Insns: []bytecode.Instr{
 			{Op: bytecode.OpNop},
@@ -127,6 +127,26 @@ func TestExecUnknownOpcode(t *testing.T) {
 	_, err := vm.Run(&bytecode.ISeq{SplatIndex: -1, KwRestSlot: -1, BlockSlot: -1, Insns: []bytecode.Instr{{Op: bytecode.Op(254)}}})
 	if err == nil || err.(RubyError).Class != "VMError" {
 		t.Fatalf("expected VMError, got %v", err)
+	}
+}
+
+// TestStackPoolOverflow drives the operand-stack free-list past its cap: once
+// envFreeMax stacks are pooled, putStack must drop further returns rather than
+// grow the pool unbounded (mirroring putEnv). Balanced recursion never reaches
+// this depth, so it is asserted directly.
+func TestStackPoolOverflow(t *testing.T) {
+	vm := New(io.Discard)
+	// Fill the free-list to its cap with recyclable stacks.
+	for i := 0; i < envFreeMax; i++ {
+		vm.putStack(make([]object.Value, 0, 16))
+	}
+	if len(vm.stackFree) != envFreeMax {
+		t.Fatalf("free-list = %d, want %d", len(vm.stackFree), envFreeMax)
+	}
+	// One more return must be dropped (the >= envFreeMax guard), leaving the cap.
+	vm.putStack(make([]object.Value, 0, 16))
+	if len(vm.stackFree) != envFreeMax {
+		t.Fatalf("free-list grew past cap: %d, want %d", len(vm.stackFree), envFreeMax)
 	}
 }
 

@@ -22,14 +22,27 @@ time goes**, and shows the one path (build-time AOT) that already beats both.
   program's stdout is checked for byte-identical parity against MRI **before**
   timing; a divergent program is reported and skipped. Single process, no
   server warm-up beyond the program's own loop; **best-of-N** wall time (best,
-  not mean, to suppress scheduler noise) — N = 5 for the table below.
+  not mean, to suppress scheduler noise) — N = 8 for the call-bound rows
+  re-measured 2026-06-22, N = 5 for the rest.
 - **rbgo+AOT:** a specialised native binary from `rbgo build` (the program's
   lowerable methods compiled to Go and linked); shown because it is the lever
   that reaches CRuby. AOT builds need `GOWORK=off` on this host (a stray parent
   `go.work` otherwise shadows the module graph).
 - Reproduce: `GOWORK=off AOT=1 RUBY=ruby RBGO=./rbgo bash bench/run.sh 5`.
 
-## Results (best of 5)
+## Results (best of 8)
+
+> **2026-06-22 — inline method caches landed.** The call-bound rows below are
+> *after* adding per-send-site inline method caches, in-place argument passing on
+> the OpSend fast path, pooled operand-stack/frame backing arrays, and an
+> exact-arity block-bind fast path. Before→after (best-of-8, this host):
+> **fib 3030→2480 ms (−18%)**, **dispatch 1340→1190 ms (−11%)**,
+> **proc 750→700 ms (−7%)**, **blocks 700→640 ms (−9%, also from a reused
+> times-arg slice)**; `alloc` is unchanged (allocation-, not dispatch-, bound).
+> All output stays byte-identical to MRI. Cache invalidation is exact —
+> method (re)definition, `define_method`, `include`/`prepend`, singleton-method
+> definition and `extend` all bust the relevant caches (a global method-serial
+> stamp + per-object singleton bypass; tests in `inlinecache_test.go`).
 
 | program | rbgo (ms) | ruby (ms) | ruby --yjit (ms) | rbgo+AOT (ms) | ratio rbgo/ruby | ratio rbgo/yjit | verdict |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -37,13 +50,13 @@ time goes**, and shows the one path (build-time AOT) that already beats both.
 | wordcount | 120 | 90 | 80 | 120 | 1.3× | 1.5× | competitive |
 | hash | 280 | 100 | 100 | 300 | 2.8× | 2.8× | within ~3× |
 | array | 340 | 90 | 60 | 340 | 3.8× | 5.7× | within ~4–6× |
-| blocks | 850 | 250 | 230 | 880 | 3.4× | 3.7× | within ~4× |
-| proc | 850 | 170 | 150 | 840 | 5.0× | 5.7× | within ~5–6× |
-| alloc | 1330 | 240 | 210 | 1410 | 5.5× | 6.3× | allocation-bound, ~6× |
-| dispatch | 1490 | 230 | 180 | 1550 | 6.5× | 8.3× | call-bound, the widest gap |
+| blocks | 640 | 250 | 230 | 880 | 2.6× | 2.8× | within ~3× (inline-cache + reused-arg path) |
+| proc | 700 | 160 | 140 | 840 | 4.4× | 5.0× | within ~4–5× |
+| alloc | 1320 | 240 | 200 | 1410 | 5.5× | 6.6× | allocation-bound, ~6× |
+| dispatch | 1190 | 230 | 180 | 1550 | 5.2× | 6.6× | call-bound — narrowed by inline caches |
 | loop | 1520 | 400 | 400 | **10** | 3.8× | 3.8× | AOT: **40× faster than both** |
 | mandelbrot | 2650 | 860 | 830 | n/a* | 3.1× | 3.2× | float kernel, ~3× (not yet AOT-lowered) |
-| fib | 3500 | 520 | 120 | **20** | 6.7× | 29× | AOT: **26× MRI / 6× YJIT** |
+| fib | 2480 | 500 | 110 | **20** | 5.0× | 22.5× | call-bound — inline caches; AOT still wins |
 
 \* *`mandelbrot` is the benchmarks-game float kernel at `mandelbrot(600)`; it is
 not yet AOT-lowered (the AOT path currently specialises only pure-integer
@@ -65,10 +78,15 @@ methods), so the AOT column is n/a and the row reflects the interpreter: rbgo
   allocation pipelines with no user method to lower, so they run on the bytecode
   loop. ~3–6× the C interpreter is the expected floor for an interface-dispatched
   Go VM.
-- **Widest gap — call-bound:** `dispatch` (6.5× MRI, 8.3× YJIT) and the
-  interpreted `fib` (6.7× MRI, **29× YJIT**). Per-call overhead (frame setup +
-  method lookup + interface dispatch) is rbgo's single most expensive primitive
-  relative to CRuby's inline method cache + YJIT's call-site specialisation.
+- **Widest gap — call-bound:** `dispatch` (5.2× MRI, 6.6× YJIT) and the
+  interpreted `fib` (5.0× MRI, **22.5× YJIT**) — both **narrowed** by the new
+  inline method caches (was 6.5×/8.3× and 6.7×/29× respectively). Per-call
+  overhead (frame setup + method lookup + interface dispatch) is still rbgo's
+  most expensive primitive relative to CRuby's inline cache + YJIT's call-site
+  specialisation, but the per-call-site cache now removes the method-table walk
+  on the monomorphic hot path, leaving frame setup + interface dispatch as the
+  residual cost. Matching the MRI *interpreter* on these is the realistic bar;
+  YJIT (a JIT) stays far ahead until rbgo grows runtime specialisation.
 - **AOT beats both:** the two pure-integer **method** kernels (`fib`, `loop`)
   AOT-compile to unboxed `int64` Go and **beat CRuby and YJIT outright** —
   `fib` ~26× MRI / ~6× YJIT, `loop` ~40× both. This is the build-time lever a
@@ -92,23 +110,31 @@ experiments, locate the cost precisely. **Measured, not assumed:**
    was run before committing to that large refactor and saved it.
 3. **GC is not the bottleneck either** — same `GOGC=off` control. The `alloc`
    row's ~6× is dominated by per-object frame/method-call cost, not collection.
-4. **Method dispatch has no inline cache.** Each send re-resolves the target
-   (a monomorphic send fast path landed, ~5%, but there is no per-call-site
-   cache as in CRuby). `dispatch`'s 6.5–8.3× is the direct readout of this.
+4. **Method dispatch now has an inline cache (landed 2026-06-22).** Each send
+   first hit the monomorphic fast path (~5%); it now also carries a per-call-site
+   inline cache keyed by receiver class + a global method serial, so a warm
+   monomorphic send is a pointer compare instead of a method-table walk. This
+   closed `dispatch` from 6.5×→5.2× MRI and interpreted `fib` from 6.7×→5.0×.
+   What remains on these rows is frame setup + interface-handler dispatch
+   (items 2–3), not method resolution.
 
 ## Action items (ordered by expected leverage)
 
-1. **Inline (polymorphic) method caches at the send site.** Cache the resolved
-   method per call site keyed by receiver class; this is the single biggest
-   lever for the call-bound rows (`dispatch`, interpreted `fib`, `proc`) and is
-   exactly what CRuby/YJIT exploit. Highest ROI.
+1. ~~**Inline (polymorphic) method caches at the send site.**~~ **DONE
+   (2026-06-22).** Per-call-site monomorphic inline cache keyed by receiver class
+   + global method serial; drops the method-table walk on the warm hot path.
+   Delivered −18% `fib`, −11% `dispatch`, −7% `proc`. Next refinement: a small
+   polymorphic (N-way) cache for megamorphic sites.
 2. **Threaded-code / computed-goto-style dispatch.** Replace the interface
    handler indirection with a direct-threaded loop (jump table over opcode
    functions) to cut per-instruction overhead on every compute row. A
    *duplicated* fast loop already showed −24% on `fib` in a throwaway test — the
    lever is real; the task is a form that keeps the 100%-coverage gate.
-3. **Cheaper call frames.** Pool / stack-allocate the per-call frame so method
-   calls stop hitting the heap; targets `dispatch`/`fib`/`proc`/`alloc`.
+3. **Cheaper call frames (partly done).** The frame env and the operand-stack
+   backing array are now pooled (free-lists, GVL-guarded), and the OpSend fast
+   path passes args in place from the operand stack instead of copying — this is
+   part of the 2026-06-22 win. Remaining: avoid the `push`/`pop` closures that
+   force the operand stack to the heap, and stack-allocate small frames.
 4. **Extend AOT beyond integer kernels.** Float/mixed-type kernels (would pull
    `mandelbrot` into the AOT-wins column), cross-method devirtualisation, and
    the closed-world single-binary half of `rbgo build`. Already the only path

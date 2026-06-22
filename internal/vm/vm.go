@@ -129,6 +129,9 @@ type VM struct {
 	// / markEnvCaptured). Touched only while the GVL is held, so it needs no lock.
 	envFree []*Env
 
+	// stackFree recycles per-frame operand-stack backing arrays (see getStack).
+	stackFree [][]object.Value
+
 	// objIDs assigns stable object_id/__id__ values to symbols and reference
 	// objects (value types get a deterministic id from their value); nextObjID is
 	// the counter for the next reference id. Lazily initialised; GVL-guarded.
@@ -167,6 +170,42 @@ func (vm *VM) objectID(self object.Value) object.Value {
 
 // envFreeMax caps the env free-list so a deep call burst doesn't pin memory.
 const envFreeMax = 1024
+
+// stackFree recycles per-frame operand-stack backing arrays, mirroring envFree.
+// Each exec checks one out (getStack) and returns it (putStack) on normal exit;
+// an exception unwinding past the return leaves it to the GC. GVL-guarded.
+//
+// The operand stack escapes to the heap (the push/pop closures capture and
+// reassign it), so without pooling every frame allocated a fresh backing array;
+// recycling removes that per-call allocation on the hot call-bound path.
+
+// getStack returns a recycled operand stack (len 0), or a fresh one.
+func (vm *VM) getStack() []object.Value {
+	n := len(vm.stackFree)
+	if n == 0 {
+		return make([]object.Value, 0, 16)
+	}
+	s := vm.stackFree[n-1]
+	vm.stackFree = vm.stackFree[:n-1]
+	return s[:0]
+}
+
+// putStack returns an operand stack to the free-list. The slice must be empty
+// of live references the caller still needs; exec only recycles on normal
+// completion, when the stack holds nothing the frame will read again.
+func (vm *VM) putStack(s []object.Value) {
+	// getStack only ever hands out backing arrays with cap >= 16, so s always has
+	// capacity worth recycling; the only reason to drop it is a full free-list.
+	if len(vm.stackFree) >= envFreeMax {
+		return
+	}
+	// Clear so a pooled stack pins nothing for the GC.
+	s = s[:cap(s)]
+	for i := range s {
+		s[i] = nil
+	}
+	vm.stackFree = append(vm.stackFree, s[:0])
+}
 
 // getEnv returns a recycled frame env, or a fresh one if the free-list is empty.
 func (vm *VM) getEnv() *Env {
@@ -363,7 +402,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		}
 	}
 
-	stack := make([]object.Value, 0, 16)
+	stack := vm.getStack()
 	push := func(v object.Value) { stack = append(stack, v) }
 	pop := func() object.Value {
 		v := stack[len(stack)-1]
@@ -371,378 +410,425 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		return v
 	}
 
+	// caches is the per-send-site inline-cache slice, fetched lazily on the first
+	// OpSend (iseqCaches type-asserts the bytecode.ISeq's `any` field, so a
+	// send-free body — e.g. the hot `times { t += i }` block — never pays it).
+	var caches []inlineCache
+
 	pc := 0
 	var handlers []handlerFrame
 	result := object.Value(object.NilV)
 	finished := false
-	for !finished {
-		func() {
-			defer func() {
-				r := recover()
-				if r == nil {
-					return
+
+	// runChunk runs the instruction loop until the frame finishes (OpReturn /
+	// falling off the end) or a panic unwinds out. It is the shared loop body for
+	// both the handler-bearing path (wrapped in a recover that resumes at a
+	// rescue) and the common no-rescue path (run directly, so a method without a
+	// begin/rescue — fib, dispatch, attr accessors — pays no per-frame defer).
+	runChunk := func() {
+		for pc < len(iseq.Insns) {
+			in := iseq.Insns[pc]
+			switch in.Op {
+			case bytecode.OpNop:
+			case bytecode.OpPushConst:
+				// A string literal evaluates to a fresh mutable object each time
+				// (Ruby semantics), so clone string constants on push; every other
+				// constant is immutable and can be shared.
+				if s, ok := iseq.Consts[in.A].(*object.String); ok {
+					push(s.Dup())
+				} else {
+					push(iseq.Consts[in.A])
 				}
-				rerr, ok := r.(RubyError)
-				if !ok || len(handlers) == 0 {
-					panic(r) // not a Ruby exception, or no handler in this frame
+			case bytecode.OpPushNil:
+				push(object.NilV)
+			case bytecode.OpPushTrue:
+				push(object.True)
+			case bytecode.OpPushFalse:
+				push(object.False)
+			case bytecode.OpPushSelf:
+				push(self)
+			case bytecode.OpNewArray:
+				n := in.A
+				elems := make([]object.Value, n)
+				copy(elems, stack[len(stack)-n:])
+				stack = stack[:len(stack)-n]
+				push(&object.Array{Elems: elems})
+			case bytecode.OpNewHash:
+				n := in.A * 2
+				region := stack[len(stack)-n:]
+				h := object.NewHash()
+				for i := 0; i < n; i += 2 {
+					h.Set(region[i], region[i+1])
 				}
-				h := handlers[len(handlers)-1]
-				handlers = handlers[:len(handlers)-1]
-				stack = stack[:h.sp]
-				exc := vm.exceptionObject(rerr)
-				vm.curExc = exc
-				push(exc)
-				pc = h.pc
-			}()
-			for pc < len(iseq.Insns) {
-				in := iseq.Insns[pc]
-				switch in.Op {
-				case bytecode.OpNop:
-				case bytecode.OpPushConst:
-					// A string literal evaluates to a fresh mutable object each time
-					// (Ruby semantics), so clone string constants on push; every other
-					// constant is immutable and can be shared.
-					if s, ok := iseq.Consts[in.A].(*object.String); ok {
-						push(s.Dup())
-					} else {
-						push(iseq.Consts[in.A])
-					}
-				case bytecode.OpPushNil:
+				stack = stack[:len(stack)-n]
+				push(h)
+			case bytecode.OpHashSetPair:
+				v := pop()
+				k := pop()
+				// the accumulator hash is now on top of the stack; mutate in place.
+				stack[len(stack)-1].(*object.Hash).Set(k, v)
+			case bytecode.OpHashMerge:
+				val := pop()
+				other, ok := val.(*object.Hash)
+				if !ok {
+					raise("TypeError", "no implicit conversion of %s into Hash", vm.classOf(val).name)
+				}
+				acc := stack[len(stack)-1].(*object.Hash)
+				for _, k := range other.Keys {
+					v, _ := other.Get(k)
+					acc.Set(k, v)
+				}
+			case bytecode.OpNewRange:
+				hi := pop()
+				lo := pop()
+				push(&object.Range{Lo: lo, Hi: hi, Exclusive: in.A == 1})
+			case bytecode.OpPop:
+				pop()
+			case bytecode.OpDup:
+				push(stack[len(stack)-1])
+			case bytecode.OpGetLocal:
+				push(env.ancestor(in.B).slots[in.A])
+			case bytecode.OpSetLocal:
+				env.ancestor(in.B).slots[in.A] = stack[len(stack)-1]
+			case bytecode.OpGetIvar:
+				push(getIvar(self, iseq.Names[in.A]))
+			case bytecode.OpSetIvar:
+				setIvar(self, iseq.Names[in.A], stack[len(stack)-1])
+			case bytecode.OpGetConst:
+				name := iseq.Names[in.A]
+				v, ok := vm.consts[name]
+				if !ok {
+					raise("NameError", "uninitialized constant %s", name)
+				}
+				push(v)
+			case bytecode.OpGetScopedConst:
+				name := iseq.Names[in.A]
+				recv := pop()
+				cls, ok := recv.(*RClass)
+				if !ok {
+					raise("TypeError", "%s is not a class/module", recv.Inspect())
+				}
+				push(vm.scopedConst(cls, name))
+			case bytecode.OpSetConst:
+				// Assignment is an expression: set the constant, keep its value.
+				vm.consts[iseq.Names[in.A]] = stack[len(stack)-1]
+			case bytecode.OpGetGVar:
+				push(vm.gvar(iseq.Names[in.A]))
+			case bytecode.OpSetGVar:
+				// Assignment is an expression: set the global, keep its value.
+				vm.globals[iseq.Names[in.A]] = stack[len(stack)-1]
+			case bytecode.OpGetCVar:
+				name := iseq.Names[in.A]
+				vm.checkCVarScope(definee)
+				if c := cvarOwner(definee, name); c != nil {
+					push(c.cvars[name])
+				} else {
+					raise("NameError", "uninitialized class variable %s in %s", name, definee.name)
+				}
+			case bytecode.OpGetCVarQuiet:
+				// The read side of @@name ||= …: an undefined class variable is
+				// nil here rather than a NameError (Ruby's ||=/&&= semantics).
+				name := iseq.Names[in.A]
+				vm.checkCVarScope(definee)
+				if c := cvarOwner(definee, name); c != nil {
+					push(c.cvars[name])
+				} else {
 					push(object.NilV)
-				case bytecode.OpPushTrue:
-					push(object.True)
-				case bytecode.OpPushFalse:
-					push(object.False)
-				case bytecode.OpPushSelf:
-					push(self)
-				case bytecode.OpNewArray:
-					n := in.A
-					elems := make([]object.Value, n)
-					copy(elems, stack[len(stack)-n:])
-					stack = stack[:len(stack)-n]
-					push(&object.Array{Elems: elems})
-				case bytecode.OpNewHash:
-					n := in.A * 2
-					region := stack[len(stack)-n:]
-					h := object.NewHash()
-					for i := 0; i < n; i += 2 {
-						h.Set(region[i], region[i+1])
-					}
-					stack = stack[:len(stack)-n]
-					push(h)
-				case bytecode.OpHashSetPair:
-					v := pop()
-					k := pop()
-					// the accumulator hash is now on top of the stack; mutate in place.
-					stack[len(stack)-1].(*object.Hash).Set(k, v)
-				case bytecode.OpHashMerge:
-					val := pop()
-					other, ok := val.(*object.Hash)
-					if !ok {
-						raise("TypeError", "no implicit conversion of %s into Hash", vm.classOf(val).name)
-					}
-					acc := stack[len(stack)-1].(*object.Hash)
-					for _, k := range other.Keys {
-						v, _ := other.Get(k)
-						acc.Set(k, v)
-					}
-				case bytecode.OpNewRange:
-					hi := pop()
-					lo := pop()
-					push(&object.Range{Lo: lo, Hi: hi, Exclusive: in.A == 1})
-				case bytecode.OpPop:
-					pop()
-				case bytecode.OpDup:
-					push(stack[len(stack)-1])
-				case bytecode.OpGetLocal:
-					push(env.ancestor(in.B).slots[in.A])
-				case bytecode.OpSetLocal:
-					env.ancestor(in.B).slots[in.A] = stack[len(stack)-1]
-				case bytecode.OpGetIvar:
-					push(getIvar(self, iseq.Names[in.A]))
-				case bytecode.OpSetIvar:
-					setIvar(self, iseq.Names[in.A], stack[len(stack)-1])
-				case bytecode.OpGetConst:
-					name := iseq.Names[in.A]
-					v, ok := vm.consts[name]
-					if !ok {
-						raise("NameError", "uninitialized constant %s", name)
-					}
-					push(v)
-				case bytecode.OpGetScopedConst:
-					name := iseq.Names[in.A]
-					recv := pop()
-					cls, ok := recv.(*RClass)
-					if !ok {
-						raise("TypeError", "%s is not a class/module", recv.Inspect())
-					}
-					push(vm.scopedConst(cls, name))
-				case bytecode.OpSetConst:
-					// Assignment is an expression: set the constant, keep its value.
-					vm.consts[iseq.Names[in.A]] = stack[len(stack)-1]
-				case bytecode.OpGetGVar:
-					push(vm.gvar(iseq.Names[in.A]))
-				case bytecode.OpSetGVar:
-					// Assignment is an expression: set the global, keep its value.
-					vm.globals[iseq.Names[in.A]] = stack[len(stack)-1]
-				case bytecode.OpGetCVar:
-					name := iseq.Names[in.A]
-					vm.checkCVarScope(definee)
-					if c := cvarOwner(definee, name); c != nil {
-						push(c.cvars[name])
-					} else {
-						raise("NameError", "uninitialized class variable %s in %s", name, definee.name)
-					}
-				case bytecode.OpGetCVarQuiet:
-					// The read side of @@name ||= …: an undefined class variable is
-					// nil here rather than a NameError (Ruby's ||=/&&= semantics).
-					name := iseq.Names[in.A]
-					vm.checkCVarScope(definee)
-					if c := cvarOwner(definee, name); c != nil {
-						push(c.cvars[name])
-					} else {
-						push(object.NilV)
-					}
-				case bytecode.OpSetCVar:
-					// Set where the variable already lives in the hierarchy, else
-					// define it on the current class. Assignment keeps its value.
-					name := iseq.Names[in.A]
-					vm.checkCVarScope(definee)
-					if c := cvarOwner(definee, name); c != nil {
-						c.cvars[name] = stack[len(stack)-1]
-					} else {
-						definee.cvars[name] = stack[len(stack)-1]
-					}
-				case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
-					bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
-					bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:
-					b := pop()
-					a := pop()
-					push(vm.binaryOp(in.Op, a, b))
-				case bytecode.OpNeg:
-					push(negate(pop()))
-				case bytecode.OpNot:
-					push(object.Bool(!pop().Truthy()))
-				case bytecode.OpTruthy:
-					push(object.Bool(pop().Truthy()))
-				case bytecode.OpRaiseNoMatch:
-					subj := pop()
-					raise("NoMatchingPatternError", "%s", subj.Inspect())
-				case bytecode.OpJump:
+				}
+			case bytecode.OpSetCVar:
+				// Set where the variable already lives in the hierarchy, else
+				// define it on the current class. Assignment keeps its value.
+				name := iseq.Names[in.A]
+				vm.checkCVarScope(definee)
+				if c := cvarOwner(definee, name); c != nil {
+					c.cvars[name] = stack[len(stack)-1]
+				} else {
+					definee.cvars[name] = stack[len(stack)-1]
+				}
+			case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv,
+				bytecode.OpMod, bytecode.OpLt, bytecode.OpGt, bytecode.OpLe,
+				bytecode.OpGe, bytecode.OpEq, bytecode.OpNeq:
+				b := pop()
+				a := pop()
+				push(vm.binaryOp(in.Op, a, b))
+			case bytecode.OpNeg:
+				push(negate(pop()))
+			case bytecode.OpNot:
+				push(object.Bool(!pop().Truthy()))
+			case bytecode.OpTruthy:
+				push(object.Bool(pop().Truthy()))
+			case bytecode.OpRaiseNoMatch:
+				subj := pop()
+				raise("NoMatchingPatternError", "%s", subj.Inspect())
+			case bytecode.OpJump:
+				pc = in.A
+				continue
+			case bytecode.OpBranchIf:
+				if pop().Truthy() {
 					pc = in.A
 					continue
-				case bytecode.OpBranchIf:
-					if pop().Truthy() {
-						pc = in.A
-						continue
-					}
-				case bytecode.OpBranchUnless:
-					if !pop().Truthy() {
-						pc = in.A
-						continue
-					}
-				case bytecode.OpBranchNil:
-					if _, isNil := pop().(object.Nil); isNil {
-						pc = in.A
-						continue
-					}
-				case bytecode.OpSend:
-					argc := in.B
-					callArgs := make([]object.Value, argc)
-					copy(callArgs, stack[len(stack)-argc:])
-					stack = stack[:len(stack)-argc]
-					recv := pop()
-					name := iseq.Names[in.A]
-					if in.C == 0 {
-						// No literal block: take the monomorphic fast path that resolves
-						// and invokes the method directly, skipping the dispatchSend→send
-						// layers. A class receiver (singleton dispatch) or an unresolved
-						// name (operator fallback / method_missing) falls back to send.
-						if _, isClass := recv.(*RClass); !isClass {
-							if m := lookupMethod(vm.classOf(recv), name); m != nil {
-								push(vm.invoke(m, recv, callArgs, nil))
-								pc++
-								continue
-							}
-						}
-						push(vm.dispatchSend(recv, name, callArgs, nil))
-					} else {
-						// A literal block: capture this frame's env, self, block.
-						markEnvCaptured(env)
-						blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
-						push(vm.dispatchSend(recv, name, callArgs, blk))
-					}
-				case bytecode.OpSendBlockArg:
-					blockVal := pop()
-					argc := in.B
-					callArgs := make([]object.Value, argc)
-					copy(callArgs, stack[len(stack)-argc:])
-					stack = stack[:len(stack)-argc]
-					recv := pop()
-					push(vm.dispatchSend(recv, iseq.Names[in.A], callArgs, vm.toBlock(blockVal)))
-				case bytecode.OpDefineMethod:
-					name := iseq.Names[in.A]
-					m := &Method{name: name, iseq: iseq.Children[in.B], owner: definee}
-					// Attach the AOT-compiled body only on the first definition of
-					// this name; a redefinition gets a fresh, interpreted Method
-					// (deopt), since the compiled body matched the original source.
-					if _, redef := definee.methods[name]; !redef {
-						m.compiled = compiledFor(definee.name, name)
-					}
-					definee.methods[name] = m
-					// Hook: definee.method_added(:name) for instance-method defs, if
-					// the class/module defines the hook (singleton method).
-					if hook := lookupSMethod(definee, "method_added"); hook != nil {
-						vm.invoke(hook, definee, []object.Value{object.Symbol(name)}, nil)
-					}
-					push(object.NilV)
-				case bytecode.OpDefineSMethod:
-					definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
-					push(object.NilV)
-				case bytecode.OpDefineSingletonMethod:
-					// def recv.foo: a class receiver gains a class method; any other
-					// object gains a method on its singleton class.
-					name := iseq.Names[in.A]
-					recv := pop()
-					switch t := recv.(type) {
-					case *RClass:
-						t.smethods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: t}
-					case *RObject:
-						sc := vm.singletonClass(t)
-						sc.methods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: sc}
-					default:
-						raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
-					}
-					push(object.NilV)
-				case bytecode.OpDefineClass:
-					push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
-				case bytecode.OpDefineModule:
-					push(vm.defineModule(iseq.Names[in.A], iseq.Children[in.B]))
-				case bytecode.OpInvokeSuper:
-					var superArgs []object.Value
-					if in.B == 1 { // bare super forwards the frame's own arguments
-						superArgs = args
-					} else {
-						superArgs = make([]object.Value, in.A)
-						copy(superArgs, stack[len(stack)-in.A:])
-						stack = stack[:len(stack)-in.A]
-					}
-					push(vm.invokeSuper(self, definee, methodName, superArgs, block))
-				case bytecode.OpInvokeBlock:
-					if block == nil {
-						raise("LocalJumpError", "no block given (yield)")
-					}
-					yargs := make([]object.Value, in.A)
-					copy(yargs, stack[len(stack)-in.A:])
-					stack = stack[:len(stack)-in.A]
-					push(vm.callBlock(block, yargs))
-				case bytecode.OpBlockGiven:
-					push(object.Bool(block != nil))
-				case bytecode.OpBinding:
-					markEnvCaptured(env)
-					push(&Binding{env: env, self: self, definee: definee, names: append([]string(nil), iseq.Locals...)})
-				case bytecode.OpArgGiven:
-					push(object.Bool(in.A < len(args)))
-				case bytecode.OpKwGiven:
-					_, ok := env.kwargs.Get(object.Symbol(iseq.KwNames[in.A]))
-					push(object.Bool(ok))
-				case bytecode.OpReturn:
-					result = pop()
-					finished = true
-					return
-				case bytecode.OpBreak:
-					panic(breakSignal{owner: selfBlock, value: pop()})
-				case bytecode.OpPushHandler:
-					handlers = append(handlers, handlerFrame{pc: in.A, sp: len(stack)})
-				case bytecode.OpPopHandler:
-					handlers = handlers[:len(handlers)-1]
-				case bytecode.OpReThrow:
-					panic(vm.excError(pop()))
-				case bytecode.OpRegexp:
-					push(vm.compileRegexp(iseq.Names[in.A], iseq.Names[in.B]))
-				case bytecode.OpSplatToArray:
-					v := pop()
-					if arr, ok := v.(*object.Array); ok {
-						push(arr)
-					} else {
-						push(&object.Array{Elems: []object.Value{v}})
-					}
-				case bytecode.OpExpandArray:
-					elems := pop().(*object.Array).Elems
-					n := len(elems)
-					pre, post, hasSplat := in.A, in.B, in.C == 1
-					vals := make([]object.Value, 0, pre+post+1)
-					if hasSplat && n >= pre+post {
-						// Enough elements: the splat takes the middle, post the tail.
-						for i := 0; i < pre; i++ {
-							vals = append(vals, elems[i])
-						}
-						mid := make([]object.Value, n-pre-post)
-						copy(mid, elems[pre:n-post])
-						vals = append(vals, &object.Array{Elems: mid})
-						for i := 0; i < post; i++ {
-							vals = append(vals, elems[n-post+i])
-						}
-					} else {
-						// Too short (or no splat): fill targets left-to-right, the
-						// splat is empty, and missing targets get nil.
-						idx := 0
-						nextVal := func() object.Value {
-							if idx < n {
-								v := elems[idx]
-								idx++
-								return v
-							}
-							idx++
-							return object.NilV
-						}
-						for i := 0; i < pre; i++ {
-							vals = append(vals, nextVal())
-						}
-						if hasSplat {
-							vals = append(vals, &object.Array{})
-						}
-						for i := 0; i < post; i++ {
-							vals = append(vals, nextVal())
-						}
-					}
-					// Push in reverse so the first target's value is on top.
-					for i := len(vals) - 1; i >= 0; i-- {
-						push(vals[i])
-					}
-				case bytecode.OpConcatArray:
-					b2 := pop().(*object.Array)
-					a2 := pop().(*object.Array)
-					elems := make([]object.Value, 0, len(a2.Elems)+len(b2.Elems))
-					elems = append(elems, a2.Elems...)
-					elems = append(elems, b2.Elems...)
-					push(&object.Array{Elems: elems})
-				case bytecode.OpSendArray:
-					argsArr := pop().(*object.Array)
-					recv := pop()
-					var blk *Proc
-					if in.C > 0 {
-						markEnvCaptured(env)
-						blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
-					}
-					push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
-				case bytecode.OpSendArrayBlockArg:
-					blockVal := pop()
-					argsArr := pop().(*object.Array)
-					recv := pop()
-					push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, vm.toBlock(blockVal)))
-				default:
-					raise("VMError", "unknown opcode %s", in.Op)
 				}
-				pc++
+			case bytecode.OpBranchUnless:
+				if !pop().Truthy() {
+					pc = in.A
+					continue
+				}
+			case bytecode.OpBranchNil:
+				if _, isNil := pop().(object.Nil); isNil {
+					pc = in.A
+					continue
+				}
+			case bytecode.OpSend:
+				argc := in.B
+				name := iseq.Names[in.A]
+				if caches == nil {
+					caches = iseqCaches(iseq)
+				}
+				if in.C == 0 {
+					// No literal block: take the monomorphic fast path that resolves
+					// and invokes the method directly, skipping the dispatchSend→send
+					// layers. The per-call-site inline cache (caches[pc]) turns the
+					// method-table walk into a pointer compare on a cache hit — the
+					// dominant case for call-bound code (dispatch / fib / proc). A
+					// class receiver (singleton dispatch) or an unresolved name
+					// (operator fallback / method_missing) falls back to send.
+					base := len(stack) - argc
+					recv := stack[base-1]
+					if _, isClass := recv.(*RClass); !isClass {
+						if m := vm.lookupCached(&caches[pc], recv, name); m != nil {
+							// Pass the args in place from the operand stack: invoke
+							// (→ exec / a native method) consumes them before this frame
+							// touches the region again, so no per-call args copy is
+							// needed — this removes the single dominant allocation on the
+							// call-bound path. invokeInPlace copies into a fresh slice
+							// only when the callee might retain the args (native bodies).
+							res := vm.invokeInPlace(m, recv, stack[base:], nil)
+							stack = stack[:base-1]
+							stack = append(stack, res)
+							pc++
+							continue
+						}
+					}
+					callArgs := make([]object.Value, argc)
+					copy(callArgs, stack[base:])
+					stack = stack[:base-1]
+					push(vm.dispatchSend(recv, name, callArgs, nil))
+				} else {
+					callArgs := make([]object.Value, argc)
+					copy(callArgs, stack[len(stack)-argc:])
+					stack = stack[:len(stack)-argc]
+					recv := pop()
+					// A literal block: capture this frame's env, self, block.
+					markEnvCaptured(env)
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+					push(vm.dispatchSend(recv, name, callArgs, blk))
+				}
+			case bytecode.OpSendBlockArg:
+				blockVal := pop()
+				argc := in.B
+				callArgs := make([]object.Value, argc)
+				copy(callArgs, stack[len(stack)-argc:])
+				stack = stack[:len(stack)-argc]
+				recv := pop()
+				push(vm.dispatchSend(recv, iseq.Names[in.A], callArgs, vm.toBlock(blockVal)))
+			case bytecode.OpDefineMethod:
+				name := iseq.Names[in.A]
+				m := &Method{name: name, iseq: iseq.Children[in.B], owner: definee}
+				// Attach the AOT-compiled body only on the first definition of
+				// this name; a redefinition gets a fresh, interpreted Method
+				// (deopt), since the compiled body matched the original source.
+				if _, redef := definee.methods[name]; !redef {
+					m.compiled = compiledFor(definee.name, name)
+				}
+				definee.methods[name] = m
+				bumpMethodSerial() // a (re)definition can change what a cached send resolves to
+				// Hook: definee.method_added(:name) for instance-method defs, if
+				// the class/module defines the hook (singleton method).
+				if hook := lookupSMethod(definee, "method_added"); hook != nil {
+					vm.invoke(hook, definee, []object.Value{object.Symbol(name)}, nil)
+				}
+				push(object.NilV)
+			case bytecode.OpDefineSMethod:
+				definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
+				push(object.NilV)
+			case bytecode.OpDefineSingletonMethod:
+				// def recv.foo: a class receiver gains a class method; any other
+				// object gains a method on its singleton class.
+				name := iseq.Names[in.A]
+				recv := pop()
+				switch t := recv.(type) {
+				case *RClass:
+					t.smethods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: t}
+				case *RObject:
+					sc := vm.singletonClass(t)
+					sc.methods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: sc}
+				default:
+					raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
+				}
+				push(object.NilV)
+			case bytecode.OpDefineClass:
+				push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
+			case bytecode.OpDefineModule:
+				push(vm.defineModule(iseq.Names[in.A], iseq.Children[in.B]))
+			case bytecode.OpInvokeSuper:
+				var superArgs []object.Value
+				if in.B == 1 { // bare super forwards the frame's own arguments
+					superArgs = args
+				} else {
+					superArgs = make([]object.Value, in.A)
+					copy(superArgs, stack[len(stack)-in.A:])
+					stack = stack[:len(stack)-in.A]
+				}
+				push(vm.invokeSuper(self, definee, methodName, superArgs, block))
+			case bytecode.OpInvokeBlock:
+				if block == nil {
+					raise("LocalJumpError", "no block given (yield)")
+				}
+				yargs := make([]object.Value, in.A)
+				copy(yargs, stack[len(stack)-in.A:])
+				stack = stack[:len(stack)-in.A]
+				push(vm.callBlock(block, yargs))
+			case bytecode.OpBlockGiven:
+				push(object.Bool(block != nil))
+			case bytecode.OpBinding:
+				markEnvCaptured(env)
+				push(&Binding{env: env, self: self, definee: definee, names: append([]string(nil), iseq.Locals...)})
+			case bytecode.OpArgGiven:
+				push(object.Bool(in.A < len(args)))
+			case bytecode.OpKwGiven:
+				_, ok := env.kwargs.Get(object.Symbol(iseq.KwNames[in.A]))
+				push(object.Bool(ok))
+			case bytecode.OpReturn:
+				result = pop()
+				finished = true
+				return
+			case bytecode.OpBreak:
+				panic(breakSignal{owner: selfBlock, value: pop()})
+			case bytecode.OpPushHandler:
+				handlers = append(handlers, handlerFrame{pc: in.A, sp: len(stack)})
+			case bytecode.OpPopHandler:
+				handlers = handlers[:len(handlers)-1]
+			case bytecode.OpReThrow:
+				panic(vm.excError(pop()))
+			case bytecode.OpRegexp:
+				push(vm.compileRegexp(iseq.Names[in.A], iseq.Names[in.B]))
+			case bytecode.OpSplatToArray:
+				v := pop()
+				if arr, ok := v.(*object.Array); ok {
+					push(arr)
+				} else {
+					push(&object.Array{Elems: []object.Value{v}})
+				}
+			case bytecode.OpExpandArray:
+				elems := pop().(*object.Array).Elems
+				n := len(elems)
+				pre, post, hasSplat := in.A, in.B, in.C == 1
+				vals := make([]object.Value, 0, pre+post+1)
+				if hasSplat && n >= pre+post {
+					// Enough elements: the splat takes the middle, post the tail.
+					for i := 0; i < pre; i++ {
+						vals = append(vals, elems[i])
+					}
+					mid := make([]object.Value, n-pre-post)
+					copy(mid, elems[pre:n-post])
+					vals = append(vals, &object.Array{Elems: mid})
+					for i := 0; i < post; i++ {
+						vals = append(vals, elems[n-post+i])
+					}
+				} else {
+					// Too short (or no splat): fill targets left-to-right, the
+					// splat is empty, and missing targets get nil.
+					idx := 0
+					nextVal := func() object.Value {
+						if idx < n {
+							v := elems[idx]
+							idx++
+							return v
+						}
+						idx++
+						return object.NilV
+					}
+					for i := 0; i < pre; i++ {
+						vals = append(vals, nextVal())
+					}
+					if hasSplat {
+						vals = append(vals, &object.Array{})
+					}
+					for i := 0; i < post; i++ {
+						vals = append(vals, nextVal())
+					}
+				}
+				// Push in reverse so the first target's value is on top.
+				for i := len(vals) - 1; i >= 0; i-- {
+					push(vals[i])
+				}
+			case bytecode.OpConcatArray:
+				b2 := pop().(*object.Array)
+				a2 := pop().(*object.Array)
+				elems := make([]object.Value, 0, len(a2.Elems)+len(b2.Elems))
+				elems = append(elems, a2.Elems...)
+				elems = append(elems, b2.Elems...)
+				push(&object.Array{Elems: elems})
+			case bytecode.OpSendArray:
+				argsArr := pop().(*object.Array)
+				recv := pop()
+				var blk *Proc
+				if in.C > 0 {
+					markEnvCaptured(env)
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+				}
+				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
+			case bytecode.OpSendArrayBlockArg:
+				blockVal := pop()
+				argsArr := pop().(*object.Array)
+				recv := pop()
+				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, vm.toBlock(blockVal)))
+			default:
+				raise("VMError", "unknown opcode %s", in.Op)
 			}
-			finished = true
-		}()
+			pc++
+		}
+		finished = true
 	}
-	// Recycle this frame's env on normal completion (putEnv is a no-op if a
-	// closure captured it). An exception unwinding past here skips recycling and
-	// leaves the env to the GC — correct, just not pooled.
+
+	if iseqHasHandler(iseq) {
+		// This frame can rescue: run under a recover that, on a Ruby exception with
+		// a live handler, unwinds the operand stack and resumes at the rescue pc;
+		// other panics (or no handler) re-propagate. The loop re-enters after a
+		// caught exception (handler set a new pc) until the frame finishes.
+		for !finished {
+			func() {
+				defer func() {
+					r := recover()
+					if r == nil {
+						return
+					}
+					rerr, ok := r.(RubyError)
+					if !ok || len(handlers) == 0 {
+						panic(r) // not a Ruby exception, or no handler in this frame
+					}
+					h := handlers[len(handlers)-1]
+					handlers = handlers[:len(handlers)-1]
+					stack = stack[:h.sp]
+					exc := vm.exceptionObject(rerr)
+					vm.curExc = exc
+					push(exc)
+					pc = h.pc
+				}()
+				runChunk()
+			}()
+		}
+	} else {
+		// No begin/rescue in this ISeq: run the loop directly. A panic propagates
+		// to an enclosing frame's handler (or the Run boundary) with no per-frame
+		// defer — the common case (fib, dispatch, accessors) skips that overhead.
+		runChunk()
+	}
+	// Recycle this frame's env and operand stack on normal completion (putEnv is
+	// a no-op if a closure captured the env). An exception unwinding past here
+	// skips recycling and leaves both to the GC — correct, just not pooled.
 	vm.putEnv(env)
+	vm.putStack(stack)
 	return result
 }
 
