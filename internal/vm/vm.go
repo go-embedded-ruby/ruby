@@ -567,6 +567,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(vm.callBlock(block, yargs))
 				case bytecode.OpBlockGiven:
 					push(object.Bool(block != nil))
+				case bytecode.OpBinding:
+					push(&Binding{env: env, self: self, definee: definee, names: append([]string(nil), iseq.Locals...)})
 				case bytecode.OpArgGiven:
 					push(object.Bool(in.A < len(args)))
 				case bytecode.OpKwGiven:

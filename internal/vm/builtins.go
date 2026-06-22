@@ -68,6 +68,7 @@ func (vm *VM) bootstrap() {
 	vm.registerDate()
 	vm.registerBag()
 	vm.registerEval()
+	vm.registerBinding()
 	vm.registerRequire()
 	vm.registerSingleton()
 	vm.registerMethod()

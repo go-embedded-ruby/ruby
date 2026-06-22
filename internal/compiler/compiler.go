@@ -130,6 +130,7 @@ func (b *builder) build() *bytecode.ISeq {
 		KwRestSlot:  b.kwRestSlot,
 		BlockSlot:   b.blockSlot,
 		NumLocals:   len(b.locals),
+		Locals:      b.locals,
 		Children:    b.children,
 	}
 }
@@ -155,6 +156,32 @@ func Compile(prog *ast.Program) (iseq *bytecode.ISeq, err error) {
 	c.compileBody(prog.Body)
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	return c.pop().build(), nil
+}
+
+// CompileWithLocals lowers prog for a Binding eval: it compiles in a child scope
+// whose parent holds the binding's locals (by slot), so references to them
+// resolve at depth 1 — reads and writes reach the binding's environment when the
+// ISeq is run with that environment as the parent — while any new locals are
+// scratch in the child frame.
+func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.ISeq, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			iseq, err = nil, r.(compileError)
+		}
+	}()
+	c := &Compiler{}
+	parent := newBuilder("<binding>", nil)
+	parent.locals = append([]string(nil), localNames...)
+	c.push(parent)
+	child := newBuilder("(eval)", nil)
+	child.isBlock = true
+	child.parent = parent
+	c.push(child)
+	c.compileBody(prog.Body)
+	c.cur().emit(bytecode.OpReturn, 0, 0)
+	out := c.pop().build()
+	c.pop() // discard the synthetic parent scope
+	return out, nil
 }
 
 func (c *Compiler) cur() *builder   { return c.stack[len(c.stack)-1] }
@@ -487,6 +514,21 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	if v.Recv == nil && v.Block == nil && v.Name == "block_given?" && len(v.Args) == 0 {
 		b.emit(bytecode.OpBlockGiven, 0, 0)
 		return
+	}
+	// binding captures the current frame (locals, self) — also a frame intrinsic.
+	if v.Recv == nil && v.Block == nil && v.Name == "binding" && len(v.Args) == 0 {
+		b.emit(bytecode.OpBinding, 0, 0)
+		return
+	}
+	// A bare, zero-arg name that resolves to a local is a variable read, not a
+	// send. The parser emits a Call (not a VarRef) for an identifier whose
+	// assignment it never saw — which is exactly how an eval'd string references
+	// the binding locals seeded into this scope.
+	if v.Recv == nil && v.Block == nil && len(v.Args) == 0 {
+		if depth, slot, ok := b.resolve(v.Name); ok {
+			b.emit(bytecode.OpGetLocal, slot, depth)
+			return
+		}
 	}
 	if v.Recv != nil {
 		c.compileNode(v.Recv)

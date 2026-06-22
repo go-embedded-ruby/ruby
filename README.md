@@ -74,7 +74,10 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
   `method_missing`, `send`/`public_send`, `respond_to?`, **`define_method`**,
   **`instance_eval`/`instance_exec`**, **`class_eval`/`module_eval`/`class_exec`**,
   `instance_variable_get`/`set`/`defined?`, **string `eval`** (the embedded
-  front-end compiling Ruby at runtime), and the class/module **hooks**
+  front-end compiling Ruby at runtime), **`Binding`** (`binding`,
+  `Binding#eval`, `eval(str, binding)`, `local_variable_get`/`set`/`defined?`,
+  `local_variables`, `receiver` — capturing a frame's locals so eval'd code
+  reads and writes them), and the class/module **hooks**
   `inherited`/`included`/`prepended`/`method_added`/`extended`.
 - **Runtime loading:** **`require`/`require_relative`** load, compile and run a
   `.rb` file once (relative + search-path resolution, `LoadError` on miss,
@@ -187,8 +190,7 @@ Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/) for what's next
-(`Binding` for `eval` local-variable capture, the closed-world `rbgo build`
-toolchain).
+(the closed-world `rbgo build` toolchain).
 
 ## Quick start
 

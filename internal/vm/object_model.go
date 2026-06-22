@@ -289,6 +289,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Queue"].(*RClass)
 	case *IOObj:
 		return x.cls
+	case *Binding:
+		return vm.consts["Binding"].(*RClass)
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:

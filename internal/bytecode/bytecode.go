@@ -88,6 +88,7 @@ const (
 	OpRegexp            // A = Names index (source), B = Names index (flags); pushes a compiled Regexp
 	OpTruthy            // pops a value, pushes true if it is truthy else false (normalize a === / is_a? result)
 	OpRaiseNoMatch      // pops the subject value, raises NoMatchingPatternError naming it (case/in fell through)
+	OpBinding           // pushes a Binding capturing the current frame (locals, self, definee)
 )
 
 var opNames = map[Op]string{
@@ -109,6 +110,7 @@ var opNames = map[Op]string{
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
 	OpRegexp: "regexp", OpTruthy: "truthy", OpRaiseNoMatch: "raise_no_match",
+	OpBinding: "binding",
 }
 
 func (o Op) String() string {
@@ -142,6 +144,7 @@ type ISeq struct {
 	KwRestSlot  int          // slot of the **rest keyword-splat param, or -1
 	BlockSlot   int          // slot of the &block param, or -1
 	NumLocals int            // total local slots (params first, then assigns)
+	Locals    []string       // local-variable names by slot (for Binding); "" for anonymous slots
 	Children  []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
 	Super     string         // for a class body: the superclass name ("" → Object)
 }
