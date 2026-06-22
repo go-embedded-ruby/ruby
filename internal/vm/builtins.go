@@ -1965,6 +1965,24 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: []object.Value{object.Integer(floorDiv(a, b)), object.Integer(floorMod(a, b))}}
 	})
+	vm.cInteger.define("gcdlcm", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a, b := intOf(self), intArg(args[0])
+		g := gcdInt(a, b)
+		var lcm int64
+		if a != 0 && b != 0 {
+			lcm = absInt(a / g * b)
+		}
+		return &object.Array{Elems: []object.Value{object.Integer(g), object.Integer(lcm)}}
+	})
+	vm.cInteger.define("remainder", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// remainder truncates toward zero (keeping the dividend's sign), unlike %
+		// which floors — exactly Go's % operator.
+		a, b := intOf(self), intArg(args[0])
+		if b == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		return object.Integer(a % b)
+	})
 	vm.cInteger.define("digits", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
 		base := int64(10)
@@ -2063,6 +2081,33 @@ func (vm *VM) bootstrap() {
 			return object.Float(r)
 		}
 		return object.Integer(int64(r))
+	})
+	vm.cFloat.define("divmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := floatOf(self)
+		b, ok := toFloat(args[0])
+		if !ok {
+			raise("TypeError", "%s can't be coerced into Float", vm.classOf(args[0]).name)
+		}
+		if b == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		// Floored division: the quotient is an Integer, the modulo a Float.
+		q := math.Floor(a / b)
+		return &object.Array{Elems: []object.Value{object.Integer(int64(q)), object.Float(a - b*q)}}
+	})
+	vm.cFloat.define("to_r", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		f := floatOf(self)
+		r := new(big.Rat).SetFloat64(f)
+		if r == nil { // NaN or ±Infinity has no rational value
+			msg := "NaN"
+			if math.IsInf(f, 1) {
+				msg = "Infinity"
+			} else if math.IsInf(f, -1) {
+				msg = "-Infinity"
+			}
+			raise("FloatDomainError", "%s", msg)
+		}
+		return &object.Rational{R: r}
 	})
 	vm.cFloat.define("nan?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(math.IsNaN(floatOf(self)))
