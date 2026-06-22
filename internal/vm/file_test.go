@@ -1,6 +1,8 @@
 package vm_test
 
 import (
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -54,24 +56,22 @@ func TestFilePath(t *testing.T) {
 // TestFileIO covers File's filesystem operations against a temp directory, and
 // the Errno::ENOENT raised for missing paths (MRI Ruby 4.0.5 semantics).
 func TestFileIO(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir()) // forward-slash absolute path (portable)
+	a := dir + "/a.txt"
 	cases := []struct{ src, want string }{
-		{`p File.write("a.txt", "hello\nworld")`, "11\n"},
-		{`File.write("a.txt", "hello\nworld"); p File.read("a.txt")`, "\"hello\\nworld\"\n"},
-		{`File.write("a.txt", "hello\nworld"); p File.size("a.txt")`, "11\n"},
-		{`File.write("a.txt", "x"); p File.exist?("a.txt")`, "true\n"},
-		{`p File.exist?("missing.txt")`, "false\n"},
-		{`File.write("a.txt", "x"); p File.file?("a.txt")`, "true\n"},
-		{`p File.directory?(".")`, "true\n"},
-		{`p File.file?(".")`, "false\n"},
-		{`File.write("g.txt", "x"); p File.delete("g.txt"); p File.exist?("g.txt")`, "1\nfalse\n"},
-		{`File.write("h.txt", "x"); p File.unlink("h.txt")`, "1\n"},
+		{fmt.Sprintf(`p File.write(%q, "hello\nworld")`, a), "11\n"},
+		{fmt.Sprintf(`File.write(%q, "hello\nworld"); p File.read(%q)`, a, a), "\"hello\\nworld\"\n"},
+		{fmt.Sprintf(`File.write(%q, "hello\nworld"); p File.size(%q)`, a, a), "11\n"},
+		{fmt.Sprintf(`File.write(%q, "x"); p File.exist?(%q)`, a, a), "true\n"},
+		{fmt.Sprintf(`p File.exist?(%q)`, dir+"/missing.txt"), "false\n"},
+		{fmt.Sprintf(`File.write(%q, "x"); p File.file?(%q)`, a, a), "true\n"},
+		{fmt.Sprintf(`p File.directory?(%q)`, dir), "true\n"},
+		{fmt.Sprintf(`p File.file?(%q)`, dir), "false\n"},
+		{fmt.Sprintf(`File.write(%q, "x"); p File.delete(%q); p File.exist?(%q)`, dir+"/g.txt", dir+"/g.txt", dir+"/g.txt"), "1\nfalse\n"},
+		{fmt.Sprintf(`File.write(%q, "x"); p File.unlink(%q)`, dir+"/h.txt", dir+"/h.txt"), "1\n"},
 	}
 	for _, c := range cases {
-		got, err := runInDir(t, dir, c.src)
-		if err != nil {
-			t.Errorf("src=%q error: %v", c.src, err)
-		} else if got != c.want {
+		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}

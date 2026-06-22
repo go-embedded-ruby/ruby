@@ -211,6 +211,7 @@ func (vm *VM) bootstrap() {
 	exc("LoadError", "ScriptError")
 
 	vm.registerFile() // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerZlib() // needs the exception hierarchy (Zlib::Error < StandardError)
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
