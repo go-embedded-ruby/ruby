@@ -1627,6 +1627,24 @@ func (vm *VM) bootstrap() {
 			}
 			return h
 		}}
+	// String.new — "" with no argument, a fresh unfrozen copy of a String argument;
+	// a leading keyword-only call (capacity:/encoding:) arrives as a Hash and is
+	// ignored. It was falling through to the instance-allocating Class#new, which
+	// produced a bogus object rather than a real String.
+	vm.cString.smethods["new"] = &Method{name: "new", owner: vm.cString,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) == 0 {
+				return object.NewString("")
+			}
+			switch a := args[0].(type) {
+			case *object.String:
+				return object.NewString(a.Str())
+			case *object.Hash: // keyword-only arguments
+				return object.NewString("")
+			}
+			raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
+			return object.NilV
+		}}
 	vm.cHash.smethods["[]"] = &Method{name: "[]", owner: vm.cHash,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			h := object.NewHash()
