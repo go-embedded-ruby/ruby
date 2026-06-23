@@ -75,6 +75,7 @@ func (vm *VM) bootstrap() {
 	vm.registerEncoding()
 	vm.registerStringEncoding()
 	vm.registerBase64()
+	vm.registerPackUnpack()
 	vm.registerSecureRandom()
 	vm.registerDigest()
 	vm.registerJSON()
