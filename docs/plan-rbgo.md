@@ -500,13 +500,13 @@ the set operators (`uniq`/`&`/`|`/`-`) comparing with `eql?`, and a broad
 MRI-differential conformance sweep (Symbol/Module reflection, Numeric rounding,
 `Class.new`, `Integer()` parsing, …).
 **Exit:** most "ordinary" Ruby runs.
-**Still ahead:** `Array#pack`/`String#unpack` (format strings), and the rest of
-String **encodings**. A foundational slice has landed — an encoding tag on
-strings, the `Encoding` class (UTF_8/ASCII_8BIT/BINARY/US_ASCII), `#encoding`
-/`#force_encoding`/`#b`/`#ascii_only?`/`#valid_encoding?`, and length counting
-bytes for a binary string — but the tag does not yet propagate through every
-operation (concat/slice default to UTF-8); that completion is carried into
-Phase 8.
+**Done since:** `Array#pack`/`String#unpack`/`#unpack1` (the common directives
+C/c S/s L/l Q/q n/N v/V a/A/Z H/h U), and **String encodings** — an encoding tag
+on strings, the `Encoding` class (UTF_8/ASCII_8BIT/BINARY/US_ASCII), `#encoding`
+/`#force_encoding`/`#b`/`#ascii_only?`/`#valid_encoding?`, length counting bytes
+for a binary string, and the tag propagating through `+`/`*`/slicing/`<<`/`dup`.
+**Still ahead:** the multi-encoding *transcoding* rules (`#encode`, incompatible-
+concat `Encoding::CompatibilityError`) — a Phase 8 refinement.
 
 ### Phase 3 — Control flow & exceptions — ✅ DONE (core)
 Exception hierarchy, `raise`/`rescue`/`ensure`/`retry`, non-local
@@ -577,10 +577,10 @@ percent-literals** (in statement and command-argument position), **optional
 **`proc.()` call shorthand**, and **paren-less command calls on a method-call
 result** (`Fiber.yield 1`), **`if`/`unless` and `while`/`until` as expressions**,
 **leading-dot method chains across newlines**, and a **`&block` param in block
-lists**. **Still ahead:** the `%q`/`%Q`/`%W`/`%I` interpolation edge cases and
-`begin…end` used directly as an argument — the front-end now parses essentially
-all idiomatic Ruby (a real-world ActiveSupport core_ext idiom sweep that was 9/15
-is now 15/15).
+lists**, and **`begin…end`/`case…end` as a paren-less command argument**. The
+front-end now parses essentially all idiomatic Ruby — a real-world ActiveSupport
+core_ext idiom sweep that was 9/15 is now 15/15. **Still ahead:** only nicher
+literal/interpolation edge cases.
 
 ### Phase 6 — Standard library — 🚧 substantially landed
 IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
