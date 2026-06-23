@@ -511,9 +511,9 @@ Enumerator + `loop` + `lazy`**.
 **Landed since:** `Fiber` (`Fiber.new`/`resume`/`Fiber.yield`), `Enumerator`
 (external iteration `.next`/`.peek` on `each`-based enumerators, `with_index`),
 `Kernel#loop`, and **lazy enumerators** (`(1..Float::INFINITY).lazy.map{}.first(n)`).
-**Still ahead:** `Kernel#catch`/`throw`, and the yielder form
-`Enumerator.new { |y| y << … }` for external iteration (the `each`-based form
-already works).
+**Still ahead:** an *infinite* `Enumerator.new` generator driven by `first(n)` /
+external `next` (needs fiber-based suspension; finite generators, the each-based
+form and `lazy` already work).
 **Started:** the **exception hierarchy** (Exception → StandardError →
 RuntimeError + the built-in error classes with correct superclasses), Exception
 `#initialize`/`#message`/`#to_s`, `Object#is_a?`/`#kind_of?`/`#instance_of?`, and
@@ -536,10 +536,10 @@ machinery, hooks (`included`/`inherited`/`method_added`/…),
 `define_singleton_method`. (Refinements: deferred.)
 **Landed since:** `define_method`, `instance_eval`/`instance_exec`, `class_eval`,
 `define_singleton_method`, `extend`/`prepend`, string `eval` + `Binding`, the
-`included`/`inherited`/`method_added` hooks, and `Module#name`/`instance_methods`
-/`Object#methods`.
-**Still ahead:** `Module#const_get`/`const_set` (constant reflection),
-`extended`/`prepended` hooks, `ObjectSpace`, and **refinements** (deferred).
+`included`/`inherited`/`method_added` hooks, `Module#name`/`instance_methods`
+/`const_get`/`const_set`/`const_defined?`, and `Object#methods`.
+**Still ahead:** `extended`/`prepended` hooks, `ObjectSpace`, and **refinements**
+(deferred).
 **Started:** reflection/dispatch — `send`/`public_send` (forwarding the block),
 `respond_to?`, `itself`, `tap`, `then`/`yield_self`; Kernel conversion methods
 `Integer`/`Float`/`String`/`Array` (capitalized `Name(...)` now parses as a call).
