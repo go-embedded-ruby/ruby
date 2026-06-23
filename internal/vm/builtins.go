@@ -938,10 +938,16 @@ func (vm *VM) bootstrap() {
 		return &object.String{B: out}
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		var res object.Value
 		if re, ok := args[0].(*Regexp); ok { // s[/re/] / s[/re/, group]
-			return vm.stringRegexpIndex(strOf(self), re, args[1:])
+			res = vm.stringRegexpIndex(strOf(self), re, args[1:])
+		} else {
+			res = stringIndex(strOf(self), args)
 		}
-		return stringIndex(strOf(self), args)
+		if sub, ok := res.(*object.String); ok { // a slice keeps the receiver's encoding
+			sub.Enc = self.(*object.String).Enc
+		}
+		return res
 	}
 	vm.cString.define("[]", strIndexFn)
 	vm.cString.define("slice", strIndexFn)

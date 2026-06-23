@@ -305,7 +305,7 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		}
 		out := make([]byte, 0, len(a.B)+len(bs.B))
 		out = append(append(out, a.B...), bs.B...)
-		return &object.String{B: out}
+		return &object.String{B: out, Enc: a.Enc} // result keeps the receiver's encoding
 	case bytecode.OpMul:
 		n, ok := b.(object.Integer)
 		if !ok {
@@ -318,7 +318,7 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		for i := int64(0); i < int64(n); i++ {
 			out = append(out, a.B...)
 		}
-		return &object.String{B: out}
+		return &object.String{B: out, Enc: a.Enc} // result keeps the receiver's encoding
 	case bytecode.OpMod:
 		return object.NewString(formatString(a.Str(), formatArgs(b)))
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
