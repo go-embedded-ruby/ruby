@@ -123,6 +123,10 @@ func imagPart(im Value) string {
 type String struct {
 	B      []byte
 	Frozen bool
+	// Enc is the encoding name, or "" for the UTF-8 default. Only a non-default
+	// (e.g. "ASCII-8BIT") changes behaviour, so existing UTF-8 strings are
+	// unaffected.
+	Enc string
 }
 
 // NewString builds a String from a Go string.
@@ -131,11 +135,24 @@ func NewString(s string) *String { return &String{B: []byte(s)} }
 // Str returns the string's contents as a Go string.
 func (s *String) Str() string { return string(s.B) }
 
-// Dup returns an unfrozen shallow copy with its own backing array.
+// EncName returns the string's encoding name, defaulting to UTF-8.
+func (s *String) EncName() string {
+	if s.Enc == "" {
+		return "UTF-8"
+	}
+	return s.Enc
+}
+
+// IsBinary reports whether the string is tagged ASCII-8BIT (BINARY), in which
+// case it is treated as opaque bytes (length counts bytes, not characters).
+func (s *String) IsBinary() bool { return s.Enc == "ASCII-8BIT" }
+
+// Dup returns an unfrozen shallow copy with its own backing array, preserving the
+// encoding.
 func (s *String) Dup() *String {
 	b := make([]byte, len(s.B))
 	copy(b, s.B)
-	return &String{B: b}
+	return &String{B: b, Enc: s.Enc}
 }
 
 func (s *String) ToS() string { return string(s.B) }

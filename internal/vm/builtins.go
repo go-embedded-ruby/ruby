@@ -72,6 +72,8 @@ func (vm *VM) bootstrap() {
 	vm.registerRequire()
 	vm.registerSingleton()
 	vm.registerMethod()
+	vm.registerEncoding()
+	vm.registerStringEncoding()
 	vm.registerBase64()
 	vm.registerSecureRandom()
 	vm.registerDigest()
@@ -668,12 +670,16 @@ func (vm *VM) bootstrap() {
 	// String. Methods over the mutable byte-based String (length/chars/index are
 	// rune-aware for UTF-8). strOf reads the receiver's current contents.
 	strOf := func(self object.Value) string { return self.(*object.String).Str() }
-	vm.cString.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(utf8.RuneCountInString(strOf(self)))
-	})
-	vm.cString.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(utf8.RuneCountInString(strOf(self)))
-	})
+	strLen := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// A binary (ASCII-8BIT) string counts bytes; otherwise characters.
+		s := self.(*object.String)
+		if s.IsBinary() {
+			return object.Integer(int64(len(s.B)))
+		}
+		return object.Integer(int64(utf8.RuneCountInString(string(s.B))))
+	}
+	vm.cString.define("length", strLen)
+	vm.cString.define("size", strLen)
 	vm.cString.define("bytesize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(len(strOf(self)))
 	})

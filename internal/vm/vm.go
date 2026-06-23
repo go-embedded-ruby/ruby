@@ -110,6 +110,8 @@ type VM struct {
 	cMethod                                *RClass
 	cEnumerator                            *RClass
 	cYielder                               *RClass
+	cEncoding                              *RClass
+	encodings                              map[string]*encodingObj
 	cLazy                                  *RClass
 	lastMatch                              object.Value            // $~: last regexp MatchData (or nil)
 	globals                                map[string]object.Value // user-assigned $globals

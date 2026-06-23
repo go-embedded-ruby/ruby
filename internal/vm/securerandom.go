@@ -23,7 +23,8 @@ func (vm *VM) registerSecureRandom() {
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	def("random_bytes", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(string(secureBytes(countArg(args, 16))))
+		// Random bytes are binary, not UTF-8: tag ASCII-8BIT so length == bytesize.
+		return &object.String{B: secureBytes(countArg(args, 16)), Enc: "ASCII-8BIT"}
 	})
 	def("hex", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(hex.EncodeToString(secureBytes(countArg(args, 16))))
