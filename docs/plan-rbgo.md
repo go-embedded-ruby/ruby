@@ -567,10 +567,11 @@ navigation, numbered params/`it`. *(Or adopt Prism-on-wazero — see §16.)*
 alternative patterns, guards, one-line `=>`/`in`, `deconstruct`/
 `deconstruct_keys`), endless methods, beginless/endless ranges, **safe
 navigation `&.`**, **numbered params (`_1`/`_2`) + `it`**, **heredocs**
-(`<<`/`<<-`/`<<~`, interpolating and literal), and **`%w`/`%i` arrays**. **Still
-ahead:** `%q`/`%Q`/`%W`/`%I` literals; `%w`/`%i` in expression-argument position;
-the `proc.()` call shorthand; paren-less command calls on a method result
-(`Fiber.yield 1`); and `begin…end` used directly as an argument.
+(`<<`/`<<-`/`<<~`, interpolating and literal), the **`%w`/`%i`/`%q`/`%Q`/`%W`/`%I`
+percent-literals** (in statement and command-argument position), and **optional
+(`name = default`) and `*splat` params in block and stabby-lambda lists**. **Still
+ahead:** the `proc.()` call shorthand; other paren-less command calls on a method
+result (`Fiber.yield 1`); and `begin…end` used directly as an argument.
 
 ### Phase 6 — Standard library — 🚧 substantially landed
 IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
