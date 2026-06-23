@@ -74,6 +74,7 @@ func (vm *VM) bootstrap() {
 	vm.registerMethod()
 	vm.registerEncoding()
 	vm.registerStringEncoding()
+	vm.registerJSBridge() // browser DOM/Canvas access (wasm only; a no-op natively)
 	vm.registerBase64()
 	vm.registerPackUnpack()
 	vm.registerSecureRandom()
