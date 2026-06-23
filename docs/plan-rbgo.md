@@ -580,7 +580,8 @@ Run upstream suites.
 `Thread`/`Mutex`/`Queue` (emulated GVL), `Marshal` (MRI byte-exact), `Set`, the
 Regexp bridge (below), and the Go leaves `json`/`digest`/`zlib`/`base64`. Scientific
 + container bindings (NDArray/FFT/Image/BigDecimal) are wired in too.
-**Still ahead:** `securerandom`, and running the full upstream stdlib suites.
+**Still ahead:** running the full upstream stdlib suites against real-world
+corpora (see the conformance-ladder note below).
 
 **Regexp bridge — 🚧 landed (6a–6d):** the `go-ruby-regexp/regexp` engine is wired in
 (CGO=0).
@@ -645,6 +646,24 @@ pooling** (capture-tracked, halving per-call allocations) — plus a large, ongo
 Ruby 4.0.5. **Still ahead:** broaden the ruby/spec subset; the remaining
 hot-path optimisations (the operand-stack/value-stack redesign) were assessed and
 deferred as high-churn for their gain.
+
+**Conformance & benchmark ladder (real-world corpora).** Beyond ruby/spec, validate
+against progressively harder real Ruby, and benchmark against other implementations:
+1. **JRuby as a second oracle** — extend the MRI differential harness to a
+   three-way MRI / JRuby / rbgo comparison, and add JRuby as a third bar in the
+   perf benchmarks (rbgo is CGO=0 pure Go; JRuby is JVM-JIT).
+2. **Pure-Ruby gem test suites** as conformance corpora — e.g. ActiveSupport's
+   `core_ext` (String/Array/Hash/Numeric/Date extensions, all pure Ruby) exercises
+   the stdlib hard; run such suites to drive the remaining gaps (encodings, the
+   parser tail) by demand rather than guesswork.
+3. **Real-world workloads** — **OpenVox** (the community Puppet fork; Puppet's
+   manifest evaluation is Ruby-heavy and aligns with config-management interests)
+   and ultimately **Ruby on Rails**. Full execution needs C-extension and threading
+   depth that is out of scope, but their pure-Ruby subsets and unit suites are
+   achievable targets and strong signals. A spot-check of ActiveSupport- and
+   Puppet-style idioms (each_with_object, method_missing delegation, Comparable,
+   deep `dig`, type `case/when`, `define_method` loops, squiggly heredocs) already
+   runs; the near-term blockers are `%w` in argument position and String encodings.
 
 ## 15. Risk register
 
