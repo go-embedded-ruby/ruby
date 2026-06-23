@@ -90,6 +90,17 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Proc).isLambda)
 	})
+	vm.cProc.define("curry", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		p := self.(*Proc)
+		need := p.arityVal()
+		if need < 0 { // optional/splat parameters: the required-argument count
+			need = -need - 1
+		}
+		if len(args) > 0 {
+			need = int(intArg(args[0]))
+		}
+		return vm.curried(p, need, nil)
+	})
 	dupFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return dupValue(self)
 	}
@@ -110,6 +121,36 @@ func (vm *VM) bootstrap() {
 		for {
 			vm.callBlock(blk, nil)
 		}
+	})
+	vm.cObject.define("catch", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) (result object.Value) {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (yield)")
+		}
+		// Default tag is a fresh object passed to the block, so `catch { |t| throw t }`
+		// targets exactly this catch.
+		tag := object.Value(&RObject{class: vm.cObject, ivars: map[string]object.Value{}})
+		if len(args) > 0 {
+			tag = args[0]
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				// Tags match by identity (== on the interface): a Symbol by value, a
+				// reference by pointer — exactly Ruby's equal?.
+				if sig, ok := r.(throwSignal); ok && sig.tag == tag {
+					result = sig.value
+					return
+				}
+				panic(r)
+			}
+		}()
+		return vm.callBlock(blk, []object.Value{tag})
+	})
+	vm.cObject.define("throw", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		var val object.Value = object.NilV
+		if len(args) > 1 {
+			val = args[1]
+		}
+		panic(throwSignal{tag: args[0], value: val})
 	})
 	vm.cObject.define("equal?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Object identity: reference types compare by pointer, the immutable
@@ -215,6 +256,7 @@ func (vm *VM) bootstrap() {
 	exc("KeyError", "IndexError")
 	exc("StopIteration", "IndexError")
 	exc("LocalJumpError", "StandardError")
+	exc("UncaughtThrowError", "ArgumentError")
 	exc("NotImplementedError", "StandardError")
 	exc("FrozenError", "RuntimeError")
 	exc("IOError", "StandardError")
@@ -443,6 +485,31 @@ func (vm *VM) bootstrap() {
 	vm.cModule.define("instance_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		all := len(args) == 0 || args[0].Truthy() // instance_methods(false) = own only
 		return &object.Array{Elems: vm.methodNames(self.(*RClass), all)}
+	})
+	vm.cModule.define("const_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.scopedConst(self.(*RClass), constNameArg(args[0]))
+	})
+	vm.cModule.define("const_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := constNameArg(args[0])
+		cls := self.(*RClass)
+		// Top-level (Object) constants live in the flat namespace that a bare
+		// constant reference reads; everything else is scoped to the class.
+		if cls == vm.cObject {
+			vm.consts[name] = args[1]
+		} else {
+			cls.consts[name] = args[1]
+		}
+		return args[1]
+	})
+	vm.cModule.define("const_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := constNameArg(args[0])
+		for c := self.(*RClass); c != nil; c = c.super {
+			if _, ok := c.consts[name]; ok {
+				return object.True
+			}
+		}
+		_, ok := vm.consts[name]
+		return object.Bool(ok)
 	})
 	// Module#< <= > >= compare by the inheritance/inclusion hierarchy: A < B is
 	// true if A is a proper descendant of B, false if a proper ancestor (or, for
@@ -3193,6 +3260,25 @@ func (vm *VM) methodNames(c *RClass, all bool) []object.Value {
 		out[i] = object.Symbol(n)
 	}
 	return out
+}
+
+// constNameArg coerces a const_get/const_set/const_defined? name (a Symbol or
+// String) to its text, rejecting a name that does not begin with an uppercase
+// letter — as Ruby does.
+func constNameArg(v object.Value) string {
+	var name string
+	switch n := v.(type) {
+	case object.Symbol:
+		name = string(n)
+	case *object.String:
+		name = n.Str()
+	default:
+		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	}
+	if r := []rune(name); len(r) == 0 || !unicode.IsUpper(r[0]) {
+		raise("NameError", "wrong constant name %s", name)
+	}
+	return name
 }
 
 // stripRadixPrefix removes a leading 0x/0b/0o/0d (after an optional sign) when it

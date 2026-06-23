@@ -46,6 +46,13 @@ type breakSignal struct {
 	value object.Value
 }
 
+// throwSignal unwinds a Kernel#throw to the matching Kernel#catch (matched by tag
+// identity). An unmatched throw surfaces as an UncaughtThrowError at Run.
+type throwSignal struct {
+	tag   object.Value
+	value object.Value
+}
+
 // sendCatchBreak performs a send carrying a literal block, turning a `break`
 // raised by that block into the call's result.
 func (vm *VM) sendCatchBreak(recv object.Value, name string, args []object.Value, blk *Proc) (result object.Value) {
@@ -267,6 +274,9 @@ func (vm *VM) SetConst(name string, v object.Value) { vm.consts[name] = v }
 func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
+			if sig, ok := r.(throwSignal); ok {
+				r = RubyError{Class: "UncaughtThrowError", Message: "uncaught throw " + sig.tag.Inspect()}
+			}
 			result, err = nil, r.(RubyError)
 		}
 	}()

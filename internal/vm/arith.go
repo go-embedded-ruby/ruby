@@ -387,6 +387,19 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 }
 
 // arrayIncludes reports whether v is in elems (by Ruby ==).
+// curried returns a lambda that accumulates arguments across calls until it holds
+// at least `need` of them, then invokes p with all of them; otherwise it returns
+// a further curried lambda. Backs Proc#curry.
+func (vm *VM) curried(p *Proc, need int, got []object.Value) *Proc {
+	return &Proc{isLambda: true, nativeArity: -1, native: func(vm *VM, args []object.Value) object.Value {
+		all := append(append([]object.Value{}, got...), args...)
+		if len(all) >= need {
+			return vm.callBlock(p, all)
+		}
+		return vm.curried(p, need, all)
+	}}
+}
+
 // arrayUniq returns elems with duplicates removed, keeping first-seen order and
 // comparing with eql?. With a block, elements are distinguished by the block's
 // return value rather than the element itself.
