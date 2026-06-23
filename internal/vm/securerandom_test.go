@@ -8,8 +8,9 @@ func TestSecureRandom(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// hex: 2n lowercase hex chars; no-argument default is 16 bytes; nil -> default.
 		{`require "securerandom"; p [(SecureRandom.hex(4) =~ /\A[0-9a-f]{8}\z/) == 0, SecureRandom.hex.length, SecureRandom.hex(nil).length]`, "[true, 32, 32]\n"},
-		// random_bytes length.
-		{`require "securerandom"; p SecureRandom.random_bytes(5).length`, "5\n"},
+		// random_bytes length (bytesize, since random bytes are not valid UTF-8 and
+		// String#length counts characters here — we have no binary encoding).
+		{`require "securerandom"; p SecureRandom.random_bytes(5).bytesize`, "5\n"},
 		// uuid v4 format.
 		{`require "securerandom"; p (SecureRandom.uuid =~ /\A\h{8}-\h{4}-4\h{3}-[89ab]\h{3}-\h{12}\z/) == 0`, "true\n"},
 		// alphanumeric.
