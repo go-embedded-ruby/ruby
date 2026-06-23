@@ -18,7 +18,7 @@ var preloadedFeatures = map[string]bool{"set": true}
 var providedFeatures = map[string]bool{
 	"date": true, "time": true, "bigdecimal": true, "bag": true,
 	"base64": true, "digest": true, "json": true, "zlib": true,
-	"stringio": true,
+	"stringio": true, "securerandom": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime

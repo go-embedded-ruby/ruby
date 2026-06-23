@@ -73,6 +73,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSingleton()
 	vm.registerMethod()
 	vm.registerBase64()
+	vm.registerSecureRandom()
 	vm.registerDigest()
 	vm.registerJSON()
 	vm.registerMarshal()
