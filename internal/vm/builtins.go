@@ -1181,6 +1181,130 @@ func (vm *VM) bootstrap() {
 		a.Elems = append(a.Elems, args[0])
 		return a
 	})
+	vm.cArray.define("pop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		if len(args) > 0 { // pop(n) removes and returns the last n as an array
+			n := int(intArg(args[0]))
+			if n < 0 {
+				raise("ArgumentError", "negative array size")
+			}
+			if n > len(a.Elems) {
+				n = len(a.Elems)
+			}
+			start := len(a.Elems) - n
+			out := append([]object.Value{}, a.Elems[start:]...)
+			a.Elems = a.Elems[:start]
+			return &object.Array{Elems: out}
+		}
+		if len(a.Elems) == 0 {
+			return object.NilV
+		}
+		v := a.Elems[len(a.Elems)-1]
+		a.Elems = a.Elems[:len(a.Elems)-1]
+		return v
+	})
+	vm.cArray.define("shift", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		if len(args) > 0 { // shift(n) removes and returns the first n as an array
+			n := int(intArg(args[0]))
+			if n < 0 {
+				raise("ArgumentError", "negative array size")
+			}
+			if n > len(a.Elems) {
+				n = len(a.Elems)
+			}
+			out := append([]object.Value{}, a.Elems[:n]...)
+			a.Elems = a.Elems[n:]
+			return &object.Array{Elems: out}
+		}
+		if len(a.Elems) == 0 {
+			return object.NilV
+		}
+		v := a.Elems[0]
+		a.Elems = a.Elems[1:]
+		return v
+	})
+	unshift := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		a.Elems = append(append([]object.Value{}, args...), a.Elems...)
+		return a
+	}
+	vm.cArray.define("unshift", unshift)
+	vm.cArray.define("prepend", unshift)
+	vm.cArray.define("delete", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// Remove every element == the argument; return it, or (a block's result,
+		// else nil) when nothing matched.
+		a := self.(*object.Array)
+		found := false
+		var out []object.Value
+		for _, e := range a.Elems {
+			if valueEqual(e, args[0]) {
+				found = true
+			} else {
+				out = append(out, e)
+			}
+		}
+		a.Elems = out
+		if found {
+			return args[0]
+		}
+		if blk != nil {
+			return vm.callBlock(blk, nil)
+		}
+		return object.NilV
+	})
+	vm.cArray.define("delete_if", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "delete_if")
+		}
+		a := self.(*object.Array)
+		var out []object.Value
+		for _, e := range a.Elems {
+			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
+				out = append(out, e)
+			}
+		}
+		a.Elems = out
+		return a
+	})
+	vm.cArray.define("concat", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		for _, arg := range args {
+			other, ok := arg.(*object.Array)
+			if !ok {
+				raise("TypeError", "no implicit conversion of %s into Array", classNameOf(arg))
+			}
+			a.Elems = append(a.Elems, other.Elems...)
+		}
+		return a
+	})
+	vm.cArray.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		a.Elems = nil
+		return a
+	})
+	vm.cArray.define("rotate!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		if n := len(a.Elems); n > 0 {
+			k := 1
+			if len(args) > 0 {
+				k = int(intArg(args[0]))
+			}
+			k = ((k % n) + n) % n
+			a.Elems = append(append([]object.Value{}, a.Elems[k:]...), a.Elems[:k]...)
+		}
+		return a
+	})
+	vm.cArray.define("reverse_each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "reverse_each")
+		}
+		a := self.(*object.Array)
+		for i := len(a.Elems) - 1; i >= 0; i-- {
+			vm.callBlock(blk, []object.Value{a.Elems[i]})
+		}
+		return a
+	})
 	vm.cArray.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, e := range self.(*object.Array).Elems {
 			if valueEqual(e, args[0]) {
