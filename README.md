@@ -5,7 +5,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
-[![Phase](https://img.shields.io/badge/phases-1--8%20active-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
+[![Phase](https://img.shields.io/badge/phases-0--7%20done%20%C2%B7%208%20active-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
 
 **A pure-Go implementation of Ruby — one static binary, full dynamism, zero cgo.**
 
@@ -23,7 +23,8 @@ monkey-patching, `define_method` and `method_missing` free.
 
 ## Status
 
-Supported today (every feature **differential-tested against MRI Ruby 4.0.5**):
+Supported today (every feature **differential-tested against MRI Ruby 4.0.5 and
+JRuby**):
 
 - **Values:** integers (`int64`, with automatic **Bignum** promotion on int64
   overflow and arbitrary-precision integer literals, **radix literals** `0x`/`0o`/
@@ -272,7 +273,7 @@ internal/
 docs/                plan-rbgo.md (the roadmap), aot-compiler.md
 ```
 
-## Testing
+## Testing & conformance
 
 ```bash
 go test ./...
@@ -281,6 +282,21 @@ go tool cover -func=cov.out | tail -1
 ```
 
 If a parent `go.work` is present, prefix commands with `GOWORK=off`.
+
+Correctness is judged against **two independent reference implementations** of
+Ruby 4.0 — **MRI (CRuby) 4.0.5** and **JRuby**. The three-way differential oracle
+[`scripts/oracle.sh`](scripts/oracle.sh) runs a snippet through rbgo, MRI and
+JRuby and flags any divergence:
+
+```bash
+scripts/oracle.sh -e 'p (1..10).select(&:even?).map { |x| x**2 }'
+```
+
+Beyond synthetic tests, the bar is **real-world Ruby**: idioms and test suites
+from reference applications — **Ruby on Rails** (ActiveSupport's pure-Ruby
+`core_ext`) and **OpenVox**/Puppet (Ruby-heavy manifest evaluation) — drive the
+remaining work by demand and double as conformance corpora and performance
+baselines (pure-Go CGO=0 vs CRuby's C and JRuby's JVM JIT).
 
 ## Design & roadmap
 
