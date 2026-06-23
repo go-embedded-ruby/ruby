@@ -998,33 +998,49 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(self.(*object.Array).Elems) == 0)
 	})
+	// Array#initialize fills the receiver: empty / a copy of an Array argument /
+	// n copies of a value / n elements from a block. Reused by Array.new for both
+	// Array and its subclasses.
+	arrayInit := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// Array.new / Array.new(other) / Array.new(n[, val]) / Array.new(n) { |i| }
+		arr := self.(*object.Array)
+		if len(args) == 1 {
+			if a, ok := args[0].(*object.Array); ok {
+				arr.Elems = append([]object.Value{}, a.Elems...)
+				return self
+			}
+		}
+		if len(args) == 0 {
+			arr.Elems = nil
+			return self
+		}
+		n := intArg(args[0])
+		if n < 0 {
+			raise("ArgumentError", "negative array size")
+		}
+		out := make([]object.Value, n)
+		for i := range out {
+			switch {
+			case blk != nil:
+				out[i] = vm.callBlock(blk, []object.Value{object.Integer(int64(i))})
+			case len(args) >= 2:
+				out[i] = args[1]
+			default:
+				out[i] = object.NilV
+			}
+		}
+		arr.Elems = out
+		return self
+	}
+	vm.cArray.define("initialize", arrayInit)
 	vm.cArray.smethods["new"] = &Method{name: "new", owner: vm.cArray,
-		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-			// Array.new / Array.new(other) / Array.new(n[, val]) / Array.new(n) { |i| }
-			if len(args) == 0 {
-				return &object.Array{}
+		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			if recv := self.(*RClass); recv != vm.cArray {
+				return vm.newBuiltinSubclass(recv, &object.Array{}, args, blk)
 			}
-			if len(args) == 1 {
-				if a, ok := args[0].(*object.Array); ok {
-					return &object.Array{Elems: append([]object.Value{}, a.Elems...)}
-				}
-			}
-			n := intArg(args[0])
-			if n < 0 {
-				raise("ArgumentError", "negative array size")
-			}
-			out := make([]object.Value, n)
-			for i := range out {
-				switch {
-				case blk != nil:
-					out[i] = vm.callBlock(blk, []object.Value{object.Integer(int64(i))})
-				case len(args) >= 2:
-					out[i] = args[1]
-				default:
-					out[i] = object.NilV
-				}
-			}
-			return &object.Array{Elems: out}
+			arr := &object.Array{}
+			arrayInit(vm, arr, args, blk)
+			return arr
 		}}
 	vm.cArray.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array).Elems
@@ -1611,39 +1627,63 @@ func (vm *VM) bootstrap() {
 
 	// Hash.
 	// Hash.new — Hash.new, Hash.new(default), or Hash.new { |hash, key| … }.
-	vm.cHash.smethods["new"] = &Method{name: "new", owner: vm.cHash,
-		native: func(_ *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-			h := object.NewHash()
-			switch {
-			case blk != nil:
-				if len(args) != 0 {
-					raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
-				}
-				h.DefaultProc = blk
-			case len(args) == 1:
-				h.Default = args[0]
-			case len(args) > 1:
-				raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+	// Hash#initialize sets the default: a static default value, or a default block.
+	// Reused by Hash.new for both Hash and its subclasses.
+	hashInit := func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		h := self.(*object.Hash)
+		switch {
+		case blk != nil:
+			if len(args) != 0 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 			}
+			h.DefaultProc = blk
+		case len(args) == 1:
+			h.Default = args[0]
+		case len(args) > 1:
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
+		return self
+	}
+	vm.cHash.define("initialize", hashInit)
+	vm.cHash.smethods["new"] = &Method{name: "new", owner: vm.cHash,
+		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			if recv := self.(*RClass); recv != vm.cHash {
+				return vm.newBuiltinSubclass(recv, object.NewHash(), args, blk)
+			}
+			h := object.NewHash()
+			hashInit(vm, h, args, blk)
 			return h
 		}}
-	// String.new — "" with no argument, a fresh unfrozen copy of a String argument;
-	// a leading keyword-only call (capacity:/encoding:) arrives as a Hash and is
-	// ignored. It was falling through to the instance-allocating Class#new, which
-	// produced a bogus object rather than a real String.
-	vm.cString.smethods["new"] = &Method{name: "new", owner: vm.cString,
-		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			if len(args) == 0 {
-				return object.NewString("")
-			}
+	// String#initialize sets the receiver's content: "" with no argument, a copy
+	// of a String argument; a keyword-only call (capacity:/encoding:) arrives as a
+	// Hash and is ignored. Reused by String.new for both String and its subclasses.
+	stringInit := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		content := ""
+		if len(args) > 0 {
 			switch a := args[0].(type) {
 			case *object.String:
-				return object.NewString(a.Str())
+				content = a.Str()
 			case *object.Hash: // keyword-only arguments
-				return object.NewString("")
+			default:
+				raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
 			}
-			raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
-			return object.NilV
+		}
+		s.B = []byte(content)
+		return self
+	}
+	vm.cString.define("initialize", stringInit)
+	// String.new builds a real String (it was falling through to the
+	// instance-allocating Class#new and producing a bogus object). A subclass
+	// instead wraps a String in an RObject so its class identity is preserved.
+	vm.cString.smethods["new"] = &Method{name: "new", owner: vm.cString,
+		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			if recv := self.(*RClass); recv != vm.cString {
+				return vm.newBuiltinSubclass(recv, object.NewString(""), args, blk)
+			}
+			s := object.NewString("")
+			stringInit(vm, s, args, blk)
+			return s
 		}}
 	vm.cHash.smethods["[]"] = &Method{name: "[]", owner: vm.cHash,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -2543,6 +2583,16 @@ func (vm *VM) bootstrap() {
 func nativeNew(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 	class := self.(*RClass)
 	obj := &RObject{class: class, ivars: map[string]object.Value{}}
+	vm.send(obj, "initialize", args, blk)
+	return obj
+}
+
+// newBuiltinSubclass allocates an instance of a user subclass recv of a built-in
+// value type, wrapping a fresh zero value, then runs initialize — which
+// populates the wrapped value from args (dispatched onto it via callNative's
+// unwrap), so each value type's own constructor semantics are reused unchanged.
+func (vm *VM) newBuiltinSubclass(recv *RClass, zero object.Value, args []object.Value, blk *Proc) object.Value {
+	obj := &RObject{class: recv, ivars: map[string]object.Value{}, builtin: zero}
 	vm.send(obj, "initialize", args, blk)
 	return obj
 }

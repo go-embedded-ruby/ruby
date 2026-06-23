@@ -114,6 +114,12 @@ type RObject struct {
 	class     *RClass
 	ivars     map[string]object.Value
 	singleton *RClass // lazily created; its super is `class`
+	// builtin holds the wrapped value (a *object.String / *object.Array /
+	// *object.Hash) when this object is an instance of a user subclass of a
+	// built-in value type; nil otherwise. Value-class native methods are
+	// dispatched against it (see callNative), while user methods, ivars and
+	// identity stay with the RObject.
+	builtin object.Value
 }
 
 // singletonClass returns o's singleton class, creating it on first use. Its
@@ -126,8 +132,27 @@ func (vm *VM) singletonClass(o *RObject) *RClass {
 	return o.singleton
 }
 
-func (o *RObject) ToS() string     { return "#<" + o.class.name + ">" }
-func (o *RObject) Inspect() string { return o.ToS() }
+func (o *RObject) ToS() string {
+	if o.builtin != nil { // a built-in value subclass renders as its wrapped value
+		return o.builtin.ToS()
+	}
+	return "#<" + o.class.name + ">"
+}
+func (o *RObject) Inspect() string {
+	if o.builtin != nil {
+		return o.builtin.Inspect()
+	}
+	return o.ToS()
+}
+
+// HashUnwrap exposes the wrapped value so a built-in value subclass instance used
+// as a Hash key hashes and compares as that value (object.KeyUnwrapper).
+func (o *RObject) HashUnwrap() (object.Value, bool) {
+	if o.builtin != nil {
+		return o.builtin, true
+	}
+	return nil, false
+}
 func (o *RObject) Truthy() bool    { return true }
 
 // lookupMethod walks the ancestor chain: at each class, its own methods then
@@ -365,6 +390,13 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 // control-flow signals (break/return) pass through untouched, and a broken VM
 // invariant still panics elsewhere so real bugs stay loud.
 func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk *Proc) (res object.Value) {
+	// For an instance of a user subclass of a built-in value type, dispatch the
+	// value type's own native methods (String#upcase, Array#map, …) against the
+	// wrapped value, while Object/Kernel natives (object_id, freeze, ==, ivar
+	// accessors) keep operating on the wrapper.
+	if o, ok := self.(*RObject); ok && o.builtin != nil && vm.isBuiltinValueMethod(m, o.builtin) {
+		self = o.builtin
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(runtime.Error); ok {
@@ -374,6 +406,18 @@ func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk 
 		}
 	}()
 	return m.native(vm, self, args, blk)
+}
+
+// isBuiltinValueMethod reports whether m is one of the wrapped value's own
+// value-class methods (defined on its class or an included module such as
+// Comparable/Enumerable), as opposed to a generic Object/BasicObject method
+// (object_id, freeze, ==, ivar accessors, class) that must keep operating on the
+// wrapper so identity and instance variables behave.
+func (vm *VM) isBuiltinValueMethod(m *Method, builtin object.Value) bool {
+	if m.owner == vm.cObject || m.owner == vm.cBasicObject {
+		return false
+	}
+	return classIsA(vm.classOf(builtin), m.owner)
 }
 
 func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {

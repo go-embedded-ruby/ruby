@@ -266,7 +266,20 @@ type Hash struct {
 type strKey string
 
 // hashKey normalises a key to its comparable map form.
+// KeyUnwrapper is implemented by a wrapper around a built-in value (an instance
+// of a user subclass of String/Array/Hash) so that, used as a Hash key, it hashes
+// and compares as the value it wraps rather than by object identity. Defined here
+// (not in the vm package) to keep the hash key logic free of an import cycle.
+type KeyUnwrapper interface {
+	HashUnwrap() (Value, bool)
+}
+
 func hashKey(k Value) any {
+	if u, ok := k.(KeyUnwrapper); ok {
+		if v, wrapped := u.HashUnwrap(); wrapped {
+			k = v
+		}
+	}
 	if s, ok := k.(*String); ok {
 		return strKey(s.B)
 	}

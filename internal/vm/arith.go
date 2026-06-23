@@ -154,6 +154,15 @@ func bigOp(op bytecode.Op, a, b *big.Int) object.Value {
 // method so user classes (and the embedded-Ruby Comparable mixin) can define
 // `<`, `<=`, `>`, `>=` and `==`.
 func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
+	// An instance of a user subclass of a built-in value type uses that value's
+	// own operators (so a String-subclass "+", an Array-subclass "*", and the
+	// comparisons all work), on either side of the operator.
+	if o, ok := a.(*RObject); ok && o.builtin != nil {
+		a = o.builtin
+	}
+	if o, ok := b.(*RObject); ok && o.builtin != nil {
+		b = o.builtin
+	}
 	switch op {
 	case bytecode.OpEq, bytecode.OpNeq:
 		// Objects dispatch `==` (so Object identity, a user `==`, or
