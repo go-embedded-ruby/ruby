@@ -108,9 +108,14 @@ module Enumerable
     find(&blk)
   end
 
-  def count
+  def count(*args)
     n = 0
-    __each_packed { |x| n = n + 1 if !block_given? || yield(x) }
+    if args.empty?
+      __each_packed { |x| n = n + 1 if !block_given? || yield(x) }
+    else
+      item = args[0]
+      __each_packed { |x| n = n + 1 if x == item }
+    end
     n
   end
 

@@ -320,21 +320,37 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "count",
-						Insns: []bytecode.Instr{{Op: 1}, {Op: 12}, {Op: 9}, {Op: 5}, {Op: 30, C: 1}, {Op: 9}, {Op: 11}, {Op: 49}},
+						Insns: []bytecode.Instr{{Op: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 30}, {Op: 28, A: 9}, {Op: 5}, {Op: 30, A: 1, C: 1}, {Op: 26, A: 16}, {Op: 11}, {Op: 1}, {Op: 30, A: 2, B: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1, C: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 49}},
 						Consts: []object.Value{
 							object.Integer(0),
 						},
-						Names:       []string{"__each_packed"},
+						Names:       []string{"empty?", "__each_packed", "[]"},
+						Params:      []string{"args"},
 						NumRequired: 0,
-						SplatIndex:  -1,
+						SplatIndex:  0,
 						KwRestSlot:  -1,
 						BlockSlot:   -1,
-						NumLocals:   1,
-						Locals:      []string{"n"},
+						NumLocals:   3,
+						Locals:      []string{"args", "n", "item"},
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:  "<block>",
-								Insns: []bytecode.Instr{{Op: 48}, {Op: 25}, {Op: 10}, {Op: 27, A: 7}, {Op: 9}, {Op: 11}, {Op: 47, A: 1}, {Op: 28, A: 13}, {Op: 11, B: 1}, {Op: 1}, {Op: 13}, {Op: 12, B: 1}, {Op: 26, A: 14}, {Op: 2}, {Op: 49}},
+								Insns: []bytecode.Instr{{Op: 48}, {Op: 25}, {Op: 10}, {Op: 27, A: 7}, {Op: 9}, {Op: 11}, {Op: 47, A: 1}, {Op: 28, A: 13}, {Op: 11, A: 1, B: 1}, {Op: 1}, {Op: 13}, {Op: 12, A: 1, B: 1}, {Op: 26, A: 14}, {Op: 2}, {Op: 49}},
+								Consts: []object.Value{
+									object.Integer(1),
+								},
+								Params:      []string{"x"},
+								NumRequired: 1,
+								SplatIndex:  -1,
+								KwRestSlot:  -1,
+								BlockSlot:   -1,
+								NumLocals:   1,
+								Locals:      []string{"x"},
+								Super:       "",
+							},
+							&bytecode.ISeq{
+								Name:  "<block>",
+								Insns: []bytecode.Instr{{Op: 11}, {Op: 11, A: 2, B: 1}, {Op: 22}, {Op: 28, A: 9}, {Op: 11, A: 1, B: 1}, {Op: 1}, {Op: 13}, {Op: 12, A: 1, B: 1}, {Op: 26, A: 10}, {Op: 2}, {Op: 49}},
 								Consts: []object.Value{
 									object.Integer(1),
 								},

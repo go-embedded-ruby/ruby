@@ -1182,21 +1182,11 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
-	vm.cArray.define("uniq", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		var out []object.Value
-		for _, e := range self.(*object.Array).Elems {
-			dup := false
-			for _, k := range out {
-				if valueEql(e, k) {
-					dup = true
-					break
-				}
-			}
-			if !dup {
-				out = append(out, e)
-			}
-		}
-		return &object.Array{Elems: out}
+	vm.cArray.define("dig", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.digValue(self, args)
+	})
+	vm.cArray.define("uniq", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		return &object.Array{Elems: vm.arrayUniq(self.(*object.Array).Elems, blk)}
 	})
 	// Set intersection (&) and union (|): both deduplicate, keeping first-seen
 	// order, matching Ruby.
@@ -1271,21 +1261,9 @@ func (vm *VM) bootstrap() {
 		a.Elems = out
 		return self
 	})
-	vm.cArray.define("uniq!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("uniq!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
-		var out []object.Value
-		for _, e := range a.Elems {
-			dup := false
-			for _, k := range out {
-				if valueEql(e, k) {
-					dup = true
-					break
-				}
-			}
-			if !dup {
-				out = append(out, e)
-			}
-		}
+		out := vm.arrayUniq(a.Elems, blk)
 		if len(out) == len(a.Elems) {
 			return object.NilV
 		}

@@ -387,6 +387,31 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 }
 
 // arrayIncludes reports whether v is in elems (by Ruby ==).
+// arrayUniq returns elems with duplicates removed, keeping first-seen order and
+// comparing with eql?. With a block, elements are distinguished by the block's
+// return value rather than the element itself.
+func (vm *VM) arrayUniq(elems []object.Value, blk *Proc) []object.Value {
+	var out, keys []object.Value
+	for _, e := range elems {
+		key := e
+		if blk != nil {
+			key = vm.callBlock(blk, []object.Value{e})
+		}
+		seen := false
+		for _, k := range keys {
+			if valueEql(key, k) {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			keys = append(keys, key)
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // arrayIncludes backs the set operators &, | and - (difference), which compare
 // with eql? — so e.g. 1 and 1.0 are distinct members. Membership tests like
 // include?/index/count use == instead and do not go through here.
