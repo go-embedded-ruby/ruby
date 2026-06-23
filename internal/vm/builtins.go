@@ -2271,6 +2271,41 @@ func (vm *VM) bootstrap() {
 		}
 		return object.Integer(a % b)
 	})
+	// round / truncate with ndigits >= 0 leave an Integer unchanged; with ndigits
+	// < 0 they round/truncate to the nearest 10**(-ndigits) (round is half away
+	// from zero, truncate toward zero).
+	vm.cInteger.define("round", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		n := intArgOr(args, 0)
+		if n >= 0 {
+			return self
+		}
+		pow, ok := pow10(-n)
+		if !ok {
+			return object.Integer(0) // 10**(-n) exceeds any int64, so it rounds to 0
+		}
+		a, neg := absSign(intOf(self))
+		r := ((a + pow/2) / pow) * pow
+		if neg {
+			r = -r
+		}
+		return object.Integer(r)
+	})
+	vm.cInteger.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		n := intArgOr(args, 0)
+		if n >= 0 {
+			return self
+		}
+		pow, ok := pow10(-n)
+		if !ok {
+			return object.Integer(0)
+		}
+		a, neg := absSign(intOf(self))
+		r := (a / pow) * pow
+		if neg {
+			r = -r
+		}
+		return object.Integer(r)
+	})
 	vm.cInteger.define("digits", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
 		base := int64(10)
@@ -2382,6 +2417,10 @@ func (vm *VM) bootstrap() {
 		// Floored division: the quotient is an Integer, the modulo a Float.
 		q := math.Floor(a / b)
 		return &object.Array{Elems: []object.Value{object.Integer(int64(q)), object.Float(a - b*q)}}
+	})
+	vm.cFloat.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Truncate toward zero. ndigits > 0 keeps a Float; otherwise an Integer.
+		return floatRound(floatOf(self), args, math.Trunc)
 	})
 	vm.cFloat.define("to_r", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		f := floatOf(self)
@@ -2509,6 +2548,34 @@ func intArg(v object.Value) int64 {
 	}
 	raise("TypeError", "no implicit conversion of %s into Integer", v.Inspect())
 	return 0
+}
+
+// intArgOr returns the first integer argument, or def when there is none.
+func intArgOr(args []object.Value, def int64) int64 {
+	if len(args) > 0 {
+		return intArg(args[0])
+	}
+	return def
+}
+
+// pow10 returns 10**n, with ok=false when it would overflow an int64.
+func pow10(n int64) (int64, bool) {
+	p := int64(1)
+	for i := int64(0); i < n; i++ {
+		if p > math.MaxInt64/10 {
+			return 0, false
+		}
+		p *= 10
+	}
+	return p, true
+}
+
+// absSign returns |a| and whether a was negative.
+func absSign(a int64) (int64, bool) {
+	if a < 0 {
+		return -a, true
+	}
+	return a, false
 }
 
 // floatRound applies Float#floor/#ceil (and shares Float#round's contract): with
