@@ -359,6 +359,20 @@ module Enumerable
     select(&blk)
   end
 
+  # grep selects the elements that pattern === matches (and maps them through the
+  # block, if given); grep_v keeps the non-matching ones.
+  def grep(pattern)
+    result = []
+    __each_packed { |x| result << (block_given? ? yield(x) : x) if pattern === x }
+    result
+  end
+
+  def grep_v(pattern)
+    result = []
+    __each_packed { |x| result << (block_given? ? yield(x) : x) unless pattern === x }
+    result
+  end
+
   def take_while
     return enum_for(:take_while) unless block_given?
     r = []

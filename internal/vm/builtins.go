@@ -1835,35 +1835,43 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.methods["each_pair"] = vm.cHash.methods["each"]
 	bumpMethodSerial()
-	vm.cHash.define("merge", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
-		other, ok := args[0].(*object.Hash)
-		if !ok {
-			raise("TypeError", "no implicit conversion into Hash")
+	// mergeInto folds each other hash into dst. On a key already present, a block
+	// (|key, old, new|) decides the value; without one the new value wins. Several
+	// hashes may be merged left to right.
+	mergeInto := func(vm *VM, dst *object.Hash, others []object.Value, blk *Proc) {
+		for _, o := range others {
+			other, ok := o.(*object.Hash)
+			if !ok {
+				raise("TypeError", "no implicit conversion into Hash")
+			}
+			for _, k := range other.Keys {
+				v, _ := other.Get(k)
+				if blk != nil {
+					if old, exists := dst.Get(k); exists {
+						v = vm.callBlock(blk, []object.Value{k, old, v})
+					}
+				}
+				dst.Set(k, v)
+			}
 		}
+	}
+	vm.cHash.define("merge", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		h := self.(*object.Hash)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			out.Set(k, v)
 		}
-		for _, k := range other.Keys {
-			v, _ := other.Get(k)
-			out.Set(k, v)
-		}
+		mergeInto(vm, out, args, blk)
 		return out
 	})
-	vm.cHash.define("merge!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	mergeBang := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		h := self.(*object.Hash)
-		other, ok := args[0].(*object.Hash)
-		if !ok {
-			raise("TypeError", "no implicit conversion into Hash")
-		}
-		for _, k := range other.Keys {
-			v, _ := other.Get(k)
-			h.Set(k, v)
-		}
+		mergeInto(vm, h, args, blk)
 		return h
-	})
+	}
+	vm.cHash.define("merge!", mergeBang)
+	vm.cHash.define("update", mergeBang) // update is an alias for merge!
 	vm.cHash.define("slice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		out := object.NewHash()
@@ -1875,17 +1883,17 @@ func (vm *VM) bootstrap() {
 		return out
 	})
 	vm.cHash.define("except", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Copy then drop each key by value (Delete keys by hashKey, not by the
+		// argument's object identity — a previous identity-keyed Go map dropped
+		// nothing, since stored keys are distinct objects from the arguments).
 		h := self.(*object.Hash)
-		drop := map[object.Value]bool{}
-		for _, k := range args {
-			drop[k] = true
-		}
 		out := object.NewHash()
 		for _, k := range h.Keys {
-			if !drop[k] {
-				v, _ := h.Get(k)
-				out.Set(k, v)
-			}
+			v, _ := h.Get(k)
+			out.Set(k, v)
+		}
+		for _, k := range args {
+			out.Delete(k)
 		}
 		return out
 	})
@@ -1934,6 +1942,39 @@ func (vm *VM) bootstrap() {
 			out.Set(vm.callBlock(blk, []object.Value{k}), v)
 		}
 		return out
+	})
+	vm.cHash.define("transform_values!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "transform_values!")
+		}
+		h := self.(*object.Hash)
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			h.Set(k, vm.callBlock(blk, []object.Value{v}))
+		}
+		return h
+	})
+	vm.cHash.define("transform_keys!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "transform_keys!")
+		}
+		h := self.(*object.Hash)
+		// Compute the new keys first, then rebuild in place so a new key never
+		// collides with an old one mid-iteration.
+		keys := append([]object.Value{}, h.Keys...)
+		newKeys := make([]object.Value, len(keys))
+		vals := make([]object.Value, len(keys))
+		for i, k := range keys {
+			vals[i], _ = h.Get(k)
+			newKeys[i] = vm.callBlock(blk, []object.Value{k})
+		}
+		for _, k := range keys {
+			h.Delete(k)
+		}
+		for i := range newKeys {
+			h.Set(newKeys[i], vals[i])
+		}
+		return h
 	})
 	vm.cHash.define("invert", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
