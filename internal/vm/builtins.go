@@ -281,11 +281,13 @@ func (vm *VM) bootstrap() {
 		case object.Float:
 			return object.Integer(int64(v))
 		case *object.String:
-			base := 10
+			base := 0 // no explicit base: auto-detect a 0x/0b/0o/0 prefix (and allow _)
 			if len(args) > 1 {
 				base = int(intArg(args[1]))
 			}
-			n, err := strconv.ParseInt(strings.TrimSpace(v.Str()), base, 64)
+			// Go's ParseInt only accepts a radix prefix (0x/0b/0o/0d) with base 0,
+			// so strip a prefix that matches the explicit base, as MRI allows.
+			n, err := strconv.ParseInt(stripRadixPrefix(strings.TrimSpace(v.Str()), base), base, 64)
 			if err != nil {
 				raise("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
 			}
@@ -420,6 +422,43 @@ func (vm *VM) bootstrap() {
 		}
 		return object.Bool(false)
 	})
+	vm.cModule.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if c := self.(*RClass); c.name != "" {
+			return object.NewString(c.name)
+		}
+		return object.NilV // anonymous class/module
+	})
+	// Module#< <= > >= compare by the inheritance/inclusion hierarchy: A < B is
+	// true if A is a proper descendant of B, false if a proper ancestor (or, for
+	// <=/>=, equal), and nil when the two are unrelated.
+	classCmp := func(self, other object.Value) object.Value {
+		a := self.(*RClass)
+		b, ok := other.(*RClass)
+		if !ok {
+			raise("TypeError", "compared with non class/module")
+		}
+		switch {
+		case a == b:
+			return object.Integer(0)
+		case classIsA(a, b):
+			return object.Integer(-1)
+		case classIsA(b, a):
+			return object.Integer(1)
+		}
+		return object.NilV
+	}
+	classCmpOp := func(want func(int) bool) NativeFn {
+		return func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			if c, ok := classCmp(self, args[0]).(object.Integer); ok {
+				return object.Bool(want(int(c)))
+			}
+			return object.NilV
+		}
+	}
+	vm.cModule.define("<", classCmpOp(func(c int) bool { return c < 0 }))
+	vm.cModule.define("<=", classCmpOp(func(c int) bool { return c <= 0 }))
+	vm.cModule.define(">", classCmpOp(func(c int) bool { return c > 0 }))
+	vm.cModule.define(">=", classCmpOp(func(c int) bool { return c >= 0 }))
 	vm.cModule.define("attr_reader", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		defineAttrs(self.(*RClass), args, true, false)
 		return object.NilV
@@ -2360,6 +2399,25 @@ func (vm *VM) bootstrap() {
 
 	// Class.
 	vm.cClass.define("new", nativeNew)
+	// Class.new([superclass]) { body } builds an anonymous class (super defaults
+	// to Object); the block, if any, runs as the class body. Dispatched only for
+	// the Class receiver itself (a normal Foo.new still allocates an instance).
+	vm.cClass.smethods["new"] = &Method{name: "new", owner: vm.cClass,
+		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+			super := vm.cObject
+			if len(args) > 0 {
+				s, ok := args[0].(*RClass)
+				if !ok {
+					raise("TypeError", "superclass must be an instance of Class (given an instance of %s)", vm.classOf(args[0]).name)
+				}
+				super = s
+			}
+			c := newClass("", super)
+			if blk != nil {
+				vm.classEval(c, blk, nil)
+			}
+			return c
+		}}
 	vm.cClass.define("superclass", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if c := self.(*RClass); c.super != nil {
 			return c.super
@@ -2969,6 +3027,21 @@ func classArg(v object.Value) *RClass {
 	}
 	raise("TypeError", "class or module required")
 	return nil
+}
+
+// stripRadixPrefix removes a leading 0x/0b/0o/0d (after an optional sign) when it
+// matches base, so strconv.ParseInt — which only honours the prefix with base 0 —
+// accepts e.g. Integer("0xff", 16).
+func stripRadixPrefix(s string, base int) string {
+	sign := ""
+	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
+		sign, s = s[:1], s[1:]
+	}
+	pfx := map[int]string{16: "0x", 2: "0b", 8: "0o", 10: "0d"}[base]
+	if pfx != "" && len(s) >= 2 && strings.ToLower(s[:2]) == pfx {
+		s = s[2:]
+	}
+	return sign + s
 }
 
 // classIsA reports whether class c is, inherits from, or includes/prepends
