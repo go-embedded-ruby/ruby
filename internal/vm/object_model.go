@@ -317,6 +317,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cMethod
 	case *Enumerator:
 		return vm.cEnumerator
+	case *yielder:
+		return vm.cYielder
 	case *LazyEnum:
 		return vm.cLazy
 	case *RandomObj:

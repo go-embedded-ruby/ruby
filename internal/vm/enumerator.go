@@ -15,11 +15,22 @@ type Enumerator struct {
 	recv object.Value
 	meth string
 	args []object.Value
+	// block, when set, is an Enumerator.new { |y| … } generator: it is run with a
+	// yielder rather than driving recv.meth.
+	block *Proc
 
 	buf  []object.Value // materialised on first next/peek/to_a
 	have bool
 	pos  int
 }
+
+// yielder is the object passed to an Enumerator.new generator block; `y << v`
+// and `y.yield(v)` feed values into the enumeration.
+type yielder struct{ emit func(args []object.Value) }
+
+func (y *yielder) ToS() string     { return "#<Enumerator::Yielder>" }
+func (y *yielder) Inspect() string { return y.ToS() }
+func (y *yielder) Truthy() bool    { return true }
 
 // Inspect renders the MRI form #<Enumerator: recv:meth(args)>. (MRI's #to_s
 // shows the object address instead, which we can't reproduce deterministically,
@@ -51,6 +62,27 @@ func (vm *VM) registerEnumerator() {
 		vm.cEnumerator.includes = append(vm.cEnumerator.includes, en)
 	}
 
+	// Enumerator::Yielder — `y << v` / `y.yield(v)` feed the generator's values in.
+	vm.cYielder = newClass("Enumerator::Yielder", vm.cObject)
+	vm.cYielder.consts = vm.cEnumerator.consts // (scope is cosmetic; share the map)
+	vm.cEnumerator.consts["Yielder"] = vm.cYielder
+	vm.cYielder.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		self.(*yielder).emit(args)
+		return self // << chains
+	})
+	vm.cYielder.define("yield", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		self.(*yielder).emit(args)
+		return object.NilV
+	})
+	// Enumerator.new { |y| … } builds a generator-block enumerator.
+	vm.cEnumerator.smethods["new"] = &Method{name: "new", owner: vm.cEnumerator,
+		native: func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+			if blk == nil {
+				raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+			}
+			return &Enumerator{block: blk}
+		}}
+
 	// Kernel#enum_for / #to_enum: build an Enumerator for self.meth(*rest).
 	enumForFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		meth, rest := "each", []object.Value(nil)
@@ -67,6 +99,11 @@ func (vm *VM) registerEnumerator() {
 		e := self.(*Enumerator)
 		if blk == nil {
 			return e
+		}
+		if e.block != nil { // generator: run it with a yielder forwarding to blk
+			return vm.callBlock(e.block, []object.Value{&yielder{emit: func(args []object.Value) {
+				vm.callBlock(blk, args)
+			}}})
 		}
 		return vm.send(e.recv, e.meth, e.args, blk)
 	})
@@ -113,15 +150,20 @@ func (vm *VM) registerEnumerator() {
 			}
 			return enumFor(&object.Array{Elems: pairs}, "each")
 		}
-		// With a block, re-run the underlying method, appending the running index
-		// to each yield and forwarding the block's result — so map collects, each
-		// returns the receiver, etc., exactly as the wrapped method would.
+		// With a block, re-run the source, appending the running index to each
+		// yield and forwarding the block's result — so map collects, each returns
+		// the receiver, etc., exactly as the wrapped method would.
 		i := off
 		wrapper := &Proc{native: func(_ *VM, cargs []object.Value) object.Value {
 			withIdx := append(append([]object.Value{}, cargs...), object.Integer(i))
 			i++
 			return vm.callBlock(blk, withIdx)
 		}}
+		if e.block != nil { // generator: drive it with the indexing wrapper as the yielder
+			return vm.callBlock(e.block, []object.Value{&yielder{emit: func(args []object.Value) {
+				wrapper.native(vm, args)
+			}}})
+		}
 		return vm.send(e.recv, e.meth, e.args, wrapper)
 	}
 	d("with_index", withIndex)
@@ -134,15 +176,21 @@ func (vm *VM) registerEnumerator() {
 // the yielded elements.
 func (vm *VM) enumMaterialize(e *Enumerator) []object.Value {
 	out := []object.Value{}
-	collector := &Proc{native: func(_ *VM, args []object.Value) object.Value {
+	collect := func(args []object.Value) {
 		if len(args) == 1 {
 			out = append(out, args[0])
 		} else {
 			out = append(out, &object.Array{Elems: append([]object.Value{}, args...)})
 		}
+	}
+	if e.block != nil { // generator block: run it with a collecting yielder
+		vm.callBlock(e.block, []object.Value{&yielder{emit: collect}})
+		return out
+	}
+	vm.send(e.recv, e.meth, e.args, &Proc{native: func(_ *VM, args []object.Value) object.Value {
+		collect(args)
 		return object.NilV
-	}}
-	vm.send(e.recv, e.meth, e.args, collector)
+	}})
 	return out
 }
 
