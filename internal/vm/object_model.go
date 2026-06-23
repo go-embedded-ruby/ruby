@@ -466,6 +466,17 @@ func (p *Proc) arityVal() int {
 	if p.native != nil {
 		return p.nativeArity
 	}
+	// A *splat is always variadic: -(required + 1). Optional params are variadic
+	// for a lambda too, but a non-lambda proc reports the positive required count.
+	if p.iseq.SplatIndex >= 0 {
+		return -(p.iseq.NumRequired + 1)
+	}
+	if p.iseq.NumRequired < len(p.iseq.Params) {
+		if p.isLambda {
+			return -(p.iseq.NumRequired + 1)
+		}
+		return p.iseq.NumRequired
+	}
 	return len(p.iseq.Params)
 }
 
@@ -540,6 +551,28 @@ func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
 			args = padded
 		}
 		return args
+	}
+	if p.iseq.NumRequired < np {
+		// Optional params: pad up to the required count and pass the rest through
+		// (capped at np, dropping extras), leaving len(args) reflecting how many
+		// were actually supplied so the default-filling prologue (OpArgGiven) fires
+		// for the absent ones.
+		n := len(args)
+		if n < p.iseq.NumRequired {
+			n = p.iseq.NumRequired
+		}
+		if n > np {
+			n = np
+		}
+		out := make([]object.Value, n)
+		for i := range out {
+			if i < len(args) {
+				out[i] = args[i]
+			} else {
+				out[i] = object.NilV
+			}
+		}
+		return out
 	}
 	// Exact arity (the common case, e.g. a 1-param each block): the caller's args
 	// already have the right shape, so hand them straight to exec (which copies

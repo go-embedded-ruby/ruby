@@ -648,12 +648,30 @@ func (c *Compiler) compileHashWithSplat(v *ast.HashLit) {
 func (c *Compiler) compileBlock(blk *ast.Block) int {
 	parent := c.cur()
 	c.push(newBlockBuilder("<block>", blk.Params, parent))
+	b := c.cur()
+	// Block/lambda params lower exactly like a method's positionals: a top-level
+	// *rest and anything after it are not required, and each optional param gets a
+	// default-filling prologue (OpArgGiven → evaluate the default when absent).
+	b.splatIndex = blk.SplatIndex
+	nreq := len(blk.Params)
 	if blk.SplatIndex >= 0 {
-		// A top-level *rest block param lowers like a method's *splat: the splat
-		// and everything after it are not required.
-		c.cur().splatIndex = blk.SplatIndex
-		c.cur().numRequired = blk.SplatIndex
+		nreq = blk.SplatIndex
 	}
+	for i, d := range blk.Defaults {
+		if d == nil {
+			continue
+		}
+		if i < nreq {
+			nreq = i // first optional param marks the required count
+		}
+		b.emit(bytecode.OpArgGiven, i, 0)
+		skip := b.emit(bytecode.OpBranchIf, 0, 0)
+		c.compileNode(d)
+		b.emit(bytecode.OpSetLocal, i, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		b.patch(skip, b.here())
+	}
+	b.numRequired = nreq
 	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
 	c.compileBody(blk.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
