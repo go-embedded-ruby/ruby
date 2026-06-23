@@ -346,14 +346,15 @@ walk over each class's included modules), `super` (bare/forwarding, `super()`,
 `Env` parent chain with depth-addressed locals, `{ |params| … }` blocks, `yield`
 (with args), `block_given?`, lenient block arity, and `Integer#times` as the
 first block-driven iterator.
-**Still to come in Phase 1:** `Proc`/`lambda` and `&block` (reifying a block as a
-first-class value), singleton classes, `respond_to?`, and routing the
-arithmetic fast paths through `send`. (`do…end` block syntax landed in Phase 2;
-`method_missing` now receives a Symbol as of Phase 2.)
+**Done since (in later phases):** `Proc`/`lambda` and `&block` reifying a block as
+a first-class value (Phase 2), singleton classes (`def obj.x` /
+`define_singleton_method`), `respond_to?` (Phase 4), and the comparison operators
+routing through `send` for non-built-in receivers. (`do…end` block syntax landed
+in Phase 2; `method_missing` receives a Symbol as of Phase 2.)
 **Exit (met for core):** define classes, subclass, instantiate, call methods,
 use ivars, override `method_missing`.
 
-### Phase 2 — Go core types + Ruby mixins — 🚧 in progress
+### Phase 2 — Go core types + Ruby mixins — ✅ DONE (core)
 Integer (bignum), Float, **String (bytes+encoding)**, Symbol, Array, **ordered
 Hash**, Range, `pack`/`unpack`. **Comparable** & **Enumerable** in Ruby.
 **Started:** **Symbol** literals (`:name`, `:name?`/`:name!`), the `Symbol` class
@@ -492,13 +493,27 @@ ivars, and `recv[i] OP= v`.
 shared with top-level method bodies (closing the Phase 1 no-op-set quirk).
 **Array methods**: sort/sort_by/reverse/uniq/flatten/compact/join/index/take
 /drop/min_by/max_by/each_with_object (on top of the inherited Enumerable set);
-ordering goes through `<=>`.
+ordering goes through `<=>`. Plus, since: **user subclassing of String/Array/Hash**
+(a subclass instance wraps the value, keeps its class identity, ivars and user
+methods while the value type's own methods and operators apply), `Object#eql?`,
+the set operators (`uniq`/`&`/`|`/`-`) comparing with `eql?`, and a broad
+MRI-differential conformance sweep (Symbol/Module reflection, Numeric rounding,
+`Class.new`, `Integer()` parsing, …).
 **Exit:** most "ordinary" Ruby runs.
+**Still ahead:** `Array#pack`/`String#unpack` (format strings), and real String
+**encodings** — strings are UTF-8 `[]byte` today with no `Encoding` objects; both
+are carried into Phase 8.
 
-### Phase 3 — Control flow & exceptions — 🚧 in progress
+### Phase 3 — Control flow & exceptions — ✅ DONE (core)
 Exception hierarchy, `raise`/`rescue`/`ensure`/`retry`, non-local
 `break`/`next`/`redo`/`return` via catch tables, `StopIteration`, **Fiber +
 Enumerator + `loop` + `lazy`**.
+**Landed since:** `Fiber` (`Fiber.new`/`resume`/`Fiber.yield`), `Enumerator`
+(external iteration `.next`/`.peek` on `each`-based enumerators, `with_index`),
+`Kernel#loop`, and **lazy enumerators** (`(1..Float::INFINITY).lazy.map{}.first(n)`).
+**Still ahead:** `Kernel#catch`/`throw`, and the yielder form
+`Enumerator.new { |y| y << … }` for external iteration (the `each`-based form
+already works).
 **Started:** the **exception hierarchy** (Exception → StandardError →
 RuntimeError + the built-in error classes with correct superclasses), Exception
 `#initialize`/`#message`/`#to_s`, `Object#is_a?`/`#kind_of?`/`#instance_of?`, and
@@ -515,10 +530,16 @@ internal raises (`1/0`, NoMethodError, …) are rescuable; bare `raise` re-raise
 clauses without an explicit `begin` (shared `parseRescueTail`); and
 **`Kernel#loop`** (block-driven infinite loop, terminated by `break`).
 
-### Phase 4 — Full metaprogramming — 🚧 in progress
+### Phase 4 — Full metaprogramming — ✅ DONE (core)
 `define_method`, `instance_eval`/`instance_exec`, `class_eval`, constant
 machinery, hooks (`included`/`inherited`/`method_added`/…),
 `define_singleton_method`. (Refinements: deferred.)
+**Landed since:** `define_method`, `instance_eval`/`instance_exec`, `class_eval`,
+`define_singleton_method`, `extend`/`prepend`, string `eval` + `Binding`, the
+`included`/`inherited`/`method_added` hooks, and `Module#name`/`instance_methods`
+/`Object#methods`.
+**Still ahead:** `Module#const_get`/`const_set` (constant reflection),
+`extended`/`prepended` hooks, `ObjectSpace`, and **refinements** (deferred).
 **Started:** reflection/dispatch — `send`/`public_send` (forwarding the block),
 `respond_to?`, `itself`, `tap`, `then`/`yield_self`; Kernel conversion methods
 `Integer`/`Float`/`String`/`Array` (capitalized `Name(...)` now parses as a call).
@@ -537,7 +558,7 @@ and `method_added` (per instance-method def), each looked up as a singleton
 method so it fires only when defined. (`extended`/`prepended` wait on
 `extend`/`prepend`.)
 
-### Phase 5 — Complete front-end — 🚧 in progress
+### Phase 5 — Complete front-end — ✅ DONE (core)
 Full grammar: heredocs, interpolation, `%`-literals, multiple assignment, keyword
 args, pattern matching, endless methods, beginless/endless ranges, safe
 navigation, numbered params/`it`. *(Or adopt Prism-on-wazero — see §16.)*
@@ -547,12 +568,19 @@ alternative patterns, guards, one-line `=>`/`in`, `deconstruct`/
 `deconstruct_keys`), endless methods, beginless/endless ranges, **safe
 navigation `&.`**, **numbered params (`_1`/`_2`) + `it`**, **heredocs**
 (`<<`/`<<-`/`<<~`, interpolating and literal), and **`%w`/`%i` arrays**. **Still
-ahead:** `%q`/`%Q`/`%W`/`%I` literals.
+ahead:** `%q`/`%Q`/`%W`/`%I` literals; `%w`/`%i` in expression-argument position;
+the `proc.()` call shorthand; paren-less command calls on a method result
+(`Fiber.yield 1`); and `begin…end` used directly as an argument.
 
-### Phase 6 — Standard library
+### Phase 6 — Standard library — 🚧 substantially landed
 IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
 pure-Ruby libs; implement Go leaves (json, digest, zlib, securerandom, base64).
 Run upstream suites.
+**Landed:** `IO`/`File`/`Dir`/`StringIO`, `Time`/`Date`, `Random`,
+`Thread`/`Mutex`/`Queue` (emulated GVL), `Marshal` (MRI byte-exact), `Set`, the
+Regexp bridge (below), and the Go leaves `json`/`digest`/`zlib`/`base64`. Scientific
++ container bindings (NDArray/FFT/Image/BigDecimal) are wired in too.
+**Still ahead:** `securerandom`, and running the full upstream stdlib suites.
 
 **Regexp bridge — 🚧 landed (6a–6d):** the `go-ruby-regexp/regexp` engine is wired in
 (CGO=0).
@@ -585,7 +613,7 @@ The `$~`/`$1`..`$N`/`$&`/`` $` ``/`$'` match globals are now supported
 `(?'name')` named-group spelling (unsupported by the engine), and the
 `sub`/`gsub` enumerator and Hash-replacement forms.
 
-### Phase 7 — Build toolchain
+### Phase 7 — Build toolchain — ✅ DONE
 `rbgo build`, require-graph scan, selection (build tags), `//go:embed`, single
 static binary, closed-world mode.
 
@@ -606,10 +634,17 @@ libraries — go-fft ~7 KiB, go-ndarray ~20 KiB, go-images ~40 KiB, regexp ~57 K
 of symbols — so dropping all of them would save under 2% of a binary dominated by
 the Go runtime. The front-end drop is where the size comes from.)
 
-### Phase 8 — Conformance & performance
+### Phase 8 — Conformance & performance — 🚧 in progress
 ruby/spec subset; optimisations: dispatch **inline caches** (key = class), fixnum
 cache, reduced boxing. (JIT out of initial scope — Go does not help with runtime
 native codegen.)
+**Landed:** the performance trio — **dispatch inline caches** (class + global
+method serial), **small-integer interning** (fixnum cache), and **Env-struct
+pooling** (capture-tracked, halving per-call allocations) — plus a large, ongoing
+**MRI-differential conformance** effort closing stdlib gaps batch by batch against
+Ruby 4.0.5. **Still ahead:** broaden the ruby/spec subset; the remaining
+hot-path optimisations (the operand-stack/value-stack redesign) were assessed and
+deferred as high-churn for their gain.
 
 ## 15. Risk register
 
@@ -635,16 +670,17 @@ native codegen.)
    module** in the sibling org `go-ruby-regexp` (repo `regexp`; see
    `go-ruby-regexp/regexp/docs/plan-regexp.md`). ReDoS handled by memoization +
    `Regexp.timeout` (as Ruby ≥3.2).
-3. **Front-end strategy** — *OPEN* → hand-written lexer/parser (learning goal,
-   full control) **vs Prism→WASM under pure-Go wazero** (production-grade,
-   upstream-tracking, deletes most risk). Decide before investing heavily in
-   Phase 5. This reshapes Phases 0/5/13.
+3. **Front-end strategy** — *settled* → **hand-written lexer/parser** (learning
+   goal, full control), now extracted to the standalone sibling module
+   `go-ruby-parser/parser` (which this VM imports). Prism→WASM-on-wazero was
+   considered and not taken. The grammar is feature-complete for the core
+   language (see Phase 5); a few literal/command-call forms remain.
 4. **Native↔Ruby unwinding** — *settled* → hybrid (status internally +
    panic/recover at native callbacks); design the boundary in Phase 1.
-5. **Thread model** — emulated GVL (MRI semantics) vs real parallelism vs
-   **Ractor** (its shareable/non-shareable split already isolates state, and fits
-   Go's goroutines). *Start single-thread + Fiber; decide by Phase 6, but note
-   Ractor must be designed in early or it is permanently out.*
+5. **Thread model** — *settled* → **emulated GVL** (MRI semantics: one Ruby thread
+   runs at a time, race-free under Go's detector), shipped with
+   `Thread`/`Mutex`/`Queue`. Real parallelism and **Ractor** remain out for now
+   (Ractor would need early design to be added later).
 6. **Target version** — **Ruby 4.0** semantics.
 7. **Oracle tool** — Ripper and/or Prism offline (dev only, not linked).
 8. **Performance & multi-arch** — *settled* → benchmark **systematically against
