@@ -26,23 +26,34 @@ import (
 // The binary is specialised for this program: its baked-in method bodies are
 // registered globally, so run it on the program it was built from.
 func buildCmd(args []string) {
+	const usage = "usage: rbgo build [-o out] [--closed] [--target wasm] <file.rb>"
 	out := "a.out"
-	var file string
+	var file, target string
 	closed := false
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "-o" && i+1 < len(args):
 			out, i = args[i+1], i+1
+		case (args[i] == "--target" || args[i] == "-target") && i+1 < len(args):
+			target, i = args[i+1], i+1
 		case args[i] == "--closed" || args[i] == "-closed":
 			closed = true
 		case file == "" && !strings.HasPrefix(args[i], "-"):
 			file = args[i]
 		default:
-			fatal("usage: rbgo build [-o out] [--closed] <file.rb>")
+			fatal(usage)
 		}
 	}
 	if file == "" {
-		fatal("usage: rbgo build [-o out] [--closed] <file.rb>")
+		fatal(usage)
+	}
+	switch target {
+	case "", "native", "wasm":
+	default:
+		fatal("rbgo build: unknown --target %q (want \"native\" or \"wasm\")", target)
+	}
+	if target == "wasm" && !closed {
+		fatal("rbgo build: --target wasm requires --closed (the wasm entry runs the embedded program)")
 	}
 
 	src, err := os.ReadFile(file)
@@ -94,18 +105,19 @@ func buildCmd(args []string) {
 	cmd := exec.Command("go", goArgs...)
 	cmd.Dir = root
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Env = buildEnv(os.Environ(), target)
 	if err := cmd.Run(); err != nil {
 		fatal("rbgo build: go build failed: %v", err)
 	}
 
-	report(out, keys, aotOK, closed, iseq)
+	report(out, keys, aotOK, closed, target, iseq)
 }
 
 // report prints what the build produced: the AOT-compiled methods, and — in
 // closed-world mode — that the front-end was dropped, the resulting binary size,
-// and a warning for any front-end-dependent call (eval/require/…) the program
-// makes, since those raise in the closed binary.
-func report(out string, keys []string, aotOK, closed bool, iseq *bytecode.ISeq) {
+// the target (native or wasm), and a warning for any front-end-dependent call
+// (eval/require/…) the program makes, since those raise in the closed binary.
+func report(out string, keys []string, aotOK, closed bool, target string, iseq *bytecode.ISeq) {
 	if aotOK {
 		fmt.Fprintf(os.Stderr, "rbgo build: %s (%d method(s) AOT-compiled: %s)\n",
 			out, len(keys), strings.Join(keys, ", "))
@@ -115,6 +127,9 @@ func report(out string, keys []string, aotOK, closed bool, iseq *bytecode.ISeq) 
 	if !closed {
 		return
 	}
+	if target == "wasm" {
+		fmt.Fprintf(os.Stderr, "rbgo build: target GOOS=js GOARCH=wasm — embedded program runs then select{} keeps the runtime alive for JS callbacks\n")
+	}
 	fmt.Fprintf(os.Stderr, "rbgo build: closed-world — front-end dropped (no lexer/parser/compiler linked)\n")
 	if fi, err := os.Stat(out); err == nil {
 		fmt.Fprintf(os.Stderr, "rbgo build: binary size %.1f MiB\n", float64(fi.Size())/(1<<20))
@@ -123,6 +138,18 @@ func report(out string, keys []string, aotOK, closed bool, iseq *bytecode.ISeq) 
 		fmt.Fprintf(os.Stderr, "rbgo build: warning — these front-end calls raise NotImplementedError at runtime: %s\n",
 			strings.Join(uses, ", "))
 	}
+}
+
+// buildEnv returns the environment for the nested `go build`. For the wasm
+// target it appends GOOS=js GOARCH=wasm so the cross-build links the wasm closed
+// main (closed_main_wasm.go) and the wasm JS bridge; the native target leaves
+// the environment untouched. Later entries win in Go's exec, so appending is
+// enough to override any inherited GOOS/GOARCH.
+func buildEnv(base []string, target string) []string {
+	if target != "wasm" {
+		return base
+	}
+	return append(append([]string(nil), base...), "GOOS=js", "GOARCH=wasm")
 }
 
 // moduleRoot returns the directory of the module's go.mod.
