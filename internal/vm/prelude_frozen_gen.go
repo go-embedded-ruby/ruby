@@ -9,8 +9,8 @@ import (
 func embeddedPrelude() *bytecode.ISeq {
 	return &bytecode.ISeq{
 		Name:        "<main>",
-		Insns:       []bytecode.Instr{{Op: 42}, {Op: 9}, {Op: 42, A: 1, B: 1}, {Op: 9}, {Op: 41, A: 2, B: 2}, {Op: 9}, {Op: 41, A: 3, B: 3}, {Op: 9}, {Op: 41, A: 4, B: 4}, {Op: 9}, {Op: 41, A: 5, B: 5}, {Op: 9}, {Op: 41, A: 6, B: 6}, {Op: 49}},
-		Names:       []string{"Comparable", "Enumerable", "Numeric", "String", "Array", "Range", "Hash"},
+		Insns:       []bytecode.Instr{{Op: 42}, {Op: 9}, {Op: 42, A: 1, B: 1}, {Op: 9}, {Op: 41, A: 2, B: 2}, {Op: 9}, {Op: 41, A: 3, B: 3}, {Op: 9}, {Op: 41, A: 4, B: 4}, {Op: 9}, {Op: 41, A: 5, B: 5}, {Op: 9}, {Op: 41, A: 6, B: 6}, {Op: 9}, {Op: 41, A: 7, B: 7}, {Op: 49}},
+		Names:       []string{"Comparable", "Enumerable", "Numeric", "String", "Symbol", "Array", "Range", "Hash"},
 		NumRequired: 0,
 		SplatIndex:  -1,
 		KwRestSlot:  -1,
@@ -1377,6 +1377,17 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:        "<class:String>",
+				Insns:       []bytecode.Instr{{Op: 5}, {Op: 33}, {Op: 30, A: 1, B: 1}, {Op: 49}},
+				Names:       []string{"Comparable", "include"},
+				NumRequired: 0,
+				SplatIndex:  -1,
+				KwRestSlot:  -1,
+				BlockSlot:   -1,
+				NumLocals:   0,
+				Super:       "",
+			},
+			&bytecode.ISeq{
+				Name:        "<class:Symbol>",
 				Insns:       []bytecode.Instr{{Op: 5}, {Op: 33}, {Op: 30, A: 1, B: 1}, {Op: 49}},
 				Names:       []string{"Comparable", "include"},
 				NumRequired: 0,

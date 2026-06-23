@@ -486,6 +486,10 @@ class String
   include Comparable
 end
 
+class Symbol
+  include Comparable
+end
+
 # Array and Range are Enumerable: each defines `each` natively, so they pick up
 # select/reject/find/reduce/sum/any?/all?/none?/each_with_index from the module
 # above. Their own native methods (map, include?, min, max, count, …) take

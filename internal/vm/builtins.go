@@ -121,6 +121,13 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cObject.define("object_id", objectIDFn)
 	vm.cObject.define("__id__", objectIDFn)
+	vm.cObject.define("methods", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		c := vm.classOf(self)
+		if o, ok := self.(*RObject); ok && o.singleton != nil {
+			c = o.singleton // its super is the real class, so the walk picks up both
+		}
+		return &object.Array{Elems: vm.methodNames(c, true)}
+	})
 	vm.cObject.define("frozen?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(isFrozen(self))
 	})
@@ -428,6 +435,10 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV // anonymous class/module
 	})
+	vm.cModule.define("instance_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		all := len(args) == 0 || args[0].Truthy() // instance_methods(false) = own only
+		return &object.Array{Elems: vm.methodNames(self.(*RClass), all)}
+	})
 	// Module#< <= > >= compare by the inheritance/inclusion hierarchy: A < B is
 	// true if A is a proper descendant of B, false if a proper ancestor (or, for
 	// <=/>=, equal), and nil when the two are unrelated.
@@ -509,6 +520,13 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	symStr := func(self object.Value) string { return string(self.(object.Symbol)) }
+	vm.cSymbol.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := args[0].(object.Symbol)
+		if !ok { // incomparable with a non-Symbol
+			return object.NilV
+		}
+		return object.Integer(int64(strings.Compare(symStr(self), string(o))))
+	})
 	symLen := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(int64(utf8.RuneCountInString(symStr(self))))
 	}
@@ -3027,6 +3045,36 @@ func classArg(v object.Value) *RClass {
 	}
 	raise("TypeError", "class or module required")
 	return nil
+}
+
+// methodNames returns the method names (as sorted Symbols) defined on c when all
+// is false, or across its whole ancestor chain (super + included/prepended
+// modules) when all is true. The order is sorted for determinism — MRI uses
+// definition order, which the spec leaves implementation-defined.
+func (vm *VM) methodNames(c *RClass, all bool) []object.Value {
+	seen := map[string]bool{}
+	var names []string
+	add := func(n string) {
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	classes := []*RClass{c}
+	if all {
+		classes = vm.ancestors(c)
+	}
+	for _, k := range classes {
+		for n := range k.methods {
+			add(n)
+		}
+	}
+	sort.Strings(names)
+	out := make([]object.Value, len(names))
+	for i, n := range names {
+		out[i] = object.Symbol(n)
+	}
+	return out
 }
 
 // stripRadixPrefix removes a leading 0x/0b/0o/0d (after an optional sign) when it
