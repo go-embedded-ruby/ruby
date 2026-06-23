@@ -672,6 +672,12 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 		b.patch(skip, b.here())
 	}
 	b.numRequired = nreq
+	// A &block param gets its own local slot. Unlike a method's, it is left unbound
+	// (nil) rather than wired to BlockSlot: a block receives no separately-passed
+	// block under our calling convention, so |x, &b| sees b == nil.
+	if blk.BlockParam != "" {
+		b.localSlot(blk.BlockParam)
+	}
 	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
 	c.compileBody(blk.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
