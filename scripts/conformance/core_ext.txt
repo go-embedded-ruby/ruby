@@ -1,0 +1,28 @@
+# Real-world Ruby idiom corpus for the differential oracle.
+#   scripts/oracle.sh -b scripts/conformance/core_ext.txt
+# One snippet per line (deterministic; no randomness/time). Lines starting with #
+# are comments. Each must produce identical output on rbgo, MRI and JRuby.
+
+# --- ActiveSupport (Rails) core_ext style ---
+p %w[a b a c].each_with_object(Hash.new(0)) { |w, h| h[w] += 1 }
+p({ "a" => 1, "b" => 2 }.map { |k, v| [k.to_sym, v] }.to_h)
+p({ a: 1, b: 2 }.merge({ b: 20, c: 3 }) { |k, o, n| o + n })
+p({ x: { y: 1, z: 2 } }.merge({ x: { y: 9 } }) { |k, o, n| o.merge(n) })
+p({ "a" => 1, "b" => 2, "c" => 3 }.except("a", "b"))
+p [1, "a", 2, "b"].grep(Integer)
+p [1, 1.0, 1].uniq
+p({ node: { os: { family: "Debian" } } }.dig(:node, :os, :family))
+p [1, 2, 3].inject(:*)
+p "hello_world".split("_").map(&:capitalize).join
+p [1, 2, 3, 4].select(&:even?).map { |x| x**2 }
+
+# --- Language / metaprogramming ---
+p(if 5 > 3 then :big else :small end)
+p((1..10).step(2).to_a)
+p [1, 2, 3, 4].partition(&:even?)
+case [1, 2]; in [a, b]; p a + b; end
+p [[1, 2], [3, 4]].map { |a, b| a + b }
+p "café".length
+p({ a: 1, b: 2 }.transform_values { |v| v * 10 })
+p [3, 1, 2].sort.reverse.first
+p format("%-6s|%05d", "hi", 42)
