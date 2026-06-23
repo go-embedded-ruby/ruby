@@ -9,16 +9,28 @@ func setupStruct(vm *VM) {
 	cStruct := newClass("Struct", vm.cObject)
 	vm.consts["Struct"] = cStruct
 	cStruct.smethods["new"] = &Method{name: "new", owner: cStruct, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// A trailing options hash carries keyword_init: it is not a member name.
+		kwInit := false
+		if n := len(args); n > 0 {
+			if h, ok := args[n-1].(*object.Hash); ok {
+				if v, present := h.Get(object.Symbol("keyword_init")); present {
+					kwInit = v.Truthy()
+					args = args[:n-1]
+				}
+			}
+		}
 		names := make([]string, len(args))
 		for i, a := range args {
 			names[i] = a.ToS()
 		}
-		return vm.newStructClass(cStruct, names)
+		return vm.newStructClass(cStruct, names, kwInit)
 	}}
 }
 
-// newStructClass builds the anonymous subclass returned by Struct.new.
-func (vm *VM) newStructClass(parent *RClass, names []string) *RClass {
+// newStructClass builds the anonymous subclass returned by Struct.new. With
+// kwInit, instances are constructed from keyword arguments (S.new(a: 1, b: 2))
+// rather than positionally.
+func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClass {
 	sub := newClass("", parent)
 	// Its own `new` allocates an instance (overriding Struct.new, which would
 	// otherwise be inherited and make yet another class).
@@ -47,10 +59,37 @@ func (vm *VM) newStructClass(parent *RClass, names []string) *RClass {
 	}
 
 	sub.define("initialize", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		o := self.(*RObject)
+		if kwInit {
+			// Members come from a keyword hash; absent members are nil, unknown
+			// keys raise, exactly as MRI's keyword_init structs do.
+			h := object.NewHash()
+			if len(a) > 0 {
+				hh, ok := a[0].(*object.Hash)
+				if !ok || len(a) > 1 {
+					raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(a))
+				}
+				h = hh
+			}
+			member := map[string]bool{}
+			for _, nm := range names {
+				member[nm] = true
+				v, ok := h.Get(object.Symbol(nm))
+				if !ok {
+					v = object.NilV
+				}
+				o.ivars["@"+nm] = v
+			}
+			for _, k := range h.Keys {
+				if sym, ok := k.(object.Symbol); !ok || !member[string(sym)] {
+					raise("ArgumentError", "unknown keyword: %s", k.Inspect())
+				}
+			}
+			return object.NilV
+		}
 		if len(a) > len(names) {
 			raise("ArgumentError", "struct size differs")
 		}
-		o := self.(*RObject)
 		for i, nm := range names {
 			if i < len(a) {
 				o.ivars["@"+nm] = a[i]
