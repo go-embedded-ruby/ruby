@@ -500,9 +500,13 @@ the set operators (`uniq`/`&`/`|`/`-`) comparing with `eql?`, and a broad
 MRI-differential conformance sweep (Symbol/Module reflection, Numeric rounding,
 `Class.new`, `Integer()` parsing, …).
 **Exit:** most "ordinary" Ruby runs.
-**Still ahead:** `Array#pack`/`String#unpack` (format strings), and real String
-**encodings** — strings are UTF-8 `[]byte` today with no `Encoding` objects; both
-are carried into Phase 8.
+**Still ahead:** `Array#pack`/`String#unpack` (format strings), and the rest of
+String **encodings**. A foundational slice has landed — an encoding tag on
+strings, the `Encoding` class (UTF_8/ASCII_8BIT/BINARY/US_ASCII), `#encoding`
+/`#force_encoding`/`#b`/`#ascii_only?`/`#valid_encoding?`, and length counting
+bytes for a binary string — but the tag does not yet propagate through every
+operation (concat/slice default to UTF-8); that completion is carried into
+Phase 8.
 
 ### Phase 3 — Control flow & exceptions — ✅ DONE (core)
 Exception hierarchy, `raise`/`rescue`/`ensure`/`retry`, non-local
@@ -568,10 +572,12 @@ alternative patterns, guards, one-line `=>`/`in`, `deconstruct`/
 `deconstruct_keys`), endless methods, beginless/endless ranges, **safe
 navigation `&.`**, **numbered params (`_1`/`_2`) + `it`**, **heredocs**
 (`<<`/`<<-`/`<<~`, interpolating and literal), the **`%w`/`%i`/`%q`/`%Q`/`%W`/`%I`
-percent-literals** (in statement and command-argument position), and **optional
-(`name = default`) and `*splat` params in block and stabby-lambda lists**. **Still
-ahead:** the `proc.()` call shorthand; other paren-less command calls on a method
-result (`Fiber.yield 1`); and `begin…end` used directly as an argument.
+percent-literals** (in statement and command-argument position), **optional
+(`name = default`) and `*splat` params in block and stabby-lambda lists**, the
+**`proc.()` call shorthand**, and **paren-less command calls on a method-call
+result** (`Fiber.yield 1`). **Still ahead:** `if`/`unless` and `while`/`until` as
+expressions; leading-dot method chains across newlines; a `&block` param in block
+lists; and `begin…end` used directly as an argument.
 
 ### Phase 6 — Standard library — 🚧 substantially landed
 IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
