@@ -575,9 +575,12 @@ navigation `&.`**, **numbered params (`_1`/`_2`) + `it`**, **heredocs**
 percent-literals** (in statement and command-argument position), **optional
 (`name = default`) and `*splat` params in block and stabby-lambda lists**, the
 **`proc.()` call shorthand**, and **paren-less command calls on a method-call
-result** (`Fiber.yield 1`). **Still ahead:** `if`/`unless` and `while`/`until` as
-expressions; leading-dot method chains across newlines; a `&block` param in block
-lists; and `begin…end` used directly as an argument.
+result** (`Fiber.yield 1`), **`if`/`unless` and `while`/`until` as expressions**,
+**leading-dot method chains across newlines**, and a **`&block` param in block
+lists**. **Still ahead:** the `%q`/`%Q`/`%W`/`%I` interpolation edge cases and
+`begin…end` used directly as an argument — the front-end now parses essentially
+all idiomatic Ruby (a real-world ActiveSupport core_ext idiom sweep that was 9/15
+is now 15/15).
 
 ### Phase 6 — Standard library — 🚧 substantially landed
 IO/File/Dir, Time, Random, Thread/Mutex/Queue, **Regexp** (§16), Marshal; embed
