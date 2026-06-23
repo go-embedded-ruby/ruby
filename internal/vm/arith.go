@@ -387,9 +387,12 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 }
 
 // arrayIncludes reports whether v is in elems (by Ruby ==).
+// arrayIncludes backs the set operators &, | and - (difference), which compare
+// with eql? — so e.g. 1 and 1.0 are distinct members. Membership tests like
+// include?/index/count use == instead and do not go through here.
 func arrayIncludes(elems []object.Value, v object.Value) bool {
 	for _, e := range elems {
-		if valueEqual(e, v) {
+		if valueEql(e, v) {
 			return true
 		}
 	}

@@ -23,6 +23,13 @@ func TestEql(t *testing.T) {
 		{`class K; end; k = K.new; p [k.eql?(k), k.eql?(K.new)]`, "[true, false]\n"},
 		// Built-in subclass instances compare as the wrapped value, on either side.
 		{`class S < String; end; p [S.new("x").eql?("x"), "x".eql?(S.new("x"))]`, "[true, true]\n"},
+
+		// The set operations uniq / & / | / - compare with eql?, so 1 and 1.0 are
+		// distinct members...
+		{`p [[1, 1.0, 1].uniq, [1, 1.0] & [1.0], [1] | [1.0], [1, 1.0] - [1]]`, "[[1, 1.0], [1.0], [1, 1.0], [1.0]]\n"},
+		{`a = [1, 1.0, 1]; a.uniq!; p a`, "[1, 1.0]\n"},
+		// ...while membership/search (include?/index) still use ==.
+		{`p [[1].include?(1.0), [1, 2, 3].index(2.0)]`, "[true, 1]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

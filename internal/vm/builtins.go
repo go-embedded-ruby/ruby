@@ -1187,7 +1187,7 @@ func (vm *VM) bootstrap() {
 		for _, e := range self.(*object.Array).Elems {
 			dup := false
 			for _, k := range out {
-				if valueEqual(e, k) {
+				if valueEql(e, k) {
 					dup = true
 					break
 				}
@@ -1277,7 +1277,7 @@ func (vm *VM) bootstrap() {
 		for _, e := range a.Elems {
 			dup := false
 			for _, k := range out {
-				if valueEqual(e, k) {
+				if valueEql(e, k) {
 					dup = true
 					break
 				}
