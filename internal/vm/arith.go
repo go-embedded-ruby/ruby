@@ -516,6 +516,61 @@ func valueEqual(a, b object.Value) bool {
 	return a == b
 }
 
+// valueEql implements Object#eql?: like ==, but without numeric coercion, so an
+// Integer is never eql? a Float (1.eql?(1.0) is false) and Array/Hash compare
+// their members with eql? too. A built-in value subclass instance is compared as
+// the value it wraps; everything else falls back to object identity.
+func valueEql(a, b object.Value) bool {
+	if o, ok := a.(*RObject); ok && o.builtin != nil {
+		a = o.builtin
+	}
+	if o, ok := b.(*RObject); ok && o.builtin != nil {
+		b = o.builtin
+	}
+	switch av := a.(type) {
+	case object.Integer:
+		bv, ok := b.(object.Integer)
+		return ok && av == bv
+	case object.Float:
+		bv, ok := b.(object.Float)
+		return ok && av == bv
+	case *object.Bignum:
+		bv, ok := b.(*object.Bignum)
+		return ok && av.I.Cmp(bv.I) == 0
+	case *object.String:
+		bv, ok := b.(*object.String)
+		return ok && string(av.B) == string(bv.B)
+	case object.Symbol:
+		bv, ok := b.(object.Symbol)
+		return ok && av == bv
+	case *object.Array:
+		bv, ok := b.(*object.Array)
+		if !ok || len(av.Elems) != len(bv.Elems) {
+			return false
+		}
+		for i := range av.Elems {
+			if !valueEql(av.Elems[i], bv.Elems[i]) {
+				return false
+			}
+		}
+		return true
+	case *object.Hash:
+		bv, ok := b.(*object.Hash)
+		if !ok || av.Len() != bv.Len() {
+			return false
+		}
+		for _, k := range av.Keys {
+			v1, _ := av.Get(k)
+			v2, present := bv.Get(k)
+			if !present || !valueEql(v1, v2) {
+				return false
+			}
+		}
+		return true
+	}
+	return a == b // identity for nil/true/false and other reference types
+}
+
 func toFloat(v object.Value) (float64, bool) {
 	switch n := v.(type) {
 	case object.Integer:

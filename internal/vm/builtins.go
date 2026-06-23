@@ -116,6 +116,11 @@ func (vm *VM) bootstrap() {
 		// value types by value (Go interface equality gives exactly this).
 		return object.Bool(self == args[0])
 	})
+	vm.cObject.define("eql?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Like ==, but with no numeric coercion (see valueEql); the value types
+		// reach this through Object since none override it.
+		return object.Bool(valueEql(self, args[0]))
+	})
 	objectIDFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.objectID(self)
 	}
