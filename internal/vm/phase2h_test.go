@@ -50,9 +50,8 @@ func TestStringMethods(t *testing.T) {
 		{"to_i", `p "42abc".to_i`, "42\n"},
 		{"to_i_signed_ws", `p "  -17x".to_i`, "-17\n"},
 		{"to_i_none", `p "abc".to_i`, "0\n"},
-		// Known limitation: no bignum yet, so an integer that overflows int64
-		// yields 0 (MRI promotes to Bignum). Tracked for the bignum increment.
-		{"to_i_overflow", `p "99999999999999999999999".to_i`, "0\n"},
+		// An integer that overflows int64 promotes to a Bignum, as in MRI.
+		{"to_i_overflow", `p "99999999999999999999999".to_i`, "99999999999999999999999\n"},
 		{"to_f", `p "3.14x".to_f`, "3.14\n"},
 		{"to_f_signed", `p "-2.5".to_f`, "-2.5\n"},
 		{"to_f_exp", `p "1.5e3y".to_f`, "1500.0\n"},

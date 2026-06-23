@@ -864,8 +864,12 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("gsub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.stringSub(strOf(self), args, blk, true)
 	})
-	vm.cString.define("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(parseLeadingInt(strOf(self)))
+	vm.cString.define("to_i", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		base := 10
+		if len(args) > 0 {
+			base = int(intArg(args[0]))
+		}
+		return stringToInt(strOf(self), base)
 	})
 	vm.cString.define("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(parseLeadingFloat(strOf(self)))
@@ -3008,26 +3012,81 @@ func chopStr(s string) string {
 	return string(r[:len(r)-1])
 }
 
-// parseLeadingInt mimics String#to_i: optional whitespace and sign, then digits;
-// 0 when there is no leading integer.
-func parseLeadingInt(s string) int64 {
+// stringToInt mimics String#to_i(base): optional whitespace and sign, an optional
+// radix prefix matching the base (or auto-detected when base is 0), then the
+// longest run of valid digits (underscores allowed between digits); 0 when there
+// is no leading integer. The result promotes to a Bignum when it overflows int64.
+func stringToInt(s string, base int) object.Value {
+	if base != 0 && (base < 2 || base > 36) {
+		raise("ArgumentError", "invalid radix %d", base)
+	}
 	s = strings.TrimLeft(s, wsCutset)
-	i := 0
-	if i < len(s) && (s[i] == '+' || s[i] == '-') {
-		i++
+	neg := false
+	if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
+		neg = s[0] == '-'
+		s = s[1:]
 	}
-	j := i
-	for j < len(s) && s[j] >= '0' && s[j] <= '9' {
-		j++
+	if len(s) >= 2 && s[0] == '0' { // strip a prefix consistent with the base
+		switch s[1] | 0x20 {
+		case 'x':
+			if base == 16 || base == 0 {
+				base, s = 16, s[2:]
+			}
+		case 'b':
+			if base == 2 || base == 0 {
+				base, s = 2, s[2:]
+			}
+		case 'o':
+			if base == 8 || base == 0 {
+				base, s = 8, s[2:]
+			}
+		case 'd':
+			if base == 10 || base == 0 {
+				base, s = 10, s[2:]
+			}
+		}
 	}
-	if j == i {
-		return 0
+	if base == 0 {
+		base = 10
 	}
-	n, err := strconv.ParseInt(s[:j], 10, 64)
-	if err != nil {
-		return 0
+	var digits []byte
+	prevDigit := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '_' {
+			if !prevDigit { // an underscore must sit between two digits
+				break
+			}
+			prevDigit = false
+			continue
+		}
+		if digitValue(s[i]) < base {
+			digits = append(digits, s[i])
+			prevDigit = true
+		} else {
+			break
+		}
 	}
-	return n
+	if len(digits) == 0 {
+		return object.Integer(0)
+	}
+	z, _ := new(big.Int).SetString(string(digits), base)
+	if neg {
+		z.Neg(z)
+	}
+	return object.NormInt(z)
+}
+
+// digitValue maps a base-36 digit character to its value (>= 36 if not a digit).
+func digitValue(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'z':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'Z':
+		return int(c-'A') + 10
+	}
+	return 99
 }
 
 // parseLeadingFloat mimics String#to_f: parse the longest leading float, 0.0 if
