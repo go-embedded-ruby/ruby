@@ -1,0 +1,5 @@
+# Minitest README usage: assertions and spec API after require.
+require 'minitest'; include Minitest::Assertions; def assertions; 0; end; def assertions=(x); end; assert_equal(2, 1+1); puts "ok"
+require 'minitest/autorun'; describe "x" do; it("adds"){ _(1+1).must_equal 2 }; end
+require 'minitest'; puts Minitest::VERSION.class
+require 'minitest'; puts Minitest::Test.ancestors.include?(Minitest::Test)

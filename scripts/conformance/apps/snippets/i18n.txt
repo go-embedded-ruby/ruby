@@ -1,0 +1,4 @@
+# i18n usage: backend + translate after require.
+require 'i18n'; I18n.backend.store_translations(:en, {hi: "Hello"}); I18n.locale = :en; puts I18n.t(:hi)
+require 'i18n'; I18n.backend.store_translations(:en, {n: {x: "deep"}}); puts I18n.t("n.x")
+require 'i18n'; puts I18n.available_locales.class
