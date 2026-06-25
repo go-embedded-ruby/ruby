@@ -201,6 +201,15 @@ JRuby**):
   `eval`/`require` calls (if any) would raise in the closed binary, since there
   is no front-end left to compile source at runtime.
 
+- **WebAssembly (`GOOS=js GOARCH=wasm`) is a supported target.** rbgo runs in the
+  browser two ways: the **playground** ships the full interpreter (front-end +
+  VM + numeric/image stack) as a wasm module that evaluates arbitrary Ruby in the
+  page (see [Run in the browser](#run-in-the-browser--webassembly)); and
+  **`rbgo build --closed --target wasm app.rb`** cross-compiles a closed-world
+  wasm module that runs *that one program* (no front-end linked) and can drive
+  the page's DOM/Canvas through the built-in `JS` module
+  (`JS.document`/`JS.log`/`JS::Ref#call`/`JS.raf`).
+
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. Phase 8 (conformance and
 representation/perf tuning) is now under way: small-integer interning and
@@ -240,26 +249,52 @@ go build -o rbgo ./cmd/rbgo
 # closed-world: bake the program in as bytecode and drop the front-end
 ./rbgo build --closed -o fib fib.rb           # no lexer/parser/compiler linked
 ./fib                                          # => 6765  (runs with no source file)
+
+# WebAssembly: cross-compile a closed-world program to a browser wasm module
+./rbgo build --closed --target wasm -o app.wasm app.rb   # GOOS=js GOARCH=wasm
 ```
 
-### Browser playground (WebAssembly)
+## Run in the browser — WebAssembly
 
-The interpreter, the numeric stack and the cgo-free image pipeline also compile
-to `GOOS=js GOARCH=wasm` and run **entirely in the browser** — no server-side
-code. A self-contained playground (Ruby REPL + a load→`gaussian_blur`/`sobel`/
-`canny`→render image demo) lives in [`web/`](web):
+**`GOOS=js GOARCH=wasm` is a first-class target.** Everything is pure Go with cgo
+disabled, so the interpreter, the numeric stack and the cgo-free image pipeline
+compile to a single wasm module and run **entirely in the browser** — there is no
+server-side code. There are two ways to ship Ruby to the browser:
+
+**1. The playground — full interpreter in wasm.** A self-contained page (Ruby
+REPL + a load→`gaussian_blur`/`sobel`/`canny`→render image demo) lives in
+[`web/`](web). It builds `cmd/wasm`, which links the whole front-end (lexer,
+parser, compiler) and VM, so the page can evaluate *arbitrary* Ruby typed by the
+user:
 
 ```bash
 ./web/build.sh serve        # build web/rbgo.wasm and serve http://localhost:8080
 ```
 
-See [web/README.md](web/README.md) for the JS bridge (`rbgoEval`, `rbgoImage`).
+The module publishes `rbgoEval(src)` and `rbgoImage(src, bytes)` on the JS global
+object; see [web/README.md](web/README.md) for the bridge.
+
+**2. `rbgo build --target wasm` — a closed-world wasm app.** To ship *one* Ruby
+program (not a REPL), AOT-bake it into a closed-world wasm module that drops the
+front-end:
+
+```bash
+./rbgo build --closed --target wasm -o app.wasm app.rb
+```
+
+`--target wasm` requires `--closed` (the wasm entry runs the embedded program,
+then parks the Go runtime with `select{}` so JS callbacks keep firing). The
+program can reach the page through the built-in **`JS` module** — `JS.global`,
+`JS.window`, `JS.document`, `JS.log`, `JS::Ref#get`/`set`/`call`/`[]`/`on` for
+DOM and Canvas, and `JS.raf { |t| … }` for an animation loop — so a closed-world
+wasm app can render and handle events with no JavaScript of its own. Serve the
+emitted `app.wasm` next to Go's `wasm_exec.js` loader.
 
 ## Layout
 
 ```
-cmd/rbgo/            CLI: run, build (+ build --closed; repl arrives later)
-cmd/wasm/            GOOS=js GOARCH=wasm front-end (see web/) + native build stub
+cmd/rbgo/            CLI: run, build (+ build --closed [--target wasm]; repl later)
+cmd/wasm/            GOOS=js GOARCH=wasm playground front-end (see web/) + native stub
 cmd/aotgen/          regenerates the AOT differential suite (go:generate)
 cmd/freeze-prelude/  regenerates the frozen prelude bytecode (go:generate)
 web/                 browser playground: index.html, build.sh (rbgoEval/rbgoImage)
@@ -283,8 +318,9 @@ go tool cover -func=cov.out | tail -1
 
 If a parent `go.work` is present, prefix commands with `GOWORK=off`.
 
-Correctness is judged against **two independent reference implementations** of
-Ruby 4.0 — **MRI (CRuby) 4.0.5** and **JRuby**. The three-way differential oracle
+Correctness is judged against **independent reference implementations** of
+Ruby 4.0 — **MRI (CRuby) 4.0.5** and **JRuby**, with **TruffleRuby** being added
+as a third reference (conformance + performance). The differential oracle
 [`scripts/oracle.sh`](scripts/oracle.sh) runs a snippet through rbgo, MRI and
 JRuby and flags any divergence:
 
@@ -296,7 +332,7 @@ Beyond synthetic tests, the bar is **real-world Ruby**: idioms and test suites
 from reference applications — **Ruby on Rails** (ActiveSupport's pure-Ruby
 `core_ext`) and **OpenVox**/Puppet (Ruby-heavy manifest evaluation) — drive the
 remaining work by demand and double as conformance corpora and performance
-baselines (pure-Go CGO=0 vs CRuby's C and JRuby's JVM JIT).
+baselines (pure-Go CGO=0 vs CRuby's C, JRuby's JVM JIT and TruffleRuby's Graal).
 
 ## Design & roadmap
 
