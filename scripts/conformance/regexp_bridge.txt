@@ -1,0 +1,46 @@
+# regexp_bridge.txt — Regexp bridge gaps: Regexp.new/compile + option constants,
+# Hash-replacement sub/gsub, and the enumerator form of sub/gsub.
+# One snippet per line; '#' begins a comment. Validated three-way (rbgo/MRI/JRuby)
+# via scripts/oracle.sh -b scripts/conformance/regexp_bridge.txt.
+
+# --- Regexp option constants ---
+p Regexp::IGNORECASE
+p Regexp::EXTENDED
+p Regexp::MULTILINE
+
+# --- Regexp.new / Regexp.compile ---
+p Regexp.new("ab")
+p Regexp.new("ab", Regexp::IGNORECASE)
+p Regexp.new("ab", Regexp::EXTENDED)
+p Regexp.new("ab", Regexp::MULTILINE)
+p Regexp.new("ab", Regexp::IGNORECASE | Regexp::MULTILINE | Regexp::EXTENDED)
+p Regexp.new("ab", true)
+p Regexp.new("ab", nil)
+p Regexp.new("ab", false)
+p Regexp.new("a", "i")
+p Regexp.new("a", "im")
+p Regexp.new(/foo/i)
+p Regexp.compile("xy", Regexp::EXTENDED)
+p "ABC".match?(Regexp.new("abc", Regexp::IGNORECASE))
+p("a b".gsub(Regexp.new('\s'), "_"))
+
+# --- Hash replacement (sub / gsub) ---
+p "hello".gsub(/[el]/, "e"=>"3","l"=>"1")
+p "hello".sub(/[el]/, "e"=>"3","l"=>"1")
+p "hello".gsub(/[xyz]/, "a"=>"b")
+p "aaa".gsub(/a/, "a"=>"X")
+p "Hello".gsub(/l/, "l"=>nil)
+p("a-b-c".sub(/-/, "-"=>"+"))
+
+# --- Enumerator form (gsub with no block, no replacement) ---
+p("hello".gsub(/l/).to_a)
+p("hello".gsub(/l/).with_index { |m,i| "#{m}#{i}" })
+p("a1b2".gsub(/\d/).class)
+p("a1b2".gsub(/\d/).to_a)
+p("abcabc".gsub(/a/).with_index { |m, i| "#{i}" })
+p(" foo bar ".gsub(/\w+/).map(&:upcase))
+
+# --- Error / edge cases ---
+begin; Regexp.new(123); rescue => e; p e.class; end
+begin; Regexp.new("a", "bad"); rescue => e; p [e.class, e.message]; end
+begin; "x".sub!(/x/); rescue => e; p e.class; end

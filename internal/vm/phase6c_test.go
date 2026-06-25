@@ -82,7 +82,8 @@ func TestStringGsubErrors(t *testing.T) {
 	tests := []struct{ name, src, want string }{
 		{"named_unknown", "\"x\".gsub(/x/, \"\\\\k<no>\")", "IndexError"},
 		{"malformed_k_open", "\"x\".gsub(/x/, \"\\\\k<no\")", "RuntimeError"},
-		{"no_replacement", `"x".gsub(/x/)`, "ArgumentError"},
+		// gsub(/re/) with no replacement and no block now returns an Enumerator
+		// (see TestSubGsubEnumerator); only sub still raises here.
 		{"sub_no_replacement", `"x".sub(/x/)`, "ArgumentError"},
 		{"nonstring_replacement", `"x".gsub(/x/, 123)`, "TypeError"},
 		{"nonregex_pattern", `"x".gsub(123, "y")`, "TypeError"},
