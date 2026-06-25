@@ -932,16 +932,12 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.String{B: out}
 	})
-	vm.cString.define("squeeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		str := strOf(self)
-		out := make([]byte, 0, len(str))
-		for i := 0; i < len(str); i++ {
-			if i > 0 && str[i] == str[i-1] {
-				continue
-			}
-			out = append(out, str[i])
+	vm.cString.define("squeeze", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		sets := make([]string, len(args))
+		for i, a := range args {
+			sets[i] = strArg(a)
 		}
-		return &object.String{B: out}
+		return &object.String{B: []byte(squeezeStr(strOf(self), sets...))}
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		var res object.Value
@@ -1063,8 +1059,12 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strBang(self, chopStr)
 	})
-	vm.cString.define("squeeze!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, squeezeStr)
+	vm.cString.define("squeeze!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		sets := make([]string, len(args))
+		for i, a := range args {
+			sets[i] = strArg(a)
+		}
+		return strBang(self, func(s string) string { return squeezeStr(s, sets...) })
 	})
 	vm.cString.define("sub!", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.strSubBang(self, args, blk, false)
@@ -1655,6 +1655,44 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
+	vm.cArray.define("permutation", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		elems := self.(*object.Array).Elems
+		k := len(elems)
+		if len(args) > 0 {
+			k = int(intArg(args[0]))
+		}
+		var perms []object.Value
+		if k >= 0 && k <= len(elems) {
+			used := make([]bool, len(elems))
+			pick := make([]object.Value, k)
+			var gen func(depth int)
+			gen = func(depth int) {
+				if depth == k {
+					out := make([]object.Value, k)
+					copy(out, pick)
+					perms = append(perms, &object.Array{Elems: out})
+					return
+				}
+				for i := range elems {
+					if used[i] {
+						continue
+					}
+					used[i] = true
+					pick[depth] = elems[i]
+					gen(depth + 1)
+					used[i] = false
+				}
+			}
+			gen(0)
+		}
+		if blk == nil {
+			return enumFor(&object.Array{Elems: perms}, "each")
+		}
+		for _, pr := range perms {
+			vm.callBlock(blk, []object.Value{pr})
+		}
+		return self
+	})
 	vm.cArray.define("take_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "take_while")
@@ -2067,15 +2105,19 @@ func (vm *VM) bootstrap() {
 		}
 		return out
 	})
-	vm.cHash.define("transform_keys", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
+	vm.cHash.define("transform_keys", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		var mapping *object.Hash
+		if len(args) > 0 {
+			mapping, _ = args[0].(*object.Hash)
+		}
+		if mapping == nil && blk == nil {
 			return enumFor(self, "transform_keys")
 		}
 		h := self.(*object.Hash)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
-			out.Set(vm.callBlock(blk, []object.Value{k}), v)
+			out.Set(vm.transformKey(k, mapping, blk), v)
 		}
 		return out
 	})
@@ -2090,8 +2132,12 @@ func (vm *VM) bootstrap() {
 		}
 		return h
 	})
-	vm.cHash.define("transform_keys!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
+	vm.cHash.define("transform_keys!", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		var mapping *object.Hash
+		if len(args) > 0 {
+			mapping, _ = args[0].(*object.Hash)
+		}
+		if mapping == nil && blk == nil {
 			return enumFor(self, "transform_keys!")
 		}
 		h := self.(*object.Hash)
@@ -2102,7 +2148,7 @@ func (vm *VM) bootstrap() {
 		vals := make([]object.Value, len(keys))
 		for i, k := range keys {
 			vals[i], _ = h.Get(k)
-			newKeys[i] = vm.callBlock(blk, []object.Value{k})
+			newKeys[i] = vm.transformKey(k, mapping, blk)
 		}
 		for _, k := range keys {
 			h.Delete(k)
@@ -2728,6 +2774,19 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Rational{R: r}
 	})
+	vm.cFloat.define("rationalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		f := floatOf(self)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			msg := "NaN"
+			if math.IsInf(f, 1) {
+				msg = "Infinity"
+			} else if math.IsInf(f, -1) {
+				msg = "-Infinity"
+			}
+			raise("FloatDomainError", "%s", msg)
+		}
+		return &object.Rational{R: rationalizeFloat(f)}
+	})
 	vm.cFloat.define("nan?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(math.IsNaN(floatOf(self)))
 	})
@@ -3232,11 +3291,92 @@ func strBang(self object.Value, fn func(string) string) object.Value {
 	return s
 }
 
-// squeezeStr collapses each run of identical bytes to a single byte.
-func squeezeStr(s string) string {
+// rationalizeFloat returns the simplest rational that rounds back to f, matching
+// Ruby's Float#rationalize. It searches the interval [f-delta, f+delta] where
+// delta is half the distance to the neighbouring representable doubles, then
+// finds the rational in that interval with the smallest denominator via the
+// classic Stern-Brocot / continued-fraction mediant search.
+func rationalizeFloat(f float64) *big.Rat {
+	if f == 0 {
+		return new(big.Rat)
+	}
+	if f < 0 {
+		r := rationalizeFloat(-f)
+		return r.Neg(r)
+	}
+	lo := new(big.Rat).SetFloat64(math.Nextafter(f, math.Inf(-1)))
+	hi := new(big.Rat).SetFloat64(math.Nextafter(f, math.Inf(1)))
+	exact := new(big.Rat).SetFloat64(f)
+	// Use the midpoints to the neighbours as the inclusive search bounds.
+	half := big.NewRat(1, 2)
+	lo.Add(lo, exact).Mul(lo, half)
+	hi.Add(hi, exact).Mul(hi, half)
+	return simplestRatBetween(lo, hi)
+}
+
+// simplestRatBetween returns the rational with the smallest denominator lying in
+// the closed interval [lo, hi] (0 <= lo <= hi), using a mediant
+// (continued-fraction) descent. The interval is required to be non-negative;
+// rationalizeFloat handles the sign before calling in.
+func simplestRatBetween(lo, hi *big.Rat) *big.Rat {
+	// For non-negative lo, integer truncation equals the floor, and an integer in
+	// [lo, hi] is the simplest answer.
+	loFloor := new(big.Int).Quo(lo.Num(), lo.Denom())
+	floorRat := new(big.Rat).SetInt(loFloor)
+	if floorRat.Cmp(lo) >= 0 && floorRat.Cmp(hi) <= 0 {
+		return floorRat
+	}
+	ceil := new(big.Int).Add(loFloor, big.NewInt(1))
+	ceilRat := new(big.Rat).SetInt(ceil)
+	if ceilRat.Cmp(lo) >= 0 && ceilRat.Cmp(hi) <= 0 {
+		return ceilRat
+	}
+	// No integer in range: peel off the common integer part and recurse on the
+	// reciprocal interval (continued-fraction step).
+	one := big.NewRat(1, 1)
+	loFrac := new(big.Rat).Sub(lo, floorRat)
+	hiFrac := new(big.Rat).Sub(hi, floorRat)
+	inner := simplestRatBetween(new(big.Rat).Quo(one, hiFrac), new(big.Rat).Quo(one, loFrac))
+	return floorRat.Add(floorRat, new(big.Rat).Quo(one, inner))
+}
+
+// transformKey computes a replacement key for Hash#transform_keys(!): a mapping
+// hash takes precedence when it contains the key, otherwise the block (if any)
+// is applied, and failing both the key is left unchanged.
+func (vm *VM) transformKey(k object.Value, mapping *object.Hash, blk *Proc) object.Value {
+	if mapping != nil {
+		if nk, ok := mapping.Get(k); ok {
+			return nk
+		}
+	}
+	if blk != nil {
+		return vm.callBlock(blk, []object.Value{k})
+	}
+	return k
+}
+
+// squeezeStr collapses each run of identical bytes to a single byte. When one
+// or more character-set arguments are given only runs of bytes that belong to
+// the intersection of those sets are collapsed (matching String#squeeze).
+func squeezeStr(s string, sets ...string) string {
+	var set []byte
+	squeezeAll := len(sets) == 0
+	if !squeezeAll {
+		set = expandCharSet(sets[0])
+		for _, extra := range sets[1:] {
+			next := expandCharSet(extra)
+			keep := set[:0]
+			for _, b := range set {
+				if byteIndex(next, b) >= 0 {
+					keep = append(keep, b)
+				}
+			}
+			set = keep
+		}
+	}
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
-		if i > 0 && s[i] == s[i-1] {
+		if i > 0 && s[i] == s[i-1] && (squeezeAll || byteIndex(set, s[i]) >= 0) {
 			continue
 		}
 		out = append(out, s[i])

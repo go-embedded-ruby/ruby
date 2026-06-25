@@ -8,7 +8,7 @@ import "github.com/go-embedded-ruby/ruby/internal/object"
 func setupStruct(vm *VM) {
 	cStruct := newClass("Struct", vm.cObject)
 	vm.consts["Struct"] = cStruct
-	cStruct.smethods["new"] = &Method{name: "new", owner: cStruct, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	cStruct.smethods["new"] = &Method{name: "new", owner: cStruct, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		// A trailing options hash carries keyword_init: it is not a member name.
 		kwInit := false
 		if n := len(args); n > 0 {
@@ -23,7 +23,13 @@ func setupStruct(vm *VM) {
 		for i, a := range args {
 			names[i] = a.ToS()
 		}
-		return vm.newStructClass(cStruct, names, kwInit)
+		sub := vm.newStructClass(cStruct, names, kwInit)
+		if blk != nil {
+			// Struct.new(:a) { def m; …; end } evaluates the body in the new
+			// subclass, just like class_eval, so it can add methods/constants.
+			vm.classEval(sub, blk, nil)
+		}
+		return sub
 	}}
 }
 

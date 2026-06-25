@@ -1,0 +1,179 @@
+# Broad non-regexp stdlib conformance corpus for the differential oracle.
+#   scripts/oracle.sh -b scripts/conformance/stdlib.txt
+# One snippet per line (deterministic; no randomness/time). Lines starting with #
+# are comments. Each must produce identical output on rbgo, MRI and JRuby.
+
+# --- String: padding / case / transform ---
+p "hi".center(7)
+p "hi".center(7, "*")
+p "hi".ljust(5, ".")
+p "hi".rjust(5, "0")
+p "aaabbbccc".squeeze
+p "aaabbbccc".squeeze("a")
+p "hello".delete("l")
+p "hello world".tr("a-y", "b-z")
+p "hello".tr("el", "ip")
+p "hello".chars
+p "abc".bytes
+p "café".bytes
+p "héllo".each_char.to_a
+p "abc".each_char.map(&:upcase)
+p "a,b,c".scan("a")
+p "aXbXc".split("X")
+p "hello".count("l")
+p "hello".count("a-y")
+p "Hello World".swapcase
+p "  hi  ".strip
+p "xxhix".delete("x")
+p "mississippi".squeeze("sp")
+
+# --- String: format / % ---
+p format("%05.2f", 3.14159)
+p format("%+d", 42)
+p format("%x", 255)
+p format("%o", 8)
+p format("%b", 5)
+p format("%e", 12345.678)
+p format("%-10s|", "hi")
+p format("%3d%%", 50)
+p "%s and %s" % ["a", "b"]
+p "%d" % 42
+p format("%08.3f", -1.5)
+
+# --- Array: structure ---
+p [1, [2, [3, [4]]]].flatten
+p [1, [2, [3, [4]]]].flatten(1)
+p [1, nil, 2, nil, 3].compact
+p [1, 2, 3].zip([4, 5, 6], [7, 8, 9])
+p [1, 2, 3, 4].each_cons(2).to_a
+p [1, 2, 3, 4, 5].each_slice(2).to_a
+p [1, 2].product([3, 4])
+p [1, 2, 3].rotate
+p [1, 2, 3].rotate(2)
+p [1, 2, 3].rotate(-1)
+p [1, 2, 3].combination(2).to_a
+p [1, 2, 3].permutation(2).to_a
+p [1, 2, 3].flat_map { |x| [x, -x] }
+p %w[a b a c b a].tally
+p [1, 2, 3, 4].sum
+p [1.0, 2.0].sum
+p ["a", "b"].sum("")
+p [1, 5, 3, 2].minmax
+p [1, 2, 3, 4, 1].take_while { |x| x < 3 }
+p [1, 2, 3, 4, 1].drop_while { |x| x < 3 }
+p [1, 2, 4, 9, 10, 11, 12, 0].chunk_while { |i, j| i + 1 == j }.to_a
+p [1, 2, 3, 4].slice_when { |i, j| i + 1 != j }.to_a
+p [3, 1, 2].sort_by { |x| -x }
+p [1, 2, 3, 4, 5].each_with_index.select { |x, i| i.even? }.map(&:first)
+
+# --- Hash ---
+p (1..6).group_by { |i| i % 3 }
+p %w[a bb ccc].each_with_object({}) { |s, h| h[s] = s.length }
+p({ a: 1, b: 2 }.transform_keys(&:to_s))
+p({ a: 1, b: 2, c: 3 }.transform_keys({ a: :x, b: :y }))
+p [1, 2, 3, 4].filter_map { |x| x * 2 if x.even? }
+p({ a: 1, b: 2, c: 3 }.sum { |k, v| v })
+p({ a: 1, b: 2 }.to_a)
+p({ a: 3, b: 1, c: 2 }.min_by { |k, v| v })
+p({ a: 3, b: 1, c: 2 }.sort_by { |k, v| v })
+p({ a: 3, b: 1, c: 2 }.max_by { |k, v| v })
+p({ a: 1, b: 2, c: 3 }.select { |k, v| v.odd? })
+p({ a: 1, b: 2, c: 3 }.reject { |k, v| v.odd? })
+p({ a: 1, b: 2 }.invert)
+p({ a: 1, b: 2, c: 3 }.partition { |k, v| v.odd? })
+p({ a: 1, b: 2 }.each_with_index.to_a)
+p Hash[[[:a, 1], [:b, 2]]]
+p({ a: 1 }.merge(b: 2).merge(c: 3))
+
+# --- Enumerable ---
+p [1, 2, 3, 4, 5].partition(&:even?)
+p [1, 1, 2, 3, 3, 3].chunk { |x| x }.to_a
+p [1, 2, 3, 4].each_with_index.map { |x, i| x * i }
+p [1, 2, 3, 4].inject(:+)
+p [1, 2, 3, 4].inject(10) { |s, x| s + x }
+p [1, 2, 3, 4].inject(1, :*)
+p (1..Float::INFINITY).lazy.map { |x| x * 2 }.first(5)
+p (1..Float::INFINITY).lazy.select(&:even?).first(3)
+p [1, 2, 3].each_with_object([]) { |x, a| a << x * x }
+p [1, 2, 3, 4, 5].find { |x| x > 3 }
+p [1, 2, 3].cycle.first(7)
+p [5, 3, 8, 1].min(2)
+p [5, 3, 8, 1].max(2)
+p [1, 2, 3, 4].count(&:even?)
+p [[1, 2], [3, 4]].to_h
+
+# --- Integer / Float ---
+p 12.gcd(18)
+p 4.lcm(6)
+p 12.gcd(18) * 4.lcm(6)
+p 123.digits
+p 123.digits(16)
+p 255.bit_length
+p 1024.bit_length
+p 3.14159.round(2)
+p 3.14159.ceil(2)
+p 3.14159.floor(2)
+p (-7).divmod(3)
+p 7.divmod(-3)
+p 7.fdiv(2)
+p 10.to_s(2)
+p 255.to_s(16)
+p "ff".to_i(16)
+p 17.pow(3, 5)
+p 2 ** 64
+p 100.clamp(0, 50)
+p 3.7.truncate
+p (-3.7).truncate
+p 10.times.map { |i| i * i }
+p 5.upto(8).to_a
+p 1.5.rationalize
+p 10.fdiv(3).round(4)
+
+# --- Rational / Complex ---
+p Rational(1, 2) + Rational(1, 3)
+p Rational(2, 4)
+p (Rational(3, 4) * 2)
+p Complex(1, 2) + Complex(3, 4)
+p Complex(1, 2) * Complex(3, 4)
+p Complex(3, 4).abs
+p Rational(1, 3)
+p (Rational(1, 3) + Rational(1, 6))
+
+# --- Comparable ---
+p 5.clamp(1, 10)
+p 5.between?(1, 10)
+p [1, 2, 3].minmax
+p "b".clamp("a", "c")
+
+# --- Struct ---
+p Struct.new(:x, :y).new(1, 2).to_a
+p Struct.new(:x, :y).new(1, 2).to_h
+p (Struct.new(:a, :b).new(1, 2) == Struct.new(:a, :b).new(1, 2))
+p Struct.new(:name, :age) { def greet; "#{name} is #{age}"; end }.new("Al", 30).greet
+p Struct.new(:x, :y).new(1, 2).members
+
+# --- Set ---
+require "set"; p Set[1, 2, 3].include?(2)
+require "set"; p (Set[1, 2, 3] & Set[2, 3, 4]).to_a.sort
+require "set"; p (Set[1, 2, 3] | Set[3, 4]).to_a.sort
+require "set"; p (Set[1, 2, 3] - Set[2]).to_a.sort
+require "set"; p Set[1, 2].subset?(Set[1, 2, 3])
+require "set"; p Set.new([1, 1, 2, 3]).size
+
+# --- Marshal round-trips ---
+p Marshal.load(Marshal.dump([1, 2, 3]))
+p Marshal.load(Marshal.dump({ a: 1, b: [2, 3] }))
+p Marshal.load(Marshal.dump("hello"))
+p Marshal.load(Marshal.dump(42))
+p Marshal.load(Marshal.dump(:sym))
+p Marshal.load(Marshal.dump(nil))
+
+# --- Pattern matching (case/in) ---
+case {name: "Al", age: 30}; in {name: String => n, age: Integer => a}; p "#{n}/#{a}"; end
+case [1, 2, 3]; in [1, *rest]; p rest; end
+case [1, 2, 3, 4]; in [Integer => a, *, Integer => z]; p [a, z]; end
+case 5; in Integer => n if n > 3; p :big; else; p :small; end
+case {status: "ok", code: 200}; in {status: "ok"}; p :good; end
+case [1, [2, 3]]; in [a, [b, c]]; p a + b + c; end
+case "hi"; in String; p :str; in Integer; p :int; end
+case {a: 1, b: 2}; in {a:}; p a; end
