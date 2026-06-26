@@ -89,7 +89,8 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 
 // requireCandidates lists the paths to try for file. require_relative resolves
 // against the requiring file's directory; a plain require searches that
-// directory and the process CWD; an absolute path is used as-is.
+// directory, the process CWD, then each $LOAD_PATH entry; an absolute path is
+// used as-is.
 func (vm *VM) requireCandidates(file string, relative bool) []string {
 	switch {
 	case relative:
@@ -97,8 +98,29 @@ func (vm *VM) requireCandidates(file string, relative bool) []string {
 	case filepath.IsAbs(file):
 		return []string{file}
 	default:
-		return []string{filepath.Join(vm.currentDir(), file), file}
+		cands := []string{filepath.Join(vm.currentDir(), file), file}
+		for _, dir := range vm.loadPathDirs() {
+			cands = append(cands, filepath.Join(dir, file))
+		}
+		return cands
 	}
+}
+
+// loadPathDirs returns the directory strings currently in $LOAD_PATH. Non-string
+// entries are skipped (MRI coerces them, but the embedded load path holds plain
+// strings).
+func (vm *VM) loadPathDirs() []string {
+	lp, ok := vm.globals["$LOAD_PATH"].(*object.Array)
+	if !ok {
+		return nil
+	}
+	dirs := make([]string, 0, len(lp.Elems))
+	for _, e := range lp.Elems {
+		if s, ok := e.(*object.String); ok {
+			dirs = append(dirs, string(s.B))
+		}
+	}
+	return dirs
 }
 
 // currentDir is the directory of the file currently being required, falling back
