@@ -122,11 +122,35 @@ func TestMultiAssignTargets(t *testing.T) {
 		{"a, b = 1, 2; p [a, b]", "[1, 2]\n"}, // all-locals path still works
 		{"A, B, C = 1, 2, 3; p [A, B, C]", "[1, 2, 3]\n"},
 		{"A, b = 1, 2; p [A, b]", "[1, 2]\n"}, // mixed const + local
+		// Round-1: the other general LHS target kinds.
+		{"@a, @b, @c = 1, 2, 3; p [@a, @b, @c]", "[1, 2, 3]\n"},   // instance vars
+		{"@a, *@b = 1, 2, 3; p [@a, @b]", "[1, [2, 3]]\n"},        // ivar + splat
+		{"$g, @i = 1, 2; p [$g, @i]", "[1, 2]\n"},                 // global + ivar
+		{"class F; end; F::A, x = 1, 2; p [F::A, x]", "[1, 2]\n"}, // scoped constant
+		{"h = {}; h[:a], h[:b] = 1, 2; p h", "{a: 1, b: 2}\n"},    // index setter
+		{ // attribute setter (x= / y=)
+			"class O; attr_accessor :x, :y; end; o = O.new; o.x, o.y = 10, 20; p [o.x, o.y]",
+			"[10, 20]\n",
+		},
+		{"a, * = 1, 2, 3; p a", "1\n"}, // nameless trailing splat is discarded
+		{"*, a = 1, 2, 3; p a", "3\n"}, // nameless leading splat is discarded
+		{ // class variables, assigned from within a class method
+			"class B; @@c1 = 0; @@c2 = 0; def self.go; @@c1, @@c2 = 5, 6; [@@c1, @@c2]; end; end; p B.go",
+			"[5, 6]\n",
+		},
 	}
 	for _, tc := range tests {
 		if got := eval(t, tc.src); got != tc.want {
 			t.Errorf("src=%q got=%q want=%q", tc.src, got, tc.want)
 		}
+	}
+}
+
+// TestMultiAssignScopedConstTypeError covers OpSetScopedConst's non-class
+// receiver branch: a `::`-path masgn target whose receiver is not a module.
+func TestMultiAssignScopedConstTypeError(t *testing.T) {
+	if cls, _ := evalErr(t, "X = 5; X::A, y = 1, 2"); cls != "TypeError" {
+		t.Errorf("scoped-const masgn under a non-module: got %s, want TypeError", cls)
 	}
 }
 

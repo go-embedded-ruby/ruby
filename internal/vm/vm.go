@@ -527,6 +527,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					raise("TypeError", "%s is not a class/module", recv.Inspect())
 				}
 				push(vm.scopedConst(cls, name))
+			case bytecode.OpSetScopedConst:
+				// Foo::BAR = value. Stack is [recv, value]; pop the value, then the
+				// receiver, set recv::name and push the value back (assignment is an
+				// expression yielding its right-hand side).
+				val := pop()
+				recv := pop()
+				cls, ok := recv.(*RClass)
+				if !ok {
+					raise("TypeError", "%s is not a class/module", recv.Inspect())
+				}
+				cls.consts[iseq.Names[in.A]] = val
+				push(val)
 			case bytecode.OpSetConst:
 				// Assignment is an expression: set the constant, keep its value.
 				vm.consts[iseq.Names[in.A]] = stack[len(stack)-1]
