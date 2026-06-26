@@ -13,7 +13,10 @@ func TestNumberedParams(t *testing.T) {
 		{"reduce", `p [1, 2, 3].reduce(0) { _1 + _2 }`, "6\n"},
 		{"sort", `p [3, 1, 2].sort { _1 <=> _2 }`, "[1, 2, 3]\n"},
 		{"hash", `p({a: 1, b: 2}.map { "#{_1}=#{_2}" })`, "[\"a=1\", \"b=2\"]\n"},
-		{"do_end", "p [1, 2].map do\n  _1 + 100\nend", "[101, 102]\n"},
+		// `do...end` binds to the command call, not the method, so
+		// `p [1,2].map do ... end` is `p([1,2].map) do...end` (an Enumerator,
+		// matching MRI). Bind the block to `map` via an assignment RHS instead.
+		{"do_end", "r = [1, 2].map do\n  _1 + 100\nend\np r", "[101, 102]\n"},
 		{"lambda", "f = ->{ _1 * _1 }\np f.call(5)", "25\n"},
 		{"it", `p [1, 2, 3].map { it * 10 }`, "[10, 20, 30]\n"},
 		{"it_method", `p [1, 2, 3].select { it.odd? }`, "[1, 3]\n"},
