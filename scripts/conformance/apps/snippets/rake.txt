@@ -1,0 +1,5 @@
+# Rake usage: DSL after require.
+require 'rake'; puts Rake::VERSION
+require 'rake'; task(:hello){ puts "hi" }; Rake::Task[:hello].invoke
+require 'rake'; puts Rake::FileList["*.none"].class
+require 'rake'; ns = namespace(:n){ task(:t){} }; puts Rake::Task["n:t"].name

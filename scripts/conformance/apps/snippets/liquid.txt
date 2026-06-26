@@ -1,0 +1,6 @@
+# Liquid README usage: template parse + render.
+require 'liquid'; puts Liquid::Template.parse("Hi {{name}}").render("name" => "Bob")
+require 'liquid'; puts Liquid::Template.parse("{% for i in (1..3) %}{{i}}{% endfor %}").render
+require 'liquid'; puts Liquid::Template.parse("{{ 'a,b' | split: ',' | first }}").render
+require 'liquid'; puts Liquid::Template.parse("{% if x %}yes{% else %}no{% endif %}").render("x" => true)
+require 'liquid'; puts Liquid::Template.parse("{{ 99 | plus: 1 }}").render

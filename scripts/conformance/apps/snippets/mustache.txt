@@ -1,0 +1,6 @@
+# Mustache README usage. Each snippet requires the lib and exercises its API.
+require 'mustache'; puts Mustache.render("Hello {{name}}!", name: "World")
+require 'mustache'; puts Mustache.render("{{#a}}{{x}}{{/a}}", a: {x: 1})
+require 'mustache'; class V < Mustache; def thing; "X"; end; end; puts V.render("{{thing}}")
+require 'mustache'; puts Mustache.render("{{#items}}{{.}},{{/items}}", items: [1,2,3])
+require 'mustache'; puts Mustache.render("{{^empty}}no{{/empty}}", empty: false)

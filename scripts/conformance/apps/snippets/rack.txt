@@ -1,0 +1,5 @@
+# Rack usage: core helpers after require.
+require 'rack'; puts Rack::RELEASE
+require 'rack'; req = Rack::Request.new("REQUEST_METHOD" => "GET", "PATH_INFO" => "/x"); puts req.path_info
+require 'rack'; res = Rack::Response.new; res.write("hi"); puts res.finish[0]
+require 'rack/utils'; puts Rack::Utils.escape("a b")
