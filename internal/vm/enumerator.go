@@ -170,6 +170,62 @@ func (vm *VM) registerEnumerator() {
 	d("each_with_index", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return withIndex(vm, self, nil, blk) // each_with_index ignores any offset
 	})
+	// first/take pull only as many elements as requested, so they terminate even
+	// for unbounded enumerators such as Array#cycle without a block.
+	d("first", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		e := self.(*Enumerator)
+		if len(args) == 0 {
+			got := vm.enumTake(e, 1)
+			if len(got) == 0 {
+				return object.NilV
+			}
+			return got[0]
+		}
+		return &object.Array{Elems: vm.enumTake(e, int(intArg(args[0])))}
+	})
+	d("take", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return &object.Array{Elems: vm.enumTake(self.(*Enumerator), int(intArg(args[0])))}
+	})
+}
+
+// enumStop is the sentinel panic used by enumTake to unwind out of a possibly
+// unbounded #each once enough elements have been collected.
+type enumStop struct{}
+
+// enumTake drives the enumerator's #each and collects at most n elements,
+// aborting the (possibly infinite) iteration as soon as the quota is met.
+func (vm *VM) enumTake(e *Enumerator, n int) (out []object.Value) {
+	if n <= 0 {
+		return []object.Value{}
+	}
+	out = make([]object.Value, 0, n)
+	collect := &Proc{native: func(_ *VM, args []object.Value) object.Value {
+		if len(args) == 1 {
+			out = append(out, args[0])
+		} else {
+			out = append(out, &object.Array{Elems: append([]object.Value{}, args...)})
+		}
+		if len(out) >= n {
+			panic(enumStop{})
+		}
+		return object.NilV
+	}}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(enumStop); ok {
+				return
+			}
+			panic(r)
+		}
+	}()
+	if e.block != nil { // generator block: drive it with a collecting yielder
+		vm.callBlock(e.block, []object.Value{&yielder{emit: func(args []object.Value) {
+			collect.native(vm, args)
+		}}})
+		return out
+	}
+	vm.send(e.recv, e.meth, e.args, collect)
+	return out
 }
 
 // enumMaterialize runs the underlying method with a collecting block and returns
