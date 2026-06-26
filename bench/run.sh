@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 # Differential performance harness: runs each bench/*.rb under rbgo (interpreter),
-# rbgo+AOT (a native binary from `rbgo build`), MRI, and MRI+YJIT, takes the best
-# of N runs (least noise), and prints a Markdown table of wall-clock times and
-# ratios. Correctness (same stdout) is checked first; a program is skipped if any
-# runtime disagrees with MRI.
+# rbgo+AOT (a native binary from `rbgo build`), MRI, MRI+YJIT, JRuby and
+# TruffleRuby, takes the best of N runs (least noise), and prints a Markdown table
+# of wall-clock times and ratios. Correctness (same stdout as MRI) is checked
+# first; a program is skipped if rbgo disagrees with MRI. JRuby and TruffleRuby
+# are extra reference runtimes, shown as "n/a" when not installed and "diff" when
+# their output diverges from MRI.
 #
 # Usage: bench/run.sh [runs]   (default 5)
 #
-# The AOT column needs the Go toolchain and a module checkout (so `rbgo build`
-# can compile + link). Set AOT=0 to skip it (e.g. with only an installed rbgo).
+# Env: RBGO (./rbgo), RUBY (ruby), JRUBY (jruby), TRUFFLE (truffleruby), AOT (1).
+# The AOT column needs the Go toolchain + a module checkout; set AOT=0 to skip it.
 set -u
 RUNS="${1:-5}"
 RBGO="${RBGO:-./rbgo}"
 RUBY="${RUBY:-ruby}"
+JRUBY="${JRUBY:-jruby}"
+TRUFFLE="${TRUFFLE:-truffleruby}"
 AOT="${AOT:-1}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TMP="$(mktemp -d)"
@@ -27,16 +31,26 @@ best() { # best() prog args... → minimal real seconds over $RUNS
   echo "$b"
 }
 
-printf '| Benchmark | rbgo | rbgo+AOT | MRI | MRI+YJIT | AOT/MRI | AOT/YJIT |\n'
-printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n'
+# best_ref times an optional reference runtime: "Ns" on success, "n/a" when the
+# binary is absent, "diff" when its output diverges from MRI's.
+best_ref() { # bin, prog, expected_output
+  command -v "$1" >/dev/null 2>&1 || { echo "n/a"; return; }
+  [ "$("$1" "$2" 2>/dev/null)" = "$3" ] || { echo "diff"; return; }
+  echo "$(best "$1" "$2")s"
+}
+
+printf '| Benchmark | rbgo | rbgo+AOT | MRI | MRI+YJIT | JRuby | TruffleRuby | AOT/MRI | AOT/YJIT |\n'
+printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
 for f in "$HERE"/*.rb; do
   name=$(basename "$f" .rb)
   ro=$("$RBGO" "$f" 2>/dev/null); mo=$("$RUBY" "$f" 2>/dev/null)
-  [ "$ro" != "$mo" ] && { printf '| %s | (output differs, skipped) ||||||\n' "$name"; continue; }
+  [ "$ro" != "$mo" ] && { printf '| %s | (output differs, skipped) | | | | | | | |\n' "$name"; continue; }
 
   rb=$(best "$RBGO" "$f")
   mr=$(best "$RUBY" "$f")
   yj=$(best "$RUBY" --yjit "$f")
+  jr=$(best_ref "$JRUBY" "$f" "$mo")
+  tr=$(best_ref "$TRUFFLE" "$f" "$mo")
 
   # AOT: build a specialised native binary for this program, then time it.
   at="n/a"; am="—"; ay="—"
@@ -56,5 +70,5 @@ for f in "$HERE"/*.rb; do
     fi
   fi
 
-  printf '| %s | %ss | %s | %ss | %ss | %s | %s |\n' "$name" "$rb" "$at" "$mr" "$yj" "$am" "$ay"
+  printf '| %s | %ss | %s | %ss | %ss | %s | %s | %s | %s |\n' "$name" "$rb" "$at" "$mr" "$yj" "$jr" "$tr" "$am" "$ay"
 done
