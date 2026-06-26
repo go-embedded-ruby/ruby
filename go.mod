@@ -13,7 +13,7 @@ require (
 	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
-	github.com/go-ruby-parser/parser v0.0.0-20260626071835-a69d0a5aab13
+	github.com/go-ruby-parser/parser v0.0.0-20260626120154-14edf1949b2a
 	github.com/go-ruby-regexp/regexp v0.0.0-20260626052554-81f5a06101b9
 )
 
