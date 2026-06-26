@@ -68,7 +68,7 @@ const (
 	OpDefineMethod          // A = Names index, B = Children index; defines on the current class
 	OpDefineSMethod         // A = Names index, B = Children index; defines a singleton (class) method
 	OpDefineSingletonMethod // A = Names index, B = Children index; pops a receiver, defines a singleton method on it (def recv.foo)
-	OpInvokeSuper           // A = argc, B = 1 to forward the frame's args (bare super) else 0
+	OpInvokeSuper           // A = argc, B = 1 to forward the frame's args (bare super) else 0; C = 1 when an explicit block value sits on top of the stack (overriding the frame block)
 	OpInvokeBlock           // A = argc; yields to the block passed to the current method
 	OpBlockGiven            // pushes true if a block was passed to the current method
 	OpReturn                // returns top of stack from the current ISeq
@@ -93,7 +93,7 @@ const (
 	OpDefineClassScoped     // A = Names index (trailing name), B = Children index, C = flags (1=parent on stack, 2=super-expr on stack); defines/reopens a class at a `::` path / with a `::`-expression superclass
 	OpDefineModuleScoped    // A = Names index (trailing name), B = Children index; pops a parent module/class, defines/reopens the module there
 	OpXStr                  // A = Names index (command); runs the shell command and pushes its stdout as a String (`%x{…}` / backticks)
-	OpInvokeSuperArray      // super(*a, **k, &b): stack is argsArray (then a &block-pass value when C==1); dispatches super with the array's elements
+	OpInvokeSuperArray      // super(*a, **k, &b): stack is argsArray (then a &block-pass value when C==1); C>1 means a literal block from child C-2; dispatches super with the array's elements
 	OpOpenSingletonClass    // A = Children index; pops a target, runs the child ISeq with the target's singleton (meta) class as the definee (`class << target`)
 	OpAlias                 // A = Names index (new name), B = Names index (old name); aliases an existing method (or global variable) on the current definee
 	OpUndef                 // A = Names index; undefines the named method on the current definee

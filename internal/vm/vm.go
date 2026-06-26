@@ -731,6 +731,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				parent := vm.asModuleParent(pop())
 				push(vm.defineModuleIn(parent, iseq.Names[in.A], iseq.Children[in.B]))
 			case bytecode.OpInvokeSuper:
+				superBlk := block
+				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
+					markEnvCaptured(env)
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+				}
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the frame's own arguments
 					superArgs = args
@@ -739,11 +744,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					copy(superArgs, stack[len(stack)-in.A:])
 					stack = stack[:len(stack)-in.A]
 				}
-				push(vm.invokeSuper(self, definee, methodName, superArgs, block))
+				push(vm.invokeSuper(self, definee, methodName, superArgs, superBlk))
 			case bytecode.OpInvokeSuperArray:
 				superBlk := block
-				if in.C == 1 { // a &block-pass overrides the frame's block
+				switch {
+				case in.C == 1: // a &block-pass value (on top of the args array) overrides the frame block
 					superBlk = vm.toBlock(pop())
+				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
+					markEnvCaptured(env)
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block}
 				}
 				argsArr := pop().(*object.Array)
 				push(vm.invokeSuper(self, definee, methodName, argsArr.Elems, superBlk))

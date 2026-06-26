@@ -133,3 +133,38 @@ func TestCompileEmptyProgram(t *testing.T) {
 		t.Fatalf("expected leading push_nil, got %v", iseq.Insns)
 	}
 }
+
+// anonLocal fails when a bare anonymous-forward marker (`*` / `**` / `&`) is
+// compiled outside a method that declares a matching anonymous parameter. The
+// parser only produces these inside such methods, so the safety net is driven
+// directly from a synthesized AST.
+func TestAnonForwardOutsideDef(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Call{Name: "g", Args: []ast.Node{&ast.SplatArg{Value: nil}}},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "anonymous argument forwarding") {
+		t.Fatalf("expected an anonymous-forwarding error, got %v", err)
+	}
+}
+
+// rationalValue and numericValue panic on a literal node shape the parser never
+// produces (a non-numeric Value), exercising their safety nets.
+func TestNumericLiteralValuePanics(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fn   func()
+	}{
+		{"rationalValue", func() { rationalValue(&ast.StringLit{Value: "x"}) }},
+		{"numericValue", func() { numericValue(&ast.StringLit{Value: "x"}) }},
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatalf("%s: expected a panic on a non-numeric literal", tc.name)
+				}
+			}()
+			tc.fn()
+		}()
+	}
+}
