@@ -2,6 +2,7 @@ package vm_test
 
 import (
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -103,8 +104,10 @@ func TestXStr(t *testing.T) {
 	if got := eval(t, "p(%x{echo hi}.strip)"); got != "\"hi\"\n" {
 		t.Errorf("%%x got %q", got)
 	}
-	if got := eval(t, "print %x{printf abc}"); got != "abc" {
-		t.Errorf("%%x printf got %q", got)
+	if runtime.GOOS != "windows" { // printf is not a cmd.exe builtin
+		if got := eval(t, "print %x{printf abc}"); got != "abc" {
+			t.Errorf("%%x printf got %q", got)
+		}
 	}
 }
 
