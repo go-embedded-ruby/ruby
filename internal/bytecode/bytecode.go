@@ -56,6 +56,7 @@ const (
 	OpSetIvar               // A = Names index; sets @name on self, leaves the value
 	OpGetConst              // A = Names index; pushes the named constant
 	OpGetScopedConst        // A = Names index; pops a module/class, pushes its named constant
+	OpSetScopedConst        // A = Names index; stack: module/class, value → value (sets recv::name)
 	OpGetGVar               // A = Names index; pushes the named global (match-data specials + user globals)
 	OpSetGVar               // A = Names index; sets the named global to top of stack (kept)
 	OpGetCVar               // A = Names index; pushes the class variable @@name (NameError if unset)
@@ -96,7 +97,6 @@ const (
 	OpOpenSingletonClass    // A = Children index; pops a target, runs the child ISeq with the target's singleton (meta) class as the definee (`class << target`)
 	OpAlias                 // A = Names index (new name), B = Names index (old name); aliases an existing method (or global variable) on the current definee
 	OpUndef                 // A = Names index; undefines the named method on the current definee
-	OpSetScopedConst        // A = Names index; pops a module/class scope, sets its named constant, keeps the value
 )
 
 var opNames = map[Op]string{
@@ -108,7 +108,7 @@ var opNames = map[Op]string{
 	OpLt: "lt", OpGt: "gt", OpLe: "le", OpGe: "ge", OpEq: "eq", OpNeq: "neq",
 	OpNeg: "neg", OpNot: "not", OpJump: "jump", OpBranchIf: "branch_if",
 	OpBranchUnless: "branch_unless", OpBranchNil: "branch_nil", OpSend: "send", OpGetIvar: "get_ivar",
-	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpGetScopedConst: "get_scoped_const", OpSetConst: "set_const", OpGetGVar: "get_gvar", OpSetGVar: "set_gvar", OpGetCVar: "get_cvar", OpGetCVarQuiet: "get_cvar_quiet", OpSetCVar: "set_cvar", OpDefineClass: "define_class",
+	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpGetScopedConst: "get_scoped_const", OpSetScopedConst: "set_scoped_const", OpSetConst: "set_const", OpGetGVar: "get_gvar", OpSetGVar: "set_gvar", OpGetCVar: "get_cvar", OpGetCVarQuiet: "get_cvar_quiet", OpSetCVar: "set_cvar", OpDefineClass: "define_class",
 	OpDefineModule: "define_module", OpDefineMethod: "define_method", OpDefineSMethod: "define_smethod", OpDefineSingletonMethod: "define_singleton_method",
 	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
 	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break", OpArgGiven: "arg_given",
@@ -126,7 +126,6 @@ var opNames = map[Op]string{
 	OpOpenSingletonClass: "open_singleton_class",
 	OpAlias:              "alias",
 	OpUndef:              "undef",
-	OpSetScopedConst:     "set_scoped_const",
 }
 
 func (o Op) String() string {

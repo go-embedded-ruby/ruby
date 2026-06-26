@@ -92,6 +92,24 @@ func TestStoreMultiTargetDefault(t *testing.T) {
 	}
 }
 
+// storeMultiTarget rejects a receiver-less call as a masgn target. The parser
+// only ever emits setter-call targets with an explicit receiver, so this safety
+// net is exercised directly from a synthesized AST.
+func TestStoreMultiTargetReceiverlessCall(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.MultiAssign{
+			Names:      []string{""},
+			Targets:    []ast.Node{&ast.Call{Name: "x=", Args: []ast.Node{}}},
+			SplatIndex: -1,
+			Values:     []ast.Node{&ast.IntLit{Value: 1}},
+		},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "receiver-less call") {
+		t.Fatalf("expected a receiver-less-call masgn error, got %v", err)
+	}
+}
+
 // mustResolve fails when a `...` forward is compiled outside a def(...) method
 // (no synthetic forward locals are in scope). The parser never produces this,
 // so it is exercised directly here.

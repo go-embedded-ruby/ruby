@@ -412,12 +412,15 @@ func (c *Compiler) compileNode(n ast.Node) {
 		if !ok {
 			c.fail("scoped constant assignment target is %T, want *ast.ScopedConst", v.Target)
 		}
-		c.compileNode(v.Value)
 		if sc.Recv == nil { // leading `::NAME = value`: a top-level constant
+			c.compileNode(v.Value)
 			b.emit(bytecode.OpSetConst, b.addName(sc.Name), 0)
 			break
 		}
+		// OpSetScopedConst pops [recv, value] and keeps the value, so push the
+		// receiver under the value.
 		c.compileNode(sc.Recv)
+		c.compileNode(v.Value)
 		b.emit(bytecode.OpSetScopedConst, b.addName(sc.Name), 0)
 	case *ast.Alias:
 		// `alias new old`: install new as an alias of an existing method (or
@@ -1448,17 +1451,53 @@ func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 }
 
 // storeMultiTarget emits a store for one general multiple-assignment target,
-// consuming the value already on top of the stack and leaving it there (each
-// store opcode keeps its value; the caller pops it). The parser admits a local
-// (VarRef) or a constant (ConstRef) as a non-trivial masgn target; the default
-// is a safety net for any target a later parser might add.
+// consuming the value already on top of the stack and leaving a value there
+// (each store keeps a value; the caller pops it). A nil target is a nameless
+// `*` splat whose captured slice is discarded. The parser admits locals
+// (VarRef), constants (ConstRef / scoped Foo::BAR), instance/class/global
+// variables, and attribute / index setters (a Call with an explicit receiver
+// whose Name already ends in "=", e.g. `x=` or `[]=`).
 func (c *Compiler) storeMultiTarget(target ast.Node) {
 	b := c.cur()
 	switch t := target.(type) {
+	case nil:
+		// Nameless `*` splat target: its captured slice has no binding. The value
+		// is already on the stack; leave it for the caller's OpPop.
 	case *ast.VarRef:
 		c.storeLocal(t.Name)
 	case *ast.ConstRef:
 		b.emit(bytecode.OpSetConst, b.addName(t.Name), 0)
+	case *ast.ScopedConst:
+		// Foo::BAR = value. SetScopedConst pops [recv, value]; the receiver must
+		// sit under the value already on top, so stash and reload around it.
+		tmp := b.localSlot("")
+		b.emit(bytecode.OpSetLocal, tmp, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		c.compileNode(t.Recv)
+		b.emit(bytecode.OpGetLocal, tmp, 0)
+		b.emit(bytecode.OpSetScopedConst, b.addName(t.Name), 0)
+	case *ast.IvarRef:
+		b.emit(bytecode.OpSetIvar, b.addName(t.Name), 0)
+	case *ast.CVarRef:
+		b.emit(bytecode.OpSetCVar, b.addName(t.Name), 0)
+	case *ast.GVarRef:
+		b.emit(bytecode.OpSetGVar, b.addName(t.Name), 0)
+	case *ast.Call:
+		// Attribute / index setter: recv.x = v (Name "x=") or recv[i] = v
+		// (Name "[]="). The value is on top; stash it, evaluate the receiver and
+		// any index args, reload the value last, then send `name` with all args.
+		if t.Recv == nil {
+			c.fail("cannot assign to receiver-less call in multiple assignment")
+		}
+		tmp := b.localSlot("")
+		b.emit(bytecode.OpSetLocal, tmp, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		c.compileNode(t.Recv)
+		for _, a := range t.Args {
+			c.compileNode(a)
+		}
+		b.emit(bytecode.OpGetLocal, tmp, 0)
+		b.emit(bytecode.OpSend, b.addName(t.Name), len(t.Args)+1)
 	default:
 		c.fail("cannot assign to %T in multiple assignment", target)
 	}
