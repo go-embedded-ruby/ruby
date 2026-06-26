@@ -439,6 +439,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileClass(v)
 	case *ast.ModuleDef:
 		c.compileModule(v)
+	case *ast.SingletonClassDef:
+		c.compileSingletonClass(v)
 	case *ast.Super:
 		c.compileSuper(v)
 	case *ast.Yield:
@@ -834,6 +836,27 @@ func (c *Compiler) compileModule(v *ast.ModuleDef) {
 	}
 	c.compileNode(parentExpr)
 	parent.emit(bytecode.OpDefineModuleScoped, parent.addName(name), childIdx)
+}
+
+// compileSingletonClass compiles `class << target; body; end`. It evaluates the
+// target onto the stack, compiles the body into a child ISeq (just like a class
+// body), and emits OpOpenSingletonClass, which runs that body with the target's
+// singleton (meta) class as the definee — so the body's method/constant defs
+// attach to the target's singleton class.
+func (c *Compiler) compileSingletonClass(v *ast.SingletonClassDef) {
+	c.push(newBuilder("<singleton class>", nil))
+	savedCtxs := c.ctxs
+	c.ctxs = nil
+	c.compileBody(v.Body)
+	c.ctxs = savedCtxs
+	c.cur().emit(bytecode.OpReturn, 0, 0)
+	child := c.pop().build()
+
+	parent := c.cur()
+	childIdx := len(parent.children)
+	parent.children = append(parent.children, child)
+	c.compileNode(v.Target)
+	parent.emit(bytecode.OpOpenSingletonClass, childIdx, 0)
 }
 
 func (c *Compiler) compileSuper(v *ast.Super) {

@@ -88,13 +88,15 @@ type RClass struct {
 	smethods map[string]*Method // singleton (class) methods: def self.foo
 	consts   map[string]object.Value
 	cvars    map[string]object.Value // class variables (@@name), shared down the hierarchy
+	ivars    map[string]object.Value // the class object's OWN instance variables (@name with self = the class)
 	includes []*RClass               // modules mixed in via include (most recent last)
 	prepends []*RClass               // modules mixed in via prepend (most recent last), ahead of own methods
 	isModule bool
+	meta     *RClass // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
 }
 
 func newClass(name string, super *RClass) *RClass {
-	return &RClass{name: name, super: super, methods: map[string]*Method{}, smethods: map[string]*Method{}, consts: map[string]object.Value{}, cvars: map[string]object.Value{}}
+	return &RClass{name: name, super: super, methods: map[string]*Method{}, smethods: map[string]*Method{}, consts: map[string]object.Value{}, cvars: map[string]object.Value{}, ivars: map[string]object.Value{}}
 }
 
 func (c *RClass) ToS() string     { return c.name }
@@ -132,6 +134,34 @@ func (vm *VM) singletonClass(o *RObject) *RClass {
 	return o.singleton
 }
 
+// metaClass returns the metaclass of a class/module — the class whose method
+// table holds c's class methods (def self.foo). Its methods map aliases c's
+// smethods map, so methods defined into the metaclass become c's class methods
+// and class-method lookup (lookupSMethod) finds them. Created lazily.
+func (c *RClass) metaClass() *RClass {
+	if c.meta == nil {
+		mc := newClass("#<Class:"+c.name+">", nil)
+		mc.methods = c.smethods // alias: defs here become class methods of c
+		c.meta = mc
+	}
+	return c.meta
+}
+
+// singletonDefinee returns the class that a `class << target` body should run
+// with as its definee, so the body's method/constant defs attach to target's
+// singleton (meta) class. A second bool reports success; an immediate value
+// (Integer, Symbol, true/false/nil, …) has no singleton class in MRI.
+func (vm *VM) singletonDefinee(target object.Value) (*RClass, bool) {
+	switch t := target.(type) {
+	case *RClass:
+		return t.metaClass(), true
+	case *RObject:
+		return vm.singletonClass(t), true
+	default:
+		return nil, false
+	}
+}
+
 func (o *RObject) ToS() string {
 	if o.builtin != nil { // a built-in value subclass renders as its wrapped value
 		return o.builtin.ToS()
@@ -153,7 +183,7 @@ func (o *RObject) HashUnwrap() (object.Value, bool) {
 	}
 	return nil, false
 }
-func (o *RObject) Truthy() bool    { return true }
+func (o *RObject) Truthy() bool { return true }
 
 // lookupMethod walks the ancestor chain: at each class, its own methods then
 // its included modules (most-recently-included first), then up to its super.
@@ -648,6 +678,8 @@ func setIvar(self object.Value, name string, v object.Value) {
 func ivarTable(self object.Value) map[string]object.Value {
 	switch o := self.(type) {
 	case *RObject:
+		return o.ivars
+	case *RClass:
 		return o.ivars
 	case *object.Main:
 		return o.IvarTable()

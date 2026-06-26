@@ -93,6 +93,7 @@ const (
 	OpDefineModuleScoped    // A = Names index (trailing name), B = Children index; pops a parent module/class, defines/reopens the module there
 	OpXStr                  // A = Names index (command); runs the shell command and pushes its stdout as a String (`%x{…}` / backticks)
 	OpInvokeSuperArray      // super(*a, **k, &b): stack is argsArray (then a &block-pass value when C==1); dispatches super with the array's elements
+	OpOpenSingletonClass    // A = Children index; pops a target, runs the child ISeq with the target's singleton (meta) class as the definee (`class << target`)
 )
 
 var opNames = map[Op]string{
@@ -119,6 +120,7 @@ var opNames = map[Op]string{
 	OpDefineModuleScoped: "define_module_scoped",
 	OpXStr:               "xstr",
 	OpInvokeSuperArray:   "invoke_super_array",
+	OpOpenSingletonClass: "open_singleton_class",
 }
 
 func (o Op) String() string {

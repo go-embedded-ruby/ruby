@@ -3919,15 +3919,12 @@ func defineAttrs(cls *RClass, names []object.Value, reader, writer bool) {
 		ivar := "@" + n.ToS()
 		if reader {
 			cls.define(n.ToS(), func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-				if v, ok := self.(*RObject).ivars[ivar]; ok {
-					return v
-				}
-				return object.NilV
+				return getIvar(self, ivar)
 			})
 		}
 		if writer {
 			cls.define(n.ToS()+"=", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-				self.(*RObject).ivars[ivar] = a[0]
+				setIvar(self, ivar, a[0])
 				return a[0]
 			})
 		}
