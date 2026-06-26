@@ -76,7 +76,7 @@ func (vm *VM) resolveMethod(recv object.Value, name string) *Method {
 	if o, ok := recv.(*RObject); ok && o.singleton != nil {
 		c = o.singleton
 	}
-	return lookupMethod(c, name)
+	return undefAsNil(lookupMethod(c, name))
 }
 
 // methodArity reports a method's arity in Ruby's convention: the required count,

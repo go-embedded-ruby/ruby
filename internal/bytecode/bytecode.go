@@ -95,6 +95,8 @@ const (
 	OpXStr                  // A = Names index (command); runs the shell command and pushes its stdout as a String (`%x{…}` / backticks)
 	OpInvokeSuperArray      // super(*a, **k, &b): stack is argsArray (then a &block-pass value when C==1); dispatches super with the array's elements
 	OpOpenSingletonClass    // A = Children index; pops a target, runs the child ISeq with the target's singleton (meta) class as the definee (`class << target`)
+	OpAlias                 // A = Names index (new name), B = Names index (old name); aliases an existing method (or global variable) on the current definee
+	OpUndef                 // A = Names index; undefines the named method on the current definee
 )
 
 var opNames = map[Op]string{
@@ -122,6 +124,8 @@ var opNames = map[Op]string{
 	OpXStr:               "xstr",
 	OpInvokeSuperArray:   "invoke_super_array",
 	OpOpenSingletonClass: "open_singleton_class",
+	OpAlias:              "alias",
+	OpUndef:              "undef",
 }
 
 func (o Op) String() string {

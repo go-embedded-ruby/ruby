@@ -28,8 +28,8 @@ github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3 h1:oqUg3BkpFqPq
 github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3/go.mod h1:CZPf0P3FjwYlphONFD0ZAjE+/eaixCZYvYhm6QqmqsU=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f/go.mod h1:UpjSgWGcQSNt0ARWuHKwf0P55LkwZ65vuqoRPSKctZ8=
-github.com/go-ruby-parser/parser v0.0.0-20260626120154-14edf1949b2a h1:sUTYb1sjJ8wSnAHyxgA+bGVLUhqeIE3/MLAu7o1sNO0=
-github.com/go-ruby-parser/parser v0.0.0-20260626120154-14edf1949b2a/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
+github.com/go-ruby-parser/parser v0.0.0-20260626125317-6b7342b690e5 h1:IC3mBnZ0n7M+pasa388NMcZY0gmOp8XVuIXmN6aUFlc=
+github.com/go-ruby-parser/parser v0.0.0-20260626125317-6b7342b690e5/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-regexp/regexp v0.0.0-20260626052554-81f5a06101b9 h1:6t9pGOgWxTAGMq7/Xk1Fz24cFnJpCFQoCZ1t6wrbVKI=
 github.com/go-ruby-regexp/regexp v0.0.0-20260626052554-81f5a06101b9/go.mod h1:+0nK2X+aCPMO91bPMM/DT1OFUIzFQeoTPGkkOR3kd84=
 github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=

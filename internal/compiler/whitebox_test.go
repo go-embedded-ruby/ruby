@@ -34,6 +34,23 @@ func TestCompileNodeDefault(t *testing.T) {
 	c.compileNode(&ast.Program{})
 }
 
+// A ScopedConstAssign whose Target is not a *ast.ScopedConst (which no parser
+// produces) trips compileNode's guard.
+func TestCompileScopedConstAssignBadTarget(t *testing.T) {
+	c := &Compiler{}
+	c.push(newBuilder("t", nil))
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected compileNode to panic on a malformed ScopedConstAssign")
+		}
+		if _, ok := r.(compileError); !ok {
+			t.Fatalf("expected compileError, got %#v", r)
+		}
+	}()
+	c.compileNode(&ast.ScopedConstAssign{Target: &ast.IntLit{Value: 1}, Value: &ast.IntLit{Value: 2}})
+}
+
 // compilePattern's default fires for a pattern it does not handle; a nil
 // ast.Pattern (which no parser produces) exercises that safety net.
 func TestCompilePatternDefault(t *testing.T) {

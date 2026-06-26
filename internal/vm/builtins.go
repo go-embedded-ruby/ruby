@@ -3652,9 +3652,16 @@ func (vm *VM) methodNames(c *RClass, all bool) []object.Value {
 	if all {
 		classes = vm.ancestors(c)
 	}
+	undef := map[string]bool{} // a nearer `undef` tombstone hides an inherited name
 	for _, k := range classes {
-		for n := range k.methods {
-			add(n)
+		for n, m := range k.methods {
+			if m.undefined {
+				undef[n] = true
+				continue
+			}
+			if !undef[n] {
+				add(n)
+			}
 		}
 	}
 	sort.Strings(names)
