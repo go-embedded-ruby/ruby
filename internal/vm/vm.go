@@ -684,6 +684,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
 				}
 				push(object.NilV)
+			case bytecode.OpOpenSingletonClass:
+				// class << target: run the child body with target's singleton (meta)
+				// class as the definee, so its method/constant defs attach there.
+				target := pop()
+				sc, ok := vm.singletonDefinee(target)
+				if !ok {
+					raise("TypeError", "can't define singleton")
+				}
+				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil))
 			case bytecode.OpDefineClass:
 				push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
 			case bytecode.OpDefineModule:
