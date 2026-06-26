@@ -173,3 +173,36 @@ A require-graph scan (`internal/aot.FrontendUses`) walks the program for
 those calls raise in the closed binary. Everything else — the AOT-compiled
 methods, the frozen prelude's Comparable/Enumerable, the core types — runs
 unchanged, byte-for-byte with MRI.
+
+## WebAssembly target (`rbgo build --closed --target wasm`)
+
+The closed-world path also cross-compiles to the browser.
+`rbgo build --closed --target wasm app.rb` emits a `GOOS=js GOARCH=wasm` module
+that runs the embedded program with no front-end linked — the wasm equivalent of
+the native closed-world binary.
+
+- `--target wasm` **requires `--closed`** (the wasm entry point runs the baked-in
+  program; there is no command-line file to read in a browser tab).
+- `buildEnv` appends `GOOS=js GOARCH=wasm` to the nested `go build`, so the build
+  links `closed_main_wasm.go` instead of the native closed main. That entry runs
+  the embedded program and then blocks on `select{}` — a Go wasm module that
+  returns from `main()` is torn down, so it must stay parked for any JS event or
+  animation callbacks the program registered to keep firing.
+- The program can reach the page through the built-in **`JS` module**
+  (`internal/vm/jsbridge_wasm.go`), which `vm.New` registers automatically on
+  wasm: `JS.global`/`window`/`document`/`log`, `JS::Ref#get`/`set`/`call`/`[]`/`on`
+  for DOM and Canvas, and `JS.raf { |t| … }` for an animation loop. So a
+  closed-world wasm app can render and handle events with no hand-written
+  JavaScript.
+
+The same front-end isolation applies: `go tool nm` does not reliably read Go wasm
+objects, so the integration test (`cmd/rbgo/wasm_build_test.go`,
+`RBGO_BUILD_IT=1`) instead asserts the emitted module carries the `\0asm` magic
+and that the linker dropped the front-end (no `go-ruby-parser/parser` or
+`internal/compiler` symbols in the module bytes). Deploy the emitted `.wasm`
+alongside Go's `wasm_exec.js` loader (see [`web/`](https://github.com/go-embedded-ruby/ruby/tree/main/web)).
+
+For the *interactive REPL* flavour of wasm — the whole interpreter (front-end
+included) compiled to the browser so the page can evaluate arbitrary Ruby — see
+`cmd/wasm` and the playground in `web/`; that is a separate, open-world build,
+not produced by `rbgo build`.
