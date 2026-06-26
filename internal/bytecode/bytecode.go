@@ -89,6 +89,10 @@ const (
 	OpTruthy                // pops a value, pushes true if it is truthy else false (normalize a === / is_a? result)
 	OpRaiseNoMatch          // pops the subject value, raises NoMatchingPatternError naming it (case/in fell through)
 	OpBinding               // pushes a Binding capturing the current frame (locals, self, definee)
+	OpDefineClassScoped     // A = Names index (trailing name), B = Children index, C = flags (1=parent on stack, 2=super-expr on stack); defines/reopens a class at a `::` path / with a `::`-expression superclass
+	OpDefineModuleScoped    // A = Names index (trailing name), B = Children index; pops a parent module/class, defines/reopens the module there
+	OpXStr                  // A = Names index (command); runs the shell command and pushes its stdout as a String (`%x{…}` / backticks)
+	OpInvokeSuperArray      // super(*a, **k, &b): stack is argsArray (then a &block-pass value when C==1); dispatches super with the array's elements
 )
 
 var opNames = map[Op]string{
@@ -110,7 +114,11 @@ var opNames = map[Op]string{
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
 	OpRegexp: "regexp", OpTruthy: "truthy", OpRaiseNoMatch: "raise_no_match",
-	OpBinding: "binding",
+	OpBinding:            "binding",
+	OpDefineClassScoped:  "define_class_scoped",
+	OpDefineModuleScoped: "define_module_scoped",
+	OpXStr:               "xstr",
+	OpInvokeSuperArray:   "invoke_super_array",
 }
 
 func (o Op) String() string {

@@ -357,6 +357,23 @@ func (vm *VM) classOf(v object.Value) *RClass {
 // send is the dispatch core (our objc_msgSend): find the method on the
 // receiver's class chain, else route to method_missing (Object's default
 // raises NoMethodError). blk is the block passed to the call (nil if none).
+// findMethod resolves name on recv exactly as send dispatch would (class
+// singleton methods, then a per-object singleton class, then the class chain),
+// returning nil when nothing but method_missing would handle it. It drives
+// respond_to? so a singleton or class method is seen.
+func (vm *VM) findMethod(recv object.Value, name string) *Method {
+	if cls, ok := recv.(*RClass); ok {
+		if m := lookupSMethod(cls, name); m != nil {
+			return m
+		}
+	}
+	c := vm.classOf(recv)
+	if o, ok := recv.(*RObject); ok && o.singleton != nil {
+		c = o.singleton
+	}
+	return lookupMethod(c, name)
+}
+
 func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Proc) object.Value {
 	// A class receiver consults its singleton-method chain (def self.foo, and
 	// inherited class methods) before the generic Class instance methods.
@@ -433,8 +450,9 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 	}
 	if m.proc != nil {
 		// A define_method body runs the block with self rebound to the receiver,
-		// keeping its closure environment.
-		return vm.callBlockSelf(m.proc, self, args)
+		// keeping its closure environment; the block passed to the method binds to
+		// the body's &block param.
+		return vm.callProcMethod(m.proc, self, args, blk)
 	}
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
 }
@@ -455,7 +473,7 @@ func (vm *VM) invokeInPlace(m *Method, self object.Value, args []object.Value, b
 		return m.compiled(vm, self, args, blk)
 	}
 	if m.proc != nil {
-		return vm.callBlockSelf(m.proc, self, args)
+		return vm.callProcMethod(m.proc, self, args, blk)
 	}
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
 }
@@ -520,6 +538,22 @@ func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) obj
 		return p.native(vm, args)
 	}
 	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.cObject, "", p.env, p.block, p)
+}
+
+// callProcMethod invokes a proc that is the body of a define_method /
+// define_singleton_method method. It is callBlockSelf plus threading the block
+// passed to the method (blk) into the body, so a `&b` block param there binds
+// it (its BlockSlot is wired by the compiler). The body's own captured block
+// (p.block) still backs a bare `yield`.
+func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, blk *Proc) object.Value {
+	if p.native != nil {
+		return p.native(vm, args)
+	}
+	body := p.block
+	if blk != nil {
+		body = blk
+	}
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.cObject, "", p.env, body, p)
 }
 
 // classEval runs a block as class_eval/module_eval would: self and the method

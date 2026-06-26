@@ -252,6 +252,11 @@ func New(out io.Writer) *VM {
 	vm.currentThread = vm.mainThread
 	vm.threads = []*RThread{vm.mainThread}
 	vm.bootstrap()
+	// $LOAD_PATH (and its alias $:) is a real, mutable Array that require /
+	// require_relative search, so gems doing `$LOAD_PATH.unshift "lib"` work.
+	loadPath := &object.Array{}
+	vm.globals["$LOAD_PATH"] = loadPath
+	vm.globals["$:"] = loadPath
 	vm.installPrelude()
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
@@ -683,6 +688,21 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
 			case bytecode.OpDefineModule:
 				push(vm.defineModule(iseq.Names[in.A], iseq.Children[in.B]))
+			case bytecode.OpDefineClassScoped:
+				// C flags: bit 0 = parent on stack, bit 1 = super-expr on stack.
+				// They were pushed parent-then-super, so pop super first.
+				var superExpr object.Value
+				if in.C&2 != 0 {
+					superExpr = pop()
+				}
+				var parent *RClass
+				if in.C&1 != 0 {
+					parent = vm.asModuleParent(pop())
+				}
+				push(vm.defineClassIn(parent, iseq.Names[in.A], iseq.Children[in.B], superExpr))
+			case bytecode.OpDefineModuleScoped:
+				parent := vm.asModuleParent(pop())
+				push(vm.defineModuleIn(parent, iseq.Names[in.A], iseq.Children[in.B]))
 			case bytecode.OpInvokeSuper:
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the frame's own arguments
@@ -693,6 +713,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					stack = stack[:len(stack)-in.A]
 				}
 				push(vm.invokeSuper(self, definee, methodName, superArgs, block))
+			case bytecode.OpInvokeSuperArray:
+				superBlk := block
+				if in.C == 1 { // a &block-pass overrides the frame's block
+					superBlk = vm.toBlock(pop())
+				}
+				argsArr := pop().(*object.Array)
+				push(vm.invokeSuper(self, definee, methodName, argsArr.Elems, superBlk))
 			case bytecode.OpInvokeBlock:
 				if block == nil {
 					raise("LocalJumpError", "no block given (yield)")
@@ -725,6 +752,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				panic(vm.excError(pop()))
 			case bytecode.OpRegexp:
 				push(vm.compileRegexp(iseq.Names[in.A], iseq.Names[in.B]))
+			case bytecode.OpXStr:
+				push(object.NewString(vm.runShellCommand(iseq.Names[in.A])))
 			case bytecode.OpSplatToArray:
 				v := pop()
 				if arr, ok := v.(*object.Array); ok {
@@ -846,22 +875,63 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 }
 
 // defineClass creates or reopens a class, runs its body with self = the class,
-// and returns the body's value.
+// and returns the body's value. It is the bare top-level form; scoped paths and
+// expression superclasses go through defineClassIn.
 func (vm *VM) defineClass(name string, body *bytecode.ISeq) object.Value {
+	return vm.defineClassIn(nil, name, body, nil)
+}
+
+// constTable returns the constant table a const name is defined into for the
+// given lexical parent: the parent class/module's own table, or the global
+// top-level table when parent is nil.
+func (vm *VM) constTable(parent *RClass) map[string]object.Value {
+	if parent == nil {
+		return vm.consts
+	}
+	return parent.consts
+}
+
+// scopedName qualifies a constant name with its lexical parent, so a nested
+// class reports its full `Parent::Name` (matching MRI).
+func scopedName(parent *RClass, name string) string {
+	if parent == nil || parent.name == "" {
+		return name
+	}
+	return parent.name + "::" + name
+}
+
+// defineClassIn creates or reopens a class named `name` in `parent`'s constant
+// table (the global table when parent is nil). superExpr, when non-nil, is the
+// evaluated superclass value (a `::`-path or other expression); otherwise
+// body.Super (a bare name) is consulted. It runs the class body with self = the
+// class and returns the body's value.
+func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, superExpr object.Value) object.Value {
+	table := vm.constTable(parent)
 	var class *RClass
-	if existing, ok := vm.consts[name]; ok {
-		class = existing.(*RClass) // reopen
+	if existing, ok := table[name]; ok {
+		var isClass bool
+		class, isClass = existing.(*RClass)
+		if !isClass || class.isModule {
+			raise("TypeError", "%s is not a class", name)
+		}
 	} else {
 		super := vm.cObject
-		if body.Super != "" {
+		switch {
+		case superExpr != nil:
+			sc, ok := superExpr.(*RClass)
+			if !ok || sc.isModule {
+				raise("TypeError", "superclass must be a Class (%s given)", vm.classOf(superExpr).name)
+			}
+			super = sc
+		case body.Super != "":
 			sc, ok := vm.consts[body.Super]
 			if !ok {
 				raise("NameError", "uninitialized constant %s", body.Super)
 			}
 			super = sc.(*RClass)
 		}
-		class = newClass(name, super)
-		vm.consts[name] = class
+		class = newClass(scopedName(parent, name), super)
+		table[name] = class
 		// Hook: superclass.inherited(subclass), fired when the class is created
 		// (before its body runs) if the superclass defines the hook.
 		if hook := lookupSMethod(super, "inherited"); hook != nil {
@@ -874,15 +944,37 @@ func (vm *VM) defineClass(name string, body *bytecode.ISeq) object.Value {
 // defineModule creates or reopens a module and runs its body with self = the
 // module.
 func (vm *VM) defineModule(name string, body *bytecode.ISeq) object.Value {
+	return vm.defineModuleIn(nil, name, body)
+}
+
+// defineModuleIn creates or reopens a module named `name` in `parent`'s constant
+// table (the global table when parent is nil), runs its body with self = the
+// module, and returns the body's value.
+func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq) object.Value {
+	table := vm.constTable(parent)
 	var mod *RClass
-	if existing, ok := vm.consts[name]; ok {
-		mod = existing.(*RClass) // reopen
+	if existing, ok := table[name]; ok {
+		var isClass bool
+		mod, isClass = existing.(*RClass)
+		if !isClass || !mod.isModule {
+			raise("TypeError", "%s is not a module", name)
+		}
 	} else {
-		mod = newClass(name, nil)
+		mod = newClass(scopedName(parent, name), nil)
 		mod.isModule = true
-		vm.consts[name] = mod
+		table[name] = mod
 	}
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil)
+}
+
+// asModuleParent coerces a popped value to the class/module that a scoped
+// definition/assignment nests into, raising a TypeError otherwise.
+func (vm *VM) asModuleParent(v object.Value) *RClass {
+	cls, ok := v.(*RClass)
+	if !ok {
+		raise("TypeError", "%s is not a class/module", v.Inspect())
+	}
+	return cls
 }
 
 // invokeSuper dispatches `super`: it finds methodName starting above the current

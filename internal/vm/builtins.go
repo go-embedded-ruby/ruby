@@ -384,14 +384,29 @@ func (vm *VM) bootstrap() {
 			return &object.Array{Elems: []object.Value{v}}
 		}
 	})
-	vm.cObject.define("send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+	sendFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.send(self, args[0].ToS(), args[1:], blk)
-	})
-	vm.cObject.define("public_send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return vm.send(self, args[0].ToS(), args[1:], blk)
-	})
+	}
+	vm.cObject.define("send", sendFn)
+	// __send__ is the can't-be-overridden alias of send; public_send is the same
+	// dispatch here (visibility is not yet modelled).
+	vm.cObject.define("__send__", sendFn)
+	vm.cObject.define("public_send", sendFn)
 	vm.cObject.define("respond_to?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(lookupMethod(vm.classOf(self), args[0].ToS()) != nil)
+		name := args[0].ToS()
+		if vm.findMethod(self, name) != nil {
+			return object.True
+		}
+		// Fall back to respond_to_missing?(name, include_private): a truthy return
+		// means the object answers the method dynamically (method_missing).
+		includePrivate := object.Value(object.False)
+		if len(args) > 1 {
+			includePrivate = args[1]
+		}
+		if vm.findMethod(self, "respond_to_missing?") != nil {
+			return object.Bool(vm.send(self, "respond_to_missing?", []object.Value{object.Symbol(name), includePrivate}, nil).Truthy())
+		}
+		return object.False
 	})
 	vm.cObject.define("itself", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self

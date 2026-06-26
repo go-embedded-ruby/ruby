@@ -232,6 +232,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 		}
 	case *ast.SymbolLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(v.Name)), 0)
+	case *ast.XStr:
+		// %x{cmd} / backticks: the command travels in the name pool; the VM runs
+		// it through the shell at runtime and pushes its stdout.
+		b.emit(bytecode.OpXStr, b.addName(v.Command), 0)
 	case *ast.RegexpLit:
 		// The source and flags travel in the name pool; the VM compiles the
 		// pattern (translating the Ruby flags to an inline prefix) at runtime.
@@ -309,13 +313,13 @@ func (c *Compiler) compileNode(n ast.Node) {
 		}
 		at := b.emit(bytecode.OpExpandArray, pre, post)
 		b.insns[at].C = splat
-		// OpExpandArray pushed the target values with Names[0]'s on top; store
-		// each (OpSetLocal leaves the value, so pop it).
-		for _, name := range v.Names {
-			if depth, slot, ok := b.resolve(name); ok {
-				b.emit(bytecode.OpSetLocal, slot, depth)
+		// OpExpandArray pushed the target values with the first target's on top;
+		// store each (each store opcode leaves the value, so pop it).
+		for i := range v.Names {
+			if v.Targets != nil {
+				c.storeMultiTarget(v.Targets[i])
 			} else {
-				b.emit(bytecode.OpSetLocal, b.localSlot(name), 0)
+				c.storeLocal(v.Names[i])
 			}
 			b.emit(bytecode.OpPop, 0, 0)
 		}
@@ -387,6 +391,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.ConstRef:
 		b.emit(bytecode.OpGetConst, b.addName(v.Name), 0)
 	case *ast.ScopedConst:
+		if v.Recv == nil { // leading `::Name`: a top-level constant lookup
+			b.emit(bytecode.OpGetConst, b.addName(v.Name), 0)
+			break
+		}
 		c.compileNode(v.Recv)
 		b.emit(bytecode.OpGetScopedConst, b.addName(v.Name), 0)
 	case *ast.ConstAssign:
@@ -508,10 +516,81 @@ func fastBinOp(op string) (bytecode.Op, bool) {
 	return 0, false
 }
 
+// forwardIndex returns the position of a `...` forwarding argument
+// (ForwardArgs) in args, or -1.
+func forwardIndex(args []ast.Node) int {
+	for i, a := range args {
+		if _, ok := a.(*ast.ForwardArgs); ok {
+			return i
+		}
+	}
+	return -1
+}
+
+// compileForwardCall lowers a call carrying `...` (g(..., ...)): it splices the
+// enclosing `def f(...)` method's captured positionals (*...rest), keywords
+// (**...kw) and block (&...blk). The captured keywords are appended only when
+// non-empty, matching MRI — a `**{}` kwsplat passes no argument.
+func (c *Compiler) compileForwardCall(v *ast.Call, fwdAt int) {
+	b := c.cur()
+	if v.Recv != nil {
+		c.compileNode(v.Recv)
+	} else {
+		b.emit(bytecode.OpPushSelf, 0, 0)
+	}
+	// Build the positional-arg array: leading explicit args, then *...rest, then
+	// trailing explicit args.
+	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
+	appendOne := func(n ast.Node) {
+		c.compileNode(n)
+		b.emit(bytecode.OpNewArray, 1, 0)
+		b.emit(bytecode.OpConcatArray, 0, 0)
+	}
+	for _, a := range v.Args[:fwdAt] {
+		appendOne(a)
+	}
+	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdRestName), 0)
+	b.emit(bytecode.OpSplatToArray, 0, 0)
+	b.emit(bytecode.OpConcatArray, 0, 0)
+	for _, a := range v.Args[fwdAt+1:] {
+		appendOne(a)
+	}
+	// Append **...kw as a trailing hash, but only when it has entries.
+	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdKwName), 0)
+	b.emit(bytecode.OpDup, 0, 0)
+	b.emit(bytecode.OpSend, b.addName("empty?"), 0)
+	skip := b.emit(bytecode.OpBranchIf, 0, 0)
+	b.emit(bytecode.OpNewArray, 1, 0) // wrap the kw hash
+	b.emit(bytecode.OpConcatArray, 0, 0)
+	done := b.emit(bytecode.OpJump, 0, 0)
+	b.patch(skip, b.here())
+	b.emit(bytecode.OpPop, 0, 0) // drop the empty kw hash
+	b.patch(done, b.here())
+	// Forward the block (&...blk; nil ⇒ no block) and send.
+	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdBlockName), 0)
+	b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+}
+
+// mustResolve resolves a (compiler-synthesised) local that is guaranteed to
+// exist in scope, returning its slot. It panics via fail otherwise, which only
+// happens on a compiler bug.
+func (c *Compiler) mustResolve(name string) int {
+	_, slot, ok := c.cur().resolve(name)
+	if !ok {
+		c.fail("argument forwarding outside a def(...) method")
+	}
+	return slot
+}
+
 func (c *Compiler) compileCall(v *ast.Call) {
 	b := c.cur()
+	if fwdAt := forwardIndex(v.Args); fwdAt >= 0 {
+		c.compileForwardCall(v, fwdAt)
+		return
+	}
+	callArgs := v.Args
 	// block_given? is a frame intrinsic, not a real dispatch.
-	if v.Recv == nil && v.Block == nil && v.Name == "block_given?" && len(v.Args) == 0 {
+	if v.Recv == nil && v.Block == nil && v.Name == "block_given?" && len(callArgs) == 0 {
 		b.emit(bytecode.OpBlockGiven, 0, 0)
 		return
 	}
@@ -549,7 +628,7 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	}
 	// A trailing `&expr` block-pass is carried as the last arg; pull it out so
 	// the ordinary args compile cleanly and the block value lands on top.
-	args := v.Args
+	args := callArgs
 	var blockPass ast.Node
 	if n := len(args); n > 0 {
 		if bp, ok := args[n-1].(*ast.BlockPass); ok {
@@ -672,11 +751,13 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 		b.patch(skip, b.here())
 	}
 	b.numRequired = nreq
-	// A &block param gets its own local slot. Unlike a method's, it is left unbound
-	// (nil) rather than wired to BlockSlot: a block receives no separately-passed
-	// block under our calling convention, so |x, &b| sees b == nil.
+	// A &block param gets its own local slot wired to BlockSlot. When the proc is
+	// yielded to as an ordinary block no method-block is passed, so it binds nil
+	// (|x, &b| sees b == nil); when the proc is the body of define_method /
+	// define_singleton_method, the block passed to that method is threaded in
+	// here, so &b binds it.
 	if blk.BlockParam != "" {
-		b.localSlot(blk.BlockParam)
+		b.blockSlot = b.localSlot(blk.BlockParam)
 	}
 	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
 	c.compileBody(blk.Body)
@@ -688,8 +769,22 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 	return idx
 }
 
+// scopeParent inspects a ClassDef/ModuleDef NamePath. It returns the parent
+// expression to evaluate (nil when none — a bare name or a leading-`::`
+// top-level name, both of which define into the global constant table) and the
+// trailing constant name. A nil namePath is the bare case (name unchanged).
+func scopeParent(namePath ast.Node, name string) (parent ast.Node, trailing string) {
+	sc, ok := namePath.(*ast.ScopedConst)
+	if !ok {
+		return nil, name
+	}
+	// `class ::Bar` (Global, no Recv) targets the top level, same as bare `Bar`.
+	return sc.Recv, sc.Name
+}
+
 func (c *Compiler) compileClass(v *ast.ClassDef) {
-	c.push(newBuilder("<class:"+v.Name+">", nil))
+	parentExpr, name := scopeParent(v.NamePath, v.Name)
+	c.push(newBuilder("<class:"+name+">", nil))
 	savedCtxs := c.ctxs
 	c.ctxs = nil
 	c.compileBody(v.Body)
@@ -701,11 +796,28 @@ func (c *Compiler) compileClass(v *ast.ClassDef) {
 	parent := c.cur()
 	childIdx := len(parent.children)
 	parent.children = append(parent.children, child)
-	parent.emit(bytecode.OpDefineClass, parent.addName(v.Name), childIdx)
+	if parentExpr == nil && v.SuperExpr == nil {
+		parent.emit(bytecode.OpDefineClass, parent.addName(name), childIdx)
+		return
+	}
+	// Scoped path and/or an expression superclass: push the parent module then
+	// the superclass value (in that order), and record which are present in C.
+	flags := 0
+	if parentExpr != nil {
+		c.compileNode(parentExpr)
+		flags |= 1
+	}
+	if v.SuperExpr != nil {
+		c.compileNode(v.SuperExpr)
+		flags |= 2
+	}
+	at := parent.emit(bytecode.OpDefineClassScoped, parent.addName(name), childIdx)
+	parent.insns[at].C = flags
 }
 
 func (c *Compiler) compileModule(v *ast.ModuleDef) {
-	c.push(newBuilder("<module:"+v.Name+">", nil))
+	parentExpr, name := scopeParent(v.NamePath, v.Name)
+	c.push(newBuilder("<module:"+name+">", nil))
 	savedCtxs := c.ctxs
 	c.ctxs = nil
 	c.compileBody(v.Body)
@@ -716,7 +828,12 @@ func (c *Compiler) compileModule(v *ast.ModuleDef) {
 	parent := c.cur()
 	childIdx := len(parent.children)
 	parent.children = append(parent.children, child)
-	parent.emit(bytecode.OpDefineModule, parent.addName(v.Name), childIdx)
+	if parentExpr == nil {
+		parent.emit(bytecode.OpDefineModule, parent.addName(name), childIdx)
+		return
+	}
+	c.compileNode(parentExpr)
+	parent.emit(bytecode.OpDefineModuleScoped, parent.addName(name), childIdx)
 }
 
 func (c *Compiler) compileSuper(v *ast.Super) {
@@ -725,10 +842,34 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 		b.emit(bytecode.OpInvokeSuper, 0, 1) // forward the frame's own args
 		return
 	}
-	for _, a := range v.Args {
+	// Pull a trailing &block-pass off so the positional args compile cleanly; the
+	// block value (if any) lands on top of the args array.
+	args := v.Args
+	var blockPass ast.Node
+	if n := len(args); n > 0 {
+		if bp, ok := args[n-1].(*ast.BlockPass); ok {
+			blockPass = bp.Value
+			args = args[:n-1]
+		}
+	}
+	// A splat (or a block-pass) means a dynamic argument count: build the args as
+	// an Array and dispatch super from it (kwargs ride along as the trailing hash,
+	// exactly as in a normal call).
+	if blockPass != nil || hasSplat(args) {
+		c.compileSplatItems(args)
+		if blockPass != nil {
+			c.compileNode(blockPass)
+			at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+			b.insns[at].C = 1
+			return
+		}
+		b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+		return
+	}
+	for _, a := range args {
 		c.compileNode(a)
 	}
-	b.emit(bytecode.OpInvokeSuper, len(v.Args), 0)
+	b.emit(bytecode.OpInvokeSuper, len(args), 0)
 }
 
 func (c *Compiler) compileIf(v *ast.If) {
@@ -1253,6 +1394,23 @@ func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 	b.patch(end, b.here())
 }
 
+// storeMultiTarget emits a store for one general multiple-assignment target,
+// consuming the value already on top of the stack and leaving it there (each
+// store opcode keeps its value; the caller pops it). The parser admits a local
+// (VarRef) or a constant (ConstRef) as a non-trivial masgn target; the default
+// is a safety net for any target a later parser might add.
+func (c *Compiler) storeMultiTarget(target ast.Node) {
+	b := c.cur()
+	switch t := target.(type) {
+	case *ast.VarRef:
+		c.storeLocal(t.Name)
+	case *ast.ConstRef:
+		b.emit(bytecode.OpSetConst, b.addName(t.Name), 0)
+	default:
+		c.fail("cannot assign to %T in multiple assignment", target)
+	}
+}
+
 // storeLocal emits a SetLocal for name, resolving an existing local or
 // allocating a fresh slot, mirroring ast.Assign.
 func (c *Compiler) storeLocal(name string) {
@@ -1359,27 +1517,50 @@ func (c *Compiler) compileWhile(v *ast.While) {
 	b.emit(bytecode.OpPushNil, 0, 0) // while evaluates to nil
 }
 
+// Reserved local names for argument forwarding (`def f(...)`): they capture the
+// forwarded positionals, keywords and block. The dots make them unspellable as
+// Ruby identifiers, so they never collide with a user local.
+const (
+	fwdRestName  = "...rest"
+	fwdKwName    = "...kw"
+	fwdBlockName = "...blk"
+)
+
 func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
-	c.push(newBuilder(v.Name, v.Params))
+	// `def f(...)` collects the forwarded positionals into a synthetic *splat
+	// after the explicit params; the keyword-rest and block are added below.
+	params := v.Params
+	splatIndex := v.SplatIndex
+	if v.Forward {
+		splatIndex = len(params)
+		params = append(append([]string(nil), params...), fwdRestName)
+	}
+	c.push(newBuilder(v.Name, params))
 	b := c.cur()
-	b.splatIndex = v.SplatIndex
+	b.splatIndex = splatIndex
 	// Keyword params get local slots right after the positionals, so the body
 	// resolves them by name; record their names/required flags for the VM.
-	kwBase := len(v.Params)
+	kwBase := len(params)
 	for _, kp := range v.KwParams {
 		b.localSlot(kp.Name)
 		b.kwNames = append(b.kwNames, kp.Name)
 		b.kwRequired = append(b.kwRequired, kp.Default == nil)
 	}
-	if v.KwRest != "" {
-		b.kwRestSlot = b.localSlot(v.KwRest)
+	kwRest := v.KwRest
+	blockParam := v.BlockParam
+	if v.Forward { // capture forwarded keywords and block as **kw and &blk
+		kwRest = fwdKwName
+		blockParam = fwdBlockName
 	}
-	if v.BlockParam != "" {
-		b.blockSlot = b.localSlot(v.BlockParam)
+	if kwRest != "" {
+		b.kwRestSlot = b.localSlot(kwRest)
 	}
-	nreq := len(v.Params)
-	if v.SplatIndex >= 0 {
-		nreq = v.SplatIndex // the splat and anything after it are not required
+	if blockParam != "" {
+		b.blockSlot = b.localSlot(blockParam)
+	}
+	nreq := len(params)
+	if splatIndex >= 0 {
+		nreq = splatIndex // the splat and anything after it are not required
 	}
 	for i, d := range v.Defaults {
 		if d == nil {

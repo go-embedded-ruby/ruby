@@ -58,6 +58,36 @@ func TestCompileUndefinedLocal(t *testing.T) {
 	}
 }
 
+// storeMultiTarget's default fires for a masgn target the parser does not
+// currently produce (here a SelfLit), exercising the safety net.
+func TestStoreMultiTargetDefault(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.MultiAssign{
+			Names:      []string{""},
+			Targets:    []ast.Node{&ast.SelfLit{}},
+			SplatIndex: -1,
+			Values:     []ast.Node{&ast.IntLit{Value: 1}},
+		},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "cannot assign to") {
+		t.Fatalf("expected a masgn-target error, got %v", err)
+	}
+}
+
+// mustResolve fails when a `...` forward is compiled outside a def(...) method
+// (no synthetic forward locals are in scope). The parser never produces this,
+// so it is exercised directly here.
+func TestForwardOutsideDef(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Call{Name: "g", Args: []ast.Node{&ast.ForwardArgs{}}},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "argument forwarding") {
+		t.Fatalf("expected an argument-forwarding error, got %v", err)
+	}
+}
+
 func TestCompileEmptyProgram(t *testing.T) {
 	iseq, err := Compile(&ast.Program{})
 	if err != nil {
