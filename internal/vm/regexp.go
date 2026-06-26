@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	onig "github.com/go-ruby-regexp/regexp"
 	"github.com/go-embedded-ruby/ruby/internal/object"
+	onig "github.com/go-ruby-regexp/regexp"
 )
 
 // Regexp is a compiled Ruby regular expression. It wraps the pure-Go go-ruby-regexp
@@ -111,6 +111,100 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 		raise("RegexpError", "%s: /%s/", err.Error(), source)
 	}
 	return &Regexp{re: re, source: source, flags: flags}
+}
+
+// Regexp option bits, matching MRI's Regexp::IGNORECASE/EXTENDED/MULTILINE.
+const (
+	reIgnoreCase = 1
+	reExtended   = 2
+	reMultiline  = 4
+)
+
+// regexpNew backs Regexp.new / Regexp.compile. The first argument is either a
+// Regexp (copied, reusing its options) or a String (compiled). When the first
+// argument is a String, the optional second argument selects options: an
+// Integer is decoded bitwise (IGNORECASE/EXTENDED/MULTILINE), a String is read
+// as option letters (i/m/x), nil/false select no options and any other truthy
+// value selects IGNORECASE (the legacy form MRI still accepts).
+func (vm *VM) regexpNew(args []object.Value) object.Value {
+	if len(args) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
+	}
+	switch src := args[0].(type) {
+	case *Regexp:
+		// Copy the source Regexp; MRI warns when options are also given but still
+		// reuses the original's options, so we ignore any extra arguments here.
+		return vm.compileRegexp(src.source, src.flags)
+	case *object.String:
+		flags := ""
+		if len(args) >= 2 {
+			flags = regexpOptionFlags(args[1])
+		}
+		return vm.compileRegexp(src.Str(), flags)
+	default:
+		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
+		return nil
+	}
+}
+
+// regexpOptionFlags converts the second argument of Regexp.new into the engine's
+// "imx" flag-letter string.
+func regexpOptionFlags(v object.Value) string {
+	switch opt := v.(type) {
+	case object.Nil:
+		return ""
+	case object.Integer:
+		return flagsFromBits(int(opt))
+	case *object.String:
+		return flagsFromLetters(opt.Str())
+	default:
+		// nil/false → none; any other truthy value → IGNORECASE (legacy form).
+		if !v.Truthy() {
+			return ""
+		}
+		return "i"
+	}
+}
+
+// flagsFromBits decodes an Integer option mask into i/m/x flag letters. Bits
+// other than IGNORECASE/EXTENDED/MULTILINE (e.g. encoding bits) are ignored.
+func flagsFromBits(bits int) string {
+	out := ""
+	if bits&reIgnoreCase != 0 {
+		out += "i"
+	}
+	if bits&reMultiline != 0 {
+		out += "m"
+	}
+	if bits&reExtended != 0 {
+		out += "x"
+	}
+	return out
+}
+
+// flagsFromLetters reads a String option argument as MRI does: each character is
+// an option letter (i/m/x). An unrecognised letter raises ArgumentError.
+func flagsFromLetters(s string) string {
+	out := ""
+	for _, c := range s {
+		switch c {
+		case 'i':
+			if !strings.ContainsRune(out, 'i') {
+				out += "i"
+			}
+		case 'm':
+			if !strings.ContainsRune(out, 'm') {
+				out += "m"
+			}
+		case 'x':
+			if !strings.ContainsRune(out, 'x') {
+				out += "x"
+			}
+		default:
+			raise("ArgumentError", "unknown regexp option: %s", s)
+		}
+	}
+	return out
 }
 
 // sortIMX returns the present flags as i, m, x (the order Ruby prints them when
@@ -368,9 +462,9 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 		return &object.Array{Elems: []object.Value{}}
 	}
 	var out []object.Value
-	last := 0    // byte offset of the start of the current field
-	search := 0  // where the next match search begins
-	pieces := 0  // count of delimiter-separated fields emitted (limit applies here)
+	last := 0   // byte offset of the start of the current field
+	search := 0 // where the next match search begins
+	pieces := 0 // count of delimiter-separated fields emitted (limit applies here)
 	for search <= len(subject) {
 		if limit > 0 && pieces+1 == limit {
 			break
@@ -434,16 +528,27 @@ func captureFields(md *onig.MatchData) []object.Value {
 
 // stringSub backs String#sub (global=false) and String#gsub (global=true). The
 // first argument is the pattern (a Regexp, or a String matched literally). A
-// replacement is given either as a second String argument (with backref
-// templates) or as a block (yielded each match). The enumerator and Hash
-// replacement forms are not yet supported.
+// replacement is given as a second String argument (with backref templates), a
+// second Hash argument (each match is replaced by hash[match], "" when absent),
+// or a block (yielded each match). With neither a replacement nor a block,
+// gsub returns an Enumerator over the matches; sub raises ArgumentError, as MRI
+// does.
 func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global bool) object.Value {
 	re := scanRegexp(args[0])
 	if blk != nil {
 		return vm.gsub(re, subject, "", blk, global)
 	}
 	if len(args) < 2 {
-		raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
+		if !global {
+			raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
+		}
+		// gsub(pattern) with no replacement and no block → an Enumerator yielding
+		// the matched substrings; supports #with_index, #to_a, etc. via the
+		// receiver+method form, replaying gsub with the enumerator's block.
+		return enumFor(object.NewString(subject), "gsub", args[0])
+	}
+	if h, ok := args[1].(*object.Hash); ok {
+		return vm.gsubHash(re, subject, h, global)
 	}
 	return vm.gsub(re, subject, strArg(args[1]), nil, global)
 }
@@ -478,6 +583,49 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 			// Prematch/postmatch are taken from the whole subject so \` and \'
 			// span text already consumed by earlier matches (Ruby semantics).
 			b.WriteString(expandReplacement(repl, md, subject[:mBegin], subject[mEnd:]))
+		}
+		pos = mEnd
+		if mEnd == mBegin { // empty match: emit one char, step forward
+			if mEnd >= len(subject) {
+				search = mEnd
+				break
+			}
+			_, w := utf8.DecodeRuneInString(subject[mEnd:])
+			b.WriteString(subject[mEnd : mEnd+w])
+			pos = mEnd + w
+			search = mEnd + w
+		} else {
+			search = mEnd
+		}
+		if !global {
+			break
+		}
+	}
+	b.WriteString(subject[pos:]) // remaining tail
+	return object.NewString(b.String())
+}
+
+// gsubHash implements the Hash-replacement form of String#sub/#gsub: each
+// matched substring m is replaced by hash[m], or the empty string when the hash
+// has no such key. $~ / $1.. are updated per match, as in the block form.
+func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) object.Value {
+	var b strings.Builder
+	pos := 0    // byte cursor into subject (start of the not-yet-emitted tail)
+	search := 0 // byte cursor where the next search begins
+	for search <= len(subject) {
+		md := re.re.Match(subject[search:])
+		if md == nil {
+			break
+		}
+		mBegin := search + md.Begin(0)
+		mEnd := search + md.End(0)
+		b.WriteString(subject[pos:mBegin]) // literal text before the match
+		vm.lastMatch = &MatchData{md: md, subject: subject[search:], re: re}
+		if v, ok := h.Get(object.NewString(md.Str(0))); ok {
+			// Missing keys (and an explicit nil value) contribute nothing.
+			if _, isNil := v.(object.Nil); !isNil {
+				b.WriteString(vm.send(v, "to_s", nil, nil).ToS())
+			}
 		}
 		pos = mEnd
 		if mEnd == mBegin { // empty match: emit one char, step forward
@@ -618,6 +766,21 @@ func groupValue(m *MatchData, i int) object.Value {
 // end of bootstrap so the classes already exist as constants.
 func (vm *VM) installRegexp() {
 	reArg := func(v object.Value) *Regexp { return v.(*Regexp) }
+
+	// Regexp option constants (MRI values): IGNORECASE=1, EXTENDED=2, MULTILINE=4.
+	vm.cRegexp.consts["IGNORECASE"] = object.Integer(reIgnoreCase)
+	vm.cRegexp.consts["EXTENDED"] = object.Integer(reExtended)
+	vm.cRegexp.consts["MULTILINE"] = object.Integer(reMultiline)
+
+	// Regexp.new(str_or_regexp[, options]) / Regexp.compile(...) build a Regexp at
+	// runtime. A Regexp argument is copied (its options are reused); a String is
+	// compiled with the options decoded from the second argument.
+	reNew := &Method{name: "new", owner: vm.cRegexp,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			return vm.regexpNew(args)
+		}}
+	vm.cRegexp.smethods["new"] = reNew
+	vm.cRegexp.smethods["compile"] = &Method{name: "compile", owner: vm.cRegexp, native: reNew.native}
 
 	vm.cRegexp.define("source", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(reArg(self).source)

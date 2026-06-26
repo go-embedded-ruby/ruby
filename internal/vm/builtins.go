@@ -3390,6 +3390,15 @@ func squeezeStr(s string, sets ...string) string {
 func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, global bool) object.Value {
 	s := self.(*object.String)
 	checkFrozen(s)
+	// gsub!(pattern) with no replacement and no block yields an Enumerator bound
+	// to gsub! on this receiver (so materialising it mutates the string); sub!
+	// raises ArgumentError, as MRI does.
+	if blk == nil && len(args) < 2 {
+		if !global {
+			raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
+		}
+		return enumFor(s, "gsub!", args[0])
+	}
 	res := vm.stringSub(s.Str(), args, blk, global).(*object.String)
 	if string(res.B) == string(s.B) {
 		return object.NilV
