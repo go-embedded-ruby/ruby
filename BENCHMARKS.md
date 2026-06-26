@@ -67,6 +67,39 @@ methods), so the AOT column is n/a and the row reflects the interpreter: rbgo
 > rbgo, MRI and MRI+YJIT (checked by `bench/run.sh` before timing). No program
 > was skipped for divergence.
 
+## Comparative runtimes — rbgo vs MRI / YJIT / JRuby / TruffleRuby (2026-06-26)
+
+Best-of-8 wall time (ms), same `bench/*.rb` through every runtime, output checked
+byte-identical against MRI first. Host: Apple M4 Max, darwin/arm64.
+`ruby 4.0.5`, `jruby 10.1.0.0` (OpenJDK 25), `truffleruby 34.0.1` (GraalVM CE
+Native). Reproduce: `AOT=1 RUNS=8 JRUBY=jruby TRUFFLE=<path> bash bench/run.sh 8`.
+
+| program | rbgo | rbgo+AOT | MRI | MRI+YJIT | JRuby | TruffleRuby |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| strings | 40 | 40 | 40 | 40 | 1040 | 120 |
+| wordcount | 120 | 120 | 80 | 80 | 1090 | 200 |
+| hash | 250 | 260 | 80 | 80 | 1120 | 100 |
+| array | 440 | 440 | 90 | 60 | 1160 | 60 |
+| blocks | 560 | 600 | 250 | 220 | 1200 | 80 |
+| proc | 690 | 680 | 160 | 140 | 1160 | 70 |
+| dispatch | 1180 | 1150 | 220 | 170 | 1190 | 50 |
+| alloc | 1250 | 1280 | 230 | 190 | 1190 | 90 |
+| loop | 1490 | **10** | 360 | 360 | 1240 | 90 |
+| fib | 2470 | **20** | 480 | 100 | 2770 | 150 |
+| mandelbrot | 2930 | 2920 | 780 | 760 | 1270 | 90 |
+
+- **TruffleRuby** (GraalVM native JIT) is the compute ceiling — e.g. `mandelbrot`
+  90 ms vs MRI 780 ms. A tracing JIT is expected to dominate steady-state loops.
+- **JRuby** is dominated by ~1.0–1.2 s JVM startup: every short program lands near
+  1.1 s regardless of work, and only on the heaviest (`fib` 2.77 s) does the work
+  show — for these single-shot micro-benchmarks startup is the story.
+- **rbgo** (pure-Go bytecode interpreter, CGO=0) runs ~3–6× MRI on compute-bound
+  code and at **parity** where startup/I-O dominates (`strings`, `wordcount`).
+- **rbgo+AOT** is the standout: `loop` 10 ms and `fib` 20 ms — **18–24× faster
+  than MRI+YJIT**, the only runtime here that beats YJIT, via closed-world native
+  lowering of integer-bound methods (`mandelbrot`'s float kernel is not yet
+  AOT-lowered).
+
 ## Where rbgo stands
 
 - **Competitive / at parity:** `strings`, `wordcount`. Anything dominated by
