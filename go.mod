@@ -13,8 +13,8 @@ require (
 	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
-	github.com/go-ruby-parser/parser v0.0.0-20260623182135-4304908aa423
-	github.com/go-ruby-regexp/regexp v0.0.0-20260622075631-3a277cf71b81
+	github.com/go-ruby-parser/parser v0.0.0-20260626052551-264238e80d09
+	github.com/go-ruby-regexp/regexp v0.0.0-20260626052554-81f5a06101b9
 )
 
 require (
