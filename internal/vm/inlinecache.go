@@ -88,13 +88,23 @@ func (vm *VM) lookupCached(ic *inlineCache, recv object.Value, name string) *Met
 	// An object with a singleton class can carry per-object methods, so its
 	// dispatch must not be cached against the shared class — resolve it directly.
 	if o, ok := recv.(*RObject); ok && o.singleton != nil {
-		return lookupMethod(o.singleton, name)
+		return undefAsNil(lookupMethod(o.singleton, name))
 	}
 	serial := methodSerial()
 	if ic.class == c && ic.serial == serial {
 		return ic.method
 	}
-	m := lookupMethod(c, name)
+	m := undefAsNil(lookupMethod(c, name))
 	ic.class, ic.method, ic.serial = c, m, serial
+	return m
+}
+
+// undefAsNil maps an `undef`-ed tombstone to nil so callers treat the name as
+// unresolved (routing to the operator fallback / method_missing), while a real
+// method passes through unchanged.
+func undefAsNil(m *Method) *Method {
+	if m != nil && m.undefined {
+		return nil
+	}
 	return m
 }

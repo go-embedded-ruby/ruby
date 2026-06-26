@@ -693,6 +693,20 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					raise("TypeError", "can't define singleton")
 				}
 				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil))
+			case bytecode.OpAlias:
+				vm.aliasMethod(definee, iseq.Names[in.A], iseq.Names[in.B])
+				push(object.NilV)
+			case bytecode.OpUndef:
+				vm.undefMethod(definee, iseq.Names[in.A])
+				push(object.NilV)
+			case bytecode.OpSetScopedConst:
+				// Scope::NAME = value: pop the scope, set its constant, keep the value.
+				scope := pop()
+				cls, ok := scope.(*RClass)
+				if !ok {
+					raise("TypeError", "%s is not a class/module", scope.Inspect())
+				}
+				cls.consts[iseq.Names[in.A]] = stack[len(stack)-1]
 			case bytecode.OpDefineClass:
 				push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
 			case bytecode.OpDefineModule:

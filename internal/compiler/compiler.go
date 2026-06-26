@@ -294,11 +294,16 @@ func (c *Compiler) compileNode(n ast.Node) {
 		}
 	case *ast.MultiAssign:
 		// Build the right-hand side as one Array (a single value is splatted into
-		// its elements; multiple values are collected).
-		if len(v.Values) == 1 {
+		// its elements; multiple values are collected, with any *splat spliced in).
+		switch {
+		case hasSplat(v.Values):
+			// `a, b = *x` / `a, b = *x, y`: splat-expand the operands into the value
+			// list, matching MRI.
+			c.compileSplatItems(v.Values)
+		case len(v.Values) == 1:
 			c.compileNode(v.Values[0])
 			b.emit(bytecode.OpSplatToArray, 0, 0)
-		} else {
+		default:
 			for _, val := range v.Values {
 				c.compileNode(val)
 			}
@@ -400,6 +405,31 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.ConstAssign:
 		c.compileNode(v.Value)
 		b.emit(bytecode.OpSetConst, b.addName(v.Name), 0)
+	case *ast.ScopedConstAssign:
+		// `Scope::NAME = value`: evaluate the scope, set its constant, yield the
+		// value. Target is the *ScopedConst naming the constant.
+		sc, ok := v.Target.(*ast.ScopedConst)
+		if !ok {
+			c.fail("scoped constant assignment target is %T, want *ast.ScopedConst", v.Target)
+		}
+		c.compileNode(v.Value)
+		if sc.Recv == nil { // leading `::NAME = value`: a top-level constant
+			b.emit(bytecode.OpSetConst, b.addName(sc.Name), 0)
+			break
+		}
+		c.compileNode(sc.Recv)
+		b.emit(bytecode.OpSetScopedConst, b.addName(sc.Name), 0)
+	case *ast.Alias:
+		// `alias new old`: install new as an alias of an existing method (or
+		// global variable) on the current definee. Names already carry their
+		// leading `$` for globals; method names are bare.
+		b.emit(bytecode.OpAlias, b.addName(v.NewName), b.addName(v.OldName))
+	case *ast.Undef:
+		// `undef a, b`: undefine each named method on the current definee.
+		for _, name := range v.Names {
+			b.emit(bytecode.OpUndef, b.addName(name), 0)
+		}
+		b.emit(bytecode.OpPushNil, 0, 0) // the whole statement evaluates to nil
 	case *ast.GVarRef:
 		b.emit(bytecode.OpGetGVar, b.addName(v.Name), 0)
 	case *ast.GVarAssign:

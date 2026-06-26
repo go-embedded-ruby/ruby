@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"runtime"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -77,6 +78,11 @@ type Method struct {
 	proc     *Proc          // for define_method: a block-backed method body
 	compiled CompiledMethod // AOT-lowered native body (rbgo build); preferred when set
 	owner    *RClass
+	// undefined marks an `undef`-ed method: a tombstone that halts ancestor
+	// lookup so an inherited method stays hidden, while dispatch, respond_to? and
+	// instance_methods all treat the name as absent (a call routes to
+	// method_missing → NoMethodError).
+	undefined bool
 }
 
 // RClass is a class (the live, mutable method table that makes monkey-patching,
@@ -245,6 +251,40 @@ func lookupSMethod(c *RClass, name string) *Method {
 	return nil
 }
 
+// aliasMethod implements `alias newName oldName` on definee. Names beginning
+// with `$` alias a global variable (the new global takes the old's current
+// value); otherwise newName becomes an alias of an existing method resolved up
+// definee's ancestor chain. A missing method raises NameError, as in MRI.
+func (vm *VM) aliasMethod(definee *RClass, newName, oldName string) {
+	if strings.HasPrefix(oldName, "$") || strings.HasPrefix(newName, "$") {
+		vm.globals[newName] = vm.gvar(oldName)
+		return
+	}
+	m := lookupMethod(definee, oldName)
+	if m == nil || m.undefined {
+		raise("NameError", "undefined method '%s' for class '%s'", oldName, definee.name)
+	}
+	// Copy the method record under the new name, retargeting its name while
+	// keeping the original body, owner and any AOT-compiled form.
+	clone := *m
+	clone.name = newName
+	clone.undefined = false
+	definee.methods[newName] = &clone
+	bumpMethodSerial()
+}
+
+// undefMethod implements `undef name` on definee: it installs a tombstone so the
+// name resolves to "undefined" — hiding any inherited definition and making a
+// call route to method_missing (NoMethodError). Undefining a name that resolves
+// nowhere raises NameError, as in MRI.
+func (vm *VM) undefMethod(definee *RClass, name string) {
+	if m := lookupMethod(definee, name); m == nil || m.undefined {
+		raise("NameError", "undefined method '%s' for class '%s'", name, definee.name)
+	}
+	definee.methods[name] = &Method{name: name, owner: definee, undefined: true}
+	bumpMethodSerial()
+}
+
 func lookupOwnOrIncluded(c *RClass, name string) *Method {
 	// Prepended modules take priority over the class's own methods; own methods
 	// take priority over included modules (Ruby's ancestor order).
@@ -401,7 +441,10 @@ func (vm *VM) findMethod(recv object.Value, name string) *Method {
 	if o, ok := recv.(*RObject); ok && o.singleton != nil {
 		c = o.singleton
 	}
-	return lookupMethod(c, name)
+	if m := lookupMethod(c, name); m != nil && !m.undefined {
+		return m
+	}
+	return nil
 }
 
 func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Proc) object.Value {
@@ -418,7 +461,7 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 	if o, ok := recv.(*RObject); ok && o.singleton != nil {
 		c = o.singleton
 	}
-	if m := lookupMethod(c, name); m != nil {
+	if m := lookupMethod(c, name); m != nil && !m.undefined {
 		return vm.invoke(m, recv, args, blk)
 	}
 	// The arithmetic/comparison operators are a compiler fast path rather than
