@@ -176,6 +176,9 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cObject.define("object_id", objectIDFn)
 	vm.cObject.define("__id__", objectIDFn)
+	vm.cObject.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(vm.hashValue(self))
+	})
 	vm.cObject.define("methods", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		c := vm.classOf(self)
 		if o, ok := self.(*RObject); ok && o.singleton != nil {
@@ -3023,14 +3026,14 @@ func arrayIndex(a *object.Array, i int64) (int, bool) {
 // or program that reassigns $stdout — e.g. to a StringIO — captures the output,
 // as in MRI. The puts array-flattening/newline logic lives in io.go (ioPuts).
 func nativePuts(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-	ioPuts(vm.curStdout(), args)
+	vm.ioPuts(vm.curStdout(), args)
 	return object.NilV
 }
 
 func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 	o := vm.curStdout()
 	for _, a := range args {
-		o.writeStr(a.ToS())
+		o.writeStr(vm.displayStr(a))
 	}
 	return object.NilV
 }
@@ -3038,7 +3041,7 @@ func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 	o := vm.curStdout()
 	for _, a := range args {
-		o.writeStr(a.Inspect() + "\n")
+		o.writeStr(vm.inspectStr(a) + "\n")
 	}
 	switch len(args) {
 	case 0:
