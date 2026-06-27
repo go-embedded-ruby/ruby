@@ -25,6 +25,7 @@ var providedFeatures = map[string]bool{
 	"stringio": true, "securerandom": true,
 	"English": true, "ostruct": true, "benchmark": true,
 	"forwardable": true, "delegate": true, "pathname": true, "uri": true,
+	"tmpdir": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
