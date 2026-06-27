@@ -73,8 +73,8 @@ func (vm *VM) resolveMethod(recv object.Value, name string) *Method {
 		}
 	}
 	c := vm.classOf(recv)
-	if o, ok := recv.(*RObject); ok && o.singleton != nil {
-		c = o.singleton
+	if sc := vm.objSingleton(recv); sc != nil {
+		c = sc
 	}
 	return undefAsNil(lookupMethod(c, name))
 }

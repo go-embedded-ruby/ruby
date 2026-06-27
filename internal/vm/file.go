@@ -29,6 +29,13 @@ func (vm *VM) registerFile() {
 
 	cFile := newClass("File", vm.cObject)
 	vm.consts["File"] = cFile
+	// Path constants (POSIX). ALT_SEPARATOR is nil on unix-like platforms; NULL
+	// is the null device. These let path-handling code branch on File::SEPARATOR
+	// etc. without a runtime error.
+	cFile.consts["SEPARATOR"] = object.NewString("/")
+	cFile.consts["ALT_SEPARATOR"] = object.NilV
+	cFile.consts["PATH_SEPARATOR"] = object.NewString(":")
+	cFile.consts["NULL"] = object.NewString("/dev/null")
 	def := func(name string, fn NativeFn) { cFile.smethods[name] = &Method{name: name, owner: cFile, native: fn} }
 
 	def("basename", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {

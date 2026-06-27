@@ -188,3 +188,37 @@ stdlib, C-extension equivalents, and predefined constants. That is ongoing,
 unproven work — distinct from the parse + compile acceptance reported above, which
 establishes that *the language / front-end* is essentially complete, not that any
 given application boots.
+
+## Tier-0 language primitives: runtime boot progress (2026-06-27)
+
+Following the front-end work above, a set of **Tier-0 language primitives** that
+blocked `require "puppet"` at runtime were implemented (see the
+`feat/tier0-language-primitives` PR): correct non-evaluating `defined?`,
+`Module#module_function`, `private`/`public`/`protected` and the
+`*_class_method` / `*_constant` directives, `Object#extend` on builtin-backed
+receivers + `#singleton_class`, the `UnboundMethod` reflection API
+(`instance_method`/`bind`/`bind_call`/`unbind`, `define_method` from a Method),
+the `RUBY_*` version/platform constants, the `File::SEPARATOR` family, and
+`Kernel#caller`/`#at_exit`/`#__method__` plus `Module#alias_method`.
+
+Re-probing `require "puppet"` under a freshly built `rbgo`
+(`$LOAD_PATH.unshift "<puppet>/lib"; require "puppet"`):
+
+| | First blocker |
+|---|---|
+| **Baseline** (pre-Tier-0) | `NoMethodError: undefined method 'private_class_method'` — dies in the **first** required file (`puppet/version` → `puppet/concurrent/synchronized`) |
+| **After Tier-0** | `NameError: uninitialized constant Gem` — clears `puppet/version`, `puppet/concurrent/synchronized` (including the `$LOAD_PATH.extend(...)` line), and `puppet/error`, reaching the `puppet/util` subsystem |
+
+Per-subsystem `require` (baseline → Tier-0):
+
+| Subsystem | Baseline | Tier-0 |
+|-----------|----------|--------|
+| `puppet/version`                | `private_class_method` missing | **OK** |
+| `puppet/concurrent/synchronized`| `RUBY_PLATFORM` missing         | **OK** |
+| `puppet/error`                  | OK                              | **OK** |
+| `puppet/util`                   | `English` stdlib missing        | `English` stdlib missing |
+
+The language-level blockers are cleared: the require graph advances from the
+first subsystem to the second-plus, and the remaining first blockers are
+**library/stdlib** concerns (`Gem`/RubyGems, the `English` stdlib) rather than
+language primitives — exactly the boundary this work targeted.

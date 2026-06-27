@@ -100,6 +100,19 @@ const (
 	OpOpenSingletonClass    // A = Children index; pops a target, runs the child ISeq with the target's singleton (meta) class as the definee (`class << target`)
 	OpAlias                 // A = Names index (new name), B = Names index (old name); aliases an existing method (or global variable) on the current definee
 	OpUndef                 // A = Names index; undefines the named method on the current definee
+
+	// defined? support. Each pushes the matching tag String, or nil when the
+	// operand is not defined, and never raises. The compiler routes each
+	// `defined?` operand to the right one by its syntactic kind; method/receiver
+	// cases run under OpDefinedGuard so an undefined sub-expression yields nil.
+	OpDefinedConst       // A = Names index; "constant" if the top-level constant exists, else nil
+	OpDefinedScopedConst // A = Names index; pops a module/class, "constant" if it has that constant, else nil
+	OpDefinedIvar        // A = Names index; "instance-variable" if self has @name set, else nil
+	OpDefinedCVar        // A = Names index; "class variable" if @@name is visible in the definee chain, else nil
+	OpDefinedGVar        // A = Names index; "global-variable" if $name is set, else nil
+	OpDefinedMethod      // A = Names index; pops a receiver, "method" if it responds to name, else nil
+	OpDefinedYield       // "yield" if a block was passed to the current method, else nil
+	OpDefinedGuard       // A = Children index; runs the child ISeq; any raise inside maps to nil
 )
 
 var opNames = map[Op]string{
@@ -129,6 +142,14 @@ var opNames = map[Op]string{
 	OpOpenSingletonClass: "open_singleton_class",
 	OpAlias:              "alias",
 	OpUndef:              "undef",
+	OpDefinedConst:       "defined_const",
+	OpDefinedScopedConst: "defined_scoped_const",
+	OpDefinedIvar:        "defined_ivar",
+	OpDefinedCVar:        "defined_cvar",
+	OpDefinedGVar:        "defined_gvar",
+	OpDefinedMethod:      "defined_method",
+	OpDefinedYield:       "defined_yield",
+	OpDefinedGuard:       "defined_guard",
 }
 
 func (o Op) String() string {
