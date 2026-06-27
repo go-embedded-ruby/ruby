@@ -181,7 +181,32 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		}
 		return vm.send(a, compareOpName(op), []object.Value{b}, nil)
 	default:
+		// A user object (RObject with no builtin backing) that defines an
+		// arithmetic operator dispatches to it, so `Pathname + str`, a Money `+`,
+		// etc. work. Built-in value types keep the inline path (and its coercion
+		// errors).
+		if _, isObj := a.(*RObject); isObj {
+			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
 		return binary(op, a, b)
+	}
+}
+
+// arithOpName names the arithmetic/modulo operator behind an opcode for method
+// dispatch on a user object. Only the five arithmetic opcodes reach binaryOp's
+// default branch, so each maps to exactly one operator name.
+func arithOpName(op bytecode.Op) string {
+	switch op {
+	case bytecode.OpAdd:
+		return "+"
+	case bytecode.OpSub:
+		return "-"
+	case bytecode.OpMul:
+		return "*"
+	case bytecode.OpDiv:
+		return "/"
+	default: // bytecode.OpMod
+		return "%"
 	}
 }
 

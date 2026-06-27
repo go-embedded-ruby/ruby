@@ -29,6 +29,12 @@ func (vm *VM) gvarDefined(name string) bool {
 	if _, ok := vm.globals[name]; ok {
 		return true
 	}
+	// The process/exception specials ($0, $$, $!, $PROGRAM_NAME) and their English
+	// aliases are always defined: they resolve through specialGvar regardless of
+	// the globals map.
+	if _, handled := vm.specialGvar(name); handled {
+		return true
+	}
 	// $~ is always considered defined (the last-match special exists even before
 	// any match). The other match specials are defined only once a match exists;
 	// a numbered group ($1…) is defined only if that group participated.

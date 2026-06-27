@@ -254,6 +254,14 @@ func (vm *VM) runMatch(re *Regexp, subject string) object.Value {
 // gvar reads a global variable. The match-data specials derive from $~ (the
 // last match); any other name reads as nil (uninitialised global).
 func (vm *VM) gvar(name string) object.Value {
+	if v, handled := vm.specialGvar(name); handled {
+		return v
+	}
+	// English match-data aliases ($MATCH -> $&, …) rewrite to the cryptic form so
+	// the match-data resolution below applies; specialGvar reported them unhandled.
+	if target, ok := englishAlias[name]; ok {
+		name = target
+	}
 	last := vm.lastMatch
 	if last == nil {
 		last = object.NilV

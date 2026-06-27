@@ -9,16 +9,22 @@ import (
 )
 
 // preloadedFeatures are already loaded at startup (like MRI 4.x's preloaded
-// gems), so require returns false.
-var preloadedFeatures = map[string]bool{"set": true}
+// gems), so require returns false. rubygems is preloaded by default in MRI, and
+// the Gem module lives in the prelude, so its constants are usable with no
+// require at all (Puppet references Gem::Version before requiring rubygems).
+var preloadedFeatures = map[string]bool{"set": true, "rubygems": true}
 
-// providedFeatures are standard-library names the VM supplies as built-in
-// classes; the file never needs loading, but require still returns true on the
-// first call and false afterwards, matching a normal gem load.
+// providedFeatures are standard-library names the VM supplies — either as
+// built-in Go classes or as prelude pure-Ruby modules. The file never needs
+// loading, but require still returns true on the first call and false
+// afterwards, matching a normal gem load. English is listed under its MRI
+// filename ("English", capital E); the lookup is case-sensitive like MRI's.
 var providedFeatures = map[string]bool{
 	"date": true, "time": true, "bigdecimal": true, "bag": true,
 	"base64": true, "digest": true, "json": true, "zlib": true,
 	"stringio": true, "securerandom": true,
+	"English": true, "ostruct": true, "benchmark": true,
+	"forwardable": true, "delegate": true, "pathname": true, "uri": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime

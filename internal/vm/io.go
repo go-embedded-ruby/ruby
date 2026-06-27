@@ -89,7 +89,7 @@ func (vm *VM) registerIO() {
 	vm.cObject.define("warn", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		o := vm.curStderr()
 		for _, a := range args {
-			ioPutsValue(o, a)
+			vm.ioPutsValue(o, a)
 		}
 		return object.NilV
 	})
@@ -207,14 +207,14 @@ func defIOWrite(cls *RClass) {
 		o := self.(*IOObj)
 		ioCheckOpen(o)
 		for _, a := range args {
-			o.writeStr(a.ToS())
+			o.writeStr(vm.displayStr(a))
 		}
 		return object.NilV
 	})
 	cls.define("puts", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckOpen(o)
-		ioPuts(o, args)
+		vm.ioPuts(o, args)
 		return object.NilV
 	})
 	cls.define("printf", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -426,29 +426,62 @@ func ioGets(o *IOObj, args []object.Value) object.Value {
 }
 
 // ioPuts writes args to o with Kernel#puts semantics (arrays flattened, a
-// trailing newline added unless already present; no args ⇒ a lone newline).
-func ioPuts(o *IOObj, args []object.Value) {
+// trailing newline added unless already present; no args ⇒ a lone newline). It
+// is a VM method so each value is stringified through its (possibly
+// user-defined) #to_s, matching MRI.
+func (vm *VM) ioPuts(o *IOObj, args []object.Value) {
 	if len(args) == 0 {
 		o.writeStr("\n")
 		return
 	}
 	for _, a := range args {
-		ioPutsValue(o, a)
+		vm.ioPutsValue(o, a)
 	}
 }
 
-func ioPutsValue(o *IOObj, v object.Value) {
+func (vm *VM) ioPutsValue(o *IOObj, v object.Value) {
 	if arr, ok := v.(*object.Array); ok {
+		// An empty array writes nothing (MRI), unlike a no-arg puts which writes a
+		// lone newline.
 		for _, e := range arr.Elems {
-			ioPutsValue(o, e)
+			vm.ioPutsValue(o, e)
 		}
 		return
 	}
-	if s := v.ToS(); strings.HasSuffix(s, "\n") {
+	if s := vm.displayStr(v); strings.HasSuffix(s, "\n") {
 		o.writeStr(s)
 	} else {
 		o.writeStr(s + "\n")
 	}
+}
+
+// displayStr renders v the way Kernel#print / #puts / String() do: a user object
+// (RObject) goes through its (possibly user-defined) #to_s, so an overridden to_s
+// is honoured; built-in value types use their authoritative native ToS directly.
+// A non-String #to_s result falls back to the native ToS.
+func (vm *VM) displayStr(v object.Value) string {
+	if _, ok := v.(*RObject); !ok {
+		return v.ToS()
+	}
+	r := vm.send(v, "to_s", nil, nil)
+	if s, ok := r.(*object.String); ok {
+		return s.Str()
+	}
+	return v.ToS()
+}
+
+// inspectStr renders v the way Kernel#p does: a user object goes through its
+// (possibly user-defined) #inspect; built-in value types use their native
+// Inspect. A non-String #inspect result falls back to the native Inspect.
+func (vm *VM) inspectStr(v object.Value) string {
+	if _, ok := v.(*RObject); !ok {
+		return v.Inspect()
+	}
+	r := vm.send(v, "inspect", nil, nil)
+	if s, ok := r.(*object.String); ok {
+		return s.Str()
+	}
+	return v.Inspect()
 }
 
 // ioCheckOpen raises IOError when writing to a closed stream.

@@ -13,6 +13,7 @@ package vm
 import (
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"path/filepath"
 	"strings"
@@ -122,6 +123,7 @@ type VM struct {
 
 	loaded        map[string]bool // require/require_relative: features loaded once
 	requireDirs   []string        // stack of directories of the files currently being required
+	scriptName    string          // $0 / $PROGRAM_NAME: the running program's name
 	defaultRandom *RandomObj      // process-wide generator for Kernel#rand / #srand
 	currentFiber  *Fiber          // the fiber currently running (nil at the root), for Fiber.yield
 
@@ -182,15 +184,71 @@ func (vm *VM) objectID(self object.Value) object.Value {
 	case object.Nil:
 		return object.Integer(4)
 	}
+	// Reference objects get a stable even id memoised in objIDs (never colliding
+	// with the odd fixnum ids); refID assigns and remembers it.
+	return object.Integer(vm.refID(self))
+}
+
+// hashValue computes Kernel#hash for a value: equal-by-eql? value types hash
+// equally (so they key Hashes / Sets consistently), and other objects fall back
+// to their object_id. The exact numbers are unspecified in Ruby, so this uses a
+// stable internal scheme rather than matching MRI's.
+func (vm *VM) hashValue(self object.Value) int64 {
+	switch v := self.(type) {
+	case object.Integer:
+		return int64(v)
+	case object.Float:
+		return int64(math.Float64bits(float64(v)))
+	case object.Bool:
+		if v {
+			return 1
+		}
+		return 0
+	case object.Nil:
+		return 8
+	case object.Symbol:
+		return fnvHash("sym:" + string(v))
+	case *object.String:
+		return fnvHash("str:" + v.Str())
+	case *object.Bignum:
+		return fnvHash("big:" + v.I.String())
+	case *object.Array:
+		h := int64(1)
+		for _, e := range v.Elems {
+			h = h*31 + vm.hashValue(e)
+		}
+		return h
+	}
+	// Any other object: a stable hash derived from its identity id.
+	return vm.refID(self)
+}
+
+// refID returns the stable per-object identity id used to hash and compare
+// reference objects (the int64 backing objectID memoises). Distinct objects get
+// distinct ids; the same object always reports the same one.
+func (vm *VM) refID(self object.Value) int64 {
 	if vm.objIDs == nil {
 		vm.objIDs = map[object.Value]int64{}
 	}
 	if id, ok := vm.objIDs[self]; ok {
-		return object.Integer(id)
+		return id
 	}
-	vm.nextObjID += 8 // even ids, never colliding with the odd fixnum ids
+	vm.nextObjID += 8
 	vm.objIDs[self] = vm.nextObjID
-	return object.Integer(vm.nextObjID)
+	return vm.nextObjID
+}
+
+// fnvHash is a small deterministic 64-bit FNV-1a fold over s, used by hashValue
+// for the content-addressed value types.
+func fnvHash(s string) int64 {
+	const offset = 1469598103934665603
+	const prime = 1099511628211
+	h := uint64(offset)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= prime
+	}
+	return int64(h >> 1) // keep it non-negative, like MRI's Integer hash range
 }
 
 // envFreeMax caps the env free-list so a deep call burst doesn't pin memory.
@@ -284,6 +342,7 @@ func New(out io.Writer) *VM {
 func (vm *VM) SetScriptPath(path string) {
 	if path != "" {
 		vm.requireDirs = []string{filepath.Dir(path)}
+		vm.scriptName = path
 	}
 }
 
@@ -573,7 +632,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(vm.gvar(iseq.Names[in.A]))
 			case bytecode.OpSetGVar:
 				// Assignment is an expression: set the global, keep its value.
-				vm.globals[iseq.Names[in.A]] = stack[len(stack)-1]
+				vm.setGVar(iseq.Names[in.A], stack[len(stack)-1])
 			case bytecode.OpGetCVar:
 				name := iseq.Names[in.A]
 				vm.checkCVarScope(definee)
