@@ -30,10 +30,9 @@ func TestStdlibProvidedModules(t *testing.T) {
 		{"gem_version_correct_nil", `p Gem::Version.correct?(nil)`, "false\n"},
 		{"gem_version_release", `p Gem::Version.new("1.2.a").release.to_s`, "\"1.2\"\n"},
 		{"gem_version_release_self", `p Gem::Version.new("1.2.3").release.to_s`, "\"1.2.3\"\n"},
-		// NOTE: self.class.name is the unqualified "Version" because the VM keeps a
-		// flat constant table (implicit lexical nesting is not yet namespaced — the
-		// same gap that surfaces in URI::HTTP#class and Puppet::Util::Windows::File).
-		{"gem_version_inspect", `p Gem::Version.new("1.2.3").inspect`, "\"#<Version \\\"1.2.3\\\">\"\n"},
+		// self.class.name is the fully-qualified "Gem::Version" now that nested
+		// constants carry their lexical namespace (matches MRI).
+		{"gem_version_inspect", `p Gem::Version.new("1.2.3").inspect`, "\"#<Gem::Version \\\"1.2.3\\\">\"\n"},
 		{"gem_version_eql", `p Gem::Version.new("1.2.3").eql?(Gem::Version.new("1.2.3"))`, "true\n"},
 		{"gem_version_eql_false", `p Gem::Version.new("1.2.3").eql?(Gem::Version.new("1.2"))`, "false\n"},
 		{"gem_version_hash", `p(Gem::Version.new("1.2").hash == Gem::Version.new("1.2").hash)`, "true\n"},
@@ -265,8 +264,9 @@ func TestStdlibErrors(t *testing.T) {
 		{"gem_version_malformed", `Gem::Version.new("not a version!!")`, "ArgumentError", "Malformed"},
 		{"gem_req_illformed", `Gem::Requirement.new("?? 1")`, "ArgumentError", "Illformed"},
 		{"pathname_non_string", `require "pathname"; Pathname.new(5)`, "TypeError", "conversion"},
-		// InvalidURIError reports its unqualified name (flat-constant-table gap).
-		{"uri_invalid", `require "uri"; raise URI::InvalidURIError, "bad"`, "InvalidURIError", "bad"},
+		// InvalidURIError reports its fully-qualified name now that nested constants
+		// are namespaced (matches MRI).
+		{"uri_invalid", `require "uri"; raise URI::InvalidURIError, "bad"`, "URI::InvalidURIError", "bad"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

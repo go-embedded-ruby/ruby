@@ -404,8 +404,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.ConstRef:
 		b.emit(bytecode.OpGetConst, b.addName(v.Name), 0)
 	case *ast.ScopedConst:
-		if v.Recv == nil { // leading `::Name`: a top-level constant lookup
-			b.emit(bytecode.OpGetConst, b.addName(v.Name), 0)
+		if v.Recv == nil { // leading `::Name`: a top-level (Object) constant lookup
+			b.emit(bytecode.OpGetConstTop, b.addName(v.Name), 0)
 			break
 		}
 		c.compileNode(v.Recv)

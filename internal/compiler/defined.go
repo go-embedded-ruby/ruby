@@ -80,7 +80,7 @@ func (c *Compiler) pushDefinedTag(tag string) {
 func (c *Compiler) compileDefinedScopedConst(v *ast.ScopedConst) {
 	b := c.cur()
 	if v.Recv == nil { // leading `::Name`
-		b.emit(bytecode.OpDefinedConst, b.addName(v.Name), 0)
+		b.emit(bytecode.OpDefinedConstTop, b.addName(v.Name), 0)
 		return
 	}
 	c.guarded(func(gb *builder) {

@@ -18,6 +18,10 @@ import (
 func (vm *VM) bootstrap() {
 	vm.cBasicObject = newClass("BasicObject", nil)
 	vm.cObject = newClass("Object", vm.cBasicObject)
+	// Top-level constants ARE Object's constants in Ruby; share the one table so
+	// a bare top-level `X = 1` and `Object::X` refer to the same slot and so that
+	// constant lookup terminating at Object reaches the top level.
+	vm.consts = vm.cObject.consts
 	vm.cModule = newClass("Module", vm.cObject)
 	vm.cClass = newClass("Class", vm.cModule)
 	cNumeric := newClass("Numeric", vm.cObject) // Integer/Float/Complex/Rational < Numeric
