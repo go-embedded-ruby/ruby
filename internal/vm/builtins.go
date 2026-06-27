@@ -399,21 +399,33 @@ func (vm *VM) bootstrap() {
 		return vm.send(self, args[0].ToS(), args[1:], blk)
 	}
 	vm.cObject.define("send", sendFn)
-	// __send__ is the can't-be-overridden alias of send; public_send is the same
-	// dispatch here (visibility is not yet modelled).
+	// __send__ is the can't-be-overridden alias of send; both ignore visibility.
 	vm.cObject.define("__send__", sendFn)
-	vm.cObject.define("public_send", sendFn)
+	// public_send dispatches only public methods: a private/protected target
+	// raises NoMethodError just as an explicit-receiver call would.
+	vm.cObject.define("public_send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		name := args[0].ToS()
+		if m := vm.findMethod(self, name); m != nil {
+			vm.checkVisibility(self, name, m, nil)
+		}
+		return vm.send(self, name, args[1:], blk)
+	})
 	vm.cObject.define("respond_to?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := args[0].ToS()
-		if vm.findMethod(self, name) != nil {
-			return object.True
-		}
-		// Fall back to respond_to_missing?(name, include_private): a truthy return
-		// means the object answers the method dynamically (method_missing).
 		includePrivate := object.Value(object.False)
 		if len(args) > 1 {
 			includePrivate = args[1]
 		}
+		if m := vm.findMethod(self, name); m != nil {
+			// A private or protected method answers respond_to? only when the second
+			// argument (include_private) is truthy, matching MRI.
+			if includePrivate.Truthy() || vm.sendVisibilityOf(self, name, m) == visPublic {
+				return object.True
+			}
+			return object.False
+		}
+		// Fall back to respond_to_missing?(name, include_private): a truthy return
+		// means the object answers the method dynamically (method_missing).
 		if vm.findMethod(self, "respond_to_missing?") != nil {
 			return object.Bool(vm.send(self, "respond_to_missing?", []object.Value{object.Symbol(name), includePrivate}, nil).Truthy())
 		}

@@ -135,6 +135,9 @@ func writeInstr(b *strings.Builder, in bytecode.Instr) {
 	if in.C != 0 {
 		parts = append(parts, fmt.Sprintf("C: %d", in.C))
 	}
+	if in.Flags != 0 {
+		parts = append(parts, fmt.Sprintf("Flags: %d", in.Flags))
+	}
 	b.WriteString("{")
 	b.WriteString(strings.Join(parts, ", "))
 	b.WriteString("}")

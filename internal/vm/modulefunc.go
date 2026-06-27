@@ -5,9 +5,10 @@ import "github.com/go-embedded-ruby/ruby/internal/object"
 // registerModuleExtras installs the module/class authoring directives that real
 // Ruby code (notably Puppet) leans on: module_function, the visibility setters
 // (private/public/protected and their _class_method forms), alias_method, and
-// the constant-visibility no-ops. Method visibility itself is not enforced by
-// this VM, so the visibility setters validate and return the MRI value but do
-// not restrict dispatch; module_function and alias_method are fully functional.
+// the constant-visibility no-ops. The visibility setters record each method's
+// access level (and the body default for the no-arg form); the send path
+// enforces it (see visibility.go). module_function and alias_method are fully
+// functional. Constant-visibility (private_constant) is still a no-op.
 func (vm *VM) registerModuleExtras() {
 	// module_function: with no args, switch the module body into function mode so
 	// every subsequent `def` is also copied as a module/singleton method. With
@@ -25,7 +26,12 @@ func (vm *VM) registerModuleExtras() {
 			if m == nil || m.undefined {
 				raise("NameError", "undefined method '%s' for module '%s'", name, mod.name)
 			}
+			// A module_function method is private as an instance method but public as
+			// the module/singleton method: mark the instance copy private, and the
+			// singleton copy public.
+			vm.setInstanceVisibility(mod, name, visPrivate)
 			sm := *m
+			sm.vis = visPublic
 			mod.smethods[name] = &sm
 		}
 		bumpMethodSerial()
@@ -35,54 +41,62 @@ func (vm *VM) registerModuleExtras() {
 		return &object.Array{Elems: append([]object.Value(nil), args...)}
 	})
 
-	// Visibility setters. With no args they would set the body's default
-	// visibility (not modelled — every method stays callable); with args they
-	// return the single name, the arg list, or nil for the no-arg form, as MRI
-	// does. They accept names/symbols and validate that each method exists.
-	visibility := func(self object.Value, args []object.Value) object.Value {
+	// Visibility setters (private / public / protected). With no args they set the
+	// body's default visibility for subsequent `def`s (mod.defaultVis, consulted by
+	// OpDefineMethod). With args they set each named method's visibility — own or
+	// inherited (an inherited method is recorded as a per-receiver override, see
+	// setInstanceVisibility) — and return the single name, the arg list, or nil for
+	// the no-arg form, as MRI does. `private def foo; end` passes the symbol the
+	// def evaluates to, so the single-arg case covers it.
+	setVis := func(vm *VM, self object.Value, args []object.Value, vis visibility) object.Value {
 		mod := self.(*RClass)
-		for _, a := range args {
-			name := nameArg(a)
-			if m := lookupMethod(mod, name); m == nil || m.undefined {
-				raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
+		if len(args) == 0 {
+			mod.defaultVis = vis
+			return object.NilV
+		}
+		// `private [:a, :b]` (an Array argument) marks each element, returning the
+		// array — MRI accepts a single Array as well as a varargs name list.
+		if len(args) == 1 {
+			if arr, ok := args[0].(*object.Array); ok {
+				for _, a := range arr.Elems {
+					vm.setInstanceVisibility(mod, nameArg(a), vis)
+				}
+				return args[0]
 			}
 		}
-		switch len(args) {
-		case 0:
-			return object.NilV
-		case 1:
-			return args[0]
-		default:
-			return &object.Array{Elems: append([]object.Value(nil), args...)}
+		for _, a := range args {
+			vm.setInstanceVisibility(mod, nameArg(a), vis)
 		}
+		if len(args) == 1 {
+			return args[0]
+		}
+		return &object.Array{Elems: append([]object.Value(nil), args...)}
 	}
-	vm.cModule.define("private", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return visibility(self, args)
+	vm.cModule.define("private", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return setVis(vm, self, args, visPrivate)
 	})
-	vm.cModule.define("public", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return visibility(self, args)
+	vm.cModule.define("public", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return setVis(vm, self, args, visPublic)
 	})
-	vm.cModule.define("protected", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return visibility(self, args)
+	vm.cModule.define("protected", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return setVis(vm, self, args, visProtected)
 	})
 
-	// private_class_method / public_class_method: validate the named class
-	// methods exist (visibility itself is not enforced). Returns self, as MRI.
-	classMethodVisibility := func(self object.Value, args []object.Value) object.Value {
+	// private_class_method / public_class_method: set the named class methods'
+	// visibility — including ones inherited from Class such as `new`, recorded as a
+	// per-receiver override (see setClassMethodVisibility). Returns self, as MRI.
+	classMethodVisibility := func(vm *VM, self object.Value, args []object.Value, vis visibility) object.Value {
 		mod := self.(*RClass)
 		for _, a := range args {
-			name := nameArg(a)
-			if lookupSMethod(mod, name) == nil {
-				raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
-			}
+			vm.setClassMethodVisibility(mod, nameArg(a), vis)
 		}
 		return self
 	}
-	vm.cModule.define("private_class_method", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return classMethodVisibility(self, args)
+	vm.cModule.define("private_class_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return classMethodVisibility(vm, self, args, visPrivate)
 	})
-	vm.cModule.define("public_class_method", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return classMethodVisibility(self, args)
+	vm.cModule.define("public_class_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return classMethodVisibility(vm, self, args, visPublic)
 	})
 
 	// alias_method: the method form of `alias new old`, returning the new name as

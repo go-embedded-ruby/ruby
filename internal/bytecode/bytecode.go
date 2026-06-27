@@ -169,10 +169,25 @@ func (o Op) String() string {
 // Instr is one instruction. A, B and C are operands whose meaning depends on Op.
 // For OpSend, C is the block: 0 means none, otherwise Children[C-1] is the
 // literal block compiled for the call.
+//
+// Flags is a bitfield of per-instruction flags (see the FlagSend* constants).
+// For the send opcodes it records whether the call had an explicit receiver, so
+// the VM can enforce private/protected method visibility (a private method is
+// callable only with an implicit — or `self.` — receiver).
 type Instr struct {
 	Op      Op
 	A, B, C int
+	Flags   int
 }
+
+const (
+	// FlagSendExplicit marks a send whose receiver was written explicitly
+	// (`obj.foo`), as opposed to an implicit-receiver call (`foo`). A bare
+	// `self.foo` is treated as implicit for the private-visibility check (MRI
+	// permits private calls through an explicit self), so the compiler does NOT
+	// set this flag when the receiver is `self`.
+	FlagSendExplicit = 1 << iota
+)
 
 // ISeq is a compiled instruction sequence: a method body, or the program top
 // level. Catch tables, full arity, and source maps (plan §6) arrive with the

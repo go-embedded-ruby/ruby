@@ -769,10 +769,24 @@ func (c *Compiler) compileCall(v *ast.Call) {
 			return
 		}
 	}
+	// explicit marks a send written with an explicit receiver other than `self`,
+	// so the VM can enforce private-method visibility (private methods are
+	// callable only through an implicit — or `self.` — receiver). A bare `self.m`
+	// counts as implicit for this check, matching MRI's relaxation.
+	explicit := false
 	if v.Recv != nil {
+		if _, isSelf := v.Recv.(*ast.SelfLit); !isSelf {
+			explicit = true
+		}
 		c.compileNode(v.Recv)
 	} else {
 		b.emit(bytecode.OpPushSelf, 0, 0) // implicit receiver: self
+	}
+	sendFlags := func(at int) int {
+		if explicit {
+			b.insns[at].Flags |= bytecode.FlagSendExplicit
+		}
+		return at
 	}
 	// Safe navigation (recv&.m): if the receiver is nil, skip the send and leave
 	// nil as the result. The guard branches past whichever send is emitted below.
@@ -796,11 +810,11 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		c.compileSplatItems(args)
 		if blockPass != nil {
 			c.compileNode(blockPass)
-			b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+			sendFlags(b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0))
 			patchSafe()
 			return
 		}
-		at := b.emit(bytecode.OpSendArray, b.addName(v.Name), 0)
+		at := sendFlags(b.emit(bytecode.OpSendArray, b.addName(v.Name), 0))
 		if v.Block != nil {
 			b.insns[at].C = c.compileBlock(v.Block) + 1
 		}
@@ -812,11 +826,11 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	}
 	if blockPass != nil {
 		c.compileNode(blockPass)
-		b.emit(bytecode.OpSendBlockArg, b.addName(v.Name), len(args))
+		sendFlags(b.emit(bytecode.OpSendBlockArg, b.addName(v.Name), len(args)))
 		patchSafe()
 		return
 	}
-	at := b.emit(bytecode.OpSend, b.addName(v.Name), len(args))
+	at := sendFlags(b.emit(bytecode.OpSend, b.addName(v.Name), len(args)))
 	if v.Block != nil {
 		b.insns[at].C = c.compileBlock(v.Block) + 1 // C-1 indexes Children
 	}
