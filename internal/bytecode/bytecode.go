@@ -70,6 +70,9 @@ const (
 	OpDefineSingletonMethod // A = Names index, B = Children index; pops a receiver, defines a singleton method on it (def recv.foo)
 	OpInvokeSuper           // A = argc, B = 1 to forward the frame's args (bare super) else 0
 	OpInvokeBlock           // A = argc; yields to the block passed to the current method
+	OpInvokeBlockArray      // pops an Array of args; yields it to the block passed to the current method (yield(*args))
+	OpExcMatchAny           // pops an Array of classes then an exception; pushes true if the exception is_a? any of them (rescue *classes)
+	OpCaseMatchAny          // pops a subject then an Array of candidates; pushes true if any candidate === subject (case … when *array)
 	OpBlockGiven            // pushes true if a block was passed to the current method
 	OpReturn                // returns top of stack from the current ISeq
 	OpArgGiven              // A = param index; pushes true if that argument was supplied
@@ -110,7 +113,7 @@ var opNames = map[Op]string{
 	OpBranchUnless: "branch_unless", OpBranchNil: "branch_nil", OpSend: "send", OpGetIvar: "get_ivar",
 	OpSetIvar: "set_ivar", OpGetConst: "get_const", OpGetScopedConst: "get_scoped_const", OpSetScopedConst: "set_scoped_const", OpSetConst: "set_const", OpGetGVar: "get_gvar", OpSetGVar: "set_gvar", OpGetCVar: "get_cvar", OpGetCVarQuiet: "get_cvar_quiet", OpSetCVar: "set_cvar", OpDefineClass: "define_class",
 	OpDefineModule: "define_module", OpDefineMethod: "define_method", OpDefineSMethod: "define_smethod", OpDefineSingletonMethod: "define_singleton_method",
-	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block",
+	OpInvokeSuper: "invoke_super", OpInvokeBlock: "invoke_block", OpInvokeBlockArray: "invoke_block_array", OpExcMatchAny: "exc_match_any", OpCaseMatchAny: "case_match_any",
 	OpBlockGiven: "block_given", OpReturn: "return", OpBreak: "break", OpArgGiven: "arg_given",
 	OpPushHandler: "push_handler", OpPopHandler: "pop_handler", OpReThrow: "rethrow",
 	OpExpandArray:  "expand_array",

@@ -38,15 +38,24 @@ gaps. It is `//go:build ignore` so it never enters the module's normal
 
 | Repo   | `.rb` files | MRI-valid | rbgo front-end accepts | **acceptance rate** | rbgo gaps |
 |--------|------------:|----------:|-----------------------:|--------------------:|----------:|
-| Rails  |       3 423 |     3 423 |                    708 |          **20.68 %** |     2 715 |
-| Puppet |       2 156 |     2 154 |                    887 |          **41.18 %** |     1 267 |
-| **Total** |    5 579 |     5 577 |                  1 595 |          **28.6 %**  |     3 982 |
+| Rails  |       3 423 |     3 423 |                  3 418 |          **99.85 %** |         5 |
+| Puppet |       2 156 |     2 154 |                  2 150 |          **99.81 %** |         6 |
+| **Total** |    5 579 |     5 577 |                  5 568 |          **99.84 %** |        11 |
+
+(Round 5 parser + the compiler gaps it exposed now fixed: block-pass after
+kwargs, anonymous `&`, block keyword params, `...`/`*`/`**` forwarding through
+calls and `super`, `yield(*args)`, `rescue *classes`, and `case … when *array`.)
 
 - `both-reject` (rbgo and MRI both reject): Rails 0, Puppet 2 — i.e. essentially
   every file rbgo rejects is *valid Ruby that MRI accepts*. These are genuine
   front-end gaps, not invalid input.
 - `over-permissive` (rbgo accepts, MRI rejects): **0** in both repos — rbgo never
   accepted Ruby that MRI rejected.
+
+The remaining 11 gaps are distinct features beyond this batch: rational-literal
+compilation (`2r`), nested `MultiAssign` destructuring targets, named-regexp
+capture locals (`/(?<x>…)/ =~ s` binding `x`), `begin…end until` post-loops with
+assign-in-condition, and 2 parser-level gaps in Puppet.
 
 The gap is dominated by a *small number of very common constructs*. The single
 top construct (the `::` scope-resolution operator) blocks **2 723 files** — about

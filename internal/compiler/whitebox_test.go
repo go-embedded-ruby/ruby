@@ -123,6 +123,47 @@ func TestForwardOutsideDef(t *testing.T) {
 	}
 }
 
+// compileBlockPass fails on an anonymous `&` block-pass when no enclosing
+// method bound the "&" local (def f(&)). The parser only emits a bare-`&`
+// BlockPass inside such a method, so this shape is exercised directly here.
+func TestAnonBlockPassOutsideMethod(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Call{Name: "g", Args: []ast.Node{&ast.BlockPass{Value: nil}}},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "anonymous block argument") {
+		t.Fatalf("expected an anonymous-block-argument error, got %v", err)
+	}
+}
+
+// compileSplatValue fails on a bare `*` splat-pass when no enclosing method
+// bound the "*" parameter; the parser only emits a bare-`*` SplatArg inside such
+// a method, so this shape is exercised directly here.
+func TestAnonSplatForwardOutsideMethod(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Call{Name: "g", Args: []ast.Node{&ast.SplatArg{Value: nil}}},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "anonymous splat argument") {
+		t.Fatalf("expected an anonymous-splat-argument error, got %v", err)
+	}
+}
+
+// compileKwSplatValue fails on a bare `**` keyword-splat-pass when no enclosing
+// method bound the "**" parameter. A HashLit with a nil key and a nil value is
+// the bare-`**` forward the parser only emits inside such a method.
+func TestAnonKwSplatForwardOutsideMethod(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Call{Name: "g", Args: []ast.Node{
+			&ast.HashLit{Keys: []ast.Node{nil}, Values: []ast.Node{nil}},
+		}},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "anonymous keyword-splat argument") {
+		t.Fatalf("expected an anonymous-keyword-splat-argument error, got %v", err)
+	}
+}
+
 func TestCompileEmptyProgram(t *testing.T) {
 	iseq, err := Compile(&ast.Program{})
 	if err != nil {

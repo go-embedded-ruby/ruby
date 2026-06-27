@@ -641,6 +641,29 @@ func (vm *VM) classEval(cls *RClass, p *Proc, args []object.Value) object.Value 
 // bindBlockArgs maps call args onto a block's parameters, with the auto-splat a
 // multi-parameter block applies to a single Array argument.
 func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
+	// A block with keyword params consumes a trailing keyword hash exactly as a
+	// method does. Peel it off before positional shaping (auto-splat, padding,
+	// arity truncation) and re-append it so exec's keyword binding still sees it.
+	if len(p.iseq.KwNames) > 0 || p.iseq.KwRestSlot >= 0 {
+		var kw object.Value
+		if n := len(args); n > 0 {
+			if _, ok := args[n-1].(*object.Hash); ok {
+				kw, args = args[n-1], args[:n-1]
+			}
+		}
+		shaped := vm.bindBlockPositionals(p, args)
+		if kw != nil {
+			shaped = append(shaped[:len(shaped):len(shaped)], kw)
+		}
+		return shaped
+	}
+	return vm.bindBlockPositionals(p, args)
+}
+
+// bindBlockPositionals shapes the positional arguments of a block call onto its
+// positional parameters (auto-splat of a lone Array, padding, fixed-arity
+// truncation).
+func (vm *VM) bindBlockPositionals(p *Proc, args []object.Value) []object.Value {
 	np := len(p.iseq.Params)
 	if np > 1 && len(args) == 1 {
 		if arr, ok := args[0].(*object.Array); ok {
