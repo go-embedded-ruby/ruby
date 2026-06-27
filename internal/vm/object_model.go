@@ -74,6 +74,18 @@ func (p *Proc) ToS() string     { return "#<Proc>" }
 func (p *Proc) Inspect() string { return "#<Proc>" }
 func (p *Proc) Truthy() bool    { return true }
 
+// visibility is a Ruby method's access level: public (the default), private or
+// protected. It is recorded on the Method and may be overridden per receiver
+// for an inherited method (see RClass.visOverrides), and is enforced on the
+// explicit-receiver send path.
+type visibility uint8
+
+const (
+	visPublic visibility = iota
+	visPrivate
+	visProtected
+)
+
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
 type Method struct {
 	name     string
@@ -82,6 +94,12 @@ type Method struct {
 	proc     *Proc          // for define_method: a block-backed method body
 	compiled CompiledMethod // AOT-lowered native body (rbgo build); preferred when set
 	owner    *RClass
+	// vis is the method's access level (public/private/protected). The zero value
+	// is visPublic, so every method is public unless a visibility directive marks
+	// it otherwise. A per-receiver override (RClass.visOverrides) takes precedence
+	// over this when set, so marking an inherited method private does not mutate
+	// the shared ancestor Method.
+	vis visibility
 	// undefined marks an `undef`-ed method: a tombstone that halts ancestor
 	// lookup so an inherited method stays hidden, while dispatch, respond_to? and
 	// instance_methods all treat the name as absent (a call routes to
@@ -112,7 +130,24 @@ type RClass struct {
 	named    bool
 	isModule bool
 	meta     *RClass // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
+	metaOf   *RClass // when this RClass is a metaclass, the class it is the metaclass of (else nil); routes `class << c` visibility directives to c's class methods
 	funcMode bool    // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
+	// defaultVis is the access level applied to subsequent `def`s in this body,
+	// set by a bare `private` / `protected` / `public` with no args. It resets to
+	// visPublic at the start of each class/module body (a fresh RClass starts at
+	// the zero value, and reopening resets it in OpDefineClass/Module).
+	defaultVis visibility
+	// visOverrides records a per-receiver visibility for an INHERITED instance
+	// method — one whose Method lives on an ancestor — so e.g. `private :foo`
+	// where foo is defined in a superclass marks it private on this class without
+	// mutating the ancestor's shared Method. A key present here wins over the
+	// resolved Method's own vis. Own (re)defined methods carry their vis on the
+	// Method itself and are not recorded here. nil until first use.
+	visOverrides map[string]visibility
+	// svisOverrides is visOverrides for class (singleton) methods — notably
+	// `private_class_method :new`, where `new` is inherited from Class rather than
+	// defined on the receiver. nil until first use.
+	svisOverrides map[string]visibility
 }
 
 func newClass(name string, super *RClass) *RClass {
@@ -220,6 +255,7 @@ func (c *RClass) metaClass() *RClass {
 	if c.meta == nil {
 		mc := newClass("#<Class:"+c.name+">", nil)
 		mc.methods = c.smethods // alias: defs here become class methods of c
+		mc.metaOf = c           // back-pointer: lets `private :foo` in `class << c` reach c's class methods
 		c.meta = mc
 	}
 	return c.meta

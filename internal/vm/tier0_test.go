@@ -104,8 +104,8 @@ func TestModuleFunction(t *testing.T) {
 }
 
 // TestVisibilityDirectives covers the visibility setters and the _class_method
-// forms. Visibility is not enforced by this VM, but the directives must accept
-// names and return the MRI value.
+// forms: their MRI return values, and that the recorded visibility is enforced
+// on the explicit-receiver send path.
 func TestVisibilityDirectives(t *testing.T) {
 	checkCases(t, []runCase{
 		{`class C; def f; 1; end; p private(:f); end`, ":f\n"},
@@ -114,8 +114,10 @@ func TestVisibilityDirectives(t *testing.T) {
 		{`class C; def f; end; protected(:f); end; p "ok"`, "\"ok\"\n"},
 		{`module M; def self.sx; 1; end; p private_class_method(:sx) == M; end`, "true\n"},
 		{`module M; def self.sx; 1; end; p public_class_method(:sx) == M; end`, "true\n"},
-		// Visibility is not enforced: a "private" method stays callable.
-		{`class C; def f; 5; end; private :f; end; p C.new.f`, "5\n"},
+		// A private method is still callable through an implicit receiver.
+		{`class C; def g; f; end; def f; 5; end; private :f; end; p C.new.g`, "5\n"},
+		// public restores an inherited or previously-private method.
+		{`class A; def f; 1; end; end; class B < A; private :f; public :f; end; p B.new.f`, "1\n"},
 		// Constant-visibility directives are accepted (no-ops returning nil).
 		{`class C; X = 1; p private_constant(:X) == C; end`, "true\n"},
 		{`class C; X = 1; p public_constant(:X) == C; end`, "true\n"},

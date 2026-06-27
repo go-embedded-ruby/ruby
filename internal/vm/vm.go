@@ -722,6 +722,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					recv := stack[base-1]
 					if _, isClass := recv.(*RClass); !isClass {
 						if m := vm.lookupCached(&caches[pc], recv, name); m != nil {
+							// An explicit-receiver send enforces method visibility
+							// (private/protected); an implicit or `self.` send does not.
+							if in.Flags&bytecode.FlagSendExplicit != 0 {
+								vm.checkVisibility(recv, name, m, self)
+							}
 							// Pass the args in place from the operand stack: invoke
 							// (→ exec / a native method) consumes them before this frame
 							// touches the region again, so no per-call args copy is
@@ -738,12 +743,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					callArgs := make([]object.Value, argc)
 					copy(callArgs, stack[base:])
 					stack = stack[:base-1]
+					vm.enforceSendVis(in.Flags, recv, name, self)
 					push(vm.dispatchSend(recv, name, callArgs, nil))
 				} else {
 					callArgs := make([]object.Value, argc)
 					copy(callArgs, stack[len(stack)-argc:])
 					stack = stack[:len(stack)-argc]
 					recv := pop()
+					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
 					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee}
@@ -756,21 +763,30 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				copy(callArgs, stack[len(stack)-argc:])
 				stack = stack[:len(stack)-argc]
 				recv := pop()
+				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
 				push(vm.dispatchSend(recv, iseq.Names[in.A], callArgs, vm.toBlock(blockVal)))
 			case bytecode.OpDefineMethod:
 				name := iseq.Names[in.A]
-				m := &Method{name: name, iseq: iseq.Children[in.B], owner: definee}
+				m := &Method{name: name, iseq: iseq.Children[in.B], owner: definee, vis: definee.defaultVis}
 				// Attach the AOT-compiled body only on the first definition of
 				// this name; a redefinition gets a fresh, interpreted Method
 				// (deopt), since the compiled body matched the original source.
 				if _, redef := definee.methods[name]; !redef {
 					m.compiled = compiledFor(definee.name, name)
 				}
+				// A redefinition clears any stale per-receiver visibility override so
+				// the new Method's own vis governs (MRI: redefining resets to the
+				// current default visibility).
+				delete(definee.visOverrides, name)
+				// In module_function (no-arg) mode, a def is private as an instance
+				// method but public as the module/singleton method.
+				if definee.funcMode {
+					m.vis = visPrivate
+				}
 				definee.methods[name] = m
-				// In module_function (no-arg) mode, a copy of the freshly defined
-				// method also becomes a module/singleton method, so M.name works.
 				if definee.funcMode {
 					sm := *m
+					sm.vis = visPublic
 					definee.smethods[name] = &sm
 				}
 				bumpMethodSerial() // a (re)definition can change what a cached send resolves to
@@ -779,10 +795,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if hook := lookupSMethod(definee, "method_added"); hook != nil {
 					vm.invoke(hook, definee, []object.Value{object.Symbol(name)}, nil)
 				}
-				push(object.NilV)
+				// `def foo; end` evaluates to :foo (MRI), which is what makes
+				// `private def foo; end` mark the just-defined method.
+				push(object.Symbol(name))
 			case bytecode.OpDefineSMethod:
 				definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
-				push(object.NilV)
+				push(object.Symbol(iseq.Names[in.A]))
 			case bytecode.OpDefineSingletonMethod:
 				// def recv.foo: a class receiver gains a class method; any other
 				// object gains a method on its singleton class.
@@ -797,7 +815,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				default:
 					raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
 				}
-				push(object.NilV)
+				push(object.Symbol(name))
 			case bytecode.OpOpenSingletonClass:
 				// class << target: run the child body with target's singleton (meta)
 				// class as the definee, so its method/constant defs attach there.
@@ -1053,6 +1071,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpSendArray:
 				argsArr := pop().(*object.Array)
 				recv := pop()
+				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
@@ -1063,6 +1082,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				blockVal := pop()
 				argsArr := pop().(*object.Array)
 				recv := pop()
+				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, vm.toBlock(blockVal)))
 			default:
 				raise("VMError", "unknown opcode %s", in.Op)
@@ -1208,6 +1228,9 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			vm.invoke(hook, super, []object.Value{class}, nil)
 		}
 	}
+	// Each class body starts with public default visibility and no
+	// module_function mode (MRI resets these on every (re)open).
+	class.defaultVis, class.funcMode = visPublic, false
 	return vm.exec(body, class, nil, class, "", nil, nil, nil)
 }
 
@@ -1230,6 +1253,7 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq) o
 		mod.lexParent = lexParentFor(parent)
 		table[name] = mod
 	}
+	mod.defaultVis, mod.funcMode = visPublic, false
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil)
 }
 
