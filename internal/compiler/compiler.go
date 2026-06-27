@@ -485,6 +485,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileIf(v)
 	case *ast.While:
 		c.compileWhile(v)
+	case *ast.For:
+		c.compileFor(v)
 	case *ast.MethodDef:
 		c.compileMethodDef(v)
 	case *ast.Return:
@@ -1607,6 +1609,70 @@ func (c *Compiler) compileWhile(v *ast.While) {
 		b.patch(j, b.here())
 	}
 	b.emit(bytecode.OpPushNil, 0, 0) // while evaluates to nil
+}
+
+// compileFor lowers `for VARS in ITER ... end` to `ITER.each { ... }`. Unlike a
+// block, a `for` does not introduce a new scope: its loop variables resolve to
+// (and create, when absent) locals in the ENCLOSING scope, so they remain
+// visible — with their last value — after the loop. The synthesized block takes
+// a single hidden parameter holding the yielded value, then assigns it across
+// the enclosing loop variables. break/next behave as in any block-driven loop
+// because the block carries the usual ctxBlock break/next context. The whole
+// expression evaluates to whatever `each` returns (the iterable, in MRI).
+func (c *Compiler) compileFor(v *ast.For) {
+	// The loop variables live in the enclosing scope; ensure each has a slot
+	// there now (before compiling the block) so the block resolves them by depth.
+	// A `for` does not open a scope, so an absent variable is created in the
+	// nearest method/top-level scope (the first non-block ancestor), making it
+	// leak past the whole construct — including out of any enclosing blocks, e.g.
+	// an outer `for` — exactly as MRI does.
+	parent := c.cur()
+	owner := parent
+	for owner.isBlock && owner.parent != nil {
+		owner = owner.parent
+	}
+	for _, name := range v.Vars {
+		if _, _, ok := parent.resolve(name); !ok {
+			owner.localSlot(name)
+		}
+	}
+	// Receiver: the iterable.
+	c.compileNode(v.Iter)
+	// Synthesize the each-block as a child ISeq with one hidden parameter.
+	c.push(newBlockBuilder("<for>", []string{"...for"}, parent))
+	b := c.cur()
+	b.numRequired = 1
+	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
+	c.compileForVars(v.Vars)
+	c.compileBody(v.Body)
+	c.ctxs = c.ctxs[:len(c.ctxs)-1]
+	b.emit(bytecode.OpReturn, 0, 0)
+	child := c.pop().build()
+	idx := len(parent.children)
+	parent.children = append(parent.children, child)
+	at := parent.emit(bytecode.OpSend, parent.addName("each"), 0)
+	parent.insns[at].C = idx + 1 // C-1 indexes Children
+}
+
+// compileForVars binds the yielded value (the hidden first block local) to the
+// `for` loop variables, which resolve to enclosing-scope locals. A single
+// variable takes the value directly; multiple variables destructure it like a
+// MultiAssign (the value is splatted into an Array and expanded).
+func (c *Compiler) compileForVars(vars []string) {
+	b := c.cur()
+	if len(vars) == 1 {
+		b.emit(bytecode.OpGetLocal, 0, 0) // the hidden parameter
+		c.storeLocal(vars[0])
+		b.emit(bytecode.OpPop, 0, 0)
+		return
+	}
+	b.emit(bytecode.OpGetLocal, 0, 0)
+	b.emit(bytecode.OpSplatToArray, 0, 0)
+	b.emit(bytecode.OpExpandArray, len(vars), 0)
+	for _, name := range vars {
+		c.storeLocal(name)
+		b.emit(bytecode.OpPop, 0, 0)
+	}
 }
 
 // Reserved local names for argument forwarding (`def f(...)`): they capture the

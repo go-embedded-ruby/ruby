@@ -22,7 +22,8 @@ python3 scripts/conformance/heavyweight/categorize.py /tmp/ger-heavyweight-out p
 ## Environment
 
 - rbgo built from this repo (`GOWORK=off go build ./cmd/rbgo`), go-ruby-parser
-  `v0.0.0-20260623182135-4304908aa423`.
+  **Round 5** (`v0.0.0-20260626192347-1bbe8b4672d0`) with the compiler's
+  `ast.For` lowering activated.
 - Oracle: MRI `ruby 4.0.5 (2026-05-20) +PRISM [arm64-darwin25]`.
 - Repos: shallow clone of `rails/rails` and `puppetlabs/puppet` HEAD on 2026-06-25.
 
