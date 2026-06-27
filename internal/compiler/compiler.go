@@ -485,6 +485,11 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.Super:
 		c.compileSuper(v)
 	case *ast.Yield:
+		if hasSplat(v.Args) { // dynamic count: build an Array and yield it splatted
+			c.compileSplatItems(v.Args)
+			b.emit(bytecode.OpInvokeBlockArray, 0, 0)
+			break
+		}
 		for _, a := range v.Args {
 			c.compileNode(a)
 		}
@@ -493,6 +498,8 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileIf(v)
 	case *ast.While:
 		c.compileWhile(v)
+	case *ast.For:
+		c.compileFor(v)
 	case *ast.MethodDef:
 		c.compileMethodDef(v)
 	case *ast.Return:
@@ -617,21 +624,32 @@ func (c *Compiler) compileForwardCall(v *ast.Call, fwdAt int) {
 	} else {
 		b.emit(bytecode.OpPushSelf, 0, 0)
 	}
-	// Build the positional-arg array: leading explicit args, then *...rest, then
-	// trailing explicit args.
+	c.emitForwardArgsArray(v.Args[:fwdAt], v.Args[fwdAt+1:])
+	// Forward the block (&...blk; nil ⇒ no block) and send.
+	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdBlockName), 0)
+	b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+}
+
+// emitForwardArgsArray builds, on top of the stack, the argument Array for a
+// `...` forwarding call: the leading explicit args, then the captured `*...rest`
+// positionals, then the trailing explicit args, then the captured `**...kw`
+// hash appended as a trailing element only when it has entries (matching MRI —
+// a `**{}` kwsplat passes no argument). It does not emit the block or the send.
+func (c *Compiler) emitForwardArgsArray(leading, trailing []ast.Node) {
+	b := c.cur()
 	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
 	appendOne := func(n ast.Node) {
 		c.compileNode(n)
 		b.emit(bytecode.OpNewArray, 1, 0)
 		b.emit(bytecode.OpConcatArray, 0, 0)
 	}
-	for _, a := range v.Args[:fwdAt] {
+	for _, a := range leading {
 		appendOne(a)
 	}
 	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdRestName), 0)
 	b.emit(bytecode.OpSplatToArray, 0, 0)
 	b.emit(bytecode.OpConcatArray, 0, 0)
-	for _, a := range v.Args[fwdAt+1:] {
+	for _, a := range trailing {
 		appendOne(a)
 	}
 	// Append **...kw as a trailing hash, but only when it has entries.
@@ -645,9 +663,6 @@ func (c *Compiler) compileForwardCall(v *ast.Call, fwdAt int) {
 	b.patch(skip, b.here())
 	b.emit(bytecode.OpPop, 0, 0) // drop the empty kw hash
 	b.patch(done, b.here())
-	// Forward the block (&...blk; nil ⇒ no block) and send.
-	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdBlockName), 0)
-	b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
 }
 
 // mustResolve resolves a (compiler-synthesised) local that is guaranteed to
@@ -766,8 +781,10 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		}
 	}
 	// An `&expr` block-pass is pulled out so the ordinary args compile cleanly and
-	// the block value lands on top. It is usually last, but a bare `**` anonymous
-	// kwsplat can follow it (`g(*, **, &)` parses as [*, &, **]), so scan anywhere.
+	// the block value lands on top. It is usually last, but the parser may place it
+	// before a trailing keyword hash (`g(x, &blk, k: 1)` parses with &blk not last)
+	// or after a bare `**` anonymous kwsplat (`g(*, **, &)` parses as [*, &, **]),
+	// so scan anywhere. Bare anonymous `&` was already rewritten by rewriteAnonArgs.
 	args, blockPass := extractBlockPass(callArgs)
 	if hasSplat(args) { // dynamic argument count: build an array and splat-send
 		c.compileSplatItems(args)
@@ -800,8 +817,11 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	patchSafe()
 }
 
-// extractBlockPass removes a `&block-pass` argument from args (wherever it sits)
-// and returns the remaining args plus its value node (nil when there is none).
+// extractBlockPass removes a `&block-pass` argument from args (wherever it sits —
+// the parser may place it before a trailing keyword hash, or after a bare `**`
+// anonymous kwsplat) and returns the remaining args plus its value node (nil when
+// there is none). Bare anonymous `&` is rewritten by rewriteAnonArgs beforehand,
+// so by the time args reach here a BlockPass always carries a non-nil Value.
 func extractBlockPass(args []ast.Node) ([]ast.Node, ast.Node) {
 	for i, a := range args {
 		if bp, ok := a.(*ast.BlockPass); ok {
@@ -868,22 +888,62 @@ func (c *Compiler) compileHashWithSplat(v *ast.HashLit) {
 	}
 }
 
+// blockKwParam is one keyword parameter of a block, decoded from the parser's
+// flat Params/Defaults encoding (see splitBlockParams).
+type blockKwParam struct {
+	name   string   // the bare name, without the trailing ':'
+	def    ast.Node // default expression, or nil for a required keyword
+	defIdx int      // index of def within blk.Defaults (for the prologue)
+}
+
+// splitBlockParams separates a block's flat parameter encoding into true
+// positionals and keyword parameters. The parser folds keyword params into
+// Params as "name:" entries (required when the parallel Defaults slot is nil)
+// and a "**rest" keyword-splat as a "**name" entry, all after the positionals;
+// positionals (including a `*splat`, tracked by SplatIndex) keep their plain
+// names. The returned positionals/defaults are the leading slice that the block
+// builder binds positionally; kwParams and kwRest mirror MethodDef.KwParams /
+// KwRest so the VM's keyword binding applies unchanged.
+func splitBlockParams(blk *ast.Block) (positionals []string, posDefaults []ast.Node, kwParams []blockKwParam, kwRest string) {
+	for i, p := range blk.Params {
+		switch {
+		case len(p) >= 2 && p[:2] == "**":
+			kwRest = p[2:]
+		case p[len(p)-1] == ':':
+			var def ast.Node
+			if i < len(blk.Defaults) {
+				def = blk.Defaults[i]
+			}
+			kwParams = append(kwParams, blockKwParam{name: p[:len(p)-1], def: def, defIdx: i})
+		default:
+			positionals = append(positionals, p)
+			if i < len(blk.Defaults) {
+				posDefaults = append(posDefaults, blk.Defaults[i])
+			} else {
+				posDefaults = append(posDefaults, nil)
+			}
+		}
+	}
+	return positionals, posDefaults, kwParams, kwRest
+}
+
 // compileBlock compiles a literal block into a child ISeq of the current
 // builder and returns its index. The child is a block builder, so its body can
 // reach the enclosing locals by depth.
 func (c *Compiler) compileBlock(blk *ast.Block) int {
 	parent := c.cur()
-	c.push(newBlockBuilder("<block>", blk.Params, parent))
+	positionals, posDefaults, kwParams, kwRest := splitBlockParams(blk)
+	c.push(newBlockBuilder("<block>", positionals, parent))
 	b := c.cur()
 	// Block/lambda params lower exactly like a method's positionals: a top-level
 	// *rest and anything after it are not required, and each optional param gets a
 	// default-filling prologue (OpArgGiven → evaluate the default when absent).
 	b.splatIndex = blk.SplatIndex
-	nreq := len(blk.Params)
+	nreq := len(positionals)
 	if blk.SplatIndex >= 0 {
 		nreq = blk.SplatIndex
 	}
-	for i, d := range blk.Defaults {
+	for i, d := range posDefaults {
 		if d == nil {
 			continue
 		}
@@ -898,6 +958,18 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 		b.patch(skip, b.here())
 	}
 	b.numRequired = nreq
+	// Keyword params take local slots right after the positionals (matching the
+	// VM's keyword binding in exec), so the body resolves them by name; record
+	// their names/required flags for the VM.
+	kwBase := len(positionals)
+	for _, kp := range kwParams {
+		b.localSlot(kp.name)
+		b.kwNames = append(b.kwNames, kp.name)
+		b.kwRequired = append(b.kwRequired, kp.def == nil)
+	}
+	if kwRest != "" {
+		b.kwRestSlot = b.localSlot(kwRest)
+	}
 	// A &block param gets its own local slot wired to BlockSlot. When the proc is
 	// yielded to as an ordinary block no method-block is passed, so it binds nil
 	// (|x, &b| sees b == nil); when the proc is the body of define_method /
@@ -905,6 +977,19 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 	// here, so &b binds it.
 	if blk.BlockParam != "" {
 		b.blockSlot = b.localSlot(blk.BlockParam)
+	}
+	// Optional keyword params: the VM binds the supplied ones natively, so the
+	// prologue only fills in defaults for the absent ones.
+	for i, kp := range kwParams {
+		if kp.def == nil {
+			continue
+		}
+		b.emit(bytecode.OpKwGiven, i, 0)
+		skip := b.emit(bytecode.OpBranchIf, 0, 0)
+		c.compileNode(kp.def)
+		b.emit(bytecode.OpSetLocal, kwBase+i, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		b.patch(skip, b.here())
 	}
 	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
 	c.compileBody(blk.Body)
@@ -1013,8 +1098,20 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 		}
 		return
 	}
+	// `super(..., ...)`: splice the enclosing def(...)'s captured positionals,
+	// keywords and block, just like a forwarding call, then dispatch from the
+	// built args array (with the captured &...blk overriding the frame block).
+	if fwdAt := forwardIndex(v.Args); fwdAt >= 0 {
+		c.emitForwardArgsArray(v.Args[:fwdAt], v.Args[fwdAt+1:])
+		b.emit(bytecode.OpGetLocal, c.mustResolve(fwdBlockName), 0)
+		at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+		b.insns[at].C = 1
+		return
+	}
 	// Pull a &block-pass off so the positional args compile cleanly; the block
-	// value (if any) lands on top of the args array.
+	// value (if any) lands on top of the args array. It may sit before a trailing
+	// keyword hash, so extractBlockPass scans anywhere; bare anonymous `&`/`*`/`**`
+	// are rewritten to reads of the enclosing method's anonymous params first.
 	args, blockPass := extractBlockPass(c.rewriteAnonArgs(v.Args))
 	// A splat (or a block-pass) means a dynamic argument count: build the args as
 	// an Array and dispatch super from it (kwargs ride along as the trailing hash,
@@ -1155,6 +1252,17 @@ func (c *Compiler) compileCase(v *ast.Case) {
 	for _, clause := range v.Whens {
 		var bodyJumps []int
 		for _, cond := range clause.Conds {
+			if sp, ok := cond.(*ast.SplatArg); ok { // when *array: match any element
+				c.compileNode(sp.Value)
+				if slot >= 0 { // any element === subject
+					b.emit(bytecode.OpGetLocal, slot, 0)
+					b.emit(bytecode.OpCaseMatchAny, 0, 1)
+				} else { // no subject: any element truthy
+					b.emit(bytecode.OpCaseMatchAny, 0, 0)
+				}
+				bodyJumps = append(bodyJumps, b.emit(bytecode.OpBranchIf, 0, 0))
+				continue
+			}
 			c.compileNode(cond)
 			if slot >= 0 { // cond === subject
 				b.emit(bytecode.OpGetLocal, slot, 0)
@@ -1726,8 +1834,13 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 		} else {
 			for _, ce := range clause.Classes {
 				b.emit(bytecode.OpDup, 0, 0)
-				c.compileNode(ce)
-				b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+				if sp, ok := ce.(*ast.SplatArg); ok { // rescue *classes: match any element
+					c.compileNode(sp.Value)
+					b.emit(bytecode.OpExcMatchAny, 0, 0)
+				} else {
+					c.compileNode(ce)
+					b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+				}
 				matched = append(matched, b.emit(bytecode.OpBranchIf, 0, 0))
 			}
 		}
@@ -1773,6 +1886,70 @@ func (c *Compiler) compileWhile(v *ast.While) {
 		b.patch(j, b.here())
 	}
 	b.emit(bytecode.OpPushNil, 0, 0) // while evaluates to nil
+}
+
+// compileFor lowers `for VARS in ITER ... end` to `ITER.each { ... }`. Unlike a
+// block, a `for` does not introduce a new scope: its loop variables resolve to
+// (and create, when absent) locals in the ENCLOSING scope, so they remain
+// visible — with their last value — after the loop. The synthesized block takes
+// a single hidden parameter holding the yielded value, then assigns it across
+// the enclosing loop variables. break/next behave as in any block-driven loop
+// because the block carries the usual ctxBlock break/next context. The whole
+// expression evaluates to whatever `each` returns (the iterable, in MRI).
+func (c *Compiler) compileFor(v *ast.For) {
+	// The loop variables live in the enclosing scope; ensure each has a slot
+	// there now (before compiling the block) so the block resolves them by depth.
+	// A `for` does not open a scope, so an absent variable is created in the
+	// nearest method/top-level scope (the first non-block ancestor), making it
+	// leak past the whole construct — including out of any enclosing blocks, e.g.
+	// an outer `for` — exactly as MRI does.
+	parent := c.cur()
+	owner := parent
+	for owner.isBlock && owner.parent != nil {
+		owner = owner.parent
+	}
+	for _, name := range v.Vars {
+		if _, _, ok := parent.resolve(name); !ok {
+			owner.localSlot(name)
+		}
+	}
+	// Receiver: the iterable.
+	c.compileNode(v.Iter)
+	// Synthesize the each-block as a child ISeq with one hidden parameter.
+	c.push(newBlockBuilder("<for>", []string{"...for"}, parent))
+	b := c.cur()
+	b.numRequired = 1
+	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
+	c.compileForVars(v.Vars)
+	c.compileBody(v.Body)
+	c.ctxs = c.ctxs[:len(c.ctxs)-1]
+	b.emit(bytecode.OpReturn, 0, 0)
+	child := c.pop().build()
+	idx := len(parent.children)
+	parent.children = append(parent.children, child)
+	at := parent.emit(bytecode.OpSend, parent.addName("each"), 0)
+	parent.insns[at].C = idx + 1 // C-1 indexes Children
+}
+
+// compileForVars binds the yielded value (the hidden first block local) to the
+// `for` loop variables, which resolve to enclosing-scope locals. A single
+// variable takes the value directly; multiple variables destructure it like a
+// MultiAssign (the value is splatted into an Array and expanded).
+func (c *Compiler) compileForVars(vars []string) {
+	b := c.cur()
+	if len(vars) == 1 {
+		b.emit(bytecode.OpGetLocal, 0, 0) // the hidden parameter
+		c.storeLocal(vars[0])
+		b.emit(bytecode.OpPop, 0, 0)
+		return
+	}
+	b.emit(bytecode.OpGetLocal, 0, 0)
+	b.emit(bytecode.OpSplatToArray, 0, 0)
+	b.emit(bytecode.OpExpandArray, len(vars), 0)
+	for _, name := range vars {
+		c.storeLocal(name)
+		b.emit(bytecode.OpPop, 0, 0)
+	}
 }
 
 // Reserved local names for argument forwarding (`def f(...)`): they capture the

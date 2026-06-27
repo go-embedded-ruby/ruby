@@ -739,6 +739,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the frame's own arguments
 					superArgs = args
+					// Keyword arguments were peeled off args into env.kwargs on entry;
+					// re-attach them as the trailing hash so bare super forwards them too.
+					if env.kwargs != nil && len(env.kwargs.Keys) > 0 {
+						superArgs = append(append([]object.Value(nil), args...), env.kwargs)
+					}
 				} else {
 					superArgs = make([]object.Value, in.A)
 					copy(superArgs, stack[len(stack)-in.A:])
@@ -764,6 +769,43 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				copy(yargs, stack[len(stack)-in.A:])
 				stack = stack[:len(stack)-in.A]
 				push(vm.callBlock(block, yargs))
+			case bytecode.OpInvokeBlockArray:
+				if block == nil {
+					raise("LocalJumpError", "no block given (yield)")
+				}
+				push(vm.callBlock(block, pop().(*object.Array).Elems))
+			case bytecode.OpExcMatchAny:
+				classes := pop().(*object.Array)
+				exc := pop()
+				match := false
+				for _, ce := range classes.Elems {
+					if classIsA(vm.classOf(exc), classArg(ce)) {
+						match = true
+						break
+					}
+				}
+				push(object.Bool(match))
+			case bytecode.OpCaseMatchAny:
+				match := false
+				if in.B == 1 { // any candidate === subject
+					subject := pop()
+					cands := pop().(*object.Array)
+					for _, c := range cands.Elems {
+						if vm.send(c, "===", []object.Value{subject}, nil).Truthy() {
+							match = true
+							break
+						}
+					}
+				} else { // no subject: any candidate truthy
+					cands := pop().(*object.Array)
+					for _, c := range cands.Elems {
+						if c.Truthy() {
+							match = true
+							break
+						}
+					}
+				}
+				push(object.Bool(match))
 			case bytecode.OpBlockGiven:
 				push(object.Bool(block != nil))
 			case bytecode.OpBinding:

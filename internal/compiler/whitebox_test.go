@@ -123,6 +123,36 @@ func TestForwardOutsideDef(t *testing.T) {
 	}
 }
 
+// rewriteAnonArgs (via anonLocal) fails on a bare anonymous `&` block-pass when
+// no enclosing method declares a matching anonymous parameter. This drives the
+// BlockPass arm of rewriteAnonArgs; the parser only emits a bare-`&` BlockPass
+// inside such a method, so the shape is synthesized directly here.
+func TestAnonBlockPassOutsideMethod(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Call{Name: "g", Args: []ast.Node{&ast.BlockPass{Value: nil}}},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "anonymous argument forwarding") {
+		t.Fatalf("expected an anonymous-argument-forwarding error, got %v", err)
+	}
+}
+
+// rewriteAnonArgs (via anonLocal) fails on a bare anonymous `**` keyword-splat
+// when no enclosing method declares a matching anonymous parameter. This drives
+// the HashLit/isAnonKwSplat arm of rewriteAnonArgs. A HashLit with a nil key and
+// a nil value is the bare-`**` forward the parser only emits inside such a method.
+func TestAnonKwSplatForwardOutsideMethod(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Call{Name: "g", Args: []ast.Node{
+			&ast.HashLit{Keys: []ast.Node{nil}, Values: []ast.Node{nil}},
+		}},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "anonymous argument forwarding") {
+		t.Fatalf("expected an anonymous-argument-forwarding error, got %v", err)
+	}
+}
+
 func TestCompileEmptyProgram(t *testing.T) {
 	iseq, err := Compile(&ast.Program{})
 	if err != nil {

@@ -22,7 +22,8 @@ python3 scripts/conformance/heavyweight/categorize.py /tmp/ger-heavyweight-out p
 ## Environment
 
 - rbgo built from this repo (`GOWORK=off go build ./cmd/rbgo`), go-ruby-parser
-  `v0.0.0-20260623182135-4304908aa423`.
+  **Round 5** (`v0.0.0-20260626192347-1bbe8b4672d0`) with the compiler's
+  `ast.For` lowering activated.
 - Oracle: MRI `ruby 4.0.5 (2026-05-20) +PRISM [arm64-darwin25]`.
 - Repos: shallow clone of `rails/rails` and `puppetlabs/puppet` HEAD on 2026-06-25.
 
@@ -37,15 +38,24 @@ gaps. It is `//go:build ignore` so it never enters the module's normal
 
 | Repo   | `.rb` files | MRI-valid | rbgo front-end accepts | **acceptance rate** | rbgo gaps |
 |--------|------------:|----------:|-----------------------:|--------------------:|----------:|
-| Rails  |       3 423 |     3 423 |                    708 |          **20.68 %** |     2 715 |
-| Puppet |       2 156 |     2 154 |                    887 |          **41.18 %** |     1 267 |
-| **Total** |    5 579 |     5 577 |                  1 595 |          **28.6 %**  |     3 982 |
+| Rails  |       3 423 |     3 423 |                  3 418 |          **99.85 %** |         5 |
+| Puppet |       2 156 |     2 154 |                  2 150 |          **99.81 %** |         6 |
+| **Total** |    5 579 |     5 577 |                  5 568 |          **99.84 %** |        11 |
+
+(Round 5 parser + the compiler gaps it exposed now fixed: block-pass after
+kwargs, anonymous `&`, block keyword params, `...`/`*`/`**` forwarding through
+calls and `super`, `yield(*args)`, `rescue *classes`, and `case … when *array`.)
 
 - `both-reject` (rbgo and MRI both reject): Rails 0, Puppet 2 — i.e. essentially
   every file rbgo rejects is *valid Ruby that MRI accepts*. These are genuine
   front-end gaps, not invalid input.
 - `over-permissive` (rbgo accepts, MRI rejects): **0** in both repos — rbgo never
   accepted Ruby that MRI rejected.
+
+The remaining 11 gaps are distinct features beyond this batch: rational-literal
+compilation (`2r`), nested `MultiAssign` destructuring targets, named-regexp
+capture locals (`/(?<x>…)/ =~ s` binding `x`), `begin…end until` post-loops with
+assign-in-condition, and 2 parser-level gaps in Puppet.
 
 The gap is dominated by a *small number of very common constructs*. The single
 top construct (the `::` scope-resolution operator) blocks **2 723 files** — about
