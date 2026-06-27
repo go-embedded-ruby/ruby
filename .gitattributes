@@ -1,0 +1,5 @@
+# Embedded Ruby + all source is LF so the //go:embed prelude parses identically
+# on every OS (Windows checkout must not CRLF-convert it: the lexer line-continuation
+# "\\" + CRLF would otherwise break).
+*.rb text eol=lf
+*.go text eol=lf
