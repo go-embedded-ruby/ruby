@@ -72,6 +72,10 @@ func (vm *VM) bootstrap() {
 	vm.registerRequire()
 	vm.registerSingleton()
 	vm.registerMethod()
+	vm.registerModuleExtras()
+	vm.registerReflection()
+	vm.registerVersionConstants()
+	vm.registerKernelIntrospection()
 	vm.registerEncoding()
 	vm.registerStringEncoding()
 	vm.registerJSBridge() // browser DOM/Canvas access (wasm only; a no-op natively)
@@ -589,6 +593,26 @@ func (vm *VM) bootstrap() {
 		return vm.classEval(self.(*RClass), blk, args)
 	})
 	vm.cModule.define("define_method", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		cls := self.(*RClass)
+		name := nameArg(args[0])
+		// A Method / UnboundMethod second argument transplants that method's body
+		// under the new name and owner (Ruby allows define_method(:m, other_method)).
+		if len(args) > 1 {
+			switch src := args[1].(type) {
+			case *BoundMethod:
+				cm := *src.m
+				cm.name, cm.owner = name, cls
+				cls.methods[name] = &cm
+				bumpMethodSerial()
+				return object.Symbol(name)
+			case *UnboundMethod:
+				cm := *src.m
+				cm.name, cm.owner = name, cls
+				cls.methods[name] = &cm
+				bumpMethodSerial()
+				return object.Symbol(name)
+			}
+		}
 		body := blk
 		if body == nil {
 			if len(args) > 1 {
@@ -601,8 +625,7 @@ func (vm *VM) bootstrap() {
 				raise("ArgumentError", "tried to create a method without a block")
 			}
 		}
-		name := args[0].ToS()
-		self.(*RClass).methods[name] = &Method{name: name, proc: body, owner: self.(*RClass)}
+		cls.methods[name] = &Method{name: name, proc: body, owner: cls}
 		bumpMethodSerial()
 		return object.Symbol(name)
 	})

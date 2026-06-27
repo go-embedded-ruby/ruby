@@ -87,8 +87,10 @@ func (vm *VM) lookupCached(ic *inlineCache, recv object.Value, name string) *Met
 	c := vm.classOf(recv)
 	// An object with a singleton class can carry per-object methods, so its
 	// dispatch must not be cached against the shared class — resolve it directly.
-	if o, ok := recv.(*RObject); ok && o.singleton != nil {
-		return undefAsNil(lookupMethod(o.singleton, name))
+	// This covers both *RObject (inline singleton) and builtin-backed values that
+	// were extend-ed / given a singleton method via the side table.
+	if sc := vm.objSingleton(recv); sc != nil {
+		return undefAsNil(lookupMethod(sc, name))
 	}
 	serial := methodSerial()
 	if ic.class == c && ic.serial == serial {

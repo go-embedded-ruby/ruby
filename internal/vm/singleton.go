@@ -21,36 +21,44 @@ func (vm *VM) registerSingleton() {
 			}
 		}
 		name := args[0].ToS()
-		switch t := self.(type) {
-		case *RClass:
+		if t, ok := self.(*RClass); ok {
 			t.smethods[name] = &Method{name: name, proc: body, owner: t}
-		case *RObject:
-			sc := vm.singletonClass(t)
-			sc.methods[name] = &Method{name: name, proc: body, owner: sc}
-		default:
+			bumpMethodSerial()
+			return object.Symbol(name)
+		}
+		sc, ok := vm.ensureSingleton(self)
+		if !ok {
 			raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(self).name)
 		}
+		sc.methods[name] = &Method{name: name, proc: body, owner: sc}
+		bumpMethodSerial()
 		return object.Symbol(name)
 	})
 
 	vm.cObject.define("extend", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
 		for _, a := range args {
 			mod, ok := a.(*RClass)
 			if !ok {
 				raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(a))
 			}
-			switch t := self.(type) {
-			case *RObject:
-				sc := vm.singletonClass(t)
-				sc.includes = append(sc.includes, mod)
-			case *RClass:
+			if t, ok := self.(*RClass); ok {
 				// C.extend(M): M's instance methods become class methods of C.
 				for n, m := range mod.methods {
 					t.smethods[n] = m
 				}
-			default:
-				raise("TypeError", "can't extend a %s", vm.classOf(self).name)
+			} else {
+				// Any other object (incl. builtin-backed Array/String/… such as
+				// $LOAD_PATH) mixes the module into its singleton class.
+				sc, ok := vm.ensureSingleton(self)
+				if !ok {
+					raise("TypeError", "can't extend a %s", vm.classOf(self).name)
+				}
+				sc.includes = append(sc.includes, mod)
 			}
+			bumpMethodSerial()
 			// Hook: module.extended(object), if the module defines it.
 			if hook := lookupSMethod(mod, "extended"); hook != nil {
 				vm.invoke(hook, mod, []object.Value{self}, nil)

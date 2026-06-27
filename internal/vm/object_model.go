@@ -99,6 +99,7 @@ type RClass struct {
 	prepends []*RClass               // modules mixed in via prepend (most recent last), ahead of own methods
 	isModule bool
 	meta     *RClass // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
+	funcMode bool    // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
 }
 
 func newClass(name string, super *RClass) *RClass {
@@ -140,6 +141,55 @@ func (vm *VM) singletonClass(o *RObject) *RClass {
 	return o.singleton
 }
 
+// objSingleton returns the existing per-object singleton class for any value, or
+// nil. For *RObject it is the inline field; for other reference values it is the
+// side-table entry. Immediate values never have one.
+func (vm *VM) objSingleton(v object.Value) *RClass {
+	if o, ok := v.(*RObject); ok {
+		return o.singleton
+	}
+	if vm.extSingletons == nil {
+		return nil
+	}
+	return vm.extSingletons[v]
+}
+
+// ensureSingleton returns v's singleton class, creating it on first use. It
+// handles *RObject (inline field) and other reference values (side table). A
+// second bool reports success; immediate values (Integer/Symbol/true/false/nil)
+// and classes/modules (which use a metaclass instead) are not eligible here.
+func (vm *VM) ensureSingleton(v object.Value) (*RClass, bool) {
+	switch t := v.(type) {
+	case *RObject:
+		return vm.singletonClass(t), true
+	case *RClass:
+		return nil, false // classes use metaClass()
+	}
+	if !hasIdentitySingleton(v) {
+		return nil, false
+	}
+	if vm.extSingletons == nil {
+		vm.extSingletons = map[object.Value]*RClass{}
+	}
+	if sc := vm.extSingletons[v]; sc != nil {
+		return sc, true
+	}
+	sc := newClass("", vm.classOf(v))
+	vm.extSingletons[v] = sc
+	return sc, true
+}
+
+// hasIdentitySingleton reports whether v is a reference value that can carry a
+// side-table singleton class. Immediate / value-semantics types cannot.
+func hasIdentitySingleton(v object.Value) bool {
+	switch v.(type) {
+	case object.Integer, *object.Bignum, object.Float, object.Symbol,
+		object.Bool, object.Nil:
+		return false
+	}
+	return true
+}
+
 // metaClass returns the metaclass of a class/module — the class whose method
 // table holds c's class methods (def self.foo). Its methods map aliases c's
 // smethods map, so methods defined into the metaclass become c's class methods
@@ -158,14 +208,10 @@ func (c *RClass) metaClass() *RClass {
 // singleton (meta) class. A second bool reports success; an immediate value
 // (Integer, Symbol, true/false/nil, …) has no singleton class in MRI.
 func (vm *VM) singletonDefinee(target object.Value) (*RClass, bool) {
-	switch t := target.(type) {
-	case *RClass:
-		return t.metaClass(), true
-	case *RObject:
-		return vm.singletonClass(t), true
-	default:
-		return nil, false
+	if c, ok := target.(*RClass); ok {
+		return c.metaClass(), true
 	}
+	return vm.ensureSingleton(target)
 }
 
 func (o *RObject) ToS() string {
@@ -385,6 +431,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cProc
 	case *BoundMethod:
 		return vm.cMethod
+	case *UnboundMethod:
+		return vm.consts["UnboundMethod"].(*RClass)
 	case *Enumerator:
 		return vm.cEnumerator
 	case *yielder:
@@ -438,8 +486,8 @@ func (vm *VM) findMethod(recv object.Value, name string) *Method {
 		}
 	}
 	c := vm.classOf(recv)
-	if o, ok := recv.(*RObject); ok && o.singleton != nil {
-		c = o.singleton
+	if sc := vm.objSingleton(recv); sc != nil {
+		c = sc
 	}
 	if m := lookupMethod(c, name); m != nil && !m.undefined {
 		return m
@@ -458,8 +506,8 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 	c := vm.classOf(recv)
 	// An object with a singleton class dispatches through it first (per-object
 	// methods + extended modules), then its class chain (the singleton's super).
-	if o, ok := recv.(*RObject); ok && o.singleton != nil {
-		c = o.singleton
+	if sc := vm.objSingleton(recv); sc != nil {
+		c = sc
 	}
 	if m := lookupMethod(c, name); m != nil && !m.undefined {
 		return vm.invoke(m, recv, args, blk)

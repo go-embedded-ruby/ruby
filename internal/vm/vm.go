@@ -147,6 +147,21 @@ type VM struct {
 	// the counter for the next reference id. Lazily initialised; GVL-guarded.
 	objIDs    map[object.Value]int64
 	nextObjID int64
+
+	// extSingletons holds per-object singleton classes for reference values that
+	// are not *RObject (Array, String, Hash, Proc, …) — the backing for
+	// extend/singleton_class/define_singleton_method on builtin-backed objects
+	// such as $LOAD_PATH. Keyed by object identity; GVL-guarded.
+	extSingletons map[object.Value]*RClass
+
+	// atExit holds Kernel#at_exit blocks, run in LIFO order when Run completes
+	// normally. GVL-guarded.
+	atExit []*Proc
+
+	// frameNames is the running method-name stack (innermost last), maintained by
+	// exec for Kernel#__method__ and #caller. GVL-guarded (VM code is serialized
+	// by the GVL).
+	frameNames []string
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the
@@ -282,13 +297,19 @@ func (vm *VM) SetConst(name string, v object.Value) { vm.consts[name] = v }
 func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
+			// An exception unwinding past one or more exec frames leaves their
+			// frameNames entries unpopped; reset the stack so a later top-level
+			// statement (rescued program, REPL line) starts clean.
+			vm.frameNames = vm.frameNames[:0]
 			if sig, ok := r.(throwSignal); ok {
 				r = RubyError{Class: "UncaughtThrowError", Message: "uncaught throw " + sig.tag.Inspect()}
 			}
 			result, err = nil, r.(RubyError)
 		}
 	}()
-	return vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil), nil
+	res := vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil)
+	vm.runAtExit()
+	return res, nil
 }
 
 // exec runs one ISeq. definee is the class that `def` targets in this frame;
@@ -419,6 +440,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			env.slots[iseq.BlockSlot] = object.NilV
 		}
 	}
+
+	// Record this frame's method name for Kernel#caller (best-effort backtrace).
+	// A real method frame has a non-empty name; top-level/class/block bodies push
+	// "" so the depth still lines up. The entry is popped on normal completion;
+	// an exception unwinding past here is reset wholesale at the Run boundary.
+	vm.frameNames = append(vm.frameNames, methodName)
 
 	stack := vm.getStack()
 	push := func(v object.Value) { stack = append(stack, v) }
@@ -671,6 +698,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					m.compiled = compiledFor(definee.name, name)
 				}
 				definee.methods[name] = m
+				// In module_function (no-arg) mode, a copy of the freshly defined
+				// method also becomes a module/singleton method, so M.name works.
+				if definee.funcMode {
+					sm := *m
+					definee.smethods[name] = &sm
+				}
 				bumpMethodSerial() // a (re)definition can change what a cached send resolves to
 				// Hook: definee.method_added(:name) for instance-method defs, if
 				// the class/module defines the hook (singleton method).
@@ -808,6 +841,58 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(object.Bool(match))
 			case bytecode.OpBlockGiven:
 				push(object.Bool(block != nil))
+			case bytecode.OpDefinedConst:
+				if _, ok := vm.consts[iseq.Names[in.A]]; ok {
+					push(definedTag("constant"))
+				} else {
+					push(object.NilV)
+				}
+			case bytecode.OpDefinedScopedConst:
+				name := iseq.Names[in.A]
+				recv := pop()
+				cls, ok := recv.(*RClass)
+				if ok && vm.hasScopedConst(cls, name) {
+					push(definedTag("constant"))
+				} else {
+					push(object.NilV)
+				}
+			case bytecode.OpDefinedIvar:
+				name := iseq.Names[in.A]
+				if t := ivarTable(self); t != nil {
+					if _, ok := t[name]; ok {
+						push(definedTag("instance-variable"))
+						break
+					}
+				}
+				push(object.NilV)
+			case bytecode.OpDefinedCVar:
+				name := iseq.Names[in.A]
+				if definee != vm.cObject && cvarOwner(definee, name) != nil {
+					push(definedTag("class variable"))
+				} else {
+					push(object.NilV)
+				}
+			case bytecode.OpDefinedGVar:
+				if vm.gvarDefined(iseq.Names[in.A]) {
+					push(definedTag("global-variable"))
+				} else {
+					push(object.NilV)
+				}
+			case bytecode.OpDefinedMethod:
+				recv := pop()
+				if vm.respondsTo(recv, iseq.Names[in.A]) {
+					push(definedTag("method"))
+				} else {
+					push(object.NilV)
+				}
+			case bytecode.OpDefinedYield:
+				if block != nil {
+					push(definedTag("yield"))
+				} else {
+					push(object.NilV)
+				}
+			case bytecode.OpDefinedGuard:
+				push(vm.runDefinedGuard(iseq.Children[in.A], self, definee, env, block))
 			case bytecode.OpBinding:
 				markEnvCaptured(env)
 				push(&Binding{env: env, self: self, definee: definee, names: append([]string(nil), iseq.Locals...)})
@@ -949,6 +1034,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// skips recycling and leaves both to the GC — correct, just not pooled.
 	vm.putEnv(env)
 	vm.putStack(stack)
+	vm.frameNames = vm.frameNames[:len(vm.frameNames)-1]
 	return result
 }
 

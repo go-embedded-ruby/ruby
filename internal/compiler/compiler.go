@@ -738,6 +738,12 @@ func isAnonKwSplat(h *ast.HashLit) bool {
 
 func (c *Compiler) compileCall(v *ast.Call) {
 	b := c.cur()
+	// defined? is an operator, not a method: it inspects its operand's syntactic
+	// kind without evaluating it for value, so it is lowered specially.
+	if v.Recv == nil && v.Block == nil && v.Name == "defined?" && len(v.Args) == 1 {
+		c.compileDefined(v.Args[0])
+		return
+	}
 	if fwdAt := forwardIndex(v.Args); fwdAt >= 0 {
 		c.compileForwardCall(v, fwdAt)
 		return
