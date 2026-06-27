@@ -64,6 +64,10 @@ type Proc struct {
 	native      func(vm *VM, args []object.Value) object.Value
 	nativeArity int
 	isLambda    bool // true for lambda { } / ->(){}: backs Proc#lambda?
+	// cref is the lexical scope (enclosing class/module) where this block literal
+	// was written, so a bare constant inside the block resolves by the same
+	// lexical nesting as the surrounding method/class body. nil means top level.
+	cref *RClass
 }
 
 func (p *Proc) ToS() string     { return "#<Proc>" }
@@ -97,17 +101,35 @@ type RClass struct {
 	ivars    map[string]object.Value // the class object's OWN instance variables (@name with self = the class)
 	includes []*RClass               // modules mixed in via include (most recent last)
 	prepends []*RClass               // modules mixed in via prepend (most recent last), ahead of own methods
+	// lexParent is the lexically-enclosing class/module this one was defined in
+	// (its Module.nesting parent), used to resolve bare constants by lexical
+	// scope. nil for top-level definitions and for anonymous classes that have
+	// no lexical home. cObject's lexParent is nil (it terminates the chain).
+	lexParent *RClass
+	// named reports whether this class/module has acquired a permanent name yet.
+	// An anonymous class (Class.new / Module.new) starts unnamed; the first time
+	// it is assigned to a constant it takes that constant's qualified name.
+	named    bool
 	isModule bool
 	meta     *RClass // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
 	funcMode bool    // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
 }
 
 func newClass(name string, super *RClass) *RClass {
-	return &RClass{name: name, super: super, methods: map[string]*Method{}, smethods: map[string]*Method{}, consts: map[string]object.Value{}, cvars: map[string]object.Value{}, ivars: map[string]object.Value{}}
+	return &RClass{name: name, super: super, named: name != "", methods: map[string]*Method{}, smethods: map[string]*Method{}, consts: map[string]object.Value{}, cvars: map[string]object.Value{}, ivars: map[string]object.Value{}}
 }
 
-func (c *RClass) ToS() string     { return c.name }
-func (c *RClass) Inspect() string { return c.name }
+func (c *RClass) ToS() string {
+	if c.name != "" {
+		return c.name
+	}
+	// Anonymous class/module: MRI renders #<Class:0x...> / #<Module:0x...>.
+	if c.isModule {
+		return "#<Module>"
+	}
+	return "#<Class>"
+}
+func (c *RClass) Inspect() string { return c.ToS() }
 func (c *RClass) Truthy() bool    { return true }
 
 // define installs a native method on the class.
@@ -248,21 +270,70 @@ func lookupMethod(c *RClass, name string) *Method {
 	return nil
 }
 
-// scopedConst resolves Recv::name. It searches the class/module's own constant
-// table up the superclass chain; failing that it falls back to the global
-// constant table (constants are currently stored flat there), so both a native
-// module constant like Math::PI and a user Foo::BAR resolve.
-func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
-	for c := cls; c != nil; c = c.super {
+// constInAncestors searches name in cls's own constant table and up its ancestor
+// chain (superclass chain plus each ancestor's included modules), as Ruby's
+// scoped constant lookup does. Object/BasicObject are skipped for a non-Object
+// receiver so that Recv::Foo does not leak top-level constants in through the
+// implicit Object ancestor — matching MRI, where Foo::Bar only inherits a
+// top-level constant when Foo itself is Object.
+func (vm *VM) constInAncestors(cls *RClass, name string) (object.Value, bool) {
+	for _, c := range vm.ancestors(cls) {
+		if c == vm.cObject || c == vm.cBasicObject {
+			if cls != vm.cObject && cls != vm.cBasicObject {
+				continue
+			}
+		}
 		if v, ok := c.consts[name]; ok {
-			return v
+			return v, true
 		}
 	}
-	if v, ok := vm.consts[name]; ok {
+	return nil, false
+}
+
+// scopedConst resolves Recv::name (OpGetScopedConst, const_get): the class or
+// module's own constant table, then its ancestors. It no longer falls back to
+// the flat top-level table, so M::File is distinct from the top-level File.
+func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
+	if v, ok := vm.constInAncestors(cls, name); ok {
 		return v
 	}
-	raise("NameError", "uninitialized constant %s::%s", cls.name, name)
+	raise("NameError", "uninitialized constant %s::%s", cls.ToS(), name)
 	return object.NilV
+}
+
+// nesting returns the lexical nesting list for a cref (Module.nesting): the cref
+// itself followed by each enclosing lexParent, innermost first. cObject (which
+// terminates the lexParent chain) is not part of nesting.
+func (vm *VM) nesting(cref *RClass) []*RClass {
+	var out []*RClass
+	for c := cref; c != nil && c != vm.cObject; c = c.lexParent {
+		out = append(out, c)
+	}
+	return out
+}
+
+// resolveConst implements Ruby's bare-constant lookup for OpGetConst, using cref
+// as the current lexical scope: (1) the lexical nesting (cref and its enclosing
+// lexParents), then (2) the innermost lexical scope's ancestors, then (3) the
+// top-level (Object's table). This preserves lexical access to an outer
+// constant while giving each class/module its own namespace.
+func (vm *VM) resolveConst(cref *RClass, name string) (object.Value, bool) {
+	for _, c := range vm.nesting(cref) {
+		if v, ok := c.consts[name]; ok {
+			return v, true
+		}
+	}
+	// Ancestors of the innermost lexical class/module (and Object's own table is
+	// reached as Object is every class's ancestor, covering the top level).
+	if cref != nil {
+		if v, ok := vm.constInAncestors(cref, name); ok {
+			return v, true
+		}
+	}
+	if v, ok := vm.cObject.consts[name]; ok {
+		return v, true
+	}
+	return nil, false
 }
 
 // checkCVarScope rejects class-variable access whose lexical class is Object —
@@ -658,7 +729,17 @@ func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) obj
 	if p.native != nil {
 		return p.native(vm, args)
 	}
-	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.cObject, "", p.env, p.block, p)
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p)
+}
+
+// blockDefinee returns the definee a block body runs with: the block's captured
+// lexical scope (so bare constants resolve by the surrounding nesting), or Object
+// at the top level.
+func (vm *VM) blockDefinee(p *Proc) *RClass {
+	if p.cref != nil {
+		return p.cref
+	}
+	return vm.cObject
 }
 
 // callProcMethod invokes a proc that is the body of a define_method /
@@ -674,7 +755,7 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 	if blk != nil {
 		body = blk
 	}
-	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.cObject, "", p.env, body, p)
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, p)
 }
 
 // classEval runs a block as class_eval/module_eval would: self and the method

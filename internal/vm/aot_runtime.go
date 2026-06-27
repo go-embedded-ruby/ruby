@@ -6,9 +6,11 @@ import "github.com/go-embedded-ruby/ruby/internal/object"
 // the corresponding interpreter opcode so compiled and interpreted code behave
 // identically; they live here so the generated Go can stay terse.
 
-// aotConst backs OpGetConst: a constant lookup that raises NameError when unset.
+// aotConst backs OpGetConst in AOT-compiled bodies: a top-level (Object)
+// constant lookup that raises NameError when unset. AOT lowering is closed-world
+// and runs at top-level scope, so lexical nesting is not threaded here.
 func (vm *VM) aotConst(name string) object.Value {
-	v, ok := vm.consts[name]
+	v, ok := vm.cObject.consts[name]
 	if !ok {
 		raise("NameError", "uninitialized constant %s", name)
 	}

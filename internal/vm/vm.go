@@ -600,7 +600,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				setIvar(self, iseq.Names[in.A], stack[len(stack)-1])
 			case bytecode.OpGetConst:
 				name := iseq.Names[in.A]
-				v, ok := vm.consts[name]
+				v, ok := vm.resolveConst(definee, name)
+				if !ok {
+					raise("NameError", "uninitialized constant %s", name)
+				}
+				push(v)
+			case bytecode.OpGetConstTop:
+				// Leading `::Name`: top-level only, ignoring lexical nesting.
+				name := iseq.Names[in.A]
+				v, ok := vm.cObject.consts[name]
 				if !ok {
 					raise("NameError", "uninitialized constant %s", name)
 				}
@@ -623,11 +631,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if !ok {
 					raise("TypeError", "%s is not a class/module", recv.Inspect())
 				}
-				cls.consts[iseq.Names[in.A]] = val
+				vm.assignConstIn(cls, iseq.Names[in.A], val)
 				push(val)
 			case bytecode.OpSetConst:
-				// Assignment is an expression: set the constant, keep its value.
-				vm.consts[iseq.Names[in.A]] = stack[len(stack)-1]
+				// Assignment is an expression: set the constant in the current
+				// lexical scope (the definee's table; top-level writes land in
+				// Object's table, which vm.consts aliases), keep its value.
+				vm.assignConst(definee, iseq.Names[in.A], stack[len(stack)-1])
 			case bytecode.OpGetGVar:
 				push(vm.gvar(iseq.Names[in.A]))
 			case bytecode.OpSetGVar:
@@ -736,7 +746,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					recv := pop()
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -804,9 +814,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				vm.undefMethod(definee, iseq.Names[in.A])
 				push(object.NilV)
 			case bytecode.OpDefineClass:
-				push(vm.defineClass(iseq.Names[in.A], iseq.Children[in.B]))
+				// Bare `class B` nests into the current lexical scope (definee).
+				push(vm.defineClassIn(definee, iseq.Names[in.A], iseq.Children[in.B], nil))
 			case bytecode.OpDefineModule:
-				push(vm.defineModule(iseq.Names[in.A], iseq.Children[in.B]))
+				push(vm.defineModuleIn(definee, iseq.Names[in.A], iseq.Children[in.B]))
 			case bytecode.OpDefineClassScoped:
 				// C flags: bit 0 = parent on stack, bit 1 = super-expr on stack.
 				// They were pushed parent-then-super, so pop super first.
@@ -814,7 +825,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if in.C&2 != 0 {
 					superExpr = pop()
 				}
-				var parent *RClass
+				parent := definee // bare name nests into the lexical scope
 				if in.C&1 != 0 {
 					parent = vm.asModuleParent(pop())
 				}
@@ -826,7 +837,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee}
 				}
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the frame's own arguments
@@ -849,7 +860,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: definee}
 				}
 				argsArr := pop().(*object.Array)
 				push(vm.invokeSuper(self, definee, methodName, argsArr.Elems, superBlk))
@@ -901,7 +912,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpBlockGiven:
 				push(object.Bool(block != nil))
 			case bytecode.OpDefinedConst:
-				if _, ok := vm.consts[iseq.Names[in.A]]; ok {
+				if _, ok := vm.resolveConst(definee, iseq.Names[in.A]); ok {
+					push(definedTag("constant"))
+				} else {
+					push(object.NilV)
+				}
+			case bytecode.OpDefinedConstTop:
+				if _, ok := vm.cObject.consts[iseq.Names[in.A]]; ok {
 					push(definedTag("constant"))
 				} else {
 					push(object.NilV)
@@ -1039,7 +1056,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee}
 				}
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:
@@ -1097,16 +1114,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	return result
 }
 
-// defineClass creates or reopens a class, runs its body with self = the class,
-// and returns the body's value. It is the bare top-level form; scoped paths and
-// expression superclasses go through defineClassIn.
-func (vm *VM) defineClass(name string, body *bytecode.ISeq) object.Value {
-	return vm.defineClassIn(nil, name, body, nil)
-}
-
 // constTable returns the constant table a const name is defined into for the
 // given lexical parent: the parent class/module's own table, or the global
-// top-level table when parent is nil.
+// top-level table (Object's, which vm.consts aliases) when parent is nil.
 func (vm *VM) constTable(parent *RClass) map[string]object.Value {
 	if parent == nil {
 		return vm.consts
@@ -1114,20 +1124,56 @@ func (vm *VM) constTable(parent *RClass) map[string]object.Value {
 	return parent.consts
 }
 
-// scopedName qualifies a constant name with its lexical parent, so a nested
-// class reports its full `Parent::Name` (matching MRI).
-func scopedName(parent *RClass, name string) string {
-	if parent == nil || parent.name == "" {
+// assignConst sets a bare constant assignment (`NAME = value`) into the current
+// lexical scope's table. A nil definee (defensive) or Object writes top-level.
+func (vm *VM) assignConst(definee *RClass, name string, val object.Value) {
+	scope := definee
+	if scope == nil {
+		scope = vm.cObject
+	}
+	vm.assignConstIn(scope, name, val)
+}
+
+// assignConstIn sets name in scope's constant table and, if val is an anonymous
+// class/module, gives it the qualified name of the constant it is bound to
+// (Ruby's "assign a permanent name on first constant binding" rule).
+func (vm *VM) assignConstIn(scope *RClass, name string, val object.Value) {
+	scope.consts[name] = val
+	if c, ok := val.(*RClass); ok && !c.named {
+		c.name = scopedNameFor(scope, name)
+		c.named = true
+		c.lexParent = lexParentFor(scope)
+	}
+}
+
+// lexParentFor returns the lexParent to record for a class/module nested in
+// scope: scope itself, except Object (the top level), which terminates the
+// chain as nil.
+func lexParentFor(scope *RClass) *RClass {
+	if scope == nil {
+		return nil
+	}
+	if scope.name == "Object" && !scope.isModule {
+		return nil
+	}
+	return scope
+}
+
+// scopedNameFor qualifies name with scope's name (Scope::Name), or returns name
+// unqualified at the top level (Object) or when scope is anonymous.
+func scopedNameFor(scope *RClass, name string) string {
+	if scope == nil || scope.name == "" || (scope.name == "Object" && !scope.isModule) {
 		return name
 	}
-	return parent.name + "::" + name
+	return scope.name + "::" + name
 }
 
 // defineClassIn creates or reopens a class named `name` in `parent`'s constant
-// table (the global table when parent is nil). superExpr, when non-nil, is the
-// evaluated superclass value (a `::`-path or other expression); otherwise
-// body.Super (a bare name) is consulted. It runs the class body with self = the
-// class and returns the body's value.
+// table (the top-level/Object table when parent is nil or Object). superExpr,
+// when non-nil, is the evaluated superclass value (a `::`-path or other
+// expression); otherwise body.Super (a bare name) is consulted. It records the
+// class's fully-qualified name and lexical parent on first creation, runs the
+// class body with self = the class, and returns the body's value.
 func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, superExpr object.Value) object.Value {
 	table := vm.constTable(parent)
 	var class *RClass
@@ -1147,13 +1193,14 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			}
 			super = sc
 		case body.Super != "":
-			sc, ok := vm.consts[body.Super]
+			sc, ok := vm.resolveConst(parent, body.Super)
 			if !ok {
 				raise("NameError", "uninitialized constant %s", body.Super)
 			}
 			super = sc.(*RClass)
 		}
-		class = newClass(scopedName(parent, name), super)
+		class = newClass(scopedNameFor(parent, name), super)
+		class.lexParent = lexParentFor(parent)
 		table[name] = class
 		// Hook: superclass.inherited(subclass), fired when the class is created
 		// (before its body runs) if the superclass defines the hook.
@@ -1164,15 +1211,10 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 	return vm.exec(body, class, nil, class, "", nil, nil, nil)
 }
 
-// defineModule creates or reopens a module and runs its body with self = the
-// module.
-func (vm *VM) defineModule(name string, body *bytecode.ISeq) object.Value {
-	return vm.defineModuleIn(nil, name, body)
-}
-
 // defineModuleIn creates or reopens a module named `name` in `parent`'s constant
-// table (the global table when parent is nil), runs its body with self = the
-// module, and returns the body's value.
+// table (the top-level/Object table when parent is nil or Object), recording its
+// qualified name and lexical parent on first creation, runs its body with self =
+// the module, and returns the body's value.
 func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq) object.Value {
 	table := vm.constTable(parent)
 	var mod *RClass
@@ -1183,8 +1225,9 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq) o
 			raise("TypeError", "%s is not a module", name)
 		}
 	} else {
-		mod = newClass(scopedName(parent, name), nil)
+		mod = newClass(scopedNameFor(parent, name), nil)
 		mod.isModule = true
+		mod.lexParent = lexParentFor(parent)
 		table[name] = mod
 	}
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil)

@@ -113,6 +113,11 @@ const (
 	OpDefinedMethod      // A = Names index; pops a receiver, "method" if it responds to name, else nil
 	OpDefinedYield       // "yield" if a block was passed to the current method, else nil
 	OpDefinedGuard       // A = Children index; runs the child ISeq; any raise inside maps to nil
+
+	// Added after the original opcode block to preserve existing opcode numbers
+	// (and the frozen prelude bytecode).
+	OpGetConstTop     // A = Names index; leading `::Name` — top-level (Object) constant only, ignoring lexical nesting
+	OpDefinedConstTop // A = Names index; "constant" if the top-level `::Name` exists, else nil
 )
 
 var opNames = map[Op]string{
@@ -150,6 +155,8 @@ var opNames = map[Op]string{
 	OpDefinedMethod:      "defined_method",
 	OpDefinedYield:       "defined_yield",
 	OpDefinedGuard:       "defined_guard",
+	OpGetConstTop:        "get_const_top",
+	OpDefinedConstTop:    "defined_const_top",
 }
 
 func (o Op) String() string {

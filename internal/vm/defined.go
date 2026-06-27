@@ -10,15 +10,10 @@ import (
 // object from defined?; callers never mutate it.
 func definedTag(tag string) object.Value { return object.NewString(tag) }
 
-// hasScopedConst reports whether cls (or its superclass chain, or the flat
-// top-level table fallback) defines name — the non-raising form of scopedConst.
+// hasScopedConst reports whether cls or its ancestors define name — the
+// non-raising form of scopedConst (used by defined?(A::B)).
 func (vm *VM) hasScopedConst(cls *RClass, name string) bool {
-	for c := cls; c != nil; c = c.super {
-		if _, ok := c.consts[name]; ok {
-			return true
-		}
-	}
-	_, ok := vm.consts[name]
+	_, ok := vm.constInAncestors(cls, name)
 	return ok
 }
 

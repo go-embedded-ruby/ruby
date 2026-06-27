@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-embedded-ruby/ruby/internal/object"
 	"github.com/go-ruby-parser/parser/ast"
 )
 
@@ -151,6 +152,36 @@ func TestAnonKwSplatForwardOutsideMethod(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "anonymous argument forwarding") {
 		t.Fatalf("expected an anonymous-argument-forwarding error, got %v", err)
 	}
+}
+
+// compileDefinedCall tags a receiver-less, argument-less, block-less call as
+// "local-variable" when the name resolves to a local in scope. The parser
+// classifies a bare known local as a *ast.VarRef, so the Call shape that lands
+// in compileDefinedCall and still resolves to a local (e.g. `foo()` after
+// `foo = 1`) is synthesized directly to drive that arm.
+func TestCompileDefinedCallLocal(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Assign{Name: "foo", Value: &ast.IntLit{Value: 1}},
+		&ast.Call{Name: "defined?", Args: []ast.Node{
+			&ast.Call{Name: "foo"},
+		}},
+	}}
+	iseq, err := Compile(prog)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !iseqHasStringConst(iseq, "local-variable") {
+		t.Fatalf("expected a \"local-variable\" tag in the constant pool, got %#v", iseq.Consts)
+	}
+}
+
+func iseqHasStringConst(iseq *bytecode.ISeq, want string) bool {
+	for _, c := range iseq.Consts {
+		if s, ok := c.(*object.String); ok && string(s.B) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompileEmptyProgram(t *testing.T) {
