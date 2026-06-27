@@ -8,6 +8,8 @@ package compiler
 
 import (
 	"fmt"
+	"math/big"
+	"strconv"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -220,6 +222,12 @@ func (c *Compiler) compileNode(n ast.Node) {
 		b.emit(bytecode.OpPushConst, b.addConst(&object.Bignum{I: v.Val}), 0)
 	case *ast.FloatLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.Float(v.Value)), 0)
+	case *ast.RationalLit:
+		b.emit(bytecode.OpPushConst, b.addConst(rationalValue(v.Value)), 0)
+	case *ast.ImaginaryLit:
+		// `Ni` is Complex(0, N): the imaginary part is the promoted literal (an
+		// Integer/Float, or a Rational for the combined `ri` form).
+		b.emit(bytecode.OpPushConst, b.addConst(&object.Complex{Re: object.Integer(0), Im: numericValue(v.Value)}), 0)
 	case *ast.StringLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.NewString(v.Value)), 0)
 	case *ast.StrInterp:
@@ -310,24 +318,16 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpNewArray, len(v.Values), 0)
 		}
 		b.emit(bytecode.OpDup, 0, 0) // keep the array as the expression's value
-		pre, post, splat := len(v.Names), 0, 0
-		if v.SplatIndex >= 0 {
-			pre = v.SplatIndex
-			post = len(v.Names) - v.SplatIndex - 1
-			splat = 1
-		}
-		at := b.emit(bytecode.OpExpandArray, pre, post)
-		b.insns[at].C = splat
-		// OpExpandArray pushed the target values with the first target's on top;
-		// store each (each store opcode leaves the value, so pop it).
-		for i := range v.Names {
-			if v.Targets != nil {
-				c.storeMultiTarget(v.Targets[i])
-			} else {
-				c.storeLocal(v.Names[i])
-			}
+		if nested, ok := soleGroupTarget(v); ok {
+			// `(a, b) = rhs`: the whole RHS array flows into the single grouped
+			// target rather than being distributed element-wise. storeMultiTarget
+			// leaves the incoming value (like every store), so pop it; the first
+			// dup'd copy stays as the assignment's result.
+			c.storeMultiTarget(nested)
 			b.emit(bytecode.OpPop, 0, 0)
+			break
 		}
+		c.expandAndStore(v.Names, v.Targets, v.SplatIndex)
 	case *ast.Begin:
 		c.compileBegin(v)
 	case *ast.Case:
@@ -379,6 +379,14 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.BinaryExpr:
 		if v.Op == "&&" || v.Op == "||" {
 			c.compileLogical(v)
+			return
+		}
+		if v.Op == "!~" {
+			// `a !~ b` is the truthy-negation of `a =~ b`.
+			c.compileNode(v.Left)
+			c.compileNode(v.Right)
+			b.emit(bytecode.OpSend, b.addName("=~"), 1)
+			b.emit(bytecode.OpNot, 0, 0)
 			return
 		}
 		c.compileNode(v.Left)
@@ -528,6 +536,42 @@ func (c *Compiler) compileLogical(v *ast.BinaryExpr) {
 	b.patch(short, b.here())
 }
 
+// rationalValue builds the exact object.Rational a `r`-suffixed literal denotes.
+// An Integer/Bignum maps to N/1; a Float maps to the exact ratio of its *decimal*
+// literal (so `2.5r` is 5/2 and `0.1r` is 1/10, matching MRI — not the binary
+// float 3602879701896397/36028797018963968).
+func rationalValue(lit ast.Node) object.Value {
+	switch n := lit.(type) {
+	case *ast.IntLit:
+		return &object.Rational{R: new(big.Rat).SetInt64(n.Value)}
+	case *ast.BignumLit:
+		return &object.Rational{R: new(big.Rat).SetInt(n.Val)}
+	case *ast.FloatLit:
+		r, _ := new(big.Rat).SetString(strconv.FormatFloat(n.Value, 'g', -1, 64))
+		return &object.Rational{R: r}
+	default:
+		panic(fmt.Sprintf("compiler: bad rational literal %T", lit))
+	}
+}
+
+// numericValue builds the object.Value an imaginary literal's component denotes:
+// a RationalLit (the `ri` form) becomes an exact Rational, an Integer/Bignum
+// stays an integer, and a Float stays a Float.
+func numericValue(lit ast.Node) object.Value {
+	switch n := lit.(type) {
+	case *ast.RationalLit:
+		return rationalValue(n.Value)
+	case *ast.IntLit:
+		return object.Integer(n.Value)
+	case *ast.BignumLit:
+		return &object.Bignum{I: n.Val}
+	case *ast.FloatLit:
+		return object.Float(n.Value)
+	default:
+		panic(fmt.Sprintf("compiler: bad imaginary literal %T", lit))
+	}
+}
+
 // fastBinOp maps an operator to its fast-path opcode. ok is false for operators
 // that must dispatch as method calls (e.g. <=>, <<).
 func fastBinOp(op string) (bytecode.Op, bool) {
@@ -632,13 +676,73 @@ func (c *Compiler) mustResolve(name string) int {
 	return slot
 }
 
+// anonLocal returns a VarRef reading the enclosing method's anonymous-forward
+// parameter for one of the bare `*` / `**` / `&` argument markers. A bare marker
+// resolves either the explicitly anonymous param (`def f(*, **, &)`, whose locals
+// are named "*"/"**"/"&") or the `def f(...)` capture locals (...rest/...kw/...blk),
+// so forwarding works in both forms.
+func (c *Compiler) anonLocal(anon, fwd string) *ast.VarRef {
+	if _, _, ok := c.cur().resolve(anon); ok {
+		return &ast.VarRef{Name: anon}
+	}
+	if _, _, ok := c.cur().resolve(fwd); ok {
+		return &ast.VarRef{Name: fwd}
+	}
+	c.fail("anonymous argument forwarding outside a method that accepts it")
+	return nil
+}
+
+// rewriteAnonArgs replaces bare anonymous-forward markers in a call's args —
+// `*` (SplatArg with nil Value), `&` (BlockPass with nil Value), and `**` (a
+// HashLit entry with both key and value nil) — with reads of the enclosing
+// method's matching anonymous parameter, so the rest of compileCall handles them
+// as ordinary splat / block-pass / kwsplat arguments.
+func (c *Compiler) rewriteAnonArgs(args []ast.Node) []ast.Node {
+	var out []ast.Node
+	changed := false
+	for _, a := range args {
+		switch n := a.(type) {
+		case *ast.SplatArg:
+			if n.Value == nil {
+				out = append(out, &ast.SplatArg{Value: c.anonLocal("*", fwdRestName)})
+				changed = true
+				continue
+			}
+		case *ast.BlockPass:
+			if n.Value == nil {
+				out = append(out, &ast.BlockPass{Value: c.anonLocal("&", fwdBlockName)})
+				changed = true
+				continue
+			}
+		case *ast.HashLit:
+			if isAnonKwSplat(n) {
+				out = append(out, &ast.HashLit{Keys: []ast.Node{nil}, Values: []ast.Node{c.anonLocal("**", fwdKwName)}})
+				changed = true
+				continue
+			}
+		}
+		out = append(out, a)
+	}
+	if !changed {
+		return args
+	}
+	return out
+}
+
+// isAnonKwSplat reports whether a HashLit is a bare anonymous `**` forward: a
+// single entry whose key and value are both nil. (A real `**nil` has a non-nil
+// NilLit value, and `**h` a non-nil value, so neither matches.)
+func isAnonKwSplat(h *ast.HashLit) bool {
+	return len(h.Keys) == 1 && h.Keys[0] == nil && h.Values[0] == nil
+}
+
 func (c *Compiler) compileCall(v *ast.Call) {
 	b := c.cur()
 	if fwdAt := forwardIndex(v.Args); fwdAt >= 0 {
 		c.compileForwardCall(v, fwdAt)
 		return
 	}
-	callArgs := v.Args
+	callArgs := c.rewriteAnonArgs(v.Args)
 	// block_given? is a frame intrinsic, not a real dispatch.
 	if v.Recv == nil && v.Block == nil && v.Name == "block_given?" && len(callArgs) == 0 {
 		b.emit(bytecode.OpBlockGiven, 0, 0)
@@ -676,14 +780,16 @@ func (c *Compiler) compileCall(v *ast.Call) {
 			b.patch(safeBranch, b.here())
 		}
 	}
-	// A `&expr` block-pass is pulled out so the ordinary args compile cleanly and
-	// the block value lands on top. The parser places it before any trailing
-	// keyword hash, so it is not necessarily the last arg.
-	args, blockExpr, hasBlockPass := splitBlockPass(callArgs)
+	// An `&expr` block-pass is pulled out so the ordinary args compile cleanly and
+	// the block value lands on top. It is usually last, but the parser may place it
+	// before a trailing keyword hash (`g(x, &blk, k: 1)` parses with &blk not last)
+	// or after a bare `**` anonymous kwsplat (`g(*, **, &)` parses as [*, &, **]),
+	// so scan anywhere. Bare anonymous `&` was already rewritten by rewriteAnonArgs.
+	args, blockPass := extractBlockPass(callArgs)
 	if hasSplat(args) { // dynamic argument count: build an array and splat-send
 		c.compileSplatItems(args)
-		if hasBlockPass {
-			c.compileBlockPass(blockExpr)
+		if blockPass != nil {
+			c.compileNode(blockPass)
 			b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
 			patchSafe()
 			return
@@ -698,8 +804,8 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	for _, a := range args {
 		c.compileNode(a)
 	}
-	if hasBlockPass {
-		c.compileBlockPass(blockExpr)
+	if blockPass != nil {
+		c.compileNode(blockPass)
 		b.emit(bytecode.OpSendBlockArg, b.addName(v.Name), len(args))
 		patchSafe()
 		return
@@ -711,41 +817,21 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	patchSafe()
 }
 
-// splitBlockPass pulls a trailing `&expr` block-pass out of an argument list.
-// The parser places it before any trailing keyword hash (so the order in a
-// command call is `pos…, &blk, kw-hash`), so it is not always the last element;
-// scan from the end for the first BlockPass. It returns the args with the
-// block-pass removed, the passed-block expression (nil if none), and whether
-// one was found. An anonymous `&` (BlockPass with a nil Value) forwards the
-// current method's block, carried as a nil expression with found == true.
-func splitBlockPass(args []ast.Node) (rest []ast.Node, blockExpr ast.Node, found bool) {
-	for i := len(args) - 1; i >= 0; i-- {
-		if bp, ok := args[i].(*ast.BlockPass); ok {
-			rest = append(append([]ast.Node(nil), args[:i]...), args[i+1:]...)
-			return rest, bp.Value, true
+// extractBlockPass removes a `&block-pass` argument from args (wherever it sits —
+// the parser may place it before a trailing keyword hash, or after a bare `**`
+// anonymous kwsplat) and returns the remaining args plus its value node (nil when
+// there is none). Bare anonymous `&` is rewritten by rewriteAnonArgs beforehand,
+// so by the time args reach here a BlockPass always carries a non-nil Value.
+func extractBlockPass(args []ast.Node) ([]ast.Node, ast.Node) {
+	for i, a := range args {
+		if bp, ok := a.(*ast.BlockPass); ok {
+			rest := make([]ast.Node, 0, len(args)-1)
+			rest = append(rest, args[:i]...)
+			rest = append(rest, args[i+1:]...)
+			return rest, bp.Value
 		}
 	}
-	return args, nil, false
-}
-
-// anonBlockName is the local slot a bare `&` block parameter (def f(&)) binds
-// the method's block to; an anonymous `&` block-pass (g(&)) forwards it.
-const anonBlockName = "&"
-
-// compileBlockPass leaves the block value of a `&expr` block-pass on top of the
-// stack. A nil expr is the anonymous form (`g(&)`): it forwards the enclosing
-// method's block, which the `def f(&)` prologue bound to the "&" local.
-func (c *Compiler) compileBlockPass(expr ast.Node) {
-	if expr == nil {
-		b := c.cur()
-		depth, slot, ok := b.resolve(anonBlockName)
-		if !ok {
-			c.fail("anonymous block argument outside a method accepting one")
-		}
-		b.emit(bytecode.OpGetLocal, slot, depth)
-		return
-	}
-	c.compileNode(expr)
+	return args, nil
 }
 
 // hasSplat reports whether any item is a *splat.
@@ -758,30 +844,6 @@ func hasSplat(items []ast.Node) bool {
 	return false
 }
 
-// anonSplatName / anonKwRestName are the local slots a bare `*` / `**`
-// parameter (def f(*) / def f(**)) binds, which a bare `*` / `**` at a call site
-// forwards (g(*) / g(**)).
-const (
-	anonSplatName  = "*"
-	anonKwRestName = "**"
-)
-
-// compileSplatValue leaves the value of a `*expr` splat on the stack. A nil expr
-// is the anonymous form (`g(*)`): it forwards the enclosing method's bare `*`
-// parameter, bound to the "*" local.
-func (c *Compiler) compileSplatValue(expr ast.Node) {
-	if expr == nil {
-		b := c.cur()
-		depth, slot, ok := b.resolve(anonSplatName)
-		if !ok {
-			c.fail("anonymous splat argument outside a method accepting one")
-		}
-		b.emit(bytecode.OpGetLocal, slot, depth)
-		return
-	}
-	c.compileNode(expr)
-}
-
 // compileSplatItems leaves one Array on the stack holding all items, with
 // *splat elements spliced in.
 func (c *Compiler) compileSplatItems(items []ast.Node) {
@@ -789,7 +851,7 @@ func (c *Compiler) compileSplatItems(items []ast.Node) {
 	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
 	for _, it := range items {
 		if sp, ok := it.(*ast.SplatArg); ok {
-			c.compileSplatValue(sp.Value)
+			c.compileNode(sp.Value)
 			b.emit(bytecode.OpSplatToArray, 0, 0)
 		} else {
 			c.compileNode(it)
@@ -809,22 +871,6 @@ func hasHashSplat(v *ast.HashLit) bool {
 	return false
 }
 
-// compileKwSplatValue leaves the value of a `**expr` keyword-splat on the stack.
-// A nil expr is the anonymous form (`g(**)`): it forwards the enclosing method's
-// bare `**` parameter, bound to the "**" local.
-func (c *Compiler) compileKwSplatValue(expr ast.Node) {
-	if expr == nil {
-		b := c.cur()
-		depth, slot, ok := b.resolve(anonKwRestName)
-		if !ok {
-			c.fail("anonymous keyword-splat argument outside a method accepting one")
-		}
-		b.emit(bytecode.OpGetLocal, slot, depth)
-		return
-	}
-	c.compileNode(expr)
-}
-
 // compileHashWithSplat builds a Hash incrementally so that **splat entries
 // (key == nil) merge their hash in order, matching Ruby's last-wins semantics.
 func (c *Compiler) compileHashWithSplat(v *ast.HashLit) {
@@ -832,7 +878,7 @@ func (c *Compiler) compileHashWithSplat(v *ast.HashLit) {
 	b.emit(bytecode.OpNewHash, 0, 0) // accumulator
 	for i, k := range v.Keys {
 		if k == nil { // **splat
-			c.compileKwSplatValue(v.Values[i])
+			c.compileNode(v.Values[i])
 			b.emit(bytecode.OpHashMerge, 0, 0)
 			continue
 		}
@@ -1046,7 +1092,10 @@ func (c *Compiler) compileSingletonClass(v *ast.SingletonClassDef) {
 func (c *Compiler) compileSuper(v *ast.Super) {
 	b := c.cur()
 	if v.Forward {
-		b.emit(bytecode.OpInvokeSuper, 0, 1) // forward the frame's own args
+		at := b.emit(bytecode.OpInvokeSuper, 0, 1) // forward the frame's own args
+		if v.Block != nil {                        // bare `super { … }`: forward args, pass an explicit block
+			b.insns[at].C = c.compileBlock(v.Block) + 1
+		}
 		return
 	}
 	// `super(..., ...)`: splice the enclosing def(...)'s captured positionals,
@@ -1060,27 +1109,36 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 		return
 	}
 	// Pull a &block-pass off so the positional args compile cleanly; the block
-	// value (if any) lands on top of the args array. The parser places it before
-	// any trailing keyword hash, so it is not necessarily the last arg.
-	args, blockExpr, hasBlockPass := splitBlockPass(v.Args)
+	// value (if any) lands on top of the args array. It may sit before a trailing
+	// keyword hash, so extractBlockPass scans anywhere; bare anonymous `&`/`*`/`**`
+	// are rewritten to reads of the enclosing method's anonymous params first.
+	args, blockPass := extractBlockPass(c.rewriteAnonArgs(v.Args))
 	// A splat (or a block-pass) means a dynamic argument count: build the args as
 	// an Array and dispatch super from it (kwargs ride along as the trailing hash,
 	// exactly as in a normal call).
-	if hasBlockPass || hasSplat(args) {
+	if blockPass != nil || hasSplat(args) {
 		c.compileSplatItems(args)
-		if hasBlockPass {
-			c.compileBlockPass(blockExpr)
-			at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
-			b.insns[at].C = 1
-			return
+		cFlag := 0
+		if blockPass != nil {
+			c.compileNode(blockPass) // block-pass value sits above the args array
+			cFlag = 1
 		}
-		b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+		at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+		switch {
+		case cFlag == 1:
+			b.insns[at].C = 1
+		case v.Block != nil:
+			b.insns[at].C = c.compileBlock(v.Block) + 2 // a literal `super(*a) { … }`
+		}
 		return
 	}
 	for _, a := range args {
 		c.compileNode(a)
 	}
-	b.emit(bytecode.OpInvokeSuper, len(args), 0)
+	at := b.emit(bytecode.OpInvokeSuper, len(args), 0)
+	if v.Block != nil {
+		b.insns[at].C = c.compileBlock(v.Block) + 1
+	}
 }
 
 func (c *Compiler) compileIf(v *ast.If) {
@@ -1195,7 +1253,7 @@ func (c *Compiler) compileCase(v *ast.Case) {
 		var bodyJumps []int
 		for _, cond := range clause.Conds {
 			if sp, ok := cond.(*ast.SplatArg); ok { // when *array: match any element
-				c.compileSplatValue(sp.Value)
+				c.compileNode(sp.Value)
 				if slot >= 0 { // any element === subject
 					b.emit(bytecode.OpGetLocal, slot, 0)
 					b.emit(bytecode.OpCaseMatchAny, 0, 1)
@@ -1623,12 +1681,59 @@ func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 // (VarRef), constants (ConstRef / scoped Foo::BAR), instance/class/global
 // variables, and attribute / index setters (a Call with an explicit receiver
 // whose Name already ends in "=", e.g. `x=` or `[]=`).
+// soleGroupTarget reports whether a MultiAssign is just a wrapper around a single
+// parenthesised group target — `(a, b) = rhs`, parsed as one synthetic target
+// that is itself a MultiAssign — and returns that nested target. The whole RHS
+// then flows into it, instead of being spread element-wise across targets.
+func soleGroupTarget(v *ast.MultiAssign) (*ast.MultiAssign, bool) {
+	if v.SplatIndex < 0 && len(v.Names) == 1 && len(v.Targets) == 1 {
+		if nested, ok := v.Targets[0].(*ast.MultiAssign); ok {
+			return nested, true
+		}
+	}
+	return nil, false
+}
+
+// expandAndStore destructures the array currently on top of the stack into the
+// given targets, consuming the array. Names parallels Targets (Targets is nil
+// for the all-locals fast path); splatIndex is the position of a `*rest` target,
+// or -1. Each store opcode leaves the stored value, which is popped.
+func (c *Compiler) expandAndStore(names []string, targets []ast.Node, splatIndex int) {
+	b := c.cur()
+	pre, post, splat := len(names), 0, 0
+	if splatIndex >= 0 {
+		pre = splatIndex
+		post = len(names) - splatIndex - 1
+		splat = 1
+	}
+	at := b.emit(bytecode.OpExpandArray, pre, post)
+	b.insns[at].C = splat
+	// OpExpandArray pushed the target values with the first target's on top;
+	// store each (each store opcode leaves the value, so pop it).
+	for i := range names {
+		if targets != nil {
+			c.storeMultiTarget(targets[i])
+		} else {
+			c.storeLocal(names[i])
+		}
+		b.emit(bytecode.OpPop, 0, 0)
+	}
+}
+
 func (c *Compiler) storeMultiTarget(target ast.Node) {
 	b := c.cur()
 	switch t := target.(type) {
 	case nil:
 		// Nameless `*` splat target: its captured slice has no binding. The value
 		// is already on the stack; leave it for the caller's OpPop.
+	case *ast.MultiAssign:
+		// A nested destructuring target (`(a, b)` in `(a, b), c = …`): the one
+		// incoming value is on the stack — splat it to an array and expand it into
+		// the sub-targets, recursively (splat-aware). Keep a copy so, like every
+		// other store target, this one leaves a value for the caller's OpPop.
+		b.emit(bytecode.OpDup, 0, 0)
+		b.emit(bytecode.OpSplatToArray, 0, 0)
+		c.expandAndStore(t.Names, t.Targets, t.SplatIndex)
 	case *ast.VarRef:
 		c.storeLocal(t.Name)
 	case *ast.ConstRef:
@@ -1730,7 +1835,7 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 			for _, ce := range clause.Classes {
 				b.emit(bytecode.OpDup, 0, 0)
 				if sp, ok := ce.(*ast.SplatArg); ok { // rescue *classes: match any element
-					c.compileSplatValue(sp.Value)
+					c.compileNode(sp.Value)
 					b.emit(bytecode.OpExcMatchAny, 0, 0)
 				} else {
 					c.compileNode(ce)
@@ -1743,14 +1848,17 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 		for _, m := range matched {
 			b.patch(m, b.here())
 		}
-		if clause.Var != "" { // bind the exception (reusing an existing slot)
+		switch {
+		case clause.Var != "": // bind the exception to a local (reusing an existing slot)
 			if depth, slot, ok := b.resolve(clause.Var); ok {
 				b.emit(bytecode.OpSetLocal, slot, depth)
 			} else {
 				b.emit(bytecode.OpSetLocal, b.localSlot(clause.Var), 0)
 			}
+		case clause.VarTarget != nil: // `rescue => @e` / `=> $g` / `=> Foo::E`: a non-local target
+			c.storeMultiTarget(clause.VarTarget)
 		}
-		b.emit(bytecode.OpPop, 0, 0) // drop the exception
+		b.emit(bytecode.OpPop, 0, 0) // drop the exception (each store left it on the stack)
 		c.compileBody(clause.Body)
 		done = append(done, b.emit(bytecode.OpJump, 0, 0))
 		b.patch(skip, b.here())

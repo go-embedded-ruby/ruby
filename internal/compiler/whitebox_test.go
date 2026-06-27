@@ -123,35 +123,24 @@ func TestForwardOutsideDef(t *testing.T) {
 	}
 }
 
-// compileBlockPass fails on an anonymous `&` block-pass when no enclosing
-// method bound the "&" local (def f(&)). The parser only emits a bare-`&`
-// BlockPass inside such a method, so this shape is exercised directly here.
+// rewriteAnonArgs (via anonLocal) fails on a bare anonymous `&` block-pass when
+// no enclosing method declares a matching anonymous parameter. This drives the
+// BlockPass arm of rewriteAnonArgs; the parser only emits a bare-`&` BlockPass
+// inside such a method, so the shape is synthesized directly here.
 func TestAnonBlockPassOutsideMethod(t *testing.T) {
 	prog := &ast.Program{Body: []ast.Node{
 		&ast.Call{Name: "g", Args: []ast.Node{&ast.BlockPass{Value: nil}}},
 	}}
 	_, err := Compile(prog)
-	if err == nil || !strings.Contains(err.Error(), "anonymous block argument") {
-		t.Fatalf("expected an anonymous-block-argument error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "anonymous argument forwarding") {
+		t.Fatalf("expected an anonymous-argument-forwarding error, got %v", err)
 	}
 }
 
-// compileSplatValue fails on a bare `*` splat-pass when no enclosing method
-// bound the "*" parameter; the parser only emits a bare-`*` SplatArg inside such
-// a method, so this shape is exercised directly here.
-func TestAnonSplatForwardOutsideMethod(t *testing.T) {
-	prog := &ast.Program{Body: []ast.Node{
-		&ast.Call{Name: "g", Args: []ast.Node{&ast.SplatArg{Value: nil}}},
-	}}
-	_, err := Compile(prog)
-	if err == nil || !strings.Contains(err.Error(), "anonymous splat argument") {
-		t.Fatalf("expected an anonymous-splat-argument error, got %v", err)
-	}
-}
-
-// compileKwSplatValue fails on a bare `**` keyword-splat-pass when no enclosing
-// method bound the "**" parameter. A HashLit with a nil key and a nil value is
-// the bare-`**` forward the parser only emits inside such a method.
+// rewriteAnonArgs (via anonLocal) fails on a bare anonymous `**` keyword-splat
+// when no enclosing method declares a matching anonymous parameter. This drives
+// the HashLit/isAnonKwSplat arm of rewriteAnonArgs. A HashLit with a nil key and
+// a nil value is the bare-`**` forward the parser only emits inside such a method.
 func TestAnonKwSplatForwardOutsideMethod(t *testing.T) {
 	prog := &ast.Program{Body: []ast.Node{
 		&ast.Call{Name: "g", Args: []ast.Node{
@@ -159,8 +148,8 @@ func TestAnonKwSplatForwardOutsideMethod(t *testing.T) {
 		}},
 	}}
 	_, err := Compile(prog)
-	if err == nil || !strings.Contains(err.Error(), "anonymous keyword-splat argument") {
-		t.Fatalf("expected an anonymous-keyword-splat-argument error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "anonymous argument forwarding") {
+		t.Fatalf("expected an anonymous-argument-forwarding error, got %v", err)
 	}
 }
 
@@ -172,5 +161,40 @@ func TestCompileEmptyProgram(t *testing.T) {
 	// Empty body compiles to push_nil; leave; return.
 	if len(iseq.Insns) == 0 || iseq.Insns[0].Op != bytecode.OpPushNil {
 		t.Fatalf("expected leading push_nil, got %v", iseq.Insns)
+	}
+}
+
+// anonLocal fails when a bare anonymous-forward marker (`*` / `**` / `&`) is
+// compiled outside a method that declares a matching anonymous parameter. The
+// parser only produces these inside such methods, so the safety net is driven
+// directly from a synthesized AST.
+func TestAnonForwardOutsideDef(t *testing.T) {
+	prog := &ast.Program{Body: []ast.Node{
+		&ast.Call{Name: "g", Args: []ast.Node{&ast.SplatArg{Value: nil}}},
+	}}
+	_, err := Compile(prog)
+	if err == nil || !strings.Contains(err.Error(), "anonymous argument forwarding") {
+		t.Fatalf("expected an anonymous-forwarding error, got %v", err)
+	}
+}
+
+// rationalValue and numericValue panic on a literal node shape the parser never
+// produces (a non-numeric Value), exercising their safety nets.
+func TestNumericLiteralValuePanics(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fn   func()
+	}{
+		{"rationalValue", func() { rationalValue(&ast.StringLit{Value: "x"}) }},
+		{"numericValue", func() { numericValue(&ast.StringLit{Value: "x"}) }},
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatalf("%s: expected a panic on a non-numeric literal", tc.name)
+				}
+			}()
+			tc.fn()
+		}()
 	}
 }

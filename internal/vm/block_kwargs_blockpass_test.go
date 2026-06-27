@@ -82,6 +82,10 @@ p B.new(1, 2).v`, "[0, 1, 2]\n"},
 class A; def m(*a, &b); [a, (b && b.call)]; end; end
 class B < A; def m(...); super(...); end; end
 p B.new.m(1, &proc { 7 })`, "[[1], 7]\n"},
+		{"super_fixed_args_block", `
+class A; def m(x, y); [x, y, yield]; end; end
+class B < A; def m(x, y); super(x, y) { 99 }; end; end
+p B.new.m(1, 2)`, "[1, 2, 99]\n"},
 		{"anon_splat_forward", `def g(*a); a; end; def m(*); g(*); end; p m(1, 2)`, "[1, 2]\n"},
 		{"anon_kwsplat_forward", `def g(**k); k; end; def m(**); g(**); end; p m(x: 1, y: 2)`, "{x: 1, y: 2}\n"},
 		{"anon_both_forward", `def g(*a, **k); [a, k]; end; def m(*, **); g(*, **); end; p m(1, x: 2)`, "[[1], {x: 2}]\n"},

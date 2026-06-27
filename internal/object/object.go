@@ -88,13 +88,23 @@ func (f Float) Truthy() bool    { return true }
 // Complex is a Ruby Complex number. Its real and imaginary parts are themselves
 // numeric Values (Integer/Bignum/Float), so Complex(1, 2) keeps Integer parts
 // and renders "(1+2i)" while Complex(1.5, 2) renders "(1.5+2i)", matching MRI.
-// (Rational components are not supported — there is no Rational type — so exact
-// division of integer components yields Float parts instead.)
+// A part may also be a Rational (e.g. the `2.5ri` literal yields
+// Complex(0, Rational(5,2)), inspected as "(0+(5/2)*i)").
 type Complex struct{ Re, Im Value }
 
-func (c *Complex) ToS() string     { return c.Re.ToS() + imagPart(c.Im) }
-func (c *Complex) Inspect() string { return "(" + c.ToS() + ")" }
-func (c *Complex) Truthy() bool    { return true }
+func (c *Complex) ToS() string { return c.Re.ToS() + imagPart(c.Im) }
+
+// Inspect renders the parenthesised form, e.g. "(1+2i)". A Rational component
+// is shown in its own parenthesised inspect form and a Rational imaginary part
+// is written as "(n/d)*i" (matching MRI: Complex(0, Rational(5,2)) → "(0+(5/2)*i)").
+func (c *Complex) Inspect() string {
+	re := c.Re.ToS()
+	if r, ok := c.Re.(*Rational); ok {
+		re = r.Inspect()
+	}
+	return "(" + re + imagPartInspect(c.Im) + ")"
+}
+func (c *Complex) Truthy() bool { return true }
 
 // Rational is an exact ratio of two integers (Ruby Rational), held as a
 // normalised math/big.Rat — always reduced, with a positive denominator — so
@@ -114,6 +124,23 @@ func imagPart(im Value) string {
 		return s + "i"
 	}
 	return "+" + s + "i"
+}
+
+// imagPartInspect renders the imaginary term for Complex#inspect. A Rational
+// imaginary part is parenthesised and multiplied — "+(5/2)*i" / "-(1/2)*i" —
+// while other numeric parts match imagPart ("+2i", "-3.0i").
+func imagPartInspect(im Value) string {
+	r, ok := im.(*Rational)
+	if !ok {
+		return imagPart(im)
+	}
+	sign := "+"
+	rr := r.R
+	if rr.Sign() < 0 {
+		sign = "-"
+		rr = new(big.Rat).Neg(rr)
+	}
+	return sign + "(" + rr.Num().String() + "/" + rr.Denom().String() + ")*i"
 }
 
 // String is a Ruby string: a mutable, reference-typed byte sequence (always used
@@ -406,7 +433,7 @@ func rangeEnd(v Value, inspect bool) string {
 	}
 	return v.ToS()
 }
-func (r *Range) Truthy() bool    { return true }
+func (r *Range) Truthy() bool { return true }
 
 // Bool is true or false.
 type Bool bool
