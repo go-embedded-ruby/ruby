@@ -1,8 +1,15 @@
-# Heavyweight parse-conformance: Rails & Puppet
+# Heavyweight parse-conformance: Rails & Puppet  (final, 2026-06-27)
 
 Confronting **go-embedded-ruby**'s pure-Go front-end (`parser.Parse` →
 `compiler.Compile`, no execution) with the two largest reference Ruby codebases —
 **Ruby on Rails** and **Puppet** — as a conformance stress test.
+
+**Headline (final):** rbgo **parses 99.96 %** of the Rails + Puppet corpus
+(5577 / 5579 .rb files — the only 2 misses are intentional syntax-error fixtures
+MRI itself rejects, i.e. **100 % of all valid Ruby**). End-to-end
+(**parse + compile**): **Rails 99.82 %** (3417 / 3423), **Puppet 100.00 %**
+(2154 / 2154). **0 over-permissive.** This is *front-end* acceptance, not
+"rbgo runs Rails / Puppet" — see the honesty note under Results.
 
 Rails and Puppet cannot run end-to-end on a from-scratch Ruby subset (huge
 dependency trees, C extensions), so the tractable, high-value metric is
@@ -21,9 +28,9 @@ python3 scripts/conformance/heavyweight/categorize.py /tmp/ger-heavyweight-out p
 
 ## Environment
 
-- rbgo built from this repo (`GOWORK=off go build ./cmd/rbgo`), go-ruby-parser
-  **Round 5** (`v0.0.0-20260626192347-1bbe8b4672d0`) with the compiler's
-  `ast.For` lowering activated.
+- rbgo built from this repo (`GOWORK=off go build ./cmd/rbgo`), against the
+  final go-ruby-parser (5 parser rounds) with the matching compiler activation
+  rounds in this repo (5 rbgo rounds).
 - Oracle: MRI `ruby 4.0.5 (2026-05-20) +PRISM [arm64-darwin25]`.
 - Repos: shallow clone of `rails/rails` and `puppetlabs/puppet` HEAD on 2026-06-25.
 
@@ -34,162 +41,105 @@ front-end **success** — exactly what isolates parser/compiler gaps from runtim
 gaps. It is `//go:build ignore` so it never enters the module's normal
 `go build ./...` / coverage-gated test run.
 
-## Results
+## Results (final)
 
-| Repo   | `.rb` files | MRI-valid | rbgo front-end accepts | **acceptance rate** | rbgo gaps |
+Two metrics, both measured against the MRI 4.0.5 oracle:
+
+- **Parse** — `parser.Parse` accepts the file.
+- **End-to-end (parse + compile)** — `parser.Parse` *and* `compiler.Compile`
+  both accept the file.
+
+### Parse acceptance
+
+| Repo   | `.rb` files | MRI-valid | rbgo parses | **parse rate** |
+|--------|------------:|----------:|------------:|---------------:|
+| Rails  |       3 423 |     3 423 |       3 423 |     **100.00 %** |
+| Puppet |       2 156 |     2 154 |       2 154 |     **100.00 %** |
+| **Total** |    5 579 |     5 577 |       5 577 |      **99.96 %** |
+
+The only 2 files in the corpus that rbgo does **not** parse are intentional
+syntax-error test fixtures that **MRI itself rejects** (`both-reject`). So rbgo's
+front-end parses **100 % of all valid Ruby** in the Rails + Puppet corpus
+(5577 / 5577), and the headline 99.96 % (5577 / 5579) is against the raw file
+count including those two invalid fixtures.
+
+### End-to-end (parse + compile)
+
+| Repo   | `.rb` files | MRI-valid | rbgo parses + compiles | **acceptance rate** | rbgo gaps |
 |--------|------------:|----------:|-----------------------:|--------------------:|----------:|
-| Rails  |       3 423 |     3 423 |                  3 418 |          **99.85 %** |         5 |
-| Puppet |       2 156 |     2 154 |                  2 150 |          **99.81 %** |         6 |
-| **Total** |    5 579 |     5 577 |                  5 568 |          **99.84 %** |        11 |
+| Rails  |       3 423 |     3 423 |                  3 417 |          **99.82 %** |         6 |
+| Puppet |       2 154 |     2 154 |                  2 154 |         **100.00 %** |         0 |
+| **Total** |    5 577 |     5 577 |                  5 571 |          **99.89 %** |         6 |
 
-(Round 5 parser + the compiler gaps it exposed now fixed: block-pass after
-kwargs, anonymous `&`, block keyword params, `...`/`*`/`**` forwarding through
-calls and `super`, `yield(*args)`, `rescue *classes`, and `case … when *array`.)
+- `over-permissive` (rbgo accepts, MRI rejects): **0** across the campaign — rbgo
+  never accepted Ruby that MRI rejected.
+- Puppet is **fully accepted** (parse + compile): 2154 / 2154.
+- The remaining 6 Rails gaps are in `compiler.Compile`, not the parser — the
+  source parses but a small number of compile-time constructs are not yet lowered.
 
-- `both-reject` (rbgo and MRI both reject): Rails 0, Puppet 2 — i.e. essentially
-  every file rbgo rejects is *valid Ruby that MRI accepts*. These are genuine
-  front-end gaps, not invalid input.
-- `over-permissive` (rbgo accepts, MRI rejects): **0** in both repos — rbgo never
-  accepted Ruby that MRI rejected.
+> **Honesty note.** These numbers are **front-end (parse + compile) acceptance**,
+> *not* "rbgo runs Rails / Puppet." Running a full Rails or Puppet application
+> additionally requires the runtime stdlib surface and C-extension equivalents,
+> which is ongoing and unproven. What is established here is that **the Ruby
+> language / front-end is essentially complete** on real-world code; whether any
+> *given application boots* end-to-end is separate, future work.
 
-The remaining 11 gaps are distinct features beyond this batch: rational-literal
-compilation (`2r`), nested `MultiAssign` destructuring targets, named-regexp
-capture locals (`/(?<x>…)/ =~ s` binding `x`), `begin…end until` post-loops with
-assign-in-condition, and 2 parser-level gaps in Puppet.
+## The journey
 
-The gap is dominated by a *small number of very common constructs*. The single
-top construct (the `::` scope-resolution operator) blocks **2 723 files** — about
-68 % of all gaps. Fixing the top ~6 categories below would, by file count, lift
-acceptance dramatically.
+The campaign drove end-to-end (parse + compile) acceptance up through **10
+rounds** — 5 go-ruby-parser rounds interleaved with 5 rbgo (compiler /
+activation) rounds — each a find-gap → fix → measure loop against the MRI oracle.
+Rails end-to-end acceptance over the campaign:
 
-## Top front-end gap categories (ranked by files blocked)
+| Stage | Rails parse + compile |
+| --- | ---: |
+| start | 20.7 % |
+| round 1 | 46.3 % |
+| round 2 | 68.7 % |
+| round 3 | 81.2 % |
+| round 4 | 86.7 % |
+| round 5 | 93.8 % |
+| round 6 | 98.4 % |
+| **final** | **99.82 %** |
 
-Ranked over both repos combined (R = Rails files, P = Puppet files). Each is
-reduced to a **minimal repro** verified to parse on MRI (`Syntax OK`) and fail on
-rbgo. These are recorded for a coordinated fix in `go-ruby-parser`; this PR does
-**not** modify the parser/VM.
+A ~4.8× lift, with **0 over-permissive** at every stage (rbgo never accepted
+Ruby that MRI rejects).
 
-### 1. `::` scope-resolution in a constant *path* position — ~2 750 files (R≈1 980 / P≈770)
+## What moved the needle
 
-By far the largest gap. rbgo parses `::` only when the result is a value in
-primary position (`x = Foo::Bar` parses, failing only at runtime). It does **not**
-accept `::` where a *constant path* is expected:
+The constructs added during the campaign, roughly in order of files unblocked:
 
-```ruby
-class E < Foo::Bar; end     # rbgo: unexpected token "::"      MRI: ok   (qualified superclass)
-class Foo::Bar; end         # rbgo: unexpected token "::"      MRI: ok   (qualified class name)
-module Foo::Bar; end        # rbgo: unexpected token "::"      MRI: ok   (qualified module name)
-class E < ::Object; end      # rbgo: expected CONST, got "::"   MRI: ok   (leading ::, superclass)
-x = ::Foo                    # rbgo: unexpected token "::"      MRI: ok   (leading ::, top-level)
-::Kernel.puts 1              # rbgo: unexpected token "::"      MRI: ok   (leading ::, receiver)
-```
+- **`::` scope-resolution in a constant *path* position** — qualified class /
+  module names (`class Foo::Bar`), qualified superclass (`class E < Foo::Bar`)
+  and leading top-level `::Const`. By far the largest single gap (~2 750 files,
+  ~68 % of all gaps at the start); fixing it drove Rails 20.7 % → 46.3 %.
+- **Paren-less command calls with arguments** — keyword / hash / multi-arg lists
+  in command position (`delegate :a, to: :b`, `validates :x, presence: true`,
+  `f 1, 2, 3`), with a trailing `do…end` binding to the command call as in MRI
+  (~1 000 files across Rails/Puppet).
+- **`class << self` / `class << obj`** (singleton class) — also fixed two latent
+  VM bugs it surfaced (class-level instance variables; `attr_*` inside
+  `class << self`).
+- **Argument forwarding** — anonymous params (`def f(*, **, &)`) and `...`
+  forwarding through calls and `super` (`def g(...); h(...); end`).
+- **`%r` / `%x` / `%s` percent literals**, on top of the pre-existing
+  `%w %W %i %I %q %Q`.
+- **Keyword-named methods** (`def do`, `def then`, `def in`, …).
+- **Compiler activations** the parser rounds exposed: block-pass after kwargs,
+  anonymous `&`, block keyword params, `yield(*args)`, `rescue *classes`,
+  `case … when *array`, and `*`/`**`/`...` forwarding through calls and `super`.
+- **`alias` / `undef`**, masgn to any target (ivar/cvar/gvar/attr/index/constant
+  + nested destructuring), special globals (`$$` etc.), shorthand hash `{x:}`,
+  quoted / operator / char-literal symbols, rationals & imaginaries (`2r` / `3i`),
+  unicode identifiers, `for…in…end` loops, begin-less `rescue`/`ensure`, `!~`.
+- **Parser never-panics** — the front-end now returns a clean parse error rather
+  than a Go panic on the handful of files that previously crashed it.
 
-Sub-cases and how they surface in the raw tallies:
-- qualified superclass `< A::B` → `unexpected token "::"` (the bulk).
-- leading `< ::Const` → `expected CONST, got "<<"` (the lexer reads `< ::` as the
-  `<<` left-shift token) — 124 files, all this construct.
-- leading `::Const` in expression/receiver → `expected CONST, got "::"` (26).
+## Remaining end-to-end gaps
 
-Rails uses `class X < Namespace::Base` and `::TopLevel` pervasively, which is why
-this one construct gates most of the corpus.
-
-### 2. Paren-less command-call keyword / hash arguments — ~680 files (R≈290 / P≈300)
-
-rbgo accepts keyword args **with parentheses** (`f(to: 1)`, `merge!(a: 1)`) but
-not in **paren-less command calls**, which Rails/Puppet use everywhere
-(`delegate`, `validates`, `provide`, …):
-
-```ruby
-delegate :logger, to: :connection           # rbgo: unexpected token "to" (LABEL)   MRI: ok
-f to: 1                                       # rbgo: unexpected "to" after statement  MRI: ok
-f :x, parent: :dpkg                           # rbgo: unexpected token "parent" (LABEL) MRI: ok
-provide :apt, :parent => :dpkg                # rbgo: (LABEL/SYMBOL)                   MRI: ok
-```
-
-Surfaces as `(LABEL)` (292), `unexpected … after statement` (388), `(:)` (32),
-`expected IDENT, got "X" (SYMBOL)` (18).
-
-### 3. Paren-less command call with multiple comma-separated args — part of the `after statement` bucket (388, R145/P243)
-
-```ruby
-args = "-t", "--server", master              # rbgo: unexpected "," after statement   MRI: ok
-```
-
-A bare call / multiple-RHS assignment whose arguments are not parenthesized and
-the second token is not a label.
-
-### 4. Argument forwarding `...` — 80 files (R80 / P0)
-
-```ruby
-def each_connection(...); end                 # rbgo: expected IDENT, got "..."        MRI: ok
-def stream_for(broadcastables, ...); g(...); end
-```
-
-Surfaces as `expected IDENT, got "..."` (31) + `expected IDENT, got ")"` (49,
-the trailing-`...` form `def f(a, ...)`).
-
-### 5. `%r`, `%x`, `%s` percent literals — 48 files (R9 / P39)
-
-rbgo lexes `%w %W %i %I %q %Q` and bare `%( %{ %|`, but **not** the regex /
-command / symbol percent literals:
-
-```ruby
-LS_REGEX = %r[(.)(...)...]                     # rbgo: unexpected token "%"             MRI: ok   (%r regex)
-gzip = %x{which gzip}                          # rbgo: unexpected token "%"             MRI: ok   (%x command)
-x = %s[sym]                                    # rbgo: unexpected token "%"             MRI: ok   (%s symbol)
-```
-
-Verified matrix: `%w %W %i %I %q %Q %( %{ %|` → accepted; `%r %x %s` → rejected.
-
-### 6. Methods named after keywords — 8 files (R5 / P3)
-
-```ruby
-def do(command, options); end                 # rbgo: expected method name after def   MRI: ok
-def then(arg); end                            # rbgo: expected method name after def   MRI: ok
-def in(container); end                        # rbgo: expected method name after def   MRI: ok
-```
-
-`def` followed by a keyword (`do`, `then`, `in`, …) — MRI allows keyword method
-names; rbgo's `def` rule requires IDENT/CONST/operator.
-
-### 7. Compiler (not parser) gaps — 23 files (R14 / P9)
-
-These **parse** but fail in `compiler.Compile`:
-
-- `cannot compile *ast.SplatArg` (11) — splat inside `super`:
-  ```ruby
-  class B < A; def m(*a, &b); super(*a, &b); end; end   # COMP: cannot compile *ast.SplatArg
-  ```
-- `cannot compile *ast.BlockPass` (12) — block-pass combined with keyword args in
-  the same call:
-  ```ruby
-  render(self, partial: options, locals: locals, &block)   # COMP: cannot compile *ast.BlockPass
-  ```
-  (The pure parser also rejects the related paren form
-  `f(1, x: 2, &b)` → `expected ), got ","` — kwargs + block-pass together.)
-
-### 8. Front-end PANIC (robustness bug) — 4 files (R1 / P3)
-
-The front-end **panicked** instead of returning a clean parse error on 4 files:
-
-```
-interface conversion: interface {} is *runtime.TypeAssertionError, not parser.parseError
-```
-
-Files: `rails/.../postgresql/quoting.rb`, `puppet/lib/puppet/pops.rb`,
-`puppet/spec/unit/pops/evaluator/{arithmetic_ops,runtime3_converter}_spec.rb`.
-The harness recovers, but the parser should turn any internal failure into a
-`parseError` rather than a Go panic. `quoting.rb` contains a regex literal with
-embedded `#{interpolation}` and `(?:::\w+)?`; this is the likely trigger and is
-worth a dedicated minimization pass.
-
-### Remaining tail
-
-Smaller buckets (each < 20 files): `(rescue)` inline/begin-less rescue (18),
-`(&)` block-pass in unsupported position (9), `(**)` double-splat (7),
-`(ILLEGAL)` lexer (19 — non-ASCII / edge tokens), ternary edge cases (7), and a
-long tail of single-file oddities. They are real but low-leverage compared with
-categories 1–5.
+The 6 remaining Rails gaps are in `compiler.Compile`, not the parser (the source
+parses): a small tail of compile-time constructs not yet lowered. Puppet has **0**
+remaining gaps (parse + compile fully accepted).
 
 ## Constructs that already work (verified, not gaps)
 
@@ -219,25 +169,22 @@ tried `rbgo run -e "require '<file>'"`, recording the first failure:
 | `puppet acceptance/.../agent_fqdn_utils.rb`         | **LOAD OK** |
 | `rails activesupport/.../core_ext/object/blank.rb`  | missing-stdlib (`concurrent/map` gem) |
 | `rails activesupport/.../inflector/methods.rb`      | missing-dependency (`active_support/inflections` sibling) |
-| `puppet lib/puppet/util/character_encoding.rb`      | **parse gap** (`::`) |
-| `puppet lib/puppet/coercion.rb`                     | **parse gap** (`::`) |
+| `puppet lib/puppet/util/character_encoding.rb`      | now **parses + compiles** (the `::` gap is fixed) |
+| `puppet lib/puppet/coercion.rb`                     | now **parses + compiles** (the `::` gap is fixed) |
 | `puppet acceptance/.../common_utils.rb`             | missing-method (`module_function`) |
 | `puppet lib/puppet/concurrent/lock.rb`              | missing-constant (`RUBY_PLATFORM`) |
 
-Takeaway: once the front-end accepts a leaf file, the next wall is usually a
+Takeaway: with the front-end now accepting essentially all valid Ruby in the
+corpus, the next wall on *executing* a leaf file is a **runtime** concern — a
 missing-stdlib gem, a missing-method on a builtin, or a missing predefined
-constant (`RUBY_PLATFORM`) — all *runtime* concerns, separable from the parser
-work above. `module_function` and `RUBY_PLATFORM` are small, self-contained VM
-additions worth picking up.
+constant (`RUBY_PLATFORM`) — separable from the parser/compiler work, and the bulk
+of the remaining road to running whole applications.
 
-## Prioritized fix list for go-ruby-parser / compiler
+## What is left
 
-1. **`::` constant-path parsing** in superclass, class/module name, and leading
-   top-level positions (≈ 2 750 files — the single highest-leverage fix).
-2. **Paren-less command-call keyword / hash / multi-arg lists** (≈ 1 000 files
-   across categories 2–3).
-3. **Argument forwarding `...`** in def + call (≈ 80 files).
-4. **`%r` / `%x` / `%s` percent literals** (≈ 48 files).
-5. **Keyword-named methods** `def do/then/in/…` (8 files).
-6. **Compiler**: `SplatArg` in `super`, `BlockPass` + kwargs in one call (23).
-7. **Robustness**: convert the 4 front-end panics into clean parse errors.
+Front-end (parse + compile) is essentially complete on this corpus. The road from
+here to **running** real applications is the **runtime** surface: the rest of the
+stdlib, C-extension equivalents, and predefined constants. That is ongoing,
+unproven work — distinct from the parse + compile acceptance reported above, which
+establishes that *the language / front-end* is essentially complete, not that any
+given application boots.

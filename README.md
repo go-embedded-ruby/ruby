@@ -23,6 +23,58 @@ monkey-patching, `define_method` and `method_missing` free.
 
 ## Status
 
+### Conformance & performance (campaign final, 2026-06-27)
+
+A major conformance + performance campaign measured rbgo's pure-Go **front-end
+(parse + compile)** against the MRI 4.0.5 oracle on the two largest real-world
+Ruby codebases and a suite of popular libraries. All figures are
+**front-end acceptance**, not whole-application execution (see the honesty note
+below).
+
+- **Parse: 99.96 % of Rails + Puppet** (5577 / 5579 `.rb` files). The only 2
+  misses are intentional syntax-error fixtures **MRI itself rejects** — i.e.
+  **100 % of all valid Ruby** in the corpus parses.
+- **End-to-end (parse + compile): Rails 99.82 %** (3417 / 3423),
+  **Puppet 100.00 %** (2154 / 2154).
+- **0 over-permissive** — rbgo never accepts Ruby that MRI rejects.
+- **Library parse-conformance:** RuboCop 99.7 %, Sinatra / Jekyll / Thor /
+  Kramdown / dry-struct 100 %, Homebrew 98.7 %, Chef 99.1 %, concurrent-ruby
+  98.3 %, Asciidoctor 93.8 %.
+- **RSpec DSL usage: 10/10** byte-identical to MRI.
+- The journey (Rails end-to-end, across 5 parser rounds + 5 rbgo activation
+  rounds): 20.7 % → 46.3 % → 68.7 % → 81.2 % → 86.7 % → 93.8 % → 98.4 % →
+  **99.82 %**.
+
+Features added in the campaign include `::` constant-paths (qualified class /
+module names, superclass, leading `::`), paren-less command calls with
+args/kwargs, `class << self` (singleton class), masgn to any target
+(ivar/cvar/gvar/attr/index/constant + nested destructuring), `alias`/`undef`,
+anonymous params + forwarding (`def f(*, **, &)` / `g(...)`), special globals
+(`$$` etc.), shorthand hash `{x:}`, quoted / operator / char-literal symbols,
+rationals & imaginaries (`2r` / `3i`), unicode identifiers, `for…in…end` loops,
+block keyword params, begin-less rescue/ensure, and `!~` — on top of the
+pre-existing core (full object model, metaprogramming, Fiber/Thread, Marshal,
+regexp, the scientific bindings, and the js/wasm target) detailed below.
+
+**Performance:** a 6-runtime comparative suite ([BENCHMARKS.md](BENCHMARKS.md))
+pits rbgo and rbgo+AOT against MRI, MRI+YJIT, JRuby and TruffleRuby. The rbgo
+interpreter runs ~3–6× MRI on compute and at parity on I/O-bound work;
+**rbgo+AOT beats MRI+YJIT 18–24× on loop/fib** (the only runtime here that beats
+YJIT); TruffleRuby is the compute ceiling.
+
+> **Honesty note.** "99.82 % of Rails" means rbgo's front-end **parses and
+> compiles** that fraction of Rails's `.rb` files — *not* that rbgo **runs**
+> Rails. Running a full Rails or Puppet application additionally needs the runtime
+> stdlib surface and C-extension equivalents, which is ongoing and unproven. What
+> is established is that **the Ruby language / front-end is essentially complete**
+> on real-world code; whether any *given application boots* end-to-end is
+> separate, future work. Details:
+> [CONFORMANCE-RAILS-PUPPET.md](CONFORMANCE-RAILS-PUPPET.md),
+> [CONFORMANCE-LIBRARIES.md](CONFORMANCE-LIBRARIES.md),
+> [CONFORMANCE-RSPEC.md](CONFORMANCE-RSPEC.md).
+
+### Supported today
+
 Supported today (every feature **differential-tested against MRI Ruby 4.0.5 and
 JRuby**):
 
@@ -212,10 +264,15 @@ JRuby**):
 
 **100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
 riscv64, loong64, ppc64le, s390x) and three OSes. Phase 8 (conformance and
-representation/perf tuning) is now under way: small-integer interning and
-capture-tracked frame-environment recycling have cut call-path allocations (a
-small-int loop from ~245k allocations to 1; recursion's call allocations halved,
-~14% faster). See the [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
+representation/perf tuning) is well advanced: the conformance campaign above
+brought the front-end to ~100 % parse / 99.82 % parse+compile on real-world Ruby,
+and on the performance side small-integer interning and capture-tracked
+frame-environment recycling have cut call-path allocations (a small-int loop from
+~245k allocations to 1; recursion's call allocations halved, ~14% faster), with
+the 6-runtime benchmark suite ([BENCHMARKS.md](BENCHMARKS.md)) tracking rbgo vs
+MRI / YJIT / JRuby / TruffleRuby. The remaining road from "parses + compiles" to
+"runs whole applications" is the runtime stdlib + C-extension surface. See the
+[roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
 
 ## Quick start
 
@@ -333,6 +390,12 @@ from reference applications — **Ruby on Rails** (ActiveSupport's pure-Ruby
 `core_ext`) and **OpenVox**/Puppet (Ruby-heavy manifest evaluation) — drive the
 remaining work by demand and double as conformance corpora and performance
 baselines (pure-Go CGO=0 vs CRuby's C, JRuby's JVM JIT and TruffleRuby's Graal).
+The heavyweight front-end (parse + compile) conformance results — Rails 99.82 %,
+Puppet 100 %, ~100 % of all valid Ruby parsed, plus the per-library table — are
+in [CONFORMANCE-RAILS-PUPPET.md](CONFORMANCE-RAILS-PUPPET.md),
+[CONFORMANCE-LIBRARIES.md](CONFORMANCE-LIBRARIES.md) and
+[CONFORMANCE-RSPEC.md](CONFORMANCE-RSPEC.md); reproduce with
+`scripts/conformance/heavyweight/sweep.sh`.
 
 ## Design & roadmap
 
