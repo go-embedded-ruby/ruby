@@ -80,6 +80,11 @@ type Proc struct {
 	superName    string
 	superDefinee *RClass
 	superArgs    []object.Value
+	// dmBody marks this Proc activation as the body of a define_method-created
+	// method. Such a body anchors an *explicit* `super(args)`, but MRI forbids a
+	// bare `super` (implicit argument forwarding) from it, so the frame raises in
+	// that case rather than silently forwarding.
+	dmBody bool
 }
 
 func (p *Proc) ToS() string     { return "#<Proc>" }
@@ -741,8 +746,9 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 	if m.proc != nil {
 		// A define_method body runs the block with self rebound to the receiver,
 		// keeping its closure environment; the block passed to the method binds to
-		// the body's &block param.
-		return vm.callProcMethod(m.proc, self, args, blk)
+		// the body's &block param. The method's name/owner anchor `super` so a
+		// define_method body may call super (matching MRI).
+		return vm.callProcMethod(m.proc, self, args, blk, m.name, m.owner)
 	}
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
 }
@@ -763,7 +769,7 @@ func (vm *VM) invokeInPlace(m *Method, self object.Value, args []object.Value, b
 		return m.compiled(vm, self, args, blk)
 	}
 	if m.proc != nil {
-		return vm.callProcMethod(m.proc, self, args, blk)
+		return vm.callProcMethod(m.proc, self, args, blk, m.name, m.owner)
 	}
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
 }
@@ -841,11 +847,17 @@ func (vm *VM) blockDefinee(p *Proc) *RClass {
 }
 
 // callProcMethod invokes a proc that is the body of a define_method /
-// define_singleton_method method. It is callBlockSelf plus threading the block
-// passed to the method (blk) into the body, so a `&b` block param there binds
-// it (its BlockSlot is wired by the compiler). The body's own captured block
-// (p.block) still backs a bare `yield`.
-func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, blk *Proc) object.Value {
+// define_singleton_method method `name` on `owner`. It is callBlockSelf plus
+// threading the block passed to the method (blk) into the body, so a `&b` block
+// param there binds it (its BlockSlot is wired by the compiler); the body's own
+// captured block (p.block) still backs a bare `yield`. The method's name+owner
+// anchor `super`, so the body may call an *explicit*-argument super against
+// owner's superclass — matching MRI, where `define_method(:m) { … super(x) … }`
+// resolves super to the next definition of m. A shallow copy of the proc carries
+// the anchor (and a dmBody flag, so the frame rejects a bare implicit-argument
+// super exactly as MRI does) while keeping the proc's closure env, cref, home,
+// and yield-block.
+func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, blk *Proc, name string, owner *RClass) object.Value {
 	if p.native != nil {
 		return p.native(vm, args)
 	}
@@ -853,7 +865,10 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 	if blk != nil {
 		body = blk
 	}
-	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, p)
+	anchored := *p
+	anchored.superName, anchored.superDefinee, anchored.superArgs = name, owner, args
+	anchored.dmBody = true
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, &anchored)
 }
 
 // classEval runs a block as class_eval/module_eval would: self and the method

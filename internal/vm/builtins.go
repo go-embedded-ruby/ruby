@@ -503,7 +503,19 @@ func (vm *VM) bootstrap() {
 		return raise("NoMethodError", "undefined method '%s' for %s", name, vm.classOf(self).name)
 	})
 	isAFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(classIsA(vm.classOf(self), classArg(args[0])))
+		target := classArg(args[0])
+		if classIsA(vm.classOf(self), target) {
+			return object.True
+		}
+		// A class/module that was `extend`ed with a module M (directly, or on any
+		// of its superclasses) is_a? M, because M is mixed into the receiver's
+		// singleton (meta) class ancestry. classOf returns Class/Module for an
+		// RClass, so the metaclass chain must be consulted separately. This also
+		// covers per-object singleton-class extends for non-class receivers.
+		if classSingletonIsA(vm, self, target) {
+			return object.True
+		}
+		return object.False
 	}
 	vm.cObject.define("is_a?", isAFn)
 	vm.cObject.define("kind_of?", isAFn)
@@ -1699,6 +1711,15 @@ func (vm *VM) bootstrap() {
 		a.Elems = nil
 		return a
 	})
+	vm.cArray.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		other, ok := args[0].(*object.Array)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into Array", classNameOf(args[0]))
+		}
+		a.Elems = append([]object.Value(nil), other.Elems...)
+		return a
+	})
 	vm.cArray.define("rotate!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if n := len(a.Elems); n > 0 {
@@ -1721,14 +1742,18 @@ func (vm *VM) bootstrap() {
 		}
 		return a
 	})
-	vm.cArray.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	arrayInclude := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, e := range self.(*object.Array).Elems {
 			if valueEqual(e, args[0]) {
 				return object.True
 			}
 		}
 		return object.False
-	})
+	}
+	vm.cArray.define("include?", arrayInclude)
+	// member? is an alias of include? (the Enumerable name), used by Puppet's
+	// settings initialization.
+	vm.cArray.define("member?", arrayInclude)
 	vm.cArray.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if rng, ok := args[0].(*object.Range); ok {
@@ -2574,9 +2599,12 @@ func (vm *VM) bootstrap() {
 		}
 		return out
 	})
-	vm.cHash.define("fetch", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.define("fetch", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if v, ok := self.(*object.Hash).Get(args[0]); ok {
 			return v
+		}
+		if blk != nil {
+			return vm.callBlock(blk, []object.Value{args[0]})
 		}
 		if len(args) > 1 {
 			return args[1]
@@ -4517,6 +4545,46 @@ func classIsA(c, target *RClass) bool {
 			}
 		}
 		for _, m := range c.prepends {
+			if classIsA(m, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// classSingletonIsA reports whether self's singleton (meta) class ancestry
+// includes target — the case produced by `extend M`. For a class/module
+// receiver it walks the superclass chain (mirroring MRI, where a subclass's
+// metaclass super-chains through its parent's metaclass) and checks each
+// level's metaclass includes/prepends. For any other object it checks the
+// per-object singleton class. Returns false when there is no singleton class.
+func classSingletonIsA(vm *VM, self object.Value, target *RClass) bool {
+	if c, ok := self.(*RClass); ok {
+		for ; c != nil; c = c.super {
+			if c.meta == nil {
+				continue
+			}
+			for _, m := range c.meta.includes {
+				if classIsA(m, target) {
+					return true
+				}
+			}
+			for _, m := range c.meta.prepends {
+				if classIsA(m, target) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if sc := vm.objSingleton(self); sc != nil {
+		for _, m := range sc.includes {
+			if classIsA(m, target) {
+				return true
+			}
+		}
+		for _, m := range sc.prepends {
 			if classIsA(m, target) {
 				return true
 			}

@@ -722,8 +722,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// a block the anchor is inherited from the enclosing block (so `super` nested
 	// through several blocks still reaches the home method).
 	homeSuperName, homeSuperDefinee, homeSuperArgs := methodName, definee, args
+	homeDmBody := false
 	if selfBlock != nil {
 		homeSuperName, homeSuperDefinee, homeSuperArgs = selfBlock.superName, selfBlock.superDefinee, selfBlock.superArgs
+		homeDmBody = selfBlock.dmBody
 	}
 
 	// Every frame catches a returnSignal aimed at its own selfTarget (a local
@@ -991,7 +993,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -1106,10 +1108,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the home method's arguments
+					if homeDmBody {
+						// MRI forbids implicit-argument super from a define_method body.
+						raise("RuntimeError", "implicit argument passing of super from method defined by define_method() is not supported. Specify all arguments explicitly.")
+					}
 					superArgs = homeSuperArgs
 					// Keyword arguments were peeled off args into env.kwargs on entry;
 					// re-attach them as the trailing hash so bare super forwards them too.
@@ -1131,7 +1137,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				argsArr := pop().(*object.Array)
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, argsArr.Elems, superBlk))
@@ -1357,7 +1363,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:
