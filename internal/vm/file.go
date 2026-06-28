@@ -2,7 +2,8 @@ package vm
 
 import (
 	"os"
-	"path" // always '/'-separated, as Ruby's File is — not path/filepath
+	"path"          // always '/'-separated, as Ruby's File is — not path/filepath
+	"path/filepath" // OS-native, only for symlink resolution (File.realpath)
 	"strings"
 
 	gotime "github.com/go-composites/time/src"
@@ -106,6 +107,25 @@ func (vm *VM) registerFile() {
 	def("directory?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		fi, err := os.Stat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.IsDir())
+	})
+	// File.symlink? reports whether the path is a symbolic link. Like MRI it uses
+	// lstat (does not follow the link) and returns false for a missing path or a
+	// non-symlink, rather than raising.
+	def("symlink?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		fi, err := os.Lstat(pathArg(vm, args[0]))
+		return object.Bool(err == nil && fi.Mode()&os.ModeSymlink != 0)
+	})
+	// File.realpath returns the canonical absolute path with every symlink
+	// resolved; the path (and each component) must exist, otherwise — as in MRI —
+	// Errno::ENOENT is raised. An optional second argument is the base directory
+	// a relative path is resolved against.
+	def("realpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := fileExpand(pathArg(vm, args[0]), args[1:])
+		resolved, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
+		}
+		return object.NewString(toSlash(resolved))
 	})
 	def("read", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])

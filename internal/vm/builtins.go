@@ -112,6 +112,19 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Proc).isLambda)
 	})
+	// Proc#source_location returns [file, line] for where the block was written,
+	// or nil when no source is known (a synthesized/native Proc, or compiled-in
+	// code such as the prelude whose ISeq carries no File). The VM does not track
+	// per-instruction line numbers, so the line is reported as 0 — the array
+	// shape ([String, Integer]) is what callers (e.g. Puppet building a type URI)
+	// depend on.
+	vm.cProc.define("source_location", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		p := self.(*Proc)
+		if p.iseq == nil || p.iseq.File == "" {
+			return object.NilV
+		}
+		return &object.Array{Elems: []object.Value{object.NewString(p.iseq.File), object.Integer(0)}}
+	})
 	vm.cProc.define("curry", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		p := self.(*Proc)
 		need := p.arityVal()
@@ -1601,6 +1614,38 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cArray.define("unshift", unshift)
 	vm.cArray.define("prepend", unshift)
+	// Array#insert(index, *objects): insert the objects before the element at
+	// index (or, for a negative index, after the element index counts back to —
+	// so -1 appends). Inserting past the end pads the gap with nil, as in MRI.
+	// With no objects the array is returned unchanged.
+	vm.cArray.define("insert", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		idx := int(intArg(args[0]))
+		ins := args[1:]
+		if len(ins) == 0 {
+			return a
+		}
+		// A negative index inserts after the element it points at: pos = len+idx+1.
+		if idx < 0 {
+			idx += len(a.Elems) + 1
+			if idx < 0 {
+				raise("IndexError", "index %d too small for array; minimum: %d", int(intArg(args[0])), -len(a.Elems)-1)
+			}
+		}
+		if idx > len(a.Elems) {
+			pad := make([]object.Value, idx-len(a.Elems))
+			for i := range pad {
+				pad[i] = object.NilV
+			}
+			a.Elems = append(a.Elems, pad...)
+		}
+		tail := append([]object.Value{}, a.Elems[idx:]...)
+		a.Elems = append(append(a.Elems[:idx:idx], ins...), tail...)
+		return a
+	})
 	vm.cArray.define("delete", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		// Remove every element == the argument; return it, or (a block's result,
 		// else nil) when nothing matched.
@@ -3375,6 +3420,22 @@ func (vm *VM) bootstrap() {
 			}
 			return c
 		}}
+	// Module.new { body } builds an anonymous module (no superclass, like every
+	// module), running the block as its body — so `def self.foo` adds a singleton
+	// method and `def foo` an instance method that mixes into includers. Without
+	// this dedicated handler, `Module.new` would fall through to Class#new and
+	// allocate a plain instance (dropping the block), so the result could not be
+	// included or have methods defined into it.
+	vm.cModule.smethods["new"] = &Method{name: "new", owner: vm.cModule,
+		native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+			m := newClass("", nil)
+			m.isModule = true
+			m.defaultVis, m.funcMode = visPublic, false
+			if blk != nil {
+				vm.classEval(m, blk, nil)
+			}
+			return m
+		}}
 	vm.cClass.define("superclass", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if c := self.(*RClass); c.super != nil {
 			return c.super
@@ -4341,15 +4402,45 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 			}
 		}
 	}
+	// collectMeta gathers the class methods a class/module receives from modules
+	// mixed into its singleton class via `extend` (and those modules' own
+	// prepends/includes) — the enumeration counterpart of lookupSMethod's walk of
+	// c.meta.{prepends,includes}.
+	var collectTree func(m *RClass)
+	collectTree = func(m *RClass) {
+		for i := len(m.prepends) - 1; i >= 0; i-- {
+			collectTree(m.prepends[i])
+		}
+		collect(m.methods)
+		for i := len(m.includes) - 1; i >= 0; i-- {
+			collectTree(m.includes[i])
+		}
+	}
+	collectMeta := func(c *RClass) {
+		if c.meta == nil {
+			return
+		}
+		for i := len(c.meta.prepends) - 1; i >= 0; i-- {
+			collectTree(c.meta.prepends[i])
+		}
+		for i := len(c.meta.includes) - 1; i >= 0; i-- {
+			collectTree(c.meta.includes[i])
+		}
+	}
 	if c, ok := self.(*RClass); ok {
 		collect(c.smethods)
+		collectMeta(c)
 		if all {
 			for s := c.super; s != nil; s = s.super {
 				collect(s.smethods)
+				collectMeta(s)
 			}
 		}
 	} else if sc := vm.objSingleton(self); sc != nil {
 		collect(sc.methods)
+		for i := len(sc.includes) - 1; i >= 0; i-- {
+			collectTree(sc.includes[i])
+		}
 	}
 	sort.Strings(names)
 	out := make([]object.Value, len(names))

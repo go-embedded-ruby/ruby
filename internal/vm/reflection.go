@@ -46,6 +46,25 @@ func (vm *VM) registerReflection() {
 		return object.Bool(m != nil && !m.undefined)
 	})
 
+	// Module#public_method_defined?/#private_method_defined?/#protected_method_defined?:
+	// like #method_defined? but additionally require the resolved method's
+	// effective access level (honouring any inherited visibility override) to
+	// match. Used by Puppet's metaprogramming to probe accessor visibility.
+	definedWithVis := func(want visibility) NativeFn {
+		return func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			mod := self.(*RClass)
+			name := nameArg(args[0])
+			m := lookupMethod(mod, name)
+			if m == nil || m.undefined {
+				return object.False
+			}
+			return object.Bool(instanceVisibility(mod, name, m) == want)
+		}
+	}
+	vm.cModule.define("public_method_defined?", definedWithVis(visPublic))
+	vm.cModule.define("private_method_defined?", definedWithVis(visPrivate))
+	vm.cModule.define("protected_method_defined?", definedWithVis(visProtected))
+
 	cUnbound.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(self.(*UnboundMethod).name)
 	})
