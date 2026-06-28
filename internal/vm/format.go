@@ -143,7 +143,7 @@ func formatOne(spec string, verb byte, next func() object.Value) string {
 		if verb == 'i' { // Go has no %i; it means decimal integer
 			goSpec = spec[:len(spec)-1] + "d"
 		}
-		return fmt.Sprintf(goSpec, toFormatInt(next()))
+		return fmt.Sprintf(goSpec, toFormatIntArg(next()))
 	case 'f', 'e', 'E', 'g', 'G':
 		return fmt.Sprintf(spec, toFormatFloat(next()))
 	case 's':
@@ -158,27 +158,34 @@ func formatOne(spec string, verb byte, next func() object.Value) string {
 	}
 }
 
-// toFormatInt coerces an argument for an integer conversion (floats truncate
-// toward zero, as in Ruby). A String is parsed with Integer()-style semantics
-// (whitespace/underscores/radix prefixes), matching MRI where `"%d" % "07"`
-// formats the numeric string; a non-numeric String raises ArgumentError.
-func toFormatInt(v object.Value) int64 {
+// toFormatIntArg coerces an argument for an integer conversion to a value Go's
+// fmt formats with %d/%x/%o/%b: an int64 for the common case, or a *big.Int for
+// a Bignum so an arbitrary-precision value is not truncated (matching MRI's
+// `"%d" % (10**30)`). Floats truncate toward zero; a String is parsed with
+// Integer()-style semantics (whitespace/underscores/radix prefixes) and a
+// non-numeric String raises ArgumentError.
+func toFormatIntArg(v object.Value) any {
 	switch x := v.(type) {
 	case object.Integer:
 		return int64(x)
 	case object.Float:
 		return int64(x)
 	case *object.Bignum:
-		return x.I.Int64()
+		return x.I
 	case *object.String:
-		n, err := strconv.ParseInt(stripRadixPrefix(strings.TrimSpace(x.Str()), 0), 0, 64)
-		if err != nil {
-			raise("ArgumentError", "invalid value for Integer(): %s", x.Inspect())
+		s := stripRadixPrefix(strings.TrimSpace(x.Str()), 0)
+		if n, err := strconv.ParseInt(s, 0, 64); err == nil {
+			return n
 		}
-		return n
+		// A value too large for int64 still parses as an arbitrary-precision Integer.
+		if z, ok := new(big.Int).SetString(s, 0); ok {
+			return z
+		}
+		raise("ArgumentError", "invalid value for Integer(): %s", x.Inspect())
+		return int64(0)
 	default:
 		raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(v))
-		return 0
+		return int64(0)
 	}
 }
 

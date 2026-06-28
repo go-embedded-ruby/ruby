@@ -204,8 +204,13 @@ func (e *yamlEncoder) scalar(v object.Value) string {
 	case *object.String:
 		return yamlString(n.Str())
 	case *Time:
-		// Psych emits a Time as an unquoted ISO-8601 timestamp.
-		return n.t.Format("2006-01-02 15:04:05.000000000 -07:00")
+		// Psych emits a Time as an unquoted ISO-8601 timestamp, using "Z" for a
+		// UTC instant and the numeric "+HH:MM" offset otherwise.
+		ts := n.t.Format("2006-01-02 15:04:05.000000000 -07:00")
+		if strings.HasSuffix(ts, " +00:00") {
+			ts = strings.TrimSuffix(ts, " +00:00") + " Z"
+		}
+		return ts
 	}
 	raise("TypeError", "can't dump %s to YAML", classNameOf(v))
 	return ""
@@ -229,18 +234,17 @@ func yamlFloat(f float64) string {
 	return s
 }
 
-// yamlSymbol renders a Ruby Symbol. A plain symbol is `:name`; one whose name
-// needs quoting (spaces, specials) is rendered `:"name"`.
+// yamlSymbol renders a Ruby Symbol as `:name`. Psych writes the bare `:name`
+// form for the symbols that occur in Puppet's persisted state (`:checked`,
+// `:synced`, and even names with spaces/dashes like `:a b`); a name carrying a
+// newline is escaped via the double-quoted form. This covers the realistic
+// symbol shapes; the rare empty / control-bearing symbol is not exercised.
 func yamlSymbol(name string) string {
-	if name != "" && plainSymbolName(name) {
-		return ":" + name
+	if strings.ContainsAny(name, "\n\t") {
+		return ":" + yamlDoubleQuote(name)
 	}
-	return ":" + yamlDoubleQuote(name)
+	return ":" + name
 }
-
-var plainSymbolRe = regexp.MustCompile(`\A[A-Za-z_][A-Za-z0-9_]*[!?=]?\z`)
-
-func plainSymbolName(s string) bool { return plainSymbolRe.MatchString(s) }
 
 // yamlString renders a Ruby String following Psych's plain/single/double-quote
 // and block-scalar selection.
@@ -299,13 +303,18 @@ func needsDoubleQuote(s string) bool {
 
 // needsSingleQuote reports whether a string that is otherwise plain must be
 // single-quoted because it would round-trip as a non-string (a bool/null/number/
-// timestamp keyword) or contains a YAML indicator.
+// timestamp keyword) or carries a YAML indicator that breaks the plain flow. A
+// "#" only needs quoting at the start or after a space (a comment indicator), and
+// a ":" only when it ends the string or is followed by a space (a mapping
+// indicator) — Psych leaves "a#b" and "File[/x]" unquoted.
 func needsSingleQuote(s string) bool {
-	if yamlReservedWord(s) || looksNumericYAML(s) || strings.ContainsAny(s, ":#") || strings.Contains(s, ": ") {
+	if yamlReservedWord(s) || looksNumericYAML(s) {
 		return true
 	}
-	// A trailing colon or a value containing flow/indicator characters.
-	if strings.HasSuffix(s, ":") {
+	if strings.HasPrefix(s, "#") || strings.Contains(s, " #") {
+		return true
+	}
+	if strings.HasSuffix(s, ":") || strings.Contains(s, ": ") {
 		return true
 	}
 	return false
