@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"path/filepath"
 	"runtime"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -21,6 +22,44 @@ func (vm *VM) registerVersionConstants() {
 	vm.consts["RUBY_PLATFORM"] = object.NewString(rubyPlatform())
 	vm.consts["RUBY_DESCRIPTION"] = object.NewString("ruby " + version + " [" + rubyPlatform() + "]")
 	vm.consts["RUBY_COPYRIGHT"] = object.NewString("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto")
+	vm.registerRbConfig(version)
+}
+
+// rbconfigGOOS reports the build OS used to pick RbConfig's EXEEXT (".exe" on
+// Windows). It is a package var so a test can drive the Windows branch on any
+// host: that branch is otherwise unreachable off Windows (and the non-Windows
+// path unreachable on Windows), so the seam keeps the function at 100% on every
+// platform's coverage gate.
+var rbconfigGOOS = func() string { return runtime.GOOS }
+
+// registerRbConfig installs the RbConfig module (require "rbconfig") with a
+// CONFIG Hash holding the build-configuration keys app code reads — Puppet looks
+// up ruby_install_name / bindir / EXEEXT, and tooling reads rubylibdir. The
+// values describe this pure-Go runtime as an MRI build so MRI-shaped lookups
+// resolve.
+func (vm *VM) registerRbConfig(version string) {
+	mod := newClass("RbConfig", nil)
+	mod.isModule = true
+	vm.consts["RbConfig"] = mod
+
+	cfg := object.NewHash()
+	exeext := ""
+	if rbconfigGOOS() == "windows" {
+		exeext = ".exe"
+	}
+	for k, v := range map[string]string{
+		"ruby_install_name": "ruby",
+		"RUBY_INSTALL_NAME": "ruby",
+		"bindir":            "/usr/bin",
+		"EXEEXT":            exeext,
+		"ruby_version":      version,
+		"host_os":           runtime.GOOS,
+		"host_cpu":          runtime.GOARCH,
+		"rubylibdir":        "/usr/lib/ruby",
+	} {
+		cfg.Set(object.NewString(k), object.NewString(v))
+	}
+	mod.consts["CONFIG"] = cfg
 }
 
 // rubyPlatform renders a Ruby-style platform triple from the Go build target,
@@ -62,6 +101,24 @@ func (vm *VM) registerKernelIntrospection() {
 		return &object.Array{Elems: vm.callerFrames()}
 	})
 
+	// __FILE__: the path of the file currently executing. During a require it is
+	// the required file's absolute path; at the top level it is the script path
+	// ($0). MRI exposes __FILE__ as a keyword the parser substitutes at compile
+	// time; here it is a Kernel method returning the same value, which covers the
+	// common top-level / module-body uses (File.dirname(__FILE__), __dir__).
+	vm.cObject.define("__FILE__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(vm.currentFile())
+	})
+	// __dir__: the directory of the file currently executing (File.dirname of the
+	// realpath of __FILE__), as MRI's Kernel#__dir__.
+	vm.cObject.define("__dir__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		f := vm.currentFile()
+		if f == "" {
+			return object.NilV
+		}
+		return object.NewString(filepath.Dir(f))
+	})
+
 	// at_exit: register a block to run when the program finishes normally, in
 	// LIFO order. Returns the block as a Proc, as MRI does.
 	vm.cObject.define("at_exit", func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -71,6 +128,16 @@ func (vm *VM) registerKernelIntrospection() {
 		vm.atExit = append(vm.atExit, blk)
 		return blk
 	})
+}
+
+// currentFile returns the path of the file currently executing: the innermost
+// file being required, or the top-level script path ($0) when none is on the
+// require stack. It backs Kernel#__FILE__ / #__dir__.
+func (vm *VM) currentFile() string {
+	if n := len(vm.fileStack); n > 0 {
+		return vm.fileStack[n-1]
+	}
+	return vm.scriptName
 }
 
 // currentMethodName returns the name of the innermost real (named) method frame,

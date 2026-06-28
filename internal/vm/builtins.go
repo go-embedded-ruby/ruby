@@ -295,14 +295,23 @@ func (vm *VM) bootstrap() {
 	exc("SyntaxError", "ScriptError")
 	exc("LoadError", "ScriptError")
 
-	vm.registerFile()    // needs the exception hierarchy (Errno::ENOENT < StandardError)
-	vm.registerIO()      // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
-	vm.registerDir()     // Dir (reuses the Errno module set up by registerFile)
-	vm.registerTmpdir()  // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
-	vm.registerProcess() // Process module — identity + clock_gettime
-	vm.registerZlib()    // needs the exception hierarchy (Zlib::Error < StandardError)
-	vm.registerFiber()   // needs the exception hierarchy (FiberError < StandardError)
-	vm.registerThread()  // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
+	vm.registerFile()       // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerIO()         // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
+	vm.registerDir()        // Dir (reuses the Errno module set up by registerFile)
+	vm.registerTmpdir()     // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
+	vm.registerProcess()    // Process module — identity + clock_gettime
+	vm.registerOpenSSL()    // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
+	vm.registerNetHTTP()    // net/http + net/https loadable shell; needs StandardError
+	vm.registerTimeout()    // Timeout module (loadable shell); needs RuntimeError
+	vm.registerYAML()       // YAML/Psych loadable shell; needs StandardError
+	vm.registerFileUtils()  // FileUtils (real fs ops over os); needs Errno (registerFile)
+	vm.registerGetoptLong() // GetoptLong loadable shell; needs StandardError
+	vm.registerSyslog()     // Syslog loadable shell (feature probe)
+	vm.registerCGI()        // CGI.escape/unescape (real over net/url) + HTML helpers
+	vm.registerMonitor()    // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
+	vm.registerZlib()       // needs the exception hierarchy (Zlib::Error < StandardError)
+	vm.registerFiber()      // needs the exception hierarchy (FiberError < StandardError)
+	vm.registerThread()     // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
@@ -947,8 +956,21 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("to_str", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
-	vm.cString.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	strToSym := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(strOf(self))
+	}
+	vm.cString.define("to_sym", strToSym)
+	vm.cString.define("intern", strToSym) // MRI alias of String#to_sym
+	// scrub replaces invalid byte sequences with a replacement string (the Unicode
+	// replacement char U+FFFD by default), returning a valid UTF-8 string.
+	vm.cString.define("scrub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		repl := "�"
+		if len(args) > 0 {
+			if _, isNil := args[0].(object.Nil); !isNil {
+				repl = strArg(args[0])
+			}
+		}
+		return object.NewString(scrubUTF8(strOf(self), repl))
 	})
 	vm.cString.define("ljust", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(padString(strOf(self), args, 'l'))
@@ -2874,6 +2896,11 @@ func (vm *VM) bootstrap() {
 
 	// Class.
 	vm.cClass.define("new", nativeNew)
+	// allocate creates an uninitialized instance (no initialize call), as MRI's
+	// Class#allocate — used by frameworks that construct then initialize manually.
+	vm.cClass.define("allocate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &RObject{class: self.(*RClass), ivars: map[string]object.Value{}}
+	})
 	// Class.new([superclass]) { body } builds an anonymous class (super defaults
 	// to Object); the block, if any, runs as the class body. Dispatched only for
 	// the Class receiver itself (a normal Foo.new still allocates an instance).
@@ -2936,6 +2963,11 @@ func (vm *VM) bootstrap() {
 
 	vm.installRegexp()
 	setupStruct(vm)
+	// These depend on Struct (Etc::Passwd/Group) and the core collections, so they
+	// run after setupStruct and the prelude-defined Enumerable/Hash/Array.
+	vm.registerEtc()        // Etc module (real pw/grp via os/user; systmpdir); needs Struct + Enumerable
+	vm.registerConcurrent() // concurrent-ruby shell (collections alias core; ThreadLocalVar)
+	vm.registerENV()        // ENV: Hash-like view of the process environment over os
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,
@@ -3578,6 +3610,27 @@ func strArg(v object.Value) string {
 	}
 	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
 	return ""
+}
+
+// scrubUTF8 returns s with every invalid UTF-8 byte sequence replaced by repl,
+// so the result is valid UTF-8 (backing String#scrub). Valid runs are copied
+// verbatim; each invalid byte collapses to repl, as MRI does.
+func scrubUTF8(s, repl string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			b.WriteString(repl)
+			i++
+			continue
+		}
+		b.WriteString(s[i : i+size])
+		i += size
+	}
+	return b.String()
 }
 
 // hashPair builds the [key, value] array Hash#each yields; block auto-splat then

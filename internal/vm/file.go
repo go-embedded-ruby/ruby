@@ -63,14 +63,35 @@ func (vm *VM) registerFile() {
 		return &object.Array{Elems: []object.Value{object.NewString(path.Dir(p)), object.NewString(path.Base(p))}}
 	})
 	def("join", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		parts := make([]string, len(args))
-		for i, a := range args {
-			parts[i] = strArg(a)
+		// MRI's File.join flattens nested Array arguments, so File.join([a, b], c)
+		// behaves like File.join(a, b, c).
+		var parts []string
+		var add func(v object.Value)
+		add = func(v object.Value) {
+			if arr, ok := v.(*object.Array); ok {
+				for _, e := range arr.Elems {
+					add(e)
+				}
+				return
+			}
+			parts = append(parts, strArg(v))
+		}
+		for _, a := range args {
+			add(a)
 		}
 		return object.NewString(fileJoin(parts))
 	})
 	def("expand_path", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(fileExpand(strArg(args[0]), args[1:]))
+	})
+	// absolute_path resolves a path to an absolute one against an optional base
+	// directory (defaulting to the CWD), like expand_path but without ~ expansion.
+	// Puppet uses it with relative paths and an explicit base, where the two agree.
+	def("absolute_path", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(fileExpand(strArg(args[0]), args[1:]))
+	})
+	def("absolute_path?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(path.IsAbs(toSlash(strArg(args[0]))))
 	})
 
 	def("exist?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {

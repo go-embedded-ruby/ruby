@@ -761,6 +761,18 @@ module Gem
   def self.win_platform?
     false
   end
+
+  # clear_paths resets RubyGems' cached load paths. This runtime has no gem
+  # database, so it is a no-op (Puppet calls it when probing rubygems sources).
+  def self.clear_paths; end
+
+  # Specification is the gem metadata registry. Without a gem database its stub
+  # list is empty, so gem-directory discovery yields nothing.
+  class Specification
+    def self.stubs
+      []
+    end
+  end
 end
 
 # The English library (require "English") is implemented natively: its long-name

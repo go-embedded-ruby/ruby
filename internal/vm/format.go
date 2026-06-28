@@ -23,10 +23,50 @@ func formatString(format string, args []object.Value) string {
 		argi++
 		return v
 	}
+	// named looks up a %{name}/%<name> reference in the hash argument, raising the
+	// MRI errors when there is no hash or the key is absent.
+	named := func(key string) object.Value {
+		h, ok := namedFormatHash(args)
+		if !ok {
+			raise("ArgumentError", "one hash required")
+		}
+		v, present := h.Get(object.Symbol(key))
+		if !present {
+			raise("KeyError", "key<%s> not found", key)
+		}
+		return v
+	}
 	for i := 0; i < len(format); {
 		if format[i] != '%' {
 			b.WriteByte(format[i])
 			i++
+			continue
+		}
+		// %{name}: insert the hash value for name, to_s-converted, with no further
+		// formatting (MRI's shorthand).
+		if i+1 < len(format) && format[i+1] == '{' {
+			end := strings.IndexByte(format[i+1:], '}')
+			if end < 0 {
+				raise("ArgumentError", "malformed format string - %%{")
+			}
+			key := format[i+2 : i+1+end]
+			b.WriteString(named(key).ToS())
+			i = i + 1 + end + 1
+			continue
+		}
+		// %<name>spec: format the hash value for name with the conversion that
+		// follows the closing '>'.
+		if i+1 < len(format) && format[i+1] == '<' {
+			end := strings.IndexByte(format[i+1:], '>')
+			if end < 0 {
+				raise("ArgumentError", "malformed format string - %%<")
+			}
+			key := format[i+2 : i+1+end]
+			rest := i + 1 + end + 1 // index just past '>'
+			val := named(key)
+			spec, verb, advance := parseConversion(format, rest)
+			b.WriteString(formatOne("%"+spec, verb, func() object.Value { return val }))
+			i = advance
 			continue
 		}
 		// Parse %[flags][width][.precision]verb.
@@ -56,6 +96,40 @@ func formatString(format string, args []object.Value) string {
 		b.WriteString(formatOne(spec, verb, next))
 	}
 	return b.String()
+}
+
+// namedFormatHash returns the hash argument backing %{name}/%<name> references:
+// the sole argument when it is a Hash. A second bool reports success.
+func namedFormatHash(args []object.Value) (*object.Hash, bool) {
+	if len(args) == 1 {
+		if h, ok := args[0].(*object.Hash); ok {
+			return h, true
+		}
+	}
+	return nil, false
+}
+
+// parseConversion reads the flags/width/precision/verb of a conversion that
+// begins at start (just past a %<name> reference's '>'), returning the spec body
+// (no leading '%'), the verb byte, and the index just past the verb.
+func parseConversion(format string, start int) (spec string, verb byte, next int) {
+	j := start
+	for j < len(format) && strings.IndexByte("-+ 0#", format[j]) >= 0 {
+		j++
+	}
+	for j < len(format) && format[j] >= '0' && format[j] <= '9' {
+		j++
+	}
+	if j < len(format) && format[j] == '.' {
+		j++
+		for j < len(format) && format[j] >= '0' && format[j] <= '9' {
+			j++
+		}
+	}
+	if j >= len(format) {
+		raise("ArgumentError", "malformed format string - %%<>")
+	}
+	return format[start : j+1], format[j], j + 1
 }
 
 // formatOne renders a single conversion, coercing the next argument to the type

@@ -193,7 +193,12 @@ const (
 // level. Catch tables, full arity, and source maps (plan §6) arrive with the
 // later phases.
 type ISeq struct {
-	Name        string
+	Name string
+	// File is the source-file path this ISeq (and its nested children) was loaded
+	// from, for Kernel#__FILE__ / #__dir__. doRequire propagates it to Children so
+	// a method defined in one file reports that file even when called from another.
+	// Empty for compiled-in code (the prelude).
+	File        string
 	Insns       []Instr
 	Consts      []object.Value // literal pool: integers, floats, strings
 	Names       []string       // method-call and definition names

@@ -790,6 +790,41 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.smethods["new"] = reNew
 	vm.cRegexp.smethods["compile"] = &Method{name: "compile", owner: vm.cRegexp, native: reNew.native}
 
+	// Regexp.escape(str) / Regexp.quote(str): the string with regex metacharacters
+	// escaped so it matches literally.
+	reEscape := &Method{name: "escape", owner: vm.cRegexp,
+		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			return object.NewString(regexpEscapeLiteral(strArg(args[0])))
+		}}
+	vm.cRegexp.smethods["escape"] = reEscape
+	vm.cRegexp.smethods["quote"] = &Method{name: "quote", owner: vm.cRegexp, native: reEscape.native}
+
+	// Regexp.union(pat, ...) / Regexp.union([pat, ...]) builds one Regexp matching
+	// any of the patterns. A Regexp argument contributes its source; a String is
+	// escaped to match literally. With no arguments it matches nothing, as MRI.
+	vm.cRegexp.smethods["union"] = &Method{name: "union", owner: vm.cRegexp,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			// A single Array argument is the list of patterns.
+			if len(args) == 1 {
+				if arr, ok := args[0].(*object.Array); ok {
+					args = arr.Elems
+				}
+			}
+			if len(args) == 0 {
+				return vm.regexpNew([]object.Value{object.NewString("(?!)")})
+			}
+			sources := make([]string, len(args))
+			for i, a := range args {
+				switch v := a.(type) {
+				case *Regexp:
+					sources[i] = v.source
+				default:
+					sources[i] = regexpEscapeLiteral(strArg(a))
+				}
+			}
+			return vm.regexpNew([]object.Value{object.NewString(strings.Join(sources, "|"))})
+		}}
+
 	vm.cRegexp.define("source", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(reArg(self).source)
 	})

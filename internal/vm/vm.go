@@ -106,6 +106,7 @@ type VM struct {
 	cBigDecimal                            *RClass
 	cDate                                  *RClass
 	cBag                                   *RClass
+	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
 	cMethod                                *RClass
@@ -123,6 +124,7 @@ type VM struct {
 
 	loaded        map[string]bool // require/require_relative: features loaded once
 	requireDirs   []string        // stack of directories of the files currently being required
+	fileStack     []string        // stack of source files of the executing ISeq frames (for __FILE__)
 	scriptName    string          // $0 / $PROGRAM_NAME: the running program's name
 	defaultRandom *RandomObj      // process-wide generator for Kernel#rand / #srand
 	currentFiber  *Fiber          // the fiber currently running (nil at the root), for Fiber.yield
@@ -360,12 +362,18 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			// frameNames entries unpopped; reset the stack so a later top-level
 			// statement (rescued program, REPL line) starts clean.
 			vm.frameNames = vm.frameNames[:0]
+			vm.fileStack = vm.fileStack[:0]
 			if sig, ok := r.(throwSignal); ok {
 				r = RubyError{Class: "UncaughtThrowError", Message: "uncaught throw " + sig.tag.Inspect()}
 			}
 			result, err = nil, r.(RubyError)
 		}
 	}()
+	// Stamp the top-level program with its path so __FILE__ in the main script (and
+	// in methods/blocks it defines) reports it.
+	if vm.scriptName != "" {
+		setISeqFile(iseq, vm.scriptName)
+	}
 	res := vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil)
 	vm.runAtExit()
 	return res, nil
@@ -505,6 +513,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// "" so the depth still lines up. The entry is popped on normal completion;
 	// an exception unwinding past here is reset wholesale at the Run boundary.
 	vm.frameNames = append(vm.frameNames, methodName)
+	// Track the source file of frames that carry one (loaded files), so __FILE__
+	// reports the file of the executing ISeq even across calls into other files.
+	// Like frameNames, an exception unwinding past here is reset at the Run
+	// boundary rather than popped per-frame.
+	pushedFile := iseq.File != ""
+	if pushedFile {
+		vm.fileStack = append(vm.fileStack, iseq.File)
+	}
 
 	stack := vm.getStack()
 	push := func(v object.Value) { stack = append(stack, v) }
@@ -824,6 +840,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if !ok {
 					raise("TypeError", "can't define singleton")
 				}
+				// A `class << self` body's lexical nesting includes the enclosing
+				// class/module, so bare constants in singleton methods resolve against
+				// the surrounding scope (e.g. a sibling class defined alongside). Record
+				// the current lexical scope as the singleton class's lexParent so
+				// resolveConst walks the metaclass -> enclosing class -> ... chain.
+				if sc.lexParent == nil && definee != nil && definee != vm.cObject {
+					sc.lexParent = definee
+				}
 				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil))
 			case bytecode.OpAlias:
 				vm.aliasMethod(definee, iseq.Names[in.A], iseq.Names[in.B])
@@ -833,9 +857,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(object.NilV)
 			case bytecode.OpDefineClass:
 				// Bare `class B` nests into the current lexical scope (definee).
-				push(vm.defineClassIn(definee, iseq.Names[in.A], iseq.Children[in.B], nil))
+				push(vm.defineClassIn(definee, iseq.Names[in.A], iseq.Children[in.B], nil, false))
 			case bytecode.OpDefineModule:
-				push(vm.defineModuleIn(definee, iseq.Names[in.A], iseq.Children[in.B]))
+				push(vm.defineModuleIn(definee, iseq.Names[in.A], iseq.Children[in.B], false))
 			case bytecode.OpDefineClassScoped:
 				// C flags: bit 0 = parent on stack, bit 1 = super-expr on stack.
 				// They were pushed parent-then-super, so pop super first.
@@ -843,14 +867,19 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if in.C&2 != 0 {
 					superExpr = pop()
 				}
-				parent := definee // bare name nests into the lexical scope
+				// A compact path name (class A::B) is scoped: its constant lives in the
+				// parent's table, but its lexical nesting is only itself (Module.nesting
+				// == [A::B], not [A::B, A]), so bare constants in the body do NOT see
+				// the parent namespace. A bare `class B` (bit 0 clear) still nests into
+				// the current lexical scope.
+				parent, scoped := definee, false
 				if in.C&1 != 0 {
-					parent = vm.asModuleParent(pop())
+					parent, scoped = vm.asModuleParent(pop()), true
 				}
-				push(vm.defineClassIn(parent, iseq.Names[in.A], iseq.Children[in.B], superExpr))
+				push(vm.defineClassIn(parent, iseq.Names[in.A], iseq.Children[in.B], superExpr, scoped))
 			case bytecode.OpDefineModuleScoped:
 				parent := vm.asModuleParent(pop())
-				push(vm.defineModuleIn(parent, iseq.Names[in.A], iseq.Children[in.B]))
+				push(vm.defineModuleIn(parent, iseq.Names[in.A], iseq.Children[in.B], true))
 			case bytecode.OpInvokeSuper:
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
@@ -1131,6 +1160,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	vm.putEnv(env)
 	vm.putStack(stack)
 	vm.frameNames = vm.frameNames[:len(vm.frameNames)-1]
+	if pushedFile {
+		vm.fileStack = vm.fileStack[:len(vm.fileStack)-1]
+	}
 	return result
 }
 
@@ -1194,7 +1226,7 @@ func scopedNameFor(scope *RClass, name string) string {
 // expression); otherwise body.Super (a bare name) is consulted. It records the
 // class's fully-qualified name and lexical parent on first creation, runs the
 // class body with self = the class, and returns the body's value.
-func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, superExpr object.Value) object.Value {
+func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, superExpr object.Value, scoped bool) object.Value {
 	table := vm.constTable(parent)
 	var class *RClass
 	if existing, ok := table[name]; ok {
@@ -1220,7 +1252,12 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			super = sc.(*RClass)
 		}
 		class = newClass(scopedNameFor(parent, name), super)
-		class.lexParent = lexParentFor(parent)
+		// A compact (scoped) definition's lexical nesting is only itself, so its
+		// lexParent terminates the chain (nil); a bare nested definition records its
+		// enclosing scope so the body sees the surrounding namespace.
+		if !scoped {
+			class.lexParent = lexParentFor(parent)
+		}
 		table[name] = class
 		// Hook: superclass.inherited(subclass), fired when the class is created
 		// (before its body runs) if the superclass defines the hook.
@@ -1238,7 +1275,7 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 // table (the top-level/Object table when parent is nil or Object), recording its
 // qualified name and lexical parent on first creation, runs its body with self =
 // the module, and returns the body's value.
-func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq) object.Value {
+func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, scoped bool) object.Value {
 	table := vm.constTable(parent)
 	var mod *RClass
 	if existing, ok := table[name]; ok {
@@ -1250,7 +1287,9 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq) o
 	} else {
 		mod = newClass(scopedNameFor(parent, name), nil)
 		mod.isModule = true
-		mod.lexParent = lexParentFor(parent)
+		if !scoped {
+			mod.lexParent = lexParentFor(parent)
+		}
 		table[name] = mod
 	}
 	mod.defaultVis, mod.funcMode = visPublic, false
