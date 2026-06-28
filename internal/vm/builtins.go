@@ -734,8 +734,18 @@ func (vm *VM) bootstrap() {
 		defineAttrs(self.(*RClass), args, true, true)
 		return object.NilV
 	})
-	classEvalFn := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	classEvalFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// String form — class_eval("def m; end", file, line) — compiles the source
+		// and runs it with the class as both self and the method-definition target,
+		// so a `def` in the source becomes one of the class's instance methods. The
+		// optional file/line trailing arguments are accepted for MRI compatibility
+		// (they steer error reporting only) and otherwise ignored.
 		if blk == nil {
+			if len(args) > 0 {
+				if s, ok := args[0].(*object.String); ok {
+					return vm.classEvalString(self.(*RClass), string(s.B))
+				}
+			}
 			raise("LocalJumpError", "no block given (yield)")
 		}
 		return vm.classEval(self.(*RClass), blk, nil)
@@ -1658,6 +1668,8 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
+	// collect! is the classic alias of map! (as collect is of map).
+	vm.aliasMethod(vm.cArray, "collect!", "map!")
 	vm.cArray.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		for i, j := 0, len(a.Elems)-1; i < j; i, j = i+1, j-1 {

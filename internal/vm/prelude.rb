@@ -1421,6 +1421,170 @@ module Singleton
   end
 end
 
+# StringScanner is a pure-Ruby implementation of the strscan standard library
+# (require "strscan"), written from scratch to match MRI's observable behavior on
+# the surface Puppet's lexer relies on. It walks a string left-to-right, matching
+# regular expressions anchored at the current scan position and advancing the
+# position past each match. Positions are character indices (matching this VM's
+# character-based String/Regexp offsets); for the all-ASCII input that dominates
+# real use this is identical to MRI's byte positions, and #charpos returns the
+# same character index either way.
+class StringScanner
+  attr_reader :string, :matched
+
+  # new wraps str; scanning begins at position 0 with no recorded match.
+  def initialize(str)
+    @string = str
+    @pos = 0
+    @matched = nil
+  end
+
+  # pos / charpos report the current scan position; pos= moves it (clamped into the
+  # valid range, as MRI's scanner is reset by an explicit assignment).
+  attr_reader :pos
+  alias charpos pos
+
+  def pos=(n)
+    n += @string.length if n < 0
+    @pos = n
+  end
+
+  # eos? is true when the position is at (or past) the end of the string.
+  def eos?
+    @pos >= @string.length
+  end
+
+  # rest is the unscanned remainder of the string.
+  def rest
+    @string[@pos..] || ""
+  end
+
+  # scan matches pattern anchored at the current position; on success it records
+  # and returns the matched text and advances past it, otherwise it returns nil and
+  # leaves the position (and clears the recorded match), matching MRI.
+  def scan(pattern)
+    m = pattern.match(@string, @pos)
+    if m && m.begin(0) == @pos
+      @matched = m[0]
+      @pos = m.end(0)
+      @matched
+    else
+      @matched = nil
+      nil
+    end
+  end
+
+  # skip behaves like scan but returns the length of the matched text instead of
+  # the text itself (nil on no match).
+  def skip(pattern)
+    s = scan(pattern)
+    s && s.length
+  end
+
+  # match? reports the length of a match anchored at the current position WITHOUT
+  # advancing it (nil on no match), as MRI does.
+  def match?(pattern)
+    m = pattern.match(@string, @pos)
+    if m && m.begin(0) == @pos
+      m[0].length
+    end
+  end
+
+  # scan_until advances to and past the next occurrence of pattern anywhere ahead,
+  # returning everything from the old position through the match (nil and no move on
+  # no match). #matched holds just the pattern match.
+  def scan_until(pattern)
+    m = pattern.match(@string, @pos)
+    if m
+      @matched = m[0]
+      result = @string[@pos...m.end(0)]
+      @pos = m.end(0)
+      result
+    else
+      @matched = nil
+      nil
+    end
+  end
+
+  # getch returns the single character at the current position and advances one
+  # character; nil at end-of-string.
+  def getch
+    return nil if eos?
+    c = @string[@pos]
+    @matched = c
+    @pos += 1
+    c
+  end
+
+  # peek returns up to len characters from the current position without advancing.
+  def peek(len)
+    @string[@pos, len] || ""
+  end
+
+  # terminate jumps the position to the end of the string and clears the match,
+  # matching MRI.
+  def terminate
+    @pos = @string.length
+    @matched = nil
+    self
+  end
+
+  # reset returns the position to the start and clears the match.
+  def reset
+    @pos = 0
+    @matched = nil
+    self
+  end
+end
+
+# Find supports top-down traversal of a set of file paths (require "find"),
+# written from scratch to match MRI's lib/find.rb behavior. Find.find walks each
+# given path breadth-first-by-directory, yielding every file and directory it
+# reaches; Find.prune (called inside the block) skips into the current directory.
+module Find
+  VERSION = "0.2.0"
+
+  # find yields the name of every path given, then recursively the entries of any
+  # directory among them, depth-first with sorted children (matching MRI's order).
+  # With no block it returns an Enumerator. Missing top-level paths raise
+  # Errno::ENOENT; per-entry errors are swallowed when ignore_error is true.
+  def find(*paths, ignore_error: true) # :yield: path
+    return enum_for(__method__, *paths, ignore_error: ignore_error) unless block_given?
+
+    paths.collect! { |d| raise Errno::ENOENT, d unless File.exist?(d); d.dup }.each do |path|
+      ps = [path]
+      while (file = ps.shift)
+        catch(:prune) do
+          yield file.dup
+          # A directory's children are pushed in reverse-sorted order so that
+          # shifting from the front visits them in ascending order, depth-first.
+          if File.directory?(file)
+            children =
+              begin
+                Dir.children(file)
+              rescue SystemCallError
+                raise unless ignore_error
+                next
+              end
+            children.sort!
+            children.reverse_each { |f| ps.unshift(File.join(file, f)) }
+          end
+        end
+      end
+    end
+    nil
+  end
+
+  # prune skips the current file or directory, restarting the traversal loop with
+  # the next entry; for a directory it is not descended into. Only meaningful
+  # inside the block passed to Find.find.
+  def prune
+    throw :prune
+  end
+
+  module_function :find, :prune
+end
+
 # ERB is a pure-Ruby embedded-Ruby template engine (require "erb"), written from
 # scratch to match MRI 4.0.5's observable behavior rather than copied from MRI's
 # erb.rb. A template mixes literal text with three tag kinds —

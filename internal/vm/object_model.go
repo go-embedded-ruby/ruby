@@ -848,6 +848,19 @@ func (vm *VM) classEval(cls *RClass, p *Proc, args []object.Value) object.Value 
 	return vm.exec(p.iseq, cls, vm.bindBlockArgs(p, args), cls, "", p.env, p.block, p)
 }
 
+// classEvalString runs Ruby source as class_eval/module_eval would for the
+// string form: the class is both self and the method-definition target, with a
+// fresh local scope, so a top-level `def` in the source becomes an instance
+// method of cls — the mechanism racc's runtime uses to graft do_parse/yyparse.
+func (vm *VM) classEvalString(cls *RClass, src string) object.Value {
+	iseq, cerr := parseCompileFn(src)
+	if cerr != nil {
+		return raise("SyntaxError", "%s", cerr.Error())
+	}
+	iseq.Name = "(eval)"
+	return vm.exec(iseq, cls, nil, cls, "", nil, nil, nil)
+}
+
 // bindBlockArgs maps call args onto a block's parameters, with the auto-splat a
 // multi-parameter block applies to a single Array argument.
 func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
