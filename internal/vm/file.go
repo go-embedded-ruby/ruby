@@ -205,6 +205,14 @@ func fileJoin(parts []string) string {
 	return b.String()
 }
 
+// isAbsPath reports whether p is absolute, recognising both the forward-slash
+// rooted form ("/x") and — on Windows — a drive-letter root ("C:/x"). rbgo keeps
+// paths forward-slashed internally, so path.IsAbs alone would treat a Windows
+// absolute path as relative and wrongly prepend the working directory.
+func isAbsPath(p string) bool {
+	return path.IsAbs(p) || filepath.IsAbs(filepath.FromSlash(p))
+}
+
 // fileExpand implements File.expand_path: ~ expands to the home directory, a
 // relative path is resolved against the optional base (default: the working
 // directory), and the result is cleaned (so .. and . collapse).
@@ -214,7 +222,7 @@ func fileExpand(p string, rest []object.Value) string {
 			p = toSlash(home) + strings.TrimPrefix(p, "~")
 		}
 	}
-	if path.IsAbs(p) {
+	if isAbsPath(p) {
 		return path.Clean(p)
 	}
 	base := ""
