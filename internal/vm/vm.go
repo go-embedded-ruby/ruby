@@ -461,6 +461,13 @@ func New(out io.Writer) *VM {
 	loadedFeatures := &object.Array{}
 	vm.globals["$LOADED_FEATURES"] = loadedFeatures
 	vm.globals[`$"`] = loadedFeatures
+	// ARGV (the top-level constant) holds the program's command-line arguments and
+	// is the very same Array as $* — a script doing ARGV.replace(...) and a library
+	// reading $* see one mutable object, as in MRI. The embedded host does not feed
+	// process args in yet, so it starts empty; SetARGV can repopulate it.
+	argv := &object.Array{}
+	vm.consts["ARGV"] = argv
+	vm.globals["$*"] = argv
 	vm.installPrelude()
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
@@ -728,6 +735,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		homeDmBody = selfBlock.dmBody
 	}
 
+	// lexCref is the scope a bare constant *reference* resolves against. For a
+	// method/class body it is the definee. For a block it is the block's captured
+	// lexical scope (where the block literal was written), which usually equals the
+	// definee — except under class_eval/module_eval/instance_eval, where the
+	// definee is switched to the eval receiver (so `def` and `CONST =` target it)
+	// while constant lookup must still follow the block's textual nesting, as in
+	// MRI. Constant *definition* keeps using definee; only lookup uses lexCref.
+	lexCref := definee
+	if selfBlock != nil && selfBlock.cref != nil {
+		lexCref = selfBlock.cref
+	}
+
 	// Every frame catches a returnSignal aimed at its own selfTarget (a local
 	// return/next routed through an ensure, or a non-local return whose home is
 	// this frame). A signal for some other target passes through. On a catch the
@@ -840,7 +859,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				setIvar(self, iseq.Names[in.A], stack[len(stack)-1])
 			case bytecode.OpGetConst:
 				name := iseq.Names[in.A]
-				v, ok := vm.resolveConst(definee, name)
+				v, ok := vm.resolveConst(lexCref, name)
 				if !ok {
 					raise("NameError", "uninitialized constant %s", name)
 				}
@@ -1192,7 +1211,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// defined? must NOT trigger autoload (MRI): a pending autoload still
 				// reports "constant" without requiring the file.
 				name := iseq.Names[in.A]
-				if _, ok := vm.resolveConstNoAutoload(definee, name); ok || vm.autoloadPending(definee, name) {
+				if _, ok := vm.resolveConstNoAutoload(lexCref, name); ok || vm.autoloadPending(lexCref, name) {
 					push(definedTag("constant"))
 				} else {
 					push(object.NilV)
@@ -1633,9 +1652,20 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 				return vm.invoke(m, self, args, blk)
 			}
 		}
+	} else if definee.metaOf != nil {
+		// definee is a metaclass: the current method was defined in a `class << self`
+		// body, so its class-method super walks the metaclass chain
+		// (#<Class:Child> -> #<Class:Base> -> ...). Each metaclass's method table
+		// aliases its class's smethods, so a plain methods lookup finds the inherited
+		// class method.
+		for k := definee.super; k != nil; k = k.super {
+			if m, ok := k.methods[methodName]; ok {
+				return vm.invoke(m, self, args, blk)
+			}
+		}
 	} else if m := lookupSMethod(definee.super, methodName); m != nil {
-		// definee is outside the receiver's ancestry: this is a class-method
-		// super (def self.foo), so walk the singleton-method chain.
+		// definee is the class itself, outside the receiver's ancestry: this is a
+		// class-method super (def self.foo), so walk the singleton-method chain.
 		return vm.invoke(m, self, args, blk)
 	}
 	raise("NoMethodError", "super: no superclass method '%s'", methodName)

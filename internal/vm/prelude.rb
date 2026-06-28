@@ -1173,6 +1173,37 @@ class Pathname
     @path.split(SEPARATOR).reject(&:empty?).each { |f| yield f }
   end
 
+  # ascend yields the path then each parent up to the root (or the first relative
+  # component), like MRI's Pathname#ascend. descend is the same sequence reversed.
+  def ascend
+    return enum_for(:ascend) unless block_given?
+    paths = ascend_paths
+    paths.each { |p| yield Pathname.new(p) }
+    self
+  end
+
+  def descend
+    return enum_for(:descend) unless block_given?
+    ascend_paths.reverse_each { |p| yield Pathname.new(p) }
+    self
+  end
+
+  def ascend_paths
+    out = [@path]
+    cur = @path
+    loop do
+      idx = cur.rindex(SEPARATOR)
+      break if idx.nil?
+      if idx == 0
+        out << SEPARATOR unless cur == SEPARATOR
+        break
+      end
+      cur = cur[0...idx]
+      out << cur
+    end
+    out
+  end
+
   # cleanpath collapses "." and ".." components and redundant separators.
   def cleanpath
     abs = absolute?
@@ -2441,3 +2472,105 @@ class OptionParser
 end
 
 OptParse = OptionParser
+
+# ---------------------------------------------------------------------------
+# Tempfile (tempfile): a from-scratch pure-Ruby temporary file built over File
+# and Dir.tmpdir. It creates a uniquely-named file in the temp directory and
+# delegates the IO methods (write/read/flush/print/rewind/each_line/...) to the
+# underlying File, the way MRI's Tempfile delegates to its internal file. close
+# leaves the file on disk; unlink/delete removes it and clears #path. Required
+# by Puppet's file type at load.
+# ---------------------------------------------------------------------------
+class Tempfile
+  attr_reader :path
+
+  def self.counter
+    @counter = (@counter || 0) + 1
+  end
+
+  def initialize(basename = "", tmpdir = nil, mode: "w+", **_opts)
+    require "tmpdir"
+    prefix, suffix = basename.is_a?(Array) ? basename : [basename.to_s, ""]
+    dir = tmpdir || Dir.tmpdir
+    @path = nil
+    100.times do
+      name = "#{prefix}#{Process.pid}-#{Tempfile.counter}-#{rand(0x100000000).to_s(36)}#{suffix}"
+      candidate = File.join(dir, name)
+      unless File.exist?(candidate)
+        @path = candidate
+        break
+      end
+    end
+    @file = File.open(@path, mode)
+    if block_given?
+      begin
+        yield self
+      ensure
+        close
+        unlink
+      end
+    end
+  end
+
+  # open re-opens a closed Tempfile so a caller can keep writing (Puppet's
+  # data_sync does Tempfile.new(...) then tempfile.open). It is also offered as a
+  # class method mirroring Tempfile.new with a block.
+  def open
+    @file = File.open(@path, "r+") unless @file && !@closed
+    @closed = false
+    @file
+  end
+
+  def self.open(*args, &block)
+    new(*args, &block)
+  end
+
+  def self.create(basename = "", tmpdir = nil, **opts)
+    t = new(basename, tmpdir, **opts)
+    if block_given?
+      begin
+        return yield(t)
+      ensure
+        t.close
+        t.unlink
+      end
+    end
+    t
+  end
+
+  def close(unlink_now = false)
+    @file.close if @file && !@closed
+    @closed = true
+    unlink if unlink_now
+    nil
+  end
+
+  def close!
+    close(true)
+  end
+
+  def unlink
+    if @path && File.exist?(@path)
+      File.unlink(@path)
+    end
+    @path = nil
+    nil
+  end
+  alias delete unlink
+
+  def chmod(mode)
+    File.chmod(mode, @path) if @path && File.respond_to?(:chmod)
+  end
+
+  def respond_to_missing?(name, include_private = false)
+    (@file && @file.respond_to?(name, include_private)) || super
+  end
+
+  def method_missing(name, *args, &block)
+    if @file && @file.respond_to?(name)
+      @file.send(name, *args, &block)
+    else
+      super
+    end
+  end
+end

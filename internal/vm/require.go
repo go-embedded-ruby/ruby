@@ -32,6 +32,7 @@ var providedFeatures = map[string]bool{
 	"concurrent": true, "syslog": true, "cgi": true, "monitor": true,
 	"net/http": true, "net/https": true, "resolv": true, "singleton": true,
 	"optparse": true, "ripper": true, "erb": true, "find": true,
+	"tempfile": true, "open3": true,
 	"strscan": true, "fiber": true, "objspace": true,
 }
 

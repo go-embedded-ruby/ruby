@@ -14,12 +14,10 @@ import (
 // operating on '/'-separated paths and raising Errno::* as MRI does. It runs
 // after registerFile, reusing the Errno module set up there.
 func (vm *VM) registerDir() {
-	errno := vm.consts["Errno"].(*RClass)
-	syscallErr := vm.consts["SystemCallError"].(*RClass)
-	eexist := newClass("Errno::EEXIST", syscallErr)
-	errno.consts["EEXIST"] = eexist
-	vm.consts["Errno::EEXIST"] = eexist
-
+	// registerFile already populated the Errno module (including EEXIST), so reuse
+	// those classes rather than minting new ones — recreating Errno::EEXIST here
+	// would shadow the registerFile version and break a `rescue Errno::EEXIST` that
+	// caught the original object.
 	cDir := newClass("Dir", vm.cObject)
 	vm.consts["Dir"] = cDir
 	def := func(name string, fn NativeFn) { cDir.smethods[name] = &Method{name: name, owner: cDir, native: fn} }
