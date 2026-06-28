@@ -648,7 +648,7 @@ func (vm *VM) bootstrap() {
 				return object.Bool(true)
 			}
 		}
-		return object.Bool(false)
+		return object.False
 	})
 	vm.cModule.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if c := self.(*RClass); c.name != "" {
@@ -2052,6 +2052,43 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cNilClass.define("to_a", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Array{}
+	})
+	// NilClass conversions mirror MRI: nil.to_i → 0, nil.to_f → 0.0, nil.to_h → {},
+	// nil.to_r → (0/1), nil.to_c → (0+0i). nil.to_a/to_s/inspect already exist.
+	vm.cNilClass.define("to_i", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(0)
+	})
+	vm.cNilClass.define("to_f", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Float(0)
+	})
+	vm.cNilClass.define("to_h", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewHash()
+	})
+	vm.cNilClass.define("to_r", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Rational{R: big.NewRat(0, 1)}
+	})
+	vm.cNilClass.define("to_c", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Complex{Re: object.Integer(0), Im: object.Integer(0)}
+	})
+	// nil & obj is always false; nil | obj and nil ^ obj are true unless obj is
+	// nil or false (MRI treats only nil/false as falsey here).
+	vm.cNilClass.define("&", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.False
+	})
+	vm.cNilClass.define("|", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.Bool(args[0].Truthy())
+	})
+	vm.cNilClass.define("^", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.Bool(args[0].Truthy())
 	})
 	vm.cArray.define("sort_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
