@@ -64,14 +64,60 @@ YJIT); TruffleRuby is the compute ceiling.
 
 > **Honesty note.** "99.82 % of Rails" means rbgo's front-end **parses and
 > compiles** that fraction of Rails's `.rb` files — *not* that rbgo **runs**
-> Rails. Running a full Rails or Puppet application additionally needs the runtime
-> stdlib surface and C-extension equivalents, which is ongoing and unproven. What
-> is established is that **the Ruby language / front-end is essentially complete**
-> on real-world code; whether any *given application boots* end-to-end is
-> separate, future work. Details:
+> Rails. Running a full application additionally needs the runtime stdlib surface
+> and C-extension equivalents. That surface is now real enough that **Puppet
+> boots and evaluates manifests under rbgo** (see *Running Puppet* below); full
+> `puppet apply` (the transaction / provider layer) is still in progress. What is
+> established is that **the Ruby language / front-end is essentially complete** on
+> real-world code, and that the runtime is far enough along to boot a real
+> application; whether any *given* application runs end-to-end remains
+> application-specific work. Details:
 > [CONFORMANCE-RAILS-PUPPET.md](CONFORMANCE-RAILS-PUPPET.md),
 > [CONFORMANCE-LIBRARIES.md](CONFORMANCE-LIBRARIES.md),
 > [CONFORMANCE-RSPEC.md](CONFORMANCE-RSPEC.md).
+
+### Running Puppet — boots, parses, compiles, and evaluates manifests
+
+Beyond parsing real-world Ruby, **rbgo now runs [Puppet](https://github.com/puppetlabs/puppet)**.
+`require "puppet"` **fully boots** the framework (Puppet 8.11.0) on a pure-Go
+CGO=0 `rbgo` — its pure-Ruby gem dependencies (`semantic_puppet`,
+`concurrent-ruby`, `deep_merge`, `fast_gettext`, `facter`, `racc`, …) load on the
+`$LOAD_PATH` — and a manifest then travels the real Puppet path: it **parses to
+the Pops AST, compiles to a catalog, and evaluates**. A trivial manifest emits
+real Puppet output:
+
+```ruby
+notice("hi from puppet")
+# => Notice: Scope(Class[main]): hi from puppet
+```
+
+Reaching this exercised a large slice of the runtime, each gap reduced to a
+minimal rbgo-vs-MRI repro before fixing:
+
+- **Language / VM conformance:** `autoload`, frame-based `Exception#backtrace` /
+  `set_backtrace` / `full_message`, interpolated regexp literals, non-local block
+  `return`, `Symbol#intern`, `NilClass` conversions, `Array` slice-assignment,
+  `Module.new` (real anonymous module running its block as a body),
+  `extend` transitivity (a module's transitively-included methods become class
+  methods), setter expressions returning their RHS, nested constant namespaces,
+  and method-visibility enforcement — among dozens more.
+- **Pure-Go stdlib modules** added on the path to boot: **`ERB`** (template
+  engine), **`openssl`** (real crypto, not a stub), **`net/http`**, **`resolv`**,
+  **`tmpdir`**, **`Process`**, **`StringScanner`** (`strscan`), **`Find`**,
+  **`getoptlong`**, **`syslog`**, **`fileutils`**, `optparse`, `objspace`, and
+  more — each `require`-able and CGO=0.
+
+This is the **C-extension → pure-Go shim** strategy in action: a real Ruby
+application ships as a single static CGO=0 binary because the C-backed gem APIs
+are backed by pure Go. Puppet validates the approach end to end — its
+dependency tree is pure Ruby, so it loads as-is.
+
+> **Frontier (honest):** what works today is **boot → parse → compile →
+> evaluate** a manifest (the Pops evaluator emits `Notice:`/`warning`/… output).
+> Full **`puppet apply`** — the transaction / RAL / resource-provider layer that
+> mutates real system state — is the **active next milestone**, not done. The
+> example above is a real evaluation; an `apply` that converges resources against
+> a host is in progress.
 
 ### Supported today
 
@@ -270,8 +316,10 @@ and on the performance side small-integer interning and capture-tracked
 frame-environment recycling have cut call-path allocations (a small-int loop from
 ~245k allocations to 1; recursion's call allocations halved, ~14% faster), with
 the 6-runtime benchmark suite ([BENCHMARKS.md](BENCHMARKS.md)) tracking rbgo vs
-MRI / YJIT / JRuby / TruffleRuby. The remaining road from "parses + compiles" to
-"runs whole applications" is the runtime stdlib + C-extension surface. See the
+MRI / YJIT / JRuby / TruffleRuby. The road from "parses + compiles" to "runs whole
+applications" — the runtime stdlib + C-extension surface — is now well underway:
+**Puppet boots and evaluates manifests** (see *Running Puppet* above), with full
+`puppet apply` the active next milestone. See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
 
 ## Quick start
