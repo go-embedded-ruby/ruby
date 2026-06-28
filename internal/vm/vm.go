@@ -27,10 +27,22 @@ import (
 type RubyError struct {
 	Class   string
 	Message string
-	Obj     object.Value // the Ruby exception object, when raised from Ruby (else nil)
+	Obj     object.Value   // the Ruby exception object, when raised from Ruby (else nil)
+	Frames  []object.Value // backtrace (Array of String) captured at the Run boundary
 }
 
 func (e RubyError) Error() string { return e.Class + ": " + e.Message }
+
+// Backtrace returns the exception's backtrace as plain strings, innermost-first,
+// for a host (the rbgo CLI) to render an uncaught exception MRI-style. It is the
+// stack captured when the exception propagated out of Run.
+func (e RubyError) Backtrace() []string {
+	out := make([]string, 0, len(e.Frames))
+	for _, f := range e.Frames {
+		out = append(out, f.ToS())
+	}
+	return out
+}
 
 // raise never returns; the object.Value result lets callers write
 // `return raise(...)` without an unreachable trailing return.
@@ -81,13 +93,27 @@ type handlerFrame struct {
 // Ruby `raise` (internal raises carry no object).
 func (vm *VM) exceptionObject(e RubyError) object.Value {
 	if e.Obj != nil {
-		return e.Obj
+		return vm.captureBacktrace(e.Obj)
 	}
 	cls, ok := vm.consts[e.Class].(*RClass)
 	if !ok {
 		cls = vm.consts["StandardError"].(*RClass)
 	}
-	return &RObject{class: cls, ivars: map[string]object.Value{"@message": object.NewString(e.Message)}}
+	obj := &RObject{class: cls, ivars: map[string]object.Value{"@message": object.NewString(e.Message)}}
+	return vm.captureBacktrace(obj)
+}
+
+// uncaughtBacktrace returns the backtrace strings for an exception escaping Run.
+// It prefers the backtrace stamped on the exception object at its raise site
+// (preserved across re-raises); when none is stored — an internal raise whose
+// object is built only now — it snapshots the still-intact live frame stack.
+func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
+	if e.Obj != nil {
+		if bt, ok := getIvar(e.Obj, backtraceIvar).(*object.Array); ok {
+			return bt.Elems
+		}
+	}
+	return vm.backtraceFrames(0)
 }
 
 // VM holds I/O, the top-level self, the constant table and the base classes.
@@ -166,6 +192,14 @@ type VM struct {
 	// exec for Kernel#__method__ and #caller. GVL-guarded (VM code is serialized
 	// by the GVL).
 	frameNames []string
+
+	// frameFiles is the running source-file stack, kept in lockstep with
+	// frameNames (one entry per exec frame, "" when the ISeq carries no file). It
+	// backs exception backtraces and Kernel#caller, which pair each frame's method
+	// label with the file of the ISeq that frame is running. Unlike fileStack
+	// (which only tracks required-file frames for __FILE__), every frame pushes
+	// here so the two stacks stay aligned. GVL-guarded.
+	frameFiles []string
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the
@@ -358,15 +392,22 @@ func (vm *VM) SetConst(name string, v object.Value) { vm.consts[name] = v }
 func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
+			if sig, ok := r.(throwSignal); ok {
+				r = RubyError{Class: "UncaughtThrowError", Message: "uncaught throw " + sig.tag.Inspect()}
+			}
+			rerr := r.(RubyError)
+			// Capture the backtrace for an uncaught exception while the frame stack
+			// is still intact (panics do not pop frames; they are reset below). An
+			// exception object that already carries one (captured at its raise site,
+			// even before re-raises) wins; otherwise snapshot the live stack.
+			rerr.Frames = vm.uncaughtBacktrace(rerr)
 			// An exception unwinding past one or more exec frames leaves their
 			// frameNames entries unpopped; reset the stack so a later top-level
 			// statement (rescued program, REPL line) starts clean.
 			vm.frameNames = vm.frameNames[:0]
+			vm.frameFiles = vm.frameFiles[:0]
 			vm.fileStack = vm.fileStack[:0]
-			if sig, ok := r.(throwSignal); ok {
-				r = RubyError{Class: "UncaughtThrowError", Message: "uncaught throw " + sig.tag.Inspect()}
-			}
-			result, err = nil, r.(RubyError)
+			result, err = nil, rerr
 		}
 	}()
 	// Stamp the top-level program with its path so __FILE__ in the main script (and
@@ -513,6 +554,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// "" so the depth still lines up. The entry is popped on normal completion;
 	// an exception unwinding past here is reset wholesale at the Run boundary.
 	vm.frameNames = append(vm.frameNames, methodName)
+	// frameFiles mirrors frameNames one-for-one (every frame pushes, even with an
+	// empty file) so backtraces can pair each frame's label with its source file.
+	vm.frameFiles = append(vm.frameFiles, iseq.File)
 	// Track the source file of frames that carry one (loaded files), so __FILE__
 	// reports the file of the executing ISeq even across calls into other files.
 	// Like frameNames, an exception unwinding past here is reset at the Run
@@ -1160,6 +1204,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	vm.putEnv(env)
 	vm.putStack(stack)
 	vm.frameNames = vm.frameNames[:len(vm.frameNames)-1]
+	vm.frameFiles = vm.frameFiles[:len(vm.frameFiles)-1]
 	if pushedFile {
 		vm.fileStack = vm.fileStack[:len(vm.fileStack)-1]
 	}

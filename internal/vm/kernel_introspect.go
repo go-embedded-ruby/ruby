@@ -153,18 +153,48 @@ func (vm *VM) currentMethodName() string {
 // that invoked caller) and walks outward, formatting each as MRI does, with a
 // placeholder line number since this VM does not yet track source positions.
 func (vm *VM) callerFrames() []object.Value {
-	if len(vm.frameNames) < 2 {
-		return nil // only the calling frame (or none): no outer frames to report
+	return vm.backtraceFrames(1)
+}
+
+// backtraceFrames renders the current frame stack as an MRI-shaped backtrace
+// (innermost-first), skipping the `skip` innermost frames. Each entry is
+// "<file>:0:in '<label>'": the file is the frame's recorded ISeq file (falling
+// back to the executing script name, then "(rbgo)"/"-e" when none is known), the
+// label is the frame's method name (or "<main>" for top-level / block bodies).
+// The line is always 0 because the parser AST carries no source positions. It
+// generalises both Kernel#caller (skip 1, dropping its own native caller's
+// frame) and exception capture at raise time (skip 0). GVL-guarded via the VM.
+func (vm *VM) backtraceFrames(skip int) []object.Value {
+	top := len(vm.frameNames) - 1 - skip
+	if top < 0 {
+		return nil // nothing left to report after the skip
 	}
-	var out []object.Value
-	for i := len(vm.frameNames) - 2; i >= 0; i-- {
+	out := make([]object.Value, 0, top+1)
+	for i := top; i >= 0; i-- {
 		where := "<main>"
 		if name := vm.frameNames[i]; name != "" {
 			where = name
 		}
-		out = append(out, object.NewString("(rbgo):0:in '"+where+"'"))
+		out = append(out, object.NewString(vm.frameFileLabel(i)+":0:in '"+where+"'"))
 	}
 	return out
+}
+
+// frameFileLabel returns the file portion of a backtrace entry for frame i: the
+// frame's own ISeq file when stamped, otherwise the running script name, and
+// finally "-e" for a `-e` one-liner or "(rbgo)" when no file is known at all.
+func (vm *VM) frameFileLabel(i int) string {
+	if f := vm.frameFiles[i]; f != "" {
+		return f
+	}
+	switch vm.scriptName {
+	case "":
+		return "(rbgo)"
+	case "-e":
+		return "-e"
+	default:
+		return vm.scriptName
+	}
 }
 
 // runAtExit runs the registered at_exit blocks in LIFO order. A raise inside one

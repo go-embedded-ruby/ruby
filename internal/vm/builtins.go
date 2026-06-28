@@ -330,6 +330,45 @@ func (vm *VM) bootstrap() {
 	cException.define("message", excMessage)
 	cException.define("to_s", excMessage)
 
+	// backtrace: the captured frame list (Array of String), or nil when the
+	// exception has never been raised — matching MRI, which fills the backtrace in
+	// at raise time, not at construction.
+	cException.define("backtrace", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if bt := getIvar(self, backtraceIvar); bt != object.NilV {
+			return bt
+		}
+		return object.NilV
+	})
+	// backtrace_locations: best-effort — this VM has no Thread::Backtrace::Location
+	// objects, so it returns the same String array as #backtrace (callers that only
+	// stringify locations still work).
+	cException.define("backtrace_locations", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if bt := getIvar(self, backtraceIvar); bt != object.NilV {
+			return bt
+		}
+		return object.NilV
+	})
+	// set_backtrace: replace the backtrace with a String, an Array of String, or
+	// nil (clearing it). Anything else is a TypeError, as MRI.
+	cException.define("set_backtrace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		var v object.Value = object.NilV
+		if len(args) > 0 {
+			v = args[0]
+		}
+		setIvar(self, backtraceIvar, normalizeBacktrace(v))
+		return getIvar(self, backtraceIvar)
+	})
+	// full_message: the MRI-shaped multi-line report — the first frame, the message
+	// and class, then "\tfrom <frame>" for each remaining frame. With no captured
+	// backtrace it degrades to just the detailed message (message + class).
+	cException.define("full_message", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(vm.exceptionFullMessage(self))
+	})
+	// detailed_message: "<message> (<ClassName>)", the body full_message embeds.
+	cException.define("detailed_message", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(vm.exceptionDetailedMessage(self))
+	})
+
 	// Kernel (on Object).
 	vm.cObject.define("puts", nativePuts)
 	vm.cObject.define("print", nativePrint)
@@ -3890,24 +3929,115 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 		// Bare `raise` re-raises the exception currently being handled, else a
 		// fresh RuntimeError.
 		if vm.curExc != nil {
-			panic(vm.excError(vm.curExc))
+			panic(vm.excError(vm.captureBacktrace(vm.curExc)))
 		}
-		panic(vm.excError(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
-			[]object.Value{object.NewString("unhandled exception")}, nil)))
+		panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
+			[]object.Value{object.NewString("unhandled exception")}, nil))))
 	case 1:
 		switch a := args[0].(type) {
 		case *object.String:
-			panic(vm.excError(vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{a}, nil)))
+			panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{a}, nil))))
 		case *RClass:
-			panic(vm.excError(vm.send(a, "new", nil, nil)))
+			panic(vm.excError(vm.captureBacktrace(vm.send(a, "new", nil, nil))))
 		case *RObject:
-			panic(vm.excError(a))
+			panic(vm.excError(vm.captureBacktrace(a)))
 		}
 		raise("TypeError", "exception class/object expected")
 		return object.NilV
 	default:
-		panic(vm.excError(vm.send(classArg(args[0]), "new", []object.Value{args[1]}, nil)))
+		panic(vm.excError(vm.captureBacktrace(vm.send(classArg(args[0]), "new", []object.Value{args[1]}, nil))))
 	}
+}
+
+// captureBacktrace stamps the current frame stack onto exc as its backtrace, the
+// way MRI fills in a backtrace at the point an exception is raised. A re-raise of
+// an exception that already carries a backtrace keeps the original (MRI does not
+// overwrite it), so an exception rescued and re-raised still points at its first
+// raise site. exc is returned for call-site convenience.
+func (vm *VM) captureBacktrace(exc object.Value) object.Value {
+	if bt := getIvar(exc, backtraceIvar); bt != object.NilV {
+		return exc // already has a backtrace (re-raise) — preserve the original
+	}
+	frames := vm.backtraceFrames(0)
+	if frames == nil {
+		// Nothing on the frame stack (e.g. a raise from a native context with the
+		// stack already unwound): use an empty array rather than nil so #backtrace
+		// reports "raised" with no frames, distinct from a never-raised nil.
+		frames = []object.Value{}
+	}
+	setIvar(exc, backtraceIvar, &object.Array{Elems: frames})
+	return exc
+}
+
+// backtraceIvar is the instance variable that holds an exception's captured
+// backtrace (an Array of String, or absent when never raised / explicitly
+// cleared). Its leading underscores keep it out of casual user introspection.
+const backtraceIvar = "@__backtrace__"
+
+// normalizeBacktrace coerces a #set_backtrace argument into the stored value:
+// nil clears it, a single String becomes a one-element Array, and an Array of
+// String is taken as-is. Anything else (a non-String element included) is a
+// TypeError, matching MRI's "backtrace must be an Array of String ..." message.
+func normalizeBacktrace(v object.Value) object.Value {
+	switch a := v.(type) {
+	case object.Nil:
+		return object.NilV
+	case *object.String:
+		return &object.Array{Elems: []object.Value{a}}
+	case *object.Array:
+		for _, e := range a.Elems {
+			if _, ok := e.(*object.String); !ok {
+				raise("TypeError", "backtrace must be an Array of String or an Array of Thread::Backtrace::Location")
+			}
+		}
+		return &object.Array{Elems: append([]object.Value(nil), a.Elems...)}
+	default:
+		raise("TypeError", "backtrace must be an Array of String or an Array of Thread::Backtrace::Location")
+		return object.NilV
+	}
+}
+
+// exceptionMessageText returns the exception's message string — its @message, or
+// the class name when unset — the same text Exception#message yields.
+func (vm *VM) exceptionMessageText(self object.Value) string {
+	if m := getIvar(self, "@message"); m != object.NilV {
+		return m.ToS()
+	}
+	return vm.classOf(self).name
+}
+
+// exceptionDetailedMessage renders "<message> (<ClassName>)", the body MRI's
+// Exception#detailed_message produces (highlight off) and that full_message and
+// the uncaught-exception printer embed.
+func (vm *VM) exceptionDetailedMessage(self object.Value) string {
+	return vm.exceptionMessageText(self) + " (" + vm.classOf(self).name + ")"
+}
+
+// exceptionFullMessage renders the MRI-shaped multi-line report:
+//
+//	<file>:<line>:in '<label>': <message> (<ClassName>)
+//		from <frame>
+//		from ...
+//
+// The leading "<frame>: " prefix and the "\tfrom" tail come from the captured
+// backtrace; with no backtrace it degrades to just the detailed message. Line
+// numbers are 0 (the parser carries no positions) and the source-snippet/caret
+// lines MRI prints are omitted, but the file+label chain matches.
+func (vm *VM) exceptionFullMessage(self object.Value) string {
+	detailed := vm.exceptionDetailedMessage(self)
+	bt, ok := getIvar(self, backtraceIvar).(*object.Array)
+	if !ok || len(bt.Elems) == 0 {
+		return detailed
+	}
+	var b strings.Builder
+	b.WriteString(bt.Elems[0].ToS())
+	b.WriteString(": ")
+	b.WriteString(detailed)
+	for _, f := range bt.Elems[1:] {
+		b.WriteString("\n\tfrom ")
+		b.WriteString(f.ToS())
+	}
+	return b.String()
 }
 
 // digValue implements Hash#dig: walk nested Hashes/Arrays by successive keys,
