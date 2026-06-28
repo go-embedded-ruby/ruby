@@ -1742,14 +1742,18 @@ func (vm *VM) bootstrap() {
 		}
 		return a
 	})
-	vm.cArray.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	arrayInclude := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, e := range self.(*object.Array).Elems {
 			if valueEqual(e, args[0]) {
 				return object.True
 			}
 		}
 		return object.False
-	})
+	}
+	vm.cArray.define("include?", arrayInclude)
+	// member? is an alias of include? (the Enumerable name), used by Puppet's
+	// settings initialization.
+	vm.cArray.define("member?", arrayInclude)
 	vm.cArray.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if rng, ok := args[0].(*object.Range); ok {

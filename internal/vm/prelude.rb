@@ -1202,6 +1202,32 @@ class Pathname
     Pathname.new(@path[0...(@path.length - e.length)] + repl)
   end
 
+  # relative_path_from returns self expressed relative to base_directory, using
+  # only the lexical components (no filesystem access), matching MRI: both paths
+  # are cleaned and split, a shared prefix is dropped, each remaining base
+  # component contributes a ".." and the remaining self components follow. Mixing
+  # an absolute path with a relative one — or a ".." that escapes a relative
+  # base — raises ArgumentError, as in MRI.
+  def relative_path_from(base_directory)
+    base_directory = Pathname.new(base_directory) unless base_directory.is_a?(Pathname)
+    dest = cleanpath
+    base = base_directory.cleanpath
+    if dest.absolute? != base.absolute?
+      dest_prefix = dest.absolute? ? SEPARATOR : ""
+      raise ArgumentError, "different prefix: #{dest_prefix.inspect} and #{base_directory.to_s.inspect}"
+    end
+    dest_parts = dest.to_s.split(SEPARATOR).reject(&:empty?)
+    base_parts = base.to_s.split(SEPARATOR).reject(&:empty?)
+    i = 0
+    i += 1 while i < dest_parts.length && i < base_parts.length && dest_parts[i] == base_parts[i]
+    up = base_parts[i..-1]
+    if up.any? { |p| p == ".." }
+      raise ArgumentError, "base_directory has ..: #{base_directory.to_s.inspect}"
+    end
+    rel = up.map { ".." } + dest_parts[i..-1]
+    Pathname.new(rel.empty? ? "." : rel.join(SEPARATOR))
+  end
+
   # __plus implements the +/join append rule (class method to keep + small).
   def self.__plus(base, rel)
     return rel if rel.start_with?(SEPARATOR) # absolute resets to root

@@ -32,6 +32,19 @@ func TestPuppetTxnPrimitives(t *testing.T) {
 		{`a = [1]; p a.replace([2]).equal?(a)`, "true\n"},              // returns self
 		{`a = [1]; b = [2, 3]; a.replace(b); b << 4; p a`, "[2, 3]\n"}, // source copied, not aliased
 
+		// Array#member? is an alias of include? (used by Puppet's settings init).
+		{`p [1, 2, 3].member?(2)`, "true\n"},
+		{`p [1, 2, 3].member?(9)`, "false\n"},
+		{`p [].member?(1)`, "false\n"},
+
+		// Pathname#relative_path_from expresses self relative to a base directory
+		// using only lexical components (Puppet's autoload walks lib dirs this way).
+		{`require "pathname"; p Pathname.new("/a/b/c/d").relative_path_from(Pathname.new("/a/b")).to_s`, "\"c/d\"\n"},
+		{`require "pathname"; p Pathname.new("/a/b").relative_path_from(Pathname.new("/a/b/c")).to_s`, "\"..\"\n"},
+		{`require "pathname"; p Pathname.new("/a/b/c").relative_path_from(Pathname.new("/a/b/c")).to_s`, "\".\"\n"},
+		{`require "pathname"; p Pathname.new("/a/x").relative_path_from(Pathname.new("/a/b/c")).to_s`, "\"../../x\"\n"},
+		{`require "pathname"; p Pathname.new("x/y/z").relative_path_from("x").to_s`, "\"y/z\"\n"}, // String base is coerced
+
 		// is_a?/kind_of? through `extend`: after `C.extend(M)`, C and every subclass
 		// of C are is_a?(M) because M is inserted into the singleton (meta) class
 		// ancestry. This is what makes Puppet::Type (which does
@@ -63,6 +76,9 @@ func TestPuppetTxnPrimitives(t *testing.T) {
 	errs := []struct{ src, want string }{
 		{`{}.fetch("nope")`, `key not found: "nope"`},
 		{`[1].replace(5)`, "no implicit conversion of Integer into Array"},
+		// Mixing absolute/relative, or a base that escapes upward, is an error.
+		{`require "pathname"; Pathname.new("/a/b").relative_path_from(Pathname.new("x/y"))`, `different prefix: "/" and "x/y"`},
+		{`require "pathname"; Pathname.new("a/b").relative_path_from(Pathname.new("../x"))`, `base_directory has ..: "../x"`},
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
