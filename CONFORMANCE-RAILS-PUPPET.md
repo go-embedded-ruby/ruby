@@ -222,3 +222,72 @@ The language-level blockers are cleared: the require graph advances from the
 first subsystem to the second-plus, and the remaining first blockers are
 **library/stdlib** concerns (`Gem`/RubyGems, the `English` stdlib) rather than
 language primitives — exactly the boundary this work targeted.
+
+## Puppet boots, compiles, and evaluates a manifest (2026-06-28)
+
+Following the Tier-0 / Tier-2 runtime batches above, the remaining library/stdlib
+walls were cleared and **`require "puppet"` now fully boots** under a pure-Go
+CGO=0 `rbgo`, with a manifest going all the way through the real Puppet pipeline
+to **evaluation**.
+
+### What now works
+
+- **Boot.** With Puppet's pure-Ruby gem dependencies on the `$LOAD_PATH`
+  (`semantic_puppet`, `concurrent-ruby`, `deep_merge`, `fast_gettext`, `facter`,
+  `multi_json`, `racc`, `scanf`, `i18n`, `locale`), `require "puppet"` completes:
+
+  ```
+  $ rbgo run -e '%w[puppet semantic_puppet concurrent-ruby ...].each { |g|
+                   $LOAD_PATH.unshift "<repos>/#{g}/lib" }
+                 require "puppet"; puts "PUPPET BOOTED: #{Puppet.version}"'
+  PUPPET BOOTED: version=8.11.0
+  ```
+
+- **Parse → compile → evaluate.** `Puppet::Parser::Compiler#compile` runs a
+  trivial manifest through catalog setup and into the Pops evaluator, which emits
+  real Puppet log output:
+
+  ```
+  notice("hi from puppet")
+  # Notice: Scope(Class[main]): hi from puppet
+  ```
+
+  (Landed in PR #33 with a 100%-coverage primitive test; the evaluator path is
+  also exercised via `evaluate_string`.)
+
+### What it took
+
+The boot and evaluation surfaced a long tail of runtime gaps, each reduced to a
+minimal rbgo-vs-MRI snippet and asserted against MRI 4.0.5 before fixing
+(PRs #20–#33):
+
+- **VM / language:** `autoload`; frame-based `Exception#backtrace` /
+  `set_backtrace` / `full_message` + an uncaught-exception printer; interpolated
+  regexp literals; non-local block `return`; `Symbol#intern`; `NilClass`
+  conversions; `Array` slice-assign; `Module.new` (anonymous module that runs its
+  block as a body, includable, `class == Module`); `extend` transitivity
+  (a module's transitively-included methods become class methods — this is how
+  `desc` reaches a `Puppet::Type`); a setter expression returning its assigned RHS
+  (a Ruby guarantee Puppet's `ThreadLocalVar#default` relies on); nested constant
+  namespaces; method-visibility enforcement; `catch`/`throw` stack restore;
+  Ruby Hash key semantics; `super`-in-block; `Proc.new`; `Module#constants`.
+- **Pure-Go stdlib added on the boot path:** `ERB` (template engine), `openssl`
+  (real crypto), `net/http`, `resolv`, `tmpdir`, `Process`, `StringScanner`
+  (`strscan`), `Find`, `getoptlong`, `syslog`, `fileutils`, `optparse`, `ripper`,
+  `objspace`, plus `Concurrent::ThreadLocalVar` honouring a lazy default block.
+
+### The frontier (honest)
+
+What is **done**: Puppet **boots, parses, compiles, and evaluates** manifests
+(the Pops evaluator emits `Notice:` and friends).
+
+What is **in progress**: full **`puppet apply`** — the transaction / RAL /
+resource-provider layer that mutates real host state (package/file/service
+providers, ordering, idempotent convergence). That is the active next milestone,
+not done; the `notice(...)` example above is a real evaluation, an `apply` that
+converges resources against a host is not yet claimed.
+
+This is the **C-extension → pure-Go shim** strategy validated end to end: a real
+Ruby application ships as one static CGO=0 binary because its C-backed gem APIs
+are backed by pure Go. Puppet's dependency tree is pure Ruby, so it loads as-is
+and was the ideal first validation.
