@@ -68,6 +68,10 @@ type Proc struct {
 	// was written, so a bare constant inside the block resolves by the same
 	// lexical nesting as the surrounding method/class body. nil means top level.
 	cref *RClass
+	// home identifies the method (or top-level) activation a non-local `return`
+	// inside this block unwinds to — the activation where the block literal was
+	// written. nil for synthesized procs that never carry an explicit return.
+	home *returnTarget
 }
 
 func (p *Proc) ToS() string     { return "#<Proc>" }

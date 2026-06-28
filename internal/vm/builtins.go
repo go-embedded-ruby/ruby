@@ -648,7 +648,7 @@ func (vm *VM) bootstrap() {
 				return object.Bool(true)
 			}
 		}
-		return object.Bool(false)
+		return object.False
 	})
 	vm.cModule.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if c := self.(*RClass); c.name != "" {
@@ -662,6 +662,58 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cModule.define("const_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.scopedConst(self.(*RClass), constNameArg(args[0]))
+	})
+	// Class-variable reflection. Names arrive as a Symbol or String (e.g. :@@x);
+	// the @@-prefixed name is the key in the cvars table. Lookups walk the
+	// superclass chain via cvarOwner, mirroring how @@name resolves at runtime.
+	vm.cModule.define("class_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := cvarNameArg(args[0])
+		if c := cvarOwner(self.(*RClass), name); c != nil {
+			return c.cvars[name]
+		}
+		raise("NameError", "uninitialized class variable %s in %s", name, self.(*RClass).name)
+		return object.NilV
+	})
+	vm.cModule.define("class_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := cvarNameArg(args[0])
+		cls := self.(*RClass)
+		if c := cvarOwner(cls, name); c != nil {
+			c.cvars[name] = args[1]
+		} else {
+			cls.cvars[name] = args[1]
+		}
+		return args[1]
+	})
+	vm.cModule.define("class_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(cvarOwner(self.(*RClass), cvarNameArg(args[0])) != nil)
+	})
+	vm.cModule.define("class_variables", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// class_variables(inherit=true): own variables, then ancestors', each
+		// name only once and in first-seen order. inherit=false stops at self.
+		inherit := len(args) == 0 || args[0].Truthy()
+		seen := map[string]bool{}
+		var names []string
+		for c := self.(*RClass); c != nil; c = c.super {
+			level := make([]string, 0, len(c.cvars))
+			for name := range c.cvars {
+				if !seen[name] {
+					seen[name] = true
+					level = append(level, name)
+				}
+			}
+			// Go map iteration is unordered; sort within each level so the result
+			// is deterministic (windows-latest runs the same test).
+			sort.Strings(level)
+			names = append(names, level...)
+			if !inherit {
+				break
+			}
+		}
+		out := make([]object.Value, len(names))
+		for i, n := range names {
+			out[i] = object.Symbol(n)
+		}
+		return &object.Array{Elems: out}
 	})
 	vm.cModule.define("const_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
@@ -959,6 +1011,20 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
+	vm.cString.define("getbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := strOf(self)
+		i := toInt(args[0])
+		if i < 0 {
+			i += int64(len(s)) // negative indexes count from the end
+		}
+		if i < 0 || i >= int64(len(s)) {
+			return object.NilV
+		}
+		return object.Integer(s[i])
+	})
+	vm.cString.define("byteslice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return byteslice(self.(*object.String), args)
+	})
 	vm.cString.define("lines", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		segs := splitLines(strOf(self))
 		out := make([]object.Value, len(segs))
@@ -1076,6 +1142,10 @@ func (vm *VM) bootstrap() {
 		return object.Bool(strMatchRegexp(args[0]).re.MatchString(strOf(self)))
 	})
 	vm.cString.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// match(pattern, pos): start scanning at character offset pos (default 0).
+		if len(args) >= 2 {
+			return vm.runMatchFrom(strMatchRegexp(args[0]), strOf(self), intArg(args[1]))
+		}
 		return vm.runMatch(strMatchRegexp(args[0]), strOf(self))
 	})
 	vm.cString.define("scan", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -2053,6 +2123,43 @@ func (vm *VM) bootstrap() {
 	vm.cNilClass.define("to_a", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Array{}
 	})
+	// NilClass conversions mirror MRI: nil.to_i → 0, nil.to_f → 0.0, nil.to_h → {},
+	// nil.to_r → (0/1), nil.to_c → (0+0i). nil.to_a/to_s/inspect already exist.
+	vm.cNilClass.define("to_i", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(0)
+	})
+	vm.cNilClass.define("to_f", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Float(0)
+	})
+	vm.cNilClass.define("to_h", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewHash()
+	})
+	vm.cNilClass.define("to_r", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Rational{R: big.NewRat(0, 1)}
+	})
+	vm.cNilClass.define("to_c", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Complex{Re: object.Integer(0), Im: object.Integer(0)}
+	})
+	// nil & obj is always false; nil | obj and nil ^ obj are true unless obj is
+	// nil or false (MRI treats only nil/false as falsey here).
+	vm.cNilClass.define("&", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.False
+	})
+	vm.cNilClass.define("|", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.Bool(args[0].Truthy())
+	})
+	vm.cNilClass.define("^", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.Bool(args[0].Truthy())
+	})
 	vm.cArray.define("sort_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "sort_by")
@@ -2432,6 +2539,48 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("store", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		self.(*object.Hash).Set(args[0], args[1])
 		return args[1]
+	})
+	// default / default= and default_proc / default_proc= manage the value (or
+	// block) returned for an absent key. The static default and the default block
+	// are mutually exclusive in MRI: setting one clears the other.
+	vm.cHash.define("default", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		// default(key) invokes the default block (passing the hash and key); with
+		// no argument it returns the static default, ignoring any block.
+		if len(args) == 1 && h.DefaultProc != nil {
+			return vm.callBlock(h.DefaultProc.(*Proc), []object.Value{h, args[0]})
+		}
+		if h.Default != nil {
+			return h.Default
+		}
+		return object.NilV
+	})
+	vm.cHash.define("default=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		h.Default = args[0]
+		h.DefaultProc = nil
+		return args[0]
+	})
+	vm.cHash.define("default_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		if h.DefaultProc != nil {
+			return h.DefaultProc
+		}
+		return object.NilV
+	})
+	vm.cHash.define("default_proc=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		switch p := args[0].(type) {
+		case object.Nil:
+			h.DefaultProc = nil
+		case *Proc:
+			h.DefaultProc = p
+			h.Default = nil
+		default:
+			// MRI coerces via #to_proc; without that, only a Proc or nil is valid.
+			raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(args[0]).name)
+		}
+		return args[0]
 	})
 	vm.cHash.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		v, _ := self.(*object.Hash).Delete(args[0])
@@ -3516,6 +3665,45 @@ func stringIndex(s string, args []object.Value) object.Value {
 	return object.NewString(string(r[i]))
 }
 
+// byteslice returns a substring by BYTE offsets (not characters), the way MRI's
+// String#byteslice does: byteslice(i) is the 1-byte string at i (nil if out of
+// range), byteslice(i, len) is len bytes from i (clamped to the end; nil for a
+// negative start out of range or a negative length), and byteslice(range) slices
+// by byte range. The result keeps the receiver's encoding.
+func byteslice(self *object.String, args []object.Value) object.Value {
+	b := []byte(self.Str())
+	n := len(b)
+	mk := func(sub []byte) object.Value {
+		s := object.NewString(string(sub))
+		s.Enc = self.Enc
+		return s
+	}
+	if len(args) == 2 {
+		start := normIndex(intArg(args[0]), n)
+		length := intArg(args[1])
+		if start < 0 || start > n || length < 0 {
+			return object.NilV
+		}
+		end := start + int(length)
+		if end > n {
+			end = n
+		}
+		return mk(b[start:end])
+	}
+	if rng, ok := args[0].(*object.Range); ok {
+		start, length, ok := sliceRange(n, rng)
+		if !ok {
+			return object.NilV
+		}
+		return mk(b[start : start+length])
+	}
+	i := normIndex(intArg(args[0]), n)
+	if i < 0 || i >= n {
+		return object.NilV
+	}
+	return mk(b[i : i+1])
+}
+
 // sliceRange resolves a Range against a collection of length n into a start
 // index and length. Beginless/endless bounds (nil) default to 0 and n. ok is
 // false when the start is out of range (Ruby returns nil).
@@ -4049,6 +4237,25 @@ func constNameArg(v object.Value) string {
 	}
 	if r := []rune(name); len(r) == 0 || !unicode.IsUpper(r[0]) {
 		raise("NameError", "wrong constant name %s", name)
+	}
+	return name
+}
+
+// cvarNameArg coerces a class-variable name argument (Symbol or String) to its
+// @@-prefixed key, raising TypeError for other types and NameError when the name
+// is not a well-formed class variable, matching MRI's Module#class_variable_*.
+func cvarNameArg(v object.Value) string {
+	var name string
+	switch n := v.(type) {
+	case object.Symbol:
+		name = string(n)
+	case *object.String:
+		name = n.Str()
+	default:
+		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	}
+	if !strings.HasPrefix(name, "@@") || len(name) == 2 {
+		raise("NameError", "`%s' is not allowed as a class variable name", name)
 	}
 	return name
 }

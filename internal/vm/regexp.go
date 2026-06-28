@@ -60,6 +60,11 @@ type MatchData struct {
 	md      *onig.MatchData
 	subject string
 	re      *Regexp
+	// byteOff is the byte position in subject where matching began (for
+	// Regexp#match(str, pos) / String#match(re, pos)). The engine matched the
+	// subject[byteOff:] tail, so every byte offset it reports is shifted by this
+	// to land in the full subject. Zero for an ordinary whole-subject match.
+	byteOff int
 }
 
 func (m *MatchData) ToS() string     { return m.md.Str(0) }
@@ -251,6 +256,31 @@ func (vm *VM) runMatch(re *Regexp, subject string) object.Value {
 	return m
 }
 
+// runMatchFrom matches re against subject starting at character offset pos, the
+// way Regexp#match(str, pos) / String#match(re, pos) do. The engine matches the
+// byte tail at that offset and the MatchData records the byte offset so its
+// positions report against the full subject. A negative pos counts from the end;
+// an out-of-range pos yields no match.
+func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
+	nChars := int64(utf8.RuneCountInString(subject))
+	if pos < 0 {
+		pos += nChars
+	}
+	if pos < 0 || pos > nChars {
+		vm.lastMatch = object.NilV
+		return object.NilV
+	}
+	byteOff := charToByte(subject, int(pos))
+	md := re.re.Match(subject[byteOff:])
+	if md == nil {
+		vm.lastMatch = object.NilV
+		return object.NilV
+	}
+	m := &MatchData{md: md, subject: subject, re: re, byteOff: byteOff}
+	vm.lastMatch = m
+	return m
+}
+
 // gvar reads a global variable. The match-data specials derive from $~ (the
 // last match); any other name reads as nil (uninitialised global).
 func (vm *VM) gvar(name string) object.Value {
@@ -315,6 +345,19 @@ func gvarGroup(name string) (int, bool) {
 // byteOff is always within s.
 func byteToChar(s string, byteOff int) int {
 	return utf8.RuneCountInString(s[:byteOff])
+}
+
+// charToByte converts a character offset into a byte offset in s (the inverse of
+// byteToChar); an offset at or past the rune count returns len(s).
+func charToByte(s string, charOff int) int {
+	n := 0
+	for i := range s {
+		if n == charOff {
+			return i
+		}
+		n++
+	}
+	return len(s)
 }
 
 // scanRegexp coerces the argument of String#scan into a Regexp: a Regexp passes
@@ -862,6 +905,10 @@ func (vm *VM) installRegexp() {
 		if _, isNil := args[0].(object.Nil); isNil {
 			return object.NilV
 		}
+		// match(str, pos): start scanning at character offset pos (defaults to 0).
+		if len(args) >= 2 {
+			return vm.runMatchFrom(reArg(self), strArg(args[0]), intArg(args[1]))
+		}
 		return vm.runMatch(reArg(self), strArg(args[0]))
 	})
 	vm.cRegexp.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -884,10 +931,20 @@ func (vm *VM) installRegexp() {
 		return object.NewString(mdArg(self).Inspect())
 	})
 	vm.cMatchData.define("pre_match", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(mdArg(self).md.Pre())
+		m := mdArg(self)
+		if m.byteOff == 0 {
+			return object.NewString(m.md.Pre())
+		}
+		// Everything in the full subject before the match (the engine's Pre is
+		// relative to the matched tail, so prepend the skipped prefix).
+		return object.NewString(m.subject[:m.byteOff+m.md.Begin(0)])
 	})
 	vm.cMatchData.define("post_match", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(mdArg(self).md.Post())
+		m := mdArg(self)
+		if m.byteOff == 0 {
+			return object.NewString(m.md.Post())
+		}
+		return object.NewString(m.subject[m.byteOff+m.md.End(0):])
 	})
 	vm.cMatchData.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(mdArg(self).md.NGroups() + 1)
@@ -997,7 +1054,7 @@ func (m *MatchData) offset(i int64, end bool) object.Value {
 	if b < 0 {
 		return object.NilV
 	}
-	return object.Integer(byteToChar(m.subject, b))
+	return object.Integer(byteToChar(m.subject, b+m.byteOff))
 }
 
 // at implements MatchData#[]: an Integer selects a group by index; a String or

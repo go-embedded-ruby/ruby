@@ -1276,6 +1276,33 @@ module URI
       !@port.nil? && @port == default_port
     end
 
+    # build constructs a URI from explicit components, passed as a Hash keyed by
+    # component name or as an Array in COMPONENT order. Invoked on the receiver
+    # class, so URI::HTTP.build returns a URI::HTTP. Mirrors URI::Generic.build.
+    def self.build(args)
+      case args
+      when Hash
+        h = {}
+        args.each { |k, v| h[k.to_sym] = v }
+        new(scheme: h[:scheme], userinfo: h[:userinfo], host: h[:host],
+            port: h[:port], path: h[:path] || "", query: h[:query],
+            fragment: h[:fragment])
+      when Array
+        comp = [:scheme, :userinfo, :host, :port, :path, :query, :fragment]
+        unless args.length == comp.length
+          raise ArgumentError,
+                "expected Array of or Hash of components of #{self} (#{comp.join(', ')})"
+        end
+        h = {}
+        comp.each_with_index { |k, i| h[k] = args[i] }
+        new(scheme: h[:scheme], userinfo: h[:userinfo], host: h[:host],
+            port: h[:port], path: h[:path] || "", query: h[:query],
+            fragment: h[:fragment])
+      else
+        raise ArgumentError, "expected Array of or Hash of components of #{self}"
+      end
+    end
+
     # merge / + resolves a relative reference against this URI for the common
     # cases (absolute reference, absolute path, or last-segment replacement).
     def merge(rel)

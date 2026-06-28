@@ -193,7 +193,7 @@ func (g *gen) emit(pc int) (string, bool) {
 	case bytecode.OpGetGVar:
 		return line("s%d = vm.gvar(%q)", d, g.iseq.Names[in.A]), true
 	case bytecode.OpSplatToArray:
-		return line("s%d = aotSplat(s%d)", d-1, d-1), true
+		return line("s%d = vm.aotSplat(s%d)", d-1, d-1), true
 	case bytecode.OpConcatArray:
 		return line("s%d = aotConcat(s%d, s%d)", d-2, d-2, d-1), true
 	case bytecode.OpRegexp:

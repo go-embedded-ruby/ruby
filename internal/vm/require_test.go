@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
-	"github.com/go-ruby-parser/parser"
 	"github.com/go-embedded-ruby/ruby/internal/vm"
+	"github.com/go-ruby-parser/parser"
 )
 
 // runInDir runs src on a fresh VM whose script path is dir/main.rb, so
@@ -110,3 +110,34 @@ func TestRequireErrors(t *testing.T) {
 
 // strconvQuote is strconv.Quote without importing strconv just for one call.
 func strconvQuote(s string) string { return `"` + strings.ReplaceAll(s, `\`, `\\`) + `"` }
+
+// TestNonLocalReturnAcrossFile covers a non-local return (and a method return
+// through an ensure) unwinding out of a required file's frame — the frame that
+// pushed a source file, exercising the file-stack restore branch on that path.
+func TestNonLocalReturnAcrossFile(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "lib.rb", `
+def from_block
+  [1, 2, 3].each { |v| return "blk-#{v}" if v == 2 }
+  "fell"
+end
+def from_ensure
+  begin
+    return "ens-ret"
+  ensure
+    $ran = "yes"
+  end
+end
+`)
+	out, err := runInDir(t, dir, `require "lib"
+p from_block
+p from_ensure
+p $ran`)
+	if err != nil {
+		t.Fatalf("err=%v out=%q", err, out)
+	}
+	want := "\"blk-2\"\n\"ens-ret\"\n\"yes\"\n"
+	if out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+}

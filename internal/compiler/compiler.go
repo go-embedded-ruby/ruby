@@ -515,7 +515,16 @@ func (c *Compiler) compileNode(n ast.Node) {
 		} else {
 			c.compileNode(v.Value)
 		}
-		b.emit(bytecode.OpReturn, 0, 0)
+		// An explicit `return` inside a block body is a non-local return: it
+		// unwinds to the method the block was written in, not just the block
+		// frame. Operand A=1 flags it so the VM raises the unwinding signal;
+		// the implicit OpReturn at a block's end (operand 0) stays a plain
+		// block return.
+		if b.isBlock {
+			b.emit(bytecode.OpReturn, 1, 0)
+		} else {
+			b.emit(bytecode.OpReturn, 0, 0)
+		}
 	case *ast.Break:
 		c.compileBreak(v)
 	case *ast.Next:
@@ -1966,7 +1975,7 @@ func (c *Compiler) compileBegin(v *ast.Begin) {
 		return
 	}
 	b := c.cur()
-	h := b.emit(bytecode.OpPushHandler, 0, 0)
+	h := b.emit(bytecode.OpPushHandler, 0, 1) // B=1: an ensure handler (runs on every unwind)
 	c.compileBeginRescue(v)
 	b.emit(bytecode.OpPopHandler, 0, 0)
 	c.compileBody(v.EnsureBody)
