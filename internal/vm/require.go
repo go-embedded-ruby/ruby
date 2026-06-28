@@ -23,13 +23,15 @@ var preloadedFeatures = map[string]bool{"set": true, "rubygems": true}
 var providedFeatures = map[string]bool{
 	"date": true, "time": true, "bigdecimal": true, "bag": true,
 	"base64": true, "digest": true, "json": true, "zlib": true,
+	"digest/md5": true, "digest/sha1": true, "digest/sha2": true,
 	"stringio": true, "securerandom": true,
 	"English": true, "ostruct": true, "benchmark": true,
 	"forwardable": true, "delegate": true, "pathname": true, "uri": true,
 	"tmpdir": true, "openssl": true, "timeout": true, "rbconfig": true,
 	"yaml": true, "fileutils": true, "getoptlong": true, "etc": true,
 	"concurrent": true, "syslog": true, "cgi": true, "monitor": true,
-	"net/http": true, "net/https": true,
+	"net/http": true, "net/https": true, "resolv": true, "singleton": true,
+	"optparse": true, "ripper": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
@@ -42,6 +44,41 @@ func (vm *VM) registerRequire() {
 	vm.cObject.define("require_relative", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.doRequire(requireName(vm, args), true)
 	})
+	// Kernel#load re-executes a file every call (unlike require, which loads once)
+	// and returns true. Exposed as a private instance method (a bare `load`) and as
+	// a module method on Kernel (`Kernel.load`, the form Puppet's autoloader uses).
+	loadFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.doLoad(requireName(vm, args))
+	}
+	vm.cObject.define("load", loadFn)
+	if kernel, ok := vm.consts["Kernel"].(*RClass); ok {
+		kernel.smethods["load"] = &Method{name: "load", owner: kernel, native: loadFn}
+	}
+}
+
+// doLoad implements Kernel#load: it locates name (an explicit path, or a file
+// searched on $LOAD_PATH and the CWD) and executes it, always re-running it
+// regardless of any prior load/require. The .rb suffix is NOT auto-appended (MRI
+// loads the literal name), and a missing file raises LoadError.
+func (vm *VM) doLoad(name string) object.Value {
+	for _, cand := range vm.requireCandidates(name, false) {
+		src, err := os.ReadFile(cand)
+		if err != nil {
+			continue // not found / unreadable — try the next candidate
+		}
+		abs, _ := filepath.Abs(cand)
+		iseq, cerr := parseCompileFn(string(src))
+		if cerr != nil {
+			return raise("SyntaxError", "%s", cerr.Error())
+		}
+		iseq.Name = abs
+		setISeqFile(iseq, abs)
+		vm.requireDirs = append(vm.requireDirs, filepath.Dir(abs))
+		defer func() { vm.requireDirs = vm.requireDirs[:len(vm.requireDirs)-1] }()
+		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil)
+		return object.Bool(true)
+	}
+	return raise("LoadError", "cannot load such file -- %s", name)
 }
 
 // requireName extracts the String feature name, raising TypeError otherwise.

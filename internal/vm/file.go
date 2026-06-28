@@ -5,6 +5,7 @@ import (
 	"path" // always '/'-separated, as Ruby's File is — not path/filepath
 	"strings"
 
+	gotime "github.com/go-composites/time/src"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -38,8 +39,8 @@ func (vm *VM) registerFile() {
 	cFile.consts["NULL"] = object.NewString("/dev/null")
 	def := func(name string, fn NativeFn) { cFile.smethods[name] = &Method{name: name, owner: cFile, native: fn} }
 
-	def("basename", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		base := path.Base(strArg(args[0]))
+	def("basename", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		base := path.Base(pathArg(vm, args[0]))
 		if len(args) > 1 {
 			suf := strArg(args[1])
 			if suf == ".*" {
@@ -52,17 +53,17 @@ func (vm *VM) registerFile() {
 		}
 		return object.NewString(base)
 	})
-	def("dirname", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(path.Dir(strArg(args[0])))
+	def("dirname", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(path.Dir(pathArg(vm, args[0])))
 	})
-	def("extname", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExt(path.Base(strArg(args[0]))))
+	def("extname", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(fileExt(path.Base(pathArg(vm, args[0]))))
 	})
-	def("split", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := strArg(args[0])
+	def("split", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := pathArg(vm, args[0])
 		return &object.Array{Elems: []object.Value{object.NewString(path.Dir(p)), object.NewString(path.Base(p))}}
 	})
-	def("join", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("join", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// MRI's File.join flattens nested Array arguments, so File.join([a, b], c)
 		// behaves like File.join(a, b, c).
 		var parts []string
@@ -74,65 +75,76 @@ func (vm *VM) registerFile() {
 				}
 				return
 			}
-			parts = append(parts, strArg(v))
+			parts = append(parts, pathArg(vm, v))
 		}
 		for _, a := range args {
 			add(a)
 		}
 		return object.NewString(fileJoin(parts))
 	})
-	def("expand_path", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExpand(strArg(args[0]), args[1:]))
+	def("expand_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:]))
 	})
 	// absolute_path resolves a path to an absolute one against an optional base
 	// directory (defaulting to the CWD), like expand_path but without ~ expansion.
 	// Puppet uses it with relative paths and an explicit base, where the two agree.
-	def("absolute_path", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExpand(strArg(args[0]), args[1:]))
+	def("absolute_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:]))
 	})
-	def("absolute_path?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(path.IsAbs(toSlash(strArg(args[0]))))
+	def("absolute_path?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(path.IsAbs(toSlash(pathArg(vm, args[0]))))
 	})
 
-	def("exist?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		_, err := os.Stat(strArg(args[0]))
+	def("exist?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		_, err := os.Stat(pathArg(vm, args[0]))
 		return object.Bool(err == nil)
 	})
-	def("file?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fi, err := os.Stat(strArg(args[0]))
+	def("file?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		fi, err := os.Stat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.Mode().IsRegular())
 	})
-	def("directory?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fi, err := os.Stat(strArg(args[0]))
+	def("directory?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		fi, err := os.Stat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.IsDir())
 	})
-	def("read", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := strArg(args[0])
+	def("read", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := pathArg(vm, args[0])
 		b, err := os.ReadFile(p)
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
 		}
 		return object.NewString(string(b))
 	})
-	def("write", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := strArg(args[0])
+	def("write", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := pathArg(vm, args[0])
 		data := []byte(strArg(args[1]))
 		if err := os.WriteFile(p, data, 0o644); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
 		}
 		return object.Integer(len(data))
 	})
-	def("size", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := strArg(args[0])
+	def("size", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := pathArg(vm, args[0])
 		fi, err := os.Stat(p)
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
 		}
 		return object.Integer(fi.Size())
 	})
-	delete := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	// File.mtime returns the file's last-modification Time (whole-second
+	// resolution, matching the Time class's granularity). A missing file raises
+	// Errno::ENOENT, as in MRI.
+	def("mtime", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := pathArg(vm, args[0])
+		fi, err := os.Stat(p)
+		if err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
+		}
+		return &Time{t: gotime.FromUnix(fi.ModTime().Unix())}
+	})
+	delete := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, a := range args {
-			p := strArg(a)
+			p := pathArg(vm, a)
 			if err := os.Remove(p); err != nil {
 				raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", p)
 			}
