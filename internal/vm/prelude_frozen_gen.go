@@ -1784,7 +1784,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "<class:Requirement>",
-						Insns: []bytecode.Instr{{Op: 1}, {Op: 5}, {Op: 30, C: 1}, {Op: 1, A: 1}, {Op: 5}, {Op: 30, C: 2}, {Op: 1, A: 2}, {Op: 5}, {Op: 30, C: 3}, {Op: 1, A: 3}, {Op: 5}, {Op: 30, C: 4}, {Op: 1, A: 4}, {Op: 5}, {Op: 30, C: 5}, {Op: 1, A: 5}, {Op: 5}, {Op: 30, C: 6}, {Op: 1, A: 6}, {Op: 5}, {Op: 30, C: 7}, {Op: 7, A: 7}, {Op: 41, A: 1}, {Op: 9}, {Op: 33, A: 2}, {Op: 1, A: 7}, {Op: 33, A: 3}, {Op: 34, A: 4}, {Op: 13}, {Op: 1, A: 8}, {Op: 13}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 41, A: 6}, {Op: 9}, {Op: 45, A: 7, B: 7}, {Op: 9}, {Op: 45, A: 8, B: 8}, {Op: 9}, {Op: 5}, {Op: 1, A: 9}, {Op: 30, A: 9, B: 1}, {Op: 9}, {Op: 44, A: 10, B: 9}, {Op: 9}, {Op: 45, A: 11, B: 10}, {Op: 9}, {Op: 44, A: 12, B: 11}, {Op: 9}, {Op: 77, A: 13, B: 12}, {Op: 9}, {Op: 77, A: 14, B: 12}, {Op: 9}, {Op: 44, A: 15, B: 12}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 1}, {Op: 5}, {Op: 30, C: 1}, {Op: 1, A: 1}, {Op: 5}, {Op: 30, C: 2}, {Op: 1, A: 2}, {Op: 5}, {Op: 30, C: 3}, {Op: 1, A: 3}, {Op: 5}, {Op: 30, C: 4}, {Op: 1, A: 4}, {Op: 5}, {Op: 30, C: 5}, {Op: 1, A: 5}, {Op: 5}, {Op: 30, C: 6}, {Op: 1, A: 6}, {Op: 5}, {Op: 30, C: 7}, {Op: 7, A: 7}, {Op: 41, A: 1}, {Op: 9}, {Op: 33, A: 2}, {Op: 1, A: 7}, {Op: 33, A: 3}, {Op: 34, A: 4}, {Op: 13}, {Op: 1, A: 8}, {Op: 13}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 41, A: 6}, {Op: 9}, {Op: 45, A: 7, B: 7}, {Op: 9}, {Op: 45, A: 8, B: 8}, {Op: 9}, {Op: 5}, {Op: 1, A: 9}, {Op: 30, A: 9, B: 1}, {Op: 9}, {Op: 44, A: 10, B: 9}, {Op: 9}, {Op: 45, A: 11, B: 10}, {Op: 9}, {Op: 44, A: 12, B: 11}, {Op: 9}, {Op: 78, A: 13, B: 12}, {Op: 9}, {Op: 78, A: 14, B: 12}, {Op: 9}, {Op: 44, A: 15, B: 12}, {Op: 53}},
 						Consts: []object.Value{
 							object.NewString("="),
 							object.NewString("!="),
@@ -2094,7 +2094,7 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:        "<class:OpenStruct>",
-				Insns:       []bytecode.Instr{{Op: 44}, {Op: 9}, {Op: 44, A: 1, B: 1}, {Op: 9}, {Op: 44, A: 2, B: 2}, {Op: 9}, {Op: 44, A: 3, B: 3}, {Op: 9}, {Op: 44, A: 4, B: 4}, {Op: 9}, {Op: 44, A: 5, B: 5}, {Op: 9}, {Op: 44, A: 6, B: 6}, {Op: 9}, {Op: 44, A: 7, B: 7}, {Op: 9}, {Op: 44, A: 8, B: 8}, {Op: 9}, {Op: 44, A: 9, B: 9}, {Op: 9}, {Op: 44, A: 10, B: 10}, {Op: 9}, {Op: 77, A: 11, B: 10}, {Op: 53}},
+				Insns:       []bytecode.Instr{{Op: 44}, {Op: 9}, {Op: 44, A: 1, B: 1}, {Op: 9}, {Op: 44, A: 2, B: 2}, {Op: 9}, {Op: 44, A: 3, B: 3}, {Op: 9}, {Op: 44, A: 4, B: 4}, {Op: 9}, {Op: 44, A: 5, B: 5}, {Op: 9}, {Op: 44, A: 6, B: 6}, {Op: 9}, {Op: 44, A: 7, B: 7}, {Op: 9}, {Op: 44, A: 8, B: 8}, {Op: 9}, {Op: 44, A: 9, B: 9}, {Op: 9}, {Op: 44, A: 10, B: 10}, {Op: 9}, {Op: 78, A: 11, B: 10}, {Op: 53}},
 				Names:       []string{"initialize", "[]", "[]=", "to_h", "each_pair", "members", "respond_to_missing?", "method_missing", "==", "respond_to?", "inspect", "to_s"},
 				NumRequired: 0,
 				SplatIndex:  -1,
@@ -2519,7 +2519,7 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:        "<module:Forwardable>",
-				Insns:       []bytecode.Instr{{Op: 44}, {Op: 9}, {Op: 77, A: 1}, {Op: 9}, {Op: 44, A: 2, B: 1}, {Op: 9}, {Op: 45, A: 3, B: 2}, {Op: 53}},
+				Insns:       []bytecode.Instr{{Op: 44}, {Op: 9}, {Op: 78, A: 1}, {Op: 9}, {Op: 44, A: 2, B: 1}, {Op: 9}, {Op: 45, A: 3, B: 2}, {Op: 53}},
 				Names:       []string{"def_delegator", "delegate", "def_delegators", "__resolve_accessor"},
 				NumRequired: 0,
 				SplatIndex:  -1,
@@ -2604,7 +2604,7 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:        "<module:SingleForwardable>",
-				Insns:       []bytecode.Instr{{Op: 44}, {Op: 9}, {Op: 77, A: 1}, {Op: 9}, {Op: 44, A: 2, B: 1}, {Op: 53}},
+				Insns:       []bytecode.Instr{{Op: 44}, {Op: 9}, {Op: 78, A: 1}, {Op: 9}, {Op: 44, A: 2, B: 1}, {Op: 53}},
 				Names:       []string{"def_single_delegator", "delegate", "def_single_delegators"},
 				NumRequired: 0,
 				SplatIndex:  -1,
@@ -2913,7 +2913,7 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:  "<class:Pathname>",
-				Insns: []bytecode.Instr{{Op: 5}, {Op: 33}, {Op: 30, A: 1, B: 1}, {Op: 9}, {Op: 1}, {Op: 41, A: 2}, {Op: 9}, {Op: 44, A: 3}, {Op: 9}, {Op: 44, A: 4, B: 1}, {Op: 9}, {Op: 77, A: 5, B: 4}, {Op: 9}, {Op: 44, A: 6, B: 2}, {Op: 9}, {Op: 44, A: 7, B: 3}, {Op: 9}, {Op: 44, A: 8, B: 4}, {Op: 9}, {Op: 44, A: 9, B: 5}, {Op: 9}, {Op: 77, A: 10, B: 9}, {Op: 9}, {Op: 44, A: 11, B: 6}, {Op: 9}, {Op: 44, A: 12, B: 7}, {Op: 9}, {Op: 44, A: 13, B: 8}, {Op: 9}, {Op: 44, A: 14, B: 9}, {Op: 9}, {Op: 44, A: 15, B: 10}, {Op: 9}, {Op: 44, A: 16, B: 11}, {Op: 9}, {Op: 44, A: 17, B: 12}, {Op: 9}, {Op: 44, A: 18, B: 13}, {Op: 9}, {Op: 44, A: 19, B: 14}, {Op: 9}, {Op: 44, A: 20, B: 15}, {Op: 9}, {Op: 77, A: 21, B: 20}, {Op: 9}, {Op: 44, A: 22, B: 16}, {Op: 9}, {Op: 44, A: 23, B: 17}, {Op: 9}, {Op: 44, A: 24, B: 18}, {Op: 9}, {Op: 44, A: 25, B: 19}, {Op: 9}, {Op: 44, A: 26, B: 20}, {Op: 9}, {Op: 45, A: 27, B: 21}, {Op: 9}, {Op: 44, A: 28, B: 22}, {Op: 53}},
+				Insns: []bytecode.Instr{{Op: 5}, {Op: 33}, {Op: 30, A: 1, B: 1}, {Op: 9}, {Op: 1}, {Op: 41, A: 2}, {Op: 9}, {Op: 44, A: 3}, {Op: 9}, {Op: 44, A: 4, B: 1}, {Op: 9}, {Op: 78, A: 5, B: 4}, {Op: 9}, {Op: 44, A: 6, B: 2}, {Op: 9}, {Op: 44, A: 7, B: 3}, {Op: 9}, {Op: 44, A: 8, B: 4}, {Op: 9}, {Op: 44, A: 9, B: 5}, {Op: 9}, {Op: 78, A: 10, B: 9}, {Op: 9}, {Op: 44, A: 11, B: 6}, {Op: 9}, {Op: 44, A: 12, B: 7}, {Op: 9}, {Op: 44, A: 13, B: 8}, {Op: 9}, {Op: 44, A: 14, B: 9}, {Op: 9}, {Op: 44, A: 15, B: 10}, {Op: 9}, {Op: 44, A: 16, B: 11}, {Op: 9}, {Op: 44, A: 17, B: 12}, {Op: 9}, {Op: 44, A: 18, B: 13}, {Op: 9}, {Op: 44, A: 19, B: 14}, {Op: 9}, {Op: 44, A: 20, B: 15}, {Op: 9}, {Op: 78, A: 21, B: 20}, {Op: 9}, {Op: 44, A: 22, B: 16}, {Op: 9}, {Op: 44, A: 23, B: 17}, {Op: 9}, {Op: 44, A: 24, B: 18}, {Op: 9}, {Op: 44, A: 25, B: 19}, {Op: 9}, {Op: 44, A: 26, B: 20}, {Op: 9}, {Op: 45, A: 27, B: 21}, {Op: 9}, {Op: 44, A: 28, B: 22}, {Op: 53}},
 				Consts: []object.Value{
 					object.NewString("/"),
 				},
@@ -3304,7 +3304,7 @@ func embeddedPrelude() *bytecode.ISeq {
 			},
 			&bytecode.ISeq{
 				Name:  "<module:URI>",
-				Insns: []bytecode.Instr{{Op: 42}, {Op: 9}, {Op: 42, A: 1, B: 1}, {Op: 9}, {Op: 42, A: 2, B: 2}, {Op: 9}, {Op: 42, A: 3, B: 3}, {Op: 9}, {Op: 42, A: 4, B: 4}, {Op: 9}, {Op: 42, A: 5, B: 5}, {Op: 9}, {Op: 1}, {Op: 1, A: 1}, {Op: 1, A: 2}, {Op: 1, A: 3}, {Op: 1, A: 4}, {Op: 1, A: 5}, {Op: 1, A: 6}, {Op: 1, A: 7}, {Op: 7, A: 4}, {Op: 41, A: 6}, {Op: 9}, {Op: 1, A: 8}, {Op: 33, A: 1}, {Op: 1, A: 9}, {Op: 33, A: 2}, {Op: 1, A: 10}, {Op: 33, A: 3}, {Op: 1, A: 11}, {Op: 33, A: 4}, {Op: 1, A: 12}, {Op: 33, A: 5}, {Op: 7, A: 5}, {Op: 41, A: 7}, {Op: 9}, {Op: 33, A: 8}, {Op: 1, A: 13}, {Op: 30, A: 9, B: 1, Flags: 1}, {Op: 41, A: 10}, {Op: 9}, {Op: 45, A: 11, B: 6}, {Op: 9}, {Op: 45, A: 12, B: 7}, {Op: 9}, {Op: 45, A: 13, B: 8}, {Op: 9}, {Op: 42, A: 14, B: 9}, {Op: 53}},
+				Insns: []bytecode.Instr{{Op: 42}, {Op: 9}, {Op: 42, A: 1, B: 1}, {Op: 9}, {Op: 42, A: 2, B: 2}, {Op: 9}, {Op: 42, A: 3, B: 3}, {Op: 9}, {Op: 42, A: 4, B: 4}, {Op: 9}, {Op: 42, A: 5, B: 5}, {Op: 9}, {Op: 1}, {Op: 1, A: 1}, {Op: 1, A: 2}, {Op: 1, A: 3}, {Op: 1, A: 4}, {Op: 1, A: 5}, {Op: 1, A: 6}, {Op: 1, A: 7}, {Op: 7, A: 4}, {Op: 41, A: 6}, {Op: 9}, {Op: 1, A: 8}, {Op: 33, A: 1}, {Op: 1, A: 9}, {Op: 33, A: 2}, {Op: 1, A: 10}, {Op: 33, A: 3}, {Op: 1, A: 11}, {Op: 33, A: 4}, {Op: 1, A: 12}, {Op: 33, A: 5}, {Op: 7, A: 5}, {Op: 41, A: 7}, {Op: 9}, {Op: 33, A: 8}, {Op: 1, A: 13}, {Op: 30, A: 9, B: 1, Flags: 1}, {Op: 41, A: 10}, {Op: 9}, {Op: 45, A: 11, B: 6}, {Op: 9}, {Op: 45, A: 12, B: 7}, {Op: 9}, {Op: 45, A: 13, B: 8}, {Op: 9}, {Op: 42, A: 14, B: 9}, {Op: 9}, {Op: 42, A: 15, B: 10}, {Op: 9}, {Op: 33, A: 15}, {Op: 30, A: 9, Flags: 1}, {Op: 41, A: 16}, {Op: 9}, {Op: 33, A: 16}, {Op: 41, A: 17}, {Op: 53}},
 				Consts: []object.Value{
 					object.NewString("http"),
 					object.Integer(80),
@@ -3321,7 +3321,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					object.NewString("ldap"),
 					object.NewString("\\A(?:([^:/?#]+):)?(?://(?:([^/?#@]*)@)?([^/?#:]*)(?::(\\d+))?)?([^?#]*)(?:\\?([^#]*))?(?:#(.*))?\\z"),
 				},
-				Names:       []string{"Generic", "HTTP", "HTTPS", "FTP", "File", "LDAP", "DEFAULT_PORTS", "SCHEME_CLASSES", "Regexp", "new", "PARSE_RE", "parse", "join", "__normalize_path", "InvalidURIError"},
+				Names:       []string{"Generic", "HTTP", "HTTPS", "FTP", "File", "LDAP", "DEFAULT_PORTS", "SCHEME_CLASSES", "Regexp", "new", "PARSE_RE", "parse", "join", "__normalize_path", "InvalidURIError", "Parser", "DEFAULT_PARSER", "RFC3986_PARSER"},
 				NumRequired: 0,
 				SplatIndex:  -1,
 				KwRestSlot:  -1,
@@ -3330,7 +3330,7 @@ func embeddedPrelude() *bytecode.ISeq {
 				Children: []*bytecode.ISeq{
 					&bytecode.ISeq{
 						Name:  "<class:Generic>",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 1, A: 1}, {Op: 1, A: 2}, {Op: 1, A: 3}, {Op: 1, A: 4}, {Op: 1, A: 5}, {Op: 1, A: 6}, {Op: 30, B: 7}, {Op: 9}, {Op: 44, A: 1}, {Op: 9}, {Op: 44, A: 2, B: 1}, {Op: 9}, {Op: 77, A: 3, B: 2}, {Op: 9}, {Op: 44, A: 4, B: 2}, {Op: 9}, {Op: 44, A: 5, B: 3}, {Op: 9}, {Op: 44, A: 6, B: 4}, {Op: 9}, {Op: 44, A: 7, B: 5}, {Op: 9}, {Op: 44, A: 8, B: 6}, {Op: 9}, {Op: 44, A: 9, B: 7}, {Op: 9}, {Op: 77, A: 10, B: 9}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 1, A: 1}, {Op: 1, A: 2}, {Op: 1, A: 3}, {Op: 1, A: 4}, {Op: 1, A: 5}, {Op: 1, A: 6}, {Op: 30, B: 7}, {Op: 9}, {Op: 44, A: 1}, {Op: 9}, {Op: 44, A: 2, B: 1}, {Op: 9}, {Op: 78, A: 3, B: 2}, {Op: 9}, {Op: 44, A: 4, B: 2}, {Op: 9}, {Op: 44, A: 5, B: 3}, {Op: 9}, {Op: 44, A: 6, B: 4}, {Op: 9}, {Op: 44, A: 7, B: 5}, {Op: 9}, {Op: 44, A: 8, B: 6}, {Op: 9}, {Op: 44, A: 9, B: 7}, {Op: 9}, {Op: 78, A: 10, B: 9}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("scheme"),
 							object.Symbol("userinfo"),
@@ -3649,6 +3649,70 @@ func embeddedPrelude() *bytecode.ISeq {
 						BlockSlot:   -1,
 						NumLocals:   0,
 						Super:       "StandardError",
+					},
+					&bytecode.ISeq{
+						Name:        "<class:Parser>",
+						Insns:       []bytecode.Instr{{Op: 44}, {Op: 9}, {Op: 44, A: 1, B: 1}, {Op: 53}},
+						Names:       []string{"parse", "make_regexp"},
+						NumRequired: 0,
+						SplatIndex:  -1,
+						KwRestSlot:  -1,
+						BlockSlot:   -1,
+						NumLocals:   0,
+						Children: []*bytecode.ISeq{
+							&bytecode.ISeq{
+								Name:        "parse",
+								Insns:       []bytecode.Instr{{Op: 33}, {Op: 11}, {Op: 30, A: 1, B: 1, Flags: 1}, {Op: 53}},
+								Names:       []string{"URI", "parse"},
+								Params:      []string{"uri"},
+								NumRequired: 1,
+								SplatIndex:  -1,
+								KwRestSlot:  -1,
+								BlockSlot:   -1,
+								NumLocals:   1,
+								Locals:      []string{"uri"},
+								Super:       "",
+							},
+							&bytecode.ISeq{
+								Name:  "make_regexp",
+								Insns: []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 10}, {Op: 28, A: 12}, {Op: 9}, {Op: 11}, {Op: 30, Flags: 1}, {Op: 25}, {Op: 28, A: 27}, {Op: 1}, {Op: 1, A: 1}, {Op: 30, A: 1}, {Op: 13}, {Op: 11}, {Op: 30, A: 2, C: 1, Flags: 1}, {Op: 1, A: 2}, {Op: 30, A: 3, B: 1, Flags: 1}, {Op: 30, A: 1}, {Op: 13}, {Op: 1, A: 3}, {Op: 30, A: 1}, {Op: 13}, {Op: 26, A: 28}, {Op: 1, A: 4}, {Op: 12, A: 1}, {Op: 9}, {Op: 33, A: 4}, {Op: 1, A: 5}, {Op: 1, A: 6}, {Op: 30, A: 1}, {Op: 13}, {Op: 11, A: 1}, {Op: 30, A: 1}, {Op: 13}, {Op: 1, A: 7}, {Op: 30, A: 1}, {Op: 13}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 53}},
+								Consts: []object.Value{
+									object.NewString(""),
+									object.NewString("(?:"),
+									object.NewString("|"),
+									object.NewString(")"),
+									object.NewString("[a-zA-Z][a-zA-Z\\d+\\-.]*"),
+									object.NewString(""),
+									object.NewString("\\A"),
+									object.NewString(":(?://(?:[^/?#@]*@)?[^/?#:]*(?::\\d+)?)?[^?#]*(?:\\?[^#]*)?(?:#.*)?\\z"),
+								},
+								Names:       []string{"empty?", "to_s", "map", "join", "Regexp", "new"},
+								Params:      []string{"schemes"},
+								NumRequired: 0,
+								SplatIndex:  -1,
+								KwRestSlot:  -1,
+								BlockSlot:   -1,
+								NumLocals:   2,
+								Locals:      []string{"schemes", "scheme"},
+								Children: []*bytecode.ISeq{
+									&bytecode.ISeq{
+										Name:        "<block>",
+										Insns:       []bytecode.Instr{{Op: 33}, {Op: 11}, {Op: 30, A: 1, Flags: 1}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 53}},
+										Names:       []string{"Regexp", "to_s", "escape"},
+										Params:      []string{"s"},
+										NumRequired: 1,
+										SplatIndex:  -1,
+										KwRestSlot:  -1,
+										BlockSlot:   -1,
+										NumLocals:   1,
+										Locals:      []string{"s"},
+										Super:       "",
+									},
+								},
+								Super: "",
+							},
+						},
+						Super: "",
 					},
 				},
 				Super: "",

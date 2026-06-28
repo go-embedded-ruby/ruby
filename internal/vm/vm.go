@@ -582,6 +582,17 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		vm.fileStack = append(vm.fileStack, iseq.File)
 	}
 
+	// Depths of the per-frame tracking stacks right after THIS frame pushed its own
+	// entries. When this frame rescues an exception that unwound deeper frames, the
+	// recover handler truncates back to these depths so __FILE__/require_relative,
+	// caller and backtraces see the correct (this-frame) state rather than the
+	// abandoned deep-frame entries. requireDirs is likewise restored so a
+	// require_relative in a rescue resolves against the rescuing file.
+	frameNamesDepth := len(vm.frameNames)
+	frameFilesDepth := len(vm.frameFiles)
+	fileStackDepth := len(vm.fileStack)
+	requireDirsDepth := len(vm.requireDirs)
+
 	stack := vm.getStack()
 	push := func(v object.Value) { stack = append(stack, v) }
 	pop := func() object.Value {
@@ -1101,6 +1112,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				panic(vm.excError(pop()))
 			case bytecode.OpRegexp:
 				push(vm.compileRegexp(iseq.Names[in.A], iseq.Names[in.B]))
+			case bytecode.OpRegexpDyn:
+				// Interpolated regexp literal: the source String built from the parts
+				// (each appended via #to_s, so the top of stack is always a String) is
+				// on the stack; compile it with the static flags.
+				push(vm.compileRegexp(pop().(*object.String).Str(), iseq.Names[in.B]))
 			case bytecode.OpXStr:
 				push(object.NewString(vm.runShellCommand(iseq.Names[in.A])))
 			case bytecode.OpSplatToArray:
@@ -1203,6 +1219,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					h := handlers[len(handlers)-1]
 					handlers = handlers[:len(handlers)-1]
 					stack = stack[:h.sp]
+					// Truncate the per-frame tracking stacks back to this frame's own depth:
+					// deeper frames that unwound never ran their normal pop, so their entries
+					// would otherwise leak into __FILE__, require_relative resolution, caller
+					// and backtraces taken from the rescue body.
+					vm.frameNames = vm.frameNames[:frameNamesDepth]
+					vm.frameFiles = vm.frameFiles[:frameFilesDepth]
+					vm.fileStack = vm.fileStack[:fileStackDepth]
+					vm.requireDirs = vm.requireDirs[:requireDirsDepth]
 					exc := vm.exceptionObject(rerr)
 					vm.curExc = exc
 					push(exc)
@@ -1332,7 +1356,24 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 	// Each class body starts with public default visibility and no
 	// module_function mode (MRI resets these on every (re)open).
 	class.defaultVis, class.funcMode = visPublic, false
+	adoptReopenLexParent(class, parent, scoped)
 	return vm.exec(body, class, nil, class, "", nil, nil, nil)
+}
+
+// adoptReopenLexParent upgrades a class/module's lexParent when it is reopened
+// with a bare nested form (`module A; module B`) under a real enclosing scope but
+// currently has no lexParent. This happens when B was first created via a compact
+// path (`module A::B`, whose own nesting is just itself, so lexParent is nil) and
+// is later reopened nested: MRI's Module.nesting for the nested body is [B, A], so
+// B must reach A to resolve a bare constant defined in A. Only a nil→parent
+// upgrade is performed (a scoped reopen, or one that already records an enclosing
+// scope, is left untouched), so the common scoped-first/nested-later pattern
+// resolves while never overwriting an existing lexical home.
+func adoptReopenLexParent(c, parent *RClass, scoped bool) {
+	if scoped || c.lexParent != nil {
+		return
+	}
+	c.lexParent = lexParentFor(parent)
 }
 
 // defineModuleIn creates or reopens a module named `name` in `parent`'s constant
@@ -1357,6 +1398,7 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 		table[name] = mod
 	}
 	mod.defaultVis, mod.funcMode = visPublic, false
+	adoptReopenLexParent(mod, parent, scoped)
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil)
 }
 

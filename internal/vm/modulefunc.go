@@ -108,6 +108,33 @@ func (vm *VM) registerModuleExtras() {
 		return object.Symbol(newName)
 	})
 
+	// undef_method: the method form of `undef name`. It installs a tombstone that
+	// hides any definition (own or inherited) so a call routes to method_missing.
+	// Accepts one or more names and returns self.
+	vm.cModule.define("undef_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		for _, a := range args {
+			vm.undefMethod(mod, nameArg(a))
+		}
+		return mod
+	})
+
+	// remove_method: deletes the receiver's OWN definition of each name, leaving
+	// any inherited method visible again. A name not defined directly on the
+	// receiver raises NameError (MRI). Returns self.
+	vm.cModule.define("remove_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		for _, a := range args {
+			name := nameArg(a)
+			if _, ok := mod.methods[name]; !ok {
+				raise("NameError", "method '%s' not defined in %s", name, mod.ToS())
+			}
+			delete(mod.methods, name)
+		}
+		bumpMethodSerial()
+		return mod
+	})
+
 	// Constant-visibility directives: not enforced (constants are not access-
 	// controlled here), so accept the names and return self, as MRI does.
 	constVisibility := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {

@@ -96,15 +96,9 @@ func (vm *VM) respondsTo(recv object.Value, name string) bool {
 	if name == "!" {
 		return true
 	}
-	// Unary `-@`/`+@`/`~` are fast-path ops on the numeric tower rather than
-	// method-table entries; numbers respond to them as in MRI.
-	switch name {
-	case "-@", "+@", "~":
-		switch recv.(type) {
-		case object.Integer, *object.Bignum, object.Float, *object.Rational, *object.Complex:
-			return true
-		}
-	}
+	// Unary `-@`/`+@` are now generic Numeric methods and `~` is an Integer method,
+	// so they are all found by findMethod above; no numeric fast-path special-case
+	// is needed here.
 	return false
 }
 

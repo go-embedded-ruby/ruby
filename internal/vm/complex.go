@@ -12,6 +12,118 @@ import (
 // arithmetic reuses the existing numeric operators. There is no Rational type,
 // so division produces Float components rather than exact Rationals.
 
+// registerNumericComplexCompat installs the Complex-compatibility methods every
+// real Numeric answers in MRI — phase/arg/angle, polar, rect/rectangular,
+// conjugate/conj, imaginary/imag. A real number r has phase 0 when r >= 0 and π
+// when r < 0; its polar form is [abs, phase]; its rectangular form is [r, 0];
+// its conjugate is itself and its imaginary part is 0. They live on Numeric so
+// Integer/Float/Rational/Complex subclasses inherit them (and a Numeric subclass
+// such as Puppet's TimeData can undef_method them).
+func registerNumericComplexCompat(vm *VM, cNumeric *RClass) {
+	phaseOf := func(self object.Value) object.Value {
+		if f, ok := toFloat(self); ok && f < 0 {
+			return object.Float(math.Pi)
+		}
+		return object.Integer(0)
+	}
+	phaseFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return phaseOf(self)
+	}
+	cNumeric.define("phase", phaseFn)
+	cNumeric.define("arg", phaseFn)
+	cNumeric.define("angle", phaseFn)
+	cNumeric.define("polar", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Array{Elems: []object.Value{vm.send(self, "abs", nil, nil), phaseOf(self)}}
+	})
+	rectFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Array{Elems: []object.Value{self, object.Integer(0)}}
+	}
+	cNumeric.define("rect", rectFn)
+	cNumeric.define("rectangular", rectFn)
+	conjFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	}
+	cNumeric.define("conjugate", conjFn)
+	cNumeric.define("conj", conjFn)
+	imagFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(0)
+	}
+	cNumeric.define("imaginary", imagFn)
+	cNumeric.define("imag", imagFn)
+
+	registerNumericGeneric(vm, cNumeric)
+}
+
+// registerNumericGeneric installs the generic Numeric instance methods MRI
+// defines at the abstract Numeric level — unary +/- , abs/magnitude/abs2,
+// div/fdiv, %/modulo/divmod, negative?/positive?. Integer/Float keep their own
+// faster overrides (which win, being nearer in the ancestor chain); these exist
+// so a Numeric subclass (e.g. Puppet's Timestamp) inherits them and can
+// undef_method them, and so `5.send(:-@)` style sends resolve. Each delegates
+// through the receiver's own operators via vm.send, matching MRI's
+// coercion-based definitions.
+func registerNumericGeneric(vm *VM, cNumeric *RClass) {
+	bin := func(self object.Value, op string, other object.Value) object.Value {
+		return vm.send(self, op, []object.Value{other}, nil)
+	}
+	cmpZero := func(self object.Value) int {
+		c := vm.send(self, "<=>", []object.Value{object.Integer(0)}, nil)
+		i, ok := c.(object.Integer)
+		if !ok {
+			raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(self).name)
+		}
+		return int(i)
+	}
+	absFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if cmpZero(self) < 0 {
+			return vm.send(self, "-@", nil, nil)
+		}
+		return self
+	}
+	cNumeric.define("abs", absFn)
+	cNumeric.define("magnitude", absFn)
+	cNumeric.define("abs2", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return bin(self, "*", self)
+	})
+	cNumeric.define("-@", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return bin(object.Integer(0), "-", self)
+	})
+	cNumeric.define("+@", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	cNumeric.define("negative?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(cmpZero(self) < 0)
+	})
+	cNumeric.define("positive?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(cmpZero(self) > 0)
+	})
+	cNumeric.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := vm.send(self, "to_f", nil, nil)
+		b := vm.send(args[0], "to_f", nil, nil)
+		return bin(a, "/", b)
+	})
+	// integer division: floor of the true quotient (MRI Numeric#div).
+	divOf := func(self, other object.Value) object.Value {
+		return vm.send(bin(self, "/", other), "floor", nil, nil)
+	}
+	cNumeric.define("div", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return divOf(self, args[0])
+	})
+	// modulo: self - other * (self div other) (MRI Numeric#modulo).
+	modOf := func(self, other object.Value) object.Value {
+		return bin(self, "-", bin(other, "*", divOf(self, other)))
+	}
+	cNumeric.define("modulo", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return modOf(self, args[0])
+	})
+	cNumeric.define("%", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return modOf(self, args[0])
+	})
+	cNumeric.define("divmod", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return &object.Array{Elems: []object.Value{divOf(self, args[0]), modOf(self, args[0])}}
+	})
+}
+
 // asComplexVal coerces a real number to a Complex (zero imaginary part); a
 // Complex passes through. ok is false for a non-numeric value.
 func asComplexVal(v object.Value) (*object.Complex, bool) {

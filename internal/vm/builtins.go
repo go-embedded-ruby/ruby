@@ -62,6 +62,7 @@ func (vm *VM) bootstrap() {
 
 	vm.registerComplex()
 	vm.registerRational()
+	registerNumericComplexCompat(vm, cNumeric)
 	vm.registerMath()
 	vm.registerFFT()
 	vm.registerNDArray()
@@ -190,6 +191,37 @@ func (vm *VM) bootstrap() {
 			c = o.singleton // its super is the real class, so the walk picks up both
 		}
 		return &object.Array{Elems: vm.methodNames(c, true)}
+	})
+	vm.cObject.define("public_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Like #methods, but restricted to PUBLIC methods (excluding private and
+		// protected). An `all`/`false` argument selects inherited vs own.
+		all := len(args) == 0 || args[0].Truthy()
+		var candidates []object.Value
+		if _, ok := self.(*RClass); ok {
+			// For a class/module the callable methods are its singleton (class) methods,
+			// as with #singleton_methods.
+			candidates = vm.singletonMethodNames(self, all)
+		} else {
+			c := vm.classOf(self)
+			if o, ok := self.(*RObject); ok && o.singleton != nil {
+				c = o.singleton
+			}
+			candidates = vm.methodNames(c, all)
+		}
+		var out []object.Value
+		for _, n := range candidates {
+			name := string(n.(object.Symbol))
+			var m *Method
+			if cls, ok := self.(*RClass); ok {
+				m = vm.resolveClassMethod(cls, name)
+			} else {
+				m = undefAsNil(lookupMethod(vm.dispatchClass(self), name))
+			}
+			if m == nil || vm.sendVisibilityOf(self, name, m) == visPublic {
+				out = append(out, n)
+			}
+		}
+		return &object.Array{Elems: out}
 	})
 	vm.cObject.define("singleton_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Default includes singleton methods inherited from the receiver's
@@ -952,6 +984,22 @@ func (vm *VM) bootstrap() {
 			vm.callBlock(blk, []object.Value{object.Integer(s[i])})
 		}
 		return self
+	})
+	vm.cString.define("each_codepoint", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "each_codepoint")
+		}
+		for _, r := range strOf(self) {
+			vm.callBlock(blk, []object.Value{object.Integer(r)})
+		}
+		return self
+	})
+	vm.cString.define("codepoints", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		var out []object.Value
+		for _, r := range strOf(self) {
+			out = append(out, object.Integer(r))
+		}
+		return &object.Array{Elems: out}
 	})
 	vm.cString.define("split", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.stringSplit(strOf(self), args)
@@ -2187,6 +2235,27 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.methods["each_pair"] = vm.cHash.methods["each"]
 	bumpMethodSerial()
+	vm.cHash.define("each_key", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "each_key")
+		}
+		h := self.(*object.Hash)
+		for _, k := range h.Keys {
+			vm.callBlock(blk, []object.Value{k})
+		}
+		return h
+	})
+	vm.cHash.define("each_value", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "each_value")
+		}
+		h := self.(*object.Hash)
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			vm.callBlock(blk, []object.Value{v})
+		}
+		return h
+	})
 	// mergeInto folds each other hash into dst. On a key already present, a block
 	// (|key, old, new|) decides the value; without one the new value wins. Several
 	// hashes may be merged left to right.
@@ -2821,6 +2890,31 @@ func (vm *VM) bootstrap() {
 			r = -r
 		}
 		return object.Integer(r)
+	})
+	vm.cInteger.define("floor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// floor(n>=0) is self; floor(n<0) rounds toward negative infinity to the
+		// nearest multiple of 10**(-n).
+		n := intArgOr(args, 0)
+		if n >= 0 {
+			return self
+		}
+		pow, ok := pow10(-n)
+		if !ok {
+			return object.Integer(0) // 10**(-n) exceeds int64; the result is not int64-representable
+		}
+		return object.Integer(floorDiv(intOf(self), pow) * pow)
+	})
+	vm.cInteger.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// ceil(n>=0) is self; ceil(n<0) rounds toward positive infinity.
+		n := intArgOr(args, 0)
+		if n >= 0 {
+			return self
+		}
+		pow, ok := pow10(-n)
+		if !ok {
+			return object.Integer(0)
+		}
+		return object.Integer(-floorDiv(-intOf(self), pow) * pow)
 	})
 	vm.cInteger.define("digits", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intOf(self)

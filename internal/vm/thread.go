@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"runtime"
+	"sort"
 	"time"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -31,7 +32,8 @@ type RThread struct {
 	done   chan struct{}
 	status string                        // "run" | "sleep" | "dead"
 	name   object.Value                  // Thread#name (nil or a String)
-	locals map[object.Value]object.Value // Thread#[] / #[]=
+	locals map[object.Value]object.Value // Thread#[] / #[]= (fiber-local)
+	tvars  map[object.Value]object.Value // Thread#thread_variable_get/set (thread-local)
 	abort  bool                          // abort_on_exception
 
 	// Eager-start handshake: a freshly spawned thread runs immediately (as in
@@ -273,6 +275,40 @@ func (vm *VM) registerThreadClass() {
 		_, ok := self.(*RThread).locals[threadLocalKey(args[0])]
 		return object.Bool(ok)
 	})
+	// thread_variable_get/set/? and thread_variables: thread-local storage that is
+	// distinct from Thread#[] (which is fiber-local in MRI). Keys are coerced to
+	// Symbols like the fiber-local accessors.
+	cThread.define("thread_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		if v, ok := t.tvars[threadVarKey(args[0])]; ok {
+			return v
+		}
+		return object.NilV
+	})
+	cThread.define("thread_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		if t.tvars == nil {
+			t.tvars = map[object.Value]object.Value{}
+		}
+		t.tvars[threadVarKey(args[0])] = args[1]
+		return args[1]
+	})
+	cThread.define("thread_variable?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		_, ok := self.(*RThread).tvars[threadVarKey(args[0])]
+		return object.Bool(ok)
+	})
+	cThread.define("thread_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		keys := make([]object.Value, 0, len(t.tvars))
+		for k := range t.tvars {
+			keys = append(keys, k)
+		}
+		// Deterministic order (map iteration is randomised): sort the Symbol keys.
+		sort.SliceStable(keys, func(i, j int) bool {
+			return string(keys[i].(object.Symbol)) < string(keys[j].(object.Symbol))
+		})
+		return &object.Array{Elems: keys}
+	})
 	cThread.define("abort_on_exception", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*RThread).abort)
 	})
@@ -300,6 +336,21 @@ func threadLocalKey(k object.Value) object.Value {
 		return object.Symbol(s.Str())
 	}
 	return k
+}
+
+// threadVarKey coerces a thread-variable key to a Symbol, requiring a Symbol or
+// String as MRI does (anything else raises TypeError). Used by the
+// thread_variable_* accessors, which — unlike Thread#[] — do not accept other
+// key types.
+func threadVarKey(k object.Value) object.Value {
+	switch v := k.(type) {
+	case object.Symbol:
+		return v
+	case *object.String:
+		return object.Symbol(v.Str())
+	}
+	raise("TypeError", "%s is not a symbol nor a string", k.Inspect())
+	return nil
 }
 
 func (vm *VM) registerMutex() {

@@ -5,9 +5,70 @@
 package vm_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestReopenLexParentAfterCompactDefine covers the lexParent upgrade: a module
+// first created via a compact path (module A::B, whose nesting is only itself)
+// and later reopened nested (module A; module B) must, in the nested body,
+// resolve a bare constant defined in A. This is the constant-resolution bug that
+// blocked Puppet's Pops (Types referencing Visitor). Verified against MRI 4.0.5.
+func TestReopenLexParentAfterCompactDefine(t *testing.T) {
+	src := "module A; end\n" +
+		"module A::B; end\n" + // compact define: B.lexParent left nil
+		"module A\n" +
+		"  WANTED = 99\n" +
+		"  module B\n" +
+		"    GOT = WANTED\n" + // bare WANTED must resolve up to A
+		"  end\n" +
+		"end\n" +
+		"p A::B::GOT\n"
+	if got := eval(t, src); got != "99\n" {
+		t.Errorf("got %q want \"99\\n\"", got)
+	}
+
+	// The same for a class created compactly then reopened nested.
+	src2 := "class P; end\n" +
+		"class P::Q; end\n" +
+		"class P\n" +
+		"  K = 7\n" +
+		"  class Q\n" +
+		"    V = K\n" +
+		"  end\n" +
+		"end\n" +
+		"p P::Q::V\n"
+	if got := eval(t, src2); got != "7\n" {
+		t.Errorf("got %q want \"7\\n\"", got)
+	}
+}
+
+// TestRescueRestoresRequireState covers the per-frame tracking-stack truncation:
+// when a deep require raises a LoadError that is rescued in an outer file, a
+// require_relative in the rescue body must resolve against the rescuing file, not
+// the abandoned deep file. This backed Puppet's gettext fallback-to-stubs path.
+func TestRescueRestoresRequireState(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "config.rb", "begin\n  require 'farlib'\nrescue LoadError\n  require_relative 'stubs'\nend\nputs 'STUBBED' if defined?(STUB_OK)\n")
+	write(t, dir, "stubs.rb", "STUB_OK = true\n")
+	sub := filepath.Join(dir, "gem")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, sub, "farlib.rb", "require 'deeplib'\n")
+	write(t, sub, "deeplib.rb", "require 'nonexistent_xyz_feature'\n")
+	out, err := runInDir(t, dir,
+		"$LOAD_PATH.unshift \""+sub+"\"\n"+
+			"require_relative \"config\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "STUBBED\n" {
+		t.Errorf("got %q want \"STUBBED\\n\"", out)
+	}
+}
 
 // TestAutoloadBasic covers the headline path: a top-level autoload that fires on
 // first reference, with autoload? reporting the path before and nil after, all

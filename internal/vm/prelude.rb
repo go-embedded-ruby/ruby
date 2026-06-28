@@ -1362,6 +1362,31 @@ module URI
   end
 
   class InvalidURIError < StandardError; end
+
+  # Parser is a small stand-in for MRI's RFC3986_Parser: it exposes #parse (a
+  # thin wrapper over URI.parse) and #make_regexp, which builds a Regexp matching
+  # an absolute URI (optionally restricted to a set of schemes). DEFAULT_PARSER is
+  # the shared instance MRI also exposes; code such as Puppet's Pcore references
+  # URI::DEFAULT_PARSER.make_regexp to derive a URI type pattern.
+  class Parser
+    def parse(uri)
+      URI.parse(uri)
+    end
+
+    # make_regexp returns a Regexp anchored to match a whole absolute URI. With a
+    # list of schemes only those schemes match; without one any scheme is allowed.
+    def make_regexp(schemes = nil)
+      scheme = if schemes && !schemes.empty?
+                 "(?:#{schemes.map { |s| Regexp.escape(s.to_s) }.join('|')})"
+               else
+                 "[a-zA-Z][a-zA-Z\\d+\\-.]*"
+               end
+      Regexp.new("\\A#{scheme}:(?://(?:[^/?#@]*@)?[^/?#:]*(?::\\d+)?)?[^?#]*(?:\\?[^#]*)?(?:#.*)?\\z")
+    end
+  end
+
+  DEFAULT_PARSER = Parser.new
+  RFC3986_PARSER = DEFAULT_PARSER
 end
 
 # URI() is the Kernel-level shorthand for URI.parse, matching MRI.
