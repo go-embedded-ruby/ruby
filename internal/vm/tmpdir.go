@@ -98,7 +98,7 @@ func makeTmpdir(base, prefix, suffix string) string {
 	for i := 0; i < tmpRandRetries; i++ {
 		name := fmt.Sprintf("%s%s-%d-%s%s", prefix, stamp, pid, tmpRandToken(), suffix)
 		full := path.Join(base, name)
-		err := os.Mkdir(full, 0o700)
+		err := osMkdir(full, 0o700)
 		if err == nil {
 			return full
 		}
@@ -133,4 +133,5 @@ func tmpRandToken() string {
 var (
 	tmpNow   = time.Now
 	osGetpid = os.Getpid
+	osMkdir  = os.Mkdir
 )

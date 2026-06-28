@@ -44,10 +44,12 @@ d = Dir.mktmpdir(nil)
 ok = File.basename(d).start_with?("d")
 Dir.rmdir(d)
 p ok`, "true\n"},
-		// Explicit base directory.
+		// Explicit base directory (Dir.tmpdir exists on every platform; a
+		// hardcoded "/tmp" does not on Windows).
 		{"mktmpdir_base", `require "tmpdir"
-d = Dir.mktmpdir("z", "/tmp")
-ok = d.start_with?("/tmp")
+base = Dir.tmpdir
+d = Dir.mktmpdir("z", base)
+ok = d.start_with?(base)
 Dir.rmdir(d)
 p ok`, "true\n"},
 		// nil base falls back to the system tmpdir.
@@ -65,9 +67,10 @@ Dir.mktmpdir { |d| File.write(File.join(d, "x"), "hi"); saved = d }
 p Dir.exist?(saved)`, "false\n"},
 		// Block form with explicit base.
 		{"mktmpdir_block_base", `require "tmpdir"
+base = Dir.tmpdir
 saved = nil
-Dir.mktmpdir("z", "/tmp") { |d| saved = d }
-p saved.start_with?("/tmp")`, "true\n"},
+Dir.mktmpdir("z", base) { |d| saved = d }
+p saved.start_with?(base)`, "true\n"},
 		// Array prefix with only one element (no suffix).
 		{"mktmpdir_array_one", `require "tmpdir"
 d = Dir.mktmpdir(["only"])

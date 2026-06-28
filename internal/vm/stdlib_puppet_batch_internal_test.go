@@ -68,18 +68,17 @@ func TestMakeTmpdirErrors(t *testing.T) {
 		t.Fatalf("missing base: got %q, want Errno::ENOENT", c)
 	}
 
-	// Unwritable base -> EACCES. Skip when running as root, where the write
-	// succeeds regardless of mode bits.
-	if os.Geteuid() != 0 {
-		ro := t.TempDir()
-		if err := os.Chmod(ro, 0o500); err != nil {
-			t.Fatal(err)
+	// Unwritable base -> EACCES. Inject a permission error through the mkdir
+	// seam so the mapping is exercised deterministically on every platform; a
+	// chmod-readonly directory is a no-op on Windows and a no-op under root.
+	func() {
+		orig := osMkdir
+		defer func() { osMkdir = orig }()
+		osMkdir = func(string, os.FileMode) error { return os.ErrPermission }
+		if c := catchRaise(func() { makeTmpdir(t.TempDir(), "p", "") }); c != "Errno::EACCES" {
+			t.Fatalf("permission error: got %q, want Errno::EACCES", c)
 		}
-		defer os.Chmod(ro, 0o700)
-		if c := catchRaise(func() { makeTmpdir(ro, "p", "") }); c != "Errno::EACCES" {
-			t.Fatalf("readonly base: got %q, want Errno::EACCES", c)
-		}
-	}
+	}()
 
 	// Collision then success: force a fixed token once (collides with a
 	// pre-created dir) then a fresh one.
