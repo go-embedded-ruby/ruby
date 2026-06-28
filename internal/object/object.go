@@ -8,6 +8,7 @@
 package object
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 	"strconv"
@@ -297,6 +298,11 @@ func (a *Array) Truthy() bool    { return true }
 type Hash struct {
 	Keys []Value // insertion order (string keys held as frozen snapshots)
 	vals map[any]Value
+	// keyBucket maps a stored user-object key (snapshot) to the customBucket it
+	// hashes to, so reuseBucket can find an #eql? sibling and collapse it to the
+	// same entry. Only populated for keys routed through CustomKeyHook; lazily
+	// created on first such insertion.
+	keyBucket map[Value]customBucket
 	// Default is the value returned for a missing key (Hash.new(default)); nil
 	// means none. DefaultProc, when set, is a Proc (held as a Value to avoid an
 	// import cycle) called with (hash, key) on a miss (Hash.new { … }); it takes
@@ -318,16 +324,88 @@ type KeyUnwrapper interface {
 	HashUnwrap() (Value, bool)
 }
 
-func hashKey(k Value) any {
+// CustomKeyHook lets the vm package supply Ruby-level hash/eql? semantics for a
+// key that is neither a plain value type nor a built-in subclass — i.e. a user
+// object that overrides #hash and #eql?. Given such a key it returns the int64
+// the object's #hash method yields and a predicate that reports whether a stored
+// key is #eql? to it; ok is false for any key that should keep identity-based
+// behaviour (the default Object#hash/#eql?). Set once by the VM at construction;
+// nil in tests that never build a VM (then every object key uses identity).
+var CustomKeyHook func(k Value) (rubyHash int64, eql func(stored Value) bool, ok bool)
+
+// customBucket is the comparable map key minted for a user object whose #hash and
+// #eql? are overridden. seq disambiguates distinct (not #eql?) objects that share
+// a #hash value; reuseBucket assigns matching keys the same bucket so #eql? keys
+// collapse to one entry exactly as MRI's open-addressed table would.
+type customBucket struct {
+	hash int64
+	seq  int
+}
+
+// hashKey normalises a key to its comparable map form. Plain value types and the
+// recursively content-addressable collections (Array/Hash) reduce to a content
+// key so that #eql? values coincide; a user object with an overridden #hash/#eql?
+// is routed through CustomKeyHook and reuseBucket so it follows Ruby semantics
+// rather than Go pointer identity.
+func (h *Hash) hashKey(k Value) any {
 	if u, ok := k.(KeyUnwrapper); ok {
 		if v, wrapped := u.HashUnwrap(); wrapped {
 			k = v
 		}
 	}
-	if s, ok := k.(*String); ok {
-		return strKey(s.B)
+	switch kk := k.(type) {
+	case *String:
+		return strKey(kk.B)
+	case *Bignum:
+		return "\x00big:" + kk.I.String()
+	case *Array:
+		var b strings.Builder
+		b.WriteString("\x00arr:")
+		for _, e := range kk.Elems {
+			fmt.Fprintf(&b, "%v\x01", h.hashKey(e))
+		}
+		return b.String()
+	case *Hash:
+		var b strings.Builder
+		b.WriteString("\x00hsh:")
+		for _, e := range kk.Keys {
+			v, _ := kk.Get(e)
+			fmt.Fprintf(&b, "%v\x02%v\x01", h.hashKey(e), h.valKey(v))
+		}
+		return b.String()
+	}
+	if CustomKeyHook != nil {
+		if rh, eql, ok := CustomKeyHook(k); ok {
+			return h.reuseBucket(rh, eql)
+		}
 	}
 	return k
+}
+
+// valKey is the content key for a value appearing on the *value* side of a nested
+// Hash that is itself used as a Hash key. It reuses hashKey so the serialisation
+// is consistent (two #eql? nested hashes produce the same key string).
+func (h *Hash) valKey(v Value) any { return h.hashKey(v) }
+
+// reuseBucket returns the customBucket for a user object with Ruby hash rh and
+// #eql? predicate eql: if an existing key in this hash is #eql?, its bucket is
+// reused (so the new key updates that entry); otherwise a fresh seq is minted at
+// the same hash so non-#eql? collisions stay distinct.
+func (h *Hash) reuseBucket(rh int64, eql func(Value) bool) customBucket {
+	maxSeq := -1
+	for _, key := range h.Keys {
+		cb, ok := h.keyBucket[key]
+		if !ok || cb.hash != rh {
+			continue
+		}
+		if eql(key) {
+			return cb
+		}
+		if cb.seq > maxSeq {
+			maxSeq = cb.seq
+		}
+	}
+	return customBucket{hash: rh, seq: maxSeq + 1}
 }
 
 // snapshotKey is the value remembered in Keys for iteration/inspect: a string
@@ -345,13 +423,20 @@ func snapshotKey(k Value) Value {
 func NewHash() *Hash { return &Hash{vals: map[any]Value{}} }
 
 // Get returns the value for k and whether it is present.
-func (h *Hash) Get(k Value) (Value, bool) { v, ok := h.vals[hashKey(k)]; return v, ok }
+func (h *Hash) Get(k Value) (Value, bool) { v, ok := h.vals[h.hashKey(k)]; return v, ok }
 
 // Set inserts or updates k→v, preserving first-insertion order.
 func (h *Hash) Set(k, v Value) {
-	hk := hashKey(k)
+	hk := h.hashKey(k)
 	if _, ok := h.vals[hk]; !ok {
-		h.Keys = append(h.Keys, snapshotKey(k))
+		snap := snapshotKey(k)
+		h.Keys = append(h.Keys, snap)
+		if cb, isCustom := hk.(customBucket); isCustom {
+			if h.keyBucket == nil {
+				h.keyBucket = map[Value]customBucket{}
+			}
+			h.keyBucket[snap] = cb
+		}
 	}
 	h.vals[hk] = v
 }
@@ -361,14 +446,17 @@ func (h *Hash) Len() int { return len(h.Keys) }
 
 // Delete removes k, returning its value and whether it was present.
 func (h *Hash) Delete(k Value) (Value, bool) {
-	hk := hashKey(k)
+	hk := h.hashKey(k)
 	v, ok := h.vals[hk]
 	if !ok {
 		return NilV, false
 	}
 	delete(h.vals, hk)
 	for i, key := range h.Keys {
-		if hashKey(key) == hk {
+		if h.hashKey(key) == hk {
+			if h.keyBucket != nil {
+				delete(h.keyBucket, key)
+			}
 			h.Keys = append(h.Keys[:i], h.Keys[i+1:]...)
 			break
 		}
@@ -386,7 +474,7 @@ func (h *Hash) repr() string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		v := h.vals[hashKey(k)]
+		v := h.vals[h.hashKey(k)]
 		// Ruby 4.0 (since 3.4) inspect: symbol keys use the label form
 		// `name: value`; all other keys use `key => value` with spaces.
 		if sym, ok := k.(Symbol); ok {
