@@ -143,6 +143,24 @@ func TestProcessGroupsError(t *testing.T) {
 	}
 }
 
+// TestProcessGroupsSuccess covers the success branch (the supplementary-group
+// list is built into an Array) deterministically through the seam, so it is
+// exercised on platforms where os.Getgroups is unavailable (e.g. Windows, where
+// the real call errors and only the error branch would otherwise run).
+func TestProcessGroupsSuccess(t *testing.T) {
+	orig := processGroups
+	defer func() { processGroups = orig }()
+	processGroups = func() ([]int, error) { return []int{0, 20}, nil }
+
+	vm := New(nil)
+	mod := vm.consts["Process"].(*RClass)
+	out := mod.smethods["groups"].native(vm, mod, nil, nil)
+	arr, ok := out.(*object.Array)
+	if !ok || len(arr.Elems) != 2 || arr.Elems[0] != object.Integer(0) || arr.Elems[1] != object.Integer(20) {
+		t.Fatalf("groups success: got %#v, want [0, 20]", out)
+	}
+}
+
 // TestClockGettimeRealtimeBranch covers the default (non-monotonic) clock branch
 // directly, which uses the wall clock.
 func TestClockGettimeRealtimeBranch(t *testing.T) {
