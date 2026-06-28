@@ -266,6 +266,58 @@ func (vm *VM) objectID(self object.Value) object.Value {
 // equally (so they key Hashes / Sets consistently), and other objects fall back
 // to their object_id. The exact numbers are unspecified in Ruby, so this uses a
 // stable internal scheme rather than matching MRI's.
+// installHashKeyHook wires object.CustomKeyHook so that a user object used as a
+// Hash key follows its Ruby-level #hash/#eql? rather than Go pointer identity.
+// Built-in value types (Integer/Float/String/Symbol/Array/…) never reach the hook
+// — object.hashKey content-addresses them first; the hook only fires for a key
+// whose class overrides #hash away from the default Object#hash. Puppet's loader
+// registry keys a Hash by Pops::Loader::TypedName, which does exactly that, so
+// without this a lookup with a fresh-but-#eql? key would miss (issue: Annotation
+// type unresolved during pcore init).
+func (vm *VM) installHashKeyHook() {
+	object.CustomKeyHook = func(k object.Value) (int64, func(object.Value) bool, bool) {
+		if !vm.hasCustomHash(k) {
+			return 0, nil, false
+		}
+		hv := vm.send(k, "hash", nil, nil)
+		rh, ok := hashAsInt(hv)
+		if !ok {
+			// MRI requires #hash to return an Integer and raises when a key whose
+			// #hash yields something else is used; mirror that rather than silently
+			// falling back to identity.
+			raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(hv).name)
+		}
+		eql := func(stored object.Value) bool {
+			return vm.send(k, "eql?", []object.Value{stored}, nil).Truthy()
+		}
+		return rh, eql, true
+	}
+}
+
+// hasCustomHash reports whether v's method resolution finds a #hash defined
+// somewhere other than the default Object#hash (or BasicObject), i.e. the user
+// gave the type value semantics for hashing. Plain reference objects with no such
+// override keep identity behaviour.
+func (vm *VM) hasCustomHash(v object.Value) bool {
+	// findMethod returns nil only for a receiver with no #hash at all (a bare
+	// BasicObject); such a key keeps identity behaviour, same as a default
+	// Object#hash, so a single expression covers both.
+	m := vm.findMethod(v, "hash")
+	return m != nil && m.owner != vm.cObject && m.owner != vm.cBasicObject
+}
+
+// hashAsInt coerces the result of a Ruby #hash call to an int64 bucket. MRI's
+// Object#hash returns an Integer; a Bignum result is folded so any value works.
+func hashAsInt(v object.Value) (int64, bool) {
+	switch x := v.(type) {
+	case object.Integer:
+		return int64(x), true
+	case *object.Bignum:
+		return int64(x.I.Int64()), true
+	}
+	return 0, false
+}
+
 func (vm *VM) hashValue(self object.Value) int64 {
 	switch v := self.(type) {
 	case object.Integer:
@@ -412,6 +464,7 @@ func New(out io.Writer) *VM {
 	vm.installPrelude()
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
+	vm.installHashKeyHook()
 	return vm
 }
 

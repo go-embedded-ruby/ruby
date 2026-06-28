@@ -154,11 +154,26 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			tag = args[0]
 		}
+		// Snapshot the per-frame tracking-stack depths so that, when a matching
+		// throw unwinds the block's frames straight to this recover (bypassing each
+		// frame's normal pop), __FILE__/require_relative resolution, caller and
+		// backtraces see this catch's state rather than the abandoned deep-frame
+		// entries. Without this the pushes leak (racc's catch(:racc_end_parse) +
+		// throw drives the Pops parser, so every type parse leaked ~6 entries —
+		// corrupting __FILE__ and breaking a later require_relative).
+		fileStackDepth := len(vm.fileStack)
+		frameNamesDepth := len(vm.frameNames)
+		frameFilesDepth := len(vm.frameFiles)
+		requireDirsDepth := len(vm.requireDirs)
 		defer func() {
 			if r := recover(); r != nil {
 				// Tags match by identity (== on the interface): a Symbol by value, a
 				// reference by pointer — exactly Ruby's equal?.
 				if sig, ok := r.(throwSignal); ok && sig.tag == tag {
+					vm.fileStack = vm.fileStack[:fileStackDepth]
+					vm.frameNames = vm.frameNames[:frameNamesDepth]
+					vm.frameFiles = vm.frameFiles[:frameFilesDepth]
+					vm.requireDirs = vm.requireDirs[:requireDirsDepth]
 					result = sig.value
 					return
 				}
@@ -2389,6 +2404,11 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Hash).Len() == 0)
 	})
+	vm.cHash.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		h.Clear()
+		return h
+	})
 	hashKeyP := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		_, ok := self.(*object.Hash).Get(args[0])
 		return object.Bool(ok)
@@ -2396,6 +2416,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("key?", hashKeyP)
 	vm.cHash.define("has_key?", hashKeyP)
 	vm.cHash.define("include?", hashKeyP)
+	vm.cHash.define("member?", hashKeyP)
 	vm.cHash.define("keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		ks := make([]object.Value, len(h.Keys))

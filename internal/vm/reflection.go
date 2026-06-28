@@ -88,7 +88,16 @@ func (vm *VM) registerReflection() {
 // checkBindable raises TypeError unless recv is an instance of the
 // UnboundMethod's owner (Ruby's bind compatibility rule).
 func (vm *VM) checkBindable(u *UnboundMethod, recv object.Value) {
-	if !classIsA(vm.classOf(recv), u.owner) {
-		raise("TypeError", "bind argument must be an instance of %s", u.owner.name)
+	// An UnboundMethod taken from a per-object singleton class (the Trollop
+	// `cloaker_` trick: `instance_method` on `class << self`) is owned by that
+	// singleton class. classOf(recv) returns the regular class and never reaches
+	// the singleton in its super chain, so also walk from recv's own singleton
+	// class — recv is trivially an instance of it — before rejecting the bind.
+	if classIsA(vm.classOf(recv), u.owner) {
+		return
 	}
+	if sc := vm.objSingleton(recv); sc != nil && classIsA(sc, u.owner) {
+		return
+	}
+	raise("TypeError", "bind argument must be an instance of %s", u.owner.name)
 }
