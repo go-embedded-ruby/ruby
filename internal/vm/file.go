@@ -5,6 +5,7 @@ import (
 	"path"          // always '/'-separated, as Ruby's File is — not path/filepath
 	"path/filepath" // OS-native, only for symlink resolution (File.realpath)
 	"strings"
+	stdtime "time"
 
 	gotime "github.com/go-composites/time/src"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -184,7 +185,101 @@ func (vm *VM) registerFile() {
 	}
 	def("delete", delete)
 	def("unlink", delete)
+
+	// On-disk metadata operations Puppet's settings/file provider drives:
+	// chmod/chown/umask/utime and the access predicates. chmod/chown/utime accept
+	// a leading mode/owner/time argument followed by one or more paths, returning
+	// the count of paths affected (MRI semantics).
+	def("chmod", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		mode := os.FileMode(intArg(args[0]) & 0o7777)
+		paths := args[1:]
+		for _, a := range paths {
+			p := pathArg(vm, a)
+			if err := fileChmod(p, mode); err != nil {
+				raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", p)
+			}
+		}
+		return object.Integer(len(paths))
+	})
+	def("chown", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// A nil uid/gid leaves that id unchanged (passed as -1 to chown).
+		uid, gid := chownID(args[0]), chownID(args[1])
+		paths := args[2:]
+		for _, a := range paths {
+			p := pathArg(vm, a)
+			if err := fileChown(p, uid, gid); err != nil {
+				raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", p)
+			}
+		}
+		return object.Integer(len(paths))
+	})
+	// lchown mirrors chown but does not follow a symlink (Puppet uses it when
+	// :links => :manage). Go's os.Lchown provides the same behaviour.
+	def("lchown", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		uid, gid := chownID(args[0]), chownID(args[1])
+		paths := args[2:]
+		for _, a := range paths {
+			p := pathArg(vm, a)
+			if err := fileLchown(p, uid, gid); err != nil {
+				raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", p)
+			}
+		}
+		return object.Integer(len(paths))
+	})
+	def("utime", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		at, mt := timeArgUnix(args[0]), timeArgUnix(args[1])
+		paths := args[2:]
+		for _, a := range paths {
+			p := pathArg(vm, a)
+			if err := fileChtimes(p, at, mt); err != nil {
+				raise("Errno::ENOENT", "No such file or directory @ utime_failed - %s", p)
+			}
+		}
+		return object.Integer(len(paths))
+	})
+	// File.umask([mask]) reads (and optionally sets) the process umask, returning
+	// the previous value — the bracket Puppet::Util.withumask uses. With no
+	// argument it reports the current umask without changing it.
+	def("umask", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			cur := setUmask(0)
+			setUmask(cur) // restore: a no-arg umask is a pure read
+			return object.Integer(cur)
+		}
+		return object.Integer(setUmask(int(intArg(args[0]))))
+	})
+	// Access predicates: readable?/writable?/executable? for the current effective
+	// user, plus executable_real? — thin File.stat-and-test wrappers that return
+	// false for a missing path rather than raising (MRI's File.<predicate>).
+	access := func(want int) NativeFn {
+		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			p := pathArg(vm, args[0])
+			fi, err := osStat(p)
+			if err != nil {
+				return object.Bool(false)
+			}
+			return object.Bool(newFileStat(fi, p).accessible(want))
+		}
+	}
+	def("readable?", access(4))
+	def("writable?", access(2))
+	def("executable?", access(1))
+	def("executable_real?", access(1))
 }
+
+// fileChmod / fileChown / fileLchown / fileChtimes are seams over the os package
+// so the error branches are reachable identically on every platform (a test
+// swaps in a failing stub rather than relying on real OS behaviour, which
+// differs across Linux/macOS/Windows — e.g. chmod is largely a no-op on Windows).
+// fileChown / fileLchown are defined per-platform (filechown_unix.go /
+// filechown_windows.go): os.Chown always fails on Windows, where MRI treats
+// File.chown as a no-op, so the Windows build returns nil.
+var (
+	fileChmod   = os.Chmod
+	fileChtimes = func(p string, atime, mtime int64) error {
+		return osChtimes(p, atime, mtime)
+	}
+)
 
 // fileExt returns the extension of a base name, treating a leading-dot name with
 // no other dot (".bashrc") as having no extension — matching Ruby's File.extname.
@@ -243,4 +338,35 @@ func fileExpand(p string, rest []object.Value) string {
 		base = toSlash(wd)
 	}
 	return path.Clean(path.Join(base, p))
+}
+
+// setUmask is the seam over the build-tagged osUmask, so a test can drive
+// File.umask without perturbing the real process mask (which is shared across
+// concurrently-running tests).
+var setUmask = osUmask
+
+// osChtimes sets the access and modification times of path from whole-second
+// Unix timestamps, via os.Chtimes. It is wrapped (rather than used directly) so
+// the seam in fileChtimes takes int64 seconds, matching utime's Time arguments.
+func osChtimes(p string, atime, mtime int64) error {
+	return os.Chtimes(p, stdtime.Unix(atime, 0), stdtime.Unix(mtime, 0))
+}
+
+// chownID converts a File.chown id argument to the int the os layer expects: a
+// nil id means "leave unchanged" (-1, as POSIX chown interprets it), any other
+// value is coerced through intArg.
+func chownID(v object.Value) int {
+	if v == object.NilV {
+		return -1
+	}
+	return int(intArg(v))
+}
+
+// timeArgUnix marshals a File.utime time argument (a Time, or an Integer/Float
+// seconds-since-epoch) to a whole number of Unix seconds.
+func timeArgUnix(v object.Value) int64 {
+	if t, ok := v.(*Time); ok {
+		return t.t.ToUnix()
+	}
+	return timeSeconds(v)
 }

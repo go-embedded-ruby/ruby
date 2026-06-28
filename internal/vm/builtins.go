@@ -1105,8 +1105,8 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("rstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(strings.TrimRight(strOf(self), wsCutset))
 	})
-	vm.cString.define("chomp", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(chompStr(strOf(self)))
+	vm.cString.define("chomp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(chompSep(strOf(self), args))
 	})
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(chopStr(strOf(self)))
@@ -1474,8 +1474,8 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("rstrip!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strBang(self, func(x string) string { return strings.TrimRight(x, wsCutset) })
 	})
-	vm.cString.define("chomp!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, chompStr)
+	vm.cString.define("chomp!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strBang(self, func(s string) string { return chompSep(s, args) })
 	})
 	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strBang(self, chopStr)
@@ -2842,6 +2842,59 @@ func (vm *VM) bootstrap() {
 		}
 		return out
 	})
+	// hashDeleteWhere deletes each pair for which the block's truthiness matches
+	// `want`, returning the count removed. It snapshots the keys first so deleting
+	// during iteration is safe. delete_if/keep_if and the reject!/select! bang
+	// forms (which return nil when nothing changed) all share it.
+	hashDeleteWhere := func(vm *VM, h *object.Hash, blk *Proc, want bool) int {
+		keys := make([]object.Value, len(h.Keys))
+		copy(keys, h.Keys)
+		removed := 0
+		for _, k := range keys {
+			v, _ := h.Get(k)
+			if vm.callBlock(blk, []object.Value{hashPair(k, v)}).Truthy() == want {
+				h.Delete(k)
+				removed++
+			}
+		}
+		return removed
+	}
+	// delete_if / reject! delete the pairs the block accepts; keep_if / select!
+	// keep them (delete the rest). delete_if and keep_if always return the Hash;
+	// reject! and select! return nil when they removed nothing, matching MRI.
+	vm.cHash.define("delete_if", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "delete_if")
+		}
+		hashDeleteWhere(vm, self.(*object.Hash), blk, true)
+		return self
+	})
+	vm.cHash.define("reject!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "reject!")
+		}
+		if hashDeleteWhere(vm, self.(*object.Hash), blk, true) == 0 {
+			return object.NilV
+		}
+		return self
+	})
+	vm.cHash.define("keep_if", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "keep_if")
+		}
+		hashDeleteWhere(vm, self.(*object.Hash), blk, false)
+		return self
+	})
+	vm.cHash.define("select!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "select!")
+		}
+		if hashDeleteWhere(vm, self.(*object.Hash), blk, false) == 0 {
+			return object.NilV
+		}
+		return self
+	})
+	vm.cHash.define("filter!", vm.cHash.methods["select!"].native)
 
 	// Range.
 	vm.cRange.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -3719,6 +3772,32 @@ func reverseStr(s string) string {
 		r[i], r[j] = r[j], r[i]
 	}
 	return string(r)
+}
+
+// chompSep implements String#chomp's optional separator argument, matching MRI:
+//   - no argument (or an explicit nil): remove one trailing line ending.
+//   - "" (empty): paragraph mode — remove ALL trailing newlines (\r\n / \n).
+//   - any other string: remove that exact suffix once, if present.
+func chompSep(s string, args []object.Value) string {
+	if len(args) == 0 || args[0] == object.NilV {
+		return chompStr(s)
+	}
+	sep := strArg(args[0])
+	if sep == "" {
+		// Paragraph mode: strip every trailing \n (treating \r\n as one), so a run
+		// of blank lines at the end collapses away.
+		for {
+			switch {
+			case strings.HasSuffix(s, "\r\n"):
+				s = s[:len(s)-2]
+			case strings.HasSuffix(s, "\n"):
+				s = s[:len(s)-1]
+			default:
+				return s
+			}
+		}
+	}
+	return strings.TrimSuffix(s, sep)
 }
 
 // chompStr removes one trailing line ending (\r\n, \n, or \r), as in Ruby.

@@ -136,6 +136,21 @@ func (vm *VM) registerFileUtils() {
 		return args[0]
 	})
 
+	// FileUtils.chmod(mode, list) applies a permission mode to each path, returning
+	// the list — the form Puppet's file_impl#chmod drives. Like the rest of
+	// FileUtils it routes through the os seam so the error branch is reachable on
+	// every platform (chmod is largely a no-op on Windows, so the seam is the only
+	// way to cover the failure path there).
+	sdef("chmod", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		mode := os.FileMode(intArg(args[0]) & 0o7777)
+		for _, p := range pathsOf(args[1]) {
+			if err := fileChmod(p, mode); err != nil {
+				raise("Errno::ENOENT", "No such file or directory @ fileutils_chmod - %s", p)
+			}
+		}
+		return args[1]
+	})
+
 	// Genuinely platform-specific / stream operations: a clear NotImplementedError
 	// rather than a silently-wrong result.
 	notImpl := func(what string) NativeFn {
@@ -143,7 +158,7 @@ func (vm *VM) registerFileUtils() {
 			return raise("NotImplementedError", "FileUtils.%s not yet supported", what)
 		}
 	}
-	for _, m := range []string{"chown", "chown_R", "chmod", "chmod_R", "copy_stream",
+	for _, m := range []string{"chown", "chown_R", "chmod_R", "copy_stream",
 		"remove_entry_secure", "uptodate?", "ln", "ln_s", "ln_sf", "compare_file", "cp_r"} {
 		sdef(m, notImpl(m))
 	}

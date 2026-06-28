@@ -82,6 +82,34 @@ func (vm *VM) registerEncoding() {
 	})
 	// == is not defined here: the operator goes through the VM's identity equality,
 	// and interned Encoding objects compare correctly by identity.
+
+	// Process default encodings. rbgo works in UTF-8, so default_external is the
+	// interned UTF-8 encoding and default_internal is nil (MRI's default), the
+	// values Puppet's log_runtime_environment and IO setup read. The setters are
+	// accepted (and remembered) so code that brackets work in an encoding override
+	// runs; rbgo's string layer remains UTF-8 regardless.
+	defExternal := vm.internEncoding("UTF-8")
+	sdef := func(name string, fn NativeFn) {
+		vm.cEncoding.smethods[name] = &Method{name: name, owner: vm.cEncoding, native: fn}
+	}
+	sdef("default_external", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return defExternal
+	})
+	sdef("default_external=", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		defExternal = vm.internEncoding(encodingName(args[0]))
+		return args[0]
+	})
+	sdef("default_internal", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NilV
+	})
+	sdef("default_internal=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return args[0] // accepted but not applied — rbgo strings stay UTF-8
+	})
+	// Encoding.find(name) returns the interned encoding for a name (or an Encoding
+	// argument passed straight through), as MRI does.
+	sdef("find", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.internEncoding(encodingName(args[0]))
+	})
 }
 
 // encodingName extracts an encoding name from a force_encoding argument (a String

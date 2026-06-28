@@ -27,5 +27,5 @@ func (vm *VM) bindingEval(b *Binding, srcV object.Value) object.Value {
 		raise("SyntaxError", "%s", cerr.Error())
 	}
 	iseq.Name = "(eval)"
-	return vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil)
+	return vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil, nil)
 }

@@ -97,7 +97,7 @@ func TestFileUtilsSuccess(t *testing.T) {
 
 func TestFileUtilsNotImplemented(t *testing.T) {
 	vm := New(nil)
-	for _, m := range []string{"chown", "chown_R", "chmod", "chmod_R", "copy_stream",
+	for _, m := range []string{"chown", "chown_R", "chmod_R", "copy_stream",
 		"remove_entry_secure", "uptodate?", "ln", "ln_s", "ln_sf", "compare_file", "cp_r"} {
 		got := catchRaise(func() { callFU(t, vm, m, nil) })
 		if got != "NotImplementedError" {

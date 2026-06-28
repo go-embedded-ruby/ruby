@@ -43,6 +43,16 @@ func (vm *VM) registerOpenSSL() {
 	errRoot := newClass("OpenSSL::OpenSSLError", vm.consts["StandardError"].(*RClass))
 	mod.consts["OpenSSLError"] = errRoot
 
+	// Version-identification constants. rbgo's OpenSSL surface is a pure-Go shim,
+	// so it reports its own banner rather than a linked libcrypto's; consumers that
+	// merely log these (e.g. Puppet's log_runtime_environment, which reads
+	// OPENSSL_VERSION) get a stable, non-empty string instead of a NameError.
+	mod.consts["VERSION"] = object.NewString("4.0.0")
+	mod.consts["OPENSSL_VERSION"] = object.NewString("rbgo pure-Go OpenSSL shim")
+	mod.consts["OPENSSL_LIBRARY_VERSION"] = object.NewString("rbgo pure-Go OpenSSL shim")
+	mod.consts["OPENSSL_VERSION_NUMBER"] = object.Integer(0)
+	mod.consts["OPENSSL_FIPS"] = object.Bool(false)
+
 	vm.registerOpenSSLDigest(mod)
 	vm.registerOpenSSLHMAC(mod, errRoot)
 	vm.registerOpenSSLRandom(mod)

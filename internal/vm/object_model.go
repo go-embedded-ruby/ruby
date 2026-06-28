@@ -85,6 +85,13 @@ type Proc struct {
 	// bare `super` (implicit argument forwarding) from it, so the frame raises in
 	// that case rather than silently forwarding.
 	dmBody bool
+	// dmDirect marks the proc that IS a define_method body being invoked as a
+	// method (set by callProcMethod on its anchored copy), as opposed to dmBody —
+	// which also propagates to ordinary blocks nested *inside* such a body. Only
+	// the direct body is a return target: a `return` in it returns from the method
+	// invocation, while a `return` in a block nested inside it is still non-local
+	// (unwinds to the define_method method), matching MRI.
+	dmDirect bool
 }
 
 func (p *Proc) ToS() string     { return "#<Proc>" }
@@ -111,6 +118,14 @@ type Method struct {
 	proc     *Proc          // for define_method: a block-backed method body
 	compiled CompiledMethod // AOT-lowered native body (rbgo build); preferred when set
 	owner    *RClass
+	// lexScope is the lexical scope a bare constant in this method's body resolves
+	// against — where the `def` was textually written. It usually equals owner,
+	// but under class_eval/module_eval (where the def lands on the eval receiver
+	// while its textual nesting is the block's) it is the block's lexical scope, so
+	// e.g. a `def m; File.chmod … end` written at top level inside `provide do … end`
+	// resolves File to ::File rather than the receiver class. nil means "same as
+	// owner" (the common case), keeping normal defs unaffected.
+	lexScope *RClass
 	// vis is the method's access level (public/private/protected). The zero value
 	// is visPublic, so every method is public unless a visibility directive marks
 	// it otherwise. A per-receiver override (RClass.visOverrides) takes precedence
@@ -589,6 +604,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cSet
 	case *Time:
 		return vm.cTime
+	case *FileStat:
+		return vm.cFileStat
 	case *BigDecimal:
 		return vm.cBigDecimal
 	case *Date:
@@ -756,7 +773,7 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 		// define_method body may call super (matching MRI).
 		return vm.callProcMethod(m.proc, self, args, blk, m.name, m.owner)
 	}
-	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
+	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, m.lexScope)
 }
 
 // invokeInPlace is invoke for the OpSend fast path, where args is a live region
@@ -777,7 +794,7 @@ func (vm *VM) invokeInPlace(m *Method, self object.Value, args []object.Value, b
 	if m.proc != nil {
 		return vm.callProcMethod(m.proc, self, args, blk, m.name, m.owner)
 	}
-	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil)
+	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, m.lexScope)
 }
 
 // callBlock invokes a captured block with args. Block arity is lenient: extra
@@ -839,7 +856,7 @@ func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) obj
 	if p.native != nil {
 		return p.native(vm, args)
 	}
-	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p)
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p, nil)
 }
 
 // blockDefinee returns the definee a block body runs with: the block's captured
@@ -874,7 +891,8 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 	anchored := *p
 	anchored.superName, anchored.superDefinee, anchored.superArgs = name, owner, args
 	anchored.dmBody = true
-	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, &anchored)
+	anchored.dmDirect = true // this frame IS the method body: its `return` is a return target
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, &anchored, nil)
 }
 
 // classEval runs a block as class_eval/module_eval would: self and the method
@@ -883,7 +901,7 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 func (vm *VM) classEval(cls *RClass, p *Proc, args []object.Value) object.Value {
 	// class_eval/module_eval always receive a literal (ISeq) block, never a
 	// synthesized native Proc, so no native fast path is needed here.
-	return vm.exec(p.iseq, cls, vm.bindBlockArgs(p, args), cls, "", p.env, p.block, p)
+	return vm.exec(p.iseq, cls, vm.bindBlockArgs(p, args), cls, "", p.env, p.block, p, nil)
 }
 
 // classEvalString runs Ruby source as class_eval/module_eval would for the
@@ -896,7 +914,7 @@ func (vm *VM) classEvalString(cls *RClass, src string) object.Value {
 		return raise("SyntaxError", "%s", cerr.Error())
 	}
 	iseq.Name = "(eval)"
-	return vm.exec(iseq, cls, nil, cls, "", nil, nil, nil)
+	return vm.exec(iseq, cls, nil, cls, "", nil, nil, nil, nil)
 }
 
 // bindBlockArgs maps call args onto a block's parameters, with the auto-splat a

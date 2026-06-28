@@ -32,6 +32,6 @@ func (vm *VM) registerEval() {
 		iseq.Name = "(eval)"
 		// Run against the caller's self/definee with a fresh local scope; a runtime
 		// RubyError from the evaluated code propagates (and is rescuable) as usual.
-		return vm.exec(iseq, self, nil, vm.classOf(self), "", nil, nil, nil)
+		return vm.exec(iseq, self, nil, vm.classOf(self), "", nil, nil, nil, nil)
 	})
 }
