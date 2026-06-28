@@ -50,10 +50,10 @@ func TestReopenLexParentAfterCompactDefine(t *testing.T) {
 // require_relative in the rescue body must resolve against the rescuing file, not
 // the abandoned deep file. This backed Puppet's gettext fallback-to-stubs path.
 func TestRescueRestoresRequireState(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "config.rb", "begin\n  require 'farlib'\nrescue LoadError\n  require_relative 'stubs'\nend\nputs 'STUBBED' if defined?(STUB_OK)\n")
 	write(t, dir, "stubs.rb", "STUB_OK = true\n")
-	sub := filepath.Join(dir, "gem")
+	sub := dir + "/gem"
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestRescueRestoresRequireState(t *testing.T) {
 // first reference, with autoload? reporting the path before and nil after, all
 // verified against MRI 4.0.5 semantics.
 func TestAutoloadBasic(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "foo.rb", "Foo = Object.new\ndef Foo.hi; 'hi from foo'; end\n")
 	src := "autoload :Foo, \"" + dir + "/foo.rb\"\n" +
 		"p autoload?(:Foo)\n" +
@@ -93,7 +93,7 @@ func TestAutoloadBasic(t *testing.T) {
 // TestAutoloadQueryUndefined: autoload? for a constant with no registration is
 // nil, and a String constant name is accepted.
 func TestAutoloadQueryUndefined(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "foo.rb", "Foo = 1\n")
 	out, err := runInDir(t, dir,
 		"p autoload?(:Nope)\n"+
@@ -111,7 +111,7 @@ func TestAutoloadQueryUndefined(t *testing.T) {
 // TestAutoloadAlreadyDefined: registering an autoload for an already-defined
 // constant is inert — autoload? reports nil and the constant keeps its value.
 func TestAutoloadAlreadyDefined(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "foo.rb", "X = 99\n")
 	out, err := runInDir(t, dir,
 		"X = 1\n"+
@@ -130,7 +130,7 @@ func TestAutoloadAlreadyDefined(t *testing.T) {
 // the bare reference inside resolves it, M::Bar resolves it from outside, and
 // autoload? reports nil once defined.
 func TestAutoloadNestedModule(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "bar.rb", "module M\n  Bar = 42\nend\n")
 	out, err := runInDir(t, dir,
 		"module M\n"+
@@ -151,7 +151,7 @@ func TestAutoloadNestedModule(t *testing.T) {
 // TestAutoloadModuleForm: Module#autoload / #autoload? on an explicit receiver,
 // and the return value (nil) of both autoload forms.
 func TestAutoloadModuleForm(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "bar.rb", "module M\n  Bar = 7\nend\n")
 	out, err := runInDir(t, dir,
 		"module M; end\n"+
@@ -171,7 +171,7 @@ func TestAutoloadModuleForm(t *testing.T) {
 // TestAutoloadDuplicateReplaces: a second autoload of the same constant replaces
 // the first path.
 func TestAutoloadDuplicateReplaces(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "empty.rb", "z = 1\n")
 	write(t, dir, "foo.rb", "Foo = Object.new\ndef Foo.hi; 'real'; end\n")
 	out, err := runInDir(t, dir,
@@ -191,7 +191,7 @@ func TestAutoloadDuplicateReplaces(t *testing.T) {
 // TestAutoloadConstGetTriggers / const_defined? does NOT: const_get fires the
 // autoload, const_defined? reports true without loading (autoload? still set).
 func TestAutoloadConstGetVsDefined(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "foo.rb", "Foo = Object.new\ndef Foo.hi; 'g'; end\n")
 	out, err := runInDir(t, dir,
 		"autoload :Foo, \""+dir+"/foo.rb\"\n"+
@@ -211,7 +211,7 @@ func TestAutoloadConstGetVsDefined(t *testing.T) {
 // TestAutoloadDefined: defined?(Const) and defined?(M::Bar) report "constant"
 // for a pending autoload WITHOUT triggering the require.
 func TestAutoloadDefined(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "foo.rb", "Foo = 1\n")
 	write(t, dir, "bar.rb", "module M\n  Bar = 2\nend\n")
 	out, err := runInDir(t, dir,
@@ -233,7 +233,7 @@ func TestAutoloadDefined(t *testing.T) {
 // TestAutoloadDefinedFalse: defined?(Const) is nil when neither a constant nor a
 // pending autoload exists.
 func TestAutoloadDefinedFalse(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir, "p defined?(Nope)\np defined?(Object::Nope)\n")
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestAutoloadDefinedFalse(t *testing.T) {
 // TestAutoloadLexical: an autoload registered at the top level fires when the
 // constant is first referenced bare inside a nested method.
 func TestAutoloadLexical(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "foo.rb", "Foo = Object.new\ndef Foo.hi; 'lx'; end\n")
 	out, err := runInDir(t, dir,
 		"autoload :Foo, \""+dir+"/foo.rb\"\n"+
@@ -263,7 +263,7 @@ func TestAutoloadLexical(t *testing.T) {
 // TestAutoloadRequireNoConst: the require runs but does not define the constant —
 // MRI raises NameError on the bare reference.
 func TestAutoloadRequireNoConst(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "empty.rb", "z = 1\n")
 	out, err := runInDir(t, dir,
 		"autoload :Zed, \""+dir+"/empty.rb\"\n"+
@@ -279,7 +279,7 @@ func TestAutoloadRequireNoConst(t *testing.T) {
 // TestAutoloadLoadError: a missing autoload file propagates LoadError when the
 // constant is referenced.
 func TestAutoloadLoadError(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"autoload :Q, \""+dir+"/does_not_exist.rb\"\n"+
 			"begin; Q; rescue Exception => e; p e.class; end\n")
@@ -294,7 +294,7 @@ func TestAutoloadLoadError(t *testing.T) {
 // TestAutoloadScopedMissing: M::Bar with no constant and no autoload raises
 // NameError (the scopedConst miss after the autoload check).
 func TestAutoloadScopedMissing(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"module M; end\n"+
 			"begin; M::Bar; rescue Exception => e; puts e.class; puts e.message; end\n")
@@ -309,7 +309,7 @@ func TestAutoloadScopedMissing(t *testing.T) {
 // TestAutoloadScopedNoConstAfterRequire: M::Bar where the autoload file runs but
 // does not define Bar still raises NameError (the post-autoload re-resolve miss).
 func TestAutoloadScopedNoConstAfterRequire(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "empty.rb", "z = 1\n")
 	out, err := runInDir(t, dir,
 		"module M; autoload :Bar, \""+dir+"/empty.rb\"; end\n"+
@@ -325,7 +325,7 @@ func TestAutoloadScopedNoConstAfterRequire(t *testing.T) {
 // TestAutoloadConstNameError: a non-symbol/string name argument raises
 // TypeError, and a lowercase name raises NameError (wrong constant name).
 func TestAutoloadConstNameError(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"begin; autoload(1, \"x\"); rescue Exception => e; puts e.class; end\n"+
 			"begin; autoload(:foo, \"x\"); rescue Exception => e; puts e.class; end\n")
@@ -340,7 +340,7 @@ func TestAutoloadConstNameError(t *testing.T) {
 // TestAutoloadPathTypeError: a non-String path argument raises TypeError, for
 // both the Kernel and Module forms.
 func TestAutoloadPathTypeError(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"begin; autoload(:Foo, 1); rescue Exception => e; puts e.class; end\n"+
 			"module M; end\n"+
@@ -356,7 +356,7 @@ func TestAutoloadPathTypeError(t *testing.T) {
 // TestAutoloadModuleQueryAlreadyDefined: Module#autoload? returns nil when the
 // constant is already defined directly in the receiver's table.
 func TestAutoloadModuleQueryAlreadyDefined(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"module M; Bar = 5; end\n"+
 			"p M.autoload?(:Bar)\n")
@@ -371,7 +371,7 @@ func TestAutoloadModuleQueryAlreadyDefined(t *testing.T) {
 // TestAutoloadModuleQueryUndefined: Module#autoload? returns nil for a constant
 // that is neither defined nor registered on the receiver.
 func TestAutoloadModuleQueryUndefined(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"module M; end\n"+
 			"p M.autoload?(:Nope)\n")
@@ -387,7 +387,7 @@ func TestAutoloadModuleQueryUndefined(t *testing.T) {
 // method resolves a pending autoload registered on that module via the lexical
 // nesting (not the ancestor chain).
 func TestAutoloadBareInModuleMethod(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "barm.rb", "module M\n  Bar = 7\nend\n")
 	out, err := runInDir(t, dir,
 		"module M\n"+
@@ -408,7 +408,7 @@ func TestAutoloadBareInModuleMethod(t *testing.T) {
 // the Object/BasicObject skip in the ancestor walk, ending in NameError. defined?
 // of the same reference is nil.
 func TestAutoloadScopedUnrelated(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"module M; autoload :Bar, \""+dir+"/x.rb\"; end\n"+
 			"p defined?(M::Other)\n"+
@@ -426,7 +426,7 @@ func TestAutoloadScopedUnrelated(t *testing.T) {
 // autoload-in-ancestor scan including the Object/BasicObject skip for a non-Object
 // receiver.
 func TestAutoloadDefinedScopedAncestorSkip(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"class Base; autoload :Bar, \""+dir+"/x.rb\"; end\n"+
 			"class Sub < Base; end\n"+
@@ -443,7 +443,7 @@ func TestAutoloadDefinedScopedAncestorSkip(t *testing.T) {
 // autoload for a different constant walks C's full ancestor chain (reaching and
 // skipping Object/BasicObject) before raising NameError.
 func TestAutoloadClassScopedUnrelated(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"class C; autoload :Bar, \""+dir+"/x.rb\"; end\n"+
 			"begin; C::Other; rescue Exception => e; puts e.class; end\n")
@@ -458,7 +458,7 @@ func TestAutoloadClassScopedUnrelated(t *testing.T) {
 // TestAutoloadDefinedInNesting: defined?(Bar) inside a module method reports
 // "constant" via the pending autoload found in the lexical nesting.
 func TestAutoloadDefinedInNesting(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	out, err := runInDir(t, dir,
 		"module M\n"+
 			"  autoload :Bar, \""+dir+"/x.rb\"\n"+
@@ -476,7 +476,7 @@ func TestAutoloadDefinedInNesting(t *testing.T) {
 // TestAutoloadConstDefinedSuperchain: const_defined? walks the superclass chain
 // for a pending autoload registered on an ancestor.
 func TestAutoloadConstDefinedSuperchain(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.ToSlash(t.TempDir())
 	write(t, dir, "bar.rb", "class Base\n  Bar = 1\nend\n")
 	out, err := runInDir(t, dir,
 		"class Base; autoload :Bar, \""+dir+"/bar.rb\"; end\n"+
