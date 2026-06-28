@@ -223,12 +223,28 @@ first subsystem to the second-plus, and the remaining first blockers are
 **library/stdlib** concerns (`Gem`/RubyGems, the `English` stdlib) rather than
 language primitives — exactly the boundary this work targeted.
 
-## Puppet boots, compiles, and evaluates a manifest (2026-06-28)
+## `puppet apply` runs end-to-end (2026-06-28)
 
 Following the Tier-0 / Tier-2 runtime batches above, the remaining library/stdlib
-walls were cleared and **`require "puppet"` now fully boots** under a pure-Go
-CGO=0 `rbgo`, with a manifest going all the way through the real Puppet pipeline
-to **evaluation**.
+walls were cleared and **the real `puppet apply` CLI now runs end-to-end** under a
+pure-Go CGO=0 `rbgo`. `require "puppet"` fully boots the framework, and a manifest
+travels the **complete** Puppet path — the genuine `Puppet::Util::CommandLine` →
+`Puppet::Application::Apply` entry point (real `OptionParser`), all Puppet types +
+providers loaded, the settings catalog applied (creating Puppet's config dirs on
+disk), then the user catalog applied through the transaction / RAL — emitting real
+Puppet output and exiting `0`.
+
+```
+$ rbgo run puppet_apply.rb   # ARGV = apply -e 'notify { "hello": message => "hi from rbgo cli" }'
+Notice: Compiled catalog for  in environment production in 0.00 seconds
+Notice: hi from rbgo cli
+Notice: /Stage[main]/Main/Notify[hello]/message: defined 'message' as 'hi from rbgo cli'
+```
+
+This supersedes the earlier "boots, compiles, evaluates" milestone (PR #34): the
+`notify` resource type now **applies** through the transaction and the Resource
+Abstraction Layer, rather than a `notice(...)` evaluator print. The boot details
+below remain the foundation it stands on.
 
 ### What now works
 
@@ -271,21 +287,31 @@ minimal rbgo-vs-MRI snippet and asserted against MRI 4.0.5 before fixing
   (a Ruby guarantee Puppet's `ThreadLocalVar#default` relies on); nested constant
   namespaces; method-visibility enforcement; `catch`/`throw` stack restore;
   Ruby Hash key semantics; `super`-in-block; `Proc.new`; `Module#constants`.
-- **Pure-Go stdlib added on the boot path:** `ERB` (template engine), `openssl`
-  (real crypto), `net/http`, `resolv`, `tmpdir`, `Process`, `StringScanner`
-  (`strscan`), `Find`, `getoptlong`, `syslog`, `fileutils`, `optparse`, `ripper`,
-  `objspace`, plus `Concurrent::ThreadLocalVar` honouring a lazy default block.
+- **Pure-Go stdlib added on the boot + CLI path:** `ERB` (template engine),
+  `openssl` (real crypto), `net/http`, `resolv`, `tmpdir`, `Process`,
+  `StringScanner` (`strscan`), `Find`, `getoptlong`, `syslog`, `fileutils`,
+  `ripper`, `objspace`, plus `Concurrent::ThreadLocalVar` honouring a lazy default
+  block. Reaching the `apply` CLI added a **real `OptionParser`** (`optparse`,
+  driving `Puppet::Application`'s argument handling) and **`File::Stat` /
+  `FileTest` + on-disk filesystem operations** (so the settings catalog can create
+  Puppet's config dirs).
+- **Apply-path VM fixes (PRs #36–#37):** `class_eval` lexical scope, `return`
+  inside `define_method`, class-method `super`, `String#chomp(sep)`, and more —
+  each reduced to a minimal rbgo-vs-MRI repro before the fix.
 
 ### The frontier (honest)
 
-What is **done**: Puppet **boots, parses, compiles, and evaluates** manifests
-(the Pops evaluator emits `Notice:` and friends).
+What is **done**: the real `puppet apply` CLI **runs end-to-end** — boot → parse →
+compile → transaction / RAL → output — applying a **`notify`** resource through
+the full pipeline (genuine `OptionParser`, all types + providers loaded, settings
+catalog applied to disk, then the user catalog applied).
 
-What is **in progress**: full **`puppet apply`** — the transaction / RAL /
-resource-provider layer that mutates real host state (package/file/service
-providers, ordering, idempotent convergence). That is the active next milestone,
-not done; the `notice(...)` example above is a real evaluation, an `apply` that
-converges resources against a host is not yet claimed.
+What is **in progress**: **real resource *providers*** — `file` / `package` /
+`service` convergence against an arbitrary host (ordering, idempotent
+convergence) — and **run-report persistence**. `notify` exercises the whole
+transaction path without needing either, so the pipeline is proven; converging
+arbitrary system state and persisting the run report are the active next
+milestone, not yet claimed.
 
 This is the **C-extension → pure-Go shim** strategy validated end to end: a real
 Ruby application ships as one static CGO=0 binary because its C-backed gem APIs
