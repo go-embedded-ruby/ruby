@@ -1464,6 +1464,19 @@ class StringScanner
     @string = str
     @pos = 0
     @matched = nil
+    @match = nil
+  end
+
+  # [] returns a captured subgroup of the most recent match: 0 is the whole match,
+  # a positive Integer the nth group, a Symbol/String a named group. nil when there
+  # was no match or the group is out of range / unmatched, matching MRI.
+  def [](i)
+    if @match.nil?
+      # getch / a bare match with no captured groups still answers [0] with the
+      # matched text, while every group index / name is nil (matching MRI).
+      return (i == 0 || i == :"0") ? @matched : nil
+    end
+    @match[i]
   end
 
   # pos / charpos report the current scan position; pos= moves it (clamped into the
@@ -1492,10 +1505,12 @@ class StringScanner
   def scan(pattern)
     m = pattern.match(@string, @pos)
     if m && m.begin(0) == @pos
+      @match = m
       @matched = m[0]
       @pos = m.end(0)
       @matched
     else
+      @match = nil
       @matched = nil
       nil
     end
@@ -1523,11 +1538,13 @@ class StringScanner
   def scan_until(pattern)
     m = pattern.match(@string, @pos)
     if m
+      @match = m
       @matched = m[0]
       result = @string[@pos...m.end(0)]
       @pos = m.end(0)
       result
     else
+      @match = nil
       @matched = nil
       nil
     end
@@ -1538,6 +1555,7 @@ class StringScanner
   def getch
     return nil if eos?
     c = @string[@pos]
+    @match = nil
     @matched = c
     @pos += 1
     c
@@ -1552,6 +1570,7 @@ class StringScanner
   # matching MRI.
   def terminate
     @pos = @string.length
+    @match = nil
     @matched = nil
     self
   end
@@ -1559,6 +1578,7 @@ class StringScanner
   # reset returns the position to the start and clears the match.
   def reset
     @pos = 0
+    @match = nil
     @matched = nil
     self
   end
