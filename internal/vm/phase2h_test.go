@@ -11,6 +11,11 @@ func TestStringMethods(t *testing.T) {
 		{"length", `p "héllo".length`, "5\n"},
 		{"size", `p "héllo".size`, "5\n"},
 		{"bytesize", `p "héllo".bytesize`, "6\n"},
+		{"getbyte", `p "abc".getbyte(1)`, "98\n"},
+		{"getbyte_neg", `p "abc".getbyte(-1)`, "99\n"},
+		{"getbyte_oob", `p "abc".getbyte(5)`, "nil\n"},
+		{"getbyte_neg_oob", `p "abc".getbyte(-5)`, "nil\n"},
+		{"getbyte_multibyte", `p "héllo".getbyte(1)`, "195\n"},
 		{"empty_true", `p "".empty?`, "true\n"},
 		{"empty_false", `p "x".empty?`, "false\n"},
 		// case transforms
@@ -87,5 +92,8 @@ func TestStringMethods(t *testing.T) {
 func TestStringArgTypeError(t *testing.T) {
 	if err := runErr(t, `"x".include?(5)`); err == nil || !strings.Contains(err.Error(), "TypeError") {
 		t.Fatalf("got %v want TypeError", err)
+	}
+	if err := runErr(t, `"x".getbyte("y")`); err == nil || !strings.Contains(err.Error(), "TypeError") {
+		t.Fatalf("getbyte: got %v want TypeError", err)
 	}
 }

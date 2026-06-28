@@ -66,6 +66,22 @@ type throwSignal struct {
 	value object.Value
 }
 
+// returnTarget identifies a method (or top-level) activation that a non-local
+// `return` from a block should unwind to. Each such activation allocates a fresh
+// one; block frames inherit their creator's, so a `return` inside a block reaches
+// the method the block was written in. It carries a field so it is not zero-sized
+// — every &returnTarget{} must be a distinct pointer (Go gives all zero-sized
+// allocations the same address), which is how frames are told apart.
+type returnTarget struct{ _ bool }
+
+// returnSignal unwinds a non-local `return` (an explicit `return` inside a block)
+// to the activation identified by target. A signal whose target has no live frame
+// (the home method already returned) surfaces as a LocalJumpError.
+type returnSignal struct {
+	target *returnTarget
+	value  object.Value
+}
+
 // sendCatchBreak performs a send carrying a literal block, turning a `break`
 // raised by that block into the call's result.
 func (vm *VM) sendCatchBreak(recv object.Value, name string, args []object.Value, blk *Proc) (result object.Value) {
@@ -81,11 +97,32 @@ func (vm *VM) sendCatchBreak(recv object.Value, name string, args []object.Value
 	return vm.send(recv, name, args, blk)
 }
 
-// handlerFrame is an active begin/rescue handler: where to resume and the
-// operand-stack depth to restore.
+// popToEnsure pops handler frames from the top until it finds an ensure handler,
+// which it removes and returns. Plain rescue handlers above it do not apply to a
+// non-exception unwind and are discarded. found is false when no ensure handler
+// remains, leaving the slice empty.
+func popToEnsure(handlers *[]handlerFrame) (handlerFrame, bool) {
+	h := *handlers
+	for len(h) > 0 {
+		top := h[len(h)-1]
+		h = h[:len(h)-1]
+		if top.isEnsure {
+			*handlers = h
+			return top, true
+		}
+	}
+	*handlers = h
+	return handlerFrame{}, false
+}
+
+// handlerFrame is an active begin/rescue/ensure handler: where to resume and the
+// operand-stack depth to restore. isEnsure marks a handler whose body must run on
+// EVERY unwind (exception, non-local return, break, throw), not only on a rescued
+// exception — so those signals run pending ensure blocks before continuing.
 type handlerFrame struct {
-	pc int
-	sp int
+	pc       int
+	sp       int
+	isEnsure bool
 }
 
 // exceptionObject returns the Ruby exception object for a RubyError, building
@@ -490,7 +527,7 @@ func plural(n int) string {
 	return ""
 }
 
-func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc) object.Value {
+func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc) (execResult object.Value) {
 	var kwargs *object.Hash
 	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
 		kwargs = vm.bindKeywords(iseq, &args)
@@ -606,10 +643,61 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// send-free body — e.g. the hot `times { t += i }` block — never pays it).
 	var caches []inlineCache
 
+	// isReturnTarget is true for a frame that a `return` returns FROM: a method,
+	// top-level or class body, or a lambda (a lambda's `return` is local to it).
+	// An ordinary block frame is transparent — its `return` is non-local — so it
+	// is not a target.
+	isReturnTarget := selfBlock == nil || selfBlock.isLambda
+
+	// selfTarget identifies THIS activation. It catches a `return`/`next` that
+	// unwinds back to this very frame through an ensure (a local unwind), plus,
+	// for a return-target frame, a non-local return raised by a block it created.
+	selfTarget := &returnTarget{}
+
+	// homeTarget is where a non-local `return` (an explicit `return` in an
+	// ordinary block) unwinds to: this frame for a return target, otherwise the
+	// home method inherited from the block, so a `return` lexically nested through
+	// several blocks still reaches the enclosing method.
+	homeTarget := selfTarget
+	if !isReturnTarget && selfBlock.home != nil {
+		homeTarget = selfBlock.home
+	}
+
+	// Every frame catches a returnSignal aimed at its own selfTarget (a local
+	// return/next routed through an ensure, or a non-local return whose home is
+	// this frame). A signal for some other target passes through. On a catch the
+	// per-frame tracking stacks are truncated back to this frame's depths (deeper
+	// frames unwound without their normal pop) and the env/stack are recycled.
+	{
+		defer func() {
+			if r := recover(); r != nil {
+				sig, ok := r.(returnSignal)
+				if !ok || sig.target != selfTarget {
+					panic(r)
+				}
+				// Truncate one past this frame's own entries: this frame's normal
+				// pop never ran, and the deeper frames that unwound left theirs too.
+				vm.frameNames = vm.frameNames[:frameNamesDepth-1]
+				vm.frameFiles = vm.frameFiles[:frameFilesDepth-1]
+				vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+				if pushedFile {
+					vm.fileStack = vm.fileStack[:fileStackDepth-1]
+				} else {
+					vm.fileStack = vm.fileStack[:fileStackDepth]
+				}
+				execResult = sig.value
+			}
+		}()
+	}
+
 	pc := 0
 	var handlers []handlerFrame
 	result := object.Value(object.NilV)
 	finished := false
+	// pendingSignal holds a non-exception unwind (returnSignal / breakSignal /
+	// throwSignal) that was paused to run an intervening ensure body. The ensure
+	// body ends in OpReThrow, which re-raises this signal so the unwind resumes.
+	var pendingSignal any
 
 	// runChunk runs the instruction loop until the frame finishes (OpReturn /
 	// falling off the end) or a panic unwinds out. It is the shared loop body for
@@ -840,7 +928,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -955,7 +1043,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget}
 				}
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the frame's own arguments
@@ -978,7 +1066,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: definee}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: definee, home: homeTarget}
 				}
 				argsArr := pop().(*object.Array)
 				push(vm.invokeSuper(self, definee, methodName, argsArr.Elems, superBlk))
@@ -1099,16 +1187,42 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				_, ok := env.kwargs.Get(object.Symbol(iseq.KwNames[in.A]))
 				push(object.Bool(ok))
 			case bytecode.OpReturn:
+				// A==1 marks an explicit `return` written inside a block body. In an
+				// ordinary block it is a non-local return that unwinds to the method
+				// the block was written in (homeTarget), past any iterator frames. In a
+				// lambda, `return` is local — it just returns from the lambda.
+				if in.A == 1 && !isReturnTarget {
+					panic(returnSignal{target: homeTarget, value: pop()})
+				}
+				// An explicit return from this frame with a live ensure handler must
+				// run that ensure before unwinding; route it through the same signal
+				// so popToEnsure fires. (At a method's natural end the ensure handler
+				// has already been popped, so handlers is empty and we take the fast
+				// path.) selfTarget is this frame's own target, caught by its own
+				// defer. A lambda lands here too: its return is local, and its
+				// selfTarget is the lambda frame itself, so it returns from the lambda.
+				if len(handlers) > 0 {
+					panic(returnSignal{target: selfTarget, value: pop()})
+				}
 				result = pop()
 				finished = true
 				return
 			case bytecode.OpBreak:
 				panic(breakSignal{owner: selfBlock, value: pop()})
 			case bytecode.OpPushHandler:
-				handlers = append(handlers, handlerFrame{pc: in.A, sp: len(stack)})
+				// Operand B=1 marks an ensure handler (runs on every unwind);
+				// B=0 is a plain rescue handler (runs only on a rescued exception).
+				handlers = append(handlers, handlerFrame{pc: in.A, sp: len(stack), isEnsure: in.B == 1})
 			case bytecode.OpPopHandler:
 				handlers = handlers[:len(handlers)-1]
 			case bytecode.OpReThrow:
+				// An ensure body reached here while a non-exception unwind was paused:
+				// resume that unwind rather than re-raising the stack's exception.
+				if pendingSignal != nil {
+					sig := pendingSignal
+					pendingSignal = nil
+					panic(sig)
+				}
 				panic(vm.excError(pop()))
 			case bytecode.OpRegexp:
 				push(vm.compileRegexp(iseq.Names[in.A], iseq.Names[in.B]))
@@ -1178,7 +1292,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget}
 				}
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:
@@ -1207,21 +1321,38 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					if r == nil {
 						return
 					}
+					// Truncate the per-frame tracking stacks back to this frame's own depth:
+					// deeper frames that unwound never ran their normal pop, so their entries
+					// would otherwise leak into __FILE__, require_relative resolution, caller
+					// and backtraces taken from the rescue/ensure body.
+					restoreFrameStacks := func() {
+						vm.frameNames = vm.frameNames[:frameNamesDepth]
+						vm.frameFiles = vm.frameFiles[:frameFilesDepth]
+						vm.fileStack = vm.fileStack[:fileStackDepth]
+						vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+					}
 					rerr, ok := r.(RubyError)
-					if !ok || len(handlers) == 0 {
-						panic(r) // not a Ruby exception, or no handler in this frame
+					if !ok {
+						// A non-exception unwind (non-local return / break / throw):
+						// run an intervening ensure body before continuing it, then
+						// resume the unwind via OpReThrow (pendingSignal). A plain
+						// rescue handler does not apply, so it is skipped past.
+						if h, found := popToEnsure(&handlers); found {
+							stack = stack[:h.sp]
+							restoreFrameStacks()
+							pendingSignal = r
+							pc = h.pc
+							return
+						}
+						panic(r)
+					}
+					if len(handlers) == 0 {
+						panic(r) // a Ruby exception with no handler in this frame
 					}
 					h := handlers[len(handlers)-1]
 					handlers = handlers[:len(handlers)-1]
 					stack = stack[:h.sp]
-					// Truncate the per-frame tracking stacks back to this frame's own depth:
-					// deeper frames that unwound never ran their normal pop, so their entries
-					// would otherwise leak into __FILE__, require_relative resolution, caller
-					// and backtraces taken from the rescue body.
-					vm.frameNames = vm.frameNames[:frameNamesDepth]
-					vm.frameFiles = vm.frameFiles[:frameFilesDepth]
-					vm.fileStack = vm.fileStack[:fileStackDepth]
-					vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+					restoreFrameStacks()
 					exc := vm.exceptionObject(rerr)
 					vm.curExc = exc
 					push(exc)

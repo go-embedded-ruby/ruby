@@ -1011,6 +1011,17 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
+	vm.cString.define("getbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := strOf(self)
+		i := toInt(args[0])
+		if i < 0 {
+			i += int64(len(s)) // negative indexes count from the end
+		}
+		if i < 0 || i >= int64(len(s)) {
+			return object.NilV
+		}
+		return object.Integer(s[i])
+	})
 	vm.cString.define("lines", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		segs := splitLines(strOf(self))
 		out := make([]object.Value, len(segs))
