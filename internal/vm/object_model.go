@@ -148,6 +148,11 @@ type RClass struct {
 	// `private_class_method :new`, where `new` is inherited from Class rather than
 	// defined on the receiver. nil until first use.
 	svisOverrides map[string]visibility
+	// autoloads maps a (still-undefined) constant name to the path that should be
+	// required the first time the constant is resolved. Set by Module#autoload /
+	// Kernel#autoload; consumed (and cleared) when the constant is first resolved
+	// through this class's table. nil until first use.
+	autoloads map[string]string
 }
 
 func newClass(name string, super *RClass) *RClass {
@@ -333,6 +338,12 @@ func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
 	if v, ok := vm.constInAncestors(cls, name); ok {
 		return v
 	}
+	// A pending autoload on the receiver or an ancestor: require it and retry.
+	if vm.autoloadInAncestors(cls, name) {
+		if v, ok := vm.constInAncestors(cls, name); ok {
+			return v
+		}
+	}
 	raise("NameError", "uninitialized constant %s::%s", cls.ToS(), name)
 	return object.NilV
 }
@@ -354,6 +365,20 @@ func (vm *VM) nesting(cref *RClass) []*RClass {
 // top-level (Object's table). This preserves lexical access to an outer
 // constant while giving each class/module its own namespace.
 func (vm *VM) resolveConst(cref *RClass, name string) (object.Value, bool) {
+	if v, ok := vm.resolveConstNoAutoload(cref, name); ok {
+		return v, true
+	}
+	// A miss may be served by a pending autoload registered up the lexical/ancestor
+	// chain: require the recorded file, then re-resolve once.
+	if vm.autoloadInLexical(cref, name) {
+		return vm.resolveConstNoAutoload(cref, name)
+	}
+	return nil, false
+}
+
+// resolveConstNoAutoload is resolveConst without the autoload retry: the raw
+// lexical-then-ancestor-then-top-level lookup.
+func (vm *VM) resolveConstNoAutoload(cref *RClass, name string) (object.Value, bool) {
 	for _, c := range vm.nesting(cref) {
 		if v, ok := c.consts[name]; ok {
 			return v, true

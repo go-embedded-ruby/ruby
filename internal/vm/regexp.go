@@ -828,6 +828,24 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.define("source", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(reArg(self).source)
 	})
+	vm.cRegexp.define("options", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// The integer option bitmask MRI exposes: IGNORECASE | EXTENDED | MULTILINE.
+		f := reArg(self).flags
+		var bits int64
+		if strings.ContainsRune(f, 'i') {
+			bits |= reIgnoreCase
+		}
+		if strings.ContainsRune(f, 'x') {
+			bits |= reExtended
+		}
+		if strings.ContainsRune(f, 'm') {
+			bits |= reMultiline
+		}
+		return object.Integer(bits)
+	})
+	vm.cRegexp.define("casefold?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(strings.ContainsRune(reArg(self).flags, 'i'))
+	})
 	vm.cRegexp.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(reArg(self).ToS())
 	})

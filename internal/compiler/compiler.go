@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
+	"github.com/go-ruby-parser/parser"
 	"github.com/go-ruby-parser/parser/ast"
 )
 
@@ -245,9 +246,15 @@ func (c *Compiler) compileNode(n ast.Node) {
 		// it through the shell at runtime and pushes its stdout.
 		b.emit(bytecode.OpXStr, b.addName(v.Command), 0)
 	case *ast.RegexpLit:
-		// The source and flags travel in the name pool; the VM compiles the
-		// pattern (translating the Ruby flags to an inline prefix) at runtime.
-		b.emit(bytecode.OpRegexp, b.addName(v.Source), b.addName(v.Flags))
+		// A source carrying #{...} is an interpolated regexp: build the pattern
+		// string from its literal/expression segments at runtime, then compile it
+		// (OpRegexpDyn). A plain source compiles statically (OpRegexp). The flags
+		// always travel in the name pool.
+		if segs, ok := splitRegexpInterp(v.Source); ok {
+			c.compileRegexpInterp(segs, v.Flags)
+		} else {
+			b.emit(bytecode.OpRegexp, b.addName(v.Source), b.addName(v.Flags))
+		}
 	case *ast.ArrayLit:
 		if hasSplat(v.Elems) {
 			c.compileSplatItems(v.Elems)
@@ -806,7 +813,12 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	// or after a bare `**` anonymous kwsplat (`g(*, **, &)` parses as [*, &, **]),
 	// so scan anywhere. Bare anonymous `&` was already rewritten by rewriteAnonArgs.
 	args, blockPass := extractBlockPass(callArgs)
-	if hasSplat(args) { // dynamic argument count: build an array and splat-send
+	// A `*splat` argument OR a trailing keyword-splat (`**kw`) whose runtime hash
+	// may be empty needs the dynamic array-build path: MRI drops an empty keyword
+	// splat rather than passing an empty positional hash. A literal-only keyword
+	// hash (k: v) is never empty, and a braced positional hash carries no `**`
+	// entry, so neither is affected.
+	if hasSplat(args) || hasTrailingKwSplat(args) {
 		c.compileSplatItems(args)
 		if blockPass != nil {
 			c.compileNode(blockPass)
@@ -854,6 +866,100 @@ func extractBlockPass(args []ast.Node) ([]ast.Node, ast.Node) {
 	return args, nil
 }
 
+// regexpSeg is one piece of an interpolated regexp source: either a literal run
+// (isExpr false, text is the verbatim pattern fragment) or an embedded #{...}
+// expression (isExpr true, text is the Ruby source between the braces).
+type regexpSeg struct {
+	text   string
+	isExpr bool
+}
+
+// splitRegexpInterp splits a regexp literal source into literal and #{...}
+// expression segments. ok is false when the source contains no #{ (so the caller
+// keeps the fast static path). A `#{` preceded by a backslash is treated as a
+// literal `#{` (escaped) and not an interpolation. Nested braces inside the
+// expression are balanced so e.g. #{h[:k]} or #{a{b}} parse as one expression.
+func splitRegexpInterp(src string) ([]regexpSeg, bool) {
+	if !containsInterp(src) {
+		return nil, false
+	}
+	var segs []regexpSeg
+	var lit []byte
+	flush := func() {
+		if len(lit) > 0 {
+			segs = append(segs, regexpSeg{text: string(lit)})
+			lit = lit[:0]
+		}
+	}
+	for i := 0; i < len(src); i++ {
+		if src[i] == '#' && i+1 < len(src) && src[i+1] == '{' && !escapedAt(src, i) {
+			flush()
+			depth, j := 1, i+2
+			for ; j < len(src) && depth > 0; j++ {
+				switch src[j] {
+				case '{':
+					depth++
+				case '}':
+					depth--
+				}
+			}
+			// j now points just past the closing brace (or end of string).
+			expr := src[i+2 : j-1]
+			segs = append(segs, regexpSeg{text: expr, isExpr: true})
+			i = j - 1
+			continue
+		}
+		lit = append(lit, src[i])
+	}
+	flush()
+	return segs, true
+}
+
+// containsInterp reports whether src has an unescaped `#{`.
+func containsInterp(src string) bool {
+	for i := 0; i+1 < len(src); i++ {
+		if src[i] == '#' && src[i+1] == '{' && !escapedAt(src, i) {
+			return true
+		}
+	}
+	return false
+}
+
+// escapedAt reports whether the byte at i is preceded by an odd number of
+// backslashes (i.e. it is escaped).
+func escapedAt(src string, i int) bool {
+	n := 0
+	for i--; i >= 0 && src[i] == '\\'; i-- {
+		n++
+	}
+	return n%2 == 1
+}
+
+// compileRegexpInterp builds the interpolated pattern String on the stack (literal
+// segments concatenated with each #{expr}.to_s) and emits OpRegexpDyn to compile
+// it with the given flags. A segment that fails to parse is treated as an empty
+// expression, matching nothing — a malformed #{} only ever appears in invalid
+// source the parser would already have rejected upstream.
+func (c *Compiler) compileRegexpInterp(segs []regexpSeg, flags string) {
+	b := c.cur()
+	b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)
+	for _, s := range segs {
+		if s.isExpr {
+			prog, err := parser.Parse(s.text)
+			if err != nil || len(prog.Body) == 0 {
+				b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)
+			} else {
+				c.compileNode(prog.Body[len(prog.Body)-1])
+				b.emit(bytecode.OpSend, b.addName("to_s"), 0)
+			}
+		} else {
+			b.emit(bytecode.OpPushConst, b.addConst(object.NewString(s.text)), 0)
+		}
+		b.emit(bytecode.OpAdd, 0, 0)
+	}
+	b.emit(bytecode.OpRegexpDyn, 0, b.addName(flags))
+}
+
 // hasSplat reports whether any item is a *splat.
 func hasSplat(items []ast.Node) bool {
 	for _, it := range items {
@@ -865,20 +971,66 @@ func hasSplat(items []ast.Node) bool {
 }
 
 // compileSplatItems leaves one Array on the stack holding all items, with
-// *splat elements spliced in.
+// *splat elements spliced in. A trailing keyword-splat hash (the last item, a
+// HashLit carrying a `**` entry) is appended only when it is non-empty at
+// runtime, so an empty `**kw` passes no argument — matching MRI's keyword
+// separation.
 func (c *Compiler) compileSplatItems(items []ast.Node) {
 	b := c.cur()
 	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
-	for _, it := range items {
+	for i, it := range items {
 		if sp, ok := it.(*ast.SplatArg); ok {
 			c.compileNode(sp.Value)
 			b.emit(bytecode.OpSplatToArray, 0, 0)
-		} else {
-			c.compileNode(it)
-			b.emit(bytecode.OpNewArray, 1, 0)
+			b.emit(bytecode.OpConcatArray, 0, 0)
+			continue
 		}
+		if h, ok := it.(*ast.HashLit); ok && i == len(items)-1 && isKwSplatHash(h) {
+			c.appendKwSplatIfPresent(h)
+			continue
+		}
+		c.compileNode(it)
+		b.emit(bytecode.OpNewArray, 1, 0)
 		b.emit(bytecode.OpConcatArray, 0, 0)
 	}
+}
+
+// appendKwSplatIfPresent builds the keyword hash h and concatenates it onto the
+// argument-array accumulator on top of the stack, but only when the hash is
+// non-empty — an empty keyword splat contributes no argument.
+func (c *Compiler) appendKwSplatIfPresent(h *ast.HashLit) {
+	b := c.cur()
+	c.compileNode(h)
+	b.emit(bytecode.OpDup, 0, 0)
+	b.emit(bytecode.OpSend, b.addName("empty?"), 0)
+	skip := b.emit(bytecode.OpBranchIf, 0, 0)
+	b.emit(bytecode.OpNewArray, 1, 0) // wrap the kw hash as a single element
+	b.emit(bytecode.OpConcatArray, 0, 0)
+	done := b.emit(bytecode.OpJump, 0, 0)
+	b.patch(skip, b.here())
+	b.emit(bytecode.OpPop, 0, 0) // drop the empty kw hash, leaving the accumulator
+	b.patch(done, b.here())
+}
+
+// hasTrailingKwSplat reports whether the last argument is a keyword-splat hash
+// (a HashLit carrying at least one `**` entry, key == nil), which the call path
+// must build dynamically so an empty splat is dropped.
+func hasTrailingKwSplat(items []ast.Node) bool {
+	if len(items) == 0 {
+		return false
+	}
+	h, ok := items[len(items)-1].(*ast.HashLit)
+	return ok && isKwSplatHash(h)
+}
+
+// isKwSplatHash reports whether a HashLit contains a `**splat` entry (a nil key).
+func isKwSplatHash(h *ast.HashLit) bool {
+	for _, k := range h.Keys {
+		if k == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // hasHashSplat reports whether any hash entry is a **splat (key == nil).

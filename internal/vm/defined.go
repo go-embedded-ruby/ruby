@@ -11,9 +11,42 @@ import (
 func definedTag(tag string) object.Value { return object.NewString(tag) }
 
 // hasScopedConst reports whether cls or its ancestors define name — the
-// non-raising form of scopedConst (used by defined?(A::B)).
+// non-raising form of scopedConst (used by defined?(A::B)). A pending autoload on
+// the receiver or an ancestor counts as defined, without triggering the require.
 func (vm *VM) hasScopedConst(cls *RClass, name string) bool {
-	_, ok := vm.constInAncestors(cls, name)
+	if _, ok := vm.constInAncestors(cls, name); ok {
+		return true
+	}
+	for _, c := range vm.ancestors(cls) {
+		if c == vm.cObject || c == vm.cBasicObject {
+			if cls != vm.cObject && cls != vm.cBasicObject {
+				continue
+			}
+		}
+		if _, ok := c.autoloads[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// autoloadPending reports whether a pending autoload for name exists anywhere up
+// cref's lexical nesting or ancestor chain (or on Object). It never triggers the
+// require — used by defined? to report a registered-but-unloaded constant.
+func (vm *VM) autoloadPending(cref *RClass, name string) bool {
+	for _, c := range vm.nesting(cref) {
+		if _, ok := c.autoloads[name]; ok {
+			return true
+		}
+	}
+	if cref != nil {
+		for _, c := range vm.ancestors(cref) {
+			if _, ok := c.autoloads[name]; ok {
+				return true
+			}
+		}
+	}
+	_, ok := vm.cObject.autoloads[name]
 	return ok
 }
 
@@ -63,15 +96,9 @@ func (vm *VM) respondsTo(recv object.Value, name string) bool {
 	if name == "!" {
 		return true
 	}
-	// Unary `-@`/`+@`/`~` are fast-path ops on the numeric tower rather than
-	// method-table entries; numbers respond to them as in MRI.
-	switch name {
-	case "-@", "+@", "~":
-		switch recv.(type) {
-		case object.Integer, *object.Bignum, object.Float, *object.Rational, *object.Complex:
-			return true
-		}
-	}
+	// Unary `-@`/`+@` are now generic Numeric methods and `~` is an Integer method,
+	// so they are all found by findMethod above; no numeric fast-path special-case
+	// is needed here.
 	return false
 }
 

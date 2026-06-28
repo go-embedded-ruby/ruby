@@ -90,6 +90,7 @@ const (
 	OpSendBlockArg          // like OpSend but a &block-pass value sits on top of the args
 	OpSendArrayBlockArg     // like OpSendArray with a &block-pass value on top
 	OpRegexp                // A = Names index (source), B = Names index (flags); pushes a compiled Regexp
+	OpRegexpDyn             // B = Names index (flags); pops the interpolated source String, pushes a compiled Regexp
 	OpTruthy                // pops a value, pushes true if it is truthy else false (normalize a === / is_a? result)
 	OpRaiseNoMatch          // pops the subject value, raises NoMatchingPatternError naming it (case/in fell through)
 	OpBinding               // pushes a Binding capturing the current frame (locals, self, definee)
@@ -138,7 +139,7 @@ var opNames = map[Op]string{
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
-	OpRegexp: "regexp", OpTruthy: "truthy", OpRaiseNoMatch: "raise_no_match",
+	OpRegexp: "regexp", OpRegexpDyn: "regexp_dyn", OpTruthy: "truthy", OpRaiseNoMatch: "raise_no_match",
 	OpBinding:            "binding",
 	OpDefineClassScoped:  "define_class_scoped",
 	OpDefineModuleScoped: "define_module_scoped",
