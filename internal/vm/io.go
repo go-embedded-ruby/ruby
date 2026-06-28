@@ -149,6 +149,12 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 		o.buf, o.writable = b, strings.Contains(mode, "+")
 	case 'w':
 		o.writable = true // empty buffer; flush truncates the file
+		// Materialise the (truncated) file on disk now, as MRI's O_CREAT|O_TRUNC
+		// open does, so File.stat/chmod and friends see it before the first flush —
+		// the buffered writes are still flushed back on flush/close.
+		if err := os.WriteFile(p, nil, 0o644); err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
+		}
 	case 'a':
 		b, _ := os.ReadFile(p) // append to the existing content (or a new file)
 		o.buf, o.pos, o.writable = b, len(b), true

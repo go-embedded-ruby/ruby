@@ -181,30 +181,50 @@ C.f`); class != "NoMethodError" {
 	}
 }
 
-// TestClassEvalConstScope covers constant *lookup* inside a class_eval/
-// module_eval block: it follows the block's lexical nesting (where the block was
-// written), not the eval receiver — so a bare `File` resolves to ::File even when
-// the receiver is itself named File (Puppet's file type referencing
-// File::SEPARATOR). Constant *definition* still targets the receiver.
+// TestClassEvalConstScope covers constant *lookup* and *definition* inside a
+// class_eval/module_eval block: both follow the block's lexical nesting (where
+// the block was written), not the eval receiver — so a bare `File` resolves to
+// ::File even when the receiver is itself named File (Puppet's file type
+// referencing File::SEPARATOR), and a `CONST = …` lands in the block's lexical
+// scope rather than on the receiver (so a sibling block in the same eval body
+// reads it back the same way — Puppet's file type defines CREATORS in its
+// newtype block and a nested validate block reads it). This matches MRI.
 func TestClassEvalConstScope(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// Receiver named File; File::SEPARATOR must reach ::File, not the receiver.
+		// The defined SEP lands in the block's lexical scope (module P), not on the
+		// File receiver — exactly as MRI does.
 		{`module P; module Type; class File; end; end; end
 module P
   P::Type::File.class_eval { SEP = File::SEPARATOR.to_s }
 end
-p P::Type::File::SEP`, "\"/\"\n"},
-		// A bare constant from the surrounding lexical scope is visible in the block.
+p P::SEP`, "\"/\"\n"},
+		// A bare constant from the surrounding lexical scope is visible in the block,
+		// and a constant defined there lands in that same lexical scope (Outer), not
+		// on the eval receiver (Inner).
 		{`module Outer
   TARGET = 42
   class Inner; end
   Inner.class_eval { GOT = TARGET }
 end
-p Outer::Inner::GOT`, "42\n"},
-		// A constant defined in the block lands on the receiver (definition target).
+p Outer::GOT`, "42\n"},
+		// A constant defined in a top-level class_eval block lands at the top level
+		// (Object), reachable as a bare constant — not as Recv::MADE.
 		{`class Recv; end
 Recv.class_eval { MADE = 9 }
-p Recv::MADE`, "9\n"},
+p MADE`, "9\n"},
+		// A constant defined in one class_eval block is visible to a sibling block in
+		// the same eval body via the shared lexical scope (the CREATORS pattern).
+		{`module Q
+  class Prop
+    def self.cap(&b); define_method(:run, &b); end
+  end
+  Prop.class_eval do
+    THINGS = [:a, :b]
+    cap { THINGS }
+  end
+end
+p Q::Prop.new.run`, "[:a, :b]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

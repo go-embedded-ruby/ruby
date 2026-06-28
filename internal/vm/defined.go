@@ -115,5 +115,5 @@ func (vm *VM) runDefinedGuard(child *bytecode.ISeq, self object.Value, definee *
 			panic(r) // control-flow signals / internal bugs propagate
 		}
 	}()
-	return vm.exec(child, self, nil, definee, "", parentEnv, block, nil)
+	return vm.exec(child, self, nil, definee, "", parentEnv, block, nil, nil)
 }

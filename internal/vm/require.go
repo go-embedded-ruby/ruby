@@ -77,7 +77,7 @@ func (vm *VM) doLoad(name string) object.Value {
 		setISeqFile(iseq, abs)
 		vm.requireDirs = append(vm.requireDirs, filepath.Dir(abs))
 		defer func() { vm.requireDirs = vm.requireDirs[:len(vm.requireDirs)-1] }()
-		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil)
+		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil)
 		return object.Bool(true)
 	}
 	return raise("LoadError", "cannot load such file -- %s", name)
@@ -135,7 +135,7 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		// Push the file's directory so a nested require_relative resolves against it.
 		vm.requireDirs = append(vm.requireDirs, filepath.Dir(abs))
 		defer func() { vm.requireDirs = vm.requireDirs[:len(vm.requireDirs)-1] }()
-		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil)
+		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil)
 		return object.Bool(true)
 	}
 	return raise("LoadError", "cannot load such file -- %s", name)

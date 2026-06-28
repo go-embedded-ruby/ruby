@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"path/filepath"
 	"runtime"
 
@@ -138,6 +139,32 @@ func (vm *VM) registerKernelIntrospection() {
 		vm.atExit = append(vm.atExit, blk)
 		return blk
 	})
+
+	// Kernel#exit raises SystemExit, which unwinds to the top (running at_exit
+	// handlers there). A bare `exit` and any status argument both unwind the same
+	// way here — the embedded host has no real process, so the status is not a
+	// process code, only the signal that the program asked to stop. exit! is the
+	// same minus at_exit semantics (modelled identically). abort prints an optional
+	// message to $stderr first. Puppet's exit_on_fail calls exit(code) after
+	// logging, so these let the real CLI terminate via SystemExit rather than a
+	// NoMethodError.
+	exitFn := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return raise("SystemExit", "exit")
+	}
+	vm.cObject.define("exit", exitFn)
+	vm.cObject.define("exit!", exitFn)
+	vm.cObject.define("abort", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 0 {
+			if s, ok := args[0].(*object.String); ok {
+				fmt.Fprintln(vm.errOut, s.Str())
+			}
+		}
+		return raise("SystemExit", "exit")
+	})
+	if kernel, ok := vm.consts["Kernel"].(*RClass); ok {
+		kernel.smethods["exit"] = &Method{name: "exit", owner: kernel, native: exitFn}
+		kernel.smethods["exit!"] = &Method{name: "exit!", owner: kernel, native: exitFn}
+	}
 }
 
 // currentFile returns the path of the file currently executing: the innermost

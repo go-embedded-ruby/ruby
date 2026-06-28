@@ -166,6 +166,7 @@ type VM struct {
 	cNDArray, cImage                       *RClass
 	cSet                                   *RClass
 	cTime                                  *RClass
+	cFileStat                              *RClass
 	cBigDecimal                            *RClass
 	cDate                                  *RClass
 	cBag                                   *RClass
@@ -471,6 +472,7 @@ func New(out io.Writer) *VM {
 	vm.installPrelude()
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
+	vm.registerFileStat()   // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
 	vm.installHashKeyHook()
 	return vm
 }
@@ -502,6 +504,22 @@ func (vm *VM) SetScriptName(name string) {
 func (vm *VM) SetConst(name string, v object.Value) { vm.consts[name] = v }
 
 // Run executes the top-level ISeq (self = main, default definee = Object).
+// isSystemExit reports whether className names SystemExit or one of its
+// subclasses, so a Kernel#exit propagating to the top is recognised as a clean
+// termination rather than an uncaught error.
+func (vm *VM) isSystemExit(className string) bool {
+	c, ok := vm.consts[className].(*RClass)
+	if !ok {
+		return className == "SystemExit"
+	}
+	for ; c != nil; c = c.super {
+		if c.name == "SystemExit" {
+			return true
+		}
+	}
+	return false
+}
+
 func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -509,6 +527,18 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 				r = RubyError{Class: "UncaughtThrowError", Message: "uncaught throw " + sig.tag.Inspect()}
 			}
 			rerr := r.(RubyError)
+			// A SystemExit (Kernel#exit/abort) is a clean program termination, not a
+			// crash: unwind to the top, run at_exit handlers, and return without an
+			// error — so a real CLI that ends by calling exit (e.g. Puppet's
+			// exit_on_fail) terminates quietly rather than printing a backtrace.
+			if vm.isSystemExit(rerr.Class) {
+				vm.frameNames = vm.frameNames[:0]
+				vm.frameFiles = vm.frameFiles[:0]
+				vm.fileStack = vm.fileStack[:0]
+				vm.runAtExit()
+				result, err = object.NilV, nil
+				return
+			}
 			// Capture the backtrace for an uncaught exception while the frame stack
 			// is still intact (panics do not pop frames; they are reset below). An
 			// exception object that already carries one (captured at its raise site,
@@ -528,7 +558,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 	if vm.scriptName != "" {
 		setISeqFile(iseq, vm.scriptName)
 	}
-	res := vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil)
+	res := vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil)
 	vm.runAtExit()
 	return res, nil
 }
@@ -587,7 +617,7 @@ func plural(n int) string {
 	return ""
 }
 
-func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc) (execResult object.Value) {
+func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc, methodLexScope *RClass) (execResult object.Value) {
 	var kwargs *object.Hash
 	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
 		kwargs = vm.bindKeywords(iseq, &args)
@@ -704,10 +734,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	var caches []inlineCache
 
 	// isReturnTarget is true for a frame that a `return` returns FROM: a method,
-	// top-level or class body, or a lambda (a lambda's `return` is local to it).
-	// An ordinary block frame is transparent — its `return` is non-local — so it
-	// is not a target.
-	isReturnTarget := selfBlock == nil || selfBlock.isLambda
+	// top-level or class body, a lambda (a lambda's `return` is local to it), or a
+	// define_method body (which is a method, not a transparent block — `return`
+	// inside it returns from the method invocation, matching MRI). An ordinary
+	// block frame is transparent — its `return` is non-local — so it is not a
+	// target.
+	isReturnTarget := selfBlock == nil || selfBlock.isLambda || selfBlock.dmDirect
 
 	// selfTarget identifies THIS activation. It catches a `return`/`next` that
 	// unwinds back to this very frame through an ensure (a local unwind), plus,
@@ -741,8 +773,19 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// definee — except under class_eval/module_eval/instance_eval, where the
 	// definee is switched to the eval receiver (so `def` and `CONST =` target it)
 	// while constant lookup must still follow the block's textual nesting, as in
-	// MRI. Constant *definition* keeps using definee; only lookup uses lexCref.
+	// MRI. Constant *definition* keeps using definee; only lookup uses lexCref —
+	// and a block literal created in this frame captures lexCref (not definee), so
+	// a block written textually inside a class_eval'd block keeps the original
+	// lexical scope for its own constant lookups instead of inheriting the eval
+	// target. (This is what lets Puppet's `newvalue(:directory) { File.dirname }`,
+	// written inside a `class_eval`'d property block, resolve File to ::File.)
 	lexCref := definee
+	if methodLexScope != nil {
+		// A method defined under class_eval records the lexical scope its body's
+		// bare constants resolve against (where the def was written), which differs
+		// from the owner the method landed on.
+		lexCref = methodLexScope
+	}
 	if selfBlock != nil && selfBlock.cref != nil {
 		lexCref = selfBlock.cref
 	}
@@ -894,9 +937,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(val)
 			case bytecode.OpSetConst:
 				// Assignment is an expression: set the constant in the current
-				// lexical scope (the definee's table; top-level writes land in
-				// Object's table, which vm.consts aliases), keep its value.
-				vm.assignConst(definee, iseq.Names[in.A], stack[len(stack)-1])
+				// lexical scope (lexCref's table; top-level writes land in Object's
+				// table, which vm.consts aliases), keep its value. Using lexCref —
+				// not definee — matches MRI: a `CONST = …` written textually inside a
+				// class_eval'd block defines the constant in the block's *lexical*
+				// scope (where it was written), so a sibling block in the same
+				// class_eval body finds it by the same lexical path (Puppet's file
+				// type defines CREATORS in its newtype block and a nested `validate`
+				// block reads it back this way).
+				vm.assignConst(lexCref, iseq.Names[in.A], stack[len(stack)-1])
 			case bytecode.OpGetGVar:
 				push(vm.gvar(iseq.Names[in.A]))
 			case bytecode.OpSetGVar:
@@ -1012,7 +1061,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -1027,6 +1076,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpDefineMethod:
 				name := iseq.Names[in.A]
 				m := &Method{name: name, iseq: iseq.Children[in.B], owner: definee, vis: definee.defaultVis}
+				// Under class_eval/module_eval the def lands on the eval receiver
+				// (definee) while its bare-constant lookup must follow the block's
+				// textual nesting (lexCref) — record that scope when the two differ so
+				// the method body resolves constants as MRI does.
+				if lexCref != definee {
+					m.lexScope = lexCref
+				}
 				// Attach the AOT-compiled body only on the first definition of
 				// this name; a redefinition gets a fresh, interpreted Method
 				// (deopt), since the compiled body matched the original source.
@@ -1091,7 +1147,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if sc.lexParent == nil && definee != nil && definee != vm.cObject {
 					sc.lexParent = definee
 				}
-				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil))
+				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil, nil))
 			case bytecode.OpAlias:
 				vm.aliasMethod(definee, iseq.Names[in.A], iseq.Names[in.B])
 				push(object.NilV)
@@ -1127,7 +1183,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the home method's arguments
@@ -1156,7 +1212,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: lexCref, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				argsArr := pop().(*object.Array)
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, argsArr.Elems, superBlk))
@@ -1382,7 +1438,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:
@@ -1573,7 +1629,7 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 	// module_function mode (MRI resets these on every (re)open).
 	class.defaultVis, class.funcMode = visPublic, false
 	adoptReopenLexParent(class, parent, scoped)
-	return vm.exec(body, class, nil, class, "", nil, nil, nil)
+	return vm.exec(body, class, nil, class, "", nil, nil, nil, nil)
 }
 
 // adoptReopenLexParent upgrades a class/module's lexParent when it is reopened
@@ -1615,7 +1671,7 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 	}
 	mod.defaultVis, mod.funcMode = visPublic, false
 	adoptReopenLexParent(mod, parent, scoped)
-	return vm.exec(body, mod, nil, mod, "", nil, nil, nil)
+	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil)
 }
 
 // asModuleParent coerces a popped value to the class/module that a scoped
