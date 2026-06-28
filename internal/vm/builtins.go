@@ -1022,6 +1022,9 @@ func (vm *VM) bootstrap() {
 		}
 		return object.Integer(s[i])
 	})
+	vm.cString.define("byteslice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return byteslice(self.(*object.String), args)
+	})
 	vm.cString.define("lines", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		segs := splitLines(strOf(self))
 		out := make([]object.Value, len(segs))
@@ -1139,6 +1142,10 @@ func (vm *VM) bootstrap() {
 		return object.Bool(strMatchRegexp(args[0]).re.MatchString(strOf(self)))
 	})
 	vm.cString.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// match(pattern, pos): start scanning at character offset pos (default 0).
+		if len(args) >= 2 {
+			return vm.runMatchFrom(strMatchRegexp(args[0]), strOf(self), intArg(args[1]))
+		}
 		return vm.runMatch(strMatchRegexp(args[0]), strOf(self))
 	})
 	vm.cString.define("scan", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -3656,6 +3663,45 @@ func stringIndex(s string, args []object.Value) object.Value {
 		return object.NilV
 	}
 	return object.NewString(string(r[i]))
+}
+
+// byteslice returns a substring by BYTE offsets (not characters), the way MRI's
+// String#byteslice does: byteslice(i) is the 1-byte string at i (nil if out of
+// range), byteslice(i, len) is len bytes from i (clamped to the end; nil for a
+// negative start out of range or a negative length), and byteslice(range) slices
+// by byte range. The result keeps the receiver's encoding.
+func byteslice(self *object.String, args []object.Value) object.Value {
+	b := []byte(self.Str())
+	n := len(b)
+	mk := func(sub []byte) object.Value {
+		s := object.NewString(string(sub))
+		s.Enc = self.Enc
+		return s
+	}
+	if len(args) == 2 {
+		start := normIndex(intArg(args[0]), n)
+		length := intArg(args[1])
+		if start < 0 || start > n || length < 0 {
+			return object.NilV
+		}
+		end := start + int(length)
+		if end > n {
+			end = n
+		}
+		return mk(b[start:end])
+	}
+	if rng, ok := args[0].(*object.Range); ok {
+		start, length, ok := sliceRange(n, rng)
+		if !ok {
+			return object.NilV
+		}
+		return mk(b[start : start+length])
+	}
+	i := normIndex(intArg(args[0]), n)
+	if i < 0 || i >= n {
+		return object.NilV
+	}
+	return mk(b[i : i+1])
 }
 
 // sliceRange resolves a Range against a collection of length n into a start
