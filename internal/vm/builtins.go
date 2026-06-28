@@ -413,7 +413,6 @@ func (vm *VM) bootstrap() {
 	vm.registerYAML()        // YAML/Psych loadable shell; needs StandardError
 	vm.registerFileUtils()   // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()  // GetoptLong loadable shell; needs StandardError
-	vm.registerOptParse()    // optparse loadable shell (declares; parse raises); needs StandardError
 	vm.registerRipper()      // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
 	vm.registerSyslog()      // Syslog loadable shell (feature probe)
 	vm.registerCGI()         // CGI.escape/unescape (real over net/url) + HTML helpers
