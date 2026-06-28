@@ -2,6 +2,8 @@ package vm
 
 import (
 	"fmt"
+	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -157,26 +159,46 @@ func formatOne(spec string, verb byte, next func() object.Value) string {
 }
 
 // toFormatInt coerces an argument for an integer conversion (floats truncate
-// toward zero, as in Ruby).
+// toward zero, as in Ruby). A String is parsed with Integer()-style semantics
+// (whitespace/underscores/radix prefixes), matching MRI where `"%d" % "07"`
+// formats the numeric string; a non-numeric String raises ArgumentError.
 func toFormatInt(v object.Value) int64 {
 	switch x := v.(type) {
 	case object.Integer:
 		return int64(x)
 	case object.Float:
 		return int64(x)
+	case *object.Bignum:
+		return x.I.Int64()
+	case *object.String:
+		n, err := strconv.ParseInt(stripRadixPrefix(strings.TrimSpace(x.Str()), 0), 0, 64)
+		if err != nil {
+			raise("ArgumentError", "invalid value for Integer(): %s", x.Inspect())
+		}
+		return n
 	default:
 		raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(v))
 		return 0
 	}
 }
 
-// toFormatFloat coerces an argument for a floating conversion.
+// toFormatFloat coerces an argument for a floating conversion. A String is
+// parsed as a float (MRI's `"%f" % "1.5"`); a non-numeric String raises.
 func toFormatFloat(v object.Value) float64 {
 	switch x := v.(type) {
 	case object.Integer:
 		return float64(x)
 	case object.Float:
 		return float64(x)
+	case *object.Bignum:
+		f, _ := new(big.Float).SetInt(x.I).Float64()
+		return f
+	case *object.String:
+		f, err := strconv.ParseFloat(strings.TrimSpace(x.Str()), 64)
+		if err != nil {
+			raise("ArgumentError", "invalid value for Float(): %s", x.Inspect())
+		}
+		return f
 	default:
 		raise("TypeError", "no implicit conversion of %s into Float", classNameOf(v))
 		return 0

@@ -42,10 +42,25 @@ func digestNewByName(name string) hash.Hash {
 	return nil
 }
 
+// DigestObj is an instance of a Digest algorithm class (Digest::SHA256.new):
+// an incremental hasher that accumulates input through #update / #<< and yields
+// its result with #hexdigest / #digest. Puppet's checksum_stream feeds file
+// content through one of these before reading the hex digest.
+type DigestObj struct {
+	cls *RClass
+	h   hash.Hash
+	new func() hash.Hash // to reset / produce a fresh state
+}
+
+func (d *DigestObj) ToS() string     { return "#<" + d.cls.name + ">" }
+func (d *DigestObj) Inspect() string { return d.ToS() }
+func (d *DigestObj) Truthy() bool    { return true }
+
 // registerDigest installs the Digest module (require "digest") with the common
-// algorithms as Digest::MD5/SHA1/SHA224/SHA256/SHA384/SHA512, each offering
-// hexdigest, digest and base64digest. Backed by Go's crypto/* — byte-identical
-// to MRI.
+// algorithms as Digest::MD5/SHA1/SHA224/SHA256/SHA384/SHA512. Each class offers
+// the one-shot class methods hexdigest/digest/base64digest and the incremental
+// instance protocol (new, update/<<, hexdigest/digest, reset). Backed by Go's
+// crypto/* — byte-identical to MRI.
 func (vm *VM) registerDigest() {
 	d := newClass("Digest", nil)
 	d.isModule = true
@@ -54,8 +69,9 @@ func (vm *VM) registerDigest() {
 	algo := func(name string) {
 		c := newClass("Digest::"+name, vm.cObject)
 		d.consts[name] = c
+		ctor := digestConstructors[name]
 		sum := func(args []object.Value) []byte {
-			h := digestNewByName(name)
+			h := ctor()
 			h.Write([]byte(base64Arg(args[0])))
 			return h.Sum(nil)
 		}
@@ -71,6 +87,45 @@ func (vm *VM) registerDigest() {
 			native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 				return object.NewString(base64.StdEncoding.EncodeToString(sum(args)))
 			}}
+		// Digest::SHA256.new → a fresh incremental hasher.
+		c.smethods["new"] = &Method{name: "new", owner: c,
+			native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+				return &DigestObj{cls: c, h: ctor(), new: ctor}
+			}}
+
+		// Incremental instance protocol. update / << feed bytes and return self so
+		// they chain; hexdigest / digest read the running result (without resetting,
+		// matching MRI when called with no argument); reset starts over.
+		feed := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			o := self.(*DigestObj)
+			o.h.Write([]byte(strArg(args[0])))
+			return o
+		}
+		c.define("update", feed)
+		c.define("<<", feed)
+		c.define("hexdigest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			o := self.(*DigestObj)
+			if len(args) > 0 {
+				o.h.Write([]byte(strArg(args[0])))
+			}
+			return object.NewString(hex.EncodeToString(o.h.Sum(nil)))
+		})
+		c.define("digest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			o := self.(*DigestObj)
+			if len(args) > 0 {
+				o.h.Write([]byte(strArg(args[0])))
+			}
+			return object.NewString(string(o.h.Sum(nil)))
+		})
+		c.define("base64digest", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+			o := self.(*DigestObj)
+			return object.NewString(base64.StdEncoding.EncodeToString(o.h.Sum(nil)))
+		})
+		c.define("reset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+			o := self.(*DigestObj)
+			o.h = o.new()
+			return o
+		})
 	}
 	for _, name := range []string{"MD5", "SHA1", "SHA224", "SHA256", "SHA384", "SHA512"} {
 		algo(name)
