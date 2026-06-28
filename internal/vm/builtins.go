@@ -74,6 +74,7 @@ func (vm *VM) bootstrap() {
 	vm.registerEval()
 	vm.registerBinding()
 	vm.registerRequire()
+	vm.registerAutoload()
 	vm.registerSingleton()
 	vm.registerMethod()
 	vm.registerModuleExtras()
@@ -644,13 +645,19 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cModule.define("const_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
+		// A pending autoload counts as defined for const_defined?, which (unlike
+		// const_get) must NOT trigger the require — it just reports presence.
 		for c := self.(*RClass); c != nil; c = c.super {
 			if _, ok := c.consts[name]; ok {
 				return object.True
 			}
+			if _, ok := c.autoloads[name]; ok {
+				return object.True
+			}
 		}
-		_, ok := vm.consts[name]
-		return object.Bool(ok)
+		_, defined := vm.consts[name]
+		_, pending := vm.cObject.autoloads[name]
+		return object.Bool(defined || pending)
 	})
 	// Module#< <= > >= compare by the inheritance/inclusion hierarchy: A < B is
 	// true if A is a proper descendant of B, false if a proper ancestor (or, for

@@ -1019,7 +1019,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpBlockGiven:
 				push(object.Bool(block != nil))
 			case bytecode.OpDefinedConst:
-				if _, ok := vm.resolveConst(definee, iseq.Names[in.A]); ok {
+				// defined? must NOT trigger autoload (MRI): a pending autoload still
+				// reports "constant" without requiring the file.
+				name := iseq.Names[in.A]
+				if _, ok := vm.resolveConstNoAutoload(definee, name); ok || vm.autoloadPending(definee, name) {
 					push(definedTag("constant"))
 				} else {
 					push(object.NilV)
