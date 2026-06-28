@@ -271,10 +271,11 @@ func (vm *VM) registerFile() {
 // so the error branches are reachable identically on every platform (a test
 // swaps in a failing stub rather than relying on real OS behaviour, which
 // differs across Linux/macOS/Windows — e.g. chmod is largely a no-op on Windows).
+// fileChown / fileLchown are defined per-platform (filechown_unix.go /
+// filechown_windows.go): os.Chown always fails on Windows, where MRI treats
+// File.chown as a no-op, so the Windows build returns nil.
 var (
 	fileChmod   = os.Chmod
-	fileChown   = os.Chown
-	fileLchown  = os.Lchown
 	fileChtimes = func(p string, atime, mtime int64) error {
 		return osChtimes(p, atime, mtime)
 	}

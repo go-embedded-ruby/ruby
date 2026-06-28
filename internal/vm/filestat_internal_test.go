@@ -52,8 +52,11 @@ func TestFileStatPredicates(t *testing.T) {
 		{`s=File.stat("` + f + `"); p [s.file?, s.directory?, s.ftype, s.size, s.size?, s.zero?]`,
 			"[true, false, \"file\", 5, 5, false]\n"},
 		// mode includes the S_IFREG bits (0o100000) + perms, as MRI's st.mode does.
-		{`s=File.stat("` + f + `"); p [(s.mode & 0o7777).to_s(8), (s.mode & 0o170000).to_s(8)]`,
-			"[\"644\", \"100000\"]\n"},
+		// The exact perm bits differ by platform (Windows reports 0o666 for a
+		// writable file, not 0o644), so assert the type bits exactly and that the
+		// perms are a platform-valid value.
+		{`s=File.stat("` + f + `"); m=s.mode; p [(m & 0o170000).to_s(8), [0o644, 0o666].include?(m & 0o7777)]`,
+			"[\"100000\", true]\n"},
 		// Device/pipe/socket predicates are all false for a regular file.
 		{`s=File.stat("` + f + `"); p [s.pipe?, s.socket?, s.blockdev?, s.chardev?]`,
 			"[false, false, false, false]\n"},
