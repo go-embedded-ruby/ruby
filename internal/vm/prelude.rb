@@ -1420,3 +1420,291 @@ module Singleton
     klass.private_class_method(:new, :allocate)
   end
 end
+
+# ERB is a pure-Ruby embedded-Ruby template engine (require "erb"), written from
+# scratch to match MRI 4.0.5's observable behavior rather than copied from MRI's
+# erb.rb. A template mixes literal text with three tag kinds —
+#
+#   <% code %>      run Ruby, emit nothing
+#   <%= expr %>     run Ruby, append expr.to_s to the output buffer
+#   <%# comment %>  ignored entirely
+#
+# and the literals <%% / %%> stand for a single <% / %>. ERB#new scans the
+# template once and compiles it to a Ruby string that builds up an output buffer;
+# #result evals that string in a caller-supplied binding, so the template sees the
+# caller's locals (the same approach MRI takes). Trim modes control how newlines
+# adjacent to tags are handled.
+class ERB
+  # Compiler turns a template string into the Ruby source that, when evaluated,
+  # produces the rendered output. Each tag contributes one statement appending to
+  # the buffer named by eoutvar; literal runs are appended verbatim.
+  class Compiler
+    # A token of the scanned template: a kind (:text/:code/:expr/:comment) and its
+    # literal contents (for :text) or Ruby source (for :code/:expr).
+    Token = Struct.new(:kind, :content, :stop)
+
+    attr_reader :trim_mode, :percent
+
+    def initialize(trim_mode)
+      # Normalize the trim mode into two flags: the explicit set of newline-trimming
+      # behaviors, and whether "%"-prefixed lines are treated as code lines. MRI
+      # accepts a String combining several characters (e.g. ">", "<>", "-", "%").
+      mode = trim_mode.to_s
+      @percent  = mode.include?("%")
+      @trim_gt  = mode.include?(">")   # trim newline after a tag that ends the line
+      @trim_lgt = mode.include?("<>")  # trim only when tag both starts and ends line
+      @trim_dash = mode.include?("-")  # honor -%> to trim the immediately-following newline
+    end
+
+    # compile returns [src, enc_string]: the Ruby source that builds the buffer, and
+    # the magic encoding comment line, matching MRI's two-value contract.
+    def compile(str)
+      out = +''
+      tokens = scan(str)
+      tokens.each do |tok|
+        case tok.kind
+        when :text
+          next if tok.content.empty?
+          out << " #{@put_cmd}(#{quote(tok.content)}.freeze);"
+        when :expr
+          out << " #{@insert_cmd}((#{tok.content}).to_s);"
+        when :code
+          out << " #{tok.content};"
+        when :comment
+          # contributes nothing to the output
+        end
+      end
+      src = "#{@eoutvar} = +'';#{out} #{@eoutvar}"
+      ["#coding:UTF-8\n", src]
+    end
+
+    # add_put_cmd / add_insert_cmd record the buffer name and the append commands
+    # used when compiling, matching MRI's Compiler accessors that ERB#new sets.
+    attr_accessor :put_cmd, :insert_cmd, :pre_cmd, :post_cmd
+    attr_accessor :eoutvar
+
+    private
+
+    # scan walks the template and yields tokens, applying tag detection, the <%% /
+    # %%> literals, trim handling and (optionally) "%"-line code lines. This is the
+    # heart of the engine; the trim rules reproduce MRI's exactly:
+    #   -%>  (dash mode) strips one immediately-following "\n"
+    #   >    strips the "\n" after any tag that ends its line
+    #   <>   strips the "\n" only when the tag also starts its line
+    def scan(str)
+      tokens = []
+      # Percent-line mode: a line beginning with "%" is a code line; "%%" at the
+      # start is a literal "%". Rewrite such lines into <% ... %> / literal text
+      # before the main tag scan so the rest of the logic is uniform.
+      str = expand_percent_lines(str) if @percent
+
+      i = 0
+      n = str.length
+      pending_text = +''
+      while i < n
+        open = str.index("<%", i)
+        unless open
+          pending_text << str[i..-1]
+          break
+        end
+        pending_text << str[i...open]
+        # Literal "<%%" -> emit a literal "<%" and continue past it.
+        if str[open + 2] == "%"
+          pending_text << "<%"
+          i = open + 3
+          next
+        end
+        # Determine tag kind from the character after "<%".
+        marker = str[open + 2]
+        kind =
+          case marker
+          when "=" then :expr
+          when "#" then :comment
+          else :code
+          end
+        body_start = open + 2
+        body_start += 1 if marker == "=" || marker == "#"
+        close, dash = find_close(str, body_start)
+        # An unterminated tag (no closing "%>") is not an error in MRI: the opening
+        # "<%" (and any "="/"#" marker) is dropped and the remainder of the string
+        # is emitted as literal text.
+        unless close
+          pending_text << str[body_start..-1]
+          break
+        end
+        content = str[body_start...(dash ? close - 1 : close)]
+        # A "%%>" within the body is the escape for a literal "%>"; unescape it.
+        content = content.gsub("%%>", "%>")
+        # The text accumulated so far becomes a token; record whether the tag sits on
+        # its own line for <> trimming.
+        starts_line = pending_text.empty? || pending_text.end_with?("\n")
+        flush_text(tokens, pending_text)
+        pending_text = +''
+        tok = Token.new(kind, content.dup, nil)
+        tokens << tok
+        i = close + 2 # past "%>"
+        # Trim the trailing newline per the active mode.
+        i = apply_trim(str, i, dash, starts_line, tokens)
+      end
+      flush_text(tokens, pending_text)
+      tokens
+    end
+
+    # flush_text appends a :text token for the accumulated literal run if non-empty.
+    def flush_text(tokens, text)
+      tokens << Token.new(:text, text.dup, nil) unless text.empty?
+    end
+
+    # find_close locates the "%>" terminating a tag started at from, honoring the
+    # "%%>" literal (which stands for "%>" in the body and does not close the tag)
+    # and detecting the "-%>" dash terminator. Returns [index_of_%>, dash?].
+    def find_close(str, from)
+      i = from
+      n = str.length
+      while i < n
+        pct = str.index("%", i)
+        return [nil, false] unless pct
+        # "%%>" -> literal "%>" inside the tag body; skip both percents.
+        if str[pct + 1] == "%" && str[pct + 2] == ">"
+          i = pct + 3
+          next
+        end
+        if str[pct + 1] == ">"
+          dash = pct > from && str[pct - 1] == "-"
+          return [pct, dash]
+        end
+        i = pct + 1
+      end
+      [nil, false]
+    end
+
+    # apply_trim consumes a trailing newline after a closing tag when the active trim
+    # mode calls for it, returning the new scan index. The dash flag is the -%>
+    # terminator; starts_line says the tag began its own line (for <> mode).
+    def apply_trim(str, i, dash, starts_line, tokens)
+      # "-%>" (dash mode): strip exactly one immediately-following newline.
+      if dash && @trim_dash && str[i] == "\n"
+        return i + 1
+      end
+      # ">" / "<>" only trim code/comment-bearing tag lines whose newline is the
+      # very next character (spaces in between defeat the trim, matching MRI).
+      if (@trim_gt || @trim_lgt) && str[i] == "\n"
+        if @trim_lgt
+          return i + 1 if starts_line
+        else
+          return i + 1
+        end
+      end
+      i
+    end
+
+    # expand_percent_lines rewrites "%"-prefixed lines into tags for percent mode:
+    # a leading "%" introduces a code line (the rest becomes <% ... %>), and a
+    # leading "%%" is an escaped literal "%".
+    def expand_percent_lines(str)
+      out = +''
+      str.each_line do |line|
+        if line.start_with?("%%")
+          out << line[1..-1]
+        elsif line.start_with?("%")
+          # A "%" code line — including its terminating newline — produces no output,
+          # so the whole line collapses into a bare <% ... %> tag with no trailing
+          # literal newline.
+          code = line.end_with?("\n") ? line[1...-1] : line[1..-1]
+          out << "<% #{code} %>"
+        else
+          out << line
+        end
+      end
+      out
+    end
+
+    # quote renders a literal text run as a Ruby double-quoted string with the
+    # backslash, quote, and newline metacharacters escaped so the compiled source
+    # round-trips the text exactly.
+    def quote(text)
+      escaped = text.gsub("\\", "\\\\\\\\")
+                    .gsub('"', '\\"')
+                    .gsub("\n", '\\n')
+                    .gsub("\r", '\\r')
+                    .gsub("\t", '\\t')
+      "\"#{escaped}\""
+    end
+  end
+
+  # Util provides the HTML/URL escaping helpers ERB exposes as module functions
+  # (and their one-letter aliases h / u), matching MRI's ERB::Util output exactly.
+  module Util
+    # html_escape replaces the five HTML-significant characters with their entity
+    # references; non-strings are coerced with to_s first, matching MRI.
+    def html_escape(s)
+      s.to_s.gsub(/[&<>"']/, HTML_ESCAPE)
+    end
+    alias h html_escape
+
+    # url_encode percent-encodes every byte except the RFC-3986 unreserved set
+    # (A-Z a-z 0-9 - _ . ~), upper-casing the hex digits like MRI.
+    def url_encode(s)
+      s.to_s.b.gsub(/[^a-zA-Z0-9_\-.~]/) { |c| format("%%%02X", c.ord) }
+    end
+    alias u url_encode
+
+    module_function :html_escape, :h, :url_encode, :u
+  end
+
+  # HTML_ESCAPE is the entity table used by html_escape; defined once and frozen.
+  HTML_ESCAPE = {
+    "&" => "&amp;", "<" => "&lt;", ">" => "&gt;",
+    '"' => "&quot;", "'" => "&#39;"
+  }.freeze
+
+  attr_reader :src, :encoding
+  attr_accessor :filename, :lineno
+
+  # new compiles the template string str into evaluable Ruby source. Only the
+  # modern keyword API is offered, matching MRI 4.0.5 (which dropped the legacy
+  # positional safe_level/trim_mode/eoutvar arguments). trim_mode controls newline
+  # trimming around tags; eoutvar names the output buffer used by the compiled src.
+  def initialize(str, trim_mode: nil, eoutvar: "_erbout")
+    @filename = nil
+    @lineno = 0
+    compiler = Compiler.new(trim_mode)
+    compiler.eoutvar = eoutvar
+    compiler.put_cmd = "#{eoutvar}.<<"
+    compiler.insert_cmd = "#{eoutvar}.<<"
+    enc, code = compiler.compile(str)
+    @encoding = "UTF-8"
+    @src = "#{enc}#{code}"
+  end
+
+  # result evaluates the compiled source in binding b and returns the rendered
+  # string, so the template can reference the caller's local variables and methods.
+  # With no argument it renders against a fresh empty top-level binding.
+  def result(b = new_toplevel)
+    eval(@src, b, (@filename || "(erb)"), @lineno)
+  end
+
+  # result_with_hash renders the template with the entries of hash bound as local
+  # variables, mirroring MRI: each key becomes a local set to its value before the
+  # template body runs.
+  def result_with_hash(hash)
+    b = new_toplevel
+    hash.each do |key, value|
+      b.local_variable_set(key, value)
+    end
+    result(b)
+  end
+
+  # run renders to $stdout (the convenience method MRI offers alongside result).
+  def run(b = new_toplevel)
+    print result(b)
+  end
+
+  private
+
+  # new_toplevel produces a fresh binding for result_with_hash so each render gets
+  # its own isolated set of locals rather than mutating a shared TOPLEVEL_BINDING.
+  def new_toplevel
+    binding
+  end
+end
