@@ -36,19 +36,39 @@ func (vm *VM) registerConcurrent() {
 			vm.send(o, "initialize", args, blk)
 			return o
 		}}
-	tlv.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		var def object.Value = object.NilV
+	// initialize(default = nil) { default_block }: store either an eager default
+	// value or a lazy default block (called on first read per the gem's API).
+	// "@set" tracks whether a value has been written yet, so a nil default still
+	// triggers the block exactly once.
+	tlv.define("initialize", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) > 0 {
-			def = args[0]
+			setIvar(self, "@value", args[0])
+			setIvar(self, "@set", object.True)
+		} else if blk != nil {
+			setIvar(self, "@default_block", blk)
+			setIvar(self, "@set", object.False)
+		} else {
+			setIvar(self, "@value", object.NilV)
+			setIvar(self, "@set", object.True)
 		}
-		setIvar(self, "@value", def)
 		return object.NilV
 	})
-	tlv.define("value", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	tlv.define("value", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if !getIvar(self, "@set").Truthy() {
+			// First read with an unset value and a default block: evaluate the block,
+			// memoise the result, and clear the lazy flag (the block runs once).
+			if blk, ok := getIvar(self, "@default_block").(*Proc); ok {
+				v := vm.callBlock(blk, nil)
+				setIvar(self, "@value", v)
+				setIvar(self, "@set", object.True)
+				return v
+			}
+		}
 		return getIvar(self, "@value")
 	})
 	tlv.define("value=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		setIvar(self, "@value", args[0])
+		setIvar(self, "@set", object.True)
 		return args[0]
 	})
 }

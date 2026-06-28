@@ -554,6 +554,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *RObject:
 		return x.class
 	case *RClass:
+		// A module's class is Module; a class's class is Class. (Matches MRI:
+		// `String.class == Class`, `Comparable.class == Module`.)
+		if x.isModule {
+			return vm.cModule
+		}
 		return vm.cClass
 	case object.Integer:
 		return vm.cInteger

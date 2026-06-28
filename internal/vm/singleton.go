@@ -45,10 +45,15 @@ func (vm *VM) registerSingleton() {
 				raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(a))
 			}
 			if t, ok := self.(*RClass); ok {
-				// C.extend(M): M's instance methods become class methods of C.
-				for n, m := range mod.methods {
-					t.smethods[n] = m
-				}
+				// C.extend(M): M (and every module M itself includes) becomes part of
+				// C's singleton-class ancestry, so M's own instance methods *and* the
+				// methods of its transitively-included modules all become class methods
+				// of C. Mixing M into the metaclass's includes (rather than copying
+				// M.methods) lets lookupSMethod walk the whole include tree — matching
+				// MRI, where `extend M` inserts M's full ancestry into the singleton
+				// class.
+				mc := t.metaClass()
+				mc.includes = append(mc.includes, mod)
 			} else {
 				// Any other object (incl. builtin-backed Array/String/… such as
 				// $LOAD_PATH) mixes the module into its singleton class.

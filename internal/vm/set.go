@@ -69,8 +69,12 @@ func setKey(v object.Value) any {
 	case *object.String:
 		return "str:" + string(x.B)
 	}
-	raise("TypeError", "%s is not a valid Set member", v.Inspect())
-	return nil
+	// Any other object is a valid Set member in Ruby — it keys by identity
+	// (object equality / hash), exactly like a Hash key. A reference-typed Ruby
+	// value is a Go pointer, which is comparable, so the pointer itself is a
+	// stable per-object key. This lets a Set hold arbitrary objects (e.g. Puppet
+	// resources, model nodes) the way MRI does.
+	return v
 }
 
 // add inserts a Ruby value, preserving first-insertion order (idempotent).

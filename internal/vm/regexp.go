@@ -1010,7 +1010,43 @@ func (vm *VM) installRegexp() {
 		return h
 	})
 	vm.cMatchData.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return mdArg(self).at(args[0])
+		m := mdArg(self)
+		// The Range and (start, length) forms slice the array of all groups
+		// (whole match at 0, then each capture) — md[1..] is how callers grab just
+		// the captures, as Puppet's parse_title does.
+		groups := func() []object.Value {
+			out := make([]object.Value, 0, m.md.NGroups()+1)
+			for i := 0; i <= m.md.NGroups(); i++ {
+				out = append(out, groupValue(m, i))
+			}
+			return out
+		}
+		if rng, ok := args[0].(*object.Range); ok {
+			all := groups()
+			start, length, ok := sliceRange(len(all), rng)
+			if !ok {
+				return object.NilV
+			}
+			out := make([]object.Value, length)
+			copy(out, all[start:start+length])
+			return &object.Array{Elems: out}
+		}
+		if len(args) == 2 { // md[start, length]
+			all := groups()
+			start := normIndex(intArg(args[0]), len(all))
+			length := int(intArg(args[1]))
+			if start < 0 || start > len(all) || length < 0 {
+				return object.NilV
+			}
+			end := start + length
+			if end > len(all) {
+				end = len(all)
+			}
+			out := make([]object.Value, end-start)
+			copy(out, all[start:end])
+			return &object.Array{Elems: out}
+		}
+		return m.at(args[0])
 	})
 }
 

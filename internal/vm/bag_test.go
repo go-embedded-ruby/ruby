@@ -26,6 +26,13 @@ func TestBag(t *testing.T) {
 		// Heterogeneous comparable members.
 		{`p Bag.new(["a", :a, 1, 1.5, true, nil]).distinct_size`, "6\n"},
 		{`p Bag.new([10 ** 30, 10 ** 30]).count(10 ** 30)`, "2\n"}, // Bignum keying
+		// Arbitrary objects are valid members, keyed by identity (an Array member
+		// is allowed; an absent object reads as 0/false).
+		{`p Bag.new([[1, 2]]).size`, "1\n"},
+		{`b = Bag.new([1]); b.add([2]); p b.size`, "2\n"},
+		{`p Bag.new([1]).count([2])`, "0\n"},
+		{`p Bag.new([1]).include?([2])`, "false\n"},
+		{`o = Object.new; b = Bag.new; b.add(o); b.add(o); p b.count(o)`, "2\n"},
 		// add / << (with multiplicity).
 		{`b = Bag.new([1]); b.add(1); p b.count(1)`, "2\n"},
 		{`b = Bag.new; b << 1 << 1 << 2; p b`, "#<Bag: {1=>2, 2=>1}>\n"},
@@ -114,12 +121,7 @@ func TestBagMostCommon(t *testing.T) {
 // block.
 func TestBagErrors(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
-		{`Bag.new([[1, 2]])`, "TypeError"},     // Array member (non-comparable)
-		{`Bag.new({})`, "TypeError"},           // Hash is not enumerable here
-		{`Bag.new([1]).add([2])`, "TypeError"}, // non-comparable add
-		{`Bag.new([1]).remove([2])`, "TypeError"},
-		{`Bag.new([1]).count([2])`, "TypeError"},
-		{`Bag.new([1]).include?([2])`, "TypeError"},
+		{`Bag.new({})`, "TypeError"},        // Hash is not enumerable here
 		{`Bag.new([1]) | [2]`, "TypeError"}, // non-Bag operand
 		{`Bag.new([1]) & 3`, "TypeError"},   // non-Bag operand
 		{`Bag.new([1]).union(5)`, "TypeError"},

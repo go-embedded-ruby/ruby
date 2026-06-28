@@ -24,6 +24,13 @@ func TestSet(t *testing.T) {
 		// Heterogeneous comparable members (String distinct from Symbol, Bignum, etc.).
 		{`p Set.new(["a", :a, 1, 1.5, true, nil])`, "#<Set: {\"a\", :a, 1, 1.5, true, nil}>\n"},
 		{`p Set.new([10 ** 30, 10 ** 30]).size`, "1\n"}, // Bignum keying
+		// Arbitrary objects are valid members, keyed by identity like Ruby (an
+		// Array member is allowed; two distinct objects stay distinct).
+		{`p Set.new([[1, 2]]).size`, "1\n"},
+		{`s = Set.new([1]); s.add([2]); p s.size`, "2\n"},
+		{`p Set.new([1]).include?([2])`, "false\n"},
+		{`class O; end; p Set.new([O.new, O.new]).size`, "2\n"},
+		{`o = Object.new; s = Set.new; s << o << o; p s.size`, "1\n"}, // same object collapses
 		// add / << / add?
 		{`s = Set.new([1]); s.add(2); p s`, "#<Set: {1, 2}>\n"},
 		{`s = Set.new([1]); s << 2 << 3; p s`, "#<Set: {1, 2, 3}>\n"},
@@ -189,10 +196,7 @@ func TestSetAggregateErrors(t *testing.T) {
 // each without a block.
 func TestSetErrors(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
-		{`Set.new([[1, 2]])`, "TypeError"},     // Array member (non-comparable)
-		{`Set.new({})`, "TypeError"},           // Hash is not enumerable here
-		{`Set.new([1]).add([2])`, "TypeError"}, // non-comparable add
-		{`Set.new([1]).include?([2])`, "TypeError"},
+		{`Set.new({})`, "TypeError"},        // Hash is not enumerable here
 		{`Set.new([1]) | [2]`, "TypeError"}, // non-Set operand
 		{`Set.new([1]) & 3`, "TypeError"},   // non-Set operand
 		{`Set.new([1]).merge(5)`, "TypeError"},

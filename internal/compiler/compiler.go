@@ -851,11 +851,43 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		patchSafe()
 		return
 	}
+	// A syntactic setter call (recv.foo = v, recv[i] = v) evaluates to the
+	// assigned value v, NOT the setter method's own return value — this is a Ruby
+	// language guarantee independent of what `foo=`/`[]=` returns. The assigned
+	// value is the last argument and sits on top of the stack here; stash a copy,
+	// run the send, drop its result, and leave the stashed value as the
+	// expression's value. (Index/attr setters never carry a block.)
+	if isSetterCall(v) && len(args) > 0 {
+		tmp := b.localSlot("")
+		b.emit(bytecode.OpSetLocal, tmp, 0) // stash the assigned value (SetLocal peeks, leaving it as the send arg)
+		sendFlags(b.emit(bytecode.OpSend, b.addName(v.Name), len(args)))
+		b.emit(bytecode.OpPop, 0, 0)        // discard the setter's return value
+		b.emit(bytecode.OpGetLocal, tmp, 0) // leave the assigned value as the expression's value
+		patchSafe()
+		return
+	}
 	at := sendFlags(b.emit(bytecode.OpSend, b.addName(v.Name), len(args)))
 	if v.Block != nil {
 		b.insns[at].C = c.compileBlock(v.Block) + 1 // C-1 indexes Children
 	}
 	patchSafe()
+}
+
+// isSetterCall reports whether v is a syntactic attribute/index setter —
+// `recv.name = value` (name ends in "=") or `recv[...] = value` (name "[]=") —
+// as opposed to a comparison/operator method (==, !=, <=, >=, ===) or a
+// receiver-less call. Such calls must evaluate to the assigned value, per Ruby.
+func isSetterCall(v *ast.Call) bool {
+	// A setter has an explicit receiver and no block.
+	if v.Recv == nil || v.Block != nil {
+		return false
+	}
+	n := v.Name
+	switch n {
+	case "==", "!=", "<=", ">=", "===", "=~", "=":
+		return false
+	}
+	return n != "" && n[len(n)-1] == '='
 }
 
 // extractBlockPass removes a `&block-pass` argument from args (wherever it sits —
