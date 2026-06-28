@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -25,7 +26,10 @@ var providedFeatures = map[string]bool{
 	"stringio": true, "securerandom": true,
 	"English": true, "ostruct": true, "benchmark": true,
 	"forwardable": true, "delegate": true, "pathname": true, "uri": true,
-	"tmpdir": true,
+	"tmpdir": true, "openssl": true, "timeout": true, "rbconfig": true,
+	"yaml": true, "fileutils": true, "getoptlong": true, "etc": true,
+	"concurrent": true, "syslog": true, "cgi": true, "monitor": true,
+	"net/http": true, "net/https": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
@@ -84,6 +88,10 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 			return raise("SyntaxError", "%s", cerr.Error())
 		}
 		iseq.Name = abs
+		// Stamp the file on this ISeq and every nested child so __FILE__ in a method
+		// reports the file the method was defined in, regardless of where it is
+		// called from.
+		setISeqFile(iseq, abs)
 		vm.loaded[abs] = true
 		// Push the file's directory so a nested require_relative resolves against it.
 		vm.requireDirs = append(vm.requireDirs, filepath.Dir(abs))
@@ -94,6 +102,20 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 	return raise("LoadError", "cannot load such file -- %s", name)
 }
 
+// setISeqFile stamps path onto iseq and all of its nested children, so a method
+// or block body compiled from this file reports the file via __FILE__ even when
+// invoked from another file. Already-stamped children are left alone (an ISeq is
+// only ever loaded from one file).
+func setISeqFile(iseq *bytecode.ISeq, path string) {
+	if iseq == nil || iseq.File == path {
+		return
+	}
+	iseq.File = path
+	for _, c := range iseq.Children {
+		setISeqFile(c, path)
+	}
+}
+
 // requireCandidates lists the paths to try for file. require_relative resolves
 // against the requiring file's directory; a plain require searches that
 // directory, the process CWD, then each $LOAD_PATH entry; an absolute path is
@@ -101,6 +123,13 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 func (vm *VM) requireCandidates(file string, relative bool) []string {
 	switch {
 	case relative:
+		// require_relative resolves against the directory of the file where the call
+		// is written — the executing ISeq's file — so a require_relative inside a
+		// method works even when that method is called from another file. Fall back
+		// to the require stack's directory when no file is stamped (e.g. a -e script).
+		if f := vm.currentFile(); f != "" {
+			return []string{filepath.Join(filepath.Dir(f), file)}
+		}
 		return []string{filepath.Join(vm.currentDir(), file)}
 	case filepath.IsAbs(file):
 		return []string{file}

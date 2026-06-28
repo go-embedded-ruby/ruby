@@ -26,7 +26,15 @@ func setupStruct(vm *VM) {
 		sub := vm.newStructClass(cStruct, names, kwInit)
 		if blk != nil {
 			// Struct.new(:a) { def m; …; end } evaluates the body in the new
-			// subclass, just like class_eval, so it can add methods/constants.
+			// subclass, just like class_eval, so it can add methods/constants. The
+			// block was written in some lexical scope (e.g. inside `module Outer`), so
+			// bare-constant lookup in the body must reach that scope: record the
+			// block's captured lexical scope as the new class's lexParent so
+			// resolveConst walks sub -> Outer and finds constants like an included
+			// module defined alongside the Struct.new call (matches MRI).
+			if blk.cref != nil && blk.cref != vm.cObject {
+				sub.lexParent = blk.cref
+			}
 			vm.classEval(sub, blk, nil)
 		}
 		return sub
@@ -180,9 +188,65 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 		}
 		return self
 	})
+	// []= assigns a member by index, Symbol or String name (the inverse of []),
+	// raising the same errors for an out-of-range index or unknown name.
+	sub.define("[]=", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		o := self.(*RObject)
+		switch k := a[0].(type) {
+		case object.Integer:
+			idx := int(k)
+			if idx < 0 {
+				idx += len(names)
+			}
+			if idx < 0 || idx >= len(names) {
+				raise("IndexError", "offset %d too large for struct(size:%d)", int(k), len(names))
+			}
+			o.ivars["@"+names[idx]] = a[1]
+		case object.Symbol:
+			structSetMember(o, string(k), names, a[1])
+		case *object.String:
+			structSetMember(o, k.Str(), names, a[1])
+		default:
+			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
+		}
+		return a[1]
+	})
+	// each_pair yields [member, value] pairs in declaration order.
+	sub.define("each_pair", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("LocalJumpError", "no block given (each_pair)")
+		}
+		vals := values(self)
+		for i, nm := range names {
+			vm.callBlock(blk, []object.Value{object.Symbol(nm), vals[i]})
+		}
+		return self
+	})
+	// Class-level members: Etc::Passwd.members and friends read the member list
+	// off the Struct class itself.
+	memberSyms := make([]object.Value, len(names))
+	for i, nm := range names {
+		memberSyms[i] = object.Symbol(nm)
+	}
+	sub.smethods["members"] = &Method{name: "members", owner: sub,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return &object.Array{Elems: append([]object.Value(nil), memberSyms...)}
+		}}
 	sub.includes = append(sub.includes, vm.consts["Enumerable"].(*RClass))
 	bumpMethodSerial()
 	return sub
+}
+
+// structSetMember assigns the named member's ivar on a Struct instance, raising
+// NameError when the name is not a member.
+func structSetMember(o *RObject, name string, names []string, v object.Value) {
+	for _, nm := range names {
+		if nm == name {
+			o.ivars["@"+nm] = v
+			return
+		}
+	}
+	raise("NameError", "no member '%s' in struct", name)
 }
 
 // structMember returns the value for a member looked up by name, or raises
