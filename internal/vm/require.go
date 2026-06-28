@@ -31,7 +31,8 @@ var providedFeatures = map[string]bool{
 	"yaml": true, "fileutils": true, "getoptlong": true, "etc": true,
 	"concurrent": true, "syslog": true, "cgi": true, "monitor": true,
 	"net/http": true, "net/https": true, "resolv": true, "singleton": true,
-	"optparse": true, "ripper": true,
+	"optparse": true, "ripper": true, "erb": true, "find": true,
+	"strscan": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime

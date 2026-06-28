@@ -119,6 +119,16 @@ func (vm *VM) registerKernelIntrospection() {
 		return object.NewString(filepath.Dir(f))
 	})
 
+	// __LINE__: MRI's parser substitutes the current source line as an integer
+	// literal at compile time. This VM does not track per-instruction source lines
+	// (backtraces and #caller likewise report line 0), so __LINE__ is a Kernel
+	// method returning 0 — self-consistent with the rest of the line reporting and
+	// sufficient for the common use of feeding a line offset to
+	// eval/class_eval(str, file, line), where it only steers error messages.
+	vm.cObject.define("__LINE__", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(0)
+	})
+
 	// at_exit: register a block to run when the program finishes normally, in
 	// LIFO order. Returns the block as a Proc, as MRI does.
 	vm.cObject.define("at_exit", func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
