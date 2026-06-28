@@ -366,6 +366,12 @@ func New(out io.Writer) *VM {
 	loadPath := &object.Array{}
 	vm.globals["$LOAD_PATH"] = loadPath
 	vm.globals["$:"] = loadPath
+	// $LOADED_FEATURES (alias $") is a real, mutable Array of the files already
+	// loaded — code that consults or appends to it (Puppet's autoloader does
+	// `$LOADED_FEATURES << file`) works.
+	loadedFeatures := &object.Array{}
+	vm.globals["$LOADED_FEATURES"] = loadedFeatures
+	vm.globals[`$"`] = loadedFeatures
 	vm.installPrelude()
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)

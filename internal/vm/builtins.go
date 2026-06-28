@@ -294,6 +294,43 @@ func (vm *VM) bootstrap() {
 	exc("ScriptError", "Exception")
 	exc("SyntaxError", "ScriptError")
 	exc("LoadError", "ScriptError")
+	// Exceptions that sit directly under Exception (NOT StandardError), so a bare
+	// `rescue` does not catch them — matching MRI. SystemExit additionally carries
+	// an exit status (defined below).
+	exc("NoMemoryError", "Exception")
+	exc("SecurityError", "Exception")
+	exc("SignalException", "Exception")
+	exc("Interrupt", "SignalException")
+	systemExit := exc("SystemExit", "Exception")
+	// SystemExit#initialize accepts (status=0, message=nil) or (message); it stores
+	// @status (the process exit code) and the message. SystemExit#status returns it.
+	systemExit.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*RObject)
+		status := object.Value(object.Integer(0))
+		switch {
+		case len(args) >= 2:
+			status = args[0]
+			o.ivars["@message"] = object.NewString(args[1].ToS())
+		case len(args) == 1:
+			if i, ok := args[0].(object.Integer); ok {
+				status = i
+			} else {
+				o.ivars["@message"] = object.NewString(args[0].ToS())
+			}
+		}
+		o.ivars["@status"] = status
+		return object.NilV
+	})
+	systemExit.define("status", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if s := getIvar(self, "@status"); s != object.NilV {
+			return s
+		}
+		return object.Integer(0)
+	})
+	systemExit.define("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s, ok := getIvar(self, "@status").(object.Integer)
+		return object.Bool(!ok || s == 0)
+	})
 
 	vm.registerFile()       // needs the exception hierarchy (Errno::ENOENT < StandardError)
 	vm.registerIO()         // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
@@ -302,10 +339,13 @@ func (vm *VM) bootstrap() {
 	vm.registerProcess()    // Process module — identity + clock_gettime
 	vm.registerOpenSSL()    // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
 	vm.registerNetHTTP()    // net/http + net/https loadable shell; needs StandardError
+	vm.registerResolv()     // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
 	vm.registerTimeout()    // Timeout module (loadable shell); needs RuntimeError
 	vm.registerYAML()       // YAML/Psych loadable shell; needs StandardError
 	vm.registerFileUtils()  // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong() // GetoptLong loadable shell; needs StandardError
+	vm.registerOptParse()   // optparse loadable shell (declares; parse raises); needs StandardError
+	vm.registerRipper()     // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
 	vm.registerSyslog()     // Syslog loadable shell (feature probe)
 	vm.registerCGI()        // CGI.escape/unescape (real over net/url) + HTML helpers
 	vm.registerMonitor()    // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
@@ -710,6 +750,9 @@ func (vm *VM) bootstrap() {
 	// Symbol.
 	vm.cSymbol.define("to_sym", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
+	})
+	vm.cSymbol.define("intern", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self // MRI: Symbol#intern is an alias of Symbol#to_sym (returns self)
 	})
 	symStr := func(self object.Value) string { return string(self.(object.Symbol)) }
 	vm.cSymbol.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -3648,6 +3691,29 @@ func strArg(v object.Value) string {
 		return s.Str()
 	}
 	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
+	return ""
+}
+
+// pathArg coerces a path-like argument to a String the way MRI's File/IO entry
+// points do: a String is taken directly; otherwise the value is converted via
+// #to_path (Pathname and friends), falling back to #to_str. Anything that
+// responds to neither raises TypeError, matching MRI.
+func pathArg(vm *VM, v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	for _, m := range []string{"to_path", "to_str"} {
+		if vm.respondsTo(v, m) {
+			r := vm.send(v, m, nil, nil)
+			s, ok := r.(*object.String)
+			if !ok {
+				raise("TypeError", "can't convert %s to String (%s#%s gives %s)",
+					vm.classOf(v).name, vm.classOf(v).name, m, vm.classOf(r).name)
+			}
+			return s.Str()
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
 	return ""
 }
 

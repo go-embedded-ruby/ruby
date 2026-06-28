@@ -1372,3 +1372,26 @@ module Kernel
   end
   module_function :URI
 end
+
+# Singleton turns its includer into a single-instance class (require "singleton").
+# Mixing it in privatizes .new/.allocate and adds a memoizing .instance, matching
+# MRI's lib/singleton.rb behavior on the surface code relies on (Puppet::Runtime
+# is `include Singleton`).
+module Singleton
+  # The class methods Singleton grafts onto the includer via extend.
+  module SingletonClassMethods
+    # instance returns the one-and-only instance, building it on first call and
+    # caching it on the class thereafter.
+    def instance
+      @__singleton_instance__ ||= new
+    end
+  end
+
+  # included is the mix-in hook: it extends the includer with the class methods
+  # and makes the constructors private, so the instance is reachable only via
+  # .instance — calling .new raises NoMethodError, as in MRI.
+  def self.included(klass)
+    klass.extend(SingletonClassMethods)
+    klass.private_class_method(:new, :allocate)
+  end
+end

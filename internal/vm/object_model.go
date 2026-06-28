@@ -394,11 +394,29 @@ func cvarOwner(c *RClass, name string) *RClass {
 }
 
 // lookupSMethod finds a singleton (class) method, walking the superclass chain
-// so a subclass inherits its ancestors' class methods.
+// so a subclass inherits its ancestors' class methods. At each level it also
+// consults the modules mixed into that class's singleton (metaclass) — i.e.
+// `class << self; include M; end` / `extend M` — so a module's instance methods
+// become class methods, matching MRI's singleton-class ancestor order
+// (prepends, then own smethods, then includes).
 func lookupSMethod(c *RClass, name string) *Method {
 	for ; c != nil; c = c.super {
+		if c.meta != nil {
+			for i := len(c.meta.prepends) - 1; i >= 0; i-- {
+				if m := lookupOwnOrIncluded(c.meta.prepends[i], name); m != nil {
+					return m
+				}
+			}
+		}
 		if m, ok := c.smethods[name]; ok {
 			return m
+		}
+		if c.meta != nil {
+			for i := len(c.meta.includes) - 1; i >= 0; i-- {
+				if m := lookupOwnOrIncluded(c.meta.includes[i], name); m != nil {
+					return m
+				}
+			}
 		}
 	}
 	return nil
