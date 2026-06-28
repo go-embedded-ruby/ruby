@@ -278,6 +278,12 @@ func (c *RClass) metaClass() *RClass {
 		mc := newClass("#<Class:"+c.name+">", nil)
 		mc.methods = c.smethods // alias: defs here become class methods of c
 		mc.metaOf = c           // back-pointer: lets `private :foo` in `class << c` reach c's class methods
+		// The metaclass superclass is the superclass's metaclass, so a class-method
+		// `super` (def self.foo / class << self) walks to the inherited class method:
+		// #<Class:Child> -> #<Class:Base> -> ... This mirrors MRI's metaclass chain.
+		if c.super != nil {
+			mc.super = c.super.metaClass()
+		}
 		c.meta = mc
 	}
 	return c.meta

@@ -413,7 +413,8 @@ func (vm *VM) bootstrap() {
 	vm.registerYAML()        // YAML/Psych loadable shell; needs StandardError
 	vm.registerFileUtils()   // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()  // GetoptLong loadable shell; needs StandardError
-	vm.registerOptParse()    // optparse loadable shell (declares; parse raises); needs StandardError
+	vm.registerSignal()      // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)
+	vm.registerOpen3()       // Open3 loadable shell (popen/capture raise; spawning pending)
 	vm.registerRipper()      // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
 	vm.registerSyslog()      // Syslog loadable shell (feature probe)
 	vm.registerCGI()         // CGI.escape/unescape (real over net/url) + HTML helpers
@@ -766,20 +767,48 @@ func (vm *VM) bootstrap() {
 	vm.cModule.define("const_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
 		cls := self.(*RClass)
+		// Route through assignConstIn so an anonymous class/module bound here gains
+		// the qualified name of its constant (Ruby's "permanent name on first
+		// constant binding" rule) — the same path a `Foo::Bar = ...` literal takes.
 		// Top-level (Object) constants live in the flat namespace that a bare
-		// constant reference reads; everything else is scoped to the class.
-		if cls == vm.cObject {
-			vm.consts[name] = args[1]
-		} else {
-			cls.consts[name] = args[1]
-		}
+		// constant reference reads, which assignConstIn handles for Object.
+		vm.assignConstIn(cls, name, args[1])
 		return args[1]
+	})
+	// Module#remove_const deletes a constant defined directly on the receiver and
+	// returns its value, raising NameError when it is absent (MRI's contract). It
+	// only ever touches the receiver's own table — not ancestors — so a class
+	// generator that redefines a constant (Puppet's classgen does this) removes the
+	// stale binding before installing the new one.
+	vm.cModule.define("remove_const", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := constNameArg(args[0])
+		cls := self.(*RClass)
+		table := cls.consts
+		if cls == vm.cObject {
+			table = vm.consts
+		}
+		val, ok := table[name]
+		if !ok {
+			return raise("NameError", "constant %s::%s not defined", cls.name, name)
+		}
+		delete(table, name)
+		return val
 	})
 	vm.cModule.define("const_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
+		// The optional second argument controls whether ancestors are consulted
+		// (default true). With inherit=false only the receiver's own table is
+		// checked — Puppet's classgen relies on this to decide a fresh redefinition.
+		inherit := len(args) < 2 || args[1].Truthy()
+		cls := self.(*RClass)
 		// A pending autoload counts as defined for const_defined?, which (unlike
 		// const_get) must NOT trigger the require — it just reports presence.
-		for c := self.(*RClass); c != nil; c = c.super {
+		if !inherit {
+			_, ok := cls.consts[name]
+			_, al := cls.autoloads[name]
+			return object.Bool(ok || al)
+		}
+		for c := cls; c != nil; c = c.super {
 			if _, ok := c.consts[name]; ok {
 				return object.True
 			}

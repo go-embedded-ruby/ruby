@@ -154,40 +154,169 @@ func TestResolvDNS(t *testing.T) {
 	}
 }
 
-// TestOptParse covers the optparse loadable shell: require, OptionParser.new
-// (with and without a banner and a block), the chainable declaration methods,
-// banner accessors, the error class tree, and the NotImplementedError parsing
-// methods.
+// TestOptParse covers the real pure-Ruby OptionParser (prelude): require,
+// OptionParser.new (with and without a banner and a block), the chainable
+// declaration methods, the error class tree, and the parse family — long/short
+// options, mandatory/optional arguments, =-joined values, bundled shorts,
+// --[no-] negation, abbreviation, type coercion, the -- terminator, order!/
+// permute!/getopts, and each MRI-exact ParseError. Behaviour is pinned against
+// MRI 4.x.
 func TestOptParse(t *testing.T) {
+	const req = `require "optparse"; `
 	cases := []struct{ src, want string }{
 		{`p require "optparse"`, "true\n"},
-		{`require "optparse"; p OptionParser.new.class`, "OptionParser\n"},
-		{`require "optparse"; p OptParse.equal?(OptionParser)`, "true\n"},
-		{`require "optparse"; p OptionParser.new("usage").banner`, "\"usage\"\n"},
+		{req + `p require "optparse"`, "false\n"}, // second require returns false
+		{req + `p OptionParser.new.class`, "OptionParser\n"},
+		{req + `p OptParse.equal?(OptionParser)`, "true\n"},
+		{req + `p OptionParser.new("usage").banner`, "\"usage\"\n"},
 		// Block form yields the parser.
-		{`require "optparse"; OptionParser.new { |o| p o.class }`, "OptionParser\n"},
-		// Declaration methods return self (chainable) and the block-capturing on.
-		{`require "optparse"; o=OptionParser.new; p o.on("-x").equal?(o)`, "true\n"},
-		{`require "optparse"; o=OptionParser.new; p o.separator("--").equal?(o)`, "true\n"},
-		{`require "optparse"; o=OptionParser.new; p o.on_tail("-h").equal?(o)`, "true\n"},
-		{`require "optparse"; o=OptionParser.new; p o.on_head("-v").equal?(o)`, "true\n"},
-		{`require "optparse"; o=OptionParser.new; p o.accept(Integer).equal?(o)`, "true\n"},
-		{`require "optparse"; o=OptionParser.new; p o.reject(Integer).equal?(o)`, "true\n"},
-		// banner=/banner round-trip.
-		{`require "optparse"; o=OptionParser.new; o.banner="b"; p o.banner`, "\"b\"\n"},
+		{req + `OptionParser.new { |o| p o.class }`, "OptionParser\n"},
+		// Declaration methods return self (chainable).
+		{req + `o=OptionParser.new; p o.on("-x"){}.equal?(o)`, "true\n"},
+		{req + `o=OptionParser.new; p o.separator("--").equal?(o)`, "true\n"},
+		{req + `o=OptionParser.new; p o.on_tail("-h"){}.equal?(o)`, "true\n"},
+		{req + `o=OptionParser.new; p o.on_head("-v"){}.equal?(o)`, "true\n"},
+		{req + `o=OptionParser.new; p o.accept(Integer){}.equal?(o)`, "true\n"},
+		{req + `o=OptionParser.new; p o.reject(Integer).equal?(o)`, "true\n"},
+		{req + `o=OptionParser.new; p o.define("-d"){}.equal?(o)`, "true\n"},
+		{req + `o=OptionParser.new; p o.def_option("-d"){}.equal?(o)`, "true\n"},
+		// banner=/banner round-trip and program_name/version/release.
+		{req + `o=OptionParser.new; o.banner="b"; p o.banner`, "\"b\"\n"},
+		{req + `o=OptionParser.new; o.program_name="prog"; p o.program_name`, "\"prog\"\n"},
+		{req + `o=OptionParser.new; o.program_name="prog"; o.version="1.2"; o.release="r1"; p o.ver`,
+			"\"prog 1.2 (r1)\"\n"},
+		{req + `o=OptionParser.new; p o.ver`, "nil\n"},
+		{req + `o=OptionParser.new; o.program_name="p"; o.version="1"; p o.ver`,
+			"\"p 1\"\n"},
+		{req + `o=OptionParser.new; o.summary_width=20; p o.summary_width`, "20\n"},
+		{req + `o=OptionParser.new; o.summary_indent="  "; p o.summary_indent`,
+			"\"  \"\n"},
+		{req + `o=OptionParser.new; o.default_argv=["a"]; p o.default_argv`,
+			"[\"a\"]\n"},
 		// Error tree.
-		{`require "optparse"; p OptionParser::InvalidOption.ancestors.include?(OptionParser::ParseError)`, "true\n"},
-		{`require "optparse"; p OptionParser::ParseError.ancestors.include?(StandardError)`, "true\n"},
+		{req + `p OptionParser::InvalidOption.ancestors.include?(OptionParser::ParseError)`, "true\n"},
+		{req + `p OptionParser::ParseError.ancestors.include?(StandardError)`, "true\n"},
+		{req + `p OptionParser::AmbiguousArgument.ancestors.include?(OptionParser::InvalidArgument)`, "true\n"},
+		// --- parsing -----------------------------------------------------------
+		// Long option with a flag and a mandatory argument; argv is mutated.
+		{req + `o={}; pr=OptionParser.new
+pr.on("-v","--verbose"){o[:v]=true}; pr.on("-n","--name NAME"){|x|o[:n]=x}
+a=["-v","--name","bob","f"]; pr.parse!(a); p [o,a]`,
+			"[{v: true, n: \"bob\"}, [\"f\"]]\n"},
+		// =-joined value.
+		{req + `o={}; pr=OptionParser.new; pr.on("--name NAME"){|x|o[:n]=x}
+pr.parse!(["--name=bob"]); p o`, "{n: \"bob\"}\n"},
+		// Optional argument: present, taken from next token, and absent.
+		{req + `o={}; pr=OptionParser.new; pr.on("--name [V]"){|x|o[:n]=x}
+pr.parse!(["--name","x"]); p o`, "{n: \"x\"}\n"},
+		{req + `o={}; pr=OptionParser.new; pr.on("--name [V]"){|x|o[:n]=x}
+pr.parse!(["--name"]); p o`, "{n: nil}\n"},
+		// Bundled shorts, including a trailing arg-taking short.
+		{req + `o={}; pr=OptionParser.new
+pr.on("-x"){o[:x]=1}; pr.on("-v"){o[:v]=1}; pr.on("-f N"){|n|o[:f]=n}
+pr.parse!(["-xvfval"]); p o`, "{x: 1, v: 1, f: \"val\"}\n"},
+		// --[no-] negation.
+		{req + `o={}; pr=OptionParser.new; pr.on("--[no-]color"){|b|o[:c]=b}
+pr.parse!(["--no-color"]); p o`, "{c: false}\n"},
+		{req + `o={}; pr=OptionParser.new; pr.on("--[no-]color"){|b|o[:c]=b}
+pr.parse!(["--color"]); p o`, "{c: true}\n"},
+		// Type coercion: Integer (decimal + hex), Float, Array.
+		{req + `o={}; pr=OptionParser.new; pr.on("--n N",Integer){|n|o[:n]=n}
+pr.parse!(["--n","0xff"]); p o`, "{n: 255}\n"},
+		{req + `o={}; pr=OptionParser.new; pr.on("--f F",Float){|f|o[:f]=f}
+pr.parse!(["--f","3.5"]); p o`, "{f: 3.5}\n"},
+		{req + `o={}; pr=OptionParser.new; pr.on("--l L",Array){|l|o[:l]=l}
+pr.parse!(["--l","a,b,c"]); p o`, "{l: [\"a\", \"b\", \"c\"]}\n"},
+		// A custom accept-list (Array of allowed values, with prefix completion).
+		{req + `o={}; pr=OptionParser.new; pr.on("--s S",[:big,:small]){|s|o[:s]=s}
+pr.parse!(["--s","bi"]); p o`, "{s: :big}\n"},
+		// Abbreviation (unique prefix) and the -- terminator.
+		{req + `o={}; pr=OptionParser.new; pr.on("--verbose"){o[:v]=1}
+pr.parse!(["--verb"]); p o`, "{v: 1}\n"},
+		{req + `o={}; pr=OptionParser.new; pr.on("-v"){o[:v]=1}; pr.on("-x"){o[:x]=1}
+a=["-v","--","-x"]; pr.parse!(a); p [o,a]`, "[{v: 1}, [\"-x\"]]\n"},
+		// "-" is an operand.
+		{req + `o={}; pr=OptionParser.new; pr.on("-v"){o[:v]=1}
+a=["-v","-"]; pr.parse!(a); p [o,a]`, "[{v: 1}, [\"-\"]]\n"},
+		// order! stops at the first non-option; permute! reorders.
+		{req + `o={}; pr=OptionParser.new; pr.on("-v"){o[:v]=1}; pr.on("-x"){o[:x]=1}
+a=["-v","cmd","-x"]; pr.order!(a); p [o,a]`, "[{v: 1}, [\"cmd\", \"-x\"]]\n"},
+		{req + `o={}; pr=OptionParser.new; pr.on("-v"){o[:v]=1}; pr.on("-x"){o[:x]=1}
+a=["-v","cmd","-x"]; pr.permute!(a); p [o,a]`, "[{v: 1, x: 1}, [\"cmd\"]]\n"},
+		// order with a non-option block sink.
+		{req + `seen=[]; pr=OptionParser.new; pr.on("-v"){}
+a=["-v","x","y"]; pr.order!(a){|n|seen<<n}; p seen`, "[\"x\", \"y\"]\n"},
+		// parse (non-bang) leaves the source argv untouched.
+		{req + `pr=OptionParser.new; pr.on("-v"){}
+a=["-v","x"]; r=pr.parse(a); p [a,r]`,
+			"[[\"-v\", \"x\"], [\"x\"]]\n"},
+		{req + `pr=OptionParser.new; pr.on("-v"){}
+a=["-v","x"]; r=pr.permute(a); p [a,r]`,
+			"[[\"-v\", \"x\"], [\"x\"]]\n"},
+		{req + `pr=OptionParser.new; pr.on("-v"){}
+a=["-v","x","-v"]; r=pr.order(a); p [a,r]`,
+			"[[\"-v\", \"x\", \"-v\"], [\"x\", \"-v\"]]\n"},
+		// getopts.
+		{req + `pr=OptionParser.new; a=["-a","--bar","v","rest"]
+r=pr.getopts(a,"a","bar:"); p [r,a]`,
+			"[{\"a\" => true, \"bar\" => \"v\"}, [\"rest\"]]\n"},
+		// help / to_s structure.
+		{req + `pr=OptionParser.new; pr.banner="Usage: x"; pr.on("-v","--verbose","be v")
+print pr.help`,
+			"Usage: x\n    -v, --verbose                    be v\n"},
+		{req + `pr=OptionParser.new; pr.program_name="optparse"; pr.on("--name N","the name")
+print pr.to_s`,
+			"Usage: optparse [options]\n        --name N                     the name\n"},
+		{req + `pr=OptionParser.new; pr.separator("S:"); pr.on("-v","d")
+print pr.summarize.join`,
+			"S:\n    -v                               d\n"},
+		// A short character with no -X switch completes to a unique long option.
+		{req + `o={}; pr=OptionParser.new; pr.on("--name N"){|x|o[:n]=x}
+pr.parse!(["-n","bob"]); p o`, "{n: \"bob\"}\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
-			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
 		}
 	}
-	for _, m := range []string{"parse", "parse!", "order", "order!", "permute", "permute!", "to_a", "help"} {
-		if class, _ := evalErr(t, `require "optparse"; OptionParser.new.`+m+`([])`); class != "NotImplementedError" {
-			t.Errorf("OptionParser#%s raised %q, want NotImplementedError", m, class)
+
+	// ParseError subclasses, messages, reasons and args — each pinned to MRI.
+	errCases := []struct{ src, class, msg string }{
+		{req + `pr=OptionParser.new; pr.on("--verbose"){}; pr.parse!(["--bogus"])`,
+			"OptionParser::InvalidOption", "invalid option: --bogus"},
+		{req + `pr=OptionParser.new; pr.on("--name N"){}; pr.parse!(["--name"])`,
+			"OptionParser::MissingArgument", "missing argument: --name"},
+		{req + `pr=OptionParser.new; pr.on("--flag"){}; pr.parse!(["--flag=x"])`,
+			"OptionParser::NeedlessArgument", "needless argument: --flag=x"},
+		{req + `pr=OptionParser.new; pr.on("--verbose"){}; pr.on("--version"){}; pr.parse!(["--ve"])`,
+			"OptionParser::AmbiguousOption", "ambiguous option: --ve"},
+		{req + `pr=OptionParser.new; pr.on("--n N",Integer){}; pr.parse!(["--n","abc"])`,
+			"OptionParser::InvalidArgument", "invalid argument: --n abc"},
+		{req + `pr=OptionParser.new; pr.on("--f F",Float){}; pr.parse!(["--f","x"])`,
+			"OptionParser::InvalidArgument", "invalid argument: --f x"},
+		{req + `pr=OptionParser.new; pr.on("--s S",[:a,:b]){}; pr.parse!(["--s","z"])`,
+			"OptionParser::InvalidArgument", "invalid argument: --s z"},
+		{req + `pr=OptionParser.new; pr.parse!(["-x"])`,
+			"OptionParser::InvalidOption", "invalid option: -x"},
+		{req + `pr=OptionParser.new; pr.on("-n N"){}; pr.parse!(["-n"])`,
+			"OptionParser::MissingArgument", "missing argument: -n"},
+	}
+	for _, c := range errCases {
+		class, msg := evalErr(t, c.src)
+		if class != c.class || msg != c.msg {
+			t.Errorf("src=%q got (%s, %q), want (%s, %q)", c.src, class, msg, c.class, c.msg)
 		}
+	}
+
+	// reason / args / recover on a ParseError.
+	if got := eval(t, req+`
+e=OptionParser::InvalidArgument.new("--n","abc")
+p [e.reason, e.args, e.message]`); got != "[\"invalid argument\", [\"--n\", \"abc\"], \"invalid argument: --n abc\"]\n" {
+		t.Errorf("ParseError accessors: got %q", got)
+	}
+	if got := eval(t, req+`
+e=OptionParser::InvalidOption.new("--bad"); a=["x"]; e.recover(a); p a`); got != "[\"--bad\", \"x\"]\n" {
+		t.Errorf("ParseError#recover: got %q", got)
 	}
 }
 

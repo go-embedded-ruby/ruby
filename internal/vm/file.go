@@ -25,9 +25,20 @@ func (vm *VM) registerFile() {
 	errno := newClass("Errno", nil)
 	errno.isModule = true
 	vm.consts["Errno"] = errno
-	enoent := newClass("Errno::ENOENT", syscallErr)
-	errno.consts["ENOENT"] = enoent
-	vm.consts["Errno::ENOENT"] = enoent
+	// Each Errno::Exxx is a SystemCallError subclass, registered both scoped (for
+	// `rescue Errno::ENOENT`) and flat (so an internal raise resolves the name).
+	// The set covers the common POSIX errnos that file/IO code and libraries such
+	// as Puppet rescue; an internal raise still uses the name string directly.
+	for _, name := range []string{
+		"ENOENT", "EEXIST", "EACCES", "ENOTDIR", "EISDIR", "EPERM", "EINVAL",
+		"EAGAIN", "EBADF", "ESRCH", "EIO", "ENOSPC", "EROFS", "ENXIO", "ENOTEMPTY",
+		"ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EPIPE", "ELOOP", "ENAMETOOLONG",
+		"EADDRINUSE", "EINTR", "ECHILD", "ENOMEM", "EXDEV", "EMFILE", "ENFILE",
+	} {
+		c := newClass("Errno::"+name, syscallErr)
+		errno.consts[name] = c
+		vm.consts["Errno::"+name] = c
+	}
 
 	cFile := newClass("File", vm.cObject)
 	vm.consts["File"] = cFile
