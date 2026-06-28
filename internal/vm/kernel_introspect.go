@@ -25,6 +25,13 @@ func (vm *VM) registerVersionConstants() {
 	vm.registerRbConfig(version)
 }
 
+// rbconfigGOOS reports the build OS used to pick RbConfig's EXEEXT (".exe" on
+// Windows). It is a package var so a test can drive the Windows branch on any
+// host: that branch is otherwise unreachable off Windows (and the non-Windows
+// path unreachable on Windows), so the seam keeps the function at 100% on every
+// platform's coverage gate.
+var rbconfigGOOS = func() string { return runtime.GOOS }
+
 // registerRbConfig installs the RbConfig module (require "rbconfig") with a
 // CONFIG Hash holding the build-configuration keys app code reads — Puppet looks
 // up ruby_install_name / bindir / EXEEXT, and tooling reads rubylibdir. The
@@ -37,7 +44,7 @@ func (vm *VM) registerRbConfig(version string) {
 
 	cfg := object.NewHash()
 	exeext := ""
-	if runtime.GOOS == "windows" {
+	if rbconfigGOOS() == "windows" {
 		exeext = ".exe"
 	}
 	for k, v := range map[string]string{
