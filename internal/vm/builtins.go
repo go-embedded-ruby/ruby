@@ -96,6 +96,13 @@ func (vm *VM) bootstrap() {
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)
 	}
+	vm.cProc.smethods["new"] = &Method{name: "new", owner: vm.cProc,
+		native: func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+			if blk == nil {
+				raise("ArgumentError", "tried to create Proc object without a block")
+			}
+			return blk
+		}}
 	vm.cProc.define("call", procCall)
 	vm.cProc.define("[]", procCall)
 	vm.cProc.define("yield", procCall)
@@ -742,6 +749,44 @@ func (vm *VM) bootstrap() {
 		_, defined := vm.consts[name]
 		_, pending := vm.cObject.autoloads[name]
 		return object.Bool(defined || pending)
+	})
+	// Module#constants returns the names (as symbols) of the constants defined
+	// directly in the module/class. With inherit (the default, true) the constants
+	// of ancestor modules/classes are included too, excluding Object's. Names are
+	// returned in sorted order; MRI leaves the order unspecified, and sorting keeps
+	// results deterministic across platforms.
+	vm.cModule.define("constants", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		inherit := true
+		if len(args) > 0 {
+			inherit = args[0].Truthy()
+		}
+		seen := map[string]bool{}
+		var names []string
+		add := func(c *RClass) {
+			for name := range c.consts {
+				if !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+		}
+		cls := self.(*RClass)
+		if inherit {
+			for _, anc := range vm.ancestors(cls) {
+				if anc == vm.cObject || anc == vm.cBasicObject {
+					continue
+				}
+				add(anc)
+			}
+		} else {
+			add(cls)
+		}
+		sort.Strings(names)
+		out := make([]object.Value, len(names))
+		for i, n := range names {
+			out[i] = object.Symbol(n)
+		}
+		return &object.Array{Elems: out}
 	})
 	// Module#< <= > >= compare by the inheritance/inclusion hierarchy: A < B is
 	// true if A is a proper descendant of B, false if a proper ancestor (or, for
@@ -1655,6 +1700,31 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		// Range form: a[range] = value.
+		if rng, ok := args[0].(*object.Range); ok {
+			start, length, ok := sliceRange(len(a.Elems), rng)
+			if !ok {
+				raise("RangeError", "%s out of range", rng.Inspect())
+			}
+			val := args[1]
+			arraySpliceAssign(a, start, length, val)
+			return val
+		}
+		// Start/length form: a[start, len] = value.
+		if len(args) == 3 {
+			start := normIndex(intArg(args[0]), len(a.Elems))
+			length := int(intArg(args[1]))
+			if start < 0 {
+				raise("IndexError", "index %d out of array", intArg(args[0]))
+			}
+			if length < 0 {
+				raise("IndexError", "negative length (%d)", length)
+			}
+			val := args[2]
+			arraySpliceAssign(a, start, length, val)
+			return val
+		}
+		// Single-index form: a[i] = value.
 		i, n := intArg(args[0]), int64(len(a.Elems))
 		if i < 0 {
 			i += n
@@ -2533,8 +2603,28 @@ func (vm *VM) bootstrap() {
 		}
 		return out
 	})
-	vm.cHash.define("to_h", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self
+	vm.cHash.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		h := self.(*object.Hash)
+		if blk == nil {
+			return self
+		}
+		// With a block, each (key, value) pair is mapped through the block, which
+		// must return a two-element [new_key, new_value] array; the results build a
+		// fresh hash (later pairs overwrite earlier ones on key collision).
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			res := vm.callBlock(blk, []object.Value{k, v})
+			pair, ok := res.(*object.Array)
+			if !ok {
+				raise("TypeError", "wrong element type %s (expected array)", vm.classOf(res).name)
+			}
+			if len(pair.Elems) != 2 {
+				raise("ArgumentError", "element has wrong array length (expected 2, was %d)", len(pair.Elems))
+			}
+			out.Set(pair.Elems[0], pair.Elems[1])
+		}
+		return out
 	})
 	vm.cHash.define("store", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		self.(*object.Hash).Set(args[0], args[1])
@@ -3729,6 +3819,32 @@ func sliceRange(n int, r *object.Range) (int, int, bool) {
 		hi = lo
 	}
 	return lo, hi - lo, true
+}
+
+// arraySpliceAssign implements Ruby's a[start, length] = value slice assignment.
+// start is already resolved to a non-negative offset; length is non-negative.
+// If start is beyond the current end, the array is padded with nil. The replaced
+// span is the `length` elements at start (clamped to the end). When value is an
+// Array its elements are spliced in; any other value (including nil) becomes a
+// single element.
+func arraySpliceAssign(a *object.Array, start, length int, value object.Value) {
+	// Pad with nil so the array reaches start.
+	for len(a.Elems) < start {
+		a.Elems = append(a.Elems, object.NilV)
+	}
+	end := start + length
+	if end > len(a.Elems) {
+		end = len(a.Elems)
+	}
+	var repl []object.Value
+	if arr, ok := value.(*object.Array); ok {
+		repl = arr.Elems
+	} else {
+		repl = []object.Value{value}
+	}
+	tail := append([]object.Value{}, a.Elems[end:]...)
+	out := append(a.Elems[:start:start], repl...)
+	a.Elems = append(out, tail...)
 }
 
 // normIndex resolves a possibly-negative index against length n (no clamping of
