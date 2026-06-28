@@ -2404,6 +2404,11 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Hash).Len() == 0)
 	})
+	vm.cHash.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		h.Clear()
+		return h
+	})
 	hashKeyP := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		_, ok := self.(*object.Hash).Get(args[0])
 		return object.Bool(ok)
@@ -2411,6 +2416,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("key?", hashKeyP)
 	vm.cHash.define("has_key?", hashKeyP)
 	vm.cHash.define("include?", hashKeyP)
+	vm.cHash.define("member?", hashKeyP)
 	vm.cHash.define("keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		ks := make([]object.Value, len(h.Keys))

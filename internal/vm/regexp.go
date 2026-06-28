@@ -842,6 +842,21 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.smethods["escape"] = reEscape
 	vm.cRegexp.smethods["quote"] = &Method{name: "quote", owner: vm.cRegexp, native: reEscape.native}
 
+	// Regexp.last_match returns the MatchData of the most recent match ($~), or
+	// with an Integer / name argument the corresponding capture (Regexp.last_match(1)
+	// == $1). nil when there has been no match, matching MRI.
+	vm.cRegexp.smethods["last_match"] = &Method{name: "last_match", owner: vm.cRegexp,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			md, ok := vm.lastMatch.(*MatchData)
+			if !ok {
+				return object.NilV
+			}
+			if len(args) == 0 {
+				return md
+			}
+			return vm.send(md, "[]", []object.Value{args[0]}, nil)
+		}}
+
 	// Regexp.union(pat, ...) / Regexp.union([pat, ...]) builds one Regexp matching
 	// any of the patterns. A Regexp argument contributes its source; a String is
 	// escaped to match literally. With no arguments it matches nothing, as MRI.
@@ -914,12 +929,24 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.regexpMatchIndex(reArg(self), args[0])
 	})
-	vm.cRegexp.define("===", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cRegexp.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s, ok := stringLike(args[0])
 		if !ok {
+			// A non-string operand never matches and clears $~, as MRI does (so a
+			// case/when over a non-string subject leaves no stale last match).
+			vm.lastMatch = object.NilV
 			return object.False
 		}
-		return object.Bool(reArg(self).re.MatchString(s))
+		re := reArg(self)
+		md := re.re.Match(s)
+		if md == nil {
+			vm.lastMatch = object.NilV
+			return object.False
+		}
+		// Like =~, a successful === records $~ so Regexp.last_match / $1 work in the
+		// taken case/when branch (Trollop derives an option's :long this way).
+		vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+		return object.True
 	})
 
 	mdArg := func(v object.Value) *MatchData { return v.(*MatchData) }

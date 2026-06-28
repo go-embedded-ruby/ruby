@@ -444,6 +444,14 @@ func (h *Hash) Set(k, v Value) {
 // Len returns the number of entries.
 func (h *Hash) Len() int { return len(h.Keys) }
 
+// Clear removes every entry, leaving an empty hash (the Default/DefaultProc are
+// kept, as in MRI).
+func (h *Hash) Clear() {
+	h.Keys = nil
+	h.vals = map[any]Value{}
+	h.keyBucket = nil
+}
+
 // Delete removes k, returning its value and whether it was present.
 func (h *Hash) Delete(k Value) (Value, bool) {
 	hk := h.hashKey(k)

@@ -282,9 +282,10 @@ func (vm *VM) installHashKeyHook() {
 		hv := vm.send(k, "hash", nil, nil)
 		rh, ok := hashAsInt(hv)
 		if !ok {
-			// A non-integer #hash result is unusable as a bucket; fall back to
-			// identity so the key still works (just by object identity).
-			return 0, nil, false
+			// MRI requires #hash to return an Integer and raises when a key whose
+			// #hash yields something else is used; mirror that rather than silently
+			// falling back to identity.
+			raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(hv).name)
 		}
 		eql := func(stored object.Value) bool {
 			return vm.send(k, "eql?", []object.Value{stored}, nil).Truthy()
@@ -298,11 +299,11 @@ func (vm *VM) installHashKeyHook() {
 // gave the type value semantics for hashing. Plain reference objects with no such
 // override keep identity behaviour.
 func (vm *VM) hasCustomHash(v object.Value) bool {
+	// findMethod returns nil only for a receiver with no #hash at all (a bare
+	// BasicObject); such a key keeps identity behaviour, same as a default
+	// Object#hash, so a single expression covers both.
 	m := vm.findMethod(v, "hash")
-	if m == nil {
-		return false
-	}
-	return m.owner != vm.cObject && m.owner != vm.cBasicObject
+	return m != nil && m.owner != vm.cObject && m.owner != vm.cBasicObject
 }
 
 // hashAsInt coerces the result of a Ruby #hash call to an int64 bucket. MRI's
