@@ -190,6 +190,14 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: vm.methodNames(c, true)}
 	})
+	vm.cObject.define("singleton_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Default includes singleton methods inherited from the receiver's
+		// superclasses (a class's class methods); a false argument restricts to the
+		// receiver's own. For a plain object the singleton methods are those on its
+		// per-object singleton class.
+		all := len(args) == 0 || args[0].Truthy()
+		return &object.Array{Elems: vm.singletonMethodNames(self, all)}
+	})
 	vm.cObject.define("frozen?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(isFrozen(self))
 	})
@@ -287,12 +295,14 @@ func (vm *VM) bootstrap() {
 	exc("SyntaxError", "ScriptError")
 	exc("LoadError", "ScriptError")
 
-	vm.registerFile()   // needs the exception hierarchy (Errno::ENOENT < StandardError)
-	vm.registerIO()     // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
-	vm.registerDir()    // Dir (reuses the Errno module set up by registerFile)
-	vm.registerZlib()   // needs the exception hierarchy (Zlib::Error < StandardError)
-	vm.registerFiber()  // needs the exception hierarchy (FiberError < StandardError)
-	vm.registerThread() // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
+	vm.registerFile()    // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerIO()      // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
+	vm.registerDir()     // Dir (reuses the Errno module set up by registerFile)
+	vm.registerTmpdir()  // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
+	vm.registerProcess() // Process module — identity + clock_gettime
+	vm.registerZlib()    // needs the exception hierarchy (Zlib::Error < StandardError)
+	vm.registerFiber()   // needs the exception hierarchy (FiberError < StandardError)
+	vm.registerThread()  // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
@@ -3705,6 +3715,45 @@ func (vm *VM) methodNames(c *RClass, all bool) []object.Value {
 				add(n)
 			}
 		}
+	}
+	sort.Strings(names)
+	out := make([]object.Value, len(names))
+	for i, n := range names {
+		out[i] = object.Symbol(n)
+	}
+	return out
+}
+
+// singletonMethodNames returns the singleton-method names of self as sorted
+// Symbols. For a class/module these are its class methods (def self.foo) — walked
+// up the superclass chain when all is true, restricted to its own when false. For
+// any other object they are the methods on its per-object singleton class, if it
+// has one.
+func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
+	seen := map[string]bool{}
+	var names []string
+	add := func(n string) {
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	collect := func(tbl map[string]*Method) {
+		for n, m := range tbl {
+			if !m.undefined {
+				add(n)
+			}
+		}
+	}
+	if c, ok := self.(*RClass); ok {
+		collect(c.smethods)
+		if all {
+			for s := c.super; s != nil; s = s.super {
+				collect(s.smethods)
+			}
+		}
+	} else if sc := vm.objSingleton(self); sc != nil {
+		collect(sc.methods)
 	}
 	sort.Strings(names)
 	out := make([]object.Value, len(names))
