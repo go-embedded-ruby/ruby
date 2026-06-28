@@ -44,6 +44,15 @@ func TestPuppetTxnPrimitives(t *testing.T) {
 		{extendSetup + `p C.is_a?(Class)`, "true\n"},                           // ordinary class membership still holds
 		{`module M; end; o = Object.new; o.extend(M); p o.is_a?(M)`, "true\n"}, // per-object extend
 		{`module M; end; p Object.new.is_a?(M)`, "false\n"},
+		// A module prepended into a class's singleton (metaclass) — `class << C;
+		// prepend M; end` — makes C.is_a?(M) (the class-meta prepend branch).
+		{`module M; end; class C; end; class << C; prepend M; end; p C.is_a?(M)`, "true\n"},
+		// A module prepended into a plain object's singleton class makes the object
+		// is_a?(M) (the object-singleton prepend branch).
+		{`module N; end; o = Object.new; class << o; prepend N; end; p o.is_a?(N)`, "true\n"},
+		// extend with a module that transitively includes another: is_a? sees the
+		// included module through the object-singleton include branch.
+		{`module I; end; module O; include I; end; o = Object.new; o.extend(O); p o.is_a?(I)`, "true\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -54,6 +63,48 @@ func TestPuppetTxnPrimitives(t *testing.T) {
 	errs := []struct{ src, want string }{
 		{`{}.fetch("nope")`, `key not found: "nope"`},
 		{`[1].replace(5)`, "no implicit conversion of Integer into Array"},
+	}
+	for _, c := range errs {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q err=%v, want substring %q", c.src, err, c.want)
+		}
+	}
+}
+
+// TestDefineMethodSuper covers `super` inside a define_method body. Puppet's
+// :loglevel metaparam munge is `munge do |loglevel| val = super(loglevel) … end`
+// — the munge DSL does `define_method(:unsafe_munge, &block)`, and the block
+// calls super against the parent parameter's unsafe_munge. The define_method
+// body must anchor `super` to the method's name+owner so super resolves up the
+// superclass chain. MRI permits an *explicit*-argument super here but raises a
+// RuntimeError for a bare (implicit-argument) super. Asserted against MRI Ruby
+// 4.0.5.
+func TestDefineMethodSuper(t *testing.T) {
+	const base = "class Base\n  def greet(x); \"base-#{x}\"; end\nend\n"
+	cases := []struct{ src, want string }{
+		// Explicit-argument super from a define_method body resolves to the
+		// superclass method.
+		{base + "class Sub < Base\n  define_method(:greet) { |x| \"sub-\" + super(x) }\nend\nputs Sub.new.greet(\"hi\")", "sub-base-hi\n"},
+		// super from a proc passed as the body argument (define_method(:m, proc)).
+		{base + "blk = proc { |x| \"p-\" + super(x) }\nclass Sub2 < Base; end\nSub2.define_method(:greet, blk)\nputs Sub2.new.greet(\"z\")", "p-base-z\n"},
+		// A super nested inside a block within the define_method body still resolves.
+		{base + "class Sub3 < Base\n  define_method(:greet) { |x| [x].map { |y| super(y) }.first }\nend\nputs Sub3.new.greet(\"q\")", "base-q\n"},
+		// A normal (def) method's super is unaffected by the dmBody flag.
+		{base + "class Sub4 < Base\n  def greet(x); \"d-\" + super; end\nend\nputs Sub4.new.greet(\"k\")", "d-base-k\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+
+	errs := []struct{ src, want string }{
+		// Bare (implicit-argument) super from a define_method body is forbidden.
+		{base + "class S < Base\n  define_method(:greet) { |x| super }\nend\nS.new.greet(\"a\")",
+			"implicit argument passing of super from method defined by define_method()"},
+		// Explicit super with no matching superclass method raises NoMethodError.
+		{"class Lone\n  define_method(:foo) { super() }\nend\nLone.new.foo",
+			"super: no superclass method 'foo'"},
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
