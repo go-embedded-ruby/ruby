@@ -400,26 +400,27 @@ func (vm *VM) bootstrap() {
 		return object.Bool(!ok || s == 0)
 	})
 
-	vm.registerFile()       // needs the exception hierarchy (Errno::ENOENT < StandardError)
-	vm.registerIO()         // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
-	vm.registerDir()        // Dir (reuses the Errno module set up by registerFile)
-	vm.registerTmpdir()     // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
-	vm.registerProcess()    // Process module — identity + clock_gettime
-	vm.registerOpenSSL()    // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
-	vm.registerNetHTTP()    // net/http + net/https loadable shell; needs StandardError
-	vm.registerResolv()     // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
-	vm.registerTimeout()    // Timeout module (loadable shell); needs RuntimeError
-	vm.registerYAML()       // YAML/Psych loadable shell; needs StandardError
-	vm.registerFileUtils()  // FileUtils (real fs ops over os); needs Errno (registerFile)
-	vm.registerGetoptLong() // GetoptLong loadable shell; needs StandardError
-	vm.registerOptParse()   // optparse loadable shell (declares; parse raises); needs StandardError
-	vm.registerRipper()     // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
-	vm.registerSyslog()     // Syslog loadable shell (feature probe)
-	vm.registerCGI()        // CGI.escape/unescape (real over net/url) + HTML helpers
-	vm.registerMonitor()    // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
-	vm.registerZlib()       // needs the exception hierarchy (Zlib::Error < StandardError)
-	vm.registerFiber()      // needs the exception hierarchy (FiberError < StandardError)
-	vm.registerThread()     // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
+	vm.registerFile()        // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerIO()          // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
+	vm.registerDir()         // Dir (reuses the Errno module set up by registerFile)
+	vm.registerTmpdir()      // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
+	vm.registerProcess()     // Process module — identity + clock_gettime
+	vm.registerObjectSpace() // ObjectSpace module — finalizer API + reflective no-ops
+	vm.registerOpenSSL()     // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
+	vm.registerNetHTTP()     // net/http + net/https loadable shell; needs StandardError
+	vm.registerResolv()      // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
+	vm.registerTimeout()     // Timeout module (loadable shell); needs RuntimeError
+	vm.registerYAML()        // YAML/Psych loadable shell; needs StandardError
+	vm.registerFileUtils()   // FileUtils (real fs ops over os); needs Errno (registerFile)
+	vm.registerGetoptLong()  // GetoptLong loadable shell; needs StandardError
+	vm.registerOptParse()    // optparse loadable shell (declares; parse raises); needs StandardError
+	vm.registerRipper()      // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
+	vm.registerSyslog()      // Syslog loadable shell (feature probe)
+	vm.registerCGI()         // CGI.escape/unescape (real over net/url) + HTML helpers
+	vm.registerMonitor()     // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
+	vm.registerZlib()        // needs the exception hierarchy (Zlib::Error < StandardError)
+	vm.registerFiber()       // needs the exception hierarchy (FiberError < StandardError)
+	vm.registerThread()      // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).

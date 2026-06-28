@@ -2,6 +2,7 @@ package vm_test
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,16 +14,16 @@ func TestFilePath(t *testing.T) {
 		{`p File.basename("/a/b/c.txt")`, "\"c.txt\"\n"},
 		{`p File.basename("/a/b/c.txt", ".txt")`, "\"c\"\n"},
 		{`p File.basename("/a/b/c.txt", ".*")`, "\"c\"\n"},
-		{`p File.basename("foo", ".*")`, "\"foo\"\n"},      // no extension to strip
-		{`p File.basename(".txt", ".txt")`, "\".txt\"\n"},  // would empty -> kept
+		{`p File.basename("foo", ".*")`, "\"foo\"\n"},     // no extension to strip
+		{`p File.basename(".txt", ".txt")`, "\".txt\"\n"}, // would empty -> kept
 		{`p File.basename("foo")`, "\"foo\"\n"},
 		{`p File.dirname("/a/b/c.txt")`, "\"/a/b\"\n"},
 		{`p File.dirname("foo")`, "\".\"\n"},
 		{`p File.dirname("/")`, "\"/\"\n"},
 		{`p File.extname("/a/b/c.txt")`, "\".txt\"\n"},
 		{`p File.extname("foo")`, "\"\"\n"},
-		{`p File.extname(".bashrc")`, "\"\"\n"},  // leading-dot dotfile
-		{`p File.extname("a.")`, "\".\"\n"},      // trailing dot
+		{`p File.extname(".bashrc")`, "\"\"\n"}, // leading-dot dotfile
+		{`p File.extname("a.")`, "\".\"\n"},     // trailing dot
 		{`p File.extname("a.b.c")`, "\".c\"\n"},
 		{`p File.join("a", "b", "c")`, "\"a/b/c\"\n"},
 		{`p File.join("a/", "/b")`, "\"a/b\"\n"},   // both slashes -> collapse
@@ -86,5 +87,28 @@ func TestFileIO(t *testing.T) {
 		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "Errno::ENOENT") {
 			t.Errorf("src=%q got %v want Errno::ENOENT", src, err)
 		}
+	}
+	// realpath resolves an existing path to its canonical absolute form; a missing
+	// path raises Errno::ENOENT. (EvalSymlinks canonicalises, e.g. /var -> /private/var
+	// on darwin, so assert the basename rather than a fixed prefix.)
+	if got := eval(t, fmt.Sprintf(`File.write(%q, "x"); p File.basename(File.realpath(%q))`, a, a)); got != "\"a.txt\"\n" {
+		t.Errorf("realpath basename got=%q", got)
+	}
+	if err := runErr(t, fmt.Sprintf(`File.realpath(%q)`, dir+"/missing_rp.txt")); err == nil || !strings.Contains(err.Error(), "Errno::ENOENT") {
+		t.Errorf("realpath missing got %v want Errno::ENOENT", err)
+	}
+	// symlink? distinguishes a symlink from a regular file and a missing path. The
+	// link is created via Go; on platforms where that is not permitted, skip.
+	link := dir + "/link.txt"
+	if err := os.Symlink(a, link); err == nil {
+		if got := eval(t, fmt.Sprintf(`p File.symlink?(%q)`, link)); got != "true\n" {
+			t.Errorf("symlink? on link got=%q want true", got)
+		}
+		if got := eval(t, fmt.Sprintf(`p File.symlink?(%q)`, a)); got != "false\n" {
+			t.Errorf("symlink? on regular file got=%q want false", got)
+		}
+	}
+	if got := eval(t, fmt.Sprintf(`p File.symlink?(%q)`, dir+"/missing_sl.txt")); got != "false\n" {
+		t.Errorf("symlink? on missing got=%q want false", got)
 	}
 }
