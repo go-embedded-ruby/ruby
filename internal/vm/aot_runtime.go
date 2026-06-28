@@ -34,10 +34,26 @@ func aotConcat(a, b object.Value) object.Value {
 	return &object.Array{Elems: out}
 }
 
-// aotSplat backs OpSplatToArray: pass an array through, else wrap a scalar.
-func aotSplat(v object.Value) object.Value {
+// aotSplat backs OpSplatToArray in AOT-compiled bodies; see splatToArray.
+func (vm *VM) aotSplat(v object.Value) object.Value {
+	return vm.splatToArray(v)
+}
+
+// splatToArray implements Ruby's splat (`*v`) coercion: an Array passes through;
+// any other object that responds to #to_a is converted with it (MatchData, nil,
+// Set, …) provided the result is an Array; everything else is wrapped in a
+// one-element Array. Note MRI uses #to_a here, not #to_ary.
+func (vm *VM) splatToArray(v object.Value) object.Value {
 	if a, ok := v.(*object.Array); ok {
 		return a
+	}
+	if vm.respondsTo(v, "to_a") {
+		r := vm.send(v, "to_a", nil, nil)
+		if a, ok := r.(*object.Array); ok {
+			return a
+		}
+		raise("TypeError", "can't convert %s to Array (%s#to_a gives %s)",
+			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
 	}
 	return &object.Array{Elems: []object.Value{v}}
 }

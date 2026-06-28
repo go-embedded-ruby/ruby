@@ -203,6 +203,12 @@ K = DelegateClass(Array); p K.new([9, 8]).first`, "9\n"},
 		{"uri_merge_no_path", `require "uri"; p URI.parse("http://a.com/x").merge("?q=2").to_s`, "\"http://a.com/x?q=2\"\n"},
 		{"uri_no_scheme", `require "uri"; p URI.parse("/just/a/path").path`, "\"/just/a/path\"\n"},
 		{"uri_to_str", `require "uri"; p URI.parse("http://h.com/").to_str.class`, "String\n"},
+		{"uri_build_hash", `require "uri"; p URI::Generic.build(scheme: "http", host: "h.com", port: 8080, path: "/p", query: "q=1", fragment: "f").to_s`, "\"http://h.com:8080/p?q=1#f\"\n"},
+		{"uri_build_string_keys", `require "uri"; p URI::Generic.build("scheme" => "http", "host" => "h.com").to_s`, "\"http://h.com\"\n"},
+		{"uri_build_subclass", `require "uri"; p URI::HTTP.build(host: "x.com").class`, "URI::HTTP\n"},
+		{"uri_build_array", `require "uri"; p URI::Generic.build([nil, nil, "h.com", 80, "/p", "q", "f"]).to_s`, "\"//h.com:80/p?q#f\"\n"},
+		{"uri_build_array_arity", `require "uri"; begin; URI::Generic.build([1, 2]); rescue => e; p e.class; end`, "ArgumentError\n"},
+		{"uri_build_bad_type", `require "uri"; begin; URI::Generic.build(5); rescue => e; p e.class; end`, "ArgumentError\n"},
 		{"require_uri", `p require("uri")`, "true\n"},
 
 		// --- user-defined operator dispatch ------------------------------------

@@ -195,7 +195,7 @@ func (vm *VM) e2eSplat(self object.Value, args []object.Value, block *Proc) obje
 	s1 = l1
 	s2 = l1
 	s1 = &object.Array{Elems: []object.Value{s1, s2}}
-	s1 = aotSplat(s1)
+	s1 = vm.aotSplat(s1)
 	s0 = aotConcat(s0, s1)
 	return s0
 }

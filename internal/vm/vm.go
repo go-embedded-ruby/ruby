@@ -1120,12 +1120,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpXStr:
 				push(object.NewString(vm.runShellCommand(iseq.Names[in.A])))
 			case bytecode.OpSplatToArray:
-				v := pop()
-				if arr, ok := v.(*object.Array); ok {
-					push(arr)
-				} else {
-					push(&object.Array{Elems: []object.Value{v}})
-				}
+				push(vm.splatToArray(pop()))
 			case bytecode.OpExpandArray:
 				elems := pop().(*object.Array).Elems
 				n := len(elems)

@@ -46,12 +46,17 @@ func TestAOTConcat(t *testing.T) {
 }
 
 func TestAOTSplat(t *testing.T) {
+	vm := New(io.Discard)
 	arr := &object.Array{Elems: []object.Value{object.Integer(1)}}
-	if got := aotSplat(arr); got != arr {
+	if got := vm.aotSplat(arr); got != arr {
 		t.Errorf("aotSplat(array) should pass the array through, got %v", got)
 	}
-	wrapped := aotSplat(object.Integer(9)).(*object.Array)
+	wrapped := vm.aotSplat(object.Integer(9)).(*object.Array)
 	if wrapped.Inspect() != "[9]" {
 		t.Errorf("aotSplat(scalar) = %s, want [9]", wrapped.Inspect())
+	}
+	// nil responds to #to_a, so it coerces to an empty array rather than [nil].
+	if got := vm.aotSplat(object.NilV).(*object.Array); got.Inspect() != "[]" {
+		t.Errorf("aotSplat(nil) = %s, want []", got.Inspect())
 	}
 }

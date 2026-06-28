@@ -663,6 +663,58 @@ func (vm *VM) bootstrap() {
 	vm.cModule.define("const_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.scopedConst(self.(*RClass), constNameArg(args[0]))
 	})
+	// Class-variable reflection. Names arrive as a Symbol or String (e.g. :@@x);
+	// the @@-prefixed name is the key in the cvars table. Lookups walk the
+	// superclass chain via cvarOwner, mirroring how @@name resolves at runtime.
+	vm.cModule.define("class_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := cvarNameArg(args[0])
+		if c := cvarOwner(self.(*RClass), name); c != nil {
+			return c.cvars[name]
+		}
+		raise("NameError", "uninitialized class variable %s in %s", name, self.(*RClass).name)
+		return object.NilV
+	})
+	vm.cModule.define("class_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := cvarNameArg(args[0])
+		cls := self.(*RClass)
+		if c := cvarOwner(cls, name); c != nil {
+			c.cvars[name] = args[1]
+		} else {
+			cls.cvars[name] = args[1]
+		}
+		return args[1]
+	})
+	vm.cModule.define("class_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(cvarOwner(self.(*RClass), cvarNameArg(args[0])) != nil)
+	})
+	vm.cModule.define("class_variables", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// class_variables(inherit=true): own variables, then ancestors', each
+		// name only once and in first-seen order. inherit=false stops at self.
+		inherit := len(args) == 0 || args[0].Truthy()
+		seen := map[string]bool{}
+		var names []string
+		for c := self.(*RClass); c != nil; c = c.super {
+			level := make([]string, 0, len(c.cvars))
+			for name := range c.cvars {
+				if !seen[name] {
+					seen[name] = true
+					level = append(level, name)
+				}
+			}
+			// Go map iteration is unordered; sort within each level so the result
+			// is deterministic (windows-latest runs the same test).
+			sort.Strings(level)
+			names = append(names, level...)
+			if !inherit {
+				break
+			}
+		}
+		out := make([]object.Value, len(names))
+		for i, n := range names {
+			out[i] = object.Symbol(n)
+		}
+		return &object.Array{Elems: out}
+	})
 	vm.cModule.define("const_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
 		cls := self.(*RClass)
@@ -2470,6 +2522,48 @@ func (vm *VM) bootstrap() {
 		self.(*object.Hash).Set(args[0], args[1])
 		return args[1]
 	})
+	// default / default= and default_proc / default_proc= manage the value (or
+	// block) returned for an absent key. The static default and the default block
+	// are mutually exclusive in MRI: setting one clears the other.
+	vm.cHash.define("default", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		// default(key) invokes the default block (passing the hash and key); with
+		// no argument it returns the static default, ignoring any block.
+		if len(args) == 1 && h.DefaultProc != nil {
+			return vm.callBlock(h.DefaultProc.(*Proc), []object.Value{h, args[0]})
+		}
+		if h.Default != nil {
+			return h.Default
+		}
+		return object.NilV
+	})
+	vm.cHash.define("default=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		h.Default = args[0]
+		h.DefaultProc = nil
+		return args[0]
+	})
+	vm.cHash.define("default_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		if h.DefaultProc != nil {
+			return h.DefaultProc
+		}
+		return object.NilV
+	})
+	vm.cHash.define("default_proc=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		switch p := args[0].(type) {
+		case object.Nil:
+			h.DefaultProc = nil
+		case *Proc:
+			h.DefaultProc = p
+			h.Default = nil
+		default:
+			// MRI coerces via #to_proc; without that, only a Proc or nil is valid.
+			raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(args[0]).name)
+		}
+		return args[0]
+	})
 	vm.cHash.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		v, _ := self.(*object.Hash).Delete(args[0])
 		return v
@@ -4086,6 +4180,25 @@ func constNameArg(v object.Value) string {
 	}
 	if r := []rune(name); len(r) == 0 || !unicode.IsUpper(r[0]) {
 		raise("NameError", "wrong constant name %s", name)
+	}
+	return name
+}
+
+// cvarNameArg coerces a class-variable name argument (Symbol or String) to its
+// @@-prefixed key, raising TypeError for other types and NameError when the name
+// is not a well-formed class variable, matching MRI's Module#class_variable_*.
+func cvarNameArg(v object.Value) string {
+	var name string
+	switch n := v.(type) {
+	case object.Symbol:
+		name = string(n)
+	case *object.String:
+		name = n.Str()
+	default:
+		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	}
+	if !strings.HasPrefix(name, "@@") || len(name) == 2 {
+		raise("NameError", "`%s' is not allowed as a class variable name", name)
 	}
 	return name
 }
