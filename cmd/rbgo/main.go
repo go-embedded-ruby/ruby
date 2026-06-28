@@ -77,7 +77,12 @@ func run(src, name string) error {
 	}
 	iseq.Name = name
 	machine := vm.New(os.Stdout)
-	if name != "-e" {
+	if name == "-e" {
+		// A -e one-liner has no file on disk; record "-e" as the program name so
+		// backtraces label its frames "-e" the way MRI does (require_relative still
+		// resolves against the CWD, since there is no script directory).
+		machine.SetScriptName(name)
+	} else {
 		machine.SetScriptPath(name) // so require/require_relative resolve relative to the script
 	}
 	_, err = machine.Run(iseq)

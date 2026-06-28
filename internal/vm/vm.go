@@ -382,6 +382,16 @@ func (vm *VM) SetScriptPath(path string) {
 	}
 }
 
+// SetScriptName records the program name ($0) without deriving a require search
+// directory from it. Hosts use it for a program that has no on-disk path — the
+// CLI's `-e` one-liner — so backtraces still label the top-level frame ("-e")
+// while require_relative falls back to the process CWD.
+func (vm *VM) SetScriptName(name string) {
+	if name != "" {
+		vm.scriptName = name
+	}
+}
+
 // SetConst installs v as a top-level constant, visible to a subsequently-run
 // program as a bare constant reference. Embedding hosts use it to seed a run —
 // the wasm playground binds INPUT to the raw bytes of an image before
