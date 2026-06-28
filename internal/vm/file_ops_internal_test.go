@@ -96,13 +96,25 @@ func TestFileInstanceMetaErrors(t *testing.T) {
 	}
 }
 
+// Captured at init so restoreFileSeams resets to the PLATFORM defaults rather
+// than hardcoding os.Chown — on Windows fileChown/fileLchown default to no-ops
+// (os.Chown always fails there), and hardcoding os.Chown would clobber that and
+// break later real chown calls (e.g. TestFileRenameAndInstanceMeta).
+var (
+	origFileChmod   = fileChmod
+	origFileChown   = fileChown
+	origFileLchown  = fileLchown
+	origFileChtimes = fileChtimes
+	origSetUmask    = setUmask
+)
+
 // restoreFileSeams resets the os seams the File-ops tests override.
 func restoreFileSeams() {
-	fileChmod = os.Chmod
-	fileChown = os.Chown
-	fileLchown = os.Lchown
-	fileChtimes = func(p string, atime, mtime int64) error { return osChtimes(p, atime, mtime) }
-	setUmask = osUmask
+	fileChmod = origFileChmod
+	fileChown = origFileChown
+	fileLchown = origFileLchown
+	fileChtimes = origFileChtimes
+	setUmask = origSetUmask
 }
 
 // TestFileUtilsChmod covers FileUtils.chmod (success + the failing-seam ENOENT
