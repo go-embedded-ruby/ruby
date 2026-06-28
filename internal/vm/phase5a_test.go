@@ -26,6 +26,17 @@ func TestFormatString(t *testing.T) {
 		{"float_from_int", `p("%f" % 5)`, "\"5.000000\"\n"},
 		{"char_empty", `p("%c" % "")`, "\"\"\n"},
 		{"char_width", `p("%5c|" % "A")`, "\"    A|\"\n"},
+		// Numeric String coercion (MRI: "%02d" % "7" => "07").
+		{"int_from_string", `p("%02d" % "7")`, "\"07\"\n"},
+		{"int_from_string_ws", `p("%d" % "  12  ")`, "\"12\"\n"},
+		{"int_from_string_uscore", `p("%d" % "1_000")`, "\"1000\"\n"},
+		{"int_from_string_hex", `p("%d" % "0x1A")`, "\"26\"\n"},
+		{"float_from_string", `p("%.1f" % "1.5")`, "\"1.5\"\n"},
+		// Bignum (and a numeric String too large for int64) format at full width.
+		{"int_bignum", `p("%d" % (10 ** 30))`, "\"1000000000000000000000000000000\"\n"},
+		{"hex_bignum", `p("%x" % (10 ** 30))`, "\"c9f2c9cd04674edea40000000\"\n"},
+		{"int_bignum_string", `p("%d" % ("1" + "0" * 30))`, "\"1000000000000000000000000000000\"\n"},
+		{"float_bignum", `p("%.0f" % (10 ** 20))`, "\"100000000000000000000\"\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,7 +55,8 @@ func TestFormatErrors(t *testing.T) {
 		{"int_nil", `"%d" % [nil]`, "nil into Integer"},
 		{"int_array", `"%d" % [[1]]`, "Array into Integer"},
 		{"int_hash", `"%d" % [{}]`, "Hash into Integer"},
-		{"int_string", `"%d" % ["x"]`, "String into Integer"},
+		{"int_string", `"%d" % ["x"]`, `invalid value for Integer(): "x"`},
+		{"float_string", `"%f" % ["x"]`, `invalid value for Float(): "x"`},
 		{"int_object", "class Foo\nend\n\"%d\" % [Foo.new]", "Object into Integer"},
 		{"format_nonstring", `format(5)`, "Integer into String"},
 		{"too_few", `"%d %d" % [1]`, "too few arguments"},

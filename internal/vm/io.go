@@ -107,6 +107,33 @@ func (vm *VM) registerIO() {
 		}
 		return o
 	}}
+	// File instance metadata operations. Puppet's replace_file writes to a
+	// Uniquefile (a DelegateClass(File)) and then chmod/chowns it before renaming
+	// it into place, so the open File needs path/chmod/chown that act on its
+	// backing path. They flush the buffer first so the on-disk file reflects the
+	// writes the caller has made.
+	cFile.define("path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self.(*IOObj).path)
+	})
+	cFile.define("to_path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self.(*IOObj).path)
+	})
+	cFile.define("chmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		ioFlush(o)
+		if err := fileChmod(o.path, os.FileMode(intArg(args[0])&0o7777)); err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", o.path)
+		}
+		return object.Integer(0)
+	})
+	cFile.define("chown", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		ioFlush(o)
+		if err := fileChown(o.path, chownID(args[0]), chownID(args[1])); err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", o.path)
+		}
+		return object.Integer(0)
+	})
 	cFile.smethods["readlines"] = &Method{name: "readlines", owner: cFile, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		o := openFileIO(cFile, strArg(args[0]), "r")
 		var lines []object.Value
@@ -124,9 +151,57 @@ func (vm *VM) registerIO() {
 	}}
 }
 
-// fileMode returns the access mode argument of File.open (default "r").
+// File open-mode flag constants (File::RDWR etc.). The values are the canonical
+// POSIX ones, fixed here so behaviour is identical on every OS the test gate runs
+// on rather than reflecting the host's <fcntl.h>.
+const (
+	fO_RDONLY = 0x0
+	fO_WRONLY = 0x1
+	fO_RDWR   = 0x2
+	fO_APPEND = 0x8
+	fO_CREAT  = 0x40
+	fO_EXCL   = 0x80
+	fO_TRUNC  = 0x200
+)
+
+// fileFlagConsts maps File::Constants names to their numeric flag value.
+var fileFlagConsts = map[string]int64{
+	"RDONLY": fO_RDONLY, "WRONLY": fO_WRONLY, "RDWR": fO_RDWR,
+	"APPEND": fO_APPEND, "CREAT": fO_CREAT, "EXCL": fO_EXCL, "TRUNC": fO_TRUNC,
+}
+
+// flagsToMode maps an integer open-mode (a bitwise OR of File::RDWR/CREAT/...) to
+// the access-mode string openFileIO understands. RDWR/WRONLY without APPEND or
+// O_RDONLY-only reads map to the closest fopen-style mode; APPEND maps to "a".
+func flagsToMode(flags int64) string {
+	switch {
+	case flags&fO_APPEND != 0:
+		if flags&fO_RDWR != 0 {
+			return "a+"
+		}
+		return "a"
+	case flags&fO_RDWR != 0:
+		// RDWR with CREAT (the Uniquefile temp-file path) starts from an empty,
+		// freshly created file, like "w+"; plain RDWR keeps existing content, "r+".
+		if flags&fO_CREAT != 0 {
+			return "w+"
+		}
+		return "r+"
+	case flags&fO_WRONLY != 0:
+		return "w"
+	default:
+		return "r"
+	}
+}
+
+// fileMode returns the access mode argument of File.open (default "r"). The mode
+// may be a string ("w", "r+", ...) or an integer bit-OR of File::Constants flags
+// (e.g. File::RDWR | File::CREAT | File::EXCL); a trailing opts Hash is ignored.
 func fileMode(args []object.Value) string {
 	if len(args) > 1 {
+		if i, ok := args[1].(object.Integer); ok {
+			return flagsToMode(int64(i))
+		}
 		return strArg(args[1])
 	}
 	return "r"

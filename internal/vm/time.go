@@ -166,6 +166,26 @@ func (vm *VM) registerTime() {
 	}
 	d("utc", utcFn)
 	d("getutc", utcFn)
+	// gmtime converts the receiver to UTC. MRI mutates the receiver in place and
+	// returns it; with our whole-second instants converting to a UTC instant is
+	// equivalent, and serialization paths (report/storage YAML) only read it back.
+	d("gmtime", utcFn)
+
+	// POSIX time-value accessors. tv_sec is the whole-second Unix time (== to_i);
+	// our instants carry whole-second resolution, so the sub-second parts are all
+	// zero. These let Puppet's report summary (Time.now.tv_sec) and Time#to_yaml
+	// emit a value without raising.
+	d("tv_sec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(self(v).t.ToUnix())
+	})
+	zeroFn := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(0)
+	}
+	d("tv_usec", zeroFn)
+	d("usec", zeroFn)
+	d("tv_nsec", zeroFn)
+	d("nsec", zeroFn)
+	d("subsec", zeroFn)
 
 	// zone → abbreviated zone name ("UTC", "CET", …).
 	d("zone", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {

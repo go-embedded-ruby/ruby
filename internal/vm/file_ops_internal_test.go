@@ -75,13 +75,46 @@ func TestFileMetaOpsErrors(t *testing.T) {
 	}
 }
 
+// TestFileInstanceMetaErrors drives the File instance chmod/chown error branches
+// (Puppet's replace_file calls tempfile.chmod/chown) via failing os seams, so the
+// ENOENT mapping is exercised deterministically and portably (a real chmod is a
+// no-op on Windows).
+func TestFileInstanceMetaErrors(t *testing.T) {
+	defer restoreFileSeams()
+	dir := slash(t.TempDir())
+	f := dir + "/m.txt"
+	fileChmod = func(string, os.FileMode) error { return os.ErrNotExist }
+	fileChown = func(string, int, int) error { return os.ErrNotExist }
+
+	for _, src := range []string{
+		`f = File.open("` + f + `", "w"); f.chmod(0o600)`,
+		`f = File.open("` + f + `", "w"); f.chown(0, 0)`,
+	} {
+		if got := runFSErr(t, src); got != "Errno::ENOENT" {
+			t.Errorf("%s: got %q want Errno::ENOENT", src, got)
+		}
+	}
+}
+
+// Captured at init so restoreFileSeams resets to the PLATFORM defaults rather
+// than hardcoding os.Chown — on Windows fileChown/fileLchown default to no-ops
+// (os.Chown always fails there), and hardcoding os.Chown would clobber that and
+// break later real chown calls (e.g. TestFileRenameAndInstanceMeta).
+var (
+	origFileChmod   = fileChmod
+	origFileChown   = fileChown
+	origFileLchown  = fileLchown
+	origFileChtimes = fileChtimes
+	origSetUmask    = setUmask
+)
+
 // restoreFileSeams resets the os seams the File-ops tests override.
 func restoreFileSeams() {
-	fileChmod = os.Chmod
-	fileChown = os.Chown
-	fileLchown = os.Lchown
-	fileChtimes = func(p string, atime, mtime int64) error { return osChtimes(p, atime, mtime) }
-	setUmask = osUmask
+	fileChmod = origFileChmod
+	fileChown = origFileChown
+	fileLchown = origFileLchown
+	fileChtimes = origFileChtimes
+	setUmask = origSetUmask
 }
 
 // TestFileUtilsChmod covers FileUtils.chmod (success + the failing-seam ENOENT

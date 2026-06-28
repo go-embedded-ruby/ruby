@@ -73,6 +73,16 @@ func TestTime(t *testing.T) {
 		// truthiness + class.
 		{`p(Time.at(0) ? "y" : "n")`, "\"y\"\n"},
 		{`p Time.at(0).class`, "Time\n"},
+		// POSIX time-value accessors. tv_sec is the whole-second Unix time; the
+		// sub-second parts are zero at our resolution. gmtime converts to UTC.
+		{`p Time.at(1000).tv_sec`, "1000\n"},
+		{`p Time.at(1000).tv_usec`, "0\n"},
+		{`p Time.at(1000).usec`, "0\n"},
+		{`p Time.at(1000).tv_nsec`, "0\n"},
+		{`p Time.at(1000).nsec`, "0\n"},
+		{`p Time.at(1000).subsec`, "0\n"},
+		{`p Time.at(0).gmtime.zone`, "\"UTC\"\n"},
+		{`p Time.at(1000).gmtime.to_i`, "1000\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

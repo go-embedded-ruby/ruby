@@ -1048,12 +1048,23 @@ def DelegateClass(superclass)
       @delegate_dc_obj = obj
     end
   end
-  # Forward each of the wrapped class's own instance methods explicitly so they
-  # take precedence over any same-named method inherited here (e.g. Object#to_s),
-  # matching DelegateClass(Array).new([…]).to_s showing the array. Methods not
-  # named this way still reach the target through Delegator#method_missing.
-  skip = [:__getobj__, :__setobj__, :initialize, :initialize_copy, :initialize_clone, :initialize_dup]
-  superclass.instance_methods(false).each do |m|
+  # Forward each of the wrapped class's PUBLIC instance methods explicitly —
+  # including those it inherits — so they take precedence over a same-named method
+  # the delegator would otherwise resolve first. This matters for methods like
+  # IO#print / IO#flush / IO#write that File inherits: Kernel also defines a
+  # private #print, so without an explicit forwarder `delegate.print` would hit
+  # Kernel#print (writing to $stdout) instead of reaching the wrapped IO. MRI's
+  # DelegateClass forwards superclass.public_instance_methods for exactly this
+  # reason. The skip list keeps the delegator's own infrastructure (object
+  # identity, send, the __getobj__/__setobj__ pair) intact.
+  skip = [
+    :__getobj__, :__setobj__, :__send__, :send, :public_send,
+    :initialize, :initialize_copy, :initialize_clone, :initialize_dup,
+    :method_missing, :respond_to_missing?, :respond_to?, :==,
+    :object_id, :equal?, :instance_variable_get, :instance_variable_set,
+    :instance_variables, :__id__, :class, :is_a?, :kind_of?, :instance_of?,
+  ]
+  superclass.instance_methods.each do |m|
     next if skip.include?(m)
     klass.send(:define_method, m) do |*args, &block|
       __getobj__.__send__(m, *args, &block)
@@ -1273,6 +1284,38 @@ class Pathname
     i = name.rindex(".")
     return "" if i.nil? || i == 0 || i == name.length - 1
     name[i..-1]
+  end
+
+  # File-touching delegations. Pathname#read/write/exist?/… forward to the File
+  # class with the wrapped path, so callers such as Puppet::FileSystem.read
+  # (path.read(**opts)) operate on disk. Keyword options accepted by File.read
+  # (e.g. :encoding) are forwarded positionally where File.read expects them.
+  def read(*args, **opts)
+    File.read(@path, *args)
+  end
+
+  def write(content, *args, **opts)
+    File.write(@path, content, *args)
+  end
+
+  def each_line(*args, &block)
+    File.foreach(@path, *args, &block)
+  end
+
+  def exist?
+    File.exist?(@path)
+  end
+
+  def file?
+    File.file?(@path)
+  end
+
+  def directory?
+    File.directory?(@path)
+  end
+
+  def open(*args, &block)
+    File.open(@path, *args, &block)
   end
 end
 

@@ -13,9 +13,9 @@ func TestBase64(t *testing.T) {
 		{`p Base64.strict_encode64("")`, "\"\"\n"},
 		{`p Base64.urlsafe_encode64("hello")`, "\"aGVsbG8=\"\n"},
 		{`p Base64.decode64("aGVsbG8=")`, "\"hello\"\n"},
-		{`p Base64.decode64("aGVs\nbG8=")`, "\"hello\"\n"}, // newlines ignored
-		{`p Base64.decode64("@@@")`, "\"\"\n"},             // invalid chars ignored
-		{`p Base64.decode64("aGVsbG8")`, "\"hello\"\n"},    // missing padding ok
+		{`p Base64.decode64("aGVs\nbG8=")`, "\"hello\"\n"},       // newlines ignored
+		{`p Base64.decode64("@@@")`, "\"\"\n"},                   // invalid chars ignored
+		{`p Base64.decode64("aGVsbG8")`, "\"hello\"\n"},          // missing padding ok
 		{`p Base64.decode64("abcde").bytes`, "[105, 183, 29]\n"}, // orphan sextet dropped
 		{`p Base64.strict_decode64("aGVsbG8=")`, "\"hello\"\n"},
 		{`p Base64.urlsafe_decode64("aGVsbG8=")`, "\"hello\"\n"},
@@ -47,6 +47,25 @@ func TestDigest(t *testing.T) {
 		{`p Digest::SHA512.hexdigest("")[0, 16]`, "\"cf83e1357eefb8bd\"\n"},
 		{`p Digest::SHA256.base64digest("abc")`, "\"ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=\"\n"},
 		{`p Digest::SHA256.digest("abc").bytesize`, "32\n"},
+		// Incremental instance protocol: new, update / <<, hexdigest / digest,
+		// base64digest, reset — byte-identical to the one-shot class methods.
+		{`d = Digest::SHA256.new; d << "a"; d.update("bc"); p d.hexdigest`,
+			"\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"},
+		{`d = Digest::SHA256.new; p d.hexdigest("abc")`,
+			"\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"},
+		{`d = Digest::SHA256.new; p d.digest("abc").bytesize`, "32\n"},
+		{`d = Digest::SHA256.new; d << "abc"; p d.base64digest`,
+			"\"ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=\"\n"},
+		// update / << return the digest so they chain.
+		{`d = Digest::MD5.new; p (d << "x").equal?(d)`, "true\n"},
+		// reset returns a fresh state.
+		{`d = Digest::SHA256.new; d << "junk"; d.reset; p d.hexdigest("abc")`,
+			"\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"},
+		// A Digest instance reports its class and is truthy / inspectable.
+		{`p Digest::SHA256.new.class`, "Digest::SHA256\n"},
+		{`p !!Digest::SHA256.new`, "true\n"},
+		{`p Digest::SHA256.new.inspect`, "\"#<Digest::SHA256>\"\n"},
+		{`p Digest::SHA256.new.to_s`, "\"#<Digest::SHA256>\"\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -62,7 +81,7 @@ func TestDigest(t *testing.T) {
 // preloaded feature is false, a provided one is true the first time then false.
 func TestRequireReturn(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{`p require("set")`, "false\n"},                                  // preloaded
+		{`p require("set")`, "false\n"},                                 // preloaded
 		{`p require("base64")`, "true\n"},                               // provided, first load
 		{`p [require("digest"), require("digest")]`, "[true, false]\n"}, // then already loaded
 	}

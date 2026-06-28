@@ -50,6 +50,14 @@ func (vm *VM) registerFile() {
 	cFile.consts["ALT_SEPARATOR"] = object.NilV
 	cFile.consts["PATH_SEPARATOR"] = object.NewString(":")
 	cFile.consts["NULL"] = object.NewString("/dev/null")
+	// Open-mode flag constants (File::Constants), the canonical POSIX values. They
+	// let code such as Puppet's Uniquefile build an integer open mode
+	// (File::RDWR | File::CREAT | File::EXCL) which File.open then maps back to a
+	// mode string. We fix the numeric values here rather than reflecting the host's
+	// so behaviour is identical on every OS the gate runs on.
+	for name, val := range fileFlagConsts {
+		cFile.consts[name] = object.Integer(val)
+	}
 	def := func(name string, fn NativeFn) { cFile.smethods[name] = &Method{name: name, owner: cFile, native: fn} }
 
 	def("basename", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -185,6 +193,17 @@ func (vm *VM) registerFile() {
 	}
 	def("delete", delete)
 	def("unlink", delete)
+
+	// rename(old, new) atomically moves a file, returning 0 (MRI). Puppet's
+	// FileSystem#replace_file renames its written temp file over the target, so
+	// state.yaml / last_run_summary.yaml are written atomically.
+	def("rename", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		from, to := pathArg(vm, args[0]), pathArg(vm, args[1])
+		if err := os.Rename(from, to); err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_rename - %s or %s", from, to)
+		}
+		return object.Integer(0)
+	})
 
 	// On-disk metadata operations Puppet's settings/file provider drives:
 	// chmod/chown/umask/utime and the access predicates. chmod/chown/utime accept
