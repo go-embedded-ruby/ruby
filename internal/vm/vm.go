@@ -663,6 +663,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		homeTarget = selfBlock.home
 	}
 
+	// homeSuper* capture the super anchor that a block literal created in this
+	// frame should carry. A block is transparent to `super` just as it is to
+	// `yield` and `return`: inside a method the anchor is the method itself; inside
+	// a block the anchor is inherited from the enclosing block (so `super` nested
+	// through several blocks still reaches the home method).
+	homeSuperName, homeSuperDefinee, homeSuperArgs := methodName, definee, args
+	if selfBlock != nil {
+		homeSuperName, homeSuperDefinee, homeSuperArgs = selfBlock.superName, selfBlock.superDefinee, selfBlock.superArgs
+	}
+
 	// Every frame catches a returnSignal aimed at its own selfTarget (a local
 	// return/next routed through an ensure, or a non-local return whose home is
 	// this frame). A signal for some other target passes through. On a catch the
@@ -928,7 +938,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -1043,22 +1053,24 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs}
 				}
 				var superArgs []object.Value
-				if in.B == 1 { // bare super forwards the frame's own arguments
-					superArgs = args
+				if in.B == 1 { // bare super forwards the home method's arguments
+					superArgs = homeSuperArgs
 					// Keyword arguments were peeled off args into env.kwargs on entry;
 					// re-attach them as the trailing hash so bare super forwards them too.
-					if env.kwargs != nil && len(env.kwargs.Keys) > 0 {
-						superArgs = append(append([]object.Value(nil), args...), env.kwargs)
+					// (Only the method's own frame carries kwargs; a block forwards the
+					// home method's positional args as captured.)
+					if selfBlock == nil && env.kwargs != nil && len(env.kwargs.Keys) > 0 {
+						superArgs = append(append([]object.Value(nil), homeSuperArgs...), env.kwargs)
 					}
 				} else {
 					superArgs = make([]object.Value, in.A)
 					copy(superArgs, stack[len(stack)-in.A:])
 					stack = stack[:len(stack)-in.A]
 				}
-				push(vm.invokeSuper(self, definee, methodName, superArgs, superBlk))
+				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, superArgs, superBlk))
 			case bytecode.OpInvokeSuperArray:
 				superBlk := block
 				switch {
@@ -1066,10 +1078,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: definee, home: homeTarget}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs}
 				}
 				argsArr := pop().(*object.Array)
-				push(vm.invokeSuper(self, definee, methodName, argsArr.Elems, superBlk))
+				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, argsArr.Elems, superBlk))
 			case bytecode.OpInvokeBlock:
 				if block == nil {
 					raise("LocalJumpError", "no block given (yield)")
@@ -1292,7 +1304,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: definee, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs}
 				}
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:

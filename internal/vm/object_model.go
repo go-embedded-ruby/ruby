@@ -72,6 +72,14 @@ type Proc struct {
 	// inside this block unwinds to — the activation where the block literal was
 	// written. nil for synthesized procs that never carry an explicit return.
 	home *returnTarget
+	// superName / superDefinee / superArgs capture the enclosing method's super
+	// anchor (its name, defining class, and arguments) at block-creation time, so
+	// a `super` written inside the block resolves against that method — matching
+	// MRI, where a block is transparent to super just as it is to yield. Empty
+	// superName means the block was written outside any method (super is illegal).
+	superName    string
+	superDefinee *RClass
+	superArgs    []object.Value
 }
 
 func (p *Proc) ToS() string     { return "#<Proc>" }
