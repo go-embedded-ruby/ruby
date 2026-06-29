@@ -172,6 +172,7 @@ type VM struct {
 	cErrDimensionMismatch                  *RClass // ExceptionForMatrix::ErrDimensionMismatch
 	cErrNotRegular                         *RClass // ExceptionForMatrix::ErrNotRegular
 	cErrOperationNotDefined                *RClass // ExceptionForMatrix::ErrOperationNotDefined
+	cGetoptLong                            *RClass // the GetoptLong class (require "getoptlong"), backed by go-ruby-getoptlong
 	cIPAddr                                *RClass // the IPAddr class (require "ipaddr"), backed by go-ruby-ipaddr
 	cIPAddrError                           *RClass // IPAddr::Error
 	cIPAddrInvalidAddressError             *RClass // IPAddr::InvalidAddressError
