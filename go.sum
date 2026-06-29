@@ -24,6 +24,8 @@ github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38 h1:j0VAUKCGN
 github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38/go.mod h1:PgAtItdQBv87Wog0Q7rnbwhqsupDC0pDXDlZgSv6nvA=
 github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4 h1:XHJOnSV9GH1+gh1/SqRsskjncBzx2NUO00G8vaX5XKA=
 github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4/go.mod h1:op9nu6Z2gvH8/phs7iJZQWNvUnT2DkJV8wBAl1l0kfE=
+github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824 h1:DLLC7LmqIWv8KT64njNSNjs5H2ayBfNMJGjtPWKR8yY=
+github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824/go.mod h1:djGUM2WR7AdnZqeRg/OQ4xVzmsl8PAWQKILX2n/foas=
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc h1:XAxewcVViNLEjBSEu6xI5rfDw7lv99hqNy8jzT5mr+I=
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc/go.mod h1:vvfFJGcGOK37vnBikohtzboL6dIfbsr54+2Ri0HkWwk=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4 h1:Qyl2DRWnEC65Y7EI6TB9vIHzQmkySJrIF5uzBu3YdKw=

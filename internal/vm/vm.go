@@ -165,6 +165,7 @@ type VM struct {
 	cComplex, cRational                    *RClass
 	cNDArray, cImage                       *RClass
 	cSet                                   *RClass
+	cCMath                                 *RClass // the CMath module (require "cmath")
 	cDidYouMean                            *RClass // the DidYouMean module (require "did_you_mean")
 	cSpellChecker                          *RClass // DidYouMean::SpellChecker, backed by go-ruby-did-you-mean
 	cTime                                  *RClass

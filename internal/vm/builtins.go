@@ -68,6 +68,7 @@ func (vm *VM) bootstrap() {
 	vm.registerNDArray()
 	vm.registerImage()
 	vm.registerSet()
+	vm.registerCMath()
 	vm.registerDidYouMean()
 	vm.registerTime()
 	vm.registerBigDecimal()
