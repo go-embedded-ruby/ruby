@@ -273,6 +273,86 @@ print pr.summarize.join`,
 		// A short character with no -X switch completes to a unique long option.
 		{req + `o={}; pr=OptionParser.new; pr.on("--name N"){|x|o[:n]=x}
 pr.parse!(["-n","bob"]); p o`, "{n: \"bob\"}\n"},
+		// The native parser is a truthy object and inspects as #<OptionParser>.
+		{req + `p OptionParser.new ? 1 : 2`, "1\n"},
+		{req + `p OptionParser.new`, "#<OptionParser>\n"},
+		// new(banner, width, indent): the width/indent override the summary layout
+		// (a nil banner keeps the default Usage line).
+		{req + `o=OptionParser.new(nil, 10, "  "); p [o.summary_width, o.summary_indent]`,
+			"[10, \"  \"]\n"},
+		// A Hash candidate map: the matched key reports the Hash value.
+		{req + `o={}; pr=OptionParser.new; pr.on("--x X",{"a"=>1,"bb"=>2}){|v|o[:x]=v}
+pr.parse!(["--x","a"]); p o`, "{x: 1}\n"},
+		// An Array candidate set of non-String objects keys on each #to_s and reports
+		// the original object — the prelude's list behaviour this binding preserves.
+		{req + `o={}; pr=OptionParser.new; pr.on("--n N",[1,2,30]){|v|o[:n]=v}
+pr.parse!(["--n","30"]); p o`, "{n: 30}\n"},
+		// String coercion is the identity accept.
+		{req + `o={}; pr=OptionParser.new; pr.on("--s S",String){|v|o[:s]=v}
+pr.parse!(["--s","hi"]); p o`, "{s: \"hi\"}\n"},
+		// A very large Integer coerces through to a Bignum, round-tripping exactly.
+		{req + `o={}; pr=OptionParser.new; pr.on("--n N",Integer){|n|o[:n]=n}
+pr.parse!(["--n","0xffffffffffffffffffffffffff"]); p o`,
+			"{n: 20282409603651670423947251286015}\n"},
+		// An unknown coercion Class falls back to the identity String accept — the
+		// prelude's @acceptables miss behaviour this binding preserves.
+		{req + `class C; end; o={}; pr=OptionParser.new; pr.on("--x X",C){|v|o[:x]=v}
+pr.parse!(["--x","hi"]); p o`, "{x: \"hi\"}\n"},
+		// version/release round-trip; version is nil until set, release likewise.
+		{req + `o=OptionParser.new; p o.version; o.version="1"; p o.version
+p o.release; o.release="r"; p o.release`, "nil\n\"1\"\nnil\n\"r\"\n"},
+		// parse!/order! with no argv argument operate on default_argv in place.
+		{req + `o={}; pr=OptionParser.new; pr.on("-v"){o[:v]=1}
+pr.default_argv=["-v","f"]; r=pr.parse!; p [o,r]`, "[{v: 1}, [\"f\"]]\n"},
+		{req + `o={}; pr=OptionParser.new; pr.on("-v"){o[:v]=1}
+pr.default_argv=["-v","cmd","-v"]; r=pr.order!; p [o,r]`,
+			"[{v: 1}, [\"cmd\", \"-v\"]]\n"},
+		// getopts off default_argv (no leading Array argument).
+		{req + `pr=OptionParser.new; pr.default_argv=["-a","rest"]
+r=pr.getopts("a"); p [r,pr.default_argv]`,
+			"[{\"a\" => true}, [\"rest\"]]\n"},
+		// getopts with an absent arg-taking option reports nil.
+		{req + `pr=OptionParser.new; p pr.getopts(["x"],"a","bar:")`,
+			"{\"a\" => false, \"bar\" => nil}\n"},
+		// on(...) with no block records the value but dispatches nothing.
+		{req + `pr=OptionParser.new; pr.on("-v"); p pr.parse!(["-v","x"])`,
+			"[\"x\"]\n"},
+		// separator with no argument inserts a blank line.
+		{req + `pr=OptionParser.new; pr.separator; pr.on("-v","d")
+print pr.summarize.join`, "\n    -v                               d\n"},
+		// program_name defaults to "optparse" when no explicit name and $0 unset,
+		// and feeds the default banner; an explicit program_name overrides it.
+		{req + `pr=OptionParser.new; pr.program_name="myprog"; p pr.program_name`,
+			"\"myprog\"\n"},
+		{req + `pr=OptionParser.new; pr.program_name="myprog"; pr.on("-v","d")
+print pr.help`, "Usage: myprog [options]\n    -v                               d\n"},
+		// program_name with no explicit name falls back to File.basename($0).
+		{req + `$0="/usr/bin/foo"; p OptionParser.new.program_name`, "\"foo\"\n"},
+		// new with non-Integer width / non-String indent placeholders keeps the
+		// defaults (the nil-banner path), and a non-Array default_argv= is ignored.
+		{req + `o=OptionParser.new("u", nil, nil)
+p [o.banner, o.summary_width, o.summary_indent]`, "[\"u\", 32, \"    \"]\n"},
+		{req + `o=OptionParser.new; o.default_argv="x"; p o.default_argv`, "[]\n"},
+		// banner is nil until set (the default Usage line is only synthesized for
+		// help/to_s) — the prelude's attr_accessor behaviour.
+		{req + `p OptionParser.new.banner`, "nil\n"},
+		// order (non-bang) with a non-option block sink leaves the source untouched.
+		{req + `seen=[]; pr=OptionParser.new; pr.on("-v"){}
+r=pr.order(["-v","x","y"]){|n|seen<<n}; p [seen,r]`,
+			"[[\"x\", \"y\"], []]\n"},
+	}
+
+	// The non-mutating parse/getopts forms re-raise a library error as the matching
+	// OptionParser:: exception, just like the bang forms.
+	for _, c := range []struct{ src, class, msg string }{
+		{req + `OptionParser.new.parse(["--bad"])`,
+			"OptionParser::InvalidOption", "invalid option: --bad"},
+		{req + `OptionParser.new.getopts(["--bad"],"a")`,
+			"OptionParser::InvalidOption", "invalid option: --bad"},
+	} {
+		if class, msg := evalErr(t, c.src); class != c.class || msg != c.msg {
+			t.Errorf("src=%q got (%s, %q), want (%s, %q)", c.src, class, msg, c.class, c.msg)
+		}
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

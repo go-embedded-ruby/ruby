@@ -1661,11 +1661,11 @@ class ERB
 end
 
 # ---------------------------------------------------------------------------
-# OptionParser (optparse): a from-scratch pure-Ruby command-line option parser
-# matching MRI's surface — declaration (#on/#on_tail/#on_head/#separator), the
-# parse family (#parse/#parse!/#order/#order!/#permute/#permute!/#getopts),
-# type coercion, abbreviation, --[no-] negation, bundled shorts, #help/#to_s,
-# and the OptionParser::ParseError tree. Required by Puppet's CLI.
+# OptionParser (optparse): a command-line option parser matching MRI's surface —
+# declaration (#on/#on_tail/#on_head/#separator), the parse family (#parse/#parse!/
+# #order/#order!/#permute/#permute!/#getopts), type coercion, abbreviation,
+# --[no-] negation, bundled shorts, #help/#to_s, and the OptionParser::ParseError
+# tree. Required by Puppet's CLI.
 # ---------------------------------------------------------------------------
 # OptionParser's argv-parsing ENGINE now lives in the pure-Go
 # github.com/go-ruby-optparse/optparse library, bound natively (internal/vm/
