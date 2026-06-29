@@ -4,7 +4,6 @@ go 1.26.4
 
 require (
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
-	github.com/go-composites/bigfloat v0.0.0-20260621182601-a3f86ca9330d
 	github.com/go-composites/date v0.0.0-20260621182336-3423c9afe5fe
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/set v0.0.0-20260620192142-23f1a50c2b92
@@ -12,6 +11,7 @@ require (
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
 	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
+	github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06

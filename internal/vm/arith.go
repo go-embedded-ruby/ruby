@@ -44,6 +44,18 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return complexOp(op, ac, bc)
 	}
 
+	// BigDecimal arithmetic: + - * / % delegate to the go-ruby-bigdecimal library
+	// (MRI-exact arbitrary-precision decimal). A BigDecimal operand wins the
+	// numeric tower in either position (BigDecimal + Rational and Rational +
+	// BigDecimal are both BigDecimal), so this is checked before the Rational
+	// fast path; the non-BigDecimal operand is coerced to BigDecimal.
+	if ab, ok := a.(*BigDecimal); ok {
+		return bigDecimalOp(op, ab, b)
+	}
+	if bb, ok := b.(*BigDecimal); ok {
+		return bigDecimalRightOp(op, a, bb)
+	}
+
 	// Rational fast paths. A Float operand makes the result Float (Float wins the
 	// numeric tower); an Integer/Bignum stays exact.
 	if _, ok := a.(*object.Rational); ok {
@@ -64,13 +76,6 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 	// (the seconds between two instants) reach the operator fast path.
 	if at, ok := a.(*Time); ok {
 		return timeOp(op, at, b)
-	}
-
-	// BigDecimal arithmetic: +/-/*/ delegate to the go-composites bigfloat
-	// (exact 256-bit decimal). The left operand drives the fast path; a numeric
-	// right operand is coerced to BigDecimal.
-	if ab, ok := a.(*BigDecimal); ok {
-		return bigDecimalOp(op, ab, b)
 	}
 
 	// Date arithmetic: d + n / d - n (shift by a whole number of days) and
@@ -478,7 +483,7 @@ func negate(v object.Value) object.Value {
 	case *object.Rational:
 		return &object.Rational{R: new(big.Rat).Neg(n.R)}
 	case *BigDecimal:
-		return &BigDecimal{f: payloadBigFloat(n.f.Neg())}
+		return &BigDecimal{d: n.d.Neg()}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
@@ -492,19 +497,20 @@ func valueEqual(a, b object.Value) bool {
 	if bc, ok := b.(*object.Complex); ok {
 		return complexEqual(bc, a)
 	}
-	if ar, ok := a.(*object.Rational); ok {
-		return rationalEqual(ar, b)
-	}
-	if br, ok := b.(*object.Rational); ok {
-		return rationalEqual(br, a)
-	}
-	// BigDecimal compares by value, coercing a numeric operand (2 == BigDecimal("2")),
-	// in either operand order.
+	// BigDecimal compares by value, coercing a numeric operand (2 == BigDecimal("2"),
+	// BigDecimal("1.5") == Rational(3, 2)), in either operand order. Checked before
+	// Rational so a BigDecimal operand drives the (decimal-precise) comparison.
 	if ab, ok := a.(*BigDecimal); ok {
 		return bigDecimalEqual(ab, b)
 	}
 	if bb, ok := b.(*BigDecimal); ok {
 		return bigDecimalEqual(bb, a)
+	}
+	if ar, ok := a.(*object.Rational); ok {
+		return rationalEqual(ar, b)
+	}
+	if br, ok := b.(*object.Rational); ok {
+		return rationalEqual(br, a)
 	}
 	switch av := a.(type) {
 	case object.Integer:
