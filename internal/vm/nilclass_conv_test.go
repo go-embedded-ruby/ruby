@@ -29,6 +29,9 @@ func TestNilClassConversions(t *testing.T) {
 		{"xor_false", `p(nil ^ false)`, "false\n"},
 		{"xor_obj", `p(nil ^ 7)`, "true\n"},
 		{"xor_nil", `p(nil ^ nil)`, "false\n"},
+		// nil =~ anything is nil (NilClass#=~), so `x =~ /re/` short-circuits on nil.
+		{"match_re", `p(nil =~ /x/)`, "nil\n"},
+		{"match_str", `p(nil =~ "x")`, "nil\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,6 +48,7 @@ func TestNilClassBooleanArity(t *testing.T) {
 		`nil.send(:&)`,
 		`nil.send(:|)`,
 		`nil.send(:^)`,
+		`nil.send(:=~)`,
 	} {
 		class, _ := evalErr(t, src)
 		if class != "ArgumentError" {
