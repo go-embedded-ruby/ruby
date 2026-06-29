@@ -173,6 +173,8 @@ type VM struct {
 	cBag                                   *RClass
 	cStringScanner                         *RClass
 	cOptionParser                          *RClass
+	cURI                                   *RClass // the URI module (require "uri"), backed by go-ruby-uri
+	cURIGeneric                            *RClass // URI::Generic, the base URI class wrapping a *uri.URI
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass

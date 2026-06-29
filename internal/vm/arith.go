@@ -193,6 +193,12 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isObj := a.(*RObject); isObj {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// A URI dispatches its arithmetic operator (only + is defined, resolving a
+		// reference) as a method, so the binding's merge — which needs the VM to
+		// wrap the result — runs with a live VM rather than the VM-less binary path.
+		if _, isURI := a.(*URI); isURI {
+			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
 		return binary(op, a, b)
 	}
 }
@@ -573,6 +579,8 @@ func valueEqual(a, b object.Value) bool {
 		return timeEqual(av, b)
 	case *Date:
 		return dateEqual(av, b)
+	case *URI:
+		return uriEqual(av, b)
 	case *Regexp:
 		bv, ok := b.(*Regexp)
 		return ok && av.source == bv.source && orderFlags(av.flags) == orderFlags(bv.flags)

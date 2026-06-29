@@ -604,6 +604,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cStringScanner
 	case *OptionParser:
 		return vm.cOptionParser
+	case *URI:
+		// A URI wrapper carries its own Ruby class (URI::Generic or a scheme
+		// subclass such as URI::HTTP), so it reports that class for `class` /
+		// `is_a?` while every instance method lives on URI::Generic.
+		return x.cls
 	case *Set:
 		return vm.cSet
 	case *Time:

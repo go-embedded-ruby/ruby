@@ -423,6 +423,7 @@ func (vm *VM) bootstrap() {
 	vm.registerERB()           // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
 	vm.registerStringScanner() // StringScanner (require "strscan"), backed by go-ruby-strscan; needs StandardError
 	vm.registerOptionParser()  // OptionParser (require "optparse"), backed by go-ruby-optparse; prelude adds the ParseError tree
+	vm.registerURI()           // URI module (require "uri"), backed by go-ruby-uri; needs StandardError (URI::Error) + Regexp (make_regexp)
 	vm.registerMonitor()       // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
 	vm.registerZlib()          // needs the exception hierarchy (Zlib::Error < StandardError)
 	vm.registerFiber()         // needs the exception hierarchy (FiberError < StandardError)
