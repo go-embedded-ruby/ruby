@@ -410,6 +410,7 @@ func (vm *VM) bootstrap() {
 	vm.registerNetHTTP()       // net/http + net/https loadable shell; needs StandardError
 	vm.registerResolv()        // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
 	vm.registerTimeout()       // Timeout module (loadable shell); needs RuntimeError
+	vm.registerDateErrors()    // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
 	vm.registerJSON()          // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
 	vm.registerYAML()          // YAML/Psych loadable shell; needs StandardError
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
