@@ -615,6 +615,24 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cCSVRow
 	case *CSVTable:
 		return vm.cCSVTable
+	case *REXMLDocument:
+		return vm.cREXMLDocument
+	case *REXMLElement:
+		return vm.cREXMLElement
+	case *REXMLElements:
+		return vm.cREXMLElements
+	case *REXMLAttributes:
+		return vm.cREXMLAttributes
+	case *REXMLText:
+		return vm.cREXMLText
+	case *REXMLComment:
+		return vm.cREXMLComment
+	case *REXMLCData:
+		return vm.cREXMLCData
+	case *REXMLInstruction:
+		return vm.cREXMLInstruction
+	case *REXMLDocType:
+		return vm.cREXMLDocType
 	case *csvSink:
 		// The writer CSV.generate yields to its block: it reports CSV so its << /
 		// push methods (defined on the CSV class) dispatch.

@@ -194,6 +194,19 @@ type VM struct {
 	cCSV                                   *RClass // the CSV class (require "csv"), backed by go-ruby-csv
 	cCSVRow                                *RClass // CSV::Row, wrapping a *csv.Row
 	cCSVTable                              *RClass // CSV::Table, wrapping a *csv.Table
+	cREXML                                 *RClass // the REXML module (require "rexml/document"), backed by go-ruby-rexml
+	cREXMLDocument                         *RClass // REXML::Document, wrapping a *rexml.Document
+	cREXMLElement                          *RClass // REXML::Element, wrapping a *rexml.Element
+	cREXMLElements                         *RClass // REXML::Elements, the child-navigation proxy
+	cREXMLAttributes                       *RClass // REXML::Attributes, wrapping a *rexml.Attributes
+	cREXMLText                             *RClass // REXML::Text, wrapping a *rexml.Text
+	cREXMLComment                          *RClass // REXML::Comment, wrapping a *rexml.Comment
+	cREXMLCData                            *RClass // REXML::CData, wrapping a *rexml.CData
+	cREXMLInstruction                      *RClass // REXML::Instruction, wrapping a *rexml.Instruction
+	cREXMLDocType                          *RClass // REXML::DocType, wrapping a *rexml.DocType
+	cREXMLPretty                           *RClass // REXML::Formatters::Pretty serialiser
+	cREXMLXPath                            *RClass // REXML::XPath module
+	cREXMLParseException                   *RClass // REXML::ParseException < StandardError
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass

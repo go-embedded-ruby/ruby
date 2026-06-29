@@ -31,6 +31,7 @@ require (
 	github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8
 	github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
+	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
