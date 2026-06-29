@@ -35,7 +35,7 @@ var providedFeatures = map[string]bool{
 	"optparse": true, "ripper": true, "erb": true, "find": true,
 	"tempfile": true, "open3": true,
 	"strscan": true, "fiber": true, "objspace": true, "csv": true,
-	"shellwords": true, "prime": true,
+	"shellwords": true, "prime": true, "tsort": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
