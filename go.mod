@@ -35,5 +35,6 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
+	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 )
