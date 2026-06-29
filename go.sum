@@ -30,6 +30,8 @@ github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529 h1:md/l6ifEY6S0Iy1
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529/go.mod h1:HEJVI7jQ/BnjiSiu2Wj934QboEAgdv47RNOqvZb+nRw=
 github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c h1:dJBMxMFxBLrk4LoWL23tOl5M8P0CA8Gb7r/mvsaPk6A=
 github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c/go.mod h1:1tuz12SHPOcnFSfdPYRFwVvRhMT4Xn4M4jfPFgM7pLA=
+github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06 h1:3m+pFs699msdrHRMXTtv5N2H/Qj2k8YSbndLlCyO8Ww=
+github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06/go.mod h1:nHXcH3zaGNmCslZStZVeylXkv1wLp+nzT6qNj+m+QXU=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f/go.mod h1:UpjSgWGcQSNt0ARWuHKwf0P55LkwZ65vuqoRPSKctZ8=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=

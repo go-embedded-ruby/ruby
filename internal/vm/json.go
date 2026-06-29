@@ -1,257 +1,149 @@
+// Copyright (c) the go-embedded-ruby/ruby authors
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 package vm
 
 import (
-	"encoding/json"
-	"math"
-	"strconv"
-	"strings"
+	json "github.com/go-ruby-json/json"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // registerJSON installs the JSON module (require "json"): JSON.generate/dump,
-// JSON.pretty_generate, JSON.parse, and Object#to_json. Generation walks the
-// Ruby value tree directly (so float and hash-key formatting match MRI); parsing
-// uses encoding/json's token stream so object key order is preserved, as MRI
-// keeps it.
+// JSON.pretty_generate, JSON.parse and Object#to_json. The parser and generator
+// live in the github.com/go-ruby-json/json library; this module is the thin
+// wiring that maps rbgo's object graph to and from the library's value model (see
+// json_bind.go) and translates the Ruby keyword options to the library's
+// functional options. The error tree (JSON::JSONError and its subclasses) is
+// registered so a re-raised library error rescues as the right Ruby class.
 func (vm *VM) registerJSON() {
 	mod := newClass("JSON", nil)
 	mod.isModule = true
 	vm.consts["JSON"] = mod
+	vm.registerJSONErrors(mod)
+
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
+	// JSON.generate(obj[, opts]) / JSON.dump(obj) render a compact document.
 	generate := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		var sb strings.Builder
-		jsonGen(args[0], &sb)
-		return object.NewString(sb.String())
+		return object.NewString(jsonGenerate(args[0], jsonGenerateOpts(args[1:])...))
 	}
 	def("generate", generate)
 	def("dump", generate)
+
+	// JSON.pretty_generate(obj[, opts]) renders the two-space-indented layout.
 	def("pretty_generate", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		var sb strings.Builder
-		jsonPretty(args[0], &sb, 0)
-		return object.NewString(sb.String())
+		return object.NewString(jsonPrettyGenerate(args[0], jsonGenerateOpts(args[1:])...))
 	})
+
+	// JSON.parse(str[, opts]) parses a document; the symbolize_names: keyword
+	// returns object keys as Symbols.
 	def("parse", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s, ok := args[0].(*object.String)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 		}
-		dec := json.NewDecoder(strings.NewReader(s.Str()))
-		dec.UseNumber()
-		v := jsonParse(dec)
-		if _, err := dec.Token(); err == nil {
-			// Trailing content after a complete value is malformed.
-			raise("RuntimeError", "unexpected token after JSON value")
-		}
-		return v
+		return jsonParse(s.Str(), jsonParseOpts(args[1:])...)
 	})
 
-	// Object#to_json serialises any value (Array/Hash/… included) via generate.
+	// Object#to_json serialises any value (Array / Hash / … included) via generate.
 	vm.cObject.define("to_json", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		var sb strings.Builder
-		jsonGen(self, &sb)
-		return object.NewString(sb.String())
+		return object.NewString(jsonGenerate(self))
 	})
 }
 
-// jsonGen writes the compact JSON encoding of v.
-func jsonGen(v object.Value, sb *strings.Builder) {
-	switch x := v.(type) {
-	case object.Integer:
-		sb.WriteString(strconv.FormatInt(int64(x), 10))
-	case *object.Bignum:
-		sb.WriteString(x.ToS())
-	case object.Float:
-		f := float64(x)
-		if math.IsInf(f, 0) || math.IsNaN(f) {
-			raise("RuntimeError", "%s not allowed in JSON", x.ToS())
-		}
-		sb.WriteString(x.ToS())
-	case *object.String:
-		jsonStr(x.Str(), sb)
-	case object.Symbol:
-		jsonStr(string(x), sb)
-	case object.Bool:
-		if bool(x) {
-			sb.WriteString("true")
-		} else {
-			sb.WriteString("false")
-		}
-	case object.Nil:
-		sb.WriteString("null")
-	case *object.Array:
-		sb.WriteByte('[')
-		for i, e := range x.Elems {
-			if i > 0 {
-				sb.WriteByte(',')
-			}
-			jsonGen(e, sb)
-		}
-		sb.WriteByte(']')
-	case *object.Hash:
-		sb.WriteByte('{')
-		for i, k := range x.Keys {
-			if i > 0 {
-				sb.WriteByte(',')
-			}
-			jsonStr(jsonKey(k), sb)
-			sb.WriteByte(':')
-			val, _ := x.Get(k)
-			jsonGen(val, sb)
-		}
-		sb.WriteByte('}')
-	default:
-		// Anything else is serialised by its string form (matching MRI's
-		// to_s-of-unknown fallback closely enough for our value set).
-		jsonStr(v.ToS(), sb)
+// registerJSONErrors installs the JSON::JSONError exception tree mirroring MRI
+// (JSONError < StandardError; ParserError / GeneratorError < JSONError;
+// NestingError < ParserError). Each class is registered both as a nested constant
+// of JSON (so Ruby `JSON::ParserError` resolves it) and under its qualified name
+// in the top-level table (so a re-raised library error's exceptionObject lookup
+// finds the very same class), exactly as Errno:: classes are.
+func (vm *VM) registerJSONErrors(mod *RClass) {
+	std := vm.consts["StandardError"].(*RClass)
+	reg := func(simple, qualified string, super *RClass) *RClass {
+		c := newClass(qualified, super)
+		mod.consts[simple] = c
+		vm.consts[qualified] = c
+		return c
 	}
+	jsonErr := reg("JSONError", "JSON::JSONError", std)
+	parserErr := reg("ParserError", "JSON::ParserError", jsonErr)
+	reg("NestingError", "JSON::NestingError", parserErr)
+	reg("GeneratorError", "JSON::GeneratorError", jsonErr)
 }
 
-// jsonPretty writes the 2-space-indented JSON encoding of v (MRI's
-// JSON.pretty_generate layout).
-func jsonPretty(v object.Value, sb *strings.Builder, depth int) {
-	switch x := v.(type) {
-	case *object.Array:
-		if len(x.Elems) == 0 {
-			sb.WriteString("[]")
-			return
-		}
-		sb.WriteString("[\n")
-		for i, e := range x.Elems {
-			if i > 0 {
-				sb.WriteString(",\n")
-			}
-			jsonIndent(sb, depth+1)
-			jsonPretty(e, sb, depth+1)
-		}
-		sb.WriteByte('\n')
-		jsonIndent(sb, depth)
-		sb.WriteByte(']')
-	case *object.Hash:
-		if len(x.Keys) == 0 {
-			sb.WriteString("{}")
-			return
-		}
-		sb.WriteString("{\n")
-		for i, k := range x.Keys {
-			if i > 0 {
-				sb.WriteString(",\n")
-			}
-			jsonIndent(sb, depth+1)
-			jsonStr(jsonKey(k), sb)
-			sb.WriteString(": ")
-			val, _ := x.Get(k)
-			jsonPretty(val, sb, depth+1)
-		}
-		sb.WriteByte('\n')
-		jsonIndent(sb, depth)
-		sb.WriteByte('}')
-	default:
-		jsonGen(v, sb)
+// jsonParseOpts translates a JSON.parse options hash to the library's functional
+// options: symbolize_names (object keys as Symbols), max_nesting and allow_nan.
+// An absent keyword leaves the library default in place.
+func jsonParseOpts(rest []object.Value) []json.Option {
+	h := jsonOptsHash(rest)
+	if h == nil {
+		return nil
 	}
+	var opts []json.Option
+	if v, ok := h.Get(object.Symbol("symbolize_names")); ok {
+		opts = append(opts, json.WithSymbolizeNames(v.Truthy()))
+	}
+	opts = append(opts, jsonSharedOpts(h)...)
+	return opts
 }
 
-func jsonIndent(sb *strings.Builder, depth int) {
-	for i := 0; i < depth; i++ {
-		sb.WriteString("  ")
+// jsonGenerateOpts translates a JSON.generate / pretty_generate options hash to
+// the library's functional options: indent / space / space_before / object_nl /
+// array_nl (string formatting) plus the shared max_nesting / allow_nan. An absent
+// keyword leaves the library default in place.
+func jsonGenerateOpts(rest []object.Value) []json.Option {
+	h := jsonOptsHash(rest)
+	if h == nil {
+		return nil
 	}
-}
-
-// jsonKey renders a hash key as the string JSON requires (symbol → name,
-// anything else → its to_s).
-func jsonKey(k object.Value) string {
-	if s, ok := k.(*object.String); ok {
-		return s.Str()
-	}
-	return k.ToS()
-}
-
-// jsonStr writes a JSON string literal, escaping per MRI (control characters and
-// the structural characters only — UTF-8 text passes through unescaped).
-func jsonStr(s string, sb *strings.Builder) {
-	sb.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '"':
-			sb.WriteString(`\"`)
-		case '\\':
-			sb.WriteString(`\\`)
-		case '\n':
-			sb.WriteString(`\n`)
-		case '\r':
-			sb.WriteString(`\r`)
-		case '\t':
-			sb.WriteString(`\t`)
-		case '\f':
-			sb.WriteString(`\f`)
-		case '\b':
-			sb.WriteString(`\b`)
-		default:
-			if r < 0x20 {
-				sb.WriteString(`\u`)
-				const hexdigits = "0123456789abcdef"
-				sb.WriteByte('0')
-				sb.WriteByte('0')
-				sb.WriteByte(hexdigits[(r>>4)&0xf])
-				sb.WriteByte(hexdigits[r&0xf])
-			} else {
-				sb.WriteRune(r)
+	var opts []json.Option
+	str := func(key string, with func(string) json.Option) {
+		if v, ok := h.Get(object.Symbol(key)); ok {
+			if s, isStr := v.(*object.String); isStr {
+				opts = append(opts, with(s.Str()))
 			}
 		}
 	}
-	sb.WriteByte('"')
+	str("indent", json.WithIndent)
+	str("space", json.WithSpace)
+	str("space_before", json.WithSpaceBefore)
+	str("object_nl", json.WithObjectNL)
+	str("array_nl", json.WithArrayNL)
+	opts = append(opts, jsonSharedOpts(h)...)
+	return opts
 }
 
-// jsonParse reads one JSON value from dec's token stream, preserving object key
-// order. Malformed input raises (the decoder surfaces the error).
-func jsonParse(dec *json.Decoder) object.Value {
-	tok, err := dec.Token()
-	if err != nil {
-		raise("RuntimeError", "unexpected token in JSON")
-	}
-	switch t := tok.(type) {
-	case json.Delim:
-		// A value can only begin with '[' or '{' — the decoder errors on a stray
-		// ']'/'}' before yielding it here, so a non-'[' delim is necessarily '{'.
-		if t == '[' {
-			arr := &object.Array{}
-			for dec.More() {
-				arr.Elems = append(arr.Elems, jsonParse(dec))
+// jsonSharedOpts maps the max_nesting / allow_nan keywords common to parse and
+// generate. max_nesting: false (or 0) disables the limit, matching MRI.
+func jsonSharedOpts(h *object.Hash) []json.Option {
+	var opts []json.Option
+	if v, ok := h.Get(object.Symbol("max_nesting")); ok {
+		switch n := v.(type) {
+		case object.Integer:
+			opts = append(opts, json.WithMaxNesting(int(n)))
+		case object.Bool:
+			if !bool(n) { // max_nesting: false disables the limit
+				opts = append(opts, json.WithMaxNesting(0))
 			}
-			dec.Token() // consume ']'
-			return arr
 		}
-		h := object.NewHash()
-		for dec.More() {
-			keyTok, err := dec.Token() // object keys are always strings
-			key, ok := keyTok.(string)
-			if err != nil || !ok {
-				raise("RuntimeError", "unexpected token in JSON object key")
-			}
-			h.Set(object.NewString(key), jsonParse(dec))
-		}
-		dec.Token() // consume '}'
-		return h
-	case string:
-		return object.NewString(t)
-	case json.Number:
-		return jsonNumber(string(t))
-	case bool:
-		return object.Bool(t)
 	}
-	// The only remaining token type is a JSON null.
-	return object.NilV
+	if v, ok := h.Get(object.Symbol("allow_nan")); ok {
+		opts = append(opts, json.WithAllowNaN(v.Truthy()))
+	}
+	return opts
 }
 
-// jsonNumber turns a JSON numeric literal into an Integer when it has no
-// fractional/exponent part, else a Float (matching MRI's JSON.parse).
-func jsonNumber(s string) object.Value {
-	if !strings.ContainsAny(s, ".eE") {
-		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return object.Integer(n)
-		}
+// jsonOptsHash returns the trailing options Hash of a JSON entry point, or nil
+// when the last argument is not a Hash (no options given).
+func jsonOptsHash(rest []object.Value) *object.Hash {
+	if len(rest) == 0 {
+		return nil
 	}
-	f, _ := strconv.ParseFloat(s, 64)
-	return object.Float(f)
+	h, ok := rest[len(rest)-1].(*object.Hash)
+	if !ok {
+		return nil
+	}
+	return h
 }
