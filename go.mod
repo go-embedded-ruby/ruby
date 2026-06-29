@@ -11,6 +11,7 @@ require (
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4
+	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
 	github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc
 	github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
@@ -19,6 +20,7 @@ require (
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
+	github.com/go-ruby-matrix/matrix v0.0.0-20260629152812-557539bb95fc
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0
 	github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8
@@ -35,6 +37,5 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
-	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 )

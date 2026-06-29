@@ -72,6 +72,16 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return setOp(op, as, b)
 	}
 
+	// Matrix / Vector arithmetic: + and - reach the operator fast path (the other
+	// operators — * / ** -@ — dispatch as methods). The right operand must be the
+	// same wrapper type.
+	if _, ok := a.(*Matrix); ok {
+		return matrixOp(op, a, b)
+	}
+	if _, ok := a.(*Vector); ok {
+		return matrixOp(op, a, b)
+	}
+
 	// Time arithmetic: t + secs / t - secs (shift by a Duration) and t - other
 	// (the seconds between two instants) reach the operator fast path.
 	if at, ok := a.(*Time); ok {
@@ -492,6 +502,8 @@ func negate(v object.Value) object.Value {
 		return &object.Rational{R: new(big.Rat).Neg(n.R)}
 	case *BigDecimal:
 		return &BigDecimal{d: n.d.Neg()}
+	case *Matrix:
+		return &Matrix{m: n.m.Neg()}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
@@ -574,6 +586,10 @@ func valueEqual(a, b object.Value) bool {
 	case *Set:
 		bv, ok := b.(*Set)
 		return ok && av.s.EqualQ(bv.s)
+	case *Matrix:
+		return eqMatrix(av, b)
+	case *Vector:
+		return eqVector(av, b)
 	case *Bag:
 		bv, ok := b.(*Bag)
 		return ok && av.b.Equal(bv.b)
