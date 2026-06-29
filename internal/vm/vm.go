@@ -169,6 +169,7 @@ type VM struct {
 	cFileStat                              *RClass
 	cBigDecimal                            *RClass
 	cDate                                  *RClass
+	cDateTime                              *RClass
 	cBag                                   *RClass
 	cStringScanner                         *RClass
 	cOptionParser                          *RClass

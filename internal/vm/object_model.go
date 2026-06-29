@@ -613,6 +613,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *BigDecimal:
 		return vm.cBigDecimal
 	case *Date:
+		// A DateTime is the same wrapper with the IsDateTime flag set; it reports the
+		// DateTime class (a subclass of Date), so it inherits Date's methods yet has
+		// its own identity for `class` / `is_a?`.
+		if x.d.IsDateTime() {
+			return vm.cDateTime
+		}
 		return vm.cDate
 	case *Bag:
 		return vm.cBag
