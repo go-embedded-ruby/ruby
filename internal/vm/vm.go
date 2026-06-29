@@ -165,6 +165,7 @@ type VM struct {
 	cComplex, cRational                    *RClass
 	cNDArray, cImage                       *RClass
 	cSet                                   *RClass
+	cPrettyPrint                           *RClass // the PrettyPrint class (require "prettyprint")
 	cMatrix                                *RClass // the Matrix class (require "matrix")
 	cVector                                *RClass // the Vector class (require "matrix")
 	cExceptionForMatrix                    *RClass // the ExceptionForMatrix module (require "matrix")

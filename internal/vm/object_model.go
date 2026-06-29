@@ -621,6 +621,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cCSV
 	case *Set:
 		return vm.cSet
+	case *PrettyPrint:
+		return vm.cPrettyPrint
+	case *PrettyPrintGroup:
+		return vm.consts["PrettyPrint::Group"].(*RClass)
+	case *SingleLine:
+		return vm.consts["PrettyPrint::SingleLine"].(*RClass)
 	case *IPAddr:
 		return vm.cIPAddr
 	case *Matrix:

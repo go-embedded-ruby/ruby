@@ -68,6 +68,8 @@ func (vm *VM) bootstrap() {
 	vm.registerNDArray()
 	vm.registerImage()
 	vm.registerSet()
+	vm.registerPrettyPrint()
+	vm.registerSingleLine()
 	vm.registerCMath()
 	vm.registerDidYouMean()
 	vm.registerTime()
