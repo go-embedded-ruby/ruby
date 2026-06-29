@@ -621,6 +621,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cCSV
 	case *Set:
 		return vm.cSet
+	case *SpellChecker:
+		return vm.cSpellChecker
 	case *Time:
 		return vm.cTime
 	case *FileStat:

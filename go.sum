@@ -28,6 +28,8 @@ github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc h1:XAxewcVViNLEjBS
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc/go.mod h1:vvfFJGcGOK37vnBikohtzboL6dIfbsr54+2Ri0HkWwk=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4 h1:Qyl2DRWnEC65Y7EI6TB9vIHzQmkySJrIF5uzBu3YdKw=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4/go.mod h1:kn4XWlGthyqF+ogp9Tmj9EYLmvZa3Yb9Eqnfdsgu63Y=
+github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9 h1:6chWND+L2l7xqFlGUfv732oUBBOVs8WsMvKt8z7HJBE=
+github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9/go.mod h1:8I30lj4s9N0MCztmdJdCyMRCfK5xBBQiWHUwgnK3pIY=
 github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111 h1:pxsFN2ESynf6yWyy9Z1pX02H042YyC5ILsIVN89wPTU=
 github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111/go.mod h1:Et3sL9ojvqpOBFth/n1pryhkJzr9DvYYQ23g3rUJ0N4=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529 h1:md/l6ifEY6S0Iy1nBk5hVt5BhnWJRqhB08gVEsVvS28=
