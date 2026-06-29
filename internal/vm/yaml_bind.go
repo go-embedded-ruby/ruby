@@ -163,6 +163,8 @@ func (c *yamlToCtx) conv(v object.Value) yaml.Value {
 		return c.convObject(n)
 	case *Set:
 		return c.convSet(n)
+	case *URI:
+		return c.convURI(n)
 	case *RClass:
 		if n.isModule {
 			return yaml.Module(n.ToS())
@@ -261,6 +263,56 @@ func (c *yamlToCtx) convSet(s *Set) yaml.Value {
 	}
 	out.IVars["hash"] = inner
 	return out
+}
+
+// convURI maps a Ruby URI to its Psych shape — a !ruby/object:URI::HTTP (or the
+// matching scheme subclass) carrying the component ivars MRI's URI dumps
+// (scheme / user / password / host / port / path / query / opaque / fragment),
+// an absent component as nil. The userinfo is split into the user / password the
+// MRI ivar layout uses; the parser ivar MRI also emits is omitted (a parser
+// object has no data worth round-tripping and the loader rebuilds it). This keeps
+// a URI in a serialised graph (e.g. a Puppet run report) dumpable, as the former
+// pure-Ruby prelude URI was via its plain ivars.
+func (c *yamlToCtx) convURI(u *URI) yaml.Value {
+	if cached, ok := c.seen[u]; ok {
+		return cached
+	}
+	out := &yaml.Object{Class: u.cls.name, IVars: map[string]yaml.Value{}}
+	c.seen[u] = out
+	str := func(s string, has bool) yaml.Value {
+		if !has {
+			return nil
+		}
+		return s
+	}
+	lu := u.u
+	user, password := uriUserPassword(lu.Userinfo)
+	out.IVars["scheme"] = str(lu.Scheme, lu.Scheme != "")
+	out.IVars["user"] = str(user, lu.Userinfo != "")
+	out.IVars["password"] = str(password, password != "")
+	out.IVars["host"] = str(lu.Host, lu.Host != "")
+	out.IVars["port"] = func() yaml.Value {
+		if p, ok := lu.EffectivePort(); ok {
+			return int64(p)
+		}
+		return nil
+	}()
+	out.IVars["path"] = lu.Path
+	out.IVars["query"] = str(lu.Query, lu.HasQuery)
+	out.IVars["opaque"] = str(lu.Opaque, lu.Opaque != "")
+	out.IVars["fragment"] = str(lu.Fragment, lu.HasFrag)
+	return out
+}
+
+// uriUserPassword splits a URI userinfo ("user:password") into its user and
+// password halves for the YAML ivar layout; a userinfo with no ":" is all user.
+func uriUserPassword(userinfo string) (string, string) {
+	for i := 0; i < len(userinfo); i++ {
+		if userinfo[i] == ':' {
+			return userinfo[:i], userinfo[i+1:]
+		}
+	}
+	return userinfo, ""
 }
 
 // ivarBareName strips a leading "@" from an instance-variable name (the library

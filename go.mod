@@ -20,6 +20,7 @@ require (
 	github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0
 	github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac
 	github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406
+	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
 )
 
