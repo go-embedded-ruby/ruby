@@ -175,6 +175,9 @@ type VM struct {
 	cOptionParser                          *RClass
 	cURI                                   *RClass // the URI module (require "uri"), backed by go-ruby-uri
 	cURIGeneric                            *RClass // URI::Generic, the base URI class wrapping a *uri.URI
+	cCSV                                   *RClass // the CSV class (require "csv"), backed by go-ruby-csv
+	cCSVRow                                *RClass // CSV::Row, wrapping a *csv.Row
+	cCSVTable                              *RClass // CSV::Table, wrapping a *csv.Table
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass

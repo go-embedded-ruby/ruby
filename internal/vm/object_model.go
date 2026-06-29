@@ -609,6 +609,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// subclass such as URI::HTTP), so it reports that class for `class` /
 		// `is_a?` while every instance method lives on URI::Generic.
 		return x.cls
+	case *CSVRow:
+		// A CSV::Row wrapper reports CSV::Row; its instance methods (field/[]/
+		// to_a/to_h/headers/…) live on that class.
+		return vm.cCSVRow
+	case *CSVTable:
+		return vm.cCSVTable
+	case *csvSink:
+		// The writer CSV.generate yields to its block: it reports CSV so its << /
+		// push methods (defined on the CSV class) dispatch.
+		return vm.cCSV
 	case *Set:
 		return vm.cSet
 	case *Time:
