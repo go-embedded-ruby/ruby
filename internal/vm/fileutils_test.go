@@ -208,6 +208,114 @@ func TestFileUtilsTouchErrors(t *testing.T) {
 	}()
 }
 
+// TestFileUtilsChown covers chown / chown_R / chmod_R through fake seams so the
+// id coercion and recursive walk are exercised without real ownership changes
+// (the fileChown seam is a Windows no-op, so the test drives both forms here).
+func TestFileUtilsChown(t *testing.T) {
+	s := func(x string) object.Value { return object.NewString(x) }
+
+	// chown success: the fileChown seam records its calls; a nil user/group passes
+	// -1 (leave unchanged).
+	func() {
+		oc := fileChown
+		t.Cleanup(func() { fileChown = oc })
+		var calls [][3]any
+		fileChown = func(p string, uid, gid int) error {
+			calls = append(calls, [3]any{p, uid, gid})
+			return nil
+		}
+		vm := New(nil)
+		// chown(501, nil, "p") -> uid 501, gid -1.
+		r := callFU(t, vm, "chown", []object.Value{object.Integer(501), object.NilV, s("p")})
+		if r.ToS() != "p" {
+			t.Fatalf("chown return: %v", r)
+		}
+		if len(calls) != 1 || calls[0][1] != 501 || calls[0][2] != -1 {
+			t.Fatalf("chown calls: %v", calls)
+		}
+	}()
+
+	// chown_R recurses via the fuWalkDir seam.
+	func() {
+		oc, ow := fileChown, fuWalkDir
+		t.Cleanup(func() { fileChown, fuWalkDir = oc, ow })
+		var chowned []string
+		fileChown = func(p string, _, _ int) error { chowned = append(chowned, p); return nil }
+		fuWalkDir = func(root string, visit func(string)) error {
+			visit(root)
+			visit(root + "/child")
+			return nil
+		}
+		vm := New(nil)
+		callFU(t, vm, "chown_R", []object.Value{object.Integer(0), object.Integer(0), s("d")})
+		if len(chowned) != 2 || chowned[1] != "d/child" {
+			t.Fatalf("chown_R walked: %v", chowned)
+		}
+	}()
+
+	// chmod_R recurses via fuWalkDir and the fileChmod seam.
+	func() {
+		oc, ow := fileChmod, fuWalkDir
+		t.Cleanup(func() { fileChmod, fuWalkDir = oc, ow })
+		var chmodded []string
+		fileChmod = func(p string, _ os.FileMode) error { chmodded = append(chmodded, p); return nil }
+		fuWalkDir = func(root string, visit func(string)) error { visit(root); return nil }
+		vm := New(nil)
+		callFU(t, vm, "chmod_R", []object.Value{object.Integer(0o750), s("d")})
+		if len(chmodded) != 1 || chmodded[0] != "d" {
+			t.Fatalf("chmod_R: %v", chmodded)
+		}
+	}()
+}
+
+// TestFileUtilsChownErrors covers the Errno mapping when chown / chown_R /
+// chmod_R fail, and the fuWalk fallback that yields the root on a walk error.
+func TestFileUtilsChownErrors(t *testing.T) {
+	s := func(x string) object.Value { return object.NewString(x) }
+	perm := os.ErrPermission
+
+	cases := []struct {
+		name string
+		args []object.Value
+	}{
+		{"chown", []object.Value{object.Integer(1), object.Integer(1), s("p")}},
+		{"chown_R", []object.Value{object.Integer(1), object.Integer(1), s("p")}},
+		{"chmod_R", []object.Value{object.Integer(0o644), s("p")}},
+	}
+	for _, c := range cases {
+		oc, ocm, ow := fileChown, fileChmod, fuWalkDir
+		fileChown = func(string, int, int) error { return perm }
+		fileChmod = func(string, os.FileMode) error { return perm }
+		// A walk error makes fuWalk fall back to just the root.
+		fuWalkDir = func(string, func(string)) error { return perm }
+		vm := New(nil)
+		got := catchRaise(func() { callFU(t, vm, c.name, c.args) })
+		fileChown, fileChmod, fuWalkDir = oc, ocm, ow
+		if got != "Errno::ENOENT" {
+			t.Fatalf("%s error: got %q, want Errno::ENOENT", c.name, got)
+		}
+	}
+}
+
+// TestFuWalk covers the real filepath walk over a small tree (root + a child
+// file), and the single-root fallback on a missing path.
+func TestFuWalk(t *testing.T) {
+	dir := t.TempDir()
+	child := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(child, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := fuWalk(dir)
+	if len(got) != 2 {
+		t.Fatalf("fuWalk(%q)=%v, want root + child", dir, got)
+	}
+	// A non-existent path yields just itself.
+	miss := filepath.Join(dir, "nope")
+	if g := fuWalk(miss); len(g) != 1 || g[0] != miss {
+		t.Fatalf("fuWalk(missing)=%v", g)
+	}
+}
+
 // fakeFileInfo is a minimal os.FileInfo standing in for an existing file so the
 // touch "exists" branch (Chtimes) is taken without any real filesystem state.
 type fakeFileInfo struct{}

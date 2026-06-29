@@ -238,17 +238,17 @@ func (e *yamlEncoder) encodeInlineFirst(v object.Value, indent int) {
 	case *object.Hash:
 		for i, k := range n.Keys {
 			val, _ := n.Get(k)
+			// The "?" opener of a complex key carries the row indent for every entry
+			// except the first (which already sits on the parent dash line).
+			openPad := pad
+			if i == 0 {
+				openPad = ""
+			}
+			if e.writeComplexKey(k, val, indent, openPad) {
+				continue
+			}
 			if i > 0 {
 				e.b.WriteString(pad)
-				if e.writeComplexKey(k, val, indent, pad) {
-					continue
-				}
-			} else if isComplexKey(k) {
-				// The first key of an inline-first mapping that needs the explicit
-				// "?"/":" form: it cannot share the parent dash line, so emit it on its
-				// own lines at this indent.
-				e.writeComplexKey(k, val, indent, "")
-				continue
 			}
 			e.b.WriteString(e.keyScalar(k))
 			e.b.WriteByte(':')

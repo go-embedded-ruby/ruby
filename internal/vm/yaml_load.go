@@ -198,14 +198,13 @@ func (l *yamlLoader) parseBlockScalar(style, chomp byte, parentIndent int) objec
 		if bodyIndent < 0 {
 			bodyIndent = line.indent
 		}
-		// Preserve content relative to the block's base indentation.
-		text := line.raw
-		if len(text) >= bodyIndent {
-			text = text[bodyIndent:]
-		} else {
-			text = strings.TrimLeft(text, " ")
+		// Strip the block's base indentation, clamping for a continuation line that
+		// is less indented than the first (defensive: malformed but tolerated).
+		cut := bodyIndent
+		if cut > len(line.raw) {
+			cut = len(line.raw)
 		}
-		body = append(body, text)
+		body = append(body, line.raw[cut:])
 		l.pos++
 	}
 	var s string
@@ -296,9 +295,14 @@ func (l *yamlLoader) parseSequence(indent int, tag string) object.Value {
 		rest := strings.TrimPrefix(line.content, "-")
 		rest = strings.TrimPrefix(rest, " ")
 		if rest == "" {
-			// "-" alone: the element is the indented block on the following lines.
+			// "-" alone: the element is the indented block on the following lines, or
+			// nil when nothing deeper follows.
 			l.pos++
-			arr.Elems = append(arr.Elems, l.parseBlock(indent, ""))
+			if l.peek() != nil && l.peek().indent > indent {
+				arr.Elems = append(arr.Elems, l.parseBlock(indent, ""))
+			} else {
+				arr.Elems = append(arr.Elems, object.NilV)
+			}
 			continue
 		}
 		if style, chomp, ok := blockScalarTag(rest); ok {

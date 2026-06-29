@@ -224,6 +224,9 @@ func TestYAMLLoadSafeAndFile(t *testing.T) {
 		// Extra positional / keyword args Psych accepts are tolerated and ignored.
 		{`p YAML.safe_load("--- 7\n", permitted_classes: [Symbol])`, "7\n"},
 		{`p YAML.load("--- 7\n", symbolize_names: true)`, "7\n"},
+		// A non-String source is coerced via to_s (yamlSourceArg's fallback): a
+		// Symbol's to_s is its name, which the loader parses as a plain scalar.
+		{`p YAML.load(:hello)`, "\"hello\"\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -250,6 +253,43 @@ func TestYAMLLoadFile(t *testing.T) {
 	err := runErr(t, `YAML.load_file("/no/such/yaml/file.yaml")`)
 	if err == nil || !strings.Contains(err.Error(), "ENOENT") {
 		t.Errorf("missing file: expected ENOENT, got %v", err)
+	}
+}
+
+// TestYAMLLoadTaggedScalars covers the explicit !ruby/symbol and !ruby/string
+// scalar tags, an unknown non-object tag (ignored), and an alias whose anchor is
+// undefined (loads as nil).
+func TestYAMLLoadTaggedScalars(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p YAML.load("--- !ruby/symbol sym\n")`, ":sym\n"},
+		{`p YAML.load("--- !ruby/string 123\n")`, "\"123\"\n"},
+		// An unknown tag on a mapping leaves a plain Hash.
+		{"p YAML.load(\"--- !something\\na: 1\\n\")", "{\"a\" => 1}\n"},
+		// A standalone unknown tag with no body is an empty Hash (taggedEmpty).
+		{`p YAML.load("--- !something\n")`, "{}\n"},
+		// An alias to a missing anchor loads as nil.
+		{`p YAML.load("--- *missing\n")`, "nil\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestYAMLLoadFlowEdges covers flow-map entries with a non-entry token (skipped)
+// and an empty flow collection.
+func TestYAMLLoadFlowEdges(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// A flow map whose stray token has no ":" is skipped.
+		{`p YAML.load("--- {a: 1, junk}\n")`, "{\"a\" => 1}\n"},
+		{`p YAML.load("--- [ ]\n")`, "[]\n"},
+		{`p YAML.load("--- { }\n")`, "{}\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
 	}
 }
 

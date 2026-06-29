@@ -38,23 +38,21 @@ func isYAMLComplex(v object.Value) bool {
 // ("!ruby/object:Foo", "!ruby/range"), or "" when v is not a tagged complex
 // value. It also reserves an anchor number the first time a shareable reference
 // value is seen, so writeComplexChild can decide between "&N <tag>" and "*N".
-func (e *yamlEncoder) openTag(v object.Value, _ int) string {
+func (e *yamlEncoder) openTag(v object.Value) string {
 	switch n := v.(type) {
 	case *RObject:
-		return "!ruby/object" + objectClassSuffix(e.vm, n)
+		return "!ruby/object" + objectClassSuffix(n)
 	case *object.Range:
 		return "!ruby/range"
-	case *Set:
-		_ = n
+	default: // *Set — the only other isYAMLComplex type
 		return "!ruby/object:Set"
 	}
-	return ""
 }
 
 // objectClassSuffix renders the ":ClassName" suffix of a !ruby/object tag, or ""
 // for a bare/anonymous Object (Psych writes "!ruby/object" without a suffix when
 // the class is Object itself).
-func objectClassSuffix(vm *VM, o *RObject) string {
+func objectClassSuffix(o *RObject) string {
 	name := ""
 	if o.class != nil {
 		name = o.class.name
@@ -68,14 +66,10 @@ func objectClassSuffix(vm *VM, o *RObject) string {
 // tagBodyEmpty reports whether the complex value has no body lines (an object
 // with no instance variables), which Psych writes inline as "<tag> {}".
 func (e *yamlEncoder) tagBodyEmpty(v object.Value) bool {
-	switch n := v.(type) {
-	case *RObject:
-		return len(n.ivars) == 0
-	case *object.Range:
-		return false
-	case *Set:
-		_ = n
-		return false // always has a "hash" ivar entry, even when empty
+	// Only an object with no instance variables has an empty body; a Range always
+	// has its begin/end/excl triple and a Set always its "hash" entry.
+	if o, ok := v.(*RObject); ok {
+		return len(o.ivars) == 0
 	}
 	return false
 }
@@ -100,16 +94,16 @@ func (e *yamlEncoder) tagBody(v object.Value) []yamlPair {
 			{"end", rangeBound(n.Hi)},
 			{"excl", object.Bool(n.Exclusive)},
 		}
-	case *Set:
-		// MRI's Set#encode_with writes its backing hash (each element mapped to
-		// true) under the "hash" ivar, so it round-trips as a !ruby/object:Set.
+	default: // *Set: MRI's Set#encode_with writes its backing hash (each element
+		// mapped to true) under the "hash" ivar, so it round-trips as a
+		// !ruby/object:Set.
+		set := n.(*Set)
 		inner := object.NewHash()
-		for _, k := range n.order {
-			inner.Set(n.vals[k], object.Bool(true))
+		for _, k := range set.order {
+			inner.Set(set.vals[k], object.Bool(true))
 		}
 		return []yamlPair{{"hash", inner}}
 	}
-	return nil
 }
 
 // encodePairs writes a complex value's body as a block mapping at the given
@@ -225,12 +219,14 @@ func (e *yamlEncoder) writeComplexSeqChild(v object.Value, indent int) bool {
 // is shared (appears more than once in the graph). The anchor number is assigned
 // on this first emission so later sightings alias it.
 func (e *yamlEncoder) writeAnchorTag(v object.Value) {
-	tag := e.openTag(v, 0)
+	// A plain (untagged) collection contributes no tag; only the complex types
+	// carry a "!ruby/..." tag.
+	tag := ""
+	if isYAMLComplex(v) {
+		tag = e.openTag(v)
+	}
 	if e.shared(v) {
 		e.seq++
-		if e.anchors == nil {
-			e.anchors = map[object.Value]int{}
-		}
 		e.anchors[v] = e.seq
 		e.b.WriteByte('&')
 		e.b.WriteString(itoa(e.seq))
@@ -269,18 +265,7 @@ func (e *yamlEncoder) countRefs(v object.Value, seen map[object.Value]bool) {
 		return
 	}
 	if !anchorable(v) {
-		// Still descend into plain collections to reach the objects they hold.
-		switch n := v.(type) {
-		case *object.Array:
-			for _, el := range n.Elems {
-				e.countRefs(el, seen)
-			}
-		case *object.Hash:
-			for _, k := range n.Keys {
-				val, _ := n.Get(k)
-				e.countRefs(val, seen)
-			}
-		}
+		// A scalar value cannot be shared behind an anchor and holds no children.
 		return
 	}
 	e.refcount[v]++

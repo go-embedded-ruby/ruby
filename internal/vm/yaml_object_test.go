@@ -93,8 +93,14 @@ puts({K.new => 1}.to_yaml)`, "---\n? !ruby/object:K\n  a: 1\n: 1\n"},
 		{`puts({[1, 2] => 1}.to_yaml)`, "---\n? - 1\n  - 2\n: 1\n"},
 		{`puts({{"a" => 1} => 2}.to_yaml)`, "---\n? a: 1\n: 2\n"},
 		{`puts({nil => 1}.to_yaml)`, "---\n! '': 1\n"},
+		// A complex key that is the SECOND entry of a block mapping (after a scalar
+		// entry).
+		{`puts({"first" => 0, [1, 2] => 3}.to_yaml)`, "---\nfirst: 0\n? - 1\n  - 2\n: 3\n"},
 		// A complex key appearing as a sequence element's inline-first hash entry.
 		{`puts [{[1] => 2}].to_yaml`, "---\n- ? - 1\n  : 2\n"},
+		// A complex key that is the SECOND entry of an inline-first (under-a-dash)
+		// mapping.
+		{`puts [{"a" => 1, [2] => 3}].to_yaml`, "---\n- a: 1\n  ? - 2\n  : 3\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -133,6 +139,55 @@ y = c.to_yaml
 p y.include?("&1")
 p y.include?("*1")`
 	want := "true\ntrue\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got=%q want=%q", got, want)
+	}
+}
+
+// TestYAMLDumpSharedHashMapChild covers a shared Hash referenced from two
+// mapping values: written once with "&N" then aliased.
+func TestYAMLDumpSharedHashMapChild(t *testing.T) {
+	src := `h = {"x" => 1}
+puts({"a" => h, "b" => h}.to_yaml)`
+	want := "---\na: &1\n  x: 1\nb: *1\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got=%q want=%q", got, want)
+	}
+}
+
+// TestYAMLDumpEmptyObjectChild covers an empty-ivar object held as a mapping
+// value and a sequence element (the "tag {}" inline form in a child position).
+func TestYAMLDumpEmptyObjectChild(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`class Em; end
+puts({"k" => Em.new}.to_yaml)`, "---\nk: !ruby/object:Em {}\n"},
+		{`class Em2; end
+puts [Em2.new].to_yaml`, "---\n- !ruby/object:Em2 {}\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestYAMLDumpBeginlessRange covers a Range with a nil begin bound (rangeBound's
+// nil branch).
+func TestYAMLDumpBeginlessRange(t *testing.T) {
+	src := `puts((..5).to_yaml)`
+	want := "--- !ruby/range\nbegin:\nend: 5\nexcl: false\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("got=%q want=%q", got, want)
+	}
+}
+
+// TestYAMLDumpBareObject covers an Object instance (class Object), whose tag has
+// no ":Class" suffix.
+func TestYAMLDumpBareObject(t *testing.T) {
+	src := `o = Object.new
+o.instance_variable_set(:@a, 1)
+puts o.to_yaml`
+	want := "--- !ruby/object\na: 1\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("got=%q want=%q", got, want)
 	}
