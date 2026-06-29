@@ -425,6 +425,7 @@ func (vm *VM) bootstrap() {
 	vm.registerOptionParser()  // OptionParser (require "optparse"), backed by go-ruby-optparse; prelude adds the ParseError tree
 	vm.registerURI()           // URI module (require "uri"), backed by go-ruby-uri; needs StandardError (URI::Error) + Regexp (make_regexp)
 	vm.registerCSV()           // CSV class (require "csv"), backed by go-ruby-csv; needs StandardError (CSV::MalformedCSVError) + Date/Time
+	vm.registerShellwords()    // Shellwords (require "shellwords"), backed by go-ruby-shellwords; installs Shellwords + String/Array core extensions lazily on require
 	vm.registerMonitor()       // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
 	vm.registerZlib()          // needs the exception hierarchy (Zlib::Error < StandardError)
 	vm.registerFiber()         // needs the exception hierarchy (FiberError < StandardError)

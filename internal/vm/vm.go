@@ -194,12 +194,13 @@ type VM struct {
 	cException                             *RClass
 	curExc                                 object.Value // most recently rescued exception (for bare `raise`)
 
-	loaded        map[string]bool // require/require_relative: features loaded once
-	requireDirs   []string        // stack of directories of the files currently being required
-	fileStack     []string        // stack of source files of the executing ISeq frames (for __FILE__)
-	scriptName    string          // $0 / $PROGRAM_NAME: the running program's name
-	defaultRandom *RandomObj      // process-wide generator for Kernel#rand / #srand
-	currentFiber  *Fiber          // the fiber currently running (nil at the root), for Fiber.yield
+	loaded        map[string]bool   // require/require_relative: features loaded once
+	featureHooks  map[string]func() // built-in feature -> body run once on its first require (e.g. shellwords)
+	requireDirs   []string          // stack of directories of the files currently being required
+	fileStack     []string          // stack of source files of the executing ISeq frames (for __FILE__)
+	scriptName    string            // $0 / $PROGRAM_NAME: the running program's name
+	defaultRandom *RandomObj        // process-wide generator for Kernel#rand / #srand
+	currentFiber  *Fiber            // the fiber currently running (nil at the root), for Fiber.yield
 
 	// Concurrency: an emulated GVL (one Ruby thread executes VM code at a time).
 	// The running goroutine holds gvl; it is released only inside blocking native

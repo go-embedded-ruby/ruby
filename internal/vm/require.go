@@ -34,6 +34,7 @@ var providedFeatures = map[string]bool{
 	"optparse": true, "ripper": true, "erb": true, "find": true,
 	"tempfile": true, "open3": true,
 	"strscan": true, "fiber": true, "objspace": true, "csv": true,
+	"shellwords": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
@@ -104,6 +105,12 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 				return object.Bool(false)
 			}
 			vm.loaded[key] = true
+			// Some features install their Ruby surface lazily on first require
+			// (MRI-style), not eagerly at startup — e.g. shellwords creates the
+			// Shellwords module and the String/Array core extensions here.
+			if hook := vm.featureHooks[name]; hook != nil {
+				hook()
+			}
 			return object.Bool(true)
 		}
 	}
