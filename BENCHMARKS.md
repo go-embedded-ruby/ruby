@@ -100,6 +100,88 @@ Native). Reproduce: `AOT=1 RUNS=8 JRUBY=jruby TRUFFLE=<path> bash bench/run.sh 8
   lowering of integer-bound methods (`mandelbrot`'s float kernel is not yet
   AOT-lowered).
 
+## Per-module: rbgo vs MRI / YJIT / JRuby / TruffleRuby  (2026-06-29)
+
+The benchmarks above are *language* micro-benchmarks (dispatch, allocation,
+blocks). This section is different: it measures the **stdlib modules that `rbgo`
+binds to standalone pure-Go libraries** (the `go-ruby-<mod>` org family). For
+each module the **same** `bench/modules/<mod>.rb` runs a representative
+hot-path workload under every runtime; rbgo's column reflects the **pure-Go
+library doing the work**, every other column the runtime's own stdlib. The
+comparison is therefore the *Ruby-visible operation* — `JSON.parse`,
+`YAML.dump`, `URI.parse`, … — apples-to-apples across interpreters.
+
+### Methodology
+
+- **Host:** Apple M4 Max, macOS (darwin/arm64). **Go:** go1.26.4,
+  `GOWORK=off go build -o rbgo ./cmd/rbgo`.
+- **Runtimes:** `ruby 4.0.5 (2026-05-20) +PRISM` (MRI, the oracle) and
+  `ruby --yjit` (YJIT); `jruby 10.1.0.0` (OpenJDK 25); `truffleruby 34.0.1`
+  (GraalVM CE Native, like ruby 3.4.9).
+- **Fairness:** each `bench/modules/*.rb` prints a **deterministic checksum**
+  (no time/random input); its output is checked **byte-identical to MRI** before
+  timing — all 11 modules passed the gate under all four runtimes (no `diff`,
+  no `n/a`). Wall-clock is **best-of-5** (best, not mean, to suppress scheduler
+  noise). Iteration counts are baked into each script (overridable via `N=`).
+- **Single-shot, no warm-up beyond the script's own loop.** This matters for the
+  JIT runtimes: JRuby pays ~1.3–2.7 s JVM start and TruffleRuby pays Graal
+  warm-up on every row, so their numbers below are *cold single-process* times,
+  not steady-state — read JRuby/TruffleRuby as "what a one-shot `ruby file.rb`
+  invocation costs", which is how `rbgo`/MRI are also measured.
+- Reproduce: `RBGO=./rbgo TRUFFLE=truffleruby bash bench/modules/run.sh 5`.
+
+### Results (best of 5, ms)
+
+| Module | rbgo | MRI | MRI+YJIT | JRuby | TruffleRuby | rbgo/MRI | rbgo/YJIT |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| regexp | 1530 | 850 | 850 | 1660 | 340 | 1.80× | 1.80× |
+| erb | 410 | 340 | 310 | 1860 | 360 | 1.21× | 1.32× |
+| yaml | 170 | 750 | 480 | 2460 | 3370 | **0.23×** | **0.35×** |
+| format | 640 | 330 | 310 | 1490 | 480 | 1.94× | 2.06× |
+| strscan | 10720 | 150 | 140 | 1420 | 200 | 71.5× | 76.6× |
+| optparse | 140 | 790 | 630 | 2650 | 1350 | **0.18×** | **0.22×** |
+| json | 1520 | 340 | 340 | 2090 | 3030 | 4.47× | 4.47× |
+| bigdecimal | 570 | 300 | 300 | 1890 | 7640 | 1.90× | 1.90× |
+| date | 230 | 430 | 410 | 1510 | 8400 | **0.53×** | **0.56×** |
+| uri | 90 | 370 | 310 | 1770 | 2200 | **0.24×** | **0.29×** |
+| digest | 370 | 340 | 330 | 1330 | 480 | 1.09× | 1.12× |
+
+> `rbgo/MRI < 1` means the pure-Go library is **faster than MRI's own stdlib**
+> on this workload (bold). `csv` and `shellwords` bindings were not present in
+> `rbgo` main at measurement time — **pending**, to be added to this table when
+> bound; `digest` is bound and included.
+
+### Reading the rows — honest
+
+- **rbgo beats MRI outright on four modules:** `optparse` (0.18×), `yaml`
+  (0.23×), `uri` (0.24×) and `date` (0.53×). These are construction- and
+  parse-heavy workloads where the pure-Go library (compiled, no per-call Ruby
+  dispatch through the stdlib's own Ruby code) does the work more cheaply than
+  MRI's mostly-Ruby stdlib implementations. `yaml`/`optparse`/`date` are largely
+  *Ruby-coded* in MRI; beating them is the expected payoff of a native library.
+- **Near parity (~1–2×):** `digest` (1.09×, both ultimately call optimized
+  native hash code), `erb` (1.21×), `regexp` (1.80×, rbgo on go-ruby-regexp's
+  Onigmo vs MRI's C Onigmo), `bigdecimal` (1.90×) and `format` (1.94×).
+- **Slower — `json` (4.47×):** MRI's `json` is a tuned C extension; rbgo's
+  go-ruby-json is competitive but not yet at C-extension throughput on this
+  parse+generate loop. Honest gap, flagged for the go-ruby-json perf backlog.
+- **The outlier — `strscan` (71×):** rbgo is *dramatically* slower here. This is
+  a real wall, not noise: the StringScanner tokenize loop drives a very high rate
+  of per-call interpreter dispatch (`scan` per token) plus regexp setup, and the
+  binding currently re-does work each `scan`. **This is the top per-module
+  optimization target** — filed honestly rather than hidden. It does not affect
+  correctness (output is byte-identical to MRI).
+- **JIT runtimes (cold, single-shot):** TruffleRuby wins the compute-bound
+  string rows (`regexp` 340 ms, `strscan` 200 ms) where its native JIT shines,
+  but pays heavy cold warm-up on the allocation/precision rows (`bigdecimal`
+  7640 ms, `date` 8400 ms, `yaml` 3370 ms). JRuby is dominated by ~1.3–2.7 s JVM
+  startup throughout — for one-shot scripts startup is its story, exactly as in
+  the language benchmarks above.
+- **Variance:** best-of-5 on a loaded laptop; rows under ~200 ms (`uri` 90 ms,
+  `optparse` 140 ms, `yaml` 170 ms) carry the most relative noise — treat their
+  ratios as order-of-magnitude. The large gaps (`strscan`, `json`, the
+  rbgo-wins) are well outside the noise floor.
+
 ## Where rbgo stands
 
 - **Competitive / at parity:** `strings`, `wordcount`. Anything dominated by
@@ -180,13 +262,18 @@ experiments, locate the cost precisely. **Measured, not assumed:**
 
 ```bash
 go build -ldflags="-s -w" -o rbgo ./cmd/rbgo
-GOWORK=off AOT=1 RUBY=ruby RBGO=./rbgo bash bench/run.sh 5   # full table
+GOWORK=off AOT=1 RUBY=ruby RBGO=./rbgo bash bench/run.sh 5   # language table
 AOT=0          RUBY=ruby RBGO=./rbgo bash bench/run.sh 5      # interpreter only
+
+# Per-module comparative table (rbgo's bound pure-Go stdlib libraries vs
+# MRI/YJIT/JRuby/TruffleRuby; same .rb under each runtime, byte-identical gate):
+RBGO=./rbgo TRUFFLE=truffleruby bash bench/modules/run.sh 5
 
 # Isolated execution-loop micro-benchmarks (parse/compile/prelude excluded):
 go test ./internal/vm/ -run=NONE -bench=. -benchmem
 ```
 
-The harness (`bench/run.sh`) and its programs live under `bench/` and are
+The harnesses (`bench/run.sh`, `bench/modules/run.sh`) and their programs live
+under `bench/` and are
 **isolated from the coverage gate** (no `_test.go`, plain `.rb` + shell), so
 they never affect the 100%-coverage CI requirement.
