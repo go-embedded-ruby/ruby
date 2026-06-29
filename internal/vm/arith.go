@@ -573,7 +573,7 @@ func valueEqual(a, b object.Value) bool {
 		return ok && av.Exclusive == bv.Exclusive && valueEqual(av.Lo, bv.Lo) && valueEqual(av.Hi, bv.Hi)
 	case *Set:
 		bv, ok := b.(*Set)
-		return ok && av.s.Equal(bv.s)
+		return ok && av.s.EqualQ(bv.s)
 	case *Bag:
 		bv, ok := b.(*Bag)
 		return ok && av.b.Equal(bv.b)

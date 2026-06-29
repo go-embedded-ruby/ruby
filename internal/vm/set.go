@@ -1,26 +1,34 @@
+// Copyright (c) the go-embedded-ruby/ruby authors
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 package vm
 
 import (
-	"strings"
-
-	goset "github.com/go-composites/set/src"
+	rbset "github.com/go-ruby-set/set"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// Set binds github.com/go-composites/set — the first real consumer of the
-// go-composites family — into Ruby, mirroring how the FFT module binds go-fft.
-// A go-composites Set stores arbitrary comparable Go items; Ruby values are not
-// all comparable by value (a *String is a pointer), so each member is marshalled
-// to a canonical comparable key (setKey) which is what the go-composites Set
-// actually holds. A parallel order-preserving table recovers the original Ruby
-// value from a key for each / to_a / inspect, and gives Ruby's insertion-ordered
-// iteration on top of the (unordered, map-backed) go-composites Set.
+// Set binds github.com/go-ruby-set/set — the pure-Go, MRI-4.0.5-faithful port of
+// Ruby's Set stdlib — into rbgo. The library does all of the membership,
+// set algebra, iteration ordering, predicates and the MRI 4.0 "Set[…]" inspect
+// rendering; this file is only the thin shell that maps Ruby values onto the
+// library's any-typed member model and supplies the Ruby hash/eql? semantics
+// through the library's Hasher.
+//
+// A go-ruby-set Set built with NewWith(hasher) keys its members through the
+// host function (here setKey), so two distinct String objects with the same
+// bytes are the same member while a Symbol of the same name is a different one,
+// exactly as MRI's hash/eql? protocol — the very semantics rbgo already uses for
+// Hash keys. The original Ruby value for each canonical key is recovered for
+// each/to_a/inspect through the order-preserving vals/order table, which is also
+// what the Bag type and the YAML emitter read, so they keep working unchanged.
 
-// Set is the Ruby wrapper around a go-composites Set.
+// Set is the Ruby wrapper around a go-ruby-set Set.
 type Set struct {
-	s     goset.Interface      // membership / algebra, keyed by canonical keys
+	s     *rbset.Set           // membership / algebra, keyed by setKey
 	vals  map[any]object.Value // canonical key -> original Ruby value
 	order []any                // canonical keys in insertion order (Ruby ordering)
 }
@@ -29,29 +37,24 @@ func (s *Set) ToS() string     { return s.repr() }
 func (s *Set) Inspect() string { return s.repr() }
 func (s *Set) Truthy() bool    { return true }
 
-// repr renders MRI's "#<Set: {1, 2, 3}>", members in insertion order.
+// repr renders MRI 4.0's "Set[1, 2, 3]" (empty: "Set[]"), members in insertion
+// order, each rendered with Ruby #inspect. The library owns the format; we feed
+// it the canonical-key → Ruby-value lookup so members inspect as Ruby values.
 func (s *Set) repr() string {
-	var b strings.Builder
-	b.WriteString("#<Set: {")
-	for i, k := range s.order {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(s.vals[k].Inspect())
-	}
-	b.WriteString("}>")
-	return b.String()
+	return s.s.Inspect(func(k any) string { return s.vals[k].Inspect() })
 }
 
-// newSet builds an empty Ruby Set wrapper.
+// newSet builds an empty Ruby Set wrapper. The library Set is keyed through
+// setKey so any Ruby value (including reference types) is an accepted member.
 func newSet() *Set {
-	return &Set{s: goset.New(), vals: map[any]object.Value{}}
+	return &Set{s: rbset.NewWith(func(elem any) any { return elem }), vals: map[any]object.Value{}}
 }
 
 // setKey marshals a Ruby value to a canonical comparable Go key, raising
-// TypeError for a value that cannot be a Set member (Array/Hash/Set/Proc/…).
-// A String keys by its byte content (distinct from a Symbol of the same name,
-// as in Hash keys); the other immutable value types key by themselves.
+// TypeError for a value that cannot be a Set member is NOT done here — like a
+// Hash key, every Ruby value is a valid member. A String keys by its byte
+// content (distinct from a Symbol of the same name, as in Hash keys); the other
+// immutable value types key by themselves.
 func setKey(v object.Value) any {
 	switch x := v.(type) {
 	case object.Integer:
@@ -80,7 +83,7 @@ func setKey(v object.Value) any {
 // add inserts a Ruby value, preserving first-insertion order (idempotent).
 func (s *Set) add(v object.Value) {
 	k := setKey(v)
-	if !s.s.Has(k) {
+	if !s.s.Include(k) {
 		s.order = append(s.order, k)
 		s.vals[k] = v
 	}
@@ -90,7 +93,7 @@ func (s *Set) add(v object.Value) {
 // delete removes a Ruby value (a no-op when absent).
 func (s *Set) delete(v object.Value) {
 	k := setKey(v)
-	if !s.s.Has(k) {
+	if !s.s.Include(k) {
 		return
 	}
 	s.s.Delete(k)
@@ -128,23 +131,24 @@ func (s *Set) seed(v object.Value) {
 	}
 }
 
-// fromKeys rebuilds a Ruby Set from a go-composites key set, recovering each
-// key's Ruby value from a (b before a, so a's order/value wins) — used by the
-// algebraic combinators.
-func fromKeys(keys goset.Interface, a, b *Set) *Set {
+// fromKeys rebuilds a Ruby Set from a go-ruby-set library result, recovering
+// each key's Ruby value from a (then b), preserving a's order first, then b's —
+// used by the algebraic combinators (the library already orders its result
+// receiver-first, but it holds only canonical keys, so we re-attach the Ruby
+// values and keep the wrapper's parallel order/vals tables consistent).
+func fromKeys(res *rbset.Set, a, b *Set) *Set {
 	out := newSet()
-	// Preserve a's insertion order first, then b's, keeping only kept keys.
-	for _, src := range []*Set{a, b} {
-		if src == nil {
-			continue
+	for _, k := range res.ToSlice() {
+		var rv object.Value
+		switch {
+		case a != nil && a.s.Include(k):
+			rv = a.vals[k]
+		case b != nil && b.s.Include(k):
+			rv = b.vals[k]
 		}
-		for _, k := range src.order {
-			if keys.Has(k) && !out.s.Has(k) {
-				out.order = append(out.order, k)
-				out.vals[k] = src.vals[k]
-				out.s.Add(k)
-			}
-		}
+		out.order = append(out.order, k)
+		out.vals[k] = rv
+		out.s.Add(k)
 	}
 	return out
 }
@@ -220,7 +224,7 @@ func (vm *VM) registerSet() {
 
 	d("add?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
-		if s.s.Has(setKey(args[0])) {
+		if s.s.Include(setKey(args[0])) {
 			return object.NilV
 		}
 		s.add(args[0])
@@ -233,25 +237,25 @@ func (vm *VM) registerSet() {
 	})
 
 	includeFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.Has(setKey(args[0])))
+		return object.Bool(self(v).s.Include(setKey(args[0])))
 	}
 	d("include?", includeFn)
 	d("member?", includeFn)
 	d("===", includeFn)
 
 	sizeFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).s.Len())
+		return object.Integer(self(v).s.Size())
 	}
 	d("size", sizeFn)
 	d("length", sizeFn)
 	d("count", sizeFn)
 
 	d("empty?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.IsEmpty())
+		return object.Bool(self(v).s.Empty())
 	})
 	d("clear", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self(v)
-		s.s = goset.New()
+		s.s.Clear()
 		s.vals = map[any]object.Value{}
 		s.order = nil
 		return s
@@ -295,15 +299,15 @@ func (vm *VM) registerSet() {
 	d("difference", diffFn)
 
 	subsetFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.IsSubset(setArg(args[0]).s))
+		return object.Bool(self(v).s.SubsetQ(setArg(args[0]).s))
 	}
 	d("subset?", subsetFn)
 	d("<=", subsetFn)
 	d("superset?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(setArg(args[0]).s.IsSubset(self(v).s))
+		return object.Bool(self(v).s.SupersetQ(setArg(args[0]).s))
 	})
 	d(">=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(setArg(args[0]).s.IsSubset(self(v).s))
+		return object.Bool(self(v).s.SupersetQ(setArg(args[0]).s))
 	})
 
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -311,7 +315,7 @@ func (vm *VM) registerSet() {
 		if !ok {
 			return object.False
 		}
-		return object.Bool(self(v).s.Equal(b.s))
+		return object.Bool(self(v).s.EqualQ(b.s))
 	})
 
 	d("merge", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -429,35 +433,32 @@ func (vm *VM) registerSet() {
 		return object.True
 	})
 
-	// ^: symmetric difference — a new Set of the members in exactly one operand,
-	// computed as (a | b) - (a & b).
+	// ^: symmetric difference — a new Set of the members in exactly one operand.
 	d("^", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		union := a.s.Union(b.s)
-		inter := a.s.Intersection(b.s)
-		return fromKeys(union.Difference(inter), a, b)
+		return fromKeys(a.s.XorSym(b.s), a, b)
 	})
 
 	// disjoint?: true when the two sets share no member.
 	d("disjoint?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.Intersection(b.s).IsEmpty())
+		return object.Bool(a.s.DisjointQ(b.s))
 	})
 	// intersect?: the negation of disjoint? (the sets share at least one member).
 	d("intersect?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return object.Bool(!a.s.Intersection(b.s).IsEmpty())
+		return object.Bool(a.s.IntersectQ(b.s))
 	})
 
 	// <: proper subset — a subset of the argument and not equal to it.
 	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.IsSubset(b.s) && !a.s.Equal(b.s))
+		return object.Bool(a.s.ProperSubsetQ(b.s))
 	})
 	// >: proper superset — the argument is a proper subset of the receiver.
 	d(">", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return object.Bool(b.s.IsSubset(a.s) && !a.s.Equal(b.s))
+		return object.Bool(a.s.ProperSupersetQ(b.s))
 	})
 
 	// dup / clone: a shallow copy with the same members in insertion order.
