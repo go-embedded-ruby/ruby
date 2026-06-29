@@ -295,7 +295,7 @@ func TestYAMLLoadFlowEdges(t *testing.T) {
 
 // TestYAMLLoadArity covers the zero-argument errors of load / load_file.
 func TestYAMLLoadArity(t *testing.T) {
-	for _, call := range []string{`YAML.load`, `YAML.load_file`} {
+	for _, call := range []string{`YAML.load`, `YAML.load_file`, `YAML.safe_load`, `YAML.safe_load_file`} {
 		err := runErr(t, call)
 		if err == nil || !strings.Contains(err.Error(), "wrong number of arguments") {
 			t.Errorf("%s: expected ArgumentError, got %v", call, err)

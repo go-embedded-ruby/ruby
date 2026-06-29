@@ -9,9 +9,12 @@ import (
 )
 
 // registerYAML installs the YAML / Psych standard library (require "yaml"). The
-// module, its constant / error tree, the dump emitter and the load / safe_load /
-// load_file parser are pure-Go; parse / parse_stream / dump_tags (the low-level
-// node API) still raise NotImplementedError as Puppet does not call them.
+// module, its constant / error tree, and the dump / load / safe_load / load_file
+// methods are pure-Go: the Psych-compatible emitter and loader live in the
+// github.com/go-ruby-yaml/yaml library and rbgo binds them here, mapping its own
+// object graph to and from that library's value model (see yaml_bind.go). The
+// low-level node API (parse / parse_stream / dump_tags) still raises
+// NotImplementedError as Puppet does not call it.
 func (vm *VM) registerYAML() {
 	psych := newClass("Psych", nil)
 	psych.isModule = true
@@ -41,12 +44,9 @@ func (vm *VM) registerYAML() {
 	}
 
 	// YAML.load(source[, ...]) / Psych.load parse a YAML document string to a tree
-	// of Ruby values (Hash / Array / String / Symbol / Integer / Float / true /
-	// false / nil / Time, and !ruby/object: instances). Leading keyword/positional
-	// options Psych accepts (permitted_classes, aliases, filename, …) are tolerated
-	// and ignored: this loader is already safe by construction (it instantiates
-	// only the classes named by !ruby/object: tags actually present), so safe_load
-	// shares the same implementation.
+	// of Ruby values. unsafe_load shares the same implementation. Leading
+	// keyword/positional options Psych accepts (filename, symbolize_names, …) are
+	// tolerated and ignored.
 	loadFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
@@ -54,28 +54,41 @@ func (vm *VM) registerYAML() {
 		return yamlLoad(vm, yamlSourceArg(args[0]))
 	}
 	psych.smethods["load"] = &Method{name: "load", owner: psych, native: loadFn}
-	psych.smethods["safe_load"] = &Method{name: "safe_load", owner: psych, native: loadFn}
 	psych.smethods["unsafe_load"] = &Method{name: "unsafe_load", owner: psych, native: loadFn}
+
+	// YAML.safe_load(source[, permitted_classes: [...]]) restricts which
+	// !ruby/object: classes materialise; the loader is already safe by construction,
+	// so the allow-list is the only observable difference from load.
+	safeLoadFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
+		}
+		return yamlSafeLoad(vm, yamlSourceArg(args[0]), permittedClassesArg(args[1:]))
+	}
+	psych.smethods["safe_load"] = &Method{name: "safe_load", owner: psych, native: safeLoadFn}
 
 	// YAML.load_file(path[, ...]) reads the file and parses its contents.
 	loadFileFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
-		data, err := fuReadFile(strArg(args[0]))
-		if err != nil {
-			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", strArg(args[0]))
-		}
-		return yamlLoad(vm, string(data))
+		return yamlLoad(vm, yamlReadFile(args[0]))
 	}
 	psych.smethods["load_file"] = &Method{name: "load_file", owner: psych, native: loadFileFn}
-	psych.smethods["safe_load_file"] = &Method{name: "safe_load_file", owner: psych, native: loadFileFn}
 
-	// YAML.dump(obj[, io]) serialises a tree of plain values (Hash/Array/String/
-	// Symbol/Integer/Float/true/false/nil/Time) to a Psych-compatible document.
-	// With a second IO argument it writes the document there and returns the IO
-	// (as Psych does), so Puppet::Util::Yaml.dump(structure, fh) persists state
-	// and run-summary files; with one argument it returns the String. A value
+	// YAML.safe_load_file(path[, permitted_classes: [...]]) is safe_load over a file.
+	safeLoadFileFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
+		}
+		return yamlSafeLoad(vm, yamlReadFile(args[0]), permittedClassesArg(args[1:]))
+	}
+	psych.smethods["safe_load_file"] = &Method{name: "safe_load_file", owner: psych, native: safeLoadFileFn}
+
+	// YAML.dump(obj[, io]) serialises a tree of Ruby values to a Psych-compatible
+	// document. With a second IO argument it writes the document there and returns
+	// the IO (as Psych does), so Puppet::Util::Yaml.dump(structure, fh) persists
+	// state and run-summary files; with one argument it returns the String. A value
 	// outside the supported shapes raises TypeError, which the report YAML
 	// indirector rescues and logs, leaving puppet apply otherwise clean.
 	psych.smethods["dump"] = &Method{name: "dump", owner: psych,
@@ -108,4 +121,47 @@ func yamlSourceArg(v object.Value) string {
 		return s.Str()
 	}
 	return v.ToS()
+}
+
+// yamlReadFile reads the file named by v (coerced to a path string), raising
+// Errno::ENOENT when it cannot be opened (matching Psych.load_file).
+func yamlReadFile(v object.Value) string {
+	path := strArg(v)
+	data, err := fuReadFile(path)
+	if err != nil {
+		raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", path)
+	}
+	return string(data)
+}
+
+// permittedClassesArg extracts the permitted_classes: keyword from safe_load's
+// trailing arguments, returning the class names (so SafeLoad restricts to them),
+// or nil when the keyword is absent (permitting all classes). Class / Module
+// values list by name; any other element is rendered via to_s, matching how
+// Psych accepts a list of class objects or names.
+func permittedClassesArg(rest []object.Value) []string {
+	if len(rest) == 0 {
+		return nil
+	}
+	h, ok := rest[len(rest)-1].(*object.Hash)
+	if !ok {
+		return nil
+	}
+	val, ok := h.Get(object.Symbol("permitted_classes"))
+	if !ok {
+		return nil
+	}
+	arr, ok := val.(*object.Array)
+	if !ok {
+		return nil
+	}
+	names := make([]string, 0, len(arr.Elems))
+	for _, el := range arr.Elems {
+		if c, ok := el.(*RClass); ok {
+			names = append(names, c.ToS())
+			continue
+		}
+		names = append(names, el.ToS())
+	}
+	return names
 }
