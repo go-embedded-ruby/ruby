@@ -18,6 +18,7 @@ require (
 	github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
+	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260629152243-e2cfb3354534
 	github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
 	github.com/go-ruby-matrix/matrix v0.0.0-20260629152812-557539bb95fc

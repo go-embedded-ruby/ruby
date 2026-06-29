@@ -72,6 +72,14 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return setOp(op, as, b)
 	}
 
+	// IPAddr arithmetic: ip + n / ip - n (shift the address by a whole-number
+	// offset) reach the operator fast path (the bitwise & | ~ combinators dispatch
+	// as methods). The right operand is an integer offset, mirroring MRI's
+	// IPAddr#+ / IPAddr#-.
+	if ai, ok := a.(*IPAddr); ok {
+		return ipaddrOp(op, ai, b)
+	}
+
 	// Matrix / Vector arithmetic: + and - reach the operator fast path (the other
 	// operators — * / ** -@ — dispatch as methods). The right operand must be the
 	// same wrapper type.
@@ -586,6 +594,9 @@ func valueEqual(a, b object.Value) bool {
 	case *Set:
 		bv, ok := b.(*Set)
 		return ok && av.s.EqualQ(bv.s)
+	case *IPAddr:
+		bv, ok := b.(*IPAddr)
+		return ok && av.ip.Eql(bv.ip)
 	case *Matrix:
 		return eqMatrix(av, b)
 	case *Vector:
