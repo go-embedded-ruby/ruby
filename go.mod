@@ -36,6 +36,7 @@ require (
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
+	github.com/go-ruby-zlib/zlib v0.0.0-20260629152229-34bd3efde796
 )
 
 require (
