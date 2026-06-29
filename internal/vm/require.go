@@ -33,7 +33,7 @@ var providedFeatures = map[string]bool{
 	"net/http": true, "net/https": true, "resolv": true, "singleton": true,
 	"optparse": true, "ripper": true, "erb": true, "find": true,
 	"tempfile": true, "open3": true,
-	"strscan": true, "fiber": true, "objspace": true,
+	"strscan": true, "fiber": true, "objspace": true, "csv": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
