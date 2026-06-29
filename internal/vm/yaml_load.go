@@ -120,10 +120,23 @@ func yamlLoad(vm *VM, src string) object.Value {
 			l.pos = 1
 			return l.parseBlockScalar(style, chomp, first.indent)
 		}
+		if tag, _, content := splitTagAnchor(rest); tag != "" && content == "" {
+			// A document-level tag ("--- !ruby/object:Foo") whose body is the
+			// following lines at the document indent (0) — Psych does not indent a
+			// root object's mapping. Parse that body directly.
+			l.pos = 1
+			if l.peek() == nil {
+				return l.taggedEmpty(tag)
+			}
+			if isSeqEntry(l.peek().content) {
+				return l.parseSequence(l.peek().indent, tag)
+			}
+			return l.parseMapping(l.peek().indent, tag)
+		}
 		l.lines[0].content = rest
 		l.lines[0].indent = first.indent
-		// An inline tag (e.g. "--- !ruby/object:Foo") opens a block whose body is
-		// the following indented lines; parse from this line as a node at indent 0.
+		// An inline value (scalar, flow collection, or an inline-tagged scalar like
+		// "--- !ruby/regexp /x/") parses from this line as a node at indent 0.
 		return l.parseNode(0)
 	}
 	return l.parseNode(0)
@@ -237,10 +250,15 @@ func (l *yamlLoader) parseNode(minIndent int) object.Value {
 		l.bind(anchorName, v)
 		return v
 	}
-	if _, _, ok := splitMapEntry(content); ok {
-		v := l.parseMapping(line.indent, tag)
-		l.bind(anchorName, v)
-		return v
+	// A flow collection ("[...]" / "{...}") or any other lone scalar is parsed by
+	// scalarValue; only a genuine block-mapping line ("key: ...", not opening with
+	// a flow bracket) is parsed as a mapping.
+	if !isFlowStart(content) {
+		if _, _, ok := splitMapEntry(content); ok {
+			v := l.parseMapping(line.indent, tag)
+			l.bind(anchorName, v)
+			return v
+		}
 	}
 	// A lone scalar (or flow collection) on this line.
 	l.pos++
@@ -249,12 +267,14 @@ func (l *yamlLoader) parseNode(minIndent int) object.Value {
 	return v
 }
 
-// parseBlock parses the block that begins on the line after a standalone tag /
-// anchor, indented deeper than parentIndent.
+// parseBlock parses the block that follows a standalone tag / anchor. The tag has
+// already consumed its own line; its body is the following lines indented at
+// least to parentIndent (Psych aligns an inline-tagged object's mapping under the
+// position where the tag began, i.e. the same indent — not strictly deeper).
 func (l *yamlLoader) parseBlock(parentIndent int, tag string) object.Value {
-	if l.pos >= len(l.lines) || l.lines[l.pos].indent <= parentIndent {
-		// No deeper content: an empty tagged node (e.g. "!ruby/object:Foo" with no
-		// body) is an empty object/mapping.
+	if l.pos >= len(l.lines) || l.lines[l.pos].indent < parentIndent {
+		// No body at this depth: an empty tagged node (e.g. "!ruby/object:Foo" with
+		// no body) is an empty object/mapping.
 		return l.taggedEmpty(tag)
 	}
 	child := l.lines[l.pos]
@@ -348,9 +368,11 @@ func (l *yamlLoader) scalarValue(s string, tag string) object.Value {
 	}
 	switch {
 	case s == "[]":
-		return &object.Array{}
+		return l.applySeqTag(&object.Array{}, tag)
 	case s == "{}":
-		return object.NewHash()
+		// An inline "<tag> {}" empty mapping (e.g. "!ruby/object:Foo {}") builds the
+		// tagged empty value.
+		return l.applyMapTag(object.NewHash(), tag)
 	case strings.HasPrefix(s, "["):
 		return l.parseFlowSeq(s)
 	case strings.HasPrefix(s, "{"):
@@ -580,6 +602,12 @@ func parseYAMLTime(s string) (object.Value, bool) {
 // "- value".
 func isSeqEntry(content string) bool {
 	return content == "-" || strings.HasPrefix(content, "- ")
+}
+
+// isFlowStart reports whether content opens a flow collection ("[" or "{"), which
+// is parsed as a scalar value rather than a block mapping.
+func isFlowStart(content string) bool {
+	return strings.HasPrefix(content, "[") || strings.HasPrefix(content, "{")
 }
 
 // splitMapEntry splits "key: value" into its key and (possibly empty) value,

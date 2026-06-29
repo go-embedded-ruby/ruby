@@ -80,19 +80,26 @@ func (e *yamlEncoder) tagBodyEmpty(v object.Value) bool {
 	return false
 }
 
-// tagBody builds the Hash whose entries form the block body of a complex value:
-// the instance variables of an object (keyed by their bare names, in a stable
-// order), or the begin/end/excl triple of a Range.
-func (e *yamlEncoder) tagBody(v object.Value) object.Value {
+// yamlPair is one entry of a complex value's block body: a plain identifier key
+// (an ivar / member name, written unquoted as Psych does) and its value.
+type yamlPair struct {
+	key string
+	val object.Value
+}
+
+// tagBody returns the ordered key/value pairs that form the block body of a
+// complex value: the instance variables of an object (bare names, stably
+// ordered), the begin/end/excl triple of a Range, or the backing "hash" of a Set.
+func (e *yamlEncoder) tagBody(v object.Value) []yamlPair {
 	switch n := v.(type) {
 	case *RObject:
-		return ivarHash(n.ivars)
+		return ivarPairs(n.ivars)
 	case *object.Range:
-		h := object.NewHash()
-		h.Set(object.NewString("begin"), rangeBound(n.Lo))
-		h.Set(object.NewString("end"), rangeBound(n.Hi))
-		h.Set(object.NewString("excl"), object.Bool(n.Exclusive))
-		return h
+		return []yamlPair{
+			{"begin", rangeBound(n.Lo)},
+			{"end", rangeBound(n.Hi)},
+			{"excl", object.Bool(n.Exclusive)},
+		}
 	case *Set:
 		// MRI's Set#encode_with writes its backing hash (each element mapped to
 		// true) under the "hash" ivar, so it round-trips as a !ruby/object:Set.
@@ -100,11 +107,22 @@ func (e *yamlEncoder) tagBody(v object.Value) object.Value {
 		for _, k := range n.order {
 			inner.Set(n.vals[k], object.Bool(true))
 		}
-		h := object.NewHash()
-		h.Set(object.NewString("hash"), inner)
-		return h
+		return []yamlPair{{"hash", inner}}
 	}
-	return object.NewHash()
+	return nil
+}
+
+// encodePairs writes a complex value's body as a block mapping at the given
+// indent, each key a plain identifier (unquoted, as Psych writes ivar / member
+// names) and each value via the shared value-emission path.
+func (e *yamlEncoder) encodePairs(pairs []yamlPair, indent int) {
+	pad := strings.Repeat(" ", indent)
+	for _, p := range pairs {
+		e.b.WriteString(pad)
+		e.b.WriteString(p.key)
+		e.b.WriteByte(':')
+		e.writeMapChild(p.val, indent)
+	}
 }
 
 // rangeBound maps a Range endpoint, where a beginless / endless bound is nil.
@@ -115,20 +133,20 @@ func rangeBound(v object.Value) object.Value {
 	return v
 }
 
-// ivarHash turns an ivar table into an ordered String-keyed Hash (the leading
-// "@" stripped), sorted by name for deterministic output since the underlying
-// map has no insertion order.
-func ivarHash(ivars map[string]object.Value) *object.Hash {
+// ivarPairs renders an ivar table as ordered (name, value) pairs with the leading
+// "@" stripped, sorted by name for deterministic output (the backing Go map has
+// no insertion order).
+func ivarPairs(ivars map[string]object.Value) []yamlPair {
 	names := make([]string, 0, len(ivars))
 	for k := range ivars {
 		names = append(names, k)
 	}
 	sort.Strings(names)
-	h := object.NewHash()
-	for _, k := range names {
-		h.Set(object.NewString(strings.TrimPrefix(k, "@")), ivars[k])
+	pairs := make([]yamlPair, len(names))
+	for i, k := range names {
+		pairs[i] = yamlPair{strings.TrimPrefix(k, "@"), ivars[k]}
 	}
-	return h
+	return pairs
 }
 
 // writeComplexChild emits a complex value (object / range) as a mapping entry's
@@ -137,14 +155,28 @@ func ivarHash(ivars map[string]object.Value) *object.Hash {
 // is written as " *N". Returns false when v is not complex so the scalar /
 // collection path handles it.
 func (e *yamlEncoder) writeComplexChild(v object.Value, indent int) bool {
-	if !isYAMLComplex(v) {
-		return false
-	}
+	// A previously-emitted shared value (object OR collection) is aliased.
 	if n, ok := e.alias(v); ok {
 		e.b.WriteString(" *")
 		e.b.WriteString(itoa(n))
 		e.b.WriteByte('\n')
 		return true
+	}
+	// A first sighting of a shared plain collection carries an anchor and its body
+	// at the key's indent (sequence) or two deeper (mapping).
+	if e.shared(v) {
+		switch v.(type) {
+		case *object.Array, *object.Hash:
+			// "&N" with no tag suffix for a plain collection, body two deeper.
+			e.b.WriteByte(' ')
+			e.writeAnchorTag(v)
+			e.b.WriteByte('\n')
+			e.encodeNode(v, indent+2)
+			return true
+		}
+	}
+	if !isYAMLComplex(v) {
+		return false
 	}
 	e.b.WriteByte(' ')
 	e.writeAnchorTag(v)
@@ -153,20 +185,30 @@ func (e *yamlEncoder) writeComplexChild(v object.Value, indent int) bool {
 		return true
 	}
 	e.b.WriteByte('\n')
-	e.encodeNode(e.tagBody(v), indent+2)
+	e.encodePairs(e.tagBody(v), indent+2)
 	return true
 }
 
-// writeComplexSeqChild emits a complex value following a sequence dash ("- ").
+// writeComplexSeqChild emits a complex / shared value following a sequence dash.
 func (e *yamlEncoder) writeComplexSeqChild(v object.Value, indent int) bool {
-	if !isYAMLComplex(v) {
-		return false
-	}
 	if n, ok := e.alias(v); ok {
 		e.b.WriteString(" *")
 		e.b.WriteString(itoa(n))
 		e.b.WriteByte('\n')
 		return true
+	}
+	if e.shared(v) {
+		switch v.(type) {
+		case *object.Array, *object.Hash:
+			e.b.WriteByte(' ')
+			e.writeAnchorTag(v)
+			e.b.WriteByte('\n')
+			e.encodeNode(v, indent+2)
+			return true
+		}
+	}
+	if !isYAMLComplex(v) {
+		return false
 	}
 	e.b.WriteByte(' ')
 	e.writeAnchorTag(v)
@@ -175,7 +217,7 @@ func (e *yamlEncoder) writeComplexSeqChild(v object.Value, indent int) bool {
 		return true
 	}
 	e.b.WriteByte('\n')
-	e.encodeNode(e.tagBody(v), indent+2)
+	e.encodePairs(e.tagBody(v), indent+2)
 	return true
 }
 
@@ -183,6 +225,7 @@ func (e *yamlEncoder) writeComplexSeqChild(v object.Value, indent int) bool {
 // is shared (appears more than once in the graph). The anchor number is assigned
 // on this first emission so later sightings alias it.
 func (e *yamlEncoder) writeAnchorTag(v object.Value) {
+	tag := e.openTag(v, 0)
 	if e.shared(v) {
 		e.seq++
 		if e.anchors == nil {
@@ -191,9 +234,13 @@ func (e *yamlEncoder) writeAnchorTag(v object.Value) {
 		e.anchors[v] = e.seq
 		e.b.WriteByte('&')
 		e.b.WriteString(itoa(e.seq))
-		e.b.WriteByte(' ')
+		// A plain collection has no tag, so its anchor stands alone ("&1"); a tagged
+		// value separates the anchor from the tag with a space ("&1 !ruby/object:X").
+		if tag != "" {
+			e.b.WriteByte(' ')
+		}
 	}
-	e.b.WriteString(e.openTag(v, 0))
+	e.b.WriteString(tag)
 }
 
 // alias reports whether v has already been emitted under an anchor (so it should

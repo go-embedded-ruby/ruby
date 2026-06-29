@@ -54,7 +54,7 @@ func yamlDump(vm *VM, v object.Value) string {
 			return e.b.String()
 		}
 		e.b.WriteByte('\n')
-		e.encodeNode(e.tagBody(v), 0)
+		e.encodePairs(e.tagBody(v), 0)
 		return e.b.String()
 	}
 	if isYAMLInline(v) {
@@ -135,18 +135,20 @@ func (e *yamlEncoder) keyScalar(k object.Value) string {
 
 // writeComplexKey emits a mapping entry whose key is itself a non-scalar value
 // (an Array, Hash or object), using Psych's explicit "? <key>" / ": <value>"
-// block form, and reports whether it handled the entry. A scalar key returns
-// false so the caller uses the inline "key:" form.
-func (e *yamlEncoder) writeComplexKey(k, val object.Value, indent int, pad string) bool {
+// block form, and reports whether it handled the entry. openPad is written before
+// the "?" (empty when it already sits on a parent dash line); the ":" line is
+// always written at the mapping's own indent. A scalar key returns false so the
+// caller uses the inline "key:" form.
+func (e *yamlEncoder) writeComplexKey(k, val object.Value, indent int, openPad string) bool {
 	if !isComplexKey(k) {
 		return false
 	}
-	e.b.WriteString(pad)
+	e.b.WriteString(openPad)
 	e.b.WriteByte('?')
 	// The key block opens on the "?" line exactly as a sequence-dash child would
 	// (object tag / nested collection), reusing writeSeqChild's layout.
 	e.writeSeqChild(k, indent)
-	e.b.WriteString(pad)
+	e.b.WriteString(strings.Repeat(" ", indent))
 	e.b.WriteByte(':')
 	e.writeMapChild(val, indent)
 	return true
