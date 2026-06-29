@@ -405,6 +405,7 @@ func (vm *VM) bootstrap() {
 	vm.registerDir()         // Dir (reuses the Errno module set up by registerFile)
 	vm.registerTmpdir()      // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
 	vm.registerProcess()     // Process module — identity + clock_gettime
+	vm.registerSpawn()       // IO.pipe / read_nonblock / select + Process.spawn/waitpid2 + Kernel.fork/exec
 	vm.registerObjectSpace() // ObjectSpace module — finalizer API + reflective no-ops
 	vm.registerOpenSSL()     // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
 	vm.registerNetHTTP()     // net/http + net/https loadable shell; needs StandardError
@@ -1990,6 +1991,19 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: flattenDepth(self.(*object.Array).Elems, depth)}
 	})
+	vm.cArray.define("flatten!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		depth := -1
+		if len(args) > 0 {
+			depth = int(intArg(args[0]))
+		}
+		a := self.(*object.Array)
+		out, changed := flattenDepthChanged(a.Elems, depth)
+		if !changed {
+			return object.NilV
+		}
+		a.Elems = out
+		return self
+	})
 	vm.cArray.define("sum", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		acc := object.Value(object.Integer(0))
 		if len(args) > 0 {
@@ -2345,6 +2359,15 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 		}
 		return object.Bool(args[0].Truthy())
+	})
+	// nil =~ anything is always nil in MRI (NilClass#=~), so `value =~ /re/`
+	// short-circuits when value is nil — Puppet's useradd provider relies on this
+	// when building its command from possibly-absent properties.
+	vm.cNilClass.define("=~", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.NilV
 	})
 	vm.cArray.define("sort_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -4455,6 +4478,25 @@ func flattenDepth(elems []object.Value, depth int) []object.Value {
 		}
 	}
 	return out
+}
+
+// flattenDepthChanged flattens like flattenDepth but also reports whether any
+// nested array was actually expanded. flatten!/flatten share semantics, but the
+// bang form must return nil when nothing changed, which length alone cannot
+// detect (e.g. [[1]] flattens to [1] with the same length).
+func flattenDepthChanged(elems []object.Value, depth int) ([]object.Value, bool) {
+	var out []object.Value
+	changed := false
+	for _, e := range elems {
+		if sub, ok := e.(*object.Array); ok && depth != 0 {
+			changed = true
+			inner, _ := flattenDepthChanged(sub.Elems, depth-1)
+			out = append(out, inner...)
+		} else {
+			out = append(out, e)
+		}
+	}
+	return out, changed
 }
 
 // joinArray renders an array as a string, recursively joining nested arrays.

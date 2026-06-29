@@ -238,6 +238,12 @@ type VM struct {
 	// (which only tracks required-file frames for __FILE__), every frame pushes
 	// here so the two stacks stay aligned. GVL-guarded.
 	frameFiles []string
+
+	// children records finished synthetic child processes (Process.spawn /
+	// Kernel.fork), so Process.waitpid2 can report each one's exit status.
+	// childPidSeq assigns the next synthetic pid. GVL-guarded.
+	children    []childStatus
+	childPidSeq int64
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the
@@ -525,6 +531,17 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 		if r := recover(); r != nil {
 			if sig, ok := r.(throwSignal); ok {
 				r = RubyError{Class: "UncaughtThrowError", Message: "uncaught throw " + sig.tag.Inspect()}
+			}
+			// A top-level Kernel.exec (outside any fork) ran its command and is now
+			// "replacing" the process: terminate the run cleanly, like Kernel#exit,
+			// running at_exit handlers and returning without an error.
+			if _, ok := r.(execSentinel); ok {
+				vm.frameNames = vm.frameNames[:0]
+				vm.frameFiles = vm.frameFiles[:0]
+				vm.fileStack = vm.fileStack[:0]
+				vm.runAtExit()
+				result, err = object.NilV, nil
+				return
 			}
 			rerr := r.(RubyError)
 			// A SystemExit (Kernel#exit/abort) is a clean program termination, not a
