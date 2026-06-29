@@ -23,14 +23,40 @@ import (
 // Puppet.err) for the full !ruby/object: report graph that a complete Psych
 // emitter would be needed to dump.
 type yamlEncoder struct {
-	b strings.Builder
+	b    strings.Builder
+	vm   *VM
+	root object.Value // the value being dumped, used to compute the reference graph
+	// anchors maps an already-emitted reference value (by identity) to its anchor
+	// number, so a shared / cyclic node in the report graph is written once with
+	// "&N" and referenced thereafter with "*N".
+	anchors map[object.Value]int
+	// refcount holds how many times each anchorable node is reachable from root;
+	// a count above one forces an anchor. Computed lazily on the first shared()
+	// query and cached.
+	refcount map[object.Value]int
+	seq      int
 }
 
 // yamlDump renders v as a complete YAML document beginning with the "---"
-// directive, matching Psych.dump's output for the supported value shapes.
-func yamlDump(v object.Value) string {
-	e := &yamlEncoder{}
+// directive, matching Psych.dump's output for the supported value shapes. vm
+// supplies class names and ivar tables for generic object emission; it may be nil
+// for the plain-value tests, in which case an arbitrary object raises TypeError.
+func yamlDump(vm *VM, v object.Value) string {
+	e := &yamlEncoder{vm: vm, root: v, anchors: map[object.Value]int{}}
 	e.b.WriteString("---")
+	if isYAMLComplex(v) {
+		// A tagged complex value (object/range) writes "--- <tag>" then its mapping
+		// body at indent 0.
+		e.b.WriteByte(' ')
+		e.writeAnchorTag(v)
+		if e.tagBodyEmpty(v) {
+			e.b.WriteString(" {}\n")
+			return e.b.String()
+		}
+		e.b.WriteByte('\n')
+		e.encodePairs(e.tagBody(v), 0)
+		return e.b.String()
+	}
 	if isYAMLInline(v) {
 		// A scalar, or an empty collection, follows "--- " on the document line.
 		e.b.WriteByte(' ')
@@ -86,18 +112,67 @@ func (e *yamlEncoder) encodeNode(v object.Value, indent int) {
 	case *object.Hash:
 		for _, k := range n.Keys {
 			val, _ := n.Get(k)
+			if e.writeComplexKey(k, val, indent, pad) {
+				continue
+			}
 			e.b.WriteString(pad)
-			e.b.WriteString(e.scalar(k))
+			e.b.WriteString(e.keyScalar(k))
 			e.b.WriteByte(':')
 			e.writeMapChild(val, indent)
 		}
 	}
 }
 
+// keyScalar renders a mapping key scalar. It differs from scalar only for a nil
+// key, which Psych writes as "! ”" (the plain empty form scalar would emit is
+// ambiguous as a key), so the "key:" line always parses.
+func (e *yamlEncoder) keyScalar(k object.Value) string {
+	if _, ok := k.(object.Nil); ok {
+		return "! ''"
+	}
+	return e.scalar(k)
+}
+
+// writeComplexKey emits a mapping entry whose key is itself a non-scalar value
+// (an Array, Hash or object), using Psych's explicit "? <key>" / ": <value>"
+// block form, and reports whether it handled the entry. openPad is written before
+// the "?" (empty when it already sits on a parent dash line); the ":" line is
+// always written at the mapping's own indent. A scalar key returns false so the
+// caller uses the inline "key:" form.
+func (e *yamlEncoder) writeComplexKey(k, val object.Value, indent int, openPad string) bool {
+	if !isComplexKey(k) {
+		return false
+	}
+	e.b.WriteString(openPad)
+	e.b.WriteByte('?')
+	// The key block opens on the "?" line exactly as a sequence-dash child would
+	// (object tag / nested collection), reusing writeSeqChild's layout.
+	e.writeSeqChild(k, indent)
+	e.b.WriteString(strings.Repeat(" ", indent))
+	e.b.WriteByte(':')
+	e.writeMapChild(val, indent)
+	return true
+}
+
+// isComplexKey reports whether a mapping key must be written with the explicit
+// "?"/":" block form (any non-scalar value).
+func isComplexKey(v object.Value) bool {
+	switch n := v.(type) {
+	case *object.Array:
+		return len(n.Elems) > 0
+	case *object.Hash:
+		return n.Len() > 0
+	}
+	return isYAMLComplex(v)
+}
+
 // writeMapChild emits the value of a mapping entry (after "key:"): a scalar
 // inline, or a nested collection on the following lines. A block sequence stays
 // at the key's indent; a nested mapping is indented two deeper.
 func (e *yamlEncoder) writeMapChild(v object.Value, indent int) {
+	if e.writeComplexChild(v, indent) {
+		return
+	}
 	switch n := v.(type) {
 	case *object.Array:
 		if len(n.Elems) == 0 {
@@ -122,6 +197,9 @@ func (e *yamlEncoder) writeMapChild(v object.Value, indent int) {
 // a nested collection continues on the dash line, its remaining lines indented
 // two spaces deeper (Psych's "- - 1" / "- a: 1" layout).
 func (e *yamlEncoder) writeSeqChild(v object.Value, indent int) {
+	if e.writeComplexSeqChild(v, indent) {
+		return
+	}
 	switch n := v.(type) {
 	case *object.Array:
 		if len(n.Elems) == 0 {
@@ -160,10 +238,19 @@ func (e *yamlEncoder) encodeInlineFirst(v object.Value, indent int) {
 	case *object.Hash:
 		for i, k := range n.Keys {
 			val, _ := n.Get(k)
+			// The "?" opener of a complex key carries the row indent for every entry
+			// except the first (which already sits on the parent dash line).
+			openPad := pad
+			if i == 0 {
+				openPad = ""
+			}
+			if e.writeComplexKey(k, val, indent, openPad) {
+				continue
+			}
 			if i > 0 {
 				e.b.WriteString(pad)
 			}
-			e.b.WriteString(e.scalar(k))
+			e.b.WriteString(e.keyScalar(k))
 			e.b.WriteByte(':')
 			e.writeMapChild(val, indent)
 		}
@@ -211,6 +298,17 @@ func (e *yamlEncoder) scalar(v object.Value) string {
 			ts = strings.TrimSuffix(ts, " +00:00") + " Z"
 		}
 		return ts
+	case *Regexp:
+		// Psych emits a Regexp inline as "!ruby/regexp /source/flags".
+		return "!ruby/regexp /" + n.source + "/" + orderFlags(n.flags)
+	case *RClass:
+		// Psych emits a Class / Module reference inline as a single-quoted name
+		// behind the !ruby/class or !ruby/module tag.
+		tag := "!ruby/class "
+		if n.isModule {
+			tag = "!ruby/module "
+		}
+		return tag + "'" + n.ToS() + "'"
 	}
 	raise("TypeError", "can't dump %s to YAML", classNameOf(v))
 	return ""

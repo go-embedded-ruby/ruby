@@ -32,15 +32,13 @@ func TestYAMLConstants(t *testing.T) {
 }
 
 // TestYAMLNotImplemented covers the Psych/YAML methods that still raise
-// NotImplementedError until a real pure-Go YAML parser lands. dump is now
-// implemented (see TestYAMLDump) and so is excluded here.
+// NotImplementedError: the low-level node API (parse / parse_stream) and
+// dump_tags, which Puppet's persistence does not use. dump / load / safe_load /
+// load_file are implemented (see TestYAMLDump / TestYAMLLoad) and excluded here.
 func TestYAMLNotImplemented(t *testing.T) {
-	// load/safe_load/parse/parse_stream/dump_tags take args; load_file takes a
-	// path. Each must raise NotImplementedError naming the method.
+	// parse/parse_stream take a source; dump_tags takes none. Each must raise
+	// NotImplementedError naming the method.
 	calls := map[string]string{
-		"load":         `YAML.load("a")`,
-		"safe_load":    `YAML.safe_load("a")`,
-		"load_file":    `YAML.load_file("x.yml")`,
 		"parse":        `YAML.parse("a")`,
 		"parse_stream": `YAML.parse_stream("a")`,
 		"dump_tags":    `YAML.dump_tags`,
@@ -205,10 +203,12 @@ p r.equal?(io)`
 	}
 }
 
-// TestYAMLDumpUnsupported covers the TypeError raised for a value outside the
-// supported plain-value shapes, which the report YAML indirector rescues.
+// TestYAMLDumpUnsupported covers the TypeError raised for a value with no Psych
+// representation (a Proc), which the report YAML indirector rescues. Ordinary
+// objects now serialise (see TestYAMLDumpObject), so the unsupported case is a
+// genuinely undumpable value.
 func TestYAMLDumpUnsupported(t *testing.T) {
-	src := `class Foo; end; YAML.dump(Foo.new)`
+	src := `YAML.dump(proc {})`
 	err := runErr(t, src)
 	if err == nil || !strings.Contains(err.Error(), "TypeError") {
 		t.Errorf("expected TypeError, got %v", err)
