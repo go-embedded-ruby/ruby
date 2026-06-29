@@ -58,6 +58,8 @@ github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8 h1:zghkWpebo93
 github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8/go.mod h1:dG/91hk8HlQ6YAdD64xiMFHTTmXjTWtapKWoG9JtcRA=
 github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac h1:jYaeh86ngvgRe2Kn4hUmSO+DV0okQv5PcdC+gMiyP2U=
 github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac/go.mod h1:+0nK2X+aCPMO91bPMM/DT1OFUIzFQeoTPGkkOR3kd84=
+github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac h1:Y++tdsBF6lA/cw3c9uQ/ZyQZjP2N3wkA6pLF8a3HnHc=
+github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac/go.mod h1:RD3wPeMjMThQ7QVnB9O15gCllRg+RJhSEJu9DtFaLLQ=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386 h1:mt488Km0GMk/yjJtKUY4jo+fNz1xqHe0uLbEwPJa4To=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386/go.mod h1:UpBHz/Hf4Q8h14UpfJ5Cpp+OxVEqqNuICXGnUjg2dKc=
 github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12 h1:c051SI5P7BVVbysSroIJIZWwvXo9dZhWZlx9ef62xVI=
