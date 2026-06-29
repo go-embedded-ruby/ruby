@@ -97,6 +97,7 @@ func (vm *VM) bootstrap() {
 	vm.registerPrime()
 	vm.registerTSort()
 	vm.registerAbbrev()
+	vm.registerScanf() // String#scanf / IO#scanf / Kernel#scanf (require "scanf"), backed by go-ruby-scanf
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.callBlock(self.(*Proc), args)
