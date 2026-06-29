@@ -154,6 +154,205 @@ func TestResolvDNS(t *testing.T) {
 	}
 }
 
+// resolvReq prefixes a require so each Resolv snippet is self-contained.
+const resolvReq = `require "resolv"; `
+
+// TestResolvName covers Resolv::DNS::Name (the go-ruby-resolv binding):
+// create/to_s, the case-insensitive ==/eql?, length, and the trailing-dot
+// absolute? flag — each pinned to MRI 4.0.5.
+func TestResolvName(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{resolvReq + `p Resolv::DNS::Name.create("www.example.com").to_s`, "\"www.example.com\"\n"},
+		// The original byte string is preserved by to_s.
+		{resolvReq + `p Resolv::DNS::Name.create("WWW.Example.COM").to_s`, "\"WWW.Example.COM\"\n"},
+		{resolvReq + `p Resolv::DNS::Name.create("a.b.c").length`, "3\n"},
+		{resolvReq + `p Resolv::DNS::Name.create("a.b.").absolute?`, "true\n"},
+		{resolvReq + `p Resolv::DNS::Name.create("a.b").absolute?`, "false\n"},
+		// == / eql? compare labels case-insensitively (RFC 4343).
+		{resolvReq + `p(Resolv::DNS::Name.create("A.B") == Resolv::DNS::Name.create("a.b"))`, "true\n"},
+		{resolvReq + `p Resolv::DNS::Name.create("A.B").eql?(Resolv::DNS::Name.create("a.b"))`, "true\n"},
+		{resolvReq + `p(Resolv::DNS::Name.create("a.b") == Resolv::DNS::Name.create("a.c"))`, "false\n"},
+		// A non-Name compares unequal.
+		{resolvReq + `p(Resolv::DNS::Name.create("a.b") == "a.b")`, "false\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestResolvIPv6Compression covers the library's canonical "::" rendering, which
+// must match MRI's first-longest-run compression quirk exactly.
+func TestResolvIPv6Compression(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{resolvReq + `p Resolv::IPv6.create("fe80:0:0:0:0:0:0:1").to_s`, "\"fe80::1\"\n"},
+		{resolvReq + `p Resolv::IPv6.create("0:0:0:0:0:0:0:0").to_s`, "\"::\"\n"},
+		{resolvReq + `p Resolv::IPv6.create("1:0:0:0:0:0:0:1").to_s`, "\"1::1\"\n"},
+		{resolvReq + `p Resolv::IPv6.create("2001:db8::1").to_s`, "\"2001:db8::1\"\n"},
+		// The Regex constant is the library's MRI-exact matcher.
+		{resolvReq + `p Resolv::IPv4::Regex.match?("256.1.1.1")`, "false\n"},
+		{resolvReq + `p Resolv::IPv4::Regex.match?("10.0.0.1")`, "true\n"},
+		{resolvReq + `p Resolv::IPv6::Regex.match?("2001:db8::1")`, "true\n"},
+		{resolvReq + `p Resolv::IPv6::Regex.match?("nope")`, "false\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestResolvMessage covers Resolv::DNS::Message: new/id, the header flag
+// accessors, add_question, encode (byte-exact wire + the encoding-name quirk),
+// the Message.decode class method, question/each_question, and a DecodeError.
+func TestResolvMessage(t *testing.T) {
+	const mk = resolvReq + `m=Resolv::DNS::Message.new(0x1234); m.rd=1; ` +
+		`m.add_question("www.example.com",Resolv::DNS::Resource::IN::A); `
+	cases := []struct{ src, want string }{
+		{resolvReq + `p Resolv::DNS::Message.new(7).id`, "7\n"},
+		{resolvReq + `p Resolv::DNS::Message.new.id`, "0\n"},
+		// Wire encoding is byte-exact against MRI's Message#encode.
+		{mk + `p m.encode.unpack1("H*")`,
+			"\"12340100000100000000000003777777076578616d706c6503636f6d0000010001\"\n"},
+		// An all-ASCII wire string reports the default (UTF-8) encoding…
+		{mk + `p m.encode.encoding.name`, "\"UTF-8\"\n"},
+		// …a high address octet flips it to ASCII-8BIT (matching MRI).
+		{resolvReq + `m=Resolv::DNS::Message.new(1)
+m.add_answer("a.b",1,Resolv::DNS::Resource::IN::A.new(Resolv::IPv4.create("255.0.0.255")))
+p m.encode.encoding.name`, "\"ASCII-8BIT\"\n"},
+		// Header flag accessors round-trip.
+		{resolvReq + `m=Resolv::DNS::Message.new(1); m.qr=1; m.aa=1; m.tc=0; m.ra=1; m.rcode=3; m.opcode=2
+p [m.qr,m.opcode,m.aa,m.tc,m.rd,m.ra,m.rcode]`, "[1, 2, 1, 0, 0, 1, 3]\n"},
+		// decode round-trips the header and question.
+		{mk + `d=Resolv::DNS::Message.decode(m.encode); p [d.id, d.rd, d.question[0][0].to_s, d.question[0][1].name]`,
+			"[4660, 1, \"www.example.com\", \"Resolv::DNS::Resource::IN::A\"]\n"},
+		// add_question defaults to the A type when none is given.
+		{resolvReq + `m=Resolv::DNS::Message.new(1); m.add_question("x.y")
+d=Resolv::DNS::Message.decode(m.encode); p d.question[0][1].name`,
+			"\"Resolv::DNS::Resource::IN::A\"\n"},
+		// each_question yields [name, typeclass].
+		{mk + `d=Resolv::DNS::Message.decode(m.encode); d.each_question{|nm,tc| p [nm.to_s, tc.name]}`,
+			"[\"www.example.com\", \"Resolv::DNS::Resource::IN::A\"]\n"},
+		// A name argument (not a String) is accepted by add_question.
+		{resolvReq + `m=Resolv::DNS::Message.new(1)
+m.add_question(Resolv::DNS::Name.create("q.r"),Resolv::DNS::Resource::IN::A)
+d=Resolv::DNS::Message.decode(m.encode); p d.question[0][0].to_s`, "\"q.r\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// Malformed wire data raises a DecodeError.
+	if class, _ := evalErr(t, resolvReq+`Resolv::DNS::Message.decode("\xff")`); class != "Resolv::DNS::DecodeError" {
+		t.Errorf("bad decode raised %q, want Resolv::DNS::DecodeError", class)
+	}
+}
+
+// TestResolvRecords covers the Resolv::DNS::Resource::IN::* record classes:
+// construction, the MRI accessors, and a full encode/decode round-trip through a
+// Message answer section. Every wired record type is exercised.
+func TestResolvRecords(t *testing.T) {
+	// roundTrip wraps a record in an answer, encodes, decodes, and reads it back.
+	const rt = resolvReq + `def rt(rec)
+  m=Resolv::DNS::Message.new(1); m.add_answer("a.b",7,rec)
+  Resolv::DNS::Message.decode(m.encode).answer[0]
+end
+`
+	cases := []struct{ src, want string }{
+		// A / AAAA address accessors.
+		{rt + `a=rt(Resolv::DNS::Resource::IN::A.new(Resolv::IPv4.create("1.2.3.4")))
+p [a[0].to_s, a[1], a[2].address.to_s, a[2].class.name]`,
+			"[\"a.b\", 7, \"1.2.3.4\", \"Resolv::DNS::Resource::IN::A\"]\n"},
+		{rt + `a=rt(Resolv::DNS::Resource::IN::AAAA.new(Resolv::IPv6.create("::1")))
+p a[2].address.to_s`, "\"::1\"\n"},
+		// A accepts a plain dotted String too (rbgo is lenient over MRI's IPv4 arg).
+		{rt + `p rt(Resolv::DNS::Resource::IN::A.new("9.9.9.9"))[2].address.to_s`, "\"9.9.9.9\"\n"},
+		// MX preference + exchange.
+		{rt + `m=rt(Resolv::DNS::Resource::IN::MX.new(10,Resolv::DNS::Name.create("mail.a.b")))
+p [m[2].preference, m[2].exchange.to_s]`, "[10, \"mail.a.b\"]\n"},
+		// SRV priority/weight/port/target.
+		{rt + `s=rt(Resolv::DNS::Resource::IN::SRV.new(1,2,80,Resolv::DNS::Name.create("h.a.b")))
+p [s[2].priority, s[2].weight, s[2].port, s[2].target.to_s]`, "[1, 2, 80, \"h.a.b\"]\n"},
+		// CNAME / NS / PTR single-name records.
+		{rt + `p rt(Resolv::DNS::Resource::IN::CNAME.new(Resolv::DNS::Name.create("c.d")))[2].name.to_s`, "\"c.d\"\n"},
+		{rt + `p rt(Resolv::DNS::Resource::IN::NS.new(Resolv::DNS::Name.create("ns.d")))[2].name.to_s`, "\"ns.d\"\n"},
+		{rt + `p rt(Resolv::DNS::Resource::IN::PTR.new(Resolv::DNS::Name.create("p.d")))[2].name.to_s`, "\"p.d\"\n"},
+		// TXT strings + the data convenience accessor.
+		{rt + `t=rt(Resolv::DNS::Resource::IN::TXT.new("hi","there")); p [t[2].strings, t[2].data]`,
+			"[[\"hi\", \"there\"], \"hi\"]\n"},
+		// A single-string TXT.
+		{rt + `p rt(Resolv::DNS::Resource::IN::TXT.new("solo"))[2].data`, "\"solo\"\n"},
+		// HINFO cpu/os.
+		{rt + `h=rt(Resolv::DNS::Resource::IN::HINFO.new("amd64","linux")); p [h[2].cpu, h[2].os]`,
+			"[\"amd64\", \"linux\"]\n"},
+		// each_answer yields [name, ttl, data].
+		{rt + `m=Resolv::DNS::Message.new(1)
+m.add_answer("a.b",5,Resolv::DNS::Resource::IN::A.new(Resolv::IPv4.create("8.8.8.8")))
+Resolv::DNS::Message.decode(m.encode).each_answer{|nm,ttl,data| p [nm.to_s, ttl, data.address.to_s]}`,
+			"[\"a.b\", 5, \"8.8.8.8\"]\n"},
+		// authority / additional sections render the same [name, ttl, data] tuples.
+		{rt + `m=Resolv::DNS::Message.new(1)
+m.add_authority("a.b",1,Resolv::DNS::Resource::IN::NS.new(Resolv::DNS::Name.create("ns.a.b")))
+m.add_additional("a.b",1,Resolv::DNS::Resource::IN::A.new(Resolv::IPv4.create("1.1.1.1")))
+d=Resolv::DNS::Message.decode(m.encode)
+p [d.authority[0][2].name.to_s, d.additional[0][2].address.to_s]`,
+			"[\"ns.a.b\", \"1.1.1.1\"]\n"},
+		// SOA: all seven fields round-trip through encode/decode.
+		{rt + `soa=Resolv::DNS::Resource::IN::SOA.new(
+  Resolv::DNS::Name.create("ns.a.b"), Resolv::DNS::Name.create("root.a.b"),
+  2024010101, 7200, 3600, 1209600, 86400)
+r=rt(soa)[2]
+p [r.mname.to_s, r.rname.to_s, r.serial, r.refresh, r.retry, r.expire, r.minimum]`,
+			"[\"ns.a.b\", \"root.a.b\", 2024010101, 7200, 3600, 1209600, 86400]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// A malformed IPv4/IPv6 passed to an A/AAAA record raises ArgumentError.
+	if class, _ := evalErr(t, resolvReq+`Resolv::DNS::Resource::IN::A.new("999.1")`); class != "ArgumentError" {
+		t.Errorf("bad A addr raised %q, want ArgumentError", class)
+	}
+	if class, _ := evalErr(t, resolvReq+`Resolv::DNS::Resource::IN::AAAA.new("nope")`); class != "ArgumentError" {
+		t.Errorf("bad AAAA addr raised %q, want ArgumentError", class)
+	}
+}
+
+// TestResolvHostsParse covers Resolv::Hosts backed by go-ruby-resolv's
+// ParseHosts: the content-string constructor, getaddress(es)/getname(s) with
+// MRI's reversed per-name order, and the ResolvError for an absent entry.
+func TestResolvHostsParse(t *testing.T) {
+	const h = resolvReq + `h=Resolv::Hosts.new("127.0.0.1 localhost loop\n10.0.0.2 foo foo.example\n10.0.0.3 foo\n"); `
+	cases := []struct{ src, want string }{
+		{h + `p h.getaddress("localhost")`, "\"127.0.0.1\"\n"},
+		{h + `p h.getaddress("loop")`, "\"127.0.0.1\"\n"},
+		// getaddresses returns MRI's reversed order across the two foo lines.
+		{h + `p h.getaddresses("foo")`, "[\"10.0.0.3\", \"10.0.0.2\"]\n"},
+		{h + `p h.getname("10.0.0.2")`, "\"foo\"\n"},
+		{h + `p h.getnames("10.0.0.2")`, "[\"foo\", \"foo.example\"]\n"},
+		// getaddresses for an absent name is [].
+		{h + `p h.getaddresses("absent")`, "[]\n"},
+		{h + `p h.getnames("9.9.9.9")`, "[]\n"},
+		// An empty (default) table answers nothing.
+		{resolvReq + `p Resolv::Hosts.new.getaddresses("x")`, "[]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+	// An absent name / address raises ResolvError from getaddress / getname.
+	if class, _ := evalErr(t, h+`h.getaddress("nope")`); class != "Resolv::ResolvError" {
+		t.Errorf("getaddress(absent) raised %q, want Resolv::ResolvError", class)
+	}
+	if class, _ := evalErr(t, h+`h.getname("9.9.9.9")`); class != "Resolv::ResolvError" {
+		t.Errorf("getname(absent) raised %q, want Resolv::ResolvError", class)
+	}
+}
+
 // TestOptParse covers the real pure-Ruby OptionParser (prelude): require,
 // OptionParser.new (with and without a banner and a block), the chainable
 // declaration methods, the error class tree, and the parse family — long/short
