@@ -505,6 +505,7 @@ func New(out io.Writer) *VM {
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
 	vm.registerFileStat()   // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
 	vm.registerIPAddr()     // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
+	vm.registerPathname()   // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class
 	vm.installHashKeyHook()
 	return vm
 }
