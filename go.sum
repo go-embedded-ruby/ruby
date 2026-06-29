@@ -42,6 +42,8 @@ github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0 h1:Q3ryvK9hP
 github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac h1:jYaeh86ngvgRe2Kn4hUmSO+DV0okQv5PcdC+gMiyP2U=
 github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac/go.mod h1:+0nK2X+aCPMO91bPMM/DT1OFUIzFQeoTPGkkOR3kd84=
+github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z9b99kWJht8AgtlIbdiq7Y02j6eddxW+rr4MJpCS6kw=
+github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
 github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406 h1:0wEmUBEKLRN5JGhG4JZRsfBbO8il8qHHdOhtA6R3WGo=
 github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406/go.mod h1:Z50x1O7HpkWh6HvI2gvnbHrvqWsYTpz86IALiVfDSI4=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb h1:CyoFEEsMPa/TX4EJHOPsXud3nccESDhaW6fTQsidIKI=
