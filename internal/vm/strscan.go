@@ -27,26 +27,33 @@ type StringScanner struct{ sc *strscan.Scanner }
 
 func (s *StringScanner) ToS() string {
 	// MRI's StringScanner#inspect: "#<StringScanner fin>" at end-of-string, else
-	// "#<StringScanner pos/len [\"matched\" ]@ \"peek...\">" with the matched text
-	// shown only when there is a current match and the peek window elided with
-	// "..." when more than five bytes remain.
+	// "#<StringScanner pos/len [\"pre\" ]@ \"post\">" where the pre window is the
+	// (up to five) bytes immediately before the position — "..."-prefixed when
+	// more than five precede it and omitted entirely at the start — and the post
+	// window is the (up to five) bytes from the position, "..."-suffixed when more
+	// than five remain. The windows are byte slices, exactly as MRI shows them.
 	if s.sc.EOS() {
 		return "#<StringScanner fin>"
 	}
-	matched := ""
-	if m, ok := s.sc.Matched(); ok {
-		matched = strscanInspectStr(m) + " "
+	str := s.sc.String()
+	pos := s.sc.Pos()
+
+	pre := ""
+	if pos > 0 {
+		window := str[:pos]
+		if pos > 5 {
+			window = "..." + window[len(window)-5:]
+		}
+		pre = strscanInspectStr(window) + " "
 	}
-	rest := s.sc.Rest()
-	peek := rest
-	suffix := ""
-	if len(rest) > 5 {
-		peek = rest[:5]
-		suffix = "..."
+
+	post := str[pos:]
+	if len(post) > 5 {
+		post = post[:5] + "..."
 	}
+
 	return fmt.Sprintf("#<StringScanner %d/%d %s@ %s>",
-		s.sc.Pos(), len(s.sc.String()), matched,
-		strscanInspectStr(peek+suffix))
+		pos, len(str), pre, strscanInspectStr(post))
 }
 
 func (s *StringScanner) Inspect() string { return s.ToS() }
@@ -78,11 +85,12 @@ func ssPattern(vm *VM, v object.Value) string {
 	case *object.String:
 		return regexpEscapeLiteral(p.Str())
 	default:
-		s := vm.send(v, "to_str", nil, nil)
-		if str, ok := s.(*object.String); ok {
-			return regexpEscapeLiteral(str.Str())
+		if vm.respondsTo(v, "to_str") {
+			if str, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+				return regexpEscapeLiteral(str.Str())
+			}
 		}
-		raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
+		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 		return ""
 	}
 }
@@ -128,13 +136,15 @@ func (vm *VM) registerStringScanner() {
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			str := ""
-			if len(args) > 0 {
-				if _, isNil := args[0].(object.Nil); !isNil {
-					str = strArg(args[0])
-				}
+			// MRI's StringScanner.new(string[, fixed_anchor:]) requires the string
+			// argument (0 args is an ArgumentError) and coerces it through String()
+			// — a nil/non-string therefore raises TypeError, not a silent empty
+			// scanner. Any trailing argument (the historical dup / fixed_anchor flag)
+			// does not affect the scanned content and is ignored.
+			if len(args) == 0 || len(args) > 2 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 			}
-			return &StringScanner{sc: strscan.New(str)}
+			return &StringScanner{sc: strscan.New(strArg(args[0]))}
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
