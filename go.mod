@@ -15,6 +15,7 @@ require (
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
+	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0
 	github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac
 	github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406

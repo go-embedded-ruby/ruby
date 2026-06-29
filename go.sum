@@ -32,6 +32,8 @@ github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c h1:dJBMxMFxB
 github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c/go.mod h1:1tuz12SHPOcnFSfdPYRFwVvRhMT4Xn4M4jfPFgM7pLA=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f/go.mod h1:UpjSgWGcQSNt0ARWuHKwf0P55LkwZ65vuqoRPSKctZ8=
+github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=
+github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546/go.mod h1:BxhqkQFCqSMeYeWOHt7sdxTSkbaSJF19dWzspICZL1Q=
 github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0 h1:Q3ryvK9hPcbvX6uBw4ZpTKFIDkaGBVEtjLtxXaruP6Y=
 github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac h1:jYaeh86ngvgRe2Kn4hUmSO+DV0okQv5PcdC+gMiyP2U=
