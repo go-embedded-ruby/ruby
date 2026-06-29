@@ -1119,8 +1119,14 @@ class Pathname
     @path.hash
   end
 
+  # The lexical (no-I/O) path algebra — absolute?/cleanpath/basename/dirname/
+  # extname/+/join/split/each_filename/ascend/descend/sub_ext/relative_path_from —
+  # is backed by github.com/go-ruby-pathname/pathname through the native __lex_*
+  # class helpers registered on this class (registerPathname), matching MRI 4.0.5.
+  # This Ruby side only wraps the string results back into Pathname objects and
+  # keeps @path, Comparable and the filesystem delegations.
   def absolute?
-    @path.start_with?(SEPARATOR)
+    Pathname.__lex_absolute?(@path)
   end
 
   def relative?
@@ -1136,7 +1142,7 @@ class Pathname
   # by a single "/".
   def +(other)
     other = Pathname.new(other) unless other.is_a?(Pathname)
-    Pathname.new(Pathname.__plus(@path, other.to_s))
+    Pathname.new(Pathname.__lex_plus(@path, other.to_s))
   end
 
   def /(other)
@@ -1152,27 +1158,16 @@ class Pathname
   # basename returns the last path component (optionally stripping a suffix, or
   # ".*" for any extension).
   def basename(suffix = "")
-    base = @path.split(SEPARATOR).reject(&:empty?).last
-    base = SEPARATOR if base.nil?
-    if suffix == ".*"
-      e = File_extname(base)
-      base = base[0...(base.length - e.length)] unless e.empty?
-    elsif !suffix.empty? && base.end_with?(suffix)
-      base = base[0...(base.length - suffix.length)]
-    end
-    Pathname.new(base)
+    Pathname.new(Pathname.__lex_basename(@path, suffix))
   end
 
   def dirname
-    idx = @path.rindex(SEPARATOR)
-    return Pathname.new(".") if idx.nil?
-    return Pathname.new(SEPARATOR) if idx == 0
-    Pathname.new(@path[0...idx])
+    Pathname.new(Pathname.__lex_dirname(@path))
   end
   alias parent dirname
 
   def extname
-    File_extname(basename.to_s)
+    Pathname.__lex_extname(@path)
   end
 
   def split
@@ -1181,109 +1176,39 @@ class Pathname
 
   def each_filename
     return enum_for(:each_filename) unless block_given?
-    @path.split(SEPARATOR).reject(&:empty?).each { |f| yield f }
+    Pathname.__lex_filenames(@path).each { |f| yield f }
   end
 
   # ascend yields the path then each parent up to the root (or the first relative
   # component), like MRI's Pathname#ascend. descend is the same sequence reversed.
   def ascend
     return enum_for(:ascend) unless block_given?
-    paths = ascend_paths
-    paths.each { |p| yield Pathname.new(p) }
+    Pathname.__lex_ascend_paths(@path).each { |p| yield Pathname.new(p) }
     self
   end
 
   def descend
     return enum_for(:descend) unless block_given?
-    ascend_paths.reverse_each { |p| yield Pathname.new(p) }
+    Pathname.__lex_ascend_paths(@path).reverse_each { |p| yield Pathname.new(p) }
     self
-  end
-
-  def ascend_paths
-    out = [@path]
-    cur = @path
-    loop do
-      idx = cur.rindex(SEPARATOR)
-      break if idx.nil?
-      if idx == 0
-        out << SEPARATOR unless cur == SEPARATOR
-        break
-      end
-      cur = cur[0...idx]
-      out << cur
-    end
-    out
   end
 
   # cleanpath collapses "." and ".." components and redundant separators.
   def cleanpath
-    abs = absolute?
-    parts = @path.split(SEPARATOR).reject { |p| p.empty? || p == "." }
-    out = []
-    parts.each do |p|
-      if p == ".."
-        if !out.empty? && out.last != ".."
-          out.pop
-        elsif !abs
-          out << p
-        end
-      else
-        out << p
-      end
-    end
-    cleaned = out.join(SEPARATOR)
-    if abs
-      Pathname.new(SEPARATOR + cleaned)
-    else
-      Pathname.new(cleaned.empty? ? "." : cleaned)
-    end
+    Pathname.new(Pathname.__lex_cleanpath(@path))
   end
 
   def sub_ext(repl)
-    e = File_extname(@path)
-    Pathname.new(@path[0...(@path.length - e.length)] + repl)
+    Pathname.new(Pathname.__lex_sub_ext(@path, repl))
   end
 
   # relative_path_from returns self expressed relative to base_directory, using
-  # only the lexical components (no filesystem access), matching MRI: both paths
-  # are cleaned and split, a shared prefix is dropped, each remaining base
-  # component contributes a ".." and the remaining self components follow. Mixing
-  # an absolute path with a relative one — or a ".." that escapes a relative
-  # base — raises ArgumentError, as in MRI.
+  # only the lexical components (no filesystem access), matching MRI. Mixing an
+  # absolute path with a relative one — or a ".." that escapes a relative base —
+  # raises ArgumentError, as in MRI.
   def relative_path_from(base_directory)
     base_directory = Pathname.new(base_directory) unless base_directory.is_a?(Pathname)
-    dest = cleanpath
-    base = base_directory.cleanpath
-    if dest.absolute? != base.absolute?
-      dest_prefix = dest.absolute? ? SEPARATOR : ""
-      raise ArgumentError, "different prefix: #{dest_prefix.inspect} and #{base_directory.to_s.inspect}"
-    end
-    dest_parts = dest.to_s.split(SEPARATOR).reject(&:empty?)
-    base_parts = base.to_s.split(SEPARATOR).reject(&:empty?)
-    i = 0
-    i += 1 while i < dest_parts.length && i < base_parts.length && dest_parts[i] == base_parts[i]
-    up = base_parts[i..-1]
-    if up.any? { |p| p == ".." }
-      raise ArgumentError, "base_directory has ..: #{base_directory.to_s.inspect}"
-    end
-    rel = up.map { ".." } + dest_parts[i..-1]
-    Pathname.new(rel.empty? ? "." : rel.join(SEPARATOR))
-  end
-
-  # __plus implements the +/join append rule (class method to keep + small).
-  def self.__plus(base, rel)
-    return rel if rel.start_with?(SEPARATOR) # absolute resets to root
-    return rel if base.empty?
-    return base if rel.empty? || rel == "."
-    base.end_with?(SEPARATOR) ? base + rel : base + SEPARATOR + rel
-  end
-
-  # File_extname is Pathname's own extension extractor (".txt", "" when none),
-  # matching File.extname: a leading dot or trailing dot yields "".
-  def File_extname(name)
-    i = name.rindex(".")
-    return "" if i.nil? || i == 0 || i == name.length - 1
-    name[i..-1]
+    Pathname.new(Pathname.__lex_relative_path_from(@path, base_directory.to_s))
   end
 
   # File-touching delegations. Pathname#read/write/exist?/… forward to the File
