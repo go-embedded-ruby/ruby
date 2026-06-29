@@ -5,7 +5,9 @@
 package vm
 
 import (
+	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -24,6 +26,17 @@ var (
 	fuStat      = os.Stat
 	fuChtimes   = os.Chtimes
 	fuNow       = time.Now
+	// fuWalkDir visits root and every descendant, invoking visit for each. It is a
+	// seam so a test can drive the error branch of the recursive operations.
+	fuWalkDir = func(root string, visit func(string)) error {
+		return filepath.WalkDir(root, func(p string, _ fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			visit(p)
+			return nil
+		})
+	}
 )
 
 // registerFileUtils installs the FileUtils module (require "fileutils"). The
@@ -151,6 +164,48 @@ func (vm *VM) registerFileUtils() {
 		return args[1]
 	})
 
+	// chown(user, group, list) sets ownership of each path, reusing File.chown's
+	// id coercion: a nil user/group leaves that id unchanged (POSIX -1) and it
+	// routes through the fileChown seam (a no-op on Windows, as in MRI). Puppet's
+	// FileSystem#replace_file calls this on the destination's existing owner when
+	// rewriting state.yaml / report files, so it must succeed rather than raise.
+	chownFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		uid, gid := chownID(args[0]), chownID(args[1])
+		list := pathsOf(args[2])
+		for _, p := range list {
+			if err := fileChown(p, uid, gid); err != nil {
+				raise("Errno::ENOENT", "No such file or directory @ fileutils_chown - %s", p)
+			}
+		}
+		return args[2]
+	}
+	sdef("chown", chownFn)
+	// chown_R recurses into directories; the directory walk is shared with chmod_R.
+	sdef("chown_R", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		uid, gid := chownID(args[0]), chownID(args[1])
+		for _, p := range pathsOf(args[2]) {
+			for _, q := range fuWalk(p) {
+				if err := fileChown(q, uid, gid); err != nil {
+					raise("Errno::ENOENT", "No such file or directory @ fileutils_chown - %s", q)
+				}
+			}
+		}
+		return args[2]
+	})
+	// chmod_R recurses chmod into directories, as Puppet's report store driver does
+	// (FileUtils.chmod_R(0o750, dir)).
+	sdef("chmod_R", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		mode := os.FileMode(intArg(args[0]) & 0o7777)
+		for _, p := range pathsOf(args[1]) {
+			for _, q := range fuWalk(p) {
+				if err := fileChmod(q, mode); err != nil {
+					raise("Errno::ENOENT", "No such file or directory @ fileutils_chmod - %s", q)
+				}
+			}
+		}
+		return args[1]
+	})
+
 	// Genuinely platform-specific / stream operations: a clear NotImplementedError
 	// rather than a silently-wrong result.
 	notImpl := func(what string) NativeFn {
@@ -158,8 +213,19 @@ func (vm *VM) registerFileUtils() {
 			return raise("NotImplementedError", "FileUtils.%s not yet supported", what)
 		}
 	}
-	for _, m := range []string{"chown", "chown_R", "chmod_R", "copy_stream",
+	for _, m := range []string{"copy_stream",
 		"remove_entry_secure", "uptodate?", "ln", "ln_s", "ln_sf", "compare_file", "cp_r"} {
 		sdef(m, notImpl(m))
 	}
+}
+
+// fuWalk returns root followed by every path beneath it (files and
+// directories), for the recursive FileUtils operations. A path that cannot be
+// walked yields just itself, so the caller still attempts (and reports) the op.
+func fuWalk(root string) []string {
+	var out []string
+	if err := fuWalkDir(root, func(p string) { out = append(out, p) }); err != nil {
+		return []string{root}
+	}
+	return out
 }
