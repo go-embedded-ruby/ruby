@@ -21,6 +21,54 @@ monkey-patching, `define_method` and `method_missing` free.
 
 > 🌐 [Website](https://go-embedded-ruby.github.io) · 📚 [Documentation](https://go-embedded-ruby.github.io/docs/) · 🧭 [Roadmap](docs/plan-rbgo.md)
 
+## Ecosystem — rbgo composes the `go-ruby-*` family
+
+rbgo is increasingly assembled from a family of **standalone pure-Go (CGO=0),
+MRI-compatible libraries** — each its own org with **100% coverage and 6-arch
+CI** — that the interpreter composes and binds as native modules. The design
+principle is a clean seam: a stdlib piece whose work is **pure compute and needs
+no interpreter** — a regexp matcher, an ERB compiler, a YAML emitter, a Marshal
+codec, an OptionParser argv engine — becomes a reusable standalone library, while
+only the thin **interpreter-dependent glue** (the Ruby-object binding) stays in
+rbgo. The same lever that produced the front-end ([go-ruby-parser][grp]) is now
+applied across the stdlib. The benefit cuts both ways: rbgo still ships as a
+**single CGO=0 static binary**, and every extracted piece is independently
+reusable, tested and 6-arch by any Go program — no interpreter required.
+
+The `go.mod` currently **binds** these five satellites as native modules:
+
+| Library | Role | Org · landing |
+| --- | --- | --- |
+| **go-ruby-parser** | Ruby lexer / parser / AST front-end (embedded, so `eval`/`require` keep working) | [org][grp] · [site](https://go-ruby-parser.github.io/) |
+| **go-ruby-regexp** | Onigmo-compatible regexp engine (incl. `\b`/`\B`, char-class literals) | [org][grr] · [site](https://go-ruby-regexp.github.io/) |
+| **go-ruby-erb** | ERB template compiler | [org][gre] · [site](https://go-ruby-erb.github.io/) |
+| **go-ruby-marshal** | Marshal (`dump`/`load`), byte-exact with MRI | [org][grm] · [site](https://go-ruby-marshal.github.io/) |
+| **go-ruby-yaml** | Psych-compatible YAML emitter + loader | [org][gry] · [site](https://go-ruby-yaml.github.io/) |
+
+Three more have just been **extracted and are being integrated** (standalone
+today, binding into rbgo in progress):
+
+| Library | Role | Org · landing |
+| --- | --- | --- |
+| **go-ruby-format** | `sprintf` / `%` / `format` engine | [org][grf] · [site](https://go-ruby-format.github.io/) |
+| **go-ruby-optparse** | `OptionParser` argv engine | [org][gro] · [site](https://go-ruby-optparse.github.io/) |
+| **go-ruby-strscan** | `StringScanner` (`strscan`) | [org][grs] · [site](https://go-ruby-strscan.github.io/) |
+
+Beyond the `go-ruby-*` family, the scientific / container stack binds the
+pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),
+[go-fft](https://github.com/go-fft/fft), [go-images](https://github.com/go-images/images)
+and [go-composites](https://github.com/go-composites) libraries the same way (see
+*Supported today* below).
+
+[grp]: https://github.com/go-ruby-parser
+[grr]: https://github.com/go-ruby-regexp
+[gre]: https://github.com/go-ruby-erb
+[grm]: https://github.com/go-ruby-marshal
+[gry]: https://github.com/go-ruby-yaml
+[grf]: https://github.com/go-ruby-format
+[gro]: https://github.com/go-ruby-optparse
+[grs]: https://github.com/go-ruby-strscan
+
 ## Status
 
 ### Conformance & performance (campaign final, 2026-06-27)
@@ -66,8 +114,9 @@ YJIT); TruffleRuby is the compute ceiling.
 > compiles** that fraction of Rails's `.rb` files — *not* that rbgo **runs**
 > Rails. Running a full application additionally needs the runtime stdlib surface
 > and C-extension equivalents. That surface is now real enough that **the real
-> `puppet apply` CLI runs end-to-end under rbgo** (see *Running Puppet* below);
-> arbitrary resource *providers* (host convergence) remain in progress. What is
+> `puppet apply` CLI runs end-to-end under rbgo** (see *Running Puppet* below),
+> converging `notify`, `file` and `exec` resources; the broader resource
+> *providers* (`package` / `service` host convergence) remain in progress. What is
 > established is that **the Ruby language / front-end is essentially complete** on
 > real-world code, and that the runtime is far enough along to boot a real
 > application; whether any *given* application runs end-to-end remains
@@ -103,6 +152,13 @@ filesystem operations**, and a batch of deep Ruby fixes (`class_eval` lexical
 scope, `return` inside `define_method`, class-method `super`, `String#chomp(sep)`,
 …).
 
+Three resource types now converge end-to-end through the transaction / RAL:
+**`notify`**, **`file`** (the catalog creates / manages a real file on disk), and
+**`exec`** — which runs its command through pure-Go process execution, honouring
+the `onlyif` / `unless` / `creates` / `path` guards (so an already-converged
+`exec` is correctly skipped). `puppet apply` exits cleanly, the YAML run
+report / state round-tripping through the pure-Go Psych emitter / loader.
+
 Reaching this exercised a large slice of the runtime, each gap reduced to a
 minimal rbgo-vs-MRI repro before fixing:
 
@@ -125,14 +181,14 @@ application ships as a single static CGO=0 binary because the C-backed gem APIs
 are backed by pure Go. Puppet validates the approach end to end — its
 dependency tree is pure Ruby, so it loads as-is.
 
-> **Frontier (honest):** what runs end-to-end is the `puppet apply` CLI applying
-> a **`notify`** resource through the full pipeline (boot → parse → compile →
-> transaction / RAL → output). The next frontier is **real resource
-> *providers*** — `file` / `package` / `service` convergence against an arbitrary
-> host — and **run-report persistence**; `notify` exercises the whole transaction
-> path without needing either. So the language, front-end, boot, and CLI/apply
-> machinery are real today; converging arbitrary system state is the work in
-> progress.
+> **Frontier (honest):** what runs end-to-end is the `puppet apply` CLI converging
+> **`notify`**, **`file`** and **`exec`** resources through the full pipeline
+> (boot → parse → compile → transaction / RAL → output → clean exit). The next
+> frontier is the **broader resource providers** — `user` / `group` are
+> provider-ready, while `package` / `service` need a host package manager / systemd
+> and root. So the language, front-end, boot, CLI/apply machinery and the first
+> convergent providers are real today; the remaining system-state providers are
+> the work in progress.
 
 ### Supported today
 
@@ -333,8 +389,9 @@ frame-environment recycling have cut call-path allocations (a small-int loop fro
 the 6-runtime benchmark suite ([BENCHMARKS.md](BENCHMARKS.md)) tracking rbgo vs
 MRI / YJIT / JRuby / TruffleRuby. The road from "parses + compiles" to "runs whole
 applications" — the runtime stdlib + C-extension surface — is now well underway:
-**the real `puppet apply` CLI runs end-to-end** (see *Running Puppet* above), with
-arbitrary resource providers + run-report persistence the active next milestone.
+**the real `puppet apply` CLI runs end-to-end** (see *Running Puppet* above),
+converging `notify`, `file` and `exec` resources and exiting cleanly, with the
+broader resource providers (`package` / `service`) the active next milestone.
 See the
 [roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
 
