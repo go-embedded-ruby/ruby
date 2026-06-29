@@ -51,7 +51,7 @@ func TestFormatErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
 		{"int_symbol", `"%d" % :s`, "Symbol into Integer"},
 		{"float_symbol", `"%f" % :s`, "Symbol into Float"},
-		{"char_float", `"%c" % [1.5]`, "Float into Integer"},
+		{"char_out_of_range", `"%c" % [0x110000]`, "invalid character"},
 		{"int_nil", `"%d" % [nil]`, "nil into Integer"},
 		{"int_array", `"%d" % [[1]]`, "Array into Integer"},
 		{"int_hash", `"%d" % [{}]`, "Hash into Integer"},
@@ -61,7 +61,7 @@ func TestFormatErrors(t *testing.T) {
 		{"format_nonstring", `format(5)`, "Integer into String"},
 		{"too_few", `"%d %d" % [1]`, "too few arguments"},
 		{"unknown_verb", `"%q" % 5`, "malformed format"},
-		{"trailing_pct", `"abc%" % []`, "malformed format"},
+		{"trailing_pct", `"abc%" % []`, "incomplete format specifier"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
