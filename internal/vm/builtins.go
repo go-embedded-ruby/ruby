@@ -86,6 +86,7 @@ func (vm *VM) bootstrap() {
 	vm.registerKernelIntrospection()
 	vm.registerEncoding()
 	vm.registerStringEncoding()
+	vm.registerStringUnicodeNormalize() // String#unicode_normalize / #unicode_normalized? (core-ext, always available), backed by go-ruby-unicode-normalize
 	vm.registerJSBridge() // browser DOM/Canvas access (wasm only; a no-op natively)
 	vm.registerBase64()
 	vm.registerPackUnpack()

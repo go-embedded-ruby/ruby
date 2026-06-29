@@ -30,6 +30,7 @@ require (
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
 	github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
+	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
 )
@@ -39,4 +40,5 @@ require (
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
 	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 )
