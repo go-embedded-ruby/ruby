@@ -602,6 +602,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cImage
 	case *StringScanner:
 		return vm.cStringScanner
+	case *OptionParser:
+		return vm.cOptionParser
 	case *Set:
 		return vm.cSet
 	case *Time:

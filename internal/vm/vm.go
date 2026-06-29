@@ -171,6 +171,7 @@ type VM struct {
 	cDate                                  *RClass
 	cBag                                   *RClass
 	cStringScanner                         *RClass
+	cOptionParser                          *RClass
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
