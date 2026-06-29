@@ -50,6 +50,8 @@ github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
 github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406 h1:0wEmUBEKLRN5JGhG4JZRsfBbO8il8qHHdOhtA6R3WGo=
 github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406/go.mod h1:Z50x1O7HpkWh6HvI2gvnbHrvqWsYTpz86IALiVfDSI4=
+github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b h1:qTw5CoNYJccf05o0QlyoYwaOik4RIrUI76HAR7RGqRw=
+github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b/go.mod h1:QMZn01XgIYihSr1pAeqHtM5DNuf7q92rJzO1Uj1diwE=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb h1:CyoFEEsMPa/TX4EJHOPsXud3nccESDhaW6fTQsidIKI=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb/go.mod h1:/7+NF+4kESzcNHjRtNe/lAfhgHpgElX4C+VNo0xsb6Y=
 github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd h1:4HGjgCdTIuIEM+iZXJ9hJJzt0IBMtxPqdJq72mr0Y64=
