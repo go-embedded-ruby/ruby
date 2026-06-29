@@ -400,30 +400,31 @@ func (vm *VM) bootstrap() {
 		return object.Bool(!ok || s == 0)
 	})
 
-	vm.registerFile()        // needs the exception hierarchy (Errno::ENOENT < StandardError)
-	vm.registerIO()          // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
-	vm.registerDir()         // Dir (reuses the Errno module set up by registerFile)
-	vm.registerTmpdir()      // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
-	vm.registerProcess()     // Process module — identity + clock_gettime
-	vm.registerSpawn()       // IO.pipe / read_nonblock / select + Process.spawn/waitpid2 + Kernel.fork/exec
-	vm.registerObjectSpace() // ObjectSpace module — finalizer API + reflective no-ops
-	vm.registerOpenSSL()     // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
-	vm.registerNetHTTP()     // net/http + net/https loadable shell; needs StandardError
-	vm.registerResolv()      // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
-	vm.registerTimeout()     // Timeout module (loadable shell); needs RuntimeError
-	vm.registerYAML()        // YAML/Psych loadable shell; needs StandardError
-	vm.registerFileUtils()   // FileUtils (real fs ops over os); needs Errno (registerFile)
-	vm.registerGetoptLong()  // GetoptLong loadable shell; needs StandardError
-	vm.registerSignal()      // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)
-	vm.registerOpen3()       // Open3 loadable shell (popen/capture raise; spawning pending)
-	vm.registerRipper()      // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
-	vm.registerSyslog()      // Syslog loadable shell (feature probe)
-	vm.registerCGI()         // CGI.escape/unescape (real over net/url) + HTML helpers
-	vm.registerERB()         // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
-	vm.registerMonitor()     // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
-	vm.registerZlib()        // needs the exception hierarchy (Zlib::Error < StandardError)
-	vm.registerFiber()       // needs the exception hierarchy (FiberError < StandardError)
-	vm.registerThread()      // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
+	vm.registerFile()          // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerIO()            // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
+	vm.registerDir()           // Dir (reuses the Errno module set up by registerFile)
+	vm.registerTmpdir()        // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
+	vm.registerProcess()       // Process module — identity + clock_gettime
+	vm.registerSpawn()         // IO.pipe / read_nonblock / select + Process.spawn/waitpid2 + Kernel.fork/exec
+	vm.registerObjectSpace()   // ObjectSpace module — finalizer API + reflective no-ops
+	vm.registerOpenSSL()       // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
+	vm.registerNetHTTP()       // net/http + net/https loadable shell; needs StandardError
+	vm.registerResolv()        // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
+	vm.registerTimeout()       // Timeout module (loadable shell); needs RuntimeError
+	vm.registerYAML()          // YAML/Psych loadable shell; needs StandardError
+	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
+	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
+	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)
+	vm.registerOpen3()         // Open3 loadable shell (popen/capture raise; spawning pending)
+	vm.registerRipper()        // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
+	vm.registerSyslog()        // Syslog loadable shell (feature probe)
+	vm.registerCGI()           // CGI.escape/unescape (real over net/url) + HTML helpers
+	vm.registerERB()           // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
+	vm.registerStringScanner() // StringScanner (require "strscan"), backed by go-ruby-strscan; needs StandardError
+	vm.registerMonitor()       // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
+	vm.registerZlib()          // needs the exception hierarchy (Zlib::Error < StandardError)
+	vm.registerFiber()         // needs the exception hierarchy (FiberError < StandardError)
+	vm.registerThread()        // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
