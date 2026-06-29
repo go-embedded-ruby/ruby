@@ -418,6 +418,7 @@ func (vm *VM) bootstrap() {
 	vm.registerRipper()      // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
 	vm.registerSyslog()      // Syslog loadable shell (feature probe)
 	vm.registerCGI()         // CGI.escape/unescape (real over net/url) + HTML helpers
+	vm.registerERB()         // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
 	vm.registerMonitor()     // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
 	vm.registerZlib()        // needs the exception hierarchy (Zlib::Error < StandardError)
 	vm.registerFiber()       // needs the exception hierarchy (FiberError < StandardError)
