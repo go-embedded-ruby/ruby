@@ -24,6 +24,7 @@ require (
 	github.com/go-ruby-matrix/matrix v0.0.0-20260629152812-557539bb95fc
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0
+	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d
 	github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8
 	github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
