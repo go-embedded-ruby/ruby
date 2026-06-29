@@ -171,6 +171,11 @@ type VM struct {
 	cErrDimensionMismatch                  *RClass // ExceptionForMatrix::ErrDimensionMismatch
 	cErrNotRegular                         *RClass // ExceptionForMatrix::ErrNotRegular
 	cErrOperationNotDefined                *RClass // ExceptionForMatrix::ErrOperationNotDefined
+	cIPAddr                                *RClass // the IPAddr class (require "ipaddr"), backed by go-ruby-ipaddr
+	cIPAddrError                           *RClass // IPAddr::Error
+	cIPAddrInvalidAddressError             *RClass // IPAddr::InvalidAddressError
+	cIPAddrInvalidPrefixError              *RClass // IPAddr::InvalidPrefixError
+	cIPAddrAddressFamilyError              *RClass // IPAddr::AddressFamilyError
 	cCMath                                 *RClass // the CMath module (require "cmath")
 	cDidYouMean                            *RClass // the DidYouMean module (require "did_you_mean")
 	cSpellChecker                          *RClass // DidYouMean::SpellChecker, backed by go-ruby-did-you-mean
@@ -497,6 +502,7 @@ func New(out io.Writer) *VM {
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
 	vm.registerFileStat()   // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
+	vm.registerIPAddr()     // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
 	vm.installHashKeyHook()
 	return vm
 }
