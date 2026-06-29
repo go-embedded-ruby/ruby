@@ -38,6 +38,7 @@ var providedFeatures = map[string]bool{
 	"shellwords": true, "prime": true, "tsort": true, "abbrev": true,
 	"did_you_mean": true, "cmath": true, "matrix": true, "ipaddr": true,
 	"unicode_normalize": true, "scanf": true, "prettyprint": true,
+	"rexml": true, "rexml/document": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
