@@ -10,8 +10,6 @@ github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa h1:C7LXruttK94q
 github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa/go.mod h1:6cSkTkpvobmk2/FSOCRu928lYmWCp87HyCSffyQFhVk=
 github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381 h1:lefnD/dZINKBoIevcl16pbzh1A8B9jifm9rhenBkWUg=
 github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381/go.mod h1:U8jOcQwbbSwQ3E5geccvv0lkwNv89piHYG/Jj1w18JQ=
-github.com/go-composites/set v0.0.0-20260620192142-23f1a50c2b92 h1:1WaNiMYdoCjnTzmQ7wQZpHsFf4ajYJmLGiwCNweBU/g=
-github.com/go-composites/set v0.0.0-20260620192142-23f1a50c2b92/go.mod h1:Bm8nl0DFyeX7Ux9WF9Y4wBfdRXGvBsPmhN/lJx/mcy4=
 github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0 h1:T13Rk67KSsuSbv0n15AbxSYeSRCrzcTRB0xPCdF6pYo=
 github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0/go.mod h1:Cx3vT/o0Mo7W3klXPmdwjKWti2XLOqoLjcimGiChI7s=
 github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb h1:kDAxBx5Tvd3PfDIqCgV3J4cpXejsJOOsiKGYQiDTJB4=
@@ -44,6 +42,8 @@ github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0 h1:Q3ryvK9hP
 github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac h1:jYaeh86ngvgRe2Kn4hUmSO+DV0okQv5PcdC+gMiyP2U=
 github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac/go.mod h1:+0nK2X+aCPMO91bPMM/DT1OFUIzFQeoTPGkkOR3kd84=
+github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12 h1:c051SI5P7BVVbysSroIJIZWwvXo9dZhWZlx9ef62xVI=
+github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12/go.mod h1:F/P0PXeE5ybEPeWYfb1JAKWny1Li3dnlm6YxG2/vffE=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z9b99kWJht8AgtlIbdiq7Y02j6eddxW+rr4MJpCS6kw=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
 github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406 h1:0wEmUBEKLRN5JGhG4JZRsfBbO8il8qHHdOhtA6R3WGo=

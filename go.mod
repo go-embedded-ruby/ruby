@@ -5,7 +5,6 @@ go 1.26.4
 require (
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
-	github.com/go-composites/set v0.0.0-20260620192142-23f1a50c2b92
 	github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
 	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
@@ -21,6 +20,7 @@ require (
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0
 	github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac
+	github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
 	github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
