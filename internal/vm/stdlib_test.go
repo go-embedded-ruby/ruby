@@ -1,6 +1,9 @@
 package vm_test
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -61,19 +64,75 @@ func TestDigest(t *testing.T) {
 		// reset returns a fresh state.
 		{`d = Digest::SHA256.new; d << "junk"; d.reset; p d.hexdigest("abc")`,
 			"\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"},
-		// A Digest instance reports its class and is truthy / inspectable.
+		// The remaining algorithms (SHA384, RMD160) round out the library set.
+		{`p Digest::SHA384.hexdigest("abc")[0, 16]`, "\"cb00753f45a35e8b\"\n"},
+		{`p Digest::RMD160.hexdigest("abc")`, "\"8eb208f7e05d987a9b044a8e98c6b087f15a0bfc\"\n"},
+		// A Digest instance reports its class and is truthy; to_s / inspect render
+		// the running hex digest, matching MRI's Digest::Instance form.
 		{`p Digest::SHA256.new.class`, "Digest::SHA256\n"},
 		{`p !!Digest::SHA256.new`, "true\n"},
-		{`p Digest::SHA256.new.inspect`, "\"#<Digest::SHA256>\"\n"},
-		{`p Digest::SHA256.new.to_s`, "\"#<Digest::SHA256>\"\n"},
+		{`p Digest::SHA256.new.to_s`, "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n"},
+		{`p Digest::SHA256.new.inspect`, "\"#<Digest::SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855>\"\n"},
+		// The ! finalizers emit then reset, so a follow-up read is the empty digest.
+		{`d = Digest::SHA256.new; d << "abc"; h = d.hexdigest!; p [h, d.hexdigest == Digest::SHA256.hexdigest("")]`,
+			"[\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\", true]\n"},
+		{`d = Digest::SHA256.new; d << "abc"; p [d.digest!.bytesize, d.hexdigest == Digest::SHA256.hexdigest("")]`,
+			"[32, true]\n"},
+		{`d = Digest::MD5.new; d << "abc"; b = d.base64digest!; p [b, d.base64digest == Digest::MD5.base64digest("")]`,
+			"[\"kAFQmDzST7DWlj99KOF/cg==\", true]\n"},
+		{`p Digest::MD5.base64digest("")`, "\"1B2M2Y8AsgTpgAmY7PhCfg==\"\n"},
+		// == compares hex digests against another instance or a hex string.
+		{`a = Digest::MD5.new; a << "abc"; b = Digest::MD5.new; b << "abc"; p(a == b)`, "true\n"},
+		{`a = Digest::MD5.new; a << "abc"; p(a == Digest::MD5.hexdigest("abc"))`, "true\n"},
+		{`a = Digest::MD5.new; a << "abc"; p(a == "wrong")`, "false\n"},
+		{`a = Digest::MD5.new; a << "abc"; p(a == 42)`, "false\n"},
+		// Size accessors: length / size / digest_length report the digest size,
+		// block_length the algorithm's internal block size.
+		{`d = Digest::SHA256.new; p [d.length, d.size, d.digest_length, d.block_length]`, "[32, 32, 32, 64]\n"},
+		// Bubblebabble: of a raw string (Digest.bubblebabble) and of a digest.
+		{`p Digest.bubblebabble("abc")`, "\"ximek-domex\"\n"},
+		{`p Digest::MD5.bubblebabble("abc")[0, 11]`, "\"xogab-cegen\"\n"},
+		// Digest(name) factory returns the algorithm class (case/dash-insensitive,
+		// RIPEMD160 aliasing RMD160), so .hexdigest works straight off it.
+		{`p Digest("SHA256")`, "Digest::SHA256\n"},
+		{`p Digest("sha-256").hexdigest("abc")`, "\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"},
+		{`p Digest("RIPEMD160")`, "Digest::RMD160\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}
+	// A non-String argument to a class one-shot raises TypeError (base64Arg).
 	if err := runErr(t, `require "digest"; Digest::MD5.hexdigest(123)`); err == nil || !strings.Contains(err.Error(), "TypeError") {
 		t.Errorf("hexdigest(123): got %v", err)
+	}
+	// The Digest(name) factory raises LoadError for an unknown algorithm, matching
+	// MRI's autoload-based const_missing.
+	if err := runErr(t, `require "digest"; Digest("BOGUS")`); err == nil || !strings.Contains(err.Error(), "LoadError") {
+		t.Errorf("Digest(BOGUS): got %v", err)
+	}
+}
+
+// TestDigestFile covers Digest::ALGO.file(path): the digest of a file's contents,
+// returned as a resumable instance, plus the missing-file (Errno::ENOENT) branch.
+// The path comes from t.TempDir so the test is identical on every OS (Windows CI
+// runs the same gate); filepath.ToSlash keeps the Ruby string literal portable.
+func TestDigestFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.ToSlash(filepath.Join(dir, "data.txt"))
+	if err := os.WriteFile(filepath.FromSlash(path), []byte("abc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := `require "digest"; p Digest::SHA256.file(` + strconv.Quote(path) + `).hexdigest`
+	want := "\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"
+	if got := eval(t, src); got != want {
+		t.Errorf("file digest: got %q want %q", got, want)
+	}
+	missing := filepath.ToSlash(filepath.Join(dir, "nope.txt"))
+	bad := `require "digest"; Digest::SHA256.file(` + strconv.Quote(missing) + `)`
+	if err := runErr(t, bad); err == nil || !strings.Contains(err.Error(), "ENOENT") {
+		t.Errorf("file(missing): got %v", err)
 	}
 }
 
