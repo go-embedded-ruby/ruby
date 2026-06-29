@@ -24,6 +24,25 @@ type IOObj struct {
 	label    string // "STDOUT"/"STDERR"/"STDIN" for inspect
 	path     string // backing file path for a File stream (else "")
 	writable bool   // a File opened for writing — flush the buffer on flush/close
+
+	// Pipe ends (IO.pipe) share a single byte buffer in *pipe. The write end
+	// appends; the read end drains from pipe.rpos. Because subprocess execution
+	// in this VM is synchronous (Process.spawn / Kernel.exec run to completion
+	// before returning), the buffer is fully populated by the time a reader
+	// drains it, so a buffered model faithfully reproduces the blocking-read and
+	// EOF behaviour Puppet's execute loop relies on. reopened tracks the IO a
+	// standard stream (STDOUT/STDERR) was rebound to via #reopen, so a forked
+	// block's writes (and Kernel.exec's captured output) land on the pipe.
+	pipe       *pipeBuf
+	isWriteEnd bool
+	reopened   *IOObj
+}
+
+// pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair.
+type pipeBuf struct {
+	data    []byte
+	rpos    int
+	wClosed bool
 }
 
 func (o *IOObj) ToS() string {
@@ -38,6 +57,19 @@ func (o *IOObj) Truthy() bool    { return true }
 // writeBytes appends p to the stream (advancing the StringIO cursor, overwriting
 // then extending) and returns the byte count.
 func (o *IOObj) writeBytes(p []byte) int {
+	// A standard stream reopened onto another IO (Puppet's safe_posix_fork does
+	// STDOUT.reopen(pipe_writer)) forwards its writes to that target. Follow the
+	// chain iteratively with a cycle guard so a degenerate self/loop reopen
+	// (e.g. STDOUT.reopen($stdout)) cannot recurse without bound.
+	for cur, seen := o, map[*IOObj]bool{}; cur.reopened != nil && cur.reopened != cur && !seen[cur]; {
+		seen[cur] = true
+		cur = cur.reopened
+		o = cur
+	}
+	if o.pipe != nil && o.isWriteEnd {
+		o.pipe.data = append(o.pipe.data, p...)
+		return len(p)
+	}
 	if o.isStr {
 		if end := o.pos + len(p); end > len(o.buf) {
 			o.buf = append(o.buf, make([]byte, end-len(o.buf))...)
@@ -51,6 +83,21 @@ func (o *IOObj) writeBytes(p []byte) int {
 }
 
 func (o *IOObj) writeStr(s string) int { return o.writeBytes([]byte(s)) }
+
+// pipeRefresh snapshots a pipe reader's shared buffer into the IOObj's own
+// buf/pos view so the existing StringIO read methods (read/gets/eof?) operate on
+// the latest pipe contents. It is a no-op for non-pipe streams.
+func (o *IOObj) pipeRefresh() {
+	if o.pipe != nil && !o.isWriteEnd {
+		o.buf = o.pipe.data
+	}
+}
+
+// pipeWriterClosed reports whether the write end of a pipe reader has been
+// closed (EOF) — used by read_nonblock and IO.select to model EOF.
+func (o *IOObj) pipeWriterClosed() bool {
+	return o.pipe != nil && o.pipe.wClosed
+}
 
 // registerIO installs the IO class with the writing methods, the StringIO class
 // (read + write), and the standard streams as both globals ($stdout/$stderr/
@@ -100,7 +147,7 @@ func (vm *VM) registerIO() {
 	cFile := vm.consts["File"].(*RClass)
 	cFile.super = cIO // File < IO, inheriting the read+write protocol; is_a?(IO) holds
 	cFile.smethods["open"] = &Method{name: "open", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		o := openFileIO(cFile, strArg(args[0]), fileMode(args))
+		o := openFileIO(cFile, pathArg(vm, args[0]), fileMode(args))
 		if blk != nil {
 			defer ioFlushClose(o)
 			return vm.callBlock(blk, []object.Value{o})
@@ -134,8 +181,8 @@ func (vm *VM) registerIO() {
 		}
 		return object.Integer(0)
 	})
-	cFile.smethods["readlines"] = &Method{name: "readlines", owner: cFile, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		o := openFileIO(cFile, strArg(args[0]), "r")
+	cFile.smethods["readlines"] = &Method{name: "readlines", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		o := openFileIO(cFile, pathArg(vm, args[0]), "r")
 		var lines []object.Value
 		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
 			lines = append(lines, v)
@@ -143,7 +190,7 @@ func (vm *VM) registerIO() {
 		return &object.Array{Elems: lines}
 	}}
 	cFile.smethods["foreach"] = &Method{name: "foreach", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		o := openFileIO(cFile, strArg(args[0]), "r")
+		o := openFileIO(cFile, pathArg(vm, args[0]), "r")
 		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
 			vm.callBlock(blk, []object.Value{v})
 		}
@@ -337,6 +384,9 @@ func defIOWrite(cls *RClass) {
 	cls.define("close", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioFlush(o)
+		if o.pipe != nil && o.isWriteEnd {
+			o.pipe.wClosed = true // signal EOF to the read end
+		}
 		o.closed = true
 		return object.NilV
 	})
@@ -362,10 +412,12 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("eof?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		o.pipeRefresh()
 		return object.Bool(o.pos >= len(o.buf))
 	})
 	cls.define("eof", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		o.pipeRefresh()
 		return object.Bool(o.pos >= len(o.buf))
 	})
 	cls.define("pos", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -411,6 +463,7 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("read", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		o.pipeRefresh()
 		if len(args) > 0 && args[0] != object.NilV {
 			n := int(toInt(args[0]))
 			if o.pos >= len(o.buf) {
@@ -485,6 +538,7 @@ func defStringIORead(cls *RClass) {
 // ioGets reads one line (up to and including the separator, default "\n") from a
 // StringIO, returning nil at end of input.
 func ioGets(o *IOObj, args []object.Value) object.Value {
+	o.pipeRefresh()
 	if o.pos >= len(o.buf) {
 		return object.NilV
 	}

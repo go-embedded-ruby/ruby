@@ -52,6 +52,11 @@ func TestFileStreams(t *testing.T) {
 		// Non-block open: write, then close flushes.
 		{fmt.Sprintf(`f = File.open(%q, "w"); f.write("Z"); f.close; p File.read(%q)`, w, w), "\"Z\"\n"},
 		{fmt.Sprintf(`p File.open(%q, "w").class`, w), "File\n"},
+		// File.open / readlines / foreach accept a Pathname (anything answering
+		// #to_path), matching MRI — Puppet's FileSystem layer passes Pathnames.
+		{fmt.Sprintf(`require "pathname"; p File.open(Pathname.new(%q)) { |io| io.read(3) }`, hello), "\"hel\"\n"},
+		{fmt.Sprintf(`require "pathname"; p File.readlines(Pathname.new(%q))`, lines), "[\"one\\n\", \"two\\n\"]\n"},
+		{fmt.Sprintf(`require "pathname"; r = []; File.foreach(Pathname.new(%q)) { |l| r << l.chomp }; p r`, pq), "[\"p\", \"q\"]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

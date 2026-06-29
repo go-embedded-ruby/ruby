@@ -36,6 +36,15 @@ func TestArrayMutators(t *testing.T) {
 		// reverse_each: block iterates in reverse; no block yields an Enumerator.
 		{`r = []; [1, 2, 3].reverse_each { |x| r << x }; p r`, "[3, 2, 1]\n"},
 		{`p [[1, 2, 3].reverse_each.to_a, [1, 2, 3].reverse_each.map { |x| x * 2 }]`, "[[3, 2, 1], [6, 4, 2]]\n"},
+		// flatten!: mutates in place, returning self when it flattened, nil when
+		// there was nothing to flatten (including a depth-0 / empty / flat array),
+		// and an optional depth limits the recursion.
+		{`a = [1, [2, [3, 4]], 5]; p [a.flatten!, a]`, "[[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]\n"},
+		{`a = [1, 2, 3]; p [a.flatten!, a]`, "[nil, [1, 2, 3]]\n"},
+		{`p [[].flatten!, [1, [2]].flatten!(0)]`, "[nil, nil]\n"},
+		{`a = [1, [2, [3]]]; p [a.flatten!(1), a]`, "[[1, 2, [3]], [1, 2, [3]]]\n"},
+		// flatten! detects a change even when the length is unchanged ([[1]] -> [1]).
+		{`a = [[1]]; p [a.flatten!, a]`, "[[1], [1]]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
