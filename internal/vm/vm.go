@@ -170,6 +170,7 @@ type VM struct {
 	cBigDecimal                            *RClass
 	cDate                                  *RClass
 	cBag                                   *RClass
+	cStringScanner                         *RClass
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass

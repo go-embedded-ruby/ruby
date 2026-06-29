@@ -600,6 +600,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cNDArray
 	case *Image:
 		return vm.cImage
+	case *StringScanner:
+		return vm.cStringScanner
 	case *Set:
 		return vm.cSet
 	case *Time:
