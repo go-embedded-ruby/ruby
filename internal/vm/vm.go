@@ -165,6 +165,12 @@ type VM struct {
 	cComplex, cRational                    *RClass
 	cNDArray, cImage                       *RClass
 	cSet                                   *RClass
+	cMatrix                                *RClass // the Matrix class (require "matrix")
+	cVector                                *RClass // the Vector class (require "matrix")
+	cExceptionForMatrix                    *RClass // the ExceptionForMatrix module (require "matrix")
+	cErrDimensionMismatch                  *RClass // ExceptionForMatrix::ErrDimensionMismatch
+	cErrNotRegular                         *RClass // ExceptionForMatrix::ErrNotRegular
+	cErrOperationNotDefined                *RClass // ExceptionForMatrix::ErrOperationNotDefined
 	cCMath                                 *RClass // the CMath module (require "cmath")
 	cDidYouMean                            *RClass // the DidYouMean module (require "did_you_mean")
 	cSpellChecker                          *RClass // DidYouMean::SpellChecker, backed by go-ruby-did-you-mean
