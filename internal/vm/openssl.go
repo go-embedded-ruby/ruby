@@ -6,12 +6,44 @@ package vm
 
 import (
 	"crypto/hmac"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
 	"hash"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// digestConstructors maps an MRI digest algorithm name (as OpenSSL::Digest.new
+// accepts it) to the Go crypto/* constructor producing a byte-identical hash. The
+// OpenSSL surface adds SHA224 over the plain Digest set and needs a raw hash.Hash
+// (for HMAC and for #block_length / #digest_length), so it keeps this crypto/*
+// table; the require "digest" Digest module is instead backed by the standalone
+// go-ruby-digest library (see digest_bind.go).
+var digestConstructors = map[string]func() hash.Hash{
+	"MD5":    md5.New,
+	"SHA1":   sha1.New,
+	"SHA224": sha256.New224,
+	"SHA256": sha256.New,
+	"SHA384": sha512.New384,
+	"SHA512": sha512.New,
+}
+
+// digestNewByName returns a fresh hash.Hash for an MRI algorithm name, or nil
+// when the name is unknown (the caller raises the right Ruby error). The lookup
+// is case-insensitive and tolerant of the dashed spellings OpenSSL accepts
+// ("SHA-256"), matching MRI's OpenSSL::Digest.new.
+func digestNewByName(name string) hash.Hash {
+	key := strings.ToUpper(strings.ReplaceAll(name, "-", ""))
+	if ctor, ok := digestConstructors[key]; ok {
+		return ctor()
+	}
+	return nil
+}
 
 // opensslDigest backs an OpenSSL::Digest instance — a running hash created with
 // OpenSSL::Digest.new("SHA256") (or the named subclasses). It carries its exact

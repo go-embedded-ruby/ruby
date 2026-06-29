@@ -171,8 +171,10 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpEq, bytecode.OpNeq:
 		// Objects dispatch `==` (so Object identity, a user `==`, or
-		// Comparable#== all apply); value types keep structural equality.
-		if _, isObj := a.(*RObject); isObj {
+		// Comparable#== all apply); a builtin instance whose class defines its own
+		// `==` (e.g. Digest::Instance#==, which compares hex digests) dispatches it
+		// too; the remaining value types keep structural equality.
+		if _, isObj := a.(*RObject); isObj || hasCustomEq(vm, a) {
 			eq := vm.send(a, "==", []object.Value{b}, nil).Truthy()
 			if op == bytecode.OpNeq {
 				eq = !eq
