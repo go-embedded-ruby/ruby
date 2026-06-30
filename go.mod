@@ -31,6 +31,7 @@ require (
 	github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b
 	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d
 	github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8
+	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b

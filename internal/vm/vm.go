@@ -165,6 +165,8 @@ type VM struct {
 	cComplex, cRational                    *RClass
 	cNDArray, cImage                       *RClass
 	cSet                                   *RClass
+	cPStore                                *RClass // the PStore class (require "pstore"), backed by go-ruby-pstore
+	cPStoreError                           *RClass // PStore::Error
 	cPrettyPrint                           *RClass // the PrettyPrint class (require "prettyprint")
 	cMatrix                                *RClass // the Matrix class (require "matrix")
 	cVector                                *RClass // the Vector class (require "matrix")
@@ -523,6 +525,7 @@ func New(out io.Writer) *VM {
 	vm.registerIPAddr()     // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
 	vm.registerPathname()   // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class
 	vm.registerLogger()     // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
+	vm.registerPStore()     // PStore (require "pstore"), backed by go-ruby-pstore; after the prelude so PStore::Error < StandardError
 	vm.installHashKeyHook()
 	return vm
 }
