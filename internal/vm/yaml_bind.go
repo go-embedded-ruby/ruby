@@ -258,9 +258,7 @@ func (c *yamlToCtx) convSet(s *Set) yaml.Value {
 	out := &yaml.Object{Class: "Set", IVars: map[string]yaml.Value{}}
 	c.seen[s] = out
 	inner := yaml.NewMap()
-	for _, k := range s.order {
-		inner.Set(c.conv(s.vals[k]), true)
-	}
+	s.each(func(m object.Value) { inner.Set(c.conv(m), true) })
 	out.IVars["hash"] = inner
 	return out
 }

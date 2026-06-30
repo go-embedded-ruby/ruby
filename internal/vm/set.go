@@ -26,11 +26,13 @@ import (
 // each/to_a/inspect through the order-preserving vals/order table, which is also
 // what the Bag type and the YAML emitter read, so they keep working unchanged.
 
-// Set is the Ruby wrapper around a go-ruby-set Set.
+// Set is the Ruby wrapper around a go-ruby-set Set. The library Set holds the
+// original Ruby value as its member, keyed through setKey, so it is the single
+// source of truth for membership, the canonical key→value mapping and the
+// insertion order — there is no parallel store to keep in sync, and an algebra
+// result already carries the Ruby values in MRI order in one pass.
 type Set struct {
-	s     *rbset.Set           // membership / algebra, keyed by setKey
-	vals  map[any]object.Value // canonical key -> original Ruby value
-	order []any                // canonical keys in insertion order (Ruby ordering)
+	s *rbset.Set // members are the Ruby values, keyed by setKey
 }
 
 func (s *Set) ToS() string     { return s.repr() }
@@ -41,14 +43,29 @@ func (s *Set) Truthy() bool    { return true }
 // order, each rendered with Ruby #inspect. The library owns the format; we feed
 // it the canonical-key → Ruby-value lookup so members inspect as Ruby values.
 func (s *Set) repr() string {
-	return s.s.Inspect(func(k any) string { return s.vals[k].Inspect() })
+	return s.s.Inspect(func(m any) string { return m.(object.Value).Inspect() })
 }
 
-// newSet builds an empty Ruby Set wrapper. The library Set is keyed through
-// setKey so any Ruby value (including reference types) is an accepted member.
+// newSet builds an empty Ruby Set wrapper. The library Set keys its members
+// through setKey, so any Ruby value (including reference types) is an accepted
+// member and the stored member is the Ruby value itself.
 func newSet() *Set {
-	return &Set{s: rbset.NewWith(func(elem any) any { return elem }), vals: map[any]object.Value{}}
+	return &Set{s: rbset.NewWith(func(elem any) any { return setKey(elem.(object.Value)) })}
 }
+
+// wrap adorns a library Set (whose members are Ruby values keyed by setKey) as a
+// Ruby Set wrapper without copying — used to surface algebra results, which the
+// library already returns with the Ruby member values in MRI insertion order.
+func wrap(s *rbset.Set) *Set { return &Set{s: s} }
+
+// each calls fn for every member (a Ruby value) in insertion order, in a single
+// pass over the library's tables (no per-element membership re-lookup).
+func (s *Set) each(fn func(object.Value)) {
+	s.s.EachPair(func(_, member any) { fn(member.(object.Value)) })
+}
+
+// size returns the member count.
+func (s *Set) size() int { return s.s.Size() }
 
 // setKey marshals a Ruby value to a canonical comparable Go key, raising
 // TypeError for a value that cannot be a Set member is NOT done here — like a
@@ -80,31 +97,13 @@ func setKey(v object.Value) any {
 	return v
 }
 
-// add inserts a Ruby value, preserving first-insertion order (idempotent).
-func (s *Set) add(v object.Value) {
-	k := setKey(v)
-	if !s.s.Include(k) {
-		s.order = append(s.order, k)
-		s.vals[k] = v
-	}
-	s.s.Add(k)
-}
+// add inserts a Ruby value, preserving first-insertion order (idempotent). The
+// library stores the Ruby value as the member and keeps the canonical key→value
+// mapping and order itself, so there is nothing else to update.
+func (s *Set) add(v object.Value) { s.s.Add(v) }
 
 // delete removes a Ruby value (a no-op when absent).
-func (s *Set) delete(v object.Value) {
-	k := setKey(v)
-	if !s.s.Include(k) {
-		return
-	}
-	s.s.Delete(k)
-	delete(s.vals, k)
-	for i, ok := range s.order {
-		if ok == k {
-			s.order = append(s.order[:i], s.order[i+1:]...)
-			break
-		}
-	}
-}
+func (s *Set) delete(v object.Value) { s.s.Delete(v) }
 
 // setArg asserts an argument is a Set, raising TypeError otherwise.
 func setArg(v object.Value) *Set {
@@ -123,51 +122,22 @@ func (s *Set) seed(v object.Value) {
 			s.add(el)
 		}
 	case *Set:
-		for _, k := range e.order {
-			s.add(e.vals[k])
-		}
+		e.each(s.add)
 	default:
 		raise("TypeError", "value must be enumerable (Array or Set)")
 	}
 }
 
-// fromKeys rebuilds a Ruby Set from a go-ruby-set library result, recovering
-// each key's Ruby value from a (then b), preserving a's order first, then b's —
-// used by the algebraic combinators (the library already orders its result
-// receiver-first, but it holds only canonical keys, so we re-attach the Ruby
-// values and keep the wrapper's parallel order/vals tables consistent).
-func fromKeys(res *rbset.Set, a, b *Set) *Set {
-	out := newSet()
-	for _, k := range res.ToSlice() {
-		var rv object.Value
-		switch {
-		case a != nil && a.s.Include(k):
-			rv = a.vals[k]
-		case b != nil && b.s.Include(k):
-			rv = b.vals[k]
-		}
-		out.order = append(out.order, k)
-		out.vals[k] = rv
-		out.s.Add(k)
-	}
-	return out
-}
-
 // copy returns a shallow clone: a new Set holding the same members in the same
 // insertion order (the Ruby values are shared, as MRI's Set#dup does).
-func (s *Set) copy() *Set {
-	out := newSet()
-	for _, k := range s.order {
-		out.add(s.vals[k])
-	}
-	return out
-}
+func (s *Set) copy() *Set { return wrap(s.s.Dup()) }
 
 // toArray materialises the Set into a Ruby Array in insertion order.
 func (s *Set) toArray() object.Value {
-	out := make([]object.Value, len(s.order))
-	for i, k := range s.order {
-		out[i] = s.vals[k]
+	src := s.s.ToSlice()
+	out := make([]object.Value, len(src))
+	for i, m := range src {
+		out[i] = m.(object.Value)
 	}
 	return &object.Array{Elems: out}
 }
@@ -178,9 +148,9 @@ func (s *Set) toArray() object.Value {
 func setOp(op bytecode.Op, a *Set, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		return fromKeys(a.s.Union(setArg(b).s), a, setArg(b))
+		return wrap(a.s.Union(setArg(b).s))
 	case bytecode.OpSub:
-		return fromKeys(a.s.Difference(setArg(b).s), a, nil)
+		return wrap(a.s.Difference(setArg(b).s))
 	}
 	return raise("NoMethodError", "undefined method '%s' for a Set", op)
 }
@@ -224,7 +194,7 @@ func (vm *VM) registerSet() {
 
 	d("add?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
-		if s.s.Include(setKey(args[0])) {
+		if s.s.Include(args[0]) {
 			return object.NilV
 		}
 		s.add(args[0])
@@ -237,7 +207,7 @@ func (vm *VM) registerSet() {
 	})
 
 	includeFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.Include(setKey(args[0])))
+		return object.Bool(self(v).s.Include(args[0]))
 	}
 	d("include?", includeFn)
 	d("member?", includeFn)
@@ -256,8 +226,6 @@ func (vm *VM) registerSet() {
 	d("clear", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self(v)
 		s.s.Clear()
-		s.vals = map[any]object.Value{}
-		s.order = nil
 		return s
 	})
 
@@ -266,9 +234,7 @@ func (vm *VM) registerSet() {
 			raise("LocalJumpError", "no block given (each)")
 		}
 		s := self(v)
-		for _, k := range s.order {
-			vm.callBlock(blk, []object.Value{s.vals[k]})
-		}
+		s.each(func(m object.Value) { vm.callBlock(blk, []object.Value{m}) })
 		return s
 	})
 	d("to_a", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -280,21 +246,21 @@ func (vm *VM) registerSet() {
 
 	unionFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return fromKeys(a.s.Union(b.s), a, b)
+		return wrap(a.s.Union(b.s))
 	}
 	d("|", unionFn)
 	d("union", unionFn)
 
 	interFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return fromKeys(a.s.Intersection(b.s), a, b)
+		return wrap(a.s.Intersection(b.s))
 	}
 	d("&", interFn)
 	d("intersection", interFn)
 
 	diffFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return fromKeys(a.s.Difference(b.s), a, nil)
+		return wrap(a.s.Difference(b.s))
 	}
 	d("difference", diffFn)
 
@@ -333,10 +299,8 @@ func (vm *VM) registerSet() {
 			raise("LocalJumpError", "no block given (map)")
 		}
 		s := self(v)
-		out := make([]object.Value, 0, len(s.order))
-		for _, k := range s.order {
-			out = append(out, vm.callBlock(blk, []object.Value{s.vals[k]}))
-		}
+		out := make([]object.Value, 0, s.size())
+		s.each(func(m object.Value) { out = append(out, vm.callBlock(blk, []object.Value{m})) })
 		return &object.Array{Elems: out}
 	}
 	d("map", mapFn)
@@ -349,11 +313,11 @@ func (vm *VM) registerSet() {
 		}
 		s := self(v)
 		out := newSet()
-		for _, k := range s.order {
-			if vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
-				out.add(s.vals[k])
+		s.each(func(m object.Value) {
+			if vm.callBlock(blk, []object.Value{m}).Truthy() {
+				out.add(m)
 			}
-		}
+		})
 		return out
 	}
 	d("select", selectFn)
@@ -366,11 +330,11 @@ func (vm *VM) registerSet() {
 		}
 		s := self(v)
 		out := newSet()
-		for _, k := range s.order {
-			if !vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
-				out.add(s.vals[k])
+		s.each(func(m object.Value) {
+			if !vm.callBlock(blk, []object.Value{m}).Truthy() {
+				out.add(m)
 			}
-		}
+		})
 		return out
 	})
 
@@ -381,9 +345,10 @@ func (vm *VM) registerSet() {
 			raise("LocalJumpError", "no block given (find)")
 		}
 		s := self(v)
-		for _, k := range s.order {
-			if vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
-				return s.vals[k]
+		for _, m := range s.s.ToSlice() {
+			mv := m.(object.Value)
+			if vm.callBlock(blk, []object.Value{mv}).Truthy() {
+				return mv
 			}
 		}
 		return object.NilV
@@ -397,8 +362,8 @@ func (vm *VM) registerSet() {
 			raise("LocalJumpError", "no block given (all?)")
 		}
 		s := self(v)
-		for _, k := range s.order {
-			if !vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+		for _, m := range s.s.ToSlice() {
+			if !vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
 				return object.False
 			}
 		}
@@ -411,8 +376,8 @@ func (vm *VM) registerSet() {
 			raise("LocalJumpError", "no block given (any?)")
 		}
 		s := self(v)
-		for _, k := range s.order {
-			if vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+		for _, m := range s.s.ToSlice() {
+			if vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
 				return object.True
 			}
 		}
@@ -425,8 +390,8 @@ func (vm *VM) registerSet() {
 			raise("LocalJumpError", "no block given (none?)")
 		}
 		s := self(v)
-		for _, k := range s.order {
-			if vm.callBlock(blk, []object.Value{s.vals[k]}).Truthy() {
+		for _, m := range s.s.ToSlice() {
+			if vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
 				return object.False
 			}
 		}
@@ -436,7 +401,7 @@ func (vm *VM) registerSet() {
 	// ^: symmetric difference — a new Set of the members in exactly one operand.
 	d("^", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return fromKeys(a.s.XorSym(b.s), a, b)
+		return wrap(a.s.XorSym(b.s))
 	})
 
 	// disjoint?: true when the two sets share no member.
@@ -492,9 +457,7 @@ func (vm *VM) registerSet() {
 			acc = args[0]
 		}
 		s := self(v)
-		for _, k := range s.order {
-			acc = vm.binaryOp(bytecode.OpAdd, acc, s.vals[k])
-		}
+		s.each(func(m object.Value) { acc = vm.binaryOp(bytecode.OpAdd, acc, m) })
 		return acc
 	})
 
@@ -507,19 +470,20 @@ func (vm *VM) registerSet() {
 			raise("LocalJumpError", "no block given (reduce)")
 		}
 		s := self(v)
+		members := s.s.ToSlice()
 		var acc object.Value
 		i := 0
 		if len(args) > 0 {
 			acc = args[0]
 		} else {
-			if len(s.order) == 0 {
+			if len(members) == 0 {
 				return object.NilV
 			}
-			acc = s.vals[s.order[0]]
+			acc = members[0].(object.Value)
 			i = 1
 		}
-		for ; i < len(s.order); i++ {
-			acc = vm.callBlock(blk, []object.Value{acc, s.vals[s.order[i]]})
+		for ; i < len(members); i++ {
+			acc = vm.callBlock(blk, []object.Value{acc, members[i].(object.Value)})
 		}
 		return acc
 	}
@@ -538,12 +502,13 @@ func (vm *VM) registerSet() {
 // (want=1) by the VM's spaceship (<=>), returning nil for the empty set. Mixed
 // incomparable members surface the ArgumentError spaceship raises.
 func setExtreme(vm *VM, s *Set, want int) object.Value {
-	if len(s.order) == 0 {
+	members := s.s.ToSlice()
+	if len(members) == 0 {
 		return object.NilV
 	}
-	best := s.vals[s.order[0]]
-	for _, k := range s.order[1:] {
-		cur := s.vals[k]
+	best := members[0].(object.Value)
+	for _, m := range members[1:] {
+		cur := m.(object.Value)
 		if cmp := vm.spaceship(cur, best); (want < 0 && cmp < 0) || (want > 0 && cmp > 0) {
 			best = cur
 		}
