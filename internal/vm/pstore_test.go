@@ -22,8 +22,11 @@ import (
 // a t.TempDir() store.
 func TestPStore(t *testing.T) {
 	dir := t.TempDir()
-	// store is a per-case fresh path so cases never share on-disk state.
-	store := func(name string) string { return filepath.Join(dir, name) }
+	// store is a per-case fresh path so cases never share on-disk state. ToSlash
+	// keeps it forward-slash (valid on Windows for Ruby File ops) so embedding it
+	// in a double-quoted Ruby literal can't be mangled by backslash escapes
+	// (e.g. a Windows temp path's \001\a would become octal+bell, like MRI).
+	store := func(name string) string { return filepath.ToSlash(filepath.Join(dir, name)) }
 	// q quotes a path into a Ruby string literal (the temp dir has no quotes).
 	q := func(p string) string { return `"` + p + `"` }
 

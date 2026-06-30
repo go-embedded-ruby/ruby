@@ -6,6 +6,7 @@ package vm
 
 import (
 	"os"
+	"path/filepath"
 	"sync"
 
 	libpstore "github.com/go-ruby-pstore/pstore"
@@ -116,17 +117,9 @@ func (b *fileBackend) Store(data []byte) error {
 
 // dirOf returns the directory of path (".", not "", for a bare filename) so the
 // temp file lands on the same filesystem as the store for an atomic rename.
-func dirOf(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			if i == 0 {
-				return "/"
-			}
-			return path[:i]
-		}
-	}
-	return "."
-}
+// filepath.Dir handles both separators, so a Windows backslash path resolves to
+// its real directory (not "." / the cwd, which would make the rename cross-drive).
+func dirOf(path string) string { return filepath.Dir(path) }
 
 // pstoreSelf asserts the receiver is a PStore (always true for a bound method).
 func pstoreSelf(v object.Value) *PStore { return v.(*PStore) }
