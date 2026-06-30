@@ -194,6 +194,9 @@ type VM struct {
 	cCSV                                   *RClass // the CSV class (require "csv"), backed by go-ruby-csv
 	cCSVRow                                *RClass // CSV::Row, wrapping a *csv.Row
 	cCSVTable                              *RClass // CSV::Table, wrapping a *csv.Table
+	cLogger                                *RClass // the Logger class (require "logger"), backed by go-ruby-logger
+	cLoggerFormatter                       *RClass // Logger::Formatter, wrapping a *Logger wrapper's formatter
+	cLoggerSeverity                        *RClass // Logger::Severity, the severity-constant module
 	cREXML                                 *RClass // the REXML module (require "rexml/document"), backed by go-ruby-rexml
 	cREXMLDocument                         *RClass // REXML::Document, wrapping a *rexml.Document
 	cREXMLElement                          *RClass // REXML::Element, wrapping a *rexml.Element
@@ -519,6 +522,7 @@ func New(out io.Writer) *VM {
 	vm.registerFileStat()   // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
 	vm.registerIPAddr()     // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
 	vm.registerPathname()   // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class
+	vm.registerLogger()     // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
 	vm.installHashKeyHook()
 	return vm
 }
