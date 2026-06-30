@@ -637,6 +637,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// The writer CSV.generate yields to its block: it reports CSV so its << /
 		// push methods (defined on the CSV class) dispatch.
 		return vm.cCSV
+	case *Logger:
+		// A Logger wrapper reports Logger; its instance methods (add/info/<</…)
+		// live on that class.
+		return vm.cLogger
+	case *LoggerFormatter:
+		// A standalone Logger::Formatter (Logger::Formatter.new) reports
+		// Logger::Formatter, whose #call renders one line through the library.
+		return vm.cLoggerFormatter
 	case *GetoptLong:
 		return vm.cGetoptLong
 	case *Set:

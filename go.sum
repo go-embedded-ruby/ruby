@@ -46,6 +46,8 @@ github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b h1:1iw1eRBOG
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
 github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06 h1:3m+pFs699msdrHRMXTtv5N2H/Qj2k8YSbndLlCyO8Ww=
 github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06/go.mod h1:nHXcH3zaGNmCslZStZVeylXkv1wLp+nzT6qNj+m+QXU=
+github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277 h1:XfUzDZqZWgOUTJ22GdwNOgkZB9MZKhxsPTq0xL1u5Io=
+github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277/go.mod h1:9+5E2AAIpErKRtzJ7zqZSfptjlD/XcD/ni6H9jpO37Y=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f/go.mod h1:UpjSgWGcQSNt0ARWuHKwf0P55LkwZ65vuqoRPSKctZ8=
 github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca h1:jerobsJZBFXJa/2ktK8DEDU/Yf5CmX12oRkrezKq/XQ=
