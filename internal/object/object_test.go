@@ -68,6 +68,23 @@ func TestHashOps(t *testing.T) {
 	}
 }
 
+// TestNewHashCap covers the pre-sized hash constructor: a positive capacity
+// builds an empty, fully usable hash, and a negative capacity clamps to zero
+// (behaving like NewHash) rather than panicking.
+func TestNewHashCap(t *testing.T) {
+	h := NewHashCap(4)
+	if h.Len() != 0 {
+		t.Fatalf("pre-sized hash len = %d want 0", h.Len())
+	}
+	h.Set(NewString("k"), Integer(1))
+	if v, ok := h.Get(NewString("k")); !ok || v != Integer(1) {
+		t.Fatalf("pre-sized hash get = %v,%v", v, ok)
+	}
+	if neg := NewHashCap(-1); neg.Len() != 0 {
+		t.Fatalf("negative-cap hash len = %d want 0", neg.Len())
+	}
+}
+
 // TestHashContentKeysAndClear covers content-addressed Array/Hash/Bignum keys,
 // Clear, Delete, and (with no CustomKeyHook installed) the identity fallback for a
 // plain reference key.

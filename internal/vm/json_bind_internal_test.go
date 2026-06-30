@@ -13,52 +13,68 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// TestJSONBindToJSON covers the rbgo->library value mapping (toJSON) across every
-// arm, including the scalar shapes the document tests do not all reach directly
-// (a plain Go nil, a Bignum, a Symbol) and the to_s-of-unknown default.
-func TestJSONBindToJSON(t *testing.T) {
+// TestJSONBindGenerate covers the rbgo->library generate mapping (objSource /
+// emitValue) across every arm by round-tripping each shape through jsonGenerate,
+// including the scalar shapes the document tests do not all reach directly (a
+// plain Go nil, a Bignum, a Symbol) and the to_s-of-unknown default.
+func TestJSONBindGenerate(t *testing.T) {
 	cases := []struct {
 		name string
 		in   object.Value
-		want json.Value
+		want string
 	}{
-		{"go-nil", nil, nil},
-		{"nil", object.NilV, nil},
-		{"true", object.Bool(true), true},
-		{"false", object.Bool(false), false},
-		{"int", object.Integer(7), int64(7)},
-		{"float", object.Float(2.5), float64(2.5)},
-		{"string", object.NewString("hi"), "hi"},
-		{"symbol", object.Symbol("sym"), json.Symbol("sym")},
+		{"go-nil", nil, "null"},
+		{"nil", object.NilV, "null"},
+		{"true", object.Bool(true), "true"},
+		{"false", object.Bool(false), "false"},
+		{"int", object.Integer(7), "7"},
+		{"float", object.Float(2.5), "2.5"},
+		{"string", object.NewString("hi"), `"hi"`},
+		{"symbol", object.Symbol("sym"), `"sym"`},
+		{"empty-array", &object.Array{}, "[]"},
+		{"array", &object.Array{Elems: []object.Value{object.Integer(1)}}, "[1]"},
 	}
 	for _, c := range cases {
-		if got := toJSON(c.in); got != c.want {
-			t.Errorf("%s: toJSON=%#v want %#v", c.name, got, c.want)
+		if got := jsonGenerate(c.in); got != c.want {
+			t.Errorf("%s: jsonGenerate=%q want %q", c.name, got, c.want)
 		}
 	}
-	// A Bignum maps to its *big.Int.
+	// A Bignum emits its full decimal form.
 	bg := new(big.Int).Exp(big.NewInt(10), big.NewInt(30), nil)
-	if got, ok := toJSON(object.NormInt(bg)).(*big.Int); !ok || got.Cmp(bg) != 0 {
-		t.Errorf("bignum -> %#v", toJSON(object.NormInt(bg)))
+	if got := jsonGenerate(object.NormInt(bg)); got != bg.String() {
+		t.Errorf("bignum -> %q", got)
 	}
-	// An Array maps to []json.Value, a Hash to an ordered *Map (keys coerced).
-	arr := toJSON(&object.Array{Elems: []object.Value{object.Integer(1)}})
-	if s, ok := arr.([]json.Value); !ok || len(s) != 1 || s[0] != int64(1) {
-		t.Errorf("array -> %#v", arr)
-	}
+	// A Hash emits an ordered object with coerced keys (Symbol key -> bare name).
 	h := object.NewHash()
 	h.Set(object.Symbol("k"), object.Integer(2))
-	m, ok := toJSON(h).(*json.Map)
-	if !ok || m.Len() != 1 {
-		t.Fatalf("hash -> %#v", toJSON(h))
+	if got := jsonGenerate(h); got != `{"k":2}` {
+		t.Errorf("hash -> %q", got)
 	}
-	if v, ok := m.Get("k"); !ok || v != int64(2) {
-		t.Errorf("hash key -> %#v present=%v", v, ok)
+	// An empty Hash emits "{}".
+	if got := jsonGenerate(object.NewHash()); got != "{}" {
+		t.Errorf("empty hash -> %q", got)
 	}
 	// The to_s-of-unknown default: a Range serialises by its Ruby to_s string.
 	rng := &object.Range{Lo: object.Integer(1), Hi: object.Integer(2)}
-	if got := toJSON(rng); got != "1..2" {
-		t.Errorf("range default -> %#v", got)
+	if got := jsonGenerate(rng); got != `"1..2"` {
+		t.Errorf("range default -> %q", got)
+	}
+}
+
+// TestJSONBindGenerateNestedError covers emitValue's error-propagation arms: a
+// non-finite float nested inside an Array and inside a Hash re-raises
+// JSON::GeneratorError (exercising the err returns of the Array/Object callbacks).
+func TestJSONBindGenerateNestedError(t *testing.T) {
+	one := object.Float(1.0)
+	inf := object.Float(float64(one) / float64(object.Float(0))) // +Inf
+	arr := &object.Array{Elems: []object.Value{inf}}
+	if re := rubyErr(t, func() { jsonGenerate(arr) }); re.Class != "JSON::GeneratorError" {
+		t.Errorf("array+inf -> class=%q", re.Class)
+	}
+	h := object.NewHash()
+	h.Set(object.NewString("k"), inf)
+	if re := rubyErr(t, func() { jsonGenerate(h) }); re.Class != "JSON::GeneratorError" {
+		t.Errorf("hash+inf -> class=%q", re.Class)
 	}
 }
 
@@ -76,46 +92,77 @@ func TestJSONBindKeyString(t *testing.T) {
 	}
 }
 
-// TestJSONBindFromJSON covers the library->rbgo value mapping (fromJSON) across
-// every arm, including the cases the document tests do not all reach directly (a
-// *big.Int, a Symbol) and the defensive default.
-func TestJSONBindFromJSON(t *testing.T) {
-	if fromJSON(nil) != object.NilV {
-		t.Error("nil -> not NilV")
+// TestJSONBindObjBuilder covers the library->rbgo parse mapping (objBuilder)
+// across every Builder method by driving the builder directly, including the
+// scalar shapes (a *big.Int via Big, a symbolized Key) and the nested
+// array-inside-object structure the document tests do not all reach directly.
+func TestJSONBindObjBuilder(t *testing.T) {
+	// Scalar arms, each as the sole top-level value.
+	var bNull objBuilder
+	bNull.Null()
+	if bNull.Result() != object.NilV {
+		t.Error("Null -> not NilV")
 	}
-	if v, ok := fromJSON(true).(object.Bool); !ok || !bool(v) {
-		t.Errorf("bool -> %#v", fromJSON(true))
+	var bBool objBuilder
+	bBool.Bool(true)
+	if v, ok := bBool.Result().(object.Bool); !ok || !bool(v) {
+		t.Errorf("Bool -> %#v", bBool.Result())
 	}
-	if v, ok := fromJSON(int64(9)).(object.Integer); !ok || int64(v) != 9 {
-		t.Errorf("int64 -> %#v", fromJSON(int64(9)))
+	var bInt objBuilder
+	bInt.Int(9)
+	if v, ok := bInt.Result().(object.Integer); !ok || int64(v) != 9 {
+		t.Errorf("Int -> %#v", bInt.Result())
 	}
 	bg := new(big.Int).Exp(big.NewInt(10), big.NewInt(30), nil)
-	if v, ok := fromJSON(bg).(*object.Bignum); !ok || v.I.Cmp(bg) != 0 {
-		t.Errorf("*big.Int -> %#v", fromJSON(bg))
+	var bBig objBuilder
+	bBig.Big(bg)
+	if v, ok := bBig.Result().(*object.Bignum); !ok || v.I.Cmp(bg) != 0 {
+		t.Errorf("Big -> %#v", bBig.Result())
 	}
-	if v, ok := fromJSON(float64(2.5)).(object.Float); !ok || float64(v) != 2.5 {
-		t.Errorf("float64 -> %#v", fromJSON(float64(2.5)))
+	var bFloat objBuilder
+	bFloat.Float(2.5)
+	if v, ok := bFloat.Result().(object.Float); !ok || float64(v) != 2.5 {
+		t.Errorf("Float -> %#v", bFloat.Result())
 	}
-	if v, ok := fromJSON("s").(*object.String); !ok || v.Str() != "s" {
-		t.Errorf("string -> %#v", fromJSON("s"))
+	var bStr objBuilder
+	bStr.Str("s")
+	if v, ok := bStr.Result().(*object.String); !ok || v.Str() != "s" {
+		t.Errorf("Str -> %#v", bStr.Result())
 	}
-	if v, ok := fromJSON(json.Symbol("y")).(object.Symbol); !ok || string(v) != "y" {
-		t.Errorf("Symbol -> %#v", fromJSON(json.Symbol("y")))
+
+	// An object containing an array value, with a symbolized key — exercises
+	// BeginObject/Key(symbolize)/BeginArray/elements/EndArray/EndObject and emit
+	// into both an open Hash and an open Array.
+	var b objBuilder
+	b.BeginObject(1)
+	b.Key("k", true) // symbolize -> Symbol key
+	b.BeginArray(2)
+	b.Int(1)
+	b.Str("x")
+	b.EndArray()
+	b.EndObject()
+	h, ok := b.Result().(*object.Hash)
+	if !ok || len(h.Keys) != 1 {
+		t.Fatalf("object -> %#v", b.Result())
 	}
-	arr := fromJSON([]json.Value{int64(1), "x"})
-	a, ok := arr.(*object.Array)
+	if _, ok := h.Keys[0].(object.Symbol); !ok {
+		t.Errorf("symbolized key -> %#v", h.Keys[0])
+	}
+	v, _ := h.Get(object.Symbol("k"))
+	a, ok := v.(*object.Array)
 	if !ok || len(a.Elems) != 2 {
-		t.Fatalf("[]Value -> %#v", arr)
+		t.Fatalf("array value -> %#v", v)
 	}
-	m := json.NewMap()
-	m.Set("k", int64(3))
-	hv := fromJSON(m)
-	if hh, ok := hv.(*object.Hash); !ok || len(hh.Keys) != 1 {
-		t.Errorf("*Map -> %#v", hv)
-	}
-	// A value the parser never produces (a bare int) maps to nil (defensive arm).
-	if fromJSON(123) != object.NilV {
-		t.Errorf("unmapped -> %#v", fromJSON(123))
+
+	// A non-symbolized Key yields a String key.
+	var b2 objBuilder
+	b2.BeginObject(1)
+	b2.Key("s", false)
+	b2.Null()
+	b2.EndObject()
+	h2 := b2.Result().(*object.Hash)
+	if _, ok := h2.Keys[0].(*object.String); !ok {
+		t.Errorf("string key -> %#v", h2.Keys[0])
 	}
 }
 

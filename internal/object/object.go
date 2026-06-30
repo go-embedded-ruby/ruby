@@ -422,6 +422,16 @@ func snapshotKey(k Value) Value {
 // NewHash returns an empty hash.
 func NewHash() *Hash { return &Hash{vals: map[any]Value{}} }
 
+// NewHashCap returns an empty hash whose backing map and key slice are pre-sized
+// for about n entries, so a bulk builder (e.g. JSON.parse of a known-width
+// object) fills it without re-growing. A negative n behaves like NewHash.
+func NewHashCap(n int) *Hash {
+	if n < 0 {
+		n = 0
+	}
+	return &Hash{vals: make(map[any]Value, n), Keys: make([]Value, 0, n)}
+}
+
 // Get returns the value for k and whether it is present.
 func (h *Hash) Get(k Value) (Value, bool) { v, ok := h.vals[h.hashKey(k)]; return v, ok }
 
