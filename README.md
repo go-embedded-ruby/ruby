@@ -35,7 +35,8 @@ applied across the stdlib. The benefit cuts both ways: rbgo still ships as a
 **single CGO=0 static binary**, and every extracted piece is independently
 reusable, tested and 6-arch by any Go program — no interpreter required.
 
-The `go.mod` currently **binds** these five satellites as native modules:
+The `go.mod` currently **binds 40 of these satellites** as native modules —
+each its own org, **non-empty, CI-green, 100% coverage, 6-arch**:
 
 | Library | Role | Org · landing |
 | --- | --- | --- |
@@ -44,15 +45,18 @@ The `go.mod` currently **binds** these five satellites as native modules:
 | **go-ruby-erb** | ERB template compiler | [org][gre] · [site](https://go-ruby-erb.github.io/) |
 | **go-ruby-marshal** | Marshal (`dump`/`load`), byte-exact with MRI | [org][grm] · [site](https://go-ruby-marshal.github.io/) |
 | **go-ruby-yaml** | Psych-compatible YAML emitter + loader | [org][gry] · [site](https://go-ruby-yaml.github.io/) |
-
-Three more have just been **extracted and are being integrated** (standalone
-today, binding into rbgo in progress):
-
-| Library | Role | Org · landing |
-| --- | --- | --- |
 | **go-ruby-format** | `sprintf` / `%` / `format` engine | [org][grf] · [site](https://go-ruby-format.github.io/) |
 | **go-ruby-optparse** | `OptionParser` argv engine | [org][gro] · [site](https://go-ruby-optparse.github.io/) |
 | **go-ruby-strscan** | `StringScanner` (`strscan`) | [org][grs] · [site](https://go-ruby-strscan.github.io/) |
+
+The full bound family (alphabetical, all native modules in `go.mod`):
+`abbrev`, `base64`, `benchmark`, `bigdecimal`, `cgi`, `cmath`, `csv`, `date`,
+`did-you-mean`, `digest`, `erb`, `find`, `format`, `getoptlong`, `ipaddr`,
+`json`, `logger`, `marshal`, `matrix`, `observer`, `optparse`, `ostruct`,
+`parser`, `pathname`, `prettyprint`, `prime`, `pstore`, `regexp`, `resolv`,
+`rexml`, `scanf`, `securerandom`, `set`, `shellwords`, `strscan`, `tsort`,
+`unicode-normalize`, `uri`, `yaml`, `zlib` — each at
+`github.com/go-ruby-<name>/<name>`.
 
 Beyond the `go-ruby-*` family, the scientific / container stack binds the
 pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),

@@ -319,6 +319,18 @@ Performance is a first-class, continuous concern, not a Phase 8 afterthought.
   the rest (note: amd64-AVX2 needs a full x86_64 VM, not Rosetta or
   docker-qemu-user). Both correctness and the perf matrix run across all six, the
   same target set go-asmgen itself covers.
+- **Every arch is validated on real hardware, not just qemu.** qemu is the CI
+  gate; real silicon is the correctness-and-performance oracle. **amd64** and
+  **arm64** run natively (an x86_64 VM with AVX2; Apple-Silicon arm64). The other
+  arches run on the **GCC Compile Farm (cfarm)** over SSH (user `delavennat`):
+  **riscv64 (RVV)** on cfarm95 (a SiFive-class RVV host) for vector/SIMD work,
+  **ppc64le** on cfarm112 (POWER8E) and cfarm433 (POWER9) — POWER8 is the ISA
+  floor we gate VSX on — and **loong64** on cfarm401 (LoongArch, air-gapped, so
+  artifacts are staged in). **s390x** has no cfarm node, so it is validated on the
+  **IBM LinuxONE Community Cloud (L1CC)** (big-endian, vector facility). This real-
+  hardware access matters specifically for the **SIMD-accelerated modules**
+  (`base64`/`securerandom`/`hex` via go-simd) and the **performance benchmarks**:
+  the numbers reported are measured on real silicon, not llvm-mca estimates.
 
 ## 14. Phasing
 
