@@ -1,5 +1,9 @@
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
+github.com/cristalhq/base64 v0.1.2 h1:edsefYyYDiac7Ytdh2xdaiiSSJzcI2f0yIkdGEf1qY0=
+github.com/cristalhq/base64 v0.1.2/go.mod h1:sy4+2Hale2KbtSqkzpdMeYTP/IrB+HCvxVHWsh2VSYk=
+github.com/emmansun/base64 v0.6.2 h1:Qd/W1hAs9kzcWmBozAOhlxFrjnZQR2dBN4og7WMInFs=
+github.com/emmansun/base64 v0.6.2/go.mod h1:EjgM1HylRQjG1oaIMsF6+CzHsBCrTBm36890foTOELY=
 github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 h1:gJG8ekSggliP8pmp4R+VCqq2nGq5BLiyEoO0BHDOYl4=
 github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6/go.mod h1:hhWmL0cQYEqlwbktG0uhz17sTRDcq1Gtgs1FO9aI+gU=
 github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62 h1:HcBdYJtXHSQ8AoGdyfpN5CU19d3dZ11kv13IxXWpcd8=
@@ -22,6 +26,8 @@ github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3 h1:oqUg3BkpFqPq
 github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3/go.mod h1:CZPf0P3FjwYlphONFD0ZAjE+/eaixCZYvYhm6QqmqsU=
 github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38 h1:j0VAUKCGNUTZVThG4Pi3pgdHXFybwXnY7anpYuKeuH4=
 github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38/go.mod h1:PgAtItdQBv87Wog0Q7rnbwhqsupDC0pDXDlZgSv6nvA=
+github.com/go-ruby-base64/base64 v0.0.0-20260630081041-5dec54f20f53 h1:MBggShyLWDpr0USQMZvcRvRc+OIcHKFn4ohDnmB3C6k=
+github.com/go-ruby-base64/base64 v0.0.0-20260630081041-5dec54f20f53/go.mod h1:pjBeKtZ2Gpc6Dq9DoDwUYEXehQU2sOpKPWxcrSNr2Cs=
 github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4 h1:XHJOnSV9GH1+gh1/SqRsskjncBzx2NUO00G8vaX5XKA=
 github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4/go.mod h1:op9nu6Z2gvH8/phs7iJZQWNvUnT2DkJV8wBAl1l0kfE=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c h1:6YAo3FKzJJbQdLbvxHy7I4ur5+R+pLLMWwKXXLnWcQU=
@@ -90,6 +96,8 @@ github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd h1:4HGjgCdTIuIEM
 github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd/go.mod h1:HtbQgnZpSTJBAhPg1jOKgHycZl3tXgf9ZdOu4dnHWjQ=
 github.com/go-ruby-zlib/zlib v0.0.0-20260630052127-b4ac0c1ab281 h1:zOn3ro0WBggDR0xqvNSdOPxHEWzdR6iMy842CAyIL/g=
 github.com/go-ruby-zlib/zlib v0.0.0-20260630052127-b4ac0c1ab281/go.mod h1:abizNd4NW4jTmJYNmfSIuLz0J3l7MAImkcZKlslLNRM=
+github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c h1:iA1vHw+pR44TUtDlviXz3P8pAExO1nSm39PMZ7MsuYU=
+github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c/go.mod h1:/nL/YHcchLkENbcFEEqAcfESIiwCM9/1H67LsSnd7EI=
 github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=
 github.com/go-task/slim-sprig/v3 v3.0.0/go.mod h1:W848ghGpv3Qj3dhTPRyJypKRiqCdHZiAzKg9hl15HA8=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
