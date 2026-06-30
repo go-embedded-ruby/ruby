@@ -153,7 +153,10 @@ ps.transaction(true) { |s| p s.roots }`,
 // (PStore::Error < StandardError, rescuable as StandardError).
 func TestPStoreErrors(t *testing.T) {
 	dir := t.TempDir()
-	store := func(name string) string { return filepath.Join(dir, name) }
+	// ToSlash so a Windows temp path embedded in double-quoted Ruby source is not
+	// mangled by backslash escapes (forward slashes are valid for Ruby File ops on
+	// Windows). See the note on TestPStore's store helper.
+	store := func(name string) string { return filepath.ToSlash(filepath.Join(dir, name)) }
 	q := func(p string) string { return `"` + p + `"` }
 
 	for _, c := range []struct{ src, want string }{
@@ -219,11 +222,13 @@ ps = PStore.new(` + q(store("e6")) + `)
 begin; ps.transaction; rescue ArgumentError => e; puts "noblk"; end`,
 			"noblk\n"},
 
-		// A store whose file cannot be opened (its parent directory does not exist)
-		// surfaces the flock open error as PStore::Error when a transaction begins.
+		// A store whose file cannot be opened / written (its parent directory does not
+		// exist) surfaces an IO error as PStore::Error when a transaction begins —
+		// from the flock open on Unix, or from the atomic-write createTemp on Windows
+		// (whose flock is a no-op). The forward-slashed path stays escape-safe.
 		{`require "pstore"
-ps = PStore.new(` + q(filepath.Join(store("nodir"), "x.pstore")) + `)
-begin; ps.transaction { |s| }; rescue PStore::Error => e; puts "ioerr"; end`,
+ps = PStore.new(` + q(filepath.ToSlash(filepath.Join(store("nodir"), "x.pstore"))) + `)
+begin; ps.transaction { |s| s[:a] = 1 }; rescue PStore::Error => e; puts "ioerr"; end`,
 			"ioerr\n"},
 	} {
 		if got := eval(t, c.src); got != c.want {
@@ -240,12 +245,15 @@ begin; ps.transaction { |s| }; rescue PStore::Error => e; puts "ioerr"; end`,
 func TestPStoreOnDiskFormat(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fmt.pstore")
+	// rpath is the forward-slashed form embedded in Ruby source (escape-safe on
+	// Windows, and resolving to the same file os.ReadFile(path) reads below).
+	rpath := filepath.ToSlash(path)
 	src := `require "pstore"
-ps = PStore.new("` + path + `")
+ps = PStore.new("` + rpath + `")
 ps.transaction { |s| s[:a] = 1; s["b"] = [2, 3] }
 ` +
 		// The file bytes equal Marshal.dump of the equivalent Hash (what MRI stores).
-		`data = File.read("` + path + `")
+		`data = File.read("` + rpath + `")
 expected = Marshal.dump({:a => 1, "b" => [2, 3]})
 puts(data == expected)
 puts(data.bytes[0])  # Marshal MAJOR_VERSION (4)
@@ -277,7 +285,8 @@ p table`
 // the cross-process persistence MRI's PStore provides.
 func TestPStoreReopenAcrossVMs(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "reopen.pstore")
+	// Forward-slashed so the path embedded in Ruby source is escape-safe on Windows.
+	path := filepath.ToSlash(filepath.Join(dir, "reopen.pstore"))
 
 	writeOut := eval(t, `require "pstore"
 PStore.new("`+path+`").transaction { |s| s[:count] = 41; s[:name] = "rbgo" }

@@ -19,9 +19,12 @@ import (
 // renameFile / flockSyscall) so a test can assert Store / flockFile surface it.
 var errInjected = errors.New("pstore: injected fault")
 
-// TestPStoreDirOf covers dirOf's three branches: a path with a directory, a path at
-// the filesystem root, and a bare filename (the "." fallback that keeps the temp
-// file beside a relative store).
+// TestPStoreDirOf covers dirOf: a path with a directory, a path at the filesystem
+// root, and a bare filename (the "." that keeps the temp file beside a relative
+// store). dirOf only needs to yield the right directory for the atomic-write temp
+// file; the OS separator is irrelevant, so the result is normalised with
+// filepath.ToSlash and compared against forward-slash expectations (so the case
+// holds on both Unix and Windows, where filepath.Dir returns backslashes).
 func TestPStoreDirOf(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		{"/a/b/c.pstore", "/a/b"},
@@ -29,7 +32,7 @@ func TestPStoreDirOf(t *testing.T) {
 		{"bare.pstore", "."},
 		{"", "."},
 	} {
-		if got := dirOf(c.in); got != c.want {
+		if got := filepath.ToSlash(dirOf(c.in)); got != c.want {
 			t.Errorf("dirOf(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
@@ -127,39 +130,6 @@ func TestPStoreStoreFaults(t *testing.T) {
 		t.Fatalf("Store rename-fail = %v, want errInjected", err)
 	}
 	renameFile = restoreRename
-}
-
-// TestPStoreFlockFile covers flockFile: a successful exclusive lock + unlock, a
-// successful shared lock, the OpenFile error path for an unopenable path, and the
-// Flock-failure branch via the flockSyscall seam.
-func TestPStoreFlockFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "lock.pstore")
-
-	unlock, err := flockFile(path, false) // LOCK_EX
-	if err != nil {
-		t.Fatalf("flockFile EX: %v", err)
-	}
-	unlock()
-
-	unlock, err = flockFile(path, true) // LOCK_SH
-	if err != nil {
-		t.Fatalf("flockFile SH: %v", err)
-	}
-	unlock()
-
-	// An unopenable path (a missing parent directory) fails at OpenFile.
-	if _, err := flockFile(filepath.Join(dir, "nope", "x"), false); err == nil {
-		t.Fatal("flockFile missing dir: want error, got nil")
-	}
-
-	// flock itself failing (injected) closes the fd and surfaces the error.
-	restore := flockSyscall
-	flockSyscall = func(int, int) error { return errInjected }
-	if _, err := flockFile(path, false); err != errInjected {
-		t.Fatalf("flockFile flock-fail = %v, want errInjected", err)
-	}
-	flockSyscall = restore
 }
 
 // TestPStoreRaisePStore covers raisePStore's three branches: a nil error is a

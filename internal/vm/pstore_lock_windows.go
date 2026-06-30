@@ -6,13 +6,12 @@
 
 package vm
 
-// Windows has no flock(2); the PStore advisory lock is a no-op there (PStore
-// still works single-process, and the lock is only advisory). flockSyscall is a
-// var so tests can force the lock-failure branch of flockFile.
-var flockSyscall = func(fd, how int) error { return nil }
-
-const (
-	lockEx = 1
-	lockSh = 2
-	lockUn = 3
-)
+// flockFile is a pure no-op on Windows: it opens NOTHING. Windows has no advisory
+// flock(2), so there is no lock to take; and, crucially, holding the store file
+// open would make the atomic-rename Store fail with "Access is denied" (Windows
+// forbids renaming over an open file). PStore still works correctly single-process
+// there — the lock is only advisory cross-process serialisation, which Windows
+// callers do without here.
+func flockFile(path string, readOnly bool) (func(), error) {
+	return func() {}, nil
+}

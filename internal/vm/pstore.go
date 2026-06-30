@@ -384,30 +384,10 @@ func (p *PStore) transaction(vm *VM, readOnly bool, blk *Proc) object.Value {
 	return object.NilV
 }
 
-// flockSyscall / the lock-mode constants (lockEx/lockSh/lockUn) are defined per
-// platform: a real advisory syscall.Flock on Unix, a no-op on Windows (which lacks
-// flock — PStore still works single-process there, and the lock is only advisory).
-// flockSyscall is a var so tests can force the lock-failure branch of flockFile.
-
-// flockFile opens the store file O_CREAT|O_RDWR and takes an advisory flock on it
-// (lockSh for a read-only transaction, lockEx otherwise), returning a closure
-// that releases the lock and closes the fd. The Backend reads/writes the path
-// independently; the lock just serialises concurrent transactions, as MRI's does.
-func flockFile(path string, readOnly bool) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	how := lockEx
-	if readOnly {
-		how = lockSh
-	}
-	if err := flockSyscall(int(f.Fd()), how); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return func() {
-		flockSyscall(int(f.Fd()), lockUn)
-		f.Close()
-	}, nil
-}
+// flockFile takes the per-transaction advisory file lock, returning a closure that
+// releases it. It is defined per platform (pstore_lock_unix.go / _windows.go): on
+// Unix it opens the store O_CREAT|O_RDWR and holds a real flock(2) for the
+// transaction; on Windows — which has no advisory flock — it opens NOTHING and is a
+// pure no-op, so the atomic-rename Store is not blocked by a still-open target
+// handle (Windows forbids renaming over an open file). The lock only serialises
+// concurrent transactions, as MRI's does.
