@@ -19,10 +19,12 @@ TRUFFLE="${TRUFFLE:-truffleruby}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # Module order = the order they were bound into rbgo main.
-# Wave-1/2 modules first, then the wave-3 standalone go-ruby-<mod> bindings.
+# Wave-1/2 modules first, then the wave-3 standalone go-ruby-<mod> bindings,
+# then the wave-4 standalone go-ruby-<mod> bindings.
 MODULES="regexp erb yaml format strscan optparse json bigdecimal date uri digest \
 set prime matrix complex rational cmath tsort abbrev did-you-mean prettyprint \
-scanf unicode-normalize cgi zlib ipaddr pathname rexml"
+scanf unicode-normalize cgi zlib ipaddr pathname rexml \
+base64 securerandom ostruct observer logger find benchmark"
 
 # best PROG ARGS... → minimal real milliseconds over $RUNS runs.
 best() {

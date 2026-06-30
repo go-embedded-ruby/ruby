@@ -273,6 +273,101 @@ them on its own pure-Go numeric tower — the same apples-to-apples comparison.
   order-of-magnitude. The large gaps (`set`, `zlib`, the `did-you-mean`/`rexml`
   wins) are well outside the noise floor.
 
+## Per-module: wave-4 standalone bindings  (2026-06-30)
+
+This wave-4 section measures the **next 7 standalone `go-ruby-<mod>` bindings**
+the same way: the **same** `bench/modules/<mod>.rb` runs a representative,
+deterministic, public-API-only workload under every runtime; rbgo's column is the
+**pure-Go library doing the work**, every other column the runtime's own stdlib.
+Two of these modules — `base64` and `securerandom` — route their hot encode/decode
+paths through **go-simd** (`go-simd/base64`, `go-simd/hex`), so they are the
+SIMD-showcase rows. Output is checked byte-identical to MRI before timing (for
+`securerandom`, whose bytes are random, only the fixed output *lengths* are
+checksummed — identical across runtimes). `pstore` is **not** included: it is a
+transactional on-disk store (every commit does an `fsync` + atomic rename), so its
+cost is the filesystem, not a Ruby-visible CPU workload that runs identically
+across runtimes — it is skipped rather than reported as a misleading CPU row.
+
+### Methodology
+
+- **Host:** Apple M4 Max, macOS (darwin/arm64). **Go:** go1.26.4,
+  `GOWORK=off go build -o rbgo ./cmd/rbgo`.
+- **Runtimes:** `ruby 4.0.5 (2026-05-20) +PRISM` (MRI, the oracle) and
+  `ruby --yjit` (YJIT); `jruby 10.1.0.0` (OpenJDK 25); `truffleruby 34.0.1`
+  (GraalVM CE Native, like ruby 3.4.9).
+- **Fairness:** each `bench/modules/*.rb` prints a **deterministic checksum** and
+  uses **only the module's public Ruby API**, so the identical source runs under
+  all five runtimes; output is checked **byte-identical to MRI** before timing.
+  Wall-clock is **best-of-5** (best, not mean). Iteration counts are baked into
+  each script (overridable via `N=`).
+- **Single-shot, no warm-up beyond the script's own loop** — JRuby pays ~1.2–4.0 s
+  JVM start and TruffleRuby pays Graal warm-up on every row, so their numbers are
+  *cold single-process* times, exactly how rbgo/MRI are measured.
+- Reproduce: `RBGO=./rbgo TRUFFLE=truffleruby bash bench/modules/run.sh 5`.
+
+### Results (best of 5, ms)
+
+| Module | rbgo | MRI | MRI+YJIT | JRuby | TruffleRuby | rbgo/MRI | rbgo/YJIT |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| base64 | 680ms | 170ms | 180ms | 1640ms | 1140ms | 4.00× | 3.78× |
+| securerandom | 120ms | 330ms | 310ms | 1220ms | 270ms | **0.36×** | **0.39×** |
+| ostruct | 860ms | 1660ms | 1690ms | 2160ms | 4200ms | **0.52×** | **0.51×** |
+| observer | 160ms | 110ms | 70ms | 1300ms | 240ms | 1.45× | 2.29× |
+| logger | 140ms | 90ms | 80ms | 1360ms | 240ms | 1.56× | 1.75× |
+| find | 1010ms | 1270ms | 1200ms | 4040ms | 1780ms | **0.80×** | **0.84×** |
+| benchmark | 240ms | 110ms | 70ms | 1330ms | 180ms | 2.18× | 3.43× |
+
+> `rbgo/MRI < 1` (bold) means the pure-Go library is **faster than MRI's own
+> stdlib** on this workload. All 7 modules run on **every** runtime (no `n/a`):
+> `base64`, `securerandom`, `ostruct`, `observer`, `logger`, `find` and
+> `benchmark` are bundled by MRI, JRuby 10.1 and TruffleRuby 34 alike.
+
+### The SIMD showcase — honest
+
+- **`securerandom` (0.36×) — SIMD wins.** rbgo is **~2.8× faster than MRI** on the
+  `hex`/`base64`/`uuid`/`random_bytes` loop. The Ruby-visible cost here is a CSPRNG
+  draw *plus* a hex/base64 **encode**, and rbgo routes that encode through
+  go-simd/hex and go-simd/base64 (NEON on arm64) while MRI hex-encodes in its C
+  stdlib byte-by-byte; combined with Go's fast `crypto/rand`, the pure-Go library
+  comes out ahead. This is the clean SIMD payoff of the wave-4 suite.
+- **`base64` (4.00×) — SIMD does *not* win here, and that is honest.** rbgo is
+  **4× slower than MRI** on the `encode64`/`decode64` round-trip. The SIMD kernel
+  *is* used and *is* faster on raw bytes, but on this Ruby-visible workload the
+  per-call cost is dominated by **Ruby-string allocation and the interpreter
+  dispatch around each `Base64.*` call**, not the transform itself: MRI's
+  `pack("m")` is a tight C path with cheaper string handling, so the encode/decode
+  SIMD advantage is swamped by allocation overhead. The internal `go test -bench`
+  (SIMD-vs-scalar, bytes in/out) still shows the kernel win; the Ruby-level loop
+  does not, because the bottleneck moved. Flagged for the go-ruby-base64 perf
+  backlog (cut per-call string churn on the binding).
+
+### Reading the rows — honest
+
+- **rbgo beats MRI outright on three modules:** `securerandom` (0.36×, SIMD +
+  fast CSPRNG), `ostruct` (0.52×, the pure-Go field table builds and reads cheaper
+  than MRI's `method_missing`/`OpenStruct` Ruby machinery) and `find` (0.80×, but
+  see the I/O caveat). `find` is **I/O-bound** — `Find.find` issues real
+  `readdir`/`lstat` per entry, so the dominant cost is the OS filesystem layer
+  (the tree is warmed before timing); read its ratio as "the pure-Go engine adds
+  no measurable overhead over MRI's own traversal", not as a CPU comparison.
+- **Near / modestly above parity (~1.4–2.2×):** `observer` (1.45×), `logger`
+  (1.56×) and `benchmark` (2.18×) — small, dispatch-bound loops where rbgo's
+  per-send frame setup + interface dispatch is the residual cost over MRI's
+  inline-cached interpreter; all three are sub-250 ms, inside the order-of-magnitude
+  band.
+- **The outlier — `base64` (4.00×):** the SIMD-showcase row that *doesn't* show
+  the win at the Ruby level (string-allocation-bound) — see the SIMD section
+  above. Output stays byte-identical to MRI.
+- **JIT runtimes (cold, single-shot):** TruffleRuby is competitive on the small
+  compute rows (`benchmark` 180 ms, `observer`/`logger` 240 ms) but pays heavy
+  cold warm-up on the allocation-heavy `ostruct` (4200 ms) and the SIMD `base64`
+  (1140 ms). JRuby is dominated by ~1.2–4.0 s JVM startup throughout — for
+  one-shot scripts startup is its story, as in every table above.
+- **Variance:** best-of-5 on a laptop; rows under ~250 ms (`securerandom` 120 ms,
+  `logger`/`observer` 140–160 ms, `benchmark` 240 ms) carry the most relative
+  noise — treat those ratios as order-of-magnitude. The large gaps (`base64`,
+  the `securerandom`/`ostruct` wins) are well outside the noise floor.
+
 ## Where rbgo stands
 
 - **Competitive / at parity:** `strings`, `wordcount`. Anything dominated by
