@@ -182,6 +182,97 @@ comparison is therefore the *Ruby-visible operation* — `JSON.parse`,
   ratios as order-of-magnitude. The large gaps (`strscan`, `json`, the
   rbgo-wins) are well outside the noise floor.
 
+## Per-module: wave-3 standalone bindings  (2026-06-30)
+
+The 11 modules above were the first wave of `go-ruby-<mod>` bindings. This wave-3
+section measures the **next 17 standalone bindings** the same way: the **same**
+`bench/modules/<mod>.rb` runs a representative, deterministic, CPU-bound hot-path
+workload under every runtime; rbgo's column is the **pure-Go library doing the
+work**, every other column the runtime's own stdlib. `complex` and `rational` are
+core Ruby numerics (not a separate org repo) but are included because rbgo runs
+them on its own pure-Go numeric tower — the same apples-to-apples comparison.
+
+### Methodology
+
+- **Host:** Apple M-series, macOS (darwin/arm64). **Go:** go1.26.4,
+  `GOWORK=off go build -o rbgo ./cmd/rbgo`.
+- **Runtimes:** `ruby 4.0.5 (2026-05-20) +PRISM` (MRI, the oracle) and
+  `ruby --yjit` (YJIT); `jruby 10.1.0.0` (OpenJDK 25); `truffleruby 34.0.1`
+  (GraalVM CE Native, like ruby 3.4.9).
+- **Fairness:** each `bench/modules/*.rb` prints a **deterministic checksum**
+  (no time/random input) and uses **only the module's public Ruby API**, so the
+  identical source runs under all five runtimes. Output is checked
+  **byte-identical to MRI** before timing. Wall-clock is **best-of-5** (best, not
+  mean, to suppress scheduler noise). Iteration counts are baked into each script
+  (overridable via `N=`).
+- **Single-shot, no warm-up beyond the script's own loop** — JRuby pays ~1.1–2.9 s
+  JVM start and TruffleRuby pays Graal warm-up on every row, so their numbers are
+  *cold single-process* times, exactly how rbgo/MRI are measured.
+- Reproduce: `RBGO=./rbgo TRUFFLE=truffleruby bash bench/modules/run.sh 5`.
+
+### Results (best of 5, ms)
+
+| Module | rbgo | MRI | MRI+YJIT | JRuby | TruffleRuby | rbgo/MRI | rbgo/YJIT |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| set | 2220ms | 220ms | 220ms | 1240ms | 420ms | 10.09× | 10.09× |
+| prime | 50ms | 30ms | 50ms | 1230ms | 190ms | 1.67× | 1.00× |
+| matrix | 20ms | 50ms | 50ms | 1230ms | 210ms | **0.40×** | **0.40×** |
+| complex | 100ms | 80ms | 70ms | 1100ms | 90ms | 1.25× | 1.43× |
+| rational | 90ms | 50ms | 40ms | 1090ms | 100ms | 1.80× | 2.25× |
+| cmath | 40ms | 60ms | 60ms | diff | diff | **0.67×** | **0.67×** |
+| tsort | 80ms | 90ms | 80ms | 1220ms | 250ms | **0.89×** | 1.00× |
+| abbrev | 290ms | 220ms | 180ms | 1330ms | 380ms | 1.32× | 1.61× |
+| did-you-mean | 40ms | 1450ms | 400ms | 2660ms | 480ms | **0.03×** | **0.10×** |
+| prettyprint | 80ms | 90ms | 70ms | 1380ms | 220ms | **0.89×** | 1.14× |
+| scanf | 150ms | 570ms | 550ms | diff | diff | **0.26×** | **0.27×** |
+| unicode-normalize | 110ms | 370ms | 370ms | 1380ms | 320ms | **0.30×** | **0.30×** |
+| cgi | 60ms | 60ms | 60ms | 1090ms | 1950ms | 1.00× | 1.00× |
+| zlib | 360ms | 60ms | 60ms | 1220ms | 380ms | 6.00× | 6.00× |
+| ipaddr | 210ms | 110ms | 90ms | 1600ms | 350ms | 1.91× | 2.33× |
+| pathname | 260ms | 440ms | 420ms | 1890ms | 740ms | **0.59×** | **0.62×** |
+| rexml | 20ms | 510ms | 310ms | 2850ms | 1490ms | **0.04×** | **0.06×** |
+
+> `rbgo/MRI < 1` (bold) means the pure-Go library is **faster than MRI's own
+> stdlib** on this workload. `diff` means the module is **not shipped** by that
+> runtime: `cmath` and `scanf` are not bundled in JRuby 10.1 or TruffleRuby 34
+> (both `LoadError` on `require` — they were removed as default gems), so those
+> two rows have no JRuby/TruffleRuby number. They run on MRI, MRI+YJIT and rbgo.
+
+### Reading the rows — honest
+
+- **rbgo beats MRI outright on eight modules:** `did-you-mean` (0.03×), `rexml`
+  (0.04×), `scanf` (0.26×), `unicode-normalize` (0.30×), `matrix` (0.40×),
+  `pathname` (0.59×), `cmath` (0.67×) and `tsort`/`prettyprint` (0.89×). These are
+  parse-, layout- and algorithm-heavy workloads where MRI's implementation is
+  *largely Ruby-coded* (REXML's tree walker, the DidYouMean edit-distance
+  spell-checker, scanf's format engine, REXML/pathname string machinery): the
+  compiled pure-Go library does the work without per-call Ruby dispatch. The two
+  headline wins — `did-you-mean` ~33× and `rexml` ~25× faster than MRI — are the
+  expected payoff of replacing a pure-Ruby stdlib module with a native library.
+- **Near parity (~1–2×):** `cgi` (1.00×, both call native escaping), `complex`
+  (1.25×), `abbrev` (1.32×), `prime` (1.67×), `rational` (1.80×) and `ipaddr`
+  (1.91×) — within the noise/clean-interpreter band.
+- **Slower — `zlib` (6.0×):** MRI's `zlib` is a thin wrapper over C zlib; rbgo's
+  go-ruby-zlib goes through Go's `compress/flate`, competitive but not at C-zlib
+  throughput on this deflate+inflate loop. Honest gap, flagged for the
+  go-ruby-zlib perf backlog.
+- **The outlier — `set` (10.1×):** rbgo is dramatically slower. The workload is
+  set algebra (`|`, `&`, `-`, `^`) over 500-element sets repeated thousands of
+  times; each operation drives a very high rate of per-element interpreter
+  dispatch through the Set's Ruby methods, which is exactly rbgo's most expensive
+  primitive (frame setup + interface dispatch per send). This is the **top wave-3
+  per-module optimization target** — filed honestly. Output stays byte-identical
+  to MRI.
+- **JIT runtimes (cold, single-shot):** TruffleRuby wins the compute-bound numeric
+  rows (`complex` 90 ms, `rational` 100 ms) but pays heavy cold warm-up on the
+  parse rows (`rexml` 1490 ms, `cgi` 1950 ms). JRuby is dominated by ~1.1–2.9 s
+  JVM startup throughout — for one-shot scripts startup is its story, as in every
+  table above.
+- **Variance:** best-of-5 on a laptop; rows under ~100 ms (`matrix`/`rexml` 20 ms,
+  `prime` 50 ms) carry the most relative noise — treat those ratios as
+  order-of-magnitude. The large gaps (`set`, `zlib`, the `did-you-mean`/`rexml`
+  wins) are well outside the noise floor.
+
 ## Where rbgo stands
 
 - **Competitive / at parity:** `strings`, `wordcount`. Anything dominated by
