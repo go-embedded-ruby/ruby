@@ -20,10 +20,10 @@ require (
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
-	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260629152243-e2cfb3354534
+	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b
 	github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
-	github.com/go-ruby-matrix/matrix v0.0.0-20260629152812-557539bb95fc
+	github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0
 	github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b
@@ -40,7 +40,7 @@ require (
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
-	github.com/go-ruby-zlib/zlib v0.0.0-20260629152229-34bd3efde796
+	github.com/go-ruby-zlib/zlib v0.0.0-20260630052127-b4ac0c1ab281
 )
 
 require (

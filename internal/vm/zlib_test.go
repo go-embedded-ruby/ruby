@@ -135,6 +135,7 @@ func TestZlib(t *testing.T) {
 		{`Zlib.inflate("not a zlib stream")`, "Zlib::DataError"},
 		{`g = Zlib::Deflate.deflate("hello world" * 10); Zlib::Inflate.inflate(g[0, 6])`, "Zlib::DataError"},
 		{`Zlib::Inflate.new.inflate("not a zlib stream")`, "Zlib::DataError"},
+		{`Zlib::Inflate.new << "not a zlib stream"`, "Zlib::DataError"}, // the #<< append path
 		// Non-gzip input -> Zlib::GzipFile::Error.
 		{`Zlib.gunzip("not gzip data at all")`, "Zlib::GzipFile::Error"},
 		// Using a finished streaming compressor -> Zlib::StreamError (matches MRI).

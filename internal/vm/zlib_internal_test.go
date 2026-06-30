@@ -61,19 +61,20 @@ func TestZlibWrappersAndFallback(t *testing.T) {
 	wantClass(errors.New("boom"), "Zlib::Error", "boom")
 }
 
-// TestZlibStreamStrictness covers the streaming error branches the library
-// raises but MRI tolerates (so they are not asserted as MRI parity in the
-// behavioural test): re-finishing a deflater and inflating after an inflater is
-// finished both surface the library's Zlib::StreamError.
-func TestZlibStreamStrictness(t *testing.T) {
-	cases := []string{
-		// #finish after #finish -> the library's Deflate Finish returns ErrStream.
-		`z = Zlib::Deflate.new; z.finish; z.finish`,
-		// #inflate after the inflater is finished -> ErrStream (via #<<).
-		`d = Zlib::Deflate.deflate("abc"); inf = Zlib::Inflate.new; inf.inflate(d); inf << d`,
+// TestZlibStreamTolerance covers the streaming cases MRI tolerates — the
+// library now matches MRI rather than raising Zlib::StreamError: a 2nd #finish
+// on a deflater returns "", and #inflate after an inflater is finished returns
+// "" for any input. (Misuse MRI genuinely DOES raise — e.g. #deflate after
+// finish — stays covered by the behavioural error test.)
+func TestZlibStreamTolerance(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// 2nd #finish returns "" (the 1st returns the deflated bytes); no raise.
+		{`z = Zlib::Deflate.new; z.deflate("x"); z.finish; p z.finish`, "\"\"\n"},
+		// #inflate after the inflater is finished returns "" for any input; no raise.
+		{`d = Zlib::Deflate.deflate("abc"); inf = Zlib::Inflate.new; inf.inflate(d); inf.finish; p inf.inflate("garbage")`, "\"\"\n"},
 	}
-	for _, src := range cases {
-		prog, err := parser.Parse("require \"zlib\"\n" + src)
+	for _, c := range cases {
+		prog, err := parser.Parse("require \"zlib\"\n" + c.src)
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
@@ -81,9 +82,13 @@ func TestZlibStreamStrictness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("compile: %v", err)
 		}
-		_, err = New(&bytes.Buffer{}).Run(iseq)
-		if err == nil || !strings.Contains(err.Error(), "Zlib::StreamError") {
-			t.Errorf("src=%q got %v, want Zlib::StreamError", src, err)
+		out := &bytes.Buffer{}
+		if _, err = New(out).Run(iseq); err != nil {
+			t.Errorf("src=%q unexpected error %v", c.src, err)
+			continue
+		}
+		if out.String() != c.want {
+			t.Errorf("src=%q got %q want %q", c.src, out.String(), c.want)
 		}
 	}
 }

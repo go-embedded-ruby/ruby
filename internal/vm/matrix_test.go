@@ -67,10 +67,9 @@ func TestMatrix(t *testing.T) {
 		{`p Matrix[[1,2]] * 3`, "Matrix[[3, 6]]\n"},
 		{`p Matrix[[1,2],[3,4]] * Vector[1,1]`, "Vector[3, 7]\n"},
 		{`p Matrix[[1,2],[3,4]] / Matrix[[1,0],[0,1]]`, "Matrix[[(1/1), (2/1)], [(3/1), (4/1)]]\n"},
-		// Matrix / scalar uses the library's exact (Rational) division — Integer
-		// entries become Rationals; MRI's Matrix#/ floors integer entries, so this
-		// is a deliberate library divergence kept for exactness.
-		{`p Matrix[[2,4],[6,8]] / 2`, "Matrix[[(1/1), (2/1)], [(3/1), (4/1)]]\n"},
+		// Matrix / scalar uses Ruby's `/` semantics per entry: Integer/Integer
+		// floors (matching MRI's Matrix#/), Float/Rational stay true-division.
+		{`p Matrix[[2,4],[6,8]] / 2`, "Matrix[[1, 2], [3, 4]]\n"},
 		{`p Matrix[[1,2],[3,4]] ** 2`, "Matrix[[7, 10], [15, 22]]\n"},
 		{`p(-Matrix[[1,2],[3,4]])`, "Matrix[[-1, -2], [-3, -4]]\n"},
 
@@ -86,10 +85,9 @@ func TestMatrix(t *testing.T) {
 		{`p Matrix[[1,2],[3,4]].inv`, "Matrix[[(-2/1), (1/1)], [(3/2), (-1/2)]]\n"},
 		{`p Matrix[[1,2],[2,4]].rank`, "1\n"},
 		{`p Matrix[[1.234,2.567]].round(1)`, "Matrix[[1.2, 2.6]]\n"},
-		// round with no argument rounds to 0 digits but keeps the Float kind
-		// (the library's documented exact-tower behaviour); MRI's Float#round(0)
-		// returns an Integer, so this is a deliberate library divergence.
-		{`p Matrix[[1.234,2.567]].round`, "Matrix[[1.0, 3.0]]\n"},
+		// round with no argument returns Integer entries (Ruby Float#round(0) ->
+		// Integer), matching MRI's Matrix#round.
+		{`p Matrix[[1.234,2.567]].round`, "Matrix[[1, 3]]\n"},
 
 		// Bignum determinant promotes through *big.Int -> Bignum.
 		{`p Matrix[[10**20,0],[0,1]].determinant`, "100000000000000000000\n"},
@@ -172,7 +170,7 @@ func TestMatrix(t *testing.T) {
 		{`p Matrix[[1,2]].send(:*, 3)`, "Matrix[[3, 6]]\n"},
 		{`p Matrix[[1,2],[3,4]].send(:*, Vector[1,1])`, "Vector[3, 7]\n"},
 		{`p Matrix[[1,2],[3,4]].send(:/, Matrix[[1,0],[0,1]])`, "Matrix[[(1/1), (2/1)], [(3/1), (4/1)]]\n"},
-		{`p Matrix[[2,4]].send(:/, 2)`, "Matrix[[(1/1), (2/1)]]\n"},
+		{`p Matrix[[2,4]].send(:/, 2)`, "Matrix[[1, 2]]\n"},
 		{`p Matrix[[1,2],[3,4]].send(:**, 2)`, "Matrix[[7, 10], [15, 22]]\n"},
 		{`p Matrix[[1,2]].send(:"-@")`, "Matrix[[-1, -2]]\n"},
 		{`p Matrix[[1,2]].send(:==, Matrix[[1,2]])`, "true\n"},
@@ -207,10 +205,11 @@ func TestMatrixErrors(t *testing.T) {
 		{`Matrix[[1,2],[2,4]].inverse`, "ExceptionForMatrix::ErrNotRegular", "Not Regular Matrix"},
 		{`Vector[1,2] + Vector[1,2,3]`, "ExceptionForMatrix::ErrDimensionMismatch", "Dimension mismatch"},
 		{`Vector[1,2].inner_product(Vector[1,2,3])`, "ExceptionForMatrix::ErrDimensionMismatch", "Dimension mismatch"},
-		// A 2-D cross product maps to ErrOperationNotDefined (the library's
-		// surface; MRI raises ArgumentError here — a deliberate divergence kept so
-		// the ErrOperationNotDefined re-raise branch is exercised).
-		{`Vector[1,2].cross_product(Vector[1,2])`, "ExceptionForMatrix::ErrOperationNotDefined", ""},
+		// A 2-D cross product raises ArgumentError with MRI's verbatim
+		// arg-count message (the library now matches MRI exactly).
+		{`Vector[1,2].cross_product(Vector[1,2])`, "ArgumentError", "wrong number of arguments (1 for 0)"},
+		// A <2-D cross product is genuinely undefined -> ErrOperationNotDefined.
+		{`Vector[1].cross_product(Vector[2])`, "ExceptionForMatrix::ErrOperationNotDefined", ""},
 	} {
 		src := req + "begin; " + c.src + "; rescue => e; p e.class; p e.message; end"
 		got := eval(t, src)
