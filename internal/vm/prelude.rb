@@ -1267,53 +1267,9 @@ module Singleton
   end
 end
 
-# Find supports top-down traversal of a set of file paths (require "find"),
-# written from scratch to match MRI's lib/find.rb behavior. Find.find walks each
-# given path breadth-first-by-directory, yielding every file and directory it
-# reaches; Find.prune (called inside the block) skips into the current directory.
-module Find
-  VERSION = "0.2.0"
-
-  # find yields the name of every path given, then recursively the entries of any
-  # directory among them, depth-first with sorted children (matching MRI's order).
-  # With no block it returns an Enumerator. Missing top-level paths raise
-  # Errno::ENOENT; per-entry errors are swallowed when ignore_error is true.
-  def find(*paths, ignore_error: true) # :yield: path
-    return enum_for(__method__, *paths, ignore_error: ignore_error) unless block_given?
-
-    paths.collect! { |d| raise Errno::ENOENT, d unless File.exist?(d); d.dup }.each do |path|
-      ps = [path]
-      while (file = ps.shift)
-        catch(:prune) do
-          yield file.dup
-          # A directory's children are pushed in reverse-sorted order so that
-          # shifting from the front visits them in ascending order, depth-first.
-          if File.directory?(file)
-            children =
-              begin
-                Dir.children(file)
-              rescue SystemCallError
-                raise unless ignore_error
-                next
-              end
-            children.sort!
-            children.reverse_each { |f| ps.unshift(File.join(file, f)) }
-          end
-        end
-      end
-    end
-    nil
-  end
-
-  # prune skips the current file or directory, restarting the traversal loop with
-  # the next entry; for a directory it is not descended into. Only meaningful
-  # inside the block passed to Find.find.
-  def prune
-    throw :prune
-  end
-
-  module_function :find, :prune
-end
+# Find (require "find") — top-down traversal of a set of file paths — is provided
+# natively (internal/vm/find.go), backed by github.com/go-ruby-find/find. The
+# module is installed on the first `require "find"`, mirroring MRI's lib/find.rb.
 
 # ERB is a pure-Go embedded-Ruby template engine (require "erb"), matching MRI
 # 4.0.5's observable behavior. A template mixes literal text with three tag kinds —

@@ -44,6 +44,8 @@ github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111 h1:pxsFN2ESy
 github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111/go.mod h1:Et3sL9ojvqpOBFth/n1pryhkJzr9DvYYQ23g3rUJ0N4=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529 h1:md/l6ifEY6S0Iy1nBk5hVt5BhnWJRqhB08gVEsVvS28=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529/go.mod h1:HEJVI7jQ/BnjiSiu2Wj934QboEAgdv47RNOqvZb+nRw=
+github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272 h1:tHmlER04rO8LxFWbDiKqcFDzB4WFzBio/c6kgeOdpGo=
+github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272/go.mod h1:wpq0ciEFn8zUc1vfuHRjF2U8mH0krhJCRHHr+JOGaEY=
 github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c h1:dJBMxMFxBLrk4LoWL23tOl5M8P0CA8Gb7r/mvsaPk6A=
 github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c/go.mod h1:1tuz12SHPOcnFSfdPYRFwVvRhMT4Xn4M4jfPFgM7pLA=
 github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49 h1:v2Cy3bZTTi+u9XKBRP8FmYHwsWwZ+t8hlh3s4i1gGfQ=

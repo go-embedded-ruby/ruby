@@ -19,6 +19,7 @@ require (
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
 	github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
+	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b
