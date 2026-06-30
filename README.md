@@ -35,8 +35,9 @@ applied across the stdlib. The benefit cuts both ways: rbgo still ships as a
 **single CGO=0 static binary**, and every extracted piece is independently
 reusable, tested and 6-arch by any Go program — no interpreter required.
 
-The `go.mod` currently **binds 40 of these satellites** as native modules —
-each its own org, **non-empty, CI-green, 100% coverage, 6-arch**:
+The `go-ruby-*` family is **66 standalone pure-Go libraries** — each its own org,
+**non-empty, CI-green, 100% coverage, 6-arch**. The `go.mod` currently **binds 40
+of them** as native modules:
 
 | Library | Role | Org · landing |
 | --- | --- | --- |
