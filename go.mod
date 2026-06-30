@@ -37,6 +37,7 @@ require (
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
+	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
 	github.com/go-ruby-strscan/strscan v0.0.0-20260630060240-10bd95a9c4a4
@@ -52,6 +53,7 @@ require (
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
 	github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c // indirect
+	github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect

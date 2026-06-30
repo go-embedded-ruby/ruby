@@ -80,6 +80,8 @@ github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b h1:hWNW3Z8g7Hw
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b/go.mod h1:UQGki9qXLiqaEOm4ih1CGznGNPUDcNGCsLVJ/y6G1G8=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386 h1:mt488Km0GMk/yjJtKUY4jo+fNz1xqHe0uLbEwPJa4To=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386/go.mod h1:UpBHz/Hf4Q8h14UpfJ5Cpp+OxVEqqNuICXGnUjg2dKc=
+github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0 h1:NDJ7mJ3uMoysAoBRMJJNr0RRbqLfzp+8flALEeOuahI=
+github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0/go.mod h1:xjx6gnzA3xXHkJrJFQDp1pW559J3kJR2e6GPctYg4K4=
 github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12 h1:c051SI5P7BVVbysSroIJIZWwvXo9dZhWZlx9ef62xVI=
 github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12/go.mod h1:F/P0PXeE5ybEPeWYfb1JAKWny1Li3dnlm6YxG2/vffE=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z9b99kWJht8AgtlIbdiq7Y02j6eddxW+rr4MJpCS6kw=
@@ -98,6 +100,8 @@ github.com/go-ruby-zlib/zlib v0.0.0-20260630052127-b4ac0c1ab281 h1:zOn3ro0WBggDR
 github.com/go-ruby-zlib/zlib v0.0.0-20260630052127-b4ac0c1ab281/go.mod h1:abizNd4NW4jTmJYNmfSIuLz0J3l7MAImkcZKlslLNRM=
 github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c h1:iA1vHw+pR44TUtDlviXz3P8pAExO1nSm39PMZ7MsuYU=
 github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c/go.mod h1:/nL/YHcchLkENbcFEEqAcfESIiwCM9/1H67LsSnd7EI=
+github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea h1:qVh9jV1QriPPfKtAb8au5pmVxKDk5Vl4nQUi/issQM0=
+github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea/go.mod h1:q2/BdGuWJ9RahGzN+s+KtyacBAZFX15Nq0IikPFwKw0=
 github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=
 github.com/go-task/slim-sprig/v3 v3.0.0/go.mod h1:W848ghGpv3Qj3dhTPRyJypKRiqCdHZiAzKg9hl15HA8=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
@@ -108,6 +112,8 @@ github.com/onsi/ginkgo/v2 v2.31.0 h1:GtuJos5DFUV9EerYJo8RhYxosYNGvOdDE5haKq6Grfs
 github.com/onsi/ginkgo/v2 v2.31.0/go.mod h1:+aXOY+vzZ5mu2iI2HpTZUPmM//oQfsNFX6gU9kNcA44=
 github.com/onsi/gomega v1.42.0 h1:CJby8u36xb7v34W78F8WKvqTQP7PCMIPB78IVDB73l4=
 github.com/onsi/gomega v1.42.0/go.mod h1:M/Uqpu/8qTjtzCLUA2zJHX9Iilrau25x1PdoSRbWh5A=
+github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc h1:9lRDQMhESg+zvGYmW5DyG0UqvY96Bu5QYsTLvCHdrgo=
+github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc/go.mod h1:bciPuU6GHm1iF1pBvUfxfsH0Wmnc2VbpgvbI9ZWuIRs=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
 golang.org/x/crypto v0.53.0 h1:QZ4Muo8THX6CizN2vPPd5fBGHyogrdK9fG4wLPFUsto=
