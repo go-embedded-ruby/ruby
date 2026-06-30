@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"errors"
 	"math"
 	"math/big"
 	"strings"
@@ -185,13 +186,17 @@ func raiseMatrixErr(err error) {
 	if err == nil {
 		return
 	}
-	switch err {
-	case libmatrix.ErrDimensionMismatch:
+	switch {
+	case errors.Is(err, libmatrix.ErrDimensionMismatch):
 		raise("ExceptionForMatrix::ErrDimensionMismatch", "%s", err.Error())
-	case libmatrix.ErrNotRegular:
+	case errors.Is(err, libmatrix.ErrNotRegular):
 		raise("ExceptionForMatrix::ErrNotRegular", "%s", err.Error())
-	case libmatrix.ErrOperationNotDefined:
+	case errors.Is(err, libmatrix.ErrOperationNotDefined):
 		raise("ExceptionForMatrix::ErrOperationNotDefined", "%s", err.Error())
+	case errors.Is(err, libmatrix.ErrArgument):
+		// MRI raises a plain ArgumentError (e.g. Vector#cross_product on a
+		// non-3-D vector); the library carries MRI's verbatim message.
+		raise("ArgumentError", "%s", err.Error())
 	}
 	raise("RuntimeError", "%s", err.Error())
 }

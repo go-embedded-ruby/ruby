@@ -52,6 +52,11 @@ func TestIPAddr(t *testing.T) {
 		// new_ntoh / ntop from packed network bytes.
 		{`puts IPAddr.new_ntoh([1,2,3,4].pack("C*")).to_s`, "1.2.3.4\n"},
 		{`puts IPAddr.ntop([1,2,3,4].pack("C*"))`, "1.2.3.4\n"},
+		// ntop honours MRI's encoding precedence: a non-BINARY (UTF-8) String
+		// raises InvalidAddressError before any length check, while a BINARY
+		// string of the wrong length raises AddressFamilyError.
+		{`begin; IPAddr.ntop("xy"); rescue => e; puts e.class; end`, "IPAddr::InvalidAddressError\n"},
+		{`begin; IPAddr.ntop("xy".b); rescue => e; puts e.class; end`, "IPAddr::AddressFamilyError\n"},
 
 		// to_i (the big.Int-backed unbounded conversion, IPv4 + IPv6).
 		{`puts IPAddr.new("10.0.0.1").to_i`, "167772161\n"},
@@ -215,7 +220,7 @@ func TestIPAddrTypeErrors(t *testing.T) {
 		{`IPAddr.new("1.2.3.4").prefix = "x"`, "TypeError"},       // non-integer prefix
 		{`IPAddr.new_ntoh(42)`, "TypeError"},                      // packed bytes not a String
 		{`IPAddr.ntop(42)`, "TypeError"},                          // packed bytes not a String
-		{`IPAddr.ntop("xy")`, "AddressFamilyError"},               // bad packed length -> lib error (MRI raises InvalidAddressError here)
+		{`IPAddr.ntop("xy")`, "InvalidAddressError"},              // non-BINARY (UTF-8) String -> InvalidAddressError, like MRI
 		{`IPAddr.new("1.2.3.4").each`, "LocalJumpError"},          // each without a block
 	} {
 		if err := runErr(t, req+c.src); err == nil || !strings.Contains(err.Error(), c.want) {

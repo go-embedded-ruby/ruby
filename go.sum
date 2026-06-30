@@ -44,12 +44,16 @@ github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49 h1:v
 github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49/go.mod h1:nGvVSBSIsYrhM2qs4yQ2k8uDbXCFPWQXXqkowleHMDs=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260629152243-e2cfb3354534 h1:WEXSbIcLSaBAzATP5YjWYQ48mYM9MSJB+KWhqCcvKRs=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260629152243-e2cfb3354534/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
+github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b h1:1iw1eRBOG7D7jCC/P4hzWllM4IkYiR/jP9Bwuo3ds6c=
+github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
 github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06 h1:3m+pFs699msdrHRMXTtv5N2H/Qj2k8YSbndLlCyO8Ww=
 github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06/go.mod h1:nHXcH3zaGNmCslZStZVeylXkv1wLp+nzT6qNj+m+QXU=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f/go.mod h1:UpjSgWGcQSNt0ARWuHKwf0P55LkwZ65vuqoRPSKctZ8=
 github.com/go-ruby-matrix/matrix v0.0.0-20260629152812-557539bb95fc h1:dxnCLwF/UjnnjL8d4F07jNnYoj7jYxuTmGzRAlQ+6C4=
 github.com/go-ruby-matrix/matrix v0.0.0-20260629152812-557539bb95fc/go.mod h1:ZrmXlz95j9VE3j1bUeq8a5CTWAKoEiYrkh/ON9ns9iE=
+github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca h1:jerobsJZBFXJa/2ktK8DEDU/Yf5CmX12oRkrezKq/XQ=
+github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca/go.mod h1:ZrmXlz95j9VE3j1bUeq8a5CTWAKoEiYrkh/ON9ns9iE=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546/go.mod h1:BxhqkQFCqSMeYeWOHt7sdxTSkbaSJF19dWzspICZL1Q=
 github.com/go-ruby-parser/parser v0.0.0-20260626192347-1bbe8b4672d0 h1:Q3ryvK9hPcbvX6uBw4ZpTKFIDkaGBVEtjLtxXaruP6Y=
@@ -84,6 +88,8 @@ github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd h1:4HGjgCdTIuIEM
 github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd/go.mod h1:HtbQgnZpSTJBAhPg1jOKgHycZl3tXgf9ZdOu4dnHWjQ=
 github.com/go-ruby-zlib/zlib v0.0.0-20260629152229-34bd3efde796 h1:VIHyOh1zZtD6z6zQWi33Eat3b/JyEdezXELOx3Vqz/Q=
 github.com/go-ruby-zlib/zlib v0.0.0-20260629152229-34bd3efde796/go.mod h1:abizNd4NW4jTmJYNmfSIuLz0J3l7MAImkcZKlslLNRM=
+github.com/go-ruby-zlib/zlib v0.0.0-20260630052127-b4ac0c1ab281 h1:zOn3ro0WBggDR0xqvNSdOPxHEWzdR6iMy842CAyIL/g=
+github.com/go-ruby-zlib/zlib v0.0.0-20260630052127-b4ac0c1ab281/go.mod h1:abizNd4NW4jTmJYNmfSIuLz0J3l7MAImkcZKlslLNRM=
 github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=
 github.com/go-task/slim-sprig/v3 v3.0.0/go.mod h1:W848ghGpv3Qj3dhTPRyJypKRiqCdHZiAzKg9hl15HA8=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

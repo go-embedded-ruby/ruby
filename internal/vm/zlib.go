@@ -232,10 +232,9 @@ func (vm *VM) registerZlib() {
 	// #finish: flush and close the stream, returning any buffered bytes plus the
 	// trailing bytes — i.e. the rest of the stream.
 	deflate.define("finish", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		out, err := selfDeflater(self).Finish()
-		if err != nil {
-			raiseZlib(err)
-		}
+		// Deflater.Finish never errors (a 2nd #finish returns "", matching MRI's
+		// tolerance), so the result needs no error handling.
+		out, _ := selfDeflater(self).Finish()
 		return &object.String{B: append(takePending(self), out...)}
 	})
 	deflate.define("total_in", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {

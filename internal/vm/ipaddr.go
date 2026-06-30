@@ -217,8 +217,14 @@ func (vm *VM) registerIPAddr() {
 		return ipOK(libipaddr.NewNtoh(ipBytes(args[0])))
 	})
 	// IPAddr.ntop(packed) converts a packed address to its readable form.
+	// Honours MRI's encoding precedence (a non-BINARY String raises
+	// InvalidAddressError before any length check) via the String's encoding.
 	sm("ntop", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s, err := libipaddr.Ntop(ipBytes(args[0]))
+		str, ok := args[0].(*object.String)
+		if !ok {
+			raise("TypeError", "value must be a String of packed bytes")
+		}
+		s, err := libipaddr.NtopString(string(str.B), str.EncName())
 		raiseIPAddrErr(err)
 		return object.NewString(s)
 	})
