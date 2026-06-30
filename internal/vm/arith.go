@@ -219,6 +219,12 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isURI := a.(*URI); isURI {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// A Benchmark::Tms dispatches its memberwise/scalar + - * / as methods
+		// (defined in internal/vm/benchmark.go), so the library's Tms arithmetic
+		// runs rather than the numeric coercion path.
+		if _, isTms := a.(*Tms); isTms {
+			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
 		return binary(op, a, b)
 	}
 }

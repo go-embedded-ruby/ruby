@@ -859,89 +859,11 @@ class OpenStruct
   alias to_s inspect
 end
 
-# Benchmark (require "benchmark"): timing helpers. CPU user/system splits need OS
-# per-process accounting this runtime does not expose, so utime/stime are 0.0 and
-# real (wall-clock, from Time.now) carries the measurement — enough for the
-# common `realtime`/`measure`/`bm` reporting apps do.
-module Benchmark
-  CAPTION = "       user     system      total        real\n"
-  FORMAT = "%10.6f %10.6f %10.6f (%10.6f)\n"
-
-  # Tms holds one measurement. total is user+system; real is wall-clock seconds.
-  class Tms
-    attr_reader :utime, :stime, :cutime, :cstime, :real, :label
-
-    def initialize(utime = 0.0, stime = 0.0, cutime = 0.0, cstime = 0.0, real = 0.0, label = nil)
-      @utime = utime
-      @stime = stime
-      @cutime = cutime
-      @cstime = cstime
-      @real = real
-      @label = label
-    end
-
-    def total
-      @utime + @stime + @cutime + @cstime
-    end
-
-    def to_s
-      format(FORMAT, @utime, @stime, total, @real).chomp + (@label ? " #{@label}" : "") + "\n"
-    end
-
-    def format(fmt = nil, *args)
-      fmt ||= FORMAT
-      Kernel.format(fmt, *args)
-    end
-  end
-
-  # realtime returns the wall-clock seconds the block took.
-  def self.realtime
-    t0 = Time.now.to_f
-    yield
-    Time.now.to_f - t0
-  end
-
-  # measure times the block and returns a Tms (real time populated). The block is
-  # taken explicitly so callers (Report#report) can forward their own block.
-  def self.measure(label = nil, &blk)
-    t0 = Time.now.to_f
-    blk.call
-    real = Time.now.to_f - t0
-    Tms.new(0.0, 0.0, 0.0, 0.0, real, label)
-  end
-
-  # bm yields a report object; each report(label) { } prints a timed line and the
-  # collected Tms list is returned.
-  def self.bm(label_width = 0)
-    $stdout.print(CAPTION)
-    report = Report.new(label_width)
-    yield report
-    report.list
-  end
-  # bmbm runs the block twice (rehearsal then real); here it simply behaves like
-  # bm, which is sufficient for callers that only need the timings.
-  def self.bmbm(width = 0, &blk)
-    bm(width, &blk)
-  end
-
-  # Report collects bm's per-label measurements.
-  class Report
-    attr_reader :list
-
-    def initialize(label_width = 0)
-      @label_width = label_width
-      @list = []
-    end
-
-    def report(label = "", &blk)
-      t = Benchmark.measure(label, &blk)
-      padded = label.to_s.ljust(@label_width)
-      $stdout.print(padded + Kernel.format(Benchmark::FORMAT, t.utime, t.stime, t.total, t.real))
-      @list << t
-      t
-    end
-  end
-end
+# Benchmark (require "benchmark") is now a native module backed by
+# github.com/go-ruby-benchmark/benchmark (see internal/vm/benchmark.go): it owns
+# the Tms value, its arithmetic and %-extension formatting, and the bm/bmbm
+# report layout, with rbgo injecting the clock. It was previously implemented
+# here in pure Ruby.
 
 # Forwardable (require "forwardable"): adds def_delegator(s) to a class so it can
 # forward methods to one of its components (an ivar, a method, a constant). A
