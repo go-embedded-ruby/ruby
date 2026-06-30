@@ -24,6 +24,13 @@ func TestBase64(t *testing.T) {
 		{`p Base64.urlsafe_decode64("aGVsbG8=")`, "\"hello\"\n"},
 		// encode64 wraps at 60 columns; verify via a round-trip of a long input.
 		{`p Base64.decode64(Base64.encode64("a" * 50)) == "a" * 50`, "true\n"},
+		// Fidelity gaps the go-ruby-base64 dedup fixed vs the old inline shim:
+		// decode64 stops at a mid-stream "=" terminator (the "m" quad machine).
+		{`p Base64.decode64("aGVsbG8=world")`, "\"hello\"\n"},
+		// urlsafe_encode64 emits padding and the -_ alphabet (RFC 4648).
+		{`p Base64.urlsafe_encode64("\xfb\xff")`, "\"-_8=\"\n"},
+		// 60-column wrap of encode64 with a trailing newline.
+		{"p Base64.encode64(\"a\" * 50)", "\"YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh\\nYWFhYWE=\\n\"\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -32,7 +39,8 @@ func TestBase64(t *testing.T) {
 	}
 	for _, c := range []struct{ src, want string }{
 		{`Base64.encode64(123)`, "TypeError"},
-		{`Base64.strict_decode64("aGVsbG8")`, "ArgumentError"}, // strict: padding required
+		{`Base64.strict_decode64("aGVsbG8")`, "ArgumentError"},    // strict: padding required
+		{`Base64.strict_decode64("aGVs\nbG8=")`, "ArgumentError"}, // strict: embedded newline rejected
 		{`Base64.urlsafe_decode64("@@@@")`, "ArgumentError"},
 	} {
 		if err := runErr(t, `require "base64"; `+c.src); err == nil || !strings.Contains(err.Error(), c.want) {

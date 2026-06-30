@@ -10,6 +10,7 @@ require (
 	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
+	github.com/go-ruby-base64/base64 v0.0.0-20260630081041-5dec54f20f53
 	github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
@@ -50,6 +51,8 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
+	github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c // indirect
 	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
