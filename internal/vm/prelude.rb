@@ -782,8 +782,13 @@ end
 # is needed here.
 
 # OpenStruct (require "ostruct"): a data object whose attributes are defined on
-# assignment. Backed by a Hash; reads/writes go through method_missing, and
-# bracket access mirrors them.
+# assignment. The ordered Symbol=>value table and the DATA methods (to_h /
+# inspect / dig / delete_field / == / eql?) are backed by
+# github.com/go-ruby-ostruct/ostruct through the native __data_* class helpers
+# registered on this class (registerOstruct), matching MRI 4.0.5. This Ruby side
+# keeps @table as the source of truth and the dynamic accessor GLUE: reads/writes
+# go through method_missing (and respond_to_missing?), and bracket access mirrors
+# them.
 class OpenStruct
   def initialize(hash = nil)
     @table = {}
@@ -801,7 +806,7 @@ class OpenStruct
   end
 
   def to_h
-    @table.dup
+    OpenStruct.__data_to_h(@table)
   end
 
   def each_pair
@@ -812,6 +817,14 @@ class OpenStruct
 
   def members
     @table.keys
+  end
+
+  def dig(*names)
+    OpenStruct.__data_dig(@table, *names)
+  end
+
+  def delete_field(name)
+    OpenStruct.__data_delete_field(@table, name.to_sym)
   end
 
   def respond_to_missing?(name, include_private = false)
@@ -832,16 +845,16 @@ class OpenStruct
   end
 
   def ==(other)
-    other.is_a?(OpenStruct) && to_h == other.to_h
+    OpenStruct.__data_eq(@table, other.is_a?(OpenStruct) ? other.to_h : nil)
   end
+  alias eql? ==
 
   def respond_to?(name, include_private = false)
     respond_to_missing?(name, include_private) || super
   end
 
   def inspect
-    pairs = @table.map { |k, v| "#{k}=#{v.inspect}" }.join(", ")
-    pairs.empty? ? "#<OpenStruct>" : "#<OpenStruct #{pairs}>"
+    OpenStruct.__data_inspect(@table)
   end
   alias to_s inspect
 end
