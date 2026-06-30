@@ -13,6 +13,8 @@ func TestSecureRandom(t *testing.T) {
 		{`require "securerandom"; p SecureRandom.random_bytes(5).bytesize`, "5\n"},
 		// uuid v4 format.
 		{`require "securerandom"; p (SecureRandom.uuid =~ /\A\h{8}-\h{4}-4\h{3}-[89ab]\h{3}-\h{12}\z/) == 0`, "true\n"},
+		// uuid v7 format (version nibble 7, 10x variant) — added by the library.
+		{`require "securerandom"; p (SecureRandom.uuid_v7 =~ /\A\h{8}-\h{4}-7\h{3}-[89ab]\h{3}-\h{12}\z/) == 0`, "true\n"},
 		// alphanumeric.
 		{`require "securerandom"; p (SecureRandom.alphanumeric(12) =~ /\A[A-Za-z0-9]{12}\z/) == 0`, "true\n"},
 		// base64 / urlsafe_base64 (padless default; padded when a truthy 2nd arg is given).
