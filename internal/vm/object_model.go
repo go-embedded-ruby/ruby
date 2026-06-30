@@ -671,6 +671,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cFileStat
 	case *BigDecimal:
 		return vm.cBigDecimal
+	case *Tms:
+		return vm.cBenchmarkTms
+	case *benchReport:
+		return vm.cBenchmarkReport
+	case *benchJob:
+		return vm.cBenchmarkJob
 	case *Date:
 		// A DateTime is the same wrapper with the IsDateTime flag set; it reports the
 		// DateTime class (a subclass of Date), so it inherits Date's methods yet has

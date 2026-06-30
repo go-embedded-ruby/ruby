@@ -186,6 +186,9 @@ type VM struct {
 	cTime                                  *RClass
 	cFileStat                              *RClass
 	cBigDecimal                            *RClass
+	cBenchmarkTms                          *RClass // Benchmark::Tms (require "benchmark"), backed by go-ruby-benchmark
+	cBenchmarkReport                       *RClass // Benchmark::Report (require "benchmark")
+	cBenchmarkJob                          *RClass // Benchmark::Job (require "benchmark")
 	cDate                                  *RClass
 	cDateTime                              *RClass
 	cBag                                   *RClass
