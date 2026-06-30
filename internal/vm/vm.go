@@ -524,6 +524,7 @@ func New(out io.Writer) *VM {
 	vm.registerFileStat()   // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
 	vm.registerIPAddr()     // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
 	vm.registerPathname()   // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class
+	vm.registerOstruct()    // OpenStruct data ops (to_h/inspect/dig/delete_field/==), backed by go-ruby-ostruct; after the prelude so it reopens the prelude-defined class
 	vm.registerLogger()     // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
 	vm.registerPStore()     // PStore (require "pstore"), backed by go-ruby-pstore; after the prelude so PStore::Error < StandardError
 	vm.installHashKeyHook()
