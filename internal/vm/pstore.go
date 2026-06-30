@@ -7,7 +7,6 @@ package vm
 import (
 	"os"
 	"sync"
-	"syscall"
 
 	libpstore "github.com/go-ruby-pstore/pstore"
 
@@ -392,12 +391,13 @@ func (p *PStore) transaction(vm *VM, readOnly bool, blk *Proc) object.Value {
 	return object.NilV
 }
 
-// flockSyscall is syscall.Flock (overridable in tests so the lock-failure branch of
-// flockFile — which a valid fd never triggers in practice — is reachable).
-var flockSyscall = syscall.Flock
+// flockSyscall / the lock-mode constants (lockEx/lockSh/lockUn) are defined per
+// platform: a real advisory syscall.Flock on Unix, a no-op on Windows (which lacks
+// flock — PStore still works single-process there, and the lock is only advisory).
+// flockSyscall is a var so tests can force the lock-failure branch of flockFile.
 
 // flockFile opens the store file O_CREAT|O_RDWR and takes an advisory flock on it
-// (LOCK_SH for a read-only transaction, LOCK_EX otherwise), returning a closure
+// (lockSh for a read-only transaction, lockEx otherwise), returning a closure
 // that releases the lock and closes the fd. The Backend reads/writes the path
 // independently; the lock just serialises concurrent transactions, as MRI's does.
 func flockFile(path string, readOnly bool) (func(), error) {
@@ -405,16 +405,16 @@ func flockFile(path string, readOnly bool) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	how := syscall.LOCK_EX
+	how := lockEx
 	if readOnly {
-		how = syscall.LOCK_SH
+		how = lockSh
 	}
 	if err := flockSyscall(int(f.Fd()), how); err != nil {
 		f.Close()
 		return nil, err
 	}
 	return func() {
-		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		flockSyscall(int(f.Fd()), lockUn)
 		f.Close()
 	}, nil
 }
