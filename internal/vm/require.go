@@ -31,6 +31,7 @@ var providedFeatures = map[string]bool{
 	"tmpdir": true, "openssl": true, "timeout": true, "rbconfig": true,
 	"yaml": true, "fileutils": true, "getoptlong": true, "etc": true,
 	"concurrent": true, "syslog": true, "cgi": true, "monitor": true,
+	"observer": true,
 	"net/http": true, "net/https": true, "resolv": true, "singleton": true,
 	"optparse": true, "ripper": true, "erb": true, "find": true,
 	"tempfile": true, "open3": true,

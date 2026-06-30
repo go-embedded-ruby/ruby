@@ -24,6 +24,7 @@ require (
 	github.com/go-ruby-json/json v0.0.0-20260629113256-b42f13b6cb06
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
 	github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca
+	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-parser/parser v0.0.0-20260630055353-a831e712f1fd
 	github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b

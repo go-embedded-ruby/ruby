@@ -438,6 +438,7 @@ func (vm *VM) bootstrap() {
 	vm.registerMatrix()        // Matrix/Vector (require "matrix"), backed by go-ruby-matrix; needs StandardError (ExceptionForMatrix::Err*)
 	vm.registerShellwords()    // Shellwords (require "shellwords"), backed by go-ruby-shellwords; installs Shellwords + String/Array core extensions lazily on require
 	vm.registerMonitor()       // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
+	vm.registerObservable()    // Observable mixin (require "observer"), backed by go-ruby-observer; rbgo wires dispatch + respond_to?
 	vm.registerZlib()          // needs the exception hierarchy (Zlib::Error < StandardError)
 	vm.registerFiber()         // needs the exception hierarchy (FiberError < StandardError)
 	vm.registerThread()        // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
