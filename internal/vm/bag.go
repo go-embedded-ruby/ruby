@@ -107,9 +107,7 @@ func (b *Bag) seed(v object.Value) {
 			b.add(el)
 		}
 	case *Set:
-		for _, k := range e.order {
-			b.add(e.vals[k])
-		}
+		e.each(b.add)
 	case *Bag:
 		e.b.Each(func(item interface{}, count int) goresult.Interface {
 			for i := 0; i < count; i++ {
