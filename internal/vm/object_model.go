@@ -649,6 +649,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cGetoptLong
 	case *Set:
 		return vm.cSet
+	case *PStore:
+		return vm.cPStore
 	case *PrettyPrint:
 		return vm.cPrettyPrint
 	case *PrettyPrintGroup:
