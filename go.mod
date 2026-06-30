@@ -35,7 +35,7 @@ require (
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-set/set v0.0.0-20260629145249-d3b3639f5a12
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
-	github.com/go-ruby-strscan/strscan v0.0.0-20260629093055-7a707a207406
+	github.com/go-ruby-strscan/strscan v0.0.0-20260630060240-10bd95a9c4a4
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
