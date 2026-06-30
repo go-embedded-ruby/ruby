@@ -31,6 +31,28 @@ func TestBase64(t *testing.T) {
 		{`p Base64.urlsafe_encode64("\xfb\xff")`, "\"-_8=\"\n"},
 		// 60-column wrap of encode64 with a trailing newline.
 		{"p Base64.encode64(\"a\" * 50)", "\"YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh\\nYWFhYWE=\\n\"\n"},
+		// encode64 whose output is an EXACT multiple of 60 columns: MRI puts a '\n'
+		// only between lines plus one trailing '\n' — so a single full line ends with
+		// exactly one newline, two full lines with two (not an extra blank line).
+		{"p Base64.encode64(\"a\" * 45)", "\"YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh\\n\"\n"},
+		{"p Base64.encode64(\"a\" * 90)", "\"YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh\\nYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh\\n\"\n"},
+		// encode tails: a 2-byte (len%3==2) input pads with a single '='.
+		{`p Base64.strict_encode64("ab")`, "\"YWI=\"\n"},
+		{"p Base64.encode64(\"xy\")", "\"eHk=\\n\"\n"},
+		// Large inputs cross the SIMD threshold (strict_encode64 routes to go-simd);
+		// the round-trip stays bit-exact through encode64 (always scalar) too.
+		{`p Base64.strict_decode64(Base64.strict_encode64("M" * 3000)) == "M" * 3000`, "true\n"},
+		{`p Base64.decode64(Base64.encode64("Z" * 3000)) == "Z" * 3000`, "true\n"},
+		// urlsafe_decode64 accepts unpadded input (re-pads to a quad) and, like MRI's
+		// tr-based impl, also decodes the standard +/ alphabet.
+		{`p Base64.urlsafe_decode64("MDEyMzQ1Njc")`, "\"01234567\"\n"},
+		{`p Base64.urlsafe_decode64("++//").bytes`, "[251, 239, 255]\n"},
+		// urlsafe_decode64 translates the -_ alphabet to +/ before strict-decoding.
+		{`p Base64.urlsafe_decode64("-_8=").bytes`, "[251, 255]\n"},
+		// strict_decode64 of a "==" (two-pad) final quad -> a single byte.
+		{`p Base64.strict_decode64("YQ==")`, "\"a\"\n"},
+		// encode tail of a single byte pads with "==".
+		{`p Base64.strict_encode64("a")`, "\"YQ==\"\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -41,6 +63,11 @@ func TestBase64(t *testing.T) {
 		{`Base64.encode64(123)`, "TypeError"},
 		{`Base64.strict_decode64("aGVsbG8")`, "ArgumentError"},    // strict: padding required
 		{`Base64.strict_decode64("aGVs\nbG8=")`, "ArgumentError"}, // strict: embedded newline rejected
+		{`Base64.strict_decode64("ab===")`, "ArgumentError"},      // strict: >2 padding chars (non-quad length)
+		{`Base64.strict_decode64("a===")`, "ArgumentError"},       // strict: 3 padding chars in a quad
+		{`Base64.strict_decode64("abcde")`, "ArgumentError"},      // strict: length not a multiple of 4
+		{`Base64.strict_decode64("ab@=")`, "ArgumentError"},       // strict: stray byte in padded quad
+		{`Base64.strict_decode64("a@==")`, "ArgumentError"},       // strict: stray byte before "=="
 		{`Base64.urlsafe_decode64("@@@@")`, "ArgumentError"},
 	} {
 		if err := runErr(t, `require "base64"; `+c.src); err == nil || !strings.Contains(err.Error(), c.want) {
