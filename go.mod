@@ -36,14 +36,14 @@ require (
 	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d
 	github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
-	github.com/go-ruby-regexp/regexp v0.0.0-20260628133338-5a3a8b96feac
+	github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
-	github.com/go-ruby-strscan/strscan v0.0.0-20260630060240-10bd95a9c4a4
+	github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
