@@ -16,27 +16,30 @@ import (
 // and the interpreter-independent value model of github.com/go-ruby-json/json.
 // The parser and generator themselves live in that library (ported, byte-for-byte,
 // from rbgo's former internal/vm/json.go); rbgo only translates its values to and
-// from the library's `any` model around a single json.Parse / json.Generate /
-// json.PrettyGenerate call, so the MRI-compatible behaviour Puppet's multi_json
-// fallback relies on is preserved by construction. The library's typed errors are
-// re-raised as the matching Ruby exception via their RubyClass().
+// from the library in a single streaming pass: parsing drives a json.Builder
+// (objBuilder) that materialises the rbgo object graph directly — no intermediate
+// json.Value tree and no second conversion — and generation pushes the rbgo graph
+// straight into the library's json.Encoder via a json.Source (objSource). The
+// library's typed errors are re-raised as the matching Ruby exception via their
+// RubyClass().
 
-// jsonParse parses a JSON document into a Ruby value by calling json.Parse with
-// the given options and mapping the result back into the rbgo object graph. A
-// malformed document raises JSON::ParserError; exceeding the nesting limit
+// jsonParse parses a JSON document into a Ruby value by driving json.ParseInto
+// with an objBuilder, building the rbgo object graph in one pass. A malformed
+// document raises JSON::ParserError; exceeding the nesting limit
 // JSON::NestingError.
 func jsonParse(src string, opts ...json.Option) object.Value {
-	v, err := json.Parse(src, opts...)
-	if err != nil {
+	var b objBuilder
+	if err := json.ParseInto(src, &b, opts...); err != nil {
 		raiseJSONError(err)
 	}
-	return fromJSON(v)
+	return b.Result().(object.Value)
 }
 
-// jsonGenerate renders a Ruby value to a compact JSON document via json.Generate,
-// re-raising a non-finite-float / over-deep value as the matching Ruby exception.
+// jsonGenerate renders a Ruby value to a compact JSON document via
+// json.GenerateSource, re-raising a non-finite-float / over-deep value as the
+// matching Ruby exception.
 func jsonGenerate(v object.Value, opts ...json.Option) string {
-	out, err := json.Generate(toJSON(v), opts...)
+	out, err := json.GenerateSource(objSource{v}, opts...)
 	if err != nil {
 		raiseJSONError(err)
 	}
@@ -45,7 +48,7 @@ func jsonGenerate(v object.Value, opts ...json.Option) string {
 
 // jsonPrettyGenerate renders a Ruby value with MRI's JSON.pretty_generate layout.
 func jsonPrettyGenerate(v object.Value, opts ...json.Option) string {
-	out, err := json.PrettyGenerate(toJSON(v), opts...)
+	out, err := json.PrettyGenerateSource(objSource{v}, opts...)
 	if err != nil {
 		raiseJSONError(err)
 	}
@@ -61,48 +64,143 @@ func raiseJSONError(err error) {
 	raise(je.RubyClass(), "%s", je.Error())
 }
 
-// --- rbgo value -> library value (for Generate) ----------------------------
+// --- library parse events -> rbgo object graph (objBuilder) ----------------
 
-// toJSON maps a Ruby value to the go-ruby-json value model. The JSON value
-// shapes (nil / true / false / Integer / Bignum / Float / String / Symbol /
-// Array / ordered Hash) all translate; any other value maps to its Ruby to_s so
-// the library emits it as a JSON string, matching the former generator's
-// to_s-of-unknown fallback (e.g. a Range serialises as "1..2").
-func toJSON(v object.Value) json.Value {
-	switch n := v.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return json.Symbol(string(n))
-	case *object.Array:
-		out := make([]json.Value, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = toJSON(el)
+// objBuilder is the json.Builder that materialises rbgo values directly as the
+// parser reads them. It keeps an explicit stack of open Array/Hash containers and
+// attaches each emitted value to the innermost one (an array element, or the
+// value of the pending Hash key), so parsing builds the object graph in a single
+// allocation-light pass: arrays and hashes are pre-sized to their exact length,
+// small integers are interned (object.IntValue), and strings come straight from
+// the parser's zero-copy slices.
+type objBuilder struct {
+	stack []objFrame
+	root  object.Value
+}
+
+// objFrame is one open container on the builder stack: an *object.Array while an
+// array is open, or an *object.Hash plus its pending key while an object is open.
+type objFrame struct {
+	arr *object.Array
+	h   *object.Hash
+	key object.Value // pending Hash key set by Key, consumed by the next emit
+}
+
+// emit attaches v to the innermost open container, or records it as the parse
+// result at the top level.
+func (b *objBuilder) emit(v object.Value) {
+	if n := len(b.stack); n > 0 {
+		f := &b.stack[n-1]
+		if f.h != nil {
+			f.h.Set(f.key, v)
+			return
 		}
-		return out
-	case *object.Hash:
-		m := json.NewMap()
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m.Set(jsonKeyString(k), toJSON(val))
-		}
-		return m
+		f.arr.Elems = append(f.arr.Elems, v)
+		return
 	}
-	// Any other value (a Range, an RObject, …): its Ruby to_s, emitted as a JSON
-	// string. The former generator did the same via jsonStr(v.ToS()).
-	return v.ToS()
+	b.root = v
+}
+
+func (b *objBuilder) Null()           { b.emit(object.NilV) }
+func (b *objBuilder) Bool(x bool)     { b.emit(object.Bool(x)) }
+func (b *objBuilder) Int(n int64)     { b.emit(object.IntValue(n)) }
+func (b *objBuilder) Float(f float64) { b.emit(object.Float(f)) }
+func (b *objBuilder) Str(s string)    { b.emit(object.NewString(s)) }
+
+func (b *objBuilder) Big(n *big.Int) { b.emit(object.NormInt(n)) }
+
+func (b *objBuilder) BeginArray(n int) {
+	b.stack = append(b.stack, objFrame{arr: &object.Array{Elems: make([]object.Value, 0, n)}})
+}
+
+func (b *objBuilder) EndArray() {
+	f := b.stack[len(b.stack)-1]
+	b.stack = b.stack[:len(b.stack)-1]
+	b.emit(f.arr)
+}
+
+func (b *objBuilder) BeginObject(n int) {
+	b.stack = append(b.stack, objFrame{h: object.NewHashCap(n)})
+}
+
+func (b *objBuilder) Key(s string, symbolize bool) {
+	f := &b.stack[len(b.stack)-1]
+	if symbolize {
+		f.key = object.Symbol(s)
+	} else {
+		f.key = object.NewString(s)
+	}
+}
+
+func (b *objBuilder) EndObject() {
+	f := b.stack[len(b.stack)-1]
+	b.stack = b.stack[:len(b.stack)-1]
+	b.emit(f.h)
+}
+
+// Result returns the top-level value (as json.Value, per the Builder interface);
+// jsonParse asserts it back to object.Value.
+func (b *objBuilder) Result() json.Value { return b.root }
+
+// --- rbgo object graph -> library generate events (objSource) --------------
+
+// objSource is the json.Source that streams a Ruby value into the library's
+// Encoder, walking the rbgo object graph once with no intermediate json value.
+// The JSON value shapes (nil / true / false / Integer / Bignum / Float / String /
+// Symbol / Array / ordered Hash) all map directly; any other value emits its Ruby
+// to_s as a JSON string, matching the former generator's to_s-of-unknown fallback
+// (e.g. a Range serialises as "1..2").
+type objSource struct{ v object.Value }
+
+// EmitTo pushes the wrapped value (and, recursively, its children) into e.
+func (s objSource) EmitTo(e *json.Encoder) error { return emitValue(e, s.v) }
+
+// emitValue renders one rbgo value through the encoder.
+func emitValue(e *json.Encoder, v object.Value) error {
+	switch n := v.(type) {
+	case nil, object.Nil:
+		e.Null()
+	case object.Bool:
+		e.Bool(bool(n))
+	case object.Integer:
+		e.Int(int64(n))
+	case *object.Bignum:
+		e.Big(n.I)
+	case object.Float:
+		return e.Float(float64(n))
+	case *object.String:
+		e.Str(n.Str())
+	case object.Symbol:
+		e.Str(string(n))
+	case *object.Array:
+		elems := n.Elems
+		return e.Array(len(elems), func() error {
+			for _, el := range elems {
+				e.Elem()
+				if err := emitValue(e, el); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	case *object.Hash:
+		keys := n.Keys
+		return e.Object(len(keys), func() error {
+			for _, k := range keys {
+				val, _ := n.Get(k)
+				e.Key(jsonKeyString(k))
+				if err := emitValue(e, val); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	default:
+		// Any other value (a Range, an RObject, …): its Ruby to_s, emitted as a JSON
+		// string. The former generator did the same via jsonStr(v.ToS()).
+		e.Str(v.ToS())
+	}
+	return nil
 }
 
 // jsonKeyString renders a Hash key as the string JSON requires: a String keeps
@@ -116,43 +214,4 @@ func jsonKeyString(k object.Value) string {
 		return string(key)
 	}
 	return k.ToS()
-}
-
-// --- library value -> rbgo value (for Parse) -------------------------------
-
-// fromJSON maps a value produced by json.Parse back into the rbgo object graph:
-// nil / bool / int64 / *big.Int / float64 / string / Symbol / []any / ordered
-// *Map cover every shape the parser yields.
-func fromJSON(v json.Value) object.Value {
-	switch n := v.(type) {
-	case nil:
-		return object.NilV
-	case bool:
-		return object.Bool(n)
-	case int64:
-		return object.Integer(n)
-	case *big.Int:
-		return object.NormInt(n)
-	case float64:
-		return object.Float(n)
-	case string:
-		return object.NewString(n)
-	case json.Symbol:
-		return object.Symbol(string(n))
-	case []json.Value:
-		arr := &object.Array{Elems: make([]object.Value, len(n))}
-		for i, el := range n {
-			arr.Elems[i] = fromJSON(el)
-		}
-		return arr
-	case *json.Map:
-		h := object.NewHash()
-		for _, p := range n.Pairs() {
-			h.Set(fromJSON(p.Key), fromJSON(p.Val))
-		}
-		return h
-	}
-	// The parser only produces the cases above; any other value maps to nil
-	// defensively.
-	return object.NilV
 }
