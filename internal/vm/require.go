@@ -51,6 +51,7 @@ var providedFeatures = map[string]bool{
 	"rspec": true, "rspec/expectations": true, "rspec/matchers": true,
 	"rubocop": true,
 	"grape": true,
+	"active_record": true, "activerecord": true,
 	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,
 	"rqrcode": true, "dotenv": true, "hcl2": true, "kramdown": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,

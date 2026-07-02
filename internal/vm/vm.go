@@ -162,6 +162,8 @@ type VM struct {
 	main   object.Value
 	consts map[string]object.Value // top-level constants (classes live here)
 
+	arAdapter *arSQLiteAdapter // the ActiveRecord::Base connection (require "active_record"), backed by go-ruby-sqlite3; nil until establish_connection
+
 	cBasicObject, cObject, cModule, cClass *RClass
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cComplex, cRational                    *RClass

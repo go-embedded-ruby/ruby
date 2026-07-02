@@ -743,6 +743,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Grape::Validations::ParamsScope::DSL"].(*RClass)
 	case *GrapeFormatter:
 		return vm.consts["Grape::Formatter"].(*RClass)
+	case *ActiveRecordModel:
+		return vm.consts["ActiveRecord::Model"].(*RClass)
+	case *ActiveRecordModelBuilder:
+		return vm.consts["ActiveRecord::Model::DSL"].(*RClass)
+	case *ActiveRecordRelation:
+		return vm.consts["ActiveRecord::Relation"].(*RClass)
+	case *ActiveRecordRecord:
+		return vm.consts["ActiveRecord::Record"].(*RClass)
+	case *ActiveRecordErrors:
+		return vm.consts["ActiveRecord::Errors"].(*RClass)
 	case *RSpecMatcher:
 		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
 	case *RSpecExpectation:
