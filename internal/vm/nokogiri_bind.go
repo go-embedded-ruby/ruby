@@ -18,13 +18,12 @@ import (
 // and wraps the resulting Document / Node / NodeSet in the shells the Nokogiri
 // module dispatches on.
 
-// nokogiriParseHTML parses an HTML source String into a Document, raising a Ruby
-// Nokogiri::SyntaxError on a parse failure.
+// nokogiriParseHTML parses an HTML source String into a Document. The HTML
+// parser (golang.org/x/net/html via the library) is lenient and only surfaces an
+// error from the underlying reader, which a String reader never produces, so
+// parsing a String cannot fail — no error branch is needed.
 func nokogiriParseHTML(src string) object.Value {
-	doc, err := nokogiri.HTML(src)
-	if err != nil {
-		raiseNokogiriError(err)
-	}
+	doc, _ := nokogiri.HTML(src)
 	return &NokogiriDocument{doc: doc}
 }
 

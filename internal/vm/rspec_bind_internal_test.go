@@ -163,3 +163,20 @@ func TestRSpecDisplayMethods(t *testing.T) {
 		t.Error("expectation display methods")
 	}
 }
+
+// TestRSpecBlockGoPanicPropagates covers rspecCallBlockCatching's re-raise of a
+// non-Ruby Go panic: a genuine Go panic inside the block (not a Ruby exception)
+// must propagate rather than be reported as a raised Ruby error.
+func TestRSpecBlockGoPanicPropagates(t *testing.T) {
+	vm := New(nil)
+	blk := &Proc{native: func(_ *VM, _ []object.Value) object.Value {
+		panic("go-level panic")
+	}}
+	defer func() {
+		r := recover()
+		if r != "go-level panic" {
+			t.Errorf("want the Go panic to propagate, got %v", r)
+		}
+	}()
+	vm.rspecCallBlockCatching(blk)
+}

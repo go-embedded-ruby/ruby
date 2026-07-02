@@ -316,11 +316,28 @@ begin; st.step; rescue SQLite3::Exception; p :st; end
 begin; st.columns; rescue SQLite3::Exception; p :co; end
 begin; st.next; rescue SQLite3::Exception; p :nx; end`,
 			":ex\n:st\n:co\n:nx\n"},
-		// A syntax error while results_as_hash is set raises through the hash path.
+		// A syntax error while results_as_hash is set raises through the hash-path
+		// Prepare error arm.
 		{`require "sqlite3"
 db = SQLite3::Database.new(":memory:")
 db.results_as_hash = true
 begin; db.execute("SELECT bogus !!"); rescue SQLite3::Exception; p :hasherr; end`, ":hasherr\n"},
+		// A constraint violation in results_as_hash mode raises through the hash
+		// path's Execute error arm (Prepare succeeds, execution fails).
+		{`require "sqlite3"
+db = SQLite3::Database.new(":memory:")
+db.results_as_hash = true
+db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+db.execute("INSERT INTO t VALUES (1)")
+begin; db.execute("INSERT INTO t VALUES (1)"); rescue SQLite3::ConstraintException; p :hashexec; end`, ":hashexec\n"},
+		// Opening a database at an unreachable path raises through the Open error
+		// arm (the connection Ping fails).
+		{`require "sqlite3"
+begin
+  SQLite3::Database.new("/nonexistent-dir-xyz-42/does/not/exist.db")
+rescue SQLite3::Exception
+  p :openfail
+end`, ":openfail\n"},
 		// bind_params accepts an explicit Array (the spread path).
 		{`require "sqlite3"
 db = SQLite3::Database.new(":memory:")

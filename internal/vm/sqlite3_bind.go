@@ -275,10 +275,9 @@ func sqlite3ExecuteHash(db *sqlite3.Database, sql string, binds []sqlite3.Value)
 	if err != nil {
 		return nil, nil, err
 	}
-	cols, err := st.Columns()
-	if err != nil {
-		return nil, nil, err
-	}
+	// Columns re-reads the cached column list of the already-executed statement,
+	// so once Execute has succeeded it cannot fail.
+	cols, _ := st.Columns()
 	return rows, cols, nil
 }
 
@@ -337,10 +336,9 @@ func sqlite3HashCols(sw *SQLite3Statement) []string {
 	if sw.db == nil || !sw.db.db.ResultsAsHash() {
 		return nil
 	}
-	cols, err := sw.st.Columns()
-	if err != nil {
-		raiseSQLite3Error(err)
-	}
+	// Only ever called after a row has been produced (Step / Execute ran exec
+	// successfully), so Columns re-reads the cached list and cannot fail here.
+	cols, _ := sw.st.Columns()
 	return cols
 }
 

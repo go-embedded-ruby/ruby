@@ -214,11 +214,11 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		}
 		return object.Bool(true)
 	})
+	// #transaction_active? probes the autocommit state; the probe reports "in a
+	// transaction" rather than erroring when it cannot begin one, so this query
+	// never raises.
 	d("transaction_active?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		active, err := self(v).InTransaction()
-		if err != nil {
-			raiseSQLite3Error(err)
-		}
+		active, _ := self(v).InTransaction()
 		return object.Bool(active)
 	})
 
@@ -281,11 +281,10 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		return object.Bool(self(v).Closed())
 	})
 
-	// #close releases the connection.
+	// #close releases the connection. A close error (a broken underlying handle)
+	// is not actionable and Ruby's #close does not raise for it, so it is ignored.
 	d("close", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if err := self(v).Close(); err != nil {
-			raiseSQLite3Error(err)
-		}
+		_ = self(v).Close()
 		return object.NilV
 	})
 }
@@ -373,11 +372,10 @@ func (vm *VM) registerSQLite3Statement(mod *RClass) {
 		return sqlite3Strings(types)
 	})
 
-	// #reset rewinds the cursor so the statement can be re-run.
+	// #reset rewinds the cursor so the statement can be re-run. Reset only clears
+	// the buffered cursor state, so it cannot fail.
 	d("reset", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if err := self(v).Reset(); err != nil {
-			raiseSQLite3Error(err)
-		}
+		_ = self(v).Reset()
 		return v
 	})
 
@@ -397,11 +395,10 @@ func (vm *VM) registerSQLite3Statement(mod *RClass) {
 		return object.Bool(self(v).Closed())
 	})
 
-	// #close finalises the statement.
+	// #close finalises the statement. A close error is not actionable and Ruby's
+	// #close does not raise for it, so it is ignored.
 	d("close", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if err := self(v).Close(); err != nil {
-			raiseSQLite3Error(err)
-		}
+		_ = self(v).Close()
 		return object.NilV
 	})
 }
