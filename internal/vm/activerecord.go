@@ -5,6 +5,8 @@
 package vm
 
 import (
+	"strings"
+
 	activerecord "github.com/go-ruby-activerecord/activerecord"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -103,7 +105,7 @@ func (vm *VM) registerActiveRecordErrors(mod *RClass) {
 	mod.consts["ActiveRecordError"] = base
 	vm.consts["ActiveRecord::ActiveRecordError"] = base
 
-	for _, name := range []string{"StatementInvalid", "RecordInvalid", "ConnectionNotEstablished"} {
+	for _, name := range []string{"StatementInvalid", "RecordInvalid", "ConnectionNotEstablished", "RecordNotFound"} {
 		c := newClass("ActiveRecord::"+name, base)
 		mod.consts[name] = c
 		vm.consts["ActiveRecord::"+name] = c
@@ -134,4 +136,129 @@ func (vm *VM) registerActiveRecordBase(mod *RClass) {
 		}
 		return &SQLite3Database{db: vm.arAdapter.db}
 	}}
+
+	vm.registerActiveRecordBaseModelMethods(base)
+}
+
+// registerActiveRecordBaseModelMethods installs the ORM class methods a
+// `class User < ActiveRecord::Base` subclass inherits: table_name / table_name=
+// and the query + persistence entry points (all / where / order / create /
+// create! / count / first / find). Each resolves the receiver class to a lazily
+// built model (its table inferred via activerecord.Tableize unless table_name=
+// set one) and reuses the same chainable Relation surface the factory models do.
+func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
+	sm := func(name string, fn NativeFn) {
+		base.smethods[name] = &Method{name: name, owner: base, native: fn}
+	}
+	rel := func(m *ActiveRecordModel, r *activerecord.Relation) object.Value {
+		return &ActiveRecordRelation{r: r, model: m}
+	}
+
+	sm("table_name", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(vm.arModelForClass(self.(*RClass)).m.TableName)
+	})
+	sm("table_name=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
+		vm.arSetTableName(self.(*RClass), arStr(args[0]))
+		return args[0]
+	})
+	sm("all", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		m := vm.arModelForClass(self.(*RClass))
+		return rel(m, m.m.All())
+	})
+	sm("where", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := vm.arModelForClass(self.(*RClass))
+		return rel(m, m.m.Where(arCondArgs(args)...))
+	})
+	sm("order", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := vm.arModelForClass(self.(*RClass))
+		return rel(m, m.m.Order(arAnyArgs(args)...))
+	})
+	sm("count", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		m := vm.arModelForClass(self.(*RClass))
+		n, err := activerecord.Count(vm.arRequireAdapter(), m.m.All())
+		if err != nil {
+			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
+		}
+		return object.Integer(n)
+	})
+	sm("first", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		m := vm.arModelForClass(self.(*RClass))
+		recs, err := activerecord.LoadAll(vm.arRequireAdapter(), m.m.All().Limit(1))
+		if err != nil {
+			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
+		}
+		if len(recs) == 0 {
+			return object.NilV
+		}
+		return &ActiveRecordRecord{rec: recs[0], model: m}
+	})
+	sm("find", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
+		m := vm.arModelForClass(self.(*RClass))
+		recs, err := activerecord.LoadAll(vm.arRequireAdapter(), m.m.Where(map[string]any{m.m.PrimaryKey: arToGo(args[0])}).Limit(1))
+		if err != nil {
+			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
+		}
+		if len(recs) == 0 {
+			raise("ActiveRecord::RecordNotFound", "Couldn't find %s with '%s'=%s", m.m.Name, m.m.PrimaryKey, args[0].Inspect())
+		}
+		return &ActiveRecordRecord{rec: recs[0], model: m}
+	})
+	sm("create", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.arCreateRecord(vm.arModelForClass(self.(*RClass)), args, false)
+	})
+	sm("create!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.arCreateRecord(vm.arModelForClass(self.(*RClass)), args, true)
+	})
+}
+
+// arModelForClass returns the cached model for an ActiveRecord::Base subclass,
+// building it on first use. The table name is an explicit table_name= override
+// or, absent one, inferred from the class name (activerecord.Tableize).
+func (vm *VM) arModelForClass(c *RClass) *ActiveRecordModel {
+	if vm.arModels == nil {
+		vm.arModels = map[*RClass]*ActiveRecordModel{}
+	}
+	if m, ok := vm.arModels[c]; ok {
+		return m
+	}
+	table := vm.arTableNames[c]
+	if table == "" {
+		table = activerecord.Tableize(c.name)
+	}
+	m := &ActiveRecordModel{m: activerecord.NewModel(c.name, table), cls: c}
+	vm.arModels[c] = m
+	return m
+}
+
+// arSetTableName records an explicit table_name override for a class and drops
+// any cached model so the next access rebuilds against the new table.
+func (vm *VM) arSetTableName(c *RClass, name string) {
+	if vm.arTableNames == nil {
+		vm.arTableNames = map[*RClass]string{}
+	}
+	vm.arTableNames[c] = name
+	delete(vm.arModels, c)
+}
+
+// arCreateRecord builds a record from an attributes Hash, validates it, and
+// (when valid) runs the INSERT through the adapter. On an invalid record create!
+// raises ActiveRecord::RecordInvalid while create returns the unsaved record.
+func (vm *VM) arCreateRecord(m *ActiveRecordModel, args []object.Value, bang bool) object.Value {
+	rec := m.m.Build(arAttrs(args))
+	if errs := m.m.Validate(rec); !errs.Empty() {
+		if bang {
+			raise("ActiveRecord::RecordInvalid", "Validation failed: %s", strings.Join(errs.FullMessages(), ", "))
+		}
+		return &ActiveRecordRecord{rec: rec, model: m}
+	}
+	if _, _, err := vm.arRequireAdapter().ExecuteDML(m.m.InsertSQL(rec.Attributes())); err != nil {
+		raise("ActiveRecord::StatementInvalid", "%s", err.Error())
+	}
+	return &ActiveRecordRecord{rec: rec, model: m}
 }

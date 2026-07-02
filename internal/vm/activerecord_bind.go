@@ -5,6 +5,8 @@
 package vm
 
 import (
+	"strings"
+
 	activerecord "github.com/go-ruby-activerecord/activerecord"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -84,18 +86,13 @@ func (vm *VM) registerActiveRecordModel(mod *RClass) {
 		return object.NewString(self(v).m.InsertSQL(arAttrs(args)))
 	})
 	// #create(attrs) builds, validates, and (if valid) inserts a Record, running
-	// the INSERT through the adapter.
+	// the INSERT through the adapter. #create! raises RecordInvalid instead of
+	// returning an unsaved invalid record.
 	cls.define("create", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		m := self(v)
-		rec := m.m.Build(arAttrs(args))
-		if errs := m.m.Validate(rec); !errs.Empty() {
-			return &ActiveRecordRecord{rec: rec, model: m}
-		}
-		a := vm.arRequireAdapter()
-		if _, _, err := a.ExecuteDML(m.m.InsertSQL(rec.Attributes())); err != nil {
-			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
-		}
-		return &ActiveRecordRecord{rec: rec, model: m}
+		return vm.arCreateRecord(self(v), args, false)
+	})
+	cls.define("create!", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.arCreateRecord(self(v), args, true)
 	})
 }
 
@@ -296,6 +293,37 @@ func (vm *VM) registerActiveRecordRecord(mod *RClass) {
 	cls.define("changed?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).rec.Changed())
 	})
+	// Dynamic attribute accessors (u.name / u.name = x): a record answers each of
+	// its attributes as a reader (and its "name=" as a writer), so an AR-loaded
+	// row renders through the same u.name calls a Rails view uses.
+	cls.define("method_missing", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		r := self(v)
+		name := arStr(args[0])
+		if strings.HasSuffix(name, "=") {
+			attr := name[:len(name)-1]
+			if len(args) < 2 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
+			}
+			r.rec.Set(attr, arToGo(args[1]))
+			return args[1]
+		}
+		if val, ok := r.rec.Get(name); ok {
+			return arValueToRuby(val)
+		}
+		raise("NoMethodError", "undefined method '%s' for %s", name, r.ToS())
+		return object.NilV
+	})
+	cls.define("respond_to_missing?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			return object.False
+		}
+		name := strings.TrimSuffix(arStr(args[0]), "=")
+		_, ok := self(v).rec.Get(name)
+		return object.Bool(ok)
+	})
 }
 
 // registerActiveRecordErrorsClass installs the ActiveModel::Errors-shaped value
@@ -351,4 +379,7 @@ func (vm *VM) registerActiveRecordSchema(mod *RClass) {
 		unique := len(args) > 2 && args[2].Truthy()
 		return object.NewString(activerecord.AddIndexSQL(activerecord.SQLite, arStr(args[0]), arStrList(args[1]), unique, ""))
 	}}
+
+	// Schema.define { create_table … } executes the DDL against the connection.
+	vm.registerActiveRecordSchemaDSL(cls)
 }
