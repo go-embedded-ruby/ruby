@@ -62,6 +62,8 @@ github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgi
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f/go.mod h1:UpjSgWGcQSNt0ARWuHKwf0P55LkwZ65vuqoRPSKctZ8=
 github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca h1:jerobsJZBFXJa/2ktK8DEDU/Yf5CmX12oRkrezKq/XQ=
 github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca/go.mod h1:ZrmXlz95j9VE3j1bUeq8a5CTWAKoEiYrkh/ON9ns9iE=
+github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90 h1:xjyxDgCSi3rUAlQlewmvY+XBqFXN1jLUFWaXNjAyL3I=
+github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90/go.mod h1:MkpM6qH0Zz8H6btdGOPBmnImw6BbpcMCvPHV9J2V2Rc=
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79 h1:xZIEcf1IAtrI81CRyflqoeqkbTz7CUd3aAicW9HDzfY=
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79/go.mod h1:QvbIKqCHbVYFCko+ZlLGzFh6h/K7pqSKGzADrzTUvls=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=
@@ -94,6 +96,8 @@ github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
 github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8 h1:WxInOHCeP0EDmZqorooXIYTcDgBNm+3rOnfjRcWHlN0=
 github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8/go.mod h1:WNa2NtlvT8gaOrAw6m3VCb+8WgBWdOLLEWbKiugZ2wY=
+github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785 h1:NHdF22sPi41R7BYg2SHtIllW5yybLu9WpqinCUSVaQA=
+github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785/go.mod h1:Pt2V2/VchBYXJPEDkPxo5DZxyQivrLmXmovgbyDvU+U=
 github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b h1:qTw5CoNYJccf05o0QlyoYwaOik4RIrUI76HAR7RGqRw=
 github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b/go.mod h1:QMZn01XgIYihSr1pAeqHtM5DNuf7q92rJzO1Uj1diwE=
 github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f h1:OKU5SsaiAFX7U1u+KlW7c54zNYMnW5sRWoj4nOhY7yU=

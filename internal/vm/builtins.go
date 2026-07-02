@@ -424,6 +424,8 @@ func (vm *VM) bootstrap() {
 	vm.registerDateErrors()    // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
 	vm.registerJSON()          // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
 	vm.registerYAML()          // YAML/Psych loadable shell; needs StandardError
+	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
+	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
 	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)
