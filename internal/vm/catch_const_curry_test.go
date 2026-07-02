@@ -33,11 +33,11 @@ func TestCatchConstCurry(t *testing.T) {
 	}
 
 	errs := []struct{ src, want string }{
-		{`throw :nope, 1`, "uncaught throw :nope"},                  // UncaughtThrowError
-		{`catch(:x)`, "no block given"},                            // catch needs a block
-		{`Object.const_get(:foo)`, "wrong constant name foo"},      // not uppercase
-		{`Object.const_get(123)`, "is not a symbol nor a string"},  // bad type
-		{`Object.const_get(:Nope)`, "uninitialized constant"}, // valid name, absent -> NameError
+		{`throw :nope, 1`, "uncaught throw :nope"},                // UncaughtThrowError
+		{`catch(:x)`, "no block given"},                           // catch needs a block
+		{`Object.const_get(:foo)`, "wrong constant name foo"},     // not uppercase
+		{`Object.const_get(123)`, "is not a symbol nor a string"}, // bad type
+		{`Object.const_get(:Nope)`, "uninitialized constant"},     // valid name, absent -> NameError
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {

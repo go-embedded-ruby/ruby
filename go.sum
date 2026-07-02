@@ -58,6 +58,12 @@ github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111 h1:pxsFN2ESy
 github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111/go.mod h1:Et3sL9ojvqpOBFth/n1pryhkJzr9DvYYQ23g3rUJ0N4=
 github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd h1:VGlMcPCsQBDYqFMRU49q0NcYSE/VuDBhKaDdVDjJP+Y=
 github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd/go.mod h1:L5FvtAnqC4wHelxeOEPnWLz/BHoXA/dPD3KuDpzpcr4=
+github.com/go-ruby-dry-struct/dry-struct v0.0.0-20260702152517-9e25a927a351 h1:skeNydYQixVppLZrnamDodG48L/BzwNhOmhXaFIbU+o=
+github.com/go-ruby-dry-struct/dry-struct v0.0.0-20260702152517-9e25a927a351/go.mod h1:RAfM4qWlBLvsddvGEf/AXvYReCwPZmxw1H6g+G0S3vA=
+github.com/go-ruby-dry-types/dry-types v0.0.0-20260702150052-94ab5100a720 h1:Lc4h8mp3qJ/grk1BNoQfXkpB5liQMT/PDWh+cLgW+dg=
+github.com/go-ruby-dry-types/dry-types v0.0.0-20260702150052-94ab5100a720/go.mod h1:S+2r7EA5zp4E8JyaJ88koD8gT7k/JD9i8NGj6V6jIRM=
+github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260702151810-a274955bddac h1:ry6nkQY0B7TQfJD34iTIEqVPgThNkcXFreD116X/o74=
+github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260702151810-a274955bddac/go.mod h1:LHalD7pLKBYjablQtp55tlPahU5LHCXf0v0mSzmS6zE=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529 h1:md/l6ifEY6S0Iy1nBk5hVt5BhnWJRqhB08gVEsVvS28=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529/go.mod h1:HEJVI7jQ/BnjiSiu2Wj934QboEAgdv47RNOqvZb+nRw=
 github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352 h1:cRiGBGZWF8Pc0KxTqNr2wy0Y6WWPzeq2GsUuTroXDfE=
@@ -102,6 +108,8 @@ github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a h1:mZr5L
 github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a/go.mod h1:Jk5CZ+5dR63295HwuIRn+MOz/RwGvZvy5UEJpoAiGkk=
 github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702151113-e53746446651 h1:5zEQVymgZTTJMmfAf66r8RtIyhjZhX/LEvISYfYLo0A=
 github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702151113-e53746446651/go.mod h1:WsLJ6/u8/nzHShZKChf20tHosn/nlVnOJiD/xEY6X8c=
+github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1 h1:iZFtIn5WHQRz/oa04qYAlLvTi0XDRP5dKPGpJTGRzKg=
+github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1/go.mod h1:/yz3iBLTlChPKMqrP0uA5tBpXKh4a8Rwd46SAv/lMiw=
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79 h1:xZIEcf1IAtrI81CRyflqoeqkbTz7CUd3aAicW9HDzfY=
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79/go.mod h1:QvbIKqCHbVYFCko+ZlLGzFh6h/K7pqSKGzADrzTUvls=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=

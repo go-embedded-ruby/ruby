@@ -11,6 +11,5 @@ import _ "embed"
 // only feeds the freeze generator and the drift test that keeps the two in sync.
 //
 //go:generate go run ../../cmd/freeze-prelude
-//
 //go:embed prelude.rb
 var preludeSource string

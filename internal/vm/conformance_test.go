@@ -70,8 +70,8 @@ func TestConformanceCluster2(t *testing.T) {
 		{`p [1, 2, 3, 4].combination(2).to_a`, "[[1, 2], [1, 3], [1, 4], [2, 3], [2, 4], [3, 4]]\n"},
 		{`p [1, 2, 3].combination(0).to_a`, "[[]]\n"},
 		{`p [1, 2, 3].combination(3).to_a`, "[[1, 2, 3]]\n"},
-		{`p [1, 2, 3].combination(5).to_a`, "[]\n"},      // k > length
-		{`p [1, 2, 3].combination(-1).to_a`, "[]\n"},     // negative
+		{`p [1, 2, 3].combination(5).to_a`, "[]\n"},  // k > length
+		{`p [1, 2, 3].combination(-1).to_a`, "[]\n"}, // negative
 		{`r = []; [1, 2, 3].combination(2) { |c| r << c.sum }; p r`, "[3, 4, 5]\n"},
 	}
 	for _, c := range cases {
@@ -107,11 +107,11 @@ func TestConformanceCluster3(t *testing.T) {
 		{`p ("a".."e").to_a`, `["a", "b", "c", "d", "e"]` + "\n"},
 		{`p ("a"..."d").to_a`, `["a", "b", "c"]` + "\n"},
 		{`p ("az".."bb").to_a`, `["az", "ba", "bb"]` + "\n"},
-		{`p ("aa".."b").to_a`, `["aa"]` + "\n"},     // post-succ length guard
-		{`p ("y".."aaa").to_a`, "[]\n"},             // begin already past end
-		{`p ("a".."A").to_a`, "[]\n"},               // reversed
-		{`p ("".."b").to_a`, `[""]` + "\n"},         // no-progress (empty succ)
-		{`p ("a".."zz").to_a.length`, "702\n"},      // 26 + 26*26
+		{`p ("aa".."b").to_a`, `["aa"]` + "\n"}, // post-succ length guard
+		{`p ("y".."aaa").to_a`, "[]\n"},         // begin already past end
+		{`p ("a".."A").to_a`, "[]\n"},           // reversed
+		{`p ("".."b").to_a`, `[""]` + "\n"},     // no-progress (empty succ)
+		{`p ("a".."zz").to_a.length`, "702\n"},  // 26 + 26*26
 		{`p ("a".."e").map { |c| c.upcase }`, `["A", "B", "C", "D", "E"]` + "\n"},
 		// Hash[...]: array-of-pairs, key/value list, hash copy, short pair.
 		{`p Hash[[[:a, 1], [:b, 2]]]`, "{a: 1, b: 2}\n"},

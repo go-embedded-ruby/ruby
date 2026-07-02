@@ -32,9 +32,9 @@ func TestRandom(t *testing.T) {
 		// bytes (length not a multiple of 4 exercises the tail).
 		{`p Random.new(99).bytes(4).bytes`, "[129, 114, 26, 172]\n"},
 		{`p Random.new(5).bytes(7).length`, "7\n"},
-		{`p Random.new(0).rand(100)`, "44\n"},     // zero seed (seedKey single zero word)
-		{`p Random.new(5).rand(1)`, "0\n"},        // rand(1) -> limit 0
-		{`p Random.new(1)`, "#<Random>\n"},        // Inspect (MRI shows an address; we don't)
+		{`p Random.new(0).rand(100)`, "44\n"}, // zero seed (seedKey single zero word)
+		{`p Random.new(5).rand(1)`, "0\n"},    // rand(1) -> limit 0
+		{`p Random.new(1)`, "#<Random>\n"},    // Inspect (MRI shows an address; we don't)
 		// seed accessor + determinism of Kernel#rand under srand.
 		{`p Random.new(42).seed`, "42\n"},
 		{`srand(123); p [rand(100), rand(100)]`, "[66, 92]\n"},

@@ -27,8 +27,8 @@ func TestStringIterationBatch(t *testing.T) {
 func TestStringIterationNoBlock(t *testing.T) {
 	// String iterators with no block return an Enumerator (MRI semantics).
 	cases := map[string]string{
-		`p "xy".each_char.to_a`: "[\"x\", \"y\"]\n",
-		`p "xy".each_byte.to_a`: "[120, 121]\n",
+		`p "xy".each_char.to_a`:   "[\"x\", \"y\"]\n",
+		`p "xy".each_byte.to_a`:   "[120, 121]\n",
 		`p "x\ny".each_line.to_a`: "[\"x\\n\", \"y\"]\n",
 	}
 	for src, want := range cases {

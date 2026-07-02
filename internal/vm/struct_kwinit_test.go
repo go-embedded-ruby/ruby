@@ -23,7 +23,7 @@ func TestStructKeywordInit(t *testing.T) {
 	}
 
 	errs := []struct{ src, want string }{
-		{`S = Struct.new(:a, keyword_init: true); S.new(a: 1, c: 3)`, "unknown keyword"}, // unknown member key
+		{`S = Struct.new(:a, keyword_init: true); S.new(a: 1, c: 3)`, "unknown keyword"},  // unknown member key
 		{`S = Struct.new(:a, keyword_init: true); S.new(5)`, "wrong number of arguments"}, // positional given to a kw struct
 		{`S = Struct.new(:a, :b); S.new(1, 2, 3)`, "struct size differs"},                 // too many positionals
 	}

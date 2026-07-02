@@ -13,8 +13,8 @@ func TestImage(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// Construction, dimensions, pixel access.
 		{`i = Image.new(4, 3); p [i.width, i.height]`, "[4, 3]\n"},
-		{`i = Image.new(2, 2); i.set(0, 0, 10, 20, 30); p i.get(0, 0)`, "[10, 20, 30, 255]\n"},          // default alpha
-		{`i = Image.new(2, 2); i.set(0, 0, 10, 20, 30, 128); p i.get(0, 0)`, "[10, 20, 30, 128]\n"},     // explicit alpha
+		{`i = Image.new(2, 2); i.set(0, 0, 10, 20, 30); p i.get(0, 0)`, "[10, 20, 30, 255]\n"},           // default alpha
+		{`i = Image.new(2, 2); i.set(0, 0, 10, 20, 30, 128); p i.get(0, 0)`, "[10, 20, 30, 128]\n"},      // explicit alpha
 		{`i = Image.new(2, 2); i.set(0, 0, 10, 20, 30); p i.invert.get(0, 0)`, "[245, 235, 225, 255]\n"}, // 255 - v
 		// Unary operations (no error) — share one closure; varied for confidence.
 		{`p Image.new(4, 4).grayscale.width`, "4\n"},

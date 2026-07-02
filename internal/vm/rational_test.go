@@ -53,7 +53,7 @@ func TestRational(t *testing.T) {
 		// Exponentiation: integer exponent exact, negative inverts, fractional → Float.
 		{`p Rational(2, 3) ** 2`, "(4/9)\n"},
 		{`p Rational(2, 3) ** -1`, "(3/2)\n"},
-		{`p Rational(1, 4) ** 0.5`, "0.5\n"},                      // Float exponent → Float
+		{`p Rational(1, 4) ** 0.5`, "0.5\n"},                           // Float exponent → Float
 		{`p Rational(4, 9) ** Rational(1, 2)`, "0.6666666666666666\n"}, // fractional Rational exponent → Float
 		{`p Rational(1, 2).class`, "Rational\n"},
 	}
