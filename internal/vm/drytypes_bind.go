@@ -6,10 +6,12 @@ package vm
 
 import (
 	"math/big"
+	"sort"
 	"strings"
 	stdtime "time"
 
 	gotime "github.com/go-composites/time/src"
+	drystruct "github.com/go-ruby-dry-struct/dry-struct"
 	drytypes "github.com/go-ruby-dry-types/dry-types"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -148,6 +150,22 @@ func drySchema(h *object.Hash) *drytypes.HashSchema {
 	return drytypes.NewSchema(keys...)
 }
 
+// dryMetaToHash maps a type's metadata (map[string]any) to a Ruby Hash with
+// Symbol keys (the gem stores meta under Symbol keys), sorted for a deterministic
+// order and with values mapped back through dryFromGo.
+func dryMetaToHash(vm *VM, m map[string]any) object.Value {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := object.NewHash()
+	for _, k := range keys {
+		h.Set(object.Symbol(k), dryFromGo(vm, m[k]))
+	}
+	return h
+}
+
 // dryTypeName renders the Dry::Types[...] lookup argument as its bare name (a
 // Symbol or String); any other value falls back to its to_s.
 func dryTypeName(v object.Value) string {
@@ -251,6 +269,11 @@ func dryFromGo(vm *VM, v any) object.Value {
 		return object.NewString(n.String())
 	case stdtime.Time:
 		return &Time{t: gotime.FromUnix(n.Unix())}
+	case *drystruct.Struct:
+		// A nested struct value: wrap it as a DryStruct reporting the Ruby subclass
+		// named by its StructType (registered when the subclass was defined).
+		cls, _ := vm.consts[n.Type().Name].(*RClass)
+		return &DryStruct{s: n, cls: cls}
 	}
 	if v == drytypes.Undefined {
 		return object.NilV

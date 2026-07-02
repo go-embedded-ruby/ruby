@@ -85,7 +85,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 	})
 	d("meta", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
-			return anyMapToHash(self.(*DryType).t.GetMeta())
+			return dryMetaToHash(vm, self.(*DryType).t.GetMeta())
 		}
 		h, ok := args[0].(*object.Hash)
 		if !ok {
