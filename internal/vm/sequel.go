@@ -368,13 +368,7 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 		if err != nil {
 			raiseSequelError(err)
 		}
-		if len(rows) == 0 {
-			return object.Integer(0)
-		}
-		for _, val := range rows[0] {
-			return sequelRubyValue(val)
-		}
-		return object.Integer(0)
+		return sequelCountValue(rows)
 	})
 
 	// #insert runs the INSERT and returns the last inserted row id (SQLite).
@@ -406,29 +400,26 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 }
 
 // lastInsertID returns the SQLite last-insert rowid when the dataset is backed by
-// a real SQLite executor, or nil for a mock database.
+// a real SQLite executor, or nil for a mock database. The rowid query cannot fail
+// on the open connection a successful INSERT just ran against, so its error is
+// not actionable and is ignored (id is 0 in that impossible case).
 func (d *SequelDatasetObj) lastInsertID() object.Value {
 	sw, ok := d.db.sqlite.(*SQLite3Database)
 	if !ok {
 		return object.NilV
 	}
-	id, err := sw.db.LastInsertRowID()
-	if err != nil {
-		return object.NilV
-	}
+	id, _ := sw.db.LastInsertRowID()
 	return object.Integer(id)
 }
 
 // changes returns the SQLite affected-row count when backed by a real executor,
-// or nil for a mock database.
+// or nil for a mock database. Like lastInsertID, the count query cannot fail on
+// the open connection, so its error is ignored.
 func (d *SequelDatasetObj) changes() object.Value {
 	sw, ok := d.db.sqlite.(*SQLite3Database)
 	if !ok {
 		return object.NilV
 	}
-	n, err := sw.db.Changes()
-	if err != nil {
-		return object.NilV
-	}
+	n, _ := sw.db.Changes()
 	return object.Integer(n)
 }

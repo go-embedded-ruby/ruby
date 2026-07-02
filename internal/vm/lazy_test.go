@@ -21,8 +21,8 @@ func TestLazy(t *testing.T) {
 		// Finite sources.
 		{`p [1, 2, 3, 4].lazy.map { |x| x * 10 }.to_a`, "[10, 20, 30, 40]\n"},
 		{`p [1, 2, 3].lazy.collect { |x| x + 1 }.to_a`, "[2, 3, 4]\n"},
-		{`p (1...5).lazy.to_a`, "[1, 2, 3, 4]\n"},      // exclusive bounded range
-		{`p (1..5.0).lazy.to_a`, "[1, 2, 3, 4, 5]\n"}, // float (non-infinite) range end
+		{`p (1...5).lazy.to_a`, "[1, 2, 3, 4]\n"},                                  // exclusive bounded range
+		{`p (1..5.0).lazy.to_a`, "[1, 2, 3, 4, 5]\n"},                              // float (non-infinite) range end
 		{`p [1, 2, 3].lazy.map { |x| x }`, "#<Enumerator::Lazy: [1, 2, 3]:map>\n"}, // inspect with ops
 		{`p (1..20).lazy.reject { |x| x.even? }.take(3).to_a`, "[1, 3, 5]\n"},
 		{`p (1..10).lazy.drop(3).first(2)`, "[4, 5]\n"},

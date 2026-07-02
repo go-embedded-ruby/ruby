@@ -39,7 +39,7 @@ func TestNumericExtras(t *testing.T) {
 // modulus or non-integer modulus for pow, and an exclusive clamp range.
 func TestNumericExtraErrors(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
-		{`2.pow(-1, 5)`, "RangeError"},      // no modular inverse, like MRI
+		{`2.pow(-1, 5)`, "RangeError"},       // no modular inverse, like MRI
 		{`3.pow(4, 0)`, "ZeroDivisionError"}, // zero modulus
 		{`3.pow(4, 1.5)`, "TypeError"},       // non-integer modulus
 		{`5.clamp(1...10)`, "ArgumentError"}, // exclusive range

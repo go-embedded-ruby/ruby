@@ -227,7 +227,9 @@ func (vm *VM) e2eFib_l1(self object.Value, args []object.Value, block *Proc) obj
 	s0 = l0
 	s1 = object.Integer(2)
 	s0 = vm.binaryOp(bytecode.OpLt, s0, s1)
-	if !s0.Truthy() { goto L6 }
+	if !s0.Truthy() {
+		goto L6
+	}
 	s0 = l0
 	goto L17
 L6:
@@ -251,7 +253,9 @@ func (vm *VM) e2eFib_k(l0 int64) int64 {
 	var k0, k1, k2, k3 int64
 	k0 = l0
 	k1 = 2
-	if !(k0 < k1) { goto L6 }
+	if !(k0 < k1) {
+		goto L6
+	}
 	k0 = l0
 	goto L17
 L6:
@@ -446,7 +450,9 @@ L3:
 	s0 = l0
 	s1 = object.Integer(1)
 	s0 = vm.binaryOp(bytecode.OpGt, s0, s1)
-	if !s0.Truthy() { goto L18 }
+	if !s0.Truthy() {
+		goto L18
+	}
 	s0 = l1
 	s1 = l0
 	s0 = vm.binaryOp(bytecode.OpMul, s0, s1)
@@ -472,7 +478,9 @@ func (vm *VM) e2eFact_k(l0 int64) int64 {
 L3:
 	k0 = l0
 	k1 = 1
-	if !(k0 > k1) { goto L18 }
+	if !(k0 > k1) {
+		goto L18
+	}
 	k0 = l1
 	k1 = l0
 	k0 = aotMul(k0, k1)
@@ -523,7 +531,9 @@ L3:
 	s0 = l0
 	s1 = object.Integer(1)
 	s0 = vm.binaryOp(bytecode.OpGt, s0, s1)
-	if !s0.Truthy() { goto L18 }
+	if !s0.Truthy() {
+		goto L18
+	}
 	s0 = l1
 	s1 = l0
 	s0 = vm.binaryOp(bytecode.OpMul, s0, s1)
@@ -549,7 +559,9 @@ func (vm *VM) e2eFactBig_k(l0 int64) int64 {
 L3:
 	k0 = l0
 	k1 = 1
-	if !(k0 > k1) { goto L18 }
+	if !(k0 > k1) {
+		goto L18
+	}
 	k0 = l1
 	k1 = l0
 	k0 = aotMul(k0, k1)
@@ -593,18 +605,32 @@ var aotE2ECases = []struct {
 	ruby string // the program whose MRI output is `want`
 	want string // reference MRI stdout (trimmed)
 }{
-	{"e2eArith", func(vm *VM) object.Value { return vm.e2eArith(vm.main, []object.Value{object.Integer(20), object.Integer(6)}, nil) }, "def m(a, b) = a * b + a / b - a % b\np m(20, 6)\n", "121"},
-	{"e2eCmp", func(vm *VM) object.Value { return vm.e2eCmp(vm.main, []object.Value{object.Integer(3), object.Integer(5)}, nil) }, "def m(a, b) = a < b == (a >= b)\np m(3, 5)\n", "false"},
-	{"e2eArray", func(vm *VM) object.Value { return vm.e2eArray(vm.main, []object.Value{object.Integer(1), object.Integer(2), object.Integer(3)}, nil) }, "def m(a, b, c) = [a, b, c]\np m(1, 2, 3)\n", "[1, 2, 3]"},
+	{"e2eArith", func(vm *VM) object.Value {
+		return vm.e2eArith(vm.main, []object.Value{object.Integer(20), object.Integer(6)}, nil)
+	}, "def m(a, b) = a * b + a / b - a % b\np m(20, 6)\n", "121"},
+	{"e2eCmp", func(vm *VM) object.Value {
+		return vm.e2eCmp(vm.main, []object.Value{object.Integer(3), object.Integer(5)}, nil)
+	}, "def m(a, b) = a < b == (a >= b)\np m(3, 5)\n", "false"},
+	{"e2eArray", func(vm *VM) object.Value {
+		return vm.e2eArray(vm.main, []object.Value{object.Integer(1), object.Integer(2), object.Integer(3)}, nil)
+	}, "def m(a, b, c) = [a, b, c]\np m(1, 2, 3)\n", "[1, 2, 3]"},
 	{"e2eNestArray", func(vm *VM) object.Value { return vm.e2eNestArray(vm.main, []object.Value{object.Integer(5)}, nil) }, "def m(a) = [a, [a, a]]\np m(5)\n", "[5, [5, 5]]"},
 	{"e2eRange", func(vm *VM) object.Value { return vm.e2eRange(vm.main, []object.Value{object.Integer(5)}, nil) }, "def m(a) = (1..a)\np m(5)\n", "1..5"},
 	{"e2eRangeExcl", func(vm *VM) object.Value { return vm.e2eRangeExcl(vm.main, []object.Value{object.Integer(5)}, nil) }, "def m(a) = (1...a)\np m(5)\n", "1...5"},
-	{"e2eHash", func(vm *VM) object.Value { return vm.e2eHash(vm.main, []object.Value{object.Integer(1), object.Integer(2)}, nil) }, "def m(a, b) = {x: a, y: b}\np m(1, 2)\n", "{x: 1, y: 2}"},
-	{"e2eSplat", func(vm *VM) object.Value { return vm.e2eSplat(vm.main, []object.Value{object.Integer(1), object.Integer(2)}, nil) }, "def m(a, b) = [a, *[b, b]]\np m(1, 2)\n", "[1, 2, 2]"},
+	{"e2eHash", func(vm *VM) object.Value {
+		return vm.e2eHash(vm.main, []object.Value{object.Integer(1), object.Integer(2)}, nil)
+	}, "def m(a, b) = {x: a, y: b}\np m(1, 2)\n", "{x: 1, y: 2}"},
+	{"e2eSplat", func(vm *VM) object.Value {
+		return vm.e2eSplat(vm.main, []object.Value{object.Integer(1), object.Integer(2)}, nil)
+	}, "def m(a, b) = [a, *[b, b]]\np m(1, 2)\n", "[1, 2, 2]"},
 	{"e2eIvar", func(vm *VM) object.Value { return vm.e2eIvar(vm.main, []object.Value{object.Integer(41)}, nil) }, "def m(a)\n  @x = a\n  @x + 1\nend\np m(41)\n", "42"},
 	{"e2eFib", func(vm *VM) object.Value { return vm.e2eFib(vm.main, []object.Value{object.Integer(10)}, nil) }, "def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)\np fib(10)\n", "55"},
-	{"e2eDiv", func(vm *VM) object.Value { return vm.e2eDiv(vm.main, []object.Value{object.Integer(17), object.Integer(5)}, nil) }, "def m(a, b) = a / b\np m(17, 5)\n", "3"},
-	{"e2eMulOverflow", func(vm *VM) object.Value { return vm.e2eMulOverflow(vm.main, []object.Value{object.Integer(1000000000000), object.Integer(1000000000000)}, nil) }, "def m(a, b) = a * b\np m(1000000000000, 1000000000000)\n", "1000000000000000000000000"},
+	{"e2eDiv", func(vm *VM) object.Value {
+		return vm.e2eDiv(vm.main, []object.Value{object.Integer(17), object.Integer(5)}, nil)
+	}, "def m(a, b) = a / b\np m(17, 5)\n", "3"},
+	{"e2eMulOverflow", func(vm *VM) object.Value {
+		return vm.e2eMulOverflow(vm.main, []object.Value{object.Integer(1000000000000), object.Integer(1000000000000)}, nil)
+	}, "def m(a, b) = a * b\np m(1000000000000, 1000000000000)\n", "1000000000000000000000000"},
 	{"e2eFloatDeopt", func(vm *VM) object.Value { return vm.e2eFloatDeopt(vm.main, []object.Value{object.Float(1.5)}, nil) }, "def m(a) = a + 1\np m(1.5)\n", "2.5"},
 	{"e2eFact", func(vm *VM) object.Value { return vm.e2eFact(vm.main, []object.Value{object.Integer(10)}, nil) }, "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\np m(10)\n", "3628800"},
 	{"e2eFactBig", func(vm *VM) object.Value { return vm.e2eFactBig(vm.main, []object.Value{object.Integer(25)}, nil) }, "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\np m(25)\n", "15511210043330985984000000"},

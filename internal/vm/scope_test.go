@@ -13,7 +13,7 @@ func TestScopeOperator(t *testing.T) {
 		{`p Math::PI`, "3.141592653589793\n"},
 		{`p Math::E`, "2.718281828459045\n"},
 		{"class Foo\n  BAR = 42\nend\np Foo::BAR", "42\n"},
-		{`p Math::sqrt(4)`, "2.0\n"}, // :: method call with arguments
+		{`p Math::sqrt(4)`, "2.0\n"},                              // :: method call with arguments
 		{"class Foo\n  def self.bar = 7\nend\np Foo::bar", "7\n"}, // :: method call, no args
 	}
 	for _, c := range cases {

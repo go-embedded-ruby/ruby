@@ -5,8 +5,10 @@
 package vm
 
 import (
-	sqlite3 "github.com/go-ruby-sqlite3/sqlite3"
+	"sort"
+
 	sequel "github.com/go-ruby-sequel/sequel"
+	sqlite3 "github.com/go-ruby-sqlite3/sqlite3"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -140,15 +142,6 @@ func sequelColumn(v object.Value) sequel.Value {
 	return sequelValue(v)
 }
 
-// sequelValues maps a slice of Ruby values.
-func sequelValues(vals []object.Value) []sequel.Value {
-	out := make([]sequel.Value, len(vals))
-	for i, v := range vals {
-		out[i] = sequelValue(v)
-	}
-	return out
-}
-
 // sequelColumns maps a slice of Ruby column references (select/order/group args).
 func sequelColumns(vals []object.Value) []sequel.Value {
 	out := make([]sequel.Value, len(vals))
@@ -185,11 +178,18 @@ func sequelRubyValue(v sequel.Value) object.Value {
 }
 
 // sequelRow maps an executor row (column->value map) to a Ruby Hash keyed by a
-// Symbol column name, matching Sequel's default symbol-keyed rows.
+// Symbol column name, matching Sequel's default symbol-keyed rows. The executor
+// hands back a Go map (unordered), so the keys are sorted for a deterministic
+// row shape.
 func sequelRow(row map[string]sequel.Value) *object.Hash {
+	keys := make([]string, 0, len(row))
+	for k := range row {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	h := object.NewHash()
-	for k, v := range row {
-		h.Set(object.Symbol(k), sequelRubyValue(v))
+	for _, k := range keys {
+		h.Set(object.Symbol(k), sequelRubyValue(row[k]))
 	}
 	return h
 }
@@ -206,4 +206,16 @@ func sequelRows(rows []map[string]sequel.Value) *object.Array {
 // raiseSequelError re-raises an executor error as a Sequel::DatabaseError.
 func raiseSequelError(err error) {
 	raise("Sequel::DatabaseError", "%s", err.Error())
+}
+
+// sequelCountValue extracts the scalar a count(*) query returned: the sole value
+// of the sole row. A mock (executor-less) database returns no rows, so the count
+// is 0; a real count(*) always returns one single-column row.
+func sequelCountValue(rows []map[string]sequel.Value) object.Value {
+	for _, row := range rows {
+		for _, val := range row {
+			return sequelRubyValue(val)
+		}
+	}
+	return object.Integer(0)
 }

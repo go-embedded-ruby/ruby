@@ -73,7 +73,7 @@ func (vm *VM) sequelSchemaClass() *RClass {
 		}
 		name := sequelName(args[0])
 		typeName := sequelName(args[1])
-		_, opts := sequelColArgs(args[2:])
+		opts := sequelOptsFrom(args[2:])
 		tb := self(v)
 		switch typeName {
 		case "Integer", "integer", "int":
@@ -103,7 +103,7 @@ func (vm *VM) sequelSchemaClass() *RClass {
 		if len(args) < 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2..)", len(args))
 		}
-		_, opts := sequelColArgs(args[2:])
+		opts := sequelOptsFrom(args[2:])
 		self(v).ForeignKey(sequelName(args[0]), sequelName(args[1]), opts...)
 		return object.NilV
 	})
@@ -154,6 +154,17 @@ func sequelColArgs(args []object.Value) (string, []sequel.ColOpt) {
 		}
 	}
 	return name, opts
+}
+
+// sequelOptsFrom reads ColOpts from a trailing keyword Hash in args (the option
+// list for column()/foreign_key(), where there is no leading name in the slice).
+func sequelOptsFrom(args []object.Value) []sequel.ColOpt {
+	if len(args) > 0 {
+		if h, ok := args[len(args)-1].(*object.Hash); ok {
+			return sequelColOpts(h)
+		}
+	}
+	return nil
 }
 
 // sequelColOpts reads a column option Hash into the library's ColOpts.
@@ -225,16 +236,16 @@ func sequelKVArgs(args []object.Value) []sequel.Value {
 	if len(args) == 0 {
 		return nil
 	}
+	// Insert/update values are always given as a Hash (column => value); the
+	// column position must be a bare string name (InsertSQL/UpdateSQL quote it).
 	if h, ok := args[0].(*object.Hash); ok {
 		kv := make([]sequel.Value, 0, h.Len()*2)
 		for i := 0; i < h.Len(); i++ {
 			k := h.Keys[i]
 			val, _ := h.Get(k)
-			// InsertSQL/UpdateSQL expect the column position to be a bare string
-			// name (they quote it), not an Identifier.
 			kv = append(kv, sequelName(k), sequelValue(val))
 		}
 		return kv
 	}
-	return sequelValues(args)
+	return nil
 }

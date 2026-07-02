@@ -68,11 +68,11 @@ func TestFFTErrors(t *testing.T) {
 		{`FFT.fft([1, "x"])`, "TypeError"},
 		{`FFT.rfft([1.0, "x"])`, "TypeError"},
 		{`FFT.fftfreq(4, "x")`, "TypeError"},
-		{`FFT.fftn([1], [])`, "ArgumentError"},        // empty shape
-		{`FFT.fftn([1], [0])`, "ArgumentError"},       // non-positive dimension
-		{`FFT.fft2([1, 2, 3], 2, 2)`, "ArgumentError"}, // product != data length
-		{`FFT.spectrogram([1.0, 2.0], 0, 0, [], 1.0)`, "ArgumentError"},                  // segment <= 0
-		{`FFT.spectrogram([1.0, 2.0, 3.0, 4.0], 4, 0, [1.0, 1.0], 1.0)`, "ArgumentError"}, // window != segment
+		{`FFT.fftn([1], [])`, "ArgumentError"},                                             // empty shape
+		{`FFT.fftn([1], [0])`, "ArgumentError"},                                            // non-positive dimension
+		{`FFT.fft2([1, 2, 3], 2, 2)`, "ArgumentError"},                                     // product != data length
+		{`FFT.spectrogram([1.0, 2.0], 0, 0, [], 1.0)`, "ArgumentError"},                    // segment <= 0
+		{`FFT.spectrogram([1.0, 2.0, 3.0, 4.0], 4, 0, [1.0, 1.0], 1.0)`, "ArgumentError"},  // window != segment
 		{`FFT.spectrogram([1.0, 2.0, 3.0, 4.0], 4, 4, FFT.hann(4), 1.0)`, "ArgumentError"}, // overlap >= segment
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
