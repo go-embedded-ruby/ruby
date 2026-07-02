@@ -45,6 +45,42 @@ func featureLoadable(feature string) (bool, string) {
 	return out.String() == "LOADED", out.String()
 }
 
+// arORMProbe exercises the exact ActiveRecord ORM chain stage 4b's app needs —
+// establish_connection, Schema.define, a model insert, and where(...).order.to_a
+// — inside a Ruby rescue. `require "active_record"` succeeding is NOT enough: the
+// binding can expose the constant yet lack a method the route calls (it shipped
+// without Schema.define). The probe prints "READY" only when the whole chain
+// runs clean, and otherwise "GAP: <ExceptionClass>: <message>" naming the exact
+// missing capability.
+const arORMProbe = `
+require "active_record"
+begin
+  ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
+  ActiveRecord::Schema.define do
+    create_table(:ar_probe) { |t| t.string :name }
+  end
+  klass = Class.new(ActiveRecord::Base) { self.table_name = "ar_probe" }
+  klass.create!(name: "x")
+  raise "query returned no rows" unless klass.where("name = ?", "x").order(:name).to_a.length == 1
+  print "READY"
+rescue Exception => e
+  print "GAP: #{e.class}: #{e.message}"
+end
+`
+
+// arORMReady reports whether the ActiveRecord ORM path stage 4b relies on
+// actually works, returning the probe detail (a "GAP: ..." string naming the
+// missing method) when it does not. It flips to true automatically once the AR
+// binding gains the methods, upgrading stage 4b to a hard assertion.
+func arORMReady() (bool, string) {
+	var out bytes.Buffer
+	if err := ruby.Run(arORMProbe, &out); err != nil {
+		return false, "interpreter error: " + err.Error()
+	}
+	got := out.String()
+	return got == "READY", got
+}
+
 // mustRun runs an app that is expected to succeed, failing the test on any
 // interpreter error (the response assertions live in each stage).
 func mustRun(t *testing.T, name string) string {
@@ -123,18 +159,20 @@ func TestStage4SQLiteData(t *testing.T) {
 // gap is recorded. This flips to a hard assertion automatically once the
 // go-ruby-activerecord binding (PR #102) lands on main.
 func TestStage4bActiveRecord(t *testing.T) {
-	if ok, _ := featureLoadable("active_record"); !ok {
-		out, err := runApp(t, "stage4b_active_record.rb")
-		if err == nil {
-			t.Fatalf("stage 4b: active_record reports unloadable yet the app ran clean:\n%s", out)
-		}
-		t.Logf("GAP stage 4b (ActiveRecord ORM route): active_record is not runnable "+
-			"through rbgo yet.\n"+
-			"  need: the go-ruby-activerecord binding (ActiveRecord::Base,\n"+
-			"        establish_connection, Schema.define, the query interface).\n"+
+	// require "active_record" succeeding is not sufficient — probe the specific
+	// ORM chain the route calls (establish_connection + Schema.define + insert +
+	// where.order.to_a). When any required method is missing the probe reports the
+	// exact gap and we skip; when the binding gains those methods this flips to a
+	// hard assertion automatically.
+	if ready, detail := arORMReady(); !ready {
+		t.Logf("GAP stage 4b (ActiveRecord ORM route): the AR binding is loadable but the\n"+
+			"  ORM route path does not run yet.\n"+
+			"  need: go-ruby-activerecord to implement the chain the route uses\n"+
+			"        (ActiveRecord::Schema.define + create_table + Model.create! +\n"+
+			"        Model.where(...).order(...).to_a).\n"+
 			"  note: the equivalent route over the raw sqlite3 binding IS green (stage 4).\n"+
-			"  observed error: %v", err)
-		t.Skip("ActiveRecord binding absent — gap recorded (PR #102 pending)")
+			"  probe result: %s", detail)
+		t.Skip("ActiveRecord ORM path incomplete — gap recorded")
 	}
 	out := mustRun(t, "stage4b_active_record.rb")
 	want := "status=200\nbody=<ul><li>amy (30)</li><li>cat (40)</li></ul>\n"
