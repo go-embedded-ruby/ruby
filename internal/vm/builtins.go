@@ -89,7 +89,7 @@ func (vm *VM) bootstrap() {
 	vm.registerEncoding()
 	vm.registerStringEncoding()
 	vm.registerStringUnicodeNormalize() // String#unicode_normalize / #unicode_normalized? (core-ext, always available), backed by go-ruby-unicode-normalize
-	vm.registerJSBridge() // browser DOM/Canvas access (wasm only; a no-op natively)
+	vm.registerJSBridge()               // browser DOM/Canvas access (wasm only; a no-op natively)
 	vm.registerBase64()
 	vm.registerPackUnpack()
 	vm.registerSecureRandom()
@@ -424,8 +424,14 @@ func (vm *VM) bootstrap() {
 	vm.registerDateErrors()    // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
 	vm.registerJSON()          // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
 	vm.registerYAML()          // YAML/Psych loadable shell; needs StandardError
+	vm.registerBCrypt()        // BCrypt (require "bcrypt"), backed by go-ruby-bcrypt; needs StandardError + String
+	vm.registerJWT()           // JWT (require "jwt"), backed by go-ruby-jwt; needs StandardError
 	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
 	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
+	vm.registerTZInfo()        // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier
+	vm.registerChronic()       // Chronic module (go-ruby-chronic backend); needs StandardError
+	vm.registerMoney()         // Money module (go-ruby-money backend); needs StandardError for Money::Currency::UnknownCurrency
+	vm.registerAddressable()   // Addressable module (go-ruby-addressable backend); needs StandardError
 	vm.registerCommonmark()    // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-ruby-commonmark
 	vm.registerMustache()      // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
 	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder

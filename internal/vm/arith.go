@@ -225,6 +225,12 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isTms := a.(*Tms); isTms {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// A Money dispatches its arithmetic (+ - * over the go-ruby-money library,
+		// raising Money::DifferentCurrencyError on a currency mismatch) as a method
+		// rather than falling into the numeric coercion path.
+		if _, isMoney := a.(*Money); isMoney {
+			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
 		return binary(op, a, b)
 	}
 }
@@ -518,6 +524,9 @@ func negate(v object.Value) object.Value {
 		return &BigDecimal{d: n.d.Neg()}
 	case *Matrix:
 		return &Matrix{m: n.m.Neg()}
+	case *Money:
+		// -money negates the amount via the go-ruby-money library.
+		return &Money{m: n.m.Neg()}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }

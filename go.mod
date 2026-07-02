@@ -10,11 +10,14 @@ require (
 	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
+	github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795
 	github.com/go-ruby-base64/base64 v0.0.0-20260630081041-5dec54f20f53
+	github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363
 	github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378
 	github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4
 	github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
+	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
 	github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689
 	github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc
@@ -28,9 +31,11 @@ require (
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
 	github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5
+	github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
 	github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca
+	github.com/go-ruby-money/money v0.0.0-20260702143724-59c9de931e83
 	github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90
 	github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
@@ -51,6 +56,7 @@ require (
 	github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8
 	github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
+	github.com/go-ruby-tzinfo/tzinfo v0.0.0-20260701105256-15977bdf6e1a
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd

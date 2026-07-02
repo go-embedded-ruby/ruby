@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 
+	money "github.com/go-ruby-money/money"
+
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -193,6 +195,7 @@ type VM struct {
 	cDateTime                              *RClass
 	cBag                                   *RClass
 	cStringScanner                         *RClass
+	moneyBank                              *money.VariableExchange // the process-wide default exchange bank for Money (require "money")
 	cOptionParser                          *RClass
 	cURI                                   *RClass // the URI module (require "uri"), backed by go-ruby-uri
 	cURIGeneric                            *RClass // URI::Generic, the base URI class wrapping a *uri.URI

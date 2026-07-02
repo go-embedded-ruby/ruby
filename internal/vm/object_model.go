@@ -675,6 +675,22 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cSpellChecker
 	case *Time:
 		return vm.cTime
+	case *Timezone:
+		return vm.consts["TZInfo::Timezone"].(*RClass)
+	case *TimezonePeriod:
+		return vm.consts["TZInfo::TimezonePeriod"].(*RClass)
+	case *TimezoneOffset:
+		return vm.consts["TZInfo::TimezoneOffset"].(*RClass)
+	case *Country:
+		return vm.consts["TZInfo::Country"].(*RClass)
+	case *Money:
+		return vm.consts["Money"].(*RClass)
+	case *Currency:
+		return vm.consts["Money::Currency"].(*RClass)
+	case *AddressableURI:
+		return vm.consts["Addressable::URI"].(*RClass)
+	case *AddressableTemplate:
+		return vm.consts["Addressable::Template"].(*RClass)
 	case *FileStat:
 		return vm.cFileStat
 	case *BigDecimal:
@@ -734,6 +750,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *opensslDigest:
 		return x.cls
 	case *DigestObj:
+		return x.cls
+	case *BCryptPassword:
 		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
