@@ -5,6 +5,8 @@
 package vm
 
 import (
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -63,6 +65,15 @@ func TestDotenvEnvRunCommand(t *testing.T) {
 	env := dotenvEnv(vm)
 	if env.RunCommand == nil {
 		t.Fatal("nil RunCommand seam")
+	}
+	if runtime.GOOS == "windows" {
+		// On Windows runShellCommand shells through cmd.exe, where `printf` is
+		// absent and `echo` appends CRLF. Still exercise the seam (covering the
+		// RunCommand closure) and assert the whitespace-trimmed output.
+		if got := strings.TrimSpace(env.RunCommand("echo hi")); got != "hi" {
+			t.Errorf("RunCommand(windows) -> %q, want %q", got, "hi")
+		}
+		return
 	}
 	if got := env.RunCommand("printf hi"); got != "hi" {
 		t.Errorf("RunCommand -> %q, want %q", got, "hi")
