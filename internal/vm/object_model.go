@@ -671,6 +671,20 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["SQLite3::Database"].(*RClass)
 	case *SQLite3Statement:
 		return vm.consts["SQLite3::Statement"].(*RClass)
+	case *RedisObj:
+		return x.cls
+	case *RedisBatch:
+		return x.cls
+	case *PGConnObj:
+		return x.cls
+	case *PGResultObj:
+		return x.cls
+	case *SequelDBObj:
+		return x.cls
+	case *SequelDatasetObj:
+		return x.cls
+	case *SequelSchemaObj:
+		return x.cls
 	case *NokogiriDocument:
 		return vm.consts["Nokogiri::XML::Document"].(*RClass)
 	case *NokogiriNode:
