@@ -25,6 +25,9 @@ require (
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
 	github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111
 	github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd
+	github.com/go-ruby-dry-struct/dry-struct v0.0.0-20260702152517-9e25a927a351
+	github.com/go-ruby-dry-types/dry-types v0.0.0-20260702150052-94ab5100a720
+	github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260702151810-a274955bddac
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
@@ -47,6 +50,7 @@ require (
 	github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90
 	github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a
 	github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702151113-e53746446651
+	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf

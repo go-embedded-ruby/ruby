@@ -454,6 +454,10 @@ func (vm *VM) bootstrap() {
 	vm.registerRouge()         // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
 	vm.registerSlim()          // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error
 	vm.registerHaml()          // Haml::Template.new(src).render (require "haml"), compile-to-source via go-ruby-haml; needs StandardError for Haml::Error
+	vm.registerDryTypes()      // Dry::Types type system (require "dry/types"), backed by go-ruby-dry-types; needs StandardError for Dry::Types::CoercionError
+	vm.registerDryStruct()     // Dry::Struct base class (require "dry/struct"), backed by go-ruby-dry-struct; pins go-ruby-dry-types
+	vm.registerDryValidation() // Dry::Schema / Dry::Validation::Contract (require "dry/validation"), backed by go-ruby-dry-validation; pins go-ruby-dry-types
+	vm.registerOAuth2()        // OAuth2::Client / AccessToken / Response (require "oauth2"), backed by go-ruby-oauth2; HTTP round-trip is a net-http host seam
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
 	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)

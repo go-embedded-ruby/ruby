@@ -258,6 +258,10 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 	case *Currency:
 		// Money::Currency#== compares by id, not identity.
 		return true
+	case *DryStruct:
+		// Dry::Struct#== compares attributes by value (via go-ruby-dry-struct's
+		// Struct.Eql), not object identity, so it must dispatch its own ==.
+		return true
 	}
 	return false
 }

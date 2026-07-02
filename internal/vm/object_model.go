@@ -655,6 +655,36 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A Jbuilder builder reports Jbuilder so its method_missing DSL and bang
 		// methods (defined on that class) dispatch.
 		return vm.consts["Jbuilder"].(*RClass)
+	case *DryType:
+		return vm.consts["Dry::Types::Type"].(*RClass)
+	case *DryResult:
+		return vm.consts["Dry::Types::Result"].(*RClass)
+	case *DryStruct:
+		return x.cls
+	case *DrySchema:
+		return vm.consts["Dry::Schema::Params"].(*RClass)
+	case *DrySchemaBuilder:
+		return vm.consts["Dry::Schema::DSL"].(*RClass)
+	case *DryKey:
+		return vm.consts["Dry::Schema::Key"].(*RClass)
+	case *DryContract:
+		return x.cls
+	case *DryValidationResult:
+		return vm.consts["Dry::Validation::Result"].(*RClass)
+	case *DryRuleCtx:
+		return vm.consts["Dry::Validation::Rule"].(*RClass)
+	case *DryRuleKey:
+		return vm.consts["Dry::Validation::RuleKey"].(*RClass)
+	case *OAuth2Client:
+		return vm.consts["OAuth2::Client"].(*RClass)
+	case *OAuth2Strategy:
+		return vm.consts[x.className].(*RClass)
+	case *OAuth2AccessToken:
+		return vm.consts["OAuth2::AccessToken"].(*RClass)
+	case *OAuth2Response:
+		return vm.consts["OAuth2::Response"].(*RClass)
+	case *OAuth2Request:
+		return vm.consts["OAuth2::Request"].(*RClass)
 	case *KramdownDoc:
 		// A Kramdown::Document reports Kramdown::Document so its #to_html renders
 		// the held source through the library.
