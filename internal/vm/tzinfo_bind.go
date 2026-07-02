@@ -28,22 +28,28 @@ func tzGet(id string) object.Value {
 	return &Timezone{tz: tz}
 }
 
-// tzIdentifiers returns TZInfo::Timezone.all_identifiers as a Ruby Array of
-// Strings, raising RuntimeError if the embedded database cannot be read.
-func tzIdentifiers() object.Value {
-	ids, err := tzinfo.AllIdentifiers()
+// tzCheck raises a Ruby RuntimeError carrying err's message when the embedded
+// database read fails. The IANA data is embedded, so this never fires in
+// practice; it exists so a corrupt build surfaces as a Ruby exception rather than
+// a nil dereference.
+func tzCheck(err error) {
 	if err != nil {
 		raise("RuntimeError", "%s", err.Error())
 	}
+}
+
+// tzIdentifiers returns TZInfo::Timezone.all_identifiers as a Ruby Array of
+// Strings.
+func tzIdentifiers() object.Value {
+	ids, err := tzinfo.AllIdentifiers()
+	tzCheck(err)
 	return strSliceToArray(ids)
 }
 
 // tzAll returns TZInfo::Timezone.all as a Ruby Array of Timezone objects.
 func tzAll() object.Value {
 	all, err := tzinfo.All()
-	if err != nil {
-		raise("RuntimeError", "%s", err.Error())
-	}
+	tzCheck(err)
 	arr := &object.Array{Elems: make([]object.Value, len(all))}
 	for i, tz := range all {
 		arr.Elems[i] = &Timezone{tz: tz}
