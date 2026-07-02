@@ -46,6 +46,7 @@ require (
 	github.com/go-ruby-money/money v0.0.0-20260702143724-59c9de931e83
 	github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90
 	github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a
+	github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702151113-e53746446651
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
@@ -60,11 +61,13 @@ require (
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
+	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
 	github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4
+	github.com/go-ruby-sqlite3/sqlite3 v0.0.0-20260702143910-c9f337771f41
 	github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8
 	github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
@@ -76,12 +79,22 @@ require (
 )
 
 require (
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
 	github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c // indirect
 	github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
+	modernc.org/libc v1.73.4 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.53.0 // indirect
 )
