@@ -50,11 +50,9 @@ func (vm *VM) registerMustache() {
 		}}
 
 	// Mustache#template / #template= expose the instance's template source.
+	// getIvar yields Ruby nil when @template was never set.
 	cls.define("template", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if t := getIvar(self, "@template"); t != nil {
-			return t
-		}
-		return object.NilV
+		return getIvar(self, "@template")
 	})
 	cls.define("template=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		setIvar(self, "@template", args[0])
@@ -67,9 +65,17 @@ func (vm *VM) registerMustache() {
 	// view methods — here modelled by the object's instance variables).
 	cls.define("render", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		tmpl := ""
+		// An explicit non-nil first argument overrides @template; a nil (or absent)
+		// first argument falls back to the instance's stored template.
+		hasTemplate := false
 		if len(args) > 0 {
+			if _, isNil := args[0].(object.Nil); !isNil {
+				hasTemplate = true
+			}
+		}
+		if hasTemplate {
 			tmpl = mustacheStringArg(args[0])
-		} else if t := getIvar(self, "@template"); t != nil {
+		} else if t := getIvar(self, "@template"); t != object.NilV {
 			tmpl = mustacheStringArg(t)
 		}
 		var ctx object.Value = self

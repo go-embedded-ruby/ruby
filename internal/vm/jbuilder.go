@@ -67,10 +67,9 @@ func (vm *VM) registerJbuilder() {
 	// json.name collection { |x| … } maps a nested array (the gem's
 	// method_missing collection form). name is the (unformatted) key.
 	d("method_missing", func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
+		// The dispatcher always calls method_missing with the missing name as
+		// args[0], so args is non-empty here.
 		j := self(v)
-		if len(args) == 0 {
-			raise("ArgumentError", "wrong number of arguments")
-		}
 		key := jbuilderName(args[0])
 		rest := args[1:]
 		switch {

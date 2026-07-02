@@ -54,10 +54,9 @@ func (vm *VM) registerBuilder() {
 	// method: xml.br, xml.name("text"), xml.p(id: 1) { … }. It maps straight onto
 	// the library's Tag, with the block adapted to a child callback.
 	d("method_missing", func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
+		// The dispatcher always calls method_missing with the missing name as
+		// args[0], so args is non-empty here.
 		m := self(v)
-		if len(args) == 0 {
-			raise("ArgumentError", "wrong number of arguments")
-		}
 		name := builderName(args[0])
 		m.x.Tag(name, vm.builderTagArgs(args[1:], blk)...)
 		return object.NewString(m.x.Target())
