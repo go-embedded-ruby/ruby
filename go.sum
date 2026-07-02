@@ -120,6 +120,8 @@ github.com/go-ruby-parser/parser v0.0.0-20260630055353-a831e712f1fd h1:4JhMDqqpX
 github.com/go-ruby-parser/parser v0.0.0-20260630055353-a831e712f1fd/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b h1:/ZN1eLOg0oH4wF8qmd6NOyB4ENYthx6wFwOpZiPhRIE=
 github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b/go.mod h1:IvW5q5Kyl5l3hrYwiHylOEmk5hpGSo7XqcmUXBHF5H0=
+github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d h1:JKIZD+pJQ64/nla4DHdzMLnc4/v45MyYwnjACwS6dyM=
+github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d/go.mod h1:XIYL8wT1Thvoeh7y5v9ZrL+34ySHiieu1/GyDZauULk=
 github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d h1:hH6O6QdrUlbePkqb8skhFQ0BVuMe0u1c/CXFFaVUnXg=
 github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d/go.mod h1:SIQyfiIJRKJq0OD9gWYfmvQTdJClJf8z56BsfVVw7rY=
 github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8 h1:zghkWpebo93z7Uz/BMXnLSN30ZPeLXS35Y1HPeXkUE4=
@@ -128,6 +130,8 @@ github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e h1:JmbJL+0nq
 github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e/go.mod h1:tbYmHYXjnNXJCNYABDx9nWfuGBCXeKrp134bNsQeTpM=
 github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444 h1:vkMPJDpZHmu09pVxr7CFppoh1b5Kc8LkhKpxkSBoyxA=
 github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444/go.mod h1:Wq3cgP6klsULbO4ee0DOavVIzifgmddOWnYpqljbER4=
+github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92 h1:EXqNsTpyz5KPZURl94uOjcIIyJ0mCyMA7/AFAXvFgdg=
+github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92/go.mod h1:gt67ft80L9J5DpRGe+x3qPy2hg1g75aWQ6h52inm7og=
 github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee h1:ctauEAdAq129WCrU+dndYcOjNlo1Y94vWNBtgXp1heE=
 github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee/go.mod h1:+0nK2X+aCPMO91bPMM/DT1OFUIzFQeoTPGkkOR3kd84=
 github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac h1:Y++tdsBF6lA/cw3c9uQ/ZyQZjP2N3wkA6pLF8a3HnHc=
@@ -144,6 +148,8 @@ github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386 h1:mt488Km0GMk
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386/go.mod h1:UpBHz/Hf4Q8h14UpfJ5Cpp+OxVEqqNuICXGnUjg2dKc=
 github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0 h1:NDJ7mJ3uMoysAoBRMJJNr0RRbqLfzp+8flALEeOuahI=
 github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0/go.mod h1:xjx6gnzA3xXHkJrJFQDp1pW559J3kJR2e6GPctYg4K4=
+github.com/go-ruby-sequel/sequel v0.0.0-20260702151352-66413b601977 h1:2PWvE7+rEB78Ly4SlX3MvIrfpo3s6JcPVQDrR08icPI=
+github.com/go-ruby-sequel/sequel v0.0.0-20260702151352-66413b601977/go.mod h1:24vGiLxZE/YuFm5qNQpiXYloUQNg3w4AGW8zTmdI2Xw=
 github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910 h1:Q41u365suJ1TlrX2mlVHOGBmW904Lwh3mo+WnlVPtno=
 github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910/go.mod h1:F/P0PXeE5ybEPeWYfb1JAKWny1Li3dnlm6YxG2/vffE=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z9b99kWJht8AgtlIbdiq7Y02j6eddxW+rr4MJpCS6kw=
