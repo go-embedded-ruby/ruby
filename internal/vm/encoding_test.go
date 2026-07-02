@@ -28,6 +28,21 @@ func TestEncoding(t *testing.T) {
 		{`p ["x".dup.force_encoding("ISO-8859-1").encoding.name, (Encoding::UTF_8 ? :t : :f)]`, "[\"ISO-8859-1\", :t]\n"},
 		// random_bytes is binary, so length == the requested count.
 		{`require "securerandom"; b = SecureRandom.random_bytes(5); p [b.length, b.encoding.name]`, "[5, \"ASCII-8BIT\"]\n"},
+		// String#[] / #slice on a binary (ASCII-8BIT) string indexes by BYTES and
+		// keeps the result binary — matching MRI, where index/length are byte
+		// offsets on an ASCII-8BIT string. "café".b is 5 bytes; [3, 2] takes the
+		// two bytes of "é", and each slice stays ASCII-8BIT.
+		{`s = "café".b; p [s[3, 2].bytesize, s[3, 2].encoding.name]`, "[2, \"ASCII-8BIT\"]\n"},
+		{`s = "café".b; p [s.slice(0, 5).bytesize, s.slice(0, 5).encoding.name]`, "[5, \"ASCII-8BIT\"]\n"},
+		{`s = "é".b; p [s[0].bytesize, s[1].bytesize, s[1].encoding.name]`, "[1, 1, \"ASCII-8BIT\"]\n"},
+		{`s = "café".b; p [s[0..2].bytesize, s[0..2].encoding.name]`, "[3, \"ASCII-8BIT\"]\n"},
+		// The UTF-8 default is unchanged: [] indexes by character.
+		{`p ["café"[3, 1], "café"[0, 3], "café"[3].bytesize]`, "[\"é\", \"caf\", 2]\n"},
+		// A binary index past the byte length is nil (byte-range, not char-range).
+		{`s = "é".b; p s[2]`, "nil\n"},
+		// The substring form s[sub] is byte-wise Contains either way: present →
+		// the substring, absent → nil.
+		{`s = "café".b; p [s["af"], s["zz"]]`, "[\"af\", nil]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
