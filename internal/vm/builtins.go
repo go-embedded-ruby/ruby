@@ -428,6 +428,10 @@ func (vm *VM) bootstrap() {
 	vm.registerJWT()           // JWT (require "jwt"), backed by go-ruby-jwt; needs StandardError
 	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
 	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
+	vm.registerTZInfo()        // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier
+	vm.registerChronic()       // Chronic module (go-ruby-chronic backend); needs StandardError
+	vm.registerMoney()         // Money module (go-ruby-money backend); needs StandardError for Money::Currency::UnknownCurrency
+	vm.registerAddressable()   // Addressable module (go-ruby-addressable backend); needs StandardError
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
 	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)

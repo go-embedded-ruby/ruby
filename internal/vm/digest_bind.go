@@ -251,9 +251,15 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 	switch v.(type) {
 	case *DigestObj, *BCryptPassword:
 		return true
-	default:
-		return false
+	case *Money:
+		// Money#== compares fractional amount and currency via the go-ruby-money
+		// library, not object identity, so it must dispatch its own ==.
+		return true
+	case *Currency:
+		// Money::Currency#== compares by id, not identity.
+		return true
 	}
+	return false
 }
 
 // digestCanon normalises a Digest algorithm name for the Digest(name) factory:
