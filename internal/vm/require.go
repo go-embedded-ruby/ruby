@@ -48,6 +48,7 @@ var providedFeatures = map[string]bool{
 	"commonmark": true, "mustache": true, "jbuilder": true, "builder": true,
 	"sqlite3": true, "nokogiri": true,
 	"rspec": true, "rspec/expectations": true, "rspec/matchers": true,
+	"rubocop": true,
 	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,
 	"rqrcode": true, "dotenv": true, "hcl2": true, "kramdown": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,

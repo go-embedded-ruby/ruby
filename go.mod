@@ -66,6 +66,7 @@ require (
 	github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
 	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75
+	github.com/go-ruby-rubocop/rubocop v0.0.0-20260702170528-0a89da6e9147
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910

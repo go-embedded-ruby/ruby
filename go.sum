@@ -140,6 +140,8 @@ github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8 h1:02tvTxe
 github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8/go.mod h1:+MJBJltcK0b7tztRFluEcmlg4PVSA23h4LTbsBu7Aks=
 github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75 h1:EC/j4IhxcBe+9A8hdW1A4QrRCMaTSdvKhP2n0ahWqYA=
 github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75/go.mod h1:BYeb8EVnYLyl+ykaRyA1XAKJl3bOad/hJ7D+ZZCj2SQ=
+github.com/go-ruby-rubocop/rubocop v0.0.0-20260702170528-0a89da6e9147 h1:853nYYolC7/2Q/3Cd2mj9Ck+gRSpU5cWgCIJn4QfWCU=
+github.com/go-ruby-rubocop/rubocop v0.0.0-20260702170528-0a89da6e9147/go.mod h1:B3YLDBNxYrrd94jXv++1Fsxw/SsjtoZT6hpF6OZ+wFY=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386 h1:mt488Km0GMk/yjJtKUY4jo+fNz1xqHe0uLbEwPJa4To=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386/go.mod h1:UpBHz/Hf4Q8h14UpfJ5Cpp+OxVEqqNuICXGnUjg2dKc=
 github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0 h1:NDJ7mJ3uMoysAoBRMJJNr0RRbqLfzp+8flALEeOuahI=

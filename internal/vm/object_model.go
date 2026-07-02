@@ -709,6 +709,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Nokogiri::XML::NodeSet"].(*RClass)
 	case *NokogiriXSLTStylesheet:
 		return vm.consts["Nokogiri::XSLT::Stylesheet"].(*RClass)
+	case *RuboCopRunner:
+		return vm.consts["RuboCop::Runner"].(*RClass)
+	case *RuboCopConfig:
+		return vm.consts["RuboCop::Config"].(*RClass)
+	case *RuboCopOffense:
+		return vm.consts["RuboCop::Cop::Offense"].(*RClass)
+	case *RuboCopLocation:
+		return vm.consts["RuboCop::Cop::Offense::Location"].(*RClass)
 	case *RSpecMatcher:
 		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
 	case *RSpecExpectation:
