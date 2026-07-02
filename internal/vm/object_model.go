@@ -699,6 +699,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Addressable::URI"].(*RClass)
 	case *AddressableTemplate:
 		return vm.consts["Addressable::Template"].(*RClass)
+	case *PublicSuffixDomain:
+		return vm.consts["PublicSuffix::Domain"].(*RClass)
+	case *MIMEType:
+		return vm.consts["MIME::Type"].(*RClass)
+	case *MailMessage:
+		return vm.consts["Mail::Message"].(*RClass)
+	case *MailBody:
+		return vm.consts["Mail::Body"].(*RClass)
+	case *MailField:
+		return vm.consts["Mail::Field"].(*RClass)
 	case *FileStat:
 		return vm.cFileStat
 	case *BigDecimal:

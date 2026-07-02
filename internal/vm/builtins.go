@@ -432,6 +432,10 @@ func (vm *VM) bootstrap() {
 	vm.registerChronic()       // Chronic module (go-ruby-chronic backend); needs StandardError
 	vm.registerMoney()         // Money module (go-ruby-money backend); needs StandardError for Money::Currency::UnknownCurrency
 	vm.registerAddressable()   // Addressable module (go-ruby-addressable backend); needs StandardError
+	vm.registerPublicSuffix()  // PublicSuffix module (go-ruby-public-suffix backend); needs StandardError for PublicSuffix::Error tree
+	vm.registerMIMETypes()     // MIME::Types module (go-ruby-mime-types backend)
+	vm.registerMail()          // Mail module (go-ruby-mail backend)
+	vm.registerFaker()         // Faker module (go-ruby-faker backend); needs Random for the seed contract
 	vm.registerCommonmark()    // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-ruby-commonmark
 	vm.registerMustache()      // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
 	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
