@@ -436,6 +436,10 @@ func (vm *VM) bootstrap() {
 	vm.registerMustache()      // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
 	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
 	vm.registerBuilder()       // Builder::XmlMarkup (require "builder"), backed by go-ruby-builder
+	vm.registerRQRCode()       // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
+	vm.registerDotenv()        // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
+	vm.registerHCL2()          // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
+	vm.registerKramdown()      // Kramdown::Document (require "kramdown"), backed by go-ruby-kramdown
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
 	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)

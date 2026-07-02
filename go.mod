@@ -67,6 +67,10 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
+	github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd // indirect
+	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b // indirect
+	github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8 // indirect
+	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8 // indirect
 	github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c // indirect
 	github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea // indirect
 	golang.org/x/crypto v0.53.0 // indirect
