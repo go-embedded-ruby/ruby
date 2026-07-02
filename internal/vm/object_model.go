@@ -651,6 +651,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cSet
 	case *PStore:
 		return vm.cPStore
+	case *Jbuilder:
+		// A Jbuilder builder reports Jbuilder so its method_missing DSL and bang
+		// methods (defined on that class) dispatch.
+		return vm.consts["Jbuilder"].(*RClass)
+	case *XmlMarkup:
+		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
+		// method_missing element DSL and special methods dispatch.
+		return vm.consts["Builder::XmlMarkup"].(*RClass)
 	case *PrettyPrint:
 		return vm.cPrettyPrint
 	case *PrettyPrintGroup:

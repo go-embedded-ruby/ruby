@@ -32,10 +32,14 @@ github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378 h1:tn4
 github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378/go.mod h1:xTLuIsErHXTxzLBJkUz5J07NwY58QJ75j2Ww4DQGFEM=
 github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4 h1:XHJOnSV9GH1+gh1/SqRsskjncBzx2NUO00G8vaX5XKA=
 github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4/go.mod h1:op9nu6Z2gvH8/phs7iJZQWNvUnT2DkJV8wBAl1l0kfE=
+github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba h1:80lP4yd8SBscei1vfm9KgHlvKKi5AFa7D/qeW8dnK44=
+github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba/go.mod h1:wYtstpfGi/nHyyNdfTU+JACaSR5Vzd3FvCQd4Hchyrc=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c h1:6YAo3FKzJJbQdLbvxHy7I4ur5+R+pLLMWwKXXLnWcQU=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c/go.mod h1:TAIxiFMAj68dWClzEmDY1vCSNFiPfupD3HRADRXrkZw=
 github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824 h1:DLLC7LmqIWv8KT64njNSNjs5H2ayBfNMJGjtPWKR8yY=
 github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824/go.mod h1:djGUM2WR7AdnZqeRg/OQ4xVzmsl8PAWQKILX2n/foas=
+github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689 h1:d9MJXveisTUgvZGaNxH+sZBgrnoVz8580xcnC34wS1k=
+github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689/go.mod h1:I/pxqnwoebfatUAlGT/jiZkcnhx05Th1q6BVqIiqrb4=
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc h1:XAxewcVViNLEjBSEu6xI5rfDw7lv99hqNy8jzT5mr+I=
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc/go.mod h1:vvfFJGcGOK37vnBikohtzboL6dIfbsr54+2Ri0HkWwk=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4 h1:Qyl2DRWnEC65Y7EI6TB9vIHzQmkySJrIF5uzBu3YdKw=
@@ -54,6 +58,8 @@ github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49 h1:v
 github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49/go.mod h1:nGvVSBSIsYrhM2qs4yQ2k8uDbXCFPWQXXqkowleHMDs=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b h1:1iw1eRBOG7D7jCC/P4hzWllM4IkYiR/jP9Bwuo3ds6c=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
+github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3 h1:L1dfFWPEHgWSbh3tTM4bvIulVoO8CFreHga8wSqtlio=
+github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3/go.mod h1:EY+IHrYLDowQEX9Pj3OJ8u2bI5FfkTmMbMhmEmV6uUM=
 github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5 h1:KFU3OKsop0CF8Zv1TQ9FwGY3fWcdGGCcqJEjx9zxykU=
 github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5/go.mod h1:nHXcH3zaGNmCslZStZVeylXkv1wLp+nzT6qNj+m+QXU=
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277 h1:XfUzDZqZWgOUTJ22GdwNOgkZB9MZKhxsPTq0xL1u5Io=
@@ -64,6 +70,8 @@ github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca h1:jerobsJZB
 github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca/go.mod h1:ZrmXlz95j9VE3j1bUeq8a5CTWAKoEiYrkh/ON9ns9iE=
 github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90 h1:xjyxDgCSi3rUAlQlewmvY+XBqFXN1jLUFWaXNjAyL3I=
 github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90/go.mod h1:MkpM6qH0Zz8H6btdGOPBmnImw6BbpcMCvPHV9J2V2Rc=
+github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a h1:mZr5L/r+Qw0RHzFnwV/2jB2GPm/dOcaoki6/Rz34eCw=
+github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a/go.mod h1:Jk5CZ+5dR63295HwuIRn+MOz/RwGvZvy5UEJpoAiGkk=
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79 h1:xZIEcf1IAtrI81CRyflqoeqkbTz7CUd3aAicW9HDzfY=
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79/go.mod h1:QvbIKqCHbVYFCko+ZlLGzFh6h/K7pqSKGzADrzTUvls=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=

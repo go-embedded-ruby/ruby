@@ -426,6 +426,10 @@ func (vm *VM) bootstrap() {
 	vm.registerYAML()          // YAML/Psych loadable shell; needs StandardError
 	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
 	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
+	vm.registerCommonmark()    // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-ruby-commonmark
+	vm.registerMustache()      // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
+	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
+	vm.registerBuilder()       // Builder::XmlMarkup (require "builder"), backed by go-ruby-builder
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
 	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)

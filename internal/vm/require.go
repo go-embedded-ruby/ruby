@@ -42,6 +42,7 @@ var providedFeatures = map[string]bool{
 	"rexml": true, "rexml/document": true,
 	"logger": true, "pstore": true,
 	"msgpack": true, "toml": true,
+	"commonmark": true, "mustache": true, "jbuilder": true, "builder": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
