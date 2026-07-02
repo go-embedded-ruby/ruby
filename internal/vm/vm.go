@@ -164,6 +164,13 @@ type VM struct {
 
 	arAdapter *arSQLiteAdapter // the ActiveRecord::Base connection (require "active_record"), backed by go-ruby-sqlite3; nil until establish_connection
 
+	// arModels caches the *ActiveRecordModel lazily built for each
+	// `class … < ActiveRecord::Base` subclass, and arTableNames records an
+	// explicit `self.table_name = "…"` override per class (otherwise the table
+	// name is inferred from the class name via activerecord.Tableize).
+	arModels     map[*RClass]*ActiveRecordModel
+	arTableNames map[*RClass]string
+
 	cBasicObject, cObject, cModule, cClass *RClass
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cComplex, cRational                    *RClass

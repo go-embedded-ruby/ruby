@@ -30,6 +30,10 @@ github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38 h1:j0VAUKCGN
 github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38/go.mod h1:PgAtItdQBv87Wog0Q7rnbwhqsupDC0pDXDlZgSv6nvA=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702164905-aee9eeac33f8 h1:Wch5abT03FDXqmfbicJ+obeRP0brwY3DzvE6irEisZI=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702164905-aee9eeac33f8/go.mod h1:0QY+Ri6/HhOkjRGhhyZ5NwtcDosKI7xwO5csmWEG0W0=
+github.com/go-ruby-activerecord/activerecord v0.0.0-20260702220727-79156c39cc96 h1:ZPCAAa/KIV8AsuSEDFcsXWRgENPUtH9bQy/BaHdbU0o=
+github.com/go-ruby-activerecord/activerecord v0.0.0-20260702220727-79156c39cc96/go.mod h1:0QY+Ri6/HhOkjRGhhyZ5NwtcDosKI7xwO5csmWEG0W0=
+github.com/go-ruby-activerecord/activerecord v0.0.0-20260702221722-178c14377e6e h1:0l/wRvg8V0xZ84nkHie5+ToxoChV59DyV0qRAiIEabg=
+github.com/go-ruby-activerecord/activerecord v0.0.0-20260702221722-178c14377e6e/go.mod h1:0QY+Ri6/HhOkjRGhhyZ5NwtcDosKI7xwO5csmWEG0W0=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795 h1:UPDrh2pXuwewmbZiEM5SWg26Hy/08mw4MJnCszwGUEk=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795/go.mod h1:4gG3enh3yJ4fpQWjNuzsLbB01vF8XINKkgqsHdfL9O4=
 github.com/go-ruby-base64/base64 v0.0.0-20260630081041-5dec54f20f53 h1:MBggShyLWDpr0USQMZvcRvRc+OIcHKFn4ohDnmB3C6k=
