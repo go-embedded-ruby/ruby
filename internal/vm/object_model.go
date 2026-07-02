@@ -669,6 +669,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Nokogiri::XML::Node"].(*RClass)
 	case *NokogiriNodeSet:
 		return vm.consts["Nokogiri::XML::NodeSet"].(*RClass)
+	case *RSpecMatcher:
+		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
+	case *RSpecExpectation:
+		return vm.consts["RSpec::Expectations::ExpectationTarget"].(*RClass)
 	case *PrettyPrint:
 		return vm.cPrettyPrint
 	case *PrettyPrintGroup:
