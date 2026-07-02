@@ -47,6 +47,7 @@ var providedFeatures = map[string]bool{
 	"addressable": true, "addressable/uri": true, "addressable/template": true,
 	"commonmark": true, "mustache": true, "jbuilder": true, "builder": true,
 	"sqlite3": true, "nokogiri": true,
+	"redis": true, "pg": true, "sequel": true,
 	"rspec": true, "rspec/expectations": true, "rspec/matchers": true,
 	"rubocop": true,
 	"grape": true,

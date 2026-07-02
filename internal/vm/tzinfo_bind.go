@@ -82,4 +82,30 @@ func rubyTimeArg(args []object.Value) stdtime.Time {
 
 // goTimeToRuby wraps a Go time.Time as an rbgo Time (whole-second resolution,
 // matching the rest of the Time surface).
-func goTimeToRuby(t stdtime.Time) object.Value { return &Time{t: gotime.FromUnix(t.Unix())} }
+//
+// The instant is carried in the Go time.Time's OWN location, not forced to UTC:
+// MRI renders strftime / to_s in the Time's local zone (the wall clock of that
+// zone), so a Chronic parse of "2016-05-27 12:00:00" or a TZInfo local
+// conversion must keep its wall clock and offset. We round-trip through
+// RFC3339 (which encodes the numeric offset) so gotime's Parse rebuilds a
+// composite whose Format renders that same wall clock; getutc / UTC re-shifts
+// to UTC as MRI does. FromUnix would discard the offset and render UTC-shifted.
+func goTimeToRuby(t stdtime.Time) object.Value {
+	// Truncate to whole seconds (the rest of the Time surface is second
+	// resolution) while preserving the location, then encode the offset via
+	// RFC3339 for zonedFromRFC3339 to reconstruct.
+	t = t.Truncate(stdtime.Second)
+	return &Time{t: zonedFromRFC3339(t.Format(stdtime.RFC3339), t.Unix())}
+}
+
+// zonedFromRFC3339 rebuilds a gotime composite from an RFC3339 string, keeping
+// the numeric offset it encodes so Format renders the wall clock of that zone.
+// The RFC3339 rendering of any valid time.Time parses cleanly; the error path
+// falls back to the UTC instant so a malformed input can never panic.
+func zonedFromRFC3339(rfc3339 string, unix int64) gotime.Interface {
+	r := gotime.Parse(stdtime.RFC3339, rfc3339)
+	if r.HasError() {
+		return gotime.FromUnix(unix)
+	}
+	return r.Payload().(gotime.Interface)
+}

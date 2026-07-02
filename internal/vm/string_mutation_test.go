@@ -61,6 +61,17 @@ func TestStringMutation(t *testing.T) {
 		{"slice_bang_oob", `p "hello".slice!(9)`, "nil\n"},
 		{"slice_bang_oob_startlen", `p "hello".slice!(9, 1)`, "nil\n"},
 		{"slice_bang_oob_range", `p "hello".slice!(9..10)`, "nil\n"},
+		// Binary (ASCII-8BIT) slice! is byte-oriented and keeps the result binary
+		// (MRI): "é" is 2 bytes, so a 5-char "héllo".b is 6 bytes; slice!(0, 6)
+		// removes all 6 bytes and the removed span reports 6 bytes, not 5 chars.
+		{"slice_bang_binary_bytes", `s = "héllo".b; p s.slice!(0, 6).bytesize`, "6\n"},
+		{"slice_bang_binary_enc", `s = "héllo".b; p s.slice!(0, 6).encoding.to_s`, "\"ASCII-8BIT\"\n"},
+		{"slice_bang_binary_empties", `s = "héllo".b; s.slice!(0, 6); p s.bytesize`, "0\n"},
+		{"slice_bang_binary_byteoffset", `s = "é".b; p s.slice!(1).bytesize`, "1\n"},
+		{"slice_bang_binary_partial", `s = "héllo".b; s.slice!(0, 2); p s.bytesize`, "4\n"},
+		{"slice_bang_binary_forced", `s = "abc".force_encoding("ASCII-8BIT"); p s.slice!(0, 2)`, "\"ab\"\n"},
+		{"slice_bang_binary_range", `s = "héllo".b; p s.slice!(0..1).bytesize`, "2\n"},
+		{"slice_bang_binary_oob", `s = "é".b; p s.slice!(9)`, "nil\n"},
 		{"freeze_frozen?", `s = "x".freeze; p s.frozen?`, "true\n"},
 		// <<= reassigns the (mutated) same object.
 		{"shovel_assign", `s = "a"; s <<= "b"; p s`, "\"ab\"\n"},

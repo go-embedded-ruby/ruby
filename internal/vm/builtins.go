@@ -441,6 +441,9 @@ func (vm *VM) bootstrap() {
 	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
 	vm.registerBuilder()       // Builder::XmlMarkup (require "builder"), backed by go-ruby-builder
 	vm.registerSQLite3()       // SQLite3::Database/Statement (require "sqlite3"), backed by go-ruby-sqlite3 (modernc); needs StandardError for SQLite3::Exception
+	vm.registerRedis()         // Redis client (require "redis"), backed by go-ruby-redis RESP codec; socket = injected IO seam; needs StandardError for Redis::BaseError
+	vm.registerPG()            // PG::Connection/Result (require "pg"), backed by go-ruby-pg v3 protocol; socket = injected IO seam; needs StandardError for PG::Error
+	vm.registerSequel()        // Sequel query builder + Database (require "sequel"), backed by go-ruby-sequel; executor seam wired to SQLite3::Database (real execution)
 	vm.registerNokogiri()      // Nokogiri::HTML/XML -> Document/Node/NodeSet (require "nokogiri"), backed by go-ruby-nokogiri; needs StandardError for Nokogiri::SyntaxError
 	vm.registerNokogiriXSLT()  // Nokogiri::XSLT(str) -> Stylesheet#transform/apply_to (require "nokogiri"), backed by go-ruby-xslt over go-ruby-nokogiri; needs registerNokogiri first
 	vm.registerRSpec()         // RSpec matcher + expect surface (require "rspec"), backed by go-ruby-rspec; needs Exception for ExpectationNotMetError
@@ -1421,7 +1424,7 @@ func (vm *VM) bootstrap() {
 		if re, ok := args[0].(*Regexp); ok { // s[/re/] / s[/re/, group]
 			res = vm.stringRegexpIndex(strOf(self), re, args[1:])
 		} else {
-			res = stringIndex(strOf(self), args)
+			res = stringIndexEnc(strOf(self), args, self.(*object.String).IsBinary())
 		}
 		if sub, ok := res.(*object.String); ok { // a slice keeps the receiver's encoding
 			sub.Enc = self.(*object.String).Enc
@@ -4018,8 +4021,29 @@ func parseLeadingFloat(s string) float64 {
 // stringIndex implements String#[]: s[i], s[i, len], and s[range], all
 // rune-indexed, returning nil for an out-of-range start.
 func stringIndex(s string, args []object.Value) object.Value {
-	r := []rune(s)
-	n := len(r)
+	return stringIndexEnc(s, args, false)
+}
+
+// stringIndexEnc implements String#[] / #slice indexing. When binary is true the
+// receiver is ASCII-8BIT, so the integer index/length forms count BYTES (not
+// characters) and the sliced result stays binary — matching MRI, where index
+// and length on an ASCII-8BIT string are byte offsets. For the default (UTF-8)
+// case it indexes by character, unchanged. The substring form (s[sub]) is a
+// byte-wise Contains either way, so it needs no encoding branch.
+func stringIndexEnc(s string, args []object.Value, binary bool) object.Value {
+	// units is the addressable sequence: bytes for a binary string, runes
+	// otherwise. take(lo, hi) rebuilds the corresponding substring.
+	var n int
+	var take func(lo, hi int) string
+	if binary {
+		b := []byte(s)
+		n = len(b)
+		take = func(lo, hi int) string { return string(b[lo:hi]) }
+	} else {
+		r := []rune(s)
+		n = len(r)
+		take = func(lo, hi int) string { return string(r[lo:hi]) }
+	}
 	if len(args) == 2 {
 		start := normIndex(intArg(args[0]), n)
 		length := intArg(args[1])
@@ -4030,14 +4054,14 @@ func stringIndex(s string, args []object.Value) object.Value {
 		if end > n {
 			end = n
 		}
-		return object.NewString(string(r[start:end]))
+		return object.NewString(take(start, end))
 	}
 	if rng, ok := args[0].(*object.Range); ok {
 		start, length, ok := sliceRange(n, rng)
 		if !ok {
 			return object.NilV
 		}
-		return object.NewString(string(r[start : start+length]))
+		return object.NewString(take(start, start+length))
 	}
 	if sub, ok := args[0].(*object.String); ok { // s[substr] -> the substring if present, else nil
 		if strings.Contains(s, sub.Str()) {
@@ -4049,7 +4073,7 @@ func stringIndex(s string, args []object.Value) object.Value {
 	if i < 0 || i >= n {
 		return object.NilV
 	}
-	return object.NewString(string(r[i]))
+	return object.NewString(take(i, i+1))
 }
 
 // byteslice returns a substring by BYTE offsets (not characters), the way MRI's
@@ -4353,6 +4377,19 @@ func stringAssignSpan(args []object.Value, n int) (start, length int) {
 // receiver and returns it (nil when the index does not select anything).
 func stringSliceBang(s *object.String, args []object.Value) object.Value {
 	checkFrozen(s)
+	// A binary (ASCII-8BIT) string slices by BYTES and the removed span stays
+	// binary, matching MRI; a UTF-8 string slices by characters.
+	if s.IsBinary() {
+		b := s.B
+		n := len(b)
+		start, length, ok := sliceSpan(args, n)
+		if !ok {
+			return object.NilV
+		}
+		removed := append([]byte{}, b[start:start+length]...)
+		s.B = append(append([]byte{}, b[:start]...), b[start+length:]...)
+		return &object.String{B: removed, Enc: s.Enc}
+	}
 	r := []rune(s.Str())
 	n := len(r)
 	start, length, ok := sliceSpan(args, n)
