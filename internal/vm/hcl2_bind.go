@@ -59,12 +59,6 @@ func hcl2Context(ctx object.Value) *hcl2.Context {
 	}
 	c := hcl2.NewContext()
 	for _, k := range vars.Keys {
-		if k.ToS() == "variables" || k.ToS() == "functions" {
-			// Skip the structural keys when the whole Hash doubles as variables.
-			if _, hasVars := hcl2HashGet(h, "variables"); hasVars {
-				continue
-			}
-		}
 		val, _ := vars.Get(k)
 		c.Variables[hcl2Key(k)] = toHCL2(val)
 	}
