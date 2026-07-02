@@ -191,8 +191,8 @@ func TestJWTRS256(t *testing.T) {
 	writePEM(t, filepath.Join(dir, "pub.pem"), "PUBLIC KEY", pubDER)
 	src := `
 require "jwt"
-priv = File.read("` + filepath.Join(dir, "priv.pem") + `")
-pub  = File.read("` + filepath.Join(dir, "pub.pem") + `")
+priv = File.read("` + filepath.ToSlash(filepath.Join(dir, "priv.pem")) + `")
+pub  = File.read("` + filepath.ToSlash(filepath.Join(dir, "pub.pem")) + `")
 tok = JWT.encode({"u" => "amy"}, priv, "RS256")
 payload, header = JWT.decode(tok, pub, true, algorithm: "RS256")
 puts "#{payload["u"]}:#{header["alg"]}"
@@ -222,8 +222,8 @@ func TestJWTES256(t *testing.T) {
 	writePEM(t, filepath.Join(dir, "pub.pem"), "PUBLIC KEY", pubDER)
 	src := `
 require "jwt"
-priv = File.read("` + filepath.Join(dir, "priv.pem") + `")
-pub  = File.read("` + filepath.Join(dir, "pub.pem") + `")
+priv = File.read("` + filepath.ToSlash(filepath.Join(dir, "priv.pem")) + `")
+pub  = File.read("` + filepath.ToSlash(filepath.Join(dir, "pub.pem")) + `")
 tok = JWT.encode({"u" => "bob"}, priv, "ES256")
 payload, header = JWT.decode(tok, pub, true, algorithm: "ES256")
 puts "#{payload["u"]}:#{header["alg"]}"
