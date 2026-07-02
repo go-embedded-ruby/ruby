@@ -721,6 +721,38 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Nokogiri::XML::Node"].(*RClass)
 	case *NokogiriNodeSet:
 		return vm.consts["Nokogiri::XML::NodeSet"].(*RClass)
+	case *NokogiriXSLTStylesheet:
+		return vm.consts["Nokogiri::XSLT::Stylesheet"].(*RClass)
+	case *RuboCopRunner:
+		return vm.consts["RuboCop::Runner"].(*RClass)
+	case *RuboCopConfig:
+		return vm.consts["RuboCop::Config"].(*RClass)
+	case *RuboCopOffense:
+		return vm.consts["RuboCop::Cop::Offense"].(*RClass)
+	case *RuboCopLocation:
+		return vm.consts["RuboCop::Cop::Offense::Location"].(*RClass)
+	case *GrapeRouter:
+		return vm.consts["Grape::Router"].(*RClass)
+	case *GrapeRoute:
+		return vm.consts["Grape::Router::Route"].(*RClass)
+	case *GrapeMatch:
+		return vm.consts["Grape::Router::Match"].(*RClass)
+	case *GrapeValidator:
+		return vm.consts["Grape::Validator"].(*RClass)
+	case *GrapeParamsBuilder:
+		return vm.consts["Grape::Validations::ParamsScope::DSL"].(*RClass)
+	case *GrapeFormatter:
+		return vm.consts["Grape::Formatter"].(*RClass)
+	case *ActiveRecordModel:
+		return vm.consts["ActiveRecord::Model"].(*RClass)
+	case *ActiveRecordModelBuilder:
+		return vm.consts["ActiveRecord::Model::DSL"].(*RClass)
+	case *ActiveRecordRelation:
+		return vm.consts["ActiveRecord::Relation"].(*RClass)
+	case *ActiveRecordRecord:
+		return vm.consts["ActiveRecord::Record"].(*RClass)
+	case *ActiveRecordErrors:
+		return vm.consts["ActiveRecord::Errors"].(*RClass)
 	case *RSpecMatcher:
 		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
 	case *RSpecExpectation:
