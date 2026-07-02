@@ -154,10 +154,12 @@ func TestStage4SQLiteData(t *testing.T) {
 	}
 }
 
-// Stage 4b — the same data route expressed through the ActiveRecord ORM. When
-// active_record is loadable it must render the AR-queried rows; otherwise the
-// gap is recorded. This flips to a hard assertion automatically once the
-// go-ruby-activerecord binding (PR #102) lands on main.
+// Stage 4b — the same data route expressed through the ActiveRecord ORM. It
+// probes the specific ORM chain the route needs (not merely that active_record
+// requires) and asserts the AR-queried rows render when that chain works;
+// otherwise it records the exact missing capability. This flips to a hard
+// assertion automatically once the go-ruby-activerecord binding implements the
+// chain (the binding landed via PR #102 but Schema.define is not yet present).
 func TestStage4bActiveRecord(t *testing.T) {
 	// require "active_record" succeeding is not sufficient — probe the specific
 	// ORM chain the route calls (establish_connection + Schema.define + insert +
