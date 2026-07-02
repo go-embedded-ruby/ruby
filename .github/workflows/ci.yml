@@ -35,7 +35,9 @@ jobs:
         run: |
           COVERPKG=$(go list ./internal/... | paste -sd, -)
           go test -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
-          go tool cover -func=cover.out | tail -n 25
+          echo "--- functions below 100% (empty = all covered) ---"
+          go tool cover -func=cover.out | grep -vE '100\.0%$' || true
+          echo "---------------------------------------------------"
           cov=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
           echo "coverage: ${cov}%"
           awk -v t="$cov" 'BEGIN { exit !(t+0 >= 100.0) }' || {
