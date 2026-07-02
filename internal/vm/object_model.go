@@ -707,6 +707,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Nokogiri::XML::Node"].(*RClass)
 	case *NokogiriNodeSet:
 		return vm.consts["Nokogiri::XML::NodeSet"].(*RClass)
+	case *NokogiriXSLTStylesheet:
+		return vm.consts["Nokogiri::XSLT::Stylesheet"].(*RClass)
 	case *RSpecMatcher:
 		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
 	case *RSpecExpectation:
