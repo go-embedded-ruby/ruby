@@ -727,6 +727,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *DigestObj:
 		return x.cls
+	case *BCryptPassword:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:

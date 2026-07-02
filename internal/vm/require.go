@@ -41,6 +41,7 @@ var providedFeatures = map[string]bool{
 	"unicode_normalize": true, "scanf": true, "prettyprint": true,
 	"rexml": true, "rexml/document": true,
 	"logger": true, "pstore": true,
+	"bcrypt": true, "jwt": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
