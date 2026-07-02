@@ -659,6 +659,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
 		// method_missing element DSL and special methods dispatch.
 		return vm.consts["Builder::XmlMarkup"].(*RClass)
+	case *SQLite3Database:
+		return vm.consts["SQLite3::Database"].(*RClass)
+	case *SQLite3Statement:
+		return vm.consts["SQLite3::Statement"].(*RClass)
 	case *PrettyPrint:
 		return vm.cPrettyPrint
 	case *PrettyPrintGroup:
