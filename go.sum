@@ -54,6 +54,8 @@ github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9 
 github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9/go.mod h1:8I30lj4s9N0MCztmdJdCyMRCfK5xBBQiWHUwgnK3pIY=
 github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111 h1:pxsFN2ESynf6yWyy9Z1pX02H042YyC5ILsIVN89wPTU=
 github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111/go.mod h1:Et3sL9ojvqpOBFth/n1pryhkJzr9DvYYQ23g3rUJ0N4=
+github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd h1:VGlMcPCsQBDYqFMRU49q0NcYSE/VuDBhKaDdVDjJP+Y=
+github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd/go.mod h1:L5FvtAnqC4wHelxeOEPnWLz/BHoXA/dPD3KuDpzpcr4=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529 h1:md/l6ifEY6S0Iy1nBk5hVt5BhnWJRqhB08gVEsVvS28=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529/go.mod h1:HEJVI7jQ/BnjiSiu2Wj934QboEAgdv47RNOqvZb+nRw=
 github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272 h1:tHmlER04rO8LxFWbDiKqcFDzB4WFzBio/c6kgeOdpGo=
@@ -64,6 +66,8 @@ github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49 h1:v
 github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49/go.mod h1:nGvVSBSIsYrhM2qs4yQ2k8uDbXCFPWQXXqkowleHMDs=
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c h1:VByP5jdzov6JMMsIPremuz4Q06y/rSCac/j5Q3GvXZk=
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c/go.mod h1:D4xOrc0xIiN0u0Q+KqjfKx/f7up8ekpud/syYsHTrPY=
+github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b h1:hi8tu1lr/1cOkFMdaONWyuNGVmE9GuN8tmpUN6VxgLI=
+github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b/go.mod h1:zPgLGk8wYhXACwDsJqxkdK09WgWbJwalPxiw6qHMGQg=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b h1:1iw1eRBOG7D7jCC/P4hzWllM4IkYiR/jP9Bwuo3ds6c=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
 github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3 h1:L1dfFWPEHgWSbh3tTM4bvIulVoO8CFreHga8wSqtlio=
@@ -72,6 +76,8 @@ github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5 h1:KFU3OKsop0CF8
 github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5/go.mod h1:nHXcH3zaGNmCslZStZVeylXkv1wLp+nzT6qNj+m+QXU=
 github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8 h1:88eY9TFWOtrX2JL7bnGOOJ2SsOpcfjuRAYuDv+HknRY=
 github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8/go.mod h1:lXzMyvgfYye7tZm1cY9ej2SbXzAdJdA2IAiY+niM+nU=
+github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8 h1:cM6xIhOcvpAOPBC/RZxMUixTDlMCz0fQnaab3ee8KH0=
+github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8/go.mod h1:lpczu9a88TnJ1mD0vLvXcL9MJL+2y8ZI5QeP2HmEqjA=
 github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf h1:igeeLsQctCEBtYSrUWmTuYI3Nh8518UtAimgpA2JTg0=
 github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf/go.mod h1:VY1lx+1SYMHiGhxr0R5RIxRXwpq0vkIpQiHLrKYiX8U=
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277 h1:XfUzDZqZWgOUTJ22GdwNOgkZB9MZKhxsPTq0xL1u5Io=
@@ -110,6 +116,8 @@ github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b h1:hWNW3Z8g7Hw
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b/go.mod h1:UQGki9qXLiqaEOm4ih1CGznGNPUDcNGCsLVJ/y6G1G8=
 github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c h1:VAD5jFMNvUBEvL8tQZXyGvbif4qJt9l3S6riFyBtPuk=
 github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c/go.mod h1:PJHlTuP01g0s+3cVfuQgCztiLcUD2intYD2bZTEMOZM=
+github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8 h1:02tvTxeNaPJjebV1A8SUrggsBVco1axxdycqXzH2zDs=
+github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8/go.mod h1:+MJBJltcK0b7tztRFluEcmlg4PVSA23h4LTbsBu7Aks=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386 h1:mt488Km0GMk/yjJtKUY4jo+fNz1xqHe0uLbEwPJa4To=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386/go.mod h1:UpBHz/Hf4Q8h14UpfJ5Cpp+OxVEqqNuICXGnUjg2dKc=
 github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0 h1:NDJ7mJ3uMoysAoBRMJJNr0RRbqLfzp+8flALEeOuahI=

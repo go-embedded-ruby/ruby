@@ -436,6 +436,10 @@ func (vm *VM) bootstrap() {
 	vm.registerMustache()      // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
 	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
 	vm.registerBuilder()       // Builder::XmlMarkup (require "builder"), backed by go-ruby-builder
+	vm.registerRQRCode()       // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
+	vm.registerDotenv()        // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
+	vm.registerHCL2()          // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
+	vm.registerKramdown()      // Kramdown::Document (require "kramdown"), backed by go-ruby-kramdown
 	vm.registerLiquid()        // Liquid::Template.parse(...).render (require "liquid"), backed by go-ruby-liquid; needs StandardError for Liquid::Error
 	vm.registerRouge()         // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
 	vm.registerSlim()          // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error
