@@ -35,8 +35,8 @@ applied across the stdlib. The benefit cuts both ways: rbgo still ships as a
 **single CGO=0 static binary**, and every extracted piece is independently
 reusable, tested and 6-arch by any Go program — no interpreter required.
 
-The `go-ruby-*` family is **53 standalone pure-Go modules — all CI-green, 100%
-coverage, 6-arch** — each its own org. The `go.mod` currently **binds 40 into
+The `go-ruby-*` family is **104 standalone pure-Go modules — all CI-green, 100%
+coverage, 6-arch** — each its own org. The `go.mod` currently **binds 71 into
 rbgo** as native modules (binding the rest in progress):
 
 | Library | Role | Org · landing |
@@ -51,13 +51,17 @@ rbgo** as native modules (binding the rest in progress):
 | **go-ruby-strscan** | `StringScanner` (`strscan`) | [org][grs] · [site](https://go-ruby-strscan.github.io/) |
 
 The full bound family (alphabetical, all native modules in `go.mod`):
-`abbrev`, `base64`, `benchmark`, `bigdecimal`, `cgi`, `cmath`, `csv`, `date`,
-`did-you-mean`, `digest`, `erb`, `find`, `format`, `getoptlong`, `ipaddr`,
-`json`, `logger`, `marshal`, `matrix`, `observer`, `optparse`, `ostruct`,
-`parser`, `pathname`, `prettyprint`, `prime`, `pstore`, `regexp`, `resolv`,
-`rexml`, `scanf`, `securerandom`, `set`, `shellwords`, `strscan`, `tsort`,
-`unicode-normalize`, `uri`, `yaml`, `zlib` — each at
-`github.com/go-ruby-<name>/<name>`.
+`abbrev`, `addressable`, `base64`, `bcrypt`, `benchmark`, `bigdecimal`,
+`builder`, `cgi`, `chronic`, `cmath`, `commonmark`, `csv`, `date`,
+`did-you-mean`, `digest`, `dotenv`, `dry-struct`, `dry-types`, `dry-validation`,
+`erb`, `faker`, `find`, `format`, `getoptlong`, `haml`, `hcl2`, `ipaddr`,
+`jbuilder`, `json`, `jwt`, `kramdown`, `liquid`, `logger`, `mail`, `marshal`,
+`matrix`, `mime-types`, `money`, `msgpack`, `mustache`, `nokogiri`, `oauth2`,
+`observer`, `optparse`, `ostruct`, `parser`, `pathname`, `prettyprint`, `prime`,
+`pstore`, `public-suffix`, `regexp`, `resolv`, `rexml`, `rouge`, `rqrcode`,
+`rspec`, `scanf`, `securerandom`, `set`, `shellwords`, `slim`, `sqlite3`,
+`strscan`, `toml`, `tsort`, `tzinfo`, `unicode-normalize`, `uri`, `yaml`,
+`zlib` — each at `github.com/go-ruby-<name>/<name>`.
 
 Beyond the `go-ruby-*` family, the scientific / container stack binds the
 pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),
