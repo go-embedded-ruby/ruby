@@ -432,6 +432,10 @@ func (vm *VM) bootstrap() {
 	vm.registerChronic()       // Chronic module (go-ruby-chronic backend); needs StandardError
 	vm.registerMoney()         // Money module (go-ruby-money backend); needs StandardError for Money::Currency::UnknownCurrency
 	vm.registerAddressable()   // Addressable module (go-ruby-addressable backend); needs StandardError
+	vm.registerCommonmark()    // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-ruby-commonmark
+	vm.registerMustache()      // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
+	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
+	vm.registerBuilder()       // Builder::XmlMarkup (require "builder"), backed by go-ruby-builder
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
 	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)

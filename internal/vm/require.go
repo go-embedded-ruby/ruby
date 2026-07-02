@@ -45,6 +45,7 @@ var providedFeatures = map[string]bool{
 	"msgpack": true, "toml": true,
 	"tzinfo": true, "chronic": true, "money": true,
 	"addressable": true, "addressable/uri": true, "addressable/template": true,
+	"commonmark": true, "mustache": true, "jbuilder": true, "builder": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
