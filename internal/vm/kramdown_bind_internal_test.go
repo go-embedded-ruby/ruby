@@ -21,8 +21,17 @@ func TestKramdownDocShell(t *testing.T) {
 // TestKramdownKeyBridge covers kramdownKey's to_s-default arm (a non-Symbol,
 // non-String key) and kramdownStr's to_s-default arm (a non-String value).
 func TestKramdownKeyBridge(t *testing.T) {
+	if got := kramdownKey(object.Symbol("s")); got != "s" {
+		t.Errorf("symbol key -> %q", got)
+	}
+	if got := kramdownKey(object.NewString("k")); got != "k" {
+		t.Errorf("string key -> %q", got)
+	}
 	if got := kramdownKey(object.Integer(3)); got != "3" {
 		t.Errorf("integer key -> %q", got)
+	}
+	if got := kramdownStr(object.NewString("s")); got != "s" {
+		t.Errorf("string str -> %q", got)
 	}
 	if got := kramdownStr(object.Integer(7)); got != "7" {
 		t.Errorf("integer str -> %q", got)
