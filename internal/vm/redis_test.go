@@ -14,9 +14,16 @@ import (
 // the injected transport the bindings drive their protocol over.
 const fakeSock = `
 class FakeSock
-  def initialize(reply) ; @in = reply.dup.force_encoding("ASCII-8BIT") ; @out = "".b ; end
+  def initialize(reply) ; @in = reply.dup.force_encoding("ASCII-8BIT") ; @pos = 0 ; @out = "".b ; end
   def write(s) ; @out << s ; s.bytesize ; end
-  def read(n = nil) ; return @in.slice!(0, @in.bytesize) if n.nil? ; @in.slice!(0, n) || "" ; end
+  def read(n = nil)
+    avail = @in.bytesize - @pos
+    return "".b if avail <= 0
+    n = avail if n.nil? || n > avail
+    chunk = @in.byteslice(@pos, n)
+    @pos += n
+    chunk
+  end
   def out ; @out ; end
 end
 `

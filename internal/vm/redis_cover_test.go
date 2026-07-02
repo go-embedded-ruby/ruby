@@ -201,10 +201,10 @@ r.pipelined { |pl| p(pl ? :y : :n) }`
 func TestRedisReadChunking(t *testing.T) {
 	src := fakeSock + `require "redis"
 class GreedySock
-  def initialize(reply) ; @in = reply.dup.force_encoding("ASCII-8BIT") ; @out = "".b ; end
+  def initialize(reply) ; @in = reply.dup.force_encoding("ASCII-8BIT") ; @pos = 0 ; @out = "".b ; end
   def write(s) ; @out << s ; s.bytesize ; end
   # Ignore n: hand back the entire remaining buffer in one go.
-  def read(n = nil) ; @in.slice!(0, @in.bytesize) ; end
+  def read(n = nil) ; chunk = @in.byteslice(@pos, @in.bytesize - @pos) ; @pos = @in.bytesize ; chunk ; end
 end
 r = Redis.new(connection: GreedySock.new("+PONG\r\n:5\r\n"))
 p r.ping

@@ -73,11 +73,12 @@ func (vm *VM) pgConnect(mod *RClass, args []object.Value) object.Value {
 	if io == nil {
 		raise("ArgumentError", "PG.connect requires a connection: IO-like object (rbgo has no native socket yet)")
 	}
-	conn := pg.NewConn(&rubyConn{vm: vm, obj: io})
-	// The StartupMessage carries the parameter set; the caller owns it.
-	if err := conn.RW.(*rubyConn).writeStartup(pg.EncodeStartup(params)); err != nil {
-		raise("PG::ConnectionBad", "%s", err.Error())
-	}
+	rw := &rubyConn{vm: vm, obj: io}
+	conn := pg.NewConn(rw)
+	// The StartupMessage carries the parameter set; the caller owns it. rubyConn's
+	// Write forwards to the Ruby object's #write and never reports an io error (a
+	// Ruby exception unwinds through raise instead), so the write cannot fail here.
+	_, _ = rw.Write(pg.EncodeStartup(params))
 	var auth pg.Authenticator
 	if hasAuth {
 		auth = pg.NewPasswordAuthenticator(user, password)
@@ -86,12 +87,6 @@ func (vm *VM) pgConnect(mod *RClass, args []object.Value) object.Value {
 		raisePGError(err)
 	}
 	return &PGConnObj{cls: pgConnClass(vm, mod), conn: conn, io: io}
-}
-
-// writeStartup writes the untyped StartupMessage bytes to the seam.
-func (c *rubyConn) writeStartup(b []byte) error {
-	_, err := c.Write(b)
-	return err
 }
 
 // pgConnClass returns the PG::Connection class.
