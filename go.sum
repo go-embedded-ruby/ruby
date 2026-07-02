@@ -84,6 +84,8 @@ github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90 h1:xjyxDgC
 github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90/go.mod h1:MkpM6qH0Zz8H6btdGOPBmnImw6BbpcMCvPHV9J2V2Rc=
 github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a h1:mZr5L/r+Qw0RHzFnwV/2jB2GPm/dOcaoki6/Rz34eCw=
 github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a/go.mod h1:Jk5CZ+5dR63295HwuIRn+MOz/RwGvZvy5UEJpoAiGkk=
+github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702151113-e53746446651 h1:5zEQVymgZTTJMmfAf66r8RtIyhjZhX/LEvISYfYLo0A=
+github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702151113-e53746446651/go.mod h1:WsLJ6/u8/nzHShZKChf20tHosn/nlVnOJiD/xEY6X8c=
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79 h1:xZIEcf1IAtrI81CRyflqoeqkbTz7CUd3aAicW9HDzfY=
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79/go.mod h1:QvbIKqCHbVYFCko+ZlLGzFh6h/K7pqSKGzADrzTUvls=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=

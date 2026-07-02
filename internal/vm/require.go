@@ -46,7 +46,7 @@ var providedFeatures = map[string]bool{
 	"tzinfo": true, "chronic": true, "money": true,
 	"addressable": true, "addressable/uri": true, "addressable/template": true,
 	"commonmark": true, "mustache": true, "jbuilder": true, "builder": true,
-	"sqlite3": true,
+	"sqlite3": true, "nokogiri": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime

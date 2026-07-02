@@ -663,6 +663,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["SQLite3::Database"].(*RClass)
 	case *SQLite3Statement:
 		return vm.consts["SQLite3::Statement"].(*RClass)
+	case *NokogiriDocument:
+		return vm.consts["Nokogiri::XML::Document"].(*RClass)
+	case *NokogiriNode:
+		return vm.consts["Nokogiri::XML::Node"].(*RClass)
+	case *NokogiriNodeSet:
+		return vm.consts["Nokogiri::XML::NodeSet"].(*RClass)
 	case *PrettyPrint:
 		return vm.cPrettyPrint
 	case *PrettyPrintGroup:
