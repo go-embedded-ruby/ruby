@@ -43,16 +43,15 @@ func (r *RedisObj) Inspect() string { return "#<Redis client>" }
 func (r *RedisObj) Truthy() bool    { return true }
 
 // rubyConn bridges a Ruby IO-like object (responding to #read and #write) to the
-// io.ReadWriter the redis library drives its RESP stream over. Write forwards the
-// bytes to the object's #write; Read pulls bytes from the object's #read,
-// buffering any surplus a #read(n) returns beyond the caller's slice. This is the
-// host seam: the library owns the protocol, rbgo owns the transport.
+// io.ReadWriter the redis and pg libraries drive their protocol streams over.
+// Write forwards the bytes to the object's #write; Read pulls up to len(p) bytes
+// from the object's #read. The library wraps a rubyConn in a bufio.Reader, which
+// always supplies a large destination slice, so a well-behaved #read(n) reply
+// (n bytes at most) fits without any surplus buffering. This is the host seam:
+// the library owns the protocol, rbgo owns the transport.
 type rubyConn struct {
 	vm  *VM
 	obj object.Value
-	// pending holds bytes a prior #read returned that did not fit the caller's
-	// buffer, to be served before the next #read.
-	pending []byte
 }
 
 // Write sends p to the Ruby object's #write and reports the byte count. A Ruby
@@ -63,41 +62,24 @@ func (c *rubyConn) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Read fills p from the Ruby object's #read, first draining any pending surplus.
-// It asks the object for len(p) bytes; a nil / empty reply is EOF. Bytes beyond
-// p are buffered in pending for the next call.
+// Read fills p from the Ruby object's #read(len(p)); a nil / empty reply is EOF.
+// The library's bufio.Reader supplies a large p, so the reply always fits.
 func (c *rubyConn) Read(p []byte) (int, error) {
-	if len(c.pending) > 0 {
-		n := copy(p, c.pending)
-		c.pending = c.pending[n:]
-		return n, nil
-	}
-	want := len(p)
-	if want == 0 {
-		return 0, nil
-	}
-	rv := c.vm.send(c.obj, "read", []object.Value{object.Integer(want)}, nil)
+	rv := c.vm.send(c.obj, "read", []object.Value{object.Integer(len(p))}, nil)
 	data := redisReadBytes(rv)
 	if len(data) == 0 {
 		return 0, io.EOF
 	}
-	n := copy(p, data)
-	if n < len(data) {
-		c.pending = append(c.pending, data[n:]...)
-	}
-	return n, nil
+	return copy(p, data), nil
 }
 
 // redisReadBytes extracts the byte payload a Ruby #read returned: a String yields
-// its bytes, nil yields none (EOF).
+// its bytes, a nil (or anything else) yields none (EOF).
 func redisReadBytes(v object.Value) []byte {
-	switch s := v.(type) {
-	case *object.String:
+	if s, ok := v.(*object.String); ok {
 		return s.B
-	case object.Nil, nil:
-		return nil
 	}
-	return []byte(v.ToS())
+	return nil
 }
 
 // --- Ruby command argument -> library `any` --------------------------------
@@ -149,20 +131,14 @@ func (vm *VM) redisValue(v any) object.Value {
 		return object.NilV
 	case string:
 		return object.NewString(n)
-	case []byte:
-		return &object.String{B: n, Enc: "ASCII-8BIT"}
 	case bool:
 		return object.Bool(n)
 	case int64:
 		return object.Integer(n)
-	case int:
-		return object.Integer(int64(n))
 	case float64:
 		return object.Float(n)
 	case *redis.VerbatimString:
 		return object.NewString(n.Text)
-	case redis.Symbol:
-		return object.NewString(string(n))
 	case []any:
 		return vm.redisArray(n)
 	case *redis.Map:
@@ -275,13 +251,11 @@ func redisOptsFromHash(h *object.Hash, opts *redis.Options) object.Value {
 	return conn
 }
 
-// redisInt coerces a keyword value to an int64 (0 for a non-integer).
+// redisInt coerces a db:/protocol: keyword value to an int64; a non-Integer
+// (never a sensible index) yields 0.
 func redisInt(v object.Value) int64 {
-	switch n := v.(type) {
-	case object.Integer:
+	if n, ok := v.(object.Integer); ok {
 		return int64(n)
-	case *object.Bignum:
-		return n.I.Int64()
 	}
 	return 0
 }
