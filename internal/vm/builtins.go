@@ -448,7 +448,9 @@ func (vm *VM) bootstrap() {
 	vm.registerNokogiriXSLT()  // Nokogiri::XSLT(str) -> Stylesheet#transform/apply_to (require "nokogiri"), backed by go-ruby-xslt over go-ruby-nokogiri; needs registerNokogiri first
 	vm.registerRSpec()         // RSpec matcher + expect surface (require "rspec"), backed by go-ruby-rspec; needs Exception for ExpectationNotMetError
 	vm.registerRuboCop()       // RuboCop::Runner#inspect/autocorrect + Cop::Offense (require "rubocop"), backed by go-ruby-rubocop over go-ruby-parser; needs StandardError for RuboCop::Error
+	vm.registerRack()          // Rack::Request/Response/Utils (require "rack" / "rack/utils"), backed by go-ruby-rack; deterministic env/query/escape, no socket
 	vm.registerGrape()         // Grape::Router/Validator/Formatter (require "grape"), backed by go-ruby-grape; endpoint-block exec + Rack env are host seams; needs StandardError for Grape::Exceptions
+	vm.registerSinatra()       // Sinatra::Base class-DSL + #call Rack adapter (require "sinatra/base"), backed by go-ruby-sinatra over go-ruby-rack; route/filter block eval is the rbgo seam; needs Rack + StandardError (Sinatra::NotFound), so registered after registerRack
 	vm.registerActiveRecord()  // ActiveRecord::Model/Relation/Record + Base.establish_connection (require "active_record"), backed by go-ruby-activerecord; adapter seam wired to go-ruby-sqlite3 so queries run; needs StandardError for ActiveRecordError
 	vm.registerRQRCode()       // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
 	vm.registerDotenv()        // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
