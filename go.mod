@@ -28,10 +28,12 @@ require (
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
+	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
 	github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5
 	github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8
+	github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
 	github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca
@@ -49,10 +51,12 @@ require (
 	github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
+	github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
+	github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4
 	github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8
 	github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b

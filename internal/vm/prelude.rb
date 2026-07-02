@@ -1271,6 +1271,199 @@ class ERB
 end
 
 # ---------------------------------------------------------------------------
+# Slim (require "slim"): the Slim template engine (the `slim` gem). Slim compiles
+# an indentation-structured template to Ruby source that, evaluated against a set
+# of locals, renders the same HTML the gem produces. The scan/compile lives in the
+# go-ruby-slim library, reached through the native Slim::Template#__compile (slim.go);
+# the eval — which runs the compiled source's embedded Ruby (`=` expressions, `-`
+# control, interpolation) — stays here because it needs a Binding, mirroring ERB.
+# The compiled source references the runtime helpers Slim::Helpers.escape_html /
+# .render_attribute / .render_attributes; those are defined below (the go-ruby-slim
+# reference implementations) so the rendered HTML comes from one authoritative
+# source. Slim::Template / Slim::Engine are created natively; this reopens
+# Slim::Template to add the public compile-to-eval API.
+# ---------------------------------------------------------------------------
+module Slim
+  module Helpers
+    # Safe wraps a value the compiled source marked HTML-safe (an "attr==expr"
+    # unescaped attribute) so render_attributes skips escaping it.
+    class Safe
+      attr_reader :value
+      def initialize(v)
+        @value = v
+      end
+    end
+
+    def self.safe(v)
+      Safe.new(v)
+    end
+
+    # escape_html mirrors Temple::Utils.escape_html, the escaper Slim uses for "="
+    # output and interpolated text: the five-character HTML entity table (' becomes
+    # &#39;, '/' is left untouched).
+    def self.escape_html(s)
+      s.to_s.gsub(/[&<>"']/, '&' => '&amp;', '<' => '&lt;', '>' => '&gt;',
+                  '"' => '&quot;', "'" => '&#39;')
+    end
+
+    # render_attribute renders a single dynamic attribute the way Slim does: a
+    # nil/false value is omitted (""), a true value emits name="" (a boolean
+    # attribute), and any other value emits name="escaped". A Safe-wrapped value is
+    # left unescaped.
+    def self.render_attribute(name, value)
+      return '' if value.nil? || value == false
+      return %( #{name}="") if value == true
+      return %( #{name}="#{value.value}") if value.is_a?(Safe)
+
+      %( #{name}="#{escape_html(value)}")
+    end
+
+    # render_attributes renders a merged attribute hash the way Slim does: class
+    # values merged with spaces, a single id, boolean attributes (a true value)
+    # emitted as name="", nil/false values omitted, every pair sorted
+    # alphabetically, string values HTML-escaped (Safe-wrapped values left as-is).
+    # Trailing hashes are splat sources merged on top of the base hash.
+    def self.render_attributes(base, *splats)
+      merged = {}
+      add = lambda do |k, v|
+        k = k.to_s
+        if k == 'class'
+          existing = merged['class']
+          val = v.is_a?(Array) ? v.join(' ') : v
+          merged['class'] = [existing, val].compact.reject { |x| x == '' }.join(' ')
+        elsif k == 'id'
+          merged['id'] = v
+        else
+          merged[k] = v
+        end
+      end
+      base.each { |k, v| add.call(k, v) }
+      splats.each { |h| (h || {}).each { |k, v| add.call(k, v) } }
+
+      out = +''
+      merged.keys.sort.each do |k|
+        out << render_attribute(k, merged[k])
+      end
+      out
+    end
+  end
+
+  # Slim::Template compiles a template to Ruby source (via the native __compile,
+  # slim.go) and renders it by eval'ing that source in a binding carrying the
+  # supplied locals — the same compile→eval seam ERB uses. new accepts the template
+  # either as the first positional argument or as a block returning the source (the
+  # gem's Slim::Template.new { source } form).
+  class Template
+    attr_reader :src
+
+    # new(template = nil, &block) compiles the template source (the positional
+    # argument, or the block's return value) into evaluable Ruby source.
+    def initialize(template = nil, &block)
+      template = block.call if template.nil? && block
+      @src = __compile(template.to_s)
+    end
+
+    # render(scope = Object.new, locals = {}) evaluates the compiled source with the
+    # entries of locals bound as local variables, so the template can reference them
+    # by name. scope is accepted for gem compatibility (the object the template body
+    # would run against) but the compiled Slim source only reads the bound locals.
+    def render(_scope = Object.new, locals = {})
+      b = binding
+      locals.each { |k, v| b.local_variable_set(k, v) }
+      eval(@src, b, '(slim)', 0)
+    end
+  end
+
+  Engine = Template
+end
+
+# ---------------------------------------------------------------------------
+# Haml (require "haml"): the Haml template engine (the `haml` gem), the same
+# compile→eval design as Slim/ERB. The scan/compile lives in the go-ruby-haml
+# library, reached through the native Haml::Template#__compile (haml.go); the eval
+# stays here because it needs a Binding. The compiled source references the runtime
+# helpers Haml::Util.escape_html and Haml::HamlAttributes.render; those are defined
+# below (the go-ruby-haml reference implementations). Haml::Template / Haml::Engine
+# are created natively; this reopens Haml::Template to add the public API.
+# ---------------------------------------------------------------------------
+module Haml
+  module Util
+    # escape_html mirrors Haml::Util.escape_html: the five-character HTML entity
+    # table (' becomes &#39;).
+    def self.escape_html(s)
+      s.to_s.gsub(/[&<>"']/, '&' => '&amp;', '<' => '&lt;', '>' => '&gt;',
+                  '"' => '&quot;', "'" => '&#39;')
+    end
+  end
+
+  # HamlAttributes.render renders a dynamic attribute hash the way Haml does: class
+  # values merged with spaces, id values merged with "_", data hashes expanded to
+  # data-<k>, boolean attributes emitted bare when truthy and omitted when
+  # nil/false, and every pair sorted alphabetically with escaped values.
+  module HamlAttributes
+    BOOL = %w[disabled readonly multiple checked selected hidden required async
+              defer novalidate autofocus open reversed ismap muted
+              controls loop autoplay].freeze
+
+    def self.render(h)
+      pairs = {}
+      h.each do |k, v|
+        k = k.to_s
+        if k == 'data' && v.is_a?(Hash)
+          v.each { |dk, dv| pairs["data-#{dk}"] = dv }
+        elsif k == 'class'
+          existing = pairs['class']
+          merged = [existing, (v.is_a?(Array) ? v.join(' ') : v)].compact.join(' ')
+          pairs['class'] = merged
+        elsif k == 'id'
+          existing = pairs['id']
+          pairs['id'] = [existing, v].compact.join('_')
+        else
+          pairs[k] = v
+        end
+      end
+      out = +''
+      pairs.keys.sort.each do |k|
+        v = pairs[k]
+        if BOOL.include?(k)
+          out << " #{k}" if v && v != false
+        else
+          next if v.nil?
+
+          out << %( #{k}="#{Haml::Util.escape_html(v.to_s)}")
+        end
+      end
+      out
+    end
+  end
+
+  # Haml::Template compiles a Haml template to Ruby source (native __compile,
+  # haml.go) and renders it by eval'ing that source in a binding carrying the
+  # supplied locals — the same compile→eval seam ERB/Slim use.
+  class Template
+    attr_reader :src
+
+    # new(template = nil, &block) compiles the template source (the positional
+    # argument, or the block's return value) into evaluable Ruby source.
+    def initialize(template = nil, &block)
+      template = block.call if template.nil? && block
+      @src = __compile(template.to_s)
+    end
+
+    # render(scope = Object.new, locals = {}) evaluates the compiled source with the
+    # entries of locals bound as local variables. scope is accepted for gem
+    # compatibility; the compiled Haml source reads only the bound locals.
+    def render(_scope = Object.new, locals = {})
+      b = binding
+      locals.each { |k, v| b.local_variable_set(k, v) }
+      eval(@src, b, '(haml)', 0)
+    end
+  end
+
+  Engine = Template
+end
+
+# ---------------------------------------------------------------------------
 # OptionParser (optparse): a command-line option parser matching MRI's surface —
 # declaration (#on/#on_tail/#on_head/#separator), the parse family (#parse/#parse!/
 # #order/#order!/#permute/#permute!/#getopts), type coercion, abbreviation,

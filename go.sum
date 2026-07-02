@@ -62,6 +62,8 @@ github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c h1:dJBMxMFxB
 github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c/go.mod h1:1tuz12SHPOcnFSfdPYRFwVvRhMT4Xn4M4jfPFgM7pLA=
 github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49 h1:v2Cy3bZTTi+u9XKBRP8FmYHwsWwZ+t8hlh3s4i1gGfQ=
 github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49/go.mod h1:nGvVSBSIsYrhM2qs4yQ2k8uDbXCFPWQXXqkowleHMDs=
+github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c h1:VByP5jdzov6JMMsIPremuz4Q06y/rSCac/j5Q3GvXZk=
+github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c/go.mod h1:D4xOrc0xIiN0u0Q+KqjfKx/f7up8ekpud/syYsHTrPY=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b h1:1iw1eRBOG7D7jCC/P4hzWllM4IkYiR/jP9Bwuo3ds6c=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
 github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3 h1:L1dfFWPEHgWSbh3tTM4bvIulVoO8CFreHga8wSqtlio=
@@ -70,6 +72,8 @@ github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5 h1:KFU3OKsop0CF8
 github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5/go.mod h1:nHXcH3zaGNmCslZStZVeylXkv1wLp+nzT6qNj+m+QXU=
 github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8 h1:88eY9TFWOtrX2JL7bnGOOJ2SsOpcfjuRAYuDv+HknRY=
 github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8/go.mod h1:lXzMyvgfYye7tZm1cY9ej2SbXzAdJdA2IAiY+niM+nU=
+github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf h1:igeeLsQctCEBtYSrUWmTuYI3Nh8518UtAimgpA2JTg0=
+github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf/go.mod h1:VY1lx+1SYMHiGhxr0R5RIxRXwpq0vkIpQiHLrKYiX8U=
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277 h1:XfUzDZqZWgOUTJ22GdwNOgkZB9MZKhxsPTq0xL1u5Io=
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277/go.mod h1:9+5E2AAIpErKRtzJ7zqZSfptjlD/XcD/ni6H9jpO37Y=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=
@@ -104,6 +108,8 @@ github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac h1:Y++tdsBF6
 github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac/go.mod h1:RD3wPeMjMThQ7QVnB9O15gCllRg+RJhSEJu9DtFaLLQ=
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b h1:hWNW3Z8g7Hwi17NJT912J0udGhK5dzxub8u7T07Oyv8=
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b/go.mod h1:UQGki9qXLiqaEOm4ih1CGznGNPUDcNGCsLVJ/y6G1G8=
+github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c h1:VAD5jFMNvUBEvL8tQZXyGvbif4qJt9l3S6riFyBtPuk=
+github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c/go.mod h1:PJHlTuP01g0s+3cVfuQgCztiLcUD2intYD2bZTEMOZM=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386 h1:mt488Km0GMk/yjJtKUY4jo+fNz1xqHe0uLbEwPJa4To=
 github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386/go.mod h1:UpBHz/Hf4Q8h14UpfJ5Cpp+OxVEqqNuICXGnUjg2dKc=
 github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0 h1:NDJ7mJ3uMoysAoBRMJJNr0RRbqLfzp+8flALEeOuahI=
@@ -112,6 +118,8 @@ github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910 h1:Q41u365suJ1TlrX
 github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910/go.mod h1:F/P0PXeE5ybEPeWYfb1JAKWny1Li3dnlm6YxG2/vffE=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z9b99kWJht8AgtlIbdiq7Y02j6eddxW+rr4MJpCS6kw=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
+github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4 h1:FYfHAxVaFU2q7BQ8wsKesUxO2uAQ2VK/TdTVut1/wfg=
+github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4/go.mod h1:+y2RCJmyKesyDRfmIlOSHFbBzTgEIpch7rqkFqPunAw=
 github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8 h1:WxInOHCeP0EDmZqorooXIYTcDgBNm+3rOnfjRcWHlN0=
 github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8/go.mod h1:WNa2NtlvT8gaOrAw6m3VCb+8WgBWdOLLEWbKiugZ2wY=
 github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785 h1:NHdF22sPi41R7BYg2SHtIllW5yybLu9WpqinCUSVaQA=
