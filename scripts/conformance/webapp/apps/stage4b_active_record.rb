@@ -1,9 +1,11 @@
 # Stage 4b (data-backed via the ORM) — ActiveRecord + sqlite3 + ERB.
 # The idiomatic Rails-style data route: an ActiveRecord model over an in-memory
 # SQLite database, queried with the AR query interface and rendered through ERB.
-# The Go harness only runs this file when `active_record` is loadable; otherwise
-# it records the exact gap. This is the app that must go green once the
-# go-ruby-activerecord binding lands (PR #102, bind/batch7).
+# The Go harness only runs this file when the AR ORM chain it uses actually
+# works (it probes establish_connection + Schema.define + create! +
+# where(...).order.to_a first); otherwise it records the exact missing method.
+# The go-ruby-activerecord binding landed (PR #102) but does not yet implement
+# ActiveRecord::Schema.define, so this app is skipped-with-gap until it does.
 #
 #   GET /users?min=26  =>  200, "<ul><li>amy (30)</li><li>cat (40)</li></ul>"
 
