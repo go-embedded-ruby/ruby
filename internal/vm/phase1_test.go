@@ -45,8 +45,8 @@ func TestClassOfNames(t *testing.T) {
 		{"true", "TrueClass"},
 		{"false", "FalseClass"},
 		{"nil", "NilClass"},
-		{"self", "Object"},          // top-level self is main (an Object)
-		{"Integer", "Class"},        // the class of a class is Class
+		{"self", "Object"},   // top-level self is main (an Object)
+		{"Integer", "Class"}, // the class of a class is Class
 	}
 	for _, c := range cases {
 		src := "puts (" + c.expr + ").class"
@@ -73,7 +73,7 @@ func TestKernelMethods(t *testing.T) {
 
 func TestValueReprAndTruthy(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{"class E\nend\nputs E.new", "#<E>\n"},   // RObject.ToS
+		{"class E\nend\nputs E.new", "#<E>\n"},    // RObject.ToS
 		{"class E\nend\np E.new", "#<E>\n"},       // RObject.Inspect
 		{"class E\nend\nputs(!E.new)", "false\n"}, // RObject.Truthy (objects are truthy)
 		{"class K\nend\np K", "K\n"},              // RClass.Inspect
@@ -88,9 +88,9 @@ func TestValueReprAndTruthy(t *testing.T) {
 
 func TestObjectModelErrors(t *testing.T) {
 	tests := []struct{ src, want string }{
-		{`puts Nope`, "NameError"},               // uninitialized constant
-		{"class X < Nope\nend", "NameError"},     // unknown superclass
-		{`1.frobnicate`, "NoMethodError"},        // method_missing default
+		{`puts Nope`, "NameError"},           // uninitialized constant
+		{"class X < Nope\nend", "NameError"}, // unknown superclass
+		{`1.frobnicate`, "NoMethodError"},    // method_missing default
 	}
 	for _, tc := range tests {
 		if err := runErr(t, tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {

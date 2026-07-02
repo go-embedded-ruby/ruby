@@ -17,7 +17,7 @@ func TestBlockSplatParams(t *testing.T) {
 		{`p [[1, 2]].map { |*a| a }`, "[[[1, 2]]]\n"},
 		// Procs / lambdas with splat, including too-few-args padding.
 		{`p proc { |*a| a }.call(1, 2, 3)`, "[1, 2, 3]\n"},
-		{`p proc { |a, *b| [a, b] }.call`, "[nil, []]\n"},   // 0 args -> pad required
+		{`p proc { |a, *b| [a, b] }.call`, "[nil, []]\n"}, // 0 args -> pad required
 		{`p proc { |a, *b| [a, b] }.call(1)`, "[1, []]\n"},
 		{`p lambda { |*a| a }.call(5)`, "[5]\n"},
 		// Regressions: non-splat blocks and Hash auto-splat must be unchanged.

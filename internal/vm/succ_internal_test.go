@@ -9,10 +9,10 @@ import "testing"
 // plain carry (best-effort for non-text data).
 func TestSuccStringBinaryCarry(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"##", "#$"},                  // no alnum: increment the last byte
-		{"\xff", "\x01\x00"},          // single 0xff overflows -> prepend 0x01
-		{"\xff\xff", "\x01\x00\x00"},  // all bytes overflow
-		{"a\xff", "b\xff"},            // alnum present: carry handled by the alnum path
+		{"##", "#$"},                 // no alnum: increment the last byte
+		{"\xff", "\x01\x00"},         // single 0xff overflows -> prepend 0x01
+		{"\xff\xff", "\x01\x00\x00"}, // all bytes overflow
+		{"a\xff", "b\xff"},           // alnum present: carry handled by the alnum path
 	}
 	for _, c := range cases {
 		if got := succString(c.in); got != c.want {

@@ -26,7 +26,7 @@ func TestStep(t *testing.T) {
 		{`p 1.step(10, 2).to_a`, "[1, 3, 5, 7, 9]\n"},
 		{`p 10.step(1, -2).to_a`, "[10, 8, 6, 4, 2]\n"},
 		{`p 1.step(10).to_a`, "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n"}, // default step 1
-		{`p 1.step(5) { |i| }`, "1\n"},                            // block form returns self
+		{`p 1.step(5) { |i| }`, "1\n"},                             // block form returns self
 		{`p (1..5).step(2).class`, "Enumerator\n"},
 	}
 	for _, c := range cases {

@@ -11,10 +11,10 @@ import (
 func TestEnumerator(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{`p [1, 2, 3].each.class`, "Enumerator\n"},
-		{`p [1, 2, 3].each`, "#<Enumerator: [1, 2, 3]:each>\n"},               // Inspect
+		{`p [1, 2, 3].each`, "#<Enumerator: [1, 2, 3]:each>\n"},                   // Inspect
 		{`p [1, 2, 3].each_slice(2)`, "#<Enumerator: [1, 2, 3]:each_slice(2)>\n"}, // Inspect w/ args
-		{`puts [1, 2, 3].each`, "#<Enumerator: [1, 2, 3]:each>\n"},            // ToS
-		{`p([1, 2, 3].each ? "yes" : "no")`, "\"yes\"\n"},                     // Truthy
+		{`puts [1, 2, 3].each`, "#<Enumerator: [1, 2, 3]:each>\n"},                // ToS
+		{`p([1, 2, 3].each ? "yes" : "no")`, "\"yes\"\n"},                         // Truthy
 		{`e = [1, 2, 3].each; p [e.next, e.next, e.next]`, "[1, 2, 3]\n"},
 		{`e = [1, 2, 3].each; p e.peek; p e.next; p e.peek`, "1\n1\n2\n"},
 		{`e = [1, 2]; en = e.each; en.next; en.rewind; p en.next`, "1\n"},
@@ -36,7 +36,7 @@ func TestEnumerator(t *testing.T) {
 		{`p [10, 20].map.with_index(1) { |x, i| x + i }`, "[11, 22]\n"},
 		{`p [1, 2, 3, 4].select.with_index { |x, i| i.even? }`, "[1, 3]\n"},
 		// enum_for / to_enum:
-		{`p [1, 2, 3].enum_for.to_a`, "[1, 2, 3]\n"},      // default method is :each
+		{`p [1, 2, 3].enum_for.to_a`, "[1, 2, 3]\n"},       // default method is :each
 		{`p [1, 2, 3].to_enum(:each).to_a`, "[1, 2, 3]\n"}, // explicit method
 		// each with a block on the enumerator forwards to the underlying method;
 		// with no block it returns the enumerator itself.

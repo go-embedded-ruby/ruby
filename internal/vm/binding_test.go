@@ -47,8 +47,8 @@ func TestBinding(t *testing.T) {
 		{`binding.local_variable_set(42, 1)`, "42 is not a symbol nor a string"},
 		{`binding.local_variable_get(42)`, "42 is not a symbol nor a string"},
 		{`binding.eval(42)`, "no implicit conversion of Integer into String"},
-		{`binding.eval("(")`, "SyntaxError"},        // parse failure
-		{`binding.eval("retry")`, "SyntaxError"},    // parses, fails to compile
+		{`binding.eval("(")`, "SyntaxError"},     // parse failure
+		{`binding.eval("retry")`, "SyntaxError"}, // parses, fails to compile
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
