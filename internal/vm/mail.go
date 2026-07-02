@@ -91,40 +91,60 @@ func (vm *VM) registerMailMessage(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) mailMsg { return v.(*MailMessage).m }
 
-	// The address fields (from/to/cc/bcc/reply_to) each return a single String
-	// when the field carries exactly one address (the gem's convenience), the
-	// Array otherwise, and nil when the field is absent.
-	addr := func(name string, get func(mailMsg) []string) {
-		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	// The address fields (from/to/cc/bcc/reply_to) are dual getter/setter DSL
+	// methods, matching the gem: called with no argument they read the field
+	// (returning a single String when it carries one address, the Array
+	// otherwise, nil when absent); called with a String they set it and return
+	// self (the `from "x@y"` form used inside a Mail.new block).
+	addr := func(name string, get func(mailMsg) []string, set func(mailMsg, string)) {
+		d(name, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) > 0 {
+				set(self(v), strArg(args[0]))
+				return v
+			}
 			return mailAddressValue(get(self(v)))
 		})
 	}
-	addr("from", mailMsg.From)
-	addr("to", mailMsg.To)
-	addr("cc", mailMsg.Cc)
-	addr("bcc", mailMsg.Bcc)
-	addr("reply_to", mailMsg.ReplyTo)
+	addr("from", mailMsg.From, mailMsg.SetFrom)
+	addr("to", mailMsg.To, mailMsg.SetTo)
+	addr("cc", mailMsg.Cc, mailMsg.SetCc)
+	addr("bcc", mailMsg.Bcc, mailMsg.SetBcc)
+	addr("reply_to", mailMsg.ReplyTo, mailMsg.SetReplyTo)
 
-	// The single-value string fields return the String, or nil when absent.
-	optStr := func(name string, get func(mailMsg) string) {
-		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	// The single-value string fields are dual getter/setter DSL methods too:
+	// a bare call reads the field (nil when absent), a call with a String sets it
+	// and returns self. Fields with no setter (mime_type, filename, …) take only
+	// the reader form.
+	optStr := func(name string, get func(mailMsg) string, set func(mailMsg, string)) {
+		d(name, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+			if set != nil && len(args) > 0 {
+				set(self(v), strArg(args[0]))
+				return v
+			}
 			return mailOptStr(get(self(v)))
 		})
 	}
-	optStr("subject", mailMsg.Subject)
-	optStr("message_id", mailMsg.MessageID)
-	optStr("in_reply_to", mailMsg.InReplyTo)
-	optStr("content_type", mailMsg.ContentType)
-	optStr("mime_type", mailMsg.MimeType)
-	optStr("content_transfer_encoding", mailMsg.ContentTransferEncoding)
-	optStr("content_description", mailMsg.ContentDescription)
-	optStr("content_disposition", mailMsg.ContentDisposition)
-	optStr("content_id", mailMsg.ContentID)
-	optStr("charset", mailMsg.Charset)
-	optStr("filename", mailMsg.Filename)
+	optStr("subject", mailMsg.Subject, mailMsg.SetSubject)
+	optStr("message_id", mailMsg.MessageID, mailMsg.SetMessageID)
+	optStr("content_type", mailMsg.ContentType, mailMsg.SetContentType)
+	optStr("date_string", mailMsg.DateString, mailMsg.SetDateString)
+	optStr("in_reply_to", mailMsg.InReplyTo, nil)
+	optStr("mime_type", mailMsg.MimeType, nil)
+	optStr("content_transfer_encoding", mailMsg.ContentTransferEncoding, nil)
+	optStr("content_description", mailMsg.ContentDescription, nil)
+	optStr("content_disposition", mailMsg.ContentDisposition, nil)
+	optStr("content_id", mailMsg.ContentID, nil)
+	optStr("charset", mailMsg.Charset, nil)
+	optStr("filename", mailMsg.Filename, nil)
 
-	// body returns a Mail::Body wrapper over the (decoded-on-demand) body.
-	d("body", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	// body is a dual getter/setter DSL method: a bare call returns the Mail::Body
+	// wrapper (decoded-on-demand), a call with a String sets the body and returns
+	// self (the `body "…"` form used inside a Mail.new block).
+	d("body", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 0 {
+			self(v).SetBody(strArg(args[0]))
+			return v
+		}
 		return &MailBody{b: self(v).Body()}
 	})
 	// date returns a Ruby Time for the Date: header, or nil when it is absent or
@@ -164,6 +184,11 @@ func (vm *VM) registerMailMessage(cls *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
 		return mailOptStr(self(v).Field(strArg(args[0])))
+	})
+	// header_fields returns the ordered Array of Mail::Field objects (the
+	// name/value pairs of the header), the value-object view of the header.
+	d("header_fields", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return mailFieldsArray(self(v).Header())
 	})
 
 	// encoded / to_s serialise the message back to its on-the-wire form.

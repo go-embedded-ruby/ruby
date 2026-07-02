@@ -53,6 +53,7 @@ func (m mailMsg) Header() *mail.Header            { return m.m.Header() }
 func (m mailMsg) Encoded() string                 { return m.m.Encoded() }
 func (m mailMsg) Decoded() []byte                 { return m.m.Decoded() }
 func (m mailMsg) Date() (stdtime.Time, bool)      { return m.m.Date() }
+func (m mailMsg) DateString() string              { return m.m.Field("Date") }
 
 func (m mailMsg) SetFrom(v string)        { m.m.SetFrom(v) }
 func (m mailMsg) SetTo(v string)          { m.m.SetTo(v) }
@@ -157,6 +158,17 @@ func mailPartOrNil(p *mail.Part) object.Value {
 		return object.NilV
 	}
 	return &MailMessage{m: mailMsg{m: p}}
+}
+
+// mailFieldsArray wraps a message header's fields into a Ruby Array of
+// Mail::Field value objects, preserving field order.
+func mailFieldsArray(h *mail.Header) object.Value {
+	fields := h.Fields()
+	arr := &object.Array{Elems: make([]object.Value, len(fields))}
+	for i, f := range fields {
+		arr.Elems[i] = &MailField{f: mailField{f: f}}
+	}
+	return arr
 }
 
 // mailHeaderHash renders the message header as a Ruby Hash of field name to
