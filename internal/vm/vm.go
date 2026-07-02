@@ -227,6 +227,10 @@ type VM struct {
 	cREXMLPretty                           *RClass // REXML::Formatters::Pretty serialiser
 	cREXMLXPath                            *RClass // REXML::XPath module
 	cREXMLParseException                   *RClass // REXML::ParseException < StandardError
+	cSinatraBase                           *RClass // Sinatra::Base (require "sinatra/base"), backed by go-ruby-sinatra
+	cSinatraCtx                            *RClass // Sinatra::Base::Context, the self a route/filter block runs against
+	cSinatraSettings                       *RClass // Sinatra::Base::Settings, the handler's `settings` view
+	sinatraDefs                            map[*RClass]*sinatraDef // per-Sinatra::Base-subclass route/filter/handler declarations
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass

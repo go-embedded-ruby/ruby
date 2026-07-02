@@ -63,6 +63,7 @@ require (
 	github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
+	github.com/go-ruby-rack/rack v0.0.0-20260630124607-8a4f9cfcdbb5
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
@@ -76,6 +77,7 @@ require (
 	github.com/go-ruby-sequel/sequel v0.0.0-20260702151352-66413b601977
 	github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
+	github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c
 	github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4
 	github.com/go-ruby-sqlite3/sqlite3 v0.0.0-20260702143910-c9f337771f41
 	github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8

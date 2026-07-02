@@ -615,6 +615,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cCSVRow
 	case *CSVTable:
 		return vm.cCSVTable
+	case *RackRequest:
+		// A Rack::Request wrapper reports the class stamped on it at construction.
+		return x.cls
+	case *RackResponse:
+		return x.cls
+	case *SinatraCtx:
+		// The self a Sinatra route/filter block runs against.
+		return x.cls
+	case *SinatraSettings:
+		return x.cls
 	case *REXMLDocument:
 		return vm.cREXMLDocument
 	case *REXMLElement:
