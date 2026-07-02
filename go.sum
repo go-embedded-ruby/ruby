@@ -28,6 +28,8 @@ github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38 h1:j0VAUKCGN
 github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38/go.mod h1:PgAtItdQBv87Wog0Q7rnbwhqsupDC0pDXDlZgSv6nvA=
 github.com/go-ruby-base64/base64 v0.0.0-20260630081041-5dec54f20f53 h1:MBggShyLWDpr0USQMZvcRvRc+OIcHKFn4ohDnmB3C6k=
 github.com/go-ruby-base64/base64 v0.0.0-20260630081041-5dec54f20f53/go.mod h1:pjBeKtZ2Gpc6Dq9DoDwUYEXehQU2sOpKPWxcrSNr2Cs=
+github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363 h1:uhvORTvegQwkGruQW1TK3fuQjV/BHMqQjkAUICFiHSw=
+github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363/go.mod h1:jxNh7fOQlIauCvfILUOHAIBA/XEtn559+qRW3W6OiL4=
 github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378 h1:tn4iqFZc2KhoZ4iamcqdT+dYYiDef0RhmSbBNjPVRGk=
 github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378/go.mod h1:xTLuIsErHXTxzLBJkUz5J07NwY58QJ75j2Ww4DQGFEM=
 github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260629113642-660c01ff39c4 h1:XHJOnSV9GH1+gh1/SqRsskjncBzx2NUO00G8vaX5XKA=
@@ -56,6 +58,8 @@ github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b h1:1iw1eRBOG
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
 github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5 h1:KFU3OKsop0CF8Zv1TQ9FwGY3fWcdGGCcqJEjx9zxykU=
 github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5/go.mod h1:nHXcH3zaGNmCslZStZVeylXkv1wLp+nzT6qNj+m+QXU=
+github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8 h1:88eY9TFWOtrX2JL7bnGOOJ2SsOpcfjuRAYuDv+HknRY=
+github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8/go.mod h1:lXzMyvgfYye7tZm1cY9ej2SbXzAdJdA2IAiY+niM+nU=
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277 h1:XfUzDZqZWgOUTJ22GdwNOgkZB9MZKhxsPTq0xL1u5Io=
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277/go.mod h1:9+5E2AAIpErKRtzJ7zqZSfptjlD/XcD/ni6H9jpO37Y=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=

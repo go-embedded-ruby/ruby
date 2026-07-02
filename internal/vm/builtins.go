@@ -89,7 +89,7 @@ func (vm *VM) bootstrap() {
 	vm.registerEncoding()
 	vm.registerStringEncoding()
 	vm.registerStringUnicodeNormalize() // String#unicode_normalize / #unicode_normalized? (core-ext, always available), backed by go-ruby-unicode-normalize
-	vm.registerJSBridge() // browser DOM/Canvas access (wasm only; a no-op natively)
+	vm.registerJSBridge()               // browser DOM/Canvas access (wasm only; a no-op natively)
 	vm.registerBase64()
 	vm.registerPackUnpack()
 	vm.registerSecureRandom()
@@ -424,6 +424,8 @@ func (vm *VM) bootstrap() {
 	vm.registerDateErrors()    // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
 	vm.registerJSON()          // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
 	vm.registerYAML()          // YAML/Psych loadable shell; needs StandardError
+	vm.registerBCrypt()        // BCrypt (require "bcrypt"), backed by go-ruby-bcrypt; needs StandardError + String
+	vm.registerJWT()           // JWT (require "jwt"), backed by go-ruby-jwt; needs StandardError
 	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
 	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)

@@ -243,11 +243,17 @@ func digestFeedOptional(self object.Value, args []object.Value) *DigestObj {
 
 // hasCustomEq reports whether v is a builtin instance whose Ruby class defines
 // its own `==` (rather than inheriting Object identity), so the OpEq fast path in
-// binaryOp routes `==` through that method. Today only Digest::Instance overrides
-// `==` among the builtin-object types (it compares hex digests, not pointers).
+// binaryOp routes `==` through that method. Digest::Instance overrides `==` (it
+// compares hex digests) and BCrypt::Password overrides it too (it compares a
+// candidate secret against the stored hash), so both must dispatch their `==`
+// rather than fall to pointer identity.
 func hasCustomEq(_ *VM, v object.Value) bool {
-	_, ok := v.(*DigestObj)
-	return ok
+	switch v.(type) {
+	case *DigestObj, *BCryptPassword:
+		return true
+	default:
+		return false
+	}
 }
 
 // digestCanon normalises a Digest algorithm name for the Digest(name) factory:
