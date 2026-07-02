@@ -26,6 +26,7 @@ require (
 	github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111
 	github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
+	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
@@ -38,8 +39,10 @@ require (
 	github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8
 	github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
+	github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
 	github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca
+	github.com/go-ruby-mime-types/mime-types v0.0.0-20260630150449-4e5a308a8847
 	github.com/go-ruby-money/money v0.0.0-20260702143724-59c9de931e83
 	github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90
 	github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a
@@ -51,6 +54,7 @@ require (
 	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d
 	github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
+	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
 	github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b

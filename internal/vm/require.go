@@ -46,6 +46,7 @@ var providedFeatures = map[string]bool{
 	"tzinfo": true, "chronic": true, "money": true,
 	"addressable": true, "addressable/uri": true, "addressable/template": true,
 	"commonmark": true, "mustache": true, "jbuilder": true, "builder": true,
+	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,
 	"rqrcode": true, "dotenv": true, "hcl2": true, "kramdown": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,
 }

@@ -58,6 +58,8 @@ github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd h1:VGlMcPCsQ
 github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd/go.mod h1:L5FvtAnqC4wHelxeOEPnWLz/BHoXA/dPD3KuDpzpcr4=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529 h1:md/l6ifEY6S0Iy1nBk5hVt5BhnWJRqhB08gVEsVvS28=
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529/go.mod h1:HEJVI7jQ/BnjiSiu2Wj934QboEAgdv47RNOqvZb+nRw=
+github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352 h1:cRiGBGZWF8Pc0KxTqNr2wy0Y6WWPzeq2GsUuTroXDfE=
+github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352/go.mod h1:7h2mxQ3mnWz9bg39nSDr0h/LxqnEnbrJxmNRDbu3zs8=
 github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272 h1:tHmlER04rO8LxFWbDiKqcFDzB4WFzBio/c6kgeOdpGo=
 github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272/go.mod h1:wpq0ciEFn8zUc1vfuHRjF2U8mH0krhJCRHHr+JOGaEY=
 github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c h1:dJBMxMFxBLrk4LoWL23tOl5M8P0CA8Gb7r/mvsaPk6A=
@@ -82,10 +84,14 @@ github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf h1:igeeLsQct
 github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf/go.mod h1:VY1lx+1SYMHiGhxr0R5RIxRXwpq0vkIpQiHLrKYiX8U=
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277 h1:XfUzDZqZWgOUTJ22GdwNOgkZB9MZKhxsPTq0xL1u5Io=
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277/go.mod h1:9+5E2AAIpErKRtzJ7zqZSfptjlD/XcD/ni6H9jpO37Y=
+github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e h1:mBJm+ZY0JP4pKMEiIfTPcfUuGL+8ACLmQEVb3q/yu/E=
+github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e/go.mod h1:YJN6l0WpGBz87UAbyHGqnH14iwABfjvrZPUunn9OrNs=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f/go.mod h1:UpjSgWGcQSNt0ARWuHKwf0P55LkwZ65vuqoRPSKctZ8=
 github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca h1:jerobsJZBFXJa/2ktK8DEDU/Yf5CmX12oRkrezKq/XQ=
 github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca/go.mod h1:ZrmXlz95j9VE3j1bUeq8a5CTWAKoEiYrkh/ON9ns9iE=
+github.com/go-ruby-mime-types/mime-types v0.0.0-20260630150449-4e5a308a8847 h1:jlKTwLxgvXbdCw0KAvQ7Cc+2uyKW0SDOhM8Z05HZxHE=
+github.com/go-ruby-mime-types/mime-types v0.0.0-20260630150449-4e5a308a8847/go.mod h1:CxpFpr/gPj1iq9+xI8uyDtB+LiRzlY7FlytmXEE9z2s=
 github.com/go-ruby-money/money v0.0.0-20260702143724-59c9de931e83 h1:6RfUr1Dl9QA/tMQkVAUFm9QtlipHwE+MuqFGe2fW0dw=
 github.com/go-ruby-money/money v0.0.0-20260702143724-59c9de931e83/go.mod h1:jVG6K5w0MzXZlyEdBdzbUC/WqArBowo9hJd6PQZ/TPA=
 github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90 h1:xjyxDgCSi3rUAlQlewmvY+XBqFXN1jLUFWaXNjAyL3I=
@@ -108,6 +114,8 @@ github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8 h1:zghkWpebo93
 github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8/go.mod h1:dG/91hk8HlQ6YAdD64xiMFHTTmXjTWtapKWoG9JtcRA=
 github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e h1:JmbJL+0nq6HY1SX1tDBFQyo7M8JgbQ+ukwn8iLyNGfs=
 github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e/go.mod h1:tbYmHYXjnNXJCNYABDx9nWfuGBCXeKrp134bNsQeTpM=
+github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444 h1:vkMPJDpZHmu09pVxr7CFppoh1b5Kc8LkhKpxkSBoyxA=
+github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444/go.mod h1:Wq3cgP6klsULbO4ee0DOavVIzifgmddOWnYpqljbER4=
 github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee h1:ctauEAdAq129WCrU+dndYcOjNlo1Y94vWNBtgXp1heE=
 github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee/go.mod h1:+0nK2X+aCPMO91bPMM/DT1OFUIzFQeoTPGkkOR3kd84=
 github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac h1:Y++tdsBF6lA/cw3c9uQ/ZyQZjP2N3wkA6pLF8a3HnHc=
