@@ -524,6 +524,9 @@ func negate(v object.Value) object.Value {
 		return &BigDecimal{d: n.d.Neg()}
 	case *Matrix:
 		return &Matrix{m: n.m.Neg()}
+	case *Money:
+		// -money negates the amount via the go-ruby-money library.
+		return &Money{m: n.m.Neg()}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }

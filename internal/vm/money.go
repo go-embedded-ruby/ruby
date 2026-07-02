@@ -127,9 +127,6 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 	d("*", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return &Money{m: moneyOf(self).Mul(moneyRat(args[0]))}
 	})
-	d("-@", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Money{m: moneyOf(self).Neg()}
-	})
 	d("abs", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Money{m: moneyOf(self).Abs()}
 	})
