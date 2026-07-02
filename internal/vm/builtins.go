@@ -432,6 +432,10 @@ func (vm *VM) bootstrap() {
 	vm.registerChronic()       // Chronic module (go-ruby-chronic backend); needs StandardError
 	vm.registerMoney()         // Money module (go-ruby-money backend); needs StandardError for Money::Currency::UnknownCurrency
 	vm.registerAddressable()   // Addressable module (go-ruby-addressable backend); needs StandardError
+	vm.registerPublicSuffix()  // PublicSuffix module (go-ruby-public-suffix backend); needs StandardError for PublicSuffix::Error tree
+	vm.registerMIMETypes()     // MIME::Types module (go-ruby-mime-types backend)
+	vm.registerMail()          // Mail module (go-ruby-mail backend)
+	vm.registerFaker()         // Faker module (go-ruby-faker backend); needs Random for the seed contract
 	vm.registerCommonmark()    // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-ruby-commonmark
 	vm.registerMustache()      // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
 	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
@@ -439,6 +443,14 @@ func (vm *VM) bootstrap() {
 	vm.registerSQLite3()       // SQLite3::Database/Statement (require "sqlite3"), backed by go-ruby-sqlite3 (modernc); needs StandardError for SQLite3::Exception
 	vm.registerNokogiri()      // Nokogiri::HTML/XML -> Document/Node/NodeSet (require "nokogiri"), backed by go-ruby-nokogiri; needs StandardError for Nokogiri::SyntaxError
 	vm.registerRSpec()         // RSpec matcher + expect surface (require "rspec"), backed by go-ruby-rspec; needs Exception for ExpectationNotMetError
+	vm.registerRQRCode()       // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
+	vm.registerDotenv()        // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
+	vm.registerHCL2()          // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
+	vm.registerKramdown()      // Kramdown::Document (require "kramdown"), backed by go-ruby-kramdown
+	vm.registerLiquid()        // Liquid::Template.parse(...).render (require "liquid"), backed by go-ruby-liquid; needs StandardError for Liquid::Error
+	vm.registerRouge()         // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
+	vm.registerSlim()          // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error
+	vm.registerHaml()          // Haml::Template.new(src).render (require "haml"), compile-to-source via go-ruby-haml; needs StandardError for Haml::Error
 	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
 	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
 	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)

@@ -655,6 +655,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A Jbuilder builder reports Jbuilder so its method_missing DSL and bang
 		// methods (defined on that class) dispatch.
 		return vm.consts["Jbuilder"].(*RClass)
+	case *KramdownDoc:
+		// A Kramdown::Document reports Kramdown::Document so its #to_html renders
+		// the held source through the library.
+		return vm.consts["Kramdown::Document"].(*RClass)
+	case *RQRCode:
+		// An RQRCode::QRCode reports RQRCode::QRCode so its renderer methods
+		// (as_svg / as_ansi / as_html / to_s / checked? / to_a) dispatch.
+		return vm.consts["RQRCode::QRCode"].(*RClass)
 	case *XmlMarkup:
 		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
 		// method_missing element DSL and special methods dispatch.
@@ -705,6 +713,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Addressable::URI"].(*RClass)
 	case *AddressableTemplate:
 		return vm.consts["Addressable::Template"].(*RClass)
+	case *PublicSuffixDomain:
+		return vm.consts["PublicSuffix::Domain"].(*RClass)
+	case *MIMEType:
+		return vm.consts["MIME::Type"].(*RClass)
+	case *MailMessage:
+		return vm.consts["Mail::Message"].(*RClass)
+	case *MailBody:
+		return vm.consts["Mail::Body"].(*RClass)
+	case *MailField:
+		return vm.consts["Mail::Field"].(*RClass)
 	case *FileStat:
 		return vm.cFileStat
 	case *BigDecimal:

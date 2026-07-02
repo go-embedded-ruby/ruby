@@ -240,6 +240,7 @@ type VM struct {
 	fileStack     []string          // stack of source files of the executing ISeq frames (for __FILE__)
 	scriptName    string            // $0 / $PROGRAM_NAME: the running program's name
 	defaultRandom *RandomObj        // process-wide generator for Kernel#rand / #srand
+	fakerInst     *fakerState       // Faker instance + its seed source (Faker::Config.random)
 	currentFiber  *Fiber            // the fiber currently running (nil at the root), for Fiber.yield
 
 	// Concurrency: an emulated GVL (one Ruby thread executes VM code at a time).
