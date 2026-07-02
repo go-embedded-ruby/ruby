@@ -33,6 +33,7 @@ require (
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
+	github.com/go-ruby-grape/grape v0.0.0-20260702151528-455377c8c7c3
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b

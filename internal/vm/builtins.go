@@ -445,6 +445,7 @@ func (vm *VM) bootstrap() {
 	vm.registerNokogiriXSLT()  // Nokogiri::XSLT(str) -> Stylesheet#transform/apply_to (require "nokogiri"), backed by go-ruby-xslt over go-ruby-nokogiri; needs registerNokogiri first
 	vm.registerRSpec()         // RSpec matcher + expect surface (require "rspec"), backed by go-ruby-rspec; needs Exception for ExpectationNotMetError
 	vm.registerRuboCop()       // RuboCop::Runner#inspect/autocorrect + Cop::Offense (require "rubocop"), backed by go-ruby-rubocop over go-ruby-parser; needs StandardError for RuboCop::Error
+	vm.registerGrape()         // Grape::Router/Validator/Formatter (require "grape"), backed by go-ruby-grape; endpoint-block exec + Rack env are host seams; needs StandardError for Grape::Exceptions
 	vm.registerRQRCode()       // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
 	vm.registerDotenv()        // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
 	vm.registerHCL2()          // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
