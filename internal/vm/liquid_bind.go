@@ -43,21 +43,27 @@ func liquidParse(src string, mode liquid.ErrorMode) *liquid.Template {
 // string; in strict mode a runtime error is surfaced as the matching Liquid error
 // via RenderStrict, so #render! raises where #render would embed.
 func liquidRender(vm *VM, h *liquidTemplate, assigns map[string]any, strict bool) string {
+	render := liquidRenderFn
 	if strict {
-		out, err := h.t.RenderStrict(assigns)
-		if err != nil {
-			raise(liquidErrorClass(err), "%s", err.Error())
-		}
-		return out
+		render = liquidRenderStrictFn
 	}
-	out, err := h.t.Render(assigns)
+	out, err := render(h.t, assigns)
 	if err != nil {
-		// Lax Render only returns an error for a non-recoverable failure; surface
-		// it as the matching Liquid error rather than silently dropping output.
+		// A strict runtime error (render!) surfaces here; the lax Render never
+		// returns an error in practice (it embeds "Liquid error: …" inline), so its
+		// error arm is a defensive one, reached only by swapping the seam below.
 		raise(liquidErrorClass(err), "%s", err.Error())
 	}
 	return out
 }
+
+// liquidRenderFn / liquidRenderStrictFn are the seams over Template.Render /
+// Template.RenderStrict: swapping them lets a fault-injection test exercise
+// liquidRender's error arm for the lax path, which the real Render never triggers.
+var (
+	liquidRenderFn       = func(t *liquid.Template, a map[string]any) (string, error) { return t.Render(a) }
+	liquidRenderStrictFn = func(t *liquid.Template, a map[string]any) (string, error) { return t.RenderStrict(a) }
+)
 
 // liquidErrorMode reads the error_mode keyword from a parse call's trailing kwargs
 // Hash. :lax (the gem default), :warn and :strict select the library's Lax / Warn /
