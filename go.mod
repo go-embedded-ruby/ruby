@@ -24,15 +24,18 @@ require (
 	github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
 	github.com/go-ruby-digest/digest v0.0.0-20260629113522-e22d22431111
+	github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
 	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
+	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260630052208-78ca85dc054b
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
 	github.com/go-ruby-json/json v0.0.0-20260630210255-96013117f0d5
 	github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8
+	github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
 	github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
@@ -53,6 +56,7 @@ require (
 	github.com/go-ruby-regexp/regexp v0.0.0-20260701043846-fa3d6604e1ee
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
+	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-set/set v0.0.0-20260630204346-ab6a8a92a910

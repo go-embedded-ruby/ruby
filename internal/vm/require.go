@@ -47,6 +47,7 @@ var providedFeatures = map[string]bool{
 	"addressable": true, "addressable/uri": true, "addressable/template": true,
 	"commonmark": true, "mustache": true, "jbuilder": true, "builder": true,
 	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,
+	"rqrcode": true, "dotenv": true, "hcl2": true, "kramdown": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
