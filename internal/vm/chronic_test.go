@@ -30,8 +30,10 @@ func TestChronicParse(t *testing.T) {
 	// 2006-08-16 14:00 UTC).
 	anchor := `now: Time.at(1155736800)`
 	cases := []struct{ src, want string }{
-		// An ISO timestamp parses to the same instant.
-		{`require "chronic"; p Chronic.parse("2016-05-27 12:00:00", ` + anchor + `).to_i`, "1464343200\n"},
+		// An ISO timestamp parses to that local wall-clock time. Assert the
+		// wall clock (round-trips regardless of $TZ) rather than an absolute
+		// epoch, which would be timezone-dependent (CI runs UTC, not local).
+		{`require "chronic"; p Chronic.parse("2016-05-27 12:00:00", ` + anchor + `).strftime("%Y-%m-%d %H:%M:%S")`, "2016-05-27 12:00:00\n"},
 		{`require "chronic"; p Chronic.parse("2016-05-27 12:00:00", ` + anchor + `).class`, "Time\n"},
 		// A relative phrase resolves against the anchor into the future.
 		{`require "chronic"; p (Chronic.parse("tomorrow", ` + anchor + `).to_i > Time.at(1155736800).to_i)`, "true\n"},
