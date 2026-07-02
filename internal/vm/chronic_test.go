@@ -30,11 +30,10 @@ func TestChronicParse(t *testing.T) {
 	// 2006-08-16 14:00 UTC).
 	anchor := `now: Time.at(1155736800)`
 	cases := []struct{ src, want string }{
-		// An ISO timestamp parses to that wall-clock time. Rendered in UTC (which
-		// CI runs, and which the parse resolves against here) it round-trips to the
-		// same string; the absolute .to_i would be timezone-dependent.
-		// NOTE: a dev box in a non-UTC zone will see a shifted hour here until the
-		// Time#strftime local-zone rendering bug is fixed (tracked separately).
+		// An ISO timestamp parses to that wall-clock time, rendered in the parsed
+		// Time's own (local) zone — matching MRI, where strftime shows the zone's
+		// wall clock. So it round-trips to the same string on ANY box, not just a
+		// UTC one; the absolute .to_i would be timezone-dependent.
 		{`require "chronic"; p Chronic.parse("2016-05-27 12:00:00", ` + anchor + `).strftime("%Y-%m-%d %H:%M:%S")`, "\"2016-05-27 12:00:00\"\n"},
 		{`require "chronic"; p Chronic.parse("2016-05-27 12:00:00", ` + anchor + `).class`, "Time\n"},
 		// A relative phrase resolves against the anchor into the future.
