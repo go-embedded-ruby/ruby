@@ -66,7 +66,11 @@ func (vm *VM) registerJWT() {
 			if len(args) > 2 && args[2] != object.NilV {
 				verify = args[2].Truthy()
 			}
-			opts, alg := jwtDecodeOpts(args[3:])
+			var rest []object.Value
+			if len(args) > 3 {
+				rest = args[3:]
+			}
+			opts, alg := jwtDecodeOpts(rest)
 			payload, header, err := jwt.Decode(strArg(args[0]), jwtKey(args[1], alg, true), verify, opts)
 			if err != nil {
 				raiseJWTError(err)
@@ -144,23 +148,23 @@ func jwtRawKey(v object.Value) any {
 func jwtPEMKey(pemStr string, verify bool) any {
 	block, _ := pem.Decode([]byte(pemStr))
 	if block == nil {
-		raiseJWTError(errors.New("invalid PEM key"))
+		return raiseJWTError(errors.New("invalid PEM key"))
 	}
+	// On verify a public key is preferred (a verify only needs the public half);
+	// on sign a private key is required. Either side falls back to the other
+	// encoding so a caller that passes, say, a private key on verify still works
+	// (the library uses its public half).
 	if verify {
 		if k := jwtParsePublic(block); k != nil {
 			return k
 		}
-	}
-	if k := jwtParsePrivate(block); k != nil {
+		if k := jwtParsePrivate(block); k != nil {
+			return k
+		}
+	} else if k := jwtParsePrivate(block); k != nil {
 		return k
 	}
-	// A verify with only a public key available still returns it (the private parse
-	// failed because it *is* a public key); otherwise the key is unusable.
-	if k := jwtParsePublic(block); k != nil {
-		return k
-	}
-	raiseJWTError(errors.New("invalid PEM key"))
-	return nil
+	return raiseJWTError(errors.New("invalid PEM key"))
 }
 
 // jwtParsePrivate parses a PEM block as an RSA or ECDSA private key across the
@@ -296,12 +300,15 @@ func jwtLastHash(rest []object.Value) (*object.Hash, bool) {
 // jwt.Error carries its gem class name in Kind (e.g. "JWT::ExpiredSignature"),
 // which is exactly the qualified name the error tree is registered under; a plain
 // error (e.g. a PEM parse failure) raises JWT::DecodeError.
-func raiseJWTError(err error) {
+// raiseJWTError never returns (raise panics); it is typed to return any so a
+// caller can write `return raiseJWTError(err)` in a value position and leave no
+// dead code after the raise.
+func raiseJWTError(err error) any {
 	var je *jwt.Error
 	if errors.As(err, &je) {
 		raise(je.Kind, "%s", je.Message)
 	}
-	raise("JWT::DecodeError", "%s", err.Error())
+	return raise("JWT::DecodeError", "%s", err.Error())
 }
 
 // jwtFromRuby converts a Ruby value to the library's value model for encoding: a
