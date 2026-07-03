@@ -694,7 +694,7 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 	var missing []string
 	for i, kn := range iseq.KwNames {
 		if iseq.KwRequired[i] {
-			if _, ok := kwargs.Get(object.Symbol(kn)); !ok {
+			if _, ok := kwargs.Get(object.SymVal(kn)); !ok {
 				missing = append(missing, ":"+kn)
 			}
 		}
@@ -762,7 +762,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		named := make(map[object.Symbol]bool, len(iseq.KwNames))
 		for i, kn := range iseq.KwNames {
 			named[object.Symbol(kn)] = true
-			if v, ok := kwargs.Get(object.Symbol(kn)); ok {
+			if v, ok := kwargs.Get(object.SymVal(kn)); ok {
 				env.slots[base+i] = v
 			}
 		}
@@ -837,18 +837,42 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// target.
 	isReturnTarget := selfBlock == nil || selfBlock.isLambda || selfBlock.dmDirect
 
-	// selfTarget identifies THIS activation. It catches a `return`/`next` that
-	// unwinds back to this very frame through an ensure (a local unwind), plus,
-	// for a return-target frame, a non-local return raised by a block it created.
-	selfTarget := &returnTarget{}
+	// selfTarget identifies THIS activation: a distinct heap pointer that a
+	// non-local exit compares against (by identity) to find the frame it must
+	// unwind to. It catches a `return`/`next` routed back to this very frame
+	// through an ensure (a local unwind), plus, for a return-target frame, a
+	// non-local return raised by a block it created.
+	//
+	// It is allocated lazily — only a frame that can actually BE the target of a
+	// non-local exit ever needs one: a frame that creates a block literal (the
+	// block stores this token as its home, and may be captured and outlive the
+	// frame, so the token must be a stable unique heap object — which is exactly
+	// what lazy-alloc gives, and why a freelist/pool would be unsafe here), or a
+	// frame that routes a `return` through a live ensure/rescue handler. A leaf
+	// call (plain arithmetic, no block, no handler — fib, counter bumps) never
+	// materialises one: selfTarget stays nil, so it matches no signal's (always
+	// non-nil) target and the unwind machinery is unaffected, while paying zero
+	// allocations. ensureTarget allocates on first need and caches, so every use
+	// within a single frame shares the one identity.
+	var selfTarget *returnTarget
+	ensureTarget := func() *returnTarget {
+		if selfTarget == nil {
+			selfTarget = &returnTarget{}
+		}
+		return selfTarget
+	}
 
 	// homeTarget is where a non-local `return` (an explicit `return` in an
 	// ordinary block) unwinds to: this frame for a return target, otherwise the
 	// home method inherited from the block, so a `return` lexically nested through
-	// several blocks still reaches the enclosing method.
-	homeTarget := selfTarget
-	if !isReturnTarget && selfBlock.home != nil {
-		homeTarget = selfBlock.home
+	// several blocks still reaches the enclosing method. It is evaluated on demand
+	// (at block creation and at a non-local return) so a frame that does neither
+	// allocates no token.
+	homeTarget := func() *returnTarget {
+		if !isReturnTarget && selfBlock.home != nil {
+			return selfBlock.home
+		}
+		return ensureTarget()
 	}
 
 	// homeSuper* capture the super anchor that a block literal created in this
@@ -1157,7 +1181,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -1204,14 +1228,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// Hook: definee.method_added(:name) for instance-method defs, if
 				// the class/module defines the hook (singleton method).
 				if hook := lookupSMethod(definee, "method_added"); hook != nil {
-					vm.invoke(hook, definee, []object.Value{object.Symbol(name)}, nil)
+					vm.invoke(hook, definee, []object.Value{object.SymVal(name)}, nil)
 				}
 				// `def foo; end` evaluates to :foo (MRI), which is what makes
 				// `private def foo; end` mark the just-defined method.
-				push(object.Symbol(name))
+				push(object.SymVal(name))
 			case bytecode.OpDefineSMethod:
 				definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
-				push(object.Symbol(iseq.Names[in.A]))
+				push(object.SymVal(iseq.Names[in.A]))
 			case bytecode.OpDefineSingletonMethod:
 				// def recv.foo: a class receiver gains a class method; any other
 				// object gains a method on its singleton class.
@@ -1226,7 +1250,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				default:
 					raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
 				}
-				push(object.Symbol(name))
+				push(object.SymVal(name))
 			case bytecode.OpOpenSingletonClass:
 				// class << target: run the child body with target's singleton (meta)
 				// class as the definee, so its method/constant defs attach there.
@@ -1279,7 +1303,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the home method's arguments
@@ -1308,7 +1332,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: lexCref, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				argsArr := pop().(*object.Array)
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, argsArr.Elems, superBlk))
@@ -1426,7 +1450,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpArgGiven:
 				push(object.Bool(in.A < len(args)))
 			case bytecode.OpKwGiven:
-				_, ok := env.kwargs.Get(object.Symbol(iseq.KwNames[in.A]))
+				_, ok := env.kwargs.Get(object.SymVal(iseq.KwNames[in.A]))
 				push(object.Bool(ok))
 			case bytecode.OpReturn:
 				// A==1 marks an explicit `return` written inside a block body. In an
@@ -1434,7 +1458,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// the block was written in (homeTarget), past any iterator frames. In a
 				// lambda, `return` is local — it just returns from the lambda.
 				if in.A == 1 && !isReturnTarget {
-					panic(returnSignal{target: homeTarget, value: pop()})
+					panic(returnSignal{target: homeTarget(), value: pop()})
 				}
 				// An explicit return from this frame with a live ensure handler must
 				// run that ensure before unwinding; route it through the same signal
@@ -1444,7 +1468,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// defer. A lambda lands here too: its return is local, and its
 				// selfTarget is the lambda frame itself, so it returns from the lambda.
 				if len(handlers) > 0 {
-					panic(returnSignal{target: selfTarget, value: pop()})
+					panic(returnSignal{target: ensureTarget(), value: pop()})
 				}
 				result = pop()
 				finished = true
@@ -1568,7 +1592,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget, superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:

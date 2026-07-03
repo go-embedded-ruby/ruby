@@ -491,20 +491,23 @@ func (h *Hash) hashKey(k Value) any {
 	// Immediate value types are their own comparable key: Ruby fixnums, floats,
 	// symbols, true/false and nil hash and compare by value (1.eql?(1),
 	// :a.eql?(:a)), and none can be subclassed to override #hash, so they never
-	// need the CustomKeyHook / #hash-method walk below. Returning them directly is
-	// byte-identical to the old fall-through (the hook reported ok=false for them
-	// and returned k) but skips a full method-resolution per Get/Set — the hot
-	// cost on an Integer- or Symbol-keyed Hash.
+	// need the CustomKeyHook / #hash-method walk below. We return the *already
+	// boxed* incoming k (not the concrete kk) so the map key is the interface we
+	// were handed: interface→any is a no-op copy, whereas returning kk re-boxes
+	// the concrete value into a fresh any — one allocation per Get AND per Set on
+	// an Integer- or Symbol-keyed Hash. The stored key compares byte-identically
+	// either way (map keys compare by dynamic type + value), so semantics are
+	// unchanged; this only removes the re-box.
 	case Integer:
-		return kk
+		return k
 	case Float:
-		return kk
+		return k
 	case Symbol:
-		return kk
+		return k
 	case Bool:
-		return kk
+		return k
 	case Nil:
-		return kk
+		return k
 	case *Bignum:
 		return "\x00big:" + kk.I.String()
 	case *Array:
