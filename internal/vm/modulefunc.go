@@ -38,7 +38,7 @@ func (vm *VM) registerModuleExtras() {
 		if len(args) == 1 {
 			return args[0]
 		}
-		return &object.Array{Elems: append([]object.Value(nil), args...)}
+		return object.NewArrayFromSlice(append([]object.Value(nil), args...))
 	})
 
 	// Visibility setters (private / public / protected). With no args they set the
@@ -70,7 +70,7 @@ func (vm *VM) registerModuleExtras() {
 		if len(args) == 1 {
 			return args[0]
 		}
-		return &object.Array{Elems: append([]object.Value(nil), args...)}
+		return object.NewArrayFromSlice(append([]object.Value(nil), args...))
 	}
 	vm.cModule.define("private", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return setVis(vm, self, args, visPrivate)

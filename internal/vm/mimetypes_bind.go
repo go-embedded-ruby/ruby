@@ -45,7 +45,7 @@ func mimeDefault() *mimetypes.Registry { return mimetypes.Default() }
 // mimeTypeArray wraps a priority-sorted slice of library types into a Ruby Array
 // of MIME::Type value objects, preserving the registry's order.
 func mimeTypeArray(ts []*mimetypes.Type) object.Value {
-	arr := &object.Array{Elems: make([]object.Value, len(ts))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(ts)))
 	for i, t := range ts {
 		arr.Elems[i] = &MIMEType{t: mimeTypeVal{t: t}}
 	}

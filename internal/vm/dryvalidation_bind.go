@@ -194,7 +194,7 @@ func (vm *VM) registerDryValidationResult(val *RClass) {
 	})
 	d("messages", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		msgs := self.(*DryValidationResult).r.Messages()
-		arr := &object.Array{Elems: make([]object.Value, len(msgs))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(msgs)))
 		for i, m := range msgs {
 			arr.Elems[i] = object.NewString(m.Text)
 		}

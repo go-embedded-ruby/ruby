@@ -187,7 +187,7 @@ func (vm *VM) registerIO() {
 		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
 			lines = append(lines, v)
 		}
-		return &object.Array{Elems: lines}
+		return object.NewArrayFromSlice(lines)
 	}}
 	cFile.smethods["foreach"] = &Method{name: "foreach", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		o := openFileIO(cFile, pathArg(vm, args[0]), "r")
@@ -511,7 +511,7 @@ func defStringIORead(cls *RClass) {
 			}
 			lines = append(lines, v)
 		}
-		return &object.Array{Elems: lines}
+		return object.NewArrayFromSlice(lines)
 	})
 	cls.define("each_line", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		o := self.(*IOObj)

@@ -192,7 +192,7 @@ func sqlite3Value(vm *VM, v sqlite3.Value) object.Value {
 
 // sqlite3Row maps a positional result row to a Ruby Array of values.
 func sqlite3Row(vm *VM, row sqlite3.Row) *object.Array {
-	arr := &object.Array{Elems: make([]object.Value, len(row))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(row)))
 	for i, v := range row {
 		arr.Elems[i] = sqlite3Value(vm, v)
 	}
@@ -214,7 +214,7 @@ func sqlite3HashRow(vm *VM, row sqlite3.Row, cols []string) *object.Hash {
 // sqlite3Strings maps a []string (column names / types) to a Ruby Array of
 // Strings.
 func sqlite3Strings(ss []string) *object.Array {
-	arr := &object.Array{Elems: make([]object.Value, len(ss))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(ss)))
 	for i, s := range ss {
 		arr.Elems[i] = object.NewString(s)
 	}
@@ -238,7 +238,7 @@ func (vm *VM) sqlite3Execute(db *sqlite3.Database, sql string, binds []sqlite3.V
 			}
 			return object.NilV
 		}
-		out := &object.Array{Elems: make([]object.Value, len(rows))}
+		out := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 		for i, r := range rows {
 			out.Elems[i] = sqlite3RawHashRow(vm, r, cols)
 		}
@@ -254,7 +254,7 @@ func (vm *VM) sqlite3Execute(db *sqlite3.Database, sql string, binds []sqlite3.V
 		}
 		return object.NilV
 	}
-	out := &object.Array{Elems: make([]object.Value, len(rows))}
+	out := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 	for i, r := range rows {
 		out.Elems[i] = sqlite3Row(vm, r)
 	}
@@ -293,7 +293,7 @@ func (vm *VM) sqlite3Execute2(db *sqlite3.Database, sql string, binds []sqlite3.
 	if err != nil {
 		raiseSQLite3Error(err)
 	}
-	out := &object.Array{Elems: make([]object.Value, 0, len(rows)+1)}
+	out := object.NewArrayFromSlice(make([]object.Value, 0, len(rows)+1))
 	out.Elems = append(out.Elems, sqlite3Strings(cols))
 	for _, r := range rows {
 		out.Elems = append(out.Elems, sqlite3Row(vm, r))
@@ -311,7 +311,7 @@ func (vm *VM) sqlite3EmitRows(sw *SQLite3Statement, rows []sqlite3.Row, blk *Pro
 		}
 		return object.NilV
 	}
-	out := &object.Array{Elems: make([]object.Value, len(rows))}
+	out := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 	for i, r := range rows {
 		out.Elems[i] = vm.sqlite3StepRow(sw, r)
 	}

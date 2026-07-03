@@ -75,7 +75,7 @@ func (vm *VM) registerEtc() {
 		o.ivars["@name"] = object.NewString(g.Name)
 		o.ivars["@passwd"] = object.NewString("x")
 		o.ivars["@gid"] = atoiOr0(g.Gid)
-		o.ivars["@mem"] = &object.Array{Elems: nil}
+		o.ivars["@mem"] = object.NewArray()
 		return o
 	}
 

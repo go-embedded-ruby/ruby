@@ -137,7 +137,7 @@ func (vm *VM) bootstrap() {
 		if p.iseq == nil || p.iseq.File == "" {
 			return object.NilV
 		}
-		return &object.Array{Elems: []object.Value{object.NewString(p.iseq.File), object.IntValue(0)}}
+		return object.NewArray(object.NewString(p.iseq.File), object.IntValue(0))
 	})
 	vm.cProc.define("curry", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		p := self.(*Proc)
@@ -239,7 +239,7 @@ func (vm *VM) bootstrap() {
 		if o, ok := self.(*RObject); ok && o.singleton != nil {
 			c = o.singleton // its super is the real class, so the walk picks up both
 		}
-		return &object.Array{Elems: vm.methodNames(c, true)}
+		return object.NewArrayFromSlice(vm.methodNames(c, true))
 	})
 	vm.cObject.define("public_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Like #methods, but restricted to PUBLIC methods (excluding private and
@@ -270,7 +270,7 @@ func (vm *VM) bootstrap() {
 				out = append(out, n)
 			}
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cObject.define("singleton_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Default includes singleton methods inherited from the receiver's
@@ -278,7 +278,7 @@ func (vm *VM) bootstrap() {
 		// receiver's own. For a plain object the singleton methods are those on its
 		// per-object singleton class.
 		all := len(args) == 0 || args[0].Truthy()
-		return &object.Array{Elems: vm.singletonMethodNames(self, all)}
+		return object.NewArrayFromSlice(vm.singletonMethodNames(self, all))
 	})
 	vm.cObject.define("frozen?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(isFrozen(self))
@@ -634,11 +634,11 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("Array", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		switch v := args[0].(type) {
 		case object.Nil:
-			return &object.Array{}
+			return object.NewArray()
 		case *object.Array:
 			return v
 		default:
-			return &object.Array{Elems: []object.Value{v}}
+			return object.NewArray(v)
 		}
 	})
 	sendFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -750,7 +750,7 @@ func (vm *VM) bootstrap() {
 		for i, k := range anc {
 			out[i] = k
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cModule.define("include?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod, ok := args[0].(*RClass)
@@ -773,7 +773,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cModule.define("instance_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		all := len(args) == 0 || args[0].Truthy() // instance_methods(false) = own only
-		return &object.Array{Elems: vm.methodNames(self.(*RClass), all)}
+		return object.NewArrayFromSlice(vm.methodNames(self.(*RClass), all))
 	})
 	vm.cModule.define("const_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.scopedConst(self.(*RClass), constNameArg(args[0]))
@@ -828,7 +828,7 @@ func (vm *VM) bootstrap() {
 		for i, n := range names {
 			out[i] = object.Symbol(n)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cModule.define("const_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
@@ -922,7 +922,7 @@ func (vm *VM) bootstrap() {
 		for i, n := range names {
 			out[i] = object.Symbol(n)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	// Module#< <= > >= compare by the inheritance/inclusion hierarchy: A < B is
 	// true if A is a proper descendant of B, false if a proper ancestor (or, for
@@ -1182,7 +1182,7 @@ func (vm *VM) bootstrap() {
 		for _, r := range strOf(self) {
 			out = append(out, object.NewStringView(string(r)))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("bytes", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := strOf(self)
@@ -1190,7 +1190,7 @@ func (vm *VM) bootstrap() {
 		for i := 0; i < len(s); i++ {
 			out[i] = object.IntValue(int64(s[i]))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("getbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := strOf(self)
@@ -1212,7 +1212,7 @@ func (vm *VM) bootstrap() {
 		for i, seg := range segs {
 			out[i] = object.NewStringView(seg)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("each_line", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -1256,7 +1256,7 @@ func (vm *VM) bootstrap() {
 		for _, r := range strOf(self) {
 			out = append(out, object.IntValue(int64(r)))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("split", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.stringSplit(strOf(self), args)
@@ -1450,16 +1450,16 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("partition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s, sep := strOf(self), strArg(args[0])
 		if i := strings.Index(s, sep); i >= 0 {
-			return &object.Array{Elems: []object.Value{object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):])}}
+			return object.NewArray(object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):]))
 		}
-		return &object.Array{Elems: []object.Value{object.NewString(s), object.NewString(""), object.NewString("")}}
+		return object.NewArray(object.NewString(s), object.NewString(""), object.NewString(""))
 	})
 	vm.cString.define("rpartition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s, sep := strOf(self), strArg(args[0])
 		if i := strings.LastIndex(s, sep); i >= 0 {
-			return &object.Array{Elems: []object.Value{object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):])}}
+			return object.NewArray(object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):]))
 		}
-		return &object.Array{Elems: []object.Value{object.NewString(""), object.NewString(""), object.NewString(s)}}
+		return object.NewArray(object.NewString(""), object.NewString(""), object.NewString(s))
 	})
 
 	// String mutation (in-place). Every mutator guards against a frozen receiver.
@@ -1614,9 +1614,9 @@ func (vm *VM) bootstrap() {
 	vm.cArray.smethods["new"] = &Method{name: "new", owner: vm.cArray,
 		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 			if recv := self.(*RClass); recv != vm.cArray {
-				return vm.newBuiltinSubclass(recv, &object.Array{}, args, blk)
+				return vm.newBuiltinSubclass(recv, object.NewArray(), args, blk)
 			}
-			arr := &object.Array{}
+			arr := object.NewArray()
 			arrayInit(vm, arr, args, blk)
 			return arr
 		}}
@@ -1634,7 +1634,7 @@ func (vm *VM) bootstrap() {
 				out[i] = object.NilV
 			}
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
@@ -1647,7 +1647,7 @@ func (vm *VM) bootstrap() {
 		n := clampCount(intArg(args[0]), len(a.Elems))
 		out := make([]object.Value, n)
 		copy(out, a.Elems[:n])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
@@ -1660,7 +1660,7 @@ func (vm *VM) bootstrap() {
 		n := clampCount(intArg(args[0]), len(a.Elems))
 		out := make([]object.Value, n)
 		copy(out, a.Elems[len(a.Elems)-n:])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
@@ -1685,7 +1685,7 @@ func (vm *VM) bootstrap() {
 			start := len(a.Elems) - n
 			out := append([]object.Value{}, a.Elems[start:]...)
 			a.Elems = a.Elems[:start]
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		if len(a.Elems) == 0 {
 			return object.NilV
@@ -1706,7 +1706,7 @@ func (vm *VM) bootstrap() {
 			}
 			out := append([]object.Value{}, a.Elems[:n]...)
 			a.Elems = a.Elems[n:]
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		if len(a.Elems) == 0 {
 			return object.NilV
@@ -1861,7 +1861,7 @@ func (vm *VM) bootstrap() {
 			}
 			out := make([]object.Value, length)
 			copy(out, a.Elems[start:start+length])
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		if len(args) == 2 { // a[start, len]
 			start := normIndex(intArg(args[0]), len(a.Elems))
@@ -1875,7 +1875,7 @@ func (vm *VM) bootstrap() {
 			}
 			out := make([]object.Value, end-start)
 			copy(out, a.Elems[start:end])
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		if i, ok := arrayIndex(a, intArg(args[0])); ok {
 			return a.Elems[i]
@@ -1959,7 +1959,7 @@ func (vm *VM) bootstrap() {
 		for i, e := range a.Elems {
 			out[i] = vm.callBlock(blk, []object.Value{e})
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	// select is native (Array includes Enumerable, whose #select routes every
 	// element through __each_packed — a splat-array allocation and a second block
@@ -1978,7 +1978,7 @@ func (vm *VM) bootstrap() {
 				out = append(out, e)
 			}
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	// reduce/inject are native for the same reason (and #inject delegates here via
 	// the prelude). The fold mirrors Enumerable#reduce exactly — the (init, sym),
@@ -1993,13 +1993,13 @@ func (vm *VM) bootstrap() {
 		for i, e := range a.Elems {
 			out[len(a.Elems)-1-i] = e
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("dig", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.digValue(self, args)
 	})
 	vm.cArray.define("uniq", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		return &object.Array{Elems: vm.arrayUniq(self.(*object.Array).Elems, blk)}
+		return object.NewArrayFromSlice(vm.arrayUniq(self.(*object.Array).Elems, blk))
 	})
 	// Set intersection (&) and union (|): both deduplicate, keeping first-seen
 	// order, matching Ruby.
@@ -2012,7 +2012,7 @@ func (vm *VM) bootstrap() {
 				out = append(out, e)
 			}
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("|", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
@@ -2023,7 +2023,7 @@ func (vm *VM) bootstrap() {
 				out = append(out, e)
 			}
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("map!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -2092,14 +2092,14 @@ func (vm *VM) bootstrap() {
 				out = append(out, e)
 			}
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 {
 			depth = int(intArg(args[0]))
 		}
-		return &object.Array{Elems: flattenDepth(self.(*object.Array).Elems, depth)}
+		return object.NewArrayFromSlice(flattenDepth(self.(*object.Array).Elems, depth))
 	})
 	vm.cArray.define("flatten!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
@@ -2163,7 +2163,7 @@ func (vm *VM) bootstrap() {
 			}
 			slice := make([]object.Value, end-i)
 			copy(slice, a.Elems[i:end])
-			vm.callBlock(blk, []object.Value{&object.Array{Elems: slice}})
+			vm.callBlock(blk, []object.Value{object.NewArrayFromSlice(slice)})
 		}
 		return self
 	})
@@ -2182,14 +2182,14 @@ func (vm *VM) bootstrap() {
 		for i := 0; i+n <= len(a.Elems); i++ {
 			window := make([]object.Value, n)
 			copy(window, a.Elems[i:i+n])
-			vm.callBlock(blk, []object.Value{&object.Array{Elems: window}})
+			vm.callBlock(blk, []object.Value{object.NewArrayFromSlice(window)})
 		}
 		return self
 	})
 	vm.cArray.define("transpose", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		rows := self.(*object.Array).Elems
 		if len(rows) == 0 {
-			return &object.Array{}
+			return object.NewArray()
 		}
 		var width int
 		for i, r := range rows {
@@ -2209,9 +2209,9 @@ func (vm *VM) bootstrap() {
 			for i, r := range rows {
 				col[i] = r.(*object.Array).Elems[j]
 			}
-			out[j] = &object.Array{Elems: col}
+			out[j] = object.NewArrayFromSlice(col)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		lists := [][]object.Value{self.(*object.Array).Elems}
@@ -2223,18 +2223,18 @@ func (vm *VM) bootstrap() {
 			lists = append(lists, la.Elems)
 		}
 		// Cartesian product, last list varying fastest (MRI order).
-		out := []object.Value{&object.Array{}}
+		out := []object.Value{object.NewArray()}
 		for _, list := range lists {
 			var next []object.Value
 			for _, prefix := range out {
 				for _, e := range list {
 					row := append(append([]object.Value{}, prefix.(*object.Array).Elems...), e)
-					next = append(next, &object.Array{Elems: row})
+					next = append(next, object.NewArrayFromSlice(row))
 				}
 			}
 			out = next
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("combination", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		k := int(intArg(args[0]))
@@ -2250,7 +2250,7 @@ func (vm *VM) bootstrap() {
 				for i, j := range idx {
 					pick[i] = elems[j]
 				}
-				combos = append(combos, &object.Array{Elems: pick})
+				combos = append(combos, object.NewArrayFromSlice(pick))
 				// advance the index combination (lexicographic)
 				i := k - 1
 				for i >= 0 && idx[i] == i+len(elems)-k {
@@ -2266,7 +2266,7 @@ func (vm *VM) bootstrap() {
 			}
 		}
 		if blk == nil {
-			return enumFor(&object.Array{Elems: combos}, "each")
+			return enumFor(object.NewArrayFromSlice(combos), "each")
 		}
 		for _, c := range combos {
 			vm.callBlock(blk, []object.Value{c})
@@ -2288,7 +2288,7 @@ func (vm *VM) bootstrap() {
 				if depth == k {
 					out := make([]object.Value, k)
 					copy(out, pick)
-					perms = append(perms, &object.Array{Elems: out})
+					perms = append(perms, object.NewArrayFromSlice(out))
 					return
 				}
 				for i := range elems {
@@ -2304,7 +2304,7 @@ func (vm *VM) bootstrap() {
 			gen(0)
 		}
 		if blk == nil {
-			return enumFor(&object.Array{Elems: perms}, "each")
+			return enumFor(object.NewArrayFromSlice(perms), "each")
 		}
 		for _, pr := range perms {
 			vm.callBlock(blk, []object.Value{pr})
@@ -2322,7 +2322,7 @@ func (vm *VM) bootstrap() {
 			}
 			out = append(out, e)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("drop_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -2335,13 +2335,13 @@ func (vm *VM) bootstrap() {
 		}
 		out := make([]object.Value, len(a.Elems)-i)
 		copy(out, a.Elems[i:])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("rotate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		n := len(a.Elems)
 		if n == 0 {
-			return &object.Array{}
+			return object.NewArray()
 		}
 		shift := 1
 		if len(args) > 0 {
@@ -2352,7 +2352,7 @@ func (vm *VM) bootstrap() {
 		for i := 0; i < n; i++ {
 			out[i] = a.Elems[(i+shift)%n]
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("join", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		sep := ""
@@ -2380,7 +2380,7 @@ func (vm *VM) bootstrap() {
 		}
 		out := make([]object.Value, n)
 		copy(out, a.Elems[:n])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
@@ -2393,14 +2393,14 @@ func (vm *VM) bootstrap() {
 		}
 		out := make([]object.Value, len(a.Elems)-n)
 		copy(out, a.Elems[n:])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("sort", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		out := make([]object.Value, len(a.Elems))
 		copy(out, a.Elems)
 		vm.sortSlice(out, blk)
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array).Elems
@@ -2431,7 +2431,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(0)
 	})
 	vm.cNilClass.define("to_a", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{}
+		return object.NewArray()
 	})
 	// NilClass conversions mirror MRI: nil.to_i → 0, nil.to_f → 0.0, nil.to_h → {},
 	// nil.to_r → (0/1), nil.to_c → (0+0i). nil.to_a/to_s/inspect already exist.
@@ -2498,7 +2498,7 @@ func (vm *VM) bootstrap() {
 		for i, k := range idx {
 			out[i] = a.Elems[k]
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("min_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		return vm.arrayByExtreme(self.(*object.Array), blk, "min_by", -1)
@@ -2658,7 +2658,7 @@ func (vm *VM) bootstrap() {
 		h := self.(*object.Hash)
 		ks := make([]object.Value, len(h.Keys))
 		copy(ks, h.Keys)
-		return &object.Array{Elems: ks}
+		return object.NewArrayFromSlice(ks)
 	})
 	vm.cHash.define("values", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
@@ -2667,7 +2667,7 @@ func (vm *VM) bootstrap() {
 			v, _ := h.Get(k)
 			vs = append(vs, v)
 		}
-		return &object.Array{Elems: vs}
+		return object.NewArrayFromSlice(vs)
 	})
 	vm.cHash.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -2788,7 +2788,7 @@ func (vm *VM) bootstrap() {
 			v, _ := h.Get(k)
 			out[i] = v
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cHash.define("transform_values", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -3057,13 +3057,13 @@ func (vm *VM) bootstrap() {
 			for i := range out {
 				out[i] = object.IntValue(int64(lo) + int64(i))
 			}
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		elems := rangeElems(r)
 		n = clampCount(int64(n), len(elems))
 		out := make([]object.Value, n)
 		copy(out, elems[:n])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("end", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*object.Range).Hi
@@ -3080,7 +3080,7 @@ func (vm *VM) bootstrap() {
 		n := clampCount(intArg(args[0]), len(elems))
 		out := make([]object.Value, n)
 		copy(out, elems[len(elems)-n:])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("exclude_end?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Range).Exclusive)
@@ -3119,7 +3119,7 @@ func (vm *VM) bootstrap() {
 			n := clampCount(intArg(args[0]), len(elems))
 			out := make([]object.Value, n)
 			copy(out, elems[:n])
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		lo, _, ok := rangeInts(r)
 		if !ok { // non-integer (e.g. String) range: the first iterated element
@@ -3143,7 +3143,7 @@ func (vm *VM) bootstrap() {
 			for i := 0; i < n; i++ {
 				out[i] = elems[len(elems)-1-i]
 			}
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		_, hi, ok := rangeInts(r)
 		if !ok { // non-integer range: the last iterated element
@@ -3185,7 +3185,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(n)
 	})
 	vm.cRange.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: rangeElems(self.(*object.Range))}
+		return object.NewArrayFromSlice(rangeElems(self.(*object.Range)))
 	})
 	// take(n) mirrors first(n) (it works on endless ranges); drop(n) needs the
 	// full materialised range, so it is bounded only.
@@ -3204,13 +3204,13 @@ func (vm *VM) bootstrap() {
 			for i := range out {
 				out[i] = object.IntValue(int64(lo) + int64(i))
 			}
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		elems := rangeElems(r)
 		n = clampCount(int64(n), len(elems))
 		out := make([]object.Value, n)
 		copy(out, elems[:n])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		elems := rangeElems(self.(*object.Range))
@@ -3223,7 +3223,7 @@ func (vm *VM) bootstrap() {
 		}
 		out := make([]object.Value, len(elems)-n)
 		copy(out, elems[n:])
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -3244,7 +3244,7 @@ func (vm *VM) bootstrap() {
 		for i, e := range elems {
 			out[i] = vm.callBlock(blk, []object.Value{e})
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -3362,7 +3362,7 @@ func (vm *VM) bootstrap() {
 		_, selfInt := self.(object.Integer)
 		_, otherInt := other.(object.Integer)
 		if selfInt && otherInt {
-			return &object.Array{Elems: []object.Value{other, self}}
+			return object.NewArray(other, self)
 		}
 		sf, _ := toFloat(self) // self is always numeric here
 		of, ok := toFloat(other)
@@ -3380,7 +3380,7 @@ func (vm *VM) bootstrap() {
 			}
 			raise("TypeError", "can't convert %s into Float", name)
 		}
-		return &object.Array{Elems: []object.Value{object.Float(of), object.Float(sf)}}
+		return object.NewArray(object.Float(of), object.Float(sf))
 	}
 	vm.cInteger.define("coerce", coerce)
 	vm.cFloat.define("coerce", coerce)
@@ -3401,7 +3401,7 @@ func (vm *VM) bootstrap() {
 		if b == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return &object.Array{Elems: []object.Value{object.IntValue(floorDiv(a, b)), object.IntValue(floorMod(a, b))}}
+		return object.NewArray(object.IntValue(floorDiv(a, b)), object.IntValue(floorMod(a, b)))
 	})
 	vm.cInteger.define("gcdlcm", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := intOf(self), intArg(args[0])
@@ -3410,7 +3410,7 @@ func (vm *VM) bootstrap() {
 		if a != 0 && b != 0 {
 			lcm = absInt(a / g * b)
 		}
-		return &object.Array{Elems: []object.Value{object.IntValue(g), object.IntValue(lcm)}}
+		return object.NewArray(object.IntValue(g), object.IntValue(lcm))
 	})
 	vm.cInteger.define("remainder", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// remainder truncates toward zero (keeping the dividend's sign), unlike %
@@ -3494,14 +3494,14 @@ func (vm *VM) bootstrap() {
 			raise("Math::DomainError", "out of domain")
 		}
 		if n == 0 {
-			return &object.Array{Elems: []object.Value{object.IntValue(0)}}
+			return object.NewArray(object.IntValue(0))
 		}
 		var out []object.Value
 		for n > 0 {
 			out = append(out, object.IntValue(n%base))
 			n /= base
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cInteger.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
@@ -3591,7 +3591,7 @@ func (vm *VM) bootstrap() {
 		}
 		// Floored division: the quotient is an Integer, the modulo a Float.
 		q := math.Floor(a / b)
-		return &object.Array{Elems: []object.Value{object.IntValue(int64(q)), object.Float(a - b*q)}}
+		return object.NewArray(object.IntValue(int64(q)), object.Float(a-b*q))
 	})
 	vm.cFloat.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Truncate toward zero. ndigits > 0 keeps a Float; otherwise an Integer.
@@ -4549,7 +4549,7 @@ func scrubUTF8(s, repl string) string {
 // binds a two-parameter block element-wise, while a one-parameter block sees the
 // pair (matching Ruby).
 func hashPair(k, v object.Value) *object.Array {
-	return &object.Array{Elems: []object.Value{k, v}}
+	return object.NewArray(k, v)
 }
 
 // spaceship compares two values via their <=> method, raising ArgumentError if
@@ -4946,7 +4946,7 @@ func (vm *VM) captureBacktrace(exc object.Value) object.Value {
 		// reports "raised" with no frames, distinct from a never-raised nil.
 		frames = []object.Value{}
 	}
-	setIvar(exc, backtraceIvar, &object.Array{Elems: frames})
+	setIvar(exc, backtraceIvar, object.NewArrayFromSlice(frames))
 	return exc
 }
 
@@ -4964,14 +4964,14 @@ func normalizeBacktrace(v object.Value) object.Value {
 	case object.Nil:
 		return object.NilV
 	case *object.String:
-		return &object.Array{Elems: []object.Value{a}}
+		return object.NewArray(a)
 	case *object.Array:
 		for _, e := range a.Elems {
 			if _, ok := e.(*object.String); !ok {
 				raise("TypeError", "backtrace must be an Array of String or an Array of Thread::Backtrace::Location")
 			}
 		}
-		return &object.Array{Elems: append([]object.Value(nil), a.Elems...)}
+		return object.NewArrayFromSlice(append([]object.Value(nil), a.Elems...))
 	default:
 		raise("TypeError", "backtrace must be an Array of String or an Array of Thread::Backtrace::Location")
 		return object.NilV
@@ -5203,7 +5203,7 @@ func dupValue(v object.Value) object.Value {
 	case *object.Array:
 		elems := make([]object.Value, len(x.Elems))
 		copy(elems, x.Elems)
-		return &object.Array{Elems: elems}
+		return object.NewArrayFromSlice(elems)
 	case *object.Hash:
 		h := object.NewHash()
 		for _, k := range x.Keys {

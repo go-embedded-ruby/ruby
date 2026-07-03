@@ -67,7 +67,7 @@ func (vm *VM) pgValue(v any) object.Value {
 
 // pgArray maps a decoded PostgreSQL array column ([]any) to a Ruby Array.
 func (vm *VM) pgArray(vals []any) *object.Array {
-	arr := &object.Array{Elems: make([]object.Value, len(vals))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(vals)))
 	for i, e := range vals {
 		arr.Elems[i] = vm.pgValue(e)
 	}
@@ -175,7 +175,7 @@ func pgIntArg(v object.Value) int64 {
 
 // pgStrings maps a []string to a Ruby Array of Strings.
 func pgStrings(ss []string) *object.Array {
-	arr := &object.Array{Elems: make([]object.Value, len(ss))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(ss)))
 	for i, s := range ss {
 		arr.Elems[i] = object.NewString(s)
 	}

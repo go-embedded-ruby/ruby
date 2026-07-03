@@ -262,9 +262,9 @@ func (vm *VM) registerPGResult(mod *RClass) {
 	// #values returns every row as an Array of Arrays.
 	d("values", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		rows := self(v).Values()
-		out := &object.Array{Elems: make([]object.Value, len(rows))}
+		out := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 		for i, row := range rows {
-			inner := &object.Array{Elems: make([]object.Value, len(row))}
+			inner := object.NewArrayFromSlice(make([]object.Value, len(row)))
 			for j, cell := range row {
 				inner.Elems[j] = vm.pgValue(cell)
 			}

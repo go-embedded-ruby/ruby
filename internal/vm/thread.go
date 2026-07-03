@@ -221,7 +221,7 @@ func (vm *VM) registerThreadClass() {
 				live = append(live, t)
 			}
 		}
-		return &object.Array{Elems: live}
+		return object.NewArrayFromSlice(live)
 	})
 	sdef("pass", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		vm.threadBlock(runtime.Gosched)
@@ -307,7 +307,7 @@ func (vm *VM) registerThreadClass() {
 		sort.SliceStable(keys, func(i, j int) bool {
 			return string(keys[i].(object.Symbol)) < string(keys[j].(object.Symbol))
 		})
-		return &object.Array{Elems: keys}
+		return object.NewArrayFromSlice(keys)
 	})
 	cThread.define("abort_on_exception", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*RThread).abort)

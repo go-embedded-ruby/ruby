@@ -103,7 +103,7 @@ func shellSplit(line string) object.Value {
 	for i, w := range words {
 		out[i] = object.NewString(w)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // shellWords coerces an Array receiver/argument to a []string for Join. Each

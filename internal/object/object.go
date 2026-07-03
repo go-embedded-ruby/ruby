@@ -383,6 +383,22 @@ func (a *Array) ToS() string     { return a.repr() }
 func (a *Array) Inspect() string { return a.repr() }
 func (a *Array) Truthy() bool    { return true }
 
+// NewArray returns an *Array whose backing slice holds elems. Calling it with
+// a spread slice (NewArray(xs...)) passes xs through unchanged — the array
+// shares that backing slice, exactly like &Array{Elems: xs} — while calling it
+// with individual arguments (NewArray(a, b)) allocates a fresh slice, exactly
+// like &Array{Elems: []Value{a, b}}. It is the single construction chokepoint
+// for arrays entering a Value, so the migration to a tagged-struct Value can be
+// localised here (compare NewString / NewHash).
+func NewArray(elems ...Value) *Array { return &Array{Elems: elems} }
+
+// NewArrayFromSlice returns an *Array that shares (does not copy) the given
+// backing slice, exactly like &Array{Elems: elems}. Use it for the aliasing
+// case — a named slice, a make(...) that is filled in place, or an append
+// result — where NewArray(elems...) would read awkwardly. Aliasing semantics
+// are identical to the composite literal.
+func NewArrayFromSlice(elems []Value) *Array { return &Array{Elems: elems} }
+
 // Hash is an insertion-ordered map (as in Ruby). Keys are normalised by hashKey:
 // a String keys by its byte content (Ruby dups+freezes string keys, so a stored
 // key is a frozen snapshot), every other value keys by itself — value types by
@@ -752,6 +768,13 @@ func rangeEnd(v Value, inspect bool) string {
 	return v.ToS()
 }
 func (r *Range) Truthy() bool { return true }
+
+// NewRange returns a *Range spanning lo..hi (exclusive of hi when exclusive is
+// true), exactly like &Range{Lo: lo, Hi: hi, Exclusive: exclusive}. It is the
+// construction chokepoint for ranges entering a Value, mirroring NewArray.
+func NewRange(lo, hi Value, exclusive bool) *Range {
+	return &Range{Lo: lo, Hi: hi, Exclusive: exclusive}
+}
 
 // Bool is true or false.
 type Bool bool

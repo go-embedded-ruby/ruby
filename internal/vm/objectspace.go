@@ -33,7 +33,7 @@ func (vm *VM) registerObjectSpace() {
 		} else if blk != nil {
 			callable = blk
 		}
-		return &object.Array{Elems: []object.Value{object.IntValue(0), callable}}
+		return object.NewArray(object.IntValue(0), callable)
 	})
 	// undefine_finalizer(obj): a no-op that returns the object, as in MRI.
 	def("undefine_finalizer", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {

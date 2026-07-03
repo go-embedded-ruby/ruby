@@ -72,7 +72,7 @@ func (vm *VM) installScanf() {
 	vm.cObject.define("scanf", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		stdin, ok := vm.globals["$stdin"].(*IOObj)
 		if !ok {
-			return &object.Array{}
+			return object.NewArray()
 		}
 		return scanfIO(vm, stdin, args, blk)
 	})
@@ -93,7 +93,7 @@ func (vm *VM) doScanf(input, format string, blk *Proc) object.Value {
 	for _, g := range groups {
 		results = append(results, vm.callBlock(blk, []object.Value{scanfValues(g)}))
 	}
-	return &object.Array{Elems: results}
+	return object.NewArrayFromSlice(results)
 }
 
 // scanfValues maps a library result group ([]any of int / *big.Int / float64 /
@@ -103,7 +103,7 @@ func scanfValues(vals []any) object.Value {
 	for _, v := range vals {
 		elems = append(elems, scanfValue(v))
 	}
-	return &object.Array{Elems: elems}
+	return object.NewArrayFromSlice(elems)
 }
 
 // scanfValue maps one library value onto its Ruby counterpart. The library

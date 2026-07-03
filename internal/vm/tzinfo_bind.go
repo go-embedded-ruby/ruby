@@ -50,7 +50,7 @@ func tzIdentifiers() object.Value {
 func tzAll() object.Value {
 	all, err := tzinfo.All()
 	tzCheck(err)
-	arr := &object.Array{Elems: make([]object.Value, len(all))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(all)))
 	for i, tz := range all {
 		arr.Elems[i] = &Timezone{tz: tz}
 	}

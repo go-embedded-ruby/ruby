@@ -65,7 +65,7 @@ func complexArray(cs []complex128) object.Value {
 	for i, c := range cs {
 		out[i] = &object.Complex{Re: object.Float(real(c)), Im: object.Float(imag(c))}
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // floatArray marshals []float64 back into a Ruby Array of Float.
@@ -74,7 +74,7 @@ func floatArray(fs []float64) object.Value {
 	for i, f := range fs {
 		out[i] = object.Float(f)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // float2DArray marshals [][]float64 into a Ruby Array of Arrays of Float.
@@ -83,7 +83,7 @@ func float2DArray(rows [][]float64) object.Value {
 	for i, r := range rows {
 		out[i] = floatArray(r)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // sampleSpacing reads an optional trailing spacing argument (numpy's `d`),

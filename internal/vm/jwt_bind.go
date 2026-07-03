@@ -75,7 +75,7 @@ func (vm *VM) registerJWT() {
 			if err != nil {
 				raiseJWTError(err)
 			}
-			return &object.Array{Elems: []object.Value{jwtToRuby(payload), jwtToRuby(header)}}
+			return object.NewArray(jwtToRuby(payload), jwtToRuby(header))
 		}}
 }
 
@@ -382,7 +382,7 @@ func jwtToRuby(v any) object.Value {
 		for i, e := range n {
 			elems[i] = jwtToRuby(e)
 		}
-		return &object.Array{Elems: elems}
+		return object.NewArrayFromSlice(elems)
 	case *jwt.OrderedMap:
 		h := object.NewHashCap(n.Len())
 		for _, k := range n.Keys() {

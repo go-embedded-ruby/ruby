@@ -33,21 +33,21 @@ func (vm *VM) registerDir() {
 		for _, n := range names {
 			elems = append(elems, object.NewString(n))
 		}
-		return &object.Array{Elems: elems}
+		return object.NewArrayFromSlice(elems)
 	})
 	def("children", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		var elems []object.Value
 		for _, n := range dirNames(strArg(args[0])) {
 			elems = append(elems, object.NewString(n))
 		}
-		return &object.Array{Elems: elems}
+		return object.NewArrayFromSlice(elems)
 	})
 	glob := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		var elems []object.Value
 		for _, m := range dirGlob(strArg(args[0])) {
 			elems = append(elems, object.NewString(m))
 		}
-		return &object.Array{Elems: elems}
+		return object.NewArrayFromSlice(elems)
 	}
 	def("glob", glob)
 	def("[]", glob)

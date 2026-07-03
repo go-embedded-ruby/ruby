@@ -28,7 +28,7 @@ func (vm *VM) registerPackUnpack() {
 	})
 	vm.cString.define("unpack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := self.(*object.String).Bytes()
-		return &object.Array{Elems: unpackElems(data, packFormat(args))}
+		return object.NewArrayFromSlice(unpackElems(data, packFormat(args)))
 	})
 	vm.cString.define("unpack1", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := self.(*object.String).Bytes()

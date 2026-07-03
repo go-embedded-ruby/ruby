@@ -367,7 +367,7 @@ func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 	// #map collects the block's result for each node into an Array.
 	d("map", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		nodes := self(v).Nodes()
-		out := &object.Array{Elems: make([]object.Value, 0, len(nodes))}
+		out := object.NewArrayFromSlice(make([]object.Value, 0, len(nodes)))
 		if blk == nil {
 			return out
 		}

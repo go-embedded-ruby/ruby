@@ -157,7 +157,7 @@ func (b *Bag) toArray() object.Value {
 			out = append(out, e.val)
 		}
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // distinctArray materialises the distinct members into a Ruby Array (each once),
@@ -176,7 +176,7 @@ func (b *Bag) distinctArray() object.Value {
 	for i, e := range entries {
 		out[i] = e.val
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // sortedKeys returns the canonical keys ordered by their member's inspected
@@ -290,7 +290,7 @@ func (vm *VM) registerBag() {
 		}
 		bag := self(v)
 		for _, k := range bag.sortedKeys() {
-			pair := &object.Array{Elems: []object.Value{bag.vals[k], object.IntValue(int64(bag.b.Count(k)))}}
+			pair := object.NewArray(bag.vals[k], object.IntValue(int64(bag.b.Count(k))))
 			vm.callBlock(blk, []object.Value{pair})
 		}
 		return bag
@@ -373,9 +373,9 @@ func (vm *VM) registerBag() {
 		}
 		out := make([]object.Value, len(entries))
 		for i, e := range entries {
-			out[i] = &object.Array{Elems: []object.Value{e.val, object.IntValue(int64(e.count))}}
+			out[i] = object.NewArray(e.val, object.IntValue(int64(e.count)))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {

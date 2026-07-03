@@ -254,7 +254,7 @@ func dryFromGo(vm *VM, v any) object.Value {
 	case drytypes.Symbol:
 		return object.Symbol(string(n))
 	case []any:
-		arr := &object.Array{Elems: make([]object.Value, len(n))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = dryFromGo(vm, el)
 		}

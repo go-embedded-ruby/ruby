@@ -216,7 +216,7 @@ func compArray(keys []any, vals tsortVals) object.Value {
 	for i, k := range keys {
 		out[i] = vals[k]
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // sccArray boxes the slice-of-components result into a Ruby Array of Arrays.
@@ -225,5 +225,5 @@ func sccArray(comps [][]any, vals tsortVals) object.Value {
 	for i, c := range comps {
 		out[i] = compArray(c, vals)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }

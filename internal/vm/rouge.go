@@ -66,7 +66,7 @@ func (vm *VM) registerRouge() {
 	})
 	lexerCls.define("aliases", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		al := rougeLexerHandle(self).lx.Aliases()
-		out := &object.Array{Elems: make([]object.Value, len(al))}
+		out := object.NewArrayFromSlice(make([]object.Value, len(al)))
 		for i, a := range al {
 			out.Elems[i] = object.NewString(a)
 		}

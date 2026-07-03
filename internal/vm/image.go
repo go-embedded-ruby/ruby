@@ -83,8 +83,7 @@ func (vm *VM) registerImage() {
 	})
 	d("get", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		c := imgOf(v).RGBAAt(int(intArg(args[0])), int(intArg(args[1])))
-		return &object.Array{Elems: []object.Value{
-			object.IntValue(int64(c.R)), object.IntValue(int64(c.G)), object.IntValue(int64(c.B)), object.IntValue(int64(c.A))}}
+		return object.NewArray(object.IntValue(int64(c.R)), object.IntValue(int64(c.G)), object.IntValue(int64(c.B)), object.IntValue(int64(c.A)))
 	})
 	d("set", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a := uint8(255)

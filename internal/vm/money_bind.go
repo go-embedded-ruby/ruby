@@ -117,7 +117,7 @@ func moneyInt64Slice(v object.Value) []int64 {
 
 // moneySlice maps a []*money.Money to a Ruby Array of Money objects.
 func moneySlice(ms []*money.Money) object.Value {
-	arr := &object.Array{Elems: make([]object.Value, len(ms))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(ms)))
 	for i, m := range ms {
 		arr.Elems[i] = &Money{m: m}
 	}

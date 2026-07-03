@@ -211,7 +211,7 @@ func (vm *VM) registerActiveRecordRelation(mod *RClass) {
 		if err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 		}
-		arr := &object.Array{Elems: make([]object.Value, len(recs))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(recs)))
 		for i, rec := range recs {
 			arr.Elems[i] = &ActiveRecordRecord{rec: rec, model: rel.model}
 		}

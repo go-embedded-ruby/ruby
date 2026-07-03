@@ -249,7 +249,7 @@ func (vm *VM) registerPStore() {
 		for i, k := range ks {
 			out[i] = pstoreVal(k)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	rootQ := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pstoreSelf(v)

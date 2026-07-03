@@ -110,7 +110,7 @@ func (b *objBuilder) Str(s string)    { b.emit(object.NewString(s)) }
 func (b *objBuilder) Big(n *big.Int) { b.emit(object.NormInt(n)) }
 
 func (b *objBuilder) BeginArray(n int) {
-	b.stack = append(b.stack, objFrame{arr: &object.Array{Elems: make([]object.Value, 0, n)}})
+	b.stack = append(b.stack, objFrame{arr: object.NewArrayFromSlice(make([]object.Value, 0, n))})
 }
 
 func (b *objBuilder) EndArray() {

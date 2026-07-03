@@ -158,7 +158,7 @@ func (vm *VM) redisValue(v any) object.Value {
 
 // redisArray maps a []any reply to a Ruby Array.
 func (vm *VM) redisArray(vals []any) *object.Array {
-	arr := &object.Array{Elems: make([]object.Value, len(vals))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(vals)))
 	for i, e := range vals {
 		arr.Elems[i] = vm.redisValue(e)
 	}

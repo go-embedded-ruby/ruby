@@ -258,11 +258,7 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 func rackFinishMethod(self func(object.Value) *rack.Response) NativeFn {
 	return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		status, headers, body := self(v).Finish()
-		return &object.Array{Elems: []object.Value{
-			object.IntValue(int64(status)),
-			rackHeadersToHash(headers),
-			rackBodyArray(body),
-		}}
+		return object.NewArray(object.IntValue(int64(status)), rackHeadersToHash(headers), rackBodyArray(body))
 	}
 }
 

@@ -73,9 +73,9 @@ func rqrcodeErrMsg(err error) string {
 // rqrcodeModules returns the module matrix as a Ruby Array of Arrays of booleans,
 // matching the gem's `qr.qrcode.modules` / `qr.to_a`.
 func rqrcodeModules(q *rqrcode.QRCode) object.Value {
-	rows := &object.Array{Elems: make([]object.Value, len(q.Modules))}
+	rows := object.NewArrayFromSlice(make([]object.Value, len(q.Modules)))
 	for i, row := range q.Modules {
-		cols := &object.Array{Elems: make([]object.Value, len(row))}
+		cols := object.NewArrayFromSlice(make([]object.Value, len(row)))
 		for j, dark := range row {
 			cols.Elems[j] = object.Bool(dark)
 		}

@@ -31,7 +31,7 @@ func aotConcat(a, b object.Value) object.Value {
 	be := b.(*object.Array).Elems
 	out := make([]object.Value, 0, len(ae)+len(be))
 	out = append(append(out, ae...), be...)
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // aotSplat backs OpSplatToArray in AOT-compiled bodies; see splatToArray.
@@ -55,5 +55,5 @@ func (vm *VM) splatToArray(v object.Value) object.Value {
 		raise("TypeError", "can't convert %s to Array (%s#to_a gives %s)",
 			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
 	}
-	return &object.Array{Elems: []object.Value{v}}
+	return object.NewArray(v)
 }

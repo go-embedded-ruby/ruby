@@ -529,20 +529,20 @@ func New(out io.Writer) *VM {
 	vm.bootstrap()
 	// $LOAD_PATH (and its alias $:) is a real, mutable Array that require /
 	// require_relative search, so gems doing `$LOAD_PATH.unshift "lib"` work.
-	loadPath := &object.Array{}
+	loadPath := object.NewArray()
 	vm.globals["$LOAD_PATH"] = loadPath
 	vm.globals["$:"] = loadPath
 	// $LOADED_FEATURES (alias $") is a real, mutable Array of the files already
 	// loaded — code that consults or appends to it (Puppet's autoloader does
 	// `$LOADED_FEATURES << file`) works.
-	loadedFeatures := &object.Array{}
+	loadedFeatures := object.NewArray()
 	vm.globals["$LOADED_FEATURES"] = loadedFeatures
 	vm.globals[`$"`] = loadedFeatures
 	// ARGV (the top-level constant) holds the program's command-line arguments and
 	// is the very same Array as $* — a script doing ARGV.replace(...) and a library
 	// reading $* see one mutable object, as in MRI. The embedded host does not feed
 	// process args in yet, so it starts empty; SetARGV can repopulate it.
-	argv := &object.Array{}
+	argv := object.NewArray()
 	vm.consts["ARGV"] = argv
 	vm.globals["$*"] = argv
 	vm.installPrelude()
@@ -751,7 +751,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		if len(args) > si {
 			rest = append(rest, args[si:]...)
 		}
-		env.slots[si] = &object.Array{Elems: rest}
+		env.slots[si] = object.NewArrayFromSlice(rest)
 	} else {
 		copy(env.slots, args)
 	}
@@ -978,7 +978,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				elems := make([]object.Value, n)
 				copy(elems, stack[len(stack)-n:])
 				stack = stack[:len(stack)-n]
-				push(&object.Array{Elems: elems})
+				push(object.NewArrayFromSlice(elems))
 			case bytecode.OpNewHash:
 				n := in.A * 2
 				region := stack[len(stack)-n:]
@@ -1007,7 +1007,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpNewRange:
 				hi := pop()
 				lo := pop()
-				push(&object.Range{Lo: lo, Hi: hi, Exclusive: in.A == 1})
+				push(object.NewRange(lo, hi, in.A == 1))
 			case bytecode.OpPop:
 				pop()
 			case bytecode.OpDup:
@@ -1553,7 +1553,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					}
 					mid := make([]object.Value, n-pre-post)
 					copy(mid, elems[pre:n-post])
-					vals = append(vals, &object.Array{Elems: mid})
+					vals = append(vals, object.NewArrayFromSlice(mid))
 					for i := 0; i < post; i++ {
 						vals = append(vals, elems[n-post+i])
 					}
@@ -1574,7 +1574,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						vals = append(vals, nextVal())
 					}
 					if hasSplat {
-						vals = append(vals, &object.Array{})
+						vals = append(vals, object.NewArray())
 					}
 					for i := 0; i < post; i++ {
 						vals = append(vals, nextVal())
@@ -1590,7 +1590,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				elems := make([]object.Value, 0, len(a2.Elems)+len(b2.Elems))
 				elems = append(elems, a2.Elems...)
 				elems = append(elems, b2.Elems...)
-				push(&object.Array{Elems: elems})
+				push(object.NewArrayFromSlice(elems))
 			case bytecode.OpSendArray:
 				argsArr := pop().(*object.Array)
 				recv := pop()

@@ -119,5 +119,5 @@ func stringArray(ss []string) *object.Array {
 	for i, s := range ss {
 		elems[i] = object.NewString(s)
 	}
-	return &object.Array{Elems: elems}
+	return object.NewArrayFromSlice(elems)
 }

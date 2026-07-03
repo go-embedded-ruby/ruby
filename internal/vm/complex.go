@@ -33,10 +33,10 @@ func registerNumericComplexCompat(vm *VM, cNumeric *RClass) {
 	cNumeric.define("arg", phaseFn)
 	cNumeric.define("angle", phaseFn)
 	cNumeric.define("polar", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: []object.Value{vm.send(self, "abs", nil, nil), phaseOf(self)}}
+		return object.NewArray(vm.send(self, "abs", nil, nil), phaseOf(self))
 	})
 	rectFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: []object.Value{self, object.IntValue(0)}}
+		return object.NewArray(self, object.IntValue(0))
 	}
 	cNumeric.define("rect", rectFn)
 	cNumeric.define("rectangular", rectFn)
@@ -120,7 +120,7 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 		return modOf(self, args[0])
 	})
 	cNumeric.define("divmod", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: []object.Value{divOf(self, args[0]), modOf(self, args[0])}}
+		return object.NewArray(divOf(self, args[0]), modOf(self, args[0]))
 	})
 }
 
@@ -240,7 +240,7 @@ func (vm *VM) registerComplex() {
 
 	rect := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		c := cval(self)
-		return &object.Array{Elems: []object.Value{c.Re, c.Im}}
+		return object.NewArray(c.Re, c.Im)
 	}
 	vm.cComplex.define("rectangular", rect)
 	vm.cComplex.define("rect", rect)
@@ -249,7 +249,7 @@ func (vm *VM) registerComplex() {
 		c := cval(self)
 		mag := object.Float(math.Hypot(complexFloat(c.Re), complexFloat(c.Im)))
 		ang := object.Float(math.Atan2(complexFloat(c.Im), complexFloat(c.Re)))
-		return &object.Array{Elems: []object.Value{mag, ang}}
+		return object.NewArray(mag, ang)
 	})
 
 	vm.cComplex.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {

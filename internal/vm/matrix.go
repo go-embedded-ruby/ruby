@@ -110,7 +110,7 @@ func numsToArray(ns []libmatrix.Num) object.Value {
 	for i, n := range ns {
 		out[i] = numToValue(n)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // rowsFromValue maps the Ruby [[..],[..]] (Array of Arrays) argument of
@@ -447,7 +447,7 @@ func (vm *VM) registerMatrixClass() {
 		for i, r := range rows {
 			out[i] = numsToArray(r)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 
 	d("+", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {

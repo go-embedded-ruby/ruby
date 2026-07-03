@@ -82,7 +82,7 @@ func (vm *VM) registerFile() {
 	})
 	def("split", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])
-		return &object.Array{Elems: []object.Value{object.NewString(path.Dir(p)), object.NewString(path.Base(p))}}
+		return object.NewArray(object.NewString(path.Dir(p)), object.NewString(path.Base(p)))
 	})
 	def("join", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// MRI's File.join flattens nested Array arguments, so File.join([a, b], c)

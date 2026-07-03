@@ -144,7 +144,7 @@ func mailDateValue(m mailMsg) object.Value {
 // mailPartsArray wraps a slice of parts into a Ruby Array of Mail::Message
 // objects (a part is modelled as a message), preserving order.
 func mailPartsArray(parts []*mail.Part) object.Value {
-	arr := &object.Array{Elems: make([]object.Value, len(parts))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(parts)))
 	for i, p := range parts {
 		arr.Elems[i] = &MailMessage{m: mailMsg{m: p}}
 	}
@@ -164,7 +164,7 @@ func mailPartOrNil(p *mail.Part) object.Value {
 // Mail::Field value objects, preserving field order.
 func mailFieldsArray(h *mail.Header) object.Value {
 	fields := h.Fields()
-	arr := &object.Array{Elems: make([]object.Value, len(fields))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(fields)))
 	for i, f := range fields {
 		arr.Elems[i] = &MailField{f: mailField{f: f}}
 	}

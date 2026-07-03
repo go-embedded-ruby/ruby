@@ -134,7 +134,7 @@ func (vm *VM) registerGrapeMatch(cls *RClass) {
 	// #allowed lists the methods a path accepts (the 405 Allow header set).
 	cls.define("allowed", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		allowed := self(v).m.Allowed
-		arr := &object.Array{Elems: make([]object.Value, len(allowed))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(allowed)))
 		for i, a := range allowed {
 			arr.Elems[i] = object.NewString(a)
 		}
@@ -217,7 +217,7 @@ func (vm *VM) registerGrapeFormatter(mod *RClass) {
 		}
 		body, mime, err := f.Format(grapeStr(args[0]), grapeToGo(args[1]))
 		grapeCheckFormatErr(err)
-		return &object.Array{Elems: []object.Value{object.NewString(body), object.NewString(mime)}}
+		return object.NewArray(object.NewString(body), object.NewString(mime))
 	})
 	cls.define("json", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		body, err := f.JSON(grapeToGo(grapeArg(args)))

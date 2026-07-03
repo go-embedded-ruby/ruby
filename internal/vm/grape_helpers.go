@@ -237,7 +237,7 @@ func grapeFromGo(v any) object.Value {
 	case string:
 		return object.NewString(n)
 	case []any:
-		arr := &object.Array{Elems: make([]object.Value, len(n))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = grapeFromGo(el)
 		}

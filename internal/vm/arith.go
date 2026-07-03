@@ -421,7 +421,7 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		}
 		out := make([]object.Value, 0, len(a.Elems)+len(bb.Elems))
 		out = append(append(out, a.Elems...), bb.Elems...)
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	case bytecode.OpSub:
 		bb, ok := b.(*object.Array)
 		if !ok {
@@ -433,7 +433,7 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 				out = append(out, e)
 			}
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	case bytecode.OpMul:
 		if sep, ok := b.(*object.String); ok {
 			return object.NewString(joinArray(a, sep.Str()))
@@ -449,7 +449,7 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		for i := int64(0); i < int64(n); i++ {
 			out = append(out, a.Elems...)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	}
 	return raise("NoMethodError", "undefined method '%s' for an Array", op)
 }

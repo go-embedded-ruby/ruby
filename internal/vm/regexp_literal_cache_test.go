@@ -39,9 +39,9 @@ p a == b
 func TestRegexpLiteralMatchingUnchanged(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{`p(/abc/ =~ "xxabc")`, "2\n"},
-		{`p(/ABC/i =~ "xabc")`, "1\n"},           // i: case-insensitive
-		{`p("a\nb" =~ /^b/m)`, "2\n"},            // m: dot/anchors over newlines
-		{`p(/ a b c /x =~ "abc")`, "0\n"},        // x: whitespace ignored
+		{`p(/ABC/i =~ "xabc")`, "1\n"},    // i: case-insensitive
+		{`p("a\nb" =~ /^b/m)`, "2\n"},     // m: dot/anchors over newlines
+		{`p(/ a b c /x =~ "abc")`, "0\n"}, // x: whitespace ignored
 		{`p "a1 b2 c3".scan(/\d/)`, "[\"1\", \"2\", \"3\"]\n"},
 		{`p "foo".match?(/o+/)`, "true\n"},
 		{`m = /(\d+)-(\d+)/.match("12-34"); p [m[1], m[2]]`, "[\"12\", \"34\"]\n"},

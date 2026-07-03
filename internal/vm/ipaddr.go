@@ -280,7 +280,7 @@ func (vm *VM) registerIPAddr() {
 	d("to_range", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		lo, hi, err := self(v).ip.ToRange()
 		raiseIPAddrErr(err)
-		return &object.Range{Lo: &IPAddr{ip: lo}, Hi: &IPAddr{ip: hi}, Exclusive: false}
+		return object.NewRange(&IPAddr{ip: lo}, &IPAddr{ip: hi}, false)
 	})
 	// each is an EXTENSION beyond MRI 4.0.5 (MRI's IPAddr has no #each); the
 	// library exposes it as iteration over to_range, lowest address first.

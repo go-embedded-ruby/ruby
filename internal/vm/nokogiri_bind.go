@@ -85,7 +85,7 @@ func nokogiriNodeOrNil(n *nokogiri.Node) object.Value {
 // nokogiriNodeArray maps a NodeSet to a Ruby Array of wrapped nodes (#to_a).
 func nokogiriNodeArray(set *nokogiri.NodeSet) *object.Array {
 	nodes := set.Nodes()
-	arr := &object.Array{Elems: make([]object.Value, len(nodes))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(nodes)))
 	for i, n := range nodes {
 		arr.Elems[i] = &NokogiriNode{n: n}
 	}

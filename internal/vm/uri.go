@@ -496,9 +496,9 @@ func (vm *VM) registerURIModuleFns(mod *RClass) {
 		raiseURIErr(err)
 		out := make([]object.Value, len(pairs))
 		for i, p := range pairs {
-			out[i] = &object.Array{Elems: []object.Value{object.NewString(p[0]), object.NewString(p[1])}}
+			out[i] = object.NewArray(object.NewString(p[0]), object.NewString(p[1]))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 
 	// URI.escape(str[, unsafe]) / URI.unescape(str) — the legacy percent-codec.
@@ -532,7 +532,7 @@ func (vm *VM) uriSplit(s string) object.Value {
 		nilOrStr(u.Query, u.HasQuery),
 		nilOrStr(u.Fragment, u.HasFrag),
 	}
-	return &object.Array{Elems: elems}
+	return object.NewArrayFromSlice(elems)
 }
 
 // uriSplitPort renders the port element of URI.split: the explicit port as a

@@ -457,14 +457,7 @@ func benchFormatArgs(vs []object.Value) []any {
 
 // benchToA renders Tms#to_a: [label, utime, stime, cutime, cstime, real].
 func benchToA(t benchmark.Tms) object.Value {
-	return &object.Array{Elems: []object.Value{
-		object.NewString(t.Label()),
-		object.Float(t.Utime()),
-		object.Float(t.Stime()),
-		object.Float(t.Cutime()),
-		object.Float(t.Cstime()),
-		object.Float(t.Real()),
-	}}
+	return object.NewArray(object.NewString(t.Label()), object.Float(t.Utime()), object.Float(t.Stime()), object.Float(t.Cutime()), object.Float(t.Cstime()), object.Float(t.Real()))
 }
 
 // benchTmsList wraps a slice of library Tms values as a Ruby Array of
@@ -474,7 +467,7 @@ func benchTmsList(ts []benchmark.Tms) object.Value {
 	for i, t := range ts {
 		elems[i] = &Tms{t: t}
 	}
-	return &object.Array{Elems: elems}
+	return object.NewArrayFromSlice(elems)
 }
 
 // benchExtras coerces a block's return value into the slice of summary Tms the

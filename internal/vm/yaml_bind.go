@@ -381,7 +381,7 @@ func (c *yamlFromCtx) conv(v yaml.Value) object.Value {
 // convSeq maps a library sequence to a Ruby Array, caching identity so a shared
 // (aliased) sequence becomes a single Array.
 func (c *yamlFromCtx) convSeq(s []yaml.Value) object.Value {
-	arr := &object.Array{Elems: make([]object.Value, len(s))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(s)))
 	for i, el := range s {
 		arr.Elems[i] = c.conv(el)
 	}
@@ -405,11 +405,7 @@ func (c *yamlFromCtx) convMap(m *yaml.Map) object.Value {
 // convRange maps a library *Range to a Ruby Range, a nil bound modelling a
 // beginless / endless range.
 func (c *yamlFromCtx) convRange(r *yaml.Range) object.Value {
-	return &object.Range{
-		Lo:        c.convBound(r.Begin),
-		Hi:        c.convBound(r.End),
-		Exclusive: r.Exclusive,
-	}
+	return object.NewRange(c.convBound(r.Begin), c.convBound(r.End), r.Exclusive)
 }
 
 // convBound maps a Range endpoint, where a library nil bound becomes a Go-nil

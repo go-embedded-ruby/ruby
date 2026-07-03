@@ -122,7 +122,7 @@ func fromMsgpack(vm *VM, v msgpack.Value) object.Value {
 	case msgpack.Bin:
 		return object.NewStringBytesEnc([]byte(n), "ASCII-8BIT")
 	case []msgpack.Value:
-		arr := &object.Array{Elems: make([]object.Value, len(n))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = fromMsgpack(vm, el)
 		}

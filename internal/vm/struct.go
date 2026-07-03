@@ -118,10 +118,10 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 		for i, nm := range names {
 			out[i] = object.Symbol(nm)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	toA := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: values(self)}
+		return object.NewArrayFromSlice(values(self))
 	}
 	sub.define("to_a", toA)
 	sub.define("values", toA)
@@ -230,7 +230,7 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 	}
 	sub.smethods["members"] = &Method{name: "members", owner: sub,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &object.Array{Elems: append([]object.Value(nil), memberSyms...)}
+			return object.NewArrayFromSlice(append([]object.Value(nil), memberSyms...))
 		}}
 	sub.includes = append(sub.includes, vm.consts["Enumerable"].(*RClass))
 	bumpMethodSerial()
