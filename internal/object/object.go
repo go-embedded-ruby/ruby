@@ -633,13 +633,11 @@ func (h *Hash) Set(k, v Value) {
 }
 
 // value returns the stored value for a key already known to be present (used by
-// repr while iterating Keys), dispatching to the same fast path as Get.
+// repr while iterating Keys, so the entry always exists), dispatching to the same
+// fast path as Get.
 func (h *Hash) value(k Value) Value {
 	if b, ok := strContentKey(k); ok {
-		if e := h.strVals[string(b)]; e != nil {
-			return e.v
-		}
-		return nil
+		return h.strVals[string(b)].v
 	}
 	return h.vals[h.hashKey(k)]
 }
