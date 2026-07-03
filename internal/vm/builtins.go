@@ -1845,7 +1845,10 @@ func (vm *VM) bootstrap() {
 	// member? is an alias of include? (the Enumerable name), used by Puppet's
 	// settings initialization.
 	vm.cArray.define("member?", arrayInclude)
-	vm.cArray.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// #[] and #[]= only read args and copy element *values* into the array (or a
+	// freshly allocated result); they never retain the args slice, so the OpSend
+	// fast path may hand them the live operand-stack region (defineNR).
+	vm.cArray.defineNR("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if rng, ok := args[0].(*object.Range); ok {
 			start, length, ok := sliceRange(len(a.Elems), rng)
@@ -1875,7 +1878,7 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
-	vm.cArray.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		// Range form: a[range] = value.
 		if rng, ok := args[0].(*object.Range); ok {
@@ -2594,14 +2597,17 @@ func (vm *VM) bootstrap() {
 			}
 			return h
 		}}
-	vm.cHash.define("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// #[] reads args[0] and returns a stored/default value; #[]= copies element
+	// values into the hash. Neither retains the args slice, so both take the
+	// no-copy OpSend fast path (defineNR).
+	vm.cHash.defineNR("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		if v, ok := h.Get(args[0]); ok {
 			return v
 		}
 		return vm.hashDefault(h, args[0])
 	})
-	vm.cHash.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		self.(*object.Hash).Set(args[0], args[1])
 		return args[1]
 	})
