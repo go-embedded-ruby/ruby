@@ -241,7 +241,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpAdd, 0, 0)
 		}
 	case *ast.SymbolLit:
-		b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(v.Name)), 0)
+		// Intern the box so every `:name` literal across the program shares one
+		// Value: :foo.equal?(:foo) then holds by pointer, and the const pool holds
+		// one box per distinct name rather than one per occurrence.
+		b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(v.Name)), 0)
 	case *ast.XStr:
 		// %x{cmd} / backticks: the command travels in the name pool; the VM runs
 		// it through the shell at runtime and pushes its stdout.

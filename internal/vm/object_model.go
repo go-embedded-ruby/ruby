@@ -961,7 +961,7 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 		}
 	}
 	mm := lookupMethod(c, "method_missing")
-	mmArgs := append([]object.Value{object.Symbol(name)}, args...)
+	mmArgs := append([]object.Value{object.SymVal(name)}, args...)
 	return vm.invoke(mm, recv, mmArgs, blk)
 }
 
