@@ -261,6 +261,49 @@ func AsObj(v Value) RubyObj {
 	}
 }
 
+// AsIntegerOK returns v as object.Integer and whether it is one.
+func AsIntegerOK(v Value) (Integer, bool) { i, ok := v.(Integer); return i, ok }
+
+// AsFloatOK returns v as object.Float and whether it is one.
+func AsFloatOK(v Value) (Float, bool) { f, ok := v.(Float); return f, ok }
+
+// AsBoolOK returns v as object.Bool and whether it is one.
+func AsBoolOK(v Value) (Bool, bool) { b, ok := v.(Bool); return b, ok }
+
+// AsSymbolOK returns v as object.Symbol and whether it is one.
+func AsSymbolOK(v Value) (Symbol, bool) { s, ok := v.(Symbol); return s, ok }
+
+// AsNil returns v as object.Nil; it panics if v is not the Nil object.
+func AsNil(v Value) Nil { return v.(Nil) }
+
+// AsNilOK returns v as object.Nil and whether it is one.
+func AsNilOK(v Value) (Nil, bool) { n, ok := v.(Nil); return n, ok }
+
+// NilObj returns the Nil value type (distinct from NilVal, which returns it as a
+// Value). Used by the rewriter to bind a Nil-typed switch variable.
+func NilObj() Nil { return NilV }
+
+// IsNilObj reports whether v is specifically the Nil object (distinct, while
+// Value is an interface, from an absent Go-nil Value — unlike IsNil/IsNilV which
+// fold both). Used by the rewriter for a `case object.Nil` switch arm so the
+// conversion is behaviour-neutral before the flip; after the flip (where Go-nil
+// Values no longer exist) it is simply tag==TagNil.
+func IsNilObj(v Value) bool { _, ok := v.(Nil); return ok }
+
+// IsKind reports whether v's heap object is a T (a pointer/heap concrete type, or
+// Symbol). It is false for the immediate value types (Integer/Float/Bool/Nil),
+// whose payload is not in the object word. Used by the rewriter for the
+// heap-typed arms of a converted type switch.
+func IsKind[T any](v Value) bool { _, ok := AsObj(v).(T); return ok }
+
+// Kind returns v's heap object asserted to T, panicking on mismatch (matching a
+// bare X.(T) assertion). Used by the rewriter for single-value heap assertions.
+func Kind[T any](v Value) T { return AsObj(v).(T) }
+
+// KindOK returns v's heap object asserted to T and whether it matched. Used by
+// the rewriter for comma-ok heap assertions.
+func KindOK[T any](v Value) (T, bool) { x, ok := AsObj(v).(T); return x, ok }
+
 // Equal reports Ruby-representation equality of two Values with the exact
 // semantics the interface `==` had: identity for reference types, value equality
 // for immediates, and — the one hazard the tagged struct would otherwise change
