@@ -62,6 +62,7 @@ var providedFeatures = map[string]bool{
 	"dry/validation": true, "dry-validation": true, "dry/schema": true, "dry-schema": true,
 	"oauth2":         true,
 	"openid_connect": true, "oidc": true,
+	"i18n": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime

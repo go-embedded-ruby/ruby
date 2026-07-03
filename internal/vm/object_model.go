@@ -731,6 +731,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A Kramdown::Document reports Kramdown::Document so its #to_html renders
 		// the held source through the library.
 		return vm.consts["Kramdown::Document"].(*RClass)
+	case *I18nBackend:
+		// The handle I18n.backend returns reports I18n::Backend::Simple so its
+		// store_translations / available_locales dispatch.
+		return vm.consts["I18n::Backend::Simple"].(*RClass)
 	case *RQRCode:
 		// An RQRCode::QRCode reports RQRCode::QRCode so its renderer methods
 		// (as_svg / as_ansi / as_html / to_s / checked? / to_a) dispatch.
