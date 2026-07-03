@@ -105,7 +105,7 @@ func arValueToRuby(v any) object.Value {
 	case string:
 		return object.NewString(n)
 	case []byte:
-		return &object.String{B: n, Enc: "ASCII-8BIT"}
+		return object.NewStringBytesEnc(n, "ASCII-8BIT")
 	case bool:
 		return object.Bool(n)
 	}

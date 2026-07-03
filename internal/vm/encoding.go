@@ -152,11 +152,11 @@ func (vm *VM) registerStringEncoding() {
 		return d
 	})
 	vm.cString.define("ascii_only?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(asciiOnly(self.(*object.String).B))
+		return object.Bool(asciiOnly(self.(*object.String).Bytes()))
 	})
 	vm.cString.define("valid_encoding?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		// Binary is always valid; a UTF-8 string is valid iff it decodes cleanly.
-		return object.Bool(s.IsBinary() || utf8.Valid(s.B))
+		return object.Bool(s.IsBinary() || utf8.Valid(s.Bytes()))
 	})
 }

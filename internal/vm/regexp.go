@@ -490,14 +490,14 @@ func splitWhitespace(subject string, limit int) object.Value {
 			break
 		}
 		if limit > 0 && len(out)+1 == limit {
-			out = append(out, object.NewString(subject[i:]))
+			out = append(out, object.NewStringView(subject[i:]))
 			return &object.Array{Elems: out}
 		}
 		start := i
 		for i < n && !isASCIISpace(subject[i]) {
 			i++
 		}
-		out = append(out, object.NewString(subject[start:i]))
+		out = append(out, object.NewStringView(subject[start:i]))
 	}
 	return &object.Array{Elems: out}
 }
@@ -537,7 +537,7 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 				search = mBegin + w
 				continue
 			}
-			out = append(out, object.NewString(subject[last:mBegin]))
+			out = append(out, object.NewStringView(subject[last:mBegin]))
 			out = append(out, captureFields(md)...)
 			pieces++
 			last = mBegin
@@ -545,17 +545,17 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 			search = mBegin + w
 			continue
 		}
-		out = append(out, object.NewString(subject[last:mBegin]))
+		out = append(out, object.NewStringView(subject[last:mBegin]))
 		out = append(out, captureFields(md)...)
 		pieces++
 		last = mEnd
 		search = mEnd
 	}
-	out = append(out, object.NewString(subject[last:]))
+	out = append(out, object.NewStringView(subject[last:]))
 	if limit == 0 {
 		// Strip trailing empty fields (the default behaviour).
 		for len(out) > 0 {
-			if s, ok := out[len(out)-1].(*object.String); ok && len(s.B) == 0 {
+			if s, ok := out[len(out)-1].(*object.String); ok && len(s.Bytes()) == 0 {
 				out = out[:len(out)-1]
 				continue
 			}
@@ -571,7 +571,7 @@ func captureFields(md *onig.MatchData) []object.Value {
 	var out []object.Value
 	for i := 1; i <= md.NGroups(); i++ {
 		if md.Begin(i) >= 0 {
-			out = append(out, object.NewString(md.Str(i)))
+			out = append(out, object.NewStringView(md.Str(i)))
 		}
 	}
 	return out
@@ -769,7 +769,7 @@ func scanElement(md *onig.MatchData) object.Value {
 		if md.Begin(i) < 0 {
 			caps[i-1] = object.NilV
 		} else {
-			caps[i-1] = object.NewString(md.Str(i))
+			caps[i-1] = object.NewStringView(md.Str(i))
 		}
 	}
 	return &object.Array{Elems: caps}

@@ -164,7 +164,9 @@ func (f *freezer) writeConst(b *strings.Builder, v object.Value) {
 		fmt.Fprintf(b, "object.Symbol(%s)", strconv.Quote(string(c)))
 	case *object.String:
 		if c.Frozen {
-			fmt.Fprintf(b, "&object.String{B: []byte(%s), Frozen: true}", strconv.Quote(c.Str()))
+			// A frozen literal never mutates, so emit a zero-copy view over the
+			// immutable Go string rather than copying its bytes at load time.
+			fmt.Fprintf(b, "object.NewFrozenStringView(%s)", strconv.Quote(c.Str()))
 		} else {
 			fmt.Fprintf(b, "object.NewString(%s)", strconv.Quote(c.Str()))
 		}

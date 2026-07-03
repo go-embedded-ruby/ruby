@@ -76,7 +76,7 @@ func ipOperand(v object.Value) any {
 	case *IPAddr:
 		return x.ip
 	case *object.String:
-		return string(x.B)
+		return string(x.Bytes())
 	case object.Integer:
 		return big.NewInt(int64(x))
 	case *object.Bignum:
@@ -96,7 +96,7 @@ func ipIncludeOperand(v object.Value) any {
 	case *IPAddr:
 		return x.ip
 	case *object.String:
-		return string(x.B)
+		return string(x.Bytes())
 	case object.Integer:
 		return big.NewInt(int64(x))
 	case *object.Bignum:
@@ -115,7 +115,7 @@ func ipCmpOperand(v object.Value) (any, bool) {
 	case *IPAddr:
 		return x.ip, true
 	case *object.String:
-		return string(x.B), true
+		return string(x.Bytes()), true
 	case object.Integer:
 		return big.NewInt(int64(x)), true
 	case *object.Bignum:
@@ -131,7 +131,7 @@ func ipBytes(v object.Value) []byte {
 	if !ok {
 		raise("TypeError", "value must be a String of packed bytes")
 	}
-	return append([]byte(nil), s.B...)
+	return append([]byte(nil), s.Bytes()...)
 }
 
 // ipaddrOp implements the IPAddr operator fast path reached from binary(): ip + n
@@ -196,7 +196,7 @@ func (vm *VM) registerIPAddr() {
 		var n *big.Int
 		switch first := args[0].(type) {
 		case *object.String:
-			return ipOK(libipaddr.New(string(first.B)))
+			return ipOK(libipaddr.New(string(first.Bytes())))
 		case object.Integer:
 			n = big.NewInt(int64(first))
 		case *object.Bignum:
@@ -224,7 +224,7 @@ func (vm *VM) registerIPAddr() {
 		if !ok {
 			raise("TypeError", "value must be a String of packed bytes")
 		}
-		s, err := libipaddr.NtopString(string(str.B), str.EncName())
+		s, err := libipaddr.NtopString(string(str.Bytes()), str.EncName())
 		raiseIPAddrErr(err)
 		return object.NewString(s)
 	})
@@ -263,7 +263,7 @@ func (vm *VM) registerIPAddr() {
 		case object.Integer:
 			return ipOK(self(v).ip.MaskLen(int(x)))
 		case *object.String:
-			return ipOK(self(v).ip.Mask(string(x.B)))
+			return ipOK(self(v).ip.Mask(string(x.Bytes())))
 		}
 		raise("TypeError", "mask expects an Integer prefix length or a String netmask")
 		return object.NilV

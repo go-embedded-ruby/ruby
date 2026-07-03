@@ -371,9 +371,9 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", b.Inspect())
 		}
-		out := make([]byte, 0, len(a.B)+len(bs.B))
-		out = append(append(out, a.B...), bs.B...)
-		return &object.String{B: out, Enc: a.Enc} // result keeps the receiver's encoding
+		out := make([]byte, 0, len(a.Bytes())+len(bs.Bytes()))
+		out = append(append(out, a.Bytes()...), bs.Bytes()...)
+		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
 	case bytecode.OpMul:
 		n, ok := b.(object.Integer)
 		if !ok {
@@ -382,11 +382,11 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		if n < 0 {
 			raise("ArgumentError", "negative argument")
 		}
-		out := make([]byte, 0, len(a.B)*int(n))
+		out := make([]byte, 0, len(a.Bytes())*int(n))
 		for i := int64(0); i < int64(n); i++ {
-			out = append(out, a.B...)
+			out = append(out, a.Bytes()...)
 		}
-		return &object.String{B: out, Enc: a.Enc} // result keeps the receiver's encoding
+		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
 	case bytecode.OpMod:
 		return object.NewString(formatString(a.Str(), formatArgs(b)))
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
@@ -575,7 +575,7 @@ func valueEqual(a, b object.Value) bool {
 		}
 	case *object.String:
 		bv, ok := b.(*object.String)
-		return ok && string(av.B) == string(bv.B)
+		return ok && string(av.Bytes()) == string(bv.Bytes())
 	case object.Symbol:
 		bv, ok := b.(object.Symbol)
 		return ok && av == bv
@@ -663,7 +663,7 @@ func valueEql(a, b object.Value) bool {
 		return ok && av.I.Cmp(bv.I) == 0
 	case *object.String:
 		bv, ok := b.(*object.String)
-		return ok && string(av.B) == string(bv.B)
+		return ok && string(av.Bytes()) == string(bv.Bytes())
 	case object.Symbol:
 		bv, ok := b.(object.Symbol)
 		return ok && av == bv

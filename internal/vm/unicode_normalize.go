@@ -56,10 +56,10 @@ func normForm(args []object.Value) norm.Form {
 // error MRI raises before attempting to normalize.
 func normSource(self object.Value) string {
 	s := self.(*object.String)
-	if !utf8.Valid(s.B) {
+	if !utf8.Valid(s.Bytes()) {
 		raise("ArgumentError", "invalid byte sequence in UTF-8")
 	}
-	return string(s.B)
+	return string(s.Bytes())
 }
 
 // registerStringUnicodeNormalize adds the unicode_normalize core-ext String

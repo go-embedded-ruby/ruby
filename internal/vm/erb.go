@@ -84,7 +84,7 @@ func optStrArg(v object.Value) string {
 // verbatim.
 func erbToS(vm *VM, v object.Value) string {
 	if s, ok := v.(*object.String); ok {
-		return string(s.B)
+		return string(s.Bytes())
 	}
-	return string(vm.send(v, "to_s", nil, nil).(*object.String).B)
+	return vm.send(v, "to_s", nil, nil).(*object.String).Str()
 }

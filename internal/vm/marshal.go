@@ -60,7 +60,7 @@ func toMarshalValue(v object.Value, seen map[object.Value]marshal.Value) marshal
 		if m, ok := seen[v]; ok {
 			return m
 		}
-		ms := &marshal.Str{Bytes: append([]byte(nil), x.B...), Enc: marshal.UTF8}
+		ms := &marshal.Str{Bytes: append([]byte(nil), x.Bytes()...), Enc: marshal.UTF8}
 		seen[v] = ms
 		return ms
 	case *object.Array:
@@ -115,7 +115,7 @@ func fromMarshalValue(v marshal.Value, seen map[marshal.Value]object.Value) obje
 		if o, ok := seen[v]; ok {
 			return o
 		}
-		os := &object.String{B: append([]byte(nil), x.Bytes...)}
+		os := object.NewStringBytes(append([]byte(nil), x.Bytes...))
 		seen[v] = os
 		return os
 	case *marshal.Array:

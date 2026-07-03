@@ -94,7 +94,7 @@ func signalName(v object.Value) string {
 	case object.Symbol:
 		return stripSIG(string(s))
 	case *object.String:
-		return stripSIG(string(s.B))
+		return stripSIG(string(s.Bytes()))
 	case object.Integer:
 		for name, num := range signalNumbers {
 			if int64(num) == int64(s) {

@@ -261,7 +261,7 @@ func (vm *VM) registerRandom() {
 				b[i+k] = byte(w >> (8 * uint(k)))
 			}
 		}
-		return &object.String{B: b}
+		return object.NewStringBytes(b)
 	})
 
 	// Kernel#rand / #srand operate on a process-wide default generator.

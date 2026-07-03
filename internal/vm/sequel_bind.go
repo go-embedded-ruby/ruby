@@ -101,7 +101,7 @@ func sequelValue(v object.Value) sequel.Value {
 		return float64(n)
 	case *object.String:
 		if n.IsBinary() {
-			return sequel.Blob(n.B)
+			return sequel.Blob(n.Bytes())
 		}
 		return n.Str()
 	case object.Symbol:
@@ -171,7 +171,7 @@ func sequelRubyValue(v sequel.Value) object.Value {
 	case string:
 		return object.NewString(n)
 	case []byte:
-		return &object.String{B: n, Enc: "ASCII-8BIT"}
+		return object.NewStringBytesEnc(n, "ASCII-8BIT")
 	}
 	// The executor only ever produces the cases above.
 	return object.NilV

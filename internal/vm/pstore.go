@@ -184,7 +184,7 @@ func (vm *VM) registerPStore() {
 			if !ok {
 				raise("TypeError", "no implicit conversion into String")
 			}
-			path := string(s.B)
+			path := string(s.Bytes())
 			ts := false
 			if len(args) > 1 {
 				ts = args[1].Truthy()

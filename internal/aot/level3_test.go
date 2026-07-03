@@ -49,13 +49,13 @@ func TestL3Supported(t *testing.T) {
 // level-1 floor rejecting the method, and each integer-kernel-specific veto.
 func TestL3Bails(t *testing.T) {
 	cases := []struct{ name, src string }{
-		{"l1_rejects", "def m(*a) = a\nm"},                  // splat: Compile itself bails
-		{"float_const", "def m = 1.5\nm"},                   // non-Integer constant
-		{"array", "def m = [1, 2]\nm"},                      // unsupported kernel opcode
-		{"compare_not_branched", "def m(a, b) = a < b\nm(1, 2)"}, // comparison result escapes
-		{"branch_without_compare", "def m(a) = a ? 1 : 2\nm(1)"}, // truthiness branch, no compare
-		{"non_self_send", "def m(a) = a.abs\nm(-1)"},        // a send that is not self-recursion
-		{"return_self", "def m = self\nm"},                  // returns self, not an int64
+		{"l1_rejects", "def m(*a) = a\nm"},                                          // splat: Compile itself bails
+		{"float_const", "def m = 1.5\nm"},                                           // non-Integer constant
+		{"array", "def m = [1, 2]\nm"},                                              // unsupported kernel opcode
+		{"compare_not_branched", "def m(a, b) = a < b\nm(1, 2)"},                    // comparison result escapes
+		{"branch_without_compare", "def m(a) = a ? 1 : 2\nm(1)"},                    // truthiness branch, no compare
+		{"non_self_send", "def m(a) = a.abs\nm(-1)"},                                // a send that is not self-recursion
+		{"return_self", "def m = self\nm"},                                          // returns self, not an int64
 		{"nil_escapes", "def m(n)\n  while n > 0\n    n = n - 1\n  end\nend\nm(1)"}, // while value (nil) is returned
 	}
 	for _, c := range cases {

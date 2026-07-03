@@ -55,7 +55,7 @@ func (vm *VM) pgValue(v any) object.Value {
 	case string:
 		return object.NewString(n)
 	case []byte:
-		return &object.String{B: n, Enc: "ASCII-8BIT"}
+		return object.NewStringBytesEnc(n, "ASCII-8BIT")
 	case time.Time:
 		return object.NewString(n.Format("2006-01-02 15:04:05.999999999-07"))
 	case []any:
@@ -110,7 +110,7 @@ func pgArg(v object.Value) any {
 		return float64(n)
 	case *object.String:
 		if n.IsBinary() {
-			return []byte(n.B)
+			return []byte(n.Bytes())
 		}
 		return n.Str()
 	case object.Symbol:
