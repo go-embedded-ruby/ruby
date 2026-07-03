@@ -115,6 +115,28 @@ for reference types. Note `ObjectSpace._id2ref` / `each_object` are effectively
 **incompatible** with reusing Go's GC (they need a registry that pins
 everything) — stub them, do not promise them.
 
+**✅ EMPIRICALLY CONFIRMED (2026-07-03) — the interface `Value` stays.** After
+landing the interpreter allocation-floor levers (lazy `returnTarget`, hashKey
+no-rebox + symbol intern, int-boxing funnel through `IntValue`, proc arg
+elision), we prototyped the full tagged-struct alternative
+(`struct{tag uint8; i int64; obj RubyObj}`, immediates inline, `tagNil==0`) as a
+complete, correct flip: ~4,700 sites converted by four type-aware `go/types`
+rewriters, compiles + `-race`-green + 100% coverage on all 6 arches incl
+s390x-BE (see PR #121, parked as a documented spike, **not merged**). It **did**
+eliminate immediate boxing — `LoopSum` (s+=i ×300k) went **598,931 → 0
+allocs/op**. But it is a **net wall-clock regression** on copy-heavy paths:
+Fib +36%, Wordcount +68% (72→121 ms — would undo the whole allocation-floor
+arc), HashStringChurn +62%, because a 24–32-byte struct `Value` costs ~2× the
+16-byte interface to copy through args, slices, and Hash entries. A tight
+alloc-bound int-loop microbench projected ~3.95× — misleading, because it did
+not model the VM's copy-heavy paths. **Conclusion: in single-threaded safe Go,
+the interface `Value`'s smaller copy footprint beats tagged-struct
+alloc-elimination; the struct only wins under GC pressure / concurrency.** The
+right levers for the interpreter floor are the ones already merged (targeted
+alloc elimination on the interface representation) + AOT for compute-bound code
+(AOT-L3 already crushes int loops via native `int64` locals). Revisit tagged
+`Value` only if a concurrent/GC-bound production workload justifies it.
+
 Phase 0 ships a minimal `Value` (Integer `int64`, Float, String, Bool, Nil,
 Main) without `RClass`; the object model lands in Phase 1.
 
