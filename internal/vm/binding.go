@@ -33,13 +33,13 @@ func (vm *VM) registerBinding() {
 	vm.consts["Binding"] = cBinding
 
 	cBinding.define("eval", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.bindingEval(self.(*Binding), args[0])
+		return vm.bindingEval(object.Kind[*Binding](self), args[0])
 	})
 	cBinding.define("receiver", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*Binding).self
+		return object.Kind[*Binding](self).self
 	})
 	cBinding.define("local_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		b := self.(*Binding)
+		b := object.Kind[*Binding](self)
 		seen := map[string]bool{}
 		var elems []object.Value
 		add := func(n string) {
@@ -59,7 +59,7 @@ func (vm *VM) registerBinding() {
 		return object.NewArrayFromSlice(elems)
 	})
 	cBinding.define("local_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		b := self.(*Binding)
+		b := object.Kind[*Binding](self)
 		name := bindingVarName(args[0])
 		i := b.slotOf(name)
 		if i < 0 {
@@ -68,7 +68,7 @@ func (vm *VM) registerBinding() {
 		return b.env.slots[i]
 	})
 	cBinding.define("local_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		b := self.(*Binding)
+		b := object.Kind[*Binding](self)
 		name := bindingVarName(args[0])
 		if i := b.slotOf(name); i >= 0 {
 			b.env.slots[i] = args[1]
@@ -82,20 +82,29 @@ func (vm *VM) registerBinding() {
 		return args[1]
 	})
 	cBinding.define("local_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*Binding).slotOf(bindingVarName(args[0])) >= 0)
+		return object.Bool(object.Kind[*Binding](self).slotOf(bindingVarName(args[0])) >= 0)
 	})
 }
 
 // bindingVarName coerces a Symbol/String local-variable name to a Go string.
 func bindingVarName(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
-	default:
-		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
-		return ""
+	{
+		__sw16 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw16):
+			n := object.Kind[object.Symbol](__sw16)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw16):
+			n := object.Kind[*object.String](__sw16)
+			_ = n
+			return n.Str()
+		default:
+			n := __sw16
+			_ = n
+			raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+			return ""
+		}
 	}
 }
 

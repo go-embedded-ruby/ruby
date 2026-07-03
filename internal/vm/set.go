@@ -73,21 +73,38 @@ func (s *Set) size() int { return s.s.Size() }
 // content (distinct from a Symbol of the same name, as in Hash keys); the other
 // immutable value types key by themselves.
 func setKey(v object.Value) any {
-	switch x := v.(type) {
-	case object.Integer:
-		return x
-	case object.Float:
-		return x
-	case object.Symbol:
-		return x
-	case object.Bool:
-		return x
-	case object.Nil:
-		return x
-	case *object.Bignum:
-		return "bignum:" + x.I.String()
-	case *object.String:
-		return "str:" + string(x.Bytes())
+	{
+		__sw157 := v
+		switch {
+		case object.IsInt(__sw157):
+			x := object.AsInteger(__sw157)
+			_ = x
+			return x
+		case object.IsFloat(__sw157):
+			x := object.AsFloatV(__sw157)
+			_ = x
+			return x
+		case object.IsKind[object.Symbol](__sw157):
+			x := object.Kind[object.Symbol](__sw157)
+			_ = x
+			return x
+		case object.IsBool(__sw157):
+			x := object.AsBoolV(__sw157)
+			_ = x
+			return x
+		case object.IsNilObj(__sw157):
+			x := object.NilObj()
+			_ = x
+			return x
+		case object.IsKind[*object.Bignum](__sw157):
+			x := object.Kind[*object.Bignum](__sw157)
+			_ = x
+			return "bignum:" + x.I.String()
+		case object.IsKind[*object.String](__sw157):
+			x := object.Kind[*object.String](__sw157)
+			_ = x
+			return "str:" + string(x.Bytes())
+		}
 	}
 	// Any other object is a valid Set member in Ruby — it keys by identity
 	// (object equality / hash), exactly like a Hash key. A reference-typed Ruby
@@ -107,7 +124,7 @@ func (s *Set) delete(v object.Value) { s.s.Delete(v) }
 
 // setArg asserts an argument is a Set, raising TypeError otherwise.
 func setArg(v object.Value) *Set {
-	s, ok := v.(*Set)
+	s, ok := object.KindOK[*Set](v)
 	if !ok {
 		raise("TypeError", "value must be a Set")
 	}
@@ -116,15 +133,24 @@ func setArg(v object.Value) *Set {
 
 // seed adds every element of an enumerable (Array or Set) to s.
 func (s *Set) seed(v object.Value) {
-	switch e := v.(type) {
-	case *object.Array:
-		for _, el := range e.Elems {
-			s.add(el)
+	{
+		__sw158 := v
+		switch {
+		case object.IsKind[*object.Array](__sw158):
+			e := object.Kind[*object.Array](__sw158)
+			_ = e
+			for _, el := range e.Elems {
+				s.add(el)
+			}
+		case object.IsKind[*Set](__sw158):
+			e := object.Kind[*Set](__sw158)
+			_ = e
+			e.each(s.add)
+		default:
+			e := __sw158
+			_ = e
+			raise("TypeError", "value must be enumerable (Array or Set)")
 		}
-	case *Set:
-		e.each(s.add)
-	default:
-		raise("TypeError", "value must be enumerable (Array or Set)")
 	}
 }
 
@@ -165,7 +191,7 @@ func (vm *VM) registerSet() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			s := newSet()
 			if len(args) > 0 {
-				if _, isNil := args[0].(object.Nil); !isNil {
+				if _, isNil := object.AsNilOK(args[0]); !isNil {
 					s.seed(args[0])
 				}
 			}
@@ -182,7 +208,7 @@ func (vm *VM) registerSet() {
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cSet.define(name, fn) }
-	self := func(v object.Value) *Set { return v.(*Set) }
+	self := func(v object.Value) *Set { return object.Kind[*Set](v) }
 
 	addFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
@@ -277,7 +303,7 @@ func (vm *VM) registerSet() {
 	})
 
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		b, ok := args[0].(*Set)
+		b, ok := object.KindOK[*Set](args[0])
 		if !ok {
 			return object.False
 		}

@@ -4,7 +4,11 @@
 
 package vm
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/go-embedded-ruby/ruby/internal/object"
+)
 
 // TestTimeout covers Timeout.timeout running the block to completion (no
 // deadline enforced yet) and returning its value, the block receiving nil as
@@ -39,7 +43,7 @@ end`, `"Timeout::Error"`},
 // TestTimeoutNoBlock covers the no-block branch, which raises LocalJumpError.
 func TestTimeoutNoBlock(t *testing.T) {
 	vm := New(nil)
-	mod := vm.consts["Timeout"].(*RClass)
+	mod := object.Kind[*RClass](vm.consts["Timeout"])
 	got := catchRaise(func() { mod.smethods["timeout"].native(vm, mod, nil, nil) })
 	if got != "LocalJumpError" {
 		t.Fatalf("timeout no-block: got %q, want LocalJumpError", got)

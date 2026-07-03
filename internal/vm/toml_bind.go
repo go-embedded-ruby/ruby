@@ -52,38 +52,63 @@ func tomlDump(v object.Value) string {
 // is returned as-is so the library raises the dump error tomlDump turns into a
 // Ruby ArgumentError.
 func toTOML(v object.Value) toml.Value {
-	switch n := v.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
-	case *object.Array:
-		out := make([]toml.Value, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = toTOML(el)
+	{
+		__sw177 := v
+		switch {
+		case __sw177 == nil:
+			n := __sw177
+			_ = n
+			return nil
+		case object.IsNilObj(__sw177):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsBool(__sw177):
+			n := object.AsBoolV(__sw177)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw177):
+			n := object.AsInteger(__sw177)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw177):
+			n := object.Kind[*object.Bignum](__sw177)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw177):
+			n := object.AsFloatV(__sw177)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw177):
+			n := object.Kind[*object.String](__sw177)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw177):
+			n := object.Kind[object.Symbol](__sw177)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.Array](__sw177):
+			n := object.Kind[*object.Array](__sw177)
+			_ = n
+			out := make([]toml.Value, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = toTOML(el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw177):
+			n := object.Kind[*object.Hash](__sw177)
+			_ = n
+			m := toml.NewMap()
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				m.Set(tomlKey(k), toTOML(val))
+			}
+			return m
+		case object.IsKind[*Time](__sw177):
+			n := object.Kind[*Time](__sw177)
+			_ = n
+			return stdtime.Unix(n.t.ToUnix(), 0).UTC()
 		}
-		return out
-	case *object.Hash:
-		m := toml.NewMap()
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m.Set(tomlKey(k), toTOML(val))
-		}
-		return m
-	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
 	}
 	// An unmapped value: hand it to the library, which returns the dump error
 	// tomlDump turns into a Ruby ArgumentError.
@@ -93,11 +118,18 @@ func toTOML(v object.Value) toml.Value {
 // tomlKey renders a Ruby Hash key as a TOML table key: a Symbol by its name, any
 // other value by its to_s (TOML keys are strings).
 func tomlKey(k object.Value) string {
-	switch n := k.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw178 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw178):
+			n := object.Kind[object.Symbol](__sw178)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw178):
+			n := object.Kind[*object.String](__sw178)
+			_ = n
+			return n.Str()
+		}
 	}
 	return k.ToS()
 }

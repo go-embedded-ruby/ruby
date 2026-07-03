@@ -73,7 +73,7 @@ func (vm *VM) registerZlib() {
 		vm.consts["Zlib::"+name] = c
 		return c
 	}
-	zerr := defErr("Error", vm.consts["StandardError"].(*RClass))
+	zerr := defErr("Error", object.Kind[*RClass](vm.consts["StandardError"]))
 	defErr("StreamError", zerr)
 	defErr("BufError", zerr)
 	defErr("DataError", zerr)
@@ -198,12 +198,14 @@ func (vm *VM) registerZlib() {
 		setIvar(self, "@__stream", zlibDeflater{d: d})
 		return object.NilV
 	})
-	selfDeflater := func(self object.Value) *gozlib.Deflater { return getIvar(self, "@__stream").(zlibDeflater).d }
+	selfDeflater := func(self object.Value) *gozlib.Deflater {
+		return object.Kind[zlibDeflater](getIvar(self, "@__stream")).d
+	}
 	// takePending drains the bytes #<< produced but did not yet hand back, so the
 	// next #deflate / #finish emits a contiguous stream (MRI's #<< buffers, with
 	// the bytes surfacing on the next read).
 	takePending := func(self object.Value) []byte {
-		if p, ok := getIvar(self, "@__pending").(*object.String); ok && len(p.Bytes()) > 0 {
+		if p, ok := object.KindOK[*object.String](getIvar(self, "@__pending")); ok && len(p.Bytes()) > 0 {
 			setIvar(self, "@__pending", object.NilV)
 			return p.Bytes()
 		}
@@ -264,11 +266,13 @@ func (vm *VM) registerZlib() {
 		setIvar(self, "@__stream", zlibInflater{i: gozlib.NewInflater()})
 		return object.NilV
 	})
-	selfInflater := func(self object.Value) *gozlib.Inflater { return getIvar(self, "@__stream").(zlibInflater).i }
+	selfInflater := func(self object.Value) *gozlib.Inflater {
+		return object.Kind[zlibInflater](getIvar(self, "@__stream")).i
+	}
 	// takeInflated drains the decoded bytes #<< produced but did not yet hand back,
 	// so #finish returns them (MRI's #<< buffers; the bytes surface on a read).
 	takeInflated := func(self object.Value) []byte {
-		if p, ok := getIvar(self, "@__pending").(*object.String); ok && len(p.Bytes()) > 0 {
+		if p, ok := object.KindOK[*object.String](getIvar(self, "@__pending")); ok && len(p.Bytes()) > 0 {
 			setIvar(self, "@__pending", object.NilV)
 			return p.Bytes()
 		}

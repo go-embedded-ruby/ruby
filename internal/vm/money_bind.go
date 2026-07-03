@@ -18,14 +18,14 @@ import (
 // wrappers, integer / float / rational scalars and the format options hash.
 
 // moneyOf returns the receiver's wrapped library Money.
-func moneyOf(v object.Value) *money.Money { return v.(*Money).m }
+func moneyOf(v object.Value) *money.Money { return object.Kind[*Money](v).m }
 
 // moneyArg reads a required Money argument, raising TypeError otherwise.
 func moneyArg(args []object.Value) *money.Money {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	m, ok := args[0].(*Money)
+	m, ok := object.KindOK[*Money](args[0])
 	if !ok {
 		raise("TypeError", "expected a Money")
 	}
@@ -56,13 +56,22 @@ func moneyResult(out *money.Money, err error) object.Value {
 // Money::Currency wrapper) to a *money.Currency, raising
 // Money::Currency::UnknownCurrency for an unknown id.
 func (vm *VM) currencyArg(v object.Value) *money.Currency {
-	switch c := v.(type) {
-	case *Currency:
-		return c.c
-	case object.Symbol:
-		return lookupCurrency(string(c))
-	case *object.String:
-		return lookupCurrency(c.Str())
+	{
+		__sw99 := v
+		switch {
+		case object.IsKind[*Currency](__sw99):
+			c := object.Kind[*Currency](__sw99)
+			_ = c
+			return c.c
+		case object.IsKind[object.Symbol](__sw99):
+			c := object.Kind[object.Symbol](__sw99)
+			_ = c
+			return lookupCurrency(string(c))
+		case object.IsKind[*object.String](__sw99):
+			c := object.Kind[*object.String](__sw99)
+			_ = c
+			return lookupCurrency(c.Str())
+		}
 	}
 	raise("TypeError", "no implicit conversion of %s into a currency", v.Inspect())
 	return nil
@@ -90,13 +99,22 @@ func lookupCurrency(id string) *money.Currency {
 // moneyRat coerces a Ruby scalar (Integer / Float / Bignum) to a *big.Rat for
 // Money's rational arithmetic, raising TypeError otherwise.
 func moneyRat(v object.Value) *big.Rat {
-	switch n := v.(type) {
-	case object.Integer:
-		return new(big.Rat).SetInt64(int64(n))
-	case *object.Bignum:
-		return new(big.Rat).SetInt(n.I)
-	case object.Float:
-		return new(big.Rat).SetFloat64(float64(n))
+	{
+		__sw100 := v
+		switch {
+		case object.IsInt(__sw100):
+			n := object.AsInteger(__sw100)
+			_ = n
+			return new(big.Rat).SetInt64(int64(n))
+		case object.IsKind[*object.Bignum](__sw100):
+			n := object.Kind[*object.Bignum](__sw100)
+			_ = n
+			return new(big.Rat).SetInt(n.I)
+		case object.IsFloat(__sw100):
+			n := object.AsFloatV(__sw100)
+			_ = n
+			return new(big.Rat).SetFloat64(float64(n))
+		}
 	}
 	raise("TypeError", "no implicit conversion of %s into a number", v.Inspect())
 	return nil
@@ -104,7 +122,7 @@ func moneyRat(v object.Value) *big.Rat {
 
 // moneyInt64Slice coerces a Ruby Array of weights to a []int64 for #allocate.
 func moneyInt64Slice(v object.Value) []int64 {
-	arr, ok := v.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](v)
 	if !ok {
 		raise("TypeError", "expected an Array of weights")
 	}
@@ -136,7 +154,7 @@ func moneyOptsArg(args []object.Value) *object.Hash {
 	if len(args) == 0 {
 		return nil
 	}
-	h, _ := args[len(args)-1].(*object.Hash)
+	h, _ := object.KindOK[*object.Hash](args[len(args)-1])
 	return h
 }
 
@@ -154,15 +172,22 @@ func moneyFormatOpts(h *object.Hash) money.Options {
 	o.DropTrailingZeros = boolOpt(h, "drop_trailing_zeros")
 	o.SignPositive = boolOpt(h, "sign_positive")
 	if v, ok := h.Get(object.Symbol("symbol")); ok {
-		switch s := v.(type) {
-		case object.Bool:
-			if bool(s) {
-				o.Symbol = money.SymbolOn()
-			} else {
-				o.Symbol = money.SymbolOff()
+		{
+			__sw101 := v
+			switch {
+			case object.IsBool(__sw101):
+				s := object.AsBoolV(__sw101)
+				_ = s
+				if bool(s) {
+					o.Symbol = money.SymbolOn()
+				} else {
+					o.Symbol = money.SymbolOff()
+				}
+			case object.IsKind[*object.String](__sw101):
+				s := object.Kind[*object.String](__sw101)
+				_ = s
+				o.Symbol = money.SymbolString(s.Str())
 			}
-		case *object.String:
-			o.Symbol = money.SymbolString(s.Str())
 		}
 	}
 	return o

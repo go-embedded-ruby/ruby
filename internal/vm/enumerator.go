@@ -58,7 +58,7 @@ func (vm *VM) registerEnumerator() {
 	vm.cEnumerator = newClass("Enumerator", vm.cObject)
 	vm.consts["Enumerator"] = vm.cEnumerator
 	// Mix in Enumerable so map/select/reduce/… work via #each.
-	if en, ok := vm.consts["Enumerable"].(*RClass); ok {
+	if en, ok := object.KindOK[*RClass](vm.consts["Enumerable"]); ok {
 		vm.cEnumerator.includes = append(vm.cEnumerator.includes, en)
 	}
 
@@ -67,11 +67,11 @@ func (vm *VM) registerEnumerator() {
 	vm.cYielder.consts = vm.cEnumerator.consts // (scope is cosmetic; share the map)
 	vm.cEnumerator.consts["Yielder"] = vm.cYielder
 	vm.cYielder.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*yielder).emit(args)
+		object.Kind[*yielder](self).emit(args)
 		return self // << chains
 	})
 	vm.cYielder.define("yield", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*yielder).emit(args)
+		object.Kind[*yielder](self).emit(args)
 		return object.NilV
 	})
 	// Enumerator.new { |y| … } builds a generator-block enumerator.
@@ -96,7 +96,7 @@ func (vm *VM) registerEnumerator() {
 
 	d := func(name string, fn NativeFn) { vm.cEnumerator.define(name, fn) }
 	d("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		e := self.(*Enumerator)
+		e := object.Kind[*Enumerator](self)
 		if blk == nil {
 			return e
 		}
@@ -108,13 +108,13 @@ func (vm *VM) registerEnumerator() {
 		return vm.send(e.recv, e.meth, e.args, blk)
 	})
 	d("to_a", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.enumMaterialize(self.(*Enumerator)))
+		return object.NewArrayFromSlice(vm.enumMaterialize(object.Kind[*Enumerator](self)))
 	})
 	d("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(vm.enumMaterialize(self.(*Enumerator)))))
+		return object.IntValue(int64(len(vm.enumMaterialize(object.Kind[*Enumerator](self)))))
 	})
 	d("next", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		e := self.(*Enumerator)
+		e := object.Kind[*Enumerator](self)
 		buf := vm.enumBuffer(e)
 		if e.pos >= len(buf) {
 			raise("StopIteration", "iteration reached an end")
@@ -124,7 +124,7 @@ func (vm *VM) registerEnumerator() {
 		return v
 	})
 	d("peek", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		e := self.(*Enumerator)
+		e := object.Kind[*Enumerator](self)
 		buf := vm.enumBuffer(e)
 		if e.pos >= len(buf) {
 			raise("StopIteration", "iteration reached an end")
@@ -132,11 +132,11 @@ func (vm *VM) registerEnumerator() {
 		return buf[e.pos]
 	})
 	d("rewind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		self.(*Enumerator).pos = 0
+		object.Kind[*Enumerator](self).pos = 0
 		return self
 	})
 	withIndex := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		e := self.(*Enumerator)
+		e := object.Kind[*Enumerator](self)
 		off := int64(0)
 		if len(args) > 0 {
 			off = intArg(args[0])
@@ -173,7 +173,7 @@ func (vm *VM) registerEnumerator() {
 	// first/take pull only as many elements as requested, so they terminate even
 	// for unbounded enumerators such as Array#cycle without a block.
 	d("first", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		e := self.(*Enumerator)
+		e := object.Kind[*Enumerator](self)
 		if len(args) == 0 {
 			got := vm.enumTake(e, 1)
 			if len(got) == 0 {
@@ -184,7 +184,7 @@ func (vm *VM) registerEnumerator() {
 		return object.NewArrayFromSlice(vm.enumTake(e, int(intArg(args[0]))))
 	})
 	d("take", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.enumTake(self.(*Enumerator), int(intArg(args[0]))))
+		return object.NewArrayFromSlice(vm.enumTake(object.Kind[*Enumerator](self), int(intArg(args[0]))))
 	})
 }
 

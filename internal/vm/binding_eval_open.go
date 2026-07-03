@@ -14,7 +14,7 @@ import (
 // front-end directly (CompileWithLocals), so a closed-world build replaces it
 // with the stub in binding_eval_closed.go.
 func (vm *VM) bindingEval(b *Binding, srcV object.Value) object.Value {
-	s, ok := srcV.(*object.String)
+	s, ok := object.KindOK[*object.String](srcV)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(srcV))
 	}

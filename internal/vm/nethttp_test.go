@@ -68,8 +68,8 @@ func TestNetHTTPHeaderLazyInit(t *testing.T) {
 // RObject instances), so call the native with a non-RObject self.
 func TestNetHTTPHeaderTypeError(t *testing.T) {
 	vm := New(io.Discard)
-	net := vm.consts["Net"].(*RClass)
-	header := net.consts["HTTPHeader"].(*RClass)
+	net := object.Kind[*RClass](vm.consts["Net"])
+	header := object.Kind[*RClass](net.consts["HTTPHeader"])
 	get := header.methods["[]"]
 	if get == nil || get.native == nil {
 		t.Fatalf("Net::HTTPHeader#[] native not found")

@@ -43,7 +43,7 @@ func (vm *VM) runTop(iseq *bytecode.ISeq) object.Value {
 // argument list pads with nil / truncates.
 func aotBlockArgs(np int, args []object.Value) []object.Value {
 	if np > 1 && len(args) == 1 {
-		if arr, ok := args[0].(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](args[0]); ok {
 			args = arr.Elems
 		}
 	}
@@ -68,7 +68,7 @@ func aotBlockArgs(np int, args []object.Value) []object.Value {
 // the caller's self, for the protected-method check.
 func (vm *VM) aotSend(ic *inlineCache, recv object.Value, name string, args []object.Value, flags int, self object.Value, blk *Proc) object.Value {
 	if blk == nil {
-		if _, isClass := recv.(*RClass); !isClass {
+		if _, isClass := object.KindOK[*RClass](recv); !isClass {
 			if m := vm.lookupCached(ic, recv, name); m != nil {
 				if flags&bytecode.FlagSendExplicit != 0 {
 					vm.checkVisibility(recv, name, m, self)

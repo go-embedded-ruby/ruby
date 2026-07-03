@@ -59,9 +59,9 @@ func TestCaptureBacktraceEmptyFrames(t *testing.T) {
 	vm := New(nil)
 	vm.frameNames = nil
 	vm.frameFiles = nil
-	exc := &RObject{class: vm.consts["RuntimeError"].(*RClass), ivars: map[string]object.Value{}}
+	exc := &RObject{class: object.Kind[*RClass](vm.consts["RuntimeError"]), ivars: map[string]object.Value{}}
 	vm.captureBacktrace(exc)
-	bt, ok := getIvar(exc, backtraceIvar).(*object.Array)
+	bt, ok := object.KindOK[*object.Array](getIvar(exc, backtraceIvar))
 	if !ok {
 		t.Fatalf("expected an Array backtrace, got %#v", getIvar(exc, backtraceIvar))
 	}
@@ -74,13 +74,13 @@ func TestCaptureBacktraceEmptyFrames(t *testing.T) {
 // already-stored backtrace untouched.
 func TestCaptureBacktraceKeepsExisting(t *testing.T) {
 	vm := New(nil)
-	exc := &RObject{class: vm.consts["RuntimeError"].(*RClass), ivars: map[string]object.Value{}}
+	exc := &RObject{class: object.Kind[*RClass](vm.consts["RuntimeError"]), ivars: map[string]object.Value{}}
 	orig := &object.Array{Elems: []object.Value{object.NewString("orig:0:in 'x'")}}
 	setIvar(exc, backtraceIvar, orig)
 	vm.frameNames = []string{"later"}
 	vm.frameFiles = []string{"/y/other.rb"}
 	vm.captureBacktrace(exc)
-	got := getIvar(exc, backtraceIvar).(*object.Array)
+	got := object.Kind[*object.Array](getIvar(exc, backtraceIvar))
 	if got != orig {
 		t.Fatalf("re-raise overwrote the backtrace: %v", got.Elems)
 	}
@@ -93,7 +93,7 @@ func TestUncaughtBacktraceFallsBackToLiveStack(t *testing.T) {
 	vm := New(nil)
 	vm.frameNames = []string{"top", "inner"}
 	vm.frameFiles = []string{"/p.rb", "/p.rb"}
-	exc := &RObject{class: vm.consts["RuntimeError"].(*RClass), ivars: map[string]object.Value{}}
+	exc := &RObject{class: object.Kind[*RClass](vm.consts["RuntimeError"]), ivars: map[string]object.Value{}}
 	bt := vm.uncaughtBacktrace(RubyError{Obj: exc})
 	if len(bt) != 2 {
 		t.Fatalf("expected 2 live frames, got %v", bt)
@@ -122,7 +122,7 @@ func TestNormalizeBacktraceDirect(t *testing.T) {
 	if v := normalizeBacktrace(object.NilV); v != object.NilV {
 		t.Fatalf("nil: got %#v", v)
 	}
-	if a, ok := normalizeBacktrace(object.NewString("s")).(*object.Array); !ok || len(a.Elems) != 1 {
+	if a, ok := object.KindOK[*object.Array](normalizeBacktrace(object.NewString("s"))); !ok || len(a.Elems) != 1 {
 		t.Fatalf("string: got %#v", normalizeBacktrace(object.NewString("s")))
 	}
 	wantRaise(t, "TypeError", func() { normalizeBacktrace(object.Integer(1)) })

@@ -57,7 +57,7 @@ func (vm *VM) registerHaml() {
 // exceptionObject lookup finds the very same class), matching the gem's
 // Haml::Error / Haml::SyntaxError.
 func (vm *VM) registerHamlErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c

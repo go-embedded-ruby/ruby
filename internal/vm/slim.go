@@ -56,7 +56,7 @@ func (vm *VM) registerSlim() {
 // resolves it) and under its qualified name in the top-level table (so a re-raised
 // library error's exceptionObject lookup finds the very same class).
 func (vm *VM) registerSlimErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("Slim::Error", std)
 	mod.consts["Error"] = c
 	vm.consts["Slim::Error"] = c

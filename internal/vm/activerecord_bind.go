@@ -43,7 +43,7 @@ func (vm *VM) registerActiveRecordModel(mod *RClass) {
 		return wrapper
 	}}
 
-	self := func(v object.Value) *ActiveRecordModel { return v.(*ActiveRecordModel) }
+	self := func(v object.Value) *ActiveRecordModel { return object.Kind[*ActiveRecordModel](v) }
 
 	// Chainable entry points delegate to the model and wrap the relation.
 	rel := func(m *ActiveRecordModel, r *activerecord.Relation) object.Value {
@@ -99,7 +99,7 @@ func (vm *VM) registerActiveRecordModel(mod *RClass) {
 // registerActiveRecordModelDSL installs the model-block receiver: #column and the
 // validates_* / association declarations.
 func (vm *VM) registerActiveRecordModelDSL(dsl *RClass) {
-	self := func(v object.Value) *activerecord.Model { return v.(*ActiveRecordModelBuilder).m }
+	self := func(v object.Value) *activerecord.Model { return object.Kind[*ActiveRecordModelBuilder](v).m }
 
 	dsl.define("column", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 1 {
@@ -156,7 +156,7 @@ func (vm *VM) registerActiveRecordRelation(mod *RClass) {
 	mod.consts["Relation"] = cls
 	vm.consts["ActiveRecord::Relation"] = cls
 
-	self := func(v object.Value) *ActiveRecordRelation { return v.(*ActiveRecordRelation) }
+	self := func(v object.Value) *ActiveRecordRelation { return object.Kind[*ActiveRecordRelation](v) }
 	chain := func(v object.Value, r *activerecord.Relation) object.Value {
 		return &ActiveRecordRelation{r: r, model: self(v).model}
 	}
@@ -171,7 +171,7 @@ func (vm *VM) registerActiveRecordRelation(mod *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return chain(v, self(v).r.Or(args[0].(*ActiveRecordRelation).r))
+		return chain(v, self(v).r.Or(object.Kind[*ActiveRecordRelation](args[0]).r))
 	})
 	cls.define("select", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return chain(v, self(v).r.Select(arAnyArgs(args)...))
@@ -260,7 +260,7 @@ func (vm *VM) registerActiveRecordRecord(mod *RClass) {
 	mod.consts["Record"] = cls
 	vm.consts["ActiveRecord::Record"] = cls
 
-	self := func(v object.Value) *ActiveRecordRecord { return v.(*ActiveRecordRecord) }
+	self := func(v object.Value) *ActiveRecordRecord { return object.Kind[*ActiveRecordRecord](v) }
 	cls.define("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
@@ -333,7 +333,7 @@ func (vm *VM) registerActiveRecordErrorsClass(mod *RClass) {
 	mod.consts["Errors"] = cls
 	vm.consts["ActiveRecord::Errors"] = cls
 
-	self := func(v object.Value) *activerecord.Errors { return v.(*ActiveRecordErrors).e }
+	self := func(v object.Value) *activerecord.Errors { return object.Kind[*ActiveRecordErrors](v).e }
 	cls.define("empty?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).Empty())
 	})

@@ -80,7 +80,7 @@ func collectWalk(vm *VM, lister find.Lister, roots []string, ignoreError bool) (
 		}
 	}()
 	findWalk(vm, lister, roots, ignoreError, func(p object.Value) {
-		visited = append(visited, p.(*object.String).Str())
+		visited = append(visited, object.Kind[*object.String](p).Str())
 	})
 	return visited, "", ""
 }
@@ -157,7 +157,7 @@ func TestFindWalkPrune(t *testing.T) {
 	}}
 	var visited []string
 	findWalk(newTestVM(), lister, []string{"r"}, true, func(p object.Value) {
-		s := p.(*object.String).Str()
+		s := object.Kind[*object.String](p).Str()
 		visited = append(visited, s)
 		if s == "r/a" {
 			panic(throwSignal{tag: pruneTag, value: object.NilV})

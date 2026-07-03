@@ -39,7 +39,7 @@ func TestScanfValue(t *testing.T) {
 // TestScanfValuesEmpty covers scanfValues over an empty group (the no-match
 // result), which must yield an empty Ruby Array.
 func TestScanfValuesEmpty(t *testing.T) {
-	a, ok := scanfValues(nil).(*object.Array)
+	a, ok := object.KindOK[*object.Array](scanfValues(nil))
 	if !ok || len(a.Elems) != 0 {
 		t.Errorf("scanfValues(nil) = %v, want empty Array", scanfValues(nil))
 	}

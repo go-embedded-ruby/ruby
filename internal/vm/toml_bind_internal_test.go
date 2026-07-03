@@ -60,23 +60,23 @@ func TestTOMLFromBridge(t *testing.T) {
 	}
 	// Offset date-time.
 	off := toml.OffsetDateTime{Time: stdtime.Unix(296638320, 0).UTC()}
-	if tm, ok := fromTOML(vm, off).(*Time); !ok || tm.t.ToUnix() != 296638320 {
+	if tm, ok := object.KindOK[*Time](fromTOML(vm, off)); !ok || tm.t.ToUnix() != 296638320 {
 		t.Errorf("offset dt -> %#v", fromTOML(vm, off))
 	}
 	// Local date-time (materialised UTC).
 	ldt := toml.LocalDateTime{Year: 1979, Month: 5, Day: 27, Hour: 7, Minute: 32}
 	want := stdtime.Date(1979, 5, 27, 7, 32, 0, 0, stdtime.UTC).Unix()
-	if tm, ok := fromTOML(vm, ldt).(*Time); !ok || tm.t.ToUnix() != want {
+	if tm, ok := object.KindOK[*Time](fromTOML(vm, ldt)); !ok || tm.t.ToUnix() != want {
 		t.Errorf("local dt -> %#v", fromTOML(vm, ldt))
 	}
 	// Local date.
 	ld := toml.LocalDate{Year: 1979, Month: 5, Day: 27}
-	if tm, ok := fromTOML(vm, ld).(*Time); !ok || tm.t.ToUnix() != stdtime.Date(1979, 5, 27, 0, 0, 0, 0, stdtime.UTC).Unix() {
+	if tm, ok := object.KindOK[*Time](fromTOML(vm, ld)); !ok || tm.t.ToUnix() != stdtime.Date(1979, 5, 27, 0, 0, 0, 0, stdtime.UTC).Unix() {
 		t.Errorf("local date -> %#v", fromTOML(vm, ld))
 	}
 	// Local time (on the epoch date).
 	lt := toml.LocalTime{Hour: 7, Minute: 32, Second: 5}
-	if tm, ok := fromTOML(vm, lt).(*Time); !ok || tm.t.ToUnix() != stdtime.Date(1970, 1, 1, 7, 32, 5, 0, stdtime.UTC).Unix() {
+	if tm, ok := object.KindOK[*Time](fromTOML(vm, lt)); !ok || tm.t.ToUnix() != stdtime.Date(1970, 1, 1, 7, 32, 5, 0, stdtime.UTC).Unix() {
 		t.Errorf("local time -> %#v", fromTOML(vm, lt))
 	}
 }

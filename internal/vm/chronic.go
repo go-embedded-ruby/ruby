@@ -39,6 +39,6 @@ func chronicOptsArg(rest []object.Value) *object.Hash {
 	if len(rest) == 0 {
 		return nil
 	}
-	h, _ := rest[len(rest)-1].(*object.Hash)
+	h, _ := object.KindOK[*object.Hash](rest[len(rest)-1])
 	return h
 }

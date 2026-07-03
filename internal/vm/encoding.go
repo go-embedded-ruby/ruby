@@ -72,13 +72,13 @@ func (vm *VM) registerEncoding() {
 	mkConst("US_ASCII", "US-ASCII")
 
 	vm.cEncoding.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*encodingObj).name)
+		return object.NewString(object.Kind[*encodingObj](self).name)
 	})
 	vm.cEncoding.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*encodingObj).name)
+		return object.NewString(object.Kind[*encodingObj](self).name)
 	})
 	vm.cEncoding.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*encodingObj).Inspect())
+		return object.NewString(object.Kind[*encodingObj](self).Inspect())
 	})
 	// == is not defined here: the operator goes through the VM's identity equality,
 	// and interned Encoding objects compare correctly by identity.
@@ -115,11 +115,18 @@ func (vm *VM) registerEncoding() {
 // encodingName extracts an encoding name from a force_encoding argument (a String
 // or an Encoding object).
 func encodingName(v object.Value) string {
-	switch e := v.(type) {
-	case *object.String:
-		return normalizeEncoding(e.Str())
-	case *encodingObj:
-		return e.name
+	{
+		__sw54 := v
+		switch {
+		case object.IsKind[*object.String](__sw54):
+			e := object.Kind[*object.String](__sw54)
+			_ = e
+			return normalizeEncoding(e.Str())
+		case object.IsKind[*encodingObj](__sw54):
+			e := object.Kind[*encodingObj](__sw54)
+			_ = e
+			return e.name
+		}
 	}
 	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 	return ""
@@ -139,23 +146,23 @@ func asciiOnly(b []byte) bool {
 // String setup so it shares cString.)
 func (vm *VM) registerStringEncoding() {
 	vm.cString.define("encoding", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.internEncoding(self.(*object.String).EncName())
+		return vm.internEncoding(object.Kind[*object.String](self).EncName())
 	})
 	vm.cString.define("force_encoding", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		s.Enc = encodingName(args[0])
 		return s
 	})
 	vm.cString.define("b", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		d := self.(*object.String).Dup()
+		d := object.Kind[*object.String](self).Dup()
 		d.Enc = "ASCII-8BIT"
 		return d
 	})
 	vm.cString.define("ascii_only?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(asciiOnly(self.(*object.String).Bytes()))
+		return object.Bool(asciiOnly(object.Kind[*object.String](self).Bytes()))
 	})
 	vm.cString.define("valid_encoding?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		// Binary is always valid; a UTF-8 string is valid iff it decodes cleanly.
 		return object.Bool(s.IsBinary() || utf8.Valid(s.Bytes()))
 	})

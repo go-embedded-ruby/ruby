@@ -75,7 +75,7 @@ func (vm *VM) registerPublicSuffix() {
 // qualified name in the top-level table (so a re-raised library error's
 // exceptionObject lookup finds the very same class).
 func (vm *VM) registerPublicSuffixErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c
@@ -92,7 +92,7 @@ func (vm *VM) registerPublicSuffixErrors(mod *RClass) {
 // and the domain? / subdomain? predicates.
 func (vm *VM) registerPublicSuffixDomain(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) publicSuffixDomain { return v.(*PublicSuffixDomain).d }
+	self := func(v object.Value) publicSuffixDomain { return object.Kind[*PublicSuffixDomain](v).d }
 
 	// tld / sld / trd are the three levels; each is nil (not "") when absent, as
 	// the gem models a missing level.

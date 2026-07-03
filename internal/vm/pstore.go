@@ -122,7 +122,7 @@ func (b *fileBackend) Store(data []byte) error {
 func dirOf(path string) string { return filepath.Dir(path) }
 
 // pstoreSelf asserts the receiver is a PStore (always true for a bound method).
-func pstoreSelf(v object.Value) *PStore { return v.(*PStore) }
+func pstoreSelf(v object.Value) *PStore { return object.Kind[*PStore](v) }
 
 // pstoreKey converts a Ruby key/value to the marshal model the library stores,
 // reusing the Marshal binding so PStore holds genuine Ruby objects (and the bytes
@@ -164,7 +164,7 @@ func raisePStore(err error) {
 func (vm *VM) registerPStore() {
 	// PStore::Error < StandardError (MRI's hierarchy), registered under its
 	// qualified top-level name and re-attached as a nested PStore constant.
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	vm.cPStoreError = newClass("PStore::Error", std)
 	vm.consts["PStore::Error"] = vm.cPStoreError
 
@@ -180,7 +180,7 @@ func (vm *VM) registerPStore() {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 			}
-			s, ok := args[0].(*object.String)
+			s, ok := object.KindOK[*object.String](args[0])
 			if !ok {
 				raise("TypeError", "no implicit conversion into String")
 			}

@@ -30,7 +30,7 @@ func kramdownRender(src string, opt object.Value) string {
 // :typographic_symbols, :hard_wrap) take the key's truthiness, :auto_id_prefix
 // takes a String, and :footnote_nr an Integer. Unrecognised keys are ignored.
 func kramdownOptions(opt object.Value) *kramdown.Options {
-	h, ok := opt.(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](opt)
 	if !ok {
 		return nil
 	}
@@ -49,7 +49,7 @@ func kramdownOptions(opt object.Value) *kramdown.Options {
 		case "hard_wrap":
 			o.HardWrap = val.Truthy()
 		case "footnote_nr":
-			if n, ok := val.(object.Integer); ok {
+			if n, ok := object.AsIntegerOK(val); ok {
 				o.FootnoteNr = int(n)
 			}
 		}
@@ -60,11 +60,18 @@ func kramdownOptions(opt object.Value) *kramdown.Options {
 // kramdownKey renders an option key (a Symbol or String) as its bare name; any
 // other value falls back to its to_s.
 func kramdownKey(k object.Value) string {
-	switch n := k.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw83 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw83):
+			n := object.Kind[object.Symbol](__sw83)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw83):
+			n := object.Kind[*object.String](__sw83)
+			_ = n
+			return n.Str()
+		}
 	}
 	return k.ToS()
 }
@@ -72,7 +79,7 @@ func kramdownKey(k object.Value) string {
 // kramdownStr renders an option value as a string: a String yields its contents,
 // any other value its to_s.
 func kramdownStr(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

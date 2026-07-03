@@ -90,7 +90,7 @@ func (b *Bag) remove(v object.Value) {
 
 // bagArg asserts an argument is a Bag, raising TypeError otherwise.
 func bagArg(v object.Value) *Bag {
-	bag, ok := v.(*Bag)
+	bag, ok := object.KindOK[*Bag](v)
 	if !ok {
 		raise("TypeError", "value must be a Bag")
 	}
@@ -101,22 +101,33 @@ func bagArg(v object.Value) *Bag {
 // multiplicity — each occurrence bumps the count — and a Set seeds each member
 // once.
 func (b *Bag) seed(v object.Value) {
-	switch e := v.(type) {
-	case *object.Array:
-		for _, el := range e.Elems {
-			b.add(el)
-		}
-	case *Set:
-		e.each(b.add)
-	case *Bag:
-		e.b.Each(func(item interface{}, count int) goresult.Interface {
-			for i := 0; i < count; i++ {
-				b.add(e.vals[item])
+	{
+		__sw12 := v
+		switch {
+		case object.IsKind[*object.Array](__sw12):
+			e := object.Kind[*object.Array](__sw12)
+			_ = e
+			for _, el := range e.Elems {
+				b.add(el)
 			}
-			return goresult.New()
-		})
-	default:
-		raise("TypeError", "value must be enumerable (Array, Set or Bag)")
+		case object.IsKind[*Set](__sw12):
+			e := object.Kind[*Set](__sw12)
+			_ = e
+			e.each(b.add)
+		case object.IsKind[*Bag](__sw12):
+			e := object.Kind[*Bag](__sw12)
+			_ = e
+			e.b.Each(func(item interface{}, count int) goresult.Interface {
+				for i := 0; i < count; i++ {
+					b.add(e.vals[item])
+				}
+				return goresult.New()
+			})
+		default:
+			e := __sw12
+			_ = e
+			raise("TypeError", "value must be enumerable (Array, Set or Bag)")
+		}
 	}
 }
 
@@ -218,7 +229,7 @@ func (vm *VM) registerBag() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			bag := newBag()
 			if len(args) > 0 {
-				if _, isNil := args[0].(object.Nil); !isNil {
+				if _, isNil := object.AsNilOK(args[0]); !isNil {
 					bag.seed(args[0])
 				}
 			}
@@ -235,7 +246,7 @@ func (vm *VM) registerBag() {
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cBag.define(name, fn) }
-	self := func(v object.Value) *Bag { return v.(*Bag) }
+	self := func(v object.Value) *Bag { return object.Kind[*Bag](v) }
 
 	addFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		bag := self(v)
@@ -330,7 +341,7 @@ func (vm *VM) registerBag() {
 	d("difference", diffFn)
 
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		b, ok := args[0].(*Bag)
+		b, ok := object.KindOK[*Bag](args[0])
 		if !ok {
 			return object.False
 		}
@@ -361,7 +372,7 @@ func (vm *VM) registerBag() {
 		})
 		// An Integer n caps the result; a missing arg or explicit nil keeps all.
 		if len(args) > 0 {
-			if _, isNil := args[0].(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(args[0]); !isNil {
 				n := int(intArg(args[0]))
 				if n < 0 {
 					n = 0

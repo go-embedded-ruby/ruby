@@ -50,15 +50,26 @@ func (v *Vector) Truthy() bool    { return true }
 // Rational -> Rational Num, Float -> Float Num. Anything else raises TypeError,
 // matching MRI, which only stores Numerics in a Matrix/Vector.
 func numFromValue(v object.Value) libmatrix.Num {
-	switch x := v.(type) {
-	case object.Integer:
-		return libmatrix.NewInt(int64(x))
-	case *object.Bignum:
-		return libmatrix.NewBigInt(x.I)
-	case *object.Rational:
-		return libmatrix.NewBigRat(x.R)
-	case object.Float:
-		return libmatrix.NewFloat(float64(x))
+	{
+		__sw94 := v
+		switch {
+		case object.IsInt(__sw94):
+			x := object.AsInteger(__sw94)
+			_ = x
+			return libmatrix.NewInt(int64(x))
+		case object.IsKind[*object.Bignum](__sw94):
+			x := object.Kind[*object.Bignum](__sw94)
+			_ = x
+			return libmatrix.NewBigInt(x.I)
+		case object.IsKind[*object.Rational](__sw94):
+			x := object.Kind[*object.Rational](__sw94)
+			_ = x
+			return libmatrix.NewBigRat(x.R)
+		case object.IsFloat(__sw94):
+			x := object.AsFloatV(__sw94)
+			_ = x
+			return libmatrix.NewFloat(float64(x))
+		}
 	}
 	raise("TypeError", "not a numeric value")
 	panic("unreachable")
@@ -117,13 +128,13 @@ func numsToArray(ns []libmatrix.Num) object.Value {
 // Matrix.new / rows / [] into the library's [][]any of Nums, raising TypeError
 // for a non-Array element exactly as the library would reject the entry.
 func rowsFromValue(v object.Value) [][]any {
-	arr, ok := v.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](v)
 	if !ok {
 		raise("TypeError", "expected an Array of rows")
 	}
 	rows := make([][]any, len(arr.Elems))
 	for i, rv := range arr.Elems {
-		row, ok := rv.(*object.Array)
+		row, ok := object.KindOK[*object.Array](rv)
 		if !ok {
 			raise("TypeError", "expected an Array for each row")
 		}
@@ -139,7 +150,7 @@ func rowsFromValue(v object.Value) [][]any {
 // cellsFromValue maps a flat Ruby Array argument (row_vector / column_vector /
 // Vector elements) into a []any of Nums.
 func cellsFromValue(v object.Value) []any {
-	arr, ok := v.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](v)
 	if !ok {
 		raise("TypeError", "expected an Array")
 	}
@@ -164,7 +175,7 @@ func argsToCells(args []object.Value) []any {
 // otherwise (MRI raises ErrOperationNotDefined / TypeError for a non-Matrix
 // operand; a TypeError is the closest faithful surface for the binding seam).
 func matrixArg(v object.Value) *Matrix {
-	m, ok := v.(*Matrix)
+	m, ok := object.KindOK[*Matrix](v)
 	if !ok {
 		raise("TypeError", "value must be a Matrix")
 	}
@@ -172,7 +183,7 @@ func matrixArg(v object.Value) *Matrix {
 }
 
 func vectorArg(v object.Value) *Vector {
-	vec, ok := v.(*Vector)
+	vec, ok := object.KindOK[*Vector](v)
 	if !ok {
 		raise("TypeError", "value must be a Vector")
 	}
@@ -219,36 +230,52 @@ func vecOK(v *libmatrix.Vector, err error) object.Value {
 // Matrix / Matrix * Vector / Matrix * scalar, Matrix / Matrix / Matrix / scalar,
 // Vector * scalar, and structural == across the same wrapper type.
 func matrixOp(op bytecode.Op, a object.Value, b object.Value) object.Value {
-	switch lhs := a.(type) {
-	case *Matrix:
-		switch op {
-		case bytecode.OpAdd:
-			return matOK(lhs.m.Add(matrixArg(b).m))
-		case bytecode.OpSub:
-			return matOK(lhs.m.Sub(matrixArg(b).m))
-		case bytecode.OpMul:
-			switch o := b.(type) {
-			case *Matrix:
-				return matOK(lhs.m.Mul(o.m))
-			case *Vector:
-				return vecOK(lhs.m.MulVector(o.v))
-			default:
-				return matOK(lhs.m.MulScalar(numFromValue(b)))
+	{
+		__sw95 := a
+		switch {
+		case object.IsKind[*Matrix](__sw95):
+			lhs := object.Kind[*Matrix](__sw95)
+			_ = lhs
+			switch op {
+			case bytecode.OpAdd:
+				return matOK(lhs.m.Add(matrixArg(b).m))
+			case bytecode.OpSub:
+				return matOK(lhs.m.Sub(matrixArg(b).m))
+			case bytecode.OpMul:
+				{
+					__sw96 := b
+					switch {
+					case object.IsKind[*Matrix](__sw96):
+						o := object.Kind[*Matrix](__sw96)
+						_ = o
+						return matOK(lhs.m.Mul(o.m))
+					case object.IsKind[*Vector](__sw96):
+						o := object.Kind[*Vector](__sw96)
+						_ = o
+						return vecOK(lhs.m.MulVector(o.v))
+					default:
+						o := __sw96
+						_ = o
+						return matOK(lhs.m.MulScalar(numFromValue(b)))
+					}
+				}
+			case bytecode.OpDiv:
+				if o, ok := object.KindOK[*Matrix](b); ok {
+					return matOK(lhs.m.Div(o.m))
+				}
+				return matOK(lhs.m.DivScalar(numFromValue(b)))
 			}
-		case bytecode.OpDiv:
-			if o, ok := b.(*Matrix); ok {
-				return matOK(lhs.m.Div(o.m))
+		case object.IsKind[*Vector](__sw95):
+			lhs := object.Kind[*Vector](__sw95)
+			_ = lhs
+			switch op {
+			case bytecode.OpAdd:
+				return vecOK(lhs.v.Add(vectorArg(b).v))
+			case bytecode.OpSub:
+				return vecOK(lhs.v.Sub(vectorArg(b).v))
+			case bytecode.OpMul:
+				return vecOK(lhs.v.Mul(numFromValue(b)))
 			}
-			return matOK(lhs.m.DivScalar(numFromValue(b)))
-		}
-	case *Vector:
-		switch op {
-		case bytecode.OpAdd:
-			return vecOK(lhs.v.Add(vectorArg(b).v))
-		case bytecode.OpSub:
-			return vecOK(lhs.v.Sub(vectorArg(b).v))
-		case bytecode.OpMul:
-			return vecOK(lhs.v.Mul(numFromValue(b)))
 		}
 	}
 	return raise("NoMethodError", "undefined method '%s'", op)
@@ -257,12 +284,12 @@ func matrixOp(op bytecode.Op, a object.Value, b object.Value) object.Value {
 // eqMatrix / eqVector implement structural == against any value: only a
 // same-kind wrapper can be equal (a Matrix is never == a Vector or a scalar).
 func eqMatrix(a *Matrix, b object.Value) bool {
-	o, ok := b.(*Matrix)
+	o, ok := object.KindOK[*Matrix](b)
 	return ok && a.m.Eql(o.m)
 }
 
 func eqVector(a *Vector, b object.Value) bool {
-	o, ok := b.(*Vector)
+	o, ok := object.KindOK[*Vector](b)
 	return ok && a.v.Eql(o.v)
 }
 
@@ -283,7 +310,7 @@ func (vm *VM) registerMatrix() {
 // re-raised library error's exceptionObject lookup finds the same class), the
 // CSV::Row / URI:: pattern.
 func (vm *VM) registerMatrixErrors() {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 
 	efm := newClass("ExceptionForMatrix", vm.cObject)
 	efm.isModule = true
@@ -322,7 +349,7 @@ func (vm *VM) registerMatrixClass() {
 	sm("[]", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		rows := make([][]any, len(args))
 		for i, a := range args {
-			row, ok := a.(*object.Array)
+			row, ok := object.KindOK[*object.Array](a)
 			if !ok {
 				raise("TypeError", "expected an Array for each row")
 			}
@@ -342,10 +369,10 @@ func (vm *VM) registerMatrixClass() {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (build)")
 		}
-		r := int(args[0].(object.Integer))
+		r := int(object.AsInteger(args[0]))
 		c := r
 		if len(args) > 1 {
-			c = int(args[1].(object.Integer))
+			c = int(object.AsInteger(args[1]))
 		}
 		return matOK(libmatrix.Build(r, c, func(i, j int) any {
 			res := vm.callBlock(blk, []object.Value{object.IntValue(int64(i)), object.IntValue(int64(j))})
@@ -354,17 +381,17 @@ func (vm *VM) registerMatrixClass() {
 	})
 
 	identFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Matrix{m: libmatrix.Identity(int(args[0].(object.Integer)))}
+		return &Matrix{m: libmatrix.Identity(int(object.AsInteger(args[0])))}
 	}
 	sm("identity", identFn)
 	sm("I", identFn)
 	sm("unit", identFn)
 
 	sm("zero", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		r := int(args[0].(object.Integer))
+		r := int(object.AsInteger(args[0]))
 		c := r
 		if len(args) > 1 {
-			c = int(args[1].(object.Integer))
+			c = int(object.AsInteger(args[1]))
 		}
 		return &Matrix{m: libmatrix.Zero(r, c)}
 	})
@@ -372,7 +399,7 @@ func (vm *VM) registerMatrixClass() {
 		return matOK(libmatrix.Diagonal(argsToCells(args)...))
 	})
 	sm("scalar", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return matOK(libmatrix.Scalar(int(args[0].(object.Integer)), numFromValue(args[1])))
+		return matOK(libmatrix.Scalar(int(object.AsInteger(args[0])), numFromValue(args[1])))
 	})
 	sm("row_vector", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return matOK(libmatrix.RowVector(cellsFromValue(args[0])))
@@ -388,7 +415,7 @@ func (vm *VM) registerMatrixClass() {
 	})
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *Matrix { return v.(*Matrix) }
+	self := func(v object.Value) *Matrix { return object.Kind[*Matrix](v) }
 
 	d("row_count", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).m.RowCount()))
@@ -397,21 +424,21 @@ func (vm *VM) registerMatrixClass() {
 		return object.IntValue(int64(self(v).m.ColumnCount()))
 	})
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		n, ok := self(v).m.At(int(args[0].(object.Integer)), int(args[1].(object.Integer)))
+		n, ok := self(v).m.At(int(object.AsInteger(args[0])), int(object.AsInteger(args[1])))
 		if !ok {
 			return object.NilV
 		}
 		return numToValue(n)
 	})
 	d("row", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		vec, ok := self(v).m.Row(int(args[0].(object.Integer)))
+		vec, ok := self(v).m.Row(int(object.AsInteger(args[0])))
 		if !ok {
 			return object.NilV
 		}
 		return &Vector{v: vec}
 	})
 	d("column", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		vec, ok := self(v).m.Column(int(args[0].(object.Integer)))
+		vec, ok := self(v).m.Column(int(object.AsInteger(args[0])))
 		if !ok {
 			return object.NilV
 		}
@@ -435,11 +462,11 @@ func (vm *VM) registerMatrixClass() {
 	})
 	d("minor", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return matOK(self(v).m.Minor(
-			int(args[0].(object.Integer)), int(args[1].(object.Integer)),
-			int(args[2].(object.Integer)), int(args[3].(object.Integer))))
+			int(object.AsInteger(args[0])), int(object.AsInteger(args[1])),
+			int(object.AsInteger(args[2])), int(object.AsInteger(args[3]))))
 	})
 	d("first_minor", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return matOK(self(v).m.FirstMinor(int(args[0].(object.Integer)), int(args[1].(object.Integer))))
+		return matOK(self(v).m.FirstMinor(int(object.AsInteger(args[0])), int(object.AsInteger(args[1]))))
 	})
 	d("to_a", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		rows := self(v).m.ToA()
@@ -457,23 +484,32 @@ func (vm *VM) registerMatrixClass() {
 		return matOK(self(v).m.Sub(matrixArg(args[0]).m))
 	})
 	d("*", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		switch o := args[0].(type) {
-		case *Matrix:
-			return matOK(self(v).m.Mul(o.m))
-		case *Vector:
-			return vecOK(self(v).m.MulVector(o.v))
-		default:
-			return matOK(self(v).m.MulScalar(numFromValue(args[0])))
+		{
+			__sw97 := args[0]
+			switch {
+			case object.IsKind[*Matrix](__sw97):
+				o := object.Kind[*Matrix](__sw97)
+				_ = o
+				return matOK(self(v).m.Mul(o.m))
+			case object.IsKind[*Vector](__sw97):
+				o := object.Kind[*Vector](__sw97)
+				_ = o
+				return vecOK(self(v).m.MulVector(o.v))
+			default:
+				o := __sw97
+				_ = o
+				return matOK(self(v).m.MulScalar(numFromValue(args[0])))
+			}
 		}
 	})
 	d("/", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		if o, ok := args[0].(*Matrix); ok {
+		if o, ok := object.KindOK[*Matrix](args[0]); ok {
 			return matOK(self(v).m.Div(o.m))
 		}
 		return matOK(self(v).m.DivScalar(numFromValue(args[0])))
 	})
 	d("**", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return matOK(self(v).m.Pow(int(args[0].(object.Integer))))
+		return matOK(self(v).m.Pow(int(object.AsInteger(args[0]))))
 	})
 	d("-@", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Matrix{m: self(v).m.Neg()}
@@ -513,7 +549,7 @@ func (vm *VM) registerMatrixClass() {
 	d("round", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		n := 0
 		if len(args) > 0 {
-			n = int(args[0].(object.Integer))
+			n = int(object.AsInteger(args[0]))
 		}
 		return &Matrix{m: self(v).m.RoundEntries(n)}
 	})
@@ -553,14 +589,14 @@ func (vm *VM) registerMatrixClass() {
 	})
 
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*Matrix)
+		o, ok := object.KindOK[*Matrix](args[0])
 		if !ok {
 			return object.False
 		}
 		return object.Bool(self(v).m.Eql(o.m))
 	})
 	d("eql?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*Matrix)
+		o, ok := object.KindOK[*Matrix](args[0])
 		if !ok {
 			return object.False
 		}
@@ -614,10 +650,10 @@ func (vm *VM) registerVectorClass() {
 	})
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *Vector { return v.(*Vector) }
+	self := func(v object.Value) *Vector { return object.Kind[*Vector](v) }
 
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		n, ok := self(v).v.At(int(args[0].(object.Integer)))
+		n, ok := self(v).v.At(int(object.AsInteger(args[0])))
 		if !ok {
 			return object.NilV
 		}
@@ -681,14 +717,14 @@ func (vm *VM) registerVectorClass() {
 	})
 
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*Vector)
+		o, ok := object.KindOK[*Vector](args[0])
 		if !ok {
 			return object.False
 		}
 		return object.Bool(self(v).v.Eql(o.v))
 	})
 	d("eql?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*Vector)
+		o, ok := object.KindOK[*Vector](args[0])
 		if !ok {
 			return object.False
 		}

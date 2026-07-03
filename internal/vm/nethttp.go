@@ -16,7 +16,7 @@ import (
 // a later round: the networking methods (start/request/get/...) raise
 // NotImplementedError, while the cheap-and-real header surface is implemented.
 func (vm *VM) registerNetHTTP() {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 
 	net := newClass("Net", nil)
 	net.isModule = true
@@ -60,7 +60,7 @@ func (vm *VM) registerNetHTTP() {
 		rc.includes = append(rc.includes, header)
 		rc.smethods["new"] = &Method{name: "new", owner: rc,
 			native: func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-				o := &RObject{class: self.(*RClass), ivars: map[string]object.Value{}}
+				o := &RObject{class: object.Kind[*RClass](self), ivars: map[string]object.Value{}}
 				o.ivars["@header"] = object.NewHash()
 				return o
 			}}
@@ -118,11 +118,11 @@ func (vm *VM) registerNetHTTP() {
 // request/response headers works without any networking.
 func defNetHTTPHeader(header *RClass) {
 	hashOf := func(self object.Value) *object.Hash {
-		o, ok := self.(*RObject)
+		o, ok := object.KindOK[*RObject](self)
 		if !ok {
 			raise("TypeError", "Net::HTTPHeader expects an object receiver")
 		}
-		h, ok := o.ivars["@header"].(*object.Hash)
+		h, ok := object.KindOK[*object.Hash](o.ivars["@header"])
 		if !ok {
 			h = object.NewHash()
 			o.ivars["@header"] = h

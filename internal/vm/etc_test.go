@@ -45,7 +45,7 @@ func etcSeams(t *testing.T, found bool) *VM {
 // callEtc invokes an Etc module function by name.
 func callEtc(t *testing.T, vm *VM, name string, args []object.Value) object.Value {
 	t.Helper()
-	mod := vm.consts["Etc"].(*RClass)
+	mod := object.Kind[*RClass](vm.consts["Etc"])
 	m := mod.smethods[name]
 	if m == nil {
 		t.Fatalf("Etc.%s not found", name)
@@ -58,7 +58,7 @@ func TestEtcLookupsFound(t *testing.T) {
 
 	// getpwuid(0) -> Etc::Passwd struct with MRI members.
 	pw := callEtc(t, vm, "getpwuid", []object.Value{object.Integer(0)})
-	o, ok := pw.(*RObject)
+	o, ok := object.KindOK[*RObject](pw)
 	if !ok {
 		t.Fatalf("getpwuid not an object: %#v", pw)
 	}
@@ -70,22 +70,22 @@ func TestEtcLookupsFound(t *testing.T) {
 	}
 
 	// no argument -> current user (etcCurrentUID); nil argument is the same.
-	if v := callEtc(t, vm, "getpwuid", nil); v.(*RObject).ivars["@name"].ToS() != "root" {
+	if v := callEtc(t, vm, "getpwuid", nil); object.Kind[*RObject](v).ivars["@name"].ToS() != "root" {
 		t.Fatalf("getpwuid() current user wrong")
 	}
-	if v := callEtc(t, vm, "getpwuid", []object.Value{object.NilV}); v.(*RObject).ivars["@name"].ToS() != "root" {
+	if v := callEtc(t, vm, "getpwuid", []object.Value{object.NilV}); object.Kind[*RObject](v).ivars["@name"].ToS() != "root" {
 		t.Fatalf("getpwuid(nil) wrong")
 	}
 
 	// getpwnam, getgrgid, getgrnam, systmpdir all succeed.
-	if callEtc(t, vm, "getpwnam", []object.Value{object.NewString("root")}).(*RObject).ivars["@name"].ToS() != "root" {
+	if object.Kind[*RObject](callEtc(t, vm, "getpwnam", []object.Value{object.NewString("root")})).ivars["@name"].ToS() != "root" {
 		t.Fatalf("getpwnam wrong")
 	}
-	gr := callEtc(t, vm, "getgrgid", []object.Value{object.Integer(0)}).(*RObject)
+	gr := object.Kind[*RObject](callEtc(t, vm, "getgrgid", []object.Value{object.Integer(0)}))
 	if gr.ivars["@name"].ToS() != "wheel" || gr.class.name != "Etc::Group" {
 		t.Fatalf("getgrgid: %#v", gr.ivars)
 	}
-	if callEtc(t, vm, "getgrnam", []object.Value{object.NewString("wheel")}).(*RObject).ivars["@name"].ToS() != "wheel" {
+	if object.Kind[*RObject](callEtc(t, vm, "getgrnam", []object.Value{object.NewString("wheel")})).ivars["@name"].ToS() != "wheel" {
 		t.Fatalf("getgrnam wrong")
 	}
 	if callEtc(t, vm, "systmpdir", nil).ToS() != "/seam-tmp" {
@@ -97,9 +97,9 @@ func TestEtcEnsureClassesCached(t *testing.T) {
 	vm := etcSeams(t, true)
 	// First lookup builds the Passwd/Group struct classes; a second lookup must
 	// reuse them (the cached branch of ensureClasses).
-	first := callEtc(t, vm, "getpwuid", []object.Value{object.Integer(0)}).(*RObject)
-	second := callEtc(t, vm, "getgrgid", []object.Value{object.Integer(0)}).(*RObject)
-	third := callEtc(t, vm, "getpwnam", []object.Value{object.NewString("root")}).(*RObject)
+	first := object.Kind[*RObject](callEtc(t, vm, "getpwuid", []object.Value{object.Integer(0)}))
+	second := object.Kind[*RObject](callEtc(t, vm, "getgrgid", []object.Value{object.Integer(0)}))
+	third := object.Kind[*RObject](callEtc(t, vm, "getpwnam", []object.Value{object.NewString("root")}))
 	if first.class != third.class {
 		t.Fatalf("Passwd class not reused across lookups")
 	}

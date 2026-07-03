@@ -33,15 +33,15 @@ func (vm *VM) fibL1(n object.Value) object.Value {
 // deopt fall-back (here to fibL1) for the dynamic case. Overflow promotion is
 // elided for the prototype (fib(34) fits in int64).
 func (vm *VM) fibL2(n object.Value) object.Value {
-	ni, ok := n.(object.Integer)
+	ni, ok := object.AsIntegerOK(n)
 	if !ok {
 		return vm.fibL1(n) // deopt
 	}
 	if ni < 2 {
 		return ni
 	}
-	a := vm.fibL2(ni - 1).(object.Integer)
-	b := vm.fibL2(ni - 2).(object.Integer)
+	a := object.AsInteger(vm.fibL2(ni - 1))
+	b := object.AsInteger(vm.fibL2(ni - 2))
 	return a + b
 }
 
@@ -61,7 +61,7 @@ func fibUnboxed(n int64) int64 {
 
 // fibL3 is the boundary: guard + box at the edge, unboxed interior.
 func (vm *VM) fibL3(n object.Value) object.Value {
-	ni, ok := n.(object.Integer)
+	ni, ok := object.AsIntegerOK(n)
 	if !ok {
 		return vm.fibL1(n) // deopt
 	}

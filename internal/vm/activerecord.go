@@ -100,7 +100,7 @@ func (vm *VM) registerActiveRecord() {
 // ActiveRecord::ActiveRecordError < StandardError, StatementInvalid (a failed
 // query) and RecordInvalid (a failed validation) under it, mirroring the gem.
 func (vm *VM) registerActiveRecordErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	base := newClass("ActiveRecord::ActiveRecordError", std)
 	mod.consts["ActiveRecordError"] = base
 	vm.consts["ActiveRecord::ActiveRecordError"] = base
@@ -155,29 +155,29 @@ func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
 	}
 
 	sm("table_name", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.arModelForClass(self.(*RClass)).m.TableName)
+		return object.NewString(vm.arModelForClass(object.Kind[*RClass](self)).m.TableName)
 	})
 	sm("table_name=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		vm.arSetTableName(self.(*RClass), arStr(args[0]))
+		vm.arSetTableName(object.Kind[*RClass](self), arStr(args[0]))
 		return args[0]
 	})
 	sm("all", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		m := vm.arModelForClass(self.(*RClass))
+		m := vm.arModelForClass(object.Kind[*RClass](self))
 		return rel(m, m.m.All())
 	})
 	sm("where", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		m := vm.arModelForClass(self.(*RClass))
+		m := vm.arModelForClass(object.Kind[*RClass](self))
 		return rel(m, m.m.Where(arCondArgs(args)...))
 	})
 	sm("order", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		m := vm.arModelForClass(self.(*RClass))
+		m := vm.arModelForClass(object.Kind[*RClass](self))
 		return rel(m, m.m.Order(arAnyArgs(args)...))
 	})
 	sm("count", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		m := vm.arModelForClass(self.(*RClass))
+		m := vm.arModelForClass(object.Kind[*RClass](self))
 		n, err := activerecord.Count(vm.arRequireAdapter(), m.m.All())
 		if err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
@@ -185,7 +185,7 @@ func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
 		return object.IntValue(n)
 	})
 	sm("first", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		m := vm.arModelForClass(self.(*RClass))
+		m := vm.arModelForClass(object.Kind[*RClass](self))
 		recs, err := activerecord.LoadAll(vm.arRequireAdapter(), m.m.All().Limit(1))
 		if err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
@@ -199,7 +199,7 @@ func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		m := vm.arModelForClass(self.(*RClass))
+		m := vm.arModelForClass(object.Kind[*RClass](self))
 		recs, err := activerecord.LoadAll(vm.arRequireAdapter(), m.m.Where(map[string]any{m.m.PrimaryKey: arToGo(args[0])}).Limit(1))
 		if err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
@@ -210,10 +210,10 @@ func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
 		return &ActiveRecordRecord{rec: recs[0], model: m}
 	})
 	sm("create", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.arCreateRecord(vm.arModelForClass(self.(*RClass)), args, false)
+		return vm.arCreateRecord(vm.arModelForClass(object.Kind[*RClass](self)), args, false)
 	})
 	sm("create!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.arCreateRecord(vm.arModelForClass(self.(*RClass)), args, true)
+		return vm.arCreateRecord(vm.arModelForClass(object.Kind[*RClass](self)), args, true)
 	})
 }
 

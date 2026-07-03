@@ -17,7 +17,7 @@ import (
 // callFU invokes a FileUtils module function by name.
 func callFU(t *testing.T, vm *VM, name string, args []object.Value) object.Value {
 	t.Helper()
-	mod := vm.consts["FileUtils"].(*RClass)
+	mod := object.Kind[*RClass](vm.consts["FileUtils"])
 	m := mod.smethods[name]
 	if m == nil {
 		t.Fatalf("FileUtils.%s not found", name)

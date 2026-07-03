@@ -51,7 +51,7 @@ func (vm *VM) registerSequel() {
 	mod.smethods["mock"] = &Method{name: "mock", owner: mod, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		dialect := "default"
 		if len(args) > 0 {
-			if h, ok := args[0].(*object.Hash); ok {
+			if h, ok := object.KindOK[*object.Hash](args[0]); ok {
 				if v, ok := sequelKw(h, "host"); ok {
 					dialect = pgStringArg(v)
 				}
@@ -74,14 +74,14 @@ func (vm *VM) callBlockDSL(blk *Proc, gen object.Value) object.Value {
 func (vm *VM) sequelConnect(mod *RClass, args []object.Value) object.Value {
 	adapter, database := "", ":memory:"
 	if len(args) > 0 {
-		if h, ok := args[len(args)-1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
 			if v, ok := sequelKw(h, "adapter"); ok {
 				adapter = pgStringArg(v)
 			}
 			if v, ok := sequelKw(h, "database"); ok {
 				database = pgStringArg(v)
 			}
-		} else if s, ok := args[0].(*object.String); ok {
+		} else if s, ok := object.KindOK[*object.String](args[0]); ok {
 			// A connection string "sqlite://path" / "sqlite::memory:".
 			adapter, database = sequelParseURL(s.Str())
 		}
@@ -130,7 +130,7 @@ func sequelKw(h *object.Hash, name string) (object.Value, bool) {
 // registerSequelErrors installs the Sequel::Error tree (Error < StandardError;
 // DatabaseError < Error).
 func (vm *VM) registerSequelErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple string, super *RClass) *RClass {
 		qualified := "Sequel::" + simple
 		c := newClass(qualified, super)
@@ -144,7 +144,7 @@ func (vm *VM) registerSequelErrors(mod *RClass) {
 
 // sequelDBClass returns the Sequel::Database class.
 func sequelDBClass(vm *VM, mod *RClass) *RClass {
-	return mod.consts["Database"].(*RClass)
+	return object.Kind[*RClass](mod.consts["Database"])
 }
 
 // registerSequelDatabase installs Sequel::Database and its methods.
@@ -154,7 +154,7 @@ func (vm *VM) registerSequelDatabase(mod *RClass) {
 	vm.consts["Sequel::Database"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *SequelDBObj { return v.(*SequelDBObj) }
+	self := func(v object.Value) *SequelDBObj { return object.Kind[*SequelDBObj](v) }
 
 	// DB[:table] / DB.from(:table) return a dataset over the named source(s).
 	d("[]", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -226,7 +226,7 @@ func (vm *VM) registerSequelDatabase(mod *RClass) {
 
 // dataset wraps a *sequel.Dataset as a Ruby Sequel::Dataset bound to this DB.
 func (o *SequelDBObj) dataset(vm *VM, ds *sequel.Dataset) *SequelDatasetObj {
-	return &SequelDatasetObj{cls: vm.consts["Sequel::Dataset"].(*RClass), db: o, ds: ds}
+	return &SequelDatasetObj{cls: object.Kind[*RClass](vm.consts["Sequel::Dataset"]), db: o, ds: ds}
 }
 
 // registerSequelDataset installs Sequel::Dataset and its chainable + terminal
@@ -237,7 +237,7 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 	vm.consts["Sequel::Dataset"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *SequelDatasetObj { return v.(*SequelDatasetObj) }
+	self := func(v object.Value) *SequelDatasetObj { return object.Kind[*SequelDatasetObj](v) }
 	// chain builds a new dataset wrapper from a library dataset, keeping the DB.
 	chain := func(v object.Value, ds *sequel.Dataset) object.Value {
 		return &SequelDatasetObj{cls: self(v).cls, db: self(v).db, ds: ds}
@@ -404,7 +404,7 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 // on the open connection a successful INSERT just ran against, so its error is
 // not actionable and is ignored (id is 0 in that impossible case).
 func (d *SequelDatasetObj) lastInsertID() object.Value {
-	sw, ok := d.db.sqlite.(*SQLite3Database)
+	sw, ok := object.KindOK[*SQLite3Database](d.db.sqlite)
 	if !ok {
 		return object.NilV
 	}
@@ -416,7 +416,7 @@ func (d *SequelDatasetObj) lastInsertID() object.Value {
 // or nil for a mock database. Like lastInsertID, the count query cannot fail on
 // the open connection, so its error is ignored.
 func (d *SequelDatasetObj) changes() object.Value {
-	sw, ok := d.db.sqlite.(*SQLite3Database)
+	sw, ok := object.KindOK[*SQLite3Database](d.db.sqlite)
 	if !ok {
 		return object.NilV
 	}

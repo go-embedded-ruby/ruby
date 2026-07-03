@@ -63,7 +63,7 @@ func (o *OptionParser) Inspect() string { return o.ToS() }
 func (o *OptionParser) Truthy() bool    { return true }
 
 // opOf returns the receiver as a *OptionParser.
-func opOf(v object.Value) *OptionParser { return v.(*OptionParser) }
+func opOf(v object.Value) *OptionParser { return object.Kind[*OptionParser](v) }
 
 // registerOptionParser installs the native OptionParser class backed by the
 // go-ruby-optparse library. OptionParser.new builds a fresh library Parser (with
@@ -92,17 +92,17 @@ func (vm *VM) registerOptionParser() {
 			// becomes the first help line; the width/indent override the summary
 			// layout. Each is optional and a nil placeholder keeps the default.
 			if len(args) >= 1 {
-				if s, ok := args[0].(*object.String); ok {
+				if s, ok := object.KindOK[*object.String](args[0]); ok {
 					op.p.Banner = s.Str()
 				}
 			}
 			if len(args) >= 2 {
-				if n, ok := args[1].(object.Integer); ok {
+				if n, ok := object.AsIntegerOK(args[1]); ok {
 					op.p.SummaryWidth = int(n)
 				}
 			}
 			if len(args) >= 3 {
-				if s, ok := args[2].(*object.String); ok {
+				if s, ok := object.KindOK[*object.String](args[2]); ok {
 					op.p.SummaryIndent = s.Str()
 				}
 			}
@@ -151,7 +151,7 @@ func (vm *VM) registerOptionParser() {
 	d("separator", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		text := ""
 		if len(args) > 0 {
-			if s, ok := args[0].(*object.String); ok {
+			if s, ok := object.KindOK[*object.String](args[0]); ok {
 				text = s.Str()
 			}
 		}
@@ -162,13 +162,13 @@ func (vm *VM) registerOptionParser() {
 	// accept/reject keep the chainable Ruby surface; the library owns the built-in
 	// converters, so a custom accept block is recorded but never consulted.
 	d("accept", func(_ *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
-		if c, ok := args[0].(*RClass); ok {
+		if c, ok := object.KindOK[*RClass](args[0]); ok {
 			opOf(v).acceptables[c] = blk
 		}
 		return v
 	})
 	d("reject", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		if c, ok := args[0].(*RClass); ok {
+		if c, ok := object.KindOK[*RClass](args[0]); ok {
 			delete(opOf(v).acceptables, c)
 		}
 		return v
@@ -204,7 +204,7 @@ func (vm *VM) registerOptionParser() {
 		return opOf(v).defaultArgv
 	})
 	d("default_argv=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		if a, ok := args[0].(*object.Array); ok {
+		if a, ok := object.KindOK[*object.Array](args[0]); ok {
 			opOf(v).defaultArgv = a
 		}
 		return args[0]
@@ -348,7 +348,7 @@ func (vm *VM) registerOptionParser() {
 		var argv *object.Array
 		rest := args
 		if len(args) > 0 {
-			if a, ok := args[0].(*object.Array); ok {
+			if a, ok := object.KindOK[*object.Array](args[0]); ok {
 				argv = a
 				rest = args[1:]
 			}
@@ -461,17 +461,28 @@ func (vm *VM) optSpecFromArgs(args []object.Value) (optparse.Spec, []string, []o
 	var list, values []string
 	var ruby []object.Value
 	for _, a := range args {
-		switch v := a.(type) {
-		case *object.String:
-			opts = append(opts, v.Str())
-		case *RClass:
-			coerce = vm.optCoerceForClass(v)
-		case *object.Array:
-			coerce = optparse.CoerceList
-			list, values, ruby = optListFromArray(vm, v)
-		case *object.Hash:
-			coerce = optparse.CoerceList
-			list, values, ruby = optListFromHash(vm, v)
+		{
+			__sw115 := a
+			switch {
+			case object.IsKind[*object.String](__sw115):
+				v := object.Kind[*object.String](__sw115)
+				_ = v
+				opts = append(opts, v.Str())
+			case object.IsKind[*RClass](__sw115):
+				v := object.Kind[*RClass](__sw115)
+				_ = v
+				coerce = vm.optCoerceForClass(v)
+			case object.IsKind[*object.Array](__sw115):
+				v := object.Kind[*object.Array](__sw115)
+				_ = v
+				coerce = optparse.CoerceList
+				list, values, ruby = optListFromArray(vm, v)
+			case object.IsKind[*object.Hash](__sw115):
+				v := object.Kind[*object.Hash](__sw115)
+				_ = v
+				coerce = optparse.CoerceList
+				list, values, ruby = optListFromHash(vm, v)
+			}
 		}
 	}
 	spec := optparse.MakeSpec(opts, coerce, list, values)
@@ -527,13 +538,22 @@ func optListFromHash(vm *VM, h *object.Hash) (keys, values []string, ruby []obje
 // optToS renders a candidate value's key string the way the prelude did (k.to_s):
 // a Symbol/String contributes its text, anything else its #to_s.
 func optToS(vm *VM, v object.Value) string {
-	switch t := v.(type) {
-	case object.Symbol:
-		return string(t)
-	case *object.String:
-		return t.Str()
-	default:
-		return strArg(vm.send(v, "to_s", nil, nil))
+	{
+		__sw116 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw116):
+			t := object.Kind[object.Symbol](__sw116)
+			_ = t
+			return string(t)
+		case object.IsKind[*object.String](__sw116):
+			t := object.Kind[*object.String](__sw116)
+			_ = t
+			return t.Str()
+		default:
+			t := __sw116
+			_ = t
+			return strArg(vm.send(v, "to_s", nil, nil))
+		}
 	}
 }
 
@@ -549,7 +569,7 @@ func (vm *VM) optRaise(err error) {
 	// pe.Class() is "OptionParser::<Name>"; the subclasses live in the OptionParser
 	// class's own constant table (nested), so resolve <Name> there.
 	name := strings.TrimPrefix(pe.Class(), "OptionParser::")
-	cls, ok := vm.cOptionParser.consts[name].(*RClass)
+	cls, ok := object.KindOK[*RClass](vm.cOptionParser.consts[name])
 	if !ok {
 		raise("OptionParser::ParseError", "%s", pe.Error())
 		return
@@ -567,7 +587,7 @@ func (vm *VM) optRaise(err error) {
 func (vm *VM) optDefaultProgramName() string {
 	name := "optparse"
 	if v, set := vm.globals["$0"]; set {
-		if s, ok := v.(*object.String); ok && s.Str() != "" {
+		if s, ok := object.KindOK[*object.String](v); ok && s.Str() != "" {
 			name = s.Str()
 		}
 	}
@@ -587,7 +607,7 @@ func (vm *VM) optProgramNameFor(op *OptionParser) string {
 // argument, or the parser's default_argv when none is given.
 func (op *OptionParser) argvArg(args []object.Value) *object.Array {
 	if len(args) > 0 {
-		if a, ok := args[0].(*object.Array); ok {
+		if a, ok := object.KindOK[*object.Array](args[0]); ok {
 			return a
 		}
 	}

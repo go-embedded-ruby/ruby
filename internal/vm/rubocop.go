@@ -73,7 +73,7 @@ func (vm *VM) registerRuboCop() {
 	vm.consts["RuboCop"] = mod
 
 	// RuboCop::Error < StandardError for a config-parse failure, mirroring the gem.
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	rcErr := newClass("RuboCop::Error", std)
 	mod.consts["Error"] = rcErr
 	vm.consts["RuboCop::Error"] = rcErr
@@ -122,14 +122,14 @@ func (vm *VM) registerRuboCopRunner(mod *RClass) {
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		cfg := rubocop.NewConfig()
 		if len(args) > 0 {
-			if c, ok := args[0].(*RuboCopConfig); ok {
+			if c, ok := object.KindOK[*RuboCopConfig](args[0]); ok {
 				cfg = c.c
 			}
 		}
 		return &RuboCopRunner{r: rubocop.NewRunner(rubocop.DefaultRegistry(), cfg)}
 	}}
 
-	self := func(v object.Value) *rubocop.Runner { return v.(*RuboCopRunner).r }
+	self := func(v object.Value) *rubocop.Runner { return object.Kind[*RuboCopRunner](v).r }
 
 	// #inspect(source[, path]) returns the Offenses as an Array of value objects.
 	cls.define("inspect", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {

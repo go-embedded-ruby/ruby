@@ -116,7 +116,7 @@ var dryRegistry = map[string]func() drytypes.Type{
 func dryConstraints(args []object.Value) []drytypes.Constraint {
 	var cs []drytypes.Constraint
 	for _, a := range args {
-		h, ok := a.(*object.Hash)
+		h, ok := object.KindOK[*object.Hash](a)
 		if !ok {
 			continue
 		}
@@ -135,7 +135,7 @@ func drySchema(h *object.Hash) *drytypes.HashSchema {
 	var keys []drytypes.SchemaKey
 	for _, k := range h.Keys {
 		v, _ := h.Get(k)
-		t, ok := v.(*DryType)
+		t, ok := object.KindOK[*DryType](v)
 		if !ok {
 			continue
 		}
@@ -169,22 +169,36 @@ func dryMetaToHash(vm *VM, m map[string]any) object.Value {
 // dryTypeName renders the Dry::Types[...] lookup argument as its bare name (a
 // Symbol or String); any other value falls back to its to_s.
 func dryTypeName(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw50 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw50):
+			n := object.Kind[object.Symbol](__sw50)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw50):
+			n := object.Kind[*object.String](__sw50)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
 
 // dryKeyName renders a key (Symbol or String) as its bare name.
 func dryKeyName(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw51 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw51):
+			n := object.Kind[object.Symbol](__sw51)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw51):
+			n := object.Kind[*object.String](__sw51)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
@@ -196,38 +210,63 @@ func dryKeyName(v object.Value) string {
 // gem's `.default` substitutes for); any other value passes through as-is so the
 // library reports the coercion failure.
 func dryToGo(v object.Value) any {
-	switch n := v.(type) {
-	case nil:
-		return drytypes.Undefined
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return drytypes.Symbol(string(n))
-	case *object.Array:
-		out := make([]any, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = dryToGo(el)
+	{
+		__sw52 := v
+		switch {
+		case __sw52 == nil:
+			n := __sw52
+			_ = n
+			return drytypes.Undefined
+		case object.IsNilObj(__sw52):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsBool(__sw52):
+			n := object.AsBoolV(__sw52)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw52):
+			n := object.AsInteger(__sw52)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw52):
+			n := object.Kind[*object.Bignum](__sw52)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw52):
+			n := object.AsFloatV(__sw52)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw52):
+			n := object.Kind[*object.String](__sw52)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw52):
+			n := object.Kind[object.Symbol](__sw52)
+			_ = n
+			return drytypes.Symbol(string(n))
+		case object.IsKind[*object.Array](__sw52):
+			n := object.Kind[*object.Array](__sw52)
+			_ = n
+			out := make([]any, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = dryToGo(el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw52):
+			n := object.Kind[*object.Hash](__sw52)
+			_ = n
+			m := drytypes.NewMap()
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				m.Set(dryToGo(k), dryToGo(val))
+			}
+			return m
+		case object.IsKind[*Time](__sw52):
+			n := object.Kind[*Time](__sw52)
+			_ = n
+			return stdtime.Unix(n.t.ToUnix(), 0).UTC()
 		}
-		return out
-	case *object.Hash:
-		m := drytypes.NewMap()
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m.Set(dryToGo(k), dryToGo(val))
-		}
-		return m
-	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
 	}
 	return v
 }
@@ -272,7 +311,7 @@ func dryFromGo(vm *VM, v any) object.Value {
 	case *drystruct.Struct:
 		// A nested struct value: wrap it as a DryStruct reporting the Ruby subclass
 		// named by its StructType (registered when the subclass was defined).
-		cls, _ := vm.consts[n.Type().Name].(*RClass)
+		cls, _ := object.KindOK[*RClass](vm.consts[n.Type().Name])
 		return &DryStruct{s: n, cls: cls}
 	}
 	if v == drytypes.Undefined {

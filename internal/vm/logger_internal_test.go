@@ -873,7 +873,7 @@ func TestLoggerRotatePeriodNoBase(t *testing.T) {
 // non-object.Value fallback.
 func TestLoggerFormatterInspectNonValue(t *testing.T) {
 	vm := New(io.Discard)
-	lf := vm.cLoggerFormatter.smethods["new"].native(vm, nil, nil, nil).(*LoggerFormatter)
+	lf := object.Kind[*LoggerFormatter](vm.cLoggerFormatter.smethods["new"].native(vm, nil, nil, nil))
 	if got := lf.f.Inspect(42); got != "" {
 		t.Fatalf("formatter Inspect(non-Value) = %q, want empty", got)
 	}
@@ -882,7 +882,7 @@ func TestLoggerFormatterInspectNonValue(t *testing.T) {
 // TestLoggerFormatterInspectValue covers the closure's object.Value arm.
 func TestLoggerFormatterInspectValue(t *testing.T) {
 	vm := New(io.Discard)
-	lf := vm.cLoggerFormatter.smethods["new"].native(vm, nil, nil, nil).(*LoggerFormatter)
+	lf := object.Kind[*LoggerFormatter](vm.cLoggerFormatter.smethods["new"].native(vm, nil, nil, nil))
 	if got := lf.f.Inspect(object.Integer(7)); got != "7" {
 		t.Fatalf("formatter Inspect(Integer 7) = %q, want 7", got)
 	}

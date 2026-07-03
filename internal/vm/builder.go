@@ -48,7 +48,7 @@ func (vm *VM) registerBuilder() {
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *XmlMarkup { return v.(*XmlMarkup) }
+	self := func(v object.Value) *XmlMarkup { return object.Kind[*XmlMarkup](v) }
 
 	// method_missing(name, *args, &blk) emits an element named after the missing
 	// method: xml.br, xml.name("text"), xml.p(id: 1) { … }. It maps straight onto

@@ -69,7 +69,7 @@ func (vm *VM) gvarDefined(name string) bool {
 	if name == "$~" {
 		return true
 	}
-	md, haveMatch := vm.lastMatch.(*MatchData)
+	md, haveMatch := object.KindOK[*MatchData](vm.lastMatch)
 	switch name {
 	case "$&", "$`", "$'", "$+":
 		return haveMatch

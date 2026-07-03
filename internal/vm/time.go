@@ -43,7 +43,7 @@ func (t *Time) Truthy() bool    { return true }
 
 // timeArg asserts an argument is a Time, raising TypeError otherwise.
 func timeArg(v object.Value) *Time {
-	t, ok := v.(*Time)
+	t, ok := object.KindOK[*Time](v)
 	if !ok {
 		raise("TypeError", "value must be a Time")
 	}
@@ -54,11 +54,18 @@ func timeArg(v object.Value) *Time {
 // raising TypeError for anything else (mirroring the Integer/Float ↔ int64
 // marshalling the task calls for).
 func timeSeconds(v object.Value) int64 {
-	switch n := v.(type) {
-	case object.Integer:
-		return int64(n)
-	case object.Float:
-		return int64(n)
+	{
+		__sw175 := v
+		switch {
+		case object.IsInt(__sw175):
+			n := object.AsInteger(__sw175)
+			_ = n
+			return int64(n)
+		case object.IsFloat(__sw175):
+			n := object.AsFloatV(__sw175)
+			_ = n
+			return int64(n)
+		}
 	}
 	raise("TypeError", "no implicit conversion of %s into seconds", v.Inspect())
 	return 0
@@ -103,7 +110,7 @@ func (vm *VM) registerTime() {
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cTime.define(name, fn) }
-	self := func(v object.Value) *Time { return v.(*Time) }
+	self := func(v object.Value) *Time { return object.Kind[*Time](v) }
 
 	d("to_i", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(self(v).t.ToUnix())
@@ -205,7 +212,7 @@ func (vm *VM) registerTime() {
 	// Comparison: <=> via Before/After/Equal (nil for a non-Time, as in MRI),
 	// and the boolean operators / == built on it.
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		other, ok := args[0].(*Time)
+		other, ok := object.KindOK[*Time](args[0])
 		if !ok {
 			return object.NilV
 		}
@@ -224,7 +231,7 @@ func (vm *VM) registerTime() {
 		return object.Bool(!self(v).t.Before(timeArg(args[0]).t))
 	})
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		other, ok := args[0].(*Time)
+		other, ok := object.KindOK[*Time](args[0])
 		if !ok {
 			return object.False
 		}
@@ -242,7 +249,7 @@ func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
 	case bytecode.OpAdd:
 		return timeShift(a, timeSeconds(b))
 	case bytecode.OpSub:
-		if other, ok := b.(*Time); ok {
+		if other, ok := object.KindOK[*Time](b); ok {
 			return object.IntValue(a.t.Sub(other.t).ToSeconds())
 		}
 		return timeShift(a, -timeSeconds(b))
@@ -281,7 +288,7 @@ func timeCmp(a, b *Time) int64 {
 
 // timeEqual reports Time equality for valueEqual / the == operator fast path.
 func timeEqual(a *Time, other object.Value) bool {
-	b, ok := other.(*Time)
+	b, ok := object.KindOK[*Time](other)
 	return ok && a.t.Equal(b.t)
 }
 

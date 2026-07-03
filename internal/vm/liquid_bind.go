@@ -90,11 +90,18 @@ func liquidErrorMode(args []object.Value) liquid.ErrorMode {
 
 // liquidModeName renders an error_mode value (a Symbol or String) as its bare name.
 func liquidModeName(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw86 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw86):
+			n := object.Kind[object.Symbol](__sw86)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw86):
+			n := object.Kind[*object.String](__sw86)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
@@ -126,11 +133,18 @@ func liquidAssignsArg(vm *VM, args []object.Value) map[string]any {
 	if len(args) == 0 {
 		return map[string]any{}
 	}
-	switch a := args[0].(type) {
-	case object.Nil:
-		return map[string]any{}
-	case *object.Hash:
-		return liquidHashToMap(vm, a)
+	{
+		__sw87 := args[0]
+		switch {
+		case object.IsNilObj(__sw87):
+			a := object.NilObj()
+			_ = a
+			return map[string]any{}
+		case object.IsKind[*object.Hash](__sw87):
+			a := object.Kind[*object.Hash](__sw87)
+			_ = a
+			return liquidHashToMap(vm, a)
+		}
 	}
 	raise("Liquid::ArgumentError", "assigns must be a Hash")
 	return nil
@@ -150,11 +164,18 @@ func liquidHashToMap(vm *VM, h *object.Hash) map[string]any {
 
 // liquidKey renders a Hash key as its bare name for the assigns map.
 func liquidKey(k object.Value) string {
-	switch n := k.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw88 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw88):
+			n := object.Kind[object.Symbol](__sw88)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw88):
+			n := object.Kind[*object.String](__sw88)
+			_ = n
+			return n.Str()
+		}
 	}
 	return k.ToS()
 }
@@ -164,31 +185,54 @@ func liquidKey(k object.Value) string {
 // shape is handed the engine its #to_s text, so a Drop-less custom object still
 // renders as a string.
 func toLiquid(vm *VM, v object.Value) any {
-	switch n := v.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
-	case *object.Array:
-		out := make([]any, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = toLiquid(vm, el)
+	{
+		__sw89 := v
+		switch {
+		case __sw89 == nil:
+			n := __sw89
+			_ = n
+			return nil
+		case object.IsNilObj(__sw89):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsBool(__sw89):
+			n := object.AsBoolV(__sw89)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw89):
+			n := object.AsInteger(__sw89)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw89):
+			n := object.Kind[*object.Bignum](__sw89)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw89):
+			n := object.AsFloatV(__sw89)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw89):
+			n := object.Kind[*object.String](__sw89)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw89):
+			n := object.Kind[object.Symbol](__sw89)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.Array](__sw89):
+			n := object.Kind[*object.Array](__sw89)
+			_ = n
+			out := make([]any, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = toLiquid(vm, el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw89):
+			n := object.Kind[*object.Hash](__sw89)
+			_ = n
+			return liquidHashToMap(vm, n)
 		}
-		return out
-	case *object.Hash:
-		return liquidHashToMap(vm, n)
 	}
-	return vm.send(v, "to_s", nil, nil).(*object.String).Str()
+	return object.Kind[*object.String](vm.send(v, "to_s", nil, nil)).Str()
 }

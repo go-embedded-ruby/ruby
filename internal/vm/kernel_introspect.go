@@ -155,13 +155,13 @@ func (vm *VM) registerKernelIntrospection() {
 	vm.cObject.define("exit!", exitFn)
 	vm.cObject.define("abort", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) > 0 {
-			if s, ok := args[0].(*object.String); ok {
+			if s, ok := object.KindOK[*object.String](args[0]); ok {
 				fmt.Fprintln(vm.errOut, s.Str())
 			}
 		}
 		return raise("SystemExit", "exit")
 	})
-	if kernel, ok := vm.consts["Kernel"].(*RClass); ok {
+	if kernel, ok := object.KindOK[*RClass](vm.consts["Kernel"]); ok {
 		kernel.smethods["exit"] = &Method{name: "exit", owner: kernel, native: exitFn}
 		kernel.smethods["exit!"] = &Method{name: "exit!", owner: kernel, native: exitFn}
 	}

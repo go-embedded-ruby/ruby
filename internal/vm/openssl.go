@@ -72,7 +72,7 @@ func (vm *VM) registerOpenSSL() {
 
 	// OpenSSL::OpenSSLError < StandardError is the root of the OpenSSL error tree;
 	// the per-namespace error classes below descend from it, matching MRI.
-	errRoot := newClass("OpenSSL::OpenSSLError", vm.consts["StandardError"].(*RClass))
+	errRoot := newClass("OpenSSL::OpenSSLError", object.Kind[*RClass](vm.consts["StandardError"]))
 	mod.consts["OpenSSLError"] = errRoot
 
 	// Version-identification constants. rbgo's OpenSSL surface is a pure-Go shim,
@@ -161,7 +161,7 @@ func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 	dig.define("update", opensslDigestUpdate)
 	dig.define("<<", opensslDigestUpdate)
 	dig.define("reset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		self.(*opensslDigest).h.Reset()
+		object.Kind[*opensslDigest](self).h.Reset()
 		return self
 	})
 	dig.define("digest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -174,10 +174,10 @@ func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 		return object.NewString(base64.StdEncoding.EncodeToString(opensslDigestSum(self, args)))
 	})
 	dig.define("digest_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*opensslDigest).h.Size()))
+		return object.IntValue(int64(object.Kind[*opensslDigest](self).h.Size()))
 	})
 	dig.define("block_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*opensslDigest).h.BlockSize()))
+		return object.IntValue(int64(object.Kind[*opensslDigest](self).h.BlockSize()))
 	})
 
 	vm.cOpenSSLDigest = dig
@@ -187,7 +187,7 @@ func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 // an optional data argument it first resets and feeds that data — matching MRI,
 // where d.digest(s) == d.reset.update(s).digest and leaves d holding only s.
 func opensslDigestSum(self object.Value, args []object.Value) []byte {
-	d := self.(*opensslDigest)
+	d := object.Kind[*opensslDigest](self)
 	if len(args) > 0 {
 		d.h.Reset()
 		d.h.Write([]byte(base64Arg(args[0])))
@@ -198,7 +198,7 @@ func opensslDigestSum(self object.Value, args []object.Value) []byte {
 // opensslDigestUpdate appends data to a running OpenSSL::Digest and returns self
 // (so `d << a << b` chains), shared by #update and #<<.
 func opensslDigestUpdate(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-	self.(*opensslDigest).h.Write([]byte(base64Arg(args[0])))
+	object.Kind[*opensslDigest](self).h.Write([]byte(base64Arg(args[0])))
 	return self
 }
 
@@ -255,16 +255,22 @@ func (vm *VM) registerOpenSSLHMAC(mod, errRoot *RClass) {
 // OpenSSL::Digest instance) to a hash constructor, raising RuntimeError for an
 // unknown algorithm.
 func hmacConstructor(sel object.Value) func() hash.Hash {
-	switch d := sel.(type) {
-	case *opensslDigest:
-		// Reuse the instance's exact algorithm by mirroring its digest size/name.
-		return func() hash.Hash { h := digestCloneCtor(d); return h }
-	default:
-		name := base64Arg(sel)
-		if digestNewByName(name) == nil {
-			raise("RuntimeError", "Unsupported digest algorithm (%s).", name)
+	{
+		__sw114 := sel
+		switch {
+		case object.IsKind[*opensslDigest](__sw114):
+			d := object.Kind[*opensslDigest](__sw114)
+			_ = d
+			return func() hash.Hash { h := digestCloneCtor(d); return h }
+		default:
+			d := __sw114
+			_ = d
+			name := base64Arg(sel)
+			if digestNewByName(name) == nil {
+				raise("RuntimeError", "Unsupported digest algorithm (%s).", name)
+			}
+			return func() hash.Hash { return digestNewByName(name) }
 		}
-		return func() hash.Hash { return digestNewByName(name) }
 	}
 }
 

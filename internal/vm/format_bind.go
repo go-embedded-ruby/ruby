@@ -33,23 +33,26 @@ type formatValue struct{ v object.Value }
 // Kind reports which family of conversions the value natively satisfies,
 // mapping the rbgo dynamic type to the library's Kind enumeration.
 func (fv formatValue) Kind() format.Kind {
-	switch fv.v.(type) {
-	case object.Integer, *object.Bignum:
-		return format.KindInteger
-	case object.Float:
-		return format.KindFloat
-	case *object.String:
-		return format.KindString
-	case object.Symbol:
-		return format.KindSymbol
-	case *object.Array:
-		return format.KindArray
-	case *object.Hash:
-		return format.KindHash
-	case object.Nil:
-		return format.KindNil
-	default:
-		return format.KindOther
+	{
+		__sw58 := fv.v
+		switch {
+		case object.IsInt(__sw58) || object.IsKind[*object.Bignum](__sw58):
+			return format.KindInteger
+		case object.IsFloat(__sw58):
+			return format.KindFloat
+		case object.IsKind[*object.String](__sw58):
+			return format.KindString
+		case object.IsKind[object.Symbol](__sw58):
+			return format.KindSymbol
+		case object.IsKind[*object.Array](__sw58):
+			return format.KindArray
+		case object.IsKind[*object.Hash](__sw58):
+			return format.KindHash
+		case object.IsNilObj(__sw58):
+			return format.KindNil
+		default:
+			return format.KindOther
+		}
 	}
 }
 
@@ -59,16 +62,25 @@ func (fv formatValue) Kind() format.Kind {
 // only when it fits; every other value (Float, String, etc.) reports ok=false so
 // the formatter uses the precise Int() path with its coercion and error rules.
 func (fv formatValue) Int64Fast() (int64, bool) {
-	switch x := fv.v.(type) {
-	case object.Integer:
-		return int64(x), true
-	case *object.Bignum:
-		if x.I.IsInt64() {
-			return x.I.Int64(), true
+	{
+		__sw59 := fv.v
+		switch {
+		case object.IsInt(__sw59):
+			x := object.AsInteger(__sw59)
+			_ = x
+			return int64(x), true
+		case object.IsKind[*object.Bignum](__sw59):
+			x := object.Kind[*object.Bignum](__sw59)
+			_ = x
+			if x.I.IsInt64() {
+				return x.I.Int64(), true
+			}
+			return 0, false
+		default:
+			x := __sw59
+			_ = x
+			return 0, false
 		}
-		return 0, false
-	default:
-		return 0, false
 	}
 }
 
@@ -89,19 +101,32 @@ func (fv formatValue) ClassName() string { return classNameOf(fv.v) }
 // err marks a String that is not a valid Integer() literal (ArgumentError). A
 // Float truncates toward zero, matching MRI's "%d" % 3.9.
 func (fv formatValue) Int() (*big.Int, error, bool) {
-	switch x := fv.v.(type) {
-	case object.Integer:
-		return big.NewInt(int64(x)), nil, true
-	case *object.Bignum:
-		return new(big.Int).Set(x.I), nil, true
-	case object.Float:
-		z, _ := big.NewFloat(float64(x)).Int(nil)
-		return z, nil, true
-	case *object.String:
-		z, err := parseFormatInteger(x.Str(), x.Inspect())
-		return z, err, true
-	default:
-		return nil, nil, false
+	{
+		__sw60 := fv.v
+		switch {
+		case object.IsInt(__sw60):
+			x := object.AsInteger(__sw60)
+			_ = x
+			return big.NewInt(int64(x)), nil, true
+		case object.IsKind[*object.Bignum](__sw60):
+			x := object.Kind[*object.Bignum](__sw60)
+			_ = x
+			return new(big.Int).Set(x.I), nil, true
+		case object.IsFloat(__sw60):
+			x := object.AsFloatV(__sw60)
+			_ = x
+			z, _ := big.NewFloat(float64(x)).Int(nil)
+			return z, nil, true
+		case object.IsKind[*object.String](__sw60):
+			x := object.Kind[*object.String](__sw60)
+			_ = x
+			z, err := parseFormatInteger(x.Str(), x.Inspect())
+			return z, err, true
+		default:
+			x := __sw60
+			_ = x
+			return nil, nil, false
+		}
 	}
 }
 
@@ -110,19 +135,32 @@ func (fv formatValue) Int() (*big.Int, error, bool) {
 // non-numeric String reports a non-nil error so the library raises
 // ArgumentError.
 func (fv formatValue) Float() (float64, error, bool) {
-	switch x := fv.v.(type) {
-	case object.Integer:
-		return float64(x), nil, true
-	case *object.Bignum:
-		f, _ := new(big.Float).SetInt(x.I).Float64()
-		return f, nil, true
-	case object.Float:
-		return float64(x), nil, true
-	case *object.String:
-		f, err := parseFormatFloat(x.Str(), x.Inspect())
-		return f, err, true
-	default:
-		return 0, nil, false
+	{
+		__sw61 := fv.v
+		switch {
+		case object.IsInt(__sw61):
+			x := object.AsInteger(__sw61)
+			_ = x
+			return float64(x), nil, true
+		case object.IsKind[*object.Bignum](__sw61):
+			x := object.Kind[*object.Bignum](__sw61)
+			_ = x
+			f, _ := new(big.Float).SetInt(x.I).Float64()
+			return f, nil, true
+		case object.IsFloat(__sw61):
+			x := object.AsFloatV(__sw61)
+			_ = x
+			return float64(x), nil, true
+		case object.IsKind[*object.String](__sw61):
+			x := object.Kind[*object.String](__sw61)
+			_ = x
+			f, err := parseFormatFloat(x.Str(), x.Inspect())
+			return f, err, true
+		default:
+			x := __sw61
+			_ = x
+			return 0, nil, false
+		}
 	}
 }
 
@@ -170,13 +208,13 @@ func formatNamedArgs(args []object.Value) *format.NamedArgs {
 	if len(args) != 1 {
 		return nil
 	}
-	h, ok := args[0].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](args[0])
 	if !ok {
 		return nil
 	}
 	m := make(map[string]format.Value, h.Len())
 	for _, k := range h.Keys {
-		sym, isSym := k.(object.Symbol)
+		sym, isSym := object.KindOK[object.Symbol](k)
 		if !isSym {
 			continue
 		}
@@ -225,7 +263,7 @@ func raiseFormatError(err error) {
 // positional operand and exposes as the %<name>/%{name} hash (MRI's behaviour
 // where "%<a>d %s" % {a: 1} formats the hash for both forms).
 func formatArgs(b object.Value) []object.Value {
-	if arr, ok := b.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](b); ok {
 		return arr.Elems
 	}
 	return []object.Value{b}

@@ -30,44 +30,71 @@ import (
 // object as an *rspec.Object carrying its class name, ancestry and method names
 // so be_a / respond_to / equality reflect faithfully.
 func rspecFromRuby(vm *VM, v object.Value) any {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return new(big.Int).Set(n.I)
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return rspec.Symbol(string(n))
-	case *object.Array:
-		out := make([]any, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = rspecFromRuby(vm, el)
+	{
+		__sw145 := v
+		switch {
+		case __sw145 == nil || object.IsNilObj(__sw145):
+			n := __sw145
+			_ = n
+			return nil
+		case object.IsBool(__sw145):
+			n := object.AsBoolV(__sw145)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw145):
+			n := object.AsInteger(__sw145)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw145):
+			n := object.Kind[*object.Bignum](__sw145)
+			_ = n
+			return new(big.Int).Set(n.I)
+		case object.IsFloat(__sw145):
+			n := object.AsFloatV(__sw145)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw145):
+			n := object.Kind[*object.String](__sw145)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw145):
+			n := object.Kind[object.Symbol](__sw145)
+			_ = n
+			return rspec.Symbol(string(n))
+		case object.IsKind[*object.Array](__sw145):
+			n := object.Kind[*object.Array](__sw145)
+			_ = n
+			out := make([]any, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = rspecFromRuby(vm, el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw145):
+			n := object.Kind[*object.Hash](__sw145)
+			_ = n
+			h := rspec.NewHash()
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				h.Set(rspecFromRuby(vm, k), rspecFromRuby(vm, val))
+			}
+			return h
+		case object.IsKind[*object.Range](__sw145):
+			n := object.Kind[*object.Range](__sw145)
+			_ = n
+			return &rspec.Range{
+				Begin:     rspecFromRuby(vm, n.Lo),
+				End:       rspecFromRuby(vm, n.Hi),
+				Exclusive: n.Exclusive,
+			}
+		case object.IsKind[*Regexp](__sw145):
+			n := object.Kind[*Regexp](__sw145)
+			_ = n
+			return &rspec.Regexp{Source: n.source, Flags: orderFlags(n.flags)}
+		case object.IsKind[*RClass](__sw145):
+			n := object.Kind[*RClass](__sw145)
+			_ = n
+			return rspec.Class(n.ToS())
 		}
-		return out
-	case *object.Hash:
-		h := rspec.NewHash()
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			h.Set(rspecFromRuby(vm, k), rspecFromRuby(vm, val))
-		}
-		return h
-	case *object.Range:
-		return &rspec.Range{
-			Begin:     rspecFromRuby(vm, n.Lo),
-			End:       rspecFromRuby(vm, n.Hi),
-			Exclusive: n.Exclusive,
-		}
-	case *Regexp:
-		return &rspec.Regexp{Source: n.source, Flags: orderFlags(n.flags)}
-	case *RClass:
-		return rspec.Class(n.ToS())
 	}
 	return rspecObject(vm, v)
 }
@@ -84,7 +111,7 @@ func rspecObject(vm *VM, v object.Value) *rspec.Object {
 		IVars:      map[string]any{},
 		RespondsTo: rspecMethodNames(vm, v),
 	}
-	if ro, ok := v.(*RObject); ok {
+	if ro, ok := object.KindOK[*RObject](v); ok {
 		for name, val := range ro.ivars {
 			obj.IVars[name] = rspecFromRuby(vm, val)
 			obj.Order = append(obj.Order, name)
@@ -138,7 +165,7 @@ func rspecArgs(vm *VM, args []object.Value) []any {
 // rspecArrayArg converts a single Array argument to []any (match_array([…])).
 func rspecArrayArg(vm *VM, args []object.Value) []any {
 	if len(args) == 1 {
-		if arr, ok := args[0].(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](args[0]); ok {
 			return rspecArgs(vm, arr.Elems)
 		}
 	}
@@ -151,13 +178,22 @@ func rspecClassName(args []object.Value) string {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	switch n := args[0].(type) {
-	case *RClass:
-		return n.ToS()
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw146 := args[0]
+		switch {
+		case object.IsKind[*RClass](__sw146):
+			n := object.Kind[*RClass](__sw146)
+			_ = n
+			return n.ToS()
+		case object.IsKind[*object.String](__sw146):
+			n := object.Kind[*object.String](__sw146)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw146):
+			n := object.Kind[object.Symbol](__sw146)
+			_ = n
+			return string(n)
+		}
 	}
 	return args[0].ToS()
 }
@@ -166,13 +202,22 @@ func rspecClassName(args []object.Value) string {
 func rspecSymbols(args []object.Value) []rspec.Symbol {
 	out := make([]rspec.Symbol, 0, len(args))
 	for _, a := range args {
-		switch n := a.(type) {
-		case object.Symbol:
-			out = append(out, rspec.Symbol(string(n)))
-		case *object.String:
-			out = append(out, rspec.Symbol(n.Str()))
-		default:
-			out = append(out, rspec.Symbol(a.ToS()))
+		{
+			__sw147 := a
+			switch {
+			case object.IsKind[object.Symbol](__sw147):
+				n := object.Kind[object.Symbol](__sw147)
+				_ = n
+				out = append(out, rspec.Symbol(string(n)))
+			case object.IsKind[*object.String](__sw147):
+				n := object.Kind[*object.String](__sw147)
+				_ = n
+				out = append(out, rspec.Symbol(n.Str()))
+			default:
+				n := __sw147
+				_ = n
+				out = append(out, rspec.Symbol(a.ToS()))
+			}
 		}
 	}
 	return out
@@ -183,14 +228,23 @@ func rspecFloatArg(args []object.Value) float64 {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	switch n := args[0].(type) {
-	case object.Integer:
-		return float64(n)
-	case object.Float:
-		return float64(n)
-	case *object.Bignum:
-		f, _ := new(big.Float).SetInt(n.I).Float64()
-		return f
+	{
+		__sw148 := args[0]
+		switch {
+		case object.IsInt(__sw148):
+			n := object.AsInteger(__sw148)
+			_ = n
+			return float64(n)
+		case object.IsFloat(__sw148):
+			n := object.AsFloatV(__sw148)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.Bignum](__sw148):
+			n := object.Kind[*object.Bignum](__sw148)
+			_ = n
+			f, _ := new(big.Float).SetInt(n.I).Float64()
+			return f
+		}
 	}
 	raise("TypeError", "no implicit conversion to Float")
 	return 0
@@ -201,11 +255,18 @@ func rspecIntArg(args []object.Value) int64 {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	switch n := args[0].(type) {
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I.Int64()
+	{
+		__sw149 := args[0]
+		switch {
+		case object.IsInt(__sw149):
+			n := object.AsInteger(__sw149)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw149):
+			n := object.Kind[*object.Bignum](__sw149)
+			_ = n
+			return n.I.Int64()
+		}
 	}
 	raise("TypeError", "no implicit conversion to Integer")
 	return 0
@@ -224,7 +285,7 @@ func rspecMatcherWrap(args []object.Value) *RSpecMatcher {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	m, ok := args[0].(*RSpecMatcher)
+	m, ok := object.KindOK[*RSpecMatcher](args[0])
 	if !ok {
 		raise("ArgumentError", "expected a matcher, got %s", args[0].Inspect())
 	}
@@ -238,13 +299,22 @@ func rspecMatcherWrap(args []object.Value) *RSpecMatcher {
 func rspecRaiseSpecOf(args []object.Value) *rspecRaiseSpec {
 	spec := &rspecRaiseSpec{}
 	for _, a := range args {
-		switch n := a.(type) {
-		case *RClass:
-			spec.class = n.ToS()
-		case *object.String:
-			spec.message = n.Str()
-		case *Regexp:
-			spec.message = &rspec.Regexp{Source: n.source, Flags: orderFlags(n.flags)}
+		{
+			__sw150 := a
+			switch {
+			case object.IsKind[*RClass](__sw150):
+				n := object.Kind[*RClass](__sw150)
+				_ = n
+				spec.class = n.ToS()
+			case object.IsKind[*object.String](__sw150):
+				n := object.Kind[*object.String](__sw150)
+				_ = n
+				spec.message = n.Str()
+			case object.IsKind[*Regexp](__sw150):
+				n := object.Kind[*Regexp](__sw150)
+				_ = n
+				spec.message = &rspec.Regexp{Source: n.source, Flags: orderFlags(n.flags)}
+			}
 		}
 	}
 	return spec

@@ -208,7 +208,7 @@ func (vm *VM) registerREXML() {
 // it) and under its qualified top-level name (so a re-raised library error's
 // class lookup finds the same class), exactly as CSV::MalformedCSVError is.
 func (vm *VM) registerREXMLError(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	pe := newClass("REXML::ParseException", std)
 	mod.consts["ParseException"] = pe
 	vm.consts["REXML::ParseException"] = pe
@@ -232,30 +232,41 @@ func (vm *VM) registerREXMLDocument(mod *RClass) {
 			if len(args) == 0 {
 				return &REXMLDocument{d: rx.NewDocument()}
 			}
-			switch src := args[0].(type) {
-			case object.Nil:
-				return &REXMLDocument{d: rx.NewDocument()}
-			case *object.String:
-				d, err := rx.ParseDocument(src.Str())
-				raiseREXMLParse(err)
-				return &REXMLDocument{d: d}
-			case *REXMLDocument:
-				d := rx.NewDocument()
-				if r := src.d.Root(); r != nil {
-					d.Add(r)
+			{
+				__sw139 := args[0]
+				switch {
+				case object.IsNilObj(__sw139):
+					src := object.NilObj()
+					_ = src
+					return &REXMLDocument{d: rx.NewDocument()}
+				case object.IsKind[*object.String](__sw139):
+					src := object.Kind[*object.String](__sw139)
+					_ = src
+					d, err := rx.ParseDocument(src.Str())
+					raiseREXMLParse(err)
+					return &REXMLDocument{d: d}
+				case object.IsKind[*REXMLDocument](__sw139):
+					src := object.Kind[*REXMLDocument](__sw139)
+					_ = src
+					d := rx.NewDocument()
+					if r := src.d.Root(); r != nil {
+						d.Add(r)
+					}
+					return &REXMLDocument{d: d}
+				case object.IsKind[*REXMLElement](__sw139):
+					src := object.Kind[*REXMLElement](__sw139)
+					_ = src
+					d := rx.NewDocument()
+					d.Add(src.e)
+					return &REXMLDocument{d: d}
 				}
-				return &REXMLDocument{d: d}
-			case *REXMLElement:
-				d := rx.NewDocument()
-				d.Add(src.e)
-				return &REXMLDocument{d: d}
 			}
 			raise("TypeError", "wrong argument type %s (expected String)", args[0].Inspect())
 			return object.NilV
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	doc := func(v object.Value) *rx.Document { return v.(*REXMLDocument).d }
+	doc := func(v object.Value) *rx.Document { return object.Kind[*REXMLDocument](v).d }
 
 	d("root", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		r := doc(v).Root()
@@ -314,13 +325,13 @@ func rexmlWriteString(d *rx.Document, args []object.Value) string {
 // else the first when it is the only argument and an Integer (write(indent)).
 func rexmlIndentArg(args []object.Value) (int, bool) {
 	if len(args) >= 2 {
-		if n, ok := args[1].(object.Integer); ok {
+		if n, ok := object.AsIntegerOK(args[1]); ok {
 			return int(n), true
 		}
 		return 0, false
 	}
 	if len(args) == 1 {
-		if n, ok := args[0].(object.Integer); ok {
+		if n, ok := object.AsIntegerOK(args[0]); ok {
 			return int(n), true
 		}
 	}
@@ -334,9 +345,12 @@ func rexmlIOArg(args []object.Value) object.Value {
 	if len(args) == 0 {
 		return object.NilVal()
 	}
-	switch args[0].(type) {
-	case object.Integer, object.Nil:
-		return object.NilVal()
+	{
+		__sw140 := args[0]
+		switch {
+		case object.IsInt(__sw140) || object.IsNilObj(__sw140):
+			return object.NilVal()
+		}
 	}
 	return args[0]
 }
@@ -361,7 +375,7 @@ func (vm *VM) registerREXMLElement(mod *RClass) {
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	elem := func(v object.Value) *rx.Element { return v.(*REXMLElement).e }
+	elem := func(v object.Value) *rx.Element { return object.Kind[*REXMLElement](v).e }
 
 	d("name", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(elem(v).Name)
@@ -384,7 +398,7 @@ func (vm *VM) registerREXMLElement(mod *RClass) {
 	// Element#[Integer]); a name/Symbol reads the attribute of that name.
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		e := elem(v)
-		if n, ok := args[0].(object.Integer); ok {
+		if n, ok := object.AsIntegerOK(args[0]); ok {
 			// Element#[Integer] is 0-based; the library's ElementAt is 1-based.
 			ch := e.ElementAt(int(n) + 1)
 			if ch == nil {
@@ -448,13 +462,13 @@ func (vm *VM) registerREXMLElements(mod *RClass) {
 	vm.cREXMLElements = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	owner := func(v object.Value) *rx.Element { return v.(*REXMLElements).e }
+	owner := func(v object.Value) *rx.Element { return object.Kind[*REXMLElements](v).e }
 
 	// [](path|index): an XPath path returns its first match; an Integer index
 	// (1-based, MRI's Elements#[]) returns the n-th child element; nil when none.
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		e := owner(v)
-		if n, ok := args[0].(object.Integer); ok {
+		if n, ok := object.AsIntegerOK(args[0]); ok {
 			// Elements#[Integer] is 1-based, matching the library's ElementAt.
 			ch := e.ElementAt(int(n))
 			if ch == nil {
@@ -497,11 +511,18 @@ func (vm *VM) registerREXMLElements(mod *RClass) {
 
 // rexmlNameArg coerces an attribute-name argument (String or Symbol) to its text.
 func rexmlNameArg(v object.Value) string {
-	switch x := v.(type) {
-	case *object.String:
-		return x.Str()
-	case object.Symbol:
-		return string(x)
+	{
+		__sw141 := v
+		switch {
+		case object.IsKind[*object.String](__sw141):
+			x := object.Kind[*object.String](__sw141)
+			_ = x
+			return x.Str()
+		case object.IsKind[object.Symbol](__sw141):
+			x := object.Kind[object.Symbol](__sw141)
+			_ = x
+			return string(x)
+		}
 	}
 	return ""
 }
@@ -515,7 +536,7 @@ func (vm *VM) registerREXMLAttributes(mod *RClass) {
 	vm.cREXMLAttributes = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	attrs := func(v object.Value) *rx.Attributes { return v.(*REXMLAttributes).a }
+	attrs := func(v object.Value) *rx.Attributes { return object.Kind[*REXMLAttributes](v).a }
 
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if val, ok := attrs(v).Get(rexmlNameArg(args[0])); ok {
@@ -567,10 +588,10 @@ func (vm *VM) registerREXMLLeafNodes(mod *RClass) {
 			return &REXMLText{t: rx.NewText(strArg(args[0]))}
 		}}
 	text.define("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*REXMLText).t.String())
+		return object.NewString(object.Kind[*REXMLText](v).t.String())
 	})
 	textValue := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*REXMLText).t.Val())
+		return object.NewString(object.Kind[*REXMLText](v).t.Val())
 	}
 	text.define("value", textValue)
 	text.define("to_string", textValue)
@@ -585,7 +606,7 @@ func (vm *VM) registerREXMLLeafNodes(mod *RClass) {
 			return &REXMLComment{c: &rx.Comment{Value: strArg(args[0])}}
 		}}
 	commentVal := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*REXMLComment).c.Value)
+		return object.NewString(object.Kind[*REXMLComment](v).c.Value)
 	}
 	comment.define("to_s", commentVal)
 	comment.define("string", commentVal)
@@ -600,7 +621,7 @@ func (vm *VM) registerREXMLLeafNodes(mod *RClass) {
 			return &REXMLCData{c: &rx.CData{Value: strArg(args[0])}}
 		}}
 	cdataVal := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*REXMLCData).c.Value)
+		return object.NewString(object.Kind[*REXMLCData](v).c.Value)
 	}
 	cdata.define("to_s", cdataVal)
 	cdata.define("value", cdataVal)
@@ -620,13 +641,13 @@ func (vm *VM) registerREXMLLeafNodes(mod *RClass) {
 			return &REXMLInstruction{i: &rx.Instruction{Target: target, Content: content}}
 		}}
 	instr.define("target", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*REXMLInstruction).i.Target)
+		return object.NewString(object.Kind[*REXMLInstruction](v).i.Target)
 	})
 	instr.define("content", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*REXMLInstruction).i.Content)
+		return object.NewString(object.Kind[*REXMLInstruction](v).i.Content)
 	})
 	instr.define("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*REXMLInstruction).ToS())
+		return object.NewString(object.Kind[*REXMLInstruction](v).ToS())
 	})
 
 	// REXML::DocType
@@ -635,7 +656,7 @@ func (vm *VM) registerREXMLLeafNodes(mod *RClass) {
 	vm.consts["REXML::DocType"] = doctype
 	vm.cREXMLDocType = doctype
 	doctype.define("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*REXMLDocType).ToS())
+		return object.NewString(object.Kind[*REXMLDocType](v).ToS())
 	})
 }
 
@@ -660,7 +681,7 @@ func (vm *VM) registerREXMLFormatters(mod *RClass) {
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			indent := 2
 			if len(args) > 0 {
-				if n, ok := args[0].(object.Integer); ok {
+				if n, ok := object.AsIntegerOK(args[0]); ok {
 					indent = int(n)
 				}
 			}
@@ -675,8 +696,8 @@ func (vm *VM) registerREXMLFormatters(mod *RClass) {
 	// ArgumentError, matching MRI's Formatters::Pretty#write.
 	pretty.define("write", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// @indentation is always the Integer the constructor stored.
-		indent := int(self.(*RObject).ivars["@indentation"].(object.Integer))
-		dv, ok := args[0].(*REXMLDocument)
+		indent := int(object.AsInteger(object.Kind[*RObject](self).ivars["@indentation"]))
+		dv, ok := object.KindOK[*REXMLDocument](args[0])
 		if !ok {
 			raise("ArgumentError", "Formatters::Pretty#write expects a REXML::Document")
 		}
@@ -736,7 +757,7 @@ func (vm *VM) registerREXMLXPath(mod *RClass) {
 // rexmlCtx extracts the library node a Ruby REXML::* wrapper holds, to serve as
 // an XPath context. A non-node raises TypeError.
 func rexmlCtx(v object.Value) rx.Node {
-	if n, ok := v.(REXMLNode); ok {
+	if n, ok := object.CastAnyOK[REXMLNode](v); ok {
 		return n.node()
 	}
 	raise("TypeError", "XPath context must be a REXML node")

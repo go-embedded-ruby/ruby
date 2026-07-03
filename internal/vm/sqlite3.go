@@ -64,7 +64,7 @@ func (vm *VM) registerSQLite3() {
 // name in the top-level table (so a raised library error's class-name lookup
 // finds the same class), exactly as the JSON:: / MessagePack:: classes are.
 func (vm *VM) registerSQLite3Errors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(qualified string, super *RClass) *RClass {
 		simple := qualified[len("SQLite3::"):]
 		c := newClass(qualified, super)
@@ -112,7 +112,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 	cls.smethods["open"] = &Method{name: "open", owner: cls, native: open}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *sqlite3.Database { return v.(*SQLite3Database).db }
+	self := func(v object.Value) *sqlite3.Database { return object.Kind[*SQLite3Database](v).db }
 
 	// #execute(sql, binds = []) runs sql and returns its rows. Positional binds
 	// come from a trailing Array or the remaining arguments. With results_as_hash
@@ -141,7 +141,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return &SQLite3Statement{st: st, db: v.(*SQLite3Database)}
+		return &SQLite3Statement{st: st, db: object.Kind[*SQLite3Database](v)}
 	})
 
 	// #prepare(sql) compiles sql into a SQLite3::Statement without running it.
@@ -154,7 +154,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return &SQLite3Statement{st: st, db: v.(*SQLite3Database)}
+		return &SQLite3Statement{st: st, db: object.Kind[*SQLite3Database](v)}
 	})
 
 	// #get_first_row(sql, binds = []) returns the first result row, or nil.
@@ -296,8 +296,8 @@ func (vm *VM) registerSQLite3Statement(mod *RClass) {
 	vm.consts["SQLite3::Statement"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *sqlite3.Statement { return v.(*SQLite3Statement).st }
-	wrap := func(v object.Value) *SQLite3Statement { return v.(*SQLite3Statement) }
+	self := func(v object.Value) *sqlite3.Statement { return object.Kind[*SQLite3Statement](v).st }
+	wrap := func(v object.Value) *SQLite3Statement { return object.Kind[*SQLite3Statement](v) }
 
 	// #bind_param(key, value) binds a positional (Integer key) or named (String /
 	// Symbol key) parameter (SQLite3::Statement#bind_param).

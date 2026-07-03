@@ -88,32 +88,53 @@ func (e *sqliteExecutor) Execute(sql string) ([]map[string]sequel.Value, error) 
 // Symbol becomes a column Identifier, an Array becomes an IN-list, a Hash becomes
 // an ordered AND-of-equalities condition (the where(a: 1, b: 2) form).
 func sequelValue(v object.Value) sequel.Value {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		if n.IsBinary() {
-			return sequel.Blob(n.Bytes())
+	{
+		__sw153 := v
+		switch {
+		case __sw153 == nil || object.IsNilObj(__sw153):
+			n := __sw153
+			_ = n
+			return nil
+		case object.IsBool(__sw153):
+			n := object.AsBoolV(__sw153)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw153):
+			n := object.AsInteger(__sw153)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw153):
+			n := object.Kind[*object.Bignum](__sw153)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw153):
+			n := object.AsFloatV(__sw153)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw153):
+			n := object.Kind[*object.String](__sw153)
+			_ = n
+			if n.IsBinary() {
+				return sequel.Blob(n.Bytes())
+			}
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw153):
+			n := object.Kind[object.Symbol](__sw153)
+			_ = n
+			return sequel.Ident(string(n))
+		case object.IsKind[*object.Array](__sw153):
+			n := object.Kind[*object.Array](__sw153)
+			_ = n
+			vals := make([]sequel.Value, len(n.Elems))
+			for i, e := range n.Elems {
+				vals[i] = sequelValue(e)
+			}
+			return vals
+		case object.IsKind[*object.Hash](__sw153):
+			n := object.Kind[*object.Hash](__sw153)
+			_ = n
+			return sequelHashCond(n)
 		}
-		return n.Str()
-	case object.Symbol:
-		return sequel.Ident(string(n))
-	case *object.Array:
-		vals := make([]sequel.Value, len(n.Elems))
-		for i, e := range n.Elems {
-			vals[i] = sequelValue(e)
-		}
-		return vals
-	case *object.Hash:
-		return sequelHashCond(n)
 	}
 	return v.ToS()
 }
@@ -133,11 +154,18 @@ func sequelHashCond(h *object.Hash) sequel.Expr {
 // sequelColumn maps a Ruby value used as a column reference: a Symbol or String
 // becomes an Identifier, anything else its literal value.
 func sequelColumn(v object.Value) sequel.Value {
-	switch n := v.(type) {
-	case object.Symbol:
-		return sequel.Ident(string(n))
-	case *object.String:
-		return sequel.Ident(n.Str())
+	{
+		__sw154 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw154):
+			n := object.Kind[object.Symbol](__sw154)
+			_ = n
+			return sequel.Ident(string(n))
+		case object.IsKind[*object.String](__sw154):
+			n := object.Kind[*object.String](__sw154)
+			_ = n
+			return sequel.Ident(n.Str())
+		}
 	}
 	return sequelValue(v)
 }

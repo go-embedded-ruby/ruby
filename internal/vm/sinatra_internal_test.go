@@ -488,12 +488,12 @@ func TestSinatraParamsHashDirect(t *testing.T) {
 	if captured == nil {
 		t.Fatal("action not invoked")
 	}
-	if v, ok := captured.Get(object.NewString("n")); !ok || v.(*object.String).Str() != "1" {
+	if v, ok := captured.Get(object.NewString("n")); !ok || object.Kind[*object.String](v).Str() != "1" {
 		t.Errorf("scalar param missing: %#v", v)
 	}
 	if v, ok := captured.Get(object.NewString("splat")); !ok {
 		t.Errorf("splat param missing")
-	} else if _, isArr := v.(*object.Array); !isArr {
+	} else if _, isArr := object.KindOK[*object.Array](v); !isArr {
 		t.Errorf("splat should be an Array, got %#v", v)
 	}
 }

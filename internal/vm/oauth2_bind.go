@@ -31,13 +31,13 @@ func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 			if len(args) < 2 {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 2..)", len(args))
 			}
-			client, ok := args[0].(*OAuth2Client)
+			client, ok := object.KindOK[*OAuth2Client](args[0])
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into OAuth2::Client", args[0].Inspect())
 			}
 			tok := oauth2.NewAccessToken(client.c, strArg(args[1]))
 			if len(args) > 2 {
-				if h, ok := args[2].(*object.Hash); ok {
+				if h, ok := object.KindOK[*object.Hash](args[2]); ok {
 					for _, k := range h.Keys {
 						v, _ := h.Get(k)
 						tok.Params.Set(oauth2Name(k), oauth2Str(v))
@@ -52,11 +52,11 @@ func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 			if len(args) < 2 {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 			}
-			client, ok := args[0].(*OAuth2Client)
+			client, ok := object.KindOK[*OAuth2Client](args[0])
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into OAuth2::Client", args[0].Inspect())
 			}
-			h, ok := args[1].(*object.Hash)
+			h, ok := object.KindOK[*object.Hash](args[1])
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Hash", args[1].Inspect())
 			}
@@ -73,49 +73,49 @@ func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	d("token", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*OAuth2AccessToken).t.Token)
+		return object.NewString(object.Kind[*OAuth2AccessToken](self).t.Token)
 	})
 	d("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*OAuth2AccessToken).t.Token)
+		return object.NewString(object.Kind[*OAuth2AccessToken](self).t.Token)
 	})
 	d("refresh_token", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if r := self.(*OAuth2AccessToken).t.RefreshToken; r != "" {
+		if r := object.Kind[*OAuth2AccessToken](self).t.RefreshToken; r != "" {
 			return object.NewString(r)
 		}
 		return object.NilV
 	})
 	d("expires?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*OAuth2AccessToken).t.Expires())
+		return object.Bool(object.Kind[*OAuth2AccessToken](self).t.Expires())
 	})
 	d("expired?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*OAuth2AccessToken).t.Expired())
+		return object.Bool(object.Kind[*OAuth2AccessToken](self).t.Expired())
 	})
 	d("expires_at", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if ea := self.(*OAuth2AccessToken).t.ExpiresAt; ea != 0 {
+		if ea := object.Kind[*OAuth2AccessToken](self).t.ExpiresAt; ea != 0 {
 			return object.IntValue(ea)
 		}
 		return object.NilV
 	})
 	d("token_type", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*OAuth2AccessToken).t.TokenType())
+		return object.NewString(object.Kind[*OAuth2AccessToken](self).t.TokenType())
 	})
 	d("scope", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*OAuth2AccessToken).t.Scope())
+		return object.NewString(object.Kind[*OAuth2AccessToken](self).t.Scope())
 	})
 	d("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		if v, ok := self.(*OAuth2AccessToken).t.Get(oauth2Name(args[0])); ok {
+		if v, ok := object.Kind[*OAuth2AccessToken](self).t.Get(oauth2Name(args[0])); ok {
 			return object.NewString(v)
 		}
 		return object.NilV
 	})
 	d("to_hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return oauth2MapToHash(self.(*OAuth2AccessToken).t.ToHash())
+		return oauth2MapToHash(object.Kind[*OAuth2AccessToken](self).t.ToHash())
 	})
 	d("refresh", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		req, err := self.(*OAuth2AccessToken).t.RefreshRequest(oauth2ExtraParams(args)...)
+		req, err := object.Kind[*OAuth2AccessToken](self).t.RefreshRequest(oauth2ExtraParams(args)...)
 		if err != nil {
 			raise("OAuth2::Error", "%s", err.Error())
 		}
@@ -139,7 +139,7 @@ func (vm *VM) registerOAuth2Value(mod *RClass) {
 			status := int(intArg(args[0]))
 			headers := oauth2.NewMap()
 			if len(args) > 1 {
-				if h, ok := args[1].(*object.Hash); ok {
+				if h, ok := object.KindOK[*object.Hash](args[1]); ok {
 					for _, k := range h.Keys {
 						v, _ := h.Get(k)
 						headers.Set(oauth2Name(k), oauth2Str(v))
@@ -154,10 +154,10 @@ func (vm *VM) registerOAuth2Value(mod *RClass) {
 		}}
 	rd := func(name string, fn NativeFn) { resp.define(name, fn) }
 	rd("content_type", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*OAuth2Response).r.ContentType())
+		return object.NewString(object.Kind[*OAuth2Response](self).r.ContentType())
 	})
 	rd("parsed", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return oauth2ParsedToHash(vm, self.(*OAuth2Response).r.Parsed())
+		return oauth2ParsedToHash(vm, object.Kind[*OAuth2Response](self).r.Parsed())
 	})
 
 	req := newClass("OAuth2::Request", vm.cObject)
@@ -165,19 +165,19 @@ func (vm *VM) registerOAuth2Value(mod *RClass) {
 	vm.consts["OAuth2::Request"] = req
 	qd := func(name string, fn NativeFn) { req.define(name, fn) }
 	qd("method", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*OAuth2Request).r.Method)
+		return object.NewString(object.Kind[*OAuth2Request](self).r.Method)
 	})
 	qd("url", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*OAuth2Request).r.FullURL())
+		return object.NewString(object.Kind[*OAuth2Request](self).r.FullURL())
 	})
 	qd("body", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*OAuth2Request).r.EncodedBody())
+		return object.NewString(object.Kind[*OAuth2Request](self).r.EncodedBody())
 	})
 	qd("params", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return oauth2MapToHash(self.(*OAuth2Request).r.Body)
+		return oauth2MapToHash(object.Kind[*OAuth2Request](self).r.Body)
 	})
 	qd("headers", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return oauth2MapToHash(self.(*OAuth2Request).r.Headers)
+		return oauth2MapToHash(object.Kind[*OAuth2Request](self).r.Headers)
 	})
 }
 
@@ -194,7 +194,7 @@ func oauth2Params(args []object.Value) oauth2.Params {
 func oauth2ExtraParams(args []object.Value) oauth2.Params {
 	var ps oauth2.Params
 	for _, a := range args {
-		if h, ok := a.(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](a); ok {
 			for _, k := range h.Keys {
 				v, _ := h.Get(k)
 				ps = append(ps, oauth2.Param{Key: oauth2Name(k), Val: oauth2Str(v)})
@@ -263,11 +263,18 @@ func oauth2AnyToRuby(v any) object.Value {
 
 // oauth2Name renders a key (Symbol or String) as its bare name.
 func oauth2Name(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw107 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw107):
+			n := object.Kind[object.Symbol](__sw107)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw107):
+			n := object.Kind[*object.String](__sw107)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
@@ -275,7 +282,7 @@ func oauth2Name(v object.Value) string {
 // oauth2Str renders a value as its request string: a String verbatim, anything
 // else its to_s.
 func oauth2Str(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

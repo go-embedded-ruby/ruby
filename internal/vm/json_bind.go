@@ -157,48 +157,69 @@ func (s objSource) EmitTo(e *json.Encoder) error { return emitValue(e, s.v) }
 
 // emitValue renders one rbgo value through the encoder.
 func emitValue(e *json.Encoder, v object.Value) error {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		e.Null()
-	case object.Bool:
-		e.Bool(bool(n))
-	case object.Integer:
-		e.Int(int64(n))
-	case *object.Bignum:
-		e.Big(n.I)
-	case object.Float:
-		return e.Float(float64(n))
-	case *object.String:
-		e.Str(n.Str())
-	case object.Symbol:
-		e.Str(string(n))
-	case *object.Array:
-		elems := n.Elems
-		return e.Array(len(elems), func() error {
-			for _, el := range elems {
-				e.Elem()
-				if err := emitValue(e, el); err != nil {
-					return err
+	{
+		__sw79 := v
+		switch {
+		case __sw79 == nil || object.IsNilObj(__sw79):
+			n := __sw79
+			_ = n
+			e.Null()
+		case object.IsBool(__sw79):
+			n := object.AsBoolV(__sw79)
+			_ = n
+			e.Bool(bool(n))
+		case object.IsInt(__sw79):
+			n := object.AsInteger(__sw79)
+			_ = n
+			e.Int(int64(n))
+		case object.IsKind[*object.Bignum](__sw79):
+			n := object.Kind[*object.Bignum](__sw79)
+			_ = n
+			e.Big(n.I)
+		case object.IsFloat(__sw79):
+			n := object.AsFloatV(__sw79)
+			_ = n
+			return e.Float(float64(n))
+		case object.IsKind[*object.String](__sw79):
+			n := object.Kind[*object.String](__sw79)
+			_ = n
+			e.Str(n.Str())
+		case object.IsKind[object.Symbol](__sw79):
+			n := object.Kind[object.Symbol](__sw79)
+			_ = n
+			e.Str(string(n))
+		case object.IsKind[*object.Array](__sw79):
+			n := object.Kind[*object.Array](__sw79)
+			_ = n
+			elems := n.Elems
+			return e.Array(len(elems), func() error {
+				for _, el := range elems {
+					e.Elem()
+					if err := emitValue(e, el); err != nil {
+						return err
+					}
 				}
-			}
-			return nil
-		})
-	case *object.Hash:
-		keys := n.Keys
-		return e.Object(len(keys), func() error {
-			for _, k := range keys {
-				val, _ := n.Get(k)
-				e.Key(jsonKeyString(k))
-				if err := emitValue(e, val); err != nil {
-					return err
+				return nil
+			})
+		case object.IsKind[*object.Hash](__sw79):
+			n := object.Kind[*object.Hash](__sw79)
+			_ = n
+			keys := n.Keys
+			return e.Object(len(keys), func() error {
+				for _, k := range keys {
+					val, _ := n.Get(k)
+					e.Key(jsonKeyString(k))
+					if err := emitValue(e, val); err != nil {
+						return err
+					}
 				}
-			}
-			return nil
-		})
-	default:
-		// Any other value (a Range, an RObject, …): its Ruby to_s, emitted as a JSON
-		// string. The former generator did the same via jsonStr(v.ToS()).
-		e.Str(v.ToS())
+				return nil
+			})
+		default:
+			n := __sw79
+			_ = n
+			e.Str(v.ToS())
+		}
 	}
 	return nil
 }
@@ -207,11 +228,18 @@ func emitValue(e *json.Encoder, v object.Value) error {
 // its contents, a Symbol its bare name, anything else its Ruby to_s (MRI coerces
 // every JSON object key to a string).
 func jsonKeyString(k object.Value) string {
-	switch key := k.(type) {
-	case *object.String:
-		return key.Str()
-	case object.Symbol:
-		return string(key)
+	{
+		__sw80 := k
+		switch {
+		case object.IsKind[*object.String](__sw80):
+			key := object.Kind[*object.String](__sw80)
+			_ = key
+			return key.Str()
+		case object.IsKind[object.Symbol](__sw80):
+			key := object.Kind[object.Symbol](__sw80)
+			_ = key
+			return string(key)
+		}
 	}
 	return k.ToS()
 }

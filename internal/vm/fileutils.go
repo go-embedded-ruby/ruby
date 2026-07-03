@@ -55,7 +55,7 @@ func (vm *VM) registerFileUtils() {
 	// pathsOf flattens the leading path argument(s): FileUtils accepts a single
 	// path or an array of paths for the bulk operations.
 	pathsOf := func(v object.Value) []string {
-		if arr, ok := v.(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](v); ok {
 			out := make([]string, len(arr.Elems))
 			for i, e := range arr.Elems {
 				out[i] = strArg(e)

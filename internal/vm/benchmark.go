@@ -145,7 +145,7 @@ func (vm *VM) registerBenchmark() {
 		}
 		format := ""
 		if len(args) > 2 {
-			if _, ok := args[2].(object.Nil); !ok {
+			if _, ok := object.AsNilOK(args[2]); !ok {
 				format = strArg(args[2])
 			}
 		}
@@ -190,7 +190,7 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 
 	reader := func(name string, get func(benchmark.Tms) float64) {
 		cls.define(name, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Float(get(self.(*Tms).t))
+			return object.Float(get(object.Kind[*Tms](self).t))
 		})
 	}
 	reader("utime", benchmark.Tms.Utime)
@@ -201,15 +201,15 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 	reader("total", benchmark.Tms.Total)
 
 	cls.define("label", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*Tms).t.Label())
+		return object.NewString(object.Kind[*Tms](self).t.Label())
 	})
 
 	// Arithmetic: each accepts another Tms (memberwise) or a numeric scalar
 	// (applied to all fields), mirroring Tms#+ / #- / #* / #/.
 	arith := func(name string, tms func(benchmark.Tms, benchmark.Tms) benchmark.Tms, scalar func(benchmark.Tms, float64) benchmark.Tms) {
 		cls.define(name, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-			t := self.(*Tms).t
-			if other, ok := args[0].(*Tms); ok {
+			t := object.Kind[*Tms](self).t
+			if other, ok := object.KindOK[*Tms](args[0]); ok {
 				return &Tms{t: tms(t, other.t)}
 			}
 			if x, ok := toFloat(args[0]); ok {
@@ -225,10 +225,10 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 	arith("/", benchmark.Tms.Div, benchmark.Tms.DivScalar)
 
 	cls.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return benchToA(self.(*Tms).t)
+		return benchToA(object.Kind[*Tms](self).t)
 	})
 	cls.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*Tms).t.ToS())
+		return object.NewString(object.Kind[*Tms](self).t.ToS())
 	})
 
 	// format(fmt = nil, *args): a nil/absent format selects FORMAT and ignores
@@ -238,12 +238,12 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 		fmt := ""
 		var rest []object.Value
 		if len(args) > 0 {
-			if _, ok := args[0].(object.Nil); !ok {
+			if _, ok := object.AsNilOK(args[0]); !ok {
 				fmt = strArg(args[0])
 			}
 			rest = args[1:]
 		}
-		return object.NewString(self.(*Tms).t.Format(fmt, benchFormatArgs(rest)...))
+		return object.NewString(object.Kind[*Tms](self).t.Format(fmt, benchFormatArgs(rest)...))
 	})
 }
 
@@ -256,7 +256,7 @@ func (vm *VM) registerBenchmarkReport(mod *RClass) {
 	vm.consts["Benchmark::Report"] = cls
 
 	run := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		br := self.(*benchReport)
+		br := object.Kind[*benchReport](self)
 		label := benchLabel(args)
 		t := br.r.Run(label, vm.benchRun(blk, "report"))
 		vm.benchPrint(br.r.Line(t))
@@ -266,7 +266,7 @@ func (vm *VM) registerBenchmarkReport(mod *RClass) {
 	cls.define("item", run)
 
 	cls.define("list", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return benchTmsList(self.(*benchReport).r.List())
+		return benchTmsList(object.Kind[*benchReport](self).r.List())
 	})
 }
 
@@ -279,7 +279,7 @@ func (vm *VM) registerBenchmarkJob(mod *RClass) {
 	vm.consts["Benchmark::Job"] = cls
 
 	add := func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		bj := self.(*benchJob)
+		bj := object.Kind[*benchJob](self)
 		label := benchLabel(args)
 		bj.job.Item(label, func() {})
 		bj.procs = append(bj.procs, blk)
@@ -383,13 +383,22 @@ func benchLabel(args []object.Value) string {
 // does: a String is taken directly, nil becomes "", and anything else uses its
 // to_s rendering.
 func labelToS(v object.Value) string {
-	switch s := v.(type) {
-	case *object.String:
-		return s.Str()
-	case object.Nil:
-		return ""
-	default:
-		return v.ToS()
+	{
+		__sw13 := v
+		switch {
+		case object.IsKind[*object.String](__sw13):
+			s := object.Kind[*object.String](__sw13)
+			_ = s
+			return s.Str()
+		case object.IsNilObj(__sw13):
+			s := object.NilObj()
+			_ = s
+			return ""
+		default:
+			s := __sw13
+			_ = s
+			return v.ToS()
+		}
 	}
 }
 
@@ -475,13 +484,13 @@ func benchTmsList(ts []benchmark.Tms) object.Value {
 // of Tms is taken as the extra rows. It mirrors how Benchmark#benchmark treats
 // the block's result.
 func benchExtras(v object.Value) []benchmark.Tms {
-	arr, ok := v.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](v)
 	if !ok {
 		return nil
 	}
 	out := make([]benchmark.Tms, 0, len(arr.Elems))
 	for _, e := range arr.Elems {
-		t, ok := e.(*Tms)
+		t, ok := object.KindOK[*Tms](e)
 		if !ok {
 			return nil
 		}

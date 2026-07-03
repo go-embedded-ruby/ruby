@@ -66,7 +66,7 @@ func (vm *VM) registerLiquid() {
 // table (so a re-raised library error's exceptionObject lookup finds the very same
 // class), exactly as the Mustache:: classes are.
 func (vm *VM) registerLiquidErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c
@@ -84,7 +84,7 @@ func (vm *VM) registerLiquidErrors(mod *RClass) {
 // String yields its contents, and any other value its to_s, so a non-String
 // argument does not crash the parser.
 func liquidSourceArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()
@@ -94,7 +94,7 @@ func liquidSourceArg(v object.Value) string {
 // instance by parse. A receiver without one (never parsed) raises, matching a
 // nil template.
 func liquidHandle(self object.Value) *liquidTemplate {
-	if h, ok := getIvar(self, "@__tmpl").(*liquidTemplate); ok {
+	if h, ok := object.KindOK[*liquidTemplate](getIvar(self, "@__tmpl")); ok {
 		return h
 	}
 	raise("Liquid::Error", "template was not parsed")

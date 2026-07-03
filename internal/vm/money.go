@@ -138,7 +138,7 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 		return object.IntValue(int64(c))
 	})
 	d("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		other, ok := args[0].(*Money)
+		other, ok := object.KindOK[*Money](args[0])
 		return object.Bool(ok && moneyOf(self).Eql(other.m))
 	})
 	d("<", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -186,26 +186,26 @@ func (vm *VM) registerMoneyCurrency(cls *RClass) {
 		}}
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	d("id", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(self.(*Currency).c.ID)
+		return object.Symbol(object.Kind[*Currency](self).c.ID)
 	})
 	d("iso_code", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*Currency).c.ISOCode)
+		return object.NewString(object.Kind[*Currency](self).c.ISOCode)
 	})
 	d("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*Currency).c.Name)
+		return object.NewString(object.Kind[*Currency](self).c.Name)
 	})
 	d("symbol", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*Currency).c.SymbolOrDefault())
+		return object.NewString(object.Kind[*Currency](self).c.SymbolOrDefault())
 	})
 	d("subunit_to_unit", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(self.(*Currency).c.SubunitToUnit)
+		return object.IntValue(object.Kind[*Currency](self).c.SubunitToUnit)
 	})
 	d("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*Currency).c.String())
+		return object.NewString(object.Kind[*Currency](self).c.String())
 	})
 	d("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		other, ok := args[0].(*Currency)
-		return object.Bool(ok && self.(*Currency).c.Equal(other.c))
+		other, ok := object.KindOK[*Currency](args[0])
+		return object.Bool(ok && object.Kind[*Currency](self).c.Equal(other.c))
 	})
 }
 
@@ -213,7 +213,7 @@ func (vm *VM) registerMoneyCurrency(cls *RClass) {
 // (Money::Currency::UnknownCurrency and Money::Bank::UnknownRate /
 // DifferentCurrencyError < StandardError). Each is registered scoped and flat.
 func (vm *VM) registerMoneyErrors(cls, curCls *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	bank := newClass("Money::Bank", nil)
 	bank.isModule = true
 	cls.consts["Bank"] = bank

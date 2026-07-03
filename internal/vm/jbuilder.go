@@ -60,7 +60,7 @@ func (vm *VM) registerJbuilder() {
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *Jbuilder { return v.(*Jbuilder) }
+	self := func(v object.Value) *Jbuilder { return object.Kind[*Jbuilder](v) }
 
 	// method_missing(name, *args, &blk) is the heart of the DSL: json.name "x"
 	// sets key -> value, json.name { … } nests a block-built object, and
@@ -146,17 +146,26 @@ func (vm *VM) registerJbuilder() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		switch n := args[0].(type) {
-		case *object.Array:
-			elems := make([]any, len(n.Elems))
-			for i, el := range n.Elems {
-				elems[i] = toJbuilder(vm, el)
+		{
+			__sw73 := args[0]
+			switch {
+			case object.IsKind[*object.Array](__sw73):
+				n := object.Kind[*object.Array](__sw73)
+				_ = n
+				elems := make([]any, len(n.Elems))
+				for i, el := range n.Elems {
+					elems[i] = toJbuilder(vm, el)
+				}
+				j.b.MergeArray(elems)
+			case object.IsKind[*object.Hash](__sw73):
+				n := object.Kind[*object.Hash](__sw73)
+				_ = n
+				j.b.Merge(jbuilderPairs(vm, n))
+			default:
+				n := __sw73
+				_ = n
+				raise("TypeError", "no implicit conversion into Hash or Array")
 			}
-			j.b.MergeArray(elems)
-		case *object.Hash:
-			j.b.Merge(jbuilderPairs(vm, n))
-		default:
-			raise("TypeError", "no implicit conversion into Hash or Array")
 		}
 		return object.NilV
 	})

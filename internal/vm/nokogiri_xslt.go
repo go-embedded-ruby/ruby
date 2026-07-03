@@ -35,7 +35,7 @@ func (s *NokogiriXSLTStylesheet) Truthy() bool    { return true }
 // (a subclass of Nokogiri::SyntaxError), matching how the gem surfaces a
 // compilation failure.
 func (vm *VM) registerNokogiriXSLT() {
-	nok, ok := vm.consts["Nokogiri"].(*RClass)
+	nok, ok := object.KindOK[*RClass](vm.consts["Nokogiri"])
 	if !ok {
 		return
 	}
@@ -46,7 +46,7 @@ func (vm *VM) registerNokogiriXSLT() {
 	vm.consts["Nokogiri::XSLT"] = xsltMod
 
 	// Nokogiri::XSLT::SyntaxError < Nokogiri::SyntaxError for a compile failure.
-	synErr := vm.consts["Nokogiri::SyntaxError"].(*RClass)
+	synErr := object.Kind[*RClass](vm.consts["Nokogiri::SyntaxError"])
 	xsltErr := newClass("Nokogiri::XSLT::SyntaxError", synErr)
 	xsltMod.consts["SyntaxError"] = xsltErr
 	vm.consts["Nokogiri::XSLT::SyntaxError"] = xsltErr
@@ -72,7 +72,7 @@ func (vm *VM) registerNokogiriXSLT() {
 // #transform (returns a Nokogiri::XML::Document) and #apply_to / #serialize
 // (returns the serialised output String), each accepting an optional params Hash.
 func (vm *VM) registerNokogiriXSLTStylesheet(cls *RClass) {
-	self := func(v object.Value) *xslt.Stylesheet { return v.(*NokogiriXSLTStylesheet).s }
+	self := func(v object.Value) *xslt.Stylesheet { return object.Kind[*NokogiriXSLTStylesheet](v).s }
 
 	cls.define("transform", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		doc, params := nokogiriXSLTArgs(args)
@@ -113,13 +113,13 @@ func nokogiriXSLTArgs(args []object.Value) (*nokogiri.Document, map[string]any) 
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 	}
-	doc, ok := args[0].(*NokogiriDocument)
+	doc, ok := object.KindOK[*NokogiriDocument](args[0])
 	if !ok {
 		raise("TypeError", "no implicit conversion into Nokogiri::XML::Document")
 	}
 	var params map[string]any
 	if len(args) > 1 {
-		if h, ok := args[1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[1]); ok {
 			params = nokogiriXSLTParams(h)
 		}
 	}
@@ -141,19 +141,34 @@ func nokogiriXSLTParams(h *object.Hash) map[string]any {
 // nokogiriXSLTParamValue maps one Ruby parameter value to the Go value the xslt
 // engine accepts (string / float64 / bool / nil), defaulting to the value's to_s.
 func nokogiriXSLTParamValue(v object.Value) any {
-	switch n := v.(type) {
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return float64(n)
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw106 := v
+		switch {
+		case object.IsNilObj(__sw106):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsBool(__sw106):
+			n := object.AsBoolV(__sw106)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw106):
+			n := object.AsInteger(__sw106)
+			_ = n
+			return float64(n)
+		case object.IsFloat(__sw106):
+			n := object.AsFloatV(__sw106)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw106):
+			n := object.Kind[*object.String](__sw106)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw106):
+			n := object.Kind[object.Symbol](__sw106)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }

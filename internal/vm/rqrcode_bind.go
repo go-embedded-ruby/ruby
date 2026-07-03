@@ -24,7 +24,7 @@ import (
 // data too large) raises the matching RQRCode error, mirroring the gem.
 func rqrcodeNew(data string, opt object.Value) *rqrcode.QRCode {
 	var opts []rqrcode.Option
-	if h, ok := opt.(*object.Hash); ok {
+	if h, ok := object.KindOK[*object.Hash](opt); ok {
 		for _, k := range h.Keys {
 			val, _ := h.Get(k)
 			switch rqrcodeKey(k) {
@@ -161,11 +161,18 @@ func rqrcodeEachOpt(h *object.Hash, fn func(key string, val object.Value)) {
 
 // rqrcodeKey renders an option key (a Symbol or String) as its bare name.
 func rqrcodeKey(k object.Value) string {
-	switch n := k.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw143 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw143):
+			n := object.Kind[object.Symbol](__sw143)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw143):
+			n := object.Kind[*object.String](__sw143)
+			_ = n
+			return n.Str()
+		}
 	}
 	return k.ToS()
 }
@@ -173,11 +180,18 @@ func rqrcodeKey(k object.Value) string {
 // rqrcodeSym renders an option value expected to be a level/mode symbol as its
 // bare name (a Symbol or String), so `level: :h` and `level: "h"` both work.
 func rqrcodeSym(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw144 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw144):
+			n := object.Kind[object.Symbol](__sw144)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw144):
+			n := object.Kind[*object.String](__sw144)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
@@ -185,7 +199,7 @@ func rqrcodeSym(v object.Value) string {
 // rqrcodeStr renders an option value as a string: a String yields its contents,
 // any other value its to_s.
 func rqrcodeStr(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

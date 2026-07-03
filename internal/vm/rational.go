@@ -16,13 +16,22 @@ import (
 // toRat converts an exact integer or Rational to *big.Rat; ok is false for a
 // Float or non-numeric value.
 func toRat(v object.Value) (*big.Rat, bool) {
-	switch n := v.(type) {
-	case object.Integer:
-		return new(big.Rat).SetInt64(int64(n)), true
-	case *object.Bignum:
-		return new(big.Rat).SetInt(n.I), true
-	case *object.Rational:
-		return n.R, true
+	{
+		__sw129 := v
+		switch {
+		case object.IsInt(__sw129):
+			n := object.AsInteger(__sw129)
+			_ = n
+			return new(big.Rat).SetInt64(int64(n)), true
+		case object.IsKind[*object.Bignum](__sw129):
+			n := object.Kind[*object.Bignum](__sw129)
+			_ = n
+			return new(big.Rat).SetInt(n.I), true
+		case object.IsKind[*object.Rational](__sw129):
+			n := object.Kind[*object.Rational](__sw129)
+			_ = n
+			return n.R, true
+		}
 	}
 	return nil, false
 }
@@ -48,10 +57,10 @@ func newRational(num, den object.Value) object.Value {
 // Rational. A Float operand drops to float arithmetic; otherwise the result is
 // an exact Rational.
 func rationalOp(op bytecode.Op, a, b object.Value) object.Value {
-	if _, ok := a.(object.Float); ok {
+	if _, ok := object.AsFloatOK(a); ok {
 		return floatOp(op, complexFloat(a), complexFloat(b))
 	}
-	if _, ok := b.(object.Float); ok {
+	if _, ok := object.AsFloatOK(b); ok {
 		return floatOp(op, complexFloat(a), complexFloat(b))
 	}
 	ra, aok := toRat(a)
@@ -119,7 +128,7 @@ func rationalEqual(r *object.Rational, other object.Value) bool {
 	if orat, ok := toRat(other); ok {
 		return r.R.Cmp(orat) == 0
 	}
-	if of, ok := other.(object.Float); ok {
+	if of, ok := object.AsFloatOK(other); ok {
 		rf, _ := r.R.Float64()
 		return rf == float64(of)
 	}
@@ -132,7 +141,7 @@ func (vm *VM) ratCompare(r *object.Rational, other object.Value) object.Value {
 	if orat, ok := toRat(other); ok {
 		return object.IntValue(int64(r.R.Cmp(orat)))
 	}
-	if of, ok := other.(object.Float); ok {
+	if of, ok := object.AsFloatOK(other); ok {
 		rf, _ := r.R.Float64()
 		switch {
 		case rf < float64(of):
@@ -156,7 +165,7 @@ func (vm *VM) registerRational() {
 		return newRational(args[0], den)
 	})
 
-	rval := func(self object.Value) *object.Rational { return self.(*object.Rational) }
+	rval := func(self object.Value) *object.Rational { return object.Kind[*object.Rational](self) }
 
 	vm.cRational.define("numerator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NormInt(rval(self).R.Num())
@@ -185,7 +194,7 @@ func (vm *VM) registerRational() {
 	})
 	vm.cRational.define("**", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := rval(self).R
-		if ef, ok := args[0].(object.Float); ok { // Float exponent → Float result
+		if ef, ok := object.AsFloatOK(args[0]); ok { // Float exponent → Float result
 			rf, _ := r.Float64()
 			return object.Float(math.Pow(rf, float64(ef)))
 		}

@@ -182,13 +182,13 @@ func TestGrapeRouteHandlerNil(t *testing.T) {
 func TestGrapeRouteHandlerGoNil(t *testing.T) {
 	vm := New(nil)
 	// Route#handler with a nil handler field.
-	route := vm.consts["Grape::Router::Route"].(*RClass)
+	route := object.Kind[*RClass](vm.consts["Grape::Router::Route"])
 	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: nil}
 	if got := route.methods["handler"].native(vm, r, nil, nil); got != object.NilV {
 		t.Errorf("Route#handler nil field -> %v, want nil", got)
 	}
 	// Match#handler / #route with nil fields.
-	match := vm.consts["Grape::Router::Match"].(*RClass)
+	match := object.Kind[*RClass](vm.consts["Grape::Router::Match"])
 	m := &GrapeMatch{}
 	if got := match.methods["handler"].native(vm, m, nil, nil); got != object.NilV {
 		t.Errorf("Match#handler nil field -> %v, want nil", got)
@@ -203,7 +203,7 @@ func TestGrapeRouteHandlerGoNil(t *testing.T) {
 // non-nil branch of the accessor, distinct from the nil arms above.
 func TestGrapeRouteHandlerPresent(t *testing.T) {
 	vm := New(nil)
-	route := vm.consts["Grape::Router::Route"].(*RClass)
+	route := object.Kind[*RClass](vm.consts["Grape::Router::Route"])
 	h := object.NewString("do-thing")
 	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: h}
 	if got := route.methods["handler"].native(vm, r, nil, nil); got != h {
@@ -220,7 +220,7 @@ func TestGrapeCoercedExtraKey(t *testing.T) {
 		t.Fatalf("expected both keys, got %d", len(h.Keys))
 	}
 	v, _ := h.Get(object.NewString("extra"))
-	if s, ok := v.(*object.String); !ok || s.Str() != "x" {
+	if s, ok := object.KindOK[*object.String](v); !ok || s.Str() != "x" {
 		t.Errorf("extra key = %v", v)
 	}
 }
@@ -284,14 +284,14 @@ func TestGrapeFromGo(t *testing.T) {
 	if grapeFromGo(2.5) != object.Float(2.5) {
 		t.Error("float arm")
 	}
-	if s, ok := grapeFromGo("s").(*object.String); !ok || s.Str() != "s" {
+	if s, ok := object.KindOK[*object.String](grapeFromGo("s")); !ok || s.Str() != "s" {
 		t.Error("string arm")
 	}
-	arr, ok := grapeFromGo([]any{int64(1), "x"}).(*object.Array)
+	arr, ok := object.KindOK[*object.Array](grapeFromGo([]any{int64(1), "x"}))
 	if !ok || len(arr.Elems) != 2 {
 		t.Error("array arm")
 	}
-	hh, ok := grapeFromGo(map[string]any{"k": int64(1)}).(*object.Hash)
+	hh, ok := object.KindOK[*object.Hash](grapeFromGo(map[string]any{"k": int64(1)}))
 	if !ok || len(hh.Keys) != 1 {
 		t.Error("hash arm")
 	}

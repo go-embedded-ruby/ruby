@@ -42,9 +42,9 @@ func (vm *VM) registerEtc() {
 	// They are built lazily on first lookup because newStructClass mixes in
 	// Enumerable, which the prelude installs after this bootstrap step runs.
 	ensureClasses := func() (passwd, group *RClass) {
-		cStruct := vm.consts["Struct"].(*RClass)
-		if p, ok := mod.consts["Passwd"].(*RClass); ok {
-			return p, mod.consts["Group"].(*RClass)
+		cStruct := object.Kind[*RClass](vm.consts["Struct"])
+		if p, ok := object.KindOK[*RClass](mod.consts["Passwd"]); ok {
+			return p, object.Kind[*RClass](mod.consts["Group"])
 		}
 		passwd = vm.newStructClass(cStruct,
 			[]string{"name", "passwd", "uid", "gid", "gecos", "dir", "shell"}, false)
@@ -83,7 +83,7 @@ func (vm *VM) registerEtc() {
 		// No argument means the current process's user, as MRI does.
 		id := etcCurrentUID()
 		if len(args) > 0 {
-			if _, isNil := args[0].(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(args[0]); !isNil {
 				id = strconv.FormatInt(intArg(args[0]), 10)
 			}
 		}

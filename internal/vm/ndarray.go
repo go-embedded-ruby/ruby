@@ -20,7 +20,7 @@ func (n *NDArray) Truthy() bool    { return true }
 
 // ndArg asserts an argument is an NDArray.
 func ndArg(v object.Value) *NDArray {
-	a, ok := v.(*NDArray)
+	a, ok := object.KindOK[*NDArray](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into NDArray", v.Inspect())
 	}
@@ -75,8 +75,8 @@ func ndScalar(op bytecode.Op, a *nd.Array, s float64) *NDArray {
 // ndarrayOp implements the arithmetic operators when an NDArray is involved:
 // array⊕array (element-wise), array⊕scalar, and scalar⊕array.
 func ndarrayOp(op bytecode.Op, a, b object.Value) object.Value {
-	if an, ok := a.(*NDArray); ok {
-		if bn, ok := b.(*NDArray); ok {
+	if an, ok := object.KindOK[*NDArray](a); ok {
+		if bn, ok := object.KindOK[*NDArray](b); ok {
 			return ndApply(op, an.a, bn.a)
 		}
 		if f, ok := toFloat(b); ok {
@@ -86,7 +86,7 @@ func ndarrayOp(op bytecode.Op, a, b object.Value) object.Value {
 	}
 	// a is a scalar, b is an NDArray: broadcast the scalar to an array first so
 	// non-commutative ops (scalar - array, scalar / array) are correct.
-	bn := b.(*NDArray)
+	bn := object.Kind[*NDArray](b)
 	f, ok := toFloat(a)
 	if !ok {
 		return raise("TypeError", "no implicit conversion of %s into NDArray", a.Inspect())
@@ -136,7 +136,7 @@ func (vm *VM) registerNDArray() {
 	})
 
 	d := func(name string, fn NativeFn) { vm.cNDArray.define(name, fn) }
-	self := func(v object.Value) *nd.Array { return v.(*NDArray).a }
+	self := func(v object.Value) *nd.Array { return object.Kind[*NDArray](v).a }
 
 	d("shape", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		sh := self(v).Shape()

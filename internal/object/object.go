@@ -55,11 +55,18 @@ func NormInt(z *big.Int) Value {
 
 // BigOf returns the big.Int value of an Integer or Bignum (ok=false otherwise).
 func BigOf(v Value) (*big.Int, bool) {
-	switch x := v.(type) {
-	case Integer:
-		return big.NewInt(int64(x)), true
-	case *Bignum:
-		return x.I, true
+	{
+		__sw1 := v
+		switch {
+		case IsInt(__sw1):
+			x := AsInteger(__sw1)
+			_ = x
+			return big.NewInt(int64(x)), true
+		case IsKind[*Bignum](__sw1):
+			x := Kind[*Bignum](__sw1)
+			_ = x
+			return x.I, true
+		}
 	}
 	return nil, false
 }
@@ -101,7 +108,7 @@ func (c *Complex) ToS() string { return c.Re.ToS() + imagPart(c.Im) }
 // is written as "(n/d)*i" (matching MRI: Complex(0, Rational(5,2)) → "(0+(5/2)*i)").
 func (c *Complex) Inspect() string {
 	re := c.Re.ToS()
-	if r, ok := c.Re.(*Rational); ok {
+	if r, ok := KindOK[*Rational](c.Re); ok {
 		re = r.Inspect()
 	}
 	return "(" + re + imagPartInspect(c.Im) + ")"
@@ -132,7 +139,7 @@ func imagPart(im Value) string {
 // imaginary part is parenthesised and multiplied — "+(5/2)*i" / "-(1/2)*i" —
 // while other numeric parts match imagPart ("+2i", "-3.0i").
 func imagPartInspect(im Value) string {
-	r, ok := im.(*Rational)
+	r, ok := KindOK[*Rational](im)
 	if !ok {
 		return imagPart(im)
 	}
@@ -418,7 +425,7 @@ func NewArrayFromSlice(elems []Value) *Array { return &Array{Elems: elems} }
 // snapshot Ruby semantics require. strVals is nil until the first String key is
 // inserted; nil-map reads are safe, so Get/repr need no guard.
 type Hash struct {
-	Keys    []Value             // insertion order (string keys held as frozen snapshots)
+	Keys    []Value              // insertion order (string keys held as frozen snapshots)
 	strVals map[string]*strEntry // String keys, content-addressed (allocation-free hot path)
 	vals    map[any]Value
 	// keyBucket maps a stored user-object key (snapshot) to the customBucket it
@@ -452,12 +459,12 @@ type strEntry struct{ v Value }
 // returns ok=false and takes the general hashKey path. Symbols are deliberately
 // excluded: :a and "a" are distinct Ruby keys.
 func strContentKey(k Value) ([]byte, bool) {
-	if u, ok := k.(KeyUnwrapper); ok {
+	if u, ok := CastAnyOK[KeyUnwrapper](k); ok {
 		if v, wrapped := u.HashUnwrap(); wrapped {
 			k = v
 		}
 	}
-	if s, ok := k.(*String); ok {
+	if s, ok := KindOK[*String](k); ok {
 		return s.Bytes(), true
 	}
 	return nil, false
@@ -496,51 +503,62 @@ type customBucket struct {
 // is routed through CustomKeyHook and reuseBucket so it follows Ruby semantics
 // rather than Go pointer identity.
 func (h *Hash) hashKey(k Value) any {
-	if u, ok := k.(KeyUnwrapper); ok {
+	if u, ok := CastAnyOK[KeyUnwrapper](k); ok {
 		if v, wrapped := u.HashUnwrap(); wrapped {
 			k = v
 		}
 	}
-	switch kk := k.(type) {
-	case *String:
-		return strKey(kk.Bytes())
-	// Immediate value types are their own comparable key: Ruby fixnums, floats,
-	// symbols, true/false and nil hash and compare by value (1.eql?(1),
-	// :a.eql?(:a)), and none can be subclassed to override #hash, so they never
-	// need the CustomKeyHook / #hash-method walk below. We return the *already
-	// boxed* incoming k (not the concrete kk) so the map key is the interface we
-	// were handed: interface→any is a no-op copy, whereas returning kk re-boxes
-	// the concrete value into a fresh any — one allocation per Get AND per Set on
-	// an Integer- or Symbol-keyed Hash. The stored key compares byte-identically
-	// either way (map keys compare by dynamic type + value), so semantics are
-	// unchanged; this only removes the re-box.
-	case Integer:
-		return k
-	case Float:
-		return k
-	case Symbol:
-		return k
-	case Bool:
-		return k
-	case Nil:
-		return k
-	case *Bignum:
-		return "\x00big:" + kk.I.String()
-	case *Array:
-		var b strings.Builder
-		b.WriteString("\x00arr:")
-		for _, e := range kk.Elems {
-			fmt.Fprintf(&b, "%v\x01", h.hashKey(e))
+	{
+		__sw2 := k
+		switch {
+		case IsKind[*String](__sw2):
+			kk := Kind[*String](__sw2)
+			_ = kk
+			return strKey(kk.Bytes())
+		case IsInt(__sw2):
+			kk := AsInteger(__sw2)
+			_ = kk
+			return k
+		case IsFloat(__sw2):
+			kk := AsFloatV(__sw2)
+			_ = kk
+			return k
+		case IsKind[Symbol](__sw2):
+			kk := Kind[Symbol](__sw2)
+			_ = kk
+			return k
+		case IsBool(__sw2):
+			kk := AsBoolV(__sw2)
+			_ = kk
+			return k
+		case IsNilObj(__sw2):
+			kk := NilObj()
+			_ = kk
+			return k
+		case IsKind[*Bignum](__sw2):
+			kk := Kind[*Bignum](__sw2)
+			_ = kk
+			return "\x00big:" + kk.I.String()
+		case IsKind[*Array](__sw2):
+			kk := Kind[*Array](__sw2)
+			_ = kk
+			var b strings.Builder
+			b.WriteString("\x00arr:")
+			for _, e := range kk.Elems {
+				fmt.Fprintf(&b, "%v\x01", h.hashKey(e))
+			}
+			return b.String()
+		case IsKind[*Hash](__sw2):
+			kk := Kind[*Hash](__sw2)
+			_ = kk
+			var b strings.Builder
+			b.WriteString("\x00hsh:")
+			for _, e := range kk.Keys {
+				v, _ := kk.Get(e)
+				fmt.Fprintf(&b, "%v\x02%v\x01", h.hashKey(e), h.valKey(v))
+			}
+			return b.String()
 		}
-		return b.String()
-	case *Hash:
-		var b strings.Builder
-		b.WriteString("\x00hsh:")
-		for _, e := range kk.Keys {
-			v, _ := kk.Get(e)
-			fmt.Fprintf(&b, "%v\x02%v\x01", h.hashKey(e), h.valKey(v))
-		}
-		return b.String()
 	}
 	if CustomKeyHook != nil {
 		if rh, eql, ok := CustomKeyHook(k); ok {
@@ -579,7 +597,7 @@ func (h *Hash) reuseBucket(rh int64, eql func(Value) bool) customBucket {
 // snapshotKey is the value remembered in Keys for iteration/inspect: a string
 // key is stored as a frozen copy so mutating the original does not change it.
 func snapshotKey(k Value) Value {
-	if s, ok := k.(*String); ok {
+	if s, ok := KindOK[*String](k); ok {
 		d := s.Dup()
 		d.Frozen = true
 		return d
@@ -723,7 +741,7 @@ func (h *Hash) repr() string {
 		v := h.value(k)
 		// Ruby 4.0 (since 3.4) inspect: symbol keys use the label form
 		// `name: value`; all other keys use `key => value` with spaces.
-		if sym, ok := k.(Symbol); ok {
+		if sym, ok := KindOK[Symbol](k); ok {
 			// A plain symbol key uses the bare label `name:`; one that needs
 			// quoting uses the quoted label `"name":`.
 			if isPlainSymbol(string(sym)) {
@@ -759,7 +777,7 @@ func (r *Range) Inspect() string { return rangeEnd(r.Lo, true) + r.sep() + range
 
 // rangeEnd renders one endpoint, or "" for a nil (beginless/endless) bound.
 func rangeEnd(v Value, inspect bool) string {
-	if _, ok := v.(Nil); ok {
+	if _, ok := AsNilOK(v); ok {
 		return ""
 	}
 	if inspect {

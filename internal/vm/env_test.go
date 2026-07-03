@@ -57,7 +57,7 @@ func envSeams(t *testing.T) (*VM, map[string]string) {
 // callEnv invokes an ENV instance method by name through its class method table.
 func callEnv(t *testing.T, vm *VM, name string, args []object.Value, blk *Proc) object.Value {
 	t.Helper()
-	env := vm.consts["ENV"].(*RObject)
+	env := object.Kind[*RObject](vm.consts["ENV"])
 	m := lookupMethod(env.class, name)
 	if m == nil || m.native == nil {
 		t.Fatalf("ENV#%s not found", name)
@@ -82,7 +82,7 @@ func TestENVReadWrite(t *testing.T) {
 		t.Fatalf("store did not write B")
 	}
 	// Missing key reads as nil.
-	if _, ok := callEnv(t, vm, "[]", []object.Value{s("MISSING")}, nil).(object.Nil); !ok {
+	if _, ok := object.AsNilOK(callEnv(t, vm, "[]", []object.Value{s("MISSING")}, nil)); !ok {
 		t.Fatalf("missing key not nil")
 	}
 	// []= with nil deletes the key, returning nil.
@@ -149,7 +149,7 @@ func TestENVDeleteAndClear(t *testing.T) {
 	}
 	// clear empties the whole environment and returns self.
 	self := callEnv(t, vm, "clear", nil, nil)
-	if _, ok := self.(*RObject); !ok {
+	if _, ok := object.KindOK[*RObject](self); !ok {
 		t.Fatalf("clear did not return self object")
 	}
 	if len(store) != 0 {
@@ -164,7 +164,7 @@ func TestENVHashViews(t *testing.T) {
 	callEnv(t, vm, "[]=", []object.Value{s("H2"), s("b")}, nil)
 
 	for _, name := range []string{"to_hash", "to_h"} {
-		h, ok := callEnv(t, vm, name, nil, nil).(*object.Hash)
+		h, ok := object.KindOK[*object.Hash](callEnv(t, vm, name, nil, nil))
 		if !ok {
 			t.Fatalf("%s not a Hash", name)
 		}
@@ -173,7 +173,7 @@ func TestENVHashViews(t *testing.T) {
 		}
 	}
 
-	keys := callEnv(t, vm, "keys", nil, nil).(*object.Array)
+	keys := object.Kind[*object.Array](callEnv(t, vm, "keys", nil, nil))
 	if len(keys.Elems) != 2 {
 		t.Fatalf("keys = %v", keys.Elems)
 	}
@@ -212,7 +212,7 @@ func TestENVMergeReplaceKey(t *testing.T) {
 	// merge! keeps existing keys and adds the new ones; returns self.
 	for _, name := range []string{"merge!", "update"} {
 		self := callEnv(t, vm, name, []object.Value{h}, nil)
-		if _, ok := self.(*RObject); !ok {
+		if _, ok := object.KindOK[*RObject](self); !ok {
 			t.Fatalf("%s did not return self", name)
 		}
 	}
@@ -232,7 +232,7 @@ func TestENVMergeReplaceKey(t *testing.T) {
 	r := object.NewHash()
 	r.Set(s("R1"), s("z"))
 	self := callEnv(t, vm, "replace", []object.Value{r}, nil)
-	if _, ok := self.(*RObject); !ok {
+	if _, ok := object.KindOK[*RObject](self); !ok {
 		t.Fatalf("replace did not return self")
 	}
 	if _, ok := store["OLD"]; ok {

@@ -33,7 +33,7 @@ func TestRougeLexerHandleValue(t *testing.T) {
 // here directly.
 func TestRougeLexerHandleMissing(t *testing.T) {
 	vm := New(io.Discard)
-	cls := vm.consts["Rouge::Lexer"].(*RClass)
+	cls := object.Kind[*RClass](vm.consts["Rouge::Lexer"])
 	inst := &RObject{class: cls, ivars: map[string]object.Value{}}
 	defer func() {
 		re, ok := recover().(RubyError)

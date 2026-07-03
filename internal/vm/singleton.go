@@ -11,7 +11,7 @@ func (vm *VM) registerSingleton() {
 		body := blk
 		if body == nil {
 			if len(args) > 1 {
-				p, ok := args[1].(*Proc)
+				p, ok := object.KindOK[*Proc](args[1])
 				if !ok {
 					raise("TypeError", "wrong argument type %s (expected Proc)", classNameOf(args[1]))
 				}
@@ -21,7 +21,7 @@ func (vm *VM) registerSingleton() {
 			}
 		}
 		name := args[0].ToS()
-		if t, ok := self.(*RClass); ok {
+		if t, ok := object.KindOK[*RClass](self); ok {
 			t.smethods[name] = &Method{name: name, proc: body, owner: t}
 			bumpMethodSerial()
 			return object.Symbol(name)
@@ -40,11 +40,11 @@ func (vm *VM) registerSingleton() {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
 		for _, a := range args {
-			mod, ok := a.(*RClass)
+			mod, ok := object.KindOK[*RClass](a)
 			if !ok {
 				raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(a))
 			}
-			if t, ok := self.(*RClass); ok {
+			if t, ok := object.KindOK[*RClass](self); ok {
 				// C.extend(M): M (and every module M itself includes) becomes part of
 				// C's singleton-class ancestry, so M's own instance methods *and* the
 				// methods of its transitively-included modules all become class methods

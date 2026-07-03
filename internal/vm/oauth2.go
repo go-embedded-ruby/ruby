@@ -117,7 +117,7 @@ func oauth2Options(args []object.Value) oauth2.Options {
 	if len(args) == 0 {
 		return o
 	}
-	h, ok := args[0].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](args[0])
 	if !ok {
 		return o
 	}
@@ -143,7 +143,7 @@ func oauth2Options(args []object.Value) oauth2.Options {
 // nested constant and under its qualified name so a re-raised library error and the
 // Ruby constant resolve to the same class.
 func (vm *VM) registerOAuth2Error(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("OAuth2::Error", std)
 	mod.consts["Error"] = c
 	vm.consts["OAuth2::Error"] = c

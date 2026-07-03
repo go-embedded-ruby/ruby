@@ -22,21 +22,21 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 	}
 
 	// String fast paths: "a" + "b" and "a" * 3.
-	if as, ok := a.(*object.String); ok {
+	if as, ok := object.KindOK[*object.String](a); ok {
 		return stringOp(op, as, b)
 	}
 
 	// Array fast paths: [1] + [2], [1, 2, 1] - [1], [1, 2] * 3 / [1, 2] * ",".
-	if aa, ok := a.(*object.Array); ok {
+	if aa, ok := object.KindOK[*object.Array](a); ok {
 		return arrayOp(op, aa, b)
 	}
 
 	// Complex fast paths, both Complex⊕x and x⊕Complex (a real number coerces to
 	// a Complex with zero imaginary part).
-	if ac, ok := a.(*object.Complex); ok {
+	if ac, ok := object.KindOK[*object.Complex](a); ok {
 		return complexOp(op, ac, b)
 	}
-	if bc, ok := b.(*object.Complex); ok {
+	if bc, ok := object.KindOK[*object.Complex](b); ok {
 		ac, ok := asComplexVal(a)
 		if !ok {
 			return raise("TypeError", "%s can't be coerced into Complex", a.Inspect())
@@ -49,26 +49,26 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 	// numeric tower in either position (BigDecimal + Rational and Rational +
 	// BigDecimal are both BigDecimal), so this is checked before the Rational
 	// fast path; the non-BigDecimal operand is coerced to BigDecimal.
-	if ab, ok := a.(*BigDecimal); ok {
+	if ab, ok := object.KindOK[*BigDecimal](a); ok {
 		return bigDecimalOp(op, ab, b)
 	}
-	if bb, ok := b.(*BigDecimal); ok {
+	if bb, ok := object.KindOK[*BigDecimal](b); ok {
 		return bigDecimalRightOp(op, a, bb)
 	}
 
 	// Rational fast paths. A Float operand makes the result Float (Float wins the
 	// numeric tower); an Integer/Bignum stays exact.
-	if _, ok := a.(*object.Rational); ok {
+	if _, ok := object.KindOK[*object.Rational](a); ok {
 		return rationalOp(op, a, b)
 	}
-	if _, ok := b.(*object.Rational); ok {
+	if _, ok := object.KindOK[*object.Rational](b); ok {
 		return rationalOp(op, a, b)
 	}
 
 	// Set algebra: + (union) and - (difference) reach the operator fast path
 	// (the other combinators — & | << — dispatch as methods). The right operand
 	// must be a Set.
-	if as, ok := a.(*Set); ok {
+	if as, ok := object.KindOK[*Set](a); ok {
 		return setOp(op, as, b)
 	}
 
@@ -76,49 +76,49 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 	// offset) reach the operator fast path (the bitwise & | ~ combinators dispatch
 	// as methods). The right operand is an integer offset, mirroring MRI's
 	// IPAddr#+ / IPAddr#-.
-	if ai, ok := a.(*IPAddr); ok {
+	if ai, ok := object.KindOK[*IPAddr](a); ok {
 		return ipaddrOp(op, ai, b)
 	}
 
 	// Matrix / Vector arithmetic: + and - reach the operator fast path (the other
 	// operators — * / ** -@ — dispatch as methods). The right operand must be the
 	// same wrapper type.
-	if _, ok := a.(*Matrix); ok {
+	if _, ok := object.KindOK[*Matrix](a); ok {
 		return matrixOp(op, a, b)
 	}
-	if _, ok := a.(*Vector); ok {
+	if _, ok := object.KindOK[*Vector](a); ok {
 		return matrixOp(op, a, b)
 	}
 
 	// Time arithmetic: t + secs / t - secs (shift by a Duration) and t - other
 	// (the seconds between two instants) reach the operator fast path.
-	if at, ok := a.(*Time); ok {
+	if at, ok := object.KindOK[*Time](a); ok {
 		return timeOp(op, at, b)
 	}
 
 	// Date arithmetic: d + n / d - n (shift by a whole number of days) and
 	// d - other (the day count between two dates) reach the operator fast path.
-	if ad, ok := a.(*Date); ok {
+	if ad, ok := object.KindOK[*Date](a); ok {
 		return dateOp(op, ad, b)
 	}
 
 	// Bag (multiset) algebra: + (Sum, additive union) and - (Difference) reach
 	// the operator fast path; the other combinators — & | — dispatch as methods.
 	// The right operand must be a Bag.
-	if ab, ok := a.(*Bag); ok {
+	if ab, ok := object.KindOK[*Bag](a); ok {
 		return bagOp(op, ab, b)
 	}
 
 	// NDArray element-wise / scalar arithmetic, in either operand order.
-	if _, ok := a.(*NDArray); ok {
+	if _, ok := object.KindOK[*NDArray](a); ok {
 		return ndarrayOp(op, a, b)
 	}
-	if _, ok := b.(*NDArray); ok {
+	if _, ok := object.KindOK[*NDArray](b); ok {
 		return ndarrayOp(op, a, b)
 	}
 
-	ai, aok := a.(object.Integer)
-	bi, bok := b.(object.Integer)
+	ai, aok := object.AsIntegerOK(a)
+	bi, bok := object.AsIntegerOK(b)
 	if aok && bok {
 		return intOp(op, int64(ai), int64(bi))
 	}
@@ -180,10 +180,10 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 	// An instance of a user subclass of a built-in value type uses that value's
 	// own operators (so a String-subclass "+", an Array-subclass "*", and the
 	// comparisons all work), on either side of the operator.
-	if o, ok := a.(*RObject); ok && !object.IsNil(o.builtin) {
+	if o, ok := object.KindOK[*RObject](a); ok && !object.IsNil(o.builtin) {
 		a = o.builtin
 	}
-	if o, ok := b.(*RObject); ok && !object.IsNil(o.builtin) {
+	if o, ok := object.KindOK[*RObject](b); ok && !object.IsNil(o.builtin) {
 		b = o.builtin
 	}
 	switch op {
@@ -192,7 +192,7 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		// Comparable#== all apply); a builtin instance whose class defines its own
 		// `==` (e.g. Digest::Instance#==, which compares hex digests) dispatches it
 		// too; the remaining value types keep structural equality.
-		if _, isObj := a.(*RObject); isObj || hasCustomEq(vm, a) {
+		if _, isObj := object.KindOK[*RObject](a); isObj || hasCustomEq(vm, a) {
 			eq := vm.send(a, "==", []object.Value{b}, nil).Truthy()
 			if op == bytecode.OpNeq {
 				eq = !eq
@@ -210,25 +210,25 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		// arithmetic operator dispatches to it, so `Pathname + str`, a Money `+`,
 		// etc. work. Built-in value types keep the inline path (and its coercion
 		// errors).
-		if _, isObj := a.(*RObject); isObj {
+		if _, isObj := object.KindOK[*RObject](a); isObj {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
 		// A URI dispatches its arithmetic operator (only + is defined, resolving a
 		// reference) as a method, so the binding's merge — which needs the VM to
 		// wrap the result — runs with a live VM rather than the VM-less binary path.
-		if _, isURI := a.(*URI); isURI {
+		if _, isURI := object.KindOK[*URI](a); isURI {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
 		// A Benchmark::Tms dispatches its memberwise/scalar + - * / as methods
 		// (defined in internal/vm/benchmark.go), so the library's Tms arithmetic
 		// runs rather than the numeric coercion path.
-		if _, isTms := a.(*Tms); isTms {
+		if _, isTms := object.KindOK[*Tms](a); isTms {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
 		// A Money dispatches its arithmetic (+ - * over the go-ruby-money library,
 		// raising Money::DifferentCurrencyError on a currency mismatch) as a method
 		// rather than falling into the numeric coercion path.
-		if _, isMoney := a.(*Money); isMoney {
+		if _, isMoney := object.KindOK[*Money](a); isMoney {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
 		return binary(op, a, b)
@@ -280,9 +280,12 @@ func operatorOpcode(name string) (bytecode.Op, bool) {
 // Those keep the Phase 0 inline comparison (including its own coercion errors
 // for a bad right operand); anything else dispatches `<`/`<=`/`>`/`>=`.
 func hasFastOrdering(a object.Value) bool {
-	switch a.(type) {
-	case object.Integer, object.Float, *object.String, *object.Bignum:
-		return true
+	{
+		__sw7 := a
+		switch {
+		case object.IsInt(__sw7) || object.IsFloat(__sw7) || object.IsKind[*object.String](__sw7) || object.IsKind[*object.Bignum](__sw7):
+			return true
+		}
 	}
 	return false
 }
@@ -367,7 +370,7 @@ func floatOp(op bytecode.Op, a, b float64) object.Value {
 func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		bs, ok := b.(*object.String)
+		bs, ok := object.KindOK[*object.String](b)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", b.Inspect())
 		}
@@ -375,7 +378,7 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		out = append(append(out, a.Bytes()...), bs.Bytes()...)
 		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
 	case bytecode.OpMul:
-		n, ok := b.(object.Integer)
+		n, ok := object.AsIntegerOK(b)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Integer", b.Inspect())
 		}
@@ -390,7 +393,7 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 	case bytecode.OpMod:
 		return object.NewString(formatString(a.Str(), formatArgs(b)))
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
-		bs, ok := b.(*object.String)
+		bs, ok := object.KindOK[*object.String](b)
 		if !ok {
 			raise("ArgumentError", "comparison of String with %s failed", b.Inspect())
 		}
@@ -415,7 +418,7 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		bb, ok := b.(*object.Array)
+		bb, ok := object.KindOK[*object.Array](b)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Array", b.Inspect())
 		}
@@ -423,7 +426,7 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		out = append(append(out, a.Elems...), bb.Elems...)
 		return object.NewArrayFromSlice(out)
 	case bytecode.OpSub:
-		bb, ok := b.(*object.Array)
+		bb, ok := object.KindOK[*object.Array](b)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Array", b.Inspect())
 		}
@@ -435,10 +438,10 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		}
 		return object.NewArrayFromSlice(out)
 	case bytecode.OpMul:
-		if sep, ok := b.(*object.String); ok {
+		if sep, ok := object.KindOK[*object.String](b); ok {
 			return object.NewString(joinArray(a, sep.Str()))
 		}
-		n, ok := b.(object.Integer)
+		n, ok := object.AsIntegerOK(b)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Integer", b.Inspect())
 		}
@@ -506,27 +509,45 @@ func arrayIncludes(elems []object.Value, v object.Value) bool {
 }
 
 func negate(v object.Value) object.Value {
-	switch n := v.(type) {
-	case object.Integer:
-		if n == minInt64 { // -minInt64 overflows int64 → promote
-			return object.NormInt(new(big.Int).Neg(big.NewInt(int64(n))))
+	{
+		__sw8 := v
+		switch {
+		case object.IsInt(__sw8):
+			n := object.AsInteger(__sw8)
+			_ = n
+			if n == minInt64 { // -minInt64 overflows int64 → promote
+				return object.NormInt(new(big.Int).Neg(big.NewInt(int64(n))))
+			}
+			return object.IntValue(int64(-n))
+		case object.IsFloat(__sw8):
+			n := object.AsFloatV(__sw8)
+			_ = n
+			return object.Float(-n)
+		case object.IsKind[*object.Bignum](__sw8):
+			n := object.Kind[*object.Bignum](__sw8)
+			_ = n
+			return object.NormInt(new(big.Int).Neg(n.I))
+		case object.IsKind[*object.Complex](__sw8):
+			n := object.Kind[*object.Complex](__sw8)
+			_ = n
+			return &object.Complex{Re: negate(n.Re), Im: negate(n.Im)}
+		case object.IsKind[*object.Rational](__sw8):
+			n := object.Kind[*object.Rational](__sw8)
+			_ = n
+			return &object.Rational{R: new(big.Rat).Neg(n.R)}
+		case object.IsKind[*BigDecimal](__sw8):
+			n := object.Kind[*BigDecimal](__sw8)
+			_ = n
+			return &BigDecimal{d: n.d.Neg()}
+		case object.IsKind[*Matrix](__sw8):
+			n := object.Kind[*Matrix](__sw8)
+			_ = n
+			return &Matrix{m: n.m.Neg()}
+		case object.IsKind[*Money](__sw8):
+			n := object.Kind[*Money](__sw8)
+			_ = n
+			return &Money{m: n.m.Neg()}
 		}
-		return object.IntValue(int64(-n))
-	case object.Float:
-		return object.Float(-n)
-	case *object.Bignum:
-		return object.NormInt(new(big.Int).Neg(n.I))
-	case *object.Complex:
-		return &object.Complex{Re: negate(n.Re), Im: negate(n.Im)}
-	case *object.Rational:
-		return &object.Rational{R: new(big.Rat).Neg(n.R)}
-	case *BigDecimal:
-		return &BigDecimal{d: n.d.Neg()}
-	case *Matrix:
-		return &Matrix{m: n.m.Neg()}
-	case *Money:
-		// -money negates the amount via the go-ruby-money library.
-		return &Money{m: n.m.Neg()}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
@@ -534,106 +555,145 @@ func negate(v object.Value) object.Value {
 func valueEqual(a, b object.Value) bool {
 	// Complex compares component-wise, and equals a real number when its
 	// imaginary part is zero (Complex(2, 0) == 2), in either operand order.
-	if ac, ok := a.(*object.Complex); ok {
+	if ac, ok := object.KindOK[*object.Complex](a); ok {
 		return complexEqual(ac, b)
 	}
-	if bc, ok := b.(*object.Complex); ok {
+	if bc, ok := object.KindOK[*object.Complex](b); ok {
 		return complexEqual(bc, a)
 	}
 	// BigDecimal compares by value, coercing a numeric operand (2 == BigDecimal("2"),
 	// BigDecimal("1.5") == Rational(3, 2)), in either operand order. Checked before
 	// Rational so a BigDecimal operand drives the (decimal-precise) comparison.
-	if ab, ok := a.(*BigDecimal); ok {
+	if ab, ok := object.KindOK[*BigDecimal](a); ok {
 		return bigDecimalEqual(ab, b)
 	}
-	if bb, ok := b.(*BigDecimal); ok {
+	if bb, ok := object.KindOK[*BigDecimal](b); ok {
 		return bigDecimalEqual(bb, a)
 	}
-	if ar, ok := a.(*object.Rational); ok {
+	if ar, ok := object.KindOK[*object.Rational](a); ok {
 		return rationalEqual(ar, b)
 	}
-	if br, ok := b.(*object.Rational); ok {
+	if br, ok := object.KindOK[*object.Rational](b); ok {
 		return rationalEqual(br, a)
 	}
-	switch av := a.(type) {
-	case object.Integer:
-		if bv, ok := b.(object.Integer); ok {
-			return av == bv
-		}
-		if bv, ok := b.(object.Float); ok {
-			return float64(av) == float64(bv)
-		}
-	case object.Float:
-		if bf, ok := toFloat(b); ok {
-			return float64(av) == bf
-		}
-	case *object.Bignum:
-		// A Bignum is, by construction, outside int64 range, so it can only equal
-		// another Bignum of the same magnitude.
-		if bv, ok := b.(*object.Bignum); ok {
-			return av.I.Cmp(bv.I) == 0
-		}
-	case *object.String:
-		bv, ok := b.(*object.String)
-		return ok && string(av.Bytes()) == string(bv.Bytes())
-	case object.Symbol:
-		bv, ok := b.(object.Symbol)
-		return ok && av == bv
-	case *object.Array:
-		bv, ok := b.(*object.Array)
-		if !ok || len(av.Elems) != len(bv.Elems) {
-			return false
-		}
-		for i := range av.Elems {
-			if !valueEqual(av.Elems[i], bv.Elems[i]) {
+	{
+		__sw9 := a
+		switch {
+		case object.IsInt(__sw9):
+			av := object.AsInteger(__sw9)
+			_ = av
+			if bv, ok := object.AsIntegerOK(b); ok {
+				return av == bv
+			}
+			if bv, ok := object.AsFloatOK(b); ok {
+				return float64(av) == float64(bv)
+			}
+		case object.IsFloat(__sw9):
+			av := object.AsFloatV(__sw9)
+			_ = av
+			if bf, ok := toFloat(b); ok {
+				return float64(av) == bf
+			}
+		case object.IsKind[*object.Bignum](__sw9):
+			av := object.Kind[*object.Bignum](__sw9)
+			_ = av
+			if bv, ok := object.KindOK[*object.Bignum](b); ok {
+				return av.I.Cmp(bv.I) == 0
+			}
+		case object.IsKind[*object.String](__sw9):
+			av := object.Kind[*object.String](__sw9)
+			_ = av
+			bv, ok := object.KindOK[*object.String](b)
+			return ok && string(av.Bytes()) == string(bv.Bytes())
+		case object.IsKind[object.Symbol](__sw9):
+			av := object.Kind[object.Symbol](__sw9)
+			_ = av
+			bv, ok := object.KindOK[object.Symbol](b)
+			return ok && av == bv
+		case object.IsKind[*object.Array](__sw9):
+			av := object.Kind[*object.Array](__sw9)
+			_ = av
+			bv, ok := object.KindOK[*object.Array](b)
+			if !ok || len(av.Elems) != len(bv.Elems) {
 				return false
 			}
-		}
-		return true
-	case *object.Hash:
-		bv, ok := b.(*object.Hash)
-		if !ok || av.Len() != bv.Len() {
-			return false
-		}
-		for _, k := range av.Keys {
-			ae, _ := av.Get(k)
-			be, present := bv.Get(k)
-			if !present || !valueEqual(ae, be) {
+			for i := range av.Elems {
+				if !valueEqual(av.Elems[i], bv.Elems[i]) {
+					return false
+				}
+			}
+			return true
+		case object.IsKind[*object.Hash](__sw9):
+			av := object.Kind[*object.Hash](__sw9)
+			_ = av
+			bv, ok := object.KindOK[*object.Hash](b)
+			if !ok || av.Len() != bv.Len() {
 				return false
 			}
+			for _, k := range av.Keys {
+				ae, _ := av.Get(k)
+				be, present := bv.Get(k)
+				if !present || !valueEqual(ae, be) {
+					return false
+				}
+			}
+			return true
+		case object.IsKind[*object.Range](__sw9):
+			av := object.Kind[*object.Range](__sw9)
+			_ = av
+			bv, ok := object.KindOK[*object.Range](b)
+			return ok && av.Exclusive == bv.Exclusive && valueEqual(av.Lo, bv.Lo) && valueEqual(av.Hi, bv.Hi)
+		case object.IsKind[*Set](__sw9):
+			av := object.Kind[*Set](__sw9)
+			_ = av
+			bv, ok := object.KindOK[*Set](b)
+			return ok && av.s.EqualQ(bv.s)
+		case object.IsKind[*IPAddr](__sw9):
+			av := object.Kind[*IPAddr](__sw9)
+			_ = av
+			bv, ok := object.KindOK[*IPAddr](b)
+			return ok && av.ip.Eql(bv.ip)
+		case object.IsKind[*Matrix](__sw9):
+			av := object.Kind[*Matrix](__sw9)
+			_ = av
+			return eqMatrix(av, b)
+		case object.IsKind[*Vector](__sw9):
+			av := object.Kind[*Vector](__sw9)
+			_ = av
+			return eqVector(av, b)
+		case object.IsKind[*Bag](__sw9):
+			av := object.Kind[*Bag](__sw9)
+			_ = av
+			bv, ok := object.KindOK[*Bag](b)
+			return ok && av.b.Equal(bv.b)
+		case object.IsKind[*Time](__sw9):
+			av := object.Kind[*Time](__sw9)
+			_ = av
+			return timeEqual(av, b)
+		case object.IsKind[*Date](__sw9):
+			av := object.Kind[*Date](__sw9)
+			_ = av
+			return dateEqual(av, b)
+		case object.IsKind[*URI](__sw9):
+			av := object.Kind[*URI](__sw9)
+			_ = av
+			return uriEqual(av, b)
+		case object.IsKind[*Regexp](__sw9):
+			av := object.Kind[*Regexp](__sw9)
+			_ = av
+			bv, ok := object.KindOK[*Regexp](b)
+			return ok && av.source == bv.source && orderFlags(av.flags) == orderFlags(bv.flags)
+		case object.IsBool(__sw9):
+			av := object.AsBoolV(__sw9)
+			_ = av
+			bv, ok := object.AsBoolOK(b)
+			return ok && av == bv
+		case object.IsNilObj(__sw9):
+			av := object.NilObj()
+			_ = av
+			_, ok := object.AsNilOK(b)
+			return ok
 		}
-		return true
-	case *object.Range:
-		bv, ok := b.(*object.Range)
-		return ok && av.Exclusive == bv.Exclusive && valueEqual(av.Lo, bv.Lo) && valueEqual(av.Hi, bv.Hi)
-	case *Set:
-		bv, ok := b.(*Set)
-		return ok && av.s.EqualQ(bv.s)
-	case *IPAddr:
-		bv, ok := b.(*IPAddr)
-		return ok && av.ip.Eql(bv.ip)
-	case *Matrix:
-		return eqMatrix(av, b)
-	case *Vector:
-		return eqVector(av, b)
-	case *Bag:
-		bv, ok := b.(*Bag)
-		return ok && av.b.Equal(bv.b)
-	case *Time:
-		return timeEqual(av, b)
-	case *Date:
-		return dateEqual(av, b)
-	case *URI:
-		return uriEqual(av, b)
-	case *Regexp:
-		bv, ok := b.(*Regexp)
-		return ok && av.source == bv.source && orderFlags(av.flags) == orderFlags(bv.flags)
-	case object.Bool:
-		bv, ok := b.(object.Bool)
-		return ok && av == bv
-	case object.Nil:
-		_, ok := b.(object.Nil)
-		return ok
 	}
 	// Reference types not handled above (classes, procs, …) compare by identity,
 	// which is Ruby's default Object#==.
@@ -645,68 +705,96 @@ func valueEqual(a, b object.Value) bool {
 // their members with eql? too. A built-in value subclass instance is compared as
 // the value it wraps; everything else falls back to object identity.
 func valueEql(a, b object.Value) bool {
-	if o, ok := a.(*RObject); ok && !object.IsNil(o.builtin) {
+	if o, ok := object.KindOK[*RObject](a); ok && !object.IsNil(o.builtin) {
 		a = o.builtin
 	}
-	if o, ok := b.(*RObject); ok && !object.IsNil(o.builtin) {
+	if o, ok := object.KindOK[*RObject](b); ok && !object.IsNil(o.builtin) {
 		b = o.builtin
 	}
-	switch av := a.(type) {
-	case object.Integer:
-		bv, ok := b.(object.Integer)
-		return ok && av == bv
-	case object.Float:
-		bv, ok := b.(object.Float)
-		return ok && av == bv
-	case *object.Bignum:
-		bv, ok := b.(*object.Bignum)
-		return ok && av.I.Cmp(bv.I) == 0
-	case *object.String:
-		bv, ok := b.(*object.String)
-		return ok && string(av.Bytes()) == string(bv.Bytes())
-	case object.Symbol:
-		bv, ok := b.(object.Symbol)
-		return ok && av == bv
-	case *object.Array:
-		bv, ok := b.(*object.Array)
-		if !ok || len(av.Elems) != len(bv.Elems) {
-			return false
-		}
-		for i := range av.Elems {
-			if !valueEql(av.Elems[i], bv.Elems[i]) {
+	{
+		__sw10 := a
+		switch {
+		case object.IsInt(__sw10):
+			av := object.AsInteger(__sw10)
+			_ = av
+			bv, ok := object.AsIntegerOK(b)
+			return ok && av == bv
+		case object.IsFloat(__sw10):
+			av := object.AsFloatV(__sw10)
+			_ = av
+			bv, ok := object.AsFloatOK(b)
+			return ok && av == bv
+		case object.IsKind[*object.Bignum](__sw10):
+			av := object.Kind[*object.Bignum](__sw10)
+			_ = av
+			bv, ok := object.KindOK[*object.Bignum](b)
+			return ok && av.I.Cmp(bv.I) == 0
+		case object.IsKind[*object.String](__sw10):
+			av := object.Kind[*object.String](__sw10)
+			_ = av
+			bv, ok := object.KindOK[*object.String](b)
+			return ok && string(av.Bytes()) == string(bv.Bytes())
+		case object.IsKind[object.Symbol](__sw10):
+			av := object.Kind[object.Symbol](__sw10)
+			_ = av
+			bv, ok := object.KindOK[object.Symbol](b)
+			return ok && av == bv
+		case object.IsKind[*object.Array](__sw10):
+			av := object.Kind[*object.Array](__sw10)
+			_ = av
+			bv, ok := object.KindOK[*object.Array](b)
+			if !ok || len(av.Elems) != len(bv.Elems) {
 				return false
 			}
-		}
-		return true
-	case *object.Hash:
-		bv, ok := b.(*object.Hash)
-		if !ok || av.Len() != bv.Len() {
-			return false
-		}
-		for _, k := range av.Keys {
-			v1, _ := av.Get(k)
-			v2, present := bv.Get(k)
-			if !present || !valueEql(v1, v2) {
+			for i := range av.Elems {
+				if !valueEql(av.Elems[i], bv.Elems[i]) {
+					return false
+				}
+			}
+			return true
+		case object.IsKind[*object.Hash](__sw10):
+			av := object.Kind[*object.Hash](__sw10)
+			_ = av
+			bv, ok := object.KindOK[*object.Hash](b)
+			if !ok || av.Len() != bv.Len() {
 				return false
 			}
+			for _, k := range av.Keys {
+				v1, _ := av.Get(k)
+				v2, present := bv.Get(k)
+				if !present || !valueEql(v1, v2) {
+					return false
+				}
+			}
+			return true
 		}
-		return true
 	}
 	return a == b // identity for nil/true/false and other reference types
 }
 
 func toFloat(v object.Value) (float64, bool) {
-	switch n := v.(type) {
-	case object.Integer:
-		return float64(n), true
-	case object.Float:
-		return float64(n), true
-	case *object.Bignum:
-		f, _ := new(big.Float).SetInt(n.I).Float64()
-		return f, true
-	case *object.Rational:
-		f, _ := n.R.Float64()
-		return f, true
+	{
+		__sw11 := v
+		switch {
+		case object.IsInt(__sw11):
+			n := object.AsInteger(__sw11)
+			_ = n
+			return float64(n), true
+		case object.IsFloat(__sw11):
+			n := object.AsFloatV(__sw11)
+			_ = n
+			return float64(n), true
+		case object.IsKind[*object.Bignum](__sw11):
+			n := object.Kind[*object.Bignum](__sw11)
+			_ = n
+			f, _ := new(big.Float).SetInt(n.I).Float64()
+			return f, true
+		case object.IsKind[*object.Rational](__sw11):
+			n := object.Kind[*object.Rational](__sw11)
+			_ = n
+			f, _ := n.R.Float64()
+			return f, true
+		}
 	}
 	return 0, false
 }

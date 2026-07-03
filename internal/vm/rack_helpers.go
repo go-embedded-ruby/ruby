@@ -15,23 +15,37 @@ import (
 // rackStr coerces an argument to its String contents: a String yields its bytes,
 // a Symbol its name, any other value its to_s.
 func rackStr(v object.Value) string {
-	switch n := v.(type) {
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw122 := v
+		switch {
+		case object.IsKind[*object.String](__sw122):
+			n := object.Kind[*object.String](__sw122)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw122):
+			n := object.Kind[object.Symbol](__sw122)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }
 
 // rackInt reads an argument as an int, falling back to def for a non-integer.
 func rackInt(v object.Value, def int) int {
-	switch n := v.(type) {
-	case object.Integer:
-		return int(n)
-	case *object.String:
-		if i, err := strconv.Atoi(n.Str()); err == nil {
-			return i
+	{
+		__sw123 := v
+		switch {
+		case object.IsInt(__sw123):
+			n := object.AsInteger(__sw123)
+			_ = n
+			return int(n)
+		case object.IsKind[*object.String](__sw123):
+			n := object.Kind[*object.String](__sw123)
+			_ = n
+			if i, err := strconv.Atoi(n.Str()); err == nil {
+				return i
+			}
 		}
 	}
 	return def
@@ -48,7 +62,7 @@ func rackArg(args []object.Value) object.Value {
 // rackEnv converts a Ruby Hash into a rack.Env (map[string]any), stringifying
 // keys and mapping scalar values into the generic Go value model rack consumes.
 func rackEnv(v object.Value) rack.Env {
-	h, ok := v.(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion into Hash")
 	}
@@ -64,19 +78,34 @@ func rackEnv(v object.Value) rack.Env {
 // entries are almost always strings; scalars are preserved and anything else is
 // stringified so the request accessors always see a usable value.
 func rackEnvValue(v object.Value) any {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case object.Float:
-		return float64(n)
+	{
+		__sw124 := v
+		switch {
+		case __sw124 == nil || object.IsNilObj(__sw124):
+			n := __sw124
+			_ = n
+			return nil
+		case object.IsKind[*object.String](__sw124):
+			n := object.Kind[*object.String](__sw124)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw124):
+			n := object.Kind[object.Symbol](__sw124)
+			_ = n
+			return string(n)
+		case object.IsBool(__sw124):
+			n := object.AsBoolV(__sw124)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw124):
+			n := object.AsInteger(__sw124)
+			_ = n
+			return int64(n)
+		case object.IsFloat(__sw124):
+			n := object.AsFloatV(__sw124)
+			_ = n
+			return float64(n)
+		}
 	}
 	return v.ToS()
 }
@@ -85,7 +114,7 @@ func rackEnvValue(v object.Value) any {
 // argument yields empty headers), stringifying keys and values.
 func rackHeadersFrom(v object.Value) *rack.Headers {
 	h := rack.NewHeaders()
-	hash, ok := v.(*object.Hash)
+	hash, ok := object.KindOK[*object.Hash](v)
 	if !ok {
 		return h
 	}
@@ -103,17 +132,26 @@ func rackResponseBody(args []object.Value) []string {
 	if len(args) == 0 {
 		return nil
 	}
-	switch n := args[0].(type) {
-	case object.Nil:
-		return nil
-	case *object.String:
-		return []string{n.Str()}
-	case *object.Array:
-		out := make([]string, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = rackStr(el)
+	{
+		__sw125 := args[0]
+		switch {
+		case object.IsNilObj(__sw125):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsKind[*object.String](__sw125):
+			n := object.Kind[*object.String](__sw125)
+			_ = n
+			return []string{n.Str()}
+		case object.IsKind[*object.Array](__sw125):
+			n := object.Kind[*object.Array](__sw125)
+			_ = n
+			out := make([]string, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = rackStr(el)
+			}
+			return out
 		}
-		return out
 	}
 	return []string{rackStr(args[0])}
 }
@@ -145,7 +183,7 @@ func rackParamsToHash(p *rack.Params) *object.Hash {
 // yields empty params), for Rack::Utils.build_query.
 func rackParamsFromHash(v object.Value) *rack.Params {
 	p := rack.NewParams()
-	hash, ok := v.(*object.Hash)
+	hash, ok := object.KindOK[*object.Hash](v)
 	if !ok {
 		return p
 	}
@@ -212,32 +250,51 @@ func rackFromGo(v any) object.Value {
 // rackToGo maps a Ruby value into the generic Go value model rack consumes
 // (nil / bool / int64 / float64 / string / []any / map[string]any).
 func rackToGo(v object.Value) any {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
-	case *object.Array:
-		out := make([]any, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = rackToGo(el)
+	{
+		__sw126 := v
+		switch {
+		case __sw126 == nil || object.IsNilObj(__sw126):
+			n := __sw126
+			_ = n
+			return nil
+		case object.IsBool(__sw126):
+			n := object.AsBoolV(__sw126)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw126):
+			n := object.AsInteger(__sw126)
+			_ = n
+			return int64(n)
+		case object.IsFloat(__sw126):
+			n := object.AsFloatV(__sw126)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw126):
+			n := object.Kind[*object.String](__sw126)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw126):
+			n := object.Kind[object.Symbol](__sw126)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.Array](__sw126):
+			n := object.Kind[*object.Array](__sw126)
+			_ = n
+			out := make([]any, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = rackToGo(el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw126):
+			n := object.Kind[*object.Hash](__sw126)
+			_ = n
+			m := make(map[string]any, len(n.Keys))
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				m[rackStr(k)] = rackToGo(val)
+			}
+			return m
 		}
-		return out
-	case *object.Hash:
-		m := make(map[string]any, len(n.Keys))
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m[rackStr(k)] = rackToGo(val)
-		}
-		return m
 	}
 	return v.ToS()
 }

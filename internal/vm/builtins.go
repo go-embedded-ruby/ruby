@@ -104,7 +104,7 @@ func (vm *VM) bootstrap() {
 	vm.registerScanf()     // String#scanf / IO#scanf / Kernel#scanf (require "scanf"), backed by go-ruby-scanf
 
 	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.callBlock(self.(*Proc), args)
+		return vm.callBlock(object.Kind[*Proc](self), args)
 	}
 	vm.cProc.smethods["new"] = &Method{name: "new", owner: vm.cProc,
 		native: func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -121,10 +121,10 @@ func (vm *VM) bootstrap() {
 	vm.cProc.defineNR("[]", procCall)
 	vm.cProc.defineNR("yield", procCall)
 	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*Proc).arityVal()))
+		return object.IntValue(int64(object.Kind[*Proc](self).arityVal()))
 	})
 	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*Proc).isLambda)
+		return object.Bool(object.Kind[*Proc](self).isLambda)
 	})
 	// Proc#source_location returns [file, line] for where the block was written,
 	// or nil when no source is known (a synthesized/native Proc, or compiled-in
@@ -133,14 +133,14 @@ func (vm *VM) bootstrap() {
 	// shape ([String, Integer]) is what callers (e.g. Puppet building a type URI)
 	// depend on.
 	vm.cProc.define("source_location", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		p := self.(*Proc)
+		p := object.Kind[*Proc](self)
 		if p.iseq == nil || p.iseq.File == "" {
 			return object.NilV
 		}
 		return object.NewArray(object.NewString(p.iseq.File), object.IntValue(0))
 	})
 	vm.cProc.define("curry", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		p := self.(*Proc)
+		p := object.Kind[*Proc](self)
 		need := p.arityVal()
 		if need < 0 { // optional/splat parameters: the required-argument count
 			need = -need - 1
@@ -156,7 +156,7 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("dup", dupFn)
 	vm.cObject.define("clone", dupFn)
 	vm.cObject.define("freeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if s, ok := self.(*object.String); ok {
+		if s, ok := object.KindOK[*object.String](self); ok {
 			s.Frozen = true
 		}
 		return self
@@ -236,7 +236,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cObject.define("methods", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		c := vm.classOf(self)
-		if o, ok := self.(*RObject); ok && o.singleton != nil {
+		if o, ok := object.KindOK[*RObject](self); ok && o.singleton != nil {
 			c = o.singleton // its super is the real class, so the walk picks up both
 		}
 		return object.NewArrayFromSlice(vm.methodNames(c, true))
@@ -246,22 +246,22 @@ func (vm *VM) bootstrap() {
 		// protected). An `all`/`false` argument selects inherited vs own.
 		all := len(args) == 0 || args[0].Truthy()
 		var candidates []object.Value
-		if _, ok := self.(*RClass); ok {
+		if _, ok := object.KindOK[*RClass](self); ok {
 			// For a class/module the callable methods are its singleton (class) methods,
 			// as with #singleton_methods.
 			candidates = vm.singletonMethodNames(self, all)
 		} else {
 			c := vm.classOf(self)
-			if o, ok := self.(*RObject); ok && o.singleton != nil {
+			if o, ok := object.KindOK[*RObject](self); ok && o.singleton != nil {
 				c = o.singleton
 			}
 			candidates = vm.methodNames(c, all)
 		}
 		var out []object.Value
 		for _, n := range candidates {
-			name := string(n.(object.Symbol))
+			name := string(object.Kind[object.Symbol](n))
 			var m *Method
-			if cls, ok := self.(*RClass); ok {
+			if cls, ok := object.KindOK[*RClass](self); ok {
 				m = vm.resolveClassMethod(cls, name)
 			} else {
 				m = undefAsNil(lookupMethod(vm.dispatchClass(self), name))
@@ -311,7 +311,7 @@ func (vm *VM) bootstrap() {
 		return vm.callBlockSelf(blk, self, args)
 	})
 	formatFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fmtStr, ok := args[0].(*object.String)
+		fmtStr, ok := object.KindOK[*object.String](args[0])
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 		}
@@ -333,7 +333,7 @@ func (vm *VM) bootstrap() {
 		return blk
 	})
 	vm.cSymbol.define("to_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		name := string(self.(object.Symbol))
+		name := string(object.Kind[object.Symbol](self))
 		// :sym.to_proc is { |recv, *rest| recv.sym(*rest) } — arity -2 as in MRI.
 		return &Proc{nativeArity: -2, native: func(vm *VM, args []object.Value) object.Value {
 			return vm.send(args[0], name, args[1:], nil)
@@ -343,7 +343,7 @@ func (vm *VM) bootstrap() {
 	// Exception hierarchy. Each is registered as a constant so it can be raised
 	// and matched by rescue.
 	exc := func(name, super string) *RClass {
-		c := newClass(name, vm.consts[super].(*RClass))
+		c := newClass(name, object.Kind[*RClass](vm.consts[super]))
 		vm.consts[name] = c
 		return c
 	}
@@ -387,14 +387,14 @@ func (vm *VM) bootstrap() {
 	// SystemExit#initialize accepts (status=0, message=nil) or (message); it stores
 	// @status (the process exit code) and the message. SystemExit#status returns it.
 	systemExit.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*RObject)
+		o := object.Kind[*RObject](self)
 		status := object.Value(object.IntValue(0))
 		switch {
 		case len(args) >= 2:
 			status = args[0]
 			o.ivars["@message"] = object.NewString(args[1].ToS())
 		case len(args) == 1:
-			if i, ok := args[0].(object.Integer); ok {
+			if i, ok := object.AsIntegerOK(args[0]); ok {
 				status = i
 			} else {
 				o.ivars["@message"] = object.NewString(args[0].ToS())
@@ -410,7 +410,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(0)
 	})
 	systemExit.define("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		s, ok := getIvar(self, "@status").(object.Integer)
+		s, ok := object.AsIntegerOK(getIvar(self, "@status"))
 		return object.Bool(!ok || s == 0)
 	})
 
@@ -493,7 +493,7 @@ func (vm *VM) bootstrap() {
 	// return it (or the class name when unset).
 	cException.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) > 0 {
-			self.(*RObject).ivars["@message"] = object.NewString(args[0].ToS())
+			object.Kind[*RObject](self).ivars["@message"] = object.NewString(args[0].ToS())
 		}
 		return object.NilV
 	})
@@ -559,7 +559,7 @@ func (vm *VM) bootstrap() {
 		return object.NewString(self.Inspect())
 	})
 	vm.cObject.define("nil?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		_, isNil := self.(object.Nil)
+		_, isNil := object.AsNilOK(self)
 		return object.Bool(isNil)
 	})
 	vm.cObject.define("initialize", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -591,39 +591,57 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cObject.define("raise", nativeRaise)
 	vm.cObject.define("Integer", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		switch v := args[0].(type) {
-		case object.Integer:
-			return v
-		case object.Float:
-			return object.IntValue(int64(v))
-		case *object.String:
-			base := 0 // no explicit base: auto-detect a 0x/0b/0o/0 prefix (and allow _)
-			if len(args) > 1 {
-				base = int(intArg(args[1]))
+		{
+			__sw20 := args[0]
+			switch {
+			case object.IsInt(__sw20):
+				v := object.AsInteger(__sw20)
+				_ = v
+				return v
+			case object.IsFloat(__sw20):
+				v := object.AsFloatV(__sw20)
+				_ = v
+				return object.IntValue(int64(v))
+			case object.IsKind[*object.String](__sw20):
+				v := object.Kind[*object.String](__sw20)
+				_ = v
+				base := 0 // no explicit base: auto-detect a 0x/0b/0o/0 prefix (and allow _)
+				if len(args) > 1 {
+					base = int(intArg(args[1]))
+				}
+				// Go's ParseInt only accepts a radix prefix (0x/0b/0o/0d) with base 0,
+				// so strip a prefix that matches the explicit base, as MRI allows.
+				n, err := strconv.ParseInt(stripRadixPrefix(strings.TrimSpace(v.Str()), base), base, 64)
+				if err != nil {
+					raise("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
+				}
+				return object.IntValue(n)
 			}
-			// Go's ParseInt only accepts a radix prefix (0x/0b/0o/0d) with base 0,
-			// so strip a prefix that matches the explicit base, as MRI allows.
-			n, err := strconv.ParseInt(stripRadixPrefix(strings.TrimSpace(v.Str()), base), base, 64)
-			if err != nil {
-				raise("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
-			}
-			return object.IntValue(n)
 		}
 		raise("TypeError", "can't convert %s into Integer", args[0].Inspect())
 		return object.NilV
 	})
 	vm.cObject.define("Float", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		switch v := args[0].(type) {
-		case object.Float:
-			return v
-		case object.Integer:
-			return object.Float(float64(v))
-		case *object.String:
-			f, err := strconv.ParseFloat(strings.TrimSpace(v.Str()), 64)
-			if err != nil {
-				raise("ArgumentError", "invalid value for Float(): %s", v.Inspect())
+		{
+			__sw21 := args[0]
+			switch {
+			case object.IsFloat(__sw21):
+				v := object.AsFloatV(__sw21)
+				_ = v
+				return v
+			case object.IsInt(__sw21):
+				v := object.AsInteger(__sw21)
+				_ = v
+				return object.Float(float64(v))
+			case object.IsKind[*object.String](__sw21):
+				v := object.Kind[*object.String](__sw21)
+				_ = v
+				f, err := strconv.ParseFloat(strings.TrimSpace(v.Str()), 64)
+				if err != nil {
+					raise("ArgumentError", "invalid value for Float(): %s", v.Inspect())
+				}
+				return object.Float(f)
 			}
-			return object.Float(f)
 		}
 		raise("TypeError", "can't convert %s into Float", args[0].Inspect())
 		return object.NilV
@@ -632,13 +650,22 @@ func (vm *VM) bootstrap() {
 		return vm.send(args[0], "to_s", nil, nil)
 	})
 	vm.cObject.define("Array", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		switch v := args[0].(type) {
-		case object.Nil:
-			return object.NewArray()
-		case *object.Array:
-			return v
-		default:
-			return object.NewArray(v)
+		{
+			__sw22 := args[0]
+			switch {
+			case object.IsNilObj(__sw22):
+				v := object.NilObj()
+				_ = v
+				return object.NewArray()
+			case object.IsKind[*object.Array](__sw22):
+				v := object.Kind[*object.Array](__sw22)
+				_ = v
+				return v
+			default:
+				v := __sw22
+				_ = v
+				return object.NewArray(v)
+			}
 		}
 	})
 	sendFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -713,14 +740,14 @@ func (vm *VM) bootstrap() {
 		return object.Bool(vm.send(self, "==", []object.Value{args[0]}, nil).Truthy())
 	})
 	vm.cModule.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(classIsA(vm.classOf(args[0]), self.(*RClass)))
+		return object.Bool(classIsA(vm.classOf(args[0]), object.Kind[*RClass](self)))
 	})
 
 	// Module (Class inherits these).
 	vm.cModule.define("include", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		target := self.(*RClass)
+		target := object.Kind[*RClass](self)
 		for _, a := range args {
-			mod := a.(*RClass)
+			mod := object.Kind[*RClass](a)
 			target.includes = append(target.includes, mod)
 			bumpMethodSerial()
 			// Hook: module.included(base), fired per included module if it defines
@@ -732,9 +759,9 @@ func (vm *VM) bootstrap() {
 		return target
 	})
 	vm.cModule.define("prepend", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		target := self.(*RClass)
+		target := object.Kind[*RClass](self)
 		for _, a := range args {
-			mod := a.(*RClass)
+			mod := object.Kind[*RClass](a)
 			target.prepends = append(target.prepends, mod)
 			bumpMethodSerial()
 			// Hook: module.prepended(base), mirroring included.
@@ -745,7 +772,7 @@ func (vm *VM) bootstrap() {
 		return target
 	})
 	vm.cModule.define("ancestors", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		anc := vm.ancestors(self.(*RClass))
+		anc := vm.ancestors(object.Kind[*RClass](self))
 		out := make([]object.Value, len(anc))
 		for i, k := range anc {
 			out[i] = k
@@ -753,11 +780,11 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cModule.define("include?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		mod, ok := args[0].(*RClass)
+		mod, ok := object.KindOK[*RClass](args[0])
 		if !ok {
 			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
 		}
-		me := self.(*RClass)
+		me := object.Kind[*RClass](self)
 		for _, k := range vm.ancestors(me) {
 			if k == mod && k != me { // a module never includes itself
 				return object.Bool(true)
@@ -766,32 +793,32 @@ func (vm *VM) bootstrap() {
 		return object.False
 	})
 	vm.cModule.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if c := self.(*RClass); c.name != "" {
+		if c := object.Kind[*RClass](self); c.name != "" {
 			return object.NewString(c.name)
 		}
 		return object.NilV // anonymous class/module
 	})
 	vm.cModule.define("instance_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		all := len(args) == 0 || args[0].Truthy() // instance_methods(false) = own only
-		return object.NewArrayFromSlice(vm.methodNames(self.(*RClass), all))
+		return object.NewArrayFromSlice(vm.methodNames(object.Kind[*RClass](self), all))
 	})
 	vm.cModule.define("const_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.scopedConst(self.(*RClass), constNameArg(args[0]))
+		return vm.scopedConst(object.Kind[*RClass](self), constNameArg(args[0]))
 	})
 	// Class-variable reflection. Names arrive as a Symbol or String (e.g. :@@x);
 	// the @@-prefixed name is the key in the cvars table. Lookups walk the
 	// superclass chain via cvarOwner, mirroring how @@name resolves at runtime.
 	vm.cModule.define("class_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := cvarNameArg(args[0])
-		if c := cvarOwner(self.(*RClass), name); c != nil {
+		if c := cvarOwner(object.Kind[*RClass](self), name); c != nil {
 			return c.cvars[name]
 		}
-		raise("NameError", "uninitialized class variable %s in %s", name, self.(*RClass).name)
+		raise("NameError", "uninitialized class variable %s in %s", name, object.Kind[*RClass](self).name)
 		return object.NilV
 	})
 	vm.cModule.define("class_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := cvarNameArg(args[0])
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		if c := cvarOwner(cls, name); c != nil {
 			c.cvars[name] = args[1]
 		} else {
@@ -800,7 +827,7 @@ func (vm *VM) bootstrap() {
 		return args[1]
 	})
 	vm.cModule.define("class_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(cvarOwner(self.(*RClass), cvarNameArg(args[0])) != nil)
+		return object.Bool(cvarOwner(object.Kind[*RClass](self), cvarNameArg(args[0])) != nil)
 	})
 	vm.cModule.define("class_variables", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// class_variables(inherit=true): own variables, then ancestors', each
@@ -808,7 +835,7 @@ func (vm *VM) bootstrap() {
 		inherit := len(args) == 0 || args[0].Truthy()
 		seen := map[string]bool{}
 		var names []string
-		for c := self.(*RClass); c != nil; c = c.super {
+		for c := object.Kind[*RClass](self); c != nil; c = c.super {
 			level := make([]string, 0, len(c.cvars))
 			for name := range c.cvars {
 				if !seen[name] {
@@ -832,7 +859,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cModule.define("const_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		// Route through assignConstIn so an anonymous class/module bound here gains
 		// the qualified name of its constant (Ruby's "permanent name on first
 		// constant binding" rule) — the same path a `Foo::Bar = ...` literal takes.
@@ -848,7 +875,7 @@ func (vm *VM) bootstrap() {
 	// stale binding before installing the new one.
 	vm.cModule.define("remove_const", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		table := cls.consts
 		if cls == vm.cObject {
 			table = vm.consts
@@ -866,7 +893,7 @@ func (vm *VM) bootstrap() {
 		// (default true). With inherit=false only the receiver's own table is
 		// checked — Puppet's classgen relies on this to decide a fresh redefinition.
 		inherit := len(args) < 2 || args[1].Truthy()
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		// A pending autoload counts as defined for const_defined?, which (unlike
 		// const_get) must NOT trigger the require — it just reports presence.
 		if !inherit {
@@ -906,7 +933,7 @@ func (vm *VM) bootstrap() {
 				}
 			}
 		}
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		if inherit {
 			for _, anc := range vm.ancestors(cls) {
 				if anc == vm.cObject || anc == vm.cBasicObject {
@@ -928,8 +955,8 @@ func (vm *VM) bootstrap() {
 	// true if A is a proper descendant of B, false if a proper ancestor (or, for
 	// <=/>=, equal), and nil when the two are unrelated.
 	classCmp := func(self, other object.Value) object.Value {
-		a := self.(*RClass)
-		b, ok := other.(*RClass)
+		a := object.Kind[*RClass](self)
+		b, ok := object.KindOK[*RClass](other)
 		if !ok {
 			raise("TypeError", "compared with non class/module")
 		}
@@ -945,7 +972,7 @@ func (vm *VM) bootstrap() {
 	}
 	classCmpOp := func(want func(int) bool) NativeFn {
 		return func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-			if c, ok := classCmp(self, args[0]).(object.Integer); ok {
+			if c, ok := object.AsIntegerOK(classCmp(self, args[0])); ok {
 				return object.Bool(want(int(c)))
 			}
 			return object.NilV
@@ -956,15 +983,15 @@ func (vm *VM) bootstrap() {
 	vm.cModule.define(">", classCmpOp(func(c int) bool { return c > 0 }))
 	vm.cModule.define(">=", classCmpOp(func(c int) bool { return c >= 0 }))
 	vm.cModule.define("attr_reader", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		defineAttrs(self.(*RClass), args, true, false)
+		defineAttrs(object.Kind[*RClass](self), args, true, false)
 		return object.NilV
 	})
 	vm.cModule.define("attr_writer", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		defineAttrs(self.(*RClass), args, false, true)
+		defineAttrs(object.Kind[*RClass](self), args, false, true)
 		return object.NilV
 	})
 	vm.cModule.define("attr_accessor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		defineAttrs(self.(*RClass), args, true, true)
+		defineAttrs(object.Kind[*RClass](self), args, true, true)
 		return object.NilV
 	})
 	classEvalFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -975,13 +1002,13 @@ func (vm *VM) bootstrap() {
 		// (they steer error reporting only) and otherwise ignored.
 		if blk == nil {
 			if len(args) > 0 {
-				if s, ok := args[0].(*object.String); ok {
-					return vm.classEvalString(self.(*RClass), string(s.Bytes()))
+				if s, ok := object.KindOK[*object.String](args[0]); ok {
+					return vm.classEvalString(object.Kind[*RClass](self), string(s.Bytes()))
 				}
 			}
 			raise("LocalJumpError", "no block given (yield)")
 		}
-		return vm.classEval(self.(*RClass), blk, nil)
+		return vm.classEval(object.Kind[*RClass](self), blk, nil)
 	}
 	vm.cModule.define("class_eval", classEvalFn)
 	vm.cModule.define("module_eval", classEvalFn)
@@ -989,33 +1016,40 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
-		return vm.classEval(self.(*RClass), blk, args)
+		return vm.classEval(object.Kind[*RClass](self), blk, args)
 	})
 	vm.cModule.define("define_method", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		name := nameArg(args[0])
 		// A Method / UnboundMethod second argument transplants that method's body
 		// under the new name and owner (Ruby allows define_method(:m, other_method)).
 		if len(args) > 1 {
-			switch src := args[1].(type) {
-			case *BoundMethod:
-				cm := *src.m
-				cm.name, cm.owner = name, cls
-				cls.methods[name] = &cm
-				bumpMethodSerial()
-				return object.Symbol(name)
-			case *UnboundMethod:
-				cm := *src.m
-				cm.name, cm.owner = name, cls
-				cls.methods[name] = &cm
-				bumpMethodSerial()
-				return object.Symbol(name)
+			{
+				__sw23 := args[1]
+				switch {
+				case object.IsKind[*BoundMethod](__sw23):
+					src := object.Kind[*BoundMethod](__sw23)
+					_ = src
+					cm := *src.m
+					cm.name, cm.owner = name, cls
+					cls.methods[name] = &cm
+					bumpMethodSerial()
+					return object.Symbol(name)
+				case object.IsKind[*UnboundMethod](__sw23):
+					src := object.Kind[*UnboundMethod](__sw23)
+					_ = src
+					cm := *src.m
+					cm.name, cm.owner = name, cls
+					cls.methods[name] = &cm
+					bumpMethodSerial()
+					return object.Symbol(name)
+				}
 			}
 		}
 		body := blk
 		if body == nil {
 			if len(args) > 1 {
-				p, ok := args[1].(*Proc)
+				p, ok := object.KindOK[*Proc](args[1])
 				if !ok {
 					raise("TypeError", "wrong argument type %s (expected Proc)", classNameOf(args[1]))
 				}
@@ -1036,9 +1070,9 @@ func (vm *VM) bootstrap() {
 	vm.cSymbol.define("intern", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self // MRI: Symbol#intern is an alias of Symbol#to_sym (returns self)
 	})
-	symStr := func(self object.Value) string { return string(self.(object.Symbol)) }
+	symStr := func(self object.Value) string { return string(object.Kind[object.Symbol](self)) }
 	vm.cSymbol.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(object.Symbol)
+		o, ok := object.KindOK[object.Symbol](args[0])
 		if !ok { // incomparable with a non-Symbol
 			return object.NilV
 		}
@@ -1101,8 +1135,8 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("**", powNumeric)
 	vm.cFloat.define("pow", powNumeric)
 	vm.cString.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.String)
-		b, ok := args[0].(*object.String)
+		a := object.Kind[*object.String](self)
+		b, ok := object.KindOK[*object.String](args[0])
 		if !ok {
 			return object.NilV
 		}
@@ -1111,10 +1145,10 @@ func (vm *VM) bootstrap() {
 
 	// String. Methods over the mutable byte-based String (length/chars/index are
 	// rune-aware for UTF-8). strOf reads the receiver's current contents.
-	strOf := func(self object.Value) string { return self.(*object.String).Str() }
+	strOf := func(self object.Value) string { return object.Kind[*object.String](self).Str() }
 	strLen := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		// A binary (ASCII-8BIT) string counts bytes; otherwise characters.
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		if s.IsBinary() {
 			return object.IntValue(int64(len(s.Bytes())))
 		}
@@ -1135,14 +1169,14 @@ func (vm *VM) bootstrap() {
 		return object.NewString(strings.ToLower(strOf(self)))
 	})
 	vm.cString.define("casecmp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*object.String)
+		o, ok := object.KindOK[*object.String](args[0])
 		if !ok { // like <=>, a non-String operand compares to nil
 			return object.NilV
 		}
 		return object.IntValue(int64(strings.Compare(strings.ToLower(strOf(self)), strings.ToLower(o.Str()))))
 	})
 	vm.cString.define("casecmp?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*object.String)
+		o, ok := object.KindOK[*object.String](args[0])
 		if !ok {
 			return object.NilV
 		}
@@ -1204,7 +1238,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(s[i]))
 	})
 	vm.cString.define("byteslice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return byteslice(self.(*object.String), args)
+		return byteslice(object.Kind[*object.String](self), args)
 	})
 	vm.cString.define("lines", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		segs := splitLines(strOf(self))
@@ -1267,7 +1301,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("start_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := strOf(self)
 		for _, a := range args { // true if any prefix matches; a Regexp must match at offset 0
-			if re, ok := a.(*Regexp); ok {
+			if re, ok := object.KindOK[*Regexp](a); ok {
 				if md := re.re.Match(s); md != nil && md.Begin(0) == 0 {
 					return object.True
 				}
@@ -1313,7 +1347,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(utf8.RuneCountInString(strOf(self)[:byteIdx])))
 	})
 	vm.cString.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		re, ok := args[0].(*Regexp)
+		re, ok := object.KindOK[*Regexp](args[0])
 		if !ok {
 			raise("TypeError", "type mismatch: %s given", classNameOf(args[0]))
 		}
@@ -1364,7 +1398,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("scrub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		repl := "�"
 		if len(args) > 0 {
-			if _, isNil := args[0].(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(args[0]); !isNil {
 				repl = strArg(args[0])
 			}
 		}
@@ -1428,13 +1462,13 @@ func (vm *VM) bootstrap() {
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		var res object.Value
-		if re, ok := args[0].(*Regexp); ok { // s[/re/] / s[/re/, group]
+		if re, ok := object.KindOK[*Regexp](args[0]); ok { // s[/re/] / s[/re/, group]
 			res = vm.stringRegexpIndex(strOf(self), re, args[1:])
 		} else {
-			res = stringIndexEnc(strOf(self), args, self.(*object.String).IsBinary())
+			res = stringIndexEnc(strOf(self), args, object.Kind[*object.String](self).IsBinary())
 		}
-		if sub, ok := res.(*object.String); ok { // a slice keeps the receiver's encoding
-			sub.Enc = self.(*object.String).Enc
+		if sub, ok := object.KindOK[*object.String](res); ok { // a slice keeps the receiver's encoding
+			sub.Enc = object.Kind[*object.String](self).Enc
 		}
 		return res
 	}
@@ -1466,7 +1500,7 @@ func (vm *VM) bootstrap() {
 	// `<<` and concat append each argument: a String contributes its bytes, an
 	// Integer its UTF-8 code point.
 	strConcatFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		checkFrozen(s)
 		for _, a := range args {
 			s.SetBytes(append(s.MutableBytes(), strAppendBytes(a)...))
@@ -1476,13 +1510,13 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("<<", strConcatFn)
 	vm.cString.define("concat", strConcatFn)
 	vm.cString.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		checkFrozen(s)
 		s.SetBytes([]byte(strArg(args[0])))
 		return s
 	})
 	vm.cString.define("prepend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		checkFrozen(s)
 		var head []byte
 		for _, a := range args {
@@ -1492,7 +1526,7 @@ func (vm *VM) bootstrap() {
 		return s
 	})
 	vm.cString.define("insert", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		checkFrozen(s)
 		r := []rune(s.Str())
 		at := int(intArg(args[0]))
@@ -1508,7 +1542,7 @@ func (vm *VM) bootstrap() {
 		return s
 	})
 	vm.cString.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		checkFrozen(s)
 		s.SetBytes(nil)
 		return s
@@ -1526,7 +1560,7 @@ func (vm *VM) bootstrap() {
 		return strBang(self, swapcaseStr)
 	})
 	vm.cString.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		checkFrozen(s)
 		s.SetBytes([]byte(reverseStr(s.Str())))
 		return s
@@ -1560,30 +1594,30 @@ func (vm *VM) bootstrap() {
 		return vm.strSubBang(self, args, blk, true)
 	})
 	vm.cString.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return stringIndexAssign(self.(*object.String), args)
+		return stringIndexAssign(object.Kind[*object.String](self), args)
 	})
 	vm.cString.define("slice!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return stringSliceBang(self.(*object.String), args)
+		return stringSliceBang(object.Kind[*object.String](self), args)
 	})
 
 	// Array.
 	vm.cArray.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*object.Array).Elems)))
+		return object.IntValue(int64(len(object.Kind[*object.Array](self).Elems)))
 	})
 	vm.cArray.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*object.Array).Elems)))
+		return object.IntValue(int64(len(object.Kind[*object.Array](self).Elems)))
 	})
 	vm.cArray.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(len(self.(*object.Array).Elems) == 0)
+		return object.Bool(len(object.Kind[*object.Array](self).Elems) == 0)
 	})
 	// Array#initialize fills the receiver: empty / a copy of an Array argument /
 	// n copies of a value / n elements from a block. Reused by Array.new for both
 	// Array and its subclasses.
 	arrayInit := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		// Array.new / Array.new(other) / Array.new(n[, val]) / Array.new(n) { |i| }
-		arr := self.(*object.Array)
+		arr := object.Kind[*object.Array](self)
 		if len(args) == 1 {
-			if a, ok := args[0].(*object.Array); ok {
+			if a, ok := object.KindOK[*object.Array](args[0]); ok {
 				arr.Elems = append([]object.Value{}, a.Elems...)
 				return self
 			}
@@ -1613,7 +1647,7 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("initialize", arrayInit)
 	vm.cArray.smethods["new"] = &Method{name: "new", owner: vm.cArray,
 		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-			if recv := self.(*RClass); recv != vm.cArray {
+			if recv := object.Kind[*RClass](self); recv != vm.cArray {
 				return vm.newBuiltinSubclass(recv, object.NewArray(), args, blk)
 			}
 			arr := object.NewArray()
@@ -1621,7 +1655,7 @@ func (vm *VM) bootstrap() {
 			return arr
 		}}
 	vm.cArray.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array).Elems
+		a := object.Kind[*object.Array](self).Elems
 		out := make([]object.Value, len(args))
 		for i, idxV := range args {
 			idx := int(intArg(idxV))
@@ -1637,7 +1671,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		if len(args) == 0 {
 			if len(a.Elems) == 0 {
 				return object.NilV
@@ -1650,7 +1684,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		if len(args) == 0 {
 			if len(a.Elems) == 0 {
 				return object.NilV
@@ -1663,17 +1697,17 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		a.Elems = append(a.Elems, args...)
 		return a
 	})
 	vm.cArray.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		a.Elems = append(a.Elems, args[0])
 		return a
 	})
 	vm.cArray.define("pop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		if len(args) > 0 { // pop(n) removes and returns the last n as an array
 			n := int(intArg(args[0]))
 			if n < 0 {
@@ -1695,7 +1729,7 @@ func (vm *VM) bootstrap() {
 		return v
 	})
 	vm.cArray.define("shift", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		if len(args) > 0 { // shift(n) removes and returns the first n as an array
 			n := int(intArg(args[0]))
 			if n < 0 {
@@ -1716,7 +1750,7 @@ func (vm *VM) bootstrap() {
 		return v
 	})
 	unshift := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		a.Elems = append(append([]object.Value{}, args...), a.Elems...)
 		return a
 	}
@@ -1727,7 +1761,7 @@ func (vm *VM) bootstrap() {
 	// so -1 appends). Inserting past the end pads the gap with nil, as in MRI.
 	// With no objects the array is returned unchanged.
 	vm.cArray.define("insert", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
@@ -1757,7 +1791,7 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("delete", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		// Remove every element == the argument; return it, or (a block's result,
 		// else nil) when nothing matched.
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		found := false
 		var out []object.Value
 		for _, e := range a.Elems {
@@ -1780,7 +1814,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "delete_if")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		var out []object.Value
 		for _, e := range a.Elems {
 			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
@@ -1791,9 +1825,9 @@ func (vm *VM) bootstrap() {
 		return a
 	})
 	vm.cArray.define("concat", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		for _, arg := range args {
-			other, ok := arg.(*object.Array)
+			other, ok := object.KindOK[*object.Array](arg)
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", classNameOf(arg))
 			}
@@ -1802,13 +1836,13 @@ func (vm *VM) bootstrap() {
 		return a
 	})
 	vm.cArray.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		a.Elems = nil
 		return a
 	})
 	vm.cArray.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
-		other, ok := args[0].(*object.Array)
+		a := object.Kind[*object.Array](self)
+		other, ok := object.KindOK[*object.Array](args[0])
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Array", classNameOf(args[0]))
 		}
@@ -1816,7 +1850,7 @@ func (vm *VM) bootstrap() {
 		return a
 	})
 	vm.cArray.define("rotate!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		if n := len(a.Elems); n > 0 {
 			k := 1
 			if len(args) > 0 {
@@ -1831,14 +1865,14 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "reverse_each")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		for i := len(a.Elems) - 1; i >= 0; i-- {
 			vm.callBlock(blk, []object.Value{a.Elems[i]})
 		}
 		return a
 	})
 	arrayInclude := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		for _, e := range self.(*object.Array).Elems {
+		for _, e := range object.Kind[*object.Array](self).Elems {
 			if valueEqual(e, args[0]) {
 				return object.True
 			}
@@ -1853,8 +1887,8 @@ func (vm *VM) bootstrap() {
 	// freshly allocated result); they never retain the args slice, so the OpSend
 	// fast path may hand them the live operand-stack region (defineNR).
 	vm.cArray.defineNR("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
-		if rng, ok := args[0].(*object.Range); ok {
+		a := object.Kind[*object.Array](self)
+		if rng, ok := object.KindOK[*object.Range](args[0]); ok {
 			start, length, ok := sliceRange(len(a.Elems), rng)
 			if !ok {
 				return object.NilV
@@ -1883,9 +1917,9 @@ func (vm *VM) bootstrap() {
 		return object.NilV
 	})
 	vm.cArray.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		// Range form: a[range] = value.
-		if rng, ok := args[0].(*object.Range); ok {
+		if rng, ok := object.KindOK[*object.Range](args[0]); ok {
 			start, length, ok := sliceRange(len(a.Elems), rng)
 			if !ok {
 				raise("RangeError", "%s out of range", rng.Inspect())
@@ -1927,7 +1961,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		if blk.native != nil {
 			// A synthesized native block (e.g. &:to_s, a Go-compiled AOT closure)
 			// runs opaque Go code that could retain the args slice, so each yield
@@ -1954,7 +1988,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "map")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		out := make([]object.Value, len(a.Elems))
 		for i, e := range a.Elems {
 			out[i] = vm.callBlock(blk, []object.Value{e})
@@ -1971,7 +2005,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "select")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		out := make([]object.Value, 0, len(a.Elems))
 		for _, e := range a.Elems {
 			if vm.callBlock(blk, []object.Value{e}).Truthy() {
@@ -1985,10 +2019,10 @@ func (vm *VM) bootstrap() {
 	// (sym), (init) and bare-block forms, the "no block given" yield error, and the
 	// nil result of an empty fold — so behaviour is byte-identical, only faster.
 	vm.cArray.define("reduce", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return arrayReduce(vm, self.(*object.Array), args, blk)
+		return arrayReduce(vm, object.Kind[*object.Array](self), args, blk)
 	})
 	vm.cArray.define("reverse", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		out := make([]object.Value, len(a.Elems))
 		for i, e := range a.Elems {
 			out[len(a.Elems)-1-i] = e
@@ -1999,12 +2033,12 @@ func (vm *VM) bootstrap() {
 		return vm.digValue(self, args)
 	})
 	vm.cArray.define("uniq", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.arrayUniq(self.(*object.Array).Elems, blk))
+		return object.NewArrayFromSlice(vm.arrayUniq(object.Kind[*object.Array](self).Elems, blk))
 	})
 	// Set intersection (&) and union (|): both deduplicate, keeping first-seen
 	// order, matching Ruby.
 	vm.cArray.define("&", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		b := arrArg(args[0])
 		var out []object.Value
 		for _, e := range a.Elems {
@@ -2015,7 +2049,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("|", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		b := arrArg(args[0])
 		var out []object.Value
 		for _, e := range append(append([]object.Value{}, a.Elems...), b.Elems...) {
@@ -2029,7 +2063,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "map!")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		for i := range a.Elems {
 			a.Elems[i] = vm.callBlock(blk, []object.Value{a.Elems[i]})
 		}
@@ -2038,21 +2072,21 @@ func (vm *VM) bootstrap() {
 	// collect! is the classic alias of map! (as collect is of map).
 	vm.aliasMethod(vm.cArray, "collect!", "map!")
 	vm.cArray.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		for i, j := 0, len(a.Elems)-1; i < j; i, j = i+1, j-1 {
 			a.Elems[i], a.Elems[j] = a.Elems[j], a.Elems[i]
 		}
 		return self
 	})
 	vm.cArray.define("sort!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		vm.sortSlice(self.(*object.Array).Elems, blk)
+		vm.sortSlice(object.Kind[*object.Array](self).Elems, blk)
 		return self
 	})
 	selectBang := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "select!")
 		}
-		return arrayKeepIf(vm, self.(*object.Array), blk, true)
+		return arrayKeepIf(vm, object.Kind[*object.Array](self), blk, true)
 	}
 	vm.cArray.define("select!", selectBang)
 	vm.cArray.define("filter!", selectBang)
@@ -2060,13 +2094,13 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "reject!")
 		}
-		return arrayKeepIf(vm, self.(*object.Array), blk, false)
+		return arrayKeepIf(vm, object.Kind[*object.Array](self), blk, false)
 	})
 	vm.cArray.define("compact!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		var out []object.Value
 		for _, e := range a.Elems {
-			if _, isNil := e.(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(e); !isNil {
 				out = append(out, e)
 			}
 		}
@@ -2077,7 +2111,7 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.define("uniq!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		out := vm.arrayUniq(a.Elems, blk)
 		if len(out) == len(a.Elems) {
 			return object.NilV
@@ -2087,8 +2121,8 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("compact", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		var out []object.Value
-		for _, e := range self.(*object.Array).Elems {
-			if _, isNil := e.(object.Nil); !isNil {
+		for _, e := range object.Kind[*object.Array](self).Elems {
+			if _, isNil := object.AsNilOK(e); !isNil {
 				out = append(out, e)
 			}
 		}
@@ -2099,14 +2133,14 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			depth = int(intArg(args[0]))
 		}
-		return object.NewArrayFromSlice(flattenDepth(self.(*object.Array).Elems, depth))
+		return object.NewArrayFromSlice(flattenDepth(object.Kind[*object.Array](self).Elems, depth))
 	})
 	vm.cArray.define("flatten!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 {
 			depth = int(intArg(args[0]))
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		out, changed := flattenDepthChanged(a.Elems, depth)
 		if !changed {
 			return object.NilV
@@ -2119,7 +2153,7 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			acc = args[0]
 		}
-		for _, e := range self.(*object.Array).Elems {
+		for _, e := range object.Kind[*object.Array](self).Elems {
 			if blk != nil { // sum { |x| ... } maps each element before adding
 				e = vm.callBlock(blk, []object.Value{e})
 			}
@@ -2129,11 +2163,11 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		h := object.NewHash()
-		for i, e := range self.(*object.Array).Elems {
+		for i, e := range object.Kind[*object.Array](self).Elems {
 			if blk != nil { // to_h { |x| [k, v] } maps each element to a pair
 				e = vm.callBlock(blk, []object.Value{e})
 			}
-			pair, ok := e.(*object.Array)
+			pair, ok := object.KindOK[*object.Array](e)
 			if !ok {
 				raise("TypeError", "wrong element type %s at %d (expected array)", vm.classOf(e).name, i)
 			}
@@ -2155,7 +2189,7 @@ func (vm *VM) bootstrap() {
 		if n <= 0 {
 			raise("ArgumentError", "invalid slice size")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		for i := 0; i < len(a.Elems); i += n {
 			end := i + n
 			if end > len(a.Elems) {
@@ -2178,7 +2212,7 @@ func (vm *VM) bootstrap() {
 		if n <= 0 {
 			raise("ArgumentError", "invalid size")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		for i := 0; i+n <= len(a.Elems); i++ {
 			window := make([]object.Value, n)
 			copy(window, a.Elems[i:i+n])
@@ -2187,13 +2221,13 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.define("transpose", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		rows := self.(*object.Array).Elems
+		rows := object.Kind[*object.Array](self).Elems
 		if len(rows) == 0 {
 			return object.NewArray()
 		}
 		var width int
 		for i, r := range rows {
-			ra, ok := r.(*object.Array)
+			ra, ok := object.KindOK[*object.Array](r)
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(r).name)
 			}
@@ -2207,16 +2241,16 @@ func (vm *VM) bootstrap() {
 		for j := 0; j < width; j++ {
 			col := make([]object.Value, len(rows))
 			for i, r := range rows {
-				col[i] = r.(*object.Array).Elems[j]
+				col[i] = object.Kind[*object.Array](r).Elems[j]
 			}
 			out[j] = object.NewArrayFromSlice(col)
 		}
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		lists := [][]object.Value{self.(*object.Array).Elems}
+		lists := [][]object.Value{object.Kind[*object.Array](self).Elems}
 		for _, a := range args {
-			la, ok := a.(*object.Array)
+			la, ok := object.KindOK[*object.Array](a)
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(a).name)
 			}
@@ -2228,7 +2262,7 @@ func (vm *VM) bootstrap() {
 			var next []object.Value
 			for _, prefix := range out {
 				for _, e := range list {
-					row := append(append([]object.Value{}, prefix.(*object.Array).Elems...), e)
+					row := append(append([]object.Value{}, object.Kind[*object.Array](prefix).Elems...), e)
 					next = append(next, object.NewArrayFromSlice(row))
 				}
 			}
@@ -2238,7 +2272,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("combination", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		k := int(intArg(args[0]))
-		elems := self.(*object.Array).Elems
+		elems := object.Kind[*object.Array](self).Elems
 		var combos []object.Value
 		if k >= 0 && k <= len(elems) {
 			idx := make([]int, k)
@@ -2274,7 +2308,7 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.define("permutation", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		elems := self.(*object.Array).Elems
+		elems := object.Kind[*object.Array](self).Elems
 		k := len(elems)
 		if len(args) > 0 {
 			k = int(intArg(args[0]))
@@ -2316,7 +2350,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "take_while")
 		}
 		var out []object.Value
-		for _, e := range self.(*object.Array).Elems {
+		for _, e := range object.Kind[*object.Array](self).Elems {
 			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
 				break
 			}
@@ -2328,7 +2362,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "drop_while")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		i := 0
 		for i < len(a.Elems) && vm.callBlock(blk, []object.Value{a.Elems[i]}).Truthy() {
 			i++
@@ -2338,7 +2372,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("rotate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		n := len(a.Elems)
 		if n == 0 {
 			return object.NewArray()
@@ -2359,10 +2393,10 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			sep = strArg(args[0])
 		}
-		return object.NewString(joinArray(self.(*object.Array), sep))
+		return object.NewString(joinArray(object.Kind[*object.Array](self), sep))
 	})
 	vm.cArray.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		for i, e := range self.(*object.Array).Elems {
+		for i, e := range object.Kind[*object.Array](self).Elems {
 			if valueEqual(e, args[0]) {
 				return object.IntValue(int64(i))
 			}
@@ -2370,7 +2404,7 @@ func (vm *VM) bootstrap() {
 		return object.NilV
 	})
 	vm.cArray.define("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		n := int(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to take negative size")
@@ -2383,7 +2417,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		n := int(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
@@ -2396,15 +2430,15 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("sort", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		out := make([]object.Value, len(a.Elems))
 		copy(out, a.Elems)
 		vm.sortSlice(out, blk)
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array).Elems
-		b, ok := args[0].(*object.Array)
+		a := object.Kind[*object.Array](self).Elems
+		b, ok := object.KindOK[*object.Array](args[0])
 		if !ok {
 			return object.NilV
 		}
@@ -2414,7 +2448,7 @@ func (vm *VM) bootstrap() {
 			n = len(be)
 		}
 		for i := 0; i < n; i++ {
-			c, ok := vm.send(a[i], "<=>", []object.Value{be[i]}, nil).(object.Integer)
+			c, ok := object.AsIntegerOK(vm.send(a[i], "<=>", []object.Value{be[i]}, nil))
 			if !ok {
 				return object.NilV // an incomparable pair makes the arrays incomparable
 			}
@@ -2483,7 +2517,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "sort_by")
 		}
-		a := self.(*object.Array)
+		a := object.Kind[*object.Array](self)
 		keys := make([]object.Value, len(a.Elems))
 		for i, e := range a.Elems {
 			keys[i] = vm.callBlock(blk, []object.Value{e})
@@ -2501,10 +2535,10 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("min_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		return vm.arrayByExtreme(self.(*object.Array), blk, "min_by", -1)
+		return vm.arrayByExtreme(object.Kind[*object.Array](self), blk, "min_by", -1)
 	})
 	vm.cArray.define("max_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		return vm.arrayByExtreme(self.(*object.Array), blk, "max_by", 1)
+		return vm.arrayByExtreme(object.Kind[*object.Array](self), blk, "max_by", 1)
 	})
 	vm.cArray.define("each_with_object", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) < 1 {
@@ -2514,7 +2548,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each_with_object", args...)
 		}
 		memo := args[0]
-		for _, e := range self.(*object.Array).Elems {
+		for _, e := range object.Kind[*object.Array](self).Elems {
 			vm.callBlock(blk, []object.Value{e, memo})
 		}
 		return memo
@@ -2525,7 +2559,7 @@ func (vm *VM) bootstrap() {
 	// Hash#initialize sets the default: a static default value, or a default block.
 	// Reused by Hash.new for both Hash and its subclasses.
 	hashInit := func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		switch {
 		case blk != nil:
 			if len(args) != 0 {
@@ -2542,7 +2576,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("initialize", hashInit)
 	vm.cHash.smethods["new"] = &Method{name: "new", owner: vm.cHash,
 		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-			if recv := self.(*RClass); recv != vm.cHash {
+			if recv := object.Kind[*RClass](self); recv != vm.cHash {
 				return vm.newBuiltinSubclass(recv, object.NewHash(), args, blk)
 			}
 			h := object.NewHash()
@@ -2553,15 +2587,25 @@ func (vm *VM) bootstrap() {
 	// of a String argument; a keyword-only call (capacity:/encoding:) arrives as a
 	// Hash and is ignored. Reused by String.new for both String and its subclasses.
 	stringInit := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s := self.(*object.String)
+		s := object.Kind[*object.String](self)
 		content := ""
 		if len(args) > 0 {
-			switch a := args[0].(type) {
-			case *object.String:
-				content = a.Str()
-			case *object.Hash: // keyword-only arguments
-			default:
-				raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
+			{
+				__sw24 := args[0]
+				switch {
+				case object.IsKind[*object.String](__sw24):
+					a := object.Kind[*object.String](__sw24)
+					_ = a
+					content = a.Str()
+				case object.IsKind[*object.Hash](__sw24):
+					a := object.Kind[*object.Hash](__sw24)
+					_ = a
+
+				default:
+					a := __sw24
+					_ = a
+					raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
+				}
 			}
 		}
 		s.SetBytes([]byte(content))
@@ -2573,7 +2617,7 @@ func (vm *VM) bootstrap() {
 	// instead wraps a String in an RObject so its class identity is preserved.
 	vm.cString.smethods["new"] = &Method{name: "new", owner: vm.cString,
 		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-			if recv := self.(*RClass); recv != vm.cString {
+			if recv := object.Kind[*RClass](self); recv != vm.cString {
 				return vm.newBuiltinSubclass(recv, object.NewString(""), args, blk)
 			}
 			s := object.NewString("")
@@ -2585,29 +2629,36 @@ func (vm *VM) bootstrap() {
 			h := object.NewHash()
 			// Hash[[[k,v],…]] / Hash[existing_hash] / Hash[k1,v1,k2,v2,…].
 			if len(args) == 1 {
-				switch a := args[0].(type) {
-				case *object.Array:
-					for i, e := range a.Elems {
-						pair, ok := e.(*object.Array)
-						if !ok {
-							raise("ArgumentError", "wrong element type %s at %d (expected array)", vm.classOf(e).name, i)
+				{
+					__sw25 := args[0]
+					switch {
+					case object.IsKind[*object.Array](__sw25):
+						a := object.Kind[*object.Array](__sw25)
+						_ = a
+						for i, e := range a.Elems {
+							pair, ok := object.KindOK[*object.Array](e)
+							if !ok {
+								raise("ArgumentError", "wrong element type %s at %d (expected array)", vm.classOf(e).name, i)
+							}
+							if len(pair.Elems) < 1 || len(pair.Elems) > 2 {
+								raise("ArgumentError", "invalid number of elements (%d for 1..2)", len(pair.Elems))
+							}
+							v := object.Value(object.NilV)
+							if len(pair.Elems) == 2 {
+								v = pair.Elems[1]
+							}
+							h.Set(pair.Elems[0], v)
 						}
-						if len(pair.Elems) < 1 || len(pair.Elems) > 2 {
-							raise("ArgumentError", "invalid number of elements (%d for 1..2)", len(pair.Elems))
+						return h
+					case object.IsKind[*object.Hash](__sw25):
+						a := object.Kind[*object.Hash](__sw25)
+						_ = a
+						for _, k := range a.Keys {
+							v, _ := a.Get(k)
+							h.Set(k, v)
 						}
-						v := object.Value(object.NilV)
-						if len(pair.Elems) == 2 {
-							v = pair.Elems[1]
-						}
-						h.Set(pair.Elems[0], v)
+						return h
 					}
-					return h
-				case *object.Hash:
-					for _, k := range a.Keys {
-						v, _ := a.Get(k)
-						h.Set(k, v)
-					}
-					return h
 				}
 			}
 			if len(args)%2 != 0 {
@@ -2622,32 +2673,32 @@ func (vm *VM) bootstrap() {
 	// values into the hash. Neither retains the args slice, so both take the
 	// no-copy OpSend fast path (defineNR).
 	vm.cHash.defineNR("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		if v, ok := h.Get(args[0]); ok {
 			return v
 		}
 		return vm.hashDefault(h, args[0])
 	})
 	vm.cHash.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*object.Hash).Set(args[0], args[1])
+		object.Kind[*object.Hash](self).Set(args[0], args[1])
 		return args[1]
 	})
 	vm.cHash.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*object.Hash).Len()))
+		return object.IntValue(int64(object.Kind[*object.Hash](self).Len()))
 	})
 	vm.cHash.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*object.Hash).Len()))
+		return object.IntValue(int64(object.Kind[*object.Hash](self).Len()))
 	})
 	vm.cHash.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*object.Hash).Len() == 0)
+		return object.Bool(object.Kind[*object.Hash](self).Len() == 0)
 	})
 	vm.cHash.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		h.Clear()
 		return h
 	})
 	hashKeyP := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		_, ok := self.(*object.Hash).Get(args[0])
+		_, ok := object.Kind[*object.Hash](self).Get(args[0])
 		return object.Bool(ok)
 	}
 	vm.cHash.define("key?", hashKeyP)
@@ -2655,13 +2706,13 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("include?", hashKeyP)
 	vm.cHash.define("member?", hashKeyP)
 	vm.cHash.define("keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		ks := make([]object.Value, len(h.Keys))
 		copy(ks, h.Keys)
 		return object.NewArrayFromSlice(ks)
 	})
 	vm.cHash.define("values", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		vs := make([]object.Value, 0, len(h.Keys))
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
@@ -2673,7 +2724,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			vm.callBlock(blk, []object.Value{hashPair(k, v)})
@@ -2686,7 +2737,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each_key")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		for _, k := range h.Keys {
 			vm.callBlock(blk, []object.Value{k})
 		}
@@ -2696,7 +2747,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each_value")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			vm.callBlock(blk, []object.Value{v})
@@ -2708,7 +2759,7 @@ func (vm *VM) bootstrap() {
 	// hashes may be merged left to right.
 	mergeInto := func(vm *VM, dst *object.Hash, others []object.Value, blk *Proc) {
 		for _, o := range others {
-			other, ok := o.(*object.Hash)
+			other, ok := object.KindOK[*object.Hash](o)
 			if !ok {
 				raise("TypeError", "no implicit conversion into Hash")
 			}
@@ -2724,7 +2775,7 @@ func (vm *VM) bootstrap() {
 		}
 	}
 	vm.cHash.define("merge", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
@@ -2734,14 +2785,14 @@ func (vm *VM) bootstrap() {
 		return out
 	})
 	mergeBang := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		mergeInto(vm, h, args, blk)
 		return h
 	}
 	vm.cHash.define("merge!", mergeBang)
 	vm.cHash.define("update", mergeBang) // update is an alias for merge!
 	vm.cHash.define("slice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := object.NewHash()
 		for _, k := range args {
 			if v, ok := h.Get(k); ok {
@@ -2754,7 +2805,7 @@ func (vm *VM) bootstrap() {
 		// Copy then drop each key by value (Delete keys by hashKey, not by the
 		// argument's object identity — a previous identity-keyed Go map dropped
 		// nothing, since stored keys are distinct objects from the arguments).
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
@@ -2766,7 +2817,7 @@ func (vm *VM) bootstrap() {
 		return out
 	})
 	vm.cHash.define("fetch", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		if v, ok := self.(*object.Hash).Get(args[0]); ok {
+		if v, ok := object.Kind[*object.Hash](self).Get(args[0]); ok {
 			return v
 		}
 		if blk != nil {
@@ -2782,7 +2833,7 @@ func (vm *VM) bootstrap() {
 		return vm.digValue(self, args)
 	})
 	vm.cHash.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := make([]object.Value, len(args))
 		for i, k := range args {
 			v, _ := h.Get(k)
@@ -2794,7 +2845,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "transform_values")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
@@ -2805,12 +2856,12 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("transform_keys", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		var mapping *object.Hash
 		if len(args) > 0 {
-			mapping, _ = args[0].(*object.Hash)
+			mapping, _ = object.KindOK[*object.Hash](args[0])
 		}
 		if mapping == nil && blk == nil {
 			return enumFor(self, "transform_keys")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
@@ -2822,7 +2873,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "transform_values!")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			h.Set(k, vm.callBlock(blk, []object.Value{v}))
@@ -2832,12 +2883,12 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("transform_keys!", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		var mapping *object.Hash
 		if len(args) > 0 {
-			mapping, _ = args[0].(*object.Hash)
+			mapping, _ = object.KindOK[*object.Hash](args[0])
 		}
 		if mapping == nil && blk == nil {
 			return enumFor(self, "transform_keys!")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		// Compute the new keys first, then rebuild in place so a new key never
 		// collides with an old one mid-iteration.
 		keys := append([]object.Value{}, h.Keys...)
@@ -2856,7 +2907,7 @@ func (vm *VM) bootstrap() {
 		return h
 	})
 	vm.cHash.define("invert", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
@@ -2865,7 +2916,7 @@ func (vm *VM) bootstrap() {
 		return out
 	})
 	vm.cHash.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		if blk == nil {
 			return self
 		}
@@ -2876,7 +2927,7 @@ func (vm *VM) bootstrap() {
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			res := vm.callBlock(blk, []object.Value{k, v})
-			pair, ok := res.(*object.Array)
+			pair, ok := object.KindOK[*object.Array](res)
 			if !ok {
 				raise("TypeError", "wrong element type %s (expected array)", vm.classOf(res).name)
 			}
@@ -2888,18 +2939,18 @@ func (vm *VM) bootstrap() {
 		return out
 	})
 	vm.cHash.define("store", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*object.Hash).Set(args[0], args[1])
+		object.Kind[*object.Hash](self).Set(args[0], args[1])
 		return args[1]
 	})
 	// default / default= and default_proc / default_proc= manage the value (or
 	// block) returned for an absent key. The static default and the default block
 	// are mutually exclusive in MRI: setting one clears the other.
 	vm.cHash.define("default", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		// default(key) invokes the default block (passing the hash and key); with
 		// no argument it returns the static default, ignoring any block.
 		if len(args) == 1 && !object.IsNil(h.DefaultProc) {
-			return vm.callBlock(h.DefaultProc.(*Proc), []object.Value{h, args[0]})
+			return vm.callBlock(object.Kind[*Proc](h.DefaultProc), []object.Value{h, args[0]})
 		}
 		if h.Default != nil {
 			return h.Default
@@ -2907,38 +2958,46 @@ func (vm *VM) bootstrap() {
 		return object.NilV
 	})
 	vm.cHash.define("default=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		h.Default = args[0]
 		h.DefaultProc = nil
 		return args[0]
 	})
 	vm.cHash.define("default_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		if !object.IsNil(h.DefaultProc) {
 			return h.DefaultProc
 		}
 		return object.NilV
 	})
 	vm.cHash.define("default_proc=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
-		switch p := args[0].(type) {
-		case object.Nil:
-			h.DefaultProc = nil
-		case *Proc:
-			h.DefaultProc = p
-			h.Default = nil
-		default:
-			// MRI coerces via #to_proc; without that, only a Proc or nil is valid.
-			raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(args[0]).name)
+		h := object.Kind[*object.Hash](self)
+		{
+			__sw26 := args[0]
+			switch {
+			case object.IsNilObj(__sw26):
+				p := object.NilObj()
+				_ = p
+				h.DefaultProc = nil
+			case object.IsKind[*Proc](__sw26):
+				p := object.Kind[*Proc](__sw26)
+				_ = p
+				h.DefaultProc = p
+				h.Default = nil
+			default:
+				p := __sw26
+				_ = p
+				raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(args[0]).name)
+			}
 		}
 		return args[0]
 	})
 	vm.cHash.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		v, _ := self.(*object.Hash).Delete(args[0])
+		v, _ := object.Kind[*object.Hash](self).Delete(args[0])
 		return v
 	})
 	hashHasValue := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			if valueEqual(v, args[0]) {
@@ -2955,7 +3014,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "select")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
@@ -2969,7 +3028,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "reject")
 		}
-		h := self.(*object.Hash)
+		h := object.Kind[*object.Hash](self)
 		out := object.NewHash()
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
@@ -3003,14 +3062,14 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "delete_if")
 		}
-		hashDeleteWhere(vm, self.(*object.Hash), blk, true)
+		hashDeleteWhere(vm, object.Kind[*object.Hash](self), blk, true)
 		return self
 	})
 	vm.cHash.define("reject!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "reject!")
 		}
-		if hashDeleteWhere(vm, self.(*object.Hash), blk, true) == 0 {
+		if hashDeleteWhere(vm, object.Kind[*object.Hash](self), blk, true) == 0 {
 			return object.NilV
 		}
 		return self
@@ -3019,14 +3078,14 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "keep_if")
 		}
-		hashDeleteWhere(vm, self.(*object.Hash), blk, false)
+		hashDeleteWhere(vm, object.Kind[*object.Hash](self), blk, false)
 		return self
 	})
 	vm.cHash.define("select!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "select!")
 		}
-		if hashDeleteWhere(vm, self.(*object.Hash), blk, false) == 0 {
+		if hashDeleteWhere(vm, object.Kind[*object.Hash](self), blk, false) == 0 {
 			return object.NilV
 		}
 		return self
@@ -3035,10 +3094,10 @@ func (vm *VM) bootstrap() {
 
 	// Range.
 	vm.cRange.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*object.Range).Lo
+		return object.Kind[*object.Range](self).Lo
 	})
 	vm.cRange.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		r := self.(*object.Range)
+		r := object.Kind[*object.Range](self)
 		if len(args) == 0 {
 			return r.Lo
 		}
@@ -3048,8 +3107,8 @@ func (vm *VM) bootstrap() {
 		}
 		// An endless range generates its first n elements directly; a bounded one
 		// caps the count to its materialised size.
-		if _, isNil := r.Hi.(object.Nil); isNil {
-			lo, ok := r.Lo.(object.Integer)
+		if _, isNil := object.AsNilOK(r.Hi); isNil {
+			lo, ok := object.AsIntegerOK(r.Lo)
 			if !ok {
 				raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
 			}
@@ -3066,11 +3125,11 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("end", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*object.Range).Hi
+		return object.Kind[*object.Range](self).Hi
 	})
 	vm.cRange.define("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		r := self.(*object.Range)
-		if _, isNil := r.Hi.(object.Nil); isNil {
+		r := object.Kind[*object.Range](self)
+		if _, isNil := object.AsNilOK(r.Hi); isNil {
 			raise("RangeError", "cannot get the last element of endless range")
 		}
 		if len(args) == 0 {
@@ -3083,20 +3142,20 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("exclude_end?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*object.Range).Exclusive)
+		return object.Bool(object.Kind[*object.Range](self).Exclusive)
 	})
 	rangeCover := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		r := self.(*object.Range)
+		r := object.Kind[*object.Range](self)
 		v := args[0]
 		// cover? is comparison-based: an incomparable member is simply not
 		// covered (Ruby returns false rather than raising). A nil bound is open.
-		if _, isNil := r.Lo.(object.Nil); !isNil {
+		if _, isNil := object.AsNilOK(r.Lo); !isNil {
 			lc, lok := rangeCmp(v, r.Lo)
 			if !lok || lc < 0 {
 				return object.False
 			}
 		}
-		if _, isNil := r.Hi.(object.Nil); isNil {
+		if _, isNil := object.AsNilOK(r.Hi); isNil {
 			return object.True
 		}
 		hc, hok := rangeCmp(v, r.Hi)
@@ -3113,7 +3172,7 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("member?", rangeCover)
 	vm.cRange.define("===", rangeCover)
 	vm.cRange.define("min", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		r := self.(*object.Range)
+		r := object.Kind[*object.Range](self)
 		if len(args) > 0 { // min(n): the n smallest (the range is ascending)
 			elems := rangeElems(r)
 			n := clampCount(intArg(args[0]), len(elems))
@@ -3135,7 +3194,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(lo)
 	})
 	vm.cRange.define("max", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		r := self.(*object.Range)
+		r := object.Kind[*object.Range](self)
 		if len(args) > 0 { // max(n): the n largest, descending
 			elems := rangeElems(r)
 			n := clampCount(intArg(args[0]), len(elems))
@@ -3162,7 +3221,7 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(hi)
 	})
 	rangeSizeFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(rangeSize(self.(*object.Range)))
+		return object.IntValue(rangeSize(object.Kind[*object.Range](self)))
 	}
 	vm.cRange.define("size", rangeSizeFn)
 	vm.cRange.define("count", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -3171,7 +3230,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil && len(args) == 0 {
 			return rangeSizeFn(vm, self, args, blk)
 		}
-		arr := vm.send(self, "to_a", nil, nil).(*object.Array)
+		arr := object.Kind[*object.Array](vm.send(self, "to_a", nil, nil))
 		var n int64
 		for _, e := range arr.Elems {
 			if blk != nil {
@@ -3185,18 +3244,18 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(n)
 	})
 	vm.cRange.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(rangeElems(self.(*object.Range)))
+		return object.NewArrayFromSlice(rangeElems(object.Kind[*object.Range](self)))
 	})
 	// take(n) mirrors first(n) (it works on endless ranges); drop(n) needs the
 	// full materialised range, so it is bounded only.
 	vm.cRange.define("take", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		r := self.(*object.Range)
+		r := object.Kind[*object.Range](self)
 		n := int(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to take negative size")
 		}
-		if _, isNil := r.Hi.(object.Nil); isNil {
-			lo, ok := r.Lo.(object.Integer)
+		if _, isNil := object.AsNilOK(r.Hi); isNil {
+			lo, ok := object.AsIntegerOK(r.Lo)
 			if !ok {
 				raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
 			}
@@ -3213,7 +3272,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		elems := rangeElems(self.(*object.Range))
+		elems := rangeElems(object.Kind[*object.Range](self))
 		n := int(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
@@ -3229,7 +3288,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each")
 		}
-		r := self.(*object.Range)
+		r := object.Kind[*object.Range](self)
 		for _, e := range rangeElems(r) {
 			vm.callBlock(blk, []object.Value{e})
 		}
@@ -3239,7 +3298,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "map")
 		}
-		elems := rangeElems(self.(*object.Range))
+		elems := rangeElems(object.Kind[*object.Range](self))
 		out := make([]object.Value, len(elems))
 		for i, e := range elems {
 			out[i] = vm.callBlock(blk, []object.Value{e})
@@ -3254,7 +3313,7 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			step = args[0]
 		}
-		r := self.(*object.Range)
+		r := object.Kind[*object.Range](self)
 		vm.numericStep(blk, r.Lo, r.Hi, step, r.Exclusive)
 		return r
 	})
@@ -3263,7 +3322,7 @@ func (vm *VM) bootstrap() {
 	// intOf coerces a receiver to int64; a Bignum is genuinely out of range for
 	// the methods that need a machine int (raising rather than panicking).
 	intOf := func(self object.Value) int64 {
-		if i, ok := self.(object.Integer); ok {
+		if i, ok := object.AsIntegerOK(self); ok {
 			return int64(i)
 		}
 		raise("RangeError", "bignum too big to convert into `long'")
@@ -3359,24 +3418,27 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("fdiv", fdiv)
 	coerce := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other := args[0]
-		_, selfInt := self.(object.Integer)
-		_, otherInt := other.(object.Integer)
+		_, selfInt := object.AsIntegerOK(self)
+		_, otherInt := object.AsIntegerOK(other)
 		if selfInt && otherInt {
 			return object.NewArray(other, self)
 		}
 		sf, _ := toFloat(self) // self is always numeric here
 		of, ok := toFloat(other)
 		if !ok { // MRI coerces via Float(other), so mirror its errors
-			if s, isStr := other.(*object.String); isStr {
+			if s, isStr := object.KindOK[*object.String](other); isStr {
 				raise("ArgumentError", "invalid value for Float(): %s", s.Inspect())
 			}
 			// MRI names nil/true/false by value, everything else by class.
 			name := vm.classOf(other).name
-			switch other.(type) {
-			case object.Nil:
-				name = "nil"
-			case object.Bool:
-				name = other.ToS()
+			{
+				__sw27 := other
+				switch {
+				case object.IsNilObj(__sw27):
+					name = "nil"
+				case object.IsBool(__sw27):
+					name = other.ToS()
+				}
 			}
 			raise("TypeError", "can't convert %s into Float", name)
 		}
@@ -3536,7 +3598,7 @@ func (vm *VM) bootstrap() {
 	})
 
 	// Float methods.
-	floatOf := func(self object.Value) float64 { return float64(self.(object.Float)) }
+	floatOf := func(self object.Value) float64 { return float64(object.AsFloatV(self)) }
 	vm.cFloat.define("abs", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(math.Abs(floatOf(self)))
 	})
@@ -3647,7 +3709,7 @@ func (vm *VM) bootstrap() {
 	// allocate creates an uninitialized instance (no initialize call), as MRI's
 	// Class#allocate — used by frameworks that construct then initialize manually.
 	vm.cClass.define("allocate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RObject{class: self.(*RClass), ivars: map[string]object.Value{}}
+		return &RObject{class: object.Kind[*RClass](self), ivars: map[string]object.Value{}}
 	})
 	// Class.new([superclass]) { body } builds an anonymous class (super defaults
 	// to Object); the block, if any, runs as the class body. Dispatched only for
@@ -3656,7 +3718,7 @@ func (vm *VM) bootstrap() {
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 			super := vm.cObject
 			if len(args) > 0 {
-				s, ok := args[0].(*RClass)
+				s, ok := object.KindOK[*RClass](args[0])
 				if !ok {
 					raise("TypeError", "superclass must be an instance of Class (given an instance of %s)", vm.classOf(args[0]).name)
 				}
@@ -3685,7 +3747,7 @@ func (vm *VM) bootstrap() {
 			return m
 		}}
 	vm.cClass.define("superclass", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if c := self.(*RClass); c.super != nil {
+		if c := object.Kind[*RClass](self); c.super != nil {
 			return c.super
 		}
 		return object.NilV
@@ -3711,7 +3773,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "times")
 		}
-		n := int64(self.(object.Integer))
+		n := int64(object.AsInteger(self))
 		// One reused arg slice across the whole loop: callBlock → exec copies the
 		// args into the block's env slots synchronously before any user code runs
 		// (and before the next iteration overwrites elem[0]), so the backing array
@@ -3737,7 +3799,7 @@ func (vm *VM) bootstrap() {
 // nativeNew allocates an instance of the receiver class and runs initialize,
 // forwarding any block.
 func nativeNew(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-	class := self.(*RClass)
+	class := object.Kind[*RClass](self)
 	obj := &RObject{class: class, ivars: map[string]object.Value{}}
 	vm.send(obj, "initialize", args, blk)
 	return obj
@@ -3757,7 +3819,7 @@ func (vm *VM) newBuiltinSubclass(recv *RClass, zero object.Value, args []object.
 // result (called with the hash and key), else the static default, else nil.
 func (vm *VM) hashDefault(h *object.Hash, key object.Value) object.Value {
 	if !object.IsNil(h.DefaultProc) {
-		return vm.callBlock(h.DefaultProc.(*Proc), []object.Value{h, key})
+		return vm.callBlock(object.Kind[*Proc](h.DefaultProc), []object.Value{h, key})
 	}
 	if h.Default != nil {
 		return h.Default
@@ -3767,7 +3829,7 @@ func (vm *VM) hashDefault(h *object.Hash, key object.Value) object.Value {
 
 // intArg coerces an argument used as an array index to int64, or raises.
 func intArg(v object.Value) int64 {
-	if i, ok := v.(object.Integer); ok {
+	if i, ok := object.AsIntegerOK(v); ok {
 		return int64(i)
 	}
 	raise("TypeError", "no implicit conversion of %s into Integer", v.Inspect())
@@ -4112,14 +4174,14 @@ func stringIndexEnc(s string, args []object.Value, binary bool) object.Value {
 		}
 		return object.NewStringView(take(start, end))
 	}
-	if rng, ok := args[0].(*object.Range); ok {
+	if rng, ok := object.KindOK[*object.Range](args[0]); ok {
 		start, length, ok := sliceRange(n, rng)
 		if !ok {
 			return object.NilV
 		}
 		return object.NewStringView(take(start, start+length))
 	}
-	if sub, ok := args[0].(*object.String); ok { // s[substr] -> the substring if present, else nil
+	if sub, ok := object.KindOK[*object.String](args[0]); ok { // s[substr] -> the substring if present, else nil
 		if strings.Contains(s, sub.Str()) {
 			return object.NewStringView(sub.Str())
 		}
@@ -4157,7 +4219,7 @@ func byteslice(self *object.String, args []object.Value) object.Value {
 		}
 		return mk(b[start:end])
 	}
-	if rng, ok := args[0].(*object.Range); ok {
+	if rng, ok := object.KindOK[*object.Range](args[0]); ok {
 		start, length, ok := sliceRange(n, rng)
 		if !ok {
 			return object.NilV
@@ -4176,14 +4238,14 @@ func byteslice(self *object.String, args []object.Value) object.Value {
 // false when the start is out of range (Ruby returns nil).
 func sliceRange(n int, r *object.Range) (int, int, bool) {
 	lo := 0
-	if _, isNil := r.Lo.(object.Nil); !isNil {
+	if _, isNil := object.AsNilOK(r.Lo); !isNil {
 		lo = normIndex(intArg(r.Lo), n)
 		if lo < 0 || lo > n {
 			return 0, 0, false
 		}
 	}
 	hi := n
-	if _, isNil := r.Hi.(object.Nil); !isNil {
+	if _, isNil := object.AsNilOK(r.Hi); !isNil {
 		hi = normIndex(intArg(r.Hi), n)
 		if !r.Exclusive {
 			hi++
@@ -4214,7 +4276,7 @@ func arraySpliceAssign(a *object.Array, start, length int, value object.Value) {
 		end = len(a.Elems)
 	}
 	var repl []object.Value
-	if arr, ok := value.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](value); ok {
 		repl = arr.Elems
 	} else {
 		repl = []object.Value{value}
@@ -4243,11 +4305,18 @@ func checkFrozen(s *object.String) {
 // strAppendBytes is the byte contribution of a `<<`/concat/prepend argument: a
 // String contributes its bytes, an Integer its UTF-8 code point.
 func strAppendBytes(a object.Value) []byte {
-	switch v := a.(type) {
-	case *object.String:
-		return v.Bytes()
-	case object.Integer:
-		return []byte(string(rune(v)))
+	{
+		__sw28 := a
+		switch {
+		case object.IsKind[*object.String](__sw28):
+			v := object.Kind[*object.String](__sw28)
+			_ = v
+			return v.Bytes()
+		case object.IsInt(__sw28):
+			v := object.AsInteger(__sw28)
+			_ = v
+			return []byte(string(rune(v)))
+		}
 	}
 	raise("TypeError", "no implicit conversion of %s into String", classNameOf(a))
 	return nil
@@ -4256,7 +4325,7 @@ func strAppendBytes(a object.Value) []byte {
 // strBang applies a pure transform to the receiver in place. As a Ruby bang
 // method it returns the (mutated) receiver when the content changed, else nil.
 func strBang(self object.Value, fn func(string) string) object.Value {
-	s := self.(*object.String)
+	s := object.Kind[*object.String](self)
 	checkFrozen(s)
 	out := fn(s.Str())
 	if out == s.Str() {
@@ -4363,7 +4432,7 @@ func squeezeStr(s string, sets ...string) string {
 // sub/gsub and writes the result back, returning the receiver when it changed
 // and nil otherwise.
 func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, global bool) object.Value {
-	s := self.(*object.String)
+	s := object.Kind[*object.String](self)
 	checkFrozen(s)
 	// gsub!(pattern) with no replacement and no block yields an Enumerator bound
 	// to gsub! on this receiver (so materialising it mutates the string); sub!
@@ -4374,7 +4443,7 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 		}
 		return enumFor(s, "gsub!", args[0])
 	}
-	res := vm.stringSub(s.Str(), args, blk, global).(*object.String)
+	res := object.Kind[*object.String](vm.stringSub(s.Str(), args, blk, global))
 	if res.Str() == s.Str() {
 		return object.NilV
 	}
@@ -4415,7 +4484,7 @@ func stringAssignSpan(args []object.Value, n int) (start, length int) {
 		}
 		return start, length
 	}
-	if rng, ok := args[0].(*object.Range); ok {
+	if rng, ok := object.KindOK[*object.Range](args[0]); ok {
 		st, ln, ok := sliceRange(n, rng)
 		if !ok {
 			raise("RangeError", "%s out of range", rng.Inspect())
@@ -4473,7 +4542,7 @@ func sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
 		}
 		return start, length, true
 	}
-	if rng, isR := args[0].(*object.Range); isR {
+	if rng, isR := object.KindOK[*object.Range](args[0]); isR {
 		return sliceRange(n, rng)
 	}
 	start = normIndex(intArg(args[0]), n)
@@ -4486,7 +4555,7 @@ func sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
 // strArg coerces a String argument, raising TypeError otherwise.
 // arrArg coerces an argument to an *Array, raising TypeError otherwise.
 func arrArg(v object.Value) *object.Array {
-	if a, ok := v.(*object.Array); ok {
+	if a, ok := object.KindOK[*object.Array](v); ok {
 		return a
 	}
 	raise("TypeError", "no implicit conversion of %s into Array", v.Inspect())
@@ -4494,7 +4563,7 @@ func arrArg(v object.Value) *object.Array {
 }
 
 func strArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
@@ -4506,13 +4575,13 @@ func strArg(v object.Value) string {
 // #to_path (Pathname and friends), falling back to #to_str. Anything that
 // responds to neither raises TypeError, matching MRI.
 func pathArg(vm *VM, v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	for _, m := range []string{"to_path", "to_str"} {
 		if vm.respondsTo(v, m) {
 			r := vm.send(v, m, nil, nil)
-			s, ok := r.(*object.String)
+			s, ok := object.KindOK[*object.String](r)
 			if !ok {
 				raise("TypeError", "can't convert %s to String (%s#%s gives %s)",
 					vm.classOf(v).name, vm.classOf(v).name, m, vm.classOf(r).name)
@@ -4556,7 +4625,7 @@ func hashPair(k, v object.Value) *object.Array {
 // they are incomparable (a nil result).
 func (vm *VM) spaceship(a, b object.Value) int {
 	r := vm.send(a, "<=>", []object.Value{b}, nil)
-	n, ok := r.(object.Integer)
+	n, ok := object.AsIntegerOK(r)
 	if !ok {
 		raise("ArgumentError", "comparison of %s with %s failed", vm.classOf(a).name, vm.classOf(b).name)
 	}
@@ -4573,7 +4642,7 @@ func (vm *VM) sortSlice(out []object.Value, blk *Proc) {
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		r := vm.callBlock(blk, []object.Value{out[i], out[j]})
-		c, ok := r.(object.Integer)
+		c, ok := object.AsIntegerOK(r)
 		if !ok {
 			// MRI compares the block's result against 0, so a non-Integer fails as
 			// "comparison of <result class> with 0 failed".
@@ -4618,7 +4687,7 @@ func sign(n int) int {
 func flattenDepth(elems []object.Value, depth int) []object.Value {
 	var out []object.Value
 	for _, e := range elems {
-		if sub, ok := e.(*object.Array); ok && depth != 0 {
+		if sub, ok := object.KindOK[*object.Array](e); ok && depth != 0 {
 			out = append(out, flattenDepth(sub.Elems, depth-1)...)
 		} else {
 			out = append(out, e)
@@ -4635,7 +4704,7 @@ func flattenDepthChanged(elems []object.Value, depth int) ([]object.Value, bool)
 	var out []object.Value
 	changed := false
 	for _, e := range elems {
-		if sub, ok := e.(*object.Array); ok && depth != 0 {
+		if sub, ok := object.KindOK[*object.Array](e); ok && depth != 0 {
 			changed = true
 			inner, _ := flattenDepthChanged(sub.Elems, depth-1)
 			out = append(out, inner...)
@@ -4653,7 +4722,7 @@ func joinArray(a *object.Array, sep string) string {
 		if i > 0 {
 			b.WriteString(sep)
 		}
-		if sub, ok := e.(*object.Array); ok {
+		if sub, ok := object.KindOK[*object.Array](e); ok {
 			b.WriteString(joinArray(sub, sep))
 		} else {
 			b.WriteString(e.ToS())
@@ -4664,7 +4733,7 @@ func joinArray(a *object.Array, sep string) string {
 
 // classArg coerces an argument expected to be a class/module, else TypeError.
 func classArg(v object.Value) *RClass {
-	if c, ok := v.(*RClass); ok {
+	if c, ok := object.KindOK[*RClass](v); ok {
 		return c
 	}
 	raise("TypeError", "class or module required")
@@ -4754,7 +4823,7 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 			collectTree(c.meta.includes[i])
 		}
 	}
-	if c, ok := self.(*RClass); ok {
+	if c, ok := object.KindOK[*RClass](self); ok {
 		collect(c.smethods)
 		collectMeta(c)
 		if all {
@@ -4782,13 +4851,22 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 // letter — as Ruby does.
 func constNameArg(v object.Value) string {
 	var name string
-	switch n := v.(type) {
-	case object.Symbol:
-		name = string(n)
-	case *object.String:
-		name = n.Str()
-	default:
-		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	{
+		__sw29 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw29):
+			n := object.Kind[object.Symbol](__sw29)
+			_ = n
+			name = string(n)
+		case object.IsKind[*object.String](__sw29):
+			n := object.Kind[*object.String](__sw29)
+			_ = n
+			name = n.Str()
+		default:
+			n := __sw29
+			_ = n
+			raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+		}
 	}
 	if r := []rune(name); len(r) == 0 || !unicode.IsUpper(r[0]) {
 		raise("NameError", "wrong constant name %s", name)
@@ -4801,13 +4879,22 @@ func constNameArg(v object.Value) string {
 // is not a well-formed class variable, matching MRI's Module#class_variable_*.
 func cvarNameArg(v object.Value) string {
 	var name string
-	switch n := v.(type) {
-	case object.Symbol:
-		name = string(n)
-	case *object.String:
-		name = n.Str()
-	default:
-		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	{
+		__sw30 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw30):
+			n := object.Kind[object.Symbol](__sw30)
+			_ = n
+			name = string(n)
+		case object.IsKind[*object.String](__sw30):
+			n := object.Kind[*object.String](__sw30)
+			_ = n
+			name = n.Str()
+		default:
+			n := __sw30
+			_ = n
+			raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+		}
 	}
 	if !strings.HasPrefix(name, "@@") || len(name) == 2 {
 		raise("NameError", "`%s' is not allowed as a class variable name", name)
@@ -4858,7 +4945,7 @@ func classIsA(c, target *RClass) bool {
 // level's metaclass includes/prepends. For any other object it checks the
 // per-object singleton class. Returns false when there is no singleton class.
 func classSingletonIsA(vm *VM, self object.Value, target *RClass) bool {
-	if c, ok := self.(*RClass); ok {
+	if c, ok := object.KindOK[*RClass](self); ok {
 		for ; c != nil; c = c.super {
 			if c.meta == nil {
 				continue
@@ -4912,16 +4999,25 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 		if !object.IsNil(vm.curExc) {
 			panic(vm.excError(vm.captureBacktrace(vm.curExc)))
 		}
-		panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
+		panic(vm.excError(vm.captureBacktrace(vm.send(object.Kind[*RClass](vm.consts["RuntimeError"]), "new",
 			[]object.Value{object.NewString("unhandled exception")}, nil))))
 	case 1:
-		switch a := args[0].(type) {
-		case *object.String:
-			panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{a}, nil))))
-		case *RClass:
-			panic(vm.excError(vm.captureBacktrace(vm.send(a, "new", nil, nil))))
-		case *RObject:
-			panic(vm.excError(vm.captureBacktrace(a)))
+		{
+			__sw31 := args[0]
+			switch {
+			case object.IsKind[*object.String](__sw31):
+				a := object.Kind[*object.String](__sw31)
+				_ = a
+				panic(vm.excError(vm.captureBacktrace(vm.send(object.Kind[*RClass](vm.consts["RuntimeError"]), "new", []object.Value{a}, nil))))
+			case object.IsKind[*RClass](__sw31):
+				a := object.Kind[*RClass](__sw31)
+				_ = a
+				panic(vm.excError(vm.captureBacktrace(vm.send(a, "new", nil, nil))))
+			case object.IsKind[*RObject](__sw31):
+				a := object.Kind[*RObject](__sw31)
+				_ = a
+				panic(vm.excError(vm.captureBacktrace(a)))
+			}
 		}
 		raise("TypeError", "exception class/object expected")
 		return object.NilV
@@ -4960,21 +5056,32 @@ const backtraceIvar = "@__backtrace__"
 // String is taken as-is. Anything else (a non-String element included) is a
 // TypeError, matching MRI's "backtrace must be an Array of String ..." message.
 func normalizeBacktrace(v object.Value) object.Value {
-	switch a := v.(type) {
-	case object.Nil:
-		return object.NilV
-	case *object.String:
-		return object.NewArray(a)
-	case *object.Array:
-		for _, e := range a.Elems {
-			if _, ok := e.(*object.String); !ok {
-				raise("TypeError", "backtrace must be an Array of String or an Array of Thread::Backtrace::Location")
+	{
+		__sw32 := v
+		switch {
+		case object.IsNilObj(__sw32):
+			a := object.NilObj()
+			_ = a
+			return object.NilV
+		case object.IsKind[*object.String](__sw32):
+			a := object.Kind[*object.String](__sw32)
+			_ = a
+			return object.NewArray(a)
+		case object.IsKind[*object.Array](__sw32):
+			a := object.Kind[*object.Array](__sw32)
+			_ = a
+			for _, e := range a.Elems {
+				if _, ok := object.KindOK[*object.String](e); !ok {
+					raise("TypeError", "backtrace must be an Array of String or an Array of Thread::Backtrace::Location")
+				}
 			}
+			return object.NewArrayFromSlice(append([]object.Value(nil), a.Elems...))
+		default:
+			a := __sw32
+			_ = a
+			raise("TypeError", "backtrace must be an Array of String or an Array of Thread::Backtrace::Location")
+			return object.NilV
 		}
-		return object.NewArrayFromSlice(append([]object.Value(nil), a.Elems...))
-	default:
-		raise("TypeError", "backtrace must be an Array of String or an Array of Thread::Backtrace::Location")
-		return object.NilV
 	}
 }
 
@@ -5006,7 +5113,7 @@ func (vm *VM) exceptionDetailedMessage(self object.Value) string {
 // lines MRI prints are omitted, but the file+label chain matches.
 func (vm *VM) exceptionFullMessage(self object.Value) string {
 	detailed := vm.exceptionDetailedMessage(self)
-	bt, ok := getIvar(self, backtraceIvar).(*object.Array)
+	bt, ok := object.KindOK[*object.Array](getIvar(self, backtraceIvar))
 	if !ok || len(bt.Elems) == 0 {
 		return detailed
 	}
@@ -5025,23 +5132,34 @@ func (vm *VM) exceptionFullMessage(self object.Value) string {
 // returning nil as soon as a step is missing.
 func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
 	for _, k := range keys {
-		switch c := cur.(type) {
-		case object.Nil:
-			return object.NilV
-		case *object.Hash:
-			v, ok := c.Get(k)
-			if !ok {
+		{
+			__sw33 := cur
+			switch {
+			case object.IsNilObj(__sw33):
+				c := object.NilObj()
+				_ = c
 				return object.NilV
+			case object.IsKind[*object.Hash](__sw33):
+				c := object.Kind[*object.Hash](__sw33)
+				_ = c
+				v, ok := c.Get(k)
+				if !ok {
+					return object.NilV
+				}
+				cur = v
+			case object.IsKind[*object.Array](__sw33):
+				c := object.Kind[*object.Array](__sw33)
+				_ = c
+				if i, ok := arrayIndex(c, intArg(k)); ok {
+					cur = c.Elems[i]
+				} else {
+					cur = object.NilV
+				}
+			default:
+				c := __sw33
+				_ = c
+				raise("TypeError", "%s does not have #dig method", vm.classOf(cur).name)
 			}
-			cur = v
-		case *object.Array:
-			if i, ok := arrayIndex(c, intArg(k)); ok {
-				cur = c.Elems[i]
-			} else {
-				cur = object.NilV
-			}
-		default:
-			raise("TypeError", "%s does not have #dig method", vm.classOf(cur).name)
 		}
 	}
 	return cur
@@ -5132,7 +5250,7 @@ func powNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.V
 		return object.NormInt(new(big.Int).Exp(base, e, m))
 	}
 	if base, ok := object.BigOf(self); ok {
-		if ei, ok := args[0].(object.Integer); ok {
+		if ei, ok := object.AsIntegerOK(args[0]); ok {
 			if ei < 0 {
 				bf, _ := toFloat(self)
 				return object.Float(math.Pow(bf, float64(ei)))
@@ -5197,41 +5315,63 @@ func defineAttrs(cls *RClass, names []object.Value, reader, writer bool) {
 // fresh container with the same elements; immutable value types are their own
 // copy.
 func dupValue(v object.Value) object.Value {
-	switch x := v.(type) {
-	case *object.String:
-		return x.Dup()
-	case *object.Array:
-		elems := make([]object.Value, len(x.Elems))
-		copy(elems, x.Elems)
-		return object.NewArrayFromSlice(elems)
-	case *object.Hash:
-		h := object.NewHash()
-		for _, k := range x.Keys {
-			val, _ := x.Get(k)
-			h.Set(k, val)
+	{
+		__sw34 := v
+		switch {
+		case object.IsKind[*object.String](__sw34):
+			x := object.Kind[*object.String](__sw34)
+			_ = x
+			return x.Dup()
+		case object.IsKind[*object.Array](__sw34):
+			x := object.Kind[*object.Array](__sw34)
+			_ = x
+			elems := make([]object.Value, len(x.Elems))
+			copy(elems, x.Elems)
+			return object.NewArrayFromSlice(elems)
+		case object.IsKind[*object.Hash](__sw34):
+			x := object.Kind[*object.Hash](__sw34)
+			_ = x
+			h := object.NewHash()
+			for _, k := range x.Keys {
+				val, _ := x.Get(k)
+				h.Set(k, val)
+			}
+			return h
+		case object.IsKind[*RObject](__sw34):
+			x := object.Kind[*RObject](__sw34)
+			_ = x
+			ivars := make(map[string]object.Value, len(x.ivars))
+			for k, val := range x.ivars {
+				ivars[k] = val
+			}
+			return &RObject{class: x.class, ivars: ivars}
+		default:
+			x := __sw34
+			_ = x
+			return v
 		}
-		return h
-	case *RObject:
-		ivars := make(map[string]object.Value, len(x.ivars))
-		for k, val := range x.ivars {
-			ivars[k] = val
-		}
-		return &RObject{class: x.class, ivars: ivars}
-	default:
-		return v
 	}
 }
 
 // isFrozen backs Object#frozen?: the immutable value types report frozen,
 // everything mutable reports not-frozen (we do not track explicit freezes).
 func isFrozen(v object.Value) bool {
-	switch x := v.(type) {
-	case object.Integer, object.Float, object.Symbol, object.Bool, object.Nil:
-		return true
-	case *object.String:
-		return x.Frozen
-	case *Regexp:
-		return x.frozen
+	{
+		__sw35 := v
+		switch {
+		case object.IsInt(__sw35) || object.IsFloat(__sw35) || object.IsKind[object.Symbol](__sw35) || object.IsBool(__sw35) || object.IsNilObj(__sw35):
+			x := __sw35
+			_ = x
+			return true
+		case object.IsKind[*object.String](__sw35):
+			x := object.Kind[*object.String](__sw35)
+			_ = x
+			return x.Frozen
+		case object.IsKind[*Regexp](__sw35):
+			x := object.Kind[*Regexp](__sw35)
+			_ = x
+			return x.frozen
+		}
 	}
 	return false
 }
@@ -5256,14 +5396,14 @@ func arrayReduce(vm *VM, a *object.Array, args []object.Value, blk *Proc) object
 		init, symVal = args[0], args[1]
 		hasSym, hasInit = true, true
 	case len(args) == 1:
-		if s, ok := args[0].(object.Symbol); ok {
+		if s, ok := object.KindOK[object.Symbol](args[0]); ok {
 			symVal, symName, hasSym, symKnown = s, string(s), true, true
 		} else {
 			init, hasInit = args[0], true
 		}
 	}
 	if hasSym && !symKnown {
-		if s, ok := symVal.(object.Symbol); ok {
+		if s, ok := object.KindOK[object.Symbol](symVal); ok {
 			symName, symKnown = string(s), true
 		}
 	}
@@ -5339,8 +5479,8 @@ func gcdInt(a, b int64) int64 {
 // rubyEqual is the default Object#== : pointer identity for instances, and
 // structural equality for the immutable value types.
 func rubyEqual(a, b object.Value) bool {
-	if ao, ok := a.(*RObject); ok {
-		bo, ok := b.(*RObject)
+	if ao, ok := object.KindOK[*RObject](a); ok {
+		bo, ok := object.KindOK[*RObject](b)
 		return ok && ao == bo
 	}
 	return valueEqual(a, b)
@@ -5351,8 +5491,8 @@ func rubyEqual(a, b object.Value) bool {
 func spaceshipNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 	// Compare two integers (Integer or Bignum) exactly; only fall back to float
 	// when one side is a Float (where the precision loss is intrinsic).
-	if ai, ok := self.(object.Integer); ok {
-		if bi, ok := args[0].(object.Integer); ok {
+	if ai, ok := object.AsIntegerOK(self); ok {
+		if bi, ok := object.AsIntegerOK(args[0]); ok {
 			return object.IntValue(int64(cmpInt64(int64(ai), int64(bi))))
 		}
 	}
@@ -5408,8 +5548,8 @@ func rangeCmp(a, b object.Value) (ord int, ok bool) {
 		}
 		return 0, false
 	}
-	as, aok := a.(*object.String)
-	bs, bok := b.(*object.String)
+	as, aok := object.KindOK[*object.String](a)
+	bs, bok := object.KindOK[*object.String](b)
 	if aok && bok {
 		return strings.Compare(as.Str(), bs.Str()), true
 	}
@@ -5419,8 +5559,8 @@ func rangeCmp(a, b object.Value) (ord int, ok bool) {
 // rangeInts extracts integer endpoints. ok is false when either endpoint is not
 // an Integer (string/float ranges are not iterable in this phase).
 func rangeInts(r *object.Range) (lo, hi int64, ok bool) {
-	li, lok := r.Lo.(object.Integer)
-	hi2, hok := r.Hi.(object.Integer)
+	li, lok := object.AsIntegerOK(r.Lo)
+	hi2, hok := object.AsIntegerOK(r.Hi)
 	if !lok || !hok {
 		return 0, 0, false
 	}
@@ -5448,8 +5588,8 @@ func rangeSize(r *object.Range) int64 {
 // non-integer endpoints (Ruby: "can't iterate from String").
 func rangeElems(r *object.Range) []object.Value {
 	// String ranges iterate by String#succ from begin up to end (MRI semantics).
-	if loS, ok := r.Lo.(*object.String); ok {
-		if hiS, ok := r.Hi.(*object.String); ok {
+	if loS, ok := object.KindOK[*object.String](r.Lo); ok {
+		if hiS, ok := object.KindOK[*object.String](r.Hi); ok {
 			return strRangeElems(loS.Str(), hiS.Str(), r.Exclusive)
 		}
 	}
@@ -5560,9 +5700,9 @@ func succString(s string) string {
 // (exact); any float operand switches to an index-based float walk that avoids
 // accumulated drift. step must be non-zero.
 func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive bool) {
-	li, loInt := loV.(object.Integer)
-	hi2, hiInt := hiV.(object.Integer)
-	si, stepInt := stepV.(object.Integer)
+	li, loInt := object.AsIntegerOK(loV)
+	hi2, hiInt := object.AsIntegerOK(hiV)
+	si, stepInt := object.AsIntegerOK(stepV)
 	if loInt && hiInt && stepInt {
 		step := int64(si)
 		if step == 0 {

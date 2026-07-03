@@ -57,7 +57,7 @@ func (vm *VM) registerConcurrent() {
 		if !getIvar(self, "@set").Truthy() {
 			// First read with an unset value and a default block: evaluate the block,
 			// memoise the result, and clear the lazy flag (the block runs once).
-			if blk, ok := getIvar(self, "@default_block").(*Proc); ok {
+			if blk, ok := object.KindOK[*Proc](getIvar(self, "@default_block")); ok {
 				v := vm.callBlock(blk, nil)
 				setIvar(self, "@value", v)
 				setIvar(self, "@set", object.True)

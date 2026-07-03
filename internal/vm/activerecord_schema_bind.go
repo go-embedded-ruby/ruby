@@ -137,7 +137,7 @@ func (vm *VM) registerActiveRecordSchemaDefinition(def *RClass) {
 // datetime/timestamp/date/time/binary/decimal/bigint), timestamps, references /
 // belongs_to, the generic column, index, and primary_key.
 func (vm *VM) registerActiveRecordTableDefinition(tbl *RClass) {
-	self := func(v object.Value) *ActiveRecordTableDSL { return v.(*ActiveRecordTableDSL) }
+	self := func(v object.Value) *ActiveRecordTableDSL { return object.Kind[*ActiveRecordTableDSL](v) }
 
 	// Each shortcut adds a column of its ActiveRecord type.
 	for _, typ := range []string{
@@ -200,7 +200,7 @@ func (vm *VM) registerActiveRecordTableDefinition(tbl *RClass) {
 // arApplyCreateTableOpts reads the create_table options Hash: id: false disables
 // the implicit primary key, and id:/primary_key: <name> renames it.
 func arApplyCreateTableOpts(td *activerecord.TableDef, v object.Value) {
-	h, ok := v.(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](v)
 	if !ok {
 		return
 	}
@@ -209,7 +209,7 @@ func arApplyCreateTableOpts(td *activerecord.TableDef, v object.Value) {
 		if !ok {
 			continue
 		}
-		if b, isBool := val.(object.Bool); isBool {
+		if b, isBool := object.AsBoolOK(val); isBool {
 			if !bool(b) {
 				td.NoPrimaryKey()
 			}
@@ -224,7 +224,7 @@ func arApplyCreateTableOpts(td *activerecord.TableDef, v object.Value) {
 func arColumnNames(args []object.Value) []string {
 	var out []string
 	for _, a := range args {
-		if _, isHash := a.(*object.Hash); isHash {
+		if _, isHash := object.KindOK[*object.Hash](a); isHash {
 			break
 		}
 		out = append(out, arStr(a))
@@ -236,7 +236,7 @@ func arColumnNames(args []object.Value) []string {
 // Callers guarantee at least one argument (the column name), so the last element
 // is always addressable.
 func colOptsHash(args []object.Value) *object.Hash {
-	if h, ok := args[len(args)-1].(*object.Hash); ok {
+	if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
 		return h
 	}
 	return nil
@@ -250,7 +250,7 @@ func arColOpts(h *object.Hash) []activerecord.ColOpt {
 	}
 	var opts []activerecord.ColOpt
 	if val, ok := arHashGet(h, "null"); ok {
-		if b, isBool := val.(object.Bool); isBool && !bool(b) {
+		if b, isBool := object.AsBoolOK(val); isBool && !bool(b) {
 			opts = append(opts, activerecord.NotNull())
 		}
 	}
@@ -258,7 +258,7 @@ func arColOpts(h *object.Hash) []activerecord.ColOpt {
 		opts = append(opts, activerecord.Default(arToGo(val)))
 	}
 	if val, ok := arHashGet(h, "limit"); ok {
-		if n, isInt := val.(object.Integer); isInt {
+		if n, isInt := object.AsIntegerOK(val); isInt {
 			opts = append(opts, activerecord.Limit(int(n)))
 		}
 	}
@@ -271,7 +271,7 @@ func indexOpts(args []object.Value, from int) *object.Hash {
 	if from >= len(args) {
 		return nil
 	}
-	if h, ok := args[from].(*object.Hash); ok {
+	if h, ok := object.KindOK[*object.Hash](args[from]); ok {
 		return h
 	}
 	return nil

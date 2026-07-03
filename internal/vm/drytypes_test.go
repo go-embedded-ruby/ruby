@@ -287,14 +287,14 @@ func TestDryTypesMetaGetter(t *testing.T) {
 // the very closure #default installs.
 func TestDryTypesDefaultFn(t *testing.T) {
 	vm := New(io.Discard)
-	cls := vm.consts["Dry::Types::Type"].(*RClass)
+	cls := object.Kind[*RClass](vm.consts["Dry::Types::Type"])
 	m := cls.methods["default"]
 	if m == nil || m.native == nil {
 		t.Fatal("default method missing")
 	}
 	base := &DryType{t: drytypes.StrictInteger()}
 	blk := &Proc{native: func(_ *VM, _ []object.Value) object.Value { return object.Integer(99) }}
-	res := m.native(vm, base, nil, blk).(*DryType)
+	res := object.Kind[*DryType](m.native(vm, base, nil, blk))
 	out, err := res.t.Call(drytypes.Undefined)
 	if err != nil {
 		t.Fatalf("default fn call: %v", err)

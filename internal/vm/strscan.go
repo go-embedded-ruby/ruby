@@ -67,7 +67,7 @@ func strscanInspectStr(s string) string {
 }
 
 // ssScannerOf returns the receiver's wrapped library scanner.
-func ssScannerOf(v object.Value) *strscan.Scanner { return v.(*StringScanner).sc }
+func ssScannerOf(v object.Value) *strscan.Scanner { return object.Kind[*StringScanner](v).sc }
 
 // ssPattern converts a Ruby scan/skip/match pattern into the regex source string
 // the library compiles. A Regexp contributes its source with an inline (?imx)
@@ -76,22 +76,31 @@ func ssScannerOf(v object.Value) *strscan.Scanner { return v.(*StringScanner).sc
 // escaping its regex metacharacters. Any other value is coerced via to_str the
 // way MRI requires a string-like pattern.
 func ssPattern(vm *VM, v object.Value) string {
-	switch p := v.(type) {
-	case *Regexp:
-		if imx := sortIMX(p.flags); imx != "" {
-			return "(?" + imx + ")" + p.source
-		}
-		return p.source
-	case *object.String:
-		return regexpEscapeLiteral(p.Str())
-	default:
-		if vm.respondsTo(v, "to_str") {
-			if str, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
-				return regexpEscapeLiteral(str.Str())
+	{
+		__sw169 := v
+		switch {
+		case object.IsKind[*Regexp](__sw169):
+			p := object.Kind[*Regexp](__sw169)
+			_ = p
+			if imx := sortIMX(p.flags); imx != "" {
+				return "(?" + imx + ")" + p.source
 			}
+			return p.source
+		case object.IsKind[*object.String](__sw169):
+			p := object.Kind[*object.String](__sw169)
+			_ = p
+			return regexpEscapeLiteral(p.Str())
+		default:
+			p := __sw169
+			_ = p
+			if vm.respondsTo(v, "to_str") {
+				if str, ok := object.KindOK[*object.String](vm.send(v, "to_str", nil, nil)); ok {
+					return regexpEscapeLiteral(str.Str())
+				}
+			}
+			raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+			return ""
 		}
-		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
-		return ""
 	}
 }
 
@@ -129,7 +138,7 @@ func (vm *VM) registerStringScanner() {
 	// StringScanner::Error < StandardError, the exception #unscan raises with
 	// nothing to undo (and the public exception type MRI exposes). Registered
 	// scoped (StringScanner::Error) and flat (so raise can name it).
-	std, _ := vm.consts["StandardError"].(*RClass)
+	std, _ := object.KindOK[*RClass](vm.consts["StandardError"])
 	ssErr := newClass("StringScanner::Error", std)
 	cls.consts["Error"] = ssErr
 	vm.consts["StringScanner::Error"] = ssErr
@@ -204,20 +213,31 @@ func (vm *VM) registerStringScanner() {
 	// but an undefined NAME raises IndexError — matching MRI's StringScanner#[].
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		sc := ssScannerOf(v)
-		switch k := args[0].(type) {
-		case object.Integer:
-			text, ok := sc.Group(int(k))
-			if !ok {
+		{
+			__sw170 := args[0]
+			switch {
+			case object.IsInt(__sw170):
+				k := object.AsInteger(__sw170)
+				_ = k
+				text, ok := sc.Group(int(k))
+				if !ok {
+					return object.NilV
+				}
+				return object.NewString(text)
+			case object.IsKind[object.Symbol](__sw170):
+				k := object.Kind[object.Symbol](__sw170)
+				_ = k
+				return ssNamedGroup(sc, string(k))
+			case object.IsKind[*object.String](__sw170):
+				k := object.Kind[*object.String](__sw170)
+				_ = k
+				return ssNamedGroup(sc, k.Str())
+			default:
+				k := __sw170
+				_ = k
+				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
 				return object.NilV
 			}
-			return object.NewString(text)
-		case object.Symbol:
-			return ssNamedGroup(sc, string(k))
-		case *object.String:
-			return ssNamedGroup(sc, k.Str())
-		default:
-			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
-			return object.NilV
 		}
 	})
 

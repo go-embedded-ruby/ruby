@@ -69,7 +69,7 @@ func (vm *VM) registerMustache() {
 		// first argument falls back to the instance's stored template.
 		hasTemplate := false
 		if len(args) > 0 {
-			if _, isNil := args[0].(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(args[0]); !isNil {
 				hasTemplate = true
 			}
 		}
@@ -92,7 +92,7 @@ func (vm *VM) registerMustache() {
 // qualified name in the top-level table (so a re-raised library error's
 // exceptionObject lookup finds the very same class), exactly as JSON:: classes are.
 func (vm *VM) registerMustacheErrors(cls *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		cls.consts[simple] = c
@@ -106,7 +106,7 @@ func (vm *VM) registerMustacheErrors(cls *RClass) {
 // mustacheStringArg coerces a template argument to its source string: a String
 // yields its contents, and any other value its to_s.
 func mustacheStringArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

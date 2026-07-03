@@ -22,7 +22,7 @@ func (vm *VM) registerDryStructInstance(base *RClass) {
 	d := func(name string, fn NativeFn) { base.define(name, fn) }
 
 	toh := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return dryMapToHash(vm, self.(*DryStruct).s.ToH())
+		return dryMapToHash(vm, object.Kind[*DryStruct](self).s.ToH())
 	}
 	d("to_h", toh)
 	d("to_hash", toh)
@@ -31,7 +31,7 @@ func (vm *VM) registerDryStructInstance(base *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		v, ok := self.(*DryStruct).s.Get(drytypes.Symbol(dryKeyName(args[0])))
+		v, ok := object.Kind[*DryStruct](self).s.Get(drytypes.Symbol(dryKeyName(args[0])))
 		if !ok {
 			raise("Dry::Struct::Error", "%s", "unknown attribute")
 		}
@@ -39,16 +39,16 @@ func (vm *VM) registerDryStructInstance(base *RClass) {
 	})
 
 	d("attributes", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return dryMapToHash(vm, self.(*DryStruct).s.Attributes())
+		return dryMapToHash(vm, object.Kind[*DryStruct](self).s.Attributes())
 	})
 
 	// with(changes) returns a new struct of the same type with the given
 	// attributes replaced (the gem's Struct#new/#with).
 	d("with", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		ds := self.(*DryStruct)
+		ds := object.Kind[*DryStruct](self)
 		changes := drytypes.NewMap()
 		if len(args) > 0 {
-			if h, ok := args[0].(*object.Hash); ok {
+			if h, ok := object.KindOK[*object.Hash](args[0]); ok {
 				for _, k := range h.Keys {
 					v, _ := h.Get(k)
 					changes.Set(drytypes.Symbol(dryKeyName(k)), dryToGo(v))
@@ -66,20 +66,20 @@ func (vm *VM) registerDryStructInstance(base *RClass) {
 		if len(args) == 0 {
 			return object.Bool(false)
 		}
-		other, ok := args[0].(*DryStruct)
+		other, ok := object.KindOK[*DryStruct](args[0])
 		if !ok {
 			return object.Bool(false)
 		}
-		return object.Bool(self.(*DryStruct).s.Eql(other.s))
+		return object.Bool(object.Kind[*DryStruct](self).s.Eql(other.s))
 	}
 	d("==", eq)
 	d("eql?", eq)
 
 	d("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*DryStruct).s.Inspect())
+		return object.NewString(object.Kind[*DryStruct](self).s.Inspect())
 	})
 	d("to_s", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*DryStruct).s.String())
+		return object.NewString(object.Kind[*DryStruct](self).s.String())
 	})
 }
 

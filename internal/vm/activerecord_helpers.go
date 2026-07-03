@@ -13,11 +13,18 @@ import (
 // arStr coerces an argument to its String contents: a String yields its bytes, a
 // Symbol its name, any other value its to_s.
 func arStr(v object.Value) string {
-	switch n := v.(type) {
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw4 := v
+		switch {
+		case object.IsKind[*object.String](__sw4):
+			n := object.Kind[*object.String](__sw4)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw4):
+			n := object.Kind[object.Symbol](__sw4)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }
@@ -27,7 +34,7 @@ func arInt(args []object.Value) int {
 	if len(args) == 0 {
 		return 0
 	}
-	if n, ok := args[0].(object.Integer); ok {
+	if n, ok := object.AsIntegerOK(args[0]); ok {
 		return int(n)
 	}
 	return 0
@@ -36,27 +43,46 @@ func arInt(args []object.Value) int {
 // arToGo maps a Ruby value into the generic Go value model activerecord consumes
 // (nil / bool / int64 / *big.Int / float64 / string / Symbol / []any).
 func arToGo(v object.Value) any {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return activerecord.Symbol(string(n))
-	case *object.Array:
-		out := make([]any, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = arToGo(el)
+	{
+		__sw5 := v
+		switch {
+		case __sw5 == nil || object.IsNilObj(__sw5):
+			n := __sw5
+			_ = n
+			return nil
+		case object.IsBool(__sw5):
+			n := object.AsBoolV(__sw5)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw5):
+			n := object.AsInteger(__sw5)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw5):
+			n := object.Kind[*object.Bignum](__sw5)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw5):
+			n := object.AsFloatV(__sw5)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw5):
+			n := object.Kind[*object.String](__sw5)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw5):
+			n := object.Kind[object.Symbol](__sw5)
+			_ = n
+			return activerecord.Symbol(string(n))
+		case object.IsKind[*object.Array](__sw5):
+			n := object.Kind[*object.Array](__sw5)
+			_ = n
+			out := make([]any, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = arToGo(el)
+			}
+			return out
 		}
-		return out
 	}
 	return v.ToS()
 }
@@ -66,13 +92,22 @@ func arToGo(v object.Value) any {
 func arAnyArgs(args []object.Value) []any {
 	out := make([]any, len(args))
 	for i, a := range args {
-		switch v := a.(type) {
-		case object.Symbol:
-			out[i] = string(v)
-		case *object.String:
-			out[i] = v.Str()
-		default:
-			out[i] = arToGo(a)
+		{
+			__sw6 := a
+			switch {
+			case object.IsKind[object.Symbol](__sw6):
+				v := object.Kind[object.Symbol](__sw6)
+				_ = v
+				out[i] = string(v)
+			case object.IsKind[*object.String](__sw6):
+				v := object.Kind[*object.String](__sw6)
+				_ = v
+				out[i] = v.Str()
+			default:
+				v := __sw6
+				_ = v
+				out[i] = arToGo(a)
+			}
 		}
 	}
 	return out
@@ -83,13 +118,13 @@ func arAnyArgs(args []object.Value) []any {
 // otherwise the arguments pass through (a "sql", binds… fragment).
 func arCondArgs(args []object.Value) []any {
 	if len(args) == 1 {
-		if h, ok := args[0].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[0]); ok {
 			return []any{arCondHash(h)}
 		}
 	}
 	out := make([]any, len(args))
 	for i, a := range args {
-		if s, ok := a.(*object.String); ok {
+		if s, ok := object.KindOK[*object.String](a); ok {
 			out[i] = s.Str()
 			continue
 		}
@@ -114,7 +149,7 @@ func arAttrs(args []object.Value) map[string]any {
 	if len(args) == 0 {
 		return map[string]any{}
 	}
-	if h, ok := args[0].(*object.Hash); ok {
+	if h, ok := object.KindOK[*object.Hash](args[0]); ok {
 		return arCondHash(h)
 	}
 	return map[string]any{}
@@ -132,7 +167,7 @@ func arStrings(ss []string) *object.Array {
 // arStrList reads an add_index columns argument (a single name or an Array of
 // names) into a []string.
 func arStrList(v object.Value) []string {
-	if arr, ok := v.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](v); ok {
 		out := make([]string, len(arr.Elems))
 		for i, el := range arr.Elems {
 			out[i] = arStr(el)
@@ -149,13 +184,13 @@ func arLengthOpts(args []object.Value) activerecord.LengthOpts {
 	if len(args) < 2 {
 		return o
 	}
-	h, ok := args[1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](args[1])
 	if !ok {
 		return o
 	}
 	for _, k := range h.Keys {
 		val, _ := h.Get(k)
-		n, isInt := val.(object.Integer)
+		n, isInt := object.AsIntegerOK(val)
 		if !isInt {
 			continue
 		}
@@ -177,12 +212,12 @@ func arInList(args []object.Value) []any {
 	if len(args) < 2 {
 		return nil
 	}
-	h, ok := args[1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](args[1])
 	if !ok {
 		return nil
 	}
 	if v, ok := h.Get(object.Symbol("in")); ok {
-		if arr, ok := v.(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](v); ok {
 			out := make([]any, len(arr.Elems))
 			for i, el := range arr.Elems {
 				out[i] = arToGo(el)
@@ -198,7 +233,7 @@ func arInList(args []object.Value) []any {
 // name is enough for the join SQL).
 func arClassName(args []object.Value) string {
 	if len(args) > 1 {
-		if h, ok := args[1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[1]); ok {
 			if v, ok := h.Get(object.Symbol("class_name")); ok {
 				return arStr(v)
 			}

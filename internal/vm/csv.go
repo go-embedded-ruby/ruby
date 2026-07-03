@@ -88,7 +88,7 @@ func (vm *VM) registerCSV() {
 	// and returns itself (so `csv << a << b` chains). Defined on the CSV class so
 	// the csvSink receiver (which reports CSV) dispatches here.
 	pushFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if s, ok := self.(*csvSink); ok {
+		if s, ok := object.KindOK[*csvSink](self); ok {
 			*s.rows = append(*s.rows, vm.csvRowFor(args[0]))
 		}
 		return self
@@ -103,7 +103,7 @@ func (vm *VM) registerCSV() {
 // top-level name (so a re-raised library error's exceptionObject lookup finds
 // the same class), exactly as the URI:: / Date:: error classes are.
 func (vm *VM) registerCSVError(cls *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	mErr := newClass("CSV::MalformedCSVError", std)
 	cls.consts["MalformedCSVError"] = mErr
 	vm.consts["CSV::MalformedCSVError"] = mErr
@@ -252,7 +252,7 @@ func (vm *VM) csvGenerate(args []object.Value, blk *Proc) object.Value {
 	optsAt := 0
 	var rows [][]any
 	if len(args) > 0 {
-		if arr, ok := args[0].(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](args[0]); ok {
 			optsAt = 1
 			for _, e := range arr.Elems {
 				rows = append(rows, vm.csvRowFor(e))
@@ -350,18 +350,27 @@ func (vm *VM) csvDateTime(raw string, isTime bool) object.Value {
 // fields. Anything else raises TypeError, matching MRI's generate_line which
 // expects an Array(-like) row.
 func (vm *VM) csvRowFor(v object.Value) []any {
-	switch x := v.(type) {
-	case *object.Array:
-		row := make([]any, len(x.Elems))
-		for i, e := range x.Elems {
-			row[i] = vm.csvFieldFromRuby(e)
+	{
+		__sw40 := v
+		switch {
+		case object.IsKind[*object.Array](__sw40):
+			x := object.Kind[*object.Array](__sw40)
+			_ = x
+			row := make([]any, len(x.Elems))
+			for i, e := range x.Elems {
+				row[i] = vm.csvFieldFromRuby(e)
+			}
+			return row
+		case object.IsKind[*CSVRow](__sw40):
+			x := object.Kind[*CSVRow](__sw40)
+			_ = x
+			return x.r.Fields
+		default:
+			x := __sw40
+			_ = x
+			raise("TypeError", "no implicit conversion of %s into Array", classNameOf(v))
+			return nil
 		}
-		return row
-	case *CSVRow:
-		return x.r.Fields
-	default:
-		raise("TypeError", "no implicit conversion of %s into Array", classNameOf(v))
-		return nil
 	}
 }
 
@@ -370,19 +379,34 @@ func (vm *VM) csvRowFor(v object.Value) []any {
 // Integer -> int64, Float -> float64, Symbol -> its name. Anything else is sent
 // #to_s so an arbitrary object renders as MRI's generate would.
 func (vm *VM) csvFieldFromRuby(v object.Value) any {
-	switch x := v.(type) {
-	case object.Nil:
-		return nil
-	case *object.String:
-		return x.Str()
-	case object.Integer:
-		return int64(x)
-	case object.Float:
-		return float64(x)
-	case object.Symbol:
-		return string(x)
-	default:
-		return strArg(vm.send(v, "to_s", nil, nil))
+	{
+		__sw41 := v
+		switch {
+		case object.IsNilObj(__sw41):
+			x := object.NilObj()
+			_ = x
+			return nil
+		case object.IsKind[*object.String](__sw41):
+			x := object.Kind[*object.String](__sw41)
+			_ = x
+			return x.Str()
+		case object.IsInt(__sw41):
+			x := object.AsInteger(__sw41)
+			_ = x
+			return int64(x)
+		case object.IsFloat(__sw41):
+			x := object.AsFloatV(__sw41)
+			_ = x
+			return float64(x)
+		case object.IsKind[object.Symbol](__sw41):
+			x := object.Kind[object.Symbol](__sw41)
+			_ = x
+			return string(x)
+		default:
+			x := __sw41
+			_ = x
+			return strArg(vm.send(v, "to_s", nil, nil))
+		}
 	}
 }
 
@@ -396,7 +420,7 @@ func (vm *VM) csvOptions(args []object.Value, i int) libcsv.Options {
 	if i >= len(args) {
 		return o
 	}
-	h, ok := args[i].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](args[i])
 	if !ok {
 		return o
 	}
@@ -409,7 +433,7 @@ func (vm *VM) csvOptions(args []object.Value, i int) libcsv.Options {
 		o.RowSep = strArg(v)
 	}
 	if v, ok := get("quote_char"); ok {
-		if _, isNil := v.(object.Nil); isNil {
+		if _, isNil := object.AsNilOK(v); isNil {
 			o.NoQuote = true
 		} else {
 			o.QuoteChar = strArg(v)
@@ -468,21 +492,34 @@ func (vm *VM) csvOptions(args []object.Value, i int) libcsv.Options {
 // "first_row" passes through, an Array of names -> []string. Any other value is
 // treated as truthy (first-row headers), matching MRI's coercion.
 func csvHeadersOpt(v object.Value) any {
-	switch x := v.(type) {
-	case object.Bool:
-		return bool(x)
-	case object.Nil:
-		return false
-	case *object.String:
-		return x.Str()
-	case *object.Array:
-		names := make([]string, len(x.Elems))
-		for i, e := range x.Elems {
-			names[i] = strArg(e)
+	{
+		__sw42 := v
+		switch {
+		case object.IsBool(__sw42):
+			x := object.AsBoolV(__sw42)
+			_ = x
+			return bool(x)
+		case object.IsNilObj(__sw42):
+			x := object.NilObj()
+			_ = x
+			return false
+		case object.IsKind[*object.String](__sw42):
+			x := object.Kind[*object.String](__sw42)
+			_ = x
+			return x.Str()
+		case object.IsKind[*object.Array](__sw42):
+			x := object.Kind[*object.Array](__sw42)
+			_ = x
+			names := make([]string, len(x.Elems))
+			for i, e := range x.Elems {
+				names[i] = strArg(e)
+			}
+			return names
+		default:
+			x := __sw42
+			_ = x
+			return v.Truthy()
 		}
-		return names
-	default:
-		return v.Truthy()
 	}
 }
 
@@ -490,25 +527,36 @@ func csvHeadersOpt(v object.Value) any {
 // library's []string of converter names: a single Symbol or String is one name;
 // an Array yields each element's name. A nil / empty value yields no converters.
 func csvConverterNames(v object.Value) []string {
-	switch x := v.(type) {
-	case object.Symbol:
-		return []string{string(x)}
-	case *object.String:
-		return []string{x.Str()}
-	case *object.Array:
-		names := make([]string, 0, len(x.Elems))
-		for _, e := range x.Elems {
-			names = append(names, csvName(e))
+	{
+		__sw43 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw43):
+			x := object.Kind[object.Symbol](__sw43)
+			_ = x
+			return []string{string(x)}
+		case object.IsKind[*object.String](__sw43):
+			x := object.Kind[*object.String](__sw43)
+			_ = x
+			return []string{x.Str()}
+		case object.IsKind[*object.Array](__sw43):
+			x := object.Kind[*object.Array](__sw43)
+			_ = x
+			names := make([]string, 0, len(x.Elems))
+			for _, e := range x.Elems {
+				names = append(names, csvName(e))
+			}
+			return names
+		default:
+			x := __sw43
+			_ = x
+			return nil
 		}
-		return names
-	default:
-		return nil
 	}
 }
 
 // csvName renders a converter-name element (a Symbol or String) as its text.
 func csvName(v object.Value) string {
-	if s, ok := v.(object.Symbol); ok {
+	if s, ok := object.KindOK[object.Symbol](v); ok {
 		return string(s)
 	}
 	return strArg(v)
@@ -521,7 +569,7 @@ func csvName(v object.Value) string {
 // likewise rejects a bad :skip_lines pattern at parse time.
 func csvSkipLines(v object.Value) string {
 	var src string
-	if r, ok := v.(*Regexp); ok {
+	if r, ok := object.KindOK[*Regexp](v); ok {
 		src = r.source
 	} else {
 		src = strArg(v)
@@ -535,7 +583,7 @@ func csvSkipLines(v object.Value) string {
 // csvStripOpt maps the :strip value: true -> strip whitespace, a String -> strip
 // those specific characters. A falsey value leaves stripping off.
 func csvStripOpt(o *libcsv.Options, v object.Value) {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		o.StripChars = s.Str()
 		return
 	}
@@ -550,7 +598,7 @@ func (vm *VM) registerCSVRowClass(cls *RClass) {
 	vm.consts["CSV::Row"] = row
 	vm.cCSVRow = row
 
-	rowOf := func(v object.Value) *libcsv.Row { return v.(*CSVRow).r }
+	rowOf := func(v object.Value) *libcsv.Row { return object.Kind[*CSVRow](v).r }
 
 	d := func(name string, fn NativeFn) { row.define(name, fn) }
 
@@ -558,7 +606,7 @@ func (vm *VM) registerCSVRowClass(cls *RClass) {
 	// header or out-of-range index reads as nil, as CSV::Row#[] does.
 	idx := func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		r := rowOf(v)
-		if n, ok := args[0].(object.Integer); ok {
+		if n, ok := object.AsIntegerOK(args[0]); ok {
 			if val, ok := r.At(int(n)); ok {
 				return vm.csvFieldToRuby(val)
 			}
@@ -614,16 +662,22 @@ func (vm *VM) registerCSVRowClass(cls *RClass) {
 // String its text — so :a finds a :symbol-converted header and "a" a plain one,
 // matching MRI where the two are distinct.
 func csvLookupKey(v object.Value) any {
-	switch x := v.(type) {
-	case object.Symbol:
-		return libcsv.Symbol(string(x))
-	case *object.String:
-		return x.Str()
-	default:
-		// Any other key (e.g. a Float) cannot equal a string/Symbol header, so it
-		// is passed through unchanged and Field misses — reading as nil, as MRI's
-		// CSV::Row#[] does for a non-Integer, non-name key.
-		return v
+	{
+		__sw44 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw44):
+			x := object.Kind[object.Symbol](__sw44)
+			_ = x
+			return libcsv.Symbol(string(x))
+		case object.IsKind[*object.String](__sw44):
+			x := object.Kind[*object.String](__sw44)
+			_ = x
+			return x.Str()
+		default:
+			x := __sw44
+			_ = x
+			return v
+		}
 	}
 }
 
@@ -673,7 +727,7 @@ func (vm *VM) registerCSVTableClass(cls *RClass) {
 	vm.consts["CSV::Table"] = tbl
 	vm.cCSVTable = tbl
 
-	tblOf := func(v object.Value) *libcsv.Table { return v.(*CSVTable).t }
+	tblOf := func(v object.Value) *libcsv.Table { return object.Kind[*CSVTable](v).t }
 	d := func(name string, fn NativeFn) { tbl.define(name, fn) }
 
 	d("headers", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {

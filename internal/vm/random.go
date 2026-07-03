@@ -162,22 +162,31 @@ func (vm *VM) randValue(r *RandomObj, args []object.Value) object.Value {
 	if len(args) == 0 {
 		return object.Float(r.res53())
 	}
-	switch a := args[0].(type) {
-	case object.Integer:
-		if a <= 0 { // Random#rand requires a positive integer
-			raise("ArgumentError", "invalid argument - %d", int64(a))
+	{
+		__sw127 := args[0]
+		switch {
+		case object.IsInt(__sw127):
+			a := object.AsInteger(__sw127)
+			_ = a
+			if a <= 0 { // Random#rand requires a positive integer
+				raise("ArgumentError", "invalid argument - %d", int64(a))
+			}
+			return object.IntValue(int64(r.limitedRand(uint64(a) - 1)))
+		case object.IsFloat(__sw127):
+			a := object.AsFloatV(__sw127)
+			_ = a
+			if a < 0 {
+				raise("ArgumentError", "invalid argument - %s", a.Inspect())
+			}
+			if a == 0 {
+				return object.Float(r.res53())
+			}
+			return object.Float(r.res53() * float64(a))
+		case object.IsKind[*object.Range](__sw127):
+			a := object.Kind[*object.Range](__sw127)
+			_ = a
+			return vm.randRange(r, a)
 		}
-		return object.IntValue(int64(r.limitedRand(uint64(a) - 1)))
-	case object.Float:
-		if a < 0 {
-			raise("ArgumentError", "invalid argument - %s", a.Inspect())
-		}
-		if a == 0 {
-			return object.Float(r.res53())
-		}
-		return object.Float(r.res53() * float64(a))
-	case *object.Range:
-		return vm.randRange(r, a)
 	}
 	raise("ArgumentError", "invalid argument - %s", args[0].Inspect())
 	return object.NilV
@@ -191,15 +200,26 @@ func (vm *VM) kernelRandValue(r *RandomObj, args []object.Value) object.Value {
 		return object.Float(r.res53())
 	}
 	var n int64
-	switch a := args[0].(type) {
-	case object.Integer:
-		n = int64(a)
-	case object.Float:
-		n = int64(a) // truncates toward zero, like Float#to_i
-	case *object.Range:
-		return vm.randRange(r, a)
-	default:
-		raise("ArgumentError", "invalid argument - %s", args[0].Inspect())
+	{
+		__sw128 := args[0]
+		switch {
+		case object.IsInt(__sw128):
+			a := object.AsInteger(__sw128)
+			_ = a
+			n = int64(a)
+		case object.IsFloat(__sw128):
+			a := object.AsFloatV(__sw128)
+			_ = a
+			n = int64(a)
+		case object.IsKind[*object.Range](__sw128):
+			a := object.Kind[*object.Range](__sw128)
+			_ = a
+			return vm.randRange(r, a)
+		default:
+			a := __sw128
+			_ = a
+			raise("ArgumentError", "invalid argument - %s", args[0].Inspect())
+		}
 	}
 	if n < 0 {
 		n = -n
@@ -212,8 +232,8 @@ func (vm *VM) kernelRandValue(r *RandomObj, args []object.Value) object.Value {
 
 // randRange implements Random#rand(a..b) for integer or float ranges.
 func (vm *VM) randRange(r *RandomObj, rg *object.Range) object.Value {
-	lo, lok := rg.Lo.(object.Integer)
-	hi, hok := rg.Hi.(object.Integer)
+	lo, lok := object.AsIntegerOK(rg.Lo)
+	hi, hok := object.AsIntegerOK(rg.Hi)
 	if lok && hok {
 		span := int64(hi) - int64(lo)
 		if !rg.Exclusive {
@@ -246,13 +266,13 @@ func (vm *VM) registerRandom() {
 	}}
 
 	cRandom.define("rand", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.randValue(self.(*RandomObj), args)
+		return vm.randValue(object.Kind[*RandomObj](self), args)
 	})
 	cRandom.define("seed", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(self.(*RandomObj).seed)
+		return object.IntValue(object.Kind[*RandomObj](self).seed)
 	})
 	cRandom.define("bytes", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		r := self.(*RandomObj)
+		r := object.Kind[*RandomObj](self)
 		n := int(intArg(args[0]))
 		b := make([]byte, n)
 		for i := 0; i < n; i += 4 {

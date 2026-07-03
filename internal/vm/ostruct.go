@@ -28,7 +28,7 @@ import (
 // after the prelude so it reopens the prelude-defined class rather than creating
 // it.
 func (vm *VM) registerOstruct() {
-	cls, ok := vm.consts["OpenStruct"].(*RClass)
+	cls, ok := object.KindOK[*RClass](vm.consts["OpenStruct"])
 	if !ok {
 		// The prelude always defines OpenStruct; if a host stripped it, there is
 		// nothing to back, so leave the data helpers unbound.
@@ -82,7 +82,7 @@ func (vm *VM) registerOstruct() {
 	// Hash and returns its prior value, raising NameError (with MRI's exact
 	// message) when the field is absent — MRI's OpenStruct#delete_field.
 	sm("__data_delete_field", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		h := args[0].(*object.Hash)
+		h := object.Kind[*object.Hash](args[0])
 		os := vm.ostructFromHash(h)
 		v, err := os.DeleteField(symKey(args[1]))
 		if err != nil {
@@ -99,7 +99,7 @@ func (vm *VM) registerOstruct() {
 	// values is then compared with Ruby's #==, so reference values (String, Array,
 	// nested OpenStruct, …) compare by content as MRI does.
 	sm("__data_eq", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		if _, isNil := args[1].(object.Nil); isNil {
+		if _, isNil := object.AsNilOK(args[1]); isNil {
 			return object.Bool(false)
 		}
 		a, b := vm.ostructFromHash(args[0]), vm.ostructFromHash(args[1])
@@ -128,7 +128,7 @@ func (vm *VM) registerOstruct() {
 // interns them on assignment); each value is wrapped in a vmValue so the library
 // renders/digs/classifies it through the VM.
 func (vm *VM) ostructFromHash(v object.Value) *ostruct.OpenStruct {
-	h, ok := v.(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](v)
 	if !ok {
 		return ostruct.New()
 	}
@@ -143,13 +143,22 @@ func (vm *VM) ostructFromHash(v object.Value) *ostruct.OpenStruct {
 // symKey converts a Ruby Hash key to a library Symbol. Table keys are Symbols;
 // a stray String key is interned by its content, matching MRI's name.to_sym.
 func symKey(k object.Value) ostruct.Symbol {
-	switch t := k.(type) {
-	case object.Symbol:
-		return ostruct.Symbol(t)
-	case *object.String:
-		return ostruct.Symbol(t.Str())
-	default:
-		return ostruct.ToSym(k.ToS())
+	{
+		__sw117 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw117):
+			t := object.Kind[object.Symbol](__sw117)
+			_ = t
+			return ostruct.Symbol(t)
+		case object.IsKind[*object.String](__sw117):
+			t := object.Kind[*object.String](__sw117)
+			_ = t
+			return ostruct.Symbol(t.Str())
+		default:
+			t := __sw117
+			_ = t
+			return ostruct.ToSym(k.ToS())
+		}
 	}
 }
 
@@ -196,7 +205,7 @@ func (vm *VM) wrapVMValue(v object.Value) any {
 	if v == nil {
 		return nil
 	}
-	if _, isNil := v.(object.Nil); isNil {
+	if _, isNil := object.AsNilOK(v); isNil {
 		return nil
 	}
 	base := vmValue{vm: vm, v: v}

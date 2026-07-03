@@ -22,7 +22,7 @@ import (
 // form <to_s>." — the to_s of the offending argument. ok reports whether the
 // argument was one of the four recognised symbols.
 func formOf(v object.Value) (form norm.Form, ok bool) {
-	if s, isSym := v.(object.Symbol); isSym {
+	if s, isSym := object.KindOK[object.Symbol](v); isSym {
 		switch string(s) {
 		case "nfc":
 			return norm.NFC, true
@@ -55,7 +55,7 @@ func normForm(args []object.Value) norm.Form {
 // "invalid byte sequence in UTF-8" when the string is not valid UTF-8 — the same
 // error MRI raises before attempting to normalize.
 func normSource(self object.Value) string {
-	s := self.(*object.String)
+	s := object.Kind[*object.String](self)
 	if !utf8.Valid(s.Bytes()) {
 		raise("ArgumentError", "invalid byte sequence in UTF-8")
 	}

@@ -67,10 +67,10 @@ func TestSQLite3ValueBridge(t *testing.T) {
 	if v := sqlite3Value(vm, float64(1.5)); v != object.Float(1.5) {
 		t.Errorf("float64 -> %v", v)
 	}
-	if s, ok := sqlite3Value(vm, "x").(*object.String); !ok || s.Str() != "x" {
+	if s, ok := object.KindOK[*object.String](sqlite3Value(vm, "x")); !ok || s.Str() != "x" {
 		t.Errorf("string -> %v", sqlite3Value(vm, "x"))
 	}
-	if s, ok := sqlite3Value(vm, []byte{0x00}).(*object.String); !ok || !s.IsBinary() {
+	if s, ok := object.KindOK[*object.String](sqlite3Value(vm, []byte{0x00})); !ok || !s.IsBinary() {
 		t.Errorf("[]byte -> %v", sqlite3Value(vm, []byte{0x00}))
 	}
 	if v := sqlite3Value(vm, true); v != object.Bool(true) {

@@ -123,7 +123,7 @@ func (vm *VM) registerGrape() {
 // StandardError (raised by Validator#validate on a failing params Hash), nested
 // under Grape::Exceptions and re-exposed under its qualified name.
 func (vm *VM) registerGrapeErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	exc := newClass("Grape::Exceptions", nil)
 	exc.isModule = true
 	mod.consts["Exceptions"] = exc

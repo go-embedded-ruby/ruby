@@ -59,7 +59,7 @@ func (vm *VM) registerTOML() {
 // re-raised library error's exceptionObject lookup finds the very same class),
 // exactly as JSON:: classes are.
 func (vm *VM) registerTOMLErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c
@@ -74,7 +74,7 @@ func (vm *VM) registerTOMLErrors(mod *RClass) {
 // contents, and any other value its to_s, so a non-String argument does not crash
 // the parser.
 func tomlSourceArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

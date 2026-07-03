@@ -72,7 +72,7 @@ func (vm *VM) registerDryStruct() {
 	// transform_keys(:symbolize|:stringify) sets the subclass's key transform,
 	// matching `transform_keys(&:to_sym)` / `(&:to_s)`.
 	sdef("transform_keys", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		st := vm.dryStructType(cls)
 		mode := drystruct.KeyNone
 		if len(args) > 0 {
@@ -91,11 +91,11 @@ func (vm *VM) registerDryStruct() {
 	// raises Dry::Struct::Error. new(existing_instance_of_same_type) passes it
 	// through, matching the gem.
 	sdef("new", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		st := vm.dryStructType(cls)
 		var input any
 		if len(args) > 0 {
-			if ds, ok := args[0].(*DryStruct); ok {
+			if ds, ok := object.KindOK[*DryStruct](args[0]); ok {
 				input = ds.s
 			} else {
 				input = dryToGo(args[0])
@@ -118,7 +118,7 @@ func (vm *VM) registerDryStruct() {
 // subclass (whose StructType coerces the value); a missing name or type raises
 // ArgumentError.
 func (vm *VM) dryStructAttribute(self object.Value, args []object.Value, optional bool) object.Value {
-	cls, ok := self.(*RClass)
+	cls, ok := object.KindOK[*RClass](self)
 	if !ok {
 		raise("TypeError", "attribute must be called on a Dry::Struct subclass")
 	}
@@ -127,28 +127,37 @@ func (vm *VM) dryStructAttribute(self object.Value, args []object.Value, optiona
 	}
 	name := drytypes.Symbol(dryKeyName(args[0]))
 	st := vm.dryStructType(cls)
-	switch t := args[1].(type) {
-	case *DryType:
-		if optional {
-			st = st.AttributeOpt(name, t.t)
-		} else {
-			st = st.Attribute(name, t.t)
+	{
+		__sw49 := args[1]
+		switch {
+		case object.IsKind[*DryType](__sw49):
+			t := object.Kind[*DryType](__sw49)
+			_ = t
+			if optional {
+				st = st.AttributeOpt(name, t.t)
+			} else {
+				st = st.Attribute(name, t.t)
+			}
+		case object.IsKind[*RClass](__sw49):
+			t := object.Kind[*RClass](__sw49)
+			_ = t
+			nested := vm.dryStructType(t)
+			if optional {
+				st = st.AttributeTypeOpt(name, nested)
+			} else {
+				st = st.AttributeType(name, nested)
+			}
+		default:
+			t := __sw49
+			_ = t
+			raise("TypeError", "attribute type must be a Dry::Types type or a Dry::Struct subclass")
 		}
-	case *RClass:
-		nested := vm.dryStructType(t)
-		if optional {
-			st = st.AttributeTypeOpt(name, nested)
-		} else {
-			st = st.AttributeType(name, nested)
-		}
-	default:
-		raise("TypeError", "attribute type must be a Dry::Types type or a Dry::Struct subclass")
 	}
 	vm.setDryStructType(cls, st)
 	// Install the reader for this attribute (idempotent on redefinition).
 	rd := string(name)
 	cls.define(rd, func(vm *VM, recv object.Value, _ []object.Value, _ *Proc) object.Value {
-		ds := recv.(*DryStruct)
+		ds := object.Kind[*DryStruct](recv)
 		v, ok := ds.s.Get(name)
 		if !ok {
 			return object.NilV
@@ -161,13 +170,13 @@ func (vm *VM) dryStructAttribute(self object.Value, args []object.Value, optiona
 // dryStructType returns cls's accumulating *drystruct.StructType, creating and
 // stashing a fresh one (inheriting a parent subclass's schema) on first use.
 func (vm *VM) dryStructType(cls *RClass) *drystruct.StructType {
-	if m, ok := cls.ivars[dryStructMetaIvar].(*dryStructMeta); ok {
+	if m, ok := object.KindOK[*dryStructMeta](cls.ivars[dryStructMetaIvar]); ok {
 		return m.st
 	}
 	var st *drystruct.StructType
 	// A subclass of another struct subclass inherits its parent's attributes.
 	if p := cls.super; p != nil {
-		if pm, ok := p.ivars[dryStructMetaIvar].(*dryStructMeta); ok {
+		if pm, ok := object.KindOK[*dryStructMeta](p.ivars[dryStructMetaIvar]); ok {
 			st = pm.st.Inherit(cls.name)
 		}
 	}
@@ -194,7 +203,7 @@ func (vm *VM) setDryStructType(cls *RClass, st *drystruct.StructType) {
 // as a nested constant of Dry::Struct and under its qualified name so both the
 // Ruby constant and a re-raised library error resolve to the same class.
 func (vm *VM) registerDryStructError(base *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("Dry::Struct::Error", std)
 	base.consts["Error"] = c
 	vm.consts["Dry::Struct::Error"] = c

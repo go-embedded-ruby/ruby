@@ -15,11 +15,18 @@ import (
 // grapeStr coerces an argument to its String contents: a String yields its
 // bytes, a Symbol its name, any other value its to_s.
 func grapeStr(v object.Value) string {
-	switch n := v.(type) {
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw63 := v
+		switch {
+		case object.IsKind[*object.String](__sw63):
+			n := object.Kind[*object.String](__sw63)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw63):
+			n := object.Kind[object.Symbol](__sw63)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }
@@ -61,7 +68,7 @@ func grapeStatusName(s grape.MatchStatus) string {
 // (returns nil when absent).
 func grapeOptions(args []object.Value) *object.Hash {
 	if len(args) > 1 {
-		if h, ok := args[len(args)-1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
 			return h
 		}
 	}
@@ -125,7 +132,7 @@ func grapeType(v object.Value) grape.Type {
 // grapeValueList reads a values: option as a slice of allowed values: an Array
 // of literals, or a single literal.
 func grapeValueList(v object.Value) []any {
-	if arr, ok := v.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](v); ok {
 		out := make([]any, len(arr.Elems))
 		for i, el := range arr.Elems {
 			out[i] = grapeToGo(el)
@@ -139,7 +146,7 @@ func grapeValueList(v object.Value) []any {
 // the rbgo Regexp (so the pattern uses go-ruby-regexp, not a second engine). A
 // non-Regexp value yields the zero Regexp (no constraint).
 func grapeRegexp(v object.Value) grape.Regexp {
-	re, ok := v.(*Regexp)
+	re, ok := object.KindOK[*Regexp](v)
 	if !ok {
 		return grape.Regexp{}
 	}
@@ -153,7 +160,7 @@ func grapeRegexp(v object.Value) grape.Regexp {
 // map[string]any the validator consumes (keys stringified, values in the generic
 // Go value model).
 func grapeRawHash(v object.Value) map[string]any {
-	h, ok := v.(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion into Hash")
 	}
@@ -168,34 +175,55 @@ func grapeRawHash(v object.Value) map[string]any {
 // grapeToGo maps a Ruby value into the generic Go value model grape consumes
 // (nil / bool / int64 / float64 / string / []any / map[string]any).
 func grapeToGo(v object.Value) any {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
-	case *object.Array:
-		out := make([]any, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = grapeToGo(el)
+	{
+		__sw64 := v
+		switch {
+		case __sw64 == nil || object.IsNilObj(__sw64):
+			n := __sw64
+			_ = n
+			return nil
+		case object.IsBool(__sw64):
+			n := object.AsBoolV(__sw64)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw64):
+			n := object.AsInteger(__sw64)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw64):
+			n := object.Kind[*object.Bignum](__sw64)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw64):
+			n := object.AsFloatV(__sw64)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw64):
+			n := object.Kind[*object.String](__sw64)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw64):
+			n := object.Kind[object.Symbol](__sw64)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.Array](__sw64):
+			n := object.Kind[*object.Array](__sw64)
+			_ = n
+			out := make([]any, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = grapeToGo(el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw64):
+			n := object.Kind[*object.Hash](__sw64)
+			_ = n
+			m := make(map[string]any, len(n.Keys))
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				m[grapeStr(k)] = grapeToGo(val)
+			}
+			return m
 		}
-		return out
-	case *object.Hash:
-		m := make(map[string]any, len(n.Keys))
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m[grapeStr(k)] = grapeToGo(val)
-		}
-		return m
 	}
 	return v.ToS()
 }

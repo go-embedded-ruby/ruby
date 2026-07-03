@@ -15,7 +15,7 @@ func (vm *VM) registerAutoload() {
 	// constant table. If the constant is already defined the registration is a
 	// no-op (MRI: autoload? then reports nil). Returns nil.
 	autoloadFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		name := constNameArg(args[0])
 		path := autoloadPathArg(vm, args[1])
 		vm.registerAutoloadOn(cls, name, path)
@@ -26,7 +26,7 @@ func (vm *VM) registerAutoload() {
 	// Module#autoload?(const): the pending autoload path String, or nil. A const
 	// already defined in this class's table (not merely registered) reports nil.
 	autoloadQFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		name := constNameArg(args[0])
 		if _, defined := cls.consts[name]; defined {
 			return object.NilV
@@ -65,7 +65,7 @@ func (vm *VM) registerAutoload() {
 // autoloadPathArg coerces the second autoload argument to its file-name String,
 // raising TypeError otherwise — matching MRI's "no implicit conversion" error.
 func autoloadPathArg(vm *VM, v object.Value) string {
-	s, ok := v.(*object.String)
+	s, ok := object.KindOK[*object.String](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
 	}

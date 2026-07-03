@@ -43,7 +43,7 @@ func (vm *VM) registerFaker() {
 
 	// RetryLimitExceeded < StandardError mirrors the gem's unique-generator
 	// exhaustion error (raised by Faker::…unique when the retry budget is spent).
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	uniqErr := newClass("Faker::UniqueGenerator::RetryLimitExceeded", std)
 	mod.consts["UniqueGenerator"] = func() *RClass {
 		ug := newClass("Faker::UniqueGenerator", nil)

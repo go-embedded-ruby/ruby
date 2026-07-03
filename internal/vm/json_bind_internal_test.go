@@ -145,11 +145,11 @@ func TestJSONBindObjBuilder(t *testing.T) {
 	if !ok || len(h.Keys) != 1 {
 		t.Fatalf("object -> %#v", b.Result())
 	}
-	if _, ok := h.Keys[0].(object.Symbol); !ok {
+	if _, ok := object.KindOK[object.Symbol](h.Keys[0]); !ok {
 		t.Errorf("symbolized key -> %#v", h.Keys[0])
 	}
 	v, _ := h.Get(object.Symbol("k"))
-	a, ok := v.(*object.Array)
+	a, ok := object.KindOK[*object.Array](v)
 	if !ok || len(a.Elems) != 2 {
 		t.Fatalf("array value -> %#v", v)
 	}
@@ -161,7 +161,7 @@ func TestJSONBindObjBuilder(t *testing.T) {
 	b2.Null()
 	b2.EndObject()
 	h2 := b2.Result().(*object.Hash)
-	if _, ok := h2.Keys[0].(*object.String); !ok {
+	if _, ok := object.KindOK[*object.String](h2.Keys[0]); !ok {
 		t.Errorf("string key -> %#v", h2.Keys[0])
 	}
 }

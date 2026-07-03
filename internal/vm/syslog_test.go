@@ -35,7 +35,7 @@ func TestSyslogConstants(t *testing.T) {
 // NotImplementedError until the syslog transport round.
 func TestSyslogNotImplemented(t *testing.T) {
 	vm := New(nil)
-	mod := vm.consts["Syslog"].(*RClass)
+	mod := object.Kind[*RClass](vm.consts["Syslog"])
 	for _, name := range []string{"open", "log", "close", "info", "warning", "err", "debug", "notice"} {
 		m := mod.smethods[name]
 		if m == nil {

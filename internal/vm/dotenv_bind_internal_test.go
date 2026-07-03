@@ -90,7 +90,7 @@ func TestDotenvEnvRunCommand(t *testing.T) {
 func TestDotenvParseErrorInternal(t *testing.T) {
 	vm := New(nil)
 	h := dotenvParse(vm, "A=1", false)
-	if hh, ok := h.(*object.Hash); !ok || len(hh.Keys) != 1 {
+	if hh, ok := object.KindOK[*object.Hash](h); !ok || len(hh.Keys) != 1 {
 		t.Errorf("parse -> %#v", h)
 	}
 }

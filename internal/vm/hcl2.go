@@ -69,7 +69,7 @@ func (vm *VM) registerHCL2() {
 // Diagnostics error's exceptionObject lookup finds the very same class), exactly
 // as the JSON:: and TomlRB:: classes are.
 func (vm *VM) registerHCL2Errors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("HCL2::Error", std)
 	mod.consts["Error"] = c
 	vm.consts["HCL2::Error"] = c
@@ -79,7 +79,7 @@ func (vm *VM) registerHCL2Errors(mod *RClass) {
 // contents, and any other value its to_s, so a non-String argument does not crash
 // the parser.
 func hcl2SourceArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

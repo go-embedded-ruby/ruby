@@ -48,7 +48,7 @@ func raiseSQLite3Error(err error) {
 // sqlite3StringArg coerces a path / SQL argument to its string: a String yields
 // its contents, any other value its to_s.
 func sqlite3StringArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()
@@ -57,11 +57,18 @@ func sqlite3StringArg(v object.Value) string {
 // sqlite3IntArg coerces an argument to an int64, raising a TypeError for a
 // non-integer.
 func sqlite3IntArg(v object.Value) int64 {
-	switch n := v.(type) {
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I.Int64()
+	{
+		__sw166 := v
+		switch {
+		case object.IsInt(__sw166):
+			n := object.AsInteger(__sw166)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw166):
+			n := object.Kind[*object.Bignum](__sw166)
+			_ = n
+			return n.I.Int64()
+		}
 	}
 	raise("TypeError", "no implicit conversion to Integer")
 	return 0
@@ -77,7 +84,7 @@ func sqlite3ExecArgs(args []object.Value) (string, []sqlite3.Value) {
 	sql := sqlite3StringArg(args[0])
 	rest := args[1:]
 	if len(rest) == 1 {
-		if arr, ok := rest[0].(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](rest[0]); ok {
 			return sql, sqlite3Binds(arr.Elems)
 		}
 	}
@@ -88,7 +95,7 @@ func sqlite3ExecArgs(args []object.Value) (string, []sqlite3.Value) {
 // #bind_params(*values) accepts both an explicit list and a single Array.
 func sqlite3Spread(args []object.Value) []object.Value {
 	if len(args) == 1 {
-		if arr, ok := args[0].(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](args[0]); ok {
 			return arr.Elems
 		}
 	}
@@ -114,13 +121,22 @@ func sqlite3Mode(args []object.Value) sqlite3.TransactionMode {
 // sqlite3BindKey coerces a #bind_param key: an Integer is a 1-based positional
 // index, a String / Symbol a named parameter.
 func sqlite3BindKey(v object.Value) any {
-	switch n := v.(type) {
-	case object.Integer:
-		return int(n)
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw167 := v
+		switch {
+		case object.IsInt(__sw167):
+			n := object.AsInteger(__sw167)
+			_ = n
+			return int(n)
+		case object.IsKind[object.Symbol](__sw167):
+			n := object.Kind[object.Symbol](__sw167)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw167):
+			n := object.Kind[*object.String](__sw167)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
@@ -132,27 +148,44 @@ func sqlite3BindKey(v object.Value) any {
 // String -> string (TEXT), an ASCII-8BIT String -> []byte (BLOB), nil -> NULL,
 // true/false -> 1/0 (SQLite has no boolean). Any other value binds its to_s.
 func sqlite3Bind(v object.Value) sqlite3.Value {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		if bool(n) {
-			return int64(1)
+	{
+		__sw168 := v
+		switch {
+		case __sw168 == nil || object.IsNilObj(__sw168):
+			n := __sw168
+			_ = n
+			return nil
+		case object.IsBool(__sw168):
+			n := object.AsBoolV(__sw168)
+			_ = n
+			if bool(n) {
+				return int64(1)
+			}
+			return int64(0)
+		case object.IsInt(__sw168):
+			n := object.AsInteger(__sw168)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw168):
+			n := object.Kind[*object.Bignum](__sw168)
+			_ = n
+			return n.I.Int64()
+		case object.IsFloat(__sw168):
+			n := object.AsFloatV(__sw168)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw168):
+			n := object.Kind[*object.String](__sw168)
+			_ = n
+			if n.IsBinary() {
+				return []byte(n.Bytes())
+			}
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw168):
+			n := object.Kind[object.Symbol](__sw168)
+			_ = n
+			return string(n)
 		}
-		return int64(0)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I.Int64()
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		if n.IsBinary() {
-			return []byte(n.Bytes())
-		}
-		return n.Str()
-	case object.Symbol:
-		return string(n)
 	}
 	return v.ToS()
 }

@@ -59,10 +59,10 @@ func (g *PrettyPrintGroup) Truthy() bool    { return true }
 // ppText coerces a #text/#group obj argument to its string content the way MRI's
 // `@output << obj` does: a String contributes its bytes, any other value its #to_s.
 func (vm *VM) ppText(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
-	if s, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](vm.send(v, "to_s", nil, nil)); ok {
 		return s.Str()
 	}
 	return ""
@@ -95,17 +95,17 @@ func newPrettyPrint(prefix string, maxwidth int, newline string) *PrettyPrint {
 func (vm *VM) ppNewArgs(args []object.Value) (prefix string, maxwidth int, newline string) {
 	maxwidth, newline = 79, "\n"
 	if len(args) > 0 {
-		if s, ok := args[0].(*object.String); ok {
+		if s, ok := object.KindOK[*object.String](args[0]); ok {
 			prefix = s.Str()
 		}
 	}
 	if len(args) > 1 {
-		if _, isNil := args[1].(object.Nil); !isNil {
+		if _, isNil := object.AsNilOK(args[1]); !isNil {
 			maxwidth = int(intArg(args[1]))
 		}
 	}
 	if len(args) > 2 {
-		if s, ok := args[2].(*object.String); ok {
+		if s, ok := object.KindOK[*object.String](args[2]); ok {
 			newline = s.Str()
 		}
 	}
@@ -122,7 +122,7 @@ func (vm *VM) registerPrettyPrint() {
 	vm.cPrettyPrint.consts["Group"] = grp
 	vm.consts["PrettyPrint::Group"] = grp
 	grp.define("depth", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(v.(*PrettyPrintGroup).depth))
+		return object.IntValue(int64(object.Kind[*PrettyPrintGroup](v).depth))
 	})
 
 	// PrettyPrint.new(output='', maxwidth=79, newline="\n").
@@ -161,7 +161,7 @@ func (vm *VM) registerPrettyPrint() {
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cPrettyPrint.define(name, fn) }
-	self := func(v object.Value) *PrettyPrint { return v.(*PrettyPrint) }
+	self := func(v object.Value) *PrettyPrint { return object.Kind[*PrettyPrint](v) }
 
 	// text(obj, width=obj.length): add obj as width columns of text.
 	d("text", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -295,7 +295,7 @@ func (vm *VM) registerSingleLine() {
 	vm.cPrettyPrint.consts["SingleLine"] = cls
 	vm.consts["PrettyPrint::SingleLine"] = cls
 
-	self := func(v object.Value) *SingleLine { return v.(*SingleLine) }
+	self := func(v object.Value) *SingleLine { return object.Kind[*SingleLine](v) }
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 
 	d("text", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {

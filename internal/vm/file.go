@@ -21,7 +21,7 @@ func toSlash(s string) string { return strings.ReplaceAll(s, "\\", "/") }
 func (vm *VM) registerFile() {
 	// SystemCallError + Errno::ENOENT, registered both as a scoped constant
 	// (rescue Errno::ENOENT) and a flat name (so the internal raise resolves it).
-	syscallErr := newClass("SystemCallError", vm.consts["StandardError"].(*RClass))
+	syscallErr := newClass("SystemCallError", object.Kind[*RClass](vm.consts["StandardError"]))
 	vm.consts["SystemCallError"] = syscallErr
 	errno := newClass("Errno", nil)
 	errno.isModule = true
@@ -90,7 +90,7 @@ func (vm *VM) registerFile() {
 		var parts []string
 		var add func(v object.Value)
 		add = func(v object.Value) {
-			if arr, ok := v.(*object.Array); ok {
+			if arr, ok := object.KindOK[*object.Array](v); ok {
 				for _, e := range arr.Elems {
 					add(e)
 				}
@@ -384,7 +384,7 @@ func chownID(v object.Value) int {
 // timeArgUnix marshals a File.utime time argument (a Time, or an Integer/Float
 // seconds-since-epoch) to a whole number of Unix seconds.
 func timeArgUnix(v object.Value) int64 {
-	if t, ok := v.(*Time); ok {
+	if t, ok := object.KindOK[*Time](v); ok {
 		return t.t.ToUnix()
 	}
 	return timeSeconds(v)

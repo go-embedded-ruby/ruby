@@ -27,7 +27,7 @@ func (vm *VM) registerRuboCopOffense(cop *RClass) {
 	vm.consts["RuboCop::Cop::Offense::Location"] = loc
 
 	ld := func(name string, fn NativeFn) { loc.define(name, fn) }
-	lself := func(v object.Value) rubocop.Location { return v.(*RuboCopLocation).l }
+	lself := func(v object.Value) rubocop.Location { return object.Kind[*RuboCopLocation](v).l }
 	ld("line", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(lself(v).Line))
 	})
@@ -39,7 +39,7 @@ func (vm *VM) registerRuboCopOffense(cop *RClass) {
 	})
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) rubocop.Offense { return v.(*RuboCopOffense).o }
+	self := func(v object.Value) rubocop.Offense { return object.Kind[*RuboCopOffense](v).o }
 	d("cop_name", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).CopName)
 	})
@@ -79,11 +79,18 @@ func (vm *VM) registerRuboCopOffense(cop *RClass) {
 // rubocopStr coerces an argument to its String contents: a String yields its
 // bytes, any other value its to_s.
 func rubocopStr(v object.Value) string {
-	switch n := v.(type) {
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw151 := v
+		switch {
+		case object.IsKind[*object.String](__sw151):
+			n := object.Kind[*object.String](__sw151)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw151):
+			n := object.Kind[object.Symbol](__sw151)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }

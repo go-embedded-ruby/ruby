@@ -129,7 +129,7 @@ func (b *observerBox) Truthy() bool    { return true }
 // observerState returns the receiver's observer box, creating and stashing it on
 // first use (MRI lazily defines @observer_peers/@observer_state likewise).
 func observerState(self object.Value) *observerBox {
-	if b, ok := getIvar(self, "@__observer_state").(*observerBox); ok {
+	if b, ok := object.KindOK[*observerBox](getIvar(self, "@__observer_state")); ok {
 		return b
 	}
 	b := &observerBox{reg: &observer.Registry{}, funcs: map[object.Value]string{}}
@@ -146,13 +146,22 @@ func observerFuncs(self object.Value) map[object.Value]string { return observerS
 // methodNameArg coerces an add_observer func argument (a Symbol or String) to its
 // text. MRI accepts either; a non-name value raises TypeError.
 func methodNameArg(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
-	default:
-		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
-		return ""
+	{
+		__sw113 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw113):
+			n := object.Kind[object.Symbol](__sw113)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw113):
+			n := object.Kind[*object.String](__sw113)
+			_ = n
+			return n.Str()
+		default:
+			n := __sw113
+			_ = n
+			raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+			return ""
+		}
 	}
 }

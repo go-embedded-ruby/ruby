@@ -55,22 +55,22 @@ func (vm *VM) installScanf() {
 	})
 
 	scanfIO := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		o.pipeRefresh()
 		input := string(o.buf[min(o.pos, len(o.buf)):])
 		o.pos = len(o.buf) // scanf consumes the stream's remaining input
 		return vm.doScanf(input, strArg(args[0]), blk)
 	}
-	if cIO, ok := vm.consts["IO"].(*RClass); ok {
+	if cIO, ok := object.KindOK[*RClass](vm.consts["IO"]); ok {
 		cIO.define("scanf", scanfIO)
 	}
-	if cStringIO, ok := vm.consts["StringIO"].(*RClass); ok {
+	if cStringIO, ok := object.KindOK[*RClass](vm.consts["StringIO"]); ok {
 		cStringIO.define("scanf", scanfIO)
 	}
 
 	// Kernel#scanf(format) reads from $stdin — the top-level `scanf("%d")` form.
 	vm.cObject.define("scanf", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		stdin, ok := vm.globals["$stdin"].(*IOObj)
+		stdin, ok := object.KindOK[*IOObj](vm.globals["$stdin"])
 		if !ok {
 			return object.NewArray()
 		}

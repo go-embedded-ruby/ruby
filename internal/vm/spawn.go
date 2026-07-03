@@ -46,7 +46,7 @@ func (execSentinel) Error() string { return "exec sentinel" }
 // registerSpawn installs IO.pipe / read_nonblock / reopen / IO.select and the
 // Process spawning entry points, plus Kernel#fork / Kernel#exec.
 func (vm *VM) registerSpawn() {
-	cIO := vm.consts["IO"].(*RClass)
+	cIO := object.Kind[*RClass](vm.consts["IO"])
 
 	cIO.smethods["pipe"] = &Method{name: "pipe", owner: cIO, native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 		buf := &pipeBuf{}
@@ -64,7 +64,7 @@ func (vm *VM) registerSpawn() {
 	// read_nonblock / readpartial drain available pipe bytes; at EOF (write end
 	// closed, nothing buffered) they raise EOFError, as MRI does.
 	nonblock := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		o.pipeRefresh()
 		if o.pos >= len(o.buf) {
 			if o.pipeWriterClosed() {
@@ -88,8 +88,8 @@ func (vm *VM) registerSpawn() {
 	// reopen rebinds a standard stream onto another IO (Puppet's safe_posix_fork
 	// does STDOUT.reopen(pipe_writer)); subsequent writes forward to the target.
 	cIO.define("reopen", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		if target, ok := args[0].(*IOObj); ok {
+		o := object.Kind[*IOObj](self)
+		if target, ok := object.KindOK[*IOObj](args[0]); ok {
 			o.reopened = target
 		}
 		return self
@@ -102,9 +102,9 @@ func (vm *VM) registerSpawn() {
 	cIO.smethods["select"] = &Method{name: "select", owner: cIO, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		readReady := object.NewArray()
 		if len(args) > 0 {
-			if rs, ok := args[0].(*object.Array); ok {
+			if rs, ok := object.KindOK[*object.Array](args[0]); ok {
 				for _, v := range rs.Elems {
-					if o, ok := v.(*IOObj); ok {
+					if o, ok := object.KindOK[*IOObj](v); ok {
 						o.pipeRefresh()
 						if o.pos < len(o.buf) || o.pipeWriterClosed() {
 							readReady.Elems = append(readReady.Elems, o)
@@ -115,7 +115,7 @@ func (vm *VM) registerSpawn() {
 		}
 		writeReady := object.NewArray()
 		if len(args) > 1 {
-			if ws, ok := args[1].(*object.Array); ok {
+			if ws, ok := object.KindOK[*object.Array](args[1]); ok {
 				writeReady.Elems = append(writeReady.Elems, ws.Elems...)
 			}
 		}
@@ -132,7 +132,7 @@ func (vm *VM) registerSpawn() {
 // registerProcessSpawn adds spawn / waitpid2 / setsid / Status to the Process
 // module (already created by registerProcess).
 func (vm *VM) registerProcessSpawn() {
-	mod := vm.consts["Process"].(*RClass)
+	mod := object.Kind[*RClass](vm.consts["Process"])
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	// WNOHANG / WUNTRACED are the wait flags Puppet passes to waitpid2; only their
@@ -147,13 +147,13 @@ func (vm *VM) registerProcessSpawn() {
 	mod.consts["Status"] = status
 	vm.consts["Process::Status"] = status
 	status.define("exitstatus", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*RObject).ivars["@exitstatus"]
+		return object.Kind[*RObject](self).ivars["@exitstatus"]
 	})
 	status.define("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*RObject).ivars["@exitstatus"] == object.IntValue(0))
+		return object.Bool(object.Kind[*RObject](self).ivars["@exitstatus"] == object.IntValue(0))
 	})
 	status.define("pid", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*RObject).ivars["@pid"]
+		return object.Kind[*RObject](self).ivars["@pid"]
 	})
 
 	// spawn(env?, command..., opts?) runs the command synchronously, writing its
@@ -176,7 +176,7 @@ func (vm *VM) registerProcessSpawn() {
 			}
 			raise("Errno::ECHILD", "No child processes")
 		}
-		so := &RObject{class: vm.consts["Process::Status"].(*RClass), ivars: map[string]object.Value{}}
+		so := &RObject{class: object.Kind[*RClass](vm.consts["Process::Status"]), ivars: map[string]object.Value{}}
 		so.ivars["@exitstatus"] = object.IntValue(int64(st.code))
 		so.ivars["@pid"] = object.IntValue(int64(st.pid))
 		return object.NewArray(object.IntValue(int64(pid)), so)
@@ -281,12 +281,12 @@ func (vm *VM) reapChild(pid int) (childStatus, bool) {
 func parseSpawnArgs(args []object.Value) (cmd []string, opts *object.Hash) {
 	rest := args
 	if len(rest) > 0 {
-		if _, ok := rest[0].(*object.Hash); ok {
+		if _, ok := object.KindOK[*object.Hash](rest[0]); ok {
 			rest = rest[1:] // leading env Hash — ignored (custom_environment handled by caller)
 		}
 	}
 	if len(rest) > 0 {
-		if h, ok := rest[len(rest)-1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](rest[len(rest)-1]); ok {
 			opts = h
 			rest = rest[:len(rest)-1]
 		}
@@ -310,7 +310,7 @@ func writeSpawnOutput(opts *object.Hash, out string) {
 		return
 	}
 	if v, ok := opts.Get(object.Symbol("out")); ok {
-		if o, ok := v.(*IOObj); ok {
+		if o, ok := object.KindOK[*IOObj](v); ok {
 			o.writeStr(out)
 		}
 	}

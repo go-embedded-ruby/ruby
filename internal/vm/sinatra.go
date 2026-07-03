@@ -133,7 +133,7 @@ func (vm *VM) registerSinatra() {
 	// Sinatra::NotFound < StandardError, raised/checked for an unmatched route
 	// (Sinatra maps it to a 404). Provided so `require "sinatra/base"` exposes the
 	// name application code rescues.
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	nf := newClass("Sinatra::NotFound", std)
 	mod.consts["NotFound"] = nf
 	vm.consts["Sinatra::NotFound"] = nf
@@ -141,11 +141,18 @@ func (vm *VM) registerSinatra() {
 
 // sinatraStr coerces an argument to its String contents.
 func sinatraStr(v object.Value) string {
-	switch n := v.(type) {
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw160 := v
+		switch {
+		case object.IsKind[*object.String](__sw160):
+			n := object.Kind[*object.String](__sw160)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw160):
+			n := object.Kind[object.Symbol](__sw160)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }

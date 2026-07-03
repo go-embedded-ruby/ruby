@@ -30,7 +30,7 @@ func (vm *VM) yamlResolveClass(name string) *RClass {
 			resolved = nil
 			break
 		}
-		c, isClass := v.(*RClass)
+		c, isClass := object.KindOK[*RClass](v)
 		if !isClass {
 			resolved = nil
 			break
@@ -46,7 +46,7 @@ func (vm *VM) yamlResolveClass(name string) *RClass {
 	// Unknown class: register a placeholder under its qualified name so repeated
 	// loads reuse one class object.
 	if v, ok := vm.cObject.consts[name]; ok {
-		if c, isClass := v.(*RClass); isClass {
+		if c, isClass := object.KindOK[*RClass](v); isClass {
 			return c
 		}
 	}
@@ -134,44 +134,81 @@ type yamlToCtx struct {
 
 // conv maps one Ruby value to its library equivalent.
 func (c *yamlToCtx) conv(v object.Value) yaml.Value {
-	switch n := v.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return yaml.Symbol(string(n))
-	case *object.Array:
-		return c.convArray(n)
-	case *object.Hash:
-		return c.convHash(n)
-	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
-	case *object.Range:
-		return c.convRange(n)
-	case *RObject:
-		return c.convObject(n)
-	case *Set:
-		return c.convSet(n)
-	case *URI:
-		return c.convURI(n)
-	case *RClass:
-		if n.isModule {
-			return yaml.Module(n.ToS())
+	{
+		__sw187 := v
+		switch {
+		case __sw187 == nil:
+			n := __sw187
+			_ = n
+			return nil
+		case object.IsNilObj(__sw187):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsBool(__sw187):
+			n := object.AsBoolV(__sw187)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw187):
+			n := object.AsInteger(__sw187)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw187):
+			n := object.Kind[*object.Bignum](__sw187)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw187):
+			n := object.AsFloatV(__sw187)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw187):
+			n := object.Kind[*object.String](__sw187)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw187):
+			n := object.Kind[object.Symbol](__sw187)
+			_ = n
+			return yaml.Symbol(string(n))
+		case object.IsKind[*object.Array](__sw187):
+			n := object.Kind[*object.Array](__sw187)
+			_ = n
+			return c.convArray(n)
+		case object.IsKind[*object.Hash](__sw187):
+			n := object.Kind[*object.Hash](__sw187)
+			_ = n
+			return c.convHash(n)
+		case object.IsKind[*Time](__sw187):
+			n := object.Kind[*Time](__sw187)
+			_ = n
+			return stdtime.Unix(n.t.ToUnix(), 0).UTC()
+		case object.IsKind[*object.Range](__sw187):
+			n := object.Kind[*object.Range](__sw187)
+			_ = n
+			return c.convRange(n)
+		case object.IsKind[*RObject](__sw187):
+			n := object.Kind[*RObject](__sw187)
+			_ = n
+			return c.convObject(n)
+		case object.IsKind[*Set](__sw187):
+			n := object.Kind[*Set](__sw187)
+			_ = n
+			return c.convSet(n)
+		case object.IsKind[*URI](__sw187):
+			n := object.Kind[*URI](__sw187)
+			_ = n
+			return c.convURI(n)
+		case object.IsKind[*RClass](__sw187):
+			n := object.Kind[*RClass](__sw187)
+			_ = n
+			if n.isModule {
+				return yaml.Module(n.ToS())
+			}
+			return yaml.Class(n.ToS())
+		case object.IsKind[*Regexp](__sw187):
+			n := object.Kind[*Regexp](__sw187)
+			_ = n
+			return &yaml.Regexp{Source: n.source, Flags: orderFlags(n.flags)}
 		}
-		return yaml.Class(n.ToS())
-	case *Regexp:
-		return &yaml.Regexp{Source: n.source, Flags: orderFlags(n.flags)}
 	}
 	// An unmapped value (e.g. a Proc): hand it to the library, which returns the
 	// dump error yamlDump turns into a Ruby TypeError.

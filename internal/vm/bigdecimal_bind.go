@@ -64,18 +64,31 @@ func newDecimalString(s string) *BigDecimal {
 // through its exact decimal string. ok is false for a non-numeric, non-BigDecimal
 // value.
 func asBigDecimal(v object.Value) (*bigdecimal.Decimal, bool) {
-	switch x := v.(type) {
-	case *BigDecimal:
-		return x.d, true
-	case object.Integer:
-		return bigdecimal.FromInt(int64(x)), true
-	case *object.Bignum:
-		return bigdecimal.FromBigInt(x.I), true
-	case object.Float:
-		return floatToDecimal(float64(x)), true
-	case *object.Rational:
-		f, _ := x.R.Float64()
-		return floatToDecimal(f), true
+	{
+		__sw14 := v
+		switch {
+		case object.IsKind[*BigDecimal](__sw14):
+			x := object.Kind[*BigDecimal](__sw14)
+			_ = x
+			return x.d, true
+		case object.IsInt(__sw14):
+			x := object.AsInteger(__sw14)
+			_ = x
+			return bigdecimal.FromInt(int64(x)), true
+		case object.IsKind[*object.Bignum](__sw14):
+			x := object.Kind[*object.Bignum](__sw14)
+			_ = x
+			return bigdecimal.FromBigInt(x.I), true
+		case object.IsFloat(__sw14):
+			x := object.AsFloatV(__sw14)
+			_ = x
+			return floatToDecimal(float64(x)), true
+		case object.IsKind[*object.Rational](__sw14):
+			x := object.Kind[*object.Rational](__sw14)
+			_ = x
+			f, _ := x.R.Float64()
+			return floatToDecimal(f), true
+		}
 	}
 	return nil, false
 }
@@ -205,24 +218,37 @@ func (vm *VM) registerBigDecimal() {
 	// significant-digit argument (MRI raises ArgumentError without it); a
 	// BigDecimal passes through.
 	vm.cObject.define("BigDecimal", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		switch v := args[0].(type) {
-		case *BigDecimal:
-			return v
-		case *object.String:
-			return newDecimalString(v.Str())
-		case object.Integer:
-			return &BigDecimal{d: bigdecimal.FromInt(int64(v))}
-		case *object.Bignum:
-			return &BigDecimal{d: bigdecimal.FromBigInt(v.I)}
-		case object.Float:
-			if len(args) < 2 {
-				return raise("ArgumentError", "can't omit precision for a Float")
+		{
+			__sw15 := args[0]
+			switch {
+			case object.IsKind[*BigDecimal](__sw15):
+				v := object.Kind[*BigDecimal](__sw15)
+				_ = v
+				return v
+			case object.IsKind[*object.String](__sw15):
+				v := object.Kind[*object.String](__sw15)
+				_ = v
+				return newDecimalString(v.Str())
+			case object.IsInt(__sw15):
+				v := object.AsInteger(__sw15)
+				_ = v
+				return &BigDecimal{d: bigdecimal.FromInt(int64(v))}
+			case object.IsKind[*object.Bignum](__sw15):
+				v := object.Kind[*object.Bignum](__sw15)
+				_ = v
+				return &BigDecimal{d: bigdecimal.FromBigInt(v.I)}
+			case object.IsFloat(__sw15):
+				v := object.AsFloatV(__sw15)
+				_ = v
+				if len(args) < 2 {
+					return raise("ArgumentError", "can't omit precision for a Float")
+				}
+				d, err := bigdecimal.FromFloat(float64(v), int(intArg(args[1])))
+				if err != nil {
+					return raise("ArgumentError", "%s", err.Error())
+				}
+				return &BigDecimal{d: d}
 			}
-			d, err := bigdecimal.FromFloat(float64(v), int(intArg(args[1])))
-			if err != nil {
-				return raise("ArgumentError", "%s", err.Error())
-			}
-			return &BigDecimal{d: d}
 		}
 		return raise("TypeError", "can't convert %s into BigDecimal", args[0].Inspect())
 	})
@@ -242,7 +268,7 @@ func (vm *VM) registerBigDecimal() {
 	vm.cBigDecimal.consts["INFINITY"] = newDecimalString("Infinity")
 
 	d := func(name string, fn NativeFn) { vm.cBigDecimal.define(name, fn) }
-	self := func(v object.Value) *BigDecimal { return v.(*BigDecimal) }
+	self := func(v object.Value) *BigDecimal { return object.Kind[*BigDecimal](v) }
 
 	// Arithmetic mirrors the operator fast path (bigDecimalOp) so `send(:+, x)`
 	// agrees with the `a + x` syntax.

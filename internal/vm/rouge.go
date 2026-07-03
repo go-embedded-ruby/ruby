@@ -95,7 +95,7 @@ func (vm *VM) registerRouge() {
 // table (so a re-raised library error's exceptionObject lookup finds the very same
 // class), exactly as the Mustache:: classes are.
 func (vm *VM) registerRougeErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("Rouge::Error", std)
 	mod.consts["Error"] = c
 	vm.consts["Rouge::Error"] = c
@@ -104,7 +104,7 @@ func (vm *VM) registerRougeErrors(mod *RClass) {
 // rougeStringArg coerces the highlight source argument to its text string: a String
 // yields its contents, and any other value its to_s.
 func rougeStringArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()
@@ -113,11 +113,18 @@ func rougeStringArg(v object.Value) string {
 // rougeNameArg renders a lexer / formatter name argument as its bare name: a
 // String verbatim, a Symbol as its text, and any other value its to_s.
 func rougeNameArg(v object.Value) string {
-	switch n := v.(type) {
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw142 := v
+		switch {
+		case object.IsKind[*object.String](__sw142):
+			n := object.Kind[*object.String](__sw142)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw142):
+			n := object.Kind[object.Symbol](__sw142)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }

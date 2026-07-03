@@ -48,12 +48,12 @@ func chronicOptions(h *object.Hash) (chronic.Options, bool) {
 		return o, false
 	}
 	if v, ok := h.Get(object.Symbol("now")); ok {
-		if t, isT := v.(*Time); isT {
+		if t, isT := object.KindOK[*Time](v); isT {
 			o.Now = stdtime.Unix(t.t.ToUnix(), 0).UTC()
 		}
 	}
 	if v, ok := h.Get(object.Symbol("context")); ok {
-		if sym, isSym := v.(object.Symbol); isSym && string(sym) == "past" {
+		if sym, isSym := object.KindOK[object.Symbol](v); isSym && string(sym) == "past" {
 			o.Context = chronic.ContextPast
 		}
 	}
@@ -61,19 +61,26 @@ func chronicOptions(h *object.Hash) (chronic.Options, bool) {
 		o.EndianLittle = chronicEndianLittle(v)
 	}
 	if v, ok := h.Get(object.Symbol("guess")); ok {
-		switch g := v.(type) {
-		case object.Bool:
-			if !bool(g) {
-				return o, true
-			}
-		case object.Symbol:
-			switch string(g) {
-			case "begin":
-				o.Guess = chronic.GuessBegin
-			case "end":
-				o.Guess = chronic.GuessEnd
-			case "none":
-				return o, true
+		{
+			__sw36 := v
+			switch {
+			case object.IsBool(__sw36):
+				g := object.AsBoolV(__sw36)
+				_ = g
+				if !bool(g) {
+					return o, true
+				}
+			case object.IsKind[object.Symbol](__sw36):
+				g := object.Kind[object.Symbol](__sw36)
+				_ = g
+				switch string(g) {
+				case "begin":
+					o.Guess = chronic.GuessBegin
+				case "end":
+					o.Guess = chronic.GuessEnd
+				case "none":
+					return o, true
+				}
 			}
 		}
 	}
@@ -84,16 +91,23 @@ func chronicOptions(h *object.Hash) (chronic.Options, bool) {
 // element is :little (the gem's [:little, :middle]) selects day/month parsing, as
 // does the bare :little symbol.
 func chronicEndianLittle(v object.Value) bool {
-	switch p := v.(type) {
-	case *object.Array:
-		return len(p.Elems) > 0 && chronicIsLittle(p.Elems[0])
-	default:
-		return chronicIsLittle(v)
+	{
+		__sw37 := v
+		switch {
+		case object.IsKind[*object.Array](__sw37):
+			p := object.Kind[*object.Array](__sw37)
+			_ = p
+			return len(p.Elems) > 0 && chronicIsLittle(p.Elems[0])
+		default:
+			p := __sw37
+			_ = p
+			return chronicIsLittle(v)
+		}
 	}
 }
 
 // chronicIsLittle reports whether v is the :little symbol.
 func chronicIsLittle(v object.Value) bool {
-	s, ok := v.(object.Symbol)
+	s, ok := object.KindOK[object.Symbol](v)
 	return ok && string(s) == "little"
 }

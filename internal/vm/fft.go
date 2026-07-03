@@ -13,7 +13,7 @@ import (
 // toComplex128 converts a Ruby number (Integer/Float/Bignum/Complex) to a Go
 // complex128; ok is false for a non-numeric value.
 func toComplex128(v object.Value) (complex128, bool) {
-	if c, ok := v.(*object.Complex); ok {
+	if c, ok := object.KindOK[*object.Complex](v); ok {
 		return complex(complexFloat(c.Re), complexFloat(c.Im)), true
 	}
 	if f, ok := toFloat(v); ok {
@@ -24,7 +24,7 @@ func toComplex128(v object.Value) (complex128, bool) {
 
 // arrayArg asserts that an argument is an Array, raising TypeError otherwise.
 func arrayArg(v object.Value) *object.Array {
-	a, ok := v.(*object.Array)
+	a, ok := object.KindOK[*object.Array](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into Array", v.Inspect())
 	}

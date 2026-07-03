@@ -49,11 +49,11 @@ func (vm *VM) e2eArith_k(l0, l1 int64) int64 {
 }
 
 func (vm *VM) e2eArith(self object.Value, args []object.Value, block *Proc) (res object.Value) {
-	i0, ok0 := args[0].(object.Integer)
+	i0, ok0 := object.AsIntegerOK(args[0])
 	if !ok0 {
 		return vm.e2eArith_l1(self, args, block)
 	}
-	i1, ok1 := args[1].(object.Integer)
+	i1, ok1 := object.AsIntegerOK(args[1])
 	if !ok1 {
 		return vm.e2eArith_l1(self, args, block)
 	}
@@ -273,7 +273,7 @@ L17:
 }
 
 func (vm *VM) e2eFib(self object.Value, args []object.Value, block *Proc) (res object.Value) {
-	i0, ok0 := args[0].(object.Integer)
+	i0, ok0 := object.AsIntegerOK(args[0])
 	if !ok0 {
 		return vm.e2eFib_l1(self, args, block)
 	}
@@ -319,11 +319,11 @@ func (vm *VM) e2eDiv_k(l0, l1 int64) int64 {
 }
 
 func (vm *VM) e2eDiv(self object.Value, args []object.Value, block *Proc) (res object.Value) {
-	i0, ok0 := args[0].(object.Integer)
+	i0, ok0 := object.AsIntegerOK(args[0])
 	if !ok0 {
 		return vm.e2eDiv_l1(self, args, block)
 	}
-	i1, ok1 := args[1].(object.Integer)
+	i1, ok1 := object.AsIntegerOK(args[1])
 	if !ok1 {
 		return vm.e2eDiv_l1(self, args, block)
 	}
@@ -369,11 +369,11 @@ func (vm *VM) e2eMulOverflow_k(l0, l1 int64) int64 {
 }
 
 func (vm *VM) e2eMulOverflow(self object.Value, args []object.Value, block *Proc) (res object.Value) {
-	i0, ok0 := args[0].(object.Integer)
+	i0, ok0 := object.AsIntegerOK(args[0])
 	if !ok0 {
 		return vm.e2eMulOverflow_l1(self, args, block)
 	}
-	i1, ok1 := args[1].(object.Integer)
+	i1, ok1 := object.AsIntegerOK(args[1])
 	if !ok1 {
 		return vm.e2eMulOverflow_l1(self, args, block)
 	}
@@ -416,7 +416,7 @@ func (vm *VM) e2eFloatDeopt_k(l0 int64) int64 {
 }
 
 func (vm *VM) e2eFloatDeopt(self object.Value, args []object.Value, block *Proc) (res object.Value) {
-	i0, ok0 := args[0].(object.Integer)
+	i0, ok0 := object.AsIntegerOK(args[0])
 	if !ok0 {
 		return vm.e2eFloatDeopt_l1(self, args, block)
 	}
@@ -497,7 +497,7 @@ L18:
 }
 
 func (vm *VM) e2eFact(self object.Value, args []object.Value, block *Proc) (res object.Value) {
-	i0, ok0 := args[0].(object.Integer)
+	i0, ok0 := object.AsIntegerOK(args[0])
 	if !ok0 {
 		return vm.e2eFact_l1(self, args, block)
 	}
@@ -578,7 +578,7 @@ L18:
 }
 
 func (vm *VM) e2eFactBig(self object.Value, args []object.Value, block *Proc) (res object.Value) {
-	i0, ok0 := args[0].(object.Integer)
+	i0, ok0 := object.AsIntegerOK(args[0])
 	if !ok0 {
 		return vm.e2eFactBig_l1(self, args, block)
 	}

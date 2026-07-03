@@ -28,7 +28,7 @@ func (vm *VM) registerFiber() {
 	cFiber := newClass("Fiber", vm.cObject)
 	vm.consts["Fiber"] = cFiber
 	if _, ok := vm.consts["FiberError"]; !ok {
-		fe := newClass("FiberError", vm.consts["StandardError"].(*RClass))
+		fe := newClass("FiberError", object.Kind[*RClass](vm.consts["StandardError"]))
 		vm.consts["FiberError"] = fe
 	}
 
@@ -42,10 +42,10 @@ func (vm *VM) registerFiber() {
 		return vm.fiberYield(args)
 	}}
 	cFiber.define("resume", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.fiberResume(self.(*Fiber), args)
+		return vm.fiberResume(object.Kind[*Fiber](self), args)
 	})
 	cFiber.define("alive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		f := self.(*Fiber)
+		f := object.Kind[*Fiber](self)
 		return object.Bool(!f.started || f.alive)
 	})
 }

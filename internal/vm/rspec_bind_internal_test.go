@@ -133,7 +133,7 @@ func TestRSpecNumericArms(t *testing.T) {
 // TestRSpecRaiseSpecOf covers rspecRaiseSpecOf's Class / String / Regexp arms.
 func TestRSpecRaiseSpecOf(t *testing.T) {
 	vm := New(nil)
-	cls := vm.consts["ArgumentError"].(*RClass)
+	cls := object.Kind[*RClass](vm.consts["ArgumentError"])
 	spec := rspecRaiseSpecOf([]object.Value{cls, object.NewString("msg")})
 	if spec.class != "ArgumentError" || spec.message != "msg" {
 		t.Errorf("class/string spec -> %+v", spec)

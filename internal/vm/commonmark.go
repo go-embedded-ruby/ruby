@@ -50,7 +50,7 @@ func (vm *VM) registerCommonmark() {
 		if len(args) > 0 {
 			opt = args[0]
 		}
-		return object.NewString(commonmarkRender(vm, self.(*object.String).Str(), opt))
+		return object.NewString(commonmarkRender(vm, object.Kind[*object.String](self).Str(), opt))
 	})
 }
 
@@ -58,7 +58,7 @@ func (vm *VM) registerCommonmark() {
 // String yields its contents, and any other value its to_s, so a non-String
 // argument does not crash the renderer.
 func commonmarkSourceArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

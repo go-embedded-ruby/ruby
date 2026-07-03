@@ -17,11 +17,11 @@ func (vm *VM) registerEval() {
 	vm.cObject.define("eval", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// eval(str, binding) runs against the binding's captured locals/self.
 		if len(args) > 1 {
-			if b, ok := args[1].(*Binding); ok {
+			if b, ok := object.KindOK[*Binding](args[1]); ok {
 				return vm.bindingEval(b, args[0])
 			}
 		}
-		s, ok := args[0].(*object.String)
+		s, ok := object.KindOK[*object.String](args[0])
 		if !ok {
 			return raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
 		}

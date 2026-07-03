@@ -76,7 +76,7 @@ func (vm *VM) registerMIMETypes() {
 // the binary? / ascii? / registered? / obsolete? predicates.
 func (vm *VM) registerMIMEType(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) mimeTypeVal { return v.(*MIMEType).t }
+	self := func(v object.Value) mimeTypeVal { return object.Kind[*MIMEType](v).t }
 
 	str := func(name string, get func(mimeTypeVal) string) {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {

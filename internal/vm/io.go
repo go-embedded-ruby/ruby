@@ -117,7 +117,7 @@ func (vm *VM) registerIO() {
 	cStringIO.smethods["new"] = &Method{name: "new", owner: cStringIO, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		o := &IOObj{cls: cStringIO, isStr: true}
 		if len(args) > 0 {
-			if s, ok := args[0].(*object.String); ok {
+			if s, ok := object.KindOK[*object.String](args[0]); ok {
 				o.buf = append([]byte(nil), s.Bytes()...)
 			} else {
 				raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
@@ -144,7 +144,7 @@ func (vm *VM) registerIO() {
 	// File streams: File.open returns a buffered, file-backed IO carrying the
 	// same read+write protocol (File acts as an IO subtype). The block form
 	// flushes and closes afterwards, returning the block's value.
-	cFile := vm.consts["File"].(*RClass)
+	cFile := object.Kind[*RClass](vm.consts["File"])
 	cFile.super = cIO // File < IO, inheriting the read+write protocol; is_a?(IO) holds
 	cFile.smethods["open"] = &Method{name: "open", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		o := openFileIO(cFile, pathArg(vm, args[0]), fileMode(args))
@@ -160,13 +160,13 @@ func (vm *VM) registerIO() {
 	// backing path. They flush the buffer first so the on-disk file reflects the
 	// writes the caller has made.
 	cFile.define("path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*IOObj).path)
+		return object.NewString(object.Kind[*IOObj](self).path)
 	})
 	cFile.define("to_path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*IOObj).path)
+		return object.NewString(object.Kind[*IOObj](self).path)
 	})
 	cFile.define("chmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioFlush(o)
 		if err := fileChmod(o.path, os.FileMode(intArg(args[0])&0o7777)); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", o.path)
@@ -174,7 +174,7 @@ func (vm *VM) registerIO() {
 		return object.IntValue(0)
 	})
 	cFile.define("chown", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioFlush(o)
 		if err := fileChown(o.path, chownID(args[0]), chownID(args[1])); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", o.path)
@@ -246,7 +246,7 @@ func flagsToMode(flags int64) string {
 // (e.g. File::RDWR | File::CREAT | File::EXCL); a trailing opts Hash is ignored.
 func fileMode(args []object.Value) string {
 	if len(args) > 1 {
-		if i, ok := args[1].(object.Integer); ok {
+		if i, ok := object.AsIntegerOK(args[1]); ok {
 			return flagsToMode(int64(i))
 		}
 		return strArg(args[1])
@@ -307,17 +307,17 @@ func (vm *VM) curStdout() *IOObj { return vm.curIO("$stdout", vm.out, "STDOUT") 
 func (vm *VM) curStderr() *IOObj { return vm.curIO("$stderr", vm.errOut, "STDERR") }
 
 func (vm *VM) curIO(global string, w io.Writer, label string) *IOObj {
-	if o, ok := vm.globals[global].(*IOObj); ok {
+	if o, ok := object.KindOK[*IOObj](vm.globals[global]); ok {
 		return o
 	}
-	return &IOObj{cls: vm.consts["IO"].(*RClass), w: w, label: label}
+	return &IOObj{cls: object.Kind[*RClass](vm.consts["IO"]), w: w, label: label}
 }
 
 // defIOWrite defines the writing half of the IO protocol on cls (shared by IO
 // and StringIO).
 func defIOWrite(cls *RClass) {
 	cls.define("write", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioCheckOpen(o)
 		n := 0
 		for _, a := range args {
@@ -326,13 +326,13 @@ func defIOWrite(cls *RClass) {
 		return object.IntValue(int64(n))
 	})
 	cls.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioCheckOpen(o)
 		o.writeStr(args[0].ToS())
 		return self
 	})
 	cls.define("print", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioCheckOpen(o)
 		for _, a := range args {
 			o.writeStr(vm.displayStr(a))
@@ -340,13 +340,13 @@ func defIOWrite(cls *RClass) {
 		return object.NilV
 	})
 	cls.define("puts", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioCheckOpen(o)
 		vm.ioPuts(o, args)
 		return object.NilV
 	})
 	cls.define("printf", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioCheckOpen(o)
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
@@ -355,34 +355,43 @@ func defIOWrite(cls *RClass) {
 		return object.NilV
 	})
 	cls.define("putc", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioCheckOpen(o)
-		switch a := args[0].(type) {
-		case object.Integer:
-			o.writeBytes([]byte{byte(a)})
-		case *object.String:
-			if len(a.Bytes()) > 0 {
-				o.writeBytes(a.Bytes()[:1])
+		{
+			__sw66 := args[0]
+			switch {
+			case object.IsInt(__sw66):
+				a := object.AsInteger(__sw66)
+				_ = a
+				o.writeBytes([]byte{byte(a)})
+			case object.IsKind[*object.String](__sw66):
+				a := object.Kind[*object.String](__sw66)
+				_ = a
+				if len(a.Bytes()) > 0 {
+					o.writeBytes(a.Bytes()[:1])
+				}
+			default:
+				a := __sw66
+				_ = a
+				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
 			}
-		default:
-			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
 		}
 		return args[0]
 	})
 	cls.define("flush", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		ioFlush(self.(*IOObj))
+		ioFlush(object.Kind[*IOObj](self))
 		return self
 	})
 	cls.define("fsync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.IntValue(0) })
 	cls.define("sync", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*IOObj).sync)
+		return object.Bool(object.Kind[*IOObj](self).sync)
 	})
 	cls.define("sync=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).sync = args[0].Truthy()
+		object.Kind[*IOObj](self).sync = args[0].Truthy()
 		return args[0]
 	})
 	cls.define("close", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		ioFlush(o)
 		if o.pipe != nil && o.isWriteEnd {
 			o.pipe.wClosed = true // signal EOF to the read end
@@ -391,7 +400,7 @@ func defIOWrite(cls *RClass) {
 		return object.NilV
 	})
 	cls.define("closed?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*IOObj).closed)
+		return object.Bool(object.Kind[*IOObj](self).closed)
 	})
 	cls.define("tty?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Bool(false) })
 	cls.define("isatty", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Bool(false) })
@@ -402,36 +411,36 @@ func defIOWrite(cls *RClass) {
 // content methods, on StringIO.
 func defStringIORead(cls *RClass) {
 	cls.define("string", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(string(self.(*IOObj).buf))
+		return object.NewString(string(object.Kind[*IOObj](self).buf))
 	})
 	cls.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*IOObj).buf)))
+		return object.IntValue(int64(len(object.Kind[*IOObj](self).buf)))
 	})
 	cls.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*IOObj).buf)))
+		return object.IntValue(int64(len(object.Kind[*IOObj](self).buf)))
 	})
 	cls.define("eof?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		o.pipeRefresh()
 		return object.Bool(o.pos >= len(o.buf))
 	})
 	cls.define("eof", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		o.pipeRefresh()
 		return object.Bool(o.pos >= len(o.buf))
 	})
 	cls.define("pos", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*IOObj).pos))
+		return object.IntValue(int64(object.Kind[*IOObj](self).pos))
 	})
 	cls.define("tell", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*IOObj).pos))
+		return object.IntValue(int64(object.Kind[*IOObj](self).pos))
 	})
 	cls.define("pos=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).pos = int(toInt(args[0]))
+		object.Kind[*IOObj](self).pos = int(toInt(args[0]))
 		return args[0]
 	})
 	cls.define("seek", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		amount := int(toInt(args[0]))
 		whence := 0
 		if len(args) > 1 {
@@ -448,11 +457,11 @@ func defStringIORead(cls *RClass) {
 		return object.IntValue(0)
 	})
 	cls.define("rewind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).pos = 0
+		object.Kind[*IOObj](self).pos = 0
 		return object.IntValue(0)
 	})
 	cls.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		n := int(toInt(args[0]))
 		if n < len(o.buf) {
 			o.buf = o.buf[:n]
@@ -462,7 +471,7 @@ func defStringIORead(cls *RClass) {
 		return object.IntValue(0)
 	})
 	cls.define("read", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		o.pipeRefresh()
 		if len(args) > 0 && args[0] != object.NilV {
 			n := int(toInt(args[0]))
@@ -480,7 +489,7 @@ func defStringIORead(cls *RClass) {
 		return s
 	})
 	cls.define("getc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		if o.pos >= len(o.buf) {
 			return object.NilV
 		}
@@ -490,7 +499,7 @@ func defStringIORead(cls *RClass) {
 		return s
 	})
 	gets := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		return ioGets(o, args)
 	}
 	cls.define("gets", gets)
@@ -502,7 +511,7 @@ func defStringIORead(cls *RClass) {
 		return v
 	})
 	cls.define("readlines", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		var lines []object.Value
 		for {
 			v := ioGets(o, args)
@@ -514,7 +523,7 @@ func defStringIORead(cls *RClass) {
 		return object.NewArrayFromSlice(lines)
 	})
 	cls.define("each_line", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		for {
 			v := ioGets(o, args)
 			if v == object.NilV {
@@ -525,7 +534,7 @@ func defStringIORead(cls *RClass) {
 		return self
 	})
 	cls.define("each_char", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		o := self.(*IOObj)
+		o := object.Kind[*IOObj](self)
 		for o.pos < len(o.buf) {
 			r, sz := utf8.DecodeRune(o.buf[o.pos:])
 			o.pos += sz
@@ -544,7 +553,7 @@ func ioGets(o *IOObj, args []object.Value) object.Value {
 	}
 	sep := "\n"
 	if len(args) > 0 {
-		if s, ok := args[0].(*object.String); ok {
+		if s, ok := object.KindOK[*object.String](args[0]); ok {
 			sep = s.Str()
 		}
 	}
@@ -575,7 +584,7 @@ func (vm *VM) ioPuts(o *IOObj, args []object.Value) {
 }
 
 func (vm *VM) ioPutsValue(o *IOObj, v object.Value) {
-	if arr, ok := v.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](v); ok {
 		// An empty array writes nothing (MRI), unlike a no-arg puts which writes a
 		// lone newline.
 		for _, e := range arr.Elems {
@@ -595,11 +604,11 @@ func (vm *VM) ioPutsValue(o *IOObj, v object.Value) {
 // is honoured; built-in value types use their authoritative native ToS directly.
 // A non-String #to_s result falls back to the native ToS.
 func (vm *VM) displayStr(v object.Value) string {
-	if _, ok := v.(*RObject); !ok {
+	if _, ok := object.KindOK[*RObject](v); !ok {
 		return v.ToS()
 	}
 	r := vm.send(v, "to_s", nil, nil)
-	if s, ok := r.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](r); ok {
 		return s.Str()
 	}
 	return v.ToS()
@@ -609,11 +618,11 @@ func (vm *VM) displayStr(v object.Value) string {
 // (possibly user-defined) #inspect; built-in value types use their native
 // Inspect. A non-String #inspect result falls back to the native Inspect.
 func (vm *VM) inspectStr(v object.Value) string {
-	if _, ok := v.(*RObject); !ok {
+	if _, ok := object.KindOK[*RObject](v); !ok {
 		return v.Inspect()
 	}
 	r := vm.send(v, "inspect", nil, nil)
-	if s, ok := r.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](r); ok {
 		return s.Str()
 	}
 	return v.Inspect()
@@ -629,7 +638,7 @@ func ioCheckOpen(o *IOObj) {
 // toInt coerces a small Integer position/length argument to int64 (raising for
 // anything else, including a Bignum — a stream offset that large is nonsensical).
 func toInt(v object.Value) int64 {
-	if n, ok := v.(object.Integer); ok {
+	if n, ok := object.AsIntegerOK(v); ok {
 		return int64(n)
 	}
 	raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(v))

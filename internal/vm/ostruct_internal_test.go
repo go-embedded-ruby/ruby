@@ -100,7 +100,7 @@ func recoverRaisedClass(t *testing.T, vm *VM, err error) (cls string) {
 func TestUnwrapVMValue(t *testing.T) {
 	vm := New(&bytes.Buffer{})
 	// bare nil -> Ruby nil
-	if _, ok := unwrapVMValue(nil).(object.Nil); !ok {
+	if _, ok := object.AsNilOK(unwrapVMValue(nil)); !ok {
 		t.Fatal("nil did not unwrap to Ruby nil")
 	}
 	// plain vmValue (a non-dig value: an Integer) -> the wrapped value
@@ -124,7 +124,7 @@ func TestUnwrapVMValue(t *testing.T) {
 		t.Fatalf("library Symbol unwrapped to %#v", got)
 	}
 	// default (unexpected payload) -> Ruby nil
-	if _, ok := unwrapVMValue(42).(object.Nil); !ok {
+	if _, ok := object.AsNilOK(unwrapVMValue(42)); !ok {
 		t.Fatal("unexpected payload did not unwrap to Ruby nil")
 	}
 }

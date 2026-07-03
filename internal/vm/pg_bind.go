@@ -97,24 +97,41 @@ func pgArgs(vals []object.Value) []any {
 
 // pgArg maps one Ruby bind value to a library argument.
 func pgArg(v object.Value) any {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I.String()
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		if n.IsBinary() {
-			return []byte(n.Bytes())
+	{
+		__sw118 := v
+		switch {
+		case __sw118 == nil || object.IsNilObj(__sw118):
+			n := __sw118
+			_ = n
+			return nil
+		case object.IsBool(__sw118):
+			n := object.AsBoolV(__sw118)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw118):
+			n := object.AsInteger(__sw118)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw118):
+			n := object.Kind[*object.Bignum](__sw118)
+			_ = n
+			return n.I.String()
+		case object.IsFloat(__sw118):
+			n := object.AsFloatV(__sw118)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw118):
+			n := object.Kind[*object.String](__sw118)
+			_ = n
+			if n.IsBinary() {
+				return []byte(n.Bytes())
+			}
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw118):
+			n := object.Kind[object.Symbol](__sw118)
+			_ = n
+			return string(n)
 		}
-		return n.Str()
-	case object.Symbol:
-		return string(n)
 	}
 	return v.ToS()
 }
@@ -124,7 +141,7 @@ func pgArg(v object.Value) any {
 // Array), otherwise the arguments are taken as-is.
 func pgParamArray(args []object.Value) []object.Value {
 	if len(args) == 1 {
-		if arr, ok := args[0].(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](args[0]); ok {
 			return arr.Elems
 		}
 	}
@@ -154,7 +171,7 @@ func pgArg0(args []object.Value) object.Value {
 // pgStringArg coerces an argument to its string: a String yields its contents,
 // any other value its to_s.
 func pgStringArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()
@@ -163,11 +180,18 @@ func pgStringArg(v object.Value) string {
 // pgIntArg coerces an argument to an int64, raising a TypeError for a
 // non-integer.
 func pgIntArg(v object.Value) int64 {
-	switch n := v.(type) {
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I.Int64()
+	{
+		__sw119 := v
+		switch {
+		case object.IsInt(__sw119):
+			n := object.AsInteger(__sw119)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw119):
+			n := object.Kind[*object.Bignum](__sw119)
+			_ = n
+			return n.I.Int64()
+		}
 	}
 	raise("TypeError", "no implicit conversion to Integer")
 	return 0
@@ -193,7 +217,7 @@ func pgConnectArgs(args []object.Value) (io object.Value, params pg.StartupParam
 	if len(args) == 0 {
 		return nil, params, "", "", false
 	}
-	h, ok := args[len(args)-1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](args[len(args)-1])
 	if !ok {
 		return nil, params, "", "", false
 	}
@@ -223,11 +247,18 @@ func pgConnectArgs(args []object.Value) (io object.Value, params pg.StartupParam
 
 // pgKeyName renders a keyword Hash key (Symbol or String) to its name.
 func pgKeyName(k object.Value) string {
-	switch n := k.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw120 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw120):
+			n := object.Kind[object.Symbol](__sw120)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw120):
+			n := object.Kind[*object.String](__sw120)
+			_ = n
+			return n.Str()
+		}
 	}
 	return k.ToS()
 }

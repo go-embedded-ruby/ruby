@@ -80,7 +80,7 @@ func publicSuffixOpts(args []object.Value) *publicsuffix.Options {
 	if len(args) < 2 {
 		return nil
 	}
-	h, ok := args[len(args)-1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](args[len(args)-1])
 	if !ok {
 		return nil
 	}
@@ -100,11 +100,18 @@ func publicSuffixOpts(args []object.Value) *publicsuffix.Options {
 
 // publicSuffixKey renders an options key (a Symbol or String) as its bare name.
 func publicSuffixKey(k object.Value) string {
-	switch n := k.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw121 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw121):
+			n := object.Kind[object.Symbol](__sw121)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw121):
+			n := object.Kind[*object.String](__sw121)
+			_ = n
+			return n.Str()
+		}
 	}
 	return k.ToS()
 }

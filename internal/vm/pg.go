@@ -52,7 +52,7 @@ func (vm *VM) registerPG() {
 // ConnectionBad / ServerError < Error), mirroring the pg gem closely enough that
 // a raised library error rescues as its gem-faithful class.
 func (vm *VM) registerPGErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple string, super *RClass) *RClass {
 		qualified := "PG::" + simple
 		c := newClass(qualified, super)
@@ -91,7 +91,7 @@ func (vm *VM) pgConnect(mod *RClass, args []object.Value) object.Value {
 
 // pgConnClass returns the PG::Connection class.
 func pgConnClass(vm *VM, mod *RClass) *RClass {
-	return mod.consts["Connection"].(*RClass)
+	return object.Kind[*RClass](mod.consts["Connection"])
 }
 
 // registerPGConnection installs PG::Connection and its query methods.
@@ -101,7 +101,7 @@ func (vm *VM) registerPGConnection(mod *RClass) {
 	vm.consts["PG::Connection"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *pg.Conn { return v.(*PGConnObj).conn }
+	self := func(v object.Value) *pg.Conn { return object.Kind[*PGConnObj](v).conn }
 
 	// #exec(sql) / #query(sql) run a simple query and return a PG::Result.
 	execFn := func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
@@ -179,14 +179,14 @@ func (vm *VM) registerPGConnection(mod *RClass) {
 
 	// #socket_io returns the injected seam object (rbgo accessor).
 	d("socket_io", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return v.(*PGConnObj).io
+		return object.Kind[*PGConnObj](v).io
 	})
 }
 
 // pgResultOrYield wraps a *pg.Result and, when a block is given, yields the
 // wrapper and returns the block's value (PG::Connection#exec with a block).
 func (vm *VM) pgResultOrYield(res *pg.Result, blk *Proc) object.Value {
-	w := &PGResultObj{cls: vm.consts["PG::Result"].(*RClass), res: res}
+	w := &PGResultObj{cls: object.Kind[*RClass](vm.consts["PG::Result"]), res: res}
 	if blk != nil {
 		return vm.callBlock(blk, []object.Value{w})
 	}
@@ -200,7 +200,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 	vm.consts["PG::Result"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *pg.Result { return v.(*PGResultObj).res }
+	self := func(v object.Value) *pg.Result { return object.Kind[*PGResultObj](v).res }
 
 	// #ntuples / #num_tuples and #nfields / #num_fields.
 	d("ntuples", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {

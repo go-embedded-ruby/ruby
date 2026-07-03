@@ -37,10 +37,10 @@ p [m.mon_enter.equal?(m), m.mon_exit.equal?(m), m.mon_initialize.equal?(m)]`, "[
 // returns the receiver (self) under the single-thread model.
 func TestMonitorSynchronizeNoBlock(t *testing.T) {
 	vm := New(nil)
-	mon := vm.consts["Monitor"].(*RClass)
+	mon := object.Kind[*RClass](vm.consts["Monitor"])
 	self := mon.smethods["new"].native(vm, mon, nil, nil)
 	for _, name := range []string{"synchronize", "mon_synchronize"} {
-		m := lookupMethod(self.(*RObject).class, name)
+		m := lookupMethod(object.Kind[*RObject](self).class, name)
 		if got := m.native(vm, self, nil, nil); got != self {
 			t.Fatalf("%s no-block: got %v, want self", name, got)
 		}
@@ -61,9 +61,9 @@ p [c.wait.equal?(c), c.wait_while.equal?(c), c.wait_until.equal?(c),
 
 	// ConditionVariable.new constructs an instance of the cond class.
 	vm := New(nil)
-	cond := vm.consts["MonitorMixin"].(*RClass).consts["ConditionVariable"].(*RClass)
+	cond := object.Kind[*RClass](object.Kind[*RClass](vm.consts["MonitorMixin"]).consts["ConditionVariable"])
 	o := cond.smethods["new"].native(vm, cond, nil, nil)
-	if ro, ok := o.(*RObject); !ok || ro.class != cond {
+	if ro, ok := object.KindOK[*RObject](o); !ok || ro.class != cond {
 		t.Fatalf("ConditionVariable.new: %#v", o)
 	}
 	_ = object.NilV

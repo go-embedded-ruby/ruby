@@ -47,7 +47,7 @@ func (vm *VM) registerRedis() {
 // redis gem's error tree closely enough that a raised library error rescues as
 // its gem-faithful class.
 func (vm *VM) registerRedisErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple string, super *RClass) *RClass {
 		qualified := "Redis::" + simple
 		c := newClass(qualified, super)
@@ -65,7 +65,7 @@ func (vm *VM) registerRedisErrors(mod *RClass) {
 // the object graph (see redis_bind.go).
 func (vm *VM) registerRedisCommands(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	cl := func(v object.Value) *redis.Client { return v.(*RedisObj).client }
+	cl := func(v object.Value) *redis.Client { return object.Kind[*RedisObj](v).client }
 
 	// #call(*args) sends an arbitrary command (Redis#call), the escape hatch for
 	// any command without a dedicated method.
@@ -296,6 +296,6 @@ func (vm *VM) registerRedisCommands(cls *RClass) {
 	// #_connection returns the injected IO-like seam object (a rbgo-specific
 	// accessor, so a host can inspect or close the transport).
 	d("_connection", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return v.(*RedisObj).conn
+		return object.Kind[*RedisObj](v).conn
 	})
 }

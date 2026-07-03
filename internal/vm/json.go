@@ -40,7 +40,7 @@ func (vm *VM) registerJSON() {
 	// JSON.parse(str[, opts]) parses a document; the symbolize_names: keyword
 	// returns object keys as Symbols.
 	def("parse", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s, ok := args[0].(*object.String)
+		s, ok := object.KindOK[*object.String](args[0])
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 		}
@@ -60,7 +60,7 @@ func (vm *VM) registerJSON() {
 // in the top-level table (so a re-raised library error's exceptionObject lookup
 // finds the very same class), exactly as Errno:: classes are.
 func (vm *VM) registerJSONErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c
@@ -101,7 +101,7 @@ func jsonGenerateOpts(rest []object.Value) []json.Option {
 	var opts []json.Option
 	str := func(key string, with func(string) json.Option) {
 		if v, ok := h.Get(object.Symbol(key)); ok {
-			if s, isStr := v.(*object.String); isStr {
+			if s, isStr := object.KindOK[*object.String](v); isStr {
 				opts = append(opts, with(s.Str()))
 			}
 		}
@@ -120,12 +120,19 @@ func jsonGenerateOpts(rest []object.Value) []json.Option {
 func jsonSharedOpts(h *object.Hash) []json.Option {
 	var opts []json.Option
 	if v, ok := h.Get(object.Symbol("max_nesting")); ok {
-		switch n := v.(type) {
-		case object.Integer:
-			opts = append(opts, json.WithMaxNesting(int(n)))
-		case object.Bool:
-			if !bool(n) { // max_nesting: false disables the limit
-				opts = append(opts, json.WithMaxNesting(0))
+		{
+			__sw78 := v
+			switch {
+			case object.IsInt(__sw78):
+				n := object.AsInteger(__sw78)
+				_ = n
+				opts = append(opts, json.WithMaxNesting(int(n)))
+			case object.IsBool(__sw78):
+				n := object.AsBoolV(__sw78)
+				_ = n
+				if !bool(n) { // max_nesting: false disables the limit
+					opts = append(opts, json.WithMaxNesting(0))
+				}
 			}
 		}
 	}
@@ -141,7 +148,7 @@ func jsonOptsHash(rest []object.Value) *object.Hash {
 	if len(rest) == 0 {
 		return nil
 	}
-	h, ok := rest[len(rest)-1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](rest[len(rest)-1])
 	if !ok {
 		return nil
 	}

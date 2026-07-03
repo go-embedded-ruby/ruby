@@ -127,7 +127,7 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 // result per literal occurrence so repeated evaluation returns the same object.
 func (vm *VM) compileLiteralRegexp(source, flags string) object.Value {
 	r := vm.compileRegexp(source, flags)
-	r.(*Regexp).frozen = true
+	object.Kind[*Regexp](r).frozen = true
 	return r
 }
 
@@ -148,39 +148,56 @@ func (vm *VM) regexpNew(args []object.Value) object.Value {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
 	}
-	switch src := args[0].(type) {
-	case *Regexp:
-		// Copy the source Regexp; MRI warns when options are also given but still
-		// reuses the original's options, so we ignore any extra arguments here.
-		return vm.compileRegexp(src.source, src.flags)
-	case *object.String:
-		flags := ""
-		if len(args) >= 2 {
-			flags = regexpOptionFlags(args[1])
+	{
+		__sw131 := args[0]
+		switch {
+		case object.IsKind[*Regexp](__sw131):
+			src := object.Kind[*Regexp](__sw131)
+			_ = src
+			return vm.compileRegexp(src.source, src.flags)
+		case object.IsKind[*object.String](__sw131):
+			src := object.Kind[*object.String](__sw131)
+			_ = src
+			flags := ""
+			if len(args) >= 2 {
+				flags = regexpOptionFlags(args[1])
+			}
+			return vm.compileRegexp(src.Str(), flags)
+		default:
+			src := __sw131
+			_ = src
+			raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
+			return object.NilVal()
 		}
-		return vm.compileRegexp(src.Str(), flags)
-	default:
-		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
-		return object.NilVal()
 	}
 }
 
 // regexpOptionFlags converts the second argument of Regexp.new into the engine's
 // "imx" flag-letter string.
 func regexpOptionFlags(v object.Value) string {
-	switch opt := v.(type) {
-	case object.Nil:
-		return ""
-	case object.Integer:
-		return flagsFromBits(int(opt))
-	case *object.String:
-		return flagsFromLetters(opt.Str())
-	default:
-		// nil/false → none; any other truthy value → IGNORECASE (legacy form).
-		if !v.Truthy() {
+	{
+		__sw132 := v
+		switch {
+		case object.IsNilObj(__sw132):
+			opt := object.NilObj()
+			_ = opt
 			return ""
+		case object.IsInt(__sw132):
+			opt := object.AsInteger(__sw132)
+			_ = opt
+			return flagsFromBits(int(opt))
+		case object.IsKind[*object.String](__sw132):
+			opt := object.Kind[*object.String](__sw132)
+			_ = opt
+			return flagsFromLetters(opt.Str())
+		default:
+			opt := __sw132
+			_ = opt
+			if !v.Truthy() {
+				return ""
+			}
+			return "i"
 		}
-		return "i"
 	}
 }
 
@@ -241,18 +258,27 @@ func sortIMX(flags string) string {
 // Regexp: a Regexp passes through; a String is compiled (no flags); anything
 // else raises TypeError.
 func strMatchRegexp(v object.Value) *Regexp {
-	switch x := v.(type) {
-	case *Regexp:
-		return x
-	case *object.String:
-		re, err := onig.Compile(x.Str())
-		if err != nil {
-			raise("RegexpError", "%s: /%s/", err.Error(), x.Str())
+	{
+		__sw133 := v
+		switch {
+		case object.IsKind[*Regexp](__sw133):
+			x := object.Kind[*Regexp](__sw133)
+			_ = x
+			return x
+		case object.IsKind[*object.String](__sw133):
+			x := object.Kind[*object.String](__sw133)
+			_ = x
+			re, err := onig.Compile(x.Str())
+			if err != nil {
+				raise("RegexpError", "%s: /%s/", err.Error(), x.Str())
+			}
+			return &Regexp{re: re, source: x.Str()}
+		default:
+			x := __sw133
+			_ = x
+			raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
+			return nil
 		}
-		return &Regexp{re: re, source: x.Str()}
-	default:
-		raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
-		return nil
 	}
 }
 
@@ -312,7 +338,7 @@ func (vm *VM) gvar(name string) object.Value {
 	if name == "$~" {
 		return last
 	}
-	md, ok := last.(*MatchData)
+	md, ok := object.KindOK[*MatchData](last)
 	switch name {
 	case "$&":
 		if ok {
@@ -377,18 +403,25 @@ func charToByte(s string, charOff int) int {
 // through; a String is matched literally (its metacharacters are escaped, as
 // Ruby does); anything else raises TypeError.
 func scanRegexp(v object.Value) *Regexp {
-	switch x := v.(type) {
-	case *Regexp:
-		return x
-	case *object.String:
-		// The escaped literal is always a well-formed pattern, so compilation
-		// cannot fail here (the engine even accepts raw, non-UTF-8 bytes).
-		src := regexpEscapeLiteral(x.Str())
-		re, _ := onig.Compile(src)
-		return &Regexp{re: re, source: src}
-	default:
-		raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
-		return nil
+	{
+		__sw134 := v
+		switch {
+		case object.IsKind[*Regexp](__sw134):
+			x := object.Kind[*Regexp](__sw134)
+			_ = x
+			return x
+		case object.IsKind[*object.String](__sw134):
+			x := object.Kind[*object.String](__sw134)
+			_ = x
+			src := regexpEscapeLiteral(x.Str())
+			re, _ := onig.Compile(src)
+			return &Regexp{re: re, source: src}
+		default:
+			x := __sw134
+			_ = x
+			raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
+			return nil
+		}
 	}
 }
 
@@ -479,13 +512,22 @@ func splitOnWhitespace(args []object.Value) bool {
 	if len(args) == 0 {
 		return true
 	}
-	switch p := args[0].(type) {
-	case object.Nil:
-		return true
-	case *object.String:
-		return p.Str() == " "
-	default:
-		return false
+	{
+		__sw135 := args[0]
+		switch {
+		case object.IsNilObj(__sw135):
+			p := object.NilObj()
+			_ = p
+			return true
+		case object.IsKind[*object.String](__sw135):
+			p := object.Kind[*object.String](__sw135)
+			_ = p
+			return p.Str() == " "
+		default:
+			p := __sw135
+			_ = p
+			return false
+		}
 	}
 }
 
@@ -568,7 +610,7 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 	if limit == 0 {
 		// Strip trailing empty fields (the default behaviour).
 		for len(out) > 0 {
-			if s, ok := out[len(out)-1].(*object.String); ok && len(s.Bytes()) == 0 {
+			if s, ok := object.KindOK[*object.String](out[len(out)-1]); ok && len(s.Bytes()) == 0 {
 				out = out[:len(out)-1]
 				continue
 			}
@@ -611,7 +653,7 @@ func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global b
 		// receiver+method form, replaying gsub with the enumerator's block.
 		return enumFor(object.NewString(subject), "gsub", args[0])
 	}
-	if h, ok := args[1].(*object.Hash); ok {
+	if h, ok := object.KindOK[*object.Hash](args[1]); ok {
 		return vm.gsubHash(re, subject, h, global)
 	}
 	return vm.gsub(re, subject, strArg(args[1]), nil, global)
@@ -687,7 +729,7 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 		vm.lastMatch = &MatchData{md: md, subject: subject[search:], re: re}
 		if v, ok := h.Get(object.NewString(md.Str(0))); ok {
 			// Missing keys (and an explicit nil value) contribute nothing.
-			if _, isNil := v.(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(v); !isNil {
 				b.WriteString(vm.send(v, "to_s", nil, nil).ToS())
 			}
 		}
@@ -829,7 +871,7 @@ func groupValue(m *MatchData, i int) object.Value {
 // installRegexp registers the Regexp and MatchData method tables. It runs at the
 // end of bootstrap so the classes already exist as constants.
 func (vm *VM) installRegexp() {
-	reArg := func(v object.Value) *Regexp { return v.(*Regexp) }
+	reArg := func(v object.Value) *Regexp { return object.Kind[*Regexp](v) }
 
 	// Regexp option constants (MRI values): IGNORECASE=1, EXTENDED=2, MULTILINE=4.
 	vm.cRegexp.consts["IGNORECASE"] = object.IntValue(reIgnoreCase)
@@ -860,7 +902,7 @@ func (vm *VM) installRegexp() {
 	// == $1). nil when there has been no match, matching MRI.
 	vm.cRegexp.smethods["last_match"] = &Method{name: "last_match", owner: vm.cRegexp,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			md, ok := vm.lastMatch.(*MatchData)
+			md, ok := object.KindOK[*MatchData](vm.lastMatch)
 			if !ok {
 				return object.NilV
 			}
@@ -877,7 +919,7 @@ func (vm *VM) installRegexp() {
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			// A single Array argument is the list of patterns.
 			if len(args) == 1 {
-				if arr, ok := args[0].(*object.Array); ok {
+				if arr, ok := object.KindOK[*object.Array](args[0]); ok {
 					args = arr.Elems
 				}
 			}
@@ -886,11 +928,18 @@ func (vm *VM) installRegexp() {
 			}
 			sources := make([]string, len(args))
 			for i, a := range args {
-				switch v := a.(type) {
-				case *Regexp:
-					sources[i] = v.source
-				default:
-					sources[i] = regexpEscapeLiteral(strArg(a))
+				{
+					__sw136 := a
+					switch {
+					case object.IsKind[*Regexp](__sw136):
+						v := object.Kind[*Regexp](__sw136)
+						_ = v
+						sources[i] = v.source
+					default:
+						v := __sw136
+						_ = v
+						sources[i] = regexpEscapeLiteral(strArg(a))
+					}
 				}
 			}
 			return vm.regexpNew([]object.Value{object.NewString(strings.Join(sources, "|"))})
@@ -924,13 +973,13 @@ func (vm *VM) installRegexp() {
 		return object.NewString(reArg(self).Inspect())
 	})
 	vm.cRegexp.define("match?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if _, isNil := args[0].(object.Nil); isNil {
+		if _, isNil := object.AsNilOK(args[0]); isNil {
 			return object.False
 		}
 		return object.Bool(reArg(self).re.MatchString(strArg(args[0])))
 	})
 	vm.cRegexp.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if _, isNil := args[0].(object.Nil); isNil {
+		if _, isNil := object.AsNilOK(args[0]); isNil {
 			return object.NilV
 		}
 		// match(str, pos): start scanning at character offset pos (defaults to 0).
@@ -962,7 +1011,7 @@ func (vm *VM) installRegexp() {
 		return object.True
 	})
 
-	mdArg := func(v object.Value) *MatchData { return v.(*MatchData) }
+	mdArg := func(v object.Value) *MatchData { return object.Kind[*MatchData](v) }
 
 	vm.cMatchData.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(mdArg(self).md.Str(0))
@@ -1034,7 +1083,7 @@ func (vm *VM) installRegexp() {
 			}
 			return out
 		}
-		if rng, ok := args[0].(*object.Range); ok {
+		if rng, ok := object.KindOK[*object.Range](args[0]); ok {
 			all := groups()
 			start, length, ok := sliceRange(len(all), rng)
 			if !ok {
@@ -1068,7 +1117,7 @@ func (vm *VM) installRegexp() {
 // String or Symbol is matched; any other subject raises TypeError (matching
 // MRI, which only converts those types).
 func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
-	if _, isNil := subject.(object.Nil); isNil {
+	if _, isNil := object.AsNilOK(subject); isNil {
 		return object.NilV
 	}
 	s, ok := stringLike(subject)
@@ -1104,13 +1153,22 @@ func (vm *VM) stringRegexpIndex(s string, re *Regexp, rest []object.Value) objec
 // stringLike returns the Go string for a String or Symbol receiver (the two
 // types Ruby's Regexp matching coerces), and whether it was one.
 func stringLike(v object.Value) (string, bool) {
-	switch x := v.(type) {
-	case *object.String:
-		return x.Str(), true
-	case object.Symbol:
-		return string(x), true
-	default:
-		return "", false
+	{
+		__sw137 := v
+		switch {
+		case object.IsKind[*object.String](__sw137):
+			x := object.Kind[*object.String](__sw137)
+			_ = x
+			return x.Str(), true
+		case object.IsKind[object.Symbol](__sw137):
+			x := object.Kind[object.Symbol](__sw137)
+			_ = x
+			return string(x), true
+		default:
+			x := __sw137
+			_ = x
+			return "", false
+		}
 	}
 }
 
@@ -1136,20 +1194,31 @@ func (m *MatchData) offset(i int64, end bool) object.Value {
 // at implements MatchData#[]: an Integer selects a group by index; a String or
 // Symbol selects a named group (raising IndexError for an unknown name).
 func (m *MatchData) at(key object.Value) object.Value {
-	switch k := key.(type) {
-	case object.Integer:
-		idx := int(k)
-		if idx < 0 || idx > m.md.NGroups() {
+	{
+		__sw138 := key
+		switch {
+		case object.IsInt(__sw138):
+			k := object.AsInteger(__sw138)
+			_ = k
+			idx := int(k)
+			if idx < 0 || idx > m.md.NGroups() {
+				return object.NilV
+			}
+			return groupValue(m, idx)
+		case object.IsKind[*object.String](__sw138):
+			k := object.Kind[*object.String](__sw138)
+			_ = k
+			return m.byName(k.Str())
+		case object.IsKind[object.Symbol](__sw138):
+			k := object.Kind[object.Symbol](__sw138)
+			_ = k
+			return m.byName(string(k))
+		default:
+			k := __sw138
+			_ = k
+			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(key))
 			return object.NilV
 		}
-		return groupValue(m, idx)
-	case *object.String:
-		return m.byName(k.Str())
-	case object.Symbol:
-		return m.byName(string(k))
-	default:
-		raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(key))
-		return object.NilV
 	}
 }
 

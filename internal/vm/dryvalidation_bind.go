@@ -24,10 +24,10 @@ func (vm *VM) registerDrySchemaSurface() {
 	vm.consts["Dry::Schema::DSL"] = dsl
 	bd := func(name string, fn NativeFn) { dsl.define(name, fn) }
 	bd("required", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &DryKey{k: self.(*DrySchemaBuilder).b.Required(drySym(args))}
+		return &DryKey{k: object.Kind[*DrySchemaBuilder](self).b.Required(drySym(args))}
 	})
 	bd("optional", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &DryKey{k: self.(*DrySchemaBuilder).b.Optional(drySym(args))}
+		return &DryKey{k: object.Kind[*DrySchemaBuilder](self).b.Optional(drySym(args))}
 	})
 
 	key := newClass("Dry::Schema::Key", vm.cObject)
@@ -35,35 +35,35 @@ func (vm *VM) registerDrySchemaSurface() {
 	kd := func(name string, fn NativeFn) { key.define(name, fn) }
 	kd("filled", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		tn, preds := dryTypeAndPreds(args)
-		self.(*DryKey).k.Filled(tn, preds...)
+		object.Kind[*DryKey](self).k.Filled(tn, preds...)
 		return self
 	})
 	kd("maybe", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		tn, preds := dryTypeAndPreds(args)
-		self.(*DryKey).k.Maybe(tn, preds...)
+		object.Kind[*DryKey](self).k.Maybe(tn, preds...)
 		return self
 	})
 	kd("value", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		tn, preds := dryTypeAndPreds(args)
-		self.(*DryKey).k.Value(tn, preds...)
+		object.Kind[*DryKey](self).k.Value(tn, preds...)
 		return self
 	})
 	kd("array", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk != nil {
-			self.(*DryKey).k.ArrayOf(func(b *dryvalidation.Builder) {
+			object.Kind[*DryKey](self).k.ArrayOf(func(b *dryvalidation.Builder) {
 				vm.callBlockSelf(blk, &DrySchemaBuilder{b: b}, nil)
 			})
 			return self
 		}
 		tn, preds := dryTypeAndPreds(args)
-		self.(*DryKey).k.Array(tn, preds...)
+		object.Kind[*DryKey](self).k.Array(tn, preds...)
 		return self
 	})
 	kd("hash", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("ArgumentError", "no block given")
 		}
-		self.(*DryKey).k.Hash(func(b *dryvalidation.Builder) {
+		object.Kind[*DryKey](self).k.Hash(func(b *dryvalidation.Builder) {
 			vm.callBlockSelf(blk, &DrySchemaBuilder{b: b}, nil)
 		})
 		return self
@@ -72,19 +72,19 @@ func (vm *VM) registerDrySchemaSurface() {
 		if blk == nil {
 			raise("ArgumentError", "no block given")
 		}
-		self.(*DryKey).k.Schema(func(b *dryvalidation.Builder) {
+		object.Kind[*DryKey](self).k.Schema(func(b *dryvalidation.Builder) {
 			vm.callBlockSelf(blk, &DrySchemaBuilder{b: b}, nil)
 		})
 		return self
 	})
 
 	// Dry::Schema::Params#call applies the schema to an input hash.
-	pd := vm.consts["Dry::Schema::Params"].(*RClass)
+	pd := object.Kind[*RClass](vm.consts["Dry::Schema::Params"])
 	pd.define("call", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &DryValidationResult{r: self.(*DrySchema).s.Call(dryToGo(args[0]))}
+		return &DryValidationResult{r: object.Kind[*DrySchema](self).s.Call(dryToGo(args[0]))}
 	})
 }
 
@@ -98,13 +98,13 @@ func (vm *VM) registerDryContractClass(contract *RClass) {
 
 	// schema { ... } builds the contract's schema from a Params-style block.
 	sdef("schema", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		m := vm.dryContractMeta(cls)
 		m.schema = dryvalidation.Params(vm.drySchemaBuild(blk))
 		return object.NilV
 	})
 	sdef("params", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		m := vm.dryContractMeta(cls)
 		m.schema = dryvalidation.Params(vm.drySchemaBuild(blk))
 		return object.NilV
@@ -115,7 +115,7 @@ func (vm *VM) registerDryContractClass(contract *RClass) {
 		if blk == nil {
 			raise("ArgumentError", "no block given")
 		}
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		m := vm.dryContractMeta(cls)
 		keys := make([]drytypes.Symbol, 0, len(args))
 		for _, a := range args {
@@ -126,7 +126,7 @@ func (vm *VM) registerDryContractClass(contract *RClass) {
 	})
 
 	sdef("new", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		cls := self.(*RClass)
+		cls := object.Kind[*RClass](self)
 		m := vm.dryContractMeta(cls)
 		sc := m.schema
 		if sc == nil {
@@ -151,14 +151,14 @@ func (vm *VM) registerDryContractClass(contract *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &DryValidationResult{r: self.(*DryContract).c.Call(dryToGo(args[0]))}
+		return &DryValidationResult{r: object.Kind[*DryContract](self).c.Call(dryToGo(args[0]))}
 	})
 }
 
 // dryContractMeta returns cls's accumulating contract meta, creating it on first
 // use (a subclass inherits nothing here — each Contract declares its own schema).
 func (vm *VM) dryContractMeta(cls *RClass) *dryContractMeta {
-	if m, ok := cls.ivars[dryContractMetaIvar].(*dryContractMeta); ok {
+	if m, ok := object.KindOK[*dryContractMeta](cls.ivars[dryContractMetaIvar]); ok {
 		return m
 	}
 	m := &dryContractMeta{}
@@ -178,22 +178,22 @@ func (vm *VM) registerDryValidationResult(val *RClass) {
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	d("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*DryValidationResult).r.Success())
+		return object.Bool(object.Kind[*DryValidationResult](self).r.Success())
 	})
 	d("failure?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(!self.(*DryValidationResult).r.Success())
+		return object.Bool(!object.Kind[*DryValidationResult](self).r.Success())
 	})
 	d("errors", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return dryMapToHash(vm, self.(*DryValidationResult).r.Errors())
+		return dryMapToHash(vm, object.Kind[*DryValidationResult](self).r.Errors())
 	})
 	d("to_h", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return dryMapToHash(vm, self.(*DryValidationResult).r.ToH())
+		return dryMapToHash(vm, object.Kind[*DryValidationResult](self).r.ToH())
 	})
 	d("output", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return dryMapToHash(vm, self.(*DryValidationResult).r.Output())
+		return dryMapToHash(vm, object.Kind[*DryValidationResult](self).r.Output())
 	})
 	d("messages", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		msgs := self.(*DryValidationResult).r.Messages()
+		msgs := object.Kind[*DryValidationResult](self).r.Messages()
 		arr := object.NewArrayFromSlice(make([]object.Value, len(msgs)))
 		for i, m := range msgs {
 			arr.Elems[i] = object.NewString(m.Text)
@@ -224,20 +224,29 @@ func dryTypeAndPreds(args []object.Value) (string, []dryvalidation.Predicate) {
 	tn := ""
 	var preds []dryvalidation.Predicate
 	for _, a := range args {
-		switch v := a.(type) {
-		case object.Symbol:
-			if tn == "" {
-				tn = string(v)
-			}
-		case *object.String:
-			if tn == "" {
-				tn = v.Str()
-			}
-		case *object.Hash:
-			for _, k := range v.Keys {
-				val, _ := v.Get(k)
-				name := dryKeyName(k)
-				preds = append(preds, dryvalidation.Predicate{Name: dryPredName(name), Arg: dryToGo(val)})
+		{
+			__sw53 := a
+			switch {
+			case object.IsKind[object.Symbol](__sw53):
+				v := object.Kind[object.Symbol](__sw53)
+				_ = v
+				if tn == "" {
+					tn = string(v)
+				}
+			case object.IsKind[*object.String](__sw53):
+				v := object.Kind[*object.String](__sw53)
+				_ = v
+				if tn == "" {
+					tn = v.Str()
+				}
+			case object.IsKind[*object.Hash](__sw53):
+				v := object.Kind[*object.Hash](__sw53)
+				_ = v
+				for _, k := range v.Keys {
+					val, _ := v.Get(k)
+					name := dryKeyName(k)
+					preds = append(preds, dryvalidation.Predicate{Name: dryPredName(name), Arg: dryToGo(val)})
+				}
 			}
 		}
 	}

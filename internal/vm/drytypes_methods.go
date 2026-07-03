@@ -29,7 +29,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return dryCall(vm, self.(*DryType).t, args[0])
+		return dryCall(vm, object.Kind[*DryType](self).t, args[0])
 	}
 	d("call", apply)
 	d("[]", apply)
@@ -39,7 +39,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return object.Bool(drytypes.Valid(self.(*DryType).t, dryToGo(args[0])))
+		return object.Bool(drytypes.Valid(object.Kind[*DryType](self).t, dryToGo(args[0])))
 	})
 
 	// try(input) returns a Dry::Types::Result (#success? / #input / #error)
@@ -48,46 +48,46 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &DryResult{r: drytypes.Try(self.(*DryType).t, dryToGo(args[0]))}
+		return &DryResult{r: drytypes.Try(object.Kind[*DryType](self).t, dryToGo(args[0]))}
 	})
 
 	d("optional", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &DryType{t: self.(*DryType).t.Optional()}
+		return &DryType{t: object.Kind[*DryType](self).t.Optional()}
 	})
 	d("default", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk != nil {
-			return &DryType{t: self.(*DryType).t.DefaultFn(func() any {
+			return &DryType{t: object.Kind[*DryType](self).t.DefaultFn(func() any {
 				return dryToGo(vm.callBlock(blk, nil))
 			})}
 		}
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &DryType{t: self.(*DryType).t.Default(dryToGo(args[0]))}
+		return &DryType{t: object.Kind[*DryType](self).t.Default(dryToGo(args[0]))}
 	})
 	d("constrained", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &DryType{t: self.(*DryType).t.Constrained(dryConstraints(args)...)}
+		return &DryType{t: object.Kind[*DryType](self).t.Constrained(dryConstraints(args)...)}
 	})
 	d("enum", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		vals := make([]any, len(args))
 		for i, a := range args {
 			vals[i] = dryToGo(a)
 		}
-		return &DryType{t: self.(*DryType).t.Enum(vals...)}
+		return &DryType{t: object.Kind[*DryType](self).t.Enum(vals...)}
 	})
 	d("constructor", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("ArgumentError", "no block given")
 		}
-		return &DryType{t: self.(*DryType).t.Constructor(func(in any) any {
+		return &DryType{t: object.Kind[*DryType](self).t.Constructor(func(in any) any {
 			return dryToGo(vm.callBlock(blk, []object.Value{dryFromGo(vm, in)}))
 		})}
 	})
 	d("meta", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
-			return dryMetaToHash(vm, self.(*DryType).t.GetMeta())
+			return dryMetaToHash(vm, object.Kind[*DryType](self).t.GetMeta())
 		}
-		h, ok := args[0].(*object.Hash)
+		h, ok := object.KindOK[*object.Hash](args[0])
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Hash", args[0].Inspect())
 		}
@@ -96,17 +96,17 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 			v, _ := h.Get(k)
 			m[dryKeyName(k)] = dryToGo(v)
 		}
-		return &DryType{t: self.(*DryType).t.Meta(m)}
+		return &DryType{t: object.Kind[*DryType](self).t.Meta(m)}
 	})
 	d("|", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		other, ok := args[0].(*DryType)
+		other, ok := object.KindOK[*DryType](args[0])
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Dry::Types::Type", args[0].Inspect())
 		}
-		return &DryType{t: self.(*DryType).t.Or(other.t)}
+		return &DryType{t: object.Kind[*DryType](self).t.Or(other.t)}
 	})
 
 	// Types.Array.of / Types::Array(elem) builds an array type whose members are
@@ -116,7 +116,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 			}
-			el, ok := args[0].(*DryType)
+			el, ok := object.KindOK[*DryType](args[0])
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Dry::Types::Type", args[0].Inspect())
 			}
@@ -130,7 +130,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 			}
-			h, ok := args[0].(*object.Hash)
+			h, ok := object.KindOK[*object.Hash](args[0])
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Hash", args[0].Inspect())
 			}
@@ -148,16 +148,16 @@ func (vm *VM) registerDryResultMethods(types *RClass) {
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	d("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*DryResult).r.Success())
+		return object.Bool(object.Kind[*DryResult](self).r.Success())
 	})
 	d("failure?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*DryResult).r.Failure())
+		return object.Bool(object.Kind[*DryResult](self).r.Failure())
 	})
 	d("input", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return dryFromGo(vm, self.(*DryResult).r.Input())
+		return dryFromGo(vm, object.Kind[*DryResult](self).r.Input())
 	})
 	d("error", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if err := self.(*DryResult).r.Error(); err != nil {
+		if err := object.Kind[*DryResult](self).r.Error(); err != nil {
 			return object.NewString(err.Error())
 		}
 		return object.NilV

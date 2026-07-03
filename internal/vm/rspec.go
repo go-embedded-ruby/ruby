@@ -199,7 +199,7 @@ func (vm *VM) registerRSpecErrors(mod *RClass) {
 	mod.consts["Expectations"] = expectations
 	vm.consts["RSpec::Expectations"] = expectations
 
-	exc := vm.consts["Exception"].(*RClass)
+	exc := object.Kind[*RClass](vm.consts["Exception"])
 	notMet := newClass("RSpec::Expectations::ExpectationNotMetError", exc)
 	expectations.consts["ExpectationNotMetError"] = notMet
 	vm.consts["RSpec::Expectations::ExpectationNotMetError"] = notMet
@@ -208,7 +208,7 @@ func (vm *VM) registerRSpecErrors(mod *RClass) {
 // registerRSpecMatcherClass installs RSpec::Matchers::BuiltIn::BaseMatcher (the
 // class of every matcher object) and its predicate / message methods.
 func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
-	matchers := mod.consts["Matchers"].(*RClass)
+	matchers := object.Kind[*RClass](mod.consts["Matchers"])
 	builtIn := newClass("RSpec::Matchers::BuiltIn", nil)
 	builtIn.isModule = true
 	matchers.consts["BuiltIn"] = builtIn
@@ -219,7 +219,7 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 	vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *RSpecMatcher { return v.(*RSpecMatcher) }
+	self := func(v object.Value) *RSpecMatcher { return object.Kind[*RSpecMatcher](v) }
 
 	// matches?(actual) runs the match.
 	d("matches?", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -275,7 +275,7 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 // registerRSpecExpectationClass installs RSpec::Expectations::ExpectationTarget
 // and its to / not_to (to_not) methods.
 func (vm *VM) registerRSpecExpectationClass(mod *RClass) {
-	expectations := mod.consts["Expectations"].(*RClass)
+	expectations := object.Kind[*RClass](mod.consts["Expectations"])
 	cls := newClass("RSpec::Expectations::ExpectationTarget", vm.cObject)
 	expectations.consts["ExpectationTarget"] = cls
 	vm.consts["RSpec::Expectations::ExpectationTarget"] = cls
@@ -285,10 +285,10 @@ func (vm *VM) registerRSpecExpectationClass(mod *RClass) {
 	// to(matcher) passes when the matcher matches; otherwise it raises
 	// ExpectationNotMetError with the matcher's failure message.
 	d("to", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.rspecRunExpectation(v.(*RSpecExpectation), rspecMatcherWrap(args), true)
+		return vm.rspecRunExpectation(object.Kind[*RSpecExpectation](v), rspecMatcherWrap(args), true)
 	})
 	notTo := func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.rspecRunExpectation(v.(*RSpecExpectation), rspecMatcherWrap(args), false)
+		return vm.rspecRunExpectation(object.Kind[*RSpecExpectation](v), rspecMatcherWrap(args), false)
 	}
 	d("not_to", notTo)
 	d("to_not", notTo)

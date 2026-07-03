@@ -76,7 +76,7 @@ func (c *rubyConn) Read(p []byte) (int, error) {
 // redisReadBytes extracts the byte payload a Ruby #read returned: a String yields
 // its bytes, a nil (or anything else) yields none (EOF).
 func redisReadBytes(v object.Value) []byte {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Bytes()
 	}
 	return nil
@@ -89,21 +89,38 @@ func redisReadBytes(v object.Value) []byte {
 // numbers and symbols exactly as the redis gem does, so the mapping keeps the
 // primitive Go types the encoder understands and falls back to a value's to_s.
 func redisArg(v object.Value) any {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I.String()
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return redis.Symbol(string(n))
+	{
+		__sw130 := v
+		switch {
+		case __sw130 == nil || object.IsNilObj(__sw130):
+			n := __sw130
+			_ = n
+			return nil
+		case object.IsBool(__sw130):
+			n := object.AsBoolV(__sw130)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw130):
+			n := object.AsInteger(__sw130)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw130):
+			n := object.Kind[*object.Bignum](__sw130)
+			_ = n
+			return n.I.String()
+		case object.IsFloat(__sw130):
+			n := object.AsFloatV(__sw130)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw130):
+			n := object.Kind[*object.String](__sw130)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw130):
+			n := object.Kind[object.Symbol](__sw130)
+			_ = n
+			return redis.Symbol(string(n))
+		}
 	}
 	return v.ToS()
 }
@@ -208,7 +225,7 @@ func redisNewArgs(args []object.Value) (object.Value, redis.Options) {
 	var conn object.Value
 	// A trailing Hash is the keyword set.
 	if len(args) > 0 {
-		if h, ok := args[len(args)-1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
 			conn = redisOptsFromHash(h, &opts)
 			args = args[:len(args)-1]
 		}
@@ -254,7 +271,7 @@ func redisOptsFromHash(h *object.Hash, opts *redis.Options) object.Value {
 // redisInt coerces a db:/protocol: keyword value to an int64; a non-Integer
 // (never a sensible index) yields 0.
 func redisInt(v object.Value) int64 {
-	if n, ok := v.(object.Integer); ok {
+	if n, ok := object.AsIntegerOK(v); ok {
 		return int64(n)
 	}
 	return 0
@@ -263,7 +280,7 @@ func redisInt(v object.Value) int64 {
 // redisStr coerces a keyword value to a string: a String yields its contents,
 // any other value its to_s.
 func redisStr(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()
@@ -342,12 +359,12 @@ func (vm *VM) redisMulti(cl *redis.Client, blk *Proc) object.Value {
 // #call (queue any command) and #method_missing-style command methods lazily on
 // first use.
 func (vm *VM) redisBatchClass() *RClass {
-	if c, ok := vm.consts["Redis::Pipeline"].(*RClass); ok {
+	if c, ok := object.KindOK[*RClass](vm.consts["Redis::Pipeline"]); ok {
 		return c
 	}
 	cls := newClass("Redis::Pipeline", vm.cObject)
 	vm.consts["Redis::Pipeline"] = cls
-	if mod, ok := vm.consts["Redis"].(*RClass); ok {
+	if mod, ok := object.KindOK[*RClass](vm.consts["Redis"]); ok {
 		mod.consts["Pipeline"] = cls
 	}
 	// #call(*args) and every command method queue onto the batch. Because a
@@ -355,7 +372,7 @@ func (vm *VM) redisBatchClass() *RClass {
 	// method name backs them all.
 	queue := func(name string) NativeFn {
 		return func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-			b := v.(*RedisBatch)
+			b := object.Kind[*RedisBatch](v)
 			if name == "call" {
 				b.batch.Add(redisArgs(args)...)
 			} else {

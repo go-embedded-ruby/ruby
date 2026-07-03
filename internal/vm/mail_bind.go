@@ -87,7 +87,7 @@ func (f mailField) Decoded() string { return f.f.Decoded() }
 func mailNew(vm *VM, args []object.Value, blk *Proc) object.Value {
 	raw := ""
 	if len(args) > 0 {
-		if _, isNil := args[0].(object.Nil); !isNil {
+		if _, isNil := object.AsNilOK(args[0]); !isNil {
 			raw = strArg(args[0])
 		}
 	}

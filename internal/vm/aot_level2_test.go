@@ -78,7 +78,7 @@ func TestAOTSend(t *testing.T) {
 	// native block, which each element is yielded to.
 	sum := 0
 	blk := &Proc{native: func(_ *VM, args []object.Value) object.Value {
-		sum += int(args[0].(object.Integer))
+		sum += int(object.AsInteger(args[0]))
 		return object.NilV
 	}}
 	arr := &object.Array{Elems: []object.Value{object.Integer(2), object.Integer(3)}}

@@ -48,7 +48,7 @@ func (g *GetoptLong) Inspect() string { return g.ToS() }
 func (g *GetoptLong) Truthy() bool    { return true }
 
 // golOf returns the receiver as a *GetoptLong.
-func golOf(v object.Value) *GetoptLong { return v.(*GetoptLong) }
+func golOf(v object.Value) *GetoptLong { return object.Kind[*GetoptLong](v) }
 
 // registerGetoptLong installs the native GetoptLong class backed by the
 // go-ruby-getoptlong library. The argument-kind constants (NO_ARGUMENT /
@@ -69,7 +69,7 @@ func (vm *VM) registerGetoptLong() {
 	c.consts["REQUIRE_ORDER"] = object.IntValue(int64(getoptlong.RequireOrder))
 	c.consts["PERMUTE"] = object.IntValue(int64(getoptlong.Permute))
 	c.consts["RETURN_IN_ORDER"] = object.IntValue(int64(getoptlong.ReturnInOrder))
-	errClass := newClass("GetoptLong::Error", vm.consts["StandardError"].(*RClass))
+	errClass := newClass("GetoptLong::Error", object.Kind[*RClass](vm.consts["StandardError"]))
 	c.consts["Error"] = errClass
 	c.consts["AmbiguousOption"] = newClass("GetoptLong::AmbiguousOption", errClass)
 	c.consts["NeedlessArgument"] = newClass("GetoptLong::NeedlessArgument", errClass)
@@ -81,10 +81,10 @@ func (vm *VM) registerGetoptLong() {
 			g := &GetoptLong{
 				p:         getoptlong.NewParser(),
 				argv:      vm.argvArray(),
-				invalid:   c.consts["InvalidOption"].(*RClass),
-				missing:   c.consts["MissingArgument"].(*RClass),
-				needless:  c.consts["NeedlessArgument"].(*RClass),
-				ambiguous: c.consts["AmbiguousOption"].(*RClass),
+				invalid:   object.Kind[*RClass](c.consts["InvalidOption"]),
+				missing:   object.Kind[*RClass](c.consts["MissingArgument"]),
+				needless:  object.Kind[*RClass](c.consts["NeedlessArgument"]),
+				ambiguous: object.Kind[*RClass](c.consts["AmbiguousOption"]),
 			}
 			// GetoptLong.new(spec, spec, ...): each spec is an array of name/alias
 			// strings followed by the argument-kind constant. set_options does the
@@ -197,7 +197,7 @@ func (vm *VM) registerGetoptLong() {
 // argvArray returns the global argument Array (the object bound to ARGV and $*),
 // the slice GetoptLong scans and mutates.
 func (vm *VM) argvArray() *object.Array {
-	if a, ok := vm.consts["ARGV"].(*object.Array); ok {
+	if a, ok := object.KindOK[*object.Array](vm.consts["ARGV"]); ok {
 		return a
 	}
 	// ARGV is always installed as an Array at boot; fall back to an empty one so a
@@ -211,20 +211,29 @@ func (vm *VM) argvArray() *object.Array {
 func (vm *VM) golSetOptions(g *GetoptLong, specs []object.Value) {
 	opts := make([]getoptlong.Option, 0, len(specs))
 	for _, s := range specs {
-		arr, ok := s.(*object.Array)
+		arr, ok := object.KindOK[*object.Array](s)
 		if !ok {
 			raise("ArgumentError", "the option list contains non-array argument")
 		}
 		var names []string
 		flag := getoptlong.NoArgument
 		for _, e := range arr.Elems {
-			switch t := e.(type) {
-			case *object.String:
-				names = append(names, t.Str())
-			case object.Integer:
-				flag = getoptlong.ArgumentFlag(t)
-			default:
-				raise("ArgumentError", "the option list contains an invalid element")
+			{
+				__sw62 := e
+				switch {
+				case object.IsKind[*object.String](__sw62):
+					t := object.Kind[*object.String](__sw62)
+					_ = t
+					names = append(names, t.Str())
+				case object.IsInt(__sw62):
+					t := object.AsInteger(__sw62)
+					_ = t
+					flag = getoptlong.ArgumentFlag(t)
+				default:
+					t := __sw62
+					_ = t
+					raise("ArgumentError", "the option list contains an invalid element")
+				}
 			}
 		}
 		opts = append(opts, getoptlong.Option{Names: names, Flag: flag})

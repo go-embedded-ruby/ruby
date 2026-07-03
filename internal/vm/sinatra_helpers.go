@@ -17,11 +17,18 @@ import (
 // targets: the receiver itself when the DSL runs in a class body (self = the
 // class), or the receiver's class when #call runs on an instance (App.new.call).
 func sinatraClassOf(self object.Value) *RClass {
-	switch v := self.(type) {
-	case *RClass:
-		return v
-	case *RObject:
-		return v.class
+	{
+		__sw161 := self
+		switch {
+		case object.IsKind[*RClass](__sw161):
+			v := object.Kind[*RClass](__sw161)
+			_ = v
+			return v
+		case object.IsKind[*RObject](__sw161):
+			v := object.Kind[*RObject](__sw161)
+			_ = v
+			return v.class
+		}
 	}
 	raise("TypeError", "not a Sinatra::Base")
 	return nil
@@ -50,12 +57,19 @@ func sinatraOptPattern(args []object.Value) string {
 
 // sinatraInt reads an argument as an int, falling back to def.
 func sinatraInt(v object.Value, def int) int {
-	switch n := v.(type) {
-	case object.Integer:
-		return int(n)
-	case *object.String:
-		if i, err := strconv.Atoi(n.Str()); err == nil {
-			return i
+	{
+		__sw162 := v
+		switch {
+		case object.IsInt(__sw162):
+			n := object.AsInteger(__sw162)
+			_ = n
+			return int(n)
+		case object.IsKind[*object.String](__sw162):
+			n := object.Kind[*object.String](__sw162)
+			_ = n
+			if i, err := strconv.Atoi(n.Str()); err == nil {
+				return i
+			}
 		}
 	}
 	return def
@@ -78,17 +92,26 @@ func sinatraParamsHash(c *sinatra.Context) *object.Hash {
 func sinatraHaltArgs(args []object.Value) []any {
 	out := make([]any, 0, len(args))
 	for _, a := range args {
-		switch n := a.(type) {
-		case object.Integer:
-			out = append(out, int(n))
-		case *object.String:
-			out = append(out, n.Str())
-		case *object.Array:
-			parts := make([]string, len(n.Elems))
-			for i, el := range n.Elems {
-				parts[i] = sinatraStr(el)
+		{
+			__sw163 := a
+			switch {
+			case object.IsInt(__sw163):
+				n := object.AsInteger(__sw163)
+				_ = n
+				out = append(out, int(n))
+			case object.IsKind[*object.String](__sw163):
+				n := object.Kind[*object.String](__sw163)
+				_ = n
+				out = append(out, n.Str())
+			case object.IsKind[*object.Array](__sw163):
+				n := object.Kind[*object.Array](__sw163)
+				_ = n
+				parts := make([]string, len(n.Elems))
+				for i, el := range n.Elems {
+					parts[i] = sinatraStr(el)
+				}
+				out = append(out, parts)
 			}
-			out = append(out, parts)
 		}
 	}
 	return out
@@ -106,7 +129,7 @@ func sinatraSetContentType(c *sinatra.Context, args []object.Value) {
 	typeArg := sinatraStr(args[0])
 	charset := ""
 	if len(args) > 1 {
-		if h, ok := args[len(args)-1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
 			if v, ok := h.Get(object.Symbol("charset")); ok {
 				charset = sinatraStr(v)
 			}
@@ -126,15 +149,26 @@ func sinatraSetContentType(c *sinatra.Context, args []object.Value) {
 // sinatraSettingValue maps a Ruby settings value into the Go value the library's
 // Settings registry holds (string / bool / int, else its to_s).
 func sinatraSettingValue(v object.Value) any {
-	switch n := v.(type) {
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw164 := v
+		switch {
+		case object.IsBool(__sw164):
+			n := object.AsBoolV(__sw164)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw164):
+			n := object.AsInteger(__sw164)
+			_ = n
+			return int(n)
+		case object.IsKind[*object.String](__sw164):
+			n := object.Kind[*object.String](__sw164)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw164):
+			n := object.Kind[object.Symbol](__sw164)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }
@@ -144,19 +178,30 @@ func sinatraSettingValue(v object.Value) any {
 // body parts, nil leaves the body as helpers set it; any other value is rendered
 // through its Ruby #to_s.
 func sinatraResult(vm *VM, ret object.Value) any {
-	switch n := ret.(type) {
-	case nil, object.Nil:
-		return nil
-	case *object.String:
-		return n.Str()
-	case object.Integer:
-		return int(n)
-	case *object.Array:
-		parts := make([]string, len(n.Elems))
-		for i, el := range n.Elems {
-			parts[i] = sinatraToS(vm, el)
+	{
+		__sw165 := ret
+		switch {
+		case __sw165 == nil || object.IsNilObj(__sw165):
+			n := __sw165
+			_ = n
+			return nil
+		case object.IsKind[*object.String](__sw165):
+			n := object.Kind[*object.String](__sw165)
+			_ = n
+			return n.Str()
+		case object.IsInt(__sw165):
+			n := object.AsInteger(__sw165)
+			_ = n
+			return int(n)
+		case object.IsKind[*object.Array](__sw165):
+			n := object.Kind[*object.Array](__sw165)
+			_ = n
+			parts := make([]string, len(n.Elems))
+			for i, el := range n.Elems {
+				parts[i] = sinatraToS(vm, el)
+			}
+			return parts
 		}
-		return parts
 	}
 	return sinatraToS(vm, ret)
 }
@@ -164,7 +209,7 @@ func sinatraResult(vm *VM, ret object.Value) any {
 // sinatraToS renders a value through Ruby #to_s (so a custom object's body is
 // what the app would render), used verbatim for a String.
 func sinatraToS(vm *VM, v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return vm.send(v, "to_s", nil, nil).ToS()

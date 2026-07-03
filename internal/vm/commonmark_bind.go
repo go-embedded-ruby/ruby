@@ -32,22 +32,35 @@ func commonmarkRender(vm *VM, src string, opt object.Value) string {
 // `extensions:` form). Unrecognised keys are ignored.
 func commonmarkOptions(opt object.Value) *commonmark.Options {
 	o := &commonmark.Options{}
-	switch v := opt.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case *object.Hash:
-		for _, k := range v.Keys {
-			val, _ := v.Get(k)
-			commonmarkSetOption(o, commonmarkKey(k), val.Truthy())
+	{
+		__sw38 := opt
+		switch {
+		case __sw38 == nil:
+			v := __sw38
+			_ = v
+			return nil
+		case object.IsNilObj(__sw38):
+			v := object.NilObj()
+			_ = v
+			return nil
+		case object.IsKind[*object.Hash](__sw38):
+			v := object.Kind[*object.Hash](__sw38)
+			_ = v
+			for _, k := range v.Keys {
+				val, _ := v.Get(k)
+				commonmarkSetOption(o, commonmarkKey(k), val.Truthy())
+			}
+		case object.IsKind[*object.Array](__sw38):
+			v := object.Kind[*object.Array](__sw38)
+			_ = v
+			for _, el := range v.Elems {
+				commonmarkSetOption(o, commonmarkKey(el), true)
+			}
+		default:
+			v := __sw38
+			_ = v
+			return nil
 		}
-	case *object.Array:
-		for _, el := range v.Elems {
-			commonmarkSetOption(o, commonmarkKey(el), true)
-		}
-	default:
-		return nil
 	}
 	return o
 }
@@ -77,11 +90,18 @@ func commonmarkSetOption(o *commonmark.Options, key string, on bool) {
 // commonmarkKey renders an option key (a Symbol or String) as its bare name; any
 // other value falls back to its to_s.
 func commonmarkKey(k object.Value) string {
-	switch n := k.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw39 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw39):
+			n := object.Kind[object.Symbol](__sw39)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw39):
+			n := object.Kind[*object.String](__sw39)
+			_ = n
+			return n.Str()
+		}
 	}
 	return k.ToS()
 }

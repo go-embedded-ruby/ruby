@@ -15,7 +15,7 @@ import (
 // wait/signal are no-ops. This is behaviourally correct for the single-thread
 // case Puppet's load path exercises; real cross-thread blocking is a later round.
 func (vm *VM) registerMonitor() {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 
 	// MonitorMixin: included into classes that want monitor semantics.
 	mixin := newClass("MonitorMixin", nil)
@@ -67,7 +67,7 @@ func defMonitorMethods(c *RClass) {
 	c.define("mon_exit", noop)
 	c.define("mon_initialize", noop)
 	c.define("new_cond", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		cond := vm.consts["MonitorMixin"].(*RClass).consts["ConditionVariable"].(*RClass)
+		cond := object.Kind[*RClass](object.Kind[*RClass](vm.consts["MonitorMixin"]).consts["ConditionVariable"])
 		return &RObject{class: cond, ivars: map[string]object.Value{}}
 	})
 }

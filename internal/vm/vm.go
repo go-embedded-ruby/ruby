@@ -134,9 +134,9 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 	if !object.IsNil(e.Obj) {
 		return vm.captureBacktrace(e.Obj)
 	}
-	cls, ok := vm.consts[e.Class].(*RClass)
+	cls, ok := object.KindOK[*RClass](vm.consts[e.Class])
 	if !ok {
-		cls = vm.consts["StandardError"].(*RClass)
+		cls = object.Kind[*RClass](vm.consts["StandardError"])
 	}
 	obj := &RObject{class: cls, ivars: map[string]object.Value{"@message": object.NewString(e.Message)}}
 	return vm.captureBacktrace(obj)
@@ -148,7 +148,7 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 // object is built only now — it snapshots the still-intact live frame stack.
 func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
 	if !object.IsNil(e.Obj) {
-		if bt, ok := getIvar(e.Obj, backtraceIvar).(*object.Array); ok {
+		if bt, ok := object.KindOK[*object.Array](getIvar(e.Obj, backtraceIvar)); ok {
 			return bt.Elems
 		}
 	}
@@ -321,18 +321,25 @@ type VM struct {
 // false -> 0); symbols and reference objects get a stable id memoised in objIDs
 // (so the same object always reports the same id, distinct objects differ).
 func (vm *VM) objectID(self object.Value) object.Value {
-	switch v := self.(type) {
-	case object.Integer:
-		// Fixnum id is 2n+1 (matches MRI up to its 62-bit fixnum range). Bignums
-		// are heap objects in MRI, so they fall through to the memoised path below.
-		return object.NormInt(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(int64(v)), 1), big.NewInt(1)))
-	case object.Bool:
-		if v {
-			return object.IntValue(20)
+	{
+		__sw183 := self
+		switch {
+		case object.IsInt(__sw183):
+			v := object.AsInteger(__sw183)
+			_ = v
+			return object.NormInt(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(int64(v)), 1), big.NewInt(1)))
+		case object.IsBool(__sw183):
+			v := object.AsBoolV(__sw183)
+			_ = v
+			if v {
+				return object.IntValue(20)
+			}
+			return object.IntValue(0)
+		case object.IsNilObj(__sw183):
+			v := object.NilObj()
+			_ = v
+			return object.IntValue(4)
 		}
-		return object.IntValue(0)
-	case object.Nil:
-		return object.IntValue(4)
 	}
 	// Reference objects get a stable even id memoised in objIDs (never colliding
 	// with the odd fixnum ids); refID assigns and remembers it.
@@ -386,40 +393,66 @@ func (vm *VM) hasCustomHash(v object.Value) bool {
 // hashAsInt coerces the result of a Ruby #hash call to an int64 bucket. MRI's
 // Object#hash returns an Integer; a Bignum result is folded so any value works.
 func hashAsInt(v object.Value) (int64, bool) {
-	switch x := v.(type) {
-	case object.Integer:
-		return int64(x), true
-	case *object.Bignum:
-		return int64(x.I.Int64()), true
+	{
+		__sw184 := v
+		switch {
+		case object.IsInt(__sw184):
+			x := object.AsInteger(__sw184)
+			_ = x
+			return int64(x), true
+		case object.IsKind[*object.Bignum](__sw184):
+			x := object.Kind[*object.Bignum](__sw184)
+			_ = x
+			return int64(x.I.Int64()), true
+		}
 	}
 	return 0, false
 }
 
 func (vm *VM) hashValue(self object.Value) int64 {
-	switch v := self.(type) {
-	case object.Integer:
-		return int64(v)
-	case object.Float:
-		return int64(math.Float64bits(float64(v)))
-	case object.Bool:
-		if v {
-			return 1
+	{
+		__sw185 := self
+		switch {
+		case object.IsInt(__sw185):
+			v := object.AsInteger(__sw185)
+			_ = v
+			return int64(v)
+		case object.IsFloat(__sw185):
+			v := object.AsFloatV(__sw185)
+			_ = v
+			return int64(math.Float64bits(float64(v)))
+		case object.IsBool(__sw185):
+			v := object.AsBoolV(__sw185)
+			_ = v
+			if v {
+				return 1
+			}
+			return 0
+		case object.IsNilObj(__sw185):
+			v := object.NilObj()
+			_ = v
+			return 8
+		case object.IsKind[object.Symbol](__sw185):
+			v := object.Kind[object.Symbol](__sw185)
+			_ = v
+			return fnvHash("sym:" + string(v))
+		case object.IsKind[*object.String](__sw185):
+			v := object.Kind[*object.String](__sw185)
+			_ = v
+			return fnvHash("str:" + v.Str())
+		case object.IsKind[*object.Bignum](__sw185):
+			v := object.Kind[*object.Bignum](__sw185)
+			_ = v
+			return fnvHash("big:" + v.I.String())
+		case object.IsKind[*object.Array](__sw185):
+			v := object.Kind[*object.Array](__sw185)
+			_ = v
+			h := int64(1)
+			for _, e := range v.Elems {
+				h = h*31 + vm.hashValue(e)
+			}
+			return h
 		}
-		return 0
-	case object.Nil:
-		return 8
-	case object.Symbol:
-		return fnvHash("sym:" + string(v))
-	case *object.String:
-		return fnvHash("str:" + v.Str())
-	case *object.Bignum:
-		return fnvHash("big:" + v.I.String())
-	case *object.Array:
-		h := int64(1)
-		for _, e := range v.Elems {
-			h = h*31 + vm.hashValue(e)
-		}
-		return h
 	}
 	// Any other object: a stable hash derived from its identity id.
 	return vm.refID(self)
@@ -593,7 +626,7 @@ func (vm *VM) SetConst(name string, v object.Value) { vm.consts[name] = v }
 // subclasses, so a Kernel#exit propagating to the top is recognised as a clean
 // termination rather than an uncaught error.
 func (vm *VM) isSystemExit(className string) bool {
-	c, ok := vm.consts[className].(*RClass)
+	c, ok := object.KindOK[*RClass](vm.consts[className])
 	if !ok {
 		return className == "SystemExit"
 	}
@@ -669,7 +702,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Hash {
 	kwargs := object.NewHash()
 	if a := *args; len(a) > 0 {
-		if h, ok := a[len(a)-1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](a[len(a)-1]); ok {
 			kwargs = h
 			*args = a[:len(a)-1]
 		}
@@ -682,7 +715,7 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 	if iseq.KwRestSlot < 0 {
 		var unknown []string
 		for _, k := range kwargs.Keys {
-			if sym, ok := k.(object.Symbol); ok && valid[sym] {
+			if sym, ok := object.KindOK[object.Symbol](k); ok && valid[sym] {
 				continue
 			}
 			unknown = append(unknown, k.Inspect())
@@ -770,7 +803,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		if iseq.KwRestSlot >= 0 {
 			rest := object.NewHash()
 			for _, k := range kwargs.Keys {
-				if sym, ok := k.(object.Symbol); ok && named[sym] {
+				if sym, ok := object.KindOK[object.Symbol](k); ok && named[sym] {
 					continue
 				}
 				v, _ := kwargs.Get(k)
@@ -960,7 +993,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// A string literal evaluates to a fresh mutable object each time
 				// (Ruby semantics), so clone string constants on push; every other
 				// constant is immutable and can be shared.
-				if s, ok := iseq.Consts[in.A].(*object.String); ok {
+				if s, ok := object.KindOK[*object.String](iseq.Consts[in.A]); ok {
 					push(s.Dup())
 				} else {
 					push(iseq.Consts[in.A])
@@ -992,14 +1025,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				v := pop()
 				k := pop()
 				// the accumulator hash is now on top of the stack; mutate in place.
-				stack[len(stack)-1].(*object.Hash).Set(k, v)
+				object.Kind[*object.Hash](stack[len(stack)-1]).Set(k, v)
 			case bytecode.OpHashMerge:
 				val := pop()
-				other, ok := val.(*object.Hash)
+				other, ok := object.KindOK[*object.Hash](val)
 				if !ok {
 					raise("TypeError", "no implicit conversion of %s into Hash", vm.classOf(val).name)
 				}
-				acc := stack[len(stack)-1].(*object.Hash)
+				acc := object.Kind[*object.Hash](stack[len(stack)-1])
 				for _, k := range other.Keys {
 					v, _ := other.Get(k)
 					acc.Set(k, v)
@@ -1038,7 +1071,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpGetScopedConst:
 				name := iseq.Names[in.A]
 				recv := pop()
-				cls, ok := recv.(*RClass)
+				cls, ok := object.KindOK[*RClass](recv)
 				if !ok {
 					raise("TypeError", "%s is not a class/module", recv.Inspect())
 				}
@@ -1049,7 +1082,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// expression yielding its right-hand side).
 				val := pop()
 				recv := pop()
-				cls, ok := recv.(*RClass)
+				cls, ok := object.KindOK[*RClass](recv)
 				if !ok {
 					raise("TypeError", "%s is not a class/module", recv.Inspect())
 				}
@@ -1128,7 +1161,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					continue
 				}
 			case bytecode.OpBranchNil:
-				if _, isNil := pop().(object.Nil); isNil {
+				if _, isNil := object.AsNilOK(pop()); isNil {
 					pc = in.A
 					continue
 				}
@@ -1148,7 +1181,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// (operator fallback / method_missing) falls back to send.
 					base := len(stack) - argc
 					recv := stack[base-1]
-					if _, isClass := recv.(*RClass); !isClass {
+					if _, isClass := object.KindOK[*RClass](recv); !isClass {
 						if m := vm.lookupCached(&caches[pc], recv, name); m != nil {
 							// An explicit-receiver send enforces method visibility
 							// (private/protected); an implicit or `self.` send does not.
@@ -1247,14 +1280,23 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// object gains a method on its singleton class.
 				name := iseq.Names[in.A]
 				recv := pop()
-				switch t := recv.(type) {
-				case *RClass:
-					t.smethods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: t}
-				case *RObject:
-					sc := vm.singletonClass(t)
-					sc.methods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: sc}
-				default:
-					raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
+				{
+					__sw186 := recv
+					switch {
+					case object.IsKind[*RClass](__sw186):
+						t := object.Kind[*RClass](__sw186)
+						_ = t
+						t.smethods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: t}
+					case object.IsKind[*RObject](__sw186):
+						t := object.Kind[*RObject](__sw186)
+						_ = t
+						sc := vm.singletonClass(t)
+						sc.methods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: sc}
+					default:
+						t := __sw186
+						_ = t
+						raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
+					}
 				}
 				push(object.SymVal(name))
 			case bytecode.OpOpenSingletonClass:
@@ -1340,7 +1382,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					markEnvCaptured(env)
 					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
 				}
-				argsArr := pop().(*object.Array)
+				argsArr := object.Kind[*object.Array](pop())
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, argsArr.Elems, superBlk))
 			case bytecode.OpInvokeBlock:
 				if block == nil {
@@ -1354,9 +1396,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if block == nil {
 					raise("LocalJumpError", "no block given (yield)")
 				}
-				push(vm.callBlock(block, pop().(*object.Array).Elems))
+				push(vm.callBlock(block, object.Kind[*object.Array](pop()).Elems))
 			case bytecode.OpExcMatchAny:
-				classes := pop().(*object.Array)
+				classes := object.Kind[*object.Array](pop())
 				exc := pop()
 				match := false
 				for _, ce := range classes.Elems {
@@ -1370,7 +1412,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				match := false
 				if in.B == 1 { // any candidate === subject
 					subject := pop()
-					cands := pop().(*object.Array)
+					cands := object.Kind[*object.Array](pop())
 					for _, c := range cands.Elems {
 						if vm.send(c, "===", []object.Value{subject}, nil).Truthy() {
 							match = true
@@ -1378,7 +1420,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						}
 					}
 				} else { // no subject: any candidate truthy
-					cands := pop().(*object.Array)
+					cands := object.Kind[*object.Array](pop())
 					for _, c := range cands.Elems {
 						if c.Truthy() {
 							match = true
@@ -1407,7 +1449,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpDefinedScopedConst:
 				name := iseq.Names[in.A]
 				recv := pop()
-				cls, ok := recv.(*RClass)
+				cls, ok := object.KindOK[*RClass](recv)
 				if ok && vm.hasScopedConst(cls, name) {
 					push(definedTag("constant"))
 				} else {
@@ -1518,7 +1560,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// literal rebuilds every evaluation (A == 0). A /o literal is "interpolate
 				// once": store the compiled object in the guard's cache slot (A-1) so
 				// later evaluations reuse it without re-running the interpolation.
-				r := vm.compileLiteralRegexp(pop().(*object.String).Str(), iseq.Names[in.B])
+				r := vm.compileLiteralRegexp(object.Kind[*object.String](pop()).Str(), iseq.Names[in.B])
 				if in.A != 0 {
 					// /o: store into the guard's slot. The guard (OpRegexpOnce) always
 					// runs first and allocated caches, so it is non-nil here.
@@ -1542,7 +1584,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpSplatToArray:
 				push(vm.splatToArray(pop()))
 			case bytecode.OpExpandArray:
-				elems := pop().(*object.Array).Elems
+				elems := object.Kind[*object.Array](pop()).Elems
 				n := len(elems)
 				pre, post, hasSplat := in.A, in.B, in.C == 1
 				vals := make([]object.Value, 0, pre+post+1)
@@ -1585,14 +1627,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(vals[i])
 				}
 			case bytecode.OpConcatArray:
-				b2 := pop().(*object.Array)
-				a2 := pop().(*object.Array)
+				b2 := object.Kind[*object.Array](pop())
+				a2 := object.Kind[*object.Array](pop())
 				elems := make([]object.Value, 0, len(a2.Elems)+len(b2.Elems))
 				elems = append(elems, a2.Elems...)
 				elems = append(elems, b2.Elems...)
 				push(object.NewArrayFromSlice(elems))
 			case bytecode.OpSendArray:
-				argsArr := pop().(*object.Array)
+				argsArr := object.Kind[*object.Array](pop())
 				recv := pop()
 				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
 				var blk *Proc
@@ -1603,7 +1645,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:
 				blockVal := pop()
-				argsArr := pop().(*object.Array)
+				argsArr := object.Kind[*object.Array](pop())
 				recv := pop()
 				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, vm.toBlock(blockVal)))
@@ -1711,7 +1753,7 @@ func (vm *VM) assignConst(definee *RClass, name string, val object.Value) {
 // (Ruby's "assign a permanent name on first constant binding" rule).
 func (vm *VM) assignConstIn(scope *RClass, name string, val object.Value) {
 	scope.consts[name] = val
-	if c, ok := val.(*RClass); ok && !c.named {
+	if c, ok := object.KindOK[*RClass](val); ok && !c.named {
 		c.name = scopedNameFor(scope, name)
 		c.named = true
 		c.lexParent = lexParentFor(scope)
@@ -1751,7 +1793,7 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 	var class *RClass
 	if existing, ok := table[name]; ok {
 		var isClass bool
-		class, isClass = existing.(*RClass)
+		class, isClass = object.KindOK[*RClass](existing)
 		if !isClass || class.isModule {
 			raise("TypeError", "%s is not a class", name)
 		}
@@ -1759,7 +1801,7 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 		super := vm.cObject
 		switch {
 		case superExpr != nil:
-			sc, ok := superExpr.(*RClass)
+			sc, ok := object.KindOK[*RClass](superExpr)
 			if !ok || sc.isModule {
 				raise("TypeError", "superclass must be a Class (%s given)", vm.classOf(superExpr).name)
 			}
@@ -1769,7 +1811,7 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			if !ok {
 				raise("NameError", "uninitialized constant %s", body.Super)
 			}
-			super = sc.(*RClass)
+			super = object.Kind[*RClass](sc)
 		}
 		class = newClass(scopedNameFor(parent, name), super)
 		// A compact (scoped) definition's lexical nesting is only itself, so its
@@ -1817,7 +1859,7 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 	var mod *RClass
 	if existing, ok := table[name]; ok {
 		var isClass bool
-		mod, isClass = existing.(*RClass)
+		mod, isClass = object.KindOK[*RClass](existing)
 		if !isClass || !mod.isModule {
 			raise("TypeError", "%s is not a module", name)
 		}
@@ -1837,7 +1879,7 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 // asModuleParent coerces a popped value to the class/module that a scoped
 // definition/assignment nests into, raising a TypeError otherwise.
 func (vm *VM) asModuleParent(v object.Value) *RClass {
-	cls, ok := v.(*RClass)
+	cls, ok := object.KindOK[*RClass](v)
 	if !ok {
 		raise("TypeError", "%s is not a class/module", v.Inspect())
 	}

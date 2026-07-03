@@ -29,7 +29,7 @@ import (
 // treated as complex is preserved; everything else coerces to a real through
 // toFloat, raising TypeError on a non-numeric argument.
 func cmathArg(v object.Value) cmath.Number {
-	if c, ok := v.(*object.Complex); ok {
+	if c, ok := object.KindOK[*object.Complex](v); ok {
 		return cmath.Complex(complexFloat(c.Re), complexFloat(c.Im))
 	}
 	f, ok := toFloat(v)

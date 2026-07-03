@@ -48,7 +48,7 @@ func (vm *VM) installTSort() {
 	mod.isModule = true
 	vm.consts["TSort"] = mod
 
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	cyclic := newClass("TSort::Cyclic", std)
 	mod.consts["Cyclic"] = cyclic
 	vm.consts["TSort::Cyclic"] = cyclic
@@ -68,7 +68,7 @@ func (vm *VM) installTSort() {
 	// but the Array is the documented value the block iterates).
 	d("tsort_each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		nodes, children, vals := tsortFuncs(vm, self)
-		arr := tsortResult(vm, nodes, children, vals).(*object.Array)
+		arr := object.Kind[*object.Array](tsortResult(vm, nodes, children, vals))
 		if blk == nil {
 			return enumFor(self, "tsort_each")
 		}

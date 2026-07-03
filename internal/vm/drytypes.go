@@ -78,7 +78,7 @@ func (vm *VM) registerDryTypes() {
 // dryModule returns (creating on first use) the shared Dry module both
 // dry-types and dry-struct/dry-validation hang their constants under.
 func (vm *VM) dryModule() *RClass {
-	if c, ok := vm.consts["Dry"].(*RClass); ok {
+	if c, ok := object.KindOK[*RClass](vm.consts["Dry"]); ok {
 		return c
 	}
 	dry := newClass("Dry", nil)
@@ -136,7 +136,7 @@ var dryPrimitives = []dryPrimitive{
 // under its qualified name in the top-level table, so both `Dry::Types::X` and a
 // re-raised library error resolve to the same class.
 func (vm *VM) registerDryTypesErrors(types *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		types.consts[simple] = c

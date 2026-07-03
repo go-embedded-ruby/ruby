@@ -197,16 +197,16 @@ func (vm *VM) sinatraAction(blk *Proc, merged map[string]object.Value) sinatra.A
 // registerSinatraContext installs the request-context helper surface a handler
 // block runs against (self = SinatraCtx).
 func (vm *VM) registerSinatraContext(ctx *RClass) {
-	self := func(v object.Value) *SinatraCtx { return v.(*SinatraCtx) }
+	self := func(v object.Value) *SinatraCtx { return object.Kind[*SinatraCtx](v) }
 
 	ctx.define("params", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return sinatraParamsHash(self(v).c)
 	})
 	ctx.define("request", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RackRequest{req: self(v).c.Request(), cls: vm.consts["Rack::Request"].(*RClass)}
+		return &RackRequest{req: self(v).c.Request(), cls: object.Kind[*RClass](vm.consts["Rack::Request"])}
 	})
 	ctx.define("response", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RackResponse{resp: self(v).c.Response(), cls: vm.consts["Rack::Response"].(*RClass)}
+		return &RackResponse{resp: self(v).c.Response(), cls: object.Kind[*RClass](vm.consts["Rack::Response"])}
 	})
 	ctx.define("session", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		// The session seam is the rack.session env value, which lives in the Go
@@ -238,7 +238,7 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 	})
 	ctx.define("headers", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) > 0 {
-			if h, ok := args[0].(*object.Hash); ok {
+			if h, ok := object.KindOK[*object.Hash](args[0]); ok {
 				c := self(v).c
 				for _, k := range h.Keys {
 					val, _ := h.Get(k)
@@ -289,14 +289,14 @@ func (vm *VM) registerSinatraSettings(cls *RClass) {
 		return object.NilV
 	}
 	cls.define("[]", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return get(v.(*SinatraSettings), sinatraStr(rackArg(args)))
+		return get(object.Kind[*SinatraSettings](v), sinatraStr(rackArg(args)))
 	})
 	cls.define("respond_to?", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		_, ok := v.(*SinatraSettings).settings[sinatraStr(rackArg(args))]
+		_, ok := object.Kind[*SinatraSettings](v).settings[sinatraStr(rackArg(args))]
 		return object.Bool(ok)
 	})
 	cls.define("method_missing", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		s := v.(*SinatraSettings)
+		s := object.Kind[*SinatraSettings](v)
 		name := sinatraStr(rackArg(args))
 		if n := len(name); n > 0 && name[n-1] == '?' {
 			key := name[:n-1]

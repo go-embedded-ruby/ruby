@@ -257,7 +257,7 @@ func (vm *VM) singletonClass(o *RObject) *RClass {
 // nil. For *RObject it is the inline field; for other reference values it is the
 // side-table entry. Immediate values never have one.
 func (vm *VM) objSingleton(v object.Value) *RClass {
-	if o, ok := v.(*RObject); ok {
+	if o, ok := object.KindOK[*RObject](v); ok {
 		return o.singleton
 	}
 	if vm.extSingletons == nil {
@@ -271,11 +271,18 @@ func (vm *VM) objSingleton(v object.Value) *RClass {
 // second bool reports success; immediate values (Integer/Symbol/true/false/nil)
 // and classes/modules (which use a metaclass instead) are not eligible here.
 func (vm *VM) ensureSingleton(v object.Value) (*RClass, bool) {
-	switch t := v.(type) {
-	case *RObject:
-		return vm.singletonClass(t), true
-	case *RClass:
-		return nil, false // classes use metaClass()
+	{
+		__sw108 := v
+		switch {
+		case object.IsKind[*RObject](__sw108):
+			t := object.Kind[*RObject](__sw108)
+			_ = t
+			return vm.singletonClass(t), true
+		case object.IsKind[*RClass](__sw108):
+			t := object.Kind[*RClass](__sw108)
+			_ = t
+			return nil, false
+		}
 	}
 	if !hasIdentitySingleton(v) {
 		return nil, false
@@ -294,10 +301,12 @@ func (vm *VM) ensureSingleton(v object.Value) (*RClass, bool) {
 // hasIdentitySingleton reports whether v is a reference value that can carry a
 // side-table singleton class. Immediate / value-semantics types cannot.
 func hasIdentitySingleton(v object.Value) bool {
-	switch v.(type) {
-	case object.Integer, *object.Bignum, object.Float, object.Symbol,
-		object.Bool, object.Nil:
-		return false
+	{
+		__sw109 := v
+		switch {
+		case object.IsInt(__sw109) || object.IsKind[*object.Bignum](__sw109) || object.IsFloat(__sw109) || object.IsKind[object.Symbol](__sw109) || object.IsBool(__sw109) || object.IsNilObj(__sw109):
+			return false
+		}
 	}
 	return true
 }
@@ -327,7 +336,7 @@ func (c *RClass) metaClass() *RClass {
 // singleton (meta) class. A second bool reports success; an immediate value
 // (Integer, Symbol, true/false/nil, …) has no singleton class in MRI.
 func (vm *VM) singletonDefinee(target object.Value) (*RClass, bool) {
-	if c, ok := target.(*RClass); ok {
+	if c, ok := object.KindOK[*RClass](target); ok {
 		return c.metaClass(), true
 	}
 	return vm.ensureSingleton(target)
@@ -594,320 +603,575 @@ func (vm *VM) ancestors(c *RClass) []*RClass {
 
 // classOf returns the dynamic class of any value — the basis of dispatch.
 func (vm *VM) classOf(v object.Value) *RClass {
-	switch x := v.(type) {
-	case *RObject:
-		return x.class
-	case *RClass:
-		// A module's class is Module; a class's class is Class. (Matches MRI:
-		// `String.class == Class`, `Comparable.class == Module`.)
-		if x.isModule {
-			return vm.cModule
+	{
+		__sw110 := v
+		switch {
+		case object.IsKind[*RObject](__sw110):
+			x := object.Kind[*RObject](__sw110)
+			_ = x
+			return x.class
+		case object.IsKind[*RClass](__sw110):
+			x := object.Kind[*RClass](__sw110)
+			_ = x
+			if x.isModule {
+				return vm.cModule
+			}
+			return vm.cClass
+		case object.IsInt(__sw110):
+			x := object.AsInteger(__sw110)
+			_ = x
+			return vm.cInteger
+		case object.IsKind[*object.Bignum](__sw110):
+			x := object.Kind[*object.Bignum](__sw110)
+			_ = x
+			return vm.cInteger
+		case object.IsFloat(__sw110):
+			x := object.AsFloatV(__sw110)
+			_ = x
+			return vm.cFloat
+		case object.IsKind[*object.Complex](__sw110):
+			x := object.Kind[*object.Complex](__sw110)
+			_ = x
+			return vm.cComplex
+		case object.IsKind[*object.Rational](__sw110):
+			x := object.Kind[*object.Rational](__sw110)
+			_ = x
+			return vm.cRational
+		case object.IsKind[*NDArray](__sw110):
+			x := object.Kind[*NDArray](__sw110)
+			_ = x
+			return vm.cNDArray
+		case object.IsKind[*Image](__sw110):
+			x := object.Kind[*Image](__sw110)
+			_ = x
+			return vm.cImage
+		case object.IsKind[*StringScanner](__sw110):
+			x := object.Kind[*StringScanner](__sw110)
+			_ = x
+			return vm.cStringScanner
+		case object.IsKind[*OptionParser](__sw110):
+			x := object.Kind[*OptionParser](__sw110)
+			_ = x
+			return vm.cOptionParser
+		case object.IsKind[*URI](__sw110):
+			x := object.Kind[*URI](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*CSVRow](__sw110):
+			x := object.Kind[*CSVRow](__sw110)
+			_ = x
+			return vm.cCSVRow
+		case object.IsKind[*CSVTable](__sw110):
+			x := object.Kind[*CSVTable](__sw110)
+			_ = x
+			return vm.cCSVTable
+		case object.IsKind[*RackRequest](__sw110):
+			x := object.Kind[*RackRequest](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*RackResponse](__sw110):
+			x := object.Kind[*RackResponse](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*SinatraCtx](__sw110):
+			x := object.Kind[*SinatraCtx](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*SinatraSettings](__sw110):
+			x := object.Kind[*SinatraSettings](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*REXMLDocument](__sw110):
+			x := object.Kind[*REXMLDocument](__sw110)
+			_ = x
+			return vm.cREXMLDocument
+		case object.IsKind[*REXMLElement](__sw110):
+			x := object.Kind[*REXMLElement](__sw110)
+			_ = x
+			return vm.cREXMLElement
+		case object.IsKind[*REXMLElements](__sw110):
+			x := object.Kind[*REXMLElements](__sw110)
+			_ = x
+			return vm.cREXMLElements
+		case object.IsKind[*REXMLAttributes](__sw110):
+			x := object.Kind[*REXMLAttributes](__sw110)
+			_ = x
+			return vm.cREXMLAttributes
+		case object.IsKind[*REXMLText](__sw110):
+			x := object.Kind[*REXMLText](__sw110)
+			_ = x
+			return vm.cREXMLText
+		case object.IsKind[*REXMLComment](__sw110):
+			x := object.Kind[*REXMLComment](__sw110)
+			_ = x
+			return vm.cREXMLComment
+		case object.IsKind[*REXMLCData](__sw110):
+			x := object.Kind[*REXMLCData](__sw110)
+			_ = x
+			return vm.cREXMLCData
+		case object.IsKind[*REXMLInstruction](__sw110):
+			x := object.Kind[*REXMLInstruction](__sw110)
+			_ = x
+			return vm.cREXMLInstruction
+		case object.IsKind[*REXMLDocType](__sw110):
+			x := object.Kind[*REXMLDocType](__sw110)
+			_ = x
+			return vm.cREXMLDocType
+		case object.IsKind[*csvSink](__sw110):
+			x := object.Kind[*csvSink](__sw110)
+			_ = x
+			return vm.cCSV
+		case object.IsKind[*Logger](__sw110):
+			x := object.Kind[*Logger](__sw110)
+			_ = x
+			return vm.cLogger
+		case object.IsKind[*LoggerFormatter](__sw110):
+			x := object.Kind[*LoggerFormatter](__sw110)
+			_ = x
+			return vm.cLoggerFormatter
+		case object.IsKind[*GetoptLong](__sw110):
+			x := object.Kind[*GetoptLong](__sw110)
+			_ = x
+			return vm.cGetoptLong
+		case object.IsKind[*Set](__sw110):
+			x := object.Kind[*Set](__sw110)
+			_ = x
+			return vm.cSet
+		case object.IsKind[*PStore](__sw110):
+			x := object.Kind[*PStore](__sw110)
+			_ = x
+			return vm.cPStore
+		case object.IsKind[*Jbuilder](__sw110):
+			x := object.Kind[*Jbuilder](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Jbuilder"])
+		case object.IsKind[*DryType](__sw110):
+			x := object.Kind[*DryType](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Dry::Types::Type"])
+		case object.IsKind[*DryResult](__sw110):
+			x := object.Kind[*DryResult](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Dry::Types::Result"])
+		case object.IsKind[*DryStruct](__sw110):
+			x := object.Kind[*DryStruct](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*DrySchema](__sw110):
+			x := object.Kind[*DrySchema](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Dry::Schema::Params"])
+		case object.IsKind[*DrySchemaBuilder](__sw110):
+			x := object.Kind[*DrySchemaBuilder](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Dry::Schema::DSL"])
+		case object.IsKind[*DryKey](__sw110):
+			x := object.Kind[*DryKey](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Dry::Schema::Key"])
+		case object.IsKind[*DryContract](__sw110):
+			x := object.Kind[*DryContract](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*DryValidationResult](__sw110):
+			x := object.Kind[*DryValidationResult](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Dry::Validation::Result"])
+		case object.IsKind[*DryRuleCtx](__sw110):
+			x := object.Kind[*DryRuleCtx](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Dry::Validation::Rule"])
+		case object.IsKind[*DryRuleKey](__sw110):
+			x := object.Kind[*DryRuleKey](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Dry::Validation::RuleKey"])
+		case object.IsKind[*OAuth2Client](__sw110):
+			x := object.Kind[*OAuth2Client](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["OAuth2::Client"])
+		case object.IsKind[*OAuth2Strategy](__sw110):
+			x := object.Kind[*OAuth2Strategy](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts[x.className])
+		case object.IsKind[*OAuth2AccessToken](__sw110):
+			x := object.Kind[*OAuth2AccessToken](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["OAuth2::AccessToken"])
+		case object.IsKind[*OAuth2Response](__sw110):
+			x := object.Kind[*OAuth2Response](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["OAuth2::Response"])
+		case object.IsKind[*OAuth2Request](__sw110):
+			x := object.Kind[*OAuth2Request](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["OAuth2::Request"])
+		case object.IsKind[*KramdownDoc](__sw110):
+			x := object.Kind[*KramdownDoc](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Kramdown::Document"])
+		case object.IsKind[*RQRCode](__sw110):
+			x := object.Kind[*RQRCode](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["RQRCode::QRCode"])
+		case object.IsKind[*XmlMarkup](__sw110):
+			x := object.Kind[*XmlMarkup](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Builder::XmlMarkup"])
+		case object.IsKind[*SQLite3Database](__sw110):
+			x := object.Kind[*SQLite3Database](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["SQLite3::Database"])
+		case object.IsKind[*SQLite3Statement](__sw110):
+			x := object.Kind[*SQLite3Statement](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["SQLite3::Statement"])
+		case object.IsKind[*RedisObj](__sw110):
+			x := object.Kind[*RedisObj](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*RedisBatch](__sw110):
+			x := object.Kind[*RedisBatch](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*PGConnObj](__sw110):
+			x := object.Kind[*PGConnObj](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*PGResultObj](__sw110):
+			x := object.Kind[*PGResultObj](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*SequelDBObj](__sw110):
+			x := object.Kind[*SequelDBObj](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*SequelDatasetObj](__sw110):
+			x := object.Kind[*SequelDatasetObj](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*SequelSchemaObj](__sw110):
+			x := object.Kind[*SequelSchemaObj](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*NokogiriDocument](__sw110):
+			x := object.Kind[*NokogiriDocument](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Nokogiri::XML::Document"])
+		case object.IsKind[*NokogiriNode](__sw110):
+			x := object.Kind[*NokogiriNode](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Nokogiri::XML::Node"])
+		case object.IsKind[*NokogiriNodeSet](__sw110):
+			x := object.Kind[*NokogiriNodeSet](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Nokogiri::XML::NodeSet"])
+		case object.IsKind[*NokogiriXSLTStylesheet](__sw110):
+			x := object.Kind[*NokogiriXSLTStylesheet](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Nokogiri::XSLT::Stylesheet"])
+		case object.IsKind[*RuboCopRunner](__sw110):
+			x := object.Kind[*RuboCopRunner](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["RuboCop::Runner"])
+		case object.IsKind[*RuboCopConfig](__sw110):
+			x := object.Kind[*RuboCopConfig](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["RuboCop::Config"])
+		case object.IsKind[*RuboCopOffense](__sw110):
+			x := object.Kind[*RuboCopOffense](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["RuboCop::Cop::Offense"])
+		case object.IsKind[*RuboCopLocation](__sw110):
+			x := object.Kind[*RuboCopLocation](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["RuboCop::Cop::Offense::Location"])
+		case object.IsKind[*GrapeRouter](__sw110):
+			x := object.Kind[*GrapeRouter](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Grape::Router"])
+		case object.IsKind[*GrapeRoute](__sw110):
+			x := object.Kind[*GrapeRoute](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Grape::Router::Route"])
+		case object.IsKind[*GrapeMatch](__sw110):
+			x := object.Kind[*GrapeMatch](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Grape::Router::Match"])
+		case object.IsKind[*GrapeValidator](__sw110):
+			x := object.Kind[*GrapeValidator](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Grape::Validator"])
+		case object.IsKind[*GrapeParamsBuilder](__sw110):
+			x := object.Kind[*GrapeParamsBuilder](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Grape::Validations::ParamsScope::DSL"])
+		case object.IsKind[*GrapeFormatter](__sw110):
+			x := object.Kind[*GrapeFormatter](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Grape::Formatter"])
+		case object.IsKind[*ActiveRecordModel](__sw110):
+			x := object.Kind[*ActiveRecordModel](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["ActiveRecord::Model"])
+		case object.IsKind[*ActiveRecordModelBuilder](__sw110):
+			x := object.Kind[*ActiveRecordModelBuilder](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["ActiveRecord::Model::DSL"])
+		case object.IsKind[*ActiveRecordRelation](__sw110):
+			x := object.Kind[*ActiveRecordRelation](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["ActiveRecord::Relation"])
+		case object.IsKind[*ActiveRecordRecord](__sw110):
+			x := object.Kind[*ActiveRecordRecord](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["ActiveRecord::Record"])
+		case object.IsKind[*ActiveRecordErrors](__sw110):
+			x := object.Kind[*ActiveRecordErrors](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["ActiveRecord::Errors"])
+		case object.IsKind[*ActiveRecordSchemaDSL](__sw110):
+			x := object.Kind[*ActiveRecordSchemaDSL](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["ActiveRecord::Schema::Definition"])
+		case object.IsKind[*ActiveRecordTableDSL](__sw110):
+			x := object.Kind[*ActiveRecordTableDSL](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["ActiveRecord::Schema::TableDefinition"])
+		case object.IsKind[*RSpecMatcher](__sw110):
+			x := object.Kind[*RSpecMatcher](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"])
+		case object.IsKind[*RSpecExpectation](__sw110):
+			x := object.Kind[*RSpecExpectation](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["RSpec::Expectations::ExpectationTarget"])
+		case object.IsKind[*PrettyPrint](__sw110):
+			x := object.Kind[*PrettyPrint](__sw110)
+			_ = x
+			return vm.cPrettyPrint
+		case object.IsKind[*PrettyPrintGroup](__sw110):
+			x := object.Kind[*PrettyPrintGroup](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["PrettyPrint::Group"])
+		case object.IsKind[*SingleLine](__sw110):
+			x := object.Kind[*SingleLine](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["PrettyPrint::SingleLine"])
+		case object.IsKind[*IPAddr](__sw110):
+			x := object.Kind[*IPAddr](__sw110)
+			_ = x
+			return vm.cIPAddr
+		case object.IsKind[*Matrix](__sw110):
+			x := object.Kind[*Matrix](__sw110)
+			_ = x
+			return vm.cMatrix
+		case object.IsKind[*Vector](__sw110):
+			x := object.Kind[*Vector](__sw110)
+			_ = x
+			return vm.cVector
+		case object.IsKind[*SpellChecker](__sw110):
+			x := object.Kind[*SpellChecker](__sw110)
+			_ = x
+			return vm.cSpellChecker
+		case object.IsKind[*Time](__sw110):
+			x := object.Kind[*Time](__sw110)
+			_ = x
+			return vm.cTime
+		case object.IsKind[*Timezone](__sw110):
+			x := object.Kind[*Timezone](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["TZInfo::Timezone"])
+		case object.IsKind[*TimezonePeriod](__sw110):
+			x := object.Kind[*TimezonePeriod](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["TZInfo::TimezonePeriod"])
+		case object.IsKind[*TimezoneOffset](__sw110):
+			x := object.Kind[*TimezoneOffset](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["TZInfo::TimezoneOffset"])
+		case object.IsKind[*Country](__sw110):
+			x := object.Kind[*Country](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["TZInfo::Country"])
+		case object.IsKind[*Money](__sw110):
+			x := object.Kind[*Money](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Money"])
+		case object.IsKind[*Currency](__sw110):
+			x := object.Kind[*Currency](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Money::Currency"])
+		case object.IsKind[*AddressableURI](__sw110):
+			x := object.Kind[*AddressableURI](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Addressable::URI"])
+		case object.IsKind[*AddressableTemplate](__sw110):
+			x := object.Kind[*AddressableTemplate](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Addressable::Template"])
+		case object.IsKind[*PublicSuffixDomain](__sw110):
+			x := object.Kind[*PublicSuffixDomain](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["PublicSuffix::Domain"])
+		case object.IsKind[*MIMEType](__sw110):
+			x := object.Kind[*MIMEType](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["MIME::Type"])
+		case object.IsKind[*MailMessage](__sw110):
+			x := object.Kind[*MailMessage](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Mail::Message"])
+		case object.IsKind[*MailBody](__sw110):
+			x := object.Kind[*MailBody](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Mail::Body"])
+		case object.IsKind[*MailField](__sw110):
+			x := object.Kind[*MailField](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Mail::Field"])
+		case object.IsKind[*FileStat](__sw110):
+			x := object.Kind[*FileStat](__sw110)
+			_ = x
+			return vm.cFileStat
+		case object.IsKind[*BigDecimal](__sw110):
+			x := object.Kind[*BigDecimal](__sw110)
+			_ = x
+			return vm.cBigDecimal
+		case object.IsKind[*Tms](__sw110):
+			x := object.Kind[*Tms](__sw110)
+			_ = x
+			return vm.cBenchmarkTms
+		case object.IsKind[*benchReport](__sw110):
+			x := object.Kind[*benchReport](__sw110)
+			_ = x
+			return vm.cBenchmarkReport
+		case object.IsKind[*benchJob](__sw110):
+			x := object.Kind[*benchJob](__sw110)
+			_ = x
+			return vm.cBenchmarkJob
+		case object.IsKind[*Date](__sw110):
+			x := object.Kind[*Date](__sw110)
+			_ = x
+			if x.d.IsDateTime() {
+				return vm.cDateTime
+			}
+			return vm.cDate
+		case object.IsKind[*Bag](__sw110):
+			x := object.Kind[*Bag](__sw110)
+			_ = x
+			return vm.cBag
+		case object.IsKind[*object.String](__sw110):
+			x := object.Kind[*object.String](__sw110)
+			_ = x
+			return vm.cString
+		case object.IsKind[object.Symbol](__sw110):
+			x := object.Kind[object.Symbol](__sw110)
+			_ = x
+			return vm.cSymbol
+		case object.IsKind[*object.Array](__sw110):
+			x := object.Kind[*object.Array](__sw110)
+			_ = x
+			return vm.cArray
+		case object.IsKind[*object.Hash](__sw110):
+			x := object.Kind[*object.Hash](__sw110)
+			_ = x
+			return vm.cHash
+		case object.IsKind[*object.Range](__sw110):
+			x := object.Kind[*object.Range](__sw110)
+			_ = x
+			return vm.cRange
+		case object.IsKind[*Proc](__sw110):
+			x := object.Kind[*Proc](__sw110)
+			_ = x
+			return vm.cProc
+		case object.IsKind[*BoundMethod](__sw110):
+			x := object.Kind[*BoundMethod](__sw110)
+			_ = x
+			return vm.cMethod
+		case object.IsKind[*UnboundMethod](__sw110):
+			x := object.Kind[*UnboundMethod](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["UnboundMethod"])
+		case object.IsKind[*Enumerator](__sw110):
+			x := object.Kind[*Enumerator](__sw110)
+			_ = x
+			return vm.cEnumerator
+		case object.IsKind[*yielder](__sw110):
+			x := object.Kind[*yielder](__sw110)
+			_ = x
+			return vm.cYielder
+		case object.IsKind[*encodingObj](__sw110):
+			x := object.Kind[*encodingObj](__sw110)
+			_ = x
+			return vm.cEncoding
+		case object.IsKind[*LazyEnum](__sw110):
+			x := object.Kind[*LazyEnum](__sw110)
+			_ = x
+			return vm.cLazy
+		case object.IsKind[*RandomObj](__sw110):
+			x := object.Kind[*RandomObj](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Random"])
+		case object.IsKind[*Fiber](__sw110):
+			x := object.Kind[*Fiber](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Fiber"])
+		case object.IsKind[*RThread](__sw110):
+			x := object.Kind[*RThread](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Thread"])
+		case object.IsKind[*RMutex](__sw110):
+			x := object.Kind[*RMutex](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Mutex"])
+		case object.IsKind[*RQueue](__sw110):
+			x := object.Kind[*RQueue](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Queue"])
+		case object.IsKind[*IOObj](__sw110):
+			x := object.Kind[*IOObj](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*opensslDigest](__sw110):
+			x := object.Kind[*opensslDigest](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*DigestObj](__sw110):
+			x := object.Kind[*DigestObj](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*BCryptPassword](__sw110):
+			x := object.Kind[*BCryptPassword](__sw110)
+			_ = x
+			return x.cls
+		case object.IsKind[*Binding](__sw110):
+			x := object.Kind[*Binding](__sw110)
+			_ = x
+			return object.Kind[*RClass](vm.consts["Binding"])
+		case object.IsKind[*Regexp](__sw110):
+			x := object.Kind[*Regexp](__sw110)
+			_ = x
+			return vm.cRegexp
+		case object.IsKind[*MatchData](__sw110):
+			x := object.Kind[*MatchData](__sw110)
+			_ = x
+			return vm.cMatchData
+		case object.IsBool(__sw110):
+			x := object.AsBoolV(__sw110)
+			_ = x
+			if x {
+				return vm.cTrueClass
+			}
+			return vm.cFalseClass
+		case object.IsNilObj(__sw110):
+			x := object.NilObj()
+			_ = x
+			return vm.cNilClass
+		case object.IsKind[*object.Main](__sw110):
+			x := object.Kind[*object.Main](__sw110)
+			_ = x
+			return vm.cObject
 		}
-		return vm.cClass
-	case object.Integer:
-		return vm.cInteger
-	case *object.Bignum:
-		return vm.cInteger
-	case object.Float:
-		return vm.cFloat
-	case *object.Complex:
-		return vm.cComplex
-	case *object.Rational:
-		return vm.cRational
-	case *NDArray:
-		return vm.cNDArray
-	case *Image:
-		return vm.cImage
-	case *StringScanner:
-		return vm.cStringScanner
-	case *OptionParser:
-		return vm.cOptionParser
-	case *URI:
-		// A URI wrapper carries its own Ruby class (URI::Generic or a scheme
-		// subclass such as URI::HTTP), so it reports that class for `class` /
-		// `is_a?` while every instance method lives on URI::Generic.
-		return x.cls
-	case *CSVRow:
-		// A CSV::Row wrapper reports CSV::Row; its instance methods (field/[]/
-		// to_a/to_h/headers/…) live on that class.
-		return vm.cCSVRow
-	case *CSVTable:
-		return vm.cCSVTable
-	case *RackRequest:
-		// A Rack::Request wrapper reports the class stamped on it at construction.
-		return x.cls
-	case *RackResponse:
-		return x.cls
-	case *SinatraCtx:
-		// The self a Sinatra route/filter block runs against.
-		return x.cls
-	case *SinatraSettings:
-		return x.cls
-	case *REXMLDocument:
-		return vm.cREXMLDocument
-	case *REXMLElement:
-		return vm.cREXMLElement
-	case *REXMLElements:
-		return vm.cREXMLElements
-	case *REXMLAttributes:
-		return vm.cREXMLAttributes
-	case *REXMLText:
-		return vm.cREXMLText
-	case *REXMLComment:
-		return vm.cREXMLComment
-	case *REXMLCData:
-		return vm.cREXMLCData
-	case *REXMLInstruction:
-		return vm.cREXMLInstruction
-	case *REXMLDocType:
-		return vm.cREXMLDocType
-	case *csvSink:
-		// The writer CSV.generate yields to its block: it reports CSV so its << /
-		// push methods (defined on the CSV class) dispatch.
-		return vm.cCSV
-	case *Logger:
-		// A Logger wrapper reports Logger; its instance methods (add/info/<</…)
-		// live on that class.
-		return vm.cLogger
-	case *LoggerFormatter:
-		// A standalone Logger::Formatter (Logger::Formatter.new) reports
-		// Logger::Formatter, whose #call renders one line through the library.
-		return vm.cLoggerFormatter
-	case *GetoptLong:
-		return vm.cGetoptLong
-	case *Set:
-		return vm.cSet
-	case *PStore:
-		return vm.cPStore
-	case *Jbuilder:
-		// A Jbuilder builder reports Jbuilder so its method_missing DSL and bang
-		// methods (defined on that class) dispatch.
-		return vm.consts["Jbuilder"].(*RClass)
-	case *DryType:
-		return vm.consts["Dry::Types::Type"].(*RClass)
-	case *DryResult:
-		return vm.consts["Dry::Types::Result"].(*RClass)
-	case *DryStruct:
-		return x.cls
-	case *DrySchema:
-		return vm.consts["Dry::Schema::Params"].(*RClass)
-	case *DrySchemaBuilder:
-		return vm.consts["Dry::Schema::DSL"].(*RClass)
-	case *DryKey:
-		return vm.consts["Dry::Schema::Key"].(*RClass)
-	case *DryContract:
-		return x.cls
-	case *DryValidationResult:
-		return vm.consts["Dry::Validation::Result"].(*RClass)
-	case *DryRuleCtx:
-		return vm.consts["Dry::Validation::Rule"].(*RClass)
-	case *DryRuleKey:
-		return vm.consts["Dry::Validation::RuleKey"].(*RClass)
-	case *OAuth2Client:
-		return vm.consts["OAuth2::Client"].(*RClass)
-	case *OAuth2Strategy:
-		return vm.consts[x.className].(*RClass)
-	case *OAuth2AccessToken:
-		return vm.consts["OAuth2::AccessToken"].(*RClass)
-	case *OAuth2Response:
-		return vm.consts["OAuth2::Response"].(*RClass)
-	case *OAuth2Request:
-		return vm.consts["OAuth2::Request"].(*RClass)
-	case *KramdownDoc:
-		// A Kramdown::Document reports Kramdown::Document so its #to_html renders
-		// the held source through the library.
-		return vm.consts["Kramdown::Document"].(*RClass)
-	case *RQRCode:
-		// An RQRCode::QRCode reports RQRCode::QRCode so its renderer methods
-		// (as_svg / as_ansi / as_html / to_s / checked? / to_a) dispatch.
-		return vm.consts["RQRCode::QRCode"].(*RClass)
-	case *XmlMarkup:
-		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
-		// method_missing element DSL and special methods dispatch.
-		return vm.consts["Builder::XmlMarkup"].(*RClass)
-	case *SQLite3Database:
-		return vm.consts["SQLite3::Database"].(*RClass)
-	case *SQLite3Statement:
-		return vm.consts["SQLite3::Statement"].(*RClass)
-	case *RedisObj:
-		return x.cls
-	case *RedisBatch:
-		return x.cls
-	case *PGConnObj:
-		return x.cls
-	case *PGResultObj:
-		return x.cls
-	case *SequelDBObj:
-		return x.cls
-	case *SequelDatasetObj:
-		return x.cls
-	case *SequelSchemaObj:
-		return x.cls
-	case *NokogiriDocument:
-		return vm.consts["Nokogiri::XML::Document"].(*RClass)
-	case *NokogiriNode:
-		return vm.consts["Nokogiri::XML::Node"].(*RClass)
-	case *NokogiriNodeSet:
-		return vm.consts["Nokogiri::XML::NodeSet"].(*RClass)
-	case *NokogiriXSLTStylesheet:
-		return vm.consts["Nokogiri::XSLT::Stylesheet"].(*RClass)
-	case *RuboCopRunner:
-		return vm.consts["RuboCop::Runner"].(*RClass)
-	case *RuboCopConfig:
-		return vm.consts["RuboCop::Config"].(*RClass)
-	case *RuboCopOffense:
-		return vm.consts["RuboCop::Cop::Offense"].(*RClass)
-	case *RuboCopLocation:
-		return vm.consts["RuboCop::Cop::Offense::Location"].(*RClass)
-	case *GrapeRouter:
-		return vm.consts["Grape::Router"].(*RClass)
-	case *GrapeRoute:
-		return vm.consts["Grape::Router::Route"].(*RClass)
-	case *GrapeMatch:
-		return vm.consts["Grape::Router::Match"].(*RClass)
-	case *GrapeValidator:
-		return vm.consts["Grape::Validator"].(*RClass)
-	case *GrapeParamsBuilder:
-		return vm.consts["Grape::Validations::ParamsScope::DSL"].(*RClass)
-	case *GrapeFormatter:
-		return vm.consts["Grape::Formatter"].(*RClass)
-	case *ActiveRecordModel:
-		return vm.consts["ActiveRecord::Model"].(*RClass)
-	case *ActiveRecordModelBuilder:
-		return vm.consts["ActiveRecord::Model::DSL"].(*RClass)
-	case *ActiveRecordRelation:
-		return vm.consts["ActiveRecord::Relation"].(*RClass)
-	case *ActiveRecordRecord:
-		return vm.consts["ActiveRecord::Record"].(*RClass)
-	case *ActiveRecordErrors:
-		return vm.consts["ActiveRecord::Errors"].(*RClass)
-	case *ActiveRecordSchemaDSL:
-		return vm.consts["ActiveRecord::Schema::Definition"].(*RClass)
-	case *ActiveRecordTableDSL:
-		return vm.consts["ActiveRecord::Schema::TableDefinition"].(*RClass)
-	case *RSpecMatcher:
-		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
-	case *RSpecExpectation:
-		return vm.consts["RSpec::Expectations::ExpectationTarget"].(*RClass)
-	case *PrettyPrint:
-		return vm.cPrettyPrint
-	case *PrettyPrintGroup:
-		return vm.consts["PrettyPrint::Group"].(*RClass)
-	case *SingleLine:
-		return vm.consts["PrettyPrint::SingleLine"].(*RClass)
-	case *IPAddr:
-		return vm.cIPAddr
-	case *Matrix:
-		return vm.cMatrix
-	case *Vector:
-		return vm.cVector
-	case *SpellChecker:
-		return vm.cSpellChecker
-	case *Time:
-		return vm.cTime
-	case *Timezone:
-		return vm.consts["TZInfo::Timezone"].(*RClass)
-	case *TimezonePeriod:
-		return vm.consts["TZInfo::TimezonePeriod"].(*RClass)
-	case *TimezoneOffset:
-		return vm.consts["TZInfo::TimezoneOffset"].(*RClass)
-	case *Country:
-		return vm.consts["TZInfo::Country"].(*RClass)
-	case *Money:
-		return vm.consts["Money"].(*RClass)
-	case *Currency:
-		return vm.consts["Money::Currency"].(*RClass)
-	case *AddressableURI:
-		return vm.consts["Addressable::URI"].(*RClass)
-	case *AddressableTemplate:
-		return vm.consts["Addressable::Template"].(*RClass)
-	case *PublicSuffixDomain:
-		return vm.consts["PublicSuffix::Domain"].(*RClass)
-	case *MIMEType:
-		return vm.consts["MIME::Type"].(*RClass)
-	case *MailMessage:
-		return vm.consts["Mail::Message"].(*RClass)
-	case *MailBody:
-		return vm.consts["Mail::Body"].(*RClass)
-	case *MailField:
-		return vm.consts["Mail::Field"].(*RClass)
-	case *FileStat:
-		return vm.cFileStat
-	case *BigDecimal:
-		return vm.cBigDecimal
-	case *Tms:
-		return vm.cBenchmarkTms
-	case *benchReport:
-		return vm.cBenchmarkReport
-	case *benchJob:
-		return vm.cBenchmarkJob
-	case *Date:
-		// A DateTime is the same wrapper with the IsDateTime flag set; it reports the
-		// DateTime class (a subclass of Date), so it inherits Date's methods yet has
-		// its own identity for `class` / `is_a?`.
-		if x.d.IsDateTime() {
-			return vm.cDateTime
-		}
-		return vm.cDate
-	case *Bag:
-		return vm.cBag
-	case *object.String:
-		return vm.cString
-	case object.Symbol:
-		return vm.cSymbol
-	case *object.Array:
-		return vm.cArray
-	case *object.Hash:
-		return vm.cHash
-	case *object.Range:
-		return vm.cRange
-	case *Proc:
-		return vm.cProc
-	case *BoundMethod:
-		return vm.cMethod
-	case *UnboundMethod:
-		return vm.consts["UnboundMethod"].(*RClass)
-	case *Enumerator:
-		return vm.cEnumerator
-	case *yielder:
-		return vm.cYielder
-	case *encodingObj:
-		return vm.cEncoding
-	case *LazyEnum:
-		return vm.cLazy
-	case *RandomObj:
-		return vm.consts["Random"].(*RClass)
-	case *Fiber:
-		return vm.consts["Fiber"].(*RClass)
-	case *RThread:
-		return vm.consts["Thread"].(*RClass)
-	case *RMutex:
-		return vm.consts["Mutex"].(*RClass)
-	case *RQueue:
-		return vm.consts["Queue"].(*RClass)
-	case *IOObj:
-		return x.cls
-	case *opensslDigest:
-		return x.cls
-	case *DigestObj:
-		return x.cls
-	case *BCryptPassword:
-		return x.cls
-	case *Binding:
-		return vm.consts["Binding"].(*RClass)
-	case *Regexp:
-		return vm.cRegexp
-	case *MatchData:
-		return vm.cMatchData
-	case object.Bool:
-		if x {
-			return vm.cTrueClass
-		}
-		return vm.cFalseClass
-	case object.Nil:
-		return vm.cNilClass
-	case *object.Main:
-		return vm.cObject
 	}
 	return nil // unreachable for the closed set of value types
 }
@@ -920,7 +1184,7 @@ func (vm *VM) classOf(v object.Value) *RClass {
 // returning nil when nothing but method_missing would handle it. It drives
 // respond_to? so a singleton or class method is seen.
 func (vm *VM) findMethod(recv object.Value, name string) *Method {
-	if cls, ok := recv.(*RClass); ok {
+	if cls, ok := object.KindOK[*RClass](recv); ok {
 		if m := lookupSMethod(cls, name); m != nil {
 			return m
 		}
@@ -938,7 +1202,7 @@ func (vm *VM) findMethod(recv object.Value, name string) *Method {
 func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Proc) object.Value {
 	// A class receiver consults its singleton-method chain (def self.foo, and
 	// inherited class methods) before the generic Class instance methods.
-	if cls, ok := recv.(*RClass); ok {
+	if cls, ok := object.KindOK[*RClass](recv); ok {
 		if m := lookupSMethod(cls, name); m != nil {
 			return vm.invokeInPlace(m, recv, args, blk)
 		}
@@ -976,7 +1240,7 @@ func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk 
 	// value type's own native methods (String#upcase, Array#map, …) against the
 	// wrapped value, while Object/Kernel natives (object_id, freeze, ==, ivar
 	// accessors) keep operating on the wrapper.
-	if o, ok := self.(*RObject); ok && !object.IsNil(o.builtin) && vm.isBuiltinValueMethod(m, o.builtin) {
+	if o, ok := object.KindOK[*RObject](self); ok && !object.IsNil(o.builtin) && vm.isBuiltinValueMethod(m, o.builtin) {
 		self = o.builtin
 	}
 	defer func() {
@@ -1077,18 +1341,27 @@ func (p *Proc) arityVal() int {
 // toBlock coerces a &block-pass value into a *Proc: nil for nil, the Proc
 // itself, else whatever its to_proc returns (which must be a Proc).
 func (vm *VM) toBlock(v object.Value) *Proc {
-	switch p := v.(type) {
-	case object.Nil:
-		return nil
-	case *Proc:
-		return p
-	default:
-		conv := vm.send(v, "to_proc", nil, nil)
-		cp, ok := conv.(*Proc)
-		if !ok {
-			raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(v).name)
+	{
+		__sw111 := v
+		switch {
+		case object.IsNilObj(__sw111):
+			p := object.NilObj()
+			_ = p
+			return nil
+		case object.IsKind[*Proc](__sw111):
+			p := object.Kind[*Proc](__sw111)
+			_ = p
+			return p
+		default:
+			p := __sw111
+			_ = p
+			conv := vm.send(v, "to_proc", nil, nil)
+			cp, ok := object.KindOK[*Proc](conv)
+			if !ok {
+				raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(v).name)
+			}
+			return cp
 		}
-		return cp
 	}
 }
 
@@ -1192,7 +1465,7 @@ func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
 	if len(p.iseq.KwNames) > 0 || p.iseq.KwRestSlot >= 0 {
 		var kw object.Value
 		if n := len(args); n > 0 {
-			if _, ok := args[n-1].(*object.Hash); ok {
+			if _, ok := object.KindOK[*object.Hash](args[n-1]); ok {
 				kw, args = args[n-1], args[:n-1]
 			}
 		}
@@ -1211,7 +1484,7 @@ func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
 func (vm *VM) bindBlockPositionals(p *Proc, args []object.Value) []object.Value {
 	np := len(p.iseq.Params)
 	if np > 1 && len(args) == 1 {
-		if arr, ok := args[0].(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](args[0]); ok {
 			args = arr.Elems
 		}
 	}
@@ -1287,13 +1560,22 @@ func setIvar(self object.Value, name string, v object.Value) {
 // ivarTable returns the instance-variable map backing self, or nil for values
 // (Integer, String, …) that cannot hold ivars in this phase.
 func ivarTable(self object.Value) map[string]object.Value {
-	switch o := self.(type) {
-	case *RObject:
-		return o.ivars
-	case *RClass:
-		return o.ivars
-	case *object.Main:
-		return o.IvarTable()
+	{
+		__sw112 := self
+		switch {
+		case object.IsKind[*RObject](__sw112):
+			o := object.Kind[*RObject](__sw112)
+			_ = o
+			return o.ivars
+		case object.IsKind[*RClass](__sw112):
+			o := object.Kind[*RClass](__sw112)
+			_ = o
+			return o.ivars
+		case object.IsKind[*object.Main](__sw112):
+			o := object.Kind[*object.Main](__sw112)
+			_ = o
+			return o.IvarTable()
+		}
 	}
 	return nil
 }

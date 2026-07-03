@@ -65,7 +65,7 @@ func (vm *VM) registerDotenv() {
 // dotenvSourceArg coerces a source argument to its string: a String yields its
 // contents, and any other value its to_s.
 func dotenvSourceArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

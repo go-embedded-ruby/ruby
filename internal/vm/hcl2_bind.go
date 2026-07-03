@@ -47,13 +47,13 @@ func hcl2EvalExpr(vm *VM, src string, ctx object.Value) object.Value {
 // are bridged — Ruby callables are not exposed as HCL functions, so a
 // :functions key is ignored (the library's built-in functions remain available).
 func hcl2Context(ctx object.Value) *hcl2.Context {
-	h, ok := ctx.(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](ctx)
 	if !ok {
 		return nil
 	}
 	vars := h
 	if v, present := hcl2HashGet(h, "variables"); present {
-		if sub, ok := v.(*object.Hash); ok {
+		if sub, ok := object.KindOK[*object.Hash](v); ok {
 			vars = sub
 		}
 	}
@@ -77,10 +77,10 @@ func hcl2HashGet(h *object.Hash, name string) (object.Value, bool) {
 // hcl2Key renders a Ruby Hash key as a variable name: a Symbol by its name, any
 // other value by its to_s.
 func hcl2Key(k object.Value) string {
-	if s, ok := k.(object.Symbol); ok {
+	if s, ok := object.KindOK[object.Symbol](k); ok {
 		return string(s)
 	}
-	if s, ok := k.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](k); ok {
 		return s.Str()
 	}
 	return k.ToS()
@@ -93,40 +93,63 @@ func hcl2Key(k object.Value) string {
 // maps to its name (HCL has string values only), and Array / Hash recurse. An
 // unmapped value maps to nil.
 func toHCL2(v object.Value) hcl2.Value {
-	switch n := v.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		if n.I.IsInt64() {
-			return n.I.Int64()
+	{
+		__sw65 := v
+		switch {
+		case __sw65 == nil:
+			n := __sw65
+			_ = n
+			return nil
+		case object.IsNilObj(__sw65):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsBool(__sw65):
+			n := object.AsBoolV(__sw65)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw65):
+			n := object.AsInteger(__sw65)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw65):
+			n := object.Kind[*object.Bignum](__sw65)
+			_ = n
+			if n.I.IsInt64() {
+				return n.I.Int64()
+			}
+			f, _ := new(big.Float).SetInt(n.I).Float64()
+			return f
+		case object.IsFloat(__sw65):
+			n := object.AsFloatV(__sw65)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw65):
+			n := object.Kind[*object.String](__sw65)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw65):
+			n := object.Kind[object.Symbol](__sw65)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.Array](__sw65):
+			n := object.Kind[*object.Array](__sw65)
+			_ = n
+			out := make([]hcl2.Value, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = toHCL2(el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw65):
+			n := object.Kind[*object.Hash](__sw65)
+			_ = n
+			m := hcl2.NewMap()
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				m.Set(hcl2Key(k), toHCL2(val))
+			}
+			return m
 		}
-		f, _ := new(big.Float).SetInt(n.I).Float64()
-		return f
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
-	case *object.Array:
-		out := make([]hcl2.Value, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = toHCL2(el)
-		}
-		return out
-	case *object.Hash:
-		m := hcl2.NewMap()
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m.Set(hcl2Key(k), toHCL2(val))
-		}
-		return m
 	}
 	return nil
 }

@@ -72,22 +72,22 @@ func (vm *VM) registerAddressable() {
 		}}
 	td := func(name string, fn NativeFn) { tmplCls.define(name, fn) }
 	td("pattern", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*AddressableTemplate).t.Pattern())
+		return object.NewString(object.Kind[*AddressableTemplate](self).t.Pattern())
 	})
 	td("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*AddressableTemplate).t.Pattern())
+		return object.NewString(object.Kind[*AddressableTemplate](self).t.Pattern())
 	})
 	td("expand", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &AddressableURI{u: addressable.Parse(self.(*AddressableTemplate).t.Expand(addressableVars(args[0])))}
+		return &AddressableURI{u: addressable.Parse(object.Kind[*AddressableTemplate](self).t.Expand(addressableVars(args[0])))}
 	})
 	td("extract", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		m := self.(*AddressableTemplate).t.Extract(addressableURIStr(args[0]))
+		m := object.Kind[*AddressableTemplate](self).t.Extract(addressableURIStr(args[0]))
 		if m == nil {
 			return object.NilV
 		}
@@ -101,48 +101,48 @@ func (vm *VM) registerAddressableURI(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 
 	d("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*AddressableURI).u.String())
+		return object.NewString(object.Kind[*AddressableURI](self).u.String())
 	})
 	d("scheme", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strPtrToRuby(self.(*AddressableURI).u.Scheme())
+		return strPtrToRuby(object.Kind[*AddressableURI](self).u.Scheme())
 	})
 	d("host", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strPtrToRuby(self.(*AddressableURI).u.Host())
+		return strPtrToRuby(object.Kind[*AddressableURI](self).u.Host())
 	})
 	d("path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*AddressableURI).u.Path())
+		return object.NewString(object.Kind[*AddressableURI](self).u.Path())
 	})
 	d("query", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strPtrToRuby(self.(*AddressableURI).u.Query())
+		return strPtrToRuby(object.Kind[*AddressableURI](self).u.Query())
 	})
 	d("fragment", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strPtrToRuby(self.(*AddressableURI).u.Fragment())
+		return strPtrToRuby(object.Kind[*AddressableURI](self).u.Fragment())
 	})
 	d("userinfo", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strPtrToRuby(self.(*AddressableURI).u.Userinfo())
+		return strPtrToRuby(object.Kind[*AddressableURI](self).u.Userinfo())
 	})
 	d("port", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if p := self.(*AddressableURI).u.Port(); p != nil {
+		if p := object.Kind[*AddressableURI](self).u.Port(); p != nil {
 			return object.IntValue(int64(*p))
 		}
 		return object.NilV
 	})
 	d("normalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &AddressableURI{u: self.(*AddressableURI).u.Normalize()}
+		return &AddressableURI{u: object.Kind[*AddressableURI](self).u.Normalize()}
 	})
 	d("join", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &AddressableURI{u: self.(*AddressableURI).u.Join(addressableURIStr(args[0]))}
+		return &AddressableURI{u: object.Kind[*AddressableURI](self).u.Join(addressableURIStr(args[0]))}
 	})
 	d("query_values", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		q := self.(*AddressableURI).u.Query()
+		q := object.Kind[*AddressableURI](self).u.Query()
 		if q == nil {
 			return object.NilV
 		}
 		h := object.NewHash()
-		for _, pair := range self.(*AddressableURI).u.QueryValues() {
+		for _, pair := range object.Kind[*AddressableURI](self).u.QueryValues() {
 			h.Set(object.NewString(pair[0]), object.NewString(pair[1]))
 		}
 		return h

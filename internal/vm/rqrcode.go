@@ -64,19 +64,19 @@ func (vm *VM) registerRQRCode() {
 
 	// #modules / #to_a return the module matrix as an Array of Arrays of booleans.
 	modules := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return rqrcodeModules(self.(*RQRCode).q)
+		return rqrcodeModules(object.Kind[*RQRCode](self).q)
 	}
 	cls.define("modules", modules)
 	cls.define("to_a", modules)
 
 	// #module_count returns the side length in modules.
 	cls.define("module_count", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*RQRCode).q.ModuleCount))
+		return object.IntValue(int64(object.Kind[*RQRCode](self).q.ModuleCount))
 	})
 
 	// #version returns the QR version (1..40).
 	cls.define("version", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*RQRCode).q.Version))
+		return object.IntValue(int64(object.Kind[*RQRCode](self).q.Version))
 	})
 
 	// #checked?(row, col) reports whether the module at (row, col) is dark. An
@@ -85,7 +85,7 @@ func (vm *VM) registerRQRCode() {
 		if len(args) < 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
-		on, err := self.(*RQRCode).q.Checked(int(intArg(args[0])), int(intArg(args[1])))
+		on, err := object.Kind[*RQRCode](self).q.Checked(int(intArg(args[0])), int(intArg(args[1])))
 		if err != nil {
 			raise("RQRCode::QRCodeRunTimeError", "%s", rqrcodeErrMsg(err))
 		}
@@ -94,22 +94,22 @@ func (vm *VM) registerRQRCode() {
 
 	// #as_svg(options = {}) renders an SVG document.
 	cls.define("as_svg", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(rqrcodeAsSVG(self.(*RQRCode).q, rqrcodeOptArg(args)))
+		return object.NewString(rqrcodeAsSVG(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args)))
 	})
 
 	// #as_ansi(options = {}) renders with ANSI background colors.
 	cls.define("as_ansi", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(rqrcodeAsANSI(self.(*RQRCode).q, rqrcodeOptArg(args)))
+		return object.NewString(rqrcodeAsANSI(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args)))
 	})
 
 	// #as_html renders the code as an HTML table.
 	cls.define("as_html", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*RQRCode).q.AsHTML())
+		return object.NewString(object.Kind[*RQRCode](self).q.AsHTML())
 	})
 
 	// #to_s(options = {}) / #as_ansi renders the matrix as text (dark "x").
 	toS := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(rqrcodeToString(self.(*RQRCode).q, rqrcodeOptArg(args)))
+		return object.NewString(rqrcodeToString(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args)))
 	}
 	cls.define("to_s", toS)
 }
@@ -121,7 +121,7 @@ func (vm *VM) registerRQRCode() {
 // top-level table (so a re-raised library error's exceptionObject lookup finds
 // the same class), exactly as the TomlRB:: classes are.
 func (vm *VM) registerRQRCodeErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c
@@ -135,7 +135,7 @@ func (vm *VM) registerRQRCodeErrors(mod *RClass) {
 // rqrcodeDataArg coerces the data argument to its string: a String yields its
 // contents, and any other value its to_s.
 func rqrcodeDataArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()
@@ -147,6 +147,6 @@ func rqrcodeOptArg(args []object.Value) *object.Hash {
 	if len(args) == 0 {
 		return nil
 	}
-	h, _ := args[len(args)-1].(*object.Hash)
+	h, _ := object.KindOK[*object.Hash](args[len(args)-1])
 	return h
 }

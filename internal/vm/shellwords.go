@@ -112,14 +112,14 @@ func shellSplit(line string) object.Value {
 // stringifies its members (1 -> "1", nil -> ""). A non-Array raises TypeError,
 // mirroring Shellwords.shelljoin's argument check.
 func (vm *VM) shellWords(v object.Value) []string {
-	arr, ok := v.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into Array", classNameOf(v))
 		return nil
 	}
 	words := make([]string, len(arr.Elems))
 	for i, e := range arr.Elems {
-		if s, ok := e.(*object.String); ok {
+		if s, ok := object.KindOK[*object.String](e); ok {
 			words[i] = s.Str()
 		} else {
 			words[i] = strArg(vm.send(e, "to_s", nil, nil))

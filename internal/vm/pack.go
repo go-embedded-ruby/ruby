@@ -22,16 +22,16 @@ import (
 // in the format are ignored.
 func (vm *VM) registerPackUnpack() {
 	vm.cArray.define("pack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		elems := self.(*object.Array).Elems
+		elems := object.Kind[*object.Array](self).Elems
 		fmtStr := packFormat(args)
 		return object.NewStringBytesEnc(packBytes(elems, fmtStr), "ASCII-8BIT")
 	})
 	vm.cString.define("unpack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		data := self.(*object.String).Bytes()
+		data := object.Kind[*object.String](self).Bytes()
 		return object.NewArrayFromSlice(unpackElems(data, packFormat(args)))
 	})
 	vm.cString.define("unpack1", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		data := self.(*object.String).Bytes()
+		data := object.Kind[*object.String](self).Bytes()
 		elems := unpackElems(data, packFormat(args))
 		if len(elems) == 0 {
 			return object.NilV
@@ -45,7 +45,7 @@ func packFormat(args []object.Value) string {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	s, ok := args[0].(*object.String)
+	s, ok := object.KindOK[*object.String](args[0])
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 	}
@@ -213,7 +213,7 @@ func packBytes(elems []object.Value, fmtStr string) []byte {
 
 // packStrArg returns the String argument's bytes for an a/A/Z/H/h directive.
 func packStrArg(v object.Value) []byte {
-	s, ok := v.(*object.String)
+	s, ok := object.KindOK[*object.String](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 	}

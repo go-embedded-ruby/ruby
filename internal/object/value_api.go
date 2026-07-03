@@ -304,6 +304,26 @@ func Kind[T any](v Value) T { return AsObj(v).(T) }
 // the rewriter for comma-ok heap assertions.
 func KindOK[T any](v Value) (T, bool) { x, ok := AsObj(v).(T); return x, ok }
 
+// AsAny materializes v as a plain interface value for a type assertion to an
+// arbitrary Go interface type (e.g. v.(fmt.Stringer)). Unlike AsObj it does NOT
+// drop the immediates: an Integer/Float/Bool/Nil is returned boxed, so it can
+// still satisfy an interface it implements. While Value is an interface it
+// returns v unchanged; after the flip it boxes the immediate (a rare,
+// interface-assertion-only path, so the box is acceptable) or returns the object
+// word. Used by the rewriter only for interface-typed assertion targets.
+func AsAny(v Value) any { return v }
+
+// IsAny reports whether v, materialized via AsAny, satisfies interface T.
+func IsAny[T any](v Value) bool { _, ok := AsAny(v).(T); return ok }
+
+// CastAny asserts v (materialized via AsAny) to interface T, panicking on
+// mismatch.
+func CastAny[T any](v Value) T { return AsAny(v).(T) }
+
+// CastAnyOK asserts v (materialized via AsAny) to interface T and reports whether
+// it matched.
+func CastAnyOK[T any](v Value) (T, bool) { x, ok := AsAny(v).(T); return x, ok }
+
 // Equal reports Ruby-representation equality of two Values with the exact
 // semantics the interface `==` had: identity for reference types, value equality
 // for immediates, and — the one hazard the tagged struct would otherwise change

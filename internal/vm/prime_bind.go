@@ -70,7 +70,7 @@ func (vm *VM) installPrime() {
 		bounded := false
 		var ubound int64
 		if len(args) > 0 {
-			if _, isNil := args[0].(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(args[0]); !isNil {
 				bounded = true
 				ubound = intArg(args[0])
 			}
@@ -145,13 +145,13 @@ func primeDivision(n *big.Int) object.Value {
 // primePairs reads an Array of [prime, exponent] Arrays into the library's pair
 // slice, raising TypeError on a malformed shape (matching MRI, which coerces).
 func primePairs(v object.Value) [][2]*big.Int {
-	arr, ok := v.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into Array", v.Inspect())
 	}
 	pairs := make([][2]*big.Int, 0, len(arr.Elems))
 	for _, e := range arr.Elems {
-		pair, ok := e.(*object.Array)
+		pair, ok := object.KindOK[*object.Array](e)
 		if !ok || len(pair.Elems) != 2 {
 			raise("TypeError", "each prime-division entry must be a [prime, exponent] pair")
 		}

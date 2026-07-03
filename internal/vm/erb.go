@@ -73,7 +73,7 @@ var erbCompile = erb.Compile
 // keyword defaults to nil (no trimming), which the library spells as the empty
 // trim string.
 func optStrArg(v object.Value) string {
-	if _, isNil := v.(object.Nil); isNil {
+	if _, isNil := object.AsNilOK(v); isNil {
 		return ""
 	}
 	return strArg(v)
@@ -83,8 +83,8 @@ func optStrArg(v object.Value) string {
 // invoking #to_s on non-strings (so nil -> "", 123 -> "123"). A String is used
 // verbatim.
 func erbToS(vm *VM, v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return string(s.Bytes())
 	}
-	return vm.send(v, "to_s", nil, nil).(*object.String).Str()
+	return object.Kind[*object.String](vm.send(v, "to_s", nil, nil)).Str()
 }

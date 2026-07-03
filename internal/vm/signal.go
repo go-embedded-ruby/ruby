@@ -62,7 +62,7 @@ func (vm *VM) registerSignal() {
 			if len(args) == 0 {
 				return object.NilV
 			}
-			n, ok := args[0].(object.Integer)
+			n, ok := object.AsIntegerOK(args[0])
 			if !ok {
 				return object.NilV
 			}
@@ -90,20 +90,31 @@ var signalNumbers = map[string]int{
 // signalName normalises a signal designator to its bare name (no "SIG" prefix),
 // accepting a Symbol, a String ("INT"/"SIGINT") or an Integer.
 func signalName(v object.Value) string {
-	switch s := v.(type) {
-	case object.Symbol:
-		return stripSIG(string(s))
-	case *object.String:
-		return stripSIG(string(s.Bytes()))
-	case object.Integer:
-		for name, num := range signalNumbers {
-			if int64(num) == int64(s) {
-				return name
+	{
+		__sw159 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw159):
+			s := object.Kind[object.Symbol](__sw159)
+			_ = s
+			return stripSIG(string(s))
+		case object.IsKind[*object.String](__sw159):
+			s := object.Kind[*object.String](__sw159)
+			_ = s
+			return stripSIG(string(s.Bytes()))
+		case object.IsInt(__sw159):
+			s := object.AsInteger(__sw159)
+			_ = s
+			for name, num := range signalNumbers {
+				if int64(num) == int64(s) {
+					return name
+				}
 			}
+			return v.ToS()
+		default:
+			s := __sw159
+			_ = s
+			return v.ToS()
 		}
-		return v.ToS()
-	default:
-		return v.ToS()
 	}
 }
 

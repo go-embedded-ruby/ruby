@@ -23,7 +23,7 @@ import (
 func builderOptions(args []object.Value) []xmlbuilder.Option {
 	var opts []xmlbuilder.Option
 	for _, a := range args {
-		h, ok := a.(*object.Hash)
+		h, ok := object.KindOK[*object.Hash](a)
 		if !ok {
 			continue
 		}
@@ -47,7 +47,7 @@ func builderOptions(args []object.Value) []xmlbuilder.Option {
 func (vm *VM) builderTagArgs(rest []object.Value, blk *Proc) []any {
 	var out []any
 	for _, a := range rest {
-		if h, ok := a.(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](a); ok {
 			out = append(out, builderAttrs(vm, []object.Value{h}))
 			continue
 		}
@@ -75,13 +75,22 @@ func (vm *VM) builderBlockFn(blk *Proc) func(*xmlbuilder.XmlMarkup) {
 func (vm *VM) builderDeclareArgs(rest []object.Value, blk *Proc) []any {
 	var out []any
 	for _, a := range rest {
-		switch n := a.(type) {
-		case object.Symbol:
-			out = append(out, xmlbuilder.Symbol(string(n)))
-		case *object.String:
-			out = append(out, n.Str())
-		default:
-			out = append(out, a.ToS())
+		{
+			__sw17 := a
+			switch {
+			case object.IsKind[object.Symbol](__sw17):
+				n := object.Kind[object.Symbol](__sw17)
+				_ = n
+				out = append(out, xmlbuilder.Symbol(string(n)))
+			case object.IsKind[*object.String](__sw17):
+				n := object.Kind[*object.String](__sw17)
+				_ = n
+				out = append(out, n.Str())
+			default:
+				n := __sw17
+				_ = n
+				out = append(out, a.ToS())
+			}
 		}
 	}
 	if blk != nil {
@@ -96,7 +105,7 @@ func (vm *VM) builderDeclareArgs(rest []object.Value, blk *Proc) []any {
 func builderAttrs(vm *VM, args []object.Value) xmlbuilder.Attrs {
 	var attrs xmlbuilder.Attrs
 	for _, a := range args {
-		h, ok := a.(*object.Hash)
+		h, ok := object.KindOK[*object.Hash](a)
 		if !ok {
 			continue
 		}
@@ -113,15 +122,26 @@ func builderAttrs(vm *VM, args []object.Value) xmlbuilder.Attrs {
 // for a String, the bare name for a Symbol, and the Ruby to_s text otherwise (so
 // numbers and booleans print as Ruby would).
 func builderValueOf(v object.Value) any {
-	switch n := v.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw18 := v
+		switch {
+		case __sw18 == nil:
+			n := __sw18
+			_ = n
+			return nil
+		case object.IsNilObj(__sw18):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsKind[*object.String](__sw18):
+			n := object.Kind[*object.String](__sw18)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw18):
+			n := object.Kind[object.Symbol](__sw18)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }
@@ -129,11 +149,18 @@ func builderValueOf(v object.Value) any {
 // builderName renders an element name or attribute key (a Symbol, a String, or
 // any value) as its bare string name.
 func builderName(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw19 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw19):
+			n := object.Kind[object.Symbol](__sw19)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw19):
+			n := object.Kind[*object.String](__sw19)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
@@ -144,7 +171,7 @@ func builderContent(args []object.Value) string {
 	if len(args) == 0 {
 		return ""
 	}
-	if s, ok := args[0].(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](args[0]); ok {
 		return s.Str()
 	}
 	return args[0].ToS()

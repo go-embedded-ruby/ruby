@@ -129,7 +129,7 @@ func (vm *VM) enforceSendVis(flags int, recv object.Value, name string, caller o
 		return
 	}
 	var m *Method
-	if cls, ok := recv.(*RClass); ok {
+	if cls, ok := object.KindOK[*RClass](recv); ok {
 		m = vm.resolveClassMethod(cls, name)
 	} else {
 		m = undefAsNil(lookupMethod(vm.dispatchClass(recv), name))
@@ -143,7 +143,7 @@ func (vm *VM) enforceSendVis(flags int, recv object.Value, name string, caller o
 // method override chain, anything else uses the instance-method chain. Used by
 // respond_to? and public_send, which need the level without raising.
 func (vm *VM) sendVisibilityOf(recv object.Value, name string, m *Method) visibility {
-	if cls, ok := recv.(*RClass); ok {
+	if cls, ok := object.KindOK[*RClass](recv); ok {
 		if lookupSMethod(cls, name) != nil || m.owner == vm.cClass {
 			return classMethodVisibilityOf(cls, name, m)
 		}
@@ -161,11 +161,11 @@ func (vm *VM) checkVisibility(recv object.Value, name string, m *Method, caller 
 		return
 	}
 	var vis visibility
-	if cls, ok := recv.(*RClass); ok && lookupSMethod(cls, name) == nil && m.owner != vm.cClass {
+	if cls, ok := object.KindOK[*RClass](recv); ok && lookupSMethod(cls, name) == nil && m.owner != vm.cClass {
 		// Not a class-method dispatch (the method came from the generic Class/Module
 		// instance methods, i.e. a normal instance-method visibility applies).
 		vis = instanceVisibility(vm.classOf(recv), name, m)
-	} else if cls, ok := recv.(*RClass); ok {
+	} else if cls, ok := object.KindOK[*RClass](recv); ok {
 		vis = classMethodVisibilityOf(cls, name, m)
 	} else {
 		vis = instanceVisibility(vm.dispatchClass(recv), name, m)
@@ -196,7 +196,7 @@ func (vm *VM) dispatchClass(recv object.Value) *RClass {
 // recvDesc renders a receiver as MRI does in a NoMethodError: "class C" for a
 // class/module receiver, otherwise "an instance of C".
 func (vm *VM) recvDesc(recv object.Value) string {
-	if c, ok := recv.(*RClass); ok {
+	if c, ok := object.KindOK[*RClass](recv); ok {
 		kind := "class"
 		if c.isModule {
 			kind = "module"

@@ -30,7 +30,7 @@ func (vm *VM) registerReflection() {
 
 	// Module#instance_method(:m) → UnboundMethod resolved up the ancestor chain.
 	vm.cModule.define("instance_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		mod := self.(*RClass)
+		mod := object.Kind[*RClass](self)
 		name := nameArg(args[0])
 		m := lookupMethod(mod, name)
 		if m == nil || m.undefined {
@@ -41,7 +41,7 @@ func (vm *VM) registerReflection() {
 
 	// Module#method_defined?(:m): true if m resolves up the ancestor chain.
 	vm.cModule.define("method_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		mod := self.(*RClass)
+		mod := object.Kind[*RClass](self)
 		m := lookupMethod(mod, nameArg(args[0]))
 		return object.Bool(m != nil && !m.undefined)
 	})
@@ -52,7 +52,7 @@ func (vm *VM) registerReflection() {
 	// match. Used by Puppet's metaprogramming to probe accessor visibility.
 	definedWithVis := func(want visibility) NativeFn {
 		return func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-			mod := self.(*RClass)
+			mod := object.Kind[*RClass](self)
 			name := nameArg(args[0])
 			m := lookupMethod(mod, name)
 			if m == nil || m.undefined {
@@ -66,23 +66,23 @@ func (vm *VM) registerReflection() {
 	vm.cModule.define("protected_method_defined?", definedWithVis(visProtected))
 
 	cUnbound.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(self.(*UnboundMethod).name)
+		return object.Symbol(object.Kind[*UnboundMethod](self).name)
 	})
 	cUnbound.define("owner", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*UnboundMethod).owner
+		return object.Kind[*UnboundMethod](self).owner
 	})
 	cUnbound.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(methodArity(self.(*UnboundMethod).m)))
+		return object.IntValue(int64(methodArity(object.Kind[*UnboundMethod](self).m)))
 	})
 	// UnboundMethod#bind(obj) → Method; obj must be a kind_of? the owner.
 	cUnbound.define("bind", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		u := self.(*UnboundMethod)
+		u := object.Kind[*UnboundMethod](self)
 		vm.checkBindable(u, args[0])
 		return &BoundMethod{recv: args[0], name: u.name, m: u.m}
 	})
 	// UnboundMethod#bind_call(obj, *args, &blk): bind then invoke in one step.
 	cUnbound.define("bind_call", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		u := self.(*UnboundMethod)
+		u := object.Kind[*UnboundMethod](self)
 		vm.checkBindable(u, args[0])
 		return vm.invoke(u.m, args[0], args[1:], blk)
 	})
@@ -99,7 +99,7 @@ func (vm *VM) registerReflection() {
 
 	// Method#unbind → UnboundMethod.
 	vm.cMethod.define("unbind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		b := self.(*BoundMethod)
+		b := object.Kind[*BoundMethod](self)
 		return &UnboundMethod{name: b.name, owner: b.m.owner, m: b.m}
 	})
 }

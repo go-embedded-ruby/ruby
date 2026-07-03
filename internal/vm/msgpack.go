@@ -61,7 +61,7 @@ func (vm *VM) registerMsgpack() {
 // the top-level table (so a re-raised library error's exceptionObject lookup
 // finds the very same class), exactly as JSON:: classes are.
 func (vm *VM) registerMsgpackErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c
@@ -78,7 +78,7 @@ func (vm *VM) registerMsgpackErrors(mod *RClass) {
 // yields its backing bytes verbatim (a binary payload is not re-encoded), and any
 // other value its to_s bytes, so a non-String argument does not crash the parser.
 func msgpackBytesArg(v object.Value) []byte {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Bytes()
 	}
 	return []byte(v.ToS())

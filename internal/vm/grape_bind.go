@@ -34,7 +34,7 @@ func (vm *VM) registerGrapeRouter(mod *RClass) {
 		return &GrapeRouter{rt: grape.NewRouter()}
 	}}
 
-	self := func(v object.Value) *GrapeRouter { return v.(*GrapeRouter) }
+	self := func(v object.Value) *GrapeRouter { return object.Kind[*GrapeRouter](v) }
 	// add wires one verb: #get/#post/… declare a route whose handler is any Ruby
 	// value (kept alongside the library route so #match hands the same object back).
 	add := func(method string) NativeFn {
@@ -80,7 +80,7 @@ func (vm *VM) registerGrapeRouter(mod *RClass) {
 // registerGrapeRoute installs the Route instance surface: #http_method /
 // #pattern / #handler.
 func (vm *VM) registerGrapeRoute(cls *RClass) {
-	self := func(v object.Value) *GrapeRoute { return v.(*GrapeRoute) }
+	self := func(v object.Value) *GrapeRoute { return object.Kind[*GrapeRoute](v) }
 	cls.define("http_method", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).rt.Method)
 	})
@@ -98,7 +98,7 @@ func (vm *VM) registerGrapeRoute(cls *RClass) {
 // registerGrapeMatch installs the Match instance surface: #status (a Symbol),
 // #ok? / #not_found? / #method_not_allowed?, #route, #params, #allowed.
 func (vm *VM) registerGrapeMatch(cls *RClass) {
-	self := func(v object.Value) *GrapeMatch { return v.(*GrapeMatch) }
+	self := func(v object.Value) *GrapeMatch { return object.Kind[*GrapeMatch](v) }
 	cls.define("status", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(grapeStatusName(self(v).m.Status))
 	})
@@ -165,7 +165,7 @@ func (vm *VM) registerGrapeValidator(mod *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
 		raw := grapeRawHash(args[0])
-		gv := v.(*GrapeValidator)
+		gv := object.Kind[*GrapeValidator](v)
 		coerced, verr := gv.v.Validate(raw)
 		if verr != nil && !verr.Empty() {
 			raise("Grape::Exceptions::ValidationErrors", "%s", verr.Error())
@@ -188,7 +188,7 @@ func (vm *VM) registerGrapeParamsBuilder() {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 			}
-			b := self.(*GrapeParamsBuilder)
+			b := object.Kind[*GrapeParamsBuilder](self)
 			p := grapeBuildParam(grapeStr(args[0]), required, grapeOptions(args))
 			b.set.Params = append(b.set.Params, p)
 			return object.NilV

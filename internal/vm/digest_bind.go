@@ -150,7 +150,7 @@ func (vm *VM) defineDigestInstance(c *RClass) {
 	// feed appends data and returns self so `d << a << b` and d.update(s).update(t)
 	// both chain, matching MRI (and the existing equal?(d) self-identity test).
 	feed := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*DigestObj)
+		o := object.Kind[*DigestObj](self)
 		o.d.Update([]byte(strArg(args[0])))
 		return o
 	}
@@ -173,26 +173,26 @@ func (vm *VM) defineDigestInstance(c *RClass) {
 	// The ! finalizers return the digest and then reset the hasher, matching MRI's
 	// Digest::Instance#digest! / #hexdigest! / #base64digest!.
 	c.define("hexdigest!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*DigestObj)
+		o := object.Kind[*DigestObj](self)
 		s := o.d.HexFinish()
 		o.d.Reset()
 		return object.NewString(s)
 	})
 	c.define("digest!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*DigestObj)
+		o := object.Kind[*DigestObj](self)
 		s := o.d.Finish()
 		o.d.Reset()
 		return object.NewString(string(s))
 	})
 	c.define("base64digest!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*DigestObj)
+		o := object.Kind[*DigestObj](self)
 		s := o.d.Base64Finish()
 		o.d.Reset()
 		return object.NewString(s)
 	})
 
 	c.define("reset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*DigestObj)
+		o := object.Kind[*DigestObj](self)
 		o.d.Reset()
 		return o
 	})
@@ -200,41 +200,50 @@ func (vm *VM) defineDigestInstance(c *RClass) {
 	// == compares hex digests: against another Digest instance's running digest or
 	// a hex string, matching MRI's Digest::Instance#==.
 	c.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*DigestObj)
-		switch other := args[0].(type) {
-		case *DigestObj:
-			return object.Bool(o.d.HexFinish() == other.d.HexFinish())
-		case *object.String:
-			return object.Bool(o.d.HexFinish() == other.Str())
-		default:
-			return object.Bool(false)
+		o := object.Kind[*DigestObj](self)
+		{
+			__sw47 := args[0]
+			switch {
+			case object.IsKind[*DigestObj](__sw47):
+				other := object.Kind[*DigestObj](__sw47)
+				_ = other
+				return object.Bool(o.d.HexFinish() == other.d.HexFinish())
+			case object.IsKind[*object.String](__sw47):
+				other := object.Kind[*object.String](__sw47)
+				_ = other
+				return object.Bool(o.d.HexFinish() == other.Str())
+			default:
+				other := __sw47
+				_ = other
+				return object.Bool(false)
+			}
 		}
 	})
 
 	c.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*DigestObj).ToS())
+		return object.NewString(object.Kind[*DigestObj](self).ToS())
 	})
 	c.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*DigestObj).Inspect())
+		return object.NewString(object.Kind[*DigestObj](self).Inspect())
 	})
 
 	// length / size / digest_length all report the digest size; block_length the
 	// algorithm's internal block size — Digest::Instance's size accessors.
 	dlen := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*DigestObj).d.DigestLength()))
+		return object.IntValue(int64(object.Kind[*DigestObj](self).d.DigestLength()))
 	}
 	c.define("length", dlen)
 	c.define("size", dlen)
 	c.define("digest_length", dlen)
 	c.define("block_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*DigestObj).d.BlockLength()))
+		return object.IntValue(int64(object.Kind[*DigestObj](self).d.BlockLength()))
 	})
 }
 
 // digestFeedOptional appends an optional data argument to the running digest
 // (MRI's d.hexdigest(s) feeds s before reading), returning the DigestObj.
 func digestFeedOptional(self object.Value, args []object.Value) *DigestObj {
-	o := self.(*DigestObj)
+	o := object.Kind[*DigestObj](self)
 	if len(args) > 0 {
 		o.d.Update([]byte(strArg(args[0])))
 	}
@@ -248,20 +257,18 @@ func digestFeedOptional(self object.Value, args []object.Value) *DigestObj {
 // candidate secret against the stored hash), so both must dispatch their `==`
 // rather than fall to pointer identity.
 func hasCustomEq(_ *VM, v object.Value) bool {
-	switch v.(type) {
-	case *DigestObj, *BCryptPassword:
-		return true
-	case *Money:
-		// Money#== compares fractional amount and currency via the go-ruby-money
-		// library, not object identity, so it must dispatch its own ==.
-		return true
-	case *Currency:
-		// Money::Currency#== compares by id, not identity.
-		return true
-	case *DryStruct:
-		// Dry::Struct#== compares attributes by value (via go-ruby-dry-struct's
-		// Struct.Eql), not object identity, so it must dispatch its own ==.
-		return true
+	{
+		__sw48 := v
+		switch {
+		case object.IsKind[*DigestObj](__sw48) || object.IsKind[*BCryptPassword](__sw48):
+			return true
+		case object.IsKind[*Money](__sw48):
+			return true
+		case object.IsKind[*Currency](__sw48):
+			return true
+		case object.IsKind[*DryStruct](__sw48):
+			return true
+		}
 	}
 	return false
 }

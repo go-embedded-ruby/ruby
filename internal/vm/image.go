@@ -26,7 +26,7 @@ func (i *Image) Inspect() string { return i.ToS() }
 func (i *Image) Truthy() bool    { return true }
 
 // imgOf returns the receiver's raster.
-func imgOf(v object.Value) *image.RGBA { return v.(*Image).img }
+func imgOf(v object.Value) *image.RGBA { return object.Kind[*Image](v).img }
 
 // mustImg raises a Ruby error when a go-images operation fails (bad radius,
 // out-of-bounds crop, …) instead of returning a Go error.
@@ -62,7 +62,7 @@ func (vm *VM) registerImage() {
 	// so it works in a browser (wasm) where the program is handed image bytes.
 	vm.cImage.smethods["decode"] = &Method{name: "decode", owner: vm.cImage,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			s, ok := args[0].(*object.String)
+			s, ok := object.KindOK[*object.String](args[0])
 			if !ok {
 				raise("TypeError", "Image.decode expects a String of image bytes")
 			}
@@ -178,7 +178,7 @@ func (vm *VM) registerImage() {
 	})
 
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*Image).Inspect())
+		return object.NewString(object.Kind[*Image](v).Inspect())
 	})
 	vm.cImage.define("to_s", vm.cImage.methods["inspect"].native)
 }

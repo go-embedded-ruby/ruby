@@ -12,7 +12,7 @@ func setupStruct(vm *VM) {
 		// A trailing options hash carries keyword_init: it is not a member name.
 		kwInit := false
 		if n := len(args); n > 0 {
-			if h, ok := args[n-1].(*object.Hash); ok {
+			if h, ok := object.KindOK[*object.Hash](args[n-1]); ok {
 				if v, present := h.Get(object.Symbol("keyword_init")); present {
 					kwInit = v.Truthy()
 					args = args[:n-1]
@@ -55,16 +55,16 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 		// initialize always populates every member ivar, so a plain map read
 		// (no presence check) always returns the stored value.
 		sub.define(nm, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-			return self.(*RObject).ivars[ivar]
+			return object.Kind[*RObject](self).ivars[ivar]
 		})
 		sub.define(nm+"=", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-			self.(*RObject).ivars[ivar] = a[0]
+			object.Kind[*RObject](self).ivars[ivar] = a[0]
 			return a[0]
 		})
 	}
 
 	values := func(self object.Value) []object.Value {
-		o := self.(*RObject)
+		o := object.Kind[*RObject](self)
 		out := make([]object.Value, len(names))
 		for i, nm := range names {
 			out[i] = o.ivars["@"+nm]
@@ -73,13 +73,13 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 	}
 
 	sub.define("initialize", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-		o := self.(*RObject)
+		o := object.Kind[*RObject](self)
 		if kwInit {
 			// Members come from a keyword hash; absent members are nil, unknown
 			// keys raise, exactly as MRI's keyword_init structs do.
 			h := object.NewHash()
 			if len(a) > 0 {
-				hh, ok := a[0].(*object.Hash)
+				hh, ok := object.KindOK[*object.Hash](a[0])
 				if !ok || len(a) > 1 {
 					raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(a))
 				}
@@ -95,7 +95,7 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 				o.ivars["@"+nm] = v
 			}
 			for _, k := range h.Keys {
-				if sym, ok := k.(object.Symbol); !ok || !member[string(sym)] {
+				if sym, ok := object.KindOK[object.Symbol](k); !ok || !member[string(sym)] {
 					raise("ArgumentError", "unknown keyword: %s", k.Inspect())
 				}
 			}
@@ -145,28 +145,39 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 	sub.define("deconstruct_keys", toH)
 	sub.define("[]", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
 		vals := values(self)
-		switch k := a[0].(type) {
-		case object.Integer:
-			idx := int(k)
-			if idx < 0 {
-				idx += len(vals)
+		{
+			__sw171 := a[0]
+			switch {
+			case object.IsInt(__sw171):
+				k := object.AsInteger(__sw171)
+				_ = k
+				idx := int(k)
+				if idx < 0 {
+					idx += len(vals)
+				}
+				if idx < 0 || idx >= len(vals) {
+					raise("IndexError", "offset %d too large for struct(size:%d)", int(k), len(vals))
+				}
+				return vals[idx]
+			case object.IsKind[object.Symbol](__sw171):
+				k := object.Kind[object.Symbol](__sw171)
+				_ = k
+				return structMember(string(k), names, vals)
+			case object.IsKind[*object.String](__sw171):
+				k := object.Kind[*object.String](__sw171)
+				_ = k
+				return structMember(k.Str(), names, vals)
+			default:
+				k := __sw171
+				_ = k
+				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
+				return object.NilV
 			}
-			if idx < 0 || idx >= len(vals) {
-				raise("IndexError", "offset %d too large for struct(size:%d)", int(k), len(vals))
-			}
-			return vals[idx]
-		case object.Symbol:
-			return structMember(string(k), names, vals)
-		case *object.String:
-			return structMember(k.Str(), names, vals)
-		default:
-			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
-			return object.NilV
 		}
 	})
 	sub.define("==", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-		other, ok := a[0].(*RObject)
-		if !ok || other.class != self.(*RObject).class {
+		other, ok := object.KindOK[*RObject](a[0])
+		if !ok || other.class != object.Kind[*RObject](self).class {
 			return object.False
 		}
 		sv, ov := values(self), values(other)
@@ -191,23 +202,34 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 	// []= assigns a member by index, Symbol or String name (the inverse of []),
 	// raising the same errors for an out-of-range index or unknown name.
 	sub.define("[]=", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-		o := self.(*RObject)
-		switch k := a[0].(type) {
-		case object.Integer:
-			idx := int(k)
-			if idx < 0 {
-				idx += len(names)
+		o := object.Kind[*RObject](self)
+		{
+			__sw172 := a[0]
+			switch {
+			case object.IsInt(__sw172):
+				k := object.AsInteger(__sw172)
+				_ = k
+				idx := int(k)
+				if idx < 0 {
+					idx += len(names)
+				}
+				if idx < 0 || idx >= len(names) {
+					raise("IndexError", "offset %d too large for struct(size:%d)", int(k), len(names))
+				}
+				o.ivars["@"+names[idx]] = a[1]
+			case object.IsKind[object.Symbol](__sw172):
+				k := object.Kind[object.Symbol](__sw172)
+				_ = k
+				structSetMember(o, string(k), names, a[1])
+			case object.IsKind[*object.String](__sw172):
+				k := object.Kind[*object.String](__sw172)
+				_ = k
+				structSetMember(o, k.Str(), names, a[1])
+			default:
+				k := __sw172
+				_ = k
+				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
 			}
-			if idx < 0 || idx >= len(names) {
-				raise("IndexError", "offset %d too large for struct(size:%d)", int(k), len(names))
-			}
-			o.ivars["@"+names[idx]] = a[1]
-		case object.Symbol:
-			structSetMember(o, string(k), names, a[1])
-		case *object.String:
-			structSetMember(o, k.Str(), names, a[1])
-		default:
-			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
 		}
 		return a[1]
 	})
@@ -232,7 +254,7 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			return object.NewArrayFromSlice(append([]object.Value(nil), memberSyms...))
 		}}
-	sub.includes = append(sub.includes, vm.consts["Enumerable"].(*RClass))
+	sub.includes = append(sub.includes, object.Kind[*RClass](vm.consts["Enumerable"]))
 	bumpMethodSerial()
 	return sub
 }

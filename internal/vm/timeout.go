@@ -21,7 +21,7 @@ func (vm *VM) registerTimeout() {
 
 	// Timeout::Error < RuntimeError, matching MRI's hierarchy so a bare rescue and
 	// `rescue Timeout::Error` both catch it.
-	mod.consts["Error"] = newClass("Timeout::Error", vm.consts["RuntimeError"].(*RClass))
+	mod.consts["Error"] = newClass("Timeout::Error", object.Kind[*RClass](vm.consts["RuntimeError"]))
 
 	mod.smethods["timeout"] = &Method{name: "timeout", owner: mod,
 		native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {

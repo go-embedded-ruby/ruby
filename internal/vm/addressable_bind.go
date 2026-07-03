@@ -29,7 +29,7 @@ func strPtrToRuby(p *string) object.Value {
 // addressableURIStr coerces a URI-ish argument (a String or an Addressable::URI
 // wrapper) to its string form.
 func addressableURIStr(v object.Value) string {
-	if u, ok := v.(*AddressableURI); ok {
+	if u, ok := object.KindOK[*AddressableURI](v); ok {
 		return u.u.String()
 	}
 	return strArg(v)
@@ -40,7 +40,7 @@ func addressableURIStr(v object.Value) string {
 // value maps to a []string (RFC 6570 list expansion). Any other value is coerced
 // via to_s.
 func addressableVars(v object.Value) map[string]addressable.Value {
-	h, ok := v.(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](v)
 	if !ok {
 		raise("TypeError", "expected a Hash of template variables")
 	}
@@ -55,7 +55,7 @@ func addressableVars(v object.Value) map[string]addressable.Value {
 // addressableKey renders a Hash key as a template variable name: a Symbol by its
 // name, any other value by to_s.
 func addressableKey(k object.Value) string {
-	if s, ok := k.(object.Symbol); ok {
+	if s, ok := object.KindOK[object.Symbol](k); ok {
 		return string(s)
 	}
 	return k.ToS()
@@ -64,7 +64,7 @@ func addressableKey(k object.Value) string {
 // addressableVal maps a Ruby template-variable value to an addressable.Value: an
 // Array to a []string list, anything else to a scalar string.
 func addressableVal(v object.Value) addressable.Value {
-	if arr, ok := v.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](v); ok {
 		list := make([]string, len(arr.Elems))
 		for i, e := range arr.Elems {
 			list[i] = e.ToS()

@@ -20,7 +20,7 @@ import (
 // MRI's stdlib/tmpdir.rb behaviour. It is wired through providedFeatures so the
 // require returns true on the first call and false thereafter.
 func (vm *VM) registerTmpdir() {
-	cDir := vm.consts["Dir"].(*RClass)
+	cDir := object.Kind[*RClass](vm.consts["Dir"])
 	def := func(name string, fn NativeFn) { cDir.smethods[name] = &Method{name: name, owner: cDir, native: fn} }
 
 	def("tmpdir", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -31,7 +31,7 @@ func (vm *VM) registerTmpdir() {
 		prefix, suffix := tmpdirPrefixSuffix(args)
 		base := systemTmpdir()
 		if len(args) > 1 {
-			if _, isNil := args[1].(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(args[1]); !isNil {
 				base = strArg(args[1])
 			}
 		}
@@ -68,19 +68,28 @@ func tmpdirPrefixSuffix(args []object.Value) (prefix, suffix string) {
 	if len(args) == 0 {
 		return "d", ""
 	}
-	switch a := args[0].(type) {
-	case object.Nil:
-		return "d", ""
-	case *object.Array:
-		if len(a.Elems) > 0 {
-			prefix = strArg(a.Elems[0])
+	{
+		__sw176 := args[0]
+		switch {
+		case object.IsNilObj(__sw176):
+			a := object.NilObj()
+			_ = a
+			return "d", ""
+		case object.IsKind[*object.Array](__sw176):
+			a := object.Kind[*object.Array](__sw176)
+			_ = a
+			if len(a.Elems) > 0 {
+				prefix = strArg(a.Elems[0])
+			}
+			if len(a.Elems) > 1 {
+				suffix = strArg(a.Elems[1])
+			}
+			return prefix, suffix
+		default:
+			a := __sw176
+			_ = a
+			return strArg(args[0]), ""
 		}
-		if len(a.Elems) > 1 {
-			suffix = strArg(a.Elems[1])
-		}
-		return prefix, suffix
-	default:
-		return strArg(args[0]), ""
 	}
 }
 

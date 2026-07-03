@@ -15,7 +15,7 @@ func (vm *VM) registerModuleExtras() {
 	// args, convert the named instance methods now. Returns nil (no-arg) or the
 	// arg list, matching MRI.
 	vm.cModule.define("module_function", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		mod := self.(*RClass)
+		mod := object.Kind[*RClass](self)
 		if len(args) == 0 {
 			mod.funcMode = true
 			return object.NilV
@@ -49,7 +49,7 @@ func (vm *VM) registerModuleExtras() {
 	// the no-arg form, as MRI does. `private def foo; end` passes the symbol the
 	// def evaluates to, so the single-arg case covers it.
 	setVis := func(vm *VM, self object.Value, args []object.Value, vis visibility) object.Value {
-		mod := self.(*RClass)
+		mod := object.Kind[*RClass](self)
 		if len(args) == 0 {
 			mod.defaultVis = vis
 			return object.NilV
@@ -57,7 +57,7 @@ func (vm *VM) registerModuleExtras() {
 		// `private [:a, :b]` (an Array argument) marks each element, returning the
 		// array — MRI accepts a single Array as well as a varargs name list.
 		if len(args) == 1 {
-			if arr, ok := args[0].(*object.Array); ok {
+			if arr, ok := object.KindOK[*object.Array](args[0]); ok {
 				for _, a := range arr.Elems {
 					vm.setInstanceVisibility(mod, nameArg(a), vis)
 				}
@@ -86,7 +86,7 @@ func (vm *VM) registerModuleExtras() {
 	// visibility — including ones inherited from Class such as `new`, recorded as a
 	// per-receiver override (see setClassMethodVisibility). Returns self, as MRI.
 	classMethodVisibility := func(vm *VM, self object.Value, args []object.Value, vis visibility) object.Value {
-		mod := self.(*RClass)
+		mod := object.Kind[*RClass](self)
 		for _, a := range args {
 			vm.setClassMethodVisibility(mod, nameArg(a), vis)
 		}
@@ -102,7 +102,7 @@ func (vm *VM) registerModuleExtras() {
 	// alias_method: the method form of `alias new old`, returning the new name as
 	// a Symbol (MRI returns a Symbol since 3.0).
 	vm.cModule.define("alias_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		mod := self.(*RClass)
+		mod := object.Kind[*RClass](self)
 		newName, oldName := nameArg(args[0]), nameArg(args[1])
 		vm.aliasMethod(mod, newName, oldName)
 		return object.Symbol(newName)
@@ -112,7 +112,7 @@ func (vm *VM) registerModuleExtras() {
 	// hides any definition (own or inherited) so a call routes to method_missing.
 	// Accepts one or more names and returns self.
 	vm.cModule.define("undef_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		mod := self.(*RClass)
+		mod := object.Kind[*RClass](self)
 		for _, a := range args {
 			vm.undefMethod(mod, nameArg(a))
 		}
@@ -123,7 +123,7 @@ func (vm *VM) registerModuleExtras() {
 	// any inherited method visible again. A name not defined directly on the
 	// receiver raises NameError (MRI). Returns self.
 	vm.cModule.define("remove_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		mod := self.(*RClass)
+		mod := object.Kind[*RClass](self)
 		for _, a := range args {
 			name := nameArg(a)
 			if _, ok := mod.methods[name]; !ok {
@@ -148,13 +148,22 @@ func (vm *VM) registerModuleExtras() {
 // raising TypeError for anything else (matching MRI's "not a symbol nor a
 // string").
 func nameArg(v object.Value) string {
-	switch x := v.(type) {
-	case object.Symbol:
-		return string(x)
-	case *object.String:
-		return x.Str()
-	default:
-		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
-		return ""
+	{
+		__sw98 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw98):
+			x := object.Kind[object.Symbol](__sw98)
+			_ = x
+			return string(x)
+		case object.IsKind[*object.String](__sw98):
+			x := object.Kind[*object.String](__sw98)
+			_ = x
+			return x.Str()
+		default:
+			x := __sw98
+			_ = x
+			raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+			return ""
+		}
 	}
 }

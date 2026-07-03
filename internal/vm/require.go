@@ -80,7 +80,7 @@ func (vm *VM) registerRequire() {
 		return vm.doLoad(requireName(vm, args))
 	}
 	vm.cObject.define("load", loadFn)
-	if kernel, ok := vm.consts["Kernel"].(*RClass); ok {
+	if kernel, ok := object.KindOK[*RClass](vm.consts["Kernel"]); ok {
 		kernel.smethods["load"] = &Method{name: "load", owner: kernel, native: loadFn}
 	}
 }
@@ -112,7 +112,7 @@ func (vm *VM) doLoad(name string) object.Value {
 
 // requireName extracts the String feature name, raising TypeError otherwise.
 func requireName(vm *VM, args []object.Value) string {
-	s, ok := args[0].(*object.String)
+	s, ok := object.KindOK[*object.String](args[0])
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
 	}
@@ -218,13 +218,13 @@ func (vm *VM) requireCandidates(file string, relative bool) []string {
 // entries are skipped (MRI coerces them, but the embedded load path holds plain
 // strings).
 func (vm *VM) loadPathDirs() []string {
-	lp, ok := vm.globals["$LOAD_PATH"].(*object.Array)
+	lp, ok := object.KindOK[*object.Array](vm.globals["$LOAD_PATH"])
 	if !ok {
 		return nil
 	}
 	dirs := make([]string, 0, len(lp.Elems))
 	for _, e := range lp.Elems {
-		if s, ok := e.(*object.String); ok {
+		if s, ok := object.KindOK[*object.String](e); ok {
 			dirs = append(dirs, string(s.Bytes()))
 		}
 	}

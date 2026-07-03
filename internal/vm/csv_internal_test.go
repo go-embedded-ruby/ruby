@@ -42,7 +42,7 @@ func TestCSVRaiseErrRuntime(t *testing.T) {
 func TestCSVFieldToRubyDefault(t *testing.T) {
 	vm := New(io.Discard)
 	got := vm.csvFieldToRuby(true)
-	s, ok := got.(*object.String)
+	s, ok := object.KindOK[*object.String](got)
 	if !ok || s.Str() != "true\n" {
 		t.Fatalf("csvFieldToRuby(true) = %v, want String \"true\\n\"", got)
 	}

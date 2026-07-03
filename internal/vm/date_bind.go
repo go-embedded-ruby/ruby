@@ -87,7 +87,7 @@ func i64toa(n int64) string { return object.IntValue(n).ToS() }
 // dateArg asserts an argument is a Date, raising TypeError otherwise (the Date
 // counterpart of timeArg / setArg).
 func dateArg(v object.Value) *Date {
-	d, ok := v.(*Date)
+	d, ok := object.KindOK[*Date](v)
 	if !ok {
 		raise("TypeError", "value must be a Date")
 	}
@@ -98,7 +98,7 @@ func dateArg(v object.Value) *Date {
 // TypeError for anything else (only an Integer is a meaningful whole count, so a
 // Float is rejected) — the day/month-offset counterpart of intArg.
 func dateDays(v object.Value) int {
-	if n, ok := v.(object.Integer); ok {
+	if n, ok := object.AsIntegerOK(v); ok {
 		return int(n)
 	}
 	raise("TypeError", "no implicit conversion of %s into Integer", v.Inspect())
@@ -129,7 +129,7 @@ func dateOp(op bytecode.Op, a *Date, b object.Value) object.Value {
 	case bytecode.OpAdd:
 		return &Date{d: a.d.Plus(dateDays(b))}
 	case bytecode.OpSub:
-		if other, ok := b.(*Date); ok {
+		if other, ok := object.KindOK[*Date](b); ok {
 			return object.IntValue(int64(a.d.Diff(other.d)))
 		}
 		return &Date{d: a.d.Minus(dateDays(b))}
@@ -142,7 +142,7 @@ func dateCmp(a, b *Date) int64 { return int64(a.d.Cmp(b.d)) }
 
 // dateEqual reports Date equality for valueEqual / the == operator fast path.
 func dateEqual(a *Date, other object.Value) bool {
-	b, ok := other.(*Date)
+	b, ok := object.KindOK[*Date](other)
 	return ok && a.d.Equal(b.d)
 }
 
@@ -152,20 +152,31 @@ func dateEqual(a *Date, other object.Value) bool {
 // day, matching MRI's DateTime.new(..., offset) forms. An unparsable string
 // raises Date::Error.
 func offsetSeconds(v object.Value) int {
-	switch x := v.(type) {
-	case *object.String:
-		secs, ok := zoneOffsetSeconds(x.Str())
-		if !ok {
-			raise("Date::Error", "invalid date")
+	{
+		__sw45 := v
+		switch {
+		case object.IsKind[*object.String](__sw45):
+			x := object.Kind[*object.String](__sw45)
+			_ = x
+			secs, ok := zoneOffsetSeconds(x.Str())
+			if !ok {
+				raise("Date::Error", "invalid date")
+			}
+			return secs
+		case object.IsInt(__sw45):
+			x := object.AsInteger(__sw45)
+			_ = x
+			return int(int64(x) * 86400)
+		case object.IsFloat(__sw45):
+			x := object.AsFloatV(__sw45)
+			_ = x
+			return int(float64(x) * 86400)
+		case object.IsKind[*object.Rational](__sw45):
+			x := object.Kind[*object.Rational](__sw45)
+			_ = x
+			f, _ := x.R.Float64()
+			return int(f * 86400)
 		}
-		return secs
-	case object.Integer:
-		return int(int64(x) * 86400)
-	case object.Float:
-		return int(float64(x) * 86400)
-	case *object.Rational:
-		f, _ := x.R.Float64()
-		return int(f * 86400)
 	}
 	raise("TypeError", "invalid offset: %s", v.Inspect())
 	return 0
@@ -259,7 +270,7 @@ func (vm *VM) registerDate() {
 // exactly as the JSON / Errno error classes are. It runs after the exception
 // hierarchy is in place (registerDate itself runs before StandardError exists).
 func (vm *VM) registerDateErrors() {
-	dateErr := newClass("Date::Error", vm.consts["ArgumentError"].(*RClass))
+	dateErr := newClass("Date::Error", object.Kind[*RClass](vm.consts["ArgumentError"]))
 	vm.cDate.consts["Error"] = dateErr
 	vm.consts["Date::Error"] = dateErr
 }
@@ -432,7 +443,7 @@ func strptimeHash(d *date.Date) object.Value {
 // Date and DateTime (DateTime inherits them).
 func (vm *VM) registerDateAccessors() {
 	d := func(name string, fn NativeFn) { vm.cDate.define(name, fn) }
-	self := func(v object.Value) *date.Date { return v.(*Date).d }
+	self := func(v object.Value) *date.Date { return object.Kind[*Date](v).d }
 	intM := func(get func(*date.Date) int) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 			return object.IntValue(int64(get(self(v))))
@@ -477,7 +488,7 @@ func (vm *VM) registerDateAccessors() {
 // and the iteration methods (step / upto / downto).
 func (vm *VM) registerDateArithmetic() {
 	d := func(name string, fn NativeFn) { vm.cDate.define(name, fn) }
-	self := func(v object.Value) *Date { return v.(*Date) }
+	self := func(v object.Value) *Date { return object.Kind[*Date](v) }
 
 	// + / - mirror the operator fast path (dateOp) so `send(:+, n)` agrees with the
 	// `d + n` syntax.
@@ -557,7 +568,7 @@ func (vm *VM) registerDateArithmetic() {
 // registerDateFormat installs strftime and the named string formats.
 func (vm *VM) registerDateFormat() {
 	d := func(name string, fn NativeFn) { vm.cDate.define(name, fn) }
-	self := func(v object.Value) *date.Date { return v.(*Date).d }
+	self := func(v object.Value) *date.Date { return object.Kind[*Date](v).d }
 	strM := func(get func(*date.Date) string) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 			return object.NewString(get(self(v)))
@@ -585,10 +596,10 @@ func (vm *VM) registerDateFormat() {
 // operators.
 func (vm *VM) registerDateCompare() {
 	d := func(name string, fn NativeFn) { vm.cDate.define(name, fn) }
-	self := func(v object.Value) *Date { return v.(*Date) }
+	self := func(v object.Value) *Date { return object.Kind[*Date](v) }
 
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		other, ok := args[0].(*Date)
+		other, ok := object.KindOK[*Date](args[0])
 		if !ok {
 			return object.NilV
 		}

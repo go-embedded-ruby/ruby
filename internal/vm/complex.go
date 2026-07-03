@@ -68,7 +68,7 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 	}
 	cmpZero := func(self object.Value) int {
 		c := vm.send(self, "<=>", []object.Value{object.IntValue(0)}, nil)
-		i, ok := c.(object.Integer)
+		i, ok := object.AsIntegerOK(c)
 		if !ok {
 			raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(self).name)
 		}
@@ -127,7 +127,7 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 // asComplexVal coerces a real number to a Complex (zero imaginary part); a
 // Complex passes through. ok is false for a non-numeric value.
 func asComplexVal(v object.Value) (*object.Complex, bool) {
-	if c, ok := v.(*object.Complex); ok {
+	if c, ok := object.KindOK[*object.Complex](v); ok {
 		return c, true
 	}
 	if _, ok := toFloat(v); ok {
@@ -138,7 +138,7 @@ func asComplexVal(v object.Value) (*object.Complex, bool) {
 
 // complexEqual reports Complex equality, including Complex(x, 0) == x.
 func complexEqual(c *object.Complex, other object.Value) bool {
-	if oc, ok := other.(*object.Complex); ok {
+	if oc, ok := object.KindOK[*object.Complex](other); ok {
 		return valueEqual(c.Re, oc.Re) && valueEqual(c.Im, oc.Im)
 	}
 	if _, ok := toFloat(other); ok {
@@ -202,7 +202,7 @@ func (vm *VM) registerComplex() {
 		return &object.Complex{Re: re, Im: im}
 	})
 
-	cval := func(self object.Value) *object.Complex { return self.(*object.Complex) }
+	cval := func(self object.Value) *object.Complex { return object.Kind[*object.Complex](self) }
 
 	vm.cComplex.define("real", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return cval(self).Re

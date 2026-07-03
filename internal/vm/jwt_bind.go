@@ -86,7 +86,7 @@ func (vm *VM) registerJWT() {
 // re-raised library error's exception lookup finds the same class), as the JSON
 // error tree is.
 func (vm *VM) registerJWTErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c
@@ -131,13 +131,22 @@ func jwtKey(v object.Value, alg string, verify bool) any {
 // jwtRawKey extracts the raw HMAC secret: a String's bytes, or nil for a nil key
 // ("none"). Any other type is coerced through strArg (raising TypeError).
 func jwtRawKey(v object.Value) any {
-	switch k := v.(type) {
-	case object.Nil:
-		return nil
-	case *object.String:
-		return k.Str()
-	default:
-		return strArg(v)
+	{
+		__sw81 := v
+		switch {
+		case object.IsNilObj(__sw81):
+			k := object.NilObj()
+			_ = k
+			return nil
+		case object.IsKind[*object.String](__sw81):
+			k := object.Kind[*object.String](__sw81)
+			_ = k
+			return k.Str()
+		default:
+			k := __sw81
+			_ = k
+			return strArg(v)
+		}
 	}
 }
 
@@ -267,7 +276,7 @@ func jwtAlgorithms(h *object.Hash) []string {
 
 // jwtStringList coerces an Array of Strings (or a single String) to a []string.
 func jwtStringList(v object.Value) []string {
-	if arr, ok := v.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](v); ok {
 		out := make([]string, len(arr.Elems))
 		for i, e := range arr.Elems {
 			out[i] = strArg(e)
@@ -280,7 +289,7 @@ func jwtStringList(v object.Value) []string {
 // jwtGoScalarOrList maps a Ruby String or Array-of-Strings option value to the
 // Go any (string or []string) the Options issuer/audience fields accept.
 func jwtGoScalarOrList(v object.Value) any {
-	if arr, ok := v.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](v); ok {
 		return jwtStringList(arr)
 	}
 	return strArg(v)
@@ -292,7 +301,7 @@ func jwtLastHash(rest []object.Value) (*object.Hash, bool) {
 	if len(rest) == 0 {
 		return nil, false
 	}
-	h, ok := rest[len(rest)-1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](rest[len(rest)-1])
 	return h, ok
 }
 
@@ -316,34 +325,55 @@ func raiseJWTError(err error) any {
 // scalars their Go equivalents. It mirrors emitValue in json_bind.go but targets
 // go-ruby-jwt's json.go value shapes.
 func jwtFromRuby(v object.Value) any {
-	switch n := v.(type) {
-	case nil, object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
-	case *object.Array:
-		out := make([]any, len(n.Elems))
-		for i, e := range n.Elems {
-			out[i] = jwtFromRuby(e)
+	{
+		__sw82 := v
+		switch {
+		case __sw82 == nil || object.IsNilObj(__sw82):
+			n := __sw82
+			_ = n
+			return nil
+		case object.IsBool(__sw82):
+			n := object.AsBoolV(__sw82)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw82):
+			n := object.AsInteger(__sw82)
+			_ = n
+			return int64(n)
+		case object.IsFloat(__sw82):
+			n := object.AsFloatV(__sw82)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw82):
+			n := object.Kind[*object.String](__sw82)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw82):
+			n := object.Kind[object.Symbol](__sw82)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.Array](__sw82):
+			n := object.Kind[*object.Array](__sw82)
+			_ = n
+			out := make([]any, len(n.Elems))
+			for i, e := range n.Elems {
+				out[i] = jwtFromRuby(e)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw82):
+			n := object.Kind[*object.Hash](__sw82)
+			_ = n
+			m := jwt.NewOrderedMap()
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				m.Set(jsonKeyString(k), jwtFromRuby(val))
+			}
+			return m
+		default:
+			n := __sw82
+			_ = n
+			return v.ToS()
 		}
-		return out
-	case *object.Hash:
-		m := jwt.NewOrderedMap()
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m.Set(jsonKeyString(k), jwtFromRuby(val))
-		}
-		return m
-	default:
-		return v.ToS()
 	}
 }
 

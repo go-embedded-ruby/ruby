@@ -57,7 +57,7 @@ func (vm *VM) registerLazy() {
 			if blk == nil {
 				raise("ArgumentError", "tried to call lazy %s without a block", kind)
 			}
-			return self.(*LazyEnum).with(lazyOp{kind: kind, blk: blk})
+			return object.Kind[*LazyEnum](self).with(lazyOp{kind: kind, blk: blk})
 		}
 	}
 	d("map", chain("map"))
@@ -69,30 +69,30 @@ func (vm *VM) registerLazy() {
 	d("take_while", chain("take_while"))
 	d("drop_while", chain("drop_while"))
 	d("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return self.(*LazyEnum).with(lazyOp{kind: "take", n: int(intArg(args[0]))})
+		return object.Kind[*LazyEnum](self).with(lazyOp{kind: "take", n: int(intArg(args[0]))})
 	})
 	d("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return self.(*LazyEnum).with(lazyOp{kind: "drop", n: int(intArg(args[0]))})
+		return object.Kind[*LazyEnum](self).with(lazyOp{kind: "drop", n: int(intArg(args[0]))})
 	})
 	d("lazy", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
 
 	toA := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.lazyForce(self.(*LazyEnum), -1))
+		return object.NewArrayFromSlice(vm.lazyForce(object.Kind[*LazyEnum](self), -1))
 	}
 	d("to_a", toA)
 	d("force", toA)
 	d("first", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
-			got := vm.lazyForce(self.(*LazyEnum), 1)
+			got := vm.lazyForce(object.Kind[*LazyEnum](self), 1)
 			if len(got) == 0 {
 				return object.NilV
 			}
 			return got[0]
 		}
-		return object.NewArrayFromSlice(vm.lazyForce(self.(*LazyEnum), int(intArg(args[0]))))
+		return object.NewArrayFromSlice(vm.lazyForce(object.Kind[*LazyEnum](self), int(intArg(args[0]))))
 	})
 	d("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		l := self.(*LazyEnum)
+		l := object.Kind[*LazyEnum](self)
 		if blk == nil {
 			return l
 		}
@@ -108,58 +108,78 @@ func (vm *VM) registerLazy() {
 // (including endless and Float::INFINITY-bounded) are walked by counter; arrays
 // by index; any other Enumerable is materialised once (so it must be finite).
 func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
-	switch r := recv.(type) {
-	case *object.Array:
-		i := 0
-		return func() (object.Value, bool) {
-			if i < len(r.Elems) {
-				v := r.Elems[i]
-				i++
-				return v, true
-			}
-			return object.NilVal(), false
-		}
-	case *object.Range:
-		lo, ok := r.Lo.(object.Integer)
-		if !ok {
-			raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
-		}
-		i, hi, unbounded := int64(lo), int64(0), false
-		switch h := r.Hi.(type) {
-		case object.Nil:
-			unbounded = true
-		case object.Float:
-			if math.IsInf(float64(h), 1) {
-				unbounded = true
-			} else {
-				hi = int64(h)
-			}
-		case object.Integer:
-			hi = int64(h)
-		default:
-			raise("TypeError", "can't iterate to %s", r.Hi.Inspect())
-		}
-		if r.Exclusive && !unbounded {
-			hi--
-		}
-		return func() (object.Value, bool) {
-			if !unbounded && i > hi {
+	{
+		__sw84 := recv
+		switch {
+		case object.IsKind[*object.Array](__sw84):
+			r := object.Kind[*object.Array](__sw84)
+			_ = r
+			i := 0
+			return func() (object.Value, bool) {
+				if i < len(r.Elems) {
+					v := r.Elems[i]
+					i++
+					return v, true
+				}
 				return object.NilVal(), false
 			}
-			v := object.IntValue(i)
-			i++
-			return v, true
-		}
-	default:
-		buf := vm.collectEach(recv)
-		i := 0
-		return func() (object.Value, bool) {
-			if i < len(buf) {
-				v := buf[i]
+		case object.IsKind[*object.Range](__sw84):
+			r := object.Kind[*object.Range](__sw84)
+			_ = r
+			lo, ok := object.AsIntegerOK(r.Lo)
+			if !ok {
+				raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+			}
+			i, hi, unbounded := int64(lo), int64(0), false
+			{
+				__sw85 := r.Hi
+				switch {
+				case object.IsNilObj(__sw85):
+					h := object.NilObj()
+					_ = h
+					unbounded = true
+				case object.IsFloat(__sw85):
+					h := object.AsFloatV(__sw85)
+					_ = h
+					if math.IsInf(float64(h), 1) {
+						unbounded = true
+					} else {
+						hi = int64(h)
+					}
+				case object.IsInt(__sw85):
+					h := object.AsInteger(__sw85)
+					_ = h
+					hi = int64(h)
+				default:
+					h := __sw85
+					_ = h
+					raise("TypeError", "can't iterate to %s", r.Hi.Inspect())
+				}
+			}
+			if r.Exclusive && !unbounded {
+				hi--
+			}
+			return func() (object.Value, bool) {
+				if !unbounded && i > hi {
+					return object.NilVal(), false
+				}
+				v := object.IntValue(i)
 				i++
 				return v, true
 			}
-			return object.NilVal(), false
+		default:
+			r := __sw84
+			_ = r
+			buf := vm.collectEach(recv)
+			i := 0
+			return func() (object.Value, bool) {
+				if i < len(buf) {
+					v := buf[i]
+					i++
+					return v, true
+				}
+				return object.NilVal(), false
+			}
 		}
 	}
 }

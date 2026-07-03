@@ -22,10 +22,10 @@ func (vm *VM) registerYAML() {
 	// In MRI, YAML is an alias of Psych.
 	vm.consts["YAML"] = psych
 
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	psych.consts["Exception"] = newClass("Psych::Exception", std)
-	psych.consts["SyntaxError"] = newClass("Psych::SyntaxError", psych.consts["Exception"].(*RClass))
-	psych.consts["DisallowedClass"] = newClass("Psych::DisallowedClass", psych.consts["Exception"].(*RClass))
+	psych.consts["SyntaxError"] = newClass("Psych::SyntaxError", object.Kind[*RClass](psych.consts["Exception"]))
+	psych.consts["DisallowedClass"] = newClass("Psych::DisallowedClass", object.Kind[*RClass](psych.consts["Exception"]))
 	psych.consts["VERSION"] = object.NewString("5.0.0")
 
 	nodes := newClass("Psych::Nodes", nil)
@@ -117,7 +117,7 @@ func (vm *VM) registerYAML() {
 // its contents, and any other value its to_s, so an IO-ish or symbol argument
 // does not crash the loader (Puppet always passes a String).
 func yamlSourceArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()
@@ -143,7 +143,7 @@ func permittedClassesArg(rest []object.Value) []string {
 	if len(rest) == 0 {
 		return nil
 	}
-	h, ok := rest[len(rest)-1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](rest[len(rest)-1])
 	if !ok {
 		return nil
 	}
@@ -151,13 +151,13 @@ func permittedClassesArg(rest []object.Value) []string {
 	if !ok {
 		return nil
 	}
-	arr, ok := val.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](val)
 	if !ok {
 		return nil
 	}
 	names := make([]string, 0, len(arr.Elems))
 	for _, el := range arr.Elems {
-		if c, ok := el.(*RClass); ok {
+		if c, ok := object.KindOK[*RClass](el); ok {
 			names = append(names, c.ToS())
 			continue
 		}

@@ -72,15 +72,26 @@ func ipOK(ip *libipaddr.IPAddr, err error) object.Value {
 // an Integer/Bignum becomes a *big.Int (the library coerces it against the
 // receiver's family). Anything else raises TypeError, as MRI's coercion does.
 func ipOperand(v object.Value) any {
-	switch x := v.(type) {
-	case *IPAddr:
-		return x.ip
-	case *object.String:
-		return string(x.Bytes())
-	case object.Integer:
-		return big.NewInt(int64(x))
-	case *object.Bignum:
-		return new(big.Int).Set(x.I)
+	{
+		__sw67 := v
+		switch {
+		case object.IsKind[*IPAddr](__sw67):
+			x := object.Kind[*IPAddr](__sw67)
+			_ = x
+			return x.ip
+		case object.IsKind[*object.String](__sw67):
+			x := object.Kind[*object.String](__sw67)
+			_ = x
+			return string(x.Bytes())
+		case object.IsInt(__sw67):
+			x := object.AsInteger(__sw67)
+			_ = x
+			return big.NewInt(int64(x))
+		case object.IsKind[*object.Bignum](__sw67):
+			x := object.Kind[*object.Bignum](__sw67)
+			_ = x
+			return new(big.Int).Set(x.I)
+		}
 	}
 	raise("TypeError", "value must be an IPAddr, a String or an Integer")
 	panic("unreachable")
@@ -92,15 +103,26 @@ func ipOperand(v object.Value) any {
 // coercion as an IPAddr::Error (MRI also raises from include? for an operand it
 // cannot coerce), rather than the binding pre-judging it.
 func ipIncludeOperand(v object.Value) any {
-	switch x := v.(type) {
-	case *IPAddr:
-		return x.ip
-	case *object.String:
-		return string(x.Bytes())
-	case object.Integer:
-		return big.NewInt(int64(x))
-	case *object.Bignum:
-		return new(big.Int).Set(x.I)
+	{
+		__sw68 := v
+		switch {
+		case object.IsKind[*IPAddr](__sw68):
+			x := object.Kind[*IPAddr](__sw68)
+			_ = x
+			return x.ip
+		case object.IsKind[*object.String](__sw68):
+			x := object.Kind[*object.String](__sw68)
+			_ = x
+			return string(x.Bytes())
+		case object.IsInt(__sw68):
+			x := object.AsInteger(__sw68)
+			_ = x
+			return big.NewInt(int64(x))
+		case object.IsKind[*object.Bignum](__sw68):
+			x := object.Kind[*object.Bignum](__sw68)
+			_ = x
+			return new(big.Int).Set(x.I)
+		}
 	}
 	return v // an unsupported operand -> the library raises IPAddr::Error
 }
@@ -111,15 +133,26 @@ func ipIncludeOperand(v object.Value) any {
 // than raising — the difference from ipOperand, which raises for the bitwise
 // operators.
 func ipCmpOperand(v object.Value) (any, bool) {
-	switch x := v.(type) {
-	case *IPAddr:
-		return x.ip, true
-	case *object.String:
-		return string(x.Bytes()), true
-	case object.Integer:
-		return big.NewInt(int64(x)), true
-	case *object.Bignum:
-		return new(big.Int).Set(x.I), true
+	{
+		__sw69 := v
+		switch {
+		case object.IsKind[*IPAddr](__sw69):
+			x := object.Kind[*IPAddr](__sw69)
+			_ = x
+			return x.ip, true
+		case object.IsKind[*object.String](__sw69):
+			x := object.Kind[*object.String](__sw69)
+			_ = x
+			return string(x.Bytes()), true
+		case object.IsInt(__sw69):
+			x := object.AsInteger(__sw69)
+			_ = x
+			return big.NewInt(int64(x)), true
+		case object.IsKind[*object.Bignum](__sw69):
+			x := object.Kind[*object.Bignum](__sw69)
+			_ = x
+			return new(big.Int).Set(x.I), true
+		}
 	}
 	return nil, false
 }
@@ -127,7 +160,7 @@ func ipCmpOperand(v object.Value) (any, bool) {
 // ipBytes maps a Ruby String of packed network bytes (the new_ntoh / ntop
 // argument) into a []byte, raising TypeError for a non-String.
 func ipBytes(v object.Value) []byte {
-	s, ok := v.(*object.String)
+	s, ok := object.KindOK[*object.String](v)
 	if !ok {
 		raise("TypeError", "value must be a String of packed bytes")
 	}
@@ -152,11 +185,14 @@ func ipaddrOp(op bytecode.Op, a *IPAddr, b object.Value) object.Value {
 // value is outside int64 range) cannot be applied and raises RangeError rather
 // than silently truncating. A non-integer raises TypeError.
 func ipOffset(v object.Value) int64 {
-	switch v.(type) {
-	case object.Integer:
-		return int64(v.(object.Integer))
-	case *object.Bignum:
-		raise("RangeError", "offset out of range")
+	{
+		__sw70 := v
+		switch {
+		case object.IsInt(__sw70):
+			return int64(object.AsInteger(v))
+		case object.IsKind[*object.Bignum](__sw70):
+			raise("RangeError", "offset out of range")
+		}
 	}
 	raise("TypeError", "offset must be an Integer")
 	panic("unreachable")
@@ -173,7 +209,7 @@ func (vm *VM) registerIPAddr() {
 	vm.consts["IPAddr"] = cls
 	// Comparable gives <, <=, >, >= from #<=> (IPAddr includes Comparable in MRI);
 	// the prelude registered Comparable before this runs.
-	if cmp, ok := vm.consts["Comparable"].(*RClass); ok {
+	if cmp, ok := object.KindOK[*RClass](vm.consts["Comparable"]); ok {
 		cls.includes = append(cls.includes, cmp)
 	}
 	// Re-attach the error classes as nested constants so Ruby `IPAddr::Error`
@@ -194,20 +230,31 @@ func (vm *VM) registerIPAddr() {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 		}
 		var n *big.Int
-		switch first := args[0].(type) {
-		case *object.String:
-			return ipOK(libipaddr.New(string(first.Bytes())))
-		case object.Integer:
-			n = big.NewInt(int64(first))
-		case *object.Bignum:
-			n = new(big.Int).Set(first.I)
-		default:
-			raise("TypeError", "IPAddr.new expects a String or an Integer")
+		{
+			__sw71 := args[0]
+			switch {
+			case object.IsKind[*object.String](__sw71):
+				first := object.Kind[*object.String](__sw71)
+				_ = first
+				return ipOK(libipaddr.New(string(first.Bytes())))
+			case object.IsInt(__sw71):
+				first := object.AsInteger(__sw71)
+				_ = first
+				n = big.NewInt(int64(first))
+			case object.IsKind[*object.Bignum](__sw71):
+				first := object.Kind[*object.Bignum](__sw71)
+				_ = first
+				n = new(big.Int).Set(first.I)
+			default:
+				first := __sw71
+				_ = first
+				raise("TypeError", "IPAddr.new expects a String or an Integer")
+			}
 		}
 		// IPAddr.new(integer, family): a missing or AF_INET (2) family is IPv4, any
 		// other family int is IPv6 (MRI's AF_INET6 is OS-dependent).
 		fam := libipaddr.AFInet
-		if len(args) > 1 && int64(args[1].(object.Integer)) != int64(libipaddr.AFInet) {
+		if len(args) > 1 && int64(object.AsInteger(args[1])) != int64(libipaddr.AFInet) {
 			fam = libipaddr.AFInet6
 		}
 		return ipOK(libipaddr.NewFromInt(n, fam))
@@ -220,7 +267,7 @@ func (vm *VM) registerIPAddr() {
 	// Honours MRI's encoding precedence (a non-BINARY String raises
 	// InvalidAddressError before any length check) via the String's encoding.
 	sm("ntop", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		str, ok := args[0].(*object.String)
+		str, ok := object.KindOK[*object.String](args[0])
 		if !ok {
 			raise("TypeError", "value must be a String of packed bytes")
 		}
@@ -230,7 +277,7 @@ func (vm *VM) registerIPAddr() {
 	})
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *IPAddr { return v.(*IPAddr) }
+	self := func(v object.Value) *IPAddr { return object.Kind[*IPAddr](v) }
 
 	// String / rendering.
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -259,11 +306,18 @@ func (vm *VM) registerIPAddr() {
 		return args[0]
 	})
 	d("mask", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		switch x := args[0].(type) {
-		case object.Integer:
-			return ipOK(self(v).ip.MaskLen(int(x)))
-		case *object.String:
-			return ipOK(self(v).ip.Mask(string(x.Bytes())))
+		{
+			__sw72 := args[0]
+			switch {
+			case object.IsInt(__sw72):
+				x := object.AsInteger(__sw72)
+				_ = x
+				return ipOK(self(v).ip.MaskLen(int(x)))
+			case object.IsKind[*object.String](__sw72):
+				x := object.Kind[*object.String](__sw72)
+				_ = x
+				return ipOK(self(v).ip.Mask(string(x.Bytes())))
+			}
 		}
 		raise("TypeError", "mask expects an Integer prefix length or a String netmask")
 		return object.NilV
@@ -338,11 +392,11 @@ func (vm *VM) registerIPAddr() {
 		return object.IntValue(int64(res))
 	})
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*IPAddr)
+		o, ok := object.KindOK[*IPAddr](args[0])
 		return object.Bool(ok && self(v).ip.Eql(o.ip))
 	})
 	d("eql?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*IPAddr)
+		o, ok := object.KindOK[*IPAddr](args[0])
 		return object.Bool(ok && self(v).ip.Eql(o.ip))
 	})
 	d("hash", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -401,7 +455,7 @@ func (vm *VM) registerIPAddr() {
 
 // ipInt reads an Integer argument as an int64, raising TypeError otherwise.
 func ipInt(v object.Value) int64 {
-	i, ok := v.(object.Integer)
+	i, ok := object.AsIntegerOK(v)
 	if !ok {
 		raise("TypeError", "expected an Integer")
 	}
@@ -415,7 +469,7 @@ func ipInt(v object.Value) int64 {
 // library error's exceptionObject lookup finds the same class) and re-attached
 // as a nested IPAddr constant in registerIPAddr.
 func (vm *VM) registerIPAddrErrors() {
-	arg := vm.consts["ArgumentError"].(*RClass)
+	arg := object.Kind[*RClass](vm.consts["ArgumentError"])
 
 	mk := func(short string, parent *RClass) *RClass {
 		cls := newClass("IPAddr::"+short, parent)

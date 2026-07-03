@@ -33,10 +33,10 @@ func TestARValueToRubyGoOnly(t *testing.T) {
 	if got := arValueToRuby(float64(1.5)); got != object.Float(1.5) {
 		t.Errorf("float arm got=%v", got)
 	}
-	if s, ok := arValueToRuby("x").(*object.String); !ok || s.Str() != "x" {
+	if s, ok := object.KindOK[*object.String](arValueToRuby("x")); !ok || s.Str() != "x" {
 		t.Errorf("string arm got=%v", arValueToRuby("x"))
 	}
-	if s, ok := arValueToRuby([]byte("ab")).(*object.String); !ok || s.Str() != "ab" {
+	if s, ok := object.KindOK[*object.String](arValueToRuby([]byte("ab"))); !ok || s.Str() != "ab" {
 		t.Errorf("bytes arm got=%v", arValueToRuby([]byte("ab")))
 	}
 	if got := arValueToRuby(nil); got != object.NilV {

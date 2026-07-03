@@ -23,51 +23,83 @@ import (
 // recurses to []any, and a nested Jbuilder wrapper contributes its underlying
 // builder. Everything else passes through as its Go-typed value.
 func toJbuilder(vm *VM, v object.Value) any {
-	switch n := v.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return jbuilder.Symbol(string(n))
-	case *object.Array:
-		out := make([]any, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = toJbuilder(vm, el)
+	{
+		__sw74 := v
+		switch {
+		case __sw74 == nil:
+			n := __sw74
+			_ = n
+			return nil
+		case object.IsNilObj(__sw74):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsBool(__sw74):
+			n := object.AsBoolV(__sw74)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw74):
+			n := object.AsInteger(__sw74)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw74):
+			n := object.Kind[*object.Bignum](__sw74)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw74):
+			n := object.AsFloatV(__sw74)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw74):
+			n := object.Kind[*object.String](__sw74)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw74):
+			n := object.Kind[object.Symbol](__sw74)
+			_ = n
+			return jbuilder.Symbol(string(n))
+		case object.IsKind[*object.Array](__sw74):
+			n := object.Kind[*object.Array](__sw74)
+			_ = n
+			out := make([]any, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = toJbuilder(vm, el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw74):
+			n := object.Kind[*object.Hash](__sw74)
+			_ = n
+			m := map[string]any{}
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				m[jbuilderName(k)] = toJbuilder(vm, val)
+			}
+			return m
+		case object.IsKind[*Jbuilder](__sw74):
+			n := object.Kind[*Jbuilder](__sw74)
+			_ = n
+			return n.b
 		}
-		return out
-	case *object.Hash:
-		m := map[string]any{}
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m[jbuilderName(k)] = toJbuilder(vm, val)
-		}
-		return m
-	case *Jbuilder:
-		return n.b
 	}
 	// A Ruby object with no direct shape degrades to its #to_s text.
-	return vm.send(v, "to_s", nil, nil).(*object.String).Str()
+	return object.Kind[*object.String](vm.send(v, "to_s", nil, nil)).Str()
 }
 
 // jbuilderName renders a key (a Symbol, a String, or any value) as its bare
 // string name — jbuilder applies its own key_format! transform afterwards.
 func jbuilderName(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw75 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw75):
+			n := object.Kind[object.Symbol](__sw75)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw75):
+			n := object.Kind[*object.String](__sw75)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
@@ -129,7 +161,7 @@ func jbuilderArray(vm *VM, j *Jbuilder, coll object.Value, key string, blk *Proc
 // treated as empty. The elements are held as object.Value so the mapping block
 // receives real Ruby values; a no-block array! coerces them at emit time.
 func jbuilderItems(vm *VM, coll object.Value) []any {
-	arr, ok := coll.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](coll)
 	if !ok {
 		return nil
 	}
@@ -160,7 +192,7 @@ func jbuilderExtract(vm *VM, src object.Value, keys []object.Value) []jbuilder.P
 	for _, k := range keys {
 		name := jbuilderName(k)
 		var val object.Value
-		if h, ok := src.(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](src); ok {
 			if v, present := h.Get(object.Symbol(name)); present {
 				val = v
 			} else if v, present := h.Get(object.NewString(name)); present {
@@ -195,15 +227,24 @@ func jbuilderKeyOps(vm *VM, args []object.Value) []jbuilder.KeyOp {
 		}
 	}
 	for _, a := range args {
-		switch n := a.(type) {
-		case object.Symbol:
-			add(string(n), object.NilV)
-		case *object.String:
-			add(n.Str(), object.NilV)
-		case *object.Hash:
-			for _, k := range n.Keys {
-				val, _ := n.Get(k)
-				add(jbuilderName(k), val)
+		{
+			__sw76 := a
+			switch {
+			case object.IsKind[object.Symbol](__sw76):
+				n := object.Kind[object.Symbol](__sw76)
+				_ = n
+				add(string(n), object.NilV)
+			case object.IsKind[*object.String](__sw76):
+				n := object.Kind[*object.String](__sw76)
+				_ = n
+				add(n.Str(), object.NilV)
+			case object.IsKind[*object.Hash](__sw76):
+				n := object.Kind[*object.Hash](__sw76)
+				_ = n
+				for _, k := range n.Keys {
+					val, _ := n.Get(k)
+					add(jbuilderName(k), val)
+				}
 			}
 		}
 	}
@@ -213,11 +254,18 @@ func jbuilderKeyOps(vm *VM, args []object.Value) []jbuilder.KeyOp {
 // jbuilderCamelUpper reads the camelize option's argument: :upper selects
 // UpperCamelCase, anything else (:lower / nil) lowerCamelCase.
 func jbuilderCamelUpper(arg object.Value) bool {
-	switch n := arg.(type) {
-	case object.Symbol:
-		return string(n) == "upper"
-	case *object.String:
-		return n.Str() == "upper"
+	{
+		__sw77 := arg
+		switch {
+		case object.IsKind[object.Symbol](__sw77):
+			n := object.Kind[object.Symbol](__sw77)
+			_ = n
+			return string(n) == "upper"
+		case object.IsKind[*object.String](__sw77):
+			n := object.Kind[*object.String](__sw77)
+			_ = n
+			return n.Str() == "upper"
+		}
 	}
 	return false
 }

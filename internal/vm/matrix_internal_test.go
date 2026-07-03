@@ -42,7 +42,7 @@ func TestMatrixNumToValue(t *testing.T) {
 	}
 
 	// A Bignum value round-trips to the *object.Bignum type (not Integer).
-	if _, ok := numToValue(libmatrix.NewBigInt(big1)).(*object.Bignum); !ok {
+	if _, ok := object.KindOK[*object.Bignum](numToValue(libmatrix.NewBigInt(big1))); !ok {
 		t.Errorf("a >int64 Num should map to *object.Bignum")
 	}
 }

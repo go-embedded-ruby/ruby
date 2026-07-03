@@ -363,7 +363,7 @@ func base64Arg(v object.Value) string {
 // base64Bytes returns the String argument's underlying bytes without copying,
 // raising TypeError for a non-String. The Base64 hot paths read these directly.
 func base64Bytes(v object.Value) []byte {
-	s, ok := v.(*object.String)
+	s, ok := object.KindOK[*object.String](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 	}

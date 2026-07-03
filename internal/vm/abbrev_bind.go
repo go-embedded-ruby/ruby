@@ -67,7 +67,7 @@ func (vm *VM) installAbbrev() {
 		if len(args) > 0 {
 			pattern = args[0]
 		}
-		return abbrevHash(vm, self.(*object.Array), pattern)
+		return abbrevHash(vm, object.Kind[*object.Array](self), pattern)
 	})
 }
 
@@ -119,7 +119,7 @@ func abbrevWords(vm *VM, arr *object.Array) []string {
 // abbrevPrefix reports whether pattern is a String prefix (MRI regards a String
 // pattern as an anchored /\A.../ prefix), returning the prefix text.
 func abbrevPrefix(pattern object.Value) (string, bool) {
-	if s, ok := pattern.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](pattern); ok {
 		return s.Str(), true
 	}
 	return "", false
@@ -131,10 +131,10 @@ func abbrevRegexp(pattern object.Value) (object.Value, bool) {
 	if pattern == nil {
 		return object.NilVal(), false
 	}
-	if _, isNil := pattern.(object.Nil); isNil {
+	if _, isNil := object.AsNilOK(pattern); isNil {
 		return object.NilVal(), false
 	}
-	if _, ok := pattern.(*object.String); ok {
+	if _, ok := object.KindOK[*object.String](pattern); ok {
 		return object.NilVal(), false
 	}
 	return pattern, true

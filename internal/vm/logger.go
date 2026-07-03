@@ -68,7 +68,7 @@ func (lf *LoggerFormatter) Truthy() bool    { return true }
 
 // loggerArg asserts an argument is a Logger, raising TypeError otherwise.
 func loggerArg(v object.Value) *Logger {
-	lo, ok := v.(*Logger)
+	lo, ok := object.KindOK[*Logger](v)
 	if !ok {
 		raise("TypeError", "value must be a Logger")
 	}
@@ -111,23 +111,32 @@ func (lo *Logger) bindDevice(logdev object.Value) {
 		lo.l.Sink = nil
 		return
 	}
-	switch d := logdev.(type) {
-	case object.Nil:
-		lo.dev = nil
-		lo.l.Sink = nil
-	case *object.String:
-		lo.path = d.Str()
-		lo.l.Sink = lo.fileSink
-	default:
-		lo.dev = logdev
-		lo.l.Sink = lo.ioSink
+	{
+		__sw90 := logdev
+		switch {
+		case object.IsNilObj(__sw90):
+			d := object.NilObj()
+			_ = d
+			lo.dev = nil
+			lo.l.Sink = nil
+		case object.IsKind[*object.String](__sw90):
+			d := object.Kind[*object.String](__sw90)
+			_ = d
+			lo.path = d.Str()
+			lo.l.Sink = lo.fileSink
+		default:
+			d := __sw90
+			_ = d
+			lo.dev = logdev
+			lo.l.Sink = lo.ioSink
+		}
 	}
 }
 
 // ioSink writes a formatted line to the bound IO object ($stdout/$stderr/an IO),
 // after applying any due size/period rotation (a no-op for a non-file device).
 func (lo *Logger) ioSink(s string) {
-	if io, ok := lo.dev.(*IOObj); ok {
+	if io, ok := object.KindOK[*IOObj](lo.dev); ok {
 		io.writeStr(s)
 		return
 	}
@@ -218,13 +227,22 @@ func (lo *Logger) armPeriod(now time.Time) {
 // size-based backup count; a String/Symbol ("daily"/"weekly"/"monthly"/…) selects
 // a calendar period and arms its clock.
 func (lo *Logger) applyShiftAge(v object.Value) {
-	switch x := v.(type) {
-	case object.Integer:
-		lo.shiftAge = int(x)
-	case *object.String:
-		lo.setPeriod(x.Str())
-	case object.Symbol:
-		lo.setPeriod(string(x))
+	{
+		__sw91 := v
+		switch {
+		case object.IsInt(__sw91):
+			x := object.AsInteger(__sw91)
+			_ = x
+			lo.shiftAge = int(x)
+		case object.IsKind[*object.String](__sw91):
+			x := object.Kind[*object.String](__sw91)
+			_ = x
+			lo.setPeriod(x.Str())
+		case object.IsKind[object.Symbol](__sw91):
+			x := object.Kind[object.Symbol](__sw91)
+			_ = x
+			lo.setPeriod(string(x))
+		}
 	}
 }
 
@@ -295,7 +313,7 @@ func (lo *Logger) emitCustom(sev lg.Severity, prog string, raw object.Value) {
 // library renders "message (Class)\nbacktrace"), and anything else stays an
 // object.Value the Inspector renders via #inspect.
 func (lo *Logger) coerce(v object.Value) any {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	if exc, ok := lo.asException(v); ok {
@@ -308,7 +326,7 @@ func (lo *Logger) coerce(v object.Value) any {
 // Exception shape (message / class name / backtrace), so msg2str renders it exactly
 // as MRI does.
 func (lo *Logger) asException(v object.Value) (lg.Exception, bool) {
-	if _, ok := v.(*RObject); !ok {
+	if _, ok := object.KindOK[*RObject](v); !ok {
 		return lg.Exception{}, false
 	}
 	cls := lo.vm.classOf(v)
@@ -320,7 +338,7 @@ func (lo *Logger) asException(v object.Value) (lg.Exception, bool) {
 		Class:   lo.vm.send(v, "class", nil, nil).ToS(),
 	}
 	if bt := lo.vm.send(v, "backtrace", nil, nil); !object.IsNil(bt) {
-		if arr, ok := bt.(*object.Array); ok {
+		if arr, ok := object.KindOK[*object.Array](bt); ok {
 			lines := make([]string, len(arr.Elems))
 			for i, e := range arr.Elems {
 				lines[i] = e.ToS()
@@ -381,7 +399,7 @@ func (vm *VM) registerLogger() {
 				lo.applyShiftAge(pos[1])
 			}
 			if len(pos) > 2 {
-				if n, ok := pos[2].(object.Integer); ok {
+				if n, ok := object.AsIntegerOK(pos[2]); ok {
 					lo.shiftSize = int64(n)
 				}
 			}
@@ -390,14 +408,14 @@ func (vm *VM) registerLogger() {
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *Logger { return v.(*Logger) }
+	self := func(v object.Value) *Logger { return object.Kind[*Logger](v) }
 
 	// add / log: the full Logger#add with the message/progname/block juggling.
 	addFn := func(_ *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
 		lo := self(v)
 		sev := lg.UNKNOWN
 		if len(args) > 0 {
-			if _, isNil := args[0].(object.Nil); !isNil {
+			if _, isNil := object.AsNilOK(args[0]); !isNil {
 				s, err := lg.CoerceSeverity(severityArg(args[0]))
 				if err != nil {
 					raise("ArgumentError", "%s", err.Error())
@@ -492,7 +510,7 @@ func (vm *VM) registerLogger() {
 	})
 	d("progname=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lo := self(v)
-		if _, isNil := args[0].(object.Nil); isNil {
+		if _, isNil := object.AsNilOK(args[0]); isNil {
 			lo.progDefault, lo.l.Progname = "", ""
 		} else {
 			lo.progDefault = strArg(args[0])
@@ -512,7 +530,7 @@ func (vm *VM) registerLogger() {
 	})
 	d("datetime_format=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lo := self(v)
-		if _, isNil := args[0].(object.Nil); isNil {
+		if _, isNil := object.AsNilOK(args[0]); isNil {
 			lo.l.Formatter.DatetimeFormat = ""
 		} else {
 			lo.l.Formatter.DatetimeFormat = strArg(args[0])
@@ -530,7 +548,7 @@ func (vm *VM) registerLogger() {
 	})
 	d("formatter=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lo := self(v)
-		if p, ok := args[0].(*Proc); ok {
+		if p, ok := object.KindOK[*Proc](args[0]); ok {
 			lo.formatter = p
 		} else {
 			lo.formatter = nil
@@ -568,18 +586,18 @@ func (lo *Logger) applyKwargs(kw *object.Hash) {
 		}
 	}
 	if v, ok := kw.Get(object.Symbol("progname")); ok {
-		if _, isNil := v.(object.Nil); !isNil {
+		if _, isNil := object.AsNilOK(v); !isNil {
 			lo.progDefault = v.ToS()
 			lo.l.Progname = lo.progDefault
 		}
 	}
 	if v, ok := kw.Get(object.Symbol("datetime_format")); ok {
-		if _, isNil := v.(object.Nil); !isNil {
+		if _, isNil := object.AsNilOK(v); !isNil {
 			lo.l.Formatter.DatetimeFormat = v.ToS()
 		}
 	}
 	if v, ok := kw.Get(object.Symbol("formatter")); ok {
-		if p, ok := v.(*Proc); ok {
+		if p, ok := object.KindOK[*Proc](v); ok {
 			lo.formatter = p
 		}
 	}
@@ -588,13 +606,22 @@ func (lo *Logger) applyKwargs(kw *object.Hash) {
 // severityArg marshals a level argument to the form CoerceSeverity accepts: an
 // Integer passes through, a String / Symbol passes its name (case-insensitive).
 func severityArg(v object.Value) any {
-	switch x := v.(type) {
-	case object.Integer:
-		return int(x)
-	case *object.String:
-		return x.Str()
-	case object.Symbol:
-		return string(x)
+	{
+		__sw92 := v
+		switch {
+		case object.IsInt(__sw92):
+			x := object.AsInteger(__sw92)
+			_ = x
+			return int(x)
+		case object.IsKind[*object.String](__sw92):
+			x := object.Kind[*object.String](__sw92)
+			_ = x
+			return x.Str()
+		case object.IsKind[object.Symbol](__sw92):
+			x := object.Kind[object.Symbol](__sw92)
+			_ = x
+			return string(x)
+		}
 	}
 	return v
 }
@@ -621,7 +648,7 @@ func (vm *VM) registerLoggerSeverity(cls *RClass) {
 // registerLoggerErrors installs Logger::Error and Logger::ShiftingError, matching
 // MRI's hierarchy (Logger::Error < RuntimeError, ShiftingError < Logger::Error).
 func (vm *VM) registerLoggerErrors(cls *RClass) {
-	runtimeErr, _ := vm.consts["RuntimeError"].(*RClass)
+	runtimeErr, _ := object.KindOK[*RClass](vm.consts["RuntimeError"])
 	if runtimeErr == nil {
 		runtimeErr = vm.cException
 	}
@@ -655,7 +682,7 @@ func (vm *VM) registerLoggerFormatterClass(cls *RClass) {
 			return lf
 		}}
 
-	self := func(v object.Value) *LoggerFormatter { return v.(*LoggerFormatter) }
+	self := func(v object.Value) *LoggerFormatter { return object.Kind[*LoggerFormatter](v) }
 
 	// call(severity_label, time, progname, msg) → the formatted line. The host
 	// unwraps the Ruby Time to a Go time and projects an exception / String / other
@@ -665,7 +692,7 @@ func (vm *VM) registerLoggerFormatterClass(cls *RClass) {
 		label := args[0].ToS()
 		t := loggerTimeOf(args[1])
 		prog := ""
-		if _, isNil := args[2].(object.Nil); !isNil {
+		if _, isNil := object.AsNilOK(args[2]); !isNil {
 			prog = args[2].ToS()
 		}
 		msg := loggerMsg(vm, args[3])
@@ -680,7 +707,7 @@ func (vm *VM) registerLoggerFormatterClass(cls *RClass) {
 	})
 	fc.define("datetime_format=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lf := self(v)
-		if _, isNil := args[0].(object.Nil); isNil {
+		if _, isNil := object.AsNilOK(args[0]); isNil {
 			lf.f.DatetimeFormat = ""
 		} else {
 			lf.f.DatetimeFormat = strArg(args[0])
@@ -692,7 +719,7 @@ func (vm *VM) registerLoggerFormatterClass(cls *RClass) {
 // loggerMsg projects a Ruby message onto the library's msg2str input (String /
 // Exception / other), shared by Logger::Formatter#call.
 func loggerMsg(vm *VM, v object.Value) any {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	lo := &Logger{vm: vm}
@@ -705,7 +732,7 @@ func loggerMsg(vm *VM, v object.Value) any {
 // loggerTimeOf unwraps a Ruby Time to a Go time.Time; a non-Time falls back to the
 // current instant (the formatter is timestamp-tolerant).
 func loggerTimeOf(v object.Value) time.Time {
-	if t, ok := v.(*Time); ok {
+	if t, ok := object.KindOK[*Time](v); ok {
 		return time.Unix(t.t.ToUnix(), 0)
 	}
 	return time.Now()

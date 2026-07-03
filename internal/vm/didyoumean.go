@@ -47,13 +47,22 @@ func (s *SpellChecker) Truthy() bool    { return true }
 // SpellChecker stringifies each entry, so a non-String/Symbol entry keys by its
 // ToS() rendering and maps back to that same original Ruby value.
 func dictName(v object.Value) string {
-	switch x := v.(type) {
-	case object.Symbol:
-		return string(x)
-	case *object.String:
-		return string(x.Bytes())
-	default:
-		return x.ToS()
+	{
+		__sw46 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw46):
+			x := object.Kind[object.Symbol](__sw46)
+			_ = x
+			return string(x)
+		case object.IsKind[*object.String](__sw46):
+			x := object.Kind[*object.String](__sw46)
+			_ = x
+			return string(x.Bytes())
+		default:
+			x := __sw46
+			_ = x
+			return x.ToS()
+		}
 	}
 }
 
@@ -112,7 +121,7 @@ func (vm *VM) registerDidYouMean() {
 	// SpellChecker#correct(input) — the ranked matches in the dictionary entries'
 	// original type, or [] when nothing is close enough.
 	sc.define("correct", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return v.(*SpellChecker).correct(dictName(args[0]))
+		return object.Kind[*SpellChecker](v).correct(dictName(args[0]))
 	})
 }
 
@@ -124,7 +133,7 @@ func trailingHash(args []object.Value) (*object.Hash, bool) {
 	if len(args) == 0 {
 		return nil, false
 	}
-	h, ok := args[len(args)-1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](args[len(args)-1])
 	return h, ok
 }
 
@@ -133,7 +142,7 @@ func trailingHash(args []object.Value) (*object.Hash, bool) {
 // as its original Ruby value, index-aligned, so #correct can round-trip the
 // entry's String/Symbol type.
 func newSpellChecker(dict object.Value) *SpellChecker {
-	arr, ok := dict.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](dict)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into Array", dict.Inspect())
 	}

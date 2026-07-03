@@ -328,7 +328,7 @@ func TestJWTToRuby(t *testing.T) {
 	if v := jwtToRuby(true); v != object.Bool(true) {
 		t.Errorf("bool -> %v", v)
 	}
-	if v, ok := jwtToRuby("s").(*object.String); !ok || v.Str() != "s" {
+	if v, ok := object.KindOK[*object.String](jwtToRuby("s")); !ok || v.Str() != "s" {
 		t.Errorf("string -> %v", v)
 	}
 	if v := jwtToRuby(float64(4)); v != object.IntValue(4) {
@@ -343,13 +343,13 @@ func TestJWTToRuby(t *testing.T) {
 	if v := jwtToRuby(7); v != object.IntValue(7) {
 		t.Errorf("int -> %v", v)
 	}
-	arr := jwtToRuby([]any{int64(1)}).(*object.Array)
+	arr := object.Kind[*object.Array](jwtToRuby([]any{int64(1)}))
 	if len(arr.Elems) != 1 {
 		t.Errorf("array -> %v", arr)
 	}
 	m := jwt.NewOrderedMap()
 	m.Set("k", int64(2))
-	h := jwtToRuby(m).(*object.Hash)
+	h := object.Kind[*object.Hash](jwtToRuby(m))
 	if v, _ := h.Get(object.NewString("k")); v != object.IntValue(2) {
 		t.Errorf("ordered-map -> %v", v)
 	}

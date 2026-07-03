@@ -145,7 +145,7 @@ func (vm *VM) registerENV() {
 
 // setEnvKV sets or (on a nil value) deletes an environment variable.
 func setEnvKV(key string, v object.Value) {
-	if _, isNil := v.(object.Nil); isNil {
+	if _, isNil := object.AsNilOK(v); isNil {
 		_ = envUnsetenv(key)
 		return
 	}
@@ -165,7 +165,7 @@ func envHash() *object.Hash {
 
 // mergeEnvHash sets each pair of a Ruby Hash into the process environment.
 func mergeEnvHash(v object.Value) {
-	h, ok := v.(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into Hash", classNameOf(v))
 	}

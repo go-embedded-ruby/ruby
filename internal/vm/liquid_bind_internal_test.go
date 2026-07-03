@@ -36,7 +36,7 @@ func TestLiquidHandleValue(t *testing.T) {
 // program cannot build such an instance, so the arm is exercised here directly.
 func TestLiquidHandleUnparsed(t *testing.T) {
 	vm := New(io.Discard)
-	cls := vm.consts["Liquid::Template"].(*RClass)
+	cls := object.Kind[*RClass](vm.consts["Liquid::Template"])
 	inst := &RObject{class: cls, ivars: map[string]object.Value{}}
 	defer func() {
 		re, ok := recover().(RubyError)

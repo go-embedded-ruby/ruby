@@ -62,7 +62,7 @@ func (vm *VM) registerBCrypt() {
 // re-raised library sentinel's exception lookup finds the same class), exactly as
 // the JSON error tree is.
 func (vm *VM) registerBCryptErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	errs := newClass("BCrypt::Errors", nil)
 	errs.isModule = true
 	mod.consts["Errors"] = errs
@@ -118,30 +118,30 @@ func (vm *VM) registerBCryptPassword(mod *RClass) {
 	// == compares a candidate secret against the stored hash in constant time
 	// (password == "secret"), matching the gem's Password#== / #is_password?.
 	eq := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*BCryptPassword).p.EqualString(strArg(args[0])))
+		return object.Bool(object.Kind[*BCryptPassword](self).p.EqualString(strArg(args[0])))
 	}
 	c.define("==", eq)
 	c.define("is_password?", eq)
 
 	c.define("cost", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*BCryptPassword).p.Cost()))
+		return object.IntValue(int64(object.Kind[*BCryptPassword](self).p.Cost()))
 	})
 	c.define("salt", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*BCryptPassword).p.Salt())
+		return object.NewString(object.Kind[*BCryptPassword](self).p.Salt())
 	})
 	c.define("version", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*BCryptPassword).p.Version())
+		return object.NewString(object.Kind[*BCryptPassword](self).p.Version())
 	})
 	c.define("checksum", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*BCryptPassword).p.Checksum())
+		return object.NewString(object.Kind[*BCryptPassword](self).p.Checksum())
 	})
 	toS := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*BCryptPassword).p.String())
+		return object.NewString(object.Kind[*BCryptPassword](self).p.String())
 	}
 	c.define("to_s", toS)
 	c.define("to_str", toS)
 	c.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*BCryptPassword).Inspect())
+		return object.NewString(object.Kind[*BCryptPassword](self).Inspect())
 	})
 }
 
@@ -201,7 +201,7 @@ func bcryptOptsHash(rest []object.Value) *object.Hash {
 	if len(rest) == 0 {
 		return nil
 	}
-	h, ok := rest[len(rest)-1].(*object.Hash)
+	h, ok := object.KindOK[*object.Hash](rest[len(rest)-1])
 	if !ok {
 		return nil
 	}

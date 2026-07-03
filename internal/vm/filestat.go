@@ -193,7 +193,7 @@ func statOrRaise(path string, follow bool) *FileStat {
 // (which created the File class and the Errno hierarchy) and after the prelude
 // (so Comparable is available to mix in for File::Stat#<=> ordering).
 func (vm *VM) registerFileStat() {
-	cFile := vm.consts["File"].(*RClass)
+	cFile := object.Kind[*RClass](vm.consts["File"])
 
 	cStat := newClass("File::Stat", vm.cObject)
 	vm.cFileStat = cStat
@@ -201,7 +201,7 @@ func (vm *VM) registerFileStat() {
 	vm.consts["File::Stat"] = cStat
 	// Comparable gives <, <=, >, >= from #<=> (used by code that sorts stats by
 	// mtime); the prelude registered it before this runs.
-	if cmp, ok := vm.consts["Comparable"].(*RClass); ok {
+	if cmp, ok := object.KindOK[*RClass](vm.consts["Comparable"]); ok {
 		cStat.includes = append(cStat.includes, cmp)
 	}
 
@@ -211,7 +211,7 @@ func (vm *VM) registerFileStat() {
 		return statOrRaise(pathArg(vm, args[0]), true)
 	}}
 
-	self := func(v object.Value) *FileStat { return v.(*FileStat) }
+	self := func(v object.Value) *FileStat { return object.Kind[*FileStat](v) }
 	d := func(name string, fn NativeFn) { cStat.define(name, fn) }
 
 	d("directory?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -306,7 +306,7 @@ func (vm *VM) registerFileStat() {
 		return statTime(self(v).fi.ModTime().Unix())
 	})
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		other, ok := args[0].(*FileStat)
+		other, ok := object.KindOK[*FileStat](args[0])
 		if !ok {
 			return object.NilV
 		}

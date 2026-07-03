@@ -104,7 +104,7 @@ const (
 func clockGettimeUnit(d time.Duration, args []object.Value) object.Value {
 	unit := "float_second"
 	if len(args) > 1 {
-		if s, ok := args[1].(object.Symbol); ok {
+		if s, ok := object.KindOK[object.Symbol](args[1]); ok {
 			unit = string(s)
 		}
 	}

@@ -74,7 +74,7 @@ func (vm *VM) registerRackRequest(mod *RClass) {
 		return &RackRequest{req: rack.NewRequest(rackEnv(args[0])), cls: cls}
 	}}
 
-	self := func(v object.Value) *rack.Request { return v.(*RackRequest).req }
+	self := func(v object.Value) *rack.Request { return object.Kind[*RackRequest](v).req }
 
 	// String accessors straight off the env.
 	str := func(fn func(*rack.Request) string) NativeFn {
@@ -149,7 +149,7 @@ func (vm *VM) registerRackRequest(mod *RClass) {
 // into a native method returning a Ruby Hash, raising on a parse error.
 func rackParamsMethod(fn func(*rack.Request) (*rack.Params, error)) NativeFn {
 	return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		p, err := fn(v.(*RackRequest).req)
+		p, err := fn(object.Kind[*RackRequest](v).req)
 		if err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
@@ -176,7 +176,7 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 		return &RackResponse{resp: rack.NewResponse(body, status, headers), cls: cls}
 	}}
 
-	self := func(v object.Value) *rack.Response { return v.(*RackResponse).resp }
+	self := func(v object.Value) *rack.Response { return object.Kind[*RackResponse](v).resp }
 
 	cls.define("write", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		chunk := rackStr(rackArg(args))

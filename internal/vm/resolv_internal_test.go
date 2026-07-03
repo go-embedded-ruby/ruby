@@ -62,8 +62,8 @@ func TestResolvVMFallbacks(t *testing.T) {
 	// data accessor's empty-strings guard.
 	txt := newRecord(byType[resolv.TypeTXT], &resolv.TXT{})
 	dataFn := byType[resolv.TypeTXT].methods["data"].native
-	if got := dataFn(vm, txt, nil, nil); got.(*object.String).Str() != "" {
-		t.Errorf("empty TXT data = %q, want \"\"", got.(*object.String).Str())
+	if got := dataFn(vm, txt, nil, nil); object.Kind[*object.String](got).Str() != "" {
+		t.Errorf("empty TXT data = %q, want \"\"", object.Kind[*object.String](got).Str())
 	}
 }
 
@@ -73,14 +73,14 @@ func TestResolvVMFallbacks(t *testing.T) {
 // class to the (otherwise box-backed) native methods.
 func TestResolvMessageBoxAbsent(t *testing.T) {
 	vm := New(nil)
-	dns := vm.consts["Resolv"].(*RClass).consts["DNS"].(*RClass)
-	msgCls := dns.consts["Message"].(*RClass)
-	hostsCls := vm.consts["Resolv"].(*RClass).consts["Hosts"].(*RClass)
+	dns := object.Kind[*RClass](object.Kind[*RClass](vm.consts["Resolv"]).consts["DNS"])
+	msgCls := object.Kind[*RClass](dns.consts["Message"])
+	hostsCls := object.Kind[*RClass](object.Kind[*RClass](vm.consts["Resolv"]).consts["Hosts"])
 
 	// Message#id off a box-less object falls back to a fresh Message (id 0).
 	bareMsg := &RObject{class: msgCls, ivars: map[string]object.Value{}}
 	idFn := msgCls.methods["id"].native
-	if got := idFn(vm, bareMsg, nil, nil); got.(object.Integer) != 0 {
+	if got := idFn(vm, bareMsg, nil, nil); object.AsInteger(got) != 0 {
 		t.Errorf("box-less Message#id = %v, want 0", got)
 	}
 
@@ -88,7 +88,7 @@ func TestResolvMessageBoxAbsent(t *testing.T) {
 	bareHosts := &RObject{class: hostsCls, ivars: map[string]object.Value{}}
 	gaFn := hostsCls.methods["getaddresses"].native
 	got := gaFn(vm, bareHosts, []object.Value{object.NewString("x")}, nil)
-	if arr, ok := got.(*object.Array); !ok || len(arr.Elems) != 0 {
+	if arr, ok := object.KindOK[*object.Array](got); !ok || len(arr.Elems) != 0 {
 		t.Errorf("box-less Hosts#getaddresses = %#v, want []", got)
 	}
 }

@@ -89,7 +89,7 @@ func (vm *VM) registerMail() {
 // (encoded / to_s).
 func (vm *VM) registerMailMessage(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) mailMsg { return v.(*MailMessage).m }
+	self := func(v object.Value) mailMsg { return object.Kind[*MailMessage](v).m }
 
 	// The address fields (from/to/cc/bcc/reply_to) are dual getter/setter DSL
 	// methods, matching the gem: called with no argument they read the field
@@ -229,7 +229,7 @@ func (vm *VM) registerMailMessage(cls *RClass) {
 // views and to_s.
 func (vm *VM) registerMailBody(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) mailBody { return v.(*MailBody).b }
+	self := func(v object.Value) mailBody { return object.Kind[*MailBody](v).b }
 
 	d("decoded", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).DecodedString())
@@ -249,7 +249,7 @@ func (vm *VM) registerMailBody(cls *RClass) {
 // decoded readers.
 func (vm *VM) registerMailField(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) mailField { return v.(*MailField).f }
+	self := func(v object.Value) mailField { return object.Kind[*MailField](v).f }
 
 	d("name", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).Name())

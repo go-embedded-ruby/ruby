@@ -57,7 +57,7 @@ func (vm *VM) registerKramdown() {
 
 	// Kramdown::Document#to_html renders the held source under the held options.
 	doc.define("to_html", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		d := self.(*KramdownDoc)
+		d := object.Kind[*KramdownDoc](self)
 		return object.NewString(kramdownRender(d.src, d.opt))
 	})
 
@@ -69,7 +69,7 @@ func (vm *VM) registerKramdown() {
 		if len(args) > 0 {
 			opt = args[0]
 		}
-		return object.NewString(kramdownRender(self.(*object.String).Str(), opt))
+		return object.NewString(kramdownRender(object.Kind[*object.String](self).Str(), opt))
 	})
 }
 
@@ -89,7 +89,7 @@ func (d *KramdownDoc) Truthy() bool    { return true }
 // String yields its contents, and any other value its to_s, so a non-String
 // argument does not crash the renderer.
 func kramdownSourceArg(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](v); ok {
 		return s.Str()
 	}
 	return v.ToS()

@@ -168,23 +168,23 @@ func TestYAMLBindFromScalars(t *testing.T) {
 	vm := New(nil)
 	c := &yamlFromCtx{vm: vm, seen: map[yaml.Value]object.Value{}}
 	bg := new(big.Int).Exp(big.NewInt(10), big.NewInt(30), nil)
-	if v, ok := c.conv(bg).(*object.Bignum); !ok || v.I.Cmp(bg) != 0 {
+	if v, ok := object.KindOK[*object.Bignum](c.conv(bg)); !ok || v.I.Cmp(bg) != 0 {
 		t.Errorf("*big.Int -> %T", c.conv(bg))
 	}
-	if v, ok := c.conv(float64(2.5)).(object.Float); !ok || float64(v) != 2.5 {
+	if v, ok := object.AsFloatOK(c.conv(float64(2.5))); !ok || float64(v) != 2.5 {
 		t.Errorf("float64 -> %v", c.conv(float64(2.5)))
 	}
 	tm := c.conv(stdtime.Unix(0, 0).UTC())
-	if rt, ok := tm.(*Time); !ok || rt.t.ToUnix() != 0 {
+	if rt, ok := object.KindOK[*Time](tm); !ok || rt.t.ToUnix() != 0 {
 		t.Errorf("time.Time -> %T", tm)
 	}
-	if cl, ok := c.conv(yaml.Class("String")).(*RClass); !ok || cl.ToS() != "String" {
+	if cl, ok := object.KindOK[*RClass](c.conv(yaml.Class("String"))); !ok || cl.ToS() != "String" {
 		t.Errorf("Class -> %T", c.conv(yaml.Class("String")))
 	}
-	if md, ok := c.conv(yaml.Module("Comparable")).(*RClass); !ok || md.ToS() != "Comparable" {
+	if md, ok := object.KindOK[*RClass](c.conv(yaml.Module("Comparable"))); !ok || md.ToS() != "Comparable" {
 		t.Errorf("Module -> %T", c.conv(yaml.Module("Comparable")))
 	}
-	if rx, ok := c.conv(&yaml.Regexp{Source: "ab", Flags: "i"}).(*Regexp); !ok || rx.source != "ab" {
+	if rx, ok := object.KindOK[*Regexp](c.conv(&yaml.Regexp{Source: "ab", Flags: "i"})); !ok || rx.source != "ab" {
 		t.Errorf("Regexp -> %T", c.conv(&yaml.Regexp{Source: "ab"}))
 	}
 	// An unmodelled value maps to nil (the defensive final arm). A bare int (not
@@ -200,11 +200,11 @@ func TestYAMLBindFromRangeAndBound(t *testing.T) {
 	vm := New(nil)
 	c := &yamlFromCtx{vm: vm, seen: map[yaml.Value]object.Value{}}
 	r := c.conv(&yaml.Range{Begin: nil, End: int64(5), Exclusive: true})
-	rng, ok := r.(*object.Range)
+	rng, ok := object.KindOK[*object.Range](r)
 	if !ok || rng.Lo != nil || !rng.Exclusive {
 		t.Fatalf("range -> %T %v", r, r)
 	}
-	if hi, ok := rng.Hi.(object.Integer); !ok || int64(hi) != 5 {
+	if hi, ok := object.AsIntegerOK(rng.Hi); !ok || int64(hi) != 5 {
 		t.Errorf("range end -> %v", rng.Hi)
 	}
 }
@@ -226,7 +226,7 @@ func TestYAMLBindFromSharedCache(t *testing.T) {
 	}
 	// A bare object (empty class) resolves to the Object class.
 	bare := c.conv(&yaml.Object{Class: "", IVars: map[string]yaml.Value{}})
-	if ro, ok := bare.(*RObject); !ok || ro.class.name != "Object" {
+	if ro, ok := object.KindOK[*RObject](bare); !ok || ro.class.name != "Object" {
 		t.Errorf("bare object -> %T", bare)
 	}
 }
@@ -301,7 +301,7 @@ func TestYAMLBindFromTimeConstruct(t *testing.T) {
 	c := &yamlFromCtx{vm: vm, seen: map[yaml.Value]object.Value{}}
 	want := int64(1_600_000_000)
 	v := c.conv(stdtime.Unix(want, 0).UTC())
-	rt, ok := v.(*Time)
+	rt, ok := object.KindOK[*Time](v)
 	if !ok || rt.t.ToUnix() != want {
 		t.Fatalf("time round trip -> %T %v", v, v)
 	}

@@ -35,26 +35,26 @@ func (vm *VM) registerMethod() {
 	})
 
 	call := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		b := self.(*BoundMethod)
+		b := object.Kind[*BoundMethod](self)
 		return vm.invoke(b.m, b.recv, args, blk)
 	}
 	vm.cMethod.define("call", call)
 	vm.cMethod.define("[]", call)
 	vm.cMethod.define("===", call)
 	vm.cMethod.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(self.(*BoundMethod).name)
+		return object.Symbol(object.Kind[*BoundMethod](self).name)
 	})
 	vm.cMethod.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(methodArity(self.(*BoundMethod).m)))
+		return object.IntValue(int64(methodArity(object.Kind[*BoundMethod](self).m)))
 	})
 	vm.cMethod.define("owner", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*BoundMethod).m.owner // always non-nil for a resolved method
+		return object.Kind[*BoundMethod](self).m.owner // always non-nil for a resolved method
 	})
 	vm.cMethod.define("receiver", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self.(*BoundMethod).recv
+		return object.Kind[*BoundMethod](self).recv
 	})
 	vm.cMethod.define("to_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		b := self.(*BoundMethod)
+		b := object.Kind[*BoundMethod](self)
 		return &Proc{
 			native:      func(vm *VM, args []object.Value) object.Value { return vm.send(b.recv, b.name, args, nil) },
 			nativeArity: methodArity(b.m),
@@ -67,7 +67,7 @@ func (vm *VM) registerMethod() {
 // and the class chain), or nil. Operators handled by the compiler fast path are
 // not real methods and won't resolve here.
 func (vm *VM) resolveMethod(recv object.Value, name string) *Method {
-	if cls, ok := recv.(*RClass); ok {
+	if cls, ok := object.KindOK[*RClass](recv); ok {
 		if m := lookupSMethod(cls, name); m != nil {
 			return m
 		}

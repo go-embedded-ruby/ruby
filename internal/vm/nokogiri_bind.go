@@ -64,11 +64,18 @@ func nokogiriSelectorArg(args []object.Value) string {
 // nokogiriStr coerces a value to its string: a String yields its contents, a
 // Symbol its name, and any other value its to_s.
 func nokogiriStr(v object.Value) string {
-	switch n := v.(type) {
-	case *object.String:
-		return n.Str()
-	case object.Symbol:
-		return string(n)
+	{
+		__sw105 := v
+		switch {
+		case object.IsKind[*object.String](__sw105):
+			n := object.Kind[*object.String](__sw105)
+			_ = n
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw105):
+			n := object.Kind[object.Symbol](__sw105)
+			_ = n
+			return string(n)
+		}
 	}
 	return v.ToS()
 }

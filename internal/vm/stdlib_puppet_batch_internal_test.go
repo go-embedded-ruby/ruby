@@ -135,9 +135,9 @@ func TestProcessGroupsError(t *testing.T) {
 	processGroups = func() ([]int, error) { return nil, errors.New("boom") }
 
 	vm := New(nil)
-	mod := vm.consts["Process"].(*RClass)
+	mod := object.Kind[*RClass](vm.consts["Process"])
 	out := mod.smethods["groups"].native(vm, mod, nil, nil)
-	arr, ok := out.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](out)
 	if !ok || len(arr.Elems) != 0 {
 		t.Fatalf("groups error: got %#v, want empty Array", out)
 	}
@@ -153,9 +153,9 @@ func TestProcessGroupsSuccess(t *testing.T) {
 	processGroups = func() ([]int, error) { return []int{0, 20}, nil }
 
 	vm := New(nil)
-	mod := vm.consts["Process"].(*RClass)
+	mod := object.Kind[*RClass](vm.consts["Process"])
 	out := mod.smethods["groups"].native(vm, mod, nil, nil)
-	arr, ok := out.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](out)
 	if !ok || len(arr.Elems) != 2 || arr.Elems[0] != object.Integer(0) || arr.Elems[1] != object.Integer(20) {
 		t.Fatalf("groups success: got %#v, want [0, 20]", out)
 	}
@@ -165,9 +165,9 @@ func TestProcessGroupsSuccess(t *testing.T) {
 // directly, which uses the wall clock.
 func TestClockGettimeRealtimeBranch(t *testing.T) {
 	vm := New(nil)
-	mod := vm.consts["Process"].(*RClass)
+	mod := object.Kind[*RClass](vm.consts["Process"])
 	out := mod.smethods["clock_gettime"].native(vm, mod, []object.Value{object.Integer(clockRealtime)}, nil)
-	if _, ok := out.(object.Float); !ok {
+	if _, ok := object.AsFloatOK(out); !ok {
 		t.Fatalf("realtime clock: got %#v, want Float", out)
 	}
 }

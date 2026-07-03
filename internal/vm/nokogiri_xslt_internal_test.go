@@ -48,7 +48,7 @@ func TestNokogiriXSLTParamValue(t *testing.T) {
 
 // TestNokogiriXSLTStylesheetInspect covers the wrapper's ToS / Inspect / Truthy.
 func TestNokogiriXSLTStylesheetInspect(t *testing.T) {
-	s := nokogiriXSLTParse(`<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/"><o/></xsl:template></xsl:stylesheet>`).(*NokogiriXSLTStylesheet)
+	s := object.Kind[*NokogiriXSLTStylesheet](nokogiriXSLTParse(`<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/"><o/></xsl:template></xsl:stylesheet>`))
 	if s.ToS() != "#<Nokogiri::XSLT::Stylesheet>" {
 		t.Errorf("ToS = %q", s.ToS())
 	}
@@ -63,7 +63,7 @@ func TestNokogiriXSLTStylesheetInspect(t *testing.T) {
 // TestNokogiriXSLTArgsNonHashParams covers nokogiriXSLTArgs's branch where the
 // second argument is present but not a Hash (params stays nil).
 func TestNokogiriXSLTArgsNonHashParams(t *testing.T) {
-	doc := nokogiriParseXML("<root/>").(*NokogiriDocument)
+	doc := object.Kind[*NokogiriDocument](nokogiriParseXML("<root/>"))
 	gotDoc, params := nokogiriXSLTArgs([]object.Value{doc, object.Integer(1)})
 	if gotDoc == nil {
 		t.Fatal("expected the document back")

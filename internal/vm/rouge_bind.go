@@ -55,7 +55,7 @@ func rougeFindLexer(cls *RClass, name string) object.Value {
 // instance. A receiver without one raises, matching a lexer object built outside
 // Lexer.find.
 func rougeLexerHandle(self object.Value) *rougeLexer {
-	if h, ok := getIvar(self, "@__lexer").(*rougeLexer); ok {
+	if h, ok := object.KindOK[*rougeLexer](getIvar(self, "@__lexer")); ok {
 		return h
 	}
 	raise("Rouge::Error", "lexer was not found")

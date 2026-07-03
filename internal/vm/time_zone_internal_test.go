@@ -7,6 +7,8 @@ package vm
 import (
 	"testing"
 	stdtime "time"
+
+	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // TestGoTimeToRubyPreservesWallClock proves the Bug-1 fix: a Go time.Time in a
@@ -18,7 +20,7 @@ func TestGoTimeToRubyPreservesWallClock(t *testing.T) {
 	loc := stdtime.FixedZone("plus2", 2*3600)
 	src := stdtime.Date(2016, 5, 27, 12, 0, 0, 0, loc)
 
-	rt := goTimeToRuby(src).(*Time)
+	rt := object.Kind[*Time](goTimeToRuby(src))
 
 	// strftime path (Time#strftime delegates to t.Format(rubyLayout(...))): the
 	// wall clock of the Time's own zone, NOT the UTC-shifted hour.
@@ -47,7 +49,7 @@ func TestGoTimeToRubyNegativeOffset(t *testing.T) {
 	loc := stdtime.FixedZone("minus5", -5*3600) // EST-like
 	src := stdtime.Date(1979, 5, 27, 3, 32, 0, 0, loc)
 
-	rt := goTimeToRuby(src).(*Time)
+	rt := object.Kind[*Time](goTimeToRuby(src))
 
 	if got := rt.t.Format(rubyLayout("%H:%M:%S")); got != "03:32:00" {
 		t.Errorf("local strftime = %q, want %q", got, "03:32:00")
@@ -65,7 +67,7 @@ func TestGoTimeToRubySubSecondTruncated(t *testing.T) {
 	loc := stdtime.FixedZone("plus1", 3600)
 	src := stdtime.Date(2020, 1, 1, 6, 0, 0, 987654321, loc)
 
-	rt := goTimeToRuby(src).(*Time)
+	rt := object.Kind[*Time](goTimeToRuby(src))
 
 	if got := rt.t.Format(rubyLayout("%H:%M:%S")); got != "06:00:00" {
 		t.Errorf("truncated strftime = %q, want %q", got, "06:00:00")

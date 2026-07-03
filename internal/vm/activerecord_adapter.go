@@ -75,17 +75,24 @@ func activeRecordConnPath(args []object.Value) string {
 	if len(args) == 0 {
 		return ":memory:"
 	}
-	switch v := args[0].(type) {
-	case *object.Hash:
-		if db, ok := v.Get(object.Symbol("database")); ok {
-			return arStr(db)
+	{
+		__sw3 := args[0]
+		switch {
+		case object.IsKind[*object.Hash](__sw3):
+			v := object.Kind[*object.Hash](__sw3)
+			_ = v
+			if db, ok := v.Get(object.Symbol("database")); ok {
+				return arStr(db)
+			}
+			if db, ok := v.Get(object.NewString("database")); ok {
+				return arStr(db)
+			}
+			return ":memory:"
+		default:
+			v := __sw3
+			_ = v
+			return arStr(args[0])
 		}
-		if db, ok := v.Get(object.NewString("database")); ok {
-			return arStr(db)
-		}
-		return ":memory:"
-	default:
-		return arStr(args[0])
 	}
 }
 

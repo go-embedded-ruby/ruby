@@ -157,14 +157,14 @@ func (q *RQueue) Inspect() string { return q.ToS() }
 func (q *RQueue) Truthy() bool    { return true }
 
 func (vm *VM) registerThread() {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	if _, ok := vm.consts["ThreadError"]; !ok {
 		vm.consts["ThreadError"] = newClass("ThreadError", std)
 	}
 	// StopIteration is in place from the Phase-3 exception hierarchy (built before
 	// the stdlib), so ClosedQueueError < StopIteration as in MRI.
 	if _, ok := vm.consts["ClosedQueueError"]; !ok {
-		vm.consts["ClosedQueueError"] = newClass("ClosedQueueError", vm.consts["StopIteration"].(*RClass))
+		vm.consts["ClosedQueueError"] = newClass("ClosedQueueError", object.Kind[*RClass](vm.consts["StopIteration"]))
 	}
 
 	vm.registerThreadClass()
@@ -229,20 +229,20 @@ func (vm *VM) registerThreadClass() {
 	})
 
 	cThread.define("join", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		t := self.(*RThread)
+		t := object.Kind[*RThread](self)
 		vm.threadJoin(t)
 		return t
 	})
 	cThread.define("value", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		t := self.(*RThread)
+		t := object.Kind[*RThread](self)
 		vm.threadJoin(t)
 		return t.result
 	})
 	cThread.define("alive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(!self.(*RThread).isDone())
+		return object.Bool(!object.Kind[*RThread](self).isDone())
 	})
 	cThread.define("status", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		t := self.(*RThread)
+		t := object.Kind[*RThread](self)
 		if t.isDone() {
 			if t.err != nil {
 				return object.NilV // terminated by an exception
@@ -252,41 +252,41 @@ func (vm *VM) registerThreadClass() {
 		return object.NewString(t.status)
 	})
 	cThread.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if n := self.(*RThread).name; !object.IsNil(n) {
+		if n := object.Kind[*RThread](self).name; !object.IsNil(n) {
 			return n
 		}
 		return object.NilV
 	})
 	cThread.define("name=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*RThread).name = args[0]
+		object.Kind[*RThread](self).name = args[0]
 		return args[0]
 	})
 	cThread.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if v, ok := self.(*RThread).locals[threadLocalKey(args[0])]; ok {
+		if v, ok := object.Kind[*RThread](self).locals[threadLocalKey(args[0])]; ok {
 			return v
 		}
 		return object.NilV
 	})
 	cThread.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*RThread).locals[threadLocalKey(args[0])] = args[1]
+		object.Kind[*RThread](self).locals[threadLocalKey(args[0])] = args[1]
 		return args[1]
 	})
 	cThread.define("key?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		_, ok := self.(*RThread).locals[threadLocalKey(args[0])]
+		_, ok := object.Kind[*RThread](self).locals[threadLocalKey(args[0])]
 		return object.Bool(ok)
 	})
 	// thread_variable_get/set/? and thread_variables: thread-local storage that is
 	// distinct from Thread#[] (which is fiber-local in MRI). Keys are coerced to
 	// Symbols like the fiber-local accessors.
 	cThread.define("thread_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		t := self.(*RThread)
+		t := object.Kind[*RThread](self)
 		if v, ok := t.tvars[threadVarKey(args[0])]; ok {
 			return v
 		}
 		return object.NilV
 	})
 	cThread.define("thread_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		t := self.(*RThread)
+		t := object.Kind[*RThread](self)
 		if t.tvars == nil {
 			t.tvars = map[object.Value]object.Value{}
 		}
@@ -294,26 +294,26 @@ func (vm *VM) registerThreadClass() {
 		return args[1]
 	})
 	cThread.define("thread_variable?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		_, ok := self.(*RThread).tvars[threadVarKey(args[0])]
+		_, ok := object.Kind[*RThread](self).tvars[threadVarKey(args[0])]
 		return object.Bool(ok)
 	})
 	cThread.define("thread_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		t := self.(*RThread)
+		t := object.Kind[*RThread](self)
 		keys := make([]object.Value, 0, len(t.tvars))
 		for k := range t.tvars {
 			keys = append(keys, k)
 		}
 		// Deterministic order (map iteration is randomised): sort the Symbol keys.
 		sort.SliceStable(keys, func(i, j int) bool {
-			return string(keys[i].(object.Symbol)) < string(keys[j].(object.Symbol))
+			return string(object.Kind[object.Symbol](keys[i])) < string(object.Kind[object.Symbol](keys[j]))
 		})
 		return object.NewArrayFromSlice(keys)
 	})
 	cThread.define("abort_on_exception", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*RThread).abort)
+		return object.Bool(object.Kind[*RThread](self).abort)
 	})
 	cThread.define("abort_on_exception=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*RThread).abort = args[0].Truthy()
+		object.Kind[*RThread](self).abort = args[0].Truthy()
 		return args[0]
 	})
 }
@@ -332,7 +332,7 @@ func (vm *VM) threadJoin(t *RThread) {
 // threadLocalKey normalises a Thread#[] key (Symbol or String) to a Symbol, so
 // thread[:k] and thread["k"] address the same slot, as in MRI.
 func threadLocalKey(k object.Value) object.Value {
-	if s, ok := k.(*object.String); ok {
+	if s, ok := object.KindOK[*object.String](k); ok {
 		return object.Symbol(s.Str())
 	}
 	return k
@@ -343,11 +343,18 @@ func threadLocalKey(k object.Value) object.Value {
 // thread_variable_* accessors, which — unlike Thread#[] — do not accept other
 // key types.
 func threadVarKey(k object.Value) object.Value {
-	switch v := k.(type) {
-	case object.Symbol:
-		return v
-	case *object.String:
-		return object.Symbol(v.Str())
+	{
+		__sw173 := k
+		switch {
+		case object.IsKind[object.Symbol](__sw173):
+			v := object.Kind[object.Symbol](__sw173)
+			_ = v
+			return v
+		case object.IsKind[*object.String](__sw173):
+			v := object.Kind[*object.String](__sw173)
+			_ = v
+			return object.Symbol(v.Str())
+		}
 	}
 	raise("TypeError", "%s is not a symbol nor a string", k.Inspect())
 	return object.NilVal()
@@ -356,20 +363,20 @@ func threadVarKey(k object.Value) object.Value {
 func (vm *VM) registerMutex() {
 	cMutex := newClass("Mutex", vm.cObject)
 	vm.consts["Mutex"] = cMutex
-	vm.consts["Thread"].(*RClass).consts["Mutex"] = cMutex
+	object.Kind[*RClass](vm.consts["Thread"]).consts["Mutex"] = cMutex
 	cMutex.smethods["new"] = &Method{name: "new", owner: cMutex, native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &RMutex{}
 	}}
 	cMutex.define("lock", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		vm.mutexLock(self.(*RMutex))
+		vm.mutexLock(object.Kind[*RMutex](self))
 		return self
 	})
 	cMutex.define("unlock", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		vm.mutexUnlock(self.(*RMutex))
+		vm.mutexUnlock(object.Kind[*RMutex](self))
 		return self
 	})
 	cMutex.define("try_lock", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		m := self.(*RMutex)
+		m := object.Kind[*RMutex](self)
 		if m.owner != nil {
 			return object.Bool(false)
 		}
@@ -377,16 +384,16 @@ func (vm *VM) registerMutex() {
 		return object.Bool(true)
 	})
 	cMutex.define("locked?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*RMutex).owner != nil)
+		return object.Bool(object.Kind[*RMutex](self).owner != nil)
 	})
 	cMutex.define("owned?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*RMutex).owner == vm.currentThread)
+		return object.Bool(object.Kind[*RMutex](self).owner == vm.currentThread)
 	})
 	cMutex.define("synchronize", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("ThreadError", "must be called with a block")
 		}
-		m := self.(*RMutex)
+		m := object.Kind[*RMutex](self)
 		vm.mutexLock(m)
 		defer vm.mutexUnlock(m)
 		return vm.callBlock(blk, nil)
@@ -425,41 +432,41 @@ func (vm *VM) mutexUnlock(m *RMutex) {
 func (vm *VM) registerQueue() {
 	cQueue := newClass("Queue", vm.cObject)
 	vm.consts["Queue"] = cQueue
-	vm.consts["Thread"].(*RClass).consts["Queue"] = cQueue
+	object.Kind[*RClass](vm.consts["Thread"]).consts["Queue"] = cQueue
 	cQueue.smethods["new"] = &Method{name: "new", owner: cQueue, native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &RQueue{}
 	}}
 	push := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		vm.queuePush(self.(*RQueue), args[0])
+		vm.queuePush(object.Kind[*RQueue](self), args[0])
 		return self
 	}
 	cQueue.define("push", push)
 	cQueue.define("<<", push)
 	cQueue.define("enq", push)
 	pop := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.queuePop(self.(*RQueue), len(args) > 0 && args[0].Truthy())
+		return vm.queuePop(object.Kind[*RQueue](self), len(args) > 0 && args[0].Truthy())
 	}
 	cQueue.define("pop", pop)
 	cQueue.define("shift", pop)
 	cQueue.define("deq", pop)
 	cQueue.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*RQueue).items)))
+		return object.IntValue(int64(len(object.Kind[*RQueue](self).items)))
 	})
 	cQueue.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*RQueue).items)))
+		return object.IntValue(int64(len(object.Kind[*RQueue](self).items)))
 	})
 	cQueue.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(len(self.(*RQueue).items) == 0)
+		return object.Bool(len(object.Kind[*RQueue](self).items) == 0)
 	})
 	cQueue.define("num_waiting", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*RQueue).waitq)))
+		return object.IntValue(int64(len(object.Kind[*RQueue](self).waitq)))
 	})
 	cQueue.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		self.(*RQueue).items = nil
+		object.Kind[*RQueue](self).items = nil
 		return self
 	})
 	cQueue.define("close", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		q := self.(*RQueue)
+		q := object.Kind[*RQueue](self)
 		q.closed = true
 		for _, ch := range q.waitq {
 			close(ch)
@@ -468,7 +475,7 @@ func (vm *VM) registerQueue() {
 		return self
 	})
 	cQueue.define("closed?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*RQueue).closed)
+		return object.Bool(object.Kind[*RQueue](self).closed)
 	})
 }
 
@@ -508,13 +515,22 @@ func (vm *VM) registerSleep() {
 	vm.cObject.define("sleep", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		secs := 0.0
 		if len(args) > 0 {
-			switch n := args[0].(type) {
-			case object.Integer:
-				secs = float64(n)
-			case object.Float:
-				secs = float64(n)
-			default:
-				raise("TypeError", "can't convert %s into time interval", classNameOf(args[0]))
+			{
+				__sw174 := args[0]
+				switch {
+				case object.IsInt(__sw174):
+					n := object.AsInteger(__sw174)
+					_ = n
+					secs = float64(n)
+				case object.IsFloat(__sw174):
+					n := object.AsFloatV(__sw174)
+					_ = n
+					secs = float64(n)
+				default:
+					n := __sw174
+					_ = n
+					raise("TypeError", "can't convert %s into time interval", classNameOf(args[0]))
+				}
 			}
 		}
 		vm.threadBlock(func() { time.Sleep(time.Duration(secs * float64(time.Second))) })

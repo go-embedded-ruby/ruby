@@ -27,8 +27,8 @@ func (vm *VM) aotYield(block *Proc, args []object.Value) object.Value {
 
 // aotConcat backs OpConcatArray: concatenate two arrays into a fresh one.
 func aotConcat(a, b object.Value) object.Value {
-	ae := a.(*object.Array).Elems
-	be := b.(*object.Array).Elems
+	ae := object.Kind[*object.Array](a).Elems
+	be := object.Kind[*object.Array](b).Elems
 	out := make([]object.Value, 0, len(ae)+len(be))
 	out = append(append(out, ae...), be...)
 	return object.NewArrayFromSlice(out)
@@ -44,12 +44,12 @@ func (vm *VM) aotSplat(v object.Value) object.Value {
 // Set, …) provided the result is an Array; everything else is wrapped in a
 // one-element Array. Note MRI uses #to_a here, not #to_ary.
 func (vm *VM) splatToArray(v object.Value) object.Value {
-	if a, ok := v.(*object.Array); ok {
+	if a, ok := object.KindOK[*object.Array](v); ok {
 		return a
 	}
 	if vm.respondsTo(v, "to_a") {
 		r := vm.send(v, "to_a", nil, nil)
-		if a, ok := r.(*object.Array); ok {
+		if a, ok := object.KindOK[*object.Array](r); ok {
 			return a
 		}
 		raise("TypeError", "can't convert %s to Array (%s#to_a gives %s)",

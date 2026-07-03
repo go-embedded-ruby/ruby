@@ -77,7 +77,7 @@ func (vm *VM) registerNokogiri() {
 // Nokogiri and under its qualified name so a raised error resolves to the same
 // class.
 func (vm *VM) registerNokogiriErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	synErr := newClass("Nokogiri::SyntaxError", std)
 	mod.consts["SyntaxError"] = synErr
 	vm.consts["Nokogiri::SyntaxError"] = synErr
@@ -100,13 +100,13 @@ func (vm *VM) registerNokogiriErrors(mod *RClass) {
 // registerNokogiriDocument installs Nokogiri::XML::Document (also the class of an
 // HTML document) and its query / navigation methods.
 func (vm *VM) registerNokogiriDocument(mod *RClass) {
-	xml := mod.consts["XML"].(*RClass)
+	xml := object.Kind[*RClass](mod.consts["XML"])
 	cls := newClass("Nokogiri::XML::Document", vm.cObject)
 	xml.consts["Document"] = cls
 	vm.consts["Nokogiri::XML::Document"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *nokogiri.Document { return v.(*NokogiriDocument).doc }
+	self := func(v object.Value) *nokogiri.Document { return object.Kind[*NokogiriDocument](v).doc }
 
 	// #css / #at_css run a CSS query rooted at the document.
 	d("css", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -163,13 +163,13 @@ func (vm *VM) registerNokogiriDocument(mod *RClass) {
 // registerNokogiriNode installs Nokogiri::XML::Node and its navigation, query,
 // serialization and attribute methods.
 func (vm *VM) registerNokogiriNode(mod *RClass) {
-	xml := mod.consts["XML"].(*RClass)
+	xml := object.Kind[*RClass](mod.consts["XML"])
 	cls := newClass("Nokogiri::XML::Node", vm.cObject)
 	xml.consts["Node"] = cls
 	vm.consts["Nokogiri::XML::Node"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *nokogiri.Node { return v.(*NokogiriNode).n }
+	self := func(v object.Value) *nokogiri.Node { return object.Kind[*NokogiriNode](v).n }
 
 	// #css / #at_css / #xpath / #at_xpath run rooted at this node.
 	d("css", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -307,13 +307,13 @@ func (vm *VM) registerNokogiriNode(mod *RClass) {
 // registerNokogiriNodeSet installs Nokogiri::XML::NodeSet and its collection
 // methods.
 func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
-	xml := mod.consts["XML"].(*RClass)
+	xml := object.Kind[*RClass](mod.consts["XML"])
 	cls := newClass("Nokogiri::XML::NodeSet", vm.cObject)
 	xml.consts["NodeSet"] = cls
 	vm.consts["Nokogiri::XML::NodeSet"] = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *nokogiri.NodeSet { return v.(*NokogiriNodeSet).set }
+	self := func(v object.Value) *nokogiri.NodeSet { return object.Kind[*NokogiriNodeSet](v).set }
 
 	// #length / #size / #count.
 	length := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {

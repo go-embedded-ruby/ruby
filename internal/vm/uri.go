@@ -43,13 +43,13 @@ func (u *URI) Inspect() string { return "#<" + u.cls.name + " " + u.u.String() +
 func (u *URI) Truthy() bool    { return true }
 
 // uriOf returns the receiver's wrapped library URI.
-func uriOf(v object.Value) *liburi.URI { return v.(*URI).u }
+func uriOf(v object.Value) *liburi.URI { return object.Kind[*URI](v).u }
 
 // uriEqual implements URI::Generic#== (and the == operator fast path): two URIs
 // are equal when the other is also a URI and their normalised string forms match
 // — MRI compares component-wise, which for our value model is the rendered form.
 func uriEqual(a *URI, other object.Value) bool {
-	b, ok := other.(*URI)
+	b, ok := object.KindOK[*URI](other)
 	return ok && a.u.String() == b.u.String()
 }
 
@@ -59,7 +59,7 @@ func uriEqual(a *URI, other object.Value) bool {
 // through the URI module's scheme_list (mirroring MRI's URI.scheme_list lookup).
 func (vm *VM) classForScheme(scheme string) *RClass {
 	if scheme != "" {
-		if c, ok := vm.cURI.consts[uriUpcase(scheme)].(*RClass); ok {
+		if c, ok := object.KindOK[*RClass](vm.cURI.consts[uriUpcase(scheme)]); ok {
 			return c
 		}
 	}
@@ -117,13 +117,22 @@ func (vm *VM) uriParse(s string) *URI {
 // rendered form, a String is taken as-is, and anything else is sent #to_s — the
 // coercion MRI's URI.parse / merge accept.
 func (vm *VM) uriStrOf(v object.Value) string {
-	switch x := v.(type) {
-	case *URI:
-		return x.u.String()
-	case *object.String:
-		return x.Str()
-	default:
-		return strArg(vm.send(v, "to_s", nil, nil))
+	{
+		__sw179 := v
+		switch {
+		case object.IsKind[*URI](__sw179):
+			x := object.Kind[*URI](__sw179)
+			_ = x
+			return x.u.String()
+		case object.IsKind[*object.String](__sw179):
+			x := object.Kind[*object.String](__sw179)
+			_ = x
+			return x.Str()
+		default:
+			x := __sw179
+			_ = x
+			return strArg(vm.send(v, "to_s", nil, nil))
+		}
 	}
 }
 
@@ -174,7 +183,7 @@ func (vm *VM) registerURI() {
 // re-raised library error's exceptionObject lookup finds the very same class),
 // exactly as the JSON:: / Date:: error classes are.
 func (vm *VM) registerURIErrors(mod *RClass) {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
 		mod.consts[simple] = c
@@ -238,7 +247,7 @@ func (vm *VM) registerURISchemeList(mod *RClass) {
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			h := object.NewHash()
 			for _, name := range []string{"HTTP", "HTTPS", "FTP", "LDAP", "LDAPS", "WS", "WSS", "FILE"} {
-				if c, ok := mod.consts[name].(*RClass); ok {
+				if c, ok := object.KindOK[*RClass](mod.consts[name]); ok {
 					h.Set(object.NewString(name), c)
 				}
 			}
@@ -318,17 +327,17 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 	d("to_s", toS)
 	d("to_str", toS)
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(v.(*URI).Inspect())
+		return object.NewString(object.Kind[*URI](v).Inspect())
 	})
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(uriEqual(v.(*URI), args[0]))
+		return object.Bool(uriEqual(object.Kind[*URI](v), args[0]))
 	})
 
 	// Reference resolution: merge / + resolve a relative reference; route_to
 	// computes the reference from the receiver to its argument; normalize collapses
 	// the path and lower-cases the scheme/host.
 	mergeFn := func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.uriMerge(v.(*URI), args[0])
+		return vm.uriMerge(object.Kind[*URI](v), args[0])
 	}
 	d("merge", mergeFn)
 	d("+", mergeFn)
@@ -353,7 +362,7 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 // uriSetArg coerces a setter argument to a string, treating Ruby nil as the empty
 // (cleared) component — MRI's URI setters accept nil to clear userinfo/port/etc.
 func uriSetArg(v object.Value) string {
-	if _, ok := v.(object.Nil); ok {
+	if _, ok := object.AsNilOK(v); ok {
 		return ""
 	}
 	return strArg(v)
@@ -368,47 +377,56 @@ func uriSetArg(v object.Value) string {
 // as MRI's build does.
 func (vm *VM) registerURIBuild(generic *RClass) {
 	build := func(_ *VM, recv object.Value, args []object.Value, _ *Proc) object.Value {
-		cls, _ := recv.(*RClass)
+		cls, _ := object.KindOK[*RClass](recv)
 		var scheme, userinfo, host, path, query, fragment string
 		var port int
 		var hasPort, hasQuery, hasFrag bool
-		switch a := args[0].(type) {
-		case *object.Hash:
-			get := func(key string) (string, bool) {
-				if v, ok := a.Get(object.Symbol(key)); ok {
-					return uriBuildField(v)
+		{
+			__sw180 := args[0]
+			switch {
+			case object.IsKind[*object.Hash](__sw180):
+				a := object.Kind[*object.Hash](__sw180)
+				_ = a
+				get := func(key string) (string, bool) {
+					if v, ok := a.Get(object.Symbol(key)); ok {
+						return uriBuildField(v)
+					}
+					if v, ok := a.Get(object.NewString(key)); ok {
+						return uriBuildField(v)
+					}
+					return "", false
 				}
-				if v, ok := a.Get(object.NewString(key)); ok {
-					return uriBuildField(v)
+				scheme, _ = get("scheme")
+				userinfo, _ = get("userinfo")
+				host, _ = get("host")
+				path, _ = get("path")
+				query, hasQuery = get("query")
+				fragment, hasFrag = get("fragment")
+				if v, ok := a.Get(object.Symbol("port")); ok {
+					port, hasPort = uriBuildPort(v)
+				} else if v, ok := a.Get(object.NewString("port")); ok {
+					port, hasPort = uriBuildPort(v)
 				}
-				return "", false
+			case object.IsKind[*object.Array](__sw180):
+				a := object.Kind[*object.Array](__sw180)
+				_ = a
+				if len(a.Elems) != 7 {
+					raise("ArgumentError",
+						"expected Array of or Hash of components of %s (scheme, userinfo, host, port, path, query, fragment)",
+						cls.name)
+				}
+				scheme, _ = uriBuildField(a.Elems[0])
+				userinfo, _ = uriBuildField(a.Elems[1])
+				host, _ = uriBuildField(a.Elems[2])
+				port, hasPort = uriBuildPort(a.Elems[3])
+				path, _ = uriBuildField(a.Elems[4])
+				query, hasQuery = uriBuildField(a.Elems[5])
+				fragment, hasFrag = uriBuildField(a.Elems[6])
+			default:
+				a := __sw180
+				_ = a
+				raise("ArgumentError", "expected Array of or Hash of components of %s", cls.name)
 			}
-			scheme, _ = get("scheme")
-			userinfo, _ = get("userinfo")
-			host, _ = get("host")
-			path, _ = get("path")
-			query, hasQuery = get("query")
-			fragment, hasFrag = get("fragment")
-			if v, ok := a.Get(object.Symbol("port")); ok {
-				port, hasPort = uriBuildPort(v)
-			} else if v, ok := a.Get(object.NewString("port")); ok {
-				port, hasPort = uriBuildPort(v)
-			}
-		case *object.Array:
-			if len(a.Elems) != 7 {
-				raise("ArgumentError",
-					"expected Array of or Hash of components of %s (scheme, userinfo, host, port, path, query, fragment)",
-					cls.name)
-			}
-			scheme, _ = uriBuildField(a.Elems[0])
-			userinfo, _ = uriBuildField(a.Elems[1])
-			host, _ = uriBuildField(a.Elems[2])
-			port, hasPort = uriBuildPort(a.Elems[3])
-			path, _ = uriBuildField(a.Elems[4])
-			query, hasQuery = uriBuildField(a.Elems[5])
-			fragment, hasFrag = uriBuildField(a.Elems[6])
-		default:
-			raise("ArgumentError", "expected Array of or Hash of components of %s", cls.name)
 		}
 		u := liburi.Build(scheme, userinfo, host, port, hasPort, path, query, hasQuery, fragment, hasFrag)
 		return &URI{u: u, cls: cls}
@@ -420,7 +438,7 @@ func (vm *VM) registerURIBuild(generic *RClass) {
 // absent component. ok is false for nil so build can tell an explicit "" from an
 // omitted field (the query / fragment present-but-empty distinction).
 func uriBuildField(v object.Value) (string, bool) {
-	if _, ok := v.(object.Nil); ok {
+	if _, ok := object.AsNilOK(v); ok {
 		return "", false
 	}
 	return strArg(v), true
@@ -429,23 +447,32 @@ func uriBuildField(v object.Value) (string, bool) {
 // uriBuildPort coerces a build port value: an Integer is the port and hasPort is
 // true; a String of digits is parsed; nil (or anything else) is an absent port.
 func uriBuildPort(v object.Value) (int, bool) {
-	switch p := v.(type) {
-	case object.Integer:
-		return int(p), true
-	case *object.String:
-		n := 0
-		for _, c := range p.Str() {
-			if c < '0' || c > '9' {
+	{
+		__sw181 := v
+		switch {
+		case object.IsInt(__sw181):
+			p := object.AsInteger(__sw181)
+			_ = p
+			return int(p), true
+		case object.IsKind[*object.String](__sw181):
+			p := object.Kind[*object.String](__sw181)
+			_ = p
+			n := 0
+			for _, c := range p.Str() {
+				if c < '0' || c > '9' {
+					return 0, false
+				}
+				n = n*10 + int(c-'0')
+			}
+			if p.Str() == "" {
 				return 0, false
 			}
-			n = n*10 + int(c-'0')
-		}
-		if p.Str() == "" {
+			return n, true
+		default:
+			p := __sw181
+			_ = p
 			return 0, false
 		}
-		return n, true
-	default:
-		return 0, false
 	}
 }
 
@@ -549,13 +576,13 @@ func uriSplitPort(u *liburi.URI) object.Value {
 // stringifying each side. A non-Array (or a non-pair element) raises TypeError,
 // matching MRI's encode_www_form which iterates pairs.
 func (vm *VM) uriFormPairs(v object.Value) [][2]string {
-	arr, ok := v.(*object.Array)
+	arr, ok := object.KindOK[*object.Array](v)
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into Array", classNameOf(v))
 	}
 	pairs := make([][2]string, len(arr.Elems))
 	for i, e := range arr.Elems {
-		pair, ok := e.(*object.Array)
+		pair, ok := object.KindOK[*object.Array](e)
 		if !ok || len(pair.Elems) != 2 {
 			raise("TypeError", "wrong element type %s (expected array)", classNameOf(e))
 		}
@@ -568,14 +595,23 @@ func (vm *VM) uriFormPairs(v object.Value) [][2]string {
 // contributes its source, a String its literal text. Anything else raises
 // TypeError, as MRI's escape expects a Regexp or String unsafe pattern.
 func uriUnsafe(v object.Value) string {
-	switch x := v.(type) {
-	case *Regexp:
-		return x.source
-	case *object.String:
-		return x.Str()
-	default:
-		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
-		return ""
+	{
+		__sw182 := v
+		switch {
+		case object.IsKind[*Regexp](__sw182):
+			x := object.Kind[*Regexp](__sw182)
+			_ = x
+			return x.source
+		case object.IsKind[*object.String](__sw182):
+			x := object.Kind[*object.String](__sw182)
+			_ = x
+			return x.Str()
+		default:
+			x := __sw182
+			_ = x
+			raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+			return ""
+		}
 	}
 }
 
@@ -631,7 +667,7 @@ func (vm *VM) registerURIParser(mod *RClass) {
 func uriMakeRegexp(args []object.Value) string {
 	scheme := `[a-zA-Z][a-zA-Z\d+\-.]*`
 	if len(args) > 0 {
-		if arr, ok := args[0].(*object.Array); ok && len(arr.Elems) > 0 {
+		if arr, ok := object.KindOK[*object.Array](args[0]); ok && len(arr.Elems) > 0 {
 			alts := make([]string, len(arr.Elems))
 			for i, e := range arr.Elems {
 				alts[i] = regexpEscapeLiteral(strArg(e))
@@ -660,9 +696,9 @@ func uriJoin(parts []string, sep string) string {
 // instance method on Kernel (module_function), so a bare URI(...) call resolves it
 // on any self.
 func (vm *VM) registerURIKernel() {
-	kernel := vm.consts["Kernel"].(*RClass)
+	kernel := object.Kind[*RClass](vm.consts["Kernel"])
 	fn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		if u, ok := args[0].(*URI); ok {
+		if u, ok := object.KindOK[*URI](args[0]); ok {
 			return u
 		}
 		return vm.uriParse(vm.uriStrOf(args[0]))

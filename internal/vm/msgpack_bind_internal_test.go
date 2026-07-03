@@ -53,7 +53,7 @@ func TestMsgpackFromBridge(t *testing.T) {
 	}
 	// A uint64 above int64's max promotes to a Bignum-valued Integer.
 	big := fromMsgpack(vm, uint64(math.MaxUint64))
-	if bn, ok := big.(*object.Bignum); !ok || bn.I.Sign() <= 0 {
+	if bn, ok := object.KindOK[*object.Bignum](big); !ok || bn.I.Sign() <= 0 {
 		t.Errorf("large uint64 -> %T", big)
 	}
 	// A *big.Int maps through NormInt.
@@ -61,12 +61,12 @@ func TestMsgpackFromBridge(t *testing.T) {
 		t.Error("big.Int -> nil")
 	}
 	// A Bin maps to an ASCII-8BIT String.
-	s, ok := fromMsgpack(vm, msgpack.Bin{0xff, 0x00}).(*object.String)
+	s, ok := object.KindOK[*object.String](fromMsgpack(vm, msgpack.Bin{0xff, 0x00}))
 	if !ok || !s.IsBinary() || s.Len() != 2 {
 		t.Errorf("bin -> %#v", fromMsgpack(vm, msgpack.Bin{0xff, 0x00}))
 	}
 	// A time.Time maps to a Ruby Time carrying the same instant.
-	tm, ok := fromMsgpack(vm, stdtime.Unix(100, 0)).(*Time)
+	tm, ok := object.KindOK[*Time](fromMsgpack(vm, stdtime.Unix(100, 0)))
 	if !ok || tm.t.ToUnix() != 100 {
 		t.Errorf("time -> %#v", fromMsgpack(vm, stdtime.Unix(100, 0)))
 	}

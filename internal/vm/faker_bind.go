@@ -46,7 +46,7 @@ type fakerState struct {
 // the gem's for that seed (the deterministic-seed contract). A non-Random value
 // raises TypeError, as the gem expects a Random.
 func (vm *VM) fakerSetRandom(r object.Value) {
-	ro, ok := r.(*RandomObj)
+	ro, ok := object.KindOK[*RandomObj](r)
 	if !ok {
 		raise("TypeError", "Faker::Config.random must be a Random")
 	}
@@ -118,11 +118,18 @@ func fakerIntArg(args []object.Value, n, def int) int {
 	if n >= len(args) {
 		return def
 	}
-	switch v := args[n].(type) {
-	case object.Integer:
-		return int(v)
-	case object.Nil:
-		return def
+	{
+		__sw55 := args[n]
+		switch {
+		case object.IsInt(__sw55):
+			v := object.AsInteger(__sw55)
+			_ = v
+			return int(v)
+		case object.IsNilObj(__sw55):
+			v := object.NilObj()
+			_ = v
+			return def
+		}
 	}
 	raise("TypeError", "no implicit conversion into Integer")
 	return def
@@ -135,13 +142,22 @@ func fakerFloatArg(args []object.Value, n int, def float64) float64 {
 	if n >= len(args) {
 		return def
 	}
-	switch v := args[n].(type) {
-	case object.Float:
-		return float64(v)
-	case object.Integer:
-		return float64(v)
-	case object.Nil:
-		return def
+	{
+		__sw56 := args[n]
+		switch {
+		case object.IsFloat(__sw56):
+			v := object.AsFloatV(__sw56)
+			_ = v
+			return float64(v)
+		case object.IsInt(__sw56):
+			v := object.AsInteger(__sw56)
+			_ = v
+			return float64(v)
+		case object.IsNilObj(__sw56):
+			v := object.NilObj()
+			_ = v
+			return def
+		}
 	}
 	raise("TypeError", "no implicit conversion into Float")
 	return def

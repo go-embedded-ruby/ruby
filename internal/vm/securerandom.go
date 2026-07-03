@@ -54,14 +54,21 @@ func (vm *VM) registerSecureRandom() {
 		// (RandomFloat scaled); no argument or a non-positive bound -> a Float in
 		// [0, 1), exactly as MRI does for a non-positive bound.
 		if len(args) > 0 {
-			switch n := args[0].(type) {
-			case object.Integer:
-				if n > 0 {
-					return object.IntValue(gen.RandomInt(int64(n)))
-				}
-			case object.Float:
-				if n > 0 {
-					return object.Float(float64(n) * gen.RandomFloat())
+			{
+				__sw152 := args[0]
+				switch {
+				case object.IsInt(__sw152):
+					n := object.AsInteger(__sw152)
+					_ = n
+					if n > 0 {
+						return object.IntValue(gen.RandomInt(int64(n)))
+					}
+				case object.IsFloat(__sw152):
+					n := object.AsFloatV(__sw152)
+					_ = n
+					if n > 0 {
+						return object.Float(float64(n) * gen.RandomFloat())
+					}
 				}
 			}
 		}
@@ -82,7 +89,7 @@ func countArg(args []object.Value, def int) int {
 	if len(args) == 0 {
 		return def
 	}
-	if _, isNil := args[0].(object.Nil); isNil {
+	if _, isNil := object.AsNilOK(args[0]); isNil {
 		return def
 	}
 	return int(intArg(args[0]))

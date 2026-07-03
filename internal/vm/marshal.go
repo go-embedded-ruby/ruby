@@ -26,7 +26,7 @@ func (vm *VM) registerMarshal() {
 		return object.NewString(string(marshal.Dump(mv)))
 	})
 	def("load", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s, ok := args[0].(*object.String)
+		s, ok := object.KindOK[*object.String](args[0])
 		if !ok {
 			raise("TypeError", "instance of IO needed")
 		}
@@ -43,57 +43,80 @@ func (vm *VM) registerMarshal() {
 // maps already-converted composite pointers to their marshal counterparts so
 // shared/cyclic structures map to shared/cyclic ones (and thus encode as links).
 func toMarshalValue(v object.Value, seen map[object.Value]marshal.Value) marshal.Value {
-	switch x := v.(type) {
-	case object.Nil:
-		return marshal.Nil{}
-	case object.Bool:
-		return marshal.Bool(bool(x))
-	case object.Integer:
-		return marshal.Int{I: big.NewInt(int64(x))}
-	case *object.Bignum:
-		return marshal.Int{I: new(big.Int).Set(x.I)}
-	case object.Float:
-		return marshal.Float(float64(x))
-	case object.Symbol:
-		return marshal.Symbol(string(x))
-	case *object.String:
-		if m, ok := seen[v]; ok {
-			return m
+	{
+		__sw93 := v
+		switch {
+		case object.IsNilObj(__sw93):
+			x := object.NilObj()
+			_ = x
+			return marshal.Nil{}
+		case object.IsBool(__sw93):
+			x := object.AsBoolV(__sw93)
+			_ = x
+			return marshal.Bool(bool(x))
+		case object.IsInt(__sw93):
+			x := object.AsInteger(__sw93)
+			_ = x
+			return marshal.Int{I: big.NewInt(int64(x))}
+		case object.IsKind[*object.Bignum](__sw93):
+			x := object.Kind[*object.Bignum](__sw93)
+			_ = x
+			return marshal.Int{I: new(big.Int).Set(x.I)}
+		case object.IsFloat(__sw93):
+			x := object.AsFloatV(__sw93)
+			_ = x
+			return marshal.Float(float64(x))
+		case object.IsKind[object.Symbol](__sw93):
+			x := object.Kind[object.Symbol](__sw93)
+			_ = x
+			return marshal.Symbol(string(x))
+		case object.IsKind[*object.String](__sw93):
+			x := object.Kind[*object.String](__sw93)
+			_ = x
+			if m, ok := seen[v]; ok {
+				return m
+			}
+			ms := &marshal.Str{Bytes: append([]byte(nil), x.Bytes()...), Enc: marshal.UTF8}
+			seen[v] = ms
+			return ms
+		case object.IsKind[*object.Array](__sw93):
+			x := object.Kind[*object.Array](__sw93)
+			_ = x
+			if m, ok := seen[v]; ok {
+				return m
+			}
+			ma := &marshal.Array{}
+			seen[v] = ma
+			for _, e := range x.Elems {
+				ma.Elems = append(ma.Elems, toMarshalValue(e, seen))
+			}
+			return ma
+		case object.IsKind[*object.Hash](__sw93):
+			x := object.Kind[*object.Hash](__sw93)
+			_ = x
+			if m, ok := seen[v]; ok {
+				return m
+			}
+			if !object.IsNil(x.DefaultProc) {
+				raise("TypeError", "can't dump hash with default proc")
+			}
+			mh := &marshal.Hash{}
+			seen[v] = mh
+			for _, k := range x.Keys {
+				val, _ := x.Get(k)
+				mh.Keys = append(mh.Keys, toMarshalValue(k, seen))
+				mh.Vals = append(mh.Vals, toMarshalValue(val, seen))
+			}
+			if x.Default != nil {
+				mh.Default = toMarshalValue(x.Default, seen)
+			}
+			return mh
+		default:
+			x := __sw93
+			_ = x
+			panic(RubyError{Class: "TypeError",
+				Message: fmt.Sprintf("no _dump_data is defined for class %s", classNameOf(v))})
 		}
-		ms := &marshal.Str{Bytes: append([]byte(nil), x.Bytes()...), Enc: marshal.UTF8}
-		seen[v] = ms
-		return ms
-	case *object.Array:
-		if m, ok := seen[v]; ok {
-			return m
-		}
-		ma := &marshal.Array{}
-		seen[v] = ma
-		for _, e := range x.Elems {
-			ma.Elems = append(ma.Elems, toMarshalValue(e, seen))
-		}
-		return ma
-	case *object.Hash:
-		if m, ok := seen[v]; ok {
-			return m
-		}
-		if !object.IsNil(x.DefaultProc) {
-			raise("TypeError", "can't dump hash with default proc")
-		}
-		mh := &marshal.Hash{}
-		seen[v] = mh
-		for _, k := range x.Keys {
-			val, _ := x.Get(k)
-			mh.Keys = append(mh.Keys, toMarshalValue(k, seen))
-			mh.Vals = append(mh.Vals, toMarshalValue(val, seen))
-		}
-		if x.Default != nil {
-			mh.Default = toMarshalValue(x.Default, seen)
-		}
-		return mh
-	default:
-		panic(RubyError{Class: "TypeError",
-			Message: fmt.Sprintf("no _dump_data is defined for class %s", classNameOf(v))})
 	}
 }
 

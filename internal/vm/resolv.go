@@ -31,7 +31,7 @@ import (
 // NotImplementedError, and Resolv.getaddress answers only a literal IP, raising
 // ResolvError for a name that would require an actual DNS query.
 func (vm *VM) registerResolv() {
-	std := vm.consts["StandardError"].(*RClass)
+	std := object.Kind[*RClass](vm.consts["StandardError"])
 
 	resolvMod := newClass("Resolv", nil)
 	resolvMod.isModule = true
@@ -130,7 +130,7 @@ func defineResolvAddrMethods(cls *RClass, clsName string) {
 		return object.NewString("#<" + clsName + " " + strArg(getIvar(self, "@addr")) + ">")
 	})
 	cls.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*RObject)
+		o, ok := object.KindOK[*RObject](args[0])
 		if !ok || o.class != cls {
 			return object.Bool(false)
 		}
@@ -156,7 +156,7 @@ func registerResolvHosts(vm *VM, resolvMod *RClass) {
 			return o
 		}}
 	hostsTable := func(self object.Value) *resolv.Hosts {
-		if b, ok := getIvar(self, "@table").(*resolvBox); ok && b.hosts != nil {
+		if b, ok := object.KindOK[*resolvBox](getIvar(self, "@table")); ok && b.hosts != nil {
 			return b.hosts
 		}
 		return resolv.ParseHosts("")
@@ -236,7 +236,7 @@ func registerResolvName(vm *VM, dns *RClass) {
 		return object.Bool(resolvNameOf(self).Absolute)
 	})
 	name.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*RObject)
+		o, ok := object.KindOK[*RObject](args[0])
 		if !ok || o.class != name {
 			return object.Bool(false)
 		}
@@ -288,7 +288,7 @@ func resolvRecordSpecs() []resolvRecordSpec {
 			},
 			define: func(cls *RClass) {
 				cls.define("address", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-					return newResolvAddr(vm.consts["Resolv"].(*RClass).consts["IPv4"].(*RClass),
+					return newResolvAddr(object.Kind[*RClass](object.Kind[*RClass](vm.consts["Resolv"]).consts["IPv4"]),
 						recordOf(self).(*resolv.A).Address.String())
 				})
 			}},
@@ -299,7 +299,7 @@ func resolvRecordSpecs() []resolvRecordSpec {
 			},
 			define: func(cls *RClass) {
 				cls.define("address", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-					return newResolvAddr(vm.consts["Resolv"].(*RClass).consts["IPv6"].(*RClass),
+					return newResolvAddr(object.Kind[*RClass](object.Kind[*RClass](vm.consts["Resolv"]).consts["IPv6"]),
 						recordOf(self).(*resolv.AAAA).Address.String())
 				})
 			}},
@@ -457,10 +457,10 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 			o.ivars["@msg"] = &resolvBox{msg: m}
 			return o
 		}}
-	dns.consts["DecodeError"] = newClass("Resolv::DNS::DecodeError", vm.consts["StandardError"].(*RClass))
+	dns.consts["DecodeError"] = newClass("Resolv::DNS::DecodeError", object.Kind[*RClass](vm.consts["StandardError"]))
 
 	mget := func(self object.Value) *resolv.Message {
-		if b, ok := getIvar(self, "@msg").(*resolvBox); ok && b.msg != nil {
+		if b, ok := object.KindOK[*resolvBox](getIvar(self, "@msg")); ok && b.msg != nil {
 			return b.msg
 		}
 		return resolv.NewMessage(0)
@@ -592,7 +592,7 @@ func newResolvName(cls *RClass, n resolv.Name) object.Value {
 
 // resolvNameOf returns the resolv.Name backing a Resolv::DNS::Name object.
 func resolvNameOf(self object.Value) resolv.Name {
-	if b, ok := getIvar(self, "@name").(*resolvBox); ok {
+	if b, ok := object.KindOK[*resolvBox](getIvar(self, "@name")); ok {
 		return b.name
 	}
 	return resolv.Name{}
@@ -605,7 +605,7 @@ func newRecord(cls *RClass, r resolv.Resource) object.Value {
 
 // recordOf returns the library Resource backing a record object.
 func recordOf(self object.Value) resolv.Resource {
-	if b, ok := getIvar(self, "@rec").(*resolvBox); ok {
+	if b, ok := object.KindOK[*resolvBox](getIvar(self, "@rec")); ok {
 		return b.record
 	}
 	return nil
@@ -613,7 +613,7 @@ func recordOf(self object.Value) resolv.Resource {
 
 // dnsNameClass returns the Resolv::DNS::Name class.
 func (vm *VM) dnsNameClass() *RClass {
-	return vm.consts["Resolv"].(*RClass).consts["DNS"].(*RClass).consts["Name"].(*RClass)
+	return object.Kind[*RClass](object.Kind[*RClass](object.Kind[*RClass](vm.consts["Resolv"]).consts["DNS"]).consts["Name"])
 }
 
 // recordClass returns the Resolv::DNS::Resource::IN::* class for a TYPE value,
@@ -628,7 +628,7 @@ func (vm *VM) recordClass(byType map[uint16]*RClass, typ uint16) *RClass {
 // resolvNameArg coerces a Ruby argument (a Resolv::DNS::Name or a String) into a
 // resolv.Name.
 func resolvNameArg(vm *VM, v object.Value) resolv.Name {
-	if o, ok := v.(*RObject); ok && o.class == vm.dnsNameClass() {
+	if o, ok := object.KindOK[*RObject](v); ok && o.class == vm.dnsNameClass() {
 		return resolvNameOf(o)
 	}
 	return resolv.NewName(strArg(v))
@@ -660,8 +660,8 @@ func resolvIPv6Of(vm *VM, v object.Value) resolv.IPv6 {
 // resolvAddrString returns the @addr string of a Resolv::IPv4/IPv6 object, or the
 // argument coerced to a String.
 func resolvAddrString(vm *VM, v object.Value, kind string) object.Value {
-	if o, ok := v.(*RObject); ok {
-		if cls, found := vm.consts["Resolv"].(*RClass).consts[kind].(*RClass); found && o.class == cls {
+	if o, ok := object.KindOK[*RObject](v); ok {
+		if cls, found := object.KindOK[*RClass](object.Kind[*RClass](vm.consts["Resolv"]).consts[kind]); found && o.class == cls {
 			return getIvar(o, "@addr")
 		}
 	}
@@ -671,7 +671,7 @@ func resolvAddrString(vm *VM, v object.Value, kind string) object.Value {
 // resolvTypeArg maps a Resolv::DNS::Resource::IN::* class argument to its library
 // TYPE value (defaulting to A).
 func resolvTypeArg(vm *VM, v object.Value) uint16 {
-	cls, ok := v.(*RClass)
+	cls, ok := object.KindOK[*RClass](v)
 	if !ok {
 		return resolv.TypeA
 	}
@@ -687,11 +687,11 @@ func resolvTypeArg(vm *VM, v object.Value) uint16 {
 // map is not stored on the VM, so it is reconstructed when a type lookup needs
 // it; the tree is tiny).
 func (vm *VM) recordClassesByType() map[uint16]*RClass {
-	in := vm.consts["Resolv"].(*RClass).consts["DNS"].(*RClass).
-		consts["Resource"].(*RClass).consts["IN"].(*RClass)
+	in := object.Kind[*RClass](object.Kind[*RClass](object.Kind[*RClass](object.Kind[*RClass](vm.consts["Resolv"]).consts["DNS"]).
+		consts["Resource"]).consts["IN"])
 	out := map[uint16]*RClass{}
 	for _, spec := range resolvRecordSpecs() {
-		if c, ok := in.consts[spec.name].(*RClass); ok {
+		if c, ok := object.KindOK[*RClass](in.consts[spec.name]); ok {
 			out[spec.typ] = c
 		}
 	}

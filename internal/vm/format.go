@@ -7,26 +7,29 @@ import (
 // classNameOf names a value's class for the TypeError messages various builtins
 // (and the format binding's formatValue.ClassName) raise without a VM handle.
 func classNameOf(v object.Value) string {
-	switch v.(type) {
-	case object.Integer:
-		return "Integer"
-	case object.Float:
-		return "Float"
-	case *object.String:
-		return "String"
-	case object.Symbol:
-		return "Symbol"
-	case *object.Array:
-		return "Array"
-	case *object.Hash:
-		return "Hash"
-	case *Regexp:
-		return "Regexp"
-	case *MatchData:
-		return "MatchData"
-	case object.Nil:
-		return "nil"
-	default:
-		return "Object"
+	{
+		__sw57 := v
+		switch {
+		case object.IsInt(__sw57):
+			return "Integer"
+		case object.IsFloat(__sw57):
+			return "Float"
+		case object.IsKind[*object.String](__sw57):
+			return "String"
+		case object.IsKind[object.Symbol](__sw57):
+			return "Symbol"
+		case object.IsKind[*object.Array](__sw57):
+			return "Array"
+		case object.IsKind[*object.Hash](__sw57):
+			return "Hash"
+		case object.IsKind[*Regexp](__sw57):
+			return "Regexp"
+		case object.IsKind[*MatchData](__sw57):
+			return "MatchData"
+		case object.IsNilObj(__sw57):
+			return "nil"
+		default:
+			return "Object"
+		}
 	}
 }

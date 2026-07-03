@@ -30,13 +30,13 @@ func (s *SequelSchemaObj) Truthy() bool    { return true }
 // sequelSchemaClass returns (memoised) the Sequel::Schema::Generator class,
 // defining its column DSL on first use.
 func (vm *VM) sequelSchemaClass() *RClass {
-	if c, ok := vm.consts["Sequel::Schema::Generator"].(*RClass); ok {
+	if c, ok := object.KindOK[*RClass](vm.consts["Sequel::Schema::Generator"]); ok {
 		return c
 	}
 	cls := newClass("Sequel::Schema::Generator", vm.cObject)
 	vm.consts["Sequel::Schema::Generator"] = cls
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
-	self := func(v object.Value) *sequel.TableBuilder { return v.(*SequelSchemaObj).tb }
+	self := func(v object.Value) *sequel.TableBuilder { return object.Kind[*SequelSchemaObj](v).tb }
 
 	// primary_key :id defines an auto-increment primary key column.
 	d("primary_key", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -116,7 +116,7 @@ func (vm *VM) sequelSchemaClass() *RClass {
 		cols := sequelIndexCols(args[0])
 		var opts []sequel.IdxOpt
 		if len(args) > 1 {
-			if h, ok := args[len(args)-1].(*object.Hash); ok {
+			if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
 				if v, ok := sequelKw(h, "unique"); ok && v.Truthy() {
 					opts = append(opts, sequel.UniqueIndex())
 				}
@@ -131,11 +131,18 @@ func (vm *VM) sequelSchemaClass() *RClass {
 
 // sequelName renders a Symbol/String argument to its bare name.
 func sequelName(v object.Value) string {
-	switch n := v.(type) {
-	case object.Symbol:
-		return string(n)
-	case *object.String:
-		return n.Str()
+	{
+		__sw155 := v
+		switch {
+		case object.IsKind[object.Symbol](__sw155):
+			n := object.Kind[object.Symbol](__sw155)
+			_ = n
+			return string(n)
+		case object.IsKind[*object.String](__sw155):
+			n := object.Kind[*object.String](__sw155)
+			_ = n
+			return n.Str()
+		}
 	}
 	return v.ToS()
 }
@@ -149,7 +156,7 @@ func sequelColArgs(args []object.Value) (string, []sequel.ColOpt) {
 	name := sequelName(args[0])
 	var opts []sequel.ColOpt
 	if len(args) > 1 {
-		if h, ok := args[len(args)-1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
 			opts = sequelColOpts(h)
 		}
 	}
@@ -160,7 +167,7 @@ func sequelColArgs(args []object.Value) (string, []sequel.ColOpt) {
 // list for column()/foreign_key(), where there is no leading name in the slice).
 func sequelOptsFrom(args []object.Value) []sequel.ColOpt {
 	if len(args) > 0 {
-		if h, ok := args[len(args)-1].(*object.Hash); ok {
+		if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
 			return sequelColOpts(h)
 		}
 	}
@@ -191,7 +198,7 @@ func sequelColOpts(h *object.Hash) []sequel.ColOpt {
 // sequelIndexCols reads the index column list: a single Symbol/String, or an
 // Array of them.
 func sequelIndexCols(v object.Value) []string {
-	if arr, ok := v.(*object.Array); ok {
+	if arr, ok := object.KindOK[*object.Array](v); ok {
 		cols := make([]string, len(arr.Elems))
 		for i, e := range arr.Elems {
 			cols[i] = sequelName(e)
@@ -211,11 +218,18 @@ func sequelCond(args []object.Value) sequel.Value {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	switch n := args[0].(type) {
-	case *object.Hash:
-		return sequelHashCond(n)
-	case *object.String:
-		return sequel.Lit(n.Str())
+	{
+		__sw156 := args[0]
+		switch {
+		case object.IsKind[*object.Hash](__sw156):
+			n := object.Kind[*object.Hash](__sw156)
+			_ = n
+			return sequelHashCond(n)
+		case object.IsKind[*object.String](__sw156):
+			n := object.Kind[*object.String](__sw156)
+			_ = n
+			return sequel.Lit(n.Str())
+		}
 	}
 	return sequelValue(args[0])
 }
@@ -238,7 +252,7 @@ func sequelKVArgs(args []object.Value) []sequel.Value {
 	}
 	// Insert/update values are always given as a Hash (column => value); the
 	// column position must be a bare string name (InsertSQL/UpdateSQL quote it).
-	if h, ok := args[0].(*object.Hash); ok {
+	if h, ok := object.KindOK[*object.Hash](args[0]); ok {
 		kv := make([]sequel.Value, 0, h.Len()*2)
 		for i := 0; i < h.Len(); i++ {
 			k := h.Keys[i]

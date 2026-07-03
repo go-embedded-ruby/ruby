@@ -25,7 +25,7 @@ import (
 // result back into a Ruby Pathname itself. registerPathname runs after the prelude
 // so it reopens the prelude-defined class rather than creating it.
 func (vm *VM) registerPathname() {
-	cls, ok := vm.consts["Pathname"].(*RClass)
+	cls, ok := object.KindOK[*RClass](vm.consts["Pathname"])
 	if !ok {
 		// The prelude always defines Pathname; if a host stripped it, there is
 		// nothing to back, so leave the lexical helpers unbound.

@@ -53,41 +53,66 @@ func msgpackUnpack(vm *VM, b []byte) object.Value {
 // recurse. An unmapped value is returned as-is so the library raises the pack
 // error msgpackPack turns into a Ruby ArgumentError.
 func toMsgpack(v object.Value) msgpack.Value {
-	switch n := v.(type) {
-	case nil:
-		return nil
-	case object.Nil:
-		return nil
-	case object.Bool:
-		return bool(n)
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I
-	case object.Float:
-		return float64(n)
-	case *object.String:
-		if n.IsBinary() {
-			return msgpack.Bin(n.Bytes())
+	{
+		__sw102 := v
+		switch {
+		case __sw102 == nil:
+			n := __sw102
+			_ = n
+			return nil
+		case object.IsNilObj(__sw102):
+			n := object.NilObj()
+			_ = n
+			return nil
+		case object.IsBool(__sw102):
+			n := object.AsBoolV(__sw102)
+			_ = n
+			return bool(n)
+		case object.IsInt(__sw102):
+			n := object.AsInteger(__sw102)
+			_ = n
+			return int64(n)
+		case object.IsKind[*object.Bignum](__sw102):
+			n := object.Kind[*object.Bignum](__sw102)
+			_ = n
+			return n.I
+		case object.IsFloat(__sw102):
+			n := object.AsFloatV(__sw102)
+			_ = n
+			return float64(n)
+		case object.IsKind[*object.String](__sw102):
+			n := object.Kind[*object.String](__sw102)
+			_ = n
+			if n.IsBinary() {
+				return msgpack.Bin(n.Bytes())
+			}
+			return n.Str()
+		case object.IsKind[object.Symbol](__sw102):
+			n := object.Kind[object.Symbol](__sw102)
+			_ = n
+			return msgpack.Symbol(string(n))
+		case object.IsKind[*object.Array](__sw102):
+			n := object.Kind[*object.Array](__sw102)
+			_ = n
+			out := make([]msgpack.Value, len(n.Elems))
+			for i, el := range n.Elems {
+				out[i] = toMsgpack(el)
+			}
+			return out
+		case object.IsKind[*object.Hash](__sw102):
+			n := object.Kind[*object.Hash](__sw102)
+			_ = n
+			m := msgpack.NewMap()
+			for _, k := range n.Keys {
+				val, _ := n.Get(k)
+				m.Set(toMsgpack(k), toMsgpack(val))
+			}
+			return m
+		case object.IsKind[*Time](__sw102):
+			n := object.Kind[*Time](__sw102)
+			_ = n
+			return stdtime.Unix(n.t.ToUnix(), 0).UTC()
 		}
-		return n.Str()
-	case object.Symbol:
-		return msgpack.Symbol(string(n))
-	case *object.Array:
-		out := make([]msgpack.Value, len(n.Elems))
-		for i, el := range n.Elems {
-			out[i] = toMsgpack(el)
-		}
-		return out
-	case *object.Hash:
-		m := msgpack.NewMap()
-		for _, k := range n.Keys {
-			val, _ := n.Get(k)
-			m.Set(toMsgpack(k), toMsgpack(val))
-		}
-		return m
-	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
 	}
 	// An unmapped value: hand it to the library, which returns the pack error
 	// msgpackPack turns into a Ruby ArgumentError.
