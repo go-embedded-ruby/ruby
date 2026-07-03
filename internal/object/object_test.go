@@ -68,6 +68,31 @@ func TestHashOps(t *testing.T) {
 	}
 }
 
+// TestHashValueTypeKeys covers the immediate-value-key fast path in hashKey:
+// Integer, Float, Symbol, true/false and nil each round-trip and update in place,
+// and distinct value types never collide.
+func TestHashValueTypeKeys(t *testing.T) {
+	h := NewHash()
+	keys := []Value{Integer(7), Float(1.5), Symbol("s"), True, False, NilV}
+	for i, k := range keys {
+		h.Set(k, Integer(int64(i)))
+	}
+	if h.Len() != len(keys) {
+		t.Fatalf("len = %d want %d", h.Len(), len(keys))
+	}
+	for i, k := range keys {
+		if v, ok := h.Get(k); !ok || v != Integer(int64(i)) {
+			t.Fatalf("get %v = %v,%v want %d", k, v, ok, i)
+		}
+	}
+	// Updating an existing Integer key keeps the entry count (the found branch of
+	// Set), confirming the fast-path key is stable across Get/Set.
+	h.Set(Integer(7), Integer(70))
+	if v, ok := h.Get(Integer(7)); !ok || v != Integer(70) || h.Len() != len(keys) {
+		t.Fatalf("update Integer key: %v,%v len=%d", v, ok, h.Len())
+	}
+}
+
 // TestNewHashCap covers the pre-sized hash constructor: a positive capacity
 // builds an empty, fully usable hash, and a negative capacity clamps to zero
 // (behaving like NewHash) rather than panicking.
