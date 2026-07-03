@@ -14,7 +14,7 @@ const (
 var smallInts = func() [smallIntMax - smallIntMin + 1]Value {
 	var a [smallIntMax - smallIntMin + 1]Value
 	for i := range a {
-		a[i] = Integer(int64(i) + smallIntMin)
+		a[i] = Value{tag: TagInt, i: int64(i) + smallIntMin}
 	}
 	return a
 }()
@@ -26,5 +26,5 @@ func IntValue(v int64) Value {
 	if v >= smallIntMin && v <= smallIntMax {
 		return smallInts[v-smallIntMin]
 	}
-	return Integer(v)
+	return Value{tag: TagInt, i: v}
 }

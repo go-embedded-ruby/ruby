@@ -16,15 +16,79 @@ import (
 	"unsafe"
 )
 
-// Value is the interface implemented by every Ruby value.
+// Value is the concrete tagged-struct representation of every Ruby value
+// (plan-rbgo.md §4). It replaces the former interface so that the immediates
+// (Integer/Float/Bool/nil) live inline in a machine word and never heap-box —
+// the measured ~3.95× win on integer-bound code.
 //
-// ToS  backs to_s / puts / string interpolation.
+// Layout:
+//   - tag classifies the payload (see the Tag* constants in value_api.go).
+//   - i holds an immediate: an Integer directly, a Float as math.Float64bits
+//     (endian-safe — the bit pattern is stored, so it round-trips identically on
+//     little- and big-endian, including s390x), a Bool as 0/1. It is unused
+//     (zero) for heap values.
+//   - obj holds a heap-backed Ruby value (Symbol, *String, *Array, *Hash,
+//     *Bignum, *Complex, *Rational, *Range, *Main, RObject and every VM binding
+//     type) as a RubyObj interface. It is nil for the immediates. Being an
+//     ordinary interface word it is fully GC-scannable — unlike NaN-boxing,
+//     which we rejected precisely because it hides pointers from Go's GC.
+//
+// The zero Value{} has tag == TagNil and is exactly Ruby nil, so `var v Value`
+// is already the nil object and a struct Value can never be a Go nil — which
+// dissolves the interface-nil-vs-Nil hazard the interface representation carried.
+//
+// ToS/Inspect/Truthy are methods so a Value dispatches like the old interface:
+// they switch on the tag and, for heap values, delegate to obj's own method.
+type Value struct {
+	tag uint8
+	i   int64
+	obj RubyObj
+}
+
+// ToS backs to_s / puts / string interpolation.
+func (v Value) ToS() string {
+	switch v.tag {
+	case TagNil:
+		return ""
+	case TagInt:
+		return Integer(v.i).ToS()
+	case TagFloat:
+		return Float(math.Float64frombits(uint64(v.i))).ToS()
+	case TagBool:
+		return Bool(v.i != 0).ToS()
+	default:
+		return v.obj.ToS()
+	}
+}
+
 // Inspect backs inspect / p.
+func (v Value) Inspect() string {
+	switch v.tag {
+	case TagNil:
+		return "nil"
+	case TagInt:
+		return Integer(v.i).Inspect()
+	case TagFloat:
+		return Float(math.Float64frombits(uint64(v.i))).Inspect()
+	case TagBool:
+		return Bool(v.i != 0).Inspect()
+	default:
+		return v.obj.Inspect()
+	}
+}
+
 // Truthy implements Ruby truthiness: everything is truthy except false and nil.
-type Value interface {
-	ToS() string
-	Inspect() string
-	Truthy() bool
+func (v Value) Truthy() bool {
+	switch v.tag {
+	case TagNil:
+		return false
+	case TagBool:
+		return v.i != 0
+	case TagInt, TagFloat:
+		return true
+	default:
+		return v.obj.Truthy()
+	}
 }
 
 // Integer is a 64-bit integer (the common case). Arithmetic that overflows
@@ -632,7 +696,7 @@ func (h *Hash) Get(k Value) (Value, bool) {
 		if e := h.strVals[string(b)]; e != nil { // string(b) elided: no copy
 			return e.v, true
 		}
-		return nil, false
+		return NilVal(), false
 	}
 	v, ok := h.vals[h.hashKey(k)]
 	return v, ok
@@ -831,7 +895,7 @@ var (
 // neutral (it yields NilV, the same singleton the interpreter already uses for
 // Ruby nil) and lets the representation flip swap this one function's body
 // rather than every call site.
-func NilVal() Value { return NilV }
+func NilVal() Value { return Value{} }
 
 // IsNil reports whether v is the Ruby nil value or an absent (Go nil) Value.
 //
@@ -843,7 +907,7 @@ func NilVal() Value { return NilV }
 //
 // Comparing v against NilV never panics: NilV's dynamic type (Nil) is
 // comparable, so a v holding any other dynamic type simply compares unequal.
-func IsNil(v Value) bool { return v == nil || v == NilV }
+func IsNil(v Value) bool { return v.tag == TagNil }
 
 // Main is the top-level self ("main" object) used while executing the program
 // body. It is a real object with its own instance-variable table, so top-level

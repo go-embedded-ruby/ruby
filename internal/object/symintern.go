@@ -29,6 +29,6 @@ func SymVal(name string) Value {
 	// Miss: box once and publish it. LoadOrStore resolves a race with a
 	// concurrent first-boxer by returning whichever box won, so all callers
 	// still converge on one shared Value.
-	v, _ := symIntern.LoadOrStore(name, Value(Symbol(name)))
+	v, _ := symIntern.LoadOrStore(name, Value{tag: TagSym, obj: Symbol(name)})
 	return v.(Value)
 }
