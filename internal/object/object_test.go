@@ -162,6 +162,150 @@ func TestHashContentKeysAndClear(t *testing.T) {
 	}
 }
 
+// TestHashStringKeyFastPath exercises the allocation-free String-key fast path
+// (strVals) end-to-end: insertion order, in-place overwrite keeping the original
+// key + position, miss, delete-then-reinsert, Len, #keys returning the stored
+// (frozen) snapshots, inspect, and the distinctness of a String key from a Symbol
+// of the same name. It covers both the nil-strVals insert path (NewHash) and the
+// pre-sized path (NewHashCap).
+func TestHashStringKeyFastPath(t *testing.T) {
+	for _, h := range []*Hash{NewHash(), NewHashCap(3)} {
+		h.Set(NewString("a"), Integer(1))
+		h.Set(Symbol("a"), Integer(100)) // Symbol("a") is a DISTINCT key from "a".
+		h.Set(NewString("b"), Integer(2))
+		h.Set(NewString("a"), Integer(9)) // overwrite: keeps key + first position.
+		if h.Len() != 3 {
+			t.Fatalf("len = %d want 3", h.Len())
+		}
+		if v, ok := h.Get(NewString("a")); !ok || v != Integer(9) {
+			t.Fatalf(`get "a" = %v,%v want 9`, v, ok)
+		}
+		if v, ok := h.Get(Symbol("a")); !ok || v != Integer(100) {
+			t.Fatalf("get :a = %v,%v want 100 (String/Symbol must not collide)", v, ok)
+		}
+		if _, ok := h.Get(NewString("z")); ok {
+			t.Fatal(`missing string key "z" should be absent`)
+		}
+		// Insertion order + frozen snapshots via #keys.
+		wantOrder := []string{"a", ":a", "b"}
+		if len(h.Keys) != 3 {
+			t.Fatalf("keys len %d", len(h.Keys))
+		}
+		for i, k := range h.Keys {
+			switch kk := k.(type) {
+			case *String:
+				if !kk.Frozen {
+					t.Fatalf("stored string key %q not frozen", kk.Str())
+				}
+				if kk.Str() != wantOrder[i] {
+					t.Fatalf("order[%d] = %q want %q", i, kk.Str(), wantOrder[i])
+				}
+			case Symbol:
+				if ":"+string(kk) != wantOrder[i] {
+					t.Fatalf("order[%d] = :%s want %q", i, string(kk), wantOrder[i])
+				}
+			}
+		}
+		if h.Inspect() != `{"a" => 9, a: 100, "b" => 2}` {
+			t.Fatalf("inspect = %q", h.Inspect())
+		}
+		// Delete a string key, then reinsert it: reinsertion appends at the end.
+		if v, ok := h.Delete(NewString("a")); !ok || v != Integer(9) {
+			t.Fatalf(`delete "a" = %v,%v`, v, ok)
+		}
+		if _, ok := h.Get(NewString("a")); ok {
+			t.Fatal(`"a" present after delete`)
+		}
+		if _, ok := h.Delete(NewString("a")); ok {
+			t.Fatal("second delete should report absent")
+		}
+		h.Set(NewString("a"), Integer(42))
+		if h.Keys[len(h.Keys)-1].(*String).Str() != "a" {
+			t.Fatal("reinserted key should be last")
+		}
+	}
+}
+
+// TestHashStringKeyDupOnInsert covers Ruby's dup+freeze-on-insert: mutating the
+// caller's String after insertion leaves the stored key (and the entry) intact,
+// and the entry is still found by an equal String.
+func TestHashStringKeyDupOnInsert(t *testing.T) {
+	h := NewHash()
+	s := NewString("k")
+	h.Set(s, Integer(1))
+	s.SetBytes([]byte("kx")) // mutate the original after insertion
+	if got := h.Keys[0].(*String).Str(); got != "k" {
+		t.Fatalf("stored key mutated to %q, want %q", got, "k")
+	}
+	if v, ok := h.Get(NewString("k")); !ok || v != Integer(1) {
+		t.Fatalf(`get "k" after source mutation = %v,%v`, v, ok)
+	}
+	if _, ok := h.Get(s); ok {
+		t.Fatal(`mutated source "kx" should not be a key`)
+	}
+}
+
+// keyUnwrap is a test double for KeyUnwrapper: an object that, used as a Hash key,
+// hashes/compares as the value it wraps (wrap==true) or by identity (wrap==false).
+type keyUnwrap struct {
+	inner Value
+	wrap  bool
+}
+
+func (k *keyUnwrap) HashUnwrap() (Value, bool) { return k.inner, k.wrap }
+func (k *keyUnwrap) ToS() string               { return "unwrap" }
+func (k *keyUnwrap) Inspect() string           { return "unwrap" }
+func (k *keyUnwrap) Truthy() bool              { return true }
+
+// TestHashStringKeyUnwrapper covers strContentKey's KeyUnwrapper branches: a
+// wrapper of a String routes through the fast path and collides with a plain
+// String of equal content; a wrapper of a non-String, and a wrapper that reports
+// wrap==false, both fall through to the general (identity) path.
+func TestHashStringKeyUnwrapper(t *testing.T) {
+	h := NewHash()
+	// Wrapper of a String -> fast path, same slot as a plain equal String.
+	h.Set(&keyUnwrap{inner: NewString("w"), wrap: true}, Integer(1))
+	if v, ok := h.Get(NewString("w")); !ok || v != Integer(1) {
+		t.Fatalf("string-wrapper/plain collision = %v,%v", v, ok)
+	}
+	// Wrapper of a non-String (Array) -> general path (unwrapped to content key).
+	aw := &keyUnwrap{inner: &Array{Elems: []Value{Integer(3)}}, wrap: true}
+	h.Set(aw, Integer(2))
+	if v, ok := h.Get(&keyUnwrap{inner: &Array{Elems: []Value{Integer(3)}}, wrap: true}); !ok || v != Integer(2) {
+		t.Fatalf("array-wrapper key = %v,%v", v, ok)
+	}
+	// Wrapper reporting wrap==false -> identity key (no hook installed here).
+	iw := &keyUnwrap{inner: NewString("i"), wrap: false}
+	h.Set(iw, Integer(3))
+	if v, ok := h.Get(iw); !ok || v != Integer(3) {
+		t.Fatalf("identity-wrapper key = %v,%v", v, ok)
+	}
+	if _, ok := h.Get(&keyUnwrap{inner: NewString("i"), wrap: false}); ok {
+		t.Fatal("distinct identity wrapper should miss")
+	}
+}
+
+// TestHashStringInsideCompositeKey covers the recursive hashKey `case *String`:
+// a String appearing INSIDE an Array/Hash key is still serialised by content, so
+// two equal composite keys coincide even though the top-level fast path never
+// sees the inner String.
+func TestHashStringInsideCompositeKey(t *testing.T) {
+	h := NewHash()
+	h.Set(&Array{Elems: []Value{NewString("x"), Integer(1)}}, Integer(7))
+	if v, ok := h.Get(&Array{Elems: []Value{NewString("x"), Integer(1)}}); !ok || v != Integer(7) {
+		t.Fatalf("composite string-in-array key = %v,%v", v, ok)
+	}
+	// A nested Hash key whose value side is a String (exercises valKey -> case *String).
+	inner := NewHash()
+	inner.Set(Symbol("k"), NewString("s"))
+	probe := NewHash()
+	probe.Set(Symbol("k"), NewString("s"))
+	h.Set(inner, Integer(8))
+	if v, ok := h.Get(probe); !ok || v != Integer(8) {
+		t.Fatalf("nested-hash string-value key = %v,%v", v, ok)
+	}
+}
+
 func TestSingletons(t *testing.T) {
 	if !True.Truthy() || False.Truthy() || NilV.Truthy() {
 		t.Fatal("singleton truthiness wrong")
