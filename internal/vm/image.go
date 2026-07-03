@@ -66,7 +66,7 @@ func (vm *VM) registerImage() {
 			if !ok {
 				raise("TypeError", "Image.decode expects a String of image bytes")
 			}
-			img, err := goimg.Decode(bytes.NewReader(s.B))
+			img, err := goimg.Decode(bytes.NewReader(s.Bytes()))
 			if err != nil {
 				raise("ArgumentError", "%s", err.Error())
 			}
@@ -107,7 +107,7 @@ func (vm *VM) registerImage() {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 			var buf bytes.Buffer
 			_ = goimg.Encode(&buf, imgOf(v), format)
-			return &object.String{B: buf.Bytes()}
+			return object.NewStringBytes(buf.Bytes())
 		})
 	}
 	encode("to_png", goimg.PNG)

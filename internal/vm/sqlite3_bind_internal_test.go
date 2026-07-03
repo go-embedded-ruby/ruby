@@ -43,7 +43,7 @@ func TestSQLite3BindBridge(t *testing.T) {
 	if v := sqlite3Bind(object.NewString("hi")); v != "hi" {
 		t.Errorf("string -> %v", v)
 	}
-	if v := sqlite3Bind(&object.String{B: []byte{0xff}, Enc: "ASCII-8BIT"}); string(v.([]byte)) != "\xff" {
+	if v := sqlite3Bind(object.NewStringBytesEnc([]byte{0xff}, "ASCII-8BIT")); string(v.([]byte)) != "\xff" {
 		t.Errorf("binary -> %v", v)
 	}
 	if v := sqlite3Bind(object.Symbol("s")); v != "s" {

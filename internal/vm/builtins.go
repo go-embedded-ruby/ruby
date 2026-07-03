@@ -972,7 +972,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			if len(args) > 0 {
 				if s, ok := args[0].(*object.String); ok {
-					return vm.classEvalString(self.(*RClass), string(s.B))
+					return vm.classEvalString(self.(*RClass), string(s.Bytes()))
 				}
 			}
 			raise("LocalJumpError", "no block given (yield)")
@@ -1112,9 +1112,9 @@ func (vm *VM) bootstrap() {
 		// A binary (ASCII-8BIT) string counts bytes; otherwise characters.
 		s := self.(*object.String)
 		if s.IsBinary() {
-			return object.Integer(int64(len(s.B)))
+			return object.Integer(int64(len(s.Bytes())))
 		}
-		return object.Integer(int64(utf8.RuneCountInString(string(s.B))))
+		return object.Integer(int64(utf8.RuneCountInString(string(s.Bytes()))))
 	}
 	vm.cString.define("length", strLen)
 	vm.cString.define("size", strLen)
@@ -1393,7 +1393,7 @@ func (vm *VM) bootstrap() {
 				out = append(out, b)
 			}
 		}
-		return &object.String{B: out}
+		return object.NewStringBytes(out)
 	})
 	vm.cString.define("count", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		set := expandCharSet(strArg(args[0]))
@@ -1413,14 +1413,14 @@ func (vm *VM) bootstrap() {
 				out = append(out, strOf(self)[i])
 			}
 		}
-		return &object.String{B: out}
+		return object.NewStringBytes(out)
 	})
 	vm.cString.define("squeeze", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		sets := make([]string, len(args))
 		for i, a := range args {
 			sets[i] = strArg(a)
 		}
-		return &object.String{B: []byte(squeezeStr(strOf(self), sets...))}
+		return object.NewStringBytes([]byte(squeezeStr(strOf(self), sets...)))
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		var res object.Value
@@ -1465,7 +1465,7 @@ func (vm *VM) bootstrap() {
 		s := self.(*object.String)
 		checkFrozen(s)
 		for _, a := range args {
-			s.B = append(s.B, strAppendBytes(a)...)
+			s.SetBytes(append(s.MutableBytes(), strAppendBytes(a)...))
 		}
 		return s
 	}
@@ -1474,7 +1474,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		checkFrozen(s)
-		s.B = []byte(strArg(args[0]))
+		s.SetBytes([]byte(strArg(args[0])))
 		return s
 	})
 	vm.cString.define("prepend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -1484,7 +1484,7 @@ func (vm *VM) bootstrap() {
 		for _, a := range args {
 			head = append(head, strAppendBytes(a)...)
 		}
-		s.B = append(head, s.B...)
+		s.SetBytes(append(head, s.Bytes()...))
 		return s
 	})
 	vm.cString.define("insert", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -1500,13 +1500,13 @@ func (vm *VM) bootstrap() {
 		}
 		ins := []rune(strArg(args[1]))
 		out := append(append(append([]rune{}, r[:at]...), ins...), r[at:]...)
-		s.B = []byte(string(out))
+		s.SetBytes([]byte(string(out)))
 		return s
 	})
 	vm.cString.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		checkFrozen(s)
-		s.B = s.B[:0]
+		s.SetBytes(nil)
 		return s
 	})
 	vm.cString.define("upcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -1524,7 +1524,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		checkFrozen(s)
-		s.B = []byte(reverseStr(s.Str()))
+		s.SetBytes([]byte(reverseStr(s.Str())))
 		return s
 	})
 	vm.cString.define("strip!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -2540,7 +2540,7 @@ func (vm *VM) bootstrap() {
 				raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
 			}
 		}
-		s.B = []byte(content)
+		s.SetBytes([]byte(content))
 		return self
 	}
 	vm.cString.define("initialize", stringInit)
@@ -4218,7 +4218,7 @@ func checkFrozen(s *object.String) {
 func strAppendBytes(a object.Value) []byte {
 	switch v := a.(type) {
 	case *object.String:
-		return v.B
+		return v.Bytes()
 	case object.Integer:
 		return []byte(string(rune(v)))
 	}
@@ -4232,10 +4232,10 @@ func strBang(self object.Value, fn func(string) string) object.Value {
 	s := self.(*object.String)
 	checkFrozen(s)
 	out := fn(s.Str())
-	if out == string(s.B) {
+	if out == s.Str() {
 		return object.NilV
 	}
-	s.B = []byte(out)
+	s.SetBytes([]byte(out))
 	return s
 }
 
@@ -4348,10 +4348,10 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 		return enumFor(s, "gsub!", args[0])
 	}
 	res := vm.stringSub(s.Str(), args, blk, global).(*object.String)
-	if string(res.B) == string(s.B) {
+	if res.Str() == s.Str() {
 		return object.NilV
 	}
-	s.B = res.B
+	s.TakeFrom(res)
 	return s
 }
 
@@ -4366,7 +4366,7 @@ func stringIndexAssign(s *object.String, args []object.Value) object.Value {
 	repl := strArg(rhs)
 	start, length := stringAssignSpan(args, n)
 	out := append(append(append([]rune{}, r[:start]...), []rune(repl)...), r[start+length:]...)
-	s.B = []byte(string(out))
+	s.SetBytes([]byte(string(out)))
 	return rhs
 }
 
@@ -4409,15 +4409,15 @@ func stringSliceBang(s *object.String, args []object.Value) object.Value {
 	// A binary (ASCII-8BIT) string slices by BYTES and the removed span stays
 	// binary, matching MRI; a UTF-8 string slices by characters.
 	if s.IsBinary() {
-		b := s.B
+		b := s.Bytes()
 		n := len(b)
 		start, length, ok := sliceSpan(args, n)
 		if !ok {
 			return object.NilV
 		}
 		removed := append([]byte{}, b[start:start+length]...)
-		s.B = append(append([]byte{}, b[:start]...), b[start+length:]...)
-		return &object.String{B: removed, Enc: s.Enc}
+		s.SetBytes(append(append([]byte{}, b[:start]...), b[start+length:]...))
+		return object.NewStringBytesEnc(removed, s.Enc)
 	}
 	r := []rune(s.Str())
 	n := len(r)
@@ -4427,7 +4427,7 @@ func stringSliceBang(s *object.String, args []object.Value) object.Value {
 	}
 	removed := string(r[start : start+length])
 	out := append(append([]rune{}, r[:start]...), r[start+length:]...)
-	s.B = []byte(string(out))
+	s.SetBytes([]byte(string(out)))
 	return object.NewString(removed)
 }
 

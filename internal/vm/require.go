@@ -50,8 +50,8 @@ var providedFeatures = map[string]bool{
 	"redis": true, "pg": true, "sequel": true,
 	"rspec": true, "rspec/expectations": true, "rspec/matchers": true,
 	"rubocop": true,
-	"grape": true,
-	"rack": true, "rack/utils": true,
+	"grape":   true,
+	"rack":    true, "rack/utils": true,
 	"sinatra": true, "sinatra/base": true,
 	"active_record": true, "activerecord": true,
 	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,
@@ -116,7 +116,7 @@ func requireName(vm *VM, args []object.Value) string {
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
 	}
-	return string(s.B)
+	return string(s.Bytes())
 }
 
 func (vm *VM) doRequire(name string, relative bool) object.Value {
@@ -225,7 +225,7 @@ func (vm *VM) loadPathDirs() []string {
 	dirs := make([]string, 0, len(lp.Elems))
 	for _, e := range lp.Elems {
 		if s, ok := e.(*object.String); ok {
-			dirs = append(dirs, string(s.B))
+			dirs = append(dirs, string(s.Bytes()))
 		}
 	}
 	return dirs

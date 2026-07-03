@@ -148,7 +148,7 @@ func sqlite3Bind(v object.Value) sqlite3.Value {
 		return float64(n)
 	case *object.String:
 		if n.IsBinary() {
-			return []byte(n.B)
+			return []byte(n.Bytes())
 		}
 		return n.Str()
 	case object.Symbol:
@@ -182,7 +182,7 @@ func sqlite3Value(vm *VM, v sqlite3.Value) object.Value {
 	case string:
 		return object.NewString(n)
 	case []byte:
-		return &object.String{B: n, Enc: "ASCII-8BIT"}
+		return object.NewStringBytesEnc(n, "ASCII-8BIT")
 	case bool:
 		return object.Bool(n)
 	}

@@ -24,14 +24,14 @@ func (vm *VM) registerPackUnpack() {
 	vm.cArray.define("pack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		elems := self.(*object.Array).Elems
 		fmtStr := packFormat(args)
-		return &object.String{B: packBytes(elems, fmtStr), Enc: "ASCII-8BIT"}
+		return object.NewStringBytesEnc(packBytes(elems, fmtStr), "ASCII-8BIT")
 	})
 	vm.cString.define("unpack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		data := self.(*object.String).B
+		data := self.(*object.String).Bytes()
 		return &object.Array{Elems: unpackElems(data, packFormat(args))}
 	})
 	vm.cString.define("unpack1", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		data := self.(*object.String).B
+		data := self.(*object.String).Bytes()
 		elems := unpackElems(data, packFormat(args))
 		if len(elems) == 0 {
 			return object.NilV
@@ -49,7 +49,7 @@ func packFormat(args []object.Value) string {
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 	}
-	return string(s.B)
+	return string(s.Bytes())
 }
 
 // packDir is one parsed directive: its letter, a count, and whether the count
@@ -217,7 +217,7 @@ func packStrArg(v object.Value) []byte {
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 	}
-	return s.B
+	return s.Bytes()
 }
 
 // packString implements the a/A/Z directives: pad/truncate to the count (with

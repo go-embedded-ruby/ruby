@@ -62,7 +62,7 @@ func TestMsgpackFromBridge(t *testing.T) {
 	}
 	// A Bin maps to an ASCII-8BIT String.
 	s, ok := fromMsgpack(vm, msgpack.Bin{0xff, 0x00}).(*object.String)
-	if !ok || !s.IsBinary() || len(s.B) != 2 {
+	if !ok || !s.IsBinary() || s.Len() != 2 {
 		t.Errorf("bin -> %#v", fromMsgpack(vm, msgpack.Bin{0xff, 0x00}))
 	}
 	// A time.Time maps to a Ruby Time carrying the same instant.

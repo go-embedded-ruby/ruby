@@ -68,7 +68,7 @@ func toMsgpack(v object.Value) msgpack.Value {
 		return float64(n)
 	case *object.String:
 		if n.IsBinary() {
-			return msgpack.Bin(n.B)
+			return msgpack.Bin(n.Bytes())
 		}
 		return n.Str()
 	case object.Symbol:
@@ -120,7 +120,7 @@ func fromMsgpack(vm *VM, v msgpack.Value) object.Value {
 	case string:
 		return object.NewString(n)
 	case msgpack.Bin:
-		return &object.String{B: []byte(n), Enc: "ASCII-8BIT"}
+		return object.NewStringBytesEnc([]byte(n), "ASCII-8BIT")
 	case []msgpack.Value:
 		arr := &object.Array{Elems: make([]object.Value, len(n))}
 		for i, el := range n {

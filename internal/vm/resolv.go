@@ -523,7 +523,7 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 				break
 			}
 		}
-		return &object.String{B: b, Enc: enc}
+		return object.NewStringBytesEnc(b, enc)
 	})
 	msg.define("question", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		out := []object.Value{}

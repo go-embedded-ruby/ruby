@@ -25,7 +25,7 @@ func (vm *VM) registerEval() {
 		if !ok {
 			return raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
 		}
-		iseq, cerr := parseCompileFn(string(s.B))
+		iseq, cerr := parseCompileFn(string(s.Bytes()))
 		if cerr != nil {
 			return raise("SyntaxError", "%s", cerr.Error())
 		}

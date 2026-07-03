@@ -31,7 +31,7 @@ func (vm *VM) registerMsgpack() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
-		return &object.String{B: msgpackPack(args[0]), Enc: "ASCII-8BIT"}
+		return object.NewStringBytesEnc(msgpackPack(args[0]), "ASCII-8BIT")
 	}
 	def("pack", pack)
 	def("dump", pack)
@@ -50,7 +50,7 @@ func (vm *VM) registerMsgpack() {
 	// Object#to_msgpack (the gem installs this on Object) returns
 	// MessagePack.pack(self).
 	vm.cObject.define("to_msgpack", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.String{B: msgpackPack(self), Enc: "ASCII-8BIT"}
+		return object.NewStringBytesEnc(msgpackPack(self), "ASCII-8BIT")
 	})
 }
 
@@ -79,7 +79,7 @@ func (vm *VM) registerMsgpackErrors(mod *RClass) {
 // other value its to_s bytes, so a non-String argument does not crash the parser.
 func msgpackBytesArg(v object.Value) []byte {
 	if s, ok := v.(*object.String); ok {
-		return s.B
+		return s.Bytes()
 	}
 	return []byte(v.ToS())
 }

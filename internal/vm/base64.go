@@ -36,29 +36,29 @@ func (vm *VM) registerBase64() {
 		// extra pass cancels the SIMD win — the single-pass scalar encoder (which
 		// emits the newlines inline) matches or beats it at every size. So there is
 		// no SIMD crossover for the wrapped form.
-		return &object.String{B: encodeScalar(base64Bytes(args[0]), b64StdAlphabet, true)}
+		return object.NewStringBytes(encodeScalar(base64Bytes(args[0]), b64StdAlphabet, true))
 	})
 	def("strict_encode64", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		src := base64Bytes(args[0])
 		if len(src) >= encodeSIMDThreshold {
 			return object.NewString(b64.StrictEncode64(string(src)))
 		}
-		return &object.String{B: encodeScalar(src, b64StdAlphabet, false)}
+		return object.NewStringBytes(encodeScalar(src, b64StdAlphabet, false))
 	})
 	def("urlsafe_encode64", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// urlsafe always pads here (rbgo never passed the padding: kwarg), so the
 		// scalar encoder produces the final bytes with no post-pass remap.
-		return &object.String{B: encodeScalar(base64Bytes(args[0]), b64URLAlphabet, false)}
+		return object.NewStringBytes(encodeScalar(base64Bytes(args[0]), b64URLAlphabet, false))
 	})
 	def("decode64", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return &object.String{B: decodeLenient(base64Bytes(args[0]))}
+		return object.NewStringBytes(decodeLenient(base64Bytes(args[0])))
 	})
 	def("strict_decode64", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		out, ok := decodeStrict(base64Bytes(args[0]))
 		if !ok {
 			raiseBase64Invalid()
 		}
-		return &object.String{B: out}
+		return object.NewStringBytes(out)
 	})
 	def("urlsafe_decode64", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// MRI urlsafe_decode64 translates -_ -> +/ (and, like its tr-based impl,
@@ -69,7 +69,7 @@ func (vm *VM) registerBase64() {
 		if !ok {
 			raiseBase64Invalid()
 		}
-		return &object.String{B: out}
+		return object.NewStringBytes(out)
 	})
 }
 
@@ -367,5 +367,5 @@ func base64Bytes(v object.Value) []byte {
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 	}
-	return s.B
+	return s.Bytes()
 }

@@ -66,7 +66,7 @@ func TestFreezeAllConstKinds(t *testing.T) {
 			object.Integer(-7),
 			object.Symbol("sym"),
 			object.NewString("hi\n"),
-			&object.String{B: []byte("frozen"), Frozen: true},
+			object.NewFrozenStringView("frozen"),
 			object.Float(2.5),
 			&object.Bignum{I: bigVal},
 		},
@@ -89,7 +89,7 @@ func TestFreezeAllConstKinds(t *testing.T) {
 		"object.Integer(-7)",
 		`object.Symbol("sym")`,
 		`object.NewString("hi\n")`,
-		`&object.String{B: []byte("frozen"), Frozen: true}`,
+		`object.NewFrozenStringView("frozen")`,
 		"frozenFloat(0x4004000000000000)", // 2.5
 		`&object.Bignum{I: frozenBig("123456789012345678901234567890")}`,
 		`frozenBig(s string) *big.Int`,

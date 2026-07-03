@@ -51,7 +51,7 @@ func dictName(v object.Value) string {
 	case object.Symbol:
 		return string(x)
 	case *object.String:
-		return string(x.B)
+		return string(x.Bytes())
 	default:
 		return x.ToS()
 	}

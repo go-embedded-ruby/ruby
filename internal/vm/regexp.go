@@ -555,7 +555,7 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 	if limit == 0 {
 		// Strip trailing empty fields (the default behaviour).
 		for len(out) > 0 {
-			if s, ok := out[len(out)-1].(*object.String); ok && len(s.B) == 0 {
+			if s, ok := out[len(out)-1].(*object.String); ok && len(s.Bytes()) == 0 {
 				out = out[:len(out)-1]
 				continue
 			}

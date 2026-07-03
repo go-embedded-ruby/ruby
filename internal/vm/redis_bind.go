@@ -58,7 +58,7 @@ type rubyConn struct {
 // exception from #write unwinds through the panic-based raise, so a returned
 // error is never a Ruby-level failure — it only guards the io.Writer contract.
 func (c *rubyConn) Write(p []byte) (int, error) {
-	c.vm.send(c.obj, "write", []object.Value{&object.String{B: append([]byte(nil), p...), Enc: "ASCII-8BIT"}}, nil)
+	c.vm.send(c.obj, "write", []object.Value{object.NewStringBytesEnc(append([]byte(nil), p...), "ASCII-8BIT")}, nil)
 	return len(p), nil
 }
 
@@ -77,7 +77,7 @@ func (c *rubyConn) Read(p []byte) (int, error) {
 // its bytes, a nil (or anything else) yields none (EOF).
 func redisReadBytes(v object.Value) []byte {
 	if s, ok := v.(*object.String); ok {
-		return s.B
+		return s.Bytes()
 	}
 	return nil
 }

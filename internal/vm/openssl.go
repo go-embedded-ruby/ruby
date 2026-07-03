@@ -320,7 +320,7 @@ func (vm *VM) registerOpenSSLRandom(mod *RClass) {
 	mod.consts["Random"] = r
 	r.smethods["random_bytes"] = &Method{name: "random_bytes", owner: r,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return &object.String{B: secureBytes(int(intArg(args[0]))), Enc: "ASCII-8BIT"}
+			return object.NewStringBytesEnc(secureBytes(int(intArg(args[0]))), "ASCII-8BIT")
 		}}
 }
 

@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"unsafe"
 )
 
 // Value is the interface implemented by every Ruby value.
@@ -148,8 +149,24 @@ func imagPartInspect(im Value) string {
 // as *String), so aliasing and in-place mutation (<<, []=, replace, the bang
 // methods) behave as in Ruby. Frozen marks a string that may not be mutated
 // (Hash keys are frozen snapshots; a frozen literal raises on mutation).
+//
+// Copy-on-write: a String has two representations. An *owned* string holds a
+// private, mutable byte slice in b (isView == false). A *view* string instead
+// shares an immutable Go string in view (isView == true) and leaves b nil,
+// avoiding the substring copy that dominates alloc-heavy paths such as
+// String#split. Because Go strings are immutable, a view can never observe a
+// mutation of whatever produced it, so views are provably free of source
+// aliasing. The first in-place mutation calls ensureOwned, which copies the
+// view into a private b and switches the representation; all reads go through
+// the Bytes / Str / Len accessors, which work on both representations.
+//
+// Invariants: exactly one representation is live. When isView is true, view
+// holds the content and b is nil; when isView is false, b holds the content and
+// view is "".
 type String struct {
-	B      []byte
+	b      []byte // owned, mutable bytes (isView == false)
+	view   string // shared immutable bytes (isView == true)
+	isView bool
 	Frozen bool
 	// Enc is the encoding name, or "" for the UTF-8 default. Only a non-default
 	// (e.g. "ASCII-8BIT") changes behaviour, so existing UTF-8 strings are
@@ -157,11 +174,85 @@ type String struct {
 	Enc string
 }
 
-// NewString builds a String from a Go string.
-func NewString(s string) *String { return &String{B: []byte(s)} }
+// NewString builds an owned String from a Go string, copying its bytes.
+func NewString(s string) *String { return &String{b: []byte(s)} }
+
+// NewStringBytes builds an owned String that takes ownership of b without
+// copying it. The caller must not retain or mutate b afterwards.
+func NewStringBytes(b []byte) *String { return &String{b: b} }
+
+// NewStringBytesEnc is NewStringBytes with an explicit encoding tag.
+func NewStringBytesEnc(b []byte, enc string) *String { return &String{b: b, Enc: enc} }
+
+// NewFrozenStringView builds a frozen copy-on-write view over the immutable Go
+// string s. Because it is frozen it never mutates, so the view is permanent and
+// serves every read without copying — ideal for interned/AOT string literals.
+func NewFrozenStringView(s string) *String { return &String{view: s, isView: true, Frozen: true} }
+
+// TakeFrom makes s share o's representation (owned slice or view), used when o
+// is a freshly produced, otherwise-discarded String so the transfer is
+// zero-copy and cannot alias any live value. Enc and Frozen are left untouched.
+func (s *String) TakeFrom(o *String) { s.b, s.view, s.isView = o.b, o.view, o.isView }
+
+// NewStringView builds a copy-on-write String that shares s's immutable bytes
+// without copying them. The first in-place mutation transparently materializes
+// a private copy (see ensureOwned). Use this for substrings and other reads
+// carved out of an already-immutable Go string.
+func NewStringView(s string) *String { return &String{view: s, isView: true} }
+
+// Bytes returns the string's bytes for READ-ONLY use, without copying. Callers
+// MUST NOT mutate the returned slice; use MutableBytes for in-place mutation.
+// For a view this aliases the underlying immutable Go string, so mutating it
+// would corrupt every sibling sharing that source.
+func (s *String) Bytes() []byte {
+	if s.isView {
+		return unsafe.Slice(unsafe.StringData(s.view), len(s.view))
+	}
+	return s.b
+}
+
+// Len returns the string's byte length on either representation.
+func (s *String) Len() int {
+	if s.isView {
+		return len(s.view)
+	}
+	return len(s.b)
+}
+
+// ensureOwned materializes a private, mutable byte slice, converting a view to
+// owned. It is idempotent and a no-op on an already-owned string. It does NOT
+// check Frozen: mutation methods must raise FrozenError before calling it.
+func (s *String) ensureOwned() {
+	if s.isView {
+		s.b = []byte(s.view)
+		s.view = ""
+		s.isView = false
+	}
+}
+
+// MutableBytes returns the owned byte slice for in-place mutation, first
+// materializing a private copy if the string is a view. Callers may freely
+// mutate the result in place.
+func (s *String) MutableBytes() []byte {
+	s.ensureOwned()
+	return s.b
+}
+
+// SetBytes replaces the string's contents with b, taking ownership of it and
+// switching to the owned representation.
+func (s *String) SetBytes(b []byte) {
+	s.b = b
+	s.view = ""
+	s.isView = false
+}
 
 // Str returns the string's contents as a Go string.
-func (s *String) Str() string { return string(s.B) }
+func (s *String) Str() string {
+	if s.isView {
+		return s.view
+	}
+	return string(s.b)
+}
 
 // EncName returns the string's encoding name, defaulting to UTF-8.
 func (s *String) EncName() string {
@@ -178,16 +269,17 @@ func (s *String) IsBinary() bool { return s.Enc == "ASCII-8BIT" }
 // Dup returns an unfrozen shallow copy with its own backing array, preserving the
 // encoding.
 func (s *String) Dup() *String {
-	b := make([]byte, len(s.B))
-	copy(b, s.B)
-	return &String{B: b, Enc: s.Enc}
+	src := s.Bytes()
+	b := make([]byte, len(src))
+	copy(b, src)
+	return &String{b: b, Enc: s.Enc}
 }
 
-func (s *String) ToS() string { return string(s.B) }
+func (s *String) ToS() string { return s.Str() }
 func (s *String) Inspect() string {
 	var b strings.Builder
 	b.WriteByte('"')
-	rs := []rune(string(s.B))
+	rs := []rune(s.Str())
 	for i := 0; i < len(rs); i++ {
 		switch r := rs[i]; r {
 		case '"':
@@ -355,7 +447,7 @@ func (h *Hash) hashKey(k Value) any {
 	}
 	switch kk := k.(type) {
 	case *String:
-		return strKey(kk.B)
+		return strKey(kk.Bytes())
 	// Immediate value types are their own comparable key: Ruby fixnums, floats,
 	// symbols, true/false and nil hash and compare by value (1.eql?(1),
 	// :a.eql?(:a)), and none can be subclassed to override #hash, so they never

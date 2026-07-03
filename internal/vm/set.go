@@ -87,7 +87,7 @@ func setKey(v object.Value) any {
 	case *object.Bignum:
 		return "bignum:" + x.I.String()
 	case *object.String:
-		return "str:" + string(x.B)
+		return "str:" + string(x.Bytes())
 	}
 	// Any other object is a valid Set member in Ruby — it keys by identity
 	// (object equality / hash), exactly like a Hash key. A reference-typed Ruby

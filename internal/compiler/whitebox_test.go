@@ -177,7 +177,7 @@ func TestCompileDefinedCallLocal(t *testing.T) {
 
 func iseqHasStringConst(iseq *bytecode.ISeq, want string) bool {
 	for _, c := range iseq.Consts {
-		if s, ok := c.(*object.String); ok && string(s.B) == want {
+		if s, ok := c.(*object.String); ok && s.Str() == want {
 			return true
 		}
 	}

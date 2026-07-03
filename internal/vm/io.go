@@ -118,7 +118,7 @@ func (vm *VM) registerIO() {
 		o := &IOObj{cls: cStringIO, isStr: true}
 		if len(args) > 0 {
 			if s, ok := args[0].(*object.String); ok {
-				o.buf = append([]byte(nil), s.B...)
+				o.buf = append([]byte(nil), s.Bytes()...)
 			} else {
 				raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 			}
@@ -361,8 +361,8 @@ func defIOWrite(cls *RClass) {
 		case object.Integer:
 			o.writeBytes([]byte{byte(a)})
 		case *object.String:
-			if len(a.B) > 0 {
-				o.writeBytes(a.B[:1])
+			if len(a.Bytes()) > 0 {
+				o.writeBytes(a.Bytes()[:1])
 			}
 		default:
 			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
