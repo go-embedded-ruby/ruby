@@ -2898,7 +2898,7 @@ func (vm *VM) bootstrap() {
 		h := self.(*object.Hash)
 		// default(key) invokes the default block (passing the hash and key); with
 		// no argument it returns the static default, ignoring any block.
-		if len(args) == 1 && h.DefaultProc != nil {
+		if len(args) == 1 && !object.IsNil(h.DefaultProc) {
 			return vm.callBlock(h.DefaultProc.(*Proc), []object.Value{h, args[0]})
 		}
 		if h.Default != nil {
@@ -2914,7 +2914,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("default_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
-		if h.DefaultProc != nil {
+		if !object.IsNil(h.DefaultProc) {
 			return h.DefaultProc
 		}
 		return object.NilV
@@ -3756,7 +3756,7 @@ func (vm *VM) newBuiltinSubclass(recv *RClass, zero object.Value, args []object.
 // hashDefault returns the value a missing key reads as: the default proc's
 // result (called with the hash and key), else the static default, else nil.
 func (vm *VM) hashDefault(h *object.Hash, key object.Value) object.Value {
-	if h.DefaultProc != nil {
+	if !object.IsNil(h.DefaultProc) {
 		return vm.callBlock(h.DefaultProc.(*Proc), []object.Value{h, key})
 	}
 	if h.Default != nil {
@@ -4909,7 +4909,7 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 	case 0:
 		// Bare `raise` re-raises the exception currently being handled, else a
 		// fresh RuntimeError.
-		if vm.curExc != nil {
+		if !object.IsNil(vm.curExc) {
 			panic(vm.excError(vm.captureBacktrace(vm.curExc)))
 		}
 		panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new",

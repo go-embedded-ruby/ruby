@@ -291,7 +291,7 @@ func (vm *VM) registerREXMLDocument(mod *RClass) {
 	// MRI's default output is $stdout).
 	d("write", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := rexmlWriteString(doc(v), args)
-		if io := rexmlIOArg(args); io != nil {
+		if io := rexmlIOArg(args); !object.IsNil(io) {
 			vm.send(io, "<<", []object.Value{object.NewString(s)}, nil)
 			return object.NilV
 		}
@@ -332,11 +332,11 @@ func rexmlIndentArg(args []object.Value) (int, bool) {
 // not nil) — or nil when write should return the rendered String.
 func rexmlIOArg(args []object.Value) object.Value {
 	if len(args) == 0 {
-		return nil
+		return object.NilVal()
 	}
 	switch args[0].(type) {
 	case object.Integer, object.Nil:
-		return nil
+		return object.NilVal()
 	}
 	return args[0]
 }

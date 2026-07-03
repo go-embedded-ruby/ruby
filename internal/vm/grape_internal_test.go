@@ -198,6 +198,19 @@ func TestGrapeRouteHandlerGoNil(t *testing.T) {
 	}
 }
 
+// TestGrapeRouteHandlerPresent covers the Route#handler arm that returns the
+// stored handler value when the route carries a real (present) handler — the
+// non-nil branch of the accessor, distinct from the nil arms above.
+func TestGrapeRouteHandlerPresent(t *testing.T) {
+	vm := New(nil)
+	route := vm.consts["Grape::Router::Route"].(*RClass)
+	h := object.NewString("do-thing")
+	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: h}
+	if got := route.methods["handler"].native(vm, r, nil, nil); got != h {
+		t.Errorf("Route#handler present field -> %v, want %v", got, h)
+	}
+}
+
 // TestGrapeCoercedExtraKey covers grapeCoercedToHash's arm for a coerced key not
 // present in the declared ParamSet (the defensive passthrough).
 func TestGrapeCoercedExtraKey(t *testing.T) {

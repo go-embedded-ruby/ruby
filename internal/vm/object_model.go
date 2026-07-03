@@ -334,13 +334,13 @@ func (vm *VM) singletonDefinee(target object.Value) (*RClass, bool) {
 }
 
 func (o *RObject) ToS() string {
-	if o.builtin != nil { // a built-in value subclass renders as its wrapped value
+	if !object.IsNil(o.builtin) { // a built-in value subclass renders as its wrapped value
 		return o.builtin.ToS()
 	}
 	return "#<" + o.class.name + ">"
 }
 func (o *RObject) Inspect() string {
-	if o.builtin != nil {
+	if !object.IsNil(o.builtin) {
 		return o.builtin.Inspect()
 	}
 	return o.ToS()
@@ -349,10 +349,10 @@ func (o *RObject) Inspect() string {
 // HashUnwrap exposes the wrapped value so a built-in value subclass instance used
 // as a Hash key hashes and compares as that value (object.KeyUnwrapper).
 func (o *RObject) HashUnwrap() (object.Value, bool) {
-	if o.builtin != nil {
+	if !object.IsNil(o.builtin) {
 		return o.builtin, true
 	}
-	return nil, false
+	return object.NilVal(), false
 }
 func (o *RObject) Truthy() bool { return true }
 
@@ -384,7 +384,7 @@ func (vm *VM) constInAncestors(cls *RClass, name string) (object.Value, bool) {
 			return v, true
 		}
 	}
-	return nil, false
+	return object.NilVal(), false
 }
 
 // scopedConst resolves Recv::name (OpGetScopedConst, const_get): the class or
@@ -429,7 +429,7 @@ func (vm *VM) resolveConst(cref *RClass, name string) (object.Value, bool) {
 	if vm.autoloadInLexical(cref, name) {
 		return vm.resolveConstNoAutoload(cref, name)
 	}
-	return nil, false
+	return object.NilVal(), false
 }
 
 // resolveConstNoAutoload is resolveConst without the autoload retry: the raw
@@ -450,7 +450,7 @@ func (vm *VM) resolveConstNoAutoload(cref *RClass, name string) (object.Value, b
 	if v, ok := vm.cObject.consts[name]; ok {
 		return v, true
 	}
-	return nil, false
+	return object.NilVal(), false
 }
 
 // checkCVarScope rejects class-variable access whose lexical class is Object —
@@ -976,7 +976,7 @@ func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk 
 	// value type's own native methods (String#upcase, Array#map, …) against the
 	// wrapped value, while Object/Kernel natives (object_id, freeze, ==, ivar
 	// accessors) keep operating on the wrapper.
-	if o, ok := self.(*RObject); ok && o.builtin != nil && vm.isBuiltinValueMethod(m, o.builtin) {
+	if o, ok := self.(*RObject); ok && !object.IsNil(o.builtin) && vm.isBuiltinValueMethod(m, o.builtin) {
 		self = o.builtin
 	}
 	defer func() {
@@ -1197,7 +1197,7 @@ func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
 			}
 		}
 		shaped := vm.bindBlockPositionals(p, args)
-		if kw != nil {
+		if !object.IsNil(kw) {
 			shaped = append(shaped[:len(shaped):len(shaped)], kw)
 		}
 		return shaped

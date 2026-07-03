@@ -217,7 +217,7 @@ func (vm *VM) registerSequelDatabase(mod *RClass) {
 
 	// DB._sqlite3 returns the backing SQLite3::Database (rbgo accessor), or nil.
 	d("_sqlite3", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if o := self(v); o.sqlite != nil {
+		if o := self(v); !object.IsNil(o.sqlite) {
 			return o.sqlite
 		}
 		return object.NilV

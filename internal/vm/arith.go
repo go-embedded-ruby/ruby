@@ -180,10 +180,10 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 	// An instance of a user subclass of a built-in value type uses that value's
 	// own operators (so a String-subclass "+", an Array-subclass "*", and the
 	// comparisons all work), on either side of the operator.
-	if o, ok := a.(*RObject); ok && o.builtin != nil {
+	if o, ok := a.(*RObject); ok && !object.IsNil(o.builtin) {
 		a = o.builtin
 	}
-	if o, ok := b.(*RObject); ok && o.builtin != nil {
+	if o, ok := b.(*RObject); ok && !object.IsNil(o.builtin) {
 		b = o.builtin
 	}
 	switch op {
@@ -645,10 +645,10 @@ func valueEqual(a, b object.Value) bool {
 // their members with eql? too. A built-in value subclass instance is compared as
 // the value it wraps; everything else falls back to object identity.
 func valueEql(a, b object.Value) bool {
-	if o, ok := a.(*RObject); ok && o.builtin != nil {
+	if o, ok := a.(*RObject); ok && !object.IsNil(o.builtin) {
 		a = o.builtin
 	}
-	if o, ok := b.(*RObject); ok && o.builtin != nil {
+	if o, ok := b.(*RObject); ok && !object.IsNil(o.builtin) {
 		b = o.builtin
 	}
 	switch av := a.(type) {

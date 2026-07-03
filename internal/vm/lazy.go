@@ -117,7 +117,7 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
 				i++
 				return v, true
 			}
-			return nil, false
+			return object.NilVal(), false
 		}
 	case *object.Range:
 		lo, ok := r.Lo.(object.Integer)
@@ -144,7 +144,7 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
 		}
 		return func() (object.Value, bool) {
 			if !unbounded && i > hi {
-				return nil, false
+				return object.NilVal(), false
 			}
 			v := object.IntValue(i)
 			i++
@@ -159,7 +159,7 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
 				i++
 				return v, true
 			}
-			return nil, false
+			return object.NilVal(), false
 		}
 	}
 }
