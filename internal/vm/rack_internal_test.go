@@ -172,7 +172,25 @@ func TestRackUtils(t *testing.T) {
 		{`require "rack/utils"; puts Rack::Utils.unescape_path("a%20b")`, "a b\n"},
 		{`require "rack/utils"; puts Rack::Utils.parse_query("a=1&b=2")["a"]`, "1\n"},
 		{`require "rack/utils"; puts Rack::Utils.build_query("a"=>"1")`, "a=1\n"},
+		{`require "rack/utils"; puts Rack::Utils.build_query("a"=>["1","2"])`, "a=1&a=2\n"},
+		{`require "rack/utils"; puts Rack::Utils.parse_nested_query("a[b][c]=1")["a"]["b"]["c"]`, "1\n"},
+		{`require "rack/utils"; puts Rack::Utils.parse_nested_query("e[]=x&e[]=y")["e"].inspect`, `["x", "y"]` + "\n"},
+		{`require "rack/utils"; puts Rack::Utils.parse_nested_query("a=1;b=2", ";")["b"]`, "2\n"},
+		{`require "rack/utils"; puts Rack::Utils.parse_nested_query("a=1", nil)["a"]`, "1\n"},
+		{`require "rack/utils"; puts Rack::Utils.build_nested_query("a"=>{"b"=>"1"})`, "a%5Bb%5D=1\n"},
+		{`require "rack/utils"; puts Rack::Utils.build_nested_query(["x","y"], "k")`, "k%5B%5D=x&k%5B%5D=y\n"},
+		{`require "rack/utils"; puts Rack::Utils.q_values("text/html;q=0.5").inspect`, `[["text/html", 0.5]]` + "\n"},
+		{`require "rack/utils"; puts Rack::Utils.best_q_match("text/html", ["text/html","application/json"])`, "text/html\n"},
+		{`require "rack/utils"; p Rack::Utils.best_q_match("image/png", ["text/html"])`, "nil\n"},
+		{`require "rack/utils"; puts Rack::Utils.parse_cookies_header("a=1; b=2")["b"]`, "2\n"},
+		{`require "rack/utils"; puts Rack::Utils.parse_cookies("HTTP_COOKIE"=>"a=1; b=2")["a"]`, "1\n"},
+		{`require "rack/utils"; puts Rack::Utils.parse_cookies({})["a"].inspect`, "nil\n"},
 		{`require "rack/utils"; puts Rack::Utils.status_code(404)`, "404\n"},
+		{`require "rack/utils"; puts Rack::Utils.status_code(:not_found)`, "404\n"},
+		{`require "rack/utils"; puts Rack::Utils.status_code(:unprocessable_entity)`, "422\n"},
+		{`require "rack/utils"; puts Rack::Utils.status_code("500")`, "500\n"},
+		{`require "rack/utils"; puts Rack::Utils::HTTP_STATUS_CODES[404]`, "Not Found\n"},
+		{`require "rack/utils"; puts Rack::Utils::HTTP_STATUS_CODES[200]`, "OK\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -182,6 +200,10 @@ func TestRackUtils(t *testing.T) {
 	for _, src := range []string{
 		`require "rack/utils"; Rack::Utils.unescape("%ZZ")`,
 		`require "rack/utils"; Rack::Utils.parse_query("a=%ZZ")`,
+		`require "rack/utils"; Rack::Utils.parse_nested_query("a=%ZZ")`,
+		`require "rack/utils"; Rack::Utils.build_nested_query("scalar")`,
+		`require "rack/utils"; Rack::Utils.status_code(:bogus)`,
+		`require "rack/utils"; Rack::Utils.best_q_match("x")`,
 	} {
 		if class, _ := evalErr(t, src); class != "ArgumentError" {
 			t.Errorf("src=%q class=%q want ArgumentError", src, class)
@@ -290,6 +312,51 @@ func TestRackParamsFromHash(t *testing.T) {
 	hash.Set(object.NewString("k"), object.NewString("v"))
 	if p := rackParamsFromHash(hash); rack.BuildQuery(p) != "k=v" {
 		t.Errorf("hash arm got=%q", rack.BuildQuery(p))
+	}
+}
+
+// TestRackToGoNested covers the Hash → *Params, Array → []any and scalar
+// delegation arms of the nested build_nested_query converter.
+func TestRackToGoNested(t *testing.T) {
+	inner := object.NewHash()
+	inner.Set(object.NewString("b"), object.NewString("1"))
+	outer := object.NewHash()
+	outer.Set(object.NewString("a"), inner)
+	got, err := rack.BuildNestedQuery(rackToGoNested(outer), "")
+	if err != nil || got != "a%5Bb%5D=1" {
+		t.Errorf("hash arm got=%q err=%v", got, err)
+	}
+	if arr, ok := rackToGoNested(object.NewArray(object.NewString("x"))).([]any); !ok || len(arr) != 1 {
+		t.Errorf("array arm got=%#v", rackToGoNested(object.NewArray(object.NewString("x"))))
+	}
+	if s, ok := rackToGoNested(object.NewString("s")).(string); !ok || s != "s" {
+		t.Errorf("scalar arm got=%#v", rackToGoNested(object.NewString("s")))
+	}
+}
+
+// TestRackStrArray covers the Array and non-Array arms.
+func TestRackStrArray(t *testing.T) {
+	if rackStrArray(object.NilV) != nil {
+		t.Error("non-Array arm")
+	}
+	got := rackStrArray(object.NewArray(object.NewString("a"), object.Integer(2)))
+	if !reflect.DeepEqual(got, []string{"a", "2"}) {
+		t.Errorf("array arm got=%#v", got)
+	}
+}
+
+// TestRackCookieHeader covers the present-key, absent-key and non-Hash arms.
+func TestRackCookieHeader(t *testing.T) {
+	if rackCookieHeader(object.Integer(1)) != "" {
+		t.Error("non-Hash arm")
+	}
+	if rackCookieHeader(object.NewHash()) != "" {
+		t.Error("absent-key arm")
+	}
+	h := object.NewHash()
+	h.Set(object.NewString("HTTP_COOKIE"), object.NewString("a=1"))
+	if rackCookieHeader(h) != "a=1" {
+		t.Errorf("present-key arm got=%q", rackCookieHeader(h))
 	}
 }
 
