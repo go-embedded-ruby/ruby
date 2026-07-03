@@ -735,6 +735,36 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// The handle I18n.backend returns reports I18n::Backend::Simple so its
 		// store_translations / available_locales dispatch.
 		return vm.consts["I18n::Backend::Simple"].(*RClass)
+	case *RSSRss:
+		return vm.consts["RSS::Rss"].(*RClass)
+	case *RSSChannel:
+		return vm.consts["RSS::Rss::Channel"].(*RClass)
+	case *RSSItem:
+		return vm.consts["RSS::Rss::Channel::Item"].(*RClass)
+	case *RSSImage:
+		return vm.consts["RSS::Rss::Channel::Image"].(*RClass)
+	case *RSSGuid:
+		return vm.consts["RSS::Rss::Channel::Item::Guid"].(*RClass)
+	case *RSSRDF:
+		return vm.consts["RSS::RDF"].(*RClass)
+	case *RSSRDFChannel:
+		return vm.consts["RSS::RDF::Channel"].(*RClass)
+	case *RSSRDFItem:
+		return vm.consts["RSS::RDF::Item"].(*RClass)
+	case *RSSRDFImage:
+		return vm.consts["RSS::RDF::Image"].(*RClass)
+	case *RSSRDFTextinput:
+		return vm.consts["RSS::RDF::Textinput"].(*RClass)
+	case *RSSAtomFeed:
+		return vm.consts["RSS::Atom::Feed"].(*RClass)
+	case *RSSAtomEntry:
+		return vm.consts["RSS::Atom::Feed::Entry"].(*RClass)
+	case *RSSAtomLink:
+		return vm.consts["RSS::Atom::Link"].(*RClass)
+	case *RSSAtomPerson:
+		return vm.consts["RSS::Atom::Person"].(*RClass)
+	case *RSSAtomCategory:
+		return vm.consts["RSS::Atom::Category"].(*RClass)
 	case *RQRCode:
 		// An RQRCode::QRCode reports RQRCode::QRCode so its renderer methods
 		// (as_svg / as_ansi / as_html / to_s / checked? / to_a) dispatch.

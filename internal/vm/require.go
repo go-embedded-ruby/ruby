@@ -63,6 +63,7 @@ var providedFeatures = map[string]bool{
 	"oauth2":         true,
 	"openid_connect": true, "oidc": true,
 	"i18n": true,
+	"rss": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
