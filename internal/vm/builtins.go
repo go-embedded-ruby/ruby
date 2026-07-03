@@ -177,7 +177,7 @@ func (vm *VM) bootstrap() {
 		}
 		// Default tag is a fresh object passed to the block, so `catch { |t| throw t }`
 		// targets exactly this catch.
-		tag := object.Value(&RObject{class: vm.cObject, ivars: map[string]object.Value{}})
+		tag := object.Wrap(&RObject{class: vm.cObject, ivars: map[string]object.Value{}})
 		if len(args) > 0 {
 			tag = args[0]
 		}
@@ -388,7 +388,7 @@ func (vm *VM) bootstrap() {
 	// @status (the process exit code) and the message. SystemExit#status returns it.
 	systemExit.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := object.Kind[*RObject](self)
-		status := object.Value(object.IntValue(0))
+		status := object.IntValue(0)
 		switch {
 		case len(args) >= 2:
 			status = args[0]
@@ -404,7 +404,7 @@ func (vm *VM) bootstrap() {
 		return object.NilVal()
 	})
 	systemExit.define("status", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if s := getIvar(self, "@status"); s != object.NilV {
+		if s := getIvar(self, "@status"); !object.IsNil(s) {
 			return s
 		}
 		return object.IntValue(0)
@@ -498,7 +498,7 @@ func (vm *VM) bootstrap() {
 		return object.NilVal()
 	})
 	excMessage := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if m := getIvar(self, "@message"); m != object.NilV {
+		if m := getIvar(self, "@message"); !object.IsNil(m) {
 			return m
 		}
 		return object.Wrap(object.NewString(vm.classOf(self).name))
@@ -510,7 +510,7 @@ func (vm *VM) bootstrap() {
 	// exception has never been raised — matching MRI, which fills the backtrace in
 	// at raise time, not at construction.
 	cException.define("backtrace", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if bt := getIvar(self, backtraceIvar); bt != object.NilV {
+		if bt := getIvar(self, backtraceIvar); !object.IsNil(bt) {
 			return bt
 		}
 		return object.NilVal()
@@ -519,7 +519,7 @@ func (vm *VM) bootstrap() {
 	// objects, so it returns the same String array as #backtrace (callers that only
 	// stringify locations still work).
 	cException.define("backtrace_locations", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if bt := getIvar(self, backtraceIvar); bt != object.NilV {
+		if bt := getIvar(self, backtraceIvar); !object.IsNil(bt) {
 			return bt
 		}
 		return object.NilVal()
@@ -679,13 +679,13 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("public_send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		name := args[0].ToS()
 		if m := vm.findMethod(self, name); m != nil {
-			vm.checkVisibility(self, name, m, nil)
+			vm.checkVisibility(self, name, m, object.NilVal())
 		}
 		return vm.send(self, name, args[1:], blk)
 	})
 	vm.cObject.define("respond_to?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := args[0].ToS()
-		includePrivate := object.Value(object.False)
+		includePrivate := object.BoolValue(bool(object.False))
 		if len(args) > 1 {
 			includePrivate = args[1]
 		}
@@ -2149,7 +2149,7 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.define("sum", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		acc := object.Value(object.IntValue(0))
+		acc := object.IntValue(0)
 		if len(args) > 0 {
 			acc = args[0]
 		}
@@ -2643,7 +2643,7 @@ func (vm *VM) bootstrap() {
 							if len(pair.Elems) < 1 || len(pair.Elems) > 2 {
 								raise("ArgumentError", "invalid number of elements (%d for 1..2)", len(pair.Elems))
 							}
-							v := object.Value(object.NilV)
+							v := object.NilVal()
 							if len(pair.Elems) == 2 {
 								v = pair.Elems[1]
 							}
@@ -2952,7 +2952,7 @@ func (vm *VM) bootstrap() {
 		if len(args) == 1 && !object.IsNil(h.DefaultProc) {
 			return vm.callBlock(object.Kind[*Proc](h.DefaultProc), []object.Value{object.Wrap(h), args[0]})
 		}
-		if h.Default != nil {
+		if !object.IsNil(h.Default) {
 			return h.Default
 		}
 		return object.NilVal()
@@ -2960,7 +2960,7 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("default=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := object.Kind[*object.Hash](self)
 		h.Default = args[0]
-		h.DefaultProc = nil
+		h.DefaultProc = object.NilVal()
 		return args[0]
 	})
 	vm.cHash.define("default_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -2978,12 +2978,12 @@ func (vm *VM) bootstrap() {
 			case object.IsNilObj(__sw26):
 				p := object.NilObj()
 				_ = p
-				h.DefaultProc = nil
+				h.DefaultProc = object.NilVal()
 			case object.IsKind[*Proc](__sw26):
 				p := object.Kind[*Proc](__sw26)
 				_ = p
 				h.DefaultProc = object.Wrap(p)
-				h.Default = nil
+				h.Default = object.NilVal()
 			default:
 				p := __sw26
 				_ = p
@@ -3309,7 +3309,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return object.Wrap(enumFor(self, "step", args...))
 		}
-		step := object.Value(object.IntValue(1))
+		step := object.IntValue(1)
 		if len(args) > 0 {
 			step = args[0]
 		}
@@ -3760,7 +3760,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return object.Wrap(enumFor(self, "step", args...))
 		}
-		step := object.Value(object.IntValue(1))
+		step := object.IntValue(1)
 		if len(args) > 1 {
 			step = args[1]
 		}
@@ -3821,7 +3821,7 @@ func (vm *VM) hashDefault(h *object.Hash, key object.Value) object.Value {
 	if !object.IsNil(h.DefaultProc) {
 		return vm.callBlock(object.Kind[*Proc](h.DefaultProc), []object.Value{object.Wrap(h), key})
 	}
-	if h.Default != nil {
+	if !object.IsNil(h.Default) {
 		return h.Default
 	}
 	return object.NilVal()
@@ -3978,7 +3978,7 @@ func reverseStr(s string) string {
 //   - "" (empty): paragraph mode — remove ALL trailing newlines (\r\n / \n).
 //   - any other string: remove that exact suffix once, if present.
 func chompSep(s string, args []object.Value) string {
-	if len(args) == 0 || args[0] == object.NilV {
+	if len(args) == 0 || object.IsNil(args[0]) {
 		return chompStr(s)
 	}
 	sep := strArg(args[0])
@@ -4982,7 +4982,7 @@ func classSingletonIsA(vm *VM, self object.Value, target *RClass) bool {
 func (vm *VM) excError(exc object.Value) RubyError {
 	cls := vm.classOf(exc)
 	msg := cls.name
-	if m := getIvar(exc, "@message"); m != object.NilV {
+	if m := getIvar(exc, "@message"); !object.IsNil(m) {
 		msg = m.ToS()
 	}
 	return RubyError{Class: cls.name, Message: msg, Obj: exc}
@@ -5032,7 +5032,7 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 // overwrite it), so an exception rescued and re-raised still points at its first
 // raise site. exc is returned for call-site convenience.
 func (vm *VM) captureBacktrace(exc object.Value) object.Value {
-	if bt := getIvar(exc, backtraceIvar); bt != object.NilV {
+	if bt := getIvar(exc, backtraceIvar); !object.IsNil(bt) {
 		return exc // already has a backtrace (re-raise) — preserve the original
 	}
 	frames := vm.backtraceFrames(0)
@@ -5088,7 +5088,7 @@ func normalizeBacktrace(v object.Value) object.Value {
 // exceptionMessageText returns the exception's message string — its @message, or
 // the class name when unset — the same text Exception#message yields.
 func (vm *VM) exceptionMessageText(self object.Value) string {
-	if m := getIvar(self, "@message"); m != object.NilV {
+	if m := getIvar(self, "@message"); !object.IsNil(m) {
 		return m.ToS()
 	}
 	return vm.classOf(self).name

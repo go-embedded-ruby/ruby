@@ -63,12 +63,12 @@ func TestFreezeAllConstKinds(t *testing.T) {
 		// Exercises every writeInstr branch: Op+A+B+C set, and an all-zero instr.
 		Insns: []bytecode.Instr{{Op: 1, A: 2, B: 3, C: 4}, {}},
 		Consts: []object.Value{
-			object.Integer(-7),
-			object.Symbol("sym"),
-			object.NewString("hi\n"),
-			object.NewFrozenStringView("frozen"),
-			object.Float(2.5),
-			&object.Bignum{I: bigVal},
+			object.IntValue(int64(object.Integer(-7))),
+			object.SymVal(string(object.Symbol("sym"))),
+			object.Wrap(object.NewString("hi\n")),
+			object.Wrap(object.NewFrozenStringView("frozen")),
+			object.FloatValue(float64(object.Float(2.5))),
+			object.Wrap(&object.Bignum{I: bigVal}),
 		},
 		Names:      []string{"m"},
 		SplatIndex: -1, KwRestSlot: -1, BlockSlot: -1,
@@ -132,7 +132,7 @@ func TestFreezeUnsupportedConst(t *testing.T) {
 		}
 	}()
 	iseq := &bytecode.ISeq{
-		Consts:     []object.Value{&object.Array{}},
+		Consts:     []object.Value{object.Wrap(&object.Array{})},
 		SplatIndex: -1, KwRestSlot: -1, BlockSlot: -1,
 	}
 	FreezeISeq(iseq, "vm", "f", "")

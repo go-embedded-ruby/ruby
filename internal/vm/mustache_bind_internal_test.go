@@ -18,7 +18,7 @@ import (
 // library value model.
 func TestMustacheToBridge(t *testing.T) {
 	vm := New(nil)
-	if got := toMustache(vm, nil); got != nil {
+	if got := toMustache(vm, object.NilVal()); got != nil {
 		t.Errorf("plain nil: got %#v want nil", got)
 	}
 	if got := toMustache(vm, object.NilVal()); got != nil {

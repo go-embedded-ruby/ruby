@@ -11,13 +11,13 @@ func BenchmarkHashIntKeyGetSet(b *testing.B) {
 	h := NewHash()
 	keys := make([]Value, 64)
 	for i := range keys {
-		keys[i] = Integer(int64(i))
+		keys[i] = IntValue(int64(Integer(int64(i))))
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		k := keys[i&63]
-		h.Set(k, Integer(int64(i)))
+		h.Set(k, IntValue(int64(Integer(int64(i)))))
 		_, _ = h.Get(k)
 	}
 }
@@ -36,7 +36,7 @@ func BenchmarkSymRawBox(b *testing.B) {
 	name := symBenchName
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		sink = Value(Symbol(name))
+		sink = SymVal(string(Symbol(name)))
 	}
 }
 
@@ -55,13 +55,13 @@ func BenchmarkHashSymKeyGetSet(b *testing.B) {
 	keys := make([]Value, 64)
 	names := []string{"alpha", "beta", "gamma", "delta"}
 	for i := range keys {
-		keys[i] = Symbol(names[i%len(names)] + string(rune('a'+i%26)))
+		keys[i] = SymVal(string(Symbol(names[i%len(names)] + string(rune('a'+i%26)))))
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		k := keys[i&63]
-		h.Set(k, Integer(int64(i)))
+		h.Set(k, IntValue(int64(Integer(int64(i)))))
 		_, _ = h.Get(k)
 	}
 }

@@ -80,7 +80,7 @@ func (vm *VM) currencyArg(v object.Value) *money.Currency {
 // currencyArgOr coerces args[i] to a currency, or falls back to def when the
 // argument is absent.
 func (vm *VM) currencyArgOr(args []object.Value, i int, def string) *money.Currency {
-	if i >= len(args) || args[i] == object.NilV {
+	if i >= len(args) || object.IsNil(args[i]) {
 		return lookupCurrency(def)
 	}
 	return vm.currencyArg(args[i])

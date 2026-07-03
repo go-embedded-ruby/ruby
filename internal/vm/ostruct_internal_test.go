@@ -120,7 +120,7 @@ func TestUnwrapVMValue(t *testing.T) {
 		t.Fatalf("vmDigValue unwrapped to %q", got.ToS())
 	}
 	// a library Symbol -> a Ruby Symbol
-	if got := unwrapVMValue(ostruct.Symbol("k")); got != object.Value(object.Symbol("k")) {
+	if got := unwrapVMValue(ostruct.Symbol("k")); got != object.SymVal(string(object.Symbol("k"))) {
 		t.Fatalf("library Symbol unwrapped to %#v", got)
 	}
 	// default (unexpected payload) -> Ruby nil
@@ -134,7 +134,7 @@ func TestUnwrapVMValue(t *testing.T) {
 // nil handling (rendering and the dig short-circuit) applies unchanged.
 func TestWrapVMValueNil(t *testing.T) {
 	vm := New(&bytes.Buffer{})
-	if got := vm.wrapVMValue(nil); got != nil {
+	if got := vm.wrapVMValue(object.NilVal()); got != nil {
 		t.Fatalf("Go-nil wrapped to %#v, want nil", got)
 	}
 	if got := vm.wrapVMValue(object.NilVal()); got != nil {

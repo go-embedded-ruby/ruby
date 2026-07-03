@@ -152,7 +152,7 @@ func TestDryTypesArgErrors(t *testing.T) {
 // exercised through the surface above (Undefined via a nil, Bignum, Float, Symbol,
 // Time, and the pass-through for an unmapped value).
 func TestDryToGo(t *testing.T) {
-	if dryToGo(nil) != drytypes.Undefined {
+	if dryToGo(object.NilVal()) != drytypes.Undefined {
 		t.Error("nil should map to Undefined")
 	}
 	if dryToGo(object.NilVal()) != nil {
@@ -194,7 +194,7 @@ func TestDryToGo(t *testing.T) {
 	}
 	// An unmapped value passes through as-is.
 	p := &Proc{}
-	if dryToGo(object.Wrap(p)) != object.Value(p) {
+	if object.Wrap(dryToGo(object.Wrap(p))) != object.Wrap(p) {
 		t.Error("passthrough")
 	}
 }

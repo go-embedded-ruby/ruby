@@ -125,7 +125,7 @@ func builderValueOf(v object.Value) any {
 	{
 		__sw18 := v
 		switch {
-		case __sw18 == nil:
+		case object.IsNil(__sw18):
 			n := __sw18
 			_ = n
 			return nil

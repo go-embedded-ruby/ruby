@@ -151,7 +151,7 @@ func sqlite3Bind(v object.Value) sqlite3.Value {
 	{
 		__sw168 := v
 		switch {
-		case __sw168 == nil || object.IsNilObj(__sw168):
+		case object.IsNil(__sw168) || object.IsNilObj(__sw168):
 			n := __sw168
 			_ = n
 			return nil

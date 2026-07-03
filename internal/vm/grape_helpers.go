@@ -178,7 +178,7 @@ func grapeToGo(v object.Value) any {
 	{
 		__sw64 := v
 		switch {
-		case __sw64 == nil || object.IsNilObj(__sw64):
+		case object.IsNil(__sw64) || object.IsNilObj(__sw64):
 			n := __sw64
 			_ = n
 			return nil

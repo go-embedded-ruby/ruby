@@ -26,7 +26,7 @@ func TestAssignConstNilScope(t *testing.T) {
 	vm := New(io.Discard)
 	// A nil scope (defensive) writes the constant into the top level.
 	vm.assignConst(nil, "WhiteboxNilScope", object.IntValue(int64(object.Integer(7))))
-	if v, ok := vm.consts["WhiteboxNilScope"]; !ok || v != object.Integer(7) {
+	if v, ok := vm.consts["WhiteboxNilScope"]; !ok || v != object.IntValue(int64(object.Integer(7))) {
 		t.Fatalf("assignConst(nil, ...) should write top-level, got %v ok=%v", v, ok)
 	}
 }

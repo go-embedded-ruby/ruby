@@ -191,14 +191,14 @@ puts io.string.split(" -- ", 2).last
 func TestLoggerLevelGating(t *testing.T) {
 	lo, b := newPinnedLogger(t)
 	lo.l.Level = lg.WARN
-	if got := lo.add(lg.INFO, object.Wrap(object.NewString("x")), nil, nil); got != object.True {
+	if got := lo.add(lg.INFO, object.Wrap(object.NewString("x")), object.NilVal(), nil); got != object.BoolValue(bool(object.True)) {
 		t.Fatalf("gated add returned %v, want true", got)
 	}
 	if b.String() != "" {
 		t.Fatalf("gated add wrote %q, want nothing", b.String())
 	}
 	// A warn at the threshold is emitted.
-	lo.add(lg.WARN, object.Wrap(object.NewString("y")), nil, nil)
+	lo.add(lg.WARN, object.Wrap(object.NewString("y")), object.NilVal(), nil)
 	if !strings.Contains(b.String(), "WARN -- : y") {
 		t.Fatalf("warn not emitted: %q", b.String())
 	}
@@ -299,7 +299,7 @@ func TestLoggerAddNilSeverity(t *testing.T) {
 	lo, b := newPinnedLogger(t)
 	// Drive through the Ruby-facing add by calling the wrapper with UNKNOWN, which
 	// is what add(nil, …) resolves to.
-	lo.add(lg.UNKNOWN, object.Wrap(object.NewString("x")), nil, nil)
+	lo.add(lg.UNKNOWN, object.Wrap(object.NewString("x")), object.NilVal(), nil)
 	if !strings.Contains(b.String(), "  ANY -- : x") {
 		t.Fatalf("nil severity -> ANY: %q", b.String())
 	}
@@ -339,7 +339,7 @@ p l.datetime_format
 	// Byte-exact line with a custom datetime format, via the pinned clock.
 	lo, b := newPinnedLogger(t)
 	lo.l.Formatter.DatetimeFormat = "%Y"
-	lo.add(lg.INFO, object.Wrap(object.NewString("x")), nil, nil)
+	lo.add(lg.INFO, object.Wrap(object.NewString("x")), object.NilVal(), nil)
 	if b.String() != "I, [2026 #4242]  INFO -- : x\n" {
 		t.Fatalf("custom datetime line = %q", b.String())
 	}
@@ -522,7 +522,7 @@ func TestLoggerFormatterClass(t *testing.T) {
 	vm := New(io.Discard)
 	vm.registerLogger() // ensure the class exists (also installed at construction)
 	fc := vm.cLoggerFormatter
-	lf := fc.smethods["new"].native(vm, nil, nil, nil)
+	lf := fc.smethods["new"].native(vm, object.NilVal(), nil, nil)
 	tm := &Time{t: gotime.FromUnix(fixedInstant.Unix())}
 	args := []object.Value{
 		object.Wrap(object.NewString("DEBUG")), object.Wrap(tm), object.Wrap(object.NewString("prog")), object.Wrap(object.NewString("hello")),
@@ -641,7 +641,7 @@ func TestLoggerPeriodRotation(t *testing.T) {
 		t.Fatalf("seed log: %v", err)
 	}
 	lo.nextRotate = fixedInstant.Add(-time.Hour) // already due
-	lo.add(lg.INFO, object.Wrap(object.NewString("new")), nil, nil)
+	lo.add(lg.INFO, object.Wrap(object.NewString("new")), object.NilVal(), nil)
 	// The old content was rotated away to a dated file, and a fresh log holds the
 	// new line.
 	matches, _ := filepath.Glob(path + ".*")
@@ -789,7 +789,7 @@ func TestLoggerRegisterErrorsFallback(t *testing.T) {
 	delete(vm.consts, "RuntimeError")
 	cls := newClass("LoggerProbe", vm.cObject)
 	vm.registerLoggerErrors(cls)
-	if cls.consts["Error"] == nil {
+	if object.IsNil(cls.consts["Error"]) {
 		t.Fatal("fallback Logger::Error not installed")
 	}
 }
@@ -873,7 +873,7 @@ func TestLoggerRotatePeriodNoBase(t *testing.T) {
 // non-object.Value fallback.
 func TestLoggerFormatterInspectNonValue(t *testing.T) {
 	vm := New(io.Discard)
-	lf := object.Kind[*LoggerFormatter](vm.cLoggerFormatter.smethods["new"].native(vm, nil, nil, nil))
+	lf := object.Kind[*LoggerFormatter](vm.cLoggerFormatter.smethods["new"].native(vm, object.NilVal(), nil, nil))
 	if got := lf.f.Inspect(42); got != "" {
 		t.Fatalf("formatter Inspect(non-Value) = %q, want empty", got)
 	}
@@ -882,7 +882,7 @@ func TestLoggerFormatterInspectNonValue(t *testing.T) {
 // TestLoggerFormatterInspectValue covers the closure's object.Value arm.
 func TestLoggerFormatterInspectValue(t *testing.T) {
 	vm := New(io.Discard)
-	lf := object.Kind[*LoggerFormatter](vm.cLoggerFormatter.smethods["new"].native(vm, nil, nil, nil))
+	lf := object.Kind[*LoggerFormatter](vm.cLoggerFormatter.smethods["new"].native(vm, object.NilVal(), nil, nil))
 	if got := lf.f.Inspect(object.Integer(7)); got != "7" {
 		t.Fatalf("formatter Inspect(Integer 7) = %q, want 7", got)
 	}

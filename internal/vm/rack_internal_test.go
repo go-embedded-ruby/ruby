@@ -214,10 +214,10 @@ func TestRackInt(t *testing.T) {
 
 // TestRackArg covers absent / present.
 func TestRackArg(t *testing.T) {
-	if rackArg(nil) != object.NilV {
+	if !object.IsNil(rackArg(nil)) {
 		t.Error("absent")
 	}
-	if rackArg([]object.Value{object.IntValue(int64(object.Integer(1)))}) != object.Integer(1) {
+	if rackArg([]object.Value{object.IntValue(int64(object.Integer(1)))}) != object.IntValue(int64(object.Integer(1))) {
 		t.Error("present")
 	}
 }

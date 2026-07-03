@@ -181,7 +181,7 @@ func sinatraResult(vm *VM, ret object.Value) any {
 	{
 		__sw165 := ret
 		switch {
-		case __sw165 == nil || object.IsNilObj(__sw165):
+		case object.IsNil(__sw165) || object.IsNilObj(__sw165):
 			n := __sw165
 			_ = n
 			return nil

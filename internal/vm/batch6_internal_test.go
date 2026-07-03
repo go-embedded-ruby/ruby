@@ -17,7 +17,7 @@ import (
 // defensive final return that the wire grammar cannot reach.
 func TestRedisValueUnmapped(t *testing.T) {
 	vm := New(nil)
-	if got := vm.redisValue(int32(7)); got != object.NilV {
+	if got := vm.redisValue(int32(7)); !object.IsNil(got) {
 		t.Errorf("redisValue(int32) = %v, want nil", got)
 	}
 }

@@ -55,7 +55,7 @@ func toTOML(v object.Value) toml.Value {
 	{
 		__sw177 := v
 		switch {
-		case __sw177 == nil:
+		case object.IsNil(__sw177):
 			n := __sw177
 			_ = n
 			return nil

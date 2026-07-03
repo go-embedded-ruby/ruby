@@ -28,7 +28,7 @@ func toMustache(vm *VM, v object.Value) mustache.Value {
 	{
 		__sw103 := v
 		switch {
-		case __sw103 == nil:
+		case object.IsNil(__sw103):
 			n := __sw103
 			_ = n
 			return nil

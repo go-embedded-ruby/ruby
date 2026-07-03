@@ -157,27 +157,42 @@ func (f *freezer) writeConsts(b *strings.Builder, consts []object.Value) {
 
 // writeConst emits one constant-pool value. The set mirrors compiler.addConst.
 func (f *freezer) writeConst(b *strings.Builder, v object.Value) {
-	switch c := v.(type) {
-	case object.Integer:
-		fmt.Fprintf(b, "object.IntValue(%d)", int64(c))
-	case object.Symbol:
-		fmt.Fprintf(b, "object.Symbol(%s)", strconv.Quote(string(c)))
-	case *object.String:
-		if c.Frozen {
-			// A frozen literal never mutates, so emit a zero-copy view over the
-			// immutable Go string rather than copying its bytes at load time.
-			fmt.Fprintf(b, "object.NewFrozenStringView(%s)", strconv.Quote(c.Str()))
-		} else {
-			fmt.Fprintf(b, "object.NewString(%s)", strconv.Quote(c.Str()))
+	{
+		__sw2 := v
+		switch {
+		case object.IsInt(__sw2):
+			c := object.AsInteger(__sw2)
+			_ = c
+			fmt.Fprintf(b, "object.IntValue(%d)", int64(c))
+		case object.IsKind[object.Symbol](__sw2):
+			c := object.Kind[object.Symbol](__sw2)
+			_ = c
+			fmt.Fprintf(b, "object.Symbol(%s)", strconv.Quote(string(c)))
+		case object.IsKind[*object.String](__sw2):
+			c := object.Kind[*object.String](__sw2)
+			_ = c
+			if c.Frozen {
+				// A frozen literal never mutates, so emit a zero-copy view over the
+				// immutable Go string rather than copying its bytes at load time.
+				fmt.Fprintf(b, "object.NewFrozenStringView(%s)", strconv.Quote(c.Str()))
+			} else {
+				fmt.Fprintf(b, "object.NewString(%s)", strconv.Quote(c.Str()))
+			}
+		case object.IsFloat(__sw2):
+			c := object.AsFloatV(__sw2)
+			_ = c
+			f.needMath = true
+			fmt.Fprintf(b, "frozenFloat(%#x)", math.Float64bits(float64(c)))
+		case object.IsKind[*object.Bignum](__sw2):
+			c := object.Kind[*object.Bignum](__sw2)
+			_ = c
+			f.needBig = true
+			fmt.Fprintf(b, "&object.Bignum{I: frozenBig(%s)}", strconv.Quote(c.I.String()))
+		default:
+			c := __sw2
+			_ = c
+			panic(fmt.Sprintf("aot.FreezeISeq: unsupported constant %T (not produced by the compiler)", v))
 		}
-	case object.Float:
-		f.needMath = true
-		fmt.Fprintf(b, "frozenFloat(%#x)", math.Float64bits(float64(c)))
-	case *object.Bignum:
-		f.needBig = true
-		fmt.Fprintf(b, "&object.Bignum{I: frozenBig(%s)}", strconv.Quote(c.I.String()))
-	default:
-		panic(fmt.Sprintf("aot.FreezeISeq: unsupported constant %T (not produced by the compiler)", v))
 	}
 }
 

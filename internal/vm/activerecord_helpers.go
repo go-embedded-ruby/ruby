@@ -46,7 +46,7 @@ func arToGo(v object.Value) any {
 	{
 		__sw5 := v
 		switch {
-		case __sw5 == nil || object.IsNilObj(__sw5):
+		case object.IsNil(__sw5) || object.IsNilObj(__sw5):
 			n := __sw5
 			_ = n
 			return nil

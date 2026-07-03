@@ -213,7 +213,7 @@ func dryToGo(v object.Value) any {
 	{
 		__sw52 := v
 		switch {
-		case __sw52 == nil:
+		case object.IsNil(__sw52):
 			n := __sw52
 			_ = n
 			return drytypes.Undefined

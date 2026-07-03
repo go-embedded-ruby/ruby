@@ -23,7 +23,7 @@ func TestJSONBindGenerate(t *testing.T) {
 		in   object.Value
 		want string
 	}{
-		{"go-nil", nil, "null"},
+		{"go-nil", object.NilVal(), "null"},
 		{"nil", object.NilVal(), "null"},
 		{"true", object.BoolValue(bool(object.Bool(true))), "true"},
 		{"false", object.BoolValue(bool(object.Bool(false))), "false"},

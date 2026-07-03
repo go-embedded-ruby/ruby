@@ -43,7 +43,7 @@ func TestHCL2KeyBridge(t *testing.T) {
 // a fitting Bignum (-> int64), an over-64-bit Bignum (-> float64), float, string,
 // symbol, array, hash, and the unmapped default (-> nil).
 func TestHCL2ToBridge(t *testing.T) {
-	if toHCL2(nil) != nil {
+	if toHCL2(object.NilVal()) != nil {
 		t.Error("go-nil should map to nil")
 	}
 	if toHCL2(object.NilVal()) != nil {
@@ -94,13 +94,13 @@ func TestHCL2ToBridge(t *testing.T) {
 // default (both -> nil).
 func TestHCL2FromBridge(t *testing.T) {
 	vm := New(nil)
-	if v := fromHCL2(vm, bigOver64()); v == nil {
+	if v := fromHCL2(vm, bigOver64()); object.IsNil(v) {
 		t.Error("big.Int -> nil")
 	}
-	if v := fromHCL2(vm, nil); v != object.NilV {
+	if v := fromHCL2(vm, nil); !object.IsNil(v) {
 		t.Errorf("nil -> %v", v)
 	}
-	if v := fromHCL2(vm, struct{}{}); v != object.NilV {
+	if v := fromHCL2(vm, struct{}{}); !object.IsNil(v) {
 		t.Errorf("unmapped -> %v", v)
 	}
 }

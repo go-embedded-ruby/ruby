@@ -119,7 +119,7 @@ func TestRubyErrorBacktraceStrings(t *testing.T) {
 // TestNormalizeBacktraceDirect exercises normalizeBacktrace's branches directly,
 // including the nil-clear, single-String wrap and the two TypeError paths.
 func TestNormalizeBacktraceDirect(t *testing.T) {
-	if v := normalizeBacktrace(object.NilVal()); v != object.NilV {
+	if v := normalizeBacktrace(object.NilVal()); !object.IsNil(v) {
 		t.Fatalf("nil: got %#v", v)
 	}
 	if a, ok := object.KindOK[*object.Array](normalizeBacktrace(object.Wrap(object.NewString("s")))); !ok || len(a.Elems) != 1 {

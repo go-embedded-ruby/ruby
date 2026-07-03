@@ -62,7 +62,7 @@ func TestEtcLookupsFound(t *testing.T) {
 	if !ok {
 		t.Fatalf("getpwuid not an object: %#v", pw)
 	}
-	if o.ivars["@name"].ToS() != "root" || o.ivars["@uid"] != object.Integer(0) {
+	if o.ivars["@name"].ToS() != "root" || o.ivars["@uid"] != object.IntValue(int64(object.Integer(0))) {
 		t.Fatalf("passwd fields: %#v", o.ivars)
 	}
 	if o.class.name != "Etc::Passwd" {
@@ -143,10 +143,10 @@ func TestEtcNotImplemented(t *testing.T) {
 func TestEtcAtoiOr0(t *testing.T) {
 	// Numeric id parses; a non-numeric id falls back to 0 (defensive branch for
 	// platforms whose os/user could return a non-numeric id).
-	if got := atoiOr0("42"); got != object.Integer(42) {
+	if got := atoiOr0("42"); got != object.IntValue(int64(object.Integer(42))) {
 		t.Fatalf("atoiOr0(42) = %v", got)
 	}
-	if got := atoiOr0("notanumber"); got != object.Integer(0) {
+	if got := atoiOr0("notanumber"); got != object.IntValue(int64(object.Integer(0))) {
 		t.Fatalf("atoiOr0(non-numeric) = %v", got)
 	}
 }

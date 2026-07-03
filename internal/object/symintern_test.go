@@ -16,14 +16,14 @@ func TestSymValIdentity(t *testing.T) {
 	if a != b {
 		t.Fatalf("SymVal(%q) not stable: %v vs %v", "greeting", a, b)
 	}
-	if a != Value(Symbol("greeting")) {
+	if a != SymVal(string(Symbol("greeting"))) {
 		t.Fatal("interned symbol must equal a plainly boxed Symbol of the same name")
 	}
-	if a == Value(NewString("greeting")) {
+	if a == Wrap(NewString("greeting")) {
 		t.Fatal("a symbol must never equal a string of the same name")
 	}
 	// Empty symbol interns too and stays stable.
-	if SymVal("") != SymVal("") || SymVal("") != Value(Symbol("")) {
+	if SymVal("") != SymVal("") || SymVal("") != SymVal(string(Symbol(""))) {
 		t.Fatal("empty symbol interning is inconsistent")
 	}
 }
@@ -42,9 +42,9 @@ func TestSymValZeroAllocOnHit(t *testing.T) {
 // beyond these singletons is needed.
 func TestBoolNilSingletonsZeroAlloc(t *testing.T) {
 	if n := testing.AllocsPerRun(1000, func() {
-		sink = True
-		sink = False
-		sink = NilV
+		sink = BoolValue(bool(True))
+		sink = BoolValue(bool(False))
+		sink = NilVal()
 	}); n != 0 {
 		t.Fatalf("boxing true/false/nil allocated %v/op, want 0", n)
 	}
@@ -55,12 +55,12 @@ func TestBoolNilSingletonsZeroAlloc(t *testing.T) {
 // identity, not the map key (hashKey compares by dynamic type + value).
 func TestSymValHashInterop(t *testing.T) {
 	h := NewHash()
-	h.Set(SymVal("kw"), Integer(5))
-	if v, ok := h.Get(Symbol("kw")); !ok || v != Integer(5) {
+	h.Set(SymVal("kw"), IntValue(int64(Integer(5))))
+	if v, ok := h.Get(SymVal(string(Symbol("kw")))); !ok || v != IntValue(int64(Integer(5))) {
 		t.Fatalf("SymVal-keyed entry not found via plain Symbol: %v,%v", v, ok)
 	}
-	h.Set(Symbol("kw"), Integer(6)) // overwrite via the other box: still one entry
-	if v, ok := h.Get(SymVal("kw")); !ok || v != Integer(6) || h.Len() != 1 {
+	h.Set(SymVal(string(Symbol("kw"))), IntValue(int64(Integer(6)))) // overwrite via the other box: still one entry
+	if v, ok := h.Get(SymVal("kw")); !ok || v != IntValue(int64(Integer(6))) || h.Len() != 1 {
 		t.Fatalf("interned/plain symbol keys did not collapse: v=%v ok=%v len=%d", v, ok, h.Len())
 	}
 }
@@ -70,30 +70,30 @@ func TestSymValHashInterop(t *testing.T) {
 // same-named string stay distinct, and every immediate key type deletes cleanly.
 func TestHashImmediateKeyDeleteAndDistinct(t *testing.T) {
 	h := NewHash()
-	h.Set(Integer(1), Symbol("int"))
-	h.Set(Float(1.0), Symbol("float"))
+	h.Set(IntValue(int64(Integer(1))), SymVal(string(Symbol("int"))))
+	h.Set(FloatValue(float64(Float(1.0))), SymVal(string(Symbol("float"))))
 	if h.Len() != 2 {
 		t.Fatalf("Integer(1) and Float(1.0) collapsed to one key: len=%d", h.Len())
 	}
-	if v, _ := h.Get(Integer(1)); v != Symbol("int") {
+	if v, _ := h.Get(IntValue(int64(Integer(1)))); v != SymVal(string(Symbol("int"))) {
 		t.Fatalf("Integer(1) key = %v want :int", v)
 	}
-	if v, _ := h.Get(Float(1.0)); v != Symbol("float") {
+	if v, _ := h.Get(FloatValue(float64(Float(1.0)))); v != SymVal(string(Symbol("float"))) {
 		t.Fatalf("Float(1.0) key = %v want :float", v)
 	}
 
-	h.Set(Symbol("x"), Integer(1))
-	h.Set(NewString("x"), Integer(2))
-	if sv, _ := h.Get(Symbol("x")); sv != Integer(1) {
+	h.Set(SymVal(string(Symbol("x"))), IntValue(int64(Integer(1))))
+	h.Set(Wrap(NewString("x")), IntValue(int64(Integer(2))))
+	if sv, _ := h.Get(SymVal(string(Symbol("x")))); sv != IntValue(int64(Integer(1))) {
 		t.Fatalf("symbol x = %v want 1 (must not alias string \"x\")", sv)
 	}
-	if strv, _ := h.Get(NewString("x")); strv != Integer(2) {
+	if strv, _ := h.Get(Wrap(NewString("x"))); strv != IntValue(int64(Integer(2))) {
 		t.Fatalf("string x = %v want 2", strv)
 	}
 
-	for _, k := range []Value{Integer(1), Float(1.0), Symbol("x"), True, False, NilV} {
-		h.Set(k, Integer(99))
-		if v, ok := h.Delete(k); !ok || v != Integer(99) {
+	for _, k := range []Value{IntValue(int64(Integer(1))), FloatValue(float64(Float(1.0))), SymVal(string(Symbol("x"))), BoolValue(bool(True)), BoolValue(bool(False)), NilVal()} {
+		h.Set(k, IntValue(int64(Integer(99))))
+		if v, ok := h.Delete(k); !ok || v != IntValue(int64(Integer(99))) {
 			t.Fatalf("delete %v: v=%v ok=%v", k, v, ok)
 		}
 		if _, ok := h.Get(k); ok {

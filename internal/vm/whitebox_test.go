@@ -110,7 +110,7 @@ func TestExecCraftedOpcodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != object.Integer(7) {
+	if got != object.IntValue(int64(object.Integer(7))) {
 		t.Fatalf("got %v want 7", got)
 	}
 }
@@ -119,7 +119,7 @@ func TestExecCraftedOpcodes(t *testing.T) {
 func TestExecFallsOffEnd(t *testing.T) {
 	vm := New(io.Discard)
 	got, err := vm.Run(&bytecode.ISeq{SplatIndex: -1, KwRestSlot: -1, BlockSlot: -1, Insns: []bytecode.Instr{{Op: bytecode.OpNop}}})
-	if err != nil || got != object.NilV {
+	if err != nil || !object.IsNil(got) {
 		t.Fatalf("got (%v,%v) want (nil,<nil>)", got, err)
 	}
 }

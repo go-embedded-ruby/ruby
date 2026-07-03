@@ -294,15 +294,26 @@ func jumpTargets(iseq *bytecode.ISeq) map[int]bool {
 // constExpr reconstructs a Go expression building the constant value, or
 // ok=false for a kind this stage does not lower (e.g. Bignum).
 func constExpr(v object.Value) (string, bool) {
-	switch x := v.(type) {
-	case object.Integer:
-		return "object.IntValue(" + strconv.FormatInt(int64(x), 10) + ")", true
-	case object.Float:
-		return "object.Float(" + strconv.FormatFloat(float64(x), 'g', -1, 64) + ")", true
-	case *object.String:
-		return "object.NewString(" + strconv.Quote(x.Str()) + ")", true
-	case object.Symbol:
-		return "object.Symbol(" + strconv.Quote(string(x)) + ")", true
+	{
+		__sw1 := v
+		switch {
+		case object.IsInt(__sw1):
+			x := object.AsInteger(__sw1)
+			_ = x
+			return "object.IntValue(" + strconv.FormatInt(int64(x), 10) + ")", true
+		case object.IsFloat(__sw1):
+			x := object.AsFloatV(__sw1)
+			_ = x
+			return "object.Float(" + strconv.FormatFloat(float64(x), 'g', -1, 64) + ")", true
+		case object.IsKind[*object.String](__sw1):
+			x := object.Kind[*object.String](__sw1)
+			_ = x
+			return "object.NewString(" + strconv.Quote(x.Str()) + ")", true
+		case object.IsKind[object.Symbol](__sw1):
+			x := object.Kind[object.Symbol](__sw1)
+			_ = x
+			return "object.Symbol(" + strconv.Quote(string(x)) + ")", true
+		}
 	}
 	return "", false
 }

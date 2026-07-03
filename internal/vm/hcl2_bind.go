@@ -96,7 +96,7 @@ func toHCL2(v object.Value) hcl2.Value {
 	{
 		__sw65 := v
 		switch {
-		case __sw65 == nil:
+		case object.IsNil(__sw65):
 			n := __sw65
 			_ = n
 			return nil

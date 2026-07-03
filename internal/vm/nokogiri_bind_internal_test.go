@@ -28,11 +28,11 @@ func TestNokogiriStr(t *testing.T) {
 
 // TestNokogiriNodeOrNil covers the nil (Go) -> Ruby nil arm and the wrap arm.
 func TestNokogiriNodeOrNil(t *testing.T) {
-	if v := nokogiriNodeOrNil(nil); v != object.NilV {
+	if v := nokogiriNodeOrNil(nil); !object.IsNil(v) {
 		t.Errorf("nil node -> %v", v)
 	}
 	doc, _ := nokogiri.XML("<a/>")
-	if v := nokogiriNodeOrNil(doc.Root()); v == object.NilV {
+	if v := nokogiriNodeOrNil(doc.Root()); object.IsNil(v) {
 		t.Error("real node should wrap, not nil")
 	}
 }

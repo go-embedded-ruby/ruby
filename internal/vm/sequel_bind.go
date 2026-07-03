@@ -91,7 +91,7 @@ func sequelValue(v object.Value) sequel.Value {
 	{
 		__sw153 := v
 		switch {
-		case __sw153 == nil || object.IsNilObj(__sw153):
+		case object.IsNil(__sw153) || object.IsNilObj(__sw153):
 			n := __sw153
 			_ = n
 			return nil

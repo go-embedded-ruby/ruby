@@ -43,11 +43,11 @@ func (vm *VM) registerJWT() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			payload := jwtFromRuby(args[0])
 			alg := "HS256"
-			if len(args) > 2 && args[2] != object.NilV {
+			if len(args) > 2 && !object.IsNil(args[2]) {
 				alg = strArg(args[2])
 			}
 			var header any
-			if len(args) > 3 && args[3] != object.NilV {
+			if len(args) > 3 && !object.IsNil(args[3]) {
 				header = jwtFromRuby(args[3])
 			}
 			tok, err := jwt.Encode(payload, jwtKey(args[1], alg, false), alg, header)
@@ -63,7 +63,7 @@ func (vm *VM) registerJWT() {
 	mod.smethods["decode"] = &Method{name: "decode", owner: mod,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			verify := true
-			if len(args) > 2 && args[2] != object.NilV {
+			if len(args) > 2 && !object.IsNil(args[2]) {
 				verify = args[2].Truthy()
 			}
 			var rest []object.Value
@@ -328,7 +328,7 @@ func jwtFromRuby(v object.Value) any {
 	{
 		__sw82 := v
 		switch {
-		case __sw82 == nil || object.IsNilObj(__sw82):
+		case object.IsNil(__sw82) || object.IsNilObj(__sw82):
 			n := __sw82
 			_ = n
 			return nil

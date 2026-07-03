@@ -156,7 +156,7 @@ func TestProcessGroupsSuccess(t *testing.T) {
 	mod := object.Kind[*RClass](vm.consts["Process"])
 	out := mod.smethods["groups"].native(vm, object.Wrap(mod), nil, nil)
 	arr, ok := object.KindOK[*object.Array](out)
-	if !ok || len(arr.Elems) != 2 || arr.Elems[0] != object.Integer(0) || arr.Elems[1] != object.Integer(20) {
+	if !ok || len(arr.Elems) != 2 || arr.Elems[0] != object.IntValue(int64(object.Integer(0))) || arr.Elems[1] != object.IntValue(int64(object.Integer(20))) {
 		t.Fatalf("groups success: got %#v, want [0, 20]", out)
 	}
 }

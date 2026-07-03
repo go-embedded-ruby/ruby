@@ -30,7 +30,7 @@ func (vm *VM) registerRedis() {
 	// username:, password:, protocol:) configure the recorded Options.
 	mod.smethods["new"] = &Method{name: "new", owner: mod, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		conn, opts := redisNewArgs(args)
-		if conn == nil {
+		if object.IsNil(conn) {
 			raise("ArgumentError", "Redis.new requires a connection: IO-like object (rbgo has no native socket yet)")
 		}
 		// New records opts for a host-driven Handshake; it never fails for a

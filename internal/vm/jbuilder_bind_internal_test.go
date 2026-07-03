@@ -17,7 +17,7 @@ import (
 // wrapper (mapped to its underlying builder).
 func TestJbuilderToBridge(t *testing.T) {
 	vm := New(nil)
-	if got := toJbuilder(vm, nil); got != nil {
+	if got := toJbuilder(vm, object.NilVal()); got != nil {
 		t.Errorf("plain nil: got %#v want nil", got)
 	}
 	inner := &Jbuilder{b: jbuilder.New()}

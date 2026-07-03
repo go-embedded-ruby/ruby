@@ -375,7 +375,7 @@ func osChtimes(p string, atime, mtime int64) error {
 // nil id means "leave unchanged" (-1, as POSIX chown interprets it), any other
 // value is coerced through intArg.
 func chownID(v object.Value) int {
-	if v == object.NilV {
+	if object.IsNil(v) {
 		return -1
 	}
 	return int(intArg(v))

@@ -295,11 +295,11 @@ func TestFileStatWorldWritable(t *testing.T) {
 	vm := New(nil)
 	m := vm.cFileStat.methods["world_writable?"]
 	ww := &FileStat{fi: fakeInfo{mode: 0o777}}
-	if got := m.native(vm, object.Wrap(ww), nil, nil); got != object.Integer(0o777) {
+	if got := m.native(vm, object.Wrap(ww), nil, nil); got != object.IntValue(int64(object.Integer(0o777))) {
 		t.Errorf("world_writable? 0777: got %v want 511", got)
 	}
 	now := &FileStat{fi: fakeInfo{mode: 0o755}}
-	if got := m.native(vm, object.Wrap(now), nil, nil); got != object.NilV {
+	if got := m.native(vm, object.Wrap(now), nil, nil); !object.IsNil(got) {
 		t.Errorf("world_writable? 0755: got %v want nil", got)
 	}
 }
@@ -397,13 +397,13 @@ func TestFileStatSpaceship(t *testing.T) {
 	cmp := vm.cFileStat.methods["<=>"]
 	older := &FileStat{fi: fakeInfo{mt: time.Unix(100, 0)}}
 	newer := &FileStat{fi: fakeInfo{mt: time.Unix(200, 0)}}
-	if got := cmp.native(vm, object.Wrap(older), []object.Value{object.Wrap(newer)}, nil); got != object.Integer(-1) {
+	if got := cmp.native(vm, object.Wrap(older), []object.Value{object.Wrap(newer)}, nil); got != object.IntValue(int64(object.Integer(-1))) {
 		t.Errorf("older <=> newer: got %v want -1", got)
 	}
-	if got := cmp.native(vm, object.Wrap(newer), []object.Value{object.Wrap(older)}, nil); got != object.Integer(1) {
+	if got := cmp.native(vm, object.Wrap(newer), []object.Value{object.Wrap(older)}, nil); got != object.IntValue(int64(object.Integer(1))) {
 		t.Errorf("newer <=> older: got %v want 1", got)
 	}
-	if got := cmp.native(vm, object.Wrap(older), []object.Value{object.Wrap(older)}, nil); got != object.Integer(0) {
+	if got := cmp.native(vm, object.Wrap(older), []object.Value{object.Wrap(older)}, nil); got != object.IntValue(int64(object.Integer(0))) {
 		t.Errorf("equal <=>: got %v want 0", got)
 	}
 }

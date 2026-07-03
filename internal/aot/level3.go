@@ -114,7 +114,7 @@ func emitKernel(iseq *bytecode.ISeq, goName, rubyName string, depth []int) (stri
 
 		switch in.Op {
 		case bytecode.OpPushConst:
-			n, isInt := iseq.Consts[in.A].(object.Integer)
+			n, isInt := object.KindOK[object.Integer](iseq.Consts[in.A])
 			if !isInt {
 				return "", false
 			}

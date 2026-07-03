@@ -75,7 +75,7 @@ func (vm *VM) registerMustache() {
 		}
 		if hasTemplate {
 			tmpl = mustacheStringArg(args[0])
-		} else if t := getIvar(self, "@template"); t != object.NilV {
+		} else if t := getIvar(self, "@template"); !object.IsNil(t) {
 			tmpl = mustacheStringArg(t)
 		}
 		var ctx object.Value = self

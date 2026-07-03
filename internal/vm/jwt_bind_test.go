@@ -280,7 +280,7 @@ func TestJWTKeyFamilies(t *testing.T) {
 // the Symbol, Float, bool, nil, Bignum-less scalar and the to_s-of-unknown default
 // (a Range), which the document round-trips do not all reach directly.
 func TestJWTFromRuby(t *testing.T) {
-	if v := jwtFromRuby(nil); v != nil {
+	if v := jwtFromRuby(object.NilVal()); v != nil {
 		t.Errorf("go-nil -> %v want nil", v)
 	}
 	if v := jwtFromRuby(object.NilVal()); v != nil {
@@ -322,10 +322,10 @@ func TestJWTFromRuby(t *testing.T) {
 // the raw Go scalar types the library never emits through Ruby (int, float64,
 // whole-number float, non-integer json.Number) and the unknown-type default.
 func TestJWTToRuby(t *testing.T) {
-	if v := jwtToRuby(nil); v != object.NilV {
+	if v := jwtToRuby(nil); !object.IsNil(v) {
 		t.Errorf("nil -> %v", v)
 	}
-	if v := jwtToRuby(true); v != object.Bool(true) {
+	if v := jwtToRuby(true); v != object.BoolValue(bool(object.Bool(true))) {
 		t.Errorf("bool -> %v", v)
 	}
 	if v, ok := object.KindOK[*object.String](jwtToRuby("s")); !ok || v.Str() != "s" {
@@ -334,7 +334,7 @@ func TestJWTToRuby(t *testing.T) {
 	if v := jwtToRuby(float64(4)); v != object.IntValue(4) {
 		t.Errorf("whole float -> %v want Integer 4", v)
 	}
-	if v := jwtToRuby(float64(4.5)); v != object.Float(4.5) {
+	if v := jwtToRuby(float64(4.5)); v != object.FloatValue(float64(object.Float(4.5))) {
 		t.Errorf("float -> %v want 4.5", v)
 	}
 	if v := jwtToRuby(int64(5)); v != object.IntValue(5) {
@@ -354,7 +354,7 @@ func TestJWTToRuby(t *testing.T) {
 		t.Errorf("ordered-map -> %v", v)
 	}
 	// An unknown Go type maps to nil.
-	if v := jwtToRuby(struct{}{}); v != object.NilV {
+	if v := jwtToRuby(struct{}{}); !object.IsNil(v) {
 		t.Errorf("unknown -> %v want nil", v)
 	}
 }

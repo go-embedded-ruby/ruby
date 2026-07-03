@@ -19,7 +19,7 @@ import (
 // do not reach directly: a plain Go nil, the object.Nil singleton, a Bignum, a
 // Time, and the default (unmapped) fall-through.
 func TestTOMLToBridge(t *testing.T) {
-	if toTOML(nil) != nil {
+	if toTOML(object.NilVal()) != nil {
 		t.Error("go-nil should map to nil")
 	}
 	if toTOML(object.NilVal()) != nil {
@@ -55,7 +55,7 @@ func TestTOMLKeyBridge(t *testing.T) {
 // four TOML datetime shapes collapsing onto Ruby Time.
 func TestTOMLFromBridge(t *testing.T) {
 	vm := New(nil)
-	if v := fromTOML(vm, big1e30()); v == nil {
+	if v := fromTOML(vm, big1e30()); object.IsNil(v) {
 		t.Error("big.Int -> nil")
 	}
 	// Offset date-time.
@@ -85,10 +85,10 @@ func TestTOMLFromBridge(t *testing.T) {
 // actually produces: a nil value and an unmodelled Go value both map to nil.
 func TestTOMLFromDefaults(t *testing.T) {
 	vm := New(nil)
-	if v := fromTOML(vm, nil); v != object.NilV {
+	if v := fromTOML(vm, nil); !object.IsNil(v) {
 		t.Errorf("nil -> %v", v)
 	}
-	if v := fromTOML(vm, struct{}{}); v != object.NilV {
+	if v := fromTOML(vm, struct{}{}); !object.IsNil(v) {
 		t.Errorf("unmodelled -> %v", v)
 	}
 }

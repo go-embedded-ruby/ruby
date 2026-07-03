@@ -97,7 +97,7 @@ func (vm *VM) registerYAML() {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 			}
 			doc := object.NewString(yamlDump(vm, args[0]))
-			if len(args) > 1 && args[1] != object.NilV {
+			if len(args) > 1 && !object.IsNil(args[1]) {
 				vm.send(args[1], "write", []object.Value{object.Wrap(doc)}, nil)
 				return args[1]
 			}

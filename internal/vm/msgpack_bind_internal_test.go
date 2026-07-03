@@ -19,7 +19,7 @@ import (
 // tests do not reach directly: a plain Go nil, the object.Nil singleton, a
 // Bignum, and the default (unmapped) fall-through.
 func TestMsgpackToBridge(t *testing.T) {
-	if toMsgpack(nil) != nil {
+	if toMsgpack(object.NilVal()) != nil {
 		t.Error("go-nil should map to nil")
 	}
 	if toMsgpack(object.NilVal()) != nil {
@@ -44,11 +44,11 @@ func TestMsgpackToBridge(t *testing.T) {
 // Time, and the *Ext raise.
 func TestMsgpackFromBridge(t *testing.T) {
 	vm := New(nil)
-	if v := fromMsgpack(vm, int64(5)); v != object.Integer(5) {
+	if v := fromMsgpack(vm, int64(5)); v != object.IntValue(int64(object.Integer(5))) {
 		t.Errorf("int64 -> %v", v)
 	}
 	// A uint64 within int64 range stays an Integer.
-	if v := fromMsgpack(vm, uint64(7)); v != object.Integer(7) {
+	if v := fromMsgpack(vm, uint64(7)); v != object.IntValue(int64(object.Integer(7))) {
 		t.Errorf("small uint64 -> %v", v)
 	}
 	// A uint64 above int64's max promotes to a Bignum-valued Integer.
@@ -57,7 +57,7 @@ func TestMsgpackFromBridge(t *testing.T) {
 		t.Errorf("large uint64 -> %T", big)
 	}
 	// A *big.Int maps through NormInt.
-	if v := fromMsgpack(vm, big1e30()); v == nil {
+	if v := fromMsgpack(vm, big1e30()); object.IsNil(v) {
 		t.Error("big.Int -> nil")
 	}
 	// A Bin maps to an ASCII-8BIT String.
@@ -80,7 +80,7 @@ func TestMsgpackFromBridge(t *testing.T) {
 // TestMsgpackFromDefault covers fromMsgpack's defensive default arm — a value
 // the unpacker never actually produces maps to nil rather than panicking.
 func TestMsgpackFromDefault(t *testing.T) {
-	if v := fromMsgpack(New(nil), struct{}{}); v != object.NilV {
+	if v := fromMsgpack(New(nil), struct{}{}); !object.IsNil(v) {
 		t.Errorf("unmodelled -> %v", v)
 	}
 }

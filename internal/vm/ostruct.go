@@ -202,7 +202,7 @@ type vmDigValue struct{ vmValue }
 // non-nil value that responds to #dig is wrapped as a Digger; every other value
 // as a plain vmValue.
 func (vm *VM) wrapVMValue(v object.Value) any {
-	if v == nil {
+	if object.IsNil(v) {
 		return nil
 	}
 	if _, isNil := object.AsNilOK(v); isNil {

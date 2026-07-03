@@ -26,7 +26,7 @@ func toJbuilder(vm *VM, v object.Value) any {
 	{
 		__sw74 := v
 		switch {
-		case __sw74 == nil:
+		case object.IsNil(__sw74):
 			n := __sw74
 			_ = n
 			return nil

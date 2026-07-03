@@ -53,7 +53,7 @@ func TestCSVFieldToRubyDefault(t *testing.T) {
 func TestCSVFieldToRubyObjectValue(t *testing.T) {
 	vm := New(io.Discard)
 	in := object.Integer(7)
-	if got := vm.csvFieldToRuby(in); got != object.Value(in) {
+	if got := vm.csvFieldToRuby(in); got != object.IntValue(int64(in)) {
 		t.Fatalf("csvFieldToRuby(Integer 7) = %v, want it unchanged", got)
 	}
 }
@@ -65,7 +65,7 @@ func TestCSVFieldToRubyObjectValue(t *testing.T) {
 // options (no headers).
 func TestCSVParseLineRowNoTable(t *testing.T) {
 	vm := New(io.Discard)
-	if got := vm.csvParseLineRow("a,b", libcsv.Options{}); got != object.NilV {
+	if got := vm.csvParseLineRow("a,b", libcsv.Options{}); !object.IsNil(got) {
 		t.Fatalf("csvParseLineRow without headers = %v, want nil", got)
 	}
 }

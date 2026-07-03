@@ -18,7 +18,7 @@ import (
 // mapping the Ruby tests do not reach directly.
 func TestSQLite3BindBridge(t *testing.T) {
 	// sqlite3Bind: every value shape.
-	if v := sqlite3Bind(nil); v != nil {
+	if v := sqlite3Bind(object.NilVal()); v != nil {
 		t.Errorf("go-nil -> %v", v)
 	}
 	if v := sqlite3Bind(object.NilVal()); v != nil {
@@ -58,13 +58,13 @@ func TestSQLite3BindBridge(t *testing.T) {
 // TestSQLite3ValueBridge covers the driver-value -> Ruby mapping arms.
 func TestSQLite3ValueBridge(t *testing.T) {
 	vm := New(nil)
-	if v := sqlite3Value(vm, nil); v != object.NilV {
+	if v := sqlite3Value(vm, nil); !object.IsNil(v) {
 		t.Errorf("nil -> %v", v)
 	}
-	if v := sqlite3Value(vm, int64(3)); v != object.Integer(3) {
+	if v := sqlite3Value(vm, int64(3)); v != object.IntValue(int64(object.Integer(3))) {
 		t.Errorf("int64 -> %v", v)
 	}
-	if v := sqlite3Value(vm, float64(1.5)); v != object.Float(1.5) {
+	if v := sqlite3Value(vm, float64(1.5)); v != object.FloatValue(float64(object.Float(1.5))) {
 		t.Errorf("float64 -> %v", v)
 	}
 	if s, ok := object.KindOK[*object.String](sqlite3Value(vm, "x")); !ok || s.Str() != "x" {
@@ -73,11 +73,11 @@ func TestSQLite3ValueBridge(t *testing.T) {
 	if s, ok := object.KindOK[*object.String](sqlite3Value(vm, []byte{0x00})); !ok || !s.IsBinary() {
 		t.Errorf("[]byte -> %v", sqlite3Value(vm, []byte{0x00}))
 	}
-	if v := sqlite3Value(vm, true); v != object.Bool(true) {
+	if v := sqlite3Value(vm, true); v != object.BoolValue(bool(object.Bool(true))) {
 		t.Errorf("bool -> %v", v)
 	}
 	// Default (never produced by the driver) arm.
-	if v := sqlite3Value(vm, struct{}{}); v != object.NilV {
+	if v := sqlite3Value(vm, struct{}{}); !object.IsNil(v) {
 		t.Errorf("default -> %v", v)
 	}
 }
@@ -165,7 +165,7 @@ func TestSQLite3HashColsNoOwner(t *testing.T) {
 func TestSQLite3SpreadNoArray(t *testing.T) {
 	in := []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2)))}
 	out := sqlite3Spread(in)
-	if len(out) != 2 || out[0] != object.Integer(1) {
+	if len(out) != 2 || out[0] != object.IntValue(int64(object.Integer(1))) {
 		t.Errorf("no-array spread -> %v", out)
 	}
 	// A single non-Array argument also passes through.

@@ -54,7 +54,7 @@ func (vm *VM) registerAddressable() {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 			}
-			if args[0] == object.NilV {
+			if object.IsNil(args[0]) {
 				return object.NilVal()
 			}
 			return object.Wrap(&AddressableURI{u: addressable.Parse(strArg(args[0]))})

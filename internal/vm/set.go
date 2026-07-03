@@ -478,7 +478,7 @@ func (vm *VM) registerSet() {
 	// sum(init=0): fold the members with + starting from init, reusing the VM's
 	// add (binaryOp OpAdd) — so it agrees with Array#sum / numeric coercions.
 	d("sum", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		acc := object.Value(object.IntValue(0))
+		acc := object.IntValue(0)
 		if len(args) > 0 {
 			acc = args[0]
 		}

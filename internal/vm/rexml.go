@@ -33,7 +33,7 @@ import (
 // underlying library node and renders Ruby #to_s / #inspect. classOf reports the
 // concrete Ruby class (REXML::Element, REXML::Text, …) for each wrapper.
 type REXMLNode interface {
-	object.Value
+	object.RubyObj
 	node() rx.Node
 }
 
@@ -769,7 +769,7 @@ func rexmlCtx(v object.Value) rx.Node {
 // ("@attr") result — which wrapNode does not wrap — is lifted to its decoded
 // value String via REXML's AttrValue.
 func rexmlMatchValue(n rx.Node) object.Value {
-	if w := wrapNode(n); w != object.NilV {
+	if w := wrapNode(n); !object.IsNil(w) {
 		return w
 	}
 	return object.Wrap(object.NewString(rx.AttrValue(n)))

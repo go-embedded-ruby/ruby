@@ -55,10 +55,10 @@ func TestGrapeStr(t *testing.T) {
 
 // TestGrapeArg covers the present / absent arms of grapeArg.
 func TestGrapeArg(t *testing.T) {
-	if grapeArg(nil) != object.NilV {
+	if !object.IsNil(grapeArg(nil)) {
 		t.Error("absent arm")
 	}
-	if grapeArg([]object.Value{object.IntValue(int64(object.Integer(1)))}) != object.Integer(1) {
+	if grapeArg([]object.Value{object.IntValue(int64(object.Integer(1)))}) != object.IntValue(int64(object.Integer(1))) {
 		t.Error("present arm")
 	}
 }
@@ -165,13 +165,13 @@ func (errStub) Error() string { return "boom" }
 // TestGrapeRouteHandlerNil covers the nil-handler arms of Route#handler /
 // Match#handler / Match#route where a matched route carries no handler value.
 func TestGrapeRouteHandlerNil(t *testing.T) {
-	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: nil}
+	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: object.NilVal()}
 	// handler is nil -> the accessor returns Ruby nil, not a Go nil interface.
-	if r.handler != nil {
+	if !object.IsNil(r.handler) {
 		t.Skip("handler set")
 	}
 	m := &GrapeMatch{} // no route, no handler
-	if m.route != nil || m.handler != nil {
+	if !object.IsNil(m.route) || !object.IsNil(m.handler) {
 		t.Error("empty match should carry no route/handler")
 	}
 }
@@ -183,17 +183,17 @@ func TestGrapeRouteHandlerGoNil(t *testing.T) {
 	vm := New(nil)
 	// Route#handler with a nil handler field.
 	route := object.Kind[*RClass](vm.consts["Grape::Router::Route"])
-	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: nil}
-	if got := route.methods["handler"].native(vm, object.Wrap(r), nil, nil); got != object.NilV {
+	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: object.NilVal()}
+	if got := route.methods["handler"].native(vm, object.Wrap(r), nil, nil); !object.IsNil(got) {
 		t.Errorf("Route#handler nil field -> %v, want nil", got)
 	}
 	// Match#handler / #route with nil fields.
 	match := object.Kind[*RClass](vm.consts["Grape::Router::Match"])
 	m := &GrapeMatch{}
-	if got := match.methods["handler"].native(vm, object.Wrap(m), nil, nil); got != object.NilV {
+	if got := match.methods["handler"].native(vm, object.Wrap(m), nil, nil); !object.IsNil(got) {
 		t.Errorf("Match#handler nil field -> %v, want nil", got)
 	}
-	if got := match.methods["route"].native(vm, object.Wrap(m), nil, nil); got != object.NilV {
+	if got := match.methods["route"].native(vm, object.Wrap(m), nil, nil); !object.IsNil(got) {
 		t.Errorf("Match#route nil field -> %v, want nil", got)
 	}
 }
@@ -206,7 +206,7 @@ func TestGrapeRouteHandlerPresent(t *testing.T) {
 	route := object.Kind[*RClass](vm.consts["Grape::Router::Route"])
 	h := object.NewString("do-thing")
 	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: object.Wrap(h)}
-	if got := route.methods["handler"].native(vm, object.Wrap(r), nil, nil); got != h {
+	if got := route.methods["handler"].native(vm, object.Wrap(r), nil, nil); got != object.Wrap(h) {
 		t.Errorf("Route#handler present field -> %v, want %v", got, h)
 	}
 }
@@ -230,7 +230,7 @@ func TestGrapeToGo(t *testing.T) {
 	if grapeToGo(object.NilVal()) != nil {
 		t.Error("nil arm")
 	}
-	if grapeToGo(nil) != nil {
+	if grapeToGo(object.NilVal()) != nil {
 		t.Error("go-nil arm")
 	}
 	if grapeToGo(object.BoolValue(bool(object.Bool(true)))) != true {
@@ -269,19 +269,19 @@ func TestGrapeToGo(t *testing.T) {
 
 // TestGrapeFromGo covers every arm of the Go->Ruby value mapper.
 func TestGrapeFromGo(t *testing.T) {
-	if grapeFromGo(nil) != object.NilV {
+	if !object.IsNil(grapeFromGo(nil)) {
 		t.Error("nil arm")
 	}
-	if grapeFromGo(true) != object.Bool(true) {
+	if grapeFromGo(true) != object.BoolValue(bool(object.Bool(true))) {
 		t.Error("bool arm")
 	}
-	if grapeFromGo(int(3)) != object.Integer(3) {
+	if grapeFromGo(int(3)) != object.IntValue(int64(object.Integer(3))) {
 		t.Error("int arm")
 	}
-	if grapeFromGo(int64(4)) != object.Integer(4) {
+	if grapeFromGo(int64(4)) != object.IntValue(int64(object.Integer(4))) {
 		t.Error("int64 arm")
 	}
-	if grapeFromGo(2.5) != object.Float(2.5) {
+	if grapeFromGo(2.5) != object.FloatValue(float64(object.Float(2.5))) {
 		t.Error("float arm")
 	}
 	if s, ok := object.KindOK[*object.String](grapeFromGo("s")); !ok || s.Str() != "s" {
@@ -296,7 +296,7 @@ func TestGrapeFromGo(t *testing.T) {
 		t.Error("hash arm")
 	}
 	// The default arm (an unmapped Go type) yields nil.
-	if grapeFromGo(struct{}{}) != object.NilV {
+	if !object.IsNil(grapeFromGo(struct{}{})) {
 		t.Error("default arm")
 	}
 }

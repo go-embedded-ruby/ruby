@@ -91,11 +91,11 @@ func TestYAMLBindToScalars(t *testing.T) {
 		t.Errorf("float -> %v", v)
 	}
 	// A Go-nil object.Value maps to a library nil (the defensive first arm).
-	if v := c.conv(nil); v != nil {
+	if v := c.conv(object.NilVal()); v != nil {
 		t.Errorf("nil -> %v", v)
 	}
 	// convBound's nil and non-nil arms.
-	if v := c.convBound(nil); v != nil {
+	if v := c.convBound(object.NilVal()); v != nil {
 		t.Errorf("convBound(nil) -> %v", v)
 	}
 	if v := c.convBound(object.IntValue(int64(object.Integer(3)))); v != int64(3) {
@@ -189,7 +189,7 @@ func TestYAMLBindFromScalars(t *testing.T) {
 	}
 	// An unmodelled value maps to nil (the defensive final arm). A bare int (not
 	// int64) is never produced by Load, so it exercises the default.
-	if v := c.conv(123); v != object.NilV {
+	if v := c.conv(123); !object.IsNil(v) {
 		t.Errorf("unmapped -> %v", v)
 	}
 }
@@ -201,7 +201,7 @@ func TestYAMLBindFromRangeAndBound(t *testing.T) {
 	c := &yamlFromCtx{vm: vm, seen: map[yaml.Value]object.Value{}}
 	r := c.conv(&yaml.Range{Begin: nil, End: int64(5), Exclusive: true})
 	rng, ok := object.KindOK[*object.Range](r)
-	if !ok || rng.Lo != nil || !rng.Exclusive {
+	if !ok || !object.IsNil(rng.Lo) || !rng.Exclusive {
 		t.Fatalf("range -> %T %v", r, r)
 	}
 	if hi, ok := object.AsIntegerOK(rng.Hi); !ok || int64(hi) != 5 {

@@ -62,7 +62,7 @@ func (vm *VM) registerDryRuleContext(val *RClass) {
 	// targets the rule's own default key path (the gem's `key.failure`).
 	d("key", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		rc := object.Kind[*DryRuleCtx](self).rc
-		if len(args) > 0 && args[0] != object.NilV {
+		if len(args) > 0 && !object.IsNil(args[0]) {
 			return object.Wrap(&DryRuleKey{rc: rc, path: []any{drytypes.Symbol(dryKeyName(args[0]))}})
 		}
 		return object.Wrap(&DryRuleKey{rc: rc})

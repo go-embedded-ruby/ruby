@@ -228,7 +228,7 @@ func TestOAuth2ValueObjects(t *testing.T) {
 		t.Error("oauth2Str fallback")
 	}
 	// oauth2AnyToRuby covers every decoded-value shape.
-	if oauth2AnyToRuby(nil) != object.NilV {
+	if !object.IsNil(oauth2AnyToRuby(nil)) {
 		t.Error("nil")
 	}
 	if oauth2AnyToRuby(int(3)).Inspect() != "3" {
@@ -237,14 +237,14 @@ func TestOAuth2ValueObjects(t *testing.T) {
 	if oauth2AnyToRuby(int64(4)).Inspect() != "4" {
 		t.Error("int64")
 	}
-	if oauth2AnyToRuby(struct{}{}) != object.NilV {
+	if !object.IsNil(oauth2AnyToRuby(struct{}{})) {
 		t.Error("unmapped")
 	}
 	if !strings.Contains(oauth2AnyToRuby([]any{"a"}).Inspect(), "\"a\"") {
 		t.Error("array")
 	}
 	// oauth2ParsedToHash on a nil map yields nil.
-	if oauth2ParsedToHash(nil, nil) != object.NilV {
+	if !object.IsNil(oauth2ParsedToHash(nil, nil)) {
 		t.Error("nil parsed")
 	}
 }

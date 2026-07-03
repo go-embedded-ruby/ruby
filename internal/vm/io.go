@@ -184,14 +184,14 @@ func (vm *VM) registerIO() {
 	cFile.smethods["readlines"] = &Method{name: "readlines", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		o := openFileIO(cFile, pathArg(vm, args[0]), "r")
 		var lines []object.Value
-		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
+		for v := ioGets(o, nil); !object.IsNil(v); v = ioGets(o, nil) {
 			lines = append(lines, v)
 		}
 		return object.Wrap(object.NewArrayFromSlice(lines))
 	}}
 	cFile.smethods["foreach"] = &Method{name: "foreach", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		o := openFileIO(cFile, pathArg(vm, args[0]), "r")
-		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
+		for v := ioGets(o, nil); !object.IsNil(v); v = ioGets(o, nil) {
 			vm.callBlock(blk, []object.Value{v})
 		}
 		return object.NilVal()
@@ -477,7 +477,7 @@ func defStringIORead(cls *RClass) {
 	cls.define("read", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := object.Kind[*IOObj](self)
 		o.pipeRefresh()
-		if len(args) > 0 && args[0] != object.NilV {
+		if len(args) > 0 && !object.IsNil(args[0]) {
 			n := int(toInt(args[0]))
 			if o.pos >= len(o.buf) {
 				return object.NilVal() // a length read at EOF yields nil
@@ -509,7 +509,7 @@ func defStringIORead(cls *RClass) {
 	cls.define("gets", gets)
 	cls.define("readline", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		v := gets(vm, self, args, nil)
-		if v == object.NilV {
+		if object.IsNil(v) {
 			raise("EOFError", "end of file reached")
 		}
 		return v
@@ -519,7 +519,7 @@ func defStringIORead(cls *RClass) {
 		var lines []object.Value
 		for {
 			v := ioGets(o, args)
-			if v == object.NilV {
+			if object.IsNil(v) {
 				break
 			}
 			lines = append(lines, v)
@@ -530,7 +530,7 @@ func defStringIORead(cls *RClass) {
 		o := object.Kind[*IOObj](self)
 		for {
 			v := ioGets(o, args)
-			if v == object.NilV {
+			if object.IsNil(v) {
 				break
 			}
 			vm.callBlock(blk, []object.Value{v})

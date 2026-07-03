@@ -364,7 +364,7 @@ func (vm *VM) benchRun(blk *Proc, name string) func() {
 // $stdout captures the report, matching MRI.
 func (vm *VM) benchPrint(s string) {
 	out := vm.globals["$stdout"]
-	if out == nil {
+	if object.IsNil(out) {
 		out = object.Wrap(vm.curStdout())
 	}
 	vm.send(out, "print", []object.Value{object.Wrap(object.NewString(s))}, nil)

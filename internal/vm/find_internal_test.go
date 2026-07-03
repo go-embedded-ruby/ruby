@@ -176,7 +176,7 @@ func TestFindYieldRepanic(t *testing.T) {
 	defer func() {
 		r := recover()
 		sig, ok := r.(throwSignal)
-		if !ok || sig.tag != other {
+		if !ok || sig.tag != object.SymVal(string(other)) {
 			t.Fatalf("expected re-panicked throwSignal{other}, got %#v", r)
 		}
 	}()

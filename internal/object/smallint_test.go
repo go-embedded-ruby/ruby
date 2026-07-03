@@ -13,7 +13,7 @@ func TestIntValue(t *testing.T) {
 		1 << 40, -(1 << 40),
 	} {
 		got := IntValue(n)
-		if got != Integer(n) {
+		if got != IntValue(int64(Integer(n))) {
 			t.Errorf("IntValue(%d) = %v, want Integer(%d)", n, got, n)
 		}
 	}

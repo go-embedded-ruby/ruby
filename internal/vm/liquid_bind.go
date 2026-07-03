@@ -188,7 +188,7 @@ func toLiquid(vm *VM, v object.Value) any {
 	{
 		__sw89 := v
 		switch {
-		case __sw89 == nil:
+		case object.IsNil(__sw89):
 			n := __sw89
 			_ = n
 			return nil

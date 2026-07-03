@@ -158,7 +158,7 @@ func (vm *VM) ratCompare(r *object.Rational, other object.Value) object.Value {
 // registerRational installs Kernel#Rational and the Rational instance methods.
 func (vm *VM) registerRational() {
 	vm.cObject.define("Rational", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		den := object.Value(object.IntValue(1))
+		den := object.IntValue(1)
 		if len(args) > 1 {
 			den = args[1]
 		}

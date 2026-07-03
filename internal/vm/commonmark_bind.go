@@ -35,7 +35,7 @@ func commonmarkOptions(opt object.Value) *commonmark.Options {
 	{
 		__sw38 := opt
 		switch {
-		case __sw38 == nil:
+		case object.IsNil(__sw38):
 			v := __sw38
 			_ = v
 			return nil

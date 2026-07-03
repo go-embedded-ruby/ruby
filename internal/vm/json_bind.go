@@ -160,7 +160,7 @@ func emitValue(e *json.Encoder, v object.Value) error {
 	{
 		__sw79 := v
 		switch {
-		case __sw79 == nil || object.IsNilObj(__sw79):
+		case object.IsNil(__sw79) || object.IsNilObj(__sw79):
 			n := __sw79
 			_ = n
 			e.Null()

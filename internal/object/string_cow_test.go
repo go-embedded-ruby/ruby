@@ -151,8 +151,8 @@ func TestStringBytesEncAndFrozenView(t *testing.T) {
 // an owned string with equal bytes collapse to the same Hash entry.
 func TestStringViewAsHashKey(t *testing.T) {
 	h := NewHash()
-	h.Set(NewStringView("k"), Integer(1))
-	if v, ok := h.Get(NewString("k")); !ok || v != Integer(1) {
+	h.Set(Wrap(NewStringView("k")), IntValue(int64(Integer(1))))
+	if v, ok := h.Get(Wrap(NewString("k"))); !ok || v != IntValue(int64(Integer(1))) {
 		t.Fatalf("view/owned key mismatch: v=%v ok=%v", v, ok)
 	}
 }

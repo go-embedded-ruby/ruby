@@ -17,28 +17,28 @@ func TestAOTBlockArgs(t *testing.T) {
 	pair := &object.Array{Elems: []object.Value{object.IntValue(int64(one)), object.IntValue(int64(two))}}
 
 	// Exact arity: the args pass straight through (same backing slice).
-	if got := aotBlockArgs(1, []object.Value{object.IntValue(int64(one))}); len(got) != 1 || got[0] != one {
+	if got := aotBlockArgs(1, []object.Value{object.IntValue(int64(one))}); len(got) != 1 || got[0] != object.IntValue(int64(one)) {
 		t.Errorf("exact arity: got %v", got)
 	}
 	// np>1, a single Array arg: auto-splat into the elements.
 	got := aotBlockArgs(2, []object.Value{object.Wrap(pair)})
-	if len(got) != 2 || got[0] != one || got[1] != two {
+	if len(got) != 2 || got[0] != object.IntValue(int64(one)) || got[1] != object.IntValue(int64(two)) {
 		t.Errorf("auto-splat: got %v", got)
 	}
 	// np>1, a single non-Array arg: no splat, pad the missing parameter with nil.
 	got = aotBlockArgs(2, []object.Value{object.IntValue(int64(one))})
-	if len(got) != 2 || got[0] != one || got[1] != nil {
+	if len(got) != 2 || got[0] != object.IntValue(int64(one)) || !object.IsNil(got[1]) {
 		t.Errorf("non-array single arg: got %v", got)
 	}
 	// A short argument list to a fixed-arity block pads with nil (no auto-splat
 	// when np==1).
 	got = aotBlockArgs(1, nil)
-	if len(got) != 1 || got[0] != nil {
+	if len(got) != 1 || !object.IsNil(got[0]) {
 		t.Errorf("padding: got %v", got)
 	}
 	// More args than params: truncate to np.
 	got = aotBlockArgs(1, []object.Value{object.IntValue(int64(one)), object.IntValue(int64(two))})
-	if len(got) != 1 || got[0] != one {
+	if len(got) != 1 || got[0] != object.IntValue(int64(one)) {
 		t.Errorf("truncate: got %v", got)
 	}
 }
@@ -102,7 +102,7 @@ func TestRunTopCompiled(t *testing.T) {
 	})
 
 	vm := New(io.Discard) // arms mainArmed after the prelude
-	if got := vm.runTop(&bytecode.ISeq{}); got != sentinel {
+	if got := vm.runTop(&bytecode.ISeq{}); got != object.Wrap(sentinel) {
 		t.Errorf("runTop = %v, want the compiled main's result", got)
 	}
 	if calls != 1 || vm.mainArmed {

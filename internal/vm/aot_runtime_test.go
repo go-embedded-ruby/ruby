@@ -14,7 +14,7 @@ import (
 func TestAOTConst(t *testing.T) {
 	vm := New(io.Discard)
 	vm.consts["Answer"] = object.IntValue(int64(object.Integer(42)))
-	if got := vm.aotConst("Answer"); got != object.Integer(42) {
+	if got := vm.aotConst("Answer"); got != object.IntValue(int64(object.Integer(42))) {
 		t.Errorf("aotConst hit = %v, want 42", got)
 	}
 	wantRaise(t, "NameError", func() { vm.aotConst("Nope") })
@@ -27,10 +27,10 @@ func TestAOTYield(t *testing.T) {
 		seen = args
 		return object.IntValue(int64(object.Integer(7)))
 	}}
-	if got := vm.aotYield(block, []object.Value{object.IntValue(int64(object.Integer(1)))}); got != object.Integer(7) {
+	if got := vm.aotYield(block, []object.Value{object.IntValue(int64(object.Integer(1)))}); got != object.IntValue(int64(object.Integer(7))) {
 		t.Errorf("aotYield result = %v, want 7", got)
 	}
-	if len(seen) != 1 || seen[0] != object.Integer(1) {
+	if len(seen) != 1 || seen[0] != object.IntValue(int64(object.Integer(1))) {
 		t.Errorf("block received %v, want [1]", seen)
 	}
 	wantRaise(t, "LocalJumpError", func() { vm.aotYield(nil, nil) })
@@ -48,7 +48,7 @@ func TestAOTConcat(t *testing.T) {
 func TestAOTSplat(t *testing.T) {
 	vm := New(io.Discard)
 	arr := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}
-	if got := vm.aotSplat(object.Wrap(arr)); got != arr {
+	if got := vm.aotSplat(object.Wrap(arr)); got != object.Wrap(arr) {
 		t.Errorf("aotSplat(array) should pass the array through, got %v", got)
 	}
 	wrapped := object.Kind[*object.Array](vm.aotSplat(object.IntValue(int64(object.Integer(9)))))

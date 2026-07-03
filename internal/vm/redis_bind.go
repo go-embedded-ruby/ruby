@@ -92,7 +92,7 @@ func redisArg(v object.Value) any {
 	{
 		__sw130 := v
 		switch {
-		case __sw130 == nil || object.IsNilObj(__sw130):
+		case object.IsNil(__sw130) || object.IsNilObj(__sw130):
 			n := __sw130
 			_ = n
 			return nil
@@ -232,7 +232,7 @@ func redisNewArgs(args []object.Value) (object.Value, redis.Options) {
 	}
 	// A leading positional argument is the connection when the keywords did not
 	// supply one.
-	if conn == nil && len(args) > 0 {
+	if object.IsNil(conn) && len(args) > 0 {
 		conn = args[0]
 	}
 	return conn, opts

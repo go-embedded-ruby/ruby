@@ -137,7 +137,7 @@ func (c *yamlToCtx) conv(v object.Value) yaml.Value {
 	{
 		__sw187 := v
 		switch {
-		case __sw187 == nil:
+		case object.IsNil(__sw187):
 			n := __sw187
 			_ = n
 			return nil
@@ -218,7 +218,7 @@ func (c *yamlToCtx) conv(v object.Value) yaml.Value {
 // convBound maps a Range endpoint, where a Go-nil bound (a beginless / endless
 // range) becomes a library nil.
 func (c *yamlToCtx) convBound(v object.Value) yaml.Value {
-	if v == nil {
+	if object.IsNil(v) {
 		return nil
 	}
 	return c.conv(v)
@@ -227,11 +227,11 @@ func (c *yamlToCtx) convBound(v object.Value) yaml.Value {
 // convArray maps a Ruby Array to a library []any, registered in the identity
 // cache before its elements so a cyclic / shared array maps to one slice.
 func (c *yamlToCtx) convArray(a *object.Array) yaml.Value {
-	if cached, ok := c.seen[a]; ok {
+	if cached, ok := c.seen[object.Wrap(a)]; ok {
 		return cached
 	}
 	out := make([]yaml.Value, len(a.Elems))
-	c.seen[a] = out // the backing array is fixed; elements are filled in place
+	c.seen[object.Wrap(a)] = out // the backing array is fixed; elements are filled in place
 	for i, el := range a.Elems {
 		out[i] = c.conv(el)
 	}
@@ -241,11 +241,11 @@ func (c *yamlToCtx) convArray(a *object.Array) yaml.Value {
 // convHash maps an ordered Ruby Hash to the library's ordered *Map, preserving
 // key insertion order and caching identity for shared / cyclic hashes.
 func (c *yamlToCtx) convHash(h *object.Hash) yaml.Value {
-	if cached, ok := c.seen[h]; ok {
+	if cached, ok := c.seen[object.Wrap(h)]; ok {
 		return cached
 	}
 	m := yaml.NewMap()
-	c.seen[h] = m
+	c.seen[object.Wrap(h)] = m
 	for _, k := range h.Keys {
 		val, _ := h.Get(k)
 		m.Set(c.conv(k), c.conv(val))
@@ -255,11 +255,11 @@ func (c *yamlToCtx) convHash(h *object.Hash) yaml.Value {
 
 // convRange maps a Ruby Range to a library *Range, caching identity.
 func (c *yamlToCtx) convRange(r *object.Range) yaml.Value {
-	if cached, ok := c.seen[r]; ok {
+	if cached, ok := c.seen[object.Wrap(r)]; ok {
 		return cached
 	}
 	out := &yaml.Range{Exclusive: r.Exclusive}
-	c.seen[r] = out
+	c.seen[object.Wrap(r)] = out
 	out.Begin = c.convBound(r.Lo)
 	out.End = c.convBound(r.Hi)
 	return out
@@ -271,7 +271,7 @@ func (c *yamlToCtx) convRange(r *object.Range) yaml.Value {
 // library value is cached before its ivars so a self-referential object graph
 // terminates.
 func (c *yamlToCtx) convObject(o *RObject) yaml.Value {
-	if cached, ok := c.seen[o]; ok {
+	if cached, ok := c.seen[object.Wrap(o)]; ok {
 		return cached
 	}
 	className := ""
@@ -279,7 +279,7 @@ func (c *yamlToCtx) convObject(o *RObject) yaml.Value {
 		className = o.class.name
 	}
 	out := &yaml.Object{Class: className, IVars: map[string]yaml.Value{}}
-	c.seen[o] = out
+	c.seen[object.Wrap(o)] = out
 	for name, val := range o.ivars {
 		out.IVars[ivarBareName(name)] = c.conv(val)
 	}
@@ -289,11 +289,11 @@ func (c *yamlToCtx) convObject(o *RObject) yaml.Value {
 // convSet maps a Ruby Set to its Psych shape (!ruby/object:Set with a backing
 // "hash" ivar of element->true, in insertion order), caching identity.
 func (c *yamlToCtx) convSet(s *Set) yaml.Value {
-	if cached, ok := c.seen[s]; ok {
+	if cached, ok := c.seen[object.Wrap(s)]; ok {
 		return cached
 	}
 	out := &yaml.Object{Class: "Set", IVars: map[string]yaml.Value{}}
-	c.seen[s] = out
+	c.seen[object.Wrap(s)] = out
 	inner := yaml.NewMap()
 	s.each(func(m object.Value) { inner.Set(c.conv(m), true) })
 	out.IVars["hash"] = inner
@@ -309,11 +309,11 @@ func (c *yamlToCtx) convSet(s *Set) yaml.Value {
 // a URI in a serialised graph (e.g. a Puppet run report) dumpable, as the former
 // pure-Ruby prelude URI was via its plain ivars.
 func (c *yamlToCtx) convURI(u *URI) yaml.Value {
-	if cached, ok := c.seen[u]; ok {
+	if cached, ok := c.seen[object.Wrap(u)]; ok {
 		return cached
 	}
 	out := &yaml.Object{Class: u.cls.name, IVars: map[string]yaml.Value{}}
-	c.seen[u] = out
+	c.seen[object.Wrap(u)] = out
 	str := func(s string, has bool) yaml.Value {
 		if !has {
 			return nil
@@ -449,7 +449,7 @@ func (c *yamlFromCtx) convRange(r *yaml.Range) object.Value {
 // Range bound (rbgo's beginless / endless representation).
 func (c *yamlFromCtx) convBound(v yaml.Value) object.Value {
 	if v == nil {
-		return nil
+		return object.NilVal()
 	}
 	return c.conv(v)
 }

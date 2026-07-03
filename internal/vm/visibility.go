@@ -176,7 +176,7 @@ func (vm *VM) checkVisibility(recv object.Value, name string, m *Method, caller 
 	case visProtected:
 		// Allowed when the caller's self is an instance of the method's owner (or a
 		// descendant) — the classic protected use (a == comparing two instances).
-		if caller != nil && classIsA(vm.classOf(caller), m.owner) {
+		if !object.IsNil(caller) && classIsA(vm.classOf(caller), m.owner) {
 			return
 		}
 		raise("NoMethodError", "protected method '%s' called for %s", name, vm.recvDesc(recv))

@@ -420,7 +420,7 @@ func (vm *VM) optValueToRuby(op *OptionParser, m optparse.Match) object.Value {
 		// A coerced string is either a plain value or a candidate-list key; for a
 		// list, map it back to the original Ruby object via the per-spec table.
 		if vals, ok := op.listVals[m.SpecIndex]; ok {
-			if rv := optListLookup(op, m.SpecIndex, val, vals); rv != nil {
+			if rv := optListLookup(op, m.SpecIndex, val, vals); !object.IsNil(rv) {
 				return rv
 			}
 		}
@@ -447,7 +447,7 @@ func optListLookup(op *OptionParser, idx int, matched string, vals []object.Valu
 			return vals[i]
 		}
 	}
-	return nil
+	return object.NilVal()
 }
 
 // optSpecFromArgs splits an on(*args) argument list into the library Spec and,

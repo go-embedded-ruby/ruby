@@ -100,7 +100,7 @@ func pgArg(v object.Value) any {
 	{
 		__sw118 := v
 		switch {
-		case __sw118 == nil || object.IsNilObj(__sw118):
+		case object.IsNil(__sw118) || object.IsNilObj(__sw118):
 			n := __sw118
 			_ = n
 			return nil
@@ -215,11 +215,11 @@ func pgStrings(ss []string) *object.Array {
 func pgConnectArgs(args []object.Value) (io object.Value, params pg.StartupParams, user, password string, hasAuth bool) {
 	params = pg.StartupParams{}
 	if len(args) == 0 {
-		return nil, params, "", "", false
+		return object.NilVal(), params, "", "", false
 	}
 	h, ok := object.KindOK[*object.Hash](args[len(args)-1])
 	if !ok {
-		return nil, params, "", "", false
+		return object.NilVal(), params, "", "", false
 	}
 	for i := 0; i < h.Len(); i++ {
 		k := h.Keys[i]

@@ -15,22 +15,22 @@ import (
 // which are reachable only from Go. The int64 / float64 / string / []byte / nil
 // arms are exercised through real queries by the vm_test suite.
 func TestARValueToRubyGoOnly(t *testing.T) {
-	if got := arValueToRuby(int(7)); got != object.Integer(7) {
+	if got := arValueToRuby(int(7)); got != object.IntValue(int64(object.Integer(7))) {
 		t.Errorf("int arm got=%v", got)
 	}
-	if got := arValueToRuby(true); got != object.Bool(true) {
+	if got := arValueToRuby(true); got != object.BoolValue(bool(object.Bool(true))) {
 		t.Errorf("bool arm got=%v", got)
 	}
 	// A Go value of no mapped type degrades to nil, matching a column the driver
 	// could not classify.
-	if got := arValueToRuby(struct{}{}); got != object.NilV {
+	if got := arValueToRuby(struct{}{}); !object.IsNil(got) {
 		t.Errorf("fallback arm got=%v", got)
 	}
 	// int64 / float64 / string / []byte / nil, for completeness of the mapper.
-	if got := arValueToRuby(int64(3)); got != object.Integer(3) {
+	if got := arValueToRuby(int64(3)); got != object.IntValue(int64(object.Integer(3))) {
 		t.Errorf("int64 arm got=%v", got)
 	}
-	if got := arValueToRuby(float64(1.5)); got != object.Float(1.5) {
+	if got := arValueToRuby(float64(1.5)); got != object.FloatValue(float64(object.Float(1.5))) {
 		t.Errorf("float arm got=%v", got)
 	}
 	if s, ok := object.KindOK[*object.String](arValueToRuby("x")); !ok || s.Str() != "x" {
@@ -39,7 +39,7 @@ func TestARValueToRubyGoOnly(t *testing.T) {
 	if s, ok := object.KindOK[*object.String](arValueToRuby([]byte("ab"))); !ok || s.Str() != "ab" {
 		t.Errorf("bytes arm got=%v", arValueToRuby([]byte("ab")))
 	}
-	if got := arValueToRuby(nil); got != object.NilV {
+	if got := arValueToRuby(nil); !object.IsNil(got) {
 		t.Errorf("nil arm got=%v", got)
 	}
 }

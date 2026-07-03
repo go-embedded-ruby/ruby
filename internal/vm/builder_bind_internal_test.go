@@ -16,7 +16,7 @@ import (
 // reach directly: a plain Go nil and the object.Nil singleton (both map to Go
 // nil), plus the String and Symbol shapes.
 func TestBuilderValueOf(t *testing.T) {
-	if got := builderValueOf(nil); got != nil {
+	if got := builderValueOf(object.NilVal()); got != nil {
 		t.Errorf("plain nil: got %#v want nil", got)
 	}
 	if got := builderValueOf(object.NilVal()); got != nil {

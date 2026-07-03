@@ -81,7 +81,7 @@ func rackEnvValue(v object.Value) any {
 	{
 		__sw124 := v
 		switch {
-		case __sw124 == nil || object.IsNilObj(__sw124):
+		case object.IsNil(__sw124) || object.IsNilObj(__sw124):
 			n := __sw124
 			_ = n
 			return nil
@@ -253,7 +253,7 @@ func rackToGo(v object.Value) any {
 	{
 		__sw126 := v
 		switch {
-		case __sw126 == nil || object.IsNilObj(__sw126):
+		case object.IsNil(__sw126) || object.IsNilObj(__sw126):
 			n := __sw126
 			_ = n
 			return nil

@@ -56,7 +56,7 @@ func toMsgpack(v object.Value) msgpack.Value {
 	{
 		__sw102 := v
 		switch {
-		case __sw102 == nil:
+		case object.IsNil(__sw102):
 			n := __sw102
 			_ = n
 			return nil

@@ -70,7 +70,7 @@ func (vm *VM) registerPGErrors(mod *RClass) {
 // failure.
 func (vm *VM) pgConnect(mod *RClass, args []object.Value) object.Value {
 	io, params, user, password, hasAuth := pgConnectArgs(args)
-	if io == nil {
+	if object.IsNil(io) {
 		raise("ArgumentError", "PG.connect requires a connection: IO-like object (rbgo has no native socket yet)")
 	}
 	rw := &rubyConn{vm: vm, obj: io}

@@ -30,7 +30,7 @@ func TestAddressableWrapperMethods(t *testing.T) {
 // string nor a []string (Template#extract never produces one, so the arm is
 // exercised directly).
 func TestAnyToRubyDefault(t *testing.T) {
-	if v := anyToRuby(42); v != object.NilV {
+	if v := anyToRuby(42); !object.IsNil(v) {
 		t.Errorf("anyToRuby(int) -> %v, want nil", v)
 	}
 }

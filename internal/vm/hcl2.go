@@ -32,7 +32,7 @@ func (vm *VM) registerHCL2() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return hcl2Eval(vm, hcl2SourceArg(args[0]), nil)
+		return hcl2Eval(vm, hcl2SourceArg(args[0]), object.NilVal())
 	})
 
 	// HCL2.eval(src, ctx = nil) evaluates a document against a context Hash

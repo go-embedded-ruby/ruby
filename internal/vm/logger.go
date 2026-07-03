@@ -107,7 +107,7 @@ func (vm *VM) newLogger(logdev object.Value) *Logger {
 // nil (MRI's @logdev.nil?). A String is a file path rbgo opens for append; any
 // other value (an IOObj such as $stdout/$stderr) is written through directly.
 func (lo *Logger) bindDevice(logdev object.Value) {
-	if logdev == nil {
+	if object.IsNil(logdev) {
 		lo.l.Sink = nil
 		return
 	}
@@ -117,7 +117,7 @@ func (lo *Logger) bindDevice(logdev object.Value) {
 		case object.IsNilObj(__sw90):
 			d := object.NilObj()
 			_ = d
-			lo.dev = nil
+			lo.dev = object.NilVal()
 			lo.l.Sink = nil
 		case object.IsKind[*object.String](__sw90):
 			d := object.Kind[*object.String](__sw90)
@@ -445,9 +445,9 @@ func (vm *VM) registerLogger() {
 				arg = args[0]
 			}
 			if blk != nil {
-				return lo.add(sev, nil, arg, blk)
+				return lo.add(sev, object.NilVal(), arg, blk)
 			}
-			return lo.add(sev, arg, nil, nil)
+			return lo.add(sev, arg, object.NilVal(), nil)
 		}
 	}
 	d("debug", sevHelper(lg.DEBUG))

@@ -154,11 +154,11 @@ func TestPStoreRaisePStore(t *testing.T) {
 // TestPStoreValNil covers pstoreVal's nil branch (a nil marshal.Value becomes Ruby
 // nil), which the in-transaction Get/Delete miss paths feed.
 func TestPStoreValNil(t *testing.T) {
-	if v := pstoreVal(nil); v != object.NilV {
+	if v := pstoreVal(nil); !object.IsNil(v) {
 		t.Fatalf("pstoreVal(nil) = %v, want nil", v)
 	}
 	// A non-nil value converts through the Marshal binding.
-	if v := pstoreVal(marshal.Int{I: big.NewInt(1)}); v != object.Integer(1) {
+	if v := pstoreVal(marshal.Int{I: big.NewInt(1)}); v != object.IntValue(int64(object.Integer(1))) {
 		t.Fatalf("pstoreVal(1) = %v, want 1", v)
 	}
 }

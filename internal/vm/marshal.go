@@ -107,7 +107,7 @@ func toMarshalValue(v object.Value, seen map[object.Value]marshal.Value) marshal
 				mh.Keys = append(mh.Keys, toMarshalValue(k, seen))
 				mh.Vals = append(mh.Vals, toMarshalValue(val, seen))
 			}
-			if x.Default != nil {
+			if !object.IsNil(x.Default) {
 				mh.Default = toMarshalValue(x.Default, seen)
 			}
 			return mh

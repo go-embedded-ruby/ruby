@@ -128,7 +128,7 @@ func abbrevPrefix(pattern object.Value) (string, bool) {
 // abbrevRegexp reports whether pattern is a Ruby Regexp, returning it so the
 // rarer pattern form can be applied host-side.
 func abbrevRegexp(pattern object.Value) (object.Value, bool) {
-	if pattern == nil {
+	if object.IsNil(pattern) {
 		return object.NilVal(), false
 	}
 	if _, isNil := object.AsNilOK(pattern); isNil {

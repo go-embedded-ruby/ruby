@@ -68,7 +68,7 @@ func (vm *VM) setGVar(name string, v object.Value) {
 		name = "$0"
 	case "$ERROR_INFO", "$!":
 		if _, ok := object.AsNilOK(v); ok {
-			vm.curExc = nil
+			vm.curExc = object.NilVal()
 		} else {
 			vm.curExc = v
 		}

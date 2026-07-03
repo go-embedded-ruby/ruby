@@ -86,7 +86,7 @@ func TestENVReadWrite(t *testing.T) {
 		t.Fatalf("missing key not nil")
 	}
 	// []= with nil deletes the key, returning nil.
-	if got := callEnv(t, vm, "[]=", []object.Value{s("A"), object.NilVal()}, nil); got != object.NilV {
+	if got := callEnv(t, vm, "[]=", []object.Value{s("A"), object.NilVal()}, nil); !object.IsNil(got) {
 		t.Fatalf("[]=nil returned %v", got)
 	}
 	if _, ok := store["A"]; ok {
@@ -100,10 +100,10 @@ func TestENVPredicates(t *testing.T) {
 	callEnv(t, vm, "[]=", []object.Value{s("K"), s("v")}, nil)
 
 	for _, name := range []string{"include?", "key?", "has_key?"} {
-		if callEnv(t, vm, name, []object.Value{s("K")}, nil) != object.True {
+		if callEnv(t, vm, name, []object.Value{s("K")}, nil) != object.BoolValue(bool(object.True)) {
 			t.Fatalf("%s(K) not true", name)
 		}
-		if callEnv(t, vm, name, []object.Value{s("NOPE")}, nil) != object.False {
+		if callEnv(t, vm, name, []object.Value{s("NOPE")}, nil) != object.BoolValue(bool(object.False)) {
 			t.Fatalf("%s(NOPE) not false", name)
 		}
 	}
@@ -144,7 +144,7 @@ func TestENVDeleteAndClear(t *testing.T) {
 		t.Fatalf("delete returned %v", got)
 	}
 	// ...and nil for an absent key.
-	if got := callEnv(t, vm, "delete", []object.Value{s("ABSENT")}, nil); got != object.NilV {
+	if got := callEnv(t, vm, "delete", []object.Value{s("ABSENT")}, nil); !object.IsNil(got) {
 		t.Fatalf("delete absent returned %v", got)
 	}
 	// clear empties the whole environment and returns self.
@@ -224,7 +224,7 @@ func TestENVMergeReplaceKey(t *testing.T) {
 	if got := callEnv(t, vm, "key", []object.Value{s("a")}, nil); got.ToS() != "M1" {
 		t.Fatalf("key(a) = %v", got)
 	}
-	if got := callEnv(t, vm, "key", []object.Value{s("__nope__")}, nil); got != object.NilV {
+	if got := callEnv(t, vm, "key", []object.Value{s("__nope__")}, nil); !object.IsNil(got) {
 		t.Fatalf("key(nope) = %v", got)
 	}
 

@@ -84,7 +84,7 @@ func TestLiquidModeAndKey(t *testing.T) {
 // fall-through for an object with no direct model shape.
 func TestToLiquidGoArms(t *testing.T) {
 	vm := New(io.Discard)
-	if toLiquid(vm, nil) != nil {
+	if toLiquid(vm, object.NilVal()) != nil {
 		t.Error("go-nil should map to nil")
 	}
 	if toLiquid(vm, object.NilVal()) != nil {

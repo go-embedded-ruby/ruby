@@ -33,7 +33,7 @@ func rspecFromRuby(vm *VM, v object.Value) any {
 	{
 		__sw145 := v
 		switch {
-		case __sw145 == nil || object.IsNilObj(__sw145):
+		case object.IsNil(__sw145) || object.IsNilObj(__sw145):
 			n := __sw145
 			_ = n
 			return nil

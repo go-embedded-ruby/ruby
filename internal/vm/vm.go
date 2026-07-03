@@ -520,7 +520,7 @@ func (vm *VM) putStack(s []object.Value) {
 	// Clear so a pooled stack pins nothing for the GC.
 	s = s[:cap(s)]
 	for i := range s {
-		s[i] = nil
+		s[i] = object.NilVal()
 	}
 	vm.stackFree = append(vm.stackFree, s[:0])
 }
@@ -679,7 +679,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			vm.frameNames = vm.frameNames[:0]
 			vm.frameFiles = vm.frameFiles[:0]
 			vm.fileStack = vm.fileStack[:0]
-			result, err = nil, rerr
+			result, err = object.NilVal(), rerr
 		}
 	}()
 	// Stamp the top-level program with its path so __FILE__ in the main script (and
@@ -972,7 +972,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 
 	pc := 0
 	var handlers []handlerFrame
-	result := object.Value(object.NilV)
+	result := object.NilVal()
 	finished := false
 	// pendingSignal holds a non-exception unwind (returnSignal / breakSignal /
 	// throwSignal) that was paused to run an intervening ensure body. The ensure
@@ -1324,7 +1324,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(object.NilVal())
 			case bytecode.OpDefineClass:
 				// Bare `class B` nests into the current lexical scope (definee).
-				push(vm.defineClassIn(definee, iseq.Names[in.A], iseq.Children[in.B], nil, false))
+				push(vm.defineClassIn(definee, iseq.Names[in.A], iseq.Children[in.B], object.NilVal(), false))
 			case bytecode.OpDefineModule:
 				push(vm.defineModuleIn(definee, iseq.Names[in.A], iseq.Children[in.B], false))
 			case bytecode.OpDefineClassScoped:
@@ -1800,7 +1800,7 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 	} else {
 		super := vm.cObject
 		switch {
-		case superExpr != nil:
+		case !object.IsNil(superExpr):
 			sc, ok := object.KindOK[*RClass](superExpr)
 			if !ok || sc.isModule {
 				raise("TypeError", "superclass must be a Class (%s given)", vm.classOf(superExpr).name)

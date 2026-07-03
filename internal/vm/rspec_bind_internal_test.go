@@ -18,7 +18,7 @@ import (
 // Nil singleton, Bignum, Regexp, Class).
 func TestRSpecFromRuby(t *testing.T) {
 	vm := New(nil)
-	if v := rspecFromRuby(vm, nil); v != nil {
+	if v := rspecFromRuby(vm, object.NilVal()); v != nil {
 		t.Errorf("go-nil -> %v", v)
 	}
 	if v := rspecFromRuby(vm, object.NilVal()); v != nil {

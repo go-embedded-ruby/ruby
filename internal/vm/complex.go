@@ -189,7 +189,7 @@ func complexFloat(v object.Value) float64 {
 func (vm *VM) registerComplex() {
 	vm.cObject.define("Complex", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		re := args[0]
-		im := object.Value(object.IntValue(0))
+		im := object.IntValue(0)
 		if len(args) > 1 {
 			im = args[1]
 		}
