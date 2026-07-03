@@ -5226,6 +5226,8 @@ func isFrozen(v object.Value) bool {
 		return true
 	case *object.String:
 		return x.Frozen
+	case *Regexp:
+		return x.frozen
 	}
 	return false
 }

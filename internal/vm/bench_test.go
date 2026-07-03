@@ -58,3 +58,18 @@ func BenchmarkArrayMap(b *testing.B) {
 func BenchmarkStringConcat(b *testing.B) {
 	benchProgram(b, "s = \"\"\n10000.times { s << \"x\" }")
 }
+
+// BenchmarkInlineRegexpMatch is the focused micro-bench: a non-interpolated
+// literal /…/ used with =~ inside a hot loop. Before per-occurrence caching each
+// iteration recompiled the pattern through go-ruby-regexp; after, the literal
+// compiles once and the loop just matches.
+func BenchmarkInlineRegexpMatch(b *testing.B) {
+	benchProgram(b, "s = \"the quick brown fox 123 over 42 lazy dogs\"\nc = 0\n1000.times do\n  c += 1 if /\\w+/ =~ s\n  c += 1 if /\\d+/ =~ s\nend")
+}
+
+// BenchmarkInlineRegexpScan mirrors the strscan/tokenise workload: several inline
+// literals driving String#scan in a loop (the idiomatic "regexp literal in a hot
+// loop" the fix targets). It is the intra-rbgo speedup the fix delivers.
+func BenchmarkInlineRegexpScan(b *testing.B) {
+	benchProgram(b, "src = \"name = value; count = 42; flag = true; ratio = 3.14;\" * 2\nacc = 0\n200.times do\n  acc += src.scan(/[A-Za-z_]\\w*/).length\n  acc += src.scan(/\\d+(?:\\.\\d+)?/).length\n  acc += src.scan(/\\s+/).length\nend")
+}

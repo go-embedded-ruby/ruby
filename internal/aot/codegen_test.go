@@ -75,7 +75,7 @@ func TestCompileSupported(t *testing.T) {
 		{"getgvar", "def m = $g\nm", "m", "vm.gvar("},
 		{"splat_concat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotConcat("},
 		{"splat", "def m(a, b) = [a, *[b, b]]\nm(1, 2)", "m", "aotSplat("},
-		{"regexp", "def m = /ab/\nm", "m", "compileRegexp("},
+		{"regexp", "def m = /ab/\nm", "m", "compileLiteralRegexp("},
 		{"block_given", "def m = block_given?\nm", "m", "object.Bool(block != nil)"},
 		{"invoke_block", "def m\n  yield 1\nend\nm", "m", "aotYield(block,"},
 	}
