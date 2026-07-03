@@ -32,11 +32,9 @@ import (
 // the Shellwords module with its module functions and adds the String / Array
 // core extensions, mirroring MRI where lib/shellwords.rb defines them only when
 // loaded. It runs during VM construction after String / Array exist so the hook
-// can close over them.
+// can close over them. The featureHooks map is already created by registerPrime
+// (which runs first), so this only records the hook.
 func (vm *VM) registerShellwords() {
-	if vm.featureHooks == nil {
-		vm.featureHooks = map[string]func(){}
-	}
 	vm.featureHooks["shellwords"] = vm.installShellwords
 }
 
