@@ -1467,12 +1467,46 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				}
 				panic(vm.excError(pop()))
 			case bytecode.OpRegexp:
-				push(vm.compileRegexp(iseq.Names[in.A], iseq.Names[in.B]))
+				// Non-interpolated literal (/foo/, /\s+/i): a "once" literal in Ruby.
+				// Memoise the frozen Regexp on this occurrence's cache slot so a literal
+				// in a hot loop compiles ONCE and every evaluation returns the same
+				// (.equal?) object, instead of recompiling through the engine each time.
+				if caches == nil {
+					caches = iseqCaches(iseq)
+				}
+				if slot := &caches[pc]; slot.regexp != nil {
+					push(slot.regexp)
+				} else {
+					r := vm.compileLiteralRegexp(iseq.Names[in.A], iseq.Names[in.B])
+					slot.regexp = r
+					push(r)
+				}
 			case bytecode.OpRegexpDyn:
 				// Interpolated regexp literal: the source String built from the parts
 				// (each appended via #to_s, so the top of stack is always a String) is
-				// on the stack; compile it with the static flags.
-				push(vm.compileRegexp(pop().(*object.String).Str(), iseq.Names[in.B]))
+				// on the stack; compile it with the static flags. A plain interpolated
+				// literal rebuilds every evaluation (A == 0). A /o literal is "interpolate
+				// once": store the compiled object in the guard's cache slot (A-1) so
+				// later evaluations reuse it without re-running the interpolation.
+				r := vm.compileLiteralRegexp(pop().(*object.String).Str(), iseq.Names[in.B])
+				if in.A != 0 {
+					// /o: store into the guard's slot. The guard (OpRegexpOnce) always
+					// runs first and allocated caches, so it is non-nil here.
+					caches[in.A-1].regexp = r
+				}
+				push(r)
+			case bytecode.OpRegexpOnce:
+				// Guards a /o interpolated literal: if this occurrence was already
+				// compiled, push the memoised object and skip past the interpolation
+				// build (jump to A). Otherwise fall through to build + compile once.
+				if caches == nil {
+					caches = iseqCaches(iseq)
+				}
+				if r := caches[pc].regexp; r != nil {
+					push(r)
+					pc = in.A
+					continue
+				}
 			case bytecode.OpXStr:
 				push(object.NewString(vm.runShellCommand(iseq.Names[in.A])))
 			case bytecode.OpSplatToArray:

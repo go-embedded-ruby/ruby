@@ -76,6 +76,14 @@ type inlineCache struct {
 	serial uint64
 	class  *RClass
 	method *Method
+
+	// regexp memoises the frozen Regexp object for a regexp-literal occurrence at
+	// this instruction — a non-interpolated /…/ (OpRegexp) or an interpolate-once
+	// /…/o (OpRegexpOnce). Compiled on first evaluation and reused verbatim after,
+	// so a literal in a hot loop compiles once and repeated evaluation returns the
+	// same (.equal?) frozen object, matching MRI. Never shares the method-cache
+	// fields above: a regexp-literal instruction is never an OpSend site.
+	regexp object.Value
 }
 
 // lookupCached resolves name on recv's class, consulting and refilling the

@@ -120,8 +120,8 @@ github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMr
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546/go.mod h1:BxhqkQFCqSMeYeWOHt7sdxTSkbaSJF19dWzspICZL1Q=
 github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf h1:W5Itep0ISPPujTPpHk86NVfbk+wwQ/qvI/Jq/CEpBrw=
 github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf/go.mod h1:WkHaYzJJba7jbtNmSXYztEF9tPOWgUv32ox47v1+AZc=
-github.com/go-ruby-parser/parser v0.0.0-20260630055353-a831e712f1fd h1:4JhMDqqpXr2+lMoOKePJ7MzcoLMHmjoDsKWxz07ALEw=
-github.com/go-ruby-parser/parser v0.0.0-20260630055353-a831e712f1fd/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
+github.com/go-ruby-parser/parser v0.0.0-20260703101519-9d62e7631559 h1:ZApKFB12ILZ0tHqXsRolsQDus+l7MlV1LhL+saik4XA=
+github.com/go-ruby-parser/parser v0.0.0-20260703101519-9d62e7631559/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b h1:/ZN1eLOg0oH4wF8qmd6NOyB4ENYthx6wFwOpZiPhRIE=
 github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b/go.mod h1:IvW5q5Kyl5l3hrYwiHylOEmk5hpGSo7XqcmUXBHF5H0=
 github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d h1:JKIZD+pJQ64/nla4DHdzMLnc4/v45MyYwnjACwS6dyM=

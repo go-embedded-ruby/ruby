@@ -89,8 +89,8 @@ const (
 	OpHashMerge             // stack acc,other → acc with other (a Hash) merged in (** splat)
 	OpSendBlockArg          // like OpSend but a &block-pass value sits on top of the args
 	OpSendArrayBlockArg     // like OpSendArray with a &block-pass value on top
-	OpRegexp                // A = Names index (source), B = Names index (flags); pushes a compiled Regexp
-	OpRegexpDyn             // B = Names index (flags); pops the interpolated source String, pushes a compiled Regexp
+	OpRegexp                // A = Names index (source), B = Names index (flags); pushes a compiled Regexp (memoised per occurrence, frozen)
+	OpRegexpDyn             // A = 0, or (for /o) 1+the cache-slot pc to store the once-compiled Regexp into; B = Names index (flags); pops the interpolated source String, pushes a compiled Regexp
 	OpTruthy                // pops a value, pushes true if it is truthy else false (normalize a === / is_a? result)
 	OpRaiseNoMatch          // pops the subject value, raises NoMatchingPatternError naming it (case/in fell through)
 	OpBinding               // pushes a Binding capturing the current frame (locals, self, definee)
@@ -119,6 +119,7 @@ const (
 	// (and the frozen prelude bytecode).
 	OpGetConstTop     // A = Names index; leading `::Name` — top-level (Object) constant only, ignoring lexical nesting
 	OpDefinedConstTop // A = Names index; "constant" if the top-level `::Name` exists, else nil
+	OpRegexpOnce      // A = target pc past the interpolation build; guards a /o literal: if the occurrence's Regexp is already memoised, push it and jump to A, else fall through to (re)build once
 )
 
 var opNames = map[Op]string{
@@ -139,7 +140,7 @@ var opNames = map[Op]string{
 	OpSplatToArray: "splat_to_array", OpConcatArray: "concat_array", OpSendArray: "send_array",
 	OpKwGiven: "kw_given", OpHashSetPair: "hash_set_pair", OpHashMerge: "hash_merge",
 	OpSendBlockArg: "send_block_arg", OpSendArrayBlockArg: "send_array_block_arg",
-	OpRegexp: "regexp", OpRegexpDyn: "regexp_dyn", OpTruthy: "truthy", OpRaiseNoMatch: "raise_no_match",
+	OpRegexp: "regexp", OpRegexpDyn: "regexp_dyn", OpRegexpOnce: "regexp_once", OpTruthy: "truthy", OpRaiseNoMatch: "raise_no_match",
 	OpBinding:            "binding",
 	OpDefineClassScoped:  "define_class_scoped",
 	OpDefineModuleScoped: "define_module_scoped",

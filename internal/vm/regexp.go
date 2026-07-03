@@ -21,6 +21,10 @@ type Regexp struct {
 	re     *onig.Regexp
 	source string
 	flags  string
+	// frozen is set on Regexps produced from a source literal (/…/, %r{…}),
+	// which Ruby 3.0+ freezes; Object#frozen? reports it. Runtime constructions
+	// (Regexp.new / Regexp.compile) leave it false, matching MRI.
+	frozen bool
 }
 
 func (r *Regexp) ToS() string {
@@ -116,6 +120,15 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 		raise("RegexpError", "%s: /%s/", err.Error(), source)
 	}
 	return &Regexp{re: re, source: source, flags: flags}
+}
+
+// compileLiteralRegexp compiles a Regexp for a source-literal occurrence and
+// marks it frozen (Ruby 3.0+ freezes regexp literals). Callers memoise the
+// result per literal occurrence so repeated evaluation returns the same object.
+func (vm *VM) compileLiteralRegexp(source, flags string) object.Value {
+	r := vm.compileRegexp(source, flags)
+	r.(*Regexp).frozen = true
+	return r
 }
 
 // Regexp option bits, matching MRI's Regexp::IGNORECASE/EXTENDED/MULTILINE.

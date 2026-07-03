@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -983,6 +984,15 @@ func escapedAt(src string, i int) bool {
 // source the parser would already have rejected upstream.
 func (c *Compiler) compileRegexpInterp(segs []regexpSeg, flags string) {
 	b := c.cur()
+	// A /o literal is "interpolate once": compile on the first evaluation, then
+	// reuse that object forever (even if the interpolated values change). A guard
+	// jumps past the string build once the occurrence is memoised; the trailing
+	// OpRegexpDyn stores into the guard's cache slot (encoded as 1+its pc).
+	once := strings.ContainsRune(flags, 'o')
+	guard := -1
+	if once {
+		guard = b.emit(bytecode.OpRegexpOnce, 0, 0)
+	}
 	b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)
 	for _, s := range segs {
 		if s.isExpr {
@@ -998,7 +1008,14 @@ func (c *Compiler) compileRegexpInterp(segs []regexpSeg, flags string) {
 		}
 		b.emit(bytecode.OpAdd, 0, 0)
 	}
-	b.emit(bytecode.OpRegexpDyn, 0, b.addName(flags))
+	dynA := 0
+	if once {
+		dynA = guard + 1 // caches[guard] is the shared once-slot (0 means "no cache")
+	}
+	b.emit(bytecode.OpRegexpDyn, dynA, b.addName(flags))
+	if once {
+		b.patch(guard, b.here())
+	}
 }
 
 // hasSplat reports whether any item is a *splat.

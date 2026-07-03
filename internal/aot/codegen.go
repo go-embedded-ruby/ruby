@@ -197,7 +197,8 @@ func (g *gen) emit(pc int) (string, bool) {
 	case bytecode.OpConcatArray:
 		return line("s%d = aotConcat(s%d, s%d)", d-2, d-2, d-1), true
 	case bytecode.OpRegexp:
-		return line("s%d = vm.compileRegexp(%q, %q)", d, g.iseq.Names[in.A], g.iseq.Names[in.B]), true
+		// Frozen, matching the interpreter's OpRegexp (Ruby 3.0+ freezes literals).
+		return line("s%d = vm.compileLiteralRegexp(%q, %q)", d, g.iseq.Names[in.A], g.iseq.Names[in.B]), true
 	case bytecode.OpBlockGiven:
 		return line("s%d = object.Bool(block != nil)", d), true
 	case bytecode.OpInvokeBlock:
