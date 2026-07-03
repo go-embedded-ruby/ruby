@@ -52,8 +52,8 @@ func TestCSVFieldToRubyDefault(t *testing.T) {
 // (a :nil_value / :empty_value substitution) round-trips unchanged.
 func TestCSVFieldToRubyObjectValue(t *testing.T) {
 	vm := New(io.Discard)
-	in := object.Integer(7)
-	if got := vm.csvFieldToRuby(in); got != object.IntValue(int64(in)) {
+	in := object.IntValue(7)
+	if got := vm.csvFieldToRuby(in); got != in {
 		t.Fatalf("csvFieldToRuby(Integer 7) = %v, want it unchanged", got)
 	}
 }

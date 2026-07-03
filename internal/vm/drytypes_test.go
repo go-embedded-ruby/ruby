@@ -152,9 +152,9 @@ func TestDryTypesArgErrors(t *testing.T) {
 // exercised through the surface above (Undefined via a nil, Bignum, Float, Symbol,
 // Time, and the pass-through for an unmapped value).
 func TestDryToGo(t *testing.T) {
-	if dryToGo(object.NilVal()) != drytypes.Undefined {
-		t.Error("nil should map to Undefined")
-	}
+	// Ruby nil maps to Go nil. (A tagged-struct object.Value can never be Go-nil,
+	// so the former Go-nil-Value=>Undefined mapping is unreachable from the Ruby
+	// surface; Undefined now only originates Go-side — see TestDryTypesDefaultFn.)
 	if dryToGo(object.NilVal()) != nil {
 		t.Error("Ruby nil should map to Go nil")
 	}

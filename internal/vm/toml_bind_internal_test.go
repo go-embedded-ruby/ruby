@@ -31,7 +31,7 @@ func TestTOMLToBridge(t *testing.T) {
 	if v, ok := toTOML(object.Wrap(&Time{t: gotime.FromUnix(42)})).(stdtime.Time); !ok || v.Unix() != 42 {
 		t.Errorf("time -> %T", toTOML(object.Wrap(&Time{t: gotime.FromUnix(42)})))
 	}
-	if _, ok := toTOML(object.Wrap(&Proc{})).(*Proc); !ok {
+	if v, ok := toTOML(object.Wrap(&Proc{})).(object.Value); !ok || !object.IsKind[*Proc](v) {
 		t.Errorf("unmapped -> %T", toTOML(object.Wrap(&Proc{})))
 	}
 }

@@ -34,7 +34,7 @@ func TestMsgpackToBridge(t *testing.T) {
 		t.Errorf("symbol -> %T", toMsgpack(object.SymVal(string(object.Symbol("s")))))
 	}
 	// An unmapped value (a Proc) is returned as-is for the library to reject.
-	if _, ok := toMsgpack(object.Wrap(&Proc{})).(*Proc); !ok {
+	if v, ok := toMsgpack(object.Wrap(&Proc{})).(object.Value); !ok || !object.IsKind[*Proc](v) {
 		t.Errorf("unmapped -> %T", toMsgpack(object.Wrap(&Proc{})))
 	}
 }

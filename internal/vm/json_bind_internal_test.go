@@ -100,33 +100,33 @@ func TestJSONBindObjBuilder(t *testing.T) {
 	// Scalar arms, each as the sole top-level value.
 	var bNull objBuilder
 	bNull.Null()
-	if bNull.Result() != object.NilV {
+	if v, ok := bNull.Result().(object.Value); !ok || !object.IsNil(v) {
 		t.Error("Null -> not NilV")
 	}
 	var bBool objBuilder
 	bBool.Bool(true)
-	if v, ok := bBool.Result().(object.Bool); !ok || !bool(v) {
+	if v, ok := bBool.Result().(object.Value); !ok || !object.IsBool(v) || !object.AsBool(v) {
 		t.Errorf("Bool -> %#v", bBool.Result())
 	}
 	var bInt objBuilder
 	bInt.Int(9)
-	if v, ok := bInt.Result().(object.Integer); !ok || int64(v) != 9 {
+	if v, ok := bInt.Result().(object.Value); !ok || !object.IsInt(v) || object.AsInt(v) != 9 {
 		t.Errorf("Int -> %#v", bInt.Result())
 	}
 	bg := new(big.Int).Exp(big.NewInt(10), big.NewInt(30), nil)
 	var bBig objBuilder
 	bBig.Big(bg)
-	if v, ok := bBig.Result().(*object.Bignum); !ok || v.I.Cmp(bg) != 0 {
+	if v, ok := bBig.Result().(object.Value); !ok || !object.IsBignum(v) || object.AsBignum(v).I.Cmp(bg) != 0 {
 		t.Errorf("Big -> %#v", bBig.Result())
 	}
 	var bFloat objBuilder
 	bFloat.Float(2.5)
-	if v, ok := bFloat.Result().(object.Float); !ok || float64(v) != 2.5 {
+	if v, ok := bFloat.Result().(object.Value); !ok || !object.IsFloat(v) || object.AsFloat(v) != 2.5 {
 		t.Errorf("Float -> %#v", bFloat.Result())
 	}
 	var bStr objBuilder
 	bStr.Str("s")
-	if v, ok := bStr.Result().(*object.String); !ok || v.Str() != "s" {
+	if v, ok := bStr.Result().(object.Value); !ok || !object.IsString(v) || object.AsString(v).Str() != "s" {
 		t.Errorf("Str -> %#v", bStr.Result())
 	}
 
@@ -141,8 +141,9 @@ func TestJSONBindObjBuilder(t *testing.T) {
 	b.Str("x")
 	b.EndArray()
 	b.EndObject()
-	h, ok := b.Result().(*object.Hash)
-	if !ok || len(h.Keys) != 1 {
+	hv, ok := b.Result().(object.Value)
+	h, hok := object.AsHashOK(hv)
+	if !ok || !hok || len(h.Keys) != 1 {
 		t.Fatalf("object -> %#v", b.Result())
 	}
 	if _, ok := object.KindOK[object.Symbol](h.Keys[0]); !ok {
@@ -160,7 +161,7 @@ func TestJSONBindObjBuilder(t *testing.T) {
 	b2.Key("s", false)
 	b2.Null()
 	b2.EndObject()
-	h2 := b2.Result().(*object.Hash)
+	h2 := object.AsHash(b2.Result().(object.Value))
 	if _, ok := object.KindOK[*object.String](h2.Keys[0]); !ok {
 		t.Errorf("string key -> %#v", h2.Keys[0])
 	}

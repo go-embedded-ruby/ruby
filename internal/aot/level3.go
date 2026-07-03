@@ -82,7 +82,7 @@ func wrapper(iseq *bytecode.ISeq, goName string) string {
 	fmt.Fprintf(&b, "func (vm *VM) %s(self object.Value, args []object.Value, block *Proc) (res object.Value) {\n", goName)
 	var kargs []string
 	for i := 0; i < iseq.NumRequired; i++ {
-		fmt.Fprintf(&b, "\ti%d, ok%d := args[%d].(object.Integer)\n", i, i, i)
+		fmt.Fprintf(&b, "\ti%d, ok%d := object.AsIntegerOK(args[%d])\n", i, i, i)
 		fmt.Fprintf(&b, "\tif !ok%d {\n\t\treturn vm.%s_l1(self, args, block)\n\t}\n", i, goName)
 		kargs = append(kargs, fmt.Sprintf("int64(i%d)", i))
 	}
@@ -114,7 +114,7 @@ func emitKernel(iseq *bytecode.ISeq, goName, rubyName string, depth []int) (stri
 
 		switch in.Op {
 		case bytecode.OpPushConst:
-			n, isInt := object.KindOK[object.Integer](iseq.Consts[in.A])
+			n, isInt := object.AsIntegerOK(iseq.Consts[in.A])
 			if !isInt {
 				return "", false
 			}

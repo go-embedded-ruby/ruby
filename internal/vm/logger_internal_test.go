@@ -883,7 +883,7 @@ func TestLoggerFormatterInspectNonValue(t *testing.T) {
 func TestLoggerFormatterInspectValue(t *testing.T) {
 	vm := New(io.Discard)
 	lf := object.Kind[*LoggerFormatter](vm.cLoggerFormatter.smethods["new"].native(vm, object.NilVal(), nil, nil))
-	if got := lf.f.Inspect(object.Integer(7)); got != "7" {
+	if got := lf.f.Inspect(object.IntValue(7)); got != "7" {
 		t.Fatalf("formatter Inspect(Integer 7) = %q, want 7", got)
 	}
 }

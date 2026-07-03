@@ -214,12 +214,10 @@ func dryToGo(v object.Value) any {
 		__sw52 := v
 		switch {
 		case object.IsNil(__sw52):
-			n := __sw52
-			_ = n
-			return drytypes.Undefined
-		case object.IsNilObj(__sw52):
-			n := object.NilObj()
-			_ = n
+			// Ruby nil maps to Go nil. (Pre-flip a Go-nil object.Value additionally
+			// meant drytypes.Undefined; a tagged-struct Value can never be Go-nil, so
+			// that sentinel is unreachable from the Ruby surface — Undefined now only
+			// ever originates on the Go side. See TestDryTypesDefaultFn.)
 			return nil
 		case object.IsBool(__sw52):
 			n := object.AsBoolV(__sw52)
