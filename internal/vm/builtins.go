@@ -1845,7 +1845,10 @@ func (vm *VM) bootstrap() {
 	// member? is an alias of include? (the Enumerable name), used by Puppet's
 	// settings initialization.
 	vm.cArray.define("member?", arrayInclude)
-	vm.cArray.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// #[] and #[]= only read args and copy element *values* into the array (or a
+	// freshly allocated result); they never retain the args slice, so the OpSend
+	// fast path may hand them the live operand-stack region (defineNR).
+	vm.cArray.defineNR("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if rng, ok := args[0].(*object.Range); ok {
 			start, length, ok := sliceRange(len(a.Elems), rng)
@@ -1875,7 +1878,7 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
-	vm.cArray.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		// Range form: a[range] = value.
 		if rng, ok := args[0].(*object.Range); ok {
@@ -1921,8 +1924,25 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each")
 		}
 		a := self.(*object.Array)
+		if blk.native != nil {
+			// A synthesized native block (e.g. &:to_s, a Go-compiled AOT closure)
+			// runs opaque Go code that could retain the args slice, so each yield
+			// gets its own fresh slice.
+			for _, e := range a.Elems {
+				vm.callBlock(blk, []object.Value{e})
+			}
+			return a
+		}
+		// An interpreted block: exec copies the yielded value into the block's env
+		// slots (or, for a *splat/auto-splat param, into a freshly built rest Array)
+		// synchronously at frame entry, before any block bytecode runs, and never
+		// aliases the passed slice. So a single 1-element scratch slice, private to
+		// this call (re-entrant each gets its own), can be reused across iterations
+		// without a capturing block observing the next iteration's overwrite.
+		scratch := make([]object.Value, 1)
 		for _, e := range a.Elems {
-			vm.callBlock(blk, []object.Value{e})
+			scratch[0] = e
+			vm.callBlock(blk, scratch)
 		}
 		return a
 	})
@@ -2594,14 +2614,17 @@ func (vm *VM) bootstrap() {
 			}
 			return h
 		}}
-	vm.cHash.define("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// #[] reads args[0] and returns a stored/default value; #[]= copies element
+	// values into the hash. Neither retains the args slice, so both take the
+	// no-copy OpSend fast path (defineNR).
+	vm.cHash.defineNR("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		if v, ok := h.Get(args[0]); ok {
 			return v
 		}
 		return vm.hashDefault(h, args[0])
 	})
-	vm.cHash.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		self.(*object.Hash).Set(args[0], args[1])
 		return args[1]
 	})

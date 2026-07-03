@@ -137,6 +137,14 @@ type Method struct {
 	// instance_methods all treat the name as absent (a call routes to
 	// method_missing → NoMethodError).
 	undefined bool
+	// nonRetaining marks a native method whose body provably does NOT retain the
+	// args slice beyond the call (it never stores the slice in a field, returns
+	// it, or hands it to something that keeps it — it only reads elements and
+	// copies element *values*). Such a method is safe to call with the caller's
+	// live operand-stack region in invokeInPlace without the defensive per-call
+	// copy. The zero value (false) is safe-by-default: an unmarked native always
+	// gets the copy. Only set via defineNR after auditing the body.
+	nonRetaining bool
 }
 
 // RClass is a class (the live, mutable method table that makes monkey-patching,
@@ -208,6 +216,16 @@ func (c *RClass) Truthy() bool    { return true }
 func (c *RClass) define(name string, fn NativeFn) {
 	c.methods[name] = &Method{name: name, native: fn, owner: c}
 	bumpMethodSerial()
+}
+
+// defineNR is define for a native whose body has been audited not to retain its
+// args slice (see Method.nonRetaining). Only the OpSend fast path (invokeInPlace)
+// reads the flag, to elide its defensive per-call args copy; every other caller
+// is unaffected. Restrict this to bodies that merely read arguments and copy
+// element values — never store, return, or forward the slice itself.
+func (c *RClass) defineNR(name string, fn NativeFn) {
+	c.define(name, fn)
+	c.methods[name].nonRetaining = true
 }
 
 // RObject is an ordinary instance: a class plus instance variables, and an
@@ -1009,6 +1027,13 @@ func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Pro
 // (e.g. Array#push stores them), so only that case copies into a fresh slice.
 func (vm *VM) invokeInPlace(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {
 	if m.native != nil {
+		// A native audited as non-retaining (Array/Hash#[], #[]=, …) consumes args
+		// synchronously without keeping the slice, so it can read the caller's live
+		// operand-stack region directly — eliding the defensive copy that every
+		// other native still gets.
+		if m.nonRetaining {
+			return vm.callNative(m, self, args, blk)
+		}
 		cp := make([]object.Value, len(args))
 		copy(cp, args)
 		return vm.callNative(m, self, cp, blk)
