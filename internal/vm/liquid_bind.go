@@ -192,10 +192,6 @@ func toLiquid(vm *VM, v object.Value) any {
 			n := __sw89
 			_ = n
 			return nil
-		case object.IsNilObj(__sw89):
-			n := object.NilObj()
-			_ = n
-			return nil
 		case object.IsBool(__sw89):
 			n := object.AsBoolV(__sw89)
 			_ = n

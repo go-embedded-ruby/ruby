@@ -131,9 +131,6 @@ func abbrevRegexp(pattern object.Value) (object.Value, bool) {
 	if object.IsNil(pattern) {
 		return object.NilVal(), false
 	}
-	if _, isNil := object.AsNilOK(pattern); isNil {
-		return object.NilVal(), false
-	}
 	if _, ok := object.KindOK[*object.String](pattern); ok {
 		return object.NilVal(), false
 	}

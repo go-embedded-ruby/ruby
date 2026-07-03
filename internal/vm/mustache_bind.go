@@ -32,10 +32,6 @@ func toMustache(vm *VM, v object.Value) mustache.Value {
 			n := __sw103
 			_ = n
 			return nil
-		case object.IsNilObj(__sw103):
-			n := object.NilObj()
-			_ = n
-			return nil
 		case object.IsBool(__sw103):
 			n := object.AsBoolV(__sw103)
 			_ = n

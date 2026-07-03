@@ -59,10 +59,6 @@ func toTOML(v object.Value) toml.Value {
 			n := __sw177
 			_ = n
 			return nil
-		case object.IsNilObj(__sw177):
-			n := object.NilObj()
-			_ = n
-			return nil
 		case object.IsBool(__sw177):
 			n := object.AsBoolV(__sw177)
 			_ = n

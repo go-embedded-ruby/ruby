@@ -141,10 +141,6 @@ func (c *yamlToCtx) conv(v object.Value) yaml.Value {
 			n := __sw187
 			_ = n
 			return nil
-		case object.IsNilObj(__sw187):
-			n := object.NilObj()
-			_ = n
-			return nil
 		case object.IsBool(__sw187):
 			n := object.AsBoolV(__sw187)
 			_ = n

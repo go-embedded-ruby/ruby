@@ -129,10 +129,6 @@ func builderValueOf(v object.Value) any {
 			n := __sw18
 			_ = n
 			return nil
-		case object.IsNilObj(__sw18):
-			n := object.NilObj()
-			_ = n
-			return nil
 		case object.IsKind[*object.String](__sw18):
 			n := object.Kind[*object.String](__sw18)
 			_ = n

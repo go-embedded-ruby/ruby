@@ -205,9 +205,6 @@ func (vm *VM) wrapVMValue(v object.Value) any {
 	if object.IsNil(v) {
 		return nil
 	}
-	if _, isNil := object.AsNilOK(v); isNil {
-		return nil
-	}
 	base := vmValue{vm: vm, v: v}
 	if vm.respondsTo(v, "dig") {
 		return vmDigValue{base}

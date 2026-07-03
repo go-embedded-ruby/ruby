@@ -30,10 +30,6 @@ func toJbuilder(vm *VM, v object.Value) any {
 			n := __sw74
 			_ = n
 			return nil
-		case object.IsNilObj(__sw74):
-			n := object.NilObj()
-			_ = n
-			return nil
 		case object.IsBool(__sw74):
 			n := object.AsBoolV(__sw74)
 			_ = n

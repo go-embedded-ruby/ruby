@@ -39,10 +39,6 @@ func commonmarkOptions(opt object.Value) *commonmark.Options {
 			v := __sw38
 			_ = v
 			return nil
-		case object.IsNilObj(__sw38):
-			v := object.NilObj()
-			_ = v
-			return nil
 		case object.IsKind[*object.Hash](__sw38):
 			v := object.Kind[*object.Hash](__sw38)
 			_ = v

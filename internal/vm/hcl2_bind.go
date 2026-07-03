@@ -100,10 +100,6 @@ func toHCL2(v object.Value) hcl2.Value {
 			n := __sw65
 			_ = n
 			return nil
-		case object.IsNilObj(__sw65):
-			n := object.NilObj()
-			_ = n
-			return nil
 		case object.IsBool(__sw65):
 			n := object.AsBoolV(__sw65)
 			_ = n

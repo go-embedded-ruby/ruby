@@ -60,10 +60,6 @@ func toMsgpack(v object.Value) msgpack.Value {
 			n := __sw102
 			_ = n
 			return nil
-		case object.IsNilObj(__sw102):
-			n := object.NilObj()
-			_ = n
-			return nil
 		case object.IsBool(__sw102):
 			n := object.AsBoolV(__sw102)
 			_ = n

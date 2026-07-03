@@ -114,11 +114,6 @@ func (lo *Logger) bindDevice(logdev object.Value) {
 	{
 		__sw90 := logdev
 		switch {
-		case object.IsNilObj(__sw90):
-			d := object.NilObj()
-			_ = d
-			lo.dev = object.NilVal()
-			lo.l.Sink = nil
 		case object.IsKind[*object.String](__sw90):
 			d := object.Kind[*object.String](__sw90)
 			_ = d
