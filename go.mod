@@ -37,6 +37,7 @@ require (
 	github.com/go-ruby-grape/grape v0.0.0-20260702151528-455377c8c7c3
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
+	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2

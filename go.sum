@@ -82,6 +82,8 @@ github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c h1:VByP5jdzov6JM
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c/go.mod h1:D4xOrc0xIiN0u0Q+KqjfKx/f7up8ekpud/syYsHTrPY=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b h1:hi8tu1lr/1cOkFMdaONWyuNGVmE9GuN8tmpUN6VxgLI=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b/go.mod h1:zPgLGk8wYhXACwDsJqxkdK09WgWbJwalPxiw6qHMGQg=
+github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5 h1:Ygv/HnlYvVmGzxTfRMuQziT0jSb0FDFA1JParkM6vq4=
+github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5/go.mod h1:EIn9QjMqN3zvyz37o1hU2Vqvqi2YTjf5mCKvSc+PMDA=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1 h1:nwISQpJLt51MbXIgwf/stz8DeHkCDY6UsPI9dpIFGWU=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
 github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3 h1:L1dfFWPEHgWSbh3tTM4bvIulVoO8CFreHga8wSqtlio=
