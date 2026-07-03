@@ -60,7 +60,7 @@ require (
 	github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b
 	github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d
 	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d
-	github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8
+	github.com/go-ruby-prime/prime v0.0.0-20260703101152-9274dca78d88
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
 	github.com/go-ruby-rack/rack v0.0.0-20260630124607-8a4f9cfcdbb5

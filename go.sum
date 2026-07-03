@@ -128,8 +128,8 @@ github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d h1:JKIZD+pJQ64/nla4D
 github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d/go.mod h1:XIYL8wT1Thvoeh7y5v9ZrL+34ySHiieu1/GyDZauULk=
 github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d h1:hH6O6QdrUlbePkqb8skhFQ0BVuMe0u1c/CXFFaVUnXg=
 github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d/go.mod h1:SIQyfiIJRKJq0OD9gWYfmvQTdJClJf8z56BsfVVw7rY=
-github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8 h1:zghkWpebo93z7Uz/BMXnLSN30ZPeLXS35Y1HPeXkUE4=
-github.com/go-ruby-prime/prime v0.0.0-20260629151744-aa26747e21a8/go.mod h1:dG/91hk8HlQ6YAdD64xiMFHTTmXjTWtapKWoG9JtcRA=
+github.com/go-ruby-prime/prime v0.0.0-20260703101152-9274dca78d88 h1:td+zp+GfoRSqG1kuNvKiX+ujC6QQwR5YsQjqeXFUofg=
+github.com/go-ruby-prime/prime v0.0.0-20260703101152-9274dca78d88/go.mod h1:dG/91hk8HlQ6YAdD64xiMFHTTmXjTWtapKWoG9JtcRA=
 github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e h1:JmbJL+0nq6HY1SX1tDBFQyo7M8JgbQ+ukwn8iLyNGfs=
 github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e/go.mod h1:tbYmHYXjnNXJCNYABDx9nWfuGBCXeKrp134bNsQeTpM=
 github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444 h1:vkMPJDpZHmu09pVxr7CFppoh1b5Kc8LkhKpxkSBoyxA=
