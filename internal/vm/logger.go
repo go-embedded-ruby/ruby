@@ -319,7 +319,7 @@ func (lo *Logger) asException(v object.Value) (lg.Exception, bool) {
 		Message: lo.vm.send(v, "message", nil, nil).ToS(),
 		Class:   lo.vm.send(v, "class", nil, nil).ToS(),
 	}
-	if bt := lo.vm.send(v, "backtrace", nil, nil); bt != nil {
+	if bt := lo.vm.send(v, "backtrace", nil, nil); !object.IsNil(bt) {
 		if arr, ok := bt.(*object.Array); ok {
 			lines := make([]string, len(arr.Elems))
 			for i, e := range arr.Elems {
@@ -343,13 +343,9 @@ func (vm *VM) classLE(c, anc *RClass) bool {
 }
 
 // isNilV reports whether v is absent — a Go nil interface (an omitted argument) or
-// the Ruby nil value.
+// the Ruby nil value. It delegates to object.IsNil, the shared nil seam.
 func isNilV(v object.Value) bool {
-	if v == nil {
-		return true
-	}
-	_, ok := v.(object.Nil)
-	return ok
+	return object.IsNil(v)
 }
 
 // registerLogger installs the Logger class (require "logger") backed by

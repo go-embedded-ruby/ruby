@@ -77,7 +77,7 @@ func toMarshalValue(v object.Value, seen map[object.Value]marshal.Value) marshal
 		if m, ok := seen[v]; ok {
 			return m
 		}
-		if x.DefaultProc != nil {
+		if !object.IsNil(x.DefaultProc) {
 			raise("TypeError", "can't dump hash with default proc")
 		}
 		mh := &marshal.Hash{}

@@ -311,3 +311,37 @@ func TestSingletons(t *testing.T) {
 		t.Fatal("singleton truthiness wrong")
 	}
 }
+
+func TestNilSeam(t *testing.T) {
+	// Nil() returns the shared nil singleton.
+	if NilVal() != NilV {
+		t.Fatalf("NilVal() = %v, want NilV", NilVal())
+	}
+	if NilVal().Truthy() {
+		t.Fatal("NilVal() must be falsy")
+	}
+
+	// IsNil folds a Go-nil Value and the Nil object together, and rejects every
+	// other value — including ones whose dynamic type is not comparable (a
+	// *Bignum holds a pointer, an Array holds a slice) to prove the NilV
+	// comparison never panics.
+	var absent Value
+	cases := []struct {
+		name string
+		v    Value
+		want bool
+	}{
+		{"go-nil", absent, true},
+		{"nil-object", NilV, true},
+		{"nil-via-constructor", NilVal(), true},
+		{"integer", Integer(0), false},
+		{"false", False, false},
+		{"bignum-ptr", &Bignum{I: big.NewInt(1)}, false},
+		{"array-slice", &Array{Elems: []Value{Integer(1)}}, false},
+	}
+	for _, c := range cases {
+		if got := IsNil(c.v); got != c.want {
+			t.Errorf("IsNil(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

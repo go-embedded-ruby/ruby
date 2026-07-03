@@ -161,7 +161,7 @@ func (vm *VM) regexpNew(args []object.Value) object.Value {
 		return vm.compileRegexp(src.Str(), flags)
 	default:
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
-		return nil
+		return object.NilVal()
 	}
 }
 
@@ -306,7 +306,7 @@ func (vm *VM) gvar(name string) object.Value {
 		name = target
 	}
 	last := vm.lastMatch
-	if last == nil {
+	if object.IsNil(last) {
 		last = object.NilV
 	}
 	if name == "$~" {

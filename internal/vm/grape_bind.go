@@ -88,7 +88,7 @@ func (vm *VM) registerGrapeRoute(cls *RClass) {
 		return object.NewString(self(v).rt.Pattern)
 	})
 	cls.define("handler", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if h := self(v).handler; h != nil {
+		if h := self(v).handler; !object.IsNil(h) {
 			return h
 		}
 		return object.NilV
@@ -112,13 +112,13 @@ func (vm *VM) registerGrapeMatch(cls *RClass) {
 		return object.Bool(self(v).m.Status == grape.StatusMethodNotAllowed)
 	})
 	cls.define("route", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if r := self(v).route; r != nil {
+		if r := self(v).route; !object.IsNil(r) {
 			return r
 		}
 		return object.NilV
 	})
 	cls.define("handler", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if h := self(v).handler; h != nil {
+		if h := self(v).handler; !object.IsNil(h) {
 			return h
 		}
 		return object.NilV

@@ -252,7 +252,7 @@ func (vm *VM) registerThreadClass() {
 		return object.NewString(t.status)
 	})
 	cThread.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if n := self.(*RThread).name; n != nil {
+		if n := self.(*RThread).name; !object.IsNil(n) {
 			return n
 		}
 		return object.NilV
@@ -350,7 +350,7 @@ func threadVarKey(k object.Value) object.Value {
 		return object.Symbol(v.Str())
 	}
 	raise("TypeError", "%s is not a symbol nor a string", k.Inspect())
-	return nil
+	return object.NilVal()
 }
 
 func (vm *VM) registerMutex() {

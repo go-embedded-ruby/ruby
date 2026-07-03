@@ -131,7 +131,7 @@ type handlerFrame struct {
 // one from the class name + message when the error did not originate from a
 // Ruby `raise` (internal raises carry no object).
 func (vm *VM) exceptionObject(e RubyError) object.Value {
-	if e.Obj != nil {
+	if !object.IsNil(e.Obj) {
 		return vm.captureBacktrace(e.Obj)
 	}
 	cls, ok := vm.consts[e.Class].(*RClass)
@@ -147,7 +147,7 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 // (preserved across re-raises); when none is stored — an internal raise whose
 // object is built only now — it snapshots the still-intact live frame stack.
 func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
-	if e.Obj != nil {
+	if !object.IsNil(e.Obj) {
 		if bt, ok := getIvar(e.Obj, backtraceIvar).(*object.Array); ok {
 			return bt.Elems
 		}
@@ -1504,7 +1504,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if caches == nil {
 					caches = iseqCaches(iseq)
 				}
-				if slot := &caches[pc]; slot.regexp != nil {
+				if slot := &caches[pc]; !object.IsNil(slot.regexp) {
 					push(slot.regexp)
 				} else {
 					r := vm.compileLiteralRegexp(iseq.Names[in.A], iseq.Names[in.B])
@@ -1532,7 +1532,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if caches == nil {
 					caches = iseqCaches(iseq)
 				}
-				if r := caches[pc].regexp; r != nil {
+				if r := caches[pc].regexp; !object.IsNil(r) {
 					push(r)
 					pc = in.A
 					continue

@@ -42,7 +42,7 @@ func (vm *VM) specialGvar(name string) (object.Value, bool) {
 	}
 	switch name {
 	case "$!":
-		if vm.curExc != nil {
+		if !object.IsNil(vm.curExc) {
 			return vm.curExc, true
 		}
 		return object.NilV, true
@@ -56,7 +56,7 @@ func (vm *VM) specialGvar(name string) (object.Value, bool) {
 	}
 	// $~, $&, $`, $' and $N fall through so the match-data resolver in gvar
 	// handles them — englishAlias only rewrote the name to the cryptic form.
-	return nil, false
+	return object.NilVal(), false
 }
 
 // setGVar stores a global, normalising the assignable program-name / error-info

@@ -779,6 +779,31 @@ var (
 	NilV  = Nil{}
 )
 
+// NilVal returns the single Ruby nil value. (It cannot be named Nil — that is
+// the value type; the name follows the IntValue / SymVal constructor style.)
+//
+// It is the constructor half of the nil seam used by the eventual migration of
+// Value from an interface to a concrete tagged struct (plan-rbgo.md §4). A
+// tagged-struct Value can never be a Go nil, so code that today produces an
+// "absent Value" as the untyped nil must instead produce the nil object. Using
+// NilVal() at those sites now — while Value is still an interface — is behaviour
+// neutral (it yields NilV, the same singleton the interpreter already uses for
+// Ruby nil) and lets the representation flip swap this one function's body
+// rather than every call site.
+func NilVal() Value { return NilV }
+
+// IsNil reports whether v is the Ruby nil value or an absent (Go nil) Value.
+//
+// It is the predicate half of the nil seam. Today, while Value is an interface,
+// a Value can be Go-nil (an "absent" sentinel) or hold the Nil singleton; both
+// read as nil, so IsNil folds them together. After Value becomes a tagged
+// struct — where a Go-nil Value no longer exists and nil is a tag — this
+// function's body changes to a single tag check while its call sites stay put.
+//
+// Comparing v against NilV never panics: NilV's dynamic type (Nil) is
+// comparable, so a v holding any other dynamic type simply compares unequal.
+func IsNil(v Value) bool { return v == nil || v == NilV }
+
 // Main is the top-level self ("main" object) used while executing the program
 // body. It is a real object with its own instance-variable table, so top-level
 // @ivars persist (and are shared with top-level method bodies, whose self is

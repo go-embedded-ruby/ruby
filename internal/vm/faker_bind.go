@@ -57,7 +57,7 @@ func (vm *VM) fakerSetRandom(r object.Value) {
 // Faker::Config.random=, or Ruby nil when none has been set (matching the gem,
 // which returns nil until the caller assigns one).
 func (vm *VM) fakerConfiguredRandom() object.Value {
-	if vm.fakerInst == nil || vm.fakerInst.random == nil {
+	if vm.fakerInst == nil || object.IsNil(vm.fakerInst.random) {
 		return object.NilV
 	}
 	return vm.fakerInst.random

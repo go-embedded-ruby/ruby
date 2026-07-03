@@ -129,13 +129,13 @@ func abbrevPrefix(pattern object.Value) (string, bool) {
 // rarer pattern form can be applied host-side.
 func abbrevRegexp(pattern object.Value) (object.Value, bool) {
 	if pattern == nil {
-		return nil, false
+		return object.NilVal(), false
 	}
 	if _, isNil := pattern.(object.Nil); isNil {
-		return nil, false
+		return object.NilVal(), false
 	}
 	if _, ok := pattern.(*object.String); ok {
-		return nil, false
+		return object.NilVal(), false
 	}
 	return pattern, true
 }
