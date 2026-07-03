@@ -80,4 +80,9 @@ jobs:
           go-version: stable
       - run: sudo apt-get update && sudo apt-get install -y qemu-user-static
       - name: Test under qemu (${{ matrix.goarch }})
-        run: GOARCH=${{ matrix.goarch }} go test -exec=${{ matrix.qemu }} ./...
+        # qemu-user emulation is ~50-100x slower than native; the heaviest lane
+        # (s390x, the slowest target) can exceed Go's default 10m test-binary
+        # timeout on the full vm suite. Give the emulated lanes generous headroom
+        # so a slow-but-correct run isn't killed as a false failure. (On real
+        # s390x silicon the same suite runs natively in seconds.)
+        run: GOARCH=${{ matrix.goarch }} go test -timeout=30m -exec=${{ matrix.qemu }} ./...
