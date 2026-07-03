@@ -217,7 +217,7 @@ func TestDryStructDirectGuards(t *testing.T) {
 
 	// attribute on a non-RClass self raises TypeError.
 	mustRaise(t, "TypeError", func() {
-		vm.dryStructAttribute(object.NilV, []object.Value{object.Symbol("x"), &DryType{t: drytypes.StrictInteger()}}, false)
+		vm.dryStructAttribute(object.NilVal(), []object.Value{object.SymVal(string(object.Symbol("x"))), object.Wrap(&DryType{t: drytypes.StrictInteger()})}, false)
 	})
 
 	// An anonymous class (empty name) gets the "Dry::Struct" fallback name and a

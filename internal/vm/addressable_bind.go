@@ -21,9 +21,9 @@ import (
 // String or nil.
 func strPtrToRuby(p *string) object.Value {
 	if p == nil {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(*p)
+	return object.Wrap(object.NewString(*p))
 }
 
 // addressableURIStr coerces a URI-ish argument (a String or an Addressable::URI
@@ -84,18 +84,18 @@ func anyMapToHash(m map[string]any) object.Value {
 	sort.Strings(keys)
 	h := object.NewHash()
 	for _, k := range keys {
-		h.Set(object.NewString(k), anyToRuby(m[k]))
+		h.Set(object.Wrap(object.NewString(k)), anyToRuby(m[k]))
 	}
-	return h
+	return object.Wrap(h)
 }
 
 // anyToRuby maps an extract value (a string or a []string) to a Ruby value.
 func anyToRuby(v any) object.Value {
 	switch x := v.(type) {
 	case string:
-		return object.NewString(x)
+		return object.Wrap(object.NewString(x))
 	case []string:
 		return strSliceToArray(x)
 	}
-	return object.NilV
+	return object.NilVal()
 }

@@ -30,7 +30,7 @@ func (b *Binding) slotOf(name string) int {
 
 func (vm *VM) registerBinding() {
 	cBinding := newClass("Binding", vm.cObject)
-	vm.consts["Binding"] = cBinding
+	vm.consts["Binding"] = object.Wrap(cBinding)
 
 	cBinding.define("eval", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.bindingEval(object.Kind[*Binding](self), args[0])
@@ -45,7 +45,7 @@ func (vm *VM) registerBinding() {
 		add := func(n string) {
 			if n != "" && !seen[n] { // skip anonymous slots (pattern subjects etc.)
 				seen[n] = true
-				elems = append(elems, object.Symbol(n))
+				elems = append(elems, object.SymVal(string(object.Symbol(n))))
 			}
 		}
 		// MRI lists local_variable_set-injected locals first (most-recent first),
@@ -56,7 +56,7 @@ func (vm *VM) registerBinding() {
 		for _, n := range b.names[:len(b.names)-len(b.added)] {
 			add(n)
 		}
-		return object.NewArrayFromSlice(elems)
+		return object.Wrap(object.NewArrayFromSlice(elems))
 	})
 	cBinding.define("local_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := object.Kind[*Binding](self)
@@ -82,7 +82,7 @@ func (vm *VM) registerBinding() {
 		return args[1]
 	})
 	cBinding.define("local_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*Binding](self).slotOf(bindingVarName(args[0])) >= 0)
+		return object.BoolValue(bool(object.Bool(object.Kind[*Binding](self).slotOf(bindingVarName(args[0])) >= 0)))
 	})
 }
 

@@ -19,7 +19,7 @@ import (
 func (vm *VM) registerHCL2() {
 	mod := newClass("HCL2", nil)
 	mod.isModule = true
-	vm.consts["HCL2"] = mod
+	vm.consts["HCL2"] = object.Wrap(mod)
 	vm.registerHCL2Errors(mod)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
@@ -71,8 +71,8 @@ func (vm *VM) registerHCL2() {
 func (vm *VM) registerHCL2Errors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("HCL2::Error", std)
-	mod.consts["Error"] = c
-	vm.consts["HCL2::Error"] = c
+	mod.consts["Error"] = object.Wrap(c)
+	vm.consts["HCL2::Error"] = object.Wrap(c)
 }
 
 // hcl2SourceArg coerces a source argument to its string: a String yields its

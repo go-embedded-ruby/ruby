@@ -86,20 +86,20 @@ func numToValue(n libmatrix.Num) object.Value {
 		// Rational "(n/d)".
 		body := strings.TrimSuffix(strings.TrimPrefix(s, "("), ")")
 		r, _ := new(big.Rat).SetString(body)
-		return &object.Rational{R: r}
+		return object.Wrap(&object.Rational{R: r})
 	}
 	if isFloatStr(s) {
 		switch {
 		case s == "Infinity":
-			return object.Float(math.Inf(1))
+			return object.FloatValue(float64(object.Float(math.Inf(1))))
 		case s == "-Infinity":
-			return object.Float(math.Inf(-1))
+			return object.FloatValue(float64(object.Float(math.Inf(-1))))
 		case s == "NaN":
-			return object.Float(math.NaN())
+			return object.FloatValue(float64(object.Float(math.NaN())))
 		}
 		f, _, _ := big.ParseFloat(s, 10, 53, big.ToNearestEven)
 		v, _ := f.Float64()
-		return object.Float(v)
+		return object.FloatValue(float64(object.Float(v)))
 	}
 	z, _ := new(big.Int).SetString(s, 10)
 	return object.NormInt(z)
@@ -121,7 +121,7 @@ func numsToArray(ns []libmatrix.Num) object.Value {
 	for i, n := range ns {
 		out[i] = numToValue(n)
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // rowsFromValue maps the Ruby [[..],[..]] (Array of Arrays) argument of
@@ -216,12 +216,12 @@ func raiseMatrixErr(err error) {
 // the matching MRI exception, then returns the wrapped Ruby value.
 func matOK(m *libmatrix.Matrix, err error) object.Value {
 	raiseMatrixErr(err)
-	return &Matrix{m: m}
+	return object.Wrap(&Matrix{m: m})
 }
 
 func vecOK(v *libmatrix.Vector, err error) object.Value {
 	raiseMatrixErr(err)
-	return &Vector{v: v}
+	return object.Wrap(&Vector{v: v})
 }
 
 // matrixOp implements the Matrix/Vector operator fast path reached from binary()
@@ -314,14 +314,14 @@ func (vm *VM) registerMatrixErrors() {
 
 	efm := newClass("ExceptionForMatrix", vm.cObject)
 	efm.isModule = true
-	vm.consts["ExceptionForMatrix"] = efm
+	vm.consts["ExceptionForMatrix"] = object.Wrap(efm)
 	vm.cExceptionForMatrix = efm
 
 	mk := func(short string) *RClass {
 		full := "ExceptionForMatrix::" + short
 		cls := newClass(full, std)
-		efm.consts[short] = cls
-		vm.consts[full] = cls
+		efm.consts[short] = object.Wrap(cls)
+		vm.consts[full] = object.Wrap(cls)
 		return cls
 	}
 	vm.cErrDimensionMismatch = mk("ErrDimensionMismatch")
@@ -335,7 +335,7 @@ func (vm *VM) registerMatrixErrors() {
 func (vm *VM) registerMatrixClass() {
 	cls := newClass("Matrix", vm.cObject)
 	vm.cMatrix = cls
-	vm.consts["Matrix"] = cls
+	vm.consts["Matrix"] = object.Wrap(cls)
 	cls.includes = append(cls.includes, vm.cExceptionForMatrix)
 
 	sm := func(name string, fn NativeFn) { cls.smethods[name] = &Method{name: name, owner: cls, native: fn} }
@@ -381,7 +381,7 @@ func (vm *VM) registerMatrixClass() {
 	})
 
 	identFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Matrix{m: libmatrix.Identity(int(object.AsInteger(args[0])))}
+		return object.Wrap(&Matrix{m: libmatrix.Identity(int(object.AsInteger(args[0])))})
 	}
 	sm("identity", identFn)
 	sm("I", identFn)
@@ -393,7 +393,7 @@ func (vm *VM) registerMatrixClass() {
 		if len(args) > 1 {
 			c = int(object.AsInteger(args[1]))
 		}
-		return &Matrix{m: libmatrix.Zero(r, c)}
+		return object.Wrap(&Matrix{m: libmatrix.Zero(r, c)})
 	})
 	sm("diagonal", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return matOK(libmatrix.Diagonal(argsToCells(args)...))
@@ -426,23 +426,23 @@ func (vm *VM) registerMatrixClass() {
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		n, ok := self(v).m.At(int(object.AsInteger(args[0])), int(object.AsInteger(args[1])))
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return numToValue(n)
 	})
 	d("row", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		vec, ok := self(v).m.Row(int(object.AsInteger(args[0])))
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
-		return &Vector{v: vec}
+		return object.Wrap(&Vector{v: vec})
 	})
 	d("column", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		vec, ok := self(v).m.Column(int(object.AsInteger(args[0])))
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
-		return &Vector{v: vec}
+		return object.Wrap(&Vector{v: vec})
 	})
 	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -474,7 +474,7 @@ func (vm *VM) registerMatrixClass() {
 		for i, r := range rows {
 			out[i] = numsToArray(r)
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 
 	d("+", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -512,11 +512,11 @@ func (vm *VM) registerMatrixClass() {
 		return matOK(self(v).m.Pow(int(object.AsInteger(args[0]))))
 	})
 	d("-@", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Matrix{m: self(v).m.Neg()}
+		return object.Wrap(&Matrix{m: self(v).m.Neg()})
 	})
 
 	transposeFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Matrix{m: self(v).m.Transpose()}
+		return object.Wrap(&Matrix{m: self(v).m.Transpose()})
 	}
 	d("transpose", transposeFn)
 	d("t", transposeFn)
@@ -551,65 +551,65 @@ func (vm *VM) registerMatrixClass() {
 		if len(args) > 0 {
 			n = int(object.AsInteger(args[0]))
 		}
-		return &Matrix{m: self(v).m.RoundEntries(n)}
+		return object.Wrap(&Matrix{m: self(v).m.RoundEntries(n)})
 	})
 
 	d("square?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.Square())
+		return object.BoolValue(bool(object.Bool(self(v).m.Square())))
 	})
 	d("zero?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.IsZero())
+		return object.BoolValue(bool(object.Bool(self(v).m.IsZero())))
 	})
 	d("diagonal?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.IsDiagonal())
+		return object.BoolValue(bool(object.Bool(self(v).m.IsDiagonal())))
 	})
 	d("symmetric?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.Symmetric())
+		return object.BoolValue(bool(object.Bool(self(v).m.Symmetric())))
 	})
 	d("lower_triangular?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.LowerTriangular())
+		return object.BoolValue(bool(object.Bool(self(v).m.LowerTriangular())))
 	})
 	d("upper_triangular?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.UpperTriangular())
+		return object.BoolValue(bool(object.Bool(self(v).m.UpperTriangular())))
 	})
 	d("singular?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		b, err := self(v).m.Singular()
 		raiseMatrixErr(err)
-		return object.Bool(b)
+		return object.BoolValue(bool(object.Bool(b)))
 	})
 	d("regular?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		b, err := self(v).m.Regular()
 		raiseMatrixErr(err)
-		return object.Bool(b)
+		return object.BoolValue(bool(object.Bool(b)))
 	})
 	d("orthogonal?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		b, err := self(v).m.Orthogonal()
 		raiseMatrixErr(err)
-		return object.Bool(b)
+		return object.BoolValue(bool(object.Bool(b)))
 	})
 
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := object.KindOK[*Matrix](args[0])
 		if !ok {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		return object.Bool(self(v).m.Eql(o.m))
+		return object.BoolValue(bool(object.Bool(self(v).m.Eql(o.m))))
 	})
 	d("eql?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := object.KindOK[*Matrix](args[0])
 		if !ok {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		return object.Bool(self(v).m.Eql(o.m))
+		return object.BoolValue(bool(object.Bool(self(v).m.Eql(o.m))))
 	})
 	d("hash", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NormInt(new(big.Int).SetUint64(self(v).m.Hash()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).m.ToS())
+		return object.Wrap(object.NewString(self(v).m.ToS()))
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).m.Inspect())
+		return object.Wrap(object.NewString(self(v).m.Inspect()))
 	})
 }
 
@@ -628,7 +628,7 @@ func matrixSlice(args []object.Value) []*libmatrix.Matrix {
 func (vm *VM) registerVectorClass() {
 	cls := newClass("Vector", vm.cObject)
 	vm.cVector = cls
-	vm.consts["Vector"] = cls
+	vm.consts["Vector"] = object.Wrap(cls)
 
 	sm := func(name string, fn NativeFn) { cls.smethods[name] = &Method{name: name, owner: cls, native: fn} }
 
@@ -646,7 +646,7 @@ func (vm *VM) registerVectorClass() {
 		}
 		ok, err := libmatrix.Independent(vs...)
 		raiseMatrixErr(err)
-		return object.Bool(ok)
+		return object.BoolValue(bool(object.Bool(ok)))
 	})
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -655,7 +655,7 @@ func (vm *VM) registerVectorClass() {
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		n, ok := self(v).v.At(int(object.AsInteger(args[0])))
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return numToValue(n)
 	})
@@ -719,21 +719,21 @@ func (vm *VM) registerVectorClass() {
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := object.KindOK[*Vector](args[0])
 		if !ok {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		return object.Bool(self(v).v.Eql(o.v))
+		return object.BoolValue(bool(object.Bool(self(v).v.Eql(o.v))))
 	})
 	d("eql?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := object.KindOK[*Vector](args[0])
 		if !ok {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		return object.Bool(self(v).v.Eql(o.v))
+		return object.BoolValue(bool(object.Bool(self(v).v.Eql(o.v))))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).v.ToS())
+		return object.Wrap(object.NewString(self(v).v.ToS()))
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).v.Inspect())
+		return object.Wrap(object.NewString(self(v).v.Inspect()))
 	})
 }

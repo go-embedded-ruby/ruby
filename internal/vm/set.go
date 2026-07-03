@@ -165,7 +165,7 @@ func (s *Set) toArray() object.Value {
 	for i, m := range src {
 		out[i] = m.(object.Value)
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // setOp implements the Set operator fast path reached from binary(): + is union
@@ -174,9 +174,9 @@ func (s *Set) toArray() object.Value {
 func setOp(op bytecode.Op, a *Set, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		return wrap(a.s.Union(setArg(b).s))
+		return object.Wrap(wrap(a.s.Union(setArg(b).s)))
 	case bytecode.OpSub:
-		return wrap(a.s.Difference(setArg(b).s))
+		return object.Wrap(wrap(a.s.Difference(setArg(b).s)))
 	}
 	return raise("NoMethodError", "undefined method '%s' for a Set", op)
 }
@@ -184,7 +184,7 @@ func setOp(op bytecode.Op, a *Set, b object.Value) object.Value {
 // registerSet installs the Set class, its constructor and instance methods.
 func (vm *VM) registerSet() {
 	vm.cSet = newClass("Set", vm.cObject)
-	vm.consts["Set"] = vm.cSet
+	vm.consts["Set"] = object.Wrap(vm.cSet)
 
 	// Set.new(enumerable=nil): empty, or seeded from an Array/Set.
 	vm.cSet.smethods["new"] = &Method{name: "new", owner: vm.cSet,
@@ -195,7 +195,7 @@ func (vm *VM) registerSet() {
 					s.seed(args[0])
 				}
 			}
-			return s
+			return object.Wrap(s)
 		}}
 	// Set[a, b, …] builds a Set from its arguments (MRI's Set.[]).
 	vm.cSet.smethods["[]"] = &Method{name: "[]", owner: vm.cSet,
@@ -204,7 +204,7 @@ func (vm *VM) registerSet() {
 			for _, a := range args {
 				s.add(a)
 			}
-			return s
+			return object.Wrap(s)
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cSet.define(name, fn) }
@@ -213,7 +213,7 @@ func (vm *VM) registerSet() {
 	addFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
 		s.add(args[0])
-		return s
+		return object.Wrap(s)
 	}
 	d("add", addFn)
 	d("<<", addFn)
@@ -221,19 +221,19 @@ func (vm *VM) registerSet() {
 	d("add?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
 		if s.s.Include(args[0]) {
-			return object.NilV
+			return object.NilVal()
 		}
 		s.add(args[0])
-		return s
+		return object.Wrap(s)
 	})
 	d("delete", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
 		s.delete(args[0])
-		return s
+		return object.Wrap(s)
 	})
 
 	includeFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.Include(args[0]))
+		return object.BoolValue(bool(object.Bool(self(v).s.Include(args[0]))))
 	}
 	d("include?", includeFn)
 	d("member?", includeFn)
@@ -247,12 +247,12 @@ func (vm *VM) registerSet() {
 	d("count", sizeFn)
 
 	d("empty?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.Empty())
+		return object.BoolValue(bool(object.Bool(self(v).s.Empty())))
 	})
 	d("clear", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self(v)
 		s.s.Clear()
-		return s
+		return object.Wrap(s)
 	})
 
 	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -261,7 +261,7 @@ func (vm *VM) registerSet() {
 		}
 		s := self(v)
 		s.each(func(m object.Value) { vm.callBlock(blk, []object.Value{m}) })
-		return s
+		return object.Wrap(s)
 	})
 	d("to_a", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self(v).toArray()
@@ -272,42 +272,42 @@ func (vm *VM) registerSet() {
 
 	unionFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return wrap(a.s.Union(b.s))
+		return object.Wrap(wrap(a.s.Union(b.s)))
 	}
 	d("|", unionFn)
 	d("union", unionFn)
 
 	interFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return wrap(a.s.Intersection(b.s))
+		return object.Wrap(wrap(a.s.Intersection(b.s)))
 	}
 	d("&", interFn)
 	d("intersection", interFn)
 
 	diffFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return wrap(a.s.Difference(b.s))
+		return object.Wrap(wrap(a.s.Difference(b.s)))
 	}
 	d("difference", diffFn)
 
 	subsetFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.SubsetQ(setArg(args[0]).s))
+		return object.BoolValue(bool(object.Bool(self(v).s.SubsetQ(setArg(args[0]).s))))
 	}
 	d("subset?", subsetFn)
 	d("<=", subsetFn)
 	d("superset?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.SupersetQ(setArg(args[0]).s))
+		return object.BoolValue(bool(object.Bool(self(v).s.SupersetQ(setArg(args[0]).s))))
 	})
 	d(">=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.SupersetQ(setArg(args[0]).s))
+		return object.BoolValue(bool(object.Bool(self(v).s.SupersetQ(setArg(args[0]).s))))
 	})
 
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		b, ok := object.KindOK[*Set](args[0])
 		if !ok {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		return object.Bool(self(v).s.EqualQ(b.s))
+		return object.BoolValue(bool(object.Bool(self(v).s.EqualQ(b.s))))
 	})
 
 	d("merge", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -315,7 +315,7 @@ func (vm *VM) registerSet() {
 		for _, a := range args {
 			s.seed(a)
 		}
-		return s
+		return object.Wrap(s)
 	})
 
 	// map / collect: yield each member, collect the block results into a new
@@ -327,7 +327,7 @@ func (vm *VM) registerSet() {
 		s := self(v)
 		out := make([]object.Value, 0, s.size())
 		s.each(func(m object.Value) { out = append(out, vm.callBlock(blk, []object.Value{m})) })
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	}
 	d("map", mapFn)
 	d("collect", mapFn)
@@ -344,7 +344,7 @@ func (vm *VM) registerSet() {
 				out.add(m)
 			}
 		})
-		return out
+		return object.Wrap(out)
 	}
 	d("select", selectFn)
 	d("filter", selectFn)
@@ -361,7 +361,7 @@ func (vm *VM) registerSet() {
 				out.add(m)
 			}
 		})
-		return out
+		return object.Wrap(out)
 	})
 
 	// find / detect: the first member (insertion order) for which the block is
@@ -377,7 +377,7 @@ func (vm *VM) registerSet() {
 				return mv
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	d("find", findFn)
 	d("detect", findFn)
@@ -390,10 +390,10 @@ func (vm *VM) registerSet() {
 		s := self(v)
 		for _, m := range s.s.ToSlice() {
 			if !vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
-				return object.False
+				return object.BoolValue(bool(object.False))
 			}
 		}
-		return object.True
+		return object.BoolValue(bool(object.True))
 	})
 
 	// any?: true when the block is truthy for some member (false on the empty set).
@@ -404,10 +404,10 @@ func (vm *VM) registerSet() {
 		s := self(v)
 		for _, m := range s.s.ToSlice() {
 			if vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
-				return object.True
+				return object.BoolValue(bool(object.True))
 			}
 		}
-		return object.False
+		return object.BoolValue(bool(object.False))
 	})
 
 	// none?: true when the block is truthy for no member (true on the empty set).
@@ -418,43 +418,43 @@ func (vm *VM) registerSet() {
 		s := self(v)
 		for _, m := range s.s.ToSlice() {
 			if vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
-				return object.False
+				return object.BoolValue(bool(object.False))
 			}
 		}
-		return object.True
+		return object.BoolValue(bool(object.True))
 	})
 
 	// ^: symmetric difference — a new Set of the members in exactly one operand.
 	d("^", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return wrap(a.s.XorSym(b.s))
+		return object.Wrap(wrap(a.s.XorSym(b.s)))
 	})
 
 	// disjoint?: true when the two sets share no member.
 	d("disjoint?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.DisjointQ(b.s))
+		return object.BoolValue(bool(object.Bool(a.s.DisjointQ(b.s))))
 	})
 	// intersect?: the negation of disjoint? (the sets share at least one member).
 	d("intersect?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.IntersectQ(b.s))
+		return object.BoolValue(bool(object.Bool(a.s.IntersectQ(b.s))))
 	})
 
 	// <: proper subset — a subset of the argument and not equal to it.
 	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.ProperSubsetQ(b.s))
+		return object.BoolValue(bool(object.Bool(a.s.ProperSubsetQ(b.s))))
 	})
 	// >: proper superset — the argument is a proper subset of the receiver.
 	d(">", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.ProperSupersetQ(b.s))
+		return object.BoolValue(bool(object.Bool(a.s.ProperSupersetQ(b.s))))
 	})
 
 	// dup / clone: a shallow copy with the same members in insertion order.
 	dupFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self(v).copy()
+		return object.Wrap(self(v).copy())
 	}
 	d("dup", dupFn)
 	d("clone", dupFn)
@@ -503,7 +503,7 @@ func (vm *VM) registerSet() {
 			acc = args[0]
 		} else {
 			if len(members) == 0 {
-				return object.NilV
+				return object.NilVal()
 			}
 			acc = members[0].(object.Value)
 			i = 1
@@ -517,10 +517,10 @@ func (vm *VM) registerSet() {
 	d("inject", reduceFn)
 
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).repr())
+		return object.Wrap(object.NewString(self(v).repr()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).repr())
+		return object.Wrap(object.NewString(self(v).repr()))
 	})
 }
 
@@ -530,7 +530,7 @@ func (vm *VM) registerSet() {
 func setExtreme(vm *VM, s *Set, want int) object.Value {
 	members := s.s.ToSlice()
 	if len(members) == 0 {
-		return object.NilV
+		return object.NilVal()
 	}
 	best := members[0].(object.Value)
 	for _, m := range members[1:] {

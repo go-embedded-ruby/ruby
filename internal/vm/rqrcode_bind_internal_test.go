@@ -24,28 +24,28 @@ func TestRQRCodeShell(t *testing.T) {
 // TestRQRCodeKeyBridges covers the to_s-default arms of rqrcodeKey, rqrcodeSym
 // and rqrcodeStr (a non-Symbol, non-String value) plus their String/Symbol arms.
 func TestRQRCodeKeyBridges(t *testing.T) {
-	if got := rqrcodeKey(object.Symbol("s")); got != "s" {
+	if got := rqrcodeKey(object.SymVal(string(object.Symbol("s")))); got != "s" {
 		t.Errorf("sym key -> %q", got)
 	}
-	if got := rqrcodeKey(object.NewString("k")); got != "k" {
+	if got := rqrcodeKey(object.Wrap(object.NewString("k"))); got != "k" {
 		t.Errorf("str key -> %q", got)
 	}
-	if got := rqrcodeKey(object.Integer(3)); got != "3" {
+	if got := rqrcodeKey(object.IntValue(int64(object.Integer(3)))); got != "3" {
 		t.Errorf("int key -> %q", got)
 	}
-	if got := rqrcodeSym(object.Symbol("h")); got != "h" {
+	if got := rqrcodeSym(object.SymVal(string(object.Symbol("h")))); got != "h" {
 		t.Errorf("sym -> %q", got)
 	}
-	if got := rqrcodeSym(object.NewString("q")); got != "q" {
+	if got := rqrcodeSym(object.Wrap(object.NewString("q"))); got != "q" {
 		t.Errorf("str sym -> %q", got)
 	}
-	if got := rqrcodeSym(object.Integer(1)); got != "1" {
+	if got := rqrcodeSym(object.IntValue(int64(object.Integer(1)))); got != "1" {
 		t.Errorf("int sym -> %q", got)
 	}
-	if got := rqrcodeStr(object.NewString("x")); got != "x" {
+	if got := rqrcodeStr(object.Wrap(object.NewString("x"))); got != "x" {
 		t.Errorf("str -> %q", got)
 	}
-	if got := rqrcodeStr(object.Integer(7)); got != "7" {
+	if got := rqrcodeStr(object.IntValue(int64(object.Integer(7)))); got != "7" {
 		t.Errorf("int str -> %q", got)
 	}
 }

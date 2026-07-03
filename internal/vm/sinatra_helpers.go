@@ -81,7 +81,7 @@ func sinatraInt(v object.Value, def int) int {
 func sinatraParamsHash(c *sinatra.Context) *object.Hash {
 	h := object.NewHash()
 	for _, p := range c.Params() {
-		h.Set(object.NewString(p.Key), rackFromGo(p.Value))
+		h.Set(object.Wrap(object.NewString(p.Key)), rackFromGo(p.Value))
 	}
 	return h
 }
@@ -130,7 +130,7 @@ func sinatraSetContentType(c *sinatra.Context, args []object.Value) {
 	charset := ""
 	if len(args) > 1 {
 		if h, ok := object.KindOK[*object.Hash](args[len(args)-1]); ok {
-			if v, ok := h.Get(object.Symbol("charset")); ok {
+			if v, ok := h.Get(object.SymVal(string(object.Symbol("charset")))); ok {
 				charset = sinatraStr(v)
 			}
 		}

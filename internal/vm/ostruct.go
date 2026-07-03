@@ -43,15 +43,15 @@ func (vm *VM) registerOstruct() {
 		os := vm.ostructFromHash(args[0])
 		h := object.NewHash()
 		for _, p := range os.ToH() {
-			h.Set(object.Symbol(p.Key.(ostruct.Symbol)), unwrapVMValue(p.Value))
+			h.Set(object.SymVal(string(object.Symbol(p.Key.(ostruct.Symbol)))), unwrapVMValue(p.Value))
 		}
-		return h
+		return object.Wrap(h)
 	})
 
 	// __data_inspect(table) -> the "#<OpenStruct k=v, ...>" string (and #to_s),
 	// each value rendered through its Ruby #inspect, matching MRI.
 	sm("__data_inspect", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.ostructFromHash(args[0]).Inspect())
+		return object.Wrap(object.NewString(vm.ostructFromHash(args[0]).Inspect()))
 	})
 
 	// __data_dig(table, *keys) -> table.dig(*keys): the first key reads the
@@ -83,7 +83,7 @@ func (vm *VM) registerOstruct() {
 	// message) when the field is absent — MRI's OpenStruct#delete_field.
 	sm("__data_delete_field", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		h := object.Kind[*object.Hash](args[0])
-		os := vm.ostructFromHash(h)
+		os := vm.ostructFromHash(object.Wrap(h))
 		v, err := os.DeleteField(symKey(args[1]))
 		if err != nil {
 			vm.raiseOstructErr(err)
@@ -100,11 +100,11 @@ func (vm *VM) registerOstruct() {
 	// nested OpenStruct, …) compare by content as MRI does.
 	sm("__data_eq", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if _, isNil := object.AsNilOK(args[1]); isNil {
-			return object.Bool(false)
+			return object.BoolValue(bool(object.Bool(false)))
 		}
 		a, b := vm.ostructFromHash(args[0]), vm.ostructFromHash(args[1])
 		if a.Len() != b.Len() {
-			return object.Bool(false)
+			return object.BoolValue(bool(object.Bool(false)))
 		}
 		eq := true
 		a.EachPair(func(k ostruct.Symbol, av any) bool {
@@ -119,7 +119,7 @@ func (vm *VM) registerOstruct() {
 			}
 			return true
 		})
-		return object.Bool(eq)
+		return object.BoolValue(bool(object.Bool(eq)))
 	})
 }
 
@@ -221,15 +221,15 @@ func (vm *VM) wrapVMValue(v object.Value) any {
 func unwrapVMValue(v any) object.Value {
 	switch t := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case vmDigValue:
 		return t.v
 	case vmValue:
 		return t.v
 	case ostruct.Symbol:
-		return object.Symbol(t)
+		return object.SymVal(string(object.Symbol(t)))
 	default:
-		return object.NilV
+		return object.NilVal()
 	}
 }
 

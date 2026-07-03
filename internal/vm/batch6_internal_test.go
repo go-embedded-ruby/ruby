@@ -70,8 +70,8 @@ func TestSequelRubyValueMapped(t *testing.T) {
 // outside the mapped set (an arbitrary object stringifies).
 func TestSequelValueDefault(t *testing.T) {
 	// A Range is not in sequelValue's mapped set, so it falls through to ToS.
-	r := &object.Range{Lo: object.Integer(1), Hi: object.Integer(3)}
-	if got := sequelValue(r); got != r.ToS() {
+	r := &object.Range{Lo: object.IntValue(int64(object.Integer(1))), Hi: object.IntValue(int64(object.Integer(3)))}
+	if got := sequelValue(object.Wrap(r)); got != r.ToS() {
 		t.Errorf("sequelValue(Range) = %v, want its ToS %q", got, r.ToS())
 	}
 }
@@ -79,7 +79,7 @@ func TestSequelValueDefault(t *testing.T) {
 // TestSequelNameDefault covers sequelName's ToS fallback for a non-Symbol,
 // non-String value.
 func TestSequelNameDefault(t *testing.T) {
-	if got := sequelName(object.Integer(42)); got != "42" {
+	if got := sequelName(object.IntValue(int64(object.Integer(42)))); got != "42" {
 		t.Errorf("sequelName(42) = %q, want 42", got)
 	}
 }
@@ -87,8 +87,8 @@ func TestSequelNameDefault(t *testing.T) {
 // TestSequelValueArray covers sequelValue's Array branch (a top-level Array value
 // -> an IN-list []sequel.Value), which the Hash-condition path does not reach.
 func TestSequelValueArray(t *testing.T) {
-	arr := &object.Array{Elems: []object.Value{object.Integer(1), object.Integer(2)}}
-	v := sequelValue(arr)
+	arr := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2)))}}
+	v := sequelValue(object.Wrap(arr))
 	vals, ok := v.([]sequel.Value)
 	if !ok || len(vals) != 2 {
 		t.Fatalf("sequelValue(Array) = %#v, want a 2-element []sequel.Value", v)
@@ -100,16 +100,16 @@ func TestSequelValueArray(t *testing.T) {
 // sequelCond rather than sequelValue.
 func TestSequelValueHash(t *testing.T) {
 	h := object.NewHash()
-	h.Set(object.Symbol("a"), object.Integer(1))
-	if _, ok := sequelValue(h).(sequel.Expr); !ok {
-		t.Errorf("sequelValue(Hash) = %T, want a sequel.Expr", sequelValue(h))
+	h.Set(object.SymVal(string(object.Symbol("a"))), object.IntValue(int64(object.Integer(1))))
+	if _, ok := sequelValue(object.Wrap(h)).(sequel.Expr); !ok {
+		t.Errorf("sequelValue(Hash) = %T, want a sequel.Expr", sequelValue(object.Wrap(h)))
 	}
 }
 
 // TestSequelIndexColsSingle covers sequelIndexCols with a single (non-Array)
 // column reference.
 func TestSequelIndexColsSingle(t *testing.T) {
-	cols := sequelIndexCols(object.Symbol("name"))
+	cols := sequelIndexCols(object.SymVal(string(object.Symbol("name"))))
 	if len(cols) != 1 || cols[0] != "name" {
 		t.Errorf("sequelIndexCols(:name) = %v, want [name]", cols)
 	}

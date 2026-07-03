@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
+	"github.com/go-embedded-ruby/ruby/internal/object"
 	"github.com/go-ruby-parser/parser"
 )
 
@@ -98,14 +99,14 @@ func TestSendVisibilityClassReceiverInstanceMethod(t *testing.T) {
 	// instance-method chain of the class's own class.
 	vm := New(io.Discard)
 	c := newClass("C", vm.cObject)
-	m := vm.findMethod(c, "itself")
+	m := vm.findMethod(object.Wrap(c), "itself")
 	if m == nil {
 		t.Fatal("expected to resolve Object#itself on a class receiver")
 	}
 	if lookupSMethod(c, "itself") != nil || m.owner == vm.cClass {
 		t.Fatalf("itself unexpectedly resolved as a class method (owner=%v)", m.owner.name)
 	}
-	if got := vm.sendVisibilityOf(c, "itself", m); got != visPublic {
+	if got := vm.sendVisibilityOf(object.Wrap(c), "itself", m); got != visPublic {
 		t.Errorf("sendVisibilityOf(class, itself) = %d, want visPublic(%d)", got, visPublic)
 	}
 }
@@ -123,11 +124,11 @@ func TestRecvDescModule(t *testing.T) {
 	vm := New(io.Discard)
 	mod := newClass("M", vm.cObject)
 	mod.isModule = true
-	if got := vm.recvDesc(mod); got != "module M" {
+	if got := vm.recvDesc(object.Wrap(mod)); got != "module M" {
 		t.Errorf("recvDesc(module) = %q, want %q", got, "module M")
 	}
 	cls := newClass("C", vm.cObject)
-	if got := vm.recvDesc(cls); got != "class C" {
+	if got := vm.recvDesc(object.Wrap(cls)); got != "class C" {
 		t.Errorf("recvDesc(class) = %q, want %q", got, "class C")
 	}
 }

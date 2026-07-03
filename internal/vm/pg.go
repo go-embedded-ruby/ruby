@@ -34,7 +34,7 @@ func (c *PGConnObj) Truthy() bool    { return true }
 func (vm *VM) registerPG() {
 	mod := newClass("PG", nil)
 	mod.isModule = true
-	vm.consts["PG"] = mod
+	vm.consts["PG"] = object.Wrap(mod)
 	vm.registerPGErrors(mod)
 	vm.registerPGConnection(mod)
 	vm.registerPGResult(mod)
@@ -56,8 +56,8 @@ func (vm *VM) registerPGErrors(mod *RClass) {
 	reg := func(simple string, super *RClass) *RClass {
 		qualified := "PG::" + simple
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	base := reg("Error", std)
@@ -86,7 +86,7 @@ func (vm *VM) pgConnect(mod *RClass, args []object.Value) object.Value {
 	if err := conn.Startup(auth); err != nil {
 		raisePGError(err)
 	}
-	return &PGConnObj{cls: pgConnClass(vm, mod), conn: conn, io: io}
+	return object.Wrap(&PGConnObj{cls: pgConnClass(vm, mod), conn: conn, io: io})
 }
 
 // pgConnClass returns the PG::Connection class.
@@ -97,8 +97,8 @@ func pgConnClass(vm *VM, mod *RClass) *RClass {
 // registerPGConnection installs PG::Connection and its query methods.
 func (vm *VM) registerPGConnection(mod *RClass) {
 	cls := newClass("PG::Connection", vm.cObject)
-	mod.consts["Connection"] = cls
-	vm.consts["PG::Connection"] = cls
+	mod.consts["Connection"] = object.Wrap(cls)
+	vm.consts["PG::Connection"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *pg.Conn { return object.Kind[*PGConnObj](v).conn }
@@ -139,7 +139,7 @@ func (vm *VM) registerPGConnection(mod *RClass) {
 		if err := self(v).Prepare(pgStringArg(args[0]), pgStringArg(args[1]), nil); err != nil {
 			raisePGError(err)
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// #exec_prepared(name, params = []) binds and runs a prepared statement.
@@ -158,23 +158,23 @@ func (vm *VM) registerPGConnection(mod *RClass) {
 	// #escape_string(s) / #escape_literal(s) / #escape_identifier(s) /
 	// #quote_ident(s) are the pure string helpers.
 	d("escape_string", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).EscapeString(pgStringArg(pgArg0(args))))
+		return object.Wrap(object.NewString(self(v).EscapeString(pgStringArg(pgArg0(args)))))
 	})
 	d("escape_literal", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).EscapeLiteral(pgStringArg(pgArg0(args))))
+		return object.Wrap(object.NewString(self(v).EscapeLiteral(pgStringArg(pgArg0(args)))))
 	})
 	d("escape_identifier", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).EscapeIdentifier(pgStringArg(pgArg0(args))))
+		return object.Wrap(object.NewString(self(v).EscapeIdentifier(pgStringArg(pgArg0(args)))))
 	})
 	d("quote_ident", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).QuoteIdent(pgStringArg(pgArg0(args))))
+		return object.Wrap(object.NewString(self(v).QuoteIdent(pgStringArg(pgArg0(args)))))
 	})
 
 	// #finish sends Terminate (PG::Connection#finish's protocol half). A write
 	// error on an already-broken connection is not actionable, so it is ignored.
 	d("finish", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		_ = self(v).Terminate()
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// #socket_io returns the injected seam object (rbgo accessor).
@@ -188,16 +188,16 @@ func (vm *VM) registerPGConnection(mod *RClass) {
 func (vm *VM) pgResultOrYield(res *pg.Result, blk *Proc) object.Value {
 	w := &PGResultObj{cls: object.Kind[*RClass](vm.consts["PG::Result"]), res: res}
 	if blk != nil {
-		return vm.callBlock(blk, []object.Value{w})
+		return vm.callBlock(blk, []object.Value{object.Wrap(w)})
 	}
-	return w
+	return object.Wrap(w)
 }
 
 // registerPGResult installs PG::Result and its accessor methods.
 func (vm *VM) registerPGResult(mod *RClass) {
 	cls := newClass("PG::Result", vm.cObject)
-	mod.consts["Result"] = cls
-	vm.consts["PG::Result"] = cls
+	mod.consts["Result"] = object.Wrap(cls)
+	vm.consts["PG::Result"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *pg.Result { return object.Kind[*PGResultObj](v).res }
@@ -218,7 +218,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 
 	// #fields returns the column names.
 	d("fields", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return pgStrings(self(v).Fields())
+		return object.Wrap(pgStrings(self(v).Fields()))
 	})
 
 	// #fname(i) returns column i's name.
@@ -227,7 +227,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 		if err != nil {
 			raise("PG::Error", "%s", err.Error())
 		}
-		return object.NewString(name)
+		return object.Wrap(object.NewString(name))
 	})
 
 	// #fnumber(name) returns the column index, or -1 if absent.
@@ -256,7 +256,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 		if err != nil {
 			raise("PG::Error", "%s", err.Error())
 		}
-		return object.Bool(null)
+		return object.BoolValue(bool(object.Bool(null)))
 	})
 
 	// #values returns every row as an Array of Arrays.
@@ -268,9 +268,9 @@ func (vm *VM) registerPGResult(mod *RClass) {
 			for j, cell := range row {
 				inner.Elems[j] = vm.pgValue(cell)
 			}
-			out.Elems[i] = inner
+			out.Elems[i] = object.Wrap(inner)
 		}
-		return out
+		return object.Wrap(out)
 	})
 
 	// #[](i) / #tuple(i) return row i as a Hash keyed by column name.
@@ -279,7 +279,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 		if err != nil {
 			raise("PG::Error", "%s", err.Error())
 		}
-		return vm.pgTuple(self(v), t)
+		return object.Wrap(vm.pgTuple(self(v), t))
 	}
 	d("[]", tupleFn)
 	d("tuple", tupleFn)
@@ -293,7 +293,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 		for i := 0; i < res.Ntuples(); i++ {
 			// Tuple(i) cannot fail for an in-range i.
 			t, _ := res.Tuple(i)
-			vm.callBlock(blk, []object.Value{vm.pgTuple(res, t)})
+			vm.callBlock(blk, []object.Value{object.Wrap(vm.pgTuple(res, t))})
 		}
 		return v
 	})
@@ -303,12 +303,12 @@ func (vm *VM) registerPGResult(mod *RClass) {
 		return object.IntValue(int64(self(v).CmdTuples()))
 	})
 	d("cmd_status", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).CmdStatus())
+		return object.Wrap(object.NewString(self(v).CmdStatus()))
 	})
 
 	// #clear is a no-op accessor (the pure Result holds no server handle).
 	d("clear", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
@@ -317,7 +317,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 func (vm *VM) pgTuple(res *pg.Result, t map[string]any) *object.Hash {
 	h := object.NewHash()
 	for _, name := range res.Fields() {
-		h.Set(object.NewString(name), vm.pgValue(t[name]))
+		h.Set(object.Wrap(object.NewString(name)), vm.pgValue(t[name]))
 	}
 	return h
 }

@@ -207,20 +207,20 @@ func sqlite3Binds(vals []object.Value) []sqlite3.Value {
 func sqlite3Value(vm *VM, v sqlite3.Value) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case int64:
 		return object.IntValue(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case []byte:
-		return object.NewStringBytesEnc(n, "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc(n, "ASCII-8BIT"))
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	}
 	// The driver only ever produces the cases above; anything else is nil.
-	return object.NilV
+	return object.NilVal()
 }
 
 // sqlite3Row maps a positional result row to a Ruby Array of values.
@@ -238,7 +238,7 @@ func sqlite3HashRow(vm *VM, row sqlite3.Row, cols []string) *object.Hash {
 	h := object.NewHash()
 	for i, c := range cols {
 		if i < len(row) {
-			h.Set(object.NewString(c), sqlite3Value(vm, row[i]))
+			h.Set(object.Wrap(object.NewString(c)), sqlite3Value(vm, row[i]))
 		}
 	}
 	return h
@@ -249,7 +249,7 @@ func sqlite3HashRow(vm *VM, row sqlite3.Row, cols []string) *object.Hash {
 func sqlite3Strings(ss []string) *object.Array {
 	arr := object.NewArrayFromSlice(make([]object.Value, len(ss)))
 	for i, s := range ss {
-		arr.Elems[i] = object.NewString(s)
+		arr.Elems[i] = object.Wrap(object.NewString(s))
 	}
 	return arr
 }
@@ -269,13 +269,13 @@ func (vm *VM) sqlite3Execute(db *sqlite3.Database, sql string, binds []sqlite3.V
 			for _, r := range rows {
 				vm.callBlock(blk, []object.Value{sqlite3RawHashRow(vm, r, cols)})
 			}
-			return object.NilV
+			return object.NilVal()
 		}
 		out := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 		for i, r := range rows {
 			out.Elems[i] = sqlite3RawHashRow(vm, r, cols)
 		}
-		return out
+		return object.Wrap(out)
 	}
 	rows, err := db.Execute(sql, binds)
 	if err != nil {
@@ -283,15 +283,15 @@ func (vm *VM) sqlite3Execute(db *sqlite3.Database, sql string, binds []sqlite3.V
 	}
 	if blk != nil {
 		for _, r := range rows {
-			vm.callBlock(blk, []object.Value{sqlite3Row(vm, r)})
+			vm.callBlock(blk, []object.Value{object.Wrap(sqlite3Row(vm, r))})
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	out := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 	for i, r := range rows {
-		out.Elems[i] = sqlite3Row(vm, r)
+		out.Elems[i] = object.Wrap(sqlite3Row(vm, r))
 	}
-	return out
+	return object.Wrap(out)
 }
 
 // sqlite3ExecuteHash runs sql through a prepared statement so both the hash rows
@@ -316,7 +316,7 @@ func sqlite3ExecuteHash(db *sqlite3.Database, sql string, binds []sqlite3.Value)
 
 // sqlite3RawHashRow builds a Ruby Hash from a positional row and its columns.
 func sqlite3RawHashRow(vm *VM, row sqlite3.Row, cols []string) object.Value {
-	return sqlite3HashRow(vm, row, cols)
+	return object.Wrap(sqlite3HashRow(vm, row, cols))
 }
 
 // sqlite3Execute2 runs sql and returns the column-name header row followed by
@@ -327,11 +327,11 @@ func (vm *VM) sqlite3Execute2(db *sqlite3.Database, sql string, binds []sqlite3.
 		raiseSQLite3Error(err)
 	}
 	out := object.NewArrayFromSlice(make([]object.Value, 0, len(rows)+1))
-	out.Elems = append(out.Elems, sqlite3Strings(cols))
+	out.Elems = append(out.Elems, object.Wrap(sqlite3Strings(cols)))
 	for _, r := range rows {
-		out.Elems = append(out.Elems, sqlite3Row(vm, r))
+		out.Elems = append(out.Elems, object.Wrap(sqlite3Row(vm, r)))
 	}
-	return out
+	return object.Wrap(out)
 }
 
 // sqlite3EmitRows returns a statement's rows, yielding to a block when one is
@@ -342,13 +342,13 @@ func (vm *VM) sqlite3EmitRows(sw *SQLite3Statement, rows []sqlite3.Row, blk *Pro
 		for _, r := range rows {
 			vm.callBlock(blk, []object.Value{vm.sqlite3StepRow(sw, r)})
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	out := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 	for i, r := range rows {
 		out.Elems[i] = vm.sqlite3StepRow(sw, r)
 	}
-	return out
+	return object.Wrap(out)
 }
 
 // sqlite3StepRow renders one row in the shape the statement's owning database
@@ -356,9 +356,9 @@ func (vm *VM) sqlite3EmitRows(sw *SQLite3Statement, rows []sqlite3.Row, blk *Pro
 // otherwise.
 func (vm *VM) sqlite3StepRow(sw *SQLite3Statement, row sqlite3.Row) object.Value {
 	if cols := sqlite3HashCols(sw); cols != nil {
-		return sqlite3HashRow(vm, row, cols)
+		return object.Wrap(sqlite3HashRow(vm, row, cols))
 	}
-	return sqlite3Row(vm, row)
+	return object.Wrap(sqlite3Row(vm, row))
 }
 
 // sqlite3HashCols returns the statement's column names when its owning database

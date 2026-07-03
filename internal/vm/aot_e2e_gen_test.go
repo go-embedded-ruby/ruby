@@ -107,7 +107,7 @@ func (vm *VM) e2eArray(self object.Value, args []object.Value, block *Proc) obje
 	s0 = l0
 	s1 = l1
 	s2 = l2
-	s0 = &object.Array{Elems: []object.Value{s0, s1, s2}}
+	s0 = object.Wrap(&object.Array{Elems: []object.Value{s0, s1, s2}})
 	return s0
 }
 
@@ -122,8 +122,8 @@ func (vm *VM) e2eNestArray(self object.Value, args []object.Value, block *Proc) 
 	s0 = l0
 	s1 = l0
 	s2 = l0
-	s1 = &object.Array{Elems: []object.Value{s1, s2}}
-	s0 = &object.Array{Elems: []object.Value{s0, s1}}
+	s1 = object.Wrap(&object.Array{Elems: []object.Value{s1, s2}})
+	s0 = object.Wrap(&object.Array{Elems: []object.Value{s0, s1}})
 	return s0
 }
 
@@ -137,7 +137,7 @@ func (vm *VM) e2eRange(self object.Value, args []object.Value, block *Proc) obje
 	var s0, s1 object.Value
 	s0 = object.IntValue(1)
 	s1 = l0
-	s0 = &object.Range{Lo: s0, Hi: s1, Exclusive: false}
+	s0 = object.Wrap(&object.Range{Lo: s0, Hi: s1, Exclusive: false})
 	return s0
 }
 
@@ -151,7 +151,7 @@ func (vm *VM) e2eRangeExcl(self object.Value, args []object.Value, block *Proc) 
 	var s0, s1 object.Value
 	s0 = object.IntValue(1)
 	s1 = l0
-	s0 = &object.Range{Lo: s0, Hi: s1, Exclusive: true}
+	s0 = object.Wrap(&object.Range{Lo: s0, Hi: s1, Exclusive: true})
 	return s0
 }
 
@@ -165,15 +165,15 @@ func (vm *VM) e2eHash(self object.Value, args []object.Value, block *Proc) objec
 	_ = args
 	_ = block
 	var s0, s1, s2, s3 object.Value
-	s0 = object.Symbol("x")
+	s0 = object.SymVal(string(object.Symbol("x")))
 	s1 = l0
-	s2 = object.Symbol("y")
+	s2 = object.SymVal(string(object.Symbol("y")))
 	s3 = l1
 	{
 		h := object.NewHash()
 		h.Set(s0, s1)
 		h.Set(s2, s3)
-		s0 = h
+		s0 = object.Wrap(h)
 	}
 	return s0
 }
@@ -188,13 +188,13 @@ func (vm *VM) e2eSplat(self object.Value, args []object.Value, block *Proc) obje
 	_ = args
 	_ = block
 	var s0, s1, s2 object.Value
-	s0 = &object.Array{Elems: []object.Value{}}
+	s0 = object.Wrap(&object.Array{Elems: []object.Value{}})
 	s1 = l0
-	s1 = &object.Array{Elems: []object.Value{s1}}
+	s1 = object.Wrap(&object.Array{Elems: []object.Value{s1}})
 	s0 = aotConcat(s0, s1)
 	s1 = l1
 	s2 = l1
-	s1 = &object.Array{Elems: []object.Value{s1, s2}}
+	s1 = object.Wrap(&object.Array{Elems: []object.Value{s1, s2}})
 	s1 = vm.aotSplat(s1)
 	s0 = aotConcat(s0, s1)
 	return s0
@@ -463,7 +463,7 @@ L3:
 	l0 = s0
 	goto L3
 L18:
-	s0 = object.NilV
+	s0 = object.NilVal()
 	s0 = l1
 	return s0
 }
@@ -544,7 +544,7 @@ L3:
 	l0 = s0
 	goto L3
 L18:
-	s0 = object.NilV
+	s0 = object.NilVal()
 	s0 = l1
 	return s0
 }
@@ -606,32 +606,48 @@ var aotE2ECases = []struct {
 	want string // reference MRI stdout (trimmed)
 }{
 	{"e2eArith", func(vm *VM) object.Value {
-		return vm.e2eArith(vm.main, []object.Value{object.Integer(20), object.Integer(6)}, nil)
+		return vm.e2eArith(vm.main, []object.Value{object.IntValue(int64(object.Integer(20))), object.IntValue(int64(object.Integer(6)))}, nil)
 	}, "def m(a, b) = a * b + a / b - a % b\np m(20, 6)\n", "121"},
 	{"e2eCmp", func(vm *VM) object.Value {
-		return vm.e2eCmp(vm.main, []object.Value{object.Integer(3), object.Integer(5)}, nil)
+		return vm.e2eCmp(vm.main, []object.Value{object.IntValue(int64(object.Integer(3))), object.IntValue(int64(object.Integer(5)))}, nil)
 	}, "def m(a, b) = a < b == (a >= b)\np m(3, 5)\n", "false"},
 	{"e2eArray", func(vm *VM) object.Value {
-		return vm.e2eArray(vm.main, []object.Value{object.Integer(1), object.Integer(2), object.Integer(3)}, nil)
+		return vm.e2eArray(vm.main, []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2))), object.IntValue(int64(object.Integer(3)))}, nil)
 	}, "def m(a, b, c) = [a, b, c]\np m(1, 2, 3)\n", "[1, 2, 3]"},
-	{"e2eNestArray", func(vm *VM) object.Value { return vm.e2eNestArray(vm.main, []object.Value{object.Integer(5)}, nil) }, "def m(a) = [a, [a, a]]\np m(5)\n", "[5, [5, 5]]"},
-	{"e2eRange", func(vm *VM) object.Value { return vm.e2eRange(vm.main, []object.Value{object.Integer(5)}, nil) }, "def m(a) = (1..a)\np m(5)\n", "1..5"},
-	{"e2eRangeExcl", func(vm *VM) object.Value { return vm.e2eRangeExcl(vm.main, []object.Value{object.Integer(5)}, nil) }, "def m(a) = (1...a)\np m(5)\n", "1...5"},
+	{"e2eNestArray", func(vm *VM) object.Value {
+		return vm.e2eNestArray(vm.main, []object.Value{object.IntValue(int64(object.Integer(5)))}, nil)
+	}, "def m(a) = [a, [a, a]]\np m(5)\n", "[5, [5, 5]]"},
+	{"e2eRange", func(vm *VM) object.Value {
+		return vm.e2eRange(vm.main, []object.Value{object.IntValue(int64(object.Integer(5)))}, nil)
+	}, "def m(a) = (1..a)\np m(5)\n", "1..5"},
+	{"e2eRangeExcl", func(vm *VM) object.Value {
+		return vm.e2eRangeExcl(vm.main, []object.Value{object.IntValue(int64(object.Integer(5)))}, nil)
+	}, "def m(a) = (1...a)\np m(5)\n", "1...5"},
 	{"e2eHash", func(vm *VM) object.Value {
-		return vm.e2eHash(vm.main, []object.Value{object.Integer(1), object.Integer(2)}, nil)
+		return vm.e2eHash(vm.main, []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2)))}, nil)
 	}, "def m(a, b) = {x: a, y: b}\np m(1, 2)\n", "{x: 1, y: 2}"},
 	{"e2eSplat", func(vm *VM) object.Value {
-		return vm.e2eSplat(vm.main, []object.Value{object.Integer(1), object.Integer(2)}, nil)
+		return vm.e2eSplat(vm.main, []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2)))}, nil)
 	}, "def m(a, b) = [a, *[b, b]]\np m(1, 2)\n", "[1, 2, 2]"},
-	{"e2eIvar", func(vm *VM) object.Value { return vm.e2eIvar(vm.main, []object.Value{object.Integer(41)}, nil) }, "def m(a)\n  @x = a\n  @x + 1\nend\np m(41)\n", "42"},
-	{"e2eFib", func(vm *VM) object.Value { return vm.e2eFib(vm.main, []object.Value{object.Integer(10)}, nil) }, "def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)\np fib(10)\n", "55"},
+	{"e2eIvar", func(vm *VM) object.Value {
+		return vm.e2eIvar(vm.main, []object.Value{object.IntValue(int64(object.Integer(41)))}, nil)
+	}, "def m(a)\n  @x = a\n  @x + 1\nend\np m(41)\n", "42"},
+	{"e2eFib", func(vm *VM) object.Value {
+		return vm.e2eFib(vm.main, []object.Value{object.IntValue(int64(object.Integer(10)))}, nil)
+	}, "def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)\np fib(10)\n", "55"},
 	{"e2eDiv", func(vm *VM) object.Value {
-		return vm.e2eDiv(vm.main, []object.Value{object.Integer(17), object.Integer(5)}, nil)
+		return vm.e2eDiv(vm.main, []object.Value{object.IntValue(int64(object.Integer(17))), object.IntValue(int64(object.Integer(5)))}, nil)
 	}, "def m(a, b) = a / b\np m(17, 5)\n", "3"},
 	{"e2eMulOverflow", func(vm *VM) object.Value {
-		return vm.e2eMulOverflow(vm.main, []object.Value{object.Integer(1000000000000), object.Integer(1000000000000)}, nil)
+		return vm.e2eMulOverflow(vm.main, []object.Value{object.IntValue(int64(object.Integer(1000000000000))), object.IntValue(int64(object.Integer(1000000000000)))}, nil)
 	}, "def m(a, b) = a * b\np m(1000000000000, 1000000000000)\n", "1000000000000000000000000"},
-	{"e2eFloatDeopt", func(vm *VM) object.Value { return vm.e2eFloatDeopt(vm.main, []object.Value{object.Float(1.5)}, nil) }, "def m(a) = a + 1\np m(1.5)\n", "2.5"},
-	{"e2eFact", func(vm *VM) object.Value { return vm.e2eFact(vm.main, []object.Value{object.Integer(10)}, nil) }, "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\np m(10)\n", "3628800"},
-	{"e2eFactBig", func(vm *VM) object.Value { return vm.e2eFactBig(vm.main, []object.Value{object.Integer(25)}, nil) }, "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\np m(25)\n", "15511210043330985984000000"},
+	{"e2eFloatDeopt", func(vm *VM) object.Value {
+		return vm.e2eFloatDeopt(vm.main, []object.Value{object.FloatValue(float64(object.Float(1.5)))}, nil)
+	}, "def m(a) = a + 1\np m(1.5)\n", "2.5"},
+	{"e2eFact", func(vm *VM) object.Value {
+		return vm.e2eFact(vm.main, []object.Value{object.IntValue(int64(object.Integer(10)))}, nil)
+	}, "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\np m(10)\n", "3628800"},
+	{"e2eFactBig", func(vm *VM) object.Value {
+		return vm.e2eFactBig(vm.main, []object.Value{object.IntValue(int64(object.Integer(25)))}, nil)
+	}, "def m(n)\n  r = 1\n  while n > 1\n    r = r * n\n    n = n - 1\n  end\n  r\nend\np m(25)\n", "15511210043330985984000000"},
 }

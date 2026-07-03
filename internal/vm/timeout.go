@@ -17,11 +17,11 @@ import (
 func (vm *VM) registerTimeout() {
 	mod := newClass("Timeout", nil)
 	mod.isModule = true
-	vm.consts["Timeout"] = mod
+	vm.consts["Timeout"] = object.Wrap(mod)
 
 	// Timeout::Error < RuntimeError, matching MRI's hierarchy so a bare rescue and
 	// `rescue Timeout::Error` both catch it.
-	mod.consts["Error"] = newClass("Timeout::Error", object.Kind[*RClass](vm.consts["RuntimeError"]))
+	mod.consts["Error"] = object.Wrap(newClass("Timeout::Error", object.Kind[*RClass](vm.consts["RuntimeError"])))
 
 	mod.smethods["timeout"] = &Method{name: "timeout", owner: mod,
 		native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -30,6 +30,6 @@ func (vm *VM) registerTimeout() {
 			}
 			// The block receives the limit (sec) as its single argument in MRI; pass
 			// nil since no deadline is enforced yet.
-			return vm.callBlock(blk, []object.Value{object.NilV})
+			return vm.callBlock(blk, []object.Value{object.NilVal()})
 		}}
 }

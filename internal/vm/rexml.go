@@ -163,13 +163,13 @@ func (n *REXMLElements) Inspect() string { return "#<REXML::Elements>" }
 func wrapNode(n rx.Node) object.Value {
 	switch x := n.(type) {
 	case *rx.Element:
-		return &REXMLElement{e: x}
+		return object.Wrap(&REXMLElement{e: x})
 	case *rx.Text:
-		return &REXMLText{t: x}
+		return object.Wrap(&REXMLText{t: x})
 	case *rx.DocType:
-		return &REXMLDocType{dt: x}
+		return object.Wrap(&REXMLDocType{dt: x})
 	}
-	return object.NilV
+	return object.NilVal()
 }
 
 // raiseREXMLParse re-raises a library parse failure as REXML::ParseException
@@ -191,7 +191,7 @@ func raiseREXMLParse(err error) {
 func (vm *VM) registerREXML() {
 	mod := newClass("REXML", vm.cObject)
 	vm.cREXML = mod
-	vm.consts["REXML"] = mod
+	vm.consts["REXML"] = object.Wrap(mod)
 
 	vm.registerREXMLError(mod)
 	vm.registerREXMLDocument(mod)
@@ -210,8 +210,8 @@ func (vm *VM) registerREXML() {
 func (vm *VM) registerREXMLError(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	pe := newClass("REXML::ParseException", std)
-	mod.consts["ParseException"] = pe
-	vm.consts["REXML::ParseException"] = pe
+	mod.consts["ParseException"] = object.Wrap(pe)
+	vm.consts["REXML::ParseException"] = object.Wrap(pe)
 	vm.cREXMLParseException = pe
 }
 
@@ -220,8 +220,8 @@ func (vm *VM) registerREXMLError(mod *RClass) {
 // to_s / write serialisers (compact by default, Pretty when an indent is given).
 func (vm *VM) registerREXMLDocument(mod *RClass) {
 	cls := newClass("REXML::Document", vm.cObject)
-	mod.consts["Document"] = cls
-	vm.consts["REXML::Document"] = cls
+	mod.consts["Document"] = object.Wrap(cls)
+	vm.consts["REXML::Document"] = object.Wrap(cls)
 	vm.cREXMLDocument = cls
 
 	// REXML::Document.new(source=nil): an empty document, or one parsed from an
@@ -230,7 +230,7 @@ func (vm *VM) registerREXMLDocument(mod *RClass) {
 	cls.smethods["new"] = &Method{name: "new", owner: cls,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			if len(args) == 0 {
-				return &REXMLDocument{d: rx.NewDocument()}
+				return object.Wrap(&REXMLDocument{d: rx.NewDocument()})
 			}
 			{
 				__sw139 := args[0]
@@ -238,13 +238,13 @@ func (vm *VM) registerREXMLDocument(mod *RClass) {
 				case object.IsNilObj(__sw139):
 					src := object.NilObj()
 					_ = src
-					return &REXMLDocument{d: rx.NewDocument()}
+					return object.Wrap(&REXMLDocument{d: rx.NewDocument()})
 				case object.IsKind[*object.String](__sw139):
 					src := object.Kind[*object.String](__sw139)
 					_ = src
 					d, err := rx.ParseDocument(src.Str())
 					raiseREXMLParse(err)
-					return &REXMLDocument{d: d}
+					return object.Wrap(&REXMLDocument{d: d})
 				case object.IsKind[*REXMLDocument](__sw139):
 					src := object.Kind[*REXMLDocument](__sw139)
 					_ = src
@@ -252,17 +252,17 @@ func (vm *VM) registerREXMLDocument(mod *RClass) {
 					if r := src.d.Root(); r != nil {
 						d.Add(r)
 					}
-					return &REXMLDocument{d: d}
+					return object.Wrap(&REXMLDocument{d: d})
 				case object.IsKind[*REXMLElement](__sw139):
 					src := object.Kind[*REXMLElement](__sw139)
 					_ = src
 					d := rx.NewDocument()
 					d.Add(src.e)
-					return &REXMLDocument{d: d}
+					return object.Wrap(&REXMLDocument{d: d})
 				}
 			}
 			raise("TypeError", "wrong argument type %s (expected String)", args[0].Inspect())
-			return object.NilV
+			return object.NilVal()
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -271,28 +271,28 @@ func (vm *VM) registerREXMLDocument(mod *RClass) {
 	d("root", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		r := doc(v).Root()
 		if r == nil {
-			return object.NilV
+			return object.NilVal()
 		}
-		return &REXMLElement{e: r}
+		return object.Wrap(&REXMLElement{e: r})
 	})
 	// doctype: the REXML::DocType node, or nil when the document has none.
 	d("doctype", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		dt := doc(v).DocType()
 		if dt == nil {
-			return object.NilV
+			return object.NilVal()
 		}
 		return wrapNode(dt)
 	})
 	// add_element(name): create and append a root element, returning it.
 	d("add_element", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &REXMLElement{e: doc(v).AddElement(strArg(args[0]))}
+		return object.Wrap(&REXMLElement{e: doc(v).AddElement(strArg(args[0]))})
 	})
 
 	// to_s / write([io], indent): serialise. With no indent (or indent -1) the
 	// compact default formatter is used; a non-negative indent selects Pretty.
 	// write writes to an io-like object (anything responding to <<) when given.
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(doc(v).ToString())
+		return object.Wrap(object.NewString(doc(v).ToString()))
 	})
 	// write(output=nil, indent=-1): MRI's Document#write — positional output
 	// (an io-like object responding to <<, or a mutable String) then indent.
@@ -303,10 +303,10 @@ func (vm *VM) registerREXMLDocument(mod *RClass) {
 	d("write", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := rexmlWriteString(doc(v), args)
 		if io := rexmlIOArg(args); !object.IsNil(io) {
-			vm.send(io, "<<", []object.Value{object.NewString(s)}, nil)
-			return object.NilV
+			vm.send(io, "<<", []object.Value{object.Wrap(object.NewString(s))}, nil)
+			return object.NilVal()
 		}
-		return object.NewString(s)
+		return object.Wrap(object.NewString(s))
 	})
 }
 
@@ -360,8 +360,8 @@ func rexmlIOArg(args []object.Value) object.Value {
 // add_element) and text mutation (add_text).
 func (vm *VM) registerREXMLElement(mod *RClass) {
 	cls := newClass("REXML::Element", vm.cObject)
-	mod.consts["Element"] = cls
-	vm.consts["REXML::Element"] = cls
+	mod.consts["Element"] = object.Wrap(cls)
+	vm.consts["REXML::Element"] = object.Wrap(cls)
 	vm.cREXMLElement = cls
 
 	// REXML::Element.new(name): a new, detached element.
@@ -371,27 +371,27 @@ func (vm *VM) registerREXMLElement(mod *RClass) {
 			if len(args) > 0 {
 				name = strArg(args[0])
 			}
-			return &REXMLElement{e: rx.NewElement(name)}
+			return object.Wrap(&REXMLElement{e: rx.NewElement(name)})
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	elem := func(v object.Value) *rx.Element { return object.Kind[*REXMLElement](v).e }
 
 	d("name", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(elem(v).Name)
+		return object.Wrap(object.NewString(elem(v).Name))
 	})
 	d("expanded_name", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(elem(v).ExpandedName())
+		return object.Wrap(object.NewString(elem(v).ExpandedName()))
 	})
 	d("text", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		e := elem(v)
 		if !e.HasText() {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewString(e.Text())
+		return object.Wrap(object.NewString(e.Text()))
 	})
 	d("attributes", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &REXMLAttributes{a: elem(v).Attributes}
+		return object.Wrap(&REXMLAttributes{a: elem(v).Attributes})
 	})
 
 	// [](key): an Integer index selects the n-th child element (0-based, MRI's
@@ -402,21 +402,21 @@ func (vm *VM) registerREXMLElement(mod *RClass) {
 			// Element#[Integer] is 0-based; the library's ElementAt is 1-based.
 			ch := e.ElementAt(int(n) + 1)
 			if ch == nil {
-				return object.NilV
+				return object.NilVal()
 			}
-			return &REXMLElement{e: ch}
+			return object.Wrap(&REXMLElement{e: ch})
 		}
 		if val, ok := e.Attr(rexmlNameArg(args[0])); ok {
-			return object.NewString(val)
+			return object.Wrap(object.NewString(val))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// elements: the REXML::Elements proxy for child-element navigation (so
 	// element.elements[path] does an XPath lookup, distinct from element[name]
 	// which reads an attribute).
 	d("elements", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &REXMLElements{e: elem(v)}
+		return object.Wrap(&REXMLElements{e: elem(v)})
 	})
 
 	// each_element([path]): yield each matching child element (all children with
@@ -430,17 +430,17 @@ func (vm *VM) registerREXMLElement(mod *RClass) {
 			kids = e.ChildElements()
 		}
 		for _, ch := range kids {
-			vm.callBlock(blk, []object.Value{&REXMLElement{e: ch}})
+			vm.callBlock(blk, []object.Value{object.Wrap(&REXMLElement{e: ch})})
 		}
 		return v
 	})
 
 	d("add_element", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &REXMLElement{e: elem(v).AddElement(strArg(args[0]))}
+		return object.Wrap(&REXMLElement{e: elem(v).AddElement(strArg(args[0]))})
 	})
 	d("add_attribute", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		elem(v).AddAttribute(strArg(args[0]), strArg(args[1]))
-		return object.NewString(strArg(args[1]))
+		return object.Wrap(object.NewString(strArg(args[1])))
 	})
 	d("add_text", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		elem(v).AddText(strArg(args[0]))
@@ -448,7 +448,7 @@ func (vm *VM) registerREXMLElement(mod *RClass) {
 	})
 
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(elementString(elem(v)))
+		return object.Wrap(object.NewString(elementString(elem(v))))
 	})
 }
 
@@ -457,8 +457,8 @@ func (vm *VM) registerREXMLElement(mod *RClass) {
 // Integer), each([path]), size and add_element.
 func (vm *VM) registerREXMLElements(mod *RClass) {
 	cls := newClass("REXML::Elements", vm.cObject)
-	mod.consts["Elements"] = cls
-	vm.consts["REXML::Elements"] = cls
+	mod.consts["Elements"] = object.Wrap(cls)
+	vm.consts["REXML::Elements"] = object.Wrap(cls)
 	vm.cREXMLElements = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -472,15 +472,15 @@ func (vm *VM) registerREXMLElements(mod *RClass) {
 			// Elements#[Integer] is 1-based, matching the library's ElementAt.
 			ch := e.ElementAt(int(n))
 			if ch == nil {
-				return object.NilV
+				return object.NilVal()
 			}
-			return &REXMLElement{e: ch}
+			return object.Wrap(&REXMLElement{e: ch})
 		}
 		ch := e.FirstElement(strArg(args[0]))
 		if ch == nil {
-			return object.NilV
+			return object.NilVal()
 		}
-		return &REXMLElement{e: ch}
+		return object.Wrap(&REXMLElement{e: ch})
 	})
 
 	// each([path]): yield each matching child element (all children with no path).
@@ -493,7 +493,7 @@ func (vm *VM) registerREXMLElements(mod *RClass) {
 			kids = e.ChildElements()
 		}
 		for _, ch := range kids {
-			vm.callBlock(blk, []object.Value{&REXMLElement{e: ch}})
+			vm.callBlock(blk, []object.Value{object.Wrap(&REXMLElement{e: ch})})
 		}
 		return v
 	})
@@ -502,10 +502,10 @@ func (vm *VM) registerREXMLElements(mod *RClass) {
 		return object.IntValue(int64(len(owner(v).ChildElements())))
 	})
 	d("add_element", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &REXMLElement{e: owner(v).AddElement(strArg(args[0]))}
+		return object.Wrap(&REXMLElement{e: owner(v).AddElement(strArg(args[0]))})
 	})
 	d("add", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &REXMLElement{e: owner(v).AddElement(strArg(args[0]))}
+		return object.Wrap(&REXMLElement{e: owner(v).AddElement(strArg(args[0]))})
 	})
 }
 
@@ -531,8 +531,8 @@ func rexmlNameArg(v object.Value) string {
 // delete, size and iteration (each / each_attribute).
 func (vm *VM) registerREXMLAttributes(mod *RClass) {
 	cls := newClass("REXML::Attributes", vm.cObject)
-	mod.consts["Attributes"] = cls
-	vm.consts["REXML::Attributes"] = cls
+	mod.consts["Attributes"] = object.Wrap(cls)
+	vm.consts["REXML::Attributes"] = object.Wrap(cls)
 	vm.cREXMLAttributes = cls
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -540,9 +540,9 @@ func (vm *VM) registerREXMLAttributes(mod *RClass) {
 
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if val, ok := attrs(v).Get(rexmlNameArg(args[0])); ok {
-			return object.NewString(val)
+			return object.Wrap(object.NewString(val))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("[]=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		attrs(v).Set(rexmlNameArg(args[0]), strArg(args[1]))
@@ -562,14 +562,14 @@ func (vm *VM) registerREXMLAttributes(mod *RClass) {
 	// the receiver. (each_attribute yields the attribute name/value as MRI does.)
 	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		attrs(v).Each(func(a *rx.Attribute) {
-			pair := object.NewArray(object.NewString(a.QName()), object.NewString(a.Value))
-			vm.callBlock(blk, []object.Value{pair})
+			pair := object.NewArray(object.Wrap(object.NewString(a.QName())), object.Wrap(object.NewString(a.Value)))
+			vm.callBlock(blk, []object.Value{object.Wrap(pair)})
 		})
 		return v
 	})
 	d("each_attribute", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		attrs(v).Each(func(a *rx.Attribute) {
-			vm.callBlock(blk, []object.Value{object.NewString(a.Value)})
+			vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(a.Value))})
 		})
 		return v
 	})
@@ -580,56 +580,56 @@ func (vm *VM) registerREXMLAttributes(mod *RClass) {
 func (vm *VM) registerREXMLLeafNodes(mod *RClass) {
 	// REXML::Text
 	text := newClass("REXML::Text", vm.cObject)
-	mod.consts["Text"] = text
-	vm.consts["REXML::Text"] = text
+	mod.consts["Text"] = object.Wrap(text)
+	vm.consts["REXML::Text"] = object.Wrap(text)
 	vm.cREXMLText = text
 	text.smethods["new"] = &Method{name: "new", owner: text,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return &REXMLText{t: rx.NewText(strArg(args[0]))}
+			return object.Wrap(&REXMLText{t: rx.NewText(strArg(args[0]))})
 		}}
 	text.define("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*REXMLText](v).t.String())
+		return object.Wrap(object.NewString(object.Kind[*REXMLText](v).t.String()))
 	})
 	textValue := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*REXMLText](v).t.Val())
+		return object.Wrap(object.NewString(object.Kind[*REXMLText](v).t.Val()))
 	}
 	text.define("value", textValue)
 	text.define("to_string", textValue)
 
 	// REXML::Comment
 	comment := newClass("REXML::Comment", vm.cObject)
-	mod.consts["Comment"] = comment
-	vm.consts["REXML::Comment"] = comment
+	mod.consts["Comment"] = object.Wrap(comment)
+	vm.consts["REXML::Comment"] = object.Wrap(comment)
 	vm.cREXMLComment = comment
 	comment.smethods["new"] = &Method{name: "new", owner: comment,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return &REXMLComment{c: &rx.Comment{Value: strArg(args[0])}}
+			return object.Wrap(&REXMLComment{c: &rx.Comment{Value: strArg(args[0])}})
 		}}
 	commentVal := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*REXMLComment](v).c.Value)
+		return object.Wrap(object.NewString(object.Kind[*REXMLComment](v).c.Value))
 	}
 	comment.define("to_s", commentVal)
 	comment.define("string", commentVal)
 
 	// REXML::CData
 	cdata := newClass("REXML::CData", vm.cObject)
-	mod.consts["CData"] = cdata
-	vm.consts["REXML::CData"] = cdata
+	mod.consts["CData"] = object.Wrap(cdata)
+	vm.consts["REXML::CData"] = object.Wrap(cdata)
 	vm.cREXMLCData = cdata
 	cdata.smethods["new"] = &Method{name: "new", owner: cdata,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return &REXMLCData{c: &rx.CData{Value: strArg(args[0])}}
+			return object.Wrap(&REXMLCData{c: &rx.CData{Value: strArg(args[0])}})
 		}}
 	cdataVal := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*REXMLCData](v).c.Value)
+		return object.Wrap(object.NewString(object.Kind[*REXMLCData](v).c.Value))
 	}
 	cdata.define("to_s", cdataVal)
 	cdata.define("value", cdataVal)
 
 	// REXML::Instruction
 	instr := newClass("REXML::Instruction", vm.cObject)
-	mod.consts["Instruction"] = instr
-	vm.consts["REXML::Instruction"] = instr
+	mod.consts["Instruction"] = object.Wrap(instr)
+	vm.consts["REXML::Instruction"] = object.Wrap(instr)
 	vm.cREXMLInstruction = instr
 	instr.smethods["new"] = &Method{name: "new", owner: instr,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -638,25 +638,25 @@ func (vm *VM) registerREXMLLeafNodes(mod *RClass) {
 			if len(args) > 1 {
 				content = strArg(args[1])
 			}
-			return &REXMLInstruction{i: &rx.Instruction{Target: target, Content: content}}
+			return object.Wrap(&REXMLInstruction{i: &rx.Instruction{Target: target, Content: content}})
 		}}
 	instr.define("target", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*REXMLInstruction](v).i.Target)
+		return object.Wrap(object.NewString(object.Kind[*REXMLInstruction](v).i.Target))
 	})
 	instr.define("content", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*REXMLInstruction](v).i.Content)
+		return object.Wrap(object.NewString(object.Kind[*REXMLInstruction](v).i.Content))
 	})
 	instr.define("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*REXMLInstruction](v).ToS())
+		return object.Wrap(object.NewString(object.Kind[*REXMLInstruction](v).ToS()))
 	})
 
 	// REXML::DocType
 	doctype := newClass("REXML::DocType", vm.cObject)
-	mod.consts["DocType"] = doctype
-	vm.consts["REXML::DocType"] = doctype
+	mod.consts["DocType"] = object.Wrap(doctype)
+	vm.consts["REXML::DocType"] = object.Wrap(doctype)
 	vm.cREXMLDocType = doctype
 	doctype.define("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*REXMLDocType](v).ToS())
+		return object.Wrap(object.NewString(object.Kind[*REXMLDocType](v).ToS()))
 	})
 }
 
@@ -666,12 +666,12 @@ func (vm *VM) registerREXMLLeafNodes(mod *RClass) {
 // pretty rendering to io (anything responding to <<) and #write(doc) returns it.
 func (vm *VM) registerREXMLFormatters(mod *RClass) {
 	formatters := newClass("REXML::Formatters", vm.cObject)
-	mod.consts["Formatters"] = formatters
-	vm.consts["REXML::Formatters"] = formatters
+	mod.consts["Formatters"] = object.Wrap(formatters)
+	vm.consts["REXML::Formatters"] = object.Wrap(formatters)
 
 	pretty := newClass("REXML::Formatters::Pretty", vm.cObject)
-	formatters.consts["Pretty"] = pretty
-	vm.consts["REXML::Formatters::Pretty"] = pretty
+	formatters.consts["Pretty"] = object.Wrap(pretty)
+	vm.consts["REXML::Formatters::Pretty"] = object.Wrap(pretty)
 	vm.cREXMLPretty = pretty
 
 	// Pretty.new(indentation=2): store the indent in @indentation. A new Pretty
@@ -687,7 +687,7 @@ func (vm *VM) registerREXMLFormatters(mod *RClass) {
 			}
 			obj := &RObject{class: pretty, ivars: map[string]object.Value{}}
 			obj.ivars["@indentation"] = object.IntValue(int64(indent))
-			return obj
+			return object.Wrap(obj)
 		}}
 
 	// Pretty#write(doc, output=nil): render doc with the stored indent. With an
@@ -703,10 +703,10 @@ func (vm *VM) registerREXMLFormatters(mod *RClass) {
 		}
 		s := rx.PrettyString(dv.d, indent)
 		if len(args) > 1 {
-			vm.send(args[1], "<<", []object.Value{object.NewString(s)}, nil)
+			vm.send(args[1], "<<", []object.Value{object.Wrap(object.NewString(s))}, nil)
 			return args[1]
 		}
-		return object.NewString(s)
+		return object.Wrap(object.NewString(s))
 	})
 }
 
@@ -716,8 +716,8 @@ func (vm *VM) registerREXMLFormatters(mod *RClass) {
 // (a String) via REXML's AttrValue; an element step yields the wrapped element.
 func (vm *VM) registerREXMLXPath(mod *RClass) {
 	xpath := newClass("REXML::XPath", vm.cObject)
-	mod.consts["XPath"] = xpath
-	vm.consts["REXML::XPath"] = xpath
+	mod.consts["XPath"] = object.Wrap(xpath)
+	vm.consts["REXML::XPath"] = object.Wrap(xpath)
 	vm.cREXMLXPath = xpath
 
 	sm := func(name string, fn NativeFn) { xpath.smethods[name] = &Method{name: name, owner: xpath, native: fn} }
@@ -729,7 +729,7 @@ func (vm *VM) registerREXMLXPath(mod *RClass) {
 		path := strArg(args[1])
 		n := rx.XPathFirst(ctx, path)
 		if n == nil {
-			return object.NilV
+			return object.NilVal()
 		}
 		return rexmlMatchValue(n)
 	})
@@ -741,7 +741,7 @@ func (vm *VM) registerREXMLXPath(mod *RClass) {
 		for _, n := range rx.XPathMatch(ctx, path) {
 			out = append(out, rexmlMatchValue(n))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 	// XPath.each(node, path) { |n| ... }: yield each match, returning nil.
 	sm("each", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
@@ -750,7 +750,7 @@ func (vm *VM) registerREXMLXPath(mod *RClass) {
 		rx.XPathEach(ctx, path, func(n rx.Node) {
 			vm.callBlock(blk, []object.Value{rexmlMatchValue(n)})
 		})
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
@@ -772,5 +772,5 @@ func rexmlMatchValue(n rx.Node) object.Value {
 	if w := wrapNode(n); w != object.NilV {
 		return w
 	}
-	return object.NewString(rx.AttrValue(n))
+	return object.Wrap(object.NewString(rx.AttrValue(n)))
 }

@@ -21,10 +21,10 @@ func TestJbuilderToBridge(t *testing.T) {
 		t.Errorf("plain nil: got %#v want nil", got)
 	}
 	inner := &Jbuilder{b: jbuilder.New()}
-	if got := toJbuilder(vm, inner); got != inner.b {
+	if got := toJbuilder(vm, object.Wrap(inner)); got != inner.b {
 		t.Errorf("nested Jbuilder: got %#v want the inner builder", got)
 	}
-	if got := toJbuilder(vm, object.NilV); got != nil {
+	if got := toJbuilder(vm, object.NilVal()); got != nil {
 		t.Errorf("object.Nil: got %#v want nil", got)
 	}
 }
@@ -40,7 +40,7 @@ func TestJbuilderShell(t *testing.T) {
 // TestJbuilderNameDefault covers jbuilderName's fall-through (a non-Symbol,
 // non-String key rendered via to_s).
 func TestJbuilderNameDefault(t *testing.T) {
-	if got := jbuilderName(object.Integer(5)); got != "5" {
+	if got := jbuilderName(object.IntValue(int64(object.Integer(5)))); got != "5" {
 		t.Errorf("integer key: got %q want \"5\"", got)
 	}
 }

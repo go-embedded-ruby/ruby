@@ -141,7 +141,7 @@ func (lo *Logger) ioSink(s string) {
 		return
 	}
 	// A host that rebound the device to an arbitrary object: route through #write.
-	lo.vm.send(lo.dev, "write", []object.Value{object.NewString(s)}, nil)
+	lo.vm.send(lo.dev, "write", []object.Value{object.Wrap(object.NewString(s))}, nil)
 }
 
 // fileSink applies any due rotation, then appends s to the log file. The library
@@ -264,7 +264,7 @@ func (lo *Logger) setPeriod(s string) {
 // the default), exactly as MRI's add does.
 func (lo *Logger) add(sev lg.Severity, message object.Value, progname object.Value, blk *Proc) object.Value {
 	if lo.l.Sink == nil || sev < lo.l.Level {
-		return object.True
+		return object.BoolValue(bool(object.True))
 	}
 	// progname ||= @progname (resolved first, as MRI does).
 	prog := lo.progDefault
@@ -279,16 +279,16 @@ func (lo *Logger) add(sev lg.Severity, message object.Value, progname object.Val
 		if blk != nil {
 			raw = lo.vm.callBlock(blk, nil)
 		} else {
-			raw = object.NewString(prog)
+			raw = object.Wrap(object.NewString(prog))
 			prog = lo.progDefault
 		}
 	}
 	if lo.formatter != nil {
 		lo.emitCustom(sev, prog, raw)
-		return object.True
+		return object.BoolValue(bool(object.True))
 	}
 	lo.l.Add(sev, lo.coerce(raw), prog)
-	return object.True
+	return object.BoolValue(bool(object.True))
 }
 
 // emitCustom drives a custom Ruby Proc formatter: it is called with the severity
@@ -299,9 +299,9 @@ func (lo *Logger) emitCustom(sev lg.Severity, prog string, raw object.Value) {
 	now := lo.l.Now()
 	t := &Time{t: gotime.FromUnix(now.Unix())}
 	args := []object.Value{
-		object.NewString(lg.SeverityLabel(sev)),
-		t,
-		object.NewString(prog),
+		object.Wrap(object.NewString(lg.SeverityLabel(sev))),
+		object.Wrap(t),
+		object.Wrap(object.NewString(prog)),
 		raw,
 	}
 	out := lo.vm.callBlock(lo.formatter, args)
@@ -375,7 +375,7 @@ func isNilV(v object.Value) bool {
 func (vm *VM) registerLogger() {
 	cls := newClass("Logger", vm.cObject)
 	vm.cLogger = cls
-	vm.consts["Logger"] = cls
+	vm.consts["Logger"] = object.Wrap(cls)
 
 	vm.registerLoggerSeverity(cls)
 	vm.registerLoggerErrors(cls)
@@ -404,7 +404,7 @@ func (vm *VM) registerLogger() {
 				}
 			}
 			lo.applyKwargs(kw)
-			return lo
+			return object.Wrap(lo)
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -459,19 +459,19 @@ func (vm *VM) registerLogger() {
 
 	// The predicates: would a message at that severity currently be emitted?
 	d("debug?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).l.DebugQ())
+		return object.BoolValue(bool(object.Bool(self(v).l.DebugQ())))
 	})
 	d("info?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).l.InfoQ())
+		return object.BoolValue(bool(object.Bool(self(v).l.InfoQ())))
 	})
 	d("warn?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).l.WarnQ())
+		return object.BoolValue(bool(object.Bool(self(v).l.WarnQ())))
 	})
 	d("error?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).l.ErrorQ())
+		return object.BoolValue(bool(object.Bool(self(v).l.ErrorQ())))
 	})
 	d("fatal?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).l.FatalQ())
+		return object.BoolValue(bool(object.Bool(self(v).l.FatalQ())))
 	})
 
 	// <<: a raw write with no formatting. Returns the byte count, or nil with no
@@ -480,7 +480,7 @@ func (vm *VM) registerLogger() {
 		lo := self(v)
 		n := lo.l.Write(strArg(args[0]))
 		if n < 0 {
-			return object.NilV
+			return object.NilVal()
 		}
 		return object.IntValue(int64(n))
 	})
@@ -504,9 +504,9 @@ func (vm *VM) registerLogger() {
 	d("progname", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		lo := self(v)
 		if lo.progDefault == "" {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewString(lo.progDefault)
+		return object.Wrap(object.NewString(lo.progDefault))
 	})
 	d("progname=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lo := self(v)
@@ -524,9 +524,9 @@ func (vm *VM) registerLogger() {
 	d("datetime_format", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		lo := self(v)
 		if lo.l.Formatter == nil || lo.l.Formatter.DatetimeFormat == "" {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewString(lo.l.Formatter.DatetimeFormat)
+		return object.Wrap(object.NewString(lo.l.Formatter.DatetimeFormat))
 	})
 	d("datetime_format=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lo := self(v)
@@ -542,9 +542,9 @@ func (vm *VM) registerLogger() {
 	d("formatter", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		lo := self(v)
 		if lo.formatter == nil {
-			return object.NilV
+			return object.NilVal()
 		}
-		return lo.formatter
+		return object.Wrap(lo.formatter)
 	})
 	d("formatter=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lo := self(v)
@@ -562,7 +562,7 @@ func (vm *VM) registerLogger() {
 		lo := self(v)
 		lo.closed = true
 		lo.l.Sink = nil
-		return object.NilV
+		return object.NilVal()
 	})
 	d("reopen", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lo := self(v)
@@ -580,23 +580,23 @@ func (lo *Logger) applyKwargs(kw *object.Hash) {
 	if kw == nil {
 		return
 	}
-	if v, ok := kw.Get(object.Symbol("level")); ok {
+	if v, ok := kw.Get(object.SymVal(string(object.Symbol("level")))); ok {
 		if err := lo.l.SetLevel(severityArg(v)); err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
 	}
-	if v, ok := kw.Get(object.Symbol("progname")); ok {
+	if v, ok := kw.Get(object.SymVal(string(object.Symbol("progname")))); ok {
 		if _, isNil := object.AsNilOK(v); !isNil {
 			lo.progDefault = v.ToS()
 			lo.l.Progname = lo.progDefault
 		}
 	}
-	if v, ok := kw.Get(object.Symbol("datetime_format")); ok {
+	if v, ok := kw.Get(object.SymVal(string(object.Symbol("datetime_format")))); ok {
 		if _, isNil := object.AsNilOK(v); !isNil {
 			lo.l.Formatter.DatetimeFormat = v.ToS()
 		}
 	}
-	if v, ok := kw.Get(object.Symbol("formatter")); ok {
+	if v, ok := kw.Get(object.SymVal(string(object.Symbol("formatter")))); ok {
 		if p, ok := object.KindOK[*Proc](v); ok {
 			lo.formatter = p
 		}
@@ -632,8 +632,8 @@ func severityArg(v object.Value) any {
 func (vm *VM) registerLoggerSeverity(cls *RClass) {
 	sev := newClass("Logger::Severity", vm.cObject)
 	sev.isModule = true
-	cls.consts["Severity"] = sev
-	vm.consts["Logger::Severity"] = sev
+	cls.consts["Severity"] = object.Wrap(sev)
+	vm.consts["Logger::Severity"] = object.Wrap(sev)
 	vm.cLoggerSeverity = sev
 
 	for name, val := range map[string]lg.Severity{
@@ -653,20 +653,20 @@ func (vm *VM) registerLoggerErrors(cls *RClass) {
 		runtimeErr = vm.cException
 	}
 	err := newClass("Logger::Error", runtimeErr)
-	cls.consts["Error"] = err
-	vm.consts["Logger::Error"] = err
+	cls.consts["Error"] = object.Wrap(err)
+	vm.consts["Logger::Error"] = object.Wrap(err)
 
 	shift := newClass("Logger::ShiftingError", err)
-	cls.consts["ShiftingError"] = shift
-	vm.consts["Logger::ShiftingError"] = shift
+	cls.consts["ShiftingError"] = object.Wrap(shift)
+	vm.consts["Logger::ShiftingError"] = object.Wrap(shift)
 }
 
 // registerLoggerFormatterClass installs Logger::Formatter with its #call (rendering
 // one line through the library) and the datetime_format accessor.
 func (vm *VM) registerLoggerFormatterClass(cls *RClass) {
 	fc := newClass("Logger::Formatter", vm.cObject)
-	cls.consts["Formatter"] = fc
-	vm.consts["Logger::Formatter"] = fc
+	cls.consts["Formatter"] = object.Wrap(fc)
+	vm.consts["Logger::Formatter"] = object.Wrap(fc)
 	vm.cLoggerFormatter = fc
 
 	fc.smethods["new"] = &Method{name: "new", owner: fc,
@@ -679,7 +679,7 @@ func (vm *VM) registerLoggerFormatterClass(cls *RClass) {
 				}
 				return ""
 			}
-			return lf
+			return object.Wrap(lf)
 		}}
 
 	self := func(v object.Value) *LoggerFormatter { return object.Kind[*LoggerFormatter](v) }
@@ -696,14 +696,14 @@ func (vm *VM) registerLoggerFormatterClass(cls *RClass) {
 			prog = args[2].ToS()
 		}
 		msg := loggerMsg(vm, args[3])
-		return object.NewString(lf.f.Format(label, t, os.Getpid(), prog, msg))
+		return object.Wrap(object.NewString(lf.f.Format(label, t, os.Getpid(), prog, msg)))
 	})
 	fc.define("datetime_format", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		lf := self(v)
 		if lf.f.DatetimeFormat == "" {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewString(lf.f.DatetimeFormat)
+		return object.Wrap(object.NewString(lf.f.DatetimeFormat))
 	})
 	fc.define("datetime_format=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lf := self(v)

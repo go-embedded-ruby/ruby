@@ -20,18 +20,18 @@ import (
 // registerGrapeRouter installs Grape::Router and its Route / Match value objects.
 func (vm *VM) registerGrapeRouter(mod *RClass) {
 	cls := newClass("Grape::Router", vm.cObject)
-	mod.consts["Router"] = cls
-	vm.consts["Grape::Router"] = cls
+	mod.consts["Router"] = object.Wrap(cls)
+	vm.consts["Grape::Router"] = object.Wrap(cls)
 
 	route := newClass("Grape::Router::Route", vm.cObject)
-	cls.consts["Route"] = route
-	vm.consts["Grape::Router::Route"] = route
+	cls.consts["Route"] = object.Wrap(route)
+	vm.consts["Grape::Router::Route"] = object.Wrap(route)
 	match := newClass("Grape::Router::Match", vm.cObject)
-	cls.consts["Match"] = match
-	vm.consts["Grape::Router::Match"] = match
+	cls.consts["Match"] = object.Wrap(match)
+	vm.consts["Grape::Router::Match"] = object.Wrap(match)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &GrapeRouter{rt: grape.NewRouter()}
+		return object.Wrap(&GrapeRouter{rt: grape.NewRouter()})
 	}}
 
 	self := func(v object.Value) *GrapeRouter { return object.Kind[*GrapeRouter](v) }
@@ -43,15 +43,15 @@ func (vm *VM) registerGrapeRouter(mod *RClass) {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 			}
 			pattern := grapeStr(args[0])
-			var handler object.Value = object.NilV
+			var handler object.Value = object.NilVal()
 			if len(args) > 1 {
 				handler = args[1]
 			} else if blk != nil {
-				handler = blk
+				handler = object.Wrap(blk)
 			}
 			r := grape.NewRoute(method, pattern, handler)
 			self(v).rt.Add(r)
-			return &GrapeRoute{rt: r, handler: handler}
+			return object.Wrap(&GrapeRoute{rt: r, handler: handler})
 		}
 	}
 	for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"} {
@@ -68,9 +68,9 @@ func (vm *VM) registerGrapeRouter(mod *RClass) {
 		if m.Route != nil {
 			h, _ := m.Route.Handler.(object.Value)
 			gm.handler = h
-			gm.route = &GrapeRoute{rt: m.Route, handler: h}
+			gm.route = object.Wrap(&GrapeRoute{rt: m.Route, handler: h})
 		}
-		return gm
+		return object.Wrap(gm)
 	})
 
 	vm.registerGrapeRoute(route)
@@ -82,16 +82,16 @@ func (vm *VM) registerGrapeRouter(mod *RClass) {
 func (vm *VM) registerGrapeRoute(cls *RClass) {
 	self := func(v object.Value) *GrapeRoute { return object.Kind[*GrapeRoute](v) }
 	cls.define("http_method", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).rt.Method)
+		return object.Wrap(object.NewString(self(v).rt.Method))
 	})
 	cls.define("pattern", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).rt.Pattern)
+		return object.Wrap(object.NewString(self(v).rt.Pattern))
 	})
 	cls.define("handler", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if h := self(v).handler; !object.IsNil(h) {
 			return h
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
@@ -100,45 +100,45 @@ func (vm *VM) registerGrapeRoute(cls *RClass) {
 func (vm *VM) registerGrapeMatch(cls *RClass) {
 	self := func(v object.Value) *GrapeMatch { return object.Kind[*GrapeMatch](v) }
 	cls.define("status", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(grapeStatusName(self(v).m.Status))
+		return object.SymVal(string(object.Symbol(grapeStatusName(self(v).m.Status))))
 	})
 	cls.define("ok?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.Status == grape.StatusOK)
+		return object.BoolValue(bool(object.Bool(self(v).m.Status == grape.StatusOK)))
 	})
 	cls.define("not_found?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.Status == grape.StatusNotFound)
+		return object.BoolValue(bool(object.Bool(self(v).m.Status == grape.StatusNotFound)))
 	})
 	cls.define("method_not_allowed?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).m.Status == grape.StatusMethodNotAllowed)
+		return object.BoolValue(bool(object.Bool(self(v).m.Status == grape.StatusMethodNotAllowed)))
 	})
 	cls.define("route", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if r := self(v).route; !object.IsNil(r) {
 			return r
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	cls.define("handler", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if h := self(v).handler; !object.IsNil(h) {
 			return h
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	// #params returns the captured path params as a String=>String Hash.
 	cls.define("params", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := object.NewHash()
 		for k, val := range self(v).m.Params {
-			h.Set(object.NewString(k), object.NewString(val))
+			h.Set(object.Wrap(object.NewString(k)), object.Wrap(object.NewString(val)))
 		}
-		return h
+		return object.Wrap(h)
 	})
 	// #allowed lists the methods a path accepts (the 405 Allow header set).
 	cls.define("allowed", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		allowed := self(v).m.Allowed
 		arr := object.NewArrayFromSlice(make([]object.Value, len(allowed)))
 		for i, a := range allowed {
-			arr.Elems[i] = object.NewString(a)
+			arr.Elems[i] = object.Wrap(object.NewString(a))
 		}
-		return arr
+		return object.Wrap(arr)
 	})
 }
 
@@ -146,18 +146,18 @@ func (vm *VM) registerGrapeMatch(cls *RClass) {
 // #validate instance method.
 func (vm *VM) registerGrapeValidator(mod *RClass) {
 	cls := newClass("Grape::Validator", vm.cObject)
-	mod.consts["Validator"] = cls
-	vm.consts["Grape::Validator"] = cls
+	mod.consts["Validator"] = object.Wrap(cls)
+	vm.consts["Grape::Validator"] = object.Wrap(cls)
 
 	scope := newClass("Grape::Validations::ParamsScope", vm.cObject)
-	vm.consts["Grape::Validations::ParamsScope"] = scope
+	vm.consts["Grape::Validations::ParamsScope"] = object.Wrap(scope)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 		set := &grape.ParamSet{}
 		if blk != nil {
-			vm.callBlockSelf(blk, &GrapeParamsBuilder{set: set}, nil)
+			vm.callBlockSelf(blk, object.Wrap(&GrapeParamsBuilder{set: set}), nil)
 		}
-		return &GrapeValidator{set: set, v: grape.NewParamsValidator(set)}
+		return object.Wrap(&GrapeValidator{set: set, v: grape.NewParamsValidator(set)})
 	}}
 
 	cls.define("validate", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -170,7 +170,7 @@ func (vm *VM) registerGrapeValidator(mod *RClass) {
 		if verr != nil && !verr.Empty() {
 			raise("Grape::Exceptions::ValidationErrors", "%s", verr.Error())
 		}
-		return grapeCoercedToHash(vm, gv.set, coerced)
+		return object.Wrap(grapeCoercedToHash(vm, gv.set, coerced))
 	})
 
 	vm.registerGrapeParamsBuilder()
@@ -181,7 +181,7 @@ func (vm *VM) registerGrapeValidator(mod *RClass) {
 // Hash (type / values / regexp / default / length).
 func (vm *VM) registerGrapeParamsBuilder() {
 	dsl := newClass("Grape::Validations::ParamsScope::DSL", vm.cObject)
-	vm.consts["Grape::Validations::ParamsScope::DSL"] = dsl
+	vm.consts["Grape::Validations::ParamsScope::DSL"] = object.Wrap(dsl)
 
 	add := func(required bool) NativeFn {
 		return func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -191,7 +191,7 @@ func (vm *VM) registerGrapeParamsBuilder() {
 			b := object.Kind[*GrapeParamsBuilder](self)
 			p := grapeBuildParam(grapeStr(args[0]), required, grapeOptions(args))
 			b.set.Params = append(b.set.Params, p)
-			return object.NilV
+			return object.NilVal()
 		}
 	}
 	dsl.define("requires", add(true))
@@ -202,11 +202,11 @@ func (vm *VM) registerGrapeParamsBuilder() {
 // #txt / #xml methods.
 func (vm *VM) registerGrapeFormatter(mod *RClass) {
 	cls := newClass("Grape::Formatter", vm.cObject)
-	mod.consts["Formatter"] = cls
-	vm.consts["Grape::Formatter"] = cls
+	mod.consts["Formatter"] = object.Wrap(cls)
+	vm.consts["Grape::Formatter"] = object.Wrap(cls)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &GrapeFormatter{}
+		return object.Wrap(&GrapeFormatter{})
 	}}
 
 	f := grape.Formatter{}
@@ -217,19 +217,19 @@ func (vm *VM) registerGrapeFormatter(mod *RClass) {
 		}
 		body, mime, err := f.Format(grapeStr(args[0]), grapeToGo(args[1]))
 		grapeCheckFormatErr(err)
-		return object.NewArray(object.NewString(body), object.NewString(mime))
+		return object.Wrap(object.NewArray(object.Wrap(object.NewString(body)), object.Wrap(object.NewString(mime))))
 	})
 	cls.define("json", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		body, err := f.JSON(grapeToGo(grapeArg(args)))
 		grapeCheckFormatErr(err)
-		return object.NewString(body)
+		return object.Wrap(object.NewString(body))
 	})
 	cls.define("xml", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		body, err := f.XML(grapeToGo(grapeArg(args)))
 		grapeCheckFormatErr(err)
-		return object.NewString(body)
+		return object.Wrap(object.NewString(body))
 	})
 	cls.define("txt", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(f.Txt(grapeToGo(grapeArg(args))))
+		return object.Wrap(object.NewString(f.Txt(grapeToGo(grapeArg(args)))))
 	})
 }

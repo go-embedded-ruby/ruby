@@ -44,7 +44,7 @@ func TestLiquidHandleUnparsed(t *testing.T) {
 			t.Fatalf("want Liquid::Error, got %v", recover())
 		}
 	}()
-	liquidHandle(inst)
+	liquidHandle(object.Wrap(inst))
 }
 
 // TestLiquidErrorClass covers every arm of liquidErrorClass, including the *Error
@@ -71,10 +71,10 @@ func TestLiquidErrorClass(t *testing.T) {
 // TestLiquidModeAndKey covers the to_s fall-through arms of liquidModeName and
 // liquidKey, which a Symbol/String argument never reaches.
 func TestLiquidModeAndKey(t *testing.T) {
-	if got := liquidModeName(object.Integer(1)); got != "1" {
+	if got := liquidModeName(object.IntValue(int64(object.Integer(1)))); got != "1" {
 		t.Errorf("liquidModeName(int) = %q", got)
 	}
-	if got := liquidKey(object.Integer(2)); got != "2" {
+	if got := liquidKey(object.IntValue(int64(object.Integer(2)))); got != "2" {
 		t.Errorf("liquidKey(int) = %q", got)
 	}
 }
@@ -87,7 +87,7 @@ func TestToLiquidGoArms(t *testing.T) {
 	if toLiquid(vm, nil) != nil {
 		t.Error("go-nil should map to nil")
 	}
-	if toLiquid(vm, object.NilV) != nil {
+	if toLiquid(vm, object.NilVal()) != nil {
 		t.Error("object.NilV should map to nil")
 	}
 	bn := object.NormInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(30), nil))
@@ -95,38 +95,38 @@ func TestToLiquidGoArms(t *testing.T) {
 		t.Errorf("bignum -> %T", toLiquid(vm, bn))
 	}
 	// A String maps to its contents.
-	if got := toLiquid(vm, object.NewString("s")); got != "s" {
+	if got := toLiquid(vm, object.Wrap(object.NewString("s"))); got != "s" {
 		t.Errorf("string -> %v", got)
 	}
 	// An object with no direct model shape is handed its #to_s text: an RObject of
 	// a bare class stringifies to its "#<Class …>" inspect-style to_s.
 	obj := &RObject{class: vm.cObject, ivars: map[string]object.Value{}}
-	if got, ok := toLiquid(vm, obj).(string); !ok {
+	if got, ok := toLiquid(vm, object.Wrap(obj)).(string); !ok {
 		t.Errorf("object -> %T (want string via to_s)", got)
 	}
 	// A Symbol value maps to its bare name string.
-	if got := toLiquid(vm, object.Symbol("sym")); got != "sym" {
+	if got := toLiquid(vm, object.SymVal(string(object.Symbol("sym")))); got != "sym" {
 		t.Errorf("symbol -> %v", got)
 	}
 	// A truthy/false Bool and Integer/Float map straight through.
-	if got := toLiquid(vm, object.Bool(true)); got != true {
+	if got := toLiquid(vm, object.BoolValue(bool(object.Bool(true)))); got != true {
 		t.Errorf("bool -> %v", got)
 	}
-	if got := toLiquid(vm, object.Integer(7)); got != int64(7) {
+	if got := toLiquid(vm, object.IntValue(int64(object.Integer(7)))); got != int64(7) {
 		t.Errorf("int -> %v", got)
 	}
-	if got := toLiquid(vm, object.Float(1.5)); got != 1.5 {
+	if got := toLiquid(vm, object.FloatValue(float64(object.Float(1.5)))); got != 1.5 {
 		t.Errorf("float -> %v", got)
 	}
 	// An Array recurses into []any.
-	if got, ok := toLiquid(vm, &object.Array{Elems: []object.Value{object.Integer(1)}}).([]any); !ok || len(got) != 1 {
-		t.Errorf("array -> %T", toLiquid(vm, &object.Array{}))
+	if got, ok := toLiquid(vm, object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}})).([]any); !ok || len(got) != 1 {
+		t.Errorf("array -> %T", toLiquid(vm, object.Wrap(&object.Array{})))
 	}
 	// A Hash recurses into map[string]any.
 	h := object.NewHash()
-	h.Set(object.NewString("k"), object.Integer(9))
-	if got, ok := toLiquid(vm, h).(map[string]any); !ok || got["k"] != int64(9) {
-		t.Errorf("hash -> %T", toLiquid(vm, h))
+	h.Set(object.Wrap(object.NewString("k")), object.IntValue(int64(object.Integer(9))))
+	if got, ok := toLiquid(vm, object.Wrap(h)).(map[string]any); !ok || got["k"] != int64(9) {
+		t.Errorf("hash -> %T", toLiquid(vm, object.Wrap(h)))
 	}
 }
 

@@ -92,7 +92,7 @@ func (f *GrapeFormatter) Truthy() bool    { return true }
 func (vm *VM) registerGrape() {
 	mod := newClass("Grape", nil)
 	mod.isModule = true
-	vm.consts["Grape"] = mod
+	vm.consts["Grape"] = object.Wrap(mod)
 
 	vm.registerGrapeErrors(mod)
 	vm.registerGrapeRouter(mod)
@@ -106,9 +106,9 @@ func (vm *VM) registerGrape() {
 		}
 		mime := grape.MimeFor(grapeStr(args[0]))
 		if mime == "" {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewString(mime)
+		return object.Wrap(object.NewString(mime))
 	}}
 	// Grape.default_status(method) -> 201 for POST, 200 otherwise.
 	mod.smethods["default_status"] = &Method{name: "default_status", owner: mod, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -126,14 +126,14 @@ func (vm *VM) registerGrapeErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	exc := newClass("Grape::Exceptions", nil)
 	exc.isModule = true
-	mod.consts["Exceptions"] = exc
-	vm.consts["Grape::Exceptions"] = exc
+	mod.consts["Exceptions"] = object.Wrap(exc)
+	vm.consts["Grape::Exceptions"] = object.Wrap(exc)
 
 	base := newClass("Grape::Exceptions::Base", std)
-	exc.consts["Base"] = base
-	vm.consts["Grape::Exceptions::Base"] = base
+	exc.consts["Base"] = object.Wrap(base)
+	vm.consts["Grape::Exceptions::Base"] = object.Wrap(base)
 
 	ve := newClass("Grape::Exceptions::ValidationErrors", base)
-	exc.consts["ValidationErrors"] = ve
-	vm.consts["Grape::Exceptions::ValidationErrors"] = ve
+	exc.consts["ValidationErrors"] = object.Wrap(ve)
+	vm.consts["Grape::Exceptions::ValidationErrors"] = object.Wrap(ve)
 }

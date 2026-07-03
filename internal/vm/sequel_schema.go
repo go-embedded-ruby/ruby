@@ -34,14 +34,14 @@ func (vm *VM) sequelSchemaClass() *RClass {
 		return c
 	}
 	cls := newClass("Sequel::Schema::Generator", vm.cObject)
-	vm.consts["Sequel::Schema::Generator"] = cls
+	vm.consts["Sequel::Schema::Generator"] = object.Wrap(cls)
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *sequel.TableBuilder { return object.Kind[*SequelSchemaObj](v).tb }
 
 	// primary_key :id defines an auto-increment primary key column.
 	d("primary_key", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).PrimaryKey(sequelName(pgArg0(args)))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// The typed column builders (String/Integer/Float/Bignum/Numeric/Bool/Date/
@@ -51,7 +51,7 @@ func (vm *VM) sequelSchemaClass() *RClass {
 		return func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 			name, opts := sequelColArgs(args)
 			add(self(v), name, opts...)
-			return object.NilV
+			return object.NilVal()
 		}
 	}
 	d("String", typed((*sequel.TableBuilder).String))
@@ -95,7 +95,7 @@ func (vm *VM) sequelSchemaClass() *RClass {
 		default:
 			tb.String(name, opts...)
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// foreign_key(:name, :table, opts) adds a foreign-key column.
@@ -105,7 +105,7 @@ func (vm *VM) sequelSchemaClass() *RClass {
 		}
 		opts := sequelOptsFrom(args[2:])
 		self(v).ForeignKey(sequelName(args[0]), sequelName(args[1]), opts...)
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// index([:cols], unique: true) adds an index.
@@ -123,7 +123,7 @@ func (vm *VM) sequelSchemaClass() *RClass {
 			}
 		}
 		self(v).Index(cols, opts...)
-		return object.NilV
+		return object.NilVal()
 	})
 
 	return cls

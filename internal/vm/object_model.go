@@ -410,7 +410,7 @@ func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
 		}
 	}
 	raise("NameError", "uninitialized constant %s::%s", cls.ToS(), name)
-	return object.NilV
+	return object.NilVal()
 }
 
 // nesting returns the lexical nesting list for a cref (Module.nesting): the cref
@@ -1440,7 +1440,7 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 func (vm *VM) classEval(cls *RClass, p *Proc, args []object.Value) object.Value {
 	// class_eval/module_eval always receive a literal (ISeq) block, never a
 	// synthesized native Proc, so no native fast path is needed here.
-	return vm.exec(p.iseq, cls, vm.bindBlockArgs(p, args), cls, "", p.env, p.block, p, nil)
+	return vm.exec(p.iseq, object.Wrap(cls), vm.bindBlockArgs(p, args), cls, "", p.env, p.block, p, nil)
 }
 
 // classEvalString runs Ruby source as class_eval/module_eval would for the
@@ -1453,7 +1453,7 @@ func (vm *VM) classEvalString(cls *RClass, src string) object.Value {
 		return raise("SyntaxError", "%s", cerr.Error())
 	}
 	iseq.Name = "(eval)"
-	return vm.exec(iseq, cls, nil, cls, "", nil, nil, nil, nil)
+	return vm.exec(iseq, object.Wrap(cls), nil, cls, "", nil, nil, nil, nil)
 }
 
 // bindBlockArgs maps call args onto a block's parameters, with the auto-splat a
@@ -1496,7 +1496,7 @@ func (vm *VM) bindBlockPositionals(p *Proc, args []object.Value) []object.Value 
 			padded := make([]object.Value, p.iseq.NumRequired)
 			copy(padded, args)
 			for i := len(args); i < len(padded); i++ {
-				padded[i] = object.NilV
+				padded[i] = object.NilVal()
 			}
 			args = padded
 		}
@@ -1519,7 +1519,7 @@ func (vm *VM) bindBlockPositionals(p *Proc, args []object.Value) []object.Value 
 			if i < len(args) {
 				out[i] = args[i]
 			} else {
-				out[i] = object.NilV
+				out[i] = object.NilVal()
 			}
 		}
 		return out
@@ -1536,7 +1536,7 @@ func (vm *VM) bindBlockPositionals(p *Proc, args []object.Value) []object.Value 
 		if i < len(args) {
 			bargs[i] = args[i]
 		} else {
-			bargs[i] = object.NilV
+			bargs[i] = object.NilVal()
 		}
 	}
 	return bargs
@@ -1548,7 +1548,7 @@ func getIvar(self object.Value, name string) object.Value {
 			return v
 		}
 	}
-	return object.NilV
+	return object.NilVal()
 }
 
 func setIvar(self object.Value, name string, v object.Value) {

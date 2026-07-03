@@ -19,9 +19,9 @@ import (
 func (vm *VM) registerTOML() {
 	mod := newClass("TomlRB", nil)
 	mod.isModule = true
-	vm.consts["TomlRB"] = mod
+	vm.consts["TomlRB"] = object.Wrap(mod)
 	// The toml-rb gem exposes the module under both TomlRB and TOML.
-	vm.consts["TOML"] = mod
+	vm.consts["TOML"] = object.Wrap(mod)
 	vm.registerTOMLErrors(mod)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
@@ -48,7 +48,7 @@ func (vm *VM) registerTOML() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
-		return object.NewString(tomlDump(args[0]))
+		return object.Wrap(object.NewString(tomlDump(args[0])))
 	})
 }
 
@@ -62,8 +62,8 @@ func (vm *VM) registerTOMLErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	reg("ParseError", "TomlRB::ParseError", std)

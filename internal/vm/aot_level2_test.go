@@ -14,19 +14,19 @@ import (
 func TestAOTBlockArgs(t *testing.T) {
 	one := object.Integer(1)
 	two := object.Integer(2)
-	pair := &object.Array{Elems: []object.Value{one, two}}
+	pair := &object.Array{Elems: []object.Value{object.IntValue(int64(one)), object.IntValue(int64(two))}}
 
 	// Exact arity: the args pass straight through (same backing slice).
-	if got := aotBlockArgs(1, []object.Value{one}); len(got) != 1 || got[0] != one {
+	if got := aotBlockArgs(1, []object.Value{object.IntValue(int64(one))}); len(got) != 1 || got[0] != one {
 		t.Errorf("exact arity: got %v", got)
 	}
 	// np>1, a single Array arg: auto-splat into the elements.
-	got := aotBlockArgs(2, []object.Value{pair})
+	got := aotBlockArgs(2, []object.Value{object.Wrap(pair)})
 	if len(got) != 2 || got[0] != one || got[1] != two {
 		t.Errorf("auto-splat: got %v", got)
 	}
 	// np>1, a single non-Array arg: no splat, pad the missing parameter with nil.
-	got = aotBlockArgs(2, []object.Value{one})
+	got = aotBlockArgs(2, []object.Value{object.IntValue(int64(one))})
 	if len(got) != 2 || got[0] != one || got[1] != nil {
 		t.Errorf("non-array single arg: got %v", got)
 	}
@@ -37,7 +37,7 @@ func TestAOTBlockArgs(t *testing.T) {
 		t.Errorf("padding: got %v", got)
 	}
 	// More args than params: truncate to np.
-	got = aotBlockArgs(1, []object.Value{one, two})
+	got = aotBlockArgs(1, []object.Value{object.IntValue(int64(one)), object.IntValue(int64(two))})
 	if len(got) != 1 || got[0] != one {
 		t.Errorf("truncate: got %v", got)
 	}
@@ -55,23 +55,23 @@ func TestAOTSend(t *testing.T) {
 
 	// Explicit receiver, resolved method: String#length via the cache + a
 	// (passing) visibility check.
-	if r := vm.aotSend(&ic, object.NewString("hi"), "length", nil, bytecode.FlagSendExplicit, self, nil); r.Inspect() != "2" {
+	if r := vm.aotSend(&ic, object.Wrap(object.NewString("hi")), "length", nil, bytecode.FlagSendExplicit, self, nil); r.Inspect() != "2" {
 		t.Errorf("explicit length = %s, want 2", r.Inspect())
 	}
 	// Implicit receiver, resolved method: no visibility check taken.
-	if r := vm.aotSend(&ic, &object.Array{Elems: []object.Value{object.NilV, object.NilV}}, "length", nil, 0, self, nil); r.Inspect() != "2" {
+	if r := vm.aotSend(&ic, object.Wrap(&object.Array{Elems: []object.Value{object.NilVal(), object.NilVal()}}), "length", nil, 0, self, nil); r.Inspect() != "2" {
 		t.Errorf("implicit length = %s, want 2", r.Inspect())
 	}
 	// Unresolved name (`+` is an operator fast path, not a method): the cache
 	// misses (nil) and the call falls through to dispatchSend → binaryOp.
 	var ic2 inlineCache
-	if r := vm.aotSend(&ic2, object.Integer(1), "+", []object.Value{object.Integer(2)}, 0, self, nil); r.Inspect() != "3" {
+	if r := vm.aotSend(&ic2, object.IntValue(int64(object.Integer(1))), "+", []object.Value{object.IntValue(int64(object.Integer(2)))}, 0, self, nil); r.Inspect() != "3" {
 		t.Errorf("operator + = %s, want 3", r.Inspect())
 	}
 	// Class receiver: bypasses the cache (singleton dispatch) and goes through
 	// dispatchSend.
-	intClass := vm.classOf(object.Integer(0))
-	if r := vm.aotSend(&ic, intClass, "name", nil, 0, self, nil); r.Inspect() != `"Integer"` {
+	intClass := vm.classOf(object.IntValue(int64(object.Integer(0))))
+	if r := vm.aotSend(&ic, object.Wrap(intClass), "name", nil, 0, self, nil); r.Inspect() != `"Integer"` {
 		t.Errorf("class name = %s, want \"Integer\"", r.Inspect())
 	}
 	// A literal-block send: blk != nil skips the fast path and dispatches with the
@@ -79,10 +79,10 @@ func TestAOTSend(t *testing.T) {
 	sum := 0
 	blk := &Proc{native: func(_ *VM, args []object.Value) object.Value {
 		sum += int(object.AsInteger(args[0]))
-		return object.NilV
+		return object.NilVal()
 	}}
-	arr := &object.Array{Elems: []object.Value{object.Integer(2), object.Integer(3)}}
-	vm.aotSend(&ic, arr, "each", nil, 0, self, blk)
+	arr := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(2))), object.IntValue(int64(object.Integer(3)))}}
+	vm.aotSend(&ic, object.Wrap(arr), "each", nil, 0, self, blk)
 	if sum != 5 {
 		t.Errorf("block each sum = %d, want 5", sum)
 	}
@@ -98,7 +98,7 @@ func TestRunTopCompiled(t *testing.T) {
 	sentinel := object.NewString("from-aot-main")
 	RegisterCompiledMain(func(_ *VM) object.Value {
 		calls++
-		return sentinel
+		return object.Wrap(sentinel)
 	})
 
 	vm := New(io.Discard) // arms mainArmed after the prelude

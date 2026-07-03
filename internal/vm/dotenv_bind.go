@@ -58,7 +58,7 @@ func dotenvLoad(vm *VM, src string, overwrite bool) object.Value {
 func fromDotenvMap(m *dotenv.OrderedMap) object.Value {
 	h := object.NewHash()
 	m.Each(func(key, val string) {
-		h.Set(object.NewString(key), object.NewString(val))
+		h.Set(object.Wrap(object.NewString(key)), object.Wrap(object.NewString(val)))
 	})
-	return h
+	return object.Wrap(h)
 }

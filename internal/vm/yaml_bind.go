@@ -51,7 +51,7 @@ func (vm *VM) yamlResolveClass(name string) *RClass {
 		}
 	}
 	c := newClass(name, vm.cObject)
-	vm.cObject.consts[name] = c
+	vm.cObject.consts[name] = object.Wrap(c)
 	return c
 }
 
@@ -380,39 +380,39 @@ type yamlFromCtx struct {
 func (c *yamlFromCtx) conv(v yaml.Value) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int64:
 		return object.IntValue(n)
 	case *big.Int:
 		return object.NormInt(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case yaml.Symbol:
-		return object.Symbol(string(n))
+		return object.SymVal(string(object.Symbol(string(n))))
 	case []yaml.Value:
 		return c.convSeq(n)
 	case *yaml.Map:
 		return c.convMap(n)
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return object.Wrap(&Time{t: gotime.FromUnix(n.Unix())})
 	case *yaml.Range:
 		return c.convRange(n)
 	case *yaml.Object:
 		return c.convObject(n)
 	case yaml.Class:
-		return c.vm.yamlResolveClass(string(n))
+		return object.Wrap(c.vm.yamlResolveClass(string(n)))
 	case yaml.Module:
-		return c.vm.yamlResolveClass(string(n))
+		return object.Wrap(c.vm.yamlResolveClass(string(n)))
 	case *yaml.Regexp:
 		return c.vm.compileRegexp(n.Source, n.Flags)
 	}
 	// Any value the library does not model maps to nil (defensive: the loader only
 	// ever produces the cases above).
-	return object.NilV
+	return object.NilVal()
 }
 
 // convSeq maps a library sequence to a Ruby Array, caching identity so a shared
@@ -422,7 +422,7 @@ func (c *yamlFromCtx) convSeq(s []yaml.Value) object.Value {
 	for i, el := range s {
 		arr.Elems[i] = c.conv(el)
 	}
-	return arr
+	return object.Wrap(arr)
 }
 
 // convMap maps a library ordered *Map to a Ruby Hash, caching identity so a
@@ -432,17 +432,17 @@ func (c *yamlFromCtx) convMap(m *yaml.Map) object.Value {
 		return cached
 	}
 	h := object.NewHash()
-	c.seen[m] = h
+	c.seen[m] = object.Wrap(h)
 	for _, p := range m.Pairs() {
 		h.Set(c.conv(p.Key), c.conv(p.Val))
 	}
-	return h
+	return object.Wrap(h)
 }
 
 // convRange maps a library *Range to a Ruby Range, a nil bound modelling a
 // beginless / endless range.
 func (c *yamlFromCtx) convRange(r *yaml.Range) object.Value {
-	return object.NewRange(c.convBound(r.Begin), c.convBound(r.End), r.Exclusive)
+	return object.Wrap(object.NewRange(c.convBound(r.Begin), c.convBound(r.End), r.Exclusive))
 }
 
 // convBound maps a Range endpoint, where a library nil bound becomes a Go-nil
@@ -468,9 +468,9 @@ func (c *yamlFromCtx) convObject(o *yaml.Object) object.Value {
 	}
 	cls := c.vm.yamlResolveClass(name)
 	obj := &RObject{class: cls, ivars: map[string]object.Value{}}
-	c.seen[o] = obj
+	c.seen[o] = object.Wrap(obj)
 	for k, val := range o.IVars {
 		obj.ivars["@"+k] = c.conv(val)
 	}
-	return obj
+	return object.Wrap(obj)
 }

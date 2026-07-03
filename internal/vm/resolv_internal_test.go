@@ -29,11 +29,11 @@ func TestResolvBoxValue(t *testing.T) {
 func TestResolvAccessorFallbacks(t *testing.T) {
 	// An object with no @name box yields the zero Name.
 	bare := &RObject{class: nil, ivars: map[string]object.Value{}}
-	if n := resolvNameOf(bare); len(n.Labels) != 0 {
+	if n := resolvNameOf(object.Wrap(bare)); len(n.Labels) != 0 {
 		t.Errorf("resolvNameOf(bare) = %#v, want zero Name", n)
 	}
 	// An object with no @rec box yields a nil Resource.
-	if r := recordOf(bare); r != nil {
+	if r := recordOf(object.Wrap(bare)); r != nil {
 		t.Errorf("recordOf(bare) = %#v, want nil", r)
 	}
 }
@@ -51,10 +51,10 @@ func TestResolvVMFallbacks(t *testing.T) {
 	}
 
 	// resolvTypeArg returns A for a non-class argument and for an unknown class.
-	if got := resolvTypeArg(vm, object.NewString("not a class")); got != resolv.TypeA {
+	if got := resolvTypeArg(vm, object.Wrap(object.NewString("not a class"))); got != resolv.TypeA {
 		t.Errorf("resolvTypeArg(String) = %d, want TypeA", got)
 	}
-	if got := resolvTypeArg(vm, vm.dnsNameClass()); got != resolv.TypeA {
+	if got := resolvTypeArg(vm, object.Wrap(vm.dnsNameClass())); got != resolv.TypeA {
 		t.Errorf("resolvTypeArg(unknown class) = %d, want TypeA", got)
 	}
 
@@ -80,14 +80,14 @@ func TestResolvMessageBoxAbsent(t *testing.T) {
 	// Message#id off a box-less object falls back to a fresh Message (id 0).
 	bareMsg := &RObject{class: msgCls, ivars: map[string]object.Value{}}
 	idFn := msgCls.methods["id"].native
-	if got := idFn(vm, bareMsg, nil, nil); object.AsInteger(got) != 0 {
+	if got := idFn(vm, object.Wrap(bareMsg), nil, nil); object.AsInteger(got) != 0 {
 		t.Errorf("box-less Message#id = %v, want 0", got)
 	}
 
 	// Hosts#getaddresses off a box-less object falls back to an empty table ([]).
 	bareHosts := &RObject{class: hostsCls, ivars: map[string]object.Value{}}
 	gaFn := hostsCls.methods["getaddresses"].native
-	got := gaFn(vm, bareHosts, []object.Value{object.NewString("x")}, nil)
+	got := gaFn(vm, object.Wrap(bareHosts), []object.Value{object.Wrap(object.NewString("x"))}, nil)
 	if arr, ok := object.KindOK[*object.Array](got); !ok || len(arr.Elems) != 0 {
 		t.Errorf("box-less Hosts#getaddresses = %#v, want []", got)
 	}

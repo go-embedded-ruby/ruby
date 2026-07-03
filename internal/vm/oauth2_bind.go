@@ -22,8 +22,8 @@ import (
 // / refresh (which rebuilds the refresh Request).
 func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 	cls := newClass("OAuth2::AccessToken", vm.cObject)
-	mod.consts["AccessToken"] = cls
-	vm.consts["OAuth2::AccessToken"] = cls
+	mod.consts["AccessToken"] = object.Wrap(cls)
+	vm.consts["OAuth2::AccessToken"] = object.Wrap(cls)
 
 	// AccessToken.new(client, token, params = {}) builds a token bound to client.
 	cls.smethods["new"] = &Method{name: "new", owner: cls,
@@ -44,7 +44,7 @@ func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 					}
 				}
 			}
-			return &OAuth2AccessToken{t: tok}
+			return object.Wrap(&OAuth2AccessToken{t: tok})
 		}}
 	// AccessToken.from_hash(client, hash) rebuilds a token from its serialised form.
 	cls.smethods["from_hash"] = &Method{name: "from_hash", owner: cls,
@@ -68,48 +68,48 @@ func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 				m[name] = oauth2Str(v)
 				order = append(order, name)
 			}
-			return &OAuth2AccessToken{t: oauth2.AccessTokenFromHash(client.c, m, order)}
+			return object.Wrap(&OAuth2AccessToken{t: oauth2.AccessTokenFromHash(client.c, m, order)})
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	d("token", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2AccessToken](self).t.Token)
+		return object.Wrap(object.NewString(object.Kind[*OAuth2AccessToken](self).t.Token))
 	})
 	d("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2AccessToken](self).t.Token)
+		return object.Wrap(object.NewString(object.Kind[*OAuth2AccessToken](self).t.Token))
 	})
 	d("refresh_token", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if r := object.Kind[*OAuth2AccessToken](self).t.RefreshToken; r != "" {
-			return object.NewString(r)
+			return object.Wrap(object.NewString(r))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("expires?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*OAuth2AccessToken](self).t.Expires())
+		return object.BoolValue(bool(object.Bool(object.Kind[*OAuth2AccessToken](self).t.Expires())))
 	})
 	d("expired?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*OAuth2AccessToken](self).t.Expired())
+		return object.BoolValue(bool(object.Bool(object.Kind[*OAuth2AccessToken](self).t.Expired())))
 	})
 	d("expires_at", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if ea := object.Kind[*OAuth2AccessToken](self).t.ExpiresAt; ea != 0 {
 			return object.IntValue(ea)
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("token_type", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2AccessToken](self).t.TokenType())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2AccessToken](self).t.TokenType()))
 	})
 	d("scope", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2AccessToken](self).t.Scope())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2AccessToken](self).t.Scope()))
 	})
 	d("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
 		if v, ok := object.Kind[*OAuth2AccessToken](self).t.Get(oauth2Name(args[0])); ok {
-			return object.NewString(v)
+			return object.Wrap(object.NewString(v))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("to_hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return oauth2MapToHash(object.Kind[*OAuth2AccessToken](self).t.ToHash())
@@ -119,7 +119,7 @@ func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 		if err != nil {
 			raise("OAuth2::Error", "%s", err.Error())
 		}
-		return &OAuth2Request{r: req}
+		return object.Wrap(&OAuth2Request{r: req})
 	})
 }
 
@@ -128,8 +128,8 @@ func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 // and Request with #method / #url / #body / #headers / #to_h.
 func (vm *VM) registerOAuth2Value(mod *RClass) {
 	resp := newClass("OAuth2::Response", vm.cObject)
-	mod.consts["Response"] = resp
-	vm.consts["OAuth2::Response"] = resp
+	mod.consts["Response"] = object.Wrap(resp)
+	vm.consts["OAuth2::Response"] = object.Wrap(resp)
 
 	resp.smethods["new"] = &Method{name: "new", owner: resp,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -150,28 +150,28 @@ func (vm *VM) registerOAuth2Value(mod *RClass) {
 			if len(args) > 2 {
 				body = oauth2Str(args[2])
 			}
-			return &OAuth2Response{r: oauth2.NewResponse(status, headers, body)}
+			return object.Wrap(&OAuth2Response{r: oauth2.NewResponse(status, headers, body)})
 		}}
 	rd := func(name string, fn NativeFn) { resp.define(name, fn) }
 	rd("content_type", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2Response](self).r.ContentType())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2Response](self).r.ContentType()))
 	})
 	rd("parsed", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return oauth2ParsedToHash(vm, object.Kind[*OAuth2Response](self).r.Parsed())
 	})
 
 	req := newClass("OAuth2::Request", vm.cObject)
-	mod.consts["Request"] = req
-	vm.consts["OAuth2::Request"] = req
+	mod.consts["Request"] = object.Wrap(req)
+	vm.consts["OAuth2::Request"] = object.Wrap(req)
 	qd := func(name string, fn NativeFn) { req.define(name, fn) }
 	qd("method", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2Request](self).r.Method)
+		return object.Wrap(object.NewString(object.Kind[*OAuth2Request](self).r.Method))
 	})
 	qd("url", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2Request](self).r.FullURL())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2Request](self).r.FullURL()))
 	})
 	qd("body", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2Request](self).r.EncodedBody())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2Request](self).r.EncodedBody()))
 	})
 	qd("params", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return oauth2MapToHash(object.Kind[*OAuth2Request](self).r.Body)
@@ -208,9 +208,9 @@ func oauth2ExtraParams(args []object.Value) oauth2.Params {
 func oauth2MapToHash(m *oauth2.Map) object.Value {
 	h := object.NewHash()
 	for _, p := range m.Pairs() {
-		h.Set(object.NewString(p.Key), object.NewString(p.Val))
+		h.Set(object.Wrap(object.NewString(p.Key)), object.Wrap(object.NewString(p.Val)))
 	}
-	return h
+	return object.Wrap(h)
 }
 
 // oauth2ParsedToHash maps a Response.Parsed result (map[string]any) to a Ruby
@@ -218,7 +218,7 @@ func oauth2MapToHash(m *oauth2.Map) object.Value {
 // empty body) yields nil.
 func oauth2ParsedToHash(vm *VM, m map[string]any) object.Value {
 	if m == nil {
-		return object.NilV
+		return object.NilVal()
 	}
 	return oauth2AnyToRuby(m)
 }
@@ -229,13 +229,13 @@ func oauth2ParsedToHash(vm *VM, m map[string]any) object.Value {
 func oauth2AnyToRuby(v any) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case int:
 		return object.IntValue(int64(n))
 	case int64:
@@ -245,7 +245,7 @@ func oauth2AnyToRuby(v any) object.Value {
 		for i, el := range n {
 			arr.Elems[i] = oauth2AnyToRuby(el)
 		}
-		return arr
+		return object.Wrap(arr)
 	case map[string]any:
 		keys := make([]string, 0, len(n))
 		for k := range n {
@@ -254,11 +254,11 @@ func oauth2AnyToRuby(v any) object.Value {
 		sort.Strings(keys)
 		h := object.NewHash()
 		for _, k := range keys {
-			h.Set(object.NewString(k), oauth2AnyToRuby(n[k]))
+			h.Set(object.Wrap(object.NewString(k)), oauth2AnyToRuby(n[k]))
 		}
-		return h
+		return object.Wrap(h)
 	}
-	return object.NilV
+	return object.NilVal()
 }
 
 // oauth2Name renders a key (Symbol or String) as its bare name.

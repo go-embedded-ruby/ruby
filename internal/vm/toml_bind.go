@@ -143,39 +143,39 @@ func tomlKey(k object.Value) string {
 func fromTOML(vm *VM, v toml.Value) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int64:
 		return object.IntValue(n)
 	case *big.Int:
 		return object.NormInt(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case []toml.Value:
 		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = fromTOML(vm, el)
 		}
-		return arr
+		return object.Wrap(arr)
 	case *toml.Map:
 		return fromTOMLMap(vm, n)
 	case toml.OffsetDateTime:
-		return &Time{t: gotime.FromUnix(n.Time.Unix())}
+		return object.Wrap(&Time{t: gotime.FromUnix(n.Time.Unix())})
 	case toml.LocalDateTime:
 		t := stdtime.Date(n.Year, stdtime.Month(n.Month), n.Day, n.Hour, n.Minute, n.Second, n.Nanosecond, stdtime.UTC)
-		return &Time{t: gotime.FromUnix(t.Unix())}
+		return object.Wrap(&Time{t: gotime.FromUnix(t.Unix())})
 	case toml.LocalDate:
 		t := stdtime.Date(n.Year, stdtime.Month(n.Month), n.Day, 0, 0, 0, 0, stdtime.UTC)
-		return &Time{t: gotime.FromUnix(t.Unix())}
+		return object.Wrap(&Time{t: gotime.FromUnix(t.Unix())})
 	case toml.LocalTime:
 		t := stdtime.Date(1970, 1, 1, n.Hour, n.Minute, n.Second, n.Nanosecond, stdtime.UTC)
-		return &Time{t: gotime.FromUnix(t.Unix())}
+		return object.Wrap(&Time{t: gotime.FromUnix(t.Unix())})
 	}
 	// The parser only ever produces the cases above; anything else is nil.
-	return object.NilV
+	return object.NilVal()
 }
 
 // fromTOMLMap maps a library ordered *Map to a Ruby Hash with String keys,
@@ -183,7 +183,7 @@ func fromTOML(vm *VM, v toml.Value) object.Value {
 func fromTOMLMap(vm *VM, m *toml.Map) object.Value {
 	h := object.NewHash()
 	for _, p := range m.Pairs() {
-		h.Set(object.NewString(p.Key), fromTOML(vm, p.Val))
+		h.Set(object.Wrap(object.NewString(p.Key)), fromTOML(vm, p.Val))
 	}
-	return h
+	return object.Wrap(h)
 }

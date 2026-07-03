@@ -24,16 +24,16 @@ import (
 func (vm *VM) registerHaml() {
 	mod := newClass("Haml", nil)
 	mod.isModule = true
-	vm.consts["Haml"] = mod
+	vm.consts["Haml"] = object.Wrap(mod)
 	vm.registerHamlErrors(mod)
 
 	cTmpl := newClass("Template", vm.cObject)
-	mod.consts["Template"] = cTmpl
-	vm.consts["Haml::Template"] = cTmpl
+	mod.consts["Template"] = object.Wrap(cTmpl)
+	vm.consts["Haml::Template"] = object.Wrap(cTmpl)
 	// Haml::Engine names the same class (the gem's Haml::Engine.new(src).render;
 	// here the one Template class carries both roles).
-	mod.consts["Engine"] = cTmpl
-	vm.consts["Haml::Engine"] = cTmpl
+	mod.consts["Engine"] = object.Wrap(cTmpl)
+	vm.consts["Haml::Engine"] = object.Wrap(cTmpl)
 
 	// __compile(template) -> src. The single bridge into the library: it returns
 	// the Ruby source the compiled template evaluates to (assigning the buffer to
@@ -46,7 +46,7 @@ func (vm *VM) registerHaml() {
 			if err != nil {
 				raise("Haml::SyntaxError", "%s", err.Error())
 			}
-			return object.NewString(src)
+			return object.Wrap(object.NewString(src))
 		}}
 }
 
@@ -60,8 +60,8 @@ func (vm *VM) registerHamlErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	e := reg("Error", "Haml::Error", std)

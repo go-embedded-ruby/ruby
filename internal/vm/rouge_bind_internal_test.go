@@ -41,13 +41,13 @@ func TestRougeLexerHandleMissing(t *testing.T) {
 			t.Fatalf("want Rouge::Error, got %v", recover())
 		}
 	}()
-	rougeLexerHandle(inst)
+	rougeLexerHandle(object.Wrap(inst))
 }
 
 // TestRougeNameArgToS covers rougeNameArg's #to_s fall-through arm, which a String
 // or Symbol argument never reaches. An Integer stringifies to its decimal text.
 func TestRougeNameArgToS(t *testing.T) {
-	if got := rougeNameArg(object.Integer(7)); got != "7" {
+	if got := rougeNameArg(object.IntValue(int64(object.Integer(7)))); got != "7" {
 		t.Errorf("rougeNameArg(int) = %q", got)
 	}
 }
@@ -55,7 +55,7 @@ func TestRougeNameArgToS(t *testing.T) {
 // TestRougeStringArgToS covers rougeStringArg's #to_s fall-through arm for a
 // non-String source value.
 func TestRougeStringArgToS(t *testing.T) {
-	if got := rougeStringArg(object.Integer(9)); got != "9" {
+	if got := rougeStringArg(object.IntValue(int64(object.Integer(9)))); got != "9" {
 		t.Errorf("rougeStringArg(int) = %q", got)
 	}
 }

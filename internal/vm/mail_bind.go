@@ -93,9 +93,9 @@ func mailNew(vm *VM, args []object.Value, blk *Proc) object.Value {
 	}
 	msg := &MailMessage{m: mailMsg{m: mail.New(raw)}}
 	if blk != nil {
-		vm.callBlockSelf(blk, msg, nil)
+		vm.callBlockSelf(blk, object.Wrap(msg), nil)
 	}
-	return msg
+	return object.Wrap(msg)
 }
 
 // mailRead implements Mail.read: it reads and parses a message from a file,
@@ -105,7 +105,7 @@ func mailRead(path string) object.Value {
 	if err != nil {
 		raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", path)
 	}
-	return &MailMessage{m: mailMsg{m: m}}
+	return object.Wrap(&MailMessage{m: mailMsg{m: m}})
 }
 
 // mailAddressValue renders an address field: nil when empty, the single String
@@ -114,9 +114,9 @@ func mailRead(path string) object.Value {
 func mailAddressValue(addrs []string) object.Value {
 	switch len(addrs) {
 	case 0:
-		return object.NilV
+		return object.NilVal()
 	case 1:
-		return object.NewString(addrs[0])
+		return object.Wrap(object.NewString(addrs[0]))
 	default:
 		return strSliceToArray(addrs)
 	}
@@ -126,9 +126,9 @@ func mailAddressValue(addrs []string) object.Value {
 // when empty (an absent field reads as nil in the gem).
 func mailOptStr(s string) object.Value {
 	if s == "" {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(s)
+	return object.Wrap(object.NewString(s))
 }
 
 // mailDateValue maps the Date: header to a Ruby Time, or Ruby nil when it is
@@ -136,9 +136,9 @@ func mailOptStr(s string) object.Value {
 func mailDateValue(m mailMsg) object.Value {
 	t, ok := m.Date()
 	if !ok {
-		return object.NilV
+		return object.NilVal()
 	}
-	return &Time{t: gotime.FromUnix(t.Unix())}
+	return object.Wrap(&Time{t: gotime.FromUnix(t.Unix())})
 }
 
 // mailPartsArray wraps a slice of parts into a Ruby Array of Mail::Message
@@ -146,18 +146,18 @@ func mailDateValue(m mailMsg) object.Value {
 func mailPartsArray(parts []*mail.Part) object.Value {
 	arr := object.NewArrayFromSlice(make([]object.Value, len(parts)))
 	for i, p := range parts {
-		arr.Elems[i] = &MailMessage{m: mailMsg{m: p}}
+		arr.Elems[i] = object.Wrap(&MailMessage{m: mailMsg{m: p}})
 	}
-	return arr
+	return object.Wrap(arr)
 }
 
 // mailPartOrNil wraps a single part as a Mail::Message, or Ruby nil when the
 // message has no such part.
 func mailPartOrNil(p *mail.Part) object.Value {
 	if p == nil {
-		return object.NilV
+		return object.NilVal()
 	}
-	return &MailMessage{m: mailMsg{m: p}}
+	return object.Wrap(&MailMessage{m: mailMsg{m: p}})
 }
 
 // mailFieldsArray wraps a message header's fields into a Ruby Array of
@@ -166,9 +166,9 @@ func mailFieldsArray(h *mail.Header) object.Value {
 	fields := h.Fields()
 	arr := object.NewArrayFromSlice(make([]object.Value, len(fields)))
 	for i, f := range fields {
-		arr.Elems[i] = &MailField{f: mailField{f: f}}
+		arr.Elems[i] = object.Wrap(&MailField{f: mailField{f: f}})
 	}
-	return arr
+	return object.Wrap(arr)
 }
 
 // mailHeaderHash renders the message header as a Ruby Hash of field name to
@@ -178,7 +178,7 @@ func mailFieldsArray(h *mail.Header) object.Value {
 func mailHeaderHash(m mailMsg) object.Value {
 	h := object.NewHash()
 	for _, f := range m.Header().Fields() {
-		h.Set(object.NewString(f.Name), object.NewString(f.Value))
+		h.Set(object.Wrap(object.NewString(f.Name)), object.Wrap(object.NewString(f.Value)))
 	}
-	return h
+	return object.Wrap(h)
 }

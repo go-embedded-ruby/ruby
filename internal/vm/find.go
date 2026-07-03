@@ -46,9 +46,9 @@ func (vm *VM) registerFind() {
 func (vm *VM) installFind() {
 	mod := newClass("Find", nil)
 	mod.isModule = true
-	vm.consts["Find"] = mod
+	vm.consts["Find"] = object.Wrap(mod)
 
-	mod.consts["VERSION"] = object.NewString("0.2.0")
+	mod.consts["VERSION"] = object.Wrap(object.NewString("0.2.0"))
 
 	// define installs fn as both a module-method (Find.fn) and an instance method,
 	// mirroring Ruby's `module_function :find, :prune`.
@@ -68,25 +68,25 @@ func (vm *VM) installFind() {
 		if blk == nil {
 			// MRI returns enum_for(:find, *paths, ignore_error:) — replay the call
 			// with the original args (start paths plus any trailing kwargs hash).
-			return enumFor(self, "find", args...)
+			return object.Wrap(enumFor(self, "find", args...))
 		}
 		findWalk(vm, findLister{vm: vm}, paths, ignoreError, func(path object.Value) {
 			vm.callBlock(blk, []object.Value{path})
 		})
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// Find.prune skips the current file or directory; inside the block passed to
 	// Find.find it is `throw :prune`, recovered by findYield and turned into
 	// find.ErrPrune so the engine prunes the current path.
 	define("prune", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		panic(throwSignal{tag: pruneTag, value: object.NilV})
+		panic(throwSignal{tag: pruneTag, value: object.NilVal()})
 	})
 }
 
 // pruneTag is the throw tag Find.prune uses (:prune). It is a Symbol value, so it
 // matches by value exactly like Ruby's `catch(:prune) { ... throw :prune }`.
-var pruneTag object.Value = object.Symbol("prune")
+var pruneTag object.Value = object.SymVal(string(object.Symbol("prune")))
 
 // findArgs splits Find.find's arguments into the start paths and the ignore_error
 // flag. The trailing argument may be a kwargs Hash carrying :ignore_error
@@ -95,7 +95,7 @@ var pruneTag object.Value = object.Symbol("prune")
 func findArgs(vm *VM, args []object.Value) (paths []string, ignoreError bool) {
 	ignoreError = true
 	if h, ok := trailingHash(args); ok {
-		if v, ok := h.Get(object.Symbol("ignore_error")); ok {
+		if v, ok := h.Get(object.SymVal(string(object.Symbol("ignore_error")))); ok {
 			ignoreError = v.Truthy()
 		}
 		args = args[:len(args)-1]
@@ -165,7 +165,7 @@ func findYield(vm *VM, emit func(object.Value), path string) (yieldErr error) {
 			panic(r)
 		}
 	}()
-	emit(object.NewString(path))
+	emit(object.Wrap(object.NewString(path)))
 	return nil
 }
 
@@ -188,7 +188,7 @@ type findLister struct{ vm *VM }
 // to Errno::ENOENT as MRI does.
 func (l findLister) Exist(path string) bool {
 	cFile := l.vm.consts["File"]
-	return l.vm.send(cFile, "exist?", []object.Value{object.NewString(path)}, nil).Truthy()
+	return l.vm.send(cFile, "exist?", []object.Value{object.Wrap(object.NewString(path))}, nil).Truthy()
 }
 
 // IsDir reports whether path is a directory to descend into, via
@@ -199,7 +199,7 @@ func (l findLister) Exist(path string) bool {
 func (l findLister) IsDir(path string) (bool, error) {
 	cFile := l.vm.consts["File"]
 	isDir, err := findCall(l.vm, func() object.Value {
-		st := l.vm.send(cFile, "lstat", []object.Value{object.NewString(path)}, nil)
+		st := l.vm.send(cFile, "lstat", []object.Value{object.Wrap(object.NewString(path))}, nil)
 		return l.vm.send(st, "directory?", nil, nil)
 	})
 	if err != nil {
@@ -214,7 +214,7 @@ func (l findLister) IsDir(path string) (bool, error) {
 func (l findLister) Children(dir string) ([]string, error) {
 	cDir := l.vm.consts["Dir"]
 	v, err := findCall(l.vm, func() object.Value {
-		return l.vm.send(cDir, "children", []object.Value{object.NewString(dir)}, nil)
+		return l.vm.send(cDir, "children", []object.Value{object.Wrap(object.NewString(dir))}, nil)
 	})
 	if err != nil {
 		return nil, err

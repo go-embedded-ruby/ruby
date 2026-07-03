@@ -64,7 +64,7 @@ func raiseIPAddrErr(err error) {
 // matching Ruby exception, then returns the wrapped Ruby value.
 func ipOK(ip *libipaddr.IPAddr, err error) object.Value {
 	raiseIPAddrErr(err)
-	return &IPAddr{ip: ip}
+	return object.Wrap(&IPAddr{ip: ip})
 }
 
 // ipOperand maps a Ruby operand for the bitwise/comparison combinators onto a
@@ -206,7 +206,7 @@ func (vm *VM) registerIPAddr() {
 
 	cls := newClass("IPAddr", vm.cObject)
 	vm.cIPAddr = cls
-	vm.consts["IPAddr"] = cls
+	vm.consts["IPAddr"] = object.Wrap(cls)
 	// Comparable gives <, <=, >, >= from #<=> (IPAddr includes Comparable in MRI);
 	// the prelude registered Comparable before this runs.
 	if cmp, ok := object.KindOK[*RClass](vm.consts["Comparable"]); ok {
@@ -214,10 +214,10 @@ func (vm *VM) registerIPAddr() {
 	}
 	// Re-attach the error classes as nested constants so Ruby `IPAddr::Error`
 	// (etc.) resolves them, the CSV::Row / ExceptionForMatrix pattern.
-	cls.consts["Error"] = vm.cIPAddrError
-	cls.consts["InvalidAddressError"] = vm.cIPAddrInvalidAddressError
-	cls.consts["InvalidPrefixError"] = vm.cIPAddrInvalidPrefixError
-	cls.consts["AddressFamilyError"] = vm.cIPAddrAddressFamilyError
+	cls.consts["Error"] = object.Wrap(vm.cIPAddrError)
+	cls.consts["InvalidAddressError"] = object.Wrap(vm.cIPAddrInvalidAddressError)
+	cls.consts["InvalidPrefixError"] = object.Wrap(vm.cIPAddrInvalidPrefixError)
+	cls.consts["AddressFamilyError"] = object.Wrap(vm.cIPAddrAddressFamilyError)
 
 	sm := func(name string, fn NativeFn) { cls.smethods[name] = &Method{name: name, owner: cls, native: fn} }
 
@@ -273,7 +273,7 @@ func (vm *VM) registerIPAddr() {
 		}
 		s, err := libipaddr.NtopString(string(str.Bytes()), str.EncName())
 		raiseIPAddrErr(err)
-		return object.NewString(s)
+		return object.Wrap(object.NewString(s))
 	})
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -281,19 +281,19 @@ func (vm *VM) registerIPAddr() {
 
 	// String / rendering.
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ip.ToS())
+		return object.Wrap(object.NewString(self(v).ip.ToS()))
 	})
 	d("to_string", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ip.ToString())
+		return object.Wrap(object.NewString(self(v).ip.ToString()))
 	})
 	d("cidr", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ip.Cidr())
+		return object.Wrap(object.NewString(self(v).ip.Cidr()))
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ip.Inspect())
+		return object.Wrap(object.NewString(self(v).ip.Inspect()))
 	})
 	d("netmask", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ip.Netmask())
+		return object.Wrap(object.NewString(self(v).ip.Netmask()))
 	})
 
 	// Prefix / masking.
@@ -320,21 +320,21 @@ func (vm *VM) registerIPAddr() {
 			}
 		}
 		raise("TypeError", "mask expects an Integer prefix length or a String netmask")
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// Membership / iteration.
 	includeFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		ok, err := self(v).ip.Include(ipIncludeOperand(args[0]))
 		raiseIPAddrErr(err)
-		return object.Bool(ok)
+		return object.BoolValue(bool(object.Bool(ok)))
 	}
 	d("include?", includeFn)
 	d("===", includeFn)
 	d("to_range", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		lo, hi, err := self(v).ip.ToRange()
 		raiseIPAddrErr(err)
-		return object.NewRange(&IPAddr{ip: lo}, &IPAddr{ip: hi}, false)
+		return object.Wrap(object.NewRange(object.Wrap(&IPAddr{ip: lo}), object.Wrap(&IPAddr{ip: hi}), false))
 	})
 	// each is an EXTENSION beyond MRI 4.0.5 (MRI's IPAddr has no #each); the
 	// library exposes it as iteration over to_range, lowest address first.
@@ -343,7 +343,7 @@ func (vm *VM) registerIPAddr() {
 			raise("LocalJumpError", "no block given (each)")
 		}
 		err := self(v).ip.Each(func(e *libipaddr.IPAddr) error {
-			vm.callBlock(blk, []object.Value{&IPAddr{ip: e}})
+			vm.callBlock(blk, []object.Value{object.Wrap(&IPAddr{ip: e})})
 			return nil
 		})
 		raiseIPAddrErr(err)
@@ -383,21 +383,21 @@ func (vm *VM) registerIPAddr() {
 		// performs the same coercion, so the operand is forwarded as-is.
 		o, ok := ipCmpOperand(args[0])
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		res, comparable := self(v).ip.Cmp(o)
 		if !comparable {
-			return object.NilV
+			return object.NilVal()
 		}
 		return object.IntValue(int64(res))
 	})
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := object.KindOK[*IPAddr](args[0])
-		return object.Bool(ok && self(v).ip.Eql(o.ip))
+		return object.BoolValue(bool(object.Bool(ok && self(v).ip.Eql(o.ip))))
 	})
 	d("eql?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := object.KindOK[*IPAddr](args[0])
-		return object.Bool(ok && self(v).ip.Eql(o.ip))
+		return object.BoolValue(bool(object.Bool(ok && self(v).ip.Eql(o.ip))))
 	})
 	d("hash", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NormInt(new(big.Int).SetUint64(self(v).ip.Hash()))
@@ -405,29 +405,29 @@ func (vm *VM) registerIPAddr() {
 
 	// Predicates.
 	d("ipv4?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ip.Ipv4())
+		return object.BoolValue(bool(object.Bool(self(v).ip.Ipv4())))
 	})
 	d("ipv6?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ip.Ipv6())
+		return object.BoolValue(bool(object.Bool(self(v).ip.Ipv6())))
 	})
 	d("loopback?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ip.Loopback())
+		return object.BoolValue(bool(object.Bool(self(v).ip.Loopback())))
 	})
 	d("private?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ip.Private())
+		return object.BoolValue(bool(object.Bool(self(v).ip.Private())))
 	})
 	d("link_local?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ip.LinkLocal())
+		return object.BoolValue(bool(object.Bool(self(v).ip.LinkLocal())))
 	})
 	// multicast? is an EXTENSION beyond MRI 4.0.5 (MRI's IPAddr has no #multicast?).
 	d("multicast?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ip.Multicast())
+		return object.BoolValue(bool(object.Bool(self(v).ip.Multicast())))
 	})
 	d("ipv4_mapped?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ip.IsIpv4Mapped())
+		return object.BoolValue(bool(object.Bool(self(v).ip.IsIpv4Mapped())))
 	})
 	d("ipv4_compat?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ip.IsIpv4Compat())
+		return object.BoolValue(bool(object.Bool(self(v).ip.IsIpv4Compat())))
 	})
 
 	// Conversions.
@@ -449,7 +449,7 @@ func (vm *VM) registerIPAddr() {
 	d("hton", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		b, err := self(v).ip.HtonString()
 		raiseIPAddrErr(err)
-		return object.NewString(string(b))
+		return object.Wrap(object.NewString(string(b)))
 	})
 }
 
@@ -473,7 +473,7 @@ func (vm *VM) registerIPAddrErrors() {
 
 	mk := func(short string, parent *RClass) *RClass {
 		cls := newClass("IPAddr::"+short, parent)
-		vm.consts["IPAddr::"+short] = cls
+		vm.consts["IPAddr::"+short] = object.Wrap(cls)
 		return cls
 	}
 	vm.cIPAddrError = mk("Error", arg)

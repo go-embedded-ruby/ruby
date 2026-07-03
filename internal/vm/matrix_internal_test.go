@@ -52,10 +52,10 @@ func TestMatrixNumToValue(t *testing.T) {
 // own numFromAny error unreachable from the binding).
 func TestMatrixNumFromValue(t *testing.T) {
 	cases := []object.Value{
-		object.Integer(3),
-		&object.Bignum{I: big.NewInt(7)},
-		&object.Rational{R: big.NewRat(1, 2)},
-		object.Float(1.5),
+		object.IntValue(int64(object.Integer(3))),
+		object.Wrap(&object.Bignum{I: big.NewInt(7)}),
+		object.Wrap(&object.Rational{R: big.NewRat(1, 2)}),
+		object.FloatValue(float64(object.Float(1.5))),
 	}
 	for _, v := range cases {
 		// Each accepted kind round-trips through the library: feeding the Num into
@@ -70,7 +70,7 @@ func TestMatrixNumFromValue(t *testing.T) {
 		}
 	}
 
-	assertRaises(t, "TypeError", func() { numFromValue(object.NewString("x")) })
+	assertRaises(t, "TypeError", func() { numFromValue(object.Wrap(object.NewString("x"))) })
 }
 
 // TestMatrixRaiseErr covers raiseMatrixErr across its branches: nil is a no-op,

@@ -16,7 +16,7 @@ import (
 func (vm *VM) registerSyslog() {
 	mod := newClass("Syslog", nil)
 	mod.isModule = true
-	vm.consts["Syslog"] = mod
+	vm.consts["Syslog"] = object.Wrap(mod)
 
 	// Severity levels (LOG_EMERG..LOG_DEBUG) and a couple of common facilities,
 	// the values app code ORs and compares against.

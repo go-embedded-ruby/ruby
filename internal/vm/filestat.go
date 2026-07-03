@@ -197,8 +197,8 @@ func (vm *VM) registerFileStat() {
 
 	cStat := newClass("File::Stat", vm.cObject)
 	vm.cFileStat = cStat
-	cFile.consts["Stat"] = cStat
-	vm.consts["File::Stat"] = cStat
+	cFile.consts["Stat"] = object.Wrap(cStat)
+	vm.consts["File::Stat"] = object.Wrap(cStat)
 	// Comparable gives <, <=, >, >= from #<=> (used by code that sorts stats by
 	// mtime); the prelude registered it before this runs.
 	if cmp, ok := object.KindOK[*RClass](vm.consts["Comparable"]); ok {
@@ -208,36 +208,36 @@ func (vm *VM) registerFileStat() {
 	// File::Stat.new(path) stats the path eagerly (following symlinks), the same
 	// as File.stat — MRI raises Errno::ENOENT for a missing path here too.
 	cStat.smethods["new"] = &Method{name: "new", owner: cStat, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return statOrRaise(pathArg(vm, args[0]), true)
+		return object.Wrap(statOrRaise(pathArg(vm, args[0]), true))
 	}}
 
 	self := func(v object.Value) *FileStat { return object.Kind[*FileStat](v) }
 	d := func(name string, fn NativeFn) { cStat.define(name, fn) }
 
 	d("directory?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).fi.Mode()&fs.ModeDir != 0)
+		return object.BoolValue(bool(object.Bool(self(v).fi.Mode()&fs.ModeDir != 0)))
 	})
 	d("file?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).fi.Mode().IsRegular())
+		return object.BoolValue(bool(object.Bool(self(v).fi.Mode().IsRegular())))
 	})
 	d("symlink?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).fi.Mode()&fs.ModeSymlink != 0)
+		return object.BoolValue(bool(object.Bool(self(v).fi.Mode()&fs.ModeSymlink != 0)))
 	})
 	d("pipe?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).fi.Mode()&fs.ModeNamedPipe != 0)
+		return object.BoolValue(bool(object.Bool(self(v).fi.Mode()&fs.ModeNamedPipe != 0)))
 	})
 	d("socket?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).fi.Mode()&fs.ModeSocket != 0)
+		return object.BoolValue(bool(object.Bool(self(v).fi.Mode()&fs.ModeSocket != 0)))
 	})
 	d("blockdev?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := self(v).fi.Mode()
-		return object.Bool(m&fs.ModeDevice != 0 && m&fs.ModeCharDevice == 0)
+		return object.BoolValue(bool(object.Bool(m&fs.ModeDevice != 0 && m&fs.ModeCharDevice == 0)))
 	})
 	d("chardev?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).fi.Mode()&fs.ModeCharDevice != 0)
+		return object.BoolValue(bool(object.Bool(self(v).fi.Mode()&fs.ModeCharDevice != 0)))
 	})
 	d("ftype", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ftype())
+		return object.Wrap(object.NewString(self(v).ftype()))
 	})
 	d("mode", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(self(v).modeBits())
@@ -249,10 +249,10 @@ func (vm *VM) registerFileStat() {
 		if sz := self(v).fi.Size(); sz > 0 {
 			return object.IntValue(sz)
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("zero?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).fi.Size() == 0)
+		return object.BoolValue(bool(object.Bool(self(v).fi.Size() == 0)))
 	})
 	d("uid", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(self(v).sys.uid)
@@ -274,16 +274,16 @@ func (vm *VM) registerFileStat() {
 	})
 	d("owned?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self(v)
-		return object.Bool(s.sys.hasSys && int64(statEuid()) == s.sys.uid)
+		return object.BoolValue(bool(object.Bool(s.sys.hasSys && int64(statEuid()) == s.sys.uid)))
 	})
 	d("readable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).accessible(4))
+		return object.BoolValue(bool(object.Bool(self(v).accessible(4))))
 	})
 	d("writable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).accessible(2))
+		return object.BoolValue(bool(object.Bool(self(v).accessible(2))))
 	})
 	d("executable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).accessible(1))
+		return object.BoolValue(bool(object.Bool(self(v).accessible(1))))
 	})
 	d("world_writable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self(v)
@@ -291,24 +291,24 @@ func (vm *VM) registerFileStat() {
 		if perm&0o002 != 0 {
 			return object.IntValue(perm) // MRI returns the perm bits when world-writable
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("mtime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return statTime(self(v).fi.ModTime().Unix())
+		return object.Wrap(statTime(self(v).fi.ModTime().Unix()))
 	})
 	// ctime/atime: Go's fs.FileInfo exposes only ModTime portably, so both report
 	// the modification time (whole-second). Puppet reads mtime; ctime/atime are
 	// provided for completeness and never raise.
 	d("ctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return statTime(self(v).fi.ModTime().Unix())
+		return object.Wrap(statTime(self(v).fi.ModTime().Unix()))
 	})
 	d("atime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return statTime(self(v).fi.ModTime().Unix())
+		return object.Wrap(statTime(self(v).fi.ModTime().Unix()))
 	})
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := object.KindOK[*FileStat](args[0])
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		a, b := self(v).fi.ModTime().Unix(), other.fi.ModTime().Unix()
 		switch {
@@ -321,15 +321,15 @@ func (vm *VM) registerFileStat() {
 		}
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Inspect())
+		return object.Wrap(object.NewString(self(v).Inspect()))
 	})
 
 	// File.stat / File.lstat class methods on the File class.
 	cFile.smethods["stat"] = &Method{name: "stat", owner: cFile, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return statOrRaise(pathArg(vm, args[0]), true)
+		return object.Wrap(statOrRaise(pathArg(vm, args[0]), true))
 	}}
 	cFile.smethods["lstat"] = &Method{name: "lstat", owner: cFile, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return statOrRaise(pathArg(vm, args[0]), false)
+		return object.Wrap(statOrRaise(pathArg(vm, args[0]), false))
 	}}
 
 	vm.registerFileTest()
@@ -342,7 +342,7 @@ func (vm *VM) registerFileStat() {
 func (vm *VM) registerFileTest() {
 	mod := newClass("FileTest", nil)
 	mod.isModule = true
-	vm.consts["FileTest"] = mod
+	vm.consts["FileTest"] = object.Wrap(mod)
 	sdef := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	// statOf stats path (following symlinks) returning nil for a missing path, so
@@ -357,24 +357,24 @@ func (vm *VM) registerFileTest() {
 
 	sdef("exist?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		_, err := osStat(pathArg(vm, args[0]))
-		return object.Bool(err == nil)
+		return object.BoolValue(bool(object.Bool(err == nil)))
 	})
 	mod.smethods["exists?"] = mod.smethods["exist?"]
 	sdef("directory?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Mode()&fs.ModeDir != 0)
+		return object.BoolValue(bool(object.Bool(s != nil && s.fi.Mode()&fs.ModeDir != 0)))
 	})
 	sdef("file?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Mode().IsRegular())
+		return object.BoolValue(bool(object.Bool(s != nil && s.fi.Mode().IsRegular())))
 	})
 	sdef("symlink?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		fi, err := osLstat(pathArg(vm, args[0]))
-		return object.Bool(err == nil && fi.Mode()&fs.ModeSymlink != 0)
+		return object.BoolValue(bool(object.Bool(err == nil && fi.Mode()&fs.ModeSymlink != 0)))
 	})
 	sdef("zero?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Size() == 0)
+		return object.BoolValue(bool(object.Bool(s != nil && s.fi.Size() == 0)))
 	})
 	sdef("size", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])
@@ -387,20 +387,20 @@ func (vm *VM) registerFileTest() {
 	sdef("size?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))
 		if s == nil || s.fi.Size() == 0 {
-			return object.NilV
+			return object.NilVal()
 		}
 		return object.IntValue(s.fi.Size())
 	})
 	sdef("readable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(4))
+		return object.BoolValue(bool(object.Bool(s != nil && s.accessible(4))))
 	})
 	sdef("writable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(2))
+		return object.BoolValue(bool(object.Bool(s != nil && s.accessible(2))))
 	})
 	sdef("executable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(1))
+		return object.BoolValue(bool(object.Bool(s != nil && s.accessible(1))))
 	})
 }

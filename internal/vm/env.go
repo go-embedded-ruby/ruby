@@ -31,15 +31,15 @@ var (
 func (vm *VM) registerENV() {
 	cls := newClass("", vm.cObject) // ENV's class is anonymous in MRI too
 	env := &RObject{class: cls, ivars: map[string]object.Value{}}
-	vm.consts["ENV"] = env
+	vm.consts["ENV"] = object.Wrap(env)
 
 	def := func(name string, fn NativeFn) { cls.define(name, fn) }
 
 	get := func(key string) object.Value {
 		if v, ok := envLookup(key); ok {
-			return object.NewString(v)
+			return object.Wrap(object.NewString(v))
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	def("[]", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return get(strArg(args[0]))
@@ -57,11 +57,11 @@ func (vm *VM) registerENV() {
 	def("fetch", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		key := strArg(args[0])
 		if v, ok := envLookup(key); ok {
-			return object.NewString(v)
+			return object.Wrap(object.NewString(v))
 		}
 		switch {
 		case blk != nil:
-			return vm.callBlock(blk, []object.Value{object.NewString(key)})
+			return vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(key))})
 		case len(args) > 1:
 			return args[1]
 		default:
@@ -70,15 +70,15 @@ func (vm *VM) registerENV() {
 	})
 	def("include?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		_, ok := envLookup(strArg(args[0]))
-		return object.Bool(ok)
+		return object.BoolValue(bool(object.Bool(ok)))
 	})
 	def("key?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		_, ok := envLookup(strArg(args[0]))
-		return object.Bool(ok)
+		return object.BoolValue(bool(object.Bool(ok)))
 	})
 	def("has_key?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		_, ok := envLookup(strArg(args[0]))
-		return object.Bool(ok)
+		return object.BoolValue(bool(object.Bool(ok)))
 	})
 	def("delete", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		key := strArg(args[0])
@@ -95,7 +95,7 @@ func (vm *VM) registerENV() {
 		return self
 	})
 	toHash := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return envHash()
+		return object.Wrap(envHash())
 	}
 	def("to_hash", toHash)
 	def("to_h", toHash)
@@ -132,14 +132,14 @@ func (vm *VM) registerENV() {
 		want := strArg(args[0])
 		for _, kv := range envEnviron() {
 			if i := strings.IndexByte(kv, '='); i >= 0 && kv[i+1:] == want {
-				return object.NewString(kv[:i])
+				return object.Wrap(object.NewString(kv[:i]))
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	def("keys", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := envHash()
-		return object.NewArrayFromSlice(append([]object.Value(nil), h.Keys...))
+		return object.Wrap(object.NewArrayFromSlice(append([]object.Value(nil), h.Keys...)))
 	})
 }
 
@@ -157,7 +157,7 @@ func envHash() *object.Hash {
 	h := object.NewHash()
 	for _, kv := range envEnviron() {
 		if i := strings.IndexByte(kv, '='); i >= 0 {
-			h.Set(object.NewString(kv[:i]), object.NewString(kv[i+1:]))
+			h.Set(object.Wrap(object.NewString(kv[:i])), object.Wrap(object.NewString(kv[i+1:])))
 		}
 	}
 	return h

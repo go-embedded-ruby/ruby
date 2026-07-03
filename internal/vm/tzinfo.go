@@ -49,7 +49,7 @@ func (c *Country) Truthy() bool    { return true }
 func (vm *VM) registerTZInfo() {
 	mod := newClass("TZInfo", nil)
 	mod.isModule = true
-	vm.consts["TZInfo"] = mod
+	vm.consts["TZInfo"] = object.Wrap(mod)
 	vm.registerTZInfoErrors(mod)
 
 	tzCls := vm.tzNestedClass(mod, "Timezone")
@@ -78,16 +78,16 @@ func (vm *VM) registerTZInfo() {
 
 	// TZInfo::Timezone instance methods.
 	tzCls.define("identifier", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Timezone](self).tz.Identifier())
+		return object.Wrap(object.NewString(object.Kind[*Timezone](self).tz.Identifier()))
 	})
 	tzCls.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Timezone](self).tz.Identifier())
+		return object.Wrap(object.NewString(object.Kind[*Timezone](self).tz.Identifier()))
 	})
 	tzCls.define("canonical_identifier", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Timezone](self).tz.CanonicalIdentifier())
+		return object.Wrap(object.NewString(object.Kind[*Timezone](self).tz.CanonicalIdentifier()))
 	})
 	tzCls.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Timezone](self).tz.String())
+		return object.Wrap(object.NewString(object.Kind[*Timezone](self).tz.String()))
 	})
 	tzCls.define("now", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return goTimeToRuby(object.Kind[*Timezone](self).tz.Now())
@@ -103,31 +103,31 @@ func (vm *VM) registerTZInfo() {
 		return goTimeToRuby(out)
 	})
 	tzCls.define("period_for_utc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &TimezonePeriod{p: object.Kind[*Timezone](self).tz.PeriodForUTC(rubyTimeArg(args))}
+		return object.Wrap(&TimezonePeriod{p: object.Kind[*Timezone](self).tz.PeriodForUTC(rubyTimeArg(args))})
 	})
 	tzCls.define("current_period", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &TimezonePeriod{p: object.Kind[*Timezone](self).tz.CurrentPeriod()}
+		return object.Wrap(&TimezonePeriod{p: object.Kind[*Timezone](self).tz.CurrentPeriod()})
 	})
 	tzCls.define("utc_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(object.Kind[*Timezone](self).tz.UTCOffset()))
 	})
 	tzCls.define("abbreviation", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Timezone](self).tz.Abbreviation(rubyTimeArg(args)))
+		return object.Wrap(object.NewString(object.Kind[*Timezone](self).tz.Abbreviation(rubyTimeArg(args))))
 	})
 	tzCls.define("dst?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*Timezone](self).tz.DST(rubyTimeArg(args)))
+		return object.BoolValue(bool(object.Bool(object.Kind[*Timezone](self).tz.DST(rubyTimeArg(args)))))
 	})
 
 	// TZInfo::TimezonePeriod instance methods.
 	pCls := object.Kind[*RClass](vm.consts["TZInfo::TimezonePeriod"])
 	pCls.define("offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &TimezoneOffset{o: object.Kind[*TimezonePeriod](self).p.Offset}
+		return object.Wrap(&TimezoneOffset{o: object.Kind[*TimezonePeriod](self).p.Offset})
 	})
 	pCls.define("abbreviation", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*TimezonePeriod](self).p.Abbreviation())
+		return object.Wrap(object.NewString(object.Kind[*TimezonePeriod](self).p.Abbreviation()))
 	})
 	pCls.define("dst?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*TimezonePeriod](self).p.DST())
+		return object.BoolValue(bool(object.Bool(object.Kind[*TimezonePeriod](self).p.DST())))
 	})
 	pCls.define("base_utc_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(object.Kind[*TimezonePeriod](self).p.BaseUTCOffset()))
@@ -151,10 +151,10 @@ func (vm *VM) registerTZInfo() {
 		return object.IntValue(int64(object.Kind[*TimezoneOffset](self).o.UTCTotalOffset()))
 	})
 	oCls.define("abbreviation", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*TimezoneOffset](self).o.Abbreviation)
+		return object.Wrap(object.NewString(object.Kind[*TimezoneOffset](self).o.Abbreviation))
 	})
 	oCls.define("dst?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*TimezoneOffset](self).o.DST())
+		return object.BoolValue(bool(object.Bool(object.Kind[*TimezoneOffset](self).o.DST())))
 	})
 
 	// TZInfo::Country.get(code) / .all_codes.
@@ -170,10 +170,10 @@ func (vm *VM) registerTZInfo() {
 			return tzCountryCodes()
 		}}
 	countryCls.define("code", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Country](self).c.Code())
+		return object.Wrap(object.NewString(object.Kind[*Country](self).c.Code()))
 	})
 	countryCls.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Country](self).c.Name())
+		return object.Wrap(object.NewString(object.Kind[*Country](self).c.Name()))
 	})
 	countryCls.define("zone_identifiers", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strSliceToArray(object.Kind[*Country](self).c.ZoneIdentifiers())
@@ -185,8 +185,8 @@ func (vm *VM) registerTZInfo() {
 // can resolve it for native value dispatch.
 func (vm *VM) tzNestedClass(mod *RClass, name string) *RClass {
 	c := newClass("TZInfo::"+name, vm.cObject)
-	mod.consts[name] = c
-	vm.consts["TZInfo::"+name] = c
+	mod.consts[name] = object.Wrap(c)
+	vm.consts["TZInfo::"+name] = object.Wrap(c)
 	return c
 }
 
@@ -198,8 +198,8 @@ func (vm *VM) registerTZInfoErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	reg("InvalidTimezoneIdentifier", "TZInfo::InvalidTimezoneIdentifier", std)

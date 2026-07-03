@@ -22,7 +22,7 @@ import (
 func registerNumericComplexCompat(vm *VM, cNumeric *RClass) {
 	phaseOf := func(self object.Value) object.Value {
 		if f, ok := toFloat(self); ok && f < 0 {
-			return object.Float(math.Pi)
+			return object.FloatValue(float64(object.Float(math.Pi)))
 		}
 		return object.IntValue(0)
 	}
@@ -33,10 +33,10 @@ func registerNumericComplexCompat(vm *VM, cNumeric *RClass) {
 	cNumeric.define("arg", phaseFn)
 	cNumeric.define("angle", phaseFn)
 	cNumeric.define("polar", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArray(vm.send(self, "abs", nil, nil), phaseOf(self))
+		return object.Wrap(object.NewArray(vm.send(self, "abs", nil, nil), phaseOf(self)))
 	})
 	rectFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArray(self, object.IntValue(0))
+		return object.Wrap(object.NewArray(self, object.IntValue(0)))
 	}
 	cNumeric.define("rect", rectFn)
 	cNumeric.define("rectangular", rectFn)
@@ -92,10 +92,10 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 		return self
 	})
 	cNumeric.define("negative?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(cmpZero(self) < 0)
+		return object.BoolValue(bool(object.Bool(cmpZero(self) < 0)))
 	})
 	cNumeric.define("positive?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(cmpZero(self) > 0)
+		return object.BoolValue(bool(object.Bool(cmpZero(self) > 0)))
 	})
 	cNumeric.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := vm.send(self, "to_f", nil, nil)
@@ -120,7 +120,7 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 		return modOf(self, args[0])
 	})
 	cNumeric.define("divmod", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewArray(divOf(self, args[0]), modOf(self, args[0]))
+		return object.Wrap(object.NewArray(divOf(self, args[0]), modOf(self, args[0])))
 	})
 }
 
@@ -157,24 +157,24 @@ func complexOp(op bytecode.Op, a *object.Complex, b object.Value) object.Value {
 	}
 	switch op {
 	case bytecode.OpAdd:
-		return &object.Complex{Re: binary(bytecode.OpAdd, a.Re, bc.Re), Im: binary(bytecode.OpAdd, a.Im, bc.Im)}
+		return object.Wrap(&object.Complex{Re: binary(bytecode.OpAdd, a.Re, bc.Re), Im: binary(bytecode.OpAdd, a.Im, bc.Im)})
 	case bytecode.OpSub:
-		return &object.Complex{Re: binary(bytecode.OpSub, a.Re, bc.Re), Im: binary(bytecode.OpSub, a.Im, bc.Im)}
+		return object.Wrap(&object.Complex{Re: binary(bytecode.OpSub, a.Re, bc.Re), Im: binary(bytecode.OpSub, a.Im, bc.Im)})
 	case bytecode.OpMul:
 		// (ar + ai·i)(br + bi·i) = (ar·br − ai·bi) + (ar·bi + ai·br)i.
 		re := binary(bytecode.OpSub, binary(bytecode.OpMul, a.Re, bc.Re), binary(bytecode.OpMul, a.Im, bc.Im))
 		im := binary(bytecode.OpAdd, binary(bytecode.OpMul, a.Re, bc.Im), binary(bytecode.OpMul, a.Im, bc.Re))
-		return &object.Complex{Re: re, Im: im}
+		return object.Wrap(&object.Complex{Re: re, Im: im})
 	case bytecode.OpDiv:
 		ar, _ := toFloat(a.Re)
 		ai, _ := toFloat(a.Im)
 		br, _ := toFloat(bc.Re)
 		bi, _ := toFloat(bc.Im)
 		den := br*br + bi*bi
-		return &object.Complex{
-			Re: object.Float((ar*br + ai*bi) / den),
-			Im: object.Float((ai*br - ar*bi) / den),
-		}
+		return object.Wrap(&object.Complex{
+			Re: object.FloatValue(float64(object.Float((ar*br + ai*bi) / den))),
+			Im: object.FloatValue(float64(object.Float((ai*br - ar*bi) / den))),
+		})
 	}
 	return raise("NoMethodError", "undefined method '%s' for a Complex", op)
 }
@@ -199,7 +199,7 @@ func (vm *VM) registerComplex() {
 		if _, ok := toFloat(im); !ok {
 			return raise("TypeError", "can't convert %s into Complex", im.Inspect())
 		}
-		return &object.Complex{Re: re, Im: im}
+		return object.Wrap(&object.Complex{Re: re, Im: im})
 	})
 
 	cval := func(self object.Value) *object.Complex { return object.Kind[*object.Complex](self) }
@@ -213,7 +213,7 @@ func (vm *VM) registerComplex() {
 
 	abs := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		c := cval(self)
-		return object.Float(math.Hypot(complexFloat(c.Re), complexFloat(c.Im)))
+		return object.FloatValue(float64(object.Float(math.Hypot(complexFloat(c.Re), complexFloat(c.Im)))))
 	}
 	vm.cComplex.define("abs", abs)
 	vm.cComplex.define("magnitude", abs)
@@ -225,7 +225,7 @@ func (vm *VM) registerComplex() {
 
 	arg := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		c := cval(self)
-		return object.Float(math.Atan2(complexFloat(c.Im), complexFloat(c.Re)))
+		return object.FloatValue(float64(object.Float(math.Atan2(complexFloat(c.Im), complexFloat(c.Re)))))
 	}
 	vm.cComplex.define("arg", arg)
 	vm.cComplex.define("angle", arg)
@@ -233,14 +233,14 @@ func (vm *VM) registerComplex() {
 
 	conj := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		c := cval(self)
-		return &object.Complex{Re: c.Re, Im: negate(c.Im)}
+		return object.Wrap(&object.Complex{Re: c.Re, Im: negate(c.Im)})
 	}
 	vm.cComplex.define("conjugate", conj)
 	vm.cComplex.define("conj", conj)
 
 	rect := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		c := cval(self)
-		return object.NewArray(c.Re, c.Im)
+		return object.Wrap(object.NewArray(c.Re, c.Im))
 	}
 	vm.cComplex.define("rectangular", rect)
 	vm.cComplex.define("rect", rect)
@@ -249,13 +249,13 @@ func (vm *VM) registerComplex() {
 		c := cval(self)
 		mag := object.Float(math.Hypot(complexFloat(c.Re), complexFloat(c.Im)))
 		ang := object.Float(math.Atan2(complexFloat(c.Im), complexFloat(c.Re)))
-		return object.NewArray(mag, ang)
+		return object.Wrap(object.NewArray(object.FloatValue(float64(mag)), object.FloatValue(float64(ang))))
 	})
 
 	vm.cComplex.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(cval(self).ToS())
+		return object.Wrap(object.NewString(cval(self).ToS()))
 	})
 	vm.cComplex.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(cval(self).Inspect())
+		return object.Wrap(object.NewString(cval(self).Inspect()))
 	})
 }

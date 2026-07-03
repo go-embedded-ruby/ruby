@@ -16,9 +16,9 @@ const minInt64 = math.MinInt64
 func binary(op bytecode.Op, a, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpEq:
-		return object.Bool(valueEqual(a, b))
+		return object.BoolValue(bool(object.Bool(valueEqual(a, b))))
 	case bytecode.OpNeq:
-		return object.Bool(!valueEqual(a, b))
+		return object.BoolValue(bool(object.Bool(!valueEqual(a, b))))
 	}
 
 	// String fast paths: "a" + "b" and "a" * 3.
@@ -41,7 +41,7 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		if !ok {
 			return raise("TypeError", "%s can't be coerced into Complex", a.Inspect())
 		}
-		return complexOp(op, ac, bc)
+		return complexOp(op, ac, object.Wrap(bc))
 	}
 
 	// BigDecimal arithmetic: + - * / % delegate to the go-ruby-bigdecimal library
@@ -161,13 +161,13 @@ func bigOp(op bytecode.Op, a, b *big.Int) object.Value {
 		}
 		return object.NormInt(new(big.Int).Mod(a, b))
 	case bytecode.OpLt:
-		return object.Bool(a.Cmp(b) < 0)
+		return object.BoolValue(bool(object.Bool(a.Cmp(b) < 0)))
 	case bytecode.OpGt:
-		return object.Bool(a.Cmp(b) > 0)
+		return object.BoolValue(bool(object.Bool(a.Cmp(b) > 0)))
 	case bytecode.OpLe:
-		return object.Bool(a.Cmp(b) <= 0)
+		return object.BoolValue(bool(object.Bool(a.Cmp(b) <= 0)))
 	case bytecode.OpGe:
-		return object.Bool(a.Cmp(b) >= 0)
+		return object.BoolValue(bool(object.Bool(a.Cmp(b) >= 0)))
 	}
 	return raise("VMError", "bad integer op %s", op)
 }
@@ -197,7 +197,7 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 			if op == bytecode.OpNeq {
 				eq = !eq
 			}
-			return object.Bool(eq)
+			return object.BoolValue(bool(object.Bool(eq)))
 		}
 		return binary(op, a, b)
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
@@ -332,13 +332,13 @@ func intOp(op bytecode.Op, a, b int64) object.Value {
 		}
 		return object.IntValue(floorMod(a, b))
 	case bytecode.OpLt:
-		return object.Bool(a < b)
+		return object.BoolValue(bool(object.Bool(a < b)))
 	case bytecode.OpGt:
-		return object.Bool(a > b)
+		return object.BoolValue(bool(object.Bool(a > b)))
 	case bytecode.OpLe:
-		return object.Bool(a <= b)
+		return object.BoolValue(bool(object.Bool(a <= b)))
 	case bytecode.OpGe:
-		return object.Bool(a >= b)
+		return object.BoolValue(bool(object.Bool(a >= b)))
 	}
 	return raise("VMError", "bad integer op %s", op)
 }
@@ -346,23 +346,23 @@ func intOp(op bytecode.Op, a, b int64) object.Value {
 func floatOp(op bytecode.Op, a, b float64) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		return object.Float(a + b)
+		return object.FloatValue(float64(object.Float(a + b)))
 	case bytecode.OpSub:
-		return object.Float(a - b)
+		return object.FloatValue(float64(object.Float(a - b)))
 	case bytecode.OpMul:
-		return object.Float(a * b)
+		return object.FloatValue(float64(object.Float(a * b)))
 	case bytecode.OpDiv:
-		return object.Float(a / b) // matches Ruby: 1.0/0 => Infinity
+		return object.FloatValue(float64(object.Float(a / b))) // matches Ruby: 1.0/0 => Infinity
 	case bytecode.OpMod:
-		return object.Float(floatMod(a, b))
+		return object.FloatValue(float64(object.Float(floatMod(a, b))))
 	case bytecode.OpLt:
-		return object.Bool(a < b)
+		return object.BoolValue(bool(object.Bool(a < b)))
 	case bytecode.OpGt:
-		return object.Bool(a > b)
+		return object.BoolValue(bool(object.Bool(a > b)))
 	case bytecode.OpLe:
-		return object.Bool(a <= b)
+		return object.BoolValue(bool(object.Bool(a <= b)))
 	case bytecode.OpGe:
-		return object.Bool(a >= b)
+		return object.BoolValue(bool(object.Bool(a >= b)))
 	}
 	return raise("VMError", "bad float op %s", op)
 }
@@ -376,7 +376,7 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		}
 		out := make([]byte, 0, len(a.Bytes())+len(bs.Bytes()))
 		out = append(append(out, a.Bytes()...), bs.Bytes()...)
-		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
+		return object.Wrap(object.NewStringBytesEnc(out, a.Enc)) // result keeps the receiver's encoding
 	case bytecode.OpMul:
 		n, ok := object.AsIntegerOK(b)
 		if !ok {
@@ -389,9 +389,9 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		for i := int64(0); i < int64(n); i++ {
 			out = append(out, a.Bytes()...)
 		}
-		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
+		return object.Wrap(object.NewStringBytesEnc(out, a.Enc)) // result keeps the receiver's encoding
 	case bytecode.OpMod:
-		return object.NewString(formatString(a.Str(), formatArgs(b)))
+		return object.Wrap(object.NewString(formatString(a.Str(), formatArgs(b))))
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
 		bs, ok := object.KindOK[*object.String](b)
 		if !ok {
@@ -400,13 +400,13 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		as, bsv := a.Str(), bs.Str()
 		switch op {
 		case bytecode.OpLt:
-			return object.Bool(as < bsv)
+			return object.BoolValue(bool(object.Bool(as < bsv)))
 		case bytecode.OpGt:
-			return object.Bool(as > bsv)
+			return object.BoolValue(bool(object.Bool(as > bsv)))
 		case bytecode.OpLe:
-			return object.Bool(as <= bsv)
+			return object.BoolValue(bool(object.Bool(as <= bsv)))
 		default:
-			return object.Bool(as >= bsv)
+			return object.BoolValue(bool(object.Bool(as >= bsv)))
 		}
 	}
 	return raise("NoMethodError", "undefined method '%s' for a String", op)
@@ -424,7 +424,7 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		}
 		out := make([]object.Value, 0, len(a.Elems)+len(bb.Elems))
 		out = append(append(out, a.Elems...), bb.Elems...)
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	case bytecode.OpSub:
 		bb, ok := object.KindOK[*object.Array](b)
 		if !ok {
@@ -436,10 +436,10 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 				out = append(out, e)
 			}
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	case bytecode.OpMul:
 		if sep, ok := object.KindOK[*object.String](b); ok {
-			return object.NewString(joinArray(a, sep.Str()))
+			return object.Wrap(object.NewString(joinArray(a, sep.Str())))
 		}
 		n, ok := object.AsIntegerOK(b)
 		if !ok {
@@ -452,7 +452,7 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		for i := int64(0); i < int64(n); i++ {
 			out = append(out, a.Elems...)
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	}
 	return raise("NoMethodError", "undefined method '%s' for an Array", op)
 }
@@ -467,7 +467,7 @@ func (vm *VM) curried(p *Proc, need int, got []object.Value) *Proc {
 		if len(all) >= need {
 			return vm.callBlock(p, all)
 		}
-		return vm.curried(p, need, all)
+		return object.Wrap(vm.curried(p, need, all))
 	}}
 }
 
@@ -522,7 +522,7 @@ func negate(v object.Value) object.Value {
 		case object.IsFloat(__sw8):
 			n := object.AsFloatV(__sw8)
 			_ = n
-			return object.Float(-n)
+			return object.FloatValue(float64(object.Float(-n)))
 		case object.IsKind[*object.Bignum](__sw8):
 			n := object.Kind[*object.Bignum](__sw8)
 			_ = n
@@ -530,23 +530,23 @@ func negate(v object.Value) object.Value {
 		case object.IsKind[*object.Complex](__sw8):
 			n := object.Kind[*object.Complex](__sw8)
 			_ = n
-			return &object.Complex{Re: negate(n.Re), Im: negate(n.Im)}
+			return object.Wrap(&object.Complex{Re: negate(n.Re), Im: negate(n.Im)})
 		case object.IsKind[*object.Rational](__sw8):
 			n := object.Kind[*object.Rational](__sw8)
 			_ = n
-			return &object.Rational{R: new(big.Rat).Neg(n.R)}
+			return object.Wrap(&object.Rational{R: new(big.Rat).Neg(n.R)})
 		case object.IsKind[*BigDecimal](__sw8):
 			n := object.Kind[*BigDecimal](__sw8)
 			_ = n
-			return &BigDecimal{d: n.d.Neg()}
+			return object.Wrap(&BigDecimal{d: n.d.Neg()})
 		case object.IsKind[*Matrix](__sw8):
 			n := object.Kind[*Matrix](__sw8)
 			_ = n
-			return &Matrix{m: n.m.Neg()}
+			return object.Wrap(&Matrix{m: n.m.Neg()})
 		case object.IsKind[*Money](__sw8):
 			n := object.Kind[*Money](__sw8)
 			_ = n
-			return &Money{m: n.m.Neg()}
+			return object.Wrap(&Money{m: n.m.Neg()})
 		}
 	}
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())

@@ -21,7 +21,7 @@ import (
 // error rescues as the right Ruby class.
 func (vm *VM) registerMustache() {
 	cls := newClass("Mustache", vm.cObject)
-	vm.consts["Mustache"] = cls
+	vm.consts["Mustache"] = object.Wrap(cls)
 	vm.registerMustacheErrors(cls)
 
 	// Mustache.render(template, context = {}) renders template against context in
@@ -31,11 +31,11 @@ func (vm *VM) registerMustache() {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 			}
-			var ctx object.Value = object.NilV
+			var ctx object.Value = object.NilVal()
 			if len(args) > 1 {
 				ctx = args[1]
 			}
-			return object.NewString(mustacheRender(vm, mustacheStringArg(args[0]), ctx))
+			return object.Wrap(object.NewString(mustacheRender(vm, mustacheStringArg(args[0]), ctx)))
 		}}
 
 	// Mustache.new(template: nil) builds a view instance whose @template and view
@@ -44,9 +44,9 @@ func (vm *VM) registerMustache() {
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			inst := &RObject{class: cls, ivars: map[string]object.Value{}}
 			if len(args) > 0 {
-				setIvar(inst, "@template", args[0])
+				setIvar(object.Wrap(inst), "@template", args[0])
 			}
-			return inst
+			return object.Wrap(inst)
 		}}
 
 	// Mustache#template / #template= expose the instance's template source.
@@ -82,7 +82,7 @@ func (vm *VM) registerMustache() {
 		if len(args) > 1 {
 			ctx = args[1]
 		}
-		return object.NewString(mustacheRender(vm, tmpl, ctx))
+		return object.Wrap(object.NewString(mustacheRender(vm, tmpl, ctx)))
 	})
 }
 
@@ -95,8 +95,8 @@ func (vm *VM) registerMustacheErrors(cls *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		cls.consts[simple] = c
-		vm.consts[qualified] = c
+		cls.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	e := reg("Error", "Mustache::Error", std)

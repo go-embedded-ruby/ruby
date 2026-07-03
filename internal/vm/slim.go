@@ -25,16 +25,16 @@ import (
 func (vm *VM) registerSlim() {
 	mod := newClass("Slim", nil)
 	mod.isModule = true
-	vm.consts["Slim"] = mod
+	vm.consts["Slim"] = object.Wrap(mod)
 	vm.registerSlimErrors(mod)
 
 	cTmpl := newClass("Template", vm.cObject)
-	mod.consts["Template"] = cTmpl
-	vm.consts["Slim::Template"] = cTmpl
+	mod.consts["Template"] = object.Wrap(cTmpl)
+	vm.consts["Slim::Template"] = object.Wrap(cTmpl)
 	// Slim::Engine names the same class (the gem's Slim::Engine is the Temple
 	// engine; here the one Template class carries both roles).
-	mod.consts["Engine"] = cTmpl
-	vm.consts["Slim::Engine"] = cTmpl
+	mod.consts["Engine"] = object.Wrap(cTmpl)
+	vm.consts["Slim::Engine"] = object.Wrap(cTmpl)
 
 	// __compile(template) -> src. The single bridge into the library: it returns
 	// the Ruby source the compiled template evaluates to (assigning the buffer to
@@ -47,7 +47,7 @@ func (vm *VM) registerSlim() {
 			if err != nil {
 				raise("Slim::Error", "%s", err.Error())
 			}
-			return object.NewString(src)
+			return object.Wrap(object.NewString(src))
 		}}
 }
 
@@ -58,8 +58,8 @@ func (vm *VM) registerSlim() {
 func (vm *VM) registerSlimErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("Slim::Error", std)
-	mod.consts["Error"] = c
-	vm.consts["Slim::Error"] = c
+	mod.consts["Error"] = object.Wrap(c)
+	vm.consts["Slim::Error"] = object.Wrap(c)
 }
 
 // slimCompile is the seam over the go-ruby-slim compiler. The library never fails

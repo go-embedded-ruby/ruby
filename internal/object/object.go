@@ -50,7 +50,7 @@ func NormInt(z *big.Int) Value {
 	if z.IsInt64() {
 		return IntValue(z.Int64())
 	}
-	return &Bignum{I: z}
+	return Wrap(&Bignum{I: z})
 }
 
 // BigOf returns the big.Int value of an Integer or Bignum (ok=false otherwise).
@@ -600,7 +600,7 @@ func snapshotKey(k Value) Value {
 	if s, ok := KindOK[*String](k); ok {
 		d := s.Dup()
 		d.Frozen = true
-		return d
+		return Wrap(d)
 	}
 	return k
 }
@@ -698,7 +698,7 @@ func (h *Hash) Delete(k Value) (Value, bool) {
 	if b, ok := strContentKey(k); ok {
 		e := h.strVals[string(b)]
 		if e == nil {
-			return NilV, false
+			return NilVal(), false
 		}
 		sk := string(b)
 		delete(h.strVals, sk) // string(b) elided
@@ -713,7 +713,7 @@ func (h *Hash) Delete(k Value) (Value, bool) {
 	hk := h.hashKey(k)
 	v, ok := h.vals[hk]
 	if !ok {
-		return NilV, false
+		return NilVal(), false
 	}
 	delete(h.vals, hk)
 	for i, key := range h.Keys {

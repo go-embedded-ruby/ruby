@@ -141,7 +141,7 @@ func (vm *VM) uriStrOf(v object.Value) string {
 func (vm *VM) uriMerge(u *URI, rel object.Value) object.Value {
 	r, err := u.u.Merge(vm.uriStrOf(rel))
 	raiseURIErr(err)
-	return vm.wrapURI(r)
+	return object.Wrap(vm.wrapURI(r))
 }
 
 // nilOrStr renders an optional URI component: the empty/absent form is Ruby nil,
@@ -150,9 +150,9 @@ func (vm *VM) uriMerge(u *URI, rel object.Value) object.Value {
 // nil ("a?" vs "a").
 func nilOrStr(s string, has bool) object.Value {
 	if !has {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(s)
+	return object.Wrap(object.NewString(s))
 }
 
 // registerURI installs the URI module (require "uri") backed by the go-ruby-uri
@@ -166,7 +166,7 @@ func (vm *VM) registerURI() {
 	mod := newClass("URI", nil)
 	mod.isModule = true
 	vm.cURI = mod
-	vm.consts["URI"] = mod
+	vm.consts["URI"] = object.Wrap(mod)
 
 	vm.registerURIErrors(mod)
 	vm.registerURIClasses(mod)
@@ -186,8 +186,8 @@ func (vm *VM) registerURIErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	uriErr := reg("Error", "URI::Error", std)
@@ -204,8 +204,8 @@ func (vm *VM) registerURIErrors(mod *RClass) {
 func (vm *VM) registerURIClasses(mod *RClass) {
 	generic := newClass("URI::Generic", vm.cObject)
 	generic.includes = append(generic.includes, mod) // URI::Generic includes URI -> is_a?(URI)
-	mod.consts["Generic"] = generic
-	vm.consts["URI::Generic"] = generic
+	mod.consts["Generic"] = object.Wrap(generic)
+	vm.consts["URI::Generic"] = object.Wrap(generic)
 	vm.cURIGeneric = generic
 
 	// The scheme subclasses MRI registers, each a URI::Generic with a default
@@ -214,24 +214,24 @@ func (vm *VM) registerURIClasses(mod *RClass) {
 	for _, scheme := range []string{"http", "https", "ftp", "ldap", "ldaps", "ws", "wss"} {
 		name := uriUpcase(scheme)
 		sub := newClass("URI::"+name, generic)
-		mod.consts[name] = sub
-		vm.consts["URI::"+name] = sub
+		mod.consts[name] = object.Wrap(sub)
+		vm.consts["URI::"+name] = object.Wrap(sub)
 	}
 	// URI::File (file:// URIs) — registered like the port-carrying subclasses but
 	// keyed FILE; the constant name keeps MRI's capitalisation.
 	fileCls := newClass("URI::File", generic)
-	mod.consts["File"] = fileCls
-	vm.consts["URI::File"] = fileCls
+	mod.consts["File"] = object.Wrap(fileCls)
+	vm.consts["URI::File"] = object.Wrap(fileCls)
 
 	// DEFAULT_PORTS exposes the library's scheme->port table as a Ruby Hash; both
 	// URI::DEFAULT_PORTS and URI::Generic::DEFAULT_PORTS resolve it (MRI defines it
 	// on Generic; the prelude exposed it on URI).
 	ports := object.NewHash()
 	for scheme, port := range liburi.DefaultPorts {
-		ports.Set(object.NewString(scheme), object.IntValue(int64(port)))
+		ports.Set(object.Wrap(object.NewString(scheme)), object.IntValue(int64(port)))
 	}
-	mod.consts["DEFAULT_PORTS"] = ports
-	generic.consts["DEFAULT_PORTS"] = ports
+	mod.consts["DEFAULT_PORTS"] = object.Wrap(ports)
+	generic.consts["DEFAULT_PORTS"] = object.Wrap(ports)
 
 	vm.registerURIInstanceMethods(generic)
 	vm.registerURIBuild(generic)
@@ -248,10 +248,10 @@ func (vm *VM) registerURISchemeList(mod *RClass) {
 			h := object.NewHash()
 			for _, name := range []string{"HTTP", "HTTPS", "FTP", "LDAP", "LDAPS", "WS", "WSS", "FILE"} {
 				if c, ok := object.KindOK[*RClass](mod.consts[name]); ok {
-					h.Set(object.NewString(name), c)
+					h.Set(object.Wrap(object.NewString(name)), object.Wrap(c))
 				}
 			}
-			return h
+			return object.Wrap(h)
 		}}
 }
 
@@ -274,7 +274,7 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 		return nilOrStr(uriOf(v).Host, uriOf(v).Host != "")
 	})
 	d("path", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(uriOf(v).Path)
+		return object.Wrap(object.NewString(uriOf(v).Path))
 	})
 	d("userinfo", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return nilOrStr(uriOf(v).Userinfo, uriOf(v).Userinfo != "")
@@ -292,7 +292,7 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 		if p, ok := uriOf(v).EffectivePort(); ok {
 			return object.IntValue(int64(p))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("hostname", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := uriOf(v).Hostname()
@@ -302,7 +302,7 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 		if p, ok := uriOf(v).DefaultPort(); ok {
 			return object.IntValue(int64(p))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// Validated setters (URI#scheme= / host= / port= / userinfo=): each delegates
@@ -322,15 +322,15 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 
 	// String forms: to_s / to_str render the URI; inspect is "#<URI::HTTP url>".
 	toS := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(uriOf(v).String())
+		return object.Wrap(object.NewString(uriOf(v).String()))
 	}
 	d("to_s", toS)
 	d("to_str", toS)
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*URI](v).Inspect())
+		return object.Wrap(object.NewString(object.Kind[*URI](v).Inspect()))
 	})
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(uriEqual(object.Kind[*URI](v), args[0]))
+		return object.BoolValue(bool(object.Bool(uriEqual(object.Kind[*URI](v), args[0]))))
 	})
 
 	// Reference resolution: merge / + resolve a relative reference; route_to
@@ -344,18 +344,18 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 	d("route_to", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		r, err := uriOf(v).RouteTo(vm.uriStrOf(args[0]))
 		raiseURIErr(err)
-		return vm.wrapURI(r)
+		return object.Wrap(vm.wrapURI(r))
 	})
 	d("normalize", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.wrapURI(uriOf(v).Normalize())
+		return object.Wrap(vm.wrapURI(uriOf(v).Normalize()))
 	})
 
 	// Predicates: absolute? (has a scheme) / relative? (its negation).
 	d("absolute?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(uriOf(v).Absolute())
+		return object.BoolValue(bool(object.Bool(uriOf(v).Absolute())))
 	})
 	d("relative?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(uriOf(v).Relative())
+		return object.BoolValue(bool(object.Bool(uriOf(v).Relative())))
 	})
 }
 
@@ -388,10 +388,10 @@ func (vm *VM) registerURIBuild(generic *RClass) {
 				a := object.Kind[*object.Hash](__sw180)
 				_ = a
 				get := func(key string) (string, bool) {
-					if v, ok := a.Get(object.Symbol(key)); ok {
+					if v, ok := a.Get(object.SymVal(string(object.Symbol(key)))); ok {
 						return uriBuildField(v)
 					}
-					if v, ok := a.Get(object.NewString(key)); ok {
+					if v, ok := a.Get(object.Wrap(object.NewString(key))); ok {
 						return uriBuildField(v)
 					}
 					return "", false
@@ -402,9 +402,9 @@ func (vm *VM) registerURIBuild(generic *RClass) {
 				path, _ = get("path")
 				query, hasQuery = get("query")
 				fragment, hasFrag = get("fragment")
-				if v, ok := a.Get(object.Symbol("port")); ok {
+				if v, ok := a.Get(object.SymVal(string(object.Symbol("port")))); ok {
 					port, hasPort = uriBuildPort(v)
-				} else if v, ok := a.Get(object.NewString("port")); ok {
+				} else if v, ok := a.Get(object.Wrap(object.NewString("port"))); ok {
 					port, hasPort = uriBuildPort(v)
 				}
 			case object.IsKind[*object.Array](__sw180):
@@ -429,7 +429,7 @@ func (vm *VM) registerURIBuild(generic *RClass) {
 			}
 		}
 		u := liburi.Build(scheme, userinfo, host, port, hasPort, path, query, hasQuery, fragment, hasFrag)
-		return &URI{u: u, cls: cls}
+		return object.Wrap(&URI{u: u, cls: cls})
 	}
 	generic.smethods["build"] = &Method{name: "build", owner: generic, native: build}
 }
@@ -485,7 +485,7 @@ func (vm *VM) registerURIModuleFns(mod *RClass) {
 
 	// URI.parse(str) -> a URI::Generic (or scheme subclass).
 	sm("parse", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.uriParse(vm.uriStrOf(args[0]))
+		return object.Wrap(vm.uriParse(vm.uriStrOf(args[0])))
 	})
 
 	// URI.join(base, *rels) resolves each reference against the running base.
@@ -499,7 +499,7 @@ func (vm *VM) registerURIModuleFns(mod *RClass) {
 		}
 		u, err := liburi.Join(vm.uriStrOf(args[0]), rels...)
 		raiseURIErr(err)
-		return vm.wrapURI(u)
+		return object.Wrap(vm.wrapURI(u))
 	})
 
 	// URI.split(str) -> the 9-element [scheme, userinfo, host, port, registry,
@@ -513,7 +513,7 @@ func (vm *VM) registerURIModuleFns(mod *RClass) {
 	// URI.encode_www_form(enum) renders an application/x-www-form-urlencoded body
 	// from an Array of [key, value] pairs.
 	sm("encode_www_form", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(liburi.EncodeWWWForm(vm.uriFormPairs(args[0])))
+		return object.Wrap(object.NewString(liburi.EncodeWWWForm(vm.uriFormPairs(args[0]))))
 	})
 
 	// URI.decode_www_form(str) parses a form body into an Array of [key, value]
@@ -523,20 +523,20 @@ func (vm *VM) registerURIModuleFns(mod *RClass) {
 		raiseURIErr(err)
 		out := make([]object.Value, len(pairs))
 		for i, p := range pairs {
-			out[i] = object.NewArray(object.NewString(p[0]), object.NewString(p[1]))
+			out[i] = object.Wrap(object.NewArray(object.Wrap(object.NewString(p[0])), object.Wrap(object.NewString(p[1]))))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 
 	// URI.escape(str[, unsafe]) / URI.unescape(str) — the legacy percent-codec.
 	sm("escape", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) > 1 {
-			return object.NewString(liburi.Escape(strArg(args[0]), uriUnsafe(args[1])))
+			return object.Wrap(object.NewString(liburi.Escape(strArg(args[0]), uriUnsafe(args[1]))))
 		}
-		return object.NewString(liburi.EscapeDefault(strArg(args[0])))
+		return object.Wrap(object.NewString(liburi.EscapeDefault(strArg(args[0]))))
 	})
 	sm("unescape", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(liburi.Unescape(strArg(args[0])))
+		return object.Wrap(object.NewString(liburi.Unescape(strArg(args[0]))))
 	})
 }
 
@@ -553,13 +553,13 @@ func (vm *VM) uriSplit(s string) object.Value {
 		nilOrStr(u.Userinfo, u.Userinfo != ""),
 		nilOrStr(u.Host, u.Host != ""),
 		uriSplitPort(u),
-		object.NilV, // registry
-		object.NewString(u.Path),
+		object.NilVal(), // registry
+		object.Wrap(object.NewString(u.Path)),
 		nilOrStr(u.Opaque, u.Opaque != ""),
 		nilOrStr(u.Query, u.HasQuery),
 		nilOrStr(u.Fragment, u.HasFrag),
 	}
-	return object.NewArrayFromSlice(elems)
+	return object.Wrap(object.NewArrayFromSlice(elems))
 }
 
 // uriSplitPort renders the port element of URI.split: the explicit port as a
@@ -567,9 +567,9 @@ func (vm *VM) uriSplit(s string) object.Value {
 // URI#port, split does not substitute the scheme default.
 func uriSplitPort(u *liburi.URI) object.Value {
 	if !u.HasPort {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(object.IntValue(int64(u.Port)).ToS())
+	return object.Wrap(object.NewString(object.IntValue(int64(u.Port)).ToS()))
 }
 
 // uriFormPairs coerces an Array of [key, value] pairs to the library's pair form,
@@ -623,38 +623,38 @@ func uriUnsafe(v object.Value) string {
 // URI type pattern from (URI::DEFAULT_PARSER.make_regexp).
 func (vm *VM) registerURIParser(mod *RClass) {
 	parser := newClass("URI::RFC3986_Parser", vm.cObject)
-	mod.consts["RFC3986_Parser"] = parser
-	vm.consts["URI::RFC3986_Parser"] = parser
+	mod.consts["RFC3986_Parser"] = object.Wrap(parser)
+	vm.consts["URI::RFC3986_Parser"] = object.Wrap(parser)
 	// URI::Parser is MRI's generic-parser alias; here it names the same class so
 	// `URI::Parser.new` and the DEFAULT_PARSER share one implementation.
-	mod.consts["Parser"] = parser
-	vm.consts["URI::Parser"] = parser
+	mod.consts["Parser"] = object.Wrap(parser)
+	vm.consts["URI::Parser"] = object.Wrap(parser)
 
 	d := func(name string, fn NativeFn) { parser.define(name, fn) }
 	d("parse", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.uriParse(vm.uriStrOf(args[0]))
+		return object.Wrap(vm.uriParse(vm.uriStrOf(args[0])))
 	})
 	d("split", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.uriSplit(vm.uriStrOf(args[0]))
 	})
 	d("escape", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) > 1 {
-			return object.NewString(liburi.Escape(strArg(args[0]), uriUnsafe(args[1])))
+			return object.Wrap(object.NewString(liburi.Escape(strArg(args[0]), uriUnsafe(args[1]))))
 		}
-		return object.NewString(liburi.EscapeDefault(strArg(args[0])))
+		return object.Wrap(object.NewString(liburi.EscapeDefault(strArg(args[0]))))
 	})
 	d("unescape", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(liburi.Unescape(strArg(args[0])))
+		return object.Wrap(object.NewString(liburi.Unescape(strArg(args[0]))))
 	})
 	d("make_regexp", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.compileRegexp(uriMakeRegexp(args), "")
 	})
 
 	inst := &RObject{class: parser, ivars: map[string]object.Value{}}
-	mod.consts["DEFAULT_PARSER"] = inst
-	vm.consts["URI::DEFAULT_PARSER"] = inst
-	mod.consts["RFC3986_PARSER"] = inst
-	vm.consts["URI::RFC3986_PARSER"] = inst
+	mod.consts["DEFAULT_PARSER"] = object.Wrap(inst)
+	vm.consts["URI::DEFAULT_PARSER"] = object.Wrap(inst)
+	mod.consts["RFC3986_PARSER"] = object.Wrap(inst)
+	vm.consts["URI::RFC3986_PARSER"] = object.Wrap(inst)
 }
 
 // uriMakeRegexp builds the source of the Regexp DEFAULT_PARSER.make_regexp
@@ -699,9 +699,9 @@ func (vm *VM) registerURIKernel() {
 	kernel := object.Kind[*RClass](vm.consts["Kernel"])
 	fn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if u, ok := object.KindOK[*URI](args[0]); ok {
-			return u
+			return object.Wrap(u)
 		}
-		return vm.uriParse(vm.uriStrOf(args[0]))
+		return object.Wrap(vm.uriParse(vm.uriStrOf(args[0])))
 	}
 	kernel.define("URI", fn)
 	kernel.smethods["URI"] = &Method{name: "URI", owner: kernel, native: fn}

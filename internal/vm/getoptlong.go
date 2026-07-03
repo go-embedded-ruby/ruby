@@ -62,7 +62,7 @@ func golOf(v object.Value) *GetoptLong { return object.Kind[*GetoptLong](v) }
 func (vm *VM) registerGetoptLong() {
 	c := newClass("GetoptLong", vm.cObject)
 	vm.cGetoptLong = c
-	vm.consts["GetoptLong"] = c
+	vm.consts["GetoptLong"] = object.Wrap(c)
 	c.consts["NO_ARGUMENT"] = object.IntValue(int64(getoptlong.NoArgument))
 	c.consts["REQUIRED_ARGUMENT"] = object.IntValue(int64(getoptlong.RequiredArgument))
 	c.consts["OPTIONAL_ARGUMENT"] = object.IntValue(int64(getoptlong.OptionalArgument))
@@ -70,11 +70,11 @@ func (vm *VM) registerGetoptLong() {
 	c.consts["PERMUTE"] = object.IntValue(int64(getoptlong.Permute))
 	c.consts["RETURN_IN_ORDER"] = object.IntValue(int64(getoptlong.ReturnInOrder))
 	errClass := newClass("GetoptLong::Error", object.Kind[*RClass](vm.consts["StandardError"]))
-	c.consts["Error"] = errClass
-	c.consts["AmbiguousOption"] = newClass("GetoptLong::AmbiguousOption", errClass)
-	c.consts["NeedlessArgument"] = newClass("GetoptLong::NeedlessArgument", errClass)
-	c.consts["MissingArgument"] = newClass("GetoptLong::MissingArgument", errClass)
-	c.consts["InvalidOption"] = newClass("GetoptLong::InvalidOption", errClass)
+	c.consts["Error"] = object.Wrap(errClass)
+	c.consts["AmbiguousOption"] = object.Wrap(newClass("GetoptLong::AmbiguousOption", errClass))
+	c.consts["NeedlessArgument"] = object.Wrap(newClass("GetoptLong::NeedlessArgument", errClass))
+	c.consts["MissingArgument"] = object.Wrap(newClass("GetoptLong::MissingArgument", errClass))
+	c.consts["InvalidOption"] = object.Wrap(newClass("GetoptLong::InvalidOption", errClass))
 
 	c.smethods["new"] = &Method{name: "new", owner: c,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -91,7 +91,7 @@ func (vm *VM) registerGetoptLong() {
 			// same conversion and validation, so reuse it (it raises ArgumentError on
 			// a malformed spec, exactly like MRI's GetoptLong.new).
 			vm.golSetOptions(g, args)
-			return g
+			return object.Wrap(g)
 		}}
 
 	d := func(name string, fn NativeFn) { c.define(name, fn) }
@@ -115,9 +115,9 @@ func (vm *VM) registerGetoptLong() {
 			vm.golRaise(g, err)
 		}
 		if !ok {
-			return object.NewArray(object.NilV, object.NilV)
+			return object.Wrap(object.NewArray(object.NilVal(), object.NilVal()))
 		}
-		return object.NewArray(object.NewString(name), object.NewString(arg))
+		return object.Wrap(object.NewArray(object.Wrap(object.NewString(name)), object.Wrap(object.NewString(arg))))
 	}
 	d("get", getFn)
 	d("get_option", getFn)
@@ -131,7 +131,7 @@ func (vm *VM) registerGetoptLong() {
 		err := g.p.Each(func(name, arg string) {
 			vm.golSyncArgv(g)
 			if blk != nil {
-				vm.callBlock(blk, []object.Value{object.NewString(name), object.NewString(arg)})
+				vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(name)), object.Wrap(object.NewString(arg))})
 			}
 		})
 		vm.golSyncArgv(g)
@@ -163,7 +163,7 @@ func (vm *VM) registerGetoptLong() {
 		return args[0]
 	})
 	quietFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(golOf(v).p.Quiet())
+		return object.BoolValue(bool(object.Bool(golOf(v).p.Quiet())))
 	}
 	d("quiet", quietFn)
 	d("quiet?", quietFn)
@@ -173,24 +173,24 @@ func (vm *VM) registerGetoptLong() {
 	d("error", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		g := golOf(v)
 		if e := g.p.Err(); e != nil {
-			return vm.golErrClass(g, e.Kind)
+			return object.Wrap(vm.golErrClass(g, e.Kind))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("error?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(golOf(v).p.Err() != nil)
+		return object.BoolValue(bool(object.Bool(golOf(v).p.Err() != nil)))
 	})
 	d("error_message", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if msg := golOf(v).p.ErrorMessage(); msg != "" {
-			return object.NewString(msg)
+			return object.Wrap(object.NewString(msg))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// terminated? reports whether the scan has finished (input exhausted, a `--`
 	// terminator was hit, or an error stopped it).
 	d("terminated?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(golOf(v).p.Terminated())
+		return object.BoolValue(bool(object.Bool(golOf(v).p.Terminated())))
 	})
 }
 
@@ -285,6 +285,6 @@ func (vm *VM) golErrClass(g *GetoptLong, kind getoptlong.ErrorKind) *RClass {
 func (vm *VM) golRaise(g *GetoptLong, err error) {
 	e := err.(*getoptlong.Error)
 	cls := vm.golErrClass(g, e.Kind)
-	exc := vm.send(cls, "new", []object.Value{object.NewString(e.Message)}, nil)
+	exc := vm.send(object.Wrap(cls), "new", []object.Value{object.Wrap(object.NewString(e.Message))}, nil)
 	panic(vm.excError(vm.captureBacktrace(exc)))
 }

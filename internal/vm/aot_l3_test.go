@@ -14,7 +14,7 @@ import (
 func TestAOTDivByZeroDeopt(t *testing.T) {
 	vm := New(io.Discard)
 	wantRaise(t, "ZeroDivisionError", func() {
-		vm.e2eDiv(vm.main, []object.Value{object.Integer(10), object.Integer(0)}, nil)
+		vm.e2eDiv(vm.main, []object.Value{object.IntValue(int64(object.Integer(10))), object.IntValue(int64(object.Integer(0)))}, nil)
 	})
 }
 
@@ -23,7 +23,7 @@ func TestAOTDivByZeroDeopt(t *testing.T) {
 // reaches the unboxed-kernel speed that beats YJIT.
 func BenchmarkAOTGeneratedL3Fib(b *testing.B) {
 	vm := New(io.Discard)
-	arg := []object.Value{object.Integer(30)}
+	arg := []object.Value{object.IntValue(int64(object.Integer(30)))}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = vm.e2eFib(vm.main, arg, nil)

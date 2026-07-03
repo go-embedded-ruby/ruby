@@ -128,9 +128,9 @@ func toMsgpack(v object.Value) msgpack.Value {
 func fromMsgpack(vm *VM, v msgpack.Value) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int64:
 		return object.IntValue(n)
 	case uint64:
@@ -141,28 +141,28 @@ func fromMsgpack(vm *VM, v msgpack.Value) object.Value {
 	case *big.Int:
 		return object.NormInt(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case msgpack.Bin:
-		return object.NewStringBytesEnc([]byte(n), "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc([]byte(n), "ASCII-8BIT"))
 	case []msgpack.Value:
 		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = fromMsgpack(vm, el)
 		}
-		return arr
+		return object.Wrap(arr)
 	case *msgpack.Map:
 		h := object.NewHash()
 		for _, p := range n.Pairs() {
 			h.Set(fromMsgpack(vm, p.Key), fromMsgpack(vm, p.Val))
 		}
-		return h
+		return object.Wrap(h)
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return object.Wrap(&Time{t: gotime.FromUnix(n.Unix())})
 	case *msgpack.Ext:
 		raise("ArgumentError", "unsupported MessagePack extension type %d", n.Type)
 	}
 	// The unpacker only ever produces the cases above; anything else is nil.
-	return object.NilV
+	return object.NilVal()
 }

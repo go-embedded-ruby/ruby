@@ -16,7 +16,7 @@ import (
 func (vm *VM) registerSecureRandom() {
 	mod := newClass("SecureRandom", nil)
 	mod.isModule = true
-	vm.consts["SecureRandom"] = mod
+	vm.consts["SecureRandom"] = object.Wrap(mod)
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	// One generator bound to rbgo's crypto/rand seam (secureRandRead). Routing
@@ -26,27 +26,27 @@ func (vm *VM) registerSecureRandom() {
 
 	def("random_bytes", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// Random bytes are binary, not UTF-8: tag ASCII-8BIT so length == bytesize.
-		return object.NewStringBytesEnc(gen.RandomBytes(countArg(args, 16)), "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc(gen.RandomBytes(countArg(args, 16)), "ASCII-8BIT"))
 	})
 	def("hex", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(gen.Hex(countArg(args, 16)))
+		return object.Wrap(object.NewString(gen.Hex(countArg(args, 16))))
 	})
 	def("base64", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(gen.Base64(countArg(args, 16)))
+		return object.Wrap(object.NewString(gen.Base64(countArg(args, 16))))
 	})
 	def("urlsafe_base64", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// MRI defaults to no padding; an explicit truthy second argument keeps it.
 		padding := len(args) > 1 && args[1].Truthy()
-		return object.NewString(gen.UrlsafeBase64(countArg(args, 16), padding))
+		return object.Wrap(object.NewString(gen.UrlsafeBase64(countArg(args, 16), padding)))
 	})
 	def("alphanumeric", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(gen.Alphanumeric(countArg(args, 16)))
+		return object.Wrap(object.NewString(gen.Alphanumeric(countArg(args, 16))))
 	})
 	def("uuid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(gen.Uuid())
+		return object.Wrap(object.NewString(gen.Uuid()))
 	})
 	def("uuid_v7", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(gen.UuidV7())
+		return object.Wrap(object.NewString(gen.UuidV7()))
 	})
 	def("random_number", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// The Integer-vs-Float dispatch lives here: a positive Ruby Integer -> an
@@ -67,12 +67,12 @@ func (vm *VM) registerSecureRandom() {
 					n := object.AsFloatV(__sw152)
 					_ = n
 					if n > 0 {
-						return object.Float(float64(n) * gen.RandomFloat())
+						return object.FloatValue(float64(object.Float(float64(n) * gen.RandomFloat())))
 					}
 				}
 			}
 		}
-		return object.Float(gen.RandomFloat())
+		return object.FloatValue(float64(object.Float(gen.RandomFloat())))
 	})
 }
 

@@ -27,7 +27,7 @@ func dotenvEnvSeams(t *testing.T) (*VM, map[string]string) {
 
 // TestDotenvSourceArgNonString covers dotenvSourceArg's to_s branch.
 func TestDotenvSourceArgNonString(t *testing.T) {
-	if got := dotenvSourceArg(object.Integer(9)); got != "9" {
+	if got := dotenvSourceArg(object.IntValue(int64(object.Integer(9)))); got != "9" {
 		t.Errorf("non-string source -> %q", got)
 	}
 }

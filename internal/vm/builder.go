@@ -33,18 +33,18 @@ func (m *XmlMarkup) Truthy() bool    { return true }
 func (vm *VM) registerBuilder() {
 	mod := newClass("Builder", nil)
 	mod.isModule = true
-	vm.consts["Builder"] = mod
+	vm.consts["Builder"] = object.Wrap(mod)
 
 	cls := newClass("Builder::XmlMarkup", vm.cObject)
-	mod.consts["XmlMarkup"] = cls
-	vm.consts["Builder::XmlMarkup"] = cls
+	mod.consts["XmlMarkup"] = object.Wrap(cls)
+	vm.consts["Builder::XmlMarkup"] = object.Wrap(cls)
 
 	// Builder::XmlMarkup.new(indent: 0, margin: 0, target: nil): the emitter. An
 	// explicit target: sink is not modelled (rbgo owns the accumulator), so only
 	// indent/margin are honoured; target! reads the accumulated markup.
 	cls.smethods["new"] = &Method{name: "new", owner: cls,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return &XmlMarkup{x: xmlbuilder.New(builderOptions(args)...)}
+			return object.Wrap(&XmlMarkup{x: xmlbuilder.New(builderOptions(args)...)})
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -59,12 +59,12 @@ func (vm *VM) registerBuilder() {
 		m := self(v)
 		name := builderName(args[0])
 		m.x.Tag(name, vm.builderTagArgs(args[1:], blk)...)
-		return object.NewString(m.x.Target())
+		return object.Wrap(object.NewString(m.x.Target()))
 	})
 
 	// respond_to_missing? — the emitter answers every element name dynamically.
 	d("respond_to_missing?", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(true)
+		return object.BoolValue(bool(object.Bool(true)))
 	})
 
 	// tag!(name, *args, &blk): the explicit element emitter (Builder's tag!),
@@ -76,31 +76,31 @@ func (vm *VM) registerBuilder() {
 		}
 		name := builderName(args[0])
 		m.x.Tag(name, vm.builderTagArgs(args[1:], blk)...)
-		return object.NewString(m.x.Target())
+		return object.Wrap(object.NewString(m.x.Target()))
 	})
 
 	// text!(str) appends escaped character data.
 	d("text!", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).x.Text(builderContent(args))
-		return object.NewString(self(v).x.Target())
+		return object.Wrap(object.NewString(self(v).x.Target()))
 	})
 
 	// <<(str) inserts markup verbatim (no escaping).
 	d("<<", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).x.Append(builderContent(args))
-		return object.NewString(self(v).x.Target())
+		return object.Wrap(object.NewString(self(v).x.Target()))
 	})
 
 	// cdata!(text) wraps text in a CDATA section.
 	d("cdata!", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).x.CData(builderString(args))
-		return object.NewString(self(v).x.Target())
+		return object.Wrap(object.NewString(self(v).x.Target()))
 	})
 
 	// comment!(text) emits an XML comment.
 	d("comment!", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).x.Comment(builderString(args))
-		return object.NewString(self(v).x.Target())
+		return object.Wrap(object.NewString(self(v).x.Target()))
 	})
 
 	// instruct!(directive = :xml, **attrs) emits a processing instruction; with no
@@ -113,7 +113,7 @@ func (vm *VM) registerBuilder() {
 			rest = args[1:]
 		}
 		self(v).x.Instruct(directive, builderAttrs(vm, rest))
-		return object.NewString(self(v).x.Target())
+		return object.Wrap(object.NewString(self(v).x.Target()))
 	})
 
 	// declare!(inst, *args, &blk) emits a markup declaration (e.g. a DOCTYPE). A
@@ -126,12 +126,12 @@ func (vm *VM) registerBuilder() {
 		}
 		inst := builderName(args[0])
 		m.x.Declare(inst, vm.builderDeclareArgs(args[1:], blk)...)
-		return object.NewString(m.x.Target())
+		return object.Wrap(object.NewString(m.x.Target()))
 	})
 
 	// target! returns the markup accumulated so far.
 	target := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).x.Target())
+		return object.Wrap(object.NewString(self(v).x.Target()))
 	}
 	d("target!", target)
 	d("to_s", target)

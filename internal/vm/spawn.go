@@ -52,13 +52,13 @@ func (vm *VM) registerSpawn() {
 		buf := &pipeBuf{}
 		reader := &IOObj{cls: cIO, pipe: buf, label: "pipe-r"}
 		writer := &IOObj{cls: cIO, pipe: buf, isWriteEnd: true, label: "pipe-w"}
-		pair := object.NewArray(reader, writer)
+		pair := object.NewArray(object.Wrap(reader), object.Wrap(writer))
 		if blk != nil {
 			// IO.pipe { |r, w| ... } yields the pair and closes both ends after.
 			defer func() { reader.closed, writer.closed, buf.wClosed = true, true, true }()
-			return vm.callBlock(blk, []object.Value{reader, writer})
+			return vm.callBlock(blk, []object.Value{object.Wrap(reader), object.Wrap(writer)})
 		}
-		return pair
+		return object.Wrap(pair)
 	}}
 
 	// read_nonblock / readpartial drain available pipe bytes; at EOF (write end
@@ -80,7 +80,7 @@ func (vm *VM) registerSpawn() {
 		}
 		s := object.NewString(string(o.buf[o.pos : o.pos+n]))
 		o.pos += n
-		return s
+		return object.Wrap(s)
 	}
 	cIO.define("read_nonblock", nonblock)
 	cIO.define("readpartial", nonblock)
@@ -107,7 +107,7 @@ func (vm *VM) registerSpawn() {
 					if o, ok := object.KindOK[*IOObj](v); ok {
 						o.pipeRefresh()
 						if o.pos < len(o.buf) || o.pipeWriterClosed() {
-							readReady.Elems = append(readReady.Elems, o)
+							readReady.Elems = append(readReady.Elems, object.Wrap(o))
 						}
 					}
 				}
@@ -120,9 +120,9 @@ func (vm *VM) registerSpawn() {
 			}
 		}
 		if len(readReady.Elems) == 0 && len(writeReady.Elems) == 0 {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewArray(readReady, writeReady, object.NewArray())
+		return object.Wrap(object.NewArray(object.Wrap(readReady), object.Wrap(writeReady), object.Wrap(object.NewArray())))
 	}}
 
 	vm.registerProcessSpawn()
@@ -144,13 +144,13 @@ func (vm *VM) registerProcessSpawn() {
 
 	status := newClass("Status", vm.cObject)
 	status.name, status.named = "Process::Status", true
-	mod.consts["Status"] = status
-	vm.consts["Process::Status"] = status
+	mod.consts["Status"] = object.Wrap(status)
+	vm.consts["Process::Status"] = object.Wrap(status)
 	status.define("exitstatus", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Kind[*RObject](self).ivars["@exitstatus"]
 	})
 	status.define("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*RObject](self).ivars["@exitstatus"] == object.IntValue(0))
+		return object.BoolValue(bool(object.Bool(object.Kind[*RObject](self).ivars["@exitstatus"] == object.IntValue(0))))
 	})
 	status.define("pid", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Kind[*RObject](self).ivars["@pid"]
@@ -172,21 +172,21 @@ func (vm *VM) registerProcessSpawn() {
 			// WNOHANG (a non-zero flag) on an unknown/already-reaped child means
 			// "not ready / no child" — nil, as MRI returns.
 			if len(args) > 1 && intArg(args[1]) != 0 {
-				return object.NilV
+				return object.NilVal()
 			}
 			raise("Errno::ECHILD", "No child processes")
 		}
 		so := &RObject{class: object.Kind[*RClass](vm.consts["Process::Status"]), ivars: map[string]object.Value{}}
 		so.ivars["@exitstatus"] = object.IntValue(int64(st.code))
 		so.ivars["@pid"] = object.IntValue(int64(st.pid))
-		return object.NewArray(object.IntValue(int64(pid)), so)
+		return object.Wrap(object.NewArray(object.IntValue(int64(pid)), object.Wrap(so)))
 	})
 
 	def("waitpid", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		pid := int(intArg(args[0]))
 		if _, ok := vm.reapChild(pid); !ok {
 			if len(args) > 1 && intArg(args[1]) != 0 {
-				return object.NilV
+				return object.NilVal()
 			}
 			raise("Errno::ECHILD", "No child processes")
 		}
@@ -309,7 +309,7 @@ func writeSpawnOutput(opts *object.Hash, out string) {
 	if opts == nil {
 		return
 	}
-	if v, ok := opts.Get(object.Symbol("out")); ok {
+	if v, ok := opts.Get(object.SymVal(string(object.Symbol("out")))); ok {
 		if o, ok := object.KindOK[*IOObj](v); ok {
 			o.writeStr(out)
 		}

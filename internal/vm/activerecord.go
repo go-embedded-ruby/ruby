@@ -85,7 +85,7 @@ func (b *ActiveRecordModelBuilder) Truthy() bool    { return true }
 func (vm *VM) registerActiveRecord() {
 	mod := newClass("ActiveRecord", nil)
 	mod.isModule = true
-	vm.consts["ActiveRecord"] = mod
+	vm.consts["ActiveRecord"] = object.Wrap(mod)
 
 	vm.registerActiveRecordErrors(mod)
 	vm.registerActiveRecordBase(mod)
@@ -102,13 +102,13 @@ func (vm *VM) registerActiveRecord() {
 func (vm *VM) registerActiveRecordErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	base := newClass("ActiveRecord::ActiveRecordError", std)
-	mod.consts["ActiveRecordError"] = base
-	vm.consts["ActiveRecord::ActiveRecordError"] = base
+	mod.consts["ActiveRecordError"] = object.Wrap(base)
+	vm.consts["ActiveRecord::ActiveRecordError"] = object.Wrap(base)
 
 	for _, name := range []string{"StatementInvalid", "RecordInvalid", "ConnectionNotEstablished", "RecordNotFound"} {
 		c := newClass("ActiveRecord::"+name, base)
-		mod.consts[name] = c
-		vm.consts["ActiveRecord::"+name] = c
+		mod.consts[name] = object.Wrap(c)
+		vm.consts["ActiveRecord::"+name] = object.Wrap(c)
 	}
 }
 
@@ -116,25 +116,25 @@ func (vm *VM) registerActiveRecordErrors(mod *RClass) {
 // establish_connection / connected? / connection class methods (the adapter seam).
 func (vm *VM) registerActiveRecordBase(mod *RClass) {
 	base := newClass("ActiveRecord::Base", vm.cObject)
-	mod.consts["Base"] = base
-	vm.consts["ActiveRecord::Base"] = base
+	mod.consts["Base"] = object.Wrap(base)
+	vm.consts["ActiveRecord::Base"] = object.Wrap(base)
 
 	// establish_connection(database: ":memory:") / establish_connection(path)
 	// opens a sqlite3 database and installs it as the process adapter.
 	base.smethods["establish_connection"] = &Method{name: "establish_connection", owner: base, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		path := activeRecordConnPath(args)
 		vm.arConnect(path)
-		return object.NilV
+		return object.NilVal()
 	}}
 	base.smethods["connected?"] = &Method{name: "connected?", owner: base, native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(vm.arAdapter != nil)
+		return object.BoolValue(bool(object.Bool(vm.arAdapter != nil)))
 	}}
 	// connection returns the underlying SQLite3::Database so raw #execute works.
 	base.smethods["connection"] = &Method{name: "connection", owner: base, native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		if vm.arAdapter == nil {
 			raise("ActiveRecord::ConnectionNotEstablished", "No connection pool for ActiveRecord::Base")
 		}
-		return &SQLite3Database{db: vm.arAdapter.db}
+		return object.Wrap(&SQLite3Database{db: vm.arAdapter.db})
 	}}
 
 	vm.registerActiveRecordBaseModelMethods(base)
@@ -151,11 +151,11 @@ func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
 		base.smethods[name] = &Method{name: name, owner: base, native: fn}
 	}
 	rel := func(m *ActiveRecordModel, r *activerecord.Relation) object.Value {
-		return &ActiveRecordRelation{r: r, model: m}
+		return object.Wrap(&ActiveRecordRelation{r: r, model: m})
 	}
 
 	sm("table_name", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.arModelForClass(object.Kind[*RClass](self)).m.TableName)
+		return object.Wrap(object.NewString(vm.arModelForClass(object.Kind[*RClass](self)).m.TableName))
 	})
 	sm("table_name=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -191,9 +191,9 @@ func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 		}
 		if len(recs) == 0 {
-			return object.NilV
+			return object.NilVal()
 		}
-		return &ActiveRecordRecord{rec: recs[0], model: m}
+		return object.Wrap(&ActiveRecordRecord{rec: recs[0], model: m})
 	})
 	sm("find", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -207,7 +207,7 @@ func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
 		if len(recs) == 0 {
 			raise("ActiveRecord::RecordNotFound", "Couldn't find %s with '%s'=%s", m.m.Name, m.m.PrimaryKey, args[0].Inspect())
 		}
-		return &ActiveRecordRecord{rec: recs[0], model: m}
+		return object.Wrap(&ActiveRecordRecord{rec: recs[0], model: m})
 	})
 	sm("create", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.arCreateRecord(vm.arModelForClass(object.Kind[*RClass](self)), args, false)
@@ -255,10 +255,10 @@ func (vm *VM) arCreateRecord(m *ActiveRecordModel, args []object.Value, bang boo
 		if bang {
 			raise("ActiveRecord::RecordInvalid", "Validation failed: %s", strings.Join(errs.FullMessages(), ", "))
 		}
-		return &ActiveRecordRecord{rec: rec, model: m}
+		return object.Wrap(&ActiveRecordRecord{rec: rec, model: m})
 	}
 	if _, _, err := vm.arRequireAdapter().ExecuteDML(m.m.InsertSQL(rec.Attributes())); err != nil {
 		raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 	}
-	return &ActiveRecordRecord{rec: rec, model: m}
+	return object.Wrap(&ActiveRecordRecord{rec: rec, model: m})
 }

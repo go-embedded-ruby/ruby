@@ -38,7 +38,7 @@ func runProg(t *testing.T, src string, seed map[string]object.Value) (string, er
 // is how the wasm playground hands INPUT to Ruby image code.
 func TestSetConst(t *testing.T) {
 	out, err := runProg(t, `puts SEED.upcase`, map[string]object.Value{
-		"SEED": object.NewString("hi"),
+		"SEED": object.Wrap(object.NewString("hi")),
 	})
 	if err != nil {
 		t.Fatal(err)

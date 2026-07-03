@@ -81,10 +81,10 @@ func activeRecordConnPath(args []object.Value) string {
 		case object.IsKind[*object.Hash](__sw3):
 			v := object.Kind[*object.Hash](__sw3)
 			_ = v
-			if db, ok := v.Get(object.Symbol("database")); ok {
+			if db, ok := v.Get(object.SymVal(string(object.Symbol("database")))); ok {
 				return arStr(db)
 			}
-			if db, ok := v.Get(object.NewString("database")); ok {
+			if db, ok := v.Get(object.Wrap(object.NewString("database"))); ok {
 				return arStr(db)
 			}
 			return ":memory:"
@@ -102,19 +102,19 @@ func activeRecordConnPath(args []object.Value) string {
 func arValueToRuby(v any) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case int64:
 		return object.IntValue(n)
 	case int:
 		return object.IntValue(int64(n))
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case []byte:
-		return object.NewStringBytesEnc(n, "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc(n, "ASCII-8BIT"))
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	}
-	return object.NilV
+	return object.NilVal()
 }

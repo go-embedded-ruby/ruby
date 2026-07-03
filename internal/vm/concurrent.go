@@ -18,23 +18,23 @@ import (
 func (vm *VM) registerConcurrent() {
 	mod := newClass("Concurrent", nil)
 	mod.isModule = true
-	vm.consts["Concurrent"] = mod
+	vm.consts["Concurrent"] = object.Wrap(mod)
 
 	// The thread-safe collections degrade to the core collections here.
-	mod.consts["Hash"] = vm.cHash
-	mod.consts["Map"] = vm.cHash
-	mod.consts["Array"] = vm.cArray
+	mod.consts["Hash"] = object.Wrap(vm.cHash)
+	mod.consts["Map"] = object.Wrap(vm.cHash)
+	mod.consts["Array"] = object.Wrap(vm.cArray)
 
 	// Concurrent::ThreadLocalVar(default): #value reads the current slot (the
 	// default until first written), #value= writes it. A single emulated thread
 	// makes one shared slot correct for the common path.
 	tlv := newClass("Concurrent::ThreadLocalVar", vm.cObject)
-	mod.consts["ThreadLocalVar"] = tlv
+	mod.consts["ThreadLocalVar"] = object.Wrap(tlv)
 	tlv.smethods["new"] = &Method{name: "new", owner: tlv,
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 			o := &RObject{class: tlv, ivars: map[string]object.Value{}}
-			vm.send(o, "initialize", args, blk)
-			return o
+			vm.send(object.Wrap(o), "initialize", args, blk)
+			return object.Wrap(o)
 		}}
 	// initialize(default = nil) { default_block }: store either an eager default
 	// value or a lazy default block (called on first read per the gem's API).
@@ -43,15 +43,15 @@ func (vm *VM) registerConcurrent() {
 	tlv.define("initialize", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) > 0 {
 			setIvar(self, "@value", args[0])
-			setIvar(self, "@set", object.True)
+			setIvar(self, "@set", object.BoolValue(bool(object.True)))
 		} else if blk != nil {
-			setIvar(self, "@default_block", blk)
-			setIvar(self, "@set", object.False)
+			setIvar(self, "@default_block", object.Wrap(blk))
+			setIvar(self, "@set", object.BoolValue(bool(object.False)))
 		} else {
-			setIvar(self, "@value", object.NilV)
-			setIvar(self, "@set", object.True)
+			setIvar(self, "@value", object.NilVal())
+			setIvar(self, "@set", object.BoolValue(bool(object.True)))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	tlv.define("value", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if !getIvar(self, "@set").Truthy() {
@@ -60,7 +60,7 @@ func (vm *VM) registerConcurrent() {
 			if blk, ok := object.KindOK[*Proc](getIvar(self, "@default_block")); ok {
 				v := vm.callBlock(blk, nil)
 				setIvar(self, "@value", v)
-				setIvar(self, "@set", object.True)
+				setIvar(self, "@set", object.BoolValue(bool(object.True)))
 				return v
 			}
 		}
@@ -68,7 +68,7 @@ func (vm *VM) registerConcurrent() {
 	})
 	tlv.define("value=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		setIvar(self, "@value", args[0])
-		setIvar(self, "@set", object.True)
+		setIvar(self, "@set", object.BoolValue(bool(object.True)))
 		return args[0]
 	})
 }

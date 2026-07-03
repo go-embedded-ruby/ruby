@@ -23,7 +23,7 @@ func (b *BoundMethod) Truthy() bool    { return true }
 // registerMethod installs the Method class and Object#method.
 func (vm *VM) registerMethod() {
 	vm.cMethod = newClass("Method", vm.cObject)
-	vm.consts["Method"] = vm.cMethod
+	vm.consts["Method"] = object.Wrap(vm.cMethod)
 
 	vm.cObject.define("method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := args[0].ToS()
@@ -31,7 +31,7 @@ func (vm *VM) registerMethod() {
 		if m == nil {
 			return raise("NameError", "undefined method '%s' for %s", name, vm.classOf(self).name)
 		}
-		return &BoundMethod{recv: self, name: name, m: m}
+		return object.Wrap(&BoundMethod{recv: self, name: name, m: m})
 	})
 
 	call := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -42,24 +42,24 @@ func (vm *VM) registerMethod() {
 	vm.cMethod.define("[]", call)
 	vm.cMethod.define("===", call)
 	vm.cMethod.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(object.Kind[*BoundMethod](self).name)
+		return object.SymVal(string(object.Symbol(object.Kind[*BoundMethod](self).name)))
 	})
 	vm.cMethod.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(methodArity(object.Kind[*BoundMethod](self).m)))
 	})
 	vm.cMethod.define("owner", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Kind[*BoundMethod](self).m.owner // always non-nil for a resolved method
+		return object.Wrap(object.Kind[*BoundMethod](self).m.owner) // always non-nil for a resolved method
 	})
 	vm.cMethod.define("receiver", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Kind[*BoundMethod](self).recv
 	})
 	vm.cMethod.define("to_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := object.Kind[*BoundMethod](self)
-		return &Proc{
+		return object.Wrap(&Proc{
 			native:      func(vm *VM, args []object.Value) object.Value { return vm.send(b.recv, b.name, args, nil) },
 			nativeArity: methodArity(b.m),
 			isLambda:    true,
-		}
+		})
 	})
 }
 

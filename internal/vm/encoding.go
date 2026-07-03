@@ -59,26 +59,26 @@ func upper(s string) string {
 
 func (vm *VM) registerEncoding() {
 	vm.cEncoding = newClass("Encoding", vm.cObject)
-	vm.consts["Encoding"] = vm.cEncoding
+	vm.consts["Encoding"] = object.Wrap(vm.cEncoding)
 
 	mkConst := func(constName, name string) *encodingObj {
 		e := vm.internEncoding(name)
-		vm.cEncoding.consts[constName] = e
+		vm.cEncoding.consts[constName] = object.Wrap(e)
 		return e
 	}
 	mkConst("UTF_8", "UTF-8")
 	ascii := mkConst("ASCII_8BIT", "ASCII-8BIT")
-	vm.cEncoding.consts["BINARY"] = ascii // BINARY is an alias of ASCII-8BIT
+	vm.cEncoding.consts["BINARY"] = object.Wrap(ascii) // BINARY is an alias of ASCII-8BIT
 	mkConst("US_ASCII", "US-ASCII")
 
 	vm.cEncoding.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*encodingObj](self).name)
+		return object.Wrap(object.NewString(object.Kind[*encodingObj](self).name))
 	})
 	vm.cEncoding.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*encodingObj](self).name)
+		return object.Wrap(object.NewString(object.Kind[*encodingObj](self).name))
 	})
 	vm.cEncoding.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*encodingObj](self).Inspect())
+		return object.Wrap(object.NewString(object.Kind[*encodingObj](self).Inspect()))
 	})
 	// == is not defined here: the operator goes through the VM's identity equality,
 	// and interned Encoding objects compare correctly by identity.
@@ -93,14 +93,14 @@ func (vm *VM) registerEncoding() {
 		vm.cEncoding.smethods[name] = &Method{name: name, owner: vm.cEncoding, native: fn}
 	}
 	sdef("default_external", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return defExternal
+		return object.Wrap(defExternal)
 	})
 	sdef("default_external=", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		defExternal = vm.internEncoding(encodingName(args[0]))
 		return args[0]
 	})
 	sdef("default_internal", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NilV
+		return object.NilVal()
 	})
 	sdef("default_internal=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return args[0] // accepted but not applied — rbgo strings stay UTF-8
@@ -108,7 +108,7 @@ func (vm *VM) registerEncoding() {
 	// Encoding.find(name) returns the interned encoding for a name (or an Encoding
 	// argument passed straight through), as MRI does.
 	sdef("find", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.internEncoding(encodingName(args[0]))
+		return object.Wrap(vm.internEncoding(encodingName(args[0])))
 	})
 }
 
@@ -146,24 +146,24 @@ func asciiOnly(b []byte) bool {
 // String setup so it shares cString.)
 func (vm *VM) registerStringEncoding() {
 	vm.cString.define("encoding", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.internEncoding(object.Kind[*object.String](self).EncName())
+		return object.Wrap(vm.internEncoding(object.Kind[*object.String](self).EncName()))
 	})
 	vm.cString.define("force_encoding", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := object.Kind[*object.String](self)
 		s.Enc = encodingName(args[0])
-		return s
+		return object.Wrap(s)
 	})
 	vm.cString.define("b", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		d := object.Kind[*object.String](self).Dup()
 		d.Enc = "ASCII-8BIT"
-		return d
+		return object.Wrap(d)
 	})
 	vm.cString.define("ascii_only?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(asciiOnly(object.Kind[*object.String](self).Bytes()))
+		return object.BoolValue(bool(object.Bool(asciiOnly(object.Kind[*object.String](self).Bytes()))))
 	})
 	vm.cString.define("valid_encoding?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := object.Kind[*object.String](self)
 		// Binary is always valid; a UTF-8 string is valid iff it decodes cleanly.
-		return object.Bool(s.IsBinary() || utf8.Valid(s.Bytes()))
+		return object.BoolValue(bool(object.Bool(s.IsBinary() || utf8.Valid(s.Bytes()))))
 	})
 }

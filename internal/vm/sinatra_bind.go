@@ -26,7 +26,7 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 		return func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 			d := vm.sinatraDefFor(sinatraClassOf(self))
 			d.routes = append(d.routes, sinatraRoute{verb: name, pattern: sinatraPattern(args), blk: blk})
-			return object.NilV
+			return object.NilVal()
 		}
 	}
 	for _, m := range []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"} {
@@ -43,7 +43,7 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 			} else {
 				d.befores = append(d.befores, f)
 			}
-			return object.NilV
+			return object.NilVal()
 		}
 	}
 	base.smethods["before"] = &Method{name: "before", owner: base, native: filter(false)}
@@ -52,7 +52,7 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 	// not_found do … end.
 	base.smethods["not_found"] = &Method{name: "not_found", owner: base, native: func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		vm.sinatraDefFor(sinatraClassOf(self)).notFound = blk
-		return object.NilV
+		return object.NilVal()
 	}}
 
 	// error(status = 500) do … end — a bare error registers the 500 handler.
@@ -62,7 +62,7 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 			code = sinatraInt(args[0], 500)
 		}
 		vm.sinatraDefFor(sinatraClassOf(self)).errors[code] = blk
-		return object.NilV
+		return object.NilVal()
 	}}
 
 	// set(key, value) / enable(key) / disable(key).
@@ -71,15 +71,15 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
 		vm.sinatraDefFor(sinatraClassOf(self)).settings[sinatraStr(args[0])] = args[1]
-		return object.NilV
+		return object.NilVal()
 	}}
 	toggle := func(on bool) NativeFn {
 		return func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			d := vm.sinatraDefFor(sinatraClassOf(self))
 			for _, a := range args {
-				d.settings[sinatraStr(a)] = object.Bool(on)
+				d.settings[sinatraStr(a)] = object.BoolValue(bool(object.Bool(on)))
 			}
-			return object.NilV
+			return object.NilVal()
 		}
 	}
 	base.smethods["enable"] = &Method{name: "enable", owner: base, native: toggle(true)}
@@ -92,7 +92,7 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 		if blk != nil {
 			vm.callBlockSelf(blk, self, nil)
 		}
-		return object.NilV
+		return object.NilVal()
 	}}
 
 	// helpers { def foo; …; end } grafts the block's method definitions onto the
@@ -101,7 +101,7 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 		if blk != nil {
 			vm.classEval(vm.cSinatraCtx, blk, nil)
 		}
-		return object.NilV
+		return object.NilVal()
 	}}
 
 	// #call(env) — the Rack adapter, available both as an instance method
@@ -119,7 +119,7 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 func (vm *VM) sinatraCall(cls *RClass, envArg object.Value) object.Value {
 	app := vm.buildSinatraApp(cls)
 	status, headers, body := app.CallTuple(rackEnv(envArg))
-	return object.NewArray(object.IntValue(int64(status)), rackHeadersToHash(headers), rackBodyArray(body))
+	return object.Wrap(object.NewArray(object.IntValue(int64(status)), object.Wrap(rackHeadersToHash(headers)), object.Wrap(rackBodyArray(body))))
 }
 
 // buildSinatraApp assembles a *sinatra.Sinatra from cls's declaration chain: it
@@ -190,7 +190,7 @@ func (vm *VM) sinatraAction(blk *Proc, merged map[string]object.Value) sinatra.A
 		if blk == nil {
 			return nil
 		}
-		return sinatraResult(vm, vm.callBlockSelf(blk, ctx, nil))
+		return sinatraResult(vm, vm.callBlockSelf(blk, object.Wrap(ctx), nil))
 	}
 }
 
@@ -200,13 +200,13 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 	self := func(v object.Value) *SinatraCtx { return object.Kind[*SinatraCtx](v) }
 
 	ctx.define("params", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return sinatraParamsHash(self(v).c)
+		return object.Wrap(sinatraParamsHash(self(v).c))
 	})
 	ctx.define("request", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RackRequest{req: self(v).c.Request(), cls: object.Kind[*RClass](vm.consts["Rack::Request"])}
+		return object.Wrap(&RackRequest{req: self(v).c.Request(), cls: object.Kind[*RClass](vm.consts["Rack::Request"])})
 	})
 	ctx.define("response", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RackResponse{resp: self(v).c.Response(), cls: object.Kind[*RClass](vm.consts["Rack::Response"])}
+		return object.Wrap(&RackResponse{resp: self(v).c.Response(), cls: object.Kind[*RClass](vm.consts["Rack::Response"])})
 	})
 	ctx.define("session", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		// The session seam is the rack.session env value, which lives in the Go
@@ -215,7 +215,7 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 		return rackFromGo(self(v).c.Session())
 	})
 	ctx.define("settings", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &SinatraSettings{settings: self(v).settings, cls: vm.cSinatraSettings}
+		return object.Wrap(&SinatraSettings{settings: self(v).settings, cls: vm.cSinatraSettings})
 	})
 
 	// status — reader with no arg, setter with one.
@@ -225,13 +225,13 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 			return object.IntValue(int64(c.CurrentStatus()))
 		}
 		c.Status(sinatraInt(args[0], 200))
-		return object.NilV
+		return object.NilVal()
 	})
 	ctx.define("body", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		c := self(v).c
 		if len(args) == 0 {
 			// Reader form: the currently buffered body as a Rack body Array.
-			return rackBodyArray(c.Response().Body())
+			return object.Wrap(rackBodyArray(c.Response().Body()))
 		}
 		c.Body(sinatraStr(args[0]))
 		return args[0]
@@ -246,11 +246,11 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 				}
 			}
 		}
-		return rackHeadersToHash(self(v).c.Response().Headers())
+		return object.Wrap(rackHeadersToHash(self(v).c.Response().Headers()))
 	})
 	ctx.define("content_type", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		sinatraSetContentType(self(v).c, args)
-		return object.NilV
+		return object.NilVal()
 	})
 	ctx.define("redirect", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -261,21 +261,21 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 			status = append(status, sinatraInt(args[1], 302))
 		}
 		self(v).c.Redirect(sinatraStr(args[0]), status...)
-		return object.NilV
+		return object.NilVal()
 	})
 	ctx.define("halt", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).c.Halt(sinatraHaltArgs(args)...)
-		return object.NilV
+		return object.NilVal()
 	})
 	ctx.define("pass", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		self(v).c.Pass()
-		return object.NilV
+		return object.NilVal()
 	})
 	ctx.define("uri", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).c.URI(sinatraStr(rackArg(args))))
+		return object.Wrap(object.NewString(self(v).c.URI(sinatraStr(rackArg(args)))))
 	})
 	ctx.define("url", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).c.URI(sinatraStr(rackArg(args))))
+		return object.Wrap(object.NewString(self(v).c.URI(sinatraStr(rackArg(args)))))
 	})
 }
 
@@ -286,14 +286,14 @@ func (vm *VM) registerSinatraSettings(cls *RClass) {
 		if v, ok := s.settings[key]; ok {
 			return v
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	cls.define("[]", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return get(object.Kind[*SinatraSettings](v), sinatraStr(rackArg(args)))
 	})
 	cls.define("respond_to?", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		_, ok := object.Kind[*SinatraSettings](v).settings[sinatraStr(rackArg(args))]
-		return object.Bool(ok)
+		return object.BoolValue(bool(object.Bool(ok)))
 	})
 	cls.define("method_missing", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := object.Kind[*SinatraSettings](v)
@@ -301,7 +301,7 @@ func (vm *VM) registerSinatraSettings(cls *RClass) {
 		if n := len(name); n > 0 && name[n-1] == '?' {
 			key := name[:n-1]
 			val, ok := s.settings[key]
-			return object.Bool(ok && val.Truthy())
+			return object.BoolValue(bool(object.Bool(ok && val.Truthy())))
 		}
 		return get(s, name)
 	})

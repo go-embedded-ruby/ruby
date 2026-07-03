@@ -46,7 +46,7 @@ func (vm *VM) registerShellwords() {
 func (vm *VM) installShellwords() {
 	mod := newClass("Shellwords", nil)
 	mod.isModule = true
-	vm.consts["Shellwords"] = mod
+	vm.consts["Shellwords"] = object.Wrap(mod)
 
 	// Module functions. MRI's `module_function` makes each both a module method
 	// (Shellwords.shellsplit) and a private instance method on includers; rbgo
@@ -65,14 +65,14 @@ func (vm *VM) installShellwords() {
 	sm("split", splitFn)
 
 	escapeFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(libsw.Escape(strArg(args[0])))
+		return object.Wrap(object.NewString(libsw.Escape(strArg(args[0]))))
 	}
 	// Shellwords.shellescape / .escape — the per-argument escaper.
 	sm("shellescape", escapeFn)
 	sm("escape", escapeFn)
 
 	joinFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(libsw.Join(vm.shellWords(args[0])))
+		return object.Wrap(object.NewString(libsw.Join(vm.shellWords(args[0]))))
 	}
 	// Shellwords.shelljoin / .join — the array joiner.
 	sm("shelljoin", joinFn)
@@ -84,10 +84,10 @@ func (vm *VM) installShellwords() {
 		return shellSplit(strArg(self))
 	})
 	vm.cString.define("shellescape", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(libsw.Escape(strArg(self)))
+		return object.Wrap(object.NewString(libsw.Escape(strArg(self))))
 	})
 	vm.cArray.define("shelljoin", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(libsw.Join(vm.shellWords(self)))
+		return object.Wrap(object.NewString(libsw.Join(vm.shellWords(self))))
 	})
 }
 
@@ -101,9 +101,9 @@ func shellSplit(line string) object.Value {
 	}
 	out := make([]object.Value, len(words))
 	for i, w := range words {
-		out[i] = object.NewString(w)
+		out[i] = object.Wrap(object.NewString(w))
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // shellWords coerces an Array receiver/argument to a []string for Join. Each

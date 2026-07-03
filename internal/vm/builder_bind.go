@@ -48,7 +48,7 @@ func (vm *VM) builderTagArgs(rest []object.Value, blk *Proc) []any {
 	var out []any
 	for _, a := range rest {
 		if h, ok := object.KindOK[*object.Hash](a); ok {
-			out = append(out, builderAttrs(vm, []object.Value{h}))
+			out = append(out, builderAttrs(vm, []object.Value{object.Wrap(h)}))
 			continue
 		}
 		out = append(out, builderValueOf(a))
@@ -64,7 +64,7 @@ func (vm *VM) builderTagArgs(rest []object.Value, blk *Proc) []any {
 // the block, so the block body emits nested elements against the same document.
 func (vm *VM) builderBlockFn(blk *Proc) func(*xmlbuilder.XmlMarkup) {
 	return func(child *xmlbuilder.XmlMarkup) {
-		vm.callBlock(blk, []object.Value{&XmlMarkup{x: child}})
+		vm.callBlock(blk, []object.Value{object.Wrap(&XmlMarkup{x: child})})
 	}
 }
 

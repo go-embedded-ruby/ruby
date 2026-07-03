@@ -42,9 +42,9 @@ func splitWhitespaceCopy(subject string) object.Value {
 		for i < n && !isASCIISpace(subject[i]) {
 			i++
 		}
-		out = append(out, object.NewString(subject[start:i]))
+		out = append(out, object.Wrap(object.NewString(subject[start:i])))
 	}
-	return &object.Array{Elems: out}
+	return object.Wrap(&object.Array{Elems: out})
 }
 
 // BenchmarkSplitWhitespaceCopy is the "before" number: each field copies its

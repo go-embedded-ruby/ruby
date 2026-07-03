@@ -38,7 +38,7 @@ p [m.mon_enter.equal?(m), m.mon_exit.equal?(m), m.mon_initialize.equal?(m)]`, "[
 func TestMonitorSynchronizeNoBlock(t *testing.T) {
 	vm := New(nil)
 	mon := object.Kind[*RClass](vm.consts["Monitor"])
-	self := mon.smethods["new"].native(vm, mon, nil, nil)
+	self := mon.smethods["new"].native(vm, object.Wrap(mon), nil, nil)
 	for _, name := range []string{"synchronize", "mon_synchronize"} {
 		m := lookupMethod(object.Kind[*RObject](self).class, name)
 		if got := m.native(vm, self, nil, nil); got != self {
@@ -62,7 +62,7 @@ p [c.wait.equal?(c), c.wait_while.equal?(c), c.wait_until.equal?(c),
 	// ConditionVariable.new constructs an instance of the cond class.
 	vm := New(nil)
 	cond := object.Kind[*RClass](object.Kind[*RClass](vm.consts["MonitorMixin"]).consts["ConditionVariable"])
-	o := cond.smethods["new"].native(vm, cond, nil, nil)
+	o := cond.smethods["new"].native(vm, object.Wrap(cond), nil, nil)
 	if ro, ok := object.KindOK[*RObject](o); !ok || ro.class != cond {
 		t.Fatalf("ConditionVariable.new: %#v", o)
 	}

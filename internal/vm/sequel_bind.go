@@ -187,22 +187,22 @@ func sequelColumns(vals []object.Value) []sequel.Value {
 func sequelRubyValue(v sequel.Value) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int64:
 		return object.IntValue(n)
 	case int:
 		return object.IntValue(int64(n))
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case []byte:
-		return object.NewStringBytesEnc(n, "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc(n, "ASCII-8BIT"))
 	}
 	// The executor only ever produces the cases above.
-	return object.NilV
+	return object.NilVal()
 }
 
 // sequelRow maps an executor row (column->value map) to a Ruby Hash keyed by a
@@ -217,7 +217,7 @@ func sequelRow(row map[string]sequel.Value) *object.Hash {
 	sort.Strings(keys)
 	h := object.NewHash()
 	for _, k := range keys {
-		h.Set(object.Symbol(k), sequelRubyValue(row[k]))
+		h.Set(object.SymVal(string(object.Symbol(k))), sequelRubyValue(row[k]))
 	}
 	return h
 }
@@ -226,7 +226,7 @@ func sequelRow(row map[string]sequel.Value) *object.Hash {
 func sequelRows(rows []map[string]sequel.Value) *object.Array {
 	arr := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 	for i, r := range rows {
-		arr.Elems[i] = sequelRow(r)
+		arr.Elems[i] = object.Wrap(sequelRow(r))
 	}
 	return arr
 }

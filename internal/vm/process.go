@@ -29,7 +29,7 @@ var (
 func (vm *VM) registerProcess() {
 	mod := newClass("Process", nil)
 	mod.isModule = true
-	vm.consts["Process"] = mod
+	vm.consts["Process"] = object.Wrap(mod)
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	def("pid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -53,13 +53,13 @@ func (vm *VM) registerProcess() {
 	def("groups", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		gids, err := processGroups()
 		if err != nil {
-			return object.NewArray()
+			return object.Wrap(object.NewArray())
 		}
 		elems := make([]object.Value, len(gids))
 		for i, g := range gids {
 			elems[i] = object.IntValue(int64(g))
 		}
-		return object.NewArrayFromSlice(elems)
+		return object.Wrap(object.NewArrayFromSlice(elems))
 	})
 	// maxgroups is a platform tunable; reading it returns the conventional 16 cap
 	// and assigning it is accepted but ignored (the kernel limit is fixed), which
@@ -118,11 +118,11 @@ func clockGettimeUnit(d time.Duration, args []object.Value) object.Value {
 	case "second":
 		return object.IntValue(int64(d.Seconds()))
 	case "float_microsecond":
-		return object.Float(float64(d.Nanoseconds()) / 1e3)
+		return object.FloatValue(float64(object.Float(float64(d.Nanoseconds()) / 1e3)))
 	case "float_millisecond":
-		return object.Float(float64(d.Nanoseconds()) / 1e6)
+		return object.FloatValue(float64(object.Float(float64(d.Nanoseconds()) / 1e6)))
 	default: // float_second
-		return object.Float(d.Seconds())
+		return object.FloatValue(float64(object.Float(d.Seconds())))
 	}
 }
 

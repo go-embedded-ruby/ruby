@@ -116,7 +116,7 @@ func jbuilderBlockFn(vm *VM, j *Jbuilder, blk *Proc) func(*jbuilder.Jbuilder) {
 		prev := j.b
 		j.b = child
 		defer func() { j.b = prev }()
-		vm.callBlock(blk, []object.Value{j})
+		vm.callBlock(blk, []object.Value{object.Wrap(j)})
 	}
 }
 
@@ -193,12 +193,12 @@ func jbuilderExtract(vm *VM, src object.Value, keys []object.Value) []jbuilder.P
 		name := jbuilderName(k)
 		var val object.Value
 		if h, ok := object.KindOK[*object.Hash](src); ok {
-			if v, present := h.Get(object.Symbol(name)); present {
+			if v, present := h.Get(object.SymVal(string(object.Symbol(name)))); present {
 				val = v
-			} else if v, present := h.Get(object.NewString(name)); present {
+			} else if v, present := h.Get(object.Wrap(object.NewString(name))); present {
 				val = v
 			} else {
-				val = object.NilV
+				val = object.NilVal()
 			}
 		} else if vm.respondsTo(src, name) {
 			val = vm.send(src, name, nil, nil)
@@ -233,11 +233,11 @@ func jbuilderKeyOps(vm *VM, args []object.Value) []jbuilder.KeyOp {
 			case object.IsKind[object.Symbol](__sw76):
 				n := object.Kind[object.Symbol](__sw76)
 				_ = n
-				add(string(n), object.NilV)
+				add(string(n), object.NilVal())
 			case object.IsKind[*object.String](__sw76):
 				n := object.Kind[*object.String](__sw76)
 				_ = n
-				add(n.Str(), object.NilV)
+				add(n.Str(), object.NilVal())
 			case object.IsKind[*object.Hash](__sw76):
 				n := object.Kind[*object.Hash](__sw76)
 				_ = n

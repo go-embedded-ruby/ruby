@@ -33,7 +33,7 @@ func (j *Jbuilder) Truthy() bool    { return true }
 // (json.<name>) as well as the explicit bang methods.
 func (vm *VM) registerJbuilder() {
 	cls := newClass("Jbuilder", vm.cObject)
-	vm.consts["Jbuilder"] = cls
+	vm.consts["Jbuilder"] = object.Wrap(cls)
 
 	// Jbuilder.encode { |json| … } builds a fresh builder, yields it, and returns
 	// the compact JSON string — the common `render json: Jbuilder.encode { … }`.
@@ -43,8 +43,8 @@ func (vm *VM) registerJbuilder() {
 				raise("LocalJumpError", "no block given (yield)")
 			}
 			j := &Jbuilder{b: jbuilder.New()}
-			vm.callBlock(blk, []object.Value{j})
-			return object.NewString(j.b.Encode())
+			vm.callBlock(blk, []object.Value{object.Wrap(j)})
+			return object.Wrap(object.NewString(j.b.Encode()))
 		}}
 
 	// Jbuilder.new { |json| … } builds a builder, optionally yielding it (the gem
@@ -54,9 +54,9 @@ func (vm *VM) registerJbuilder() {
 		native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 			j := &Jbuilder{b: jbuilder.New()}
 			if blk != nil {
-				vm.callBlock(blk, []object.Value{j})
+				vm.callBlock(blk, []object.Value{object.Wrap(j)})
 			}
-			return j
+			return object.Wrap(j)
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -89,12 +89,12 @@ func (vm *VM) registerJbuilder() {
 			// json.name(obj, :a, :b) — extract! shorthand.
 			j.b.Set(key, toJbuilder(vm, rest[0]))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// respond_to_missing? — the builder answers every name dynamically.
 	d("respond_to_missing?", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(true)
+		return object.BoolValue(bool(object.Bool(true)))
 	})
 
 	// set!(key, value = nil, &blk): explicit form of json.<key>.
@@ -114,19 +114,19 @@ func (vm *VM) registerJbuilder() {
 		default:
 			j.b.Block(key, func(*jbuilder.Jbuilder) {})
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// array!(collection) { |x| … } turns the builder into a JSON array by mapping
 	// the block over the collection; with no block the elements pass through.
 	d("array!", func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
 		j := self(v)
-		var coll object.Value = object.NilV
+		var coll object.Value = object.NilVal()
 		if len(args) > 0 {
 			coll = args[0]
 		}
 		jbuilderArray(vm, j, coll, "", blk)
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// child! { … } appends one block-built element to the builder's array.
@@ -136,7 +136,7 @@ func (vm *VM) registerJbuilder() {
 			raise("LocalJumpError", "no block given (yield)")
 		}
 		j.b.Child(jbuilderBlockFn(vm, j, blk))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// merge!(hash_or_array) folds a Hash's pairs (or an Array's elements) into the
@@ -167,7 +167,7 @@ func (vm *VM) registerJbuilder() {
 				raise("TypeError", "no implicit conversion into Hash or Array")
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// extract!(object, *keys): copy object.key / object[key] for each key into the
@@ -179,13 +179,13 @@ func (vm *VM) registerJbuilder() {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
 		j.b.Extract(jbuilderExtract(vm, args[0], args[1:]))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// nil!/null! set the whole target to JSON null.
 	nilFn := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		self(v).b.Nil()
-		return object.NilV
+		return object.NilVal()
 	}
 	d("nil!", nilFn)
 	d("null!", nilFn)
@@ -194,7 +194,7 @@ func (vm *VM) registerJbuilder() {
 	// underscore). With no arguments it clears formatting.
 	d("key_format!", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).b.KeyFormat(jbuilderKeyOps(vm, args)...)
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// ignore_nil!(on = true) drops keys whose value is nil.
@@ -204,12 +204,12 @@ func (vm *VM) registerJbuilder() {
 		} else {
 			self(v).b.IgnoreNil(args[0].Truthy())
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// target!/encode! render the builder to its compact JSON string.
 	target := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).b.Encode())
+		return object.Wrap(object.NewString(self(v).b.Encode()))
 	}
 	d("target!", target)
 	d("encode!", target)

@@ -20,16 +20,16 @@ func (vm *VM) registerMonitor() {
 	// MonitorMixin: included into classes that want monitor semantics.
 	mixin := newClass("MonitorMixin", nil)
 	mixin.isModule = true
-	vm.consts["MonitorMixin"] = mixin
+	vm.consts["MonitorMixin"] = object.Wrap(mixin)
 	defMonitorMethods(mixin)
 
 	// A ConditionVariable returned by new_cond; wait/signal/broadcast are no-ops
 	// under the single-thread model (no other thread can hold the lock).
 	cond := newClass("MonitorMixin::ConditionVariable", vm.cObject)
-	mixin.consts["ConditionVariable"] = cond
+	mixin.consts["ConditionVariable"] = object.Wrap(cond)
 	cond.smethods["new"] = &Method{name: "new", owner: cond,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &RObject{class: cond, ivars: map[string]object.Value{}}
+			return object.Wrap(&RObject{class: cond, ivars: map[string]object.Value{}})
 		}}
 	cond.define("wait", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
 	cond.define("wait_while", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
@@ -40,13 +40,13 @@ func (vm *VM) registerMonitor() {
 	// Monitor is the standalone object form (Monitor.new.synchronize { ... }).
 	mon := newClass("Monitor", vm.cObject)
 	mon.includes = append(mon.includes, mixin)
-	vm.consts["Monitor"] = mon
+	vm.consts["Monitor"] = object.Wrap(mon)
 	mon.smethods["new"] = &Method{name: "new", owner: mon,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &RObject{class: mon, ivars: map[string]object.Value{}}
+			return object.Wrap(&RObject{class: mon, ivars: map[string]object.Value{}})
 		}}
 
-	mixin.consts["ConditionVariable"] = cond
+	mixin.consts["ConditionVariable"] = object.Wrap(cond)
 	_ = std
 }
 
@@ -68,6 +68,6 @@ func defMonitorMethods(c *RClass) {
 	c.define("mon_initialize", noop)
 	c.define("new_cond", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		cond := object.Kind[*RClass](object.Kind[*RClass](vm.consts["MonitorMixin"]).consts["ConditionVariable"])
-		return &RObject{class: cond, ivars: map[string]object.Value{}}
+		return object.Wrap(&RObject{class: cond, ivars: map[string]object.Value{}})
 	})
 }

@@ -109,16 +109,16 @@ func ssPattern(vm *VM, v object.Value) string {
 // pre_match / post_match all share.
 func ssStr(text string, ok bool) object.Value {
 	if !ok {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(text)
+	return object.Wrap(object.NewString(text))
 }
 
 // ssLen wraps a (length, ok) library result as a Ruby Integer length, or nil
 // when ok is false — the shape skip / skip_until / match? share.
 func ssLen(n int, ok bool) object.Value {
 	if !ok {
-		return object.NilV
+		return object.NilVal()
 	}
 	return object.IntValue(int64(n))
 }
@@ -133,15 +133,15 @@ func ssLen(n int, ok bool) object.Value {
 func (vm *VM) registerStringScanner() {
 	cls := newClass("StringScanner", vm.cObject)
 	vm.cStringScanner = cls
-	vm.consts["StringScanner"] = cls
+	vm.consts["StringScanner"] = object.Wrap(cls)
 
 	// StringScanner::Error < StandardError, the exception #unscan raises with
 	// nothing to undo (and the public exception type MRI exposes). Registered
 	// scoped (StringScanner::Error) and flat (so raise can name it).
 	std, _ := object.KindOK[*RClass](vm.consts["StandardError"])
 	ssErr := newClass("StringScanner::Error", std)
-	cls.consts["Error"] = ssErr
-	vm.consts["StringScanner::Error"] = ssErr
+	cls.consts["Error"] = object.Wrap(ssErr)
+	vm.consts["StringScanner::Error"] = object.Wrap(ssErr)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -153,7 +153,7 @@ func (vm *VM) registerStringScanner() {
 			if len(args) == 0 || len(args) > 2 {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 			}
-			return &StringScanner{sc: strscan.New(strArg(args[0]))}
+			return object.Wrap(&StringScanner{sc: strscan.New(strArg(args[0]))})
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -180,7 +180,7 @@ func (vm *VM) registerStringScanner() {
 	})
 	matchedP := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		_, ok := ssScannerOf(v).Matched()
-		return object.Bool(ok)
+		return object.BoolValue(bool(object.Bool(ok)))
 	}
 	d("matched?", matchedP)
 	d("pre_match", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -203,7 +203,7 @@ func (vm *VM) registerStringScanner() {
 	d("matched_size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		n := ssScannerOf(v).MatchedSize()
 		if n < 0 {
-			return object.NilV
+			return object.NilVal()
 		}
 		return object.IntValue(int64(n))
 	})
@@ -221,9 +221,9 @@ func (vm *VM) registerStringScanner() {
 				_ = k
 				text, ok := sc.Group(int(k))
 				if !ok {
-					return object.NilV
+					return object.NilVal()
 				}
-				return object.NewString(text)
+				return object.Wrap(object.NewString(text))
 			case object.IsKind[object.Symbol](__sw170):
 				k := object.Kind[object.Symbol](__sw170)
 				_ = k
@@ -236,14 +236,14 @@ func (vm *VM) registerStringScanner() {
 				k := __sw170
 				_ = k
 				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
-				return object.NilV
+				return object.NilVal()
 			}
 		}
 	})
 
 	// peek(n) returns up to n bytes from the current position without advancing.
 	d("peek", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(ssScannerOf(v).Peek(int(intArg(args[0]))))
+		return object.Wrap(object.NewString(ssScannerOf(v).Peek(int(intArg(args[0])))))
 	})
 
 	// pos / charpos report the position; pos= moves it, raising RangeError when
@@ -268,18 +268,18 @@ func (vm *VM) registerStringScanner() {
 
 	// rest / rest_size / eos? / beginning_of_line? describe the unscanned tail.
 	d("rest", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(ssScannerOf(v).Rest())
+		return object.Wrap(object.NewString(ssScannerOf(v).Rest()))
 	})
 	d("rest_size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(ssScannerOf(v).RestSize()))
 	})
 	eosFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(ssScannerOf(v).EOS())
+		return object.BoolValue(bool(object.Bool(ssScannerOf(v).EOS())))
 	}
 	d("eos?", eosFn)
 	d("empty?", eosFn)
 	bolFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(ssScannerOf(v).Beginning())
+		return object.BoolValue(bool(object.Bool(ssScannerOf(v).Beginning())))
 	}
 	d("beginning_of_line?", bolFn)
 	d("bol?", bolFn)
@@ -287,7 +287,7 @@ func (vm *VM) registerStringScanner() {
 	// string / string= read and replace the scanned text; << / concat append to
 	// it. terminate / reset move the position and return self for chaining.
 	d("string", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(ssScannerOf(v).String())
+		return object.Wrap(object.NewString(ssScannerOf(v).String()))
 	})
 	d("string=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		ssScannerOf(v).SetString(strArg(args[0]))
@@ -327,8 +327,8 @@ func (vm *VM) registerStringScanner() {
 // the name case is disambiguated here.
 func ssNamedGroup(sc *strscan.Scanner, name string) object.Value {
 	if text, ok := sc.GroupName(name); ok {
-		return object.NewString(text)
+		return object.Wrap(object.NewString(text))
 	}
 	raise("IndexError", "undefined group name reference: %s", name)
-	return object.NilV
+	return object.NilVal()
 }

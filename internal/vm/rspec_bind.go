@@ -337,7 +337,7 @@ func (vm *VM) rspecRunExpectation(e *RSpecExpectation, mw *RSpecMatcher, positiv
 	if !ok {
 		raise("RSpec::Expectations::ExpectationNotMetError", "%s", msg)
 	}
-	return object.NilV
+	return object.NilVal()
 }
 
 // rspecCallBlockCatching runs blk and reports whether it raised, plus the raised

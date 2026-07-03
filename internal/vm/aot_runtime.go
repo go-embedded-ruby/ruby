@@ -31,7 +31,7 @@ func aotConcat(a, b object.Value) object.Value {
 	be := object.Kind[*object.Array](b).Elems
 	out := make([]object.Value, 0, len(ae)+len(be))
 	out = append(append(out, ae...), be...)
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // aotSplat backs OpSplatToArray in AOT-compiled bodies; see splatToArray.
@@ -45,15 +45,15 @@ func (vm *VM) aotSplat(v object.Value) object.Value {
 // one-element Array. Note MRI uses #to_a here, not #to_ary.
 func (vm *VM) splatToArray(v object.Value) object.Value {
 	if a, ok := object.KindOK[*object.Array](v); ok {
-		return a
+		return object.Wrap(a)
 	}
 	if vm.respondsTo(v, "to_a") {
 		r := vm.send(v, "to_a", nil, nil)
 		if a, ok := object.KindOK[*object.Array](r); ok {
-			return a
+			return object.Wrap(a)
 		}
 		raise("TypeError", "can't convert %s to Array (%s#to_a gives %s)",
 			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
 	}
-	return object.NewArray(v)
+	return object.Wrap(object.NewArray(v))
 }

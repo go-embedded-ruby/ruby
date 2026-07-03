@@ -24,7 +24,7 @@ import (
 // parsing a String cannot fail — no error branch is needed.
 func nokogiriParseHTML(src string) object.Value {
 	doc, _ := nokogiri.HTML(src)
-	return &NokogiriDocument{doc: doc}
+	return object.Wrap(&NokogiriDocument{doc: doc})
 }
 
 // nokogiriParseXML parses an XML source String into a Document, raising a Ruby
@@ -35,7 +35,7 @@ func nokogiriParseXML(src string) object.Value {
 	if err != nil {
 		raiseNokogiriError(err)
 	}
-	return &NokogiriDocument{doc: doc}
+	return object.Wrap(&NokogiriDocument{doc: doc})
 }
 
 // raiseNokogiriError re-raises a library error as a Ruby Nokogiri::SyntaxError.
@@ -84,9 +84,9 @@ func nokogiriStr(v object.Value) string {
 // #at_css / #parent / #next etc. return nil when there is no node.
 func nokogiriNodeOrNil(n *nokogiri.Node) object.Value {
 	if n == nil {
-		return object.NilV
+		return object.NilVal()
 	}
-	return &NokogiriNode{n: n}
+	return object.Wrap(&NokogiriNode{n: n})
 }
 
 // nokogiriNodeArray maps a NodeSet to a Ruby Array of wrapped nodes (#to_a).
@@ -94,7 +94,7 @@ func nokogiriNodeArray(set *nokogiri.NodeSet) *object.Array {
 	nodes := set.Nodes()
 	arr := object.NewArrayFromSlice(make([]object.Value, len(nodes)))
 	for i, n := range nodes {
-		arr.Elems[i] = &NokogiriNode{n: n}
+		arr.Elems[i] = object.Wrap(&NokogiriNode{n: n})
 	}
 	return arr
 }

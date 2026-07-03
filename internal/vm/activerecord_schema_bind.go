@@ -56,18 +56,18 @@ func (vm *VM) registerActiveRecordSchemaDSL(schema *RClass) {
 		if blk == nil {
 			raise("ArgumentError", "ActiveRecord::Schema.define requires a block")
 		}
-		vm.callBlockSelf(blk, &ActiveRecordSchemaDSL{}, nil)
-		return object.NilV
+		vm.callBlockSelf(blk, object.Wrap(&ActiveRecordSchemaDSL{}), nil)
+		return object.NilVal()
 	}}
 
 	def := newClass("ActiveRecord::Schema::Definition", vm.cObject)
-	schema.consts["Definition"] = def
-	vm.consts["ActiveRecord::Schema::Definition"] = def
+	schema.consts["Definition"] = object.Wrap(def)
+	vm.consts["ActiveRecord::Schema::Definition"] = object.Wrap(def)
 	vm.registerActiveRecordSchemaDefinition(def)
 
 	tbl := newClass("ActiveRecord::Schema::TableDefinition", vm.cObject)
-	schema.consts["TableDefinition"] = tbl
-	vm.consts["ActiveRecord::Schema::TableDefinition"] = tbl
+	schema.consts["TableDefinition"] = object.Wrap(tbl)
+	vm.consts["ActiveRecord::Schema::TableDefinition"] = object.Wrap(tbl)
 	vm.registerActiveRecordTableDefinition(tbl)
 }
 
@@ -86,7 +86,7 @@ func (vm *VM) registerActiveRecordSchemaDefinition(def *RClass) {
 		}
 		tdsl := &ActiveRecordTableDSL{td: td}
 		if blk != nil {
-			vm.callBlock(blk, []object.Value{tdsl})
+			vm.callBlock(blk, []object.Value{object.Wrap(tdsl)})
 		}
 		a := vm.arRequireAdapter()
 		if _, _, err := a.ExecuteDML(td.ToSQL()); err != nil {
@@ -98,7 +98,7 @@ func (vm *VM) registerActiveRecordSchemaDefinition(def *RClass) {
 				raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	def.define("add_index", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 2 {
@@ -109,7 +109,7 @@ func (vm *VM) registerActiveRecordSchemaDefinition(def *RClass) {
 		if _, _, err := vm.arRequireAdapter().ExecuteDML(sql); err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	def.define("add_column", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 3 {
@@ -119,7 +119,7 @@ func (vm *VM) registerActiveRecordSchemaDefinition(def *RClass) {
 		if _, _, err := vm.arRequireAdapter().ExecuteDML(sql); err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	def.define("execute", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -128,7 +128,7 @@ func (vm *VM) registerActiveRecordSchemaDefinition(def *RClass) {
 		if _, _, err := vm.arRequireAdapter().ExecuteDML(arStr(args[0])); err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
@@ -153,7 +153,7 @@ func (vm *VM) registerActiveRecordTableDefinition(tbl *RClass) {
 			for _, a := range arColumnNames(args) {
 				d.td.Column(a, t, arColOpts(colOptsHash(args))...)
 			}
-			return object.NilV
+			return object.NilVal()
 		})
 	}
 	tbl.define("column", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -161,11 +161,11 @@ func (vm *VM) registerActiveRecordTableDefinition(tbl *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2..)", len(args))
 		}
 		self(v).td.Column(arStr(args[0]), arStr(args[1]), arColOpts(colOptsHash(args))...)
-		return object.NilV
+		return object.NilVal()
 	})
 	tbl.define("timestamps", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		self(v).td.Timestamps()
-		return object.NilV
+		return object.NilVal()
 	})
 	references := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -175,7 +175,7 @@ func (vm *VM) registerActiveRecordTableDefinition(tbl *RClass) {
 		for _, a := range arColumnNames(args) {
 			d.td.References(a, arColOpts(colOptsHash(args))...)
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	tbl.define("references", references)
 	tbl.define("belongs_to", references)
@@ -186,14 +186,14 @@ func (vm *VM) registerActiveRecordTableDefinition(tbl *RClass) {
 		cols, unique, name := arIndexArgs(args[0], indexOpts(args, 1))
 		d := self(v)
 		d.indexes = append(d.indexes, arPendingIndex{cols: cols, unique: unique, name: name})
-		return object.NilV
+		return object.NilVal()
 	})
 	tbl.define("primary_key", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
 		self(v).td.PrimaryKey(arStr(args[0]))
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
@@ -296,8 +296,8 @@ func arIndexArgs(colSpec object.Value, h *object.Hash) (cols []string, unique bo
 // arHashGet reads key from a Ruby options Hash accepting either a Symbol or a
 // String key (Rails options are symbol-keyed; a string key is tolerated).
 func arHashGet(h *object.Hash, key string) (object.Value, bool) {
-	if v, ok := h.Get(object.Symbol(key)); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol(key)))); ok {
 		return v, true
 	}
-	return h.Get(object.NewString(key))
+	return h.Get(object.Wrap(object.NewString(key)))
 }

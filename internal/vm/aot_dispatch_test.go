@@ -41,7 +41,7 @@ func register(t *testing.T, key string, fn CompiledMethod) {
 // compiled body returns a sentinel, and the sentinel is what runs.
 func TestAOTDispatchPrefersCompiled(t *testing.T) {
 	register(t, "Object#sentinel", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(999)
+		return object.IntValue(int64(object.Integer(999)))
 	})
 	if got := runSrc(t, "def sentinel = 1\np sentinel"); got != "999" {
 		t.Errorf("compiled body not preferred: got %q, want 999", got)
@@ -54,7 +54,7 @@ func TestAOTDispatchPrefersCompiled(t *testing.T) {
 // invokeInPlace instead). Same sentinel proof as the direct-call test.
 func TestAOTDispatchViaSend(t *testing.T) {
 	register(t, "Object#sentinel2", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(777)
+		return object.IntValue(int64(object.Integer(777)))
 	})
 	if got := runSrc(t, "def sentinel2 = 1\np send(:sentinel2)"); got != "777" {
 		t.Errorf("compiled body via send not preferred: got %q, want 777", got)
@@ -75,7 +75,7 @@ func TestAOTDispatchRealCodegen(t *testing.T) {
 // first definition runs compiled (sentinel), the redefinition is interpreted.
 func TestAOTDispatchDeoptOnRedef(t *testing.T) {
 	register(t, "Object#g", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(999)
+		return object.IntValue(int64(object.Integer(999)))
 	})
 	if got := runSrc(t, "def g = 1\np g\ndef g = 2\np g"); got != "999\n2" {
 		t.Errorf("redefinition should deopt to interpreter: got %q, want \"999\\n2\"", got)

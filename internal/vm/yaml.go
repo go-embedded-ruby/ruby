@@ -18,19 +18,19 @@ import (
 func (vm *VM) registerYAML() {
 	psych := newClass("Psych", nil)
 	psych.isModule = true
-	vm.consts["Psych"] = psych
+	vm.consts["Psych"] = object.Wrap(psych)
 	// In MRI, YAML is an alias of Psych.
-	vm.consts["YAML"] = psych
+	vm.consts["YAML"] = object.Wrap(psych)
 
 	std := object.Kind[*RClass](vm.consts["StandardError"])
-	psych.consts["Exception"] = newClass("Psych::Exception", std)
-	psych.consts["SyntaxError"] = newClass("Psych::SyntaxError", object.Kind[*RClass](psych.consts["Exception"]))
-	psych.consts["DisallowedClass"] = newClass("Psych::DisallowedClass", object.Kind[*RClass](psych.consts["Exception"]))
-	psych.consts["VERSION"] = object.NewString("5.0.0")
+	psych.consts["Exception"] = object.Wrap(newClass("Psych::Exception", std))
+	psych.consts["SyntaxError"] = object.Wrap(newClass("Psych::SyntaxError", object.Kind[*RClass](psych.consts["Exception"])))
+	psych.consts["DisallowedClass"] = object.Wrap(newClass("Psych::DisallowedClass", object.Kind[*RClass](psych.consts["Exception"])))
+	psych.consts["VERSION"] = object.Wrap(object.NewString("5.0.0"))
 
 	nodes := newClass("Psych::Nodes", nil)
 	nodes.isModule = true
-	psych.consts["Nodes"] = nodes
+	psych.consts["Nodes"] = object.Wrap(nodes)
 
 	notImpl := func(what string) NativeFn {
 		return func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -98,10 +98,10 @@ func (vm *VM) registerYAML() {
 			}
 			doc := object.NewString(yamlDump(vm, args[0]))
 			if len(args) > 1 && args[1] != object.NilV {
-				vm.send(args[1], "write", []object.Value{doc}, nil)
+				vm.send(args[1], "write", []object.Value{object.Wrap(doc)}, nil)
 				return args[1]
 			}
-			return doc
+			return object.Wrap(doc)
 		}}
 
 	// Object#to_yaml (Psych installs this on Object) returns YAML.dump(self). It is
@@ -109,7 +109,7 @@ func (vm *VM) registerYAML() {
 	// object — including the full Puppet::Transaction::Report graph — serialises.
 	vm.cObject.methods["to_yaml"] = &Method{name: "to_yaml", owner: vm.cObject,
 		native: func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.NewString(yamlDump(vm, self))
+			return object.Wrap(object.NewString(yamlDump(vm, self)))
 		}}
 }
 
@@ -147,7 +147,7 @@ func permittedClassesArg(rest []object.Value) []string {
 	if !ok {
 		return nil
 	}
-	val, ok := h.Get(object.Symbol("permitted_classes"))
+	val, ok := h.Get(object.SymVal(string(object.Symbol("permitted_classes"))))
 	if !ok {
 		return nil
 	}

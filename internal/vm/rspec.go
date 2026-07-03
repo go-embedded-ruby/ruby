@@ -75,15 +75,15 @@ func (e *RSpecExpectation) Truthy() bool    { return true }
 func (vm *VM) registerRSpec() {
 	mod := newClass("RSpec", nil)
 	mod.isModule = true
-	vm.consts["RSpec"] = mod
+	vm.consts["RSpec"] = object.Wrap(mod)
 
 	// The matcher constructors and expect live on the top level (Kernel), matching
 	// how a spec file calls them bare (`expect(x).to eq(1)`), and also as module
 	// methods on RSpec::Matchers for explicit qualification.
 	matchers := newClass("RSpec::Matchers", nil)
 	matchers.isModule = true
-	mod.consts["Matchers"] = matchers
-	vm.consts["RSpec::Matchers"] = matchers
+	mod.consts["Matchers"] = object.Wrap(matchers)
+	vm.consts["RSpec::Matchers"] = object.Wrap(matchers)
 
 	vm.registerRSpecErrors(mod)
 	vm.registerRSpecMatcherClass(mod)
@@ -98,7 +98,7 @@ func (vm *VM) registerRSpec() {
 
 	simple := func(name string, build func(vm *VM, args []object.Value) rspec.Matcher) {
 		def(name, func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return &RSpecMatcher{m: build(vm, args)}
+			return object.Wrap(&RSpecMatcher{m: build(vm, args)})
 		})
 	}
 
@@ -111,9 +111,9 @@ func (vm *VM) registerRSpec() {
 	// the truthiness matcher.
 	def("be", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
-			return &RSpecMatcher{m: rspec.BeTruthy()}
+			return object.Wrap(&RSpecMatcher{m: rspec.BeTruthy()})
 		}
-		return &RSpecMatcher{m: rspec.Equal(rspecArg(vm, args))}
+		return object.Wrap(&RSpecMatcher{m: rspec.Equal(rspecArg(vm, args))})
 	})
 	simple("be_truthy", func(vm *VM, a []object.Value) rspec.Matcher { return rspec.BeTruthy() })
 	simple("be_falsey", func(vm *VM, a []object.Value) rspec.Matcher { return rspec.BeFalsey() })
@@ -145,34 +145,34 @@ func (vm *VM) registerRSpec() {
 
 	// all(matcher) wraps an inner matcher.
 	def("all", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return &RSpecMatcher{m: rspec.All(rspecMatcherArg(args))}
+		return object.Wrap(&RSpecMatcher{m: rspec.All(rspecMatcherArg(args))})
 	})
 
 	// be_within(delta) — chainable: .of(centre).
 	def("be_within", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		delta := rspecFloatArg(args)
-		return &RSpecMatcher{
+		return object.Wrap(&RSpecMatcher{
 			m:     rspec.BeWithin(delta),
 			chain: &rspecChain{within: &rspecWithinChain{delta: delta}},
-		}
+		})
 	})
 
 	// respond_to(:m, …) — chainable: .with(n).arguments.
 	def("respond_to", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		names := rspecSymbols(args)
-		return &RSpecMatcher{
+		return object.Wrap(&RSpecMatcher{
 			m:     rspec.RespondTo(names...),
 			chain: &rspecChain{respTo: &rspecRespondChain{names: names}},
-		}
+		})
 	})
 
 	// raise_error([class[, message]]) — a block matcher; expect { … } observes it.
 	raiseErr := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		spec := rspecRaiseSpecOf(args)
-		return &RSpecMatcher{
+		return object.Wrap(&RSpecMatcher{
 			m:         rspec.RaiseErrorObserved(rspec.RaisedError{}, spec.class, spec.message),
 			raiseSpec: spec,
-		}
+		})
 	}
 	def("raise_error", raiseErr)
 	def("raise_exception", raiseErr)
@@ -180,12 +180,12 @@ func (vm *VM) registerRSpec() {
 	// expect(actual) / expect { block } builds the expectation target.
 	def("expect", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk != nil {
-			return &RSpecExpectation{block: blk}
+			return object.Wrap(&RSpecExpectation{block: blk})
 		}
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &RSpecExpectation{actual: rspecFromRuby(vm, args[0])}
+		return object.Wrap(&RSpecExpectation{actual: rspecFromRuby(vm, args[0])})
 	})
 }
 
@@ -196,13 +196,13 @@ func (vm *VM) registerRSpec() {
 func (vm *VM) registerRSpecErrors(mod *RClass) {
 	expectations := newClass("RSpec::Expectations", nil)
 	expectations.isModule = true
-	mod.consts["Expectations"] = expectations
-	vm.consts["RSpec::Expectations"] = expectations
+	mod.consts["Expectations"] = object.Wrap(expectations)
+	vm.consts["RSpec::Expectations"] = object.Wrap(expectations)
 
 	exc := object.Kind[*RClass](vm.consts["Exception"])
 	notMet := newClass("RSpec::Expectations::ExpectationNotMetError", exc)
-	expectations.consts["ExpectationNotMetError"] = notMet
-	vm.consts["RSpec::Expectations::ExpectationNotMetError"] = notMet
+	expectations.consts["ExpectationNotMetError"] = object.Wrap(notMet)
+	vm.consts["RSpec::Expectations::ExpectationNotMetError"] = object.Wrap(notMet)
 }
 
 // registerRSpecMatcherClass installs RSpec::Matchers::BuiltIn::BaseMatcher (the
@@ -211,12 +211,12 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 	matchers := object.Kind[*RClass](mod.consts["Matchers"])
 	builtIn := newClass("RSpec::Matchers::BuiltIn", nil)
 	builtIn.isModule = true
-	matchers.consts["BuiltIn"] = builtIn
-	vm.consts["RSpec::Matchers::BuiltIn"] = builtIn
+	matchers.consts["BuiltIn"] = object.Wrap(builtIn)
+	vm.consts["RSpec::Matchers::BuiltIn"] = object.Wrap(builtIn)
 
 	cls := newClass("RSpec::Matchers::BuiltIn::BaseMatcher", vm.cObject)
-	builtIn.consts["BaseMatcher"] = cls
-	vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"] = cls
+	builtIn.consts["BaseMatcher"] = object.Wrap(cls)
+	vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *RSpecMatcher { return object.Kind[*RSpecMatcher](v) }
@@ -226,21 +226,21 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return object.Bool(self(v).m.Matches(rspecFromRuby(vm, args[0])))
+		return object.BoolValue(bool(object.Bool(self(v).m.Matches(rspecFromRuby(vm, args[0])))))
 	})
 	// failure_message / failure_message_when_negated.
 	d("failure_message", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).m.FailureMessage())
+		return object.Wrap(object.NewString(self(v).m.FailureMessage()))
 	})
 	d("failure_message_when_negated", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).m.FailureMessageNegated())
+		return object.Wrap(object.NewString(self(v).m.FailureMessageNegated()))
 	})
 	// description falls back to a generic form for matchers without one.
 	d("description", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if dsc, ok := self(v).m.(rspec.Describer); ok {
-			return object.NewString(dsc.Description())
+			return object.Wrap(object.NewString(dsc.Description()))
 		}
-		return object.NewString("match")
+		return object.Wrap(object.NewString("match"))
 	})
 
 	// of(centre) refines be_within(delta).of(x).
@@ -249,7 +249,7 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 		if m.chain == nil || m.chain.within == nil {
 			raise("NoMethodError", "undefined method `of' for matcher")
 		}
-		return &RSpecMatcher{m: rspec.BeWithin(m.chain.within.delta).Of(rspecFloatArg(args))}
+		return object.Wrap(&RSpecMatcher{m: rspec.BeWithin(m.chain.within.delta).Of(rspecFloatArg(args))})
 	})
 	// with(n) refines respond_to(:m).with(n); arguments is the no-op tail.
 	d("with", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -258,17 +258,17 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 			raise("NoMethodError", "undefined method `with' for matcher")
 		}
 		n := int(rspecIntArg(args))
-		return &RSpecMatcher{m: rspec.RespondTo(m.chain.respTo.names...).With(n)}
+		return object.Wrap(&RSpecMatcher{m: rspec.RespondTo(m.chain.respTo.names...).With(n)})
 	})
 	d("arguments", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value { return v })
 	d("argument", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value { return v })
 
 	// & / | build the and / or combinators.
 	d("&", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &RSpecMatcher{m: rspec.And(self(v).m, rspecMatcherArg(args))}
+		return object.Wrap(&RSpecMatcher{m: rspec.And(self(v).m, rspecMatcherArg(args))})
 	})
 	d("|", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &RSpecMatcher{m: rspec.Or(self(v).m, rspecMatcherArg(args))}
+		return object.Wrap(&RSpecMatcher{m: rspec.Or(self(v).m, rspecMatcherArg(args))})
 	})
 }
 
@@ -277,8 +277,8 @@ func (vm *VM) registerRSpecMatcherClass(mod *RClass) {
 func (vm *VM) registerRSpecExpectationClass(mod *RClass) {
 	expectations := object.Kind[*RClass](mod.consts["Expectations"])
 	cls := newClass("RSpec::Expectations::ExpectationTarget", vm.cObject)
-	expectations.consts["ExpectationTarget"] = cls
-	vm.consts["RSpec::Expectations::ExpectationTarget"] = cls
+	expectations.consts["ExpectationTarget"] = object.Wrap(cls)
+	vm.consts["RSpec::Expectations::ExpectationTarget"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 

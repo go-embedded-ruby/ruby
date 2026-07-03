@@ -18,7 +18,7 @@ func (vm *VM) registerModuleExtras() {
 		mod := object.Kind[*RClass](self)
 		if len(args) == 0 {
 			mod.funcMode = true
-			return object.NilV
+			return object.NilVal()
 		}
 		for _, a := range args {
 			name := nameArg(a)
@@ -38,7 +38,7 @@ func (vm *VM) registerModuleExtras() {
 		if len(args) == 1 {
 			return args[0]
 		}
-		return object.NewArrayFromSlice(append([]object.Value(nil), args...))
+		return object.Wrap(object.NewArrayFromSlice(append([]object.Value(nil), args...)))
 	})
 
 	// Visibility setters (private / public / protected). With no args they set the
@@ -52,7 +52,7 @@ func (vm *VM) registerModuleExtras() {
 		mod := object.Kind[*RClass](self)
 		if len(args) == 0 {
 			mod.defaultVis = vis
-			return object.NilV
+			return object.NilVal()
 		}
 		// `private [:a, :b]` (an Array argument) marks each element, returning the
 		// array — MRI accepts a single Array as well as a varargs name list.
@@ -70,7 +70,7 @@ func (vm *VM) registerModuleExtras() {
 		if len(args) == 1 {
 			return args[0]
 		}
-		return object.NewArrayFromSlice(append([]object.Value(nil), args...))
+		return object.Wrap(object.NewArrayFromSlice(append([]object.Value(nil), args...)))
 	}
 	vm.cModule.define("private", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return setVis(vm, self, args, visPrivate)
@@ -105,7 +105,7 @@ func (vm *VM) registerModuleExtras() {
 		mod := object.Kind[*RClass](self)
 		newName, oldName := nameArg(args[0]), nameArg(args[1])
 		vm.aliasMethod(mod, newName, oldName)
-		return object.Symbol(newName)
+		return object.SymVal(string(object.Symbol(newName)))
 	})
 
 	// undef_method: the method form of `undef name`. It installs a tombstone that
@@ -116,7 +116,7 @@ func (vm *VM) registerModuleExtras() {
 		for _, a := range args {
 			vm.undefMethod(mod, nameArg(a))
 		}
-		return mod
+		return object.Wrap(mod)
 	})
 
 	// remove_method: deletes the receiver's OWN definition of each name, leaving
@@ -132,7 +132,7 @@ func (vm *VM) registerModuleExtras() {
 			delete(mod.methods, name)
 		}
 		bumpMethodSerial()
-		return mod
+		return object.Wrap(mod)
 	})
 
 	// Constant-visibility directives: not enforced (constants are not access-

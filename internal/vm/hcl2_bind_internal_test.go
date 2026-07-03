@@ -20,7 +20,7 @@ func bigOver64() *big.Int {
 
 // TestHCL2SourceArgNonString covers hcl2SourceArg's to_s branch.
 func TestHCL2SourceArgNonString(t *testing.T) {
-	if got := hcl2SourceArg(object.Integer(5)); got != "5" {
+	if got := hcl2SourceArg(object.IntValue(int64(object.Integer(5)))); got != "5" {
 		t.Errorf("non-string source -> %q", got)
 	}
 }
@@ -28,13 +28,13 @@ func TestHCL2SourceArgNonString(t *testing.T) {
 // TestHCL2KeyBridge covers hcl2Key across its Symbol, String and to_s-default
 // arms.
 func TestHCL2KeyBridge(t *testing.T) {
-	if got := hcl2Key(object.Symbol("s")); got != "s" {
+	if got := hcl2Key(object.SymVal(string(object.Symbol("s")))); got != "s" {
 		t.Errorf("symbol key -> %q", got)
 	}
-	if got := hcl2Key(object.NewString("str")); got != "str" {
+	if got := hcl2Key(object.Wrap(object.NewString("str"))); got != "str" {
 		t.Errorf("string key -> %q", got)
 	}
-	if got := hcl2Key(object.Integer(3)); got != "3" {
+	if got := hcl2Key(object.IntValue(int64(object.Integer(3)))); got != "3" {
 		t.Errorf("integer key -> %q", got)
 	}
 }
@@ -46,46 +46,46 @@ func TestHCL2ToBridge(t *testing.T) {
 	if toHCL2(nil) != nil {
 		t.Error("go-nil should map to nil")
 	}
-	if toHCL2(object.NilV) != nil {
+	if toHCL2(object.NilVal()) != nil {
 		t.Error("object.NilV should map to nil")
 	}
-	if v, ok := toHCL2(object.Bool(true)).(bool); !ok || !v {
-		t.Errorf("bool -> %#v", toHCL2(object.Bool(true)))
+	if v, ok := toHCL2(object.BoolValue(bool(object.Bool(true)))).(bool); !ok || !v {
+		t.Errorf("bool -> %#v", toHCL2(object.BoolValue(bool(object.Bool(true)))))
 	}
-	if v, ok := toHCL2(object.Integer(7)).(int64); !ok || v != 7 {
-		t.Errorf("int -> %#v", toHCL2(object.Integer(7)))
+	if v, ok := toHCL2(object.IntValue(int64(object.Integer(7)))).(int64); !ok || v != 7 {
+		t.Errorf("int -> %#v", toHCL2(object.IntValue(int64(object.Integer(7)))))
 	}
 	// A *Bignum whose value fits in int64 maps to int64 (the IsInt64 true arm).
 	fit := &object.Bignum{I: big.NewInt(123)}
-	if v, ok := toHCL2(fit).(int64); !ok || v != 123 {
-		t.Errorf("fitting bignum -> %#v", toHCL2(fit))
+	if v, ok := toHCL2(object.Wrap(fit)).(int64); !ok || v != 123 {
+		t.Errorf("fitting bignum -> %#v", toHCL2(object.Wrap(fit)))
 	}
 	// An over-64-bit Bignum maps to float64.
 	big100 := &object.Bignum{I: bigOver64()}
-	if _, ok := toHCL2(big100).(float64); !ok {
-		t.Errorf("over-64 bignum -> %#v", toHCL2(big100))
+	if _, ok := toHCL2(object.Wrap(big100)).(float64); !ok {
+		t.Errorf("over-64 bignum -> %#v", toHCL2(object.Wrap(big100)))
 	}
-	if v, ok := toHCL2(object.Float(1.5)).(float64); !ok || v != 1.5 {
-		t.Errorf("float -> %#v", toHCL2(object.Float(1.5)))
+	if v, ok := toHCL2(object.FloatValue(float64(object.Float(1.5)))).(float64); !ok || v != 1.5 {
+		t.Errorf("float -> %#v", toHCL2(object.FloatValue(float64(object.Float(1.5)))))
 	}
-	if v, ok := toHCL2(object.NewString("x")).(string); !ok || v != "x" {
-		t.Errorf("string -> %#v", toHCL2(object.NewString("x")))
+	if v, ok := toHCL2(object.Wrap(object.NewString("x"))).(string); !ok || v != "x" {
+		t.Errorf("string -> %#v", toHCL2(object.Wrap(object.NewString("x"))))
 	}
-	if v, ok := toHCL2(object.Symbol("s")).(string); !ok || v != "s" {
-		t.Errorf("symbol -> %#v", toHCL2(object.Symbol("s")))
+	if v, ok := toHCL2(object.SymVal(string(object.Symbol("s")))).(string); !ok || v != "s" {
+		t.Errorf("symbol -> %#v", toHCL2(object.SymVal(string(object.Symbol("s")))))
 	}
-	arr := &object.Array{Elems: []object.Value{object.Integer(1)}}
-	if v, ok := toHCL2(arr).([]hcl2.Value); !ok || len(v) != 1 {
-		t.Errorf("array -> %#v", toHCL2(arr))
+	arr := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}
+	if v, ok := toHCL2(object.Wrap(arr)).([]hcl2.Value); !ok || len(v) != 1 {
+		t.Errorf("array -> %#v", toHCL2(object.Wrap(arr)))
 	}
 	h := object.NewHash()
-	h.Set(object.NewString("k"), object.Integer(2))
-	if m, ok := toHCL2(h).(*hcl2.Map); !ok || m.Len() != 1 {
-		t.Errorf("hash -> %#v", toHCL2(h))
+	h.Set(object.Wrap(object.NewString("k")), object.IntValue(int64(object.Integer(2))))
+	if m, ok := toHCL2(object.Wrap(h)).(*hcl2.Map); !ok || m.Len() != 1 {
+		t.Errorf("hash -> %#v", toHCL2(object.Wrap(h)))
 	}
 	// An unmapped value maps to nil.
-	if toHCL2(&Proc{}) != nil {
-		t.Errorf("unmapped -> %#v", toHCL2(&Proc{}))
+	if toHCL2(object.Wrap(&Proc{})) != nil {
+		t.Errorf("unmapped -> %#v", toHCL2(object.Wrap(&Proc{})))
 	}
 }
 
@@ -109,8 +109,8 @@ func TestHCL2FromBridge(t *testing.T) {
 // key is present but not a Hash: the whole Hash is then read as variables.
 func TestHCL2ContextVariablesWrapperNonHash(t *testing.T) {
 	h := object.NewHash()
-	h.Set(object.Symbol("variables"), object.Integer(1))
-	c := hcl2Context(h)
+	h.Set(object.SymVal(string(object.Symbol("variables"))), object.IntValue(int64(object.Integer(1))))
+	c := hcl2Context(object.Wrap(h))
 	if c == nil {
 		t.Fatal("nil context")
 	}

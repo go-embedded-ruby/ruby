@@ -18,9 +18,9 @@ import (
 func (vm *VM) registerMsgpack() {
 	mod := newClass("MessagePack", nil)
 	mod.isModule = true
-	vm.consts["MessagePack"] = mod
+	vm.consts["MessagePack"] = object.Wrap(mod)
 	// The `msgpack` gem exposes the module under both names.
-	vm.consts["Msgpack"] = mod
+	vm.consts["Msgpack"] = object.Wrap(mod)
 	vm.registerMsgpackErrors(mod)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
@@ -31,7 +31,7 @@ func (vm *VM) registerMsgpack() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
 		}
-		return object.NewStringBytesEnc(msgpackPack(args[0]), "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc(msgpackPack(args[0]), "ASCII-8BIT"))
 	}
 	def("pack", pack)
 	def("dump", pack)
@@ -50,7 +50,7 @@ func (vm *VM) registerMsgpack() {
 	// Object#to_msgpack (the gem installs this on Object) returns
 	// MessagePack.pack(self).
 	vm.cObject.define("to_msgpack", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewStringBytesEnc(msgpackPack(self), "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc(msgpackPack(self), "ASCII-8BIT"))
 	})
 }
 
@@ -64,8 +64,8 @@ func (vm *VM) registerMsgpackErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	err := reg("Error", "MessagePack::Error", std)

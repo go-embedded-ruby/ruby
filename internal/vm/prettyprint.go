@@ -116,11 +116,11 @@ func (vm *VM) ppNewArgs(args []object.Value) (prefix string, maxwidth int, newli
 // builder instance methods, plus the nested PrettyPrint::Group constant.
 func (vm *VM) registerPrettyPrint() {
 	vm.cPrettyPrint = newClass("PrettyPrint", vm.cObject)
-	vm.consts["PrettyPrint"] = vm.cPrettyPrint
+	vm.consts["PrettyPrint"] = object.Wrap(vm.cPrettyPrint)
 
 	grp := newClass("PrettyPrint::Group", vm.cObject)
-	vm.cPrettyPrint.consts["Group"] = grp
-	vm.consts["PrettyPrint::Group"] = grp
+	vm.cPrettyPrint.consts["Group"] = object.Wrap(grp)
+	vm.consts["PrettyPrint::Group"] = object.Wrap(grp)
 	grp.define("depth", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(object.Kind[*PrettyPrintGroup](v).depth))
 	})
@@ -129,7 +129,7 @@ func (vm *VM) registerPrettyPrint() {
 	vm.cPrettyPrint.smethods["new"] = &Method{name: "new", owner: vm.cPrettyPrint,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			prefix, maxwidth, newline := vm.ppNewArgs(args)
-			return newPrettyPrint(prefix, maxwidth, newline)
+			return object.Wrap(newPrettyPrint(prefix, maxwidth, newline))
 		}}
 
 	// PrettyPrint.format(output='', maxwidth=79, newline="\n") { |q| ... }: build,
@@ -141,9 +141,9 @@ func (vm *VM) registerPrettyPrint() {
 			}
 			prefix, maxwidth, newline := vm.ppNewArgs(args)
 			p := newPrettyPrint(prefix, maxwidth, newline)
-			vm.callBlock(blk, []object.Value{p})
+			vm.callBlock(blk, []object.Value{object.Wrap(p)})
 			p.q.Flush()
-			return object.NewString(p.output())
+			return object.Wrap(object.NewString(p.output()))
 		}}
 
 	// PrettyPrint.singleline_format(output='', ...) { |q| ... }: render with no
@@ -156,8 +156,8 @@ func (vm *VM) registerPrettyPrint() {
 			}
 			prefix, _, _ := vm.ppNewArgs(args)
 			sl := newSingleLine(prefix)
-			vm.callBlock(blk, []object.Value{sl})
-			return object.NewString(sl.output())
+			vm.callBlock(blk, []object.Value{object.Wrap(sl)})
+			return object.Wrap(object.NewString(sl.output()))
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cPrettyPrint.define(name, fn) }
@@ -168,7 +168,7 @@ func (vm *VM) registerPrettyPrint() {
 		p := self(v)
 		s := vm.ppText(args[0])
 		p.q.Text(s, ppWidth(s, args, 1))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// breakable(sep=' ', width=sep.length): a permitted line break, rendering sep
@@ -180,7 +180,7 @@ func (vm *VM) registerPrettyPrint() {
 			sep = vm.ppText(args[0])
 		}
 		p.q.Breakable(sep, ppWidth(sep, args, 1))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// nest(indent) { ... }: increase the left margin by indent for breaks added in
@@ -192,7 +192,7 @@ func (vm *VM) registerPrettyPrint() {
 		p := self(v)
 		indent := int(intArg(args[0]))
 		p.q.Nest(indent, func() { vm.callBlock(blk, nil) })
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// group(indent=0, open_obj='', close_obj='', open_width=open_obj.length,
@@ -218,7 +218,7 @@ func (vm *VM) registerPrettyPrint() {
 		p.depth++
 		p.q.Group(indent, openObj, openWidth, closeObj, closeWidth, func() { vm.callBlock(blk, nil) })
 		p.depth--
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// fill_breakable(sep=' ', width=sep.length): a breakable whose break decision is
@@ -230,43 +230,43 @@ func (vm *VM) registerPrettyPrint() {
 			sep = vm.ppText(args[0])
 		}
 		p.q.FillBreakable(sep, ppWidth(sep, args, 1))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// flush: drain the buffered document into the output.
 	d("flush", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		self(v).q.Flush()
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// break_outmost_groups: break the buffer into lines shorter than maxwidth.
 	d("break_outmost_groups", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		self(v).q.BreakOutmostGroups()
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// current_group: the group most recently pushed on the stack.
 	d("current_group", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &PrettyPrintGroup{depth: self(v).depth}
+		return object.Wrap(&PrettyPrintGroup{depth: self(v).depth})
 	})
 
 	d("output", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).output())
+		return object.Wrap(object.NewString(self(v).output()))
 	})
 	d("maxwidth", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).maxwidth))
 	})
 	d("newline", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).newline)
+		return object.Wrap(object.NewString(self(v).newline))
 	})
 	d("indent", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).q.Indent()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ToS())
+		return object.Wrap(object.NewString(self(v).ToS()))
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Inspect())
+		return object.Wrap(object.NewString(self(v).Inspect()))
 	})
 }
 
@@ -292,15 +292,15 @@ func newSingleLine(prefix string) *SingleLine {
 // The block yielded by singleline_format receives one of these.
 func (vm *VM) registerSingleLine() {
 	cls := newClass("PrettyPrint::SingleLine", vm.cObject)
-	vm.cPrettyPrint.consts["SingleLine"] = cls
-	vm.consts["PrettyPrint::SingleLine"] = cls
+	vm.cPrettyPrint.consts["SingleLine"] = object.Wrap(cls)
+	vm.consts["PrettyPrint::SingleLine"] = object.Wrap(cls)
 
 	self := func(v object.Value) *SingleLine { return object.Kind[*SingleLine](v) }
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 
 	d("text", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).s.Text(vm.ppText(args[0]), 0)
-		return object.NilV
+		return object.NilVal()
 	})
 	d("breakable", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		sep := " "
@@ -308,14 +308,14 @@ func (vm *VM) registerSingleLine() {
 			sep = vm.ppText(args[0])
 		}
 		self(v).s.Breakable(sep, 0)
-		return object.NilV
+		return object.NilVal()
 	})
 	d("nest", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (nest)")
 		}
 		self(v).s.Nest(0, func() { vm.callBlock(blk, nil) })
-		return object.NilV
+		return object.NilVal()
 	})
 	d("group", func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -329,22 +329,22 @@ func (vm *VM) registerSingleLine() {
 			closeObj = vm.ppText(args[2])
 		}
 		self(v).s.Group(0, openObj, 0, closeObj, 0, func() { vm.callBlock(blk, nil) })
-		return object.NilV
+		return object.NilVal()
 	})
 	d("flush", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		self(v).s.Flush()
-		return object.NilV
+		return object.NilVal()
 	})
 	d("first?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.First())
+		return object.BoolValue(bool(object.Bool(self(v).s.First())))
 	})
 	d("output", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).output())
+		return object.Wrap(object.NewString(self(v).output()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ToS())
+		return object.Wrap(object.NewString(self(v).ToS()))
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Inspect())
+		return object.Wrap(object.NewString(self(v).Inspect()))
 	})
 }

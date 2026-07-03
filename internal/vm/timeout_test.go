@@ -44,7 +44,7 @@ end`, `"Timeout::Error"`},
 func TestTimeoutNoBlock(t *testing.T) {
 	vm := New(nil)
 	mod := object.Kind[*RClass](vm.consts["Timeout"])
-	got := catchRaise(func() { mod.smethods["timeout"].native(vm, mod, nil, nil) })
+	got := catchRaise(func() { mod.smethods["timeout"].native(vm, object.Wrap(mod), nil, nil) })
 	if got != "LocalJumpError" {
 		t.Fatalf("timeout no-block: got %q, want LocalJumpError", got)
 	}

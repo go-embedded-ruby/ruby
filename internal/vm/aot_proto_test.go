@@ -20,11 +20,11 @@ import (
 // operator still goes through vm.binaryOp, so semantics match the interpreter
 // exactly (a redefined Integer#+ would be honoured identically).
 func (vm *VM) fibL1(n object.Value) object.Value {
-	if vm.binaryOp(bytecode.OpLt, n, object.Integer(2)).Truthy() {
+	if vm.binaryOp(bytecode.OpLt, n, object.IntValue(int64(object.Integer(2)))).Truthy() {
 		return n
 	}
-	a := vm.fibL1(vm.binaryOp(bytecode.OpSub, n, object.Integer(1)))
-	b := vm.fibL1(vm.binaryOp(bytecode.OpSub, n, object.Integer(2)))
+	a := vm.fibL1(vm.binaryOp(bytecode.OpSub, n, object.IntValue(int64(object.Integer(1)))))
+	b := vm.fibL1(vm.binaryOp(bytecode.OpSub, n, object.IntValue(int64(object.Integer(2)))))
 	return vm.binaryOp(bytecode.OpAdd, a, b)
 }
 
@@ -38,11 +38,11 @@ func (vm *VM) fibL2(n object.Value) object.Value {
 		return vm.fibL1(n) // deopt
 	}
 	if ni < 2 {
-		return ni
+		return object.IntValue(int64(ni))
 	}
-	a := object.AsInteger(vm.fibL2(ni - 1))
-	b := object.AsInteger(vm.fibL2(ni - 2))
-	return a + b
+	a := object.AsInteger(vm.fibL2(object.IntValue(int64(ni - 1))))
+	b := object.AsInteger(vm.fibL2(object.IntValue(int64(ni - 2))))
+	return object.IntValue(int64(a + b))
 }
 
 // fibL3 is the "fully monomorphised" form a whole-method type-inference pass
@@ -65,7 +65,7 @@ func (vm *VM) fibL3(n object.Value) object.Value {
 	if !ok {
 		return vm.fibL1(n) // deopt
 	}
-	return object.Integer(fibUnboxed(int64(ni)))
+	return object.IntValue(int64(object.Integer(fibUnboxed(int64(ni)))))
 }
 
 const fibN = 30
@@ -86,7 +86,7 @@ func BenchmarkAOTLevel1(b *testing.B) {
 	m := New(io.Discard)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.fibL1(object.Integer(fibN))
+		_ = m.fibL1(object.IntValue(int64(object.Integer(fibN))))
 	}
 }
 
@@ -94,7 +94,7 @@ func BenchmarkAOTLevel2(b *testing.B) {
 	m := New(io.Discard)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.fibL2(object.Integer(fibN))
+		_ = m.fibL2(object.IntValue(int64(object.Integer(fibN))))
 	}
 }
 
@@ -102,7 +102,7 @@ func BenchmarkAOTLevel3(b *testing.B) {
 	m := New(io.Discard)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.fibL3(object.Integer(fibN))
+		_ = m.fibL3(object.IntValue(int64(object.Integer(fibN))))
 	}
 }
 

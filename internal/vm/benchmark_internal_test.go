@@ -258,7 +258,7 @@ func TestBenchmarkInternals(t *testing.T) {
 		t.Fatalf("benchJob stringers: %q %q %v", bj.ToS(), bj.Inspect(), bj.Truthy())
 	}
 	// benchFormatArgs maps a non-numeric to its ToS() and a numeric to float64.
-	got := benchFormatArgs([]object.Value{object.NewString("hi"), object.Integer(3)})
+	got := benchFormatArgs([]object.Value{object.Wrap(object.NewString("hi")), object.IntValue(int64(object.Integer(3)))})
 	if len(got) != 2 || got[0] != "hi" || got[1] != 3.0 {
 		t.Fatalf("benchFormatArgs = %#v", got)
 	}
@@ -267,7 +267,7 @@ func TestBenchmarkInternals(t *testing.T) {
 		t.Fatalf("benchLjust over-width")
 	}
 	// labelToS coerces a non-string/non-nil via to_s and nil to "".
-	if labelToS(object.Integer(7)) != "7" || labelToS(object.NilV) != "" {
+	if labelToS(object.IntValue(int64(object.Integer(7)))) != "7" || labelToS(object.NilVal()) != "" {
 		t.Fatalf("labelToS coercion")
 	}
 

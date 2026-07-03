@@ -67,10 +67,10 @@ func normSource(self object.Value) string {
 func (vm *VM) registerStringUnicodeNormalize() {
 	vm.cString.define("unicode_normalize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		form := normForm(args)
-		return object.NewString(norm.Normalize(normSource(self), form))
+		return object.Wrap(object.NewString(norm.Normalize(normSource(self), form)))
 	})
 	vm.cString.define("unicode_normalized?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		form := normForm(args)
-		return object.Bool(norm.IsNormalized(normSource(self), form))
+		return object.BoolValue(bool(object.Bool(norm.IsNormalized(normSource(self), form))))
 	})
 }

@@ -119,7 +119,7 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 	if err != nil {
 		raise("RegexpError", "%s: /%s/", err.Error(), source)
 	}
-	return &Regexp{re: re, source: source, flags: flags}
+	return object.Wrap(&Regexp{re: re, source: source, flags: flags})
 }
 
 // compileLiteralRegexp compiles a Regexp for a source-literal occurrence and
@@ -287,12 +287,12 @@ func strMatchRegexp(v object.Value) *Regexp {
 func (vm *VM) runMatch(re *Regexp, subject string) object.Value {
 	md := re.re.Match(subject)
 	if md == nil {
-		vm.lastMatch = object.NilV
-		return object.NilV
+		vm.lastMatch = object.NilVal()
+		return object.NilVal()
 	}
 	m := &MatchData{md: md, subject: subject, re: re}
-	vm.lastMatch = m
-	return m
+	vm.lastMatch = object.Wrap(m)
+	return object.Wrap(m)
 }
 
 // runMatchFrom matches re against subject starting at character offset pos, the
@@ -306,18 +306,18 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 		pos += nChars
 	}
 	if pos < 0 || pos > nChars {
-		vm.lastMatch = object.NilV
-		return object.NilV
+		vm.lastMatch = object.NilVal()
+		return object.NilVal()
 	}
 	byteOff := charToByte(subject, int(pos))
 	md := re.re.Match(subject[byteOff:])
 	if md == nil {
-		vm.lastMatch = object.NilV
-		return object.NilV
+		vm.lastMatch = object.NilVal()
+		return object.NilVal()
 	}
 	m := &MatchData{md: md, subject: subject, re: re, byteOff: byteOff}
-	vm.lastMatch = m
-	return m
+	vm.lastMatch = object.Wrap(m)
+	return object.Wrap(m)
 }
 
 // gvar reads a global variable. The match-data specials derive from $~ (the
@@ -333,7 +333,7 @@ func (vm *VM) gvar(name string) object.Value {
 	}
 	last := vm.lastMatch
 	if object.IsNil(last) {
-		last = object.NilV
+		last = object.NilVal()
 	}
 	if name == "$~" {
 		return last
@@ -342,29 +342,29 @@ func (vm *VM) gvar(name string) object.Value {
 	switch name {
 	case "$&":
 		if ok {
-			return object.NewString(md.md.Str(0))
+			return object.Wrap(object.NewString(md.md.Str(0)))
 		}
 	case "$`":
 		if ok {
-			return object.NewString(md.md.Pre())
+			return object.Wrap(object.NewString(md.md.Pre()))
 		}
 	case "$'":
 		if ok {
-			return object.NewString(md.md.Post())
+			return object.Wrap(object.NewString(md.md.Post()))
 		}
 	default:
 		if n, isGroup := gvarGroup(name); isGroup {
 			if ok && n <= md.md.NGroups() {
 				return groupValue(md, n)
 			}
-			return object.NilV
+			return object.NilVal()
 		}
 		// Any other name is an ordinary user global: nil until assigned.
 		if v, set := vm.globals[name]; set {
 			return v
 		}
 	}
-	return object.NilV
+	return object.NilVal()
 }
 
 // gvarGroup parses "$N" (N a positive integer) into its group number.
@@ -481,7 +481,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 	if blk != nil {
 		return self
 	}
-	return object.NewArrayFromSlice(results)
+	return object.Wrap(object.NewArrayFromSlice(results))
 }
 
 // stringSplit backs String#split. With no pattern, a nil pattern, or the single
@@ -545,16 +545,16 @@ func splitWhitespace(subject string, limit int) object.Value {
 			break
 		}
 		if limit > 0 && len(out)+1 == limit {
-			out = append(out, object.NewStringView(subject[i:]))
-			return object.NewArrayFromSlice(out)
+			out = append(out, object.Wrap(object.NewStringView(subject[i:])))
+			return object.Wrap(object.NewArrayFromSlice(out))
 		}
 		start := i
 		for i < n && !isASCIISpace(subject[i]) {
 			i++
 		}
-		out = append(out, object.NewStringView(subject[start:i]))
+		out = append(out, object.Wrap(object.NewStringView(subject[start:i])))
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 func isASCIISpace(c byte) bool {
@@ -565,7 +565,7 @@ func isASCIISpace(c byte) bool {
 // and honouring the field limit (see stringSplit).
 func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 	if subject == "" {
-		return object.NewArray()
+		return object.Wrap(object.NewArray())
 	}
 	var out []object.Value
 	last := 0   // byte offset of the start of the current field
@@ -592,7 +592,7 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 				search = mBegin + w
 				continue
 			}
-			out = append(out, object.NewStringView(subject[last:mBegin]))
+			out = append(out, object.Wrap(object.NewStringView(subject[last:mBegin])))
 			out = append(out, captureFields(md)...)
 			pieces++
 			last = mBegin
@@ -600,13 +600,13 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 			search = mBegin + w
 			continue
 		}
-		out = append(out, object.NewStringView(subject[last:mBegin]))
+		out = append(out, object.Wrap(object.NewStringView(subject[last:mBegin])))
 		out = append(out, captureFields(md)...)
 		pieces++
 		last = mEnd
 		search = mEnd
 	}
-	out = append(out, object.NewStringView(subject[last:]))
+	out = append(out, object.Wrap(object.NewStringView(subject[last:])))
 	if limit == 0 {
 		// Strip trailing empty fields (the default behaviour).
 		for len(out) > 0 {
@@ -617,7 +617,7 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 			break
 		}
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // captureFields returns the participating capture groups of a split delimiter
@@ -626,7 +626,7 @@ func captureFields(md *onig.MatchData) []object.Value {
 	var out []object.Value
 	for i := 1; i <= md.NGroups(); i++ {
 		if md.Begin(i) >= 0 {
-			out = append(out, object.NewStringView(md.Str(i)))
+			out = append(out, object.Wrap(object.NewStringView(md.Str(i))))
 		}
 	}
 	return out
@@ -651,7 +651,7 @@ func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global b
 		// gsub(pattern) with no replacement and no block → an Enumerator yielding
 		// the matched substrings; supports #with_index, #to_a, etc. via the
 		// receiver+method form, replaying gsub with the enumerator's block.
-		return enumFor(object.NewString(subject), "gsub", args[0])
+		return object.Wrap(enumFor(object.Wrap(object.NewString(subject)), "gsub", args[0]))
 	}
 	if h, ok := object.KindOK[*object.Hash](args[1]); ok {
 		return vm.gsubHash(re, subject, h, global)
@@ -681,9 +681,9 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 		// Expose this match through $~ / $1.. so a replacement block (and MRI's
 		// post-sub $~) sees the captures. md's offsets are relative to the slice
 		// it matched, so the MatchData's subject must be that same slice.
-		vm.lastMatch = &MatchData{md: md, subject: subject[search:], re: re}
+		vm.lastMatch = object.Wrap(&MatchData{md: md, subject: subject[search:], re: re})
 		if blk != nil {
-			res := vm.callBlock(blk, []object.Value{object.NewString(md.Str(0))})
+			res := vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(md.Str(0)))})
 			b.WriteString(vm.send(res, "to_s", nil, nil).ToS())
 		} else {
 			// Prematch/postmatch are taken from the whole subject so \` and \'
@@ -708,7 +708,7 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 		}
 	}
 	b.WriteString(subject[pos:]) // remaining tail
-	return object.NewString(b.String())
+	return object.Wrap(object.NewString(b.String()))
 }
 
 // gsubHash implements the Hash-replacement form of String#sub/#gsub: each
@@ -726,8 +726,8 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 		mBegin := search + md.Begin(0)
 		mEnd := search + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
-		vm.lastMatch = &MatchData{md: md, subject: subject[search:], re: re}
-		if v, ok := h.Get(object.NewString(md.Str(0))); ok {
+		vm.lastMatch = object.Wrap(&MatchData{md: md, subject: subject[search:], re: re})
+		if v, ok := h.Get(object.Wrap(object.NewString(md.Str(0)))); ok {
 			// Missing keys (and an explicit nil value) contribute nothing.
 			if _, isNil := object.AsNilOK(v); !isNil {
 				b.WriteString(vm.send(v, "to_s", nil, nil).ToS())
@@ -751,7 +751,7 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 		}
 	}
 	b.WriteString(subject[pos:]) // remaining tail
-	return object.NewString(b.String())
+	return object.Wrap(object.NewString(b.String()))
 }
 
 // expandReplacement expands a sub/gsub replacement template against a match:
@@ -817,17 +817,17 @@ func expandReplacement(tmpl string, md *onig.MatchData, pre, post string) string
 func scanElement(md *onig.MatchData) object.Value {
 	n := md.NGroups()
 	if n == 0 {
-		return object.NewString(md.Str(0))
+		return object.Wrap(object.NewString(md.Str(0)))
 	}
 	caps := make([]object.Value, n)
 	for i := 1; i <= n; i++ {
 		if md.Begin(i) < 0 {
-			caps[i-1] = object.NilV
+			caps[i-1] = object.NilVal()
 		} else {
-			caps[i-1] = object.NewStringView(md.Str(i))
+			caps[i-1] = object.Wrap(object.NewStringView(md.Str(i)))
 		}
 	}
-	return object.NewArrayFromSlice(caps)
+	return object.Wrap(object.NewArrayFromSlice(caps))
 }
 
 // namedGroups returns the names of (?<name>…) capture groups in source, in
@@ -863,9 +863,9 @@ func namedGroups(source string) []string {
 // non-participating group, else the captured substring.
 func groupValue(m *MatchData, i int) object.Value {
 	if m.md.Begin(i) < 0 {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(m.md.Str(i))
+	return object.Wrap(object.NewString(m.md.Str(i)))
 }
 
 // installRegexp registers the Regexp and MatchData method tables. It runs at the
@@ -892,7 +892,7 @@ func (vm *VM) installRegexp() {
 	// escaped so it matches literally.
 	reEscape := &Method{name: "escape", owner: vm.cRegexp,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(regexpEscapeLiteral(strArg(args[0])))
+			return object.Wrap(object.NewString(regexpEscapeLiteral(strArg(args[0]))))
 		}}
 	vm.cRegexp.smethods["escape"] = reEscape
 	vm.cRegexp.smethods["quote"] = &Method{name: "quote", owner: vm.cRegexp, native: reEscape.native}
@@ -904,12 +904,12 @@ func (vm *VM) installRegexp() {
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			md, ok := object.KindOK[*MatchData](vm.lastMatch)
 			if !ok {
-				return object.NilV
+				return object.NilVal()
 			}
 			if len(args) == 0 {
-				return md
+				return object.Wrap(md)
 			}
-			return vm.send(md, "[]", []object.Value{args[0]}, nil)
+			return vm.send(object.Wrap(md), "[]", []object.Value{args[0]}, nil)
 		}}
 
 	// Regexp.union(pat, ...) / Regexp.union([pat, ...]) builds one Regexp matching
@@ -924,7 +924,7 @@ func (vm *VM) installRegexp() {
 				}
 			}
 			if len(args) == 0 {
-				return vm.regexpNew([]object.Value{object.NewString("(?!)")})
+				return vm.regexpNew([]object.Value{object.Wrap(object.NewString("(?!)"))})
 			}
 			sources := make([]string, len(args))
 			for i, a := range args {
@@ -942,11 +942,11 @@ func (vm *VM) installRegexp() {
 					}
 				}
 			}
-			return vm.regexpNew([]object.Value{object.NewString(strings.Join(sources, "|"))})
+			return vm.regexpNew([]object.Value{object.Wrap(object.NewString(strings.Join(sources, "|")))})
 		}}
 
 	vm.cRegexp.define("source", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(reArg(self).source)
+		return object.Wrap(object.NewString(reArg(self).source))
 	})
 	vm.cRegexp.define("options", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		// The integer option bitmask MRI exposes: IGNORECASE | EXTENDED | MULTILINE.
@@ -964,23 +964,23 @@ func (vm *VM) installRegexp() {
 		return object.IntValue(bits)
 	})
 	vm.cRegexp.define("casefold?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(strings.ContainsRune(reArg(self).flags, 'i'))
+		return object.BoolValue(bool(object.Bool(strings.ContainsRune(reArg(self).flags, 'i'))))
 	})
 	vm.cRegexp.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(reArg(self).ToS())
+		return object.Wrap(object.NewString(reArg(self).ToS()))
 	})
 	vm.cRegexp.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(reArg(self).Inspect())
+		return object.Wrap(object.NewString(reArg(self).Inspect()))
 	})
 	vm.cRegexp.define("match?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if _, isNil := object.AsNilOK(args[0]); isNil {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		return object.Bool(reArg(self).re.MatchString(strArg(args[0])))
+		return object.BoolValue(bool(object.Bool(reArg(self).re.MatchString(strArg(args[0])))))
 	})
 	vm.cRegexp.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if _, isNil := object.AsNilOK(args[0]); isNil {
-			return object.NilV
+			return object.NilVal()
 		}
 		// match(str, pos): start scanning at character offset pos (defaults to 0).
 		if len(args) >= 2 {
@@ -996,44 +996,44 @@ func (vm *VM) installRegexp() {
 		if !ok {
 			// A non-string operand never matches and clears $~, as MRI does (so a
 			// case/when over a non-string subject leaves no stale last match).
-			vm.lastMatch = object.NilV
-			return object.False
+			vm.lastMatch = object.NilVal()
+			return object.BoolValue(bool(object.False))
 		}
 		re := reArg(self)
 		md := re.re.Match(s)
 		if md == nil {
-			vm.lastMatch = object.NilV
-			return object.False
+			vm.lastMatch = object.NilVal()
+			return object.BoolValue(bool(object.False))
 		}
 		// Like =~, a successful === records $~ so Regexp.last_match / $1 work in the
 		// taken case/when branch (Trollop derives an option's :long this way).
-		vm.lastMatch = &MatchData{md: md, subject: s, re: re}
-		return object.True
+		vm.lastMatch = object.Wrap(&MatchData{md: md, subject: s, re: re})
+		return object.BoolValue(bool(object.True))
 	})
 
 	mdArg := func(v object.Value) *MatchData { return object.Kind[*MatchData](v) }
 
 	vm.cMatchData.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(mdArg(self).md.Str(0))
+		return object.Wrap(object.NewString(mdArg(self).md.Str(0)))
 	})
 	vm.cMatchData.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(mdArg(self).Inspect())
+		return object.Wrap(object.NewString(mdArg(self).Inspect()))
 	})
 	vm.cMatchData.define("pre_match", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		if m.byteOff == 0 {
-			return object.NewString(m.md.Pre())
+			return object.Wrap(object.NewString(m.md.Pre()))
 		}
 		// Everything in the full subject before the match (the engine's Pre is
 		// relative to the matched tail, so prepend the skipped prefix).
-		return object.NewString(m.subject[:m.byteOff+m.md.Begin(0)])
+		return object.Wrap(object.NewString(m.subject[:m.byteOff+m.md.Begin(0)]))
 	})
 	vm.cMatchData.define("post_match", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		if m.byteOff == 0 {
-			return object.NewString(m.md.Post())
+			return object.Wrap(object.NewString(m.md.Post()))
 		}
-		return object.NewString(m.subject[m.byteOff+m.md.End(0):])
+		return object.Wrap(object.NewString(m.subject[m.byteOff+m.md.End(0):]))
 	})
 	vm.cMatchData.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(mdArg(self).md.NGroups() + 1))
@@ -1047,7 +1047,7 @@ func (vm *VM) installRegexp() {
 		for i := 0; i <= m.md.NGroups(); i++ {
 			out = append(out, groupValue(m, i))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 	vm.cMatchData.define("captures", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
@@ -1055,7 +1055,7 @@ func (vm *VM) installRegexp() {
 		for i := 1; i <= m.md.NGroups(); i++ {
 			out = append(out, groupValue(m, i))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 	vm.cMatchData.define("begin", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return mdArg(self).offset(intArg(args[0]), false)
@@ -1067,9 +1067,9 @@ func (vm *VM) installRegexp() {
 		m := mdArg(self)
 		h := object.NewHash()
 		for _, name := range namedGroups(m.re.source) {
-			h.Set(object.NewString(name), groupValue(m, m.md.IndexOfName(name)))
+			h.Set(object.Wrap(object.NewString(name)), groupValue(m, m.md.IndexOfName(name)))
 		}
-		return h
+		return object.Wrap(h)
 	})
 	vm.cMatchData.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
@@ -1087,18 +1087,18 @@ func (vm *VM) installRegexp() {
 			all := groups()
 			start, length, ok := sliceRange(len(all), rng)
 			if !ok {
-				return object.NilV
+				return object.NilVal()
 			}
 			out := make([]object.Value, length)
 			copy(out, all[start:start+length])
-			return object.NewArrayFromSlice(out)
+			return object.Wrap(object.NewArrayFromSlice(out))
 		}
 		if len(args) == 2 { // md[start, length]
 			all := groups()
 			start := normIndex(intArg(args[0]), len(all))
 			length := int(intArg(args[1]))
 			if start < 0 || start > len(all) || length < 0 {
-				return object.NilV
+				return object.NilVal()
 			}
 			end := start + length
 			if end > len(all) {
@@ -1106,7 +1106,7 @@ func (vm *VM) installRegexp() {
 			}
 			out := make([]object.Value, end-start)
 			copy(out, all[start:end])
-			return object.NewArrayFromSlice(out)
+			return object.Wrap(object.NewArrayFromSlice(out))
 		}
 		return m.at(args[0])
 	})
@@ -1118,7 +1118,7 @@ func (vm *VM) installRegexp() {
 // MRI, which only converts those types).
 func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 	if _, isNil := object.AsNilOK(subject); isNil {
-		return object.NilV
+		return object.NilVal()
 	}
 	s, ok := stringLike(subject)
 	if !ok {
@@ -1126,10 +1126,10 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 	}
 	md := re.re.Match(s)
 	if md == nil {
-		vm.lastMatch = object.NilV
-		return object.NilV
+		vm.lastMatch = object.NilVal()
+		return object.NilVal()
 	}
-	vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+	vm.lastMatch = object.Wrap(&MatchData{md: md, subject: s, re: re})
 	return object.IntValue(int64(byteToChar(s, md.Begin(0))))
 }
 
@@ -1139,13 +1139,13 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 func (vm *VM) stringRegexpIndex(s string, re *Regexp, rest []object.Value) object.Value {
 	md := re.re.Match(s)
 	if md == nil {
-		vm.lastMatch = object.NilV
-		return object.NilV
+		vm.lastMatch = object.NilVal()
+		return object.NilVal()
 	}
 	m := &MatchData{md: md, subject: s, re: re}
-	vm.lastMatch = m
+	vm.lastMatch = object.Wrap(m)
 	if len(rest) == 0 {
-		return object.NewString(md.Str(0))
+		return object.Wrap(object.NewString(md.Str(0)))
 	}
 	return m.at(rest[0])
 }
@@ -1186,7 +1186,7 @@ func (m *MatchData) offset(i int64, end bool) object.Value {
 		b = m.md.Begin(int(i))
 	}
 	if b < 0 {
-		return object.NilV
+		return object.NilVal()
 	}
 	return object.IntValue(int64(byteToChar(m.subject, b+m.byteOff)))
 }
@@ -1202,7 +1202,7 @@ func (m *MatchData) at(key object.Value) object.Value {
 			_ = k
 			idx := int(k)
 			if idx < 0 || idx > m.md.NGroups() {
-				return object.NilV
+				return object.NilVal()
 			}
 			return groupValue(m, idx)
 		case object.IsKind[*object.String](__sw138):
@@ -1217,7 +1217,7 @@ func (m *MatchData) at(key object.Value) object.Value {
 			k := __sw138
 			_ = k
 			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(key))
-			return object.NilV
+			return object.NilVal()
 		}
 	}
 }

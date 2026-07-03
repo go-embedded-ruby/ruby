@@ -56,7 +56,7 @@ func enumFor(recv object.Value, meth string, args ...object.Value) *Enumerator {
 
 func (vm *VM) registerEnumerator() {
 	vm.cEnumerator = newClass("Enumerator", vm.cObject)
-	vm.consts["Enumerator"] = vm.cEnumerator
+	vm.consts["Enumerator"] = object.Wrap(vm.cEnumerator)
 	// Mix in Enumerable so map/select/reduce/… work via #each.
 	if en, ok := object.KindOK[*RClass](vm.consts["Enumerable"]); ok {
 		vm.cEnumerator.includes = append(vm.cEnumerator.includes, en)
@@ -65,14 +65,14 @@ func (vm *VM) registerEnumerator() {
 	// Enumerator::Yielder — `y << v` / `y.yield(v)` feed the generator's values in.
 	vm.cYielder = newClass("Enumerator::Yielder", vm.cObject)
 	vm.cYielder.consts = vm.cEnumerator.consts // (scope is cosmetic; share the map)
-	vm.cEnumerator.consts["Yielder"] = vm.cYielder
+	vm.cEnumerator.consts["Yielder"] = object.Wrap(vm.cYielder)
 	vm.cYielder.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		object.Kind[*yielder](self).emit(args)
 		return self // << chains
 	})
 	vm.cYielder.define("yield", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		object.Kind[*yielder](self).emit(args)
-		return object.NilV
+		return object.NilVal()
 	})
 	// Enumerator.new { |y| … } builds a generator-block enumerator.
 	vm.cEnumerator.smethods["new"] = &Method{name: "new", owner: vm.cEnumerator,
@@ -80,7 +80,7 @@ func (vm *VM) registerEnumerator() {
 			if blk == nil {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 			}
-			return &Enumerator{block: blk}
+			return object.Wrap(&Enumerator{block: blk})
 		}}
 
 	// Kernel#enum_for / #to_enum: build an Enumerator for self.meth(*rest).
@@ -89,7 +89,7 @@ func (vm *VM) registerEnumerator() {
 		if len(args) > 0 {
 			meth, rest = args[0].ToS(), args[1:]
 		}
-		return &Enumerator{recv: self, meth: meth, args: rest}
+		return object.Wrap(&Enumerator{recv: self, meth: meth, args: rest})
 	}
 	vm.cObject.define("enum_for", enumForFn)
 	vm.cObject.define("to_enum", enumForFn)
@@ -98,17 +98,17 @@ func (vm *VM) registerEnumerator() {
 	d("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		e := object.Kind[*Enumerator](self)
 		if blk == nil {
-			return e
+			return object.Wrap(e)
 		}
 		if e.block != nil { // generator: run it with a yielder forwarding to blk
-			return vm.callBlock(e.block, []object.Value{&yielder{emit: func(args []object.Value) {
+			return vm.callBlock(e.block, []object.Value{object.Wrap(&yielder{emit: func(args []object.Value) {
 				vm.callBlock(blk, args)
-			}}})
+			}})})
 		}
 		return vm.send(e.recv, e.meth, e.args, blk)
 	})
 	d("to_a", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.enumMaterialize(object.Kind[*Enumerator](self)))
+		return object.Wrap(object.NewArrayFromSlice(vm.enumMaterialize(object.Kind[*Enumerator](self))))
 	})
 	d("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(len(vm.enumMaterialize(object.Kind[*Enumerator](self)))))
@@ -146,9 +146,9 @@ func (vm *VM) registerEnumerator() {
 			elems := vm.enumMaterialize(e)
 			pairs := make([]object.Value, len(elems))
 			for i, v := range elems {
-				pairs[i] = object.NewArray(v, object.IntValue(off+int64(i)))
+				pairs[i] = object.Wrap(object.NewArray(v, object.IntValue(off+int64(i))))
 			}
-			return enumFor(object.NewArrayFromSlice(pairs), "each")
+			return object.Wrap(enumFor(object.Wrap(object.NewArrayFromSlice(pairs)), "each"))
 		}
 		// With a block, re-run the source, appending the running index to each
 		// yield and forwarding the block's result — so map collects, each returns
@@ -160,9 +160,9 @@ func (vm *VM) registerEnumerator() {
 			return vm.callBlock(blk, withIdx)
 		}}
 		if e.block != nil { // generator: drive it with the indexing wrapper as the yielder
-			return vm.callBlock(e.block, []object.Value{&yielder{emit: func(args []object.Value) {
+			return vm.callBlock(e.block, []object.Value{object.Wrap(&yielder{emit: func(args []object.Value) {
 				wrapper.native(vm, args)
-			}}})
+			}})})
 		}
 		return vm.send(e.recv, e.meth, e.args, wrapper)
 	}
@@ -177,14 +177,14 @@ func (vm *VM) registerEnumerator() {
 		if len(args) == 0 {
 			got := vm.enumTake(e, 1)
 			if len(got) == 0 {
-				return object.NilV
+				return object.NilVal()
 			}
 			return got[0]
 		}
-		return object.NewArrayFromSlice(vm.enumTake(e, int(intArg(args[0]))))
+		return object.Wrap(object.NewArrayFromSlice(vm.enumTake(e, int(intArg(args[0])))))
 	})
 	d("take", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.enumTake(object.Kind[*Enumerator](self), int(intArg(args[0]))))
+		return object.Wrap(object.NewArrayFromSlice(vm.enumTake(object.Kind[*Enumerator](self), int(intArg(args[0])))))
 	})
 }
 
@@ -203,12 +203,12 @@ func (vm *VM) enumTake(e *Enumerator, n int) (out []object.Value) {
 		if len(args) == 1 {
 			out = append(out, args[0])
 		} else {
-			out = append(out, object.NewArrayFromSlice(append([]object.Value{}, args...)))
+			out = append(out, object.Wrap(object.NewArrayFromSlice(append([]object.Value{}, args...))))
 		}
 		if len(out) >= n {
 			panic(enumStop{})
 		}
-		return object.NilV
+		return object.NilVal()
 	}}
 	defer func() {
 		if r := recover(); r != nil {
@@ -219,9 +219,9 @@ func (vm *VM) enumTake(e *Enumerator, n int) (out []object.Value) {
 		}
 	}()
 	if e.block != nil { // generator block: drive it with a collecting yielder
-		vm.callBlock(e.block, []object.Value{&yielder{emit: func(args []object.Value) {
+		vm.callBlock(e.block, []object.Value{object.Wrap(&yielder{emit: func(args []object.Value) {
 			collect.native(vm, args)
-		}}})
+		}})})
 		return out
 	}
 	vm.send(e.recv, e.meth, e.args, collect)
@@ -236,16 +236,16 @@ func (vm *VM) enumMaterialize(e *Enumerator) []object.Value {
 		if len(args) == 1 {
 			out = append(out, args[0])
 		} else {
-			out = append(out, object.NewArrayFromSlice(append([]object.Value{}, args...)))
+			out = append(out, object.Wrap(object.NewArrayFromSlice(append([]object.Value{}, args...))))
 		}
 	}
 	if e.block != nil { // generator block: run it with a collecting yielder
-		vm.callBlock(e.block, []object.Value{&yielder{emit: collect}})
+		vm.callBlock(e.block, []object.Value{object.Wrap(&yielder{emit: collect})})
 		return out
 	}
 	vm.send(e.recv, e.meth, e.args, &Proc{native: func(_ *VM, args []object.Value) object.Value {
 		collect(args)
-		return object.NilV
+		return object.NilVal()
 	}})
 	return out
 }

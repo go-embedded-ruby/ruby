@@ -50,7 +50,7 @@ func (s *SQLite3Statement) Truthy() bool    { return true }
 func (vm *VM) registerSQLite3() {
 	mod := newClass("SQLite3", nil)
 	mod.isModule = true
-	vm.consts["SQLite3"] = mod
+	vm.consts["SQLite3"] = object.Wrap(mod)
 	vm.registerSQLite3Errors(mod)
 
 	vm.registerSQLite3Database(mod)
@@ -68,8 +68,8 @@ func (vm *VM) registerSQLite3Errors(mod *RClass) {
 	reg := func(qualified string, super *RClass) *RClass {
 		simple := qualified[len("SQLite3::"):]
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	exc := reg(string(sqlite3.ExcException), std)
@@ -91,8 +91,8 @@ func (vm *VM) registerSQLite3Errors(mod *RClass) {
 // registerSQLite3Database installs SQLite3::Database and its instance methods.
 func (vm *VM) registerSQLite3Database(mod *RClass) {
 	cls := newClass("SQLite3::Database", vm.cObject)
-	mod.consts["Database"] = cls
-	vm.consts["SQLite3::Database"] = cls
+	mod.consts["Database"] = object.Wrap(cls)
+	vm.consts["SQLite3::Database"] = object.Wrap(cls)
 
 	// SQLite3::Database.new(path) / .open(path): open (or create) the database at
 	// path. ":memory:" opens a private in-memory database. A block form yields the
@@ -104,9 +104,9 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		db := sqlite3Open(sqlite3StringArg(args[0]))
 		if blk != nil {
 			defer func() { _ = db.db.Close() }()
-			return vm.callBlock(blk, []object.Value{db})
+			return vm.callBlock(blk, []object.Value{object.Wrap(db)})
 		}
-		return db
+		return object.Wrap(db)
 	}
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: open}
 	cls.smethods["open"] = &Method{name: "open", owner: cls, native: open}
@@ -141,7 +141,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return &SQLite3Statement{st: st, db: object.Kind[*SQLite3Database](v)}
+		return object.Wrap(&SQLite3Statement{st: st, db: object.Kind[*SQLite3Database](v)})
 	})
 
 	// #prepare(sql) compiles sql into a SQLite3::Statement without running it.
@@ -154,7 +154,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return &SQLite3Statement{st: st, db: object.Kind[*SQLite3Database](v)}
+		return object.Wrap(&SQLite3Statement{st: st, db: object.Kind[*SQLite3Database](v)})
 	})
 
 	// #get_first_row(sql, binds = []) returns the first result row, or nil.
@@ -166,9 +166,9 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 			raiseSQLite3Error(err)
 		}
 		if row == nil {
-			return object.NilV
+			return object.NilVal()
 		}
-		return sqlite3Row(vm, row)
+		return object.Wrap(sqlite3Row(vm, row))
 	})
 
 	// #get_first_value(sql, binds = []) returns the first column of the first row,
@@ -193,7 +193,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 			if err := db.Begin(mode); err != nil {
 				raiseSQLite3Error(err)
 			}
-			return object.Bool(true)
+			return object.BoolValue(bool(object.Bool(true)))
 		}
 		if err := db.Begin(mode); err != nil {
 			raiseSQLite3Error(err)
@@ -206,20 +206,20 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		if err := self(v).Commit(); err != nil {
 			raiseSQLite3Error(err)
 		}
-		return object.Bool(true)
+		return object.BoolValue(bool(object.Bool(true)))
 	})
 	d("rollback", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if err := self(v).Rollback(); err != nil {
 			raiseSQLite3Error(err)
 		}
-		return object.Bool(true)
+		return object.BoolValue(bool(object.Bool(true)))
 	})
 	// #transaction_active? probes the autocommit state; the probe reports "in a
 	// transaction" rather than erroring when it cannot begin one, so this query
 	// never raises.
 	d("transaction_active?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		active, _ := self(v).InTransaction()
-		return object.Bool(active)
+		return object.BoolValue(bool(object.Bool(active)))
 	})
 
 	// #last_insert_row_id returns the rowid of the most recent INSERT.
@@ -251,12 +251,12 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 
 	// #results_as_hash / #results_as_hash= read and set the row shape flag.
 	d("results_as_hash", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).ResultsAsHash())
+		return object.BoolValue(bool(object.Bool(self(v).ResultsAsHash())))
 	})
 	d("results_as_hash=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		on := len(args) > 0 && args[0].Truthy()
 		self(v).SetResultsAsHash(on)
-		return object.Bool(on)
+		return object.BoolValue(bool(object.Bool(on)))
 	})
 
 	// #busy_timeout=(ms) sets the busy-handler timeout in milliseconds.
@@ -273,27 +273,27 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 
 	// #path returns the database file path (":memory:" for an in-memory database).
 	d("path", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Path())
+		return object.Wrap(object.NewString(self(v).Path()))
 	})
 
 	// #closed? reports whether #close has run.
 	d("closed?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).Closed())
+		return object.BoolValue(bool(object.Bool(self(v).Closed())))
 	})
 
 	// #close releases the connection. A close error (a broken underlying handle)
 	// is not actionable and Ruby's #close does not raise for it, so it is ignored.
 	d("close", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		_ = self(v).Close()
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
 // registerSQLite3Statement installs SQLite3::Statement and its cursor methods.
 func (vm *VM) registerSQLite3Statement(mod *RClass) {
 	cls := newClass("SQLite3::Statement", vm.cObject)
-	mod.consts["Statement"] = cls
-	vm.consts["SQLite3::Statement"] = cls
+	mod.consts["Statement"] = object.Wrap(cls)
+	vm.consts["SQLite3::Statement"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *sqlite3.Statement { return object.Kind[*SQLite3Statement](v).st }
@@ -338,7 +338,7 @@ func (vm *VM) registerSQLite3Statement(mod *RClass) {
 			raiseSQLite3Error(err)
 		}
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return vm.sqlite3StepRow(wrap(v), row)
 	})
@@ -349,7 +349,7 @@ func (vm *VM) registerSQLite3Statement(mod *RClass) {
 			raiseSQLite3Error(err)
 		}
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return vm.sqlite3StepRow(wrap(v), row)
 	})
@@ -360,7 +360,7 @@ func (vm *VM) registerSQLite3Statement(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return sqlite3Strings(cols)
+		return object.Wrap(sqlite3Strings(cols))
 	})
 
 	// #types returns the declared column type names.
@@ -369,7 +369,7 @@ func (vm *VM) registerSQLite3Statement(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return sqlite3Strings(types)
+		return object.Wrap(sqlite3Strings(types))
 	})
 
 	// #reset rewinds the cursor so the statement can be re-run. Reset only clears
@@ -387,18 +387,18 @@ func (vm *VM) registerSQLite3Statement(mod *RClass) {
 
 	// #sql returns the statement's source text.
 	d("sql", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).SQL())
+		return object.Wrap(object.NewString(self(v).SQL()))
 	})
 
 	// #closed? reports whether #close has run.
 	d("closed?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).Closed())
+		return object.BoolValue(bool(object.Bool(self(v).Closed())))
 	})
 
 	// #close finalises the statement. A close error is not actionable and Ruby's
 	// #close does not raise for it, so it is ignored.
 	d("close", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		_ = self(v).Close()
-		return object.NilV
+		return object.NilVal()
 	})
 }

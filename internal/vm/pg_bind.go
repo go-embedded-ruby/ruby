@@ -45,24 +45,24 @@ func (r *PGResultObj) Truthy() bool    { return true }
 func (vm *VM) pgValue(v any) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int64:
 		return object.IntValue(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case []byte:
-		return object.NewStringBytesEnc(n, "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc(n, "ASCII-8BIT"))
 	case time.Time:
-		return object.NewString(n.Format("2006-01-02 15:04:05.999999999-07"))
+		return object.Wrap(object.NewString(n.Format("2006-01-02 15:04:05.999999999-07")))
 	case []any:
-		return vm.pgArray(n)
+		return object.Wrap(vm.pgArray(n))
 	}
 	// The decoders only ever produce the cases above; anything else stringifies.
-	return object.NewString(pgSprint(v))
+	return object.Wrap(object.NewString(pgSprint(v)))
 }
 
 // pgArray maps a decoded PostgreSQL array column ([]any) to a Ruby Array.
@@ -201,7 +201,7 @@ func pgIntArg(v object.Value) int64 {
 func pgStrings(ss []string) *object.Array {
 	arr := object.NewArrayFromSlice(make([]object.Value, len(ss)))
 	for i, s := range ss {
-		arr.Elems[i] = object.NewString(s)
+		arr.Elems[i] = object.Wrap(object.NewString(s))
 	}
 	return arr
 }

@@ -22,13 +22,13 @@ func callFU(t *testing.T, vm *VM, name string, args []object.Value) object.Value
 	if m == nil {
 		t.Fatalf("FileUtils.%s not found", name)
 	}
-	return m.native(vm, mod, args, nil)
+	return m.native(vm, object.Wrap(mod), args, nil)
 }
 
 func TestFileUtilsSuccess(t *testing.T) {
 	vm := New(nil)
 	d := t.TempDir()
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 	join := func(parts ...string) string { return filepath.Join(append([]string{d}, parts...)...) }
 
 	// mkdir_p (single + array form) and its aliases.
@@ -40,7 +40,7 @@ func TestFileUtilsSuccess(t *testing.T) {
 	}
 	callFU(t, vm, "mkpath", []object.Value{s(join("c"))})
 	callFU(t, vm, "makedirs", []object.Value{s(join("e"))})
-	callFU(t, vm, "mkdir_p", []object.Value{&object.Array{Elems: []object.Value{s(join("f")), s(join("g"))}}})
+	callFU(t, vm, "mkdir_p", []object.Value{object.Wrap(&object.Array{Elems: []object.Value{s(join("f")), s(join("g"))}})})
 	if fi, err := os.Stat(join("g")); err != nil || !fi.IsDir() {
 		t.Fatalf("mkdir_p array form failed")
 	}
@@ -128,7 +128,7 @@ func fuFail(t *testing.T) {
 }
 
 func TestFileUtilsErrorBranches(t *testing.T) {
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 	cases := []struct {
 		name string
 		args []object.Value
@@ -157,7 +157,7 @@ func TestFileUtilsRmFIgnoresNotExist(t *testing.T) {
 	t.Cleanup(func() { fuRemove = o })
 	fuRemove = func(string) error { return os.ErrNotExist }
 	vm := New(nil)
-	got := catchRaise(func() { callFU(t, vm, "rm_f", []object.Value{object.NewString("p")}) })
+	got := catchRaise(func() { callFU(t, vm, "rm_f", []object.Value{object.Wrap(object.NewString("p"))}) })
 	if got != "" {
 		t.Fatalf("rm_f on ENOENT raised %q, want no raise", got)
 	}
@@ -171,7 +171,7 @@ func TestFileUtilsCpWriteError(t *testing.T) {
 	fuWriteFile = func(string, []byte, os.FileMode) error { return os.ErrPermission }
 	vm := New(nil)
 	got := catchRaise(func() {
-		callFU(t, vm, "cp", []object.Value{object.NewString("a"), object.NewString("b")})
+		callFU(t, vm, "cp", []object.Value{object.Wrap(object.NewString("a")), object.Wrap(object.NewString("b"))})
 	})
 	if got != "Errno::EACCES" {
 		t.Fatalf("cp write error: got %q, want Errno::EACCES", got)
@@ -179,7 +179,7 @@ func TestFileUtilsCpWriteError(t *testing.T) {
 }
 
 func TestFileUtilsTouchErrors(t *testing.T) {
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 
 	// touch where the file is absent and the create write fails -> EACCES.
 	func() {
@@ -212,7 +212,7 @@ func TestFileUtilsTouchErrors(t *testing.T) {
 // id coercion and recursive walk are exercised without real ownership changes
 // (the fileChown seam is a Windows no-op, so the test drives both forms here).
 func TestFileUtilsChown(t *testing.T) {
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 
 	// chown success: the fileChown seam records its calls; a nil user/group passes
 	// -1 (leave unchanged).
@@ -226,7 +226,7 @@ func TestFileUtilsChown(t *testing.T) {
 		}
 		vm := New(nil)
 		// chown(501, nil, "p") -> uid 501, gid -1.
-		r := callFU(t, vm, "chown", []object.Value{object.Integer(501), object.NilV, s("p")})
+		r := callFU(t, vm, "chown", []object.Value{object.IntValue(int64(object.Integer(501))), object.NilVal(), s("p")})
 		if r.ToS() != "p" {
 			t.Fatalf("chown return: %v", r)
 		}
@@ -247,7 +247,7 @@ func TestFileUtilsChown(t *testing.T) {
 			return nil
 		}
 		vm := New(nil)
-		callFU(t, vm, "chown_R", []object.Value{object.Integer(0), object.Integer(0), s("d")})
+		callFU(t, vm, "chown_R", []object.Value{object.IntValue(int64(object.Integer(0))), object.IntValue(int64(object.Integer(0))), s("d")})
 		if len(chowned) != 2 || chowned[1] != "d/child" {
 			t.Fatalf("chown_R walked: %v", chowned)
 		}
@@ -261,7 +261,7 @@ func TestFileUtilsChown(t *testing.T) {
 		fileChmod = func(p string, _ os.FileMode) error { chmodded = append(chmodded, p); return nil }
 		fuWalkDir = func(root string, visit func(string)) error { visit(root); return nil }
 		vm := New(nil)
-		callFU(t, vm, "chmod_R", []object.Value{object.Integer(0o750), s("d")})
+		callFU(t, vm, "chmod_R", []object.Value{object.IntValue(int64(object.Integer(0o750))), s("d")})
 		if len(chmodded) != 1 || chmodded[0] != "d" {
 			t.Fatalf("chmod_R: %v", chmodded)
 		}
@@ -271,16 +271,16 @@ func TestFileUtilsChown(t *testing.T) {
 // TestFileUtilsChownErrors covers the Errno mapping when chown / chown_R /
 // chmod_R fail, and the fuWalk fallback that yields the root on a walk error.
 func TestFileUtilsChownErrors(t *testing.T) {
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 	perm := os.ErrPermission
 
 	cases := []struct {
 		name string
 		args []object.Value
 	}{
-		{"chown", []object.Value{object.Integer(1), object.Integer(1), s("p")}},
-		{"chown_R", []object.Value{object.Integer(1), object.Integer(1), s("p")}},
-		{"chmod_R", []object.Value{object.Integer(0o644), s("p")}},
+		{"chown", []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(1))), s("p")}},
+		{"chown_R", []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(1))), s("p")}},
+		{"chmod_R", []object.Value{object.IntValue(int64(object.Integer(0o644))), s("p")}},
 	}
 	for _, c := range cases {
 		oc, ocm, ow := fileChown, fileChmod, fuWalkDir

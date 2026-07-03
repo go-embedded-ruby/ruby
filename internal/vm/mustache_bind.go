@@ -82,7 +82,7 @@ func toMustache(vm *VM, v object.Value) mustache.Value {
 			_ = n
 			p := n
 			return mustache.Lambda(func(section string) mustache.Value {
-				r := vm.callBlock(p, []object.Value{object.NewString(section)})
+				r := vm.callBlock(p, []object.Value{object.Wrap(object.NewString(section))})
 				return toMustache(vm, r)
 			})
 		}

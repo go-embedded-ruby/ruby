@@ -42,12 +42,12 @@ func (vm *VM) registerPrime() {
 func (vm *VM) installPrime() {
 	mod := newClass("Prime", nil)
 	mod.isModule = true
-	vm.consts["Prime"] = mod
+	vm.consts["Prime"] = object.Wrap(mod)
 	sm := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	// Prime.prime?(n) — primality via the library's deterministic BPSW test.
 	sm("prime?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(prime.IsPrime(primeBig(args[0])))
+		return object.BoolValue(bool(object.Bool(prime.IsPrime(primeBig(args[0])))))
 	})
 
 	// Prime.take(n) / Prime.first(n) — the first n primes as an Array.
@@ -64,7 +64,7 @@ func (vm *VM) installPrime() {
 	// returns an Enumerator (so Prime.each.first(5) works), like MRI.
 	sm("each", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each", args...)
+			return object.Wrap(enumFor(self, "each", args...))
 		}
 		// Determine the bound: a nil / absent argument means unbounded.
 		bounded := false
@@ -101,7 +101,7 @@ func (vm *VM) installPrime() {
 	// Integer#prime? and Integer#prime_division — the core extensions `require
 	// "prime"` adds. They delegate to the same library functions on the receiver.
 	vm.cInteger.define("prime?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(prime.IsPrime(bigVal(self)))
+		return object.BoolValue(bool(object.Bool(prime.IsPrime(bigVal(self)))))
 	})
 	vm.cInteger.define("prime_division", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return primeDivision(bigVal(self))
@@ -124,7 +124,7 @@ func primesToArray(ps []*big.Int) object.Value {
 	for i, p := range ps {
 		out[i] = object.NormInt(p)
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // primeDivision returns the factorisation of n as an Array of [prime, exponent]
@@ -137,9 +137,9 @@ func primeDivision(n *big.Int) object.Value {
 	}
 	out := make([]object.Value, len(pairs))
 	for i, pr := range pairs {
-		out[i] = object.NewArray(object.NormInt(pr[0]), object.NormInt(pr[1]))
+		out[i] = object.Wrap(object.NewArray(object.NormInt(pr[0]), object.NormInt(pr[1])))
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // primePairs reads an Array of [prime, exponent] Arrays into the library's pair

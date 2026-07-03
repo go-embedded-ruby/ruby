@@ -72,7 +72,7 @@ var fixedInstant = time.Date(2026, 6, 30, 12, 34, 56, 789012000, time.UTC)
 func newPinnedLogger(t *testing.T) (*Logger, *strings.Builder) {
 	t.Helper()
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NewString("")) // placeholder device, sink replaced below
+	lo := vm.newLogger(object.Wrap(object.NewString(""))) // placeholder device, sink replaced below
 	var b strings.Builder
 	lo.path = ""
 	lo.l.Sink = func(s string) { b.WriteString(s) }
@@ -90,24 +90,24 @@ func TestLoggerDefaultLineByteExact(t *testing.T) {
 		msg  object.Value
 		want string
 	}{
-		{lg.DEBUG, "myprog", object.NewString("hello"),
+		{lg.DEBUG, "myprog", object.Wrap(object.NewString("hello")),
 			"D, [2026-06-30T12:34:56.789012 #4242] DEBUG -- myprog: hello\n"},
-		{lg.INFO, "", object.NewString("world"),
+		{lg.INFO, "", object.Wrap(object.NewString("world")),
 			"I, [2026-06-30T12:34:56.789012 #4242]  INFO -- : world\n"},
-		{lg.WARN, "p", object.NewString("w"),
+		{lg.WARN, "p", object.Wrap(object.NewString("w")),
 			"W, [2026-06-30T12:34:56.789012 #4242]  WARN -- p: w\n"},
-		{lg.ERROR, "p", object.NewString("e"),
+		{lg.ERROR, "p", object.Wrap(object.NewString("e")),
 			"E, [2026-06-30T12:34:56.789012 #4242] ERROR -- p: e\n"},
-		{lg.FATAL, "p", object.NewString("f"),
+		{lg.FATAL, "p", object.Wrap(object.NewString("f")),
 			"F, [2026-06-30T12:34:56.789012 #4242] FATAL -- p: f\n"},
-		{lg.UNKNOWN, "p", object.NewString("u"),
+		{lg.UNKNOWN, "p", object.Wrap(object.NewString("u")),
 			"A, [2026-06-30T12:34:56.789012 #4242]   ANY -- p: u\n"},
 	}
 	for _, c := range cases {
 		lo, b := newPinnedLogger(t)
 		var prog object.Value
 		if c.prog != "" {
-			prog = object.NewString(c.prog)
+			prog = object.Wrap(object.NewString(c.prog))
 		}
 		lo.add(c.sev, c.msg, prog, nil)
 		if b.String() != c.want {
@@ -120,7 +120,7 @@ func TestLoggerDefaultLineByteExact(t *testing.T) {
 // message is rendered through the host #inspect, matching MRI's msg.inspect.
 func TestLoggerInspectMessage(t *testing.T) {
 	lo, b := newPinnedLogger(t)
-	lo.add(lg.WARN, &object.Array{Elems: []object.Value{object.Integer(1), object.Integer(2)}}, object.NewString("p"), nil)
+	lo.add(lg.WARN, object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2)))}}), object.Wrap(object.NewString("p")), nil)
 	want := "W, [2026-06-30T12:34:56.789012 #4242]  WARN -- p: [1, 2]\n"
 	if b.String() != want {
 		t.Fatalf("array message: got %q want %q", b.String(), want)
@@ -160,12 +160,12 @@ puts io.string.split(" -- ", 2).last
 // both rejected.
 func TestLoggerAsExceptionNonException(t *testing.T) {
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NilV)
-	if _, ok := lo.asException(object.Integer(1)); ok {
+	lo := vm.newLogger(object.NilVal())
+	if _, ok := lo.asException(object.IntValue(int64(object.Integer(1)))); ok {
 		t.Fatal("Integer should not be an exception")
 	}
 	plain := &RObject{class: vm.cObject, ivars: map[string]object.Value{}}
-	if _, ok := lo.asException(plain); ok {
+	if _, ok := lo.asException(object.Wrap(plain)); ok {
 		t.Fatal("a plain Object should not be an exception")
 	}
 }
@@ -191,14 +191,14 @@ puts io.string.split(" -- ", 2).last
 func TestLoggerLevelGating(t *testing.T) {
 	lo, b := newPinnedLogger(t)
 	lo.l.Level = lg.WARN
-	if got := lo.add(lg.INFO, object.NewString("x"), nil, nil); got != object.True {
+	if got := lo.add(lg.INFO, object.Wrap(object.NewString("x")), nil, nil); got != object.True {
 		t.Fatalf("gated add returned %v, want true", got)
 	}
 	if b.String() != "" {
 		t.Fatalf("gated add wrote %q, want nothing", b.String())
 	}
 	// A warn at the threshold is emitted.
-	lo.add(lg.WARN, object.NewString("y"), nil, nil)
+	lo.add(lg.WARN, object.Wrap(object.NewString("y")), nil, nil)
 	if !strings.Contains(b.String(), "WARN -- : y") {
 		t.Fatalf("warn not emitted: %q", b.String())
 	}
@@ -223,7 +223,7 @@ p (l << "raw")
 func TestLoggerPrognameJuggling(t *testing.T) {
 	// add(WARN, nil, "progname-as-msg"): message nil, no block => message=progname.
 	lo, b := newPinnedLogger(t)
-	lo.add(lg.WARN, object.NilV, object.NewString("progname-as-msg"), nil)
+	lo.add(lg.WARN, object.NilVal(), object.Wrap(object.NewString("progname-as-msg")), nil)
 	want := "W, [2026-06-30T12:34:56.789012 #4242]  WARN -- : progname-as-msg\n"
 	if b.String() != want {
 		t.Fatalf("progname-as-message: got %q want %q", b.String(), want)
@@ -299,7 +299,7 @@ func TestLoggerAddNilSeverity(t *testing.T) {
 	lo, b := newPinnedLogger(t)
 	// Drive through the Ruby-facing add by calling the wrapper with UNKNOWN, which
 	// is what add(nil, …) resolves to.
-	lo.add(lg.UNKNOWN, object.NewString("x"), nil, nil)
+	lo.add(lg.UNKNOWN, object.Wrap(object.NewString("x")), nil, nil)
 	if !strings.Contains(b.String(), "  ANY -- : x") {
 		t.Fatalf("nil severity -> ANY: %q", b.String())
 	}
@@ -339,7 +339,7 @@ p l.datetime_format
 	// Byte-exact line with a custom datetime format, via the pinned clock.
 	lo, b := newPinnedLogger(t)
 	lo.l.Formatter.DatetimeFormat = "%Y"
-	lo.add(lg.INFO, object.NewString("x"), nil, nil)
+	lo.add(lg.INFO, object.Wrap(object.NewString("x")), nil, nil)
 	if b.String() != "I, [2026 #4242]  INFO -- : x\n" {
 		t.Fatalf("custom datetime line = %q", b.String())
 	}
@@ -402,9 +402,9 @@ p b.string.include?("hi")
 // keeping the existing device.
 func TestLoggerReopenNoArg(t *testing.T) {
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NilV)
+	lo := vm.newLogger(object.NilVal())
 	lo.closed = true
-	vm.send(lo, "reopen", nil, nil)
+	vm.send(object.Wrap(lo), "reopen", nil, nil)
 	if lo.closed {
 		t.Fatal("reopen() should clear closed")
 	}
@@ -525,7 +525,7 @@ func TestLoggerFormatterClass(t *testing.T) {
 	lf := fc.smethods["new"].native(vm, nil, nil, nil)
 	tm := &Time{t: gotime.FromUnix(fixedInstant.Unix())}
 	args := []object.Value{
-		object.NewString("DEBUG"), tm, object.NewString("prog"), object.NewString("hello"),
+		object.Wrap(object.NewString("DEBUG")), object.Wrap(tm), object.Wrap(object.NewString("prog")), object.Wrap(object.NewString("hello")),
 	}
 	got := vm.send(lf, "call", args, nil).ToS()
 	// The pid is the live process pid; assert the stable prefix/suffix.
@@ -632,7 +632,7 @@ func TestLoggerPeriodRotation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.log")
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NewString(path))
+	lo := vm.newLogger(object.Wrap(object.NewString(path)))
 	lo.l.Formatter = &lg.Formatter{}
 	lo.l.Now = func() time.Time { return fixedInstant }
 	lo.setPeriod("daily")
@@ -641,7 +641,7 @@ func TestLoggerPeriodRotation(t *testing.T) {
 		t.Fatalf("seed log: %v", err)
 	}
 	lo.nextRotate = fixedInstant.Add(-time.Hour) // already due
-	lo.add(lg.INFO, object.NewString("new"), nil, nil)
+	lo.add(lg.INFO, object.Wrap(object.NewString("new")), nil, nil)
 	// The old content was rotated away to a dated file, and a fresh log holds the
 	// new line.
 	matches, _ := filepath.Glob(path + ".*")
@@ -663,7 +663,7 @@ func TestLoggerSetPeriodInvalid(t *testing.T) {
 		}
 	}()
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NilV)
+	lo := vm.newLogger(object.NilVal())
 	lo.setPeriod("hourly")
 }
 
@@ -671,17 +671,17 @@ func TestLoggerSetPeriodInvalid(t *testing.T) {
 // arms (the Integer count, and the two period spellings).
 func TestLoggerApplyShiftAgeForms(t *testing.T) {
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NewString(filepath.Join(t.TempDir(), "x.log")))
+	lo := vm.newLogger(object.Wrap(object.NewString(filepath.Join(t.TempDir(), "x.log"))))
 	lo.l.Now = func() time.Time { return fixedInstant }
-	lo.applyShiftAge(object.Integer(5))
+	lo.applyShiftAge(object.IntValue(int64(object.Integer(5))))
 	if lo.shiftAge != 5 {
 		t.Fatalf("Integer shift_age = %d, want 5", lo.shiftAge)
 	}
-	lo.applyShiftAge(object.NewString("weekly"))
+	lo.applyShiftAge(object.Wrap(object.NewString("weekly")))
 	if lo.period != lg.Weekly {
 		t.Fatalf("String shift_age period = %q, want weekly", lo.period)
 	}
-	lo.applyShiftAge(object.Symbol("monthly"))
+	lo.applyShiftAge(object.SymVal(string(object.Symbol("monthly"))))
 	if lo.period != lg.Monthly {
 		t.Fatalf("Symbol shift_age period = %q, want monthly", lo.period)
 	}
@@ -751,7 +751,7 @@ func TestLoggerWrapperReprTruthy(t *testing.T) {
 
 // TestLoggerArg covers loggerArg's type-error arm.
 func TestLoggerArg(t *testing.T) {
-	if got := loggerArg(&Logger{}); got == nil {
+	if got := loggerArg(object.Wrap(&Logger{})); got == nil {
 		t.Fatal("loggerArg(*Logger) returned nil")
 	}
 	defer func() {
@@ -760,13 +760,13 @@ func TestLoggerArg(t *testing.T) {
 			t.Fatalf("loggerArg(non-Logger): got %v", recover())
 		}
 	}()
-	loggerArg(object.Integer(1))
+	loggerArg(object.IntValue(int64(object.Integer(1))))
 }
 
 // TestLoggerSeverityArgDefault covers severityArg's default arm: a value outside
 // Integer/String/Symbol passes through to CoerceSeverity, which errors.
 func TestLoggerSeverityArgDefault(t *testing.T) {
-	if got := severityArg(object.NilV); got == nil {
+	if got := severityArg(object.NilVal()); got == nil {
 		t.Fatal("severityArg(nil) returned nil")
 	}
 }
@@ -774,8 +774,8 @@ func TestLoggerSeverityArgDefault(t *testing.T) {
 // TestLoggerCloseInternal covers close clearing the sink directly.
 func TestLoggerCloseInternal(t *testing.T) {
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NewString(""))
-	vm.send(lo, "close", nil, nil)
+	lo := vm.newLogger(object.Wrap(object.NewString("")))
+	vm.send(object.Wrap(lo), "close", nil, nil)
 	if lo.l.Sink != nil {
 		t.Fatal("close did not clear the sink")
 	}
@@ -839,7 +839,7 @@ func TestLoggerRotatePeriodInvalid(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NewString(path))
+	lo := vm.newLogger(object.Wrap(object.NewString(path)))
 	lo.period = lg.Period("not-a-period") // unresolvable -> PreviousPeriodEnd errors
 	lo.rotatePeriod(fixedInstant)
 	data, _ := os.ReadFile(path)
@@ -851,8 +851,8 @@ func TestLoggerRotatePeriodInvalid(t *testing.T) {
 // TestLoggerMaybeRotateNoPath covers maybeRotate's non-file early return.
 func TestLoggerMaybeRotateNoPath(t *testing.T) {
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NilV) // no path
-	lo.maybeRotate(100)             // must be a no-op (no panic)
+	lo := vm.newLogger(object.NilVal()) // no path
+	lo.maybeRotate(100)                 // must be a no-op (no panic)
 }
 
 // TestLoggerRotatePeriodNoBase covers rotatePeriod when the base log does not yet
@@ -861,7 +861,7 @@ func TestLoggerRotatePeriodNoBase(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "absent.log")
 	vm := New(io.Discard)
-	lo := vm.newLogger(object.NewString(path))
+	lo := vm.newLogger(object.Wrap(object.NewString(path)))
 	lo.period = lg.Daily
 	lo.rotatePeriod(fixedInstant) // base file absent -> no-op, no rename
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

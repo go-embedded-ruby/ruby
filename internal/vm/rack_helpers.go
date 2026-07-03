@@ -54,7 +54,7 @@ func rackInt(v object.Value, def int) int {
 // rackArg reads the single value argument of a method, defaulting to nil.
 func rackArg(args []object.Value) object.Value {
 	if len(args) == 0 {
-		return object.NilV
+		return object.NilVal()
 	}
 	return args[0]
 }
@@ -160,7 +160,7 @@ func rackResponseBody(args []object.Value) []string {
 func rackBodyArray(parts []string) *object.Array {
 	arr := object.NewArrayFromSlice(make([]object.Value, len(parts)))
 	for i, p := range parts {
-		arr.Elems[i] = object.NewString(p)
+		arr.Elems[i] = object.Wrap(object.NewString(p))
 	}
 	return arr
 }
@@ -174,7 +174,7 @@ func rackParamsToHash(p *rack.Params) *object.Hash {
 	}
 	for _, k := range p.Keys() {
 		val, _ := p.Get(k)
-		h.Set(object.NewString(k), rackFromGo(val))
+		h.Set(object.Wrap(object.NewString(k)), rackFromGo(val))
 	}
 	return h
 }
@@ -202,7 +202,7 @@ func rackHeadersToHash(h *rack.Headers) *object.Hash {
 		return out
 	}
 	for _, k := range h.Keys() {
-		out.Set(object.NewString(k), rackFromGo(h.Get(k)))
+		out.Set(object.Wrap(object.NewString(k)), rackFromGo(h.Get(k)))
 	}
 	return out
 }
@@ -212,39 +212,39 @@ func rackHeadersToHash(h *rack.Headers) *object.Hash {
 func rackFromGo(v any) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int:
 		return object.IntValue(int64(n))
 	case int64:
 		return object.IntValue(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case []any:
 		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = rackFromGo(el)
 		}
-		return arr
+		return object.Wrap(arr)
 	case []string:
 		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
-			arr.Elems[i] = object.NewString(el)
+			arr.Elems[i] = object.Wrap(object.NewString(el))
 		}
-		return arr
+		return object.Wrap(arr)
 	case map[string]any:
 		h := object.NewHash()
 		for k, val := range n {
-			h.Set(object.NewString(k), rackFromGo(val))
+			h.Set(object.Wrap(object.NewString(k)), rackFromGo(val))
 		}
-		return h
+		return object.Wrap(h)
 	case *rack.Params:
-		return rackParamsToHash(n)
+		return object.Wrap(rackParamsToHash(n))
 	}
-	return object.NilV
+	return object.NilVal()
 }
 
 // rackToGo maps a Ruby value into the generic Go value model rack consumes

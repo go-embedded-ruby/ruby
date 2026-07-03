@@ -62,12 +62,12 @@ func callEnv(t *testing.T, vm *VM, name string, args []object.Value, blk *Proc) 
 	if m == nil || m.native == nil {
 		t.Fatalf("ENV#%s not found", name)
 	}
-	return m.native(vm, env, args, blk)
+	return m.native(vm, object.Wrap(env), args, blk)
 }
 
 func TestENVReadWrite(t *testing.T) {
 	vm, store := envSeams(t)
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 
 	// []= sets and returns the assigned value; [] reads it back.
 	if got := callEnv(t, vm, "[]=", []object.Value{s("A"), s("1")}, nil); got.ToS() != "1" {
@@ -86,7 +86,7 @@ func TestENVReadWrite(t *testing.T) {
 		t.Fatalf("missing key not nil")
 	}
 	// []= with nil deletes the key, returning nil.
-	if got := callEnv(t, vm, "[]=", []object.Value{s("A"), object.NilV}, nil); got != object.NilV {
+	if got := callEnv(t, vm, "[]=", []object.Value{s("A"), object.NilVal()}, nil); got != object.NilV {
 		t.Fatalf("[]=nil returned %v", got)
 	}
 	if _, ok := store["A"]; ok {
@@ -96,7 +96,7 @@ func TestENVReadWrite(t *testing.T) {
 
 func TestENVPredicates(t *testing.T) {
 	vm, _ := envSeams(t)
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 	callEnv(t, vm, "[]=", []object.Value{s("K"), s("v")}, nil)
 
 	for _, name := range []string{"include?", "key?", "has_key?"} {
@@ -111,7 +111,7 @@ func TestENVPredicates(t *testing.T) {
 
 func TestENVFetch(t *testing.T) {
 	vm, _ := envSeams(t)
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 	callEnv(t, vm, "[]=", []object.Value{s("K"), s("v")}, nil)
 
 	// present key
@@ -135,7 +135,7 @@ func TestENVFetch(t *testing.T) {
 
 func TestENVDeleteAndClear(t *testing.T) {
 	vm, store := envSeams(t)
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 	callEnv(t, vm, "[]=", []object.Value{s("D"), s("x")}, nil)
 	callEnv(t, vm, "[]=", []object.Value{s("E"), s("y")}, nil)
 
@@ -159,7 +159,7 @@ func TestENVDeleteAndClear(t *testing.T) {
 
 func TestENVHashViews(t *testing.T) {
 	vm, _ := envSeams(t)
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 	callEnv(t, vm, "[]=", []object.Value{s("H1"), s("a")}, nil)
 	callEnv(t, vm, "[]=", []object.Value{s("H2"), s("b")}, nil)
 
@@ -202,7 +202,7 @@ p acc.sort`)
 
 func TestENVMergeReplaceKey(t *testing.T) {
 	vm, store := envSeams(t)
-	s := func(x string) object.Value { return object.NewString(x) }
+	s := func(x string) object.Value { return object.Wrap(object.NewString(x)) }
 	callEnv(t, vm, "[]=", []object.Value{s("OLD"), s("keep")}, nil)
 
 	h := object.NewHash()
@@ -211,7 +211,7 @@ func TestENVMergeReplaceKey(t *testing.T) {
 
 	// merge! keeps existing keys and adds the new ones; returns self.
 	for _, name := range []string{"merge!", "update"} {
-		self := callEnv(t, vm, name, []object.Value{h}, nil)
+		self := callEnv(t, vm, name, []object.Value{object.Wrap(h)}, nil)
 		if _, ok := object.KindOK[*RObject](self); !ok {
 			t.Fatalf("%s did not return self", name)
 		}
@@ -231,7 +231,7 @@ func TestENVMergeReplaceKey(t *testing.T) {
 	// replace clears, then sets only the new pairs; returns self.
 	r := object.NewHash()
 	r.Set(s("R1"), s("z"))
-	self := callEnv(t, vm, "replace", []object.Value{r}, nil)
+	self := callEnv(t, vm, "replace", []object.Value{object.Wrap(r)}, nil)
 	if _, ok := object.KindOK[*RObject](self); !ok {
 		t.Fatalf("replace did not return self")
 	}
@@ -247,7 +247,7 @@ func TestENVMergeTypeError(t *testing.T) {
 	vm, _ := envSeams(t)
 	// mergeEnvHash on a non-Hash argument raises TypeError, matching MRI.
 	c := catchRaise(func() {
-		callEnv(t, vm, "merge!", []object.Value{object.Integer(5)}, nil)
+		callEnv(t, vm, "merge!", []object.Value{object.IntValue(int64(object.Integer(5)))}, nil)
 	})
 	if c != "TypeError" {
 		t.Fatalf("merge! non-hash: got %q", c)

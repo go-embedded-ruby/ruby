@@ -18,12 +18,12 @@ func (vm *VM) registerMarshal() {
 	mod.isModule = true
 	mod.consts["MAJOR_VERSION"] = object.IntValue(4)
 	mod.consts["MINOR_VERSION"] = object.IntValue(8)
-	vm.consts["Marshal"] = mod
+	vm.consts["Marshal"] = object.Wrap(mod)
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	def("dump", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		mv := toMarshalValue(args[0], map[object.Value]marshal.Value{})
-		return object.NewString(string(marshal.Dump(mv)))
+		return object.Wrap(object.NewString(string(marshal.Dump(mv))))
 	})
 	def("load", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s, ok := object.KindOK[*object.String](args[0])
@@ -125,45 +125,45 @@ func toMarshalValue(v object.Value, seen map[object.Value]marshal.Value) marshal
 func fromMarshalValue(v marshal.Value, seen map[marshal.Value]object.Value) object.Value {
 	switch x := v.(type) {
 	case marshal.Nil:
-		return object.NilV
+		return object.NilVal()
 	case marshal.Bool:
-		return object.Bool(bool(x))
+		return object.BoolValue(bool(object.Bool(bool(x))))
 	case marshal.Int:
 		return object.NormInt(new(big.Int).Set(x.I))
 	case marshal.Float:
-		return object.Float(float64(x))
+		return object.FloatValue(float64(object.Float(float64(x))))
 	case marshal.Symbol:
-		return object.Symbol(string(x))
+		return object.SymVal(string(object.Symbol(string(x))))
 	case *marshal.Str:
 		if o, ok := seen[v]; ok {
 			return o
 		}
 		os := object.NewStringBytes(append([]byte(nil), x.Bytes...))
-		seen[v] = os
-		return os
+		seen[v] = object.Wrap(os)
+		return object.Wrap(os)
 	case *marshal.Array:
 		if o, ok := seen[v]; ok {
 			return o
 		}
 		oa := object.NewArray()
-		seen[v] = oa
+		seen[v] = object.Wrap(oa)
 		for _, e := range x.Elems {
 			oa.Elems = append(oa.Elems, fromMarshalValue(e, seen))
 		}
-		return oa
+		return object.Wrap(oa)
 	case *marshal.Hash:
 		if o, ok := seen[v]; ok {
 			return o
 		}
 		oh := object.NewHash()
-		seen[v] = oh
+		seen[v] = object.Wrap(oh)
 		for i := range x.Keys {
 			oh.Set(fromMarshalValue(x.Keys[i], seen), fromMarshalValue(x.Vals[i], seen))
 		}
 		if x.Default != nil {
 			oh.Default = fromMarshalValue(x.Default, seen)
 		}
-		return oh
+		return object.Wrap(oh)
 	default:
 		// Defensive: the marshal engine only produces the cases above.
 		return raise("ArgumentError", "marshal: unsupported value %s", v.RubyClass())

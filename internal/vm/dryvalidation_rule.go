@@ -39,8 +39,8 @@ func (k *DryRuleKey) Truthy() bool    { return true }
 // the key/base failure targets.
 func (vm *VM) registerDryRuleContext(val *RClass) {
 	ctx := newClass("Dry::Validation::Rule", vm.cObject)
-	val.consts["Rule"] = ctx
-	vm.consts["Dry::Validation::Rule"] = ctx
+	val.consts["Rule"] = object.Wrap(ctx)
+	vm.consts["Dry::Validation::Rule"] = object.Wrap(ctx)
 	d := func(name string, fn NativeFn) { ctx.define(name, fn) }
 
 	// value(:key) returns the coerced value for key, or nil when absent.
@@ -50,7 +50,7 @@ func (vm *VM) registerDryRuleContext(val *RClass) {
 		}
 		v, ok := object.Kind[*DryRuleCtx](self).rc.Value(drytypes.Symbol(dryKeyName(args[0])))
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return dryFromGo(vm, v)
 	})
@@ -63,23 +63,23 @@ func (vm *VM) registerDryRuleContext(val *RClass) {
 	d("key", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		rc := object.Kind[*DryRuleCtx](self).rc
 		if len(args) > 0 && args[0] != object.NilV {
-			return &DryRuleKey{rc: rc, path: []any{drytypes.Symbol(dryKeyName(args[0]))}}
+			return object.Wrap(&DryRuleKey{rc: rc, path: []any{drytypes.Symbol(dryKeyName(args[0]))}})
 		}
-		return &DryRuleKey{rc: rc}
+		return object.Wrap(&DryRuleKey{rc: rc})
 	})
 	// base targets a base (whole-input) failure.
 	d("base", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &DryRuleKey{rc: object.Kind[*DryRuleCtx](self).rc, base: true}
+		return object.Wrap(&DryRuleKey{rc: object.Kind[*DryRuleCtx](self).rc, base: true})
 	})
 	// failure(text) with no key targets the rule's default key failure directly.
 	d("failure", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		object.Kind[*DryRuleCtx](self).rc.KeyFailure(dryFailureText(args))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	keyCls := newClass("Dry::Validation::RuleKey", vm.cObject)
-	val.consts["RuleKey"] = keyCls
-	vm.consts["Dry::Validation::RuleKey"] = keyCls
+	val.consts["RuleKey"] = object.Wrap(keyCls)
+	vm.consts["Dry::Validation::RuleKey"] = object.Wrap(keyCls)
 	keyCls.define("failure", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		k := object.Kind[*DryRuleKey](self)
 		text := dryFailureText(args)
@@ -91,7 +91,7 @@ func (vm *VM) registerDryRuleContext(val *RClass) {
 		default:
 			k.rc.KeyFailureAt(k.path, text)
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 }
 

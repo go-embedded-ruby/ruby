@@ -41,21 +41,21 @@ func TestMoneyWrapperMethods(t *testing.T) {
 // TestMoneyRatBridge covers moneyRat across Integer, Bignum, Float and the
 // TypeError default.
 func TestMoneyRatBridge(t *testing.T) {
-	if moneyRat(object.Integer(3)).Cmp(big.NewRat(3, 1)) != 0 {
+	if moneyRat(object.IntValue(int64(object.Integer(3)))).Cmp(big.NewRat(3, 1)) != 0 {
 		t.Error("integer -> rat")
 	}
-	if moneyRat(&object.Bignum{I: big.NewInt(5)}).Cmp(big.NewRat(5, 1)) != 0 {
+	if moneyRat(object.Wrap(&object.Bignum{I: big.NewInt(5)})).Cmp(big.NewRat(5, 1)) != 0 {
 		t.Error("bignum -> rat")
 	}
-	if f, _ := moneyRat(object.Float(1.5)).Float64(); f != 1.5 {
+	if f, _ := moneyRat(object.FloatValue(float64(object.Float(1.5)))).Float64(); f != 1.5 {
 		t.Error("float -> rat")
 	}
-	mustRaise(t, "moneyRat proc", func() { moneyRat(&Proc{}) })
+	mustRaise(t, "moneyRat proc", func() { moneyRat(object.Wrap(&Proc{})) })
 }
 
 // TestMoneyArgBridge covers moneyArg's TypeError arm (a non-Money argument).
 func TestMoneyArgBridge(t *testing.T) {
-	mustRaise(t, "moneyArg non-money", func() { moneyArg([]object.Value{object.Integer(1)}) })
+	mustRaise(t, "moneyArg non-money", func() { moneyArg([]object.Value{object.IntValue(int64(object.Integer(1)))}) })
 	mustRaise(t, "moneyArg no-arg", func() { moneyArg(nil) })
 }
 
@@ -63,18 +63,18 @@ func TestMoneyArgBridge(t *testing.T) {
 // currencyArgOr's absent-argument fallback.
 func TestCurrencyArgBridge(t *testing.T) {
 	vm := New(nil)
-	mustRaise(t, "currencyArg int", func() { vm.currencyArg(object.Integer(1)) })
+	mustRaise(t, "currencyArg int", func() { vm.currencyArg(object.IntValue(int64(object.Integer(1)))) })
 	// currencyArgOr with the index past the args uses the default.
-	if c := vm.currencyArgOr([]object.Value{object.Integer(1)}, 1, "USD"); c.ISOCode != "USD" {
+	if c := vm.currencyArgOr([]object.Value{object.IntValue(int64(object.Integer(1)))}, 1, "USD"); c.ISOCode != "USD" {
 		t.Errorf("currencyArgOr default -> %s", c.ISOCode)
 	}
 	// currencyArgOr with an explicit nil uses the default too.
-	if c := vm.currencyArgOr([]object.Value{object.Integer(1), object.NilV}, 1, "EUR"); c.ISOCode != "EUR" {
+	if c := vm.currencyArgOr([]object.Value{object.IntValue(int64(object.Integer(1))), object.NilVal()}, 1, "EUR"); c.ISOCode != "EUR" {
 		t.Errorf("currencyArgOr nil -> %s", c.ISOCode)
 	}
 }
 
 // TestMoneyInt64SliceBridge covers moneyInt64Slice's non-Array TypeError arm.
 func TestMoneyInt64SliceBridge(t *testing.T) {
-	mustRaise(t, "moneyInt64Slice non-array", func() { moneyInt64Slice(object.Integer(1)) })
+	mustRaise(t, "moneyInt64Slice non-array", func() { moneyInt64Slice(object.IntValue(int64(object.Integer(1)))) })
 }

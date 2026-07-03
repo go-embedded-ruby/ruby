@@ -28,16 +28,16 @@ func (t *MIMEType) Truthy() bool    { return true }
 func (vm *VM) registerMIMETypes() {
 	mimeMod := newClass("MIME", nil)
 	mimeMod.isModule = true
-	vm.consts["MIME"] = mimeMod
+	vm.consts["MIME"] = object.Wrap(mimeMod)
 
 	typesMod := newClass("MIME::Types", nil)
 	typesMod.isModule = true
-	mimeMod.consts["Types"] = typesMod
-	vm.consts["MIME::Types"] = typesMod
+	mimeMod.consts["Types"] = object.Wrap(typesMod)
+	vm.consts["MIME::Types"] = object.Wrap(typesMod)
 
 	typeCls := newClass("MIME::Type", vm.cObject)
-	mimeMod.consts["Type"] = typeCls
-	vm.consts["MIME::Type"] = typeCls
+	mimeMod.consts["Type"] = object.Wrap(typeCls)
+	vm.consts["MIME::Type"] = object.Wrap(typeCls)
 	vm.registerMIMEType(typeCls)
 
 	def := func(name string, fn NativeFn) {
@@ -80,7 +80,7 @@ func (vm *VM) registerMIMEType(cls *RClass) {
 
 	str := func(name string, get func(mimeTypeVal) string) {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.NewString(get(self(v)))
+			return object.Wrap(object.NewString(get(self(v))))
 		})
 	}
 	str("content_type", mimeTypeVal.ContentType)
@@ -99,14 +99,14 @@ func (vm *VM) registerMIMEType(cls *RClass) {
 	// type registers none (the gem returns nil).
 	d("preferred_extension", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if ext := self(v).PreferredExtension(); ext != "" {
-			return object.NewString(ext)
+			return object.Wrap(object.NewString(ext))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	boolean := func(name string, get func(mimeTypeVal) bool) {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Bool(get(self(v)))
+			return object.BoolValue(bool(object.Bool(get(self(v)))))
 		})
 	}
 	boolean("binary?", mimeTypeVal.Binary)

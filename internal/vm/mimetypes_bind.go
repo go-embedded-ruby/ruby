@@ -47,7 +47,7 @@ func mimeDefault() *mimetypes.Registry { return mimetypes.Default() }
 func mimeTypeArray(ts []*mimetypes.Type) object.Value {
 	arr := object.NewArrayFromSlice(make([]object.Value, len(ts)))
 	for i, t := range ts {
-		arr.Elems[i] = &MIMEType{t: mimeTypeVal{t: t}}
+		arr.Elems[i] = object.Wrap(&MIMEType{t: mimeTypeVal{t: t}})
 	}
-	return arr
+	return object.Wrap(arr)
 }

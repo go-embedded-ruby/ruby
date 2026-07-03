@@ -46,12 +46,12 @@ func (vm *VM) registerTSort() {
 func (vm *VM) installTSort() {
 	mod := newClass("TSort", nil)
 	mod.isModule = true
-	vm.consts["TSort"] = mod
+	vm.consts["TSort"] = object.Wrap(mod)
 
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	cyclic := newClass("TSort::Cyclic", std)
-	mod.consts["Cyclic"] = cyclic
-	vm.consts["TSort::Cyclic"] = cyclic
+	mod.consts["Cyclic"] = object.Wrap(cyclic)
+	vm.consts["TSort::Cyclic"] = object.Wrap(cyclic)
 
 	// --- mixin instance methods (self supplies tsort_each_node/child) ---
 
@@ -70,12 +70,12 @@ func (vm *VM) installTSort() {
 		nodes, children, vals := tsortFuncs(vm, self)
 		arr := object.Kind[*object.Array](tsortResult(vm, nodes, children, vals))
 		if blk == nil {
-			return enumFor(self, "tsort_each")
+			return object.Wrap(enumFor(self, "tsort_each"))
 		}
 		for _, n := range arr.Elems {
 			vm.callBlock(blk, []object.Value{n})
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("strongly_connected_components", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		nodes, children, vals := tsortFuncs(vm, self)
@@ -83,17 +83,17 @@ func (vm *VM) installTSort() {
 	})
 	d("each_strongly_connected_component", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_strongly_connected_component")
+			return object.Wrap(enumFor(self, "each_strongly_connected_component"))
 		}
 		nodes, children, vals := tsortFuncs(vm, self)
 		tsort.EachStronglyConnectedComponentWith(nodes, children, tsortOpts(vals), func(comp []any) {
 			vm.callBlock(blk, []object.Value{compArray(comp, vals)})
 		})
-		return object.NilV
+		return object.NilVal()
 	})
 	d("each_strongly_connected_component_from", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_strongly_connected_component_from", args...)
+			return object.Wrap(enumFor(self, "each_strongly_connected_component_from", args...))
 		}
 		_, children, vals := tsortFuncs(vm, self)
 		start := setKey(args[0])
@@ -101,7 +101,7 @@ func (vm *VM) installTSort() {
 		tsort.EachStronglyConnectedComponentFromWith(start, children, tsortOpts(vals), func(comp []any) {
 			vm.callBlock(blk, []object.Value{compArray(comp, vals)})
 		})
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// --- singleton methods (callbacks supplied as Procs) ---
@@ -120,7 +120,7 @@ func (vm *VM) installTSort() {
 		tsort.EachStronglyConnectedComponentWith(nodes, children, tsortOpts(vals), func(comp []any) {
 			vm.callBlock(blk, []object.Value{compArray(comp, vals)})
 		})
-		return object.NilV
+		return object.NilVal()
 	})
 	sm("each_strongly_connected_component_from", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		children, vals := tsortChildProc(vm, args[1])
@@ -129,7 +129,7 @@ func (vm *VM) installTSort() {
 		tsort.EachStronglyConnectedComponentFromWith(start, children, tsortOpts(vals), func(comp []any) {
 			vm.callBlock(blk, []object.Value{compArray(comp, vals)})
 		})
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
@@ -195,7 +195,7 @@ func collectNode(vals tsortVals, yield func(any)) *Proc {
 		k := setKey(v)
 		vals[k] = v
 		yield(k)
-		return object.NilV
+		return object.NilVal()
 	}}
 }
 
@@ -216,7 +216,7 @@ func compArray(keys []any, vals tsortVals) object.Value {
 	for i, k := range keys {
 		out[i] = vals[k]
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // sccArray boxes the slice-of-components result into a Ruby Array of Arrays.
@@ -225,5 +225,5 @@ func sccArray(comps [][]any, vals tsortVals) object.Value {
 	for i, c := range comps {
 		out[i] = compArray(c, vals)
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }

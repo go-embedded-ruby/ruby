@@ -101,11 +101,11 @@ func (b *objBuilder) emit(v object.Value) {
 	b.root = v
 }
 
-func (b *objBuilder) Null()           { b.emit(object.NilV) }
-func (b *objBuilder) Bool(x bool)     { b.emit(object.Bool(x)) }
+func (b *objBuilder) Null()           { b.emit(object.NilVal()) }
+func (b *objBuilder) Bool(x bool)     { b.emit(object.BoolValue(bool(object.Bool(x)))) }
 func (b *objBuilder) Int(n int64)     { b.emit(object.IntValue(n)) }
-func (b *objBuilder) Float(f float64) { b.emit(object.Float(f)) }
-func (b *objBuilder) Str(s string)    { b.emit(object.NewString(s)) }
+func (b *objBuilder) Float(f float64) { b.emit(object.FloatValue(float64(object.Float(f)))) }
+func (b *objBuilder) Str(s string)    { b.emit(object.Wrap(object.NewString(s))) }
 
 func (b *objBuilder) Big(n *big.Int) { b.emit(object.NormInt(n)) }
 
@@ -116,7 +116,7 @@ func (b *objBuilder) BeginArray(n int) {
 func (b *objBuilder) EndArray() {
 	f := b.stack[len(b.stack)-1]
 	b.stack = b.stack[:len(b.stack)-1]
-	b.emit(f.arr)
+	b.emit(object.Wrap(f.arr))
 }
 
 func (b *objBuilder) BeginObject(n int) {
@@ -126,16 +126,16 @@ func (b *objBuilder) BeginObject(n int) {
 func (b *objBuilder) Key(s string, symbolize bool) {
 	f := &b.stack[len(b.stack)-1]
 	if symbolize {
-		f.key = object.Symbol(s)
+		f.key = object.SymVal(string(object.Symbol(s)))
 	} else {
-		f.key = object.NewString(s)
+		f.key = object.Wrap(object.NewString(s))
 	}
 }
 
 func (b *objBuilder) EndObject() {
 	f := b.stack[len(b.stack)-1]
 	b.stack = b.stack[:len(b.stack)-1]
-	b.emit(f.h)
+	b.emit(object.Wrap(f.h))
 }
 
 // Result returns the top-level value (as json.Value, per the Builder interface);

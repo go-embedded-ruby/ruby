@@ -42,18 +42,18 @@ func (vm *VM) registerNokogiriXSLT() {
 
 	xsltMod := newClass("Nokogiri::XSLT", nil)
 	xsltMod.isModule = true
-	nok.consts["XSLT"] = xsltMod
-	vm.consts["Nokogiri::XSLT"] = xsltMod
+	nok.consts["XSLT"] = object.Wrap(xsltMod)
+	vm.consts["Nokogiri::XSLT"] = object.Wrap(xsltMod)
 
 	// Nokogiri::XSLT::SyntaxError < Nokogiri::SyntaxError for a compile failure.
 	synErr := object.Kind[*RClass](vm.consts["Nokogiri::SyntaxError"])
 	xsltErr := newClass("Nokogiri::XSLT::SyntaxError", synErr)
-	xsltMod.consts["SyntaxError"] = xsltErr
-	vm.consts["Nokogiri::XSLT::SyntaxError"] = xsltErr
+	xsltMod.consts["SyntaxError"] = object.Wrap(xsltErr)
+	vm.consts["Nokogiri::XSLT::SyntaxError"] = object.Wrap(xsltErr)
 
 	stylesheet := newClass("Nokogiri::XSLT::Stylesheet", vm.cObject)
-	xsltMod.consts["Stylesheet"] = stylesheet
-	vm.consts["Nokogiri::XSLT::Stylesheet"] = stylesheet
+	xsltMod.consts["Stylesheet"] = object.Wrap(stylesheet)
+	vm.consts["Nokogiri::XSLT::Stylesheet"] = object.Wrap(stylesheet)
 
 	// Nokogiri::XSLT(str) is a method call on the Nokogiri module (Ruby's
 	// Nokogiri::XSLT() constructor sugar), and Nokogiri::XSLT.parse(str) is the
@@ -80,7 +80,7 @@ func (vm *VM) registerNokogiriXSLTStylesheet(cls *RClass) {
 		if err != nil {
 			raiseNokogiriError(err)
 		}
-		return &NokogiriDocument{doc: out}
+		return object.Wrap(&NokogiriDocument{doc: out})
 	})
 
 	apply := func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -89,7 +89,7 @@ func (vm *VM) registerNokogiriXSLTStylesheet(cls *RClass) {
 		if err != nil {
 			raiseNokogiriError(err)
 		}
-		return object.NewString(out)
+		return object.Wrap(object.NewString(out))
 	}
 	cls.define("apply_to", apply)
 	cls.define("serialize", apply)
@@ -102,7 +102,7 @@ func nokogiriXSLTParse(src string) object.Value {
 	if err != nil {
 		raise("Nokogiri::XSLT::SyntaxError", "%s", err.Error())
 	}
-	return &NokogiriXSLTStylesheet{s: s}
+	return object.Wrap(&NokogiriXSLTStylesheet{s: s})
 }
 
 // nokogiriXSLTArgs reads the transform / apply_to arguments: the first argument

@@ -63,9 +63,9 @@ func TestDateOffsetForms(t *testing.T) {
 		v    object.Value
 		want int
 	}{
-		{object.Integer(0), 0},
-		{object.Float(0.5), 43200},
-		{&object.Rational{R: big.NewRat(1, 2)}, 43200},
+		{object.IntValue(int64(object.Integer(0))), 0},
+		{object.FloatValue(float64(object.Float(0.5))), 43200},
+		{object.Wrap(&object.Rational{R: big.NewRat(1, 2)}), 43200},
 	} {
 		if got := offsetSeconds(c.v); got != c.want {
 			t.Errorf("offsetSeconds(%v) = %d, want %d", c.v, got, c.want)
@@ -76,7 +76,7 @@ func TestDateOffsetForms(t *testing.T) {
 // TestDateOffsetBadType covers offsetSeconds' TypeError arm for a value that is
 // neither a zone string nor a numeric.
 func TestDateOffsetBadType(t *testing.T) {
-	wantRaise(t, "TypeError", func() { offsetSeconds(object.NilV) })
+	wantRaise(t, "TypeError", func() { offsetSeconds(object.NilVal()) })
 }
 
 // TestZoneOffsetSeconds covers zoneOffsetSeconds across the accepted forms and
@@ -122,7 +122,7 @@ func TestZoneOffsetSeconds(t *testing.T) {
 func TestDateOpUnsupported(t *testing.T) {
 	wantRaise(t, "NoMethodError", func() {
 		d, _ := date.NewDate(2026, 6, 29)
-		dateOp(bytecode.OpMul, &Date{d: d}, object.Integer(1))
+		dateOp(bytecode.OpMul, &Date{d: d}, object.IntValue(int64(object.Integer(1))))
 	})
 }
 
@@ -142,10 +142,10 @@ func TestDateDefaultArgs(t *testing.T) {
 	if got := compArg(nil, 1); got != true {
 		t.Errorf("compArg default = %v, want true", got)
 	}
-	if got := compArg([]object.Value{object.NewString("s"), object.False}, 1); got != false {
+	if got := compArg([]object.Value{object.Wrap(object.NewString("s")), object.BoolValue(bool(object.False))}, 1); got != false {
 		t.Errorf("compArg explicit false = %v, want false", got)
 	}
-	if got := strptimeFormat([]object.Value{object.NewString("2026-06-29")}); got != "%F" {
+	if got := strptimeFormat([]object.Value{object.Wrap(object.NewString("2026-06-29"))}); got != "%F" {
 		t.Errorf("strptimeFormat default = %q, want %%F", got)
 	}
 }

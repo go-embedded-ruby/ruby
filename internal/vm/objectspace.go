@@ -17,7 +17,7 @@ import "github.com/go-embedded-ruby/ruby/internal/object"
 func (vm *VM) registerObjectSpace() {
 	mod := newClass("ObjectSpace", nil)
 	mod.isModule = true
-	vm.consts["ObjectSpace"] = mod
+	vm.consts["ObjectSpace"] = object.Wrap(mod)
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	// define_finalizer(obj, callable = block): MRI returns [object_id_flag, callable].
@@ -27,13 +27,13 @@ func (vm *VM) registerObjectSpace() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 		}
-		var callable object.Value = object.NilV
+		var callable object.Value = object.NilVal()
 		if len(args) >= 2 {
 			callable = args[1]
 		} else if blk != nil {
-			callable = blk
+			callable = object.Wrap(blk)
 		}
-		return object.NewArray(object.IntValue(0), callable)
+		return object.Wrap(object.NewArray(object.IntValue(0), callable))
 	})
 	// undefine_finalizer(obj): a no-op that returns the object, as in MRI.
 	def("undefine_finalizer", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -49,11 +49,11 @@ func (vm *VM) registerObjectSpace() {
 		return object.IntValue(0)
 	})
 	// garbage_collect / start: trigger a collection — a no-op, returning nil.
-	gc := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.NilV }
+	gc := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.NilVal() }
 	def("garbage_collect", gc)
 	def("start", gc)
 	// count_objects returns an empty Hash (the live set is not tracked).
 	def("count_objects", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewHash()
+		return object.Wrap(object.NewHash())
 	})
 }

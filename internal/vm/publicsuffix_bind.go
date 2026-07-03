@@ -46,7 +46,7 @@ func publicSuffixParse(name string, opts *publicsuffix.Options) object.Value {
 	if err != nil {
 		raise(publicSuffixErrClass(err), "%s", err.Error())
 	}
-	return &PublicSuffixDomain{d: publicSuffixDomain{d: dom}}
+	return object.Wrap(&PublicSuffixDomain{d: publicSuffixDomain{d: dom}})
 }
 
 // publicSuffixRegistrable returns the registrable-domain String for a name, or
@@ -120,16 +120,16 @@ func publicSuffixKey(k object.Value) string {
 // nil when absent (the gem models a missing level as nil).
 func publicSuffixLevel(s string, present bool) object.Value {
 	if !present {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(s)
+	return object.Wrap(object.NewString(s))
 }
 
 // publicSuffixOptStr maps a possibly-empty derived string to a Ruby String, or
 // Ruby nil when empty (PublicSuffix#domain / #subdomain return nil, not "").
 func publicSuffixOptStr(s string) object.Value {
 	if s == "" {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(s)
+	return object.Wrap(object.NewString(s))
 }

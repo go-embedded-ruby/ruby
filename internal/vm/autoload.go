@@ -19,7 +19,7 @@ func (vm *VM) registerAutoload() {
 		name := constNameArg(args[0])
 		path := autoloadPathArg(vm, args[1])
 		vm.registerAutoloadOn(cls, name, path)
-		return object.NilV
+		return object.NilVal()
 	}
 	vm.cModule.define("autoload", autoloadFn)
 
@@ -29,14 +29,14 @@ func (vm *VM) registerAutoload() {
 		cls := object.Kind[*RClass](self)
 		name := constNameArg(args[0])
 		if _, defined := cls.consts[name]; defined {
-			return object.NilV
+			return object.NilVal()
 		}
 		if cls.autoloads != nil {
 			if p, ok := cls.autoloads[name]; ok {
-				return object.NewString(p)
+				return object.Wrap(object.NewString(p))
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	vm.cModule.define("autoload?", autoloadQFn)
 
@@ -46,19 +46,19 @@ func (vm *VM) registerAutoload() {
 		name := constNameArg(args[0])
 		path := autoloadPathArg(vm, args[1])
 		vm.registerAutoloadOn(vm.cObject, name, path)
-		return object.NilV
+		return object.NilVal()
 	})
 	vm.cObject.define("autoload?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		name := constNameArg(args[0])
 		if _, defined := vm.cObject.consts[name]; defined {
-			return object.NilV
+			return object.NilVal()
 		}
 		if vm.cObject.autoloads != nil {
 			if p, ok := vm.cObject.autoloads[name]; ok {
-				return object.NewString(p)
+				return object.Wrap(object.NewString(p))
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 }
 

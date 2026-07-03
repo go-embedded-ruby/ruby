@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // TestBigDecimalFloatToDecimal covers floatToDecimal across the float shapes a
@@ -45,5 +46,5 @@ func TestBigDecimalOpUnsupported(t *testing.T) {
 	}()
 	a := newDecimalString("1")
 	b := newDecimalString("2")
-	bigDecimalOp(bytecode.OpLt, a, b)
+	bigDecimalOp(bytecode.OpLt, a, object.Wrap(b))
 }

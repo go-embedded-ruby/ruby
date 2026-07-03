@@ -58,7 +58,7 @@ type rubyConn struct {
 // exception from #write unwinds through the panic-based raise, so a returned
 // error is never a Ruby-level failure — it only guards the io.Writer contract.
 func (c *rubyConn) Write(p []byte) (int, error) {
-	c.vm.send(c.obj, "write", []object.Value{object.NewStringBytesEnc(append([]byte(nil), p...), "ASCII-8BIT")}, nil)
+	c.vm.send(c.obj, "write", []object.Value{object.Wrap(object.NewStringBytesEnc(append([]byte(nil), p...), "ASCII-8BIT"))}, nil)
 	return len(p), nil
 }
 
@@ -145,32 +145,32 @@ func redisArgs(vals []object.Value) []any {
 func (vm *VM) redisValue(v any) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int64:
 		return object.IntValue(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case *redis.VerbatimString:
-		return object.NewString(n.Text)
+		return object.Wrap(object.NewString(n.Text))
 	case []any:
-		return vm.redisArray(n)
+		return object.Wrap(vm.redisArray(n))
 	case *redis.Map:
-		return vm.redisHash(n)
+		return object.Wrap(vm.redisHash(n))
 	case *redis.Set:
 		return vm.redisSet(n)
 	case *redis.Push:
-		return vm.redisArray(n.Values)
+		return object.Wrap(vm.redisArray(n.Values))
 	case *big.Int:
 		return object.NormInt(new(big.Int).Set(n))
 	case *redis.CommandError:
 		raise("Redis::CommandError", "%s", n.Message)
 	}
 	// The library only ever produces the cases above.
-	return object.NilV
+	return object.NilVal()
 }
 
 // redisArray maps a []any reply to a Ruby Array.
@@ -197,7 +197,7 @@ func (vm *VM) redisSet(s *redis.Set) object.Value {
 	for _, m := range s.Members() {
 		set.add(vm.redisValue(m))
 	}
-	return set
+	return object.Wrap(set)
 }
 
 // redisReply turns a (value, error) command result into a Ruby value, raising a
@@ -243,10 +243,10 @@ func redisNewArgs(args []object.Value) (object.Value, redis.Options) {
 func redisOptsFromHash(h *object.Hash, opts *redis.Options) object.Value {
 	var conn object.Value
 	get := func(name string) (object.Value, bool) {
-		if v, ok := h.Get(object.Symbol(name)); ok {
+		if v, ok := h.Get(object.SymVal(string(object.Symbol(name)))); ok {
 			return v, true
 		}
-		return h.Get(object.NewString(name))
+		return h.Get(object.Wrap(object.NewString(name)))
 	}
 	if v, ok := get("connection"); ok {
 		conn = v
@@ -326,12 +326,12 @@ func (vm *VM) redisPipelined(cl *redis.Client, blk *Proc) object.Value {
 	b := &RedisBatch{cls: vm.redisBatchClass(), batch: &redis.Batch{}}
 	results, err := cl.Pipelined(func(batch *redis.Batch) {
 		b.batch = batch
-		vm.callBlock(blk, []object.Value{b})
+		vm.callBlock(blk, []object.Value{object.Wrap(b)})
 	})
 	if err != nil {
 		raise("Redis::ConnectionError", "%s", err.Error())
 	}
-	return vm.redisArray(results)
+	return object.Wrap(vm.redisArray(results))
 }
 
 // redisMulti runs blk to queue commands and wraps them in a MULTI/EXEC
@@ -344,7 +344,7 @@ func (vm *VM) redisMulti(cl *redis.Client, blk *Proc) object.Value {
 	b := &RedisBatch{cls: vm.redisBatchClass()}
 	result, err := cl.Multi(func(batch *redis.Batch) {
 		b.batch = batch
-		vm.callBlock(blk, []object.Value{b})
+		vm.callBlock(blk, []object.Value{object.Wrap(b)})
 	})
 	if err != nil {
 		if ce, ok := err.(*redis.CommandError); ok {
@@ -363,9 +363,9 @@ func (vm *VM) redisBatchClass() *RClass {
 		return c
 	}
 	cls := newClass("Redis::Pipeline", vm.cObject)
-	vm.consts["Redis::Pipeline"] = cls
+	vm.consts["Redis::Pipeline"] = object.Wrap(cls)
 	if mod, ok := object.KindOK[*RClass](vm.consts["Redis"]); ok {
-		mod.consts["Pipeline"] = cls
+		mod.consts["Pipeline"] = object.Wrap(cls)
 	}
 	// #call(*args) and every command method queue onto the batch. Because a
 	// queued command is just a name plus arguments, one native closure keyed by

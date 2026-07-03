@@ -85,28 +85,28 @@ func payloadTime(r goresult.Interface) *Time {
 // methods, all delegating to the go-composites Time.Interface.
 func (vm *VM) registerTime() {
 	vm.cTime = newClass("Time", vm.cObject)
-	vm.consts["Time"] = vm.cTime
+	vm.consts["Time"] = object.Wrap(vm.cTime)
 
 	// Time.at(seconds) → FromUnix. Accepts an Integer or Float (truncated).
 	vm.cTime.smethods["at"] = &Method{name: "at", owner: vm.cTime,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return &Time{t: gotime.FromUnix(timeSeconds(args[0]))}
+			return object.Wrap(&Time{t: gotime.FromUnix(timeSeconds(args[0]))})
 		}}
 	// Time.now → built here from Go's clock (go-composites/time has no Now() by
 	// design) and handed to FromUnix; whole-second resolution.
 	vm.cTime.smethods["now"] = &Method{name: "now", owner: vm.cTime,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &Time{t: gotime.FromUnix(nowUnix())}
+			return object.Wrap(&Time{t: gotime.FromUnix(nowUnix())})
 		}}
 	// Time.parse(str) → Parse(RFC3339, str); raises on the error Result.
 	vm.cTime.smethods["parse"] = &Method{name: "parse", owner: vm.cTime,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return payloadTime(gotime.Parse(stdtime.RFC3339, strArg(args[0])))
+			return object.Wrap(payloadTime(gotime.Parse(stdtime.RFC3339, strArg(args[0]))))
 		}}
 	// Time.strptime(str, fmt) → Parse(rubyLayout(fmt), str); raises on failure.
 	vm.cTime.smethods["strptime"] = &Method{name: "strptime", owner: vm.cTime,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return payloadTime(gotime.Parse(rubyLayout(strArg(args[1])), strArg(args[0])))
+			return object.Wrap(payloadTime(gotime.Parse(rubyLayout(strArg(args[1])), strArg(args[0]))))
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cTime.define(name, fn) }
@@ -116,11 +116,11 @@ func (vm *VM) registerTime() {
 		return object.IntValue(self(v).t.ToUnix())
 	})
 	d("to_f", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Float(float64(self(v).t.ToUnix()))
+		return object.FloatValue(float64(object.Float(float64(self(v).t.ToUnix()))))
 	})
 
 	toSFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).repr())
+		return object.Wrap(object.NewString(self(v).repr()))
 	}
 	d("to_s", toSFn)
 	d("inspect", toSFn)
@@ -128,7 +128,7 @@ func (vm *VM) registerTime() {
 	// strftime(fmt): translate the Ruby/strftime directives to a Go layout, then
 	// delegate to the composite's Format.
 	d("strftime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).t.Format(rubyLayout(strArg(args[0]))))
+		return object.Wrap(object.NewString(self(v).t.Format(rubyLayout(strArg(args[0])))))
 	})
 
 	// Field accessors, derived from the underlying instant via Format directives.
@@ -156,7 +156,7 @@ func (vm *VM) registerTime() {
 	// Weekday predicates: sunday? … saturday?, booleans off wday.
 	weekdayPred := func(want int64) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Bool(weekday(self(v)) == want)
+			return object.BoolValue(bool(object.Bool(weekday(self(v)) == want)))
 		}
 	}
 	d("sunday?", weekdayPred(0))
@@ -169,7 +169,7 @@ func (vm *VM) registerTime() {
 
 	// utc / getutc → UTC (same instant, UTC location).
 	utcFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Time{t: self(v).t.UTC()}
+		return object.Wrap(&Time{t: self(v).t.UTC()})
 	}
 	d("utc", utcFn)
 	d("getutc", utcFn)
@@ -196,7 +196,7 @@ func (vm *VM) registerTime() {
 
 	// zone → abbreviated zone name ("UTC", "CET", …).
 	d("zone", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).t.Zone())
+		return object.Wrap(object.NewString(self(v).t.Zone()))
 	})
 
 	// + seconds → Add(Duration). - seconds → Add(-Duration); - Time → seconds.
@@ -214,28 +214,28 @@ func (vm *VM) registerTime() {
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := object.KindOK[*Time](args[0])
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return object.IntValue(timeCmp(self(v), other))
 	})
 	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).t.Before(timeArg(args[0]).t))
+		return object.BoolValue(bool(object.Bool(self(v).t.Before(timeArg(args[0]).t))))
 	})
 	d(">", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).t.After(timeArg(args[0]).t))
+		return object.BoolValue(bool(object.Bool(self(v).t.After(timeArg(args[0]).t))))
 	})
 	d("<=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(!self(v).t.After(timeArg(args[0]).t))
+		return object.BoolValue(bool(object.Bool(!self(v).t.After(timeArg(args[0]).t))))
 	})
 	d(">=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(!self(v).t.Before(timeArg(args[0]).t))
+		return object.BoolValue(bool(object.Bool(!self(v).t.Before(timeArg(args[0]).t))))
 	})
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := object.KindOK[*Time](args[0])
 		if !ok {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		return object.Bool(self(v).t.Equal(other.t))
+		return object.BoolValue(bool(object.Bool(self(v).t.Equal(other.t))))
 	})
 }
 
@@ -261,7 +261,7 @@ func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
 // arithmetic. The non-null Add Result always carries a payload.
 func timeShift(t *Time, sec int64) object.Value {
 	r := t.t.Add(goduration.FromSeconds(sec))
-	return &Time{t: r.Payload().(gotime.Interface)}
+	return object.Wrap(&Time{t: r.Payload().(gotime.Interface)})
 }
 
 // weekdayNum maps the abbreviated weekday name produced by the "Mon" Format

@@ -63,18 +63,18 @@ func floatSlice(v object.Value) []float64 {
 func complexArray(cs []complex128) object.Value {
 	out := make([]object.Value, len(cs))
 	for i, c := range cs {
-		out[i] = &object.Complex{Re: object.Float(real(c)), Im: object.Float(imag(c))}
+		out[i] = object.Wrap(&object.Complex{Re: object.FloatValue(float64(object.Float(real(c)))), Im: object.FloatValue(float64(object.Float(imag(c))))})
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // floatArray marshals []float64 back into a Ruby Array of Float.
 func floatArray(fs []float64) object.Value {
 	out := make([]object.Value, len(fs))
 	for i, f := range fs {
-		out[i] = object.Float(f)
+		out[i] = object.FloatValue(float64(object.Float(f)))
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // float2DArray marshals [][]float64 into a Ruby Array of Arrays of Float.
@@ -83,7 +83,7 @@ func float2DArray(rows [][]float64) object.Value {
 	for i, r := range rows {
 		out[i] = floatArray(r)
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // sampleSpacing reads an optional trailing spacing argument (numpy's `d`),
@@ -132,7 +132,7 @@ func checkShape(n int, shape []int) {
 func (vm *VM) registerFFT() {
 	mod := newClass("FFT", nil)
 	mod.isModule = true
-	vm.consts["FFT"] = mod
+	vm.consts["FFT"] = object.Wrap(mod)
 
 	def := func(name string, fn NativeFn) {
 		mod.smethods[name] = &Method{name: name, owner: mod, native: fn}

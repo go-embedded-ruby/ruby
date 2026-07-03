@@ -19,15 +19,15 @@ import (
 func (vm *VM) registerFaker() {
 	mod := newClass("Faker", nil)
 	mod.isModule = true
-	vm.consts["Faker"] = mod
+	vm.consts["Faker"] = object.Wrap(mod)
 
 	// Faker::Config.random = Random.new(seed) sets the generator; reading it back
 	// returns the configured Random (or nil before it is set). This is the gem's
 	// deterministic-seed contract.
 	cfg := newClass("Faker::Config", nil)
 	cfg.isModule = true
-	mod.consts["Config"] = cfg
-	vm.consts["Faker::Config"] = cfg
+	mod.consts["Config"] = object.Wrap(cfg)
+	vm.consts["Faker::Config"] = object.Wrap(cfg)
 	cfg.smethods["random="] = &Method{name: "random=", owner: cfg,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			if len(args) == 0 {
@@ -45,13 +45,13 @@ func (vm *VM) registerFaker() {
 	// exhaustion error (raised by Faker::…unique when the retry budget is spent).
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	uniqErr := newClass("Faker::UniqueGenerator::RetryLimitExceeded", std)
-	mod.consts["UniqueGenerator"] = func() *RClass {
+	mod.consts["UniqueGenerator"] = object.Wrap(func() *RClass {
 		ug := newClass("Faker::UniqueGenerator", nil)
 		ug.isModule = true
-		ug.consts["RetryLimitExceeded"] = uniqErr
+		ug.consts["RetryLimitExceeded"] = object.Wrap(uniqErr)
 		return ug
-	}()
-	vm.consts["Faker::UniqueGenerator::RetryLimitExceeded"] = uniqErr
+	}())
+	vm.consts["Faker::UniqueGenerator::RetryLimitExceeded"] = object.Wrap(uniqErr)
 
 	vm.registerFakerGenerators(mod)
 }
@@ -139,19 +139,19 @@ func (vm *VM) registerFakerLorem(mod *RClass) {
 		return strSliceToArray(vm.fakerGen().Lorem().Words(fakerIntArg(args, 0, 3), false))
 	})
 	fakerNS(lorem, "sentence", func(vm *VM, args []object.Value) object.Value {
-		return object.NewString(vm.fakerGen().Lorem().Sentence(fakerIntArg(args, 0, 4), false))
+		return object.Wrap(object.NewString(vm.fakerGen().Lorem().Sentence(fakerIntArg(args, 0, 4), false)))
 	})
 	fakerNS(lorem, "sentences", func(vm *VM, args []object.Value) object.Value {
 		return strSliceToArray(vm.fakerGen().Lorem().Sentences(fakerIntArg(args, 0, 3), false))
 	})
 	fakerNS(lorem, "paragraph", func(vm *VM, args []object.Value) object.Value {
-		return object.NewString(vm.fakerGen().Lorem().Paragraph(fakerIntArg(args, 0, 3), false))
+		return object.Wrap(object.NewString(vm.fakerGen().Lorem().Paragraph(fakerIntArg(args, 0, 3), false)))
 	})
 	fakerNS(lorem, "paragraphs", func(vm *VM, args []object.Value) object.Value {
 		return strSliceToArray(vm.fakerGen().Lorem().Paragraphs(fakerIntArg(args, 0, 3), false))
 	})
 	fakerNS(lorem, "characters", func(vm *VM, args []object.Value) object.Value {
-		return object.NewString(vm.fakerGen().Lorem().Characters(fakerIntArg(args, 0, 255)))
+		return object.Wrap(object.NewString(vm.fakerGen().Lorem().Characters(fakerIntArg(args, 0, 255))))
 	})
 }
 
@@ -166,16 +166,16 @@ func (vm *VM) registerFakerNumber(mod *RClass) {
 		return object.IntValue(int64(vm.fakerGen().Number().Digit()))
 	})
 	fakerNS(num, "hexadecimal", func(vm *VM, args []object.Value) object.Value {
-		return object.NewString(vm.fakerGen().Number().Hexadecimal(fakerIntArg(args, 0, 6)))
+		return object.Wrap(object.NewString(vm.fakerGen().Number().Hexadecimal(fakerIntArg(args, 0, 6))))
 	})
 	fakerNS(num, "binary", func(vm *VM, args []object.Value) object.Value {
-		return object.NewString(vm.fakerGen().Number().Binary(fakerIntArg(args, 0, 4)))
+		return object.Wrap(object.NewString(vm.fakerGen().Number().Binary(fakerIntArg(args, 0, 4))))
 	})
 	fakerNS(num, "decimal", func(vm *VM, args []object.Value) object.Value {
-		return object.Float(vm.fakerGen().Number().Decimal(fakerIntArg(args, 0, 5), fakerIntArg(args, 1, 2)))
+		return object.FloatValue(float64(object.Float(vm.fakerGen().Number().Decimal(fakerIntArg(args, 0, 5), fakerIntArg(args, 1, 2)))))
 	})
 	fakerNS(num, "between", func(vm *VM, args []object.Value) object.Value {
-		return object.Float(vm.fakerGen().Number().Between(fakerFloatArg(args, 0, 1), fakerFloatArg(args, 1, 5000)))
+		return object.FloatValue(float64(object.Float(vm.fakerGen().Number().Between(fakerFloatArg(args, 0, 1), fakerFloatArg(args, 1, 5000)))))
 	})
 }
 
@@ -184,15 +184,15 @@ func (vm *VM) registerFakerNumber(mod *RClass) {
 func (vm *VM) registerFakerBooleanCommerce(mod *RClass) {
 	boolean := vm.fakerNamespace(mod, "Boolean")
 	fakerNS(boolean, "boolean", func(vm *VM, args []object.Value) object.Value {
-		return object.Bool(vm.fakerGen().Boolean().Boolean(fakerFloatArg(args, 0, 0.5)))
+		return object.BoolValue(bool(object.Bool(vm.fakerGen().Boolean().Boolean(fakerFloatArg(args, 0, 0.5)))))
 	})
 
 	commerce := vm.fakerNamespace(mod, "Commerce")
 	fakerStr(commerce, "product_name", func(f fakerGen) string { return f.Commerce().ProductName() })
 	fakerNS(commerce, "price", func(vm *VM, args []object.Value) object.Value {
-		return object.Float(vm.fakerGen().Commerce().Price(fakerFloatArg(args, 0, 100)))
+		return object.FloatValue(float64(object.Float(vm.fakerGen().Commerce().Price(fakerFloatArg(args, 0, 100)))))
 	})
 	fakerNS(commerce, "department", func(vm *VM, args []object.Value) object.Value {
-		return object.NewString(vm.fakerGen().Commerce().Department(fakerIntArg(args, 0, 3), false))
+		return object.Wrap(object.NewString(vm.fakerGen().Commerce().Department(fakerIntArg(args, 0, 3), false)))
 	})
 }

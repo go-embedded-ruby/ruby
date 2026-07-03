@@ -15,13 +15,13 @@ import (
 
 // TestNokogiriStr covers nokogiriStr's String / Symbol / default (to_s) arms.
 func TestNokogiriStr(t *testing.T) {
-	if s := nokogiriStr(object.NewString("x")); s != "x" {
+	if s := nokogiriStr(object.Wrap(object.NewString("x"))); s != "x" {
 		t.Errorf("string -> %q", s)
 	}
-	if s := nokogiriStr(object.Symbol("sym")); s != "sym" {
+	if s := nokogiriStr(object.SymVal(string(object.Symbol("sym")))); s != "sym" {
 		t.Errorf("symbol -> %q", s)
 	}
-	if s := nokogiriStr(object.Integer(7)); s != "7" {
+	if s := nokogiriStr(object.IntValue(int64(object.Integer(7)))); s != "7" {
 		t.Errorf("default to_s -> %q", s)
 	}
 }

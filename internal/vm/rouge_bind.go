@@ -44,11 +44,11 @@ func rougeHighlight(text, lexer, formatter string) string {
 func rougeFindLexer(cls *RClass, name string) object.Value {
 	lx := rouge.FindLexer(name)
 	if lx == nil {
-		return object.NilV
+		return object.NilVal()
 	}
 	inst := &RObject{class: cls, ivars: map[string]object.Value{}}
-	inst.ivars["@__lexer"] = &rougeLexer{lx: lx}
-	return inst
+	inst.ivars["@__lexer"] = object.Wrap(&rougeLexer{lx: lx})
+	return object.Wrap(inst)
 }
 
 // rougeLexerHandle returns the native lexer handle stored on a Rouge::Lexer
@@ -68,7 +68,7 @@ func rougeLexerHandle(self object.Value) *rougeLexer {
 // Rouge.highlight needs to select one.
 func rougeFindFormatter(tag string) object.Value {
 	if f := rouge.FindFormatter(tag); f != nil {
-		return object.NewString(tag)
+		return object.Wrap(object.NewString(tag))
 	}
-	return object.NilV
+	return object.NilVal()
 }

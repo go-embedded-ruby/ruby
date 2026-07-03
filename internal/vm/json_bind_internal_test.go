@@ -24,15 +24,15 @@ func TestJSONBindGenerate(t *testing.T) {
 		want string
 	}{
 		{"go-nil", nil, "null"},
-		{"nil", object.NilV, "null"},
-		{"true", object.Bool(true), "true"},
-		{"false", object.Bool(false), "false"},
-		{"int", object.Integer(7), "7"},
-		{"float", object.Float(2.5), "2.5"},
-		{"string", object.NewString("hi"), `"hi"`},
-		{"symbol", object.Symbol("sym"), `"sym"`},
-		{"empty-array", &object.Array{}, "[]"},
-		{"array", &object.Array{Elems: []object.Value{object.Integer(1)}}, "[1]"},
+		{"nil", object.NilVal(), "null"},
+		{"true", object.BoolValue(bool(object.Bool(true))), "true"},
+		{"false", object.BoolValue(bool(object.Bool(false))), "false"},
+		{"int", object.IntValue(int64(object.Integer(7))), "7"},
+		{"float", object.FloatValue(float64(object.Float(2.5))), "2.5"},
+		{"string", object.Wrap(object.NewString("hi")), `"hi"`},
+		{"symbol", object.SymVal(string(object.Symbol("sym"))), `"sym"`},
+		{"empty-array", object.Wrap(&object.Array{}), "[]"},
+		{"array", object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}), "[1]"},
 	}
 	for _, c := range cases {
 		if got := jsonGenerate(c.in); got != c.want {
@@ -46,17 +46,17 @@ func TestJSONBindGenerate(t *testing.T) {
 	}
 	// A Hash emits an ordered object with coerced keys (Symbol key -> bare name).
 	h := object.NewHash()
-	h.Set(object.Symbol("k"), object.Integer(2))
-	if got := jsonGenerate(h); got != `{"k":2}` {
+	h.Set(object.SymVal(string(object.Symbol("k"))), object.IntValue(int64(object.Integer(2))))
+	if got := jsonGenerate(object.Wrap(h)); got != `{"k":2}` {
 		t.Errorf("hash -> %q", got)
 	}
 	// An empty Hash emits "{}".
-	if got := jsonGenerate(object.NewHash()); got != "{}" {
+	if got := jsonGenerate(object.Wrap(object.NewHash())); got != "{}" {
 		t.Errorf("empty hash -> %q", got)
 	}
 	// The to_s-of-unknown default: a Range serialises by its Ruby to_s string.
-	rng := &object.Range{Lo: object.Integer(1), Hi: object.Integer(2)}
-	if got := jsonGenerate(rng); got != `"1..2"` {
+	rng := &object.Range{Lo: object.IntValue(int64(object.Integer(1))), Hi: object.IntValue(int64(object.Integer(2)))}
+	if got := jsonGenerate(object.Wrap(rng)); got != `"1..2"` {
 		t.Errorf("range default -> %q", got)
 	}
 }
@@ -67,13 +67,13 @@ func TestJSONBindGenerate(t *testing.T) {
 func TestJSONBindGenerateNestedError(t *testing.T) {
 	one := object.Float(1.0)
 	inf := object.Float(float64(one) / float64(object.Float(0))) // +Inf
-	arr := &object.Array{Elems: []object.Value{inf}}
-	if re := rubyErr(t, func() { jsonGenerate(arr) }); re.Class != "JSON::GeneratorError" {
+	arr := &object.Array{Elems: []object.Value{object.FloatValue(float64(inf))}}
+	if re := rubyErr(t, func() { jsonGenerate(object.Wrap(arr)) }); re.Class != "JSON::GeneratorError" {
 		t.Errorf("array+inf -> class=%q", re.Class)
 	}
 	h := object.NewHash()
-	h.Set(object.NewString("k"), inf)
-	if re := rubyErr(t, func() { jsonGenerate(h) }); re.Class != "JSON::GeneratorError" {
+	h.Set(object.Wrap(object.NewString("k")), object.FloatValue(float64(inf)))
+	if re := rubyErr(t, func() { jsonGenerate(object.Wrap(h)) }); re.Class != "JSON::GeneratorError" {
 		t.Errorf("hash+inf -> class=%q", re.Class)
 	}
 }
@@ -81,13 +81,13 @@ func TestJSONBindGenerateNestedError(t *testing.T) {
 // TestJSONBindKeyString covers jsonKeyString's three arms (String / Symbol /
 // to_s-of-anything-else).
 func TestJSONBindKeyString(t *testing.T) {
-	if got := jsonKeyString(object.NewString("s")); got != "s" {
+	if got := jsonKeyString(object.Wrap(object.NewString("s"))); got != "s" {
 		t.Errorf("string key -> %q", got)
 	}
-	if got := jsonKeyString(object.Symbol("y")); got != "y" {
+	if got := jsonKeyString(object.SymVal(string(object.Symbol("y")))); got != "y" {
 		t.Errorf("symbol key -> %q", got)
 	}
-	if got := jsonKeyString(object.Integer(1)); got != "1" {
+	if got := jsonKeyString(object.IntValue(int64(object.Integer(1)))); got != "1" {
 		t.Errorf("int key -> %q", got)
 	}
 }
@@ -148,7 +148,7 @@ func TestJSONBindObjBuilder(t *testing.T) {
 	if _, ok := object.KindOK[object.Symbol](h.Keys[0]); !ok {
 		t.Errorf("symbolized key -> %#v", h.Keys[0])
 	}
-	v, _ := h.Get(object.Symbol("k"))
+	v, _ := h.Get(object.SymVal(string(object.Symbol("k"))))
 	a, ok := object.KindOK[*object.Array](v)
 	if !ok || len(a.Elems) != 2 {
 		t.Fatalf("array value -> %#v", v)
@@ -191,7 +191,7 @@ func TestJSONBindRaiseError(t *testing.T) {
 func TestJSONBindPrettyError(t *testing.T) {
 	inf := object.Float(1.0)
 	inf = object.Float(float64(inf) / 0) // +Inf
-	re := rubyErr(t, func() { jsonPrettyGenerate(inf) })
+	re := rubyErr(t, func() { jsonPrettyGenerate(object.FloatValue(float64(inf))) })
 	if re.Class != "JSON::GeneratorError" {
 		t.Errorf("class=%q message=%q", re.Class, re.Message)
 	}
@@ -203,11 +203,11 @@ func TestJSONOptsHash(t *testing.T) {
 	if jsonOptsHash(nil) != nil {
 		t.Error("no args -> non-nil")
 	}
-	if jsonOptsHash([]object.Value{object.Integer(1)}) != nil {
+	if jsonOptsHash([]object.Value{object.IntValue(int64(object.Integer(1)))}) != nil {
 		t.Error("non-hash trailing -> non-nil")
 	}
 	h := object.NewHash()
-	if jsonOptsHash([]object.Value{h}) != h {
+	if jsonOptsHash([]object.Value{object.Wrap(h)}) != h {
 		t.Error("hash trailing -> not the hash")
 	}
 }
@@ -219,10 +219,10 @@ func TestJSONParseOpts(t *testing.T) {
 		t.Error("no options -> non-nil")
 	}
 	h := object.NewHash()
-	h.Set(object.Symbol("symbolize_names"), object.Bool(true))
-	h.Set(object.Symbol("max_nesting"), object.Integer(2))
-	h.Set(object.Symbol("allow_nan"), object.Bool(true))
-	if got := jsonParseOpts([]object.Value{h}); len(got) != 3 {
+	h.Set(object.SymVal(string(object.Symbol("symbolize_names"))), object.BoolValue(bool(object.Bool(true))))
+	h.Set(object.SymVal(string(object.Symbol("max_nesting"))), object.IntValue(int64(object.Integer(2))))
+	h.Set(object.SymVal(string(object.Symbol("allow_nan"))), object.BoolValue(bool(object.Bool(true))))
+	if got := jsonParseOpts([]object.Value{object.Wrap(h)}); len(got) != 3 {
 		t.Errorf("populated parse opts -> %d", len(got))
 	}
 }
@@ -235,20 +235,20 @@ func TestJSONGenerateOpts(t *testing.T) {
 	}
 	h := object.NewHash()
 	for _, k := range []string{"indent", "space", "space_before", "object_nl", "array_nl"} {
-		h.Set(object.Symbol(k), object.NewString(" "))
+		h.Set(object.SymVal(string(object.Symbol(k))), object.Wrap(object.NewString(" ")))
 	}
 	// A non-String value for a string keyword is ignored (the isStr guard).
-	h.Set(object.Symbol("indent"), object.NewString("  "))
-	h.Set(object.Symbol("max_nesting"), object.Bool(false)) // disables the limit
-	h.Set(object.Symbol("allow_nan"), object.Bool(true))
-	if got := jsonGenerateOpts([]object.Value{h}); len(got) != 7 {
+	h.Set(object.SymVal(string(object.Symbol("indent"))), object.Wrap(object.NewString("  ")))
+	h.Set(object.SymVal(string(object.Symbol("max_nesting"))), object.BoolValue(bool(object.Bool(false)))) // disables the limit
+	h.Set(object.SymVal(string(object.Symbol("allow_nan"))), object.BoolValue(bool(object.Bool(true))))
+	if got := jsonGenerateOpts([]object.Value{object.Wrap(h)}); len(got) != 7 {
 		t.Errorf("populated generate opts -> %d", len(got))
 	}
 	// max_nesting as an Integer, and a non-String string-keyword value (ignored).
 	h2 := object.NewHash()
-	h2.Set(object.Symbol("indent"), object.Integer(2)) // ignored: not a String
-	h2.Set(object.Symbol("max_nesting"), object.Integer(5))
-	if got := jsonGenerateOpts([]object.Value{h2}); len(got) != 1 {
+	h2.Set(object.SymVal(string(object.Symbol("indent"))), object.IntValue(int64(object.Integer(2)))) // ignored: not a String
+	h2.Set(object.SymVal(string(object.Symbol("max_nesting"))), object.IntValue(int64(object.Integer(5))))
+	if got := jsonGenerateOpts([]object.Value{object.Wrap(h2)}); len(got) != 1 {
 		t.Errorf("int max_nesting opts -> %d", len(got))
 	}
 }

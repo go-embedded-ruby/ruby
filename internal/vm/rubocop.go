@@ -70,19 +70,19 @@ func (l *RuboCopLocation) Truthy() bool    { return true }
 func (vm *VM) registerRuboCop() {
 	mod := newClass("RuboCop", nil)
 	mod.isModule = true
-	vm.consts["RuboCop"] = mod
+	vm.consts["RuboCop"] = object.Wrap(mod)
 
 	// RuboCop::Error < StandardError for a config-parse failure, mirroring the gem.
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	rcErr := newClass("RuboCop::Error", std)
-	mod.consts["Error"] = rcErr
-	vm.consts["RuboCop::Error"] = rcErr
+	mod.consts["Error"] = object.Wrap(rcErr)
+	vm.consts["RuboCop::Error"] = object.Wrap(rcErr)
 
 	// RuboCop::Cop and RuboCop::Cop::Offense[::Location] namespace.
 	cop := newClass("RuboCop::Cop", nil)
 	cop.isModule = true
-	mod.consts["Cop"] = cop
-	vm.consts["RuboCop::Cop"] = cop
+	mod.consts["Cop"] = object.Wrap(cop)
+	vm.consts["RuboCop::Cop"] = object.Wrap(cop)
 
 	vm.registerRuboCopConfig(mod)
 	vm.registerRuboCopOffense(cop)
@@ -93,11 +93,11 @@ func (vm *VM) registerRuboCop() {
 // instance shell.
 func (vm *VM) registerRuboCopConfig(mod *RClass) {
 	cls := newClass("RuboCop::Config", vm.cObject)
-	mod.consts["Config"] = cls
-	vm.consts["RuboCop::Config"] = cls
+	mod.consts["Config"] = object.Wrap(cls)
+	vm.consts["RuboCop::Config"] = object.Wrap(cls)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RuboCopConfig{c: rubocop.NewConfig()}
+		return object.Wrap(&RuboCopConfig{c: rubocop.NewConfig()})
 	}}
 	// RuboCop::Config.parse(yml) parses a .rubocop.yml document.
 	cls.smethods["parse"] = &Method{name: "parse", owner: cls, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -108,7 +108,7 @@ func (vm *VM) registerRuboCopConfig(mod *RClass) {
 		if err != nil {
 			raise("RuboCop::Error", "%s", err.Error())
 		}
-		return &RuboCopConfig{c: c}
+		return object.Wrap(&RuboCopConfig{c: c})
 	}}
 }
 
@@ -116,8 +116,8 @@ func (vm *VM) registerRuboCopConfig(mod *RClass) {
 // #autocorrect instance methods.
 func (vm *VM) registerRuboCopRunner(mod *RClass) {
 	cls := newClass("RuboCop::Runner", vm.cObject)
-	mod.consts["Runner"] = cls
-	vm.consts["RuboCop::Runner"] = cls
+	mod.consts["Runner"] = object.Wrap(cls)
+	vm.consts["RuboCop::Runner"] = object.Wrap(cls)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		cfg := rubocop.NewConfig()
@@ -126,7 +126,7 @@ func (vm *VM) registerRuboCopRunner(mod *RClass) {
 				cfg = c.c
 			}
 		}
-		return &RuboCopRunner{r: rubocop.NewRunner(rubocop.DefaultRegistry(), cfg)}
+		return object.Wrap(&RuboCopRunner{r: rubocop.NewRunner(rubocop.DefaultRegistry(), cfg)})
 	}}
 
 	self := func(v object.Value) *rubocop.Runner { return object.Kind[*RuboCopRunner](v).r }
@@ -137,14 +137,14 @@ func (vm *VM) registerRuboCopRunner(mod *RClass) {
 		offs := self(v).Inspect(path, src)
 		arr := object.NewArrayFromSlice(make([]object.Value, len(offs)))
 		for i, o := range offs {
-			arr.Elems[i] = &RuboCopOffense{o: o}
+			arr.Elems[i] = object.Wrap(&RuboCopOffense{o: o})
 		}
-		return arr
+		return object.Wrap(arr)
 	})
 
 	// #autocorrect(source[, path]) returns the corrected source String.
 	cls.define("autocorrect", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		src, path := rubocopSourceArgs(args)
-		return object.NewString(self(v).Autocorrect(path, src))
+		return object.Wrap(object.NewString(self(v).Autocorrect(path, src)))
 	})
 }

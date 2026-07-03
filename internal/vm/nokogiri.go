@@ -54,7 +54,7 @@ func (s *NokogiriNodeSet) Truthy() bool    { return true }
 func (vm *VM) registerNokogiri() {
 	mod := newClass("Nokogiri", nil)
 	mod.isModule = true
-	vm.consts["Nokogiri"] = mod
+	vm.consts["Nokogiri"] = object.Wrap(mod)
 	vm.registerNokogiriErrors(mod)
 	vm.registerNokogiriDocument(mod)
 	vm.registerNokogiriNode(mod)
@@ -79,22 +79,22 @@ func (vm *VM) registerNokogiri() {
 func (vm *VM) registerNokogiriErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	synErr := newClass("Nokogiri::SyntaxError", std)
-	mod.consts["SyntaxError"] = synErr
-	vm.consts["Nokogiri::SyntaxError"] = synErr
+	mod.consts["SyntaxError"] = object.Wrap(synErr)
+	vm.consts["Nokogiri::SyntaxError"] = object.Wrap(synErr)
 
 	// Nokogiri::XML::SyntaxError is the same class re-exposed under the XML module
 	// namespace, matching the gem.
 	xml := newClass("Nokogiri::XML", nil)
 	xml.isModule = true
-	mod.consts["XML"] = xml
-	vm.consts["Nokogiri::XML"] = xml
-	xml.consts["SyntaxError"] = synErr
-	vm.consts["Nokogiri::XML::SyntaxError"] = synErr
+	mod.consts["XML"] = object.Wrap(xml)
+	vm.consts["Nokogiri::XML"] = object.Wrap(xml)
+	xml.consts["SyntaxError"] = object.Wrap(synErr)
+	vm.consts["Nokogiri::XML::SyntaxError"] = object.Wrap(synErr)
 
 	html := newClass("Nokogiri::HTML", nil)
 	html.isModule = true
-	mod.consts["HTML"] = html
-	vm.consts["Nokogiri::HTML"] = html
+	mod.consts["HTML"] = object.Wrap(html)
+	vm.consts["Nokogiri::HTML"] = object.Wrap(html)
 }
 
 // registerNokogiriDocument installs Nokogiri::XML::Document (also the class of an
@@ -102,8 +102,8 @@ func (vm *VM) registerNokogiriErrors(mod *RClass) {
 func (vm *VM) registerNokogiriDocument(mod *RClass) {
 	xml := object.Kind[*RClass](mod.consts["XML"])
 	cls := newClass("Nokogiri::XML::Document", vm.cObject)
-	xml.consts["Document"] = cls
-	vm.consts["Nokogiri::XML::Document"] = cls
+	xml.consts["Document"] = object.Wrap(cls)
+	vm.consts["Nokogiri::XML::Document"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *nokogiri.Document { return object.Kind[*NokogiriDocument](v).doc }
@@ -114,7 +114,7 @@ func (vm *VM) registerNokogiriDocument(mod *RClass) {
 		if err != nil {
 			raiseNokogiriError(err)
 		}
-		return &NokogiriNodeSet{set: set}
+		return object.Wrap(&NokogiriNodeSet{set: set})
 	})
 	d("at_css", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		node, err := self(v).AtCSS(nokogiriSelectorArg(args))
@@ -129,7 +129,7 @@ func (vm *VM) registerNokogiriDocument(mod *RClass) {
 		if err != nil {
 			raiseNokogiriError(err)
 		}
-		return &NokogiriNodeSet{set: set}
+		return object.Wrap(&NokogiriNodeSet{set: set})
 	})
 	d("at_xpath", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		node, err := self(v).AtXPath(nokogiriSelectorArg(args))
@@ -144,19 +144,19 @@ func (vm *VM) registerNokogiriDocument(mod *RClass) {
 	})
 	// #text / #content / #to_html / #to_xml / #to_s serialise the document.
 	d("text", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Text())
+		return object.Wrap(object.NewString(self(v).Text()))
 	})
 	d("content", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Text())
+		return object.Wrap(object.NewString(self(v).Text()))
 	})
 	d("to_html", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ToHTML())
+		return object.Wrap(object.NewString(self(v).ToHTML()))
 	})
 	d("to_xml", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ToXML())
+		return object.Wrap(object.NewString(self(v).ToXML()))
 	})
 	d("to_s", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ToS())
+		return object.Wrap(object.NewString(self(v).ToS()))
 	})
 }
 
@@ -165,8 +165,8 @@ func (vm *VM) registerNokogiriDocument(mod *RClass) {
 func (vm *VM) registerNokogiriNode(mod *RClass) {
 	xml := object.Kind[*RClass](mod.consts["XML"])
 	cls := newClass("Nokogiri::XML::Node", vm.cObject)
-	xml.consts["Node"] = cls
-	vm.consts["Nokogiri::XML::Node"] = cls
+	xml.consts["Node"] = object.Wrap(cls)
+	vm.consts["Nokogiri::XML::Node"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *nokogiri.Node { return object.Kind[*NokogiriNode](v).n }
@@ -177,7 +177,7 @@ func (vm *VM) registerNokogiriNode(mod *RClass) {
 		if err != nil {
 			raiseNokogiriError(err)
 		}
-		return &NokogiriNodeSet{set: set}
+		return object.Wrap(&NokogiriNodeSet{set: set})
 	})
 	d("at_css", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		node, err := self(v).AtCSS(nokogiriSelectorArg(args), nil)
@@ -191,7 +191,7 @@ func (vm *VM) registerNokogiriNode(mod *RClass) {
 		if err != nil {
 			raiseNokogiriError(err)
 		}
-		return &NokogiriNodeSet{set: set}
+		return object.Wrap(&NokogiriNodeSet{set: set})
 	})
 	d("at_xpath", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		node, err := self(v).AtXPath(nokogiriSelectorArg(args), nil)
@@ -203,7 +203,7 @@ func (vm *VM) registerNokogiriNode(mod *RClass) {
 
 	// #text / #content / #inner_text return the descendant character data.
 	text := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Text())
+		return object.Wrap(object.NewString(self(v).Text()))
 	}
 	d("text", text)
 	d("content", text)
@@ -211,26 +211,26 @@ func (vm *VM) registerNokogiriNode(mod *RClass) {
 
 	// #name / #node_name return the element/PI name.
 	name := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).NodeName())
+		return object.Wrap(object.NewString(self(v).NodeName()))
 	}
 	d("name", name)
 	d("node_name", name)
 
 	// Serialisation.
 	d("to_html", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ToHTML())
+		return object.Wrap(object.NewString(self(v).ToHTML()))
 	})
 	d("to_xml", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ToXML())
+		return object.Wrap(object.NewString(self(v).ToXML()))
 	})
 	d("to_s", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ToS())
+		return object.Wrap(object.NewString(self(v).ToS()))
 	})
 	d("inner_html", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).InnerHTML())
+		return object.Wrap(object.NewString(self(v).InnerHTML()))
 	})
 	d("inner_xml", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).InnerXML())
+		return object.Wrap(object.NewString(self(v).InnerXML()))
 	})
 
 	// #[] reads an attribute value (nil when absent); #[]= sets one.
@@ -240,9 +240,9 @@ func (vm *VM) registerNokogiriNode(mod *RClass) {
 		}
 		key := nokogiriStr(args[0])
 		if val, ok := self(v).Get(key); ok {
-			return object.NewString(val)
+			return object.Wrap(object.NewString(val))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("[]=", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 2 {
@@ -256,36 +256,36 @@ func (vm *VM) registerNokogiriNode(mod *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
 		if val, ok := self(v).Get(nokogiriStr(args[0])); ok {
-			return object.NewString(val)
+			return object.Wrap(object.NewString(val))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	// #attributes returns a Hash of attribute name => value.
 	d("attributes", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := object.NewHash()
 		for _, a := range self(v).Attrs {
-			h.Set(object.NewString(a.Name), object.NewString(a.Value))
+			h.Set(object.Wrap(object.NewString(a.Name)), object.Wrap(object.NewString(a.Value)))
 		}
-		return h
+		return object.Wrap(h)
 	})
 
 	// Predicates.
 	d("element?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).IsElement())
+		return object.BoolValue(bool(object.Bool(self(v).IsElement())))
 	})
 	d("text?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).IsText())
+		return object.BoolValue(bool(object.Bool(self(v).IsText())))
 	})
 	d("comment?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).IsComment())
+		return object.BoolValue(bool(object.Bool(self(v).IsComment())))
 	})
 	d("cdata?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).IsCDATA())
+		return object.BoolValue(bool(object.Bool(self(v).IsCDATA())))
 	})
 
 	// Tree navigation.
 	d("children", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &NokogiriNodeSet{set: self(v).Children()}
+		return object.Wrap(&NokogiriNodeSet{set: self(v).Children()})
 	})
 	d("parent", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return nokogiriNodeOrNil(self(v).Parent())
@@ -309,8 +309,8 @@ func (vm *VM) registerNokogiriNode(mod *RClass) {
 func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 	xml := object.Kind[*RClass](mod.consts["XML"])
 	cls := newClass("Nokogiri::XML::NodeSet", vm.cObject)
-	xml.consts["NodeSet"] = cls
-	vm.consts["Nokogiri::XML::NodeSet"] = cls
+	xml.consts["NodeSet"] = object.Wrap(cls)
+	vm.consts["Nokogiri::XML::NodeSet"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *nokogiri.NodeSet { return object.Kind[*NokogiriNodeSet](v).set }
@@ -323,7 +323,7 @@ func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 	d("size", length)
 	d("count", length)
 	d("empty?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).Empty())
+		return object.BoolValue(bool(object.Bool(self(v).Empty())))
 	})
 
 	// #[](i) returns the i-th node (negative indexes count from the end), or nil.
@@ -336,9 +336,9 @@ func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 			i += self(v).Length()
 		}
 		if i < 0 || i >= self(v).Length() {
-			return object.NilV
+			return object.NilVal()
 		}
-		return &NokogiriNode{n: self(v).At(i)}
+		return object.Wrap(&NokogiriNode{n: self(v).At(i)})
 	})
 	d("first", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return nokogiriNodeOrNil(self(v).First())
@@ -348,11 +348,11 @@ func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 	})
 	// #text concatenates the text of every node in the set.
 	d("text", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Text())
+		return object.Wrap(object.NewString(self(v).Text()))
 	})
 	// #to_a returns the nodes as a Ruby Array.
 	d("to_a", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return nokogiriNodeArray(self(v))
+		return object.Wrap(nokogiriNodeArray(self(v)))
 	})
 	// #each yields each node; without a block it returns the set (chaining).
 	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -360,7 +360,7 @@ func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 			return v
 		}
 		for _, n := range self(v).Nodes() {
-			vm.callBlock(blk, []object.Value{&NokogiriNode{n: n}})
+			vm.callBlock(blk, []object.Value{object.Wrap(&NokogiriNode{n: n})})
 		}
 		return v
 	})
@@ -369,11 +369,11 @@ func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 		nodes := self(v).Nodes()
 		out := object.NewArrayFromSlice(make([]object.Value, 0, len(nodes)))
 		if blk == nil {
-			return out
+			return object.Wrap(out)
 		}
 		for _, n := range nodes {
-			out.Elems = append(out.Elems, vm.callBlock(blk, []object.Value{&NokogiriNode{n: n}}))
+			out.Elems = append(out.Elems, vm.callBlock(blk, []object.Value{object.Wrap(&NokogiriNode{n: n})}))
 		}
-		return out
+		return object.Wrap(out)
 	})
 }

@@ -29,12 +29,12 @@ func (d *PublicSuffixDomain) Truthy() bool    { return true }
 func (vm *VM) registerPublicSuffix() {
 	mod := newClass("PublicSuffix", nil)
 	mod.isModule = true
-	vm.consts["PublicSuffix"] = mod
+	vm.consts["PublicSuffix"] = object.Wrap(mod)
 	vm.registerPublicSuffixErrors(mod)
 
 	domCls := newClass("PublicSuffix::Domain", vm.cObject)
-	mod.consts["Domain"] = domCls
-	vm.consts["PublicSuffix::Domain"] = domCls
+	mod.consts["Domain"] = object.Wrap(domCls)
+	vm.consts["PublicSuffix::Domain"] = object.Wrap(domCls)
 	vm.registerPublicSuffixDomain(domCls)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
@@ -64,7 +64,7 @@ func (vm *VM) registerPublicSuffix() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 		}
-		return object.Bool(publicSuffixValid(strArg(args[0]), publicSuffixOpts(args)))
+		return object.BoolValue(bool(object.Bool(publicSuffixValid(strArg(args[0]), publicSuffixOpts(args)))))
 	})
 }
 
@@ -78,8 +78,8 @@ func (vm *VM) registerPublicSuffixErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	base := reg("Error", "PublicSuffix::Error", std)
@@ -108,10 +108,10 @@ func (vm *VM) registerPublicSuffixDomain(cls *RClass) {
 	// name is the full hostname (trd.sld.tld); domain is the registrable domain
 	// (sld.tld); subdomain is trd.sld.tld — each nil when its parts are absent.
 	d("name", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Name())
+		return object.Wrap(object.NewString(self(v).Name()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Name())
+		return object.Wrap(object.NewString(self(v).Name()))
 	})
 	d("domain", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return publicSuffixOptStr(self(v).DomainName())
@@ -120,9 +120,9 @@ func (vm *VM) registerPublicSuffixDomain(cls *RClass) {
 		return publicSuffixOptStr(self(v).Subdomain())
 	})
 	d("domain?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).IsDomain())
+		return object.BoolValue(bool(object.Bool(self(v).IsDomain())))
 	})
 	d("subdomain?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).IsSubdomain())
+		return object.BoolValue(bool(object.Bool(self(v).IsSubdomain())))
 	})
 }

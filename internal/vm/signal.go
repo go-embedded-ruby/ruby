@@ -19,7 +19,7 @@ import (
 func (vm *VM) registerSignal() {
 	mod := newClass("Signal", nil)
 	mod.isModule = true
-	vm.consts["Signal"] = mod
+	vm.consts["Signal"] = object.Wrap(mod)
 
 	// handlers records the most recently installed handler per normalised signal
 	// name so trap can report the previous one. It lives on the VM-shared module
@@ -33,15 +33,15 @@ func (vm *VM) registerSignal() {
 		name := signalName(args[0])
 		prev, had := handlers[name]
 		if !had {
-			prev = object.NewString("DEFAULT")
+			prev = object.Wrap(object.NewString("DEFAULT"))
 		}
 		switch {
 		case blk != nil:
-			handlers[name] = blk // a Proc is itself a Value, returned as the previous handler later
+			handlers[name] = object.Wrap(blk) // a Proc is itself a Value, returned as the previous handler later
 		case len(args) >= 2:
 			handlers[name] = args[1] // "DEFAULT" / "IGNORE" / "SIG_IGN" / a command string
 		default:
-			handlers[name] = object.NewString("DEFAULT")
+			handlers[name] = object.Wrap(object.NewString("DEFAULT"))
 		}
 		return prev
 	}
@@ -53,25 +53,25 @@ func (vm *VM) registerSignal() {
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			h := object.NewHash()
 			for name, num := range signalNumbers {
-				h.Set(object.NewString(name), object.IntValue(int64(num)))
+				h.Set(object.Wrap(object.NewString(name)), object.IntValue(int64(num)))
 			}
-			return h
+			return object.Wrap(h)
 		}}
 	mod.smethods["signame"] = &Method{name: "signame", owner: mod,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			if len(args) == 0 {
-				return object.NilV
+				return object.NilVal()
 			}
 			n, ok := object.AsIntegerOK(args[0])
 			if !ok {
-				return object.NilV
+				return object.NilVal()
 			}
 			for name, num := range signalNumbers {
 				if int64(num) == int64(n) {
-					return object.NewString(name)
+					return object.Wrap(object.NewString(name))
 				}
 			}
-			return object.NilV
+			return object.NilVal()
 		}}
 
 	// Kernel#trap is the same operation reachable without the Signal receiver.

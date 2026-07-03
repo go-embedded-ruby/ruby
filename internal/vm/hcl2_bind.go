@@ -68,10 +68,10 @@ func hcl2Context(ctx object.Value) *hcl2.Context {
 // hcl2HashGet looks up a key by its bare name, trying the Symbol and String
 // spellings, so a caller may write either `variables:` or `"variables" =>`.
 func hcl2HashGet(h *object.Hash, name string) (object.Value, bool) {
-	if v, ok := h.Get(object.Symbol(name)); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol(name)))); ok {
 		return v, true
 	}
-	return h.Get(object.NewString(name))
+	return h.Get(object.Wrap(object.NewString(name)))
 }
 
 // hcl2Key renders a Ruby Hash key as a variable name: a Symbol by its name, any
@@ -162,28 +162,28 @@ func toHCL2(v object.Value) hcl2.Value {
 func fromHCL2(vm *VM, v hcl2.Value) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int64:
 		return object.IntValue(n)
 	case *big.Int:
 		return object.NormInt(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case []hcl2.Value:
 		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = fromHCL2(vm, el)
 		}
-		return arr
+		return object.Wrap(arr)
 	case *hcl2.Map:
 		return fromHCL2Map(vm, n)
 	}
 	// The evaluator only ever produces the cases above; anything else is nil.
-	return object.NilV
+	return object.NilVal()
 }
 
 // fromHCL2Map maps a library ordered *Map to a Ruby Hash with String keys,
@@ -191,7 +191,7 @@ func fromHCL2(vm *VM, v hcl2.Value) object.Value {
 func fromHCL2Map(vm *VM, m *hcl2.Map) object.Value {
 	h := object.NewHash()
 	for _, p := range m.Pairs() {
-		h.Set(object.NewString(p.Key), fromHCL2(vm, p.Val))
+		h.Set(object.Wrap(object.NewString(p.Key)), fromHCL2(vm, p.Val))
 	}
-	return h
+	return object.Wrap(h)
 }

@@ -13,7 +13,7 @@ import (
 
 func TestAOTConst(t *testing.T) {
 	vm := New(io.Discard)
-	vm.consts["Answer"] = object.Integer(42)
+	vm.consts["Answer"] = object.IntValue(int64(object.Integer(42)))
 	if got := vm.aotConst("Answer"); got != object.Integer(42) {
 		t.Errorf("aotConst hit = %v, want 42", got)
 	}
@@ -25,9 +25,9 @@ func TestAOTYield(t *testing.T) {
 	var seen []object.Value
 	block := &Proc{native: func(_ *VM, args []object.Value) object.Value {
 		seen = args
-		return object.Integer(7)
+		return object.IntValue(int64(object.Integer(7)))
 	}}
-	if got := vm.aotYield(block, []object.Value{object.Integer(1)}); got != object.Integer(7) {
+	if got := vm.aotYield(block, []object.Value{object.IntValue(int64(object.Integer(1)))}); got != object.Integer(7) {
 		t.Errorf("aotYield result = %v, want 7", got)
 	}
 	if len(seen) != 1 || seen[0] != object.Integer(1) {
@@ -37,9 +37,9 @@ func TestAOTYield(t *testing.T) {
 }
 
 func TestAOTConcat(t *testing.T) {
-	a := &object.Array{Elems: []object.Value{object.Integer(1), object.Integer(2)}}
-	b := &object.Array{Elems: []object.Value{object.Integer(3)}}
-	got := object.Kind[*object.Array](aotConcat(a, b))
+	a := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2)))}}
+	b := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(3)))}}
+	got := object.Kind[*object.Array](aotConcat(object.Wrap(a), object.Wrap(b)))
 	if got.Inspect() != "[1, 2, 3]" {
 		t.Errorf("aotConcat = %s, want [1, 2, 3]", got.Inspect())
 	}
@@ -47,16 +47,16 @@ func TestAOTConcat(t *testing.T) {
 
 func TestAOTSplat(t *testing.T) {
 	vm := New(io.Discard)
-	arr := &object.Array{Elems: []object.Value{object.Integer(1)}}
-	if got := vm.aotSplat(arr); got != arr {
+	arr := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}
+	if got := vm.aotSplat(object.Wrap(arr)); got != arr {
 		t.Errorf("aotSplat(array) should pass the array through, got %v", got)
 	}
-	wrapped := object.Kind[*object.Array](vm.aotSplat(object.Integer(9)))
+	wrapped := object.Kind[*object.Array](vm.aotSplat(object.IntValue(int64(object.Integer(9)))))
 	if wrapped.Inspect() != "[9]" {
 		t.Errorf("aotSplat(scalar) = %s, want [9]", wrapped.Inspect())
 	}
 	// nil responds to #to_a, so it coerces to an empty array rather than [nil].
-	if got := object.Kind[*object.Array](vm.aotSplat(object.NilV)); got.Inspect() != "[]" {
+	if got := object.Kind[*object.Array](vm.aotSplat(object.NilVal())); got.Inspect() != "[]" {
 		t.Errorf("aotSplat(nil) = %s, want []", got.Inspect())
 	}
 }

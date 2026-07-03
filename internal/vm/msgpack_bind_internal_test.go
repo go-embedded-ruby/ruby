@@ -22,7 +22,7 @@ func TestMsgpackToBridge(t *testing.T) {
 	if toMsgpack(nil) != nil {
 		t.Error("go-nil should map to nil")
 	}
-	if toMsgpack(object.NilV) != nil {
+	if toMsgpack(object.NilVal()) != nil {
 		t.Error("object.NilV should map to nil")
 	}
 	big30 := object.NormInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(30), nil))
@@ -30,12 +30,12 @@ func TestMsgpackToBridge(t *testing.T) {
 		t.Errorf("bignum -> %T", toMsgpack(big30))
 	}
 	// A Symbol maps to msgpack.Symbol.
-	if v, ok := toMsgpack(object.Symbol("s")).(msgpack.Symbol); !ok || string(v) != "s" {
-		t.Errorf("symbol -> %T", toMsgpack(object.Symbol("s")))
+	if v, ok := toMsgpack(object.SymVal(string(object.Symbol("s")))).(msgpack.Symbol); !ok || string(v) != "s" {
+		t.Errorf("symbol -> %T", toMsgpack(object.SymVal(string(object.Symbol("s")))))
 	}
 	// An unmapped value (a Proc) is returned as-is for the library to reject.
-	if _, ok := toMsgpack(&Proc{}).(*Proc); !ok {
-		t.Errorf("unmapped -> %T", toMsgpack(&Proc{}))
+	if _, ok := toMsgpack(object.Wrap(&Proc{})).(*Proc); !ok {
+		t.Errorf("unmapped -> %T", toMsgpack(object.Wrap(&Proc{})))
 	}
 }
 
@@ -88,7 +88,7 @@ func TestMsgpackFromDefault(t *testing.T) {
 // TestMsgpackBytesArgNonString covers msgpackBytesArg's to_s branch for a
 // non-String argument.
 func TestMsgpackBytesArgNonString(t *testing.T) {
-	if got := msgpackBytesArg(object.Integer(1)); string(got) != "1" {
+	if got := msgpackBytesArg(object.IntValue(int64(object.Integer(1)))); string(got) != "1" {
 		t.Errorf("non-string arg -> %q", got)
 	}
 }

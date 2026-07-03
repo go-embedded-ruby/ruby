@@ -19,16 +19,16 @@ func TestBuilderValueOf(t *testing.T) {
 	if got := builderValueOf(nil); got != nil {
 		t.Errorf("plain nil: got %#v want nil", got)
 	}
-	if got := builderValueOf(object.NilV); got != nil {
+	if got := builderValueOf(object.NilVal()); got != nil {
 		t.Errorf("object.Nil: got %#v want nil", got)
 	}
-	if got := builderValueOf(object.NewString("s")); got != "s" {
+	if got := builderValueOf(object.Wrap(object.NewString("s"))); got != "s" {
 		t.Errorf("string: got %#v want \"s\"", got)
 	}
-	if got := builderValueOf(object.Symbol("y")); got != "y" {
+	if got := builderValueOf(object.SymVal(string(object.Symbol("y")))); got != "y" {
 		t.Errorf("symbol: got %#v want \"y\"", got)
 	}
-	if got := builderValueOf(object.Integer(3)); got != "3" {
+	if got := builderValueOf(object.IntValue(int64(object.Integer(3)))); got != "3" {
 		t.Errorf("integer: got %#v want \"3\"", got)
 	}
 }
@@ -36,10 +36,10 @@ func TestBuilderValueOf(t *testing.T) {
 // TestBuilderNameAndContent covers builderName's String arm and default
 // fall-through, and builderContent's empty-args path.
 func TestBuilderNameAndContent(t *testing.T) {
-	if got := builderName(object.NewString("k")); got != "k" {
+	if got := builderName(object.Wrap(object.NewString("k"))); got != "k" {
 		t.Errorf("string name: got %q want \"k\"", got)
 	}
-	if got := builderName(object.Integer(4)); got != "4" {
+	if got := builderName(object.IntValue(int64(object.Integer(4)))); got != "4" {
 		t.Errorf("default name: got %q want \"4\"", got)
 	}
 	if got := builderContent(nil); got != "" {

@@ -20,7 +20,7 @@ import (
 func (vm *VM) registerKramdown() {
 	mod := newClass("Kramdown", nil)
 	mod.isModule = true
-	vm.consts["Kramdown"] = mod
+	vm.consts["Kramdown"] = object.Wrap(mod)
 
 	// Kramdown.to_html(src, options = nil) is a convenience one-shot the gem does
 	// not itself expose but a host commonly wants; it renders a Markdown source
@@ -34,14 +34,14 @@ func (vm *VM) registerKramdown() {
 			if len(args) > 1 {
 				opt = args[1]
 			}
-			return object.NewString(kramdownRender(kramdownSourceArg(args[0]), opt))
+			return object.Wrap(object.NewString(kramdownRender(kramdownSourceArg(args[0]), opt)))
 		}}
 
 	// Kramdown::Document is the gem's document class; new(src, options = {}) parses
 	// (lazily — rendering happens in #to_html) and #to_html returns the HTML.
 	doc := newClass("Kramdown::Document", vm.cObject)
-	mod.consts["Document"] = doc
-	vm.consts["Kramdown::Document"] = doc
+	mod.consts["Document"] = object.Wrap(doc)
+	vm.consts["Kramdown::Document"] = object.Wrap(doc)
 
 	doc.smethods["new"] = &Method{name: "new", owner: doc,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -52,13 +52,13 @@ func (vm *VM) registerKramdown() {
 			if len(args) > 1 {
 				opt = args[1]
 			}
-			return &KramdownDoc{src: kramdownSourceArg(args[0]), opt: opt}
+			return object.Wrap(&KramdownDoc{src: kramdownSourceArg(args[0]), opt: opt})
 		}}
 
 	// Kramdown::Document#to_html renders the held source under the held options.
 	doc.define("to_html", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		d := object.Kind[*KramdownDoc](self)
-		return object.NewString(kramdownRender(d.src, d.opt))
+		return object.Wrap(object.NewString(kramdownRender(d.src, d.opt)))
 	})
 
 	// String#to_kramdown_html renders the receiver as kramdown Markdown (a host
@@ -69,7 +69,7 @@ func (vm *VM) registerKramdown() {
 		if len(args) > 0 {
 			opt = args[0]
 		}
-		return object.NewString(kramdownRender(object.Kind[*object.String](self).Str(), opt))
+		return object.Wrap(object.NewString(kramdownRender(object.Kind[*object.String](self).Str(), opt)))
 	})
 }
 

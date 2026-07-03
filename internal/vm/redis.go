@@ -21,7 +21,7 @@ import (
 // server error or transport fault rescues as the gem-faithful Ruby class.
 func (vm *VM) registerRedis() {
 	mod := newClass("Redis", vm.cObject)
-	vm.consts["Redis"] = mod
+	vm.consts["Redis"] = object.Wrap(mod)
 	vm.registerRedisErrors(mod)
 
 	// Redis.new(connection: io) / Redis.new(io): build a client over an injected
@@ -36,7 +36,7 @@ func (vm *VM) registerRedis() {
 		// New records opts for a host-driven Handshake; it never fails for a
 		// non-nil Conn, so the error is not actionable here.
 		client, _ := redis.New(&rubyConn{vm: vm, obj: conn}, opts)
-		return &RedisObj{cls: mod, client: client, conn: conn}
+		return object.Wrap(&RedisObj{cls: mod, client: client, conn: conn})
 	}}
 
 	vm.registerRedisCommands(mod)
@@ -51,8 +51,8 @@ func (vm *VM) registerRedisErrors(mod *RClass) {
 	reg := func(simple string, super *RClass) *RClass {
 		qualified := "Redis::" + simple
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	base := reg("BaseError", std)

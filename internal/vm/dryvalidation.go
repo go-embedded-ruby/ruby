@@ -84,21 +84,21 @@ func (vm *VM) registerDryValidation() {
 	// --- Dry::Schema.Params / .JSON ---
 	schema := newClass("Dry::Schema", vm.cObject)
 	schema.isModule = true
-	dry.consts["Schema"] = schema
-	vm.consts["Dry::Schema"] = schema
+	dry.consts["Schema"] = object.Wrap(schema)
+	vm.consts["Dry::Schema"] = object.Wrap(schema)
 
 	// The value objects a schema block/result surface report these classes.
 	params := newClass("Dry::Schema::Params", vm.cObject)
-	schema.consts["Params"] = params
-	vm.consts["Dry::Schema::Params"] = params
+	schema.consts["Params"] = object.Wrap(params)
+	vm.consts["Dry::Schema::Params"] = object.Wrap(params)
 
 	schema.smethods["Params"] = &Method{name: "Params", owner: schema,
 		native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
-			return &DrySchema{s: dryvalidation.Params(vm.drySchemaBuild(blk))}
+			return object.Wrap(&DrySchema{s: dryvalidation.Params(vm.drySchemaBuild(blk))})
 		}}
 	schema.smethods["JSON"] = &Method{name: "JSON", owner: schema,
 		native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
-			return &DrySchema{s: dryvalidation.JSON(vm.drySchemaBuild(blk))}
+			return object.Wrap(&DrySchema{s: dryvalidation.JSON(vm.drySchemaBuild(blk))})
 		}}
 
 	vm.registerDrySchemaSurface()
@@ -106,12 +106,12 @@ func (vm *VM) registerDryValidation() {
 	// --- Dry::Validation ---
 	val := newClass("Dry::Validation", vm.cObject)
 	val.isModule = true
-	dry.consts["Validation"] = val
-	vm.consts["Dry::Validation"] = val
+	dry.consts["Validation"] = object.Wrap(val)
+	vm.consts["Dry::Validation"] = object.Wrap(val)
 
 	contract := newClass("Dry::Validation::Contract", vm.cObject)
-	val.consts["Contract"] = contract
-	vm.consts["Dry::Validation::Contract"] = contract
+	val.consts["Contract"] = object.Wrap(contract)
+	vm.consts["Dry::Validation::Contract"] = object.Wrap(contract)
 
 	vm.registerDryContractClass(contract)
 	vm.registerDryValidationResult(val)
@@ -126,6 +126,6 @@ func (vm *VM) drySchemaBuild(blk *Proc) func(*dryvalidation.Builder) {
 		if blk == nil {
 			return
 		}
-		vm.callBlockSelf(blk, &DrySchemaBuilder{b: b}, nil)
+		vm.callBlockSelf(blk, object.Wrap(&DrySchemaBuilder{b: b}), nil)
 	}
 }

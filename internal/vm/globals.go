@@ -45,12 +45,12 @@ func (vm *VM) specialGvar(name string) (object.Value, bool) {
 		if !object.IsNil(vm.curExc) {
 			return vm.curExc, true
 		}
-		return object.NilV, true
+		return object.NilVal(), true
 	case "$0", "$PROGRAM_NAME":
 		if v, set := vm.globals["$0"]; set {
 			return v, true
 		}
-		return object.NewString(vm.scriptName), true
+		return object.Wrap(object.NewString(vm.scriptName)), true
 	case "$$":
 		return object.IntValue(int64(os.Getpid())), true
 	}

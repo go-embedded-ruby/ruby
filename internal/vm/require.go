@@ -105,7 +105,7 @@ func (vm *VM) doLoad(name string) object.Value {
 		vm.requireDirs = append(vm.requireDirs, filepath.Dir(abs))
 		defer func() { vm.requireDirs = vm.requireDirs[:len(vm.requireDirs)-1] }()
 		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil)
-		return object.Bool(true)
+		return object.BoolValue(bool(object.Bool(true)))
 	}
 	return raise("LoadError", "cannot load such file -- %s", name)
 }
@@ -123,12 +123,12 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 	// Features the VM provides as built-in classes need no file.
 	if !relative {
 		if preloadedFeatures[name] {
-			return object.Bool(false) // already loaded at startup
+			return object.BoolValue(bool(object.Bool(false))) // already loaded at startup
 		}
 		if providedFeatures[name] {
 			key := "feature:" + name
 			if vm.loaded[key] {
-				return object.Bool(false)
+				return object.BoolValue(bool(object.Bool(false)))
 			}
 			vm.loaded[key] = true
 			// Some features install their Ruby surface lazily on first require
@@ -137,7 +137,7 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 			if hook := vm.featureHooks[name]; hook != nil {
 				hook()
 			}
-			return object.Bool(true)
+			return object.BoolValue(bool(object.Bool(true)))
 		}
 	}
 
@@ -153,7 +153,7 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		}
 		abs, _ := filepath.Abs(cand)
 		if vm.loaded[abs] {
-			return object.Bool(false)
+			return object.BoolValue(bool(object.Bool(false)))
 		}
 		iseq, cerr := parseCompileFn(string(src))
 		if cerr != nil {
@@ -169,7 +169,7 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		vm.requireDirs = append(vm.requireDirs, filepath.Dir(abs))
 		defer func() { vm.requireDirs = vm.requireDirs[:len(vm.requireDirs)-1] }()
 		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil)
-		return object.Bool(true)
+		return object.BoolValue(bool(object.Bool(true)))
 	}
 	return raise("LoadError", "cannot load such file -- %s", name)
 }

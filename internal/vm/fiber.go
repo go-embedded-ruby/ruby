@@ -26,17 +26,17 @@ func (f *Fiber) Truthy() bool    { return true }
 
 func (vm *VM) registerFiber() {
 	cFiber := newClass("Fiber", vm.cObject)
-	vm.consts["Fiber"] = cFiber
+	vm.consts["Fiber"] = object.Wrap(cFiber)
 	if _, ok := vm.consts["FiberError"]; !ok {
 		fe := newClass("FiberError", object.Kind[*RClass](vm.consts["StandardError"]))
-		vm.consts["FiberError"] = fe
+		vm.consts["FiberError"] = object.Wrap(fe)
 	}
 
 	cFiber.smethods["new"] = &Method{name: "new", owner: cFiber, native: func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("ArgumentError", "tried to create a Fiber without a block")
 		}
-		return &Fiber{blk: blk}
+		return object.Wrap(&Fiber{blk: blk})
 	}}
 	cFiber.smethods["yield"] = &Method{name: "yield", owner: cFiber, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.fiberYield(args)
@@ -46,7 +46,7 @@ func (vm *VM) registerFiber() {
 	})
 	cFiber.define("alive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		f := object.Kind[*Fiber](self)
-		return object.Bool(!f.started || f.alive)
+		return object.BoolValue(bool(object.Bool(!f.started || f.alive)))
 	})
 }
 
@@ -107,10 +107,10 @@ func (vm *VM) fiberYield(args []object.Value) object.Value {
 func yieldValue(args []object.Value) object.Value {
 	switch len(args) {
 	case 0:
-		return object.NilV
+		return object.NilVal()
 	case 1:
 		return args[0]
 	default:
-		return object.NewArrayFromSlice(append([]object.Value{}, args...))
+		return object.Wrap(object.NewArrayFromSlice(append([]object.Value{}, args...)))
 	}
 }

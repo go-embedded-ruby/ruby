@@ -23,7 +23,7 @@ import (
 // private instance method; the prelude reopens ERB to add the public API.
 func (vm *VM) registerERB() {
 	cERB := newClass("ERB", vm.cObject)
-	vm.consts["ERB"] = cERB
+	vm.consts["ERB"] = object.Wrap(cERB)
 
 	// __compile(template, trim_mode, eoutvar) -> src. The single bridge into the
 	// library: it returns the Ruby source the compiled template evaluates to
@@ -39,7 +39,7 @@ func (vm *VM) registerERB() {
 		if err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
-		return object.NewString(src)
+		return object.Wrap(object.NewString(src))
 	}}
 
 	// ERB::Util — html_escape / url_encode (with the one-letter h / u aliases)
@@ -48,14 +48,14 @@ func (vm *VM) registerERB() {
 	// happens here via toS so the library sees a String.
 	util := newClass("Util", nil)
 	util.isModule = true
-	cERB.consts["Util"] = util
+	cERB.consts["Util"] = object.Wrap(util)
 	udef := func(name string, fn NativeFn) { util.smethods[name] = &Method{name: name, owner: util, native: fn} }
 
 	htmlEscape := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(erb.HTMLEscape(erbToS(vm, args[0])))
+		return object.Wrap(object.NewString(erb.HTMLEscape(erbToS(vm, args[0]))))
 	}
 	urlEncode := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(erb.URLEncode(erbToS(vm, args[0])))
+		return object.Wrap(object.NewString(erb.URLEncode(erbToS(vm, args[0]))))
 	}
 	udef("html_escape", htmlEscape)
 	udef("h", htmlEscape)

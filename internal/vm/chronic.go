@@ -18,7 +18,7 @@ import (
 func (vm *VM) registerChronic() {
 	mod := newClass("Chronic", nil)
 	mod.isModule = true
-	vm.consts["Chronic"] = mod
+	vm.consts["Chronic"] = object.Wrap(mod)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 

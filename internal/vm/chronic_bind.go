@@ -26,13 +26,13 @@ func chronicParse(text string, opts *object.Hash) object.Value {
 	if span {
 		s, ok := chronic.ParseSpan(text, o)
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewArray(goTimeToRuby(s.Begin), goTimeToRuby(s.End))
+		return object.Wrap(object.NewArray(goTimeToRuby(s.Begin), goTimeToRuby(s.End)))
 	}
 	t, ok := chronic.Parse(text, o)
 	if !ok {
-		return object.NilV
+		return object.NilVal()
 	}
 	return goTimeToRuby(t)
 }
@@ -47,20 +47,20 @@ func chronicOptions(h *object.Hash) (chronic.Options, bool) {
 	if h == nil {
 		return o, false
 	}
-	if v, ok := h.Get(object.Symbol("now")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("now")))); ok {
 		if t, isT := object.KindOK[*Time](v); isT {
 			o.Now = stdtime.Unix(t.t.ToUnix(), 0).UTC()
 		}
 	}
-	if v, ok := h.Get(object.Symbol("context")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("context")))); ok {
 		if sym, isSym := object.KindOK[object.Symbol](v); isSym && string(sym) == "past" {
 			o.Context = chronic.ContextPast
 		}
 	}
-	if v, ok := h.Get(object.Symbol("endian_precedence")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("endian_precedence")))); ok {
 		o.EndianLittle = chronicEndianLittle(v)
 	}
-	if v, ok := h.Get(object.Symbol("guess")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("guess")))); ok {
 		{
 			__sw36 := v
 			switch {

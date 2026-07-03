@@ -20,14 +20,14 @@ import (
 func (vm *VM) registerLiquid() {
 	mod := newClass("Liquid", nil)
 	mod.isModule = true
-	vm.consts["Liquid"] = mod
+	vm.consts["Liquid"] = object.Wrap(mod)
 	vm.registerLiquidErrors(mod)
 
 	// Liquid::Template is the parsed-template class: Template.parse compiles a
 	// source String, and #render / #render! evaluate it against an assigns Hash.
 	tmplClass := newClass("Template", vm.cObject)
-	mod.consts["Template"] = tmplClass
-	vm.consts["Liquid::Template"] = tmplClass
+	mod.consts["Template"] = object.Wrap(tmplClass)
+	vm.consts["Liquid::Template"] = object.Wrap(tmplClass)
 
 	// Liquid::Template.parse(source, error_mode: :lax) parses source into a
 	// template instance. The compiled template is stored on the instance as an
@@ -41,21 +41,21 @@ func (vm *VM) registerLiquid() {
 			mode := liquidErrorMode(args)
 			t := liquidParse(liquidSourceArg(args[0]), mode)
 			inst := &RObject{class: tmplClass, ivars: map[string]object.Value{}}
-			inst.ivars["@__tmpl"] = &liquidTemplate{t: t}
-			return inst
+			inst.ivars["@__tmpl"] = object.Wrap(&liquidTemplate{t: t})
+			return object.Wrap(inst)
 		}}
 
 	// Liquid::Template#render(assigns = {}) renders the template against the
 	// assigns Hash in lax mode: a runtime error renders inline as
 	// "Liquid error: …" rather than raising, matching the gem's #render.
 	tmplClass.define("render", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(liquidRender(vm, liquidHandle(self), liquidAssignsArg(vm, args), false))
+		return object.Wrap(object.NewString(liquidRender(vm, liquidHandle(self), liquidAssignsArg(vm, args), false)))
 	})
 
 	// Liquid::Template#render!(assigns = {}) renders the template in strict mode:
 	// a runtime error raises the corresponding Liquid error, matching #render!.
 	tmplClass.define("render!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(liquidRender(vm, liquidHandle(self), liquidAssignsArg(vm, args), true))
+		return object.Wrap(object.NewString(liquidRender(vm, liquidHandle(self), liquidAssignsArg(vm, args), true)))
 	})
 }
 
@@ -69,8 +69,8 @@ func (vm *VM) registerLiquidErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	e := reg("Error", "Liquid::Error", std)

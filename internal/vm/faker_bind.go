@@ -58,7 +58,7 @@ func (vm *VM) fakerSetRandom(r object.Value) {
 // which returns nil until the caller assigns one).
 func (vm *VM) fakerConfiguredRandom() object.Value {
 	if vm.fakerInst == nil || object.IsNil(vm.fakerInst.random) {
-		return object.NilV
+		return object.NilVal()
 	}
 	return vm.fakerInst.random
 }
@@ -79,8 +79,8 @@ func (vm *VM) fakerGen() fakerGen {
 func (vm *VM) fakerNamespace(mod *RClass, name string) *RClass {
 	ns := newClass("Faker::"+name, nil)
 	ns.isModule = true
-	mod.consts[name] = ns
-	vm.consts["Faker::"+name] = ns
+	mod.consts[name] = object.Wrap(ns)
+	vm.consts["Faker::"+name] = object.Wrap(ns)
 	return ns
 }
 
@@ -89,7 +89,7 @@ func (vm *VM) fakerNamespace(mod *RClass, name string) *RClass {
 func fakerStr(ns *RClass, name string, get func(fakerGen) string) {
 	ns.smethods[name] = &Method{name: name, owner: ns,
 		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.NewString(get(vm.fakerGen()))
+			return object.Wrap(object.NewString(get(vm.fakerGen())))
 		}}
 }
 
@@ -98,7 +98,7 @@ func fakerStr(ns *RClass, name string, get func(fakerGen) string) {
 func fakerFloat(ns *RClass, name string, get func(fakerGen) float64) {
 	ns.smethods[name] = &Method{name: name, owner: ns,
 		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Float(get(vm.fakerGen()))
+			return object.FloatValue(float64(object.Float(get(vm.fakerGen()))))
 		}}
 }
 

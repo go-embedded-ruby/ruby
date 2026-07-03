@@ -155,46 +155,46 @@ func TestDryToGo(t *testing.T) {
 	if dryToGo(nil) != drytypes.Undefined {
 		t.Error("nil should map to Undefined")
 	}
-	if dryToGo(object.NilV) != nil {
+	if dryToGo(object.NilVal()) != nil {
 		t.Error("Ruby nil should map to Go nil")
 	}
-	if dryToGo(object.Bool(true)) != true {
+	if dryToGo(object.BoolValue(bool(object.Bool(true)))) != true {
 		t.Error("bool")
 	}
-	if dryToGo(object.Integer(5)).(int64) != 5 {
+	if dryToGo(object.IntValue(int64(object.Integer(5)))).(int64) != 5 {
 		t.Error("int")
 	}
 	bn := &object.Bignum{I: big.NewInt(7)}
-	if dryToGo(bn).(*big.Int).Int64() != 7 {
+	if dryToGo(object.Wrap(bn)).(*big.Int).Int64() != 7 {
 		t.Error("bignum")
 	}
-	if dryToGo(object.Float(1.5)).(float64) != 1.5 {
+	if dryToGo(object.FloatValue(float64(object.Float(1.5)))).(float64) != 1.5 {
 		t.Error("float")
 	}
-	if dryToGo(object.NewString("x")).(string) != "x" {
+	if dryToGo(object.Wrap(object.NewString("x"))).(string) != "x" {
 		t.Error("string")
 	}
-	if dryToGo(object.Symbol("s")) != drytypes.Symbol("s") {
+	if dryToGo(object.SymVal(string(object.Symbol("s")))) != drytypes.Symbol("s") {
 		t.Error("symbol")
 	}
-	arr := dryToGo(&object.Array{Elems: []object.Value{object.Integer(1)}}).([]any)
+	arr := dryToGo(object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}})).([]any)
 	if arr[0].(int64) != 1 {
 		t.Error("array")
 	}
 	h := object.NewHash()
-	h.Set(object.NewString("k"), object.Integer(2))
-	m := dryToGo(h).(*drytypes.Map)
+	h.Set(object.Wrap(object.NewString("k")), object.IntValue(int64(object.Integer(2))))
+	m := dryToGo(object.Wrap(h)).(*drytypes.Map)
 	if v, _ := m.Get("k"); v.(int64) != 2 {
 		t.Error("hash")
 	}
 	// A Time maps to a Go time.Time.
 	tm := &Time{t: gotime.FromUnix(1_700_000_000)}
-	if _, ok := dryToGo(tm).(stdtime.Time); !ok {
+	if _, ok := dryToGo(object.Wrap(tm)).(stdtime.Time); !ok {
 		t.Error("time")
 	}
 	// An unmapped value passes through as-is.
 	p := &Proc{}
-	if dryToGo(p) != object.Value(p) {
+	if dryToGo(object.Wrap(p)) != object.Value(p) {
 		t.Error("passthrough")
 	}
 }
@@ -244,17 +244,17 @@ func TestDryTypesValueObjects(t *testing.T) {
 	if dr.ToS() == "" || dr.Inspect() == "" || !dr.Truthy() {
 		t.Error("DryResult display")
 	}
-	if dryTypeName(object.Integer(5)) != "5" {
+	if dryTypeName(object.IntValue(int64(object.Integer(5)))) != "5" {
 		t.Error("dryTypeName fallback")
 	}
-	if dryKeyName(object.Integer(6)) != "6" {
+	if dryKeyName(object.IntValue(int64(object.Integer(6)))) != "6" {
 		t.Error("dryKeyName fallback")
 	}
-	if cs := dryConstraints([]object.Value{object.Integer(1)}); cs != nil {
+	if cs := dryConstraints([]object.Value{object.IntValue(int64(object.Integer(1)))}); cs != nil {
 		t.Errorf("dryConstraints non-hash: %v", cs)
 	}
 	h := object.NewHash()
-	h.Set(object.Symbol("bad"), object.Integer(1))
+	h.Set(object.SymVal(string(object.Symbol("bad"))), object.IntValue(int64(object.Integer(1))))
 	if sc := drySchema(h); sc == nil {
 		t.Error("drySchema nil")
 	}
@@ -293,8 +293,8 @@ func TestDryTypesDefaultFn(t *testing.T) {
 		t.Fatal("default method missing")
 	}
 	base := &DryType{t: drytypes.StrictInteger()}
-	blk := &Proc{native: func(_ *VM, _ []object.Value) object.Value { return object.Integer(99) }}
-	res := object.Kind[*DryType](m.native(vm, base, nil, blk))
+	blk := &Proc{native: func(_ *VM, _ []object.Value) object.Value { return object.IntValue(int64(object.Integer(99))) }}
+	res := object.Kind[*DryType](m.native(vm, object.Wrap(base), nil, blk))
 	out, err := res.t.Call(drytypes.Undefined)
 	if err != nil {
 		t.Fatalf("default fn call: %v", err)

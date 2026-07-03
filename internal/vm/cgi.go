@@ -27,32 +27,32 @@ import (
 func (vm *VM) registerCGI() {
 	mod := newClass("CGI", nil)
 	mod.isModule = true
-	vm.consts["CGI"] = mod
+	vm.consts["CGI"] = object.Wrap(mod)
 	sdef := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	sdef("escape", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(cgi.Escape(strArg(args[0])))
+		return object.Wrap(object.NewString(cgi.Escape(strArg(args[0]))))
 	})
 	sdef("unescape", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(cgi.Unescape(strArg(args[0])))
+		return object.Wrap(object.NewString(cgi.Unescape(strArg(args[0]))))
 	})
 	sdef("escapeURIComponent", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(cgi.EscapeURIComponent(strArg(args[0])))
+		return object.Wrap(object.NewString(cgi.EscapeURIComponent(strArg(args[0]))))
 	})
 	sdef("unescapeURIComponent", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(cgi.UnescapeURIComponent(strArg(args[0])))
+		return object.Wrap(object.NewString(cgi.UnescapeURIComponent(strArg(args[0]))))
 	})
 	sdef("escapeHTML", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(cgi.EscapeHTML(strArg(args[0])))
+		return object.Wrap(object.NewString(cgi.EscapeHTML(strArg(args[0]))))
 	})
 	sdef("unescapeHTML", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(cgi.UnescapeHTML(strArg(args[0])))
+		return object.Wrap(object.NewString(cgi.UnescapeHTML(strArg(args[0]))))
 	})
 	sdef("escapeElement", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(cgi.EscapeElement(strArg(args[0]), elementNames(args[1:])...))
+		return object.Wrap(object.NewString(cgi.EscapeElement(strArg(args[0]), elementNames(args[1:])...)))
 	})
 	sdef("unescapeElement", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(cgi.UnescapeElement(strArg(args[0]), elementNames(args[1:])...))
+		return object.Wrap(object.NewString(cgi.UnescapeElement(strArg(args[0]), elementNames(args[1:])...)))
 	})
 	sdef("parse", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return cgiParse(strArg(args[0]))
@@ -81,11 +81,11 @@ func cgiParse(query string) object.Value {
 	for _, key := range parseKeyOrder(query) {
 		arr := object.NewArrayFromSlice(make([]object.Value, 0, len(parsed[key])))
 		for _, v := range parsed[key] {
-			arr.Elems = append(arr.Elems, object.NewString(v))
+			arr.Elems = append(arr.Elems, object.Wrap(object.NewString(v)))
 		}
-		h.Set(object.NewString(key), arr)
+		h.Set(object.Wrap(object.NewString(key)), object.Wrap(arr))
 	}
-	return h
+	return object.Wrap(h)
 }
 
 // parseKeyOrder returns the query's keys in first-appearance order. It mirrors

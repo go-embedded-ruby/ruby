@@ -43,9 +43,9 @@ func cmathArg(v object.Value) cmath.Number {
 // real branch, *object.Complex (Float components) on the complex branch.
 func cmathResult(n cmath.Number) object.Value {
 	if n.IsComplex {
-		return &object.Complex{Re: object.Float(n.Real), Im: object.Float(n.Imag)}
+		return object.Wrap(&object.Complex{Re: object.FloatValue(float64(object.Float(n.Real))), Im: object.FloatValue(float64(object.Float(n.Imag)))})
 	}
-	return object.Float(n.Real)
+	return object.FloatValue(float64(object.Float(n.Real)))
 }
 
 // registerCMath installs the CMath module and its complex-aware functions as
@@ -55,7 +55,7 @@ func (vm *VM) registerCMath() {
 	mod := newClass("CMath", nil)
 	mod.isModule = true
 	vm.cCMath = mod
-	vm.consts["CMath"] = mod
+	vm.consts["CMath"] = object.Wrap(mod)
 
 	// define installs fn as both a module-method (CMath.fn) and a private
 	// instance method, mirroring Ruby's module_function.

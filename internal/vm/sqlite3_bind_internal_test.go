@@ -21,36 +21,36 @@ func TestSQLite3BindBridge(t *testing.T) {
 	if v := sqlite3Bind(nil); v != nil {
 		t.Errorf("go-nil -> %v", v)
 	}
-	if v := sqlite3Bind(object.NilV); v != nil {
+	if v := sqlite3Bind(object.NilVal()); v != nil {
 		t.Errorf("NilV -> %v", v)
 	}
-	if v := sqlite3Bind(object.Bool(true)); v != int64(1) {
+	if v := sqlite3Bind(object.BoolValue(bool(object.Bool(true)))); v != int64(1) {
 		t.Errorf("true -> %v", v)
 	}
-	if v := sqlite3Bind(object.Bool(false)); v != int64(0) {
+	if v := sqlite3Bind(object.BoolValue(bool(object.Bool(false)))); v != int64(0) {
 		t.Errorf("false -> %v", v)
 	}
-	if v := sqlite3Bind(object.Integer(7)); v != int64(7) {
+	if v := sqlite3Bind(object.IntValue(int64(object.Integer(7)))); v != int64(7) {
 		t.Errorf("int -> %v", v)
 	}
 	bn := &object.Bignum{I: big.NewInt(9)}
-	if v := sqlite3Bind(bn); v != int64(9) {
+	if v := sqlite3Bind(object.Wrap(bn)); v != int64(9) {
 		t.Errorf("bignum -> %v", v)
 	}
-	if v := sqlite3Bind(object.Float(2.5)); v != 2.5 {
+	if v := sqlite3Bind(object.FloatValue(float64(object.Float(2.5)))); v != 2.5 {
 		t.Errorf("float -> %v", v)
 	}
-	if v := sqlite3Bind(object.NewString("hi")); v != "hi" {
+	if v := sqlite3Bind(object.Wrap(object.NewString("hi"))); v != "hi" {
 		t.Errorf("string -> %v", v)
 	}
-	if v := sqlite3Bind(object.NewStringBytesEnc([]byte{0xff}, "ASCII-8BIT")); string(v.([]byte)) != "\xff" {
+	if v := sqlite3Bind(object.Wrap(object.NewStringBytesEnc([]byte{0xff}, "ASCII-8BIT"))); string(v.([]byte)) != "\xff" {
 		t.Errorf("binary -> %v", v)
 	}
-	if v := sqlite3Bind(object.Symbol("s")); v != "s" {
+	if v := sqlite3Bind(object.SymVal(string(object.Symbol("s")))); v != "s" {
 		t.Errorf("symbol -> %v", v)
 	}
 	// Default arm: a value with a to_s (an Array).
-	if v := sqlite3Bind(&object.Array{}); v != "[]" {
+	if v := sqlite3Bind(object.Wrap(&object.Array{})); v != "[]" {
 		t.Errorf("default -> %v", v)
 	}
 }
@@ -85,16 +85,16 @@ func TestSQLite3ValueBridge(t *testing.T) {
 // TestSQLite3BindKey covers sqlite3BindKey's Integer / Symbol / String / default
 // arms.
 func TestSQLite3BindKey(t *testing.T) {
-	if k := sqlite3BindKey(object.Integer(2)); k != 2 {
+	if k := sqlite3BindKey(object.IntValue(int64(object.Integer(2)))); k != 2 {
 		t.Errorf("int key -> %v", k)
 	}
-	if k := sqlite3BindKey(object.Symbol("v")); k != "v" {
+	if k := sqlite3BindKey(object.SymVal(string(object.Symbol("v")))); k != "v" {
 		t.Errorf("sym key -> %v", k)
 	}
-	if k := sqlite3BindKey(object.NewString("n")); k != "n" {
+	if k := sqlite3BindKey(object.Wrap(object.NewString("n"))); k != "n" {
 		t.Errorf("str key -> %v", k)
 	}
-	if k := sqlite3BindKey(&object.Array{}); k != "[]" {
+	if k := sqlite3BindKey(object.Wrap(&object.Array{})); k != "[]" {
 		t.Errorf("default key -> %v", k)
 	}
 }
@@ -103,7 +103,7 @@ func TestSQLite3BindKey(t *testing.T) {
 // arm is reached through busy_timeout= in the Ruby tests).
 func TestSQLite3IntArgBignum(t *testing.T) {
 	bn := &object.Bignum{I: big.NewInt(100)}
-	if n := sqlite3IntArg(bn); n != 100 {
+	if n := sqlite3IntArg(object.Wrap(bn)); n != 100 {
 		t.Errorf("bignum arg -> %d", n)
 	}
 }
@@ -117,7 +117,7 @@ func TestSQLite3IntArgTypeError(t *testing.T) {
 			t.Errorf("want TypeError, got %v", r)
 		}
 	}()
-	sqlite3IntArg(object.NewString("x"))
+	sqlite3IntArg(object.Wrap(object.NewString("x")))
 }
 
 // TestSQLite3ModeDefault covers sqlite3Mode's no-argument default arm.
@@ -125,17 +125,17 @@ func TestSQLite3ModeDefault(t *testing.T) {
 	if m := sqlite3Mode(nil); m != sqlite3.Deferred {
 		t.Errorf("default mode -> %q", m)
 	}
-	if m := sqlite3Mode([]object.Value{object.NewString("exclusive")}); m != sqlite3.Exclusive {
+	if m := sqlite3Mode([]object.Value{object.Wrap(object.NewString("exclusive"))}); m != sqlite3.Exclusive {
 		t.Errorf("exclusive mode -> %q", m)
 	}
-	if m := sqlite3Mode([]object.Value{object.NewString("weird")}); m != sqlite3.Deferred {
+	if m := sqlite3Mode([]object.Value{object.Wrap(object.NewString("weird"))}); m != sqlite3.Deferred {
 		t.Errorf("unknown mode -> %q", m)
 	}
 }
 
 // TestSQLite3StringArgToS covers sqlite3StringArg's non-String to_s arm.
 func TestSQLite3StringArgToS(t *testing.T) {
-	if s := sqlite3StringArg(object.Integer(5)); s != "5" {
+	if s := sqlite3StringArg(object.IntValue(int64(object.Integer(5)))); s != "5" {
 		t.Errorf("to_s arg -> %q", s)
 	}
 }
@@ -163,13 +163,13 @@ func TestSQLite3HashColsNoOwner(t *testing.T) {
 
 // TestSQLite3SpreadNoArray covers sqlite3Spread's non-Array (pass-through) arm.
 func TestSQLite3SpreadNoArray(t *testing.T) {
-	in := []object.Value{object.Integer(1), object.Integer(2)}
+	in := []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2)))}
 	out := sqlite3Spread(in)
 	if len(out) != 2 || out[0] != object.Integer(1) {
 		t.Errorf("no-array spread -> %v", out)
 	}
 	// A single non-Array argument also passes through.
-	if got := sqlite3Spread([]object.Value{object.Integer(9)}); len(got) != 1 {
+	if got := sqlite3Spread([]object.Value{object.IntValue(int64(object.Integer(9)))}); len(got) != 1 {
 		t.Errorf("single scalar spread -> %v", got)
 	}
 }

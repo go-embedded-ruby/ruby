@@ -20,7 +20,7 @@ func (vm *VM) registerNetHTTP() {
 
 	net := newClass("Net", nil)
 	net.isModule = true
-	vm.consts["Net"] = net
+	vm.consts["Net"] = object.Wrap(net)
 
 	notImpl := func(what string) NativeFn {
 		return func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -31,13 +31,13 @@ func (vm *VM) registerNetHTTP() {
 	// --- Net::HTTPHeader: a real header map mixin (cheap, no networking) ---------
 	header := newClass("Net::HTTPHeader", nil)
 	header.isModule = true
-	net.consts["HTTPHeader"] = header
+	net.consts["HTTPHeader"] = object.Wrap(header)
 	defNetHTTPHeader(header)
 
 	// --- Net::HTTP --------------------------------------------------------------
 	http := newClass("Net::HTTP", vm.cObject)
 	http.includes = append(http.includes, header)
-	net.consts["HTTP"] = http
+	net.consts["HTTP"] = object.Wrap(http)
 	// Class-level conveniences and the instance networking surface are all stubbed:
 	// they need real sockets (next round).
 	for _, m := range []string{"get", "post", "get_response", "start"} {
@@ -47,7 +47,7 @@ func (vm *VM) registerNetHTTP() {
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			// Constructing the object is allowed (Puppet builds one, then configures
 			// it); only the I/O methods raise.
-			return &RObject{class: http, ivars: map[string]object.Value{}}
+			return object.Wrap(&RObject{class: http, ivars: map[string]object.Value{}})
 		}}
 	for _, m := range []string{"start", "request", "get", "post", "head", "put", "delete", "finish"} {
 		http.define(m, notImpl("Net::HTTP#"+m))
@@ -61,23 +61,23 @@ func (vm *VM) registerNetHTTP() {
 		rc.smethods["new"] = &Method{name: "new", owner: rc,
 			native: func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 				o := &RObject{class: object.Kind[*RClass](self), ivars: map[string]object.Value{}}
-				o.ivars["@header"] = object.NewHash()
-				return o
+				o.ivars["@header"] = object.Wrap(object.NewHash())
+				return object.Wrap(o)
 			}}
-		http.consts[verb] = rc
+		http.consts[verb] = object.Wrap(rc)
 	}
 
 	// --- Net::HTTPResponse status subclass tree ---------------------------------
 	resp := newClass("Net::HTTPResponse", vm.cObject)
 	resp.includes = append(resp.includes, header)
-	net.consts["HTTPResponse"] = resp
+	net.consts["HTTPResponse"] = object.Wrap(resp)
 	defNetHTTPResponse(resp)
 
 	// Category bases + the concrete status classes Puppet references, each a
 	// subclass of its category so `is_a?(Net::HTTPSuccess)` works.
 	mk := func(name string, super *RClass) *RClass {
 		c := newClass("Net::"+name, super)
-		net.consts[name] = c
+		net.consts[name] = object.Wrap(c)
 		return c
 	}
 	info := mk("HTTPInformation", resp)
@@ -105,12 +105,12 @@ func (vm *VM) registerNetHTTP() {
 	mk("HTTPGatewayTimeout", serverErr)
 
 	// --- Net error / timeout classes --------------------------------------------
-	net.consts["HTTPError"] = newClass("Net::HTTPError", std)
-	net.consts["HTTPBadResponse"] = newClass("Net::HTTPBadResponse", std)
-	net.consts["HTTPFatalError"] = newClass("Net::HTTPFatalError", std)
-	net.consts["OpenTimeout"] = newClass("Net::OpenTimeout", std)
-	net.consts["ReadTimeout"] = newClass("Net::ReadTimeout", std)
-	net.consts["WriteTimeout"] = newClass("Net::WriteTimeout", std)
+	net.consts["HTTPError"] = object.Wrap(newClass("Net::HTTPError", std))
+	net.consts["HTTPBadResponse"] = object.Wrap(newClass("Net::HTTPBadResponse", std))
+	net.consts["HTTPFatalError"] = object.Wrap(newClass("Net::HTTPFatalError", std))
+	net.consts["OpenTimeout"] = object.Wrap(newClass("Net::OpenTimeout", std))
+	net.consts["ReadTimeout"] = object.Wrap(newClass("Net::ReadTimeout", std))
+	net.consts["WriteTimeout"] = object.Wrap(newClass("Net::WriteTimeout", std))
 }
 
 // defNetHTTPHeader implements the cheap, real Net::HTTPHeader surface over an
@@ -125,27 +125,27 @@ func defNetHTTPHeader(header *RClass) {
 		h, ok := object.KindOK[*object.Hash](o.ivars["@header"])
 		if !ok {
 			h = object.NewHash()
-			o.ivars["@header"] = h
+			o.ivars["@header"] = object.Wrap(h)
 		}
 		return h
 	}
 	header.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		v, ok := hashOf(self).Get(object.NewString(headerKey(args[0])))
+		v, ok := hashOf(self).Get(object.Wrap(object.NewString(headerKey(args[0]))))
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return v
 	})
 	header.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		hashOf(self).Set(object.NewString(headerKey(args[0])), args[1])
+		hashOf(self).Set(object.Wrap(object.NewString(headerKey(args[0]))), args[1])
 		return args[1]
 	})
 	header.define("key?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		_, ok := hashOf(self).Get(object.NewString(headerKey(args[0])))
-		return object.Bool(ok)
+		_, ok := hashOf(self).Get(object.Wrap(object.NewString(headerKey(args[0]))))
+		return object.BoolValue(bool(object.Bool(ok)))
 	})
 	header.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		v, _ := hashOf(self).Delete(object.NewString(headerKey(args[0])))
+		v, _ := hashOf(self).Delete(object.Wrap(object.NewString(headerKey(args[0]))))
 		return v
 	})
 }

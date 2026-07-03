@@ -19,35 +19,35 @@ func (vm *VM) registerDir() {
 	// would shadow the registerFile version and break a `rescue Errno::EEXIST` that
 	// caught the original object.
 	cDir := newClass("Dir", vm.cObject)
-	vm.consts["Dir"] = cDir
+	vm.consts["Dir"] = object.Wrap(cDir)
 	def := func(name string, fn NativeFn) { cDir.smethods[name] = &Method{name: name, owner: cDir, native: fn} }
 
 	def("pwd", dirPwd)
 	def("getwd", dirPwd)
 	def("home", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(toSlash(dirHomeStr()))
+		return object.Wrap(object.NewString(toSlash(dirHomeStr())))
 	})
 	def("entries", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		names := dirNames(strArg(args[0]))
-		elems := []object.Value{object.NewString("."), object.NewString("..")}
+		elems := []object.Value{object.Wrap(object.NewString(".")), object.Wrap(object.NewString(".."))}
 		for _, n := range names {
-			elems = append(elems, object.NewString(n))
+			elems = append(elems, object.Wrap(object.NewString(n)))
 		}
-		return object.NewArrayFromSlice(elems)
+		return object.Wrap(object.NewArrayFromSlice(elems))
 	})
 	def("children", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		var elems []object.Value
 		for _, n := range dirNames(strArg(args[0])) {
-			elems = append(elems, object.NewString(n))
+			elems = append(elems, object.Wrap(object.NewString(n)))
 		}
-		return object.NewArrayFromSlice(elems)
+		return object.Wrap(object.NewArrayFromSlice(elems))
 	})
 	glob := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		var elems []object.Value
 		for _, m := range dirGlob(strArg(args[0])) {
-			elems = append(elems, object.NewString(m))
+			elems = append(elems, object.Wrap(object.NewString(m)))
 		}
-		return object.NewArrayFromSlice(elems)
+		return object.Wrap(object.NewArrayFromSlice(elems))
 	}
 	def("glob", glob)
 	def("[]", glob)
@@ -60,9 +60,9 @@ func (vm *VM) registerDir() {
 			raise("Errno::ENOENT", "No such file or directory @ dir_s_empty_p - %s", p)
 		}
 		if !fi.IsDir() {
-			return object.Bool(false)
+			return object.BoolValue(bool(object.Bool(false)))
 		}
-		return object.Bool(len(dirNames(p)) == 0)
+		return object.BoolValue(bool(object.Bool(len(dirNames(p)) == 0)))
 	})
 	def("mkdir", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := strArg(args[0])
@@ -97,23 +97,23 @@ func (vm *VM) registerDir() {
 		}
 		if blk != nil {
 			defer os.Chdir(old)
-			return vm.callBlock(blk, []object.Value{object.NewString(toSlash(target))})
+			return vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(toSlash(target)))})
 		}
 		return object.IntValue(0)
 	})
 	def("each_child", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		for _, n := range dirNames(strArg(args[0])) {
-			vm.callBlock(blk, []object.Value{object.NewString(n)})
+			vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(n))})
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	def("foreach", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		vm.callBlock(blk, []object.Value{object.NewString(".")})
-		vm.callBlock(blk, []object.Value{object.NewString("..")})
+		vm.callBlock(blk, []object.Value{object.Wrap(object.NewString("."))})
+		vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(".."))})
 		for _, n := range dirNames(strArg(args[0])) {
-			vm.callBlock(blk, []object.Value{object.NewString(n)})
+			vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(n))})
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
@@ -133,12 +133,12 @@ func dirHomeStr() string {
 
 func dirPwd(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 	wd, _ := os.Getwd()
-	return object.NewString(toSlash(wd))
+	return object.Wrap(object.NewString(toSlash(wd)))
 }
 
 func dirExist(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 	fi, err := os.Stat(strArg(args[0]))
-	return object.Bool(err == nil && fi.IsDir())
+	return object.BoolValue(bool(object.Bool(err == nil && fi.IsDir())))
 }
 
 // dirNames returns the directory's entry names (sorted, no "." / ".."), raising

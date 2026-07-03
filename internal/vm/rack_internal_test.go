@@ -191,23 +191,23 @@ func TestRackUtils(t *testing.T) {
 
 // TestRackStr covers the String / Symbol / default arms.
 func TestRackStr(t *testing.T) {
-	if rackStr(object.NewString("x")) != "x" || rackStr(object.Symbol("y")) != "y" || rackStr(object.Integer(3)) != "3" {
+	if rackStr(object.Wrap(object.NewString("x"))) != "x" || rackStr(object.SymVal(string(object.Symbol("y")))) != "y" || rackStr(object.IntValue(int64(object.Integer(3)))) != "3" {
 		t.Error("rackStr arms")
 	}
 }
 
 // TestRackInt covers Integer / valid-String / invalid-String / other arms.
 func TestRackInt(t *testing.T) {
-	if rackInt(object.Integer(7), 0) != 7 {
+	if rackInt(object.IntValue(int64(object.Integer(7))), 0) != 7 {
 		t.Error("int arm")
 	}
-	if rackInt(object.NewString("9"), 0) != 9 {
+	if rackInt(object.Wrap(object.NewString("9")), 0) != 9 {
 		t.Error("valid string arm")
 	}
-	if rackInt(object.NewString("no"), 5) != 5 {
+	if rackInt(object.Wrap(object.NewString("no")), 5) != 5 {
 		t.Error("invalid string arm")
 	}
-	if rackInt(object.NilV, 4) != 4 {
+	if rackInt(object.NilVal(), 4) != 4 {
 		t.Error("other arm")
 	}
 }
@@ -217,7 +217,7 @@ func TestRackArg(t *testing.T) {
 	if rackArg(nil) != object.NilV {
 		t.Error("absent")
 	}
-	if rackArg([]object.Value{object.Integer(1)}) != object.Integer(1) {
+	if rackArg([]object.Value{object.IntValue(int64(object.Integer(1)))}) != object.Integer(1) {
 		t.Error("present")
 	}
 }
@@ -228,13 +228,13 @@ func TestRackEnvValue(t *testing.T) {
 		in   object.Value
 		want any
 	}{
-		{object.NilV, nil},
-		{object.NewString("s"), "s"},
-		{object.Symbol("y"), "y"},
-		{object.Bool(true), true},
-		{object.Integer(3), int64(3)},
-		{object.Float(1.5), 1.5},
-		{&object.Array{}, "[]"},
+		{object.NilVal(), nil},
+		{object.Wrap(object.NewString("s")), "s"},
+		{object.SymVal(string(object.Symbol("y"))), "y"},
+		{object.BoolValue(bool(object.Bool(true))), true},
+		{object.IntValue(int64(object.Integer(3))), int64(3)},
+		{object.FloatValue(float64(object.Float(1.5))), 1.5},
+		{object.Wrap(&object.Array{}), "[]"},
 	}
 	for _, c := range checks {
 		if got := rackEnvValue(c.in); !reflect.DeepEqual(got, c.want) {
@@ -255,40 +255,40 @@ func TestRackResponseBody(t *testing.T) {
 	if rackResponseBody(nil) != nil {
 		t.Error("absent")
 	}
-	if rackResponseBody([]object.Value{object.NilV}) != nil {
+	if rackResponseBody([]object.Value{object.NilVal()}) != nil {
 		t.Error("nil arm")
 	}
-	if got := rackResponseBody([]object.Value{object.NewString("x")}); !reflect.DeepEqual(got, []string{"x"}) {
+	if got := rackResponseBody([]object.Value{object.Wrap(object.NewString("x"))}); !reflect.DeepEqual(got, []string{"x"}) {
 		t.Errorf("string arm got=%#v", got)
 	}
-	if got := rackResponseBody([]object.Value{&object.Array{Elems: []object.Value{object.NewString("a"), object.Integer(2)}}}); !reflect.DeepEqual(got, []string{"a", "2"}) {
+	if got := rackResponseBody([]object.Value{object.Wrap(&object.Array{Elems: []object.Value{object.Wrap(object.NewString("a")), object.IntValue(int64(object.Integer(2)))}})}); !reflect.DeepEqual(got, []string{"a", "2"}) {
 		t.Errorf("array arm got=%#v", got)
 	}
-	if got := rackResponseBody([]object.Value{object.Integer(9)}); !reflect.DeepEqual(got, []string{"9"}) {
+	if got := rackResponseBody([]object.Value{object.IntValue(int64(object.Integer(9)))}); !reflect.DeepEqual(got, []string{"9"}) {
 		t.Errorf("default arm got=%#v", got)
 	}
 }
 
 // TestRackHeadersFrom covers the Hash and non-Hash arms.
 func TestRackHeadersFrom(t *testing.T) {
-	if h := rackHeadersFrom(object.NilV); h.Len() != 0 {
+	if h := rackHeadersFrom(object.NilVal()); h.Len() != 0 {
 		t.Error("non-Hash arm")
 	}
 	hash := object.NewHash()
-	hash.Set(object.NewString("A"), object.NewString("b"))
-	if h := rackHeadersFrom(hash); h.Get("a") != "b" {
+	hash.Set(object.Wrap(object.NewString("A")), object.Wrap(object.NewString("b")))
+	if h := rackHeadersFrom(object.Wrap(hash)); h.Get("a") != "b" {
 		t.Errorf("hash arm got=%v", h.Get("a"))
 	}
 }
 
 // TestRackParamsFromHash covers the Hash and non-Hash arms.
 func TestRackParamsFromHash(t *testing.T) {
-	if p := rackParamsFromHash(object.Integer(1)); p.Len() != 0 {
+	if p := rackParamsFromHash(object.IntValue(int64(object.Integer(1)))); p.Len() != 0 {
 		t.Error("non-Hash arm")
 	}
 	hash := object.NewHash()
-	hash.Set(object.NewString("k"), object.NewString("v"))
-	if p := rackParamsFromHash(hash); rack.BuildQuery(p) != "k=v" {
+	hash.Set(object.Wrap(object.NewString("k")), object.Wrap(object.NewString("v")))
+	if p := rackParamsFromHash(object.Wrap(hash)); rack.BuildQuery(p) != "k=v" {
 		t.Errorf("hash arm got=%q", rack.BuildQuery(p))
 	}
 }
@@ -332,21 +332,21 @@ func TestRackFromGo(t *testing.T) {
 
 // TestRackToGo covers every arm of the object->Go converter.
 func TestRackToGo(t *testing.T) {
-	arr := &object.Array{Elems: []object.Value{object.Integer(1)}}
+	arr := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}
 	h := object.NewHash()
-	h.Set(object.NewString("k"), object.Integer(2))
+	h.Set(object.Wrap(object.NewString("k")), object.IntValue(int64(object.Integer(2))))
 	checks := []struct {
 		in   object.Value
 		want any
 	}{
-		{object.NilV, nil},
-		{object.Bool(true), true},
-		{object.Integer(5), int64(5)},
-		{object.Float(2.5), 2.5},
-		{object.NewString("s"), "s"},
-		{object.Symbol("y"), "y"},
-		{arr, []any{int64(1)}},
-		{h, map[string]any{"k": int64(2)}},
+		{object.NilVal(), nil},
+		{object.BoolValue(bool(object.Bool(true))), true},
+		{object.IntValue(int64(object.Integer(5))), int64(5)},
+		{object.FloatValue(float64(object.Float(2.5))), 2.5},
+		{object.Wrap(object.NewString("s")), "s"},
+		{object.SymVal(string(object.Symbol("y"))), "y"},
+		{object.Wrap(arr), []any{int64(1)}},
+		{object.Wrap(h), map[string]any{"k": int64(2)}},
 	}
 	for _, c := range checks {
 		if got := rackToGo(c.in); !reflect.DeepEqual(got, c.want) {
@@ -354,7 +354,7 @@ func TestRackToGo(t *testing.T) {
 		}
 	}
 	// default arm: a wrapper value falls back to its to_s.
-	if got := rackToGo(&RackResponse{}); got != "#<Rack::Response>" {
+	if got := rackToGo(object.Wrap(&RackResponse{})); got != "#<Rack::Response>" {
 		t.Errorf("default arm got=%#v", got)
 	}
 }

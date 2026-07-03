@@ -70,7 +70,7 @@ func unaryMethodName(op string) string {
 // pushDefinedTag pushes a constant tag String.
 func (c *Compiler) pushDefinedTag(tag string) {
 	b := c.cur()
-	b.emit(bytecode.OpPushConst, b.addConst(object.NewString(tag)), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Wrap(object.NewString(tag))), 0)
 }
 
 // compileDefinedScopedConst handles `defined?(A::B)` and `defined?(::B)`.

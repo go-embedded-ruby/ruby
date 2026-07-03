@@ -49,14 +49,14 @@ func (vm *VM) registerDryStruct() {
 	dry := vm.dryModule()
 
 	base := newClass("Dry::Struct", vm.cObject)
-	dry.consts["Struct"] = base
-	vm.consts["Dry::Struct"] = base
+	dry.consts["Struct"] = object.Wrap(base)
+	vm.consts["Dry::Struct"] = object.Wrap(base)
 	vm.registerDryStructError(base)
 
 	// A struct's own value-object shorthand: Dry::Struct::Value is a struct whose
 	// instances compare by value (the gem's Dry::Struct::Value); rbgo structs are
 	// already value-compared, so Value is an alias of the base for `< Value`.
-	base.consts["Value"] = base
+	base.consts["Value"] = object.Wrap(base)
 
 	sdef := func(name string, fn NativeFn) { base.smethods[name] = &Method{name: name, owner: base, native: fn} }
 
@@ -84,7 +84,7 @@ func (vm *VM) registerDryStruct() {
 			}
 		}
 		vm.setDryStructType(cls, st.TransformKeys(mode))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// new(hash) coerces the input hash into a struct instance; a coercion failure
@@ -107,7 +107,7 @@ func (vm *VM) registerDryStruct() {
 		if err != nil {
 			raise("Dry::Struct::Error", "%s", err.Error())
 		}
-		return &DryStruct{s: s, cls: cls}
+		return object.Wrap(&DryStruct{s: s, cls: cls})
 	})
 
 	vm.registerDryStructInstance(base)
@@ -160,11 +160,11 @@ func (vm *VM) dryStructAttribute(self object.Value, args []object.Value, optiona
 		ds := object.Kind[*DryStruct](recv)
 		v, ok := ds.s.Get(name)
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return dryFromGo(vm, v)
 	})
-	return object.NilV
+	return object.NilVal()
 }
 
 // dryStructType returns cls's accumulating *drystruct.StructType, creating and
@@ -196,7 +196,7 @@ func (vm *VM) setDryStructType(cls *RClass, st *drystruct.StructType) {
 	if cls.ivars == nil {
 		cls.ivars = map[string]object.Value{}
 	}
-	cls.ivars[dryStructMetaIvar] = &dryStructMeta{st: st}
+	cls.ivars[dryStructMetaIvar] = object.Wrap(&dryStructMeta{st: st})
 }
 
 // registerDryStructError installs Dry::Struct::Error < StandardError, registered
@@ -205,6 +205,6 @@ func (vm *VM) setDryStructType(cls *RClass, st *drystruct.StructType) {
 func (vm *VM) registerDryStructError(base *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("Dry::Struct::Error", std)
-	base.consts["Error"] = c
-	vm.consts["Dry::Struct::Error"] = c
+	base.consts["Error"] = object.Wrap(c)
+	vm.consts["Dry::Struct::Error"] = object.Wrap(c)
 }

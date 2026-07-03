@@ -18,7 +18,7 @@ import (
 func (vm *VM) registerOpen3() {
 	mod := newClass("Open3", nil)
 	mod.isModule = true
-	vm.consts["Open3"] = mod
+	vm.consts["Open3"] = object.Wrap(mod)
 
 	notImpl := func(what string) NativeFn {
 		return func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {

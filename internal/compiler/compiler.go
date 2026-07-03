@@ -221,20 +221,20 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.IntLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(v.Value)), 0)
 	case *ast.BignumLit:
-		b.emit(bytecode.OpPushConst, b.addConst(&object.Bignum{I: v.Val}), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Wrap(&object.Bignum{I: v.Val})), 0)
 	case *ast.FloatLit:
-		b.emit(bytecode.OpPushConst, b.addConst(object.Float(v.Value)), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.FloatValue(float64(object.Float(v.Value)))), 0)
 	case *ast.RationalLit:
 		b.emit(bytecode.OpPushConst, b.addConst(rationalValue(v.Value)), 0)
 	case *ast.ImaginaryLit:
 		// `Ni` is Complex(0, N): the imaginary part is the promoted literal (an
 		// Integer/Float, or a Rational for the combined `ri` form).
-		b.emit(bytecode.OpPushConst, b.addConst(&object.Complex{Re: object.IntValue(0), Im: numericValue(v.Value)}), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Wrap(&object.Complex{Re: object.IntValue(0), Im: numericValue(v.Value)})), 0)
 	case *ast.StringLit:
-		b.emit(bytecode.OpPushConst, b.addConst(object.NewString(v.Value)), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Wrap(object.NewString(v.Value))), 0)
 	case *ast.StrInterp:
 		// Concatenate each part coerced with to_s onto a growing string.
-		b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.Wrap(object.NewString(""))), 0)
 		for _, part := range v.Parts {
 			c.compileNode(part)
 			b.emit(bytecode.OpSend, b.addName("to_s"), 0)
@@ -563,12 +563,12 @@ func (c *Compiler) compileLogical(v *ast.BinaryExpr) {
 func rationalValue(lit ast.Node) object.Value {
 	switch n := lit.(type) {
 	case *ast.IntLit:
-		return &object.Rational{R: new(big.Rat).SetInt64(n.Value)}
+		return object.Wrap(&object.Rational{R: new(big.Rat).SetInt64(n.Value)})
 	case *ast.BignumLit:
-		return &object.Rational{R: new(big.Rat).SetInt(n.Val)}
+		return object.Wrap(&object.Rational{R: new(big.Rat).SetInt(n.Val)})
 	case *ast.FloatLit:
 		r, _ := new(big.Rat).SetString(strconv.FormatFloat(n.Value, 'g', -1, 64))
-		return &object.Rational{R: r}
+		return object.Wrap(&object.Rational{R: r})
 	default:
 		panic(fmt.Sprintf("compiler: bad rational literal %T", lit))
 	}
@@ -584,9 +584,9 @@ func numericValue(lit ast.Node) object.Value {
 	case *ast.IntLit:
 		return object.IntValue(n.Value)
 	case *ast.BignumLit:
-		return &object.Bignum{I: n.Val}
+		return object.Wrap(&object.Bignum{I: n.Val})
 	case *ast.FloatLit:
-		return object.Float(n.Value)
+		return object.FloatValue(float64(object.Float(n.Value)))
 	default:
 		panic(fmt.Sprintf("compiler: bad imaginary literal %T", lit))
 	}
@@ -996,18 +996,18 @@ func (c *Compiler) compileRegexpInterp(segs []regexpSeg, flags string) {
 	if once {
 		guard = b.emit(bytecode.OpRegexpOnce, 0, 0)
 	}
-	b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Wrap(object.NewString(""))), 0)
 	for _, s := range segs {
 		if s.isExpr {
 			prog, err := parser.Parse(s.text)
 			if err != nil || len(prog.Body) == 0 {
-				b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)
+				b.emit(bytecode.OpPushConst, b.addConst(object.Wrap(object.NewString(""))), 0)
 			} else {
 				c.compileNode(prog.Body[len(prog.Body)-1])
 				b.emit(bytecode.OpSend, b.addName("to_s"), 0)
 			}
 		} else {
-			b.emit(bytecode.OpPushConst, b.addConst(object.NewString(s.text)), 0)
+			b.emit(bytecode.OpPushConst, b.addConst(object.Wrap(object.NewString(s.text))), 0)
 		}
 		b.emit(bytecode.OpAdd, 0, 0)
 	}
@@ -1652,7 +1652,7 @@ func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
 	}
 	// respond_to?(:deconstruct)
 	b.emit(bytecode.OpGetLocal, subj, 0)
-	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct")), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(string(object.Symbol("deconstruct")))), 0)
 	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
 	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
 	// arr = subject.deconstruct
@@ -1740,7 +1740,7 @@ func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
 	}
 	// respond_to?(:deconstruct), then arr = subject.deconstruct.
 	b.emit(bytecode.OpGetLocal, subj, 0)
-	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct")), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(string(object.Symbol("deconstruct")))), 0)
 	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
 	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
 	b.emit(bytecode.OpGetLocal, subj, 0)
@@ -1844,7 +1844,7 @@ func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 	var fails []int
 	// respond_to?(:deconstruct_keys)
 	b.emit(bytecode.OpGetLocal, subj, 0)
-	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct_keys")), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(string(object.Symbol("deconstruct_keys")))), 0)
 	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
 	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
 	// h = subject.deconstruct_keys(nil) — we pass nil (full hash) for simplicity,
@@ -1866,21 +1866,21 @@ func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 	for i, key := range p.Keys {
 		// h.key?(:key)
 		b.emit(bytecode.OpGetLocal, h, 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(string(object.Symbol(key)))), 0)
 		b.emit(bytecode.OpSend, b.addName("key?"), 1)
 		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
 		// value = h[:key]
 		if p.Values[i] == nil {
 			// Shorthand `{key:}` binds local key to the value.
 			b.emit(bytecode.OpGetLocal, h, 0)
-			b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+			b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(string(object.Symbol(key)))), 0)
 			b.emit(bytecode.OpSend, b.addName("[]"), 1)
 			c.storeLocal(key)
 			b.emit(bytecode.OpPop, 0, 0)
 		} else {
 			elem := b.localSlot("")
 			b.emit(bytecode.OpGetLocal, h, 0)
-			b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+			b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(string(object.Symbol(key)))), 0)
 			b.emit(bytecode.OpSend, b.addName("[]"), 1)
 			b.emit(bytecode.OpSetLocal, elem, 0)
 			b.emit(bytecode.OpPop, 0, 0)
@@ -1892,7 +1892,7 @@ func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 	if p.HasRest && p.RestName != "" {
 		b.emit(bytecode.OpGetLocal, h, 0)
 		for _, key := range p.Keys {
-			b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+			b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(string(object.Symbol(key)))), 0)
 		}
 		b.emit(bytecode.OpSend, b.addName("except"), len(p.Keys))
 		c.storeLocal(p.RestName)

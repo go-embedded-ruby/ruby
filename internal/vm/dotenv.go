@@ -20,7 +20,7 @@ import (
 func (vm *VM) registerDotenv() {
 	mod := newClass("Dotenv", nil)
 	mod.isModule = true
-	vm.consts["Dotenv"] = mod
+	vm.consts["Dotenv"] = object.Wrap(mod)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
@@ -57,8 +57,8 @@ func (vm *VM) registerDotenv() {
 	// low-level parse entry the module methods build on.
 	parser := newClass("Dotenv::Parser", vm.cObject)
 	parser.isModule = true
-	mod.consts["Parser"] = parser
-	vm.consts["Dotenv::Parser"] = parser
+	mod.consts["Parser"] = object.Wrap(parser)
+	vm.consts["Dotenv::Parser"] = object.Wrap(parser)
 	parser.smethods["call"] = &Method{name: "call", owner: parser, native: parse}
 }
 

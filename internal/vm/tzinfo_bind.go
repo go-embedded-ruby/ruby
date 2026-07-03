@@ -25,7 +25,7 @@ func tzGet(id string) object.Value {
 	if err != nil {
 		raise("TZInfo::InvalidTimezoneIdentifier", "%s", err.Error())
 	}
-	return &Timezone{tz: tz}
+	return object.Wrap(&Timezone{tz: tz})
 }
 
 // tzCheck raises a Ruby RuntimeError carrying err's message when the embedded
@@ -52,9 +52,9 @@ func tzAll() object.Value {
 	tzCheck(err)
 	arr := object.NewArrayFromSlice(make([]object.Value, len(all)))
 	for i, tz := range all {
-		arr.Elems[i] = &Timezone{tz: tz}
+		arr.Elems[i] = object.Wrap(&Timezone{tz: tz})
 	}
-	return arr
+	return object.Wrap(arr)
 }
 
 // tzGetCountry resolves a country by ISO code, raising TZInfo::InvalidCountryCode
@@ -64,7 +64,7 @@ func tzGetCountry(code string) object.Value {
 	if err != nil {
 		raise("TZInfo::InvalidCountryCode", "%s", err.Error())
 	}
-	return &Country{c: c}
+	return object.Wrap(&Country{c: c})
 }
 
 // tzCountryCodes returns TZInfo::Country.all_codes as a Ruby Array of Strings.
@@ -95,7 +95,7 @@ func goTimeToRuby(t stdtime.Time) object.Value {
 	// resolution) while preserving the location, then encode the offset via
 	// RFC3339 for zonedFromRFC3339 to reconstruct.
 	t = t.Truncate(stdtime.Second)
-	return &Time{t: zonedFromRFC3339(t.Format(stdtime.RFC3339), t.Unix())}
+	return object.Wrap(&Time{t: zonedFromRFC3339(t.Format(stdtime.RFC3339), t.Unix())})
 }
 
 // zonedFromRFC3339 rebuilds a gotime composite from an RFC3339 string, keeping

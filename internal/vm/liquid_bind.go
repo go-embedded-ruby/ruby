@@ -74,7 +74,7 @@ func liquidErrorMode(args []object.Value) liquid.ErrorMode {
 	if !ok {
 		return liquid.Lax
 	}
-	v, ok := h.Get(object.Symbol("error_mode"))
+	v, ok := h.Get(object.SymVal(string(object.Symbol("error_mode"))))
 	if !ok {
 		return liquid.Lax
 	}

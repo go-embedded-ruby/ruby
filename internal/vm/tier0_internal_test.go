@@ -30,7 +30,7 @@ func TestRubyPlatformFor(t *testing.T) {
 func TestRunAtExitOneRepanic(t *testing.T) {
 	vm := New(&bytes.Buffer{})
 	blk := &Proc{native: func(_ *VM, _ []object.Value) object.Value {
-		panic(throwSignal{tag: object.NilV, value: object.NilV})
+		panic(throwSignal{tag: object.NilVal(), value: object.NilVal()})
 	}}
 	defer func() {
 		r := recover()

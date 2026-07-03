@@ -24,7 +24,7 @@ func (vm *VM) registerSingleton() {
 		if t, ok := object.KindOK[*RClass](self); ok {
 			t.smethods[name] = &Method{name: name, proc: body, owner: t}
 			bumpMethodSerial()
-			return object.Symbol(name)
+			return object.SymVal(string(object.Symbol(name)))
 		}
 		sc, ok := vm.ensureSingleton(self)
 		if !ok {
@@ -32,7 +32,7 @@ func (vm *VM) registerSingleton() {
 		}
 		sc.methods[name] = &Method{name: name, proc: body, owner: sc}
 		bumpMethodSerial()
-		return object.Symbol(name)
+		return object.SymVal(string(object.Symbol(name)))
 	})
 
 	vm.cObject.define("extend", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -66,7 +66,7 @@ func (vm *VM) registerSingleton() {
 			bumpMethodSerial()
 			// Hook: module.extended(object), if the module defines it.
 			if hook := lookupSMethod(mod, "extended"); hook != nil {
-				vm.invoke(hook, mod, []object.Value{self}, nil)
+				vm.invoke(hook, object.Wrap(mod), []object.Value{self}, nil)
 			}
 		}
 		return self

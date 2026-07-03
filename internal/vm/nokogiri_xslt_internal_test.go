@@ -27,13 +27,13 @@ func TestNokogiriXSLTParamValue(t *testing.T) {
 		in   object.Value
 		want any
 	}{
-		{object.NilV, nil},
-		{object.Bool(true), true},
-		{object.Integer(3), float64(3)},
-		{object.Float(2.5), float64(2.5)},
-		{object.NewString("s"), "s"},
-		{object.Symbol("y"), "y"},
-		{object.Integer(0), float64(0)},
+		{object.NilVal(), nil},
+		{object.BoolValue(bool(object.Bool(true))), true},
+		{object.IntValue(int64(object.Integer(3))), float64(3)},
+		{object.FloatValue(float64(object.Float(2.5))), float64(2.5)},
+		{object.Wrap(object.NewString("s")), "s"},
+		{object.SymVal(string(object.Symbol("y"))), "y"},
+		{object.IntValue(int64(object.Integer(0))), float64(0)},
 	}
 	for _, c := range cases {
 		if got := nokogiriXSLTParamValue(c.in); got != c.want {
@@ -41,7 +41,7 @@ func TestNokogiriXSLTParamValue(t *testing.T) {
 		}
 	}
 	// Default arm: a value that is none of the fast cases falls back to to_s.
-	if got := nokogiriXSLTParamValue(&object.Array{Elems: []object.Value{object.Integer(1)}}); got != "[1]" {
+	if got := nokogiriXSLTParamValue(object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}})); got != "[1]" {
 		t.Errorf("default arm = %v, want [1]", got)
 	}
 }
@@ -64,7 +64,7 @@ func TestNokogiriXSLTStylesheetInspect(t *testing.T) {
 // second argument is present but not a Hash (params stays nil).
 func TestNokogiriXSLTArgsNonHashParams(t *testing.T) {
 	doc := object.Kind[*NokogiriDocument](nokogiriParseXML("<root/>"))
-	gotDoc, params := nokogiriXSLTArgs([]object.Value{doc, object.Integer(1)})
+	gotDoc, params := nokogiriXSLTArgs([]object.Value{object.Wrap(doc), object.IntValue(int64(object.Integer(1)))})
 	if gotDoc == nil {
 		t.Fatal("expected the document back")
 	}

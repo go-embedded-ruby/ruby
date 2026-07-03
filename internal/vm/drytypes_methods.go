@@ -18,8 +18,8 @@ import (
 // Types::Strict::String` composes exactly as the gem does.
 func (vm *VM) registerDryTypeMethods(types *RClass) {
 	cls := newClass("Dry::Types::Type", vm.cObject)
-	types.consts["Type"] = cls
-	vm.consts["Dry::Types::Type"] = cls
+	types.consts["Type"] = object.Wrap(cls)
+	vm.consts["Dry::Types::Type"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 
@@ -39,7 +39,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return object.Bool(drytypes.Valid(object.Kind[*DryType](self).t, dryToGo(args[0])))
+		return object.BoolValue(bool(object.Bool(drytypes.Valid(object.Kind[*DryType](self).t, dryToGo(args[0])))))
 	})
 
 	// try(input) returns a Dry::Types::Result (#success? / #input / #error)
@@ -48,40 +48,40 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &DryResult{r: drytypes.Try(object.Kind[*DryType](self).t, dryToGo(args[0]))}
+		return object.Wrap(&DryResult{r: drytypes.Try(object.Kind[*DryType](self).t, dryToGo(args[0]))})
 	})
 
 	d("optional", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &DryType{t: object.Kind[*DryType](self).t.Optional()}
+		return object.Wrap(&DryType{t: object.Kind[*DryType](self).t.Optional()})
 	})
 	d("default", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk != nil {
-			return &DryType{t: object.Kind[*DryType](self).t.DefaultFn(func() any {
+			return object.Wrap(&DryType{t: object.Kind[*DryType](self).t.DefaultFn(func() any {
 				return dryToGo(vm.callBlock(blk, nil))
-			})}
+			})})
 		}
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &DryType{t: object.Kind[*DryType](self).t.Default(dryToGo(args[0]))}
+		return object.Wrap(&DryType{t: object.Kind[*DryType](self).t.Default(dryToGo(args[0]))})
 	})
 	d("constrained", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &DryType{t: object.Kind[*DryType](self).t.Constrained(dryConstraints(args)...)}
+		return object.Wrap(&DryType{t: object.Kind[*DryType](self).t.Constrained(dryConstraints(args)...)})
 	})
 	d("enum", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		vals := make([]any, len(args))
 		for i, a := range args {
 			vals[i] = dryToGo(a)
 		}
-		return &DryType{t: object.Kind[*DryType](self).t.Enum(vals...)}
+		return object.Wrap(&DryType{t: object.Kind[*DryType](self).t.Enum(vals...)})
 	})
 	d("constructor", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("ArgumentError", "no block given")
 		}
-		return &DryType{t: object.Kind[*DryType](self).t.Constructor(func(in any) any {
+		return object.Wrap(&DryType{t: object.Kind[*DryType](self).t.Constructor(func(in any) any {
 			return dryToGo(vm.callBlock(blk, []object.Value{dryFromGo(vm, in)}))
-		})}
+		})})
 	})
 	d("meta", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -96,7 +96,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 			v, _ := h.Get(k)
 			m[dryKeyName(k)] = dryToGo(v)
 		}
-		return &DryType{t: object.Kind[*DryType](self).t.Meta(m)}
+		return object.Wrap(&DryType{t: object.Kind[*DryType](self).t.Meta(m)})
 	})
 	d("|", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -106,7 +106,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Dry::Types::Type", args[0].Inspect())
 		}
-		return &DryType{t: object.Kind[*DryType](self).t.Or(other.t)}
+		return object.Wrap(&DryType{t: object.Kind[*DryType](self).t.Or(other.t)})
 	})
 
 	// Types.Array.of / Types::Array(elem) builds an array type whose members are
@@ -120,7 +120,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Dry::Types::Type", args[0].Inspect())
 			}
-			return &DryType{t: drytypes.ArrayOf(el.t)}
+			return object.Wrap(&DryType{t: drytypes.ArrayOf(el.t)})
 		}}
 
 	// Types.Hash(schema) / HashSchema builds a keyed hash type from a Ruby Hash of
@@ -134,7 +134,7 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Hash", args[0].Inspect())
 			}
-			return &DryType{t: drySchema(h).AsType()}
+			return object.Wrap(&DryType{t: drySchema(h).AsType()})
 		}}
 
 	vm.registerDryResultMethods(types)
@@ -143,23 +143,23 @@ func (vm *VM) registerDryTypeMethods(types *RClass) {
 // registerDryResultMethods installs the Dry::Types::Result surface #try returns.
 func (vm *VM) registerDryResultMethods(types *RClass) {
 	cls := newClass("Dry::Types::Result", vm.cObject)
-	types.consts["Result"] = cls
-	vm.consts["Dry::Types::Result"] = cls
+	types.consts["Result"] = object.Wrap(cls)
+	vm.consts["Dry::Types::Result"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	d("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*DryResult](self).r.Success())
+		return object.BoolValue(bool(object.Bool(object.Kind[*DryResult](self).r.Success())))
 	})
 	d("failure?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*DryResult](self).r.Failure())
+		return object.BoolValue(bool(object.Bool(object.Kind[*DryResult](self).r.Failure())))
 	})
 	d("input", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return dryFromGo(vm, object.Kind[*DryResult](self).r.Input())
 	})
 	d("error", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if err := object.Kind[*DryResult](self).r.Error(); err != nil {
-			return object.NewString(err.Error())
+			return object.Wrap(object.NewString(err.Error()))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 }

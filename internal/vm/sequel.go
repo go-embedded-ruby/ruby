@@ -21,7 +21,7 @@ import (
 func (vm *VM) registerSequel() {
 	mod := newClass("Sequel", nil)
 	mod.isModule = true
-	vm.consts["Sequel"] = mod
+	vm.consts["Sequel"] = object.Wrap(mod)
 	vm.registerSequelErrors(mod)
 	vm.registerSequelDatabase(mod)
 	vm.registerSequelDataset(mod)
@@ -36,7 +36,7 @@ func (vm *VM) registerSequel() {
 		sw := sqlite3Open(path)
 		exec := &sqliteExecutor{db: sw.db}
 		db := sequel.Connect("sqlite", exec)
-		return &SequelDBObj{cls: sequelDBClass(vm, mod), db: db, sqlite: sw}
+		return object.Wrap(&SequelDBObj{cls: sequelDBClass(vm, mod), db: db, sqlite: object.Wrap(sw)})
 	}}
 
 	// Sequel.connect(adapter: :sqlite, database: path) mirrors the gem's keyword
@@ -57,7 +57,7 @@ func (vm *VM) registerSequel() {
 				}
 			}
 		}
-		return &SequelDBObj{cls: sequelDBClass(vm, mod), db: sequel.Mock(dialect)}
+		return object.Wrap(&SequelDBObj{cls: sequelDBClass(vm, mod), db: sequel.Mock(dialect)})
 	}}
 }
 
@@ -89,13 +89,13 @@ func (vm *VM) sequelConnect(mod *RClass, args []object.Value) object.Value {
 	if adapter == "sqlite" {
 		sw := sqlite3Open(database)
 		db := sequel.Connect("sqlite", &sqliteExecutor{db: sw.db})
-		return &SequelDBObj{cls: sequelDBClass(vm, mod), db: db, sqlite: sw}
+		return object.Wrap(&SequelDBObj{cls: sequelDBClass(vm, mod), db: db, sqlite: object.Wrap(sw)})
 	}
 	dialect := adapter
 	if dialect == "" {
 		dialect = "default"
 	}
-	return &SequelDBObj{cls: sequelDBClass(vm, mod), db: sequel.Mock(dialect)}
+	return object.Wrap(&SequelDBObj{cls: sequelDBClass(vm, mod), db: sequel.Mock(dialect)})
 }
 
 // sequelParseURL splits a "sqlite://path" / "postgres://..." connection string
@@ -121,10 +121,10 @@ func sequelParseURL(url string) (adapter, database string) {
 
 // sequelKw looks up a keyword by Symbol or String name in a Hash.
 func sequelKw(h *object.Hash, name string) (object.Value, bool) {
-	if v, ok := h.Get(object.Symbol(name)); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol(name)))); ok {
 		return v, true
 	}
-	return h.Get(object.NewString(name))
+	return h.Get(object.Wrap(object.NewString(name)))
 }
 
 // registerSequelErrors installs the Sequel::Error tree (Error < StandardError;
@@ -134,8 +134,8 @@ func (vm *VM) registerSequelErrors(mod *RClass) {
 	reg := func(simple string, super *RClass) *RClass {
 		qualified := "Sequel::" + simple
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	base := reg("Error", std)
@@ -150,8 +150,8 @@ func sequelDBClass(vm *VM, mod *RClass) *RClass {
 // registerSequelDatabase installs Sequel::Database and its methods.
 func (vm *VM) registerSequelDatabase(mod *RClass) {
 	cls := newClass("Sequel::Database", vm.cObject)
-	mod.consts["Database"] = cls
-	vm.consts["Sequel::Database"] = cls
+	mod.consts["Database"] = object.Wrap(cls)
+	vm.consts["Sequel::Database"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *SequelDBObj { return object.Kind[*SequelDBObj](v) }
@@ -162,11 +162,11 @@ func (vm *VM) registerSequelDatabase(mod *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
 		o := self(v)
-		return o.dataset(vm, o.db.From(sequelColumns(args)...))
+		return object.Wrap(o.dataset(vm, o.db.From(sequelColumns(args)...)))
 	})
 	d("from", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self(v)
-		return o.dataset(vm, o.db.From(sequelColumns(args)...))
+		return object.Wrap(o.dataset(vm, o.db.From(sequelColumns(args)...)))
 	})
 
 	// DB.run(sql) executes a raw statement (returns nil; rows are for datasets).
@@ -177,7 +177,7 @@ func (vm *VM) registerSequelDatabase(mod *RClass) {
 		if _, err := self(v).db.Run(pgStringArg(args[0])); err != nil {
 			raiseSequelError(err)
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// DB.create_table(:t) { ... } builds and runs CREATE TABLE via the schema
@@ -195,9 +195,9 @@ func (vm *VM) registerSequelDatabase(mod *RClass) {
 			// Sequel's create_table block runs with self bound to the generator
 			// (instance_eval), so a bare `primary_key :id` resolves; the generator
 			// is also passed as the block argument for the `do |t| ... end` form.
-			vm.callBlockDSL(blk, gen)
+			vm.callBlockDSL(blk, object.Wrap(gen))
 		})
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// DB.drop_table(:t, ...) runs DROP TABLE.
@@ -207,12 +207,12 @@ func (vm *VM) registerSequelDatabase(mod *RClass) {
 			names[i] = sequelName(a)
 		}
 		self(v).db.DropTable(names...)
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// DB.sqls returns and clears the logged DDL/statements (mock adapter).
 	d("sqls", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return pgStrings(self(v).db.SQLs())
+		return object.Wrap(pgStrings(self(v).db.SQLs()))
 	})
 
 	// DB._sqlite3 returns the backing SQLite3::Database (rbgo accessor), or nil.
@@ -220,7 +220,7 @@ func (vm *VM) registerSequelDatabase(mod *RClass) {
 		if o := self(v); !object.IsNil(o.sqlite) {
 			return o.sqlite
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 }
 
@@ -233,14 +233,14 @@ func (o *SequelDBObj) dataset(vm *VM, ds *sequel.Dataset) *SequelDatasetObj {
 // methods.
 func (vm *VM) registerSequelDataset(mod *RClass) {
 	cls := newClass("Sequel::Dataset", vm.cObject)
-	mod.consts["Dataset"] = cls
-	vm.consts["Sequel::Dataset"] = cls
+	mod.consts["Dataset"] = object.Wrap(cls)
+	vm.consts["Sequel::Dataset"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) *SequelDatasetObj { return object.Kind[*SequelDatasetObj](v) }
 	// chain builds a new dataset wrapper from a library dataset, keeping the DB.
 	chain := func(v object.Value, ds *sequel.Dataset) object.Value {
-		return &SequelDatasetObj{cls: self(v).cls, db: self(v).db, ds: ds}
+		return object.Wrap(&SequelDatasetObj{cls: self(v).cls, db: self(v).db, ds: ds})
 	}
 
 	// --- chainable query builders ---
@@ -297,20 +297,20 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 	// --- terminal SQL / execution methods ---
 	// #sql / #select_sql return the SELECT text.
 	sqlFn := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ds.SQL())
+		return object.Wrap(object.NewString(self(v).ds.SQL()))
 	}
 	d("sql", sqlFn)
 	d("select_sql", sqlFn)
 
 	// #insert_sql / #update_sql / #delete_sql return the DML text.
 	d("insert_sql", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ds.InsertSQL(sequelKVArgs(args)...))
+		return object.Wrap(object.NewString(self(v).ds.InsertSQL(sequelKVArgs(args)...)))
 	})
 	d("update_sql", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ds.UpdateSQL(sequelKVArgs(args)...))
+		return object.Wrap(object.NewString(self(v).ds.UpdateSQL(sequelKVArgs(args)...)))
 	})
 	d("delete_sql", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ds.DeleteSQL())
+		return object.Wrap(object.NewString(self(v).ds.DeleteSQL()))
 	})
 
 	// #all runs the SELECT through the executor and returns its rows as an Array
@@ -328,7 +328,7 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 				vm.callBlock(blk, []object.Value{r})
 			}
 		}
-		return out
+		return object.Wrap(out)
 	})
 
 	// #first runs the SELECT and returns the first row (a Hash), or nil.
@@ -339,9 +339,9 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 			raiseSequelError(err)
 		}
 		if len(rows) == 0 {
-			return object.NilV
+			return object.NilVal()
 		}
-		return sequelRow(rows[0])
+		return object.Wrap(sequelRow(rows[0]))
 	})
 
 	// #each yields each row (a Hash) and returns the dataset.
@@ -406,7 +406,7 @@ func (vm *VM) registerSequelDataset(mod *RClass) {
 func (d *SequelDatasetObj) lastInsertID() object.Value {
 	sw, ok := object.KindOK[*SQLite3Database](d.db.sqlite)
 	if !ok {
-		return object.NilV
+		return object.NilVal()
 	}
 	id, _ := sw.db.LastInsertRowID()
 	return object.IntValue(id)
@@ -418,7 +418,7 @@ func (d *SequelDatasetObj) lastInsertID() object.Value {
 func (d *SequelDatasetObj) changes() object.Value {
 	sw, ok := object.KindOK[*SQLite3Database](d.db.sqlite)
 	if !ok {
-		return object.NilV
+		return object.NilVal()
 	}
 	n, _ := sw.db.Changes()
 	return object.IntValue(n)

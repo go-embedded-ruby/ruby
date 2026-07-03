@@ -160,7 +160,7 @@ func TestFindWalkPrune(t *testing.T) {
 		s := object.Kind[*object.String](p).Str()
 		visited = append(visited, s)
 		if s == "r/a" {
-			panic(throwSignal{tag: pruneTag, value: object.NilV})
+			panic(throwSignal{tag: pruneTag, value: object.NilVal()})
 		}
 	})
 	if want := []string{"r", "r/a", "r/z.txt"}; !equalStrings(visited, want) {
@@ -181,7 +181,7 @@ func TestFindYieldRepanic(t *testing.T) {
 		}
 	}()
 	findYield(newTestVM(), func(object.Value) {
-		panic(throwSignal{tag: other, value: object.NilV})
+		panic(throwSignal{tag: object.SymVal(string(other)), value: object.NilVal()})
 	}, "p")
 }
 
@@ -211,14 +211,14 @@ func TestFindRubyErrorError(t *testing.T) {
 func TestFindArgsDefaults(t *testing.T) {
 	vm := newTestVM()
 
-	paths, ig := findArgs(vm, []object.Value{object.NewString("x"), object.NewString("y")})
+	paths, ig := findArgs(vm, []object.Value{object.Wrap(object.NewString("x")), object.Wrap(object.NewString("y"))})
 	if !ig || !equalStrings(paths, []string{"x", "y"}) {
 		t.Errorf("defaults: paths=%v ignore=%v", paths, ig)
 	}
 
 	h := object.NewHash()
-	h.Set(object.Symbol("ignore_error"), object.Bool(false))
-	paths, ig = findArgs(vm, []object.Value{object.NewString("x"), h})
+	h.Set(object.SymVal(string(object.Symbol("ignore_error"))), object.BoolValue(bool(object.Bool(false))))
+	paths, ig = findArgs(vm, []object.Value{object.Wrap(object.NewString("x")), object.Wrap(h)})
 	if ig || !equalStrings(paths, []string{"x"}) {
 		t.Errorf("kwargs: paths=%v ignore=%v", paths, ig)
 	}
@@ -226,7 +226,7 @@ func TestFindArgsDefaults(t *testing.T) {
 	// A trailing hash without :ignore_error leaves the default (true) but is still
 	// stripped from the path list.
 	empty := object.NewHash()
-	paths, ig = findArgs(vm, []object.Value{object.NewString("x"), empty})
+	paths, ig = findArgs(vm, []object.Value{object.Wrap(object.NewString("x")), object.Wrap(empty)})
 	if !ig || !equalStrings(paths, []string{"x"}) {
 		t.Errorf("empty-hash: paths=%v ignore=%v", paths, ig)
 	}

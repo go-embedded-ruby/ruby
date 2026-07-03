@@ -160,7 +160,7 @@ func makeMask64(x uint64) uint64 {
 // range gives a value within it.
 func (vm *VM) randValue(r *RandomObj, args []object.Value) object.Value {
 	if len(args) == 0 {
-		return object.Float(r.res53())
+		return object.FloatValue(float64(object.Float(r.res53())))
 	}
 	{
 		__sw127 := args[0]
@@ -179,9 +179,9 @@ func (vm *VM) randValue(r *RandomObj, args []object.Value) object.Value {
 				raise("ArgumentError", "invalid argument - %s", a.Inspect())
 			}
 			if a == 0 {
-				return object.Float(r.res53())
+				return object.FloatValue(float64(object.Float(r.res53())))
 			}
-			return object.Float(r.res53() * float64(a))
+			return object.FloatValue(float64(object.Float(r.res53() * float64(a))))
 		case object.IsKind[*object.Range](__sw127):
 			a := object.Kind[*object.Range](__sw127)
 			_ = a
@@ -189,7 +189,7 @@ func (vm *VM) randValue(r *RandomObj, args []object.Value) object.Value {
 		}
 	}
 	raise("ArgumentError", "invalid argument - %s", args[0].Inspect())
-	return object.NilV
+	return object.NilVal()
 }
 
 // kernelRandValue implements Kernel#rand: a numeric argument is truncated to an
@@ -197,7 +197,7 @@ func (vm *VM) randValue(r *RandomObj, args []object.Value) object.Value {
 // argument gives a float in [0, 1); a range is honoured as for Random#rand.
 func (vm *VM) kernelRandValue(r *RandomObj, args []object.Value) object.Value {
 	if len(args) == 0 {
-		return object.Float(r.res53())
+		return object.FloatValue(float64(object.Float(r.res53())))
 	}
 	var n int64
 	{
@@ -225,7 +225,7 @@ func (vm *VM) kernelRandValue(r *RandomObj, args []object.Value) object.Value {
 		n = -n
 	}
 	if n == 0 {
-		return object.Float(r.res53())
+		return object.FloatValue(float64(object.Float(r.res53())))
 	}
 	return object.IntValue(int64(r.limitedRand(uint64(n) - 1)))
 }
@@ -249,12 +249,12 @@ func (vm *VM) randRange(r *RandomObj, rg *object.Range) object.Value {
 	if !fok1 || !fok2 || fhi < flo {
 		raise("ArgumentError", "invalid argument - %s", rg.Inspect())
 	}
-	return object.Float(flo + r.res53()*(fhi-flo))
+	return object.FloatValue(float64(object.Float(flo + r.res53()*(fhi-flo))))
 }
 
 func (vm *VM) registerRandom() {
 	cRandom := newClass("Random", vm.cObject)
-	vm.consts["Random"] = cRandom
+	vm.consts["Random"] = object.Wrap(cRandom)
 	vm.defaultRandom = newRandom(randomSeed())
 
 	cRandom.smethods["new"] = &Method{name: "new", owner: cRandom, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -262,7 +262,7 @@ func (vm *VM) registerRandom() {
 		if len(args) > 0 {
 			seed = intArg(args[0])
 		}
-		return newRandom(seed)
+		return object.Wrap(newRandom(seed))
 	}}
 
 	cRandom.define("rand", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -281,7 +281,7 @@ func (vm *VM) registerRandom() {
 				b[i+k] = byte(w >> (8 * uint(k)))
 			}
 		}
-		return object.NewStringBytes(b)
+		return object.Wrap(object.NewStringBytes(b))
 	})
 
 	// Kernel#rand / #srand operate on a process-wide default generator.

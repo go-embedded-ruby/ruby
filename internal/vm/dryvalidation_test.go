@@ -275,7 +275,7 @@ func TestDryFailureText(t *testing.T) {
 	if dryFailureText(nil) != "" {
 		t.Error("no-arg failure text")
 	}
-	if dryFailureText([]object.Value{object.Integer(5)}) != "5" {
+	if dryFailureText([]object.Value{object.IntValue(int64(object.Integer(5)))}) != "5" {
 		t.Error("non-string failure text")
 	}
 }

@@ -37,15 +37,15 @@ func (t *AddressableTemplate) Truthy() bool { return true }
 func (vm *VM) registerAddressable() {
 	mod := newClass("Addressable", nil)
 	mod.isModule = true
-	vm.consts["Addressable"] = mod
+	vm.consts["Addressable"] = object.Wrap(mod)
 
 	uriCls := newClass("Addressable::URI", vm.cObject)
-	mod.consts["URI"] = uriCls
-	vm.consts["Addressable::URI"] = uriCls
+	mod.consts["URI"] = object.Wrap(uriCls)
+	vm.consts["Addressable::URI"] = object.Wrap(uriCls)
 
 	tmplCls := newClass("Addressable::Template", vm.cObject)
-	mod.consts["Template"] = tmplCls
-	vm.consts["Addressable::Template"] = tmplCls
+	mod.consts["Template"] = object.Wrap(tmplCls)
+	vm.consts["Addressable::Template"] = object.Wrap(tmplCls)
 
 	// Addressable::URI.parse(str) parses a URI string (a nil argument yields nil,
 	// matching the gem).
@@ -55,9 +55,9 @@ func (vm *VM) registerAddressable() {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 			}
 			if args[0] == object.NilV {
-				return object.NilV
+				return object.NilVal()
 			}
-			return &AddressableURI{u: addressable.Parse(strArg(args[0]))}
+			return object.Wrap(&AddressableURI{u: addressable.Parse(strArg(args[0]))})
 		}}
 
 	vm.registerAddressableURI(uriCls)
@@ -68,20 +68,20 @@ func (vm *VM) registerAddressable() {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 			}
-			return &AddressableTemplate{t: addressable.NewTemplate(strArg(args[0]))}
+			return object.Wrap(&AddressableTemplate{t: addressable.NewTemplate(strArg(args[0]))})
 		}}
 	td := func(name string, fn NativeFn) { tmplCls.define(name, fn) }
 	td("pattern", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*AddressableTemplate](self).t.Pattern())
+		return object.Wrap(object.NewString(object.Kind[*AddressableTemplate](self).t.Pattern()))
 	})
 	td("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*AddressableTemplate](self).t.Pattern())
+		return object.Wrap(object.NewString(object.Kind[*AddressableTemplate](self).t.Pattern()))
 	})
 	td("expand", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &AddressableURI{u: addressable.Parse(object.Kind[*AddressableTemplate](self).t.Expand(addressableVars(args[0])))}
+		return object.Wrap(&AddressableURI{u: addressable.Parse(object.Kind[*AddressableTemplate](self).t.Expand(addressableVars(args[0])))})
 	})
 	td("extract", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -89,7 +89,7 @@ func (vm *VM) registerAddressable() {
 		}
 		m := object.Kind[*AddressableTemplate](self).t.Extract(addressableURIStr(args[0]))
 		if m == nil {
-			return object.NilV
+			return object.NilVal()
 		}
 		return anyMapToHash(m)
 	})
@@ -101,7 +101,7 @@ func (vm *VM) registerAddressableURI(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 
 	d("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*AddressableURI](self).u.String())
+		return object.Wrap(object.NewString(object.Kind[*AddressableURI](self).u.String()))
 	})
 	d("scheme", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strPtrToRuby(object.Kind[*AddressableURI](self).u.Scheme())
@@ -110,7 +110,7 @@ func (vm *VM) registerAddressableURI(cls *RClass) {
 		return strPtrToRuby(object.Kind[*AddressableURI](self).u.Host())
 	})
 	d("path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*AddressableURI](self).u.Path())
+		return object.Wrap(object.NewString(object.Kind[*AddressableURI](self).u.Path()))
 	})
 	d("query", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strPtrToRuby(object.Kind[*AddressableURI](self).u.Query())
@@ -125,26 +125,26 @@ func (vm *VM) registerAddressableURI(cls *RClass) {
 		if p := object.Kind[*AddressableURI](self).u.Port(); p != nil {
 			return object.IntValue(int64(*p))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("normalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &AddressableURI{u: object.Kind[*AddressableURI](self).u.Normalize()}
+		return object.Wrap(&AddressableURI{u: object.Kind[*AddressableURI](self).u.Normalize()})
 	})
 	d("join", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &AddressableURI{u: object.Kind[*AddressableURI](self).u.Join(addressableURIStr(args[0]))}
+		return object.Wrap(&AddressableURI{u: object.Kind[*AddressableURI](self).u.Join(addressableURIStr(args[0]))})
 	})
 	d("query_values", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		q := object.Kind[*AddressableURI](self).u.Query()
 		if q == nil {
-			return object.NilV
+			return object.NilVal()
 		}
 		h := object.NewHash()
 		for _, pair := range object.Kind[*AddressableURI](self).u.QueryValues() {
-			h.Set(object.NewString(pair[0]), object.NewString(pair[1]))
+			h.Set(object.Wrap(object.NewString(pair[0])), object.Wrap(object.NewString(pair[1])))
 		}
-		return h
+		return object.Wrap(h)
 	})
 }

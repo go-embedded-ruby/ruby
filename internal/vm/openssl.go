@@ -68,22 +68,22 @@ func (o *opensslDigest) Truthy() bool    { return true }
 func (vm *VM) registerOpenSSL() {
 	mod := newClass("OpenSSL", nil)
 	mod.isModule = true
-	vm.consts["OpenSSL"] = mod
+	vm.consts["OpenSSL"] = object.Wrap(mod)
 
 	// OpenSSL::OpenSSLError < StandardError is the root of the OpenSSL error tree;
 	// the per-namespace error classes below descend from it, matching MRI.
 	errRoot := newClass("OpenSSL::OpenSSLError", object.Kind[*RClass](vm.consts["StandardError"]))
-	mod.consts["OpenSSLError"] = errRoot
+	mod.consts["OpenSSLError"] = object.Wrap(errRoot)
 
 	// Version-identification constants. rbgo's OpenSSL surface is a pure-Go shim,
 	// so it reports its own banner rather than a linked libcrypto's; consumers that
 	// merely log these (e.g. Puppet's log_runtime_environment, which reads
 	// OPENSSL_VERSION) get a stable, non-empty string instead of a NameError.
-	mod.consts["VERSION"] = object.NewString("4.0.0")
-	mod.consts["OPENSSL_VERSION"] = object.NewString("rbgo pure-Go OpenSSL shim")
-	mod.consts["OPENSSL_LIBRARY_VERSION"] = object.NewString("rbgo pure-Go OpenSSL shim")
+	mod.consts["VERSION"] = object.Wrap(object.NewString("4.0.0"))
+	mod.consts["OPENSSL_VERSION"] = object.Wrap(object.NewString("rbgo pure-Go OpenSSL shim"))
+	mod.consts["OPENSSL_LIBRARY_VERSION"] = object.Wrap(object.NewString("rbgo pure-Go OpenSSL shim"))
 	mod.consts["OPENSSL_VERSION_NUMBER"] = object.IntValue(0)
-	mod.consts["OPENSSL_FIPS"] = object.Bool(false)
+	mod.consts["OPENSSL_FIPS"] = object.BoolValue(bool(object.Bool(false)))
 
 	vm.registerOpenSSLDigest(mod)
 	vm.registerOpenSSLHMAC(mod, errRoot)
@@ -97,7 +97,7 @@ func (vm *VM) registerOpenSSL() {
 // digest/hexdigest/base64digest, matching MRI.
 func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 	dig := newClass("OpenSSL::Digest", vm.cObject)
-	mod.consts["Digest"] = dig
+	mod.consts["Digest"] = object.Wrap(dig)
 
 	// newInstance builds a running OpenSSL::Digest for algorithm `name` on class
 	// `cls`, optionally seeding it with an initial data string (MRI's optional
@@ -110,7 +110,7 @@ func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 		if len(seed) > 0 {
 			h.Write([]byte(base64Arg(seed[0])))
 		}
-		return &opensslDigest{cls: cls, h: h}
+		return object.Wrap(&opensslDigest{cls: cls, h: h})
 	}
 
 	// OpenSSL::Digest.new(name, [data]) — name selects the algorithm.
@@ -125,15 +125,15 @@ func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 	// Class-level one-shots: OpenSSL::Digest.digest(name, data) etc.
 	dig.smethods["digest"] = &Method{name: "digest", owner: dig,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(string(opensslOneShot(args)))
+			return object.Wrap(object.NewString(string(opensslOneShot(args))))
 		}}
 	dig.smethods["hexdigest"] = &Method{name: "hexdigest", owner: dig,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(hex.EncodeToString(opensslOneShot(args)))
+			return object.Wrap(object.NewString(hex.EncodeToString(opensslOneShot(args))))
 		}}
 	dig.smethods["base64digest"] = &Method{name: "base64digest", owner: dig,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(base64.StdEncoding.EncodeToString(opensslOneShot(args)))
+			return object.Wrap(object.NewString(base64.StdEncoding.EncodeToString(opensslOneShot(args))))
 		}}
 
 	// Named subclasses (OpenSSL::Digest::SHA256.new -> that algorithm), plus their
@@ -141,18 +141,18 @@ func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 	for _, name := range []string{"MD5", "SHA1", "SHA224", "SHA256", "SHA384", "SHA512"} {
 		name := name
 		sub := newClass("OpenSSL::Digest::"+name, dig)
-		dig.consts[name] = sub
+		dig.consts[name] = object.Wrap(sub)
 		sub.smethods["new"] = &Method{name: "new", owner: sub,
 			native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 				return newInstance(sub, name, args)
 			}}
 		sub.smethods["digest"] = &Method{name: "digest", owner: sub,
 			native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-				return object.NewString(string(opensslSubOneShot(name, args)))
+				return object.Wrap(object.NewString(string(opensslSubOneShot(name, args))))
 			}}
 		sub.smethods["hexdigest"] = &Method{name: "hexdigest", owner: sub,
 			native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-				return object.NewString(hex.EncodeToString(opensslSubOneShot(name, args)))
+				return object.Wrap(object.NewString(hex.EncodeToString(opensslSubOneShot(name, args))))
 			}}
 	}
 
@@ -165,13 +165,13 @@ func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 		return self
 	})
 	dig.define("digest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(string(opensslDigestSum(self, args)))
+		return object.Wrap(object.NewString(string(opensslDigestSum(self, args))))
 	})
 	dig.define("hexdigest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(hex.EncodeToString(opensslDigestSum(self, args)))
+		return object.Wrap(object.NewString(hex.EncodeToString(opensslDigestSum(self, args))))
 	})
 	dig.define("base64digest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(base64.StdEncoding.EncodeToString(opensslDigestSum(self, args)))
+		return object.Wrap(object.NewString(base64.StdEncoding.EncodeToString(opensslDigestSum(self, args))))
 	})
 	dig.define("digest_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(object.Kind[*opensslDigest](self).h.Size()))
@@ -230,7 +230,7 @@ func opensslSubOneShot(name string, args []object.Value) []byte {
 // instance, matching MRI; both select the same underlying hash.
 func (vm *VM) registerOpenSSLHMAC(mod, errRoot *RClass) {
 	h := newClass("OpenSSL::HMAC", vm.cObject)
-	mod.consts["HMAC"] = h
+	mod.consts["HMAC"] = object.Wrap(h)
 	mac := func(args []object.Value) []byte {
 		if len(args) < 3 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 3)", len(args))
@@ -242,11 +242,11 @@ func (vm *VM) registerOpenSSLHMAC(mod, errRoot *RClass) {
 	}
 	h.smethods["digest"] = &Method{name: "digest", owner: h,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(string(mac(args)))
+			return object.Wrap(object.NewString(string(mac(args))))
 		}}
 	h.smethods["hexdigest"] = &Method{name: "hexdigest", owner: h,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(hex.EncodeToString(mac(args)))
+			return object.Wrap(object.NewString(hex.EncodeToString(mac(args))))
 		}}
 	_ = errRoot
 }
@@ -323,10 +323,10 @@ func digestBySize(n int) hash.Hash {
 func (vm *VM) registerOpenSSLRandom(mod *RClass) {
 	r := newClass("OpenSSL::Random", nil)
 	r.isModule = true
-	mod.consts["Random"] = r
+	mod.consts["Random"] = object.Wrap(r)
 	r.smethods["random_bytes"] = &Method{name: "random_bytes", owner: r,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewStringBytesEnc(secureBytes(int(intArg(args[0]))), "ASCII-8BIT")
+			return object.Wrap(object.NewStringBytesEnc(secureBytes(int(intArg(args[0]))), "ASCII-8BIT"))
 		}}
 }
 
@@ -346,20 +346,20 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 	}
 	// subErr defines a namespaced OpenSSL error class under errRoot.
 	subErr := func(ns *RClass, qname, key string) {
-		ns.consts[key] = newClass(qname, errRoot)
+		ns.consts[key] = object.Wrap(newClass(qname, errRoot))
 	}
 	// shell defines an empty class under ns whose .new raises NotImplementedError.
 	shell := func(ns *RClass, qname, key string) *RClass {
 		c := newClass(qname, vm.cObject)
 		c.smethods["new"] = &Method{name: "new", owner: c, native: notImpl(qname[len("OpenSSL::"):])}
-		ns.consts[key] = c
+		ns.consts[key] = object.Wrap(c)
 		return c
 	}
 
 	// --- OpenSSL::X509 -----------------------------------------------------------
 	x509 := newClass("OpenSSL::X509", nil)
 	x509.isModule = true
-	mod.consts["X509"] = x509
+	mod.consts["X509"] = object.Wrap(x509)
 	shell(x509, "OpenSSL::X509::Certificate", "Certificate")
 	shell(x509, "OpenSSL::X509::Name", "Name")
 	shell(x509, "OpenSSL::X509::Store", "Store")
@@ -388,7 +388,7 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 	// --- OpenSSL::PKey -----------------------------------------------------------
 	pkey := newClass("OpenSSL::PKey", nil)
 	pkey.isModule = true
-	mod.consts["PKey"] = pkey
+	mod.consts["PKey"] = object.Wrap(pkey)
 	shell(pkey, "OpenSSL::PKey::PKey", "PKey")
 	shell(pkey, "OpenSSL::PKey::RSA", "RSA")
 	shell(pkey, "OpenSSL::PKey::EC", "EC")
@@ -400,7 +400,7 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 	// --- OpenSSL::SSL ------------------------------------------------------------
 	ssl := newClass("OpenSSL::SSL", nil)
 	ssl.isModule = true
-	mod.consts["SSL"] = ssl
+	mod.consts["SSL"] = object.Wrap(ssl)
 	shell(ssl, "OpenSSL::SSL::SSLSocket", "SSLSocket")
 	subErr(ssl, "OpenSSL::SSL::SSLError", "SSLError")
 	ssl.consts["VERIFY_NONE"] = object.IntValue(0)
@@ -421,19 +421,19 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 	// `alias __original_initialize initialize` patch resolves) and a no-op
 	// set_params storing the params for inspection.
 	sslCtx := newClass("OpenSSL::SSL::SSLContext", vm.cObject)
-	ssl.consts["SSLContext"] = sslCtx
+	ssl.consts["SSLContext"] = object.Wrap(sslCtx)
 	defaultParams := object.NewHash()
-	defaultParams.Set(object.Symbol("ciphers"), object.NilV)
-	defaultParams.Set(object.Symbol("verify_mode"), ssl.consts["VERIFY_PEER"])
-	sslCtx.consts["DEFAULT_PARAMS"] = defaultParams
+	defaultParams.Set(object.SymVal(string(object.Symbol("ciphers"))), object.NilVal())
+	defaultParams.Set(object.SymVal(string(object.Symbol("verify_mode"))), ssl.consts["VERIFY_PEER"])
+	sslCtx.consts["DEFAULT_PARAMS"] = object.Wrap(defaultParams)
 	sslCtx.smethods["new"] = &Method{name: "new", owner: sslCtx,
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 			o := &RObject{class: sslCtx, ivars: map[string]object.Value{}}
-			vm.send(o, "initialize", args, blk)
-			return o
+			vm.send(object.Wrap(o), "initialize", args, blk)
+			return object.Wrap(o)
 		}}
 	sslCtx.define("initialize", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NilV
+		return object.NilVal()
 	})
 	sslCtx.define("set_params", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) > 0 {
@@ -447,7 +447,7 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 	// --- OpenSSL::ASN1 (referenced by certificate_request at load) ---------------
 	asn1 := newClass("OpenSSL::ASN1", nil)
 	asn1.isModule = true
-	mod.consts["ASN1"] = asn1
+	mod.consts["ASN1"] = object.Wrap(asn1)
 	shell(asn1, "OpenSSL::ASN1::UTF8String", "UTF8String")
 	shell(asn1, "OpenSSL::ASN1::Sequence", "Sequence")
 	shell(asn1, "OpenSSL::ASN1::Set", "Set")

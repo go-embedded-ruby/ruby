@@ -20,9 +20,9 @@ import (
 func (vm *VM) registerCommonmark() {
 	mod := newClass("Commonmark", nil)
 	mod.isModule = true
-	vm.consts["Commonmark"] = mod
+	vm.consts["Commonmark"] = object.Wrap(mod)
 	// The commonmarker gem exposes the same API under the CommonMarker name.
-	vm.consts["CommonMarker"] = mod
+	vm.consts["CommonMarker"] = object.Wrap(mod)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
@@ -37,7 +37,7 @@ func (vm *VM) registerCommonmark() {
 		if len(args) > 1 {
 			opt = args[1]
 		}
-		return object.NewString(commonmarkRender(vm, commonmarkSourceArg(args[0]), opt))
+		return object.Wrap(object.NewString(commonmarkRender(vm, commonmarkSourceArg(args[0]), opt)))
 	}
 	def("render_html", render)
 	def("to_html", render)
@@ -50,7 +50,7 @@ func (vm *VM) registerCommonmark() {
 		if len(args) > 0 {
 			opt = args[0]
 		}
-		return object.NewString(commonmarkRender(vm, object.Kind[*object.String](self).Str(), opt))
+		return object.Wrap(object.NewString(commonmarkRender(vm, object.Kind[*object.String](self).Str(), opt)))
 	})
 }
 

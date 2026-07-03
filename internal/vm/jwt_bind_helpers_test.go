@@ -20,7 +20,7 @@ import (
 // no-algorithm arm of jwtAlgorithms, neither reached by the end-to-end tests
 // (which pass Arrays / an algorithm: key).
 func TestJWTStringListScalar(t *testing.T) {
-	if got := jwtStringList(object.NewString("HS256")); len(got) != 1 || got[0] != "HS256" {
+	if got := jwtStringList(object.Wrap(object.NewString("HS256"))); len(got) != 1 || got[0] != "HS256" {
 		t.Errorf("jwtStringList(string) = %v want [HS256]", got)
 	}
 	if got := jwtAlgorithms(object.NewHash()); got != nil {
@@ -111,7 +111,7 @@ func TestBCryptOptsHashNil(t *testing.T) {
 	if got := bcryptOptsHash(nil); got != nil {
 		t.Errorf("bcryptOptsHash(nil) = %v want nil", got)
 	}
-	if got := bcryptOptsHash([]object.Value{object.NewString("x")}); got != nil {
+	if got := bcryptOptsHash([]object.Value{object.Wrap(object.NewString("x"))}); got != nil {
 		t.Errorf("bcryptOptsHash(non-hash) = %v want nil", got)
 	}
 }

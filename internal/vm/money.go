@@ -33,11 +33,11 @@ func (c *Currency) Truthy() bool    { return true }
 // Money.add_rate). The error tree lives under Money::Currency:: mirroring the gem.
 func (vm *VM) registerMoney() {
 	cls := newClass("Money", vm.cObject)
-	vm.consts["Money"] = cls
+	vm.consts["Money"] = object.Wrap(cls)
 
 	curCls := newClass("Money::Currency", vm.cObject)
-	cls.consts["Currency"] = curCls
-	vm.consts["Money::Currency"] = curCls
+	cls.consts["Currency"] = object.Wrap(curCls)
+	vm.consts["Money::Currency"] = object.Wrap(curCls)
 	vm.registerMoneyErrors(cls, curCls)
 
 	// The process-wide default bank starts as a VariableExchange so Money.add_rate
@@ -51,11 +51,11 @@ func (vm *VM) registerMoney() {
 			}
 			cents := intArg(args[0])
 			cur := vm.currencyArgOr(args, 1, "USD")
-			return &Money{m: money.NewWithBank(cents, cur, vm.moneyBank)}
+			return object.Wrap(&Money{m: money.NewWithBank(cents, cur, vm.moneyBank)})
 		}}
 	cls.smethods["default_bank"] = &Method{name: "default_bank", owner: cls,
 		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.NilV // the bank is a host seam; the Ruby handle is opaque
+			return object.NilVal() // the bank is a host seam; the Ruby handle is opaque
 		}}
 	cls.smethods["add_rate"] = &Method{name: "add_rate", owner: cls,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -84,34 +84,34 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 		return object.IntValue(moneyOf(self).Fractional())
 	})
 	d("amount", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Float(ratToFloat(moneyOf(self).Amount()))
+		return object.FloatValue(float64(object.Float(ratToFloat(moneyOf(self).Amount()))))
 	})
 	d("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Float(moneyOf(self).ToF())
+		return object.FloatValue(float64(object.Float(moneyOf(self).ToF())))
 	})
 	d("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(moneyOf(self).ToI())
 	})
 	d("currency", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Currency{c: moneyOf(self).Currency()}
+		return object.Wrap(&Currency{c: moneyOf(self).Currency()})
 	})
 	d("symbol", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(moneyOf(self).Symbol())
+		return object.Wrap(object.NewString(moneyOf(self).Symbol()))
 	})
 	d("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(moneyOf(self).String())
+		return object.Wrap(object.NewString(moneyOf(self).String()))
 	})
 	d("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(moneyOf(self).Inspect())
+		return object.Wrap(object.NewString(moneyOf(self).Inspect()))
 	})
 	d("zero?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(moneyOf(self).Zero())
+		return object.BoolValue(bool(object.Bool(moneyOf(self).Zero())))
 	})
 	d("positive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(moneyOf(self).Positive())
+		return object.BoolValue(bool(object.Bool(moneyOf(self).Positive())))
 	})
 	d("negative?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(moneyOf(self).Negative())
+		return object.BoolValue(bool(object.Bool(moneyOf(self).Negative())))
 	})
 
 	// Arithmetic. +/- require a Money of a matching currency (a mismatch raises
@@ -125,33 +125,33 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 		return moneyResult(out, err)
 	})
 	d("*", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Money{m: moneyOf(self).Mul(moneyRat(args[0]))}
+		return object.Wrap(&Money{m: moneyOf(self).Mul(moneyRat(args[0]))})
 	})
 	d("abs", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Money{m: moneyOf(self).Abs()}
+		return object.Wrap(&Money{m: moneyOf(self).Abs()})
 	})
 	d("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		c, err := moneyOf(self).Cmp(moneyArg(args))
 		if err != nil {
-			return object.NilV
+			return object.NilVal()
 		}
 		return object.IntValue(int64(c))
 	})
 	d("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := object.KindOK[*Money](args[0])
-		return object.Bool(ok && moneyOf(self).Eql(other.m))
+		return object.BoolValue(bool(object.Bool(ok && moneyOf(self).Eql(other.m))))
 	})
 	d("<", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(moneyCmp(self, args) < 0)
+		return object.BoolValue(bool(object.Bool(moneyCmp(self, args) < 0)))
 	})
 	d(">", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(moneyCmp(self, args) > 0)
+		return object.BoolValue(bool(object.Bool(moneyCmp(self, args) > 0)))
 	})
 	d("<=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(moneyCmp(self, args) <= 0)
+		return object.BoolValue(bool(object.Bool(moneyCmp(self, args) <= 0)))
 	})
 	d(">=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(moneyCmp(self, args) >= 0)
+		return object.BoolValue(bool(object.Bool(moneyCmp(self, args) >= 0)))
 	})
 
 	// Penny distribution: allocate([w1, w2, ...]) and split(n).
@@ -168,10 +168,10 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 		if err != nil {
 			raise("Money::Bank::UnknownRate", "%s", err.Error())
 		}
-		return &Money{m: out}
+		return object.Wrap(&Money{m: out})
 	})
 	d("format", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(moneyOf(self).Format(moneyFormatOpts(moneyOptsArg(args))))
+		return object.Wrap(object.NewString(moneyOf(self).Format(moneyFormatOpts(moneyOptsArg(args)))))
 	})
 }
 
@@ -182,30 +182,30 @@ func (vm *VM) registerMoneyCurrency(cls *RClass) {
 			if len(args) == 0 {
 				raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 			}
-			return &Currency{c: vm.currencyArg(args[0])}
+			return object.Wrap(&Currency{c: vm.currencyArg(args[0])})
 		}}
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	d("id", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(object.Kind[*Currency](self).c.ID)
+		return object.SymVal(string(object.Symbol(object.Kind[*Currency](self).c.ID)))
 	})
 	d("iso_code", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Currency](self).c.ISOCode)
+		return object.Wrap(object.NewString(object.Kind[*Currency](self).c.ISOCode))
 	})
 	d("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Currency](self).c.Name)
+		return object.Wrap(object.NewString(object.Kind[*Currency](self).c.Name))
 	})
 	d("symbol", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Currency](self).c.SymbolOrDefault())
+		return object.Wrap(object.NewString(object.Kind[*Currency](self).c.SymbolOrDefault()))
 	})
 	d("subunit_to_unit", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(object.Kind[*Currency](self).c.SubunitToUnit)
 	})
 	d("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Currency](self).c.String())
+		return object.Wrap(object.NewString(object.Kind[*Currency](self).c.String()))
 	})
 	d("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := object.KindOK[*Currency](args[0])
-		return object.Bool(ok && object.Kind[*Currency](self).c.Equal(other.c))
+		return object.BoolValue(bool(object.Bool(ok && object.Kind[*Currency](self).c.Equal(other.c))))
 	})
 }
 
@@ -216,13 +216,13 @@ func (vm *VM) registerMoneyErrors(cls, curCls *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	bank := newClass("Money::Bank", nil)
 	bank.isModule = true
-	cls.consts["Bank"] = bank
-	vm.consts["Money::Bank"] = bank
+	cls.consts["Bank"] = object.Wrap(bank)
+	vm.consts["Money::Bank"] = object.Wrap(bank)
 
 	reg := func(host *RClass, simple, qualified string) {
 		c := newClass(qualified, std)
-		host.consts[simple] = c
-		vm.consts[qualified] = c
+		host.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 	}
 	reg(curCls, "UnknownCurrency", "Money::Currency::UnknownCurrency")
 	reg(cls, "DifferentCurrencyError", "Money::DifferentCurrencyError")

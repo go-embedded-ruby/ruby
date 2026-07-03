@@ -6,6 +6,7 @@ import (
 	gotime "github.com/go-composites/time/src"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // TestTimeNowSeam pins the nowUnix seam so Time.now is deterministic in a test:
@@ -26,6 +27,6 @@ func TestTimeNowSeam(t *testing.T) {
 // opcode is the only way to exercise the fallthrough.
 func TestTimeOpDefault(t *testing.T) {
 	wantRaise(t, "NoMethodError", func() {
-		timeOp(bytecode.OpMul, &Time{t: gotime.FromUnix(0)}, &Time{t: gotime.FromUnix(0)})
+		timeOp(bytecode.OpMul, &Time{t: gotime.FromUnix(0)}, object.Wrap(&Time{t: gotime.FromUnix(0)}))
 	})
 }

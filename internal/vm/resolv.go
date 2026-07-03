@@ -35,12 +35,12 @@ func (vm *VM) registerResolv() {
 
 	resolvMod := newClass("Resolv", nil)
 	resolvMod.isModule = true
-	vm.consts["Resolv"] = resolvMod
+	vm.consts["Resolv"] = object.Wrap(resolvMod)
 
 	// --- Error classes ----------------------------------------------------------
 	resolvErr := newClass("Resolv::ResolvError", std)
-	resolvMod.consts["ResolvError"] = resolvErr
-	resolvMod.consts["ResolvTimeout"] = newClass("Resolv::ResolvTimeout", resolvErr)
+	resolvMod.consts["ResolvError"] = object.Wrap(resolvErr)
+	resolvMod.consts["ResolvTimeout"] = object.Wrap(newClass("Resolv::ResolvTimeout", resolvErr))
 
 	registerResolvIPv4(vm, resolvMod)
 	registerResolvIPv6(vm, resolvMod)
@@ -59,7 +59,7 @@ func (vm *VM) registerResolv() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			name := strArg(args[0])
 			if isLiteralIP(name) {
-				return object.NewString(name)
+				return object.Wrap(object.NewString(name))
 			}
 			return raise("Resolv::ResolvError", "no address for %s", name)
 		}}
@@ -67,9 +67,9 @@ func (vm *VM) registerResolv() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			name := strArg(args[0])
 			if isLiteralIP(name) {
-				return object.NewArray(object.NewString(name))
+				return object.Wrap(object.NewArray(object.Wrap(object.NewString(name))))
 			}
-			return object.NewArray() // MRI returns [] when nothing resolves
+			return object.Wrap(object.NewArray()) // MRI returns [] when nothing resolves
 		}}
 	for _, m := range []string{"getname", "getnames", "each_address", "each_name"} {
 		resolvMod.smethods[m] = &Method{name: m, owner: resolvMod, native: resolveNotImpl(m)}
@@ -81,7 +81,7 @@ func (vm *VM) registerResolv() {
 // constant is the library's MRI-exact matcher.
 func registerResolvIPv4(vm *VM, resolvMod *RClass) {
 	ipv4 := newClass("Resolv::IPv4", vm.cObject)
-	resolvMod.consts["IPv4"] = ipv4
+	resolvMod.consts["IPv4"] = object.Wrap(ipv4)
 	ipv4.consts["Regex"] = vm.compileRegexp(resolv.IPv4Regex.String(), "")
 	ipv4.smethods["create"] = &Method{name: "create", owner: ipv4,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -99,7 +99,7 @@ func registerResolvIPv4(vm *VM, resolvMod *RClass) {
 // canonical "::" compression (including the first-run rule) and Regex matcher.
 func registerResolvIPv6(vm *VM, resolvMod *RClass) {
 	ipv6 := newClass("Resolv::IPv6", vm.cObject)
-	resolvMod.consts["IPv6"] = ipv6
+	resolvMod.consts["IPv6"] = object.Wrap(ipv6)
 	ipv6.consts["Regex"] = vm.compileRegexp(resolv.IPv6Regex.String(), "")
 	ipv6.smethods["create"] = &Method{name: "create", owner: ipv6,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -127,14 +127,14 @@ func defineResolvAddrMethods(cls *RClass, clsName string) {
 		return getIvar(self, "@addr")
 	})
 	cls.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString("#<" + clsName + " " + strArg(getIvar(self, "@addr")) + ">")
+		return object.Wrap(object.NewString("#<" + clsName + " " + strArg(getIvar(self, "@addr")) + ">"))
 	})
 	cls.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := object.KindOK[*RObject](args[0])
 		if !ok || o.class != cls {
-			return object.Bool(false)
+			return object.BoolValue(bool(object.Bool(false)))
 		}
-		return object.Bool(strArg(getIvar(self, "@addr")) == strArg(getIvar(o, "@addr")))
+		return object.BoolValue(bool(object.Bool(strArg(getIvar(self, "@addr")) == strArg(getIvar(object.Wrap(o), "@addr")))))
 	})
 }
 
@@ -143,8 +143,8 @@ func defineResolvAddrMethods(cls *RClass, clsName string) {
 // hosts-file *content* directly (defaulting to an empty table) and parses it.
 func registerResolvHosts(vm *VM, resolvMod *RClass) {
 	hosts := newClass("Resolv::Hosts", vm.cObject)
-	resolvMod.consts["Hosts"] = hosts
-	hosts.consts["DefaultFileName"] = object.NewString(resolv.DefaultHostsFileName)
+	resolvMod.consts["Hosts"] = object.Wrap(hosts)
+	hosts.consts["DefaultFileName"] = object.Wrap(object.NewString(resolv.DefaultHostsFileName))
 	hosts.smethods["new"] = &Method{name: "new", owner: hosts,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			content := ""
@@ -152,8 +152,8 @@ func registerResolvHosts(vm *VM, resolvMod *RClass) {
 				content = strArg(args[0])
 			}
 			o := &RObject{class: hosts, ivars: map[string]object.Value{}}
-			o.ivars["@table"] = &resolvBox{hosts: resolv.ParseHosts(content)}
-			return o
+			o.ivars["@table"] = object.Wrap(&resolvBox{hosts: resolv.ParseHosts(content)})
+			return object.Wrap(o)
 		}}
 	hostsTable := func(self object.Value) *resolv.Hosts {
 		if b, ok := object.KindOK[*resolvBox](getIvar(self, "@table")); ok && b.hosts != nil {
@@ -166,7 +166,7 @@ func registerResolvHosts(vm *VM, resolvMod *RClass) {
 		if err != nil {
 			return raise("Resolv::ResolvError", "no address for %s", strArg(args[0]))
 		}
-		return object.NewString(addr)
+		return object.Wrap(object.NewString(addr))
 	})
 	hosts.define("getaddresses", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return strSliceToArray(hostsTable(self).GetAddresses(strArg(args[0])))
@@ -176,7 +176,7 @@ func registerResolvHosts(vm *VM, resolvMod *RClass) {
 		if err != nil {
 			return raise("Resolv::ResolvError", "no name for %s", strArg(args[0]))
 		}
-		return object.NewString(name)
+		return object.Wrap(object.NewString(name))
 	})
 	hosts.define("getnames", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return strSliceToArray(hostsTable(self).GetNames(strArg(args[0])))
@@ -189,10 +189,10 @@ func registerResolvHosts(vm *VM, resolvMod *RClass) {
 // decode) and the Resolv::DNS::Resource::IN::* record tree.
 func registerResolvDNS(vm *VM, resolvMod *RClass) {
 	dns := newClass("Resolv::DNS", vm.cObject)
-	resolvMod.consts["DNS"] = dns
+	resolvMod.consts["DNS"] = object.Wrap(dns)
 	dns.smethods["new"] = &Method{name: "new", owner: dns,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &RObject{class: dns, ivars: map[string]object.Value{}}
+			return object.Wrap(&RObject{class: dns, ivars: map[string]object.Value{}})
 		}}
 	dns.smethods["open"] = dns.smethods["new"]
 	queryNotImpl := func(what string) NativeFn {
@@ -208,9 +208,9 @@ func registerResolvDNS(vm *VM, resolvMod *RClass) {
 	}
 
 	resource := newClass("Resolv::DNS::Resource", vm.cObject)
-	dns.consts["Resource"] = resource
+	dns.consts["Resource"] = object.Wrap(resource)
 	in := newClass("Resolv::DNS::Resource::IN", resource)
-	resource.consts["IN"] = in
+	resource.consts["IN"] = object.Wrap(in)
 
 	registerResolvName(vm, dns)
 	recordClasses := registerResolvRecords(vm, in, resource)
@@ -221,26 +221,26 @@ func registerResolvDNS(vm *VM, resolvMod *RClass) {
 // dotted string, to_s, length, absolute? and case-insensitive ==.
 func registerResolvName(vm *VM, dns *RClass) {
 	name := newClass("Resolv::DNS::Name", vm.cObject)
-	dns.consts["Name"] = name
+	dns.consts["Name"] = object.Wrap(name)
 	name.smethods["create"] = &Method{name: "create", owner: name,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			return newResolvName(name, resolv.NewName(strArg(args[0])))
 		}}
 	name.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(resolvNameOf(self).String())
+		return object.Wrap(object.NewString(resolvNameOf(self).String()))
 	})
 	name.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(resolvNameOf(self).Length()))
 	})
 	name.define("absolute?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(resolvNameOf(self).Absolute)
+		return object.BoolValue(bool(object.Bool(resolvNameOf(self).Absolute)))
 	})
 	name.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := object.KindOK[*RObject](args[0])
 		if !ok || o.class != name {
-			return object.Bool(false)
+			return object.BoolValue(bool(object.Bool(false)))
 		}
-		return object.Bool(resolvNameOf(self).Equal(resolvNameOf(o)))
+		return object.BoolValue(bool(object.Bool(resolvNameOf(self).Equal(resolvNameOf(object.Wrap(o))))))
 	})
 	name.define("eql?", name.methods["=="].native)
 }
@@ -262,7 +262,7 @@ func registerResolvRecords(vm *VM, in, resource *RClass) map[uint16]*RClass {
 	byType := map[uint16]*RClass{}
 	for _, spec := range resolvRecordSpecs() {
 		cls := newClass("Resolv::DNS::Resource::IN::"+spec.name, resource)
-		in.consts[spec.name] = cls
+		in.consts[spec.name] = object.Wrap(cls)
 		byType[spec.typ] = cls
 		if spec.construct != nil {
 			c := spec.construct
@@ -336,9 +336,9 @@ func resolvRecordSpecs() []resolvRecordSpec {
 				cls.define("data", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 					strs := recordOf(self).(*resolv.TXT).Strings
 					if len(strs) == 0 {
-						return object.NewString("")
+						return object.Wrap(object.NewString(""))
 					}
-					return object.NewString(strs[0])
+					return object.Wrap(object.NewString(strs[0]))
 				})
 			}},
 		{name: "SOA", typ: resolv.TypeSOA,
@@ -405,10 +405,10 @@ func resolvRecordSpecs() []resolvRecordSpec {
 			},
 			define: func(cls *RClass) {
 				cls.define("cpu", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-					return object.NewString(recordOf(self).(*resolv.HINFO).CPU)
+					return object.Wrap(object.NewString(recordOf(self).(*resolv.HINFO).CPU))
 				})
 				cls.define("os", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-					return object.NewString(recordOf(self).(*resolv.HINFO).OS)
+					return object.Wrap(object.NewString(recordOf(self).(*resolv.HINFO).OS))
 				})
 			}},
 	}
@@ -436,7 +436,7 @@ func domainNameAccessor(get func(resolv.Resource) resolv.Name) func(cls *RClass)
 // Message.decode class method, plus question/answer enumeration.
 func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 	msg := newClass("Resolv::DNS::Message", vm.cObject)
-	dns.consts["Message"] = msg
+	dns.consts["Message"] = object.Wrap(msg)
 	msg.smethods["new"] = &Method{name: "new", owner: msg,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			id := uint16(0)
@@ -444,8 +444,8 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 				id = uint16(intArg(args[0]))
 			}
 			o := &RObject{class: msg, ivars: map[string]object.Value{}}
-			o.ivars["@msg"] = &resolvBox{msg: resolv.NewMessage(id)}
-			return o
+			o.ivars["@msg"] = object.Wrap(&resolvBox{msg: resolv.NewMessage(id)})
+			return object.Wrap(o)
 		}}
 	msg.smethods["decode"] = &Method{name: "decode", owner: msg,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -454,10 +454,10 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 				return raise("Resolv::DNS::DecodeError", "%v", err)
 			}
 			o := &RObject{class: msg, ivars: map[string]object.Value{}}
-			o.ivars["@msg"] = &resolvBox{msg: m}
-			return o
+			o.ivars["@msg"] = object.Wrap(&resolvBox{msg: m})
+			return object.Wrap(o)
 		}}
-	dns.consts["DecodeError"] = newClass("Resolv::DNS::DecodeError", object.Kind[*RClass](vm.consts["StandardError"]))
+	dns.consts["DecodeError"] = object.Wrap(newClass("Resolv::DNS::DecodeError", object.Kind[*RClass](vm.consts["StandardError"])))
 
 	mget := func(self object.Value) *resolv.Message {
 		if b, ok := object.KindOK[*resolvBox](getIvar(self, "@msg")); ok && b.msg != nil {
@@ -497,19 +497,19 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 			typ = resolvTypeArg(vm, args[1])
 		}
 		mget(self).AddQuestion(resolvNameArg(vm, args[0]), typ, resolv.ClassIN)
-		return object.NilV
+		return object.NilVal()
 	})
 	msg.define("add_answer", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mget(self).AddAnswer(resolvNameArg(vm, args[0]), uint32(intArg(args[1])), recordOf(args[2]))
-		return object.NilV
+		return object.NilVal()
 	})
 	msg.define("add_authority", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mget(self).AddAuthority(resolvNameArg(vm, args[0]), uint32(intArg(args[1])), recordOf(args[2]))
-		return object.NilV
+		return object.NilVal()
 	})
 	msg.define("add_additional", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mget(self).AddAdditional(resolvNameArg(vm, args[0]), uint32(intArg(args[1])), recordOf(args[2]))
-		return object.NilV
+		return object.NilVal()
 	})
 	msg.define("encode", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := mget(self).Encode()
@@ -523,14 +523,14 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 				break
 			}
 		}
-		return object.NewStringBytesEnc(b, enc)
+		return object.Wrap(object.NewStringBytesEnc(b, enc))
 	})
 	msg.define("question", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		out := []object.Value{}
 		for _, q := range mget(self).Question {
-			out = append(out, object.NewArray(newResolvName(vm.dnsNameClass(), q.Name), resolvTypeClass(vm, byType, q.Type)))
+			out = append(out, object.Wrap(object.NewArray(newResolvName(vm.dnsNameClass(), q.Name), resolvTypeClass(vm, byType, q.Type))))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 	msg.define("answer", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return resolvSectionArray(vm, byType, mget(self).Answer)
@@ -582,12 +582,12 @@ func (b *resolvBox) Truthy() bool    { return true }
 
 // newResolvAddr builds a Resolv::IPv4/IPv6 RObject holding the canonical address.
 func newResolvAddr(cls *RClass, addr string) object.Value {
-	return &RObject{class: cls, ivars: map[string]object.Value{"@addr": object.NewString(addr)}}
+	return object.Wrap(&RObject{class: cls, ivars: map[string]object.Value{"@addr": object.Wrap(object.NewString(addr))}})
 }
 
 // newResolvName wraps a resolv.Name in a Resolv::DNS::Name RObject.
 func newResolvName(cls *RClass, n resolv.Name) object.Value {
-	return &RObject{class: cls, ivars: map[string]object.Value{"@name": &resolvBox{name: n}}}
+	return object.Wrap(&RObject{class: cls, ivars: map[string]object.Value{"@name": object.Wrap(&resolvBox{name: n})}})
 }
 
 // resolvNameOf returns the resolv.Name backing a Resolv::DNS::Name object.
@@ -600,7 +600,7 @@ func resolvNameOf(self object.Value) resolv.Name {
 
 // newRecord wraps a library Resource in its Resolv::DNS::Resource::IN::* RObject.
 func newRecord(cls *RClass, r resolv.Resource) object.Value {
-	return &RObject{class: cls, ivars: map[string]object.Value{"@rec": &resolvBox{record: r}}}
+	return object.Wrap(&RObject{class: cls, ivars: map[string]object.Value{"@rec": object.Wrap(&resolvBox{record: r})}})
 }
 
 // recordOf returns the library Resource backing a record object.
@@ -629,7 +629,7 @@ func (vm *VM) recordClass(byType map[uint16]*RClass, typ uint16) *RClass {
 // resolv.Name.
 func resolvNameArg(vm *VM, v object.Value) resolv.Name {
 	if o, ok := object.KindOK[*RObject](v); ok && o.class == vm.dnsNameClass() {
-		return resolvNameOf(o)
+		return resolvNameOf(object.Wrap(o))
 	}
 	return resolv.NewName(strArg(v))
 }
@@ -662,10 +662,10 @@ func resolvIPv6Of(vm *VM, v object.Value) resolv.IPv6 {
 func resolvAddrString(vm *VM, v object.Value, kind string) object.Value {
 	if o, ok := object.KindOK[*RObject](v); ok {
 		if cls, found := object.KindOK[*RClass](object.Kind[*RClass](vm.consts["Resolv"]).consts[kind]); found && o.class == cls {
-			return getIvar(o, "@addr")
+			return getIvar(object.Wrap(o), "@addr")
 		}
 	}
-	return object.NewString(strArg(v))
+	return object.Wrap(object.NewString(strArg(v)))
 }
 
 // resolvTypeArg maps a Resolv::DNS::Resource::IN::* class argument to its library
@@ -700,25 +700,25 @@ func (vm *VM) recordClassesByType() map[uint16]*RClass {
 
 // resolvTypeClass returns the Resolv::DNS::Resource::IN::* class for a TYPE value.
 func resolvTypeClass(vm *VM, byType map[uint16]*RClass, typ uint16) object.Value {
-	return vm.recordClass(byType, typ)
+	return object.Wrap(vm.recordClass(byType, typ))
 }
 
 // resolvSectionArray renders an RR section as MRI's [[name, ttl, data], ...].
 func resolvSectionArray(vm *VM, byType map[uint16]*RClass, rrs []resolv.RR) object.Value {
 	out := []object.Value{}
 	for _, rr := range rrs {
-		out = append(out, object.NewArray(newResolvName(vm.dnsNameClass(), rr.Name), object.IntValue(int64(rr.TTL)), newRecord(vm.recordClass(byType, rr.Data.TypeValue()), rr.Data)))
+		out = append(out, object.Wrap(object.NewArray(newResolvName(vm.dnsNameClass(), rr.Name), object.IntValue(int64(rr.TTL)), newRecord(vm.recordClass(byType, rr.Data.TypeValue()), rr.Data))))
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // strSliceToArray builds a Ruby Array of Strings from a Go slice.
 func strSliceToArray(ss []string) object.Value {
 	elems := make([]object.Value, len(ss))
 	for i, s := range ss {
-		elems[i] = object.NewString(s)
+		elems[i] = object.Wrap(object.NewString(s))
 	}
-	return object.NewArrayFromSlice(elems)
+	return object.Wrap(object.NewArrayFromSlice(elems))
 }
 
 // splitZone splits an IPv6 textual address into its base and an optional %zone

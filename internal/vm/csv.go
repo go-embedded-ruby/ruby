@@ -77,7 +77,7 @@ func csvTableString(t *libcsv.Table) string {
 func (vm *VM) registerCSV() {
 	cls := newClass("CSV", vm.cObject)
 	vm.cCSV = cls
-	vm.consts["CSV"] = cls
+	vm.consts["CSV"] = object.Wrap(cls)
 
 	vm.registerCSVError(cls)
 	vm.registerCSVRowClass(cls)
@@ -105,8 +105,8 @@ func (vm *VM) registerCSV() {
 func (vm *VM) registerCSVError(cls *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	mErr := newClass("CSV::MalformedCSVError", std)
-	cls.consts["MalformedCSVError"] = mErr
-	vm.consts["CSV::MalformedCSVError"] = mErr
+	cls.consts["MalformedCSVError"] = object.Wrap(mErr)
+	vm.consts["CSV::MalformedCSVError"] = object.Wrap(mErr)
 }
 
 // raiseCSVErr re-raises a library error as the matching Ruby exception: a
@@ -141,9 +141,9 @@ func (vm *VM) registerCSVClassMethods(cls *RClass) {
 		fields, err := libcsv.ParseLine(strArg(args[0]), opts)
 		raiseCSVErr(err)
 		if fields == nil {
-			return object.NilV
+			return object.NilVal()
 		}
-		return vm.csvFieldsToArray(fields)
+		return object.Wrap(vm.csvFieldsToArray(fields))
 	})
 
 	// CSV.parse(str, **opts) -> [[..],..] without headers, or a CSV::Table with
@@ -158,7 +158,7 @@ func (vm *VM) registerCSVClassMethods(cls *RClass) {
 	sm("generate_line", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s, err := libcsv.GenerateLine(vm.csvRowFor(args[0]), vm.csvOptions(args, 1))
 		raiseCSVErr(err)
-		return object.NewString(s)
+		return object.Wrap(object.NewString(s))
 	})
 
 	// CSV.generate(**opts) { |csv| csv << row ... } and CSV.generate(rows, **opts)
@@ -171,7 +171,7 @@ func (vm *VM) registerCSVClassMethods(cls *RClass) {
 	// receiver keeps the binding filesystem-free; CSV.read covers the path case.
 	sm("foreach", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		vm.csvParse(strArg(args[0]), vm.csvOptions(args, 1), blk)
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// CSV.read(path, **opts) reads the file at path and parses it, returning the
@@ -194,24 +194,24 @@ func (vm *VM) csvParse(data string, opts libcsv.Options, blk *Proc) object.Value
 	if tbl, ok := result.(*libcsv.Table); ok {
 		if blk != nil {
 			for _, r := range tbl.Rows {
-				vm.callBlock(blk, []object.Value{&CSVRow{r: r}})
+				vm.callBlock(blk, []object.Value{object.Wrap(&CSVRow{r: r})})
 			}
-			return object.NilV
+			return object.NilVal()
 		}
-		return &CSVTable{t: tbl}
+		return object.Wrap(&CSVTable{t: tbl})
 	}
 	rows, _ := result.([][]any)
 	if blk != nil {
 		for _, row := range rows {
-			vm.callBlock(blk, []object.Value{vm.csvFieldsToArray(row)})
+			vm.callBlock(blk, []object.Value{object.Wrap(vm.csvFieldsToArray(row))})
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	out := make([]object.Value, len(rows))
 	for i, row := range rows {
-		out[i] = vm.csvFieldsToArray(row)
+		out[i] = object.Wrap(vm.csvFieldsToArray(row))
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // csvHasHeaders reports whether the options request headers — true / "first_row"
@@ -237,12 +237,12 @@ func (vm *VM) csvParseLineRow(line string, opts libcsv.Options) object.Value {
 	raiseCSVErr(err)
 	tbl, ok := result.(*libcsv.Table)
 	if !ok {
-		return object.NilV
+		return object.NilVal()
 	}
 	if r, ok := tbl.Row(0); ok {
-		return &CSVRow{r: r}
+		return object.Wrap(&CSVRow{r: r})
 	}
-	return object.NilV
+	return object.NilVal()
 }
 
 // csvGenerate implements CSV.generate: with a block, an accumulator object is
@@ -262,11 +262,11 @@ func (vm *VM) csvGenerate(args []object.Value, blk *Proc) object.Value {
 	opts := vm.csvOptions(args, optsAt)
 	if blk != nil {
 		sink := &csvSink{rows: &rows}
-		vm.callBlock(blk, []object.Value{sink})
+		vm.callBlock(blk, []object.Value{object.Wrap(sink)})
 	}
 	s, err := libcsv.Generate(rows, opts)
 	raiseCSVErr(err)
-	return object.NewString(s)
+	return object.Wrap(object.NewString(s))
 }
 
 // csvSink is the accumulator object CSV.generate yields to its block: its <<
@@ -299,15 +299,15 @@ func (vm *VM) csvFieldsToArray(fields []any) *object.Array {
 func (vm *VM) csvFieldToRuby(f any) object.Value {
 	switch v := f.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case string:
-		return object.NewString(v)
+		return object.Wrap(object.NewString(v))
 	case int:
 		return object.IntValue(int64(v))
 	case float64:
-		return object.Float(v)
+		return object.FloatValue(float64(object.Float(v)))
 	case libcsv.Symbol:
-		return object.Symbol(string(v))
+		return object.SymVal(string(object.Symbol(string(v))))
 	case libcsv.Date:
 		return vm.csvDate(v.Raw)
 	case libcsv.DateTime:
@@ -321,7 +321,7 @@ func (vm *VM) csvFieldToRuby(f any) object.Value {
 		// The library surfaces only the field types enumerated above; anything else
 		// is rendered through one-field generation so the mapping stays total.
 		s, _ := libcsv.GenerateLine([]any{v}, libcsv.Options{})
-		return object.NewString(s)
+		return object.Wrap(object.NewString(s))
 	}
 }
 
@@ -330,7 +330,7 @@ func (vm *VM) csvFieldToRuby(f any) object.Value {
 // shape, leaving the calendar to the binding's Date). A parse failure raises
 // Date::Error, as Date.parse would.
 func (vm *VM) csvDate(raw string) object.Value {
-	return vm.send(vm.cDate, "parse", []object.Value{object.NewString(raw)}, nil)
+	return vm.send(object.Wrap(vm.cDate), "parse", []object.Value{object.Wrap(object.NewString(raw))}, nil)
 }
 
 // csvDateTime re-parses a :date_time / :time converter's raw text: when isTime
@@ -342,7 +342,7 @@ func (vm *VM) csvDateTime(raw string, isTime bool) object.Value {
 	if isTime {
 		cls = vm.cTime
 	}
-	return vm.send(cls, "parse", []object.Value{object.NewString(raw)}, nil)
+	return vm.send(object.Wrap(cls), "parse", []object.Value{object.Wrap(object.NewString(raw))}, nil)
 }
 
 // csvRowFor coerces a Ruby value to a library generate-row ([]any): an Array's
@@ -424,7 +424,7 @@ func (vm *VM) csvOptions(args []object.Value, i int) libcsv.Options {
 	if !ok {
 		return o
 	}
-	get := func(key string) (object.Value, bool) { return h.Get(object.Symbol(key)) }
+	get := func(key string) (object.Value, bool) { return h.Get(object.SymVal(string(object.Symbol(key)))) }
 
 	if v, ok := get("col_sep"); ok {
 		o.ColSep = strArg(v)
@@ -594,8 +594,8 @@ func csvStripOpt(o *libcsv.Options, v object.Value) {
 // the to_a / to_h / headers / field / [] methods, all delegating to the library.
 func (vm *VM) registerCSVRowClass(cls *RClass) {
 	row := newClass("CSV::Row", vm.cObject)
-	cls.consts["Row"] = row
-	vm.consts["CSV::Row"] = row
+	cls.consts["Row"] = object.Wrap(row)
+	vm.consts["CSV::Row"] = object.Wrap(row)
 	vm.cCSVRow = row
 
 	rowOf := func(v object.Value) *libcsv.Row { return object.Kind[*CSVRow](v).r }
@@ -610,36 +610,36 @@ func (vm *VM) registerCSVRowClass(cls *RClass) {
 			if val, ok := r.At(int(n)); ok {
 				return vm.csvFieldToRuby(val)
 			}
-			return object.NilV
+			return object.NilVal()
 		}
 		if val, ok := r.Field(csvLookupKey(args[0])); ok {
 			return vm.csvFieldToRuby(val)
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	d("[]", idx)
 	d("field", idx)
 
 	d("headers", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.csvHeadersArray(rowOf(v).Headers)
+		return object.Wrap(vm.csvHeadersArray(rowOf(v).Headers))
 	})
 	d("fields", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.csvFieldsToArray(rowOf(v).Fields)
+		return object.Wrap(vm.csvFieldsToArray(rowOf(v).Fields))
 	})
 	d("to_a", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.csvRowPairs(rowOf(v))
+		return object.Wrap(vm.csvRowPairs(rowOf(v)))
 	})
 	d("to_h", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.csvRowHash(rowOf(v))
+		return object.Wrap(vm.csvRowHash(rowOf(v)))
 	})
 	d("to_hash", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.csvRowHash(rowOf(v))
+		return object.Wrap(vm.csvRowHash(rowOf(v)))
 	})
 	d("header_row?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(rowOf(v).HeaderRow)
+		return object.BoolValue(bool(object.Bool(rowOf(v).HeaderRow)))
 	})
 	toCSV := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(csvRowString(rowOf(v)))
+		return object.Wrap(object.NewString(csvRowString(rowOf(v))))
 	}
 	d("to_s", toCSV)
 	d("to_csv", toCSV)
@@ -651,7 +651,7 @@ func (vm *VM) registerCSVRowClass(cls *RClass) {
 				f = r.Fields[i]
 			}
 			pair := object.NewArray(vm.csvFieldToRuby(h), vm.csvFieldToRuby(f))
-			vm.callBlock(blk, []object.Value{pair})
+			vm.callBlock(blk, []object.Value{object.Wrap(pair)})
 		}
 		return v
 	})
@@ -700,7 +700,7 @@ func (vm *VM) csvRowPairs(r *libcsv.Row) *object.Array {
 		if i < len(r.Fields) {
 			f = r.Fields[i]
 		}
-		out[i] = object.NewArray(vm.csvFieldToRuby(h), vm.csvFieldToRuby(f))
+		out[i] = object.Wrap(object.NewArray(vm.csvFieldToRuby(h), vm.csvFieldToRuby(f)))
 	}
 	return object.NewArrayFromSlice(out)
 }
@@ -723,33 +723,33 @@ func (vm *VM) csvRowHash(r *libcsv.Row) *object.Hash {
 // to_a / headers / [] / each / size methods, delegating to the library.
 func (vm *VM) registerCSVTableClass(cls *RClass) {
 	tbl := newClass("CSV::Table", vm.cObject)
-	cls.consts["Table"] = tbl
-	vm.consts["CSV::Table"] = tbl
+	cls.consts["Table"] = object.Wrap(tbl)
+	vm.consts["CSV::Table"] = object.Wrap(tbl)
 	vm.cCSVTable = tbl
 
 	tblOf := func(v object.Value) *libcsv.Table { return object.Kind[*CSVTable](v).t }
 	d := func(name string, fn NativeFn) { tbl.define(name, fn) }
 
 	d("headers", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.csvHeadersArray(tblOf(v).Headers)
+		return object.Wrap(vm.csvHeadersArray(tblOf(v).Headers))
 	})
 	d("[]", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if r, ok := tblOf(v).Row(int(intArg(args[0]))); ok {
-			return &CSVRow{r: r}
+			return object.Wrap(&CSVRow{r: r})
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("first", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if r, ok := tblOf(v).Row(0); ok {
-			return &CSVRow{r: r}
+			return object.Wrap(&CSVRow{r: r})
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("to_a", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.csvTableArray(tblOf(v))
+		return object.Wrap(vm.csvTableArray(tblOf(v)))
 	})
 	tblCSV := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(csvTableString(tblOf(v)))
+		return object.Wrap(object.NewString(csvTableString(tblOf(v))))
 	}
 	d("to_s", tblCSV)
 	d("to_csv", tblCSV)
@@ -761,7 +761,7 @@ func (vm *VM) registerCSVTableClass(cls *RClass) {
 	})
 	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		for _, r := range tblOf(v).Rows {
-			vm.callBlock(blk, []object.Value{&CSVRow{r: r}})
+			vm.callBlock(blk, []object.Value{object.Wrap(&CSVRow{r: r})})
 		}
 		return v
 	})
@@ -771,9 +771,9 @@ func (vm *VM) registerCSVTableClass(cls *RClass) {
 // row as an Array of values (MRI's Table#to_a form: [[h1,h2],[v1,v2],...]).
 func (vm *VM) csvTableArray(t *libcsv.Table) *object.Array {
 	out := make([]object.Value, 0, len(t.Rows)+1)
-	out = append(out, vm.csvHeadersArray(t.Headers))
+	out = append(out, object.Wrap(vm.csvHeadersArray(t.Headers)))
 	for _, r := range t.Rows {
-		out = append(out, vm.csvFieldsToArray(r.Fields))
+		out = append(out, object.Wrap(vm.csvFieldsToArray(r.Fields)))
 	}
 	return object.NewArrayFromSlice(out)
 }

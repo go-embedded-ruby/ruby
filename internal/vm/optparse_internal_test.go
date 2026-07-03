@@ -20,7 +20,7 @@ import (
 func TestOptValueToRubyEdges(t *testing.T) {
 	vm := New(&bytes.Buffer{})
 	op := &OptionParser{
-		listVals: map[int][]object.Value{0: {object.Symbol("big")}},
+		listVals: map[int][]object.Value{0: {object.SymVal(string(object.Symbol("big")))}},
 		listKeys: map[int][]string{0: {"big"}},
 	}
 

@@ -26,7 +26,7 @@ import (
 func (vm *VM) registerObservable() {
 	mod := newClass("Observable", nil)
 	mod.isModule = true
-	vm.consts["Observable"] = mod
+	vm.consts["Observable"] = object.Wrap(mod)
 
 	// add_observer(observer, func=:update): register observer, recording the
 	// method to call on notification. Raises NoMethodError (MRI's verbatim
@@ -48,7 +48,7 @@ func (vm *VM) registerObservable() {
 			return raise("NoMethodError", "%s", err.Error())
 		}
 		observerFuncs(self)[obs] = fn
-		return object.Symbol(fn)
+		return object.SymVal(string(object.Symbol(fn)))
 	})
 
 	// delete_observer(observer): remove observer; returns the func that was
@@ -61,9 +61,9 @@ func (vm *VM) registerObservable() {
 		observerRegistry(self).DeleteObserver(obs)
 		delete(funcs, obs)
 		if !had {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.Symbol(fn)
+		return object.SymVal(string(object.Symbol(fn)))
 	})
 
 	// delete_observers: remove every observer; returns the (now empty) hash, as
@@ -71,7 +71,7 @@ func (vm *VM) registerObservable() {
 	mod.define("delete_observers", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		observerRegistry(self).DeleteObservers()
 		clear(observerFuncs(self))
-		return &object.Hash{}
+		return object.Wrap(&object.Hash{})
 	})
 
 	// count_observers: number of registered observers.
@@ -87,12 +87,12 @@ func (vm *VM) registerObservable() {
 			state = args[0].Truthy()
 		}
 		observerRegistry(self).Changed(state)
-		return object.Bool(state)
+		return object.BoolValue(bool(object.Bool(state)))
 	})
 
 	// changed?: whether the state is marked changed.
 	mod.define("changed?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(observerRegistry(self).ChangedQ())
+		return object.BoolValue(bool(object.Bool(observerRegistry(self).ChangedQ())))
 	})
 
 	// notify_observers(*args): when changed?, dispatch each observer's method (in
@@ -102,14 +102,14 @@ func (vm *VM) registerObservable() {
 	mod.define("notify_observers", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		entries, _, ok := observerRegistry(self).NotifyObservers()
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		for _, e := range entries {
 			vm.send(e.Observer.(object.Value), e.Func, args, nil)
 		}
 		// MRI's notify_observers ends with `@observer_state = false`, whose value
 		// (false) is the method's result.
-		return object.Bool(false)
+		return object.BoolValue(bool(object.Bool(false)))
 	})
 }
 
@@ -133,7 +133,7 @@ func observerState(self object.Value) *observerBox {
 		return b
 	}
 	b := &observerBox{reg: &observer.Registry{}, funcs: map[object.Value]string{}}
-	setIvar(self, "@__observer_state", b)
+	setIvar(self, "@__observer_state", object.Wrap(b))
 	return b
 }
 

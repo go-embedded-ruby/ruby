@@ -41,8 +41,8 @@ func (vm *VM) registerDryTypes() {
 
 	types := newClass("Dry::Types", vm.cObject)
 	types.isModule = true
-	dry.consts["Types"] = types
-	vm.consts["Dry::Types"] = types
+	dry.consts["Types"] = object.Wrap(types)
+	vm.consts["Dry::Types"] = object.Wrap(types)
 
 	// Dry::Types[name] resolves a registered type by its dotted name
 	// ("strict.integer", "coercible.string", "params.bool", …).
@@ -62,7 +62,7 @@ func (vm *VM) registerDryTypes() {
 	// `include Dry.Types()`. rbgo exposes the same surface as the Types:: module.
 	dry.smethods["Types"] = &Method{name: "Types", owner: dry,
 		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return types
+			return object.Wrap(types)
 		}}
 
 	// Types::Strict / Coercible / Params / JSON namespaces carry the per-primitive
@@ -83,7 +83,7 @@ func (vm *VM) dryModule() *RClass {
 	}
 	dry := newClass("Dry", nil)
 	dry.isModule = true
-	vm.consts["Dry"] = dry
+	vm.consts["Dry"] = object.Wrap(dry)
 	return dry
 }
 
@@ -93,7 +93,7 @@ func (vm *VM) dryModule() *RClass {
 func (vm *VM) installDryNamespace(types *RClass, name, prefix string) {
 	ns := newClass("Dry::Types::"+name, vm.cObject)
 	ns.isModule = true
-	types.consts[name] = ns
+	types.consts[name] = object.Wrap(ns)
 	// The namespace is also a Types method (Types.Strict) for the gem's
 	// `Types::Strict::Integer`-via-method-call spelling.
 	for _, prim := range dryPrimitives {
@@ -139,8 +139,8 @@ func (vm *VM) registerDryTypesErrors(types *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		types.consts[simple] = c
-		vm.consts[qualified] = c
+		types.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	coerce := reg("CoercionError", "Dry::Types::CoercionError", std)

@@ -72,7 +72,7 @@ func TestYAMLBindDumpUnmapped(t *testing.T) {
 	vm := New(nil)
 	// A Proc has no library mapping; toYAML returns it as-is and the library's
 	// Dump rejects it, which yamlDump turns into a TypeError.
-	re := rubyErr(t, func() { yamlDump(vm, &Proc{}) })
+	re := rubyErr(t, func() { yamlDump(vm, object.Wrap(&Proc{})) })
 	if re.Class != "TypeError" {
 		t.Errorf("class=%q message=%q", re.Class, re.Message)
 	}
@@ -87,7 +87,7 @@ func TestYAMLBindToScalars(t *testing.T) {
 	if v, ok := c.conv(big30).(*big.Int); !ok || v.Sign() <= 0 {
 		t.Errorf("bignum -> %T %v", c.conv(big30), c.conv(big30))
 	}
-	if v := c.conv(object.Float(1.5)); v != float64(1.5) {
+	if v := c.conv(object.FloatValue(float64(object.Float(1.5)))); v != float64(1.5) {
 		t.Errorf("float -> %v", v)
 	}
 	// A Go-nil object.Value maps to a library nil (the defensive first arm).
@@ -98,7 +98,7 @@ func TestYAMLBindToScalars(t *testing.T) {
 	if v := c.convBound(nil); v != nil {
 		t.Errorf("convBound(nil) -> %v", v)
 	}
-	if v := c.convBound(object.Integer(3)); v != int64(3) {
+	if v := c.convBound(object.IntValue(int64(object.Integer(3)))); v != int64(3) {
 		t.Errorf("convBound(3) -> %v", v)
 	}
 }
@@ -135,16 +135,16 @@ func TestYAMLBindToSharedCache(t *testing.T) {
 			}
 		}
 	}
-	arr := &object.Array{Elems: []object.Value{object.Integer(1)}}
-	check("array", arr)
+	arr := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}
+	check("array", object.Wrap(arr))
 	h := object.NewHash()
-	h.Set(object.NewString("k"), object.Integer(1))
-	check("hash", h)
-	check("range", &object.Range{Lo: object.Integer(1), Hi: object.Integer(5)})
-	check("object", &RObject{class: newClass("O", vm.cObject), ivars: map[string]object.Value{"@a": object.Integer(1)}})
+	h.Set(object.Wrap(object.NewString("k")), object.IntValue(int64(object.Integer(1))))
+	check("hash", object.Wrap(h))
+	check("range", object.Wrap(&object.Range{Lo: object.IntValue(int64(object.Integer(1))), Hi: object.IntValue(int64(object.Integer(5)))}))
+	check("object", object.Wrap(&RObject{class: newClass("O", vm.cObject), ivars: map[string]object.Value{"@a": object.IntValue(int64(object.Integer(1)))}}))
 	set := newSet()
-	set.add(object.Integer(1))
-	check("set", set)
+	set.add(object.IntValue(int64(object.Integer(1))))
+	check("set", object.Wrap(set))
 }
 
 // TestYAMLBindIvarBareName covers both arms of ivarBareName (a leading "@" is
@@ -241,8 +241,8 @@ func TestYAMLBindResolveClass(t *testing.T) {
 	}
 	outer := newClass("Outer", vm.cObject)
 	inner := newClass("Inner", vm.cObject)
-	outer.consts["Inner"] = inner
-	vm.cObject.consts["Outer"] = outer
+	outer.consts["Inner"] = object.Wrap(inner)
+	vm.cObject.consts["Outer"] = object.Wrap(outer)
 	if c := vm.yamlResolveClass("Outer::Inner"); c != inner {
 		t.Errorf("qualified known -> %v", c)
 	}
@@ -251,7 +251,7 @@ func TestYAMLBindResolveClass(t *testing.T) {
 		t.Error("placeholder not reused")
 	}
 	// A name that resolves to a non-class constant degrades to a placeholder.
-	vm.cObject.consts["NotAClass"] = object.Integer(5)
+	vm.cObject.consts["NotAClass"] = object.IntValue(int64(object.Integer(5)))
 	if c := vm.yamlResolveClass("NotAClass"); c == nil || c.name != "NotAClass" {
 		t.Errorf("non-class const -> %v", c)
 	}
@@ -271,24 +271,24 @@ func TestYAMLBindPermittedClassesArg(t *testing.T) {
 	if got := permittedClassesArg(nil); got != nil {
 		t.Errorf("no args -> %v", got)
 	}
-	if got := permittedClassesArg([]object.Value{object.Integer(1)}); got != nil {
+	if got := permittedClassesArg([]object.Value{object.IntValue(int64(object.Integer(1)))}); got != nil {
 		t.Errorf("non-hash trailing -> %v", got)
 	}
-	if got := permittedClassesArg([]object.Value{object.NewHash()}); got != nil {
+	if got := permittedClassesArg([]object.Value{object.Wrap(object.NewHash())}); got != nil {
 		t.Errorf("hash without keyword -> %v", got)
 	}
 	// permitted_classes whose value is not an Array is ignored.
 	h := object.NewHash()
-	h.Set(object.Symbol("permitted_classes"), object.Integer(7))
-	if got := permittedClassesArg([]object.Value{h}); got != nil {
+	h.Set(object.SymVal(string(object.Symbol("permitted_classes"))), object.IntValue(int64(object.Integer(7))))
+	if got := permittedClassesArg([]object.Value{object.Wrap(h)}); got != nil {
 		t.Errorf("non-array value -> %v", got)
 	}
 	// A populated list: a Class element lists by name, a String element by to_s.
 	vm := New(nil)
 	h2 := object.NewHash()
-	arr := &object.Array{Elems: []object.Value{vm.consts["String"], object.NewString("Symbol")}}
-	h2.Set(object.Symbol("permitted_classes"), arr)
-	got := permittedClassesArg([]object.Value{h2})
+	arr := &object.Array{Elems: []object.Value{vm.consts["String"], object.Wrap(object.NewString("Symbol"))}}
+	h2.Set(object.SymVal(string(object.Symbol("permitted_classes"))), object.Wrap(arr))
+	got := permittedClassesArg([]object.Value{object.Wrap(h2)})
 	if len(got) != 2 || got[0] != "String" || got[1] != "Symbol" {
 		t.Errorf("populated -> %v", got)
 	}

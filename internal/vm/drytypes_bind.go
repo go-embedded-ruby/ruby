@@ -53,17 +53,17 @@ func dryErrorClass(err error) string {
 // DryType. An unknown name raises ArgumentError, matching the gem's registry miss.
 func dryLookup(name string) object.Value {
 	if fn, ok := dryRegistry[name]; ok {
-		return &DryType{t: fn()}
+		return object.Wrap(&DryType{t: fn()})
 	}
 	// A bare primitive name resolves to its strict type (the gem's default
 	// namespace), so "integer" == "strict.integer".
 	if !strings.Contains(name, ".") {
 		if fn, ok := dryRegistry["strict."+name]; ok {
-			return &DryType{t: fn()}
+			return object.Wrap(&DryType{t: fn()})
 		}
 	}
 	raise("ArgumentError", "Undefined type %q", name)
-	return object.NilV
+	return object.NilVal()
 }
 
 // dryRegistry maps every dotted type name to its library constructor, mirroring
@@ -161,9 +161,9 @@ func dryMetaToHash(vm *VM, m map[string]any) object.Value {
 	sort.Strings(keys)
 	h := object.NewHash()
 	for _, k := range keys {
-		h.Set(object.Symbol(k), dryFromGo(vm, m[k]))
+		h.Set(object.SymVal(string(object.Symbol(k))), dryFromGo(vm, m[k]))
 	}
-	return h
+	return object.Wrap(h)
 }
 
 // dryTypeName renders the Dry::Types[...] lookup argument as its bare name (a
@@ -277,9 +277,9 @@ func dryToGo(v object.Value) any {
 func dryFromGo(vm *VM, v any) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int:
 		return object.IntValue(int64(n))
 	case int64:
@@ -287,35 +287,35 @@ func dryFromGo(vm *VM, v any) object.Value {
 	case *big.Int:
 		return object.NormInt(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case drytypes.Symbol:
-		return object.Symbol(string(n))
+		return object.SymVal(string(object.Symbol(string(n))))
 	case []any:
 		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = dryFromGo(vm, el)
 		}
-		return arr
+		return object.Wrap(arr)
 	case *drytypes.Map:
 		h := object.NewHash()
 		for _, p := range n.Pairs() {
 			h.Set(dryFromGo(vm, p.Key), dryFromGo(vm, p.Val))
 		}
-		return h
+		return object.Wrap(h)
 	case drytypes.Date:
-		return object.NewString(n.String())
+		return object.Wrap(object.NewString(n.String()))
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return object.Wrap(&Time{t: gotime.FromUnix(n.Unix())})
 	case *drystruct.Struct:
 		// A nested struct value: wrap it as a DryStruct reporting the Ruby subclass
 		// named by its StructType (registered when the subclass was defined).
 		cls, _ := object.KindOK[*RClass](vm.consts[n.Type().Name])
-		return &DryStruct{s: n, cls: cls}
+		return object.Wrap(&DryStruct{s: n, cls: cls})
 	}
 	if v == drytypes.Undefined {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NilV
+	return object.NilVal()
 }

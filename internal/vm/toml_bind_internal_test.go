@@ -22,31 +22,31 @@ func TestTOMLToBridge(t *testing.T) {
 	if toTOML(nil) != nil {
 		t.Error("go-nil should map to nil")
 	}
-	if toTOML(object.NilV) != nil {
+	if toTOML(object.NilVal()) != nil {
 		t.Error("object.NilV should map to nil")
 	}
 	if v, ok := toTOML(object.NormInt(big1e30())).(*big.Int); !ok || v.Sign() <= 0 {
 		t.Errorf("bignum -> %T", toTOML(object.NormInt(big1e30())))
 	}
-	if v, ok := toTOML(&Time{t: gotime.FromUnix(42)}).(stdtime.Time); !ok || v.Unix() != 42 {
-		t.Errorf("time -> %T", toTOML(&Time{t: gotime.FromUnix(42)}))
+	if v, ok := toTOML(object.Wrap(&Time{t: gotime.FromUnix(42)})).(stdtime.Time); !ok || v.Unix() != 42 {
+		t.Errorf("time -> %T", toTOML(object.Wrap(&Time{t: gotime.FromUnix(42)})))
 	}
-	if _, ok := toTOML(&Proc{}).(*Proc); !ok {
-		t.Errorf("unmapped -> %T", toTOML(&Proc{}))
+	if _, ok := toTOML(object.Wrap(&Proc{})).(*Proc); !ok {
+		t.Errorf("unmapped -> %T", toTOML(object.Wrap(&Proc{})))
 	}
 }
 
 // TestTOMLKeyBridge covers tomlKey across its Symbol, String and to_s-default
 // arms.
 func TestTOMLKeyBridge(t *testing.T) {
-	if got := tomlKey(object.Symbol("s")); got != "s" {
+	if got := tomlKey(object.SymVal(string(object.Symbol("s")))); got != "s" {
 		t.Errorf("symbol key -> %q", got)
 	}
-	if got := tomlKey(object.NewString("str")); got != "str" {
+	if got := tomlKey(object.Wrap(object.NewString("str"))); got != "str" {
 		t.Errorf("string key -> %q", got)
 	}
 	// A non-Symbol / non-String key renders via to_s.
-	if got := tomlKey(object.Integer(3)); got != "3" {
+	if got := tomlKey(object.IntValue(int64(object.Integer(3)))); got != "3" {
 		t.Errorf("integer key -> %q", got)
 	}
 }
@@ -96,7 +96,7 @@ func TestTOMLFromDefaults(t *testing.T) {
 // TestTOMLSourceArgNonString covers tomlSourceArg's to_s branch for a non-String
 // argument.
 func TestTOMLSourceArgNonString(t *testing.T) {
-	if got := tomlSourceArg(object.Integer(1)); got != "1" {
+	if got := tomlSourceArg(object.IntValue(int64(object.Integer(1)))); got != "1" {
 		t.Errorf("non-string arg -> %q", got)
 	}
 }

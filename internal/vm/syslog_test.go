@@ -41,7 +41,7 @@ func TestSyslogNotImplemented(t *testing.T) {
 		if m == nil {
 			t.Fatalf("Syslog.%s not found", name)
 		}
-		got := catchRaise(func() { m.native(vm, mod, []object.Value{object.NewString("x")}, nil) })
+		got := catchRaise(func() { m.native(vm, object.Wrap(mod), []object.Value{object.Wrap(object.NewString("x"))}, nil) })
 		if got != "NotImplementedError" {
 			t.Fatalf("Syslog.%s: got %q, want NotImplementedError", name, got)
 		}

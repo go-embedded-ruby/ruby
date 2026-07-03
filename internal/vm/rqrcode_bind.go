@@ -77,11 +77,11 @@ func rqrcodeModules(q *rqrcode.QRCode) object.Value {
 	for i, row := range q.Modules {
 		cols := object.NewArrayFromSlice(make([]object.Value, len(row)))
 		for j, dark := range row {
-			cols.Elems[j] = object.Bool(dark)
+			cols.Elems[j] = object.BoolValue(bool(object.Bool(dark)))
 		}
-		rows.Elems[i] = cols
+		rows.Elems[i] = object.Wrap(cols)
 	}
-	return rows
+	return object.Wrap(rows)
 }
 
 // rqrcodeAsSVG maps a renderer-options Hash to a rqrcode.SVGOptions and renders.

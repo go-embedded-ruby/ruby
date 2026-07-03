@@ -135,7 +135,7 @@ func pstoreKey(v object.Value) marshal.Value {
 // pstoreKey), again through the shared Marshal binding.
 func pstoreVal(v marshal.Value) object.Value {
 	if v == nil {
-		return object.NilV
+		return object.NilVal()
 	}
 	return fromMarshalValue(v, map[marshal.Value]object.Value{})
 }
@@ -166,12 +166,12 @@ func (vm *VM) registerPStore() {
 	// qualified top-level name and re-attached as a nested PStore constant.
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	vm.cPStoreError = newClass("PStore::Error", std)
-	vm.consts["PStore::Error"] = vm.cPStoreError
+	vm.consts["PStore::Error"] = object.Wrap(vm.cPStoreError)
 
 	cls := newClass("PStore", vm.cObject)
 	vm.cPStore = cls
-	vm.consts["PStore"] = cls
-	cls.consts["Error"] = vm.cPStoreError
+	vm.consts["PStore"] = object.Wrap(cls)
+	cls.consts["Error"] = object.Wrap(vm.cPStoreError)
 
 	// PStore.new(file, thread_safe=false): a store over file. The file is not
 	// opened until a transaction runs (MRI opens it lazily too).
@@ -189,17 +189,17 @@ func (vm *VM) registerPStore() {
 			if len(args) > 1 {
 				ts = args[1].Truthy()
 			}
-			return &PStore{
+			return object.Wrap(&PStore{
 				path:       path,
 				threadSafe: ts,
 				store:      libpstore.New(&fileBackend{path: path}),
-			}
+			})
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 
 	d("path", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(pstoreSelf(v).path)
+		return object.Wrap(object.NewString(pstoreSelf(v).path))
 	})
 
 	d("transaction", func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
@@ -249,13 +249,13 @@ func (vm *VM) registerPStore() {
 		for i, k := range ks {
 			out[i] = pstoreVal(k)
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 	rootQ := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pstoreSelf(v)
 		ok, err := p.curTx().RootQ(pstoreKey(args[0]))
 		raisePStore(err)
-		return object.Bool(ok)
+		return object.BoolValue(bool(object.Bool(ok)))
 	}
 	d("root?", rootQ)
 	d("key?", rootQ)
@@ -376,12 +376,12 @@ func (p *PStore) transaction(vm *VM, readOnly bool, blk *Proc) object.Value {
 				panic(r)
 			}
 		}()
-		vm.callBlock(blk, []object.Value{p})
+		vm.callBlock(blk, []object.Value{object.Wrap(p)})
 		return nil
 	}
 
 	raisePStore(p.store.Transaction(readOnly, body))
-	return object.NilV
+	return object.NilVal()
 }
 
 // flockFile takes the per-transaction advisory file lock, returning a closure that

@@ -47,7 +47,7 @@ func (p *BCryptPassword) Truthy() bool { return true }
 func (vm *VM) registerBCrypt() {
 	mod := newClass("BCrypt", nil)
 	mod.isModule = true
-	vm.consts["BCrypt"] = mod
+	vm.consts["BCrypt"] = object.Wrap(mod)
 
 	vm.registerBCryptErrors(mod)
 	vm.registerBCryptPassword(mod)
@@ -65,12 +65,12 @@ func (vm *VM) registerBCryptErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	errs := newClass("BCrypt::Errors", nil)
 	errs.isModule = true
-	mod.consts["Errors"] = errs
+	mod.consts["Errors"] = object.Wrap(errs)
 
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		errs.consts[simple] = c
-		vm.consts[qualified] = c
+		errs.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	base := reg("BCryptError", "BCrypt::Errors::BCryptError", std)
@@ -84,7 +84,7 @@ func (vm *VM) registerBCryptErrors(mod *RClass) {
 // the parsed-field readers, and the constant-time secret comparison.
 func (vm *VM) registerBCryptPassword(mod *RClass) {
 	c := newClass("BCrypt::Password", vm.cString)
-	mod.consts["Password"] = c
+	mod.consts["Password"] = object.Wrap(c)
 
 	// BCrypt::Password.create(secret, cost: n) hashes a secret with a fresh salt,
 	// returning a Password. cost: is the gem's option (via the trailing keyword
@@ -93,7 +93,7 @@ func (vm *VM) registerBCryptPassword(mod *RClass) {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			var opts []bcrypt.CreateOption
 			if h := bcryptOptsHash(args[1:]); h != nil {
-				if v, ok := h.Get(object.Symbol("cost")); ok {
+				if v, ok := h.Get(object.SymVal(string(object.Symbol("cost")))); ok {
 					opts = append(opts, bcrypt.WithCost(int(intArg(v))))
 				}
 			}
@@ -101,7 +101,7 @@ func (vm *VM) registerBCryptPassword(mod *RClass) {
 			if err != nil {
 				raiseBCryptError(err)
 			}
-			return &BCryptPassword{cls: c, p: p}
+			return object.Wrap(&BCryptPassword{cls: c, p: p})
 		}}
 
 	// BCrypt::Password.new(hash) parses a stored "$2a$NN$...." hash, raising
@@ -112,13 +112,13 @@ func (vm *VM) registerBCryptPassword(mod *RClass) {
 			if err != nil {
 				raiseBCryptError(err)
 			}
-			return &BCryptPassword{cls: c, p: p}
+			return object.Wrap(&BCryptPassword{cls: c, p: p})
 		}}
 
 	// == compares a candidate secret against the stored hash in constant time
 	// (password == "secret"), matching the gem's Password#== / #is_password?.
 	eq := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*BCryptPassword](self).p.EqualString(strArg(args[0])))
+		return object.BoolValue(bool(object.Bool(object.Kind[*BCryptPassword](self).p.EqualString(strArg(args[0])))))
 	}
 	c.define("==", eq)
 	c.define("is_password?", eq)
@@ -127,21 +127,21 @@ func (vm *VM) registerBCryptPassword(mod *RClass) {
 		return object.IntValue(int64(object.Kind[*BCryptPassword](self).p.Cost()))
 	})
 	c.define("salt", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*BCryptPassword](self).p.Salt())
+		return object.Wrap(object.NewString(object.Kind[*BCryptPassword](self).p.Salt()))
 	})
 	c.define("version", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*BCryptPassword](self).p.Version())
+		return object.Wrap(object.NewString(object.Kind[*BCryptPassword](self).p.Version()))
 	})
 	c.define("checksum", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*BCryptPassword](self).p.Checksum())
+		return object.Wrap(object.NewString(object.Kind[*BCryptPassword](self).p.Checksum()))
 	})
 	toS := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*BCryptPassword](self).p.String())
+		return object.Wrap(object.NewString(object.Kind[*BCryptPassword](self).p.String()))
 	}
 	c.define("to_s", toS)
 	c.define("to_str", toS)
 	c.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*BCryptPassword](self).Inspect())
+		return object.Wrap(object.NewString(object.Kind[*BCryptPassword](self).Inspect()))
 	})
 }
 
@@ -149,7 +149,7 @@ func (vm *VM) registerBCryptPassword(mod *RClass) {
 // and the cost constants, delegating to go-ruby-bcrypt's Engine functions.
 func (vm *VM) registerBCryptEngine(mod *RClass) {
 	e := newClass("BCrypt::Engine", vm.cObject)
-	mod.consts["Engine"] = e
+	mod.consts["Engine"] = object.Wrap(e)
 
 	e.consts["DEFAULT_COST"] = object.IntValue(bcrypt.DefaultCost)
 	e.consts["MIN_COST"] = object.IntValue(bcrypt.MinCost)
@@ -167,7 +167,7 @@ func (vm *VM) registerBCryptEngine(mod *RClass) {
 			if err != nil {
 				raiseBCryptError(err)
 			}
-			return object.NewString(salt)
+			return object.Wrap(object.NewString(salt))
 		}}
 
 	// BCrypt::Engine.hash_secret(secret, salt) → the "$2a$NN$...." hash of secret
@@ -178,16 +178,16 @@ func (vm *VM) registerBCryptEngine(mod *RClass) {
 			if err != nil {
 				raiseBCryptError(err)
 			}
-			return object.NewString(h)
+			return object.Wrap(object.NewString(h))
 		}}
 
 	e.smethods["valid_secret?"] = &Method{name: "valid_secret?", owner: e,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.Bool(bcrypt.ValidSecret([]byte(strArg(args[0]))))
+			return object.BoolValue(bool(object.Bool(bcrypt.ValidSecret([]byte(strArg(args[0]))))))
 		}}
 	e.smethods["valid_salt?"] = &Method{name: "valid_salt?", owner: e,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.Bool(bcrypt.ValidSalt(strArg(args[0])))
+			return object.BoolValue(bool(object.Bool(bcrypt.ValidSalt(strArg(args[0])))))
 		}}
 	e.smethods["autodetect_cost"] = &Method{name: "autodetect_cost", owner: e,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {

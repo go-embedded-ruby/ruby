@@ -21,10 +21,10 @@ import (
 func (vm *VM) registerRuboCopOffense(cop *RClass) {
 	loc := newClass("RuboCop::Cop::Offense::Location", vm.cObject)
 	cls := newClass("RuboCop::Cop::Offense", vm.cObject)
-	cop.consts["Offense"] = cls
-	vm.consts["RuboCop::Cop::Offense"] = cls
-	cls.consts["Location"] = loc
-	vm.consts["RuboCop::Cop::Offense::Location"] = loc
+	cop.consts["Offense"] = object.Wrap(cls)
+	vm.consts["RuboCop::Cop::Offense"] = object.Wrap(cls)
+	cls.consts["Location"] = object.Wrap(loc)
+	vm.consts["RuboCop::Cop::Offense::Location"] = object.Wrap(loc)
 
 	ld := func(name string, fn NativeFn) { loc.define(name, fn) }
 	lself := func(v object.Value) rubocop.Location { return object.Kind[*RuboCopLocation](v).l }
@@ -41,22 +41,22 @@ func (vm *VM) registerRuboCopOffense(cop *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	self := func(v object.Value) rubocop.Offense { return object.Kind[*RuboCopOffense](v).o }
 	d("cop_name", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).CopName)
+		return object.Wrap(object.NewString(self(v).CopName))
 	})
 	d("message", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Message)
+		return object.Wrap(object.NewString(self(v).Message))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).String())
+		return object.Wrap(object.NewString(self(v).String()))
 	})
 	// #severity is the RuboCop severity name (:convention, :warning, …), matching
 	// the gem's RuboCop::Cop::Severity#name.
 	d("severity", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(rubocopSeverityName(self(v).Severity))
+		return object.SymVal(string(object.Symbol(rubocopSeverityName(self(v).Severity))))
 	})
 	// #location returns the offense's Location value object.
 	d("location", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RuboCopLocation{l: self(v).Location}
+		return object.Wrap(&RuboCopLocation{l: self(v).Location})
 	})
 	// #line / #column delegate to the location (the gem's Offense#line/#column).
 	d("line", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -66,13 +66,13 @@ func (vm *VM) registerRuboCopOffense(cop *RClass) {
 		return object.IntValue(int64(self(v).Location.Column))
 	})
 	d("correctable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).Correctable)
+		return object.BoolValue(bool(object.Bool(self(v).Correctable)))
 	})
 	d("corrected?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		// This surface never applies corrections (autocorrect returns a new
 		// source), so a reported offense is never marked corrected, matching an
 		// inspection-only run.
-		return object.False
+		return object.BoolValue(bool(object.False))
 	})
 }
 

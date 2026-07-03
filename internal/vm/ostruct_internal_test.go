@@ -32,7 +32,7 @@ func TestRegisterOstructNoClass(t *testing.T) {
 // @table) yields an empty OpenStruct rather than panicking.
 func TestOstructFromHashNonHash(t *testing.T) {
 	vm := New(&bytes.Buffer{})
-	if got := vm.ostructFromHash(object.NilV).Len(); got != 0 {
+	if got := vm.ostructFromHash(object.NilVal()).Len(); got != 0 {
 		t.Fatalf("non-Hash table: Len = %d, want 0", got)
 	}
 }
@@ -41,13 +41,13 @@ func TestOstructFromHashNonHash(t *testing.T) {
 // is interned by content, and any other value (the default branch) is interned
 // via its #to_s.
 func TestSymKey(t *testing.T) {
-	if got := symKey(object.Symbol("a")); got != ostruct.Symbol("a") {
+	if got := symKey(object.SymVal(string(object.Symbol("a")))); got != ostruct.Symbol("a") {
 		t.Fatalf("Symbol key: got %q", got)
 	}
-	if got := symKey(object.NewString("b")); got != ostruct.Symbol("b") {
+	if got := symKey(object.Wrap(object.NewString("b"))); got != ostruct.Symbol("b") {
 		t.Fatalf("String key: got %q", got)
 	}
-	if got := symKey(object.Integer(7)); got != ostruct.Symbol("7") {
+	if got := symKey(object.IntValue(int64(object.Integer(7)))); got != ostruct.Symbol("7") {
 		t.Fatalf("default (Integer) key: got %q", got)
 	}
 }
@@ -104,7 +104,7 @@ func TestUnwrapVMValue(t *testing.T) {
 		t.Fatal("nil did not unwrap to Ruby nil")
 	}
 	// plain vmValue (a non-dig value: an Integer) -> the wrapped value
-	plain := vm.wrapVMValue(object.Integer(3))
+	plain := vm.wrapVMValue(object.IntValue(int64(object.Integer(3))))
 	if _, ok := plain.(vmValue); !ok {
 		t.Fatalf("Integer wrapped as %T, want vmValue", plain)
 	}
@@ -112,7 +112,7 @@ func TestUnwrapVMValue(t *testing.T) {
 		t.Fatalf("vmValue unwrapped to %q", got.ToS())
 	}
 	// vmDigValue (a dig-responder: an Array) -> the wrapped value
-	dig := vm.wrapVMValue(&object.Array{Elems: []object.Value{object.Integer(1)}})
+	dig := vm.wrapVMValue(object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}))
 	if _, ok := dig.(vmDigValue); !ok {
 		t.Fatalf("Array wrapped as %T, want vmDigValue", dig)
 	}
@@ -137,7 +137,7 @@ func TestWrapVMValueNil(t *testing.T) {
 	if got := vm.wrapVMValue(nil); got != nil {
 		t.Fatalf("Go-nil wrapped to %#v, want nil", got)
 	}
-	if got := vm.wrapVMValue(object.NilV); got != nil {
+	if got := vm.wrapVMValue(object.NilVal()); got != nil {
 		t.Fatalf("Ruby nil wrapped to %#v, want nil", got)
 	}
 }
@@ -147,7 +147,7 @@ func TestWrapVMValueNil(t *testing.T) {
 // stored value.
 func TestVMValueInspectAndClass(t *testing.T) {
 	vm := New(&bytes.Buffer{})
-	w := vmValue{vm: vm, v: object.NewString("x")}
+	w := vmValue{vm: vm, v: object.Wrap(object.NewString("x"))}
 	if got := w.Inspect(); got != `"x"` {
 		t.Fatalf("Inspect = %q, want %q", got, `"x"`)
 	}

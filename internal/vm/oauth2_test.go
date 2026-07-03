@@ -217,14 +217,14 @@ func TestOAuth2ValueObjects(t *testing.T) {
 	}
 
 	// oauth2Options: a non-hash argument yields defaults.
-	if o := oauth2Options([]object.Value{object.Integer(5)}); o.Site != "" {
+	if o := oauth2Options([]object.Value{object.IntValue(int64(object.Integer(5)))}); o.Site != "" {
 		t.Error("oauth2Options non-hash")
 	}
 	// oauth2Name / oauth2Str fall back to to_s for a non-Symbol/String value.
-	if oauth2Name(object.Integer(7)) != "7" {
+	if oauth2Name(object.IntValue(int64(object.Integer(7)))) != "7" {
 		t.Error("oauth2Name fallback")
 	}
-	if oauth2Str(object.Integer(8)) != "8" {
+	if oauth2Str(object.IntValue(int64(object.Integer(8)))) != "8" {
 		t.Error("oauth2Str fallback")
 	}
 	// oauth2AnyToRuby covers every decoded-value shape.
@@ -253,7 +253,7 @@ func TestOAuth2ValueObjects(t *testing.T) {
 // returning "" for a missing positional argument.
 func TestOAuth2ArgAtSkipsHash(t *testing.T) {
 	h := object.NewHash()
-	args := []object.Value{h, object.NewString("first")}
+	args := []object.Value{object.Wrap(h), object.Wrap(object.NewString("first"))}
 	if got := oauth2ArgAt(args, 0); got != "first" {
 		t.Errorf("argAt(0) = %q", got)
 	}

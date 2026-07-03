@@ -63,14 +63,14 @@ func raiseZlib(err error) object.Value {
 func (vm *VM) registerZlib() {
 	mod := newClass("Zlib", nil)
 	mod.isModule = true
-	vm.consts["Zlib"] = mod
+	vm.consts["Zlib"] = object.Wrap(mod)
 
 	// Error hierarchy. Each class is registered both scoped (on the module, for
 	// constant lookup) and flat in vm.consts (so an internal raise(name) finds it).
 	defErr := func(name string, super *RClass) *RClass {
 		c := newClass("Zlib::"+name, super)
-		mod.consts[name] = c
-		vm.consts["Zlib::"+name] = c
+		mod.consts[name] = object.Wrap(c)
+		vm.consts["Zlib::"+name] = object.Wrap(c)
 		return c
 	}
 	zerr := defErr("Error", object.Kind[*RClass](vm.consts["StandardError"]))
@@ -81,8 +81,8 @@ func (vm *VM) registerZlib() {
 	// GzipFile::Error is the class the library names; expose it both as a constant
 	// nested under GzipFile and flat for raising.
 	gzErr := newClass("Zlib::GzipFile::Error", zerr)
-	gzFile.consts["Error"] = gzErr
-	vm.consts["Zlib::GzipFile::Error"] = gzErr
+	gzFile.consts["Error"] = object.Wrap(gzErr)
+	vm.consts["Zlib::GzipFile::Error"] = object.Wrap(gzErr)
 
 	// Level / strategy / flush constants and VERSION. ZLIB_VERSION is host-
 	// dependent in MRI, so it is intentionally not asserted by tests, but the
@@ -105,8 +105,8 @@ func (vm *VM) registerZlib() {
 	for name, v := range ints {
 		mod.consts[name] = object.IntValue(int64(v))
 	}
-	mod.consts["VERSION"] = object.NewString(gozlib.Version)
-	mod.consts["ZLIB_VERSION"] = object.NewString(gozlib.ZlibVersion)
+	mod.consts["VERSION"] = object.Wrap(object.NewString(gozlib.Version))
+	mod.consts["ZLIB_VERSION"] = object.Wrap(object.NewString(gozlib.ZlibVersion))
 
 	// bytesArg returns args[i] as bytes, or empty when absent.
 	bytesArg := func(args []object.Value, i int) []byte {
@@ -147,7 +147,7 @@ func (vm *VM) registerZlib() {
 		if err != nil {
 			raiseZlib(err)
 		}
-		return object.NewStringBytes(out)
+		return object.Wrap(object.NewStringBytes(out))
 	}
 	// Zlib.inflate(data) — one-shot decompress.
 	inflateOneShot := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -155,7 +155,7 @@ func (vm *VM) registerZlib() {
 		if err != nil {
 			raiseZlib(err)
 		}
-		return object.NewStringBytes(out)
+		return object.Wrap(object.NewStringBytes(out))
 	}
 	modFn("deflate", deflateOneShot)
 	modFn("inflate", inflateOneShot)
@@ -167,25 +167,25 @@ func (vm *VM) registerZlib() {
 		if err != nil {
 			raiseZlib(err)
 		}
-		return object.NewStringBytes(out)
+		return object.Wrap(object.NewStringBytes(out))
 	})
 	modFn("gunzip", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		out, err := gozlib.GzipDecompress(bytesArg(args, 0))
 		if err != nil {
 			raiseZlib(err)
 		}
-		return object.NewStringBytes(out)
+		return object.Wrap(object.NewStringBytes(out))
 	})
 
 	// Zlib::Deflate — streaming compressor + the Zlib::Deflate.deflate one-shot.
 	deflate := newClass("Zlib::Deflate", vm.cObject)
-	mod.consts["Deflate"] = deflate
+	mod.consts["Deflate"] = object.Wrap(deflate)
 	deflate.smethods["deflate"] = &Method{name: "deflate", owner: deflate, native: deflateOneShot}
 	deflate.smethods["new"] = &Method{name: "new", owner: deflate,
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 			o := &RObject{class: deflate, ivars: map[string]object.Value{}}
-			vm.send(o, "initialize", args, blk)
-			return o
+			vm.send(object.Wrap(o), "initialize", args, blk)
+			return object.Wrap(o)
 		}}
 	// initialize(level = DEFAULT_COMPRESSION): an out-of-range level raises
 	// Zlib::StreamError, matching MRI.
@@ -195,8 +195,8 @@ func (vm *VM) registerZlib() {
 		if err != nil {
 			raiseZlib(err)
 		}
-		setIvar(self, "@__stream", zlibDeflater{d: d})
-		return object.NilV
+		setIvar(self, "@__stream", object.Wrap(zlibDeflater{d: d}))
+		return object.NilVal()
 	})
 	selfDeflater := func(self object.Value) *gozlib.Deflater {
 		return object.Kind[zlibDeflater](getIvar(self, "@__stream")).d
@@ -206,7 +206,7 @@ func (vm *VM) registerZlib() {
 	// the bytes surfacing on the next read).
 	takePending := func(self object.Value) []byte {
 		if p, ok := object.KindOK[*object.String](getIvar(self, "@__pending")); ok && len(p.Bytes()) > 0 {
-			setIvar(self, "@__pending", object.NilV)
+			setIvar(self, "@__pending", object.NilVal())
 			return p.Bytes()
 		}
 		return nil
@@ -219,7 +219,7 @@ func (vm *VM) registerZlib() {
 		if err != nil {
 			raiseZlib(err)
 		}
-		return object.NewStringBytes(append(takePending(self), out...))
+		return object.Wrap(object.NewStringBytes(append(takePending(self), out...)))
 	})
 	// #<<(data): feed data and return self; the bytes produced are buffered and
 	// surface on the next #deflate / #finish, matching MRI's append idiom.
@@ -228,7 +228,7 @@ func (vm *VM) registerZlib() {
 		if err != nil {
 			raiseZlib(err)
 		}
-		setIvar(self, "@__pending", object.NewStringBytes(append(takePending(self), out...)))
+		setIvar(self, "@__pending", object.Wrap(object.NewStringBytes(append(takePending(self), out...))))
 		return self
 	})
 	// #finish: flush and close the stream, returning any buffered bytes plus the
@@ -237,7 +237,7 @@ func (vm *VM) registerZlib() {
 		// Deflater.Finish never errors (a 2nd #finish returns "", matching MRI's
 		// tolerance), so the result needs no error handling.
 		out, _ := selfDeflater(self).Finish()
-		return object.NewStringBytes(append(takePending(self), out...))
+		return object.Wrap(object.NewStringBytes(append(takePending(self), out...)))
 	})
 	deflate.define("total_in", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(selfDeflater(self).TotalIn())
@@ -249,22 +249,22 @@ func (vm *VM) registerZlib() {
 		return object.IntValue(int64(selfDeflater(self).Adler()))
 	})
 	deflate.define("finished?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(selfDeflater(self).Finished())
+		return object.BoolValue(bool(object.Bool(selfDeflater(self).Finished())))
 	})
 
 	// Zlib::Inflate — streaming decompressor + the Zlib::Inflate.inflate one-shot.
 	inflate := newClass("Zlib::Inflate", vm.cObject)
-	mod.consts["Inflate"] = inflate
+	mod.consts["Inflate"] = object.Wrap(inflate)
 	inflate.smethods["inflate"] = &Method{name: "inflate", owner: inflate, native: inflateOneShot}
 	inflate.smethods["new"] = &Method{name: "new", owner: inflate,
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 			o := &RObject{class: inflate, ivars: map[string]object.Value{}}
-			vm.send(o, "initialize", args, blk)
-			return o
+			vm.send(object.Wrap(o), "initialize", args, blk)
+			return object.Wrap(o)
 		}}
 	inflate.define("initialize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		setIvar(self, "@__stream", zlibInflater{i: gozlib.NewInflater()})
-		return object.NilV
+		setIvar(self, "@__stream", object.Wrap(zlibInflater{i: gozlib.NewInflater()}))
+		return object.NilVal()
 	})
 	selfInflater := func(self object.Value) *gozlib.Inflater {
 		return object.Kind[zlibInflater](getIvar(self, "@__stream")).i
@@ -273,7 +273,7 @@ func (vm *VM) registerZlib() {
 	// so #finish returns them (MRI's #<< buffers; the bytes surface on a read).
 	takeInflated := func(self object.Value) []byte {
 		if p, ok := object.KindOK[*object.String](getIvar(self, "@__pending")); ok && len(p.Bytes()) > 0 {
-			setIvar(self, "@__pending", object.NilV)
+			setIvar(self, "@__pending", object.NilVal())
 			return p.Bytes()
 		}
 		return nil
@@ -285,7 +285,7 @@ func (vm *VM) registerZlib() {
 		if err != nil {
 			raiseZlib(err)
 		}
-		return object.NewStringBytes(append(takeInflated(self), out...))
+		return object.Wrap(object.NewStringBytes(append(takeInflated(self), out...)))
 	})
 	// #<<(data): feed compressed data and return self; the decoded bytes are
 	// buffered and surface on the next #inflate / #finish.
@@ -294,7 +294,7 @@ func (vm *VM) registerZlib() {
 		if err != nil {
 			raiseZlib(err)
 		}
-		setIvar(self, "@__pending", object.NewStringBytes(append(takeInflated(self), out...)))
+		setIvar(self, "@__pending", object.Wrap(object.NewStringBytes(append(takeInflated(self), out...))))
 		return self
 	})
 	inflate.define("finish", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -302,7 +302,7 @@ func (vm *VM) registerZlib() {
 		// (a no-op in this one-shot streaming model); its error is always nil, so
 		// only the buffered #<< output is surfaced here.
 		out, _ := selfInflater(self).Finish()
-		return object.NewStringBytes(append(takeInflated(self), out...))
+		return object.Wrap(object.NewStringBytes(append(takeInflated(self), out...)))
 	})
 	inflate.define("total_in", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(selfInflater(self).TotalIn())
@@ -314,6 +314,6 @@ func (vm *VM) registerZlib() {
 		return object.IntValue(int64(selfInflater(self).Adler()))
 	})
 	inflate.define("finished?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(selfInflater(self).Finished())
+		return object.BoolValue(bool(object.Bool(selfInflater(self).Finished())))
 	})
 }

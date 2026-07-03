@@ -383,11 +383,11 @@ puts s; puts b.join.length`, "200\n0\n"},
 // TestSinatraClassOf covers the RClass, RObject and default (raise) arms.
 func TestSinatraClassOf(t *testing.T) {
 	c := newClass("K", nil)
-	if sinatraClassOf(c) != c {
+	if sinatraClassOf(object.Wrap(c)) != c {
 		t.Error("RClass arm")
 	}
 	obj := &RObject{class: c}
-	if sinatraClassOf(obj) != c {
+	if sinatraClassOf(object.Wrap(obj)) != c {
 		t.Error("RObject arm")
 	}
 	defer func() {
@@ -399,20 +399,20 @@ func TestSinatraClassOf(t *testing.T) {
 			t.Errorf("default arm: got %#v", r)
 		}
 	}()
-	sinatraClassOf(object.Integer(1))
+	sinatraClassOf(object.IntValue(int64(object.Integer(1))))
 }
 
 // TestSinatraPatternHelpers covers the pattern/optional-pattern defaults and
 // sinatraInt / sinatraVerbName / sinatraSettingValue arms directly.
 func TestSinatraPatternHelpers(t *testing.T) {
-	if sinatraPattern(nil) != "/" || sinatraPattern([]object.Value{object.NewString("/p")}) != "/p" {
+	if sinatraPattern(nil) != "/" || sinatraPattern([]object.Value{object.Wrap(object.NewString("/p"))}) != "/p" {
 		t.Error("sinatraPattern")
 	}
-	if sinatraOptPattern(nil) != "" || sinatraOptPattern([]object.Value{object.NewString("/f")}) != "/f" {
+	if sinatraOptPattern(nil) != "" || sinatraOptPattern([]object.Value{object.Wrap(object.NewString("/f"))}) != "/f" {
 		t.Error("sinatraOptPattern")
 	}
-	if sinatraInt(object.Integer(3), 0) != 3 || sinatraInt(object.NewString("7"), 0) != 7 ||
-		sinatraInt(object.NewString("x"), 9) != 9 || sinatraInt(object.NilV, 4) != 4 {
+	if sinatraInt(object.IntValue(int64(object.Integer(3))), 0) != 3 || sinatraInt(object.Wrap(object.NewString("7")), 0) != 7 ||
+		sinatraInt(object.Wrap(object.NewString("x")), 9) != 9 || sinatraInt(object.NilVal(), 4) != 4 {
 		t.Error("sinatraInt")
 	}
 	if sinatraVerbName("GET") != "get" {
@@ -422,11 +422,11 @@ func TestSinatraPatternHelpers(t *testing.T) {
 		in   object.Value
 		want any
 	}{
-		{object.Bool(true), true},
-		{object.Integer(5), 5},
-		{object.NewString("s"), "s"},
-		{object.Symbol("y"), "y"},
-		{object.NilV, ""},
+		{object.BoolValue(bool(object.Bool(true))), true},
+		{object.IntValue(int64(object.Integer(5))), 5},
+		{object.Wrap(object.NewString("s")), "s"},
+		{object.SymVal(string(object.Symbol("y"))), "y"},
+		{object.NilVal(), ""},
 	}
 	for _, c := range checks {
 		if got := sinatraSettingValue(c.in); got != c.want {
@@ -438,10 +438,10 @@ func TestSinatraPatternHelpers(t *testing.T) {
 // TestSinatraHaltArgs covers the Integer / String / Array / ignored arms.
 func TestSinatraHaltArgs(t *testing.T) {
 	got := sinatraHaltArgs([]object.Value{
-		object.Integer(500),
-		object.NewString("body"),
-		&object.Array{Elems: []object.Value{object.NewString("a"), object.Integer(2)}},
-		object.NilV, // ignored
+		object.IntValue(int64(object.Integer(500))),
+		object.Wrap(object.NewString("body")),
+		object.Wrap(&object.Array{Elems: []object.Value{object.Wrap(object.NewString("a")), object.IntValue(int64(object.Integer(2)))}}),
+		object.NilVal(), // ignored
 	})
 	if len(got) != 3 {
 		t.Fatalf("len=%d want 3 (%#v)", len(got), got)
@@ -457,7 +457,7 @@ func TestSinatraHaltArgs(t *testing.T) {
 
 // TestSinatraStr covers the String / Symbol / default arms.
 func TestSinatraStr(t *testing.T) {
-	if sinatraStr(object.NewString("x")) != "x" || sinatraStr(object.Symbol("y")) != "y" || sinatraStr(object.Integer(3)) != "3" {
+	if sinatraStr(object.Wrap(object.NewString("x"))) != "x" || sinatraStr(object.SymVal(string(object.Symbol("y")))) != "y" || sinatraStr(object.IntValue(int64(object.Integer(3)))) != "3" {
 		t.Error("sinatraStr arms")
 	}
 }
@@ -488,10 +488,10 @@ func TestSinatraParamsHashDirect(t *testing.T) {
 	if captured == nil {
 		t.Fatal("action not invoked")
 	}
-	if v, ok := captured.Get(object.NewString("n")); !ok || object.Kind[*object.String](v).Str() != "1" {
+	if v, ok := captured.Get(object.Wrap(object.NewString("n"))); !ok || object.Kind[*object.String](v).Str() != "1" {
 		t.Errorf("scalar param missing: %#v", v)
 	}
-	if v, ok := captured.Get(object.NewString("splat")); !ok {
+	if v, ok := captured.Get(object.Wrap(object.NewString("splat"))); !ok {
 		t.Errorf("splat param missing")
 	} else if _, isArr := object.KindOK[*object.Array](v); !isArr {
 		t.Errorf("splat should be an Array, got %#v", v)

@@ -168,7 +168,7 @@ func (b *Bag) toArray() object.Value {
 			out = append(out, e.val)
 		}
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // distinctArray materialises the distinct members into a Ruby Array (each once),
@@ -187,7 +187,7 @@ func (b *Bag) distinctArray() object.Value {
 	for i, e := range entries {
 		out[i] = e.val
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // sortedKeys returns the canonical keys ordered by their member's inspected
@@ -210,10 +210,10 @@ func bagOp(op bytecode.Op, a *Bag, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
 		bb := bagArg(b)
-		return fromBag(a.b.Sum(bb.b), a, bb)
+		return object.Wrap(fromBag(a.b.Sum(bb.b), a, bb))
 	case bytecode.OpSub:
 		bb := bagArg(b)
-		return fromBag(a.b.Difference(bb.b), a, bb)
+		return object.Wrap(fromBag(a.b.Difference(bb.b), a, bb))
 	}
 	return raise("NoMethodError", "undefined method '%s' for a Bag", op)
 }
@@ -221,7 +221,7 @@ func bagOp(op bytecode.Op, a *Bag, b object.Value) object.Value {
 // registerBag installs the Bag class, its constructor and instance methods.
 func (vm *VM) registerBag() {
 	vm.cBag = newClass("Bag", vm.cObject)
-	vm.consts["Bag"] = vm.cBag
+	vm.consts["Bag"] = object.Wrap(vm.cBag)
 
 	// Bag.new(enumerable=nil): empty, or seeded from an Array/Set/Bag (an Array
 	// or Bag seeds with multiplicity).
@@ -233,7 +233,7 @@ func (vm *VM) registerBag() {
 					bag.seed(args[0])
 				}
 			}
-			return bag
+			return object.Wrap(bag)
 		}}
 	// Bag[a, b, …] builds a Bag from its arguments, counting duplicates.
 	vm.cBag.smethods["[]"] = &Method{name: "[]", owner: vm.cBag,
@@ -242,7 +242,7 @@ func (vm *VM) registerBag() {
 			for _, a := range args {
 				bag.add(a)
 			}
-			return bag
+			return object.Wrap(bag)
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cBag.define(name, fn) }
@@ -251,7 +251,7 @@ func (vm *VM) registerBag() {
 	addFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		bag := self(v)
 		bag.add(args[0])
-		return bag
+		return object.Wrap(bag)
 	}
 	d("add", addFn)
 	d("<<", addFn)
@@ -259,7 +259,7 @@ func (vm *VM) registerBag() {
 	removeFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		bag := self(v)
 		bag.remove(args[0])
-		return bag
+		return object.Wrap(bag)
 	}
 	d("remove", removeFn)
 	d("delete", removeFn)
@@ -269,7 +269,7 @@ func (vm *VM) registerBag() {
 	})
 
 	includeFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).b.Has(setKey(args[0])))
+		return object.BoolValue(bool(object.Bool(self(v).b.Has(setKey(args[0])))))
 	}
 	d("include?", includeFn)
 	d("member?", includeFn)
@@ -284,13 +284,13 @@ func (vm *VM) registerBag() {
 		return object.IntValue(int64(self(v).b.DistinctLen()))
 	})
 	d("empty?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).b.IsEmpty())
+		return object.BoolValue(bool(object.Bool(self(v).b.IsEmpty())))
 	})
 	d("clear", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		bag := self(v)
 		bag.b = gobag.New()
 		bag.vals = map[any]object.Value{}
-		return bag
+		return object.Wrap(bag)
 	})
 
 	// each yields a two-element [item, count] Array per distinct member, in a
@@ -302,9 +302,9 @@ func (vm *VM) registerBag() {
 		bag := self(v)
 		for _, k := range bag.sortedKeys() {
 			pair := object.NewArray(bag.vals[k], object.IntValue(int64(bag.b.Count(k))))
-			vm.callBlock(blk, []object.Value{pair})
+			vm.callBlock(blk, []object.Value{object.Wrap(pair)})
 		}
-		return bag
+		return object.Wrap(bag)
 	})
 	d("to_a", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self(v).toArray()
@@ -315,27 +315,27 @@ func (vm *VM) registerBag() {
 
 	sumFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), bagArg(args[0])
-		return fromBag(a.b.Sum(b.b), a, b)
+		return object.Wrap(fromBag(a.b.Sum(b.b), a, b))
 	}
 	d("+", sumFn)
 
 	unionFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), bagArg(args[0])
-		return fromBag(a.b.Union(b.b), a, b)
+		return object.Wrap(fromBag(a.b.Union(b.b), a, b))
 	}
 	d("|", unionFn)
 	d("union", unionFn)
 
 	interFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), bagArg(args[0])
-		return fromBag(a.b.Intersection(b.b), a, b)
+		return object.Wrap(fromBag(a.b.Intersection(b.b), a, b))
 	}
 	d("&", interFn)
 	d("intersection", interFn)
 
 	diffFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := self(v), bagArg(args[0])
-		return fromBag(a.b.Difference(b.b), a, b)
+		return object.Wrap(fromBag(a.b.Difference(b.b), a, b))
 	}
 	d("-", diffFn)
 	d("difference", diffFn)
@@ -343,9 +343,9 @@ func (vm *VM) registerBag() {
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		b, ok := object.KindOK[*Bag](args[0])
 		if !ok {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		return object.Bool(self(v).b.Equal(b.b))
+		return object.BoolValue(bool(object.Bool(self(v).b.Equal(b.b))))
 	})
 
 	// most_common(n=nil): an Array of [item, count] pairs ordered by count
@@ -384,15 +384,15 @@ func (vm *VM) registerBag() {
 		}
 		out := make([]object.Value, len(entries))
 		for i, e := range entries {
-			out[i] = object.NewArray(e.val, object.IntValue(int64(e.count)))
+			out[i] = object.Wrap(object.NewArray(e.val, object.IntValue(int64(e.count))))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).repr())
+		return object.Wrap(object.NewString(self(v).repr()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).repr())
+		return object.Wrap(object.NewString(self(v).repr()))
 	})
 }

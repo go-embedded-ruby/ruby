@@ -39,10 +39,10 @@ func (l *LazyEnum) with(op lazyOp) *LazyEnum {
 
 func (vm *VM) registerLazy() {
 	vm.cLazy = newClass("Enumerator::Lazy", vm.cEnumerator)
-	vm.cEnumerator.consts["Lazy"] = vm.cLazy
+	vm.cEnumerator.consts["Lazy"] = object.Wrap(vm.cLazy)
 
 	makeLazy := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &LazyEnum{recv: self}
+		return object.Wrap(&LazyEnum{recv: self})
 	}
 	// Sources that lazy iteration can drive directly. (#lazy on a Lazy is itself,
 	// defined separately below.)
@@ -57,7 +57,7 @@ func (vm *VM) registerLazy() {
 			if blk == nil {
 				raise("ArgumentError", "tried to call lazy %s without a block", kind)
 			}
-			return object.Kind[*LazyEnum](self).with(lazyOp{kind: kind, blk: blk})
+			return object.Wrap(object.Kind[*LazyEnum](self).with(lazyOp{kind: kind, blk: blk}))
 		}
 	}
 	d("map", chain("map"))
@@ -69,15 +69,15 @@ func (vm *VM) registerLazy() {
 	d("take_while", chain("take_while"))
 	d("drop_while", chain("drop_while"))
 	d("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Kind[*LazyEnum](self).with(lazyOp{kind: "take", n: int(intArg(args[0]))})
+		return object.Wrap(object.Kind[*LazyEnum](self).with(lazyOp{kind: "take", n: int(intArg(args[0]))}))
 	})
 	d("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Kind[*LazyEnum](self).with(lazyOp{kind: "drop", n: int(intArg(args[0]))})
+		return object.Wrap(object.Kind[*LazyEnum](self).with(lazyOp{kind: "drop", n: int(intArg(args[0]))}))
 	})
 	d("lazy", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
 
 	toA := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.lazyForce(object.Kind[*LazyEnum](self), -1))
+		return object.Wrap(object.NewArrayFromSlice(vm.lazyForce(object.Kind[*LazyEnum](self), -1)))
 	}
 	d("to_a", toA)
 	d("force", toA)
@@ -85,21 +85,21 @@ func (vm *VM) registerLazy() {
 		if len(args) == 0 {
 			got := vm.lazyForce(object.Kind[*LazyEnum](self), 1)
 			if len(got) == 0 {
-				return object.NilV
+				return object.NilVal()
 			}
 			return got[0]
 		}
-		return object.NewArrayFromSlice(vm.lazyForce(object.Kind[*LazyEnum](self), int(intArg(args[0]))))
+		return object.Wrap(object.NewArrayFromSlice(vm.lazyForce(object.Kind[*LazyEnum](self), int(intArg(args[0])))))
 	})
 	d("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		l := object.Kind[*LazyEnum](self)
 		if blk == nil {
-			return l
+			return object.Wrap(l)
 		}
 		for _, v := range vm.lazyForce(l, -1) {
 			vm.callBlock(blk, []object.Value{v})
 		}
-		return l
+		return object.Wrap(l)
 	})
 }
 

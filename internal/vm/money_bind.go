@@ -49,7 +49,7 @@ func moneyResult(out *money.Money, err error) object.Value {
 	if err != nil {
 		raise("Money::DifferentCurrencyError", "%s", err.Error())
 	}
-	return &Money{m: out}
+	return object.Wrap(&Money{m: out})
 }
 
 // currencyArg coerces a currency argument (a String / Symbol id, or a
@@ -137,9 +137,9 @@ func moneyInt64Slice(v object.Value) []int64 {
 func moneySlice(ms []*money.Money) object.Value {
 	arr := object.NewArrayFromSlice(make([]object.Value, len(ms)))
 	for i, m := range ms {
-		arr.Elems[i] = &Money{m: m}
+		arr.Elems[i] = object.Wrap(&Money{m: m})
 	}
-	return arr
+	return object.Wrap(arr)
 }
 
 // ratToFloat renders a *big.Rat as the nearest float64 (Money#amount is a
@@ -171,7 +171,7 @@ func moneyFormatOpts(h *object.Hash) money.Options {
 	o.WithCurrency = boolOpt(h, "with_currency")
 	o.DropTrailingZeros = boolOpt(h, "drop_trailing_zeros")
 	o.SignPositive = boolOpt(h, "sign_positive")
-	if v, ok := h.Get(object.Symbol("symbol")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("symbol")))); ok {
 		{
 			__sw101 := v
 			switch {
@@ -195,7 +195,7 @@ func moneyFormatOpts(h *object.Hash) money.Options {
 
 // boolOpt reads a boolean option keyed by a Symbol, defaulting to false.
 func boolOpt(h *object.Hash, key string) bool {
-	if v, ok := h.Get(object.Symbol(key)); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol(key)))); ok {
 		return v.Truthy()
 	}
 	return false

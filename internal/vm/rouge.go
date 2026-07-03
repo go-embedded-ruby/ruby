@@ -20,7 +20,7 @@ import (
 func (vm *VM) registerRouge() {
 	mod := newClass("Rouge", nil)
 	mod.isModule = true
-	vm.consts["Rouge"] = mod
+	vm.consts["Rouge"] = object.Wrap(mod)
 	vm.registerRougeErrors(mod)
 
 	// Rouge.highlight(text, lexer = "text", formatter = "html") tokenizes text with
@@ -39,15 +39,15 @@ func (vm *VM) registerRouge() {
 			if len(args) > 2 {
 				formatter = rougeNameArg(args[2])
 			}
-			return object.NewString(rougeHighlight(rougeStringArg(args[0]), lexer, formatter))
+			return object.Wrap(object.NewString(rougeHighlight(rougeStringArg(args[0]), lexer, formatter)))
 		}}
 
 	// Rouge::Lexer is the lexer-lookup class: Lexer.find(name) returns a lexer
 	// instance (a thin wrapper exposing #tag / #title / #aliases) or nil, mirroring
 	// Rouge::Lexer.find.
 	lexerCls := newClass("Lexer", vm.cObject)
-	mod.consts["Lexer"] = lexerCls
-	vm.consts["Rouge::Lexer"] = lexerCls
+	mod.consts["Lexer"] = object.Wrap(lexerCls)
+	vm.consts["Rouge::Lexer"] = object.Wrap(lexerCls)
 	lexerCls.smethods["find"] = &Method{name: "find", owner: lexerCls,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			if len(args) == 0 {
@@ -59,18 +59,18 @@ func (vm *VM) registerRouge() {
 	// Rouge::Lexer#tag / #title / #aliases expose the found lexer's metadata,
 	// reading the native lexer handle stored on the instance.
 	lexerCls.define("tag", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(rougeLexerHandle(self).lx.Tag())
+		return object.Wrap(object.NewString(rougeLexerHandle(self).lx.Tag()))
 	})
 	lexerCls.define("title", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(rougeLexerHandle(self).lx.Title())
+		return object.Wrap(object.NewString(rougeLexerHandle(self).lx.Title()))
 	})
 	lexerCls.define("aliases", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		al := rougeLexerHandle(self).lx.Aliases()
 		out := object.NewArrayFromSlice(make([]object.Value, len(al)))
 		for i, a := range al {
-			out.Elems[i] = object.NewString(a)
+			out.Elems[i] = object.Wrap(object.NewString(a))
 		}
-		return out
+		return object.Wrap(out)
 	})
 
 	// Rouge::Formatter.find(tag) returns whether a formatter is registered under
@@ -78,8 +78,8 @@ func (vm *VM) registerRouge() {
 	// resolving a formatter class). rbgo models a formatter by its tag name, which
 	// is all Rouge.highlight needs.
 	fmtCls := newClass("Formatter", vm.cObject)
-	mod.consts["Formatter"] = fmtCls
-	vm.consts["Rouge::Formatter"] = fmtCls
+	mod.consts["Formatter"] = object.Wrap(fmtCls)
+	vm.consts["Rouge::Formatter"] = object.Wrap(fmtCls)
 	fmtCls.smethods["find"] = &Method{name: "find", owner: fmtCls,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			if len(args) == 0 {
@@ -97,8 +97,8 @@ func (vm *VM) registerRouge() {
 func (vm *VM) registerRougeErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("Rouge::Error", std)
-	mod.consts["Error"] = c
-	vm.consts["Rouge::Error"] = c
+	mod.consts["Error"] = object.Wrap(c)
+	vm.consts["Rouge::Error"] = object.Wrap(c)
 }
 
 // rougeStringArg coerces the highlight source argument to its text string: a String

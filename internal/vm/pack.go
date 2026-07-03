@@ -24,17 +24,17 @@ func (vm *VM) registerPackUnpack() {
 	vm.cArray.define("pack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		elems := object.Kind[*object.Array](self).Elems
 		fmtStr := packFormat(args)
-		return object.NewStringBytesEnc(packBytes(elems, fmtStr), "ASCII-8BIT")
+		return object.Wrap(object.NewStringBytesEnc(packBytes(elems, fmtStr), "ASCII-8BIT"))
 	})
 	vm.cString.define("unpack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := object.Kind[*object.String](self).Bytes()
-		return object.NewArrayFromSlice(unpackElems(data, packFormat(args)))
+		return object.Wrap(object.NewArrayFromSlice(unpackElems(data, packFormat(args))))
 	})
 	vm.cString.define("unpack1", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := object.Kind[*object.String](self).Bytes()
 		elems := unpackElems(data, packFormat(args))
 		if len(elems) == 0 {
-			return object.NilV
+			return object.NilVal()
 		}
 		return elems[0]
 	})
@@ -306,7 +306,7 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			}
 			for k := 0; k < count; k++ {
 				if pos+w > len(data) {
-					out = append(out, object.NilV)
+					out = append(out, object.NilVal())
 					continue
 				}
 				out = append(out, object.IntValue(getInt(data[pos:pos+w], d.code)))
@@ -338,14 +338,14 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 				seg = data[pos:end]
 				pos = end
 			}
-			out = append(out, object.NewString(unpackString(seg, d.code)))
+			out = append(out, object.Wrap(object.NewString(unpackString(seg, d.code))))
 		case d.code == 'H' || d.code == 'h':
 			n := d.count
 			avail := (len(data) - pos) * 2
 			if d.star || n > avail {
 				n = avail
 			}
-			out = append(out, object.NewString(unpackHex(data[pos:], d.code, n)))
+			out = append(out, object.Wrap(object.NewString(unpackHex(data[pos:], d.code, n))))
 			pos += (n + 1) / 2
 		}
 	}

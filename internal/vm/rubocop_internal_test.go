@@ -36,13 +36,13 @@ func TestRuboCopSeverityName(t *testing.T) {
 
 // TestRuboCopStr covers the String / Symbol / default (to_s) arms of rubocopStr.
 func TestRuboCopStr(t *testing.T) {
-	if s := rubocopStr(object.NewString("x")); s != "x" {
+	if s := rubocopStr(object.Wrap(object.NewString("x"))); s != "x" {
 		t.Errorf("string -> %q", s)
 	}
-	if s := rubocopStr(object.Symbol("sym")); s != "sym" {
+	if s := rubocopStr(object.SymVal(string(object.Symbol("sym")))); s != "sym" {
 		t.Errorf("symbol -> %q", s)
 	}
-	if s := rubocopStr(object.Integer(7)); s != "7" {
+	if s := rubocopStr(object.IntValue(int64(object.Integer(7)))); s != "7" {
 		t.Errorf("default to_s -> %q", s)
 	}
 }

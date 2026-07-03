@@ -14,7 +14,7 @@ import (
 // bareVM builds a bootstrapped VM without loading the prelude, so prelude
 // loader behaviour can be exercised in isolation.
 func bareVM() *VM {
-	vm := &VM{out: io.Discard, errOut: io.Discard, main: object.NewMain(),
+	vm := &VM{out: io.Discard, errOut: io.Discard, main: object.Wrap(object.NewMain()),
 		consts: map[string]object.Value{}, globals: map[string]object.Value{}, loaded: map[string]bool{}}
 	vm.bootstrap()
 	return vm
@@ -68,10 +68,10 @@ func TestExceptionObjectFallback(t *testing.T) {
 }
 
 func TestRubyEqualValueTypes(t *testing.T) {
-	if !rubyEqual(object.Integer(5), object.Integer(5)) {
+	if !rubyEqual(object.IntValue(int64(object.Integer(5))), object.IntValue(int64(object.Integer(5)))) {
 		t.Error("5 == 5 should be true")
 	}
-	if rubyEqual(object.Integer(5), object.NewString("x")) {
+	if rubyEqual(object.IntValue(int64(object.Integer(5))), object.Wrap(object.NewString("x"))) {
 		t.Error("5 == \"x\" should be false")
 	}
 }

@@ -52,9 +52,9 @@ func (r *RackResponse) Truthy() bool    { return true }
 func (vm *VM) registerRack() {
 	mod := newClass("Rack", nil)
 	mod.isModule = true
-	vm.consts["Rack"] = mod
+	vm.consts["Rack"] = object.Wrap(mod)
 
-	mod.consts["RELEASE"] = object.NewString(rackRelease)
+	mod.consts["RELEASE"] = object.Wrap(object.NewString(rackRelease))
 
 	vm.registerRackRequest(mod)
 	vm.registerRackResponse(mod)
@@ -64,14 +64,14 @@ func (vm *VM) registerRack() {
 // registerRackRequest installs Rack::Request and its accessor methods.
 func (vm *VM) registerRackRequest(mod *RClass) {
 	cls := newClass("Rack::Request", vm.cObject)
-	mod.consts["Request"] = cls
-	vm.consts["Rack::Request"] = cls
+	mod.consts["Request"] = object.Wrap(cls)
+	vm.consts["Rack::Request"] = object.Wrap(cls)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &RackRequest{req: rack.NewRequest(rackEnv(args[0])), cls: cls}
+		return object.Wrap(&RackRequest{req: rack.NewRequest(rackEnv(args[0])), cls: cls})
 	}}
 
 	self := func(v object.Value) *rack.Request { return object.Kind[*RackRequest](v).req }
@@ -79,7 +79,7 @@ func (vm *VM) registerRackRequest(mod *RClass) {
 	// String accessors straight off the env.
 	str := func(fn func(*rack.Request) string) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.NewString(fn(self(v)))
+			return object.Wrap(object.NewString(fn(self(v))))
 		}
 	}
 	cls.define("request_method", str((*rack.Request).RequestMethod))
@@ -101,7 +101,7 @@ func (vm *VM) registerRackRequest(mod *RClass) {
 	// Boolean predicates.
 	boolean := func(fn func(*rack.Request) bool) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Bool(fn(self(v)))
+			return object.BoolValue(bool(object.Bool(fn(self(v)))))
 		}
 	}
 	cls.define("get?", boolean((*rack.Request).IsGet))
@@ -125,7 +125,7 @@ func (vm *VM) registerRackRequest(mod *RClass) {
 		}
 		raw, ok := self(v).GetHeaderRaw(rackStr(args[0]))
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return rackFromGo(raw)
 	})
@@ -133,7 +133,7 @@ func (vm *VM) registerRackRequest(mod *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return object.Bool(self(v).HasHeader(rackStr(args[0])))
+		return object.BoolValue(bool(object.Bool(self(v).HasHeader(rackStr(args[0])))))
 	})
 
 	// Parsed params as Ruby Hashes.
@@ -141,7 +141,7 @@ func (vm *VM) registerRackRequest(mod *RClass) {
 	cls.define("GET", rackParamsMethod((*rack.Request).GET))
 	cls.define("POST", rackParamsMethod((*rack.Request).POST))
 	cls.define("cookies", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return rackParamsToHash(self(v).Cookies())
+		return object.Wrap(rackParamsToHash(self(v).Cookies()))
 	})
 }
 
@@ -153,15 +153,15 @@ func rackParamsMethod(fn func(*rack.Request) (*rack.Params, error)) NativeFn {
 		if err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
-		return rackParamsToHash(p)
+		return object.Wrap(rackParamsToHash(p))
 	}
 }
 
 // registerRackResponse installs Rack::Response and its buffering surface.
 func (vm *VM) registerRackResponse(mod *RClass) {
 	cls := newClass("Rack::Response", vm.cObject)
-	mod.consts["Response"] = cls
-	vm.consts["Rack::Response"] = cls
+	mod.consts["Response"] = object.Wrap(cls)
+	vm.consts["Rack::Response"] = object.Wrap(cls)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		body := rackResponseBody(args)
@@ -173,7 +173,7 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 		if len(args) > 2 {
 			headers = rackHeadersFrom(args[2])
 		}
-		return &RackResponse{resp: rack.NewResponse(body, status, headers), cls: cls}
+		return object.Wrap(&RackResponse{resp: rack.NewResponse(body, status, headers), cls: cls})
 	}}
 
 	self := func(v object.Value) *rack.Response { return object.Kind[*RackResponse](v).resp }
@@ -181,7 +181,7 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 	cls.define("write", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		chunk := rackStr(rackArg(args))
 		self(v).Write(chunk)
-		return object.NewString(chunk)
+		return object.Wrap(object.NewString(chunk))
 	})
 	cls.define("status", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).Status()))
@@ -191,7 +191,7 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 		return rackArg(args)
 	})
 	cls.define("headers", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return rackHeadersToHash(self(v).Headers())
+		return object.Wrap(rackHeadersToHash(self(v).Headers()))
 	})
 	cls.define("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -214,14 +214,14 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 		return args[1]
 	})
 	cls.define("content_type", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).ContentType())
+		return object.Wrap(object.NewString(self(v).ContentType()))
 	})
 	cls.define("content_type=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).SetContentType(rackStr(rackArg(args)))
 		return rackArg(args)
 	})
 	cls.define("location", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Location())
+		return object.Wrap(object.NewString(self(v).Location()))
 	})
 	cls.define("redirect", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
@@ -232,24 +232,24 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 			status = rackInt(args[1], 302)
 		}
 		self(v).Redirect(rackStr(args[0]), status)
-		return object.NilV
+		return object.NilVal()
 	})
 	cls.define("body", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return rackBodyArray(self(v).Body())
+		return object.Wrap(rackBodyArray(self(v).Body()))
 	})
 	cls.define("empty?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).Empty())
+		return object.BoolValue(bool(object.Bool(self(v).Empty())))
 	})
 	cls.define("finish", rackFinishMethod(self))
 	cls.define("to_a", rackFinishMethod(self))
 	cls.define("redirect?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).IsRedirect())
+		return object.BoolValue(bool(object.Bool(self(v).IsRedirect())))
 	})
 	cls.define("ok?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).OK())
+		return object.BoolValue(bool(object.Bool(self(v).OK())))
 	})
 	cls.define("not_found?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).NotFound())
+		return object.BoolValue(bool(object.Bool(self(v).NotFound())))
 	})
 }
 
@@ -258,7 +258,7 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 func rackFinishMethod(self func(object.Value) *rack.Response) NativeFn {
 	return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		status, headers, body := self(v).Finish()
-		return object.NewArray(object.IntValue(int64(status)), rackHeadersToHash(headers), rackBodyArray(body))
+		return object.Wrap(object.NewArray(object.IntValue(int64(status)), object.Wrap(rackHeadersToHash(headers)), object.Wrap(rackBodyArray(body))))
 	}
 }
 
@@ -267,14 +267,14 @@ func rackFinishMethod(self func(object.Value) *rack.Response) NativeFn {
 func (vm *VM) registerRackUtils(mod *RClass) {
 	util := newClass("Rack::Utils", nil)
 	util.isModule = true
-	mod.consts["Utils"] = util
-	vm.consts["Rack::Utils"] = util
+	mod.consts["Utils"] = object.Wrap(util)
+	vm.consts["Rack::Utils"] = object.Wrap(util)
 
 	def := func(name string, fn NativeFn) { util.smethods[name] = &Method{name: name, owner: util, native: fn} }
 
 	strFn := func(fn func(string) string) NativeFn {
 		return func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(fn(rackStr(rackArg(args))))
+			return object.Wrap(object.NewString(fn(rackStr(rackArg(args)))))
 		}
 	}
 	def("escape", strFn(rack.Escape))
@@ -287,17 +287,17 @@ func (vm *VM) registerRackUtils(mod *RClass) {
 		if err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
-		return object.NewString(s)
+		return object.Wrap(object.NewString(s))
 	})
 	def("parse_query", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p, err := rack.ParseQuery(rackStr(rackArg(args)), "&")
 		if err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
-		return rackParamsToHash(p)
+		return object.Wrap(rackParamsToHash(p))
 	})
 	def("build_query", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(rack.BuildQuery(rackParamsFromHash(rackArg(args))))
+		return object.Wrap(object.NewString(rack.BuildQuery(rackParamsFromHash(rackArg(args)))))
 	})
 	def("status_code", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(rackInt(rackArg(args), 500)))

@@ -19,7 +19,7 @@ func (vm *VM) registerOAuth2Client(cls *RClass) {
 
 	strat := func(grant, className string) NativeFn {
 		return func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &OAuth2Strategy{client: object.Kind[*OAuth2Client](self).c, grant: grant, className: className}
+			return object.Wrap(&OAuth2Strategy{client: object.Kind[*OAuth2Client](self).c, grant: grant, className: className})
 		}
 	}
 	d("auth_code", strat("auth_code", "OAuth2::Strategy::AuthCode"))
@@ -29,13 +29,13 @@ func (vm *VM) registerOAuth2Client(cls *RClass) {
 	d("assertion", strat("assertion", "OAuth2::Strategy::Assertion"))
 
 	d("id", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2Client](self).c.ID())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2Client](self).c.ID()))
 	})
 	d("authorize_url", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2Client](self).c.AuthorizeURL())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2Client](self).c.AuthorizeURL()))
 	})
 	d("token_url", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2Client](self).c.TokenURL())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2Client](self).c.TokenURL()))
 	})
 
 	// get_token(response) / parse_token parses a token Response into an
@@ -53,7 +53,7 @@ func (vm *VM) registerOAuth2Client(cls *RClass) {
 		if err != nil {
 			raise("OAuth2::Error", "%s", err.Error())
 		}
-		return &OAuth2AccessToken{t: tok}
+		return object.Wrap(&OAuth2AccessToken{t: tok})
 	}
 	d("get_token", parse)
 	d("parse_token", parse)
@@ -65,16 +65,16 @@ func (vm *VM) registerOAuth2Client(cls *RClass) {
 func (vm *VM) registerOAuth2Strategy(mod *RClass) {
 	ns := newClass("OAuth2::Strategy", vm.cObject)
 	ns.isModule = true
-	mod.consts["Strategy"] = ns
-	vm.consts["OAuth2::Strategy"] = ns
+	mod.consts["Strategy"] = object.Wrap(ns)
+	vm.consts["OAuth2::Strategy"] = object.Wrap(ns)
 
 	cls := newClass("OAuth2::Strategy::Base", vm.cObject)
 	// Each grant reports a distinct class name for classOf; register them all as
 	// the same behavioural class so their methods dispatch.
 	for _, name := range []string{"AuthCode", "Password", "ClientCredentials", "Refresh", "Assertion"} {
 		sub := newClass("OAuth2::Strategy::"+name, cls)
-		ns.consts[name] = sub
-		vm.consts["OAuth2::Strategy::"+name] = sub
+		ns.consts[name] = object.Wrap(sub)
+		vm.consts["OAuth2::Strategy::"+name] = object.Wrap(sub)
 		vm.registerOAuth2StrategyMethods(sub)
 	}
 }
@@ -88,13 +88,13 @@ func (vm *VM) registerOAuth2StrategyMethods(cls *RClass) {
 		if s.grant != "auth_code" {
 			raise("NoMethodError", "undefined method `authorize_url' for %s", s.className)
 		}
-		return object.NewString(s.client.AuthCode().AuthorizeURL(oauth2Params(args)))
+		return object.Wrap(object.NewString(s.client.AuthCode().AuthorizeURL(oauth2Params(args))))
 	})
 	cls.define("get_token", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &OAuth2Request{r: oauth2GetTokenRequest(object.Kind[*OAuth2Strategy](self), args)}
+		return object.Wrap(&OAuth2Request{r: oauth2GetTokenRequest(object.Kind[*OAuth2Strategy](self), args)})
 	})
 	cls.define("token_url", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*OAuth2Strategy](self).client.TokenURL())
+		return object.Wrap(object.NewString(object.Kind[*OAuth2Strategy](self).client.TokenURL()))
 	})
 }
 

@@ -60,10 +60,10 @@ func TestCaptureBacktraceEmptyFrames(t *testing.T) {
 	vm.frameNames = nil
 	vm.frameFiles = nil
 	exc := &RObject{class: object.Kind[*RClass](vm.consts["RuntimeError"]), ivars: map[string]object.Value{}}
-	vm.captureBacktrace(exc)
-	bt, ok := object.KindOK[*object.Array](getIvar(exc, backtraceIvar))
+	vm.captureBacktrace(object.Wrap(exc))
+	bt, ok := object.KindOK[*object.Array](getIvar(object.Wrap(exc), backtraceIvar))
 	if !ok {
-		t.Fatalf("expected an Array backtrace, got %#v", getIvar(exc, backtraceIvar))
+		t.Fatalf("expected an Array backtrace, got %#v", getIvar(object.Wrap(exc), backtraceIvar))
 	}
 	if len(bt.Elems) != 0 {
 		t.Fatalf("expected empty backtrace, got %v", bt.Elems)
@@ -75,12 +75,12 @@ func TestCaptureBacktraceEmptyFrames(t *testing.T) {
 func TestCaptureBacktraceKeepsExisting(t *testing.T) {
 	vm := New(nil)
 	exc := &RObject{class: object.Kind[*RClass](vm.consts["RuntimeError"]), ivars: map[string]object.Value{}}
-	orig := &object.Array{Elems: []object.Value{object.NewString("orig:0:in 'x'")}}
-	setIvar(exc, backtraceIvar, orig)
+	orig := &object.Array{Elems: []object.Value{object.Wrap(object.NewString("orig:0:in 'x'"))}}
+	setIvar(object.Wrap(exc), backtraceIvar, object.Wrap(orig))
 	vm.frameNames = []string{"later"}
 	vm.frameFiles = []string{"/y/other.rb"}
-	vm.captureBacktrace(exc)
-	got := object.Kind[*object.Array](getIvar(exc, backtraceIvar))
+	vm.captureBacktrace(object.Wrap(exc))
+	got := object.Kind[*object.Array](getIvar(object.Wrap(exc), backtraceIvar))
 	if got != orig {
 		t.Fatalf("re-raise overwrote the backtrace: %v", got.Elems)
 	}
@@ -94,7 +94,7 @@ func TestUncaughtBacktraceFallsBackToLiveStack(t *testing.T) {
 	vm.frameNames = []string{"top", "inner"}
 	vm.frameFiles = []string{"/p.rb", "/p.rb"}
 	exc := &RObject{class: object.Kind[*RClass](vm.consts["RuntimeError"]), ivars: map[string]object.Value{}}
-	bt := vm.uncaughtBacktrace(RubyError{Obj: exc})
+	bt := vm.uncaughtBacktrace(RubyError{Obj: object.Wrap(exc)})
 	if len(bt) != 2 {
 		t.Fatalf("expected 2 live frames, got %v", bt)
 	}
@@ -109,7 +109,7 @@ func TestRubyErrorBacktraceStrings(t *testing.T) {
 	if got := (RubyError{}).Backtrace(); len(got) != 0 {
 		t.Fatalf("empty: got %v", got)
 	}
-	re := RubyError{Frames: []object.Value{object.NewString("a"), object.NewString("b")}}
+	re := RubyError{Frames: []object.Value{object.Wrap(object.NewString("a")), object.Wrap(object.NewString("b"))}}
 	got := re.Backtrace()
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Fatalf("got %v", got)
@@ -119,14 +119,14 @@ func TestRubyErrorBacktraceStrings(t *testing.T) {
 // TestNormalizeBacktraceDirect exercises normalizeBacktrace's branches directly,
 // including the nil-clear, single-String wrap and the two TypeError paths.
 func TestNormalizeBacktraceDirect(t *testing.T) {
-	if v := normalizeBacktrace(object.NilV); v != object.NilV {
+	if v := normalizeBacktrace(object.NilVal()); v != object.NilV {
 		t.Fatalf("nil: got %#v", v)
 	}
-	if a, ok := object.KindOK[*object.Array](normalizeBacktrace(object.NewString("s"))); !ok || len(a.Elems) != 1 {
-		t.Fatalf("string: got %#v", normalizeBacktrace(object.NewString("s")))
+	if a, ok := object.KindOK[*object.Array](normalizeBacktrace(object.Wrap(object.NewString("s")))); !ok || len(a.Elems) != 1 {
+		t.Fatalf("string: got %#v", normalizeBacktrace(object.Wrap(object.NewString("s"))))
 	}
-	wantRaise(t, "TypeError", func() { normalizeBacktrace(object.Integer(1)) })
+	wantRaise(t, "TypeError", func() { normalizeBacktrace(object.IntValue(int64(object.Integer(1)))) })
 	wantRaise(t, "TypeError", func() {
-		normalizeBacktrace(&object.Array{Elems: []object.Value{object.Integer(1)}})
+		normalizeBacktrace(object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}))
 	})
 }

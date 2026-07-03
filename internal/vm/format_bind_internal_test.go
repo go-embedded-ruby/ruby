@@ -22,15 +22,15 @@ func TestFormatValueKind(t *testing.T) {
 		v    object.Value
 		want format.Kind
 	}{
-		{object.Integer(1), format.KindInteger},
-		{&object.Bignum{I: big.NewInt(1)}, format.KindInteger},
-		{object.Float(1.5), format.KindFloat},
-		{object.NewString("x"), format.KindString},
-		{object.Symbol("s"), format.KindSymbol},
-		{&object.Array{Elems: []object.Value{object.Integer(1)}}, format.KindArray},
-		{object.NewHash(), format.KindHash},
-		{object.NilV, format.KindNil},
-		{object.Bool(true), format.KindOther},
+		{object.IntValue(int64(object.Integer(1))), format.KindInteger},
+		{object.Wrap(&object.Bignum{I: big.NewInt(1)}), format.KindInteger},
+		{object.FloatValue(float64(object.Float(1.5))), format.KindFloat},
+		{object.Wrap(object.NewString("x")), format.KindString},
+		{object.SymVal(string(object.Symbol("s"))), format.KindSymbol},
+		{object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}}), format.KindArray},
+		{object.Wrap(object.NewHash()), format.KindHash},
+		{object.NilVal(), format.KindNil},
+		{object.BoolValue(bool(object.Bool(true))), format.KindOther},
 	}
 	for _, c := range cases {
 		if got := (formatValue{c.v}).Kind(); got != c.want {
@@ -50,11 +50,11 @@ func TestFormatValueInt64Fast(t *testing.T) {
 		wantN  int64
 		wantOK bool
 	}{
-		{object.Integer(-42), -42, true},
-		{&object.Bignum{I: big.NewInt(7)}, 7, true}, // Bignum that fits int64
-		{&object.Bignum{I: big64}, 0, false},        // Bignum exceeding int64
-		{object.Float(1.5), 0, false},               // non-integer declines
-		{object.NewString("9"), 0, false},           // String declines (Int() parses it)
+		{object.IntValue(int64(object.Integer(-42))), -42, true},
+		{object.Wrap(&object.Bignum{I: big.NewInt(7)}), 7, true},  // Bignum that fits int64
+		{object.Wrap(&object.Bignum{I: big64}), 0, false},         // Bignum exceeding int64
+		{object.FloatValue(float64(object.Float(1.5))), 0, false}, // non-integer declines
+		{object.Wrap(object.NewString("9")), 0, false},            // String declines (Int() parses it)
 	}
 	for _, c := range cases {
 		n, ok := (formatValue{c.v}).Int64Fast()
@@ -67,11 +67,11 @@ func TestFormatValueInt64Fast(t *testing.T) {
 // TestFormatValueInspect covers formatValue.Inspect (the %p backing), which the
 // library calls when rendering an inspected value.
 func TestFormatValueInspect(t *testing.T) {
-	if got := (formatValue{object.NewString("a")}).Inspect(); got != `"a"` {
+	if got := (formatValue{object.Wrap(object.NewString("a"))}).Inspect(); got != `"a"` {
 		t.Fatalf("Inspect = %q, want %q", got, `"a"`)
 	}
 	// Drive it through the formatter too, so the %p path is exercised end to end.
-	if got := formatString("%p", []object.Value{object.NewString("a")}); got != `"a"` {
+	if got := formatString("%p", []object.Value{object.Wrap(object.NewString("a"))}); got != `"a"` {
 		t.Fatalf("%%p = %q, want %q", got, `"a"`)
 	}
 }
@@ -81,11 +81,11 @@ func TestFormatValueInspect(t *testing.T) {
 // String key is dropped and referencing it raises the MRI KeyError.
 func TestFormatNamedArgsNonSymbolKey(t *testing.T) {
 	h := object.NewHash()
-	h.Set(object.NewString("a"), object.Integer(1)) // non-symbol key: skipped
-	h.Set(object.Symbol("b"), object.Integer(2))    // symbol key: carried
-	na := formatNamedArgs([]object.Value{h})
+	h.Set(object.Wrap(object.NewString("a")), object.IntValue(int64(object.Integer(1))))        // non-symbol key: skipped
+	h.Set(object.SymVal(string(object.Symbol("b"))), object.IntValue(int64(object.Integer(2)))) // symbol key: carried
+	na := formatNamedArgs([]object.Value{object.Wrap(h)})
 	// The symbol key resolves...
-	if got := formatString("%<b>d", []object.Value{h}); got != "2" {
+	if got := formatString("%<b>d", []object.Value{object.Wrap(h)}); got != "2" {
 		t.Fatalf("%%<b>d = %q, want %q", got, "2")
 	}
 	// ...while the dropped string key raises a KeyError.
@@ -96,7 +96,7 @@ func TestFormatNamedArgsNonSymbolKey(t *testing.T) {
 		}
 	}()
 	_ = na
-	formatString("%<a>d", []object.Value{h})
+	formatString("%<a>d", []object.Value{object.Wrap(h)})
 }
 
 // TestRaiseFormatErrorFallback covers raiseFormatError's defensive non-

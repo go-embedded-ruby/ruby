@@ -77,10 +77,10 @@ func ndScalar(op bytecode.Op, a *nd.Array, s float64) *NDArray {
 func ndarrayOp(op bytecode.Op, a, b object.Value) object.Value {
 	if an, ok := object.KindOK[*NDArray](a); ok {
 		if bn, ok := object.KindOK[*NDArray](b); ok {
-			return ndApply(op, an.a, bn.a)
+			return object.Wrap(ndApply(op, an.a, bn.a))
 		}
 		if f, ok := toFloat(b); ok {
-			return ndScalar(op, an.a, f)
+			return object.Wrap(ndScalar(op, an.a, f))
 		}
 		return raise("TypeError", "no implicit conversion of %s into NDArray", b.Inspect())
 	}
@@ -92,7 +92,7 @@ func ndarrayOp(op bytecode.Op, a, b object.Value) object.Value {
 		return raise("TypeError", "no implicit conversion of %s into NDArray", a.Inspect())
 	}
 	full := mustArray(nd.Full(f, bn.a.Shape()...))
-	return ndApply(op, full.a, bn.a)
+	return object.Wrap(ndApply(op, full.a, bn.a))
 }
 
 // shapeArgs reads a Ruby argument list of integers into a shape slice.
@@ -107,20 +107,20 @@ func shapeArgs(args []object.Value) []int {
 // registerNDArray installs the NDArray class, its constructors and methods.
 func (vm *VM) registerNDArray() {
 	vm.cNDArray = newClass("NDArray", vm.cObject)
-	vm.consts["NDArray"] = vm.cNDArray
+	vm.consts["NDArray"] = object.Wrap(vm.cNDArray)
 
 	s := func(name string, fn NativeFn) {
 		vm.cNDArray.smethods[name] = &Method{name: name, owner: vm.cNDArray, native: fn}
 	}
 	s("zeros", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustArray(nd.Zeros(shapeArgs(args)...))
+		return object.Wrap(mustArray(nd.Zeros(shapeArgs(args)...)))
 	})
 	s("ones", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustArray(nd.Ones(shapeArgs(args)...))
+		return object.Wrap(mustArray(nd.Ones(shapeArgs(args)...)))
 	})
 	s("full", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		v, _ := toFloat(args[0])
-		return mustArray(nd.Full(v, shapeArgs(args[1:])...))
+		return object.Wrap(mustArray(nd.Full(v, shapeArgs(args[1:])...)))
 	})
 	s("arange", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		start, _ := toFloat(args[0])
@@ -129,10 +129,10 @@ func (vm *VM) registerNDArray() {
 		if len(args) > 2 {
 			step, _ = toFloat(args[2])
 		}
-		return mustArray(nd.Arange(start, stop, step))
+		return object.Wrap(mustArray(nd.Arange(start, stop, step)))
 	})
 	s("from", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustArray(nd.FromData(floatSlice(args[0]), intSlice(args[1])...))
+		return object.Wrap(mustArray(nd.FromData(floatSlice(args[0]), intSlice(args[1])...)))
 	})
 
 	d := func(name string, fn NativeFn) { vm.cNDArray.define(name, fn) }
@@ -144,7 +144,7 @@ func (vm *VM) registerNDArray() {
 		for i, x := range sh {
 			out[i] = object.IntValue(int64(x))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 	d("ndim", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).Ndim()))
@@ -153,7 +153,7 @@ func (vm *VM) registerNDArray() {
 		return object.IntValue(int64(self(v).Size()))
 	})
 	d("reshape", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustArray(self(v).Reshape(shapeArgs(args)...))
+		return object.Wrap(mustArray(self(v).Reshape(shapeArgs(args)...)))
 	})
 	d("to_a", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		flat := self(v).Flatten()
@@ -164,7 +164,7 @@ func (vm *VM) registerNDArray() {
 		return floatArray(out)
 	})
 	d("sum", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Float(self(v).Sum())
+		return object.FloatValue(float64(object.Float(self(v).Sum())))
 	})
 	reduce := func(name string, f func(*nd.Array) (float64, error)) {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -172,23 +172,23 @@ func (vm *VM) registerNDArray() {
 			if err != nil {
 				raise("ArgumentError", "%s", err.Error())
 			}
-			return object.Float(r)
+			return object.FloatValue(float64(object.Float(r)))
 		})
 	}
 	reduce("mean", (*nd.Array).Mean)
 	reduce("max", (*nd.Array).Max)
 	reduce("min", (*nd.Array).Min)
 	d("matmul", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustArray(self(v).MatMul(ndArg(args[0]).a))
+		return object.Wrap(mustArray(self(v).MatMul(ndArg(args[0]).a)))
 	})
 	d("dot", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return mustArray(self(v).Dot(ndArg(args[0]).a))
+		return object.Wrap(mustArray(self(v).Dot(ndArg(args[0]).a)))
 	})
 
 	// Element-wise unary ufuncs (each returns a new array).
 	unary := func(name string, f func(*nd.Array) *nd.Array) {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &NDArray{a: f(self(v))}
+			return object.Wrap(&NDArray{a: f(self(v))})
 		})
 	}
 	unary("sqrt", (*nd.Array).Sqrt)
@@ -202,7 +202,7 @@ func (vm *VM) registerNDArray() {
 	unary("flatten", (*nd.Array).Flatten)
 
 	d("prod", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Float(self(v).Prod())
+		return object.FloatValue(float64(object.Float(self(v).Prod())))
 	})
 	argReduce := func(name string, f func(*nd.Array) (int, error)) {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -218,12 +218,12 @@ func (vm *VM) registerNDArray() {
 
 	// Element access: a.at(i, j) / a[i, j] returns the scalar at the index.
 	at := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Float(self(v).At(shapeArgs(args)...))
+		return object.FloatValue(float64(object.Float(self(v).At(shapeArgs(args)...))))
 	}
 	d("at", at)
 	d("[]", at)
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).String())
+		return object.Wrap(object.NewString(self(v).String()))
 	})
 	vm.cNDArray.define("to_s", vm.cNDArray.methods["inspect"].native)
 }

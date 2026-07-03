@@ -22,10 +22,10 @@ func (vm *VM) registerFile() {
 	// SystemCallError + Errno::ENOENT, registered both as a scoped constant
 	// (rescue Errno::ENOENT) and a flat name (so the internal raise resolves it).
 	syscallErr := newClass("SystemCallError", object.Kind[*RClass](vm.consts["StandardError"]))
-	vm.consts["SystemCallError"] = syscallErr
+	vm.consts["SystemCallError"] = object.Wrap(syscallErr)
 	errno := newClass("Errno", nil)
 	errno.isModule = true
-	vm.consts["Errno"] = errno
+	vm.consts["Errno"] = object.Wrap(errno)
 	// Each Errno::Exxx is a SystemCallError subclass, registered both scoped (for
 	// `rescue Errno::ENOENT`) and flat (so an internal raise resolves the name).
 	// The set covers the common POSIX errnos that file/IO code and libraries such
@@ -37,19 +37,19 @@ func (vm *VM) registerFile() {
 		"EADDRINUSE", "EINTR", "ECHILD", "ENOMEM", "EXDEV", "EMFILE", "ENFILE",
 	} {
 		c := newClass("Errno::"+name, syscallErr)
-		errno.consts[name] = c
-		vm.consts["Errno::"+name] = c
+		errno.consts[name] = object.Wrap(c)
+		vm.consts["Errno::"+name] = object.Wrap(c)
 	}
 
 	cFile := newClass("File", vm.cObject)
-	vm.consts["File"] = cFile
+	vm.consts["File"] = object.Wrap(cFile)
 	// Path constants (POSIX). ALT_SEPARATOR is nil on unix-like platforms; NULL
 	// is the null device. These let path-handling code branch on File::SEPARATOR
 	// etc. without a runtime error.
-	cFile.consts["SEPARATOR"] = object.NewString("/")
-	cFile.consts["ALT_SEPARATOR"] = object.NilV
-	cFile.consts["PATH_SEPARATOR"] = object.NewString(":")
-	cFile.consts["NULL"] = object.NewString("/dev/null")
+	cFile.consts["SEPARATOR"] = object.Wrap(object.NewString("/"))
+	cFile.consts["ALT_SEPARATOR"] = object.NilVal()
+	cFile.consts["PATH_SEPARATOR"] = object.Wrap(object.NewString(":"))
+	cFile.consts["NULL"] = object.Wrap(object.NewString("/dev/null"))
 	// Open-mode flag constants (File::Constants), the canonical POSIX values. They
 	// let code such as Puppet's Uniquefile build an integer open mode
 	// (File::RDWR | File::CREAT | File::EXCL) which File.open then maps back to a
@@ -72,17 +72,17 @@ func (vm *VM) registerFile() {
 				base = base[:len(base)-len(suf)]
 			}
 		}
-		return object.NewString(base)
+		return object.Wrap(object.NewString(base))
 	})
 	def("dirname", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(path.Dir(pathArg(vm, args[0])))
+		return object.Wrap(object.NewString(path.Dir(pathArg(vm, args[0]))))
 	})
 	def("extname", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExt(path.Base(pathArg(vm, args[0]))))
+		return object.Wrap(object.NewString(fileExt(path.Base(pathArg(vm, args[0])))))
 	})
 	def("split", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])
-		return object.NewArray(object.NewString(path.Dir(p)), object.NewString(path.Base(p)))
+		return object.Wrap(object.NewArray(object.Wrap(object.NewString(path.Dir(p))), object.Wrap(object.NewString(path.Base(p)))))
 	})
 	def("join", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// MRI's File.join flattens nested Array arguments, so File.join([a, b], c)
@@ -101,39 +101,39 @@ func (vm *VM) registerFile() {
 		for _, a := range args {
 			add(a)
 		}
-		return object.NewString(fileJoin(parts))
+		return object.Wrap(object.NewString(fileJoin(parts)))
 	})
 	def("expand_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:]))
+		return object.Wrap(object.NewString(fileExpand(pathArg(vm, args[0]), args[1:])))
 	})
 	// absolute_path resolves a path to an absolute one against an optional base
 	// directory (defaulting to the CWD), like expand_path but without ~ expansion.
 	// Puppet uses it with relative paths and an explicit base, where the two agree.
 	def("absolute_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:]))
+		return object.Wrap(object.NewString(fileExpand(pathArg(vm, args[0]), args[1:])))
 	})
 	def("absolute_path?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(path.IsAbs(toSlash(pathArg(vm, args[0]))))
+		return object.BoolValue(bool(object.Bool(path.IsAbs(toSlash(pathArg(vm, args[0]))))))
 	})
 
 	def("exist?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		_, err := os.Stat(pathArg(vm, args[0]))
-		return object.Bool(err == nil)
+		return object.BoolValue(bool(object.Bool(err == nil)))
 	})
 	def("file?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		fi, err := os.Stat(pathArg(vm, args[0]))
-		return object.Bool(err == nil && fi.Mode().IsRegular())
+		return object.BoolValue(bool(object.Bool(err == nil && fi.Mode().IsRegular())))
 	})
 	def("directory?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		fi, err := os.Stat(pathArg(vm, args[0]))
-		return object.Bool(err == nil && fi.IsDir())
+		return object.BoolValue(bool(object.Bool(err == nil && fi.IsDir())))
 	})
 	// File.symlink? reports whether the path is a symbolic link. Like MRI it uses
 	// lstat (does not follow the link) and returns false for a missing path or a
 	// non-symlink, rather than raising.
 	def("symlink?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		fi, err := os.Lstat(pathArg(vm, args[0]))
-		return object.Bool(err == nil && fi.Mode()&os.ModeSymlink != 0)
+		return object.BoolValue(bool(object.Bool(err == nil && fi.Mode()&os.ModeSymlink != 0)))
 	})
 	// File.realpath returns the canonical absolute path with every symlink
 	// resolved; the path (and each component) must exist, otherwise — as in MRI —
@@ -145,7 +145,7 @@ func (vm *VM) registerFile() {
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
 		}
-		return object.NewString(toSlash(resolved))
+		return object.Wrap(object.NewString(toSlash(resolved)))
 	})
 	def("read", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])
@@ -153,7 +153,7 @@ func (vm *VM) registerFile() {
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
 		}
-		return object.NewString(string(b))
+		return object.Wrap(object.NewString(string(b)))
 	})
 	def("write", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])
@@ -180,7 +180,7 @@ func (vm *VM) registerFile() {
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
 		}
-		return &Time{t: gotime.FromUnix(fi.ModTime().Unix())}
+		return object.Wrap(&Time{t: gotime.FromUnix(fi.ModTime().Unix())})
 	})
 	delete := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, a := range args {
@@ -275,9 +275,9 @@ func (vm *VM) registerFile() {
 			p := pathArg(vm, args[0])
 			fi, err := osStat(p)
 			if err != nil {
-				return object.Bool(false)
+				return object.BoolValue(bool(object.Bool(false)))
 			}
-			return object.Bool(newFileStat(fi, p).accessible(want))
+			return object.BoolValue(bool(object.Bool(newFileStat(fi, p).accessible(want))))
 		}
 	}
 	def("readable?", access(4))

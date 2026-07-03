@@ -111,19 +111,19 @@ func (vm *VM) sinatraChain(cls *RClass) []*sinatraDef {
 func (vm *VM) registerSinatra() {
 	mod := newClass("Sinatra", nil)
 	mod.isModule = true
-	vm.consts["Sinatra"] = mod
+	vm.consts["Sinatra"] = object.Wrap(mod)
 
 	base := newClass("Sinatra::Base", vm.cObject)
-	mod.consts["Base"] = base
-	vm.consts["Sinatra::Base"] = base
+	mod.consts["Base"] = object.Wrap(base)
+	vm.consts["Sinatra::Base"] = object.Wrap(base)
 	vm.cSinatraBase = base
 
 	ctx := newClass("Sinatra::Base::Context", vm.cObject)
-	base.consts["Context"] = ctx
+	base.consts["Context"] = object.Wrap(ctx)
 	vm.cSinatraCtx = ctx
 
 	settings := newClass("Sinatra::Base::Settings", vm.cObject)
-	base.consts["Settings"] = settings
+	base.consts["Settings"] = object.Wrap(settings)
 	vm.cSinatraSettings = settings
 
 	vm.registerSinatraDSL(base)
@@ -135,8 +135,8 @@ func (vm *VM) registerSinatra() {
 	// name application code rescues.
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	nf := newClass("Sinatra::NotFound", std)
-	mod.consts["NotFound"] = nf
-	vm.consts["Sinatra::NotFound"] = nf
+	mod.consts["NotFound"] = object.Wrap(nf)
+	vm.consts["Sinatra::NotFound"] = object.Wrap(nf)
 }
 
 // sinatraStr coerces an argument to its String contents.

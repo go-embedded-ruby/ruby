@@ -33,12 +33,12 @@ func (r *RQRCode) Truthy() bool    { return true }
 func (vm *VM) registerRQRCode() {
 	mod := newClass("RQRCode", nil)
 	mod.isModule = true
-	vm.consts["RQRCode"] = mod
+	vm.consts["RQRCode"] = object.Wrap(mod)
 	vm.registerRQRCodeErrors(mod)
 
 	cls := newClass("RQRCode::QRCode", vm.cObject)
-	mod.consts["QRCode"] = cls
-	vm.consts["RQRCode::QRCode"] = cls
+	mod.consts["QRCode"] = object.Wrap(cls)
+	vm.consts["RQRCode::QRCode"] = object.Wrap(cls)
 
 	// RQRCode::QRCode.new(data, level:, size:, mode:, max_size:) builds a QR code.
 	// The keyword options mirror the gem: :level (:l/:m/:q/:h), :size (version
@@ -52,7 +52,7 @@ func (vm *VM) registerRQRCode() {
 			if len(args) > 1 {
 				opt = args[1]
 			}
-			return &RQRCode{q: rqrcodeNew(rqrcodeDataArg(args[0]), opt)}
+			return object.Wrap(&RQRCode{q: rqrcodeNew(rqrcodeDataArg(args[0]), opt)})
 		}}
 
 	// #qrcode returns the receiver itself: the rqrcode gem exposes the core code
@@ -89,27 +89,27 @@ func (vm *VM) registerRQRCode() {
 		if err != nil {
 			raise("RQRCode::QRCodeRunTimeError", "%s", rqrcodeErrMsg(err))
 		}
-		return object.Bool(on)
+		return object.BoolValue(bool(object.Bool(on)))
 	})
 
 	// #as_svg(options = {}) renders an SVG document.
 	cls.define("as_svg", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(rqrcodeAsSVG(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args)))
+		return object.Wrap(object.NewString(rqrcodeAsSVG(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args))))
 	})
 
 	// #as_ansi(options = {}) renders with ANSI background colors.
 	cls.define("as_ansi", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(rqrcodeAsANSI(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args)))
+		return object.Wrap(object.NewString(rqrcodeAsANSI(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args))))
 	})
 
 	// #as_html renders the code as an HTML table.
 	cls.define("as_html", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*RQRCode](self).q.AsHTML())
+		return object.Wrap(object.NewString(object.Kind[*RQRCode](self).q.AsHTML()))
 	})
 
 	// #to_s(options = {}) / #as_ansi renders the matrix as text (dark "x").
 	toS := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(rqrcodeToString(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args)))
+		return object.Wrap(object.NewString(rqrcodeToString(object.Kind[*RQRCode](self).q, rqrcodeOptArg(args))))
 	}
 	cls.define("to_s", toS)
 }
@@ -124,8 +124,8 @@ func (vm *VM) registerRQRCodeErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	reg("QRCodeArgumentError", "RQRCode::QRCodeArgumentError", std)

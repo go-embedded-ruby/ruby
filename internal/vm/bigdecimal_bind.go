@@ -134,15 +134,15 @@ func bigDecimalOp(op bytecode.Op, a *BigDecimal, b object.Value) object.Value {
 	rhs := bigDecimalArg(b)
 	switch op {
 	case bytecode.OpAdd:
-		return &BigDecimal{d: a.d.Add(rhs)}
+		return object.Wrap(&BigDecimal{d: a.d.Add(rhs)})
 	case bytecode.OpSub:
-		return &BigDecimal{d: a.d.Sub(rhs)}
+		return object.Wrap(&BigDecimal{d: a.d.Sub(rhs)})
 	case bytecode.OpMul:
-		return &BigDecimal{d: a.d.Mul(rhs)}
+		return object.Wrap(&BigDecimal{d: a.d.Mul(rhs)})
 	case bytecode.OpDiv:
-		return &BigDecimal{d: divChecked(a.d, rhs, 0)}
+		return object.Wrap(&BigDecimal{d: divChecked(a.d, rhs, 0)})
 	case bytecode.OpMod:
-		return &BigDecimal{d: modChecked(a.d, rhs)}
+		return object.Wrap(&BigDecimal{d: modChecked(a.d, rhs)})
 	}
 	return raise("NoMethodError", "undefined method '%s' for a BigDecimal", op)
 }
@@ -156,7 +156,7 @@ func bigDecimalRightOp(op bytecode.Op, a object.Value, b *BigDecimal) object.Val
 	if !ok {
 		raise("TypeError", "%s can't be coerced into BigDecimal", a.Inspect())
 	}
-	return bigDecimalOp(op, &BigDecimal{d: lhs}, b)
+	return bigDecimalOp(op, &BigDecimal{d: lhs}, object.Wrap(b))
 }
 
 // modChecked is the floored modulo a % o via the library's Mod, re-raising
@@ -182,7 +182,7 @@ func bigDecimalEqual(a *BigDecimal, other object.Value) bool {
 func bigDecimalCmp(a, b *bigdecimal.Decimal) object.Value {
 	c := a.Cmp(b)
 	if c == -2 {
-		return object.NilV
+		return object.NilVal()
 	}
 	return object.IntValue(int64(c))
 }
@@ -202,7 +202,7 @@ func roundFamily(d *bigdecimal.Decimal, args []object.Value, fn func(n int) *big
 	if len(args) == 0 {
 		return decimalToInteger(fn(0))
 	}
-	return &BigDecimal{d: fn(int(intArg(args[0])))}
+	return object.Wrap(&BigDecimal{d: fn(int(intArg(args[0])))})
 }
 
 // registerBigDecimal installs Kernel#BigDecimal, the BigDecimal instance methods
@@ -210,7 +210,7 @@ func roundFamily(d *bigdecimal.Decimal, args []object.Value, fn func(n int) *big
 // to the go-ruby-bigdecimal library.
 func (vm *VM) registerBigDecimal() {
 	vm.cBigDecimal = newClass("BigDecimal", vm.cObject)
-	vm.consts["BigDecimal"] = vm.cBigDecimal
+	vm.consts["BigDecimal"] = object.Wrap(vm.cBigDecimal)
 
 	// Kernel#BigDecimal(value[, ndigits]): MRI's constructor is the global
 	// method, not BigDecimal.new. A String is parsed at full precision (bad ->
@@ -224,19 +224,19 @@ func (vm *VM) registerBigDecimal() {
 			case object.IsKind[*BigDecimal](__sw15):
 				v := object.Kind[*BigDecimal](__sw15)
 				_ = v
-				return v
+				return object.Wrap(v)
 			case object.IsKind[*object.String](__sw15):
 				v := object.Kind[*object.String](__sw15)
 				_ = v
-				return newDecimalString(v.Str())
+				return object.Wrap(newDecimalString(v.Str()))
 			case object.IsInt(__sw15):
 				v := object.AsInteger(__sw15)
 				_ = v
-				return &BigDecimal{d: bigdecimal.FromInt(int64(v))}
+				return object.Wrap(&BigDecimal{d: bigdecimal.FromInt(int64(v))})
 			case object.IsKind[*object.Bignum](__sw15):
 				v := object.Kind[*object.Bignum](__sw15)
 				_ = v
-				return &BigDecimal{d: bigdecimal.FromBigInt(v.I)}
+				return object.Wrap(&BigDecimal{d: bigdecimal.FromBigInt(v.I)})
 			case object.IsFloat(__sw15):
 				v := object.AsFloatV(__sw15)
 				_ = v
@@ -247,7 +247,7 @@ func (vm *VM) registerBigDecimal() {
 				if err != nil {
 					return raise("ArgumentError", "%s", err.Error())
 				}
-				return &BigDecimal{d: d}
+				return object.Wrap(&BigDecimal{d: d})
 			}
 		}
 		return raise("TypeError", "can't convert %s into BigDecimal", args[0].Inspect())
@@ -264,8 +264,8 @@ func (vm *VM) registerBigDecimal() {
 	} {
 		vm.cBigDecimal.consts[name] = object.IntValue(code)
 	}
-	vm.cBigDecimal.consts["NAN"] = newDecimalString("NaN")
-	vm.cBigDecimal.consts["INFINITY"] = newDecimalString("Infinity")
+	vm.cBigDecimal.consts["NAN"] = object.Wrap(newDecimalString("NaN"))
+	vm.cBigDecimal.consts["INFINITY"] = object.Wrap(newDecimalString("Infinity"))
 
 	d := func(name string, fn NativeFn) { vm.cBigDecimal.define(name, fn) }
 	self := func(v object.Value) *BigDecimal { return object.Kind[*BigDecimal](v) }
@@ -287,10 +287,10 @@ func (vm *VM) registerBigDecimal() {
 
 	// abs (-> Abs) and unary -@ (-> Neg).
 	d("abs", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &BigDecimal{d: self(v).d.Abs()}
+		return object.Wrap(&BigDecimal{d: self(v).d.Abs()})
 	})
 	d("-@", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &BigDecimal{d: self(v).d.Neg()}
+		return object.Wrap(&BigDecimal{d: self(v).d.Neg()})
 	})
 
 	// ** / pow (n) -> Pow(n): the receiver to an Integer exponent (negative ->
@@ -298,7 +298,7 @@ func (vm *VM) registerBigDecimal() {
 	// ordinary method send. The exponent must be an Integer (intArg raises
 	// TypeError otherwise).
 	powFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &BigDecimal{d: self(v).d.Pow(int(intArg(args[0])))}
+		return object.Wrap(&BigDecimal{d: self(v).d.Pow(int(intArg(args[0])))})
 	}
 	d("**", powFn)
 	d("power", powFn) // MRI's named form
@@ -310,17 +310,17 @@ func (vm *VM) registerBigDecimal() {
 	d("div", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o := bigDecimalArg(args[0])
 		if len(args) >= 2 {
-			return &BigDecimal{d: divChecked(self(v).d, o, int(intArg(args[1])))}
+			return object.Wrap(&BigDecimal{d: divChecked(self(v).d, o, int(intArg(args[1])))})
 		}
 		q, err := self(v).d.IDiv(o)
 		if err != nil {
 			raise("ZeroDivisionError", "%s", err.Error())
 		}
-		return &BigDecimal{d: q}
+		return object.Wrap(&BigDecimal{d: q})
 	})
 	// % / modulo (-> Mod): the floored remainder (sign of the divisor).
 	modFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &BigDecimal{d: modChecked(self(v).d, bigDecimalArg(args[0]))}
+		return object.Wrap(&BigDecimal{d: modChecked(self(v).d, bigDecimalArg(args[0]))})
 	}
 	d("%", modFn)
 	d("modulo", modFn)
@@ -330,7 +330,7 @@ func (vm *VM) registerBigDecimal() {
 		if err != nil {
 			raise("ZeroDivisionError", "%s", err.Error())
 		}
-		return &BigDecimal{d: r}
+		return object.Wrap(&BigDecimal{d: r})
 	})
 	// divmod (-> DivMod): [floored quotient, floored modulo], both BigDecimal.
 	d("divmod", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -338,7 +338,7 @@ func (vm *VM) registerBigDecimal() {
 		if err != nil {
 			raise("ZeroDivisionError", "%s", err.Error())
 		}
-		return object.NewArray(&BigDecimal{d: q}, &BigDecimal{d: r})
+		return object.Wrap(object.NewArray(object.Wrap(&BigDecimal{d: q}), object.Wrap(&BigDecimal{d: r})))
 	})
 
 	// floor / ceil / truncate / round: no-arg or n<=0 -> Integer, n>0 -> BigDecimal
@@ -373,21 +373,21 @@ func (vm *VM) registerBigDecimal() {
 		if n <= 0 && !hasMode {
 			return decimalToInteger(r)
 		}
-		return &BigDecimal{d: r}
+		return object.Wrap(&BigDecimal{d: r})
 	})
 
 	// frac (-> Frac) / fix (-> Fix): the fractional / integer part, each a BigDecimal.
 	d("frac", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &BigDecimal{d: self(v).d.Frac()}
+		return object.Wrap(&BigDecimal{d: self(v).d.Frac()})
 	})
 	d("fix", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &BigDecimal{d: self(v).d.Fix()}
+		return object.Wrap(&BigDecimal{d: self(v).d.Fix()})
 	})
 
 	// to_f (-> Float64), to_i / to_int (-> Int, truncated toward zero, Integer/Bignum),
 	// to_r (-> Rat, a Rational).
 	d("to_f", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Float(self(v).d.Float64())
+		return object.FloatValue(float64(object.Float(self(v).d.Float64())))
 	})
 	toIFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return decimalToInteger(self(v).d)
@@ -395,7 +395,7 @@ func (vm *VM) registerBigDecimal() {
 	d("to_i", toIFn)
 	d("to_int", toIFn)
 	d("to_r", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Rational{R: self(v).d.Rat()}
+		return object.Wrap(&object.Rational{R: self(v).d.Rat()})
 	})
 
 	// to_s(fmt) / inspect: the MRI to_s grammar; the bare form is the scientific
@@ -406,16 +406,16 @@ func (vm *VM) registerBigDecimal() {
 		if len(args) >= 1 {
 			fmt = strArg(args[0])
 		}
-		return object.NewString(self(v).d.ToS(fmt))
+		return object.Wrap(object.NewString(self(v).d.ToS(fmt)))
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).d.ToS(""))
+		return object.Wrap(object.NewString(self(v).d.ToS("")))
 	})
 
 	// split (-> SplitParts): [sign, "digits", base(10), exponent].
 	d("split", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		sign, digits, base, exp := self(v).d.SplitParts()
-		return object.NewArray(object.IntValue(int64(sign)), object.NewString(digits), object.IntValue(int64(base)), object.IntValue(int64(exp)))
+		return object.Wrap(object.NewArray(object.IntValue(int64(sign)), object.Wrap(object.NewString(digits)), object.IntValue(int64(base)), object.IntValue(int64(exp))))
 	})
 	// sign (-> Sign): MRI's BigDecimal#sign code, exponent (-> Exponent),
 	// precision (-> Precision).
@@ -432,19 +432,19 @@ func (vm *VM) registerBigDecimal() {
 	// nan? / infinite? / finite? / zero?: the IEEE-style specials. infinite?
 	// returns 1 / -1 / nil (not a boolean), as MRI does.
 	d("nan?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).d.IsNaN())
+		return object.BoolValue(bool(object.Bool(self(v).d.IsNaN())))
 	})
 	d("infinite?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if i := self(v).d.IsInfinite(); i != 0 {
 			return object.IntValue(int64(i))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	d("finite?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).d.IsFinite())
+		return object.BoolValue(bool(object.Bool(self(v).d.IsFinite())))
 	})
 	d("zero?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).d.IsZero())
+		return object.BoolValue(bool(object.Bool(self(v).d.IsZero())))
 	})
 
 	// Comparison: <=> (Integer, or nil for NaN / a non-numeric operand), the
@@ -452,16 +452,16 @@ func (vm *VM) registerBigDecimal() {
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := asBigDecimal(args[0])
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return bigDecimalCmp(self(v).d, other)
 	})
 	cmpBool := func(v object.Value, args []object.Value, want func(int) bool) object.Value {
 		c := self(v).d.Cmp(bigDecimalArg(args[0]))
 		if c == -2 {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.Bool(want(c))
+		return object.BoolValue(bool(object.Bool(want(c))))
 	}
 	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return cmpBool(v, args, func(c int) bool { return c < 0 })
@@ -476,6 +476,6 @@ func (vm *VM) registerBigDecimal() {
 		return cmpBool(v, args, func(c int) bool { return c >= 0 })
 	})
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(bigDecimalEqual(self(v), args[0]))
+		return object.BoolValue(bool(object.Bool(bigDecimalEqual(self(v), args[0]))))
 	})
 }

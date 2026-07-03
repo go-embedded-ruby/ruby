@@ -75,9 +75,9 @@ func opOf(v object.Value) *OptionParser { return object.Kind[*OptionParser](v) }
 func (vm *VM) registerOptionParser() {
 	cls := newClass("OptionParser", vm.cObject)
 	vm.cOptionParser = cls
-	vm.consts["OptionParser"] = cls
-	vm.consts["OptParse"] = cls
-	cls.consts["OptParse"] = cls
+	vm.consts["OptionParser"] = object.Wrap(cls)
+	vm.consts["OptParse"] = object.Wrap(cls)
+	cls.consts["OptParse"] = object.Wrap(cls)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls,
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
@@ -107,9 +107,9 @@ func (vm *VM) registerOptionParser() {
 				}
 			}
 			if blk != nil {
-				vm.callBlock(blk, []object.Value{op})
+				vm.callBlock(blk, []object.Value{object.Wrap(op)})
 			}
-			return op
+			return object.Wrap(op)
 		}}
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -178,9 +178,9 @@ func (vm *VM) registerOptionParser() {
 	d("banner", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		op := opOf(v)
 		if op.p.Banner == "" {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewString(op.p.Banner)
+		return object.Wrap(object.NewString(op.p.Banner))
 	})
 	d("banner=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		opOf(v).p.Banner = strArg(args[0])
@@ -194,14 +194,14 @@ func (vm *VM) registerOptionParser() {
 		return args[0]
 	})
 	d("summary_indent", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(opOf(v).p.SummaryIndent)
+		return object.Wrap(object.NewString(opOf(v).p.SummaryIndent))
 	})
 	d("summary_indent=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		opOf(v).p.SummaryIndent = strArg(args[0])
 		return args[0]
 	})
 	d("default_argv", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return opOf(v).defaultArgv
+		return object.Wrap(opOf(v).defaultArgv)
 	})
 	d("default_argv=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if a, ok := object.KindOK[*object.Array](args[0]); ok {
@@ -215,9 +215,9 @@ func (vm *VM) registerOptionParser() {
 	d("program_name", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		op := opOf(v)
 		if op.programName != nil {
-			return object.NewString(*op.programName)
+			return object.Wrap(object.NewString(*op.programName))
 		}
-		return object.NewString(vm.optDefaultProgramName())
+		return object.Wrap(object.NewString(vm.optDefaultProgramName()))
 	})
 	d("program_name=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		op := opOf(v)
@@ -247,7 +247,7 @@ func (vm *VM) registerOptionParser() {
 	d("ver", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		op := opOf(v)
 		if op.version == nil {
-			return object.NilV
+			return object.NilVal()
 		}
 		name := vm.optDefaultProgramName()
 		if op.programName != nil {
@@ -257,13 +257,13 @@ func (vm *VM) registerOptionParser() {
 		if op.release != nil {
 			str += " (" + *op.release + ")"
 		}
-		return object.NewString(str)
+		return object.Wrap(object.NewString(str))
 	})
 
 	// --- help ----------------------------------------------------------------
 	helpFn := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		opOf(v).p.ProgramName = vm.optProgramNameFor(opOf(v))
-		return object.NewString(opOf(v).p.Help())
+		return object.Wrap(object.NewString(opOf(v).p.Help()))
 	}
 	d("help", helpFn)
 	d("to_s", helpFn)
@@ -271,9 +271,9 @@ func (vm *VM) registerOptionParser() {
 		lines := opOf(v).p.Summarize()
 		out := make([]object.Value, len(lines))
 		for i, l := range lines {
-			out[i] = object.NewString(l)
+			out[i] = object.Wrap(object.NewString(l))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 
 	// --- parsing -------------------------------------------------------------
@@ -294,7 +294,7 @@ func (vm *VM) registerOptionParser() {
 			} else {
 				var sink func(string)
 				if blk != nil {
-					sink = func(s string) { vm.callBlock(blk, []object.Value{object.NewString(s)}) }
+					sink = func(s string) { vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(s))}) }
 				}
 				matches, rest, err = op.p.Order(stringsOf(argv), sink)
 			}
@@ -303,7 +303,7 @@ func (vm *VM) registerOptionParser() {
 				vm.optRaise(err)
 			}
 			setArgv(argv, rest)
-			return argv
+			return object.Wrap(argv)
 		}
 	}
 	d("parse!", bangFn(true))
@@ -325,7 +325,7 @@ func (vm *VM) registerOptionParser() {
 			} else {
 				var sink func(string)
 				if blk != nil {
-					sink = func(s string) { vm.callBlock(blk, []object.Value{object.NewString(s)}) }
+					sink = func(s string) { vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(s))}) }
 				}
 				matches, rest, err = op.p.Order(in, sink)
 			}
@@ -333,7 +333,7 @@ func (vm *VM) registerOptionParser() {
 			if err != nil {
 				vm.optRaise(err)
 			}
-			return strArray(rest)
+			return object.Wrap(strArray(rest))
 		}
 	}
 	d("parse", dupFn(true))
@@ -372,13 +372,13 @@ func (vm *VM) registerOptionParser() {
 			var val object.Value
 			switch {
 			case r.TakesArg && r.Str != nil:
-				val = object.NewString(*r.Str)
+				val = object.Wrap(object.NewString(*r.Str))
 			case r.TakesArg:
-				val = object.NilV
+				val = object.NilVal()
 			default:
-				val = object.Bool(r.Flag)
+				val = object.BoolValue(bool(object.Bool(r.Flag)))
 			}
-			h.Set(object.NewString(name), val)
+			h.Set(object.Wrap(object.NewString(name)), val)
 		}
 		// getopts (no leftover form is bang) mutates the source argv: re-run to get
 		// the rest. The library already consumed argv; the operands fall out of the
@@ -388,7 +388,7 @@ func (vm *VM) registerOptionParser() {
 		// which mutates ARGV to the operands. Mirror that here.
 		_, leftover, _ := op.p.ParseBang(stringsOf(argv))
 		setArgv(argv, leftover)
-		return h
+		return object.Wrap(h)
 	})
 }
 
@@ -413,9 +413,9 @@ func (vm *VM) optDispatch(op *OptionParser, matches []optparse.Match) {
 func (vm *VM) optValueToRuby(op *OptionParser, m optparse.Match) object.Value {
 	switch val := m.Value.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(val)
+		return object.BoolValue(bool(object.Bool(val)))
 	case string:
 		// A coerced string is either a plain value or a candidate-list key; for a
 		// list, map it back to the original Ruby object via the per-spec table.
@@ -424,17 +424,17 @@ func (vm *VM) optValueToRuby(op *OptionParser, m optparse.Match) object.Value {
 				return rv
 			}
 		}
-		return object.NewString(val)
+		return object.Wrap(object.NewString(val))
 	case int64:
 		return object.IntValue(val)
 	case *big.Int:
 		return object.NormInt(new(big.Int).Set(val))
 	case float64:
-		return object.Float(val)
+		return object.FloatValue(float64(object.Float(val)))
 	case []string:
-		return strArray(val)
+		return object.Wrap(strArray(val))
 	default:
-		return object.NilV
+		return object.NilVal()
 	}
 }
 
@@ -576,9 +576,9 @@ func (vm *VM) optRaise(err error) {
 	}
 	argv := make([]object.Value, len(pe.Args))
 	for i, a := range pe.Args {
-		argv[i] = object.NewString(a)
+		argv[i] = object.Wrap(object.NewString(a))
 	}
-	exc := vm.send(cls, "new", argv, nil)
+	exc := vm.send(object.Wrap(cls), "new", argv, nil)
 	panic(vm.excError(vm.captureBacktrace(exc)))
 }
 
@@ -628,7 +628,7 @@ func stringsOf(a *object.Array) []string {
 func setArgv(a *object.Array, rest []string) {
 	a.Elems = a.Elems[:0]
 	for _, s := range rest {
-		a.Elems = append(a.Elems, object.NewString(s))
+		a.Elems = append(a.Elems, object.Wrap(object.NewString(s)))
 	}
 }
 
@@ -636,7 +636,7 @@ func setArgv(a *object.Array, rest []string) {
 func strArray(ss []string) *object.Array {
 	out := make([]object.Value, len(ss))
 	for i, s := range ss {
-		out[i] = object.NewString(s)
+		out[i] = object.Wrap(object.NewString(s))
 	}
 	return object.NewArrayFromSlice(out)
 }
@@ -644,9 +644,9 @@ func strArray(ss []string) *object.Array {
 // optStrPtr returns a String for a non-nil *string, or nil.
 func optStrPtr(p *string) object.Value {
 	if p == nil {
-		return object.NilV
+		return object.NilVal()
 	}
-	return object.NewString(*p)
+	return object.Wrap(object.NewString(*p))
 }
 
 // optGetoptsNames returns the getopts option names in scan order across the spec

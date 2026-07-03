@@ -8,7 +8,7 @@ import (
 // definedTag returns the canonical (frozen) String for a `defined?` tag. The
 // String is freshly built each call to match MRI, which returns a new String
 // object from defined?; callers never mutate it.
-func definedTag(tag string) object.Value { return object.NewString(tag) }
+func definedTag(tag string) object.Value { return object.Wrap(object.NewString(tag)) }
 
 // hasScopedConst reports whether cls or its ancestors define name — the
 // non-raising form of scopedConst (used by defined?(A::B)). A pending autoload on
@@ -109,7 +109,7 @@ func (vm *VM) runDefinedGuard(child *bytecode.ISeq, self object.Value, definee *
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(RubyError); ok {
-				res = object.NilV
+				res = object.NilVal()
 				return
 			}
 			panic(r) // control-flow signals / internal bugs propagate

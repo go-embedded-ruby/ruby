@@ -58,13 +58,13 @@ func (d *DigestObj) Truthy() bool { return true }
 func (vm *VM) registerDigest() {
 	d := newClass("Digest", nil)
 	d.isModule = true
-	vm.consts["Digest"] = d
+	vm.consts["Digest"] = object.Wrap(d)
 
 	// Digest.bubblebabble(data) — the digest/bubblebabble extension's babble
 	// encoding of a raw string (not a digest), e.g. "ximek-domex" for "abc".
 	d.smethods["bubblebabble"] = &Method{name: "bubblebabble", owner: d,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(digest.BubbleBabble([]byte(strArg(args[0]))))
+			return object.Wrap(object.NewString(digest.BubbleBabble([]byte(strArg(args[0])))))
 		}}
 
 	for _, name := range digestAlgos {
@@ -87,14 +87,14 @@ func (vm *VM) registerDigest() {
 // and the instance protocol) under the Digest module.
 func (vm *VM) defineDigestClass(mod *RClass, name string) {
 	c := newClass("Digest::"+name, vm.cObject)
-	mod.consts[name] = c
+	mod.consts[name] = object.Wrap(c)
 
 	// Digest::ALGO.new → a fresh incremental hasher. The algorithm is fixed by the
 	// class, so New never errors here (name is one of digestAlgos).
 	c.smethods["new"] = &Method{name: "new", owner: c,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			h, _ := digest.New(name)
-			return &DigestObj{cls: c, d: h}
+			return object.Wrap(&DigestObj{cls: c, d: h})
 		}}
 
 	// Class one-shots: Digest::ALGO.digest/hexdigest/base64digest(data). The
@@ -102,17 +102,17 @@ func (vm *VM) defineDigestClass(mod *RClass, name string) {
 	c.smethods["digest"] = &Method{name: "digest", owner: c,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			out, _ := digest.Sum(name, []byte(base64Arg(args[0])))
-			return object.NewString(string(out))
+			return object.Wrap(object.NewString(string(out)))
 		}}
 	c.smethods["hexdigest"] = &Method{name: "hexdigest", owner: c,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			out, _ := digest.HexSum(name, []byte(base64Arg(args[0])))
-			return object.NewString(out)
+			return object.Wrap(object.NewString(out))
 		}}
 	c.smethods["base64digest"] = &Method{name: "base64digest", owner: c,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			out, _ := digest.Base64Sum(name, []byte(base64Arg(args[0])))
-			return object.NewString(out)
+			return object.Wrap(object.NewString(out))
 		}}
 
 	// Digest::ALGO.file(path) returns a Digest::ALGO instance that has consumed the
@@ -129,14 +129,14 @@ func (vm *VM) defineDigestClass(mod *RClass, name string) {
 			}
 			h, _ := digest.New(name)
 			h.Update(data)
-			return &DigestObj{cls: c, d: h}
+			return object.Wrap(&DigestObj{cls: c, d: h})
 		}}
 
 	// Digest::ALGO.bubblebabble(data) — babble encoding of the algorithm's digest.
 	c.smethods["bubblebabble"] = &Method{name: "bubblebabble", owner: c,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			out, _ := digest.SumBubbleBabble(name, []byte(base64Arg(args[0])))
-			return object.NewString(out)
+			return object.Wrap(object.NewString(out))
 		}}
 
 	vm.defineDigestInstance(c)
@@ -152,22 +152,22 @@ func (vm *VM) defineDigestInstance(c *RClass) {
 	feed := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := object.Kind[*DigestObj](self)
 		o.d.Update([]byte(strArg(args[0])))
-		return o
+		return object.Wrap(o)
 	}
 	c.define("update", feed)
 	c.define("<<", feed)
 
 	c.define("hexdigest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := digestFeedOptional(self, args)
-		return object.NewString(o.d.HexFinish())
+		return object.Wrap(object.NewString(o.d.HexFinish()))
 	})
 	c.define("digest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := digestFeedOptional(self, args)
-		return object.NewString(string(o.d.Finish()))
+		return object.Wrap(object.NewString(string(o.d.Finish())))
 	})
 	c.define("base64digest", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := digestFeedOptional(self, args)
-		return object.NewString(o.d.Base64Finish())
+		return object.Wrap(object.NewString(o.d.Base64Finish()))
 	})
 
 	// The ! finalizers return the digest and then reset the hasher, matching MRI's
@@ -176,25 +176,25 @@ func (vm *VM) defineDigestInstance(c *RClass) {
 		o := object.Kind[*DigestObj](self)
 		s := o.d.HexFinish()
 		o.d.Reset()
-		return object.NewString(s)
+		return object.Wrap(object.NewString(s))
 	})
 	c.define("digest!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := object.Kind[*DigestObj](self)
 		s := o.d.Finish()
 		o.d.Reset()
-		return object.NewString(string(s))
+		return object.Wrap(object.NewString(string(s)))
 	})
 	c.define("base64digest!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := object.Kind[*DigestObj](self)
 		s := o.d.Base64Finish()
 		o.d.Reset()
-		return object.NewString(s)
+		return object.Wrap(object.NewString(s))
 	})
 
 	c.define("reset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := object.Kind[*DigestObj](self)
 		o.d.Reset()
-		return o
+		return object.Wrap(o)
 	})
 
 	// == compares hex digests: against another Digest instance's running digest or
@@ -207,24 +207,24 @@ func (vm *VM) defineDigestInstance(c *RClass) {
 			case object.IsKind[*DigestObj](__sw47):
 				other := object.Kind[*DigestObj](__sw47)
 				_ = other
-				return object.Bool(o.d.HexFinish() == other.d.HexFinish())
+				return object.BoolValue(bool(object.Bool(o.d.HexFinish() == other.d.HexFinish())))
 			case object.IsKind[*object.String](__sw47):
 				other := object.Kind[*object.String](__sw47)
 				_ = other
-				return object.Bool(o.d.HexFinish() == other.Str())
+				return object.BoolValue(bool(object.Bool(o.d.HexFinish() == other.Str())))
 			default:
 				other := __sw47
 				_ = other
-				return object.Bool(false)
+				return object.BoolValue(bool(object.Bool(false)))
 			}
 		}
 	})
 
 	c.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*DigestObj](self).ToS())
+		return object.Wrap(object.NewString(object.Kind[*DigestObj](self).ToS()))
 	})
 	c.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*DigestObj](self).Inspect())
+		return object.Wrap(object.NewString(object.Kind[*DigestObj](self).Inspect()))
 	})
 
 	// length / size / digest_length all report the digest size; block_length the

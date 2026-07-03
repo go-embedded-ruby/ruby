@@ -21,19 +21,19 @@ func TestKramdownDocShell(t *testing.T) {
 // TestKramdownKeyBridge covers kramdownKey's to_s-default arm (a non-Symbol,
 // non-String key) and kramdownStr's to_s-default arm (a non-String value).
 func TestKramdownKeyBridge(t *testing.T) {
-	if got := kramdownKey(object.Symbol("s")); got != "s" {
+	if got := kramdownKey(object.SymVal(string(object.Symbol("s")))); got != "s" {
 		t.Errorf("symbol key -> %q", got)
 	}
-	if got := kramdownKey(object.NewString("k")); got != "k" {
+	if got := kramdownKey(object.Wrap(object.NewString("k"))); got != "k" {
 		t.Errorf("string key -> %q", got)
 	}
-	if got := kramdownKey(object.Integer(3)); got != "3" {
+	if got := kramdownKey(object.IntValue(int64(object.Integer(3)))); got != "3" {
 		t.Errorf("integer key -> %q", got)
 	}
-	if got := kramdownStr(object.NewString("s")); got != "s" {
+	if got := kramdownStr(object.Wrap(object.NewString("s"))); got != "s" {
 		t.Errorf("string str -> %q", got)
 	}
-	if got := kramdownStr(object.Integer(7)); got != "7" {
+	if got := kramdownStr(object.IntValue(int64(object.Integer(7)))); got != "7" {
 		t.Errorf("integer str -> %q", got)
 	}
 }
@@ -42,8 +42,8 @@ func TestKramdownKeyBridge(t *testing.T) {
 // non-Integer value: the default is kept (the type switch's ok=false path).
 func TestKramdownOptionsFootnoteNonInt(t *testing.T) {
 	h := object.NewHash()
-	h.Set(object.Symbol("footnote_nr"), object.NewString("nope"))
-	o := kramdownOptions(h)
+	h.Set(object.SymVal(string(object.Symbol("footnote_nr"))), object.Wrap(object.NewString("nope")))
+	o := kramdownOptions(object.Wrap(h))
 	if o == nil || o.FootnoteNr != 1 {
 		t.Errorf("footnote_nr non-int should keep default 1, got %#v", o)
 	}

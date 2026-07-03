@@ -21,17 +21,17 @@ import (
 // and the DryKey macro methods (filled/maybe/value/array/hash).
 func (vm *VM) registerDrySchemaSurface() {
 	dsl := newClass("Dry::Schema::DSL", vm.cObject)
-	vm.consts["Dry::Schema::DSL"] = dsl
+	vm.consts["Dry::Schema::DSL"] = object.Wrap(dsl)
 	bd := func(name string, fn NativeFn) { dsl.define(name, fn) }
 	bd("required", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &DryKey{k: object.Kind[*DrySchemaBuilder](self).b.Required(drySym(args))}
+		return object.Wrap(&DryKey{k: object.Kind[*DrySchemaBuilder](self).b.Required(drySym(args))})
 	})
 	bd("optional", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &DryKey{k: object.Kind[*DrySchemaBuilder](self).b.Optional(drySym(args))}
+		return object.Wrap(&DryKey{k: object.Kind[*DrySchemaBuilder](self).b.Optional(drySym(args))})
 	})
 
 	key := newClass("Dry::Schema::Key", vm.cObject)
-	vm.consts["Dry::Schema::Key"] = key
+	vm.consts["Dry::Schema::Key"] = object.Wrap(key)
 	kd := func(name string, fn NativeFn) { key.define(name, fn) }
 	kd("filled", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		tn, preds := dryTypeAndPreds(args)
@@ -51,7 +51,7 @@ func (vm *VM) registerDrySchemaSurface() {
 	kd("array", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk != nil {
 			object.Kind[*DryKey](self).k.ArrayOf(func(b *dryvalidation.Builder) {
-				vm.callBlockSelf(blk, &DrySchemaBuilder{b: b}, nil)
+				vm.callBlockSelf(blk, object.Wrap(&DrySchemaBuilder{b: b}), nil)
 			})
 			return self
 		}
@@ -64,7 +64,7 @@ func (vm *VM) registerDrySchemaSurface() {
 			raise("ArgumentError", "no block given")
 		}
 		object.Kind[*DryKey](self).k.Hash(func(b *dryvalidation.Builder) {
-			vm.callBlockSelf(blk, &DrySchemaBuilder{b: b}, nil)
+			vm.callBlockSelf(blk, object.Wrap(&DrySchemaBuilder{b: b}), nil)
 		})
 		return self
 	})
@@ -73,7 +73,7 @@ func (vm *VM) registerDrySchemaSurface() {
 			raise("ArgumentError", "no block given")
 		}
 		object.Kind[*DryKey](self).k.Schema(func(b *dryvalidation.Builder) {
-			vm.callBlockSelf(blk, &DrySchemaBuilder{b: b}, nil)
+			vm.callBlockSelf(blk, object.Wrap(&DrySchemaBuilder{b: b}), nil)
 		})
 		return self
 	})
@@ -84,7 +84,7 @@ func (vm *VM) registerDrySchemaSurface() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &DryValidationResult{r: object.Kind[*DrySchema](self).s.Call(dryToGo(args[0]))}
+		return object.Wrap(&DryValidationResult{r: object.Kind[*DrySchema](self).s.Call(dryToGo(args[0]))})
 	})
 }
 
@@ -101,13 +101,13 @@ func (vm *VM) registerDryContractClass(contract *RClass) {
 		cls := object.Kind[*RClass](self)
 		m := vm.dryContractMeta(cls)
 		m.schema = dryvalidation.Params(vm.drySchemaBuild(blk))
-		return object.NilV
+		return object.NilVal()
 	})
 	sdef("params", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		cls := object.Kind[*RClass](self)
 		m := vm.dryContractMeta(cls)
 		m.schema = dryvalidation.Params(vm.drySchemaBuild(blk))
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// rule(*keys) { ... } records a custom rule body run after the schema.
@@ -122,7 +122,7 @@ func (vm *VM) registerDryContractClass(contract *RClass) {
 			keys = append(keys, drytypes.Symbol(dryKeyName(a)))
 		}
 		m.rules = append(m.rules, dryContractRule{keys: keys, body: blk})
-		return object.NilV
+		return object.NilVal()
 	})
 
 	sdef("new", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -144,14 +144,14 @@ func (vm *VM) registerDryContractClass(contract *RClass) {
 				c.Rule(body, rule.keys...)
 			}
 		}
-		return &DryContract{c: c, cls: cls}
+		return object.Wrap(&DryContract{c: c, cls: cls})
 	})
 
 	contract.define("call", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return &DryValidationResult{r: object.Kind[*DryContract](self).c.Call(dryToGo(args[0]))}
+		return object.Wrap(&DryValidationResult{r: object.Kind[*DryContract](self).c.Call(dryToGo(args[0]))})
 	})
 }
 
@@ -165,7 +165,7 @@ func (vm *VM) dryContractMeta(cls *RClass) *dryContractMeta {
 	if cls.ivars == nil {
 		cls.ivars = map[string]object.Value{}
 	}
-	cls.ivars[dryContractMetaIvar] = m
+	cls.ivars[dryContractMetaIvar] = object.Wrap(m)
 	return m
 }
 
@@ -173,15 +173,15 @@ func (vm *VM) dryContractMeta(cls *RClass) *dryContractMeta {
 // contract #call return: success?/failure?/errors/to_h/messages.
 func (vm *VM) registerDryValidationResult(val *RClass) {
 	cls := newClass("Dry::Validation::Result", vm.cObject)
-	val.consts["Result"] = cls
-	vm.consts["Dry::Validation::Result"] = cls
+	val.consts["Result"] = object.Wrap(cls)
+	vm.consts["Dry::Validation::Result"] = object.Wrap(cls)
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 	d("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(object.Kind[*DryValidationResult](self).r.Success())
+		return object.BoolValue(bool(object.Bool(object.Kind[*DryValidationResult](self).r.Success())))
 	})
 	d("failure?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(!object.Kind[*DryValidationResult](self).r.Success())
+		return object.BoolValue(bool(object.Bool(!object.Kind[*DryValidationResult](self).r.Success())))
 	})
 	d("errors", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return dryMapToHash(vm, object.Kind[*DryValidationResult](self).r.Errors())
@@ -196,16 +196,16 @@ func (vm *VM) registerDryValidationResult(val *RClass) {
 		msgs := object.Kind[*DryValidationResult](self).r.Messages()
 		arr := object.NewArrayFromSlice(make([]object.Value, len(msgs)))
 		for i, m := range msgs {
-			arr.Elems[i] = object.NewString(m.Text)
+			arr.Elems[i] = object.Wrap(object.NewString(m.Text))
 		}
-		return arr
+		return object.Wrap(arr)
 	})
 }
 
 // dryRuleContext builds the Ruby self a rule body runs against: a shell exposing
 // key(...)/value(...) reads and key(...).failure(text) / base.failure(text).
 func (vm *VM) dryRuleContext(rc *dryvalidation.RuleContext) object.Value {
-	return &DryRuleCtx{rc: rc}
+	return object.Wrap(&DryRuleCtx{rc: rc})
 }
 
 // drySym reads the first argument of required/optional as a Symbol name.

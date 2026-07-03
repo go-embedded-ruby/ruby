@@ -127,12 +127,12 @@ func payloadDate(d *date.Date, err error) *Date {
 func dateOp(op bytecode.Op, a *Date, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		return &Date{d: a.d.Plus(dateDays(b))}
+		return object.Wrap(&Date{d: a.d.Plus(dateDays(b))})
 	case bytecode.OpSub:
 		if other, ok := object.KindOK[*Date](b); ok {
 			return object.IntValue(int64(a.d.Diff(other.d)))
 		}
-		return &Date{d: a.d.Minus(dateDays(b))}
+		return object.Wrap(&Date{d: a.d.Minus(dateDays(b))})
 	}
 	return raise("NoMethodError", "undefined method '%s' for a Date", op)
 }
@@ -185,7 +185,7 @@ func offsetSeconds(v object.Value) int {
 // offsetRational renders a seconds-east-of-UTC offset as MRI's Rational
 // fraction-of-a-day (DateTime#offset), reduced (7200s -> 1/12).
 func offsetRational(secs int) object.Value {
-	return &object.Rational{R: new(big.Rat).SetFrac64(int64(secs), 86400)}
+	return object.Wrap(&object.Rational{R: new(big.Rat).SetFrac64(int64(secs), 86400)})
 }
 
 // zoneOffsetSeconds parses a Ruby DateTime zone string to seconds east of UTC,
@@ -249,12 +249,12 @@ func withDeterministicClock(fn func() *Date) *Date {
 // and instance methods, all delegating to the go-ruby-date library.
 func (vm *VM) registerDate() {
 	vm.cDate = newClass("Date", vm.cObject)
-	vm.consts["Date"] = vm.cDate
+	vm.consts["Date"] = object.Wrap(vm.cDate)
 	// DateTime is a subclass of Date (as in MRI), so it inherits every instance
 	// method defined on Date below; only the constructors differ. The shared
 	// *date.Date wrapper carries the IsDateTime flag that classOf reads.
 	vm.cDateTime = newClass("DateTime", vm.cDate)
-	vm.consts["DateTime"] = vm.cDateTime
+	vm.consts["DateTime"] = object.Wrap(vm.cDateTime)
 
 	vm.registerDateConstructors()
 	vm.registerDateAccessors()
@@ -271,8 +271,8 @@ func (vm *VM) registerDate() {
 // hierarchy is in place (registerDate itself runs before StandardError exists).
 func (vm *VM) registerDateErrors() {
 	dateErr := newClass("Date::Error", object.Kind[*RClass](vm.consts["ArgumentError"]))
-	vm.cDate.consts["Error"] = dateErr
-	vm.consts["Date::Error"] = dateErr
+	vm.cDate.consts["Error"] = object.Wrap(dateErr)
+	vm.consts["Date::Error"] = object.Wrap(dateErr)
 }
 
 // registerDateConstructors installs the Date / DateTime class methods.
@@ -296,14 +296,14 @@ func (vm *VM) registerDateConstructors() {
 		if len(args) > 2 {
 			d = int(intArg(args[2]))
 		}
-		return payloadDate(date.NewDate(y, m, d))
+		return object.Wrap(payloadDate(date.NewDate(y, m, d)))
 	}
 	sm(vm.cDate, "new", newFn)
 	sm(vm.cDate, "civil", newFn)
 
 	// Date.jd(n) — the Date for astronomical Julian Day Number n.
 	sm(vm.cDate, "jd", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Date{d: date.DateJD(int(intArgOr(args, 0)))}
+		return object.Wrap(&Date{d: date.DateJD(int(intArgOr(args, 0)))})
 	})
 	// Date.ordinal(y, yday) — the yday-th day of year y (1-based); an out-of-range
 	// yday raises Date::Error.
@@ -312,7 +312,7 @@ func (vm *VM) registerDateConstructors() {
 		if len(args) > 0 {
 			y = int(intArg(args[0]))
 		}
-		return payloadDate(date.Ordinal(y, int(intArgOr(args[1:], 1))))
+		return object.Wrap(payloadDate(date.Ordinal(y, int(intArgOr(args[1:], 1)))))
 	})
 	// Date.commercial(cwyear, cweek, cwday) — the ISO week-date constructor.
 	sm(vm.cDate, "commercial", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -326,7 +326,7 @@ func (vm *VM) registerDateConstructors() {
 		if len(args) > 2 {
 			cwd = int(intArg(args[2]))
 		}
-		return payloadDate(date.Commercial(cwy, cw, cwd))
+		return object.Wrap(payloadDate(date.Commercial(cwy, cw, cwd)))
 	})
 	// Date.today — the current local date, driven by the VM's pinned clock.
 	sm(vm.cDate, "today", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -348,7 +348,7 @@ func (vm *VM) registerDateConstructors() {
 	sm(vm.cDate, "_strptime", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		d, err := date.Strptime(strArg(args[0]), strptimeFormat(args))
 		if err != nil {
-			return object.NilV
+			return object.NilVal()
 		}
 		return strptimeHash(d)
 	})
@@ -379,19 +379,19 @@ func (vm *VM) registerDateConstructors() {
 		if len(args) > 6 {
 			off = offsetSeconds(args[6])
 		}
-		return payloadDate(date.NewDateTime(y, m, d, h, mi, s, off))
+		return object.Wrap(payloadDate(date.NewDateTime(y, m, d, h, mi, s, off)))
 	})
 	sm(vm.cDateTime, "civil", vm.cDateTime.smethods["new"].native)
 	// DateTime.now — the current instant, driven by the VM's pinned clock.
 	sm(vm.cDateTime, "now", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return withDeterministicClock(func() *Date { return &Date{d: date.Now()} })
+		return object.Wrap(withDeterministicClock(func() *Date { return &Date{d: date.Now()} }))
 	})
 	// DateTime.parse(str[, comp]) — the heuristic parser, returning a DateTime.
 	sm(vm.cDateTime, "parse", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return payloadDate(date.ParseDateTime(strArg(args[0]), compArg(args, 1)))
+		return object.Wrap(payloadDate(date.ParseDateTime(strArg(args[0]), compArg(args, 1))))
 	})
 	sm(vm.cDateTime, "strptime", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return payloadDate(date.Strptime(strArg(args[0]), strptimeFormat(args)))
+		return object.Wrap(payloadDate(date.Strptime(strArg(args[0]), strptimeFormat(args))))
 	})
 }
 
@@ -399,7 +399,7 @@ func (vm *VM) registerDateConstructors() {
 // Strptime / Today all build through the datetime core) to a plain Date when the
 // receiver was the Date class — so Date.parse returns a Date, DateTime.parse a
 // DateTime. The library's ToDate strips the time-of-day.
-func (d *Date) toDate() object.Value { return &Date{d: d.d.ToDate()} }
+func (d *Date) toDate() object.Value { return object.Wrap(&Date{d: d.d.ToDate()}) }
 
 // compArg reads the optional `comp` boolean (Date.parse's second argument),
 // defaulting to true (MRI's default — expand a 2-digit year).
@@ -428,15 +428,15 @@ func strptimeFormat(args []object.Value) string {
 // reconstructed from the resolved value.)
 func strptimeHash(d *date.Date) object.Value {
 	h := object.NewHash()
-	h.Set(object.Symbol("year"), object.IntValue(int64(d.Year())))
-	h.Set(object.Symbol("mon"), object.IntValue(int64(d.Month())))
-	h.Set(object.Symbol("mday"), object.IntValue(int64(d.Day())))
+	h.Set(object.SymVal(string(object.Symbol("year"))), object.IntValue(int64(d.Year())))
+	h.Set(object.SymVal(string(object.Symbol("mon"))), object.IntValue(int64(d.Month())))
+	h.Set(object.SymVal(string(object.Symbol("mday"))), object.IntValue(int64(d.Day())))
 	if d.IsDateTime() {
-		h.Set(object.Symbol("hour"), object.IntValue(int64(d.Hour())))
-		h.Set(object.Symbol("min"), object.IntValue(int64(d.Min())))
-		h.Set(object.Symbol("sec"), object.IntValue(int64(d.Sec())))
+		h.Set(object.SymVal(string(object.Symbol("hour"))), object.IntValue(int64(d.Hour())))
+		h.Set(object.SymVal(string(object.Symbol("min"))), object.IntValue(int64(d.Min())))
+		h.Set(object.SymVal(string(object.Symbol("sec"))), object.IntValue(int64(d.Sec())))
 	}
-	return h
+	return object.Wrap(h)
 }
 
 // registerDateAccessors installs the field-accessor instance methods, shared by
@@ -471,7 +471,7 @@ func (vm *VM) registerDateAccessors() {
 	d("sec", intM((*date.Date).Sec))
 
 	d("leap?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).Leap())
+		return object.BoolValue(bool(object.Bool(self(v).Leap())))
 	})
 	// offset — MRI's DateTime#offset, the Rational fraction of a day east of UTC.
 	d("offset", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -480,7 +480,7 @@ func (vm *VM) registerDateAccessors() {
 	// to_date — the plain calendar date (strips the time-of-day); to_datetime
 	// promotes to a DateTime at midnight UTC.
 	d("to_date", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Date{d: self(v).ToDate()}
+		return object.Wrap(&Date{d: self(v).ToDate()})
 	})
 }
 
@@ -501,7 +501,7 @@ func (vm *VM) registerDateArithmetic() {
 
 	// next / succ — the following day (Date#succ is the MRI alias for next).
 	succFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Date{d: self(v).d.Succ()}
+		return object.Wrap(&Date{d: self(v).d.Succ()})
 	}
 	d("next", succFn)
 	d("succ", succFn)
@@ -514,7 +514,7 @@ func (vm *VM) registerDateArithmetic() {
 			if len(args) > 0 {
 				n = dateDays(args[0])
 			}
-			return &Date{d: fn(self(v).d, n)}
+			return object.Wrap(&Date{d: fn(self(v).d, n)})
 		}
 	}
 	d("next_day", shift((*date.Date).NextDay))
@@ -527,10 +527,10 @@ func (vm *VM) registerDateArithmetic() {
 	// >> n / << n — MRI's month-shift operators (dispatch as method sends; the VM
 	// has no shift opcode). The right operand is an Integer month count.
 	d(">>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Date{d: self(v).d.PlusMonths(dateDays(args[0]))}
+		return object.Wrap(&Date{d: self(v).d.PlusMonths(dateDays(args[0]))})
 	})
 	d("<<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Date{d: self(v).d.PlusMonths(-dateDays(args[0]))}
+		return object.Wrap(&Date{d: self(v).d.PlusMonths(-dateDays(args[0]))})
 	})
 
 	// upto / downto / step — block iterators over the day range to a limit (a
@@ -539,28 +539,28 @@ func (vm *VM) registerDateArithmetic() {
 	iter := func(name string, run func(vm *VM, d *date.Date, limit *date.Date, blk *Proc)) NativeFn {
 		return func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
 			if blk == nil {
-				return enumFor(v, name, args...)
+				return object.Wrap(enumFor(v, name, args...))
 			}
 			run(vm, self(v).d, dateArg(args[0]).d, blk)
 			return v
 		}
 	}
 	d("upto", iter("upto", func(vm *VM, dd, limit *date.Date, blk *Proc) {
-		dd.Upto(limit, func(x *date.Date) { vm.callBlock(blk, []object.Value{&Date{d: x}}) })
+		dd.Upto(limit, func(x *date.Date) { vm.callBlock(blk, []object.Value{object.Wrap(&Date{d: x})}) })
 	}))
 	d("downto", iter("downto", func(vm *VM, dd, limit *date.Date, blk *Proc) {
-		dd.Downto(limit, func(x *date.Date) { vm.callBlock(blk, []object.Value{&Date{d: x}}) })
+		dd.Downto(limit, func(x *date.Date) { vm.callBlock(blk, []object.Value{object.Wrap(&Date{d: x})}) })
 	}))
 	d("step", func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(v, "step", args...)
+			return object.Wrap(enumFor(v, "step", args...))
 		}
 		step := 1
 		if len(args) > 1 {
 			step = dateDays(args[1])
 		}
 		self(v).d.Step(dateArg(args[0]).d, step,
-			func(x *date.Date) { vm.callBlock(blk, []object.Value{&Date{d: x}}) })
+			func(x *date.Date) { vm.callBlock(blk, []object.Value{object.Wrap(&Date{d: x})}) })
 		return v
 	})
 }
@@ -571,12 +571,12 @@ func (vm *VM) registerDateFormat() {
 	self := func(v object.Value) *date.Date { return object.Kind[*Date](v).d }
 	strM := func(get func(*date.Date) string) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.NewString(get(self(v)))
+			return object.Wrap(object.NewString(get(self(v))))
 		}
 	}
 
 	d("strftime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Strftime(strArg(args[0])))
+		return object.Wrap(object.NewString(self(v).Strftime(strArg(args[0]))))
 	})
 	d("iso8601", strM((*date.Date).Iso8601))
 	d("rfc3339", strM((*date.Date).Rfc3339))
@@ -588,7 +588,7 @@ func (vm *VM) registerDateFormat() {
 	d("jisx0301", strM((*date.Date).Jisx0301))
 	d("to_s", strM((*date.Date).String))
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(dateInspect(self(v)))
+		return object.Wrap(object.NewString(dateInspect(self(v))))
 	})
 }
 
@@ -601,13 +601,13 @@ func (vm *VM) registerDateCompare() {
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := object.KindOK[*Date](args[0])
 		if !ok {
-			return object.NilV
+			return object.NilVal()
 		}
 		return object.IntValue(dateCmp(self(v), other))
 	})
 	cmpBool := func(want func(int64) bool) NativeFn {
 		return func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.Bool(want(dateCmp(self(v), dateArg(args[0]))))
+			return object.BoolValue(bool(object.Bool(want(dateCmp(self(v), dateArg(args[0]))))))
 		}
 	}
 	d("<", cmpBool(func(c int64) bool { return c < 0 }))
@@ -615,6 +615,6 @@ func (vm *VM) registerDateCompare() {
 	d("<=", cmpBool(func(c int64) bool { return c <= 0 }))
 	d(">=", cmpBool(func(c int64) bool { return c >= 0 }))
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(dateEqual(self(v), args[0]))
+		return object.BoolValue(bool(object.Bool(dateEqual(self(v), args[0]))))
 	})
 }

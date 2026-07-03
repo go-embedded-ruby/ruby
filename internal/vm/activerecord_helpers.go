@@ -159,7 +159,7 @@ func arAttrs(args []object.Value) map[string]any {
 func arStrings(ss []string) *object.Array {
 	arr := object.NewArrayFromSlice(make([]object.Value, len(ss)))
 	for i, s := range ss {
-		arr.Elems[i] = object.NewString(s)
+		arr.Elems[i] = object.Wrap(object.NewString(s))
 	}
 	return arr
 }
@@ -216,7 +216,7 @@ func arInList(args []object.Value) []any {
 	if !ok {
 		return nil
 	}
-	if v, ok := h.Get(object.Symbol("in")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("in")))); ok {
 		if arr, ok := object.KindOK[*object.Array](v); ok {
 			out := make([]any, len(arr.Elems))
 			for i, el := range arr.Elems {
@@ -234,7 +234,7 @@ func arInList(args []object.Value) []any {
 func arClassName(args []object.Value) string {
 	if len(args) > 1 {
 		if h, ok := object.KindOK[*object.Hash](args[1]); ok {
-			if v, ok := h.Get(object.Symbol("class_name")); ok {
+			if v, ok := h.Get(object.SymVal(string(object.Symbol("class_name")))); ok {
 				return arStr(v)
 			}
 		}
@@ -262,7 +262,7 @@ func arPluck(recs []*activerecord.Record, args []object.Value) *object.Array {
 			val, _ := rec.Get(c)
 			row.Elems[j] = arValueToRuby(val)
 		}
-		out.Elems[i] = row
+		out.Elems[i] = object.Wrap(row)
 	}
 	return out
 }

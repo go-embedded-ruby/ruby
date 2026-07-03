@@ -24,7 +24,7 @@ func (vm *VM) registerTmpdir() {
 	def := func(name string, fn NativeFn) { cDir.smethods[name] = &Method{name: name, owner: cDir, native: fn} }
 
 	def("tmpdir", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(toSlash(systemTmpdir()))
+		return object.Wrap(object.NewString(toSlash(systemTmpdir())))
 	})
 
 	def("mktmpdir", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
@@ -37,12 +37,12 @@ func (vm *VM) registerTmpdir() {
 		}
 		dir := makeTmpdir(base, prefix, suffix)
 		if blk == nil {
-			return object.NewString(toSlash(dir))
+			return object.Wrap(object.NewString(toSlash(dir)))
 		}
 		// Block form yields the path and removes the tree afterwards, even on a
 		// non-local exit, returning the block's value (MRI semantics).
 		defer os.RemoveAll(dir)
-		return vm.callBlock(blk, []object.Value{object.NewString(toSlash(dir))})
+		return vm.callBlock(blk, []object.Value{object.Wrap(object.NewString(toSlash(dir)))})
 	})
 }
 

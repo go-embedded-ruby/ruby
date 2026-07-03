@@ -20,21 +20,21 @@ import (
 func (vm *VM) registerJSON() {
 	mod := newClass("JSON", nil)
 	mod.isModule = true
-	vm.consts["JSON"] = mod
+	vm.consts["JSON"] = object.Wrap(mod)
 	vm.registerJSONErrors(mod)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	// JSON.generate(obj[, opts]) / JSON.dump(obj) render a compact document.
 	generate := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(jsonGenerate(args[0], jsonGenerateOpts(args[1:])...))
+		return object.Wrap(object.NewString(jsonGenerate(args[0], jsonGenerateOpts(args[1:])...)))
 	}
 	def("generate", generate)
 	def("dump", generate)
 
 	// JSON.pretty_generate(obj[, opts]) renders the two-space-indented layout.
 	def("pretty_generate", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(jsonPrettyGenerate(args[0], jsonGenerateOpts(args[1:])...))
+		return object.Wrap(object.NewString(jsonPrettyGenerate(args[0], jsonGenerateOpts(args[1:])...)))
 	})
 
 	// JSON.parse(str[, opts]) parses a document; the symbolize_names: keyword
@@ -49,7 +49,7 @@ func (vm *VM) registerJSON() {
 
 	// Object#to_json serialises any value (Array / Hash / … included) via generate.
 	vm.cObject.define("to_json", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(jsonGenerate(self))
+		return object.Wrap(object.NewString(jsonGenerate(self)))
 	})
 }
 
@@ -63,8 +63,8 @@ func (vm *VM) registerJSONErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	jsonErr := reg("JSONError", "JSON::JSONError", std)
@@ -82,7 +82,7 @@ func jsonParseOpts(rest []object.Value) []json.Option {
 		return nil
 	}
 	var opts []json.Option
-	if v, ok := h.Get(object.Symbol("symbolize_names")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("symbolize_names")))); ok {
 		opts = append(opts, json.WithSymbolizeNames(v.Truthy()))
 	}
 	opts = append(opts, jsonSharedOpts(h)...)
@@ -100,7 +100,7 @@ func jsonGenerateOpts(rest []object.Value) []json.Option {
 	}
 	var opts []json.Option
 	str := func(key string, with func(string) json.Option) {
-		if v, ok := h.Get(object.Symbol(key)); ok {
+		if v, ok := h.Get(object.SymVal(string(object.Symbol(key)))); ok {
 			if s, isStr := object.KindOK[*object.String](v); isStr {
 				opts = append(opts, with(s.Str()))
 			}
@@ -119,7 +119,7 @@ func jsonGenerateOpts(rest []object.Value) []json.Option {
 // generate. max_nesting: false (or 0) disables the limit, matching MRI.
 func jsonSharedOpts(h *object.Hash) []json.Option {
 	var opts []json.Option
-	if v, ok := h.Get(object.Symbol("max_nesting")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("max_nesting")))); ok {
 		{
 			__sw78 := v
 			switch {
@@ -136,7 +136,7 @@ func jsonSharedOpts(h *object.Hash) []json.Option {
 			}
 		}
 	}
-	if v, ok := h.Get(object.Symbol("allow_nan")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("allow_nan")))); ok {
 		opts = append(opts, json.WithAllowNaN(v.Truthy()))
 	}
 	return opts

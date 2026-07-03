@@ -138,8 +138,8 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 	if !ok {
 		cls = object.Kind[*RClass](vm.consts["StandardError"])
 	}
-	obj := &RObject{class: cls, ivars: map[string]object.Value{"@message": object.NewString(e.Message)}}
-	return vm.captureBacktrace(obj)
+	obj := &RObject{class: cls, ivars: map[string]object.Value{"@message": object.Wrap(object.NewString(e.Message))}}
+	return vm.captureBacktrace(object.Wrap(obj))
 }
 
 // uncaughtBacktrace returns the backtrace strings for an exception escaping Run.
@@ -552,7 +552,7 @@ func (vm *VM) putEnv(e *Env) {
 
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
-	vm := &VM{out: out, errOut: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
+	vm := &VM{out: out, errOut: out, main: object.Wrap(object.NewMain()), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
 	// The main thread holds the GVL for the VM's lifetime, releasing it only at
 	// blocking points so spawned Ruby threads can run (see thread.go).
 	vm.gvl.Lock()
@@ -563,21 +563,21 @@ func New(out io.Writer) *VM {
 	// $LOAD_PATH (and its alias $:) is a real, mutable Array that require /
 	// require_relative search, so gems doing `$LOAD_PATH.unshift "lib"` work.
 	loadPath := object.NewArray()
-	vm.globals["$LOAD_PATH"] = loadPath
-	vm.globals["$:"] = loadPath
+	vm.globals["$LOAD_PATH"] = object.Wrap(loadPath)
+	vm.globals["$:"] = object.Wrap(loadPath)
 	// $LOADED_FEATURES (alias $") is a real, mutable Array of the files already
 	// loaded — code that consults or appends to it (Puppet's autoloader does
 	// `$LOADED_FEATURES << file`) works.
 	loadedFeatures := object.NewArray()
-	vm.globals["$LOADED_FEATURES"] = loadedFeatures
-	vm.globals[`$"`] = loadedFeatures
+	vm.globals["$LOADED_FEATURES"] = object.Wrap(loadedFeatures)
+	vm.globals[`$"`] = object.Wrap(loadedFeatures)
 	// ARGV (the top-level constant) holds the program's command-line arguments and
 	// is the very same Array as $* — a script doing ARGV.replace(...) and a library
 	// reading $* see one mutable object, as in MRI. The embedded host does not feed
 	// process args in yet, so it starts empty; SetARGV can repopulate it.
 	argv := object.NewArray()
-	vm.consts["ARGV"] = argv
-	vm.globals["$*"] = argv
+	vm.consts["ARGV"] = object.Wrap(argv)
+	vm.globals["$*"] = object.Wrap(argv)
 	vm.installPrelude()
 	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
 	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
@@ -652,7 +652,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 				vm.frameFiles = vm.frameFiles[:0]
 				vm.fileStack = vm.fileStack[:0]
 				vm.runAtExit()
-				result, err = object.NilV, nil
+				result, err = object.NilVal(), nil
 				return
 			}
 			rerr := r.(RubyError)
@@ -665,7 +665,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 				vm.frameFiles = vm.frameFiles[:0]
 				vm.fileStack = vm.fileStack[:0]
 				vm.runAtExit()
-				result, err = object.NilV, nil
+				result, err = object.NilVal(), nil
 				return
 			}
 			// Capture the backtrace for an uncaught exception while the frame stack
@@ -771,7 +771,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		env.slots = make([]object.Value, iseq.NumLocals)
 	}
 	for i := range env.slots {
-		env.slots[i] = object.NilV
+		env.slots[i] = object.NilVal()
 	}
 	if iseq.SplatIndex >= 0 {
 		si := iseq.SplatIndex
@@ -784,7 +784,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		if len(args) > si {
 			rest = append(rest, args[si:]...)
 		}
-		env.slots[si] = object.NewArrayFromSlice(rest)
+		env.slots[si] = object.Wrap(object.NewArrayFromSlice(rest))
 	} else {
 		copy(env.slots, args)
 	}
@@ -809,15 +809,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				v, _ := kwargs.Get(k)
 				rest.Set(k, v)
 			}
-			env.slots[iseq.KwRestSlot] = rest
+			env.slots[iseq.KwRestSlot] = object.Wrap(rest)
 		}
 	}
 	// &block reifies the method's block as a Proc (nil → no block given).
 	if iseq.BlockSlot >= 0 {
 		if block != nil {
-			env.slots[iseq.BlockSlot] = block
+			env.slots[iseq.BlockSlot] = object.Wrap(block)
 		} else {
-			env.slots[iseq.BlockSlot] = object.NilV
+			env.slots[iseq.BlockSlot] = object.NilVal()
 		}
 	}
 
@@ -994,16 +994,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// (Ruby semantics), so clone string constants on push; every other
 				// constant is immutable and can be shared.
 				if s, ok := object.KindOK[*object.String](iseq.Consts[in.A]); ok {
-					push(s.Dup())
+					push(object.Wrap(s.Dup()))
 				} else {
 					push(iseq.Consts[in.A])
 				}
 			case bytecode.OpPushNil:
-				push(object.NilV)
+				push(object.NilVal())
 			case bytecode.OpPushTrue:
-				push(object.True)
+				push(object.BoolValue(bool(object.True)))
 			case bytecode.OpPushFalse:
-				push(object.False)
+				push(object.BoolValue(bool(object.False)))
 			case bytecode.OpPushSelf:
 				push(self)
 			case bytecode.OpNewArray:
@@ -1011,7 +1011,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				elems := make([]object.Value, n)
 				copy(elems, stack[len(stack)-n:])
 				stack = stack[:len(stack)-n]
-				push(object.NewArrayFromSlice(elems))
+				push(object.Wrap(object.NewArrayFromSlice(elems)))
 			case bytecode.OpNewHash:
 				n := in.A * 2
 				region := stack[len(stack)-n:]
@@ -1020,7 +1020,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					h.Set(region[i], region[i+1])
 				}
 				stack = stack[:len(stack)-n]
-				push(h)
+				push(object.Wrap(h))
 			case bytecode.OpHashSetPair:
 				v := pop()
 				k := pop()
@@ -1040,7 +1040,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpNewRange:
 				hi := pop()
 				lo := pop()
-				push(object.NewRange(lo, hi, in.A == 1))
+				push(object.Wrap(object.NewRange(lo, hi, in.A == 1)))
 			case bytecode.OpPop:
 				pop()
 			case bytecode.OpDup:
@@ -1120,7 +1120,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if c := cvarOwner(definee, name); c != nil {
 					push(c.cvars[name])
 				} else {
-					push(object.NilV)
+					push(object.NilVal())
 				}
 			case bytecode.OpSetCVar:
 				// Set where the variable already lives in the hierarchy, else
@@ -1141,9 +1141,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpNeg:
 				push(negate(pop()))
 			case bytecode.OpNot:
-				push(object.Bool(!pop().Truthy()))
+				push(object.BoolValue(bool(object.Bool(!pop().Truthy()))))
 			case bytecode.OpTruthy:
-				push(object.Bool(pop().Truthy()))
+				push(object.BoolValue(bool(object.Bool(pop().Truthy()))))
 			case bytecode.OpRaiseNoMatch:
 				subj := pop()
 				raise("NoMatchingPatternError", "%s", subj.Inspect())
@@ -1267,7 +1267,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// Hook: definee.method_added(:name) for instance-method defs, if
 				// the class/module defines the hook (singleton method).
 				if hook := lookupSMethod(definee, "method_added"); hook != nil {
-					vm.invoke(hook, definee, []object.Value{object.SymVal(name)}, nil)
+					vm.invoke(hook, object.Wrap(definee), []object.Value{object.SymVal(name)}, nil)
 				}
 				// `def foo; end` evaluates to :foo (MRI), which is what makes
 				// `private def foo; end` mark the just-defined method.
@@ -1315,13 +1315,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if sc.lexParent == nil && definee != nil && definee != vm.cObject {
 					sc.lexParent = definee
 				}
-				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil, nil))
+				push(vm.exec(iseq.Children[in.A], object.Wrap(sc), nil, sc, "", nil, nil, nil, nil))
 			case bytecode.OpAlias:
 				vm.aliasMethod(definee, iseq.Names[in.A], iseq.Names[in.B])
-				push(object.NilV)
+				push(object.NilVal())
 			case bytecode.OpUndef:
 				vm.undefMethod(definee, iseq.Names[in.A])
-				push(object.NilV)
+				push(object.NilVal())
 			case bytecode.OpDefineClass:
 				// Bare `class B` nests into the current lexical scope (definee).
 				push(vm.defineClassIn(definee, iseq.Names[in.A], iseq.Children[in.B], nil, false))
@@ -1365,7 +1365,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// (Only the method's own frame carries kwargs; a block forwards the
 					// home method's positional args as captured.)
 					if selfBlock == nil && env.kwargs != nil && len(env.kwargs.Keys) > 0 {
-						superArgs = append(append([]object.Value(nil), homeSuperArgs...), env.kwargs)
+						superArgs = append(append([]object.Value(nil), homeSuperArgs...), object.Wrap(env.kwargs))
 					}
 				} else {
 					superArgs = make([]object.Value, in.A)
@@ -1407,7 +1407,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						break
 					}
 				}
-				push(object.Bool(match))
+				push(object.BoolValue(bool(object.Bool(match))))
 			case bytecode.OpCaseMatchAny:
 				match := false
 				if in.B == 1 { // any candidate === subject
@@ -1428,9 +1428,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						}
 					}
 				}
-				push(object.Bool(match))
+				push(object.BoolValue(bool(object.Bool(match))))
 			case bytecode.OpBlockGiven:
-				push(object.Bool(block != nil))
+				push(object.BoolValue(bool(object.Bool(block != nil))))
 			case bytecode.OpDefinedConst:
 				// defined? must NOT trigger autoload (MRI): a pending autoload still
 				// reports "constant" without requiring the file.
@@ -1438,13 +1438,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if _, ok := vm.resolveConstNoAutoload(lexCref, name); ok || vm.autoloadPending(lexCref, name) {
 					push(definedTag("constant"))
 				} else {
-					push(object.NilV)
+					push(object.NilVal())
 				}
 			case bytecode.OpDefinedConstTop:
 				if _, ok := vm.cObject.consts[iseq.Names[in.A]]; ok {
 					push(definedTag("constant"))
 				} else {
-					push(object.NilV)
+					push(object.NilVal())
 				}
 			case bytecode.OpDefinedScopedConst:
 				name := iseq.Names[in.A]
@@ -1453,7 +1453,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if ok && vm.hasScopedConst(cls, name) {
 					push(definedTag("constant"))
 				} else {
-					push(object.NilV)
+					push(object.NilVal())
 				}
 			case bytecode.OpDefinedIvar:
 				name := iseq.Names[in.A]
@@ -1463,43 +1463,43 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						break
 					}
 				}
-				push(object.NilV)
+				push(object.NilVal())
 			case bytecode.OpDefinedCVar:
 				name := iseq.Names[in.A]
 				if definee != vm.cObject && cvarOwner(definee, name) != nil {
 					push(definedTag("class variable"))
 				} else {
-					push(object.NilV)
+					push(object.NilVal())
 				}
 			case bytecode.OpDefinedGVar:
 				if vm.gvarDefined(iseq.Names[in.A]) {
 					push(definedTag("global-variable"))
 				} else {
-					push(object.NilV)
+					push(object.NilVal())
 				}
 			case bytecode.OpDefinedMethod:
 				recv := pop()
 				if vm.respondsTo(recv, iseq.Names[in.A]) {
 					push(definedTag("method"))
 				} else {
-					push(object.NilV)
+					push(object.NilVal())
 				}
 			case bytecode.OpDefinedYield:
 				if block != nil {
 					push(definedTag("yield"))
 				} else {
-					push(object.NilV)
+					push(object.NilVal())
 				}
 			case bytecode.OpDefinedGuard:
 				push(vm.runDefinedGuard(iseq.Children[in.A], self, definee, env, block))
 			case bytecode.OpBinding:
 				markEnvCaptured(env)
-				push(&Binding{env: env, self: self, definee: definee, names: append([]string(nil), iseq.Locals...)})
+				push(object.Wrap(&Binding{env: env, self: self, definee: definee, names: append([]string(nil), iseq.Locals...)}))
 			case bytecode.OpArgGiven:
-				push(object.Bool(in.A < len(args)))
+				push(object.BoolValue(bool(object.Bool(in.A < len(args)))))
 			case bytecode.OpKwGiven:
 				_, ok := env.kwargs.Get(object.SymVal(iseq.KwNames[in.A]))
-				push(object.Bool(ok))
+				push(object.BoolValue(bool(object.Bool(ok))))
 			case bytecode.OpReturn:
 				// A==1 marks an explicit `return` written inside a block body. In an
 				// ordinary block it is a non-local return that unwinds to the method
@@ -1580,7 +1580,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					continue
 				}
 			case bytecode.OpXStr:
-				push(object.NewString(vm.runShellCommand(iseq.Names[in.A])))
+				push(object.Wrap(object.NewString(vm.runShellCommand(iseq.Names[in.A]))))
 			case bytecode.OpSplatToArray:
 				push(vm.splatToArray(pop()))
 			case bytecode.OpExpandArray:
@@ -1595,7 +1595,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					}
 					mid := make([]object.Value, n-pre-post)
 					copy(mid, elems[pre:n-post])
-					vals = append(vals, object.NewArrayFromSlice(mid))
+					vals = append(vals, object.Wrap(object.NewArrayFromSlice(mid)))
 					for i := 0; i < post; i++ {
 						vals = append(vals, elems[n-post+i])
 					}
@@ -1610,13 +1610,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 							return v
 						}
 						idx++
-						return object.NilV
+						return object.NilVal()
 					}
 					for i := 0; i < pre; i++ {
 						vals = append(vals, nextVal())
 					}
 					if hasSplat {
-						vals = append(vals, object.NewArray())
+						vals = append(vals, object.Wrap(object.NewArray()))
 					}
 					for i := 0; i < post; i++ {
 						vals = append(vals, nextVal())
@@ -1632,7 +1632,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				elems := make([]object.Value, 0, len(a2.Elems)+len(b2.Elems))
 				elems = append(elems, a2.Elems...)
 				elems = append(elems, b2.Elems...)
-				push(object.NewArrayFromSlice(elems))
+				push(object.Wrap(object.NewArrayFromSlice(elems)))
 			case bytecode.OpSendArray:
 				argsArr := object.Kind[*object.Array](pop())
 				recv := pop()
@@ -1820,18 +1820,18 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 		if !scoped {
 			class.lexParent = lexParentFor(parent)
 		}
-		table[name] = class
+		table[name] = object.Wrap(class)
 		// Hook: superclass.inherited(subclass), fired when the class is created
 		// (before its body runs) if the superclass defines the hook.
 		if hook := lookupSMethod(super, "inherited"); hook != nil {
-			vm.invoke(hook, super, []object.Value{class}, nil)
+			vm.invoke(hook, object.Wrap(super), []object.Value{object.Wrap(class)}, nil)
 		}
 	}
 	// Each class body starts with public default visibility and no
 	// module_function mode (MRI resets these on every (re)open).
 	class.defaultVis, class.funcMode = visPublic, false
 	adoptReopenLexParent(class, parent, scoped)
-	return vm.exec(body, class, nil, class, "", nil, nil, nil, nil)
+	return vm.exec(body, object.Wrap(class), nil, class, "", nil, nil, nil, nil)
 }
 
 // adoptReopenLexParent upgrades a class/module's lexParent when it is reopened
@@ -1869,11 +1869,11 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 		if !scoped {
 			mod.lexParent = lexParentFor(parent)
 		}
-		table[name] = mod
+		table[name] = object.Wrap(mod)
 	}
 	mod.defaultVis, mod.funcMode = visPublic, false
 	adoptReopenLexParent(mod, parent, scoped)
-	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil)
+	return vm.exec(body, object.Wrap(mod), nil, mod, "", nil, nil, nil, nil)
 }
 
 // asModuleParent coerces a popped value to the class/module that a scoped
@@ -1927,5 +1927,5 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 		return vm.invoke(m, self, args, blk)
 	}
 	raise("NoMethodError", "super: no superclass method '%s'", methodName)
-	return object.NilV
+	return object.NilVal()
 }

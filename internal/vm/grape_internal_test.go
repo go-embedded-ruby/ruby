@@ -42,13 +42,13 @@ func TestGrapeWrapperInspect(t *testing.T) {
 
 // TestGrapeStr covers the String / Symbol / default (to_s) arms of grapeStr.
 func TestGrapeStr(t *testing.T) {
-	if grapeStr(object.NewString("x")) != "x" {
+	if grapeStr(object.Wrap(object.NewString("x"))) != "x" {
 		t.Error("string arm")
 	}
-	if grapeStr(object.Symbol("y")) != "y" {
+	if grapeStr(object.SymVal(string(object.Symbol("y")))) != "y" {
 		t.Error("symbol arm")
 	}
-	if grapeStr(object.Integer(3)) != "3" {
+	if grapeStr(object.IntValue(int64(object.Integer(3)))) != "3" {
 		t.Error("default arm")
 	}
 }
@@ -58,7 +58,7 @@ func TestGrapeArg(t *testing.T) {
 	if grapeArg(nil) != object.NilV {
 		t.Error("absent arm")
 	}
-	if grapeArg([]object.Value{object.Integer(1)}) != object.Integer(1) {
+	if grapeArg([]object.Value{object.IntValue(int64(object.Integer(1)))}) != object.Integer(1) {
 		t.Error("present arm")
 	}
 }
@@ -79,13 +79,13 @@ func TestGrapeStatusName(t *testing.T) {
 // TestGrapeOptions covers the with-Hash, non-Hash and no-trailing-arg arms.
 func TestGrapeOptions(t *testing.T) {
 	h := object.NewHash()
-	if grapeOptions([]object.Value{object.Symbol("n"), h}) != h {
+	if grapeOptions([]object.Value{object.SymVal(string(object.Symbol("n"))), object.Wrap(h)}) != h {
 		t.Error("hash arm")
 	}
-	if grapeOptions([]object.Value{object.Symbol("n"), object.Integer(1)}) != nil {
+	if grapeOptions([]object.Value{object.SymVal(string(object.Symbol("n"))), object.IntValue(int64(object.Integer(1)))}) != nil {
 		t.Error("non-hash arm")
 	}
-	if grapeOptions([]object.Value{object.Symbol("n")}) != nil {
+	if grapeOptions([]object.Value{object.SymVal(string(object.Symbol("n")))}) != nil {
 		t.Error("no-opts arm")
 	}
 }
@@ -104,7 +104,7 @@ func TestGrapeType(t *testing.T) {
 		"Unknown": grape.Type(""),
 	}
 	for name, want := range cases {
-		if got := grapeType(object.NewString(name)); got != want {
+		if got := grapeType(object.Wrap(object.NewString(name))); got != want {
 			t.Errorf("grapeType(%q) = %q, want %q", name, got, want)
 		}
 	}
@@ -120,18 +120,18 @@ func TestGrapeBuildParamNoOpts(t *testing.T) {
 
 // TestGrapeValueList covers the Array arm and the single-literal arm.
 func TestGrapeValueList(t *testing.T) {
-	arr := &object.Array{Elems: []object.Value{object.Integer(1), object.Integer(2)}}
-	if got := grapeValueList(arr); !reflect.DeepEqual(got, []any{int64(1), int64(2)}) {
+	arr := &object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1))), object.IntValue(int64(object.Integer(2)))}}
+	if got := grapeValueList(object.Wrap(arr)); !reflect.DeepEqual(got, []any{int64(1), int64(2)}) {
 		t.Errorf("array arm = %v", got)
 	}
-	if got := grapeValueList(object.Integer(9)); !reflect.DeepEqual(got, []any{int64(9)}) {
+	if got := grapeValueList(object.IntValue(int64(object.Integer(9)))); !reflect.DeepEqual(got, []any{int64(9)}) {
 		t.Errorf("scalar arm = %v", got)
 	}
 }
 
 // TestGrapeRegexpNonRegexp covers grapeRegexp's non-Regexp arm (zero Regexp).
 func TestGrapeRegexpNonRegexp(t *testing.T) {
-	if r := grapeRegexp(object.Integer(1)); r.Match != nil {
+	if r := grapeRegexp(object.IntValue(int64(object.Integer(1)))); r.Match != nil {
 		t.Error("non-Regexp should yield the zero Regexp")
 	}
 }
@@ -143,7 +143,7 @@ func TestGrapeRawHashTypeError(t *testing.T) {
 			t.Error("expected a raise on a non-Hash argument")
 		}
 	}()
-	grapeRawHash(object.Integer(1))
+	grapeRawHash(object.IntValue(int64(object.Integer(1))))
 }
 
 // TestGrapeCheckFormatErr covers the nil (no-op) and non-nil (raise) arms.
@@ -184,16 +184,16 @@ func TestGrapeRouteHandlerGoNil(t *testing.T) {
 	// Route#handler with a nil handler field.
 	route := object.Kind[*RClass](vm.consts["Grape::Router::Route"])
 	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: nil}
-	if got := route.methods["handler"].native(vm, r, nil, nil); got != object.NilV {
+	if got := route.methods["handler"].native(vm, object.Wrap(r), nil, nil); got != object.NilV {
 		t.Errorf("Route#handler nil field -> %v, want nil", got)
 	}
 	// Match#handler / #route with nil fields.
 	match := object.Kind[*RClass](vm.consts["Grape::Router::Match"])
 	m := &GrapeMatch{}
-	if got := match.methods["handler"].native(vm, m, nil, nil); got != object.NilV {
+	if got := match.methods["handler"].native(vm, object.Wrap(m), nil, nil); got != object.NilV {
 		t.Errorf("Match#handler nil field -> %v, want nil", got)
 	}
-	if got := match.methods["route"].native(vm, m, nil, nil); got != object.NilV {
+	if got := match.methods["route"].native(vm, object.Wrap(m), nil, nil); got != object.NilV {
 		t.Errorf("Match#route nil field -> %v, want nil", got)
 	}
 }
@@ -205,8 +205,8 @@ func TestGrapeRouteHandlerPresent(t *testing.T) {
 	vm := New(nil)
 	route := object.Kind[*RClass](vm.consts["Grape::Router::Route"])
 	h := object.NewString("do-thing")
-	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: h}
-	if got := route.methods["handler"].native(vm, r, nil, nil); got != h {
+	r := &GrapeRoute{rt: grape.NewRoute("GET", "/x", nil), handler: object.Wrap(h)}
+	if got := route.methods["handler"].native(vm, object.Wrap(r), nil, nil); got != h {
 		t.Errorf("Route#handler present field -> %v, want %v", got, h)
 	}
 }
@@ -219,7 +219,7 @@ func TestGrapeCoercedExtraKey(t *testing.T) {
 	if len(h.Keys) != 2 {
 		t.Fatalf("expected both keys, got %d", len(h.Keys))
 	}
-	v, _ := h.Get(object.NewString("extra"))
+	v, _ := h.Get(object.Wrap(object.NewString("extra")))
 	if s, ok := object.KindOK[*object.String](v); !ok || s.Str() != "x" {
 		t.Errorf("extra key = %v", v)
 	}
@@ -227,42 +227,42 @@ func TestGrapeCoercedExtraKey(t *testing.T) {
 
 // TestGrapeToGo covers every arm of the Ruby->Go value mapper.
 func TestGrapeToGo(t *testing.T) {
-	if grapeToGo(object.NilV) != nil {
+	if grapeToGo(object.NilVal()) != nil {
 		t.Error("nil arm")
 	}
 	if grapeToGo(nil) != nil {
 		t.Error("go-nil arm")
 	}
-	if grapeToGo(object.Bool(true)) != true {
+	if grapeToGo(object.BoolValue(bool(object.Bool(true)))) != true {
 		t.Error("bool arm")
 	}
-	if grapeToGo(object.Integer(5)) != int64(5) {
+	if grapeToGo(object.IntValue(int64(object.Integer(5)))) != int64(5) {
 		t.Error("int arm")
 	}
-	if g := grapeToGo(&object.Bignum{I: big.NewInt(7)}); g.(*big.Int).Int64() != 7 {
+	if g := grapeToGo(object.Wrap(&object.Bignum{I: big.NewInt(7)})); g.(*big.Int).Int64() != 7 {
 		t.Error("bignum arm")
 	}
-	if grapeToGo(object.Float(1.5)) != 1.5 {
+	if grapeToGo(object.FloatValue(float64(object.Float(1.5)))) != 1.5 {
 		t.Error("float arm")
 	}
-	if grapeToGo(object.NewString("s")) != "s" {
+	if grapeToGo(object.Wrap(object.NewString("s"))) != "s" {
 		t.Error("string arm")
 	}
-	if grapeToGo(object.Symbol("y")) != "y" {
+	if grapeToGo(object.SymVal(string(object.Symbol("y")))) != "y" {
 		t.Error("symbol arm")
 	}
-	arr := grapeToGo(&object.Array{Elems: []object.Value{object.Integer(1)}}).([]any)
+	arr := grapeToGo(object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(int64(object.Integer(1)))}})).([]any)
 	if len(arr) != 1 || arr[0] != int64(1) {
 		t.Error("array arm")
 	}
 	h := object.NewHash()
-	h.Set(object.NewString("k"), object.Integer(2))
-	m := grapeToGo(h).(map[string]any)
+	h.Set(object.Wrap(object.NewString("k")), object.IntValue(int64(object.Integer(2))))
+	m := grapeToGo(object.Wrap(h)).(map[string]any)
 	if m["k"] != int64(2) {
 		t.Error("hash arm")
 	}
 	// The default arm (a value none of the above) falls back to to_s.
-	if grapeToGo(&GrapeFormatter{}) != "#<Grape::Formatter>" {
+	if grapeToGo(object.Wrap(&GrapeFormatter{})) != "#<Grape::Formatter>" {
 		t.Error("default arm")
 	}
 }

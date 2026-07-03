@@ -34,7 +34,7 @@ var (
 func (vm *VM) registerEtc() {
 	mod := newClass("Etc", nil)
 	mod.isModule = true
-	vm.consts["Etc"] = mod
+	vm.consts["Etc"] = object.Wrap(mod)
 	sdef := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	// Etc::Passwd / Etc::Group are Struct classes with MRI's member layout, so
@@ -49,34 +49,34 @@ func (vm *VM) registerEtc() {
 		passwd = vm.newStructClass(cStruct,
 			[]string{"name", "passwd", "uid", "gid", "gecos", "dir", "shell"}, false)
 		passwd.name, passwd.named = "Etc::Passwd", true
-		mod.consts["Passwd"] = passwd
+		mod.consts["Passwd"] = object.Wrap(passwd)
 		group = vm.newStructClass(cStruct,
 			[]string{"name", "passwd", "gid", "mem"}, false)
 		group.name, group.named = "Etc::Group", true
-		mod.consts["Group"] = group
+		mod.consts["Group"] = object.Wrap(group)
 		return passwd, group
 	}
 
 	newPasswd := func(u *user.User) object.Value {
 		passwd, _ := ensureClasses()
 		o := &RObject{class: passwd, ivars: map[string]object.Value{}}
-		o.ivars["@name"] = object.NewString(u.Username)
-		o.ivars["@passwd"] = object.NewString("x")
+		o.ivars["@name"] = object.Wrap(object.NewString(u.Username))
+		o.ivars["@passwd"] = object.Wrap(object.NewString("x"))
 		o.ivars["@uid"] = atoiOr0(u.Uid)
 		o.ivars["@gid"] = atoiOr0(u.Gid)
-		o.ivars["@gecos"] = object.NewString(u.Name)
-		o.ivars["@dir"] = object.NewString(u.HomeDir)
-		o.ivars["@shell"] = object.NewString("/bin/sh")
-		return o
+		o.ivars["@gecos"] = object.Wrap(object.NewString(u.Name))
+		o.ivars["@dir"] = object.Wrap(object.NewString(u.HomeDir))
+		o.ivars["@shell"] = object.Wrap(object.NewString("/bin/sh"))
+		return object.Wrap(o)
 	}
 	newGroup := func(g *user.Group) object.Value {
 		_, group := ensureClasses()
 		o := &RObject{class: group, ivars: map[string]object.Value{}}
-		o.ivars["@name"] = object.NewString(g.Name)
-		o.ivars["@passwd"] = object.NewString("x")
+		o.ivars["@name"] = object.Wrap(object.NewString(g.Name))
+		o.ivars["@passwd"] = object.Wrap(object.NewString("x"))
 		o.ivars["@gid"] = atoiOr0(g.Gid)
-		o.ivars["@mem"] = object.NewArray()
-		return o
+		o.ivars["@mem"] = object.Wrap(object.NewArray())
+		return object.Wrap(o)
 	}
 
 	sdef("getpwuid", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -119,7 +119,7 @@ func (vm *VM) registerEtc() {
 	})
 
 	sdef("systmpdir", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(etcTempDir())
+		return object.Wrap(object.NewString(etcTempDir()))
 	})
 
 	notImpl := func(what string) NativeFn {

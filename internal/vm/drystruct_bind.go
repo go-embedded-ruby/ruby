@@ -59,27 +59,27 @@ func (vm *VM) registerDryStructInstance(base *RClass) {
 		if err != nil {
 			raise("Dry::Struct::Error", "%s", err.Error())
 		}
-		return &DryStruct{s: s, cls: ds.cls}
+		return object.Wrap(&DryStruct{s: s, cls: ds.cls})
 	})
 
 	eq := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {
-			return object.Bool(false)
+			return object.BoolValue(bool(object.Bool(false)))
 		}
 		other, ok := object.KindOK[*DryStruct](args[0])
 		if !ok {
-			return object.Bool(false)
+			return object.BoolValue(bool(object.Bool(false)))
 		}
-		return object.Bool(object.Kind[*DryStruct](self).s.Eql(other.s))
+		return object.BoolValue(bool(object.Bool(object.Kind[*DryStruct](self).s.Eql(other.s))))
 	}
 	d("==", eq)
 	d("eql?", eq)
 
 	d("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*DryStruct](self).s.Inspect())
+		return object.Wrap(object.NewString(object.Kind[*DryStruct](self).s.Inspect()))
 	})
 	d("to_s", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*DryStruct](self).s.String())
+		return object.Wrap(object.NewString(object.Kind[*DryStruct](self).s.String()))
 	})
 }
 
@@ -90,5 +90,5 @@ func dryMapToHash(vm *VM, m *drytypes.Map) object.Value {
 	for _, p := range m.Pairs() {
 		h.Set(dryFromGo(vm, p.Key), dryFromGo(vm, p.Val))
 	}
-	return h
+	return object.Wrap(h)
 }

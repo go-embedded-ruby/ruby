@@ -44,7 +44,7 @@ func grapeCheckFormatErr(err error) {
 // nil when absent.
 func grapeArg(args []object.Value) object.Value {
 	if len(args) == 0 {
-		return object.NilV
+		return object.NilVal()
 	}
 	return args[0]
 }
@@ -236,14 +236,14 @@ func grapeCoercedToHash(vm *VM, set *grape.ParamSet, m map[string]any) *object.H
 	seen := make(map[string]bool, len(m))
 	for _, p := range set.Params {
 		if v, ok := m[p.Name]; ok {
-			h.Set(object.NewString(p.Name), grapeFromGo(v))
+			h.Set(object.Wrap(object.NewString(p.Name)), grapeFromGo(v))
 			seen[p.Name] = true
 		}
 	}
 	// Any coerced key not covered by a declaration (defensive) is appended.
 	for k, v := range m {
 		if !seen[k] {
-			h.Set(object.NewString(k), grapeFromGo(v))
+			h.Set(object.Wrap(object.NewString(k)), grapeFromGo(v))
 		}
 	}
 	return h
@@ -253,29 +253,29 @@ func grapeCoercedToHash(vm *VM, set *grape.ParamSet, m map[string]any) *object.H
 func grapeFromGo(v any) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case int:
 		return object.IntValue(int64(n))
 	case int64:
 		return object.IntValue(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case []any:
 		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = grapeFromGo(el)
 		}
-		return arr
+		return object.Wrap(arr)
 	case map[string]any:
 		h := object.NewHash()
 		for k, val := range n {
-			h.Set(object.NewString(k), grapeFromGo(val))
+			h.Set(object.Wrap(object.NewString(k)), grapeFromGo(val))
 		}
-		return h
+		return object.Wrap(h)
 	}
-	return object.NilV
+	return object.NilVal()
 }

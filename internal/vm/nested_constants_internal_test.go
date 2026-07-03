@@ -25,7 +25,7 @@ func TestConstTableNilParent(t *testing.T) {
 func TestAssignConstNilScope(t *testing.T) {
 	vm := New(io.Discard)
 	// A nil scope (defensive) writes the constant into the top level.
-	vm.assignConst(nil, "WhiteboxNilScope", object.Integer(7))
+	vm.assignConst(nil, "WhiteboxNilScope", object.IntValue(int64(object.Integer(7))))
 	if v, ok := vm.consts["WhiteboxNilScope"]; !ok || v != object.Integer(7) {
 		t.Fatalf("assignConst(nil, ...) should write top-level, got %v ok=%v", v, ok)
 	}
@@ -53,7 +53,7 @@ func TestEnsureSingletonClass(t *testing.T) {
 	// Classes do not get a side-table singleton (they use metaClass); the
 	// *RClass arm returns (nil, false). The bytecode callers guard this before
 	// calling, so it is only reachable directly.
-	if sc, ok := vm.ensureSingleton(vm.cObject); ok || sc != nil {
+	if sc, ok := vm.ensureSingleton(object.Wrap(vm.cObject)); ok || sc != nil {
 		t.Fatalf("ensureSingleton(class) = (%v, %v), want (nil, false)", sc, ok)
 	}
 }
@@ -96,7 +96,7 @@ func mapsEqualIdentity(a, b map[string]object.Value) bool {
 		return false
 	}
 	const probe = "\x00wb-probe"
-	a[probe] = object.NilV
+	a[probe] = object.NilVal()
 	_, seen := b[probe]
 	delete(a, probe)
 	return seen

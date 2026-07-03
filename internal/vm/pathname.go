@@ -37,7 +37,7 @@ func (vm *VM) registerPathname() {
 	// __lex_cleanpath(path) -> cleaned path string. Collapses "." / ".." / redundant
 	// separators lexically (no filesystem access), as MRI's Pathname#cleanpath.
 	sm("__lex_cleanpath", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(pathname.New(strArg(args[0])).Cleanpath().String())
+		return object.Wrap(object.NewString(pathname.New(strArg(args[0])).Cleanpath().String()))
 	})
 
 	// __lex_basename(path, suffix) -> last component string. suffix "" keeps the full
@@ -52,43 +52,43 @@ func (vm *VM) registerPathname() {
 		} else {
 			r = p.BasenameSuffix(suffix)
 		}
-		return object.NewString(r.String())
+		return object.Wrap(object.NewString(r.String()))
 	})
 
 	// __lex_dirname(path) -> all but the last component (the Pathname#dirname /
 	// #parent string), "." or "/" at the edges.
 	sm("__lex_dirname", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(pathname.New(strArg(args[0])).Dirname().String())
+		return object.Wrap(object.NewString(pathname.New(strArg(args[0])).Dirname().String()))
 	})
 
 	// __lex_extname(path) -> the extension of the final component (".txt", or "" when
 	// none), matching MRI's Pathname#extname (and its File.extname edge cases).
 	sm("__lex_extname", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(pathname.New(strArg(args[0])).Extname())
+		return object.Wrap(object.NewString(pathname.New(strArg(args[0])).Extname()))
 	})
 
 	// __lex_plus(base, rel) -> base + rel under MRI's Pathname#+ append rule (an
 	// absolute rel resets to the root, otherwise a single "/" joins them).
 	sm("__lex_plus", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(pathname.New(strArg(args[0])).PlusString(strArg(args[1])).String())
+		return object.Wrap(object.NewString(pathname.New(strArg(args[0])).PlusString(strArg(args[1])).String()))
 	})
 
 	// __lex_sub_ext(path, repl) -> path with its extension replaced by repl (MRI's
 	// Pathname#sub_ext); when the path has no extension, repl is appended.
 	sm("__lex_sub_ext", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(pathname.New(strArg(args[0])).SubExt(strArg(args[1])).String())
+		return object.Wrap(object.NewString(pathname.New(strArg(args[0])).SubExt(strArg(args[1])).String()))
 	})
 
 	// __lex_absolute?(path) -> whether the path starts at the root ("/"), as MRI's
 	// Pathname#absolute?.
 	sm("__lex_absolute?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(pathname.New(strArg(args[0])).Absolute())
+		return object.BoolValue(bool(object.Bool(pathname.New(strArg(args[0])).Absolute())))
 	})
 
 	// __lex_filenames(path) -> the non-empty "/"-separated components, the array
 	// Pathname#each_filename yields over.
 	sm("__lex_filenames", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return stringArray(pathname.New(strArg(args[0])).Filenames())
+		return object.Wrap(stringArray(pathname.New(strArg(args[0])).Filenames()))
 	})
 
 	// __lex_ascend_paths(path) -> the path then each parent up to the root (or the
@@ -97,7 +97,7 @@ func (vm *VM) registerPathname() {
 	sm("__lex_ascend_paths", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		var out []string
 		pathname.New(strArg(args[0])).Ascend(func(p *pathname.Pathname) { out = append(out, p.String()) })
-		return stringArray(out)
+		return object.Wrap(stringArray(out))
 	})
 
 	// __lex_relative_path_from(path, base) -> path expressed relative to base using
@@ -109,7 +109,7 @@ func (vm *VM) registerPathname() {
 		if err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
-		return object.NewString(res.String())
+		return object.Wrap(object.NewString(res.String()))
 	})
 }
 
@@ -117,7 +117,7 @@ func (vm *VM) registerPathname() {
 func stringArray(ss []string) *object.Array {
 	elems := make([]object.Value, len(ss))
 	for i, s := range ss {
-		elems[i] = object.NewString(s)
+		elems[i] = object.Wrap(object.NewString(s))
 	}
 	return object.NewArrayFromSlice(elems)
 }

@@ -7,13 +7,13 @@ import "github.com/go-embedded-ruby/ruby/internal/object"
 // instance variables, with accessors and the usual value methods.
 func setupStruct(vm *VM) {
 	cStruct := newClass("Struct", vm.cObject)
-	vm.consts["Struct"] = cStruct
+	vm.consts["Struct"] = object.Wrap(cStruct)
 	cStruct.smethods["new"] = &Method{name: "new", owner: cStruct, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		// A trailing options hash carries keyword_init: it is not a member name.
 		kwInit := false
 		if n := len(args); n > 0 {
 			if h, ok := object.KindOK[*object.Hash](args[n-1]); ok {
-				if v, present := h.Get(object.Symbol("keyword_init")); present {
+				if v, present := h.Get(object.SymVal(string(object.Symbol("keyword_init")))); present {
 					kwInit = v.Truthy()
 					args = args[:n-1]
 				}
@@ -37,7 +37,7 @@ func setupStruct(vm *VM) {
 			}
 			vm.classEval(sub, blk, nil)
 		}
-		return sub
+		return object.Wrap(sub)
 	}}
 }
 
@@ -88,9 +88,9 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 			member := map[string]bool{}
 			for _, nm := range names {
 				member[nm] = true
-				v, ok := h.Get(object.Symbol(nm))
+				v, ok := h.Get(object.SymVal(string(object.Symbol(nm))))
 				if !ok {
-					v = object.NilV
+					v = object.NilVal()
 				}
 				o.ivars["@"+nm] = v
 			}
@@ -99,7 +99,7 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 					raise("ArgumentError", "unknown keyword: %s", k.Inspect())
 				}
 			}
-			return object.NilV
+			return object.NilVal()
 		}
 		if len(a) > len(names) {
 			raise("ArgumentError", "struct size differs")
@@ -108,20 +108,20 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 			if i < len(a) {
 				o.ivars["@"+nm] = a[i]
 			} else {
-				o.ivars["@"+nm] = object.NilV
+				o.ivars["@"+nm] = object.NilVal()
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	sub.define("members", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		out := make([]object.Value, len(names))
 		for i, nm := range names {
-			out[i] = object.Symbol(nm)
+			out[i] = object.SymVal(string(object.Symbol(nm)))
 		}
-		return object.NewArrayFromSlice(out)
+		return object.Wrap(object.NewArrayFromSlice(out))
 	})
 	toA := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(values(self))
+		return object.Wrap(object.NewArrayFromSlice(values(self)))
 	}
 	sub.define("to_a", toA)
 	sub.define("values", toA)
@@ -135,9 +135,9 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 		h := object.NewHash()
 		vals := values(self)
 		for i, nm := range names {
-			h.Set(object.Symbol(nm), vals[i])
+			h.Set(object.SymVal(string(object.Symbol(nm))), vals[i])
 		}
-		return h
+		return object.Wrap(h)
 	}
 	sub.define("to_h", toH)
 	// deconstruct_keys backs case/in hash patterns; the requested-key list is
@@ -171,22 +171,22 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 				k := __sw171
 				_ = k
 				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
-				return object.NilV
+				return object.NilVal()
 			}
 		}
 	})
 	sub.define("==", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
 		other, ok := object.KindOK[*RObject](a[0])
 		if !ok || other.class != object.Kind[*RObject](self).class {
-			return object.False
+			return object.BoolValue(bool(object.False))
 		}
-		sv, ov := values(self), values(other)
+		sv, ov := values(self), values(object.Wrap(other))
 		for i := range sv {
 			if !valueEqual(sv[i], ov[i]) {
-				return object.False
+				return object.BoolValue(bool(object.False))
 			}
 		}
-		return object.True
+		return object.BoolValue(bool(object.True))
 	})
 	// Struct is Enumerable: each yields the member values in order, and the
 	// Enumerable mixin then supplies map/select/min/sum/… on top of it.
@@ -240,7 +240,7 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 		}
 		vals := values(self)
 		for i, nm := range names {
-			vm.callBlock(blk, []object.Value{object.Symbol(nm), vals[i]})
+			vm.callBlock(blk, []object.Value{object.SymVal(string(object.Symbol(nm))), vals[i]})
 		}
 		return self
 	})
@@ -248,11 +248,11 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 	// off the Struct class itself.
 	memberSyms := make([]object.Value, len(names))
 	for i, nm := range names {
-		memberSyms[i] = object.Symbol(nm)
+		memberSyms[i] = object.SymVal(string(object.Symbol(nm)))
 	}
 	sub.smethods["members"] = &Method{name: "members", owner: sub,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.NewArrayFromSlice(append([]object.Value(nil), memberSyms...))
+			return object.Wrap(object.NewArrayFromSlice(append([]object.Value(nil), memberSyms...)))
 		}}
 	sub.includes = append(sub.includes, object.Kind[*RClass](vm.consts["Enumerable"]))
 	bumpMethodSerial()
@@ -280,5 +280,5 @@ func structMember(name string, names []string, vals []object.Value) object.Value
 		}
 	}
 	raise("NameError", "no member '%s' in struct", name)
-	return object.NilV
+	return object.NilVal()
 }

@@ -48,7 +48,7 @@ var (
 func (vm *VM) registerFileUtils() {
 	mod := newClass("FileUtils", nil)
 	mod.isModule = true
-	vm.consts["FileUtils"] = mod
+	vm.consts["FileUtils"] = object.Wrap(mod)
 
 	sdef := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
@@ -84,7 +84,7 @@ func (vm *VM) registerFileUtils() {
 				raise("Errno::EACCES", "Permission denied @ fileutils_rm_rf - %s", p)
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	}
 	sdef("rm_rf", rmrf)
 	sdef("rmtree", rmrf)
@@ -98,7 +98,7 @@ func (vm *VM) registerFileUtils() {
 				raise("Errno::EACCES", "Permission denied @ fileutils_rm_f - %s", p)
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	mod.smethods["safe_unlink"] = mod.smethods["rm_f"]
 
@@ -108,7 +108,7 @@ func (vm *VM) registerFileUtils() {
 				raise("Errno::ENOENT", "No such file or directory @ fileutils_rm - %s", p)
 			}
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	sdef("mv", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -116,7 +116,7 @@ func (vm *VM) registerFileUtils() {
 		if err := fuRename(src, dst); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ fileutils_mv - %s", src)
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	mod.smethods["move"] = mod.smethods["mv"]
 
@@ -129,7 +129,7 @@ func (vm *VM) registerFileUtils() {
 		if err := fuWriteFile(dst, data, 0o644); err != nil {
 			raise("Errno::EACCES", "Permission denied @ fileutils_cp - %s", dst)
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	mod.smethods["copy"] = mod.smethods["cp"]
 

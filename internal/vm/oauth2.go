@@ -64,14 +64,14 @@ func (r *OAuth2Request) Truthy() bool    { return true }
 func (vm *VM) registerOAuth2() {
 	mod := newClass("OAuth2", nil)
 	mod.isModule = true
-	vm.consts["OAuth2"] = mod
+	vm.consts["OAuth2"] = object.Wrap(mod)
 
 	vm.registerOAuth2Error(mod)
 	vm.registerOAuth2Value(mod)
 
 	clientCls := newClass("OAuth2::Client", vm.cObject)
-	mod.consts["Client"] = clientCls
-	vm.consts["OAuth2::Client"] = clientCls
+	mod.consts["Client"] = object.Wrap(clientCls)
+	vm.consts["OAuth2::Client"] = object.Wrap(clientCls)
 
 	// OAuth2::Client.new(id, secret, site:, authorize_url:, token_url:,
 	// auth_scheme:, token_method:) builds a client. A trailing Hash supplies the
@@ -84,7 +84,7 @@ func (vm *VM) registerOAuth2() {
 			id := strArg(args[0])
 			secret := strArg(args[1])
 			opts := oauth2Options(args[2:])
-			return &OAuth2Client{c: oauth2.NewClient(id, secret, opts)}
+			return object.Wrap(&OAuth2Client{c: oauth2.NewClient(id, secret, opts)})
 		}}
 
 	vm.registerOAuth2Client(clientCls)
@@ -95,8 +95,8 @@ func (vm *VM) registerOAuth2() {
 	// challenge (S256 default).
 	pkce := newClass("OAuth2::PKCE", vm.cObject)
 	pkce.isModule = true
-	mod.consts["PKCE"] = pkce
-	vm.consts["OAuth2::PKCE"] = pkce
+	mod.consts["PKCE"] = object.Wrap(pkce)
+	vm.consts["OAuth2::PKCE"] = object.Wrap(pkce)
 	pkce.smethods["code_challenge"] = &Method{name: "code_challenge", owner: pkce,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			if len(args) == 0 {
@@ -106,7 +106,7 @@ func (vm *VM) registerOAuth2() {
 			if len(args) > 1 && oauth2Name(args[1]) == "plain" {
 				method = oauth2.PKCEPlain
 			}
-			return object.NewString(oauth2.CodeChallenge(strArg(args[0]), method))
+			return object.Wrap(object.NewString(oauth2.CodeChallenge(strArg(args[0]), method)))
 		}}
 }
 
@@ -145,6 +145,6 @@ func oauth2Options(args []object.Value) oauth2.Options {
 func (vm *VM) registerOAuth2Error(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	c := newClass("OAuth2::Error", std)
-	mod.consts["Error"] = c
-	vm.consts["OAuth2::Error"] = c
+	mod.consts["Error"] = object.Wrap(c)
+	vm.consts["OAuth2::Error"] = object.Wrap(c)
 }

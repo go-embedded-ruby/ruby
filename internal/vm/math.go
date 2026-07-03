@@ -23,14 +23,14 @@ func mathFloat(v object.Value) float64 {
 func (vm *VM) registerMath() {
 	mod := newClass("Math", nil)
 	mod.isModule = true
-	mod.consts["PI"] = object.Float(math.Pi)
-	mod.consts["E"] = object.Float(math.E)
-	vm.consts["Math"] = mod
+	mod.consts["PI"] = object.FloatValue(float64(object.Float(math.Pi)))
+	mod.consts["E"] = object.FloatValue(float64(object.Float(math.E)))
+	vm.consts["Math"] = object.Wrap(mod)
 
 	unary := func(name string, f func(float64) float64) {
 		mod.smethods[name] = &Method{name: name, owner: mod,
 			native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-				return object.Float(f(mathFloat(args[0])))
+				return object.FloatValue(float64(object.Float(f(mathFloat(args[0])))))
 			}}
 	}
 	for name, f := range map[string]func(float64) float64{
@@ -46,7 +46,7 @@ func (vm *VM) registerMath() {
 	binary := func(name string, f func(a, b float64) float64) {
 		mod.smethods[name] = &Method{name: name, owner: mod,
 			native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-				return object.Float(f(mathFloat(args[0]), mathFloat(args[1])))
+				return object.FloatValue(float64(object.Float(f(mathFloat(args[0]), mathFloat(args[1])))))
 			}}
 	}
 	binary("atan2", math.Atan2)
@@ -58,8 +58,8 @@ func (vm *VM) registerMath() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			x := math.Log(mathFloat(args[0]))
 			if len(args) > 1 {
-				return object.Float(x / math.Log(mathFloat(args[1])))
+				return object.FloatValue(float64(object.Float(x / math.Log(mathFloat(args[1])))))
 			}
-			return object.Float(x)
+			return object.FloatValue(float64(object.Float(x)))
 		}}
 }

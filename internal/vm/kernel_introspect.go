@@ -16,13 +16,13 @@ import (
 // `if RUBY_VERSION >= "3.0"` pass.
 func (vm *VM) registerVersionConstants() {
 	const version = "3.4.1"
-	vm.consts["RUBY_VERSION"] = object.NewString(version)
-	vm.consts["RUBY_ENGINE"] = object.NewString("ruby")
-	vm.consts["RUBY_ENGINE_VERSION"] = object.NewString(version)
+	vm.consts["RUBY_VERSION"] = object.Wrap(object.NewString(version))
+	vm.consts["RUBY_ENGINE"] = object.Wrap(object.NewString("ruby"))
+	vm.consts["RUBY_ENGINE_VERSION"] = object.Wrap(object.NewString(version))
 	vm.consts["RUBY_PATCHLEVEL"] = object.IntValue(0)
-	vm.consts["RUBY_PLATFORM"] = object.NewString(rubyPlatform())
-	vm.consts["RUBY_DESCRIPTION"] = object.NewString("ruby " + version + " [" + rubyPlatform() + "]")
-	vm.consts["RUBY_COPYRIGHT"] = object.NewString("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto")
+	vm.consts["RUBY_PLATFORM"] = object.Wrap(object.NewString(rubyPlatform()))
+	vm.consts["RUBY_DESCRIPTION"] = object.Wrap(object.NewString("ruby " + version + " [" + rubyPlatform() + "]"))
+	vm.consts["RUBY_COPYRIGHT"] = object.Wrap(object.NewString("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto"))
 	vm.registerRbConfig(version)
 }
 
@@ -41,7 +41,7 @@ var rbconfigGOOS = func() string { return runtime.GOOS }
 func (vm *VM) registerRbConfig(version string) {
 	mod := newClass("RbConfig", nil)
 	mod.isModule = true
-	vm.consts["RbConfig"] = mod
+	vm.consts["RbConfig"] = object.Wrap(mod)
 
 	cfg := object.NewHash()
 	exeext := ""
@@ -58,9 +58,9 @@ func (vm *VM) registerRbConfig(version string) {
 		"host_cpu":          runtime.GOARCH,
 		"rubylibdir":        "/usr/lib/ruby",
 	} {
-		cfg.Set(object.NewString(k), object.NewString(v))
+		cfg.Set(object.Wrap(object.NewString(k)), object.Wrap(object.NewString(v)))
 	}
-	mod.consts["CONFIG"] = cfg
+	mod.consts["CONFIG"] = object.Wrap(cfg)
 }
 
 // rubyPlatform renders a Ruby-style platform triple from the Go build target,
@@ -90,16 +90,16 @@ func (vm *VM) registerKernelIntrospection() {
 	// frame, so the top of frameNames is its caller's method name.
 	vm.cObject.define("__method__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		if name := vm.currentMethodName(); name != "" {
-			return object.Symbol(name)
+			return object.SymVal(string(object.Symbol(name)))
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 
 	// caller: a best-effort backtrace as a String array, outermost-first omitted
 	// like MRI — it excludes the frame that called caller and lists the rest from
 	// nearest to the top level. Without source line tracking the line is 0.
 	vm.cObject.define("caller", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.callerFrames())
+		return object.Wrap(object.NewArrayFromSlice(vm.callerFrames()))
 	})
 
 	// __FILE__: the path of the file currently executing. During a require it is
@@ -108,16 +108,16 @@ func (vm *VM) registerKernelIntrospection() {
 	// time; here it is a Kernel method returning the same value, which covers the
 	// common top-level / module-body uses (File.dirname(__FILE__), __dir__).
 	vm.cObject.define("__FILE__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.currentFile())
+		return object.Wrap(object.NewString(vm.currentFile()))
 	})
 	// __dir__: the directory of the file currently executing (File.dirname of the
 	// realpath of __FILE__), as MRI's Kernel#__dir__.
 	vm.cObject.define("__dir__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		f := vm.currentFile()
 		if f == "" {
-			return object.NilV
+			return object.NilVal()
 		}
-		return object.NewString(filepath.Dir(f))
+		return object.Wrap(object.NewString(filepath.Dir(f)))
 	})
 
 	// __LINE__: MRI's parser substitutes the current source line as an integer
@@ -137,7 +137,7 @@ func (vm *VM) registerKernelIntrospection() {
 			raise("LocalJumpError", "no block given")
 		}
 		vm.atExit = append(vm.atExit, blk)
-		return blk
+		return object.Wrap(blk)
 	})
 
 	// Kernel#exit raises SystemExit, which unwinds to the top (running at_exit
@@ -212,7 +212,7 @@ func (vm *VM) backtraceFrames(skip int) []object.Value {
 		if name := vm.frameNames[i]; name != "" {
 			where = name
 		}
-		out = append(out, object.NewString(vm.frameFileLabel(i)+":0:in '"+where+"'"))
+		out = append(out, object.Wrap(object.NewString(vm.frameFileLabel(i)+":0:in '"+where+"'")))
 	}
 	return out
 }

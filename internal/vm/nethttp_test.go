@@ -75,7 +75,7 @@ func TestNetHTTPHeaderTypeError(t *testing.T) {
 		t.Fatalf("Net::HTTPHeader#[] native not found")
 	}
 	wantRaise(t, "TypeError", func() {
-		get.native(vm, object.Integer(1), []object.Value{object.NewString("x")}, nil)
+		get.native(vm, object.IntValue(int64(object.Integer(1))), []object.Value{object.Wrap(object.NewString("x"))}, nil)
 	})
 }
 

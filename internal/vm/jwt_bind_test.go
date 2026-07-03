@@ -253,16 +253,16 @@ end
 // the "none" pass-through and the default arm, plus jwtRawKey's nil and non-string
 // coercion arms not reached through the Ruby tests.
 func TestJWTKeyFamilies(t *testing.T) {
-	if got := jwtKey(object.NilV, "", false); got != nil {
+	if got := jwtKey(object.NilVal(), "", false); got != nil {
 		t.Errorf(`jwtKey(nil, "") = %v want nil`, got)
 	}
-	if got := jwtKey(object.NilV, "none", false); got != nil {
+	if got := jwtKey(object.NilVal(), "none", false); got != nil {
 		t.Errorf(`jwtKey(nil, "none") = %v want nil`, got)
 	}
-	if got := jwtKey(object.NewString("sec"), "HS256", false); got != "sec" {
+	if got := jwtKey(object.Wrap(object.NewString("sec")), "HS256", false); got != "sec" {
 		t.Errorf("jwtKey HS = %v want sec", got)
 	}
-	if got := jwtRawKey(object.NilV); got != nil {
+	if got := jwtRawKey(object.NilVal()); got != nil {
 		t.Errorf("jwtRawKey(nil) = %v want nil", got)
 	}
 	// A non-nil, non-string key coerces through strArg — an Integer raises TypeError.
@@ -283,37 +283,37 @@ func TestJWTFromRuby(t *testing.T) {
 	if v := jwtFromRuby(nil); v != nil {
 		t.Errorf("go-nil -> %v want nil", v)
 	}
-	if v := jwtFromRuby(object.NilV); v != nil {
+	if v := jwtFromRuby(object.NilVal()); v != nil {
 		t.Errorf("nil -> %v want nil", v)
 	}
-	if v := jwtFromRuby(object.Bool(true)); v != true {
+	if v := jwtFromRuby(object.BoolValue(bool(object.Bool(true)))); v != true {
 		t.Errorf("bool -> %v want true", v)
 	}
 	if v := jwtFromRuby(object.IntValue(3)); v != int64(3) {
 		t.Errorf("int -> %v want 3", v)
 	}
-	if v := jwtFromRuby(object.Float(2.5)); v != 2.5 {
+	if v := jwtFromRuby(object.FloatValue(float64(object.Float(2.5)))); v != 2.5 {
 		t.Errorf("float -> %v want 2.5", v)
 	}
-	if v := jwtFromRuby(object.NewString("s")); v != "s" {
+	if v := jwtFromRuby(object.Wrap(object.NewString("s"))); v != "s" {
 		t.Errorf("string -> %v want s", v)
 	}
-	if v := jwtFromRuby(object.Symbol("sym")); v != "sym" {
+	if v := jwtFromRuby(object.SymVal(string(object.Symbol("sym")))); v != "sym" {
 		t.Errorf("symbol -> %v want sym", v)
 	}
-	arr := jwtFromRuby(&object.Array{Elems: []object.Value{object.IntValue(1)}}).([]any)
+	arr := jwtFromRuby(object.Wrap(&object.Array{Elems: []object.Value{object.IntValue(1)}})).([]any)
 	if len(arr) != 1 || arr[0] != int64(1) {
 		t.Errorf("array -> %v", arr)
 	}
 	h := object.NewHash()
-	h.Set(object.NewString("k"), object.IntValue(9))
-	m := jwtFromRuby(h).(*jwt.OrderedMap)
+	h.Set(object.Wrap(object.NewString("k")), object.IntValue(9))
+	m := jwtFromRuby(object.Wrap(h)).(*jwt.OrderedMap)
 	if v, _ := m.Get("k"); v != int64(9) {
 		t.Errorf("hash -> %v", v)
 	}
 	// The default arm renders an unknown value's Ruby to_s.
 	rng := &object.Range{Lo: object.IntValue(1), Hi: object.IntValue(2)}
-	if v := jwtFromRuby(rng); v != rng.ToS() {
+	if v := jwtFromRuby(object.Wrap(rng)); v != rng.ToS() {
 		t.Errorf("range -> %v want %v", v, rng.ToS())
 	}
 }
@@ -350,7 +350,7 @@ func TestJWTToRuby(t *testing.T) {
 	m := jwt.NewOrderedMap()
 	m.Set("k", int64(2))
 	h := object.Kind[*object.Hash](jwtToRuby(m))
-	if v, _ := h.Get(object.NewString("k")); v != object.IntValue(2) {
+	if v, _ := h.Get(object.Wrap(object.NewString("k"))); v != object.IntValue(2) {
 		t.Errorf("ordered-map -> %v", v)
 	}
 	// An unknown Go type maps to nil.

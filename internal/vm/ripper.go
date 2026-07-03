@@ -17,7 +17,7 @@ import (
 // NotImplementedError until a real Ripper front-end lands.
 func (vm *VM) registerRipper() {
 	rip := newClass("Ripper", vm.cObject)
-	vm.consts["Ripper"] = rip
+	vm.consts["Ripper"] = object.Wrap(rip)
 
 	notImpl := func(what string) NativeFn {
 		return func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {

@@ -46,7 +46,7 @@ func (vm *VM) registerAbbrev() {
 func (vm *VM) installAbbrev() {
 	mod := newClass("Abbrev", nil)
 	mod.isModule = true
-	vm.consts["Abbrev"] = mod
+	vm.consts["Abbrev"] = object.Wrap(mod)
 
 	// Abbrev.abbrev(words, pattern = nil) — the module function (module_function
 	// in MRI). words must be an Array; pattern is an optional String prefix or
@@ -101,9 +101,9 @@ func abbrevHash(vm *VM, arr *object.Array, pattern object.Value) object.Value {
 
 	h := object.NewHash()
 	for _, key := range order {
-		h.Set(object.NewString(key), object.NewString(got[key]))
+		h.Set(object.Wrap(object.NewString(key)), object.Wrap(object.NewString(got[key])))
 	}
-	return h
+	return object.Wrap(h)
 }
 
 // abbrevWords coerces a Ruby Array of words to a []string. Each element must be
@@ -208,7 +208,7 @@ func abbrevRegexpTable(vm *VM, words []string, re object.Value) (map[string]stri
 
 // abbrevMatch reports whether the Ruby Regexp matches s, via Regexp#match?.
 func abbrevMatch(vm *VM, re object.Value, s string) bool {
-	r := vm.send(re, "match?", []object.Value{object.NewString(s)}, nil)
+	r := vm.send(re, "match?", []object.Value{object.Wrap(object.NewString(s))}, nil)
 	return r.Truthy()
 }
 

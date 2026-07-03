@@ -26,7 +26,7 @@ func (u *UnboundMethod) Truthy() bool    { return true }
 // also teaches define_method to accept a Method/UnboundMethod body.
 func (vm *VM) registerReflection() {
 	cUnbound := newClass("UnboundMethod", vm.cObject)
-	vm.consts["UnboundMethod"] = cUnbound
+	vm.consts["UnboundMethod"] = object.Wrap(cUnbound)
 
 	// Module#instance_method(:m) → UnboundMethod resolved up the ancestor chain.
 	vm.cModule.define("instance_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -36,14 +36,14 @@ func (vm *VM) registerReflection() {
 		if m == nil || m.undefined {
 			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
 		}
-		return &UnboundMethod{name: name, owner: m.owner, m: m}
+		return object.Wrap(&UnboundMethod{name: name, owner: m.owner, m: m})
 	})
 
 	// Module#method_defined?(:m): true if m resolves up the ancestor chain.
 	vm.cModule.define("method_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := object.Kind[*RClass](self)
 		m := lookupMethod(mod, nameArg(args[0]))
-		return object.Bool(m != nil && !m.undefined)
+		return object.BoolValue(bool(object.Bool(m != nil && !m.undefined)))
 	})
 
 	// Module#public_method_defined?/#private_method_defined?/#protected_method_defined?:
@@ -56,9 +56,9 @@ func (vm *VM) registerReflection() {
 			name := nameArg(args[0])
 			m := lookupMethod(mod, name)
 			if m == nil || m.undefined {
-				return object.False
+				return object.BoolValue(bool(object.False))
 			}
-			return object.Bool(instanceVisibility(mod, name, m) == want)
+			return object.BoolValue(bool(object.Bool(instanceVisibility(mod, name, m) == want)))
 		}
 	}
 	vm.cModule.define("public_method_defined?", definedWithVis(visPublic))
@@ -66,10 +66,10 @@ func (vm *VM) registerReflection() {
 	vm.cModule.define("protected_method_defined?", definedWithVis(visProtected))
 
 	cUnbound.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(object.Kind[*UnboundMethod](self).name)
+		return object.SymVal(string(object.Symbol(object.Kind[*UnboundMethod](self).name)))
 	})
 	cUnbound.define("owner", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Kind[*UnboundMethod](self).owner
+		return object.Wrap(object.Kind[*UnboundMethod](self).owner)
 	})
 	cUnbound.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(methodArity(object.Kind[*UnboundMethod](self).m)))
@@ -78,7 +78,7 @@ func (vm *VM) registerReflection() {
 	cUnbound.define("bind", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		u := object.Kind[*UnboundMethod](self)
 		vm.checkBindable(u, args[0])
-		return &BoundMethod{recv: args[0], name: u.name, m: u.m}
+		return object.Wrap(&BoundMethod{recv: args[0], name: u.name, m: u.m})
 	})
 	// UnboundMethod#bind_call(obj, *args, &blk): bind then invoke in one step.
 	cUnbound.define("bind_call", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -94,13 +94,13 @@ func (vm *VM) registerReflection() {
 		if !ok {
 			raise("TypeError", "can't define singleton")
 		}
-		return sc
+		return object.Wrap(sc)
 	})
 
 	// Method#unbind → UnboundMethod.
 	vm.cMethod.define("unbind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := object.Kind[*BoundMethod](self)
-		return &UnboundMethod{name: b.name, owner: b.m.owner, m: b.m}
+		return object.Wrap(&UnboundMethod{name: b.name, owner: b.m.owner, m: b.m})
 	})
 }
 

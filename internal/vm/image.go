@@ -34,13 +34,13 @@ func mustImg(img *image.RGBA, err error) object.Value {
 	if err != nil {
 		raise("ArgumentError", "%s", err.Error())
 	}
-	return &Image{img: img}
+	return object.Wrap(&Image{img: img})
 }
 
 // registerImage installs the Image class, its constructors and methods.
 func (vm *VM) registerImage() {
 	vm.cImage = newClass("Image", vm.cObject)
-	vm.consts["Image"] = vm.cImage
+	vm.consts["Image"] = object.Wrap(vm.cImage)
 
 	vm.cImage.smethods["new"] = &Method{name: "new", owner: vm.cImage,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -48,7 +48,7 @@ func (vm *VM) registerImage() {
 			if w <= 0 || h <= 0 {
 				raise("ArgumentError", "image dimensions must be positive")
 			}
-			return &Image{img: image.NewRGBA(image.Rect(0, 0, w, h))}
+			return object.Wrap(&Image{img: image.NewRGBA(image.Rect(0, 0, w, h))})
 		}}
 	vm.cImage.smethods["load"] = &Method{name: "load", owner: vm.cImage,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -56,7 +56,7 @@ func (vm *VM) registerImage() {
 			if err != nil {
 				raise("ArgumentError", "%s", err.Error())
 			}
-			return &Image{img: img}
+			return object.Wrap(&Image{img: img})
 		}}
 	// Image.decode(bytes) decodes an in-memory PNG/JPEG String — no filesystem,
 	// so it works in a browser (wasm) where the program is handed image bytes.
@@ -70,7 +70,7 @@ func (vm *VM) registerImage() {
 			if err != nil {
 				raise("ArgumentError", "%s", err.Error())
 			}
-			return &Image{img: img}
+			return object.Wrap(&Image{img: img})
 		}}
 
 	d := func(name string, fn NativeFn) { vm.cImage.define(name, fn) }
@@ -83,7 +83,7 @@ func (vm *VM) registerImage() {
 	})
 	d("get", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		c := imgOf(v).RGBAAt(int(intArg(args[0])), int(intArg(args[1])))
-		return object.NewArray(object.IntValue(int64(c.R)), object.IntValue(int64(c.G)), object.IntValue(int64(c.B)), object.IntValue(int64(c.A)))
+		return object.Wrap(object.NewArray(object.IntValue(int64(c.R)), object.IntValue(int64(c.G)), object.IntValue(int64(c.B)), object.IntValue(int64(c.A))))
 	})
 	d("set", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a := uint8(255)
@@ -92,13 +92,13 @@ func (vm *VM) registerImage() {
 		}
 		imgOf(v).SetRGBA(int(intArg(args[0])), int(intArg(args[1])),
 			color.RGBA{uint8(intArg(args[2])), uint8(intArg(args[3])), uint8(intArg(args[4])), a})
-		return object.NilV
+		return object.NilVal()
 	})
 	d("save", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if err := goimg.Save(args[0].ToS(), imgOf(v)); err != nil {
 			raise("ArgumentError", "%s", err.Error())
 		}
-		return object.NilV
+		return object.NilVal()
 	})
 	// to_png / to_jpeg encode to an in-memory byte String (browser-friendly: hand
 	// the bytes to JS for a canvas/Blob). Encoding to a buffer cannot fail.
@@ -106,7 +106,7 @@ func (vm *VM) registerImage() {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 			var buf bytes.Buffer
 			_ = goimg.Encode(&buf, imgOf(v), format)
-			return object.NewStringBytes(buf.Bytes())
+			return object.Wrap(object.NewStringBytes(buf.Bytes()))
 		})
 	}
 	encode("to_png", goimg.PNG)
@@ -115,7 +115,7 @@ func (vm *VM) registerImage() {
 	// Operations with no error: image → image.
 	unary := func(name string, f func(image.Image) *image.RGBA) {
 		d(name, func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &Image{img: f(imgOf(v))}
+			return object.Wrap(&Image{img: f(imgOf(v))})
 		})
 	}
 	unary("grayscale", goimg.Grayscale)
@@ -139,7 +139,7 @@ func (vm *VM) registerImage() {
 	scalar := func(name string, f func(image.Image, float64) *image.RGBA) {
 		d(name, func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 			x, _ := toFloat(args[0])
-			return &Image{img: f(imgOf(v), x)}
+			return object.Wrap(&Image{img: f(imgOf(v), x)})
 		})
 	}
 	scalar("adjust_brightness", goimg.AdjustBrightness)
@@ -178,7 +178,7 @@ func (vm *VM) registerImage() {
 	})
 
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Image](v).Inspect())
+		return object.Wrap(object.NewString(object.Kind[*Image](v).Inspect()))
 	})
 	vm.cImage.define("to_s", vm.cImage.methods["inspect"].native)
 }

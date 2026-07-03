@@ -94,10 +94,10 @@ func (benchmarkClock) Monotonic() float64                            { return be
 func (vm *VM) registerBenchmark() {
 	mod := newClass("Benchmark", nil)
 	mod.isModule = true
-	vm.consts["Benchmark"] = mod
-	mod.consts["CAPTION"] = object.NewString(benchmark.CAPTION)
-	mod.consts["FORMAT"] = object.NewString(benchmark.FORMAT)
-	mod.consts["BENCHMARK_VERSION"] = object.NewString(benchmark.BenchmarkVersion)
+	vm.consts["Benchmark"] = object.Wrap(mod)
+	mod.consts["CAPTION"] = object.Wrap(object.NewString(benchmark.CAPTION))
+	mod.consts["FORMAT"] = object.Wrap(object.NewString(benchmark.FORMAT))
+	mod.consts["BENCHMARK_VERSION"] = object.Wrap(object.NewString(benchmark.BenchmarkVersion))
 
 	vm.registerBenchmarkTms(mod)
 	vm.registerBenchmarkReport(mod)
@@ -110,17 +110,17 @@ func (vm *VM) registerBenchmark() {
 	def("measure", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		label := benchLabel(args)
 		t := benchmark.MeasureWith(benchmarkClock{}, label, vm.benchRun(blk, "measure"))
-		return &Tms{t: t}
+		return object.Wrap(&Tms{t: t})
 	})
 
 	// Benchmark.realtime { ... } -> Float (elapsed real seconds).
 	def("realtime", func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
-		return object.Float(benchmark.RealtimeWith(benchmarkClock{}, vm.benchRun(blk, "realtime")))
+		return object.FloatValue(float64(object.Float(benchmark.RealtimeWith(benchmarkClock{}, vm.benchRun(blk, "realtime")))))
 	})
 
 	// Benchmark.ms { ... } -> Float (elapsed real milliseconds).
 	def("ms", func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
-		return object.Float(benchmark.MsWith(benchmarkClock{}, vm.benchRun(blk, "ms")))
+		return object.FloatValue(float64(object.Float(benchmark.MsWith(benchmarkClock{}, vm.benchRun(blk, "ms")))))
 	})
 
 	// Benchmark.bm(label_width = 0, *labels) { |x| ... } -> [Tms]. Prints CAPTION
@@ -170,8 +170,8 @@ func (vm *VM) registerBenchmark() {
 func (vm *VM) registerBenchmarkTms(mod *RClass) {
 	cls := newClass("Benchmark::Tms", vm.cObject)
 	vm.cBenchmarkTms = cls
-	mod.consts["Tms"] = cls
-	vm.consts["Benchmark::Tms"] = cls
+	mod.consts["Tms"] = object.Wrap(cls)
+	vm.consts["Benchmark::Tms"] = object.Wrap(cls)
 
 	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// Tms.new(utime = 0, stime = 0, cutime = 0, cstime = 0, real = 0, label = nil)
@@ -185,12 +185,12 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 		if len(args) > 5 {
 			label = labelToS(args[5])
 		}
-		return &Tms{t: benchmark.NewTms(f(0), f(1), f(2), f(3), f(4), label)}
+		return object.Wrap(&Tms{t: benchmark.NewTms(f(0), f(1), f(2), f(3), f(4), label)})
 	}}
 
 	reader := func(name string, get func(benchmark.Tms) float64) {
 		cls.define(name, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Float(get(object.Kind[*Tms](self).t))
+			return object.FloatValue(float64(object.Float(get(object.Kind[*Tms](self).t))))
 		})
 	}
 	reader("utime", benchmark.Tms.Utime)
@@ -201,7 +201,7 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 	reader("total", benchmark.Tms.Total)
 
 	cls.define("label", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Tms](self).t.Label())
+		return object.Wrap(object.NewString(object.Kind[*Tms](self).t.Label()))
 	})
 
 	// Arithmetic: each accepts another Tms (memberwise) or a numeric scalar
@@ -210,13 +210,13 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 		cls.define(name, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			t := object.Kind[*Tms](self).t
 			if other, ok := object.KindOK[*Tms](args[0]); ok {
-				return &Tms{t: tms(t, other.t)}
+				return object.Wrap(&Tms{t: tms(t, other.t)})
 			}
 			if x, ok := toFloat(args[0]); ok {
-				return &Tms{t: scalar(t, x)}
+				return object.Wrap(&Tms{t: scalar(t, x)})
 			}
 			raise("TypeError", "Benchmark::Tms can't be coerced into %s", classNameOf(args[0]))
-			return object.NilV
+			return object.NilVal()
 		})
 	}
 	arith("+", benchmark.Tms.Add, benchmark.Tms.AddScalar)
@@ -228,7 +228,7 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 		return benchToA(object.Kind[*Tms](self).t)
 	})
 	cls.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(object.Kind[*Tms](self).t.ToS())
+		return object.Wrap(object.NewString(object.Kind[*Tms](self).t.ToS()))
 	})
 
 	// format(fmt = nil, *args): a nil/absent format selects FORMAT and ignores
@@ -243,7 +243,7 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 			}
 			rest = args[1:]
 		}
-		return object.NewString(object.Kind[*Tms](self).t.Format(fmt, benchFormatArgs(rest)...))
+		return object.Wrap(object.NewString(object.Kind[*Tms](self).t.Format(fmt, benchFormatArgs(rest)...)))
 	})
 }
 
@@ -252,15 +252,15 @@ func (vm *VM) registerBenchmarkTms(mod *RClass) {
 func (vm *VM) registerBenchmarkReport(mod *RClass) {
 	cls := newClass("Benchmark::Report", vm.cObject)
 	vm.cBenchmarkReport = cls
-	mod.consts["Report"] = cls
-	vm.consts["Benchmark::Report"] = cls
+	mod.consts["Report"] = object.Wrap(cls)
+	vm.consts["Benchmark::Report"] = object.Wrap(cls)
 
 	run := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		br := object.Kind[*benchReport](self)
 		label := benchLabel(args)
 		t := br.r.Run(label, vm.benchRun(blk, "report"))
 		vm.benchPrint(br.r.Line(t))
-		return &Tms{t: t}
+		return object.Wrap(&Tms{t: t})
 	}
 	cls.define("report", run)
 	cls.define("item", run)
@@ -275,8 +275,8 @@ func (vm *VM) registerBenchmarkReport(mod *RClass) {
 func (vm *VM) registerBenchmarkJob(mod *RClass) {
 	cls := newClass("Benchmark::Job", vm.cObject)
 	vm.cBenchmarkJob = cls
-	mod.consts["Job"] = cls
-	vm.consts["Benchmark::Job"] = cls
+	mod.consts["Job"] = object.Wrap(cls)
+	vm.consts["Benchmark::Job"] = object.Wrap(cls)
 
 	add := func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		bj := object.Kind[*benchJob](self)
@@ -304,7 +304,7 @@ func (vm *VM) benchDriver(blk *Proc, caption string, labelWidth int, format stri
 	if caption != "" {
 		vm.benchPrint(br.r.Caption())
 	}
-	extras := vm.callBlock(blk, []object.Value{br})
+	extras := vm.callBlock(blk, []object.Value{object.Wrap(br)})
 	for i, t := range benchExtras(extras) {
 		label := ""
 		if i < len(labels) {
@@ -325,7 +325,7 @@ func (vm *VM) benchBmbm(blk *Proc, width int) object.Value {
 		raise("LocalJumpError", "no block given (bmbm)")
 	}
 	bj := &benchJob{job: benchmark.NewJob(width)}
-	vm.callBlock(blk, []object.Value{bj})
+	vm.callBlock(blk, []object.Value{object.Wrap(bj)})
 
 	offset := bj.job.Width() + 1
 	clock := benchmarkClock{}
@@ -365,9 +365,9 @@ func (vm *VM) benchRun(blk *Proc, name string) func() {
 func (vm *VM) benchPrint(s string) {
 	out := vm.globals["$stdout"]
 	if out == nil {
-		out = vm.curStdout()
+		out = object.Wrap(vm.curStdout())
 	}
-	vm.send(out, "print", []object.Value{object.NewString(s)}, nil)
+	vm.send(out, "print", []object.Value{object.Wrap(object.NewString(s))}, nil)
 }
 
 // benchLabel returns the first argument as a label string (MRI's label.to_s),
@@ -466,7 +466,7 @@ func benchFormatArgs(vs []object.Value) []any {
 
 // benchToA renders Tms#to_a: [label, utime, stime, cutime, cstime, real].
 func benchToA(t benchmark.Tms) object.Value {
-	return object.NewArray(object.NewString(t.Label()), object.Float(t.Utime()), object.Float(t.Stime()), object.Float(t.Cutime()), object.Float(t.Cstime()), object.Float(t.Real()))
+	return object.Wrap(object.NewArray(object.Wrap(object.NewString(t.Label())), object.FloatValue(float64(object.Float(t.Utime()))), object.FloatValue(float64(object.Float(t.Stime()))), object.FloatValue(float64(object.Float(t.Cutime()))), object.FloatValue(float64(object.Float(t.Cstime()))), object.FloatValue(float64(object.Float(t.Real())))))
 }
 
 // benchTmsList wraps a slice of library Tms values as a Ruby Array of
@@ -474,9 +474,9 @@ func benchToA(t benchmark.Tms) object.Value {
 func benchTmsList(ts []benchmark.Tms) object.Value {
 	elems := make([]object.Value, len(ts))
 	for i, t := range ts {
-		elems[i] = &Tms{t: t}
+		elems[i] = object.Wrap(&Tms{t: t})
 	}
-	return object.NewArrayFromSlice(elems)
+	return object.Wrap(object.NewArrayFromSlice(elems))
 }
 
 // benchExtras coerces a block's return value into the slice of summary Tms the

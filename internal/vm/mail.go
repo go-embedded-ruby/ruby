@@ -43,24 +43,24 @@ func (f *MailField) Truthy() bool    { return true }
 func (vm *VM) registerMail() {
 	mod := newClass("Mail", nil)
 	mod.isModule = true
-	vm.consts["Mail"] = mod
+	vm.consts["Mail"] = object.Wrap(mod)
 
 	msgCls := newClass("Mail::Message", vm.cObject)
-	mod.consts["Message"] = msgCls
-	vm.consts["Mail::Message"] = msgCls
+	mod.consts["Message"] = object.Wrap(msgCls)
+	vm.consts["Mail::Message"] = object.Wrap(msgCls)
 	// Mail::Part is Mail::Message (the library models a part as a message).
-	mod.consts["Part"] = msgCls
-	vm.consts["Mail::Part"] = msgCls
+	mod.consts["Part"] = object.Wrap(msgCls)
+	vm.consts["Mail::Part"] = object.Wrap(msgCls)
 	vm.registerMailMessage(msgCls)
 
 	bodyCls := newClass("Mail::Body", vm.cObject)
-	mod.consts["Body"] = bodyCls
-	vm.consts["Mail::Body"] = bodyCls
+	mod.consts["Body"] = object.Wrap(bodyCls)
+	vm.consts["Mail::Body"] = object.Wrap(bodyCls)
 	vm.registerMailBody(bodyCls)
 
 	fieldCls := newClass("Mail::Field", vm.cObject)
-	mod.consts["Field"] = fieldCls
-	vm.consts["Mail::Field"] = fieldCls
+	mod.consts["Field"] = object.Wrap(fieldCls)
+	vm.consts["Mail::Field"] = object.Wrap(fieldCls)
 	vm.registerMailField(fieldCls)
 
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
@@ -145,7 +145,7 @@ func (vm *VM) registerMailMessage(cls *RClass) {
 			self(v).SetBody(strArg(args[0]))
 			return v
 		}
-		return &MailBody{b: self(v).Body()}
+		return object.Wrap(&MailBody{b: self(v).Body()})
 	})
 	// date returns a Ruby Time for the Date: header, or nil when it is absent or
 	// unparseable.
@@ -156,10 +156,10 @@ func (vm *VM) registerMailMessage(cls *RClass) {
 	// The MIME view: multipart? / attachment? predicates, the parts and
 	// attachments Arrays, and the text/html part convenience readers.
 	d("multipart?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).Multipart())
+		return object.BoolValue(bool(object.Bool(self(v).Multipart())))
 	})
 	d("attachment?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).IsAttachment())
+		return object.BoolValue(bool(object.Bool(self(v).IsAttachment())))
 	})
 	d("parts", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return mailPartsArray(self(v).Parts())
@@ -193,13 +193,13 @@ func (vm *VM) registerMailMessage(cls *RClass) {
 
 	// encoded / to_s serialise the message back to its on-the-wire form.
 	d("encoded", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Encoded())
+		return object.Wrap(object.NewString(self(v).Encoded()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Encoded())
+		return object.Wrap(object.NewString(self(v).Encoded()))
 	})
 	d("decoded", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(string(self(v).Decoded()))
+		return object.Wrap(object.NewString(string(self(v).Decoded())))
 	})
 
 	// The builder setters (used inside a Mail.new block and callable directly):
@@ -232,16 +232,16 @@ func (vm *VM) registerMailBody(cls *RClass) {
 	self := func(v object.Value) mailBody { return object.Kind[*MailBody](v).b }
 
 	d("decoded", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).DecodedString())
+		return object.Wrap(object.NewString(self(v).DecodedString()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).DecodedString())
+		return object.Wrap(object.NewString(self(v).DecodedString()))
 	})
 	d("raw_source", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Raw())
+		return object.Wrap(object.NewString(self(v).Raw()))
 	})
 	d("encoding", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Encoding())
+		return object.Wrap(object.NewString(self(v).Encoding()))
 	})
 }
 
@@ -252,15 +252,15 @@ func (vm *VM) registerMailField(cls *RClass) {
 	self := func(v object.Value) mailField { return object.Kind[*MailField](v).f }
 
 	d("name", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Name())
+		return object.Wrap(object.NewString(self(v).Name()))
 	})
 	d("value", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Value())
+		return object.Wrap(object.NewString(self(v).Value()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Value())
+		return object.Wrap(object.NewString(self(v).Value()))
 	})
 	d("decoded", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Decoded())
+		return object.Wrap(object.NewString(self(v).Decoded()))
 	})
 }

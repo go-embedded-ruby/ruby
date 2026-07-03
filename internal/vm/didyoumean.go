@@ -78,7 +78,7 @@ func (s *SpellChecker) correct(input string) object.Value {
 	for _, h := range hits {
 		out = append(out, s.byName[h])
 	}
-	return object.NewArrayFromSlice(out)
+	return object.Wrap(object.NewArrayFromSlice(out))
 }
 
 // registerDidYouMean installs the DidYouMean module and its nested SpellChecker
@@ -89,13 +89,13 @@ func (vm *VM) registerDidYouMean() {
 	mod := newClass("DidYouMean", nil)
 	mod.isModule = true
 	vm.cDidYouMean = mod
-	vm.consts["DidYouMean"] = mod
+	vm.consts["DidYouMean"] = object.Wrap(mod)
 
 	sc := newClass("SpellChecker", vm.cObject)
 	sc.lexParent = mod
 	vm.cSpellChecker = sc
-	mod.consts["SpellChecker"] = sc
-	vm.consts["DidYouMean::SpellChecker"] = sc
+	mod.consts["SpellChecker"] = object.Wrap(sc)
+	vm.consts["DidYouMean::SpellChecker"] = object.Wrap(sc)
 
 	// SpellChecker.new(dictionary:) — dictionary: is a required keyword. The kwargs
 	// arrive as a trailing *object.Hash; a missing :dictionary raises ArgumentError
@@ -111,11 +111,11 @@ func (vm *VM) registerDidYouMean() {
 				}
 				raise("ArgumentError", "missing keyword: :dictionary")
 			}
-			dict, ok := h.Get(object.Symbol("dictionary"))
+			dict, ok := h.Get(object.SymVal(string(object.Symbol("dictionary"))))
 			if !ok {
 				raise("ArgumentError", "missing keyword: :dictionary")
 			}
-			return newSpellChecker(dict)
+			return object.Wrap(newSpellChecker(dict))
 		}}
 
 	// SpellChecker#correct(input) — the ranked matches in the dictionary entries'

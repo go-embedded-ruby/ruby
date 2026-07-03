@@ -72,9 +72,9 @@ func (vm *VM) installScanf() {
 	vm.cObject.define("scanf", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		stdin, ok := object.KindOK[*IOObj](vm.globals["$stdin"])
 		if !ok {
-			return object.NewArray()
+			return object.Wrap(object.NewArray())
 		}
-		return scanfIO(vm, stdin, args, blk)
+		return scanfIO(vm, object.Wrap(stdin), args, blk)
 	})
 }
 
@@ -93,7 +93,7 @@ func (vm *VM) doScanf(input, format string, blk *Proc) object.Value {
 	for _, g := range groups {
 		results = append(results, vm.callBlock(blk, []object.Value{scanfValues(g)}))
 	}
-	return object.NewArrayFromSlice(results)
+	return object.Wrap(object.NewArrayFromSlice(results))
 }
 
 // scanfValues maps a library result group ([]any of int / *big.Int / float64 /
@@ -103,7 +103,7 @@ func scanfValues(vals []any) object.Value {
 	for _, v := range vals {
 		elems = append(elems, scanfValue(v))
 	}
-	return object.NewArrayFromSlice(elems)
+	return object.Wrap(object.NewArrayFromSlice(elems))
 }
 
 // scanfValue maps one library value onto its Ruby counterpart. The library
@@ -117,10 +117,10 @@ func scanfValue(v any) object.Value {
 	case *big.Int:
 		return object.NormInt(n)
 	case float64:
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	default:
-		return object.NewString(fmt.Sprintf("%v", n))
+		return object.Wrap(object.NewString(fmt.Sprintf("%v", n)))
 	}
 }

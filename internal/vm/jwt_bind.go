@@ -32,7 +32,7 @@ import (
 func (vm *VM) registerJWT() {
 	mod := newClass("JWT", nil)
 	mod.isModule = true
-	vm.consts["JWT"] = mod
+	vm.consts["JWT"] = object.Wrap(mod)
 
 	vm.registerJWTErrors(mod)
 
@@ -54,7 +54,7 @@ func (vm *VM) registerJWT() {
 			if err != nil {
 				raiseJWTError(err)
 			}
-			return object.NewString(tok)
+			return object.Wrap(object.NewString(tok))
 		}}
 
 	// JWT.decode(token, key, verify = true, options = {}) verifies and parses a
@@ -75,7 +75,7 @@ func (vm *VM) registerJWT() {
 			if err != nil {
 				raiseJWTError(err)
 			}
-			return object.NewArray(jwtToRuby(payload), jwtToRuby(header))
+			return object.Wrap(object.NewArray(jwtToRuby(payload), jwtToRuby(header)))
 		}}
 }
 
@@ -89,8 +89,8 @@ func (vm *VM) registerJWTErrors(mod *RClass) {
 	std := object.Kind[*RClass](vm.consts["StandardError"])
 	reg := func(simple, qualified string, super *RClass) *RClass {
 		c := newClass(qualified, super)
-		mod.consts[simple] = c
-		vm.consts[qualified] = c
+		mod.consts[simple] = object.Wrap(c)
+		vm.consts[qualified] = object.Wrap(c)
 		return c
 	}
 	reg("EncodeError", "JWT::EncodeError", std)
@@ -225,34 +225,34 @@ func jwtDecodeOpts(rest []object.Value) (jwt.Options, string) {
 	if algs := jwtAlgorithms(h); len(algs) > 0 {
 		opts.Algorithms = algs
 	}
-	if v, ok := h.Get(object.Symbol("leeway")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("leeway")))); ok {
 		opts.Leeway = intArg(v)
 	}
-	if v, ok := h.Get(object.Symbol("verify_expiration")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("verify_expiration")))); ok {
 		opts.VerifyExpiration, opts.VerifyExpirationSet = v.Truthy(), true
 	}
-	if v, ok := h.Get(object.Symbol("verify_not_before")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("verify_not_before")))); ok {
 		opts.VerifyNotBefore, opts.VerifyNotBeforeSet = v.Truthy(), true
 	}
-	if v, ok := h.Get(object.Symbol("verify_iat")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("verify_iat")))); ok {
 		opts.VerifyIat = v.Truthy()
 	}
-	if v, ok := h.Get(object.Symbol("iss")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("iss")))); ok {
 		opts.Issuer = jwtGoScalarOrList(v)
 	}
-	if v, ok := h.Get(object.Symbol("verify_iss")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("verify_iss")))); ok {
 		opts.VerifyIss = v.Truthy()
 	}
-	if v, ok := h.Get(object.Symbol("aud")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("aud")))); ok {
 		opts.Audience = jwtGoScalarOrList(v)
 	}
-	if v, ok := h.Get(object.Symbol("verify_aud")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("verify_aud")))); ok {
 		opts.VerifyAud = v.Truthy()
 	}
-	if v, ok := h.Get(object.Symbol("sub")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("sub")))); ok {
 		opts.Subject, opts.VerifySub = strArg(v), true
 	}
-	if v, ok := h.Get(object.Symbol("required_claims")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("required_claims")))); ok {
 		opts.RequiredClaims = jwtStringList(v)
 	}
 	alg := ""
@@ -265,10 +265,10 @@ func jwtDecodeOpts(rest []object.Value) (jwt.Options, string) {
 // jwtAlgorithms reads the algorithm: (a single String) or algorithms: (an Array)
 // option into the allow-list.
 func jwtAlgorithms(h *object.Hash) []string {
-	if v, ok := h.Get(object.Symbol("algorithm")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("algorithm")))); ok {
 		return []string{strArg(v)}
 	}
-	if v, ok := h.Get(object.Symbol("algorithms")); ok {
+	if v, ok := h.Get(object.SymVal(string(object.Symbol("algorithms")))); ok {
 		return jwtStringList(v)
 	}
 	return nil
@@ -290,7 +290,7 @@ func jwtStringList(v object.Value) []string {
 // Go any (string or []string) the Options issuer/audience fields accept.
 func jwtGoScalarOrList(v object.Value) any {
 	if arr, ok := object.KindOK[*object.Array](v); ok {
-		return jwtStringList(arr)
+		return jwtStringList(object.Wrap(arr))
 	}
 	return strArg(v)
 }
@@ -384,11 +384,11 @@ func jwtFromRuby(v object.Value) any {
 func jwtToRuby(v any) object.Value {
 	switch n := v.(type) {
 	case nil:
-		return object.NilV
+		return object.NilVal()
 	case bool:
-		return object.Bool(n)
+		return object.BoolValue(bool(object.Bool(n)))
 	case string:
-		return object.NewString(n)
+		return object.Wrap(object.NewString(n))
 	case json.Number:
 		// The library decodes with UseNumber(), so JSON numbers arrive as a
 		// json.Number (a decimal string): an integer value becomes an Integer,
@@ -397,12 +397,12 @@ func jwtToRuby(v any) object.Value {
 			return object.IntValue(i)
 		}
 		f, _ := n.Float64()
-		return object.Float(f)
+		return object.FloatValue(float64(object.Float(f)))
 	case float64:
 		if n == float64(int64(n)) {
 			return object.IntValue(int64(n))
 		}
-		return object.Float(n)
+		return object.FloatValue(float64(object.Float(n)))
 	case int64:
 		return object.IntValue(n)
 	case int:
@@ -412,15 +412,15 @@ func jwtToRuby(v any) object.Value {
 		for i, e := range n {
 			elems[i] = jwtToRuby(e)
 		}
-		return object.NewArrayFromSlice(elems)
+		return object.Wrap(object.NewArrayFromSlice(elems))
 	case *jwt.OrderedMap:
 		h := object.NewHashCap(n.Len())
 		for _, k := range n.Keys() {
 			val, _ := n.Get(k)
-			h.Set(object.NewString(k), jwtToRuby(val))
+			h.Set(object.Wrap(object.NewString(k)), jwtToRuby(val))
 		}
-		return h
+		return object.Wrap(h)
 	default:
-		return object.NilV
+		return object.NilVal()
 	}
 }
