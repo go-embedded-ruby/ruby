@@ -713,6 +713,20 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["OAuth2::Response"].(*RClass)
 	case *OAuth2Request:
 		return vm.consts["OAuth2::Request"].(*RClass)
+	case *OIDCProviderMetadata:
+		return vm.consts["OpenIDConnect::ProviderMetadata"].(*RClass)
+	case *OIDCKeySet:
+		return vm.consts["OpenIDConnect::KeySet"].(*RClass)
+	case *OIDCVerifier:
+		return vm.consts["OpenIDConnect::Verifier"].(*RClass)
+	case *OIDCClaims:
+		return vm.consts["OpenIDConnect::IDTokenClaims"].(*RClass)
+	case *OIDCClient:
+		return vm.consts["OpenIDConnect::Client"].(*RClass)
+	case *OIDCTokens:
+		return vm.consts["OpenIDConnect::Tokens"].(*RClass)
+	case *OIDCUserInfo:
+		return vm.consts["OpenIDConnect::UserInfo"].(*RClass)
 	case *KramdownDoc:
 		// A Kramdown::Document reports Kramdown::Document so its #to_html renders
 		// the held source through the library.

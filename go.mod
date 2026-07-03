@@ -40,7 +40,7 @@ require (
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2
-	github.com/go-ruby-jwt/jwt v0.0.0-20260702145313-f488bdaf07b8
+	github.com/go-ruby-jwt/jwt v0.0.0-20260702205900-15884789dfbf
 	github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8
 	github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
@@ -54,6 +54,7 @@ require (
 	github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e
 	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
+	github.com/go-ruby-oidc/oidc v0.0.0-20260703180815-11ece54216c6
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
 	github.com/go-ruby-parser/parser v0.0.0-20260703103305-5ae12948602f
