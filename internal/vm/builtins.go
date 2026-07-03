@@ -1176,7 +1176,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("chars", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		var out []object.Value
 		for _, r := range strOf(self) {
-			out = append(out, object.NewString(string(r)))
+			out = append(out, object.NewStringView(string(r)))
 		}
 		return &object.Array{Elems: out}
 	})
@@ -1206,7 +1206,7 @@ func (vm *VM) bootstrap() {
 		segs := splitLines(strOf(self))
 		out := make([]object.Value, len(segs))
 		for i, seg := range segs {
-			out[i] = object.NewString(seg)
+			out[i] = object.NewStringView(seg)
 		}
 		return &object.Array{Elems: out}
 	})
@@ -1215,7 +1215,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each_line")
 		}
 		for _, seg := range splitLines(strOf(self)) {
-			vm.callBlock(blk, []object.Value{object.NewString(seg)})
+			vm.callBlock(blk, []object.Value{object.NewStringView(seg)})
 		}
 		return self
 	})
@@ -1224,7 +1224,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each_char")
 		}
 		for _, r := range strOf(self) {
-			vm.callBlock(blk, []object.Value{object.NewString(string(r))})
+			vm.callBlock(blk, []object.Value{object.NewStringView(string(r))})
 		}
 		return self
 	})
@@ -4083,18 +4083,18 @@ func stringIndexEnc(s string, args []object.Value, binary bool) object.Value {
 		if end > n {
 			end = n
 		}
-		return object.NewString(take(start, end))
+		return object.NewStringView(take(start, end))
 	}
 	if rng, ok := args[0].(*object.Range); ok {
 		start, length, ok := sliceRange(n, rng)
 		if !ok {
 			return object.NilV
 		}
-		return object.NewString(take(start, start+length))
+		return object.NewStringView(take(start, start+length))
 	}
 	if sub, ok := args[0].(*object.String); ok { // s[substr] -> the substring if present, else nil
 		if strings.Contains(s, sub.Str()) {
-			return object.NewString(sub.Str())
+			return object.NewStringView(sub.Str())
 		}
 		return object.NilV
 	}
@@ -4102,7 +4102,7 @@ func stringIndexEnc(s string, args []object.Value, binary bool) object.Value {
 	if i < 0 || i >= n {
 		return object.NilV
 	}
-	return object.NewString(take(i, i+1))
+	return object.NewStringView(take(i, i+1))
 }
 
 // byteslice returns a substring by BYTE offsets (not characters), the way MRI's
@@ -4114,7 +4114,7 @@ func byteslice(self *object.String, args []object.Value) object.Value {
 	b := []byte(self.Str())
 	n := len(b)
 	mk := func(sub []byte) object.Value {
-		s := object.NewString(string(sub))
+		s := object.NewStringView(string(sub))
 		s.Enc = self.Enc
 		return s
 	}
