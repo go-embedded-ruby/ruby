@@ -136,8 +136,8 @@ github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e h1:JmbJL+0nq
 github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e/go.mod h1:tbYmHYXjnNXJCNYABDx9nWfuGBCXeKrp134bNsQeTpM=
 github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444 h1:vkMPJDpZHmu09pVxr7CFppoh1b5Kc8LkhKpxkSBoyxA=
 github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444/go.mod h1:Wq3cgP6klsULbO4ee0DOavVIzifgmddOWnYpqljbER4=
-github.com/go-ruby-rack/rack v0.0.0-20260630124607-8a4f9cfcdbb5 h1:8jrY0g3k1+TbiXz7jV8sXP8UcXSlB1FKcXWkyXZPBQ8=
-github.com/go-ruby-rack/rack v0.0.0-20260630124607-8a4f9cfcdbb5/go.mod h1:rKZ3vD81gJq61NvZ3XX9cr6AxtIV3+lFZKG7lPKV3PM=
+github.com/go-ruby-rack/rack v0.0.0-20260703100219-0201e5681658 h1:IBLd1bBlCdCNH/xOSp6+AchixWQE1aMjtFYw4O2hhAg=
+github.com/go-ruby-rack/rack v0.0.0-20260703100219-0201e5681658/go.mod h1:rKZ3vD81gJq61NvZ3XX9cr6AxtIV3+lFZKG7lPKV3PM=
 github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92 h1:EXqNsTpyz5KPZURl94uOjcIIyJ0mCyMA7/AFAXvFgdg=
 github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92/go.mod h1:gt67ft80L9J5DpRGe+x3qPy2hg1g75aWQ6h52inm7og=
 github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08 h1:2ULLhB9SUBzHngWYrbltWEmt7jCbA1SvweZsmKwdilM=

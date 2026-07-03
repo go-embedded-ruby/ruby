@@ -191,6 +191,30 @@ func TestRackUtils(t *testing.T) {
 		{`require "rack/utils"; puts Rack::Utils.status_code("500")`, "500\n"},
 		{`require "rack/utils"; puts Rack::Utils::HTTP_STATUS_CODES[404]`, "Not Found\n"},
 		{`require "rack/utils"; puts Rack::Utils::HTTP_STATUS_CODES[200]`, "OK\n"},
+		// secure_compare / clean_path_info / valid_path? — MRI-parity arms.
+		{`require "rack/utils"; puts Rack::Utils.secure_compare("s3cr3t", "s3cr3t")`, "true\n"},
+		{`require "rack/utils"; puts Rack::Utils.secure_compare("s3cr3t", "s3cr3x")`, "false\n"},
+		{`require "rack/utils"; puts Rack::Utils.secure_compare("abc", "abcd")`, "false\n"},
+		{`require "rack/utils"; puts Rack::Utils.clean_path_info("/foo/../bar")`, "/bar\n"},
+		{`require "rack/utils"; puts Rack::Utils.clean_path_info("a/./b/../c")`, "a/c\n"},
+		{`require "rack/utils"; puts Rack::Utils.clean_path_info("/../../etc/passwd")`, "/etc/passwd\n"},
+		{`require "rack/utils"; puts Rack::Utils.clean_path_info("").inspect`, `"/"` + "\n"},
+		{`require "rack/utils"; puts Rack::Utils.valid_path?("/ok/path")`, "true\n"},
+		{`require "rack/utils"; puts Rack::Utils.valid_path?("bad\x00path")`, "false\n"},
+		// select_best_encoding — note the (available, [[name, q], …]) arg order.
+		{`require "rack/utils"; puts Rack::Utils.select_best_encoding(["gzip","identity"], [["gzip",1.0],["identity",0.5]])`, "gzip\n"},
+		{`require "rack/utils"; puts Rack::Utils.select_best_encoding(["gzip","deflate","identity"], [["*",1.0]])`, "gzip\n"},
+		{`require "rack/utils"; puts Rack::Utils.select_best_encoding(["gzip","identity"], []).inspect`, `"identity"` + "\n"},
+		{`require "rack/utils"; p Rack::Utils.select_best_encoding(["gzip"], [["identity",0.0],["gzip",0.0]])`, "nil\n"},
+		// forwarded_values — symbol keys, header order; nil on falsy/disallowed.
+		{`require "rack/utils"; puts Rack::Utils.forwarded_values("for=1.2.3.4;proto=https").inspect`, `{for: ["1.2.3.4"], proto: ["https"]}` + "\n"},
+		{`require "rack/utils"; puts Rack::Utils.forwarded_values("proto=https;for=1.2.3.4").inspect`, `{proto: ["https"], for: ["1.2.3.4"]}` + "\n"},
+		{`require "rack/utils"; puts Rack::Utils.forwarded_values("host=example.com;by=a;for=b;proto=c").inspect`, `{host: ["example.com"], by: ["a"], for: ["b"], proto: ["c"]}` + "\n"},
+		{`require "rack/utils"; puts Rack::Utils.forwarded_values("for=1.1.1.1, for=2.2.2.2").inspect`, `{for: ["1.1.1.1", "2.2.2.2"]}` + "\n"},
+		{`require "rack/utils"; puts Rack::Utils.forwarded_values("").inspect`, "{}\n"},
+		{`require "rack/utils"; p Rack::Utils.forwarded_values(nil)`, "nil\n"},
+		{`require "rack/utils"; p Rack::Utils.forwarded_values(false)`, "nil\n"},
+		{`require "rack/utils"; p Rack::Utils.forwarded_values("cookie=x")`, "nil\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -204,6 +228,9 @@ func TestRackUtils(t *testing.T) {
 		`require "rack/utils"; Rack::Utils.build_nested_query("scalar")`,
 		`require "rack/utils"; Rack::Utils.status_code(:bogus)`,
 		`require "rack/utils"; Rack::Utils.best_q_match("x")`,
+		`require "rack/utils"; Rack::Utils.secure_compare("only-one")`,
+		`require "rack/utils"; Rack::Utils.select_best_encoding(["gzip"])`,
+		`require "rack/utils"; Rack::Utils.forwarded_values`,
 	} {
 		if class, _ := evalErr(t, src); class != "ArgumentError" {
 			t.Errorf("src=%q class=%q want ArgumentError", src, class)
@@ -393,6 +420,81 @@ func TestRackFromGo(t *testing.T) {
 	for _, c := range checks {
 		if got := rackFromGo(c.in).Inspect(); got != c.want {
 			t.Errorf("rackFromGo(%#v)=%q want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestRackFloat covers the Float / Integer / default arms of the quality
+// coercion used by select_best_encoding.
+func TestRackFloat(t *testing.T) {
+	if rackFloat(object.Float(0.5)) != 0.5 {
+		t.Error("float arm")
+	}
+	if rackFloat(object.Integer(1)) != 1.0 {
+		t.Error("integer arm")
+	}
+	if rackFloat(object.NewString("x")) != 0 {
+		t.Error("default arm")
+	}
+}
+
+// TestRackQValues covers the non-Array, skip (non-pair / short) and valid arms
+// of the accept_encoding converter.
+func TestRackQValues(t *testing.T) {
+	if rackQValues(object.NilV) != nil {
+		t.Error("non-Array arm")
+	}
+	in := object.NewArray(
+		object.NewString("scalar"),                                   // skipped: not a pair
+		object.NewArray(object.NewString("short")),                   // skipped: < 2 elems
+		object.NewArray(object.NewString("gzip"), object.Float(0.7)), // kept
+	)
+	got := rackQValues(in)
+	if len(got) != 1 || got[0].Value != "gzip" || got[0].Quality != 0.7 {
+		t.Errorf("valid arm got=%#v", got)
+	}
+}
+
+// TestRackForwardedArg covers the nil, false and truthy arms.
+func TestRackForwardedArg(t *testing.T) {
+	if _, ok := rackForwardedArg(object.NilV); ok {
+		t.Error("nil arm")
+	}
+	if _, ok := rackForwardedArg(nil); ok {
+		t.Error("go-nil arm")
+	}
+	if _, ok := rackForwardedArg(object.Bool(false)); ok {
+		t.Error("false arm")
+	}
+	s, ok := rackForwardedArg(object.NewString("for=x"))
+	if !ok || s != "for=x" {
+		t.Errorf("truthy arm got=%q ok=%v", s, ok)
+	}
+	// A truthy non-string is stringified (MRI applies #to_s).
+	if s, ok := rackForwardedArg(object.Bool(true)); !ok || s != "true" {
+		t.Errorf("truthy-bool arm got=%q ok=%v", s, ok)
+	}
+}
+
+// TestRackForwardedOrder covers every arm of the header-order reconstruction:
+// terminating quote, escaped quote, unterminated quote, separator, end-of-input,
+// duplicate keys (seen), and a disallowed name (dropped).
+func TestRackForwardedOrder(t *testing.T) {
+	cases := []struct {
+		header string
+		want   []string
+	}{
+		{"", nil},
+		{"for=b;host=h", []string{"for", "host"}},
+		{`for="a\"b";proto=x`, []string{"for", "proto"}},
+		{`for="unterminated`, []string{"for"}},
+		{"for=a;for=b;host=h", []string{"for", "host"}},
+		{"cookie=x;for=y", []string{"for"}},
+		{"\nfor=z", []string{"for"}},
+	}
+	for _, c := range cases {
+		if got := rackForwardedOrder(c.header); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("rackForwardedOrder(%q)=%#v want %#v", c.header, got, c.want)
 		}
 	}
 }

@@ -337,6 +337,56 @@ func (vm *VM) registerRackUtils(mod *RClass) {
 		}
 		return object.NewString(m)
 	})
+	// secure_compare(a, b) — constant-time string equality (CSRF/token-safe).
+	def("secure_compare", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
+		}
+		return object.Bool(rack.SecureCompare(rackStr(args[0]), rackStr(args[1])))
+	})
+	// clean_path_info(path) — traversal-safe PATH_INFO normalisation.
+	def("clean_path_info", strFn(rack.CleanPathInfo))
+	// valid_path?(path) — valid UTF-8 and NUL-free.
+	def("valid_path?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(rack.ValidPath(rackStr(rackArg(args))))
+	})
+	// select_best_encoding(available_encodings, accept_encoding) — pick the best
+	// content-coding. Note the MRI arg order: the server's available list first,
+	// the pre-parsed [name, quality] accept list second. Returns nil when nothing
+	// is acceptable.
+	def("select_best_encoding", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
+		}
+		best, ok := rack.SelectBestEncoding(rackStrArray(args[0]), rackQValues(args[1]))
+		if !ok {
+			return object.NilV
+		}
+		return object.NewString(best)
+	})
+	// forwarded_values(forwarded_header) — parse an RFC 7239 Forwarded header into
+	// a Hash of symbol parameter name → ordered value list, in header order. A
+	// falsy header or a disallowed parameter yields nil (MRI's nil return).
+	def("forwarded_values", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
+		header, has := rackForwardedArg(args[0])
+		vals, present := rack.ForwardedValues(header, has)
+		if !present {
+			return object.NilV
+		}
+		h := object.NewHash()
+		for _, k := range rackForwardedOrder(header) {
+			list := vals[k]
+			arr := object.NewArrayFromSlice(make([]object.Value, len(list)))
+			for i, s := range list {
+				arr.Elems[i] = object.NewString(s)
+			}
+			h.Set(object.Symbol(k), arr)
+		}
+		return h
+	})
 	def("parse_cookies_header", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return rackParamsToHash(rack.ParseCookiesHeader(rackStr(rackArg(args))))
 	})

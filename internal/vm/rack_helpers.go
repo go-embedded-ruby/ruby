@@ -6,6 +6,7 @@ package vm
 
 import (
 	"strconv"
+	"strings"
 
 	rack "github.com/go-ruby-rack/rack"
 
@@ -265,6 +266,109 @@ func rackCookieHeader(v object.Value) string {
 		}
 	}
 	return ""
+}
+
+// rackFloat reads an argument as a float64, used for the quality weights of the
+// [name, quality] pairs Rack::Utils.select_best_encoding accepts. An Integer
+// coerces to its float value; anything non-numeric yields 0.
+func rackFloat(v object.Value) float64 {
+	switch n := v.(type) {
+	case object.Float:
+		return float64(n)
+	case object.Integer:
+		return float64(n)
+	}
+	return 0
+}
+
+// rackQValues maps a Ruby Array of [name, quality] pairs (the pre-parsed
+// accept_encoding argument of Rack::Utils.select_best_encoding) into a
+// []rack.QValue. A non-Array argument yields nil; elements that are not at least
+// two-long arrays are skipped, mirroring MRI's `each { |m, q| }` destructuring.
+func rackQValues(v object.Value) []rack.QValue {
+	arr, ok := v.(*object.Array)
+	if !ok {
+		return nil
+	}
+	out := make([]rack.QValue, 0, len(arr.Elems))
+	for _, el := range arr.Elems {
+		pair, ok := el.(*object.Array)
+		if !ok || len(pair.Elems) < 2 {
+			continue
+		}
+		out = append(out, rack.QValue{Value: rackStr(pair.Elems[0]), Quality: rackFloat(pair.Elems[1])})
+	}
+	return out
+}
+
+// rackAllowedForwarded is the set of Forwarded-header parameters Rack::Utils
+// accepts, mirroring rack.ForwardedValues' allow-list.
+var rackAllowedForwarded = map[string]bool{"by": true, "for": true, "host": true, "proto": true}
+
+// rackForwardedArg reads the single argument of Rack::Utils.forwarded_values and
+// splits it into the (header, present) pair rack.ForwardedValues consumes. A
+// falsy argument (nil / false) is absent (present=false), matching MRI's
+// `return nil unless forwarded_header`; any other value is stringified (MRI
+// applies #to_s before parsing).
+func rackForwardedArg(v object.Value) (string, bool) {
+	switch n := v.(type) {
+	case nil, object.Nil:
+		return "", false
+	case object.Bool:
+		if !bool(n) {
+			return "", false
+		}
+	}
+	return rackStr(v), true
+}
+
+// rackForwardedOrder returns the allowed Forwarded parameter names in
+// first-appearance order, mirroring rack.ForwardedValues' tokeniser (names only)
+// so the Ruby Hash reproduces MRI's header-order enumeration — the Go func
+// returns an unordered map[string][]string, which alone cannot preserve order.
+// It is only ever called after ForwardedValues reports present, so every name it
+// yields is a key of that map.
+func rackForwardedOrder(header string) []string {
+	const seps = " \t;,"
+	h := strings.TrimLeft(strings.ReplaceAll(header, "\n", ";"), seps)
+	var order []string
+	seen := map[string]bool{}
+	for {
+		eq := strings.IndexByte(h, '=')
+		if eq < 0 {
+			break
+		}
+		name := strings.ToLower(strings.TrimSpace(h[:eq]))
+		h = h[eq+1:]
+		if len(h) > 0 && h[0] == '"' {
+			h = h[1:]
+			for {
+				i := strings.IndexAny(h, "\"\\")
+				if i < 0 {
+					h = ""
+					break
+				}
+				c := h[i]
+				h = h[i+1:]
+				if c == '"' {
+					break
+				}
+				if len(h) > 0 {
+					h = h[1:]
+				}
+			}
+		} else if i := strings.IndexAny(h, ";,"); i >= 0 {
+			h = h[i:]
+		} else {
+			h = ""
+		}
+		if rackAllowedForwarded[name] && !seen[name] {
+			seen[name] = true
+			order = append(order, name)
+		}
+		h = strings.TrimLeft(h, seps)
+	}
+	return order
 }
 
 // rackToGo maps a Ruby value into the generic Go value model rack consumes

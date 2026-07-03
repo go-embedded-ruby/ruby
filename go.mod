@@ -64,7 +64,7 @@ require (
 	github.com/go-ruby-prime/prime v0.0.0-20260703153932-08f6fe218cd4
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
-	github.com/go-ruby-rack/rack v0.0.0-20260630124607-8a4f9cfcdbb5
+	github.com/go-ruby-rack/rack v0.0.0-20260703100219-0201e5681658
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
