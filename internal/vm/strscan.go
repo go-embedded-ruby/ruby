@@ -111,7 +111,7 @@ func ssLen(n int, ok bool) object.Value {
 	if !ok {
 		return object.NilV
 	}
-	return object.Integer(n)
+	return object.IntValue(int64(n))
 }
 
 // registerStringScanner installs the native StringScanner class backed by the
@@ -196,7 +196,7 @@ func (vm *VM) registerStringScanner() {
 		if n < 0 {
 			return object.NilV
 		}
-		return object.Integer(n)
+		return object.IntValue(int64(n))
 	})
 
 	// [] reads a capture of the most recent match: an Integer index via Group, a
@@ -229,19 +229,19 @@ func (vm *VM) registerStringScanner() {
 	// pos / charpos report the position; pos= moves it, raising RangeError when
 	// the target is outside [0, len] (the library reports it as an error).
 	posFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(ssScannerOf(v).Pos())
+		return object.IntValue(int64(ssScannerOf(v).Pos()))
 	}
 	d("pos", posFn)
 	d("pointer", posFn)
 	d("charpos", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(ssScannerOf(v).CharPos())
+		return object.IntValue(int64(ssScannerOf(v).CharPos()))
 	})
 	posSet := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		n := int(intArg(args[0]))
 		if err := ssScannerOf(v).SetPos(n); err != nil {
 			raise("RangeError", "index out of range")
 		}
-		return object.Integer(n)
+		return object.IntValue(int64(n))
 	}
 	d("pos=", posSet)
 	d("pointer=", posSet)
@@ -251,7 +251,7 @@ func (vm *VM) registerStringScanner() {
 		return object.NewString(ssScannerOf(v).Rest())
 	})
 	d("rest_size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(ssScannerOf(v).RestSize())
+		return object.IntValue(int64(ssScannerOf(v).RestSize()))
 	})
 	eosFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(ssScannerOf(v).EOS())

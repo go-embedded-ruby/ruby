@@ -111,7 +111,7 @@ func (vm *VM) registerEnumerator() {
 		return &object.Array{Elems: vm.enumMaterialize(self.(*Enumerator))}
 	})
 	d("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(vm.enumMaterialize(self.(*Enumerator))))
+		return object.IntValue(int64(len(vm.enumMaterialize(self.(*Enumerator)))))
 	})
 	d("next", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		e := self.(*Enumerator)
@@ -146,7 +146,7 @@ func (vm *VM) registerEnumerator() {
 			elems := vm.enumMaterialize(e)
 			pairs := make([]object.Value, len(elems))
 			for i, v := range elems {
-				pairs[i] = &object.Array{Elems: []object.Value{v, object.Integer(off + int64(i))}}
+				pairs[i] = &object.Array{Elems: []object.Value{v, object.IntValue(off + int64(i))}}
 			}
 			return enumFor(&object.Array{Elems: pairs}, "each")
 		}
@@ -155,7 +155,7 @@ func (vm *VM) registerEnumerator() {
 		// the receiver, etc., exactly as the wrapped method would.
 		i := off
 		wrapper := &Proc{native: func(_ *VM, cargs []object.Value) object.Value {
-			withIdx := append(append([]object.Value{}, cargs...), object.Integer(i))
+			withIdx := append(append([]object.Value{}, cargs...), object.IntValue(i))
 			i++
 			return vm.callBlock(blk, withIdx)
 		}}

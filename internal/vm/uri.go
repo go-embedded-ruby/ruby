@@ -219,7 +219,7 @@ func (vm *VM) registerURIClasses(mod *RClass) {
 	// on Generic; the prelude exposed it on URI).
 	ports := object.NewHash()
 	for scheme, port := range liburi.DefaultPorts {
-		ports.Set(object.NewString(scheme), object.Integer(port))
+		ports.Set(object.NewString(scheme), object.IntValue(int64(port)))
 	}
 	mod.consts["DEFAULT_PORTS"] = ports
 	generic.consts["DEFAULT_PORTS"] = ports
@@ -281,7 +281,7 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 	})
 	d("port", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if p, ok := uriOf(v).EffectivePort(); ok {
-			return object.Integer(p)
+			return object.IntValue(int64(p))
 		}
 		return object.NilV
 	})
@@ -291,7 +291,7 @@ func (vm *VM) registerURIInstanceMethods(generic *RClass) {
 	})
 	d("default_port", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if p, ok := uriOf(v).DefaultPort(); ok {
-			return object.Integer(p)
+			return object.IntValue(int64(p))
 		}
 		return object.NilV
 	})
@@ -542,7 +542,7 @@ func uriSplitPort(u *liburi.URI) object.Value {
 	if !u.HasPort {
 		return object.NilV
 	}
-	return object.NewString(object.Integer(u.Port).ToS())
+	return object.NewString(object.IntValue(int64(u.Port)).ToS())
 }
 
 // uriFormPairs coerces an Array of [key, value] pairs to the library's pair form,

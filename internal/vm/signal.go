@@ -53,7 +53,7 @@ func (vm *VM) registerSignal() {
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			h := object.NewHash()
 			for name, num := range signalNumbers {
-				h.Set(object.NewString(name), object.Integer(num))
+				h.Set(object.NewString(name), object.IntValue(int64(num)))
 			}
 			return h
 		}}

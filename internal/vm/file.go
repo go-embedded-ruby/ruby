@@ -56,7 +56,7 @@ func (vm *VM) registerFile() {
 	// mode string. We fix the numeric values here rather than reflecting the host's
 	// so behaviour is identical on every OS the gate runs on.
 	for name, val := range fileFlagConsts {
-		cFile.consts[name] = object.Integer(val)
+		cFile.consts[name] = object.IntValue(val)
 	}
 	def := func(name string, fn NativeFn) { cFile.smethods[name] = &Method{name: name, owner: cFile, native: fn} }
 
@@ -161,7 +161,7 @@ func (vm *VM) registerFile() {
 		if err := os.WriteFile(p, data, 0o644); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
 		}
-		return object.Integer(len(data))
+		return object.IntValue(int64(len(data)))
 	})
 	def("size", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])
@@ -169,7 +169,7 @@ func (vm *VM) registerFile() {
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
 		}
-		return object.Integer(fi.Size())
+		return object.IntValue(fi.Size())
 	})
 	// File.mtime returns the file's last-modification Time (whole-second
 	// resolution, matching the Time class's granularity). A missing file raises
@@ -189,7 +189,7 @@ func (vm *VM) registerFile() {
 				raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", p)
 			}
 		}
-		return object.Integer(len(args))
+		return object.IntValue(int64(len(args)))
 	}
 	def("delete", delete)
 	def("unlink", delete)
@@ -202,7 +202,7 @@ func (vm *VM) registerFile() {
 		if err := os.Rename(from, to); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_rename - %s or %s", from, to)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 
 	// On-disk metadata operations Puppet's settings/file provider drives:
@@ -218,7 +218,7 @@ func (vm *VM) registerFile() {
 				raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", p)
 			}
 		}
-		return object.Integer(len(paths))
+		return object.IntValue(int64(len(paths)))
 	})
 	def("chown", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// A nil uid/gid leaves that id unchanged (passed as -1 to chown).
@@ -230,7 +230,7 @@ func (vm *VM) registerFile() {
 				raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", p)
 			}
 		}
-		return object.Integer(len(paths))
+		return object.IntValue(int64(len(paths)))
 	})
 	// lchown mirrors chown but does not follow a symlink (Puppet uses it when
 	// :links => :manage). Go's os.Lchown provides the same behaviour.
@@ -243,7 +243,7 @@ func (vm *VM) registerFile() {
 				raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", p)
 			}
 		}
-		return object.Integer(len(paths))
+		return object.IntValue(int64(len(paths)))
 	})
 	def("utime", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		at, mt := timeArgUnix(args[0]), timeArgUnix(args[1])
@@ -254,7 +254,7 @@ func (vm *VM) registerFile() {
 				raise("Errno::ENOENT", "No such file or directory @ utime_failed - %s", p)
 			}
 		}
-		return object.Integer(len(paths))
+		return object.IntValue(int64(len(paths)))
 	})
 	// File.umask([mask]) reads (and optionally sets) the process umask, returning
 	// the previous value — the bracket Puppet::Util.withumask uses. With no
@@ -263,9 +263,9 @@ func (vm *VM) registerFile() {
 		if len(args) == 0 {
 			cur := setUmask(0)
 			setUmask(cur) // restore: a no-arg umask is a pure read
-			return object.Integer(cur)
+			return object.IntValue(int64(cur))
 		}
-		return object.Integer(setUmask(int(intArg(args[0]))))
+		return object.IntValue(int64(setUmask(int(intArg(args[0])))))
 	})
 	// Access predicates: readable?/writable?/executable? for the current effective
 	// user, plus executable_real? — thin File.stat-and-test wrappers that return

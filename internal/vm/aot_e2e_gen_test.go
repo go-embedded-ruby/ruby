@@ -69,7 +69,7 @@ func (vm *VM) e2eArith(self object.Value, args []object.Value, block *Proc) (res
 	_ = self
 	_ = args
 	_ = block
-	return object.Integer(vm.e2eArith_k(int64(i0), int64(i1)))
+	return object.IntValue(vm.e2eArith_k(int64(i0), int64(i1)))
 }
 
 func (vm *VM) e2eCmp(self object.Value, args []object.Value, block *Proc) object.Value {
@@ -135,7 +135,7 @@ func (vm *VM) e2eRange(self object.Value, args []object.Value, block *Proc) obje
 	_ = args
 	_ = block
 	var s0, s1 object.Value
-	s0 = object.Integer(1)
+	s0 = object.IntValue(1)
 	s1 = l0
 	s0 = &object.Range{Lo: s0, Hi: s1, Exclusive: false}
 	return s0
@@ -149,7 +149,7 @@ func (vm *VM) e2eRangeExcl(self object.Value, args []object.Value, block *Proc) 
 	_ = args
 	_ = block
 	var s0, s1 object.Value
-	s0 = object.Integer(1)
+	s0 = object.IntValue(1)
 	s1 = l0
 	s0 = &object.Range{Lo: s0, Hi: s1, Exclusive: true}
 	return s0
@@ -211,7 +211,7 @@ func (vm *VM) e2eIvar(self object.Value, args []object.Value, block *Proc) objec
 	s0 = l0
 	setIvar(self, "@x", s0)
 	s0 = getIvar(self, "@x")
-	s1 = object.Integer(1)
+	s1 = object.IntValue(1)
 	s0 = vm.binaryOp(bytecode.OpAdd, s0, s1)
 	return s0
 }
@@ -225,7 +225,7 @@ func (vm *VM) e2eFib_l1(self object.Value, args []object.Value, block *Proc) obj
 	_ = block
 	var s0, s1, s2, s3 object.Value
 	s0 = l0
-	s1 = object.Integer(2)
+	s1 = object.IntValue(2)
 	s0 = vm.binaryOp(bytecode.OpLt, s0, s1)
 	if !s0.Truthy() {
 		goto L6
@@ -235,12 +235,12 @@ func (vm *VM) e2eFib_l1(self object.Value, args []object.Value, block *Proc) obj
 L6:
 	s0 = self
 	s1 = l0
-	s2 = object.Integer(1)
+	s2 = object.IntValue(1)
 	s1 = vm.binaryOp(bytecode.OpSub, s1, s2)
 	s0 = vm.e2eFib_l1(self, []object.Value{s1}, nil)
 	s1 = self
 	s2 = l0
-	s3 = object.Integer(2)
+	s3 = object.IntValue(2)
 	s2 = vm.binaryOp(bytecode.OpSub, s2, s3)
 	s1 = vm.e2eFib_l1(self, []object.Value{s2}, nil)
 	s0 = vm.binaryOp(bytecode.OpAdd, s0, s1)
@@ -289,7 +289,7 @@ func (vm *VM) e2eFib(self object.Value, args []object.Value, block *Proc) (res o
 	_ = self
 	_ = args
 	_ = block
-	return object.Integer(vm.e2eFib_k(int64(i0)))
+	return object.IntValue(vm.e2eFib_k(int64(i0)))
 }
 
 func (vm *VM) e2eDiv_l1(self object.Value, args []object.Value, block *Proc) object.Value {
@@ -339,7 +339,7 @@ func (vm *VM) e2eDiv(self object.Value, args []object.Value, block *Proc) (res o
 	_ = self
 	_ = args
 	_ = block
-	return object.Integer(vm.e2eDiv_k(int64(i0), int64(i1)))
+	return object.IntValue(vm.e2eDiv_k(int64(i0), int64(i1)))
 }
 
 func (vm *VM) e2eMulOverflow_l1(self object.Value, args []object.Value, block *Proc) object.Value {
@@ -389,7 +389,7 @@ func (vm *VM) e2eMulOverflow(self object.Value, args []object.Value, block *Proc
 	_ = self
 	_ = args
 	_ = block
-	return object.Integer(vm.e2eMulOverflow_k(int64(i0), int64(i1)))
+	return object.IntValue(vm.e2eMulOverflow_k(int64(i0), int64(i1)))
 }
 
 func (vm *VM) e2eFloatDeopt_l1(self object.Value, args []object.Value, block *Proc) object.Value {
@@ -401,7 +401,7 @@ func (vm *VM) e2eFloatDeopt_l1(self object.Value, args []object.Value, block *Pr
 	_ = block
 	var s0, s1 object.Value
 	s0 = l0
-	s1 = object.Integer(1)
+	s1 = object.IntValue(1)
 	s0 = vm.binaryOp(bytecode.OpAdd, s0, s1)
 	return s0
 }
@@ -432,7 +432,7 @@ func (vm *VM) e2eFloatDeopt(self object.Value, args []object.Value, block *Proc)
 	_ = self
 	_ = args
 	_ = block
-	return object.Integer(vm.e2eFloatDeopt_k(int64(i0)))
+	return object.IntValue(vm.e2eFloatDeopt_k(int64(i0)))
 }
 
 func (vm *VM) e2eFact_l1(self object.Value, args []object.Value, block *Proc) object.Value {
@@ -444,11 +444,11 @@ func (vm *VM) e2eFact_l1(self object.Value, args []object.Value, block *Proc) ob
 	_ = args
 	_ = block
 	var s0, s1 object.Value
-	s0 = object.Integer(1)
+	s0 = object.IntValue(1)
 	l1 = s0
 L3:
 	s0 = l0
-	s1 = object.Integer(1)
+	s1 = object.IntValue(1)
 	s0 = vm.binaryOp(bytecode.OpGt, s0, s1)
 	if !s0.Truthy() {
 		goto L18
@@ -458,7 +458,7 @@ L3:
 	s0 = vm.binaryOp(bytecode.OpMul, s0, s1)
 	l1 = s0
 	s0 = l0
-	s1 = object.Integer(1)
+	s1 = object.IntValue(1)
 	s0 = vm.binaryOp(bytecode.OpSub, s0, s1)
 	l0 = s0
 	goto L3
@@ -513,7 +513,7 @@ func (vm *VM) e2eFact(self object.Value, args []object.Value, block *Proc) (res 
 	_ = self
 	_ = args
 	_ = block
-	return object.Integer(vm.e2eFact_k(int64(i0)))
+	return object.IntValue(vm.e2eFact_k(int64(i0)))
 }
 
 func (vm *VM) e2eFactBig_l1(self object.Value, args []object.Value, block *Proc) object.Value {
@@ -525,11 +525,11 @@ func (vm *VM) e2eFactBig_l1(self object.Value, args []object.Value, block *Proc)
 	_ = args
 	_ = block
 	var s0, s1 object.Value
-	s0 = object.Integer(1)
+	s0 = object.IntValue(1)
 	l1 = s0
 L3:
 	s0 = l0
-	s1 = object.Integer(1)
+	s1 = object.IntValue(1)
 	s0 = vm.binaryOp(bytecode.OpGt, s0, s1)
 	if !s0.Truthy() {
 		goto L18
@@ -539,7 +539,7 @@ L3:
 	s0 = vm.binaryOp(bytecode.OpMul, s0, s1)
 	l1 = s0
 	s0 = l0
-	s1 = object.Integer(1)
+	s1 = object.IntValue(1)
 	s0 = vm.binaryOp(bytecode.OpSub, s0, s1)
 	l0 = s0
 	goto L3
@@ -594,7 +594,7 @@ func (vm *VM) e2eFactBig(self object.Value, args []object.Value, block *Proc) (r
 	_ = self
 	_ = args
 	_ = block
-	return object.Integer(vm.e2eFactBig_k(int64(i0)))
+	return object.IntValue(vm.e2eFactBig_k(int64(i0)))
 }
 
 // aotE2ECases pairs each compiled method with the reference MRI output

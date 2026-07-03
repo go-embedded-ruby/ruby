@@ -130,17 +130,17 @@ func rationalEqual(r *object.Rational, other object.Value) bool {
 // a non-numeric (Ruby's <=>).
 func (vm *VM) ratCompare(r *object.Rational, other object.Value) object.Value {
 	if orat, ok := toRat(other); ok {
-		return object.Integer(r.R.Cmp(orat))
+		return object.IntValue(int64(r.R.Cmp(orat)))
 	}
 	if of, ok := other.(object.Float); ok {
 		rf, _ := r.R.Float64()
 		switch {
 		case rf < float64(of):
-			return object.Integer(-1)
+			return object.IntValue(-1)
 		case rf > float64(of):
-			return object.Integer(1)
+			return object.IntValue(1)
 		default:
-			return object.Integer(0)
+			return object.IntValue(0)
 		}
 	}
 	return object.NilV
@@ -149,7 +149,7 @@ func (vm *VM) ratCompare(r *object.Rational, other object.Value) object.Value {
 // registerRational installs Kernel#Rational and the Rational instance methods.
 func (vm *VM) registerRational() {
 	vm.cObject.define("Rational", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		den := object.Value(object.Integer(1))
+		den := object.Value(object.IntValue(1))
 		if len(args) > 1 {
 			den = args[1]
 		}

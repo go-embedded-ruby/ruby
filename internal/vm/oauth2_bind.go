@@ -92,7 +92,7 @@ func (vm *VM) registerOAuth2AccessToken(mod *RClass) {
 	})
 	d("expires_at", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if ea := self.(*OAuth2AccessToken).t.ExpiresAt; ea != 0 {
-			return object.Integer(ea)
+			return object.IntValue(ea)
 		}
 		return object.NilV
 	})
@@ -237,9 +237,9 @@ func oauth2AnyToRuby(v any) object.Value {
 	case float64:
 		return object.Float(n)
 	case int:
-		return object.Integer(int64(n))
+		return object.IntValue(int64(n))
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case []any:
 		arr := &object.Array{Elems: make([]object.Value, len(n))}
 		for i, el := range n {

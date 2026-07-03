@@ -123,7 +123,7 @@ func (vm *VM) registerAddressableURI(cls *RClass) {
 	})
 	d("port", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if p := self.(*AddressableURI).u.Port(); p != nil {
-			return object.Integer(*p)
+			return object.IntValue(int64(*p))
 		}
 		return object.NilV
 	})

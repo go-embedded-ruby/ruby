@@ -33,7 +33,7 @@ func TestFreezeRealProgram(t *testing.T) {
 		"//go:build rbgo_closed",
 		"package vm",
 		"func embeddedProgram() *bytecode.ISeq {",
-		"object.Integer(5)",
+		"object.IntValue(5)",
 		"frozenFloat(0x3ff8000000000000)", // 1.5 bit-exact
 		`Names:       []string{"sq", "puts"}`,
 		"SplatIndex:  -1,",
@@ -86,7 +86,7 @@ func TestFreezeAllConstKinds(t *testing.T) {
 	// gofmt realigns struct-field columns, so collapse whitespace before matching.
 	norm := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
-		"object.Integer(-7)",
+		"object.IntValue(-7)",
 		`object.Symbol("sym")`,
 		`object.NewString("hi\n")`,
 		`object.NewFrozenStringView("frozen")`,

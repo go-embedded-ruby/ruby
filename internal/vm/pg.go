@@ -204,16 +204,16 @@ func (vm *VM) registerPGResult(mod *RClass) {
 
 	// #ntuples / #num_tuples and #nfields / #num_fields.
 	d("ntuples", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).Ntuples()))
+		return object.IntValue(int64(self(v).Ntuples()))
 	})
 	d("num_tuples", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).Ntuples()))
+		return object.IntValue(int64(self(v).Ntuples()))
 	})
 	d("nfields", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).Nfields()))
+		return object.IntValue(int64(self(v).Nfields()))
 	})
 	d("num_fields", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).Nfields()))
+		return object.IntValue(int64(self(v).Nfields()))
 	})
 
 	// #fields returns the column names.
@@ -232,7 +232,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 
 	// #fnumber(name) returns the column index, or -1 if absent.
 	d("fnumber", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).Fnumber(pgStringArg(pgArg0(args)))))
+		return object.IntValue(int64(self(v).Fnumber(pgStringArg(pgArg0(args)))))
 	})
 
 	// #getvalue(row, col) returns the decoded value at (row, col).
@@ -300,7 +300,7 @@ func (vm *VM) registerPGResult(mod *RClass) {
 
 	// #cmd_tuples returns the affected-row count and #cmd_status the raw tag.
 	d("cmd_tuples", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).CmdTuples()))
+		return object.IntValue(int64(self(v).CmdTuples()))
 	})
 	d("cmd_status", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).CmdStatus())

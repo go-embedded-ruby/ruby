@@ -511,7 +511,7 @@ func negate(v object.Value) object.Value {
 		if n == minInt64 { // -minInt64 overflows int64 → promote
 			return object.NormInt(new(big.Int).Neg(big.NewInt(int64(n))))
 		}
-		return object.Integer(-n)
+		return object.IntValue(int64(-n))
 	case object.Float:
 		return object.Float(-n)
 	case *object.Bignum:

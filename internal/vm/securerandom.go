@@ -57,7 +57,7 @@ func (vm *VM) registerSecureRandom() {
 			switch n := args[0].(type) {
 			case object.Integer:
 				if n > 0 {
-					return object.Integer(gen.RandomInt(int64(n)))
+					return object.IntValue(gen.RandomInt(int64(n)))
 				}
 			case object.Float:
 				if n > 0 {

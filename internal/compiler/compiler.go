@@ -219,7 +219,7 @@ func (c *Compiler) compileNode(n ast.Node) {
 	b := c.cur()
 	switch v := n.(type) {
 	case *ast.IntLit:
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(v.Value)), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(v.Value)), 0)
 	case *ast.BignumLit:
 		b.emit(bytecode.OpPushConst, b.addConst(&object.Bignum{I: v.Val}), 0)
 	case *ast.FloatLit:
@@ -229,7 +229,7 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.ImaginaryLit:
 		// `Ni` is Complex(0, N): the imaginary part is the promoted literal (an
 		// Integer/Float, or a Rational for the combined `ri` form).
-		b.emit(bytecode.OpPushConst, b.addConst(&object.Complex{Re: object.Integer(0), Im: numericValue(v.Value)}), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(&object.Complex{Re: object.IntValue(0), Im: numericValue(v.Value)}), 0)
 	case *ast.StringLit:
 		b.emit(bytecode.OpPushConst, b.addConst(object.NewString(v.Value)), 0)
 	case *ast.StrInterp:
@@ -582,7 +582,7 @@ func numericValue(lit ast.Node) object.Value {
 	case *ast.RationalLit:
 		return rationalValue(n.Value)
 	case *ast.IntLit:
-		return object.Integer(n.Value)
+		return object.IntValue(n.Value)
 	case *ast.BignumLit:
 		return &object.Bignum{I: n.Val}
 	case *ast.FloatLit:
@@ -1663,7 +1663,7 @@ func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
 	// Length check: == (pre+post) without splat, >= (pre+post) with.
 	b.emit(bytecode.OpGetLocal, arr, 0)
 	b.emit(bytecode.OpSend, b.addName("length"), 0)
-	b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Pre)+len(p.Post)))), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(len(p.Pre)+len(p.Post)))), 0)
 	if p.HasSplat {
 		b.emit(bytecode.OpGe, 0, 0)
 	} else {
@@ -1674,7 +1674,7 @@ func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
 	for i, sub := range p.Pre {
 		elem := b.localSlot("")
 		b.emit(bytecode.OpGetLocal, arr, 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(i))), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(i))), 0)
 		b.emit(bytecode.OpSend, b.addName("[]"), 1)
 		b.emit(bytecode.OpSetLocal, elem, 0)
 		b.emit(bytecode.OpPop, 0, 0)
@@ -1688,7 +1688,7 @@ func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
 		// index = arr.length - post + i
 		b.emit(bytecode.OpGetLocal, arr, 0)
 		b.emit(bytecode.OpSend, b.addName("length"), 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Post)-i))), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(len(p.Post)-i))), 0)
 		b.emit(bytecode.OpSub, 0, 0)
 		b.emit(bytecode.OpSend, b.addName("[]"), 1)
 		b.emit(bytecode.OpSetLocal, elem, 0)
@@ -1699,11 +1699,11 @@ func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
 	// Splat capture: arr[pre...length-post] bound to SplatName (if named).
 	if p.HasSplat && p.SplatName != "" {
 		b.emit(bytecode.OpGetLocal, arr, 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Pre)))), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(len(p.Pre)))), 0)
 		// length - post
 		b.emit(bytecode.OpGetLocal, arr, 0)
 		b.emit(bytecode.OpSend, b.addName("length"), 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Post)))), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(len(p.Post)))), 0)
 		b.emit(bytecode.OpSub, 0, 0)
 		b.emit(bytecode.OpNewRange, 1, 0) // exclusive: pre...(length-post)
 		b.emit(bytecode.OpSend, b.addName("[]"), 1)
@@ -1764,7 +1764,7 @@ func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
 	// loop while i + k <= n
 	loopTop := b.here()
 	b.emit(bytecode.OpGetLocal, i, 0)
-	b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(k))), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(k))), 0)
 	b.emit(bytecode.OpAdd, 0, 0)
 	b.emit(bytecode.OpGetLocal, n, 0)
 	b.emit(bytecode.OpLe, 0, 0)
@@ -1775,7 +1775,7 @@ func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
 		elem := b.localSlot("")
 		b.emit(bytecode.OpGetLocal, arr, 0)
 		b.emit(bytecode.OpGetLocal, i, 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(j))), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(j))), 0)
 		b.emit(bytecode.OpAdd, 0, 0)
 		b.emit(bytecode.OpSend, b.addName("[]"), 1)
 		b.emit(bytecode.OpSetLocal, elem, 0)
@@ -1786,7 +1786,7 @@ func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
 	// Window matched: bind pre = arr[0...i] and post = arr[(i+k)...n].
 	if p.PreName != "" {
 		b.emit(bytecode.OpGetLocal, arr, 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(0)), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(0)), 0)
 		b.emit(bytecode.OpGetLocal, i, 0)
 		b.emit(bytecode.OpNewRange, 1, 0)
 		b.emit(bytecode.OpSend, b.addName("[]"), 1)
@@ -1796,7 +1796,7 @@ func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
 	if p.PostName != "" {
 		b.emit(bytecode.OpGetLocal, arr, 0)
 		b.emit(bytecode.OpGetLocal, i, 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(k))), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(k))), 0)
 		b.emit(bytecode.OpAdd, 0, 0)
 		b.emit(bytecode.OpGetLocal, n, 0)
 		b.emit(bytecode.OpNewRange, 1, 0)
@@ -1813,7 +1813,7 @@ func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
 		b.patch(wf, b.here())
 	}
 	b.emit(bytecode.OpGetLocal, i, 0)
-	b.emit(bytecode.OpPushConst, b.addConst(object.Integer(1)), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(1)), 0)
 	b.emit(bytecode.OpAdd, 0, 0)
 	b.emit(bytecode.OpSetLocal, i, 0)
 	b.emit(bytecode.OpPop, 0, 0)
@@ -1833,7 +1833,7 @@ func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
 // setLocalInt sets a local slot to an integer constant (and discards the value).
 func (c *Compiler) setLocalInt(slot int, v int64) {
 	b := c.cur()
-	b.emit(bytecode.OpPushConst, b.addConst(object.Integer(v)), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(v)), 0)
 	b.emit(bytecode.OpSetLocal, slot, 0)
 	b.emit(bytecode.OpPop, 0, 0)
 }
@@ -1859,7 +1859,7 @@ func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 	if p.RestNil || (len(p.Keys) == 0 && !p.HasRest) {
 		b.emit(bytecode.OpGetLocal, h, 0)
 		b.emit(bytecode.OpSend, b.addName("size"), 0)
-		b.emit(bytecode.OpPushConst, b.addConst(object.Integer(int64(len(p.Keys)))), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(len(p.Keys)))), 0)
 		b.emit(bytecode.OpEq, 0, 0)
 		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
 	}

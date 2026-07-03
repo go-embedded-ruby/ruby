@@ -240,14 +240,14 @@ func (vm *VM) registerFileStat() {
 		return object.NewString(self(v).ftype())
 	})
 	d("mode", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).modeBits())
+		return object.IntValue(self(v).modeBits())
 	})
 	d("size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).fi.Size())
+		return object.IntValue(self(v).fi.Size())
 	})
 	d("size?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if sz := self(v).fi.Size(); sz > 0 {
-			return object.Integer(sz)
+			return object.IntValue(sz)
 		}
 		return object.NilV
 	})
@@ -255,22 +255,22 @@ func (vm *VM) registerFileStat() {
 		return object.Bool(self(v).fi.Size() == 0)
 	})
 	d("uid", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).sys.uid)
+		return object.IntValue(self(v).sys.uid)
 	})
 	d("gid", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).sys.gid)
+		return object.IntValue(self(v).sys.gid)
 	})
 	d("ino", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).sys.ino)
+		return object.IntValue(self(v).sys.ino)
 	})
 	d("dev", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).sys.dev)
+		return object.IntValue(self(v).sys.dev)
 	})
 	d("nlink", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).sys.nlink)
+		return object.IntValue(self(v).sys.nlink)
 	})
 	d("blksize", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).sys.blksize)
+		return object.IntValue(self(v).sys.blksize)
 	})
 	d("owned?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self(v)
@@ -289,7 +289,7 @@ func (vm *VM) registerFileStat() {
 		s := self(v)
 		perm := int64(s.fi.Mode().Perm())
 		if perm&0o002 != 0 {
-			return object.Integer(perm) // MRI returns the perm bits when world-writable
+			return object.IntValue(perm) // MRI returns the perm bits when world-writable
 		}
 		return object.NilV
 	})
@@ -313,11 +313,11 @@ func (vm *VM) registerFileStat() {
 		a, b := self(v).fi.ModTime().Unix(), other.fi.ModTime().Unix()
 		switch {
 		case a < b:
-			return object.Integer(-1)
+			return object.IntValue(-1)
 		case a > b:
-			return object.Integer(1)
+			return object.IntValue(1)
 		default:
-			return object.Integer(0)
+			return object.IntValue(0)
 		}
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -382,14 +382,14 @@ func (vm *VM) registerFileTest() {
 		if s == nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
 		}
-		return object.Integer(s.fi.Size())
+		return object.IntValue(s.fi.Size())
 	})
 	sdef("size?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))
 		if s == nil || s.fi.Size() == 0 {
 			return object.NilV
 		}
-		return object.Integer(s.fi.Size())
+		return object.IntValue(s.fi.Size())
 	})
 	sdef("readable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		s := statOf(pathArg(vm, args[0]))

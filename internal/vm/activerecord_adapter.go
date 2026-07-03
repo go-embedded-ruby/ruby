@@ -97,9 +97,9 @@ func arValueToRuby(v any) object.Value {
 	case nil:
 		return object.NilV
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case int:
-		return object.Integer(int64(n))
+		return object.IntValue(int64(n))
 	case float64:
 		return object.Float(n)
 	case string:

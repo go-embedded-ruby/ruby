@@ -33,22 +33,22 @@ func (vm *VM) registerProcess() {
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
 	def("pid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(os.Getpid())
+		return object.IntValue(int64(os.Getpid()))
 	})
 	def("ppid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(os.Getppid())
+		return object.IntValue(int64(os.Getppid()))
 	})
 	def("uid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(processUID())
+		return object.IntValue(int64(processUID()))
 	})
 	def("euid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(processEUID())
+		return object.IntValue(int64(processEUID()))
 	})
 	def("gid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(processGID())
+		return object.IntValue(int64(processGID()))
 	})
 	def("egid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(processEGID())
+		return object.IntValue(int64(processEGID()))
 	})
 	def("groups", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		gids, err := processGroups()
@@ -57,7 +57,7 @@ func (vm *VM) registerProcess() {
 		}
 		elems := make([]object.Value, len(gids))
 		for i, g := range gids {
-			elems[i] = object.Integer(int64(g))
+			elems[i] = object.IntValue(int64(g))
 		}
 		return &object.Array{Elems: elems}
 	})
@@ -65,7 +65,7 @@ func (vm *VM) registerProcess() {
 	// and assigning it is accepted but ignored (the kernel limit is fixed), which
 	// matches MRI on the platforms we target. Puppet sets it inside a rescue.
 	def("maxgroups", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(processMaxGroups)
+		return object.IntValue(processMaxGroups)
 	})
 	def("maxgroups=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return args[0] // accepted-and-ignored; returns the assigned value
@@ -84,10 +84,10 @@ func (vm *VM) registerProcess() {
 		return clockGettimeUnit(d, args)
 	})
 
-	mod.consts["CLOCK_REALTIME"] = object.Integer(clockRealtime)
-	vm.consts["Process::CLOCK_REALTIME"] = object.Integer(clockRealtime)
-	mod.consts["CLOCK_MONOTONIC"] = object.Integer(clockMonotonic)
-	vm.consts["Process::CLOCK_MONOTONIC"] = object.Integer(clockMonotonic)
+	mod.consts["CLOCK_REALTIME"] = object.IntValue(clockRealtime)
+	vm.consts["Process::CLOCK_REALTIME"] = object.IntValue(clockRealtime)
+	mod.consts["CLOCK_MONOTONIC"] = object.IntValue(clockMonotonic)
+	vm.consts["Process::CLOCK_MONOTONIC"] = object.IntValue(clockMonotonic)
 }
 
 // Clock identifiers match the Linux/macOS values MRI exposes (CLOCK_REALTIME=0,
@@ -110,13 +110,13 @@ func clockGettimeUnit(d time.Duration, args []object.Value) object.Value {
 	}
 	switch unit {
 	case "nanosecond":
-		return object.Integer(d.Nanoseconds())
+		return object.IntValue(d.Nanoseconds())
 	case "microsecond":
-		return object.Integer(d.Microseconds())
+		return object.IntValue(d.Microseconds())
 	case "millisecond":
-		return object.Integer(d.Milliseconds())
+		return object.IntValue(d.Milliseconds())
 	case "second":
-		return object.Integer(int64(d.Seconds()))
+		return object.IntValue(int64(d.Seconds()))
 	case "float_microsecond":
 		return object.Float(float64(d.Nanoseconds()) / 1e3)
 	case "float_millisecond":

@@ -27,7 +27,7 @@ func TestCompileMainSupported(t *testing.T) {
 		{"literals", "a = nil; b = true; c = false; puts [a, b, c]", "object.NilV"},
 		{"selftrue", "puts true", "object.True"},
 		{"selffalse", "puts false", "object.False"},
-		{"int", "puts 40 + 2", "object.Integer(40)"},
+		{"int", "puts 40 + 2", "object.IntValue(40)"},
 		{"float", "puts 1.5", "object.Float(1.5)"},
 		{"string", "puts \"hi\"", `object.NewString("hi")`},
 		{"symbol", "puts :sym", `object.Symbol("sym")`},

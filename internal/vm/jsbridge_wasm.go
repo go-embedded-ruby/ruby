@@ -38,7 +38,7 @@ func jsWrap(v js.Value) object.Value {
 	case js.TypeNumber:
 		f := v.Float()
 		if f == math.Trunc(f) && !math.IsInf(f, 0) {
-			return object.Integer(int64(f))
+			return object.IntValue(int64(f))
 		}
 		return object.Float(f)
 	case js.TypeString:
@@ -46,7 +46,7 @@ func jsWrap(v js.Value) object.Value {
 	}
 	jsNext++
 	jsHandles[jsNext] = v
-	return &RObject{class: cJSRef, ivars: map[string]object.Value{"@h": object.Integer(jsNext)}}
+	return &RObject{class: cJSRef, ivars: map[string]object.Value{"@h": object.IntValue(jsNext)}}
 }
 
 // jsUnwrap turns a Ruby value into a js argument: a JS::Ref resolves to its

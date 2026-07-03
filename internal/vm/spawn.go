@@ -137,10 +137,10 @@ func (vm *VM) registerProcessSpawn() {
 
 	// WNOHANG / WUNTRACED are the wait flags Puppet passes to waitpid2; only their
 	// truthiness (non-blocking) matters to the synchronous model.
-	mod.consts["WNOHANG"] = object.Integer(1)
-	vm.consts["Process::WNOHANG"] = object.Integer(1)
-	mod.consts["WUNTRACED"] = object.Integer(2)
-	vm.consts["Process::WUNTRACED"] = object.Integer(2)
+	mod.consts["WNOHANG"] = object.IntValue(1)
+	vm.consts["Process::WNOHANG"] = object.IntValue(1)
+	mod.consts["WUNTRACED"] = object.IntValue(2)
+	vm.consts["Process::WUNTRACED"] = object.IntValue(2)
 
 	status := newClass("Status", vm.cObject)
 	status.name, status.named = "Process::Status", true
@@ -150,7 +150,7 @@ func (vm *VM) registerProcessSpawn() {
 		return self.(*RObject).ivars["@exitstatus"]
 	})
 	status.define("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*RObject).ivars["@exitstatus"] == object.Integer(0))
+		return object.Bool(self.(*RObject).ivars["@exitstatus"] == object.IntValue(0))
 	})
 	status.define("pid", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*RObject).ivars["@pid"]
@@ -162,7 +162,7 @@ func (vm *VM) registerProcessSpawn() {
 		cmd, opts := parseSpawnArgs(args)
 		out, code := runCaptured(cmd)
 		writeSpawnOutput(opts, out)
-		return object.Integer(vm.recordChild(code))
+		return object.IntValue(vm.recordChild(code))
 	})
 
 	def("waitpid2", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -177,9 +177,9 @@ func (vm *VM) registerProcessSpawn() {
 			raise("Errno::ECHILD", "No child processes")
 		}
 		so := &RObject{class: vm.consts["Process::Status"].(*RClass), ivars: map[string]object.Value{}}
-		so.ivars["@exitstatus"] = object.Integer(st.code)
-		so.ivars["@pid"] = object.Integer(st.pid)
-		return &object.Array{Elems: []object.Value{object.Integer(pid), so}}
+		so.ivars["@exitstatus"] = object.IntValue(int64(st.code))
+		so.ivars["@pid"] = object.IntValue(int64(st.pid))
+		return &object.Array{Elems: []object.Value{object.IntValue(int64(pid)), so}}
 	})
 
 	def("waitpid", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -190,13 +190,13 @@ func (vm *VM) registerProcessSpawn() {
 			}
 			raise("Errno::ECHILD", "No child processes")
 		}
-		return object.Integer(pid)
+		return object.IntValue(int64(pid))
 	})
 
 	// setsid has no meaning without a real session, but Puppet calls it inside the
 	// forked block; return a pid so the call succeeds.
 	def("setsid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(processGID())
+		return object.IntValue(int64(processGID()))
 	})
 }
 
@@ -216,7 +216,7 @@ func (vm *VM) registerKernelExec() {
 			raise("NotImplementedError", "fork without a block is not supported (no OS-level fork)")
 		}
 		code := vm.runForkBlock(blk)
-		return object.Integer(vm.recordChild(code))
+		return object.IntValue(vm.recordChild(code))
 	})
 
 	// exec runs the command to completion (capturing combined output to the

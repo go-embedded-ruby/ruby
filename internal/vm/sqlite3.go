@@ -228,7 +228,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return object.Integer(id)
+		return object.IntValue(id)
 	})
 
 	// #changes returns the number of rows the most recent statement changed.
@@ -237,7 +237,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return object.Integer(n)
+		return object.IntValue(n)
 	})
 
 	// #total_changes returns the total rows changed since the connection opened.
@@ -246,7 +246,7 @@ func (vm *VM) registerSQLite3Database(mod *RClass) {
 		if err != nil {
 			raiseSQLite3Error(err)
 		}
-		return object.Integer(n)
+		return object.IntValue(n)
 	})
 
 	// #results_as_hash / #results_as_hash= read and set the row shape flag.

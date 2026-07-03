@@ -251,7 +251,7 @@ func (vm *VM) registerIPAddr() {
 
 	// Prefix / masking.
 	d("prefix", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).ip.Prefix())
+		return object.IntValue(int64(self(v).ip.Prefix()))
 	})
 	d("prefix=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		_, err := self(v).ip.SetPrefix(int(ipInt(args[0])))
@@ -335,7 +335,7 @@ func (vm *VM) registerIPAddr() {
 		if !comparable {
 			return object.NilV
 		}
-		return object.Integer(res)
+		return object.IntValue(int64(res))
 	})
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := args[0].(*IPAddr)
@@ -381,7 +381,7 @@ func (vm *VM) registerIPAddr() {
 		return object.NormInt(self(v).ip.ToI())
 	})
 	d("family", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int(self(v).ip.Family()))
+		return object.IntValue(int64(int(self(v).ip.Family())))
 	})
 	d("native", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return ipOK(self(v).ip.Native())

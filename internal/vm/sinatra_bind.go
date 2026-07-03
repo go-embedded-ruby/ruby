@@ -120,7 +120,7 @@ func (vm *VM) sinatraCall(cls *RClass, envArg object.Value) object.Value {
 	app := vm.buildSinatraApp(cls)
 	status, headers, body := app.CallTuple(rackEnv(envArg))
 	return &object.Array{Elems: []object.Value{
-		object.Integer(int64(status)),
+		object.IntValue(int64(status)),
 		rackHeadersToHash(headers),
 		rackBodyArray(body),
 	}}
@@ -226,7 +226,7 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 	ctx.define("status", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		c := self(v).c
 		if len(args) == 0 {
-			return object.Integer(int64(c.CurrentStatus()))
+			return object.IntValue(int64(c.CurrentStatus()))
 		}
 		c.Status(sinatraInt(args[0], 200))
 		return object.NilV

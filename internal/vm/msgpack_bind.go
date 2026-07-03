@@ -107,10 +107,10 @@ func fromMsgpack(vm *VM, v msgpack.Value) object.Value {
 	case bool:
 		return object.Bool(n)
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case uint64:
 		if n <= 1<<63-1 {
-			return object.Integer(int64(n))
+			return object.IntValue(int64(n))
 		}
 		return object.NormInt(new(big.Int).SetUint64(n))
 	case *big.Int:

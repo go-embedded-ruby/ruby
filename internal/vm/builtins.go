@@ -117,7 +117,7 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("[]", procCall)
 	vm.cProc.define("yield", procCall)
 	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*Proc).arityVal())
+		return object.IntValue(int64(self.(*Proc).arityVal()))
 	})
 	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Proc).isLambda)
@@ -133,7 +133,7 @@ func (vm *VM) bootstrap() {
 		if p.iseq == nil || p.iseq.File == "" {
 			return object.NilV
 		}
-		return &object.Array{Elems: []object.Value{object.NewString(p.iseq.File), object.Integer(0)}}
+		return &object.Array{Elems: []object.Value{object.NewString(p.iseq.File), object.IntValue(0)}}
 	})
 	vm.cProc.define("curry", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		p := self.(*Proc)
@@ -228,7 +228,7 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("object_id", objectIDFn)
 	vm.cObject.define("__id__", objectIDFn)
 	vm.cObject.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(vm.hashValue(self))
+		return object.IntValue(vm.hashValue(self))
 	})
 	vm.cObject.define("methods", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		c := vm.classOf(self)
@@ -384,7 +384,7 @@ func (vm *VM) bootstrap() {
 	// @status (the process exit code) and the message. SystemExit#status returns it.
 	systemExit.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*RObject)
-		status := object.Value(object.Integer(0))
+		status := object.Value(object.IntValue(0))
 		switch {
 		case len(args) >= 2:
 			status = args[0]
@@ -403,7 +403,7 @@ func (vm *VM) bootstrap() {
 		if s := getIvar(self, "@status"); s != object.NilV {
 			return s
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	systemExit.define("success?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s, ok := getIvar(self, "@status").(object.Integer)
@@ -591,7 +591,7 @@ func (vm *VM) bootstrap() {
 		case object.Integer:
 			return v
 		case object.Float:
-			return object.Integer(int64(v))
+			return object.IntValue(int64(v))
 		case *object.String:
 			base := 0 // no explicit base: auto-detect a 0x/0b/0o/0 prefix (and allow _)
 			if len(args) > 1 {
@@ -603,7 +603,7 @@ func (vm *VM) bootstrap() {
 			if err != nil {
 				raise("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
 			}
-			return object.Integer(n)
+			return object.IntValue(n)
 		}
 		raise("TypeError", "can't convert %s into Integer", args[0].Inspect())
 		return object.NilV
@@ -699,7 +699,7 @@ func (vm *VM) bootstrap() {
 	// Default <=>: 0 when equal (by ==), nil otherwise — the MRI Object#<=>.
 	vm.cObject.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if vm.send(self, "==", []object.Value{args[0]}, nil).Truthy() {
-			return object.Integer(0)
+			return object.IntValue(0)
 		}
 		return object.NilV
 	})
@@ -931,11 +931,11 @@ func (vm *VM) bootstrap() {
 		}
 		switch {
 		case a == b:
-			return object.Integer(0)
+			return object.IntValue(0)
 		case classIsA(a, b):
-			return object.Integer(-1)
+			return object.IntValue(-1)
 		case classIsA(b, a):
-			return object.Integer(1)
+			return object.IntValue(1)
 		}
 		return object.NilV
 	}
@@ -1038,10 +1038,10 @@ func (vm *VM) bootstrap() {
 		if !ok { // incomparable with a non-Symbol
 			return object.NilV
 		}
-		return object.Integer(int64(strings.Compare(symStr(self), string(o))))
+		return object.IntValue(int64(strings.Compare(symStr(self), string(o))))
 	})
 	symLen := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(utf8.RuneCountInString(symStr(self))))
+		return object.IntValue(int64(utf8.RuneCountInString(symStr(self))))
 	}
 	vm.cSymbol.define("length", symLen)
 	vm.cSymbol.define("size", symLen)
@@ -1102,7 +1102,7 @@ func (vm *VM) bootstrap() {
 		if !ok {
 			return object.NilV
 		}
-		return object.Integer(strings.Compare(a.Str(), b.Str()))
+		return object.IntValue(int64(strings.Compare(a.Str(), b.Str())))
 	})
 
 	// String. Methods over the mutable byte-based String (length/chars/index are
@@ -1112,14 +1112,14 @@ func (vm *VM) bootstrap() {
 		// A binary (ASCII-8BIT) string counts bytes; otherwise characters.
 		s := self.(*object.String)
 		if s.IsBinary() {
-			return object.Integer(int64(len(s.Bytes())))
+			return object.IntValue(int64(len(s.Bytes())))
 		}
-		return object.Integer(int64(utf8.RuneCountInString(string(s.Bytes()))))
+		return object.IntValue(int64(utf8.RuneCountInString(string(s.Bytes()))))
 	}
 	vm.cString.define("length", strLen)
 	vm.cString.define("size", strLen)
 	vm.cString.define("bytesize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(strOf(self)))
+		return object.IntValue(int64(len(strOf(self))))
 	})
 	vm.cString.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(strOf(self)) == 0)
@@ -1135,7 +1135,7 @@ func (vm *VM) bootstrap() {
 		if !ok { // like <=>, a non-String operand compares to nil
 			return object.NilV
 		}
-		return object.Integer(int64(strings.Compare(strings.ToLower(strOf(self)), strings.ToLower(o.Str()))))
+		return object.IntValue(int64(strings.Compare(strings.ToLower(strOf(self)), strings.ToLower(o.Str()))))
 	})
 	vm.cString.define("casecmp?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := args[0].(*object.String)
@@ -1184,7 +1184,7 @@ func (vm *VM) bootstrap() {
 		s := strOf(self)
 		out := make([]object.Value, len(s))
 		for i := 0; i < len(s); i++ {
-			out[i] = object.Integer(s[i])
+			out[i] = object.IntValue(int64(s[i]))
 		}
 		return &object.Array{Elems: out}
 	})
@@ -1197,7 +1197,7 @@ func (vm *VM) bootstrap() {
 		if i < 0 || i >= int64(len(s)) {
 			return object.NilV
 		}
-		return object.Integer(s[i])
+		return object.IntValue(int64(s[i]))
 	})
 	vm.cString.define("byteslice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return byteslice(self.(*object.String), args)
@@ -1234,7 +1234,7 @@ func (vm *VM) bootstrap() {
 		}
 		s := strOf(self)
 		for i := 0; i < len(s); i++ {
-			vm.callBlock(blk, []object.Value{object.Integer(s[i])})
+			vm.callBlock(blk, []object.Value{object.IntValue(int64(s[i]))})
 		}
 		return self
 	})
@@ -1243,14 +1243,14 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each_codepoint")
 		}
 		for _, r := range strOf(self) {
-			vm.callBlock(blk, []object.Value{object.Integer(r)})
+			vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
 		}
 		return self
 	})
 	vm.cString.define("codepoints", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		var out []object.Value
 		for _, r := range strOf(self) {
-			out = append(out, object.Integer(r))
+			out = append(out, object.IntValue(int64(r)))
 		}
 		return &object.Array{Elems: out}
 	})
@@ -1299,14 +1299,14 @@ func (vm *VM) bootstrap() {
 		if byteIdx < 0 {
 			return object.NilV
 		}
-		return object.Integer(utf8.RuneCountInString(s[:byteStart+byteIdx]))
+		return object.IntValue(int64(utf8.RuneCountInString(s[:byteStart+byteIdx])))
 	})
 	vm.cString.define("rindex", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		byteIdx := strings.LastIndex(strOf(self), strArg(args[0]))
 		if byteIdx < 0 {
 			return object.NilV
 		}
-		return object.Integer(utf8.RuneCountInString(strOf(self)[:byteIdx]))
+		return object.IntValue(int64(utf8.RuneCountInString(strOf(self)[:byteIdx])))
 	})
 	vm.cString.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		re, ok := args[0].(*Regexp)
@@ -1403,7 +1403,7 @@ func (vm *VM) bootstrap() {
 				n++
 			}
 		}
-		return object.Integer(n)
+		return object.IntValue(int64(n))
 	})
 	vm.cString.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		set := expandCharSet(strArg(args[0]))
@@ -1441,7 +1441,7 @@ func (vm *VM) bootstrap() {
 		if s == "" {
 			raise("ArgumentError", "empty string")
 		}
-		return object.Integer([]rune(s)[0])
+		return object.IntValue(int64([]rune(s)[0]))
 	})
 	vm.cString.define("partition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s, sep := strOf(self), strArg(args[0])
@@ -1564,10 +1564,10 @@ func (vm *VM) bootstrap() {
 
 	// Array.
 	vm.cArray.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(self.(*object.Array).Elems))
+		return object.IntValue(int64(len(self.(*object.Array).Elems)))
 	})
 	vm.cArray.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(self.(*object.Array).Elems))
+		return object.IntValue(int64(len(self.(*object.Array).Elems)))
 	})
 	vm.cArray.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(self.(*object.Array).Elems) == 0)
@@ -1596,7 +1596,7 @@ func (vm *VM) bootstrap() {
 		for i := range out {
 			switch {
 			case blk != nil:
-				out[i] = vm.callBlock(blk, []object.Value{object.Integer(int64(i))})
+				out[i] = vm.callBlock(blk, []object.Value{object.IntValue(int64(i))})
 			case len(args) >= 2:
 				out[i] = args[1]
 			default:
@@ -2111,7 +2111,7 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.define("sum", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		acc := object.Value(object.Integer(0))
+		acc := object.Value(object.IntValue(0))
 		if len(args) > 0 {
 			acc = args[0]
 		}
@@ -2360,7 +2360,7 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		for i, e := range self.(*object.Array).Elems {
 			if valueEqual(e, args[0]) {
-				return object.Integer(i)
+				return object.IntValue(int64(i))
 			}
 		}
 		return object.NilV
@@ -2420,11 +2420,11 @@ func (vm *VM) bootstrap() {
 		}
 		switch { // equal prefixes: the shorter array sorts first
 		case len(a) < len(be):
-			return object.Integer(-1)
+			return object.IntValue(-1)
 		case len(a) > len(be):
-			return object.Integer(1)
+			return object.IntValue(1)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	vm.cNilClass.define("to_a", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Array{}
@@ -2432,7 +2432,7 @@ func (vm *VM) bootstrap() {
 	// NilClass conversions mirror MRI: nil.to_i → 0, nil.to_f → 0.0, nil.to_h → {},
 	// nil.to_r → (0/1), nil.to_c → (0+0i). nil.to_a/to_s/inspect already exist.
 	vm.cNilClass.define("to_i", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	vm.cNilClass.define("to_f", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(0)
@@ -2444,7 +2444,7 @@ func (vm *VM) bootstrap() {
 		return &object.Rational{R: big.NewRat(0, 1)}
 	})
 	vm.cNilClass.define("to_c", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Complex{Re: object.Integer(0), Im: object.Integer(0)}
+		return &object.Complex{Re: object.IntValue(0), Im: object.IntValue(0)}
 	})
 	// nil & obj is always false; nil | obj and nil ^ obj are true unless obj is
 	// nil or false (MRI treats only nil/false as falsey here).
@@ -2629,10 +2629,10 @@ func (vm *VM) bootstrap() {
 		return args[1]
 	})
 	vm.cHash.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*object.Hash).Len())
+		return object.IntValue(int64(self.(*object.Hash).Len()))
 	})
 	vm.cHash.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*object.Hash).Len())
+		return object.IntValue(int64(self.(*object.Hash).Len()))
 	})
 	vm.cHash.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Hash).Len() == 0)
@@ -3051,7 +3051,7 @@ func (vm *VM) bootstrap() {
 			}
 			out := make([]object.Value, n)
 			for i := range out {
-				out[i] = object.Integer(int64(lo) + int64(i))
+				out[i] = object.IntValue(int64(lo) + int64(i))
 			}
 			return &object.Array{Elems: out}
 		}
@@ -3128,7 +3128,7 @@ func (vm *VM) bootstrap() {
 		if rangeSize(r) == 0 {
 			return object.NilV
 		}
-		return object.Integer(lo)
+		return object.IntValue(lo)
 	})
 	vm.cRange.define("max", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
@@ -3153,12 +3153,12 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 		if r.Exclusive {
-			return object.Integer(hi - 1)
+			return object.IntValue(hi - 1)
 		}
-		return object.Integer(hi)
+		return object.IntValue(hi)
 	})
 	rangeSizeFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(rangeSize(self.(*object.Range)))
+		return object.IntValue(rangeSize(self.(*object.Range)))
 	}
 	vm.cRange.define("size", rangeSizeFn)
 	vm.cRange.define("count", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -3178,7 +3178,7 @@ func (vm *VM) bootstrap() {
 				n++
 			}
 		}
-		return object.Integer(n)
+		return object.IntValue(n)
 	})
 	vm.cRange.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Array{Elems: rangeElems(self.(*object.Range))}
@@ -3198,7 +3198,7 @@ func (vm *VM) bootstrap() {
 			}
 			out := make([]object.Value, n)
 			for i := range out {
-				out[i] = object.Integer(int64(lo) + int64(i))
+				out[i] = object.IntValue(int64(lo) + int64(i))
 			}
 			return &object.Array{Elems: out}
 		}
@@ -3246,7 +3246,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "step", args...)
 		}
-		step := object.Value(object.Integer(1))
+		step := object.Value(object.IntValue(1))
 		if len(args) > 0 {
 			step = args[0]
 		}
@@ -3332,14 +3332,14 @@ func (vm *VM) bootstrap() {
 		return object.NormInt(new(big.Int).Not(bigVal(self)))
 	})
 	vm.cInteger.define("gcd", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Integer(gcdInt(intOf(self), intArg(args[0])))
+		return object.IntValue(gcdInt(intOf(self), intArg(args[0])))
 	})
 	vm.cInteger.define("lcm", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := intOf(self), intArg(args[0])
 		if a == 0 || b == 0 {
-			return object.Integer(0)
+			return object.IntValue(0)
 		}
-		return object.Integer(absInt(a / gcdInt(a, b) * b))
+		return object.IntValue(absInt(a / gcdInt(a, b) * b))
 	})
 	fdiv := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a, _ := toFloat(self)
@@ -3390,14 +3390,14 @@ func (vm *VM) bootstrap() {
 			c++
 			n >>= 1
 		}
-		return object.Integer(c)
+		return object.IntValue(c)
 	})
 	vm.cInteger.define("divmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := intOf(self), intArg(args[0])
 		if b == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return &object.Array{Elems: []object.Value{object.Integer(floorDiv(a, b)), object.Integer(floorMod(a, b))}}
+		return &object.Array{Elems: []object.Value{object.IntValue(floorDiv(a, b)), object.IntValue(floorMod(a, b))}}
 	})
 	vm.cInteger.define("gcdlcm", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a, b := intOf(self), intArg(args[0])
@@ -3406,7 +3406,7 @@ func (vm *VM) bootstrap() {
 		if a != 0 && b != 0 {
 			lcm = absInt(a / g * b)
 		}
-		return &object.Array{Elems: []object.Value{object.Integer(g), object.Integer(lcm)}}
+		return &object.Array{Elems: []object.Value{object.IntValue(g), object.IntValue(lcm)}}
 	})
 	vm.cInteger.define("remainder", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// remainder truncates toward zero (keeping the dividend's sign), unlike %
@@ -3415,7 +3415,7 @@ func (vm *VM) bootstrap() {
 		if b == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return object.Integer(a % b)
+		return object.IntValue(a % b)
 	})
 	// round / truncate with ndigits >= 0 leave an Integer unchanged; with ndigits
 	// < 0 they round/truncate to the nearest 10**(-ndigits) (round is half away
@@ -3427,14 +3427,14 @@ func (vm *VM) bootstrap() {
 		}
 		pow, ok := pow10(-n)
 		if !ok {
-			return object.Integer(0) // 10**(-n) exceeds any int64, so it rounds to 0
+			return object.IntValue(0) // 10**(-n) exceeds any int64, so it rounds to 0
 		}
 		a, neg := absSign(intOf(self))
 		r := ((a + pow/2) / pow) * pow
 		if neg {
 			r = -r
 		}
-		return object.Integer(r)
+		return object.IntValue(r)
 	})
 	vm.cInteger.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intArgOr(args, 0)
@@ -3443,14 +3443,14 @@ func (vm *VM) bootstrap() {
 		}
 		pow, ok := pow10(-n)
 		if !ok {
-			return object.Integer(0)
+			return object.IntValue(0)
 		}
 		a, neg := absSign(intOf(self))
 		r := (a / pow) * pow
 		if neg {
 			r = -r
 		}
-		return object.Integer(r)
+		return object.IntValue(r)
 	})
 	vm.cInteger.define("floor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// floor(n>=0) is self; floor(n<0) rounds toward negative infinity to the
@@ -3461,9 +3461,9 @@ func (vm *VM) bootstrap() {
 		}
 		pow, ok := pow10(-n)
 		if !ok {
-			return object.Integer(0) // 10**(-n) exceeds int64; the result is not int64-representable
+			return object.IntValue(0) // 10**(-n) exceeds int64; the result is not int64-representable
 		}
-		return object.Integer(floorDiv(intOf(self), pow) * pow)
+		return object.IntValue(floorDiv(intOf(self), pow) * pow)
 	})
 	vm.cInteger.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// ceil(n>=0) is self; ceil(n<0) rounds toward positive infinity.
@@ -3473,9 +3473,9 @@ func (vm *VM) bootstrap() {
 		}
 		pow, ok := pow10(-n)
 		if !ok {
-			return object.Integer(0)
+			return object.IntValue(0)
 		}
-		return object.Integer(-floorDiv(-intOf(self), pow) * pow)
+		return object.IntValue(-floorDiv(-intOf(self), pow) * pow)
 	})
 	vm.cInteger.define("digits", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
@@ -3490,11 +3490,11 @@ func (vm *VM) bootstrap() {
 			raise("Math::DomainError", "out of domain")
 		}
 		if n == 0 {
-			return &object.Array{Elems: []object.Value{object.Integer(0)}}
+			return &object.Array{Elems: []object.Value{object.IntValue(0)}}
 		}
 		var out []object.Value
 		for n > 0 {
-			out = append(out, object.Integer(n%base))
+			out = append(out, object.IntValue(n%base))
 			n /= base
 		}
 		return &object.Array{Elems: out}
@@ -3514,7 +3514,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "upto", args...)
 		}
 		for i := intOf(self); i <= intArg(args[0]); i++ {
-			vm.callBlock(blk, []object.Value{object.Integer(i)})
+			vm.callBlock(blk, []object.Value{object.IntValue(i)})
 		}
 		return self
 	})
@@ -3526,7 +3526,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "downto", args...)
 		}
 		for i := intOf(self); i >= intArg(args[0]); i-- {
-			vm.callBlock(blk, []object.Value{object.Integer(i)})
+			vm.callBlock(blk, []object.Value{object.IntValue(i)})
 		}
 		return self
 	})
@@ -3549,10 +3549,10 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cFloat.define("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(floatOf(self)))
+		return object.IntValue(int64(floatOf(self)))
 	})
 	vm.cFloat.define("to_int", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(floatOf(self)))
+		return object.IntValue(int64(floatOf(self)))
 	})
 	vm.cFloat.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return floatRound(floatOf(self), args, math.Ceil)
@@ -3574,7 +3574,7 @@ func (vm *VM) bootstrap() {
 		if ndigits > 0 {
 			return object.Float(r)
 		}
-		return object.Integer(int64(r))
+		return object.IntValue(int64(r))
 	})
 	vm.cFloat.define("divmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := floatOf(self)
@@ -3587,7 +3587,7 @@ func (vm *VM) bootstrap() {
 		}
 		// Floored division: the quotient is an Integer, the modulo a Float.
 		q := math.Floor(a / b)
-		return &object.Array{Elems: []object.Value{object.Integer(int64(q)), object.Float(a - b*q)}}
+		return &object.Array{Elems: []object.Value{object.IntValue(int64(q)), object.Float(a - b*q)}}
 	})
 	vm.cFloat.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Truncate toward zero. ndigits > 0 keeps a Float; otherwise an Integer.
@@ -3630,10 +3630,10 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("infinite?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		f := floatOf(self)
 		if math.IsInf(f, 1) {
-			return object.Integer(1)
+			return object.IntValue(1)
 		}
 		if math.IsInf(f, -1) {
-			return object.Integer(-1)
+			return object.IntValue(-1)
 		}
 		return object.NilV
 	})
@@ -3694,7 +3694,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "step", args...)
 		}
-		step := object.Value(object.Integer(1))
+		step := object.Value(object.IntValue(1))
 		if len(args) > 1 {
 			step = args[1]
 		}
@@ -3715,7 +3715,7 @@ func (vm *VM) bootstrap() {
 		// hot times-block path.
 		arg := make([]object.Value, 1)
 		for i := int64(0); i < n; i++ {
-			arg[0] = object.Integer(i)
+			arg[0] = object.IntValue(i)
 			vm.callBlock(blk, arg)
 		}
 		return self
@@ -3811,7 +3811,7 @@ func floatRound(f float64, args []object.Value, fn func(float64) float64) object
 	if ndigits > 0 {
 		return object.Float(r)
 	}
-	return object.Integer(int64(r))
+	return object.IntValue(int64(r))
 }
 
 // clampCount validates a `first(n)`/`last(n)` count: it must be non-negative
@@ -4011,7 +4011,7 @@ func stringToInt(s string, base int) object.Value {
 		}
 	}
 	if len(digits) == 0 {
-		return object.Integer(0)
+		return object.IntValue(0)
 	}
 	z, _ := new(big.Int).SetString(string(digits), base)
 	if neg {
@@ -5349,12 +5349,12 @@ func spaceshipNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) ob
 	// when one side is a Float (where the precision loss is intrinsic).
 	if ai, ok := self.(object.Integer); ok {
 		if bi, ok := args[0].(object.Integer); ok {
-			return object.Integer(int64(cmpInt64(int64(ai), int64(bi))))
+			return object.IntValue(int64(cmpInt64(int64(ai), int64(bi))))
 		}
 	}
 	if ab, ok := object.BigOf(self); ok {
 		if bb, ok := object.BigOf(args[0]); ok {
-			return object.Integer(int64(ab.Cmp(bb)))
+			return object.IntValue(int64(ab.Cmp(bb)))
 		}
 	}
 	a, _ := toFloat(self)
@@ -5362,7 +5362,7 @@ func spaceshipNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) ob
 	if !ok {
 		return object.NilV
 	}
-	return object.Integer(int64(cmpFloat(a, b)))
+	return object.IntValue(int64(cmpFloat(a, b)))
 }
 
 func cmpInt64(a, b int64) int {
@@ -5461,7 +5461,7 @@ func rangeElems(r *object.Range) []object.Value {
 	}
 	out := make([]object.Value, 0, hi-lo+1)
 	for i := lo; i <= hi; i++ {
-		out = append(out, object.Integer(i))
+		out = append(out, object.IntValue(i))
 	}
 	return out
 }
@@ -5566,7 +5566,7 @@ func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive boo
 		}
 		lo, hi := int64(li), int64(hi2)
 		for i := lo; stepInRange(float64(i), float64(hi), float64(step), exclusive); i += step {
-			vm.callBlock(blk, []object.Value{object.Integer(i)})
+			vm.callBlock(blk, []object.Value{object.IntValue(i)})
 		}
 		return
 	}

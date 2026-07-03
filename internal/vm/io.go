@@ -171,7 +171,7 @@ func (vm *VM) registerIO() {
 		if err := fileChmod(o.path, os.FileMode(intArg(args[0])&0o7777)); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", o.path)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	cFile.define("chown", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -179,7 +179,7 @@ func (vm *VM) registerIO() {
 		if err := fileChown(o.path, chownID(args[0]), chownID(args[1])); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ apply2files - %s", o.path)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	cFile.smethods["readlines"] = &Method{name: "readlines", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		o := openFileIO(cFile, pathArg(vm, args[0]), "r")
@@ -323,7 +323,7 @@ func defIOWrite(cls *RClass) {
 		for _, a := range args {
 			n += o.writeStr(a.ToS())
 		}
-		return object.Integer(n)
+		return object.IntValue(int64(n))
 	})
 	cls.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -373,7 +373,7 @@ func defIOWrite(cls *RClass) {
 		ioFlush(self.(*IOObj))
 		return self
 	})
-	cls.define("fsync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Integer(0) })
+	cls.define("fsync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.IntValue(0) })
 	cls.define("sync", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*IOObj).sync)
 	})
@@ -405,10 +405,10 @@ func defStringIORead(cls *RClass) {
 		return object.NewString(string(self.(*IOObj).buf))
 	})
 	cls.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(self.(*IOObj).buf))
+		return object.IntValue(int64(len(self.(*IOObj).buf)))
 	})
 	cls.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(self.(*IOObj).buf))
+		return object.IntValue(int64(len(self.(*IOObj).buf)))
 	})
 	cls.define("eof?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -421,10 +421,10 @@ func defStringIORead(cls *RClass) {
 		return object.Bool(o.pos >= len(o.buf))
 	})
 	cls.define("pos", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*IOObj).pos)
+		return object.IntValue(int64(self.(*IOObj).pos))
 	})
 	cls.define("tell", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*IOObj).pos)
+		return object.IntValue(int64(self.(*IOObj).pos))
 	})
 	cls.define("pos=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		self.(*IOObj).pos = int(toInt(args[0]))
@@ -445,11 +445,11 @@ func defStringIORead(cls *RClass) {
 		default: // SEEK_SET
 			o.pos = amount
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	cls.define("rewind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		self.(*IOObj).pos = 0
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	cls.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -459,7 +459,7 @@ func defStringIORead(cls *RClass) {
 		} else if n > len(o.buf) {
 			o.buf = append(o.buf, make([]byte, n-len(o.buf))...)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	cls.define("read", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)

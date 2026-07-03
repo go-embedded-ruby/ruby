@@ -167,7 +167,7 @@ func (vm *VM) randValue(r *RandomObj, args []object.Value) object.Value {
 		if a <= 0 { // Random#rand requires a positive integer
 			raise("ArgumentError", "invalid argument - %d", int64(a))
 		}
-		return object.Integer(int64(r.limitedRand(uint64(a) - 1)))
+		return object.IntValue(int64(r.limitedRand(uint64(a) - 1)))
 	case object.Float:
 		if a < 0 {
 			raise("ArgumentError", "invalid argument - %s", a.Inspect())
@@ -207,7 +207,7 @@ func (vm *VM) kernelRandValue(r *RandomObj, args []object.Value) object.Value {
 	if n == 0 {
 		return object.Float(r.res53())
 	}
-	return object.Integer(int64(r.limitedRand(uint64(n) - 1)))
+	return object.IntValue(int64(r.limitedRand(uint64(n) - 1)))
 }
 
 // randRange implements Random#rand(a..b) for integer or float ranges.
@@ -222,7 +222,7 @@ func (vm *VM) randRange(r *RandomObj, rg *object.Range) object.Value {
 		if span <= 0 {
 			raise("ArgumentError", "invalid argument - %s", rg.Inspect())
 		}
-		return object.Integer(int64(lo) + int64(r.limitedRand(uint64(span)-1)))
+		return object.IntValue(int64(lo) + int64(r.limitedRand(uint64(span)-1)))
 	}
 	flo, fok1 := toFloat(rg.Lo)
 	fhi, fok2 := toFloat(rg.Hi)
@@ -249,7 +249,7 @@ func (vm *VM) registerRandom() {
 		return vm.randValue(self.(*RandomObj), args)
 	})
 	cRandom.define("seed", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*RandomObj).seed)
+		return object.IntValue(self.(*RandomObj).seed)
 	})
 	cRandom.define("bytes", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*RandomObj)
@@ -275,6 +275,6 @@ func (vm *VM) registerRandom() {
 			seed = intArg(args[0])
 		}
 		vm.defaultRandom = newRandom(seed)
-		return object.Integer(prev)
+		return object.IntValue(prev)
 	})
 }

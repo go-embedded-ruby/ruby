@@ -82,7 +82,7 @@ func (vm *VM) registerOpenSSL() {
 	mod.consts["VERSION"] = object.NewString("4.0.0")
 	mod.consts["OPENSSL_VERSION"] = object.NewString("rbgo pure-Go OpenSSL shim")
 	mod.consts["OPENSSL_LIBRARY_VERSION"] = object.NewString("rbgo pure-Go OpenSSL shim")
-	mod.consts["OPENSSL_VERSION_NUMBER"] = object.Integer(0)
+	mod.consts["OPENSSL_VERSION_NUMBER"] = object.IntValue(0)
 	mod.consts["OPENSSL_FIPS"] = object.Bool(false)
 
 	vm.registerOpenSSLDigest(mod)
@@ -174,10 +174,10 @@ func (vm *VM) registerOpenSSLDigest(mod *RClass) {
 		return object.NewString(base64.StdEncoding.EncodeToString(opensslDigestSum(self, args)))
 	})
 	dig.define("digest_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*opensslDigest).h.Size())
+		return object.IntValue(int64(self.(*opensslDigest).h.Size()))
 	})
 	dig.define("block_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*opensslDigest).h.BlockSize())
+		return object.IntValue(int64(self.(*opensslDigest).h.BlockSize()))
 	})
 
 	vm.cOpenSSLDigest = dig
@@ -376,7 +376,7 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 		"V_ERR_CRL_NOT_YET_VALID": 11, "V_ERR_CRL_HAS_EXPIRED": 12,
 		"V_ERR_CERT_NOT_YET_VALID": 9, "V_ERR_CERT_HAS_EXPIRED": 10,
 	} {
-		x509.consts[k] = object.Integer(v)
+		x509.consts[k] = object.IntValue(int64(v))
 	}
 
 	// --- OpenSSL::PKey -----------------------------------------------------------
@@ -397,16 +397,16 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 	mod.consts["SSL"] = ssl
 	shell(ssl, "OpenSSL::SSL::SSLSocket", "SSLSocket")
 	subErr(ssl, "OpenSSL::SSL::SSLError", "SSLError")
-	ssl.consts["VERIFY_NONE"] = object.Integer(0)
-	ssl.consts["VERIFY_PEER"] = object.Integer(1)
-	ssl.consts["VERIFY_FAIL_IF_NO_PEER_CERT"] = object.Integer(2)
-	ssl.consts["VERIFY_CLIENT_ONCE"] = object.Integer(4)
+	ssl.consts["VERIFY_NONE"] = object.IntValue(0)
+	ssl.consts["VERIFY_PEER"] = object.IntValue(1)
+	ssl.consts["VERIFY_FAIL_IF_NO_PEER_CERT"] = object.IntValue(2)
+	ssl.consts["VERIFY_CLIENT_ONCE"] = object.IntValue(4)
 	// TLS option bit flags Puppet's monkey-patch ORs into DEFAULT_PARAMS.
 	for k, v := range map[string]int{
 		"OP_NO_SSLv2": 0x01000000, "OP_NO_SSLv3": 0x02000000,
 		"OP_NO_TLSv1": 0x04000000, "OP_ALL": 0x80000bff,
 	} {
-		ssl.consts[k] = object.Integer(v)
+		ssl.consts[k] = object.IntValue(int64(v))
 	}
 
 	// OpenSSL::SSL::SSLContext is constructible (Puppet reopens it and builds one),

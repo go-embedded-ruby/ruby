@@ -49,7 +49,7 @@ func (vm *VM) pgValue(v any) object.Value {
 	case bool:
 		return object.Bool(n)
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case float64:
 		return object.Float(n)
 	case string:

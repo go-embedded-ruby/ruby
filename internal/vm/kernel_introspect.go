@@ -19,7 +19,7 @@ func (vm *VM) registerVersionConstants() {
 	vm.consts["RUBY_VERSION"] = object.NewString(version)
 	vm.consts["RUBY_ENGINE"] = object.NewString("ruby")
 	vm.consts["RUBY_ENGINE_VERSION"] = object.NewString(version)
-	vm.consts["RUBY_PATCHLEVEL"] = object.Integer(0)
+	vm.consts["RUBY_PATCHLEVEL"] = object.IntValue(0)
 	vm.consts["RUBY_PLATFORM"] = object.NewString(rubyPlatform())
 	vm.consts["RUBY_DESCRIPTION"] = object.NewString("ruby " + version + " [" + rubyPlatform() + "]")
 	vm.consts["RUBY_COPYRIGHT"] = object.NewString("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto")
@@ -127,7 +127,7 @@ func (vm *VM) registerKernelIntrospection() {
 	// sufficient for the common use of feeding a line offset to
 	// eval/class_eval(str, file, line), where it only steers error messages.
 	vm.cObject.define("__LINE__", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 
 	// at_exit: register a block to run when the program finishes normally, in

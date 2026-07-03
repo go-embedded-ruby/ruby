@@ -72,14 +72,14 @@ func (vm *VM) registerDir() {
 			}
 			raise("Errno::ENOENT", "No such file or directory @ dir_s_mkdir - %s", p)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	rm := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := strArg(args[0])
 		if err := os.Remove(p); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ dir_s_rmdir - %s", p)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	}
 	def("rmdir", rm)
 	def("delete", rm)
@@ -99,7 +99,7 @@ func (vm *VM) registerDir() {
 			defer os.Chdir(old)
 			return vm.callBlock(blk, []object.Value{object.NewString(toSlash(target))})
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	def("each_child", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		for _, n := range dirNames(strArg(args[0])) {

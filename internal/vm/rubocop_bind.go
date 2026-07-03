@@ -29,13 +29,13 @@ func (vm *VM) registerRuboCopOffense(cop *RClass) {
 	ld := func(name string, fn NativeFn) { loc.define(name, fn) }
 	lself := func(v object.Value) rubocop.Location { return v.(*RuboCopLocation).l }
 	ld("line", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(lself(v).Line)
+		return object.IntValue(int64(lself(v).Line))
 	})
 	ld("column", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(lself(v).Column)
+		return object.IntValue(int64(lself(v).Column))
 	})
 	ld("length", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(lself(v).Length)
+		return object.IntValue(int64(lself(v).Length))
 	})
 
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
@@ -60,10 +60,10 @@ func (vm *VM) registerRuboCopOffense(cop *RClass) {
 	})
 	// #line / #column delegate to the location (the gem's Offense#line/#column).
 	d("line", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).Location.Line)
+		return object.IntValue(int64(self(v).Location.Line))
 	})
 	d("column", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).Location.Column)
+		return object.IntValue(int64(self(v).Location.Column))
 	})
 	d("correctable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).Correctable)

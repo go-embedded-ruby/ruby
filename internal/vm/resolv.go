@@ -230,7 +230,7 @@ func registerResolvName(vm *VM, dns *RClass) {
 		return object.NewString(resolvNameOf(self).String())
 	})
 	name.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(resolvNameOf(self).Length())
+		return object.IntValue(int64(resolvNameOf(self).Length()))
 	})
 	name.define("absolute?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(resolvNameOf(self).Absolute)
@@ -312,7 +312,7 @@ func resolvRecordSpecs() []resolvRecordSpec {
 			},
 			define: func(cls *RClass) {
 				cls.define("preference", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-					return object.Integer(recordOf(self).(*resolv.MX).Preference)
+					return object.IntValue(int64(recordOf(self).(*resolv.MX).Preference))
 				})
 				cls.define("exchange", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 					return newResolvName(vm.dnsNameClass(), recordOf(self).(*resolv.MX).Exchange)
@@ -372,7 +372,7 @@ func resolvRecordSpecs() []resolvRecordSpec {
 				} {
 					get := f.get
 					cls.define(f.name, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-						return object.Integer(get(recordOf(self).(*resolv.SOA)))
+						return object.IntValue(int64(get(recordOf(self).(*resolv.SOA))))
 					})
 				}
 			}},
@@ -387,13 +387,13 @@ func resolvRecordSpecs() []resolvRecordSpec {
 			},
 			define: func(cls *RClass) {
 				cls.define("priority", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-					return object.Integer(recordOf(self).(*resolv.SRV).Priority)
+					return object.IntValue(int64(recordOf(self).(*resolv.SRV).Priority))
 				})
 				cls.define("weight", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-					return object.Integer(recordOf(self).(*resolv.SRV).Weight)
+					return object.IntValue(int64(recordOf(self).(*resolv.SRV).Weight))
 				})
 				cls.define("port", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-					return object.Integer(recordOf(self).(*resolv.SRV).Port)
+					return object.IntValue(int64(recordOf(self).(*resolv.SRV).Port))
 				})
 				cls.define("target", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 					return newResolvName(vm.dnsNameClass(), recordOf(self).(*resolv.SRV).Target)
@@ -467,7 +467,7 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 	}
 	// Header accessors (id and the flag bits MRI exposes).
 	msg.define("id", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(mget(self).ID)
+		return object.IntValue(int64(mget(self).ID))
 	})
 	for _, fl := range []struct {
 		name string
@@ -484,7 +484,7 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 	} {
 		get, set := fl.get, fl.set
 		msg.define(fl.name, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Integer(get(mget(self)))
+			return object.IntValue(int64(get(mget(self))))
 		})
 		msg.define(fl.name+"=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			set(mget(self), uint16(intArg(args[0])))
@@ -550,7 +550,7 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 		for _, rr := range mget(self).Answer {
 			vm.callBlock(blk, []object.Value{
 				newResolvName(vm.dnsNameClass(), rr.Name),
-				object.Integer(rr.TTL),
+				object.IntValue(int64(rr.TTL)),
 				newRecord(vm.recordClass(byType, rr.Data.TypeValue()), rr.Data),
 			})
 		}
@@ -712,7 +712,7 @@ func resolvSectionArray(vm *VM, byType map[uint16]*RClass, rrs []resolv.RR) obje
 	for _, rr := range rrs {
 		out = append(out, &object.Array{Elems: []object.Value{
 			newResolvName(vm.dnsNameClass(), rr.Name),
-			object.Integer(rr.TTL),
+			object.IntValue(int64(rr.TTL)),
 			newRecord(vm.recordClass(byType, rr.Data.TypeValue()), rr.Data),
 		}})
 	}

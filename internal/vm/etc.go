@@ -140,7 +140,7 @@ func (vm *VM) registerEtc() {
 func atoiOr0(s string) object.Value {
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		return object.Integer(0)
+		return object.IntValue(0)
 	}
-	return object.Integer(n)
+	return object.IntValue(int64(n))
 }

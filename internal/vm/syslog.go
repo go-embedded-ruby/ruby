@@ -26,7 +26,7 @@ func (vm *VM) registerSyslog() {
 		"LOG_PID": 0x01, "LOG_CONS": 0x02, "LOG_NDELAY": 0x08,
 		"LOG_USER": 1 << 3, "LOG_DAEMON": 3 << 3, "LOG_LOCAL0": 16 << 3,
 	} {
-		mod.consts[k] = object.Integer(v)
+		mod.consts[k] = object.IntValue(int64(v))
 	}
 
 	notImpl := func(what string) NativeFn {

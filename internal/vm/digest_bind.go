@@ -221,13 +221,13 @@ func (vm *VM) defineDigestInstance(c *RClass) {
 	// length / size / digest_length all report the digest size; block_length the
 	// algorithm's internal block size — Digest::Instance's size accessors.
 	dlen := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*DigestObj).d.DigestLength())
+		return object.IntValue(int64(self.(*DigestObj).d.DigestLength()))
 	}
 	c.define("length", dlen)
 	c.define("size", dlen)
 	c.define("digest_length", dlen)
 	c.define("block_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*DigestObj).d.BlockLength())
+		return object.IntValue(int64(self.(*DigestObj).d.BlockLength()))
 	})
 }
 

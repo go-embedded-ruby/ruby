@@ -127,7 +127,7 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 	sub.define("values", toA)
 	sub.define("deconstruct", toA)
 	sizeFn := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(names))
+		return object.IntValue(int64(len(names)))
 	}
 	sub.define("size", sizeFn)
 	sub.define("length", sizeFn)

@@ -328,15 +328,15 @@ func (vm *VM) objectID(self object.Value) object.Value {
 		return object.NormInt(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(int64(v)), 1), big.NewInt(1)))
 	case object.Bool:
 		if v {
-			return object.Integer(20)
+			return object.IntValue(20)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	case object.Nil:
-		return object.Integer(4)
+		return object.IntValue(4)
 	}
 	// Reference objects get a stable even id memoised in objIDs (never colliding
 	// with the odd fixnum ids); refID assigns and remembers it.
-	return object.Integer(vm.refID(self))
+	return object.IntValue(vm.refID(self))
 }
 
 // hashValue computes Kernel#hash for a value: equal-by-eql? value types hash

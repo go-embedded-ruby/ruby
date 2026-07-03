@@ -296,7 +296,7 @@ func jumpTargets(iseq *bytecode.ISeq) map[int]bool {
 func constExpr(v object.Value) (string, bool) {
 	switch x := v.(type) {
 	case object.Integer:
-		return "object.Integer(" + strconv.FormatInt(int64(x), 10) + ")", true
+		return "object.IntValue(" + strconv.FormatInt(int64(x), 10) + ")", true
 	case object.Float:
 		return "object.Float(" + strconv.FormatFloat(float64(x), 'g', -1, 64) + ")", true
 	case *object.String:

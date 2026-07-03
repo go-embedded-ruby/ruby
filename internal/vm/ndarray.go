@@ -142,15 +142,15 @@ func (vm *VM) registerNDArray() {
 		sh := self(v).Shape()
 		out := make([]object.Value, len(sh))
 		for i, x := range sh {
-			out[i] = object.Integer(x)
+			out[i] = object.IntValue(int64(x))
 		}
 		return &object.Array{Elems: out}
 	})
 	d("ndim", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).Ndim())
+		return object.IntValue(int64(self(v).Ndim()))
 	})
 	d("size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).Size())
+		return object.IntValue(int64(self(v).Size()))
 	})
 	d("reshape", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return mustArray(self(v).Reshape(shapeArgs(args)...))
@@ -210,7 +210,7 @@ func (vm *VM) registerNDArray() {
 			if err != nil {
 				raise("ArgumentError", "%s", err.Error())
 			}
-			return object.Integer(i)
+			return object.IntValue(int64(i))
 		})
 	}
 	argReduce("argmax", (*nd.Array).ArgMax)

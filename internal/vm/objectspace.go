@@ -33,7 +33,7 @@ func (vm *VM) registerObjectSpace() {
 		} else if blk != nil {
 			callable = blk
 		}
-		return &object.Array{Elems: []object.Value{object.Integer(0), callable}}
+		return &object.Array{Elems: []object.Value{object.IntValue(0), callable}}
 	})
 	// undefine_finalizer(obj): a no-op that returns the object, as in MRI.
 	def("undefine_finalizer", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -46,7 +46,7 @@ func (vm *VM) registerObjectSpace() {
 	// returns 0 — the count of objects iterated. Without a block it would return
 	// an Enumerator in MRI; here it simply reports 0.
 	def("each_object", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(0)
+		return object.IntValue(0)
 	})
 	// garbage_collect / start: trigger a collection — a no-op, returning nil.
 	gc := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.NilV }
