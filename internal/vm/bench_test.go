@@ -51,6 +51,21 @@ func BenchmarkBlockEach(b *testing.B) {
 	benchProgram(b, "t = 0\n100000.times { |i| t += i }")
 }
 
+// BenchmarkDispatchMethods mirrors bench/dispatch.rb: a tight loop of
+// monomorphic method calls into a tiny object. Each bump/total call is a leaf
+// frame — no block, no ensure/rescue — so it is exactly the kind of frame that
+// no longer allocates a returnTarget identity token at entry.
+func BenchmarkDispatchMethods(b *testing.B) {
+	benchProgram(b, "class Counter\n  def initialize; @n = 0; end\n  def bump(k); @n += k; end\n  def total; @n; end\nend\nc = Counter.new\ni = 0\nwhile i < 100000\n  c.bump(2)\n  c.bump(1)\n  i += 1\nend\nc.total")
+}
+
+// BenchmarkProcCall mirrors bench/proc.rb: repeatedly invoking a captured lambda.
+// The lambda body is a return-target frame with no block of its own, so under
+// lazy allocation it never materialises a token either.
+func BenchmarkProcCall(b *testing.B) {
+	benchProgram(b, "adder = ->(a, b) { a + b }\nacc = 0\ni = 0\nwhile i < 100000\n  acc = adder.call(acc, i)\n  i += 1\nend\nacc")
+}
+
 func BenchmarkArrayMap(b *testing.B) {
 	benchProgram(b, "(1..10000).map { |x| x * 2 }.sum")
 }
