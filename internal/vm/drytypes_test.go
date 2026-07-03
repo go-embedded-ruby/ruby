@@ -194,7 +194,7 @@ func TestDryToGo(t *testing.T) {
 	}
 	// An unmapped value passes through as-is.
 	p := &Proc{}
-	if object.Wrap(dryToGo(object.Wrap(p))) != object.Wrap(p) {
+	if dryToGo(object.Wrap(p)) != object.Wrap(p) {
 		t.Error("passthrough")
 	}
 }
