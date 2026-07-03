@@ -66,6 +66,15 @@ func BenchmarkProcCall(b *testing.B) {
 	benchProgram(b, "adder = ->(a, b) { a + b }\nacc = 0\ni = 0\nwhile i < 100000\n  acc = adder.call(acc, i)\n  i += 1\nend\nacc")
 }
 
+// BenchmarkClassMethodSend exercises the general-send fallback (site #2): a
+// class receiver bypasses the monomorphic inline cache and dispatches through
+// vm.send. Each call passes two args from the operand stack, which used to be
+// copied into a fresh slice per call and is now passed in place (send routes the
+// ISeq callee straight into exec, which copies into env slots itself).
+func BenchmarkClassMethodSend(b *testing.B) {
+	benchProgram(b, "class M\n  def self.add(a, b); a + b; end\nend\nacc = 0\ni = 0\nwhile i < 100000\n  acc = M.add(acc, i)\n  i += 1\nend\nacc")
+}
+
 func BenchmarkArrayMap(b *testing.B) {
 	benchProgram(b, "(1..10000).map { |x| x * 2 }.sum")
 }

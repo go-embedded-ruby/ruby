@@ -1168,11 +1168,17 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 							continue
 						}
 					}
-					callArgs := make([]object.Value, argc)
-					copy(callArgs, stack[base:])
-					stack = stack[:base-1]
+					// General-send fallback (class receiver / unresolved name →
+					// method_missing / operator). send now routes its resolved-method
+					// invocations through invokeInPlace, which copies only for a
+					// retaining native callee, so the live operand-stack region can be
+					// passed directly here — no per-call args copy. The region is read
+					// (and copied into the callee's env by exec, or defensively by
+					// invokeInPlace) before this frame truncates the stack below.
 					vm.enforceSendVis(in.Flags, recv, name, self)
-					push(vm.dispatchSend(recv, name, callArgs, nil))
+					res := vm.send(recv, name, stack[base:], nil)
+					stack = stack[:base-1]
+					stack = append(stack, res)
 				} else {
 					callArgs := make([]object.Value, argc)
 					copy(callArgs, stack[len(stack)-argc:])

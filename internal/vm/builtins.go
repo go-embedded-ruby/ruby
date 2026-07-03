@@ -113,9 +113,13 @@ func (vm *VM) bootstrap() {
 			}
 			return blk
 		}}
-	vm.cProc.define("call", procCall)
-	vm.cProc.define("[]", procCall)
-	vm.cProc.define("yield", procCall)
+	// Proc#call/[]/yield are non-retaining: an ISeq block body copies its args
+	// into env slots synchronously (exec) before returning, and callBlockSelf
+	// copies for the rarer native-block target, so the OpSend fast path may hand
+	// them the live operand-stack region without a defensive copy (defineNR).
+	vm.cProc.defineNR("call", procCall)
+	vm.cProc.defineNR("[]", procCall)
+	vm.cProc.defineNR("yield", procCall)
 	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Integer(self.(*Proc).arityVal())
 	})
