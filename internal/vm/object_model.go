@@ -940,7 +940,7 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 	// inherited class methods) before the generic Class instance methods.
 	if cls, ok := recv.(*RClass); ok {
 		if m := lookupSMethod(cls, name); m != nil {
-			return vm.invoke(m, recv, args, blk)
+			return vm.invokeInPlace(m, recv, args, blk)
 		}
 	}
 	c := vm.classOf(recv)
@@ -950,7 +950,7 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 		c = sc
 	}
 	if m := lookupMethod(c, name); m != nil && !m.undefined {
-		return vm.invoke(m, recv, args, blk)
+		return vm.invokeInPlace(m, recv, args, blk)
 	}
 	// The arithmetic/comparison operators are a compiler fast path rather than
 	// real methods, so send(:+, x), reduce(:+) and respond_to-style dispatch
@@ -1003,34 +1003,25 @@ func (vm *VM) isBuiltinValueMethod(m *Method, builtin object.Value) bool {
 }
 
 func (vm *VM) invoke(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {
-	if m.compiled != nil {
-		return m.compiled(vm, self, args, blk)
-	}
 	if m.native != nil {
 		return vm.callNative(m, self, args, blk)
 	}
-	if m.proc != nil {
-		// A define_method body runs the block with self rebound to the receiver,
-		// keeping its closure environment; the block passed to the method binds to
-		// the body's &block param. The method's name/owner anchor `super` so a
-		// define_method body may call super (matching MRI).
-		return vm.callProcMethod(m.proc, self, args, blk, m.name, m.owner)
-	}
-	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, m.lexScope)
+	return vm.invokeBody(m, self, args, blk)
 }
 
-// invokeInPlace is invoke for the OpSend fast path, where args is a live region
-// of the caller's operand stack rather than a private copy. The interpreted /
-// AOT / define_method bodies consume args synchronously (exec copies them into
-// the callee's env slots before the call returns, so the caller's later reuse of
-// the region is safe). A native body, by contrast, can retain its args slice
-// (e.g. Array#push stores them), so only that case copies into a fresh slice.
+// invokeInPlace is invoke for the OpSend fast path (and the general-send
+// fallback), where args is a live region of the caller's operand stack rather
+// than a private copy. The interpreted / AOT / define_method bodies consume args
+// synchronously (exec copies them into the callee's env slots before the call
+// returns, so the caller's later reuse of the region is safe). A native body, by
+// contrast, can retain its args slice (e.g. Array#push stores them), so only that
+// case copies into a fresh slice.
 func (vm *VM) invokeInPlace(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {
 	if m.native != nil {
-		// A native audited as non-retaining (Array/Hash#[], #[]=, …) consumes args
-		// synchronously without keeping the slice, so it can read the caller's live
-		// operand-stack region directly — eliding the defensive copy that every
-		// other native still gets.
+		// A native audited as non-retaining (Array/Hash#[], #[]=, Proc#call, …)
+		// consumes args synchronously without keeping the slice, so it can read the
+		// caller's live operand-stack region directly — eliding the defensive copy
+		// that every other native still gets.
 		if m.nonRetaining {
 			return vm.callNative(m, self, args, blk)
 		}
@@ -1038,10 +1029,24 @@ func (vm *VM) invokeInPlace(m *Method, self object.Value, args []object.Value, b
 		copy(cp, args)
 		return vm.callNative(m, self, cp, blk)
 	}
+	return vm.invokeBody(m, self, args, blk)
+}
+
+// invokeBody dispatches the non-native method kinds shared by invoke and
+// invokeInPlace: an AOT-compiled body, a define_method proc body, or an
+// interpreted ISeq. Each copies its args into the callee's env slots
+// synchronously (exec, or the compiled body's prologue) before returning, so it
+// never retains the caller's slice — which is why the OpSend fast path may hand
+// it the live operand-stack region.
+func (vm *VM) invokeBody(m *Method, self object.Value, args []object.Value, blk *Proc) object.Value {
 	if m.compiled != nil {
 		return m.compiled(vm, self, args, blk)
 	}
 	if m.proc != nil {
+		// A define_method body runs the block with self rebound to the receiver,
+		// keeping its closure environment; the block passed to the method binds to
+		// the body's &block param. The method's name/owner anchor `super` so a
+		// define_method body may call super (matching MRI).
 		return vm.callProcMethod(m.proc, self, args, blk, m.name, m.owner)
 	}
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, m.lexScope)
@@ -1104,7 +1109,13 @@ func (vm *VM) callBlock(p *Proc, args []object.Value) object.Value {
 // rebind the block's self to the method's receiver.
 func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) object.Value {
 	if p.native != nil {
-		return p.native(vm, args)
+		// Proc#call is nonRetaining, so the OpSend fast path hands us the caller's
+		// live operand-stack region directly. An ISeq block body copies its args
+		// into env slots synchronously (exec), but a native block body may retain
+		// its args slice, so it gets a private copy before the region is reused.
+		cp := make([]object.Value, len(args))
+		copy(cp, args)
+		return p.native(vm, cp)
 	}
 	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p, nil)
 }
@@ -1132,7 +1143,12 @@ func (vm *VM) blockDefinee(p *Proc) *RClass {
 // and yield-block.
 func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, blk *Proc, name string, owner *RClass) object.Value {
 	if p.native != nil {
-		return p.native(vm, args)
+		// invokeInPlace passes the caller's live operand-stack region for a
+		// define_method body (m.proc). An ISeq body copies into env slots (exec);
+		// a native body may retain its args slice, so copy before handing it over.
+		cp := make([]object.Value, len(args))
+		copy(cp, args)
+		return p.native(vm, cp)
 	}
 	body := p.block
 	if blk != nil {
