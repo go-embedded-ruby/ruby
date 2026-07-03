@@ -209,6 +209,64 @@ func rackFromGo(v any) object.Value {
 	return object.NilV
 }
 
+// rackToGoNested maps a Ruby value into the *structural* Go model
+// rack.BuildNestedQuery consumes: a Hash becomes an insertion-ordered
+// *rack.Params, an Array a []any and a scalar its rackToGo form. build_query
+// only needs the flat model (rackToGo), but build_nested_query recurses into
+// sub-hashes and expects *rack.Params for them — a plain map[string]any would
+// lose Ruby's Hash order (and buildNested only recognises *Params for hashes),
+// so nested query building goes through this converter instead.
+func rackToGoNested(v object.Value) any {
+	switch n := v.(type) {
+	case *object.Hash:
+		p := rack.NewParams()
+		for _, k := range n.Keys {
+			val, _ := n.Get(k)
+			p.Set(rackStr(k), rackToGoNested(val))
+		}
+		return p
+	case *object.Array:
+		out := make([]any, len(n.Elems))
+		for i, el := range n.Elems {
+			out[i] = rackToGoNested(el)
+		}
+		return out
+	}
+	return rackToGo(v)
+}
+
+// rackStrArray maps a Ruby Array into a []string (each element stringified),
+// used for the `available` list of Rack::Utils.best_q_match. A non-Array
+// argument yields nil.
+func rackStrArray(v object.Value) []string {
+	arr, ok := v.(*object.Array)
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(arr.Elems))
+	for i, el := range arr.Elems {
+		out[i] = rackStr(el)
+	}
+	return out
+}
+
+// rackCookieHeader extracts the HTTP_COOKIE entry from a Ruby env Hash for
+// Rack::Utils.parse_cookies(env), matching MRI which reads env['HTTP_COOKIE'].
+// A non-Hash argument or an absent key yields the empty string (no cookies).
+func rackCookieHeader(v object.Value) string {
+	h, ok := v.(*object.Hash)
+	if !ok {
+		return ""
+	}
+	for _, k := range h.Keys {
+		if rackStr(k) == "HTTP_COOKIE" {
+			val, _ := h.Get(k)
+			return rackStr(val)
+		}
+	}
+	return ""
+}
+
 // rackToGo maps a Ruby value into the generic Go value model rack consumes
 // (nil / bool / int64 / float64 / string / []any / map[string]any).
 func rackToGo(v object.Value) any {

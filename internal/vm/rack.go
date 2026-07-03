@@ -5,6 +5,8 @@
 package vm
 
 import (
+	"sort"
+
 	rack "github.com/go-ruby-rack/rack"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -299,7 +301,82 @@ func (vm *VM) registerRackUtils(mod *RClass) {
 	def("build_query", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(rack.BuildQuery(rackParamsFromHash(rackArg(args))))
 	})
-	def("status_code", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(rackInt(rackArg(args), 500)))
+	def("parse_nested_query", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p, err := rack.ParseNestedQuery(rackStr(rackArg(args)), rackSep(args, 1), 0)
+		if err != nil {
+			raise("ArgumentError", "%s", err.Error())
+		}
+		return rackParamsToHash(p)
 	})
+	def("build_nested_query", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		prefix := ""
+		if len(args) > 1 {
+			prefix = rackStr(args[1])
+		}
+		out, err := rack.BuildNestedQuery(rackToGoNested(rackArg(args)), prefix)
+		if err != nil {
+			raise("ArgumentError", "%s", err.Error())
+		}
+		return object.NewString(out)
+	})
+	def("q_values", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		qs := rack.QValues(rackStr(rackArg(args)))
+		out := object.NewArrayFromSlice(make([]object.Value, len(qs)))
+		for i, q := range qs {
+			out.Elems[i] = object.NewArray(object.NewString(q.Value), object.Float(q.Quality))
+		}
+		return out
+	})
+	def("best_q_match", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
+		}
+		m := rack.BestQMatch(rackStr(args[0]), rackStrArray(args[1]))
+		if m == "" {
+			return object.NilV
+		}
+		return object.NewString(m)
+	})
+	def("parse_cookies_header", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return rackParamsToHash(rack.ParseCookiesHeader(rackStr(rackArg(args))))
+	})
+	def("parse_cookies", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return rackParamsToHash(rack.ParseCookiesHeader(rackCookieHeader(rackArg(args))))
+	})
+	def("status_code", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		a := rackArg(args)
+		if sym, ok := a.(object.Symbol); ok {
+			code, found := rack.SymbolToStatusCode(string(sym))
+			if !found {
+				raise("ArgumentError", "Unrecognized status code :%s", string(sym))
+			}
+			return object.IntValue(int64(code))
+		}
+		return object.IntValue(int64(rackInt(a, 500)))
+	})
+	// HTTP_STATUS_CODES — the code → reason-phrase table (Rack::Utils::
+	// HTTP_STATUS_CODES), materialised as a Ruby Hash in ascending code order.
+	codes := make([]int, 0, len(rack.HTTPStatusCodes))
+	for c := range rack.HTTPStatusCodes {
+		codes = append(codes, c)
+	}
+	sort.Ints(codes)
+	statusTable := object.NewHash()
+	for _, c := range codes {
+		statusTable.Set(object.IntValue(int64(c)), object.NewString(rack.HTTPStatusCodes[c]))
+	}
+	util.consts["HTTP_STATUS_CODES"] = statusTable
+}
+
+// rackSep reads an optional query-separator argument at index i (Ruby's
+// parse_nested_query second parameter). A missing or nil argument yields ""
+// so the library falls back to its default ("&").
+func rackSep(args []object.Value, i int) string {
+	if len(args) <= i {
+		return ""
+	}
+	if _, isNil := args[i].(object.Nil); isNil || args[i] == nil {
+		return ""
+	}
+	return rackStr(args[i])
 }
