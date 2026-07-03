@@ -309,7 +309,7 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 					out = append(out, object.NilV)
 					continue
 				}
-				out = append(out, object.Integer(getInt(data[pos:pos+w], d.code)))
+				out = append(out, object.IntValue(getInt(data[pos:pos+w], d.code)))
 				pos += w
 			}
 		case d.code == 'U':
@@ -322,7 +322,7 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 					break
 				}
 				r, sz := utf8.DecodeRune(data[pos:])
-				out = append(out, object.Integer(int64(r)))
+				out = append(out, object.IntValue(int64(r)))
 				pos += sz
 			}
 		case d.code == 'a' || d.code == 'A' || d.code == 'Z':

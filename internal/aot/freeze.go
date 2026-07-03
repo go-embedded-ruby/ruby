@@ -159,7 +159,7 @@ func (f *freezer) writeConsts(b *strings.Builder, consts []object.Value) {
 func (f *freezer) writeConst(b *strings.Builder, v object.Value) {
 	switch c := v.(type) {
 	case object.Integer:
-		fmt.Fprintf(b, "object.Integer(%d)", int64(c))
+		fmt.Fprintf(b, "object.IntValue(%d)", int64(c))
 	case object.Symbol:
 		fmt.Fprintf(b, "object.Symbol(%s)", strconv.Quote(string(c)))
 	case *object.String:

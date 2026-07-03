@@ -52,7 +52,7 @@ func (vm *VM) specialGvar(name string) (object.Value, bool) {
 		}
 		return object.NewString(vm.scriptName), true
 	case "$$":
-		return object.Integer(os.Getpid()), true
+		return object.IntValue(int64(os.Getpid())), true
 	}
 	// $~, $&, $`, $' and $N fall through so the match-data resolver in gvar
 	// handles them — englishAlias only rewrote the name to the cryptic form.

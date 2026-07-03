@@ -115,7 +115,7 @@ func fromTOML(vm *VM, v toml.Value) object.Value {
 	case bool:
 		return object.Bool(n)
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case *big.Int:
 		return object.NormInt(n)
 	case float64:

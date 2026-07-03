@@ -55,6 +55,26 @@ func BenchmarkBlockEach(b *testing.B) {
 // monomorphic method calls into a tiny object. Each bump/total call is a leaf
 // frame — no block, no ensure/rescue — so it is exactly the kind of frame that
 // no longer allocates a returnTarget identity token at entry.
+// BenchmarkTimesSmall exercises Integer#times over a range whose indices all
+// fall inside the interned small-integer window (-256..1024). The block simply
+// touches its index, so the only per-iteration boxing is the loop index the
+// times builtin hands to the block. Routing that box through object.IntValue
+// means every index reuses an interned box, so this benchmark allocates nothing
+// on the index path.
+func BenchmarkTimesSmall(b *testing.B) {
+	benchProgram(b, "1000.times { |i| i }")
+}
+
+// BenchmarkTimesLarge is the same loop but wide enough that most indices fall
+// outside the interned window, so each still heap-boxes a fresh Integer. It is
+// the counterpoint to BenchmarkTimesSmall: funnelling boxing through
+// object.IntValue does not change the large-range cost — collapsing that
+// allocation is the job of a future immediate-Value representation, which this
+// change is the localization prep for.
+func BenchmarkTimesLarge(b *testing.B) {
+	benchProgram(b, "5000.times { |i| i }")
+}
+
 func BenchmarkDispatchMethods(b *testing.B) {
 	benchProgram(b, "class Counter\n  def initialize; @n = 0; end\n  def bump(k); @n += k; end\n  def total; @n; end\nend\nc = Counter.new\ni = 0\nwhile i < 100000\n  c.bump(2)\n  c.bump(1)\n  i += 1\nend\nc.total")
 }

@@ -82,7 +82,7 @@ func dateInspect(d *date.Date) string {
 
 // i64toa renders a signed int64 decimal (the nanosecond / seconds fields, which
 // exceed int range) — the int64 companion of the package's itoa.
-func i64toa(n int64) string { return object.Integer(n).ToS() }
+func i64toa(n int64) string { return object.IntValue(n).ToS() }
 
 // dateArg asserts an argument is a Date, raising TypeError otherwise (the Date
 // counterpart of timeArg / setArg).
@@ -130,7 +130,7 @@ func dateOp(op bytecode.Op, a *Date, b object.Value) object.Value {
 		return &Date{d: a.d.Plus(dateDays(b))}
 	case bytecode.OpSub:
 		if other, ok := b.(*Date); ok {
-			return object.Integer(a.d.Diff(other.d))
+			return object.IntValue(int64(a.d.Diff(other.d)))
 		}
 		return &Date{d: a.d.Minus(dateDays(b))}
 	}
@@ -417,13 +417,13 @@ func strptimeFormat(args []object.Value) string {
 // reconstructed from the resolved value.)
 func strptimeHash(d *date.Date) object.Value {
 	h := object.NewHash()
-	h.Set(object.Symbol("year"), object.Integer(int64(d.Year())))
-	h.Set(object.Symbol("mon"), object.Integer(int64(d.Month())))
-	h.Set(object.Symbol("mday"), object.Integer(int64(d.Day())))
+	h.Set(object.Symbol("year"), object.IntValue(int64(d.Year())))
+	h.Set(object.Symbol("mon"), object.IntValue(int64(d.Month())))
+	h.Set(object.Symbol("mday"), object.IntValue(int64(d.Day())))
 	if d.IsDateTime() {
-		h.Set(object.Symbol("hour"), object.Integer(int64(d.Hour())))
-		h.Set(object.Symbol("min"), object.Integer(int64(d.Min())))
-		h.Set(object.Symbol("sec"), object.Integer(int64(d.Sec())))
+		h.Set(object.Symbol("hour"), object.IntValue(int64(d.Hour())))
+		h.Set(object.Symbol("min"), object.IntValue(int64(d.Min())))
+		h.Set(object.Symbol("sec"), object.IntValue(int64(d.Sec())))
 	}
 	return h
 }
@@ -435,7 +435,7 @@ func (vm *VM) registerDateAccessors() {
 	self := func(v object.Value) *date.Date { return v.(*Date).d }
 	intM := func(get func(*date.Date) int) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Integer(int64(get(self(v))))
+			return object.IntValue(int64(get(self(v))))
 		}
 	}
 
@@ -592,7 +592,7 @@ func (vm *VM) registerDateCompare() {
 		if !ok {
 			return object.NilV
 		}
-		return object.Integer(dateCmp(self(v), other))
+		return object.IntValue(dateCmp(self(v), other))
 	})
 	cmpBool := func(want func(int64) bool) NativeFn {
 		return func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {

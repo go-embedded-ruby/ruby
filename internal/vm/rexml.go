@@ -485,7 +485,7 @@ func (vm *VM) registerREXMLElements(mod *RClass) {
 	})
 
 	d("size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(owner(v).ChildElements()))
+		return object.IntValue(int64(len(owner(v).ChildElements())))
 	})
 	d("add_element", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return &REXMLElement{e: owner(v).AddElement(strArg(args[0]))}
@@ -532,7 +532,7 @@ func (vm *VM) registerREXMLAttributes(mod *RClass) {
 		return v
 	})
 	sizeFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(attrs(v).Len())
+		return object.IntValue(int64(attrs(v).Len()))
 	}
 	d("size", sizeFn)
 	d("length", sizeFn)
@@ -666,7 +666,7 @@ func (vm *VM) registerREXMLFormatters(mod *RClass) {
 				}
 			}
 			obj := &RObject{class: pretty, ivars: map[string]object.Value{}}
-			obj.ivars["@indentation"] = object.Integer(indent)
+			obj.ivars["@indentation"] = object.IntValue(int64(indent))
 			return obj
 		}}
 

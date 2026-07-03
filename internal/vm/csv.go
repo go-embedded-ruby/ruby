@@ -303,7 +303,7 @@ func (vm *VM) csvFieldToRuby(f any) object.Value {
 	case string:
 		return object.NewString(v)
 	case int:
-		return object.Integer(int64(v))
+		return object.IntValue(int64(v))
 	case float64:
 		return object.Float(v)
 	case libcsv.Symbol:
@@ -700,10 +700,10 @@ func (vm *VM) registerCSVTableClass(cls *RClass) {
 	d("to_s", tblCSV)
 	d("to_csv", tblCSV)
 	d("size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(len(tblOf(v).Rows)))
+		return object.IntValue(int64(len(tblOf(v).Rows)))
 	})
 	d("length", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(len(tblOf(v).Rows)))
+		return object.IntValue(int64(len(tblOf(v).Rows)))
 	})
 	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		for _, r := range tblOf(v).Rows {

@@ -115,7 +115,7 @@ func (vm *VM) registerGrape() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 		}
-		return object.Integer(grape.DefaultStatus(grapeStr(args[0])))
+		return object.IntValue(int64(grape.DefaultStatus(grapeStr(args[0]))))
 	}}
 }
 

@@ -72,7 +72,7 @@ func (vm *VM) registerReflection() {
 		return self.(*UnboundMethod).owner
 	})
 	cUnbound.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(methodArity(self.(*UnboundMethod).m))
+		return object.IntValue(int64(methodArity(self.(*UnboundMethod).m)))
 	})
 	// UnboundMethod#bind(obj) → Method; obj must be a kind_of? the owner.
 	cUnbound.define("bind", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {

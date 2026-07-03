@@ -76,7 +76,7 @@ func (vm *VM) registerObservable() {
 
 	// count_observers: number of registered observers.
 	mod.define("count_observers", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(observerRegistry(self).CountObservers())
+		return object.IntValue(int64(observerRegistry(self).CountObservers()))
 	})
 
 	// changed(state=true): set the changed flag; returns the state, matching MRI's

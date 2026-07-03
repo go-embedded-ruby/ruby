@@ -187,7 +187,7 @@ func (vm *VM) registerOptionParser() {
 		return args[0]
 	})
 	d("summary_width", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(opOf(v).p.SummaryWidth)
+		return object.IntValue(int64(opOf(v).p.SummaryWidth))
 	})
 	d("summary_width=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		opOf(v).p.SummaryWidth = int(intArg(args[0]))
@@ -426,7 +426,7 @@ func (vm *VM) optValueToRuby(op *OptionParser, m optparse.Match) object.Value {
 		}
 		return object.NewString(val)
 	case int64:
-		return object.Integer(val)
+		return object.IntValue(val)
 	case *big.Int:
 		return object.NormInt(new(big.Int).Set(val))
 	case float64:

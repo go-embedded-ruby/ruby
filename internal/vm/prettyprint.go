@@ -122,7 +122,7 @@ func (vm *VM) registerPrettyPrint() {
 	vm.cPrettyPrint.consts["Group"] = grp
 	vm.consts["PrettyPrint::Group"] = grp
 	grp.define("depth", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(v.(*PrettyPrintGroup).depth)
+		return object.IntValue(int64(v.(*PrettyPrintGroup).depth))
 	})
 
 	// PrettyPrint.new(output='', maxwidth=79, newline="\n").
@@ -254,13 +254,13 @@ func (vm *VM) registerPrettyPrint() {
 		return object.NewString(self(v).output())
 	})
 	d("maxwidth", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).maxwidth)
+		return object.IntValue(int64(self(v).maxwidth))
 	})
 	d("newline", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).newline)
 	})
 	d("indent", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).q.Indent())
+		return object.IntValue(int64(self(v).q.Indent()))
 	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).ToS())

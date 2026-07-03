@@ -317,7 +317,7 @@ func (vm *VM) registerNokogiriNodeSet(mod *RClass) {
 
 	// #length / #size / #count.
 	length := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).Length())
+		return object.IntValue(int64(self(v).Length()))
 	}
 	d("length", length)
 	d("size", length)

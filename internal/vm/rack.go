@@ -115,7 +115,7 @@ func (vm *VM) registerRackRequest(mod *RClass) {
 	cls.define("ssl?", boolean((*rack.Request).SSL))
 
 	cls.define("port", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).Port()))
+		return object.IntValue(int64(self(v).Port()))
 	})
 
 	// #get_header(name) returns the raw env entry (or nil).
@@ -184,7 +184,7 @@ func (vm *VM) registerRackResponse(mod *RClass) {
 		return object.NewString(chunk)
 	})
 	cls.define("status", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).Status()))
+		return object.IntValue(int64(self(v).Status()))
 	})
 	cls.define("status=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).SetStatus(rackInt(rackArg(args), 200))
@@ -259,7 +259,7 @@ func rackFinishMethod(self func(object.Value) *rack.Response) NativeFn {
 	return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		status, headers, body := self(v).Finish()
 		return &object.Array{Elems: []object.Value{
-			object.Integer(int64(status)),
+			object.IntValue(int64(status)),
 			rackHeadersToHash(headers),
 			rackBodyArray(body),
 		}}
@@ -304,6 +304,6 @@ func (vm *VM) registerRackUtils(mod *RClass) {
 		return object.NewString(rack.BuildQuery(rackParamsFromHash(rackArg(args))))
 	})
 	def("status_code", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(rackInt(rackArg(args), 500)))
+		return object.IntValue(int64(rackInt(rackArg(args), 500)))
 	})
 }

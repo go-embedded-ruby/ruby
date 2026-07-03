@@ -92,7 +92,7 @@ func wrapper(iseq *bytecode.ISeq, goName string) string {
 	fmt.Fprintf(&b, "\t\t\t\tres = vm.%s_l1(self, args, block)\n\t\t\t\treturn\n\t\t\t}\n", goName)
 	fmt.Fprintf(&b, "\t\t\tpanic(r)\n\t\t}\n\t}()\n")
 	fmt.Fprintf(&b, "\t_ = self\n\t_ = args\n\t_ = block\n")
-	fmt.Fprintf(&b, "\treturn object.Integer(vm.%s_k(%s))\n}\n", goName, strings.Join(kargs, ", "))
+	fmt.Fprintf(&b, "\treturn object.IntValue(vm.%s_k(%s))\n}\n", goName, strings.Join(kargs, ", "))
 	return b.String()
 }
 

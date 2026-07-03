@@ -348,7 +348,7 @@ func (vm *VM) registerMatrixClass() {
 			c = int(args[1].(object.Integer))
 		}
 		return matOK(libmatrix.Build(r, c, func(i, j int) any {
-			res := vm.callBlock(blk, []object.Value{object.Integer(i), object.Integer(j)})
+			res := vm.callBlock(blk, []object.Value{object.IntValue(int64(i)), object.IntValue(int64(j))})
 			return numFromValue(res)
 		}))
 	})
@@ -391,10 +391,10 @@ func (vm *VM) registerMatrixClass() {
 	self := func(v object.Value) *Matrix { return v.(*Matrix) }
 
 	d("row_count", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).m.RowCount())
+		return object.IntValue(int64(self(v).m.RowCount()))
 	})
 	d("column_count", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).m.ColumnCount())
+		return object.IntValue(int64(self(v).m.ColumnCount()))
 	})
 	d("[]", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		n, ok := self(v).m.At(int(args[0].(object.Integer)), int(args[1].(object.Integer)))
@@ -429,7 +429,7 @@ func (vm *VM) registerMatrixClass() {
 			raise("LocalJumpError", "no block given (each_with_index)")
 		}
 		self(v).m.EachWithIndex(func(n libmatrix.Num, i, j int) {
-			vm.callBlock(blk, []object.Value{numToValue(n), object.Integer(i), object.Integer(j)})
+			vm.callBlock(blk, []object.Value{numToValue(n), object.IntValue(int64(i)), object.IntValue(int64(j))})
 		})
 		return v
 	})
@@ -508,7 +508,7 @@ func (vm *VM) registerMatrixClass() {
 	d("inv", invFn)
 
 	d("rank", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).m.Rank())
+		return object.IntValue(int64(self(v).m.Rank()))
 	})
 	d("round", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		n := 0
@@ -624,7 +624,7 @@ func (vm *VM) registerVectorClass() {
 		return numToValue(n)
 	})
 	d("size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).v.Size())
+		return object.IntValue(int64(self(v).v.Size()))
 	})
 	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {

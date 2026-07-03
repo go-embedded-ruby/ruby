@@ -832,9 +832,9 @@ func (vm *VM) installRegexp() {
 	reArg := func(v object.Value) *Regexp { return v.(*Regexp) }
 
 	// Regexp option constants (MRI values): IGNORECASE=1, EXTENDED=2, MULTILINE=4.
-	vm.cRegexp.consts["IGNORECASE"] = object.Integer(reIgnoreCase)
-	vm.cRegexp.consts["EXTENDED"] = object.Integer(reExtended)
-	vm.cRegexp.consts["MULTILINE"] = object.Integer(reMultiline)
+	vm.cRegexp.consts["IGNORECASE"] = object.IntValue(reIgnoreCase)
+	vm.cRegexp.consts["EXTENDED"] = object.IntValue(reExtended)
+	vm.cRegexp.consts["MULTILINE"] = object.IntValue(reMultiline)
 
 	// Regexp.new(str_or_regexp[, options]) / Regexp.compile(...) build a Regexp at
 	// runtime. A Regexp argument is copied (its options are reused); a String is
@@ -912,7 +912,7 @@ func (vm *VM) installRegexp() {
 		if strings.ContainsRune(f, 'm') {
 			bits |= reMultiline
 		}
-		return object.Integer(bits)
+		return object.IntValue(bits)
 	})
 	vm.cRegexp.define("casefold?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(strings.ContainsRune(reArg(self).flags, 'i'))
@@ -987,10 +987,10 @@ func (vm *VM) installRegexp() {
 		return object.NewString(m.subject[m.byteOff+m.md.End(0):])
 	})
 	vm.cMatchData.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(mdArg(self).md.NGroups() + 1)
+		return object.IntValue(int64(mdArg(self).md.NGroups() + 1))
 	})
 	vm.cMatchData.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(mdArg(self).md.NGroups() + 1)
+		return object.IntValue(int64(mdArg(self).md.NGroups() + 1))
 	})
 	vm.cMatchData.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
@@ -1081,7 +1081,7 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 		return object.NilV
 	}
 	vm.lastMatch = &MatchData{md: md, subject: s, re: re}
-	return object.Integer(byteToChar(s, md.Begin(0)))
+	return object.IntValue(int64(byteToChar(s, md.Begin(0))))
 }
 
 // stringRegexpIndex implements String#[] / #slice with a Regexp argument: the
@@ -1130,7 +1130,7 @@ func (m *MatchData) offset(i int64, end bool) object.Value {
 	if b < 0 {
 		return object.NilV
 	}
-	return object.Integer(byteToChar(m.subject, b+m.byteOff))
+	return object.IntValue(int64(byteToChar(m.subject, b+m.byteOff)))
 }
 
 // at implements MatchData#[]: an Integer selects a group by index; a String or

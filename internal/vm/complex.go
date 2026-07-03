@@ -24,7 +24,7 @@ func registerNumericComplexCompat(vm *VM, cNumeric *RClass) {
 		if f, ok := toFloat(self); ok && f < 0 {
 			return object.Float(math.Pi)
 		}
-		return object.Integer(0)
+		return object.IntValue(0)
 	}
 	phaseFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return phaseOf(self)
@@ -36,7 +36,7 @@ func registerNumericComplexCompat(vm *VM, cNumeric *RClass) {
 		return &object.Array{Elems: []object.Value{vm.send(self, "abs", nil, nil), phaseOf(self)}}
 	})
 	rectFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: []object.Value{self, object.Integer(0)}}
+		return &object.Array{Elems: []object.Value{self, object.IntValue(0)}}
 	}
 	cNumeric.define("rect", rectFn)
 	cNumeric.define("rectangular", rectFn)
@@ -46,7 +46,7 @@ func registerNumericComplexCompat(vm *VM, cNumeric *RClass) {
 	cNumeric.define("conjugate", conjFn)
 	cNumeric.define("conj", conjFn)
 	imagFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(0)
+		return object.IntValue(0)
 	}
 	cNumeric.define("imaginary", imagFn)
 	cNumeric.define("imag", imagFn)
@@ -67,7 +67,7 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 		return vm.send(self, op, []object.Value{other}, nil)
 	}
 	cmpZero := func(self object.Value) int {
-		c := vm.send(self, "<=>", []object.Value{object.Integer(0)}, nil)
+		c := vm.send(self, "<=>", []object.Value{object.IntValue(0)}, nil)
 		i, ok := c.(object.Integer)
 		if !ok {
 			raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(self).name)
@@ -86,7 +86,7 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 		return bin(self, "*", self)
 	})
 	cNumeric.define("-@", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return bin(object.Integer(0), "-", self)
+		return bin(object.IntValue(0), "-", self)
 	})
 	cNumeric.define("+@", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
@@ -131,7 +131,7 @@ func asComplexVal(v object.Value) (*object.Complex, bool) {
 		return c, true
 	}
 	if _, ok := toFloat(v); ok {
-		return &object.Complex{Re: v, Im: object.Integer(0)}, true
+		return &object.Complex{Re: v, Im: object.IntValue(0)}, true
 	}
 	return nil, false
 }
@@ -142,7 +142,7 @@ func complexEqual(c *object.Complex, other object.Value) bool {
 		return valueEqual(c.Re, oc.Re) && valueEqual(c.Im, oc.Im)
 	}
 	if _, ok := toFloat(other); ok {
-		return valueEqual(c.Im, object.Integer(0)) && valueEqual(c.Re, other)
+		return valueEqual(c.Im, object.IntValue(0)) && valueEqual(c.Re, other)
 	}
 	return false
 }
@@ -189,7 +189,7 @@ func complexFloat(v object.Value) float64 {
 func (vm *VM) registerComplex() {
 	vm.cObject.define("Complex", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		re := args[0]
-		im := object.Value(object.Integer(0))
+		im := object.Value(object.IntValue(0))
 		if len(args) > 1 {
 			im = args[1]
 		}

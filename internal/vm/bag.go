@@ -65,7 +65,7 @@ func (b *Bag) repr() string {
 }
 
 // itoa renders a non-negative count without pulling in strconv at the call site.
-func itoa(n int) string { return object.Integer(n).ToS() }
+func itoa(n int) string { return object.IntValue(int64(n)).ToS() }
 
 // newBag builds an empty Ruby Bag wrapper.
 func newBag() *Bag {
@@ -254,7 +254,7 @@ func (vm *VM) registerBag() {
 	d("delete", removeFn)
 
 	d("count", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).b.Count(setKey(args[0])))
+		return object.IntValue(int64(self(v).b.Count(setKey(args[0]))))
 	})
 
 	includeFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -264,13 +264,13 @@ func (vm *VM) registerBag() {
 	d("member?", includeFn)
 
 	sizeFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).b.Len())
+		return object.IntValue(int64(self(v).b.Len()))
 	}
 	d("size", sizeFn)
 	d("length", sizeFn)
 
 	d("distinct_size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).b.DistinctLen())
+		return object.IntValue(int64(self(v).b.DistinctLen()))
 	})
 	d("empty?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).b.IsEmpty())
@@ -290,7 +290,7 @@ func (vm *VM) registerBag() {
 		}
 		bag := self(v)
 		for _, k := range bag.sortedKeys() {
-			pair := &object.Array{Elems: []object.Value{bag.vals[k], object.Integer(bag.b.Count(k))}}
+			pair := &object.Array{Elems: []object.Value{bag.vals[k], object.IntValue(int64(bag.b.Count(k)))}}
 			vm.callBlock(blk, []object.Value{pair})
 		}
 		return bag
@@ -373,7 +373,7 @@ func (vm *VM) registerBag() {
 		}
 		out := make([]object.Value, len(entries))
 		for i, e := range entries {
-			out[i] = &object.Array{Elems: []object.Value{e.val, object.Integer(e.count)}}
+			out[i] = &object.Array{Elems: []object.Value{e.val, object.IntValue(int64(e.count))}}
 		}
 		return &object.Array{Elems: out}
 	})

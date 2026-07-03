@@ -16,8 +16,8 @@ import (
 func (vm *VM) registerMarshal() {
 	mod := newClass("Marshal", nil)
 	mod.isModule = true
-	mod.consts["MAJOR_VERSION"] = object.Integer(4)
-	mod.consts["MINOR_VERSION"] = object.Integer(8)
+	mod.consts["MAJOR_VERSION"] = object.IntValue(4)
+	mod.consts["MINOR_VERSION"] = object.IntValue(8)
 	vm.consts["Marshal"] = mod
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 

@@ -171,7 +171,7 @@ func bigDecimalCmp(a, b *bigdecimal.Decimal) object.Value {
 	if c == -2 {
 		return object.NilV
 	}
-	return object.Integer(c)
+	return object.IntValue(int64(c))
 }
 
 // decimalToInteger converts a Decimal known to be integer-valued to a Ruby
@@ -236,7 +236,7 @@ func (vm *VM) registerBigDecimal() {
 		"SIGN_POSITIVE_FINITE": 2, "SIGN_NEGATIVE_FINITE": -2,
 		"SIGN_POSITIVE_INFINITE": 3, "SIGN_NEGATIVE_INFINITE": -3,
 	} {
-		vm.cBigDecimal.consts[name] = object.Integer(code)
+		vm.cBigDecimal.consts[name] = object.IntValue(code)
 	}
 	vm.cBigDecimal.consts["NAN"] = newDecimalString("NaN")
 	vm.cBigDecimal.consts["INFINITY"] = newDecimalString("Infinity")
@@ -390,20 +390,20 @@ func (vm *VM) registerBigDecimal() {
 	d("split", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		sign, digits, base, exp := self(v).d.SplitParts()
 		return &object.Array{Elems: []object.Value{
-			object.Integer(sign), object.NewString(digits),
-			object.Integer(base), object.Integer(exp),
+			object.IntValue(int64(sign)), object.NewString(digits),
+			object.IntValue(int64(base)), object.IntValue(int64(exp)),
 		}}
 	})
 	// sign (-> Sign): MRI's BigDecimal#sign code, exponent (-> Exponent),
 	// precision (-> Precision).
 	d("sign", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).d.Sign())
+		return object.IntValue(int64(self(v).d.Sign()))
 	})
 	d("exponent", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).d.Exponent())
+		return object.IntValue(int64(self(v).d.Exponent()))
 	})
 	d("precision", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).d.Precision())
+		return object.IntValue(int64(self(v).d.Precision()))
 	})
 
 	// nan? / infinite? / finite? / zero?: the IEEE-style specials. infinite?
@@ -413,7 +413,7 @@ func (vm *VM) registerBigDecimal() {
 	})
 	d("infinite?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		if i := self(v).d.IsInfinite(); i != 0 {
-			return object.Integer(i)
+			return object.IntValue(int64(i))
 		}
 		return object.NilV
 	})

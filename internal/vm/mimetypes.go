@@ -67,7 +67,7 @@ func (vm *VM) registerMIMETypes() {
 	// MIME::Types.count returns the size of the registry (the gem's Enumerable
 	// count / registry length).
 	def("count", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(mimeDefault().Len())
+		return object.IntValue(int64(mimeDefault().Len()))
 	})
 }
 

@@ -182,7 +182,7 @@ func (vm *VM) registerActiveRecordBaseModelMethods(base *RClass) {
 		if err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 		}
-		return object.Integer(n)
+		return object.IntValue(n)
 	})
 	sm("first", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := vm.arModelForClass(self.(*RClass))

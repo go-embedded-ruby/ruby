@@ -242,9 +242,9 @@ func dryFromGo(vm *VM, v any) object.Value {
 	case bool:
 		return object.Bool(n)
 	case int:
-		return object.Integer(int64(n))
+		return object.IntValue(int64(n))
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case *big.Int:
 		return object.NormInt(n)
 	case float64:

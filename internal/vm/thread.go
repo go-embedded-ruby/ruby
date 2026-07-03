@@ -443,16 +443,16 @@ func (vm *VM) registerQueue() {
 	cQueue.define("shift", pop)
 	cQueue.define("deq", pop)
 	cQueue.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(self.(*RQueue).items))
+		return object.IntValue(int64(len(self.(*RQueue).items)))
 	})
 	cQueue.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(self.(*RQueue).items))
+		return object.IntValue(int64(len(self.(*RQueue).items)))
 	})
 	cQueue.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(self.(*RQueue).items) == 0)
 	})
 	cQueue.define("num_waiting", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(len(self.(*RQueue).waitq))
+		return object.IntValue(int64(len(self.(*RQueue).waitq)))
 	})
 	cQueue.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		self.(*RQueue).items = nil
@@ -518,6 +518,6 @@ func (vm *VM) registerSleep() {
 			}
 		}
 		vm.threadBlock(func() { time.Sleep(time.Duration(secs * float64(time.Second))) })
-		return object.Integer(int64(secs))
+		return object.IntValue(int64(secs))
 	})
 }

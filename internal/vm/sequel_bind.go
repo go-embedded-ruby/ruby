@@ -163,9 +163,9 @@ func sequelRubyValue(v sequel.Value) object.Value {
 	case bool:
 		return object.Bool(n)
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case int:
-		return object.Integer(int64(n))
+		return object.IntValue(int64(n))
 	case float64:
 		return object.Float(n)
 	case string:
@@ -217,5 +217,5 @@ func sequelCountValue(rows []map[string]sequel.Value) object.Value {
 			return sequelRubyValue(val)
 		}
 	}
-	return object.Integer(0)
+	return object.IntValue(0)
 }

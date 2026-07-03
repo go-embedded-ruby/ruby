@@ -106,7 +106,7 @@ func (vm *VM) registerTime() {
 	self := func(v object.Value) *Time { return v.(*Time) }
 
 	d("to_i", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).t.ToUnix())
+		return object.IntValue(self(v).t.ToUnix())
 	})
 	d("to_f", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(float64(self(v).t.ToUnix()))
@@ -128,7 +128,7 @@ func (vm *VM) registerTime() {
 	field := func(layout string) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 			n, _ := strconv.ParseInt(self(v).t.Format(layout), 10, 64)
-			return object.Integer(n)
+			return object.IntValue(n)
 		}
 	}
 	d("year", field("2006"))
@@ -144,7 +144,7 @@ func (vm *VM) registerTime() {
 	// the weekday name ("Mon", … via the Mon directive) and mapping it to MRI's
 	// numbering. Following the year/month/… accessors, this stays Format-driven.
 	d("wday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(weekday(self(v)))
+		return object.IntValue(weekday(self(v)))
 	})
 	// Weekday predicates: sunday? … saturday?, booleans off wday.
 	weekdayPred := func(want int64) NativeFn {
@@ -176,10 +176,10 @@ func (vm *VM) registerTime() {
 	// zero. These let Puppet's report summary (Time.now.tv_sec) and Time#to_yaml
 	// emit a value without raising.
 	d("tv_sec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).t.ToUnix())
+		return object.IntValue(self(v).t.ToUnix())
 	})
 	zeroFn := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(0)
+		return object.IntValue(0)
 	}
 	d("tv_usec", zeroFn)
 	d("usec", zeroFn)
@@ -209,7 +209,7 @@ func (vm *VM) registerTime() {
 		if !ok {
 			return object.NilV
 		}
-		return object.Integer(timeCmp(self(v), other))
+		return object.IntValue(timeCmp(self(v), other))
 	})
 	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).t.Before(timeArg(args[0]).t))
@@ -243,7 +243,7 @@ func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
 		return timeShift(a, timeSeconds(b))
 	case bytecode.OpSub:
 		if other, ok := b.(*Time); ok {
-			return object.Integer(a.t.Sub(other.t).ToSeconds())
+			return object.IntValue(a.t.Sub(other.t).ToSeconds())
 		}
 		return timeShift(a, -timeSeconds(b))
 	}

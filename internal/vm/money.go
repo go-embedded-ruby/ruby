@@ -78,10 +78,10 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 	d := func(name string, fn NativeFn) { cls.define(name, fn) }
 
 	d("cents", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(moneyOf(self).Cents())
+		return object.IntValue(moneyOf(self).Cents())
 	})
 	d("fractional", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(moneyOf(self).Fractional())
+		return object.IntValue(moneyOf(self).Fractional())
 	})
 	d("amount", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(ratToFloat(moneyOf(self).Amount()))
@@ -90,7 +90,7 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 		return object.Float(moneyOf(self).ToF())
 	})
 	d("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(moneyOf(self).ToI())
+		return object.IntValue(moneyOf(self).ToI())
 	})
 	d("currency", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Currency{c: moneyOf(self).Currency()}
@@ -135,7 +135,7 @@ func (vm *VM) registerMoneyInstance(cls *RClass) {
 		if err != nil {
 			return object.NilV
 		}
-		return object.Integer(c)
+		return object.IntValue(int64(c))
 	})
 	d("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := args[0].(*Money)
@@ -198,7 +198,7 @@ func (vm *VM) registerMoneyCurrency(cls *RClass) {
 		return object.NewString(self.(*Currency).c.SymbolOrDefault())
 	})
 	d("subunit_to_unit", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*Currency).c.SubunitToUnit)
+		return object.IntValue(self.(*Currency).c.SubunitToUnit)
 	})
 	d("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self.(*Currency).c.String())

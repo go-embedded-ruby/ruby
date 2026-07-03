@@ -468,13 +468,13 @@ func (vm *VM) registerLogger() {
 		if n < 0 {
 			return object.NilV
 		}
-		return object.Integer(n)
+		return object.IntValue(int64(n))
 	})
 
 	// level / level= / sev_threshold= : the gating threshold, coercing a String /
 	// Symbol / Integer like MRI's Severity.coerce.
 	d("level", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self(v).l.Level)
+		return object.IntValue(int64(self(v).l.Level))
 	})
 	setLevel := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		lo := self(v)
@@ -617,8 +617,8 @@ func (vm *VM) registerLoggerSeverity(cls *RClass) {
 		"DEBUG": lg.DEBUG, "INFO": lg.INFO, "WARN": lg.WARN,
 		"ERROR": lg.ERROR, "FATAL": lg.FATAL, "UNKNOWN": lg.UNKNOWN,
 	} {
-		sev.consts[name] = object.Integer(val)
-		cls.consts[name] = object.Integer(val)
+		sev.consts[name] = object.IntValue(int64(val))
+		cls.consts[name] = object.IntValue(int64(val))
 	}
 }
 

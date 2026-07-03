@@ -222,7 +222,7 @@ func (vm *VM) registerActiveRecordRelation(mod *RClass) {
 		if err != nil {
 			raise("ActiveRecord::StatementInvalid", "%s", err.Error())
 		}
-		return object.Integer(n)
+		return object.IntValue(n)
 	})
 	cls.define("exists?", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		ok, err := activerecord.Exists(vm.arRequireAdapter(), self(v).r)
@@ -338,7 +338,7 @@ func (vm *VM) registerActiveRecordErrorsClass(mod *RClass) {
 		return object.Bool(self(v).Empty())
 	})
 	cls.define("count", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(self(v).Count()))
+		return object.IntValue(int64(self(v).Count()))
 	})
 	cls.define("full_messages", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return arStrings(self(v).FullMessages())

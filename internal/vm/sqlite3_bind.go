@@ -176,7 +176,7 @@ func sqlite3Value(vm *VM, v sqlite3.Value) object.Value {
 	case nil:
 		return object.NilV
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case float64:
 		return object.Float(n)
 	case string:

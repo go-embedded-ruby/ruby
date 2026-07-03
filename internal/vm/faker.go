@@ -160,10 +160,10 @@ func (vm *VM) registerFakerLorem(mod *RClass) {
 func (vm *VM) registerFakerNumber(mod *RClass) {
 	num := vm.fakerNamespace(mod, "Number")
 	fakerNS(num, "number", func(vm *VM, args []object.Value) object.Value {
-		return object.Integer(vm.fakerGen().Number().Number(fakerIntArg(args, 0, 10)))
+		return object.IntValue(vm.fakerGen().Number().Number(fakerIntArg(args, 0, 10)))
 	})
 	fakerNS(num, "digit", func(vm *VM, _ []object.Value) object.Value {
-		return object.Integer(vm.fakerGen().Number().Digit())
+		return object.IntValue(int64(vm.fakerGen().Number().Digit()))
 	})
 	fakerNS(num, "hexadecimal", func(vm *VM, args []object.Value) object.Value {
 		return object.NewString(vm.fakerGen().Number().Hexadecimal(fakerIntArg(args, 0, 6)))

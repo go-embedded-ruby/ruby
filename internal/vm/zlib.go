@@ -103,7 +103,7 @@ func (vm *VM) registerZlib() {
 		"FINISH":              gozlib.Finish,
 	}
 	for name, v := range ints {
-		mod.consts[name] = object.Integer(int64(v))
+		mod.consts[name] = object.IntValue(int64(v))
 	}
 	mod.consts["VERSION"] = object.NewString(gozlib.Version)
 	mod.consts["ZLIB_VERSION"] = object.NewString(gozlib.ZlibVersion)
@@ -127,17 +127,17 @@ func (vm *VM) registerZlib() {
 
 	// Zlib.crc32(data = "", crc = 0) / Zlib.adler32(data = "", adler = 1).
 	modFn("crc32", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(gozlib.Crc32(bytesArg(args, 0), uint32(intAt(args, 1, 0)))))
+		return object.IntValue(int64(gozlib.Crc32(bytesArg(args, 0), uint32(intAt(args, 1, 0)))))
 	})
 	modFn("adler32", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(gozlib.Adler32(bytesArg(args, 0), uint32(intAt(args, 1, 1)))))
+		return object.IntValue(int64(gozlib.Adler32(bytesArg(args, 0), uint32(intAt(args, 1, 1)))))
 	})
 	// Zlib.crc32_combine(crc1, crc2, len2) / adler32_combine(adler1, adler2, len2).
 	modFn("crc32_combine", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(gozlib.Crc32Combine(uint32(intArg(args[0])), uint32(intArg(args[1])), intArg(args[2]))))
+		return object.IntValue(int64(gozlib.Crc32Combine(uint32(intArg(args[0])), uint32(intArg(args[1])), intArg(args[2]))))
 	})
 	modFn("adler32_combine", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(gozlib.Adler32Combine(uint32(intArg(args[0])), uint32(intArg(args[1])), intArg(args[2]))))
+		return object.IntValue(int64(gozlib.Adler32Combine(uint32(intArg(args[0])), uint32(intArg(args[1])), intArg(args[2]))))
 	})
 
 	// Zlib.deflate(data, level = DEFAULT_COMPRESSION) — one-shot compress.
@@ -238,13 +238,13 @@ func (vm *VM) registerZlib() {
 		return object.NewStringBytes(append(takePending(self), out...))
 	})
 	deflate.define("total_in", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(selfDeflater(self).TotalIn())
+		return object.IntValue(selfDeflater(self).TotalIn())
 	})
 	deflate.define("total_out", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(selfDeflater(self).TotalOut())
+		return object.IntValue(selfDeflater(self).TotalOut())
 	})
 	deflate.define("adler", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(selfDeflater(self).Adler()))
+		return object.IntValue(int64(selfDeflater(self).Adler()))
 	})
 	deflate.define("finished?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(selfDeflater(self).Finished())
@@ -301,13 +301,13 @@ func (vm *VM) registerZlib() {
 		return object.NewStringBytes(append(takeInflated(self), out...))
 	})
 	inflate.define("total_in", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(selfInflater(self).TotalIn())
+		return object.IntValue(selfInflater(self).TotalIn())
 	})
 	inflate.define("total_out", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(selfInflater(self).TotalOut())
+		return object.IntValue(selfInflater(self).TotalOut())
 	})
 	inflate.define("adler", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(int64(selfInflater(self).Adler()))
+		return object.IntValue(int64(selfInflater(self).Adler()))
 	})
 	inflate.define("finished?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(selfInflater(self).Finished())

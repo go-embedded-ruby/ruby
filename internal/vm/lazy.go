@@ -146,7 +146,7 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
 			if !unbounded && i > hi {
 				return nil, false
 			}
-			v := object.Integer(i)
+			v := object.IntValue(i)
 			i++
 			return v, true
 		}

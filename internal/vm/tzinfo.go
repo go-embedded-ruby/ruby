@@ -109,7 +109,7 @@ func (vm *VM) registerTZInfo() {
 		return &TimezonePeriod{p: self.(*Timezone).tz.CurrentPeriod()}
 	})
 	tzCls.define("utc_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*Timezone).tz.UTCOffset())
+		return object.IntValue(int64(self.(*Timezone).tz.UTCOffset()))
 	})
 	tzCls.define("abbreviation", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(self.(*Timezone).tz.Abbreviation(rubyTimeArg(args)))
@@ -130,25 +130,25 @@ func (vm *VM) registerTZInfo() {
 		return object.Bool(self.(*TimezonePeriod).p.DST())
 	})
 	pCls.define("base_utc_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*TimezonePeriod).p.BaseUTCOffset())
+		return object.IntValue(int64(self.(*TimezonePeriod).p.BaseUTCOffset()))
 	})
 	pCls.define("std_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*TimezonePeriod).p.STDOffset())
+		return object.IntValue(int64(self.(*TimezonePeriod).p.STDOffset()))
 	})
 	pCls.define("utc_total_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*TimezonePeriod).p.UTCTotalOffset())
+		return object.IntValue(int64(self.(*TimezonePeriod).p.UTCTotalOffset()))
 	})
 
 	// TZInfo::TimezoneOffset instance methods.
 	oCls := vm.consts["TZInfo::TimezoneOffset"].(*RClass)
 	oCls.define("base_utc_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*TimezoneOffset).o.BaseUTCOffset)
+		return object.IntValue(int64(self.(*TimezoneOffset).o.BaseUTCOffset))
 	})
 	oCls.define("std_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*TimezoneOffset).o.STDOffset)
+		return object.IntValue(int64(self.(*TimezoneOffset).o.STDOffset))
 	})
 	oCls.define("utc_total_offset", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*TimezoneOffset).o.UTCTotalOffset())
+		return object.IntValue(int64(self.(*TimezoneOffset).o.UTCTotalOffset()))
 	})
 	oCls.define("abbreviation", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self.(*TimezoneOffset).o.Abbreviation)

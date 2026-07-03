@@ -65,7 +65,7 @@ func (c *rubyConn) Write(p []byte) (int, error) {
 // Read fills p from the Ruby object's #read(len(p)); a nil / empty reply is EOF.
 // The library's bufio.Reader supplies a large p, so the reply always fits.
 func (c *rubyConn) Read(p []byte) (int, error) {
-	rv := c.vm.send(c.obj, "read", []object.Value{object.Integer(len(p))}, nil)
+	rv := c.vm.send(c.obj, "read", []object.Value{object.IntValue(int64(len(p)))}, nil)
 	data := redisReadBytes(rv)
 	if len(data) == 0 {
 		return 0, io.EOF
@@ -134,7 +134,7 @@ func (vm *VM) redisValue(v any) object.Value {
 	case bool:
 		return object.Bool(n)
 	case int64:
-		return object.Integer(n)
+		return object.IntValue(n)
 	case float64:
 		return object.Float(n)
 	case *redis.VerbatimString:

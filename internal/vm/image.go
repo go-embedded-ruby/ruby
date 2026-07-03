@@ -76,15 +76,15 @@ func (vm *VM) registerImage() {
 	d := func(name string, fn NativeFn) { vm.cImage.define(name, fn) }
 
 	d("width", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(imgOf(v).Bounds().Dx())
+		return object.IntValue(int64(imgOf(v).Bounds().Dx()))
 	})
 	d("height", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(imgOf(v).Bounds().Dy())
+		return object.IntValue(int64(imgOf(v).Bounds().Dy()))
 	})
 	d("get", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		c := imgOf(v).RGBAAt(int(intArg(args[0])), int(intArg(args[1])))
 		return &object.Array{Elems: []object.Value{
-			object.Integer(c.R), object.Integer(c.G), object.Integer(c.B), object.Integer(c.A)}}
+			object.IntValue(int64(c.R)), object.IntValue(int64(c.G)), object.IntValue(int64(c.B)), object.IntValue(int64(c.A))}}
 	})
 	d("set", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		a := uint8(255)

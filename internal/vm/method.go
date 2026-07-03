@@ -45,7 +45,7 @@ func (vm *VM) registerMethod() {
 		return object.Symbol(self.(*BoundMethod).name)
 	})
 	vm.cMethod.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(methodArity(self.(*BoundMethod).m))
+		return object.IntValue(int64(methodArity(self.(*BoundMethod).m)))
 	})
 	vm.cMethod.define("owner", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*BoundMethod).m.owner // always non-nil for a resolved method

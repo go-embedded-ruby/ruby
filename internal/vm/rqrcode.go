@@ -71,12 +71,12 @@ func (vm *VM) registerRQRCode() {
 
 	// #module_count returns the side length in modules.
 	cls.define("module_count", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*RQRCode).q.ModuleCount)
+		return object.IntValue(int64(self.(*RQRCode).q.ModuleCount))
 	})
 
 	// #version returns the QR version (1..40).
 	cls.define("version", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(self.(*RQRCode).q.Version)
+		return object.IntValue(int64(self.(*RQRCode).q.Version))
 	})
 
 	// #checked?(row, col) reports whether the module at (row, col) is dark. An

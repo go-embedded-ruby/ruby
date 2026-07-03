@@ -409,7 +409,7 @@ func (d *SequelDatasetObj) lastInsertID() object.Value {
 		return object.NilV
 	}
 	id, _ := sw.db.LastInsertRowID()
-	return object.Integer(id)
+	return object.IntValue(id)
 }
 
 // changes returns the SQLite affected-row count when backed by a real executor,
@@ -421,5 +421,5 @@ func (d *SequelDatasetObj) changes() object.Value {
 		return object.NilV
 	}
 	n, _ := sw.db.Changes()
-	return object.Integer(n)
+	return object.IntValue(n)
 }

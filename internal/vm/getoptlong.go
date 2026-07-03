@@ -63,12 +63,12 @@ func (vm *VM) registerGetoptLong() {
 	c := newClass("GetoptLong", vm.cObject)
 	vm.cGetoptLong = c
 	vm.consts["GetoptLong"] = c
-	c.consts["NO_ARGUMENT"] = object.Integer(getoptlong.NoArgument)
-	c.consts["REQUIRED_ARGUMENT"] = object.Integer(getoptlong.RequiredArgument)
-	c.consts["OPTIONAL_ARGUMENT"] = object.Integer(getoptlong.OptionalArgument)
-	c.consts["REQUIRE_ORDER"] = object.Integer(getoptlong.RequireOrder)
-	c.consts["PERMUTE"] = object.Integer(getoptlong.Permute)
-	c.consts["RETURN_IN_ORDER"] = object.Integer(getoptlong.ReturnInOrder)
+	c.consts["NO_ARGUMENT"] = object.IntValue(int64(getoptlong.NoArgument))
+	c.consts["REQUIRED_ARGUMENT"] = object.IntValue(int64(getoptlong.RequiredArgument))
+	c.consts["OPTIONAL_ARGUMENT"] = object.IntValue(int64(getoptlong.OptionalArgument))
+	c.consts["REQUIRE_ORDER"] = object.IntValue(int64(getoptlong.RequireOrder))
+	c.consts["PERMUTE"] = object.IntValue(int64(getoptlong.Permute))
+	c.consts["RETURN_IN_ORDER"] = object.IntValue(int64(getoptlong.ReturnInOrder))
 	errClass := newClass("GetoptLong::Error", vm.consts["StandardError"].(*RClass))
 	c.consts["Error"] = errClass
 	c.consts["AmbiguousOption"] = newClass("GetoptLong::AmbiguousOption", errClass)
@@ -153,7 +153,7 @@ func (vm *VM) registerGetoptLong() {
 		return args[0]
 	})
 	d("ordering", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Integer(golOf(v).p.Ordering())
+		return object.IntValue(int64(golOf(v).p.Ordering()))
 	})
 
 	// quiet= / quiet? suppress / report the stderr error reporting; a quiet parser
