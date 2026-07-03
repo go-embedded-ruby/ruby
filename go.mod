@@ -32,7 +32,7 @@ require (
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
-	github.com/go-ruby-format/format v0.0.0-20260629094031-e294417ab31c
+	github.com/go-ruby-format/format v0.0.0-20260703115518-8adcf1b4af5f
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
 	github.com/go-ruby-grape/grape v0.0.0-20260702151528-455377c8c7c3
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
@@ -88,7 +88,7 @@ require (
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
-	github.com/go-ruby-zlib/zlib v0.0.0-20260630052127-b4ac0c1ab281
+	github.com/go-ruby-zlib/zlib v0.0.0-20260703114753-dbf176c108fc
 )
 
 require (
@@ -99,6 +99,7 @@ require (
 	github.com/go-simd/base64 v0.0.0-20260627054622-4058a7093f4c // indirect
 	github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

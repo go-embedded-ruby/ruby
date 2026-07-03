@@ -39,6 +39,31 @@ func TestFormatValueKind(t *testing.T) {
 	}
 }
 
+// TestFormatValueInt64Fast covers every arm of formatValue.Int64Fast, the
+// allocation-free fast path the library's integer conversions take: a native
+// Integer and an int64-range Bignum report their value; an out-of-range Bignum
+// and any non-integer decline so the formatter uses the precise Int() path.
+func TestFormatValueInt64Fast(t *testing.T) {
+	big64 := new(big.Int).Lsh(big.NewInt(1), 100) // 2^100, far beyond int64
+	cases := []struct {
+		v      object.Value
+		wantN  int64
+		wantOK bool
+	}{
+		{object.Integer(-42), -42, true},
+		{&object.Bignum{I: big.NewInt(7)}, 7, true}, // Bignum that fits int64
+		{&object.Bignum{I: big64}, 0, false},        // Bignum exceeding int64
+		{object.Float(1.5), 0, false},               // non-integer declines
+		{object.NewString("9"), 0, false},           // String declines (Int() parses it)
+	}
+	for _, c := range cases {
+		n, ok := (formatValue{c.v}).Int64Fast()
+		if n != c.wantN || ok != c.wantOK {
+			t.Errorf("Int64Fast(%T=%v) = (%d, %v), want (%d, %v)", c.v, c.v, n, ok, c.wantN, c.wantOK)
+		}
+	}
+}
+
 // TestFormatValueInspect covers formatValue.Inspect (the %p backing), which the
 // library calls when rendering an inspected value.
 func TestFormatValueInspect(t *testing.T) {

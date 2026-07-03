@@ -53,6 +53,25 @@ func (fv formatValue) Kind() format.Kind {
 	}
 }
 
+// Int64Fast reports a genuine int64-range Ruby Integer without allocating a
+// *big.Int, letting the library's integer conversions (%d/%x/%o/%b/…) skip
+// math/big for the common small-integer case. A Bignum reports its int64 value
+// only when it fits; every other value (Float, String, etc.) reports ok=false so
+// the formatter uses the precise Int() path with its coercion and error rules.
+func (fv formatValue) Int64Fast() (int64, bool) {
+	switch x := fv.v.(type) {
+	case object.Integer:
+		return int64(x), true
+	case *object.Bignum:
+		if x.I.IsInt64() {
+			return x.I.Int64(), true
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
+}
+
 // ToS is the Ruby to_s rendering (%s and the textual value of %{name}).
 func (fv formatValue) ToS() string { return fv.v.ToS() }
 
@@ -173,9 +192,13 @@ func formatNamedArgs(args []object.Value) *format.NamedArgs {
 // single entry point Kernel#sprintf / Kernel#format / IO#printf / String#% all
 // funnel through, so their formatting behaviour is identical.
 func formatString(fmtStr string, args []object.Value) string {
+	// One backing array of wrappers, referenced by pointer, so wrapping N
+	// operands costs a single allocation instead of one interface box per arg.
+	wraps := make([]formatValue, len(args))
 	vals := make([]format.Value, len(args))
 	for i, a := range args {
-		vals[i] = formatValue{a}
+		wraps[i].v = a
+		vals[i] = &wraps[i]
 	}
 	out, err := format.Format(fmtStr, vals, formatNamedArgs(args))
 	if err != nil {
