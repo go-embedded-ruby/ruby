@@ -1924,8 +1924,25 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each")
 		}
 		a := self.(*object.Array)
+		if blk.native != nil {
+			// A synthesized native block (e.g. &:to_s, a Go-compiled AOT closure)
+			// runs opaque Go code that could retain the args slice, so each yield
+			// gets its own fresh slice.
+			for _, e := range a.Elems {
+				vm.callBlock(blk, []object.Value{e})
+			}
+			return a
+		}
+		// An interpreted block: exec copies the yielded value into the block's env
+		// slots (or, for a *splat/auto-splat param, into a freshly built rest Array)
+		// synchronously at frame entry, before any block bytecode runs, and never
+		// aliases the passed slice. So a single 1-element scratch slice, private to
+		// this call (re-entrant each gets its own), can be reused across iterations
+		// without a capturing block observing the next iteration's overwrite.
+		scratch := make([]object.Value, 1)
 		for _, e := range a.Elems {
-			vm.callBlock(blk, []object.Value{e})
+			scratch[0] = e
+			vm.callBlock(blk, scratch)
 		}
 		return a
 	})
