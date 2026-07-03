@@ -40,40 +40,60 @@ go test ./internal/vm/ -run=NONE -bench=Fib -cpuprofile=cpu.prof   # then: go to
 
 | File | Exercises | AOT-eligible |
 | --- | --- | --- |
-| `fib.rb` | recursion + method dispatch (call-bound) | yes (integer kernel) |
-| `loop.rb` | tight integer `while` loop in a method | yes (integer kernel) |
+| `fib.rb` | recursion + method dispatch (call-bound) | yes (L3 integer kernel) |
+| `loop.rb` | tight integer `while` loop in a method | yes (L3 integer kernel) |
 | `dispatch.rb` | monomorphic method calls into an object | no (call-bound) |
 | `alloc.rb` | short-lived object allocation + GC pressure | no |
 | `proc.rb` | `Proc#call` invocation in a loop | no (proc dispatch) |
-| `blocks.rb` | block iteration (`Integer#times`) | no (block dispatch) |
-| `array.rb` | `map`/`select`/`reduce` pipeline | no (Enumerable) |
-| `hash.rb` | Hash insertion + lookup | no |
-| `strings.rb` | string interpolation + `join` | no |
-| `wordcount.rb` | split + hash counting + sum (mixed) | no |
+| `blocks.rb` | block iteration (`Integer#times`) | yes (L2 top level + block) |
+| `array.rb` | `map`/`select`/`reduce` pipeline | yes (L2 driver; native Enumerable stays) |
+| `hash.rb` | Hash insertion + lookup | yes (L2 top level; native Hash stays) |
+| `strings.rb` | string interpolation + `join` | yes (L2 top level + block) |
+| `wordcount.rb` | split + hash counting + sum (mixed) | yes (L2 top level + block) |
 | `mandelbrot.rb` | benchmarks-game float kernel (compute-bound) | not yet (float) |
 
 The formalized parity report — methodology, the full rbgo / MRI / MRI+YJIT
 table, root-cause analysis and action items — lives in
 [`../BENCHMARKS.md`](../BENCHMARKS.md).
 
-## Current results (Apple M-series, Ruby 4.0.5, best of 3)
+## Current results (Apple M-series, Ruby 4.0.5, best of 5, 2026-07-03)
 
 | Benchmark | rbgo | rbgo+AOT | MRI | MRI+YJIT | AOT/MRI | AOT/YJIT |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| array | 0.34s | 0.35s | 0.09s | 0.06s | 3.89× | 5.83× |
-| blocks | 0.87s | 0.87s | 0.25s | 0.23s | 3.48× | 3.78× |
-| **fib** | 3.48s | **0.02s** | 0.49s | 0.11s | **0.04×** | **0.18×** |
-| hash | 0.26s | 0.25s | 0.09s | 0.09s | 2.78× | 2.78× |
-| **loop** | 1.36s | **0.01s** | 0.37s | 0.36s | **0.03×** | **0.03×** |
-| strings | 0.04s | 0.04s | 0.04s | 0.04s | 1.00× | 1.00× |
-| wordcount | 0.12s | 0.12s | 0.09s | 0.08s | 1.33× | 1.50× |
+| array | 0.60s | 0.46s | 0.09s | 0.06s | 5.11× | 7.67× |
+| **blocks** | 0.90s | **0.23s** | 0.25s | 0.22s | **0.92×** | **1.05×** |
+| **fib** | 3.29s | **0.03s** | 0.48s | 0.10s | **0.06×** | **0.30×** |
+| hash | 0.40s | 0.27s | 0.09s | 0.08s | 3.00× | 3.38× |
+| **loop** | 1.77s | **0.02s** | 0.36s | 0.36s | **0.06×** | **0.06×** |
+| strings | 0.05s | 0.05s | 0.04s | 0.04s | 1.25× | 1.25× |
+| wordcount | 0.16s | 0.12s | 0.08s | 0.08s | 1.50× | 1.50× |
 
 The two method-based integer workloads (`fib`, `loop`) compile to unboxed
-`int64` kernels: **`fib` is ~25× faster than MRI and ~5.5× faster than YJIT;
-`loop` is ~36× faster than both.** The interpreter-bound rows (`array`/`blocks`/
-`hash`/`strings`/`wordcount`) define no hot methods, so the AOT binary is the
-same interpreter — `rbgo+AOT ≈ rbgo`, as expected (nothing was lowered). Those
-rows still run on the interpreter at ~3–6× MRI, the clean-Go-interpreter floor.
+`int64` kernels (level 3): **`fib` beats MRI ~16× and YJIT ~3×; `loop` beats both
+~18×.**
+
+The other rows are *interpreter-bound* — their top-level/block code defines no
+hot method, so levels 1/3 never touched them and they ran at the interpreter
+floor (`rbgo+AOT ≈ rbgo`). **Level 2 lowers that top-level + block code to Go**
+(see [docs/aot-compiler.md](../docs/aot-compiler.md)), and the effect splits by
+where each row spends its time (before → after this same machine):
+
+- **`blocks` 3.6× → 0.9× MRI** (0.89s → 0.23s): its hot work is `t += i`,
+  arithmetic in the block body, which Level 2 fully compiles — it now **beats the
+  MRI interpreter and matches YJIT**.
+- **`hash` 4.4× → 3.0×** (0.40 → 0.27s), **`array` 6.7× → 5.1×** (0.60 → 0.46s),
+  **`wordcount` 2.0× → 1.5×** (0.16 → 0.12s): Level 2 removes the driver/dispatch
+  overhead (each ~25–33 % faster), but these stay near the floor because their
+  hot cost is the **native runtime methods themselves** — `Hash#[]=`/`#[]`,
+  `Array#map`/`#select`/`#reduce` allocating intermediate arrays — which Level 2
+  still routes through the runtime (for identical semantics) and which MRI runs
+  in hand-tuned C. Closing these further needs specialised container kernels, not
+  more driver lowering.
+- **`strings`** is unchanged: at 0.05s it is dominated by process start, so
+  lowering its `<<` block body is in the noise.
+
+The AOT-before column equalled `rbgo` for every interpreter-bound row (nothing
+was lowered); AOT-after is the Level-2 binary, built and timed identically.
 
 rbgo also starts faster than MRI (~0 vs ~30 ms: a single static binary with no
 gem/`$LOAD_PATH` scan), which is why string/IO-bound scripts already match.
@@ -116,6 +136,15 @@ static binary through the Go toolchain, is to **compile Ruby methods to Go at
 - **Level 1** lowers any method's bytecode to straight-line Go (locals as Go
   variables, a direct call for self-recursion); semantics stay identical because
   operators still go through the runtime. This alone beats the MRI interpreter.
+- **Level 2** lowers a program's *top-level code and the blocks it passes* to Go
+  — the `<main>` ISeq becomes `aotMain`, and each literal block an inline Go
+  closure (a native `Proc`); outer locals a block closes over are captured
+  lexically, and every send carries an inline method cache. This reaches the
+  block-/string-/array-/hash-heavy "real app code" that defines no hot method:
+  **`blocks` drops from 3.5× to 0.9× MRI** (now beats the interpreter, matches
+  YJIT); `hash`/`array`/`wordcount` shed their driver overhead (~25–33 %) but
+  stay near the floor, since their hot work is the native container methods MRI
+  runs in C.
 - **Level 3** specialises a pure-integer method (arithmetic/comparison on Integer
   parameters, recursion *and* `while` loops) to an **unboxed `int64` kernel**,
   with a type guard at the boundary and a **deopt** edge that recovers any

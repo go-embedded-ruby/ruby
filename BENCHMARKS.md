@@ -440,6 +440,20 @@ experiments, locate the cost precisely. **Measured, not assumed:**
    `mandelbrot` into the AOT-wins column), cross-method devirtualisation, and
    the closed-world single-binary half of `rbgo build`. Already the only path
    that beats YJIT; widening its eligibility widens the win.
+
+   > **Update 2026-07-03 — level-2 whole-scope lowering landed.** The AOT path
+   > now also lowers a program's *top-level code and the blocks it passes to
+   > methods* (`internal/aot/level2.go`), not just pure-integer methods. The
+   > `rbgo+AOT` numbers for the interpreter-bound rows in the tables above are
+   > therefore superseded: re-measured best-of-5 on 2026-07-03, **`blocks` goes
+   > 3.6× → 0.9× MRI (0.89 → 0.23 s — now beats the interpreter, matches YJIT)**;
+   > `hash` (0.40 → 0.27 s), `array` (0.60 → 0.46 s) and `wordcount` (0.16 →
+   > 0.12 s) each shed ~25–33 % of their driver overhead but stay near the floor,
+   > because their hot cost is the native container methods (`Hash#[]=`,
+   > `Array#map`/`select`/`reduce`) MRI runs in C. See
+   > [bench/README.md](bench/README.md) and
+   > [docs/aot-compiler.md](docs/aot-compiler.md). Still open here: specialising
+   > those native container kernels, cross-method devirtualisation, and float.
 5. **Eventually, a JIT.** Matching YJIT on arbitrary dynamic code ultimately
    needs runtime specialisation. AOT covers the static/compute-bound case today;
    a tracing/method JIT is the long-horizon answer for the dynamic remainder.
