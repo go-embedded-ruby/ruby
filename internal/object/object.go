@@ -356,6 +356,23 @@ func (h *Hash) hashKey(k Value) any {
 	switch kk := k.(type) {
 	case *String:
 		return strKey(kk.B)
+	// Immediate value types are their own comparable key: Ruby fixnums, floats,
+	// symbols, true/false and nil hash and compare by value (1.eql?(1),
+	// :a.eql?(:a)), and none can be subclassed to override #hash, so they never
+	// need the CustomKeyHook / #hash-method walk below. Returning them directly is
+	// byte-identical to the old fall-through (the hook reported ok=false for them
+	// and returned k) but skips a full method-resolution per Get/Set — the hot
+	// cost on an Integer- or Symbol-keyed Hash.
+	case Integer:
+		return kk
+	case Float:
+		return kk
+	case Symbol:
+		return kk
+	case Bool:
+		return kk
+	case Nil:
+		return kk
 	case *Bignum:
 		return "\x00big:" + kk.I.String()
 	case *Array:

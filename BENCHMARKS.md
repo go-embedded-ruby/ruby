@@ -452,8 +452,26 @@ experiments, locate the cost precisely. **Measured, not assumed:**
    > because their hot cost is the native container methods (`Hash#[]=`,
    > `Array#map`/`select`/`reduce`) MRI runs in C. See
    > [bench/README.md](bench/README.md) and
-   > [docs/aot-compiler.md](docs/aot-compiler.md). Still open here: specialising
-   > those native container kernels, cross-method devirtualisation, and float.
+   > [docs/aot-compiler.md](docs/aot-compiler.md).
+   >
+   > **Update 2026-07-03 — native container kernels landed.** The residual
+   > `hash`/`array`/`wordcount` gap above was inside the container methods, so
+   > those were specialised (`internal/object/object.go`,
+   > `internal/vm/builtins.go`): `Hash#[]`/`#[]=` short-circuit an
+   > Integer/Symbol/Float/`true`/`false`/`nil` key straight to its comparable map
+   > key instead of resolving a `#hash` method per operation (that ancestor walk
+   > was ~10 % of the `hash` run), and `Array#select`/`#reduce`/`#inject` are now
+   > native single-pass loops instead of routing every element through
+   > `Enumerable`'s `__each_packed` splat (an Array alloc + a second block
+   > dispatch per element). Byte-identical output; re-measured best-of-5, this
+   > host: **`array` AOT/MRI 5.11× → 1.00× — now at MRI parity** (0.98× at N=20,
+   > the pipeline runs at C speed), **`hash` AOT/MRI 3.00× → 2.33×**,
+   > **`wordcount` 1.50× → 1.33×**; the interpreter `array` row itself dropped
+   > 0.60 → 0.26 s (2.3× faster). What's left is genuinely *not* container-kernel
+   > cost — `hash`'s `h[k]=v` send-dispatch (arg-slice + boxing on `OpSend`) and
+   > `wordcount`'s `String#split` + the `strKey` `[]byte→string` copy — so it
+   > belongs to the dispatch/AOT lever, not more kernel work. Still open here:
+   > cross-method devirtualisation and float kernels.
 5. **Eventually, a JIT.** Matching YJIT on arbitrary dynamic code ultimately
    needs runtime specialisation. AOT covers the static/compute-bound case today;
    a tracing/method JIT is the long-horizon answer for the dynamic remainder.

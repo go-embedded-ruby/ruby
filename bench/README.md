@@ -46,8 +46,8 @@ go test ./internal/vm/ -run=NONE -bench=Fib -cpuprofile=cpu.prof   # then: go to
 | `alloc.rb` | short-lived object allocation + GC pressure | no |
 | `proc.rb` | `Proc#call` invocation in a loop | no (proc dispatch) |
 | `blocks.rb` | block iteration (`Integer#times`) | yes (L2 top level + block) |
-| `array.rb` | `map`/`select`/`reduce` pipeline | yes (L2 driver; native Enumerable stays) |
-| `hash.rb` | Hash insertion + lookup | yes (L2 top level; native Hash stays) |
+| `array.rb` | `map`/`select`/`reduce` pipeline | yes (L2 driver + native container kernels) |
+| `hash.rb` | Hash insertion + lookup | yes (L2 top level + value-key fast path) |
 | `strings.rb` | string interpolation + `join` | yes (L2 top level + block) |
 | `wordcount.rb` | split + hash counting + sum (mixed) | yes (L2 top level + block) |
 | `mandelbrot.rb` | benchmarks-game float kernel (compute-bound) | not yet (float) |
@@ -58,15 +58,24 @@ table, root-cause analysis and action items — lives in
 
 ## Current results (Apple M-series, Ruby 4.0.5, best of 5, 2026-07-03)
 
+> **2026-07-03 — native container kernels landed.** The `array`/`hash`/`wordcount`
+> rows below are *after* replacing their hot container paths with native kernels
+> (see the analysis section): a value-key fast path in `Hash#[]`/`#[]=` and native
+> `Array#select`/`#reduce`. Interpreter before→after, this host: **array 0.60→0.26s
+> (2.3× faster)**, **hash 0.40→0.34s**; and the AOT binary — which calls the same
+> runtime methods — improved with them: **array AOT/MRI 5.11×→1.00× — now at MRI
+> parity** (0.98× at N=20), **hash AOT/MRI 3.00×→2.33×**, **wordcount 1.50×→1.33×**.
+> All output stays byte-identical to MRI (`go test ./...` green with `-race`, TZ=UTC).
+
 | Benchmark | rbgo | rbgo+AOT | MRI | MRI+YJIT | AOT/MRI | AOT/YJIT |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| array | 0.60s | 0.46s | 0.09s | 0.06s | 5.11× | 7.67× |
+| **array** | 0.26s | **0.09s** | 0.09s | 0.06s | **1.00×** | 1.50× |
 | **blocks** | 0.90s | **0.23s** | 0.25s | 0.22s | **0.92×** | **1.05×** |
 | **fib** | 3.29s | **0.03s** | 0.48s | 0.10s | **0.06×** | **0.30×** |
-| hash | 0.40s | 0.27s | 0.09s | 0.08s | 3.00× | 3.38× |
+| hash | 0.34s | 0.21s | 0.09s | 0.09s | 2.33× | 2.33× |
 | **loop** | 1.77s | **0.02s** | 0.36s | 0.36s | **0.06×** | **0.06×** |
 | strings | 0.05s | 0.05s | 0.04s | 0.04s | 1.25× | 1.25× |
-| wordcount | 0.16s | 0.12s | 0.08s | 0.08s | 1.50× | 1.50× |
+| wordcount | 0.16s | 0.12s | 0.09s | 0.08s | 1.33× | 1.50× |
 
 The two method-based integer workloads (`fib`, `loop`) compile to unboxed
 `int64` kernels (level 3): **`fib` beats MRI ~16× and YJIT ~3×; `loop` beats both
@@ -81,14 +90,18 @@ where each row spends its time (before → after this same machine):
 - **`blocks` 3.6× → 0.9× MRI** (0.89s → 0.23s): its hot work is `t += i`,
   arithmetic in the block body, which Level 2 fully compiles — it now **beats the
   MRI interpreter and matches YJIT**.
-- **`hash` 4.4× → 3.0×** (0.40 → 0.27s), **`array` 6.7× → 5.1×** (0.60 → 0.46s),
-  **`wordcount` 2.0× → 1.5×** (0.16 → 0.12s): Level 2 removes the driver/dispatch
-  overhead (each ~25–33 % faster), but these stay near the floor because their
-  hot cost is the **native runtime methods themselves** — `Hash#[]=`/`#[]`,
-  `Array#map`/`#select`/`#reduce` allocating intermediate arrays — which Level 2
-  still routes through the runtime (for identical semantics) and which MRI runs
-  in hand-tuned C. Closing these further needs specialised container kernels, not
-  more driver lowering.
+- **`hash` 4.4× → 3.0× → 2.3×** (0.40 → 0.27 → 0.21s), **`array` 6.7× → 5.1× →
+  1.0×** (0.60 → 0.46 → 0.09s, **now at MRI parity**), **`wordcount` 2.0× → 1.5× →
+  1.3×** (0.16 → 0.12s): Level 2 first removed the driver/dispatch overhead
+  (each ~25–33 % faster), but the rows then sat near the floor because their hot
+  cost was the **native runtime methods themselves**. The 2026-07-03 container
+  kernels close most of that remaining gap (see the analysis section below):
+  `Array#select`/`#reduce`, previously routed through `Enumerable` (a splat-array
+  allocation + a second block dispatch *per element* via `__each_packed`), are now
+  native single-pass loops, and `Hash#[]`/`#[]=` short-circuit an Integer/Symbol
+  key to its comparable value instead of resolving a `#hash` method per operation.
+  The array pipeline (`map`/`select`/`reduce`) now runs **at MRI's C speed**; hash
+  and wordcount narrow further but keep a residual gap (below).
 - **`strings`** is unchanged: at 0.05s it is dominated by process start, so
   lowering its `<<` block body is in the noise.
 
@@ -97,6 +110,40 @@ was lowered); AOT-after is the Level-2 binary, built and timed identically.
 
 rbgo also starts faster than MRI (~0 vs ~30 ms: a single static binary with no
 gem/`$LOAD_PATH` scan), which is why string/IO-bound scripts already match.
+
+### Native container kernels (2026-07-03)
+
+Profiling the `array`/`hash`/`wordcount` benches after Level 2 showed the residual
+time was *inside* the container methods, not in dispatch — two specific costs:
+
+- **`Hash#[]` / `#[]=` resolved a `#hash` method per operation.** Every key was
+  routed through `object.hashKey`, whose fall-through called the VM's
+  `CustomKeyHook` (for user objects with a Ruby-level `#hash`/`#eql?`), which ran
+  a full `findMethod("hash")` ancestor walk *on every Integer key* only to
+  discover it inherits the default `Object#hash` and fall back to the value
+  itself. On the `hash` bench (1M Integer-keyed ops) that walk was ~10 % of the
+  whole run. Fix: `hashKey` now returns immediate value types — `Integer`,
+  `Float`, `Symbol`, `true`/`false`, `nil` — directly as their own comparable
+  map key (none can be subclassed to override `#hash`, so this is byte-identical
+  to the old result, just without the per-op resolution).
+- **`Array#select` / `#reduce` ran interpreted, through `Enumerable`.** Only
+  `#map`/`#each` were native; `#select`/`#reduce` came from the `Enumerable`
+  prelude and iterated via `__each_packed`, which yields through a
+  `each { |*a| … }` splat — **an Array allocation and a second block dispatch per
+  element**. On the `array` pipeline (`.map.select.reduce`, 500 × 2000 elements)
+  that doubled the block-call count. Fix: native `Array#select` (result pre-sized
+  to the input length, single pass) and native `Array#reduce`/`#inject` (a direct
+  fold mirroring every `Enumerable#reduce` form and error, so behaviour is
+  identical). `#filter`/`#collect`/`#inject` delegate to these through the
+  prelude and inherit the fast path.
+
+Result on this host: **`array` AOT reaches MRI parity (0.98× at N=20)** — the
+pipeline now runs at C speed — while `hash` drops 3.0×→2.3× and `wordcount`
+1.5×→1.3×. The remaining `hash` gap is dispatch/allocation on the `h[k]=v` *send
+itself* (arg-slice + interface boxing on `OpSend`, i.e. Level-2/interpreter
+territory, not the Hash method), and `wordcount` is bounded by `String#split` +
+the `strKey` `[]byte→string` copy inherent to a mutable-string key — neither is a
+container-kernel cost, so they are left for the dispatch/AOT lever above.
 
 ## Where the gap is, and the plan to close it
 

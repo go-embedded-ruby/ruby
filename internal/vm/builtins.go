@@ -1937,6 +1937,32 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Array{Elems: out}
 	})
+	// select is native (Array includes Enumerable, whose #select routes every
+	// element through __each_packed — a splat-array allocation and a second block
+	// dispatch per element). Iterating a.Elems directly, with the result slice
+	// pre-sized to the input length so it never re-grows, is observably identical
+	// (single-value yields, first-seen order) but skips that per-element overhead.
+	// #filter delegates here through the prelude, so it inherits the fast path.
+	vm.cArray.define("select", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "select")
+		}
+		a := self.(*object.Array)
+		out := make([]object.Value, 0, len(a.Elems))
+		for _, e := range a.Elems {
+			if vm.callBlock(blk, []object.Value{e}).Truthy() {
+				out = append(out, e)
+			}
+		}
+		return &object.Array{Elems: out}
+	})
+	// reduce/inject are native for the same reason (and #inject delegates here via
+	// the prelude). The fold mirrors Enumerable#reduce exactly — the (init, sym),
+	// (sym), (init) and bare-block forms, the "no block given" yield error, and the
+	// nil result of an empty fold — so behaviour is byte-identical, only faster.
+	vm.cArray.define("reduce", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return arrayReduce(vm, self.(*object.Array), args, blk)
+	})
 	vm.cArray.define("reverse", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		out := make([]object.Value, len(a.Elems))
@@ -5184,6 +5210,55 @@ func isFrozen(v object.Value) bool {
 // arrayKeepIf mutates a in place, keeping the elements for which the block's
 // truthiness equals keep (select!/reject!). It returns the array, or nil when
 // nothing was removed (Ruby's "no change" signal).
+// arrayReduce folds a over blk (or a symbol operator), mirroring the prelude's
+// Enumerable#reduce for every argument form: reduce { |a,b| }, reduce(init) { },
+// reduce(sym), reduce(init, sym) and the two-argument form whose operator is not
+// a Symbol (which defers to acc.send(op, x) so its coercion error matches). A
+// bare-block fold with no block raises LocalJumpError only when it actually
+// reaches a yield step (so [].reduce is nil and [x].reduce is x), exactly as the
+// interpreted version did.
+func arrayReduce(vm *VM, a *object.Array, args []object.Value, blk *Proc) object.Value {
+	var symVal object.Value
+	var symName string
+	hasSym, symKnown, hasInit := false, false, false
+	var init object.Value = object.NilV
+	switch {
+	case len(args) == 2:
+		init, symVal = args[0], args[1]
+		hasSym, hasInit = true, true
+	case len(args) == 1:
+		if s, ok := args[0].(object.Symbol); ok {
+			symVal, symName, hasSym, symKnown = s, string(s), true, true
+		} else {
+			init, hasInit = args[0], true
+		}
+	}
+	if hasSym && !symKnown {
+		if s, ok := symVal.(object.Symbol); ok {
+			symName, symKnown = string(s), true
+		}
+	}
+	acc := init
+	started := hasInit
+	for _, x := range a.Elems {
+		switch {
+		case !started:
+			acc, started = x, true
+		case hasSym && symKnown:
+			acc = vm.send(acc, symName, []object.Value{x}, nil)
+		case hasSym:
+			// Two-argument form with a non-Symbol operator: mirror acc.send(op, x).
+			acc = vm.send(acc, "send", []object.Value{symVal, x}, nil)
+		default:
+			if blk == nil {
+				raise("LocalJumpError", "no block given (yield)")
+			}
+			acc = vm.callBlock(blk, []object.Value{acc, x})
+		}
+	}
+	return acc
+}
+
 func arrayKeepIf(vm *VM, a *object.Array, blk *Proc, keep bool) object.Value {
 	var out []object.Value
 	for _, e := range a.Elems {
