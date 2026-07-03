@@ -387,9 +387,24 @@ func (a *Array) Truthy() bool    { return true }
 // a String keys by its byte content (Ruby dups+freezes string keys, so a stored
 // key is a frozen snapshot), every other value keys by itself — value types by
 // value, reference types by identity. It is a reference type.
+//
+// String keys take a dedicated allocation-free fast path: they live in strVals,
+// a map[string]*strEntry keyed by byte content, rather than in the general
+// map[any]Value (vals). This matters because the general path routes a String
+// key through hashKey, which returns an `any` — and once a []byte→string
+// conversion is boxed into an interface the compiler can no longer elide it, so
+// every Get/Set copied the key bytes. Reading and overwriting through strVals
+// uses `h.strVals[string(b)]` directly, a form the compiler DOES elide (map
+// index and map delete of a string([]byte) allocate nothing), and the *strEntry
+// indirection lets an overwrite mutate the value in place without re-storing the
+// key (a bare `m[string(b)] = v` would allocate the key string every time). Only
+// a genuine first insert allocates: the owned key string plus the frozen key
+// snapshot Ruby semantics require. strVals is nil until the first String key is
+// inserted; nil-map reads are safe, so Get/repr need no guard.
 type Hash struct {
-	Keys []Value // insertion order (string keys held as frozen snapshots)
-	vals map[any]Value
+	Keys    []Value             // insertion order (string keys held as frozen snapshots)
+	strVals map[string]*strEntry // String keys, content-addressed (allocation-free hot path)
+	vals    map[any]Value
 	// keyBucket maps a stored user-object key (snapshot) to the customBucket it
 	// hashes to, so reuseBucket can find an #eql? sibling and collapse it to the
 	// same entry. Only populated for keys routed through CustomKeyHook; lazily
@@ -404,8 +419,33 @@ type Hash struct {
 }
 
 // strKey is the comparable map key for a Ruby String, distinct from a Symbol of
-// the same name (different dynamic type ⇒ no collision in an `any` map key).
+// the same name (different dynamic type ⇒ no collision in an `any` map key). It
+// is still used when a String appears *inside* an Array/Hash key, where hashKey
+// serialises it recursively; top-level String keys use the strVals fast path.
 type strKey string
+
+// strEntry boxes a String-keyed value so an overwrite can mutate v in place
+// (h.strVals[string(b)].v = v) without re-storing — and thus re-allocating — the
+// key string. See the Hash doc comment.
+type strEntry struct{ v Value }
+
+// strContentKey reports whether k is a String key (directly, or a KeyUnwrapper
+// wrapping a String — e.g. an instance of a user subclass of String) and returns
+// its content bytes for READ-ONLY use. A String key routes through the strVals
+// fast path; every other key (including a wrapper that unwraps to a non-String)
+// returns ok=false and takes the general hashKey path. Symbols are deliberately
+// excluded: :a and "a" are distinct Ruby keys.
+func strContentKey(k Value) ([]byte, bool) {
+	if u, ok := k.(KeyUnwrapper); ok {
+		if v, wrapped := u.HashUnwrap(); wrapped {
+			k = v
+		}
+	}
+	if s, ok := k.(*String); ok {
+		return s.Bytes(), true
+	}
+	return nil, false
+}
 
 // hashKey normalises a key to its comparable map form.
 // KeyUnwrapper is implemented by a wrapper around a built-in value (an instance
@@ -538,14 +578,46 @@ func NewHashCap(n int) *Hash {
 	if n < 0 {
 		n = 0
 	}
-	return &Hash{vals: make(map[any]Value, n), Keys: make([]Value, 0, n)}
+	// Bulk builders that size a hash (JSON.parse, JWT decode) fill it with
+	// string keys, so the fast-path map is what needs pre-sizing.
+	return &Hash{
+		vals:    map[any]Value{},
+		strVals: make(map[string]*strEntry, n),
+		Keys:    make([]Value, 0, n),
+	}
 }
 
-// Get returns the value for k and whether it is present.
-func (h *Hash) Get(k Value) (Value, bool) { v, ok := h.vals[h.hashKey(k)]; return v, ok }
+// Get returns the value for k and whether it is present. A String key resolves
+// through the allocation-free strVals fast path; every other key type takes the
+// general hashKey path.
+func (h *Hash) Get(k Value) (Value, bool) {
+	if b, ok := strContentKey(k); ok {
+		if e := h.strVals[string(b)]; e != nil { // string(b) elided: no copy
+			return e.v, true
+		}
+		return nil, false
+	}
+	v, ok := h.vals[h.hashKey(k)]
+	return v, ok
+}
 
-// Set inserts or updates k→v, preserving first-insertion order.
+// Set inserts or updates k→v, preserving first-insertion order. A String key
+// takes the strVals fast path: an overwrite mutates the stored entry in place
+// (no allocation), and only a genuine insert dups+freezes the key snapshot and
+// allocates the owned key string.
 func (h *Hash) Set(k, v Value) {
+	if b, ok := strContentKey(k); ok {
+		if e := h.strVals[string(b)]; e != nil { // overwrite: string(b) elided
+			e.v = v
+			return
+		}
+		if h.strVals == nil {
+			h.strVals = map[string]*strEntry{}
+		}
+		h.Keys = append(h.Keys, snapshotKey(k))
+		h.strVals[string(b)] = &strEntry{v: v} // insert: allocates the owned key
+		return
+	}
 	hk := h.hashKey(k)
 	if _, ok := h.vals[hk]; !ok {
 		snap := snapshotKey(k)
@@ -560,6 +632,16 @@ func (h *Hash) Set(k, v Value) {
 	h.vals[hk] = v
 }
 
+// value returns the stored value for a key already known to be present (used by
+// repr while iterating Keys, so the entry always exists), dispatching to the same
+// fast path as Get.
+func (h *Hash) value(k Value) Value {
+	if b, ok := strContentKey(k); ok {
+		return h.strVals[string(b)].v
+	}
+	return h.vals[h.hashKey(k)]
+}
+
 // Len returns the number of entries.
 func (h *Hash) Len() int { return len(h.Keys) }
 
@@ -568,11 +650,29 @@ func (h *Hash) Len() int { return len(h.Keys) }
 func (h *Hash) Clear() {
 	h.Keys = nil
 	h.vals = map[any]Value{}
+	h.strVals = nil
 	h.keyBucket = nil
 }
 
-// Delete removes k, returning its value and whether it was present.
+// Delete removes k, returning its value and whether it was present. A String key
+// is removed from the strVals fast path (and its snapshot from Keys); every other
+// key type takes the general hashKey path.
 func (h *Hash) Delete(k Value) (Value, bool) {
+	if b, ok := strContentKey(k); ok {
+		e := h.strVals[string(b)]
+		if e == nil {
+			return NilV, false
+		}
+		sk := string(b)
+		delete(h.strVals, sk) // string(b) elided
+		for i, key := range h.Keys {
+			if kb, isStr := strContentKey(key); isStr && string(kb) == sk {
+				h.Keys = append(h.Keys[:i], h.Keys[i+1:]...)
+				break
+			}
+		}
+		return e.v, true
+	}
 	hk := h.hashKey(k)
 	v, ok := h.vals[hk]
 	if !ok {
@@ -601,7 +701,7 @@ func (h *Hash) repr() string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		v := h.vals[h.hashKey(k)]
+		v := h.value(k)
 		// Ruby 4.0 (since 3.4) inspect: symbol keys use the label form
 		// `name: value`; all other keys use `key => value` with spaces.
 		if sym, ok := k.(Symbol); ok {
