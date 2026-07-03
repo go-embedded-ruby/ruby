@@ -124,7 +124,7 @@ func primesToArray(ps []*big.Int) object.Value {
 	for i, p := range ps {
 		out[i] = object.NormInt(p)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // primeDivision returns the factorisation of n as an Array of [prime, exponent]
@@ -137,9 +137,9 @@ func primeDivision(n *big.Int) object.Value {
 	}
 	out := make([]object.Value, len(pairs))
 	for i, pr := range pairs {
-		out[i] = &object.Array{Elems: []object.Value{object.NormInt(pr[0]), object.NormInt(pr[1])}}
+		out[i] = object.NewArray(object.NormInt(pr[0]), object.NormInt(pr[1]))
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // primePairs reads an Array of [prime, exponent] Arrays into the library's pair

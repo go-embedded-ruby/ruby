@@ -122,7 +122,7 @@ func fromMarshalValue(v marshal.Value, seen map[marshal.Value]object.Value) obje
 		if o, ok := seen[v]; ok {
 			return o
 		}
-		oa := &object.Array{}
+		oa := object.NewArray()
 		seen[v] = oa
 		for _, e := range x.Elems {
 			oa.Elems = append(oa.Elems, fromMarshalValue(e, seen))

@@ -111,6 +111,6 @@ func yieldValue(args []object.Value) object.Value {
 	case 1:
 		return args[0]
 	default:
-		return &object.Array{Elems: append([]object.Value{}, args...)}
+		return object.NewArrayFromSlice(append([]object.Value{}, args...))
 	}
 }

@@ -119,11 +119,7 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 func (vm *VM) sinatraCall(cls *RClass, envArg object.Value) object.Value {
 	app := vm.buildSinatraApp(cls)
 	status, headers, body := app.CallTuple(rackEnv(envArg))
-	return &object.Array{Elems: []object.Value{
-		object.IntValue(int64(status)),
-		rackHeadersToHash(headers),
-		rackBodyArray(body),
-	}}
+	return object.NewArray(object.IntValue(int64(status)), rackHeadersToHash(headers), rackBodyArray(body))
 }
 
 // buildSinatraApp assembles a *sinatra.Sinatra from cls's declaration chain: it

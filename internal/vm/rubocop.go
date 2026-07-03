@@ -135,7 +135,7 @@ func (vm *VM) registerRuboCopRunner(mod *RClass) {
 	cls.define("inspect", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		src, path := rubocopSourceArgs(args)
 		offs := self(v).Inspect(path, src)
-		arr := &object.Array{Elems: make([]object.Value, len(offs))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(offs)))
 		for i, o := range offs {
 			arr.Elems[i] = &RuboCopOffense{o: o}
 		}

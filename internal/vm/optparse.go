@@ -86,7 +86,7 @@ func (vm *VM) registerOptionParser() {
 				listVals:    map[int][]object.Value{},
 				listKeys:    map[int][]string{},
 				acceptables: map[*RClass]*Proc{},
-				defaultArgv: &object.Array{},
+				defaultArgv: object.NewArray(),
 			}
 			// OptionParser.new(banner=nil, width=32, indent="    "): a non-nil banner
 			// becomes the first help line; the width/indent override the summary
@@ -273,7 +273,7 @@ func (vm *VM) registerOptionParser() {
 		for i, l := range lines {
 			out[i] = object.NewString(l)
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 
 	// --- parsing -------------------------------------------------------------
@@ -618,7 +618,7 @@ func strArray(ss []string) *object.Array {
 	for i, s := range ss {
 		out[i] = object.NewString(s)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // optStrPtr returns a String for a non-nil *string, or nil.

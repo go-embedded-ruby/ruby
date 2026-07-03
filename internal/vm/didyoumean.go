@@ -69,7 +69,7 @@ func (s *SpellChecker) correct(input string) object.Value {
 	for _, h := range hits {
 		out = append(out, s.byName[h])
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // registerDidYouMean installs the DidYouMean module and its nested SpellChecker

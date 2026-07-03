@@ -541,8 +541,7 @@ func (vm *VM) registerREXMLAttributes(mod *RClass) {
 	// the receiver. (each_attribute yields the attribute name/value as MRI does.)
 	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		attrs(v).Each(func(a *rx.Attribute) {
-			pair := &object.Array{Elems: []object.Value{
-				object.NewString(a.QName()), object.NewString(a.Value)}}
+			pair := object.NewArray(object.NewString(a.QName()), object.NewString(a.Value))
 			vm.callBlock(blk, []object.Value{pair})
 		})
 		return v
@@ -721,7 +720,7 @@ func (vm *VM) registerREXMLXPath(mod *RClass) {
 		for _, n := range rx.XPathMatch(ctx, path) {
 			out = append(out, rexmlMatchValue(n))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	// XPath.each(node, path) { |n| ... }: yield each match, returning nil.
 	sm("each", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {

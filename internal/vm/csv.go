@@ -211,7 +211,7 @@ func (vm *VM) csvParse(data string, opts libcsv.Options, blk *Proc) object.Value
 	for i, row := range rows {
 		out[i] = vm.csvFieldsToArray(row)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // csvHasHeaders reports whether the options request headers — true / "first_row"
@@ -288,7 +288,7 @@ func (vm *VM) csvFieldsToArray(fields []any) *object.Array {
 	for i, f := range fields {
 		out[i] = vm.csvFieldToRuby(f)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // csvFieldToRuby maps a single parsed field to its Ruby value: nil -> nil, a
@@ -602,7 +602,7 @@ func (vm *VM) registerCSVRowClass(cls *RClass) {
 			if i < len(r.Fields) {
 				f = r.Fields[i]
 			}
-			pair := &object.Array{Elems: []object.Value{vm.csvFieldToRuby(h), vm.csvFieldToRuby(f)}}
+			pair := object.NewArray(vm.csvFieldToRuby(h), vm.csvFieldToRuby(f))
 			vm.callBlock(blk, []object.Value{pair})
 		}
 		return v
@@ -634,7 +634,7 @@ func (vm *VM) csvHeadersArray(headers []any) *object.Array {
 	for i, h := range headers {
 		out[i] = vm.csvFieldToRuby(h)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // csvRowPairs renders CSV::Row#to_a — an Array of [header, value] pairs in
@@ -646,9 +646,9 @@ func (vm *VM) csvRowPairs(r *libcsv.Row) *object.Array {
 		if i < len(r.Fields) {
 			f = r.Fields[i]
 		}
-		out[i] = &object.Array{Elems: []object.Value{vm.csvFieldToRuby(h), vm.csvFieldToRuby(f)}}
+		out[i] = object.NewArray(vm.csvFieldToRuby(h), vm.csvFieldToRuby(f))
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // csvRowHash renders CSV::Row#to_h — an ordered header->value Hash (a repeated
@@ -721,5 +721,5 @@ func (vm *VM) csvTableArray(t *libcsv.Table) *object.Array {
 	for _, r := range t.Rows {
 		out = append(out, vm.csvFieldsToArray(r.Fields))
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }

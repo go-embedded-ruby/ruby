@@ -108,7 +108,7 @@ func (vm *VM) registerEnumerator() {
 		return vm.send(e.recv, e.meth, e.args, blk)
 	})
 	d("to_a", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: vm.enumMaterialize(self.(*Enumerator))}
+		return object.NewArrayFromSlice(vm.enumMaterialize(self.(*Enumerator)))
 	})
 	d("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(len(vm.enumMaterialize(self.(*Enumerator)))))
@@ -146,9 +146,9 @@ func (vm *VM) registerEnumerator() {
 			elems := vm.enumMaterialize(e)
 			pairs := make([]object.Value, len(elems))
 			for i, v := range elems {
-				pairs[i] = &object.Array{Elems: []object.Value{v, object.IntValue(off + int64(i))}}
+				pairs[i] = object.NewArray(v, object.IntValue(off+int64(i)))
 			}
-			return enumFor(&object.Array{Elems: pairs}, "each")
+			return enumFor(object.NewArrayFromSlice(pairs), "each")
 		}
 		// With a block, re-run the source, appending the running index to each
 		// yield and forwarding the block's result — so map collects, each returns
@@ -181,10 +181,10 @@ func (vm *VM) registerEnumerator() {
 			}
 			return got[0]
 		}
-		return &object.Array{Elems: vm.enumTake(e, int(intArg(args[0])))}
+		return object.NewArrayFromSlice(vm.enumTake(e, int(intArg(args[0]))))
 	})
 	d("take", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: vm.enumTake(self.(*Enumerator), int(intArg(args[0])))}
+		return object.NewArrayFromSlice(vm.enumTake(self.(*Enumerator), int(intArg(args[0]))))
 	})
 }
 
@@ -203,7 +203,7 @@ func (vm *VM) enumTake(e *Enumerator, n int) (out []object.Value) {
 		if len(args) == 1 {
 			out = append(out, args[0])
 		} else {
-			out = append(out, &object.Array{Elems: append([]object.Value{}, args...)})
+			out = append(out, object.NewArrayFromSlice(append([]object.Value{}, args...)))
 		}
 		if len(out) >= n {
 			panic(enumStop{})
@@ -236,7 +236,7 @@ func (vm *VM) enumMaterialize(e *Enumerator) []object.Value {
 		if len(args) == 1 {
 			out = append(out, args[0])
 		} else {
-			out = append(out, &object.Array{Elems: append([]object.Value{}, args...)})
+			out = append(out, object.NewArrayFromSlice(append([]object.Value{}, args...)))
 		}
 	}
 	if e.block != nil { // generator block: run it with a collecting yielder

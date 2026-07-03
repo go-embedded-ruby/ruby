@@ -77,7 +77,7 @@ func (vm *VM) registerLazy() {
 	d("lazy", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
 
 	toA := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: vm.lazyForce(self.(*LazyEnum), -1)}
+		return object.NewArrayFromSlice(vm.lazyForce(self.(*LazyEnum), -1))
 	}
 	d("to_a", toA)
 	d("force", toA)
@@ -89,7 +89,7 @@ func (vm *VM) registerLazy() {
 			}
 			return got[0]
 		}
-		return &object.Array{Elems: vm.lazyForce(self.(*LazyEnum), int(intArg(args[0])))}
+		return object.NewArrayFromSlice(vm.lazyForce(self.(*LazyEnum), int(intArg(args[0]))))
 	})
 	d("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		l := self.(*LazyEnum)

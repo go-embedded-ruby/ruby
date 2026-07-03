@@ -196,7 +196,7 @@ func sequelRow(row map[string]sequel.Value) *object.Hash {
 
 // sequelRows maps a slice of executor rows to a Ruby Array of Hashes.
 func sequelRows(rows []map[string]sequel.Value) *object.Array {
-	arr := &object.Array{Elems: make([]object.Value, len(rows))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(rows)))
 	for i, r := range rows {
 		arr.Elems[i] = sequelRow(r)
 	}

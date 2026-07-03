@@ -312,7 +312,7 @@ func (vm *VM) registerBigDecimal() {
 		if err != nil {
 			raise("ZeroDivisionError", "%s", err.Error())
 		}
-		return &object.Array{Elems: []object.Value{&BigDecimal{d: q}, &BigDecimal{d: r}}}
+		return object.NewArray(&BigDecimal{d: q}, &BigDecimal{d: r})
 	})
 
 	// floor / ceil / truncate / round: no-arg or n<=0 -> Integer, n>0 -> BigDecimal
@@ -389,10 +389,7 @@ func (vm *VM) registerBigDecimal() {
 	// split (-> SplitParts): [sign, "digits", base(10), exponent].
 	d("split", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		sign, digits, base, exp := self(v).d.SplitParts()
-		return &object.Array{Elems: []object.Value{
-			object.IntValue(int64(sign)), object.NewString(digits),
-			object.IntValue(int64(base)), object.IntValue(int64(exp)),
-		}}
+		return object.NewArray(object.IntValue(int64(sign)), object.NewString(digits), object.IntValue(int64(base)), object.IntValue(int64(exp)))
 	})
 	// sign (-> Sign): MRI's BigDecimal#sign code, exponent (-> Exponent),
 	// precision (-> Precision).

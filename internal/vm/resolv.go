@@ -67,9 +67,9 @@ func (vm *VM) registerResolv() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			name := strArg(args[0])
 			if isLiteralIP(name) {
-				return &object.Array{Elems: []object.Value{object.NewString(name)}}
+				return object.NewArray(object.NewString(name))
 			}
-			return &object.Array{Elems: nil} // MRI returns [] when nothing resolves
+			return object.NewArray() // MRI returns [] when nothing resolves
 		}}
 	for _, m := range []string{"getname", "getnames", "each_address", "each_name"} {
 		resolvMod.smethods[m] = &Method{name: m, owner: resolvMod, native: resolveNotImpl(m)}
@@ -528,12 +528,9 @@ func registerResolvMessage(vm *VM, dns *RClass, byType map[uint16]*RClass) {
 	msg.define("question", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		out := []object.Value{}
 		for _, q := range mget(self).Question {
-			out = append(out, &object.Array{Elems: []object.Value{
-				newResolvName(vm.dnsNameClass(), q.Name),
-				resolvTypeClass(vm, byType, q.Type),
-			}})
+			out = append(out, object.NewArray(newResolvName(vm.dnsNameClass(), q.Name), resolvTypeClass(vm, byType, q.Type)))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	msg.define("answer", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return resolvSectionArray(vm, byType, mget(self).Answer)
@@ -710,13 +707,9 @@ func resolvTypeClass(vm *VM, byType map[uint16]*RClass, typ uint16) object.Value
 func resolvSectionArray(vm *VM, byType map[uint16]*RClass, rrs []resolv.RR) object.Value {
 	out := []object.Value{}
 	for _, rr := range rrs {
-		out = append(out, &object.Array{Elems: []object.Value{
-			newResolvName(vm.dnsNameClass(), rr.Name),
-			object.IntValue(int64(rr.TTL)),
-			newRecord(vm.recordClass(byType, rr.Data.TypeValue()), rr.Data),
-		}})
+		out = append(out, object.NewArray(newResolvName(vm.dnsNameClass(), rr.Name), object.IntValue(int64(rr.TTL)), newRecord(vm.recordClass(byType, rr.Data.TypeValue()), rr.Data)))
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // strSliceToArray builds a Ruby Array of Strings from a Go slice.
@@ -725,7 +718,7 @@ func strSliceToArray(ss []string) object.Value {
 	for i, s := range ss {
 		elems[i] = object.NewString(s)
 	}
-	return &object.Array{Elems: elems}
+	return object.NewArrayFromSlice(elems)
 }
 
 // splitZone splits an IPv6 textual address into its base and an optional %zone

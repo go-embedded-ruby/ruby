@@ -56,7 +56,7 @@ func (vm *VM) registerBinding() {
 		for _, n := range b.names[:len(b.names)-len(b.added)] {
 			add(n)
 		}
-		return &object.Array{Elems: elems}
+		return object.NewArrayFromSlice(elems)
 	})
 	cBinding.define("local_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := self.(*Binding)

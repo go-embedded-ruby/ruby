@@ -448,7 +448,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 	if blk != nil {
 		return self
 	}
-	return &object.Array{Elems: results}
+	return object.NewArrayFromSlice(results)
 }
 
 // stringSplit backs String#split. With no pattern, a nil pattern, or the single
@@ -504,7 +504,7 @@ func splitWhitespace(subject string, limit int) object.Value {
 		}
 		if limit > 0 && len(out)+1 == limit {
 			out = append(out, object.NewStringView(subject[i:]))
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		start := i
 		for i < n && !isASCIISpace(subject[i]) {
@@ -512,7 +512,7 @@ func splitWhitespace(subject string, limit int) object.Value {
 		}
 		out = append(out, object.NewStringView(subject[start:i]))
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 func isASCIISpace(c byte) bool {
@@ -523,7 +523,7 @@ func isASCIISpace(c byte) bool {
 // and honouring the field limit (see stringSplit).
 func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 	if subject == "" {
-		return &object.Array{Elems: []object.Value{}}
+		return object.NewArray()
 	}
 	var out []object.Value
 	last := 0   // byte offset of the start of the current field
@@ -575,7 +575,7 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 			break
 		}
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // captureFields returns the participating capture groups of a split delimiter
@@ -785,7 +785,7 @@ func scanElement(md *onig.MatchData) object.Value {
 			caps[i-1] = object.NewStringView(md.Str(i))
 		}
 	}
-	return &object.Array{Elems: caps}
+	return object.NewArrayFromSlice(caps)
 }
 
 // namedGroups returns the names of (?<name>…) capture groups in source, in
@@ -998,7 +998,7 @@ func (vm *VM) installRegexp() {
 		for i := 0; i <= m.md.NGroups(); i++ {
 			out = append(out, groupValue(m, i))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cMatchData.define("captures", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
@@ -1006,7 +1006,7 @@ func (vm *VM) installRegexp() {
 		for i := 1; i <= m.md.NGroups(); i++ {
 			out = append(out, groupValue(m, i))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	vm.cMatchData.define("begin", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return mdArg(self).offset(intArg(args[0]), false)
@@ -1042,7 +1042,7 @@ func (vm *VM) installRegexp() {
 			}
 			out := make([]object.Value, length)
 			copy(out, all[start:start+length])
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		if len(args) == 2 { // md[start, length]
 			all := groups()
@@ -1057,7 +1057,7 @@ func (vm *VM) installRegexp() {
 			}
 			out := make([]object.Value, end-start)
 			copy(out, all[start:end])
-			return &object.Array{Elems: out}
+			return object.NewArrayFromSlice(out)
 		}
 		return m.at(args[0])
 	})

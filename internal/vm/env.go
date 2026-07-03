@@ -139,7 +139,7 @@ func (vm *VM) registerENV() {
 	})
 	def("keys", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := envHash()
-		return &object.Array{Elems: append([]object.Value(nil), h.Keys...)}
+		return object.NewArrayFromSlice(append([]object.Value(nil), h.Keys...))
 	})
 }
 

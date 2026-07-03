@@ -120,7 +120,7 @@ func rackResponseBody(args []object.Value) []string {
 
 // rackBodyArray maps a []string response body into a Ruby Array of Strings.
 func rackBodyArray(parts []string) *object.Array {
-	arr := &object.Array{Elems: make([]object.Value, len(parts))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(parts)))
 	for i, p := range parts {
 		arr.Elems[i] = object.NewString(p)
 	}
@@ -186,13 +186,13 @@ func rackFromGo(v any) object.Value {
 	case float64:
 		return object.Float(n)
 	case []any:
-		arr := &object.Array{Elems: make([]object.Value, len(n))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = rackFromGo(el)
 		}
 		return arr
 	case []string:
-		arr := &object.Array{Elems: make([]object.Value, len(n))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = object.NewString(el)
 		}

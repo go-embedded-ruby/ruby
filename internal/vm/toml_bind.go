@@ -123,7 +123,7 @@ func fromTOML(vm *VM, v toml.Value) object.Value {
 	case string:
 		return object.NewString(n)
 	case []toml.Value:
-		arr := &object.Array{Elems: make([]object.Value, len(n))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = fromTOML(vm, el)
 		}

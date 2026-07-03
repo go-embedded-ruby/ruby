@@ -99,7 +99,7 @@ func (vm *VM) registerKernelIntrospection() {
 	// like MRI — it excludes the frame that called caller and lists the rest from
 	// nearest to the top level. Without source line tracking the line is 0.
 	vm.cObject.define("caller", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Array{Elems: vm.callerFrames()}
+		return object.NewArrayFromSlice(vm.callerFrames())
 	})
 
 	// __FILE__: the path of the file currently executing. During a require it is

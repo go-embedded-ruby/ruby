@@ -144,7 +144,7 @@ func (vm *VM) registerNDArray() {
 		for i, x := range sh {
 			out[i] = object.IntValue(int64(x))
 		}
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	})
 	d("ndim", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).Ndim()))

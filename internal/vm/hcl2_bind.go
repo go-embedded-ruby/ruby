@@ -151,7 +151,7 @@ func fromHCL2(vm *VM, v hcl2.Value) object.Value {
 	case string:
 		return object.NewString(n)
 	case []hcl2.Value:
-		arr := &object.Array{Elems: make([]object.Value, len(n))}
+		arr := object.NewArrayFromSlice(make([]object.Value, len(n)))
 		for i, el := range n {
 			arr.Elems[i] = fromHCL2(vm, el)
 		}

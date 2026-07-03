@@ -53,13 +53,13 @@ func (vm *VM) registerProcess() {
 	def("groups", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		gids, err := processGroups()
 		if err != nil {
-			return &object.Array{}
+			return object.NewArray()
 		}
 		elems := make([]object.Value, len(gids))
 		for i, g := range gids {
 			elems[i] = object.IntValue(int64(g))
 		}
-		return &object.Array{Elems: elems}
+		return object.NewArrayFromSlice(elems)
 	})
 	// maxgroups is a platform tunable; reading it returns the conventional 16 cap
 	// and assigning it is accepted but ignored (the kernel limit is fixed), which

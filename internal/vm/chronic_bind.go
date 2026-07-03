@@ -28,7 +28,7 @@ func chronicParse(text string, opts *object.Hash) object.Value {
 		if !ok {
 			return object.NilV
 		}
-		return &object.Array{Elems: []object.Value{goTimeToRuby(s.Begin), goTimeToRuby(s.End)}}
+		return object.NewArray(goTimeToRuby(s.Begin), goTimeToRuby(s.End))
 	}
 	t, ok := chronic.Parse(text, o)
 	if !ok {

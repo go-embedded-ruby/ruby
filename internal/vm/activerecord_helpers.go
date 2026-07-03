@@ -122,7 +122,7 @@ func arAttrs(args []object.Value) map[string]any {
 
 // arStrings maps a []string to a Ruby Array of Strings.
 func arStrings(ss []string) *object.Array {
-	arr := &object.Array{Elems: make([]object.Value, len(ss))}
+	arr := object.NewArrayFromSlice(make([]object.Value, len(ss)))
 	for i, s := range ss {
 		arr.Elems[i] = object.NewString(s)
 	}
@@ -215,14 +215,14 @@ func arPluck(recs []*activerecord.Record, args []object.Value) *object.Array {
 	for i, a := range args {
 		cols[i] = arStr(a)
 	}
-	out := &object.Array{Elems: make([]object.Value, len(recs))}
+	out := object.NewArrayFromSlice(make([]object.Value, len(recs)))
 	for i, rec := range recs {
 		if len(cols) == 1 {
 			val, _ := rec.Get(cols[0])
 			out.Elems[i] = arValueToRuby(val)
 			continue
 		}
-		row := &object.Array{Elems: make([]object.Value, len(cols))}
+		row := object.NewArrayFromSlice(make([]object.Value, len(cols)))
 		for j, c := range cols {
 			val, _ := rec.Get(c)
 			row.Elems[j] = arValueToRuby(val)

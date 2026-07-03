@@ -139,7 +139,7 @@ func (s *Set) toArray() object.Value {
 	for i, m := range src {
 		out[i] = m.(object.Value)
 	}
-	return &object.Array{Elems: out}
+	return object.NewArrayFromSlice(out)
 }
 
 // setOp implements the Set operator fast path reached from binary(): + is union
@@ -301,7 +301,7 @@ func (vm *VM) registerSet() {
 		s := self(v)
 		out := make([]object.Value, 0, s.size())
 		s.each(func(m object.Value) { out = append(out, vm.callBlock(blk, []object.Value{m})) })
-		return &object.Array{Elems: out}
+		return object.NewArrayFromSlice(out)
 	}
 	d("map", mapFn)
 	d("collect", mapFn)

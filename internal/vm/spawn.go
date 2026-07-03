@@ -52,7 +52,7 @@ func (vm *VM) registerSpawn() {
 		buf := &pipeBuf{}
 		reader := &IOObj{cls: cIO, pipe: buf, label: "pipe-r"}
 		writer := &IOObj{cls: cIO, pipe: buf, isWriteEnd: true, label: "pipe-w"}
-		pair := &object.Array{Elems: []object.Value{reader, writer}}
+		pair := object.NewArray(reader, writer)
 		if blk != nil {
 			// IO.pipe { |r, w| ... } yields the pair and closes both ends after.
 			defer func() { reader.closed, writer.closed, buf.wClosed = true, true, true }()
@@ -100,7 +100,7 @@ func (vm *VM) registerSpawn() {
 	// blocking). Writers and exception sets are always reported ready, matching the
 	// non-blocking, fully-synchronous model.
 	cIO.smethods["select"] = &Method{name: "select", owner: cIO, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		readReady := &object.Array{}
+		readReady := object.NewArray()
 		if len(args) > 0 {
 			if rs, ok := args[0].(*object.Array); ok {
 				for _, v := range rs.Elems {
@@ -113,7 +113,7 @@ func (vm *VM) registerSpawn() {
 				}
 			}
 		}
-		writeReady := &object.Array{}
+		writeReady := object.NewArray()
 		if len(args) > 1 {
 			if ws, ok := args[1].(*object.Array); ok {
 				writeReady.Elems = append(writeReady.Elems, ws.Elems...)
@@ -122,7 +122,7 @@ func (vm *VM) registerSpawn() {
 		if len(readReady.Elems) == 0 && len(writeReady.Elems) == 0 {
 			return object.NilV
 		}
-		return &object.Array{Elems: []object.Value{readReady, writeReady, &object.Array{}}}
+		return object.NewArray(readReady, writeReady, object.NewArray())
 	}}
 
 	vm.registerProcessSpawn()
@@ -179,7 +179,7 @@ func (vm *VM) registerProcessSpawn() {
 		so := &RObject{class: vm.consts["Process::Status"].(*RClass), ivars: map[string]object.Value{}}
 		so.ivars["@exitstatus"] = object.IntValue(int64(st.code))
 		so.ivars["@pid"] = object.IntValue(int64(st.pid))
-		return &object.Array{Elems: []object.Value{object.IntValue(int64(pid)), so}}
+		return object.NewArray(object.IntValue(int64(pid)), so)
 	})
 
 	def("waitpid", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {

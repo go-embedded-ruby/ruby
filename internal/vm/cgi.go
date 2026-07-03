@@ -79,7 +79,7 @@ func cgiParse(query string) object.Value {
 	parsed := cgi.ParseQuery(query)
 	h := object.NewHash()
 	for _, key := range parseKeyOrder(query) {
-		arr := &object.Array{Elems: make([]object.Value, 0, len(parsed[key]))}
+		arr := object.NewArrayFromSlice(make([]object.Value, 0, len(parsed[key])))
 		for _, v := range parsed[key] {
 			arr.Elems = append(arr.Elems, object.NewString(v))
 		}

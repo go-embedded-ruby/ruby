@@ -115,9 +115,9 @@ func (vm *VM) registerGetoptLong() {
 			vm.golRaise(g, err)
 		}
 		if !ok {
-			return &object.Array{Elems: []object.Value{object.NilV, object.NilV}}
+			return object.NewArray(object.NilV, object.NilV)
 		}
-		return &object.Array{Elems: []object.Value{object.NewString(name), object.NewString(arg)}}
+		return object.NewArray(object.NewString(name), object.NewString(arg))
 	}
 	d("get", getFn)
 	d("get_option", getFn)
@@ -202,7 +202,7 @@ func (vm *VM) argvArray() *object.Array {
 	}
 	// ARGV is always installed as an Array at boot; fall back to an empty one so a
 	// host that re-bound it never panics here.
-	return &object.Array{}
+	return object.NewArray()
 }
 
 // golSetOptions converts each Ruby spec array (name/alias strings followed by the
