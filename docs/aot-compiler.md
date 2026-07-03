@@ -135,13 +135,45 @@ shippable on its own:
    overflow mid-loop deopts and re-runs from the original arguments into the
    identical Bignum (`25! = 15511210043330985984000000`, MRI-verified).
 
+5. **Level-2 whole-scope lowering (top level + blocks)** — ✅ **done**
+   (`internal/aot/level2.go`). Levels 1 and 3 only lower a *method*; a program
+   whose work lives at the top level and in the blocks it passes to methods
+   (the `array`/`blocks`/`hash`/`wordcount` bench rows — real, method-/block-/
+   string-/array-/hash-heavy app code) defines no hot method, so nothing was
+   lowered and it ran entirely on the interpreter. Level 2 closes that: it lowers
+   a whole *scope tree* — the program's `<main>` ISeq becomes
+   `func (vm *VM) aotMain()` (registered via `RegisterCompiledMain`, preferred by
+   `Run` over interpreting the top level), and every literal block a `send`
+   carries becomes an inline Go closure passed as a native `Proc`, so the block
+   body runs as compiled Go with no per-yield `exec` frame and no dispatch loop.
+   A local a block closes over is the enclosing Go function's variable, captured
+   lexically by the closure — `10_000_000.times { |i| t += i }` mutates the outer
+   `t` directly. Method calls (`map`/`select`/`reduce`/`each`/`[]`/`[]=`/…) go
+   through `vm.aotSend`, which carries a per-site inline method cache mirroring the
+   interpreter's monomorphic fast path (a pointer-compare resolution + the same
+   explicit-receiver visibility check), so semantics stay identical while the
+   driver/interpreter overhead is removed. Anything unlowerable — a def/class at
+   top level, a rescue, a splat/keyword/optional block parameter, a non-local
+   `return`, an unsupported opcode — makes `CompileMain` decline and leaves the
+   whole program interpreted (a sound fall-back). Measured effect on
+   `bench/README.md`'s interpreter-bound rows: **`blocks` goes from 3.5× MRI to
+   ~0.9× — it now beats the MRI interpreter and matches YJIT**, because its hot
+   work (`t += i`) is arithmetic in the block body that Level 2 fully compiles;
+   `array`/`hash`/`wordcount` each get ~25–30 % faster (the driver overhead is
+   gone) but stay near the interpreter floor, because their hot cost is the native
+   runtime methods themselves — `Hash#[]=`, `Array#map`/`select`/`reduce` building
+   intermediate arrays — which Level 2 still (correctly) routes through the
+   runtime and which MRI implements in hand-tuned C.
+
 The prototype (`aot_proto_test.go`) stays as the regression that pins the
 target: level-1 must keep beating the MRI interpreter, level-3 must keep beating
 YJIT. `BenchmarkAOTGeneratedL3Fib` pins the *generated* kernel to that same bar.
 
-Still interpreted (left to future stages): optional/keyword/splat parameters,
-non-integer (Float / mixed) kernels, and calls to methods other than the one
-being compiled (no cross-method devirtualisation yet).
+Still interpreted (left to future stages): optional/keyword/splat parameters and
+non-integer (Float / mixed) kernels of methods; cross-method devirtualisation of
+level-2 sends (they cache but still dispatch, so a call-bound row like `array`
+does not reach a specialised kernel); and specialising the hot native container
+operations (Hash/Enumerable) a `hash`/`array`-style workload spends its time in.
 
 ## Closed-world builds (`rbgo build --closed`)
 

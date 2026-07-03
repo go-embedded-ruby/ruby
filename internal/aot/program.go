@@ -49,6 +49,23 @@ func CompileProgram(top *bytecode.ISeq) (content string, keys []string, ok bool)
 		keys = append(keys, key)
 	}
 
+	// Level 2: lower the top-level (`<main>`) code itself — the block-/string-/
+	// array-/hash-heavy script body that defines no hot method for level-1/3 to
+	// touch — to a native `aotMain`, registered so `Run` dispatches to it instead
+	// of interpreting the program's top level. Independent of the per-method
+	// lowering above: a program can have its methods compiled, its main compiled,
+	// both, or neither.
+	mainSrc, nCaches, mainOK := CompileMain(top)
+	if mainOK {
+		funcs.WriteString(mainSrc)
+		funcs.WriteString("\n")
+		for i := 0; i < nCaches; i++ {
+			fmt.Fprintf(&funcs, "var aotic%d inlineCache\n", i)
+		}
+		regs.WriteString("\tRegisterCompiledMain((*VM).aotMain)\n")
+		keys = append(keys, "<main>")
+	}
+
 	if len(keys) == 0 {
 		return "", nil, false
 	}
