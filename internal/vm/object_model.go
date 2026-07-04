@@ -785,6 +785,18 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *BoltCursor:
 		return x.cls
+	case *MongoClient:
+		return x.cls
+	case *MongoDatabase:
+		return x.cls
+	case *MongoCollection:
+		return x.cls
+	case *MongoCursor:
+		return x.cls
+	case *MongoResult:
+		return x.cls
+	case *MongoObjectId:
+		return x.cls
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:

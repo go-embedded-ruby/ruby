@@ -267,6 +267,10 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 		// by value (proto.Equal / element-wise) through the go-ruby-protobuf library,
 		// not object identity, so each must dispatch its own ==.
 		return true
+	case *MongoObjectId:
+		// BSON::ObjectId#== compares the 12-byte identifier by value, not object
+		// identity, so it must dispatch its own ==.
+		return true
 	}
 	return false
 }
