@@ -12,6 +12,7 @@ require (
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6
 	github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795
+	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
 	github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e
 	github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363
 	github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378
@@ -96,6 +97,8 @@ require (
 )
 
 require (
+	filippo.io/age v1.3.1 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect

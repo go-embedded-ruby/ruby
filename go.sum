@@ -1,3 +1,9 @@
+c2sp.org/CCTV/age v0.0.0-20251208015420-e9274a7bdbfd h1:ZLsPO6WdZ5zatV4UfVpr7oAwLGRZ+sebTUruuM4Ra3M=
+c2sp.org/CCTV/age v0.0.0-20251208015420-e9274a7bdbfd/go.mod h1:SrHC2C7r5GkDk8R+NFVzYy/sdj0Ypg9htaPXQq5Cqeo=
+filippo.io/age v1.3.1 h1:hbzdQOJkuaMEpRCLSN1/C5DX74RPcNCk6oqhKMXmZi0=
+filippo.io/age v1.3.1/go.mod h1:EZorDTYUxt836i3zdori5IJX/v2Lj6kWFU0cfh6C0D4=
+filippo.io/hpke v0.4.0 h1:p575VVQ6ted4pL+it6M00V/f2qTZITO0zgmdKCkd5+A=
+filippo.io/hpke v0.4.0/go.mod h1:EmAN849/P3qdeK+PCMkDpDm83vRHM5cDipBJ8xbQLVY=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/cristalhq/base64 v0.1.2 h1:edsefYyYDiac7Ytdh2xdaiiSSJzcI2f0yIkdGEf1qY0=
@@ -32,6 +38,8 @@ github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6 
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6/go.mod h1:0QY+Ri6/HhOkjRGhhyZ5NwtcDosKI7xwO5csmWEG0W0=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795 h1:UPDrh2pXuwewmbZiEM5SWg26Hy/08mw4MJnCszwGUEk=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795/go.mod h1:4gG3enh3yJ4fpQWjNuzsLbB01vF8XINKkgqsHdfL9O4=
+github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a h1:qLSOUbDALcDFcWTw2jfzSYz2S7SXKCeTuAPLvJrlhiw=
+github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a/go.mod h1:KbeDcUyUuspROC2mbwFxNAyHs7wGNE3VkZ7UDBAv9sk=
 github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e h1:8E6Zx9q8D1D8bhF/E35Vf2/xnw6WoMuOCigKVJJvWJI=
 github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e/go.mod h1:wAMh7VnlOelf8z8L8ZboqLAL8IX7yiPSyBS2JkSeylk=
 github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363 h1:uhvORTvegQwkGruQW1TK3fuQjV/BHMqQjkAUICFiHSw=

@@ -943,6 +943,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *naclObj:
 		return x.cls
+	case *AgeX25519Identity:
+		return x.cls
+	case *AgeX25519Recipient:
+		return x.cls
+	case *AgeScryptIdentity:
+		return x.cls
+	case *AgeScryptRecipient:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:
