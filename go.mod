@@ -15,6 +15,7 @@ require (
 	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
 	github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda
 	github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e
+	github.com/go-ruby-bbolt/bbolt v0.0.0-20260704121138-28ee121195c0
 	github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363
 	github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378
 	github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260703182656-06e4422c5207
