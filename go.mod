@@ -33,6 +33,7 @@ require (
 	github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260702151810-a274955bddac
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
+	github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
 	github.com/go-ruby-format/format v0.0.0-20260703115518-8adcf1b4af5f
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49

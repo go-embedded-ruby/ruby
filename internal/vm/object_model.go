@@ -765,6 +765,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["RSS::Atom::Person"].(*RClass)
 	case *RSSAtomCategory:
 		return vm.consts["RSS::Atom::Category"].(*RClass)
+	case *FaradayConnection:
+		return vm.consts["Faraday::Connection"].(*RClass)
+	case *FaradayRequest:
+		return vm.consts["Faraday::Request"].(*RClass)
+	case *FaradayResponse:
+		return vm.consts["Faraday::Response"].(*RClass)
+	case *FaradayParams:
+		return vm.consts["Faraday::Utils::ParamsHash"].(*RClass)
+	case *FaradayHeaders:
+		return vm.consts["Faraday::Utils::Headers"].(*RClass)
 	case *RQRCode:
 		// An RQRCode::QRCode reports RQRCode::QRCode so its renderer methods
 		// (as_svg / as_ansi / as_html / to_s / checked? / to_a) dispatch.

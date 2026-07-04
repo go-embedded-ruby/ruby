@@ -88,6 +88,8 @@ github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529 h1:md/l6ifEY6S0Iy1
 github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529/go.mod h1:HEJVI7jQ/BnjiSiu2Wj934QboEAgdv47RNOqvZb+nRw=
 github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352 h1:cRiGBGZWF8Pc0KxTqNr2wy0Y6WWPzeq2GsUuTroXDfE=
 github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352/go.mod h1:7h2mxQ3mnWz9bg39nSDr0h/LxqnEnbrJxmNRDbu3zs8=
+github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46 h1:S5pZdGwolAm7NHMQrwnN6BatfC8jWCSqzlI5OSnbIpc=
+github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46/go.mod h1:t4H4KVmvxOQ4IwtcniaHeNluKbmXKBOF8TkaULJAxsU=
 github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272 h1:tHmlER04rO8LxFWbDiKqcFDzB4WFzBio/c6kgeOdpGo=
 github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272/go.mod h1:wpq0ciEFn8zUc1vfuHRjF2U8mH0krhJCRHHr+JOGaEY=
 github.com/go-ruby-format/format v0.0.0-20260703115518-8adcf1b4af5f h1:N4nvZMNtLocbwcjJiXIhZ0gq8r0fUc7J3F/U2hnDMYQ=

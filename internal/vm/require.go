@@ -41,6 +41,7 @@ var providedFeatures = map[string]bool{
 	"arrow": true,
 	"unicode_normalize": true, "scanf": true, "prettyprint": true,
 	"rexml": true, "rexml/document": true,
+	"faraday": true,
 	"logger": true, "pstore": true,
 	"bcrypt": true, "jwt": true, "rbnacl": true,
 	"age": true,
