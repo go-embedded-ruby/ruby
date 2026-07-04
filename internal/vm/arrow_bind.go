@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"sort"
 	stdtime "time"
 
 	gotime "github.com/go-composites/time/src"
@@ -154,19 +155,13 @@ func arrowScalarToRuby(v any) object.Value {
 }
 
 // structKeyOrder returns a struct map's keys in a stable (sorted) order so a
-// Struct element renders deterministically.
+// Struct element renders deterministically regardless of Go map iteration order.
 func structKeyOrder(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
-	// insertion sort keeps the dependency surface minimal and n is tiny (a
-	// struct's field count).
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
-			keys[j-1], keys[j] = keys[j], keys[j-1]
-		}
-	}
+	sort.Strings(keys)
 	return keys
 }
 
