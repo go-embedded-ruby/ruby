@@ -1045,6 +1045,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Faraday::Utils::ParamsHash"].(*RClass)
 	case *FaradayHeaders:
 		return vm.consts["Faraday::Utils::Headers"].(*RClass)
+	case *KafkaClient:
+		return x.cls
+	case *KafkaProducer:
+		return x.cls
+	case *KafkaConsumer:
+		return x.cls
+	case *KafkaMessage:
+		return x.cls
+	case *KafkaBatch:
+		return x.cls
 	case *PumaServer:
 		return vm.consts["Puma::Server"].(*RClass)
 	case *PumaThreadPool:

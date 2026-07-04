@@ -169,6 +169,8 @@ github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2 h1:QVEA4kwx/P7dj
 github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2/go.mod h1:nHXcH3zaGNmCslZStZVeylXkv1wLp+nzT6qNj+m+QXU=
 github.com/go-ruby-jwt/jwt v0.0.0-20260702205900-15884789dfbf h1:W9pF7ZELPSwF6MZ6HOB5xNV66Uiywbc0S9pUhLkj66U=
 github.com/go-ruby-jwt/jwt v0.0.0-20260702205900-15884789dfbf/go.mod h1:lXzMyvgfYye7tZm1cY9ej2SbXzAdJdA2IAiY+niM+nU=
+github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5 h1:5H6gDIo9H4GfzMv5C04/SLpGNI2a7J8NryDoXUB0xhc=
+github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5/go.mod h1:fGpMQL4keKF1fub9DOL9FZB+gOLXwZ+uoI8PwW7d1e0=
 github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8 h1:cM6xIhOcvpAOPBC/RZxMUixTDlMCz0fQnaab3ee8KH0=
 github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8/go.mod h1:lpczu9a88TnJ1mD0vLvXcL9MJL+2y8ZI5QeP2HmEqjA=
 github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf h1:igeeLsQctCEBtYSrUWmTuYI3Nh8518UtAimgpA2JTg0=
@@ -342,6 +344,14 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc h1:9lRDQMhESg+zvGYmW5DyG0UqvY96Bu5QYsTLvCHdrgo=
 github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc/go.mod h1:bciPuU6GHm1iF1pBvUfxfsH0Wmnc2VbpgvbI9ZWuIRs=
+github.com/twmb/franz-go v1.21.5 h1:cVYI2+JTTKSvohhy8bCOleYrS7G79ZBrLVFIJsoHm8M=
+github.com/twmb/franz-go v1.21.5/go.mod h1:rfoMTnVk7107fhTGxfEKIHP/e7tPe6oyij/ywzO0czk=
+github.com/twmb/franz-go/pkg/kadm v1.18.0 h1:WRf/LZmDdcDXwX7WMbtDU++v+b3NzYh2bCGoPMmzirw=
+github.com/twmb/franz-go/pkg/kadm v1.18.0/go.mod h1:XeLhGoLXLFzK8/ryv5FfpxPxGwj4oFEGpPJMB/x6KDE=
+github.com/twmb/franz-go/pkg/kfake v0.0.0-20260702233442-45013cfc5f26 h1:ziIkgeU0E5YFrgaHG0OvwrzYbTwh6FFQHpmE5FrVGBo=
+github.com/twmb/franz-go/pkg/kfake v0.0.0-20260702233442-45013cfc5f26/go.mod h1:9j4VxU2ng6tHgD4lIkNJ5OJ3D6vgPhhIp3tBa7dJgLA=
+github.com/twmb/franz-go/pkg/kmsg v1.13.1 h1:fG5kItwysTk5UXqVwb64EpQEy3TydF3vYYK21nUQ+bI=
+github.com/twmb/franz-go/pkg/kmsg v1.13.1/go.mod h1:+DPt4NC8RmI6hqb8G09+3giKObE6uD2Eya6CfqBpeJY=
 github.com/zeebo/assert v1.3.0 h1:g7C04CbJuIDKNPFHmsk4hwZDO5O+kntRxzaUoNXj+IQ=
 github.com/zeebo/assert v1.3.0/go.mod h1:Pq9JiuJQpG8JLJdtkwrJESF0Foym2/D9XMU5ciN/wJ0=
 github.com/zeebo/xxh3 v1.1.0 h1:s7DLGDK45Dyfg7++yxI0khrfwq9661w9EN78eP/UZVs=

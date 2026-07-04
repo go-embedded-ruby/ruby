@@ -48,6 +48,7 @@ require (
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2
 	github.com/go-ruby-jwt/jwt v0.0.0-20260702205900-15884789dfbf
+	github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5
 	github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8
 	github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
@@ -103,6 +104,7 @@ require (
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
+	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260702233442-45013cfc5f26
 )
 
 require (
@@ -157,6 +159,9 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/twmb/franz-go v1.21.5 // indirect
+	github.com/twmb/franz-go/pkg/kadm v1.18.0 // indirect
+	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
