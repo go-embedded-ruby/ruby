@@ -63,6 +63,7 @@ require (
 	github.com/go-ruby-parser/parser v0.0.0-20260703103305-5ae12948602f
 	github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b
 	github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d
+	github.com/go-ruby-prawn/prawn v0.0.0-20260704123330-7bae7647bcd1
 	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d
 	github.com/go-ruby-prime/prime v0.0.0-20260703153932-08f6fe218cd4
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
@@ -105,6 +106,7 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
+	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
