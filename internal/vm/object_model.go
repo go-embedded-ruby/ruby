@@ -969,6 +969,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
+	case *ACMEClient:
+		return x.cls
+	case *ACMEOrder:
+		return x.cls
+	case *ACMEAuthorization:
+		return x.cls
+	case *ACMEChallenge:
+		return x.cls
+	case *ACMECSR:
+		return x.cls
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:
