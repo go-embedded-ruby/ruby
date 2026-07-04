@@ -65,6 +65,7 @@ require (
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
+	github.com/go-ruby-parquet/parquet v0.0.0-20260704170648-c7f0507946f7
 	github.com/go-ruby-parser/parser v0.0.0-20260703103305-5ae12948602f
 	github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b
 	github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d
@@ -109,7 +110,9 @@ require (
 	filippo.io/age v1.3.1 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.14.5 // indirect
+	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/apache/arrow-go/v18 v18.6.0 // indirect
+	github.com/apache/thrift v0.22.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.2 // indirect
 	github.com/blevesearch/bleve/v2 v2.6.0 // indirect
 	github.com/blevesearch/bleve_index_api v1.3.11 // indirect
@@ -167,8 +170,11 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
+	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
