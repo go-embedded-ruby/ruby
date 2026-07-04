@@ -785,6 +785,44 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *BoltCursor:
 		return x.cls
+	case *ParquetReader:
+		return vm.consts["Parquet::ArrowFileReader"].(*RClass)
+	case *ParquetWriter:
+		return vm.consts["Parquet::ArrowFileWriter"].(*RClass)
+	case *SAMLSettings:
+		return x.cls
+	case *SAMLAuthrequest:
+		return x.cls
+	case *SAMLResponse:
+		return x.cls
+	case *SAMLMetadata:
+		return x.cls
+	case *SAMLIdpMetadataParser:
+		return x.cls
+	case *SAMLLogoutrequest:
+		return x.cls
+	case *SAMLSloLogoutresponse:
+		return x.cls
+	case *WebAuthnRelyingParty:
+		return x.cls
+	case *WebAuthnPublicKey:
+		return x.cls
+	case *WebAuthnCredential:
+		return x.cls
+	case *WebAuthnCreateOptions:
+		return x.cls
+	case *WebAuthnGetOptions:
+		return x.cls
+	case *ACMEClient:
+		return x.cls
+	case *ACMEOrder:
+		return x.cls
+	case *ACMEAuthorization:
+		return x.cls
+	case *ACMEChallenge:
+		return x.cls
+	case *ACMECSR:
+		return x.cls
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:
