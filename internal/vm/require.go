@@ -43,7 +43,7 @@ var providedFeatures = map[string]bool{
 	"rexml": true, "rexml/document": true,
 	"logger": true, "pstore": true,
 	"bcrypt": true, "jwt": true, "rbnacl": true,
-	"age": true,
+	"age": true, "prawn": true,
 	"msgpack": true, "toml": true,
 	"tzinfo": true, "chronic": true, "money": true,
 	"addressable": true, "addressable/uri": true, "addressable/template": true,
