@@ -863,6 +863,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Arrow::RecordBatch"].(*RClass)
 	case *ArrowTable:
 		return vm.consts["Arrow::Table"].(*RClass)
+	case *GraphQLType:
+		return x.cls
+	case *GraphQLSchema:
+		return x.cls
+	case *GraphQLObjectDSL:
+		return x.cls
 	case *SpellChecker:
 		return vm.cSpellChecker
 	case *Time:

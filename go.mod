@@ -37,6 +37,7 @@ require (
 	github.com/go-ruby-format/format v0.0.0-20260703115518-8adcf1b4af5f
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
 	github.com/go-ruby-grape/grape v0.0.0-20260702151528-455377c8c7c3
+	github.com/go-ruby-graphql/graphql v0.0.0-20260704114306-47444c09995e
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
 	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
@@ -112,6 +113,7 @@ require (
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/graphql-go/graphql v0.8.1 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
