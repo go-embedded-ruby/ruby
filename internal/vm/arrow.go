@@ -172,13 +172,9 @@ func (vm *VM) registerArrowDataType(cls *RClass) {
 	}
 	d("to_s", toS)
 	d("inspect", toS)
-	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*ArrowDataType)
-		if !ok {
-			return object.False
-		}
-		return object.Bool(self(v).dt.EqualQ(o.dt))
-	})
+	// Arrow::DataType#== is dispatched by the VM's OpEq fast path through
+	// valueEqual (see arith.go), which compares two DataTypes structurally, so no
+	// separate native method is defined here.
 }
 
 // registerArrowField installs Arrow::Field: Field.new(name, type, nullable=true)
