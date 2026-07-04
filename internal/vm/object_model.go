@@ -793,6 +793,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *PGResultObj:
 		return x.cls
+	case *MySQLClient:
+		return x.cls
+	case *MySQLResult:
+		return x.cls
+	case *MySQLStatement:
+		return x.cls
 	case *SequelDBObj:
 		return x.cls
 	case *SequelDatasetObj:

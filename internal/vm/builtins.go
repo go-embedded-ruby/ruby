@@ -457,6 +457,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSQLite3()       // SQLite3::Database/Statement (require "sqlite3"), backed by go-ruby-sqlite3 (modernc); needs StandardError for SQLite3::Exception
 	vm.registerRedis()         // Redis client (require "redis"), backed by go-ruby-redis RESP codec; socket = injected IO seam; needs StandardError for Redis::BaseError
 	vm.registerPG()            // PG::Connection/Result (require "pg"), backed by go-ruby-pg v3 protocol; socket = injected IO seam; needs StandardError for PG::Error
+	vm.registerMySQL()         // Mysql2::Client/Result/Statement (require "mysql2" / "mysql"), backed by go-ruby-mysql over go-sql-driver; needs Enumerable for Result and StandardError for Mysql2::Error
 	vm.registerSequel()        // Sequel query builder + Database (require "sequel"), backed by go-ruby-sequel; executor seam wired to SQLite3::Database (real execution)
 	vm.registerNokogiri()      // Nokogiri::HTML/XML -> Document/Node/NodeSet (require "nokogiri"), backed by go-ruby-nokogiri; needs StandardError for Nokogiri::SyntaxError
 	vm.registerNokogiriXSLT()  // Nokogiri::XSLT(str) -> Stylesheet#transform/apply_to (require "nokogiri"), backed by go-ruby-xslt over go-ruby-nokogiri; needs registerNokogiri first

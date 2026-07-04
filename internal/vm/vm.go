@@ -557,6 +557,7 @@ func New(out io.Writer) *VM {
 	vm.registerOstruct()    // OpenStruct data ops (to_h/inspect/dig/delete_field/==), backed by go-ruby-ostruct; after the prelude so it reopens the prelude-defined class
 	vm.registerLogger()     // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
 	vm.registerPStore()     // PStore (require "pstore"), backed by go-ruby-pstore; after the prelude so PStore::Error < StandardError
+	vm.includeMySQLEnumerable() // Mysql2::Result mixes in Enumerable; after the prelude so the module exists
 	vm.installHashKeyHook()
 	// The prelude and built-ins are loaded; arm the level-2 AOT top level so the
 	// next Run (the user program) dispatches to the compiled aotMain, if one was
