@@ -849,6 +849,20 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cMatrix
 	case *Vector:
 		return vm.cVector
+	case *ArrowArray:
+		return vm.consts["Arrow::Array"].(*RClass)
+	case *ArrowArrayBuilder:
+		return vm.consts["Arrow::ArrayBuilder"].(*RClass)
+	case *ArrowDataType:
+		return vm.consts["Arrow::DataType"].(*RClass)
+	case *ArrowField:
+		return vm.consts["Arrow::Field"].(*RClass)
+	case *ArrowSchema:
+		return vm.consts["Arrow::Schema"].(*RClass)
+	case *ArrowRecordBatch:
+		return vm.consts["Arrow::RecordBatch"].(*RClass)
+	case *ArrowTable:
+		return vm.consts["Arrow::Table"].(*RClass)
 	case *SpellChecker:
 		return vm.cSpellChecker
 	case *Time:

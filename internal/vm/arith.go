@@ -616,6 +616,9 @@ func valueEqual(a, b object.Value) bool {
 		return eqMatrix(av, b)
 	case *Vector:
 		return eqVector(av, b)
+	case *ArrowDataType:
+		bv, ok := b.(*ArrowDataType)
+		return ok && av.dt.EqualQ(bv.dt)
 	case *Bag:
 		bv, ok := b.(*Bag)
 		return ok && av.b.Equal(bv.b)
