@@ -863,6 +863,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Arrow::RecordBatch"].(*RClass)
 	case *ArrowTable:
 		return vm.consts["Arrow::Table"].(*RClass)
+	case *PumaServer:
+		return vm.consts["Puma::Server"].(*RClass)
+	case *PumaThreadPool:
+		return vm.consts["Puma::ThreadPool"].(*RClass)
+	case *PumaConfiguration:
+		return vm.consts["Puma::Configuration"].(*RClass)
+	case *PumaDSL:
+		return vm.consts["Puma::DSL"].(*RClass)
 	case *SpellChecker:
 		return vm.cSpellChecker
 	case *Time:

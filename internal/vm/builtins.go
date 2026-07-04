@@ -488,6 +488,7 @@ func (vm *VM) bootstrap() {
 	vm.registerREXML()         // REXML module (require "rexml/document"), backed by go-ruby-rexml; needs StandardError (REXML::ParseException)
 	vm.registerMatrix()        // Matrix/Vector (require "matrix"), backed by go-ruby-matrix; needs StandardError (ExceptionForMatrix::Err*)
 	vm.registerArrow()         // Arrow module (require "arrow"), backed by go-ruby-arrow; needs StandardError (Arrow::Error)
+	vm.registerPuma()          // Puma module (require "puma"), backed by go-ruby-puma; threaded Rack web server over net/http; needs StandardError (Puma::Error) + StringIO (rack.input)
 	vm.registerShellwords()    // Shellwords (require "shellwords"), backed by go-ruby-shellwords; installs Shellwords + String/Array core extensions lazily on require
 	vm.registerMonitor()       // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
 	vm.registerObservable()    // Observable mixin (require "observer"), backed by go-ruby-observer; rbgo wires dispatch + respond_to?
