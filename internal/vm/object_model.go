@@ -777,6 +777,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["SQLite3::Database"].(*RClass)
 	case *SQLite3Statement:
 		return vm.consts["SQLite3::Statement"].(*RClass)
+	case *BoltDB:
+		return x.cls
+	case *BoltTx:
+		return x.cls
+	case *BoltBucket:
+		return x.cls
+	case *BoltCursor:
+		return x.cls
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:

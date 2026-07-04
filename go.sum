@@ -103,6 +103,8 @@ github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda h1:DcGqJUjmal8
 github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda/go.mod h1:VItI7fXduRnuTNRtFSmi+VzoNZ/riRf8p1G2xumYAF8=
 github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e h1:8E6Zx9q8D1D8bhF/E35Vf2/xnw6WoMuOCigKVJJvWJI=
 github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e/go.mod h1:wAMh7VnlOelf8z8L8ZboqLAL8IX7yiPSyBS2JkSeylk=
+github.com/go-ruby-bbolt/bbolt v0.0.0-20260704121138-28ee121195c0 h1:xgPjrU7O45G3jZtmEDnsvN+Vaa5tiRmYM+V5+Ff0iJQ=
+github.com/go-ruby-bbolt/bbolt v0.0.0-20260704121138-28ee121195c0/go.mod h1:ZAYQsrvCyOiDqPRQiJ2201BerIWJ76e/HBb99Ontr38=
 github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363 h1:uhvORTvegQwkGruQW1TK3fuQjV/BHMqQjkAUICFiHSw=
 github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363/go.mod h1:jxNh7fOQlIauCvfILUOHAIBA/XEtn559+qRW3W6OiL4=
 github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378 h1:tn4iqFZc2KhoZ4iamcqdT+dYYiDef0RhmSbBNjPVRGk=
