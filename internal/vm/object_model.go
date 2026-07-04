@@ -967,6 +967,20 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *PrawnDocument:
 		return x.cls
+	case *SAMLSettings:
+		return x.cls
+	case *SAMLAuthrequest:
+		return x.cls
+	case *SAMLResponse:
+		return x.cls
+	case *SAMLMetadata:
+		return x.cls
+	case *SAMLIdpMetadataParser:
+		return x.cls
+	case *SAMLLogoutrequest:
+		return x.cls
+	case *SAMLSloLogoutresponse:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:
