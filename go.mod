@@ -65,7 +65,7 @@ require (
 	github.com/go-ruby-prime/prime v0.0.0-20260703153932-08f6fe218cd4
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
-	github.com/go-ruby-rack/rack v0.0.0-20260703100219-0201e5681658
+	github.com/go-ruby-rack/rack v0.0.0-20260704053028-640136bb67e7
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
@@ -91,7 +91,7 @@ require (
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
-	github.com/go-ruby-zlib/zlib v0.0.0-20260703175431-ca391423d5da
+	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
 )
 
 require (
@@ -101,6 +101,7 @@ require (
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
+	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
 	github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect

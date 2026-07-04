@@ -215,6 +215,13 @@ func TestRackUtils(t *testing.T) {
 		{`require "rack/utils"; p Rack::Utils.forwarded_values(nil)`, "nil\n"},
 		{`require "rack/utils"; p Rack::Utils.forwarded_values(false)`, "nil\n"},
 		{`require "rack/utils"; p Rack::Utils.forwarded_values("cookie=x")`, "nil\n"},
+		// Malformed unterminated-quote cases — MRI keeps the accumulated value
+		// as-is and leaves the remainder in the header; the leftover either
+		// yields an empty value or forms a bogus parameter that aborts to nil.
+		// (Verified against MRI ruby 4.0 rack: {for: [""]}, then nil.)
+		{`require "rack/utils"; p Rack::Utils.forwarded_values(%q{for="unterminated})`, `{for: [""]}` + "\n"},
+		{`require "rack/utils"; p Rack::Utils.forwarded_values(%q{for="bad;proto=x})`, "nil\n"},
+		{`require "rack/utils"; p Rack::Utils.forwarded_values(%q{proto="ok";for=1.2.3.4})`, `{proto: ["ok"], for: ["1.2.3.4"]}` + "\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
