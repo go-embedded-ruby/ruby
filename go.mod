@@ -3,6 +3,7 @@ module github.com/go-embedded-ruby/ruby
 go 1.26.4
 
 require (
+	github.com/beevik/etree v1.6.0
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0
@@ -10,6 +11,7 @@ require (
 	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
+	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6
 	github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795
 	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
@@ -85,6 +87,7 @@ require (
 	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75
 	github.com/go-ruby-rss/rss v0.0.0-20260630123856-ba95b4fb73c9
 	github.com/go-ruby-rubocop/rubocop v0.0.0-20260702170528-0a89da6e9147
+	github.com/go-ruby-saml/saml v0.0.0-20260704115648-11caa3fa0e1f
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-sequel/sequel v0.0.0-20260702151352-66413b601977
@@ -100,9 +103,12 @@ require (
 	github.com/go-ruby-tzinfo/tzinfo v0.0.0-20260701105256-15977bdf6e1a
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
+	github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
+	github.com/go-webauthn/webauthn v0.17.4
+	github.com/russellhaering/goxmldsig v1.6.0
 )
 
 require (
@@ -131,7 +137,9 @@ require (
 	github.com/blevesearch/zapx/v16 v16.3.4 // indirect
 	github.com/blevesearch/zapx/v17 v17.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/crewjam/saml v0.5.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
@@ -142,21 +150,30 @@ require (
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
 	github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/go-webauthn/x v0.2.6 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
+	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/graphql-go/graphql v0.8.1 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/mattermost/xml-roundtrip-validator v0.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/tinylib/msgp v1.6.4 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
