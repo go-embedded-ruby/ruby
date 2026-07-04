@@ -863,6 +863,26 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Arrow::RecordBatch"].(*RClass)
 	case *ArrowTable:
 		return vm.consts["Arrow::Table"].(*RClass)
+	case *OTelTracerProvider:
+		// The provider reports the class stamped on it: the API provider by
+		// default, the SDK provider once OpenTelemetry::SDK::Trace::TracerProvider
+		// built it.
+		return x.cls
+	case *OTelTracer:
+		return vm.consts["OpenTelemetry::Trace::Tracer"].(*RClass)
+	case *OTelSpan:
+		return vm.consts["OpenTelemetry::Trace::Span"].(*RClass)
+	case *OTelSpanContext:
+		return vm.consts["OpenTelemetry::Trace::SpanContext"].(*RClass)
+	case *OTelStatus:
+		return vm.consts["OpenTelemetry::Trace::Status"].(*RClass)
+	case *OTelExporter:
+		return vm.consts["OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter"].(*RClass)
+	case *OTelProcessor:
+		// The processor reports its own class (Simple or Batch span processor).
+		return x.cls
+	case *OTelFinishedSpan:
+		return vm.consts["OpenTelemetry::SDK::Trace::SpanData"].(*RClass)
 	case *SpellChecker:
 		return vm.cSpellChecker
 	case *Time:
