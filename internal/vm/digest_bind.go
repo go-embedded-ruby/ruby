@@ -262,6 +262,11 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 		// Dry::Struct#== compares attributes by value (via go-ruby-dry-struct's
 		// Struct.Eql), not object identity, so it must dispatch its own ==.
 		return true
+	case *ProtobufMessage, *ProtobufRepeatedField, *ProtobufMap:
+		// Google::Protobuf messages and their RepeatedField / Map containers compare
+		// by value (proto.Equal / element-wise) through the go-ruby-protobuf library,
+		// not object identity, so each must dispatch its own ==.
+		return true
 	}
 	return false
 }

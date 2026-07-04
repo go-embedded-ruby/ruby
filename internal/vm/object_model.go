@@ -967,6 +967,30 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *PrawnDocument:
 		return x.cls
+	case *ProtobufPool:
+		return x.cls
+	case *ProtobufBuilder:
+		return x.cls
+	case *ProtobufMessageBuilder:
+		return x.cls
+	case *ProtobufOneofBuilder:
+		return x.cls
+	case *ProtobufEnumBuilder:
+		return x.cls
+	case *ProtobufDescriptor:
+		return x.cls
+	case *ProtobufEnumDescriptor:
+		return x.cls
+	case *ProtobufFieldDescriptor:
+		return x.cls
+	case *ProtobufMsgClass:
+		return x.cls
+	case *ProtobufMessage:
+		return x.cls
+	case *ProtobufRepeatedField:
+		return x.cls
+	case *ProtobufMap:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:

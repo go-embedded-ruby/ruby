@@ -433,6 +433,7 @@ func (vm *VM) bootstrap() {
 	vm.registerRbNaCl()        // RbNaCl (require "rbnacl"), backed by go-ruby-sodium; needs StandardError
 	vm.registerAge()           // Age (require "age"), backed by go-ruby-age; needs StandardError
 	vm.registerPrawn()         // Prawn::Document (require "prawn"), backed by go-ruby-prawn (fpdf); needs StandardError for Prawn::Errors
+	vm.registerProtobuf()      // Google::Protobuf (require "google/protobuf"), backed by go-ruby-protobuf; needs TypeError/RuntimeError
 	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
 	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
 	vm.registerTZInfo()        // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier

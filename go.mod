@@ -66,6 +66,7 @@ require (
 	github.com/go-ruby-prawn/prawn v0.0.0-20260704123330-7bae7647bcd1
 	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d
 	github.com/go-ruby-prime/prime v0.0.0-20260703153932-08f6fe218cd4
+	github.com/go-ruby-protobuf/protobuf v0.0.0-20260704100903-2defbe43d396
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
 	github.com/go-ruby-rack/rack v0.0.0-20260704053028-640136bb67e7
@@ -126,6 +127,7 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
