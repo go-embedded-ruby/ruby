@@ -38,7 +38,7 @@ var providedFeatures = map[string]bool{
 	"strscan": true, "fiber": true, "objspace": true, "csv": true,
 	"shellwords": true, "prime": true, "tsort": true, "abbrev": true,
 	"did_you_mean": true, "cmath": true, "matrix": true, "ipaddr": true,
-	"arrow": true,
+	"arrow": true, "parquet": true,
 	"unicode_normalize": true, "scanf": true, "prettyprint": true,
 	"rexml": true, "rexml/document": true,
 	"logger": true, "pstore": true,

@@ -863,6 +863,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Arrow::RecordBatch"].(*RClass)
 	case *ArrowTable:
 		return vm.consts["Arrow::Table"].(*RClass)
+	case *ParquetReader:
+		return vm.consts["Parquet::ArrowFileReader"].(*RClass)
+	case *ParquetWriter:
+		return vm.consts["Parquet::ArrowFileWriter"].(*RClass)
 	case *SpellChecker:
 		return vm.cSpellChecker
 	case *Time:
