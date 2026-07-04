@@ -48,6 +48,8 @@ var providedFeatures = map[string]bool{
 	"opentelemetry": true, "faraday": true, "puma": true, "bolt": true,
 	"saml": true, "ruby-saml": true, "webauthn": true,
 	"acme": true, "acme/client": true,
+	"grpc": true, "nats": true, "kafka": true, "etcd": true, "etcdv3": true,
+	"mysql2": true, "mysql": true, "mongo": true, "bson": true, "parquet": true,
 	"msgpack": true, "toml": true,
 	"tzinfo": true, "chronic": true, "money": true,
 	"addressable": true, "addressable/uri": true, "addressable/template": true,

@@ -443,6 +443,13 @@ func (vm *VM) bootstrap() {
 	vm.registerSAML()          // SAML / OneLogin::RubySaml (require "saml"/"ruby-saml"), backed by go-ruby-saml; needs StandardError for SAML::Error
 	vm.registerWebAuthn()      // WebAuthn module (require "webauthn"), backed by go-ruby-webauthn; needs StandardError (WebAuthn::Error)
 	vm.registerACME()          // Acme::Client / Order / Authorization / Challenge / CertificateRequest (require "acme" / "acme/client"), backed by go-ruby-acme (x/crypto/acme); transport is a host seam; needs StandardError for the Acme::Error tree
+	vm.registerGRPC()          // GRPC module (require "grpc"), backed by go-ruby-grpc over google.golang.org/grpc; in-process bufconn transport; needs StandardError (GRPC::Error)
+	vm.registerNATS()          // NATS module (require "nats"), backed by go-ruby-nats over nats.go; needs StandardError for the NATS::Error tree
+	vm.registerKafka()         // Kafka module (require "kafka"), backed by go-ruby-kafka (twmb/franz-go); needs StandardError for Kafka::Error
+	vm.registerEtcd()          // Etcd/Etcdv3 client (require "etcd"/"etcdv3"), backed by go-ruby-etcd over go.etcd.io/etcd/client/v3; needs StandardError for Etcd::Error
+	vm.registerMySQL()         // Mysql2::Client/Result/Statement (require "mysql2" / "mysql"), backed by go-ruby-mysql over go-sql-driver; needs Enumerable for Result and StandardError for Mysql2::Error
+	vm.registerMongo()         // Mongo::Client/Database/Collection/Cursor + BSON::ObjectId (require "mongo"), backed by go-ruby-mongodb; needs StandardError for Mongo::Error
+	vm.registerParquet()       // Parquet::ArrowFileReader/ArrowFileWriter (require "parquet"), backed by go-ruby-parquet; needs StandardError for Parquet::Error
 	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
 	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
 	vm.registerTZInfo()        // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier
