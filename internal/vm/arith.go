@@ -231,6 +231,12 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isMoney := a.(*Money); isMoney {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// A Google::Protobuf::RepeatedField dispatches its + (a new list = the
+		// receiver's elements followed by the other list's) as a method rather than
+		// falling into the numeric coercion path.
+		if _, isRF := a.(*ProtobufRepeatedField); isRF {
+			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
 		return binary(op, a, b)
 	}
 }

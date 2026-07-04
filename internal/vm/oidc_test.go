@@ -245,8 +245,12 @@ func TestOIDCVerifierHS(t *testing.T) {
 	}
 	verOKe := hsPre + `v=OpenIDConnect::Verifier.new(issuer:iss,client_id:cid,hmac_secret:sec,nonce:"n0")` + "\n"
 	raises := []struct{ src, class string }{
-		// Tampered signature (last char flipped).
-		{verOKe + `bad = tok[0..-2] + (tok[-1]=="a" ? "b" : "a"); v.verify(bad)`, "OpenIDConnect::InvalidTokenError"},
+		// Tampered signature: appending a base64url char always changes the
+		// decoded HMAC bytes (or invalidates the encoding), so verification
+		// fails deterministically. A last-char *flip* is unreliable because the
+		// final base64url char carries unused low bits that can decode to the
+		// same signature bytes.
+		{verOKe + `bad = tok + "x"; v.verify(bad)`, "OpenIDConnect::InvalidTokenError"},
 		// Expired.
 		{hsPre + `t2=mk.call({"exp"=>now-3600}); OpenIDConnect::Verifier.new(issuer:iss,client_id:cid,hmac_secret:sec).verify(t2)`, "OpenIDConnect::ExpiredError"},
 		// Wrong issuer.
