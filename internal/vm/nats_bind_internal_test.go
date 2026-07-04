@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -391,4 +392,14 @@ func TestNATSWrapperStrings(t *testing.T) {
 	// raiseNATS: a mapped sentinel and an unmapped error (the NATS::Error fallback).
 	natsRecover(t, "NATS::Timeout", func() { raiseNATS(nats.ErrTimeout) })
 	natsRecover(t, "NATS::Error", func() { raiseNATS(errors.New("weird transport error")) })
+
+	// raiseNATSConnect classifies a failed connect OS-independently: a known nats
+	// sentinel maps as usual, a bare network/dial error (no sentinel) becomes
+	// NATS::IO::NoServersError — this is the Windows path, where nats.go surfaces a
+	// raw *net.OpError instead of wrapping nats.ErrNoServers — and anything else
+	// falls back to NATS::Error.
+	natsRecover(t, "NATS::IO::NoServersError", func() { raiseNATSConnect(nats.ErrNoServers) })
+	netErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+	natsRecover(t, "NATS::IO::NoServersError", func() { raiseNATSConnect(netErr) })
+	natsRecover(t, "NATS::Error", func() { raiseNATSConnect(errors.New("non-net connect failure")) })
 }

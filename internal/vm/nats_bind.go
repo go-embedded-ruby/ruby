@@ -6,6 +6,7 @@ package vm
 
 import (
 	"errors"
+	"net"
 	"time"
 
 	nats "github.com/go-ruby-nats/nats"
@@ -112,6 +113,26 @@ func raiseNATS(err error) {
 		}
 	}
 	raise(cls, "%s", err.Error())
+}
+
+// raiseNATSConnect re-raises a failed NATS.connect. It maps the known sentinels
+// through natsErrClass like raiseNATS, but additionally classifies a bare
+// network/dial failure — one carrying no nats sentinel — as
+// NATS::IO::NoServersError, i.e. "couldn't reach any server". This keeps connect
+// errors OS-independent: on Unix nats.go wraps a refused dial as nats.ErrNoServers,
+// but on Windows it surfaces the raw net error (a *net.OpError / net.Error) that
+// does not satisfy errors.Is(err, nats.ErrNoServers).
+func raiseNATSConnect(err error) {
+	for e, name := range natsErrClass {
+		if errors.Is(err, e) {
+			raise(name, "%s", err.Error())
+		}
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		raise("NATS::IO::NoServersError", "%s", err.Error())
+	}
+	raise("NATS::Error", "%s", err.Error())
 }
 
 // natsBytes coerces a Ruby payload argument to the raw message bytes: a String

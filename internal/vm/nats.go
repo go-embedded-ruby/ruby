@@ -106,7 +106,7 @@ func (vm *VM) natsConnect(args []object.Value, blk *Proc) object.Value {
 	opts := natsConnectOptions(args)
 	c, err := nats.Connect(opts...)
 	if err != nil {
-		raiseNATS(err)
+		raiseNATSConnect(err)
 	}
 	client := vm.newNATSClient(c)
 	if blk != nil {
