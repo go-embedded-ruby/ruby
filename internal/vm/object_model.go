@@ -1053,6 +1053,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Puma::Configuration"].(*RClass)
 	case *PumaDSL:
 		return vm.consts["Puma::DSL"].(*RClass)
+	case *GRPCServer:
+		return vm.consts["GRPC::RpcServer"].(*RClass)
+	case *GRPCStub:
+		return vm.consts["GRPC::ClientStub"].(*RClass)
+	case *GRPCService:
+		return vm.consts["GRPC::Service"].(*RClass)
+	case *GRPCActiveCall:
+		return vm.consts["GRPC::ActiveCall"].(*RClass)
+	case *GRPCStatus:
+		return vm.consts["GRPC::Status"].(*RClass)
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:
