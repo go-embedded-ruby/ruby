@@ -863,6 +863,20 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Arrow::RecordBatch"].(*RClass)
 	case *ArrowTable:
 		return vm.consts["Arrow::Table"].(*RClass)
+	case *BleveIndex:
+		return x.cls
+	case *BleveMapping:
+		return x.cls
+	case *BleveQuery:
+		return x.cls
+	case *BleveSearchResult:
+		return x.cls
+	case *BleveHit:
+		return x.cls
+	case *BleveBatch:
+		return x.cls
+	case *BleveFacet:
+		return x.cls
 	case *SpellChecker:
 		return vm.cSpellChecker
 	case *Time:

@@ -18,6 +18,7 @@ require (
 	github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363
 	github.com/go-ruby-benchmark/benchmark v0.0.0-20260630081339-0d8f1c26e378
 	github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260703182656-06e4422c5207
+	github.com/go-ruby-bleve/bleve v0.0.0-20260704121320-7b342f38e500
 	github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
@@ -100,7 +101,28 @@ require (
 require (
 	filippo.io/age v1.3.1 // indirect
 	filippo.io/hpke v0.4.0 // indirect
+	github.com/RoaringBitmap/roaring/v2 v2.14.5 // indirect
 	github.com/apache/arrow-go/v18 v18.6.0 // indirect
+	github.com/bits-and-blooms/bitset v1.24.2 // indirect
+	github.com/blevesearch/bleve/v2 v2.6.0 // indirect
+	github.com/blevesearch/bleve_index_api v1.3.11 // indirect
+	github.com/blevesearch/geo v0.2.5 // indirect
+	github.com/blevesearch/go-faiss v1.1.0 // indirect
+	github.com/blevesearch/go-porterstemmer v1.0.3 // indirect
+	github.com/blevesearch/gtreap v0.1.1 // indirect
+	github.com/blevesearch/mmap-go v1.2.0 // indirect
+	github.com/blevesearch/scorch_segment_api/v2 v2.4.7 // indirect
+	github.com/blevesearch/segment v0.9.1 // indirect
+	github.com/blevesearch/snowballstem v0.9.0 // indirect
+	github.com/blevesearch/upsidedown_store_api v1.0.2 // indirect
+	github.com/blevesearch/vellum v1.2.0 // indirect
+	github.com/blevesearch/zapx/v11 v11.4.3 // indirect
+	github.com/blevesearch/zapx/v12 v12.4.3 // indirect
+	github.com/blevesearch/zapx/v13 v13.4.3 // indirect
+	github.com/blevesearch/zapx/v14 v14.4.3 // indirect
+	github.com/blevesearch/zapx/v15 v15.4.3 // indirect
+	github.com/blevesearch/zapx/v16 v16.3.4 // indirect
+	github.com/blevesearch/zapx/v17 v17.1.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
@@ -110,20 +132,27 @@ require (
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
 	github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
+	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
+	go.etcd.io/bbolt v1.4.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
