@@ -431,6 +431,7 @@ func (vm *VM) bootstrap() {
 	vm.registerBCrypt()        // BCrypt (require "bcrypt"), backed by go-ruby-bcrypt; needs StandardError + String
 	vm.registerJWT()           // JWT (require "jwt"), backed by go-ruby-jwt; needs StandardError
 	vm.registerRbNaCl()        // RbNaCl (require "rbnacl"), backed by go-ruby-sodium; needs StandardError
+	vm.registerAge()           // Age (require "age"), backed by go-ruby-age; needs StandardError
 	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
 	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
 	vm.registerTZInfo()        // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier
