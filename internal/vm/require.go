@@ -38,7 +38,7 @@ var providedFeatures = map[string]bool{
 	"strscan": true, "fiber": true, "objspace": true, "csv": true,
 	"shellwords": true, "prime": true, "tsort": true, "abbrev": true,
 	"did_you_mean": true, "cmath": true, "matrix": true, "ipaddr": true,
-	"arrow": true,
+	"arrow":             true,
 	"unicode_normalize": true, "scanf": true, "prettyprint": true,
 	"rexml": true, "rexml/document": true,
 	"logger": true, "pstore": true,
@@ -46,6 +46,7 @@ var providedFeatures = map[string]bool{
 	"age": true, "prawn": true,
 	"google/protobuf": true, "protobuf": true, "bleve": true, "graphql": true,
 	"opentelemetry": true, "faraday": true, "puma": true, "bolt": true,
+	"nats":    true,
 	"msgpack": true, "toml": true,
 	"tzinfo": true, "chronic": true, "money": true,
 	"addressable": true, "addressable/uri": true, "addressable/template": true,
@@ -67,7 +68,7 @@ var providedFeatures = map[string]bool{
 	"oauth2":         true,
 	"openid_connect": true, "oidc": true,
 	"i18n": true,
-	"rss": true,
+	"rss":  true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime

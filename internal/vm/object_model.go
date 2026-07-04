@@ -1053,6 +1053,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Puma::Configuration"].(*RClass)
 	case *PumaDSL:
 		return vm.consts["Puma::DSL"].(*RClass)
+	case *NATSX:
+		// A NATS wrapper carries its own Ruby class (NATS::Client / ::Subscription
+		// / ::Msg), so it reports that class for `class` / `is_a?`.
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:

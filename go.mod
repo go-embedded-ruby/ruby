@@ -58,6 +58,7 @@ require (
 	github.com/go-ruby-money/money v0.0.0-20260702143724-59c9de931e83
 	github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90
 	github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a
+	github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7
 	github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e
 	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
@@ -103,12 +104,14 @@ require (
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
+	github.com/nats-io/nats-server/v2 v2.14.3
 )
 
 require (
 	filippo.io/age v1.3.1 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.14.5 // indirect
+	github.com/antithesishq/antithesis-sdk-go v0.7.0-default-no-op // indirect
 	github.com/apache/arrow-go/v18 v18.6.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.2 // indirect
 	github.com/blevesearch/bleve/v2 v2.6.0 // indirect
@@ -145,15 +148,21 @@ require (
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
+	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/graphql-go/graphql v0.8.1 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/minio/highwayhash v1.0.4 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/nats-io/jwt/v2 v2.8.2 // indirect
+	github.com/nats-io/nats.go v1.52.0 // indirect
+	github.com/nats-io/nkeys v0.4.16 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -169,6 +178,7 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
