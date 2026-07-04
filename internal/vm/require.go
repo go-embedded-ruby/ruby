@@ -46,6 +46,7 @@ var providedFeatures = map[string]bool{
 	"age": true, "prawn": true,
 	"google/protobuf": true, "protobuf": true, "bleve": true, "graphql": true,
 	"opentelemetry": true, "faraday": true, "puma": true, "bolt": true,
+	"etcd": true, "etcdv3": true,
 	"msgpack": true, "toml": true,
 	"tzinfo": true, "chronic": true, "money": true,
 	"addressable": true, "addressable/uri": true, "addressable/template": true,

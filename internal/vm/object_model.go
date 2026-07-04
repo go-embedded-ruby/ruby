@@ -785,6 +785,34 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *BoltCursor:
 		return x.cls
+	case *EtcdClient:
+		return x.cls
+	case *EtcdKeyValue:
+		return x.cls
+	case *EtcdGetResult:
+		return x.cls
+	case *EtcdPutResult:
+		return x.cls
+	case *EtcdDelResult:
+		return x.cls
+	case *EtcdLease:
+		return x.cls
+	case *EtcdEvent:
+		return x.cls
+	case *EtcdTxn:
+		return x.cls
+	case *EtcdCmp:
+		return x.cls
+	case *EtcdOp:
+		return x.cls
+	case *EtcdTxnResult:
+		return x.cls
+	case *EtcdLock:
+		return x.cls
+	case *EtcdMember:
+		return x.cls
+	case *EtcdStatus:
+		return x.cls
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:
