@@ -440,7 +440,6 @@ func (vm *VM) bootstrap() {
 	vm.registerFaraday()       // Faraday HTTP client (require "faraday"), backed by go-ruby-faraday; needs StandardError for Faraday::Error
 	vm.registerPuma()          // Puma module (require "puma"), backed by go-ruby-puma; threaded Rack web server over net/http; needs StandardError (Puma::Error) + StringIO (rack.input)
 	vm.registerBolt()          // Bolt::DB/Tx/Bucket/Cursor (require "bolt"), backed by go-ruby-bbolt; needs StandardError for Bolt::Error
-	vm.registerParquet()       // Parquet module (require "parquet"), backed by go-ruby-parquet; reads/writes Arrow::Table; needs StandardError (Parquet::Error) + registerArrow for the Arrow wrappers
 	vm.registerSAML()          // SAML / OneLogin::RubySaml (require "saml"/"ruby-saml"), backed by go-ruby-saml; needs StandardError for SAML::Error
 	vm.registerWebAuthn()      // WebAuthn module (require "webauthn"), backed by go-ruby-webauthn; needs StandardError (WebAuthn::Error)
 	vm.registerACME()          // Acme::Client / Order / Authorization / Challenge / CertificateRequest (require "acme" / "acme/client"), backed by go-ruby-acme (x/crypto/acme); transport is a host seam; needs StandardError for the Acme::Error tree

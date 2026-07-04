@@ -785,10 +785,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *BoltCursor:
 		return x.cls
-	case *ParquetReader:
-		return vm.consts["Parquet::ArrowFileReader"].(*RClass)
-	case *ParquetWriter:
-		return vm.consts["Parquet::ArrowFileWriter"].(*RClass)
 	case *SAMLSettings:
 		return x.cls
 	case *SAMLAuthrequest:
