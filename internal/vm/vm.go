@@ -214,6 +214,7 @@ type VM struct {
 	cStringScanner                         *RClass
 	moneyBank                              *money.VariableExchange // the process-wide default exchange bank for Money (require "money")
 	i18nInst                               *i18n.I18n              // the process-wide I18n instance (require "i18n"), backed by go-ruby-i18n
+	otelProvider                           *OTelTracerProvider     // the process-wide OpenTelemetry.tracer_provider (require "opentelemetry"), backed by go-ruby-opentelemetry
 	cOptionParser                          *RClass
 	cURI                                   *RClass                 // the URI module (require "uri"), backed by go-ruby-uri
 	cURIGeneric                            *RClass                 // URI::Generic, the base URI class wrapping a *uri.URI
