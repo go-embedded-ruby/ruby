@@ -49,6 +49,7 @@ type SinatraCtx struct {
 	c        *sinatra.Context
 	cls      *RClass
 	settings map[string]object.Value // the app's merged set/enable/disable values, for the `settings` helper
+	ivars    map[string]object.Value // instance variables (@x) the handler sets; shared across a request's before/route/after (see sinatraAction)
 }
 
 func (c *SinatraCtx) ToS() string     { return "#<Sinatra::Base request>" }

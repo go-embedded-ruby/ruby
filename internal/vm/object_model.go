@@ -1560,6 +1560,11 @@ func ivarTable(self object.Value) map[string]object.Value {
 		return o.ivars
 	case *object.Main:
 		return o.IvarTable()
+	case *SinatraCtx:
+		if o.ivars == nil {
+			o.ivars = map[string]object.Value{}
+		}
+		return o.ivars
 	}
 	return nil
 }

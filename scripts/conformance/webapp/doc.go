@@ -11,12 +11,17 @@
 //
 //	Stage 1  Pure Rack lambda                       — runs
 //	Stage 2  Rack + ERB view                        — runs
-//	Stage 3  Sinatra DSL (require "sinatra/base")   — gap: no sinatra binding
+//	Stage 3  Sinatra DSL (require "sinatra/base")   — runs (go-ruby-sinatra binding)
 //	Stage 4  sqlite3 + ERB/JSON data route          — runs
 //	Stage 4b ActiveRecord ORM data route            — gap until go-ruby-activerecord binds
 //
-// The Sinatra and ActiveRecord stages feature-detect the require first: they
-// assert the real response when the binding is present and otherwise record the
-// exact missing feature, so the suite stays green today and lights up
-// automatically when the binding lands.
+// On top of stage 3, TestSinatraGemOracle (sinatra_oracle_test.go) is the web
+// phase's MRI-identity proof: it runs apps/sinatra_oracle.rb through rbgo and
+// asserts the [status, headers, body] dump is byte-for-byte the response the
+// real `sinatra` gem 4.2.1 produced from the same app and request envs.
+//
+// The ActiveRecord stage feature-detects the require first: it asserts the real
+// response when the binding is present and otherwise records the exact missing
+// feature, so the suite stays green today and lights up automatically when the
+// binding lands.
 package webapp
