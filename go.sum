@@ -248,8 +248,8 @@ github.com/go-ruby-grape/grape v0.0.0-20260702151528-455377c8c7c3 h1:JPcmRUa/fiw
 github.com/go-ruby-grape/grape v0.0.0-20260702151528-455377c8c7c3/go.mod h1:N0dFV4BDu87D5qFusrC2jUb+hPlJpiAuuHRSMznMM7c=
 github.com/go-ruby-graphql/graphql v0.0.0-20260704114306-47444c09995e h1:Ltn9rV7Ov5big3Fwphw2EFcyAb5KcdsrUs/WA4yzKfo=
 github.com/go-ruby-graphql/graphql v0.0.0-20260704114306-47444c09995e/go.mod h1:u2AOB5QQHSsWCoIZ3XnRcw98LQDIRHxzYYerDHuTsCw=
-github.com/go-ruby-grpc/grpc v0.0.0-20260704103831-6f8adb9d540b h1:AON4Sm2Kgbg/2vDvPrdtUPOSZE1zTeiRRZ9RDfOuXxU=
-github.com/go-ruby-grpc/grpc v0.0.0-20260704103831-6f8adb9d540b/go.mod h1:4aUK5J8VX6Umk5/FgRqXRhe3tLJ9F/rhFXiUTcb81kc=
+github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c h1:1FPq0/2nYtox3pmFpIVE+y6TR5pQsaub8ZN4/qnSWek=
+github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c/go.mod h1:4aUK5J8VX6Umk5/FgRqXRhe3tLJ9F/rhFXiUTcb81kc=
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c h1:VByP5jdzov6JMMsIPremuz4Q06y/rSCac/j5Q3GvXZk=
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c/go.mod h1:D4xOrc0xIiN0u0Q+KqjfKx/f7up8ekpud/syYsHTrPY=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b h1:hi8tu1lr/1cOkFMdaONWyuNGVmE9GuN8tmpUN6VxgLI=
