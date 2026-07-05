@@ -24,6 +24,7 @@ require (
 	github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260703182656-06e4422c5207
 	github.com/go-ruby-bleve/bleve v0.0.0-20260704121320-7b342f38e500
 	github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba
+	github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
@@ -61,6 +62,7 @@ require (
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
 	github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca
 	github.com/go-ruby-mime-types/mime-types v0.0.0-20260630150449-4e5a308a8847
+	github.com/go-ruby-minitest/minitest v0.0.0-20260630144113-dbcefec3be56
 	github.com/go-ruby-money/money v0.0.0-20260702143724-59c9de931e83
 	github.com/go-ruby-mongodb/mongodb v0.0.0-20260704115215-792ff280c51b
 	github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90
@@ -85,7 +87,9 @@ require (
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
 	github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779
+	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260704053028-640136bb67e7
+	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
@@ -95,6 +99,7 @@ require (
 	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75
 	github.com/go-ruby-rss/rss v0.0.0-20260630123856-ba95b4fb73c9
 	github.com/go-ruby-rubocop/rubocop v0.0.0-20260702170528-0a89da6e9147
+	github.com/go-ruby-rubygems/rubygems v0.0.0-20260630142147-63db192adc4d
 	github.com/go-ruby-saml/saml v0.0.0-20260704115648-11caa3fa0e1f
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
@@ -106,6 +111,7 @@ require (
 	github.com/go-ruby-sodium/sodium v0.0.0-20260704110007-85cd070fb270
 	github.com/go-ruby-sqlite3/sqlite3 v0.0.0-20260702143910-c9f337771f41
 	github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8
+	github.com/go-ruby-thor/thor v0.0.0-20260702145030-faa03e6e0228
 	github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
 	github.com/go-ruby-tzinfo/tzinfo v0.0.0-20260701105256-15977bdf6e1a

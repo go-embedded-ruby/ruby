@@ -481,6 +481,11 @@ func (vm *VM) bootstrap() {
 	vm.registerHCL2()          // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
 	vm.registerI18n()          // I18n module (require "i18n"), backed by go-ruby-i18n; needs ArgumentError for the I18n::ArgumentError tree
 	vm.registerRSS()           // RSS::Parser.parse -> RSS::Rss / RSS::RDF / RSS::Atom::Feed (require "rss"), backed by go-ruby-rss; needs StandardError for RSS::Error
+	vm.registerRDoc()          // RDoc::Markup + ToHtml/ToMarkdown/ToRdoc formatters (require "rdoc"), backed by go-ruby-rdoc; needs StandardError for RDoc::Error
+	vm.registerThor()          // Thor CLI framework: option parsing + dispatch + help (require "thor"), backed by go-ruby-thor; needs StandardError for Thor::Error
+	vm.registerBundler()       // Bundler: Gemfile/Gemfile.lock codec + resolver (require "bundler"), backed by go-ruby-bundler; needs StandardError for Bundler::BundlerError
+	vm.registerRacc()          // Racc::Parser LALR(1) runtime (require "racc/parser"), backed by go-ruby-racc; needs StandardError for Racc::ParseError
+	vm.registerMinitest()      // Minitest::Assertions + Test lifecycle (require "minitest"), backed by go-ruby-minitest; needs StandardError for Minitest::Assertion
 	vm.registerKramdown()      // Kramdown::Document (require "kramdown"), backed by go-ruby-kramdown
 	vm.registerLiquid()        // Liquid::Template.parse(...).render (require "liquid"), backed by go-ruby-liquid; needs StandardError for Liquid::Error
 	vm.registerRouge()         // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
