@@ -35,8 +35,8 @@ applied across the stdlib. The benefit cuts both ways: rbgo still ships as a
 **single CGO=0 static binary**, and every extracted piece is independently
 reusable, tested and 6-arch by any Go program — no interpreter required.
 
-The `go-ruby-*` family is **104 standalone pure-Go modules — all CI-green, 100%
-coverage, 6-arch** — each its own org. The `go.mod` currently **binds 71 into
+The `go-ruby-*` family is **127 standalone pure-Go modules — all CI-green, 100%
+coverage, 6-arch** — each its own org. The `go.mod` currently **binds 104 into
 rbgo** as native modules (binding the rest in progress):
 
 | Library | Role | Org · landing |
@@ -51,16 +51,20 @@ rbgo** as native modules (binding the rest in progress):
 | **go-ruby-strscan** | `StringScanner` (`strscan`) | [org][grs] · [site](https://go-ruby-strscan.github.io/) |
 
 The full bound family (alphabetical, all native modules in `go.mod`):
-`abbrev`, `addressable`, `base64`, `bcrypt`, `benchmark`, `bigdecimal`,
-`builder`, `cgi`, `chronic`, `cmath`, `commonmark`, `csv`, `date`,
-`did-you-mean`, `digest`, `dotenv`, `dry-struct`, `dry-types`, `dry-validation`,
-`erb`, `faker`, `find`, `format`, `getoptlong`, `haml`, `hcl2`, `ipaddr`,
-`jbuilder`, `json`, `jwt`, `kramdown`, `liquid`, `logger`, `mail`, `marshal`,
-`matrix`, `mime-types`, `money`, `msgpack`, `mustache`, `nokogiri`, `oauth2`,
-`observer`, `optparse`, `ostruct`, `parser`, `pathname`, `prettyprint`, `prime`,
-`pstore`, `public-suffix`, `regexp`, `resolv`, `rexml`, `rouge`, `rqrcode`,
-`rspec`, `scanf`, `securerandom`, `set`, `shellwords`, `slim`, `sqlite3`,
-`strscan`, `toml`, `tsort`, `tzinfo`, `unicode-normalize`, `uri`, `yaml`,
+`abbrev`, `acme`, `activerecord`, `addressable`, `age`, `arrow`, `base64`,
+`bbolt`, `bcrypt`, `benchmark`, `bigdecimal`, `bleve`, `builder`, `cgi`,
+`chronic`, `cmath`, `commonmark`, `csv`, `date`, `did-you-mean`, `digest`,
+`dotenv`, `dry-struct`, `dry-types`, `dry-validation`, `erb`, `etcd`, `faker`,
+`faraday`, `find`, `format`, `getoptlong`, `grape`, `graphql`, `grpc`, `haml`,
+`hcl2`, `i18n`, `ipaddr`, `jbuilder`, `json`, `jwt`, `kafka`, `kramdown`,
+`liquid`, `logger`, `mail`, `marshal`, `matrix`, `mime-types`, `money`,
+`mongodb`, `msgpack`, `mustache`, `mysql`, `nats`, `nokogiri`, `oauth2`,
+`observer`, `oidc`, `opentelemetry`, `optparse`, `ostruct`, `parquet`, `parser`,
+`pathname`, `pg`, `prawn`, `prettyprint`, `prime`, `protobuf`, `pstore`,
+`public-suffix`, `puma`, `rack`, `redis`, `regexp`, `resolv`, `rexml`, `rouge`,
+`rqrcode`, `rspec`, `rss`, `rubocop`, `saml`, `scanf`, `securerandom`, `sequel`,
+`set`, `shellwords`, `sinatra`, `slim`, `sodium`, `sqlite3`, `strscan`, `toml`,
+`tsort`, `tzinfo`, `unicode-normalize`, `uri`, `webauthn`, `xslt`, `yaml`,
 `zlib` — each at `github.com/go-ruby-<name>/<name>`.
 
 Beyond the `go-ruby-*` family, the scientific / container stack binds the
@@ -365,6 +369,69 @@ JRuby**):
   `count`/`size`/`distinct`/`most_common`, `union`/`difference`/`intersection`,
   `include?`/`each`/`to_a` — binding
   [go-composites/bag](https://github.com/go-composites/bag).
+
+Beyond the stdlib, rbgo binds a set of **native capability modules** — each
+`require`-able and backed by a canonical pure-Go `go-ruby-*` library, so the
+build stays **CGO=0**. These wrap real I/O / network / crypto engines, so their
+throughput tracks the underlying driver rather than the interpreter:
+
+- **Databases & key-value stores:** **`mysql2`** (`require "mysql2"` — `Mysql2::Client`,
+  `Result` and prepared `Statement`, over
+  [go-ruby-mysql](https://github.com/go-ruby-mysql/mysql), a pure-Go mysql2 over
+  `go-sql-driver/mysql`); **`mongo`** + **`bson`** (`require "mongo"` — `Mongo::Client`/
+  `Database`/`Collection`/`Cursor` with ordered `BSON` documents and `BSON::ObjectId`,
+  over [go-ruby-mongodb](https://github.com/go-ruby-mongodb/mongodb)); **`etcd`**/
+  **`etcdv3`** (`require "etcd"` — the etcd v3 KV client: get/put/txn/lease/watch/lock,
+  over [go-ruby-etcd](https://github.com/go-ruby-etcd/etcd)); and **`bolt`**
+  (`require "bolt"` — the embedded bbolt B+tree store: `DB`/`Tx`/`Bucket`/`Cursor`,
+  files interoperable with reference bbolt tooling, over
+  [go-ruby-bbolt](https://github.com/go-ruby-bbolt/bbolt) over `go.etcd.io/bbolt`).
+- **Messaging:** **`nats`** (`require "nats"` — NATS publish / subscribe / request
+  with headers, over [go-ruby-nats](https://github.com/go-ruby-nats/nats)); and
+  **`kafka`** (`require "kafka"` — a ruby-kafka-faithful producer / consumer /
+  admin client, over [go-ruby-kafka](https://github.com/go-ruby-kafka/kafka) over
+  `twmb/franz-go`).
+- **RPC, serialization & columnar data:** **`grpc`** (`require "grpc"` — a gRPC
+  server and client stub sharing an in-process transport, so one program can be
+  both peers, over [go-ruby-grpc](https://github.com/go-ruby-grpc/grpc));
+  **`google/protobuf`** (`require "protobuf"` — Protocol Buffers with
+  wire-compatible `encode`/`decode`/`encode_json`, well-known types and the
+  descriptor pool, over
+  [go-ruby-protobuf](https://github.com/go-ruby-protobuf/protobuf)); **`arrow`**
+  (`require "arrow"` — Apache Arrow `DataType`/`Field`/`Schema`/`Array`/
+  `RecordBatch`/`Table`, over [go-ruby-arrow](https://github.com/go-ruby-arrow/arrow));
+  and **`parquet`** (`require "parquet"` — an Arrow-backed Parquet reader / writer,
+  over [go-ruby-parquet](https://github.com/go-ruby-parquet/parquet)).
+- **Web & security:** **`faraday`** (`require "faraday"` — the Faraday HTTP client:
+  connection / request / response / middleware, over
+  [go-ruby-faraday](https://github.com/go-ruby-faraday/faraday)); **`puma`**
+  (`require "puma"` — a Rack HTTP server driving `app.call` under the emulated GVL,
+  over [go-ruby-puma](https://github.com/go-ruby-puma/puma)); **`graphql`**
+  (`require "graphql"` — a graphql-ruby-flavoured type system + query execution
+  preserving the exact `data`/`errors` shape, over
+  [go-ruby-graphql](https://github.com/go-ruby-graphql/graphql)); **`saml`**/
+  **`ruby-saml`** (`require "saml"` — SAML SSO auth requests / responses / metadata /
+  logout, exposed as `SAML` and `OneLogin::RubySaml`, over
+  [go-ruby-saml](https://github.com/go-ruby-saml/saml)); **`webauthn`**
+  (`require "webauthn"` — WebAuthn / FIDO2 relying-party registration and
+  authentication, over [go-ruby-webauthn](https://github.com/go-ruby-webauthn/webauthn));
+  **`acme`** (`require "acme"` — the ACME / Let's Encrypt `Acme::Client`
+  account / order / authorization / challenge / certificate flow, over
+  [go-ruby-acme](https://github.com/go-ruby-acme/acme)); **`rbnacl`**
+  (`require "rbnacl"` — NaCl / libsodium `SecretBox`/`Box`, Ed25519 / Curve25519
+  keys, AEAD, hashing and password hashing, over
+  [go-ruby-sodium](https://github.com/go-ruby-sodium/sodium)); and **`age`**
+  (`require "age"` — age file encryption with X25519 and scrypt recipients,
+  interoperable with the reference `age` CLI, over
+  [go-ruby-age](https://github.com/go-ruby-age/age) over `filippo.io/age`).
+- **Documents & observability:** **`prawn`** (`require "prawn"` — the Prawn PDF
+  document DSL, emitting well-formed PDF 1.3+, over
+  [go-ruby-prawn](https://github.com/go-ruby-prawn/prawn) over `go-pdf/fpdf`);
+  **`bleve`** (`require "bleve"` — full-text search: index / mapping / query /
+  facets, over [go-ruby-bleve](https://github.com/go-ruby-bleve/bleve)); and
+  **`opentelemetry`** (`require "opentelemetry"` — distributed tracing:
+  tracer / span / W3C context and the SDK exporter seam over the OpenTelemetry Go
+  SDK, over [go-ruby-opentelemetry](https://github.com/go-ruby-opentelemetry/opentelemetry)).
 
 - **AOT compiler (`rbgo build`):** lowers a program's methods to native Go and
   links a specialised binary. Pure integer methods become unboxed `int64`
