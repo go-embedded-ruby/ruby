@@ -21,6 +21,7 @@ import (
 
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
+	sinatra "github.com/go-ruby-sinatra/sinatra"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -241,6 +242,7 @@ type VM struct {
 	cSinatraCtx                            *RClass                 // Sinatra::Base::Context, the self a route/filter block runs against
 	cSinatraSettings                       *RClass                 // Sinatra::Base::Settings, the handler's `settings` view
 	sinatraDefs                            map[*RClass]*sinatraDef // per-Sinatra::Base-subclass route/filter/handler declarations
+	sinatraCtxCache                        map[*sinatra.Context]*SinatraCtx // per-request handler self, shared across before/route/after so @ivars persist
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass

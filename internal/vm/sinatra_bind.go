@@ -118,6 +118,11 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 // returns the SPEC [status, headers, body] triple as a Ruby Array.
 func (vm *VM) sinatraCall(cls *RClass, envArg object.Value) object.Value {
 	app := vm.buildSinatraApp(cls)
+	// The per-request handler-self cache is scoped to this one dispatch: reset it
+	// before serving and drop it after so a request's before/route/after share one
+	// SinatraCtx (and its @ivars) without leaking across requests.
+	vm.sinatraCtxCache = nil
+	defer func() { vm.sinatraCtxCache = nil }()
 	status, headers, body := app.CallTuple(rackEnv(envArg))
 	return object.NewArray(object.IntValue(int64(status)), rackHeadersToHash(headers), rackBodyArray(body))
 }
@@ -185,13 +190,31 @@ func (vm *VM) sinatraRegisterRoute(app *sinatra.Sinatra, r sinatraRoute, merged 
 // via the library's panic-based control flow, which the dispatcher recovers.
 func (vm *VM) sinatraAction(blk *Proc, merged map[string]object.Value) sinatra.Action {
 	return func(c *sinatra.Context) any {
-		ctx := &SinatraCtx{c: c, cls: vm.cSinatraCtx}
-		ctx.settings = merged
+		ctx := vm.sinatraCtxFor(c, merged)
 		if blk == nil {
 			return nil
 		}
 		return sinatraResult(vm, vm.callBlockSelf(blk, ctx, nil))
 	}
+}
+
+// sinatraCtxFor returns the handler self for the request identified by c, reusing
+// one SinatraCtx across that request's before filter(s), the route body and the
+// after filter(s) — real Sinatra runs the whole request against a single
+// instance, so instance variables an app sets in a `before` block (e.g. @user)
+// are visible in the route and after blocks. The cache is keyed by the library's
+// per-request *sinatra.Context (one per dispatch) and reset around each dispatch
+// by sinatraCall.
+func (vm *VM) sinatraCtxFor(c *sinatra.Context, merged map[string]object.Value) *SinatraCtx {
+	if vm.sinatraCtxCache == nil {
+		vm.sinatraCtxCache = map[*sinatra.Context]*SinatraCtx{}
+	}
+	if ctx, ok := vm.sinatraCtxCache[c]; ok {
+		return ctx
+	}
+	ctx := &SinatraCtx{c: c, cls: vm.cSinatraCtx, settings: merged, ivars: map[string]object.Value{}}
+	vm.sinatraCtxCache[c] = ctx
+	return ctx
 }
 
 // registerSinatraContext installs the request-context helper surface a handler

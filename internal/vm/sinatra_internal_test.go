@@ -475,6 +475,55 @@ puts s`
 	}
 }
 
+// TestSinatraIvarPersistence covers the request-scoped handler self: an instance
+// variable set in a before filter is visible in the route body and in the after
+// filter (real Sinatra runs the whole request against one instance), and it does
+// NOT leak into the next request (a fresh SinatraCtx per dispatch).
+func TestSinatraIvarPersistence(t *testing.T) {
+	// @uid set in `before` is read by the route and by `after`.
+	src := `require "sinatra/base"
+class A < Sinatra::Base
+  before { @uid = "u42" }
+  after { headers "X-Uid" => @uid.to_s }
+  get("/x"){ "uid=#{@uid}" }
+end
+_,h,b = A.new.call("REQUEST_METHOD"=>"GET","PATH_INFO"=>"/x")
+puts b.join
+puts h["x-uid"]`
+	if got := eval(t, src); got != "uid=u42\nu42\n" {
+		t.Errorf("ivar persistence got=%q want %q", got, "uid=u42\nu42\n")
+	}
+
+	// A second request on the same app must not see the first request's ivar: the
+	// route reads @uid before any before filter would set it, so it is nil.
+	iso := `require "sinatra/base"
+class B < Sinatra::Base
+  get("/set"){ @uid = "first"; "set" }
+  get("/read"){ @uid.inspect }
+end
+app = B.new
+app.call("REQUEST_METHOD"=>"GET","PATH_INFO"=>"/set")
+_,_,b = app.call("REQUEST_METHOD"=>"GET","PATH_INFO"=>"/read")
+puts b.join`
+	if got := eval(t, iso); got != "nil\n" {
+		t.Errorf("ivar isolation got=%q want %q", got, "nil\n")
+	}
+}
+
+// TestSinatraCtxIvarTable covers ivarTable's *SinatraCtx arm, including the
+// lazy allocation of the backing map for a context whose ivars are still nil
+// (writing to a nil map would panic, so the lazy init is load-bearing).
+func TestSinatraCtxIvarTable(t *testing.T) {
+	c := &SinatraCtx{} // ivars nil
+	setIvar(c, "@k", object.NewString("v"))
+	if c.ivars == nil {
+		t.Fatal("ivarTable did not lazily allocate the ivars map")
+	}
+	if got := getIvar(c, "@k"); got == nil || got.ToS() != "v" {
+		t.Errorf("round-trip got=%v", got)
+	}
+}
+
 // TestSinatraParamsHashDirect exercises sinatraParamsHash against a library
 // context built directly, covering the []string (splat) value path.
 func TestSinatraParamsHashDirect(t *testing.T) {
