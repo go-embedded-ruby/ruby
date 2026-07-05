@@ -76,7 +76,8 @@ var providedFeatures = map[string]bool{
 	"thor":        true,
 	"bundler":     true,
 	"racc/parser": true, "racc": true,
-	"minitest": true,
+	"minitest": true, "minitest/autorun": true, "minitest/spec": true,
+	"minitest/test": true, "minitest/unit": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime

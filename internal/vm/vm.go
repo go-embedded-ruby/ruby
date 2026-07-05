@@ -217,32 +217,36 @@ type VM struct {
 	i18nInst                               *i18n.I18n              // the process-wide I18n instance (require "i18n"), backed by go-ruby-i18n
 	otelProvider                           *OTelTracerProvider     // the process-wide OpenTelemetry.tracer_provider (require "opentelemetry"), backed by go-ruby-opentelemetry
 	cOptionParser                          *RClass
-	cURI                                   *RClass                 // the URI module (require "uri"), backed by go-ruby-uri
-	cURIGeneric                            *RClass                 // URI::Generic, the base URI class wrapping a *uri.URI
-	cCSV                                   *RClass                 // the CSV class (require "csv"), backed by go-ruby-csv
-	cCSVRow                                *RClass                 // CSV::Row, wrapping a *csv.Row
-	cCSVTable                              *RClass                 // CSV::Table, wrapping a *csv.Table
-	cLogger                                *RClass                 // the Logger class (require "logger"), backed by go-ruby-logger
-	cLoggerFormatter                       *RClass                 // Logger::Formatter, wrapping a *Logger wrapper's formatter
-	cLoggerSeverity                        *RClass                 // Logger::Severity, the severity-constant module
-	cREXML                                 *RClass                 // the REXML module (require "rexml/document"), backed by go-ruby-rexml
-	cREXMLDocument                         *RClass                 // REXML::Document, wrapping a *rexml.Document
-	cREXMLElement                          *RClass                 // REXML::Element, wrapping a *rexml.Element
-	cREXMLElements                         *RClass                 // REXML::Elements, the child-navigation proxy
-	cREXMLAttributes                       *RClass                 // REXML::Attributes, wrapping a *rexml.Attributes
-	cREXMLText                             *RClass                 // REXML::Text, wrapping a *rexml.Text
-	cREXMLComment                          *RClass                 // REXML::Comment, wrapping a *rexml.Comment
-	cREXMLCData                            *RClass                 // REXML::CData, wrapping a *rexml.CData
-	cREXMLInstruction                      *RClass                 // REXML::Instruction, wrapping a *rexml.Instruction
-	cREXMLDocType                          *RClass                 // REXML::DocType, wrapping a *rexml.DocType
-	cREXMLPretty                           *RClass                 // REXML::Formatters::Pretty serialiser
-	cREXMLXPath                            *RClass                 // REXML::XPath module
-	cREXMLParseException                   *RClass                 // REXML::ParseException < StandardError
-	cSinatraBase                           *RClass                 // Sinatra::Base (require "sinatra/base"), backed by go-ruby-sinatra
-	cSinatraCtx                            *RClass                 // Sinatra::Base::Context, the self a route/filter block runs against
-	cSinatraSettings                       *RClass                 // Sinatra::Base::Settings, the handler's `settings` view
-	sinatraDefs                            map[*RClass]*sinatraDef // per-Sinatra::Base-subclass route/filter/handler declarations
+	cURI                                   *RClass                          // the URI module (require "uri"), backed by go-ruby-uri
+	cURIGeneric                            *RClass                          // URI::Generic, the base URI class wrapping a *uri.URI
+	cCSV                                   *RClass                          // the CSV class (require "csv"), backed by go-ruby-csv
+	cCSVRow                                *RClass                          // CSV::Row, wrapping a *csv.Row
+	cCSVTable                              *RClass                          // CSV::Table, wrapping a *csv.Table
+	cLogger                                *RClass                          // the Logger class (require "logger"), backed by go-ruby-logger
+	cLoggerFormatter                       *RClass                          // Logger::Formatter, wrapping a *Logger wrapper's formatter
+	cLoggerSeverity                        *RClass                          // Logger::Severity, the severity-constant module
+	cREXML                                 *RClass                          // the REXML module (require "rexml/document"), backed by go-ruby-rexml
+	cREXMLDocument                         *RClass                          // REXML::Document, wrapping a *rexml.Document
+	cREXMLElement                          *RClass                          // REXML::Element, wrapping a *rexml.Element
+	cREXMLElements                         *RClass                          // REXML::Elements, the child-navigation proxy
+	cREXMLAttributes                       *RClass                          // REXML::Attributes, wrapping a *rexml.Attributes
+	cREXMLText                             *RClass                          // REXML::Text, wrapping a *rexml.Text
+	cREXMLComment                          *RClass                          // REXML::Comment, wrapping a *rexml.Comment
+	cREXMLCData                            *RClass                          // REXML::CData, wrapping a *rexml.CData
+	cREXMLInstruction                      *RClass                          // REXML::Instruction, wrapping a *rexml.Instruction
+	cREXMLDocType                          *RClass                          // REXML::DocType, wrapping a *rexml.DocType
+	cREXMLPretty                           *RClass                          // REXML::Formatters::Pretty serialiser
+	cREXMLXPath                            *RClass                          // REXML::XPath module
+	cREXMLParseException                   *RClass                          // REXML::ParseException < StandardError
+	cSinatraBase                           *RClass                          // Sinatra::Base (require "sinatra/base"), backed by go-ruby-sinatra
+	cSinatraCtx                            *RClass                          // Sinatra::Base::Context, the self a route/filter block runs against
+	cSinatraSettings                       *RClass                          // Sinatra::Base::Settings, the handler's `settings` view
+	sinatraDefs                            map[*RClass]*sinatraDef          // per-Sinatra::Base-subclass route/filter/handler declarations
 	sinatraCtxCache                        map[*sinatra.Context]*SinatraCtx // per-request handler self, shared across before/route/after so @ivars persist
+	cMinitestSpec                          *RClass                          // Minitest::Spec, the spec-DSL subclass of Minitest::Test
+	minitestRunnables                      []*RClass                        // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
+	minitestCurInstance                    object.Value                     // the test instance currently running (backs bare must_*/wont_* and _)
+	minitestAutorunDone                    bool                             // guards the require "minitest/autorun" at_exit hook against a double run
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass
@@ -551,14 +555,14 @@ func New(out io.Writer) *VM {
 	vm.consts["ARGV"] = argv
 	vm.globals["$*"] = argv
 	vm.installPrelude()
-	vm.registerEnumerator() // after the prelude so it can mix in Enumerable
-	vm.registerLazy()       // after Enumerator (Enumerator::Lazy is built on it)
-	vm.registerFileStat()   // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
-	vm.registerIPAddr()     // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
-	vm.registerPathname()   // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class
-	vm.registerOstruct()    // OpenStruct data ops (to_h/inspect/dig/delete_field/==), backed by go-ruby-ostruct; after the prelude so it reopens the prelude-defined class
-	vm.registerLogger()     // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
-	vm.registerPStore()     // PStore (require "pstore"), backed by go-ruby-pstore; after the prelude so PStore::Error < StandardError
+	vm.registerEnumerator()     // after the prelude so it can mix in Enumerable
+	vm.registerLazy()           // after Enumerator (Enumerator::Lazy is built on it)
+	vm.registerFileStat()       // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
+	vm.registerIPAddr()         // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
+	vm.registerPathname()       // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class
+	vm.registerOstruct()        // OpenStruct data ops (to_h/inspect/dig/delete_field/==), backed by go-ruby-ostruct; after the prelude so it reopens the prelude-defined class
+	vm.registerLogger()         // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
+	vm.registerPStore()         // PStore (require "pstore"), backed by go-ruby-pstore; after the prelude so PStore::Error < StandardError
 	vm.includeMySQLEnumerable() // Mysql2::Result mixes in Enumerable; after the prelude so the module exists
 	vm.installHashKeyHook()
 	// The prelude and built-ins are loaded; arm the level-2 AOT top level so the

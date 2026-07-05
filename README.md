@@ -57,7 +57,7 @@ The full bound family (alphabetical, all native modules in `go.mod`):
 `dotenv`, `dry-struct`, `dry-types`, `dry-validation`, `erb`, `etcd`, `faker`,
 `faraday`, `find`, `format`, `getoptlong`, `grape`, `graphql`, `grpc`, `haml`,
 `hcl2`, `i18n`, `ipaddr`, `jbuilder`, `json`, `jwt`, `kafka`, `kramdown`,
-`liquid`, `logger`, `mail`, `marshal`, `matrix`, `mime-types`, `money`,
+`liquid`, `logger`, `mail`, `marshal`, `matrix`, `mime-types`, `minitest`, `money`,
 `mongodb`, `msgpack`, `mustache`, `mysql`, `nats`, `nokogiri`, `oauth2`,
 `observer`, `oidc`, `opentelemetry`, `optparse`, `ostruct`, `parquet`, `parser`,
 `pathname`, `pg`, `prawn`, `prettyprint`, `prime`, `protobuf`, `pstore`,
