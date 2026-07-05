@@ -1141,6 +1141,34 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *OTelFinishedSpan:
 		return vm.consts["OpenTelemetry::SDK::Trace::SpanData"].(*RClass)
+	case *RDocMarkup:
+		return vm.consts["RDoc::Markup"].(*RClass)
+	case *RDocFormatter:
+		return vm.consts[x.clsName].(*RClass)
+	case *ThorOption:
+		return vm.consts["Thor::Option"].(*RClass)
+	case *ThorOptions:
+		return vm.consts["Thor::Options"].(*RClass)
+	case *ThorCommand:
+		return vm.consts["Thor::Command"].(*RClass)
+	case *ThorBase:
+		return vm.consts["Thor::Base"].(*RClass)
+	case *BundlerLockfile:
+		return vm.consts["Bundler::LockfileParser"].(*RClass)
+	case *BundlerSpec:
+		return vm.consts["Bundler::LazySpecification"].(*RClass)
+	case *BundlerDependency:
+		return vm.consts["Bundler::Dependency"].(*RClass)
+	case *BundlerGemfile:
+		return vm.consts["Bundler::Dsl"].(*RClass)
+	case *BundlerIndex:
+		return vm.consts["Bundler::Index"].(*RClass)
+	case *MinitestAssertionsBox:
+		return vm.consts["Minitest::Assertions"].(*RClass)
+	case *MinitestResult:
+		return vm.consts["Minitest::Result"].(*RClass)
+	case *MinitestMock:
+		return vm.consts["Minitest::Mock"].(*RClass)
 	case *FaradayConnection:
 		return vm.consts["Faraday::Connection"].(*RClass)
 	case *FaradayRequest:
