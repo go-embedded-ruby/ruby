@@ -79,6 +79,7 @@ var providedFeatures = map[string]bool{
 	"active_storage": true, "activestorage": true,
 	"action_cable": true, "actioncable": true,
 	"action_view": true, "actionview": true,
+	"action_controller": true, "action_dispatch": true, "actionpack": true, "abstract_controller": true,
 	"rails": true, "rails/railtie": true, "rails/engine": true, "rails/application": true,
 	"devise": true,
 	"hanami": true, "hanami/router": true, "hanami/action": true,

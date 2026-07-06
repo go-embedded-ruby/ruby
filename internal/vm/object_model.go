@@ -1346,6 +1346,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *OmniAuthHash:
 		return x.cls
+	case *ACRouteSet:
+		return x.cls
+	case *ACMapper:
+		return x.cls
+	case *ACParams:
+		return x.cls
+	case *ACRequest:
+		return x.cls
+	case *ACResponse:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *JobRedis:
