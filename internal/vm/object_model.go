@@ -1022,6 +1022,56 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["ActiveRecord::Schema::Definition"].(*RClass)
 	case *ActiveRecordTableDSL:
 		return vm.consts["ActiveRecord::Schema::TableDefinition"].(*RClass)
+	case *ASModelName:
+		return vm.consts["ActiveModel::Name"].(*RClass)
+	case *ASModelErrors:
+		return vm.consts["ActiveModel::Errors"].(*RClass)
+	case *ASModelError:
+		return vm.consts["ActiveModel::Error"].(*RClass)
+	case *ActiveJobConfigured:
+		return vm.consts["ActiveJob::ConfiguredJob"].(*RClass)
+	case *ASBlob:
+		return vm.consts["ActiveStorage::Blob"].(*RClass)
+	case *ASAttachment:
+		return vm.consts["ActiveStorage::Attachment"].(*RClass)
+	case *ASService:
+		return vm.consts["ActiveStorage::Service"].(*RClass)
+	case *ASOne:
+		return vm.consts["ActiveStorage::Attached::One"].(*RClass)
+	case *ASMany:
+		return vm.consts["ActiveStorage::Attached::Many"].(*RClass)
+	case *RailtieVal:
+		return x.cls
+	case *EngineVal:
+		return x.cls
+	case *RailsAppVal:
+		return x.cls
+	case *RailsConfigVal:
+		return x.cls
+	case *RailsPathsVal:
+		return x.cls
+	case *RailsPathVal:
+		return x.cls
+	case *RailsRouteSetVal:
+		return x.cls
+	case *RailsInitializerVal:
+		return x.cls
+	case *StringInquirerVal:
+		return x.cls
+	case *DeviseConfig:
+		return x.cls
+	case *DeviseResource:
+		return x.cls
+	case *DeviseTokenGenerator:
+		return x.cls
+	case *HanamiRouter:
+		return x.cls
+	case *HanamiReq:
+		return x.cls
+	case *HanamiResp:
+		return x.cls
+	case *HanamiFlash:
+		return x.cls
 	case *RSpecMatcher:
 		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
 	case *RSpecExpectation:

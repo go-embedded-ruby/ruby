@@ -14,7 +14,11 @@ require (
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
+	github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783
+	github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4
+	github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6
+	github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e4
 	github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180
 	github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795
 	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
@@ -37,6 +41,7 @@ require (
 	github.com/go-ruby-connection-pool/connection-pool v0.0.0-20260706115620-287a916e348b
 	github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc
 	github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4
+	github.com/go-ruby-devise/devise v0.0.0-20260706115634-252d1cfa97fc
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
 	github.com/go-ruby-digest/digest v0.0.0-20260703175012-4332315c5957
 	github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd
@@ -56,6 +61,7 @@ require (
 	github.com/go-ruby-graphql/graphql v0.0.0-20260704114306-47444c09995e
 	github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
+	github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
 	github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3
 	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82
@@ -102,6 +108,7 @@ require (
 	github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3
 	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
+	github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
