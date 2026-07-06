@@ -1022,6 +1022,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["ActiveRecord::Schema::Definition"].(*RClass)
 	case *ActiveRecordTableDSL:
 		return vm.consts["ActiveRecord::Schema::TableDefinition"].(*RClass)
+	case *ASBlob:
+		return vm.consts["ActiveStorage::Blob"].(*RClass)
+	case *ASAttachment:
+		return vm.consts["ActiveStorage::Attachment"].(*RClass)
+	case *ASService:
+		return vm.consts["ActiveStorage::Service"].(*RClass)
+	case *ASOne:
+		return vm.consts["ActiveStorage::Attached::One"].(*RClass)
+	case *ASMany:
+		return vm.consts["ActiveStorage::Attached::Many"].(*RClass)
 	case *RSpecMatcher:
 		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
 	case *RSpecExpectation:

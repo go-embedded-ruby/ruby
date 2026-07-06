@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	activestorage "github.com/go-ruby-activestorage/activestorage"
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
 	async "github.com/go-ruby-async/async"
 	i18n "github.com/go-ruby-i18n/i18n"
@@ -174,6 +175,8 @@ type VM struct {
 	mainArmed bool
 
 	arAdapter *arSQLiteAdapter // the ActiveRecord::Base connection (require "active_record"), backed by go-ruby-sqlite3; nil until establish_connection
+
+	asConfig *activestorage.Config // the ActiveStorage process config (require "active_storage"), backed by go-ruby-activestorage; nil until first use, then a deterministic in-process config (see asRequireConfig)
 
 	// sidekiqRedisURL / resqueRedisURL are the go-redis connection URLs the job
 	// bindings (require "sidekiq" / "resque") dial. Each is empty until set via

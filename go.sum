@@ -192,6 +192,8 @@ github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe h1:oYFDl+kcAkTOX
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe/go.mod h1:Bh8Vr5Vy9UO7JqU5f6myUOWl0jjnnvtlGdIVTBbdLRw=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6 h1:m4vrjxuJ9Cp+4QohRvpAbAqsKRaF9Ki8jzic8IPx/9c=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6/go.mod h1:0QY+Ri6/HhOkjRGhhyZ5NwtcDosKI7xwO5csmWEG0W0=
+github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e4 h1:1Fzumg4Xtn0cEhcIyqIXMoTuQUeO/6WYXhoJLj5EMkQ=
+github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e4/go.mod h1:+aVqjlgBiR8H5b1t7tPht4OVAAYCxa/KPQAbv7WzC/M=
 github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180 h1:zOgsDyqYyTOA8IU4WsurHggTd4DvXfraPTrrR7RxBUs=
 github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180/go.mod h1:ykSisArfgmpZFoV0y0irolshuOdSPyALFz/wWCJiaEE=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795 h1:UPDrh2pXuwewmbZiEM5SWg26Hy/08mw4MJnCszwGUEk=
