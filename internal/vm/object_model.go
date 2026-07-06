@@ -919,6 +919,24 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *ASInflections:
 		return vm.consts["ActiveSupport::Inflector::Inflections"].(*RClass)
+	case *ErubiEngine:
+		return x.cls
+	case *HTTPrbClient:
+		return vm.consts["HTTP::Client"].(*RClass)
+	case *HTTPrbResponse:
+		return vm.consts["HTTP::Response"].(*RClass)
+	case *HTTPrbStatus:
+		return vm.consts["HTTP::Response::Status"].(*RClass)
+	case *ExconConnection:
+		return vm.consts["Excon::Connection"].(*RClass)
+	case *ExconResponse:
+		return vm.consts["Excon::Response"].(*RClass)
+	case *TyphoeusRequest:
+		return vm.consts["Typhoeus::Request"].(*RClass)
+	case *TyphoeusResponse:
+		return vm.consts["Typhoeus::Response"].(*RClass)
+	case *TyphoeusHydra:
+		return vm.consts["Typhoeus::Hydra"].(*RClass)
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:

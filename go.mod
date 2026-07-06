@@ -26,6 +26,7 @@ require (
 	github.com/go-ruby-bleve/bleve v0.0.0-20260704121320-7b342f38e500
 	github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba
 	github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177
+	github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
@@ -41,7 +42,9 @@ require (
 	github.com/go-ruby-dry-types/dry-types v0.0.0-20260702150052-94ab5100a720
 	github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260702151810-a274955bddac
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
+	github.com/go-ruby-erubi/erubi v0.0.0-20260706150033-cfeeadde9120
 	github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a
+	github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
@@ -52,6 +55,7 @@ require (
 	github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
+	github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3
 	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82
 	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
@@ -91,6 +95,7 @@ require (
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
 	github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779
+	github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3
 	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
@@ -118,6 +123,7 @@ require (
 	github.com/go-ruby-thor/thor v0.0.0-20260702145030-faa03e6e0228
 	github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
+	github.com/go-ruby-typhoeus/typhoeus v0.0.0-20260706120426-67b7a131561d
 	github.com/go-ruby-tzinfo/tzinfo v0.0.0-20260701105256-15977bdf6e1a
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
