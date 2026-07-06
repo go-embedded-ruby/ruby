@@ -505,6 +505,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSyslog()        // Syslog loadable shell (feature probe)
 	vm.registerCGI()           // CGI.escape/unescape (real over net/url) + HTML helpers
 	vm.registerERB()           // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
+	vm.registerErubi()         // Erubi::Engine / CaptureEndEngine + Erubi.h (require "erubi"), template->Ruby-source compiler backed by go-ruby-erubi
 	vm.registerStringScanner() // StringScanner (require "strscan"), backed by go-ruby-strscan; needs StandardError
 	vm.registerOptionParser()  // OptionParser (require "optparse"), backed by go-ruby-optparse; prelude adds the ParseError tree
 	vm.registerURI()           // URI module (require "uri"), backed by go-ruby-uri; needs StandardError (URI::Error) + Regexp (make_regexp)

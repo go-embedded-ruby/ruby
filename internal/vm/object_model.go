@@ -1069,6 +1069,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *BCryptPassword:
 		return x.cls
+	case *ErubiEngine:
+		// An Erubi::Engine (or its CaptureEndEngine subclass) carries the class it
+		// was constructed as, so #class / #is_a? report Engine vs CaptureEndEngine.
+		return x.cls
 	case *naclObj:
 		return x.cls
 	case *AgeX25519Identity:

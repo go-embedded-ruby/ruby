@@ -34,6 +34,7 @@ var providedFeatures = map[string]bool{
 	"observer": true,
 	"net/http": true, "net/https": true, "resolv": true, "singleton": true,
 	"optparse": true, "ripper": true, "erb": true, "find": true,
+	"erubi": true, "erubi/capture_end": true,
 	"tempfile": true, "open3": true,
 	"strscan": true, "fiber": true, "objspace": true, "csv": true,
 	"shellwords": true, "prime": true, "tsort": true, "abbrev": true,

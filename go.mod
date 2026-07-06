@@ -38,6 +38,7 @@ require (
 	github.com/go-ruby-dry-types/dry-types v0.0.0-20260702150052-94ab5100a720
 	github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260702151810-a274955bddac
 	github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529
+	github.com/go-ruby-erubi/erubi v0.0.0-20260706150033-cfeeadde9120
 	github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46
