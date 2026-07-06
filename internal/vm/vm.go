@@ -192,6 +192,14 @@ type VM struct {
 	arModels     map[*RClass]*ActiveRecordModel
 	arTableNames map[*RClass]string
 
+	// amThunks records the ActiveModel::Validations DSL registrations declared per
+	// class (require "active_model"): each `validates` / `validate` /
+	// `validates_each` / `validates_with` call in a class body appends a thunk that
+	// replays onto a freshly built activemodel.Validations at #valid? time, so a
+	// subclass inherits its ancestors' validators (parent-first). nil until first
+	// declaration.
+	amThunks map[*RClass][]amThunk
+
 	cBasicObject, cObject, cModule, cClass *RClass
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cComplex, cRational                    *RClass

@@ -73,6 +73,7 @@ var providedFeatures = map[string]bool{
 	"grape":   true,
 	"rack":    true, "rack/utils": true,
 	"sinatra": true, "sinatra/base": true,
+	"active_model": true, "activemodel": true,
 	"active_record": true, "activerecord": true,
 	"warden": true, "omniauth": true,
 	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,

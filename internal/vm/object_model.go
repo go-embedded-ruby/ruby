@@ -1022,6 +1022,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["ActiveRecord::Schema::Definition"].(*RClass)
 	case *ActiveRecordTableDSL:
 		return vm.consts["ActiveRecord::Schema::TableDefinition"].(*RClass)
+	case *ASModelName:
+		return vm.consts["ActiveModel::Name"].(*RClass)
+	case *ASModelErrors:
+		return vm.consts["ActiveModel::Errors"].(*RClass)
+	case *ASModelError:
+		return vm.consts["ActiveModel::Error"].(*RClass)
 	case *RSpecMatcher:
 		return vm.consts["RSpec::Matchers::BuiltIn::BaseMatcher"].(*RClass)
 	case *RSpecExpectation:
