@@ -117,29 +117,45 @@ func (vm *VM) registerSinatraDSL(base *RClass) {
 // sinatraCall builds the live sinatra app for cls, serves the Rack env and
 // returns the SPEC [status, headers, body] triple as a Ruby Array.
 func (vm *VM) sinatraCall(cls *RClass, envArg object.Value) object.Value {
-	app := vm.buildSinatraApp(cls)
-	// The per-request handler-self cache is scoped to this one dispatch: reset it
-	// before serving and drop it after so a request's before/route/after share one
-	// SinatraCtx (and its @ivars) without leaking across requests.
+	merged := vm.sinatraMergedSettings(cls)
+	app := vm.buildSinatraApp(cls, merged)
+	env := rackEnv(envArg)
+	// The per-request handler-self cache and the cookie session are scoped to this
+	// one dispatch: reset them before serving and drop them after so a request's
+	// before/route/after share one SinatraCtx (and its @ivars / session) without
+	// leaking across requests.
 	vm.sinatraCtxCache = nil
-	defer func() { vm.sinatraCtxCache = nil }()
-	status, headers, body := app.CallTuple(rackEnv(envArg))
+	vm.sinatraSession = vm.loadSinatraSession(merged, env)
+	defer func() { vm.sinatraCtxCache = nil; vm.sinatraSession = nil }()
+	status, headers, body := app.CallTuple(env)
+	// When sessions are enabled, commit the (possibly mutated) session back into a
+	// signed Set-Cookie on the response, like Rack::Session::Cookie.
+	if vm.sinatraSession != nil {
+		vm.saveSinatraSession(vm.sinatraSession, headers)
+	}
 	return object.NewArray(object.IntValue(int64(status)), rackHeadersToHash(headers), rackBodyArray(body))
+}
+
+// sinatraMergedSettings flattens cls's declaration chain into one settings map
+// (ancestor first, subclass last so a subclass overrides), the view both the
+// live app and the session store read.
+func (vm *VM) sinatraMergedSettings(cls *RClass) map[string]object.Value {
+	merged := map[string]object.Value{}
+	for _, d := range vm.sinatraChain(cls) {
+		for k, v := range d.settings {
+			merged[k] = v
+		}
+	}
+	return merged
 }
 
 // buildSinatraApp assembles a *sinatra.Sinatra from cls's declaration chain: it
 // applies settings (ancestor first, subclass last so a subclass overrides),
 // registers routes/filters and the not_found / error handlers, each backed by an
 // Action that instance_evals the captured Ruby block against a SinatraCtx.
-func (vm *VM) buildSinatraApp(cls *RClass) *sinatra.Sinatra {
+func (vm *VM) buildSinatraApp(cls *RClass, merged map[string]object.Value) *sinatra.Sinatra {
 	app := sinatra.New()
-	merged := map[string]object.Value{}
 	defs := vm.sinatraChain(cls)
-	for _, d := range defs {
-		for k, v := range d.settings {
-			merged[k] = v
-		}
-	}
 	for k, v := range merged {
 		app.Settings().Set(k, sinatraSettingValue(v))
 	}
@@ -232,9 +248,15 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 		return &RackResponse{resp: self(v).c.Response(), cls: vm.consts["Rack::Response"].(*RClass)}
 	})
 	ctx.define("session", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		// The session seam is the rack.session env value, which lives in the Go
-		// value model (the env was converted at #call); map it back for Ruby. A
-		// missing session reads back as nil.
+		// With `enable :sessions`, the cookie session store is live for this
+		// dispatch: return its mutable Hash so session[:k]=v / session.clear persist
+		// and are committed to a Set-Cookie after the handler runs (see
+		// sinatra_session.go). Otherwise fall back to the rack.session env seam,
+		// which lives in the Go value model (converted at #call); a missing session
+		// reads back as nil.
+		if vm.sinatraSession != nil {
+			return vm.sinatraSession.hash
+		}
 		return rackFromGo(self(v).c.Session())
 	})
 	ctx.define("settings", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {

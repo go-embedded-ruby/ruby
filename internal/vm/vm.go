@@ -243,6 +243,8 @@ type VM struct {
 	cSinatraSettings                       *RClass                          // Sinatra::Base::Settings, the handler's `settings` view
 	sinatraDefs                            map[*RClass]*sinatraDef          // per-Sinatra::Base-subclass route/filter/handler declarations
 	sinatraCtxCache                        map[*sinatra.Context]*SinatraCtx // per-request handler self, shared across before/route/after so @ivars persist
+	sinatraSession                         *sinatraSessionState             // per-dispatch cookie session (enable :sessions); the `session` helper returns its live Hash, saved back into a Set-Cookie
+	sinatraDefaultSecret                   []byte                           // per-VM fallback session-signing key when no session_secret is set (like MRI Sinatra's random default), generated once
 	cMinitestSpec                          *RClass                          // Minitest::Spec, the spec-DSL subclass of Minitest::Test
 	minitestRunnables                      []*RClass                        // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
 	minitestCurInstance                    object.Value                     // the test instance currently running (backs bare must_*/wont_* and _)
