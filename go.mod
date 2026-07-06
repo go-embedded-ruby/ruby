@@ -90,7 +90,10 @@ require (
 	github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7
 	github.com/go-ruby-net-ftp/net-ftp v0.0.0-20260630142044-917edc09066e
 	github.com/go-ruby-net-http/net-http v0.0.0-20260630124155-c794366ce72f
+	github.com/go-ruby-net-imap/net-imap v0.0.0-20260630193116-82cd428e7b0f
 	github.com/go-ruby-net-pop/net-pop v0.0.0-20260630142109-66d7036032f5
+	github.com/go-ruby-net-sftp/net-sftp v0.0.0-20260630142744-9be6f27056d7
+	github.com/go-ruby-net-smtp/net-smtp v0.0.0-20260630142921-0151ad2e87f5
 	github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e
 	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
