@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
+	async "github.com/go-ruby-async/async"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
 	sinatra "github.com/go-ruby-sinatra/sinatra"
@@ -174,6 +175,16 @@ type VM struct {
 
 	arAdapter *arSQLiteAdapter // the ActiveRecord::Base connection (require "active_record"), backed by go-ruby-sqlite3; nil until establish_connection
 
+	// sidekiqRedisURL / resqueRedisURL are the go-redis connection URLs the job
+	// bindings (require "sidekiq" / "resque") dial. Each is empty until set via
+	// the module's redis= config (or a configure_client/server block); the getter
+	// then falls back to ENV["REDIS_URL"] and finally the local default. A fresh
+	// go-redis client is built and closed per operation (see withSidekiqRedis /
+	// withResqueRedis) so no connection or goroutine leaks across the single-
+	// threaded VM.
+	sidekiqRedisURL string
+	resqueRedisURL  string
+
 	// arModels caches the *ActiveRecordModel lazily built for each
 	// `class … < ActiveRecord::Base` subclass, and arTableNames records an
 	// explicit `self.table_name = "…"` override per class (otherwise the table
@@ -247,6 +258,17 @@ type VM struct {
 	sinatraCtxCache                        map[*sinatra.Context]*SinatraCtx // per-request handler self, shared across before/route/after so @ivars persist
 	sinatraSession                         *sinatraSessionState             // per-dispatch cookie session (enable :sessions); the `session` helper returns its live Hash, saved back into a Set-Cookie
 	sinatraDefaultSecret                   []byte                           // per-VM fallback session-signing key when no session_secret is set (like MRI Sinatra's random default), generated once
+	cRodaBase                              *RClass                          // Roda (require "roda"), the routing-tree app superclass, backed by go-ruby-roda
+	cRodaRequest                           *RClass                          // Roda::RodaRequest, the self a route/matcher block runs against
+	cRodaResponse                          *RClass                          // Roda::RodaResponse, the mutable response a route block writes into
+	rodaRoutes                             map[*RClass]*Proc                // per-Roda-subclass top-level route block (route do |r| … end)
+	cAsyncTask                             *RClass                          // Async::Task, one node of the structured-concurrency tree, backed by go-ruby-async
+	curAsyncTask                           *async.Task                      // the task whose Ruby body is currently running (backs Async::Task.current and the caller passed to blocking async ops)
+	asyncTasks                             map[*async.Task]*AsyncTask       // wrapper cache so one *async.Task always maps to one Async::Task object (Ruby #equal? identity), cleared when the root reactor finishes
+	wardenStrategies                       map[string]*RClass               // Warden::Strategies.add(name){…} registry: label -> anon subclass of Warden::Strategies::Base
+	omniAuthStrategies                     map[string]*RClass               // OmniAuth provider registry: name -> strategy class (from OmniAuth::Strategies.add or provider Class)
+	omniAuthProviderOpts                   map[string]map[string]any        // OmniAuth per-provider option args (provider :name, key: …), surfaced to a strategy as #options
+	omniAuthConfig                         *OmniAuthConfig                  // the shared OmniAuth.config (test_mode / mock_auth / path_prefix)
 	cMinitestSpec                          *RClass                          // Minitest::Spec, the spec-DSL subclass of Minitest::Test
 	minitestRunnables                      []*RClass                        // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
 	minitestCurInstance                    object.Value                     // the test instance currently running (backs bare must_*/wont_* and _)

@@ -643,6 +643,27 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *SinatraSettings:
 		return x.cls
+	case *RodaReq:
+		// The self a Roda route/matcher block runs against (Roda::RodaRequest).
+		return x.cls
+	case *RodaResp:
+		return x.cls
+	case *AsyncTask:
+		return x.cls
+	case *AsyncBarrier:
+		return x.cls
+	case *AsyncSemaphore:
+		return x.cls
+	case *AsyncCondition:
+		return x.cls
+	case *AsyncNotification:
+		return x.cls
+	case *AsyncQueue:
+		return x.cls
+	case *AsyncLimitedQueue:
+		return x.cls
+	case *AsyncWaiter:
+		return x.cls
 	case *REXMLDocument:
 		return vm.cREXMLDocument
 	case *REXMLElement:
@@ -735,6 +756,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// The handle I18n.backend returns reports I18n::Backend::Simple so its
 		// store_translations / available_locales dispatch.
 		return vm.consts["I18n::Backend::Simple"].(*RClass)
+	case *ZeitwerkLoader:
+		// A Zeitwerk::Loader.new / .for_gem handle reports Zeitwerk::Loader so its
+		// push_dir / setup / eager_load / … instance methods dispatch.
+		return vm.consts["Zeitwerk::Loader"].(*RClass)
+	case *ZeitwerkInflector:
+		// A Zeitwerk::Inflector handle reports Zeitwerk::Inflector so its
+		// camelize / inflect dispatch.
+		return vm.consts["Zeitwerk::Inflector"].(*RClass)
 	case *RSSRss:
 		return vm.consts["RSS::Rss"].(*RClass)
 	case *RSSChannel:
@@ -1239,8 +1268,32 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Puma::Configuration"].(*RClass)
 	case *PumaDSL:
 		return vm.consts["Puma::DSL"].(*RClass)
+	case *WardenManager:
+		return x.cls
+	case *WardenProxy:
+		return x.cls
+	case *WardenStrategy:
+		return x.cls
+	case *OmniAuthBuilder:
+		return x.cls
+	case *OmniAuthConfig:
+		return x.cls
+	case *OmniAuthMockAuth:
+		return x.cls
+	case *OmniAuthStrategy:
+		return x.cls
+	case *OmniAuthHash:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
+	case *JobRedis:
+		// A Sidekiq.redis / Resque.redis block connection reports the class stamped
+		// on it at construction (Sidekiq::RedisConnection or Resque::RedisConnection).
+		return x.cls
+	case *ResqueJob:
+		return x.cls
+	case *ResqueWorker:
+		return x.cls
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:

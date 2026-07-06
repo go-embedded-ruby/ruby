@@ -23,6 +23,8 @@ github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuy
 github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
 github.com/alecthomas/units v0.0.0-20190717042225-c3de453c63f4/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
+github.com/alicebob/miniredis/v2 v2.38.0 h1:nZAzCR+Lj+Vxk4ZXzm2NuKq2O33RXj1XxJ2e2uP9jiw=
+github.com/alicebob/miniredis/v2 v2.38.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
 github.com/andybalholm/brotli v1.2.1 h1:R+f5xP285VArJDRgowrfb9DqL18yVK0gKAW/F+eTWro=
 github.com/andybalholm/brotli v1.2.1/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/antithesishq/antithesis-sdk-go v0.7.0-default-no-op h1:Z/MZK75wC/NSrkgqeNIa7jexam9uWzhLmFTSCPI/kn0=
@@ -87,6 +89,10 @@ github.com/blevesearch/zapx/v16 v16.3.4 h1:hDAqA8qusZTNbPEL7//w5P65UZ2de6yhSeUaT
 github.com/blevesearch/zapx/v16 v16.3.4/go.mod h1:zqkPPqs9GS9FzVWzCO3Wf1X044yWAV17+4zb+FTiEHg=
 github.com/blevesearch/zapx/v17 v17.1.2 h1:avbOk2igaASNoiy0BE/jPgcxAnRI2PGeydeP4hg7Ikk=
 github.com/blevesearch/zapx/v17 v17.1.2/go.mod h1:WQObxKrqUX7cd0G1GMvDfc/bmZzQvoy7APOPimx7DiI=
+github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
+github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
+github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
+github.com/bsm/gomega v1.27.10/go.mod h1:JyEr/xRbxbtgWNi8tIEVPUYZ5Dzef52k01W3YH0H+O0=
 github.com/casbin/casbin/v2 v2.1.2/go.mod h1:YcPU1XXisHhLzuxH9coDNf2FbKpjGlbCg3n9yuLkIJQ=
 github.com/cenkalti/backoff v2.2.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
@@ -194,6 +200,8 @@ github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a h1:qLSOUbDALcDFcWT
 github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a/go.mod h1:KbeDcUyUuspROC2mbwFxNAyHs7wGNE3VkZ7UDBAv9sk=
 github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda h1:DcGqJUjmal8RoOxAKreIQAxBEssL2jMvH96uQLIm24M=
 github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda/go.mod h1:VItI7fXduRnuTNRtFSmi+VzoNZ/riRf8p1G2xumYAF8=
+github.com/go-ruby-async/async v0.0.0-20260706115507-51a981d1e85d h1:wmXoatXlShYdjJwkHf8xMzkByPKSdlVX/dtV3Ttav8M=
+github.com/go-ruby-async/async v0.0.0-20260706115507-51a981d1e85d/go.mod h1:461TqgFiDMx6SKwX1YFc+SSwSvI3Ny1Zj6TiZaFGtW0=
 github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e h1:8E6Zx9q8D1D8bhF/E35Vf2/xnw6WoMuOCigKVJJvWJI=
 github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e/go.mod h1:wAMh7VnlOelf8z8L8ZboqLAL8IX7yiPSyBS2JkSeylk=
 github.com/go-ruby-bbolt/bbolt v0.0.0-20260704121138-28ee121195c0 h1:xgPjrU7O45G3jZtmEDnsvN+Vaa5tiRmYM+V5+Ff0iJQ=
@@ -322,6 +330,8 @@ github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79 h1:xZIEc
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79/go.mod h1:QvbIKqCHbVYFCko+ZlLGzFh6h/K7pqSKGzADrzTUvls=
 github.com/go-ruby-oidc/oidc v0.0.0-20260705185218-08dab6b22572 h1:WnQtWUYQcpYkSiw+Nnr//Q44o0ZFlopxU9SyeuaBU1Q=
 github.com/go-ruby-oidc/oidc v0.0.0-20260705185218-08dab6b22572/go.mod h1:uy6y/DJnboV+pnO6ITsw4JIor4EmdZ0MzRv5gGlBrv0=
+github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c h1:mpewfhdvKxzc5aFCrQUaEyZ5vp1rzvHAr6Is61HRacQ=
+github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c/go.mod h1:7hF8CYcoBsFTy7OaSrjjfH888t1mcE9JdE9YpMoyB7k=
 github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c h1:9scQo7ArojaKzmw2gbdgA3urBcA0pROIOYYCvGhPQfg=
 github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c/go.mod h1:AjZ2hTwNuKGnO0OGJzgp84hTzBV6u182mj7REfuxvtw=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=
@@ -364,8 +374,12 @@ github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08 h1:2ULLhB9SU
 github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08/go.mod h1:+0nK2X+aCPMO91bPMM/DT1OFUIzFQeoTPGkkOR3kd84=
 github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac h1:Y++tdsBF6lA/cw3c9uQ/ZyQZjP2N3wkA6pLF8a3HnHc=
 github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac/go.mod h1:RD3wPeMjMThQ7QVnB9O15gCllRg+RJhSEJu9DtFaLLQ=
+github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca h1:gw8a/1QnEL40onmIZOgG9hWTLmfGOdkrxkRNMwrWe1o=
+github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca/go.mod h1:PWugNzoaXxDcxD2UVgY1X+HvKnrt0pMSRCgN4RkJjZ8=
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b h1:hWNW3Z8g7Hwi17NJT912J0udGhK5dzxub8u7T07Oyv8=
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b/go.mod h1:UQGki9qXLiqaEOm4ih1CGznGNPUDcNGCsLVJ/y6G1G8=
+github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa h1:Ud4sdjWo2FZ6i0zRzRjwMJ/h24MYCchMfxbw1N9/ZMw=
+github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa/go.mod h1:d88OqDfelEmqriOEsEkLvBopYO4FCXQWIFil4zQYNtw=
 github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c h1:VAD5jFMNvUBEvL8tQZXyGvbif4qJt9l3S6riFyBtPuk=
 github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c/go.mod h1:PJHlTuP01g0s+3cVfuQgCztiLcUD2intYD2bZTEMOZM=
 github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8 h1:02tvTxeNaPJjebV1A8SUrggsBVco1axxdycqXzH2zDs=
@@ -390,6 +404,8 @@ github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2 h1:wp+IIkvKNmbKiGv
 github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2/go.mod h1:F/P0PXeE5ybEPeWYfb1JAKWny1Li3dnlm6YxG2/vffE=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z9b99kWJht8AgtlIbdiq7Y02j6eddxW+rr4MJpCS6kw=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
+github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069 h1:cIMM8Qn+qKX6N6lNku5cl5LT61qGHlTKVuMJ4LEOP50=
+github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069/go.mod h1:ystbaHAx7g2zTN0DfeQe5mRt6Yanqr6ddThtIDhSlik=
 github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c h1:zq73EWvSARNK2T1R0WC3jl+YH7g6TutOkWd1btI8fIU=
 github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c/go.mod h1:nuEOODfga3YvXINu2Ckvp/dNTTZlx+LUyjpWI+9TMck=
 github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4 h1:FYfHAxVaFU2q7BQ8wsKesUxO2uAQ2VK/TdTVut1/wfg=
@@ -414,12 +430,16 @@ github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984
 github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f/go.mod h1:mKlLb/MTNhSHSUhcAvb6hi3ZCR5kCgVdDaInEyI3Wr8=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb h1:CyoFEEsMPa/TX4EJHOPsXud3nccESDhaW6fTQsidIKI=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb/go.mod h1:/7+NF+4kESzcNHjRtNe/lAfhgHpgElX4C+VNo0xsb6Y=
+github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef h1:JLPi8PmkOV+Yta+zBdaPYVc5wJFs3GEmbh/YiXSd6L8=
+github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef/go.mod h1:oI3L9dywsrSXJqLDuJGIYuHUHRCxUS7BU8PBZGXpx4A=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b h1:ZwN0q9xq9HUGCskWGz8rmL+v6MaHy+AM99oictlPlBs=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b/go.mod h1:tLv8PWrPxrOQrJWMFTfRi6wfZpSjZtmfxHKgGwUriR8=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176 h1:iHTCF/Eu0/lwOEank8pLKqoW5j9MI2ERXErrvqsZZ+4=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176/go.mod h1:1C3Bx0pQIsqLqC2SnqV7pJnGuLJsgYmar2NrD+CmVXw=
 github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd h1:4HGjgCdTIuIEM+iZXJ9hJJzt0IBMtxPqdJq72mr0Y64=
 github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd/go.mod h1:HtbQgnZpSTJBAhPg1jOKgHycZl3tXgf9ZdOu4dnHWjQ=
+github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c h1:qrS/rTmpYxW1eXGgv1OcBHL43iNAB8B2EkbvlTyzK5Y=
+github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c/go.mod h1:e282nPoQTTtYK2TUfrIXVe5AZ80h0lgzYvx4xpL/aDA=
 github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67 h1:otTivF26XRtz1gM268+WgbB/3cPCpcOJvMJNnbbIDx0=
 github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67/go.mod h1:v32GgUrbHSFEHg4nerQESboO6b90fhovvtAXE0GrPRw=
 github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b h1:mZiaZMwcLCZb9hoOXEUaZWgTpkMYtSeEfIaoIngt1eE=
@@ -687,6 +707,8 @@ github.com/prometheus/procfs v0.0.8/go.mod h1:7Qr8sr6344vo1JqZ6HhLceV9o3AJ1Ff+Gx
 github.com/prometheus/procfs v0.15.1 h1:YagwOFzUgYfKKHX6Dr+sHT7km/hxC76UB0learggepc=
 github.com/prometheus/procfs v0.15.1/go.mod h1:fB45yRUv8NstnjriLhBQLuOUt+WW4BsoGhij/e3PBqk=
 github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=
+github.com/redis/go-redis/v9 v9.21.0 h1:FPBE4hhbAke+TLmcY3WkpbDffJEomdqPn3HYiqAtL9E=
+github.com/redis/go-redis/v9 v9.21.0/go.mod h1:v/M13XI1PVCDcm01VtPFOADfZtHf8YW3baQf57KlIkA=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/rogpeppe/fastuuid v0.0.0-20150106093220-6724a57986af/go.mod h1:XWv6SoW27p1b0cqNHllgS5HIMJraePCO15w5zCzIWYg=
@@ -766,6 +788,8 @@ github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78/go.mod h1:aL8wCCfTfS
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
+github.com/yuin/gopher-lua v1.1.1 h1:kYKnWBjvbNP4XLT3+bPEwAXJx262OhaHDWDVOPjL46M=
+github.com/yuin/gopher-lua v1.1.1/go.mod h1:GBR0iDaNXjAgGg9zfCvksxSRnQx76gclCIb7kdAd1Pw=
 github.com/zeebo/assert v1.3.0 h1:g7C04CbJuIDKNPFHmsk4hwZDO5O+kntRxzaUoNXj+IQ=
 github.com/zeebo/assert v1.3.0/go.mod h1:Pq9JiuJQpG8JLJdtkwrJESF0Foym2/D9XMU5ciN/wJ0=
 github.com/zeebo/xxh3 v1.1.0 h1:s7DLGDK45Dyfg7++yxI0khrfwq9661w9EN78eP/UZVs=
@@ -813,6 +837,8 @@ go.opentelemetry.io/proto/otlp v1.5.0 h1:xJvq7gMzB31/d406fB8U5CBdyQGw4P399D1aQWU
 go.opentelemetry.io/proto/otlp v1.5.0/go.mod h1:keN8WnHxOy8PG0rQZjJJ5A2ebUoafqWp0eVQ4yIXvJ4=
 go.uber.org/atomic v1.3.2/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/atomic v1.5.0/go.mod h1:sABNBOSYdrvTF6hTgEIbc7YasKWGhgEQZyfxyTvoXHQ=
+go.uber.org/atomic v1.11.0 h1:ZvwS0R+56ePWxUNi+Atn9dWONBPp/AUETXlHW0DxSjE=
+go.uber.org/atomic v1.11.0/go.mod h1:LUxbIzbOniOlMKjJjyPfpl4v+PKK2cNJn91OQbhoJI0=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
 go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=

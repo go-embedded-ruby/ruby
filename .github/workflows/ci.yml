@@ -34,7 +34,10 @@ jobs:
         shell: bash
         run: |
           COVERPKG=$(go list ./internal/... | paste -sd, -)
-          go test -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
+          # -race roughly doubles wall-clock, and the windows runner is the slowest
+          # of the three OS lanes; the growing vm suite tips it past go test's 10m
+          # default. Give the same headroom the emulated arch lanes get (-timeout=30m).
+          go test -timeout=30m -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
           echo "--- functions below 100% (empty = all covered) ---"
           go tool cover -func=cover.out | grep -vE '100\.0%$' || true
           echo "---------------------------------------------------"
