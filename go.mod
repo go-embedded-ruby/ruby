@@ -15,6 +15,7 @@ require (
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783
+	github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a
 	github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4
 	github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6

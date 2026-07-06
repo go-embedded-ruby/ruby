@@ -604,6 +604,7 @@ func New(out io.Writer) *VM {
 	vm.installPrelude()
 	vm.registerEnumerator()     // after the prelude so it can mix in Enumerable
 	vm.registerActiveSupport()  // ActiveSupport::Inflector + core extensions (require "active_support" / "active_support/all"), backed by go-ruby-activesupport; after the prelude so the Enumerable module (which its core-ext extends) exists
+	vm.registerActionView()     // ActionView::Base view context (tag/url/form/text/number helpers + render) + FormBuilder + PartialIteration + ActiveSupport::SafeBuffer / String#html_safe (require "action_view"), backed by go-ruby-actionview; the URLFor (routes) and RenderTemplate seams wire to Ruby callables, the inline-render default evals ERB through the already-bound go-ruby-erb compiler; after registerActiveSupport (SafeBuffer nests under ActiveSupport) and after the bootstrap ERB/Erubi registration (escaping/compiler surface); #render stays a dispatchable method for a later actionpack/actionmailer binding
 	vm.registerLazy()           // after Enumerator (Enumerator::Lazy is built on it)
 	vm.registerFileStat()       // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
 	vm.registerIPAddr()         // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
