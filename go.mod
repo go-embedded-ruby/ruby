@@ -15,6 +15,9 @@ require (
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783
+	github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260706115414-f116fa6c4917
+	github.com/go-ruby-actionpack/actionpack v0.0.0-20260706115418-8ba13fbf84e5
+	github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a
 	github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4
 	github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6
@@ -108,6 +111,7 @@ require (
 	github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3
 	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
+	github.com/go-ruby-rails/rails v0.0.0-20260706183557-5ddb406695b0
 	github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92

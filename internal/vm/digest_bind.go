@@ -275,6 +275,11 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 		// Rails::StringInquirer#== compares the wrapped string by value (env ==
 		// "production"), not object identity, so it must dispatch its own ==.
 		return true
+	case *RailsEnvVal:
+		// Rails::EnvironmentInquirer#== compares the wrapped environment name by
+		// value (Rails.env == "production"), not object identity, so it must
+		// dispatch its own ==.
+		return true
 	}
 	return false
 }

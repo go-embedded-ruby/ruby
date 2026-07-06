@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	actionmailer "github.com/go-ruby-actionmailer/actionmailer"
 	activejob "github.com/go-ruby-activejob/activejob"
 	activestorage "github.com/go-ruby-activestorage/activestorage"
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
@@ -279,10 +280,19 @@ type VM struct {
 	ajStack                                []*RObject                         // ActiveJob: instance stack the inline #perform seam reads
 	ajLastResult                           object.Value                       // ActiveJob: last #perform return value (perform_now's result)
 	ajArgs                                 *activejob.Arguments               // ActiveJob: module-level ActiveJob::Arguments serializer (GlobalID seam wired in registerActiveJob)
+	cActionMailerBase                      *RClass                            // ActionMailer::Base, the superclass every mailer subclasses (require "action_mailer"), backed by go-ruby-actionmailer
+	cActionMailerDelivery                  *RClass                            // ActionMailer::MessageDelivery, the lazy proxy a mailer action returns
+	cActionMailerAttachments               *RClass                            // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
+	amDefs                                 map[*RClass]*amDef                 // ActionMailer: per-mailer-class default/delivery/hook declarations, merged down the chain at delivery time
+	amDeliveries                           *object.Array                      // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
+	amMailerOf                             map[*RObject]*actionmailer.Mailer  // ActionMailer: mailer instance -> library *Mailer of its running action (the mail/attachments/headers seam)
+	amRenderer                             object.Value                       // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
+	amEnqueuer                             object.Value                       // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)
 	asConfig                               *activestorage.Config              // ActiveStorage process config (require "active_storage"); nil until first use, then a deterministic in-process config (MemStore + DiskService temp dir)
 	cACChannelBase                         *RClass                            // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
 	acServer                               object.Value                       // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
 	railtieSeams                           map[any]*railtieSeam               // per-railtie/engine/app deferred initializer blocks, keyed by the library ctx object; run inline by the RunInitializer seam during Application#initialize!
+	railsApp                               *RailsAppVal                       // the Ruby Application registered via Rails.application= (the rails meta-gem's top-level app); nil before boot
 	deviseConfig                           *DeviseConfig                      // the shared Devise.config the DatabaseAuthenticatable Warden strategy authenticates against
 	cHanamiRouter                          *RClass                            // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
 	cHanamiAction                          *RClass                            // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses
@@ -290,6 +300,13 @@ type VM struct {
 	cHanamiResponse                        *RClass                            // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
 	cHanamiFlash                           *RClass                            // Hanami::Action::Flash, the two-generation flash store on the request/response
 	hanamiActionDefs                       map[*RClass]*hanamiActionDef       // per-Hanami::Action-subclass before/after/handle_exception/accept/config declarations
+	cACRouteSet                            *RClass                            // ActionDispatch::Routing::RouteSet (require "action_dispatch"), backed by go-ruby-actionpack/routing
+	cACMapper                              *RClass                            // ActionDispatch::Routing::Mapper, the self the routes DSL (draw) runs against
+	cACRequest                             *RClass                            // ActionDispatch::Request, over a Rack env
+	cACResponse                            *RClass                            // ActionDispatch::Response, the mutable Rack response
+	cACParameters                          *RClass                            // ActionController::Parameters (strong parameters)
+	cACControllerBase                      *RClass                            // ActionController::Base (require "action_controller"), the controller superclass a user subclasses
+	acControllerDefs                       map[*RClass]*acControllerDef       // per-ActionController::Base-subclass before/after/around/rescue_from/view-context declarations
 	cMinitestSpec                          *RClass                            // Minitest::Spec, the spec-DSL subclass of Minitest::Test
 	minitestRunnables                      []*RClass                          // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
 	minitestCurInstance                    object.Value                       // the test instance currently running (backs bare must_*/wont_* and _)
@@ -604,6 +621,7 @@ func New(out io.Writer) *VM {
 	vm.installPrelude()
 	vm.registerEnumerator()     // after the prelude so it can mix in Enumerable
 	vm.registerActiveSupport()  // ActiveSupport::Inflector + core extensions (require "active_support" / "active_support/all"), backed by go-ruby-activesupport; after the prelude so the Enumerable module (which its core-ext extends) exists
+	vm.registerActionView()     // ActionView::Base view context (tag/url/form/text/number helpers + render) + FormBuilder + PartialIteration + ActiveSupport::SafeBuffer / String#html_safe (require "action_view"), backed by go-ruby-actionview; the URLFor (routes) and RenderTemplate seams wire to Ruby callables, the inline-render default evals ERB through the already-bound go-ruby-erb compiler; after registerActiveSupport (SafeBuffer nests under ActiveSupport) and after the bootstrap ERB/Erubi registration (escaping/compiler surface); #render stays a dispatchable method for a later actionpack/actionmailer binding
 	vm.registerLazy()           // after Enumerator (Enumerator::Lazy is built on it)
 	vm.registerFileStat()       // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
 	vm.registerIPAddr()         // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
