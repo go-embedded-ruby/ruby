@@ -1187,6 +1187,26 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Puma::Configuration"].(*RClass)
 	case *PumaDSL:
 		return vm.consts["Puma::DSL"].(*RClass)
+	case *ConcurrentAtomicRef:
+		return x.cls
+	case *ConcurrentAtomicFixnum:
+		return x.cls
+	case *ConcurrentAtomicBool:
+		return x.cls
+	case *ConcurrentMap:
+		return x.cls
+	case *ConcurrentFuture:
+		return x.cls
+	case *ConcurrentPromise:
+		return x.cls
+	case *ConcurrentPool:
+		return x.cls
+	case *ConcurrentLatch:
+		return x.cls
+	case *ConcurrentSemaphore:
+		return x.cls
+	case *ConcurrentBarrier:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:

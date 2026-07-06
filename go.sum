@@ -216,6 +216,8 @@ github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824 h1:DLLC7LmqIWv
 github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824/go.mod h1:djGUM2WR7AdnZqeRg/OQ4xVzmsl8PAWQKILX2n/foas=
 github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689 h1:d9MJXveisTUgvZGaNxH+sZBgrnoVz8580xcnC34wS1k=
 github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689/go.mod h1:I/pxqnwoebfatUAlGT/jiZkcnhx05Th1q6BVqIiqrb4=
+github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260706115615-cdd5a0c72f9e h1:NqXMtd7IKKLdilV3CaYBzXDNWBn8fft7drXA/MsStJ0=
+github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260706115615-cdd5a0c72f9e/go.mod h1:Jj/1rtC6VpluKBpT0XN+9HT1x3xz+0m6gr69QV0Nnns=
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc h1:XAxewcVViNLEjBSEu6xI5rfDw7lv99hqNy8jzT5mr+I=
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc/go.mod h1:vvfFJGcGOK37vnBikohtzboL6dIfbsr54+2Ri0HkWwk=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4 h1:Qyl2DRWnEC65Y7EI6TB9vIHzQmkySJrIF5uzBu3YdKw=

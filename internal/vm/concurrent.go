@@ -20,9 +20,12 @@ func (vm *VM) registerConcurrent() {
 	mod.isModule = true
 	vm.consts["Concurrent"] = mod
 
-	// The thread-safe collections degrade to the core collections here.
+	// Concurrent::Hash and Concurrent::Array are, in the gem, thin subclasses of
+	// the core ::Hash / ::Array, so they degrade to the core collections here —
+	// preserving the full core API (Hash.new with a default block, Array#<<, …)
+	// that Puppet relies on. Concurrent::Map is a distinct class (atomic
+	// read-modify-write), installed by registerConcurrentRuby below.
 	mod.consts["Hash"] = vm.cHash
-	mod.consts["Map"] = vm.cHash
 	mod.consts["Array"] = vm.cArray
 
 	// Concurrent::ThreadLocalVar(default): #value reads the current slot (the
@@ -71,4 +74,10 @@ func (vm *VM) registerConcurrent() {
 		setIvar(self, "@set", object.True)
 		return args[0]
 	})
+
+	// The full concurrent-ruby core (atomics, Concurrent::Map, Future/Promise,
+	// thread pools, latch/semaphore/barrier), backed by
+	// github.com/go-ruby-concurrent-ruby/concurrent-ruby, is installed onto the
+	// same Concurrent module by registerConcurrentRuby (see concurrentruby.go).
+	vm.registerConcurrentRuby(mod)
 }
