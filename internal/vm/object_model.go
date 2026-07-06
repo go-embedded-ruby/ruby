@@ -1179,6 +1179,22 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Faraday::Utils::ParamsHash"].(*RClass)
 	case *FaradayHeaders:
 		return vm.consts["Faraday::Utils::Headers"].(*RClass)
+	case *HTTPrbClient:
+		return vm.consts["HTTP::Client"].(*RClass)
+	case *HTTPrbResponse:
+		return vm.consts["HTTP::Response"].(*RClass)
+	case *HTTPrbStatus:
+		return vm.consts["HTTP::Response::Status"].(*RClass)
+	case *ExconConnection:
+		return vm.consts["Excon::Connection"].(*RClass)
+	case *ExconResponse:
+		return vm.consts["Excon::Response"].(*RClass)
+	case *TyphoeusRequest:
+		return vm.consts["Typhoeus::Request"].(*RClass)
+	case *TyphoeusResponse:
+		return vm.consts["Typhoeus::Response"].(*RClass)
+	case *TyphoeusHydra:
+		return vm.consts["Typhoeus::Hydra"].(*RClass)
 	case *PumaServer:
 		return vm.consts["Puma::Server"].(*RClass)
 	case *PumaThreadPool:

@@ -438,6 +438,9 @@ func (vm *VM) bootstrap() {
 	vm.registerGraphQL()       // GraphQL module (require "graphql"), backed by go-ruby-graphql; needs StandardError (GraphQL::Error)
 	vm.registerOpenTelemetry() // OpenTelemetry module (require "opentelemetry"), backed by go-ruby-opentelemetry; needs Object (the SDK/API class tree)
 	vm.registerFaraday()       // Faraday HTTP client (require "faraday"), backed by go-ruby-faraday; needs StandardError for Faraday::Error
+	vm.registerHTTPrb()        // HTTP module — the chainable http.rb client (require "http"), backed by go-ruby-http; needs StandardError for HTTP::Error
+	vm.registerExcon()         // Excon module — persistent HTTP client (require "excon"), backed by go-ruby-excon; needs StandardError for the Excon::Error tree
+	vm.registerTyphoeus()      // Typhoeus module — parallel HTTP client + Hydra (require "typhoeus"), backed by go-ruby-typhoeus; net/http+goroutines, no libcurl
 	vm.registerPuma()          // Puma module (require "puma"), backed by go-ruby-puma; threaded Rack web server over net/http; needs StandardError (Puma::Error) + StringIO (rack.input)
 	vm.registerBolt()          // Bolt::DB/Tx/Bucket/Cursor (require "bolt"), backed by go-ruby-bbolt; needs StandardError for Bolt::Error
 	vm.registerSAML()          // SAML / OneLogin::RubySaml (require "saml"/"ruby-saml"), backed by go-ruby-saml; needs StandardError for SAML::Error
