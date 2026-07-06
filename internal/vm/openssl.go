@@ -395,7 +395,9 @@ func (vm *VM) registerOpenSSLPKI(mod, errRoot *RClass) {
 	ssl := newClass("OpenSSL::SSL", nil)
 	ssl.isModule = true
 	mod.consts["SSL"] = ssl
-	shell(ssl, "OpenSSL::SSL::SSLSocket", "SSLSocket")
+	// OpenSSL::SSL::SSLSocket is registered as a real crypto/tls transport by
+	// registerSocket (socket_bind.go), which runs after registerOpenSSL; no shell
+	// is installed here so the real class is the only one.
 	subErr(ssl, "OpenSSL::SSL::SSLError", "SSLError")
 	ssl.consts["VERIFY_NONE"] = object.IntValue(0)
 	ssl.consts["VERIFY_PEER"] = object.IntValue(1)
