@@ -6,8 +6,13 @@
 # `erb` helper re-exposes: <%= %> interpolation of a request param, an @ivar set
 # in a before-filter (real Sinatra runs before/route against ONE instance, so it
 # is visible to the view), <% %> control flow, `locals:` passed both positionally
-# and inside the options Hash, ERB trim behaviour, and a :symbol template read
-# from the app's :views directory.
+# and inside the options Hash, ERB trim behaviour, a :symbol template read from
+# the app's :views directory, and — via a second app whose :views dir also holds
+# a layout.erb — Sinatra's layout rule: the default layout wrapping a view with
+# `<%= yield %>` returning the view's String, `layout: false` (no layout), a
+# custom `layout: :name`, `layout: true`, an inline-String layout, and the
+# Errno::ENOENT a missing named layout / view raises (rescued to its class name so
+# the byte-exact diff does not depend on Sinatra's environment-specific error page).
 #
 # The identical file runs unchanged under MRI + the sinatra gem; the expected
 # output in sinatra_erb_oracle_test.go was captured from that run (gem 4.2.1,
@@ -78,17 +83,103 @@ class App < Sinatra::Base
   end
 end
 
-ENVS = [
-  { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/inline", "QUERY_STRING" => "name=amy", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" },
-  { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/loop", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" },
-  { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/locals", "QUERY_STRING" => "name=bob", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" },
-  { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/opts_locals", "QUERY_STRING" => "name=eve", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" },
-  { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/trim", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" },
-  { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/view", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" },
+# A second views dir that DOES hold a layout.erb (plus a custom alt.erb), so the
+# second app exercises the layout rule. Keeping it separate from VIEWS leaves the
+# first app's :symbol view (/view) un-wrapped, proving the no-layout path too.
+LVIEWS = Dir.mktmpdir("erb-oracle-lviews")
+File.write(
+  File.join(LVIEWS, "card.erb"),
+  "<h2><%= greeting %> <%= @who %></h2>\n<ul>\n<% items.each do |i| %>\n  <li><%= i %></li>\n<% end %>\n</ul>\n"
+)
+# The default layout: surrounding markup with `<%= yield %>` interpolating the
+# wrapped view and an @ivar the before-filter set (the layout renders in the same
+# handler binding as the view). `yield` is kept inline (not alone on a line) so the
+# fixture stays inside the ERB/erubi trim-agreement subset the oracle relies on —
+# a standalone `<%= %>` line is the one documented go-ruby-erb LIBRARY divergence.
+File.write(
+  File.join(LVIEWS, "layout.erb"),
+  "<!DOCTYPE html>\n<title>Site</title>\n<main><%= yield %></main>\n<footer>by <%= @who %></footer>\n"
+)
+# A custom layout selected with `layout: :alt`, using a render local (proving the
+# locals reach the layout, not just the view) around `<%= yield %>`.
+File.write(
+  File.join(LVIEWS, "alt.erb"),
+  "<section class=\"<%= css %>\"><%= yield %></section>\n"
+)
+
+class LApp < Sinatra::Base
+  disable :protection
+  set :host_authorization, { permitted_hosts: [] }
+  set :views, LVIEWS
+
+  before { @who = "World" }
+
+  # Default layout: `erb :card` renders views/card.erb and wraps it in
+  # views/layout.erb, whose `<%= yield %>` interpolates the view's String.
+  get "/l_default" do
+    erb :card, {}, greeting: "Hey", items: %w[x y]
+  end
+
+  # `layout: false` — render the view with no layout.
+  get "/l_none" do
+    erb :card, { layout: false }, greeting: "Hey", items: %w[x y]
+  end
+
+  # `layout: :alt` — a custom layout file; the render locals (css) reach it.
+  get "/l_custom" do
+    erb :card, { layout: :alt }, greeting: "Hi", items: %w[a], css: "box"
+  end
+
+  # `layout: true` — the default layout, explicitly requested.
+  get "/l_true" do
+    erb :card, { layout: true }, greeting: "Yo", items: %w[q]
+  end
+
+  # An inline-String layout, whose `<%= yield %>` wraps the view.
+  get "/l_inline" do
+    erb :card, { layout: "<wrap><%= yield %></wrap>\n" }, greeting: "In", items: %w[z]
+  end
+
+  # A missing NAMED layout raises Errno::ENOENT (MRI eats the error only for the
+  # implicit default layout, not an explicitly requested one).
+  get "/l_missing_layout" do
+    begin
+      erb :card, { layout: :nope }, greeting: "X", items: []
+    rescue => e
+      e.class.to_s
+    end
+  end
+
+  # A missing view raises Errno::ENOENT.
+  get "/l_missing_view" do
+    begin
+      erb :ghost
+    rescue => e
+      e.class.to_s
+    end
+  end
+end
+
+# [app, env] pairs — the first six keep App's original requests (and golden)
+# byte-identical; the rest exercise LApp's layout rule.
+REQS = [
+  [App, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/inline", "QUERY_STRING" => "name=amy", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [App, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/loop", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [App, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/locals", "QUERY_STRING" => "name=bob", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [App, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/opts_locals", "QUERY_STRING" => "name=eve", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [App, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/trim", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [App, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/view", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_default", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_none", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_custom", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_true", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_inline", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_missing_layout", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_missing_view", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
 ]
 
-ENVS.each_with_index do |env, i|
-  status, _headers, body = App.call(env)
+REQS.each_with_index do |(app, env), i|
+  status, _headers, body = app.call(env)
   parts = []
   body.each { |p| parts << p }
   puts "== req #{i} =="

@@ -189,6 +189,95 @@ end`
 	}
 }
 
+// sinatraLayoutApp writes card.erb / layout.erb / alt.erb into a fresh views dir
+// and returns a Sinatra app (source) whose single /v route runs the given body,
+// so a layout render exercises the whole bridge (view compile + eval, layout file
+// read, and the yield block returning the view's String).
+func sinatraLayoutApp(t *testing.T, route string) string {
+	t.Helper()
+	dir := slash(t.TempDir())
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.FromSlash(dir+"/"+name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("card.erb", "<h2><%= @who %></h2>")
+	write("layout.erb", "<main><%= yield %></main>")
+	write("alt.erb", "<alt class=\"<%= css %>\"><%= yield %></alt>")
+	return `require "sinatra/base"
+class A < Sinatra::Base
+  disable :protection
+  set :host_authorization, { permitted_hosts: [] }
+  set :views, "` + dir + `"
+  before { @who = "World" }
+  ` + route + `
+end
+_, _, b = A.new.call("REQUEST_METHOD"=>"GET","PATH_INFO"=>"/v","QUERY_STRING"=>"","rack.url_scheme"=>"http","HTTP_HOST"=>"ex")
+print b.join`
+}
+
+// TestSinatraErbLayout covers the layout render arms of sinatraErbLayout with a
+// views dir that holds layout.erb: the implicit default layout wrapping a view
+// (its `<%= yield %>` returning the view's String), layout: false / nil (no
+// layout), layout: true (the explicit default layout), a custom layout: :name
+// file (with render locals reaching the layout), and an inline-String layout.
+func TestSinatraErbLayout(t *testing.T) {
+	cases := []struct{ route, want string }{
+		// Implicit default layout — views/layout.erb wraps the view.
+		{`get("/v"){ erb :card }`, "<main><h2>World</h2></main>"},
+		// layout: false / nil — render the view with no layout.
+		{`get("/v"){ erb :card, layout: false }`, "<h2>World</h2>"},
+		{`get("/v"){ erb :card, layout: nil }`, "<h2>World</h2>"},
+		// layout: true — the default layout, explicitly requested.
+		{`get("/v"){ erb :card, layout: true }`, "<main><h2>World</h2></main>"},
+		// layout: :alt — a custom layout file; the render local (css) reaches it.
+		{`get("/v"){ erb :card, { layout: :alt }, css: "box" }`, `<alt class="box"><h2>World</h2></alt>`},
+		// An inline-String layout wraps the view via its `<%= yield %>`.
+		{`get("/v"){ erb :card, layout: "<x><%= yield %></x>" }`, "<x><h2>World</h2></x>"},
+	}
+	for _, c := range cases {
+		if got := runFS(t, sinatraLayoutApp(t, c.route)); got != c.want {
+			t.Errorf("route %q: got=%q want=%q", c.route, got, c.want)
+		}
+	}
+}
+
+// TestSinatraErbLayoutMissing covers the missing-layout arms: the implicit default
+// layout is silently skipped when views/layout.erb is absent (MRI's
+// catch(:layout_missing)), while an explicitly requested layout that is absent —
+// a named layout: :sym or layout: true — raises Errno::ENOENT.
+func TestSinatraErbLayoutMissing(t *testing.T) {
+	dir := slash(t.TempDir())
+	if err := os.WriteFile(filepath.FromSlash(dir+"/card.erb"), []byte("<x>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := func(route string) string {
+		return `require "sinatra/base"
+class A < Sinatra::Base
+  disable :protection
+  set :host_authorization, { permitted_hosts: [] }
+  set :views, "` + dir + `"
+  before { @who = "World" }
+  ` + route + `
+end
+_, _, b = A.new.call("REQUEST_METHOD"=>"GET","PATH_INFO"=>"/v","QUERY_STRING"=>"","rack.url_scheme"=>"http","HTTP_HOST"=>"ex")
+print b.join`
+	}
+	cases := []struct{ route, want string }{
+		// Implicit default layout absent -> skipped, the view renders un-wrapped.
+		{`get("/v"){ erb :card }`, "<x>"},
+		// A named layout that is absent raises Errno::ENOENT.
+		{`get("/v"){ begin; erb :card, layout: :nope; rescue => e; e.class.to_s; end }`, "Errno::ENOENT"},
+		// layout: true with an absent layout.erb also raises (MRI eats only the implicit default).
+		{`get("/v"){ begin; erb :card, layout: true; rescue => e; e.class.to_s; end }`, "Errno::ENOENT"},
+	}
+	for _, c := range cases {
+		if got := runFS(t, app(c.route)); got != c.want {
+			t.Errorf("route %q: got=%q want=%q", c.route, got, c.want)
+		}
+	}
+}
+
 // TestSinatraErbCompileError covers sinatraErb's otherwise-unreachable
 // compile-error branch: go-ruby-erb never fails on a well-formed template, so the
 // failure is injected through the erbCompile seam and must surface as a Ruby
