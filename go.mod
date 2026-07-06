@@ -102,6 +102,7 @@ require (
 	github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3
 	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
+	github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08

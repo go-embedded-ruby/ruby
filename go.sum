@@ -366,6 +366,8 @@ github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f h1:+PEruR5OxctQr
 github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f/go.mod h1:HeFcYYwifNZvQzF9jdaSFViHYT0mUNLwWEFPQj0j6V4=
 github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329 h1:4sXRBW9MXaEuosiyzzk1Fh+C8R2+PiPdua5sutdvV+E=
 github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329/go.mod h1:rKZ3vD81gJq61NvZ3XX9cr6AxtIV3+lFZKG7lPKV3PM=
+github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df h1:GQCDL/SGGtHqmDB2IfgCFe7AsgAA2LuhHg0kbbpYoFA=
+github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df/go.mod h1:AKDyiSCjqbfeZaNm8IsIUXao8ATsl2LQ9kdT5GaqYx4=
 github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e h1:Orev3pHC09GghkceOci3+dlV4Untoly525O7MyFdXOY=
 github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e/go.mod h1:NBlCj+x2SBtdDSKDvTTCVRoWd9tGPWcUwPvE2nKvYSM=
 github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92 h1:EXqNsTpyz5KPZURl94uOjcIIyJ0mCyMA7/AFAXvFgdg=

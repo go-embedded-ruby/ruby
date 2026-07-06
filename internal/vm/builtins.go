@@ -500,6 +500,7 @@ func (vm *VM) bootstrap() {
 	vm.registerRSS()              // RSS::Parser.parse -> RSS::Rss / RSS::RDF / RSS::Atom::Feed (require "rss"), backed by go-ruby-rss; needs StandardError for RSS::Error
 	vm.registerRDoc()             // RDoc::Markup + ToHtml/ToMarkdown/ToRdoc formatters (require "rdoc"), backed by go-ruby-rdoc; needs StandardError for RDoc::Error
 	vm.registerThor()             // Thor CLI framework: option parsing + dispatch + help (require "thor"), backed by go-ruby-thor; needs StandardError for Thor::Error
+	vm.registerRailties()         // Rails::Railtie/Engine/Application boot framework (require "rails"), backed by go-ruby-railties; the initializer/hook/routes blocks are the rbgo seams (run inline on initialize!); a later rails meta-gem layers the top-level Rails.* accessors
 	vm.registerBundler()          // Bundler: Gemfile/Gemfile.lock codec + resolver (require "bundler"), backed by go-ruby-bundler; needs StandardError for Bundler::BundlerError
 	vm.registerRacc()             // Racc::Parser LALR(1) runtime (require "racc/parser"), backed by go-ruby-racc; needs StandardError for Racc::ParseError
 	vm.registerMinitest()         // Minitest::Assertions + Test lifecycle (require "minitest"), backed by go-ruby-minitest; needs StandardError for Minitest::Assertion

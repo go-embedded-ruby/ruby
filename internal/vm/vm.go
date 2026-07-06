@@ -258,6 +258,7 @@ type VM struct {
 	sinatraCtxCache                        map[*sinatra.Context]*SinatraCtx // per-request handler self, shared across before/route/after so @ivars persist
 	sinatraSession                         *sinatraSessionState             // per-dispatch cookie session (enable :sessions); the `session` helper returns its live Hash, saved back into a Set-Cookie
 	sinatraDefaultSecret                   []byte                           // per-VM fallback session-signing key when no session_secret is set (like MRI Sinatra's random default), generated once
+	railtieSeams                           map[any]*railtieSeam             // per-railtie/engine/app deferred initializer blocks, keyed by the library ctx object; run inline by the RunInitializer seam during Application#initialize!
 	cRodaBase                              *RClass                          // Roda (require "roda"), the routing-tree app superclass, backed by go-ruby-roda
 	cRodaRequest                           *RClass                          // Roda::RodaRequest, the self a route/matcher block runs against
 	cRodaResponse                          *RClass                          // Roda::RodaResponse, the mutable response a route block writes into

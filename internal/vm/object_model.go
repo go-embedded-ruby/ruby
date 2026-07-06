@@ -1234,6 +1234,24 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Thor::Command"].(*RClass)
 	case *ThorBase:
 		return vm.consts["Thor::Base"].(*RClass)
+	case *RailtieVal:
+		return x.cls
+	case *EngineVal:
+		return x.cls
+	case *RailsAppVal:
+		return x.cls
+	case *RailsConfigVal:
+		return x.cls
+	case *RailsPathsVal:
+		return x.cls
+	case *RailsPathVal:
+		return x.cls
+	case *RailsRouteSetVal:
+		return x.cls
+	case *RailsInitializerVal:
+		return x.cls
+	case *StringInquirerVal:
+		return x.cls
 	case *BundlerLockfile:
 		return vm.consts["Bundler::LockfileParser"].(*RClass)
 	case *BundlerSpec:
