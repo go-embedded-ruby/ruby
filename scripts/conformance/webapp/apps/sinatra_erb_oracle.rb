@@ -19,16 +19,13 @@
 # ruby 4.0.5). To regenerate the golden vector, run this file with `ruby` and the
 # sinatra gem installed.
 #
-# Trim note (a precisely-scoped go-ruby-erb LIBRARY follow-up, NOT a binding gap):
-# Sinatra 4.x maps :erb to Tilt::ErubiTemplate (erubi), whereas go-ruby-erb
-# mirrors MRI's ERB::Compiler. Rendered with trim "<>" (Tilt::ERBTemplate's own
-# default) the two agree byte-for-byte for single-line templates and idiomatic
-# multiline templates (a code-only `<% … %>` alone on its line). They diverge only
-# for the unusual line that BOTH opens a code block and ends with an expression
-# tag with trailing content (`<% each %>x <%= v %>`), where MRI ERB trims the
-# trailing newline and erubi keeps it. This fixture stays inside the agreeing
-# subset, so the diff is exact; full erubi trim-parity is tracked upstream in
-# go-ruby-erb.
+# Dialect note: Sinatra 4.x maps :erb to Tilt::ErubiTemplate (erubi), and rbgo now
+# renders Sinatra views through go-ruby-erb's ModeErubi, which reproduces
+# Erubi::Engine byte-for-byte. So this fixture exercises erubi's own whitespace
+# semantics directly — including a standalone `<%= yield %>` line (route
+# /l_standalone) whose trailing newline erubi keeps but classic ERB trim "<>" would
+# drop. That case was previously kept inline to dodge the classic-ERB divergence;
+# it is now asserted end-to-end, matching the real gem.
 
 require "sinatra/base"
 require "tmpdir"
@@ -93,12 +90,19 @@ File.write(
 )
 # The default layout: surrounding markup with `<%= yield %>` interpolating the
 # wrapped view and an @ivar the before-filter set (the layout renders in the same
-# handler binding as the view). `yield` is kept inline (not alone on a line) so the
-# fixture stays inside the ERB/erubi trim-agreement subset the oracle relies on —
-# a standalone `<%= %>` line is the one documented go-ruby-erb LIBRARY divergence.
+# handler binding as the view). Here `yield` is kept inline within <main>…</main>.
 File.write(
   File.join(LVIEWS, "layout.erb"),
   "<!DOCTYPE html>\n<title>Site</title>\n<main><%= yield %></main>\n<footer>by <%= @who %></footer>\n"
+)
+# A layout with `<%= yield %>` STANDALONE on its own line — the erubi-specific case
+# the classic-ERB oracle used to avoid. Under erubi the yield line keeps its
+# trailing newline, so a blank-looking break appears between the wrapped view and
+# the footer; classic ERB trim "<>" would have swallowed that newline. Asserting it
+# byte-for-byte proves rbgo renders Sinatra views in erubi mode.
+File.write(
+  File.join(LVIEWS, "standalone.erb"),
+  "<header>H</header>\n<%= yield %>\n<footer>F</footer>\n"
 )
 # A custom layout selected with `layout: :alt`, using a render local (proving the
 # locals reach the layout, not just the view) around `<%= yield %>`.
@@ -140,6 +144,13 @@ class LApp < Sinatra::Base
     erb :card, { layout: "<wrap><%= yield %></wrap>\n" }, greeting: "In", items: %w[z]
   end
 
+  # A layout whose `<%= yield %>` stands ALONE on its own line: erubi keeps that
+  # line's trailing newline (classic ERB trim "<>" would drop it), so a bare
+  # newline separates the wrapped view from the footer. The newline-fidelity proof.
+  get "/l_standalone" do
+    erb :card, { layout: :standalone }, greeting: "So", items: %w[m]
+  end
+
   # A missing NAMED layout raises Errno::ENOENT (MRI eats the error only for the
   # implicit default layout, not an explicitly requested one).
   get "/l_missing_layout" do
@@ -176,6 +187,7 @@ REQS = [
   [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_inline", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
   [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_missing_layout", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
   [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_missing_view", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
+  [LApp, { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/l_standalone", "QUERY_STRING" => "", "rack.url_scheme" => "http", "HTTP_HOST" => "ex" }],
 ]
 
 REQS.each_with_index do |(app, env), i|

@@ -4,9 +4,11 @@ import "testing"
 
 // sinatraErbGem421Golden is the response dump of apps/sinatra_erb_oracle.rb
 // captured from the REAL `sinatra` gem 4.2.1 (MRI ruby 4.0.5) with its ERB view
-// engine: thirteen requests through the classic Sinatra::Base #call(env) adapter,
-// each rendering an ERB view (six inline/symbol templates, then seven exercising
-// the layout rule) and dumping [status, body]. This is the golden oracle for the
+// engine — which is erubi (Tilt::ErubiTemplate), the erubi gem 1.13.1: fourteen
+// requests through the classic Sinatra::Base #call(env) adapter, each rendering an
+// ERB view (six inline/symbol templates, then eight exercising the layout rule,
+// the last a standalone `<%= yield %>` line whose trailing newline erubi keeps but
+// classic ERB trim "<>" drops) and dumping [status, body]. This is the golden oracle for the
 // templating half of the Sinatra binding: rbgo, rendering through the bound
 // go-ruby-erb compiler, must reproduce it byte-for-byte. It is a captured constant
 // so the suite stays hermetic (no ruby, no gem, runs under qemu on every 64-bit
@@ -90,6 +92,16 @@ body<<Errno::ENOENT>>
 == req 12 ==
 status=200
 body<<Errno::ENOENT>>
+== req 13 ==
+status=200
+body<<<header>H</header>
+<h2>So World</h2>
+<ul>
+  <li>m</li>
+</ul>
+
+<footer>F</footer>
+>>
 `
 
 // TestSinatraErbGemOracle proves the Sinatra `erb` view helper is MRI-identical
@@ -101,9 +113,10 @@ body<<Errno::ENOENT>>
 // control flow, positional and options[:locals] locals, ERB trim behaviour, and
 // the layout rule (default views/layout.erb with `<%= yield %>` returning the
 // view, layout: false, a custom layout: :name, layout: true, an inline-String
-// layout, and the Errno::ENOENT a missing named layout / view raises) — all
-// rendered by rbgo (via the bound go-ruby-erb compiler, evaluated in the
-// handler's binding) exactly as by the reference gem.
+// layout, a layout with a standalone `<%= yield %>` line — the erubi
+// newline-fidelity case — and the Errno::ENOENT a missing named layout / view
+// raises) — all rendered by rbgo (via the bound go-ruby-erb compiler in erubi
+// mode, evaluated in the handler's binding) exactly as by the reference gem.
 func TestSinatraErbGemOracle(t *testing.T) {
 	if ok, detail := featureLoadable("sinatra/base"); !ok {
 		t.Fatalf("sinatra/base must be loadable for the ERB oracle: %s", detail)
