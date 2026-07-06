@@ -461,13 +461,13 @@ func (f *fakeStream) closeConn() error      { return nil }
 func TestNetHTTPExchangeErrors(t *testing.T) {
 	vm := New(io.Discard)
 	cfg := &nethttpXfer{}
-	// Write error: the writer fails immediately.
-	if _, _, err := vm.nethttpExchangeFramed(cfg, &fakeStream{w: failWriter{}, r: bufio.NewReader(strings.NewReader(""))}, []byte("x"), false); err != io.ErrClosedPipe {
-		t.Errorf("write-error arm = %v, want ErrClosedPipe", err)
+	// Write error: the writer fails immediately (phase "write").
+	if _, _, phase, err := vm.nethttpExchangeFramed(cfg, &fakeStream{w: failWriter{}, r: bufio.NewReader(strings.NewReader(""))}, []byte("x"), false); err != io.ErrClosedPipe || phase != "write" {
+		t.Errorf("write-error arm = (%q,%v), want (write,ErrClosedPipe)", phase, err)
 	}
-	// Read error: the write succeeds, the read fails.
-	if _, _, err := vm.nethttpExchangeFramed(cfg, &fakeStream{w: io.Discard, r: bufio.NewReader(errReader{})}, []byte("x"), false); err != io.ErrUnexpectedEOF {
-		t.Errorf("read-error arm = %v, want ErrUnexpectedEOF", err)
+	// Read error: the write succeeds, the read fails (phase "read").
+	if _, _, phase, err := vm.nethttpExchangeFramed(cfg, &fakeStream{w: io.Discard, r: bufio.NewReader(errReader{})}, []byte("x"), false); err != io.ErrUnexpectedEOF || phase != "read" {
+		t.Errorf("read-error arm = (%q,%v), want (read,ErrUnexpectedEOF)", phase, err)
 	}
 	// trimResponseToHeaders returns its input unchanged when there is no header
 	// terminator (the i < 0 arm).

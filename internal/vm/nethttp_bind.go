@@ -432,7 +432,7 @@ func (vm *VM) nethttpDoXfer(cfg *nethttpXfer, method, path string, body []byte, 
 	if persistent {
 		if s := nethttpGetConn(cfg.inst); s != nil {
 			reused = true
-			raw, keepAlive, err = vm.nethttpExchangeFramed(cfg, s, reqBytes, noBody)
+			raw, keepAlive, _, err = vm.nethttpExchangeFramed(cfg, s, reqBytes, noBody)
 			if err != nil {
 				nethttpDropConn(cfg.inst)
 				reused = false
@@ -444,10 +444,11 @@ func (vm *VM) nethttpDoXfer(cfg *nethttpXfer, method, path string, body []byte, 
 		if derr != nil {
 			vm.raiseTransportErr(derr, "open")
 		}
-		raw, keepAlive, err = vm.nethttpExchangeFramed(cfg, stream, reqBytes, noBody)
+		var phase string
+		raw, keepAlive, phase, err = vm.nethttpExchangeFramed(cfg, stream, reqBytes, noBody)
 		if err != nil {
 			stream.closeConn()
-			vm.raiseTransportErr(err, "read")
+			vm.raiseTransportErr(err, phase)
 		}
 		if persistent {
 			nethttpSetConn(cfg.inst, stream)
@@ -512,14 +513,16 @@ func (vm *VM) nethttpBuildRequest(cfg *nethttpXfer, method, path string, body []
 // exactly one framed response (under the read deadline) off the stream, leaving
 // any following bytes buffered for the next keep-alive request. keepAlive reports
 // whether the connection may be reused (false ⇒ the server asked to close or the
-// body was unframed and read to EOF).
-func (vm *VM) nethttpExchangeFramed(cfg *nethttpXfer, s streamIO, reqBytes []byte, noBody bool) (raw []byte, keepAlive bool, err error) {
+// body was unframed and read to EOF). phase names which half failed ("write" /
+// "read") so a deadline timeout maps to Net::WriteTimeout vs Net::ReadTimeout.
+func (vm *VM) nethttpExchangeFramed(cfg *nethttpXfer, s streamIO, reqBytes []byte, noBody bool) (raw []byte, keepAlive bool, phase string, err error) {
 	nethttpSetDeadline(s, cfg.writeTO)
 	if _, werr := s.writer().Write(reqBytes); werr != nil {
-		return nil, false, werr
+		return nil, false, "write", werr
 	}
 	nethttpSetDeadline(s, cfg.readTO)
-	return nethttpReadResponse(s.reader(), noBody)
+	raw, keepAlive, err = nethttpReadResponse(s.reader(), noBody)
+	return raw, keepAlive, "read", err
 }
 
 // nethttpDialXfer opens the transport for a transfer: a direct dial, a plain-http
