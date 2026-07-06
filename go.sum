@@ -196,6 +196,8 @@ github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a h1:qLSOUbDALcDFcWT
 github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a/go.mod h1:KbeDcUyUuspROC2mbwFxNAyHs7wGNE3VkZ7UDBAv9sk=
 github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda h1:DcGqJUjmal8RoOxAKreIQAxBEssL2jMvH96uQLIm24M=
 github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda/go.mod h1:VItI7fXduRnuTNRtFSmi+VzoNZ/riRf8p1G2xumYAF8=
+github.com/go-ruby-async/async v0.0.0-20260706115507-51a981d1e85d h1:wmXoatXlShYdjJwkHf8xMzkByPKSdlVX/dtV3Ttav8M=
+github.com/go-ruby-async/async v0.0.0-20260706115507-51a981d1e85d/go.mod h1:461TqgFiDMx6SKwX1YFc+SSwSvI3Ny1Zj6TiZaFGtW0=
 github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e h1:8E6Zx9q8D1D8bhF/E35Vf2/xnw6WoMuOCigKVJJvWJI=
 github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e/go.mod h1:wAMh7VnlOelf8z8L8ZboqLAL8IX7yiPSyBS2JkSeylk=
 github.com/go-ruby-bbolt/bbolt v0.0.0-20260704121138-28ee121195c0 h1:xgPjrU7O45G3jZtmEDnsvN+Vaa5tiRmYM+V5+Ff0iJQ=
@@ -368,6 +370,8 @@ github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca h1:gw8a/1QnE
 github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca/go.mod h1:PWugNzoaXxDcxD2UVgY1X+HvKnrt0pMSRCgN4RkJjZ8=
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b h1:hWNW3Z8g7Hwi17NJT912J0udGhK5dzxub8u7T07Oyv8=
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b/go.mod h1:UQGki9qXLiqaEOm4ih1CGznGNPUDcNGCsLVJ/y6G1G8=
+github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa h1:Ud4sdjWo2FZ6i0zRzRjwMJ/h24MYCchMfxbw1N9/ZMw=
+github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa/go.mod h1:d88OqDfelEmqriOEsEkLvBopYO4FCXQWIFil4zQYNtw=
 github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c h1:VAD5jFMNvUBEvL8tQZXyGvbif4qJt9l3S6riFyBtPuk=
 github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c/go.mod h1:PJHlTuP01g0s+3cVfuQgCztiLcUD2intYD2bZTEMOZM=
 github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8 h1:02tvTxeNaPJjebV1A8SUrggsBVco1axxdycqXzH2zDs=

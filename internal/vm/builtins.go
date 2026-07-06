@@ -486,6 +486,8 @@ func (vm *VM) bootstrap() {
 	vm.registerRack()          // Rack::Request/Response/Utils (require "rack" / "rack/utils"), backed by go-ruby-rack; deterministic env/query/escape, no socket
 	vm.registerGrape()         // Grape::Router/Validator/Formatter (require "grape"), backed by go-ruby-grape; endpoint-block exec + Rack env are host seams; needs StandardError for Grape::Exceptions
 	vm.registerSinatra()       // Sinatra::Base class-DSL + #call Rack adapter (require "sinatra/base"), backed by go-ruby-sinatra over go-ruby-rack; route/filter block eval is the rbgo seam; needs Rack + StandardError (Sinatra::NotFound), so registered after registerRack
+	vm.registerRoda()          // Roda class routing-tree DSL (route do |r| … end) + #call Rack adapter (require "roda"), backed by go-ruby-roda over go-ruby-rack; the route/matcher block eval is the rbgo seam, the routing tree is the library; needs Rack + StandardError (Roda::RodaError)
+	vm.registerAsync()         // Async{} structured concurrency + Async::Task/Barrier/Semaphore/Condition/Notification/Queue/LimitedQueue/Waiter (require "async"), backed by go-ruby-async on its CoScheduler; the task-body block eval is the rbgo seam; needs StandardError (Async::Stop / Async::TimeoutError)
 	vm.registerActiveRecord()  // ActiveRecord::Model/Relation/Record + Base.establish_connection (require "active_record"), backed by go-ruby-activerecord; adapter seam wired to go-ruby-sqlite3 so queries run; needs StandardError for ActiveRecordError
 	vm.registerRQRCode()       // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
 	vm.registerDotenv()        // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams

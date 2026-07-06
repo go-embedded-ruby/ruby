@@ -88,6 +88,8 @@ var providedFeatures = map[string]bool{
 	"rdoc": true, "rdoc/markup": true,
 	"thor":        true,
 	"bundler":     true,
+	"roda":        true,
+	"async":       true,
 	"racc/parser": true, "racc": true,
 	"minitest": true, "minitest/autorun": true, "minitest/spec": true,
 	"minitest/test": true, "minitest/unit": true,

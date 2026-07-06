@@ -643,6 +643,27 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *SinatraSettings:
 		return x.cls
+	case *RodaReq:
+		// The self a Roda route/matcher block runs against (Roda::RodaRequest).
+		return x.cls
+	case *RodaResp:
+		return x.cls
+	case *AsyncTask:
+		return x.cls
+	case *AsyncBarrier:
+		return x.cls
+	case *AsyncSemaphore:
+		return x.cls
+	case *AsyncCondition:
+		return x.cls
+	case *AsyncNotification:
+		return x.cls
+	case *AsyncQueue:
+		return x.cls
+	case *AsyncLimitedQueue:
+		return x.cls
+	case *AsyncWaiter:
+		return x.cls
 	case *REXMLDocument:
 		return vm.cREXMLDocument
 	case *REXMLElement:
