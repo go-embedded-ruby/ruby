@@ -6,6 +6,9 @@ package vm
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,7 +20,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // The Net::HTTP networking surface is proven end-to-end against in-process
@@ -309,14 +316,15 @@ func TestNetHTTPWhiteBox(t *testing.T) {
 	vm := New(io.Discard)
 	netMod := vm.consts["Net"].(*RClass)
 
-	// nethttpDo: NewRequest rejects an unknown method (ArgumentError).
+	// nethttpBuildRequest: NewRequest rejects an unknown method (ArgumentError).
+	cfg := &nethttpXfer{scheme: "http", host: "127.0.0.1", port: "1", hostHdr: "h"}
 	wantRaise(t, "ArgumentError", func() {
-		vm.nethttpDo("http", "127.0.0.1", "1", "h", "BOGUS", "/", nil, nil, 0)
+		vm.nethttpBuildRequest(cfg, "BOGUS", "/", nil, nil, true)
 	})
-	// nethttpDo: Request.Bytes rejects a Request-Line with CR/LF (Net::HTTPError),
-	// before any dial.
+	// nethttpBuildRequest: Request.Bytes rejects a Request-Line with CR/LF
+	// (Net::HTTPError), before any dial.
 	wantRaise(t, "Net::HTTPError", func() {
-		vm.nethttpDo("http", "127.0.0.1", "1", "h", "GET", "/a\r\nb", nil, nil, 0)
+		vm.nethttpBuildRequest(cfg, "GET", "/a\r\nb", nil, nil, true)
 	})
 
 	// nethttpResponseClass falls back to Net::HTTPResponse for an unknown class and
@@ -448,15 +456,17 @@ func (f *fakeStream) markClosed()           {}
 func (f *fakeStream) isClosed() bool        { return false }
 func (f *fakeStream) closeConn() error      { return nil }
 
-// TestNetHTTPExchangeErrors covers httpExchange's write-error and read-error arms
-// and trimResponseToHeaders' no-terminator arm.
+// TestNetHTTPExchangeErrors covers nethttpExchangeFramed's write-error and
+// read-error arms and trimResponseToHeaders' no-terminator arm.
 func TestNetHTTPExchangeErrors(t *testing.T) {
+	vm := New(io.Discard)
+	cfg := &nethttpXfer{}
 	// Write error: the writer fails immediately.
-	if _, err := httpExchange(&fakeStream{w: failWriter{}, r: bufio.NewReader(strings.NewReader(""))}, []byte("x")); err != io.ErrClosedPipe {
+	if _, _, err := vm.nethttpExchangeFramed(cfg, &fakeStream{w: failWriter{}, r: bufio.NewReader(strings.NewReader(""))}, []byte("x"), false); err != io.ErrClosedPipe {
 		t.Errorf("write-error arm = %v, want ErrClosedPipe", err)
 	}
 	// Read error: the write succeeds, the read fails.
-	if _, err := httpExchange(&fakeStream{w: io.Discard, r: bufio.NewReader(errReader{})}, []byte("x")); err != io.ErrUnexpectedEOF {
+	if _, _, err := vm.nethttpExchangeFramed(cfg, &fakeStream{w: io.Discard, r: bufio.NewReader(errReader{})}, []byte("x"), false); err != io.ErrUnexpectedEOF {
 		t.Errorf("read-error arm = %v, want ErrUnexpectedEOF", err)
 	}
 	// trimResponseToHeaders returns its input unchanged when there is no header
@@ -477,3 +487,614 @@ func mustPort(t *testing.T, raw string) string {
 	}
 	return u.Port()
 }
+
+// countingServer starts an httptest server over nethttpTestMux that counts the
+// distinct TCP connections it accepts (via ConnState StateNew), so keep-alive can
+// be proven by the connection count rather than the request count.
+func countingServer(t *testing.T) (*httptest.Server, *int64) {
+	t.Helper()
+	var conns int64
+	ts := httptest.NewUnstartedServer(nethttpTestMux())
+	ts.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			atomic.AddInt64(&conns, 1)
+		}
+	}
+	ts.Start()
+	return ts, &conns
+}
+
+// TestNetHTTPKeepAlive is the persistent-connection proof: three requests inside a
+// single Net::HTTP.start block return the right bodies while the server accepts
+// exactly one TCP connection (keep-alive reuse). A separate case shows requests
+// outside a start block each open their own connection.
+func TestNetHTTPKeepAlive(t *testing.T) {
+	ts, conns := countingServer(t)
+	defer ts.Close()
+	u, _ := url.Parse(ts.URL)
+
+	// Three requests, one start block: bodies correct AND one connection.
+	got := nethttpRun(t, ts.URL, `h=Net::HTTP.new(URI(BASE).host, URI(BASE).port)
+h.start do
+  puts h.get("/").body
+  puts h.get("/echo?n=2").body
+  puts h.get("/created").body
+end`)
+	want := "hello net/http\nGET|/echo?n=2||\nmade"
+	if got != want {
+		t.Fatalf("keep-alive bodies = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(conns); n != 1 {
+		t.Fatalf("keep-alive used %d connections, want 1", n)
+	}
+	// A chunked response inside the same reused connection frames correctly and
+	// still leaves the connection reusable for a following request.
+	atomic.StoreInt64(conns, 0)
+	got = nethttpRun(t, ts.URL, `h=Net::HTTP.new(URI(BASE).host, URI(BASE).port)
+h.start do
+  puts h.get("/chunked").body
+  puts h.get("/").body
+end`)
+	if want = "chunk-body\nhello net/http"; got != want {
+		t.Fatalf("keep-alive chunked = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(conns); n != 1 {
+		t.Fatalf("keep-alive chunked used %d connections, want 1", n)
+	}
+	// Without a start block, each request opens (and closes) its own connection.
+	atomic.StoreInt64(conns, 0)
+	got = nethttpRun(t, ts.URL, `h=Net::HTTP.new(URI(BASE).host, URI(BASE).port)
+puts h.get("/").body
+puts h.get("/").body`)
+	if want = "hello net/http\nhello net/http"; got != want {
+		t.Fatalf("non-persistent bodies = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(conns); n != 2 {
+		t.Fatalf("non-persistent used %d connections, want 2", n)
+	}
+	_ = u
+}
+
+// TestNetHTTPKeepAliveServerClose proves the fallback arm: when the server sends
+// Connection: close, the cached connection is dropped and the next request in the
+// same start block redials (so the body is still correct and a new connection is
+// accepted).
+func TestNetHTTPKeepAliveServerClose(t *testing.T) {
+	var conns int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close") // ask the client to not reuse
+		io.WriteString(w, "closed-body")
+	})
+	ts := httptest.NewUnstartedServer(mux)
+	ts.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			atomic.AddInt64(&conns, 1)
+		}
+	}
+	ts.Start()
+	defer ts.Close()
+
+	got := nethttpRun(t, ts.URL, `h=Net::HTTP.new(URI(BASE).host, URI(BASE).port)
+h.start do
+  puts h.get("/").body
+  puts h.get("/").body
+end`)
+	if want := "closed-body\nclosed-body"; got != want {
+		t.Fatalf("server-close bodies = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(&conns); n != 2 {
+		t.Fatalf("server-close used %d connections, want 2 (one per request)", n)
+	}
+}
+
+// TestNetHTTPReadTimeout is the timeout proof: a slow handler that never answers
+// within read_timeout makes the request raise Net::ReadTimeout, and the accessor
+// round-trips the configured value.
+func TestNetHTTPReadTimeout(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(5 * time.Second):
+		case <-r.Context().Done(): // client hung up (its read timed out) -> return promptly
+		}
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	got := nethttpRun(t, ts.URL, `h=Net::HTTP.new(URI(BASE).host, URI(BASE).port)
+h.read_timeout = 0.2
+puts h.read_timeout
+begin
+  h.get("/slow")
+rescue Net::ReadTimeout
+  puts "readtimeout"
+end`)
+	if want := "0.2\nreadtimeout"; got != want {
+		t.Fatalf("read-timeout = %q, want %q", got, want)
+	}
+}
+
+// TestNetHTTPTimeoutAccessors covers the open/read/write_timeout accessor surface
+// and the MRI defaults (60 each), independent of any I/O.
+func TestNetHTTPTimeoutAccessors(t *testing.T) {
+	got := runSrc(t, `require "net/http"
+h = Net::HTTP.new("h", 80)
+puts h.open_timeout
+puts h.read_timeout
+puts h.write_timeout
+h.open_timeout = 5
+h.write_timeout = 3
+puts h.open_timeout
+puts h.write_timeout`)
+	if want := "60\n60\n60\n5\n3"; got != want {
+		t.Fatalf("timeout accessors = %q, want %q", got, want)
+	}
+}
+
+// TestNetHTTPOpenTimeout proves open_timeout bounds the dial: a routeable but
+// unreachable address (RFC 5737 TEST-NET-1) with a tiny open_timeout raises
+// Net::OpenTimeout rather than hanging.
+func TestNetHTTPOpenTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network dial-timeout test in -short")
+	}
+	got := runSrc(t, `require "net/http"
+h = Net::HTTP.new("192.0.2.1", 80)
+h.open_timeout = 0.2
+begin
+  h.get("/")
+rescue Net::OpenTimeout
+  puts "opentimeout"
+rescue SocketError
+  puts "socketerror"
+end`)
+	// A blackholed TEST-NET address times out; some CI networks reject it outright
+	// (SocketError). Either proves open_timeout did not hang.
+	if got != "opentimeout" && got != "socketerror" {
+		t.Fatalf("open-timeout = %q, want opentimeout or socketerror", got)
+	}
+}
+
+// TestNetHTTPProxyHTTP is the plain-http proxy proof: a tiny forwarding proxy sees
+// the absolute-URI request-line (and any Proxy-Authorization), forwards to the
+// backend, and the client gets the backend's body — proving the request was
+// routed through the proxy.
+func TestNetHTTPProxyHTTP(t *testing.T) {
+	backend := httptest.NewServer(nethttpTestMux())
+	defer backend.Close()
+
+	var proxyHits int64
+	var sawAuth string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&proxyHits, 1)
+		sawAuth = r.Header.Get("Proxy-Authorization")
+		// The request-line is absolute-form for a plain-http proxy: r.RequestURI is
+		// the full target URL. Forward it to the backend and copy the response back.
+		resp, err := http.Get(r.RequestURI)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		w.Write(body)
+	}))
+	defer proxy.Close()
+
+	bu, _ := url.Parse(backend.URL)
+	pu, _ := url.Parse(proxy.URL)
+
+	// Route a GET through the proxy to the backend /echo.
+	got := runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new(%q, %s, %q, %s)
+puts h.proxy?
+puts h.proxy_address
+puts h.proxy_port
+puts h.get("/echo").body`, bu.Hostname(), bu.Port(), pu.Hostname(), pu.Port()))
+	want := "true\n" + pu.Hostname() + "\n" + pu.Port() + "\nGET|/echo||"
+	if got != want {
+		t.Fatalf("proxy GET = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(&proxyHits); n < 1 {
+		t.Fatalf("proxy was not hit (%d)", n)
+	}
+
+	// Proxy credentials are sent as Proxy-Authorization.
+	atomic.StoreInt64(&proxyHits, 0)
+	got = runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new(%q, %s, %q, %s, "usr", "pwd")
+puts h.proxy_user
+puts h.proxy_pass
+puts h.get("/").body`, bu.Hostname(), bu.Port(), pu.Hostname(), pu.Port()))
+	if want = "usr\npwd\nhello net/http"; got != want {
+		t.Fatalf("proxy auth GET = %q, want %q", got, want)
+	}
+	wantAuth := "Basic " + base64Std("usr:pwd")
+	if sawAuth != wantAuth {
+		t.Fatalf("Proxy-Authorization = %q, want %q", sawAuth, wantAuth)
+	}
+}
+
+// TestNetHTTPProxyConnect proves the https-via-proxy path: a CONNECT-tunnelling
+// proxy splices bytes to the TLS backend, and the client completes the TLS
+// handshake and request through the tunnel.
+func TestNetHTTPProxyConnect(t *testing.T) {
+	backend := httptest.NewTLSServer(nethttpTestMux())
+	defer backend.Close()
+
+	var connects int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "expected CONNECT", http.StatusMethodNotAllowed)
+			return
+		}
+		atomic.AddInt64(&connects, 1)
+		dst, err := net.Dial("tcp", r.Host) // r.Host is the CONNECT target host:port
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "no hijack", http.StatusInternalServerError)
+			dst.Close()
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			dst.Close()
+			return
+		}
+		conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+		go func() { io.Copy(dst, conn); dst.Close() }()
+		io.Copy(conn, dst)
+		conn.Close()
+	}))
+	defer proxy.Close()
+
+	bu, _ := url.Parse(backend.URL)
+	pu, _ := url.Parse(proxy.URL)
+
+	got := runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new(%q, %s, %q, %s)
+h.use_ssl = true
+puts h.get("/").body`, bu.Hostname(), bu.Port(), pu.Hostname(), pu.Port()))
+	if want := "hello net/http"; got != want {
+		t.Fatalf("proxy CONNECT body = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(&connects); n != 1 {
+		t.Fatalf("CONNECT count = %d, want 1", n)
+	}
+}
+
+// TestNetHTTPProxyConnectFailure covers the CONNECT-refused arm: a proxy that
+// answers CONNECT with a non-2xx status makes the tunnel dial fail (SocketError).
+func TestNetHTTPProxyConnectFailure(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, _ := w.(http.Hijacker)
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		conn.Write([]byte("HTTP/1.1 403 Forbidden\r\n\r\n"))
+		conn.Close()
+	}))
+	defer proxy.Close()
+	pu, _ := url.Parse(proxy.URL)
+
+	got := runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new("example.com", 443, %q, %s)
+h.use_ssl = true
+begin
+  h.get("/")
+rescue SocketError
+  puts "connectfail"
+end`, pu.Hostname(), pu.Port()))
+	if got != "connectfail" {
+		t.Fatalf("CONNECT-failure = %q, want connectfail", got)
+	}
+}
+
+// TestNetHTTPTransportUnits covers the transport helpers directly on the arms that
+// normal Ruby dispatch does not reach: duration conversion, the chunk-size hex
+// scanner, chunked detection, net.Conn extraction, the timeout error mapping and
+// the CONNECT / read framing error arms.
+func TestNetHTTPTransportUnits(t *testing.T) {
+	// nethttpDuration: Integer / Float / nil / non-positive.
+	if d := nethttpDuration(object.IntValue(2)); d != 2*time.Second {
+		t.Errorf("duration(2) = %v", d)
+	}
+	if d := nethttpDuration(object.Float(0.5)); d != 500*time.Millisecond {
+		t.Errorf("duration(0.5) = %v", d)
+	}
+	if d := nethttpDuration(object.NilV); d != 0 {
+		t.Errorf("duration(nil) = %v, want 0", d)
+	}
+	if d := nethttpDuration(object.IntValue(0)); d != 0 {
+		t.Errorf("duration(0) = %v, want 0", d)
+	}
+	if d := nethttpDuration(object.Float(-1)); d != 0 {
+		t.Errorf("duration(-1) = %v, want 0", d)
+	}
+
+	// nethttpFirstHexRun: leading junk, trailing run, and no-hex.
+	for _, c := range []struct{ in, want string }{
+		{"1a\r\n", "1a"}, {" ;\r\n", ""}, {"ff", "ff"}, {"; 5 ", "5"},
+	} {
+		if got := nethttpFirstHexRun(c.in); got != c.want {
+			t.Errorf("firstHexRun(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// nethttpIsChunked.
+	if !nethttpIsChunked("chunked") || nethttpIsChunked("gzip") {
+		t.Error("isChunked mismatch")
+	}
+	// nethttpNetConn: a non-socket stream (test fake) yields nil.
+	if c := nethttpNetConn(&fakeStream{}); c != nil {
+		t.Errorf("netConn(fake) = %v, want nil", c)
+	}
+	// nethttpSetDeadline on a no-conn stream is a no-op (both the 0 and >0 arms).
+	nethttpSetDeadline(&fakeStream{}, 0)
+	nethttpSetDeadline(&fakeStream{}, time.Second)
+
+	// basicAuthHeader.
+	if got := basicAuthHeader("a", "b"); got != "Basic "+base64Std("a:b") {
+		t.Errorf("basicAuthHeader = %q", got)
+	}
+
+	// raiseTransportErr: timeout maps per phase; non-timeout is a SocketError.
+	for phase, class := range map[string]string{
+		"open": "Net::OpenTimeout", "write": "Net::WriteTimeout", "read": "Net::ReadTimeout",
+	} {
+		vm := New(io.Discard)
+		wantRaise(t, class, func() { vm.raiseTransportErr(timeoutErr{}, phase) })
+	}
+	vmS := New(io.Discard)
+	wantRaise(t, "SocketError", func() { vmS.raiseTransportErr(errors.New("boom"), "read") })
+
+	// nethttpReadResponse: a Content-Length that cannot parse is a framing error.
+	_, _, err := nethttpReadResponse(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nContent-Length: xx\r\n\r\n")), false)
+	if err == nil {
+		t.Error("bad Content-Length: expected error")
+	}
+	// nethttpReadResponse: an EOF before the status line.
+	if _, _, err := nethttpReadResponse(bufio.NewReader(strings.NewReader("")), false); err == nil {
+		t.Error("empty stream: expected error")
+	}
+	// nethttpReadResponse: a truncated header block (EOF before the blank line).
+	if _, _, err := nethttpReadResponse(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\n")), false); err == nil {
+		t.Error("truncated headers: expected error")
+	}
+	// nethttpReadResponse: a body shorter than Content-Length is an EOF error.
+	if _, _, err := nethttpReadResponse(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhi")), false); err == nil {
+		t.Error("short body: expected error")
+	}
+	// nethttpReadResponse: an unframed body (no Content-Length, no chunked) reads to
+	// EOF and marks the connection non-reusable.
+	raw, keep, err := nethttpReadResponse(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\n\r\nunframed")), false)
+	if err != nil || keep {
+		t.Errorf("unframed: err=%v keep=%v, want nil/false", err, keep)
+	}
+	if !strings.HasSuffix(string(raw), "unframed") {
+		t.Errorf("unframed raw = %q", raw)
+	}
+	// nethttpReadResponse: a repeated header key accumulates (both-values arm).
+	raw, _, err = nethttpReadResponse(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nX-A: 1\r\nX-A: 2\r\nContent-Length: 0\r\n\r\n")), false)
+	if err != nil {
+		t.Errorf("dup-header: %v", err)
+	}
+	// nethttpReadResponse: a chunked body whose framing is broken propagates the
+	// chunk error.
+	if _, _, err := nethttpReadResponse(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n")), false); err == nil {
+		t.Error("chunked framing error: expected error")
+	}
+	// nethttpReadResponse: an unframed body whose read fails after the headers
+	// surfaces the read error (the io.ReadAll error arm).
+	if _, _, err := nethttpReadResponse(bufio.NewReader(&prefixErrReader{
+		prefix: []byte("HTTP/1.1 200 OK\r\n\r\n")}), false); err == nil {
+		t.Error("unframed read error: expected error")
+	}
+	// nethttpCopyChunked: a chunk size that overflows int64 is a framing error.
+	b0 := &bytes.Buffer{}
+	if err := nethttpCopyChunked(bufio.NewReader(strings.NewReader("fffffffffffffffff\r\n")), b0); err == nil {
+		t.Error("chunk-size overflow: expected error")
+	}
+	// nethttpCopyChunked: an EOF while consuming the trailing CRLF after the data.
+	b0.Reset()
+	if err := nethttpCopyChunked(bufio.NewReader(strings.NewReader("1\r\nX")), b0); err == nil {
+		t.Error("missing chunk CRLF: expected error")
+	}
+
+	// nethttpCopyChunked: a bad chunk-size line and a mid-chunk EOF both error.
+	var b bytes.Buffer
+	if err := nethttpCopyChunked(bufio.NewReader(strings.NewReader("zzz\r\n")), &b); err == nil {
+		t.Error("bad chunk size: expected error")
+	}
+	b.Reset()
+	if err := nethttpCopyChunked(bufio.NewReader(strings.NewReader("5\r\nab")), &b); err == nil {
+		t.Error("truncated chunk data: expected error")
+	}
+	b.Reset()
+	if err := nethttpCopyChunked(bufio.NewReader(strings.NewReader("")), &b); err == nil {
+		t.Error("EOF at chunk size: expected error")
+	}
+
+	// nethttpProxyConnect: a non-2xx CONNECT reply and a mid-header EOF both error.
+	if err := nethttpProxyConnect(&scriptConn{r: strings.NewReader("HTTP/1.1 407 Denied\r\n\r\n")}, "h:1", ""); err == nil {
+		t.Error("CONNECT non-2xx: expected error")
+	}
+	if err := nethttpProxyConnect(&scriptConn{r: strings.NewReader("HTTP/1.1 20")}, "h:1", "Basic x"); err == nil {
+		t.Error("CONNECT truncated: expected error")
+	}
+	// nethttpProxyConnect: a write failure surfaces.
+	if err := nethttpProxyConnect(&scriptConn{writeErr: io.ErrClosedPipe}, "h:1", ""); err == nil {
+		t.Error("CONNECT write error: expected error")
+	}
+	// nethttpProxyConnect: a 2xx reply succeeds.
+	if err := nethttpProxyConnect(&scriptConn{r: strings.NewReader("HTTP/1.1 200 OK\r\n\r\n")}, "h:1", ""); err != nil {
+		t.Errorf("CONNECT 2xx: %v", err)
+	}
+}
+
+// TestNetHTTPProxyNilArms covers nethttpNewInstance's proxy-argument arms not
+// exercised elsewhere: a nil / :ENV / empty p_addr leaves the instance proxy-less,
+// and proxy_user / proxy_pass default to nil.
+func TestNetHTTPProxyNilArms(t *testing.T) {
+	got := runSrc(t, `require "net/http"
+puts Net::HTTP.new("h", 80).proxy?
+puts Net::HTTP.new("h", 80, nil).proxy?
+puts Net::HTTP.new("h", 80, :ENV).proxy?
+puts Net::HTTP.new("h", 80, "").proxy?
+h = Net::HTTP.new("h", 80, "px", 3128)
+puts h.proxy?
+p h.proxy_user
+p h.proxy_pass`)
+	if want := "false\nfalse\nfalse\nfalse\ntrue\nnil\nnil"; got != want {
+		t.Fatalf("proxy nil-arms = %q, want %q", got, want)
+	}
+}
+
+// TestNetHTTPDialXferError covers nethttpDialXfer's proxy dial-error arms (both the
+// plain-http and the CONNECT-tunnel dial) against a refused proxy endpoint, via a
+// started instance so the persistent dial path is taken.
+func TestNetHTTPDialXferError(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	refused := ln.Addr().(*net.TCPAddr)
+	ln.Close()
+	port := fmt.Sprintf("%d", refused.Port)
+
+	// Plain-http proxy dial refused.
+	got := runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new("backend", 80, "127.0.0.1", %s)
+begin; h.get("/"); rescue SocketError; puts "httpdial"; end`, port))
+	if got != "httpdial" {
+		t.Fatalf("proxy http dial = %q, want httpdial", got)
+	}
+	// CONNECT-tunnel proxy dial refused (use_ssl -> connectTunnel).
+	got = runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new("backend", 443, "127.0.0.1", %s)
+h.use_ssl = true
+begin; h.get("/"); rescue SocketError; puts "connectdial"; end`, port))
+	if got != "connectdial" {
+		t.Fatalf("proxy connect dial = %q, want connectdial", got)
+	}
+	// Direct (non-proxy) started-instance dial refused (persistent open-error arm).
+	got = runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new("127.0.0.1", %s)
+begin; h.start { h.get("/") }; rescue SocketError; puts "directdial"; end`, port))
+	if got != "directdial" {
+		t.Fatalf("direct started dial = %q, want directdial", got)
+	}
+}
+
+// prefixErrReader yields prefix once, then fails every read with io.ErrUnexpectedEOF,
+// so nethttpReadResponse can read a header block and then hit a body read error.
+type prefixErrReader struct {
+	prefix []byte
+	done   bool
+}
+
+func (r *prefixErrReader) Read(p []byte) (int, error) {
+	if !r.done {
+		n := copy(p, r.prefix)
+		r.done = true
+		return n, nil
+	}
+	return 0, io.ErrUnexpectedEOF
+}
+
+// TestNetHTTPKeepAliveRetry proves the stale-connection retry arm: a raw server
+// that answers one request per connection (keep-alive implied, but the socket is
+// then closed) makes the second request in a start block find its cached
+// connection dead, drop it and redial — so both bodies are correct and two
+// connections are used.
+func TestNetHTTPKeepAliveRetry(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	var accepts int64
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			seq := atomic.AddInt64(&accepts, 1)
+			go func(c net.Conn, n int64) {
+				// Read the request headers, answer with a keep-alive-looking response
+				// (no Connection: close) but then close the socket, so a reused
+				// connection is dead on the next request.
+				br := bufio.NewReader(c)
+				for {
+					line, err := br.ReadString('\n')
+					if err != nil || strings.TrimRight(line, "\r\n") == "" {
+						break
+					}
+				}
+				body := fmt.Sprintf("R%d", n)
+				fmt.Fprintf(c, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+				c.Close()
+			}(conn, seq)
+		}
+	}()
+
+	addr := ln.Addr().(*net.TCPAddr)
+	got := runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new("127.0.0.1", %d)
+h.start do
+  puts h.get("/").body
+  puts h.get("/").body
+end`, addr.Port))
+	if want := "R1\nR2"; got != want {
+		t.Fatalf("keep-alive retry bodies = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(&accepts); n != 2 {
+		t.Fatalf("keep-alive retry used %d connections, want 2", n)
+	}
+}
+
+// base64Std is the std base64 of s, for building expected Basic credentials.
+func base64Std(s string) string {
+	return base64.StdEncoding.EncodeToString([]byte(s))
+}
+
+// timeoutErr is a net.Error whose Timeout() is true, for raiseTransportErr.
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return false }
+
+// scriptConn is a minimal net.Conn whose reads come from r and whose writes
+// optionally fail with writeErr, for driving nethttpProxyConnect off a socket.
+type scriptConn struct {
+	r        io.Reader
+	writeErr error
+}
+
+func (c *scriptConn) Read(p []byte) (int, error) {
+	if c.r == nil {
+		return 0, io.EOF
+	}
+	return c.r.Read(p)
+}
+func (c *scriptConn) Write(p []byte) (int, error) {
+	if c.writeErr != nil {
+		return 0, c.writeErr
+	}
+	return len(p), nil
+}
+func (c *scriptConn) Close() error                       { return nil }
+func (c *scriptConn) LocalAddr() net.Addr                { return nil }
+func (c *scriptConn) RemoteAddr() net.Addr               { return nil }
+func (c *scriptConn) SetDeadline(_ time.Time) error      { return nil }
+func (c *scriptConn) SetReadDeadline(_ time.Time) error  { return nil }
+func (c *scriptConn) SetWriteDeadline(_ time.Time) error { return nil }

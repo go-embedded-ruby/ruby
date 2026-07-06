@@ -326,10 +326,17 @@ func (vm *VM) augmentNetHTTPResponse(resp *RClass) {
 
 // nethttpExecURL runs a one-shot request against a parsed URL, resolving the
 // scheme / host / port and defaulting TLS verification off (the class-level
-// conveniences take no context). Returns the Net::HTTPResponse.
+// conveniences take no context). It routes through the same transport as instance
+// requests, as a non-persistent (Connection: close), un-proxied, deadline-less
+// transfer. Returns the Net::HTTPResponse.
 func (vm *VM) nethttpExecURL(u *url.URL, method string, body []byte, hdr [][2]string) object.Value {
 	scheme, port := nethttpSchemePort(u)
-	return vm.nethttpDo(scheme, u.Hostname(), port, u.Host, method, u.RequestURI(), body, hdr, 0)
+	host := u.Hostname()
+	cfg := &nethttpXfer{
+		scheme: scheme, host: host, port: port, hostHdr: u.Host,
+		dialHost: host, dialPort: port,
+	}
+	return vm.nethttpDoXfer(cfg, method, u.RequestURI(), body, hdr)
 }
 
 // nethttpSchemePort resolves a URL's scheme (defaulting to http) and port
@@ -850,47 +857,6 @@ func nethttpFirstHexRun(line string) string {
 	return ""
 }
 
-// nethttpDo is the codec↔socket seam: build the request bytes with the net-http
-// codec, write them to a connected (optionally TLS) socket, read the whole
-// response, parse it, and build the Ruby Net::HTTPResponse.
-func (vm *VM) nethttpDo(scheme, host, port, hostHdr, method, path string, body []byte, hdr [][2]string, verifyMode int64) object.Value {
-	req, err := nethttp.NewRequest(method, path, hostHdr, hdr)
-	if err != nil {
-		raise("ArgumentError", "%s", err.Error())
-	}
-	if body != nil {
-		req.SetBody(body)
-	}
-	// One connection per request: ask the server to close so the read drains to
-	// EOF (persistent connections are a follow-up).
-	req.Set("Connection", "close")
-	reqBytes, err := req.Bytes("1.1")
-	if err != nil {
-		raise("Net::HTTPError", "%s", err.Error())
-	}
-	raw, err := vm.nethttpRoundTrip(scheme, host, port, reqBytes, verifyMode)
-	if err != nil {
-		raise("SocketError", "%s", err.Error())
-	}
-	// A HEAD (and any request whose response body is not permitted) still receives
-	// the server's Content-Length / Transfer-Encoding headers but no body bytes;
-	// strip the framing so the status-based codec does not try to read a body, and
-	// report a nil body as MRI's response_body_permitted? false path does.
-	noBody := !req.ResponseBodyPermitted()
-	if noBody {
-		raw = trimResponseToHeaders(raw)
-	}
-	resp, err := nethttp.ParseResponse(raw)
-	if err != nil {
-		raise("Net::HTTPBadResponse", "%s", err.Error())
-	}
-	respVal := vm.nethttpBuildResponse(resp)
-	if noBody {
-		setIvar(respVal, "@body", object.NilV)
-	}
-	return respVal
-}
-
 // trimResponseToHeaders keeps only the status line and header block of a raw
 // response, dropping the body and any Content-Length / Transfer-Encoding fields,
 // so ParseResponse frames an empty body (used for HEAD, whose response carries
@@ -909,56 +875,6 @@ func trimResponseToHeaders(raw []byte) []byte {
 		kept = append(kept, ln)
 	}
 	return append(bytes.Join(kept, []byte("\r\n")), []byte("\r\n\r\n")...)
-}
-
-// nethttpRoundTrip opens the connection through rbgo's socket transport (a
-// tcpSocket, wrapped in a TLS sslSocket for https), writes the request bytes and
-// reads the full response to EOF. It reuses the transport's connected-stream
-// types and streamIO surface so the bytes travel the same path a Ruby
-// TCPSocket / OpenSSL::SSL::SSLSocket would.
-func (vm *VM) nethttpRoundTrip(scheme, host, port string, reqBytes []byte, verifyMode int64) ([]byte, error) {
-	stream, err := nethttpDial(scheme, host, port, verifyMode)
-	if err != nil {
-		return nil, err
-	}
-	defer stream.closeConn()
-	return httpExchange(stream, reqBytes)
-}
-
-// nethttpDial opens the connection through rbgo's socket transport (a tcpSocket,
-// wrapped in a TLS sslSocket for https) and returns it as a streamIO. verify_mode
-// VERIFY_NONE (0) — the default — skips certificate verification, matching the
-// SSLSocket transport's bare-context default; VERIFY_PEER turns on Go's chain +
-// hostname checks.
-func nethttpDial(scheme, host, port string, verifyMode int64) (streamIO, error) {
-	conn, err := net.Dial("tcp", net.JoinHostPort(host, port))
-	if err != nil {
-		return nil, err
-	}
-	tcp := newTCPSocket(nil, conn)
-	if scheme != "https" {
-		return tcp, nil
-	}
-	cfg := &tls.Config{ServerName: host}
-	if verifyMode == 0 {
-		cfg.InsecureSkipVerify = true
-	}
-	c := tls.Client(conn, cfg)
-	if err := c.Handshake(); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return &sslSocket{tcp: tcp, ctx: object.NilV, conn: conn, tls: c, r: bufio.NewReader(c), hostname: host}, nil
-}
-
-// httpExchange writes the request bytes to a connected stream and reads the whole
-// response to EOF. It is the transport-agnostic write/read half of the round trip
-// (split from the dial so both I/O-error arms are exercisable).
-func httpExchange(stream streamIO, reqBytes []byte) ([]byte, error) {
-	if _, err := stream.writer().Write(reqBytes); err != nil {
-		return nil, err
-	}
-	return io.ReadAll(stream.reader())
 }
 
 // nethttpBuildResponse turns a parsed *nethttp.Response into a Ruby
