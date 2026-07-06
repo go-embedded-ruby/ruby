@@ -312,6 +312,8 @@ github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79 h1:xZIEc
 github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79/go.mod h1:QvbIKqCHbVYFCko+ZlLGzFh6h/K7pqSKGzADrzTUvls=
 github.com/go-ruby-oidc/oidc v0.0.0-20260705185218-08dab6b22572 h1:WnQtWUYQcpYkSiw+Nnr//Q44o0ZFlopxU9SyeuaBU1Q=
 github.com/go-ruby-oidc/oidc v0.0.0-20260705185218-08dab6b22572/go.mod h1:uy6y/DJnboV+pnO6ITsw4JIor4EmdZ0MzRv5gGlBrv0=
+github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c h1:mpewfhdvKxzc5aFCrQUaEyZ5vp1rzvHAr6Is61HRacQ=
+github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c/go.mod h1:7hF8CYcoBsFTy7OaSrjjfH888t1mcE9JdE9YpMoyB7k=
 github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c h1:9scQo7ArojaKzmw2gbdgA3urBcA0pROIOYYCvGhPQfg=
 github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c/go.mod h1:AjZ2hTwNuKGnO0OGJzgp84hTzBV6u182mj7REfuxvtw=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=
@@ -400,6 +402,8 @@ github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984
 github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f/go.mod h1:mKlLb/MTNhSHSUhcAvb6hi3ZCR5kCgVdDaInEyI3Wr8=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb h1:CyoFEEsMPa/TX4EJHOPsXud3nccESDhaW6fTQsidIKI=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb/go.mod h1:/7+NF+4kESzcNHjRtNe/lAfhgHpgElX4C+VNo0xsb6Y=
+github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef h1:JLPi8PmkOV+Yta+zBdaPYVc5wJFs3GEmbh/YiXSd6L8=
+github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef/go.mod h1:oI3L9dywsrSXJqLDuJGIYuHUHRCxUS7BU8PBZGXpx4A=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b h1:ZwN0q9xq9HUGCskWGz8rmL+v6MaHy+AM99oictlPlBs=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b/go.mod h1:tLv8PWrPxrOQrJWMFTfRi6wfZpSjZtmfxHKgGwUriR8=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176 h1:iHTCF/Eu0/lwOEank8pLKqoW5j9MI2ERXErrvqsZZ+4=

@@ -1215,6 +1215,22 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Puma::Configuration"].(*RClass)
 	case *PumaDSL:
 		return vm.consts["Puma::DSL"].(*RClass)
+	case *WardenManager:
+		return x.cls
+	case *WardenProxy:
+		return x.cls
+	case *WardenStrategy:
+		return x.cls
+	case *OmniAuthBuilder:
+		return x.cls
+	case *OmniAuthConfig:
+		return x.cls
+	case *OmniAuthMockAuth:
+		return x.cls
+	case *OmniAuthStrategy:
+		return x.cls
+	case *OmniAuthHash:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *Regexp:
