@@ -982,6 +982,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *PGResultObj:
 		return x.cls
+	case *SMTPObj:
+		return x.cls
+	case *SMTPResponseObj:
+		return x.cls
+	case *SMTPStreamObj:
+		return x.cls
 	case *SequelDBObj:
 		return x.cls
 	case *SequelDatasetObj:

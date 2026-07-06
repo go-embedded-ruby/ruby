@@ -478,6 +478,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSQLite3()          // SQLite3::Database/Statement (require "sqlite3"), backed by go-ruby-sqlite3 (modernc); needs StandardError for SQLite3::Exception
 	vm.registerRedis()            // Redis client (require "redis"), backed by go-ruby-redis RESP codec; socket = injected IO seam; needs StandardError for Redis::BaseError
 	vm.registerPG()               // PG::Connection/Result (require "pg"), backed by go-ruby-pg v3 protocol; socket = injected IO seam; needs StandardError for PG::Error
+	vm.registerNetSMTP()          // Net::SMTP (require "net/smtp"), backed by go-ruby-net-smtp codec over rbgo's real socket/TLS transport; after registerSocket/registerNetHTTP (Net module + transport)
 	vm.registerSidekiq()          // Sidekiq::Client/Job(Worker) + module (require "sidekiq"), backed by go-ruby-sidekiq over go-redis/v9; Redis client dialled from Sidekiq.redis/ENV; perform body is Ruby seam; needs StandardError for Sidekiq::Error
 	vm.registerResque()           // Resque module + Job/Worker/Failure (require "resque"), backed by go-ruby-resque over go-redis/v9; @queue resolver + self.perform are Ruby seams; needs StandardError for Resque::Error
 	vm.registerSequel()           // Sequel query builder + Database (require "sequel"), backed by go-ruby-sequel; executor seam wired to SQLite3::Database (real execution)
