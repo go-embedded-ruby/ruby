@@ -25,7 +25,8 @@ import (
 // Object. rbgo roots BasicSocket at Object rather than IO on purpose: IO's
 // instance methods assume an *IOObj receiver and would panic on a socket value,
 // and the socket surface below re-implements the IO methods that matter
-// (read/gets/write/puts/...) directly. Raw Socket.new, UDPSocket, UNIXSocket,
+// (read/gets/write/puts/...) directly. UDPSocket (socket_udp.go) and
+// UNIXSocket/UNIXServer (socket_unix.go) extend this ancestry; raw Socket.new
 // and full Addrinfo are deferred follow-ups.
 
 // tcpSocket is a connected stream socket (TCPSocket): a live net.Conn plus a
@@ -79,6 +80,8 @@ func (vm *VM) registerSocket() {
 
 	vm.registerTCPSocket(tcp)
 	vm.registerTCPServer(srv)
+	vm.registerUDPSocket(ip)
+	vm.registerUnixSockets(basic)
 	vm.registerSocketClass(basic)
 
 	// Upgrade the OpenSSL::SSL TLS shell to a real transport (socket_bind.go).
@@ -179,8 +182,9 @@ func (vm *VM) registerTCPServer(srv *RClass) {
 
 // registerSocketClass installs the Socket class + the address-family / socket-
 // type constants scripts commonly reference (AF_INET, SOCK_STREAM, ...). Raw
-// Socket.new / connect / bind (and UDP / UNIX sockets) are a deferred follow-up:
-// Socket.new raises NotImplementedError so the gap is loud and rescuable.
+// Socket.new / connect / bind is a deferred follow-up (the typed TCPSocket /
+// UDPSocket / UNIXSocket classes cover the common cases): Socket.new raises
+// NotImplementedError so the gap is loud and rescuable.
 func (vm *VM) registerSocketClass(basic *RClass) {
 	sock := newClass("Socket", basic)
 	vm.consts["Socket"] = sock
@@ -194,7 +198,7 @@ func (vm *VM) registerSocketClass(basic *RClass) {
 	}
 	sock.smethods["new"] = &Method{name: "new", owner: sock,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return raise("NotImplementedError", "raw Socket.new is not yet supported (use TCPSocket/TCPServer; raw Socket/UDP/UNIX are a follow-up)")
+			return raise("NotImplementedError", "raw Socket.new is not yet supported (use TCPSocket/TCPServer/UDPSocket/UNIXSocket; raw Socket is a follow-up)")
 		}}
 }
 
@@ -290,6 +294,42 @@ func installStreamIO(cls *RClass, get func(object.Value) streamIO) {
 		get(self)
 		return object.IntValue(0)
 	})
+	// recv(maxlen[, flags]) reads up to maxlen bytes from the stream, returning
+	// whatever is available (an empty ASCII-8BIT String at end of stream), the
+	// BasicSocket#recv datagram-less semantics for a connected stream. flags is
+	// accepted and ignored.
+	cls.define("recv", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return streamRecv(get(self), args)
+	})
+	// send(mesg[, flags[, dest]]) writes mesg to the stream and returns the byte
+	// count; flags and dest are accepted and ignored for a connected stream.
+	cls.define("send", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
+		}
+		b := argBytes(vm, args[0])
+		get(self).writer().Write(b)
+		return object.IntValue(int64(len(b)))
+	})
+}
+
+// streamRecv implements #recv(maxlen): read up to maxlen bytes, blocking only
+// when the buffer is empty, and returning an empty ASCII-8BIT String at end of
+// stream (BasicSocket#recv semantics) rather than raising.
+func streamRecv(s streamIO, args []object.Value) object.Value {
+	if len(args) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+	}
+	n := int(intArg(args[0]))
+	if n < 0 {
+		raise("ArgumentError", "negative length %d given", n)
+	}
+	if n == 0 {
+		return object.NewStringBytesEnc(nil, "ASCII-8BIT")
+	}
+	buf := make([]byte, n)
+	k, _ := s.reader().Read(buf)
+	return object.NewStringBytesEnc(buf[:k], "ASCII-8BIT")
 }
 
 // streamRead implements #read: no argument reads to EOF (returning a possibly

@@ -7,20 +7,27 @@ package vm
 import (
 	"bufio"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"io"
 	"net"
+	"os"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // This file is the TLS half of rbgo's socket transport: it installs the real
 // OpenSSL::SSL::SSLSocket (openssl.go builds the surrounding OpenSSL::SSL module
-// and error tree but leaves the socket to us) as a client-side TLS transport
-// over Go's crypto/tls, wrapping a TCPSocket's live net.Conn. Server-side TLS,
-// client-certificate auth, and the
-// full certificate / verification surface (peer_cert, SSLContext#cert wiring,
-// hostname verification callbacks) are deferred follow-ups; the common `https`
-// client path — SSLSocket.new(tcp).connect then read/write — is real.
+// and error tree but leaves the socket to us) over Go's crypto/tls, wrapping a
+// TCPSocket's live net.Conn. Both directions are real: #connect drives the
+// client handshake (the common `https` path), #accept drives the server
+// handshake, and OpenSSL::SSL::SSLServer wraps a TCPServer + SSLContext so
+// accept returns handshaked server SSLSockets. The certificate / verification
+// surface is fleshed out too: SSLContext#cert / #key / #ca_file feed real
+// crypto/tls material (server certs, client RootCAs, mutual-TLS client certs),
+// VERIFY_PEER performs Go's chain + hostname verification, and #peer_cert
+// returns the handshaked peer's OpenSSL::X509::Certificate. Raw Socket-level TLS
+// options (SNI callbacks, session resumption tuning) remain deferred.
 
 // sslSocket is a TLS stream over a wrapped TCPSocket. It shares the connected-
 // stream IO surface (read/gets/write/puts/...) with tcpSocket via streamIO, so
@@ -86,6 +93,10 @@ func (vm *VM) registerSSLTransport() {
 
 	vm.augmentSSLContext(ssl.consts["SSLContext"].(*RClass))
 
+	// Upgrade the OpenSSL::X509::Certificate shell to a real PEM-carrying cert
+	// (parse on construction, #to_pem / #subject readers); #peer_cert returns one.
+	certCls := vm.augmentX509Cert()
+
 	// Install the real SSLSocket class (openssl.go deliberately leaves the
 	// SSLSocket constant to us rather than registering a stub).
 	sslSock := newClass("OpenSSL::SSL::SSLSocket", vm.cObject)
@@ -113,15 +124,13 @@ func (vm *VM) registerSSLTransport() {
 	// #connect performs the client TLS handshake over the wrapped connection.
 	sslSock.define("connect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := asSSLSocket(self)
-		cfg := &tls.Config{ServerName: s.hostname}
-		// verify_mode nil / VERIFY_NONE (0) means "do not verify", MRI's default
-		// for a bare SSLContext; anything else turns on Go's chain + hostname
-		// verification.
-		if sslVerifyMode(s.ctx) == 0 {
-			cfg.InsecureSkipVerify = true
-		}
-		c := tls.Client(s.conn, cfg)
-		if err := c.Handshake(); err != nil {
+		c := tls.Client(s.conn, clientTLSConfig(vm, s))
+		// The handshake blocks on network I/O and, for an in-VM peer (a Ruby
+		// SSLServer in another Thread), must run concurrently with it — so release
+		// the GVL for its duration, as MRI's C SSL_connect does.
+		var err error
+		vm.threadBlock(func() { err = c.Handshake() })
+		if err != nil {
 			raise("OpenSSL::SSL::SSLError", "SSL_connect returned=1 errno=0 state=error: %s", err.Error())
 		}
 		s.tls = c
@@ -130,6 +139,17 @@ func (vm *VM) registerSSLTransport() {
 	})
 	sslSock.define("connect_nonblock", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.send(self, "connect", nil, nil)
+	})
+
+	// #accept performs the *server* TLS handshake over the wrapped connection,
+	// presenting the SSLContext's certificate / key and (when VERIFY_PEER +
+	// ca_file are set) requiring & verifying a client certificate. It is the
+	// server dual of #connect: SSLSocket.new(accepted_tcp, ctx).accept.
+	sslSock.define("accept", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return sslServerHandshake(vm, asSSLSocket(self))
+	})
+	sslSock.define("accept_nonblock", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.send(self, "accept", nil, nil)
 	})
 
 	// #io / #to_io returns the wrapped TCPSocket.
@@ -149,22 +169,34 @@ func (vm *VM) registerSSLTransport() {
 		asSSLSocket(self).hostname = strArg(args[0])
 		return args[0]
 	})
-	// peer_cert is nil until the certificate surface lands (deferred follow-up).
+	// peer_cert returns the handshaked peer's leaf certificate as an
+	// OpenSSL::X509::Certificate, or nil before the handshake / when the peer
+	// presented none (an anonymous client to a non-VERIFY_PEER server).
 	sslSock.define("peer_cert", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		asSSLSocket(self)
-		return object.NilV
+		s := asSSLSocket(self)
+		if s.tls == nil {
+			return object.NilV
+		}
+		st := s.tls.ConnectionState()
+		if len(st.PeerCertificates) == 0 {
+			return object.NilV
+		}
+		return newX509Cert(certCls, st.PeerCertificates[0])
 	})
 
 	// Share the connected-stream surface (read/gets/readpartial/write/print/puts/
-	// <</flush/close/closed?/eof?/setsockopt) with TCPSocket.
+	// recv/send/<</flush/close/closed?/eof?/setsockopt) with TCPSocket.
 	installStreamIO(sslSock, func(v object.Value) streamIO { return asSSLSocket(v) })
+
+	vm.registerSSLServer(ssl, sslSock)
 }
 
 // augmentSSLContext adds the configuration accessors the TLS handshake and
 // common client setup read to OpenSSL::SSL::SSLContext (whose #new / #set_params
 // shell is defined in openssl.go). Each is a simple ivar accessor; verify_mode
-// is the one #connect consults. cert / key / ca_file are stored for inspection
-// but client-certificate auth is a deferred follow-up.
+// is the one #connect / #accept consults, and cert / key / ca_file feed real
+// crypto/tls material (server certificate, client trust roots, mutual-TLS client
+// certificate — see serverTLSConfig / clientTLSConfig).
 func (vm *VM) augmentSSLContext(ctx *RClass) {
 	accessor := func(name, ivar string) {
 		ctx.define(name, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -184,6 +216,235 @@ func (vm *VM) augmentSSLContext(ctx *RClass) {
 	accessor("options", "@options")
 	accessor("min_version", "@min_version")
 	accessor("max_version", "@max_version")
+}
+
+// clientTLSConfig builds the crypto/tls client config for #connect from the
+// wrapped SSLContext. VERIFY_NONE (the bare-context default) skips verification;
+// VERIFY_PEER turns on Go's chain + hostname verification, using the ca_file as
+// the trust anchor when one is set (else the system roots). A cert+key pair on
+// the context is presented as a client certificate for mutual TLS.
+func clientTLSConfig(vm *VM, s *sslSocket) *tls.Config {
+	cfg := &tls.Config{ServerName: s.hostname}
+	if sslVerifyMode(s.ctx) == 0 {
+		cfg.InsecureSkipVerify = true
+	} else if pool := caPool(s.ctx); pool != nil {
+		cfg.RootCAs = pool
+	}
+	if cert := clientCert(s.ctx); cert != nil {
+		cfg.Certificates = []tls.Certificate{*cert}
+	}
+	return cfg
+}
+
+// sslServerHandshake drives the server side of the TLS handshake for #accept,
+// wrapping the SSLSocket's raw connection as a tls.Server with the context's
+// certificate material and recording the session on success. The handshake runs
+// with the GVL released (it blocks on I/O and must run concurrently with the
+// peer client, which may be another in-VM Thread).
+func sslServerHandshake(vm *VM, s *sslSocket) object.Value {
+	c := tls.Server(s.conn, serverTLSConfig(s.ctx))
+	var err error
+	vm.threadBlock(func() { err = c.Handshake() })
+	if err != nil {
+		raise("OpenSSL::SSL::SSLError", "SSL_accept returned=1 errno=0 state=error: %s", err.Error())
+	}
+	s.tls = c
+	s.r = bufio.NewReader(c)
+	return s
+}
+
+// serverTLSConfig builds the crypto/tls server config from an SSLContext: the
+// certificate + key are required (a missing / malformed pair raises SSLError),
+// and a VERIFY_PEER context with a ca_file requires & verifies a client
+// certificate (mutual TLS).
+func serverTLSConfig(ctx object.Value) *tls.Config {
+	cert, err := tls.X509KeyPair(pemBytes(getIvar(ctx, "@cert")), pemBytes(getIvar(ctx, "@key")))
+	if err != nil {
+		raise("OpenSSL::SSL::SSLError", "SSL server context: %s", err.Error())
+	}
+	cfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+	if sslVerifyMode(ctx) != 0 {
+		if pool := caPool(ctx); pool != nil {
+			cfg.ClientCAs = pool
+			cfg.ClientAuth = tls.RequireAndVerifyClientCert
+		}
+	}
+	return cfg
+}
+
+// clientCert resolves the SSLContext's cert + key into a tls.Certificate for
+// mutual-TLS client authentication, or nil when either is absent (the common
+// no-client-cert case). A present-but-malformed pair raises SSLError.
+func clientCert(ctx object.Value) *tls.Certificate {
+	c, k := getIvar(ctx, "@cert"), getIvar(ctx, "@key")
+	if object.IsNil(c) || object.IsNil(k) {
+		return nil
+	}
+	cert, err := tls.X509KeyPair(pemBytes(c), pemBytes(k))
+	if err != nil {
+		raise("OpenSSL::SSL::SSLError", "SSL client certificate: %s", err.Error())
+	}
+	return &cert
+}
+
+// pemBytes resolves a cert / key SSLContext value to its PEM bytes: a String is
+// its own PEM, an OpenSSL::X509::Certificate / PKey object yields its stored
+// @pem, and nil yields nil (letting the X509KeyPair caller report the gap).
+func pemBytes(v object.Value) []byte {
+	if object.IsNil(v) {
+		return nil
+	}
+	if s, ok := v.(*object.String); ok {
+		return s.Bytes()
+	}
+	if p, ok := getIvar(v, "@pem").(*object.String); ok {
+		return p.Bytes()
+	}
+	raise("OpenSSL::SSL::SSLError", "cannot read PEM from %s", v.Inspect())
+	return nil
+}
+
+// caPool builds an x509.CertPool from the SSLContext's ca_file (a path to a PEM
+// bundle), or nil when no ca_file is set. A missing / certless file raises
+// SSLError so a misconfigured trust store fails loudly.
+func caPool(ctx object.Value) *x509.CertPool {
+	v := getIvar(ctx, "@ca_file")
+	if object.IsNil(v) {
+		return nil
+	}
+	data, err := os.ReadFile(strArg(v))
+	if err != nil {
+		raise("OpenSSL::SSL::SSLError", "ca_file: %s", err.Error())
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(data) {
+		raise("OpenSSL::SSL::SSLError", "ca_file: no certificates found in %s", strArg(v))
+	}
+	return pool
+}
+
+// newX509Cert wraps a parsed *x509.Certificate as an OpenSSL::X509::Certificate
+// object, carrying its PEM encoding (@pem) and subject DN (@subject) for the
+// #to_pem / #subject readers.
+func newX509Cert(cls *RClass, c *x509.Certificate) *RObject {
+	o := &RObject{class: cls, ivars: map[string]object.Value{}}
+	pemBlock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})
+	o.ivars["@pem"] = object.NewStringBytesEnc(pemBlock, "ASCII-8BIT")
+	o.ivars["@subject"] = object.NewString(c.Subject.String())
+	return o
+}
+
+// augmentX509Cert upgrades the OpenSSL::X509::Certificate shell (openssl.go
+// registers it with a NotImplementedError .new) to a real PEM-carrying object:
+// .new(pem) parses the certificate and stores its PEM + subject, and #to_pem /
+// #to_s / #subject read them back. It returns the class so #peer_cert can mint
+// instances. The qualified CertificateError is published top-level so a parse
+// failure is rescuable by name.
+func (vm *VM) augmentX509Cert() *RClass {
+	x509ns := vm.consts["OpenSSL"].(*RClass).consts["X509"].(*RClass)
+	cls := x509ns.consts["Certificate"].(*RClass)
+	vm.consts["OpenSSL::X509::CertificateError"] = x509ns.consts["CertificateError"]
+
+	cls.smethods["new"] = &Method{name: "new", owner: cls,
+		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			o := &RObject{class: cls, ivars: map[string]object.Value{}}
+			if len(args) > 0 && !object.IsNil(args[0]) {
+				pemStr := strArg(args[0])
+				block, _ := pem.Decode([]byte(pemStr))
+				if block == nil {
+					raise("OpenSSL::X509::CertificateError", "not enough data")
+				}
+				c, err := x509.ParseCertificate(block.Bytes)
+				if err != nil {
+					raise("OpenSSL::X509::CertificateError", "%s", err.Error())
+				}
+				o.ivars["@pem"] = object.NewString(pemStr)
+				o.ivars["@subject"] = object.NewString(c.Subject.String())
+			}
+			return o
+		}}
+	cls.define("to_pem", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@pem")
+	})
+	cls.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@pem")
+	})
+	cls.define("subject", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@subject")
+	})
+	return cls
+}
+
+// sslServer is OpenSSL::SSL::SSLServer: a TCPServer paired with an SSLContext
+// whose #accept accepts a raw connection then completes the server handshake,
+// yielding a ready server-side SSLSocket.
+type sslServer struct {
+	cls     *RClass
+	srv     object.Value // the wrapped TCPServer
+	ctx     object.Value // the SSLContext supplying the server certificate
+	sslSock *RClass      // the SSLSocket class, to wrap accepted connections
+	closed  bool
+}
+
+func (s *sslServer) ToS() string     { return "#<OpenSSL::SSL::SSLServer>" }
+func (s *sslServer) Inspect() string { return "#<OpenSSL::SSL::SSLServer>" }
+func (s *sslServer) Truthy() bool    { return true }
+
+// registerSSLServer installs OpenSSL::SSL::SSLServer.new(tcp_server, ctx) with
+// accept / to_io / addr / listen / close / closed?, wrapping accepted TCPSockets
+// as handshaked server SSLSockets.
+func (vm *VM) registerSSLServer(ssl, sslSock *RClass) {
+	srvCls := newClass("OpenSSL::SSL::SSLServer", vm.cObject)
+	ssl.consts["SSLServer"] = srvCls
+
+	srvCls.smethods["new"] = &Method{name: "new", owner: srvCls,
+		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) < 2 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
+			}
+			if _, ok := args[0].(*tcpServer); !ok {
+				raise("TypeError", "OpenSSL::SSL::SSLServer.new expects a TCPServer")
+			}
+			return &sslServer{cls: srvCls, srv: args[0], ctx: args[1], sslSock: sslSock}
+		}}
+
+	srvCls.define("accept", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := asSSLServer(self)
+		conn := asTCPSocket(vm.send(s.srv, "accept", nil, nil))
+		host, _, _ := net.SplitHostPort(conn.conn.LocalAddr().String())
+		ssl := &sslSocket{cls: s.sslSock, tcp: conn, ctx: s.ctx, conn: conn.conn, hostname: host}
+		// Route through SSLSocket#accept so the server handshake path is uniform.
+		return vm.send(ssl, "accept", nil, nil)
+	})
+	srvCls.define("to_io", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return asSSLServer(self).srv
+	})
+	srvCls.define("addr", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.send(asSSLServer(self).srv, "addr", nil, nil)
+	})
+	srvCls.define("listen", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.send(asSSLServer(self).srv, "listen", args, nil)
+	})
+	srvCls.define("close", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := asSSLServer(self)
+		if !s.closed {
+			s.closed = true
+			vm.send(s.srv, "close", nil, nil)
+		}
+		return object.NilV
+	})
+	srvCls.define("closed?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(asSSLServer(self).closed)
+	})
+}
+
+// asSSLServer narrows a receiver to *sslServer, raising TypeError otherwise.
+func asSSLServer(v object.Value) *sslServer {
+	if s, ok := v.(*sslServer); ok {
+		return s
+	}
+	raise("TypeError", "not an OpenSSL::SSL::SSLServer")
+	return nil
 }
 
 // asSSLSocket narrows a receiver to *sslSocket, raising TypeError otherwise so a
