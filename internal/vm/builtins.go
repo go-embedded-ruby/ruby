@@ -518,6 +518,8 @@ func (vm *VM) bootstrap() {
 	vm.registerZlib()          // needs the exception hierarchy (Zlib::Error < StandardError)
 	vm.registerFiber()         // needs the exception hierarchy (FiberError < StandardError)
 	vm.registerThread()        // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
+	vm.registerPundit()        // Pundit mixin (require "pundit"), backed by go-ruby-pundit; policy predicate dispatch + safe_constantize are the rbgo seams; needs StandardError for the Pundit::Error tree
+	vm.registerCanCanCan()     // CanCan::Ability mixin (require "cancancan" / "cancan"), backed by go-ruby-cancancan; attribute read + condition-block eval are the rbgo seams; needs StandardError for the CanCan::Error tree
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).

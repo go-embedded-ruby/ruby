@@ -25,6 +25,7 @@ require (
 	github.com/go-ruby-bleve/bleve v0.0.0-20260704121320-7b342f38e500
 	github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba
 	github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177
+	github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
@@ -87,6 +88,7 @@ require (
 	github.com/go-ruby-pstore/pstore v0.0.0-20260630081017-0dd55a12f94e
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
 	github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779
+	github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3
 	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e

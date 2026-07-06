@@ -208,6 +208,8 @@ github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba h1:80lP4yd
 github.com/go-ruby-builder/builder v0.0.0-20260701123755-6ebda00e35ba/go.mod h1:wYtstpfGi/nHyyNdfTU+JACaSR5Vzd3FvCQd4Hchyrc=
 github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177 h1:lKTh6VOwq8+x9mU8/xgW6cI91cPB/q+8arZD+Eog3zI=
 github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177/go.mod h1:/ATXu9XibUkiH95lNjyxy1Zosd0EmdU0JEU/P0Vau5U=
+github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df h1:sHlzlEJ7xgubi+P3XCfzSdc/4n/tL/ey+q7WEcziJwo=
+github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df/go.mod h1:WvnY0uliy6W7kQ0Mpmjo3TbRGNQUwWwMufvdyT2V8wY=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c h1:6YAo3FKzJJbQdLbvxHy7I4ur5+R+pLLMWwKXXLnWcQU=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c/go.mod h1:TAIxiFMAj68dWClzEmDY1vCSNFiPfupD3HRADRXrkZw=
 github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555 h1:84rvS0zIV+XzFZ/JmDdu1VEFLY0burLn8q9ISdJJ7jI=
@@ -332,6 +334,8 @@ github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d400244
 github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444/go.mod h1:Wq3cgP6klsULbO4ee0DOavVIzifgmddOWnYpqljbER4=
 github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779 h1:WoF2EMRWd5VxjfuHKiAS4hgF9nkk1NOsnRjgxaKzphI=
 github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779/go.mod h1:auu7u2RjtfGu7yD4e9U67Pt+EbKWs8mYVV/tLWhBanA=
+github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3 h1:kbt7fma8NIV642dOa7skkbAmj5sQpa0Qmci3SWy2mA8=
+github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3/go.mod h1:eEm7KJjGK32SW4hkOP97uB8lQfQwfxSS569Qqzo3vTY=
 github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f h1:+PEruR5OxctQrL3D592lBTI6cW43y73zujTC1jwfsbM=
 github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f/go.mod h1:HeFcYYwifNZvQzF9jdaSFViHYT0mUNLwWEFPQj0j6V4=
 github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329 h1:4sXRBW9MXaEuosiyzzk1Fh+C8R2+PiPdua5sutdvV+E=
