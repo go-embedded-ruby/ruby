@@ -312,6 +312,8 @@ github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d h1:tlOKd49moGe
 github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d/go.mod h1:ppWK2CmOURx2o9vRsiGVeIZHI/AjCSq0RX74ssEZG8g=
 github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7 h1:F+ghhcdLDBVGG977zAq2WQGos1HgRLj/jHJqkIiLL6E=
 github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7/go.mod h1:cm0D4pmaTvvQFPK815E7/uJaGeGxkr5xFLHixeQixTA=
+github.com/go-ruby-net-http/net-http v0.0.0-20260630124155-c794366ce72f h1:nS0qwCPtVAtp+48j6KkdTdpVL8jT9L2ZGQcJZwOKev8=
+github.com/go-ruby-net-http/net-http v0.0.0-20260630124155-c794366ce72f/go.mod h1:PiNQDuyrSPZX8OzApvgyn1fTjRNwx0KNO1vrzdAguEc=
 github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e h1:v8DyCc3Vp+REhN1uyQ4wN8CpJ6JMqWNOm9OESWFBtLU=
 github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e/go.mod h1:WsLJ6/u8/nzHShZKChf20tHosn/nlVnOJiD/xEY6X8c=
 github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1 h1:iZFtIn5WHQRz/oa04qYAlLvTi0XDRP5dKPGpJTGRzKg=

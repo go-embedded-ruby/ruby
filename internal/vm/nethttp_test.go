@@ -165,38 +165,7 @@ func TestNetHTTPErrorClasses(t *testing.T) {
 	}
 }
 
-// TestNetHTTPNotImplemented covers every networking method that raises
-// NotImplementedError: the class-level conveniences and the instance verbs.
-func TestNetHTTPNotImplemented(t *testing.T) {
-	// Class-level: get/post/get_response/start (notImpl smethods).
-	classLevel := []string{"get", "post", "get_response", "start"}
-	for _, m := range classLevel {
-		src := `require "net/http"
-begin
-  Net::HTTP.` + m + `
-  p :no_raise
-rescue NotImplementedError => e
-  print e.message
-end`
-		got := runSrc(t, src)
-		if !strings.Contains(got, "Net::HTTP."+m) {
-			t.Errorf("Net::HTTP.%s: got %q", m, got)
-		}
-	}
-	// Instance verbs: start/request/get/post/head/put/delete/finish.
-	instance := []string{"start", "request", "get", "post", "head", "put", "delete", "finish"}
-	for _, m := range instance {
-		src := `require "net/http"
-h = Net::HTTP.new
-begin
-  h.` + m + `
-  p :no_raise
-rescue NotImplementedError => e
-  print e.message
-end`
-		got := runSrc(t, src)
-		if !strings.Contains(got, "Net::HTTP#"+m) {
-			t.Errorf("Net::HTTP#%s: got %q", m, got)
-		}
-	}
-}
+// The networking methods that once raised NotImplementedError (Net::HTTP.get /
+// get_response / start / request and the instance verbs) are now real; their
+// behaviour is proven end-to-end against in-process httptest servers in
+// nethttp_bind_test.go.
