@@ -996,6 +996,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *POPMailObj:
 		return x.cls
+	case *ftpObj:
+		return x.cls
+	case *ftpMLSxEntry:
+		return x.cls
 	case *PGConnObj:
 		return x.cls
 	case *PGResultObj:
