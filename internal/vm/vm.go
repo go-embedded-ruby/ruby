@@ -262,6 +262,8 @@ type VM struct {
 	cRodaRequest                           *RClass                          // Roda::RodaRequest, the self a route/matcher block runs against
 	cRodaResponse                          *RClass                          // Roda::RodaResponse, the mutable response a route block writes into
 	rodaRoutes                             map[*RClass]*Proc                // per-Roda-subclass top-level route block (route do |r| … end)
+	cACChannelBase                         *RClass                          // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
+	acServer                               object.Value                     // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
 	cAsyncTask                             *RClass                          // Async::Task, one node of the structured-concurrency tree, backed by go-ruby-async
 	curAsyncTask                           *async.Task                      // the task whose Ruby body is currently running (backs Async::Task.current and the caller passed to blocking async ops)
 	asyncTasks                             map[*async.Task]*AsyncTask       // wrapper cache so one *async.Task always maps to one Async::Task object (Ruby #equal? identity), cleared when the root reactor finishes

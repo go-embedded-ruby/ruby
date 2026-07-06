@@ -190,6 +190,8 @@ github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38 h1:j0VAUKCGN
 github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38/go.mod h1:PgAtItdQBv87Wog0Q7rnbwhqsupDC0pDXDlZgSv6nvA=
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe h1:oYFDl+kcAkTOXwJEmAw1SgpuEyOc9shzkMclrc1P4nI=
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe/go.mod h1:Bh8Vr5Vy9UO7JqU5f6myUOWl0jjnnvtlGdIVTBbdLRw=
+github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783 h1:VAFOmKa1u2HKA2LFQhelusPVIAtgp+wAOkXl8IjURbQ=
+github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783/go.mod h1:5DS3icNZKImRwvDP7Kf9IHv+9d6EYtcvRpBALgh/s/Y=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6 h1:m4vrjxuJ9Cp+4QohRvpAbAqsKRaF9Ki8jzic8IPx/9c=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6/go.mod h1:0QY+Ri6/HhOkjRGhhyZ5NwtcDosKI7xwO5csmWEG0W0=
 github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180 h1:zOgsDyqYyTOA8IU4WsurHggTd4DvXfraPTrrR7RxBUs=
