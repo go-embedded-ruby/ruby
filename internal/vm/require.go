@@ -86,7 +86,7 @@ var providedFeatures = map[string]bool{
 	"i18n":     true,
 	"zeitwerk": true,
 	"rss":      true,
-	"rdoc": true, "rdoc/markup": true,
+	"rdoc":     true, "rdoc/markup": true,
 	"thor":        true,
 	"bundler":     true,
 	"roda":        true,

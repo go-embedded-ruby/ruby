@@ -414,126 +414,126 @@ func (vm *VM) bootstrap() {
 		return object.Bool(!ok || s == 0)
 	})
 
-	vm.registerFile()          // needs the exception hierarchy (Errno::ENOENT < StandardError)
-	vm.registerIO()            // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
-	vm.registerDir()           // Dir (reuses the Errno module set up by registerFile)
-	vm.registerTmpdir()        // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
-	vm.registerProcess()       // Process module — identity + clock_gettime
-	vm.registerSpawn()         // IO.pipe / read_nonblock / select + Process.spawn/waitpid2 + Kernel.fork/exec
-	vm.registerObjectSpace()   // ObjectSpace module — finalizer API + reflective no-ops
-	vm.registerOpenSSL()       // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
-	vm.registerSocket()        // TCPSocket/TCPServer (net) + OpenSSL::SSL::SSLSocket (crypto/tls); after registerOpenSSL (upgrades its SSL shell)
-	vm.registerNetHTTP()       // net/http + net/https loadable shell; needs StandardError
-	vm.registerResolv()        // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
-	vm.registerTimeout()       // Timeout module (loadable shell); needs RuntimeError
-	vm.registerDateErrors()    // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
-	vm.registerJSON()          // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
-	vm.registerYAML()          // YAML/Psych loadable shell; needs StandardError
-	vm.registerBCrypt()        // BCrypt (require "bcrypt"), backed by go-ruby-bcrypt; needs StandardError + String
-	vm.registerJWT()           // JWT (require "jwt"), backed by go-ruby-jwt; needs StandardError
-	vm.registerRbNaCl()        // RbNaCl (require "rbnacl"), backed by go-ruby-sodium; needs StandardError
-	vm.registerAge()           // Age (require "age"), backed by go-ruby-age; needs StandardError
-	vm.registerPrawn()         // Prawn::Document (require "prawn"), backed by go-ruby-prawn (fpdf); needs StandardError for Prawn::Errors
-	vm.registerProtobuf()      // Google::Protobuf (require "google/protobuf"), backed by go-ruby-protobuf; needs TypeError/RuntimeError
-	vm.registerBleve()         // Bleve module (require "bleve"), backed by go-ruby-bleve; needs StandardError (Bleve::Error)
-	vm.registerGraphQL()       // GraphQL module (require "graphql"), backed by go-ruby-graphql; needs StandardError (GraphQL::Error)
-	vm.registerOpenTelemetry() // OpenTelemetry module (require "opentelemetry"), backed by go-ruby-opentelemetry; needs Object (the SDK/API class tree)
-	vm.registerFaraday()       // Faraday HTTP client (require "faraday"), backed by go-ruby-faraday; needs StandardError for Faraday::Error
-	vm.registerPuma()          // Puma module (require "puma"), backed by go-ruby-puma; threaded Rack web server over net/http; needs StandardError (Puma::Error) + StringIO (rack.input)
-	vm.registerBolt()          // Bolt::DB/Tx/Bucket/Cursor (require "bolt"), backed by go-ruby-bbolt; needs StandardError for Bolt::Error
-	vm.registerSAML()          // SAML / OneLogin::RubySaml (require "saml"/"ruby-saml"), backed by go-ruby-saml; needs StandardError for SAML::Error
-	vm.registerWebAuthn()      // WebAuthn module (require "webauthn"), backed by go-ruby-webauthn; needs StandardError (WebAuthn::Error)
-	vm.registerACME()          // Acme::Client / Order / Authorization / Challenge / CertificateRequest (require "acme" / "acme/client"), backed by go-ruby-acme (x/crypto/acme); transport is a host seam; needs StandardError for the Acme::Error tree
-	vm.registerGRPC()          // GRPC module (require "grpc"), backed by go-ruby-grpc over google.golang.org/grpc; in-process bufconn transport; needs StandardError (GRPC::Error)
-	vm.registerNATS()          // NATS module (require "nats"), backed by go-ruby-nats over nats.go; needs StandardError for the NATS::Error tree
-	vm.registerKafka()         // Kafka module (require "kafka"), backed by go-ruby-kafka (twmb/franz-go); needs StandardError for Kafka::Error
-	vm.registerEtcd()          // Etcd/Etcdv3 client (require "etcd"/"etcdv3"), backed by go-ruby-etcd over go.etcd.io/etcd/client/v3; needs StandardError for Etcd::Error
-	vm.registerMySQL()         // Mysql2::Client/Result/Statement (require "mysql2" / "mysql"), backed by go-ruby-mysql over go-sql-driver; needs Enumerable for Result and StandardError for Mysql2::Error
-	vm.registerMongo()         // Mongo::Client/Database/Collection/Cursor + BSON::ObjectId (require "mongo"), backed by go-ruby-mongodb; needs StandardError for Mongo::Error
-	vm.registerParquet()       // Parquet::ArrowFileReader/ArrowFileWriter (require "parquet"), backed by go-ruby-parquet; needs StandardError for Parquet::Error
-	vm.registerHTTParty()      // HTTParty HTTP client (require "httparty"), backed by go-ruby-httparty; needs StandardError for HTTParty::Error
+	vm.registerFile()           // needs the exception hierarchy (Errno::ENOENT < StandardError)
+	vm.registerIO()             // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
+	vm.registerDir()            // Dir (reuses the Errno module set up by registerFile)
+	vm.registerTmpdir()         // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
+	vm.registerProcess()        // Process module — identity + clock_gettime
+	vm.registerSpawn()          // IO.pipe / read_nonblock / select + Process.spawn/waitpid2 + Kernel.fork/exec
+	vm.registerObjectSpace()    // ObjectSpace module — finalizer API + reflective no-ops
+	vm.registerOpenSSL()        // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
+	vm.registerSocket()         // TCPSocket/TCPServer (net) + OpenSSL::SSL::SSLSocket (crypto/tls); after registerOpenSSL (upgrades its SSL shell)
+	vm.registerNetHTTP()        // net/http + net/https loadable shell; needs StandardError
+	vm.registerResolv()         // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
+	vm.registerTimeout()        // Timeout module (loadable shell); needs RuntimeError
+	vm.registerDateErrors()     // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
+	vm.registerJSON()           // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
+	vm.registerYAML()           // YAML/Psych loadable shell; needs StandardError
+	vm.registerBCrypt()         // BCrypt (require "bcrypt"), backed by go-ruby-bcrypt; needs StandardError + String
+	vm.registerJWT()            // JWT (require "jwt"), backed by go-ruby-jwt; needs StandardError
+	vm.registerRbNaCl()         // RbNaCl (require "rbnacl"), backed by go-ruby-sodium; needs StandardError
+	vm.registerAge()            // Age (require "age"), backed by go-ruby-age; needs StandardError
+	vm.registerPrawn()          // Prawn::Document (require "prawn"), backed by go-ruby-prawn (fpdf); needs StandardError for Prawn::Errors
+	vm.registerProtobuf()       // Google::Protobuf (require "google/protobuf"), backed by go-ruby-protobuf; needs TypeError/RuntimeError
+	vm.registerBleve()          // Bleve module (require "bleve"), backed by go-ruby-bleve; needs StandardError (Bleve::Error)
+	vm.registerGraphQL()        // GraphQL module (require "graphql"), backed by go-ruby-graphql; needs StandardError (GraphQL::Error)
+	vm.registerOpenTelemetry()  // OpenTelemetry module (require "opentelemetry"), backed by go-ruby-opentelemetry; needs Object (the SDK/API class tree)
+	vm.registerFaraday()        // Faraday HTTP client (require "faraday"), backed by go-ruby-faraday; needs StandardError for Faraday::Error
+	vm.registerPuma()           // Puma module (require "puma"), backed by go-ruby-puma; threaded Rack web server over net/http; needs StandardError (Puma::Error) + StringIO (rack.input)
+	vm.registerBolt()           // Bolt::DB/Tx/Bucket/Cursor (require "bolt"), backed by go-ruby-bbolt; needs StandardError for Bolt::Error
+	vm.registerSAML()           // SAML / OneLogin::RubySaml (require "saml"/"ruby-saml"), backed by go-ruby-saml; needs StandardError for SAML::Error
+	vm.registerWebAuthn()       // WebAuthn module (require "webauthn"), backed by go-ruby-webauthn; needs StandardError (WebAuthn::Error)
+	vm.registerACME()           // Acme::Client / Order / Authorization / Challenge / CertificateRequest (require "acme" / "acme/client"), backed by go-ruby-acme (x/crypto/acme); transport is a host seam; needs StandardError for the Acme::Error tree
+	vm.registerGRPC()           // GRPC module (require "grpc"), backed by go-ruby-grpc over google.golang.org/grpc; in-process bufconn transport; needs StandardError (GRPC::Error)
+	vm.registerNATS()           // NATS module (require "nats"), backed by go-ruby-nats over nats.go; needs StandardError for the NATS::Error tree
+	vm.registerKafka()          // Kafka module (require "kafka"), backed by go-ruby-kafka (twmb/franz-go); needs StandardError for Kafka::Error
+	vm.registerEtcd()           // Etcd/Etcdv3 client (require "etcd"/"etcdv3"), backed by go-ruby-etcd over go.etcd.io/etcd/client/v3; needs StandardError for Etcd::Error
+	vm.registerMySQL()          // Mysql2::Client/Result/Statement (require "mysql2" / "mysql"), backed by go-ruby-mysql over go-sql-driver; needs Enumerable for Result and StandardError for Mysql2::Error
+	vm.registerMongo()          // Mongo::Client/Database/Collection/Cursor + BSON::ObjectId (require "mongo"), backed by go-ruby-mongodb; needs StandardError for Mongo::Error
+	vm.registerParquet()        // Parquet::ArrowFileReader/ArrowFileWriter (require "parquet"), backed by go-ruby-parquet; needs StandardError for Parquet::Error
+	vm.registerHTTParty()       // HTTParty HTTP client (require "httparty"), backed by go-ruby-httparty; needs StandardError for HTTParty::Error
 	vm.registerConnectionPool() // ConnectionPool + ConnectionPool::Wrapper (require "connection_pool"), backed by go-ruby-connection-pool; needs RuntimeError + Timeout::Error
-	vm.registerErubi()         // Erubi::Engine / CaptureEndEngine + Erubi.h (require "erubi"), template->Ruby-source compiler backed by go-ruby-erubi
-	vm.registerHTTPrb()        // HTTP module — chainable http.rb client (require "http"), backed by go-ruby-http; needs StandardError for HTTP::Error
-	vm.registerExcon()         // Excon module — persistent HTTP client (require "excon"), backed by go-ruby-excon; needs StandardError for Excon::Error
-	vm.registerTyphoeus()      // Typhoeus module — parallel HTTP client + Hydra (require "typhoeus"), backed by go-ruby-typhoeus; net/http+goroutines
-	vm.registerPundit()        // Pundit mixin (require "pundit"), backed by go-ruby-pundit; policy dispatch + safe_constantize are rbgo seams
-	vm.registerCanCanCan()     // CanCan::Ability mixin (require "cancancan" / "cancan"), backed by go-ruby-cancancan; attr read + block eval are rbgo seams
-	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
-	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
-	vm.registerTZInfo()        // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier
-	vm.registerChronic()       // Chronic module (go-ruby-chronic backend); needs StandardError
-	vm.registerMoney()         // Money module (go-ruby-money backend); needs StandardError for Money::Currency::UnknownCurrency
-	vm.registerAddressable()   // Addressable module (go-ruby-addressable backend); needs StandardError
-	vm.registerPublicSuffix()  // PublicSuffix module (go-ruby-public-suffix backend); needs StandardError for PublicSuffix::Error tree
-	vm.registerMIMETypes()     // MIME::Types module (go-ruby-mime-types backend)
-	vm.registerMail()          // Mail module (go-ruby-mail backend)
-	vm.registerFaker()         // Faker module (go-ruby-faker backend); needs Random for the seed contract
-	vm.registerCommonmark()    // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-ruby-commonmark
-	vm.registerMustache()      // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
-	vm.registerJbuilder()      // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
-	vm.registerBuilder()       // Builder::XmlMarkup (require "builder"), backed by go-ruby-builder
-	vm.registerSQLite3()       // SQLite3::Database/Statement (require "sqlite3"), backed by go-ruby-sqlite3 (modernc); needs StandardError for SQLite3::Exception
-	vm.registerRedis()         // Redis client (require "redis"), backed by go-ruby-redis RESP codec; socket = injected IO seam; needs StandardError for Redis::BaseError
-	vm.registerPG()            // PG::Connection/Result (require "pg"), backed by go-ruby-pg v3 protocol; socket = injected IO seam; needs StandardError for PG::Error
-	vm.registerSidekiq()       // Sidekiq::Client/Job(Worker) + module (require "sidekiq"), backed by go-ruby-sidekiq over go-redis/v9; Redis client dialled from Sidekiq.redis/ENV; perform body is Ruby seam; needs StandardError for Sidekiq::Error
-	vm.registerResque()        // Resque module + Job/Worker/Failure (require "resque"), backed by go-ruby-resque over go-redis/v9; @queue resolver + self.perform are Ruby seams; needs StandardError for Resque::Error
-	vm.registerSequel()        // Sequel query builder + Database (require "sequel"), backed by go-ruby-sequel; executor seam wired to SQLite3::Database (real execution)
-	vm.registerNokogiri()      // Nokogiri::HTML/XML -> Document/Node/NodeSet (require "nokogiri"), backed by go-ruby-nokogiri; needs StandardError for Nokogiri::SyntaxError
-	vm.registerNokogiriXSLT()  // Nokogiri::XSLT(str) -> Stylesheet#transform/apply_to (require "nokogiri"), backed by go-ruby-xslt over go-ruby-nokogiri; needs registerNokogiri first
-	vm.registerRSpec()         // RSpec matcher + expect surface (require "rspec"), backed by go-ruby-rspec; needs Exception for ExpectationNotMetError
-	vm.registerRuboCop()       // RuboCop::Runner#inspect/autocorrect + Cop::Offense (require "rubocop"), backed by go-ruby-rubocop over go-ruby-parser; needs StandardError for RuboCop::Error
-	vm.registerRack()          // Rack::Request/Response/Utils (require "rack" / "rack/utils"), backed by go-ruby-rack; deterministic env/query/escape, no socket
-	vm.registerGrape()         // Grape::Router/Validator/Formatter (require "grape"), backed by go-ruby-grape; endpoint-block exec + Rack env are host seams; needs StandardError for Grape::Exceptions
-	vm.registerSinatra()       // Sinatra::Base class-DSL + #call Rack adapter (require "sinatra/base"), backed by go-ruby-sinatra over go-ruby-rack; route/filter block eval is the rbgo seam; needs Rack + StandardError (Sinatra::NotFound), so registered after registerRack
-	vm.registerRoda()          // Roda class routing-tree DSL (route do |r| … end) + #call Rack adapter (require "roda"), backed by go-ruby-roda over go-ruby-rack; the route/matcher block eval is the rbgo seam, the routing tree is the library; needs Rack + StandardError (Roda::RodaError)
-	vm.registerAsync()         // Async{} structured concurrency + Async::Task/Barrier/Semaphore/Condition/Notification/Queue/LimitedQueue/Waiter (require "async"), backed by go-ruby-async on its CoScheduler; the task-body block eval is the rbgo seam; needs StandardError (Async::Stop / Async::TimeoutError)
-	vm.registerWarden()        // Warden::Manager/Proxy/Strategies (require "warden"), backed by go-ruby-warden over go-ruby-rack; strategy valid?/authenticate! bodies are the rbgo seam; needs Rack + StandardError (Warden::NotAuthenticated), so registered after registerRack
-	vm.registerOmniAuth()      // OmniAuth::Builder/Strategy/AuthHash + OmniAuth.config (require "omniauth"), backed by go-ruby-omniauth over go-ruby-rack; provider request_phase/uid/info bodies are the rbgo seam; needs Rack + StandardError (OmniAuth::Error), so registered after registerRack
-	vm.registerActiveRecord()  // ActiveRecord::Model/Relation/Record + Base.establish_connection (require "active_record"), backed by go-ruby-activerecord; adapter seam wired to go-ruby-sqlite3 so queries run; needs StandardError for ActiveRecordError
-	vm.registerRQRCode()       // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
-	vm.registerDotenv()        // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
-	vm.registerHCL2()          // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
-	vm.registerI18n()          // I18n module (require "i18n"), backed by go-ruby-i18n; needs ArgumentError for the I18n::ArgumentError tree
-	vm.registerZeitwerk()      // Zeitwerk::Loader/Inflector (require "zeitwerk"), backed by go-ruby-zeitwerk; wires DefineAutoload->Module#autoload, Load->require; needs StandardError/NameError for the Zeitwerk error tree
-	vm.registerRSS()           // RSS::Parser.parse -> RSS::Rss / RSS::RDF / RSS::Atom::Feed (require "rss"), backed by go-ruby-rss; needs StandardError for RSS::Error
-	vm.registerRDoc()          // RDoc::Markup + ToHtml/ToMarkdown/ToRdoc formatters (require "rdoc"), backed by go-ruby-rdoc; needs StandardError for RDoc::Error
-	vm.registerThor()          // Thor CLI framework: option parsing + dispatch + help (require "thor"), backed by go-ruby-thor; needs StandardError for Thor::Error
-	vm.registerBundler()       // Bundler: Gemfile/Gemfile.lock codec + resolver (require "bundler"), backed by go-ruby-bundler; needs StandardError for Bundler::BundlerError
-	vm.registerRacc()          // Racc::Parser LALR(1) runtime (require "racc/parser"), backed by go-ruby-racc; needs StandardError for Racc::ParseError
-	vm.registerMinitest()      // Minitest::Assertions + Test lifecycle (require "minitest"), backed by go-ruby-minitest; needs StandardError for Minitest::Assertion
-	vm.registerMinitestSpec()  // Minitest::Spec + spec DSL (describe/it/before/after/let), the must_*/wont_* expectations, and the autorun runner/reporter (require "minitest/autorun" / "minitest/spec"); layers on registerMinitest's Test + assertions
-	vm.registerKramdown()      // Kramdown::Document (require "kramdown"), backed by go-ruby-kramdown
-	vm.registerLiquid()        // Liquid::Template.parse(...).render (require "liquid"), backed by go-ruby-liquid; needs StandardError for Liquid::Error
-	vm.registerRouge()         // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
-	vm.registerSlim()          // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error
-	vm.registerHaml()          // Haml::Template.new(src).render (require "haml"), compile-to-source via go-ruby-haml; needs StandardError for Haml::Error
-	vm.registerDryTypes()      // Dry::Types type system (require "dry/types"), backed by go-ruby-dry-types; needs StandardError for Dry::Types::CoercionError
-	vm.registerDryStruct()     // Dry::Struct base class (require "dry/struct"), backed by go-ruby-dry-struct; pins go-ruby-dry-types
-	vm.registerDryValidation() // Dry::Schema / Dry::Validation::Contract (require "dry/validation"), backed by go-ruby-dry-validation; pins go-ruby-dry-types
-	vm.registerOAuth2()        // OAuth2::Client / AccessToken / Response (require "oauth2"), backed by go-ruby-oauth2; HTTP round-trip is a net-http host seam
-	vm.registerOIDC()          // OpenIDConnect::Client / Verifier / ProviderMetadata (require "openid_connect" / "oidc"), backed by go-ruby-oidc; reuses OAuth2+JWT; HTTP seam is a Ruby callable Doer
-	vm.registerFileUtils()     // FileUtils (real fs ops over os); needs Errno (registerFile)
-	vm.registerGetoptLong()    // GetoptLong loadable shell; needs StandardError
-	vm.registerSignal()        // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)
-	vm.registerOpen3()         // Open3 loadable shell (popen/capture raise; spawning pending)
-	vm.registerRipper()        // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
-	vm.registerSyslog()        // Syslog loadable shell (feature probe)
-	vm.registerCGI()           // CGI.escape/unescape (real over net/url) + HTML helpers
-	vm.registerERB()           // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
-	vm.registerStringScanner() // StringScanner (require "strscan"), backed by go-ruby-strscan; needs StandardError
-	vm.registerOptionParser()  // OptionParser (require "optparse"), backed by go-ruby-optparse; prelude adds the ParseError tree
-	vm.registerURI()           // URI module (require "uri"), backed by go-ruby-uri; needs StandardError (URI::Error) + Regexp (make_regexp)
-	vm.registerCSV()           // CSV class (require "csv"), backed by go-ruby-csv; needs StandardError (CSV::MalformedCSVError) + Date/Time
-	vm.registerREXML()         // REXML module (require "rexml/document"), backed by go-ruby-rexml; needs StandardError (REXML::ParseException)
-	vm.registerMatrix()        // Matrix/Vector (require "matrix"), backed by go-ruby-matrix; needs StandardError (ExceptionForMatrix::Err*)
-	vm.registerArrow()         // Arrow module (require "arrow"), backed by go-ruby-arrow; needs StandardError (Arrow::Error)
-	vm.registerShellwords()    // Shellwords (require "shellwords"), backed by go-ruby-shellwords; installs Shellwords + String/Array core extensions lazily on require
-	vm.registerMonitor()       // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
-	vm.registerObservable()    // Observable mixin (require "observer"), backed by go-ruby-observer; rbgo wires dispatch + respond_to?
-	vm.registerZlib()          // needs the exception hierarchy (Zlib::Error < StandardError)
-	vm.registerFiber()         // needs the exception hierarchy (FiberError < StandardError)
-	vm.registerThread()        // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
+	vm.registerErubi()          // Erubi::Engine / CaptureEndEngine + Erubi.h (require "erubi"), template->Ruby-source compiler backed by go-ruby-erubi
+	vm.registerHTTPrb()         // HTTP module — chainable http.rb client (require "http"), backed by go-ruby-http; needs StandardError for HTTP::Error
+	vm.registerExcon()          // Excon module — persistent HTTP client (require "excon"), backed by go-ruby-excon; needs StandardError for Excon::Error
+	vm.registerTyphoeus()       // Typhoeus module — parallel HTTP client + Hydra (require "typhoeus"), backed by go-ruby-typhoeus; net/http+goroutines
+	vm.registerPundit()         // Pundit mixin (require "pundit"), backed by go-ruby-pundit; policy dispatch + safe_constantize are rbgo seams
+	vm.registerCanCanCan()      // CanCan::Ability mixin (require "cancancan" / "cancan"), backed by go-ruby-cancancan; attr read + block eval are rbgo seams
+	vm.registerMsgpack()        // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
+	vm.registerTOML()           // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
+	vm.registerTZInfo()         // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier
+	vm.registerChronic()        // Chronic module (go-ruby-chronic backend); needs StandardError
+	vm.registerMoney()          // Money module (go-ruby-money backend); needs StandardError for Money::Currency::UnknownCurrency
+	vm.registerAddressable()    // Addressable module (go-ruby-addressable backend); needs StandardError
+	vm.registerPublicSuffix()   // PublicSuffix module (go-ruby-public-suffix backend); needs StandardError for PublicSuffix::Error tree
+	vm.registerMIMETypes()      // MIME::Types module (go-ruby-mime-types backend)
+	vm.registerMail()           // Mail module (go-ruby-mail backend)
+	vm.registerFaker()          // Faker module (go-ruby-faker backend); needs Random for the seed contract
+	vm.registerCommonmark()     // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-ruby-commonmark
+	vm.registerMustache()       // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
+	vm.registerJbuilder()       // Jbuilder.encode / json.<name> DSL (require "jbuilder"), backed by go-ruby-jbuilder
+	vm.registerBuilder()        // Builder::XmlMarkup (require "builder"), backed by go-ruby-builder
+	vm.registerSQLite3()        // SQLite3::Database/Statement (require "sqlite3"), backed by go-ruby-sqlite3 (modernc); needs StandardError for SQLite3::Exception
+	vm.registerRedis()          // Redis client (require "redis"), backed by go-ruby-redis RESP codec; socket = injected IO seam; needs StandardError for Redis::BaseError
+	vm.registerPG()             // PG::Connection/Result (require "pg"), backed by go-ruby-pg v3 protocol; socket = injected IO seam; needs StandardError for PG::Error
+	vm.registerSidekiq()        // Sidekiq::Client/Job(Worker) + module (require "sidekiq"), backed by go-ruby-sidekiq over go-redis/v9; Redis client dialled from Sidekiq.redis/ENV; perform body is Ruby seam; needs StandardError for Sidekiq::Error
+	vm.registerResque()         // Resque module + Job/Worker/Failure (require "resque"), backed by go-ruby-resque over go-redis/v9; @queue resolver + self.perform are Ruby seams; needs StandardError for Resque::Error
+	vm.registerSequel()         // Sequel query builder + Database (require "sequel"), backed by go-ruby-sequel; executor seam wired to SQLite3::Database (real execution)
+	vm.registerNokogiri()       // Nokogiri::HTML/XML -> Document/Node/NodeSet (require "nokogiri"), backed by go-ruby-nokogiri; needs StandardError for Nokogiri::SyntaxError
+	vm.registerNokogiriXSLT()   // Nokogiri::XSLT(str) -> Stylesheet#transform/apply_to (require "nokogiri"), backed by go-ruby-xslt over go-ruby-nokogiri; needs registerNokogiri first
+	vm.registerRSpec()          // RSpec matcher + expect surface (require "rspec"), backed by go-ruby-rspec; needs Exception for ExpectationNotMetError
+	vm.registerRuboCop()        // RuboCop::Runner#inspect/autocorrect + Cop::Offense (require "rubocop"), backed by go-ruby-rubocop over go-ruby-parser; needs StandardError for RuboCop::Error
+	vm.registerRack()           // Rack::Request/Response/Utils (require "rack" / "rack/utils"), backed by go-ruby-rack; deterministic env/query/escape, no socket
+	vm.registerGrape()          // Grape::Router/Validator/Formatter (require "grape"), backed by go-ruby-grape; endpoint-block exec + Rack env are host seams; needs StandardError for Grape::Exceptions
+	vm.registerSinatra()        // Sinatra::Base class-DSL + #call Rack adapter (require "sinatra/base"), backed by go-ruby-sinatra over go-ruby-rack; route/filter block eval is the rbgo seam; needs Rack + StandardError (Sinatra::NotFound), so registered after registerRack
+	vm.registerRoda()           // Roda class routing-tree DSL (route do |r| … end) + #call Rack adapter (require "roda"), backed by go-ruby-roda over go-ruby-rack; the route/matcher block eval is the rbgo seam, the routing tree is the library; needs Rack + StandardError (Roda::RodaError)
+	vm.registerAsync()          // Async{} structured concurrency + Async::Task/Barrier/Semaphore/Condition/Notification/Queue/LimitedQueue/Waiter (require "async"), backed by go-ruby-async on its CoScheduler; the task-body block eval is the rbgo seam; needs StandardError (Async::Stop / Async::TimeoutError)
+	vm.registerWarden()         // Warden::Manager/Proxy/Strategies (require "warden"), backed by go-ruby-warden over go-ruby-rack; strategy valid?/authenticate! bodies are the rbgo seam; needs Rack + StandardError (Warden::NotAuthenticated), so registered after registerRack
+	vm.registerOmniAuth()       // OmniAuth::Builder/Strategy/AuthHash + OmniAuth.config (require "omniauth"), backed by go-ruby-omniauth over go-ruby-rack; provider request_phase/uid/info bodies are the rbgo seam; needs Rack + StandardError (OmniAuth::Error), so registered after registerRack
+	vm.registerActiveRecord()   // ActiveRecord::Model/Relation/Record + Base.establish_connection (require "active_record"), backed by go-ruby-activerecord; adapter seam wired to go-ruby-sqlite3 so queries run; needs StandardError for ActiveRecordError
+	vm.registerRQRCode()        // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
+	vm.registerDotenv()         // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
+	vm.registerHCL2()           // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
+	vm.registerI18n()           // I18n module (require "i18n"), backed by go-ruby-i18n; needs ArgumentError for the I18n::ArgumentError tree
+	vm.registerZeitwerk()       // Zeitwerk::Loader/Inflector (require "zeitwerk"), backed by go-ruby-zeitwerk; wires DefineAutoload->Module#autoload, Load->require; needs StandardError/NameError for the Zeitwerk error tree
+	vm.registerRSS()            // RSS::Parser.parse -> RSS::Rss / RSS::RDF / RSS::Atom::Feed (require "rss"), backed by go-ruby-rss; needs StandardError for RSS::Error
+	vm.registerRDoc()           // RDoc::Markup + ToHtml/ToMarkdown/ToRdoc formatters (require "rdoc"), backed by go-ruby-rdoc; needs StandardError for RDoc::Error
+	vm.registerThor()           // Thor CLI framework: option parsing + dispatch + help (require "thor"), backed by go-ruby-thor; needs StandardError for Thor::Error
+	vm.registerBundler()        // Bundler: Gemfile/Gemfile.lock codec + resolver (require "bundler"), backed by go-ruby-bundler; needs StandardError for Bundler::BundlerError
+	vm.registerRacc()           // Racc::Parser LALR(1) runtime (require "racc/parser"), backed by go-ruby-racc; needs StandardError for Racc::ParseError
+	vm.registerMinitest()       // Minitest::Assertions + Test lifecycle (require "minitest"), backed by go-ruby-minitest; needs StandardError for Minitest::Assertion
+	vm.registerMinitestSpec()   // Minitest::Spec + spec DSL (describe/it/before/after/let), the must_*/wont_* expectations, and the autorun runner/reporter (require "minitest/autorun" / "minitest/spec"); layers on registerMinitest's Test + assertions
+	vm.registerKramdown()       // Kramdown::Document (require "kramdown"), backed by go-ruby-kramdown
+	vm.registerLiquid()         // Liquid::Template.parse(...).render (require "liquid"), backed by go-ruby-liquid; needs StandardError for Liquid::Error
+	vm.registerRouge()          // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
+	vm.registerSlim()           // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error
+	vm.registerHaml()           // Haml::Template.new(src).render (require "haml"), compile-to-source via go-ruby-haml; needs StandardError for Haml::Error
+	vm.registerDryTypes()       // Dry::Types type system (require "dry/types"), backed by go-ruby-dry-types; needs StandardError for Dry::Types::CoercionError
+	vm.registerDryStruct()      // Dry::Struct base class (require "dry/struct"), backed by go-ruby-dry-struct; pins go-ruby-dry-types
+	vm.registerDryValidation()  // Dry::Schema / Dry::Validation::Contract (require "dry/validation"), backed by go-ruby-dry-validation; pins go-ruby-dry-types
+	vm.registerOAuth2()         // OAuth2::Client / AccessToken / Response (require "oauth2"), backed by go-ruby-oauth2; HTTP round-trip is a net-http host seam
+	vm.registerOIDC()           // OpenIDConnect::Client / Verifier / ProviderMetadata (require "openid_connect" / "oidc"), backed by go-ruby-oidc; reuses OAuth2+JWT; HTTP seam is a Ruby callable Doer
+	vm.registerFileUtils()      // FileUtils (real fs ops over os); needs Errno (registerFile)
+	vm.registerGetoptLong()     // GetoptLong loadable shell; needs StandardError
+	vm.registerSignal()         // Signal.trap/list/signame + Kernel#trap (handlers recorded, not delivered)
+	vm.registerOpen3()          // Open3 loadable shell (popen/capture raise; spawning pending)
+	vm.registerRipper()         // ripper loadable shell (Ripper.sexp etc. raise); needs StandardError
+	vm.registerSyslog()         // Syslog loadable shell (feature probe)
+	vm.registerCGI()            // CGI.escape/unescape (real over net/url) + HTML helpers
+	vm.registerERB()            // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
+	vm.registerStringScanner()  // StringScanner (require "strscan"), backed by go-ruby-strscan; needs StandardError
+	vm.registerOptionParser()   // OptionParser (require "optparse"), backed by go-ruby-optparse; prelude adds the ParseError tree
+	vm.registerURI()            // URI module (require "uri"), backed by go-ruby-uri; needs StandardError (URI::Error) + Regexp (make_regexp)
+	vm.registerCSV()            // CSV class (require "csv"), backed by go-ruby-csv; needs StandardError (CSV::MalformedCSVError) + Date/Time
+	vm.registerREXML()          // REXML module (require "rexml/document"), backed by go-ruby-rexml; needs StandardError (REXML::ParseException)
+	vm.registerMatrix()         // Matrix/Vector (require "matrix"), backed by go-ruby-matrix; needs StandardError (ExceptionForMatrix::Err*)
+	vm.registerArrow()          // Arrow module (require "arrow"), backed by go-ruby-arrow; needs StandardError (Arrow::Error)
+	vm.registerShellwords()     // Shellwords (require "shellwords"), backed by go-ruby-shellwords; installs Shellwords + String/Array core extensions lazily on require
+	vm.registerMonitor()        // Monitor/MonitorMixin (single-thread synchronize); needs StandardError
+	vm.registerObservable()     // Observable mixin (require "observer"), backed by go-ruby-observer; rbgo wires dispatch + respond_to?
+	vm.registerZlib()           // needs the exception hierarchy (Zlib::Error < StandardError)
+	vm.registerFiber()          // needs the exception hierarchy (FiberError < StandardError)
+	vm.registerThread()         // needs StandardError/StopIteration (ThreadError, ClosedQueueError)
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
