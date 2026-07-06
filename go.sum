@@ -334,8 +334,8 @@ github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779 h1:WoF2EMRWd5Vxj
 github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779/go.mod h1:auu7u2RjtfGu7yD4e9U67Pt+EbKWs8mYVV/tLWhBanA=
 github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f h1:+PEruR5OxctQrL3D592lBTI6cW43y73zujTC1jwfsbM=
 github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f/go.mod h1:HeFcYYwifNZvQzF9jdaSFViHYT0mUNLwWEFPQj0j6V4=
-github.com/go-ruby-rack/rack v0.0.0-20260704053028-640136bb67e7 h1:pGxohUY0tT+OSg6Vw91D+SaUxlvaeViZZavM1d0nZK4=
-github.com/go-ruby-rack/rack v0.0.0-20260704053028-640136bb67e7/go.mod h1:rKZ3vD81gJq61NvZ3XX9cr6AxtIV3+lFZKG7lPKV3PM=
+github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329 h1:4sXRBW9MXaEuosiyzzk1Fh+C8R2+PiPdua5sutdvV+E=
+github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329/go.mod h1:rKZ3vD81gJq61NvZ3XX9cr6AxtIV3+lFZKG7lPKV3PM=
 github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e h1:Orev3pHC09GghkceOci3+dlV4Untoly525O7MyFdXOY=
 github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e/go.mod h1:NBlCj+x2SBtdDSKDvTTCVRoWd9tGPWcUwPvE2nKvYSM=
 github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92 h1:EXqNsTpyz5KPZURl94uOjcIIyJ0mCyMA7/AFAXvFgdg=
