@@ -546,7 +546,9 @@ func (vm *VM) nethttpDialXfer(cfg *nethttpXfer) (streamIO, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := nethttpProxyConnect(conn, cfg.hostHdr, cfg.proxyAuth); err != nil {
+	// CONNECT always names an explicit host:port authority (hostHdr omits the port
+	// for a default-port target, which CONNECT does not permit).
+	if err := nethttpProxyConnect(conn, net.JoinHostPort(cfg.host, cfg.port), cfg.proxyAuth); err != nil {
 		conn.Close()
 		return nil, err
 	}
