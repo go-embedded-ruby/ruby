@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
+	async "github.com/go-ruby-async/async"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
 	sinatra "github.com/go-ruby-sinatra/sinatra"
@@ -247,6 +248,13 @@ type VM struct {
 	sinatraCtxCache                        map[*sinatra.Context]*SinatraCtx // per-request handler self, shared across before/route/after so @ivars persist
 	sinatraSession                         *sinatraSessionState             // per-dispatch cookie session (enable :sessions); the `session` helper returns its live Hash, saved back into a Set-Cookie
 	sinatraDefaultSecret                   []byte                           // per-VM fallback session-signing key when no session_secret is set (like MRI Sinatra's random default), generated once
+	cRodaBase                              *RClass                          // Roda (require "roda"), the routing-tree app superclass, backed by go-ruby-roda
+	cRodaRequest                           *RClass                          // Roda::RodaRequest, the self a route/matcher block runs against
+	cRodaResponse                          *RClass                          // Roda::RodaResponse, the mutable response a route block writes into
+	rodaRoutes                             map[*RClass]*Proc                // per-Roda-subclass top-level route block (route do |r| … end)
+	cAsyncTask                             *RClass                          // Async::Task, one node of the structured-concurrency tree, backed by go-ruby-async
+	curAsyncTask                           *async.Task                      // the task whose Ruby body is currently running (backs Async::Task.current and the caller passed to blocking async ops)
+	asyncTasks                             map[*async.Task]*AsyncTask       // wrapper cache so one *async.Task always maps to one Async::Task object (Ruby #equal? identity), cleared when the root reactor finishes
 	cMinitestSpec                          *RClass                          // Minitest::Spec, the spec-DSL subclass of Minitest::Test
 	minitestRunnables                      []*RClass                        // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
 	minitestCurInstance                    object.Value                     // the test instance currently running (backs bare must_*/wont_* and _)

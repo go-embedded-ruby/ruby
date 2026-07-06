@@ -18,6 +18,7 @@ require (
 	github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795
 	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
 	github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda
+	github.com/go-ruby-async/async v0.0.0-20260706115507-51a981d1e85d
 	github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e
 	github.com/go-ruby-bbolt/bbolt v0.0.0-20260704121138-28ee121195c0
 	github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363
@@ -103,6 +104,7 @@ require (
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
+	github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa
 	github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
 	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75
