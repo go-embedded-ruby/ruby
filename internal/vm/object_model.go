@@ -1132,6 +1132,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Mail::Body"].(*RClass)
 	case *MailField:
 		return vm.consts["Mail::Field"].(*RClass)
+	case *ActionMailerDelivery:
+		return x.cls
+	case *ActionMailerAttachments:
+		return x.cls
 	case *FileStat:
 		return vm.cFileStat
 	case *BigDecimal:

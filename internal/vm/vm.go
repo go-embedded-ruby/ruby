@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	actionmailer "github.com/go-ruby-actionmailer/actionmailer"
 	activejob "github.com/go-ruby-activejob/activejob"
 	activestorage "github.com/go-ruby-activestorage/activestorage"
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
@@ -279,6 +280,14 @@ type VM struct {
 	ajStack                                []*RObject                         // ActiveJob: instance stack the inline #perform seam reads
 	ajLastResult                           object.Value                       // ActiveJob: last #perform return value (perform_now's result)
 	ajArgs                                 *activejob.Arguments               // ActiveJob: module-level ActiveJob::Arguments serializer (GlobalID seam wired in registerActiveJob)
+	cActionMailerBase                      *RClass                            // ActionMailer::Base, the superclass every mailer subclasses (require "action_mailer"), backed by go-ruby-actionmailer
+	cActionMailerDelivery                  *RClass                            // ActionMailer::MessageDelivery, the lazy proxy a mailer action returns
+	cActionMailerAttachments               *RClass                            // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
+	amDefs                                 map[*RClass]*amDef                 // ActionMailer: per-mailer-class default/delivery/hook declarations, merged down the chain at delivery time
+	amDeliveries                           *object.Array                      // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
+	amMailerOf                             map[*RObject]*actionmailer.Mailer  // ActionMailer: mailer instance -> library *Mailer of its running action (the mail/attachments/headers seam)
+	amRenderer                             object.Value                       // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
+	amEnqueuer                             object.Value                       // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)
 	asConfig                               *activestorage.Config              // ActiveStorage process config (require "active_storage"); nil until first use, then a deterministic in-process config (MemStore + DiskService temp dir)
 	cACChannelBase                         *RClass                            // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
 	acServer                               object.Value                       // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)

@@ -83,6 +83,7 @@ var providedFeatures = map[string]bool{
 	"hanami": true, "hanami/router": true, "hanami/action": true,
 	"warden": true, "omniauth": true,
 	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,
+	"action_mailer": true, "actionmailer": true,
 	"rqrcode": true, "dotenv": true, "hcl2": true, "kramdown": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,
 	"dry/types": true, "dry-types": true,
