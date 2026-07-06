@@ -240,8 +240,8 @@ github.com/go-ruby-dry-types/dry-types v0.0.0-20260702150052-94ab5100a720 h1:Lc4
 github.com/go-ruby-dry-types/dry-types v0.0.0-20260702150052-94ab5100a720/go.mod h1:S+2r7EA5zp4E8JyaJ88koD8gT7k/JD9i8NGj6V6jIRM=
 github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260702151810-a274955bddac h1:ry6nkQY0B7TQfJD34iTIEqVPgThNkcXFreD116X/o74=
 github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260702151810-a274955bddac/go.mod h1:LHalD7pLKBYjablQtp55tlPahU5LHCXf0v0mSzmS6zE=
-github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529 h1:md/l6ifEY6S0Iy1nBk5hVt5BhnWJRqhB08gVEsVvS28=
-github.com/go-ruby-erb/erb v0.0.0-20260629074717-0999ae4dd529/go.mod h1:HEJVI7jQ/BnjiSiu2Wj934QboEAgdv47RNOqvZb+nRw=
+github.com/go-ruby-erb/erb v0.0.0-20260706152133-22f94a380d76 h1:CenGI7B67vUppMG1+YV78+IgbmKArmokJFStknRlBxU=
+github.com/go-ruby-erb/erb v0.0.0-20260706152133-22f94a380d76/go.mod h1:HEJVI7jQ/BnjiSiu2Wj934QboEAgdv47RNOqvZb+nRw=
 github.com/go-ruby-erubi/erubi v0.0.0-20260706150033-cfeeadde9120 h1:+CId0Dae0fU9zVcyryFoY8l/cqTpFSEvgv9RBXiZDDU=
 github.com/go-ruby-erubi/erubi v0.0.0-20260706150033-cfeeadde9120/go.mod h1:jZJcpxqgDFkKAW7K6Z/WwrWdF7BQ78dYUopimi986ls=
 github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a h1:aFqb/Uizc/H0UPz6uv5qWpyFVopuPlPjgXevBlV7HMo=

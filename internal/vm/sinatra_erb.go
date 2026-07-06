@@ -19,11 +19,18 @@ import (
 // _erbout buffer and returning the rendered String. That String becomes the Rack
 // response body via sinatraResult, exactly as under MRI Sinatra + Tilt.
 //
-// Trim mode and the output-buffer name match Tilt::ERBTemplate's defaults, which
-// Sinatra uses unchanged: trim "<>" (a code-only line's surrounding newlines are
-// removed) and eoutvar "_erbout". <%= %> interpolates unescaped (Sinatra does not
-// auto-escape unless :erb => { escape_html: true } is configured — a scoped
-// follow-up), <% %> is control flow.
+// The dialect and the output-buffer name match what Sinatra 4.x actually renders
+// with: since Sinatra 2.0 Tilt maps :erb to Tilt::ErubiTemplate, so views compile
+// through the erubi gem's Erubi::Engine, not classic MRI ERB. go-ruby-erb's
+// ModeErubi reproduces Erubi::Engine byte-for-byte (default engine options: trim
+// on, escape off), which is why the Sinatra render selects erb.ModeErubi here
+// (erubi has no trim_mode, so TrimMode is not passed) while the standalone
+// `require "erb"` / classic-ERB binding in erb.go stays in the default ModeERB.
+// The output buffer is eoutvar "_erbout" (Tilt's default). <%= %> interpolates
+// unescaped (Sinatra does not auto-escape unless :erb => { escape_html: true } is
+// configured — a scoped follow-up), <% %> is control flow. Unlike classic ERB
+// trim "<>", erubi keeps the trailing newline of a standalone `<%= … %>` line
+// (e.g. a `<%= yield %>` alone on its line in a layout), matching MRI Sinatra.
 //
 // Two view render paths land: an inline-String template (needs no filesystem)
 // and a :symbol template naming views/<sym>.erb (read through the File binding,
@@ -39,13 +46,8 @@ import (
 // (`erb :part` composed inside a view via a helper) and the :erb escape_html /
 // app-level `set :erb, layout:` engine options remain a scoped follow-up.
 
-// sinatraTrimMode is the ERB trim mode Sinatra renders with: Tilt::ERBTemplate
-// maps a nil/true :trim option (Sinatra's default) to "<>", so a line holding
-// only a code tag has both its surrounding newlines trimmed.
-const sinatraTrimMode = "<>"
-
 // sinatraEOutVar names the output buffer the compiled template appends to, matching
-// Tilt::ERBTemplate's default output variable.
+// Tilt::ErubiTemplate's default output variable.
 const sinatraEOutVar = "_erbout"
 
 // sinatraErb implements the `erb` view helper on a request context. template is
@@ -70,7 +72,11 @@ func (vm *VM) sinatraErb(sc *SinatraCtx, args []object.Value) object.Value {
 // non-nil, the yield block (used to expose the wrapped view to a layout's
 // `<%= yield %>`). It returns the rendered String.
 func (vm *VM) sinatraErbRender(sc *SinatraCtx, tmpl string, names []string, vals []object.Value, block *Proc) object.Value {
-	src, _, err := erbCompile(tmpl, erb.Options{TrimMode: sinatraTrimMode, EOutVar: sinatraEOutVar})
+	// ModeErubi: Sinatra 4.x renders ERB views through erubi (Tilt::ErubiTemplate),
+	// so go-ruby-erb compiles in erubi mode to stay byte-identical — notably a
+	// standalone `<%= yield %>` line keeps its trailing newline (classic ERB trim
+	// "<>" would drop it). The classic `require "erb"` binding stays in ModeERB.
+	src, _, err := erbCompile(tmpl, erb.Options{Mode: erb.ModeErubi, EOutVar: sinatraEOutVar})
 	if err != nil {
 		// go-ruby-erb never fails on a well-formed template (its err is reserved for
 		// genuinely malformed options, unreachable through this fixed-option call);
