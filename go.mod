@@ -29,6 +29,7 @@ require (
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
 	github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689
+	github.com/go-ruby-connection-pool/connection-pool v0.0.0-20260706115620-287a916e348b
 	github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc
 	github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
