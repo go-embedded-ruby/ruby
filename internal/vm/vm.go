@@ -283,6 +283,7 @@ type VM struct {
 	cACChannelBase                         *RClass                            // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
 	acServer                               object.Value                       // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
 	railtieSeams                           map[any]*railtieSeam               // per-railtie/engine/app deferred initializer blocks, keyed by the library ctx object; run inline by the RunInitializer seam during Application#initialize!
+	railsApp                               *RailsAppVal                       // the Ruby Application registered via Rails.application= (the rails meta-gem's top-level app); nil before boot
 	deviseConfig                           *DeviseConfig                      // the shared Devise.config the DatabaseAuthenticatable Warden strategy authenticates against
 	cHanamiRouter                          *RClass                            // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
 	cHanamiAction                          *RClass                            // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses

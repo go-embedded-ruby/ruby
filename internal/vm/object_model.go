@@ -1058,6 +1058,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *StringInquirerVal:
 		return x.cls
+	case *RailsEnvVal:
+		return x.cls
 	case *DeviseConfig:
 		return x.cls
 	case *DeviseResource:
