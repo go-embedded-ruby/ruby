@@ -269,6 +269,7 @@ type VM struct {
 	omniAuthStrategies                     map[string]*RClass               // OmniAuth provider registry: name -> strategy class (from OmniAuth::Strategies.add or provider Class)
 	omniAuthProviderOpts                   map[string]map[string]any        // OmniAuth per-provider option args (provider :name, key: …), surfaced to a strategy as #options
 	omniAuthConfig                         *OmniAuthConfig                  // the shared OmniAuth.config (test_mode / mock_auth / path_prefix)
+	deviseConfig                           *DeviseConfig                    // the shared Devise.config the DatabaseAuthenticatable Warden strategy authenticates against
 	cMinitestSpec                          *RClass                          // Minitest::Spec, the spec-DSL subclass of Minitest::Test
 	minitestRunnables                      []*RClass                        // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
 	minitestCurInstance                    object.Value                     // the test instance currently running (backs bare must_*/wont_* and _)

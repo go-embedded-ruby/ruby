@@ -74,7 +74,7 @@ var providedFeatures = map[string]bool{
 	"rack":    true, "rack/utils": true,
 	"sinatra": true, "sinatra/base": true,
 	"active_record": true, "activerecord": true,
-	"warden": true, "omniauth": true,
+	"warden": true, "omniauth": true, "devise": true,
 	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,
 	"rqrcode": true, "dotenv": true, "hcl2": true, "kramdown": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,

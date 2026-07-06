@@ -1284,6 +1284,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *OmniAuthHash:
 		return x.cls
+	case *DeviseConfig:
+		return x.cls
+	case *DeviseResource:
+		return x.cls
+	case *DeviseTokenGenerator:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *JobRedis:

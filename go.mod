@@ -37,6 +37,7 @@ require (
 	github.com/go-ruby-connection-pool/connection-pool v0.0.0-20260706115620-287a916e348b
 	github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc
 	github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4
+	github.com/go-ruby-devise/devise v0.0.0-20260706115634-252d1cfa97fc
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
 	github.com/go-ruby-digest/digest v0.0.0-20260703175012-4332315c5957
 	github.com/go-ruby-dotenv/dotenv v0.0.0-20260701101948-1022451560fd
