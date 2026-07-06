@@ -190,8 +190,16 @@ github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38 h1:j0VAUKCGN
 github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38/go.mod h1:PgAtItdQBv87Wog0Q7rnbwhqsupDC0pDXDlZgSv6nvA=
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe h1:oYFDl+kcAkTOXwJEmAw1SgpuEyOc9shzkMclrc1P4nI=
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe/go.mod h1:Bh8Vr5Vy9UO7JqU5f6myUOWl0jjnnvtlGdIVTBbdLRw=
+github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783 h1:VAFOmKa1u2HKA2LFQhelusPVIAtgp+wAOkXl8IjURbQ=
+github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783/go.mod h1:5DS3icNZKImRwvDP7Kf9IHv+9d6EYtcvRpBALgh/s/Y=
+github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4 h1:vRJAWboG75rQWpfTiNQ8XkFRJ1Am9RNKdRKSlTLQBiA=
+github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4/go.mod h1:HBZ9KJKoGTzo4h6/5+gaYyzMYWQtucT660mE68zHZGw=
+github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a h1:d8kCh4DxIJEQJhd/ZD6niTnxEzWgnZ5NlOmxfdBRDZQ=
+github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a/go.mod h1:tIZ2td8/ApPpR4CfEJYKAelJ/RplKcaqvRm3NyEbiyY=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6 h1:m4vrjxuJ9Cp+4QohRvpAbAqsKRaF9Ki8jzic8IPx/9c=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6/go.mod h1:0QY+Ri6/HhOkjRGhhyZ5NwtcDosKI7xwO5csmWEG0W0=
+github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e4 h1:1Fzumg4Xtn0cEhcIyqIXMoTuQUeO/6WYXhoJLj5EMkQ=
+github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e4/go.mod h1:+aVqjlgBiR8H5b1t7tPht4OVAAYCxa/KPQAbv7WzC/M=
 github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180 h1:zOgsDyqYyTOA8IU4WsurHggTd4DvXfraPTrrR7RxBUs=
 github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180/go.mod h1:ykSisArfgmpZFoV0y0irolshuOdSPyALFz/wWCJiaEE=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795 h1:UPDrh2pXuwewmbZiEM5SWg26Hy/08mw4MJnCszwGUEk=
@@ -236,6 +244,8 @@ github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc h1:XAxewcVViNLEjBS
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc/go.mod h1:vvfFJGcGOK37vnBikohtzboL6dIfbsr54+2Ri0HkWwk=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4 h1:Qyl2DRWnEC65Y7EI6TB9vIHzQmkySJrIF5uzBu3YdKw=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4/go.mod h1:kn4XWlGthyqF+ogp9Tmj9EYLmvZa3Yb9Eqnfdsgu63Y=
+github.com/go-ruby-devise/devise v0.0.0-20260706115634-252d1cfa97fc h1:WA6npiVrimJ+htjXEWvnZpu0wgZlNzJBmGKYENqbUcQ=
+github.com/go-ruby-devise/devise v0.0.0-20260706115634-252d1cfa97fc/go.mod h1:KWnHi1NAlbhv7tgcMPWet+nP8wBO7gVFzquFUB5Xif4=
 github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9 h1:6chWND+L2l7xqFlGUfv732oUBBOVs8WsMvKt8z7HJBE=
 github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9/go.mod h1:8I30lj4s9N0MCztmdJdCyMRCfK5xBBQiWHUwgnK3pIY=
 github.com/go-ruby-digest/digest v0.0.0-20260703175012-4332315c5957 h1:qLnKwTBwuZ/JYNhCIxOgyQCkdyI9Vf3K9lieBx8/dN8=
@@ -274,6 +284,8 @@ github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c h1:1FPq0/2nYtox3
 github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c/go.mod h1:4aUK5J8VX6Umk5/FgRqXRhe3tLJ9F/rhFXiUTcb81kc=
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c h1:VByP5jdzov6JMMsIPremuz4Q06y/rSCac/j5Q3GvXZk=
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c/go.mod h1:D4xOrc0xIiN0u0Q+KqjfKx/f7up8ekpud/syYsHTrPY=
+github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af h1:e5bwEwQJe3BnYUBF4rJRuoE9GpfxqpbETUT6SlsZZno=
+github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af/go.mod h1:+k4LCo1yeNUanlPmnfZP+rXcxaRask4/QjB/64ze4PQ=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b h1:hi8tu1lr/1cOkFMdaONWyuNGVmE9GuN8tmpUN6VxgLI=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b/go.mod h1:zPgLGk8wYhXACwDsJqxkdK09WgWbJwalPxiw6qHMGQg=
 github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3 h1:U8uKeXh3LLrIYhd8ITjmFZ51M5DoUoSz5Byv1ZGWRpI=
@@ -366,6 +378,8 @@ github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f h1:+PEruR5OxctQr
 github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f/go.mod h1:HeFcYYwifNZvQzF9jdaSFViHYT0mUNLwWEFPQj0j6V4=
 github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329 h1:4sXRBW9MXaEuosiyzzk1Fh+C8R2+PiPdua5sutdvV+E=
 github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329/go.mod h1:rKZ3vD81gJq61NvZ3XX9cr6AxtIV3+lFZKG7lPKV3PM=
+github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df h1:GQCDL/SGGtHqmDB2IfgCFe7AsgAA2LuhHg0kbbpYoFA=
+github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df/go.mod h1:AKDyiSCjqbfeZaNm8IsIUXao8ATsl2LQ9kdT5GaqYx4=
 github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e h1:Orev3pHC09GghkceOci3+dlV4Untoly525O7MyFdXOY=
 github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e/go.mod h1:NBlCj+x2SBtdDSKDvTTCVRoWd9tGPWcUwPvE2nKvYSM=
 github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92 h1:EXqNsTpyz5KPZURl94uOjcIIyJ0mCyMA7/AFAXvFgdg=

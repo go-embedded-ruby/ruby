@@ -271,6 +271,10 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 		// BSON::ObjectId#== compares the 12-byte identifier by value, not object
 		// identity, so it must dispatch its own ==.
 		return true
+	case *StringInquirerVal:
+		// Rails::StringInquirer#== compares the wrapped string by value (env ==
+		// "production"), not object identity, so it must dispatch its own ==.
+		return true
 	}
 	return false
 }
