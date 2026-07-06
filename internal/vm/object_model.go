@@ -978,6 +978,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *RedisBatch:
 		return x.cls
+	case *POP3Obj:
+		return x.cls
+	case *POPMailObj:
+		return x.cls
 	case *PGConnObj:
 		return x.cls
 	case *PGResultObj:
