@@ -285,6 +285,7 @@ type VM struct {
 	cActionMailerAttachments               *RClass                            // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
 	amDefs                                 map[*RClass]*amDef                 // ActionMailer: per-mailer-class default/delivery/hook declarations, merged down the chain at delivery time
 	amDeliveries                           *object.Array                      // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
+	sftpClasses                            *sftpClassSet                      // Net::SFTP: the wrapper classes stamped on returned Attributes / Name / File values (require "net/sftp")
 	amMailerOf                             map[*RObject]*actionmailer.Mailer  // ActionMailer: mailer instance -> library *Mailer of its running action (the mail/attachments/headers seam)
 	amRenderer                             object.Value                       // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
 	amEnqueuer                             object.Value                       // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)

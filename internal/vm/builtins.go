@@ -425,6 +425,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSocket()           // TCPSocket/TCPServer (net) + OpenSSL::SSL::SSLSocket (crypto/tls); after registerOpenSSL (upgrades its SSL shell)
 	vm.registerNetHTTP()          // net/http + net/https loadable shell; needs StandardError
 	vm.registerNetHTTPTransport() // real Net::HTTP over the socket transport; after registerNetHTTP + registerSocket
+	vm.registerNetSFTP()          // Net::SFTP client (require "net/sftp"), backed by go-ruby-net-sftp codec; SSH channel = injected IO seam; nests under Net, after registerNetHTTP
 	vm.registerResolv()           // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
 	vm.registerTimeout()          // Timeout module (loadable shell); needs RuntimeError
 	vm.registerDateErrors()       // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError

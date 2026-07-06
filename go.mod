@@ -89,6 +89,7 @@ require (
 	github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d
 	github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7
 	github.com/go-ruby-net-http/net-http v0.0.0-20260630124155-c794366ce72f
+	github.com/go-ruby-net-sftp/net-sftp v0.0.0-20260630142744-9be6f27056d7
 	github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e
 	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
