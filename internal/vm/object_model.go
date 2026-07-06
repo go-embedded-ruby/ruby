@@ -950,6 +950,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["ActiveSupport::Inflector::Inflections"].(*RClass)
 	case *ErubiEngine:
 		return x.cls
+	case *SafeBufferVal:
+		return x.cls
+	case *ActionViewBase:
+		return x.cls
+	case *AVPartialIter:
+		return x.cls
+	case *FormBuilderVal:
+		return x.cls
 	case *HTTPrbClient:
 		return vm.consts["HTTP::Client"].(*RClass)
 	case *HTTPrbResponse:
@@ -1744,6 +1752,11 @@ func ivarTable(self object.Value) map[string]object.Value {
 	case *object.Main:
 		return o.IvarTable()
 	case *SinatraCtx:
+		if o.ivars == nil {
+			o.ivars = map[string]object.Value{}
+		}
+		return o.ivars
+	case *ActionViewBase:
 		if o.ivars == nil {
 			o.ivars = map[string]object.Value{}
 		}

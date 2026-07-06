@@ -237,6 +237,12 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isRF := a.(*ProtobufRepeatedField); isRF {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// An ActiveSupport::SafeBuffer dispatches its + (a new html-safe buffer with
+		// the right operand escaped-unless-safe) as a method, so a view can build
+		// markup with `f.label + f.text_field` rather than hitting the coercion path.
+		if _, isSB := a.(*SafeBufferVal); isSB {
+			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
 		return binary(op, a, b)
 	}
 }

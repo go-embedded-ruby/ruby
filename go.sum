@@ -192,6 +192,8 @@ github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe h1:oYFDl+kcAkTOX
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe/go.mod h1:Bh8Vr5Vy9UO7JqU5f6myUOWl0jjnnvtlGdIVTBbdLRw=
 github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783 h1:VAFOmKa1u2HKA2LFQhelusPVIAtgp+wAOkXl8IjURbQ=
 github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783/go.mod h1:5DS3icNZKImRwvDP7Kf9IHv+9d6EYtcvRpBALgh/s/Y=
+github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a h1:NhatSlzDFDTNAIYng5hhUltGPS0O5xiPr5efQ+RsL9k=
+github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a/go.mod h1:n9SEnqxWmYIXKgtrIZEiRvGui0lWdCd2GJELRpa44ls=
 github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4 h1:vRJAWboG75rQWpfTiNQ8XkFRJ1Am9RNKdRKSlTLQBiA=
 github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4/go.mod h1:HBZ9KJKoGTzo4h6/5+gaYyzMYWQtucT660mE68zHZGw=
 github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a h1:d8kCh4DxIJEQJhd/ZD6niTnxEzWgnZ5NlOmxfdBRDZQ=
