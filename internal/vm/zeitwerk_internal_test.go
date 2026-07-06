@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	zeitwerk "github.com/go-ruby-zeitwerk/zeitwerk"
@@ -505,5 +506,10 @@ func TestZeitwerkWrapperProtocol(t *testing.T) {
 }
 
 // q renders s as a double-quoted Ruby string literal for embedding a filesystem
-// path into a test script (temp paths have no quotes/backslashes to escape).
-func q(s string) string { return "\"" + s + "\"" }
+// path into a test script. Backslashes and double-quotes are escaped so a Windows
+// temp path (C:\Users\...) survives Ruby's string-literal lexer intact — without
+// escaping, \U/\A/… read as unknown escapes and Ruby drops the backslash, mangling
+// the path (the root directory then "does not exist").
+func q(s string) string {
+	return "\"" + strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(s) + "\""
+}
