@@ -262,6 +262,12 @@ type VM struct {
 	cRodaRequest                           *RClass                          // Roda::RodaRequest, the self a route/matcher block runs against
 	cRodaResponse                          *RClass                          // Roda::RodaResponse, the mutable response a route block writes into
 	rodaRoutes                             map[*RClass]*Proc                // per-Roda-subclass top-level route block (route do |r| … end)
+	cHanamiRouter                          *RClass                          // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
+	cHanamiAction                          *RClass                          // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses
+	cHanamiRequest                         *RClass                          // Hanami::Action::Request, the request handed to a Hanami action's #handle
+	cHanamiResponse                        *RClass                          // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
+	cHanamiFlash                           *RClass                          // Hanami::Action::Flash, the two-generation flash store on the request/response
+	hanamiActionDefs                       map[*RClass]*hanamiActionDef     // per-Hanami::Action-subclass before/after/handle_exception/accept/config declarations
 	cAsyncTask                             *RClass                          // Async::Task, one node of the structured-concurrency tree, backed by go-ruby-async
 	curAsyncTask                           *async.Task                      // the task whose Ruby body is currently running (backs Async::Task.current and the caller passed to blocking async ops)
 	asyncTasks                             map[*async.Task]*AsyncTask       // wrapper cache so one *async.Task always maps to one Async::Task object (Ruby #equal? identity), cleared when the root reactor finishes

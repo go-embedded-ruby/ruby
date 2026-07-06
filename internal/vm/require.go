@@ -90,6 +90,7 @@ var providedFeatures = map[string]bool{
 	"thor":        true,
 	"bundler":     true,
 	"roda":        true,
+	"hanami":      true, "hanami/router": true, "hanami/action": true,
 	"async":       true,
 	"racc/parser": true, "racc": true,
 	"minitest": true, "minitest/autorun": true, "minitest/spec": true,

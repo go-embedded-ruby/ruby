@@ -648,6 +648,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *RodaResp:
 		return x.cls
+	case *HanamiRouter:
+		// The wrapper over a *hanami.Router (Hanami::Router).
+		return x.cls
+	case *HanamiReq:
+		// The request handed to a Hanami action's #handle (Hanami::Action::Request).
+		return x.cls
+	case *HanamiResp:
+		return x.cls
+	case *HanamiFlash:
+		return x.cls
 	case *AsyncTask:
 		return x.cls
 	case *AsyncBarrier:

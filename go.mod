@@ -56,6 +56,7 @@ require (
 	github.com/go-ruby-graphql/graphql v0.0.0-20260704114306-47444c09995e
 	github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
+	github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
 	github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3
 	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82

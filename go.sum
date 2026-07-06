@@ -274,6 +274,8 @@ github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c h1:1FPq0/2nYtox3
 github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c/go.mod h1:4aUK5J8VX6Umk5/FgRqXRhe3tLJ9F/rhFXiUTcb81kc=
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c h1:VByP5jdzov6JMMsIPremuz4Q06y/rSCac/j5Q3GvXZk=
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c/go.mod h1:D4xOrc0xIiN0u0Q+KqjfKx/f7up8ekpud/syYsHTrPY=
+github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af h1:e5bwEwQJe3BnYUBF4rJRuoE9GpfxqpbETUT6SlsZZno=
+github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af/go.mod h1:+k4LCo1yeNUanlPmnfZP+rXcxaRask4/QjB/64ze4PQ=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b h1:hi8tu1lr/1cOkFMdaONWyuNGVmE9GuN8tmpUN6VxgLI=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b/go.mod h1:zPgLGk8wYhXACwDsJqxkdK09WgWbJwalPxiw6qHMGQg=
 github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3 h1:U8uKeXh3LLrIYhd8ITjmFZ51M5DoUoSz5Byv1ZGWRpI=
