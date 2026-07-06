@@ -1294,6 +1294,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *ResqueWorker:
 		return x.cls
+	case *ActiveJobConfigured:
+		return vm.consts["ActiveJob::ConfiguredJob"].(*RClass)
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:

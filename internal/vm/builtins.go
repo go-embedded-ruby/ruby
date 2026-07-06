@@ -492,6 +492,7 @@ func (vm *VM) bootstrap() {
 	vm.registerWarden()           // Warden::Manager/Proxy/Strategies (require "warden"), backed by go-ruby-warden over go-ruby-rack; strategy valid?/authenticate! bodies are the rbgo seam; needs Rack + StandardError (Warden::NotAuthenticated), so registered after registerRack
 	vm.registerOmniAuth()         // OmniAuth::Builder/Strategy/AuthHash + OmniAuth.config (require "omniauth"), backed by go-ruby-omniauth over go-ruby-rack; provider request_phase/uid/info bodies are the rbgo seam; needs Rack + StandardError (OmniAuth::Error), so registered after registerRack
 	vm.registerActiveRecord()     // ActiveRecord::Model/Relation/Record + Base.establish_connection (require "active_record"), backed by go-ruby-activerecord; adapter seam wired to go-ruby-sqlite3 so queries run; needs StandardError for ActiveRecordError
+	vm.registerActiveJob()        // ActiveJob::Base subclass DSL (queue_as/retry_on/callbacks/perform_later/perform_now/set) + Arguments (require "active_job"), backed by go-ruby-activejob; #perform is a Ruby seam run INLINE under the GVL (default inline adapter); needs ArgumentError for SerializationError
 	vm.registerRQRCode()          // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
 	vm.registerDotenv()           // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
 	vm.registerHCL2()             // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error

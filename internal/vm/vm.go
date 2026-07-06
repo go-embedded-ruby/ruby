@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
+	activejob "github.com/go-ruby-activejob/activejob"
 	async "github.com/go-ruby-async/async"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
@@ -191,6 +192,23 @@ type VM struct {
 	// name is inferred from the class name via activerecord.Tableize).
 	arModels     map[*RClass]*ActiveRecordModel
 	arTableNames map[*RClass]string
+
+	// ActiveJob per-class state (require "active_job"), backed by
+	// go-ruby-activejob. ajBases caches the library job class built for each
+	// `class … < ActiveJob::Base` subclass (the class-dispatch seam); ajJobOf /
+	// ajInstOf map a Ruby job instance to its backing library *Job in both
+	// directions (readers, and the perform / drain paths); ajTestAdapters holds
+	// the per-class :test adapter; ajStack is the instance stack the inline
+	// #perform seam reads; ajLastResult is the last #perform return value
+	// (perform_now's result); ajArgs is the module-level ActiveJob::Arguments
+	// serializer (its GlobalID seam wired in registerActiveJob).
+	ajBases        map[*RClass]*activejob.Base
+	ajJobOf        map[*RObject]*activejob.Job
+	ajInstOf       map[*activejob.Job]*RObject
+	ajTestAdapters map[*RClass]*activejob.TestAdapter
+	ajStack        []*RObject
+	ajLastResult   object.Value
+	ajArgs         *activejob.Arguments
 
 	cBasicObject, cObject, cModule, cClass *RClass
 	cInteger, cFloat, cString, cSymbol     *RClass
