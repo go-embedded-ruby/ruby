@@ -469,6 +469,7 @@ func (vm *VM) bootstrap() {
 	vm.registerPublicSuffix()     // PublicSuffix module (go-ruby-public-suffix backend); needs StandardError for PublicSuffix::Error tree
 	vm.registerMIMETypes()        // MIME::Types module (go-ruby-mime-types backend)
 	vm.registerMail()             // Mail module (go-ruby-mail backend)
+	vm.registerActionMailer()     // ActionMailer::Base subclass DSL (default/delivery_method/register_interceptor/register_observer) + MessageDelivery proxy (deliver_now/deliver_later/message) + mail/attachments/headers (require "action_mailer"), backed by go-ruby-actionmailer; the mailer-action body, RenderBody (Action View), delivery method and EnqueueJob (Active Job) are Ruby-dispatch seams run INLINE under the GVL; needs the Mail message surface, so registered after registerMail
 	vm.registerFaker()            // Faker module (go-ruby-faker backend); needs Random for the seed contract
 	vm.registerCommonmark()       // Commonmark.render_html / String#to_html (require "commonmark"), backed by go-ruby-commonmark
 	vm.registerMustache()         // Mustache.render + Mustache view class (require "mustache"); needs StandardError for Mustache::Error
