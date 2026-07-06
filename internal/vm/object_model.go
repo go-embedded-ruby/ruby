@@ -1179,6 +1179,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Faraday::Utils::ParamsHash"].(*RClass)
 	case *FaradayHeaders:
 		return vm.consts["Faraday::Utils::Headers"].(*RClass)
+	case *HTTPartyResponse:
+		return vm.consts["HTTParty::Response"].(*RClass)
 	case *PumaServer:
 		return vm.consts["Puma::Server"].(*RClass)
 	case *PumaThreadPool:

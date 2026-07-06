@@ -45,7 +45,7 @@ var providedFeatures = map[string]bool{
 	"bcrypt": true, "jwt": true, "rbnacl": true,
 	"age": true, "prawn": true,
 	"google/protobuf": true, "protobuf": true, "bleve": true, "graphql": true,
-	"opentelemetry": true, "faraday": true, "puma": true, "bolt": true,
+	"opentelemetry": true, "faraday": true, "httparty": true, "puma": true, "bolt": true,
 	"saml": true, "ruby-saml": true, "webauthn": true,
 	"acme": true, "acme/client": true,
 	"grpc": true, "nats": true, "kafka": true, "etcd": true, "etcdv3": true,

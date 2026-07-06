@@ -177,6 +177,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
+	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
