@@ -290,6 +290,13 @@ type VM struct {
 	cHanamiResponse                        *RClass                            // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
 	cHanamiFlash                           *RClass                            // Hanami::Action::Flash, the two-generation flash store on the request/response
 	hanamiActionDefs                       map[*RClass]*hanamiActionDef       // per-Hanami::Action-subclass before/after/handle_exception/accept/config declarations
+	cACRouteSet                            *RClass                            // ActionDispatch::Routing::RouteSet (require "action_dispatch"), backed by go-ruby-actionpack/routing
+	cACMapper                              *RClass                            // ActionDispatch::Routing::Mapper, the self the routes DSL (draw) runs against
+	cACRequest                             *RClass                            // ActionDispatch::Request, over a Rack env
+	cACResponse                            *RClass                            // ActionDispatch::Response, the mutable Rack response
+	cACParameters                          *RClass                            // ActionController::Parameters (strong parameters)
+	cACControllerBase                      *RClass                            // ActionController::Base (require "action_controller"), the controller superclass a user subclasses
+	acControllerDefs                       map[*RClass]*acControllerDef       // per-ActionController::Base-subclass before/after/around/rescue_from/view-context declarations
 	cMinitestSpec                          *RClass                            // Minitest::Spec, the spec-DSL subclass of Minitest::Test
 	minitestRunnables                      []*RClass                          // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
 	minitestCurInstance                    object.Value                       // the test instance currently running (backs bare must_*/wont_* and _)
