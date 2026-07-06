@@ -147,6 +147,7 @@ require (
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b
+	github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c

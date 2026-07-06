@@ -1336,6 +1336,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Puma::Configuration"].(*RClass)
 	case *PumaDSL:
 		return vm.consts["Puma::DSL"].(*RClass)
+	case *WEBrickServer:
+		return vm.consts["WEBrick::HTTPServer"].(*RClass)
+	case *WEBrickRequest:
+		return vm.consts["WEBrick::HTTPRequest"].(*RClass)
+	case *WEBrickResponse:
+		return vm.consts["WEBrick::HTTPResponse"].(*RClass)
 	case *WardenManager:
 		return x.cls
 	case *WardenProxy:
