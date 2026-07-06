@@ -26,8 +26,10 @@ import (
 // instance methods assume an *IOObj receiver and would panic on a socket value,
 // and the socket surface below re-implements the IO methods that matter
 // (read/gets/write/puts/...) directly. UDPSocket (socket_udp.go) and
-// UNIXSocket/UNIXServer (socket_unix.go) extend this ancestry; raw Socket.new
-// and full Addrinfo are deferred follow-ups.
+// UNIXSocket/UNIXServer (socket_unix.go) extend this ancestry; the name-
+// resolution + address utilities (Socket.getaddrinfo, the Addrinfo value class,
+// and the sockaddr pack/unpack helpers) live in socket_addrinfo.go. Raw
+// Socket.new remains a deferred follow-up.
 
 // tcpSocket is a connected stream socket (TCPSocket): a live net.Conn plus a
 // buffered reader so gets / readpartial / eof? can peek without losing bytes.
@@ -83,6 +85,9 @@ func (vm *VM) registerSocket() {
 	vm.registerUDPSocket(ip)
 	vm.registerUnixSockets(basic)
 	vm.registerSocketClass(basic)
+	// The address utilities (Socket.getaddrinfo, Addrinfo, sockaddr pack/unpack)
+	// build on the Socket class registered just above (socket_addrinfo.go).
+	vm.registerSocketAddr()
 
 	// Upgrade the OpenSSL::SSL TLS shell to a real transport (socket_bind.go).
 	vm.registerSSLTransport()
