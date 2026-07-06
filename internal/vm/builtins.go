@@ -450,6 +450,8 @@ func (vm *VM) bootstrap() {
 	vm.registerMySQL()         // Mysql2::Client/Result/Statement (require "mysql2" / "mysql"), backed by go-ruby-mysql over go-sql-driver; needs Enumerable for Result and StandardError for Mysql2::Error
 	vm.registerMongo()         // Mongo::Client/Database/Collection/Cursor + BSON::ObjectId (require "mongo"), backed by go-ruby-mongodb; needs StandardError for Mongo::Error
 	vm.registerParquet()       // Parquet::ArrowFileReader/ArrowFileWriter (require "parquet"), backed by go-ruby-parquet; needs StandardError for Parquet::Error
+	vm.registerHTTParty()      // HTTParty HTTP client (require "httparty"), backed by go-ruby-httparty; needs StandardError for HTTParty::Error
+	vm.registerConnectionPool() // ConnectionPool + ConnectionPool::Wrapper (require "connection_pool"), backed by go-ruby-connection-pool; needs RuntimeError + Timeout::Error
 	vm.registerMsgpack()       // MessagePack module (go-ruby-msgpack backend); needs StandardError for MessagePack::Error
 	vm.registerTOML()          // TOML/TomlRB module (go-ruby-toml backend); needs StandardError for TomlRB::ParseError
 	vm.registerTZInfo()        // TZInfo module (go-ruby-tzinfo backend); needs StandardError for TZInfo::InvalidTimezoneIdentifier

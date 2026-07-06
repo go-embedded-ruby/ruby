@@ -186,6 +186,8 @@ github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe h1:oYFDl+kcAkTOX
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe/go.mod h1:Bh8Vr5Vy9UO7JqU5f6myUOWl0jjnnvtlGdIVTBbdLRw=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6 h1:m4vrjxuJ9Cp+4QohRvpAbAqsKRaF9Ki8jzic8IPx/9c=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6/go.mod h1:0QY+Ri6/HhOkjRGhhyZ5NwtcDosKI7xwO5csmWEG0W0=
+github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180 h1:zOgsDyqYyTOA8IU4WsurHggTd4DvXfraPTrrR7RxBUs=
+github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180/go.mod h1:ykSisArfgmpZFoV0y0irolshuOdSPyALFz/wWCJiaEE=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795 h1:UPDrh2pXuwewmbZiEM5SWg26Hy/08mw4MJnCszwGUEk=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795/go.mod h1:4gG3enh3yJ4fpQWjNuzsLbB01vF8XINKkgqsHdfL9O4=
 github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a h1:qLSOUbDALcDFcWTw2jfzSYz2S7SXKCeTuAPLvJrlhiw=
@@ -216,6 +218,10 @@ github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824 h1:DLLC7LmqIWv
 github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824/go.mod h1:djGUM2WR7AdnZqeRg/OQ4xVzmsl8PAWQKILX2n/foas=
 github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689 h1:d9MJXveisTUgvZGaNxH+sZBgrnoVz8580xcnC34wS1k=
 github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689/go.mod h1:I/pxqnwoebfatUAlGT/jiZkcnhx05Th1q6BVqIiqrb4=
+github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260706115615-cdd5a0c72f9e h1:NqXMtd7IKKLdilV3CaYBzXDNWBn8fft7drXA/MsStJ0=
+github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260706115615-cdd5a0c72f9e/go.mod h1:Jj/1rtC6VpluKBpT0XN+9HT1x3xz+0m6gr69QV0Nnns=
+github.com/go-ruby-connection-pool/connection-pool v0.0.0-20260706115620-287a916e348b h1:zTsyn1vRo7h1FyUASVAuwg6VXZ5dd6mMrWiuBjnAHiE=
+github.com/go-ruby-connection-pool/connection-pool v0.0.0-20260706115620-287a916e348b/go.mod h1:Ye6JGxrVgn959GWYYwL/D0mkdhcd5Vfeler13Fyelb0=
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc h1:XAxewcVViNLEjBSEu6xI5rfDw7lv99hqNy8jzT5mr+I=
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc/go.mod h1:vvfFJGcGOK37vnBikohtzboL6dIfbsr54+2Ri0HkWwk=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4 h1:Qyl2DRWnEC65Y7EI6TB9vIHzQmkySJrIF5uzBu3YdKw=
@@ -256,6 +262,8 @@ github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c h1:VByP5jdzov6JM
 github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c/go.mod h1:D4xOrc0xIiN0u0Q+KqjfKx/f7up8ekpud/syYsHTrPY=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b h1:hi8tu1lr/1cOkFMdaONWyuNGVmE9GuN8tmpUN6VxgLI=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b/go.mod h1:zPgLGk8wYhXACwDsJqxkdK09WgWbJwalPxiw6qHMGQg=
+github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82 h1:FPHrHVrknItX1ipCAJ0Rv39Q7O9zEtGlaRq/Sb99LyM=
+github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82/go.mod h1:02LNZ7RDjMh536m57zJdVXN6VsSw/L1OjpGaTL+RRIo=
 github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5 h1:Ygv/HnlYvVmGzxTfRMuQziT0jSb0FDFA1JParkM6vq4=
 github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5/go.mod h1:EIn9QjMqN3zvyz37o1hU2Vqvqi2YTjf5mCKvSc+PMDA=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1 h1:nwISQpJLt51MbXIgwf/stz8DeHkCDY6UsPI9dpIFGWU=
