@@ -174,6 +174,16 @@ type VM struct {
 
 	arAdapter *arSQLiteAdapter // the ActiveRecord::Base connection (require "active_record"), backed by go-ruby-sqlite3; nil until establish_connection
 
+	// sidekiqRedisURL / resqueRedisURL are the go-redis connection URLs the job
+	// bindings (require "sidekiq" / "resque") dial. Each is empty until set via
+	// the module's redis= config (or a configure_client/server block); the getter
+	// then falls back to ENV["REDIS_URL"] and finally the local default. A fresh
+	// go-redis client is built and closed per operation (see withSidekiqRedis /
+	// withResqueRedis) so no connection or goroutine leaks across the single-
+	// threaded VM.
+	sidekiqRedisURL string
+	resqueRedisURL  string
+
 	// arModels caches the *ActiveRecordModel lazily built for each
 	// `class … < ActiveRecord::Base` subclass, and arTableNames records an
 	// explicit `self.table_name = "…"` override per class (otherwise the table

@@ -1249,6 +1249,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Puma::DSL"].(*RClass)
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
+	case *JobRedis:
+		// A Sidekiq.redis / Resque.redis block connection reports the class stamped
+		// on it at construction (Sidekiq::RedisConnection or Resque::RedisConnection).
+		return x.cls
+	case *ResqueJob:
+		return x.cls
+	case *ResqueWorker:
+		return x.cls
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:
