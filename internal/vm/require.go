@@ -47,7 +47,7 @@ var providedFeatures = map[string]bool{
 	"google/protobuf": true, "protobuf": true, "bleve": true, "graphql": true,
 	"opentelemetry": true, "faraday": true, "puma": true, "bolt": true,
 	"httparty": true, "connection_pool": true, "concurrent-ruby": true,
-	"zeitwerk": true, "erubi": true, "erubi/capture_end": true,
+	"erubi": true, "erubi/capture_end": true,
 	"http": true, "excon": true, "typhoeus": true,
 	"pundit": true, "cancancan": true, "cancan": true,
 	"active_support": true, "active_support/all": true, "activesupport": true,

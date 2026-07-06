@@ -130,7 +130,6 @@ require (
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
-	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706120505-80fd3cc323df
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
 	github.com/go-webauthn/webauthn v0.17.4
 	github.com/nats-io/nats-server/v2 v2.14.3

@@ -418,8 +418,6 @@ github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176 h1:iHTCF/Eu0/lwO
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176/go.mod h1:1C3Bx0pQIsqLqC2SnqV7pJnGuLJsgYmar2NrD+CmVXw=
 github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd h1:4HGjgCdTIuIEM+iZXJ9hJJzt0IBMtxPqdJq72mr0Y64=
 github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd/go.mod h1:HtbQgnZpSTJBAhPg1jOKgHycZl3tXgf9ZdOu4dnHWjQ=
-github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706120505-80fd3cc323df h1:aOFsKTKnCMJ3ycDOe4e8IRFPu6npVhveFpWhIg1sB3w=
-github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706120505-80fd3cc323df/go.mod h1:e282nPoQTTtYK2TUfrIXVe5AZ80h0lgzYvx4xpL/aDA=
 github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67 h1:otTivF26XRtz1gM268+WgbB/3cPCpcOJvMJNnbbIDx0=
 github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67/go.mod h1:v32GgUrbHSFEHg4nerQESboO6b90fhovvtAXE0GrPRw=
 github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b h1:mZiaZMwcLCZb9hoOXEUaZWgTpkMYtSeEfIaoIngt1eE=

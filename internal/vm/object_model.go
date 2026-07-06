@@ -919,10 +919,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *ASInflections:
 		return vm.consts["ActiveSupport::Inflector::Inflections"].(*RClass)
-	case *ZeitwerkLoader:
-		return vm.consts["Zeitwerk::Loader"].(*RClass)
-	case *ZeitwerkInflector:
-		return vm.consts["Zeitwerk::Inflector"].(*RClass)
 	case *ErubiEngine:
 		return x.cls
 	case *HTTPrbClient:
