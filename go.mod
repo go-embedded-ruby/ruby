@@ -14,6 +14,7 @@ require (
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6
+	github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180
 	github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795
 	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
 	github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda

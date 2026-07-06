@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
 	sinatra "github.com/go-ruby-sinatra/sinatra"
@@ -215,6 +216,7 @@ type VM struct {
 	cStringScanner                         *RClass
 	moneyBank                              *money.VariableExchange // the process-wide default exchange bank for Money (require "money")
 	i18nInst                               *i18n.I18n              // the process-wide I18n instance (require "i18n"), backed by go-ruby-i18n
+	asInflections                          *inflector.Inflections  // the ActiveSupport::Inflector inflection ruleset (require "active_support"), backed by go-ruby-activesupport; a per-VM clone of the gem's English defaults
 	otelProvider                           *OTelTracerProvider     // the process-wide OpenTelemetry.tracer_provider (require "opentelemetry"), backed by go-ruby-opentelemetry
 	cOptionParser                          *RClass
 	cURI                                   *RClass                          // the URI module (require "uri"), backed by go-ruby-uri
@@ -556,6 +558,7 @@ func New(out io.Writer) *VM {
 	vm.globals["$*"] = argv
 	vm.installPrelude()
 	vm.registerEnumerator()     // after the prelude so it can mix in Enumerable
+	vm.registerActiveSupport()  // ActiveSupport::Inflector + core extensions (require "active_support" / "active_support/all"), backed by go-ruby-activesupport; after the prelude so the Enumerable module (which its core-ext extends) exists
 	vm.registerLazy()           // after Enumerator (Enumerator::Lazy is built on it)
 	vm.registerFileStat()       // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
 	vm.registerIPAddr()         // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
