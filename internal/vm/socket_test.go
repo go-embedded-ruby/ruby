@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -402,6 +403,9 @@ func TestSocketThroughRbgoBinary(t *testing.T) {
 		t.Skip("skipping binary build in -short")
 	}
 	bin := filepath.Join(t.TempDir(), "rbgo")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", bin, "./cmd/rbgo")
 	build.Dir = repoRoot(t)
 	build.Env = append(os.Environ(), "GOWORK=off")
