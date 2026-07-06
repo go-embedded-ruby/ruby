@@ -15,10 +15,14 @@ import (
 // binding. It compiles the source in a child scope over a synthetic parent frame
 // holding the locals (compiler.CompileWithLocals), seeds that parent env with the
 // locals' values in slot order and runs the ISeq with the context as self. The
-// compiled template's final expression is its output buffer, so exec returns the
-// rendered String. It uses the front-end directly, so a closed-world build
-// replaces it with the stub in sinatra_erb_closed.go.
-func (vm *VM) sinatraErbEval(sc *SinatraCtx, src string, names []string, vals []object.Value) object.Value {
+// block, when non-nil, is the template's yield target — a layout is evaluated
+// with a block that returns the wrapped view's rendered String, so `<%= yield %>`
+// in the layout interpolates the inner content, exactly as MRI Sinatra renders a
+// layout with `render(...) { output }`. The compiled template's final expression
+// is its output buffer, so exec returns the rendered String. It uses the
+// front-end directly, so a closed-world build replaces it with the stub in
+// sinatra_erb_closed.go.
+func (vm *VM) sinatraErbEval(sc *SinatraCtx, src string, names []string, vals []object.Value, block *Proc) object.Value {
 	prog, perr := parser.Parse(src)
 	if perr != nil {
 		// go-ruby-erb emits valid Ruby for any well-formed template, so a parse error
@@ -38,5 +42,5 @@ func (vm *VM) sinatraErbEval(sc *SinatraCtx, src string, names []string, vals []
 	slots := make([]object.Value, len(vals))
 	copy(slots, vals)
 	parent := &Env{slots: slots}
-	return vm.exec(iseq, sc, nil, vm.classOf(sc), "", parent, nil, nil, nil)
+	return vm.exec(iseq, sc, nil, vm.classOf(sc), "", parent, block, nil, nil)
 }

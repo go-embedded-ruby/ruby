@@ -4,9 +4,10 @@ import "testing"
 
 // sinatraErbGem421Golden is the response dump of apps/sinatra_erb_oracle.rb
 // captured from the REAL `sinatra` gem 4.2.1 (MRI ruby 4.0.5) with its ERB view
-// engine: six requests through the classic Sinatra::Base #call(env) adapter, each
-// rendering an ERB view and dumping [status, body]. This is the golden oracle for
-// the templating half of the Sinatra binding: rbgo, rendering through the bound
+// engine: thirteen requests through the classic Sinatra::Base #call(env) adapter,
+// each rendering an ERB view (six inline/symbol templates, then seven exercising
+// the layout rule) and dumping [status, body]. This is the golden oracle for the
+// templating half of the Sinatra binding: rbgo, rendering through the bound
 // go-ruby-erb compiler, must reproduce it byte-for-byte. It is a captured constant
 // so the suite stays hermetic (no ruby, no gem, runs under qemu on every 64-bit
 // target); regenerate by running the fixture under MRI + the sinatra gem, per
@@ -36,6 +37,59 @@ body<<<h2>Hey World</h2>
   <li>y</li>
 </ul>
 >>
+== req 6 ==
+status=200
+body<<<!DOCTYPE html>
+<title>Site</title>
+<main><h2>Hey World</h2>
+<ul>
+  <li>x</li>
+  <li>y</li>
+</ul>
+</main>
+<footer>by World</footer>
+>>
+== req 7 ==
+status=200
+body<<<h2>Hey World</h2>
+<ul>
+  <li>x</li>
+  <li>y</li>
+</ul>
+>>
+== req 8 ==
+status=200
+body<<<section class="box"><h2>Hi World</h2>
+<ul>
+  <li>a</li>
+</ul>
+</section>
+>>
+== req 9 ==
+status=200
+body<<<!DOCTYPE html>
+<title>Site</title>
+<main><h2>Yo World</h2>
+<ul>
+  <li>q</li>
+</ul>
+</main>
+<footer>by World</footer>
+>>
+== req 10 ==
+status=200
+body<<<wrap><h2>In World</h2>
+<ul>
+  <li>z</li>
+</ul>
+</wrap>
+>>
+== req 11 ==
+status=200
+body<<Errno::ENOENT>>
+== req 12 ==
+status=200
+body<<Errno::ENOENT>>
 `
 
 // TestSinatraErbGemOracle proves the Sinatra `erb` view helper is MRI-identical
@@ -44,8 +98,11 @@ body<<<h2>Hey World</h2>
 // captured gem output. This is the run-conformance headline for the templating
 // half of the web phase — inline-String and :symbol/file templates, <%= %>
 // interpolation of a query param and an @ivar set in a before-filter, <% %>
-// control flow, positional and options[:locals] locals, and ERB trim behaviour —
-// all rendered by rbgo (via the bound go-ruby-erb compiler, evaluated in the
+// control flow, positional and options[:locals] locals, ERB trim behaviour, and
+// the layout rule (default views/layout.erb with `<%= yield %>` returning the
+// view, layout: false, a custom layout: :name, layout: true, an inline-String
+// layout, and the Errno::ENOENT a missing named layout / view raises) — all
+// rendered by rbgo (via the bound go-ruby-erb compiler, evaluated in the
 // handler's binding) exactly as by the reference gem.
 func TestSinatraErbGemOracle(t *testing.T) {
 	if ok, detail := featureLoadable("sinatra/base"); !ok {
