@@ -3,6 +3,7 @@ module github.com/go-embedded-ruby/ruby
 go 1.26.4
 
 require (
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/beevik/etree v1.6.0
 	github.com/dolthub/go-mysql-server v0.20.0
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
@@ -97,6 +98,7 @@ require (
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
+	github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
@@ -110,6 +112,7 @@ require (
 	github.com/go-ruby-sequel/sequel v0.0.0-20260702151352-66413b601977
 	github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
+	github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069
 	github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c
 	github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4
 	github.com/go-ruby-sodium/sodium v0.0.0-20260704110007-85cd070fb270
@@ -127,6 +130,7 @@ require (
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
 	github.com/go-webauthn/webauthn v0.17.4
 	github.com/nats-io/nats-server/v2 v2.14.3
+	github.com/redis/go-redis/v9 v9.21.0
 	github.com/russellhaering/goxmldsig v1.6.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260702233442-45013cfc5f26
@@ -245,6 +249,7 @@ require (
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
 	go.etcd.io/etcd/api/v3 v3.6.13 // indirect
@@ -262,6 +267,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
