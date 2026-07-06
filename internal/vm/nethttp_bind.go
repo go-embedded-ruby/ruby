@@ -8,11 +8,14 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	nethttp "github.com/go-ruby-net-http/net-http"
 
@@ -52,6 +55,11 @@ func (vm *VM) registerNetHTTPTransport() {
 	// Net::HTTPBadResponse class a `rescue Net::HTTPBadResponse` can catch.
 	vm.consts["Net::HTTPError"] = netMod.consts["HTTPError"]
 	vm.consts["Net::HTTPBadResponse"] = netMod.consts["HTTPBadResponse"]
+	// Publish the timeout classes too, so a raise("Net::ReadTimeout", ...) from the
+	// transport resolves the real class a `rescue Net::ReadTimeout` catches.
+	vm.consts["Net::OpenTimeout"] = netMod.consts["OpenTimeout"]
+	vm.consts["Net::ReadTimeout"] = netMod.consts["ReadTimeout"]
+	vm.consts["Net::WriteTimeout"] = netMod.consts["WriteTimeout"]
 
 	vm.registerNetHTTPClassMethods(http)
 	vm.registerNetHTTPInstanceMethods(http)
@@ -112,7 +120,7 @@ func (vm *VM) registerNetHTTPClassMethods(http *RClass) {
 		setIvar(inst, "@started", object.Bool(true))
 		if blk != nil {
 			res := vm.callBlock(blk, []object.Value{inst})
-			setIvar(inst, "@started", object.Bool(false))
+			vm.nethttpFinish(inst)
 			return res
 		}
 		return inst
@@ -154,14 +162,44 @@ func (vm *VM) registerNetHTTPInstanceMethods(http *RClass) {
 		setIvar(self, "@started", object.Bool(true))
 		if blk != nil {
 			res := vm.callBlock(blk, []object.Value{self})
-			setIvar(self, "@started", object.Bool(false))
+			vm.nethttpFinish(self)
 			return res
 		}
 		return self
 	})
-	http.define("finish", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		setIvar(self, "@started", object.Bool(false))
+	http.define("finish", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		vm.nethttpFinish(self)
 		return object.NilV
+	})
+
+	// --- timeout accessors (open/read/write); values are seconds (Integer/Float),
+	// nil disables the deadline. MRI defaults each to 60. -----------------------
+	for _, name := range []string{"open_timeout", "read_timeout", "write_timeout"} {
+		ivar := "@" + name
+		http.define(name, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+			return getIvar(self, ivar)
+		})
+		http.define(name+"=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			setIvar(self, ivar, args[0])
+			return args[0]
+		})
+	}
+
+	// --- proxy accessors --------------------------------------------------------
+	http.define("proxy?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(!object.IsNil(getIvar(self, "@proxy_address")))
+	})
+	http.define("proxy_address", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@proxy_address")
+	})
+	http.define("proxy_port", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@proxy_port")
+	})
+	http.define("proxy_user", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@proxy_user")
+	})
+	http.define("proxy_pass", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@proxy_pass")
 	})
 
 	// Instance verb helpers: get/head/delete/options take (path[, header]); the
@@ -312,7 +350,9 @@ func nethttpSchemePort(u *url.URL) (scheme, port string) {
 }
 
 // nethttpExecInstance runs a request using a Net::HTTP instance's configured
-// address / port / use_ssl / verify_mode.
+// address / port / use_ssl / verify_mode / timeouts / proxy. Within a start block
+// (@started) it keeps one connection alive across requests; otherwise it opens
+// and closes a connection per request.
 func (vm *VM) nethttpExecInstance(inst object.Value, method, path string, body []byte, hdr [][2]string) object.Value {
 	host := strArg(getIvar(inst, "@address"))
 	port := intArg(getIvar(inst, "@port"))
@@ -329,7 +369,485 @@ func (vm *VM) nethttpExecInstance(inst object.Value, method, path string, body [
 	if v, ok := getIvar(inst, "@verify_mode").(object.Integer); ok {
 		verify = int64(v)
 	}
-	return vm.nethttpDo(scheme, host, portStr, hostHdr, method, path, body, hdr, verify)
+	cfg := &nethttpXfer{
+		scheme: scheme, host: host, port: portStr, hostHdr: hostHdr,
+		verifyMode: verify,
+		openTO:     nethttpDuration(getIvar(inst, "@open_timeout")),
+		readTO:     nethttpDuration(getIvar(inst, "@read_timeout")),
+		writeTO:    nethttpDuration(getIvar(inst, "@write_timeout")),
+	}
+	cfg.dialHost, cfg.dialPort = host, portStr
+	if pa := getIvar(inst, "@proxy_address"); !object.IsNil(pa) {
+		cfg.proxied = true
+		cfg.dialHost = strArg(pa)
+		cfg.dialPort = portString(getIvar(inst, "@proxy_port"))
+		cfg.connectTunnel = scheme == "https"
+		if u := getIvar(inst, "@proxy_user"); !object.IsNil(u) {
+			cfg.proxyAuth = basicAuthHeader(strArg(u), strArg(getIvar(inst, "@proxy_pass")))
+		}
+	}
+	if getIvar(inst, "@started").Truthy() {
+		cfg.inst = inst
+	}
+	return vm.nethttpDoXfer(cfg, method, path, body, hdr)
+}
+
+// nethttpXfer carries the resolved per-request transport configuration for an
+// instance request: the final target (scheme/host/port/hostHdr), the TLS verify
+// mode, the actual dial endpoint (dialHost/dialPort — the proxy when proxied),
+// the proxy shape, the socket deadlines and, when set, the started instance whose
+// connection is reused across requests (keep-alive).
+type nethttpXfer struct {
+	scheme, host, port, hostHdr string
+	verifyMode                  int64
+	dialHost, dialPort          string
+	proxied                     bool   // plain-http proxy: absolute-form request-line
+	connectTunnel               bool   // https-via-proxy: CONNECT then TLS through the tunnel
+	proxyAuth                   string // Proxy-Authorization value, or "" for none
+	openTO, readTO, writeTO     time.Duration
+	inst                        object.Value // non-nil ⇒ persistent (keep-alive) on this instance
+}
+
+// nethttpDoXfer runs one instance request over the configured transport. Within a
+// start block it reuses (or opens and caches) a persistent connection and frames
+// exactly one response so the next request reads at the right offset; outside a
+// start block it opens a fresh connection, reads one response and closes.
+func (vm *VM) nethttpDoXfer(cfg *nethttpXfer, method, path string, body []byte, hdr [][2]string) object.Value {
+	reqBytes, noBody := vm.nethttpBuildRequest(cfg, method, path, body, hdr, cfg.inst == nil)
+
+	persistent := cfg.inst != nil
+	// Reuse a cached connection once; if the write/read fails (e.g. the server
+	// dropped an idle keep-alive), redial and retry a single time.
+	var raw []byte
+	var err error
+	var keepAlive bool
+	reused := false
+	if persistent {
+		if s := nethttpGetConn(cfg.inst); s != nil {
+			reused = true
+			raw, keepAlive, err = vm.nethttpExchangeFramed(cfg, s, reqBytes, noBody)
+			if err != nil {
+				nethttpDropConn(cfg.inst)
+				reused = false
+			}
+		}
+	}
+	if !reused {
+		stream, derr := vm.nethttpDialXfer(cfg)
+		if derr != nil {
+			vm.raiseTransportErr(derr, "open")
+		}
+		raw, keepAlive, err = vm.nethttpExchangeFramed(cfg, stream, reqBytes, noBody)
+		if err != nil {
+			stream.closeConn()
+			vm.raiseTransportErr(err, "read")
+		}
+		if persistent {
+			nethttpSetConn(cfg.inst, stream)
+		} else {
+			stream.closeConn()
+		}
+	}
+	// A server "Connection: close" (or an unframed body read to EOF) means the
+	// cached connection is spent; drop it so the next request redials.
+	if persistent && !keepAlive {
+		nethttpDropConn(cfg.inst)
+	}
+
+	// A no-body response (HEAD etc.) still carries Content-Length / Transfer-Encoding
+	// headers but no body bytes: strip that framing so ParseResponse frames an empty
+	// body instead of trying to read one, mirroring the one-shot path.
+	if noBody {
+		raw = trimResponseToHeaders(raw)
+	}
+	resp, perr := nethttp.ParseResponse(raw)
+	if perr != nil {
+		raise("Net::HTTPBadResponse", "%s", perr.Error())
+	}
+	respVal := vm.nethttpBuildResponse(resp)
+	if noBody {
+		setIvar(respVal, "@body", object.NilV)
+	}
+	return respVal
+}
+
+// nethttpBuildRequest builds the request bytes for an instance transfer. For a
+// plain-http proxy the request-target is the absolute URI (the proxy routes on
+// it); otherwise it is the origin-form path. close asks the server to close the
+// connection (used for one-shot, non-persistent requests). It returns the bytes
+// and whether the response carries no body (HEAD etc.).
+func (vm *VM) nethttpBuildRequest(cfg *nethttpXfer, method, path string, body []byte, hdr [][2]string, close bool) ([]byte, bool) {
+	target := path
+	if cfg.proxied && !cfg.connectTunnel {
+		target = cfg.scheme + "://" + cfg.hostHdr + path
+	}
+	req, err := nethttp.NewRequest(method, target, cfg.hostHdr, hdr)
+	if err != nil {
+		raise("ArgumentError", "%s", err.Error())
+	}
+	if body != nil {
+		req.SetBody(body)
+	}
+	if cfg.proxied && !cfg.connectTunnel && cfg.proxyAuth != "" {
+		req.Set("Proxy-Authorization", cfg.proxyAuth)
+	}
+	if close {
+		req.Set("Connection", "close")
+	}
+	reqBytes, err := req.Bytes("1.1")
+	if err != nil {
+		raise("Net::HTTPError", "%s", err.Error())
+	}
+	return reqBytes, !req.ResponseBodyPermitted()
+}
+
+// nethttpExchangeFramed writes the request (under the write deadline) and reads
+// exactly one framed response (under the read deadline) off the stream, leaving
+// any following bytes buffered for the next keep-alive request. keepAlive reports
+// whether the connection may be reused (false ⇒ the server asked to close or the
+// body was unframed and read to EOF).
+func (vm *VM) nethttpExchangeFramed(cfg *nethttpXfer, s streamIO, reqBytes []byte, noBody bool) (raw []byte, keepAlive bool, err error) {
+	nethttpSetDeadline(s, cfg.writeTO)
+	if _, werr := s.writer().Write(reqBytes); werr != nil {
+		return nil, false, werr
+	}
+	nethttpSetDeadline(s, cfg.readTO)
+	return nethttpReadResponse(s.reader(), noBody)
+}
+
+// nethttpDialXfer opens the transport for a transfer: a direct dial, a plain-http
+// proxy dial (a bare TCP socket to the proxy — the absolute-URI request-line does
+// the routing), or an https-via-proxy CONNECT tunnel (dial proxy, CONNECT, then
+// TLS through the tunnel to the real host).
+func (vm *VM) nethttpDialXfer(cfg *nethttpXfer) (streamIO, error) {
+	if !cfg.proxied {
+		return nethttpDialTimeout(cfg.scheme, cfg.host, cfg.dialHost, cfg.dialPort, cfg.verifyMode, cfg.openTO)
+	}
+	if !cfg.connectTunnel {
+		// Plain http through a proxy: a bare TCP socket to the proxy.
+		conn, err := nethttpRawDial(cfg.dialHost, cfg.dialPort, cfg.openTO)
+		if err != nil {
+			return nil, err
+		}
+		return newTCPSocket(nil, conn), nil
+	}
+	// https through a proxy: CONNECT then TLS to the real host over the tunnel.
+	conn, err := nethttpRawDial(cfg.dialHost, cfg.dialPort, cfg.openTO)
+	if err != nil {
+		return nil, err
+	}
+	if err := nethttpProxyConnect(conn, cfg.hostHdr, cfg.proxyAuth); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return nethttpTLSWrap(conn, cfg.host, cfg.verifyMode)
+}
+
+// nethttpProxyConnect sends a CONNECT request for target through conn and reads
+// the proxy's response, erroring unless it is a 2xx. It reads only up to the
+// response's header terminator (byte at a time) so no tunnelled TLS bytes are
+// consumed.
+func nethttpProxyConnect(conn net.Conn, target, proxyAuth string) error {
+	var b strings.Builder
+	b.WriteString("CONNECT " + target + " HTTP/1.1\r\n")
+	b.WriteString("Host: " + target + "\r\n")
+	if proxyAuth != "" {
+		b.WriteString("Proxy-Authorization: " + proxyAuth + "\r\n")
+	}
+	b.WriteString("\r\n")
+	if _, err := conn.Write([]byte(b.String())); err != nil {
+		return err
+	}
+	// Read the response headers a byte at a time up to CRLFCRLF.
+	var resp []byte
+	buf := make([]byte, 1)
+	for !bytes.HasSuffix(resp, []byte("\r\n\r\n")) {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			resp = append(resp, buf[0])
+		}
+		if err != nil {
+			return err
+		}
+	}
+	line := string(resp)
+	if i := strings.Index(line, "\r\n"); i >= 0 {
+		line = line[:i]
+	}
+	fields := strings.Fields(line)
+	if len(fields) < 2 || !strings.HasPrefix(fields[1], "2") {
+		return fmt.Errorf("proxy CONNECT failed: %s", strings.TrimSpace(line))
+	}
+	return nil
+}
+
+// nethttpFinish closes a started instance's cached keep-alive connection (if any)
+// and marks it un-started. It backs both Net::HTTP#finish and the start-block
+// teardown.
+func (vm *VM) nethttpFinish(inst object.Value) {
+	nethttpDropConn(inst)
+	setIvar(inst, "@started", object.Bool(false))
+}
+
+// nethttpGetConn returns the instance's cached persistent connection, or nil.
+func nethttpGetConn(inst object.Value) streamIO {
+	if s, ok := getIvar(inst, "@conn").(streamIO); ok {
+		return s
+	}
+	return nil
+}
+
+// nethttpSetConn caches a persistent connection on the instance.
+func nethttpSetConn(inst object.Value, s streamIO) {
+	setIvar(inst, "@conn", s.(object.Value))
+}
+
+// nethttpDropConn closes and clears the instance's cached connection.
+func nethttpDropConn(inst object.Value) {
+	if s := nethttpGetConn(inst); s != nil {
+		s.closeConn()
+	}
+	setIvar(inst, "@conn", object.NilV)
+}
+
+// nethttpDuration converts a Ruby timeout (Integer/Float seconds) to a Duration;
+// a nil or non-positive value yields 0 (no deadline).
+func nethttpDuration(v object.Value) time.Duration {
+	var secs float64
+	switch n := v.(type) {
+	case object.Integer:
+		secs = float64(n)
+	case object.Float:
+		secs = float64(n)
+	default:
+		return 0
+	}
+	if secs <= 0 {
+		return 0
+	}
+	return time.Duration(secs * float64(time.Second))
+}
+
+// nethttpSetDeadline applies a relative deadline to a stream's underlying socket
+// (0 clears it). It is a no-op for a stream with no net.Conn (e.g. a test fake).
+func nethttpSetDeadline(s streamIO, d time.Duration) {
+	conn := nethttpNetConn(s)
+	if conn == nil {
+		return
+	}
+	if d <= 0 {
+		conn.SetDeadline(time.Time{})
+		return
+	}
+	conn.SetDeadline(time.Now().Add(d))
+}
+
+// nethttpNetConn extracts the underlying net.Conn from the two real stream
+// transports (tcpSocket / sslSocket); anything else (a test fake) yields nil.
+func nethttpNetConn(s streamIO) net.Conn {
+	switch t := s.(type) {
+	case *tcpSocket:
+		return t.conn
+	case *sslSocket:
+		return t.conn
+	default:
+		return nil
+	}
+}
+
+// raiseTransportErr maps a transport error to the MRI exception: an i/o timeout
+// during open/read/write raises Net::OpenTimeout / Net::ReadTimeout /
+// Net::WriteTimeout; anything else raises SocketError.
+func (vm *VM) raiseTransportErr(err error, phase string) {
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		switch phase {
+		case "open":
+			raise("Net::OpenTimeout", "execution expired")
+		case "write":
+			raise("Net::WriteTimeout", "execution expired")
+		default:
+			raise("Net::ReadTimeout", "execution expired")
+		}
+	}
+	raise("SocketError", "%s", err.Error())
+}
+
+// basicAuthHeader builds an HTTP Basic credential value for Proxy-Authorization.
+func basicAuthHeader(user, pass string) string {
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
+}
+
+// nethttpRawDial opens a raw TCP connection with an optional dial timeout
+// (open_timeout); 0 means no bound.
+func nethttpRawDial(host, port string, openTO time.Duration) (net.Conn, error) {
+	addr := net.JoinHostPort(host, port)
+	if openTO > 0 {
+		return net.DialTimeout("tcp", addr, openTO)
+	}
+	return net.Dial("tcp", addr)
+}
+
+// nethttpDialTimeout is nethttpDial with an open_timeout on the TCP dial and the
+// TLS handshake, returning the connected stream (raw for http, TLS for https).
+func nethttpDialTimeout(scheme, host, dialHost, dialPort string, verifyMode int64, openTO time.Duration) (streamIO, error) {
+	conn, err := nethttpRawDial(dialHost, dialPort, openTO)
+	if err != nil {
+		return nil, err
+	}
+	if scheme != "https" {
+		return newTCPSocket(nil, conn), nil
+	}
+	if openTO > 0 {
+		conn.SetDeadline(time.Now().Add(openTO))
+	}
+	s, err := nethttpTLSWrap(conn, host, verifyMode)
+	if openTO > 0 && err == nil {
+		conn.SetDeadline(time.Time{})
+	}
+	return s, err
+}
+
+// nethttpTLSWrap performs the TLS handshake over an already-connected socket and
+// returns the sslSocket stream. verifyMode 0 (VERIFY_NONE) skips verification.
+func nethttpTLSWrap(conn net.Conn, host string, verifyMode int64) (streamIO, error) {
+	tcp := newTCPSocket(nil, conn)
+	cfg := &tls.Config{ServerName: host}
+	if verifyMode == 0 {
+		cfg.InsecureSkipVerify = true
+	}
+	c := tls.Client(conn, cfg)
+	if err := c.Handshake(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &sslSocket{tcp: tcp, ctx: object.NilV, conn: conn, tls: c, r: bufio.NewReader(c), hostname: host}, nil
+}
+
+// nethttpReadResponse reads exactly one HTTP/1.1 response off r — the status line,
+// the header block, and the body framed by Transfer-Encoding: chunked or
+// Content-Length (or read to EOF when unframed) — returning the raw bytes to hand
+// to nethttp.ParseResponse. keepAlive reports whether the connection may be reused
+// (false when the server sent Connection: close or the body was read to EOF).
+// noBody (HEAD and other body-forbidden responses) stops after the header block.
+func nethttpReadResponse(r *bufio.Reader, noBody bool) (raw []byte, keepAlive bool, err error) {
+	var buf bytes.Buffer
+	status, err := r.ReadString('\n')
+	if err != nil {
+		return nil, false, err
+	}
+	buf.WriteString(status)
+	headers := map[string]string{}
+	for {
+		line, lerr := r.ReadString('\n')
+		if lerr != nil {
+			return nil, false, lerr
+		}
+		buf.WriteString(line)
+		if strings.TrimRight(line, "\r\n") == "" {
+			break
+		}
+		if i := strings.IndexByte(line, ':'); i >= 0 {
+			k := strings.ToLower(strings.TrimSpace(line[:i]))
+			v := strings.TrimSpace(line[i+1:])
+			if prev, ok := headers[k]; ok {
+				headers[k] = prev + ", " + v
+			} else {
+				headers[k] = v
+			}
+		}
+	}
+	keepAlive = !strings.EqualFold(headers["connection"], "close")
+	if noBody {
+		return buf.Bytes(), keepAlive, nil
+	}
+	if te, ok := headers["transfer-encoding"]; ok && nethttpIsChunked(te) {
+		if cerr := nethttpCopyChunked(r, &buf); cerr != nil {
+			return nil, false, cerr
+		}
+		return buf.Bytes(), keepAlive, nil
+	}
+	if cl, ok := headers["content-length"]; ok {
+		n, cerr := strconv.Atoi(strings.TrimSpace(cl))
+		if cerr != nil || n < 0 {
+			return nil, false, fmt.Errorf("wrong Content-Length: %q", cl)
+		}
+		if _, cerr := io.CopyN(&buf, r, int64(n)); cerr != nil {
+			return nil, false, cerr
+		}
+		return buf.Bytes(), keepAlive, nil
+	}
+	// No framing: read to EOF. The connection is spent afterwards.
+	rest, rerr := io.ReadAll(r)
+	if rerr != nil {
+		return nil, false, rerr
+	}
+	buf.Write(rest)
+	return buf.Bytes(), false, nil
+}
+
+// nethttpCopyChunked copies a chunked body (raw, including the chunk framing) from
+// r into buf until the zero-size chunk, then consumes the trailer up to a blank
+// line — the same framing nethttp.ParseResponse later decodes.
+func nethttpCopyChunked(r *bufio.Reader, buf *bytes.Buffer) error {
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return err
+		}
+		buf.WriteString(line)
+		hexlen := nethttpFirstHexRun(line)
+		if hexlen == "" {
+			return fmt.Errorf("wrong chunk size line: %q", line)
+		}
+		n, err := strconv.ParseInt(hexlen, 16, 64)
+		if err != nil {
+			return fmt.Errorf("wrong chunk size line: %q", line)
+		}
+		if n == 0 {
+			break
+		}
+		if _, err := io.CopyN(buf, r, n); err != nil {
+			return err
+		}
+		if _, err := io.CopyN(buf, r, 2); err != nil { // trailing CRLF
+			return err
+		}
+	}
+	for { // trailer lines until a blank one (or EOF)
+		line, err := r.ReadString('\n')
+		buf.WriteString(line)
+		if err != nil || strings.TrimRight(line, "\r\n") == "" {
+			break
+		}
+	}
+	return nil
+}
+
+// nethttpIsChunked reports whether a Transfer-Encoding field requests chunked
+// framing (case-insensitive substring, as MRI's chunked? does).
+func nethttpIsChunked(te string) bool {
+	return strings.Contains(strings.ToLower(te), "chunked")
+}
+
+// nethttpFirstHexRun returns the first maximal run of hex digits in a chunk-size
+// line (the codec's firstHexRun), "" when there is none.
+func nethttpFirstHexRun(line string) string {
+	start := -1
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+		if isHex {
+			if start < 0 {
+				start = i
+			}
+		} else if start >= 0 {
+			return line[start:i]
+		}
+	}
+	if start >= 0 {
+		return line[start:]
+	}
+	return ""
 }
 
 // nethttpDo is the codec↔socket seam: build the request bytes with the net-http
@@ -483,8 +1001,12 @@ func (vm *VM) nethttpResponseClass(netMod *RClass, class, category string) *RCla
 
 // --- argument helpers -------------------------------------------------------
 
-// nethttpNewInstance builds a Net::HTTP instance from (address[, port]),
-// defaulting the port to 80 and use_ssl to false.
+// nethttpNewInstance builds a Net::HTTP instance from
+// (address[, port[, p_addr[, p_port[, p_user[, p_pass]]]]]), defaulting the port
+// to 80, use_ssl to false and each timeout to 60s (MRI's defaults). A proxy is
+// configured only when p_addr is an explicit host String; a nil or a bare
+// :ENV symbol (MRI's default, which would consult http_proxy) leaves the
+// instance proxy-less — environment-proxy resolution is a flagged follow-up.
 func (vm *VM) nethttpNewInstance(http *RClass, args []object.Value) object.Value {
 	o := &RObject{class: http, ivars: map[string]object.Value{}}
 	host := ""
@@ -499,6 +1021,31 @@ func (vm *VM) nethttpNewInstance(http *RClass, args []object.Value) object.Value
 	o.ivars["@port"] = object.IntValue(port)
 	o.ivars["@use_ssl"] = object.Bool(false)
 	o.ivars["@header"] = object.NewHash()
+	// MRI defaults: 60s open/read/write timeouts.
+	o.ivars["@open_timeout"] = object.IntValue(60)
+	o.ivars["@read_timeout"] = object.IntValue(60)
+	o.ivars["@write_timeout"] = object.IntValue(60)
+	// Proxy (p_addr, p_port, p_user, p_pass): only an explicit host String enables it.
+	o.ivars["@proxy_address"] = object.NilV
+	o.ivars["@proxy_port"] = object.NilV
+	o.ivars["@proxy_user"] = object.NilV
+	o.ivars["@proxy_pass"] = object.NilV
+	if len(args) > 2 {
+		if ps, ok := args[2].(*object.String); ok && ps.Str() != "" {
+			o.ivars["@proxy_address"] = args[2]
+			pp := int64(80)
+			if len(args) > 3 && !object.IsNil(args[3]) {
+				pp = intArg(args[3])
+			}
+			o.ivars["@proxy_port"] = object.IntValue(pp)
+			if len(args) > 4 && !object.IsNil(args[4]) {
+				o.ivars["@proxy_user"] = args[4]
+			}
+			if len(args) > 5 && !object.IsNil(args[5]) {
+				o.ivars["@proxy_pass"] = args[5]
+			}
+		}
+	}
 	return o
 }
 
