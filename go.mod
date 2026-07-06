@@ -14,6 +14,7 @@ require (
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6
+	github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180
 	github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795
 	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
 	github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda
@@ -29,6 +30,8 @@ require (
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
 	github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689
+	github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260706115615-cdd5a0c72f9e
+	github.com/go-ruby-connection-pool/connection-pool v0.0.0-20260706115620-287a916e348b
 	github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc
 	github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
@@ -49,6 +52,7 @@ require (
 	github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
+	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82
 	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3

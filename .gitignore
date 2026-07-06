@@ -15,3 +15,6 @@ cov.out
 # Editor / OS noise
 .DS_Store
 /rbgo.exe
+
+# built binaries
+rbgo-bin

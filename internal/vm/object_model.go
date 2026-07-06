@@ -891,6 +891,34 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Parquet::ArrowFileReader"].(*RClass)
 	case *ParquetWriter:
 		return vm.consts["Parquet::ArrowFileWriter"].(*RClass)
+	case *HTTPartyResponse:
+		return vm.consts["HTTParty::Response"].(*RClass)
+	case *RConnectionPool:
+		return x.cls
+	case *RConnectionPoolWrapper:
+		return x.cls
+	case *ConcurrentAtomicRef:
+		return x.cls
+	case *ConcurrentAtomicFixnum:
+		return x.cls
+	case *ConcurrentAtomicBool:
+		return x.cls
+	case *ConcurrentMap:
+		return x.cls
+	case *ConcurrentFuture:
+		return x.cls
+	case *ConcurrentPromise:
+		return x.cls
+	case *ConcurrentPool:
+		return x.cls
+	case *ConcurrentLatch:
+		return x.cls
+	case *ConcurrentSemaphore:
+		return x.cls
+	case *ConcurrentBarrier:
+		return x.cls
+	case *ASInflections:
+		return vm.consts["ActiveSupport::Inflector::Inflections"].(*RClass)
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:
