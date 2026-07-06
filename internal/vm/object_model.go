@@ -976,6 +976,18 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Typhoeus::Hydra"].(*RClass)
 	case *IMAPObj:
 		return x.cls
+	case *sftpSession:
+		return x.cls
+	case *sftpDir:
+		return x.cls
+	case *sftpFileFactory:
+		return x.cls
+	case *sftpFile:
+		return x.cls
+	case *sftpAttrs:
+		return x.cls
+	case *sftpName:
+		return x.cls
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:
