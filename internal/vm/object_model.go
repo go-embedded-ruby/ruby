@@ -1212,6 +1212,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *sslServer:
 		return x.cls
+	case *addrinfo:
+		return x.cls
 	case *opensslDigest:
 		return x.cls
 	case *DigestObj:
