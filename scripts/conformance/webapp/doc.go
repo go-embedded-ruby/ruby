@@ -20,6 +20,13 @@
 // asserts the [status, headers, body] dump is byte-for-byte the response the
 // real `sinatra` gem 4.2.1 produced from the same app and request envs.
 //
+// TestSinatraErbGemOracle (sinatra_erb_oracle_test.go) is the matching proof for
+// the templating half: it runs apps/sinatra_erb_oracle.rb through rbgo and asserts
+// the rendered responses are byte-for-byte the `sinatra` gem 4.2.1 output, across
+// inline-String and :symbol/file templates, <%= %>/<% %>, @ivars set in a filter,
+// positional and options[:locals] locals, and ERB trim behaviour — the `erb`
+// helper rendering through the bound go-ruby-erb compiler.
+//
 // The ActiveRecord stage feature-detects the require first: it asserts the real
 // response when the binding is present and otherwise records the exact missing
 // feature, so the suite stays green today and lights up automatically when the

@@ -297,6 +297,15 @@ func (vm *VM) registerSinatraContext(ctx *RClass) {
 	ctx.define("uri", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).c.URI(sinatraStr(rackArg(args))))
 	})
+	// erb(template, options = {}, locals = {}) — render an ERB view through the
+	// go-ruby-erb compiler and return the rendered String (which becomes the
+	// response body). template is an inline template String or a :symbol naming
+	// views/<sym>.erb; the compiled source evaluates in this handler's binding, so
+	// the action's @ivars and the request helpers resolve and `locals:` bind. See
+	// sinatra_erb.go. Layouts/partials and :erb escape_html are scoped follow-ups.
+	ctx.define("erb", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.sinatraErb(self(v), args)
+	})
 	ctx.define("url", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).c.URI(sinatraStr(rackArg(args))))
 	})
