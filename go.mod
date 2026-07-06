@@ -83,6 +83,7 @@ require (
 	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
 	github.com/go-ruby-oidc/oidc v0.0.0-20260705185218-08dab6b22572
+	github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
@@ -132,6 +133,7 @@ require (
 	github.com/go-ruby-tzinfo/tzinfo v0.0.0-20260701105256-15977bdf6e1a
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
+	github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd

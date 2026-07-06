@@ -61,6 +61,24 @@ func rackEnv(v object.Value) rack.Env {
 	return env
 }
 
+// deepRackEnv converts a Ruby env Hash into a rack.Env, mapping each value
+// through rackToGo so nested Hashes (notably rack.session) survive as
+// map[string]any — the shape the Rack authentication middleware (warden /
+// omniauth) reads — rather than being stringified as rackEnv would. It is the
+// shared env converter for the middleware bindings.
+func deepRackEnv(v object.Value) rack.Env {
+	h, ok := v.(*object.Hash)
+	if !ok {
+		raise("TypeError", "no implicit conversion into Hash")
+	}
+	env := make(rack.Env, len(h.Keys))
+	for _, k := range h.Keys {
+		val, _ := h.Get(k)
+		env[rackStr(k)] = rackToGo(val)
+	}
+	return env
+}
+
 // rackEnvValue maps a Ruby env value into the Go value a rack.Env holds. Env
 // entries are almost always strings; scalars are preserved and anything else is
 // stringified so the request accessors always see a usable value.
