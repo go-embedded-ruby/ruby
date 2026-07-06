@@ -735,6 +735,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// The handle I18n.backend returns reports I18n::Backend::Simple so its
 		// store_translations / available_locales dispatch.
 		return vm.consts["I18n::Backend::Simple"].(*RClass)
+	case *ZeitwerkLoader:
+		// A Zeitwerk::Loader.new / .for_gem handle reports Zeitwerk::Loader so its
+		// push_dir / setup / eager_load / … instance methods dispatch.
+		return vm.consts["Zeitwerk::Loader"].(*RClass)
+	case *ZeitwerkInflector:
+		// A Zeitwerk::Inflector handle reports Zeitwerk::Inflector so its
+		// camelize / inflect dispatch.
+		return vm.consts["Zeitwerk::Inflector"].(*RClass)
 	case *RSSRss:
 		return vm.consts["RSS::Rss"].(*RClass)
 	case *RSSChannel:

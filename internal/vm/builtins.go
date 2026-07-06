@@ -489,6 +489,7 @@ func (vm *VM) bootstrap() {
 	vm.registerDotenv()        // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
 	vm.registerHCL2()          // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
 	vm.registerI18n()          // I18n module (require "i18n"), backed by go-ruby-i18n; needs ArgumentError for the I18n::ArgumentError tree
+	vm.registerZeitwerk()      // Zeitwerk::Loader/Inflector (require "zeitwerk"), backed by go-ruby-zeitwerk; wires DefineAutoload->Module#autoload, Load->require; needs StandardError/NameError for the Zeitwerk error tree
 	vm.registerRSS()           // RSS::Parser.parse -> RSS::Rss / RSS::RDF / RSS::Atom::Feed (require "rss"), backed by go-ruby-rss; needs StandardError for RSS::Error
 	vm.registerRDoc()          // RDoc::Markup + ToHtml/ToMarkdown/ToRdoc formatters (require "rdoc"), backed by go-ruby-rdoc; needs StandardError for RDoc::Error
 	vm.registerThor()          // Thor CLI framework: option parsing + dispatch + help (require "thor"), backed by go-ruby-thor; needs StandardError for Thor::Error
