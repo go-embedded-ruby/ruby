@@ -1192,7 +1192,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *tcpServer:
 		return x.cls
+	case *udpSocket:
+		return x.cls
 	case *sslSocket:
+		return x.cls
+	case *sslServer:
 		return x.cls
 	case *opensslDigest:
 		return x.cls
@@ -1358,7 +1362,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *object.Main:
 		return vm.cObject
 	}
-	return nil // unreachable for the closed set of value types
+	// Platform-gated value types (e.g. the AF_UNIX sockets, compiled only on
+	// non-Windows) report their Ruby class through classOfPlatform rather than a
+	// case above, so the shared switch stays platform-neutral. On platforms with
+	// no such types it is a plain `return nil`, so there is no dead branch.
+	return vm.classOfPlatform(v)
 }
 
 // send is the dispatch core (our objc_msgSend): find the method on the

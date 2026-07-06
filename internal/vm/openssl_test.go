@@ -236,9 +236,9 @@ func TestOpenSSLPKIShell(t *testing.T) {
 	// Every shell .new raises NotImplementedError (the notImpl helper), as does
 	// SSL.verify_certificate_identity. Cover one shell per namespace plus the
 	// top-level BN / Cipher. (OpenSSL::SSL::SSLSocket is no longer a shell — it is
-	// a real crypto/tls transport, exercised in socket_test.go.)
+	// a real crypto/tls transport — and OpenSSL::X509::Certificate is now a real
+	// PEM-carrying cert; both are exercised in socket_test.go.)
 	notImpl := []string{
-		`OpenSSL::X509::Certificate.new`,
 		`OpenSSL::X509::Name.new`,
 		`OpenSSL::PKey::RSA.new`,
 		`OpenSSL::ASN1::Sequence.new`,
