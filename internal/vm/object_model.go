@@ -974,6 +974,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Typhoeus::Response"].(*RClass)
 	case *TyphoeusHydra:
 		return vm.consts["Typhoeus::Hydra"].(*RClass)
+	case *IMAPObj:
+		return x.cls
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:
