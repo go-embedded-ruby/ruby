@@ -14,6 +14,7 @@
 //	Stage 3  Sinatra DSL (require "sinatra/base")   — runs (go-ruby-sinatra binding)
 //	Stage 4  sqlite3 + ERB/JSON data route          — runs
 //	Stage 4b ActiveRecord ORM data route            — gap until go-ruby-activerecord binds
+//	Stage 5  Sinatra cookie session (enable :sessions) — runs (signed-cookie session store)
 //
 // On top of stage 3, TestSinatraGemOracle (sinatra_oracle_test.go) is the web
 // phase's MRI-identity proof: it runs apps/sinatra_oracle.rb through rbgo and
@@ -26,6 +27,16 @@
 // inline-String and :symbol/file templates, <%= %>/<% %>, @ivars set in a filter,
 // positional and options[:locals] locals, and ERB trim behaviour — the `erb`
 // helper rendering through the bound go-ruby-erb compiler.
+//
+// TestSinatraSessionStore (sinatra_session_oracle_test.go) proves the `enable
+// :sessions` cookie session store end-to-end: apps/stage5_sinatra_session.rb
+// drives its own request sequence through the Rack #call adapter, threading each
+// Set-Cookie back in as the next Cookie, and the transcript shows a session
+// counter incrementing across requests, persisting across a different route,
+// resetting when the signed cookie is tampered, and clearing on session.clear.
+// The transcript is an MRI-portable functional golden; the serialization's
+// byte-parity with Rack::Session::Cookie (base64(Marshal) + HMAC-SHA1) is proven
+// in the internal suite where the signing secret is fixed.
 //
 // The ActiveRecord stage feature-detects the require first: it asserts the real
 // response when the binding is present and otherwise records the exact missing
