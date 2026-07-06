@@ -433,9 +433,12 @@ func ftpToCRLF(s string) string {
 }
 
 // ftpBasename returns the final path element of p (File.basename), the default
-// remote/local name the get/put helpers derive from their counterpart.
+// remote/local name the get/put helpers derive from their counterpart. It splits
+// on either separator so a host filesystem path survives on Windows too (where a
+// local path from filepath.Join uses '\\'), matching Ruby's File.basename, which
+// treats both '/' and '\\' as separators on Windows.
 func ftpBasename(p string) string {
-	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+	if i := strings.LastIndexAny(p, `/\`); i >= 0 {
 		return p[i+1:]
 	}
 	return p

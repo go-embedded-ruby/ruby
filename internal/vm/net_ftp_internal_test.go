@@ -1234,6 +1234,14 @@ func TestFTPTextHelpers(t *testing.T) {
 	if got := ftpBasename("c.txt"); got != "c.txt" {
 		t.Fatalf("basename bare: %q", got)
 	}
+	// A Windows host path (filepath.Join uses '\\') must still yield the final
+	// element — otherwise putbinaryfile's default remote name is the whole path.
+	if got := ftpBasename(`C:\Users\me\up.txt`); got != "up.txt" {
+		t.Fatalf("basename windows: %q", got)
+	}
+	if got := ftpBasename(`a/b\c.txt`); got != "c.txt" {
+		t.Fatalf("basename mixed: %q", got)
+	}
 }
 
 func TestFTPInspectTruthyAndClose(t *testing.T) {
