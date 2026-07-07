@@ -706,6 +706,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A Jbuilder builder reports Jbuilder so its method_missing DSL and bang
 		// methods (defined on that class) dispatch.
 		return vm.consts["Jbuilder"].(*RClass)
+	case *FactoryBotProxy:
+		// The self a factory/trait/transient/nested-factory block runs against; its
+		// method_missing + DSL methods live on FactoryBot::DefinitionProxy.
+		return vm.consts["FactoryBot::DefinitionProxy"].(*RClass)
+	case *FactoryBotTopProxy:
+		// The self a FactoryBot.define block runs against (factory/sequence).
+		return vm.consts["FactoryBot::Syntax::Default::DSL"].(*RClass)
+	case *FactoryBotEvaluator:
+		// The self a dynamic attribute block / callback reads siblings through.
+		return vm.consts["FactoryBot::Evaluator"].(*RClass)
 	case *DryType:
 		return vm.consts["Dry::Types::Type"].(*RClass)
 	case *DryResult:
