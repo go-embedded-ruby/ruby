@@ -62,6 +62,7 @@ var providedFeatures = map[string]bool{
 	"acme": true, "acme/client": true,
 	"grpc": true, "nats": true, "kafka": true, "etcd": true, "etcdv3": true,
 	"vault": true, "openbao": true,
+	"vcr":    true,
 	"mysql2": true, "mysql": true, "mongo": true, "bson": true, "parquet": true,
 	"msgpack": true, "toml": true,
 	"tzinfo": true, "chronic": true, "money": true, "timecop": true,

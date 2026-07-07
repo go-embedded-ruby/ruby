@@ -440,12 +440,26 @@ func (vm *VM) nethttpDoXfer(cfg *nethttpXfer, method, path string, body []byte, 
 		}
 	}
 
+	// While a VCR.use_cassette block is active, route the request through the
+	// cassette (replay a recorded interaction, or record via the real transport)
+	// instead of performing it directly. See vcr_bind.go.
+	if vm.vcrCassette != nil {
+		return vm.vcrRoute(cfg, method, path, body, hdr)
+	}
+	raw, noBody := vm.nethttpRawExchange(cfg, method, path, body, hdr)
+	return vm.nethttpResponseFromRaw(raw, noBody)
+}
+
+// nethttpRawExchange performs one request over the configured transport and
+// returns the raw response bytes plus whether the response carries no body (HEAD
+// etc.). It is the network half of nethttpDoXfer, factored out so both the direct
+// path and the VCR record doer (vcr_bind.go) share exactly one transport.
+func (vm *VM) nethttpRawExchange(cfg *nethttpXfer, method, path string, body []byte, hdr [][2]string) (raw []byte, noBody bool) {
 	reqBytes, noBody := vm.nethttpBuildRequest(cfg, method, path, body, hdr, cfg.inst == nil)
 
 	persistent := cfg.inst != nil
 	// Reuse a cached connection once; if the write/read fails (e.g. the server
 	// dropped an idle keep-alive), redial and retry a single time.
-	var raw []byte
 	var err error
 	var keepAlive bool
 	reused := false
@@ -488,6 +502,13 @@ func (vm *VM) nethttpDoXfer(cfg *nethttpXfer, method, path string, body []byte, 
 	if noBody {
 		raw = trimResponseToHeaders(raw)
 	}
+	return raw, noBody
+}
+
+// nethttpResponseFromRaw parses a raw HTTP/1.1 response and builds the Ruby
+// Net::HTTPResponse of the subclass MRI would have instantiated. noBody (HEAD
+// etc.) forces the body to nil so a body-forbidden response carries none.
+func (vm *VM) nethttpResponseFromRaw(raw []byte, noBody bool) object.Value {
 	resp, perr := nethttp.ParseResponse(raw)
 	if perr != nil {
 		raise("Net::HTTPBadResponse", "%s", perr.Error())

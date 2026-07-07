@@ -426,6 +426,7 @@ func (vm *VM) bootstrap() {
 	vm.registerNetHTTP()          // net/http + net/https loadable shell; needs StandardError
 	vm.registerNetHTTPTransport() // real Net::HTTP over the socket transport; after registerNetHTTP + registerSocket
 	vm.registerWebMock()          // WebMock stub registry (require "webmock") intercepting the bound Net::HTTP transport; after registerNetHTTP + registerNetHTTPTransport
+	vm.registerVCR()              // VCR record/replay of the bound Net::HTTP via cassettes (require "vcr"), backed by go-ruby-vcr; after registerNetHTTP + registerNetHTTPTransport (it routes the real transport)
 	vm.registerNetPOP()           // Net::POP3/Net::POPMail (require "net/pop"), backed by go-ruby-net-pop codec; socket = injected IO seam; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL
 	vm.registerNetSFTP()          // Net::SFTP client (require "net/sftp"), backed by go-ruby-net-sftp codec; SSH channel = injected IO seam; nests under Net, after registerNetHTTP
 	vm.registerNetFTP()           // real Net::FTP over the socket transport; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL

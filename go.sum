@@ -523,6 +523,8 @@ github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984
 github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f/go.mod h1:mKlLb/MTNhSHSUhcAvb6hi3ZCR5kCgVdDaInEyI3Wr8=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb h1:CyoFEEsMPa/TX4EJHOPsXud3nccESDhaW6fTQsidIKI=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb/go.mod h1:/7+NF+4kESzcNHjRtNe/lAfhgHpgElX4C+VNo0xsb6Y=
+github.com/go-ruby-vcr/vcr v0.0.0-20260707192746-30292e709ff4 h1:mZhv7pLUQbEDqHHD86CzE8sioedN4q8AgNK2odw6HL4=
+github.com/go-ruby-vcr/vcr v0.0.0-20260707192746-30292e709ff4/go.mod h1:YK1MSInsLFhUeYgeK9MJvzrmQmSU5wgmNHPX79mMFiA=
 github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef h1:JLPi8PmkOV+Yta+zBdaPYVc5wJFs3GEmbh/YiXSd6L8=
 github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef/go.mod h1:oI3L9dywsrSXJqLDuJGIYuHUHRCxUS7BU8PBZGXpx4A=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b h1:ZwN0q9xq9HUGCskWGz8rmL+v6MaHy+AM99oictlPlBs=

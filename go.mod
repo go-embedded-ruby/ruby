@@ -160,6 +160,7 @@ require (
 	github.com/go-ruby-tzinfo/tzinfo v0.0.0-20260701105256-15977bdf6e1a
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
+	github.com/go-ruby-vcr/vcr v0.0.0-20260707192746-30292e709ff4
 	github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b
 	github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9
