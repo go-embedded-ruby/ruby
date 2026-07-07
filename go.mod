@@ -70,6 +70,7 @@ require (
 	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82
 	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
+	github.com/go-ruby-irb/irb v0.0.0-20260630203552-657e348289b2
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2
 	github.com/go-ruby-jwt/jwt v0.0.0-20260705184902-40cd404d3c65
