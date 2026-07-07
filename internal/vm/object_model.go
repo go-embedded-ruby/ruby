@@ -1034,6 +1034,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *RedisBatch:
 		return x.cls
+	case *PTVersion:
+		return vm.consts["PaperTrail::Version"].(*RClass)
+	case *PTProxy:
+		return vm.consts["PaperTrail::RecordTrail"].(*RClass)
+	case *PTRequest:
+		return vm.consts["PaperTrail::Request"].(*RClass)
 	case *POP3Obj:
 		return x.cls
 	case *POPMailObj:
