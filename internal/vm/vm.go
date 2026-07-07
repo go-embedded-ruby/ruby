@@ -276,6 +276,7 @@ type VM struct {
 	omniAuthConfig                         *OmniAuthConfig                    // the shared OmniAuth.config (test_mode / mock_auth / path_prefix)
 	amThunks                               map[*RClass][]amThunk              // ActiveModel::Validations DSL registrations per class (require "active_model"); replayed onto a fresh activemodel.Validations at #valid? time so subclasses inherit ancestors' validators
 	fidConfigs                             map[*RClass]*fidState              // FriendlyId: per-model slug config, reference slug store and in-process record cache (require "friendly_id"), installed by the friendly_id macro
+	aasmSpecs                              map[*RClass][]*aasmMachineSpec     // AASM: per-class state-machine definitions from `aasm do … end` (require "aasm"); replayed to build a bound aasm.Instance per Ruby object, walked over ancestors so a subclass inherits its machines
 	ajBases                                map[*RClass]*activejob.Base        // ActiveJob: library job class built per `class … < ActiveJob::Base` subclass (class-dispatch seam)
 	ajJobOf                                map[*RObject]*activejob.Job        // ActiveJob: Ruby job instance -> backing library *Job
 	ajInstOf                               map[*activejob.Job]*RObject        // ActiveJob: library *Job -> Ruby job instance
