@@ -943,9 +943,12 @@ func TestNetHTTPTransportUnits(t *testing.T) {
 }
 
 // TestNetHTTPProxyNilArms covers nethttpNewInstance's proxy-argument arms not
-// exercised elsewhere: a nil / :ENV / empty p_addr leaves the instance proxy-less,
-// and proxy_user / proxy_pass default to nil.
+// exercised elsewhere: with no proxy in the environment a nil / :ENV / omitted /
+// empty p_addr leaves the instance proxy-less, and proxy_user / proxy_pass default
+// to nil. The proxy environment is cleared so the :ENV arms resolve to direct
+// regardless of the host's own settings.
 func TestNetHTTPProxyNilArms(t *testing.T) {
+	nethttpClearProxyEnv(t)
 	got := runSrc(t, `require "net/http"
 puts Net::HTTP.new("h", 80).proxy?
 puts Net::HTTP.new("h", 80, nil).proxy?
@@ -1098,3 +1101,261 @@ func (c *scriptConn) RemoteAddr() net.Addr               { return nil }
 func (c *scriptConn) SetDeadline(_ time.Time) error      { return nil }
 func (c *scriptConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (c *scriptConn) SetWriteDeadline(_ time.Time) error { return nil }
+
+// nethttpClearProxyEnv blanks every proxy-related environment variable for the
+// duration of a test so that :ENV resolution is driven only by what the test sets
+// (t.Setenv restores the prior values on cleanup).
+func nethttpClearProxyEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
+		"no_proxy", "NO_PROXY", "REQUEST_METHOD",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
+// TestNetHTTPEnvProxyRouting is the end-to-end :ENV proof: with http_proxy set to
+// an in-test forwarding proxy, Net::HTTP.new(host, port) (p_addr defaulting to
+// :ENV) routes through it — proxy? / proxy_address / proxy_port reflect the
+// resolved endpoint and the proxy sees the request. no_proxy on the target host,
+// and an explicit nil p_addr, both force a direct connection even with the
+// environment set.
+func TestNetHTTPEnvProxyRouting(t *testing.T) {
+	nethttpClearProxyEnv(t)
+
+	backend := httptest.NewServer(nethttpTestMux())
+	defer backend.Close()
+
+	var proxyHits int64
+	var sawAuth string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&proxyHits, 1)
+		sawAuth = r.Header.Get("Proxy-Authorization")
+		resp, err := http.Get(r.RequestURI)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		w.Write(body)
+	}))
+	defer proxy.Close()
+
+	bu, _ := url.Parse(backend.URL)
+	pu, _ := url.Parse(proxy.URL)
+
+	// http_proxy carries userinfo so the resolved credentials become a
+	// Proxy-Authorization header on the routed request.
+	t.Setenv("http_proxy", "http://usr:pwd@"+pu.Host)
+
+	got := runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new(%q, %s)
+puts h.proxy?
+puts h.proxy_address
+puts h.proxy_port
+puts h.proxy_user
+puts h.proxy_pass
+puts h.get("/echo").body`, bu.Hostname(), bu.Port()))
+	want := "true\n" + pu.Hostname() + "\n" + pu.Port() + "\nusr\npwd\nGET|/echo||"
+	if got != want {
+		t.Fatalf("env proxy GET = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(&proxyHits); n < 1 {
+		t.Fatalf("env proxy was not hit (%d)", n)
+	}
+	if wantAuth := "Basic " + base64Std("usr:pwd"); sawAuth != wantAuth {
+		t.Fatalf("Proxy-Authorization = %q, want %q", sawAuth, wantAuth)
+	}
+
+	// no_proxy on the target host bypasses the proxy: a direct connection reaches
+	// the backend and the proxy stays untouched.
+	atomic.StoreInt64(&proxyHits, 0)
+	t.Setenv("no_proxy", bu.Hostname())
+	got = runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new(%q, %s)
+puts h.proxy?
+puts h.get("/echo").body`, bu.Hostname(), bu.Port()))
+	if want = "false\nGET|/echo||"; got != want {
+		t.Fatalf("no_proxy bypass GET = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(&proxyHits); n != 0 {
+		t.Fatalf("no_proxy: proxy was hit (%d)", n)
+	}
+
+	// An explicit nil p_addr opts out of environment resolution entirely, so even
+	// with http_proxy set (and no_proxy cleared) the request goes direct.
+	atomic.StoreInt64(&proxyHits, 0)
+	t.Setenv("no_proxy", "")
+	got = runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new(%q, %s, nil)
+puts h.proxy?
+puts h.get("/echo").body`, bu.Hostname(), bu.Port()))
+	if want = "false\nGET|/echo||"; got != want {
+		t.Fatalf("nil p_addr direct GET = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(&proxyHits); n != 0 {
+		t.Fatalf("nil p_addr: proxy was hit (%d)", n)
+	}
+}
+
+// TestNetHTTPEnvProxyHTTPS proves the https_proxy arm end-to-end: with use_ssl set
+// the instance resolves https_proxy and reaches the TLS backend through a
+// CONNECT-tunnelling proxy.
+func TestNetHTTPEnvProxyHTTPS(t *testing.T) {
+	nethttpClearProxyEnv(t)
+
+	backend := httptest.NewTLSServer(nethttpTestMux())
+	defer backend.Close()
+
+	var connects int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "expected CONNECT", http.StatusMethodNotAllowed)
+			return
+		}
+		atomic.AddInt64(&connects, 1)
+		dst, err := net.Dial("tcp", r.Host)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "no hijack", http.StatusInternalServerError)
+			dst.Close()
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			dst.Close()
+			return
+		}
+		conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+		go func() { io.Copy(dst, conn); dst.Close() }()
+		io.Copy(conn, dst)
+		conn.Close()
+	}))
+	defer proxy.Close()
+
+	bu, _ := url.Parse(backend.URL)
+	pu, _ := url.Parse(proxy.URL)
+	// Uppercase HTTPS_PROXY exercises the fallback lookup order.
+	t.Setenv("HTTPS_PROXY", "http://"+pu.Host)
+
+	got := runSrc(t, fmt.Sprintf(`require "net/http"
+h = Net::HTTP.new(%q, %s)
+h.use_ssl = true
+h.verify_mode = OpenSSL::SSL::VERIFY_NONE
+puts h.proxy?
+puts h.proxy_address
+puts h.get("/").body`, bu.Hostname(), bu.Port()))
+	want := "true\n" + pu.Hostname() + "\nhello net/http"
+	if got != want {
+		t.Fatalf("env https proxy GET = %q, want %q", got, want)
+	}
+	if n := atomic.LoadInt64(&connects); n < 1 {
+		t.Fatalf("CONNECT tunnel was not used (%d)", n)
+	}
+}
+
+// TestNetHTTPEnvProxyCGISafety covers MRI's CGI-safety rule: when REQUEST_METHOD is
+// present, the uppercase HTTP_PROXY (attacker-controllable via the Proxy header in
+// CGI) is ignored, while the lowercase http_proxy is still honored.
+func TestNetHTTPEnvProxyCGISafety(t *testing.T) {
+	nethttpClearProxyEnv(t)
+	t.Setenv("REQUEST_METHOD", "GET")
+
+	// Uppercase HTTP_PROXY alone under CGI ⇒ ignored ⇒ direct.
+	t.Setenv("HTTP_PROXY", "http://blackhole.invalid:8080")
+	if got := runSrc(t, `require "net/http"
+puts Net::HTTP.new("h", 80).proxy?`); got != "false" {
+		t.Fatalf("CGI HTTP_PROXY (upper) proxy? = %q, want false", got)
+	}
+
+	// Lowercase http_proxy under CGI ⇒ honored.
+	t.Setenv("http_proxy", "http://proxy.internal:3128")
+	got := runSrc(t, `require "net/http"
+h = Net::HTTP.new("h", 80)
+puts h.proxy?
+puts h.proxy_address
+puts h.proxy_port`)
+	if want := "true\nproxy.internal\n3128"; got != want {
+		t.Fatalf("CGI http_proxy (lower) = %q, want %q", got, want)
+	}
+}
+
+// TestNetHTTPEnvProxyResolveUnits exercises the resolver and no_proxy matcher arms
+// directly, including the branches the end-to-end tests do not naturally reach
+// (scheme-less proxy strings, malformed values, https default port, CIDR / bare
+// domain / port-qualified no_proxy entries).
+func TestNetHTTPEnvProxyResolveUnits(t *testing.T) {
+	if !nethttpIsENV(object.Symbol("ENV")) || nethttpIsENV(object.NewString("ENV")) {
+		t.Fatal("nethttpIsENV must match only the :ENV symbol")
+	}
+
+	// No proxy in the environment ⇒ direct.
+	nethttpClearProxyEnv(t)
+	if _, _, _, _, ok := nethttpResolveEnvProxy("h", 80, false); ok {
+		t.Fatal("empty env should resolve direct")
+	}
+
+	// A scheme-less "host:port" is retried as an http:// URL.
+	t.Setenv("http_proxy", "proxy.example:8080")
+	if a, p, _, _, ok := nethttpResolveEnvProxy("h", 80, false); !ok || a != "proxy.example" || p != 8080 {
+		t.Fatalf("scheme-less proxy = (%q,%d,%v), want proxy.example,8080,true", a, p, ok)
+	}
+
+	// A value malformed even after the http:// retry ⇒ direct.
+	t.Setenv("http_proxy", "%zz")
+	if _, _, _, _, ok := nethttpResolveEnvProxy("h", 80, false); ok {
+		t.Fatal("malformed proxy should resolve direct")
+	}
+
+	// The https branch defaults the port to 443 when the URL omits it.
+	t.Setenv("https_proxy", "https://secure.proxy")
+	if a, p, _, _, ok := nethttpResolveEnvProxy("h", 443, true); !ok || a != "secure.proxy" || p != 443 {
+		t.Fatalf("https default-port proxy = (%q,%d,%v), want secure.proxy,443,true", a, p, ok)
+	}
+
+	// no_proxy bypass arms.
+	if !nethttpNoProxyBypass("api.example.com", 80, ".example.com") {
+		t.Fatal("leading-dot suffix should bypass")
+	}
+	if !nethttpNoProxyBypass("api.example.com", 80, "example.com") {
+		t.Fatal("bare domain should bypass its subdomain")
+	}
+	if !nethttpNoProxyBypass("host", 8080, "host:8080") {
+		t.Fatal("port-qualified entry on matching port should bypass")
+	}
+	if nethttpNoProxyBypass("host", 80, "host:8080") {
+		t.Fatal("port-qualified entry on other port should not bypass")
+	}
+	if !nethttpNoProxyBypass("10.1.2.3", 80, "10.0.0.0/8") {
+		t.Fatal("CIDR should bypass a contained IP host")
+	}
+	if !nethttpNoProxyBypass("10.1.2.3", 80, "10.1.2.3") {
+		t.Fatal("exact IP entry should bypass")
+	}
+	// Differently-spelled but equal IPs match via net.IP equality, not the string
+	// compare (::0.0.0.1 and ::1 are the same address).
+	if !nethttpNoProxyBypass("::1", 80, "::0.0.0.1") {
+		t.Fatal("equal-but-differently-spelled IP entry should bypass")
+	}
+	if nethttpNoProxyBypass("other.net", 80, "example.com, .foo.com") {
+		t.Fatal("non-matching host should not bypass")
+	}
+	if nethttpNoProxyBypass("10.1.2.3", 80, "192.168.0.0/16") {
+		t.Fatal("IP host outside the CIDR should not bypass")
+	}
+	if nethttpNoProxyBypass("10.1.2.3", 80, "10.9.9.9") {
+		t.Fatal("non-matching IP entry should not bypass")
+	}
+	if nethttpNoProxyBypass("10.1.2.3", 80, ":80") {
+		t.Fatal("a port-only entry (empty host) should not bypass")
+	}
+	if nethttpNoProxyBypass("", 80, "example.com") || nethttpNoProxyBypass("h", 80, "") {
+		t.Fatal("empty host or empty list should not bypass")
+	}
+}

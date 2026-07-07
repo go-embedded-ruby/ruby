@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -186,20 +187,28 @@ func (vm *VM) registerNetHTTPInstanceMethods(http *RClass) {
 	}
 
 	// --- proxy accessors --------------------------------------------------------
+	// Each reflects the *effective* proxy: an explicitly-configured one, or — when
+	// the instance was built with :ENV (MRI's default) — the environment proxy
+	// resolved against the instance's current scheme (@use_ssl) and target host.
 	http.define("proxy?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(!object.IsNil(getIvar(self, "@proxy_address")))
+		addr, _, _, _ := nethttpEffectiveProxy(self)
+		return object.Bool(!object.IsNil(addr))
 	})
 	http.define("proxy_address", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return getIvar(self, "@proxy_address")
+		addr, _, _, _ := nethttpEffectiveProxy(self)
+		return addr
 	})
 	http.define("proxy_port", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return getIvar(self, "@proxy_port")
+		_, port, _, _ := nethttpEffectiveProxy(self)
+		return port
 	})
 	http.define("proxy_user", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return getIvar(self, "@proxy_user")
+		_, _, user, _ := nethttpEffectiveProxy(self)
+		return user
 	})
 	http.define("proxy_pass", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return getIvar(self, "@proxy_pass")
+		_, _, _, pass := nethttpEffectiveProxy(self)
+		return pass
 	})
 
 	// Instance verb helpers: get/head/delete/options take (path[, header]); the
@@ -384,13 +393,13 @@ func (vm *VM) nethttpExecInstance(inst object.Value, method, path string, body [
 		writeTO:    nethttpDuration(getIvar(inst, "@write_timeout")),
 	}
 	cfg.dialHost, cfg.dialPort = host, portStr
-	if pa := getIvar(inst, "@proxy_address"); !object.IsNil(pa) {
+	if pa, pp, pu, ppw := nethttpEffectiveProxy(inst); !object.IsNil(pa) {
 		cfg.proxied = true
 		cfg.dialHost = strArg(pa)
-		cfg.dialPort = portString(getIvar(inst, "@proxy_port"))
+		cfg.dialPort = portString(pp)
 		cfg.connectTunnel = scheme == "https"
-		if u := getIvar(inst, "@proxy_user"); !object.IsNil(u) {
-			cfg.proxyAuth = basicAuthHeader(strArg(u), strArg(getIvar(inst, "@proxy_pass")))
+		if !object.IsNil(pu) {
+			cfg.proxyAuth = basicAuthHeader(strArg(pu), strArg(ppw))
 		}
 	}
 	if getIvar(inst, "@started").Truthy() {
@@ -924,10 +933,15 @@ func (vm *VM) nethttpResponseClass(netMod *RClass, class, category string) *RCla
 
 // nethttpNewInstance builds a Net::HTTP instance from
 // (address[, port[, p_addr[, p_port[, p_user[, p_pass]]]]]), defaulting the port
-// to 80, use_ssl to false and each timeout to 60s (MRI's defaults). A proxy is
-// configured only when p_addr is an explicit host String; a nil or a bare
-// :ENV symbol (MRI's default, which would consult http_proxy) leaves the
-// instance proxy-less — environment-proxy resolution is a flagged follow-up.
+// to 80, use_ssl to false and each timeout to 60s (MRI's defaults). The p_addr
+// argument selects the proxy policy, mirroring MRI:
+//   - absent, or the :ENV symbol (MRI's default) → resolve the proxy from the
+//     environment at request time (http_proxy/https_proxy, honoring no_proxy);
+//   - nil (or false) → no proxy, even if the environment sets one;
+//   - an explicit host String → that fixed proxy (with p_port/p_user/p_pass).
+//
+// Environment resolution is deferred to nethttpEffectiveProxy because it depends
+// on the instance's scheme (@use_ssl, settable after .new) and target host.
 func (vm *VM) nethttpNewInstance(http *RClass, args []object.Value) object.Value {
 	o := &RObject{class: http, ivars: map[string]object.Value{}}
 	host := ""
@@ -946,11 +960,14 @@ func (vm *VM) nethttpNewInstance(http *RClass, args []object.Value) object.Value
 	o.ivars["@open_timeout"] = object.IntValue(60)
 	o.ivars["@read_timeout"] = object.IntValue(60)
 	o.ivars["@write_timeout"] = object.IntValue(60)
-	// Proxy (p_addr, p_port, p_user, p_pass): only an explicit host String enables it.
+	// Proxy (p_addr, p_port, p_user, p_pass). An explicit host String pins a fixed
+	// proxy; the :ENV symbol (or an omitted p_addr) selects environment resolution
+	// via @proxy_from_env; nil/false disables the proxy outright.
 	o.ivars["@proxy_address"] = object.NilV
 	o.ivars["@proxy_port"] = object.NilV
 	o.ivars["@proxy_user"] = object.NilV
 	o.ivars["@proxy_pass"] = object.NilV
+	o.ivars["@proxy_from_env"] = object.Bool(len(args) <= 2 || nethttpIsENV(args[2]))
 	if len(args) > 2 {
 		if ps, ok := args[2].(*object.String); ok && ps.Str() != "" {
 			o.ivars["@proxy_address"] = args[2]
@@ -968,6 +985,157 @@ func (vm *VM) nethttpNewInstance(http *RClass, args []object.Value) object.Value
 		}
 	}
 	return o
+}
+
+// nethttpIsENV reports whether a p_addr argument is MRI's :ENV symbol, which
+// selects environment-based proxy resolution.
+func nethttpIsENV(v object.Value) bool {
+	s, ok := v.(object.Symbol)
+	return ok && string(s) == "ENV"
+}
+
+// nethttpEffectiveProxy resolves the proxy that applies to a Net::HTTP instance
+// right now, returning (address, port, user, pass) as Ruby values (each NilV when
+// absent). An explicitly-configured proxy (@proxy_address set) wins unchanged;
+// otherwise, when the instance opted into :ENV (@proxy_from_env), the environment
+// is consulted against the instance's current scheme and target host. A direct
+// (no-proxy) result yields four NilV values.
+func nethttpEffectiveProxy(inst object.Value) (addr, port, user, pass object.Value) {
+	if pa := getIvar(inst, "@proxy_address"); !object.IsNil(pa) {
+		return pa, getIvar(inst, "@proxy_port"), getIvar(inst, "@proxy_user"), getIvar(inst, "@proxy_pass")
+	}
+	if getIvar(inst, "@proxy_from_env").Truthy() {
+		host := strArg(getIvar(inst, "@address"))
+		reqPort := intArg(getIvar(inst, "@port"))
+		https := getIvar(inst, "@use_ssl").Truthy()
+		if a, p, u, pw, ok := nethttpResolveEnvProxy(host, reqPort, https); ok {
+			user, pass = object.NilV, object.NilV
+			if u != "" {
+				user = object.NewString(u)
+			}
+			if pw != "" {
+				pass = object.NewString(pw)
+			}
+			return object.NewString(a), object.IntValue(p), user, pass
+		}
+	}
+	return object.NilV, object.NilV, object.NilV, object.NilV
+}
+
+// nethttpResolveEnvProxy resolves the environment proxy for a request to
+// host:reqPort over http (https=false) or https (https=true), mirroring MRI's
+// URI::Generic#find_proxy. It reads https_proxy/HTTPS_PROXY for TLS requests and
+// http_proxy/HTTP_PROXY otherwise, honors no_proxy/NO_PROXY, and returns the proxy
+// endpoint (address/port) plus any userinfo credentials. ok is false when no proxy
+// applies (a direct connection).
+func nethttpResolveEnvProxy(host string, reqPort int64, https bool) (addr string, port int64, user, pass string, ok bool) {
+	raw := nethttpProxyEnvValue(https)
+	if raw == "" {
+		return "", 0, "", "", false
+	}
+	if nethttpNoProxyBypass(host, reqPort, nethttpEnvAny("no_proxy", "NO_PROXY")) {
+		return "", 0, "", "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		// A bare "host:port" (no scheme) is a common form MRI's URI.parse would
+		// reject as relative; retry it as an http:// URL before giving up.
+		u, err = url.Parse("http://" + raw)
+		if err != nil || u.Host == "" {
+			return "", 0, "", "", false
+		}
+	}
+	addr = u.Hostname()
+	port = 80
+	if u.Scheme == "https" {
+		port = 443
+	}
+	if ps := u.Port(); ps != "" {
+		if n, e := strconv.ParseInt(ps, 10, 64); e == nil {
+			port = n
+		}
+	}
+	if u.User != nil {
+		user = u.User.Username()
+		pass, _ = u.User.Password()
+	}
+	return addr, port, user, pass, true
+}
+
+// nethttpProxyEnvValue returns the proxy URL string from the environment for the
+// request scheme. For https it prefers https_proxy then HTTPS_PROXY. For http it
+// normally prefers http_proxy then HTTP_PROXY, but when REQUEST_METHOD is set (a
+// CGI context) it deliberately ignores the uppercase HTTP_PROXY — which in CGI is
+// attacker-controlled via the Proxy request header — and honors only the lowercase
+// http_proxy, matching MRI's find_proxy CGI-safety rule.
+func nethttpProxyEnvValue(https bool) string {
+	if https {
+		return nethttpEnvAny("https_proxy", "HTTPS_PROXY")
+	}
+	if os.Getenv("REQUEST_METHOD") != "" {
+		return os.Getenv("http_proxy")
+	}
+	return nethttpEnvAny("http_proxy", "HTTP_PROXY")
+}
+
+// nethttpEnvAny returns the first non-empty value among the named environment
+// variables, in order.
+func nethttpEnvAny(names ...string) string {
+	for _, n := range names {
+		if v := os.Getenv(n); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// nethttpNoProxyBypass reports whether host:reqPort matches the no_proxy list and
+// should therefore connect directly. Each comma/space-separated entry is a host,
+// a domain suffix (leading '.', or a bare name that also matches its subdomains),
+// or a CIDR/IP (matched when host is an IP literal), optionally suffixed with
+// ":port" to restrict it to that port. This mirrors MRI's URI::Generic.use_proxy?
+// (inverted: use_proxy? false ⇒ bypass true).
+func nethttpNoProxyBypass(host string, reqPort int64, noProxy string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || noProxy == "" {
+		return false
+	}
+	for _, ent := range strings.FieldsFunc(noProxy, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	}) {
+		ehost := ent
+		// An optional trailing ":port" restricts the entry to that request port.
+		// (A CIDR mask like "/24" or an IPv6 literal has no bare numeric tail here.)
+		if i := strings.LastIndex(ent, ":"); i >= 0 {
+			if n, e := strconv.ParseInt(ent[i+1:], 10, 64); e == nil {
+				if n != reqPort {
+					continue
+				}
+				ehost = ent[:i]
+			}
+		}
+		el := strings.ToLower(ehost)
+		if strings.HasPrefix(el, ".") {
+			if strings.HasSuffix(host, el) {
+				return true
+			}
+		} else if el != "" {
+			if host == el || strings.HasSuffix("."+host, "."+el) {
+				return true
+			}
+		}
+		// A CIDR or IP entry matches when the request host is an IP literal.
+		if ip := net.ParseIP(host); ip != nil {
+			if _, cidr, e := net.ParseCIDR(ehost); e == nil {
+				if cidr.Contains(ip) {
+					return true
+				}
+			} else if eip := net.ParseIP(ehost); eip != nil && eip.Equal(ip) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // nethttpGetURI resolves the argument forms of Net::HTTP.get / get_response: a
