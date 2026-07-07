@@ -800,6 +800,15 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// An RQRCode::QRCode reports RQRCode::QRCode so its renderer methods
 		// (as_svg / as_ansi / as_html / to_s / checked? / to_a) dispatch.
 		return vm.consts["RQRCode::QRCode"].(*RClass)
+	case *ImagesImage:
+		// An Images::Image reports Images::Image so its processing + scikit-image
+		// methods (resize / crop / rotate / convert / blur / edges / at / to_blob)
+		// dispatch.
+		return vm.consts["Images::Image"].(*RClass)
+	case *ImagesCanvas:
+		// An Images::Canvas reports Images::Canvas so its chunky_png-style pixel,
+		// drawing and PNG-output methods dispatch.
+		return vm.consts["Images::Canvas"].(*RClass)
 	case *XmlMarkup:
 		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
 		// method_missing element DSL and special methods dispatch.

@@ -90,6 +90,7 @@ var providedFeatures = map[string]bool{
 	"public_suffix": true, "mime/types": true, "mail": true, "faker": true,
 	"action_mailer": true, "actionmailer": true,
 	"rqrcode": true, "dotenv": true, "hcl2": true, "kramdown": true,
+	"images": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,
 	"dry/types": true, "dry-types": true,
 	"dry/struct": true, "dry-struct": true,
