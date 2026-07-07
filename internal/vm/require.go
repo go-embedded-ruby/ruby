@@ -78,6 +78,7 @@ var providedFeatures = map[string]bool{
 	"rack":    true, "rack/utils": true,
 	"webrick": true,
 	"sinatra": true, "sinatra/base": true,
+	"capybara": true, "capybara/dsl": true,
 	"active_record": true, "activerecord": true,
 	"active_model": true, "activemodel": true,
 	"active_job": true, "activejob": true,

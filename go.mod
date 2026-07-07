@@ -37,6 +37,7 @@ require (
 	github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177
 	github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df
 	github.com/go-ruby-capistrano/capistrano v0.0.0-20260707161800-c2d92ee7442d
+	github.com/go-ruby-capybara/capybara v0.0.0-20260707193057-e0671db74ed1
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824

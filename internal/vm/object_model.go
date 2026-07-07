@@ -1426,6 +1426,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Faraday::Utils::ParamsHash"].(*RClass)
 	case *FaradayHeaders:
 		return vm.consts["Faraday::Utils::Headers"].(*RClass)
+	case *CapybaraSession:
+		// A Capybara::Session wrapper reports the class stamped on it at construction.
+		return x.cls
+	case *CapybaraNode:
+		return x.cls
 	case *PumaServer:
 		return vm.consts["Puma::Server"].(*RClass)
 	case *PumaThreadPool:
