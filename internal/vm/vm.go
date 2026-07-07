@@ -26,6 +26,7 @@ import (
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
 	async "github.com/go-ruby-async/async"
 	capistrano "github.com/go-ruby-capistrano/capistrano"
+	factorybot "github.com/go-ruby-factory-bot/factory-bot"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
 	rake "github.com/go-ruby-rake/rake"
@@ -323,6 +324,7 @@ type VM struct {
 	minitestRunnables                      []*RClass                          // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
 	minitestCurInstance                    object.Value                       // the test instance currently running (backs bare must_*/wont_* and _)
 	minitestAutorunDone                    bool                               // guards the require "minitest/autorun" at_exit hook against a double run
+	factoryBotReg                          *factorybot.Registry               // the per-VM factory_bot registry (require "factory_bot"): FactoryBot.define/build/create map onto it; the Build/Persist/Block seams are wired to this VM's object model
 	cOpenSSLDigest                         *RClass
 	cArray, cHash, cRange                  *RClass
 	cProc                                  *RClass

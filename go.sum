@@ -315,6 +315,8 @@ github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a h1:aFqb/Uizc/H0U
 github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a/go.mod h1:FzVnxMxHUDzfRgwum+xq0VAi4DofeSxtpW2dng1MtpI=
 github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f h1:ceGclILbSf/1Fnx53d5IGDoUtzZRD7mXPwHHWyWQ0B0=
 github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f/go.mod h1:oelovkSKi3ofbasu8dxitwGA53oPgoop1Ow04s8T5FA=
+github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5 h1:yc2jRZEV+kKRDrwOFyRWfjqP+SAkapwc5l/aS2MPcaQ=
+github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5/go.mod h1:XLVBvQlRhuvFMPbCgI97ifRnnLBbUal9vnpDsAXbRPY=
 github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352 h1:cRiGBGZWF8Pc0KxTqNr2wy0Y6WWPzeq2GsUuTroXDfE=
 github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352/go.mod h1:7h2mxQ3mnWz9bg39nSDr0h/LxqnEnbrJxmNRDbu3zs8=
 github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46 h1:S5pZdGwolAm7NHMQrwnN6BatfC8jWCSqzlI5OSnbIpc=
