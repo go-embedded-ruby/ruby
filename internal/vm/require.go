@@ -112,6 +112,7 @@ var providedFeatures = map[string]bool{
 	"racc/parser": true, "racc": true,
 	"minitest": true, "minitest/autorun": true, "minitest/spec": true,
 	"minitest/test": true, "minitest/unit": true,
+	"aasm": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime

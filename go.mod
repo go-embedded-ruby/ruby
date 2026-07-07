@@ -12,6 +12,7 @@ require (
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
 	github.com/go-images/images v0.0.0-20260702213524-ea366b42f216
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
+	github.com/go-ruby-aasm/aasm v0.0.0-20260707193337-00a96ee353d7
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783
