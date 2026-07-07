@@ -430,6 +430,7 @@ func (vm *VM) bootstrap() {
 	vm.registerNetFTP()           // real Net::FTP over the socket transport; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL
 	vm.registerResolv()           // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
 	vm.registerTimeout()          // Timeout module (loadable shell); needs RuntimeError
+	vm.registerTimecop()          // Timecop module (require "timecop"), backed by go-ruby-timecop; drives vm.clock behind Time.now/Date.today/DateTime.now
 	vm.registerDateErrors()       // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
 	vm.registerJSON()             // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
 	vm.registerYAML()             // YAML/Psych loadable shell; needs StandardError

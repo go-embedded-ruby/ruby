@@ -85,11 +85,13 @@ func (vm *VM) registerTime() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			return &Time{t: gotime.FromUnix(timeSeconds(args[0]))}
 		}}
-	// Time.now → built here from Go's clock (go-composites/time has no Now() by
-	// design) and handed to FromUnix; whole-second resolution.
+	// Time.now → the VM's controllable clock (go-composites/time has no Now() by
+	// design). Unmocked, the clock reports nowUnix's instant; under a require
+	// "timecop" freeze/travel/scale it reports the mocked instant. Whole-second
+	// resolution, as FromUnix takes Unix seconds.
 	vm.cTime.smethods["now"] = &Method{name: "now", owner: vm.cTime,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &Time{t: gotime.FromUnix(nowUnix())}
+			return &Time{t: gotime.FromUnix(vm.nowInstant().Unix())}
 		}}
 	// Time.parse(str) → Parse(RFC3339, str); raises on the error Result.
 	vm.cTime.smethods["parse"] = &Method{name: "parse", owner: vm.cTime,

@@ -64,7 +64,7 @@ var providedFeatures = map[string]bool{
 	"vault": true, "openbao": true,
 	"mysql2": true, "mysql": true, "mongo": true, "bson": true, "parquet": true,
 	"msgpack": true, "toml": true,
-	"tzinfo": true, "chronic": true, "money": true,
+	"tzinfo": true, "chronic": true, "money": true, "timecop": true,
 	"addressable": true, "addressable/uri": true, "addressable/template": true,
 	"commonmark": true, "mustache": true, "jbuilder": true, "builder": true,
 	"sqlite3": true, "nokogiri": true,

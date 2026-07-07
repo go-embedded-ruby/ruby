@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	stdtime "time"
 
 	actionmailer "github.com/go-ruby-actionmailer/actionmailer"
 	activejob "github.com/go-ruby-activejob/activejob"
@@ -29,6 +30,7 @@ import (
 	money "github.com/go-ruby-money/money"
 	rake "github.com/go-ruby-rake/rake"
 	sinatra "github.com/go-ruby-sinatra/sinatra"
+	timecop "github.com/go-ruby-timecop/timecop"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -221,6 +223,13 @@ type VM struct {
 	cDidYouMean                            *RClass // the DidYouMean module (require "did_you_mean")
 	cSpellChecker                          *RClass // DidYouMean::SpellChecker, backed by go-ruby-did-you-mean
 	cTime                                  *RClass
+	// clock is the per-VM controllable time source behind Time.now / Date.today /
+	// DateTime.now. It is always present; empty (unmocked) it reports the real
+	// wall clock through its Now seam (wired to nowUnix, the same determinism seam
+	// Time.now already used), so a program that never requires "timecop" is
+	// unaffected. require "timecop" installs the Ruby Timecop module (timecop.go),
+	// whose freeze / travel / scale push mock-time frames onto this clock.
+	clock                                  *timecop.Clock
 	cFileStat                              *RClass
 	cBigDecimal                            *RClass
 	cBenchmarkTms                          *RClass // Benchmark::Tms (require "benchmark"), backed by go-ruby-benchmark
@@ -615,6 +624,11 @@ func (vm *VM) putEnv(e *Env) {
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
 	vm := &VM{out: out, errOut: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
+	// The controllable clock reads the real wall clock through nowUnix (the same
+	// whole-second determinism seam Time.now/Date.today already honour) until a
+	// require "timecop" program freezes/travels/scales it. Unmocked, Current()
+	// just returns nowUnix's instant, so non-timecop programs see real time.
+	vm.clock = timecop.NewWith(func() stdtime.Time { return stdtime.Unix(nowUnix(), 0).UTC() })
 	// The main thread holds the GVL for the VM's lifetime, releasing it only at
 	// blocking points so spawned Ruby threads can run (see thread.go).
 	vm.gvl.Lock()

@@ -150,6 +150,7 @@ require (
 	github.com/go-ruby-sqlite3/sqlite3 v0.0.0-20260702143910-c9f337771f41
 	github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8
 	github.com/go-ruby-thor/thor v0.0.0-20260702145030-faa03e6e0228
+	github.com/go-ruby-timecop/timecop v0.0.0-20260707191347-9beab96d330c
 	github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
 	github.com/go-ruby-typhoeus/typhoeus v0.0.0-20260706120426-67b7a131561d

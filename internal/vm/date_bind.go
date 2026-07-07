@@ -7,7 +7,6 @@ package vm
 import (
 	"errors"
 	"math/big"
-	stdtime "time"
 
 	date "github.com/go-ruby-date/date"
 
@@ -222,12 +221,14 @@ func twoDigits(s string) (int, bool) {
 	return int(s[0]-'0')*10 + int(s[1]-'0'), true
 }
 
-// withDeterministicClock installs the Ruby VM's pinned wall clock (nowUnix, the
-// seam Time.now already uses) into the library's Today / Now clock for the
-// duration of fn, so Date.today / DateTime.now stay deterministic under the same
-// test seam. fn's result is returned; the library clock is always restored.
-func withDeterministicClock(fn func() *Date) *Date {
-	t := stdtime.Unix(nowUnix(), 0).UTC()
+// withDeterministicClock installs the Ruby VM's controllable clock instant into
+// the library's Today / Now clock for the duration of fn, so Date.today /
+// DateTime.now track the same source as Time.now: nowUnix's real instant by
+// default, or the mocked instant when a require "timecop" program has frozen /
+// travelled / scaled the clock. fn's result is returned; the library clock is
+// always restored.
+func (vm *VM) withDeterministicClock(fn func() *Date) *Date {
+	t := vm.nowInstant()
 	restore := date.SetTodayInstant(t.Year(), int(t.Month()), t.Day(),
 		t.Hour(), t.Minute(), t.Second(), t.Nanosecond())
 	defer restore()
@@ -319,7 +320,7 @@ func (vm *VM) registerDateConstructors() {
 	})
 	// Date.today — the current local date, driven by the VM's pinned clock.
 	sm(vm.cDate, "today", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return withDeterministicClock(func() *Date { return &Date{d: date.Today()} }).toDate()
+		return vm.withDeterministicClock(func() *Date { return &Date{d: date.Today()} }).toDate()
 	})
 	// Date.parse(str[, comp]) — MRI's heuristic parser; an unrecognised input
 	// raises Date::Error. comp (default true) expands a 2-digit year.
@@ -373,7 +374,7 @@ func (vm *VM) registerDateConstructors() {
 	sm(vm.cDateTime, "civil", vm.cDateTime.smethods["new"].native)
 	// DateTime.now — the current instant, driven by the VM's pinned clock.
 	sm(vm.cDateTime, "now", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return withDeterministicClock(func() *Date { return &Date{d: date.Now()} })
+		return vm.withDeterministicClock(func() *Date { return &Date{d: date.Now()} })
 	})
 	// DateTime.parse(str[, comp]) — the heuristic parser, returning a DateTime.
 	sm(vm.cDateTime, "parse", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
