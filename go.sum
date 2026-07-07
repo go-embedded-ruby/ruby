@@ -338,8 +338,18 @@ github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d h1:tlOKd49moGe
 github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d/go.mod h1:ppWK2CmOURx2o9vRsiGVeIZHI/AjCSq0RX74ssEZG8g=
 github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7 h1:F+ghhcdLDBVGG977zAq2WQGos1HgRLj/jHJqkIiLL6E=
 github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7/go.mod h1:cm0D4pmaTvvQFPK815E7/uJaGeGxkr5xFLHixeQixTA=
+github.com/go-ruby-net-ftp/net-ftp v0.0.0-20260630142044-917edc09066e h1:OJa/XKKm+bxdCoM3UKpmsgnk8hl3bFz25jEbZCvd08I=
+github.com/go-ruby-net-ftp/net-ftp v0.0.0-20260630142044-917edc09066e/go.mod h1:1H5yOndya/hONJxNjd0oAbRyCAyurxcbze0FXlF2ExA=
 github.com/go-ruby-net-http/net-http v0.0.0-20260630124155-c794366ce72f h1:nS0qwCPtVAtp+48j6KkdTdpVL8jT9L2ZGQcJZwOKev8=
 github.com/go-ruby-net-http/net-http v0.0.0-20260630124155-c794366ce72f/go.mod h1:PiNQDuyrSPZX8OzApvgyn1fTjRNwx0KNO1vrzdAguEc=
+github.com/go-ruby-net-imap/net-imap v0.0.0-20260630193116-82cd428e7b0f h1:rnyq1kTbCxqBQ0UlhaF4I2g+9TnmBLuMFTw4brsInaE=
+github.com/go-ruby-net-imap/net-imap v0.0.0-20260630193116-82cd428e7b0f/go.mod h1:jKlWC6EDNkTFr5BDzA7+UAMFXsKLwIy5r9zKqxXSM+U=
+github.com/go-ruby-net-pop/net-pop v0.0.0-20260630142109-66d7036032f5 h1:vmwYSD3D+m8vNWaA+I+lD8Ufmnw+rDHbs4askNBcFZo=
+github.com/go-ruby-net-pop/net-pop v0.0.0-20260630142109-66d7036032f5/go.mod h1:9+NyzWDudIY8eetFY066OKgrU8bk7ZVqDRKAjFBIwng=
+github.com/go-ruby-net-sftp/net-sftp v0.0.0-20260630142744-9be6f27056d7 h1:5aKzjgwxqqMvHLyQOJrDO8GLJUdE1izGJTLDG+3+V5k=
+github.com/go-ruby-net-sftp/net-sftp v0.0.0-20260630142744-9be6f27056d7/go.mod h1:okvDFdQDwwx5ubNL6mmXTHGTutWhOTHSnUPq1JzhxoU=
+github.com/go-ruby-net-smtp/net-smtp v0.0.0-20260630142921-0151ad2e87f5 h1:5WuRAb8NO7UCHTVUel5LmZfI0A76obGtDOYAzlhrKmM=
+github.com/go-ruby-net-smtp/net-smtp v0.0.0-20260630142921-0151ad2e87f5/go.mod h1:+XJbVnPobgkWUscH8bDSw9F3jW6t3QY35DEAyE9qE9Q=
 github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e h1:v8DyCc3Vp+REhN1uyQ4wN8CpJ6JMqWNOm9OESWFBtLU=
 github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e/go.mod h1:WsLJ6/u8/nzHShZKChf20tHosn/nlVnOJiD/xEY6X8c=
 github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1 h1:iZFtIn5WHQRz/oa04qYAlLvTi0XDRP5dKPGpJTGRzKg=
@@ -456,6 +466,8 @@ github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef h1:JLPi8PmkO
 github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef/go.mod h1:oI3L9dywsrSXJqLDuJGIYuHUHRCxUS7BU8PBZGXpx4A=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b h1:ZwN0q9xq9HUGCskWGz8rmL+v6MaHy+AM99oictlPlBs=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b/go.mod h1:tLv8PWrPxrOQrJWMFTfRi6wfZpSjZtmfxHKgGwUriR8=
+github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b h1:T7H6p2VhpU/05o/XSlsCT3YfMznMhcuShu8iDyDVeqU=
+github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b/go.mod h1:0DF9Jl9o+cvEvPCzCJ95nHIlF7qz8yzuQIyfMm8FUlM=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176 h1:iHTCF/Eu0/lwOEank8pLKqoW5j9MI2ERXErrvqsZZ+4=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176/go.mod h1:1C3Bx0pQIsqLqC2SnqV7pJnGuLJsgYmar2NrD+CmVXw=
 github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd h1:4HGjgCdTIuIEM+iZXJ9hJJzt0IBMtxPqdJq72mr0Y64=

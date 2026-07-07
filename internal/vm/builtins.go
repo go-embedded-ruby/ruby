@@ -425,6 +425,9 @@ func (vm *VM) bootstrap() {
 	vm.registerSocket()           // TCPSocket/TCPServer (net) + OpenSSL::SSL::SSLSocket (crypto/tls); after registerOpenSSL (upgrades its SSL shell)
 	vm.registerNetHTTP()          // net/http + net/https loadable shell; needs StandardError
 	vm.registerNetHTTPTransport() // real Net::HTTP over the socket transport; after registerNetHTTP + registerSocket
+	vm.registerNetPOP()           // Net::POP3/Net::POPMail (require "net/pop"), backed by go-ruby-net-pop codec; socket = injected IO seam; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL
+	vm.registerNetSFTP()          // Net::SFTP client (require "net/sftp"), backed by go-ruby-net-sftp codec; SSH channel = injected IO seam; nests under Net, after registerNetHTTP
+	vm.registerNetFTP()           // real Net::FTP over the socket transport; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL
 	vm.registerResolv()           // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
 	vm.registerTimeout()          // Timeout module (loadable shell); needs RuntimeError
 	vm.registerDateErrors()       // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
@@ -478,6 +481,8 @@ func (vm *VM) bootstrap() {
 	vm.registerSQLite3()          // SQLite3::Database/Statement (require "sqlite3"), backed by go-ruby-sqlite3 (modernc); needs StandardError for SQLite3::Exception
 	vm.registerRedis()            // Redis client (require "redis"), backed by go-ruby-redis RESP codec; socket = injected IO seam; needs StandardError for Redis::BaseError
 	vm.registerPG()               // PG::Connection/Result (require "pg"), backed by go-ruby-pg v3 protocol; socket = injected IO seam; needs StandardError for PG::Error
+	vm.registerNetIMAP()          // Net::IMAP (require "net/imap"), backed by go-ruby-net-imap builder+parser; socket = injected IO seam; after socket/openssl so a TCPSocket/SSLSocket can be the TLS seam
+	vm.registerNetSMTP()          // Net::SMTP (require "net/smtp"), backed by go-ruby-net-smtp codec over rbgo's real socket/TLS transport; after registerSocket/registerNetHTTP (Net module + transport)
 	vm.registerSidekiq()          // Sidekiq::Client/Job(Worker) + module (require "sidekiq"), backed by go-ruby-sidekiq over go-redis/v9; Redis client dialled from Sidekiq.redis/ENV; perform body is Ruby seam; needs StandardError for Sidekiq::Error
 	vm.registerResque()           // Resque module + Job/Worker/Failure (require "resque"), backed by go-ruby-resque over go-redis/v9; @queue resolver + self.perform are Ruby seams; needs StandardError for Resque::Error
 	vm.registerSequel()           // Sequel query builder + Database (require "sequel"), backed by go-ruby-sequel; executor seam wired to SQLite3::Database (real execution)
@@ -486,6 +491,7 @@ func (vm *VM) bootstrap() {
 	vm.registerRSpec()            // RSpec matcher + expect surface (require "rspec"), backed by go-ruby-rspec; needs Exception for ExpectationNotMetError
 	vm.registerRuboCop()          // RuboCop::Runner#inspect/autocorrect + Cop::Offense (require "rubocop"), backed by go-ruby-rubocop over go-ruby-parser; needs StandardError for RuboCop::Error
 	vm.registerRack()             // Rack::Request/Response/Utils (require "rack" / "rack/utils"), backed by go-ruby-rack; deterministic env/query/escape, no socket
+	vm.registerWEBrick()          // WEBrick::HTTPServer/HTTPRequest/HTTPResponse/HTTPServlet/HTTPStatus (require "webrick"), backed by go-ruby-webrick; deterministic parse/build/mount-dispatch, no socket; the mount_proc block / servlet do_* method is the rbgo seam run inline under the GVL; needs StandardError (WEBrick::HTTPStatus family)
 	vm.registerGrape()            // Grape::Router/Validator/Formatter (require "grape"), backed by go-ruby-grape; endpoint-block exec + Rack env are host seams; needs StandardError for Grape::Exceptions
 	vm.registerSinatra()          // Sinatra::Base class-DSL + #call Rack adapter (require "sinatra/base"), backed by go-ruby-sinatra over go-ruby-rack; route/filter block eval is the rbgo seam; needs Rack + StandardError (Sinatra::NotFound), so registered after registerRack
 	vm.registerRoda()             // Roda class routing-tree DSL (route do |r| … end) + #call Rack adapter (require "roda"), backed by go-ruby-roda over go-ruby-rack; the route/matcher block eval is the rbgo seam, the routing tree is the library; needs Rack + StandardError (Roda::RodaError)

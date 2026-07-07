@@ -974,13 +974,41 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Typhoeus::Response"].(*RClass)
 	case *TyphoeusHydra:
 		return vm.consts["Typhoeus::Hydra"].(*RClass)
+	case *IMAPObj:
+		return x.cls
+	case *sftpSession:
+		return x.cls
+	case *sftpDir:
+		return x.cls
+	case *sftpFileFactory:
+		return x.cls
+	case *sftpFile:
+		return x.cls
+	case *sftpAttrs:
+		return x.cls
+	case *sftpName:
+		return x.cls
 	case *RedisObj:
 		return x.cls
 	case *RedisBatch:
 		return x.cls
+	case *POP3Obj:
+		return x.cls
+	case *POPMailObj:
+		return x.cls
+	case *ftpObj:
+		return x.cls
+	case *ftpMLSxEntry:
+		return x.cls
 	case *PGConnObj:
 		return x.cls
 	case *PGResultObj:
+		return x.cls
+	case *SMTPObj:
+		return x.cls
+	case *SMTPResponseObj:
+		return x.cls
+	case *SMTPStreamObj:
 		return x.cls
 	case *SequelDBObj:
 		return x.cls
@@ -1338,6 +1366,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Puma::Configuration"].(*RClass)
 	case *PumaDSL:
 		return vm.consts["Puma::DSL"].(*RClass)
+	case *WEBrickServer:
+		return vm.consts["WEBrick::HTTPServer"].(*RClass)
+	case *WEBrickRequest:
+		return vm.consts["WEBrick::HTTPRequest"].(*RClass)
+	case *WEBrickResponse:
+		return vm.consts["WEBrick::HTTPResponse"].(*RClass)
 	case *WardenManager:
 		return x.cls
 	case *WardenProxy:

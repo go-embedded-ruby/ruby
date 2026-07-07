@@ -88,7 +88,12 @@ require (
 	github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a
 	github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d
 	github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7
+	github.com/go-ruby-net-ftp/net-ftp v0.0.0-20260630142044-917edc09066e
 	github.com/go-ruby-net-http/net-http v0.0.0-20260630124155-c794366ce72f
+	github.com/go-ruby-net-imap/net-imap v0.0.0-20260630193116-82cd428e7b0f
+	github.com/go-ruby-net-pop/net-pop v0.0.0-20260630142109-66d7036032f5
+	github.com/go-ruby-net-sftp/net-sftp v0.0.0-20260630142744-9be6f27056d7
+	github.com/go-ruby-net-smtp/net-smtp v0.0.0-20260630142921-0151ad2e87f5
 	github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e
 	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
@@ -147,6 +152,7 @@ require (
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
 	github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b
+	github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c
