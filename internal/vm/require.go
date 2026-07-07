@@ -61,6 +61,7 @@ var providedFeatures = map[string]bool{
 	"saml": true, "ruby-saml": true, "webauthn": true,
 	"acme": true, "acme/client": true,
 	"grpc": true, "nats": true, "kafka": true, "etcd": true, "etcdv3": true,
+	"vault": true, "openbao": true,
 	"mysql2": true, "mysql": true, "mongo": true, "bson": true, "parquet": true,
 	"msgpack": true, "toml": true,
 	"tzinfo": true, "chronic": true, "money": true,

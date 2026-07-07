@@ -900,6 +900,28 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *EtcdStatus:
 		return x.cls
+	case *VaultClient:
+		return x.cls
+	case *VaultLogical:
+		return x.cls
+	case *VaultKVv1:
+		return x.cls
+	case *VaultKVv2:
+		return x.cls
+	case *VaultTransit:
+		return x.cls
+	case *VaultSys:
+		return x.cls
+	case *VaultAuth:
+		return x.cls
+	case *VaultTokenAuth:
+		return x.cls
+	case *VaultAppRole:
+		return x.cls
+	case *VaultUserpass:
+		return x.cls
+	case *VaultSecret:
+		return x.cls
 	case *MySQLClient:
 		return x.cls
 	case *MySQLResult:

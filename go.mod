@@ -100,6 +100,7 @@ require (
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
 	github.com/go-ruby-oidc/oidc v0.0.0-20260705185218-08dab6b22572
 	github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c
+	github.com/go-ruby-openbao/openbao v0.0.0-20260707160751-fcf5670a4d6d
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
