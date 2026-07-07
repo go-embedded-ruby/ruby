@@ -50,7 +50,7 @@ var providedFeatures = map[string]bool{
 	"httparty": true, "connection_pool": true, "concurrent-ruby": true,
 	"erubi": true, "erubi/capture_end": true,
 	"reline": true,
-	"http": true, "excon": true, "typhoeus": true,
+	"http":   true, "excon": true, "typhoeus": true,
 	"pundit": true, "cancancan": true, "cancan": true,
 	"active_support": true, "active_support/all": true, "activesupport": true,
 	"active_support/core_ext": true, "active_support/inflector": true,
