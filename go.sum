@@ -316,6 +316,8 @@ github.com/go-ruby-jwt/jwt v0.0.0-20260705184902-40cd404d3c65 h1:ufX61etP9EbM6aq
 github.com/go-ruby-jwt/jwt v0.0.0-20260705184902-40cd404d3c65/go.mod h1:lXzMyvgfYye7tZm1cY9ej2SbXzAdJdA2IAiY+niM+nU=
 github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5 h1:5H6gDIo9H4GfzMv5C04/SLpGNI2a7J8NryDoXUB0xhc=
 github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5/go.mod h1:fGpMQL4keKF1fub9DOL9FZB+gOLXwZ+uoI8PwW7d1e0=
+github.com/go-ruby-kaminari/kaminari v0.0.0-20260707193800-fc9fecf9afe6 h1:CgAgKIOmTUXlX/ZsLZ7OiRnovrpQqAlxa7EjQedyJ90=
+github.com/go-ruby-kaminari/kaminari v0.0.0-20260707193800-fc9fecf9afe6/go.mod h1:L57ZFGNQr2e0gnapvjfF7tSgD+p/ET0J1voQ2TBqGDE=
 github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8 h1:cM6xIhOcvpAOPBC/RZxMUixTDlMCz0fQnaab3ee8KH0=
 github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8/go.mod h1:lpczu9a88TnJ1mD0vLvXcL9MJL+2y8ZI5QeP2HmEqjA=
 github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf h1:igeeLsQctCEBtYSrUWmTuYI3Nh8518UtAimgpA2JTg0=

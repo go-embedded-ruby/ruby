@@ -77,6 +77,7 @@ require (
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2
 	github.com/go-ruby-jwt/jwt v0.0.0-20260705184902-40cd404d3c65
 	github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5
+	github.com/go-ruby-kaminari/kaminari v0.0.0-20260707193800-fc9fecf9afe6
 	github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8
 	github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
