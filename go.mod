@@ -133,6 +133,7 @@ require (
 	github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa
+	github.com/go-ruby-rolify/rolify v0.0.0-20260707193227-5d9011931b4b
 	github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
 	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75

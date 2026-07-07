@@ -469,6 +469,8 @@ github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b h1:hWNW3Z8g7Hw
 github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b/go.mod h1:UQGki9qXLiqaEOm4ih1CGznGNPUDcNGCsLVJ/y6G1G8=
 github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa h1:Ud4sdjWo2FZ6i0zRzRjwMJ/h24MYCchMfxbw1N9/ZMw=
 github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa/go.mod h1:d88OqDfelEmqriOEsEkLvBopYO4FCXQWIFil4zQYNtw=
+github.com/go-ruby-rolify/rolify v0.0.0-20260707193227-5d9011931b4b h1:hQnea8jPVyYOlN8G6g6x/leu4jGGEjGyZ/+qdxJG7pM=
+github.com/go-ruby-rolify/rolify v0.0.0-20260707193227-5d9011931b4b/go.mod h1:4dqBKwZf+wvpwA+2Eh+2Ow51YS6ma937wYJEZ1otLcE=
 github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c h1:VAD5jFMNvUBEvL8tQZXyGvbif4qJt9l3S6riFyBtPuk=
 github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c/go.mod h1:PJHlTuP01g0s+3cVfuQgCztiLcUD2intYD2bZTEMOZM=
 github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8 h1:02tvTxeNaPJjebV1A8SUrggsBVco1axxdycqXzH2zDs=
