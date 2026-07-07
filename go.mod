@@ -121,6 +121,7 @@ require (
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
+	github.com/go-ruby-reline/reline v0.0.0-20260630130257-c3cc9ab10454
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b

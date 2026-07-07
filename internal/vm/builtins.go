@@ -458,6 +458,7 @@ func (vm *VM) bootstrap() {
 	vm.registerHTTParty()         // HTTParty HTTP client (require "httparty"), backed by go-ruby-httparty; needs StandardError for HTTParty::Error
 	vm.registerConnectionPool()   // ConnectionPool + ConnectionPool::Wrapper (require "connection_pool"), backed by go-ruby-connection-pool; needs RuntimeError + Timeout::Error
 	vm.registerErubi()            // Erubi::Engine / CaptureEndEngine + Erubi.h (require "erubi"), template->Ruby-source compiler backed by go-ruby-erubi
+	vm.registerReline()           // Reline module + Reline::HISTORY (require "reline"), line-editor backed by go-ruby-reline; the terminal I/O is wired to rbgo IO objects via Reline.input=/output=
 	vm.registerHTTPrb()           // HTTP module — chainable http.rb client (require "http"), backed by go-ruby-http; needs StandardError for HTTP::Error
 	vm.registerExcon()            // Excon module — persistent HTTP client (require "excon"), backed by go-ruby-excon; needs StandardError for Excon::Error
 	vm.registerTyphoeus()         // Typhoeus module — parallel HTTP client + Hydra (require "typhoeus"), backed by go-ruby-typhoeus; net/http+goroutines

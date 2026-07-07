@@ -1230,6 +1230,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Queue"].(*RClass)
 	case *IOObj:
 		return x.cls
+	case *RelineHistory:
+		return x.cls
 	case *tcpSocket:
 		return x.cls
 	case *tcpServer:

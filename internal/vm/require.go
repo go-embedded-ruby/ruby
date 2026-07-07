@@ -49,6 +49,7 @@ var providedFeatures = map[string]bool{
 	"opentelemetry": true, "faraday": true, "puma": true, "bolt": true,
 	"httparty": true, "connection_pool": true, "concurrent-ruby": true,
 	"erubi": true, "erubi/capture_end": true,
+	"reline": true,
 	"http": true, "excon": true, "typhoeus": true,
 	"pundit": true, "cancancan": true, "cancan": true,
 	"active_support": true, "active_support/all": true, "activesupport": true,

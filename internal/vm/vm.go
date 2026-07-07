@@ -388,6 +388,12 @@ type VM struct {
 	// childPidSeq assigns the next synthetic pid. GVL-guarded.
 	children    []childStatus
 	childPidSeq int64
+
+	// relineState holds the mutable Reline module configuration (require
+	// "reline"): the shared history backing Reline::HISTORY, the injected
+	// input/output IO seams, the Ruby completion proc, and the editing mode. It
+	// is created once by registerReline and mutated by the module's setters.
+	relineState *relineState
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the
