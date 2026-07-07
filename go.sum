@@ -234,6 +234,8 @@ github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177 h1:lKTh6VO
 github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177/go.mod h1:/ATXu9XibUkiH95lNjyxy1Zosd0EmdU0JEU/P0Vau5U=
 github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df h1:sHlzlEJ7xgubi+P3XCfzSdc/4n/tL/ey+q7WEcziJwo=
 github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df/go.mod h1:WvnY0uliy6W7kQ0Mpmjo3TbRGNQUwWwMufvdyT2V8wY=
+github.com/go-ruby-capistrano/capistrano v0.0.0-20260707161800-c2d92ee7442d h1:5cUtjOtNbhL1VgwaXfOeUMMitg9nMXBU3KD4a9iGhAk=
+github.com/go-ruby-capistrano/capistrano v0.0.0-20260707161800-c2d92ee7442d/go.mod h1:4sa+V/fEhCBeFdyVoxARfh+fe0klFk5pEMt2ACoXY4I=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c h1:6YAo3FKzJJbQdLbvxHy7I4ur5+R+pLLMWwKXXLnWcQU=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c/go.mod h1:TAIxiFMAj68dWClzEmDY1vCSNFiPfupD3HRADRXrkZw=
 github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555 h1:84rvS0zIV+XzFZ/JmDdu1VEFLY0burLn8q9ISdJJ7jI=
@@ -982,6 +984,8 @@ golang.org/x/telemetry v0.0.0-20260610154732-fb80ec83bdd9 h1:FjUup8XrRy7lv+XHONi
 golang.org/x/telemetry v0.0.0-20260610154732-fb80ec83bdd9/go.mod h1:3AWMyWHS+caVoiEXpiq6+tzKA40J4vQT3MYr80ZtQpc=
 golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
 golang.org/x/term v0.0.0-20210927222741-03fcf44c2211/go.mod h1:jbD1KX2456YbFQfuXm/mYQcufACuNUgVhRMnK/tPxf8=
+golang.org/x/term v0.44.0 h1:0rLvDRCtNj0gZkyIXhCyOb2OAzEhLVqc4B+hrsBhrmc=
+golang.org/x/term v0.44.0/go.mod h1:7ze4MdzUzLXpSAoFP1H0bOI9aXDqveSvatT5vKcFh2Y=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 golang.org/x/text v0.3.2/go.mod h1:bEr9sfX3Q8Zfm5fL9x+3itogRgK3+ptLWKqgva+5dAk=
 golang.org/x/text v0.3.3/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=

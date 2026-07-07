@@ -1347,6 +1347,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Rake::Application"].(*RClass)
 	case *RakeFileListVal:
 		return vm.consts["Rake::FileList"].(*RClass)
+	case *CapServerVal:
+		return vm.consts["Capistrano::Server"].(*RClass)
+	case *CapSessionVal:
+		return vm.consts["Capistrano::Session"].(*RClass)
+	case *CapTaskVal:
+		return vm.consts["Capistrano::Task"].(*RClass)
+	case *CapBackendVal:
+		return vm.consts["Capistrano::TestBackend"].(*RClass)
 	case *BundlerLockfile:
 		return vm.consts["Bundler::LockfileParser"].(*RClass)
 	case *BundlerSpec:

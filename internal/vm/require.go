@@ -103,6 +103,7 @@ var providedFeatures = map[string]bool{
 	"thor": true,
 	"rake": true, "rake/dsl_definition": true, "rake/task": true,
 	"rake/file_task": true, "rake/file_list": true,
+	"capistrano": true, "capistrano/all": true, "capistrano/setup": true, "capistrano/deploy": true,
 	"bundler":     true,
 	"roda":        true,
 	"async":       true,
