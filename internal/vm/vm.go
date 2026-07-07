@@ -29,6 +29,7 @@ import (
 	money "github.com/go-ruby-money/money"
 	rake "github.com/go-ruby-rake/rake"
 	sinatra "github.com/go-ruby-sinatra/sinatra"
+	vcr "github.com/go-ruby-vcr/vcr"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -409,6 +410,19 @@ type VM struct {
 	// input/output IO seams, the Ruby completion proc, and the editing mode. It
 	// is created once by registerReline and mutated by the module's setters.
 	relineState *relineState
+
+	// vcrConfig is the VCR module's configuration + cassette store (require "vcr"),
+	// backed by go-ruby-vcr: it holds cassette_library_dir, default_record_mode, the
+	// filesystem seam (OSFS by default) and the recorded_at clock. Created by
+	// registerVCR. vcrCassette is the cassette of the currently-active
+	// VCR.use_cassette block (nil outside one); while it is non-nil, bound Net::HTTP
+	// requests route through it (replay a recorded interaction or record via the
+	// real transport) instead of dialing directly. vcrTestDoer, when non-nil,
+	// substitutes the record doer with a canned one so the record/replay state
+	// machine is drivable in-process with no network. All three are GVL-guarded.
+	vcrConfig   *vcr.VCR
+	vcrCassette *vcr.Cassette
+	vcrTestDoer func(vcr.Request) (vcr.Response, error)
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the
