@@ -28,8 +28,9 @@ import (
 // (read/gets/write/puts/...) directly. UDPSocket (socket_udp.go) and
 // UNIXSocket/UNIXServer (socket_unix.go) extend this ancestry; the name-
 // resolution + address utilities (Socket.getaddrinfo, the Addrinfo value class,
-// and the sockaddr pack/unpack helpers) live in socket_addrinfo.go. Raw
-// Socket.new remains a deferred follow-up.
+// and the sockaddr pack/unpack helpers) live in socket_addrinfo.go. The generic
+// low-level Socket.new (bind/listen/accept/connect/send/recv/...) lives in
+// socket_raw.go.
 
 // tcpSocket is a connected stream socket (TCPSocket): a live net.Conn plus a
 // buffered reader so gets / readpartial / eof? can peek without losing bytes.
@@ -186,25 +187,25 @@ func (vm *VM) registerTCPServer(srv *RClass) {
 }
 
 // registerSocketClass installs the Socket class + the address-family / socket-
-// type constants scripts commonly reference (AF_INET, SOCK_STREAM, ...). Raw
-// Socket.new / connect / bind is a deferred follow-up (the typed TCPSocket /
-// UDPSocket / UNIXSocket classes cover the common cases): Socket.new raises
-// NotImplementedError so the gap is loud and rescuable.
+// type / protocol / getnameinfo-flag constants scripts commonly reference
+// (AF_INET, SOCK_STREAM, NI_NUMERICHOST, ...) and the raw Socket.new surface
+// (bind / listen / accept / connect / send / recv / ..., see socket_raw.go).
 func (vm *VM) registerSocketClass(basic *RClass) {
 	sock := newClass("Socket", basic)
 	vm.consts["Socket"] = sock
 	for k, v := range map[string]int64{
-		"AF_INET": 2, "AF_INET6": 30, "AF_UNIX": 1, "PF_INET": 2, "PF_INET6": 30,
+		"AF_INET": 2, "AF_INET6": 30, "AF_UNIX": 1, "PF_INET": 2, "PF_INET6": 30, "PF_UNIX": 1,
 		"SOCK_STREAM": 1, "SOCK_DGRAM": 2,
-		"IPPROTO_TCP": 6, "IPPROTO_UDP": 17,
-		"SOL_SOCKET": 0xffff, "SO_REUSEADDR": 4,
+		"IPPROTO_TCP": 6, "IPPROTO_UDP": 17, "IPPROTO_IP": 0,
+		"SOL_SOCKET": 0xffff, "SO_REUSEADDR": 4, "SO_KEEPALIVE": 8, "SO_BROADCAST": 32,
+		"SO_RCVBUF": 0x1002, "SO_SNDBUF": 0x1001, "TCP_NODELAY": 1,
+		// getnameinfo flags (BSD numbering; the values only matter relative to the
+		// bitmask tests in Socket.getnameinfo).
+		"NI_NUMERICHOST": 2, "NI_NUMERICSERV": 8, "NI_NOFQDN": 1, "NI_NAMEREQD": 4, "NI_DGRAM": 16,
 	} {
 		sock.consts[k] = object.IntValue(v)
 	}
-	sock.smethods["new"] = &Method{name: "new", owner: sock,
-		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return raise("NotImplementedError", "raw Socket.new is not yet supported (use TCPSocket/TCPServer/UDPSocket/UNIXSocket; raw Socket is a follow-up)")
-		}}
+	vm.registerRawSocket(sock)
 }
 
 // defineSocketIO installs the shared connected-stream IO surface on cls. get

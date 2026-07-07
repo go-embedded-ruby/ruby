@@ -1232,6 +1232,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *tcpSocket:
 		return x.cls
+	case *rawSocket:
+		return x.cls
 	case *tcpServer:
 		return x.cls
 	case *udpSocket:

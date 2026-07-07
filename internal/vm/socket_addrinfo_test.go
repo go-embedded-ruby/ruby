@@ -287,6 +287,104 @@ begin; Socket.getaddrinfo("127.0.0.1", "bogus-service", Socket::AF_INET, Socket:
 	}
 }
 
+// TestGetnameinfo covers Socket.getnameinfo's numeric arms hermetically: the
+// packed-sockaddr and array address forms, NI_NUMERICHOST / NI_NUMERICSERV, the
+// well-known port → service map (tcp and, under NI_DGRAM, udp), and the numeric
+// fallback for a port with no service entry.
+func TestGetnameinfo(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// Numeric host + well-known service name (tcp).
+		{`p Socket.getnameinfo(Socket.pack_sockaddr_in(80, "127.0.0.1"), Socket::NI_NUMERICHOST)`,
+			`["127.0.0.1", "http"]`},
+		// Numeric host + numeric service.
+		{`p Socket.getnameinfo(Socket.pack_sockaddr_in(80, "127.0.0.1"), Socket::NI_NUMERICHOST | Socket::NI_NUMERICSERV)`,
+			`["127.0.0.1", "80"]`},
+		// A port with no service entry falls back to the numeric service.
+		{`p Socket.getnameinfo(Socket.pack_sockaddr_in(12345, "127.0.0.1"), Socket::NI_NUMERICHOST)`,
+			`["127.0.0.1", "12345"]`},
+		// NI_DGRAM selects the udp service name.
+		{`p Socket.getnameinfo(Socket.pack_sockaddr_in(53, "127.0.0.1"), Socket::NI_NUMERICHOST | Socket::NI_DGRAM)`,
+			`["127.0.0.1", "domain"]`},
+		// A v6 sockaddr keeps the bracket-free numeric host.
+		{`p Socket.getnameinfo(Socket.pack_sockaddr_in(443, "::1"), Socket::NI_NUMERICHOST)`,
+			`["::1", "https"]`},
+		// The [afamily, port, host, addr] array form (numeric addr preferred as host).
+		{`p Socket.getnameinfo(["AF_INET", 22, "example", "127.0.0.1"], Socket::NI_NUMERICHOST)`,
+			`["127.0.0.1", "ssh"]`},
+		// The three-element array form with a numeric-String port.
+		{`p Socket.getnameinfo(["AF_INET", "25", "127.0.0.1"], Socket::NI_NUMERICHOST)`,
+			`["127.0.0.1", "smtp"]`},
+	}
+	for _, c := range cases {
+		if got := runSrc(t, "require \"socket\"\n"+c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestGetnameinfoReverseSeams drives the reverse-lookup arms deterministically
+// through the lookupAddr seam: a successful reverse resolution (trailing dot
+// stripped), a lookup failure falling back to the numeric host, an empty result,
+// and NI_NAMEREQD turning a failure into a SocketError.
+func TestGetnameinfoReverseSeams(t *testing.T) {
+	orig := lookupAddr
+	defer func() { lookupAddr = orig }()
+
+	// Success: the reverse name is returned with its trailing dot stripped.
+	lookupAddr = func(addr string) ([]string, error) {
+		if addr == "127.0.0.1" {
+			return []string{"localhost."}, nil
+		}
+		return nil, fmt.Errorf("no reverse for %s", addr)
+	}
+	if got := runSrc(t, `require "socket"
+p Socket.getnameinfo(Socket.pack_sockaddr_in(80, "127.0.0.1"))`); got != `["localhost", "http"]` {
+		t.Errorf("reverse success got %q", got)
+	}
+	// Failure without NI_NAMEREQD falls back to the numeric host.
+	if got := runSrc(t, `require "socket"
+p Socket.getnameinfo(Socket.pack_sockaddr_in(80, "9.9.9.9"))`); got != `["9.9.9.9", "http"]` {
+		t.Errorf("reverse fallback got %q", got)
+	}
+	// An empty (error-free) result also falls back to the numeric host.
+	lookupAddr = func(string) ([]string, error) { return nil, nil }
+	if got := runSrc(t, `require "socket"
+p Socket.getnameinfo(Socket.pack_sockaddr_in(80, "9.9.9.9"))`); got != `["9.9.9.9", "http"]` {
+		t.Errorf("reverse empty got %q", got)
+	}
+	// NI_NAMEREQD turns a lookup failure into a SocketError.
+	lookupAddr = func(string) ([]string, error) { return nil, fmt.Errorf("boom") }
+	if got := runSrc(t, `require "socket"
+begin; Socket.getnameinfo(Socket.pack_sockaddr_in(80, "9.9.9.9"), Socket::NI_NAMEREQD); rescue SocketError; puts "reqd"; end`); got != "reqd" {
+		t.Errorf("NI_NAMEREQD failure got %q", got)
+	}
+}
+
+// TestGetnameinfoErrors covers Socket.getnameinfo's raising arms: arity, a
+// non-String/Array target, a too-short array, and the port element's type /
+// numeric-parse failures.
+func TestGetnameinfoErrors(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`begin; Socket.getnameinfo; rescue ArgumentError; puts "arity"; end`, "arity"},
+		{`begin; Socket.getnameinfo(42); rescue TypeError; puts "type"; end`, "type"},
+		{`begin; Socket.getnameinfo(["AF_INET"]); rescue ArgumentError; puts "short"; end`, "short"},
+		{`begin; Socket.getnameinfo(["AF_INET", [], "127.0.0.1"]); rescue TypeError; puts "porttype"; end`, "porttype"},
+		{`begin; Socket.getnameinfo(["AF_INET", "notaport", "127.0.0.1"]); rescue SocketError; puts "badport"; end`, "badport"},
+		// A wrong-length packed sockaddr is rejected by the unpack.
+		{`begin; Socket.getnameinfo("short"); rescue ArgumentError; puts "salen"; end`, "salen"},
+	}
+	for _, c := range cases {
+		if got := runSrc(t, "require \"socket\"\n"+c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// serviceName's no-entry arm is also reachable directly (a port present in the
+	// table but not for the requested protocol).
+	if _, ok := serviceName(21, "udp"); ok {
+		t.Error("serviceName(21, udp) should have no entry")
+	}
+}
+
 // TestAddrinfoHelperArms covers the pure helper branches that normal dispatch
 // cannot reach (the AF_UNIX / AF_UNSPEC family names, the value-protocol methods,
 // and the type-narrowing guard).

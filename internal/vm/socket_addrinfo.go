@@ -9,6 +9,7 @@ import (
 	binpkg "encoding/binary"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -57,6 +58,57 @@ var resolveIPs = func(network, host string) ([]net.IP, error) {
 // through. It is a package var so a test can drive both its success and failure
 // arms deterministically without depending on the host's /etc/services.
 var lookupPort = net.LookupPort
+
+// lookupAddr is the net.LookupAddr seam Socket.getnameinfo reverse-resolves an
+// IP to a hostname through. It is a package var so a test can drive its success
+// and failure arms deterministically without depending on live reverse DNS (a
+// numeric NI_NUMERICHOST request never reaches it).
+var lookupAddr = net.LookupAddr
+
+// getnameinfo flag bits (they mirror the Socket::NI_* constants; only the
+// relative bitmask matters).
+const (
+	niNumericHost = 2
+	niNameReqd    = 4
+	niNumericServ = 8
+	niDGRAM       = 16
+)
+
+// wellKnownServices maps a small set of well-known ports to their service names
+// for the reverse (port → service) half of Socket.getnameinfo. Go's net offers
+// no reverse-service lookup, so rbgo carries the common entries and falls back to
+// the numeric port for anything else — matching what getnameinfo returns when
+// /etc/services has no entry.
+var wellKnownServices = map[int]map[string]string{
+	20:   {"tcp": "ftp-data"},
+	21:   {"tcp": "ftp"},
+	22:   {"tcp": "ssh", "udp": "ssh"},
+	23:   {"tcp": "telnet"},
+	25:   {"tcp": "smtp"},
+	53:   {"tcp": "domain", "udp": "domain"},
+	80:   {"tcp": "http", "udp": "http"},
+	110:  {"tcp": "pop3"},
+	143:  {"tcp": "imap"},
+	443:  {"tcp": "https", "udp": "https"},
+	587:  {"tcp": "submission"},
+	993:  {"tcp": "imaps"},
+	995:  {"tcp": "pop3s"},
+	3306: {"tcp": "mysql"},
+	5432: {"tcp": "postgresql"},
+	6379: {"tcp": "redis"},
+}
+
+// serviceName reports the service name for a well-known (port, proto) pair, or
+// ok=false when there is no entry (the caller then falls back to the numeric
+// port).
+func serviceName(port int, proto string) (string, bool) {
+	if m, ok := wellKnownServices[port]; ok {
+		if name, ok := m[proto]; ok {
+			return name, true
+		}
+	}
+	return "", false
+}
 
 // addrinfo is a resolved address (MRI's Addrinfo): an address family plus the
 // numeric IP, port, and the socket-type / protocol that qualify it (0 when the
@@ -126,6 +178,28 @@ func (vm *VM) registerSocketAddr() {
 				)
 			}
 			return object.NewArrayFromSlice(tuples)
+		}}
+
+	// Socket.getnameinfo(sockaddr [, flags]) → [hostname, service], the reverse of
+	// getaddrinfo: sockaddr is a packed sockaddr_in / sockaddr_in6 String or an
+	// [afamily, port, host, addr] array. hostname is the reverse-resolved name
+	// (or the numeric address under NI_NUMERICHOST / on lookup failure), service
+	// is the port's well-known name (or the numeric port under NI_NUMERICSERV / a
+	// port with no entry).
+	sock.smethods["getnameinfo"] = &Method{name: "getnameinfo", owner: sock,
+		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) < 1 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+			}
+			flags := 0
+			if len(args) > 1 && !object.IsNil(args[1]) {
+				flags = int(intArg(args[1]))
+			}
+			host, port := nameinfoTarget(args[0])
+			return object.NewArray(
+				object.NewString(nameinfoHost(host, flags)),
+				object.NewString(nameinfoService(port, flags)),
+			)
 		}}
 
 	// Socket.pack_sockaddr_in(port, host) / Socket.sockaddr_in(port, host) → the
@@ -530,6 +604,84 @@ func sockaddrBytes(v object.Value) []byte {
 	}
 	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
 	return nil
+}
+
+// nameinfoTarget extracts the numeric host and port from a Socket.getnameinfo
+// argument: a packed sockaddr_in / sockaddr_in6 String, or an [afamily, port,
+// host, addr] array (the numeric addr element is preferred as the host when
+// present). A non-String, non-Array argument raises TypeError.
+func nameinfoTarget(v object.Value) (string, int) {
+	switch x := v.(type) {
+	case *object.String:
+		port, host := unpackSockaddrIn(x.Bytes())
+		return host, port
+	case *object.Array:
+		if len(x.Elems) < 3 {
+			raise("ArgumentError", "array address must have at least 3 elements [afamily, port, host]")
+		}
+		host := strArg(x.Elems[2])
+		if len(x.Elems) >= 4 {
+			host = strArg(x.Elems[3])
+		}
+		return host, nameinfoPort(x.Elems[1])
+	default:
+		raise("TypeError", "expected a packed sockaddr String or an address Array")
+		return "", 0
+	}
+}
+
+// nameinfoPort resolves the port element of a getnameinfo address array: an
+// Integer is taken as-is, a numeric String is parsed. Anything else is a
+// TypeError.
+func nameinfoPort(v object.Value) int {
+	switch p := v.(type) {
+	case object.Integer:
+		return int(p)
+	case *object.String:
+		if n, err := strconv.Atoi(p.Str()); err == nil {
+			return n
+		}
+		raise("SocketError", "getnameinfo: invalid port %q", p.Str())
+		return 0
+	default:
+		raise("TypeError", "no implicit conversion of %s into Integer", v.Inspect())
+		return 0
+	}
+}
+
+// nameinfoHost resolves the hostname half of getnameinfo: the numeric address
+// under NI_NUMERICHOST, else the reverse-resolved name (via the lookupAddr seam).
+// A lookup failure falls back to the numeric address, unless NI_NAMEREQD demands
+// a name, in which case it raises SocketError — matching getnameinfo(3).
+func nameinfoHost(host string, flags int) string {
+	if flags&niNumericHost != 0 {
+		return host
+	}
+	names, err := lookupAddr(host)
+	if err != nil || len(names) == 0 {
+		if flags&niNameReqd != 0 {
+			raise("SocketError", "getnameinfo: Name or service not known")
+		}
+		return host
+	}
+	return strings.TrimSuffix(names[0], ".")
+}
+
+// nameinfoService resolves the service half of getnameinfo: the numeric port
+// under NI_NUMERICSERV, else the well-known service name for the port (tcp, or
+// udp under NI_DGRAM), falling back to the numeric port when there is no entry.
+func nameinfoService(port, flags int) string {
+	if flags&niNumericServ != 0 {
+		return strconv.Itoa(port)
+	}
+	proto := "tcp"
+	if flags&niDGRAM != 0 {
+		proto = "udp"
+	}
+	if name, ok := serviceName(port, proto); ok {
+		return name
+	}
+	return strconv.Itoa(port)
 }
 
 // asAddrinfo narrows a receiver to *addrinfo, raising TypeError otherwise so a
