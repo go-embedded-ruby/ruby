@@ -52,6 +52,7 @@ var providedFeatures = map[string]bool{
 	"reline": true,
 	"http":   true, "excon": true, "typhoeus": true,
 	"pundit": true, "cancancan": true, "cancan": true,
+	"friendly_id": true,
 	"active_support": true, "active_support/all": true, "activesupport": true,
 	"active_support/core_ext": true, "active_support/inflector": true,
 	"active_support/core_ext/string": true, "active_support/core_ext/array": true,

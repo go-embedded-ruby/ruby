@@ -640,6 +640,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *RackResponse:
 		return x.cls
+	case *friendlyIDScope:
+		// The scope object Model.friendly returns; its #find lives on
+		// FriendlyId::FinderMethods (stamped on the scope at construction).
+		return x.cls
 	case *SinatraCtx:
 		// The self a Sinatra route/filter block runs against.
 		return x.cls
