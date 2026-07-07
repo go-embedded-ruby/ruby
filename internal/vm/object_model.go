@@ -688,6 +688,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// The writer CSV.generate yields to its block: it reports CSV so its << /
 		// push methods (defined on the CSV class) dispatch.
 		return vm.cCSV
+	case *rolifyRole:
+		// A rolify role wrapper (user.roles / resource.applied_roles) reports the
+		// Rolify::Role class stamped on it, whose name/resource_type/resource_id/id
+		// methods read the wrapped role.
+		return x.cls
 	case *Logger:
 		// A Logger wrapper reports Logger; its instance methods (add/info/<</…)
 		// live on that class.
