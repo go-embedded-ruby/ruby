@@ -24,6 +24,7 @@ import (
 	activestorage "github.com/go-ruby-activestorage/activestorage"
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
 	async "github.com/go-ruby-async/async"
+	capistrano "github.com/go-ruby-capistrano/capistrano"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
 	rake "github.com/go-ruby-rake/rake"
@@ -394,6 +395,15 @@ type VM struct {
 	// registerRake at bootstrap. The top-level task/file/namespace/desc DSL and
 	// the Rake::Task[] lookup all resolve against it. GVL-guarded.
 	rakeApp *rake.Application
+	// capApp is the per-VM Capistrano DSL facade (the deploy `env` + task graph),
+	// created lazily by installCapistrano on the first `require "capistrano"`. The
+	// top-level set/fetch/role/server/task/before/after/invoke/on DSL resolves
+	// against it. capBackend is its injected in-process command backend (the
+	// library's FakeBackend), so execute/capture/test are recorded and never touch
+	// a real host — keeping every run hermetic. Both are nil until required and are
+	// GVL-guarded thereafter.
+	capApp     *capistrano.Application
+	capBackend *capistrano.FakeBackend
 	// relineState holds the mutable Reline module configuration (require
 	// "reline"): the shared history backing Reline::HISTORY, the injected
 	// input/output IO seams, the Ruby completion proc, and the editing mode. It

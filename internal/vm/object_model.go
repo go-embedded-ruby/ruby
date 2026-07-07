@@ -800,6 +800,15 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// An RQRCode::QRCode reports RQRCode::QRCode so its renderer methods
 		// (as_svg / as_ansi / as_html / to_s / checked? / to_a) dispatch.
 		return vm.consts["RQRCode::QRCode"].(*RClass)
+	case *ImagesImage:
+		// An Images::Image reports Images::Image so its processing + scikit-image
+		// methods (resize / crop / rotate / convert / blur / edges / at / to_blob)
+		// dispatch.
+		return vm.consts["Images::Image"].(*RClass)
+	case *ImagesCanvas:
+		// An Images::Canvas reports Images::Canvas so its chunky_png-style pixel,
+		// drawing and PNG-output methods dispatch.
+		return vm.consts["Images::Canvas"].(*RClass)
 	case *XmlMarkup:
 		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
 		// method_missing element DSL and special methods dispatch.
@@ -899,6 +908,28 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *EtcdMember:
 		return x.cls
 	case *EtcdStatus:
+		return x.cls
+	case *VaultClient:
+		return x.cls
+	case *VaultLogical:
+		return x.cls
+	case *VaultKVv1:
+		return x.cls
+	case *VaultKVv2:
+		return x.cls
+	case *VaultTransit:
+		return x.cls
+	case *VaultSys:
+		return x.cls
+	case *VaultAuth:
+		return x.cls
+	case *VaultTokenAuth:
+		return x.cls
+	case *VaultAppRole:
+		return x.cls
+	case *VaultUserpass:
+		return x.cls
+	case *VaultSecret:
 		return x.cls
 	case *MySQLClient:
 		return x.cls
@@ -1347,6 +1378,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Rake::Application"].(*RClass)
 	case *RakeFileListVal:
 		return vm.consts["Rake::FileList"].(*RClass)
+	case *CapServerVal:
+		return vm.consts["Capistrano::Server"].(*RClass)
+	case *CapSessionVal:
+		return vm.consts["Capistrano::Session"].(*RClass)
+	case *CapTaskVal:
+		return vm.consts["Capistrano::Task"].(*RClass)
+	case *CapBackendVal:
+		return vm.consts["Capistrano::TestBackend"].(*RClass)
 	case *BundlerLockfile:
 		return vm.consts["Bundler::LockfileParser"].(*RClass)
 	case *BundlerSpec:

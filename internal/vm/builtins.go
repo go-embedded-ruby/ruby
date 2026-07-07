@@ -452,6 +452,7 @@ func (vm *VM) bootstrap() {
 	vm.registerNATS()             // NATS module (require "nats"), backed by go-ruby-nats over nats.go; needs StandardError for the NATS::Error tree
 	vm.registerKafka()            // Kafka module (require "kafka"), backed by go-ruby-kafka (twmb/franz-go); needs StandardError for Kafka::Error
 	vm.registerEtcd()             // Etcd/Etcdv3 client (require "etcd"/"etcdv3"), backed by go-ruby-etcd over go.etcd.io/etcd/client/v3; needs StandardError for Etcd::Error
+	vm.registerVault()            // Vault/OpenBao client (require "vault"/"openbao"), backed by go-ruby-openbao; transport wired to the bound Net::HTTP; needs StandardError for Vault::VaultError; after registerNetHTTP + registerNetHTTPTransport
 	vm.registerMySQL()            // Mysql2::Client/Result/Statement (require "mysql2" / "mysql"), backed by go-ruby-mysql over go-sql-driver; needs Enumerable for Result and StandardError for Mysql2::Error
 	vm.registerMongo()            // Mongo::Client/Database/Collection/Cursor + BSON::ObjectId (require "mongo"), backed by go-ruby-mongodb; needs StandardError for Mongo::Error
 	vm.registerParquet()          // Parquet::ArrowFileReader/ArrowFileWriter (require "parquet"), backed by go-ruby-parquet; needs StandardError for Parquet::Error
@@ -518,11 +519,13 @@ func (vm *VM) bootstrap() {
 	vm.registerRDoc()             // RDoc::Markup + ToHtml/ToMarkdown/ToRdoc formatters (require "rdoc"), backed by go-ruby-rdoc; needs StandardError for RDoc::Error
 	vm.registerThor()             // Thor CLI framework: option parsing + dispatch + help (require "thor"), backed by go-ruby-thor; needs StandardError for Thor::Error
 	vm.registerRake()             // Rake task-graph core + top-level task/file/namespace/desc DSL (require "rake"), backed by go-ruby-rake; a task's action block is the rbgo seam, run INLINE on the VM goroutine under the GVL when the task is invoked (the depth-first prerequisite-first invoke order, once-guard, circular detection, FileTask up-to-date logic and namespace/scope resolution are the library); the FileTask mtime + FileList glob seams are wired to the real filesystem
+	vm.registerCapistrano()       // Capistrano deploy DSL core (require "capistrano"): set/fetch/role/server/task/namespace/before/after/invoke + on(hosts){execute/capture/test}, backed by go-ruby-capistrano; the task/hook block bodies and on-blocks run INLINE under the GVL as the rbgo seams, and the command backend is wired to the library's in-process FakeBackend so execute/capture are recorded and never reach a real host (hermetic). The DSL installs lazily on require (a feature hook) so it never clobbers rake's always-on top-level task/namespace/desc; registered after registerRake. Needs StandardError for the Capistrano::Error tree
 	vm.registerBundler()          // Bundler: Gemfile/Gemfile.lock codec + resolver (require "bundler"), backed by go-ruby-bundler; needs StandardError for Bundler::BundlerError
 	vm.registerRacc()             // Racc::Parser LALR(1) runtime (require "racc/parser"), backed by go-ruby-racc; needs StandardError for Racc::ParseError
 	vm.registerMinitest()         // Minitest::Assertions + Test lifecycle (require "minitest"), backed by go-ruby-minitest; needs StandardError for Minitest::Assertion
 	vm.registerMinitestSpec()     // Minitest::Spec + spec DSL (describe/it/before/after/let), the must_*/wont_* expectations, and the autorun runner/reporter (require "minitest/autorun" / "minitest/spec"); layers on registerMinitest's Test + assertions
 	vm.registerKramdown()         // Kramdown::Document (require "kramdown"), backed by go-ruby-kramdown
+	vm.registerImages()           // Images::Image/Canvas/Color (require "images"), backed by go-ruby-images (MiniMagick/ruby-vips processing + chunky_png canvas + scikit-image ops); needs StandardError for Images::Error
 	vm.registerLiquid()           // Liquid::Template.parse(...).render (require "liquid"), backed by go-ruby-liquid; needs StandardError for Liquid::Error
 	vm.registerRouge()            // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
 	vm.registerSlim()             // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error
