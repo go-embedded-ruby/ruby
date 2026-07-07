@@ -236,6 +236,8 @@ github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df h1:sHl
 github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df/go.mod h1:WvnY0uliy6W7kQ0Mpmjo3TbRGNQUwWwMufvdyT2V8wY=
 github.com/go-ruby-capistrano/capistrano v0.0.0-20260707161800-c2d92ee7442d h1:5cUtjOtNbhL1VgwaXfOeUMMitg9nMXBU3KD4a9iGhAk=
 github.com/go-ruby-capistrano/capistrano v0.0.0-20260707161800-c2d92ee7442d/go.mod h1:4sa+V/fEhCBeFdyVoxARfh+fe0klFk5pEMt2ACoXY4I=
+github.com/go-ruby-capybara/capybara v0.0.0-20260707193057-e0671db74ed1 h1:BydTiVdLURkDSRZWatazLoCEIXNJk3woc6vV8j1wx/U=
+github.com/go-ruby-capybara/capybara v0.0.0-20260707193057-e0671db74ed1/go.mod h1:0xXnDp1vPs7AfIS+lKrc2birwVjBx3SC1m4yg6gFbUE=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c h1:6YAo3FKzJJbQdLbvxHy7I4ur5+R+pLLMWwKXXLnWcQU=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c/go.mod h1:TAIxiFMAj68dWClzEmDY1vCSNFiPfupD3HRADRXrkZw=
 github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555 h1:84rvS0zIV+XzFZ/JmDdu1VEFLY0burLn8q9ISdJJ7jI=
