@@ -1471,6 +1471,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *ACResponse:
 		return x.cls
+	case *WebMockStub:
+		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
 	case *JobRedis:
