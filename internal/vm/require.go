@@ -97,6 +97,7 @@ var providedFeatures = map[string]bool{
 	"rqrcode": true, "dotenv": true, "hcl2": true, "kramdown": true,
 	"pagy": true,
 	"images": true,
+	"shrine": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,
 	"dry/types": true, "dry-types": true,
 	"dry/struct": true, "dry-struct": true,

@@ -495,6 +495,8 @@ github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2 h1:wp+IIkvKNmbKiGv
 github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2/go.mod h1:F/P0PXeE5ybEPeWYfb1JAKWny1Li3dnlm6YxG2/vffE=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z9b99kWJht8AgtlIbdiq7Y02j6eddxW+rr4MJpCS6kw=
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
+github.com/go-ruby-shrine/shrine v0.0.0-20260707193645-b6db612b0012 h1:pHdfPnzXd7D5TgT6zQNQijjgyY/BScp+ciHR0nG9oys=
+github.com/go-ruby-shrine/shrine v0.0.0-20260707193645-b6db612b0012/go.mod h1:WTwiy8FfwQDh+uDa/HnFGaahCDeXu88cNAj2AFWWyYM=
 github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069 h1:cIMM8Qn+qKX6N6lNku5cl5LT61qGHlTKVuMJ4LEOP50=
 github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069/go.mod h1:ystbaHAx7g2zTN0DfeQe5mRt6Yanqr6ddThtIDhSlik=
 github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c h1:zq73EWvSARNK2T1R0WC3jl+YH7g6TutOkWd1btI8fIU=
