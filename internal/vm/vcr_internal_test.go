@@ -31,15 +31,19 @@ func newMemVCRFS() *memVCRFS { return &memVCRFS{files: map[string][]byte{}} }
 
 func (m *memVCRFS) fs() vcr.FS {
 	return vcr.FS{
+		// Key by forward slashes so the double behaves like a real filesystem,
+		// which accepts either separator: the library builds cassette paths with
+		// filepath.Join, so on Windows it asks for "cass\\corrupt.yml" while the
+		// seeded keys use "/". Normalizing here keeps the test OS-independent.
 		ReadFile: func(name string) ([]byte, error) {
-			b, ok := m.files[name]
+			b, ok := m.files[strings.ReplaceAll(name, "\\", "/")]
 			if !ok {
 				return nil, fs.ErrNotExist
 			}
 			return append([]byte(nil), b...), nil
 		},
 		WriteFile: func(name string, data []byte, _ os.FileMode) error {
-			m.files[name] = append([]byte(nil), data...)
+			m.files[strings.ReplaceAll(name, "\\", "/")] = append([]byte(nil), data...)
 			return nil
 		},
 		MkdirAll: func(string, os.FileMode) error { return nil },
