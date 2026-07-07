@@ -511,6 +511,7 @@ func (vm *VM) bootstrap() {
 	vm.registerHanami()           // Hanami::Router (hanami-router) + Hanami::Action (hanami-controller) (require "hanami" / "hanami/router" / "hanami/action"), backed by go-ruby-hanami over go-ruby-rack; the endpoint Resolver, the action #handle body (ActionCall), before/after callbacks, handle_exception, params validation and session loading are the rbgo seams; needs Rack, so registered after registerRack
 	vm.registerActiveRecord()     // ActiveRecord::Model/Relation/Record + Base.establish_connection (require "active_record"), backed by go-ruby-activerecord; adapter seam wired to go-ruby-sqlite3 so queries run; needs StandardError for ActiveRecordError
 	vm.registerRQRCode()          // RQRCode::QRCode (require "rqrcode"), backed by go-ruby-rqrcode; needs StandardError for RQRCode::QRCode*Error
+	vm.registerPagy()             // Pagy (require "pagy"), backed by go-ruby-pagy; needs StandardError for Pagy::OverflowError / Pagy::VariableError
 	vm.registerDotenv()           // Dotenv module (require "dotenv"), backed by go-ruby-dotenv; wires ENV read/write + shell seams
 	vm.registerHCL2()             // HCL2 module (require "hcl2"), backed by go-ruby-hcl2; needs StandardError for HCL2::Error
 	vm.registerI18n()             // I18n module (require "i18n"), backed by go-ruby-i18n; needs ArgumentError for the I18n::ArgumentError tree

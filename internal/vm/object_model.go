@@ -1185,6 +1185,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["TZInfo::TimezoneOffset"].(*RClass)
 	case *Country:
 		return vm.consts["TZInfo::Country"].(*RClass)
+	case *Pagy:
+		return vm.consts["Pagy"].(*RClass)
 	case *Money:
 		return vm.consts["Money"].(*RClass)
 	case *Currency:
