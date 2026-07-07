@@ -1473,6 +1473,18 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cFalseClass
 	case object.Nil:
 		return vm.cNilClass
+	case *ShrineStorage:
+		// A Shrine::Storage::Memory / ::FileSystem backend reports the concrete
+		// class stamped on it so its upload/open/exists?/delete/url dispatch.
+		return x.cls
+	case *ShrineUploader:
+		// A Shrine.new(:key) uploader reports Shrine so its #upload / #storage_key
+		// (defined on the Shrine class) dispatch.
+		return x.cls
+	case *ShrineUploadedFile:
+		return x.cls
+	case *ShrineAttacher:
+		return x.cls
 	case *object.Main:
 		return vm.cObject
 	}
