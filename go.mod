@@ -127,6 +127,7 @@ require (
 	github.com/go-ruby-rails/rails v0.0.0-20260706183557-5ddb406695b0
 	github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df
 	github.com/go-ruby-rake/rake v0.0.0-20260630123309-28092b465e07
+	github.com/go-ruby-ransack/ransack v0.0.0-20260707193940-08f791c256b0
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08

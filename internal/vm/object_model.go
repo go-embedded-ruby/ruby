@@ -1106,6 +1106,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Kaminari::PaginatableArray"].(*RClass)
 	case *KaminariRelation:
 		return vm.consts["Kaminari::PaginatableRelation"].(*RClass)
+	case *RansackSearch:
+		return vm.consts["Ransack::Search"].(*RClass)
+	case *RansackSort:
+		return vm.consts["Ransack::Sort"].(*RClass)
 	case *ActiveRecordSchemaDSL:
 		return vm.consts["ActiveRecord::Schema::Definition"].(*RClass)
 	case *ActiveRecordTableDSL:
