@@ -302,6 +302,8 @@ github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5 h1:Ygv/HnlYvVmGz
 github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5/go.mod h1:EIn9QjMqN3zvyz37o1hU2Vqvqi2YTjf5mCKvSc+PMDA=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1 h1:nwISQpJLt51MbXIgwf/stz8DeHkCDY6UsPI9dpIFGWU=
 github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1/go.mod h1:NbAjqDjT7Qx83yBMHYGCfPFzi+iAvQtrE3JT3nqS/+U=
+github.com/go-ruby-irb/irb v0.0.0-20260630203552-657e348289b2 h1:+Xnq8+7sEu7E2w5kf6ltaGj3izPQQ4uKXO21WXTTlCc=
+github.com/go-ruby-irb/irb v0.0.0-20260630203552-657e348289b2/go.mod h1:/CCuNPTzkrA8aBkxPUB4CG0Km1YD55jlxw8V8o7XmpQ=
 github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3 h1:L1dfFWPEHgWSbh3tTM4bvIulVoO8CFreHga8wSqtlio=
 github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3/go.mod h1:EY+IHrYLDowQEX9Pj3OJ8u2bI5FfkTmMbMhmEmV6uUM=
 github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2 h1:QVEA4kwx/P7djQnHZIEDVdTxWmhL5tGxOog6AZF6kxI=

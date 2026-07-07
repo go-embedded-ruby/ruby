@@ -34,7 +34,7 @@ var providedFeatures = map[string]bool{
 	"observer": true,
 	"socket":   true,
 	"net/http": true, "net/https": true, "net/pop": true, "net/imap": true, "net/sftp": true, "net/ftp": true, "net/smtp": true, "resolv": true, "singleton": true,
-	"optparse": true, "ripper": true, "erb": true, "find": true,
+	"optparse": true, "ripper": true, "erb": true, "irb": true, "find": true,
 	"tempfile": true, "open3": true,
 	"strscan": true, "fiber": true, "objspace": true, "csv": true,
 	"shellwords": true, "prime": true, "tsort": true, "abbrev": true,
