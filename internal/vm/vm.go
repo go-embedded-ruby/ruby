@@ -409,6 +409,13 @@ type VM struct {
 	// input/output IO seams, the Ruby completion proc, and the editing mode. It
 	// is created once by registerReline and mutated by the module's setters.
 	relineState *relineState
+	// simpleCov holds the mutable SimpleCov module state (require "simplecov"):
+	// the go-ruby-simplecov result-engine configuration (filters, groups,
+	// thresholds), the accumulated per-file raw line-coverage map fed through the
+	// deferred VM line-coverage seam (SimpleCov.add_coverage), and the active
+	// formatter. It is created once by registerSimpleCov and reset by
+	// SimpleCov.start.
+	simpleCov *simpleCovState
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the

@@ -825,6 +825,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *BoltCursor:
 		return x.cls
+	case *SimpleCovResult:
+		return x.cls
+	case *SimpleCovSourceFile:
+		return x.cls
 	case *SAMLSettings:
 		return x.cls
 	case *SAMLAuthrequest:
