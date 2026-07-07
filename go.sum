@@ -478,6 +478,8 @@ github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef h1:JLPi8PmkO
 github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef/go.mod h1:oI3L9dywsrSXJqLDuJGIYuHUHRCxUS7BU8PBZGXpx4A=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b h1:ZwN0q9xq9HUGCskWGz8rmL+v6MaHy+AM99oictlPlBs=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b/go.mod h1:tLv8PWrPxrOQrJWMFTfRi6wfZpSjZtmfxHKgGwUriR8=
+github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9 h1:hct5CHw1Ne9RXFvb/4+jzgl+yQACQ0wxooNJaD5YsCQ=
+github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9/go.mod h1:yUFQOsGseFaPfF9tjFaRXVAbdDL6FPuXhVmF+GLamcc=
 github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b h1:T7H6p2VhpU/05o/XSlsCT3YfMznMhcuShu8iDyDVeqU=
 github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b/go.mod h1:0DF9Jl9o+cvEvPCzCJ95nHIlF7qz8yzuQIyfMm8FUlM=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176 h1:iHTCF/Eu0/lwOEank8pLKqoW5j9MI2ERXErrvqsZZ+4=

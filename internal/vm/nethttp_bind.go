@@ -429,6 +429,17 @@ type nethttpXfer struct {
 // exactly one response so the next request reads at the right offset; outside a
 // start block it opens a fresh connection, reads one response and closes.
 func (vm *VM) nethttpDoXfer(cfg *nethttpXfer, method, path string, body []byte, hdr [][2]string) object.Value {
+	// WebMock interception: when require "webmock" is active, every outgoing
+	// request is offered to the stub registry BEFORE any socket is dialed. A
+	// matched stub answers in-process (a response, a raised class, a timeout, or
+	// the unregistered-request diff); only an explicitly allowed net connection
+	// falls through to the real transport below. Inert (zero cost) otherwise.
+	if vm.webmockActive {
+		if resp, handled := vm.webmockIntercept(cfg, method, path, body, hdr); handled {
+			return resp
+		}
+	}
+
 	reqBytes, noBody := vm.nethttpBuildRequest(cfg, method, path, body, hdr, cfg.inst == nil)
 
 	persistent := cfg.inst != nil

@@ -337,6 +337,7 @@ type VM struct {
 	scriptName    string            // $0 / $PROGRAM_NAME: the running program's name
 	defaultRandom *RandomObj        // process-wide generator for Kernel#rand / #srand
 	fakerInst     *fakerState       // Faker instance + its seed source (Faker::Config.random)
+	webmockActive bool              // true once require "webmock" ran: gates the Net::HTTP interception hook
 	currentFiber  *Fiber            // the fiber currently running (nil at the root), for Fiber.yield
 
 	// Concurrency: an emulated GVL (one Ruby thread executes VM code at a time).
