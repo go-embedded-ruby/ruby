@@ -409,6 +409,11 @@ type VM struct {
 	// input/output IO seams, the Ruby completion proc, and the editing mode. It
 	// is created once by registerReline and mutated by the module's setters.
 	relineState *relineState
+	// paperTrail holds the model-versioning state (require "paper_trail"): the
+	// shared Version store + request-context (whodunnit/enabled) + clock seams,
+	// the per-model Tracker cache, and the per-instance snapshot/item-id state.
+	// Created once by registerPaperTrail.
+	paperTrail *paperTrailState
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the

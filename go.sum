@@ -374,6 +374,8 @@ github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMr
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546/go.mod h1:BxhqkQFCqSMeYeWOHt7sdxTSkbaSJF19dWzspICZL1Q=
 github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf h1:W5Itep0ISPPujTPpHk86NVfbk+wwQ/qvI/Jq/CEpBrw=
 github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf/go.mod h1:WkHaYzJJba7jbtNmSXYztEF9tPOWgUv32ox47v1+AZc=
+github.com/go-ruby-paper-trail/paper-trail v0.0.0-20260707193452-4e10f2b4d0b3 h1:57ZDL1QPESzjanhXTcTQPZjNA4eP07txAAXwamPWrGY=
+github.com/go-ruby-paper-trail/paper-trail v0.0.0-20260707193452-4e10f2b4d0b3/go.mod h1:z370KNJcUH8n39yLdlT0Y1QvHukxjsq1XjGpIzvfqWE=
 github.com/go-ruby-parquet/parquet v0.0.0-20260704170648-c7f0507946f7 h1:kuL9coQlysvsIZXLzCfKZguDKvDwTibgJrLCx4jh5Ak=
 github.com/go-ruby-parquet/parquet v0.0.0-20260704170648-c7f0507946f7/go.mod h1:reJ/Dgyv5OWqVEERevwU1yX6N+CB5RfTQeGWGjmnOFo=
 github.com/go-ruby-parser/parser v0.0.0-20260703103305-5ae12948602f h1:aW7r9Y24mgN6uDG6laN8M0r94VPUAdPBSu7kxv5GXlU=
