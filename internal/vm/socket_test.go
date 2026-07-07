@@ -255,7 +255,9 @@ func TestSocketErrors(t *testing.T) {
 		{`srv=TCPServer.new("127.0.0.1",0); srv.close; p srv.closed?; begin; srv.accept; rescue IOError; puts "acc"; end`, "true\nacc"},
 		{`srv=TCPServer.new("127.0.0.1",0); p srv.listen(5); p srv.local_address[0]; srv.close`, "0\n\"AF_INET\""},
 		{`srv=TCPServer.new("127.0.0.1",0); p srv; puts srv.to_s; p(!!srv); srv.close`, "#<TCPServer>\n#<TCPServer>\ntrue"},
-		{`begin; Socket.new; rescue NotImplementedError; puts "rawsock"; end`, "rawsock"},
+		// Raw Socket.new now exists (socket_raw.go); the no-argument form is an
+		// arity error, and the raw surface has its own dedicated test suite.
+		{`begin; Socket.new; rescue ArgumentError; puts "rawsock"; end`, "rawsock"},
 		{`p Socket::SOCK_STREAM; p Socket::AF_INET6`, "1\n30"},
 		// An inherited TCPSocket method invoked on a TCPServer trips the type guard.
 		{`srv=TCPServer.new("127.0.0.1",0); begin; srv.read(1); rescue TypeError; puts "guard"; end; srv.close`, "guard"},
@@ -1060,6 +1062,65 @@ func TestTLSHelperUnitArms(t *testing.T) {
 	}
 
 	mustRaiseClass(t, "TypeError", func() { asSSLServer(object.NilV) })
+}
+
+// TestSSLSocketSNIServerName is the SNI proof: a Go TLS server whose
+// GetCertificate callback records the ClientHello's ServerName runs in-process,
+// and a Ruby SSLSocket sets #hostname= to a DNS name then #connect's. The
+// assertion is that the server received that exact name as SNI — so the client
+// handshake really sent it (crypto/tls omits SNI for a bare IP, which is why the
+// hostname is a DNS-style name here).
+func TestSSLSocketSNIServerName(t *testing.T) {
+	certPEM, keyPEM := genSelfSigned(t)
+	cert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sniCh := make(chan string, 1)
+	cfg := &tls.Config{GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		select {
+		case sniCh <- chi.ServerName:
+		default:
+		}
+		return &cert, nil
+	}}
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// Drive the server handshake (invokes GetCertificate) then drop the conn.
+			go func(c net.Conn) { c.(*tls.Conn).Handshake(); c.Close() }(c)
+		}
+	}()
+
+	host, port := hostPortOf(t, ln.Addr().String())
+	src := fmt.Sprintf(`require "socket"
+require "openssl"
+tcp = TCPSocket.new(%q, %s)
+ssl = OpenSSL::SSL::SSLSocket.new(tcp)
+ssl.hostname = "sni.example.test"
+p ssl.hostname
+ssl.connect
+ssl.close`, host, port)
+	if got := runSrc(t, src); got != `"sni.example.test"` {
+		t.Fatalf("hostname readback = %q", got)
+	}
+	// The client handshake completed above, so GetCertificate has run.
+	select {
+	case sni := <-sniCh:
+		if sni != "sni.example.test" {
+			t.Fatalf("server received SNI = %q, want %q", sni, "sni.example.test")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the server to record the SNI name")
+	}
 }
 
 // mustRaise asserts fn panics with a RubyError of the given class.

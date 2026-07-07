@@ -26,8 +26,11 @@ import (
 // surface is fleshed out too: SSLContext#cert / #key / #ca_file feed real
 // crypto/tls material (server certs, client RootCAs, mutual-TLS client certs),
 // VERIFY_PEER performs Go's chain + hostname verification, and #peer_cert
-// returns the handshaked peer's OpenSSL::X509::Certificate. Raw Socket-level TLS
-// options (SNI callbacks, session resumption tuning) remain deferred.
+// returns the handshaked peer's OpenSSL::X509::Certificate. The client handshake
+// sends SNI: #connect sets tls.Config.ServerName from #hostname= (defaulting to
+// the peer host), so a name-based virtual host is selected — crypto/tls omits
+// SNI only for a bare IP literal, as the TLS spec requires. Server-side SNI
+// selection callbacks and session-resumption tuning remain deferred.
 
 // sslSocket is a TLS stream over a wrapped TCPSocket. It shares the connected-
 // stream IO surface (read/gets/write/puts/...) with tcpSocket via streamIO, so
