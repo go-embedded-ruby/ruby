@@ -524,6 +524,7 @@ func (vm *VM) bootstrap() {
 	vm.registerMinitest()         // Minitest::Assertions + Test lifecycle (require "minitest"), backed by go-ruby-minitest; needs StandardError for Minitest::Assertion
 	vm.registerMinitestSpec()     // Minitest::Spec + spec DSL (describe/it/before/after/let), the must_*/wont_* expectations, and the autorun runner/reporter (require "minitest/autorun" / "minitest/spec"); layers on registerMinitest's Test + assertions
 	vm.registerKramdown()         // Kramdown::Document (require "kramdown"), backed by go-ruby-kramdown
+	vm.registerImages()           // Images::Image/Canvas/Color (require "images"), backed by go-ruby-images (MiniMagick/ruby-vips processing + chunky_png canvas + scikit-image ops); needs StandardError for Images::Error
 	vm.registerLiquid()           // Liquid::Template.parse(...).render (require "liquid"), backed by go-ruby-liquid; needs StandardError for Liquid::Error
 	vm.registerRouge()            // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
 	vm.registerSlim()             // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error

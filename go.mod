@@ -10,7 +10,7 @@ require (
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
-	github.com/go-images/images v0.0.0-20260620184442-aa6cd1c0beb7
+	github.com/go-images/images v0.0.0-20260702213524-ea366b42f216
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
@@ -69,6 +69,7 @@ require (
 	github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3
 	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82
 	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
+	github.com/go-ruby-images/images v0.0.0-20260707161119-23e927d074f8
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
 	github.com/go-ruby-irb/irb v0.0.0-20260630203552-657e348289b2
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
@@ -305,6 +306,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
+	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
