@@ -1267,11 +1267,17 @@ func TestNetHTTPEnvProxyCGISafety(t *testing.T) {
 	nethttpClearProxyEnv(t)
 	t.Setenv("REQUEST_METHOD", "GET")
 
-	// Uppercase HTTP_PROXY alone under CGI ⇒ ignored ⇒ direct.
-	t.Setenv("HTTP_PROXY", "http://blackhole.invalid:8080")
-	if got := runSrc(t, `require "net/http"
+	// Uppercase HTTP_PROXY alone under CGI ⇒ ignored ⇒ direct. Windows env vars
+	// are case-insensitive, so HTTP_PROXY and http_proxy name the same variable
+	// and this attacker-controllable-form-is-ignored distinction cannot be
+	// represented there; the lowercase-honored assertion below still exercises the
+	// same REQUEST_METHOD/os.Getenv("http_proxy") code path, so coverage holds.
+	if runtime.GOOS != "windows" {
+		t.Setenv("HTTP_PROXY", "http://blackhole.invalid:8080")
+		if got := runSrc(t, `require "net/http"
 puts Net::HTTP.new("h", 80).proxy?`); got != "false" {
-		t.Fatalf("CGI HTTP_PROXY (upper) proxy? = %q, want false", got)
+			t.Fatalf("CGI HTTP_PROXY (upper) proxy? = %q, want false", got)
+		}
 	}
 
 	// Lowercase http_proxy under CGI ⇒ honored.
