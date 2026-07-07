@@ -77,6 +77,7 @@ var providedFeatures = map[string]bool{
 	"webrick": true,
 	"sinatra": true, "sinatra/base": true,
 	"active_record": true, "activerecord": true,
+	"kaminari": true,
 	"active_model": true, "activemodel": true,
 	"active_job": true, "activejob": true,
 	"active_storage": true, "activestorage": true,
