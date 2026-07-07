@@ -493,6 +493,8 @@ github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
 github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069 h1:cIMM8Qn+qKX6N6lNku5cl5LT61qGHlTKVuMJ4LEOP50=
 github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069/go.mod h1:ystbaHAx7g2zTN0DfeQe5mRt6Yanqr6ddThtIDhSlik=
+github.com/go-ruby-simplecov/simplecov v0.0.0-20260707192101-68bcf21e3080 h1:2DuwPP73r0ZstQ0EN0q6RtMs+vBebg3uWkDV1tNYwOo=
+github.com/go-ruby-simplecov/simplecov v0.0.0-20260707192101-68bcf21e3080/go.mod h1:cBtT0grdK86g1Rqbj9CJw/YPKg9teGlt6oH5J1axyF4=
 github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c h1:zq73EWvSARNK2T1R0WC3jl+YH7g6TutOkWd1btI8fIU=
 github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c/go.mod h1:nuEOODfga3YvXINu2Ckvp/dNTTZlx+LUyjpWI+9TMck=
 github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4 h1:FYfHAxVaFU2q7BQ8wsKesUxO2uAQ2VK/TdTVut1/wfg=

@@ -145,6 +145,7 @@ require (
 	github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
 	github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069
+	github.com/go-ruby-simplecov/simplecov v0.0.0-20260707192101-68bcf21e3080
 	github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c
 	github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4
 	github.com/go-ruby-sodium/sodium v0.0.0-20260704110007-85cd070fb270

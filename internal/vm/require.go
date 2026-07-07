@@ -73,6 +73,7 @@ var providedFeatures = map[string]bool{
 	"rspec": true, "rspec/expectations": true, "rspec/matchers": true,
 	"factory_bot": true,
 	"rubocop": true,
+	"simplecov": true,
 	"grape":   true,
 	"rack":    true, "rack/utils": true,
 	"webrick": true,
