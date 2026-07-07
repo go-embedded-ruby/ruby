@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"strings"
 
+	rake "github.com/go-ruby-rake/rake"
+
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -1230,6 +1232,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Queue"].(*RClass)
 	case *IOObj:
 		return x.cls
+	case *RelineHistory:
+		return x.cls
 	case *tcpSocket:
 		return x.cls
 	case *tcpServer:
@@ -1332,6 +1336,15 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Thor::Command"].(*RClass)
 	case *ThorBase:
 		return vm.consts["Thor::Base"].(*RClass)
+	case *RakeTaskVal:
+		if _, isFile := x.t.(*rake.FileTask); isFile {
+			return vm.consts["Rake::FileTask"].(*RClass)
+		}
+		return vm.consts["Rake::Task"].(*RClass)
+	case *RakeApplicationVal:
+		return vm.consts["Rake::Application"].(*RClass)
+	case *RakeFileListVal:
+		return vm.consts["Rake::FileList"].(*RClass)
 	case *BundlerLockfile:
 		return vm.consts["Bundler::LockfileParser"].(*RClass)
 	case *BundlerSpec:

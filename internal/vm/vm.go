@@ -26,6 +26,7 @@ import (
 	async "github.com/go-ruby-async/async"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
+	rake "github.com/go-ruby-rake/rake"
 	sinatra "github.com/go-ruby-sinatra/sinatra"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
@@ -388,6 +389,16 @@ type VM struct {
 	// childPidSeq assigns the next synthetic pid. GVL-guarded.
 	children    []childStatus
 	childPidSeq int64
+
+	// rakeApp is the per-VM Rake task registry (Rake.application), created by
+	// registerRake at bootstrap. The top-level task/file/namespace/desc DSL and
+	// the Rake::Task[] lookup all resolve against it. GVL-guarded.
+	rakeApp *rake.Application
+	// relineState holds the mutable Reline module configuration (require
+	// "reline"): the shared history backing Reline::HISTORY, the injected
+	// input/output IO seams, the Ruby completion proc, and the editing mode. It
+	// is created once by registerReline and mutated by the module's setters.
+	relineState *relineState
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the

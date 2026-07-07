@@ -458,6 +458,7 @@ func (vm *VM) bootstrap() {
 	vm.registerHTTParty()         // HTTParty HTTP client (require "httparty"), backed by go-ruby-httparty; needs StandardError for HTTParty::Error
 	vm.registerConnectionPool()   // ConnectionPool + ConnectionPool::Wrapper (require "connection_pool"), backed by go-ruby-connection-pool; needs RuntimeError + Timeout::Error
 	vm.registerErubi()            // Erubi::Engine / CaptureEndEngine + Erubi.h (require "erubi"), template->Ruby-source compiler backed by go-ruby-erubi
+	vm.registerReline()           // Reline module + Reline::HISTORY (require "reline"), line-editor backed by go-ruby-reline; the terminal I/O is wired to rbgo IO objects via Reline.input=/output=
 	vm.registerHTTPrb()           // HTTP module — chainable http.rb client (require "http"), backed by go-ruby-http; needs StandardError for HTTP::Error
 	vm.registerExcon()            // Excon module — persistent HTTP client (require "excon"), backed by go-ruby-excon; needs StandardError for Excon::Error
 	vm.registerTyphoeus()         // Typhoeus module — parallel HTTP client + Hydra (require "typhoeus"), backed by go-ruby-typhoeus; net/http+goroutines
@@ -516,6 +517,7 @@ func (vm *VM) bootstrap() {
 	vm.registerRSS()              // RSS::Parser.parse -> RSS::Rss / RSS::RDF / RSS::Atom::Feed (require "rss"), backed by go-ruby-rss; needs StandardError for RSS::Error
 	vm.registerRDoc()             // RDoc::Markup + ToHtml/ToMarkdown/ToRdoc formatters (require "rdoc"), backed by go-ruby-rdoc; needs StandardError for RDoc::Error
 	vm.registerThor()             // Thor CLI framework: option parsing + dispatch + help (require "thor"), backed by go-ruby-thor; needs StandardError for Thor::Error
+	vm.registerRake()             // Rake task-graph core + top-level task/file/namespace/desc DSL (require "rake"), backed by go-ruby-rake; a task's action block is the rbgo seam, run INLINE on the VM goroutine under the GVL when the task is invoked (the depth-first prerequisite-first invoke order, once-guard, circular detection, FileTask up-to-date logic and namespace/scope resolution are the library); the FileTask mtime + FileList glob seams are wired to the real filesystem
 	vm.registerBundler()          // Bundler: Gemfile/Gemfile.lock codec + resolver (require "bundler"), backed by go-ruby-bundler; needs StandardError for Bundler::BundlerError
 	vm.registerRacc()             // Racc::Parser LALR(1) runtime (require "racc/parser"), backed by go-ruby-racc; needs StandardError for Racc::ParseError
 	vm.registerMinitest()         // Minitest::Assertions + Test lifecycle (require "minitest"), backed by go-ruby-minitest; needs StandardError for Minitest::Assertion
@@ -538,6 +540,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSyslog()           // Syslog loadable shell (feature probe)
 	vm.registerCGI()              // CGI.escape/unescape (real over net/url) + HTML helpers
 	vm.registerERB()              // ERB class skeleton + ERB::Util (backed by go-ruby-erb); prelude adds the Ruby API
+	vm.registerIRB()              // IRB module + REPL (require "irb"), backed by go-ruby-irb; evaluates each statement through rbgo; needs Binding + IO
 	vm.registerStringScanner()    // StringScanner (require "strscan"), backed by go-ruby-strscan; needs StandardError
 	vm.registerOptionParser()     // OptionParser (require "optparse"), backed by go-ruby-optparse; prelude adds the ParseError tree
 	vm.registerURI()              // URI module (require "uri"), backed by go-ruby-uri; needs StandardError (URI::Error) + Regexp (make_regexp)

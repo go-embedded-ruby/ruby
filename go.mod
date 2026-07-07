@@ -70,6 +70,7 @@ require (
 	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82
 	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
+	github.com/go-ruby-irb/irb v0.0.0-20260630203552-657e348289b2
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2
 	github.com/go-ruby-jwt/jwt v0.0.0-20260705184902-40cd404d3c65
@@ -118,9 +119,11 @@ require (
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
 	github.com/go-ruby-rails/rails v0.0.0-20260706183557-5ddb406695b0
 	github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df
+	github.com/go-ruby-rake/rake v0.0.0-20260630123309-28092b465e07
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
+	github.com/go-ruby-reline/reline v0.0.0-20260630130257-c3cc9ab10454
 	github.com/go-ruby-resolv/resolv v0.0.0-20260629153520-df410a5796ac
 	github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
