@@ -1087,6 +1087,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["ActiveRecord::Record"].(*RClass)
 	case *ActiveRecordErrors:
 		return vm.consts["ActiveRecord::Errors"].(*RClass)
+	case *RansackSearch:
+		return vm.consts["Ransack::Search"].(*RClass)
+	case *RansackSort:
+		return vm.consts["Ransack::Sort"].(*RClass)
 	case *ActiveRecordSchemaDSL:
 		return vm.consts["ActiveRecord::Schema::Definition"].(*RClass)
 	case *ActiveRecordTableDSL:
