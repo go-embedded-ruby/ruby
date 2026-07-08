@@ -38,6 +38,7 @@ require (
 	github.com/go-ruby-bundler/bundler v0.0.0-20260630192314-85e213b45177
 	github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df
 	github.com/go-ruby-capistrano/capistrano v0.0.0-20260707161800-c2d92ee7442d
+	github.com/go-ruby-capybara/capybara v0.0.0-20260707193057-e0671db74ed1
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
@@ -57,6 +58,7 @@ require (
 	github.com/go-ruby-erubi/erubi v0.0.0-20260706150033-cfeeadde9120
 	github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a
 	github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f
+	github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
@@ -152,20 +154,24 @@ require (
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
 	github.com/go-ruby-shrine/shrine v0.0.0-20260707193645-b6db612b0012
 	github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069
+	github.com/go-ruby-simplecov/simplecov v0.0.0-20260707192101-68bcf21e3080
 	github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c
 	github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4
 	github.com/go-ruby-sodium/sodium v0.0.0-20260704110007-85cd070fb270
 	github.com/go-ruby-sqlite3/sqlite3 v0.0.0-20260702143910-c9f337771f41
 	github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8
 	github.com/go-ruby-thor/thor v0.0.0-20260702145030-faa03e6e0228
+	github.com/go-ruby-timecop/timecop v0.0.0-20260707191347-9beab96d330c
 	github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785
 	github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b
 	github.com/go-ruby-typhoeus/typhoeus v0.0.0-20260706120426-67b7a131561d
 	github.com/go-ruby-tzinfo/tzinfo v0.0.0-20260701105256-15977bdf6e1a
 	github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f
 	github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb
+	github.com/go-ruby-vcr/vcr v0.0.0-20260707192746-30292e709ff4
 	github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b
+	github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9
 	github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd

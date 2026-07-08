@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	stdtime "time"
 
 	actionmailer "github.com/go-ruby-actionmailer/actionmailer"
 	activejob "github.com/go-ruby-activejob/activejob"
@@ -25,10 +26,13 @@ import (
 	inflector "github.com/go-ruby-activesupport/activesupport/inflector"
 	async "github.com/go-ruby-async/async"
 	capistrano "github.com/go-ruby-capistrano/capistrano"
+	factorybot "github.com/go-ruby-factory-bot/factory-bot"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
 	rake "github.com/go-ruby-rake/rake"
 	sinatra "github.com/go-ruby-sinatra/sinatra"
+	timecop "github.com/go-ruby-timecop/timecop"
+	vcr "github.com/go-ruby-vcr/vcr"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -221,116 +225,128 @@ type VM struct {
 	cDidYouMean                            *RClass // the DidYouMean module (require "did_you_mean")
 	cSpellChecker                          *RClass // DidYouMean::SpellChecker, backed by go-ruby-did-you-mean
 	cTime                                  *RClass
-	cFileStat                              *RClass
-	cBigDecimal                            *RClass
-	cBenchmarkTms                          *RClass // Benchmark::Tms (require "benchmark"), backed by go-ruby-benchmark
-	cBenchmarkReport                       *RClass // Benchmark::Report (require "benchmark")
-	cBenchmarkJob                          *RClass // Benchmark::Job (require "benchmark")
-	cDate                                  *RClass
-	cDateTime                              *RClass
-	cBag                                   *RClass
-	cStringScanner                         *RClass
-	moneyBank                              *money.VariableExchange // the process-wide default exchange bank for Money (require "money")
-	i18nInst                               *i18n.I18n              // the process-wide I18n instance (require "i18n"), backed by go-ruby-i18n
-	asInflections                          *inflector.Inflections  // the ActiveSupport::Inflector inflection ruleset (require "active_support"), backed by go-ruby-activesupport; a per-VM clone of the gem's English defaults
-	otelProvider                           *OTelTracerProvider     // the process-wide OpenTelemetry.tracer_provider (require "opentelemetry"), backed by go-ruby-opentelemetry
-	cOptionParser                          *RClass
-	cURI                                   *RClass                            // the URI module (require "uri"), backed by go-ruby-uri
-	cURIGeneric                            *RClass                            // URI::Generic, the base URI class wrapping a *uri.URI
-	cCSV                                   *RClass                            // the CSV class (require "csv"), backed by go-ruby-csv
-	cCSVRow                                *RClass                            // CSV::Row, wrapping a *csv.Row
-	cCSVTable                              *RClass                            // CSV::Table, wrapping a *csv.Table
-	cLogger                                *RClass                            // the Logger class (require "logger"), backed by go-ruby-logger
-	cLoggerFormatter                       *RClass                            // Logger::Formatter, wrapping a *Logger wrapper's formatter
-	cLoggerSeverity                        *RClass                            // Logger::Severity, the severity-constant module
-	cREXML                                 *RClass                            // the REXML module (require "rexml/document"), backed by go-ruby-rexml
-	cREXMLDocument                         *RClass                            // REXML::Document, wrapping a *rexml.Document
-	cREXMLElement                          *RClass                            // REXML::Element, wrapping a *rexml.Element
-	cREXMLElements                         *RClass                            // REXML::Elements, the child-navigation proxy
-	cREXMLAttributes                       *RClass                            // REXML::Attributes, wrapping a *rexml.Attributes
-	cREXMLText                             *RClass                            // REXML::Text, wrapping a *rexml.Text
-	cREXMLComment                          *RClass                            // REXML::Comment, wrapping a *rexml.Comment
-	cREXMLCData                            *RClass                            // REXML::CData, wrapping a *rexml.CData
-	cREXMLInstruction                      *RClass                            // REXML::Instruction, wrapping a *rexml.Instruction
-	cREXMLDocType                          *RClass                            // REXML::DocType, wrapping a *rexml.DocType
-	cREXMLPretty                           *RClass                            // REXML::Formatters::Pretty serialiser
-	cREXMLXPath                            *RClass                            // REXML::XPath module
-	cREXMLParseException                   *RClass                            // REXML::ParseException < StandardError
-	cSinatraBase                           *RClass                            // Sinatra::Base (require "sinatra/base"), backed by go-ruby-sinatra
-	cSinatraCtx                            *RClass                            // Sinatra::Base::Context, the self a route/filter block runs against
-	cSinatraSettings                       *RClass                            // Sinatra::Base::Settings, the handler's `settings` view
-	sinatraDefs                            map[*RClass]*sinatraDef            // per-Sinatra::Base-subclass route/filter/handler declarations
-	sinatraCtxCache                        map[*sinatra.Context]*SinatraCtx   // per-request handler self, shared across before/route/after so @ivars persist
-	sinatraSession                         *sinatraSessionState               // per-dispatch cookie session (enable :sessions); the `session` helper returns its live Hash, saved back into a Set-Cookie
-	sinatraDefaultSecret                   []byte                             // per-VM fallback session-signing key when no session_secret is set (like MRI Sinatra's random default), generated once
-	cRodaBase                              *RClass                            // Roda (require "roda"), the routing-tree app superclass, backed by go-ruby-roda
-	cRodaRequest                           *RClass                            // Roda::RodaRequest, the self a route/matcher block runs against
-	cRodaResponse                          *RClass                            // Roda::RodaResponse, the mutable response a route block writes into
-	rodaRoutes                             map[*RClass]*Proc                  // per-Roda-subclass top-level route block (route do |r| … end)
-	cAsyncTask                             *RClass                            // Async::Task, one node of the structured-concurrency tree, backed by go-ruby-async
-	curAsyncTask                           *async.Task                        // the task whose Ruby body is currently running (backs Async::Task.current and the caller passed to blocking async ops)
-	asyncTasks                             map[*async.Task]*AsyncTask         // wrapper cache so one *async.Task always maps to one Async::Task object (Ruby #equal? identity), cleared when the root reactor finishes
-	wardenStrategies                       map[string]*RClass                 // Warden::Strategies.add(name){…} registry: label -> anon subclass of Warden::Strategies::Base
-	omniAuthStrategies                     map[string]*RClass                 // OmniAuth provider registry: name -> strategy class (from OmniAuth::Strategies.add or provider Class)
-	omniAuthProviderOpts                   map[string]map[string]any          // OmniAuth per-provider option args (provider :name, key: …), surfaced to a strategy as #options
-	omniAuthConfig                         *OmniAuthConfig                    // the shared OmniAuth.config (test_mode / mock_auth / path_prefix)
-	amThunks                               map[*RClass][]amThunk              // ActiveModel::Validations DSL registrations per class (require "active_model"); replayed onto a fresh activemodel.Validations at #valid? time so subclasses inherit ancestors' validators
-	fidConfigs                             map[*RClass]*fidState              // FriendlyId: per-model slug config, reference slug store and in-process record cache (require "friendly_id"), installed by the friendly_id macro
-	aasmSpecs                              map[*RClass][]*aasmMachineSpec     // AASM: per-class state-machine definitions from `aasm do … end` (require "aasm"); replayed to build a bound aasm.Instance per Ruby object, walked over ancestors so a subclass inherits its machines
-	ajBases                                map[*RClass]*activejob.Base        // ActiveJob: library job class built per `class … < ActiveJob::Base` subclass (class-dispatch seam)
-	ajJobOf                                map[*RObject]*activejob.Job        // ActiveJob: Ruby job instance -> backing library *Job
-	ajInstOf                               map[*activejob.Job]*RObject        // ActiveJob: library *Job -> Ruby job instance
-	ajTestAdapters                         map[*RClass]*activejob.TestAdapter // ActiveJob: per-class :test adapter
-	ajStack                                []*RObject                         // ActiveJob: instance stack the inline #perform seam reads
-	ajLastResult                           object.Value                       // ActiveJob: last #perform return value (perform_now's result)
-	ajArgs                                 *activejob.Arguments               // ActiveJob: module-level ActiveJob::Arguments serializer (GlobalID seam wired in registerActiveJob)
-	cActionMailerBase                      *RClass                            // ActionMailer::Base, the superclass every mailer subclasses (require "action_mailer"), backed by go-ruby-actionmailer
-	cActionMailerDelivery                  *RClass                            // ActionMailer::MessageDelivery, the lazy proxy a mailer action returns
-	cActionMailerAttachments               *RClass                            // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
-	amDefs                                 map[*RClass]*amDef                 // ActionMailer: per-mailer-class default/delivery/hook declarations, merged down the chain at delivery time
-	amDeliveries                           *object.Array                      // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
-	sftpClasses                            *sftpClassSet                      // Net::SFTP: the wrapper classes stamped on returned Attributes / Name / File values (require "net/sftp")
-	amMailerOf                             map[*RObject]*actionmailer.Mailer  // ActionMailer: mailer instance -> library *Mailer of its running action (the mail/attachments/headers seam)
-	amRenderer                             object.Value                       // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
-	amEnqueuer                             object.Value                       // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)
-	asConfig                               *activestorage.Config              // ActiveStorage process config (require "active_storage"); nil until first use, then a deterministic in-process config (MemStore + DiskService temp dir)
-	cACChannelBase                         *RClass                            // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
-	acServer                               object.Value                       // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
-	railtieSeams                           map[any]*railtieSeam               // per-railtie/engine/app deferred initializer blocks, keyed by the library ctx object; run inline by the RunInitializer seam during Application#initialize!
-	railsApp                               *RailsAppVal                       // the Ruby Application registered via Rails.application= (the rails meta-gem's top-level app); nil before boot
-	deviseConfig                           *DeviseConfig                      // the shared Devise.config the DatabaseAuthenticatable Warden strategy authenticates against
-	cHanamiRouter                          *RClass                            // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
-	cHanamiAction                          *RClass                            // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses
-	cHanamiRequest                         *RClass                            // Hanami::Action::Request, the request handed to a Hanami action's #handle
-	cHanamiResponse                        *RClass                            // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
-	cHanamiFlash                           *RClass                            // Hanami::Action::Flash, the two-generation flash store on the request/response
-	hanamiActionDefs                       map[*RClass]*hanamiActionDef       // per-Hanami::Action-subclass before/after/handle_exception/accept/config declarations
-	cACRouteSet                            *RClass                            // ActionDispatch::Routing::RouteSet (require "action_dispatch"), backed by go-ruby-actionpack/routing
-	cACMapper                              *RClass                            // ActionDispatch::Routing::Mapper, the self the routes DSL (draw) runs against
-	cACRequest                             *RClass                            // ActionDispatch::Request, over a Rack env
-	cACResponse                            *RClass                            // ActionDispatch::Response, the mutable Rack response
-	cACParameters                          *RClass                            // ActionController::Parameters (strong parameters)
-	cACControllerBase                      *RClass                            // ActionController::Base (require "action_controller"), the controller superclass a user subclasses
-	acControllerDefs                       map[*RClass]*acControllerDef       // per-ActionController::Base-subclass before/after/around/rescue_from/view-context declarations
-	cMinitestSpec                          *RClass                            // Minitest::Spec, the spec-DSL subclass of Minitest::Test
-	minitestRunnables                      []*RClass                          // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
-	minitestCurInstance                    object.Value                       // the test instance currently running (backs bare must_*/wont_* and _)
-	minitestAutorunDone                    bool                               // guards the require "minitest/autorun" at_exit hook against a double run
-	cOpenSSLDigest                         *RClass
-	cArray, cHash, cRange                  *RClass
-	cProc                                  *RClass
-	cMethod                                *RClass
-	cEnumerator                            *RClass
-	cYielder                               *RClass
-	cEncoding                              *RClass
-	encodings                              map[string]*encodingObj
-	cLazy                                  *RClass
-	lastMatch                              object.Value            // $~: last regexp MatchData (or nil)
-	globals                                map[string]object.Value // user-assigned $globals
-	cTrueClass, cFalseClass, cNilClass     *RClass
-	cRegexp, cMatchData                    *RClass
-	cException                             *RClass
-	curExc                                 object.Value // most recently rescued exception (for bare `raise`)
+	// clock is the per-VM controllable time source behind Time.now / Date.today /
+	// DateTime.now. It is always present; empty (unmocked) it reports the real
+	// wall clock through its Now seam (wired to nowUnix, the same determinism seam
+	// Time.now already used), so a program that never requires "timecop" is
+	// unaffected. require "timecop" installs the Ruby Timecop module (timecop.go),
+	// whose freeze / travel / scale push mock-time frames onto this clock.
+	clock                *timecop.Clock
+	cFileStat            *RClass
+	cBigDecimal          *RClass
+	cBenchmarkTms        *RClass // Benchmark::Tms (require "benchmark"), backed by go-ruby-benchmark
+	cBenchmarkReport     *RClass // Benchmark::Report (require "benchmark")
+	cBenchmarkJob        *RClass // Benchmark::Job (require "benchmark")
+	cDate                *RClass
+	cDateTime            *RClass
+	cBag                 *RClass
+	cStringScanner       *RClass
+	moneyBank            *money.VariableExchange // the process-wide default exchange bank for Money (require "money")
+	i18nInst             *i18n.I18n              // the process-wide I18n instance (require "i18n"), backed by go-ruby-i18n
+	asInflections        *inflector.Inflections  // the ActiveSupport::Inflector inflection ruleset (require "active_support"), backed by go-ruby-activesupport; a per-VM clone of the gem's English defaults
+	otelProvider         *OTelTracerProvider     // the process-wide OpenTelemetry.tracer_provider (require "opentelemetry"), backed by go-ruby-opentelemetry
+	cOptionParser        *RClass
+	cURI                 *RClass                          // the URI module (require "uri"), backed by go-ruby-uri
+	cURIGeneric          *RClass                          // URI::Generic, the base URI class wrapping a *uri.URI
+	cCSV                 *RClass                          // the CSV class (require "csv"), backed by go-ruby-csv
+	cCSVRow              *RClass                          // CSV::Row, wrapping a *csv.Row
+	cCSVTable            *RClass                          // CSV::Table, wrapping a *csv.Table
+	cLogger              *RClass                          // the Logger class (require "logger"), backed by go-ruby-logger
+	cLoggerFormatter     *RClass                          // Logger::Formatter, wrapping a *Logger wrapper's formatter
+	cLoggerSeverity      *RClass                          // Logger::Severity, the severity-constant module
+	cREXML               *RClass                          // the REXML module (require "rexml/document"), backed by go-ruby-rexml
+	cREXMLDocument       *RClass                          // REXML::Document, wrapping a *rexml.Document
+	cREXMLElement        *RClass                          // REXML::Element, wrapping a *rexml.Element
+	cREXMLElements       *RClass                          // REXML::Elements, the child-navigation proxy
+	cREXMLAttributes     *RClass                          // REXML::Attributes, wrapping a *rexml.Attributes
+	cREXMLText           *RClass                          // REXML::Text, wrapping a *rexml.Text
+	cREXMLComment        *RClass                          // REXML::Comment, wrapping a *rexml.Comment
+	cREXMLCData          *RClass                          // REXML::CData, wrapping a *rexml.CData
+	cREXMLInstruction    *RClass                          // REXML::Instruction, wrapping a *rexml.Instruction
+	cREXMLDocType        *RClass                          // REXML::DocType, wrapping a *rexml.DocType
+	cREXMLPretty         *RClass                          // REXML::Formatters::Pretty serialiser
+	cREXMLXPath          *RClass                          // REXML::XPath module
+	cREXMLParseException *RClass                          // REXML::ParseException < StandardError
+	cSinatraBase         *RClass                          // Sinatra::Base (require "sinatra/base"), backed by go-ruby-sinatra
+	cSinatraCtx          *RClass                          // Sinatra::Base::Context, the self a route/filter block runs against
+	cSinatraSettings     *RClass                          // Sinatra::Base::Settings, the handler's `settings` view
+	sinatraDefs          map[*RClass]*sinatraDef          // per-Sinatra::Base-subclass route/filter/handler declarations
+	sinatraCtxCache      map[*sinatra.Context]*SinatraCtx // per-request handler self, shared across before/route/after so @ivars persist
+	sinatraSession       *sinatraSessionState             // per-dispatch cookie session (enable :sessions); the `session` helper returns its live Hash, saved back into a Set-Cookie
+	sinatraDefaultSecret []byte                           // per-VM fallback session-signing key when no session_secret is set (like MRI Sinatra's random default), generated once
+	cRodaBase            *RClass                          // Roda (require "roda"), the routing-tree app superclass, backed by go-ruby-roda
+	cRodaRequest         *RClass                          // Roda::RodaRequest, the self a route/matcher block runs against
+	cRodaResponse        *RClass                          // Roda::RodaResponse, the mutable response a route block writes into
+	rodaRoutes           map[*RClass]*Proc                // per-Roda-subclass top-level route block (route do |r| … end)
+	cAsyncTask           *RClass                          // Async::Task, one node of the structured-concurrency tree, backed by go-ruby-async
+	curAsyncTask         *async.Task                      // the task whose Ruby body is currently running (backs Async::Task.current and the caller passed to blocking async ops)
+	asyncTasks           map[*async.Task]*AsyncTask       // wrapper cache so one *async.Task always maps to one Async::Task object (Ruby #equal? identity), cleared when the root reactor finishes
+	wardenStrategies     map[string]*RClass               // Warden::Strategies.add(name){…} registry: label -> anon subclass of Warden::Strategies::Base
+	omniAuthStrategies   map[string]*RClass               // OmniAuth provider registry: name -> strategy class (from OmniAuth::Strategies.add or provider Class)
+	omniAuthProviderOpts map[string]map[string]any        // OmniAuth per-provider option args (provider :name, key: …), surfaced to a strategy as #options
+	omniAuthConfig       *OmniAuthConfig                  // the shared OmniAuth.config (test_mode / mock_auth / path_prefix)
+	amThunks             map[*RClass][]amThunk            // ActiveModel::Validations DSL registrations per class (require "active_model"); replayed onto a fresh activemodel.Validations at #valid? time so subclasses inherit ancestors' validators
+	fidConfigs           map[*RClass]*fidState            // FriendlyId: per-model slug config, reference slug store and in-process record cache (require "friendly_id"), installed by the friendly_id macro
+	aasmSpecs            map[*RClass][]*aasmMachineSpec   // AASM: per-class state-machine definitions from `aasm do … end` (require "aasm"); replayed to build a bound aasm.Instance per Ruby object, walked over ancestors so a subclass inherits its machines
+	// paperTrail holds the model-versioning state (require "paper_trail"): the
+	// shared version store, per-class has_paper_trail config, request whodunnit
+	// and the injectable clock. Created once by registerPaperTrail.
+	paperTrail                         *paperTrailState
+	ajBases                            map[*RClass]*activejob.Base        // ActiveJob: library job class built per `class … < ActiveJob::Base` subclass (class-dispatch seam)
+	ajJobOf                            map[*RObject]*activejob.Job        // ActiveJob: Ruby job instance -> backing library *Job
+	ajInstOf                           map[*activejob.Job]*RObject        // ActiveJob: library *Job -> Ruby job instance
+	ajTestAdapters                     map[*RClass]*activejob.TestAdapter // ActiveJob: per-class :test adapter
+	ajStack                            []*RObject                         // ActiveJob: instance stack the inline #perform seam reads
+	ajLastResult                       object.Value                       // ActiveJob: last #perform return value (perform_now's result)
+	ajArgs                             *activejob.Arguments               // ActiveJob: module-level ActiveJob::Arguments serializer (GlobalID seam wired in registerActiveJob)
+	cActionMailerBase                  *RClass                            // ActionMailer::Base, the superclass every mailer subclasses (require "action_mailer"), backed by go-ruby-actionmailer
+	cActionMailerDelivery              *RClass                            // ActionMailer::MessageDelivery, the lazy proxy a mailer action returns
+	cActionMailerAttachments           *RClass                            // the internal `attachments` proxy class (Mail::AttachmentsList analogue)
+	amDefs                             map[*RClass]*amDef                 // ActionMailer: per-mailer-class default/delivery/hook declarations, merged down the chain at delivery time
+	amDeliveries                       *object.Array                      // ActionMailer: the shared ActionMailer::Base.deliveries Array the :test delivery method appends to
+	sftpClasses                        *sftpClassSet                      // Net::SFTP: the wrapper classes stamped on returned Attributes / Name / File values (require "net/sftp")
+	amMailerOf                         map[*RObject]*actionmailer.Mailer  // ActionMailer: mailer instance -> library *Mailer of its running action (the mail/attachments/headers seam)
+	amRenderer                         object.Value                       // ActionMailer: the Ruby renderer the RenderBody seam sends #render to (Action View wiring / test stub)
+	amEnqueuer                         object.Value                       // ActionMailer: the Ruby enqueuer the deliver_later seam sends #enqueue to (Active Job wiring / test stub)
+	asConfig                           *activestorage.Config              // ActiveStorage process config (require "active_storage"); nil until first use, then a deterministic in-process config (MemStore + DiskService temp dir)
+	cACChannelBase                     *RClass                            // ActionCable::Channel::Base, the superclass a subscription's channel subclass extends, backed by go-ruby-actioncable
+	acServer                           object.Value                       // memoized ActionCable.server singleton (an ActionCable::Server over an in-process async adapter)
+	railtieSeams                       map[any]*railtieSeam               // per-railtie/engine/app deferred initializer blocks, keyed by the library ctx object; run inline by the RunInitializer seam during Application#initialize!
+	railsApp                           *RailsAppVal                       // the Ruby Application registered via Rails.application= (the rails meta-gem's top-level app); nil before boot
+	deviseConfig                       *DeviseConfig                      // the shared Devise.config the DatabaseAuthenticatable Warden strategy authenticates against
+	cHanamiRouter                      *RClass                            // Hanami::Router (require "hanami/router"), backed by go-ruby-hanami; wraps a *hanami.Router
+	cHanamiAction                      *RClass                            // Hanami::Action (require "hanami/action"), the action-lifecycle superclass a user subclasses
+	cHanamiRequest                     *RClass                            // Hanami::Action::Request, the request handed to a Hanami action's #handle
+	cHanamiResponse                    *RClass                            // Hanami::Action::Response, the mutable response a Hanami action's #handle writes into
+	cHanamiFlash                       *RClass                            // Hanami::Action::Flash, the two-generation flash store on the request/response
+	hanamiActionDefs                   map[*RClass]*hanamiActionDef       // per-Hanami::Action-subclass before/after/handle_exception/accept/config declarations
+	cACRouteSet                        *RClass                            // ActionDispatch::Routing::RouteSet (require "action_dispatch"), backed by go-ruby-actionpack/routing
+	cACMapper                          *RClass                            // ActionDispatch::Routing::Mapper, the self the routes DSL (draw) runs against
+	cACRequest                         *RClass                            // ActionDispatch::Request, over a Rack env
+	cACResponse                        *RClass                            // ActionDispatch::Response, the mutable Rack response
+	cACParameters                      *RClass                            // ActionController::Parameters (strong parameters)
+	cACControllerBase                  *RClass                            // ActionController::Base (require "action_controller"), the controller superclass a user subclasses
+	acControllerDefs                   map[*RClass]*acControllerDef       // per-ActionController::Base-subclass before/after/around/rescue_from/view-context declarations
+	cMinitestSpec                      *RClass                            // Minitest::Spec, the spec-DSL subclass of Minitest::Test
+	minitestRunnables                  []*RClass                          // Minitest::Test subclasses registered via the inherited hook, in definition order (the autorun run set)
+	minitestCurInstance                object.Value                       // the test instance currently running (backs bare must_*/wont_* and _)
+	minitestAutorunDone                bool                               // guards the require "minitest/autorun" at_exit hook against a double run
+	factoryBotReg                      *factorybot.Registry               // the per-VM factory_bot registry (require "factory_bot"): FactoryBot.define/build/create map onto it; the Build/Persist/Block seams are wired to this VM's object model
+	cOpenSSLDigest                     *RClass
+	cArray, cHash, cRange              *RClass
+	cProc                              *RClass
+	cMethod                            *RClass
+	cEnumerator                        *RClass
+	cYielder                           *RClass
+	cEncoding                          *RClass
+	encodings                          map[string]*encodingObj
+	cLazy                              *RClass
+	lastMatch                          object.Value            // $~: last regexp MatchData (or nil)
+	globals                            map[string]object.Value // user-assigned $globals
+	cTrueClass, cFalseClass, cNilClass *RClass
+	cRegexp, cMatchData                *RClass
+	cException                         *RClass
+	curExc                             object.Value // most recently rescued exception (for bare `raise`)
 
 	loaded        map[string]bool   // require/require_relative: features loaded once
 	featureHooks  map[string]func() // built-in feature -> body run once on its first require (e.g. shellwords)
@@ -339,6 +355,7 @@ type VM struct {
 	scriptName    string            // $0 / $PROGRAM_NAME: the running program's name
 	defaultRandom *RandomObj        // process-wide generator for Kernel#rand / #srand
 	fakerInst     *fakerState       // Faker instance + its seed source (Faker::Config.random)
+	webmockActive bool              // true once require "webmock" ran: gates the Net::HTTP interception hook
 	currentFiber  *Fiber            // the fiber currently running (nil at the root), for Fiber.yield
 
 	// Concurrency: an emulated GVL (one Ruby thread executes VM code at a time).
@@ -411,11 +428,26 @@ type VM struct {
 	// input/output IO seams, the Ruby completion proc, and the editing mode. It
 	// is created once by registerReline and mutated by the module's setters.
 	relineState *relineState
-	// paperTrail holds the model-versioning state (require "paper_trail"): the
-	// shared Version store + request-context (whodunnit/enabled) + clock seams,
-	// the per-model Tracker cache, and the per-instance snapshot/item-id state.
-	// Created once by registerPaperTrail.
-	paperTrail *paperTrailState
+	// simpleCov holds the mutable SimpleCov module state (require "simplecov"):
+	// the go-ruby-simplecov result-engine configuration (filters, groups,
+	// thresholds), the accumulated per-file raw line-coverage map fed through the
+	// deferred VM line-coverage seam (SimpleCov.add_coverage), and the active
+	// formatter. It is created once by registerSimpleCov and reset by
+	// SimpleCov.start.
+	simpleCov *simpleCovState
+
+	// vcrConfig is the VCR module's configuration + cassette store (require "vcr"),
+	// backed by go-ruby-vcr: it holds cassette_library_dir, default_record_mode, the
+	// filesystem seam (OSFS by default) and the recorded_at clock. Created by
+	// registerVCR. vcrCassette is the cassette of the currently-active
+	// VCR.use_cassette block (nil outside one); while it is non-nil, bound Net::HTTP
+	// requests route through it (replay a recorded interaction or record via the
+	// real transport) instead of dialing directly. vcrTestDoer, when non-nil,
+	// substitutes the record doer with a canned one so the record/replay state
+	// machine is drivable in-process with no network. All three are GVL-guarded.
+	vcrConfig   *vcr.VCR
+	vcrCassette *vcr.Cassette
+	vcrTestDoer func(vcr.Request) (vcr.Response, error)
 }
 
 // objectID returns the receiver's object_id / __id__. Immediate values get the
@@ -622,6 +654,11 @@ func (vm *VM) putEnv(e *Env) {
 // New returns a VM writing program output to out.
 func New(out io.Writer) *VM {
 	vm := &VM{out: out, errOut: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
+	// The controllable clock reads the real wall clock through nowUnix (the same
+	// whole-second determinism seam Time.now/Date.today already honour) until a
+	// require "timecop" program freezes/travels/scales it. Unmocked, Current()
+	// just returns nowUnix's instant, so non-timecop programs see real time.
+	vm.clock = timecop.NewWith(func() stdtime.Time { return stdtime.Unix(nowUnix(), 0).UTC() })
 	// The main thread holds the GVL for the VM's lifetime, releasing it only at
 	// blocking points so spawned Ruby threads can run (see thread.go).
 	vm.gvl.Lock()
