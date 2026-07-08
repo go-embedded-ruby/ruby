@@ -236,6 +236,8 @@ github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df h1:sHl
 github.com/go-ruby-cancancan/cancancan v0.0.0-20260706115551-06675ef421df/go.mod h1:WvnY0uliy6W7kQ0Mpmjo3TbRGNQUwWwMufvdyT2V8wY=
 github.com/go-ruby-capistrano/capistrano v0.0.0-20260707161800-c2d92ee7442d h1:5cUtjOtNbhL1VgwaXfOeUMMitg9nMXBU3KD4a9iGhAk=
 github.com/go-ruby-capistrano/capistrano v0.0.0-20260707161800-c2d92ee7442d/go.mod h1:4sa+V/fEhCBeFdyVoxARfh+fe0klFk5pEMt2ACoXY4I=
+github.com/go-ruby-capybara/capybara v0.0.0-20260707193057-e0671db74ed1 h1:BydTiVdLURkDSRZWatazLoCEIXNJk3woc6vV8j1wx/U=
+github.com/go-ruby-capybara/capybara v0.0.0-20260707193057-e0671db74ed1/go.mod h1:0xXnDp1vPs7AfIS+lKrc2birwVjBx3SC1m4yg6gFbUE=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c h1:6YAo3FKzJJbQdLbvxHy7I4ur5+R+pLLMWwKXXLnWcQU=
 github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c/go.mod h1:TAIxiFMAj68dWClzEmDY1vCSNFiPfupD3HRADRXrkZw=
 github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555 h1:84rvS0zIV+XzFZ/JmDdu1VEFLY0burLn8q9ISdJJ7jI=
@@ -274,6 +276,8 @@ github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a h1:aFqb/Uizc/H0U
 github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a/go.mod h1:FzVnxMxHUDzfRgwum+xq0VAi4DofeSxtpW2dng1MtpI=
 github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f h1:ceGclILbSf/1Fnx53d5IGDoUtzZRD7mXPwHHWyWQ0B0=
 github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f/go.mod h1:oelovkSKi3ofbasu8dxitwGA53oPgoop1Ow04s8T5FA=
+github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5 h1:yc2jRZEV+kKRDrwOFyRWfjqP+SAkapwc5l/aS2MPcaQ=
+github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5/go.mod h1:XLVBvQlRhuvFMPbCgI97ifRnnLBbUal9vnpDsAXbRPY=
 github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352 h1:cRiGBGZWF8Pc0KxTqNr2wy0Y6WWPzeq2GsUuTroXDfE=
 github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352/go.mod h1:7h2mxQ3mnWz9bg39nSDr0h/LxqnEnbrJxmNRDbu3zs8=
 github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46 h1:S5pZdGwolAm7NHMQrwnN6BatfC8jWCSqzlI5OSnbIpc=
@@ -450,6 +454,8 @@ github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818 h1:z
 github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818/go.mod h1:gJ+9ba+y8+DKenwjZKbTLVSuX6Xp7V5R7pZ6NwtD6x0=
 github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069 h1:cIMM8Qn+qKX6N6lNku5cl5LT61qGHlTKVuMJ4LEOP50=
 github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069/go.mod h1:ystbaHAx7g2zTN0DfeQe5mRt6Yanqr6ddThtIDhSlik=
+github.com/go-ruby-simplecov/simplecov v0.0.0-20260707192101-68bcf21e3080 h1:2DuwPP73r0ZstQ0EN0q6RtMs+vBebg3uWkDV1tNYwOo=
+github.com/go-ruby-simplecov/simplecov v0.0.0-20260707192101-68bcf21e3080/go.mod h1:cBtT0grdK86g1Rqbj9CJw/YPKg9teGlt6oH5J1axyF4=
 github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c h1:zq73EWvSARNK2T1R0WC3jl+YH7g6TutOkWd1btI8fIU=
 github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c/go.mod h1:nuEOODfga3YvXINu2Ckvp/dNTTZlx+LUyjpWI+9TMck=
 github.com/go-ruby-slim/slim v0.0.0-20260701141524-ade9ddf6aec4 h1:FYfHAxVaFU2q7BQ8wsKesUxO2uAQ2VK/TdTVut1/wfg=
@@ -462,6 +468,8 @@ github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8 h1:WxInOHC
 github.com/go-ruby-strscan/strscan v0.0.0-20260701044334-d0cc926643a8/go.mod h1:WNa2NtlvT8gaOrAw6m3VCb+8WgBWdOLLEWbKiugZ2wY=
 github.com/go-ruby-thor/thor v0.0.0-20260702145030-faa03e6e0228 h1:4FwgKxpaCYw+pv/8oKAlh7/D0OvV3GkxbKbqeH5ZJKg=
 github.com/go-ruby-thor/thor v0.0.0-20260702145030-faa03e6e0228/go.mod h1:uDsL93m+Z6DbNVThgn0DD5VazEMVwpe5OJZuwyIhi9A=
+github.com/go-ruby-timecop/timecop v0.0.0-20260707191347-9beab96d330c h1:508YRxuPttQC0E45OxE8qH9nbN3RxkMMLS0H6UW3wj8=
+github.com/go-ruby-timecop/timecop v0.0.0-20260707191347-9beab96d330c/go.mod h1:HEd4hTQ+8R4+ndhNdpjeO1c0KLZZz2zXCnpWLg5m3I0=
 github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785 h1:NHdF22sPi41R7BYg2SHtIllW5yybLu9WpqinCUSVaQA=
 github.com/go-ruby-toml/toml v0.0.0-20260630152206-f9a858ddb785/go.mod h1:Pt2V2/VchBYXJPEDkPxo5DZxyQivrLmXmovgbyDvU+U=
 github.com/go-ruby-tsort/tsort v0.0.0-20260629151245-27c44f985c8b h1:qTw5CoNYJccf05o0QlyoYwaOik4RIrUI76HAR7RGqRw=
@@ -474,10 +482,14 @@ github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984
 github.com/go-ruby-unicode-normalize/unicode-normalize v0.0.0-20260629152419-984d3fbcfb7f/go.mod h1:mKlLb/MTNhSHSUhcAvb6hi3ZCR5kCgVdDaInEyI3Wr8=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb h1:CyoFEEsMPa/TX4EJHOPsXud3nccESDhaW6fTQsidIKI=
 github.com/go-ruby-uri/uri v0.0.0-20260629113958-59633d1b0deb/go.mod h1:/7+NF+4kESzcNHjRtNe/lAfhgHpgElX4C+VNo0xsb6Y=
+github.com/go-ruby-vcr/vcr v0.0.0-20260707192746-30292e709ff4 h1:mZhv7pLUQbEDqHHD86CzE8sioedN4q8AgNK2odw6HL4=
+github.com/go-ruby-vcr/vcr v0.0.0-20260707192746-30292e709ff4/go.mod h1:YK1MSInsLFhUeYgeK9MJvzrmQmSU5wgmNHPX79mMFiA=
 github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef h1:JLPi8PmkOV+Yta+zBdaPYVc5wJFs3GEmbh/YiXSd6L8=
 github.com/go-ruby-warden/warden v0.0.0-20260706120446-d887742539ef/go.mod h1:oI3L9dywsrSXJqLDuJGIYuHUHRCxUS7BU8PBZGXpx4A=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b h1:ZwN0q9xq9HUGCskWGz8rmL+v6MaHy+AM99oictlPlBs=
 github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b/go.mod h1:tLv8PWrPxrOQrJWMFTfRi6wfZpSjZtmfxHKgGwUriR8=
+github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9 h1:hct5CHw1Ne9RXFvb/4+jzgl+yQACQ0wxooNJaD5YsCQ=
+github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9/go.mod h1:yUFQOsGseFaPfF9tjFaRXVAbdDL6FPuXhVmF+GLamcc=
 github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b h1:T7H6p2VhpU/05o/XSlsCT3YfMznMhcuShu8iDyDVeqU=
 github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b/go.mod h1:0DF9Jl9o+cvEvPCzCJ95nHIlF7qz8yzuQIyfMm8FUlM=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176 h1:iHTCF/Eu0/lwOEank8pLKqoW5j9MI2ERXErrvqsZZ+4=

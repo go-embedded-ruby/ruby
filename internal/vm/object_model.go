@@ -706,6 +706,16 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A Jbuilder builder reports Jbuilder so its method_missing DSL and bang
 		// methods (defined on that class) dispatch.
 		return vm.consts["Jbuilder"].(*RClass)
+	case *FactoryBotProxy:
+		// The self a factory/trait/transient/nested-factory block runs against; its
+		// method_missing + DSL methods live on FactoryBot::DefinitionProxy.
+		return vm.consts["FactoryBot::DefinitionProxy"].(*RClass)
+	case *FactoryBotTopProxy:
+		// The self a FactoryBot.define block runs against (factory/sequence).
+		return vm.consts["FactoryBot::Syntax::Default::DSL"].(*RClass)
+	case *FactoryBotEvaluator:
+		// The self a dynamic attribute block / callback reads siblings through.
+		return vm.consts["FactoryBot::Evaluator"].(*RClass)
 	case *DryType:
 		return vm.consts["Dry::Types::Type"].(*RClass)
 	case *DryResult:
@@ -824,6 +834,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *BoltBucket:
 		return x.cls
 	case *BoltCursor:
+		return x.cls
+	case *SimpleCovResult:
+		return x.cls
+	case *SimpleCovSourceFile:
 		return x.cls
 	case *SAMLSettings:
 		return x.cls
@@ -1412,6 +1426,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["Faraday::Utils::ParamsHash"].(*RClass)
 	case *FaradayHeaders:
 		return vm.consts["Faraday::Utils::Headers"].(*RClass)
+	case *CapybaraSession:
+		// A Capybara::Session wrapper reports the class stamped on it at construction.
+		return x.cls
+	case *CapybaraNode:
+		return x.cls
 	case *PumaServer:
 		return vm.consts["Puma::Server"].(*RClass)
 	case *PumaThreadPool:
@@ -1451,6 +1470,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *ACRequest:
 		return x.cls
 	case *ACResponse:
+		return x.cls
+	case *WebMockStub:
 		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
