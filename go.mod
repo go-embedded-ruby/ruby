@@ -12,6 +12,7 @@ require (
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
 	github.com/go-images/images v0.0.0-20260702213524-ea366b42f216
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
+	github.com/go-ruby-aasm/aasm v0.0.0-20260707193337-00a96ee353d7
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783
@@ -62,6 +63,7 @@ require (
 	github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
 	github.com/go-ruby-format/format v0.0.0-20260703115518-8adcf1b4af5f
+	github.com/go-ruby-friendly-id/friendly-id v0.0.0-20260707195609-ff85fef61060
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
 	github.com/go-ruby-grape/grape v0.0.0-20260702151528-455377c8c7c3
 	github.com/go-ruby-graphql/graphql v0.0.0-20260704114306-47444c09995e
@@ -79,6 +81,7 @@ require (
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2
 	github.com/go-ruby-jwt/jwt v0.0.0-20260705184902-40cd404d3c65
 	github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5
+	github.com/go-ruby-kaminari/kaminari v0.0.0-20260707193800-fc9fecf9afe6
 	github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8
 	github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
@@ -108,6 +111,8 @@ require (
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
+	github.com/go-ruby-pagy/pagy v0.0.0-20260707193354-a84fe1d16a86
+	github.com/go-ruby-paper-trail/paper-trail v0.0.0-20260707193452-4e10f2b4d0b3
 	github.com/go-ruby-parquet/parquet v0.0.0-20260704170648-c7f0507946f7
 	github.com/go-ruby-parser/parser v0.0.0-20260703103305-5ae12948602f
 	github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b
@@ -125,6 +130,7 @@ require (
 	github.com/go-ruby-rails/rails v0.0.0-20260706183557-5ddb406695b0
 	github.com/go-ruby-railties/railties v0.0.0-20260706120201-300b4fe0f2df
 	github.com/go-ruby-rake/rake v0.0.0-20260630123309-28092b465e07
+	github.com/go-ruby-ransack/ransack v0.0.0-20260707193940-08f791c256b0
 	github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e
 	github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92
 	github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08
@@ -133,6 +139,7 @@ require (
 	github.com/go-ruby-resque/resque v0.0.0-20260706120225-d8a1746bdaca
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa
+	github.com/go-ruby-rolify/rolify v0.0.0-20260707193227-5d9011931b4b
 	github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
 	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75
@@ -145,6 +152,7 @@ require (
 	github.com/go-ruby-sequel/sequel v0.0.0-20260702151352-66413b601977
 	github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
+	github.com/go-ruby-shrine/shrine v0.0.0-20260707193645-b6db612b0012
 	github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069
 	github.com/go-ruby-simplecov/simplecov v0.0.0-20260707192101-68bcf21e3080
 	github.com/go-ruby-sinatra/sinatra v0.0.0-20260630133746-2c894e9d172c
@@ -318,10 +326,10 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/telemetry v0.0.0-20260610154732-fb80ec83bdd9 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.46.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/grpc v1.82.0 // indirect

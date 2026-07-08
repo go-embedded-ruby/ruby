@@ -640,6 +640,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *RackResponse:
 		return x.cls
+	case *friendlyIDScope:
+		// The scope object Model.friendly returns; its #find lives on
+		// FriendlyId::FinderMethods (stamped on the scope at construction).
+		return x.cls
 	case *SinatraCtx:
 		// The self a Sinatra route/filter block runs against.
 		return x.cls
@@ -688,6 +692,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// The writer CSV.generate yields to its block: it reports CSV so its << /
 		// push methods (defined on the CSV class) dispatch.
 		return vm.cCSV
+	case *rolifyRole:
+		// A rolify role wrapper (user.roles / resource.applied_roles) reports the
+		// Rolify::Role class stamped on it, whose name/resource_type/resource_id/id
+		// methods read the wrapped role.
+		return x.cls
 	case *Logger:
 		// A Logger wrapper reports Logger; its instance methods (add/info/<</…)
 		// live on that class.
@@ -1039,6 +1048,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *RedisBatch:
 		return x.cls
+	case *PTVersion:
+		return vm.consts["PaperTrail::Version"].(*RClass)
+	case *PTProxy:
+		return vm.consts["PaperTrail::RecordTrail"].(*RClass)
+	case *PTRequest:
+		return vm.consts["PaperTrail::Request"].(*RClass)
 	case *POP3Obj:
 		return x.cls
 	case *POPMailObj:
@@ -1101,6 +1116,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["ActiveRecord::Record"].(*RClass)
 	case *ActiveRecordErrors:
 		return vm.consts["ActiveRecord::Errors"].(*RClass)
+	case *KaminariArray:
+		return vm.consts["Kaminari::PaginatableArray"].(*RClass)
+	case *KaminariRelation:
+		return vm.consts["Kaminari::PaginatableRelation"].(*RClass)
+	case *RansackSearch:
+		return vm.consts["Ransack::Search"].(*RClass)
+	case *RansackSort:
+		return vm.consts["Ransack::Sort"].(*RClass)
 	case *ActiveRecordSchemaDSL:
 		return vm.consts["ActiveRecord::Schema::Definition"].(*RClass)
 	case *ActiveRecordTableDSL:
@@ -1199,6 +1222,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["TZInfo::TimezoneOffset"].(*RClass)
 	case *Country:
 		return vm.consts["TZInfo::Country"].(*RClass)
+	case *Pagy:
+		return vm.consts["Pagy"].(*RClass)
 	case *Money:
 		return vm.consts["Money"].(*RClass)
 	case *Currency:
@@ -1494,6 +1519,18 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cFalseClass
 	case object.Nil:
 		return vm.cNilClass
+	case *ShrineStorage:
+		// A Shrine::Storage::Memory / ::FileSystem backend reports the concrete
+		// class stamped on it so its upload/open/exists?/delete/url dispatch.
+		return x.cls
+	case *ShrineUploader:
+		// A Shrine.new(:key) uploader reports Shrine so its #upload / #storage_key
+		// (defined on the Shrine class) dispatch.
+		return x.cls
+	case *ShrineUploadedFile:
+		return x.cls
+	case *ShrineAttacher:
+		return x.cls
 	case *object.Main:
 		return vm.cObject
 	}
