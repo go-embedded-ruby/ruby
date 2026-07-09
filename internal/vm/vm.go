@@ -28,6 +28,7 @@ import (
 	capistrano "github.com/go-ruby-capistrano/capistrano"
 	facter "github.com/go-ruby-facter/facter"
 	factorybot "github.com/go-ruby-factory-bot/factory-bot"
+	fastgettext "github.com/go-ruby-fast-gettext/fast-gettext"
 	i18n "github.com/go-ruby-i18n/i18n"
 	money "github.com/go-ruby-money/money"
 	rake "github.com/go-ruby-rake/rake"
@@ -334,6 +335,7 @@ type VM struct {
 	minitestAutorunDone                bool                               // guards the require "minitest/autorun" at_exit hook against a double run
 	factoryBotReg                      *factorybot.Registry               // the per-VM factory_bot registry (require "factory_bot"): FactoryBot.define/build/create map onto it; the Build/Persist/Block seams are wired to this VM's object model
 	facterFacter                       *facter.Facter                     // the per-VM Facter adapter (require "facter"), from go-ruby-facter over go-facter: Facter.value/[]/fact/add/to_hash read it; custom facts (Facter.add … setcode) never leak across interpreters
+	fastGettext                        *fastgettext.Instance              // the per-VM FastGettext instance (require "fast_gettext"), from go-ruby-fast-gettext: text domains, current locale/text_domain and the translation cache never leak across interpreters
 	cOpenSSLDigest                     *RClass
 	cArray, cHash, cRange              *RClass
 	cProc                              *RClass

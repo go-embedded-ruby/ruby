@@ -36,8 +36,9 @@ jobs:
           COVERPKG=$(go list ./internal/... | paste -sd, -)
           # -race roughly doubles wall-clock, and the windows runner is the slowest
           # of the three OS lanes; the growing vm suite tips it past go test's 10m
-          # default. Give the same headroom the emulated arch lanes get (-timeout=30m).
-          go test -timeout=30m -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
+          # default. macOS/ubuntu finish ~20m; windows runs ~2x so needs more room.
+          # Bumped 30m->50m as the vm binding set keeps growing (Puppet ecosystem wave).
+          go test -timeout=50m -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
           echo "--- functions below 100% (empty = all covered) ---"
           go tool cover -func=cover.out | grep -vE '100\.0%$' || true
           echo "---------------------------------------------------"

@@ -28,6 +28,7 @@ require (
 	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
 	github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda
 	github.com/go-ruby-async/async v0.0.0-20260706115507-51a981d1e85d
+	github.com/go-ruby-augeas/augeas v0.0.0-20260709164107-328ac905530f
 	github.com/go-ruby-base64/base64 v0.0.0-20260703164120-2194be98969e
 	github.com/go-ruby-bbolt/bbolt v0.0.0-20260704121138-28ee121195c0
 	github.com/go-ruby-bcrypt/bcrypt v0.0.0-20260701122042-7e14b6a42363
@@ -62,6 +63,7 @@ require (
 	github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46
+	github.com/go-ruby-fast-gettext/fast-gettext v0.0.0-20260709172829-8beb2fbc96a8
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
 	github.com/go-ruby-format/format v0.0.0-20260703115518-8adcf1b4af5f
 	github.com/go-ruby-friendly-id/friendly-id v0.0.0-20260707195609-ff85fef61060
@@ -73,6 +75,7 @@ require (
 	github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
 	github.com/go-ruby-hiera/hiera v0.0.0-20260709142258-7d149ec4a67f
+	github.com/go-ruby-hocon/hocon v0.0.0-20260709172840-f8b55588f078
 	github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3
 	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82
 	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
@@ -127,6 +130,7 @@ require (
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
 	github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779
 	github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3
+	github.com/go-ruby-puppet-resource-api/puppet-resource-api v0.0.0-20260709172545-bd4527649544
 	github.com/go-ruby-puppet/puppet v0.0.0-20260709143301-875cb93f0770
 	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
@@ -152,6 +156,7 @@ require (
 	github.com/go-ruby-saml/saml v0.0.0-20260704115648-11caa3fa0e1f
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
+	github.com/go-ruby-semantic-puppet/semantic-puppet v0.0.0-20260709173436-e205318864ed
 	github.com/go-ruby-sequel/sequel v0.0.0-20260702151352-66413b601977
 	github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
@@ -230,17 +235,20 @@ require (
 	github.com/dolthub/vitess v0.0.0-20250512224608-8fb9c6ea092c // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
+	github.com/go-augeas/augeas v0.0.0-20260709163741-0ed2afd8169a // indirect
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
 	github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 // indirect
 	github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9 // indirect
+	github.com/go-hocon/hocon v0.0.0-20260709172518-20248359492f // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260708073959-a9485a7b2835 // indirect
+	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
