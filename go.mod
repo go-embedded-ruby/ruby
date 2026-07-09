@@ -127,6 +127,7 @@ require (
 	github.com/go-ruby-public-suffix/public-suffix v0.0.0-20260630151503-f308d4002444
 	github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779
 	github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3
+	github.com/go-ruby-puppet/puppet v0.0.0-20260709143301-875cb93f0770
 	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
 	github.com/go-ruby-rails/rails v0.0.0-20260706183557-5ddb406695b0
@@ -237,7 +238,9 @@ require (
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
+	github.com/go-puppet/puppet v0.0.0-20260708073959-a9485a7b2835 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
