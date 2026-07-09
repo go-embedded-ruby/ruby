@@ -170,6 +170,8 @@ github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 h1:1PUT8X4gKZsXEV
 github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0/go.mod h1:ghuoOHWXdq5dE3GLPDiz3Uy0ORrvK+1hB7QC997ez2U=
 github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb h1:kDAxBx5Tvd3PfDIqCgV3J4cpXejsJOOsiKGYQiDTJB4=
 github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb/go.mod h1:KcAewzZmZpMxeylWZGp0/R9p03sInnPQW8B4ttL6WCc=
+github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9 h1:SydVW8z9lhzfLFvLTsaUPoNmStmdp/09DmI7Vwxz9QE=
+github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9/go.mod h1:Xsrq+9d6EzW6Ju6DyJpIDDj4CYGka5ZAOWlBbQOOE5k=
 github.com/go-images/images v0.0.0-20260702213524-ea366b42f216 h1:JZc6nR7Zd9lidDSwVgt8NuzFt7M8lxdHsUIh1QYDJdA=
 github.com/go-images/images v0.0.0-20260702213524-ea366b42f216/go.mod h1:nWwQCf77xG1GhaSD3rvlp7FNjjDhz47vrztyeBvIerk=
 github.com/go-kit/kit v0.8.0/go.mod h1:xBxKIO96dXMWWy0MnWVtmwkA9/13aqxPnvrjFYMA2as=
@@ -308,6 +310,8 @@ github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af h1:e5bwEwQJe
 github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af/go.mod h1:+k4LCo1yeNUanlPmnfZP+rXcxaRask4/QjB/64ze4PQ=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b h1:hi8tu1lr/1cOkFMdaONWyuNGVmE9GuN8tmpUN6VxgLI=
 github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b/go.mod h1:zPgLGk8wYhXACwDsJqxkdK09WgWbJwalPxiw6qHMGQg=
+github.com/go-ruby-hiera/hiera v0.0.0-20260709142258-7d149ec4a67f h1:mXtVmb2+CkIEArnPaBzE28BE23cO/PGHQx2F6ELCTZw=
+github.com/go-ruby-hiera/hiera v0.0.0-20260709142258-7d149ec4a67f/go.mod h1:xBNNT8YgaMf6fd3iiJpjJMrMZcCm6sRnu4fPHUVSun8=
 github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3 h1:U8uKeXh3LLrIYhd8ITjmFZ51M5DoUoSz5Byv1ZGWRpI=
 github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3/go.mod h1:i+ODhr0dqRa5IzaeLSVW52G0Fd2d7fVIQe5pKO2luDA=
 github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82 h1:FPHrHVrknItX1ipCAJ0Rv39Q7O9zEtGlaRq/Sb99LyM=
@@ -514,8 +518,8 @@ github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b h1:T7H6p2V
 github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b/go.mod h1:0DF9Jl9o+cvEvPCzCJ95nHIlF7qz8yzuQIyfMm8FUlM=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176 h1:iHTCF/Eu0/lwOEank8pLKqoW5j9MI2ERXErrvqsZZ+4=
 github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176/go.mod h1:1C3Bx0pQIsqLqC2SnqV7pJnGuLJsgYmar2NrD+CmVXw=
-github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd h1:4HGjgCdTIuIEM+iZXJ9hJJzt0IBMtxPqdJq72mr0Y64=
-github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd/go.mod h1:HtbQgnZpSTJBAhPg1jOKgHycZl3tXgf9ZdOu4dnHWjQ=
+github.com/go-ruby-yaml/yaml v0.0.0-20260706120500-56d458798003 h1:SJ9mY8e11Lv0MbTh9CSxYMhY4AyaDHRmc3mYE+WQOQM=
+github.com/go-ruby-yaml/yaml v0.0.0-20260706120500-56d458798003/go.mod h1:HtbQgnZpSTJBAhPg1jOKgHycZl3tXgf9ZdOu4dnHWjQ=
 github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c h1:qrS/rTmpYxW1eXGgv1OcBHL43iNAB8B2EkbvlTyzK5Y=
 github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c/go.mod h1:e282nPoQTTtYK2TUfrIXVe5AZ80h0lgzYvx4xpL/aDA=
 github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67 h1:otTivF26XRtz1gM268+WgbB/3cPCpcOJvMJNnbbIDx0=

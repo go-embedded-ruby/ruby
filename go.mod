@@ -72,6 +72,7 @@ require (
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
 	github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
+	github.com/go-ruby-hiera/hiera v0.0.0-20260709142258-7d149ec4a67f
 	github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3
 	github.com/go-ruby-httparty/httparty v0.0.0-20260706115822-e22a29858d82
 	github.com/go-ruby-i18n/i18n v0.0.0-20260630142747-6915e4b870f5
@@ -175,7 +176,7 @@ require (
 	github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9
 	github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
-	github.com/go-ruby-yaml/yaml v0.0.0-20260629093916-8035038027bd
+	github.com/go-ruby-yaml/yaml v0.0.0-20260706120500-56d458798003
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
 	github.com/go-webauthn/webauthn v0.17.4
@@ -232,6 +233,7 @@ require (
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
 	github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 // indirect
+	github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
