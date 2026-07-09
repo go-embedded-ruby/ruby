@@ -725,6 +725,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *FactoryBotEvaluator:
 		// The self a dynamic attribute block / callback reads siblings through.
 		return vm.consts["FactoryBot::Evaluator"].(*RClass)
+	case *FacterFact:
+		// The handle Facter[]/Facter.fact returns; #value/#name live on it.
+		return vm.consts["Facter::Util::Fact"].(*RClass)
+	case *FacterResolution:
+		// The self a Facter.add block configures (setcode/confine/has_weight).
+		return vm.consts["Facter::Util::Resolution"].(*RClass)
 	case *DryType:
 		return vm.consts["Dry::Types::Type"].(*RClass)
 	case *DryResult:

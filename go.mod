@@ -58,6 +58,7 @@ require (
 	github.com/go-ruby-erubi/erubi v0.0.0-20260706150033-cfeeadde9120
 	github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a
 	github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f
+	github.com/go-ruby-facter/facter v0.0.0-20260709085649-34872965bc7b
 	github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5
 	github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352
 	github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46
@@ -230,6 +231,7 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
+	github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
