@@ -76,6 +76,7 @@ var providedFeatures = map[string]bool{
 	"sidekiq": true, "resque": true,
 	"rspec": true, "rspec/expectations": true, "rspec/matchers": true,
 	"factory_bot": true,
+	"facter":      true,
 	"rubocop":     true,
 	"simplecov":   true,
 	"grape":       true,

@@ -166,6 +166,8 @@ github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381 h1:lefnD/dZIN
 github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381/go.mod h1:U8jOcQwbbSwQ3E5geccvv0lkwNv89piHYG/Jj1w18JQ=
 github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0 h1:T13Rk67KSsuSbv0n15AbxSYeSRCrzcTRB0xPCdF6pYo=
 github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0/go.mod h1:Cx3vT/o0Mo7W3klXPmdwjKWti2XLOqoLjcimGiChI7s=
+github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 h1:1PUT8X4gKZsXEVdoMS//ceD4X2jiK9fEJinyU2iuIpI=
+github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0/go.mod h1:ghuoOHWXdq5dE3GLPDiz3Uy0ORrvK+1hB7QC997ez2U=
 github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb h1:kDAxBx5Tvd3PfDIqCgV3J4cpXejsJOOsiKGYQiDTJB4=
 github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb/go.mod h1:KcAewzZmZpMxeylWZGp0/R9p03sInnPQW8B4ttL6WCc=
 github.com/go-images/images v0.0.0-20260702213524-ea366b42f216 h1:JZc6nR7Zd9lidDSwVgt8NuzFt7M8lxdHsUIh1QYDJdA=
@@ -278,6 +280,8 @@ github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a h1:aFqb/Uizc/H0U
 github.com/go-ruby-etcd/etcd v0.0.0-20260704112801-4417ab26c89a/go.mod h1:FzVnxMxHUDzfRgwum+xq0VAi4DofeSxtpW2dng1MtpI=
 github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f h1:ceGclILbSf/1Fnx53d5IGDoUtzZRD7mXPwHHWyWQ0B0=
 github.com/go-ruby-excon/excon v0.0.0-20260706115718-5ca851d0373f/go.mod h1:oelovkSKi3ofbasu8dxitwGA53oPgoop1Ow04s8T5FA=
+github.com/go-ruby-facter/facter v0.0.0-20260709085649-34872965bc7b h1:p7RrhIh31Jo8dcxjgli8SyjNew8jRGvaGQ10Zju9Ad0=
+github.com/go-ruby-facter/facter v0.0.0-20260709085649-34872965bc7b/go.mod h1:EZ+4QFJXTbcvtTZfoZSa035tecxejnCyFulK8qA9Kto=
 github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5 h1:yc2jRZEV+kKRDrwOFyRWfjqP+SAkapwc5l/aS2MPcaQ=
 github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260707192033-cdb9f3e9f9a5/go.mod h1:XLVBvQlRhuvFMPbCgI97ifRnnLBbUal9vnpDsAXbRPY=
 github.com/go-ruby-faker/faker v0.0.0-20260630192057-0a0efdf75352 h1:cRiGBGZWF8Pc0KxTqNr2wy0Y6WWPzeq2GsUuTroXDfE=
