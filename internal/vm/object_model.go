@@ -731,6 +731,9 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *FacterResolution:
 		// The self a Facter.add block configures (setcode/confine/has_weight).
 		return vm.consts["Facter::Util::Resolution"].(*RClass)
+	case *HieraObj:
+		// A Hiera instance (require "hiera"); #lookup lives on the Hiera class.
+		return vm.consts["Hiera"].(*RClass)
 	case *DryType:
 		return vm.consts["Dry::Types::Type"].(*RClass)
 	case *DryResult:
