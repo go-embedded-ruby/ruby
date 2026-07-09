@@ -740,6 +740,22 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *PuppetResource:
 		// One catalog resource; Puppet::Resource methods.
 		return vm.consts["Puppet::Resource"].(*RClass)
+	case *PraType:
+		// A registered resource type (require "puppet/resource_api");
+		// #validate/#attributes/#namevars/#apply live on it.
+		return vm.consts["Puppet::ResourceApi::TypeDefinition"].(*RClass)
+	case *SemVerObj:
+		// A SemanticPuppet::Version (require "semantic_puppet").
+		return vm.consts["SemanticPuppet::Version"].(*RClass)
+	case *SemVerRange:
+		// A SemanticPuppet::VersionRange (require "semantic_puppet").
+		return vm.consts["SemanticPuppet::VersionRange"].(*RClass)
+	case *AugeasObj:
+		// An Augeas config-tree handle (require "augeas").
+		return vm.consts["Augeas"].(*RClass)
+	case *HoconConfig:
+		// A Hocon::Config (require "hocon"); typed path accessors live on it.
+		return vm.consts["Hocon::Config"].(*RClass)
 	case *DryType:
 		return vm.consts["Dry::Types::Type"].(*RClass)
 	case *DryResult:
