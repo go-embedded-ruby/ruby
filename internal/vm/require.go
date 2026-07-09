@@ -78,6 +78,7 @@ var providedFeatures = map[string]bool{
 	"factory_bot": true,
 	"facter":      true,
 	"hiera":       true,
+	"puppet":      true,
 	"rubocop":     true,
 	"simplecov":   true,
 	"grape":       true,

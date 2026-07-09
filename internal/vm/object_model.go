@@ -734,6 +734,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *HieraObj:
 		// A Hiera instance (require "hiera"); #lookup lives on the Hiera class.
 		return vm.consts["Hiera"].(*RClass)
+	case *PuppetCatalog:
+		// A compiled catalog (require "puppet"); Puppet::Resource::Catalog methods.
+		return vm.consts["Puppet::Resource::Catalog"].(*RClass)
+	case *PuppetResource:
+		// One catalog resource; Puppet::Resource methods.
+		return vm.consts["Puppet::Resource"].(*RClass)
 	case *DryType:
 		return vm.consts["Dry::Types::Type"].(*RClass)
 	case *DryResult:
