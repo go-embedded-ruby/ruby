@@ -374,6 +374,8 @@ github.com/go-ruby-mongodb/mongodb v0.0.0-20260704115215-792ff280c51b h1:rHd3Q2A
 github.com/go-ruby-mongodb/mongodb v0.0.0-20260704115215-792ff280c51b/go.mod h1:WHh0ZOMacH6G8CRSp1gf8Ur/4RSPfCzYbMUR3VMPqIM=
 github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90 h1:xjyxDgCSi3rUAlQlewmvY+XBqFXN1jLUFWaXNjAyL3I=
 github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90/go.mod h1:MkpM6qH0Zz8H6btdGOPBmnImw6BbpcMCvPHV9J2V2Rc=
+github.com/go-ruby-multi-json/multi-json v0.0.0-20260710080957-4d9df1e7bc10 h1:NcOlHrZOgGaLw/x94Un7e/jTGbfsqlZn2QMpsQ+55AU=
+github.com/go-ruby-multi-json/multi-json v0.0.0-20260710080957-4d9df1e7bc10/go.mod h1:/TjKZ4URypH/A7odknSIG+l4QaojOGv9dNEiyu8Y/oc=
 github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a h1:mZr5L/r+Qw0RHzFnwV/2jB2GPm/dOcaoki6/Rz34eCw=
 github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a/go.mod h1:Jk5CZ+5dR63295HwuIRn+MOz/RwGvZvy5UEJpoAiGkk=
 github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d h1:tlOKd49moGegmeZdgT9tJ0tp2jOfye2LE2QO6Ac2Pu4=

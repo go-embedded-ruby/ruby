@@ -435,6 +435,7 @@ func (vm *VM) bootstrap() {
 	vm.registerTimecop()           // Timecop module (require "timecop"), backed by go-ruby-timecop; drives vm.clock behind Time.now/Date.today/DateTime.now
 	vm.registerDateErrors()        // Date::Error < ArgumentError (Date class itself registered early); needs ArgumentError
 	vm.registerJSON()              // JSON module (go-ruby-json backend); needs StandardError for JSON::JSONError
+	vm.registerMultiJson()         // MultiJson module (require "multi_json"), backed by go-ruby-multi-json for the adapter registry + errors; parse/generate route through rbgo's ordered JSON so key order + symbol keys survive; needs StandardError + ArgumentError
 	vm.registerYAML()              // YAML/Psych loadable shell; needs StandardError
 	vm.registerBCrypt()            // BCrypt (require "bcrypt"), backed by go-ruby-bcrypt; needs StandardError + String
 	vm.registerJWT()               // JWT (require "jwt"), backed by go-ruby-jwt; needs StandardError

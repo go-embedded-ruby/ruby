@@ -48,6 +48,7 @@ require (
 	github.com/go-ruby-connection-pool/connection-pool v0.0.0-20260706115620-287a916e348b
 	github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc
 	github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4
+	github.com/go-ruby-deep-merge/deep-merge v0.0.0-20260709171717-009b1fa69d94
 	github.com/go-ruby-devise/devise v0.0.0-20260706115634-252d1cfa97fc
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9
 	github.com/go-ruby-digest/digest v0.0.0-20260703175012-4332315c5957
@@ -98,6 +99,7 @@ require (
 	github.com/go-ruby-money/money v0.0.0-20260702143724-59c9de931e83
 	github.com/go-ruby-mongodb/mongodb v0.0.0-20260704115215-792ff280c51b
 	github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90
+	github.com/go-ruby-multi-json/multi-json v0.0.0-20260710080957-4d9df1e7bc10
 	github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a
 	github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d
 	github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7
@@ -248,7 +250,6 @@ require (
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260708073959-a9485a7b2835 // indirect
-	github.com/go-ruby-deep-merge/deep-merge v0.0.0-20260709171717-009b1fa69d94 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
