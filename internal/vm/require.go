@@ -83,6 +83,7 @@ var providedFeatures = map[string]bool{
 	"semantic_puppet":     true,
 	"augeas":              true,
 	"hocon":               true,
+	"confd":               true,
 	"fast_gettext":        true,
 	"deep_merge":          true,
 	"rubocop":             true,

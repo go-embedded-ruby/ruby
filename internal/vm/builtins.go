@@ -507,6 +507,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSemanticPuppet()    // SemanticPuppet::Version/VersionRange (require "semantic_puppet"), backed by go-ruby-semantic-puppet; stateless, immutable value types; needs ArgumentError for ValidationFailure/InvalidRangeFormat
 	vm.registerAugeas()            // Augeas config-tree editing (require "augeas"), backed by go-ruby-augeas over go-augeas; per-VM tree; needs StandardError for Augeas::Error
 	vm.registerHocon()             // Hocon.parse / Hocon::ConfigFactory + Config accessors (require "hocon"), backed by go-ruby-hocon over go-hocon; needs StandardError for Hocon::ConfigError
+	vm.registerConfd()             // Confd.render(template, vars) (require "confd"), backed by go-ruby-confd over abtreece/confd; seeds confd's in-memory backend from a Ruby Hash ("/"-path keys, nested Hashes flattened) and runs confd's real text/template engine (getv/getvs/exists/base64Encode/json/…); needs StandardError for Confd::Error
 	vm.registerFastGettext()       // FastGettext translation module (require "fast_gettext"), backed by go-ruby-fast-gettext; per-VM Instance holds domains/locale; _/n_/s_/p_ helpers
 	vm.registerDeepMerge()         // DeepMerge.deep_merge!/deep_merge + Hash#deep_merge!/#deep_merge (require "deep_merge"), backed by go-ruby-deep-merge; Ruby key identity preserved; bad option combos raise DeepMerge::InvalidParameter
 	vm.registerRack()              // Rack::Request/Response/Utils (require "rack" / "rack/utils"), backed by go-ruby-rack; deterministic env/query/escape, no socket
