@@ -5,6 +5,9 @@
 package vm
 
 import (
+	"os"
+	"strings"
+
 	fastgettext "github.com/go-ruby-fast-gettext/fast-gettext"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -66,14 +69,23 @@ func strSliceToRuby(ss []string) object.Value {
 	return object.NewArrayFromSlice(out)
 }
 
-// fastGettextAddDomain implements FastGettext.add_text_domain(name,
-// translations:, plurals:): it builds an in-memory TestRepository from the two
-// keyword Hashes and registers it under name on the per-VM instance.
+// fastGettextAddDomain implements FastGettext.add_text_domain(name, ...). With a
+// path: keyword it loads an on-disk .mo (default) / .po repository from that
+// directory (see fastGettextAddFileDomain); otherwise it builds an in-memory
+// TestRepository from the translations: / plurals: keyword Hashes. The repository
+// is registered under name on the per-VM instance.
 func (vm *VM) fastGettextAddDomain(args []object.Value) {
 	name := fgStrArg(args)
-	repo := fastgettext.NewTestRepository(name)
-
 	kw := fgKwHash(args[1:])
+
+	if kw != nil {
+		if p, ok := fgKwGet(kw, "path"); ok {
+			vm.fastGettextAddFileDomain(name, p.ToS(), kw)
+			return
+		}
+	}
+
+	repo := fastgettext.NewTestRepository(name)
 	if kw != nil {
 		if tr, ok := fgKwGet(kw, "translations"); ok {
 			fgStoreTranslations(repo, tr)
@@ -83,6 +95,49 @@ func (vm *VM) fastGettextAddDomain(args []object.Value) {
 		}
 	}
 	vm.fastGettext.AddTextDomain(name, repo)
+}
+
+// fastGettextAddFileDomain loads an on-disk repository for name rooted at path,
+// following the fast_gettext discovery convention: "<locale>/LC_MESSAGES/
+// <name>.mo" for a Mo repository (the default, or type: :mo) and "<locale>/
+// <name>.po" for a Po repository (type: :po). The files are read through
+// os.DirFS(path) and parsed by go-ruby-fast-gettext's ParseMO / ParsePO. A load
+// failure (missing directory, unreadable or malformed catalog) raises a
+// RuntimeError naming the domain and path.
+func (vm *VM) fastGettextAddFileDomain(name, path string, kw *object.Hash) {
+	repo, err := fgFileRepository(name, path, fgDomainType(kw))
+	if err != nil {
+		raise("RuntimeError", "FastGettext: could not load text domain %q from %q: %s", name, path, err)
+	}
+	vm.fastGettext.AddTextDomain(name, repo)
+}
+
+// fgDomainType reads the type: keyword ("mo" / "po", symbol or string),
+// defaulting to "mo" as the gem does.
+func fgDomainType(kw *object.Hash) string {
+	if v, ok := fgKwGet(kw, "type"); ok {
+		return strings.ToLower(v.ToS())
+	}
+	return "mo"
+}
+
+// fgFileRepository builds a Mo (default) or Po file-backed repository over
+// os.DirFS(path). Either constructor loads every per-locale catalog eagerly, so a
+// directory or parse error surfaces here.
+func fgFileRepository(name, path, typ string) (fastgettext.Repository, error) {
+	fsys := os.DirFS(path)
+	if typ == "po" {
+		r, err := fastgettext.NewPORepository(name, fsys)
+		if err != nil {
+			return nil, err
+		}
+		return r, nil
+	}
+	r, err := fastgettext.NewMORepository(name, fsys)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 // fgStoreTranslations stores {locale => {key => value}} singular entries.

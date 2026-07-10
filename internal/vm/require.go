@@ -22,7 +22,7 @@ var preloadedFeatures = map[string]bool{"set": true, "rubygems": true}
 // filename ("English", capital E); the lookup is case-sensitive like MRI's.
 var providedFeatures = map[string]bool{
 	"date": true, "time": true, "bigdecimal": true, "bag": true,
-	"base64": true, "digest": true, "json": true, "zlib": true,
+	"base64": true, "digest": true, "json": true, "multi_json": true, "zlib": true,
 	"digest/md5": true, "digest/sha1": true, "digest/sha2": true,
 	"digest/rmd160": true, "digest/bubblebabble": true,
 	"stringio": true, "securerandom": true,
