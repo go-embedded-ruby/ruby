@@ -270,6 +270,8 @@ github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc h1:XAxewcVViNLEjBS
 github.com/go-ruby-csv/csv v0.0.0-20260629114549-c624fdf379cc/go.mod h1:vvfFJGcGOK37vnBikohtzboL6dIfbsr54+2Ri0HkWwk=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4 h1:Qyl2DRWnEC65Y7EI6TB9vIHzQmkySJrIF5uzBu3YdKw=
 github.com/go-ruby-date/date v0.0.0-20260629114559-23a5251a54e4/go.mod h1:kn4XWlGthyqF+ogp9Tmj9EYLmvZa3Yb9Eqnfdsgu63Y=
+github.com/go-ruby-deep-merge/deep-merge v0.0.0-20260709171717-009b1fa69d94 h1:LOG53mpldF+tzx9Tncys5kOGYZjH8WQFfNub88WlkME=
+github.com/go-ruby-deep-merge/deep-merge v0.0.0-20260709171717-009b1fa69d94/go.mod h1:a4khGfrUTGA/kTuvjH2/LEcBcKrTFXziYPd2nlC4cHA=
 github.com/go-ruby-devise/devise v0.0.0-20260706115634-252d1cfa97fc h1:WA6npiVrimJ+htjXEWvnZpu0wgZlNzJBmGKYENqbUcQ=
 github.com/go-ruby-devise/devise v0.0.0-20260706115634-252d1cfa97fc/go.mod h1:KWnHi1NAlbhv7tgcMPWet+nP8wBO7gVFzquFUB5Xif4=
 github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260629152232-d6815db959e9 h1:6chWND+L2l7xqFlGUfv732oUBBOVs8WsMvKt8z7HJBE=
