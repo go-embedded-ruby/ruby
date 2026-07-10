@@ -248,6 +248,7 @@ require (
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260708073959-a9485a7b2835 // indirect
+	github.com/go-ruby-deep-merge/deep-merge v0.0.0-20260709171717-009b1fa69d94 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
