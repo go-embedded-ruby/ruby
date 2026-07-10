@@ -81,8 +81,9 @@ func (vm *VM) registerPuppet() {
 		return object.Bool(true)
 	})
 
-	// Puppet.compile(manifest[, facts:, node_name:, hiera_config:]) — compile a
-	// catalog; Puppet::Error on an evaluation or hiera-load failure.
+	// Puppet.compile(manifest[, facts:, node_name:, hiera_config:, format:]) —
+	// compile a catalog; format: selects :puppet (default) or :hcl2 surface
+	// syntax; Puppet::Error on an evaluation or hiera-load failure.
 	sm("compile", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.puppetCompile(args)
 	})

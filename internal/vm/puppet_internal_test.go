@@ -178,6 +178,48 @@ func TestPuppetStringKwargs(t *testing.T) {
 	}
 }
 
+// TestPuppetCompileHCL2Format covers the format: kwarg: an HCL2 manifest
+// compiles to the same catalog as its .pp twin, for both the :hcl2 Symbol and
+// the "hcl2" String, while :puppet/"puppet"/(default) stay native Puppet.
+func TestPuppetCompileHCL2Format(t *testing.T) {
+	// The HCL2 manifest and its native-Puppet twin produce the same Notify[hi].
+	got := puppetRun(t, `
+hcl = <<~HCL
+resource "notify" "hi" { message = "x" }
+HCL
+pp = "notify { 'hi': message => 'x' }"
+[
+  Puppet.compile(hcl, format: :hcl2),   # Symbol
+  Puppet.compile(hcl, format: "hcl2"),  # String
+].each do |cat|
+  r = cat.resource("Notify[hi]")
+  puts r.ref
+  puts r["message"]
+end
+# :puppet Symbol, "puppet" String and the default all stay native Puppet.
+puts Puppet.compile(pp, format: :puppet).resource("Notify[hi]")["message"]
+puts Puppet.compile(pp, format: "puppet").resource("Notify[hi]")["message"]
+puts Puppet.compile(pp).resource("Notify[hi]")["message"]
+`)
+	want := "Notify[hi]\nx\nNotify[hi]\nx\nx\nx\nx"
+	if got != want {
+		t.Fatalf("hcl2 format:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+// TestPuppetCompileBadFormat covers the ArgumentError raised for an unknown
+// format: value, given as either a Symbol or a String.
+func TestPuppetCompileBadFormat(t *testing.T) {
+	for _, body := range []string{
+		`begin; Puppet.compile("notify { 'x': }", format: :bogus); rescue => e; puts "#{e.class}: #{e.message}"; end`,
+		`begin; Puppet.compile("notify { 'x': }", format: "bogus"); rescue => e; puts "#{e.class}: #{e.message}"; end`,
+	} {
+		if got := puppetRun(t, body); got != "ArgumentError: unknown format: bogus" {
+			t.Fatalf("%s\n got=%q", body, got)
+		}
+	}
+}
+
 // TestPuppetStringers covers the object.Value marker methods on both wrappers.
 func TestPuppetStringers(t *testing.T) {
 	got := puppetRun(t, orderedManifest+`
