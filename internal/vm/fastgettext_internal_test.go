@@ -85,7 +85,7 @@ func TestFastGettextMoFile(t *testing.T) {
 
 	got := fgRun(t, `
 FastGettext.available_locales = ["fr"]
-FastGettext.add_text_domain("app", path: "`+dir+`")
+FastGettext.add_text_domain("app", path: "`+filepath.ToSlash(dir)+`")
 FastGettext.text_domain = "app"
 FastGettext.locale = "fr"
 puts FastGettext._("Hello")
@@ -109,7 +109,7 @@ func TestFastGettextPoFile(t *testing.T) {
 
 	got := fgRun(t, `
 FastGettext.available_locales = ["de"]
-FastGettext.add_text_domain("app", path: "`+dir+`", type: :po)
+FastGettext.add_text_domain("app", path: "`+filepath.ToSlash(dir)+`", type: :po)
 FastGettext.text_domain = "app"
 FastGettext.locale = "de"
 puts FastGettext._("Hello")
@@ -123,7 +123,7 @@ puts FastGettext._("Hello")
 // directory (a bare regular file at the root cannot be read as a directory tree)
 // raises a RuntimeError.
 func TestFastGettextFileMissing(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	missing := filepath.ToSlash(filepath.Join(t.TempDir(), "does-not-exist"))
 	for _, typ := range []string{":mo", ":po"} {
 		got := fgRun(t, `
 begin
