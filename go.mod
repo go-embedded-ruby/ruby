@@ -74,7 +74,7 @@ require (
 	github.com/go-ruby-grpc/grpc v0.0.0-20260705194916-601b52b2269c
 	github.com/go-ruby-haml/haml v0.0.0-20260701125233-5bf8084caf1c
 	github.com/go-ruby-hanami/hanami v0.0.0-20260706115807-b2af4faf16af
-	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260630160546-4b7ef3837e5b
+	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260710124332-eb19348a7e48
 	github.com/go-ruby-hiera/hiera v0.0.0-20260709142258-7d149ec4a67f
 	github.com/go-ruby-hocon/hocon v0.0.0-20260709172840-f8b55588f078
 	github.com/go-ruby-http/http v0.0.0-20260706115817-580e321826b3
@@ -133,7 +133,7 @@ require (
 	github.com/go-ruby-puma/puma v0.0.0-20260704123157-3b47ea0ad779
 	github.com/go-ruby-pundit/pundit v0.0.0-20260706120141-d3cc8a101bc3
 	github.com/go-ruby-puppet-resource-api/puppet-resource-api v0.0.0-20260709172545-bd4527649544
-	github.com/go-ruby-puppet/puppet v0.0.0-20260709143301-875cb93f0770
+	github.com/go-ruby-puppet/puppet v0.0.0-20260710131735-28e3dd990afa
 	github.com/go-ruby-racc/racc v0.0.0-20260630123809-0d492278523f
 	github.com/go-ruby-rack/rack v0.0.0-20260705200150-888027c33329
 	github.com/go-ruby-rails/rails v0.0.0-20260706183557-5ddb406695b0
@@ -243,13 +243,13 @@ require (
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
 	github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 // indirect
 	github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9 // indirect
-	github.com/go-hocon/hocon v0.0.0-20260709172518-20248359492f // indirect
+	github.com/go-hocon/hocon v0.0.0-20260709172937-6d69e3b57178 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
-	github.com/go-puppet/puppet v0.0.0-20260708073959-a9485a7b2835 // indirect
+	github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
@@ -336,15 +336,15 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect

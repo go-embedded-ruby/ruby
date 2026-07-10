@@ -20,8 +20,11 @@ func puppetStrArg(args []object.Value) string {
 }
 
 // puppetCompile implements Puppet.compile(manifest[, facts:, node_name:,
-// hiera_config:]): it builds the compile options from the keyword Hash and
-// returns a wrapped catalog, raising Puppet::Error on failure.
+// hiera_config:, format:]): it builds the compile options from the keyword Hash
+// and returns a wrapped catalog, raising Puppet::Error on failure. The format:
+// kwarg selects the manifest's surface syntax — :puppet/"puppet" (default,
+// native .pp) or :hcl2/"hcl2" (Terraform-style HCL2) — and any other value
+// raises ArgumentError.
 func (vm *VM) puppetCompile(args []object.Value) object.Value {
 	src := puppetStrArg(args)
 	opts := puppet.CompileOptions{NodeName: "default"}
@@ -39,12 +42,30 @@ func (vm *VM) puppetCompile(args []object.Value) object.Value {
 		if v, ok := puppetKwGet(h, "hiera_config"); ok {
 			opts.HieraConfig = v.ToS()
 		}
+		if v, ok := puppetKwGet(h, "format"); ok {
+			opts.Format = puppetCompileFormat(v)
+		}
 	}
 	cat, logs, err := puppet.Compile(src, opts)
 	if err != nil {
 		raise("Puppet::Error", "%s", err.Error())
 	}
 	return &PuppetCatalog{vm: vm, c: cat, logs: logs}
+}
+
+// puppetCompileFormat maps the Ruby format: kwarg (a Symbol or String) to a
+// go-ruby-puppet Format: :puppet/"puppet" is native Puppet source and
+// :hcl2/"hcl2" is Terraform-style HCL2. Any other value raises ArgumentError.
+func puppetCompileFormat(v object.Value) puppet.Format {
+	switch v.ToS() {
+	case "puppet":
+		return puppet.FormatPuppet
+	case "hcl2":
+		return puppet.FormatHCL2
+	default:
+		raise("ArgumentError", "unknown format: %s", v.ToS())
+		return puppet.FormatPuppet // unreachable: raise does not return
+	}
 }
 
 // registerPuppetCatalog installs the Puppet::Resource::Catalog instance methods.
