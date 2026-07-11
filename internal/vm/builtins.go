@@ -120,6 +120,9 @@ func (vm *VM) bootstrap() {
 	vm.cProc.defineNR("call", procCall)
 	vm.cProc.defineNR("[]", procCall)
 	vm.cProc.defineNR("yield", procCall)
+	// Proc#=== is an alias of #call, so a proc/lambda can be used as a case /
+	// grep pattern (pattern === element).
+	vm.cProc.define("===", procCall)
 	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self.(*Proc).arityVal()))
 	})
