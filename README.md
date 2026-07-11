@@ -318,9 +318,11 @@ JRuby**):
   an `Enumerator` (MRI semantics) with `next`/`peek`/`rewind`/`size`/`to_a`,
   `with_index`/`each_with_index`, `Kernel#enum_for`/`to_enum`, and full
   `Enumerable` chaining (`[1,2,3].map.with_index { |x, i| … }`); plus
-  **`Enumerator::Lazy`** (`lazy`) — deferred `map`/`select`/`reject`/`filter_map`/
-  `take`/`take_while`/`drop`/`drop_while` over finite or **infinite**
-  (`(1..Float::INFINITY).lazy`) sources, materialised by `first`/`to_a`/`force`.
+  **`Enumerator::Lazy`** (`lazy`) — deferred `map`/`collect`, `select`/`filter`,
+  `reject`, `filter_map`, `flat_map`/`collect_concat`, `grep`/`grep_v`, `zip`,
+  `uniq`, `compact`, `with_index`, `take`/`take_while`, `drop`/`drop_while` over
+  finite or **infinite** (`(1..Float::INFINITY).lazy`) sources, chained without
+  materialising and pulled by `first(n)`/`each`/`to_a`/`force`.
 - **Numeric tower:** `Integer`/`Float`/`Rational`/`Complex` under a shared
   `Numeric` (carrying `Comparable`); `Module#ancestors`/`include?`,
   `Class#superclass`.

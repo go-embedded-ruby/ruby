@@ -16,9 +16,12 @@ type LazyEnum struct {
 }
 
 type lazyOp struct {
-	kind string // map / select / reject / filter_map / take_while / drop_while / take / drop
-	blk  *Proc
-	n    int // element count for take / drop
+	kind string // map / select / reject / filter_map / flat_map / grep / grep_v /
+	// zip / uniq / compact / with_index / take_while / drop_while / take / drop
+	blk    *Proc
+	n      int            // element count for take / drop; offset for with_index
+	pat    object.Value   // pattern for grep / grep_v
+	others []object.Value // extra sources for zip
 }
 
 func (l *LazyEnum) ToS() string {
@@ -66,6 +69,8 @@ func (vm *VM) registerLazy() {
 	d("filter", chain("select"))
 	d("reject", chain("reject"))
 	d("filter_map", chain("filter_map"))
+	d("flat_map", chain("flat_map"))
+	d("collect_concat", chain("flat_map"))
 	d("take_while", chain("take_while"))
 	d("drop_while", chain("drop_while"))
 	d("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -73,6 +78,35 @@ func (vm *VM) registerLazy() {
 	})
 	d("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return self.(*LazyEnum).with(lazyOp{kind: "drop", n: int(intArg(args[0]))})
+	})
+	// grep / grep_v take a pattern (matched with #===) and an optional block that
+	// maps the elements that pass the filter.
+	grepFn := func(kind string) NativeFn {
+		return func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			if len(args) == 0 {
+				raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+			}
+			return self.(*LazyEnum).with(lazyOp{kind: kind, pat: args[0], blk: blk})
+		}
+	}
+	d("grep", grepFn("grep"))
+	d("grep_v", grepFn("grep_v"))
+	d("compact", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self.(*LazyEnum).with(lazyOp{kind: "compact"})
+	})
+	// uniq: optional block computes the uniqueness key.
+	d("uniq", func(_ *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		return self.(*LazyEnum).with(lazyOp{kind: "uniq", blk: blk})
+	})
+	// zip pairs each element with the corresponding elements of the other
+	// sources (padding with nil once a source is exhausted).
+	d("zip", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return self.(*LazyEnum).with(lazyOp{kind: "zip", others: append([]object.Value{}, args...)})
+	})
+	// with_index(offset = 0): optional block maps (element, index); without a
+	// block each element becomes the pair [element, index].
+	d("with_index", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return self.(*LazyEnum).with(lazyOp{kind: "with_index", n: int(intArgOr(args, 0)), blk: blk})
 	})
 	d("lazy", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
 
@@ -172,77 +206,178 @@ func (vm *VM) collectEach(recv object.Value) []object.Value {
 
 // lazyForce pulls from the source, applying the op chain to each element, until
 // want elements are produced (want < 0 means all — only safe for finite/limited
-// chains).
+// chains). Each source element is threaded through the ops by feed, which
+// recurses op-by-op so that expanding ops (flat_map) and index/zip-carrying ops
+// compose the same way MRI's fibered lazy pipeline does.
 func (vm *VM) lazyForce(le *LazyEnum, want int) []object.Value {
+	if want == 0 {
+		return nil
+	}
 	src := vm.lazySource(le.recv)
-	// Per-op mutable counters for take/drop and the drop_while latch.
-	rem := make([]int, len(le.ops))
-	dropping := make([]bool, len(le.ops))
+	n := len(le.ops)
+	// Per-op mutable run state.
+	rem := make([]int, n)                             // take / drop remaining
+	dropping := make([]bool, n)                       // drop_while latch
+	idx := make([]int, n)                             // with_index counter
+	seen := make([][]object.Value, n)                 // uniq keys
+	zpull := make([][]func() (object.Value, bool), n) // zip other sources
 	for i, op := range le.ops {
 		switch op.kind {
 		case "take", "drop":
 			rem[i] = op.n
 		case "drop_while":
 			dropping[i] = true
+		case "with_index":
+			idx[i] = op.n // starting offset
+		case "zip":
+			ps := make([]func() (object.Value, bool), len(op.others))
+			for j, o := range op.others {
+				ps[j] = vm.lazySource(o)
+			}
+			zpull[i] = ps
 		}
 	}
 	var out []object.Value
-	for {
+	stop := false
+	// feed threads v through ops[i:]; it returns false to abort the whole pull
+	// (want satisfied, or a take/take_while boundary reached).
+	var feed func(i int, v object.Value) bool
+	feed = func(i int, v object.Value) bool {
+		if i == n {
+			out = append(out, v)
+			if want >= 0 && len(out) >= want {
+				stop = true
+				return false
+			}
+			return true
+		}
+		op := le.ops[i]
+		switch op.kind {
+		case "map":
+			return feed(i+1, vm.callBlock(op.blk, []object.Value{v}))
+		case "select":
+			if vm.callBlock(op.blk, []object.Value{v}).Truthy() {
+				return feed(i+1, v)
+			}
+			return true
+		case "reject":
+			if !vm.callBlock(op.blk, []object.Value{v}).Truthy() {
+				return feed(i+1, v)
+			}
+			return true
+		case "filter_map":
+			w := vm.callBlock(op.blk, []object.Value{v})
+			if w.Truthy() {
+				return feed(i+1, w)
+			}
+			return true
+		case "flat_map":
+			w := vm.callBlock(op.blk, []object.Value{v})
+			if arr, ok := w.(*object.Array); ok {
+				for _, e := range arr.Elems {
+					if !feed(i+1, e) {
+						return false
+					}
+				}
+				return true
+			}
+			return feed(i+1, w)
+		case "grep":
+			if vm.send(op.pat, "===", []object.Value{v}, nil).Truthy() {
+				return feed(i+1, vm.lazyGrepValue(op.blk, v))
+			}
+			return true
+		case "grep_v":
+			if !vm.send(op.pat, "===", []object.Value{v}, nil).Truthy() {
+				return feed(i+1, vm.lazyGrepValue(op.blk, v))
+			}
+			return true
+		case "compact":
+			if _, isNil := v.(object.Nil); isNil {
+				return true
+			}
+			return feed(i+1, v)
+		case "uniq":
+			key := v
+			if op.blk != nil {
+				key = vm.callBlock(op.blk, []object.Value{v})
+			}
+			for _, k := range seen[i] {
+				if valueEql(key, k) {
+					return true
+				}
+			}
+			seen[i] = append(seen[i], key)
+			return feed(i+1, v)
+		case "with_index":
+			j := idx[i]
+			idx[i]++
+			jv := object.IntValue(int64(j))
+			if op.blk != nil {
+				// With a block, MRI evaluates it for its side effects and passes
+				// the original item downstream (the block's result is ignored).
+				vm.callBlock(op.blk, []object.Value{v, jv})
+				return feed(i+1, v)
+			}
+			return feed(i+1, object.NewArrayFromSlice([]object.Value{v, jv}))
+		case "zip":
+			row := make([]object.Value, len(zpull[i])+1)
+			row[0] = v
+			for j, pf := range zpull[i] {
+				if e, ok := pf(); ok {
+					row[j+1] = e
+				} else {
+					row[j+1] = object.NilV
+				}
+			}
+			return feed(i+1, object.NewArrayFromSlice(row))
+		case "take_while":
+			if !vm.callBlock(op.blk, []object.Value{v}).Truthy() {
+				stop = true
+				return false
+			}
+			return feed(i+1, v)
+		case "drop_while":
+			if dropping[i] {
+				if vm.callBlock(op.blk, []object.Value{v}).Truthy() {
+					return true
+				}
+				dropping[i] = false
+			}
+			return feed(i+1, v)
+		case "take":
+			if rem[i] <= 0 {
+				stop = true
+				return false
+			}
+			rem[i]--
+			return feed(i+1, v)
+		case "drop":
+			if rem[i] > 0 {
+				rem[i]--
+				return true
+			}
+			// Past the drop count: fall through to pass v downstream.
+		}
+		return feed(i+1, v)
+	}
+	for !stop {
 		v, ok := src()
 		if !ok {
 			break
 		}
-		cur, keep, stop := v, true, false
-		for i, op := range le.ops {
-			switch op.kind {
-			case "map":
-				cur = vm.callBlock(op.blk, []object.Value{cur})
-			case "select":
-				keep = vm.callBlock(op.blk, []object.Value{cur}).Truthy()
-			case "reject":
-				keep = !vm.callBlock(op.blk, []object.Value{cur}).Truthy()
-			case "filter_map":
-				w := vm.callBlock(op.blk, []object.Value{cur})
-				if keep = w.Truthy(); keep {
-					cur = w
-				}
-			case "take_while":
-				if !vm.callBlock(op.blk, []object.Value{cur}).Truthy() {
-					stop = true
-				}
-			case "drop_while":
-				if dropping[i] {
-					if vm.callBlock(op.blk, []object.Value{cur}).Truthy() {
-						keep = false
-					} else {
-						dropping[i] = false
-					}
-				}
-			case "take":
-				if rem[i] <= 0 {
-					stop = true
-				} else {
-					rem[i]--
-				}
-			case "drop":
-				if rem[i] > 0 {
-					rem[i]--
-					keep = false
-				}
-			}
-			if stop || !keep {
-				break
-			}
-		}
-		if stop {
+		if !feed(0, v) {
 			break
-		}
-		if keep {
-			out = append(out, cur)
-			if want >= 0 && len(out) >= want {
-				break
-			}
 		}
 	}
 	return out
+}
+
+// lazyGrepValue returns the value grep/grep_v should emit for a match: the
+// element itself, or the block's mapping of it when a block was given.
+func (vm *VM) lazyGrepValue(blk *Proc, v object.Value) object.Value {
+	if blk != nil {
+		return vm.callBlock(blk, []object.Value{v})
+	}
+	return v
 }
