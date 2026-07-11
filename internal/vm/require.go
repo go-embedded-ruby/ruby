@@ -135,6 +135,7 @@ var providedFeatures = map[string]bool{
 	"minitest/test": true, "minitest/unit": true,
 	"aasm":    true,
 	"webmock": true, "webmock/minitest": true,
+	"openstack": true,
 }
 
 // registerRequire installs Kernel#require and #require_relative — the runtime
