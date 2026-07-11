@@ -464,6 +464,8 @@ github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c h1:mpewf
 github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c/go.mod h1:7hF8CYcoBsFTy7OaSrjjfH888t1mcE9JdE9YpMoyB7k=
 github.com/go-ruby-openbao/openbao v0.0.0-20260707160751-fcf5670a4d6d h1:X/m0BdS/0fm/609Fgs3mMXw5MDpiQ5Fyov1/YoLSn14=
 github.com/go-ruby-openbao/openbao v0.0.0-20260707160751-fcf5670a4d6d/go.mod h1:lOCs10/i8qtuP3cA+d8YpRrCSiUw+Bo8xffbPplrnCo=
+github.com/go-ruby-openstack/openstack v0.0.0-20260710213906-771c80a1b6cf h1:8WGc0Ii2Z0hq8jt2PgS2f7hv+jiI3tYRQBUonjfPZnE=
+github.com/go-ruby-openstack/openstack v0.0.0-20260710213906-771c80a1b6cf/go.mod h1:XFk+f0NH8h34MT3TQLkpzthsGFhZAzPedZai/Mv8oZA=
 github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c h1:9scQo7ArojaKzmw2gbdgA3urBcA0pROIOYYCvGhPQfg=
 github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c/go.mod h1:AjZ2hTwNuKGnO0OGJzgp84hTzBV6u182mj7REfuxvtw=
 github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546 h1:A4xMrLruv4Zp4q0AhTFngQ9JccwqbxVBiWB3fiTZVsQ=
@@ -680,6 +682,8 @@ github.com/google/renameio v0.1.0/go.mod h1:KWCgfxg9yswjAJkECMjeO8J8rahYeXnNhOm4
 github.com/google/uuid v1.0.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/gophercloud/gophercloud/v2 v2.13.0 h1:yEyJG+kABd8x2ttTqLsomihU6Kg2YheJSZhvP/QSx+8=
+github.com/gophercloud/gophercloud/v2 v2.13.0/go.mod h1:KZRLVs6gcoy/pEFdkZqFjdYqnS0emMHv66UqdM5lMjU=
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
 github.com/gorilla/context v1.1.1/go.mod h1:kBGZzfjB9CEq2AlWe17Uuf7NDRt0dE0s8S51q0aT7Yg=
 github.com/gorilla/mux v1.6.2/go.mod h1:1lud6UwP+6orDFRuTfBEV8e9/aOM/c4fVVCaMa2zaAs=

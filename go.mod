@@ -116,6 +116,7 @@ require (
 	github.com/go-ruby-oidc/oidc v0.0.0-20260705185218-08dab6b22572
 	github.com/go-ruby-omniauth/omniauth v0.0.0-20260706120026-fb3979b5ef4c
 	github.com/go-ruby-openbao/openbao v0.0.0-20260707160751-fcf5670a4d6d
+	github.com/go-ruby-openstack/openstack v0.0.0-20260710213906-771c80a1b6cf
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
@@ -295,6 +296,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gophercloud/gophercloud/v2 v2.13.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/graphql-go/graphql v0.8.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.1 // indirect

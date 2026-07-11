@@ -15,6 +15,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -185,6 +186,13 @@ type VM struct {
 	mainArmed bool
 
 	arAdapter *arSQLiteAdapter // the ActiveRecord::Base connection (require "active_record"), backed by go-ruby-sqlite3; nil until establish_connection
+
+	// osTransport is the optional HTTP transport injected into OpenStack.connect
+	// (require "openstack"): when non-nil it becomes the RoundTripper of the
+	// underlying gophercloud client, letting a test drive a mock OpenStack cloud
+	// with no live cloud and no socket dependence. Nil in normal use, so a real
+	// connect uses gophercloud's default transport. See openstack_bind.go.
+	osTransport http.RoundTripper
 
 	// sidekiqRedisURL / resqueRedisURL are the go-redis connection URLs the job
 	// bindings (require "sidekiq" / "resque") dial. Each is empty until set via

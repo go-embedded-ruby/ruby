@@ -1562,6 +1562,20 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *ShrineAttacher:
 		return x.cls
+	case *OpenStackConnection:
+		return vm.consts["OpenStack::Connection"].(*RClass)
+	case *OpenStackCompute:
+		return vm.consts["OpenStack::Compute"].(*RClass)
+	case *OpenStackNetwork:
+		return vm.consts["OpenStack::Network"].(*RClass)
+	case *OpenStackBlockStorage:
+		return vm.consts["OpenStack::BlockStorage"].(*RClass)
+	case *OpenStackObjectStorage:
+		return vm.consts["OpenStack::ObjectStorage"].(*RClass)
+	case *OpenStackImage:
+		return vm.consts["OpenStack::Image"].(*RClass)
+	case *OpenStackIdentity:
+		return vm.consts["OpenStack::Identity"].(*RClass)
 	case *object.Main:
 		return vm.cObject
 	}
