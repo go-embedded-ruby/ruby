@@ -8,7 +8,6 @@ import (
 	goresult "github.com/go-composites/result/src"
 	gotime "github.com/go-composites/time/src"
 	goduration "github.com/go-composites/time/src/duration"
-	dates "github.com/go-datetime/dates"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -75,27 +74,6 @@ func payloadTime(r goresult.Interface) *Time {
 	return &Time{t: r.Payload().(gotime.Interface)}
 }
 
-// parseTimeLenient implements MRI's forgiving Time.parse by delegating to the
-// shared github.com/go-datetime/dates parser (the fleet's curated date-format
-// zoo: RFC 822/1123/2822/3339/5322, asctime, HTTP-date, ISO 8601, date-only and
-// 2-digit years, with named-zone abbreviations resolved to real offsets). It
-// therefore accepts inputs the previous RFC3339-only implementation rejected —
-// e.g. "Mon, 02 Jan 2006 15:04:05 -0700" or "Tue, 07 Jul 26 11:13:37 UTC".
-//
-// dates.Parse yields a stdlib time.Time; to obtain the go-composites Time the
-// rest of this file expects, the instant is round-tripped through the
-// composite's only public time.Time constructor — Parse of its own RFC3339Nano
-// rendering, which preserves the exact instant, offset and sub-second fields and
-// so cannot itself fail. An input dates.Parse cannot recognise raises
-// ArgumentError, matching MRI (and the former behaviour on a bad parse).
-func parseTimeLenient(str string) *Time {
-	parsed, err := dates.Parse(str)
-	if err != nil {
-		raise("ArgumentError", "no time information in %q", str)
-	}
-	return payloadTime(gotime.Parse(stdtime.RFC3339Nano, parsed.Format(stdtime.RFC3339Nano)))
-}
-
 // registerTime installs the Time class, its class constructors and instance
 // methods, all delegating to the go-composites Time.Interface.
 func (vm *VM) registerTime() {
@@ -115,11 +93,15 @@ func (vm *VM) registerTime() {
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			return &Time{t: gotime.FromUnix(vm.nowInstant().Unix())}
 		}}
-	// Time.parse(str) → the shared go-datetime/dates lenient parser; raises
-	// ArgumentError on an unrecognised input, as MRI does.
+	// Time.parse(str) → the composite's lenient ParseAny (the shared real-world
+	// date-format zoo — RFC 822/1123/2822/3339/5322, asctime, HTTP-date, ISO 8601,
+	// date-only and 2-digit years, with named-zone abbreviations resolved to real
+	// offsets), so Time.parse is as forgiving as MRI's rather than RFC3339-only.
+	// The leniency lives in go-composites/time (backed by go-datetime/dates); rbgo
+	// only unwraps the same Result. An unrecognised input raises ArgumentError.
 	vm.cTime.smethods["parse"] = &Method{name: "parse", owner: vm.cTime,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return parseTimeLenient(strArg(args[0]))
+			return payloadTime(gotime.ParseAny(strArg(args[0])))
 		}}
 	// Time.strptime(str, fmt) → Parse(rubyLayout(fmt), str); raises on failure.
 	vm.cTime.smethods["strptime"] = &Method{name: "strptime", owner: vm.cTime,
