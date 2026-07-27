@@ -222,6 +222,8 @@ github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381 h1:lefnD/dZIN
 github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381/go.mod h1:U8jOcQwbbSwQ3E5geccvv0lkwNv89piHYG/Jj1w18JQ=
 github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0 h1:T13Rk67KSsuSbv0n15AbxSYeSRCrzcTRB0xPCdF6pYo=
 github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0/go.mod h1:Cx3vT/o0Mo7W3klXPmdwjKWti2XLOqoLjcimGiChI7s=
+github.com/go-datetime/dates v0.1.0 h1:Uj8TaTZ09DXdq75EGQ/teFdrXpfVAC3ZDHAPQvPTnaA=
+github.com/go-datetime/dates v0.1.0/go.mod h1:KeZ1wUeMScJD6HOvj3hINwbsB+GCSFjJLWcJhrBlwIo=
 github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 h1:1PUT8X4gKZsXEVdoMS//ceD4X2jiK9fEJinyU2iuIpI=
 github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0/go.mod h1:ghuoOHWXdq5dE3GLPDiz3Uy0ORrvK+1hB7QC997ez2U=
 github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb h1:kDAxBx5Tvd3PfDIqCgV3J4cpXejsJOOsiKGYQiDTJB4=

@@ -9,6 +9,7 @@ require (
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0
+	github.com/go-datetime/dates v0.1.0
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
 	github.com/go-images/images v0.0.0-20260702213524-ea366b42f216
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
