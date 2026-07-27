@@ -93,10 +93,15 @@ func (vm *VM) registerTime() {
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 			return &Time{t: gotime.FromUnix(vm.nowInstant().Unix())}
 		}}
-	// Time.parse(str) → Parse(RFC3339, str); raises on the error Result.
+	// Time.parse(str) → the composite's lenient ParseAny (the shared real-world
+	// date-format zoo — RFC 822/1123/2822/3339/5322, asctime, HTTP-date, ISO 8601,
+	// date-only and 2-digit years, with named-zone abbreviations resolved to real
+	// offsets), so Time.parse is as forgiving as MRI's rather than RFC3339-only.
+	// The leniency lives in go-composites/time (backed by go-datetime/dates); rbgo
+	// only unwraps the same Result. An unrecognised input raises ArgumentError.
 	vm.cTime.smethods["parse"] = &Method{name: "parse", owner: vm.cTime,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return payloadTime(gotime.Parse(stdtime.RFC3339, strArg(args[0])))
+			return payloadTime(gotime.ParseAny(strArg(args[0])))
 		}}
 	// Time.strptime(str, fmt) → Parse(rubyLayout(fmt), str); raises on failure.
 	vm.cTime.smethods["strptime"] = &Method{name: "strptime", owner: vm.cTime,

@@ -8,7 +8,7 @@ require (
 	github.com/dolthub/go-mysql-server v0.20.0
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
-	github.com/go-composites/time v0.0.0-20260620202627-52c1ec9f0af0
+	github.com/go-composites/time v0.0.0-20260727203506-b0e9511265ce
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
 	github.com/go-images/images v0.0.0-20260702213524-ea366b42f216
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
@@ -267,6 +267,7 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
+	github.com/go-datetime/dates v0.1.0 // indirect
 	github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 // indirect
 	github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9 // indirect
 	github.com/go-hocon/hocon v0.0.0-20260709172937-6d69e3b57178 // indirect

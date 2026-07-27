@@ -67,8 +67,17 @@ func TestTime(t *testing.T) {
 		{`p Time.at(1000).send(:==, Time.at(1000))`, "true\n"},
 		{`p Time.at(1000).send(:==, Time.at(2000))`, "false\n"},
 		{`p Time.at(1000).send(:==, 42)`, "false\n"}, // method, non-Time
-		// Parse (RFC3339) and strptime (strftime layout).
+		// Parse is MRI-lenient (backed by go-datetime/dates): RFC3339 still works
+		// (regression guard), and the RFC 822/1123/2822, 2-digit-year, named-zone
+		// and date-only forms the former RFC3339-only parser rejected now succeed.
 		{`p Time.parse("2026-06-21T12:34:56Z").to_i`, "1782045296\n"},
+		{`p Time.parse("Mon, 02 Jan 2006 15:04:05 -0700").year`, "2006\n"},
+		{`p Time.parse("Mon, 02 Jan 2006 15:04:05 -0700").hour`, "15\n"}, // offset preserved
+		{`p Time.parse("Tue, 07 Jul 26 11:13:37 UTC").year`, "2026\n"},   // 2-digit year
+		{`p Time.parse("Tue, 07 Jul 26 11:13:37 UTC").sec`, "37\n"},
+		{`p Time.parse("2026-06-21 12:34:56").to_i`, "1782045296\n"},           // space, zoneless=UTC
+		{`p Time.parse("2026-06-21").year`, "2026\n"},                          // date-only
+		{`p Time.parse("Sat, 21 Jun 2026 12:34:56 GMT").to_i`, "1782045296\n"}, // HTTP-date-ish
 		{`p Time.strptime("2026-06-21", "%Y-%m-%d").to_i`, "1782000000\n"},
 		// truthiness + class.
 		{`p(Time.at(0) ? "y" : "n")`, "\"y\"\n"},
