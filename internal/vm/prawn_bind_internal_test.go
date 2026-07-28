@@ -6,9 +6,14 @@ package vm
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +22,33 @@ import (
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// pdfHexOperand matches a content-stream string operand written in PDF's <hex>
+// syntax: one or more Tj/TJ text runs of `<hexpairs>`, each a run of single-byte
+// WinAnsi character codes (the go-opentype-backed native PDF core's text path
+// always emits hex strings, even for simple/AFM base-14 fonts — see
+// go-ruby-prawn/prawn's text.go drawLine/tjOperand — rather than the literal
+// "(...)" syntax the old fpdf-backed prawn used).
+var pdfHexOperand = regexp.MustCompile(`<([0-9A-Fa-f]+)>`)
+
+// pdfDecodedText concatenates every hex string operand found in a rendered PDF,
+// in file order, decoding each to its raw bytes. A drawn text run's characters
+// stay contiguous across the TJ array's kerning-adjustment gaps (the gaps are
+// bare numbers, not additional string operands), so a phrase drawn as a single
+// Text/DrawText call reassembles intact even when prawn splits it into several
+// hex chunks for per-pair kerning.
+func pdfDecodedText(t *testing.T, pdf []byte) string {
+	t.Helper()
+	var out bytes.Buffer
+	for _, m := range pdfHexOperand.FindAllSubmatch(pdf, -1) {
+		b, err := hex.DecodeString(string(m[1]))
+		if err != nil {
+			t.Fatalf("decode hex operand %q: %v", m[1], err)
+		}
+		out.Write(b)
+	}
+	return out.String()
+}
 
 // fixedClock pins the PDF /CreationDate for the whole test file so output is
 // deterministic and timezone-independent (never asserting time.Now): every test
@@ -32,7 +64,13 @@ func fixedClock(t *testing.T) {
 // TestPrawnGenerateRoundTrip drives the headline block-form generator through
 // rbgo: Prawn::Document.generate { |pdf| … } yields the document to the block,
 // and #render returns a well-formed PDF (a %PDF- header, an %%EOF trailer, the
-// drawn text in the uncompressed content stream) with the expected page count.
+// drawn text recoverable from the content stream) with the expected page count.
+// The drawn text is asserted in Go via pdfDecodedText rather than a raw Ruby
+// substring check: the go-opentype-backed native PDF core writes every text run
+// — even plain base-14/AFM text — as one or more <hex> string operands (see
+// pdfHexOperand), not the literal "(...)" syntax the older fpdf-backed prawn
+// used, and it may split a run into several hex chunks around a TJ kerning
+// adjustment.
 func TestPrawnGenerateRoundTrip(t *testing.T) {
 	fixedClock(t)
 	src := `
@@ -47,19 +85,28 @@ end
 bytes = pdf.render
 r = []
 r << (bytes.start_with?("%PDF-") ? "pdf" : "no-pdf")
-r << (bytes.include?("hello world") ? "text" : "no-text")
-r << (bytes.include?("second page") ? "p2" : "no-p2")
 r << (bytes.rstrip.end_with?("%%EOF") ? "eof" : "no-eof")
 r << pdf.page_count.to_s
-puts r.join("|")
+puts [r.join("|"), bytes].join("\n")
 `
-	if got := runSrc(t, src); got != "pdf|text|p2|eof|2" {
-		t.Fatalf("prawn generate round-trip = %q", got)
+	got := runSrc(t, src)
+	lines := strings.SplitN(got, "\n", 2)
+	if len(lines) != 2 {
+		t.Fatalf("prawn generate round-trip: unexpected output %q", got)
+	}
+	if lines[0] != "pdf|eof|2" {
+		t.Fatalf("prawn generate round-trip = %q", lines[0])
+	}
+	text := pdfDecodedText(t, []byte(lines[1]))
+	if !strings.Contains(text, "hello world") || !strings.Contains(text, "second page") {
+		t.Fatalf("prawn generate round-trip: decoded text = %q, want both page texts", text)
 	}
 }
 
 // TestPrawnGenerateToFile drives the file-writing form: generate(path) { … }
-// writes the rendered PDF to path, and the written bytes are the same PDF.
+// writes the rendered PDF to path, and the written bytes are the same PDF. The
+// drawn text is recovered via pdfDecodedText — see TestPrawnGenerateRoundTrip
+// for why a raw substring check no longer applies.
 func TestPrawnGenerateToFile(t *testing.T) {
 	fixedClock(t)
 	dir := t.TempDir()
@@ -78,8 +125,11 @@ puts "done"
 	if err != nil {
 		t.Fatalf("read pdf: %v", err)
 	}
-	if !bytes.HasPrefix(data, []byte("%PDF-")) || !bytes.Contains(data, []byte("to file")) {
-		t.Fatalf("written file is not the expected PDF (%d bytes)", len(data))
+	if !bytes.HasPrefix(data, []byte("%PDF-")) {
+		t.Fatalf("written file is not a PDF (%d bytes)", len(data))
+	}
+	if text := pdfDecodedText(t, data); !strings.Contains(text, "to file") {
+		t.Fatalf("written file: decoded text = %q, want it to contain %q", text, "to file")
 	}
 }
 
@@ -102,7 +152,7 @@ pdf.draw_text "no-at"                              # draw_text with no options h
 
 # font reader/setter and styles.
 pdf.font "Times", style: :italic
-r << pdf.font                                       # reader -> current family
+r << pdf.font                                       # reader -> current PostScript base name
 pdf.font "Helvetica", style: :bold_italic
 
 # size/color/line-width reader+setter pairs.
@@ -152,7 +202,7 @@ r << pdf.inspect
 puts r.join("|")
 `
 	want := strings.Join([]string{
-		"Times", "14.0", "00FF00", "0000FF", "2.0",
+		"Times-Italic", "14.0", "00FF00", "0000FF", "2.0",
 		"cursor", "515", "762", "40,40", "2", "ok",
 		"#<Prawn::Document>", "#<Prawn::Document>",
 	}, "|")
@@ -467,18 +517,21 @@ func TestPrawnValueMethods(t *testing.T) {
 }
 
 // onePixelPNG returns the bytes of a 1x1 opaque black PNG, used to exercise the
-// image DSL without depending on an external fixture file.
+// image DSL without depending on an external fixture file. It is built through
+// the standard image/png encoder (rather than hand-crafted bytes) because the
+// go-opentype-backed native PDF core's decodePNG now fully decodes and
+// recompresses every PNG (to move its alpha channel into a PDF /SMask), via
+// stdlib image/png.Decode — which validates every chunk CRC and the IDAT
+// zlib/Adler-32 checksum. The prior fpdf-backed prawn's image path tolerated a
+// hand-rolled, checksum-incorrect fixture; the new one, correctly, does not.
 func onePixelPNG() []byte {
-	return []byte{
-		0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a,
-		0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R',
-		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde,
-		0x00, 0x00, 0x00, 0x0c, 'I', 'D', 'A', 'T',
-		0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01,
-		0x18, 0xdd, 0x8d, 0xb0,
-		0x00, 0x00, 0x00, 0x00, 'I', 'E', 'N', 'D', 0xae, 0x42, 0x60, 0x82,
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 0, G: 0, B: 0, A: 0xff})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err) // encoding a 1x1 in-memory image cannot fail
 	}
+	return buf.Bytes()
 }
 
 // strconv quotes s as a Ruby double-quoted string literal for embedding in test
