@@ -556,6 +556,8 @@ func (vm *VM) bootstrap() {
 	vm.registerOpentype()          // Opentype module + Opentype::Font/Face (require "opentype"), backed by go-ruby-opentype over the go-opentype text stack (font parsing, sized faces, complex-script shaping, Unicode Bidi); every adapter method installed via its Methods()/Call() surface; needs StandardError for Opentype::Error
 	vm.registerShrine()            // Shrine file-attachment (require "shrine"), backed by go-ruby-shrine; Storage(Memory/FileSystem)/Uploader/UploadedFile/Attacher; needs StandardError for Shrine::Error + StringIO for #open
 	vm.registerLiquid()            // Liquid::Template.parse(...).render (require "liquid"), backed by go-ruby-liquid; needs StandardError for Liquid::Error
+	vm.registerSass()              // Sass.compile / compile_string / compile_file + SassC::Engine (require "sass"), backed by go-ruby-sass over the pure-Go go-scss engine; needs StandardError for Sass::CompileError / SassC::SyntaxError
+	vm.registerJekyll()            // Jekyll.configuration / build + Jekyll::Site (require "jekyll"), backed by go-ruby-jekyll (static-site build/render over go-ruby-liquid); needs StandardError for Jekyll::Error
 	vm.registerRouge()             // Rouge.highlight / Rouge::Lexer.find (require "rouge"), backed by go-ruby-rouge; needs StandardError for Rouge::Error
 	vm.registerSlim()              // Slim::Template.new{src}.render (require "slim"), compile-to-source via go-ruby-slim; needs StandardError for Slim::Error
 	vm.registerHaml()              // Haml::Template.new(src).render (require "haml"), compile-to-source via go-ruby-haml; needs StandardError for Haml::Error
