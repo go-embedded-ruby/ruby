@@ -85,12 +85,13 @@ require (
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
 	github.com/go-ruby-irb/irb v0.0.0-20260630203552-657e348289b2
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
+	github.com/go-ruby-jekyll/jekyll v0.0.0-20260727160455-b77b24a0e6e3
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2
 	github.com/go-ruby-jwt/jwt v0.0.0-20260705184902-40cd404d3c65
 	github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5
 	github.com/go-ruby-kaminari/kaminari v0.0.0-20260707193800-fc9fecf9afe6
-	github.com/go-ruby-kramdown/kramdown v0.0.0-20260630191459-2e9dd5fd0be8
-	github.com/go-ruby-liquid/liquid v0.0.0-20260630164624-06905b8b5eaf
+	github.com/go-ruby-kramdown/kramdown v0.0.0-20260717070109-6152f7f5a931
+	github.com/go-ruby-liquid/liquid v0.0.0-20260727135843-2b7bb06a45c2
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
 	github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
@@ -152,13 +153,14 @@ require (
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa
 	github.com/go-ruby-rolify/rolify v0.0.0-20260707193227-5d9011931b4b
-	github.com/go-ruby-rouge/rouge v0.0.0-20260701044002-71f9c1aaa66c
+	github.com/go-ruby-rouge/rouge v0.0.0-20260717073527-64efd2552805
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
 	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75
 	github.com/go-ruby-rss/rss v0.0.0-20260630123856-ba95b4fb73c9
 	github.com/go-ruby-rubocop/rubocop v0.0.0-20260702170528-0a89da6e9147
 	github.com/go-ruby-rubygems/rubygems v0.0.0-20260630142147-63db192adc4d
 	github.com/go-ruby-saml/saml v0.0.0-20260704115648-11caa3fa0e1f
+	github.com/go-ruby-sass/sass v0.0.0-20260727152834-0a0e6d3c2540
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-semantic-puppet/semantic-puppet v0.0.0-20260709173436-e205318864ed
@@ -284,6 +286,7 @@ require (
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
+	github.com/go-scss/scss v0.0.0-20260727152331-b7fc31f3fb34 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
@@ -408,6 +411,7 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/src-d/go-errors.v1 v1.0.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

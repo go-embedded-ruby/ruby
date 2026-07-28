@@ -115,6 +115,7 @@ var providedFeatures = map[string]bool{
 	"opentype": true,
 	"shrine": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,
+	"sass": true, "jekyll": true,
 	"dry/types": true, "dry-types": true,
 	"dry/struct": true, "dry-struct": true,
 	"dry/validation": true, "dry-validation": true, "dry/schema": true, "dry-schema": true,
