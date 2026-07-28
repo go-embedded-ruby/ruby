@@ -118,6 +118,7 @@ require (
 	github.com/go-ruby-openbao/openbao v0.0.0-20260707160751-fcf5670a4d6d
 	github.com/go-ruby-openstack/openstack v0.0.0-20260710213906-771c80a1b6cf
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c
+	github.com/go-ruby-opentype/opentype v0.1.0
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
 	github.com/go-ruby-pagy/pagy v0.0.0-20260707193354-a84fe1d16a86
@@ -275,6 +276,10 @@ require (
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-opentype/bidi v0.2.0 // indirect
+	github.com/go-opentype/fonts v0.4.0 // indirect
+	github.com/go-opentype/opentype v0.3.8 // indirect
+	github.com/go-opentype/shape v0.3.2 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e // indirect

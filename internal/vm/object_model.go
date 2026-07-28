@@ -859,6 +859,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// An Images::Canvas reports Images::Canvas so its chunky_png-style pixel,
 		// drawing and PNG-output methods dispatch.
 		return vm.consts["Images::Canvas"].(*RClass)
+	case *OpentypeFont:
+		// A parsed font reports Opentype::Font so its num_glyphs / glyph_index /
+		// axes / named_instances / face methods dispatch.
+		return vm.consts["Opentype::Font"].(*RClass)
+	case *OpentypeFace:
+		// A sized face reports Opentype::Face so its measure / advance / kern /
+		// metrics / glyph_info / set_hinting / set_variation methods dispatch.
+		return vm.consts["Opentype::Face"].(*RClass)
 	case *XmlMarkup:
 		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
 		// method_missing element DSL and special methods dispatch.
