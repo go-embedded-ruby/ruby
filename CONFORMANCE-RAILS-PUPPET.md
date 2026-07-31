@@ -135,9 +135,26 @@ The constructs added during the campaign, roughly in order of files unblocked:
 - **Parser never-panics** — the front-end now returns a clean parse error rather
   than a Go panic on the handful of files that previously crashed it.
 
+## Update — 2026-07-31: four more compiler-lowering gaps closed
+
+The compile-time tail shrank further; each fix is MRI-4.0.5-exact with a
+regression suite (`internal/vm/compiler_lowering_gaps_test.go`):
+
+- **`begin…end while/until cond` post-loop** — the body runs once before the
+  first condition test, and the trailing condition resolves locals the body
+  assigns (`compileDoWhile`).
+- **Named-capture `=~`** — a literal regexp with named captures on the left of
+  `=~` statically introduces each capture as a local, bound from `$~`
+  (`regexpNamedCaptures` + `compileMatchWithCaptures`).
+- **`def <expr>.method`** on a method-call receiver — a non-local identifier
+  receiver lowers as a self-send (`compileSingletonReceiver`).
+- **Anonymous `**` mixed with explicit keywords / `yield(*, **)`** — bare
+  anonymous `**` now forwards alongside explicit pairs and through `yield`
+  (`rewriteAnonKwSplat`).
+
 ## Remaining end-to-end gaps
 
-The 6 remaining Rails gaps are in `compiler.Compile`, not the parser (the source
+The remaining Rails gaps are in `compiler.Compile`, not the parser (the source
 parses): a small tail of compile-time constructs not yet lowered. Puppet has **0**
 remaining gaps (parse + compile fully accepted).
 

@@ -400,6 +400,19 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpNot, 0, 0)
 			return
 		}
+		// `/…(?<name>…)…/ =~ str`: when the left side is a *literal* regexp with
+		// named captures, Ruby statically introduces each capture name as a local
+		// in this scope, bound after the match (nil when unmatched). Only the
+		// literal-regexp-on-the-left form triggers it; interpolated literals and the
+		// `str =~ /…/` form do not.
+		if v.Op == "=~" {
+			if rx, ok := v.Left.(*ast.RegexpLit); ok && !containsInterp(rx.Source) {
+				if names := regexpNamedCaptures(rx.Source); len(names) > 0 {
+					c.compileMatchWithCaptures(v, names)
+					return
+				}
+			}
+		}
 		c.compileNode(v.Left)
 		c.compileNode(v.Right)
 		if op, ok := fastBinOp(v.Op); ok {
@@ -496,15 +509,18 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.Super:
 		c.compileSuper(v)
 	case *ast.Yield:
-		if hasSplat(v.Args) { // dynamic count: build an Array and yield it splatted
-			c.compileSplatItems(v.Args)
+		// Bare anonymous `*` / `**` in `yield(*, **)` forward the enclosing method's
+		// anonymous parameters, exactly as in a call, so resolve them the same way.
+		yieldArgs := c.rewriteAnonArgs(v.Args)
+		if hasSplat(yieldArgs) || hasTrailingKwSplat(yieldArgs) { // dynamic count: build an Array and yield it splatted
+			c.compileSplatItems(yieldArgs)
 			b.emit(bytecode.OpInvokeBlockArray, 0, 0)
 			break
 		}
-		for _, a := range v.Args {
+		for _, a := range yieldArgs {
 			c.compileNode(a)
 		}
-		b.emit(bytecode.OpInvokeBlock, len(v.Args), 0)
+		b.emit(bytecode.OpInvokeBlock, len(yieldArgs), 0)
 	case *ast.If:
 		c.compileIf(v)
 	case *ast.While:
@@ -735,8 +751,8 @@ func (c *Compiler) rewriteAnonArgs(args []ast.Node) []ast.Node {
 				continue
 			}
 		case *ast.HashLit:
-			if isAnonKwSplat(n) {
-				out = append(out, &ast.HashLit{Keys: []ast.Node{nil}, Values: []ast.Node{c.anonLocal("**", fwdKwName)}})
+			if nh, ch := c.rewriteAnonKwSplat(n); ch {
+				out = append(out, nh)
 				changed = true
 				continue
 			}
@@ -749,11 +765,32 @@ func (c *Compiler) rewriteAnonArgs(args []ast.Node) []ast.Node {
 	return out
 }
 
-// isAnonKwSplat reports whether a HashLit is a bare anonymous `**` forward: a
-// single entry whose key and value are both nil. (A real `**nil` has a non-nil
-// NilLit value, and `**h` a non-nil value, so neither matches.)
-func isAnonKwSplat(h *ast.HashLit) bool {
-	return len(h.Keys) == 1 && h.Keys[0] == nil && h.Values[0] == nil
+// rewriteAnonKwSplat replaces every bare anonymous `**` entry (both key and
+// value nil) in a hash argument with a `**` splat of the enclosing method's
+// anonymous keyword parameter, leaving explicit pairs and real `**h` splats
+// untouched. This covers a lone `g(**)` as well as an anonymous `**` mixed with
+// explicit keywords (`g(k: v, **)`). It returns the (possibly new) hash and
+// whether any entry changed. A real `**nil` has a non-nil NilLit value and `**h`
+// a non-nil value, so neither is mistaken for the anonymous marker.
+func (c *Compiler) rewriteAnonKwSplat(h *ast.HashLit) (*ast.HashLit, bool) {
+	changed := false
+	for i := range h.Keys {
+		if h.Keys[i] == nil && h.Values[i] == nil {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return h, false
+	}
+	keys := append([]ast.Node(nil), h.Keys...)
+	vals := append([]ast.Node(nil), h.Values...)
+	for i := range keys {
+		if keys[i] == nil && vals[i] == nil {
+			vals[i] = c.anonLocal("**", fwdKwName)
+		}
+	}
+	return &ast.HashLit{Keys: keys, Values: vals}, true
 }
 
 func (c *Compiler) compileCall(v *ast.Call) {
@@ -978,6 +1015,98 @@ func escapedAt(src string, i int) bool {
 		n++
 	}
 	return n%2 == 1
+}
+
+// regexpNamedCaptures returns the named capture-group names of a regexp source,
+// in first-appearance order with duplicates removed. It recognises `(?<name>…)`
+// and `(?'name'…)`, skipping escaped characters and character classes, and does
+// not treat lookbehind (`(?<=`, `(?<!`) as a capture. Only names that are valid
+// local-variable identifiers are returned, since Ruby assigns capture locals
+// only for those (an uppercase name is a constant, not a local).
+func regexpNamedCaptures(src string) []string {
+	var names []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		if isLocalName(name) && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	inClass := false
+	for i := 0; i < len(src); {
+		switch {
+		case src[i] == '\\': // an escaped character never opens a group or class
+			i += 2
+		case inClass:
+			if src[i] == ']' {
+				inClass = false
+			}
+			i++
+		case src[i] == '[':
+			inClass = true
+			i++
+		case src[i] == '(' && i+2 < len(src) && src[i+1] == '?' && src[i+2] == '<' &&
+			i+3 < len(src) && src[i+3] != '=' && src[i+3] != '!':
+			j := i + 3
+			for j < len(src) && src[j] != '>' {
+				j++
+			}
+			add(src[i+3 : j])
+			i = j + 1
+		case src[i] == '(' && i+2 < len(src) && src[i+1] == '?' && src[i+2] == '\'':
+			j := i + 3
+			for j < len(src) && src[j] != '\'' {
+				j++
+			}
+			add(src[i+3 : j])
+			i = j + 1
+		default:
+			i++
+		}
+	}
+	return names
+}
+
+// isLocalName reports whether s is a valid Ruby local-variable identifier: a
+// lowercase letter or underscore followed by word characters.
+func isLocalName(s string) bool {
+	if s == "" {
+		return false
+	}
+	if c := s[0]; c != '_' && (c < 'a' || c > 'z') {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// compileMatchWithCaptures lowers `/…(?<name>…)…/ =~ str` for a literal regexp
+// carrying named captures: it performs the match (leaving its result — the match
+// position, or nil — as the expression value) and then binds each capture name
+// to a local in this scope, reading it from the recorded match ($~) so an absent
+// or non-participating group yields nil, exactly as MRI does.
+func (c *Compiler) compileMatchWithCaptures(v *ast.BinaryExpr, names []string) {
+	b := c.cur()
+	c.compileNode(v.Left)
+	c.compileNode(v.Right)
+	b.emit(bytecode.OpSend, b.addName("=~"), 1) // leaves the match position (or nil)
+	for _, name := range names {
+		// Reuse an existing local of this name, else declare it here.
+		depth, slot, ok := b.resolve(name)
+		if !ok {
+			slot, depth = b.localSlot(name), 0
+		}
+		b.emit(bytecode.OpGetConst, b.addName("Regexp"), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(name)), 0)
+		b.emit(bytecode.OpSend, b.addName("last_match"), 1) // $~[:name], nil if unmatched
+		b.emit(bytecode.OpSetLocal, slot, depth)
+		b.emit(bytecode.OpPop, 0, 0) // drop the capture; the match result remains
+	}
 }
 
 // compileRegexpInterp builds the interpolated pattern String on the stack (literal
@@ -1413,6 +1542,7 @@ const (
 type loopCtx struct {
 	kind       ctxKind
 	contTarget int   // loop: jump here on `next` (re-evaluate the condition)
+	contFixups []int // loop: `next` OpJump placeholders when contTarget is not yet known (a do…end post-loop compiles its condition after the body)
 	breaks     []int // loop: OpJump placeholders patched to the loop exit
 }
 
@@ -1446,6 +1576,10 @@ func (c *Compiler) compileNext(v *ast.Next) {
 	if ctx.kind == ctxBlock {
 		c.compileBreakValue(v.Value)
 		b.emit(bytecode.OpReturn, 0, 0)
+		return
+	}
+	if ctx.contTarget < 0 { // a post-loop's condition is compiled after the body: patch later
+		ctx.contFixups = append(ctx.contFixups, b.emit(bytecode.OpJump, 0, 0))
 		return
 	}
 	b.emit(bytecode.OpJump, ctx.contTarget, 0)
@@ -2103,7 +2237,26 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 	}
 }
 
+// postLoopBody reports the body of a `begin…end while/until cond` post-loop: the
+// modifier form wrapping a single `begin…end` block. Ruby runs such a body once
+// before the first condition test (MRI's do-while), and — because the body is
+// parsed before the trailing condition — the condition may reference locals the
+// body assigns. Both differ from an ordinary pre-condition `while`, so the shape
+// is compiled separately.
+func postLoopBody(v *ast.While) (*ast.Begin, bool) {
+	if len(v.Body) == 1 {
+		if bg, ok := v.Body[0].(*ast.Begin); ok {
+			return bg, true
+		}
+	}
+	return nil, false
+}
+
 func (c *Compiler) compileWhile(v *ast.While) {
+	if body, ok := postLoopBody(v); ok {
+		c.compileDoWhile(v, body)
+		return
+	}
 	b := c.cur()
 	start := b.here()
 	c.compileNode(v.Cond)
@@ -2119,6 +2272,33 @@ func (c *Compiler) compileWhile(v *ast.While) {
 		b.patch(j, b.here())
 	}
 	b.emit(bytecode.OpPushNil, 0, 0) // while evaluates to nil
+}
+
+// compileDoWhile lowers a `begin…end while/until cond` post-loop: the body runs
+// once before the first condition test, then repeats while the condition holds.
+// The body is compiled before the condition, so any local it assigns already has
+// a slot when the condition is compiled — matching MRI, where such a local is in
+// scope for the trailing condition. `next` re-evaluates the condition, so its
+// jumps are fixed up to the condition PC (unknown until the body is emitted).
+func (c *Compiler) compileDoWhile(v *ast.While, body *ast.Begin) {
+	b := c.cur()
+	start := b.here()
+	ctx := &loopCtx{kind: ctxLoop, contTarget: -1} // condition PC not yet known
+	c.ctxs = append(c.ctxs, ctx)
+	c.compileNode(body)
+	b.emit(bytecode.OpPop, 0, 0) // discard each iteration's value
+	cont := b.here()
+	ctx.contTarget = cont
+	for _, j := range ctx.contFixups { // `next` lands on the condition test
+		b.patch(j, cont)
+	}
+	c.compileNode(v.Cond)
+	b.emit(bytecode.OpBranchIf, start, 0) // repeat while the condition holds
+	c.ctxs = c.ctxs[:len(c.ctxs)-1]
+	for _, j := range ctx.breaks { // break lands on the loop's nil value
+		b.patch(j, b.here())
+	}
+	b.emit(bytecode.OpPushNil, 0, 0) // the post-loop evaluates to nil
 }
 
 // compileFor lowers `for VARS in ITER ... end` to `ITER.each { ... }`. Unlike a
@@ -2271,7 +2451,7 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	parent.children = append(parent.children, child)
 	// def recv.foo: evaluate the receiver, then define a singleton method on it.
 	if v.Recv != nil {
-		c.compileNode(v.Recv)
+		c.compileSingletonReceiver(v.Recv)
 		parent.emit(bytecode.OpDefineSingletonMethod, parent.addName(v.Name), childIdx)
 		return
 	}
@@ -2280,4 +2460,21 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 		op = bytecode.OpDefineSMethod
 	}
 	parent.emit(op, parent.addName(v.Name), childIdx)
+}
+
+// compileSingletonReceiver pushes the receiver object of a `def recv.name`
+// singleton definition. The parser emits a bare identifier receiver as a VarRef
+// whether or not it names a local; when it does not resolve to one it is, by
+// Ruby's identifier rule, a zero-arg method call on self (`def foo.bar` where
+// `foo` is a method), so it is lowered as such rather than an undefined local
+// read. Any other receiver (self, a constant, an ivar/gvar, an already-visible
+// local) compiles as its own expression.
+func (c *Compiler) compileSingletonReceiver(recv ast.Node) {
+	if vr, ok := recv.(*ast.VarRef); ok {
+		if _, _, ok := c.cur().resolve(vr.Name); !ok {
+			c.compileNode(&ast.Call{Name: vr.Name})
+			return
+		}
+	}
+	c.compileNode(recv)
 }
