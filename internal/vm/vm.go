@@ -1394,22 +1394,19 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// `private def foo; end` mark the just-defined method.
 				push(object.SymVal(name))
 			case bytecode.OpDefineSMethod:
-				definee.smethods[iseq.Names[in.A]] = &Method{name: iseq.Names[in.A], iseq: iseq.Children[in.B], owner: definee}
-				push(object.SymVal(iseq.Names[in.A]))
+				// def self.foo: a singleton method on the current self — main's
+				// singleton class at top level, or the class's own method table
+				// inside a class/module body. Using self (not the definee) is what
+				// keeps a top-level `def self.foo` off Object and on main only.
+				name := iseq.Names[in.A]
+				vm.defineSingletonMethod(self, name, iseq.Children[in.B])
+				push(object.SymVal(name))
 			case bytecode.OpDefineSingletonMethod:
 				// def recv.foo: a class receiver gains a class method; any other
 				// object gains a method on its singleton class.
 				name := iseq.Names[in.A]
 				recv := pop()
-				switch t := recv.(type) {
-				case *RClass:
-					t.smethods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: t}
-				case *RObject:
-					sc := vm.singletonClass(t)
-					sc.methods[name] = &Method{name: name, iseq: iseq.Children[in.B], owner: sc}
-				default:
-					raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
-				}
+				vm.defineSingletonMethod(recv, name, iseq.Children[in.B])
 				push(object.SymVal(name))
 			case bytecode.OpOpenSingletonClass:
 				// class << target: run the child body with target's singleton (meta)

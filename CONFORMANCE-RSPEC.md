@@ -163,14 +163,14 @@ Breakdown of the 117 parse rejects + 1 compile reject, clustered by message:
 
 | count | rbgo error cluster                                  | root cause (gap) |
 |------:|-----------------------------------------------------|------------------|
-| 33    | `unexpected token "::"`                              | G1 leading `::`  |
-| 11    | `unexpected "," after statement`                    | G3 masgn ivar lhs|
+| 33    | `unexpected token "::"`                              | G1 leading `::` — **CLOSED**|
+| 11    | `unexpected "," after statement`                    | G3 masgn ivar lhs — **CLOSED**|
 | 11    | `expected CONST, got "<<"`                           | G4 `class << self` — **CLOSED**|
-|  6    | `expected IDENT, got ")"`                            | G6 bare anon splat|
+|  6    | `expected IDENT, got ")"`                            | G6 bare anon splat — **CLOSED**|
 |  5    | `unexpected token "class"`                           | G5 `class << expr` — **CLOSED**|
-|  5    | `unexpected "do" after statement`                   | G2 cmd-call + block|
+|  5    | `unexpected "do" after statement`                   | G2 cmd-call + block — **CLOSED**|
 |  ~30  | `unexpected "..." after statement` (long literals)  | G7 line-cont + interp|
-|  1    | `compile error: cannot compile *ast.SplatArg`       | G8 `super(*args)`|
+|  1    | `compile error: cannot compile *ast.SplatArg`       | G8 `super(*args)` — **CLOSED**|
 
 ---
 
@@ -238,14 +238,15 @@ green.
 Ranked by impact (lib/ files containing the construct, out of 197). For the
 coordinated `internal/vm` / go-ruby-parser fix pass — **not fixed here.**
 
-### G1 — leading `::` (top-level constant reference) — 64 files
+### G1 — leading `::` (top-level constant reference) — 64 files — **CLOSED 2026-07-31**
 ```ruby
 if defined?(::Foo)
   x = ::Foo::Bar.new
 end
 ```
 - MRI: `Syntax OK`
-- rbgo: `parse error at line 1: unexpected token "::" (::)`
+- rbgo: **CLOSED** — parses + executes. `::Foo` / `::M::Bar` resolve from the
+  top level, and `defined?(::Foo)` returns `"constant"`, matching MRI.
 - Layer: go-ruby-parser (lexer/parser). `::Const` in expression position.
 
 ### G2 — paren-less command call with arg **and** `do…end` block — spec hot path
@@ -262,14 +263,15 @@ end
   do`, `config.expect_with :rspec do`, etc. — the single biggest blocker on
   actual `*_spec.rb` files (drives spec-file acceptance down to 22.7 %).
 
-### G3 — multiple assignment with instance-variable targets — 12 files
+### G3 — multiple assignment with instance-variable targets — 12 files — **CLOSED 2026-07-31**
 ```ruby
 @read_io, @write_io = IO.pipe
 ```
 - MRI: `Syntax OK`
-- rbgo: `parse error at line 1: unexpected "," after statement`
+- rbgo: **CLOSED** — parses + executes. Masgn now lowers ivar and attribute
+  (`o.x =`) targets on the LHS, not just locals, matching MRI.
 - Layer: parser. Note: masgn to *local* vars works (`a, b = 1, 2`); masgn to
-  *ivars* on the LHS does not.
+  *ivars* on the LHS now works too.
 
 ### G4 — `class << self` (singleton class, statement position) — 20 files — **CLOSED 2026-07-31**
 ```ruby
@@ -299,15 +301,16 @@ end
   (`Kernel#method`, see §2) rather than failing here.
 - Layer: parser + compiler + vm (same production as G4).
 
-### G6 — bare anonymous splat parameter `(a, *)` — 3 files
+### G6 — bare anonymous splat parameter `(a, *)` — 3 files — **CLOSED 2026-07-31**
 ```ruby
 def self.extract(file, line, *)
   [file, line]
 end
 ```
 - MRI: `Syntax OK`
-- rbgo: `parse error: expected IDENT, got ")" ())`
-- Layer: parser. Trailing nameless `*` (and likely nameless `**`/`&`).
+- rbgo: **CLOSED** — parses + executes. Trailing nameless `*`, `**` and `&`
+  parameters all accept (and discard) their arguments, matching MRI.
+- Layer: parser. Trailing nameless `*` (and nameless `**`/`&`).
 
 ### G7 — backslash line-continuation + interpolation in the continued string
 ```ruby
@@ -321,17 +324,17 @@ x = "a" \
   fragment contains `#{…}`. Accounts for the ~30 long "after statement" rejects
   (e.g. `raise ArgumentError, "..." \` / `"...`#{verb}`..."`).
 
-### G8 — `super(*args)` (explicit super with a splat argument) — compile stage
+### G8 — `super(*args)` (explicit super with a splat argument) — compile stage — **CLOSED 2026-07-31**
 ```ruby
 class B < A
   def m(*a); super(*a); end
 end
 ```
 - MRI: `[1, 2]`
-- rbgo: `compile error: cannot compile *ast.SplatArg`
-- Layer: **compiler** (parses, fails to lower). The only compile-stage reject in
-  the lib sweep (`verifying_message_expectation.rb`). Plain `f(*args)` lowers
-  fine; only inside an explicit `super(...)` does the splat arg fail.
+- rbgo: **CLOSED** — compiles + executes; `B.new.m(1, 2)` returns `[1, 2]`.
+  The explicit-`super` splat argument now lowers like any other splat call.
+- Layer: **compiler** (parses + lowers). Was the only compile-stage reject in
+  the lib sweep (`verifying_message_expectation.rb`).
 
 ### Runtime / semantic gaps (surface only after parse succeeds)
 
