@@ -229,3 +229,75 @@ func TestNumericLiteralValuePanics(t *testing.T) {
 		}()
 	}
 }
+
+// TestRegexpNamedCaptures drives the static extraction of `=~` capture-group
+// names directly, covering escaped characters, character classes, lookbehind
+// (which is not a capture), the `(?'name'…)` spelling, de-duplication, and names
+// that are not valid local identifiers (skipped). Each expectation matches how
+// MRI introduces capture locals for a literal regexp on the left of `=~`.
+func TestRegexpNamedCaptures(t *testing.T) {
+	cases := []struct {
+		src  string
+		want []string
+	}{
+		{`(?<a>.)(?<b>.)`, []string{"a", "b"}},
+		{`\((?<c>.)`, []string{"c"}},          // an escaped paren opens no group
+		{`\\(?<d>.)`, []string{"d"}},          // an escaped backslash is skipped as a pair
+		{`[()<>?](?<e>.)`, []string{"e"}},     // group syntax inside a class is literal
+		{`(?<=x)(?<f>.)`, []string{"f"}},      // positive lookbehind is not a capture
+		{`(?<!x)(?<g>.)`, []string{"g"}},      // negative lookbehind is not a capture
+		{`(?'h'.)`, []string{"h"}},            // the quoted spelling
+		{`(?<a>.)(?<a>.)`, []string{"a"}},     // a repeated name is recorded once
+		{`(?<Bad>.)(?<ok>.)`, []string{"ok"}}, // a non-local name (uppercase) is skipped
+		{`(?<>.)(?<i>.)`, []string{"i"}},      // an empty name is skipped
+		{`no captures here`, nil},             // a plain pattern has none
+	}
+	for _, tc := range cases {
+		got := regexpNamedCaptures(tc.src)
+		if len(got) != len(tc.want) {
+			t.Fatalf("regexpNamedCaptures(%q) = %v, want %v", tc.src, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("regexpNamedCaptures(%q) = %v, want %v", tc.src, got, tc.want)
+			}
+		}
+	}
+}
+
+// TestIsLocalName covers the identifier-validity predicate used to decide which
+// capture names become locals: empty, a bad leading character, a bad interior
+// character, and the accepted shapes (leading letter/underscore, then word
+// characters including uppercase and digits).
+func TestIsLocalName(t *testing.T) {
+	cases := []struct {
+		s    string
+		want bool
+	}{
+		{"", false},
+		{"a", true},
+		{"_x", true},
+		{"abc123", true},
+		{"a_B9", true},
+		{"Foo", false}, // uppercase leading char
+		{"1ab", false}, // digit leading char
+		{"a-b", false}, // invalid interior char
+	}
+	for _, tc := range cases {
+		if got := isLocalName(tc.s); got != tc.want {
+			t.Fatalf("isLocalName(%q) = %v, want %v", tc.s, got, tc.want)
+		}
+	}
+}
+
+// TestRewriteAnonKwSplatUnchanged drives the no-op path of the anonymous `**`
+// hash rewrite: an ordinary keyword hash (no bare `**` marker) is returned as-is.
+func TestRewriteAnonKwSplatUnchanged(t *testing.T) {
+	c := &Compiler{}
+	c.push(newBuilder("<t>", nil))
+	h := &ast.HashLit{Keys: []ast.Node{&ast.SymbolLit{Name: "a"}}, Values: []ast.Node{&ast.IntLit{Value: 1}}}
+	got, changed := c.rewriteAnonKwSplat(h)
+	if changed || got != h {
+		t.Fatalf("rewriteAnonKwSplat(explicit hash) = (%p, %v), want (%p, false)", got, changed, h)
+	}
+}

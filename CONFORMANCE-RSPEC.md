@@ -92,6 +92,33 @@ over caller locals, the `LocalJumpError` branch, and paren-form regression.
 
 ---
 
+## Update — 2026-07-31: compiler-lowering gaps closed (post-loop, named captures, expr-receiver singleton def, anonymous `**`)
+
+Four compiler-lowering gaps are **closed** and execute with MRI-4.0.5 semantics
+(regression suite `internal/vm/compiler_lowering_gaps_test.go` +
+`internal/compiler/whitebox_test.go`):
+
+- **`begin…end while/until cond` post-loop.** `postLoopBody` recognises the
+  modifier form wrapping a `begin` and `compileDoWhile` runs the body once before
+  the first condition test, compiling the body before the condition so a local
+  the body assigns is in scope for the trailing condition (`begin; x = …; end
+  until x >= 3` now yields `x`; MRI-exact). `next` re-evaluates the condition.
+- **Named-capture `=~` local pre-declaration.** For a *literal* regexp with named
+  captures on the left of `=~`, the compiler statically introduces each valid
+  capture name as a local (`regexpNamedCaptures` + `compileMatchWithCaptures`),
+  bound from `$~` after the match (nil when unmatched / non-participating). Only
+  the literal-on-the-left, non-interpolated form triggers it, matching MRI.
+- **`def <expr>.method` on a method-call receiver.** `compileSingletonReceiver`
+  lowers a bare identifier receiver that is not a local as a zero-arg self-send
+  (`def foo.bar` where `foo` is a method), reusing the singleton-def path.
+- **Anonymous `**` mixed with explicit keywords, and `yield(*, **)`.**
+  `rewriteAnonKwSplat` fills bare anonymous `**` entries even when combined with
+  explicit pairs, and `yield` now routes its args through the anonymous-forward
+  rewrite, so `g(k: v, **)` and `yield(*, **)` forward intact.
+
+`G7` (backslash line-continuation with interpolation in the continued fragment)
+is also **closed** by the `go-ruby-parser v0.1.0` bump.
+
 ## Update — 2026-07-31: gaps G4 + G5 closed (singleton classes)
 
 Both singleton-class parse gaps are **closed** and execute with MRI-4.0.5
@@ -312,17 +339,17 @@ end
   parameters all accept (and discard) their arguments, matching MRI.
 - Layer: parser. Trailing nameless `*` (and nameless `**`/`&`).
 
-### G7 — backslash line-continuation + interpolation in the continued string
+### G7 — backslash line-continuation + interpolation in the continued string — **CLOSED 2026-07-31**
 ```ruby
 x = "a" \
     "b#{1}"
 ```
-- MRI: `Syntax OK`
-- rbgo: `parse error at line 2: unexpected "b" after statement`
-- Layer: lexer. Adjacent string-literal concatenation across a `\` line
-  continuation works when both fragments are plain, but breaks when the second
-  fragment contains `#{…}`. Accounts for the ~30 long "after statement" rejects
-  (e.g. `raise ArgumentError, "..." \` / `"...`#{verb}`..."`).
+- MRI: `Syntax OK` → `"ab1"`
+- rbgo: **CLOSED** — parses + executes; `x` is `"ab1"`. Closed by the
+  `go-ruby-parser v0.1.0` bump (the lexer now folds a `\`+newline continuation
+  before an interpolated fragment). Cleared the ~30 "after statement" rejects
+  (e.g. `raise ArgumentError, "..." \` / `"...#{verb}..."`).
+- Layer: lexer (go-ruby-parser).
 
 ### G8 — `super(*args)` (explicit super with a splat argument) — compile stage — **CLOSED 2026-07-31**
 ```ruby
