@@ -1,0 +1,54 @@
+name: arch-qemu-nightly
+
+# Scheduled QEMU validation of the four EXOTIC 64-bit targets that GitHub-hosted
+# runners cannot run natively: riscv64, loong64, ppc64le, s390x.
+#
+# These lanes used to run on every PR/push, where qemu-user emulation (~50-100x
+# slower than native) was the CI bottleneck (~10 min/lane). They have been moved
+# off the per-PR critical path: amd64 + arm64 gate merges natively in ci.yml, and
+# because rbgo is pure-Go (CGO=0, no hand-written assembly) arch-specific risk is
+# low. This nightly job preserves the exotic-arch coverage as an immediate
+# fallback, and stays green even before the real-hardware secrets in
+# native-arch.yml are configured. Once real-HW validation is active, this remains
+# a cheap emulated safety net.
+#
+# Triggers: nightly schedule + manual dispatch ONLY — never on pull_request/push.
+
+on:
+  schedule:
+    # 03:17 UTC daily (off-peak; odd minute to avoid the top-of-hour stampede).
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arch-qemu-nightly
+  cancel-in-progress: true
+
+jobs:
+  arch-qemu:
+    name: arch ${{ matrix.goarch }} (qemu)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goarch: riscv64, qemu: qemu-riscv64-static }
+          - { goarch: loong64, qemu: qemu-loongarch64-static }
+          - { goarch: ppc64le, qemu: qemu-ppc64le-static }
+          - { goarch: s390x,   qemu: qemu-s390x-static }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: sudo apt-get update && sudo apt-get install -y qemu-user-static
+      - name: Test under qemu (${{ matrix.goarch }})
+        # qemu-user emulation is ~50-100x slower than native; the heaviest lane
+        # (s390x, the slowest target) can exceed Go's default 10m test-binary
+        # timeout on the full vm suite. Give the emulated lanes generous headroom
+        # so a slow-but-correct run isn't killed as a false failure. (On real
+        # s390x silicon the same suite runs natively in seconds.)
+        run: GOARCH=${{ matrix.goarch }} go test -timeout=30m -exec=${{ matrix.qemu }} ./...

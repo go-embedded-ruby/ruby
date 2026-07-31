@@ -574,6 +574,17 @@ go tool cover -func=cov.out | tail -1
 
 If a parent `go.work` is present, prefix commands with `GOWORK=off`.
 
+### CI layering
+
+Per-PR CI is a **fast native gate**: the `-race` + 100 %-coverage suite on
+ubuntu/macos/windows plus native `amd64` and `arm64` lanes. Because rbgo is
+pure-Go (CGO=0, no assembly), the four exotic 64-bit targets
+(`riscv64`/`loong64`/`ppc64le`/`s390x`) are validated **off the per-PR critical
+path** — nightly under QEMU, and on **real hardware via the GCC Compile Farm**
+(ppc64le/riscv64/loong64) plus a LinuxONE `s390x` host. The real-hardware
+workflow is scheduled + secret-gated (inert until credentials are added) to
+respect the cfarm acceptable-use policy. See **[docs/CI.md](docs/CI.md)**.
+
 Correctness is judged against **independent reference implementations** of
 Ruby 4.0 — **MRI (CRuby) 4.0.5** and **JRuby**, with **TruffleRuby** being added
 as a third reference (conformance + performance). The differential oracle
