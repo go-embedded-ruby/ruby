@@ -69,6 +69,35 @@ func TestSingletonClass(t *testing.T) {
 	}
 }
 
+// TestSingletonClassOfExpression covers the `class << <expr>` form as an
+// expression (gap G5): the singleton-class body is a real scope whose value is
+// its last expression, so `(class << x; self; end)` evaluates to x's singleton
+// class. Asserted against MRI Ruby 4.0.5 (identity via Object#equal?, so the
+// object returned is the very same singleton class Object#singleton_class hands
+// back — the pattern `rspec/support.rb` relies on).
+func TestSingletonClassOfExpression(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// `class << obj; self; end` IS obj's singleton class (same identity).
+		{"o = Object.new\np o.singleton_class.equal?(class << o; self; end)", "true\n"},
+		// same for a class receiver: `class << C; self; end` == C.singleton_class.
+		{"class C; end\np C.singleton_class.equal?(class << C; self; end)", "true\n"},
+		// the receiver may be an arbitrary expression, not just self / a local.
+		{"p((class << Object.new; self; end).class)", "Class\n"},
+		{"p((class << [1, 2]; self; end).is_a?(Class))", "true\n"},
+		// the body is a real scope; its value is the last expression.
+		{"x = (class << Object.new; 40; 2; end)\np x", "2\n"},
+		// module class-level accessor via `class << self` (shared-examples shape).
+		{"module M; class << self; def reg; \"R\"; end; end; end\nputs M.reg", "R\n"},
+		// def on the singleton returned by `class << obj; self; end` targets obj.
+		{"o = Object.new\nsc = (class << o; self; end)\nsc.send(:define_method, :hi) { 5 }\np o.hi", "5\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestSingletonClassErrors covers `class << target` for a target with no
 // singleton class (an immediate value), which MRI rejects with a TypeError.
 func TestSingletonClassErrors(t *testing.T) {

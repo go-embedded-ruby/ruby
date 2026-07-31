@@ -32,6 +32,56 @@ All numbers below are from real runs, not static reasoning.
 
 ---
 
+## Update — 2026-07-31: gaps G4 + G5 closed (singleton classes)
+
+Both singleton-class parse gaps are **closed** and execute with MRI-4.0.5
+semantics. `class << <expr>` (of which `class << self` is one case) is one
+grammar production: the parser emits `ast.SingletonClassDef{Target, Body}`, the
+compiler lowers it via `compileSingletonClass` → `OpOpenSingletonClass`, and the
+VM runs the body with the target's singleton (meta) class as the definee.
+
+Re-measured with `scripts/conformance/rspec/run.sh` (parser dep
+`go-ruby-parser 2026-07-03`, which post-dates the 2026-06-25 snapshot the body of
+this doc was measured against — several other gaps have also closed since):
+
+| metric | this doc (2026-06-25) | now (2026-07-31) |
+|--------|-----------------------|-------------------|
+| **G4** `class << self` | open (11 `expected CONST, got "<<"`) | **CLOSED** |
+| **G5** `class << expr` | open (5 `unexpected token "class"`) | **CLOSED** |
+| `lib/` parse acceptance | 79 / 197 = 40.1 % | **196 / 197 = 99.5 %** |
+| DSL snippets vs MRI | 5 / 10 PASS | **10 / 10 PASS** |
+| `rspec/support.rb` (line 21 `(class << self; self; end).__send__`) | parse FAIL (G5) | **parses in full** (load then hits a runtime gap, not the parser) |
+
+Per-repo `lib/` acceptance now: rspec-support **33/33**, rspec-core **73/74**,
+rspec-expectations **49/49**, rspec-mocks **41/41**. The single remaining reject
+is unrelated to G4/G5 — `rspec-core/lib/rspec/core/formatters.rb:241` uses the
+`retry` keyword (a distinct, newly-surfaced parse gap).
+
+**`require "rspec/support"`**: the file now parses in full — the line-21
+`class << expr` blocker is gone. With the `$LOAD_PATH` cwd workaround (gap
+G-LOAD, still open) the require advances *past* parsing and reaches a *runtime*
+gap instead — `undefined method 'method' for class 'Kernel'` (`Kernel#method`
+reflection is not yet defined). So the parse gap G5 no longer blocks the load;
+the first hard failure has moved from the parser to that runtime method.
+
+MRI-parity proofs (rbgo output byte-identical to `ruby` 4.0.5):
+
+```ruby
+class Foo; class << self; def bar; 42; end; end; end; Foo.bar   # => 42  (class method via class << self)
+o = Object.new; o.singleton_class.equal?(class << o; self; end) # => true (singleton_class identity)
+module M; class << self; def reg; "R"; end; end; end; M.reg     # => "R" (module class-level accessor)
+(class << Object.new; 40; 2; end)                               # => 2   (body value = last expression)
+```
+
+Regression guard: `internal/vm/singleton_test.go`
+(`TestSingletonClass`, `TestSingletonClassOfExpression`,
+`TestSingletonClassErrors`) and `go-ruby-parser/singleton_class_test.go`.
+
+The rest of this document is the original 2026-06-25 gap map, retained for
+history; the table below has been annotated where G4/G5 are referenced.
+
+---
+
 ## 1. Parse sweep — `lib/` trees (the framework code itself)
 
 MRI baseline: **all 197** `lib/` files pass `ruby -c`. So every rbgo reject
@@ -55,9 +105,9 @@ Breakdown of the 117 parse rejects + 1 compile reject, clustered by message:
 |------:|-----------------------------------------------------|------------------|
 | 33    | `unexpected token "::"`                              | G1 leading `::`  |
 | 11    | `unexpected "," after statement`                    | G3 masgn ivar lhs|
-| 11    | `expected CONST, got "<<"`                           | G4 `class << self`|
+| 11    | `expected CONST, got "<<"`                           | G4 `class << self` — **CLOSED**|
 |  6    | `expected IDENT, got ")"`                            | G6 bare anon splat|
-|  5    | `unexpected token "class"`                           | G5 `class << expr`|
+|  5    | `unexpected token "class"`                           | G5 `class << expr` — **CLOSED**|
 |  5    | `unexpected "do" after statement`                   | G2 cmd-call + block|
 |  ~30  | `unexpected "..." after statement` (long literals)  | G7 line-cont + interp|
 |  1    | `compile error: cannot compile *ast.SplatArg`       | G8 `super(*args)`|
@@ -68,7 +118,7 @@ Breakdown of the 117 parse rejects + 1 compile reject, clustered by message:
 
 | entrypoint            | result |
 |-----------------------|--------|
-| `require "rspec/support"`      | **fails** — `rspec/support.rb:21` `unexpected token "class"` (gap G5) |
+| `require "rspec/support"`      | parse gap **G5 closed** — `rspec/support.rb` parses in full; load now advances to a *runtime* gap (`Kernel#method` undefined), not the parser (see 2026-07-31 update) |
 | `require "rspec/core"`         | fails (depends on rspec/support) |
 | `require "rspec/expectations"` | fails (depends on rspec/support) |
 | `require "rspec/mocks"`        | fails (depends on rspec/support) |
@@ -93,11 +143,14 @@ No RSpec entrypoint loads under rbgo. Two distinct blockers surface:
 Ten hand-written snippets reproducing RSpec's real DSL patterns *without*
 loading RSpec. Run through rbgo and MRI; stdout + exit code compared.
 
-**Result: 5 PASS / 5 FAIL.**
+**Result (2026-06-25 snapshot): 5 PASS / 5 FAIL.** As of 2026-07-31 the harness
+measures **10 PASS / 0 FAIL** — G4 flipped 01 and 09; the three runtime gaps
+(G-RT1/2/3) have since closed too. Rows below keep the original per-snippet
+diagnosis.
 
 | # | snippet | pattern exercised | result |
 |---|---------|-------------------|--------|
-| 01 | describe/it DSL | `define_method` + `instance_exec` + class-level block recording, `class << self` accessor | **FAIL** (parse G4) |
+| 01 | describe/it DSL | `define_method` + `instance_exec` + class-level block recording, `class << self` accessor | **PASS** (G4 closed) |
 | 02 | `let` memoization | `define_method` caching in ivar, `instance_exec` | PASS |
 | 03 | `method_missing` matcher | `be_<predicate>` dispatch via `method_missing` + `respond_to_missing?` | **FAIL** (semantic G-RT1) |
 | 04 | Comparable / `===` | `Comparable` mixin, `<=>`, `Range#===` | PASS |
@@ -105,7 +158,7 @@ loading RSpec. Run through rbgo and MRI; stdout + exit code compared.
 | 06 | nested context inheritance | `Class.new(parent)` + `class_eval(&block)` + `superclass` | PASS |
 | 07 | yield / block args | explicit block params, `block.call`, lambdas | PASS |
 | 08 | stub / send | `define_singleton_method`, `__send__`, `public_send` | **FAIL** (missing core G-RT2) |
-| 09 | shared examples registry | module `class << self` + `instance_exec(*args, &block)` | **FAIL** (parse G4) |
+| 09 | shared examples registry | module `class << self` + `instance_exec(*args, &block)` | **PASS** (G4 closed) |
 | 10 | `expect(x).to(matcher)` chain | fluent objects, raise/rescue | PASS |
 
 **Verdict.** rbgo's *core* dynamism holds up well: `define_method`,
@@ -158,7 +211,7 @@ end
 - Layer: parser. Note: masgn to *local* vars works (`a, b = 1, 2`); masgn to
   *ivars* on the LHS does not.
 
-### G4 — `class << self` (singleton class, statement position) — 20 files
+### G4 — `class << self` (singleton class, statement position) — 20 files — **CLOSED 2026-07-31**
 ```ruby
 class Foo
   class << self
@@ -167,16 +220,24 @@ class Foo
 end
 ```
 - MRI: `Syntax OK`
-- rbgo: `parse error at line 2: expected CONST, got "<<" (<<)`
-- Layer: parser. Blocks DSL snippets 01 and 09.
+- rbgo: **CLOSED** — parses + executes; `Foo.bar` returns `1`. DSL snippets 01
+  and 09 now PASS. `ast.SingletonClassDef` → `compileSingletonClass` →
+  `OpOpenSingletonClass`.
+- Layer: parser + compiler + vm.
 
-### G5 — `class << expr` (singleton class of an expression) — RSpec bootstrap
+### G5 — `class << expr` (singleton class of an expression) — RSpec bootstrap — **CLOSED 2026-07-31**
+
 ```ruby
 (class << self; self; end).__send__(:define_method, name) { }
 ```
+
 - MRI: `Syntax OK`
-- rbgo: `parse error: unexpected token "class"`
-- Layer: parser. This is `rspec/support.rb:21` — the first hard load blocker.
+- rbgo: **CLOSED** — parses + executes. The body is a real scope whose value is
+  its last expression, so `(class << obj; self; end)` returns `obj`'s singleton
+  class (`obj.singleton_class.equal?(...)` is `true`). `rspec/support.rb:21` now
+  parses in full; the load advances past the parser to a runtime gap
+  (`Kernel#method`, see §2) rather than failing here.
+- Layer: parser + compiler + vm (same production as G4).
 
 ### G6 — bare anonymous splat parameter `(a, *)` — 3 files
 ```ruby
