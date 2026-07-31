@@ -32,6 +32,66 @@ All numbers below are from real runs, not static reasoning.
 
 ---
 
+## Update — 2026-07-31: gap G2 closed (command call + `do…end` block)
+
+**G2 is closed** and executes with MRI-4.0.5 semantics. A paren-less command
+call whose trailing argument is followed by a `do…end` block —
+`describe "x" do … end`, `foo bar do … end`,
+`config.expect_with :rspec do |x| … end` — now parses *and runs*. The block
+binds to the **outermost** command call (not to the last argument), matching
+Ruby's classic do-vs-brace precedence rule.
+
+The parse gap closed in `go-ruby-parser` via commit `0fe341b` ("Attach do…end
+block to a receiver command call", 2026-06-26); it is already in the parser
+version rbgo pins (`v0.0.0-20260703103305`). The compiler + VM already lower and
+execute the resulting AST, so no rbgo production change was required — this
+update adds the **execution** regression guard and re-measures.
+
+**Measured impact — pure G2** (single parser commit `0fe341b^` → `0fe341b`, run
+over an *identical* current RSpec file set, `parser.Parse` only, so the delta is
+attributable to G2 alone):
+
+| file set | before (G2 open) | after (G2 closed) | `do`-rejects before → after |
+|----------|------------------|-------------------|------------------------------|
+| **spec files** (the G2 hot path) | 34 / 276 = **12.3 %** | 236 / 276 = **85.5 %** | **237 → 1** |
+| lib files | 130 / 197 = 66.0 % | 132 / 197 = 67.0 % | 5 → 0 |
+| all (lib+spec) | 164 / 473 = 34.7 % | 368 / 473 = **77.8 %** | 242 → 1 |
+
+G2 alone lifts **spec-file** parse acceptance **12.3 % → 85.5 % (+73.2 pts)**,
+eliminating 236 of the 237 `unexpected "do" after statement` rejects — by far
+the single biggest parse-acceptance lever, exactly as this doc predicted. Before
+the fix, `unexpected "do" after statement` was **97.9 %** of all spec-file
+rejects (237 / 242).
+
+With the full current parser + VM that rbgo ships (G2 plus every later fix),
+re-measured today with `scripts/conformance/rspec/run.sh` + a spec-file sweep:
+
+| metric | now (2026-07-31) |
+|--------|-------------------|
+| `lib/` parse acceptance | 196 / 197 = **99.5 %** |
+| **spec-file** parse acceptance | 274 / 276 = **99.3 %** |
+| DSL snippets vs MRI | **10 / 10 PASS** |
+
+MRI-parity proofs (rbgo output byte-identical to `ruby` 4.0.5):
+
+```ruby
+def foo(x); yield x*2; end; foo 3 do |n| p n end          # => 6   (yield through a command-call block)
+def m1(x); "m1:#{block_given?}"; end                       # do binds to the OUTER command → m1 sees the block
+def m2; "m2:#{block_given?}"; end
+puts(m1 m2 do end)                                         # => m1:true
+puts(m1 m2 { })                                            # => m1:false  ({…} binds to the NEAREST call, m2)
+def describe(n); "D:#{n}(#{yield})"; end                   # nested RSpec DSL shape
+def it(n); "I:#{n}=#{yield}"; end
+puts(describe "o" do; it "i" do 42 end; end)               # => D:o(I:i=42)
+```
+
+Regression guard: `internal/vm/command_call_block_test.go`
+(`TestCommandCallBlock`) — 20 cases covering yield-through, do-vs-brace
+precedence, nested describe/it, splat/keyword args, `&block` capture, closure
+over caller locals, the `LocalJumpError` branch, and paren-form regression.
+
+---
+
 ## Update — 2026-07-31: gaps G4 + G5 closed (singleton classes)
 
 Both singleton-class parse gaps are **closed** and execute with MRI-4.0.5
