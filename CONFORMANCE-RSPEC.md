@@ -125,6 +125,17 @@ the bare `def expr.method` form, so `compileSingletonReceiver` lowers it with no
 compiler change. End-to-end regression in `internal/vm/def_receiver_test.go`
 (`TestDefWithParenReceiver`), MRI-4.0.5-verified.
 
+The **modifier-`rescue`-after-a-command-call** precedence gap is **closed** by the
+`go-ruby-parser v0.1.2` bump. A paren-less command call followed by a modifier
+`rescue` — `raise "x" rescue 42` — now parses as `(raise "x") rescue 42`, the
+`rescue` wrapping the *whole* call rather than binding to the last argument; and
+`def … end rescue nil` likewise wraps the whole definition. rbgo's compiler
+already lowered the resulting `Begin`/rescue node correctly, so the bump alone
+activates it — no compiler change. End-to-end regression in
+`internal/vm/rescue_modifier_command_test.go` (`TestRescueModifierCommandCall`),
+MRI-4.0.5-verified, including the negative that a non-`StandardError` (`raise
+Exception`) still propagates past the bare modifier.
+
 ## Update — 2026-07-31: gaps G4 + G5 closed (singleton classes)
 
 Both singleton-class parse gaps are **closed** and execute with MRI-4.0.5
