@@ -32,3 +32,30 @@ func TestDefWithReceiver(t *testing.T) {
 		t.Errorf("integer singleton: got %v want TypeError", err)
 	}
 }
+
+// TestDefWithParenReceiver covers the parenthesized singleton-receiver form
+// `def (expr).name`, added to the parser in go-ruby-parser v0.1.1. The parser
+// emits the SAME MethodDef/Recv shape as the bare `def expr.name` form, so
+// compileSingletonReceiver lowers it identically — this asserts the whole
+// parse+compile+run pipeline end-to-end. Oracle: MRI Ruby 4.0.5.
+func TestDefWithParenReceiver(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// Local-variable receiver, with a keyword parameter.
+		{`obj = Object.new; def (obj).kw(a:); a; end; p obj.kw(a: 5)`, "5\n"},
+		// Constant (class) receiver → a class method.
+		{`def (String).greet; "hi"; end; p String.greet`, "\"hi\"\n"},
+		// Method-call receiver: the receiver object is the call's result.
+		{`x = Object.new; def (x.itself).m; 1; end; p x.m`, "1\n"},
+		// Endless form with a parenthesized receiver.
+		{`o = Object.new; def (o).f = 9; p o.f`, "9\n"},
+		// Parenthesized `self` receiver at the top level (main's singleton).
+		{`def (self).top; 42; end; p top`, "42\n"},
+		// Still a singleton method: defined on that object only, not its class.
+		{`o = Object.new; def (o).g; 1; end; p Object.new.respond_to?(:g)`, "false\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}

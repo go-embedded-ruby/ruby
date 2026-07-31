@@ -119,6 +119,12 @@ Four compiler-lowering gaps are **closed** and execute with MRI-4.0.5 semantics
 `G7` (backslash line-continuation with interpolation in the continued fragment)
 is also **closed** by the `go-ruby-parser v0.1.0` bump.
 
+The parenthesized singleton-receiver form `def (expr).method` is **closed** by the
+`go-ruby-parser v0.1.1` bump: the parser emits the same `MethodDef`/`Recv` node as
+the bare `def expr.method` form, so `compileSingletonReceiver` lowers it with no
+compiler change. End-to-end regression in `internal/vm/def_receiver_test.go`
+(`TestDefWithParenReceiver`), MRI-4.0.5-verified.
+
 ## Update — 2026-07-31: gaps G4 + G5 closed (singleton classes)
 
 Both singleton-class parse gaps are **closed** and execute with MRI-4.0.5
