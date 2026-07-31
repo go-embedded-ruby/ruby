@@ -55,7 +55,7 @@ mechanism, so i18n is blocked on rbgo independently of any parser issue.
 | mustache | FAIL | `mustache.rb:192` `... if not partialpath and raise_on_context_miss?` | parse-error (`and`/`not`) | 0/5 |
 | minitest | FAIL | `minitest.rb:20` `(class << self; self; end)` | parse-error (singleton-class expr) | 0/4 |
 | rake | FAIL | `rake/version.rb:6` `MAJOR, MINOR, BUILD, *OTHER = …` | parse-error (constant multiple-assignment) | 0/4 |
-| Liquid | FAIL | `require "strscan"` | unsupported-stdlib-require | 0/5 |
+| Liquid | FAIL (as of 2026-06-25; `strscan` is now provided — see note below) | `require "strscan"` | unsupported-stdlib-require | 0/5 |
 | Rack | FAIL | `rack.rb` `autoload …` | missing-method (`autoload`) | 0/4 |
 | i18n | FAIL | `i18n.rb:59` `current = Fiber[…] || self.config = …` | parse-error (assignment inside expression) + needs `concurrent-ruby` | 0/3 |
 | ActiveSupport core_ext | 27/117 files parse+run standalone (~23%) | mixed | parse-error 45, missing-method 8, intra-AS/stdlib-load 37 | n/a (file sweep) |
@@ -145,7 +145,6 @@ These pure-Ruby/stdlib feature names are unknown to rbgo's loader
 
 | Feature | Blocks | Notes |
 |---|---|---|
-| `strscan` | **Liquid** (hard blocker) | StringScanner; pure-Ruby lexers depend on it |
 | `optparse` | minitest, rake | option parser |
 | `fileutils` | rake | filesystem ops |
 | `rbconfig` | rake | build config constants |
@@ -155,7 +154,12 @@ These pure-Ruby/stdlib feature names are unknown to rbgo's loader
 | `concurrent/map`, `concurrent/hash` | **i18n** | external gem `concurrent-ruby`, not stdlib |
 
 Already provided by rbgo (no gap): `set`, `date`, `time`, `bigdecimal`,
-`base64`, `digest`, `json`, `zlib`, `stringio`, `securerandom`.
+`base64`, `digest`, `json`, `zlib`, `stringio`, `securerandom`, `strscan`
+(`StringScanner`, backed by go-ruby-strscan — wired since this report's
+2026-06-25 run; `require "strscan"; StringScanner.new(...)` works today, so it
+is no longer Liquid's blocker. Liquid's overall LOAD/USAGE status has not been
+re-measured since, so the numbers above are not updated — only this stale
+"unsupported" claim is corrected).
 
 ## Suggested fix order (maximizes libraries unblocked per unit of work)
 
@@ -164,7 +168,9 @@ Already provided by rbgo (no gap): `set`, `date`, `time`, `bigdecimal`,
 3. P1-7..9 `alias_method` / `private` / fix bare `alias` → unblocks the largest
    slice of ActiveSupport core_ext (the dominant missing-method cluster).
 4. P0-5 leading `::` (parse + resolve) → unblocks Rack utils and AS date code.
-5. P2 `strscan` (StringScanner) → unblocks Liquid (its only blocker).
+5. ~~P2 `strscan` (StringScanner) → unblocks Liquid (its only blocker).~~ Done:
+   `strscan`/`StringScanner` is now wired (go-ruby-strscan). Liquid's LOAD
+   result above predates this fix and has not been re-measured.
 6. P0-3 singleton-class expression → unblocks minitest.
 7. P1-12 `autoload` stub → unblocks Rack's entrypoint.
 8. P0-4 assignment-in-expression + P2 `optparse`/`fileutils`/etc. → chips away

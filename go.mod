@@ -128,7 +128,7 @@ require (
 	github.com/go-ruby-parser/parser v0.0.0-20260703103305-5ae12948602f
 	github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b
 	github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d
-	github.com/go-ruby-prawn/prawn v0.0.0-20260704123330-7bae7647bcd1
+	github.com/go-ruby-prawn/prawn v0.0.0-20260728194101-a5f2d786bf88
 	github.com/go-ruby-prettyprint/prettyprint v0.0.0-20260629152429-60a380e82d7d
 	github.com/go-ruby-prime/prime v0.0.0-20260703153932-08f6fe218cd4
 	github.com/go-ruby-protobuf/protobuf v0.0.0-20260704100903-2defbe43d396
@@ -280,10 +280,9 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-opentype/bidi v0.2.0 // indirect
 	github.com/go-opentype/fonts v0.4.0 // indirect
-	github.com/go-opentype/opentype v0.3.8 // indirect
-	github.com/go-opentype/shape v0.3.2 // indirect
+	github.com/go-opentype/opentype v0.5.0 // indirect
+	github.com/go-opentype/shape v0.3.3 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
-	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
 	github.com/go-scss/scss v0.0.0-20260727152331-b7fc31f3fb34 // indirect
