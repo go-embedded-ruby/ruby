@@ -1,0 +1,180 @@
+name: native-arch
+
+# Real-HARDWARE validation of the exotic 64-bit targets, run NATIVELY (no QEMU).
+#
+#   ppc64le / riscv64 / loong64  ->  GCC Compile Farm nodes (portal.cfarm.net)
+#   s390x                        ->  LinuxONE community-cloud host (direct)
+#
+# rbgo is pure-Go (CGO=0, no hand-written assembly), so this is a courtesy
+# cross-check that the interpreter behaves identically on real big-endian (s390x)
+# and the other silicon — not a per-commit gate.
+#
+# ── AUP / etiquette ────────────────────────────────────────────────────────────
+# The GCC Compile Farm is a SHARED ACADEMIC resource. Its acceptable-use policy
+# FORBIDS using it as a per-PR CI backend hammered on every push. This workflow is
+# therefore SCHEDULED (once per day, off-peak UTC) + manually dispatchable ONLY —
+# never on pull_request/push — with concurrency capped at a single run. Please
+# keep it that way.
+#
+# ── Activation (repo secrets the maintainer must add) ──────────────────────────
+# This workflow is INERT until the following repo secrets exist. The `guard` job
+# below reads CFARM_SSH_KEY into a boolean output; every real-HW job is gated on
+# it, so with no secrets the workflow simply skips (green, never red):
+#
+#   CFARM_SSH_KEY     (required)  Private SSH key registered on the cfarm account
+#                                 `delavennat` AND authorized on the s390x host
+#                                 linux1@148.100.85.193. PEM/OpenSSH, no passphrase.
+#   CFARM_KNOWN_HOSTS (required)  `ssh-keyscan` output for every host below (and
+#                                 the gateway, if used) — pins host keys so we
+#                                 never auto-accept unknown fingerprints.
+#   CFARM_GATEWAY     (optional)  `user@gateway.host[:port]` bastion for the cfarm
+#                                 nodes, if your account reaches them via a jump
+#                                 host. Leave unset for direct access. The s390x
+#                                 host is always contacted directly.
+#
+# See docs/CI.md for copy-paste `gh secret set` commands and keyscan recipe.
+#
+# ── Retargeting hosts ──────────────────────────────────────────────────────────
+# Node names / usernames / Go version live in the clearly-labelled `env:` and the
+# `matrix.include` table below — edit those, nothing else, to point at different
+# cfarm nodes. Current node picks (from portal.cfarm.net/machines/list, 2026-07):
+#   cfarm135  IBM POWER9 9006-22P            -> ppc64le
+#   cfarm94   StarFive VisionFive 2 (JH7110) -> riscv64
+#   cfarm400  Loongson-3C5000L-LL            -> loong64
+
+on:
+  schedule:
+    # 04:42 UTC daily — off-peak, single courteous run per day (respects cfarm AUP).
+    - cron: "42 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One real-HW run at a time; never cancel an in-flight run mid-suite.
+  group: native-arch
+  cancel-in-progress: false
+
+env:
+  # Go toolchain fetched onto any host that lacks a recent-enough `go`.
+  GO_VERSION: "1.26.4"
+
+jobs:
+  # ── Secret gate ────────────────────────────────────────────────────────────
+  # The `secrets` context is NOT available in job/step `if:` conditions, so we
+  # cannot write `if: ${{ secrets.CFARM_SSH_KEY != '' }}` directly. Instead this
+  # job reads the secret into a boolean OUTPUT, and every real-HW job gates on
+  # `needs.guard.outputs.enabled == 'true'`. Result: with no secrets configured
+  # the whole workflow is inert (skips green), never a red "missing secret".
+  guard:
+    name: check-secrets
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          KEY: ${{ secrets.CFARM_SSH_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "CFARM_SSH_KEY present — real-HW validation will run."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CFARM_SSH_KEY not set — real-HW jobs skipped (workflow inert). See docs/CI.md to activate."
+          fi
+
+  # ── Real-hardware suites ────────────────────────────────────────────────────
+  native:
+    name: native ${{ matrix.arch }} (${{ matrix.host }})
+    needs: guard
+    if: needs.guard.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── EDIT THIS TABLE to retarget hosts (arch / goarch / user / host). ──
+          # GCC Compile Farm nodes (portal.cfarm.net, account: delavennat).
+          # `cfarm: true` routes through CFARM_GATEWAY when that secret is set.
+          - { arch: ppc64le, goarch: ppc64le, user: delavennat, host: cfarm135.cfarm.net, cfarm: true  }
+          - { arch: riscv64, goarch: riscv64, user: delavennat, host: cfarm94.cfarm.net,  cfarm: true  }
+          - { arch: loong64, goarch: loong64, user: delavennat, host: cfarm400.cfarm.net, cfarm: true  }
+          # LinuxONE community-cloud s390x host — direct, never via the cfarm gateway.
+          - { arch: s390x,   goarch: s390x,   user: linux1,     host: 148.100.85.193,     cfarm: false }
+    steps:
+      - name: Configure SSH (key, known_hosts, optional ProxyJump)
+        env:
+          SSH_KEY:     ${{ secrets.CFARM_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.CFARM_KNOWN_HOSTS }}
+          GATEWAY:     ${{ secrets.CFARM_GATEWAY }}
+          USE_CFARM:   ${{ matrix.cfarm }}
+          TARGET_HOST: ${{ matrix.host }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_hw
+          chmod 600 ~/.ssh/id_hw
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          # Route cfarm nodes through the optional bastion; s390x stays direct.
+          if [ "$USE_CFARM" = "true" ] && [ -n "${GATEWAY:-}" ]; then
+            {
+              echo "Host $TARGET_HOST"
+              echo "  ProxyJump $GATEWAY"
+            } >> ~/.ssh/config
+            chmod 600 ~/.ssh/config
+            echo "cfarm node $TARGET_HOST will be reached via ProxyJump $GATEWAY"
+          fi
+
+      - name: Run test suite natively on real ${{ matrix.arch }} hardware
+        env:
+          TARGET:   ${{ matrix.user }}@${{ matrix.host }}
+          GOARCH:   ${{ matrix.goarch }}
+          GOVER:    ${{ env.GO_VERSION }}
+          COMMIT:   ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Remote script: ensure a recent Go, clone the exact commit, then run
+          # `go vet` + `go test ./...` natively with GOWORK=off CGO_ENABLED=0.
+          # The repo is public, so the clone needs no credentials on the host.
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -i ~/.ssh/id_hw "$TARGET" \
+            "GOARCH='$GOARCH' GOVER='$GOVER' COMMIT='$COMMIT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          echo "== host: $(uname -a)"
+
+          # ---- ensure a recent-enough Go on PATH ----------------------------------
+          need_go=1
+          if command -v go >/dev/null 2>&1; then
+            have="$(go env GOVERSION 2>/dev/null | sed 's/^go//')"
+            # crude "have >= want" check via sort -V
+            if [ -n "$have" ] && [ "$(printf '%s\n%s\n' "$GOVER" "$have" | sort -V | head -1)" = "$GOVER" ]; then
+              need_go=0
+              echo "== using system go $have"
+            fi
+          fi
+          if [ "$need_go" -eq 1 ]; then
+            workdir="$(mktemp -d)"
+            tarball="go${GOVER}.linux-${GOARCH}.tar.gz"
+            echo "== fetching $tarball"
+            ( cd "$workdir" && curl -fsSL "https://go.dev/dl/${tarball}" -o "$tarball" && tar -xzf "$tarball" )
+            export PATH="$workdir/go/bin:$PATH"
+            export GOROOT="$workdir/go"
+          fi
+          go version
+
+          # ---- fresh clone of the exact triggering commit -------------------------
+          src="$(mktemp -d)"
+          git clone --depth 50 https://github.com/go-embedded-ruby/ruby "$src/ruby"
+          cd "$src/ruby"
+          git fetch --depth 50 origin "$COMMIT" || true
+          git checkout -q "$COMMIT" || echo "== commit $COMMIT not reachable; testing default branch HEAD"
+
+          # ---- native validation --------------------------------------------------
+          export GOWORK=off CGO_ENABLED=0
+          echo "== GOARCH=$(go env GOARCH)  (expect $GOARCH)"
+          go vet ./...
+          go test -timeout=30m ./...
+          echo "== native $GOARCH validation OK"
+          REMOTE

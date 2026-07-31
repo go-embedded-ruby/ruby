@@ -47,9 +47,16 @@ jobs:
           awk -v t="$cov" 'BEGIN { exit !(t+0 >= 100.0) }' || {
             echo "::error::coverage ${cov}% < 100%"; exit 1; }
 
-  # Validate the interpreter on the six supported 64-bit targets. amd64 and
-  # arm64 run natively; the rest run the test suite under qemu-user. (s390x is
-  # big-endian — a real check for the future binary codecs.)
+  # Per-PR arch gate: the two GitHub-hosted NATIVE targets only. amd64 and arm64
+  # both have real runners, so these lanes stay fast and block merges. rbgo is
+  # pure-Go (CGO=0) with no hand-written assembly, so arch-specific risk is low
+  # and native amd64+arm64 catches virtually all bugs. The four exotic 64-bit
+  # targets (riscv64/loong64/ppc64le/s390x) are NOT emulated on every PR anymore:
+  #   - a scheduled nightly QEMU run keeps their coverage green
+  #     (.github/workflows/arch-qemu-nightly.yml), and
+  #   - scheduled real-hardware validation runs the suite natively on the GCC
+  #     Compile Farm + a LinuxONE s390x host (.github/workflows/native-arch.yml).
+  # This removes the ~10 min/lane QEMU bottleneck from the per-PR critical path.
   arch-native:
     name: arch ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
@@ -65,28 +72,3 @@ jobs:
         with:
           go-version: stable
       - run: go env GOARCH && go test ./...
-
-  arch-qemu:
-    name: arch ${{ matrix.goarch }} (qemu)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { goarch: riscv64, qemu: qemu-riscv64-static }
-          - { goarch: loong64, qemu: qemu-loongarch64-static }
-          - { goarch: ppc64le, qemu: qemu-ppc64le-static }
-          - { goarch: s390x,   qemu: qemu-s390x-static }
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
-        with:
-          go-version: stable
-      - run: sudo apt-get update && sudo apt-get install -y qemu-user-static
-      - name: Test under qemu (${{ matrix.goarch }})
-        # qemu-user emulation is ~50-100x slower than native; the heaviest lane
-        # (s390x, the slowest target) can exceed Go's default 10m test-binary
-        # timeout on the full vm suite. Give the emulated lanes generous headroom
-        # so a slow-but-correct run isn't killed as a false failure. (On real
-        # s390x silicon the same suite runs natively in seconds.)
-        run: GOARCH=${{ matrix.goarch }} go test -timeout=30m -exec=${{ matrix.qemu }} ./...
