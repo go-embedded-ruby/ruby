@@ -255,6 +255,31 @@ func (vm *VM) singletonClass(o *RObject) *RClass {
 	return o.singleton
 }
 
+// defineSingletonMethod installs iseq as a singleton method named name on recv.
+// A class/module receiver gains a class method (its singleton-method table);
+// any other object gains a per-object method on its singleton class. Both the
+// `def recv.foo` form (recv is the parsed receiver) and the `def self.foo` form
+// (recv is the current self) route through here so top-level `def self.foo`
+// lands on main's singleton class — matching MRI — rather than on the definee.
+func (vm *VM) defineSingletonMethod(recv object.Value, name string, iseq *bytecode.ISeq) {
+	if t, ok := recv.(*RClass); ok {
+		t.smethods[name] = &Method{name: name, iseq: iseq, owner: t}
+		bumpMethodSerial()
+		return
+	}
+	// Any other object — an *RObject, the top-level main object, or a
+	// builtin-backed value ($LOAD_PATH, a String held in a local) — mixes the
+	// method into its singleton class. ensureSingleton reports false only for the
+	// values that legitimately can't have one (immediates, which raise TypeError),
+	// mirroring define_singleton_method exactly.
+	sc, ok := vm.ensureSingleton(recv)
+	if !ok {
+		raise("TypeError", "can't define singleton method %q for %s", name, vm.classOf(recv).name)
+	}
+	sc.methods[name] = &Method{name: name, iseq: iseq, owner: sc}
+	bumpMethodSerial() // adding a singleton method can change what a cached send resolves to
+}
+
 // objSingleton returns the existing per-object singleton class for any value, or
 // nil. For *RObject it is the inline field; for other reference values it is the
 // side-table entry. Immediate values never have one.
