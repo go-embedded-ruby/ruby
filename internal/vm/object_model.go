@@ -892,6 +892,23 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A sized face reports Opentype::Face so its measure / advance / kern /
 		// metrics / glyph_info / set_hinting / set_variation methods dispatch.
 		return vm.consts["Opentype::Face"].(*RClass)
+	case *TuiWidget:
+		// A Tui::Widget handle reports Tui::Widget so its mutators, composition
+		// verbs and callback-wiring instance methods dispatch.
+		return vm.consts["Tui::Widget"].(*RClass)
+	case *MvvmObservable:
+		// An Mvvm::Observable handle reports Mvvm::Observable so its get / set /
+		// subscribe / unsubscribe instance methods dispatch.
+		return vm.consts["Mvvm::Observable"].(*RClass)
+	case *MvvmCommand:
+		// An Mvvm::Command handle reports Mvvm::Command so its can_execute /
+		// execute / set_can_execute / raise_can_execute_changed methods dispatch.
+		return vm.consts["Mvvm::Command"].(*RClass)
+	case *MvvmList:
+		// An Mvvm::ObservableList handle reports Mvvm::ObservableList so its
+		// add / insert / remove_at / set / move / clear / get / size / slice /
+		// observe / unobserve instance methods dispatch.
+		return vm.consts["Mvvm::ObservableList"].(*RClass)
 	case *XmlMarkup:
 		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
 		// method_missing element DSL and special methods dispatch.
