@@ -188,6 +188,9 @@ require (
 	github.com/go-ruby-webauthn/webauthn v0.0.0-20260704120708-35595b0ac27b
 	github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9
 	github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b
+	github.com/go-ruby-widgets/mvvm v0.1.0
+	github.com/go-ruby-widgets/tui v0.1.0
+	github.com/go-ruby-widgets/widgets v0.1.0
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260706120500-56d458798003
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c
@@ -279,7 +282,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-opentype/bidi v0.2.0 // indirect
-	github.com/go-opentype/fonts v0.4.0 // indirect
+	github.com/go-opentype/fonts v0.4.1 // indirect
 	github.com/go-opentype/opentype v0.5.0 // indirect
 	github.com/go-opentype/shape v0.3.3 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
@@ -293,6 +296,10 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/x v0.2.6 // indirect
+	github.com/go-widgets/mvvm v0.3.0 // indirect
+	github.com/go-widgets/painter v0.1.3 // indirect
+	github.com/go-widgets/toolkit v0.65.0 // indirect
+	github.com/go-widgets/tui v0.55.0 // indirect
 	github.com/go-zookeeper/zk v1.0.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -401,6 +408,7 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
+	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect

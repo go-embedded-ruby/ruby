@@ -71,7 +71,10 @@ Beyond the `go-ruby-*` family, the scientific / container stack binds the
 pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),
 [go-fft](https://github.com/go-fft/fft), [go-images](https://github.com/go-images/images)
 and [go-composites](https://github.com/go-composites) libraries the same way (see
-*Supported today* below).
+*Supported today* below), and the pure-Go [go-widgets](https://github.com/go-widgets)
+UI toolkit is bound through three adapters: `require "widgets"` (pixel-blitting
+GUI toolkit), `require "tui"` (terminal-cell toolkit) and `require "mvvm"`
+(data-binding layer) — each at `github.com/go-ruby-widgets/<name>`.
 
 [grp]: https://github.com/go-ruby-parser
 [grr]: https://github.com/go-ruby-regexp

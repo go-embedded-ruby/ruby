@@ -113,6 +113,7 @@ var providedFeatures = map[string]bool{
 	"pagy":     true,
 	"images":   true,
 	"opentype": true,
+	"widgets":  true, "tui": true, "mvvm": true,
 	"shrine": true,
 	"liquid": true, "rouge": true, "slim": true, "haml": true,
 	"sass": true, "jekyll": true,
