@@ -31,21 +31,35 @@ afterwards. No secrets required.
 ## 3. Real-hardware validation — `native-arch.yml` (secret-gated, inert by default)
 
 `schedule` (04:42 UTC daily) + `workflow_dispatch`, **never** on PR/push. SSHes into
-real silicon and runs the suite **natively** (no emulation):
+real silicon and runs the suite **natively** (no emulation).
 
-| Arch     | Host                         | Where                                         |
-|----------|------------------------------|-----------------------------------------------|
-| ppc64le  | `cfarm135.cfarm.net`         | GCC Compile Farm — IBM POWER9 9006-22P         |
-| riscv64  | `cfarm94.cfarm.net`          | GCC Compile Farm — StarFive VisionFive 2 (JH7110) |
-| loong64  | `cfarm400.cfarm.net`         | GCC Compile Farm — Loongson-3C5000L-LL         |
-| s390x    | `148.100.85.193` (`linux1@`) | LinuxONE community cloud (direct, **not** cfarm) |
+This aligns with the ecosystem-wide real-HW convention documented in
+[go-asmgen's `toolkit/bench-hw/README.md`](https://github.com/go-asmgen/asmgen/blob/main/toolkit/bench-hw/README.md)
+— the authoritative inventory of what hardware is actually reachable — and
+reuses go-simd's `z15-bench.yml` SSH pattern (and its `LINUX1_*` secret names)
+for the s390x lane rather than inventing a separate one:
+
+| Arch     | Host                         | Where                                              |
+|----------|------------------------------|-----------------------------------------------------|
+| ppc64le  | `cfarm433.cfarm.net`         | GCC Compile Farm — IBM POWER10                       |
+| riscv64  | `cfarm95.cfarm.net`          | GCC Compile Farm — SpacemiT X60 (RVV 1.0)             |
+| s390x    | `148.100.85.193` (`linux1@`) | IBM LinuxONE Community Cloud (direct, **not** cfarm) |
+
+**loong64 has no real-HW lane here.** cfarm400/401 — the only Loongson nodes cfarm
+ever had — have been down for roughly three years, so there is no free CI-able
+loong64 silicon on the Compile Farm. Per `bench-hw/README.md` the two live options
+are the Debian LoongArch porter box (`shenzhou.debian.net`, needs Debian-maintainer
+standing) or a self-hosted runner built from the
+[github.com/loong64](https://github.com/loong64) org's images — neither is wired
+up yet. Until one is, loong64 correctness coverage comes exclusively from the
+QEMU nightly (`arch-qemu-nightly.yml` above).
 
 On each host it ensures a recent Go (uses the system `go` if new enough, else
 downloads `go$GO_VERSION.linux-$GOARCH.tar.gz`), clones the triggering commit, and runs
 `GOWORK=off CGO_ENABLED=0 go vet ./... && go test ./...`. The `s390x` lane is the
 real **big-endian** check for the binary codecs.
 
-To retarget nodes, edit only the `env:` block and the `matrix.include` table at the top
+To retarget nodes, edit only the `env:` block and the `matrix.include` tables at the top
 of `native-arch.yml`.
 
 ### Acceptable-use policy (important)
@@ -54,32 +68,41 @@ The **GCC Compile Farm is a shared academic resource**. Its AUP **forbids** usin
 a per-PR CI backend hammered on every push. This workflow is therefore **scheduled once
 per day, off-peak, with single-run concurrency**, and is manually dispatchable — never
 triggered on `pull_request`/`push`. Please keep it courteous. Account: `delavennat`
-(request access at <https://portal.cfarm.net/>).
+(request access at <https://portal.cfarm.net/>). The LinuxONE host is a dedicated VM,
+not shared, but stays on the same schedule-only cadence for consistency.
 
 ### Activation — repo secrets to add
 
-`native-arch.yml` is **inert until these secrets exist**. A `guard` job reads
-`CFARM_SSH_KEY` into a boolean output and every real-HW job gates on it, so with no
-secrets configured the workflow simply **skips (green), never red**. (The `secrets`
-context is unavailable in job/step `if:` conditions, which is why the guard-job pattern
-is used instead of `if: ${{ secrets.CFARM_SSH_KEY != '' }}`.)
+`native-arch.yml` is **inert until the relevant secrets exist**. A `guard` job reads
+each pair into a boolean output, and the cfarm lane (`native-cfarm`) and the s390x
+lane (`native-s390x`) gate on them **independently** — either can be activated without
+the other. (The `secrets` context is unavailable in job/step `if:` conditions, which is
+why the guard-job pattern is used instead of `if: ${{ secrets.CFARM_SSH_KEY != '' }}`.)
 
-| Secret              | Required | Purpose                                                                                              |
-|---------------------|----------|------------------------------------------------------------------------------------------------------|
-| `CFARM_SSH_KEY`     | yes      | Private SSH key registered on the cfarm account `delavennat` **and** authorized on the s390x host. OpenSSH/PEM, no passphrase. |
-| `CFARM_KNOWN_HOSTS` | yes      | `ssh-keyscan` output pinning every host (and the gateway, if used) — no auto-accept of unknown keys. |
-| `CFARM_GATEWAY`     | no       | `user@bastion[:port]` jump host for the cfarm nodes, if your account reaches them via a gateway. Leave unset for direct access. The s390x host is always contacted directly. |
+| Secret               | Lane  | Required | Purpose                                                                                              |
+|----------------------|-------|----------|--------------------------------------------------------------------------------------------------------|
+| `CFARM_SSH_KEY`      | cfarm | yes      | Private SSH key registered on the cfarm account `delavennat`. OpenSSH/PEM, no passphrase. Covers ppc64le + riscv64 — cfarm is one SSH account for every machine. |
+| `CFARM_KNOWN_HOSTS`  | cfarm | yes      | `ssh-keyscan` output pinning cfarm433 + cfarm95 (and the gateway, if used) — no auto-accept of unknown keys. |
+| `CFARM_GATEWAY`      | cfarm | no       | `user@bastion[:port]` jump host for the cfarm nodes, if your account reaches them via a gateway. Leave unset for direct access. |
+| `LINUX1_SSH_KEY`     | s390x | yes      | Private SSH key authorized on the IBM LinuxONE Community Cloud host `linux1@148.100.85.193`. Same secret name as go-simd's `z15-bench.yml` — reuse the existing key rather than minting a new one. |
+| `LINUX1_KNOWN_HOSTS` | s390x | yes      | `ssh-keyscan` output for `148.100.85.193`. |
 
 ```sh
-# Private key authorized on cfarm (delavennat) + the s390x host:
-gh secret set CFARM_SSH_KEY     < ~/.ssh/id_cfarm
+# cfarm lane (ppc64le + riscv64) — private key on the cfarm account (delavennat):
+gh secret set CFARM_SSH_KEY < ~/.ssh/id_cfarm
 
-# Pin host keys (include the gateway host too if you set CFARM_GATEWAY):
-ssh-keyscan cfarm135.cfarm.net cfarm94.cfarm.net cfarm400.cfarm.net 148.100.85.193 \
-  | gh secret set CFARM_KNOWN_HOSTS
+# Pin cfarm host keys (include the gateway host too if you set CFARM_GATEWAY):
+ssh-keyscan cfarm433.cfarm.net cfarm95.cfarm.net | gh secret set CFARM_KNOWN_HOSTS
 
 # Optional bastion for the cfarm nodes (omit entirely for direct access):
 printf 'delavennat@gateway.cfarm.net' | gh secret set CFARM_GATEWAY
+
+# s390x lane — the SAME key already authorized on linux1@148.100.85.193 for
+# go-simd's z15-bench.yml (reuse it, do not mint a new key):
+gh secret set LINUX1_SSH_KEY < ~/.ssh/id_linux1
+
+# Pin the LinuxONE host key:
+ssh-keyscan 148.100.85.193 | gh secret set LINUX1_KNOWN_HOSTS
 ```
 
 Trigger a run on demand from the Actions tab (**Run workflow**) or:

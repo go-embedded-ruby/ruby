@@ -2,8 +2,16 @@ name: native-arch
 
 # Real-HARDWARE validation of the exotic 64-bit targets, run NATIVELY (no QEMU).
 #
-#   ppc64le / riscv64 / loong64  ->  GCC Compile Farm nodes (portal.cfarm.net)
-#   s390x                        ->  LinuxONE community-cloud host (direct)
+#   ppc64le / riscv64  ->  GCC Compile Farm nodes (portal.cfarm.net)
+#   s390x               ->  IBM LinuxONE Community Cloud host (direct)
+#   loong64             ->  NO free CI-able silicon today (see below) — covered
+#                           only by the QEMU nightly (arch-qemu-nightly.yml).
+#
+# This aligns with the ecosystem-wide real-HW convention documented in
+# go-asmgen's toolkit/bench-hw/README.md (the authoritative inventory of what
+# hardware is actually reachable) and exercised by go-simd's per-repo
+# z15-bench.yml SSH pattern. Reuse that convention here rather than reinvent
+# node picks or secret names.
 #
 # rbgo is pure-Go (CGO=0, no hand-written assembly), so this is a courtesy
 # cross-check that the interpreter behaves identically on real big-endian (s390x)
@@ -14,33 +22,52 @@ name: native-arch
 # FORBIDS using it as a per-PR CI backend hammered on every push. This workflow is
 # therefore SCHEDULED (once per day, off-peak UTC) + manually dispatchable ONLY —
 # never on pull_request/push — with concurrency capped at a single run. Please
-# keep it that way.
+# keep it that way. The LinuxONE host is a single dedicated VM, not shared, but
+# stays on the same schedule-only cadence for consistency.
 #
 # ── Activation (repo secrets the maintainer must add) ──────────────────────────
-# This workflow is INERT until the following repo secrets exist. The `guard` job
-# below reads CFARM_SSH_KEY into a boolean output; every real-HW job is gated on
-# it, so with no secrets the workflow simply skips (green, never red):
+# This workflow is INERT until the relevant secrets exist. The `guard` job below
+# reads them into boolean outputs; the cfarm lane and the s390x lane are gated
+# INDEPENDENTLY, so either can be activated without the other:
 #
-#   CFARM_SSH_KEY     (required)  Private SSH key registered on the cfarm account
-#                                 `delavennat` AND authorized on the s390x host
-#                                 linux1@148.100.85.193. PEM/OpenSSH, no passphrase.
-#   CFARM_KNOWN_HOSTS (required)  `ssh-keyscan` output for every host below (and
-#                                 the gateway, if used) — pins host keys so we
-#                                 never auto-accept unknown fingerprints.
-#   CFARM_GATEWAY     (optional)  `user@gateway.host[:port]` bastion for the cfarm
-#                                 nodes, if your account reaches them via a jump
-#                                 host. Leave unset for direct access. The s390x
-#                                 host is always contacted directly.
+#   CFARM_SSH_KEY      (cfarm lane)  Private SSH key registered on the cfarm
+#                                    account `delavennat`. PEM/OpenSSH, no
+#                                    passphrase. Covers ppc64le + riscv64 — the
+#                                    GCC Compile Farm is a single SSH account for
+#                                    every machine.
+#   CFARM_KNOWN_HOSTS  (cfarm lane)  `ssh-keyscan` output for cfarm433 + cfarm95
+#                                    (and the gateway, if used).
+#   CFARM_GATEWAY      (optional)    `user@gateway.host[:port]` bastion for the
+#                                    cfarm nodes, if your account reaches them
+#                                    via a jump host. Leave unset for direct
+#                                    access.
+#   LINUX1_SSH_KEY     (s390x lane)  Private SSH key authorized on the IBM
+#                                    LinuxONE Community Cloud host
+#                                    linux1@148.100.85.193. Same secret name
+#                                    used by go-simd's z15-bench.yml — reuse
+#                                    the existing key, do not mint a new one.
+#   LINUX1_KNOWN_HOSTS (s390x lane)  `ssh-keyscan` output for 148.100.85.193.
 #
 # See docs/CI.md for copy-paste `gh secret set` commands and keyscan recipe.
 #
 # ── Retargeting hosts ──────────────────────────────────────────────────────────
 # Node names / usernames / Go version live in the clearly-labelled `env:` and the
-# `matrix.include` table below — edit those, nothing else, to point at different
-# cfarm nodes. Current node picks (from portal.cfarm.net/machines/list, 2026-07):
-#   cfarm135  IBM POWER9 9006-22P            -> ppc64le
-#   cfarm94   StarFive VisionFive 2 (JH7110) -> riscv64
-#   cfarm400  Loongson-3C5000L-LL            -> loong64
+# `matrix.include` tables below — edit those, nothing else, to point at different
+# cfarm nodes. Current node picks match go-asmgen/asmgen's
+# toolkit/bench-hw/README.md (source of truth for what's actually reachable):
+#   cfarm433  IBM POWER10                     -> ppc64le
+#   cfarm95   SpacemiT X60 (RVV 1.0)          -> riscv64
+#   linux1@148.100.85.193  IBM LinuxONE (z/Architecture) -> s390x
+#
+# ── loong64 ──────────────────────────────────────────────────────────────────
+# cfarm400/401 (the only Loongson nodes cfarm ever had) have been DOWN for
+# roughly three years — there is no free CI-able loong64 silicon on cfarm, so
+# there is no real-HW loong64 job here. Per bench-hw/README.md the two live
+# options are the Debian LoongArch porter box (`shenzhou.debian.net`, needs
+# Debian-maintainer standing) or a self-hosted runner built from the
+# github.com/loong64 org's images — neither is wired up yet. Until one is,
+# loong64 correctness coverage comes exclusively from the QEMU nightly
+# (arch-qemu-nightly.yml).
 
 on:
   schedule:
@@ -64,45 +91,53 @@ jobs:
   # ── Secret gate ────────────────────────────────────────────────────────────
   # The `secrets` context is NOT available in job/step `if:` conditions, so we
   # cannot write `if: ${{ secrets.CFARM_SSH_KEY != '' }}` directly. Instead this
-  # job reads the secret into a boolean OUTPUT, and every real-HW job gates on
-  # `needs.guard.outputs.enabled == 'true'`. Result: with no secrets configured
-  # the whole workflow is inert (skips green), never a red "missing secret".
+  # job reads each secret into a boolean OUTPUT, and the matching real-HW job
+  # gates on it. The cfarm lane and the s390x lane are independent: either can
+  # be activated without the other configured. Result: with no secrets
+  # configured the whole workflow is inert (skips green), never a red
+  # "missing secret".
   guard:
     name: check-secrets
     runs-on: ubuntu-latest
     outputs:
-      enabled: ${{ steps.check.outputs.enabled }}
+      cfarm_enabled:  ${{ steps.check.outputs.cfarm_enabled }}
+      linux1_enabled: ${{ steps.check.outputs.linux1_enabled }}
     steps:
       - id: check
         env:
-          KEY: ${{ secrets.CFARM_SSH_KEY }}
+          CFARM_KEY:  ${{ secrets.CFARM_SSH_KEY }}
+          LINUX1_KEY: ${{ secrets.LINUX1_SSH_KEY }}
         run: |
-          if [ -n "$KEY" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "CFARM_SSH_KEY present — real-HW validation will run."
+          if [ -n "$CFARM_KEY" ]; then
+            echo "cfarm_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "CFARM_SSH_KEY present — cfarm (ppc64le/riscv64) validation will run."
           else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::CFARM_SSH_KEY not set — real-HW jobs skipped (workflow inert). See docs/CI.md to activate."
+            echo "cfarm_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CFARM_SSH_KEY not set — cfarm real-HW jobs skipped. See docs/CI.md to activate."
+          fi
+          if [ -n "$LINUX1_KEY" ]; then
+            echo "linux1_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "LINUX1_SSH_KEY present — s390x validation will run."
+          else
+            echo "linux1_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::LINUX1_SSH_KEY not set — s390x real-HW job skipped. See docs/CI.md to activate."
           fi
 
-  # ── Real-hardware suites ────────────────────────────────────────────────────
-  native:
+  # ── GCC Compile Farm suites (ppc64le, riscv64) ──────────────────────────────
+  native-cfarm:
     name: native ${{ matrix.arch }} (${{ matrix.host }})
     needs: guard
-    if: needs.guard.outputs.enabled == 'true'
+    if: needs.guard.outputs.cfarm_enabled == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ── EDIT THIS TABLE to retarget hosts (arch / goarch / user / host). ──
+          # ── EDIT THIS TABLE to retarget cfarm nodes. ──
           # GCC Compile Farm nodes (portal.cfarm.net, account: delavennat).
           # `cfarm: true` routes through CFARM_GATEWAY when that secret is set.
-          - { arch: ppc64le, goarch: ppc64le, user: delavennat, host: cfarm135.cfarm.net, cfarm: true  }
-          - { arch: riscv64, goarch: riscv64, user: delavennat, host: cfarm94.cfarm.net,  cfarm: true  }
-          - { arch: loong64, goarch: loong64, user: delavennat, host: cfarm400.cfarm.net, cfarm: true  }
-          # LinuxONE community-cloud s390x host — direct, never via the cfarm gateway.
-          - { arch: s390x,   goarch: s390x,   user: linux1,     host: 148.100.85.193,     cfarm: false }
+          - { arch: ppc64le, goarch: ppc64le, user: delavennat, host: cfarm433.cfarm.net, cfarm: true }
+          - { arch: riscv64, goarch: riscv64, user: delavennat, host: cfarm95.cfarm.net,  cfarm: true }
     steps:
       - name: Configure SSH (key, known_hosts, optional ProxyJump)
         env:
@@ -118,7 +153,7 @@ jobs:
           chmod 600 ~/.ssh/id_hw
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
-          # Route cfarm nodes through the optional bastion; s390x stays direct.
+          # Route cfarm nodes through the optional bastion.
           if [ "$USE_CFARM" = "true" ] && [ -n "${GATEWAY:-}" ]; then
             {
               echo "Host $TARGET_HOST"
@@ -134,6 +169,82 @@ jobs:
           GOARCH:   ${{ matrix.goarch }}
           GOVER:    ${{ env.GO_VERSION }}
           COMMIT:   ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Remote script: ensure a recent Go, clone the exact commit, then run
+          # `go vet` + `go test ./...` natively with GOWORK=off CGO_ENABLED=0.
+          # The repo is public, so the clone needs no credentials on the host.
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -i ~/.ssh/id_hw "$TARGET" \
+            "GOARCH='$GOARCH' GOVER='$GOVER' COMMIT='$COMMIT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          echo "== host: $(uname -a)"
+
+          # ---- ensure a recent-enough Go on PATH ----------------------------------
+          need_go=1
+          if command -v go >/dev/null 2>&1; then
+            have="$(go env GOVERSION 2>/dev/null | sed 's/^go//')"
+            # crude "have >= want" check via sort -V
+            if [ -n "$have" ] && [ "$(printf '%s\n%s\n' "$GOVER" "$have" | sort -V | head -1)" = "$GOVER" ]; then
+              need_go=0
+              echo "== using system go $have"
+            fi
+          fi
+          if [ "$need_go" -eq 1 ]; then
+            workdir="$(mktemp -d)"
+            tarball="go${GOVER}.linux-${GOARCH}.tar.gz"
+            echo "== fetching $tarball"
+            ( cd "$workdir" && curl -fsSL "https://go.dev/dl/${tarball}" -o "$tarball" && tar -xzf "$tarball" )
+            export PATH="$workdir/go/bin:$PATH"
+            export GOROOT="$workdir/go"
+          fi
+          go version
+
+          # ---- fresh clone of the exact triggering commit -------------------------
+          src="$(mktemp -d)"
+          git clone --depth 50 https://github.com/go-embedded-ruby/ruby "$src/ruby"
+          cd "$src/ruby"
+          git fetch --depth 50 origin "$COMMIT" || true
+          git checkout -q "$COMMIT" || echo "== commit $COMMIT not reachable; testing default branch HEAD"
+
+          # ---- native validation --------------------------------------------------
+          export GOWORK=off CGO_ENABLED=0
+          echo "== GOARCH=$(go env GOARCH)  (expect $GOARCH)"
+          go vet ./...
+          go test -timeout=30m ./...
+          echo "== native $GOARCH validation OK"
+          REMOTE
+
+  # ── IBM LinuxONE Community Cloud (s390x) ────────────────────────────────────
+  # Separate lane, separate secrets (LINUX1_*), reused verbatim from go-simd's
+  # z15-bench.yml SSH pattern — same host, same key, so the existing LinuxONE
+  # access already granted to the ecosystem works here unchanged.
+  native-s390x:
+    name: native s390x (linux1@148.100.85.193)
+    needs: guard
+    if: needs.guard.outputs.linux1_enabled == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TARGET_HOST: 148.100.85.193
+      TARGET_USER: linux1
+    steps:
+      - name: Configure SSH (key, known_hosts) — direct, no gateway
+        env:
+          SSH_KEY:     ${{ secrets.LINUX1_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.LINUX1_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_hw
+          chmod 600 ~/.ssh/id_hw
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Run test suite natively on real s390x hardware
+        env:
+          TARGET: ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}
+          GOARCH: s390x
+          GOVER:  ${{ env.GO_VERSION }}
+          COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
           # Remote script: ensure a recent Go, clone the exact commit, then run
