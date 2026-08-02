@@ -80,8 +80,9 @@ func rbgoImage(_ js.Value, args []js.Value) any {
 	})
 	res := result(out, val, errStr)
 	if s, ok := val.(*object.String); ok {
-		u8 := js.Global().Get("Uint8Array").New(len(s.B))
-		js.CopyBytesToJS(u8, s.B)
+		b := s.Bytes()
+		u8 := js.Global().Get("Uint8Array").New(len(b))
+		js.CopyBytesToJS(u8, b)
 		res["bytes"] = u8
 	}
 	return js.ValueOf(res)
