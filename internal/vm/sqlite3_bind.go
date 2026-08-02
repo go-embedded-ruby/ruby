@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !(js && wasm)
+
 package vm
 
 import (
@@ -52,19 +54,6 @@ func sqlite3StringArg(v object.Value) string {
 		return s.Str()
 	}
 	return v.ToS()
-}
-
-// sqlite3IntArg coerces an argument to an int64, raising a TypeError for a
-// non-integer.
-func sqlite3IntArg(v object.Value) int64 {
-	switch n := v.(type) {
-	case object.Integer:
-		return int64(n)
-	case *object.Bignum:
-		return n.I.Int64()
-	}
-	raise("TypeError", "no implicit conversion to Integer")
-	return 0
 }
 
 // sqlite3ExecArgs splits an #execute / #query argument list into the SQL string

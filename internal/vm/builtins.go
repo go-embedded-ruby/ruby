@@ -3886,6 +3886,23 @@ func intArgOr(args []object.Value, def int64) int64 {
 	return def
 }
 
+// sqlite3IntArg coerces an argument to an int64, raising a TypeError for a
+// non-integer. It also accepts a Bignum (narrowed to int64). It lives here, in
+// the build-tag-free core, rather than with the SQLite3 binding because it is
+// shared with a non-guarded consumer (Nokogiri::XML::NodeSet#[]); the SQLite3
+// binding is behind //go:build !(js && wasm), so keeping this helper there would
+// break the js/wasm build.
+func sqlite3IntArg(v object.Value) int64 {
+	switch n := v.(type) {
+	case object.Integer:
+		return int64(n)
+	case *object.Bignum:
+		return n.I.Int64()
+	}
+	raise("TypeError", "no implicit conversion to Integer")
+	return 0
+}
+
 // pow10 returns 10**n, with ok=false when it would overflow an int64.
 func pow10(n int64) (int64, bool) {
 	p := int64(1)

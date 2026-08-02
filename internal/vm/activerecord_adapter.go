@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !(js && wasm)
+
 package vm
 
 import (
@@ -69,45 +71,13 @@ func (vm *VM) arRequireAdapter() *arSQLiteAdapter {
 	return vm.arAdapter
 }
 
-// activeRecordConnPath reads the establish_connection argument: a Hash yields its
-// :database / :adapter (":memory:" default), a String is the path directly.
-func activeRecordConnPath(args []object.Value) string {
-	if len(args) == 0 {
-		return ":memory:"
-	}
-	switch v := args[0].(type) {
-	case *object.Hash:
-		if db, ok := v.Get(object.Symbol("database")); ok {
-			return arStr(db)
-		}
-		if db, ok := v.Get(object.NewString("database")); ok {
-			return arStr(db)
-		}
-		return ":memory:"
-	default:
-		return arStr(args[0])
-	}
-}
-
-// arValueToRuby maps a value scanned from the adapter (int64 / float64 / string /
-// []byte / bool / nil) back into the rbgo object graph, mirroring the sqlite3
-// binding's own scan mapping.
-func arValueToRuby(v any) object.Value {
-	switch n := v.(type) {
-	case nil:
-		return object.NilV
-	case int64:
-		return object.IntValue(n)
-	case int:
-		return object.IntValue(int64(n))
-	case float64:
-		return object.Float(n)
-	case string:
-		return object.NewString(n)
-	case []byte:
-		return object.NewStringBytesEnc(n, "ASCII-8BIT")
-	case bool:
-		return object.Bool(n)
-	}
-	return object.NilV
+// arRawConnection returns the underlying SQLite3::Database wrapper for the
+// process adapter, so ActiveRecord::Base.connection exposes raw #execute. It is
+// the sqlite3-typed tail of the `connection` class method, split out so the
+// method itself stays in the (build-tag-free) activerecord.go while the
+// SQLite3::Database dependency stays behind the native build tag; the js/wasm
+// build provides a stub that raises instead (see bindings_wasm.go). The nil
+// check lives in the caller, so this is only reached with a live adapter.
+func (vm *VM) arRawConnection() object.Value {
+	return &SQLite3Database{db: vm.arAdapter.db}
 }

@@ -621,6 +621,15 @@ func (vm *VM) ancestors(c *RClass) []*RClass {
 
 // classOf returns the dynamic class of any value — the basis of dispatch.
 func (vm *VM) classOf(v object.Value) *RClass {
+	// The class-mapping cases for the database / search / KV bindings that pull in
+	// js/wasm-incompatible drivers (SQLite3, Sequel, Bolt, Bleve, Etcd) live behind
+	// a build tag in classOfExtBinding, so this shared switch — and the values it
+	// handles — compile for GOOS=js GOARCH=wasm. On wasm the seam always reports
+	// false (those value types can never be constructed there); natively it maps
+	// each to its class exactly as an inline case would.
+	if c, ok := vm.classOfExtBinding(v); ok {
+		return c
+	}
 	switch x := v.(type) {
 	case *RObject:
 		return x.class
@@ -913,18 +922,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// A Builder::XmlMarkup emitter reports Builder::XmlMarkup so its
 		// method_missing element DSL and special methods dispatch.
 		return vm.consts["Builder::XmlMarkup"].(*RClass)
-	case *SQLite3Database:
-		return vm.consts["SQLite3::Database"].(*RClass)
-	case *SQLite3Statement:
-		return vm.consts["SQLite3::Statement"].(*RClass)
-	case *BoltDB:
-		return x.cls
-	case *BoltTx:
-		return x.cls
-	case *BoltBucket:
-		return x.cls
-	case *BoltCursor:
-		return x.cls
 	case *SimpleCovResult:
 		return x.cls
 	case *SimpleCovSourceFile:
@@ -984,34 +981,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *KafkaMessage:
 		return x.cls
 	case *KafkaBatch:
-		return x.cls
-	case *EtcdClient:
-		return x.cls
-	case *EtcdKeyValue:
-		return x.cls
-	case *EtcdGetResult:
-		return x.cls
-	case *EtcdPutResult:
-		return x.cls
-	case *EtcdDelResult:
-		return x.cls
-	case *EtcdLease:
-		return x.cls
-	case *EtcdEvent:
-		return x.cls
-	case *EtcdTxn:
-		return x.cls
-	case *EtcdCmp:
-		return x.cls
-	case *EtcdOp:
-		return x.cls
-	case *EtcdTxnResult:
-		return x.cls
-	case *EtcdLock:
-		return x.cls
-	case *EtcdMember:
-		return x.cls
-	case *EtcdStatus:
 		return x.cls
 	case *VaultClient:
 		return x.cls
@@ -1152,12 +1121,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *SMTPResponseObj:
 		return x.cls
 	case *SMTPStreamObj:
-		return x.cls
-	case *SequelDBObj:
-		return x.cls
-	case *SequelDatasetObj:
-		return x.cls
-	case *SequelSchemaObj:
 		return x.cls
 	case *NokogiriDocument:
 		return vm.consts["Nokogiri::XML::Document"].(*RClass)
@@ -1440,20 +1403,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *ProtobufRepeatedField:
 		return x.cls
 	case *ProtobufMap:
-		return x.cls
-	case *BleveIndex:
-		return x.cls
-	case *BleveMapping:
-		return x.cls
-	case *BleveQuery:
-		return x.cls
-	case *BleveSearchResult:
-		return x.cls
-	case *BleveHit:
-		return x.cls
-	case *BleveBatch:
-		return x.cls
-	case *BleveFacet:
 		return x.cls
 	case *GraphQLType:
 		return x.cls

@@ -134,7 +134,7 @@ func (vm *VM) registerActiveRecordBase(mod *RClass) {
 		if vm.arAdapter == nil {
 			raise("ActiveRecord::ConnectionNotEstablished", "No connection pool for ActiveRecord::Base")
 		}
-		return &SQLite3Database{db: vm.arAdapter.db}
+		return vm.arRawConnection()
 	}}
 
 	vm.registerActiveRecordBaseModelMethods(base)

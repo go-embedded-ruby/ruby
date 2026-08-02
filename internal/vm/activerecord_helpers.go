@@ -10,6 +10,52 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
+// activeRecordConnPath reads the establish_connection argument: a Hash yields its
+// :database / :adapter (":memory:" default), a String is the path directly. It is
+// pure value-mapping (no driver dependency), so it lives with the other
+// build-tag-free ActiveRecord helpers and is shared by the native and js/wasm
+// builds; only the adapter it feeds is behind a build tag.
+func activeRecordConnPath(args []object.Value) string {
+	if len(args) == 0 {
+		return ":memory:"
+	}
+	switch v := args[0].(type) {
+	case *object.Hash:
+		if db, ok := v.Get(object.Symbol("database")); ok {
+			return arStr(db)
+		}
+		if db, ok := v.Get(object.NewString("database")); ok {
+			return arStr(db)
+		}
+		return ":memory:"
+	default:
+		return arStr(args[0])
+	}
+}
+
+// arValueToRuby maps a value scanned from the adapter (int64 / float64 / string /
+// []byte / bool / nil) back into the rbgo object graph, mirroring the sqlite3
+// binding's own scan mapping. It is pure value-mapping shared by both builds.
+func arValueToRuby(v any) object.Value {
+	switch n := v.(type) {
+	case nil:
+		return object.NilV
+	case int64:
+		return object.IntValue(n)
+	case int:
+		return object.IntValue(int64(n))
+	case float64:
+		return object.Float(n)
+	case string:
+		return object.NewString(n)
+	case []byte:
+		return object.NewStringBytesEnc(n, "ASCII-8BIT")
+	case bool:
+		return object.Bool(n)
+	}
+	return object.NilV
+}
+
 // arStr coerces an argument to its String contents: a String yields its bytes, a
 // Symbol its name, any other value its to_s.
 func arStr(v object.Value) string {
