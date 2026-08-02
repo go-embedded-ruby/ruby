@@ -124,6 +124,20 @@ raise "backdrop pixels" unless bpx["pixels"].bytesize == 64 * 48 * 4
 themed = Widgets.backdrop("", "", 0)
 raise "themed backdrop" unless themed.is_a?(Integer)
 
+# Opt into anti-aliased, shaped OpenType text: window titles, menus, HUD,
+# desktop and frame decorations repaint against the bundled vector face.
+# Both the default-size and explicit-size forms are auto-registered from the
+# adapter's method surface, so respond_to? and the call both resolve.
+raise "respond use_opentype_text" unless Widgets.respond_to?(:use_opentype_text)
+raise "respond use_opentype_text_size" unless Widgets.respond_to?(:use_opentype_text_size)
+Widgets.use_opentype_text
+Widgets.use_opentype_text_size(18)
+# It repaints through the normal render path (no exception, real pixels).
+lbl = Widgets.label("Title")
+Widgets.layout(lbl, 80, 20)
+lpx = Widgets.render(lbl, 80, 20)
+raise "aa label pixels" unless lpx["pixels"].bytesize == 80 * 20 * 4
+
 # Layout the whole tree, then read a Hash of bounds.
 Widgets.layout(cont, 200, 120)
 bnds = Widgets.bounds(cont)
