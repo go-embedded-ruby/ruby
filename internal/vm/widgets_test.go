@@ -114,6 +114,16 @@ Widgets.set_region(bd, Widgets.label("w"), "west", 6)
 tv = Widgets.text_view("multi\nline")
 en = Widgets.entry("typed", "changed")
 
+# A Backdrop ground: explicit hex fill + grid, plus a theme-default one
+# (empty colour strings). Render it to prove the new constructor dispatches
+# and paints through the normal render path.
+back = Widgets.backdrop("#11131a", "#171a24", 40)
+Widgets.layout(back, 64, 48)
+bpx = Widgets.render(back, 64, 48)
+raise "backdrop pixels" unless bpx["pixels"].bytesize == 64 * 48 * 4
+themed = Widgets.backdrop("", "", 0)
+raise "themed backdrop" unless themed.is_a?(Integer)
+
 # Layout the whole tree, then read a Hash of bounds.
 Widgets.layout(cont, 200, 120)
 bnds = Widgets.bounds(cont)
