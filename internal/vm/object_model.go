@@ -394,6 +394,25 @@ func lookupMethod(c *RClass, name string) *Method {
 	return nil
 }
 
+// lookupForModuleOp resolves a method name for a reflective module operation
+// (alias_method, undef_method, the visibility setters, module_function,
+// instance_method) called on mod. It is lookupMethod plus a Kernel bridge: rbgo
+// keeps the Kernel module's methods (puts, respond_to?, system, …) physically on
+// Object, and user code routinely reopens `class Object`/`module Kernel` to add
+// or re-alias methods across the pair. So when the receiver is the Kernel module
+// and the name is not found in Kernel's own table, fall back to Object's — which
+// is where those methods live and where MRI (with Object.include(Kernel)) also
+// resolves them for these operations.
+func (vm *VM) lookupForModuleOp(mod *RClass, name string) *Method {
+	if m := lookupMethod(mod, name); m != nil {
+		return m
+	}
+	if mod == vm.cKernel {
+		return lookupMethod(vm.cObject, name)
+	}
+	return nil
+}
+
 // constInAncestors searches name in cls's own constant table and up its ancestor
 // chain (superclass chain plus each ancestor's included modules), as Ruby's
 // scoped constant lookup does. Object/BasicObject are skipped for a non-Object
@@ -539,7 +558,7 @@ func (vm *VM) aliasMethod(definee *RClass, newName, oldName string) {
 		vm.globals[newName] = vm.gvar(oldName)
 		return
 	}
-	m := lookupMethod(definee, oldName)
+	m := vm.lookupForModuleOp(definee, oldName)
 	if m == nil || m.undefined {
 		raise("NameError", "undefined method '%s' for class '%s'", oldName, definee.name)
 	}
@@ -557,6 +576,10 @@ func (vm *VM) aliasMethod(definee *RClass, newName, oldName string) {
 // call route to method_missing (NoMethodError). Undefining a name that resolves
 // nowhere raises NameError, as in MRI.
 func (vm *VM) undefMethod(definee *RClass, name string) {
+	// undef_method resolves only through the receiver's own+ancestor chain (no
+	// Kernel→Object bridge): MRI raises for a method defined on Object when undef'd
+	// via the Kernel module, and a subclass undef'ing an inherited Kernel method
+	// (e.g. respond_to_missing?) resolves through normal ancestor lookup anyway.
 	if m := lookupMethod(definee, name); m == nil || m.undefined {
 		raise("NameError", "undefined method '%s' for class '%s'", name, definee.name)
 	}

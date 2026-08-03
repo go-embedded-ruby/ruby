@@ -12,3 +12,9 @@ var runCaptured = func(cmd []string) (string, int) {
 	raise("NotImplementedError", "subprocess execution is not supported on js/wasm")
 	return "", 127
 }
+
+// systemCommand likewise has no meaning under js/wasm; Kernel#system raises.
+var systemCommand = func(cmd []string) (string, int, bool) {
+	raise("NotImplementedError", "subprocess execution is not supported on js/wasm")
+	return "", 127, false
+}

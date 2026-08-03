@@ -46,6 +46,7 @@ func (vm *VM) bootstrap() {
 	// satisfies is_a?(Kernel)/Object.include?(Kernel), as in MRI.
 	kernel := newClass("Kernel", nil)
 	kernel.isModule = true
+	vm.cKernel = kernel
 	vm.cObject.includes = append(vm.cObject.includes, kernel)
 
 	for _, c := range []*RClass{
@@ -781,6 +782,15 @@ func (vm *VM) bootstrap() {
 		}
 		return object.False
 	})
+	// respond_to_missing?(name, include_private=false) is Kernel's default hook: a
+	// private method returning false that user classes override to answer methods
+	// handled by method_missing. Defining it (rather than leaving it absent) makes
+	// `undef`/`alias`/introspection of it resolve, as in MRI where it is a real
+	// private Kernel method; the default false keeps respond_to?'s result unchanged.
+	vm.cObject.define("respond_to_missing?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.False
+	})
+	vm.setInstanceVisibility(vm.cObject, "respond_to_missing?", visPrivate)
 	vm.cObject.define("itself", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
@@ -3787,6 +3797,21 @@ func (vm *VM) bootstrap() {
 				vm.classEval(m, blk, nil)
 			}
 			return m
+		}}
+	// Module.nesting returns the list of Modules nested at the point of call,
+	// innermost first (MRI: the lexical cref chain, excluding Object). The caller's
+	// frame is on top of frameCrefs (this native pushes no frame of its own).
+	vm.cModule.smethods["nesting"] = &Method{name: "nesting", owner: vm.cModule,
+		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			var cref *RClass
+			if n := len(vm.frameCrefs); n > 0 {
+				cref = vm.frameCrefs[n-1]
+			}
+			arr := object.NewArray()
+			for _, c := range vm.nesting(cref) {
+				arr.Elems = append(arr.Elems, c)
+			}
+			return arr
 		}}
 	vm.cClass.define("superclass", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if c := self.(*RClass); c.super != nil {

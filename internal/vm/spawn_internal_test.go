@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
+	"github.com/go-embedded-ruby/ruby/internal/object"
 	"github.com/go-ruby-parser/parser"
 )
 
@@ -306,3 +307,107 @@ func TestExitCodeOf(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// runSystem runs src with systemCommand replaced by a deterministic stub, so
+// Kernel#system's true/false/nil and exception branches are exercised on every
+// OS without a real subprocess.
+func runSystem(t *testing.T, src string, fake func([]string) (string, int, bool)) string {
+	t.Helper()
+	orig := systemCommand
+	systemCommand = fake
+	defer func() { systemCommand = orig }()
+
+	prog, err := parser.Parse(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	iseq, err := compiler.Compile(prog)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := New(&buf).Run(iseq); err != nil {
+		t.Fatalf("run: %v\nsrc: %s", err, src)
+	}
+	return buf.String()
+}
+
+// TestSystemReturnValues covers Kernel#system: true (exit 0), false (non-zero),
+// nil (could not spawn), the command output reaching $stdout, and $? being set
+// to a Process::Status for a spawned command (and nil for an unspawned one).
+func TestSystemReturnValues(t *testing.T) {
+	// exit 0 -> true, output written, $? success.
+	ok := func([]string) (string, int, bool) { return "out\n", 0, true }
+	if got := runSystem(t, `r = system("true"); print r, " ", $?.exitstatus, " ", $?.success?`, ok); got != "out\ntrue 0 true" {
+		t.Fatalf("exit0: got %q", got)
+	}
+	// non-zero -> false, $? reflects the code.
+	bad := func([]string) (string, int, bool) { return "", 5, true }
+	if got := runSystem(t, `p system("false"); p $?.exitstatus; p $?.success?`, bad); got != "false\n5\nfalse\n" {
+		t.Fatalf("nonzero: got %q", got)
+	}
+	// could not spawn -> nil, $? nil.
+	miss := func([]string) (string, int, bool) { return "", 127, false }
+	if got := runSystem(t, `p system("nope"); p $?`, miss); got != "nil\nnil\n" {
+		t.Fatalf("unspawned: got %q", got)
+	}
+}
+
+// TestSystemExceptionOption covers system(..., exception: true): a raised
+// RuntimeError on a non-zero exit and Errno::ENOENT when the command cannot be
+// spawned, while exception: false keeps the return-value behaviour.
+func TestSystemExceptionOption(t *testing.T) {
+	bad := func([]string) (string, int, bool) { return "", 1, true }
+	got := runSystem(t, `begin; system("false", exception: true); rescue => e; puts e.class; end`, bad)
+	if got != "RuntimeError\n" {
+		t.Fatalf("exit-fail exception: got %q", got)
+	}
+	miss := func([]string) (string, int, bool) { return "", 127, false }
+	got = runSystem(t, `begin; system("nope", exception: true); rescue => e; puts e.class; end`, miss)
+	if got != "Errno::ENOENT\n" {
+		t.Fatalf("spawn-fail exception: got %q", got)
+	}
+	// exception: false is the same as omitting it (false return, no raise).
+	got = runSystem(t, `p system("false", exception: false)`, bad)
+	if got != "false\n" {
+		t.Fatalf("exception:false: got %q", got)
+	}
+}
+
+// TestSystemCommandReal exercises the real systemCommand for the running OS,
+// covering the empty-argv, shell, direct-argv, ExitError and non-ExitError
+// (could-not-spawn) branches with actual short-lived processes.
+func TestSystemCommandReal(t *testing.T) {
+	// Empty argv: nothing to run.
+	if _, code, spawned := systemCommand(nil); spawned || code != 127 {
+		t.Fatalf("empty argv: code=%d spawned=%v", code, spawned)
+	}
+	var zero, nonzero, missing []string
+	if runtime.GOOS == "windows" {
+		zero = []string{"cmd /c exit 0"} // whitespace -> shell path
+		nonzero = []string{"cmd /c exit 7"}
+		missing = []string{"this_binary_does_not_exist_rbgo"}
+	} else {
+		zero = []string{"exit 0"}                             // whitespace -> /bin/sh
+		nonzero = []string{"false"}                           // bare argv, real exit 1
+		missing = []string{"this_binary_does_not_exist_rbgo"} // bare argv, cannot spawn
+	}
+	if _, code, spawned := systemCommand(zero); !spawned || code != 0 {
+		t.Fatalf("zero: code=%d spawned=%v", code, spawned)
+	}
+	if _, code, spawned := systemCommand(nonzero); !spawned || code == 0 {
+		t.Fatalf("nonzero: code=%d spawned=%v", code, spawned)
+	}
+	if _, code, spawned := systemCommand(missing); spawned || code != 127 {
+		t.Fatalf("missing: code=%d spawned=%v", code, spawned)
+	}
+}
+
+// TestNewProcessStatus covers the $?-status builder directly.
+func TestNewProcessStatus(t *testing.T) {
+	vm := New(&bytes.Buffer{})
+	st := vm.newProcessStatus(4242, 9).(*RObject)
+	if st.ivars["@exitstatus"] != object.IntValue(9) || st.ivars["@pid"] != object.IntValue(4242) {
+		t.Fatalf("status ivars: %+v", st.ivars)
+	}
+}

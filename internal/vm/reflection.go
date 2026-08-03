@@ -32,7 +32,7 @@ func (vm *VM) registerReflection() {
 	vm.cModule.define("instance_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
 		name := nameArg(args[0])
-		m := lookupMethod(mod, name)
+		m := vm.lookupForModuleOp(mod, name)
 		if m == nil || m.undefined {
 			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
 		}
@@ -42,7 +42,7 @@ func (vm *VM) registerReflection() {
 	// Module#method_defined?(:m): true if m resolves up the ancestor chain.
 	vm.cModule.define("method_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
-		m := lookupMethod(mod, nameArg(args[0]))
+		m := vm.lookupForModuleOp(mod, nameArg(args[0]))
 		return object.Bool(m != nil && !m.undefined)
 	})
 
@@ -54,7 +54,7 @@ func (vm *VM) registerReflection() {
 		return func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			mod := self.(*RClass)
 			name := nameArg(args[0])
-			m := lookupMethod(mod, name)
+			m := vm.lookupForModuleOp(mod, name)
 			if m == nil || m.undefined {
 				return object.False
 			}
