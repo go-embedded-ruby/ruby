@@ -1360,6 +1360,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cYielder
 	case *encodingObj:
 		return vm.cEncoding
+	case *converterObj:
+		return vm.cConverter
 	case *LazyEnum:
 		return vm.cLazy
 	case *RandomObj:

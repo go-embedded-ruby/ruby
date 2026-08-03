@@ -43,6 +43,7 @@ var xtextEncodings = map[string]encoding.Encoding{
 	"Windows-31J":  japanese.ShiftJIS,
 	"Shift_JIS":    japanese.ShiftJIS,
 	"EUC-JP":       japanese.EUCJP,
+	"ISO-2022-JP":  japanese.ISO2022JP,
 	"EUC-KR":       korean.EUCKR,
 	"GBK":          simplifiedchinese.GBK,
 	"GB18030":      simplifiedchinese.GB18030,

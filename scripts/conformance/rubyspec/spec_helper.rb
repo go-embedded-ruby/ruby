@@ -198,7 +198,7 @@ class ShouldProxy
   def =~(x); _chk((@o =~ x) ? true : false, "=~ #{x.inspect}"); end
   def equal(x); _chk(@o.equal?(x), "equal #{x.inspect}"); end
   def eql(x); _chk(@o.eql?(x), "eql #{x.inspect}"); end
-  def raise(*args)
+  def raise(*args, &blk)
     raised = nil
     begin
       @o.call
@@ -220,6 +220,8 @@ class ShouldProxy
       ok = m.is_a?(Regexp) ? !!(raised.message =~ m) : (raised.message == m)
       ::Kernel.raise(SpecFail, "wrong message: got #{raised.message.inspect}, want #{m.inspect}") unless ok
     end
+    # `-> { ... }.should.raise(Klass) { |e| ... }` inspects the captured exception.
+    blk.call(raised) if blk
     raised
   end
   def method_missing(name, *args, &blk)

@@ -304,7 +304,7 @@ func (vm *VM) encodingArg(v object.Value) *encodingObj {
 	case *object.String:
 		return vm.lookupEncodingName(e.Str())
 	}
-	if vm.respondsTo(v, "to_str") {
+	if vm.respondsToDynamic(v, "to_str") {
 		r := vm.send(v, "to_str", nil, nil)
 		if s, ok := r.(*object.String); ok {
 			return vm.lookupEncodingName(s.Str())
