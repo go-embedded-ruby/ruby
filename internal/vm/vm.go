@@ -364,6 +364,7 @@ type VM struct {
 	cEnumerator                        *RClass
 	cYielder                           *RClass
 	cEncoding                          *RClass
+	cConverter                         *RClass
 	encodings                          map[string]*encodingObj // canonical name -> interned Encoding
 	encLookup                          map[string]*encodingObj // lowercased name/alias -> interned Encoding
 	cLazy                              *RClass

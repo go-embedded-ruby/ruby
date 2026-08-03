@@ -84,6 +84,19 @@ func (vm *VM) gvarDefined(name string) bool {
 // resolvable method (singleton, class chain, modules) or one of the
 // compiler-fast-path operators. It backs `defined?(recv.m)` / `defined?(a OP b)`
 // and never invokes the method.
+// respondsToDynamic reports whether recv answers name the way Ruby's
+// Object#respond_to? does — including methods provided only through
+// method_missing and reported by respond_to_missing?. Type-coercion paths
+// (#to_str / #to_hash / #to_int) use it so a proxy object that defines the
+// conversion dynamically (a spec mock, a DelegateClass) is coerced, matching
+// MRI's rb_respond_to.
+func (vm *VM) respondsToDynamic(recv object.Value, name string) bool {
+	if vm.respondsTo(recv, name) {
+		return true
+	}
+	return vm.send(recv, "respond_to?", []object.Value{object.Symbol(name)}, nil).Truthy()
+}
+
 func (vm *VM) respondsTo(recv object.Value, name string) bool {
 	if vm.findMethod(recv, name) != nil {
 		return true

@@ -377,6 +377,8 @@ func (vm *VM) bootstrap() {
 	exc("Math::DomainError", "StandardError")
 	// EncodingError < StandardError and Encoding's transcoding errors under it.
 	vm.registerEncodingErrors()
+	// Encoding::Converter, the stateful transcoder (needs the error classes above).
+	vm.registerConverter()
 	// ScriptError / SyntaxError sit under Exception (NOT StandardError), so a bare
 	// `rescue` does not catch them — matching MRI. eval raises SyntaxError.
 	exc("ScriptError", "Exception")
