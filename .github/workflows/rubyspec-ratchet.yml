@@ -1,0 +1,28 @@
+name: rubyspec-ratchet
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Shrink-only ruby/spec conformance gate: run the language + core suites through
+# rbgo and fail if the passing-example total drops below the frozen floor
+# (scripts/conformance/rubyspec/FLOOR). rbgo's language conformance is thereby
+# tracked and can only go up — see scripts/conformance/rubyspec/README.md.
+jobs:
+  ratchet:
+    name: ruby/spec ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: go version
+      - name: Run ruby/spec ratchet
+        shell: bash
+        run: scripts/conformance/rubyspec/run.sh
