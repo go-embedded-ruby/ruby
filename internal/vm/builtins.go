@@ -804,9 +804,12 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(rubyEqual(self, args[0]))
 	})
-	// Default <=>: 0 when equal (by ==), nil otherwise — the MRI Object#<=>.
+	// Default <=>: 0 when the two are the same object, nil otherwise — the MRI
+	// Object#<=>. It compares by identity (like #equal?) rather than sending #==,
+	// because a class that includes Comparable defines #== AS `(self <=> other)==0`;
+	// sending #== here would recurse into that #== and back into <=> forever.
 	vm.cObject.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if vm.send(self, "==", []object.Value{args[0]}, nil).Truthy() {
+		if self == args[0] {
 			return object.IntValue(0)
 		}
 		return object.NilV

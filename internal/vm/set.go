@@ -43,6 +43,10 @@ func (s *Set) Truthy() bool    { return true }
 // order, each rendered with Ruby #inspect. The library owns the format; we feed
 // it the canonical-key → Ruby-value lookup so members inspect as Ruby values.
 func (s *Set) repr() string {
+	if !object.ReprEnter(s) {
+		return "Set[...]" // s is a member of itself
+	}
+	defer object.ReprLeave(s)
 	return s.s.Inspect(func(m any) string { return m.(object.Value).Inspect() })
 }
 

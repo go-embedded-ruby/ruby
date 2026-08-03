@@ -41,10 +41,9 @@ func TestFiber(t *testing.T) {
 		{`f = Fiber.new { 1 }; f.resume; f.resume`, "FiberError"},
 		{`Fiber.yield(1)`, "FiberError"},
 		{`Fiber.new`, "ArgumentError"},
-		// A non-local break out of the fiber body terminates it abnormally. (MRI
-		// reports a LocalJumpError here; we surface a FiberError — a documented
-		// edge difference for break/return escaping a fiber.)
-		{`Fiber.new { break }.resume`, "FiberError"},
+		// A `break` in the fiber body has no enclosing iterator to unwind to, so it
+		// is a break from a proc-closure — a rescue-able LocalJumpError, as in MRI.
+		{`Fiber.new { break }.resume`, "break from proc-closure"},
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {

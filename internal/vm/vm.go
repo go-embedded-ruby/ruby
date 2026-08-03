@@ -90,7 +90,11 @@ type throwSignal struct {
 // the method the block was written in. It carries a field so it is not zero-sized
 // — every &returnTarget{} must be a distinct pointer (Go gives all zero-sized
 // allocations the same address), which is how frames are told apart.
-type returnTarget struct{ _ bool }
+//
+// live is true while the owning frame is still executing. A non-local `return`
+// to a target whose frame has already exited (live == false) is an "unexpected
+// return" — MRI raises a LocalJumpError rather than letting the unwind escape.
+type returnTarget struct{ live bool }
 
 // returnSignal unwinds a non-local `return` (an explicit `return` inside a block)
 // to the activation identified by target. A signal whose target has no live frame
@@ -103,6 +107,14 @@ type returnSignal struct {
 // sendCatchBreak performs a send carrying a literal block, turning a `break`
 // raised by that block into the call's result.
 func (vm *VM) sendCatchBreak(recv object.Value, name string, args []object.Value, blk *Proc) (result object.Value) {
+	// Mark the block break-catchable for the duration of this call, so a `break`
+	// in its body unwinds here; restore the prior state after (a proc may be
+	// yielded again through another path). A nil block carries no break.
+	if blk != nil {
+		prev := blk.breakLive
+		blk.breakLive = true
+		defer func() { blk.breakLive = prev }()
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			if sig, ok := r.(breakSignal); ok && sig.owner == blk {
@@ -1011,10 +1023,19 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	var selfTarget *returnTarget
 	ensureTarget := func() *returnTarget {
 		if selfTarget == nil {
-			selfTarget = &returnTarget{}
+			selfTarget = &returnTarget{live: true}
 		}
 		return selfTarget
 	}
+	// When this frame exits by any path (normal return, an unwinding panic, or a
+	// caught return signal), mark its target dead so a non-local `return` captured
+	// by a Proc created here raises LocalJumpError instead of unwinding to a frame
+	// that is gone. A frame that never materialised a target has nothing to clear.
+	defer func() {
+		if selfTarget != nil {
+			selfTarget.live = false
+		}
+	}()
 
 	// homeTarget is where a non-local `return` (an explicit `return` in an
 	// ordinary block) unwinds to: this frame for a return target, otherwise the
@@ -1615,7 +1636,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// the block was written in (homeTarget), past any iterator frames. In a
 				// lambda, `return` is local — it just returns from the lambda.
 				if in.A == 1 && !isReturnTarget {
-					panic(returnSignal{target: homeTarget(), value: pop()})
+					t := homeTarget()
+					val := pop()
+					// The home method activation has already returned (its Proc outlived
+					// it): MRI raises "unexpected return" here, catchable by rescue.
+					if !t.live {
+						raise("LocalJumpError", "unexpected return")
+					}
+					panic(returnSignal{target: t, value: val})
 				}
 				// An explicit return from this frame with a live ensure handler must
 				// run that ensure before unwinding; route it through the same signal
@@ -1631,7 +1659,22 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				finished = true
 				return
 			case bytecode.OpBreak:
-				panic(breakSignal{owner: selfBlock, value: pop()})
+				val := pop()
+				// `break` in a lambda returns from the lambda, like `return`.
+				if selfBlock != nil && selfBlock.isLambda {
+					result = val
+					finished = true
+					return
+				}
+				// `break` in an ordinary block unwinds to the call that yielded it
+				// (caught by sendCatchBreak). If that call has already returned — a
+				// proc invoked later via Proc#call — MRI raises a LocalJumpError
+				// ("break from proc-closure") that rescue can catch, rather than
+				// letting the signal escape and crash the VM.
+				if selfBlock == nil || !selfBlock.breakLive {
+					raise("LocalJumpError", "break from proc-closure")
+				}
+				panic(breakSignal{owner: selfBlock, value: val})
 			case bytecode.OpPushHandler:
 				// Operand B=1 marks an ensure handler (runs on every unwind);
 				// B=0 is a plain rescue handler (runs only on a rescued exception).
