@@ -214,6 +214,45 @@ thumb = Widgets.thumbnail(px4, 4, 4, "Window 1", "focus_window")
 Widgets.set_selected(thumb, true)
 Widgets.set_hover(thumb, false)
 
+# --- v0.8.0 (toolkit v0.86.0) DE-widget refinements ------------------------
+# The compositor adopts these for the calendar applet, the big-clock font, the
+# toast icons and the Spotlight. Each is auto-registered from the method surface.
+# Toast: a leading stock-glyph icon, a multi-line body, multi-action buttons.
+Widgets.set_toast_icon(toast, "save", 0, 0)
+Widgets.set_toast_lines(toast, ["Saved", "3 files written"])
+Widgets.set_toast_actions(toast, [{"label" => "Undo", "callback" => "undo_save"}])
+
+# A big-font Label (the desktop's clock face).
+clock = Widgets.label("12:00")
+Widgets.set_font_size(clock, 48)
+Widgets.layout(clock, 160, 60)
+raise "clock pixels" unless Widgets.render(clock, 160, 60)["pixels"].bytesize == 160 * 60 * 4
+
+# A Calendar month grid, driven by prev/next + the shared selection accessors.
+cal = Widgets.calendar(2026, 8, 3)
+raise "calendar" unless cal.is_a?(Integer)
+Widgets.on_select(cal, "day_picked")
+Widgets.on_month_change(cal, "month_changed")
+Widgets.next_month(cal)
+Widgets.prev_month(cal)
+Widgets.set_selected(cal, 15)
+raise "cal day" unless Widgets.selected(cal) == 15
+
+# A LevelBar with a caption + value-band thresholds.
+batt = Widgets.level_bar(10, "Battery",
+  [{"min" => 0, "color_hex" => "#e00000"},
+   {"min" => 8, "color_hex" => "#00a000"}])
+Widgets.set_value(batt, 9)
+
+# The CommandPalette host-driven as a Spotlight: query, filter, select, key.
+Widgets.set_query(palette, "open")
+raise "query" unless Widgets.query(palette) == "open"
+raise "filtered" unless Widgets.filtered_commands(palette).length == 1
+Widgets.set_selected(palette, 0)
+raise "palette sel" unless Widgets.selected(palette) == 0
+Widgets.move_selection(palette, 1)
+Widgets.handle_key(palette, {"kind" => "keydown", "code" => "Escape"})
+
 # A window decoration built from an explicit spec Hash, rendered.
 deco = Widgets.decoration({
   "title" => "untitled.txt",

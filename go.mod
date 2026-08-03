@@ -190,7 +190,7 @@ require (
 	github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b
 	github.com/go-ruby-widgets/mvvm v0.1.0
 	github.com/go-ruby-widgets/tui v0.1.0
-	github.com/go-ruby-widgets/widgets v0.7.0
+	github.com/go-ruby-widgets/widgets v0.8.0
 	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260706120500-56d458798003
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c
@@ -202,6 +202,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260702233442-45013cfc5f26
 	go.etcd.io/etcd/server/v3 v3.6.13
+	golang.org/x/text v0.40.0
 )
 
 require (
@@ -298,7 +299,7 @@ require (
 	github.com/go-webauthn/x v0.2.6 // indirect
 	github.com/go-widgets/mvvm v0.3.0 // indirect
 	github.com/go-widgets/painter v0.2.0 // indirect
-	github.com/go-widgets/toolkit v0.80.0 // indirect
+	github.com/go-widgets/toolkit v0.86.0 // indirect
 	github.com/go-widgets/tui v0.55.0 // indirect
 	github.com/go-zookeeper/zk v1.0.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
@@ -409,7 +410,6 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
 	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
