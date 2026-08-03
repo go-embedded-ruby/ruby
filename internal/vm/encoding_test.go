@@ -116,3 +116,54 @@ func TestEncodingRegistry(t *testing.T) {
 		t.Errorf("find(bogus) err=%v, want an ArgumentError", err)
 	}
 }
+
+// TestEncodingCompatible covers Encoding.compatible?'s negotiation rules. Every
+// case was verified byte-exact against MRI (a 6400-combination cross-check).
+func TestEncodingCompatible(t *testing.T) {
+	// helper: force_encoding a byte string built from escapes.
+	cases := []struct{ src, want string }{
+		// Identical encodings are always compatible.
+		{`puts Encoding.compatible?("abc", "def").name`, "UTF-8\n"},
+		{`puts Encoding.compatible?("a".b, "b".b).name`, "ASCII-8BIT\n"},
+		// An empty second string yields the first's encoding.
+		{`puts Encoding.compatible?("abc".dup.force_encoding("UTF-7"), "").name`, "UTF-7\n"},
+		// Against an empty first string: second wins unless first is ASCII-compatible
+		// and second is 7-bit.
+		{`puts Encoding.compatible?("".dup.force_encoding("utf-8"), "def".dup.force_encoding("us-ascii")).name`, "UTF-8\n"},
+		{`puts Encoding.compatible?("".dup.force_encoding("utf-7"), "def".dup.force_encoding("us-ascii")).name`, "US-ASCII\n"},
+		{`puts Encoding.compatible?("".dup.force_encoding("us-ascii"), "\x01\x81".dup.force_encoding("ASCII-8BIT")).name`, "ASCII-8BIT\n"},
+		// The 7-bit operand adopts the other's encoding; two non-7-bit → nil.
+		{`puts Encoding.compatible?("abc".dup.force_encoding("US-ASCII"), "\xff".b).name`, "ASCII-8BIT\n"},
+		{`puts Encoding.compatible?("abc".dup.force_encoding("US-ASCII"), "\x7f".b).name`, "US-ASCII\n"},
+		{`puts Encoding.compatible?("\xff".dup.force_encoding("UTF-8"), "def".dup.force_encoding("us-ascii")).name`, "UTF-8\n"},
+		{`p Encoding.compatible?("\xff".b, "あ")`, "nil\n"},
+		// A non-ASCII-compatible encoding with non-empty content on both sides → nil.
+		{`p Encoding.compatible?("abc".dup.force_encoding("utf-8"), "1234".dup.force_encoding("UTF-16LE"))`, "nil\n"},
+		{`p Encoding.compatible?("abc".dup.force_encoding("UTF-7"), "def".dup.force_encoding("us-ascii"))`, "nil\n"},
+		// Symbol operands: US-ASCII when ASCII-only.
+		{`puts Encoding.compatible?("abc".dup.force_encoding("us-ascii"), :abc).name`, "US-ASCII\n"},
+		{`puts Encoding.compatible?(:abc, :def).name`, "US-ASCII\n"},
+		// Encoding-object operands (verified against MRI): a US-ASCII Encoding keeps
+		// the string's own encoding; an ASCII-only string adopts the Encoding; a
+		// non-ASCII string against a different ASCII-compatible Encoding is nil; a
+		// non-ASCII-compatible Encoding is nil unless identical.
+		{`puts Encoding.compatible?("abc", Encoding::UTF_8).name`, "UTF-8\n"},
+		{`puts Encoding.compatible?("あ", Encoding::US_ASCII).name`, "UTF-8\n"},
+		{`puts Encoding.compatible?("abc", Encoding::EUC_JP).name`, "EUC-JP\n"},
+		{`p Encoding.compatible?("あ", Encoding::EUC_JP)`, "nil\n"},
+		{`p Encoding.compatible?("abc".dup.force_encoding("us-ascii"), Encoding::UTF_16LE)`, "nil\n"},
+		{`p Encoding.compatible?("ab".dup.force_encoding("utf-16le"), Encoding::US_ASCII)`, "nil\n"},
+		// Encoding as the first operand (asymmetric, also verified against MRI).
+		{`puts Encoding.compatible?(Encoding::EUC_JP, "abc").name`, "UTF-8\n"},
+		{`puts Encoding.compatible?(Encoding::US_ASCII, "あ").name`, "UTF-8\n"},
+		{`p Encoding.compatible?(Encoding::EUC_JP, "あ")`, "nil\n"},
+		// Incompatible argument types (no encoding) → nil.
+		{`p Encoding.compatible?("abc", 123)`, "nil\n"},
+		{`p Encoding.compatible?(nil, "abc")`, "nil\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}

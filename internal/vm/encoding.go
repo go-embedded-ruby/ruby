@@ -182,6 +182,115 @@ func (vm *VM) registerEncoding() {
 		}
 		return h
 	})
+	// Encoding.compatible?(obj1, obj2) implements MRI's encoding negotiation,
+	// returning the encoding a concatenation would take, or nil when incompatible.
+	sdef("compatible?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.encodingCompatible(args[0], args[1])
+	})
+}
+
+// encOperand is one argument to Encoding.compatible?, reduced to what the
+// negotiation needs: its governing encoding, its bytes (for String/Symbol content),
+// and whether it carries content at all (a String or Symbol) versus being a bare
+// Encoding object.
+type encOperand struct {
+	enc        *encodingObj
+	bytes      []byte
+	stringLike bool
+	ok         bool
+}
+
+// is7bit reports whether the operand is ASCII-only *for compatibility purposes*:
+// its encoding must be ASCII-compatible AND every byte 7-bit. Content in a
+// non-ASCII-compatible encoding (UTF-16, ISO-2022-JP, …) is never 7-bit even when
+// empty or all-ASCII, matching MRI's coderange (rb_enc_str_coderange).
+func (o encOperand) is7bit() bool { return o.enc.asciiCompat && asciiOnly(o.bytes) }
+
+// encOperandOf reduces a compatibility argument to an encOperand: a String keeps
+// its tagged encoding and bytes; a Symbol is US-ASCII when ASCII-only else UTF-8;
+// an Encoding is itself (no content); anything else has no encoding, making the
+// pair incompatible. (Regexp operands are a named residual.)
+func (vm *VM) encOperandOf(v object.Value) encOperand {
+	switch x := v.(type) {
+	case *object.String:
+		return encOperand{enc: vm.internEncoding(x.EncName()), bytes: x.Bytes(), stringLike: true, ok: true}
+	case object.Symbol:
+		b := []byte(string(x))
+		name := "UTF-8"
+		if asciiOnly(b) {
+			name = "US-ASCII"
+		}
+		return encOperand{enc: vm.encodings[name], bytes: b, stringLike: true, ok: true}
+	case *encodingObj:
+		return encOperand{enc: x, ok: true}
+	}
+	return encOperand{}
+}
+
+// encodingCompatible is Encoding.compatible?(obj1, obj2): the encoding of the
+// string that would result from concatenating the two, or nil if they cannot be
+// combined. It follows MRI's rb_enc_compatible negotiation:
+//
+//   - identical encodings are always compatible;
+//   - an empty second string yields the first's encoding;
+//   - against an empty first string, the second's encoding wins unless the first
+//     is ASCII-compatible and the second is 7-bit;
+//   - otherwise both encodings must be ASCII-compatible, and the 7-bit (ASCII-only)
+//     operand adopts the other's encoding; two non-7-bit operands are incompatible.
+func (vm *VM) encodingCompatible(a, b object.Value) object.Value {
+	oa := vm.encOperandOf(a)
+	ob := vm.encOperandOf(b)
+	if !oa.ok || !ob.ok {
+		return object.NilV
+	}
+	e1, e2 := oa.enc, ob.enc
+	if e1 == e2 {
+		return e1
+	}
+	if ob.stringLike && len(ob.bytes) == 0 {
+		return e1
+	}
+	if oa.stringLike && ob.stringLike && len(oa.bytes) == 0 {
+		if e1.asciiCompat && ob.is7bit() {
+			return e1
+		}
+		return e2
+	}
+	if !e1.asciiCompat || !e2.asciiCompat {
+		return object.NilV
+	}
+	if oa.stringLike && ob.stringLike {
+		// Two content operands: the 7-bit (ASCII-only) one adopts the other's
+		// encoding; two non-7-bit operands are incompatible.
+		if ob.is7bit() {
+			return e1
+		}
+		if oa.is7bit() {
+			return e2
+		}
+		return object.NilV
+	}
+	if oa.stringLike != ob.stringLike {
+		// One content operand, one bare Encoding. Verified against MRI in both
+		// argument orders: a US-ASCII Encoding always keeps the string's own
+		// encoding; otherwise, when the string is ASCII-only, the result is the
+		// second operand's encoding (the Encoding when it is second, the string's
+		// encoding when the Encoding is first); a non-ASCII string is incompatible.
+		str, enc, encSecond := oa, e2, true
+		if !oa.stringLike {
+			str, enc, encSecond = ob, e1, false
+		}
+		if enc.name == "US-ASCII" {
+			return str.enc
+		}
+		if str.is7bit() {
+			if encSecond {
+				return enc
+			}
+			return str.enc
+		}
+	}
+	return object.NilV
 }
 
 // encodingArg resolves an Encoding.find / force_encoding argument to a registry
