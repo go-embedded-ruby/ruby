@@ -66,6 +66,11 @@ type Proc struct {
 	native      func(vm *VM, args []object.Value) object.Value
 	nativeArity int
 	isLambda    bool // true for lambda { } / ->(){}: backs Proc#lambda?
+	// breakLive is true while this block is being yielded through a call that can
+	// catch its `break` (sendCatchBreak). A `break` in a block whose yielding call
+	// has already returned — a proc invoked later via Proc#call — is a "break from
+	// proc-closure" LocalJumpError, not a crash.
+	breakLive bool
 	// cref is the lexical scope (enclosing class/module) where this block literal
 	// was written, so a bare constant inside the block resolves by the same
 	// lexical nesting as the surrounding method/class body. nil means top level.

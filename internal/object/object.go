@@ -13,8 +13,39 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 )
+
+// reprSeen tracks the container values currently being rendered by repr, so a
+// self-referential Array/Hash prints "[...]"/"{...}" (as MRI does) instead of
+// recursing until the Go stack overflows. The VM serialises inspect under its
+// GVL, but the map is still mutex-guarded so it is data-race-free under -race;
+// the lock is held only for the set operations, never across the recursion.
+var (
+	reprMu   sync.Mutex
+	reprSeen = map[Value]struct{}{}
+)
+
+// ReprEnter marks v as in-progress and reports whether rendering may proceed;
+// false means v is already being rendered (a cycle). Every true return must be
+// paired with a ReprLeave(v).
+func ReprEnter(v Value) bool {
+	reprMu.Lock()
+	defer reprMu.Unlock()
+	if _, ok := reprSeen[v]; ok {
+		return false
+	}
+	reprSeen[v] = struct{}{}
+	return true
+}
+
+// ReprLeave clears the in-progress mark set by a successful ReprEnter(v).
+func ReprLeave(v Value) {
+	reprMu.Lock()
+	delete(reprSeen, v)
+	reprMu.Unlock()
+}
 
 // Value is the interface implemented by every Ruby value.
 //
@@ -368,6 +399,10 @@ func isSymLetter(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c 
 type Array struct{ Elems []Value }
 
 func (a *Array) repr() string {
+	if !ReprEnter(a) {
+		return "[...]" // a is nested inside itself
+	}
+	defer ReprLeave(a)
 	var b strings.Builder
 	b.WriteByte('[')
 	for i, e := range a.Elems {
@@ -418,7 +453,7 @@ func NewArrayFromSlice(elems []Value) *Array { return &Array{Elems: elems} }
 // snapshot Ruby semantics require. strVals is nil until the first String key is
 // inserted; nil-map reads are safe, so Get/repr need no guard.
 type Hash struct {
-	Keys    []Value             // insertion order (string keys held as frozen snapshots)
+	Keys    []Value              // insertion order (string keys held as frozen snapshots)
 	strVals map[string]*strEntry // String keys, content-addressed (allocation-free hot path)
 	vals    map[any]Value
 	// keyBucket maps a stored user-object key (snapshot) to the customBucket it
@@ -714,6 +749,10 @@ func (h *Hash) repr() string {
 	if len(h.Keys) == 0 {
 		return "{}"
 	}
+	if !ReprEnter(h) {
+		return "{...}" // h is nested inside itself
+	}
+	defer ReprLeave(h)
 	var b strings.Builder
 	b.WriteByte('{')
 	for i, k := range h.Keys {

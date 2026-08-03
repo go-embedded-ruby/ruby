@@ -575,11 +575,28 @@ func (vm *VM) ioPuts(o *IOObj, args []object.Value) {
 }
 
 func (vm *VM) ioPutsValue(o *IOObj, v object.Value) {
+	vm.ioPutsValueRec(o, v, nil)
+}
+
+// ioPutsValueRec is ioPutsValue with a guard against a self-referential array:
+// puts recurses into nested arrays (each element on its own line), so a member
+// that is its own container is written as "[...]" (as MRI does) rather than
+// looping forever. seen tracks the arrays currently being expanded.
+func (vm *VM) ioPutsValueRec(o *IOObj, v object.Value, seen map[*object.Array]struct{}) {
 	if arr, ok := v.(*object.Array); ok {
+		if _, rec := seen[arr]; rec {
+			o.writeStr("[...]\n")
+			return
+		}
+		if seen == nil {
+			seen = map[*object.Array]struct{}{}
+		}
+		seen[arr] = struct{}{}
+		defer delete(seen, arr)
 		// An empty array writes nothing (MRI), unlike a no-arg puts which writes a
 		// lone newline.
 		for _, e := range arr.Elems {
-			vm.ioPutsValue(o, e)
+			vm.ioPutsValueRec(o, e, seen)
 		}
 		return
 	}

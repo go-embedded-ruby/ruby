@@ -543,7 +543,17 @@ func negate(v object.Value) object.Value {
 	return raise("NoMethodError", "undefined method '-@' for %s", v.Inspect())
 }
 
+// eqPair keys the recursion guard used by valueEqual/valueEql: a container pair
+// currently being compared. Re-encountering the same pair means the structures
+// are mutually self-referential; MRI treats such a recursive comparison as equal
+// (rb_exec_recursive) rather than looping forever.
+type eqPair struct{ a, b object.Value }
+
 func valueEqual(a, b object.Value) bool {
+	return valueEqualRec(a, b, nil)
+}
+
+func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 	// Complex compares component-wise, and equals a real number when its
 	// imaginary part is zero (Complex(2, 0) == 2), in either operand order.
 	if ac, ok := a.(*object.Complex); ok {
@@ -596,8 +606,17 @@ func valueEqual(a, b object.Value) bool {
 		if !ok || len(av.Elems) != len(bv.Elems) {
 			return false
 		}
+		key := eqPair{av, bv}
+		if _, rec := seen[key]; rec {
+			return true // recursive pair: MRI compares as equal
+		}
+		if seen == nil {
+			seen = map[eqPair]struct{}{}
+		}
+		seen[key] = struct{}{}
+		defer delete(seen, key)
 		for i := range av.Elems {
-			if !valueEqual(av.Elems[i], bv.Elems[i]) {
+			if !valueEqualRec(av.Elems[i], bv.Elems[i], seen) {
 				return false
 			}
 		}
@@ -607,17 +626,26 @@ func valueEqual(a, b object.Value) bool {
 		if !ok || av.Len() != bv.Len() {
 			return false
 		}
+		key := eqPair{av, bv}
+		if _, rec := seen[key]; rec {
+			return true
+		}
+		if seen == nil {
+			seen = map[eqPair]struct{}{}
+		}
+		seen[key] = struct{}{}
+		defer delete(seen, key)
 		for _, k := range av.Keys {
 			ae, _ := av.Get(k)
 			be, present := bv.Get(k)
-			if !present || !valueEqual(ae, be) {
+			if !present || !valueEqualRec(ae, be, seen) {
 				return false
 			}
 		}
 		return true
 	case *object.Range:
 		bv, ok := b.(*object.Range)
-		return ok && av.Exclusive == bv.Exclusive && valueEqual(av.Lo, bv.Lo) && valueEqual(av.Hi, bv.Hi)
+		return ok && av.Exclusive == bv.Exclusive && valueEqualRec(av.Lo, bv.Lo, seen) && valueEqualRec(av.Hi, bv.Hi, seen)
 	case *Set:
 		bv, ok := b.(*Set)
 		return ok && av.s.EqualQ(bv.s)
@@ -660,6 +688,10 @@ func valueEqual(a, b object.Value) bool {
 // their members with eql? too. A built-in value subclass instance is compared as
 // the value it wraps; everything else falls back to object identity.
 func valueEql(a, b object.Value) bool {
+	return valueEqlRec(a, b, nil)
+}
+
+func valueEqlRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 	if o, ok := a.(*RObject); ok && !object.IsNil(o.builtin) {
 		a = o.builtin
 	}
@@ -687,8 +719,17 @@ func valueEql(a, b object.Value) bool {
 		if !ok || len(av.Elems) != len(bv.Elems) {
 			return false
 		}
+		key := eqPair{av, bv}
+		if _, rec := seen[key]; rec {
+			return true // recursive pair: MRI compares as equal
+		}
+		if seen == nil {
+			seen = map[eqPair]struct{}{}
+		}
+		seen[key] = struct{}{}
+		defer delete(seen, key)
 		for i := range av.Elems {
-			if !valueEql(av.Elems[i], bv.Elems[i]) {
+			if !valueEqlRec(av.Elems[i], bv.Elems[i], seen) {
 				return false
 			}
 		}
@@ -698,10 +739,19 @@ func valueEql(a, b object.Value) bool {
 		if !ok || av.Len() != bv.Len() {
 			return false
 		}
+		key := eqPair{av, bv}
+		if _, rec := seen[key]; rec {
+			return true
+		}
+		if seen == nil {
+			seen = map[eqPair]struct{}{}
+		}
+		seen[key] = struct{}{}
+		defer delete(seen, key)
 		for _, k := range av.Keys {
 			v1, _ := av.Get(k)
 			v2, present := bv.Get(k)
-			if !present || !valueEql(v1, v2) {
+			if !present || !valueEqlRec(v1, v2, seen) {
 				return false
 			}
 		}
