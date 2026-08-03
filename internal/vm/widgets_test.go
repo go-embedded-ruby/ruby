@@ -138,6 +138,98 @@ Widgets.layout(lbl, 80, 20)
 lpx = Widgets.render(lbl, 80, 20)
 raise "aa label pixels" unless lpx["pixels"].bytesize == 80 * 20 * 4
 
+# --- v0.7.0 desktop-environment overlay + chrome widgets -------------------
+# The compositor's DE-feature spine: notifications/toast, tray, wallpaper,
+# applet chrome. Each new adapter method is auto-registered from the method
+# surface, so it resolves through the same Call shim with no Go change. A 4x4
+# RGBA blit is passed base64-encoded (the binding base64-decodes String pixel
+# arguments): 64 zero bytes == "AAAA"*21 + "AA==".
+px4 = "AAAA" * 21 + "AA=="
+
+# Transient overlays: a Notification and a Toast, shown, anchored, ticked.
+note = Widgets.notification("Build finished")
+raise "note handle" unless note.is_a?(Integer)
+Widgets.set_life(note, 2)
+Widgets.set_visible(note, true)
+raise "note visible" unless Widgets.visible(note) == true
+Widgets.anchor_in(note, 0, 0, 200, 120, "top_right")
+Widgets.tick(note)
+
+toast = Widgets.toast("Saved", "success", "Undo", "undo_save")
+Widgets.set_kind(toast, "info")
+Widgets.anchor_in(toast, 0, 0, 200, 120, "bottom_center")
+Widgets.set_visible(toast, true)
+raise "toast visible" unless Widgets.visible(toast) == true
+
+# Count/indicator chrome.
+badge = Widgets.badge("12", "#c0392b", "#ffffff")
+raise "badge" unless badge.is_a?(Integer)
+lvl = Widgets.level_bar(5)
+Widgets.set_value(lvl, 3)
+
+# Pop-ups: a context menu over an existing Menu, a popover, a command palette.
+ctx = Widgets.context_menu(menu)
+Widgets.popup(ctx, 12, 20)
+Widgets.set_visible(ctx, true)
+raise "ctx visible" unless Widgets.visible(ctx) == true
+pop = Widgets.popover(Widgets.label("body"), "Details")
+Widgets.set_visible(pop, true)
+raise "pop visible" unless Widgets.visible(pop) == true
+palette = Widgets.command_palette([{"label" => "Open File", "action" => "open"},
+                                   {"label" => "Quit", "action" => "quit"}, "skip"])
+Widgets.set_visible(palette, true)
+raise "palette visible" unless Widgets.visible(palette) == true
+
+# Compact affordances.
+ib = Widgets.icon_button("+", "add")
+tip = Widgets.tooltip("Add a track", "above")
+Widgets.set_visible(tip, true)
+av = Widgets.avatar("DD", "#2c3e50")
+raise "chrome handles" unless [ib, tip, av].all? { |h| h.is_a?(Integer) }
+
+# An RGBA blit through the image constructor, rendered to real pixels.
+img = Widgets.image(px4, 4, 4, "fit")
+Widgets.layout(img, 16, 16)
+ipx = Widgets.render(img, 16, 16)
+raise "image pixels" unless ipx["pixels"].bytesize == 16 * 16 * 4
+
+# Desktop: wallpaper (image + gradient), tray with stock + image icons, thumbnail.
+wall = Widgets.wallpaper(px4, 4, 4, "fill")
+raise "wallpaper" unless wall.is_a?(Integer)
+grad = Widgets.wallpaper_gradient("#203050", "#081020")
+Widgets.layout(grad, 32, 24)
+gpx = Widgets.render(grad, 32, 24)
+raise "gradient pixels" unless gpx["pixels"].bytesize == 32 * 24 * 4
+
+tray = Widgets.status_area
+si = Widgets.status_icon("settings", "Settings", "open_settings", "settings_menu")
+sii = Widgets.status_icon_image(px4, 4, 4, "Battery", "", "")
+Widgets.add_widget(tray, si)
+Widgets.add_widget(tray, sii)
+Widgets.layout(tray, 64, 24)
+tpx = Widgets.render(tray, 64, 24)
+raise "tray pixels" unless tpx["pixels"].bytesize == 64 * 24 * 4
+
+thumb = Widgets.thumbnail(px4, 4, 4, "Window 1", "focus_window")
+Widgets.set_selected(thumb, true)
+Widgets.set_hover(thumb, false)
+
+# A window decoration built from an explicit spec Hash, rendered.
+deco = Widgets.decoration({
+  "title" => "untitled.txt",
+  "title_color" => "#2b2b2b",
+  "title_ink" => "#e0e0e0",
+  "titlebar" => [0, 0, 240, 28],
+  "border" => [0, 0, 240, 160],
+  "border_color" => "#101010",
+  "buttons" => [{"rect" => [8, 6, 16, 16], "shape" => "circle",
+                 "face" => "#e74c3c", "glyph" => "close", "glyph_ink" => "#000000"}]
+})
+raise "decoration" unless deco.is_a?(Integer)
+Widgets.layout(deco, 240, 160)
+dpx = Widgets.render(deco, 240, 160)
+raise "deco pixels" unless dpx["pixels"].bytesize == 240 * 160 * 4
+
 # Layout the whole tree, then read a Hash of bounds.
 Widgets.layout(cont, 200, 120)
 bnds = Widgets.bounds(cont)
