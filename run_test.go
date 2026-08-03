@@ -29,3 +29,21 @@ func TestRun(t *testing.T) {
 		t.Fatalf("runtime error = %v, want one mentioning boom", err)
 	}
 }
+
+// TestRunMultilineTernary exercises a ternary whose `?`/`:` and arms are split
+// across lines (parser >= v0.1.3). The newline before the `:` used to fail to
+// parse; each form below now parses and evaluates, matching MRI.
+func TestRunMultilineTernary(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{"p (true ?\n 1 :\n 2)", "1\n"},
+		{"p (false ?\n \"a\"\n: \"b\")", "\"b\"\n"},
+	} {
+		var out bytes.Buffer
+		if err := ruby.Run(tc.src, &out); err != nil {
+			t.Fatalf("Run(%q): %v", tc.src, err)
+		}
+		if got := out.String(); got != tc.want {
+			t.Errorf("Run(%q) = %q, want %q", tc.src, got, tc.want)
+		}
+	}
+}
