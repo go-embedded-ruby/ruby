@@ -27,6 +27,27 @@ var runCaptured = func(cmd []string) (string, int) {
 	return string(out), exitCodeOf(err)
 }
 
+// systemCommand runs cmd for Kernel#system on Windows (see spawn_native.go for
+// the semantics and why it is a package var).
+var systemCommand = func(cmd []string) (out string, status int, spawned bool) {
+	if len(cmd) == 0 {
+		return "", 127, false
+	}
+	var c *exec.Cmd
+	if s, sh := shellish(cmd); sh {
+		c = exec.Command("cmd", "/c", s)
+	} else {
+		c = exec.Command(cmd[0], cmd[1:]...)
+	}
+	b, err := c.CombinedOutput()
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			return "", 127, false
+		}
+	}
+	return string(b), exitCodeOf(err), true
+}
+
 // exitCodeOf extracts a process exit code from exec's error (see spawn_native.go).
 func exitCodeOf(err error) int {
 	if err == nil {

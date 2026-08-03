@@ -22,7 +22,7 @@ func (vm *VM) registerModuleExtras() {
 		}
 		for _, a := range args {
 			name := nameArg(a)
-			m := lookupMethod(mod, name)
+			m := vm.lookupForModuleOp(mod, name)
 			if m == nil || m.undefined {
 				raise("NameError", "undefined method '%s' for module '%s'", name, mod.name)
 			}

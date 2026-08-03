@@ -229,6 +229,48 @@ func (vm *VM) registerKernelExec() {
 		vm.curStdout().writeStr(out)
 		panic(execSentinel{code: code})
 	})
+
+	// system(env?, command..., opts?) runs the command synchronously, writing its
+	// combined output to the current $stdout, and returns true when it exits 0,
+	// false when it exits non-zero, and nil when the command could not be spawned
+	// at all (MRI semantics). The `exception: true` option raises instead of
+	// returning false/nil. $? is set to the child's Process::Status.
+	def("system", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		cmd, opts := parseSpawnArgs(args)
+		raiseOnFail := false
+		if opts != nil {
+			if v, ok := opts.Get(object.Symbol("exception")); ok {
+				raiseOnFail = v.Truthy()
+			}
+		}
+		out, code, spawned := systemCommand(cmd)
+		vm.curStdout().writeStr(out)
+		if !spawned {
+			// A command that never started leaves $? unset (nil), as MRI does.
+			vm.globals["$?"] = object.NilV
+			if raiseOnFail {
+				raise("Errno::ENOENT", "No such file or directory - %s", strings.Join(cmd, " "))
+			}
+			return object.NilV
+		}
+		vm.globals["$?"] = vm.newProcessStatus(vm.recordChild(code), code)
+		if code == 0 {
+			return object.Bool(true)
+		}
+		if raiseOnFail {
+			raise("RuntimeError", "Command failed with exit %d: %s", code, strings.Join(cmd, " "))
+		}
+		return object.Bool(false)
+	})
+}
+
+// newProcessStatus builds a Process::Status object recording a finished child's
+// pid and exit code, used to populate $? after Kernel#system.
+func (vm *VM) newProcessStatus(pid int64, code int) object.Value {
+	so := &RObject{class: vm.consts["Process::Status"].(*RClass), ivars: map[string]object.Value{}}
+	so.ivars["@exitstatus"] = object.IntValue(int64(code))
+	so.ivars["@pid"] = object.IntValue(pid)
+	return so
 }
 
 // runForkBlock calls blk, catching the execSentinel that Kernel.exec raises and

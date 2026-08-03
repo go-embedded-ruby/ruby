@@ -76,7 +76,7 @@ func (vm *VM) setInstanceVisibility(mod *RClass, name string, vis visibility) {
 		bumpMethodSerial()
 		return
 	}
-	if lookupMethod(mod, name) == nil {
+	if vm.lookupForModuleOp(mod, name) == nil {
 		raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
 	}
 	if mod.visOverrides == nil {

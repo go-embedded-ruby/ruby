@@ -212,6 +212,7 @@ type VM struct {
 	arTableNames map[*RClass]string
 
 	cBasicObject, cObject, cModule, cClass *RClass
+	cKernel                                *RClass // the Kernel module (included into Object; its methods live on cObject)
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cComplex, cRational                    *RClass
 	cNDArray, cImage                       *RClass
@@ -415,6 +416,13 @@ type VM struct {
 	// (which only tracks required-file frames for __FILE__), every frame pushes
 	// here so the two stacks stay aligned. GVL-guarded.
 	frameFiles []string
+
+	// frameCrefs mirrors frameNames one-for-one (every frame pushes), recording
+	// the lexical scope (cref) each frame runs under so Module.nesting can report
+	// the nesting at the call site. The entry is filled in once lexCref has been
+	// computed for the frame; a native method (which pushes no frame) sees its
+	// caller's cref on top. GVL-guarded.
+	frameCrefs []*RClass
 
 	// children records finished synthetic child processes (Process.spawn /
 	// Kernel.fork), so Process.waitpid2 can report each one's exit status.
@@ -771,6 +779,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			if _, ok := r.(execSentinel); ok {
 				vm.frameNames = vm.frameNames[:0]
 				vm.frameFiles = vm.frameFiles[:0]
+				vm.frameCrefs = vm.frameCrefs[:0]
 				vm.fileStack = vm.fileStack[:0]
 				vm.runAtExit()
 				result, err = object.NilV, nil
@@ -784,6 +793,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			if vm.isSystemExit(rerr.Class) {
 				vm.frameNames = vm.frameNames[:0]
 				vm.frameFiles = vm.frameFiles[:0]
+				vm.frameCrefs = vm.frameCrefs[:0]
 				vm.fileStack = vm.fileStack[:0]
 				vm.runAtExit()
 				result, err = object.NilV, nil
@@ -799,6 +809,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			// statement (rescued program, REPL line) starts clean.
 			vm.frameNames = vm.frameNames[:0]
 			vm.frameFiles = vm.frameFiles[:0]
+			vm.frameCrefs = vm.frameCrefs[:0]
 			vm.fileStack = vm.fileStack[:0]
 			result, err = nil, rerr
 		}
@@ -950,6 +961,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// frameFiles mirrors frameNames one-for-one (every frame pushes, even with an
 	// empty file) so backtraces can pair each frame's label with its source file.
 	vm.frameFiles = append(vm.frameFiles, iseq.File)
+	// frameCrefs mirrors frameNames too; the cref is filled in below once lexCref
+	// is known (a nil placeholder keeps the stacks aligned until then).
+	vm.frameCrefs = append(vm.frameCrefs, nil)
 	// Track the source file of frames that carry one (loaded files), so __FILE__
 	// reports the file of the executing ISeq even across calls into other files.
 	// Like frameNames, an exception unwinding past here is reset at the Run
@@ -967,6 +981,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// require_relative in a rescue resolves against the rescuing file.
 	frameNamesDepth := len(vm.frameNames)
 	frameFilesDepth := len(vm.frameFiles)
+	frameCrefsDepth := len(vm.frameCrefs)
 	fileStackDepth := len(vm.fileStack)
 	requireDirsDepth := len(vm.requireDirs)
 
@@ -1063,6 +1078,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	if selfBlock != nil && selfBlock.cref != nil {
 		lexCref = selfBlock.cref
 	}
+	// Now that this frame's lexical scope is settled, record it so Module.nesting
+	// (a native, which pushes no frame of its own) can read the call site's cref.
+	vm.frameCrefs[frameCrefsDepth-1] = lexCref
 
 	// Every frame catches a returnSignal aimed at its own selfTarget (a local
 	// return/next routed through an ensure, or a non-local return whose home is
@@ -1080,6 +1098,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// pop never ran, and the deeper frames that unwound left theirs too.
 				vm.frameNames = vm.frameNames[:frameNamesDepth-1]
 				vm.frameFiles = vm.frameFiles[:frameFilesDepth-1]
+				vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth-1]
 				vm.requireDirs = vm.requireDirs[:requireDirsDepth]
 				if pushedFile {
 					vm.fileStack = vm.fileStack[:fileStackDepth-1]
@@ -1785,6 +1804,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					restoreFrameStacks := func() {
 						vm.frameNames = vm.frameNames[:frameNamesDepth]
 						vm.frameFiles = vm.frameFiles[:frameFilesDepth]
+						vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth]
 						vm.fileStack = vm.fileStack[:fileStackDepth]
 						vm.requireDirs = vm.requireDirs[:requireDirsDepth]
 					}
@@ -1831,6 +1851,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	vm.putStack(stack)
 	vm.frameNames = vm.frameNames[:len(vm.frameNames)-1]
 	vm.frameFiles = vm.frameFiles[:len(vm.frameFiles)-1]
+	vm.frameCrefs = vm.frameCrefs[:len(vm.frameCrefs)-1]
 	if pushedFile {
 		vm.fileStack = vm.fileStack[:len(vm.fileStack)-1]
 	}
