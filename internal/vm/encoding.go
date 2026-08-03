@@ -362,4 +362,20 @@ func (vm *VM) registerStringEncoding() {
 		// Binary is always valid; a UTF-8 string is valid iff it decodes cleanly.
 		return object.Bool(s.IsBinary() || utf8.Valid(s.Bytes()))
 	})
+	vm.registerStringEncodeMethods()
+}
+
+// registerEncodingErrors defines the EncodingError hierarchy raised by the
+// transcoding path: EncodingError < StandardError, and Encoding's
+// UndefinedConversionError / InvalidByteSequenceError / ConverterNotFoundError /
+// CompatibilityError under it.
+func (vm *VM) registerEncodingErrors() {
+	std := vm.consts["StandardError"].(*RClass)
+	encErr := newClass("EncodingError", std)
+	vm.consts["EncodingError"] = encErr
+	for _, n := range []string{"UndefinedConversionError", "InvalidByteSequenceError", "ConverterNotFoundError", "CompatibilityError"} {
+		c := newClass("Encoding::"+n, encErr)
+		vm.cEncoding.consts[n] = c
+		vm.consts["Encoding::"+n] = c
+	}
 }

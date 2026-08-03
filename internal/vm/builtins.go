@@ -375,6 +375,8 @@ func (vm *VM) bootstrap() {
 	exc("NoMatchingPatternError", "StandardError")
 	exc("NoMatchingPatternKeyError", "NoMatchingPatternError")
 	exc("Math::DomainError", "StandardError")
+	// EncodingError < StandardError and Encoding's transcoding errors under it.
+	vm.registerEncodingErrors()
 	// ScriptError / SyntaxError sit under Exception (NOT StandardError), so a bare
 	// `rescue` does not catch them — matching MRI. eval raises SyntaxError.
 	exc("ScriptError", "Exception")
@@ -4673,9 +4675,11 @@ func pathArg(vm *VM, v object.Value) string {
 	return ""
 }
 
-// scrubUTF8 returns s with every invalid UTF-8 byte sequence replaced by repl,
+// scrubUTF8 returns s with every ill-formed UTF-8 byte sequence replaced by repl,
 // so the result is valid UTF-8 (backing String#scrub). Valid runs are copied
-// verbatim; each invalid byte collapses to repl, as MRI does.
+// verbatim; each *maximal ill-formed subpart* collapses to a single repl, matching
+// MRI — so a truncated multibyte lead followed by valid continuation bytes (e.g.
+// "\xE3\x81") counts as one replacement, not one per byte.
 func scrubUTF8(s, repl string) string {
 	if utf8.ValidString(s) {
 		return s
@@ -4683,15 +4687,38 @@ func scrubUTF8(s, repl string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == utf8.RuneError && size == 1 {
-			b.WriteString(repl)
-			i++
+		if !(r == utf8.RuneError && size == 1) {
+			b.WriteString(s[i : i+size])
+			i += size
 			continue
 		}
-		b.WriteString(s[i : i+size])
-		i += size
+		b.WriteString(repl)
+		i += illFormedUTF8Len(s[i:])
 	}
 	return b.String()
+}
+
+// illFormedUTF8Len returns the length of the maximal ill-formed UTF-8 subpart at
+// the start of s (whose first byte is not the start of a valid sequence): a lead
+// byte plus the run of valid continuation bytes (0x80–0xBF) it could begin, capped
+// at the length its lead implies. A lone continuation or invalid lead is length 1.
+func illFormedUTF8Len(s string) int {
+	var need int
+	switch c := s[0]; {
+	case c >= 0xC2 && c <= 0xDF:
+		need = 2
+	case c >= 0xE0 && c <= 0xEF:
+		need = 3
+	case c >= 0xF0 && c <= 0xF4:
+		need = 4
+	default:
+		return 1
+	}
+	n := 1
+	for n < need && n < len(s) && s[n]&0xC0 == 0x80 {
+		n++
+	}
+	return n
 }
 
 // hashPair builds the [key, value] array Hash#each yields; block auto-splat then
