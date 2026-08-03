@@ -77,7 +77,31 @@ end
 
 TOLERANCE = 0.00003
 def be_close(exp, tol = TOLERANCE); BeCloseMatcher.new(exp, tol); end
-def be_computed_by(*a, &b); raise SpecSkip, "be_computed_by unsupported"; end
+
+# be_computed_by(sym, *extra): the receiver is an Array of rows, each
+# [receiver, *args, expected]; the matcher calls receiver.send(sym, *args, *extra)
+# and checks it == expected for every row. This is a real MSpec matcher (used
+# heavily by core/encoding), so implementing it turns those examples from skipped
+# into genuinely scored.
+class BeComputedByMatcher
+  def initialize(sym, *extra); @sym = sym; @extra = extra; end
+  def matches?(array)
+    @bad = nil
+    array.each do |row|
+      row = row.dup
+      receiver = row.shift
+      expected = row.pop
+      actual = receiver.send(@sym, *(row + @extra))
+      unless actual == expected
+        @bad = "#{receiver.inspect}.#{@sym}(#{row.map(&:inspect).join(', ')}) => #{actual.inspect}, expected #{expected.inspect}"
+        return false
+      end
+    end
+    true
+  end
+  def failure_message; @bad || "be_computed_by(#{@sym}) mismatch"; end
+end
+def be_computed_by(sym, *extra); BeComputedByMatcher.new(sym, *extra); end
 def complain(*a); raise SpecSkip, "complain matcher unsupported"; end
 def output(*a); raise SpecSkip, "output matcher unsupported"; end
 def output_to_fd(*a); raise SpecSkip, "output_to_fd matcher unsupported"; end
