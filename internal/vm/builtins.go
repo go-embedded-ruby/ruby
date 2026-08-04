@@ -1805,6 +1805,7 @@ func (vm *VM) bootstrap() {
 		copy(out, a.Elems[len(a.Elems)-n:])
 		return object.NewArrayFromSlice(out)
 	})
+	vm.cArray.define("fill", arrayFill)
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		a.Elems = append(a.Elems, args...)
@@ -4862,6 +4863,122 @@ func flattenDepthChanged(elems []object.Value, depth int) ([]object.Value, bool)
 		}
 	}
 	return out, changed
+}
+
+// maxFillSize caps how large Array#fill may grow an array. MRI raises when the
+// requested size is unreasonable; rejecting here keeps a pathological length
+// (e.g. fill(x, 1, fixnum_max)) from attempting a doomed allocation.
+const maxFillSize = 1 << 40
+
+// arrayFill implements Array#fill in every MRI form: fill(obj), fill(obj, start),
+// fill(obj, start, length), fill(obj, range) and the block variants
+// fill { |i| }, fill(start) { }, fill(start, length) { }, fill(range) { }. It
+// fills the exclusive index interval [beg, end), growing the array with nils when
+// end (or start) is past the current length, and returns self. The block form
+// stores block(i) at each index, so a block raising mid-iteration leaves the
+// already-filled elements in place (the array is never truncated).
+func arrayFill(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+	a := self.(*object.Array)
+	var item object.Value
+	rest := args
+	if blk == nil {
+		if len(args) < 1 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
+		}
+		item = args[0]
+		rest = args[1:]
+	} else if len(args) > 2 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 0..2)", len(args))
+	}
+
+	alen := len(a.Elems)
+	var beg, end int
+	if len(rest) == 1 {
+		if r, ok := rest[0].(*object.Range); ok {
+			// Range form: fill(obj, m..n) / fill(m..n) { }.
+			beg, end = vm.fillRangeBounds(r, alen)
+			return vm.arrayFillRange(a, beg, end, item, blk)
+		}
+	}
+	// start / length form. A nil (or absent) start is 0; a nil (or absent) length
+	// fills through to the current end.
+	if len(rest) >= 1 && !object.IsNil(rest[0]) {
+		beg = int(vm.toIntCoerce(rest[0]))
+		if beg < 0 {
+			if beg += alen; beg < 0 {
+				beg = 0
+			}
+		}
+	}
+	if len(rest) >= 2 && !object.IsNil(rest[1]) {
+		length := vm.fillLength(rest[1])
+		end = beg + length
+	} else {
+		end = alen
+	}
+	return vm.arrayFillRange(a, beg, end, item, blk)
+}
+
+// fillLength coerces an Array#fill length argument to an int, raising RangeError
+// for a Bignum (an array that large cannot be built) and reusing the standard
+// #to_int coercion (with its TypeError) otherwise.
+func (vm *VM) fillLength(v object.Value) int {
+	if _, ok := v.(*object.Bignum); ok {
+		raise("RangeError", "array size too big")
+	}
+	return int(vm.toIntCoerce(v))
+}
+
+// fillRangeBounds turns a Range into the exclusive [beg, end) index interval for
+// Array#fill, resolving negative endpoints against alen (MRI's rb_range_beg_len
+// with the err flag): a begin still negative after adjustment is a RangeError.
+func (vm *VM) fillRangeBounds(r *object.Range, alen int) (beg, end int) {
+	// A beginless range (..n) starts at 0; an endless range (m..) runs to the end.
+	if object.IsNil(r.Lo) {
+		beg = 0
+	} else {
+		beg = int(vm.toIntCoerce(r.Lo))
+		if beg < 0 {
+			if beg += alen; beg < 0 {
+				raise("RangeError", "%s out of range", r.Inspect())
+			}
+		}
+	}
+	if object.IsNil(r.Hi) {
+		return beg, alen
+	}
+	end = int(vm.toIntCoerce(r.Hi))
+	if end < 0 {
+		end += alen
+	}
+	if !r.Exclusive {
+		end++
+	}
+	return beg, end
+}
+
+// arrayFillRange fills a.Elems[beg:end) with item (block==nil) or block(i),
+// growing the array with nils when end exceeds the current length. An empty or
+// inverted interval is a no-op. It returns a.
+func (vm *VM) arrayFillRange(a *object.Array, beg, end int, item object.Value, blk *Proc) object.Value {
+	if end > len(a.Elems) {
+		if end > maxFillSize {
+			raise("ArgumentError", "array size too big")
+		}
+		grow := make([]object.Value, end-len(a.Elems))
+		for i := range grow {
+			grow[i] = object.NilV
+		}
+		a.Elems = append(a.Elems, grow...)
+	}
+	for i := beg; i < end; i++ {
+		if blk != nil {
+			a.Elems[i] = vm.callBlock(blk, []object.Value{object.IntValue(int64(i))})
+		} else {
+			a.Elems[i] = item
+		}
+	}
+	return a
 }
 
 // joinSeparator coerces an Array#join / Array#* separator argument to a String:
