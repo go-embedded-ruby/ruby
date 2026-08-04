@@ -184,6 +184,20 @@ func (vm *VM) registerIO() {
 	// IO.read/binread/write/binwrite/foreach/readlines, installed identically on IO
 	// and File (File.readlines/foreach included) now that both classes exist.
 	vm.registerIOClassMethods(cIO, cFile)
+
+	// Kernel#open opens a path the way File.open does (block form yields the stream
+	// and closes it afterwards). The "|command" subprocess form is not supported in
+	// this synchronous VM, so it surfaces as Errno::ENOENT — a caller that rescues a
+	// failed open then treats the argument as a real path, as MRI code commonly does.
+	vm.cObject.define("open", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		if name := pathArg(vm, args[0]); strings.HasPrefix(name, "|") {
+			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", name)
+		}
+		return vm.send(cFile, "open", args, blk)
+	})
 }
 
 // File open-mode flag constants (File::RDWR etc.). The values are the canonical
@@ -452,20 +466,48 @@ func defStringIORead(cls *RClass) {
 	cls.define("read", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		o.pipeRefresh()
+		// An optional second argument is an output-buffer String: the read fills it
+		// (and is returned in its place), and it is cleared when the read yields nil.
+		var buf *object.String
+		if len(args) > 1 {
+			if b, ok := args[1].(*object.String); ok {
+				buf = b
+			}
+		}
+		result := func(data []byte, isNil bool) object.Value {
+			if buf != nil {
+				if buf.Frozen {
+					raise("FrozenError", "can't modify frozen String: %s", buf.Inspect())
+				}
+				if isNil {
+					buf.SetBytes(nil)
+					return object.NilV
+				}
+				buf.SetBytes(append([]byte(nil), data...))
+				return buf
+			}
+			if isNil {
+				return object.NilV
+			}
+			return object.NewStringBytes(append([]byte(nil), data...))
+		}
 		if len(args) > 0 && args[0] != object.NilV {
 			n := int(toInt(args[0]))
+			if n < 0 {
+				raise("ArgumentError", "negative length %d given", n)
+			}
 			if o.pos >= len(o.buf) {
-				return object.NilV // a length read at EOF yields nil
+				return result(nil, n > 0) // a length read at EOF is nil; a 0-length read is ""
 			}
 			end := min(o.pos+n, len(o.buf))
-			s := object.NewString(string(o.buf[o.pos:end]))
+			data := o.buf[o.pos:end]
 			o.pos = end
-			return s
+			return result(data, false)
 		}
 		start := min(o.pos, len(o.buf)) // pos= may have moved past the end
-		s := object.NewString(string(o.buf[start:]))
+		data := o.buf[start:]
 		o.pos = len(o.buf)
-		return s
+		return result(data, false)
 	})
 	cls.define("getc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
