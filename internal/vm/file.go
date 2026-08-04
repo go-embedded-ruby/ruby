@@ -319,6 +319,25 @@ func (vm *VM) registerFile() {
 	def("writable?", access(2))
 	def("executable?", access(1))
 	def("executable_real?", access(1))
+
+	// Size predicates. File.size? returns the byte size, or nil when the file is
+	// missing or empty (so it doubles as an existence-and-non-empty test); File.zero?
+	// and its alias File.empty? report whether the file exists and is empty. All
+	// return their falsey value for a missing path rather than raising (unlike
+	// File.size, which raises Errno::ENOENT).
+	def("size?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		fi, err := os.Stat(pathArg(vm, args[0]))
+		if err != nil || fi.Size() == 0 {
+			return object.NilV
+		}
+		return object.IntValue(fi.Size())
+	})
+	zero := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		fi, err := os.Stat(pathArg(vm, args[0]))
+		return object.Bool(err == nil && fi.Size() == 0)
+	}
+	def("zero?", zero)
+	def("empty?", zero)
 }
 
 // fileChmod / fileChown / fileLchown / fileChtimes are seams over the os package
