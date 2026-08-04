@@ -200,6 +200,9 @@ type RClass struct {
 	// Kernel#autoload; consumed (and cleared) when the constant is first resolved
 	// through this class's table. nil until first use.
 	autoloads map[string]string
+	// frozen records Object#freeze on the class/module object itself, reported by
+	// Object#frozen? and enforced by structural mutators (e.g. attr_*).
+	frozen bool
 }
 
 func newClass(name string, super *RClass) *RClass {
