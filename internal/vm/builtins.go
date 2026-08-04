@@ -3745,6 +3745,13 @@ func (vm *VM) bootstrap() {
 		}
 		return &object.Rational{R: rationalizeFloat(f)}
 	})
+	// Integer#to_r / #rationalize are exact — self is already an integer, so both
+	// return self/1 (rationalize ignoring any precision argument).
+	intToR := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Rational{R: new(big.Rat).SetInt(bigVal(self))}
+	}
+	vm.cInteger.define("to_r", intToR)
+	vm.cInteger.define("rationalize", intToR)
 	vm.cFloat.define("nan?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(math.IsNaN(floatOf(self)))
 	})

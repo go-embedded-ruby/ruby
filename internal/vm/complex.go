@@ -2,6 +2,8 @@ package vm
 
 import (
 	"math"
+	"math/big"
+	"math/cmplx"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -166,17 +168,43 @@ func complexOp(op bytecode.Op, a *object.Complex, b object.Value) object.Value {
 		im := binary(bytecode.OpAdd, binary(bytecode.OpMul, a.Re, bc.Im), binary(bytecode.OpMul, a.Im, bc.Re))
 		return &object.Complex{Re: re, Im: im}
 	case bytecode.OpDiv:
-		ar, _ := toFloat(a.Re)
-		ai, _ := toFloat(a.Im)
-		br, _ := toFloat(bc.Re)
-		bi, _ := toFloat(bc.Im)
-		den := br*br + bi*bi
-		return &object.Complex{
-			Re: object.Float((ar*br + ai*bi) / den),
-			Im: object.Float((ai*br - ar*bi) / den),
-		}
+		// (a+bi)/(c+di) = ((ac+bd) + (bc−ad)i)/(c²+d²). This stays exact on
+		// Integer/Rational components (each final division is quo, so 3/2 becomes
+		// Rational(3,2) rather than an integer floor) and drops to Float only when a
+		// Float component is present. A real integer 0 divisor raises
+		// ZeroDivisionError; a Float 0.0 divisor yields non-finite components.
+		c, d := bc.Re, bc.Im
+		den := binary(bytecode.OpAdd, binary(bytecode.OpMul, c, c), binary(bytecode.OpMul, d, d))
+		reNum := binary(bytecode.OpAdd, binary(bytecode.OpMul, a.Re, c), binary(bytecode.OpMul, a.Im, d))
+		imNum := binary(bytecode.OpSub, binary(bytecode.OpMul, a.Im, c), binary(bytecode.OpMul, a.Re, d))
+		return &object.Complex{Re: numQuo(reNum, den), Im: numQuo(imNum, den)}
 	}
 	return raise("NoMethodError", "undefined method '%s' for a Complex", op)
+}
+
+// numQuo divides one real numeric by another with Ruby's exact #quo semantics:
+// two exact operands (Integer/Bignum/Rational) give an Integer when the result
+// is whole and a Rational otherwise, while any Float operand yields a Float. A
+// zero exact divisor raises ZeroDivisionError (a Float 0.0 divisor instead
+// produces the IEEE non-finite result).
+func numQuo(num, den object.Value) object.Value {
+	_, numFloat := num.(object.Float)
+	_, denFloat := den.(object.Float)
+	if !numFloat && !denFloat {
+		rn, _ := toRat(num)
+		rd, _ := toRat(den)
+		if rd.Sign() == 0 {
+			return raise("ZeroDivisionError", "divided by 0")
+		}
+		q := new(big.Rat).Quo(rn, rd)
+		if q.IsInt() {
+			return object.NormInt(q.Num())
+		}
+		return &object.Rational{R: q}
+	}
+	a, _ := toFloat(num)
+	b, _ := toFloat(den)
+	return object.Float(a / b)
 }
 
 // complexFloat returns a component as float64 (components are always numeric).
@@ -201,6 +229,9 @@ func (vm *VM) registerComplex() {
 		}
 		return &object.Complex{Re: re, Im: im}
 	})
+
+	// Complex::I is the imaginary unit, Complex(0, 1).
+	vm.cComplex.consts["I"] = &object.Complex{Re: object.IntValue(0), Im: object.IntValue(1)}
 
 	cval := func(self object.Value) *object.Complex { return self.(*object.Complex) }
 
@@ -238,7 +269,10 @@ func (vm *VM) registerComplex() {
 	vm.cComplex.define("conjugate", conj)
 	vm.cComplex.define("conj", conj)
 
-	rect := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	rect := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			return raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
 		c := cval(self)
 		return object.NewArray(c.Re, c.Im)
 	}
@@ -258,4 +292,302 @@ func (vm *VM) registerComplex() {
 	vm.cComplex.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(cval(self).Inspect())
 	})
+
+	// A Complex is never real and never an integer, whatever its parts.
+	vm.cComplex.define("real?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.False
+	})
+	vm.cComplex.define("integer?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.False
+	})
+
+	vm.cComplex.define("finite?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		c := cval(self)
+		return object.Bool(finiteComponent(c.Re) && finiteComponent(c.Im))
+	})
+	vm.cComplex.define("infinite?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		c := cval(self)
+		if infiniteComponent(c.Re) || infiniteComponent(c.Im) {
+			return object.IntValue(1)
+		}
+		return object.NilV
+	})
+
+	// to_f / to_i / to_r convert the real part, but only when the imaginary part is
+	// an exact zero (an Integer/Rational 0 — a Float 0.0 raises RangeError, as MRI).
+	realOnly := func(vm *VM, self object.Value, conv string) object.Value {
+		c := cval(self)
+		if !imagExactZero(c.Im) {
+			return raise("RangeError", "can't convert %s into %s", c.Inspect(), rangeErrTarget(conv))
+		}
+		return vm.send(c.Re, conv, nil, nil)
+	}
+	vm.cComplex.define("to_f", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return realOnly(vm, self, "to_f")
+	})
+	vm.cComplex.define("to_i", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return realOnly(vm, self, "to_i")
+	})
+	// to_r is looser than to_f/to_i: a numeric-zero imaginary part (including a
+	// Float 0.0) converts, only a non-zero one raises RangeError.
+	vm.cComplex.define("to_r", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		c := cval(self)
+		if !imagNumericZero(c.Im) {
+			return raise("RangeError", "can't convert %s into Rational", c.Inspect())
+		}
+		return vm.send(c.Re, "to_r", nil, nil)
+	})
+	vm.cComplex.define("to_c", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	vm.cComplex.define("rationalize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 1 {
+			return raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
+		c := cval(self)
+		if !imagExactZero(c.Im) {
+			return raise("RangeError", "can't convert %s into Rational", c.Inspect())
+		}
+		return vm.send(c.Re, "rationalize", args, nil)
+	})
+
+	vm.cComplex.define("numerator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return complexNumerator(cval(self))
+	})
+	vm.cComplex.define("denominator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NormInt(complexDenominator(cval(self)))
+	})
+
+	vm.cComplex.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		c := cval(self)
+		return &object.Complex{
+			Re: vm.send(c.Re, "fdiv", []object.Value{args[0]}, nil),
+			Im: vm.send(c.Im, "fdiv", []object.Value{args[0]}, nil),
+		}
+	})
+
+	vm.cComplex.define("coerce", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		other := args[0]
+		if oc, ok := other.(*object.Complex); ok {
+			return object.NewArray(oc, self)
+		}
+		if _, ok := toFloat(other); ok {
+			return object.NewArray(&object.Complex{Re: other, Im: object.IntValue(0)}, self)
+		}
+		return raise("TypeError", "%s can't be coerced into Complex", vm.classOf(other).name)
+	})
+
+	vm.cComplex.define("quo", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.send(self, "/", []object.Value{args[0]}, nil)
+	})
+
+	vm.cComplex.define("**", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		exp := args[0]
+		if isNumericValue(exp) {
+			return complexPow(cval(self), exp)
+		}
+		// A non-numeric exponent answering #coerce goes through the coercion
+		// protocol; otherwise it cannot be raised to.
+		if res, ok := vm.tryNumericCoerce("**", self, exp); ok {
+			return res
+		}
+		return raise("TypeError", "%s can't be coerced into Complex", vm.classOf(exp).name)
+	})
+
+	vm.cComplex.define("eql?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		c := cval(self)
+		oc, ok := args[0].(*object.Complex)
+		if !ok {
+			return object.False
+		}
+		sameKind := vm.classOf(c.Re) == vm.classOf(oc.Re) && vm.classOf(c.Im) == vm.classOf(oc.Im)
+		return object.Bool(sameKind && complexEqual(c, oc))
+	})
+
+	vm.cComplex.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		c := cval(self)
+		if !imagNumericZero(c.Im) {
+			return object.NilV // a non-real Complex is unordered
+		}
+		var oreal object.Value
+		switch o := args[0].(type) {
+		case *object.Complex:
+			if !imagNumericZero(o.Im) {
+				return object.NilV
+			}
+			oreal = o.Re
+		default:
+			if _, ok := toFloat(o); !ok {
+				return object.NilV
+			}
+			oreal = args[0]
+		}
+		return vm.send(c.Re, "<=>", []object.Value{oreal}, nil)
+	})
+
+	// negative? / positive? are undefined on Complex (an unordered number). A
+	// tombstone hides the generic Numeric definitions that would otherwise be
+	// inherited; it is installed directly (not via undef) because those Numeric
+	// methods are registered after this hook runs.
+	vm.cComplex.methods["negative?"] = &Method{name: "negative?", owner: vm.cComplex, undefined: true}
+	vm.cComplex.methods["positive?"] = &Method{name: "positive?", owner: vm.cComplex, undefined: true}
+
+	// True aliases share one Method record so Complex.instance_method(:angle) ==
+	// Complex.instance_method(:arg), matching MRI.
+	for _, pair := range [][2]string{
+		{"angle", "arg"}, {"phase", "arg"},
+		{"conj", "conjugate"}, {"imag", "imaginary"},
+		{"rect", "rectangular"}, {"magnitude", "abs"},
+	} {
+		vm.cComplex.methods[pair[0]] = vm.cComplex.methods[pair[1]]
+	}
+
+	// Class constructors Complex.rectangular / .rect / .polar.
+	rectCtor := &Method{name: "rectangular", owner: vm.cComplex, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return complexRectangular(args)
+	}}
+	vm.cComplex.smethods["rectangular"] = rectCtor
+	vm.cComplex.smethods["rect"] = rectCtor
+	vm.cComplex.smethods["polar"] = &Method{name: "polar", owner: vm.cComplex, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return complexPolar(args)
+	}}
+}
+
+// rangeErrTarget names the conversion target in the Complex#to_f / #to_i
+// RangeError (the only two conversions routed through realOnly; #to_r is looser
+// and handled separately).
+func rangeErrTarget(conv string) string {
+	if conv == "to_f" {
+		return "Float"
+	}
+	return "Integer"
+}
+
+// finiteComponent reports whether a Complex part is finite: any exact number is,
+// and a Float is unless it is Infinity or NaN.
+func finiteComponent(v object.Value) bool {
+	if f, ok := v.(object.Float); ok {
+		return !math.IsInf(float64(f), 0) && !math.IsNaN(float64(f))
+	}
+	return true
+}
+
+// infiniteComponent reports whether a Complex part is an infinite Float.
+func infiniteComponent(v object.Value) bool {
+	f, ok := v.(object.Float)
+	return ok && math.IsInf(float64(f), 0)
+}
+
+// imagExactZero reports whether an imaginary part is an *exact* zero (Integer or
+// Rational 0). A Float 0.0 is not exact, so Complex#to_f/#to_i/#to_r reject it.
+func imagExactZero(im object.Value) bool {
+	if _, ok := im.(object.Float); ok {
+		return false
+	}
+	return valueEqual(im, object.IntValue(0))
+}
+
+// imagNumericZero reports whether an imaginary part is numerically zero (0 or
+// 0.0), the looser test Complex#<=> uses to decide a Complex is real.
+func imagNumericZero(im object.Value) bool {
+	return valueEqual(im, object.IntValue(0))
+}
+
+// ratParts returns the numerator and denominator of an exact real component.
+func ratParts(v object.Value) (num, den *big.Int) {
+	r, _ := toRat(v)
+	return r.Num(), r.Denom()
+}
+
+// complexDenominator is the LCM of the two parts' denominators (MRI's rule).
+func complexDenominator(c *object.Complex) *big.Int {
+	_, rd := ratParts(c.Re)
+	_, id := ratParts(c.Im)
+	g := new(big.Int).GCD(nil, nil, rd, id)
+	return new(big.Int).Mul(new(big.Int).Quo(rd, g), id) // lcm = rd/gcd*id
+}
+
+// complexNumerator scales both parts up by the common denominator, giving a
+// Complex of whole-number parts (MRI's Complex#numerator).
+func complexNumerator(c *object.Complex) object.Value {
+	d := complexDenominator(c)
+	rn, rd := ratParts(c.Re)
+	in, id := ratParts(c.Im)
+	re := new(big.Int).Mul(rn, new(big.Int).Quo(d, rd))
+	im := new(big.Int).Mul(in, new(big.Int).Quo(d, id))
+	return &object.Complex{Re: object.NormInt(re), Im: object.NormInt(im)}
+}
+
+// complexRectangular builds Complex(re, im=0) from real arguments (MRI's
+// Complex.rectangular), raising TypeError on a non-real part.
+func complexRectangular(args []object.Value) object.Value {
+	re := args[0]
+	im := object.Value(object.IntValue(0))
+	if len(args) > 1 {
+		im = args[1]
+	}
+	if _, ok := toFloat(re); !ok {
+		return raise("TypeError", "not a real")
+	}
+	if _, ok := toFloat(im); !ok {
+		return raise("TypeError", "not a real")
+	}
+	return &object.Complex{Re: re, Im: im}
+}
+
+// complexPolar builds a Complex from an absolute value and angle (MRI's
+// Complex.polar); the result carries Float parts.
+func complexPolar(args []object.Value) object.Value {
+	abs, ok := toFloat(args[0])
+	if !ok {
+		return raise("TypeError", "not a real")
+	}
+	ang := 0.0
+	if len(args) > 1 {
+		ang, ok = toFloat(args[1])
+		if !ok {
+			return raise("TypeError", "not a real")
+		}
+	}
+	return &object.Complex{Re: object.Float(abs * math.Cos(ang)), Im: object.Float(abs * math.Sin(ang))}
+}
+
+// complexPow raises z to an exponent. A whole-number exponent is evaluated by
+// exact repeated multiplication (a negative one via the exact reciprocal), so
+// integer/rational components stay exact; any other exponent falls back to the
+// polar (Float) form.
+func complexPow(z *object.Complex, exp object.Value) object.Value {
+	// Only a small (machine-word) integer exponent is evaluated exactly: a Bignum
+	// is by construction out of int64 range, so an exact repeated product would be
+	// infeasible — it falls through to the polar form below.
+	if n, ok := exp.(object.Integer); ok {
+		result := &object.Complex{Re: object.IntValue(1), Im: object.IntValue(0)}
+		base := z
+		k := int64(n)
+		if k < 0 {
+			base = complexReciprocal(z)
+			k = -k
+		}
+		for ; k > 0; k-- {
+			result = complexOp(bytecode.OpMul, result, base).(*object.Complex)
+		}
+		return result
+	}
+	// Non-integer (real or Complex) exponent: z**w = exp(w·ln z), in floating point.
+	base := complex(complexFloat(z.Re), complexFloat(z.Im))
+	var w complex128
+	if ec, ok := exp.(*object.Complex); ok {
+		w = complex(complexFloat(ec.Re), complexFloat(ec.Im))
+	} else {
+		ef, _ := toFloat(exp)
+		w = complex(ef, 0)
+	}
+	p := cmplx.Pow(base, w)
+	return &object.Complex{Re: object.Float(real(p)), Im: object.Float(imag(p))}
+}
+
+// complexReciprocal returns 1/z with exact components where possible.
+func complexReciprocal(z *object.Complex) *object.Complex {
+	one := &object.Complex{Re: object.IntValue(1), Im: object.IntValue(0)}
+	return complexOp(bytecode.OpDiv, one, z).(*object.Complex)
 }

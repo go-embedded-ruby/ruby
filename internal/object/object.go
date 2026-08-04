@@ -151,12 +151,18 @@ func (r *Rational) Truthy() bool    { return true }
 // imagPart renders the imaginary term with its sign, e.g. "+2i" or "-2.0i". The
 // component's own ToS already carries a leading "-" when negative, so the sign
 // is taken from it directly (no negation, which keeps Bignum/edge values exact).
+// A non-finite Float (Infinity/NaN) is written "*i" so the term stays
+// unambiguous, matching MRI ("1+Infinity*i").
 func imagPart(im Value) string {
 	s := im.ToS()
-	if strings.HasPrefix(s, "-") {
-		return s + "i"
+	tail := "i"
+	if f, ok := im.(Float); ok && (math.IsInf(float64(f), 0) || math.IsNaN(float64(f))) {
+		tail = "*i"
 	}
-	return "+" + s + "i"
+	if strings.HasPrefix(s, "-") {
+		return s + tail
+	}
+	return "+" + s + tail
 }
 
 // imagPartInspect renders the imaginary term for Complex#inspect. A Rational
