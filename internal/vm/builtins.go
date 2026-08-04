@@ -96,6 +96,7 @@ func (vm *VM) bootstrap() {
 	vm.registerMethod()
 	vm.registerModuleExtras()
 	vm.registerReflection()
+	vm.registerMethodReflect()
 	vm.registerVersionConstants()
 	vm.registerKernelIntrospection()
 	vm.registerEncoding()
@@ -1278,7 +1279,9 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(utf8.RuneCountInString(string(s.Bytes()))))
 	}
 	vm.cString.define("length", strLen)
-	vm.cString.define("size", strLen)
+	// String#size is a genuine alias of String#length (shared record), so
+	// "abc".method(:size) == "abc".method(:length), matching MRI.
+	aliasBuiltin(vm.cString, "size", "length")
 	vm.cString.define("bytesize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(len(strOf(self))))
 	})
