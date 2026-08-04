@@ -616,6 +616,13 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 	if br, ok := b.(*object.Rational); ok {
 		return rationalEqual(br, a)
 	}
+	// Value types from the js/wasm-incompatible network/OS bindings (e.g. Arrow's
+	// DataType, which compares through the go-ruby-arrow library) equate through
+	// the build-tagged seam so this shared comparison compiles for wasm, where
+	// those types can never be constructed. ok is false for every other value.
+	if eq, ok := valueEqualExtBinding(a, b); ok {
+		return eq
+	}
 	switch av := a.(type) {
 	case object.Integer:
 		if bv, ok := b.(object.Integer); ok {
@@ -695,9 +702,6 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		return eqMatrix(av, b)
 	case *Vector:
 		return eqVector(av, b)
-	case *ArrowDataType:
-		bv, ok := b.(*ArrowDataType)
-		return ok && av.dt.EqualQ(bv.dt)
 	case *Bag:
 		bv, ok := b.(*Bag)
 		return ok && av.b.Equal(bv.b)
