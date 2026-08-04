@@ -4670,7 +4670,7 @@ func pathArg(vm *VM, v object.Value) string {
 		return s.Str()
 	}
 	for _, m := range []string{"to_path", "to_str"} {
-		if vm.respondsTo(v, m) {
+		if vm.respondsToDynamic(v, m) {
 			r := vm.send(v, m, nil, nil)
 			s, ok := r.(*object.String)
 			if !ok {
