@@ -2,19 +2,19 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build js && wasm
+//go:build wasm
 
 package vm
 
 // runCaptured has no meaning under js/wasm (no subprocesses), so spawning a
 // command raises NotImplementedError there rather than silently succeeding.
 var runCaptured = func(cmd []string) (string, int) {
-	raise("NotImplementedError", "subprocess execution is not supported on js/wasm")
+	raise("NotImplementedError", "subprocess execution is not supported on wasm")
 	return "", 127
 }
 
 // systemCommand likewise has no meaning under js/wasm; Kernel#system raises.
 var systemCommand = func(cmd []string) (string, int, bool) {
-	raise("NotImplementedError", "subprocess execution is not supported on js/wasm")
+	raise("NotImplementedError", "subprocess execution is not supported on wasm")
 	return "", 127, false
 }

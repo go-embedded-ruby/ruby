@@ -72,3 +72,39 @@ jobs:
         with:
           go-version: stable
       - run: go env GOARCH && go test ./...
+
+  # WebAssembly (WASI preview 1) gate: the same interpreter compiled for
+  # GOOS=wasip1 GOARCH=wasm and RUN under a real wasm runtime. The database /
+  # search / KV / heavy-network gem backends are compiled out on wasm (their
+  # files carry //go:build !wasm) and degrade to a clean error at require /
+  # first-use, so this lane proves the VM + core stdlib build and execute in a
+  # libc-free, socket-less sandbox. wazero is a pure-Go runtime, wired in as the
+  # toolchain's WASI exec wrapper so `go build` + a real run both stay hermetic.
+  wasm-wasip1:
+    name: wasm (wasip1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: go version
+      - name: Build rbgo.wasm (CGO=0, GOOS=wasip1)
+        run: CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm go build -o rbgo.wasm ./cmd/rbgo
+      - name: Install wazero (pure-Go wasm runtime)
+        run: go install github.com/tetratelabs/wazero/cmd/wazero@latest
+      - name: Run a Ruby snippet under wazero
+        run: |
+          out=$("$(go env GOPATH)/bin/wazero" run rbgo.wasm -e 'puts (1..10).sum')
+          echo "rbgo.wasm output: $out"
+          test "$out" = "55" || { echo "::error::expected 55, got '$out'"; exit 1; }
+      - name: Vet + filestat coverage test under wasip1 (wazero exec wrapper)
+        env:
+          GOWASIRUNTIME: wazero
+        run: |
+          GOOS=wasip1 GOARCH=wasm go vet ./cmd/rbgo ./internal/vm
+          # Exercise the wasm build-tagged statSys (internal/vm/filestat_wasm.go)
+          # by running its covering test as a wasm binary under wazero.
+          GOOS=wasip1 GOARCH=wasm go test -c -o vm.test.wasm ./internal/vm
+          "$(go env GOPATH)/bin/wazero" run -mount=/tmp:/tmp -env TMPDIR=/tmp \
+            vm.test.wasm -test.run 'TestStatSysExtract' -test.v

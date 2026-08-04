@@ -44,5 +44,5 @@ var wasmUnavailableFeatures = []string{
 // class and message directly.
 func (vm *VM) raiseWasmUnavailable(feature string) object.Value {
 	delete(vm.loaded, "feature:"+feature)
-	return raise("LoadError", "cannot load such file -- %s (not available in the js/wasm build)", feature)
+	return raise("LoadError", "cannot load such file -- %s (not available in the wasm build)", feature)
 }

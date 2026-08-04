@@ -1,0 +1,103 @@
+name: release
+
+# Cut a distribution on a version tag: cross-compile the pure-Go (CGO=0) rbgo
+# interpreter to every supported target, plus a WASI-preview1 wasm module, then
+# publish a GitHub Release with a SHA256SUMS manifest. rbgo has no cgo and no
+# hand-written assembly, so a single Linux runner cross-builds the whole matrix
+# hermetically; the static ELF binaries carry no dynamic dependency and run on a
+# FROM-scratch rootfs (no libc), and rbgo.wasm runs under any WASI runtime.
+#
+# Signing: the go-embedded-ruby org has no artifact-signing convention yet (no
+# cosign / minisign / gpg key is provisioned for this repo), so the release ships
+# a SHA256SUMS manifest only. When a signing key is adopted org-wide, add a step
+# here that signs SHA256SUMS and uploads the signature/certificate alongside it.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  # One artifact per target. CGO_ENABLED=0 + -trimpath + -s -w yields a small,
+  # reproducible, fully static binary. GOOS/GOARCH drive the cross-compile; the
+  # wasip1/wasm entry produces the WebAssembly module.
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: linux,   goarch: riscv64 }
+          - { goos: linux,   goarch: loong64 }
+          - { goos: linux,   goarch: ppc64le }
+          - { goos: linux,   goarch: s390x }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64,  ext: .exe }
+          - { goos: windows, goarch: arm64,  ext: .exe }
+          - { goos: wasip1,  goarch: wasm,   ext: .wasm }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - name: Build rbgo-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          name="rbgo-${GOOS}-${GOARCH}${{ matrix.ext }}"
+          go build -trimpath -ldflags="-s -w" -o "dist/${name}" ./cmd/rbgo
+          ls -la "dist/${name}"
+          # Sanity: static Linux ELF must have no dynamic interpreter.
+          if [ "$GOOS" = linux ]; then
+            if command -v file >/dev/null && file "dist/${name}" | grep -q "dynamically linked"; then
+              echo "::error::dist/${name} is dynamically linked, expected static"; exit 1
+            fi
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rbgo-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  # Gather every artifact, produce SHA256SUMS, and publish the Release.
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: staged
+          merge-multiple: true
+      - name: Assemble dist + SHA256SUMS
+        run: |
+          mkdir -p dist
+          find staged -type f -exec cp {} dist/ \;
+          cd dist
+          sha256sum rbgo-* > SHA256SUMS
+          echo "=== release assets ==="
+          ls -la
+          echo "=== SHA256SUMS ==="
+          cat SHA256SUMS
+      - name: Create GitHub Release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$tag" \
+            --generate-notes \
+            dist/*

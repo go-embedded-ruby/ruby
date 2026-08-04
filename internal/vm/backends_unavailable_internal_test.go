@@ -55,11 +55,11 @@ func TestRaiseWasmUnavailable(t *testing.T) {
 				if e.Class != "LoadError" {
 					t.Errorf("class = %q, want LoadError", e.Class)
 				}
-				wantMsg := "cannot load such file -- " + feature + " (not available in the js/wasm build)"
+				wantMsg := "cannot load such file -- " + feature + " (not available in the wasm build)"
 				if e.Message != wantMsg {
 					t.Errorf("message = %q, want %q", e.Message, wantMsg)
 				}
-				if !strings.Contains(e.Message, "not available in the js/wasm build") {
+				if !strings.Contains(e.Message, "not available in the wasm build") {
 					t.Errorf("message %q missing reason annotation", e.Message)
 				}
 				if vm.loaded[key] {
