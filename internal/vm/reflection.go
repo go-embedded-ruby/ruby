@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -68,15 +69,17 @@ func (vm *VM) registerReflection() {
 	// Two UnboundMethods are equal when they wrap the same underlying method
 	// definition extracted from the same class — so an alias (which shares the
 	// original Method record) compares equal to its original, matching MRI.
-	cUnbound.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	unboundEq := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		u := self.(*UnboundMethod)
 		o, ok := args[0].(*UnboundMethod)
-		return object.Bool(ok && u.m == o.m && u.owner == o.owner)
-	})
-	cUnbound.define("eql?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(ok && u.owner == o.owner && methodDefKey(u.m) == methodDefKey(o.m))
+	}
+	cUnbound.define("==", unboundEq)
+	// UnboundMethod#eql? is an alias of UnboundMethod#== (shared record).
+	aliasBuiltin(cUnbound, "eql?", "==")
+	cUnbound.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		u := self.(*UnboundMethod)
-		o, ok := args[0].(*UnboundMethod)
-		return object.Bool(ok && u.m == o.m && u.owner == o.owner)
+		return object.IntValue(int64(reflect.ValueOf(u.owner).Pointer()) ^ int64(methodDefKey(u.m)))
 	})
 	cUnbound.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(self.(*UnboundMethod).name)
