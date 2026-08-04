@@ -65,6 +65,19 @@ func (vm *VM) registerReflection() {
 	vm.cModule.define("private_method_defined?", definedWithVis(visPrivate))
 	vm.cModule.define("protected_method_defined?", definedWithVis(visProtected))
 
+	// Two UnboundMethods are equal when they wrap the same underlying method
+	// definition extracted from the same class — so an alias (which shares the
+	// original Method record) compares equal to its original, matching MRI.
+	cUnbound.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		u := self.(*UnboundMethod)
+		o, ok := args[0].(*UnboundMethod)
+		return object.Bool(ok && u.m == o.m && u.owner == o.owner)
+	})
+	cUnbound.define("eql?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		u := self.(*UnboundMethod)
+		o, ok := args[0].(*UnboundMethod)
+		return object.Bool(ok && u.m == o.m && u.owner == o.owner)
+	})
 	cUnbound.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(self.(*UnboundMethod).name)
 	})

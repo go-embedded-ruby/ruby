@@ -582,6 +582,14 @@ func (vm *VM) hashValue(self object.Value) int64 {
 		return fnvHash("str:" + v.Str())
 	case *object.Bignum:
 		return fnvHash("big:" + v.I.String())
+	case *object.Rational:
+		// Value-based (normalised): Rational(2, 4) and Rational(1, 2) share a hash,
+		// while Rational(2, 3) differs.
+		return fnvHash("rat:" + v.R.Num().String() + "/" + v.R.Denom().String())
+	case *object.Complex:
+		// Value-based over the two components, so Complex(1) and Complex(1, 0) agree
+		// while Complex(1, 2) and Complex(2, 1) differ.
+		return vm.hashValue(v.Re)*31 + vm.hashValue(v.Im)
 	case *object.Array:
 		h := int64(1)
 		for _, e := range v.Elems {

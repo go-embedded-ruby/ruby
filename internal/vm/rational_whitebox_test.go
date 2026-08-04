@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // TestRatArithDefault covers ratArith's defensive default. Only the arithmetic
@@ -42,5 +43,15 @@ func TestSimplestRatBetween(t *testing.T) {
 func TestRationalizeFloatZero(t *testing.T) {
 	if got := rationalizeFloat(0).RatString(); got != "0" {
 		t.Errorf("rationalizeFloat(0) = %s, want 0", got)
+	}
+}
+
+// TestRatHalfModeNoKey covers ratHalfMode's "options Hash present but without a
+// :half key" branch, which the round methods rarely reach through Ruby.
+func TestRatHalfModeNoKey(t *testing.T) {
+	h := object.NewHash()
+	h.Set(object.Symbol("other"), object.IntValue(1))
+	if got := ratHalfMode([]object.Value{h}); got != modeHalfUp {
+		t.Errorf("ratHalfMode(no :half) = %v, want modeHalfUp", got)
 	}
 }

@@ -243,8 +243,47 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isSB := a.(*SafeBufferVal); isSB {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// Numeric coercion protocol: when a built-in number is combined with a
+		// non-numeric object that answers #coerce, MRI calls other.coerce(self)
+		// — expecting a [a2, b2] pair of same-type numbers — then re-runs the
+		// operator on that pair. This lets user Numeric-likes (and spec mocks)
+		// interoperate with Integer/Float/Rational/Complex arithmetic.
+		if isNumericValue(a) && !isNumericValue(b) {
+			if res, ok := vm.tryNumericCoerce(arithOpName(op), a, b); ok {
+				return res
+			}
+		}
 		return binary(op, a, b)
 	}
+}
+
+// isNumericValue reports whether v is one of the built-in numeric value types
+// that drive the arithmetic fast paths (and never trigger the coercion
+// protocol as a left operand's partner).
+func isNumericValue(v object.Value) bool {
+	switch v.(type) {
+	case object.Integer, object.Float, *object.Bignum, *object.Rational, *object.Complex, *BigDecimal:
+		return true
+	}
+	return false
+}
+
+// tryNumericCoerce runs MRI's numeric coercion protocol for `a op b` where a is
+// a built-in number and b is a non-numeric object. It returns (result, true)
+// when b responds to #coerce; the pair b returns is validated (a two-element
+// Array) and the operator re-dispatched on it. Any exception raised by #coerce
+// propagates (MRI does not rescue it). When b does not respond to #coerce it
+// returns (nil, false) so the caller falls back to its own coercion error.
+func (vm *VM) tryNumericCoerce(op string, a, b object.Value) (object.Value, bool) {
+	if !vm.respondsToDynamic(b, "coerce") {
+		return nil, false
+	}
+	pair := vm.send(b, "coerce", []object.Value{a}, nil)
+	arr, ok := pair.(*object.Array)
+	if !ok || len(arr.Elems) != 2 {
+		raise("TypeError", "coerce must return [x, y]")
+	}
+	return vm.send(arr.Elems[0], op, []object.Value{arr.Elems[1]}, nil), true
 }
 
 // arithOpName names the arithmetic/modulo operator behind an opcode for method
