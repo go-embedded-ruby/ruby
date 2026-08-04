@@ -431,6 +431,48 @@ func (vm *VM) registerMutex() {
 		defer vm.mutexUnlock(m)
 		return vm.callBlock(blk, nil)
 	})
+	// sleep(duration = nil): release the mutex, sleep, then re-acquire it, returning
+	// the rounded number of seconds slept. The duration is validated first (a
+	// negative one is an ArgumentError even on an unowned mutex); releasing the
+	// mutex raises ThreadError when the current thread does not hold it. A nil
+	// duration sleeps until woken (Thread#wakeup/#run), which this cooperative
+	// model does not provide, so it parks — matching MRI's blocking behaviour.
+	cMutex.define("sleep", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := self.(*RMutex)
+		var secs float64
+		hasDur := false
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			secs = mutexSleepDur(args[0])
+			hasDur = true
+		}
+		vm.mutexUnlock(m) // ownership check + release (ThreadError if not held)
+		start := time.Now()
+		if hasDur {
+			vm.threadBlock(func() { time.Sleep(time.Duration(secs * float64(time.Second))) })
+		} else {
+			vm.threadBlock(func() { select {} }) // park until woken
+		}
+		vm.mutexLock(m)
+		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
+	})
+}
+
+// mutexSleepDur coerces a Mutex#sleep / Kernel#sleep duration to seconds,
+// rejecting a negative interval with ArgumentError as MRI does.
+func mutexSleepDur(v object.Value) float64 {
+	var f float64
+	switch n := v.(type) {
+	case object.Integer:
+		f = float64(n)
+	case object.Float:
+		f = float64(n)
+	default:
+		raise("TypeError", "can't convert %s into time interval", classNameOf(v))
+	}
+	if f < 0 {
+		raise("ArgumentError", "time interval must not be negative")
+	}
+	return f
 }
 
 func (vm *VM) mutexLock(m *RMutex) {
