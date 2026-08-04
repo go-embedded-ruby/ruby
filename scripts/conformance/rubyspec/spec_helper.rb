@@ -146,8 +146,19 @@ def tmp(name, uniquify = true)
   end
   File.join(SPEC_TMP_BASE, base)
 end
+# Resolve a fixture path relative to the SPEC FILE's directory, exactly as real
+# mspec does (mspec/lib/mspec/helpers/fixture.rb): strip a trailing "/shared"
+# segment, and DO NOT append a second "fixtures" component when the directory is
+# already the fixtures directory itself. Without the latter, helpers that pass a
+# path already inside .../fixtures (e.g. IOSpecs.io_fixture, whose __FILE__ is
+# core/io/fixtures/classes.rb) would resolve to .../fixtures/fixtures/<name> and
+# raise Errno::ENOENT, spuriously failing every fixture-backed IO/File example.
 def fixture(file, *parts)
-  File.join(File.dirname(file), "fixtures", *parts)
+  path = File.dirname(file)
+  path = path[0..-7] if path[-7..-1] == "/shared"
+  fixtures = path[-9..-1] == "/fixtures" ? "" : "fixtures"
+  path = File.expand_path(path)
+  File.join(path, fixtures, *parts)
 end
 def suppress_warning; old = $VERBOSE; $VERBOSE = nil; begin; yield; ensure; $VERBOSE = old; end; end
 def suppress_keyword_warning; yield if block_given?; end
