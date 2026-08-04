@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !(js && wasm)
+
 package vm
 
 import (
@@ -390,16 +392,6 @@ func retryOption(v object.Value) any {
 		return int(n)
 	}
 	return true
-}
-
-// hashOption fetches key from a Ruby options Hash, accepting either a Symbol or
-// a String key (sidekiq_options is written with symbol keys, but a string key is
-// tolerated).
-func hashOption(h *object.Hash, key string) (object.Value, bool) {
-	if v, ok := h.Get(object.Symbol(key)); ok {
-		return v, true
-	}
-	return h.Get(object.NewString(key))
 }
 
 // sidekiqItemFromHash builds a sidekiq.Item from a Ruby push item Hash

@@ -36,6 +36,15 @@ import (
 // no value ever needs mapping here.
 func (vm *VM) classOfExtBinding(v object.Value) (*RClass, bool) { _, _ = vm, v; return nil, false }
 
+// valueEqualExtBinding is the wasm half of the value-equality seam: the guarded
+// value types (Arrow::DataType, …) can never be constructed on wasm, so no value
+// ever needs its own equality here.
+func valueEqualExtBinding(a, b object.Value) (bool, bool) { _, _ = a, b; return false, false }
+
+// hasCustomEqExtBinding is the wasm half of the custom-== seam: the guarded value
+// types (BSON::ObjectId, …) can never be constructed on wasm.
+func hasCustomEqExtBinding(v object.Value) bool { _ = v; return false }
+
 // wasmUnsupported returns a native method that raises the standard
 // "<gem> is not supported on js/wasm" NotImplementedError.
 func wasmUnsupported(gem string) NativeFn {

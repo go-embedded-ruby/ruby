@@ -649,12 +649,14 @@ func (vm *VM) ancestors(c *RClass) []*RClass {
 
 // classOf returns the dynamic class of any value — the basis of dispatch.
 func (vm *VM) classOf(v object.Value) *RClass {
-	// The class-mapping cases for the database / search / KV bindings that pull in
-	// js/wasm-incompatible drivers (SQLite3, Sequel, Bolt, Bleve, Etcd) live behind
-	// a build tag in classOfExtBinding, so this shared switch — and the values it
-	// handles — compile for GOOS=js GOARCH=wasm. On wasm the seam always reports
-	// false (those value types can never be constructed there); natively it maps
-	// each to its class exactly as an inline case would.
+	// The class-mapping cases for the database / search / KV / network bindings
+	// that cannot run under js/wasm — either their drivers do not build (SQLite3,
+	// Sequel, Bolt, Bleve, Etcd) or they link heavy network/OS libraries useless in
+	// a browser (gRPC, NATS, Kafka, MySQL, MongoDB, Parquet, Arrow, Sidekiq/Resque,
+	// OpenStack) — live behind a build tag in classOfExtBinding, so this shared
+	// switch (and the values it handles) compiles for GOOS=js GOARCH=wasm. On wasm
+	// the seam always reports false (those value types can never be constructed
+	// there); natively it maps each to its class exactly as an inline case would.
 	if c, ok := vm.classOfExtBinding(v); ok {
 		return c
 	}
@@ -988,28 +990,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *ACMECSR:
 		return x.cls
-	case *GRPCServer:
-		return vm.consts["GRPC::RpcServer"].(*RClass)
-	case *GRPCStub:
-		return vm.consts["GRPC::ClientStub"].(*RClass)
-	case *GRPCService:
-		return vm.consts["GRPC::Service"].(*RClass)
-	case *GRPCActiveCall:
-		return vm.consts["GRPC::ActiveCall"].(*RClass)
-	case *GRPCStatus:
-		return vm.consts["GRPC::Status"].(*RClass)
-	case *NATSX:
-		return x.cls
-	case *KafkaClient:
-		return x.cls
-	case *KafkaProducer:
-		return x.cls
-	case *KafkaConsumer:
-		return x.cls
-	case *KafkaMessage:
-		return x.cls
-	case *KafkaBatch:
-		return x.cls
 	case *VaultClient:
 		return x.cls
 	case *VaultLogical:
@@ -1032,28 +1012,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *VaultSecret:
 		return x.cls
-	case *MySQLClient:
-		return x.cls
-	case *MySQLResult:
-		return x.cls
-	case *MySQLStatement:
-		return x.cls
-	case *MongoClient:
-		return x.cls
-	case *MongoDatabase:
-		return x.cls
-	case *MongoCollection:
-		return x.cls
-	case *MongoCursor:
-		return x.cls
-	case *MongoResult:
-		return x.cls
-	case *MongoObjectId:
-		return x.cls
-	case *ParquetReader:
-		return vm.consts["Parquet::ArrowFileReader"].(*RClass)
-	case *ParquetWriter:
-		return vm.consts["Parquet::ArrowFileWriter"].(*RClass)
 	case *HTTPartyResponse:
 		return vm.consts["HTTParty::Response"].(*RClass)
 	case *RConnectionPool:
@@ -1268,20 +1226,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cMatrix
 	case *Vector:
 		return vm.cVector
-	case *ArrowArray:
-		return vm.consts["Arrow::Array"].(*RClass)
-	case *ArrowArrayBuilder:
-		return vm.consts["Arrow::ArrayBuilder"].(*RClass)
-	case *ArrowDataType:
-		return vm.consts["Arrow::DataType"].(*RClass)
-	case *ArrowField:
-		return vm.consts["Arrow::Field"].(*RClass)
-	case *ArrowSchema:
-		return vm.consts["Arrow::Schema"].(*RClass)
-	case *ArrowRecordBatch:
-		return vm.consts["Arrow::RecordBatch"].(*RClass)
-	case *ArrowTable:
-		return vm.consts["Arrow::Table"].(*RClass)
 	case *SpellChecker:
 		return vm.cSpellChecker
 	case *Time:
@@ -1560,14 +1504,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *Binding:
 		return vm.consts["Binding"].(*RClass)
-	case *JobRedis:
-		// A Sidekiq.redis / Resque.redis block connection reports the class stamped
-		// on it at construction (Sidekiq::RedisConnection or Resque::RedisConnection).
-		return x.cls
-	case *ResqueJob:
-		return x.cls
-	case *ResqueWorker:
-		return x.cls
 	case *Regexp:
 		return vm.cRegexp
 	case *MatchData:
@@ -1591,20 +1527,6 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *ShrineAttacher:
 		return x.cls
-	case *OpenStackConnection:
-		return vm.consts["OpenStack::Connection"].(*RClass)
-	case *OpenStackCompute:
-		return vm.consts["OpenStack::Compute"].(*RClass)
-	case *OpenStackNetwork:
-		return vm.consts["OpenStack::Network"].(*RClass)
-	case *OpenStackBlockStorage:
-		return vm.consts["OpenStack::BlockStorage"].(*RClass)
-	case *OpenStackObjectStorage:
-		return vm.consts["OpenStack::ObjectStorage"].(*RClass)
-	case *OpenStackImage:
-		return vm.consts["OpenStack::Image"].(*RClass)
-	case *OpenStackIdentity:
-		return vm.consts["OpenStack::Identity"].(*RClass)
 	case *object.Main:
 		return vm.cObject
 	}

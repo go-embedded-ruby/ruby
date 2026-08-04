@@ -248,6 +248,13 @@ func digestFeedOptional(self object.Value, args []object.Value) *DigestObj {
 // candidate secret against the stored hash), so both must dispatch their `==`
 // rather than fall to pointer identity.
 func hasCustomEq(_ *VM, v object.Value) bool {
+	// Value types from the js/wasm-incompatible network bindings that compare by
+	// value (e.g. BSON::ObjectId's 12-byte identifier) report through the
+	// build-tagged seam, so this shared predicate compiles for wasm where those
+	// types can never be constructed.
+	if hasCustomEqExtBinding(v) {
+		return true
+	}
 	switch v.(type) {
 	case *DigestObj, *BCryptPassword:
 		return true
@@ -266,10 +273,6 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 		// Google::Protobuf messages and their RepeatedField / Map containers compare
 		// by value (proto.Equal / element-wise) through the go-ruby-protobuf library,
 		// not object identity, so each must dispatch its own ==.
-		return true
-	case *MongoObjectId:
-		// BSON::ObjectId#== compares the 12-byte identifier by value, not object
-		// identity, so it must dispatch its own ==.
 		return true
 	case *SemVerObj:
 		// SemanticPuppet::Version#== compares SemVer precedence (major/minor/patch/
