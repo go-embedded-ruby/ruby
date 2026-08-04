@@ -1657,9 +1657,18 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 	}
 	// The arithmetic/comparison operators are a compiler fast path rather than
 	// real methods, so send(:+, x), reduce(:+) and respond_to-style dispatch
-	// route them through the same operator logic here.
+	// route them through the same operator logic here. A pure user object (an
+	// RObject with no built-in value backing) is excluded: if it had a real
+	// operator method it would have been found above, so here it must resolve
+	// through method_missing — routing it back into binaryOp would re-enter the
+	// operator fast path and loop (e.g. a spec mock handling `+` via
+	// method_missing, reached by the numeric-coercion protocol).
 	if len(args) == 1 {
-		if op, ok := operatorOpcode(name); ok {
+		pureUser := false
+		if o, ok := recv.(*RObject); ok && object.IsNil(o.builtin) {
+			pureUser = true
+		}
+		if op, ok := operatorOpcode(name); ok && !pureUser {
 			return vm.binaryOp(op, recv, args[0])
 		}
 	}
