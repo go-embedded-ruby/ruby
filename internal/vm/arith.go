@@ -265,6 +265,22 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		}
 		return vm.send(a, compareOpName(op), []object.Value{b}, nil)
 	default:
+		// Array#* with a String (or #to_str-convertible) right operand is Array#join
+		// with that separator; it needs a live VM for the element/separator coercion
+		// and encoding negotiation, so route it through join rather than the VM-less
+		// arrayOp path. An Integer right operand keeps the fast repeat path below.
+		if aa, ok := a.(*object.Array); ok && op == bytecode.OpMul {
+			if _, isInt := b.(object.Integer); !isInt {
+				if _, isStr := b.(*object.String); isStr || vm.respondsToDynamic(b, "to_str") {
+					return vm.arrayJoin(aa, vm.joinSeparator(b), map[*object.Array]bool{})
+				}
+				// A non-String argument is coerced to an Integer via #to_int for the
+				// repeat case; the coerced value falls through to arrayOp below.
+				if vm.respondsToDynamic(b, "to_int") {
+					b = vm.send(b, "to_int", nil, nil)
+				}
+			}
+		}
 		// A user object (RObject with no builtin backing) that defines an
 		// arithmetic operator dispatches to it, so `Pathname + str`, a Money `+`,
 		// etc. work. Built-in value types keep the inline path (and its coercion
@@ -574,9 +590,9 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		}
 		return object.NewArrayFromSlice(out)
 	case bytecode.OpMul:
-		if sep, ok := b.(*object.String); ok {
-			return object.NewString(joinArray(a, sep.Str()))
-		}
+		// Array * String (join with a separator) is intercepted in binaryOp and
+		// routed through Array#join for full coercion/encoding handling, so only the
+		// Integer repeat case reaches here.
 		n, ok := b.(object.Integer)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Integer", b.Inspect())

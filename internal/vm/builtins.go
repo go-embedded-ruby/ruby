@@ -1752,6 +1752,17 @@ func (vm *VM) bootstrap() {
 			arrayInit(vm, arr, args, blk)
 			return arr
 		}}
+	// Array[a, b, c] (and any subclass's inherited []) builds an array from its
+	// arguments. On a subclass it wraps the elements in a subclass instance without
+	// calling #initialize, matching MRI's Array.[].
+	vm.cArray.smethods["[]"] = &Method{name: "[]", owner: vm.cArray,
+		native: func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			arr := object.NewArrayFromSlice(append([]object.Value{}, args...))
+			if recv, ok := self.(*RClass); ok && recv != vm.cArray {
+				return &RObject{class: recv, ivars: map[string]object.Value{}, builtin: arr}
+			}
+			return arr
+		}}
 	vm.cArray.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array).Elems
 		out := make([]object.Value, len(args))
@@ -2486,12 +2497,23 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("join", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		sep := ""
-		if len(args) > 0 {
-			sep = strArg(args[0])
+	vm.cArray.define("join", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		// An empty Array joins to an empty US-ASCII string without ever touching the
+		// separator (MRI does not call #to_str on it), regardless of $,.
+		if len(a.Elems) == 0 {
+			return object.NewStringBytesEnc(nil, "US-ASCII")
 		}
-		return object.NewString(joinArray(self.(*object.Array), sep))
+		var sep *object.String
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			sep = vm.joinSeparator(args[0])
+		} else if v, ok := vm.globals["$,"]; ok {
+			// A nil/omitted separator falls back to the field separator $, when set.
+			if s, ok := v.(*object.String); ok {
+				sep = s
+			}
+		}
+		return vm.arrayJoin(a, sep, map[*object.Array]bool{})
 	})
 	vm.cArray.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		for i, e := range self.(*object.Array).Elems {
@@ -4842,20 +4864,125 @@ func flattenDepthChanged(elems []object.Value, depth int) ([]object.Value, bool)
 	return out, changed
 }
 
-// joinArray renders an array as a string, recursively joining nested arrays.
-func joinArray(a *object.Array, sep string) string {
-	var b strings.Builder
-	for i, e := range a.Elems {
-		if i > 0 {
-			b.WriteString(sep)
-		}
-		if sub, ok := e.(*object.Array); ok {
-			b.WriteString(joinArray(sub, sep))
-		} else {
-			b.WriteString(e.ToS())
+// joinSeparator coerces an Array#join / Array#* separator argument to a String:
+// a String is taken directly, otherwise #to_str is tried (and must return a
+// String). Anything else — including false — raises TypeError, matching MRI.
+func (vm *VM) joinSeparator(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s
 		}
 	}
-	return b.String()
+	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+	return nil
+}
+
+// arrayJoin renders an array as a String, MRI-faithfully: nested arrays (and
+// #to_ary-convertible elements) are joined recursively with the same separator,
+// elements are coerced via #to_str → #to_ary → #to_s, the running result
+// encoding is negotiated across the string pieces (raising EncodingError on an
+// incompatible pair), and a self-referential array raises ArgumentError. The
+// path set holds the arrays currently being joined so a cycle is detected at any
+// depth.
+func (vm *VM) arrayJoin(a *object.Array, sep *object.String, path map[*object.Array]bool) *object.String {
+	if path[a] {
+		raise("ArgumentError", "recursive array join")
+	}
+	path[a] = true
+	defer delete(path, a)
+
+	var buf []byte
+	resEnc := ""
+	have := false
+	negotiate := func(p *object.String) string {
+		cur := object.NewStringBytesEnc(buf, resEnc)
+		r := vm.encodingCompatible(cur, p)
+		e, ok := r.(*encodingObj)
+		if !ok {
+			raise("EncodingError", "incompatible character encodings: %s and %s",
+				cur.EncName(), p.EncName())
+		}
+		return e.name
+	}
+	add := func(p *object.String) {
+		if !have {
+			buf = append(buf, p.Bytes()...)
+			resEnc = p.EncName()
+			have = true
+			return
+		}
+		if sep != nil {
+			resEnc = negotiate(sep)
+			buf = append(buf, sep.Bytes()...)
+		}
+		resEnc = negotiate(p)
+		buf = append(buf, p.Bytes()...)
+	}
+	for _, e := range a.Elems {
+		add(vm.joinElement(e, sep, path))
+	}
+	return object.NewStringBytesEnc(buf, resEnc)
+}
+
+// joinElement converts one array element to its String piece for Array#join: a
+// String is used as-is; an Array (or Array subclass) is joined recursively;
+// otherwise MRI's conversion order applies — #to_str, then #to_ary (whose result
+// is joined recursively), then #to_s. An object answering none of these (its
+// #to_s undefined) surfaces the NoMethodError from the #to_s dispatch.
+func (vm *VM) joinElement(e object.Value, sep *object.String, path map[*object.Array]bool) *object.String {
+	if s, ok := e.(*object.String); ok {
+		return s
+	}
+	if arr, ok := asArray(e); ok {
+		return vm.arrayJoin(arr, sep, path)
+	}
+	// Immediates (numbers, symbols, nil, booleans) have no #to_str/#to_ary and use
+	// their plain #to_s rendering — take the fast path rather than three dispatches.
+	if isJoinImmediate(e) {
+		return object.NewString(e.ToS())
+	}
+	if vm.respondsToDynamic(e, "to_str") {
+		if s, ok := vm.send(e, "to_str", nil, nil).(*object.String); ok {
+			return s
+		}
+	}
+	if vm.respondsToDynamic(e, "to_ary") {
+		if arr, ok := asArray(vm.send(e, "to_ary", nil, nil)); ok {
+			return vm.arrayJoin(arr, sep, path)
+		}
+	}
+	if s, ok := vm.send(e, "to_s", nil, nil).(*object.String); ok {
+		return s
+	}
+	return object.NewString(e.ToS())
+}
+
+// asArray unwraps a value to an *object.Array, accepting both a plain Array and an
+// Array-subclass instance (an RObject whose builtin backing is an Array).
+func asArray(v object.Value) (*object.Array, bool) {
+	if a, ok := v.(*object.Array); ok {
+		return a, true
+	}
+	if o, ok := v.(*RObject); ok {
+		if a, ok := o.builtin.(*object.Array); ok {
+			return a, true
+		}
+	}
+	return nil, false
+}
+
+// isJoinImmediate reports whether a value is a simple immediate whose #to_s
+// rendering can be taken directly during Array#join (no #to_str/#to_ary path).
+func isJoinImmediate(v object.Value) bool {
+	switch v.(type) {
+	case object.Integer, object.Float, *object.Bignum, object.Symbol, object.Nil, object.Bool:
+		return true
+	}
+	return false
 }
 
 // classArg coerces an argument expected to be a class/module, else TypeError.
