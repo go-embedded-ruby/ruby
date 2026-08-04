@@ -130,6 +130,24 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		}
 	}
 
+	// Exact Integer/Float ordering: a large integer converted to a double loses
+	// precision, so ordering it against a Float via float arithmetic can give the
+	// wrong answer (e.g. (2**64+32) <= (2**64+32).to_f is false, since the float
+	// rounds down to 2**64). Compare exactly via a rational instead — MRI does the
+	// same. Arithmetic (+, -, *, /, %) still goes through the float path below.
+	if isCompareOp(op) {
+		if ai, ok := object.BigOf(a); ok {
+			if bf, ok := b.(object.Float); ok {
+				return intFloatCompare(op, ai, float64(bf), false)
+			}
+		}
+		if bi, ok := object.BigOf(b); ok {
+			if af, ok := a.(object.Float); ok {
+				return intFloatCompare(op, bi, float64(af), true)
+			}
+		}
+	}
+
 	af, aIsNum := toFloat(a)
 	bf, bIsNum := toFloat(b)
 	if aIsNum && bIsNum {
@@ -137,6 +155,39 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 	}
 
 	return raise("TypeError", "%s can't be coerced for %s", b.Inspect(), op)
+}
+
+// isCompareOp reports whether op is one of the four ordering comparisons.
+func isCompareOp(op bytecode.Op) bool {
+	switch op {
+	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
+		return true
+	}
+	return false
+}
+
+// intFloatCompare evaluates an ordering comparison between an exact integer and a
+// float without precision loss. cmpBigFloat gives the sign of (int - float); when
+// the float is the left operand that sign is inverted. A NaN operand makes every
+// ordering comparison false, matching IEEE-754 / MRI.
+func intFloatCompare(op bytecode.Op, a *big.Int, f float64, floatLeft bool) object.Value {
+	c, ok := cmpBigFloat(a, f)
+	if !ok { // NaN
+		return object.Bool(false)
+	}
+	if floatLeft {
+		c = -c
+	}
+	switch op {
+	case bytecode.OpLt:
+		return object.Bool(c < 0)
+	case bytecode.OpGt:
+		return object.Bool(c > 0)
+	case bytecode.OpLe:
+		return object.Bool(c <= 0)
+	default: // bytecode.OpGe
+		return object.Bool(c >= 0)
+	}
 }
 
 // bigOp performs an arbitrary-precision integer operation, normalizing the
@@ -202,6 +253,14 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		return binary(op, a, b)
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
 		if hasFastOrdering(a) {
+			// A built-in number compared against a non-numeric right operand runs
+			// MRI's coercion protocol for relational operators: other.coerce(self)
+			// then re-dispatch the operator on the pair. A missing/invalid #coerce
+			// raises ArgumentError ("comparison ... failed"); an exception inside
+			// #coerce propagates. (String keeps its own ArgumentError from stringOp.)
+			if isNumericValue(a) && !isNumericValue(b) {
+				return vm.numericCoerceRelop(op, a, b)
+			}
 			return binary(op, a, b)
 		}
 		return vm.send(a, compareOpName(op), []object.Value{b}, nil)
@@ -284,6 +343,35 @@ func (vm *VM) tryNumericCoerce(op string, a, b object.Value) (object.Value, bool
 		raise("TypeError", "coerce must return [x, y]")
 	}
 	return vm.send(arr.Elems[0], op, []object.Value{arr.Elems[1]}, nil), true
+}
+
+// numericCoerceRelop runs MRI's coercion protocol for a relational operator
+// (< <= > >=) where a is a built-in number and b is a non-numeric object. When b
+// answers #coerce it is called (exceptions propagate, unrescued) and the operator
+// is re-dispatched on the returned [x, y] pair. A missing #coerce, or one that
+// returns something other than a two-element Array, raises ArgumentError with the
+// "comparison of A with B failed" message — matching MRI's rb_num_coerce_relop.
+func (vm *VM) numericCoerceRelop(op bytecode.Op, a, b object.Value) object.Value {
+	if vm.respondsToDynamic(b, "coerce") {
+		pair := vm.send(b, "coerce", []object.Value{a}, nil)
+		if arr, ok := pair.(*object.Array); ok && len(arr.Elems) == 2 {
+			return vm.send(arr.Elems[0], compareOpName(op), []object.Value{arr.Elems[1]}, nil)
+		}
+	}
+	return raise("ArgumentError", "comparison of %s with %s failed", classNameOf(a), cmperrOperand(b))
+}
+
+// cmperrOperand renders the right operand of a failed comparison the way MRI's
+// rb_cmperr does: immediates (nil/true/false) and Symbols are inspected; every
+// other object is named by its class. (Numeric operands never reach here — they
+// take the arithmetic fast path — so no Float/Integer case is needed.)
+func cmperrOperand(b object.Value) string {
+	switch b.(type) {
+	case object.Symbol, object.Nil, object.Bool:
+		return b.Inspect()
+	default:
+		return classNameOf(b)
+	}
 }
 
 // arithOpName names the arithmetic/modulo operator behind an opcode for method

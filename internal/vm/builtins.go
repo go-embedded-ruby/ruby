@@ -57,9 +57,20 @@ func (vm *VM) bootstrap() {
 	} {
 		vm.consts[c.name] = c
 	}
-	// Float::INFINITY / Float::NAN.
+	// Float::INFINITY / Float::NAN and the IEEE-754 double-precision limits, matching
+	// MRI's Float constants exactly (see core/float/constants_spec).
 	vm.cFloat.consts["INFINITY"] = object.Float(math.Inf(1))
 	vm.cFloat.consts["NAN"] = object.Float(math.NaN())
+	vm.cFloat.consts["MAX"] = object.Float(math.MaxFloat64)
+	vm.cFloat.consts["MIN"] = object.Float(math.Float64frombits(0x0010000000000000)) // 2**-1022, smallest positive normal
+	vm.cFloat.consts["EPSILON"] = object.Float(math.Nextafter(1, 2) - 1)             // 2**-52
+	vm.cFloat.consts["DIG"] = object.IntValue(15)
+	vm.cFloat.consts["MANT_DIG"] = object.IntValue(53)
+	vm.cFloat.consts["MAX_EXP"] = object.IntValue(1024)
+	vm.cFloat.consts["MIN_EXP"] = object.IntValue(-1021)
+	vm.cFloat.consts["MAX_10_EXP"] = object.IntValue(308)
+	vm.cFloat.consts["MIN_10_EXP"] = object.IntValue(-307)
+	vm.cFloat.consts["RADIX"] = object.IntValue(2)
 
 	vm.registerComplex()
 	vm.registerRational()
@@ -5533,7 +5544,8 @@ func rubyEqual(a, b object.Value) bool {
 
 // spaceshipNumeric implements Integer#<=> and Float#<=>: -1/0/1 across the
 // numeric tower, nil for a non-numeric argument.
-func spaceshipNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+func spaceshipNumeric(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	other := args[0]
 	// Compare two integers (Integer or Bignum) exactly; only fall back to float
 	// when one side is a Float (where the precision loss is intrinsic).
 	if ai, ok := self.(object.Integer); ok {
@@ -5542,16 +5554,62 @@ func spaceshipNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) ob
 		}
 	}
 	if ab, ok := object.BigOf(self); ok {
-		if bb, ok := object.BigOf(args[0]); ok {
+		if bb, ok := object.BigOf(other); ok {
 			return object.IntValue(int64(ab.Cmp(bb)))
+		}
+		// Integer <=> Float: compare exactly (no precision loss) so that a Bignum
+		// larger than any representable double still orders correctly against the
+		// rounded float value — MRI does the same via a rational comparison.
+		if bf, ok := other.(object.Float); ok {
+			if c, ok := cmpBigFloat(ab, float64(bf)); ok {
+				return object.IntValue(int64(c))
+			}
+			return object.NilV // NaN
+		}
+	}
+	// Float <=> Integer (self is Float, other is a big/small Integer): exact too.
+	if af, ok := self.(object.Float); ok {
+		if bb, ok := object.BigOf(other); ok {
+			if c, ok := cmpBigFloat(bb, float64(af)); ok {
+				return object.IntValue(int64(-c))
+			}
+			return object.NilV
 		}
 	}
 	a, _ := toFloat(self)
-	b, ok := toFloat(args[0])
-	if !ok {
-		return object.NilV
+	if b, ok := toFloat(other); ok {
+		return object.IntValue(int64(cmpFloat(a, b)))
 	}
-	return object.IntValue(int64(cmpFloat(a, b)))
+	// Non-numeric argument: MRI runs the numeric coercion protocol — other.coerce(self)
+	// — and re-dispatches <=> on the returned pair. Any exception raised by #coerce
+	// propagates; a missing #coerce or a non-Array result yields nil (not an error).
+	if vm != nil && vm.respondsToDynamic(other, "coerce") {
+		pair := vm.send(other, "coerce", []object.Value{self}, nil)
+		if arr, ok := pair.(*object.Array); ok && len(arr.Elems) == 2 {
+			return vm.send(arr.Elems[0], "<=>", []object.Value{arr.Elems[1]}, nil)
+		}
+	}
+	return object.NilV
+}
+
+// cmpBigFloat compares an exact integer a against the exact rational value of the
+// float f, returning (-1, 0, or 1). ok is false only when f is NaN. It converts f
+// to a big.Rat (which represents any finite double exactly) so that no precision is
+// lost — the whole point being that a Bignum outside the double range still orders
+// correctly against the rounded float.
+func cmpBigFloat(a *big.Int, f float64) (int, bool) {
+	if math.IsNaN(f) {
+		return 0, false
+	}
+	if math.IsInf(f, 1) {
+		return -1, true
+	}
+	if math.IsInf(f, -1) {
+		return 1, true
+	}
+	ar := new(big.Rat).SetInt(a)
+	fr := new(big.Rat).SetFloat64(f) // exact for any finite double
+	return ar.Cmp(fr), true
 }
 
 func cmpInt64(a, b int64) int {
