@@ -101,7 +101,7 @@ func (vm *VM) imapValueClass(cls *RClass, simple string, fields ...string) *RCla
 	for i, f := range fields {
 		names[i] = object.NewString(f)
 	}
-	defineAttrs(c, names, true, false)
+	vm.defineAttrs(c, names, true, false)
 	return c
 }
 
