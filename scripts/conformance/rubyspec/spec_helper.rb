@@ -77,6 +77,15 @@ class ComplainMatcher
 end
 
 TOLERANCE = 0.00003
+# Faithful to real mspec (mspec/lib/mspec/matchers/be_close.rb): a top-level
+# (Object) constant, generously large "to account for GC, context switches,
+# other processes, load, etc." Specs pass it as a timeout to blocking calls
+# (e.g. Queue#pop(timeout: TIME_TOLERANCE)); without it those references raise
+# NameError inside a spawned thread, the thread dies, and the sibling
+# `Thread.pass until t.status == "sleep"` loop then spins forever, hanging the
+# whole file into a timeout/FILEFAIL. Defining it lets the file run to
+# completion so its non-timeout examples score.
+TIME_TOLERANCE = 20.0 unless Object.const_defined?(:TIME_TOLERANCE)
 def be_close(exp, tol = TOLERANCE); BeCloseMatcher.new(exp, tol); end
 
 # be_computed_by(sym, *extra): the receiver is an Array of rows, each

@@ -215,3 +215,34 @@ describe "mock intercepts + restores real methods" do
 end`
 	assertShimResult(t, runShim(t, "", src), "pass=7 fail=0 error=0 skip=0")
 }
+
+// TestShimTimeToleranceConstant guards defect #4: the shim must define the
+// top-level (Object) constant TIME_TOLERANCE, faithfully to real mspec
+// (mspec/lib/mspec/matchers/be_close.rb: `TIME_TOLERANCE = 20.0`). ruby/spec's
+// concurrency shared specs (shared/queue/deque.rb, shared/sizedqueue/enque.rb)
+// pass it as a blocking-call timeout INSIDE a spawned thread
+// (q.pop(timeout: TIME_TOLERANCE)); when the constant is undefined that thread
+// dies with NameError and the sibling `Thread.pass until t.status == "sleep"`
+// loop spins forever, hanging the whole file into a timeout/FILEFAIL that scores
+// zero. Defining the constant lets those files run to completion (core/queue/pop
+// and core/sizedqueue/pop each went 0 -> 20 passing). The value must match mspec
+// exactly — a shim that diverges to pass is worse than the hang.
+func TestShimTimeToleranceConstant(t *testing.T) {
+	// The constant resolves as a top-level Object constant and equals mspec's 20.0.
+	if out := runShim(t, "", `puts "TT=" + TIME_TOLERANCE.inspect`); !strings.Contains(out, "TT=20.0") {
+		t.Fatalf("TIME_TOLERANCE did not resolve to 20.0:\n%s", out)
+	}
+
+	// Referencing TIME_TOLERANCE from a spec example (the way the concurrency
+	// shared specs do) must NOT raise NameError; the example scores as a pass.
+	src := `
+describe "TIME_TOLERANCE (mspec constant)" do
+  it "is defined and equals mspec's 20.0" do
+    TIME_TOLERANCE.should == 20.0
+  end
+  it "is resolvable as a plain timeout argument" do
+    (0.0 < TIME_TOLERANCE).should == true
+  end
+end`
+	assertShimResult(t, runShim(t, "", src), "pass=2 fail=0 error=0 skip=0")
+}
