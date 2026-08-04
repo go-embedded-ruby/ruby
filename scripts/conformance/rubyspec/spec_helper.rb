@@ -17,6 +17,7 @@ $RB_ERROR = 0
 $RB_SKIP = 0
 $RB_FAILS = []   # [kind, describe, it, exc_class, msg]
 $mock_registry = nil
+$mock_installs = nil
 
 CUR_VERSION = "3.4.1"
 PLATFORMS = [:darwin, :bsd, :unix]
@@ -264,30 +265,67 @@ class Object
       self
     end
   end
-  # mspec installs mock expectations on arbitrary receivers
+  # mspec installs mock expectations on arbitrary receivers. Real mspec
+  # (mspec/lib/mspec/mocks/mock.rb #install_method) defines the mock as a
+  # SINGLETON method, saving/restoring any original at example teardown — so a
+  # method the receiver really defines (e.g. #to_s, #inspect on a mock object) is
+  # intercepted rather than shadowing the expectation. _mock_install performs
+  # that singleton install and records it for restoration in SpecContext#run.
   def should_receive(sym)
     e = MockExpect.new(sym)
     $mock_registry << e if $mock_registry
-    mc = (class << self; self; end)
-    mc.send(:define_method, sym) { |*a, &b| e.invoke(*a, &b) }
+    _mock_install(self, sym, e)
     e
   end
   def should_not_receive(sym)
     e = MockExpect.new(sym).forbid!
-    mc = (class << self; self; end)
-    mc.send(:define_method, sym) { |*a, &b| e.invoke(*a, &b) }
+    _mock_install(self, sym, e)
     e
   end
   def stub!(sym)
     e = MockExpect.new(sym).any_number_of_times
-    mc = (class << self; self; end)
-    mc.send(:define_method, sym) { |*a, &b| e.invoke(*a, &b) }
+    _mock_install(self, sym, e)
     e
   end
 end
 CODE_LOADING_DIR = (File.expand_path("fixtures/code", __dir__) rescue "fixtures/code")
 
 # ---------------- mocks ----------------
+# Install a mock expectation as a SINGLETON method on obj so it intercepts even a
+# method obj really defines (mspec's Mock.install_method). The receiver's original
+# method (if any) is captured ONCE per [object, sym] into $mock_installs so
+# SpecContext#run can restore it at example teardown (mspec's Mock.cleanup):
+# removing the override and re-binding the saved original — which correctly
+# handles both inherited/class methods and a pre-existing singleton method, and
+# leaves the receiver clean when there was no original.
+def _mock_install(obj, sym, expect)
+  mc = (class << obj; self; end)
+  if $mock_installs
+    # Dedup on the singleton-class identity (stable per object) so the true
+    # original is captured only once even across repeated should_receive on the
+    # same method. This deliberately avoids calling ANY method on obj itself
+    # (object_id/hash/==) — those may themselves be mocked or forbidden by the
+    # spec under test (e.g. core/kernel/case_compare's should_not_receive
+    # :object_id), so touching them would corrupt the example.
+    seen = false
+    $mock_installs.each { |ent| seen ||= (ent[0].equal?(mc) && ent[1] == sym) }
+    unless seen
+      # Save the original the way mspec does — an alias on the singleton class —
+      # rather than dispatching obj.method(sym), which could hit a mocked #method.
+      # A trailing alias captures an inherited/class method just as well as a
+      # pre-existing singleton one, so restoration works for both.
+      saved = nil
+      if mc.method_defined?(sym)
+        saved = "__mspec_saved_#{sym}".to_sym
+        begin; mc.send(:alias_method, saved, sym); rescue Exception; saved = nil; end
+      end
+      $mock_installs << [mc, sym, saved]
+    end
+  end
+  mc.send(:define_method, sym) { |*a, &b| expect.invoke(*a, &b) }
+  expect
+end
+
 # Map a call-count argument to an integer exactly as real mspec's MockProxy does
 # (mspec/lib/mspec/mocks/proxy.rb #n_times): the symbols :once/:twice, or any
 # value coercible with Integer(). Anything else (e.g. :thrice, which mspec does
@@ -359,29 +397,17 @@ class MockExpect
   def desc; "#{@sym} (expected #{@qual.to_s.sub('_', ' ')} #{@limit}, got #{@count})"; end
 end
 
+# A named mock object (mspec's `mock(name)`). It inherits should_receive/
+# should_not_receive/stub! from Object, so expectations install as singleton
+# methods that intercept even the methods MockObject really defines (#to_s,
+# #inspect) — matching mspec, where mocking #to_s on a mock returns the stubbed
+# value instead of the object's own #to_s. Any unexpected (truly undefined)
+# message raises NoMethodError, as a non-null mspec mock does.
 class MockObject
-  def initialize(name); @__name = name; @__exp = {}; end
-  def should_receive(sym)
-    e = MockExpect.new(sym)
-    @__exp[sym] = e
-    $mock_registry << e if $mock_registry
-    e
-  end
-  def should_not_receive(sym)
-    e = MockExpect.new(sym).forbid!
-    @__exp[sym] = e
-    e
-  end
-  def stub!(sym); e = MockExpect.new(sym).any_number_of_times; @__exp[sym] = e; e; end
+  def initialize(name); @__name = name; end
   def method_missing(sym, *a, &b)
-    e = @__exp[sym]
-    if e
-      e.invoke(*a, &b)
-    else
-      ::Kernel.raise(NoMethodError, "mock '#{@__name}' got unexpected #{sym}")
-    end
+    ::Kernel.raise(NoMethodError, "mock '#{@__name}' got unexpected #{sym}")
   end
-  def respond_to_missing?(sym, *); @__exp.key?(sym); end
   def inspect; "#<mock #{@__name}>"; end
   def to_s; inspect; end
 end
@@ -466,6 +492,7 @@ class SpecContext
         next
       end
       $mock_registry = []
+      $mock_installs = []
       begin
         @before_each.each { |b| instance_eval(&b) }
         instance_eval(&blk)
@@ -487,7 +514,21 @@ class SpecContext
         $RB_FAILS << ["error", @desc, d, e.class.to_s, e.message.to_s[0, 200]]
       ensure
         @after_each.each { |b| begin; instance_eval(&b); rescue Exception; end }
+        # Restore any receiver whose real method a mock intercepted (mspec's
+        # Mock.cleanup): drop the singleton override and alias the saved original
+        # back (or leave it removed when the receiver had no original method).
+        $mock_installs.each do |mc, sym, saved|
+          begin
+            mc.send(:remove_method, sym)
+            if saved
+              mc.send(:alias_method, sym, saved)
+              mc.send(:remove_method, saved)
+            end
+          rescue Exception
+          end
+        end
         $mock_registry = nil
+        $mock_installs = nil
       end
     end
   end
