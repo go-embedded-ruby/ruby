@@ -6,6 +6,7 @@ package vm
 
 import (
 	"errors"
+	"io"
 	"math/big"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestFormatValueKind(t *testing.T) {
 		{object.Bool(true), format.KindOther},
 	}
 	for _, c := range cases {
-		if got := (formatValue{c.v}).Kind(); got != c.want {
+		if got := (formatValue{v: c.v}).Kind(); got != c.want {
 			t.Errorf("Kind(%T) = %v, want %v", c.v, got, c.want)
 		}
 	}
@@ -57,7 +58,7 @@ func TestFormatValueInt64Fast(t *testing.T) {
 		{object.NewString("9"), 0, false},           // String declines (Int() parses it)
 	}
 	for _, c := range cases {
-		n, ok := (formatValue{c.v}).Int64Fast()
+		n, ok := (formatValue{v: c.v}).Int64Fast()
 		if n != c.wantN || ok != c.wantOK {
 			t.Errorf("Int64Fast(%T=%v) = (%d, %v), want (%d, %v)", c.v, c.v, n, ok, c.wantN, c.wantOK)
 		}
@@ -67,11 +68,11 @@ func TestFormatValueInt64Fast(t *testing.T) {
 // TestFormatValueInspect covers formatValue.Inspect (the %p backing), which the
 // library calls when rendering an inspected value.
 func TestFormatValueInspect(t *testing.T) {
-	if got := (formatValue{object.NewString("a")}).Inspect(); got != `"a"` {
+	if got := (formatValue{v: object.NewString("a")}).Inspect(); got != `"a"` {
 		t.Fatalf("Inspect = %q, want %q", got, `"a"`)
 	}
 	// Drive it through the formatter too, so the %p path is exercised end to end.
-	if got := formatString("%p", []object.Value{object.NewString("a")}); got != `"a"` {
+	if got := New(io.Discard).formatString("%p", []object.Value{object.NewString("a")}); got != `"a"` {
 		t.Fatalf("%%p = %q, want %q", got, `"a"`)
 	}
 }
@@ -80,12 +81,13 @@ func TestFormatValueInspect(t *testing.T) {
 // hash key: only %<name>/%{name}-addressable symbol keys are carried, so a
 // String key is dropped and referencing it raises the MRI KeyError.
 func TestFormatNamedArgsNonSymbolKey(t *testing.T) {
+	vm := New(io.Discard)
 	h := object.NewHash()
 	h.Set(object.NewString("a"), object.Integer(1)) // non-symbol key: skipped
 	h.Set(object.Symbol("b"), object.Integer(2))    // symbol key: carried
-	na := formatNamedArgs([]object.Value{h})
+	na := vm.formatNamedArgs([]object.Value{h})
 	// The symbol key resolves...
-	if got := formatString("%<b>d", []object.Value{h}); got != "2" {
+	if got := vm.formatString("%<b>d", []object.Value{h}); got != "2" {
 		t.Fatalf("%%<b>d = %q, want %q", got, "2")
 	}
 	// ...while the dropped string key raises a KeyError.
@@ -96,7 +98,7 @@ func TestFormatNamedArgsNonSymbolKey(t *testing.T) {
 		}
 	}()
 	_ = na
-	formatString("%<a>d", []object.Value{h})
+	vm.formatString("%<a>d", []object.Value{h})
 }
 
 // TestRaiseFormatErrorFallback covers raiseFormatError's defensive non-
