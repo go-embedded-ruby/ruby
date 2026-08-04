@@ -262,6 +262,10 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 		// UnboundMethod#== compares by the underlying method definition (so an alias
 		// equals its original), not object identity.
 		return true
+	case *BoundMethod:
+		// Method#== compares receiver plus the underlying method definition (so an
+		// alias equals its original), not object identity.
+		return true
 	case *Money:
 		// Money#== compares fractional amount and currency via the go-ruby-money
 		// library, not object identity, so it must dispatch its own ==.
