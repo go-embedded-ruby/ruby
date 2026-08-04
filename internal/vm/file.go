@@ -2,6 +2,7 @@ package vm
 
 import (
 	"os"
+	"os/user"
 	"path"          // always '/'-separated, as Ruby's File is — not path/filepath
 	"path/filepath" // OS-native, only for symlink resolution (File.realpath)
 	"strings"
@@ -10,6 +11,18 @@ import (
 	gotime "github.com/go-composites/time/src"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// userHomeDir looks up the home directory of the named user (File.expand_path's
+// ~user form). With CGO disabled the lookup reads the passwd database directly on
+// unix; on platforms where it is unsupported the error surfaces as the
+// ArgumentError MRI raises for an unknown ~user.
+func userHomeDir(name string) (string, error) {
+	u, err := user.Lookup(name)
+	if err != nil {
+		return "", err
+	}
+	return u.HomeDir, nil
+}
 
 // toSlash converts an OS-native path (Windows uses '\') to Ruby's '/' form.
 func toSlash(s string) string { return strings.ReplaceAll(s, "\\", "/") }
@@ -61,56 +74,91 @@ func (vm *VM) registerFile() {
 	def := func(name string, fn NativeFn) { cFile.smethods[name] = &Method{name: name, owner: cFile, native: fn} }
 
 	def("basename", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		base := path.Base(pathArg(vm, args[0]))
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
+		base := rubyBasename(pathArg(vm, args[0]))
 		if len(args) > 1 {
-			suf := strArg(args[1])
-			if suf == ".*" {
-				if ext := fileExt(base); ext != "" {
-					base = base[:len(base)-len(ext)]
-				}
-			} else if strings.HasSuffix(base, suf) && base != suf {
-				base = base[:len(base)-len(suf)]
-			}
+			base = stripBaseSuffix(base, strArg(args[1]))
 		}
 		return object.NewString(base)
 	})
 	def("dirname", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(path.Dir(pathArg(vm, args[0])))
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
+		level := 1
+		if len(args) > 1 {
+			level = int(coerceInt(vm, args[1]))
+			if level < 0 {
+				raise("ArgumentError", "negative level: %d", level)
+			}
+		}
+		p := pathArg(vm, args[0])
+		// A level > 1 strips that many trailing components; dirname is idempotent at
+		// the root/"." so a level that exceeds the depth converges rather than looping.
+		for i := 0; i < level; i++ {
+			d := rubyDirname(p)
+			if d == p {
+				break
+			}
+			p = d
+		}
+		return object.NewString(p)
 	})
 	def("extname", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExt(path.Base(pathArg(vm, args[0]))))
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.NewString(rubyExtname(rubyBasename(pathArg(vm, args[0]))))
 	})
 	def("split", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
 		p := pathArg(vm, args[0])
-		return object.NewArray(object.NewString(path.Dir(p)), object.NewString(path.Base(p)))
+		return object.NewArray(object.NewString(rubyDirname(p)), object.NewString(rubyBasename(p)))
 	})
 	def("join", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		// MRI's File.join flattens nested Array arguments, so File.join([a, b], c)
-		// behaves like File.join(a, b, c).
-		var parts []string
-		var add func(v object.Value)
-		add = func(v object.Value) {
+		// MRI's File.join recursively joins nested Array arguments — File.join([a, b], c)
+		// behaves like File.join(a, b, c) — and each array is joined to a single string
+		// first, so File.join([], []) is join("", "") == "/". A self-referential array
+		// raises ArgumentError; a null byte in any component is rejected, as in MRI.
+		var toStr func(v object.Value, seen []*object.Array) string
+		toStr = func(v object.Value, seen []*object.Array) string {
 			if arr, ok := v.(*object.Array); ok {
-				for _, e := range arr.Elems {
-					add(e)
+				for _, s := range seen {
+					if s == arr {
+						raise("ArgumentError", "recursive array")
+					}
 				}
-				return
+				seen = append(seen, arr)
+				parts := make([]string, len(arr.Elems))
+				for i, e := range arr.Elems {
+					parts[i] = toStr(e, seen)
+				}
+				return fileJoin(parts)
 			}
-			parts = append(parts, pathArg(vm, v))
+			s := pathArg(vm, v)
+			if strings.IndexByte(s, 0) >= 0 {
+				raise("ArgumentError", "string contains null byte")
+			}
+			return s
 		}
-		for _, a := range args {
-			add(a)
+		parts := make([]string, len(args))
+		for i, a := range args {
+			parts[i] = toStr(a, nil)
 		}
 		return object.NewString(fileJoin(parts))
 	})
 	def("expand_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:]))
+		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:], true))
 	})
 	// absolute_path resolves a path to an absolute one against an optional base
 	// directory (defaulting to the CWD), like expand_path but without ~ expansion.
 	// Puppet uses it with relative paths and an explicit base, where the two agree.
 	def("absolute_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:]))
+		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:], false))
 	})
 	def("absolute_path?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(path.IsAbs(toSlash(pathArg(vm, args[0]))))
@@ -140,7 +188,7 @@ func (vm *VM) registerFile() {
 	// Errno::ENOENT is raised. An optional second argument is the base directory
 	// a relative path is resolved against.
 	def("realpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := fileExpand(pathArg(vm, args[0]), args[1:])
+		p := fileExpand(pathArg(vm, args[0]), args[1:], true)
 		resolved, err := filepath.EvalSymlinks(p)
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
@@ -300,34 +348,140 @@ var (
 	}
 )
 
-// fileExt returns the extension of a base name, treating a leading-dot name with
-// no other dot (".bashrc") as having no extension — matching Ruby's File.extname.
-func fileExt(base string) string {
-	i := strings.LastIndexByte(base, '.')
-	if i <= 0 {
-		return "" // no dot, or a leading-dot dotfile (".bashrc")
+// rubyBasename returns the last component of a '/'-separated path, matching Ruby's
+// File.basename: trailing separators are stripped (a path that is all separators
+// yields "/"), the empty string yields "". Unlike path.Base it does not clean or
+// collapse internal separators.
+func rubyBasename(p string) string {
+	end := len(p)
+	for end > 0 && p[end-1] == '/' {
+		end--
 	}
-	return base[i:] // includes a lone trailing dot: "a." -> "."
+	if end == 0 {
+		if len(p) > 0 {
+			return "/" // the path was one or more separators
+		}
+		return ""
+	}
+	if i := strings.LastIndexByte(p[:end], '/'); i >= 0 {
+		return p[i+1 : end]
+	}
+	return p[:end]
 }
 
-// fileJoin joins path components with a single separator, collapsing a separator
-// that would otherwise double at a boundary — Ruby's File.join.
+// rubyDirname returns all path components except the last, matching Ruby's
+// File.dirname (single level). It preserves internal repeated separators
+// ("/holy///schnikies//x" -> "/holy///schnikies"), collapses a leading run of
+// separators to the root "/", strips trailing separators, and yields "." for a
+// path with no directory part.
+func rubyDirname(p string) string {
+	// Leading run of separators: their presence marks an absolute path rooted at "/".
+	root := 0
+	for root < len(p) && p[root] == '/' {
+		root++
+	}
+	hasRoot := root > 0
+	// Strip trailing separators down to the root.
+	end := len(p)
+	for end > root && p[end-1] == '/' {
+		end--
+	}
+	body := p[root:end]
+	i := strings.LastIndexByte(body, '/')
+	if i < 0 {
+		if hasRoot {
+			return "/"
+		}
+		return "."
+	}
+	dir := body[:i]
+	for len(dir) > 0 && dir[len(dir)-1] == '/' {
+		dir = dir[:len(dir)-1]
+	}
+	if hasRoot {
+		return "/" + dir
+	}
+	// body carries no leading separator (the root run was stripped), so a found
+	// separator always leaves a non-empty dir here.
+	return dir
+}
+
+// rubyExtname returns the extension of a base name — the substring from the last
+// '.' to the end — matching Ruby's File.extname on non-Windows platforms: a
+// leading-dot name with no other dot (".bashrc") and a name that is all dots
+// ("..", "...") have no extension, while a name ending in a dot ("foo.") yields ".".
+func rubyExtname(base string) string {
+	p := 0
+	for p < len(base) && base[p] == '.' { // skip leading dots (dotfiles have no ext)
+		p++
+	}
+	e := -1
+	for ; p < len(base); p++ {
+		if base[p] == '.' {
+			e = p
+		}
+	}
+	if e < 0 {
+		return ""
+	}
+	if e == len(base)-1 {
+		return "." // a trailing dot: File.extname("foo.") == "." on unix
+	}
+	return base[e:]
+}
+
+// stripBaseSuffix removes a File.basename suffix argument from base. A ".*" suffix
+// strips the extension (the last dot-run), any other suffix is matched literally
+// and removed only when it is a proper suffix (never reducing base to "").
+func stripBaseSuffix(base, suf string) string {
+	if suf == ".*" {
+		if dot := strings.LastIndexByte(base, '.'); dot > 0 {
+			return base[:dot]
+		}
+		return base
+	}
+	if base != suf && strings.HasSuffix(base, suf) {
+		return base[:len(base)-len(suf)]
+	}
+	return base
+}
+
+// fileJoin joins path components with File::SEPARATOR, following Ruby's File.join
+// boundary rules: when neither side of a boundary has a separator one is inserted;
+// when only one side does it is kept; when both do the right part's separator(s)
+// win, so the left part's trailing separators are dropped.
 func fileJoin(parts []string) string {
-	var b strings.Builder
+	res := ""
 	for i, p := range parts {
 		if i > 0 {
-			prevSlash := b.Len() > 0 && b.String()[b.Len()-1] == '/'
+			prevSlash := len(res) > 0 && res[len(res)-1] == '/'
 			curSlash := strings.HasPrefix(p, "/")
 			switch {
 			case prevSlash && curSlash:
-				p = strings.TrimPrefix(p, "/")
+				res = strings.TrimRight(res, "/")
 			case !prevSlash && !curSlash:
-				b.WriteByte('/')
+				res += "/"
 			}
 		}
-		b.WriteString(p)
+		res += p
 	}
-	return b.String()
+	return res
+}
+
+// coerceInt converts v to an int64, accepting an Integer directly or coercing any
+// object that responds to #to_int (File.dirname's level argument), raising
+// TypeError otherwise.
+func coerceInt(vm *VM, v object.Value) int64 {
+	if i, ok := v.(object.Integer); ok {
+		return int64(i)
+	}
+	if vm.respondsTo(v, "to_int") {
+		if i, ok := vm.send(v, "to_int", nil, nil).(object.Integer); ok {
+			return int64(i)
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(v).name)
+	return 0
 }
 
 // isAbsPath reports whether p is absolute, recognising both the forward-slash
@@ -338,25 +492,71 @@ func isAbsPath(p string) bool {
 	return path.IsAbs(p) || filepath.IsAbs(filepath.FromSlash(p))
 }
 
-// fileExpand implements File.expand_path: ~ expands to the home directory, a
-// relative path is resolved against the optional base (default: the working
-// directory), and the result is cleaned (so .. and . collapse).
-func fileExpand(p string, rest []object.Value) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			p = toSlash(home) + strings.TrimPrefix(p, "~")
-		}
+// fileExpand implements File.expand_path (expandTilde true) and File.absolute_path
+// (expandTilde false, which skips ~ expansion). ~ expands to $HOME, ~user to that
+// user's home directory, a relative path is resolved against the optional base
+// (default: the working directory), and the result is cleaned (so .. and . collapse)
+// while a leading run of two or more separators is preserved (POSIX / MRI).
+func fileExpand(p string, rest []object.Value, expandTilde bool) string {
+	if expandTilde {
+		p = expandTildePath(p)
 	}
 	if isAbsPath(p) {
-		return path.Clean(p)
+		return cleanAbs(p)
 	}
 	base := ""
-	if len(rest) > 0 {
-		base = fileExpand(strArg(rest[0]), nil)
+	if len(rest) > 0 && rest[0] != object.NilV {
+		base = fileExpand(strArg(rest[0]), nil, expandTilde)
 	} else if wd, err := os.Getwd(); err == nil {
 		base = toSlash(wd)
 	}
-	return path.Clean(path.Join(base, p))
+	return cleanAbs(path.Join(base, p))
+}
+
+// cleanAbs cleans an absolute path but preserves a leading run of two or more
+// separators (path.Clean would collapse them), matching File.expand_path which
+// leaves "////some/path" untouched while still collapsing interior separators.
+func cleanAbs(p string) string {
+	lead := 0
+	for lead < len(p) && p[lead] == '/' {
+		lead++
+	}
+	if lead >= 2 {
+		return strings.Repeat("/", lead) + strings.TrimPrefix(path.Clean(p[lead:]), "/")
+	}
+	return path.Clean(p)
+}
+
+// expandTildePath expands a leading ~ (to $HOME) or ~user (to that user's home)
+// component. As in MRI, an empty or non-absolute $HOME, or an unknown ~user,
+// raises ArgumentError; a path that does not start with ~ is returned unchanged.
+func expandTildePath(p string) string {
+	if p == "" || p[0] != '~' {
+		return p
+	}
+	rest := p[1:]
+	slash := strings.IndexByte(rest, '/')
+	var name, tail string
+	if slash < 0 {
+		name, tail = rest, ""
+	} else {
+		name, tail = rest[:slash], rest[slash:]
+	}
+	if name == "" { // "~" or "~/..." -> $HOME
+		home := os.Getenv("HOME")
+		if home == "" {
+			raise("ArgumentError", "couldn't find HOME environment -- expanding `~'")
+		}
+		if !isAbsPath(toSlash(home)) {
+			raise("ArgumentError", "non-absolute home")
+		}
+		return toSlash(home) + tail
+	}
+	home, err := userHomeDir(name) // "~user"
+	if err != nil || home == "" {
+		raise("ArgumentError", "user %s doesn't exist", name)
+	}
+	return toSlash(home) + tail
 }
 
 // setUmask is the seam over the build-tagged osUmask, so a test can drive
