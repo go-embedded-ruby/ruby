@@ -181,21 +181,9 @@ func (vm *VM) registerIO() {
 		}
 		return object.IntValue(0)
 	})
-	cFile.smethods["readlines"] = &Method{name: "readlines", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		o := openFileIO(cFile, pathArg(vm, args[0]), "r")
-		var lines []object.Value
-		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
-			lines = append(lines, v)
-		}
-		return object.NewArrayFromSlice(lines)
-	}}
-	cFile.smethods["foreach"] = &Method{name: "foreach", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		o := openFileIO(cFile, pathArg(vm, args[0]), "r")
-		for v := ioGets(o, nil); v != object.NilV; v = ioGets(o, nil) {
-			vm.callBlock(blk, []object.Value{v})
-		}
-		return object.NilV
-	}}
+	// IO.read/binread/write/binwrite/foreach/readlines, installed identically on IO
+	// and File (File.readlines/foreach included) now that both classes exist.
+	vm.registerIOClassMethods(cIO, cFile)
 }
 
 // File open-mode flag constants (File::RDWR etc.). The values are the canonical
@@ -544,8 +532,18 @@ func ioGets(o *IOObj, args []object.Value) object.Value {
 	}
 	sep := "\n"
 	if len(args) > 0 {
-		if s, ok := args[0].(*object.String); ok {
-			sep = s.Str()
+		switch a := args[0].(type) {
+		case *object.String:
+			sep = a.Str()
+			if sep == "" { // an empty separator selects paragraph mode
+				return ioGetsParagraph(o)
+			}
+		default:
+			if args[0] == object.NilV { // a nil separator reads the entire remainder
+				s := object.NewString(string(o.buf[o.pos:]))
+				o.pos = len(o.buf)
+				return s
+			}
 		}
 	}
 	rest := o.buf[o.pos:]
@@ -558,6 +556,29 @@ func ioGets(o *IOObj, args []object.Value) object.Value {
 	s := object.NewString(string(rest))
 	o.pos = len(o.buf)
 	return s
+}
+
+// ioGetsParagraph implements gets/each_line paragraph mode (an empty separator):
+// leading blank lines are skipped, then the paragraph up to and including the run
+// of two or more newlines that terminates it (or end of input) is returned.
+func ioGetsParagraph(o *IOObj) object.Value {
+	for o.pos < len(o.buf) && o.buf[o.pos] == '\n' { // skip leading blank lines
+		o.pos++
+	}
+	if o.pos >= len(o.buf) {
+		return object.NilV
+	}
+	start := o.pos
+	if idx := strings.Index(string(o.buf[start:]), "\n\n"); idx >= 0 {
+		end := start + idx
+		for end < len(o.buf) && o.buf[end] == '\n' { // consume the whole newline run
+			end++
+		}
+		o.pos = end
+		return object.NewString(string(o.buf[start:end]))
+	}
+	o.pos = len(o.buf)
+	return object.NewString(string(o.buf[start:]))
 }
 
 // ioPuts writes args to o with Kernel#puts semantics (arrays flattened, a
