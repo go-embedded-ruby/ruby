@@ -361,7 +361,7 @@ func defIOWrite(cls *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
-		o.writeStr(formatString(args[0].ToS(), args[1:]))
+		o.writeStr(vm.formatString(args[0].ToS(), args[1:]))
 		return object.NilV
 	})
 	cls.define("putc", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {

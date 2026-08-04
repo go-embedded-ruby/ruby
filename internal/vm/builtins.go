@@ -325,12 +325,12 @@ func (vm *VM) bootstrap() {
 		}
 		return vm.callBlockSelf(blk, self, args)
 	})
-	formatFn := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	formatFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		fmtStr, ok := args[0].(*object.String)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 		}
-		return object.NewString(formatString(fmtStr.Str(), args[1:]))
+		return object.NewString(vm.formatString(fmtStr.Str(), args[1:]))
 	}
 	vm.cObject.define("format", formatFn)
 	vm.cObject.define("sprintf", formatFn)
