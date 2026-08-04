@@ -288,21 +288,53 @@ end
 CODE_LOADING_DIR = (File.expand_path("fixtures/code", __dir__) rescue "fixtures/code")
 
 # ---------------- mocks ----------------
+# Map a call-count argument to an integer exactly as real mspec's MockProxy does
+# (mspec/lib/mspec/mocks/proxy.rb #n_times): the symbols :once/:twice, or any
+# value coercible with Integer(). Anything else (e.g. :thrice, which mspec does
+# NOT define) raises, matching mspec rather than silently accepting it.
+def _n_times(n)
+  case n
+  when :once then 1
+  when :twice then 2
+  else Integer(n)
+  end
+end
+
 class MockExpect
-  def initialize(sym); @sym = sym; @ret = nil; @count = 0; @min = 1; @exact = nil; @raise = nil; @yield = nil; @forbidden = false; @has_ret = false; end
-  def and_return(*v); @has_ret = true; @ret = v.size == 1 ? v[0] : v; @multi = v.size > 1 ? v.dup : nil; self; end
+  # A mock expectation carries a call-count qualifier [@qual, @limit] mirroring
+  # mspec's MockProxy#count: a bare should_receive defaults to [:exactly, 1];
+  # stub!/any_number_of_times relax it to [:any_number_of_times, 0]. The count is
+  # verified at example teardown by Mock.verify_count (here: SpecContext#run).
+  def initialize(sym)
+    @sym = sym; @ret = nil; @count = 0
+    @qual = :exactly; @limit = 1
+    @raise = nil; @yield = nil; @forbidden = false; @has_ret = false; @multi = nil
+  end
+  def and_return(*v)
+    @has_ret = true
+    if v.size <= 1
+      @ret = v[0]
+    else
+      # Queue of return values consumed one per call; the last one sticks once
+      # the queue is exhausted (mspec MockProxy#returning). mspec also bumps the
+      # expected exact count up to cover every queued value.
+      @multi = v.dup; @ret = v[0]
+      @limit = v.size if @qual == :exactly && @limit < v.size
+    end
+    self
+  end
   def and_raise(e); @raise = e; self; end
   def and_yield(*a); @yield = a; self; end
-  def with(*a); @with = a; self; end
-  def exactly(n); @min = n; @exact = n; self; end
+  def with(*a); @with = (a.size == 1 ? a[0] : a); self; end
+  def exactly(n); @qual = :exactly; @limit = _n_times(n); self; end
+  def at_least(n); @qual = :at_least; @limit = _n_times(n); self; end
+  def at_most(n); @qual = :at_most; @limit = _n_times(n); self; end
   def times; self; end
-  def at_least(n); @min = (n == :once ? 1 : n); self; end
-  def at_most(n); @max = n; self; end
-  def any_number_of_times; @min = 0; self; end
-  def once; @min = 1; @exact = 1; self; end
-  def twice; @min = 2; @exact = 2; self; end
-  def never; @min = 0; @exact = 0; @forbidden = true; self; end
-  def forbid!; @forbidden = true; self; end
+  def once; exactly(1); end
+  def twice; exactly(2); end
+  def any_number_of_times; @qual = :any_number_of_times; @limit = 0; self; end
+  def never; @qual = :exactly; @limit = 0; @forbidden = true; self; end
+  def forbid!; @qual = :exactly; @limit = 0; @forbidden = true; self; end
   def invoke(*a, &b)
     @count += 1
     if @forbidden
@@ -310,14 +342,21 @@ class MockExpect
     end
     ::Kernel.raise(@raise) if @raise
     if @yield && b; b.call(*@yield); end
-    if @multi && @count <= @multi.size; return @multi[@count - 1]; end
+    if @multi
+      i = @count - 1
+      return i < @multi.size ? @multi[i] : @multi[-1]
+    end
     @ret
   end
   def verify
-    return false if @exact && @count != @exact
-    @count >= @min
+    case @qual
+    when :at_least then @count >= @limit
+    when :at_most then @count <= @limit
+    when :exactly then @count == @limit
+    else true
+    end
   end
-  def desc; "#{@sym} (got #{@count}, need #{@exact || @min}+)"; end
+  def desc; "#{@sym} (expected #{@qual.to_s.sub('_', ' ')} #{@limit}, got #{@count})"; end
 end
 
 class MockObject

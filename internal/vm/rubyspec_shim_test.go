@@ -120,3 +120,54 @@ end`
 	}
 	assertShimResult(t, out, "pass=2 fail=0 error=0 skip=0")
 }
+
+// TestShimMockCallCounts guards defect #2: mock call-count matchers must be
+// honored exactly as mspec's MockProxy/Mock.verify_count do — symbol counts
+// (:once/:twice) map to integers, exactly/at_least/at_most are all enforced, a
+// bare should_receive defaults to exactly-once, and and_return with several
+// values both sequences the returns (last one sticks) and bumps the expected
+// count. Previously exactly(:twice)/at_least(:twice) raised (symbol vs Integer)
+// and at_most was never checked, so those examples false-failed or false-passed.
+func TestShimMockCallCounts(t *testing.T) {
+	// Positive cases: each example is satisfied, so all six pass.
+	pass := `
+describe "mock counts (satisfied)" do
+  it "exactly(:twice) honored at two calls" do
+    o = mock("m"); o.should_receive(:f).exactly(:twice); o.f; o.f
+  end
+  it "at_least(:twice) honored at three calls" do
+    o = mock("m"); o.should_receive(:f).at_least(:twice); o.f; o.f; o.f
+  end
+  it "at_most(1) honored at one call" do
+    o = mock("m"); o.should_receive(:f).at_most(1); o.f
+  end
+  it "bare should_receive defaults to exactly-once" do
+    o = mock("m"); o.should_receive(:f); o.f
+  end
+  it "and_return sequences values and bumps the count" do
+    o = mock("m"); o.should_receive(:f).and_return(10, 20)
+    [o.f, o.f].should == [10, 20]
+  end
+  it "and_return sequence keeps the last value once exhausted" do
+    o = mock("m"); o.should_receive(:f).at_least(1).and_return(1, 2)
+    [o.f, o.f, o.f].should == [1, 2, 2]
+  end
+end`
+	assertShimResult(t, runShim(t, "", pass), "pass=6 fail=0 error=0 skip=0")
+
+	// Negative cases: each violates its count, so the shim must FAIL (not error,
+	// not pass) each — proving the matchers are actually enforced.
+	fail := `
+describe "mock counts (violated)" do
+  it "exactly(:twice) fails at one call" do
+    o = mock("m"); o.should_receive(:f).exactly(:twice); o.f
+  end
+  it "at_most(1) fails at two calls" do
+    o = mock("m"); o.should_receive(:f).at_most(1); o.f; o.f
+  end
+  it "default exactly-once fails at two calls" do
+    o = mock("m"); o.should_receive(:f); o.f; o.f
+  end
+end`
+	assertShimResult(t, runShim(t, "", fail), "pass=0 fail=3 error=0 skip=0")
+}
