@@ -256,19 +256,53 @@ func (vm *VM) registerThreadClass() {
 		self.(*RThread).name = args[0]
 		return args[0]
 	})
-	cThread.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if v, ok := self.(*RThread).locals[threadLocalKey(args[0])]; ok {
+	cThread.define("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if v, ok := self.(*RThread).locals[vm.threadLocalKey(args[0])]; ok {
 			return v
 		}
 		return object.NilV
 	})
-	cThread.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*RThread).locals[threadLocalKey(args[0])] = args[1]
+	cThread.define("[]=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		self.(*RThread).locals[vm.threadLocalKey(args[0])] = args[1]
 		return args[1]
 	})
-	cThread.define("key?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		_, ok := self.(*RThread).locals[threadLocalKey(args[0])]
+	cThread.define("key?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		_, ok := self.(*RThread).locals[vm.threadLocalKey(args[0])]
 		return object.Bool(ok)
+	})
+	// fetch(key[, default]) { |key| ... }: read a fiber-local like Hash#fetch —
+	// the value if set, else the block's result (which takes precedence over a
+	// default), else the default, else a KeyError. Zero or more-than-two args is
+	// an ArgumentError.
+	cThread.define("fetch", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
+		t := self.(*RThread)
+		if v, ok := t.locals[vm.threadLocalKey(args[0])]; ok {
+			return v
+		}
+		if blk != nil {
+			return vm.callBlock(blk, []object.Value{args[0]})
+		}
+		if len(args) == 2 {
+			return args[1]
+		}
+		raise("KeyError", "key not found: %s", args[0].Inspect())
+		return object.NilV
+	})
+	// keys: the fiber-local names of this thread, as Symbols, in a deterministic
+	// order (the storage map iterates randomly).
+	cThread.define("keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		keys := make([]object.Value, 0, len(t.locals))
+		for k := range t.locals {
+			keys = append(keys, k)
+		}
+		sort.SliceStable(keys, func(i, j int) bool {
+			return string(keys[i].(object.Symbol)) < string(keys[j].(object.Symbol))
+		})
+		return object.NewArrayFromSlice(keys)
 	})
 	// thread_variable_get/set/? and thread_variables: thread-local storage that is
 	// distinct from Thread#[] (which is fiber-local in MRI). Keys are coerced to
@@ -324,13 +358,24 @@ func (vm *VM) threadJoin(t *RThread) {
 	}
 }
 
-// threadLocalKey normalises a Thread#[] key (Symbol or String) to a Symbol, so
-// thread[:k] and thread["k"] address the same slot, as in MRI.
-func threadLocalKey(k object.Value) object.Value {
-	if s, ok := k.(*object.String); ok {
-		return object.Symbol(s.Str())
+// threadLocalKey normalises a Thread#[] / #[]= / #key? / #fetch key to a Symbol,
+// so thread[:k] and thread["k"] address the same slot, as in MRI. A key that is
+// neither a Symbol nor a String is coerced through #to_str; anything that does
+// not yield a String (e.g. nil or an Integer) raises TypeError, as in MRI.
+func (vm *VM) threadLocalKey(k object.Value) object.Value {
+	switch v := k.(type) {
+	case object.Symbol:
+		return v
+	case *object.String:
+		return object.Symbol(v.Str())
 	}
-	return k
+	if vm.respondsToDynamic(k, "to_str") {
+		if s, ok := vm.send(k, "to_str", nil, nil).(*object.String); ok {
+			return object.Symbol(s.Str())
+		}
+	}
+	raise("TypeError", "%s is not a symbol nor a string", k.Inspect())
+	return object.NilVal()
 }
 
 // threadVarKey coerces a thread-variable key to a Symbol, requiring a Symbol or
