@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build js && wasm
+//go:build wasm
 
 // This file is the GOOS=js GOARCH=wasm counterpart of the gem backends whose Go
 // libraries do build for wasm but cannot function in a browser because they open

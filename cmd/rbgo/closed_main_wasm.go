@@ -1,4 +1,4 @@
-//go:build rbgo_closed && js && wasm
+//go:build rbgo_closed && wasm
 
 package main
 

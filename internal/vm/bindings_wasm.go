@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build js && wasm
+//go:build wasm
 
 // This file is the GOOS=js GOARCH=wasm counterpart of the database / search / KV
 // bindings whose Go drivers do not compile for wasm — SQLite3 (modernc.org/libc),
@@ -17,7 +17,7 @@
 // so conditional code and `rescue`s load, and only an actual operation
 // (SQLite3::Database.new, Sequel.connect, Bolt::DB.open, Bleve.new, Etcd.new,
 // Confd.render, ActiveRecord::Base.establish_connection, …) raises a clean
-// NotImplementedError "<gem> is not supported on js/wasm" — the same error kind
+// NotImplementedError "<gem> is not supported on wasm" — the same error kind
 // the existing spawn/xstr wasm stubs raise. No native behaviour changes: these
 // definitions exist only on wasm.
 
@@ -46,10 +46,10 @@ func valueEqualExtBinding(a, b object.Value) (bool, bool) { _, _ = a, b; return 
 func hasCustomEqExtBinding(v object.Value) bool { _ = v; return false }
 
 // wasmUnsupported returns a native method that raises the standard
-// "<gem> is not supported on js/wasm" NotImplementedError.
+// "<gem> is not supported on wasm" NotImplementedError.
 func wasmUnsupported(gem string) NativeFn {
 	return func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return raise("NotImplementedError", "%s is not supported on js/wasm", gem)
+		return raise("NotImplementedError", "%s is not supported on wasm", gem)
 	}
 }
 
@@ -150,12 +150,12 @@ func (vm *VM) registerConfd() {
 type arSQLiteAdapter struct{}
 
 func (a *arSQLiteAdapter) Execute(sql string) ([]activerecord.Row, error) {
-	raise("NotImplementedError", "active_record (sqlite3) is not supported on js/wasm")
+	raise("NotImplementedError", "active_record (sqlite3) is not supported on wasm")
 	return nil, nil
 }
 
 func (a *arSQLiteAdapter) ExecuteDML(sql string) (affected int64, lastInsertID int64, err error) {
-	raise("NotImplementedError", "active_record (sqlite3) is not supported on js/wasm")
+	raise("NotImplementedError", "active_record (sqlite3) is not supported on wasm")
 	return 0, 0, nil
 }
 
@@ -164,18 +164,18 @@ func (a *arSQLiteAdapter) AdapterName() string { return "sqlite3" }
 // arConnect raises on wasm: there is no SQLite3 driver to open a connection.
 func (vm *VM) arConnect(path string) {
 	_ = path
-	raise("NotImplementedError", "active_record (sqlite3) is not supported on js/wasm")
+	raise("NotImplementedError", "active_record (sqlite3) is not supported on wasm")
 }
 
 // arRequireAdapter raises on wasm (a connection can never be established), so any
 // query path degrades to a clean error rather than a nil dereference.
 func (vm *VM) arRequireAdapter() *arSQLiteAdapter {
-	raise("NotImplementedError", "active_record (sqlite3) is not supported on js/wasm")
+	raise("NotImplementedError", "active_record (sqlite3) is not supported on wasm")
 	return nil
 }
 
 // arRawConnection is the wasm stub of ActiveRecord::Base.connection's SQLite3
 // tail; it raises, matching the establish_connection path.
 func (vm *VM) arRawConnection() object.Value {
-	return raise("NotImplementedError", "active_record (sqlite3) is not supported on js/wasm")
+	return raise("NotImplementedError", "active_record (sqlite3) is not supported on wasm")
 }

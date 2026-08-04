@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build !windows && !(js && wasm)
+//go:build !windows && !wasm
 
 package vm
 
