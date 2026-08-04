@@ -28,7 +28,10 @@ import (
 // format it without an intermediate copy. ClassName mirrors classNameOf so the
 // library's TypeError messages ("no implicit conversion of X into Integer")
 // match MRI exactly.
-type formatValue struct{ v object.Value }
+type formatValue struct {
+	v  object.Value
+	vm *VM // non-nil: enables MRI argument coercion (to_s/inspect/to_int/to_i/to_f)
+}
 
 // Kind reports which family of conversions the value natively satisfies,
 // mapping the rbgo dynamic type to the library's Kind enumeration.
@@ -72,11 +75,34 @@ func (fv formatValue) Int64Fast() (int64, bool) {
 	}
 }
 
-// ToS is the Ruby to_s rendering (%s and the textual value of %{name}).
-func (fv formatValue) ToS() string { return fv.v.ToS() }
+// ToS is the Ruby to_s rendering (%s and the textual value of %{name}). For a
+// user object it dispatches #to_s (MRI coerces %s / %{name} arguments with #to_s,
+// never #to_str), so e.g. `"%s" % mock_returning("abc")` yields "abc".
+func (fv formatValue) ToS() string {
+	if o, ok := fv.v.(*RObject); ok && fv.vm != nil {
+		return fv.vm.formatDispatchStr(o, "to_s")
+	}
+	return fv.v.ToS()
+}
 
-// Inspect is the Ruby inspect rendering (%p).
-func (fv formatValue) Inspect() string { return fv.v.Inspect() }
+// Inspect is the Ruby inspect rendering (%p); for a user object it dispatches
+// #inspect.
+func (fv formatValue) Inspect() string {
+	if o, ok := fv.v.(*RObject); ok && fv.vm != nil {
+		return fv.vm.formatDispatchStr(o, "inspect")
+	}
+	return fv.v.Inspect()
+}
+
+// formatDispatchStr sends name to o and returns the resulting String's bytes (or
+// the value's default rendering if it is not a String), for %s/%p/%{name}.
+func (vm *VM) formatDispatchStr(o *RObject, name string) string {
+	r := vm.send(o, name, nil, nil)
+	if s, ok := r.(*object.String); ok {
+		return s.Str()
+	}
+	return r.ToS()
+}
 
 // ClassName names the value's Ruby class for TypeError messages, mirroring
 // classNameOf so the library's messages are byte-identical to the former
@@ -100,9 +126,32 @@ func (fv formatValue) Int() (*big.Int, error, bool) {
 	case *object.String:
 		z, err := parseFormatInteger(x.Str(), x.Inspect())
 		return z, err, true
+	case *RObject:
+		// A formatValue reaching the integer conversions always carries the VM that
+		// built it (formatString / formatNamedArgs set it), so coerce via the object.
+		return fv.vm.formatObjInt(x)
 	default:
 		return nil, nil, false
 	}
+}
+
+// formatObjInt coerces a user object to an integer for the integer conversions:
+// #to_int first, then #to_i (MRI's rule for %d/%i/%u/%o/%b/%x/%X). A coercion
+// method returning a non-Integer raises TypeError; an object answering neither
+// reports ok=false so the library raises its own "no implicit conversion".
+func (vm *VM) formatObjInt(o *RObject) (*big.Int, error, bool) {
+	for _, m := range []string{"to_int", "to_i"} {
+		if !vm.respondsToDynamic(o, m) {
+			continue
+		}
+		r := vm.send(o, m, nil, nil)
+		if z, ok := object.BigOf(r); ok {
+			return z, nil, true
+		}
+		raise("TypeError", "can't convert %s to Integer (%s#%s gives %s)",
+			vm.classOf(o).name, vm.classOf(o).name, m, vm.classOf(r).name)
+	}
+	return nil, nil, false
 }
 
 // Float returns the value as a float64 for the float conversions, with the same
@@ -121,9 +170,29 @@ func (fv formatValue) Float() (float64, error, bool) {
 	case *object.String:
 		f, err := parseFormatFloat(x.Str(), x.Inspect())
 		return f, err, true
+	case *RObject:
+		return fv.vm.formatObjFloat(x)
 	default:
 		return 0, nil, false
 	}
+}
+
+// formatObjFloat coerces a user object to a float for the float conversions via
+// #to_f (MRI's rule for %f/%e/%E/%g/%G). A non-numeric #to_f result raises
+// TypeError; an object without #to_f reports ok=false.
+func (vm *VM) formatObjFloat(o *RObject) (float64, error, bool) {
+	if !vm.respondsToDynamic(o, "to_f") {
+		return 0, nil, false
+	}
+	r := vm.send(o, "to_f", nil, nil)
+	switch n := r.(type) {
+	case object.Float:
+		return float64(n), nil, true
+	case object.Integer:
+		return float64(n), nil, true
+	}
+	raise("TypeError", "can't convert %s into Float", vm.classOf(o).name)
+	return 0, nil, false
 }
 
 // parseFormatInteger parses a String operand for an integer conversion as MRI's
@@ -166,7 +235,7 @@ func parseFormatFloat(s, inspect string) (float64, error) {
 // references are addressable by %<name>. When there is no hash operand, nil is
 // returned and the library raises the MRI "one hash required" ArgumentError on
 // the first named reference.
-func formatNamedArgs(args []object.Value) *format.NamedArgs {
+func (vm *VM) formatNamedArgs(args []object.Value) *format.NamedArgs {
 	if len(args) != 1 {
 		return nil
 	}
@@ -181,7 +250,7 @@ func formatNamedArgs(args []object.Value) *format.NamedArgs {
 			continue
 		}
 		v, _ := h.Get(k)
-		m[string(sym)] = formatValue{v}
+		m[string(sym)] = formatValue{v: v, vm: vm}
 	}
 	return format.NewNamedArgs(m)
 }
@@ -191,16 +260,17 @@ func formatNamedArgs(args []object.Value) *format.NamedArgs {
 // the matching Ruby exception (ArgumentError / KeyError / TypeError). It is the
 // single entry point Kernel#sprintf / Kernel#format / IO#printf / String#% all
 // funnel through, so their formatting behaviour is identical.
-func formatString(fmtStr string, args []object.Value) string {
+func (vm *VM) formatString(fmtStr string, args []object.Value) string {
 	// One backing array of wrappers, referenced by pointer, so wrapping N
 	// operands costs a single allocation instead of one interface box per arg.
 	wraps := make([]formatValue, len(args))
 	vals := make([]format.Value, len(args))
 	for i, a := range args {
 		wraps[i].v = a
+		wraps[i].vm = vm
 		vals[i] = &wraps[i]
 	}
-	out, err := format.Format(fmtStr, vals, formatNamedArgs(args))
+	out, err := format.Format(fmtStr, vals, vm.formatNamedArgs(args))
 	if err != nil {
 		raiseFormatError(err)
 	}

@@ -265,6 +265,13 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		}
 		return vm.send(a, compareOpName(op), []object.Value{b}, nil)
 	default:
+		// String % args is Kernel#sprintf with the format as receiver; it needs a
+		// live VM for MRI argument coercion (%s#to_s, %p#inspect, %d#to_int/#to_i,
+		// %f#to_f, %{name}#to_s), so route it through the VM-aware formatter rather
+		// than the VM-less stringOp path.
+		if as, ok := a.(*object.String); ok && op == bytecode.OpMod {
+			return object.NewString(vm.formatString(as.Str(), formatArgs(b)))
+		}
 		// A user object (RObject with no builtin backing) that defines an
 		// arithmetic operator dispatches to it, so `Pathname + str`, a Money `+`,
 		// etc. work. Built-in value types keep the inline path (and its coercion
@@ -526,8 +533,8 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 			out = append(out, a.Bytes()...)
 		}
 		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
-	case bytecode.OpMod:
-		return object.NewString(formatString(a.Str(), formatArgs(b)))
+	// String % args (OpMod) is intercepted in binaryOp and routed through the
+	// VM-aware formatter, so it never reaches this VM-less path.
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
 		bs, ok := b.(*object.String)
 		if !ok {
