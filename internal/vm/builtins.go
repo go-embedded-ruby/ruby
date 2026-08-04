@@ -708,10 +708,14 @@ func (vm *VM) bootstrap() {
 		_, isNil := self.(object.Nil)
 		return object.Bool(isNil)
 	})
-	vm.cObject.define("initialize", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+	// #initialize and #method_missing are defined on BasicObject (as in MRI), so a
+	// class descending directly from BasicObject — which does not inherit Object —
+	// still allocates (new → initialize) and reports NoMethodError through
+	// method_missing rather than dereferencing a nil method record.
+	vm.cBasicObject.define("initialize", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NilV
 	})
-	vm.cObject.define("method_missing", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cBasicObject.define("method_missing", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := args[0].ToS()
 		return raise("NoMethodError", "undefined method '%s' for %s", name, vm.classOf(self).name)
 	})
@@ -788,7 +792,7 @@ func (vm *VM) bootstrap() {
 		}
 	})
 	sendFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return vm.send(self, args[0].ToS(), args[1:], blk)
+		return vm.send(self, vm.methodNameArg(args[0]), args[1:], blk)
 	}
 	vm.cObject.define("send", sendFn)
 	// __send__ is the can't-be-overridden alias of send; both ignore visibility.
@@ -796,7 +800,7 @@ func (vm *VM) bootstrap() {
 	// public_send dispatches only public methods: a private/protected target
 	// raises NoMethodError just as an explicit-receiver call would.
 	vm.cObject.define("public_send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		name := args[0].ToS()
+		name := vm.methodNameArg(args[0])
 		if m := vm.findMethod(self, name); m != nil {
 			vm.checkVisibility(self, name, m, nil)
 		}
@@ -809,12 +813,13 @@ func (vm *VM) bootstrap() {
 			includePrivate = args[1]
 		}
 		if m := vm.findMethod(self, name); m != nil {
-			// A private or protected method answers respond_to? only when the second
-			// argument (include_private) is truthy, matching MRI.
+			// A public method (or any method when include_private is truthy) answers
+			// respond_to? immediately. A private/protected method that is not accessible
+			// falls through to respond_to_missing?, matching MRI — which gives the
+			// object the same dynamic-dispatch chance it gets for a missing method.
 			if includePrivate.Truthy() || vm.sendVisibilityOf(self, name, m) == visPublic {
 				return object.True
 			}
-			return object.False
 		}
 		// Fall back to respond_to_missing?(name, include_private): a truthy return
 		// means the object answers the method dynamically (method_missing).
