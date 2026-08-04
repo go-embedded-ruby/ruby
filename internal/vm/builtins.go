@@ -171,8 +171,11 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("dup", dupFn)
 	vm.cObject.define("clone", dupFn)
 	vm.cObject.define("freeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if s, ok := self.(*object.String); ok {
-			s.Frozen = true
+		switch o := self.(type) {
+		case *object.String:
+			o.Frozen = true
+		case *RObject:
+			o.frozen = true
 		}
 		return self
 	})
@@ -298,20 +301,42 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("frozen?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(isFrozen(self))
 	})
-	vm.cObject.define("instance_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return getIvar(self, args[0].ToS())
+	vm.cObject.define("instance_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return getIvar(self, vm.ivarNameArg(args[0]))
 	})
-	vm.cObject.define("instance_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		setIvar(self, args[0].ToS(), args[1])
+	vm.cObject.define("instance_variable_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := vm.ivarNameArg(args[0])
+		if isFrozen(self) {
+			vm.raiseFrozen(self)
+		}
+		setIvar(self, name, args[1])
 		return args[1]
 	})
-	vm.cObject.define("instance_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cObject.define("instance_variable_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := vm.ivarNameArg(args[0])
 		t := ivarTable(self)
 		if t == nil {
 			return object.False
 		}
-		_, ok := t[args[0].ToS()]
+		_, ok := t[name]
 		return object.Bool(ok)
+	})
+	vm.cObject.define("remove_instance_variable", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		name := vm.ivarNameArg(args[0])
+		if isFrozen(self) {
+			vm.raiseFrozen(self)
+		}
+		t := ivarTable(self)
+		if t != nil {
+			if v, ok := t[name]; ok {
+				delete(t, name)
+				return v
+			}
+		}
+		return raise("NameError", "instance variable %s not defined", name)
+	})
+	vm.cObject.define("instance_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewArrayFromSlice(ivarNamesInOrder(self))
 	})
 	vm.cObject.define("instance_eval", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -5672,8 +5697,16 @@ func isFrozen(v object.Value) bool {
 		return x.Frozen
 	case *Regexp:
 		return x.frozen
+	case *RObject:
+		return x.frozen
 	}
 	return false
+}
+
+// raiseFrozen raises FrozenError for a modification attempt on a frozen object,
+// mirroring MRI's "can't modify frozen <class>: <inspect>" message.
+func (vm *VM) raiseFrozen(self object.Value) {
+	raise("FrozenError", "can't modify frozen %s: %s", vm.classOf(self).name, vm.inspectStr(self))
 }
 
 // arrayKeepIf mutates a in place, keeping the elements for which the block's

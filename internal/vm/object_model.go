@@ -241,7 +241,9 @@ func (c *RClass) defineNR(name string, fn NativeFn) {
 type RObject struct {
 	class     *RClass
 	ivars     map[string]object.Value
-	singleton *RClass // lazily created; its super is `class`
+	ivarOrder []string // instance-variable names in first-assignment order
+	frozen    bool     // set by Object#freeze; reported by Object#frozen?
+	singleton *RClass  // lazily created; its super is `class`
 	// builtin holds the wrapped value (a *object.String / *object.Array /
 	// *object.Hash) when this object is an instance of a user subclass of a
 	// built-in value type; nil otherwise. Value-class native methods are
@@ -1914,8 +1916,35 @@ func getIvar(self object.Value, name string) object.Value {
 
 func setIvar(self object.Value, name string, v object.Value) {
 	if t := ivarTable(self); t != nil {
+		if o, ok := self.(*RObject); ok {
+			if _, exists := t[name]; !exists {
+				o.ivarOrder = append(o.ivarOrder, name)
+			}
+		}
 		t[name] = v
 	}
+}
+
+// ivarNamesInOrder returns self's instance-variable names as Symbols. For a
+// plain object the names are reported in the order they were first assigned
+// (matching MRI); other value kinds report in map order, which suffices for the
+// cases that reach them.
+func ivarNamesInOrder(self object.Value) []object.Value {
+	if o, ok := self.(*RObject); ok {
+		out := make([]object.Value, 0, len(o.ivarOrder))
+		for _, n := range o.ivarOrder {
+			if _, live := o.ivars[n]; live {
+				out = append(out, object.Symbol(n))
+			}
+		}
+		return out
+	}
+	t := ivarTable(self)
+	out := make([]object.Value, 0, len(t))
+	for n := range t {
+		out = append(out, object.Symbol(n))
+	}
+	return out
 }
 
 // ivarTable returns the instance-variable map backing self, or nil for values
