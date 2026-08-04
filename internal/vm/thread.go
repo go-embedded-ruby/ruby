@@ -145,17 +145,6 @@ func (m *RMutex) ToS() string     { return "#<Thread::Mutex>" }
 func (m *RMutex) Inspect() string { return m.ToS() }
 func (m *RMutex) Truthy() bool    { return true }
 
-// RQueue backs a Ruby Queue (Thread::Queue): an unbounded thread-safe FIFO.
-type RQueue struct {
-	items  []object.Value
-	waitq  []chan struct{}
-	closed bool
-}
-
-func (q *RQueue) ToS() string     { return "#<Thread::Queue>" }
-func (q *RQueue) Inspect() string { return q.ToS() }
-func (q *RQueue) Truthy() bool    { return true }
-
 func (vm *VM) registerThread() {
 	std := vm.consts["StandardError"].(*RClass)
 	if _, ok := vm.consts["ThreadError"]; !ok {
@@ -240,6 +229,12 @@ func (vm *VM) registerThreadClass() {
 	})
 	cThread.define("alive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(!self.(*RThread).isDone())
+	})
+	// stop? is true when the thread is not running: either finished (dead) or
+	// parked at a blocking point ("sleep"), matching MRI.
+	cThread.define("stop?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		return object.Bool(t.isDone() || t.status == "sleep")
 	})
 	cThread.define("status", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		t := self.(*RThread)
@@ -420,85 +415,6 @@ func (vm *VM) mutexUnlock(m *RMutex) {
 		return
 	}
 	m.owner = nil
-}
-
-func (vm *VM) registerQueue() {
-	cQueue := newClass("Queue", vm.cObject)
-	vm.consts["Queue"] = cQueue
-	vm.consts["Thread"].(*RClass).consts["Queue"] = cQueue
-	cQueue.smethods["new"] = &Method{name: "new", owner: cQueue, native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RQueue{}
-	}}
-	push := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		vm.queuePush(self.(*RQueue), args[0])
-		return self
-	}
-	cQueue.define("push", push)
-	cQueue.define("<<", push)
-	cQueue.define("enq", push)
-	pop := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.queuePop(self.(*RQueue), len(args) > 0 && args[0].Truthy())
-	}
-	cQueue.define("pop", pop)
-	cQueue.define("shift", pop)
-	cQueue.define("deq", pop)
-	cQueue.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*RQueue).items)))
-	})
-	cQueue.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*RQueue).items)))
-	})
-	cQueue.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(len(self.(*RQueue).items) == 0)
-	})
-	cQueue.define("num_waiting", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*RQueue).waitq)))
-	})
-	cQueue.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		self.(*RQueue).items = nil
-		return self
-	})
-	cQueue.define("close", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		q := self.(*RQueue)
-		q.closed = true
-		for _, ch := range q.waitq {
-			close(ch)
-		}
-		q.waitq = nil
-		return self
-	})
-	cQueue.define("closed?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*RQueue).closed)
-	})
-}
-
-func (vm *VM) queuePush(q *RQueue, v object.Value) {
-	if q.closed {
-		raise("ClosedQueueError", "queue closed")
-	}
-	q.items = append(q.items, v)
-	if len(q.waitq) > 0 {
-		ch := q.waitq[0]
-		q.waitq = q.waitq[1:]
-		close(ch) // wake exactly one waiting popper
-	}
-}
-
-func (vm *VM) queuePop(q *RQueue, nonBlock bool) object.Value {
-	for len(q.items) == 0 {
-		if q.closed {
-			return object.NilV
-		}
-		if nonBlock {
-			raise("ThreadError", "queue empty")
-		}
-		ch := make(chan struct{})
-		q.waitq = append(q.waitq, ch)
-		vm.threadBlock(func() { <-ch })
-	}
-	v := q.items[0]
-	q.items = q.items[1:]
-	return v
 }
 
 // registerSleep adds a GVL-aware Kernel#sleep that releases the lock while

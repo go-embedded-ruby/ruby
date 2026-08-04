@@ -1322,6 +1322,9 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *RMutex:
 		return vm.consts["Mutex"].(*RClass)
 	case *RQueue:
+		if x.class != nil {
+			return x.class
+		}
 		return vm.consts["Queue"].(*RClass)
 	case *IOObj:
 		return x.cls
