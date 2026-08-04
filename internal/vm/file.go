@@ -195,22 +195,9 @@ func (vm *VM) registerFile() {
 		}
 		return object.NewString(toSlash(resolved))
 	})
-	def("read", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := pathArg(vm, args[0])
-		b, err := os.ReadFile(p)
-		if err != nil {
-			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
-		}
-		return object.NewString(string(b))
-	})
-	def("write", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := pathArg(vm, args[0])
-		data := []byte(strArg(args[1]))
-		if err := os.WriteFile(p, data, 0o644); err != nil {
-			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
-		}
-		return object.IntValue(int64(len(data)))
-	})
+	// File.read / File.write / File.binread / File.binwrite are the same class
+	// methods as IO's, installed on both tables by registerIOClassMethods once the
+	// IO class exists (registerIO runs after registerFile).
 	def("size", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])
 		fi, err := os.Stat(p)
