@@ -171,3 +171,47 @@ describe "mock counts (violated)" do
 end`
 	assertShimResult(t, runShim(t, "", fail), "pass=0 fail=3 error=0 skip=0")
 }
+
+// TestShimMockInterceptsRealMethods guards defect #3: should_receive on a method
+// the receiver really defines must intercept it (mspec's Mock.install_method
+// installs a singleton method, saving the original) and restore the original at
+// example teardown (Mock.cleanup). Previously a mock object's real #to_s/#inspect
+// shadowed the expectation (method_missing never fired), so those examples ran
+// the real method instead of the stub. The bookkeeping must also never dispatch a
+// method on the receiver under test (e.g. #object_id), which a spec may forbid.
+func TestShimMockInterceptsRealMethods(t *testing.T) {
+	src := `
+class Widget; def to_s; "real-widget"; end; end
+W = Widget.new                 # to_s is an inherited/class method
+SINGLE = Object.new
+def SINGLE.greet; "real-greet"; end   # greet is a pre-existing singleton method
+
+describe "mock intercepts + restores real methods" do
+  it "intercepts a mock object's own #to_s" do
+    m = mock("m"); m.should_receive(:to_s).and_return("stubbed")
+    m.to_s.should == "stubbed"
+  end
+  it "an unmocked mock object still has its real #to_s" do
+    mock("m").to_s.should == "#<mock m>"
+  end
+  it "intercepts an inherited/class method" do
+    W.should_receive(:to_s).and_return("mockw"); W.to_s.should == "mockw"
+  end
+  it "restores the inherited method after the mocking example" do
+    W.to_s.should == "real-widget"
+  end
+  it "intercepts a pre-existing singleton method" do
+    SINGLE.should_receive(:greet).and_return("mockg"); SINGLE.greet.should == "mockg"
+  end
+  it "restores the singleton method after the mocking example" do
+    SINGLE.greet.should == "real-greet"
+  end
+  it "does not dispatch a forbidden bookkeeping method on the receiver" do
+    o = mock("o")
+    o.should_not_receive(:object_id)
+    o.should_receive(:f).and_return(1)
+    o.f.should == 1
+  end
+end`
+	assertShimResult(t, runShim(t, "", src), "pass=7 fail=0 error=0 skip=0")
+}
