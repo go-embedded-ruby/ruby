@@ -154,6 +154,14 @@ func (vm *VM) registerIO() {
 		}
 		return o
 	}}
+	// File.new opens a file-backed IO like File.open, but never takes a block (it
+	// always returns the open stream). A missing path argument is an ArgumentError.
+	cFile.smethods["new"] = &Method{name: "new", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		return openFileIO(cFile, pathArg(vm, args[0]), fileMode(args))
+	}}
 	// File instance metadata operations. Puppet's replace_file writes to a
 	// Uniquefile (a DelegateClass(File)) and then chmod/chowns it before renaming
 	// it into place, so the open File needs path/chmod/chown that act on its
