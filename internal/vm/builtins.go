@@ -97,6 +97,7 @@ func (vm *VM) bootstrap() {
 	vm.registerModuleExtras()
 	vm.registerReflection()
 	vm.registerMethodReflect()
+	vm.registerModuleReflect()
 	vm.registerVersionConstants()
 	vm.registerKernelIntrospection()
 	vm.registerEncoding()
@@ -176,6 +177,8 @@ func (vm *VM) bootstrap() {
 		case *object.String:
 			o.Frozen = true
 		case *RObject:
+			o.frozen = true
+		case *RClass:
 			o.frozen = true
 		}
 		return self
@@ -1118,17 +1121,26 @@ func (vm *VM) bootstrap() {
 	vm.cModule.define("<=", classCmpOp(func(c int) bool { return c <= 0 }))
 	vm.cModule.define(">", classCmpOp(func(c int) bool { return c > 0 }))
 	vm.cModule.define(">=", classCmpOp(func(c int) bool { return c >= 0 }))
-	vm.cModule.define("attr_reader", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		defineAttrs(self.(*RClass), args, true, false)
-		return object.NilV
+	vm.cModule.define("attr_reader", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewArrayFromSlice(vm.defineAttrs(self.(*RClass), args, true, false))
 	})
-	vm.cModule.define("attr_writer", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		defineAttrs(self.(*RClass), args, false, true)
-		return object.NilV
+	vm.cModule.define("attr", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Module#attr(:name, writable=false) is the deprecated boolean form when
+		// exactly two arguments are given and the second is true/false; otherwise
+		// every argument is an attribute name (a reader each), like attr_reader.
+		cls := self.(*RClass)
+		if len(args) == 2 {
+			if b, ok := args[1].(object.Bool); ok {
+				return object.NewArrayFromSlice(vm.defineAttrs(cls, args[:1], true, bool(b)))
+			}
+		}
+		return object.NewArrayFromSlice(vm.defineAttrs(cls, args, true, false))
 	})
-	vm.cModule.define("attr_accessor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		defineAttrs(self.(*RClass), args, true, true)
-		return object.NilV
+	vm.cModule.define("attr_writer", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewArrayFromSlice(vm.defineAttrs(self.(*RClass), args, false, true))
+	})
+	vm.cModule.define("attr_accessor", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewArrayFromSlice(vm.defineAttrs(self.(*RClass), args, true, true))
 	})
 	classEvalFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		// String form — class_eval("def m; end", file, line) — compiles the source
@@ -5649,21 +5661,41 @@ func splitLines(s string) []string {
 
 // defineAttrs installs reader and/or writer accessors on cls for each named
 // attribute (the symbols/strings passed to attr_reader/writer/accessor).
-func defineAttrs(cls *RClass, names []object.Value, reader, writer bool) {
+// defineAttrs installs the reader and/or writer accessors for each name on cls,
+// giving them the class body's current default visibility (so attr_* written
+// under `private` produce private accessors). Each name is coerced through
+// #to_str (TypeError otherwise), matching MRI. It returns the created method
+// names as Symbols — attr_reader/#attr_writer/#attr_accessor's Ruby-3 result.
+func (vm *VM) defineAttrs(cls *RClass, names []object.Value, reader, writer bool) []object.Value {
+	if isFrozen(cls) {
+		vm.raiseFrozen(cls)
+	}
+	vis := cls.defaultVis
+	var created []object.Value
 	for _, n := range names {
-		ivar := "@" + n.ToS()
+		base := vm.methodNameArg(n)
+		ivar := "@" + base
 		if reader {
-			cls.define(n.ToS(), func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+			cls.define(base, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 				return getIvar(self, ivar)
 			})
+			cls.methods[base].vis = vis
+			created = append(created, object.Symbol(base))
 		}
 		if writer {
-			cls.define(n.ToS()+"=", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+			w := base + "="
+			cls.define(w, func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+				if isFrozen(self) {
+					vm.raiseFrozen(self)
+				}
 				setIvar(self, ivar, a[0])
 				return a[0]
 			})
+			cls.methods[w].vis = vis
+			created = append(created, object.Symbol(w))
 		}
 	}
+	return created
 }
 
 // dupValue shallow-copies a value (Object#dup/#clone). Reference types get a
@@ -5706,6 +5738,8 @@ func isFrozen(v object.Value) bool {
 	case *Regexp:
 		return x.frozen
 	case *RObject:
+		return x.frozen
+	case *RClass:
 		return x.frozen
 	}
 	return false
