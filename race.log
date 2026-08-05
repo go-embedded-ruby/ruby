@@ -1,0 +1,247 @@
+panic: test timed out after 3m0s
+	running tests:
+		TestThread (2m56s)
+
+goroutine 594 [running]:
+testing.(*M).startAlarm.func1()
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2802 +0x498
+created by time.goFunc
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/time/sleep.go:215 +0x44
+
+goroutine 1 [chan receive, 2 minutes]:
+testing.(*T).Run(0xc0024f6fc8, {0x10b4be7a0, 0xa}, 0x110b90738)
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2109 +0x7dc
+testing.runTests.func1(0xc0024f6fc8)
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2585 +0x78
+testing.tRunner(0xc0024f6fc8, 0xc001e9bab8)
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2036 +0x168
+testing.runTests({0x10b59ee21, 0x20}, {0x10b611f5c, 0x2c}, 0xc001fe7968, {0x112929940, 0xb1d, 0xb1d}, {0xc0024fbcc0?, 0xc00086f800?, ...})
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2583 +0x7a4
+testing.(*M).Run(0xc00271ebe0)
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2443 +0xb3c
+main.main()
+	_testmain.go:5780 +0x104
+
+goroutine 51 [select, 3 minutes]:
+github.com/blevesearch/bleve_index_api.AnalysisWorker(...)
+	/Users/david_delavennat/go/pkg/mod/github.com/blevesearch/bleve_index_api@v1.3.11/analysis.go:46
+created by github.com/blevesearch/bleve_index_api.NewAnalysisQueue in goroutine 1
+	/Users/david_delavennat/go/pkg/mod/github.com/blevesearch/bleve_index_api@v1.3.11/analysis.go:38 +0xb4
+
+goroutine 52 [select, 3 minutes]:
+github.com/blevesearch/bleve_index_api.AnalysisWorker(...)
+	/Users/david_delavennat/go/pkg/mod/github.com/blevesearch/bleve_index_api@v1.3.11/analysis.go:46
+created by github.com/blevesearch/bleve_index_api.NewAnalysisQueue in goroutine 1
+	/Users/david_delavennat/go/pkg/mod/github.com/blevesearch/bleve_index_api@v1.3.11/analysis.go:38 +0xb4
+
+goroutine 53 [select, 3 minutes]:
+github.com/blevesearch/bleve_index_api.AnalysisWorker(...)
+	/Users/david_delavennat/go/pkg/mod/github.com/blevesearch/bleve_index_api@v1.3.11/analysis.go:46
+created by github.com/blevesearch/bleve_index_api.NewAnalysisQueue in goroutine 1
+	/Users/david_delavennat/go/pkg/mod/github.com/blevesearch/bleve_index_api@v1.3.11/analysis.go:38 +0xb4
+
+goroutine 54 [select, 3 minutes]:
+github.com/blevesearch/bleve_index_api.AnalysisWorker(...)
+	/Users/david_delavennat/go/pkg/mod/github.com/blevesearch/bleve_index_api@v1.3.11/analysis.go:46
+created by github.com/blevesearch/bleve_index_api.NewAnalysisQueue in goroutine 1
+	/Users/david_delavennat/go/pkg/mod/github.com/blevesearch/bleve_index_api@v1.3.11/analysis.go:38 +0xb4
+
+goroutine 322 [chan receive, 2 minutes]:
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerMutex.func8.2()
+	/tmp/rbgotz/internal/vm/thread.go:527 +0x34
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).threadBlock(0xc000a97808, 0xc002fdcae0)
+	/tmp/rbgotz/internal/vm/thread.go:129 +0x2ac
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerMutex.func8(0xc000a97808, {0x110c056e8, 0xc0005ac760}, {0x1138cb540, 0x0, 0x0?}, 0xc002fdcb98?)
+	/tmp/rbgotz/internal/vm/thread.go:527 +0x21c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callNative(0xc000a97808, 0xc002cbf3b0, {0x110c056e8, 0xc0005ac760}, {0x1138cb540, 0x0, 0x0}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1632 +0x1a4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).invokeInPlace(0xc000a97808, 0xc002cbf3b0, {0x110c056e8, 0xc0005ac760}, {0xc002dbf510, 0x0, 0xf}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1672 +0x108
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec.func7()
+	/tmp/rbgotz/internal/vm/vm.go:1368 +0xc9c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec(0xc000a97808, 0xc0029e3180, {0x110c019f8, 0xc0021823e0}, {0x1138cb540, 0x0, 0x0}, 0xc002a02c00, {0x0, 0x0}, ...)
+	/tmp/rbgotz/internal/vm/vm.go:1898 +0x1804
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlockSelf(0xc000a97808, 0xc001f7b7a0, {0x110c019f8, 0xc0021823e0}, {0x1138cb540, 0x0, 0x0})
+	/tmp/rbgotz/internal/vm/object_model.go:1762 +0x13c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlock(...)
+	/tmp/rbgotz/internal/vm/object_model.go:1747
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerThreadClass.func2.1.1(0xc002fc2410, 0xc000a97808)
+	/tmp/rbgotz/internal/vm/thread.go:228 +0xd0
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerThreadClass.func2.1()
+	/tmp/rbgotz/internal/vm/thread.go:229 +0x214
+created by github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerThreadClass.func2 in goroutine 308
+	/tmp/rbgotz/internal/vm/thread.go:219 +0x40c
+
+goroutine 329 [chan receive, 2 minutes]:
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerSleep.func1.2()
+	/tmp/rbgotz/internal/vm/thread.go:614 +0x34
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).threadBlock(0xc000601008, 0xc0003b6410)
+	/tmp/rbgotz/internal/vm/thread.go:129 +0x2ac
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerSleep.func1(0xc000601008, {0x16544237463656a?, 0xc0003b64d8?}, {0x1138cb540, 0x0, 0xc0028e5590?}, 0xc0003b6538?)
+	/tmp/rbgotz/internal/vm/thread.go:614 +0x2c0
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callNative(0xc000601008, 0xc0028e5590, {0x110c019f8, 0xc000119800}, {0x1138cb540, 0x0, 0x0}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1632 +0x1a4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).invokeInPlace(0xc000601008, 0xc0028e5590, {0x110c019f8, 0xc000119800}, {0xc003010220, 0x0, 0xe}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1672 +0x108
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec.func7()
+	/tmp/rbgotz/internal/vm/vm.go:1368 +0xc9c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec(0xc000601008, 0xc001e31cc0, {0x110c019f8, 0xc000119800}, {0x0, 0x0, 0x0}, 0xc001eeb080, {0x0, 0x0}, ...)
+	/tmp/rbgotz/internal/vm/vm.go:1898 +0x1804
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).runTop(0xc000601008, 0xc001e31cc0)
+	/tmp/rbgotz/internal/vm/aot_level2.go:36 +0xc4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).Run(0xc000601008, 0xc001e31cc0)
+	/tmp/rbgotz/internal/vm/vm.go:844 +0xd8
+github.com/go-embedded-ruby/ruby/internal/vm_test.eval(0xc00351f688, {0x10b4adad1, 0x7})
+	/tmp/rbgotz/internal/vm/integration_test.go:25 +0x168
+github.com/go-embedded-ruby/ruby/internal/vm_test.TestThread(0xc00351f688)
+	/tmp/rbgotz/internal/vm/thread_test.go:66 +0x1c0
+testing.tRunner(0xc00351f688, 0x110b90738)
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2036 +0x168
+created by testing.(*T).Run in goroutine 1
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2101 +0x7c0
+
+goroutine 145 [chan receive, 2 minutes]:
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberYield(0xc000601808, {0xc0001cbd00, 0x2, 0x109ef0b24?})
+	/tmp/rbgotz/internal/vm/fiber.go:102 +0x198
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerFiber.func2(0xc000601808, {0x1424838e8?, 0x115b6d9c0?}, {0xc0001cbd00, 0x2, 0x2}, 0xc0006d8aa8?)
+	/tmp/rbgotz/internal/vm/fiber.go:42 +0x44
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callNative(0xc000601808, 0xc0014d33b0, {0x110c016f8, 0xc0014c7e00}, {0xc0001cbd00, 0x2, 0x2}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1632 +0x1a4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).invokeInPlace(0xc000601808, 0xc0014d33b0, {0x110c016f8, 0xc0014c7e00}, {0xc002280010, 0x2, 0xf}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1672 +0x108
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).send(0xc000601808, {0x110c016f8, 0xc0014c7e00}, {0xc000a8184b, 0x5}, {0xc002280010, 0x2, 0xf}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1576 +0x544
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec.func7()
+	/tmp/rbgotz/internal/vm/vm.go:1383 +0xe48
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec(0xc000601808, 0xc000f8cc80, {0x110c019f8, 0xc000119778}, {0x1138cb540, 0x0, 0x0}, 0xc00103e540, {0x0, 0x0}, ...)
+	/tmp/rbgotz/internal/vm/vm.go:1898 +0x1804
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlockSelf(0xc000601808, 0xc001fb85a0, {0x110c019f8, 0xc000119778}, {0x1138cb540, 0x0, 0x0})
+	/tmp/rbgotz/internal/vm/object_model.go:1762 +0x13c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlock(...)
+	/tmp/rbgotz/internal/vm/object_model.go:1747
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume.func1.1(0xc0006d9f68, 0xc000601808, 0xc0001cbca0, {0x1138cb540, 0x0, 0x0})
+	/tmp/rbgotz/internal/vm/fiber.go:77 +0xb4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume.func1()
+	/tmp/rbgotz/internal/vm/fiber.go:78 +0x80
+created by github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume in goroutine 32
+	/tmp/rbgotz/internal/vm/fiber.go:63 +0x1e4
+
+goroutine 196 [chan receive, 2 minutes]:
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberYield(0xc002181808, {0xc000383e90, 0x1, 0x109ef0b24?})
+	/tmp/rbgotz/internal/vm/fiber.go:102 +0x198
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerFiber.func2(0xc002181808, {0x11a74fa20?, 0x115b50a00?}, {0xc000383e90, 0x1, 0x1}, 0xc001a50aa8?)
+	/tmp/rbgotz/internal/vm/fiber.go:42 +0x44
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callNative(0xc002181808, 0xc000cb19a0, {0x110c016f8, 0xc000cad8c0}, {0xc000383e90, 0x1, 0x1}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1632 +0x1a4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).invokeInPlace(0xc002181808, 0xc000cb19a0, {0x110c016f8, 0xc000cad8c0}, {0xc001d43910, 0x1, 0xf}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1672 +0x108
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).send(0xc002181808, {0x110c016f8, 0xc000cad8c0}, {0xc0025af39b, 0x5}, {0xc001d43910, 0x1, 0xf}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1576 +0x544
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec.func7()
+	/tmp/rbgotz/internal/vm/vm.go:1383 +0xe48
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec(0xc002181808, 0xc002707cc0, {0x110c019f8, 0xc000583378}, {0xc00084e7e0, 0x2, 0x2}, 0xc0006dc000, {0x0, 0x0}, ...)
+	/tmp/rbgotz/internal/vm/vm.go:1898 +0x1804
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlockSelf(0xc002181808, 0xc001fb95f0, {0x110c019f8, 0xc000583378}, {0xc00084e7e0, 0x2, 0x2})
+	/tmp/rbgotz/internal/vm/object_model.go:1762 +0x13c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlock(...)
+	/tmp/rbgotz/internal/vm/object_model.go:1747
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume.func1.1(0xc001a51f68, 0xc002181808, 0xc00084e7c0, {0xc00084e7e0, 0x2, 0x2})
+	/tmp/rbgotz/internal/vm/fiber.go:77 +0xb4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume.func1()
+	/tmp/rbgotz/internal/vm/fiber.go:78 +0x80
+created by github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume in goroutine 32
+	/tmp/rbgotz/internal/vm/fiber.go:63 +0x1e4
+
+goroutine 306 [chan receive, 2 minutes]:
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberYield(0xc002180808, {0xc0010632d0, 0x1, 0x109ef0b24?})
+	/tmp/rbgotz/internal/vm/fiber.go:102 +0x198
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerFiber.func2(0xc002180808, {0x142b9e9c0?, 0x115b6d9c0?}, {0xc0010632d0, 0x1, 0x1}, 0xc001a53458?)
+	/tmp/rbgotz/internal/vm/fiber.go:42 +0x44
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callNative(0xc002180808, 0xc000dbf9f0, {0x110c016f8, 0xc000db98c0}, {0xc0010632d0, 0x1, 0x1}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1632 +0x1a4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).invokeInPlace(0xc002180808, 0xc000dbf9f0, {0x110c016f8, 0xc000db98c0}, {0xc00183a210, 0x1, 0x1f}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1672 +0x108
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).send(0xc002180808, {0x110c016f8, 0xc000db98c0}, {0xc0015a02ab, 0x5}, {0xc00183a210, 0x1, 0x1f}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1576 +0x544
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec.func7()
+	/tmp/rbgotz/internal/vm/vm.go:1383 +0xe48
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec(0xc002180808, 0xc000f93400, {0x110c019f8, 0xc000602810}, {0xc0010632b0, 0x1, 0x1}, 0xc0025dfd40, {0x0, 0x0}, ...)
+	/tmp/rbgotz/internal/vm/vm.go:1898 +0x1804
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlockSelf(0xc002180808, 0xc001fb9830, {0x110c019f8, 0xc000602810}, {0xc0010632b0, 0x1, 0x1})
+	/tmp/rbgotz/internal/vm/object_model.go:1762 +0x13c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlock(...)
+	/tmp/rbgotz/internal/vm/object_model.go:1747
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).bootstrap.func317(0xc002180808, {0x110c01878, 0xc00109f020}, {0x0?, 0x800000?, 0x3?}, 0xc001fb9830)
+	/tmp/rbgotz/internal/vm/builtins.go:3434 +0x198
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callNative(0xc002180808, 0xc000dcb090, {0x110c01878, 0xc00109f020}, {0x1138cb540, 0x0, 0x0}, 0xc001fb9830)
+	/tmp/rbgotz/internal/vm/object_model.go:1632 +0x1a4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).invokeInPlace(0xc002180808, 0xc000dcb090, {0x110c01878, 0xc00109f020}, {0x1138cb540, 0x0, 0x0}, 0xc001fb9830)
+	/tmp/rbgotz/internal/vm/object_model.go:1672 +0x108
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).send(0xc002180808, {0x110c01878, 0xc00109f020}, {0xc0015a028c, 0x4}, {0x1138cb540, 0x0, 0x0}, 0xc001fb9830)
+	/tmp/rbgotz/internal/vm/object_model.go:1586 +0x4fc
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).sendCatchBreak(0xc002180808, {0x110c01878, 0xc00109f020}, {0xc0015a028c, 0x4}, {0x1138cb540, 0x0, 0x0}, 0xc001fb9830)
+	/tmp/rbgotz/internal/vm/vm.go:127 +0x144
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).dispatchSend(0xc002180808, {0x110c01878, 0xc00109f020}, {0xc0015a028c, 0x4}, {0x1138cb540, 0x0, 0x0}, 0xc001fb9830)
+	/tmp/rbgotz/internal/vm/object_model.go:1741 +0x74
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec.func7()
+	/tmp/rbgotz/internal/vm/vm.go:1395 +0x75c0
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec(0xc002180808, 0xc000f93540, {0x110c019f8, 0xc000602810}, {0x1138cb540, 0x0, 0x0}, 0xc0025dfd40, {0x0, 0x0}, ...)
+	/tmp/rbgotz/internal/vm/vm.go:1898 +0x1804
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlockSelf(0xc002180808, 0xc001fb97a0, {0x110c019f8, 0xc000602810}, {0x1138cb540, 0x0, 0x0})
+	/tmp/rbgotz/internal/vm/object_model.go:1762 +0x13c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlock(...)
+	/tmp/rbgotz/internal/vm/object_model.go:1747
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume.func1.1(0xc001a55f68, 0xc002180808, 0xc0001cd500, {0x1138cb540, 0x0, 0x0})
+	/tmp/rbgotz/internal/vm/fiber.go:77 +0xb4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume.func1()
+	/tmp/rbgotz/internal/vm/fiber.go:78 +0x80
+created by github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume in goroutine 32
+	/tmp/rbgotz/internal/vm/fiber.go:63 +0x1e4
+
+goroutine 307 [chan receive, 2 minutes]:
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberYield(0xc001d70008, {0xc0018a6930, 0x1, 0x109ef0b24?})
+	/tmp/rbgotz/internal/vm/fiber.go:102 +0x198
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).registerFiber.func2(0xc001d70008, {0x142b221a0?, 0x115b6d9c0?}, {0xc0018a6930, 0x1, 0x1}, 0xc00194f448?)
+	/tmp/rbgotz/internal/vm/fiber.go:42 +0x44
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callNative(0xc001d70008, 0xc0015834a0, {0x110c016f8, 0xc00157be00}, {0xc0018a6930, 0x1, 0x1}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1632 +0x1a4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).invokeInPlace(0xc001d70008, 0xc0015834a0, {0x110c016f8, 0xc00157be00}, {0xc00188c210, 0x1, 0xf}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1672 +0x108
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).send(0xc001d70008, {0x110c016f8, 0xc00157be00}, {0xc000a8053b, 0x5}, {0xc00188c210, 0x1, 0xf}, 0x0)
+	/tmp/rbgotz/internal/vm/object_model.go:1576 +0x544
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec.func7()
+	/tmp/rbgotz/internal/vm/vm.go:1383 +0xe48
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec(0xc001d70008, 0xc001084dc0, {0x110c019f8, 0xc001f8c208}, {0x0, 0x0, 0x0}, 0xc0010c0540, {0x0, 0x0}, ...)
+	/tmp/rbgotz/internal/vm/vm.go:1898 +0x1804
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlockSelf(0xc001d70008, 0xc0022146c0, {0x110c019f8, 0xc001f8c208}, {0x0, 0x0, 0x0})
+	/tmp/rbgotz/internal/vm/object_model.go:1762 +0x13c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlock(...)
+	/tmp/rbgotz/internal/vm/object_model.go:1747
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).bootstrap.func9(0xc001d70008, {0x35?, 0x3?}, {0x0?, 0x8000?, 0x1f?}, 0xc0022146c0)
+	/tmp/rbgotz/internal/vm/builtins.go:193 +0x58
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callNative(0xc001d70008, 0xc0010f8230, {0x110c019f8, 0xc001f8c208}, {0x1138cb540, 0x0, 0x0}, 0xc0022146c0)
+	/tmp/rbgotz/internal/vm/object_model.go:1632 +0x1a4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).invokeInPlace(0xc001d70008, 0xc0010f8230, {0x110c019f8, 0xc001f8c208}, {0x1138cb540, 0x0, 0x0}, 0xc0022146c0)
+	/tmp/rbgotz/internal/vm/object_model.go:1672 +0x108
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).send(0xc001d70008, {0x110c019f8, 0xc001f8c208}, {0xc000a803dc, 0x4}, {0x1138cb540, 0x0, 0x0}, 0xc0022146c0)
+	/tmp/rbgotz/internal/vm/object_model.go:1586 +0x4fc
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).sendCatchBreak(0xc001d70008, {0x110c019f8, 0xc001f8c208}, {0xc000a803dc, 0x4}, {0x1138cb540, 0x0, 0x0}, 0xc0022146c0)
+	/tmp/rbgotz/internal/vm/vm.go:127 +0x144
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).dispatchSend(0xc001d70008, {0x110c019f8, 0xc001f8c208}, {0xc000a803dc, 0x4}, {0x1138cb540, 0x0, 0x0}, 0xc0022146c0)
+	/tmp/rbgotz/internal/vm/object_model.go:1741 +0x74
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec.func7()
+	/tmp/rbgotz/internal/vm/vm.go:1395 +0x75c0
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).exec(0xc001d70008, 0xc001084f00, {0x110c019f8, 0xc001f8c208}, {0x1138cb540, 0x0, 0x0}, 0xc0010c0540, {0x0, 0x0}, ...)
+	/tmp/rbgotz/internal/vm/vm.go:1898 +0x1804
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlockSelf(0xc001d70008, 0xc0022145a0, {0x110c019f8, 0xc001f8c208}, {0x1138cb540, 0x0, 0x0})
+	/tmp/rbgotz/internal/vm/object_model.go:1762 +0x13c
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).callBlock(...)
+	/tmp/rbgotz/internal/vm/object_model.go:1747
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume.func1.1(0xc001951f68, 0xc001d70008, 0xc00053b060, {0x1138cb540, 0x0, 0x0})
+	/tmp/rbgotz/internal/vm/fiber.go:77 +0xb4
+github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume.func1()
+	/tmp/rbgotz/internal/vm/fiber.go:78 +0x80
+created by github.com/go-embedded-ruby/ruby/internal/vm.(*VM).fiberResume in goroutine 32
+	/tmp/rbgotz/internal/vm/fiber.go:63 +0x1e4
+FAIL	github.com/go-embedded-ruby/ruby/internal/vm	184.834s
+FAIL
