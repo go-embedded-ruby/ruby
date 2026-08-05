@@ -49,41 +49,31 @@ type RThread struct {
 	savedCurExc    object.Value
 	savedReqDirs   []string
 
-	// wake delivers a Thread#wakeup/#run (or Thread.stop resume) to a thread
-	// parked in an indefinite/timed sleep. Buffered (cap 1) so a wakeup racing a
-	// park's release-then-block window is not lost, and lazily created under the
-	// GVL by wakeChan so the several &RThread constructions need no change.
+	// wake is a fresh channel installed under the GVL while this thread is parked
+	// in a sleep (Kernel#sleep with no/positive duration, Thread.stop, Mutex#sleep)
+	// and nil otherwise. Thread#wakeup/#run wakes it by CLOSING the channel — a
+	// permanent signal, so a wakeup racing the park's release→block window is never
+	// lost — and clearing the field, so a second wakeup is a no-op.
 	wake chan struct{}
 }
 
-// wakeChan returns the thread's wakeup channel, creating it on first use. The
-// caller must hold the GVL (both the parking thread, before it releases, and a
-// waker in Thread#wakeup do), so the lazy init is race-free.
-func (t *RThread) wakeChan() chan struct{} {
-	if t.wake == nil {
-		t.wake = make(chan struct{}, 1)
-	}
+// parkWake installs a fresh wakeup channel and returns it; the caller (holding
+// the GVL) passes it to the blocking wait and calls unpark when the wait ends.
+func (t *RThread) parkWake() chan struct{} {
+	t.wake = make(chan struct{})
 	return t.wake
 }
 
-// wakeParked delivers a wakeup to t if it is parked in a sleep, without ever
-// blocking the caller (buffered send, else drop). Caller holds the GVL.
-func (t *RThread) wakeParked() {
-	if t.status != "sleep" {
-		return
-	}
-	select {
-	case t.wakeChan() <- struct{}{}:
-	default:
-	}
-}
+// unpark clears the wakeup channel once a sleep has ended (caller holds the GVL),
+// so a later wakeup on the now-running thread is a no-op.
+func (t *RThread) unpark() { t.wake = nil }
 
-// drain clears a stale wake token left when a timed sleep's timer and a wakeup
-// fire together, so it cannot spuriously shorten the thread's next sleep.
-func (t *RThread) drain() {
-	select {
-	case <-t.wake:
-	default:
+// wakeParked wakes a thread parked in a sleep by closing its wake channel; nil
+// means it is not sleeping, so this is a no-op. Caller holds the GVL.
+func (t *RThread) wakeParked() {
+	if t.wake != nil {
+		close(t.wake)
+		t.wake = nil
 	}
 }
 
@@ -257,9 +247,9 @@ func (vm *VM) registerThreadClass() {
 	// with Thread#wakeup or #run, then returns nil.
 	sdef("stop", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		t := vm.currentThread
-		ch := t.wakeChan()
+		ch := t.parkWake()
 		vm.threadBlock(func() { <-ch })
-		t.drain()
+		t.unpark()
 		return object.NilV
 	})
 
@@ -514,7 +504,7 @@ func (vm *VM) registerMutex() {
 		}
 		vm.mutexUnlock(m) // ownership check + release (ThreadError if not held)
 		t := vm.currentThread
-		ch := t.wakeChan()
+		ch := t.parkWake()
 		start := time.Now()
 		if hasDur {
 			vm.threadBlock(func() {
@@ -526,7 +516,7 @@ func (vm *VM) registerMutex() {
 		} else {
 			vm.threadBlock(func() { <-ch }) // park until Thread#wakeup/#run
 		}
-		t.drain()
+		t.unpark()
 		vm.mutexLock(m)
 		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
 	})
@@ -600,7 +590,7 @@ func (vm *VM) registerSleep() {
 			}
 		}
 		t := vm.currentThread
-		ch := t.wakeChan()
+		ch := t.parkWake()
 		start := time.Now()
 		if hasDur {
 			vm.threadBlock(func() {
@@ -613,7 +603,7 @@ func (vm *VM) registerSleep() {
 			// No argument: sleep until woken by Thread#wakeup/#run, as in MRI.
 			vm.threadBlock(func() { <-ch })
 		}
-		t.drain()
+		t.unpark()
 		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
 	})
 }

@@ -24,6 +24,14 @@ func TestThreadWakeup(t *testing.T) {
 		{`t = Thread.new { Thread.stop }; Thread.pass until t.stop?; p [t.status, t.stop?]; t.wakeup; t.join`, `["sleep", true]` + "\n"},
 		// wakeup returns self.
 		{`t = Thread.new { Thread.stop }; Thread.pass until t.stop?; p t.wakeup.equal?(t); t.join`, "true\n"},
+		// wakeup on a running (not parked) thread is a no-op that returns self.
+		{`p Thread.current.wakeup.equal?(Thread.current)`, "true\n"},
+		// A timed sleep is interruptible: waking it returns before the deadline.
+		{`r = nil; t = Thread.new { r = sleep(60) }; Thread.pass until t.status == "sleep"; t.wakeup; t.join; p r < 60`, "true\n"},
+		// Mutex#sleep with no duration parks until woken, then re-locks.
+		{`m = Mutex.new; t = Thread.new { m.lock; m.sleep; puts "w#{m.owned?}" }; Thread.pass until t.stop?; t.wakeup; t.join`, "wtrue\n"},
+		// Mutex#sleep with a duration is also interruptible.
+		{`m = Mutex.new; r = nil; t = Thread.new { m.lock; r = m.sleep(60) }; Thread.pass until t.stop?; t.wakeup; t.join; p r < 60`, "true\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
