@@ -65,6 +65,37 @@ type RThread struct {
 	// permanent signal, so a wakeup racing the park's release→block window is never
 	// lost — and clearing the field, so a second wakeup is a no-op.
 	wake chan struct{}
+
+	// pendingRaise is an exception object queued by Thread#raise targeting this
+	// thread; nil means none. The target picks it up at its next interpreter
+	// safepoint (see VM.serviceSafepoint), where the raise fires in the target's
+	// own execution context so the exception's backtrace is the target's. Read and
+	// written only under the GVL, so no atomics are needed — the raiser publishes
+	// it while holding the lock and the target reads it while holding the lock.
+	pendingRaise object.Value
+
+	// reportOnException mirrors Thread#report_on_exception (default true in MRI):
+	// whether a thread terminating with an unhandled exception prints a warning.
+	// rbgo does not print the warning, but the accessor is honoured for programs
+	// (and specs) that toggle it. Set on spawn so the zero value never masquerades
+	// as an explicit false.
+	reportOnException bool
+}
+
+// serviceSafepoint delivers a thread's queued asynchronous event, called by t
+// itself right after it resumes from a cooperative yield point (Kernel#sleep,
+// Thread.stop, Mutex#sleep, Thread.pass, Thread#run) while holding the GVL. A
+// Thread#raise fires the queued exception in t's own context, so captureBacktrace
+// records t's frames (MRI uses the interrupted thread's backtrace). It is enough
+// to check here — not on every interpreter instruction — because a cross-thread
+// raise can only be queued while t holds no GVL, i.e. while t is parked in exactly
+// one of these yield points; the raiser has no other window to run. Returns
+// normally (a no-op) when nothing is queued; panics to unwind when an event fires.
+func (vm *VM) serviceSafepoint(t *RThread) {
+	if exc := t.pendingRaise; exc != nil {
+		t.pendingRaise = nil
+		panic(vm.excError(vm.captureBacktrace(exc)))
+	}
 }
 
 // parkWake installs a fresh wakeup channel and returns it; the caller (holding
@@ -232,6 +263,7 @@ func (vm *VM) registerThreadClass() {
 		t := &RThread{
 			blk: blk, args: append([]object.Value{}, args...),
 			done: make(chan struct{}), status: "run", handback: make(chan struct{}),
+			reportOnException: true,
 		}
 		t.initFibers()
 		vm.threads = append(vm.threads, t)
@@ -270,6 +302,7 @@ func (vm *VM) registerThreadClass() {
 	})
 	sdef("pass", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		vm.threadBlock(runtime.Gosched)
+		vm.serviceSafepoint(vm.currentThread) // interrupt a running thread that yields via Thread.pass
 		return object.NilV
 	})
 	// Thread.stop puts the current thread to sleep until another thread wakes it
@@ -279,6 +312,7 @@ func (vm *VM) registerThreadClass() {
 		ch := t.parkWake()
 		vm.threadBlock(func() { <-ch })
 		t.unpark()
+		vm.serviceSafepoint(t) // a Thread#raise that woke the park fires here
 		return object.NilV
 	})
 
@@ -330,6 +364,7 @@ func (vm *VM) registerThreadClass() {
 		}
 		t.wakeParked()
 		vm.threadBlock(runtime.Gosched)
+		vm.serviceSafepoint(vm.currentThread) // a raise queued against the caller fires here
 		return t
 	})
 	cThread.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -424,6 +459,45 @@ func (vm *VM) registerThreadClass() {
 			return string(keys[i].(object.Symbol)) < string(keys[j].(object.Symbol))
 		})
 		return object.NewArrayFromSlice(keys)
+	})
+	// raise([exc[, msg]]) delivers an exception to the thread asynchronously: it is
+	// picked up at the target's next interpreter safepoint (a backward jump or a
+	// method/block entry) and raised in the target's own context. With no arguments
+	// it raises a RuntimeError with an empty message (MRI); otherwise the arguments
+	// are coerced exactly as Kernel#raise (String, exception class, instance, or a
+	// class+message pair). A dead thread ignores the raise and returns nil; raising
+	// the current thread raises immediately. The exception object is built in the
+	// caller's context, so its own #exception/constructor runs here, but its
+	// backtrace is captured in the target — matching MRI.
+	cThread.define("raise", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		if t.isDone() {
+			return object.NilV
+		}
+		var exc object.Value
+		if len(args) == 0 {
+			exc = vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{object.NewString("")}, nil)
+		} else {
+			exc = vm.raiseExceptionObject(args)
+		}
+		if t == vm.currentThread {
+			panic(vm.excError(vm.captureBacktrace(exc)))
+		}
+		t.pendingRaise = exc
+		// Wake a target parked in a sleep so it leaves its blocking wait and reaches
+		// the next safepoint; a target blocked elsewhere (join/mutex) services the
+		// raise when that wait returns.
+		if t.wake != nil {
+			t.wakeParked()
+		}
+		return t
+	})
+	cThread.define("report_on_exception", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*RThread).reportOnException)
+	})
+	cThread.define("report_on_exception=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		self.(*RThread).reportOnException = args[0].Truthy()
+		return args[0]
 	})
 	cThread.define("abort_on_exception", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*RThread).abort)
@@ -547,7 +621,8 @@ func (vm *VM) registerMutex() {
 			vm.threadBlock(func() { <-ch }) // park until Thread#wakeup/#run
 		}
 		t.unpark()
-		vm.mutexLock(m)
+		vm.mutexLock(m)        // MRI re-acquires the mutex before the raise propagates
+		vm.serviceSafepoint(t) // a Thread#raise that woke the park fires here (mutex held)
 		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
 	})
 }
@@ -634,6 +709,7 @@ func (vm *VM) registerSleep() {
 			vm.threadBlock(func() { <-ch })
 		}
 		t.unpark()
+		vm.serviceSafepoint(t) // a Thread#raise that woke the park fires here
 		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
 	})
 }

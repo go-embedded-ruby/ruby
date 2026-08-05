@@ -704,7 +704,7 @@ func New(out io.Writer) *VM {
 	// The main thread holds the GVL for the VM's lifetime, releasing it only at
 	// blocking points so spawned Ruby threads can run (see thread.go).
 	vm.gvl.Lock()
-	vm.mainThread = &RThread{status: "run", done: make(chan struct{}), parked: true}
+	vm.mainThread = &RThread{status: "run", done: make(chan struct{}), parked: true, reportOnException: true}
 	vm.mainThread.initFibers()
 	vm.currentThread = vm.mainThread
 	vm.currentFiber = vm.mainThread.rootFiber
