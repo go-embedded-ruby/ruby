@@ -1326,6 +1326,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 			return x.class
 		}
 		return vm.consts["Queue"].(*RClass)
+	case *RConditionVariable:
+		return vm.consts["ConditionVariable"].(*RClass)
 	case *IOObj:
 		return x.cls
 	case *RelineHistory:

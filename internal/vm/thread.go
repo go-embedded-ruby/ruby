@@ -186,6 +186,7 @@ func (vm *VM) registerThread() {
 	vm.registerThreadClass()
 	vm.registerMutex()
 	vm.registerQueue()
+	vm.registerConditionVariable()
 	vm.registerSleep()
 }
 
