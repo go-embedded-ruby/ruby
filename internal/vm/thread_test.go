@@ -61,11 +61,10 @@ func TestThread(t *testing.T) {
 		}
 	}
 
-	// No-argument sleep is a deliberate simplification: it returns 0 immediately
-	// rather than blocking forever as MRI does (covers the no-args branch).
-	if got := eval(t, "p sleep"); got != "0\n" {
-		t.Errorf("sleep (no arg) = %q, want 0", got)
-	}
+	// No-argument sleep now parks until woken, as in MRI (previously a
+	// simplification returned 0 immediately). It cannot be exercised on the main
+	// thread without a waker — TestThreadWakeup covers it with a thread that
+	// sleeps and is woken by Thread#wakeup.
 
 	errs := []struct{ src, want string }{
 		{`Thread.new`, "block"},
