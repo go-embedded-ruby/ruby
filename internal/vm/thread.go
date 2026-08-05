@@ -48,6 +48,43 @@ type RThread struct {
 	savedLastMatch object.Value
 	savedCurExc    object.Value
 	savedReqDirs   []string
+
+	// wake delivers a Thread#wakeup/#run (or Thread.stop resume) to a thread
+	// parked in an indefinite/timed sleep. Buffered (cap 1) so a wakeup racing a
+	// park's release-then-block window is not lost, and lazily created under the
+	// GVL by wakeChan so the several &RThread constructions need no change.
+	wake chan struct{}
+}
+
+// wakeChan returns the thread's wakeup channel, creating it on first use. The
+// caller must hold the GVL (both the parking thread, before it releases, and a
+// waker in Thread#wakeup do), so the lazy init is race-free.
+func (t *RThread) wakeChan() chan struct{} {
+	if t.wake == nil {
+		t.wake = make(chan struct{}, 1)
+	}
+	return t.wake
+}
+
+// wakeParked delivers a wakeup to t if it is parked in a sleep, without ever
+// blocking the caller (buffered send, else drop). Caller holds the GVL.
+func (t *RThread) wakeParked() {
+	if t.status != "sleep" {
+		return
+	}
+	select {
+	case t.wakeChan() <- struct{}{}:
+	default:
+	}
+}
+
+// drain clears a stale wake token left when a timed sleep's timer and a wakeup
+// fire together, so it cannot spuriously shorten the thread's next sleep.
+func (t *RThread) drain() {
+	select {
+	case <-t.wake:
+	default:
+	}
 }
 
 func (t *RThread) ToS() string     { return "#<Thread>" }
@@ -216,6 +253,15 @@ func (vm *VM) registerThreadClass() {
 		vm.threadBlock(runtime.Gosched)
 		return object.NilV
 	})
+	// Thread.stop puts the current thread to sleep until another thread wakes it
+	// with Thread#wakeup or #run, then returns nil.
+	sdef("stop", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := vm.currentThread
+		ch := t.wakeChan()
+		vm.threadBlock(func() { <-ch })
+		t.drain()
+		return object.NilV
+	})
 
 	cThread.define("join", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		t := self.(*RThread)
@@ -245,6 +291,27 @@ func (vm *VM) registerThreadClass() {
 			return object.Bool(false) // terminated normally
 		}
 		return object.NewString(t.status)
+	})
+	// wakeup marks a sleeping thread runnable, delivering to it if it is parked in
+	// a sleep; on a dead thread it raises ThreadError, as in MRI. Returns self.
+	cThread.define("wakeup", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		if t.isDone() {
+			raise("ThreadError", "killed thread")
+		}
+		t.wakeParked()
+		return t
+	})
+	// run wakes the thread like wakeup and additionally yields so the scheduler
+	// can pick it up; cooperatively that is a wakeup followed by Thread.pass.
+	cThread.define("run", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		if t.isDone() {
+			raise("ThreadError", "killed thread")
+		}
+		t.wakeParked()
+		vm.threadBlock(runtime.Gosched)
+		return t
 	})
 	cThread.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		if n := self.(*RThread).name; !object.IsNil(n) {
@@ -446,12 +513,20 @@ func (vm *VM) registerMutex() {
 			hasDur = true
 		}
 		vm.mutexUnlock(m) // ownership check + release (ThreadError if not held)
+		t := vm.currentThread
+		ch := t.wakeChan()
 		start := time.Now()
 		if hasDur {
-			vm.threadBlock(func() { time.Sleep(time.Duration(secs * float64(time.Second))) })
+			vm.threadBlock(func() {
+				select {
+				case <-ch:
+				case <-time.After(time.Duration(secs * float64(time.Second))):
+				}
+			})
 		} else {
-			vm.threadBlock(func() { select {} }) // park until woken
+			vm.threadBlock(func() { <-ch }) // park until Thread#wakeup/#run
 		}
+		t.drain()
 		vm.mutexLock(m)
 		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
 	})
@@ -509,8 +584,9 @@ func (vm *VM) mutexUnlock(m *RMutex) {
 // MRI; here it requires a duration.
 func (vm *VM) registerSleep() {
 	vm.cObject.define("sleep", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		secs := 0.0
-		if len(args) > 0 {
+		hasDur := len(args) > 0 && !object.IsNil(args[0])
+		var secs float64
+		if hasDur {
 			switch n := args[0].(type) {
 			case object.Integer:
 				secs = float64(n)
@@ -519,8 +595,25 @@ func (vm *VM) registerSleep() {
 			default:
 				raise("TypeError", "can't convert %s into time interval", classNameOf(args[0]))
 			}
+			if secs < 0 {
+				raise("ArgumentError", "time interval must not be negative")
+			}
 		}
-		vm.threadBlock(func() { time.Sleep(time.Duration(secs * float64(time.Second))) })
-		return object.IntValue(int64(secs))
+		t := vm.currentThread
+		ch := t.wakeChan()
+		start := time.Now()
+		if hasDur {
+			vm.threadBlock(func() {
+				select {
+				case <-ch:
+				case <-time.After(time.Duration(secs * float64(time.Second))):
+				}
+			})
+		} else {
+			// No argument: sleep until woken by Thread#wakeup/#run, as in MRI.
+			vm.threadBlock(func() { <-ch })
+		}
+		t.drain()
+		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
 	})
 }
