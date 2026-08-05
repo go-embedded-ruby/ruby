@@ -73,6 +73,15 @@ func TestThreadRaise(t *testing.T) {
 		t.Errorf("raise(non-exception): got %v want TypeError", err)
 	}
 
+	// A non-exception class or object (shared with Kernel#raise coercion) is a
+	// TypeError, not a bogus wrapped exception.
+	for _, src := range []string{`raise(String)`, `raise(Object.new)`, `raise("msg", {})`} {
+		if err := runErr(t, src); err == nil ||
+			!strings.Contains(err.Error(), "exception class/object expected") {
+			t.Errorf("%s: got %v want TypeError exception class/object expected", src, err)
+		}
+	}
+
 	// An unhandled Thread#raise surfaces through Thread#value in the joining thread.
 	if err := runErr(t, `t = Thread.new { Thread.current.report_on_exception = false; sleep }
 		Thread.pass until t.stop?; t.raise(RuntimeError, "unhandled"); t.value`); err == nil ||

@@ -84,6 +84,15 @@ type throwSignal struct {
 	value object.Value
 }
 
+// killSignal unwinds a Thread#kill / #exit / #terminate. Like a non-local return
+// it runs intervening ensure blocks on the way out (it takes the recover's
+// non-RubyError path, so popToEnsure fires), but it is NOT a RubyError, so
+// rescue / rescue => e cannot catch it — matching MRI, where a killed thread runs
+// its ensure handlers yet cannot rescue the kill. It carries no value: a killed
+// thread's result (and #value) is nil. A killSignal reaching the main thread ends
+// the program cleanly (handled in Run).
+type killSignal struct{}
+
 // returnTarget identifies a method (or top-level) activation that a non-local
 // `return` from a block should unwind to. Each such activation allocates a fresh
 // one; block frames inherit their creator's, so a `return` inside a block reaches
@@ -801,6 +810,19 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			// "replacing" the process: terminate the run cleanly, like Kernel#exit,
 			// running at_exit handlers and returning without an error.
 			if _, ok := r.(execSentinel); ok {
+				vm.frameNames = vm.frameNames[:0]
+				vm.frameFiles = vm.frameFiles[:0]
+				vm.frameCrefs = vm.frameCrefs[:0]
+				vm.fileStack = vm.fileStack[:0]
+				vm.runAtExit()
+				result, err = object.NilV, nil
+				return
+			}
+			// A Thread#kill / #exit / #terminate that unwound the main thread (killed
+			// directly, or via Thread.main.kill from another thread) ends the program:
+			// unwind to the top, run at_exit handlers, and return without an error —
+			// the main thread's ensure blocks already ran on the way up.
+			if _, ok := r.(killSignal); ok {
 				vm.frameNames = vm.frameNames[:0]
 				vm.frameFiles = vm.frameFiles[:0]
 				vm.frameCrefs = vm.frameCrefs[:0]
