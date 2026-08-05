@@ -35,9 +35,9 @@ applied across the stdlib. The benefit cuts both ways: rbgo still ships as a
 **single CGO=0 static binary**, and every extracted piece is independently
 reusable, tested and 6-arch by any Go program — no interpreter required.
 
-The `go-ruby-*` family is **127 standalone pure-Go modules — all CI-green, 100%
-coverage, 6-arch** — each its own org. The `go.mod` currently **binds 104 into
-rbgo** as native modules (binding the rest in progress):
+The `go-ruby-*` family is a growing set of **standalone pure-Go modules — all
+CI-green, 100% coverage, 6-arch** — each its own org. The `go.mod` currently
+**binds 181 of them into rbgo** as native modules:
 
 | Library | Role | Org · landing |
 | --- | --- | --- |
@@ -51,21 +51,33 @@ rbgo** as native modules (binding the rest in progress):
 | **go-ruby-strscan** | `StringScanner` (`strscan`) | [org][grs] · [site](https://go-ruby-strscan.github.io/) |
 
 The full bound family (alphabetical, all native modules in `go.mod`):
-`abbrev`, `acme`, `activerecord`, `addressable`, `age`, `arrow`, `base64`,
-`bbolt`, `bcrypt`, `benchmark`, `bigdecimal`, `bleve`, `builder`, `cgi`,
-`chronic`, `cmath`, `commonmark`, `csv`, `date`, `did-you-mean`, `digest`,
-`dotenv`, `dry-struct`, `dry-types`, `dry-validation`, `erb`, `etcd`, `faker`,
-`faraday`, `find`, `format`, `getoptlong`, `grape`, `graphql`, `grpc`, `haml`,
-`hcl2`, `i18n`, `ipaddr`, `jbuilder`, `jekyll`, `json`, `jwt`, `kafka`, `kramdown`,
-`liquid`, `logger`, `mail`, `marshal`, `matrix`, `mime-types`, `minitest`, `money`,
-`mongodb`, `msgpack`, `mustache`, `mysql`, `nats`, `nokogiri`, `oauth2`,
-`observer`, `oidc`, `opentelemetry`, `opentype`, `optparse`, `ostruct`, `parquet`, `parser`,
-`pathname`, `pg`, `prawn`, `prettyprint`, `prime`, `protobuf`, `pstore`,
-`public-suffix`, `puma`, `rack`, `redis`, `regexp`, `resolv`, `rexml`, `rouge`,
-`rqrcode`, `rspec`, `rss`, `rubocop`, `saml`, `sass`, `scanf`, `securerandom`, `sequel`,
-`set`, `shellwords`, `sinatra`, `slim`, `sodium`, `sqlite3`, `strscan`, `toml`,
-`tsort`, `tzinfo`, `unicode-normalize`, `uri`, `webauthn`, `xslt`, `yaml`,
-`zlib` — each at `github.com/go-ruby-<name>/<name>`.
+`aasm`, `abbrev`, `acme`, `actioncable`, `actionmailer`, `actionpack`,
+`actionview`, `activejob`, `activemodel`, `activerecord`, `activestorage`,
+`activesupport`, `addressable`, `age`, `arrow`, `async`, `augeas`, `base64`,
+`bbolt`, `bcrypt`, `benchmark`, `bigdecimal`, `bleve`, `builder`, `bundler`,
+`cancancan`, `capistrano`, `capybara`, `cgi`, `chronic`, `cmath`, `commonmark`,
+`concurrent-ruby`, `confd`, `connection-pool`, `csv`, `date`, `deep-merge`,
+`devise`, `did-you-mean`, `digest`, `dotenv`, `dry-struct`, `dry-types`,
+`dry-validation`, `erb`, `erubi`, `etcd`, `excon`, `facter`, `factory-bot`,
+`faker`, `faraday`, `fast-gettext`, `find`, `format`, `friendly-id`,
+`getoptlong`, `grape`, `graphql`, `grpc`, `haml`, `hanami`, `hcl2`, `hiera`,
+`hocon`, `http`, `httparty`, `i18n`, `images`, `ipaddr`, `irb`, `jbuilder`,
+`jekyll`, `json`, `jwt`, `kafka`, `kaminari`, `kramdown`, `liquid`, `logger`,
+`mail`, `marshal`, `matrix`, `mime-types`, `minitest`, `money`, `mongodb`,
+`msgpack`, `multi-json`, `mustache`, `mysql`, `nats`, `net-ftp`, `net-http`,
+`net-imap`, `net-pop`, `net-sftp`, `net-smtp`, `nokogiri`, `oauth2`, `observer`,
+`oidc`, `omniauth`, `openbao`, `openstack`, `opentelemetry`, `opentype`,
+`optparse`, `ostruct`, `pagy`, `paper-trail`, `parquet`, `parser`, `pathname`,
+`pg`, `prawn`, `prettyprint`, `prime`, `protobuf`, `pstore`, `public-suffix`,
+`puma`, `pundit`, `puppet`, `puppet-resource-api`, `racc`, `rack`, `rails`,
+`railties`, `rake`, `ransack`, `rdoc`, `redis`, `regexp`, `reline`, `resolv`,
+`resque`, `rexml`, `roda`, `rolify`, `rouge`, `rqrcode`, `rspec`, `rss`,
+`rubocop`, `rubygems`, `saml`, `sass`, `scanf`, `securerandom`,
+`semantic-puppet`, `sequel`, `set`, `shellwords`, `shrine`, `sidekiq`,
+`simplecov`, `sinatra`, `slim`, `sodium`, `sqlite3`, `strscan`, `thor`,
+`timecop`, `toml`, `tsort`, `typhoeus`, `tzinfo`, `unicode-normalize`, `uri`,
+`vcr`, `warden`, `webauthn`, `webmock`, `webrick`, `widgets`, `xslt`, `yaml`,
+`zeitwerk`, `zlib` — each at `github.com/go-ruby-<name>/<name>`.
 
 Beyond the `go-ruby-*` family, the scientific / container stack binds the
 pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),
@@ -520,6 +532,22 @@ disabled, so the interpreter, the numeric stack and the cgo-free image pipeline
 compile to a single wasm module and run **entirely in the browser** — there is no
 server-side code. There are two ways to ship Ruby to the browser:
 
+> **js/wasm excludes the network/OS gem backends.** A browser has no TCP sockets
+> and no cgo, so the gems whose backends open real sockets or use OS facilities
+> are compiled out of the `GOOS=js GOARCH=wasm` build (they carry a
+> `//go:build !(js && wasm)` tag, which also keeps ~90 MB of driver code out of
+> the module). On wasm, `require` of any of them raises a clean Ruby `LoadError`
+> (`cannot load such file -- kafka (not available in the wasm build)`):
+> **`grpc`**, **`nats`**, **`kafka`**, **`mysql2`/`mysql`**, **`mongo`/`bson`**,
+> **`arrow`**, **`parquet`**, **`openstack`**, **`sidekiq`**, **`resque`** (the
+> last two are the `redis`-backed job queues). A second tier —
+> **`sqlite3`**, **`sequel`**, **`activerecord`**, **`bolt`**, **`bleve`**,
+> **`etcd`** — still `require`s successfully but raises when a connection/handle
+> is constructed (e.g. `SQLite3::Database.new`), because their drivers do not
+> build for wasm. The **native build is unchanged**: every gem is present, loads
+> and conforms exactly as before. Plain Ruby, the numeric/image stack and the
+> `JS` DOM/Canvas bridge are fully available in the browser.
+
 **1. The playground — full interpreter in wasm.** A self-contained page (Ruby
 REPL + a load→`gaussian_blur`/`sobel`/`canny`→render image demo) lives in
 [`web/`](web). It builds `cmd/wasm`, which links the whole front-end (lexer,
@@ -609,6 +637,14 @@ in [CONFORMANCE-RAILS-PUPPET.md](CONFORMANCE-RAILS-PUPPET.md),
 [CONFORMANCE-LIBRARIES.md](CONFORMANCE-LIBRARIES.md) and
 [CONFORMANCE-RSPEC.md](CONFORMANCE-RSPEC.md); reproduce with
 `scripts/conformance/heavyweight/sweep.sh`.
+
+On top of the front-end sweeps, a **ruby/spec ratchet** runs the `language/` and
+`core/` suites of [ruby/spec](https://github.com/ruby/spec) — the executable
+specification of the language — through `rbgo` under a minimal MSpec-compatible
+shim, and gates CI on a **shrink-only floor** of passing examples
+([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), floor in
+`FLOOR`). The floor can only be raised, so measured language conformance moves in
+one direction. Run it with `scripts/conformance/rubyspec/run.sh`.
 
 ## Design & roadmap
 
