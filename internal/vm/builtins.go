@@ -5399,20 +5399,46 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 		}
 		panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
 			[]object.Value{object.NewString("unhandled exception")}, nil))))
-	case 1:
-		switch a := args[0].(type) {
-		case *object.String:
-			panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{a}, nil))))
-		case *RClass:
-			panic(vm.excError(vm.captureBacktrace(vm.send(a, "new", nil, nil))))
-		case *RObject:
-			panic(vm.excError(vm.captureBacktrace(a)))
-		}
-		raise("TypeError", "exception class/object expected")
-		return object.NilV
 	default:
-		panic(vm.excError(vm.captureBacktrace(vm.send(classArg(args[0]), "new", []object.Value{args[1]}, nil))))
+		panic(vm.excError(vm.captureBacktrace(vm.raiseExceptionObject(args))))
 	}
+}
+
+// raiseExceptionObject builds the exception object for a raise from a non-empty
+// argument list, matching MRI's Kernel#raise coercion: a String becomes a
+// RuntimeError with that message; an exception Class is instantiated (with the
+// message when a class+message pair is given); an exception instance is used
+// as-is. Anything else is a TypeError. It does NOT capture a backtrace or
+// panic — callers do that (Kernel#raise raises here and now; Thread#raise queues
+// the object for the target thread, where the backtrace is captured). Shared so
+// Thread#raise coerces its arguments exactly like Kernel#raise.
+func (vm *VM) raiseExceptionObject(args []object.Value) object.Value {
+	// A lone String is shorthand for RuntimeError with that message.
+	if len(args) == 1 {
+		if s, ok := args[0].(*object.String); ok {
+			return vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{s}, nil)
+		}
+	}
+	// Otherwise the first argument must be an exception class (instantiated, with
+	// the message when a second argument is present) or an exception instance
+	// (used as-is). Anything else — a String with extra arguments, a non-exception
+	// class or object, true/false/nil — is a TypeError, matching MRI.
+	switch a := args[0].(type) {
+	case *RClass:
+		if classIsA(a, vm.consts["Exception"].(*RClass)) {
+			var ctorArgs []object.Value
+			if len(args) >= 2 {
+				ctorArgs = []object.Value{args[1]}
+			}
+			return vm.send(a, "new", ctorArgs, nil)
+		}
+	case *RObject:
+		if classIsA(vm.classOf(a), vm.consts["Exception"].(*RClass)) {
+			return a
+		}
+	}
+	raise("TypeError", "exception class/object expected")
+	return object.NilV
 }
 
 // captureBacktrace stamps the current frame stack onto exc as its backtrace, the
