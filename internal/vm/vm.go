@@ -383,7 +383,7 @@ type VM struct {
 	defaultRandom *RandomObj        // process-wide generator for Kernel#rand / #srand
 	fakerInst     *fakerState       // Faker instance + its seed source (Faker::Config.random)
 	webmockActive bool              // true once require "webmock" ran: gates the Net::HTTP interception hook
-	currentFiber  *Fiber            // the fiber currently running (nil at the root), for Fiber.yield
+	currentFiber  *Fiber            // the fiber currently running (a thread's root fiber at the top level); never nil
 
 	// Concurrency: an emulated GVL (one Ruby thread executes VM code at a time).
 	// The running goroutine holds gvl; it is released only inside blocking native
@@ -704,8 +704,10 @@ func New(out io.Writer) *VM {
 	// The main thread holds the GVL for the VM's lifetime, releasing it only at
 	// blocking points so spawned Ruby threads can run (see thread.go).
 	vm.gvl.Lock()
-	vm.mainThread = &RThread{status: "run", done: make(chan struct{}), locals: map[object.Value]object.Value{}, parked: true}
+	vm.mainThread = &RThread{status: "run", done: make(chan struct{}), parked: true}
+	vm.mainThread.initFibers()
 	vm.currentThread = vm.mainThread
+	vm.currentFiber = vm.mainThread.rootFiber
 	vm.threads = []*RThread{vm.mainThread}
 	vm.bootstrap()
 	// $LOAD_PATH (and its alias $:) is a real, mutable Array that require /

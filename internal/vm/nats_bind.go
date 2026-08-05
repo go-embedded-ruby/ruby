@@ -78,7 +78,8 @@ func (vm *VM) natsDeliver(blk *Proc, m *nats.Msg) {
 	vm.gvl.Lock()
 	prev := vm.currentThread
 	prev.saveCtx(vm)
-	thr := &RThread{status: "run", done: make(chan struct{}), locals: map[object.Value]object.Value{}, parked: true}
+	thr := &RThread{status: "run", done: make(chan struct{}), parked: true}
+	thr.initFibers()
 	thr.restoreCtx(vm)
 	defer func() {
 		_ = recover()
