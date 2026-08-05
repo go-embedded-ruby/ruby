@@ -74,6 +74,12 @@ type RThread struct {
 	// it while holding the lock and the target reads it while holding the lock.
 	pendingRaise object.Value
 
+	// killed is set by Thread#kill / #exit / #terminate targeting this thread; the
+	// target picks it up at its next yield point (see VM.serviceSafepoint) and
+	// unwinds via killSignal, running ensure blocks and terminating with a nil
+	// result. Written and read only under the GVL, like pendingRaise.
+	killed bool
+
 	// reportOnException mirrors Thread#report_on_exception (default true in MRI):
 	// whether a thread terminating with an unhandled exception prints a warning.
 	// rbgo does not print the warning, but the accessor is honoured for programs
@@ -92,6 +98,12 @@ type RThread struct {
 // one of these yield points; the raiser has no other window to run. Returns
 // normally (a no-op) when nothing is queued; panics to unwind when an event fires.
 func (vm *VM) serviceSafepoint(t *RThread) {
+	if t.killed {
+		// Clear the flag before unwinding so ensure blocks that themselves reach a
+		// yield point are not re-killed mid-run; the killSignal carries the unwind.
+		t.killed = false
+		panic(killSignal{})
+	}
 	if exc := t.pendingRaise; exc != nil {
 		t.pendingRaise = nil
 		panic(vm.excError(vm.captureBacktrace(exc)))
@@ -273,6 +285,13 @@ func (vm *VM) registerThreadClass() {
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
+						// A Thread#kill terminates the thread cleanly: ensure blocks have
+						// already run during the unwind, the result is nil, and nothing is
+						// re-raised on join (distinct from an unhandled exception).
+						if _, ok := r.(killSignal); ok {
+							t.result = object.NilV
+							return
+						}
 						t.err = threadCaptureErr(r)
 					}
 				}()
@@ -498,6 +517,44 @@ func (vm *VM) registerThreadClass() {
 	cThread.define("report_on_exception=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		self.(*RThread).reportOnException = args[0].Truthy()
 		return args[0]
+	})
+	// kill / exit / terminate ask the thread to terminate: it unwinds at its next
+	// yield point via killSignal, running its ensure blocks (but bypassing rescue),
+	// and finishes with a nil value. Killing the current thread unwinds it
+	// immediately; killing the main thread ends the program. A dead thread is a
+	// no-op. Returns the thread. The three names share one Method record so
+	// Thread.instance_method(:exit) == Thread.instance_method(:kill), as in MRI.
+	kill := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		if t.isDone() {
+			return t
+		}
+		if t == vm.currentThread {
+			panic(killSignal{})
+		}
+		t.killed = true
+		if t.wake != nil {
+			t.wakeParked() // a sleeping target leaves its wait and reaches its next yield point
+		}
+		return t
+	}
+	cThread.define("kill", kill)
+	cThread.methods["exit"] = cThread.methods["kill"]
+	cThread.methods["terminate"] = cThread.methods["kill"]
+	// Thread.exit / Thread.kill(thread): the class-level forms — Thread.exit ends
+	// the current thread; Thread.kill(t) ends t (MRI's deprecated spelling).
+	sdef("exit", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return kill(vm, vm.currentThread, nil, nil)
+	})
+	sdef("kill", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 1 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
+		t, ok := args[0].(*RThread)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Thread)", classNameOf(args[0]))
+		}
+		return kill(vm, t, nil, nil)
 	})
 	cThread.define("abort_on_exception", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*RThread).abort)
