@@ -32,9 +32,18 @@ type RThread struct {
 	done   chan struct{}
 	status string                        // "run" | "sleep" | "dead"
 	name   object.Value                  // Thread#name (nil or a String)
-	locals map[object.Value]object.Value // Thread#[] / #[]= (fiber-local)
 	tvars  map[object.Value]object.Value // Thread#thread_variable_get/set (thread-local)
 	abort  bool                          // abort_on_exception
+
+	// Fiber bookkeeping (Thread#[] is fiber-local in MRI, so it lives per fiber,
+	// not per thread). rootFiber is the fiber the thread body runs in and the one
+	// Fiber.current returns at the top level; cur is the fiber currently executing
+	// in this thread (kept in sync by setCurFiber); curResumed is the top of this
+	// thread's resume chain — the fiber Fiber.yield and a finishing transfer chain
+	// hand control back to (see fiber.go).
+	rootFiber  *Fiber
+	cur        *Fiber
+	curResumed *Fiber
 
 	// Eager-start handshake: a freshly spawned thread runs immediately (as in
 	// MRI) until its first blocking point or completion, at which moment it hands
@@ -43,8 +52,9 @@ type RThread struct {
 	handback chan struct{}
 	parked   bool
 
-	// Execution context parked here while this thread does not hold the GVL.
-	savedFiber     *Fiber
+	// Execution context parked here while this thread does not hold the GVL. The
+	// current fiber travels with the thread via cur (kept current by setCurFiber),
+	// so it needs no separate saved slot.
 	savedLastMatch object.Value
 	savedCurExc    object.Value
 	savedReqDirs   []string
@@ -77,6 +87,25 @@ func (t *RThread) wakeParked() {
 	}
 }
 
+// initFibers gives the thread its root fiber and points the current/resume-chain
+// slots at it, so the thread body runs in a real (root) fiber from the outset.
+func (t *RThread) initFibers() {
+	t.rootFiber = newRootFiber(t)
+	t.cur = t.rootFiber
+	t.curResumed = t.rootFiber
+}
+
+// fiberLocals returns the fiber-local storage of the fiber currently executing
+// in this thread, lazily allocating it. Thread#[] and friends read/write here,
+// so a value set in one fiber is not visible in another (MRI semantics).
+func (t *RThread) fiberLocals() map[object.Value]object.Value {
+	f := t.cur
+	if f.locals == nil {
+		f.locals = map[object.Value]object.Value{}
+	}
+	return f.locals
+}
+
 func (t *RThread) ToS() string     { return "#<Thread>" }
 func (t *RThread) Inspect() string { return "#<Thread:" + t.status + ">" }
 func (t *RThread) Truthy() bool    { return true }
@@ -92,14 +121,13 @@ func (t *RThread) isDone() bool {
 }
 
 func (t *RThread) saveCtx(vm *VM) {
-	t.savedFiber = vm.currentFiber
 	t.savedLastMatch = vm.lastMatch
 	t.savedCurExc = vm.curExc
 	t.savedReqDirs = vm.requireDirs
 }
 
 func (t *RThread) restoreCtx(vm *VM) {
-	vm.currentFiber = t.savedFiber
+	vm.currentFiber = t.cur
 	vm.lastMatch = t.savedLastMatch
 	vm.curExc = t.savedCurExc
 	vm.requireDirs = t.savedReqDirs
@@ -204,8 +232,8 @@ func (vm *VM) registerThreadClass() {
 		t := &RThread{
 			blk: blk, args: append([]object.Value{}, args...),
 			done: make(chan struct{}), status: "run", handback: make(chan struct{}),
-			locals: map[object.Value]object.Value{},
 		}
+		t.initFibers()
 		vm.threads = append(vm.threads, t)
 		go func() {
 			vm.gvl.Lock()
@@ -315,17 +343,17 @@ func (vm *VM) registerThreadClass() {
 		return args[0]
 	})
 	cThread.define("[]", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if v, ok := self.(*RThread).locals[vm.threadLocalKey(args[0])]; ok {
+		if v, ok := self.(*RThread).fiberLocals()[vm.threadLocalKey(args[0])]; ok {
 			return v
 		}
 		return object.NilV
 	})
 	cThread.define("[]=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*RThread).locals[vm.threadLocalKey(args[0])] = args[1]
+		self.(*RThread).fiberLocals()[vm.threadLocalKey(args[0])] = args[1]
 		return args[1]
 	})
 	cThread.define("key?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		_, ok := self.(*RThread).locals[vm.threadLocalKey(args[0])]
+		_, ok := self.(*RThread).fiberLocals()[vm.threadLocalKey(args[0])]
 		return object.Bool(ok)
 	})
 	// fetch(key[, default]) { |key| ... }: read a fiber-local like Hash#fetch —
@@ -337,7 +365,7 @@ func (vm *VM) registerThreadClass() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 		}
 		t := self.(*RThread)
-		if v, ok := t.locals[vm.threadLocalKey(args[0])]; ok {
+		if v, ok := t.fiberLocals()[vm.threadLocalKey(args[0])]; ok {
 			return v
 		}
 		if blk != nil {
@@ -353,8 +381,9 @@ func (vm *VM) registerThreadClass() {
 	// order (the storage map iterates randomly).
 	cThread.define("keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		t := self.(*RThread)
-		keys := make([]object.Value, 0, len(t.locals))
-		for k := range t.locals {
+		locals := t.fiberLocals()
+		keys := make([]object.Value, 0, len(locals))
+		for k := range locals {
 			keys = append(keys, k)
 		}
 		sort.SliceStable(keys, func(i, j int) bool {
