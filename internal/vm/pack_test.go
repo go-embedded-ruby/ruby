@@ -116,6 +116,28 @@ func TestPackUnpack(t *testing.T) {
 		{"pack_f_rational_arg", `p [Rational(3, 2)].pack("f").unpack("f")`, "[1.5]\n"},
 		{"unpack_f_short_nil", `p ("ab").unpack("f")`, "[nil]\n"},
 		{"unpack_f_star", `p [1.0, 2.0, 3.0].pack("f*").unpack("f*")`, "[1.0, 2.0, 3.0]\n"},
+
+		// x (null pad), X (back up), @ (absolute position) — pack.
+		{"pack_x3", `p [].pack("x3").bytes`, "[0, 0, 0]\n"},
+		{"pack_x_star_empty", `p [].pack("x*").bytes`, "[]\n"},
+		{"pack_CxC", `p [1, 2].pack("CxC").bytes`, "[1, 0, 2]\n"},
+		{"pack_X_back", `p [1, 2, 3].pack("C2XC").bytes`, "[1, 3]\n"},
+		{"pack_X_star_noop", `p [1, 2, 3].pack("C2X*C").bytes`, "[1, 2, 3]\n"},
+		{"pack_at_pad", `p [1, 2, 3].pack("C@3C").bytes`, "[1, 0, 0, 2]\n"},
+		{"pack_at_truncate", `p [1, 2, 3, 4, 5].pack("C4@2C").bytes`, "[1, 2, 5]\n"},
+		{"pack_at_default_one", `p [1, 2, 3].pack("C*@").bytes`, "[1]\n"},
+		{"pack_at_from_empty", `p [1, 2, 3].pack("@3C*").bytes`, "[0, 0, 0, 1, 2, 3]\n"},
+		{"pack_at_star_noop", `p [1, 2, 3].pack("C2@*C").bytes`, "[1, 2, 3]\n"},
+		// x/X/@ — unpack.
+		{"unpack_x_skip", `p "\x01\x02\x03\x04".unpack("Cx2C")`, "[1, 4]\n"},
+		{"unpack_x_star_to_end", `p "\x01\x02\x03\x04".unpack("Cx*C")`, "[1, nil]\n"},
+		{"unpack_X_back", `p "\x01\x02\x03\x04".unpack("C3X2C")`, "[1, 2, 3, 2]\n"},
+		{"unpack_X_one", `p "\x01\x02\x03\x04".unpack("C3XC")`, "[1, 2, 3, 3]\n"},
+		{"unpack_X_star", `p "abcd".unpack("C3X*C")`, "[97, 98, 99, 99]\n"},
+		{"unpack_at_abs", `p "\x01\x02\x03\x04".unpack("C3@2C")`, "[1, 2, 3, 3]\n"},
+		{"unpack_at_default_zero", `p "\x01\x02\x03\x04".unpack("C2@C")`, "[1, 2, 1]\n"},
+		{"unpack_at_star_noop", `p "\x01\x02\x03\x04".unpack("C2@*C")`, "[1, 2, 3]\n"},
+		{"unpack_at_beyond", `p "\x01\x02\x03\x04".unpack("C2@4C")`, "[1, 2, nil]\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -248,6 +270,12 @@ func TestPackUnpackErrors(t *testing.T) {
 		{"pack_f_nil", `[nil].pack("f")`, "can't convert nil into Float"},
 		{"pack_f_string", `["1.5"].pack("f")`, "can't convert String into Float"},
 		{"pack_f_object", `[Object.new].pack("d")`, "can't convert Object into Float"},
+		// x/X/@ position-directive errors.
+		{"pack_X_underflow", `[1, 2, 3].pack("XC")`, "X outside of string"},
+		{"pack_X_count_over", `[1, 2, 3].pack("C2X3")`, "X outside of string"},
+		{"unpack_x_over", `"ab".unpack("Cx5")`, "x outside of string"},
+		{"unpack_X_over", `"abcd".unpack("C2X3C")`, "X outside of string"},
+		{"unpack_at_over", `"\x01\x02\x03\x04".unpack("@5C")`, "@ outside of string"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
