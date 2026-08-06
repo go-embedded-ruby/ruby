@@ -2,6 +2,7 @@ package vm
 
 import (
 	binpkg "encoding/binary"
+	"math"
 	"math/big"
 	"unicode/utf8"
 
@@ -167,10 +168,62 @@ func isPackSpace(c byte) bool {
 func isPackCode(c byte) bool {
 	switch c {
 	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'I', 'i', 'J', 'j',
-		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U':
+		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U',
+		'f', 'F', 'd', 'D', 'e', 'E', 'g', 'G':
 		return true
 	}
 	return false
+}
+
+// floatSpec resolves a float directive to its byte width and order, or reports
+// ok=false for a non-float directive. MRI: f/F single & d/D double in native
+// order; e/E little-endian; g/G big-endian.
+func floatSpec(d packDir) (width int, bo binpkg.ByteOrder, ok bool) {
+	switch d.code {
+	case 'f', 'F':
+		return 4, binpkg.NativeEndian, true
+	case 'e':
+		return 4, binpkg.LittleEndian, true
+	case 'g':
+		return 4, binpkg.BigEndian, true
+	case 'd', 'D':
+		return 8, binpkg.NativeEndian, true
+	case 'E':
+		return 8, binpkg.LittleEndian, true
+	case 'G':
+		return 8, binpkg.BigEndian, true
+	}
+	return 0, nil, false
+}
+
+// isFloatDir reports whether d is one of the float directives f/F/d/D/e/E/g/G.
+func isFloatDir(d packDir) bool {
+	_, _, ok := floatSpec(d)
+	return ok
+}
+
+// packFloatArg coerces a pack float argument to a float64 the way MRI's
+// rb_to_float does: an Integer/Bignum/Float is used directly; any other Numeric
+// (Rational/Complex/BigDecimal) is converted via #to_f; a non-Numeric (nil, a
+// String, an arbitrary object) raises TypeError — pack does NOT parse numeric
+// strings or call #to_f on non-Numerics.
+func (vm *VM) packFloatArg(v object.Value) float64 {
+	switch n := v.(type) {
+	case object.Float:
+		return float64(n)
+	case object.Integer:
+		return float64(int64(n))
+	case *object.Bignum:
+		f, _ := new(big.Float).SetInt(n.I).Float64()
+		return f
+	}
+	if isNumericValue(v) {
+		if f, ok := vm.send(v, "to_f", nil, nil).(object.Float); ok {
+			return float64(f)
+		}
+	}
+	raise("TypeError", "can't convert %s into Float", classNameOf(v))
+	return 0
 }
 
 // modifiableInt reports whether c accepts the '<'/'>'/'!'/'_' modifiers.
@@ -340,6 +393,20 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) []byte {
 			for k := 0; k < count; k++ {
 				out = putUint(out, vm.packIntArg(next()), s)
 			}
+		case isFloatDir(d):
+			w, bo, _ := floatSpec(d)
+			count := d.count
+			if d.star {
+				count = len(elems) - idx
+			}
+			for k := 0; k < count; k++ {
+				f := vm.packFloatArg(next())
+				if w == 4 {
+					out = putUint(out, uint64(math.Float32bits(float32(f))), intSpec{4, bo, false})
+				} else {
+					out = putUint(out, math.Float64bits(f), intSpec{8, bo, false})
+				}
+			}
 		case d.code == 'U':
 			count := d.count
 			if d.star {
@@ -469,6 +536,25 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 					continue
 				}
 				out = append(out, intResult(getUint(data[pos:pos+w], s), s))
+				pos += w
+			}
+		case isFloatDir(d):
+			w, bo, _ := floatSpec(d)
+			count := d.count
+			if d.star {
+				count = (len(data) - pos) / w
+			}
+			for k := 0; k < count; k++ {
+				if pos+w > len(data) {
+					out = append(out, object.NilV)
+					continue
+				}
+				bits := getUint(data[pos:pos+w], intSpec{w, bo, false})
+				if w == 4 {
+					out = append(out, object.Float(float64(math.Float32frombits(uint32(bits)))))
+				} else {
+					out = append(out, object.Float(math.Float64frombits(bits)))
+				}
 				pos += w
 			}
 		case d.code == 'U':

@@ -97,6 +97,25 @@ func TestPackUnpack(t *testing.T) {
 		{"unpack_short_nil", `p "x".unpack("NN")`, "[nil, nil]\n"},
 		{"unpack_U_empty", `p "".unpack("U*")`, "[]\n"},
 		{"unpack_a_empty_star", `p "".unpack("a*")`, "[\"\"]\n"},
+
+		// Float directives f/F/d/D (native, host LE), e/E (LE), g/G (BE).
+		{"pack_f", `p [1.5].pack("f").bytes`, "[0, 0, 192, 63]\n"},
+		{"pack_F_alias", `p [1.5].pack("F").bytes`, "[0, 0, 192, 63]\n"},
+		{"pack_e_le", `p [1.5].pack("e").bytes`, "[0, 0, 192, 63]\n"},
+		{"pack_g_be", `p [1.5].pack("g").bytes`, "[63, 192, 0, 0]\n"},
+		{"pack_d", `p [1.5].pack("d").bytes`, "[0, 0, 0, 0, 0, 0, 248, 63]\n"},
+		{"pack_D_alias", `p [1.5].pack("D").bytes`, "[0, 0, 0, 0, 0, 0, 248, 63]\n"},
+		{"pack_E_le", `p [1.5].pack("E").bytes`, "[0, 0, 0, 0, 0, 0, 248, 63]\n"},
+		{"pack_G_be", `p [1.5].pack("G").bytes`, "[63, 248, 0, 0, 0, 0, 0, 0]\n"},
+		{"roundtrip_d_star", `p [1.5, -2.25].pack("d*").unpack("d*")`, "[1.5, -2.25]\n"},
+		{"roundtrip_f_count", `p [1.5, 2.5].pack("f2").unpack("f2")`, "[1.5, 2.5]\n"},
+		{"roundtrip_g_G", `p [-0.5].pack("g").unpack("g") == [-0.5].pack("G").unpack("G")`, "true\n"},
+		{"f_single_precision", `p [3.14].pack("f").unpack("f")`, "[3.140000104904175]\n"},
+		{"pack_f_int_arg", `p [3].pack("f").unpack("f")`, "[3.0]\n"},
+		{"pack_f_bignum_arg", `p [2**70].pack("d").unpack("d")`, "[1.1805916207174113e+21]\n"},
+		{"pack_f_rational_arg", `p [Rational(3, 2)].pack("f").unpack("f")`, "[1.5]\n"},
+		{"unpack_f_short_nil", `p ("ab").unpack("f")`, "[nil]\n"},
+		{"unpack_f_star", `p [1.0, 2.0, 3.0].pack("f*").unpack("f*")`, "[1.0, 2.0, 3.0]\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -224,6 +243,11 @@ func TestPackUnpackErrors(t *testing.T) {
 		{"pack_too_few_U", `[].pack("U")`, "ArgumentError"},
 		{"pack_a_not_string", `[1].pack("a3")`, "TypeError"},
 		{"pack_H_not_string", `[1].pack("H2")`, "TypeError"},
+		// Float directives reject non-Numeric args (nil, String, Object) — pack
+		// does not parse numeric strings or call #to_f on non-Numerics.
+		{"pack_f_nil", `[nil].pack("f")`, "can't convert nil into Float"},
+		{"pack_f_string", `["1.5"].pack("f")`, "can't convert String into Float"},
+		{"pack_f_object", `[Object.new].pack("d")`, "can't convert Object into Float"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
