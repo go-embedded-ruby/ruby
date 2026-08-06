@@ -101,6 +101,23 @@ func TestFormatNamedArgsNonSymbolKey(t *testing.T) {
 	vm.formatString("%<a>d", []object.Value{h})
 }
 
+// TestStdoutValueFallback covers stdoutValue's fallback arm, taken when the
+// $stdout global is absent: it returns the default stdout IO rather than nil.
+// User Ruby never unsets $stdout (registerIO always binds it), so the branch is
+// exercised directly by deleting the global.
+func TestStdoutValueFallback(t *testing.T) {
+	vm := New(io.Discard)
+	// The primary path returns whatever is bound to the global.
+	if got := vm.stdoutValue(); got != vm.globals["$stdout"] {
+		t.Fatalf("bound $stdout: stdoutValue = %v, want the global's value", got)
+	}
+	// With the global removed, the fallback yields the default stdout IO.
+	delete(vm.globals, "$stdout")
+	if _, ok := vm.stdoutValue().(*IOObj); !ok {
+		t.Fatalf("unbound $stdout: stdoutValue = %T, want *IOObj", vm.stdoutValue())
+	}
+}
+
 // TestRaiseFormatErrorFallback covers raiseFormatError's defensive non-
 // *format.Error arm, which the library never reaches but which re-raises any
 // other error as an ArgumentError.
