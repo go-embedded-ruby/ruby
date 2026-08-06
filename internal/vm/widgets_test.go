@@ -46,6 +46,47 @@ puts "fired=#{res["fired"].length}"
 	}
 }
 
+// TestWidgetsToastButtonRects proves require "widgets" exposes the new
+// Toast#button_rects accessor: a two-action toast reports one {x,y,w,h} Hash per
+// button (in the pill's local painted space), the buttons tile the action zone
+// edge-to-edge, and dispatching a click at the SECOND button's centre fires the
+// second action's callback — the per-button routing a host (wasmbox) relies on.
+func TestWidgetsToastButtonRects(t *testing.T) {
+	src := `
+require "widgets"
+
+t = Widgets.toast("Deleted", "info", "", "")
+Widgets.set_toast_actions(t, [
+  {"label" => "Undo",    "callback" => "on_undo"},
+  {"label" => "Dismiss", "callback" => "on_dismiss"},
+])
+Widgets.set_bounds(t, 0, 0, 300, 44)
+Widgets.set_visible(t, true)
+
+rects = Widgets.button_rects(t)
+raise "count #{rects.length}" unless rects.length == 2
+rects.each do |r|
+  raise "y" unless r["y"] == 0
+  raise "h" unless r["h"] == 44
+end
+# Edge-to-edge tiling, last button flush with the pill right edge.
+raise "gap" unless rects[1]["x"] == rects[0]["x"] + rects[0]["w"]
+raise "flush" unless rects[1]["x"] + rects[1]["w"] == 300
+
+# Click the SECOND button's centre -> the SECOND action fires (not the first).
+cx = rects[1]["x"] + rects[1]["w"] / 2
+cy = rects[1]["y"] + rects[1]["h"] / 2
+res = Widgets.dispatch(t, {"kind" => "click", "x" => cx, "y" => cy})
+raise "routed to #{res["fired"].inspect}" unless res["fired"] == ["on_dismiss"]
+
+puts "rects=#{rects.length} fired=#{res["fired"][0]}"
+`
+	got := runSrc(t, src)
+	if got != "rects=2 fired=on_dismiss" {
+		t.Fatalf("button_rects routing = %q, want %q", got, "rects=2 fired=on_dismiss")
+	}
+}
+
 // TestWidgetsSurface exercises the rest of the Ruby-visible surface so every
 // remaining marshalling branch and constructor/mutator/composition verb is
 // driven through the interpreter: the other constructors, the Array- and
