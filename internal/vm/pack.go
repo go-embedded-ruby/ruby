@@ -2,6 +2,7 @@ package vm
 
 import (
 	binpkg "encoding/binary"
+	"math/big"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -11,28 +12,33 @@ import (
 // the common format directives with MRI-compatible semantics:
 //
 //	C/c          unsigned/signed 8-bit
-//	S/s L/l Q/q  native-endian (little) unsigned/signed 16/32/64-bit
+//	S/s L/l Q/q  native-endian unsigned/signed 16/32/64-bit
+//	I/i          native-endian unsigned/signed C int (32-bit)
+//	J/j          native-endian unsigned/signed intptr_t (64-bit)
 //	n/N          big-endian unsigned 16/32-bit
 //	v/V          little-endian unsigned 16/32-bit
 //	a/A/Z        binary string (null-padded / space-padded / null-terminated)
 //	H/h          hex string, high/low nibble first
 //	U            UTF-8 character / codepoint
 //
-// Each directive takes an optional count N, or '*' for "all remaining"; spaces
-// in the format are ignored.
+// The integer directives s/S/i/I/l/L/q/Q/j/J accept the byte-order modifiers
+// '<' (little-endian) and '>' (big-endian) and the native-size modifiers '!'
+// and '_' (which widen 'l'/'L' from a fixed 32-bit int to the platform's C
+// long, i.e. 64-bit on LP64). Each directive takes an optional count N, or '*'
+// for "all remaining"; spaces in the format are ignored.
 func (vm *VM) registerPackUnpack() {
 	vm.cArray.define("pack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		elems := self.(*object.Array).Elems
-		fmtStr := packFormat(args)
-		return object.NewStringBytesEnc(packBytes(elems, fmtStr), "ASCII-8BIT")
+		fmtStr := vm.packFormat(args)
+		return object.NewStringBytesEnc(vm.packBytes(elems, fmtStr), "ASCII-8BIT")
 	})
 	vm.cString.define("unpack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := self.(*object.String).Bytes()
-		return object.NewArrayFromSlice(unpackElems(data, packFormat(args)))
+		return object.NewArrayFromSlice(unpackElems(data, vm.packFormat(args)))
 	})
 	vm.cString.define("unpack1", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := self.(*object.String).Bytes()
-		elems := unpackElems(data, packFormat(args))
+		elems := unpackElems(data, vm.packFormat(args))
 		if len(elems) == 0 {
 			return object.NilV
 		}
@@ -40,43 +46,83 @@ func (vm *VM) registerPackUnpack() {
 	})
 }
 
-// packFormat extracts the mandatory String format argument.
-func packFormat(args []object.Value) string {
+// packFormat extracts the mandatory format argument, which is a String or any
+// object that responds to #to_str.
+func (vm *VM) packFormat(args []object.Value) string {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	s, ok := args[0].(*object.String)
-	if !ok {
-		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
+	v := args[0]
+	if s, ok := v.(*object.String); ok {
+		return string(s.Bytes())
 	}
-	return string(s.Bytes())
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return string(s.Bytes())
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return ""
 }
 
-// packDir is one parsed directive: its letter, a count, and whether the count
-// was the '*' wildcard ("all remaining").
+// packDir is one parsed directive: its letter, a count, whether the count was
+// the '*' wildcard ("all remaining"), and the byte-order / native-size
+// modifiers that followed the letter.
 type packDir struct {
-	code  byte
-	count int
-	star  bool
+	code   byte
+	count  int
+	star   bool
+	little bool // '<' modifier
+	big    bool // '>' modifier
+	bang   bool // '!' or '_' modifier
 }
 
-// parseFormat splits a pack/unpack format string into directives. A directive is
-// a single letter optionally followed by a decimal count or '*'; with no count
-// the directive applies once. Spaces are ignored; any other character raises.
-func parseFormat(fmtStr string) []packDir {
+// parseFormat splits a pack/unpack format string into directives. A directive
+// is a single letter optionally followed by any of the modifiers '<', '>', '!'
+// and '_' (only on the integer directives sSiIlLqQjJ) and then a decimal count
+// or '*'; with no count the directive applies once. Spaces are ignored; any
+// other character raises. verb is "pack" or "unpack" for the error message.
+func parseFormat(fmtStr, verb string) []packDir {
 	var dirs []packDir
 	i := 0
 	for i < len(fmtStr) {
 		c := fmtStr[i]
-		if c == ' ' {
+		if isPackSpace(c) {
 			i++
 			continue
 		}
+		if c == '#' { // comment: skip to end of line
+			for i < len(fmtStr) && fmtStr[i] != '\n' {
+				i++
+			}
+			continue
+		}
 		if !isPackCode(c) {
-			raise("ArgumentError", "unknown pack directive '%c' in '%s'", c, fmtStr)
+			raise("ArgumentError", "unknown %s directive '%c' in '%s'", verb, c, fmtStr)
 		}
 		i++
 		d := packDir{code: c, count: 1}
+		// Consume any run of byte-order / native-size modifiers.
+		for i < len(fmtStr) {
+			switch fmtStr[i] {
+			case '<':
+				d.little = true
+			case '>':
+				d.big = true
+			case '!', '_':
+				d.bang = true
+			default:
+				goto modsDone
+			}
+			i++
+		}
+	modsDone:
+		if (d.little || d.big || d.bang) && !modifiableInt(c) {
+			raise("ArgumentError", "'%c' allowed only after types sSiIlLqQjJ", firstMod(d))
+		}
+		if d.little && d.big {
+			raise("ArgumentError", "can't use both '<' and '>'")
+		}
 		switch {
 		case i < len(fmtStr) && fmtStr[i] == '*':
 			d.star = true
@@ -94,86 +140,185 @@ func parseFormat(fmtStr string) []packDir {
 	return dirs
 }
 
-// isPackCode reports whether c is a supported directive letter.
-func isPackCode(c byte) bool {
+// firstMod returns the modifier character to name in an "allowed only after"
+// error, preferring the byte-order modifiers.
+func firstMod(d packDir) byte {
+	switch {
+	case d.little:
+		return '<'
+	case d.big:
+		return '>'
+	default:
+		return '!'
+	}
+}
+
+// isPackSpace reports whether c is whitespace ignored in a format string,
+// matching MRI's use of the C ISSPACE classification.
+func isPackSpace(c byte) bool {
 	switch c {
-	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'n', 'N', 'v', 'V',
-		'a', 'A', 'Z', 'H', 'h', 'U':
+	case ' ', '\t', '\n', '\v', '\f', '\r':
 		return true
 	}
 	return false
 }
 
-// intWidth returns the byte width of an integer directive (0 for non-integer).
-func intWidth(code byte) int {
-	switch code {
-	case 'C', 'c':
-		return 1
-	case 'S', 's', 'n', 'v':
-		return 2
-	case 'L', 'l', 'N', 'V':
-		return 4
-	case 'Q', 'q':
-		return 8
+// isPackCode reports whether c is a supported directive letter.
+func isPackCode(c byte) bool {
+	switch c {
+	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'I', 'i', 'J', 'j',
+		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U':
+		return true
 	}
-	return 0
+	return false
 }
 
-// putInt appends a width-byte encoding of v in the directive's endianness. It is
-// only called with an integer directive (intWidth(code) > 0); the final case is
-// the catch-all for the 64-bit codes.
-func putInt(out []byte, code byte, v uint64) []byte {
-	var buf [8]byte
-	switch code {
-	case 'C', 'c':
-		return append(out, byte(v))
-	case 'S', 's', 'v':
-		binpkg.LittleEndian.PutUint16(buf[:], uint16(v))
-		return append(out, buf[:2]...)
-	case 'L', 'l', 'V':
-		binpkg.LittleEndian.PutUint32(buf[:], uint32(v))
-		return append(out, buf[:4]...)
+// modifiableInt reports whether c accepts the '<'/'>'/'!'/'_' modifiers.
+func modifiableInt(c byte) bool {
+	switch c {
+	case 'S', 's', 'I', 'i', 'L', 'l', 'Q', 'q', 'J', 'j':
+		return true
+	}
+	return false
+}
+
+// intSpec describes how an integer directive is encoded: its byte width, byte
+// order, and whether it is signed (for unpack sign extension).
+type intSpec struct {
+	width  int
+	bo     binpkg.ByteOrder
+	signed bool
+}
+
+// intSpecFor resolves the concrete integer encoding for a directive, or reports
+// ok=false when the directive is not an integer directive.
+func intSpecFor(d packDir) (intSpec, bool) {
+	var s intSpec
+	switch d.code {
+	case 'C':
+		s = intSpec{1, binpkg.NativeEndian, false}
+	case 'c':
+		s = intSpec{1, binpkg.NativeEndian, true}
+	case 'S':
+		s = intSpec{2, binpkg.NativeEndian, false}
+	case 's':
+		s = intSpec{2, binpkg.NativeEndian, true}
+	case 'I':
+		s = intSpec{4, binpkg.NativeEndian, false}
+	case 'i':
+		s = intSpec{4, binpkg.NativeEndian, true}
+	case 'L':
+		s = intSpec{4, binpkg.NativeEndian, false}
+	case 'l':
+		s = intSpec{4, binpkg.NativeEndian, true}
+	case 'Q':
+		s = intSpec{8, binpkg.NativeEndian, false}
+	case 'q':
+		s = intSpec{8, binpkg.NativeEndian, true}
+	case 'J':
+		s = intSpec{8, binpkg.NativeEndian, false}
+	case 'j':
+		s = intSpec{8, binpkg.NativeEndian, true}
 	case 'n':
-		binpkg.BigEndian.PutUint16(buf[:], uint16(v))
-		return append(out, buf[:2]...)
+		s = intSpec{2, binpkg.BigEndian, false}
 	case 'N':
-		binpkg.BigEndian.PutUint32(buf[:], uint32(v))
+		s = intSpec{4, binpkg.BigEndian, false}
+	case 'v':
+		s = intSpec{2, binpkg.LittleEndian, false}
+	case 'V':
+		s = intSpec{4, binpkg.LittleEndian, false}
+	default:
+		return s, false
+	}
+	// '!' / '_' select the platform's C long for l/L (64-bit on LP64); the
+	// other integer directives already have their native width.
+	if d.bang && (d.code == 'L' || d.code == 'l') {
+		s.width = 8
+	}
+	// '<' / '>' override the byte order.
+	if d.little {
+		s.bo = binpkg.LittleEndian
+	}
+	if d.big {
+		s.bo = binpkg.BigEndian
+	}
+	return s, true
+}
+
+// putUint appends the low width bytes of v to out in the given byte order.
+func putUint(out []byte, v uint64, s intSpec) []byte {
+	var buf [8]byte
+	switch s.width {
+	case 1:
+		return append(out, byte(v))
+	case 2:
+		s.bo.PutUint16(buf[:], uint16(v))
+		return append(out, buf[:2]...)
+	case 4:
+		s.bo.PutUint32(buf[:], uint32(v))
 		return append(out, buf[:4]...)
-	default: // 'Q', 'q'
-		binpkg.LittleEndian.PutUint64(buf[:], v)
+	default: // 8
+		s.bo.PutUint64(buf[:], v)
 		return append(out, buf[:8]...)
 	}
 }
 
-// getInt decodes a width-byte integer from b in the directive's endianness,
-// sign-extending the signed directives. It is only called with an integer
-// directive; the final case is the catch-all for the unsigned 64-bit codes.
-func getInt(b []byte, code byte) int64 {
-	switch code {
-	case 'C':
-		return int64(b[0])
-	case 'c':
-		return int64(int8(b[0]))
-	case 'S', 'v':
-		return int64(binpkg.LittleEndian.Uint16(b))
-	case 's':
-		return int64(int16(binpkg.LittleEndian.Uint16(b)))
-	case 'L', 'V':
-		return int64(binpkg.LittleEndian.Uint32(b))
-	case 'l':
-		return int64(int32(binpkg.LittleEndian.Uint32(b)))
-	case 'n':
-		return int64(binpkg.BigEndian.Uint16(b))
-	case 'N':
-		return int64(binpkg.BigEndian.Uint32(b))
-	default: // 'Q', 'q'
-		return int64(binpkg.LittleEndian.Uint64(b))
+// getUint decodes width bytes from b as an unsigned integer in the given byte
+// order.
+func getUint(b []byte, s intSpec) uint64 {
+	switch s.width {
+	case 1:
+		return uint64(b[0])
+	case 2:
+		return uint64(s.bo.Uint16(b))
+	case 4:
+		return uint64(s.bo.Uint32(b))
+	default: // 8
+		return s.bo.Uint64(b)
 	}
 }
 
-// packBytes serialises elems according to dirs.
-func packBytes(elems []object.Value, fmtStr string) []byte {
-	dirs := parseFormat(fmtStr)
+// intResult converts a raw width-byte unsigned value into the Ruby Integer the
+// directive decodes to: signed directives sign-extend to a (possibly negative)
+// Integer; unsigned 64-bit values above 2**63 become a Bignum.
+func intResult(u uint64, s intSpec) object.Value {
+	if s.signed {
+		shift := uint(64 - s.width*8)
+		return object.IntValue(int64(u<<shift) >> shift)
+	}
+	if s.width == 8 {
+		return object.NormInt(new(big.Int).SetUint64(u))
+	}
+	return object.IntValue(int64(u))
+}
+
+// packMask64 masks off the low 64 bits of a big.Int (two's complement for
+// negatives, matching MRI's "least significant bits" packing).
+var packMask64 = new(big.Int).SetUint64(^uint64(0))
+
+// packIntArg coerces a pack integer argument to its low 64 bits, accepting
+// Integer, Bignum, Float (truncated toward zero) and any object implementing
+// #to_int.
+func (vm *VM) packIntArg(v object.Value) uint64 {
+	switch n := v.(type) {
+	case object.Integer:
+		return uint64(int64(n))
+	case *object.Bignum:
+		return new(big.Int).And(n.I, packMask64).Uint64()
+	case object.Float:
+		z, _ := big.NewFloat(float64(n)).Int(nil)
+		return new(big.Int).And(z, packMask64).Uint64()
+	}
+	if vm.respondsToDynamic(v, "to_int") {
+		return vm.packIntArg(vm.send(v, "to_int", nil, nil))
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(v))
+	return 0
+}
+
+// packBytes serialises elems according to fmtStr.
+func (vm *VM) packBytes(elems []object.Value, fmtStr string) []byte {
+	dirs := parseFormat(fmtStr, "pack")
 	out := []byte{}
 	idx := 0
 	next := func() object.Value {
@@ -186,13 +331,14 @@ func packBytes(elems []object.Value, fmtStr string) []byte {
 	}
 	for _, d := range dirs {
 		switch {
-		case intWidth(d.code) > 0:
+		case isIntDir(d):
+			s, _ := intSpecFor(d)
 			count := d.count
 			if d.star {
 				count = len(elems) - idx
 			}
 			for k := 0; k < count; k++ {
-				out = putInt(out, d.code, uint64(toInt(next())))
+				out = putUint(out, vm.packIntArg(next()), s)
 			}
 		case d.code == 'U':
 			count := d.count
@@ -203,21 +349,33 @@ func packBytes(elems []object.Value, fmtStr string) []byte {
 				out = utf8.AppendRune(out, rune(toInt(next())))
 			}
 		case d.code == 'a' || d.code == 'A' || d.code == 'Z':
-			out = packString(out, d, packStrArg(next()))
+			out = packString(out, d, vm.packStrArg(next()))
 		case d.code == 'H' || d.code == 'h':
-			out = packHex(out, d, packStrArg(next()))
+			out = packHex(out, d, vm.packStrArg(next()))
 		}
 	}
 	return out
 }
 
-// packStrArg returns the String argument's bytes for an a/A/Z/H/h directive.
-func packStrArg(v object.Value) []byte {
-	s, ok := v.(*object.String)
-	if !ok {
-		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+// isIntDir reports whether d is one of the integer directives.
+func isIntDir(d packDir) bool {
+	_, ok := intSpecFor(d)
+	return ok
+}
+
+// packStrArg returns the String argument's bytes for an a/A/Z/H/h directive,
+// coercing a non-String argument via #to_str.
+func (vm *VM) packStrArg(v object.Value) []byte {
+	if s, ok := v.(*object.String); ok {
+		return s.Bytes()
 	}
-	return s.Bytes()
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s.Bytes()
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return nil
 }
 
 // packString implements the a/A/Z directives: pad/truncate to the count (with
@@ -293,13 +451,14 @@ func hexNibble(c byte) byte {
 
 // unpackElems deserialises data according to fmtStr.
 func unpackElems(data []byte, fmtStr string) []object.Value {
-	dirs := parseFormat(fmtStr)
+	dirs := parseFormat(fmtStr, "unpack")
 	var out []object.Value
 	pos := 0
 	for _, d := range dirs {
 		switch {
-		case intWidth(d.code) > 0:
-			w := intWidth(d.code)
+		case isIntDir(d):
+			s, _ := intSpecFor(d)
+			w := s.width
 			count := d.count
 			if d.star {
 				count = (len(data) - pos) / w
@@ -309,7 +468,7 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 					out = append(out, object.NilV)
 					continue
 				}
-				out = append(out, object.IntValue(getInt(data[pos:pos+w], d.code)))
+				out = append(out, intResult(getUint(data[pos:pos+w], s), s))
 				pos += w
 			}
 		case d.code == 'U':

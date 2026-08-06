@@ -107,6 +107,105 @@ func TestPackUnpack(t *testing.T) {
 	}
 }
 
+// TestPackUnpackModifiers exercises the integer byte-order ('<' / '>') and
+// native-size ('!' / '_') modifiers, the i/I/j/J directives, comments and
+// whitespace, and Bignum-valued 64-bit round-trips. Host is little-endian
+// (arm64 / amd64), so the native directives decode little-endian.
+func TestPackUnpackModifiers(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		// '<' / '>' byte-order overrides
+		{"unpack_s_le", `p "\x00\xff".unpack("s<")`, "[-256]\n"},
+		{"unpack_s_be", `p "\x00\xff".unpack("s>")`, "[255]\n"},
+		{"unpack_L_le", `p "abcd".unpack("L<")`, "[1684234849]\n"},
+		{"unpack_L_be", `p "abcd".unpack("L>")`, "[1633837924]\n"},
+		{"pack_S_le", `p [258].pack("S<").bytes`, "[2, 1]\n"},
+		{"pack_S_be", `p [258].pack("S>").bytes`, "[1, 2]\n"},
+		{"pack_L_be", `p [16909060].pack("L>").bytes`, "[1, 2, 3, 4]\n"},
+		{"pack_Q_be", `p [1].pack("Q>").bytes`, "[0, 0, 0, 0, 0, 0, 0, 1]\n"},
+		// modifier order and combinations
+		{"unpack_L_le_bang", `p "abcdefgh".unpack("L<_")`, "[7523094288207667809]\n"},
+		{"unpack_L_bang_le", `p "abcdefgh".unpack("L_<")`, "[7523094288207667809]\n"},
+		{"unpack_L_le_native", `p "abcdefgh".unpack("L<!")`, "[7523094288207667809]\n"},
+		// '!' / '_' widen l/L to the C long (8 bytes on LP64)
+		{"pack_L_bang_width", `p [1].pack("L!").bytes.length`, "8\n"},
+		{"pack_l_under_width", `p [1].pack("l_").bytes.length`, "8\n"},
+		// '!' leaves the other integer directives at their native width
+		{"pack_S_bang_width", `p [1].pack("S!").bytes.length`, "2\n"},
+		{"pack_I_bang_width", `p [1].pack("I!").bytes.length`, "4\n"},
+		{"pack_Q_bang_width", `p [1].pack("Q!").bytes.length`, "8\n"},
+		{"pack_j_bang_width", `p [1].pack("j!").bytes.length`, "8\n"},
+		// i / I (native C int, 32-bit) and j / J (intptr_t, 64-bit)
+		{"pack_i", `p [1].pack("i").bytes`, "[1, 0, 0, 0]\n"},
+		{"pack_I_be", `p [1].pack("I>").bytes`, "[0, 0, 0, 1]\n"},
+		{"unpack_i_le", `p "abcd".unpack("i<")`, "[1684234849]\n"},
+		{"unpack_I_le", `p "abcd".unpack("I<")`, "[1684234849]\n"},
+		{"pack_j_width", `p [1].pack("j").bytes.length`, "8\n"},
+		{"unpack_j_le", `p "abcdefgh".unpack("j<")`, "[7523094288207667809]\n"},
+		{"unpack_J_le", `p "abcdefgh".unpack("J<")`, "[7523094288207667809]\n"},
+		// unsigned 64-bit above 2**63 decodes to a Bignum
+		{"unpack_Q_big", `p "\x00\xcc\x00\xbb\x00\xaa\x00\xff".unpack("Q<")`, "[18374873399785737216]\n"},
+		{"unpack_q_neg64", `p "\x00\xcc\x00\xbb\x00\xaa\x00\xff".unpack("q<")`, "[-71870673923814400]\n"},
+		// Bignum pack argument (value above 2**63) round-trips
+		{"pack_bignum_Q", `p [0xdef0abcd34127856].pack("Q<").unpack("Q<")`, "[16064528768660830294]\n"},
+		{"pack_negint_Q", `p [-1].pack("Q<").unpack("Q<")`, "[18446744073709551615]\n"},
+		// whitespace (all ISSPACE kinds) is ignored
+		{"whitespace_all", `p "ABCD".unpack("a2\t\n\v\f\ra2")`, "[\"AB\", \"CD\"]\n"},
+		// comments run to end of line, or to end of string
+		{"comment_nl", "p [65].pack(\"C # note\n\").bytes", "[65]\n"},
+		{"comment_eof", `p [65].pack("C#tail").bytes`, "[65]\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPackUnpackCoercion covers the #to_str format coercion, #to_str element
+// coercion for a/A/Z, #to_int and Float element coercion for the integer
+// directives.
+func TestPackUnpackCoercion(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"fmt_to_str", `o = Object.new; def o.to_str; "C"; end; p [65].pack(o).bytes`, "[65]\n"},
+		{"unpack_fmt_to_str", `o = Object.new; def o.to_str; "C"; end; p "A".unpack(o)`, "[65]\n"},
+		{"a_to_str", `o = Object.new; def o.to_str; "hi"; end; p [o].pack("a2").bytes`, "[104, 105]\n"},
+		{"int_to_int", `o = Object.new; def o.to_int; 65; end; p [o].pack("C").bytes`, "[65]\n"},
+		{"int_float_trunc", `p [1.9].pack("C").bytes`, "[1]\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPackUnpackModifierErrors covers the modifier validation raises.
+func TestPackUnpackModifierErrors(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"lt_on_C", `"x".unpack("C<")`, "ArgumentError"},
+		{"gt_on_C", `"x".unpack("C>")`, "ArgumentError"},
+		{"bang_on_C", `"x".unpack("C!")`, "ArgumentError"},
+		{"bang_on_N", `"x".unpack("N!")`, "ArgumentError"},
+		{"lt_on_N", `"x".unpack("N<")`, "ArgumentError"},
+		{"both_lt_gt", `"abcd".unpack("L<>")`, "ArgumentError"},
+		{"fmt_to_str_bad", `o = Object.new; def o.to_str; 5; end; [1].pack(o)`, "TypeError"},
+		{"a_to_str_bad", `o = Object.new; def o.to_str; 5; end; [o].pack("a2")`, "TypeError"},
+		{"int_no_coerce", `["x"].pack("C")`, "TypeError"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runErr(t, tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("src=%q: got err=%v, want containing %q", tc.src, err, tc.want)
+			}
+		})
+	}
+}
+
 // TestPackUnpackErrors covers the raising paths: unknown directive, missing
 // format argument, wrong argument types, and too few pack arguments.
 func TestPackUnpackErrors(t *testing.T) {
