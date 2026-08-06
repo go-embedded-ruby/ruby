@@ -355,14 +355,14 @@ func (vm *VM) bootstrap() {
 		return vm.callBlockSelf(blk, self, args)
 	})
 	formatFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fmtStr, ok := args[0].(*object.String)
-		if !ok {
-			raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
-		return object.NewString(vm.formatString(fmtStr.Str(), args[1:]))
+		return object.NewString(vm.formatString(vm.coerceFormatString(args[0]), args[1:]))
 	}
 	vm.cObject.define("format", formatFn)
 	vm.cObject.define("sprintf", formatFn)
+	vm.cObject.define("printf", nativePrintf)
 	vm.cObject.define("proc", func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("ArgumentError", "tried to create Proc object without a block")
@@ -4067,6 +4067,63 @@ func arrayIndex(a *object.Array, i int64) (int, bool) {
 func nativePuts(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 	vm.ioPuts(vm.curStdout(), args)
 	return object.NilV
+}
+
+// nativePrintf implements Kernel#printf. With a String first argument it formats
+// the remaining arguments and writes to the current $stdout; otherwise the first
+// argument is the output target (any object answering #write, e.g. an IO,
+// StringIO, or a mock) and the format string follows. The formatted text is
+// always delivered through #write so a reassigned or mocked target captures it,
+// matching MRI.
+func nativePrintf(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	if len(args) == 0 {
+		return object.NilV
+	}
+	var target object.Value
+	var fmtArgs []object.Value
+	if _, ok := args[0].(*object.String); ok {
+		target = vm.stdoutValue()
+		fmtArgs = args
+	} else {
+		target = args[0]
+		fmtArgs = args[1:]
+	}
+	if len(fmtArgs) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+	}
+	str := vm.formatString(vm.coerceFormatString(fmtArgs[0]), fmtArgs[1:])
+	vm.send(target, "write", []object.Value{object.NewString(str)}, nil)
+	return object.NilV
+}
+
+// stdoutValue returns the object currently bound to $stdout (an IOObj, a
+// StringIO, or a host-supplied object), falling back to the default stdout IO
+// when the global is unset.
+func (vm *VM) stdoutValue() object.Value {
+	if v, ok := vm.globals["$stdout"]; ok {
+		return v
+	}
+	return vm.curStdout()
+}
+
+// coerceFormatString returns the format string for Kernel#sprintf/#format/#printf:
+// a String directly, otherwise the result of the argument's #to_str (MRI coerces
+// the format argument with #to_str, never #to_s). A missing #to_str or a
+// non-String #to_str result raises TypeError with MRI's message.
+func (vm *VM) coerceFormatString(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	if o, ok := v.(*RObject); ok && vm.respondsToDynamic(o, "to_str") {
+		r := vm.send(o, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Str()
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			vm.classOf(o).name, vm.classOf(o).name, vm.classOf(r).name)
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return ""
 }
 
 func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
