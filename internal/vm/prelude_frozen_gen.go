@@ -1728,12 +1728,14 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "chunk_while",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 1, Flags: 1}, {Op: 28, A: 10}, {Op: 6}, {Op: 53}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 6}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 1}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 1, A: 1}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 18}, {Op: 28, A: 61}, {Op: 11}, {Op: 11, A: 3}, {Op: 1, A: 1}, {Op: 14}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 48, A: 2}, {Op: 28, A: 45}, {Op: 11, A: 2}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 30, A: 4, B: 1}, {Op: 26, A: 54}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 4, B: 1}, {Op: 9}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 11, A: 3}, {Op: 1, A: 1}, {Op: 13}, {Op: 12, A: 3}, {Op: 9}, {Op: 26, A: 24}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 4, B: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 33}, {Op: 1}, {Op: 30, A: 1, B: 2}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 28, A: 22}, {Op: 6}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 1}, {Op: 53}, {Op: 26, A: 23}, {Op: 2}, {Op: 9}, {Op: 6}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 1, A: 2}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 1, A: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 18}, {Op: 28, A: 73}, {Op: 11}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 14}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 48, A: 2}, {Op: 28, A: 57}, {Op: 11, A: 2}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 30, A: 7, B: 1}, {Op: 26, A: 66}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 13}, {Op: 12, A: 3}, {Op: 9}, {Op: 26, A: 36}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 1}, {Op: 53}},
 						Consts: []object.Value{
+							object.NewString("tried to create Proc object without a block"),
+							object.Symbol("each"),
 							object.IntValue(0),
 							object.IntValue(1),
 						},
-						Names:       []string{"to_a", "empty?", "[]", "length", "<<"},
+						Names:       []string{"ArgumentError", "raise", "to_a", "empty?", "to_enum", "[]", "length", "<<"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
@@ -1744,12 +1746,14 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "slice_when",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 30}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 1, Flags: 1}, {Op: 28, A: 10}, {Op: 6}, {Op: 53}, {Op: 26, A: 11}, {Op: 2}, {Op: 9}, {Op: 6}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 1}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 1, A: 1}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 18}, {Op: 28, A: 61}, {Op: 11}, {Op: 11, A: 3}, {Op: 1, A: 1}, {Op: 14}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 48, A: 2}, {Op: 28, A: 49}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 4, B: 1}, {Op: 9}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 26, A: 54}, {Op: 11, A: 2}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 2, B: 1, Flags: 1}, {Op: 30, A: 4, B: 1}, {Op: 9}, {Op: 11, A: 3}, {Op: 1, A: 1}, {Op: 13}, {Op: 12, A: 3}, {Op: 9}, {Op: 26, A: 24}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 4, B: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 33}, {Op: 1}, {Op: 30, A: 1, B: 2}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 28, A: 22}, {Op: 6}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 1}, {Op: 53}, {Op: 26, A: 23}, {Op: 2}, {Op: 9}, {Op: 6}, {Op: 12, A: 1}, {Op: 9}, {Op: 11}, {Op: 1, A: 2}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 9}, {Op: 1, A: 3}, {Op: 12, A: 3}, {Op: 9}, {Op: 11, A: 3}, {Op: 11}, {Op: 30, A: 6, Flags: 1}, {Op: 18}, {Op: 28, A: 73}, {Op: 11}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 14}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 48, A: 2}, {Op: 28, A: 61}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 6, A: 1}, {Op: 12, A: 2}, {Op: 26, A: 66}, {Op: 11, A: 2}, {Op: 11}, {Op: 11, A: 3}, {Op: 30, A: 5, B: 1, Flags: 1}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 3}, {Op: 1, A: 3}, {Op: 13}, {Op: 12, A: 3}, {Op: 9}, {Op: 26, A: 36}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 11, A: 2}, {Op: 30, A: 7, B: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 1, A: 1}, {Op: 30, A: 4, B: 1, Flags: 1}, {Op: 53}},
 						Consts: []object.Value{
+							object.NewString("tried to create Proc object without a block"),
+							object.Symbol("each"),
 							object.IntValue(0),
 							object.IntValue(1),
 						},
-						Names:       []string{"to_a", "empty?", "[]", "length", "<<"},
+						Names:       []string{"ArgumentError", "raise", "to_a", "empty?", "to_enum", "[]", "length", "<<"},
 						NumRequired: 0,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
