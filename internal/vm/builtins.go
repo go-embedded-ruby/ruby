@@ -3210,6 +3210,78 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cHash.define("filter!", vm.cHash.methods["select!"].native)
+	// assoc/rassoc scan the pairs in insertion order and return the first
+	// [key, value] whose key (assoc) or value (rassoc) is Ruby-== to the
+	// argument, or nil when none matches. They never consult the default.
+	vm.cHash.define("assoc", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		for _, k := range h.Keys {
+			if valueEqual(k, args[0]) {
+				v, _ := h.Get(k)
+				return hashPair(k, v)
+			}
+		}
+		return object.NilV
+	})
+	vm.cHash.define("rassoc", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			if valueEqual(v, args[0]) {
+				return hashPair(k, v)
+			}
+		}
+		return object.NilV
+	})
+	// flatten returns the key/value pairs as one flat Array. The default depth is
+	// 1 (the pair wrappers are removed but Array values are left intact); a depth
+	// >= 2 recurses that many further levels into nested Array values. A
+	// non-Integer argument raises TypeError (via intArg).
+	vm.cHash.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		depth := 1
+		if len(args) > 0 {
+			depth = int(intArg(args[0]))
+		}
+		h := self.(*object.Hash)
+		pairs := make([]object.Value, 0, len(h.Keys))
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			pairs = append(pairs, hashPair(k, v))
+		}
+		return object.NewArrayFromSlice(flattenDepth(pairs, depth))
+	})
+	// compact returns a copy without the nil-valued pairs, preserving the
+	// receiver's default value and default proc. compact! removes them in place,
+	// returning self, or nil when nothing was removed.
+	vm.cHash.define("compact", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		out := object.NewHash()
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			if !object.IsNil(v) {
+				out.Set(k, v)
+			}
+		}
+		out.Default = h.Default
+		out.DefaultProc = h.DefaultProc
+		return out
+	})
+	vm.cHash.define("compact!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		var drop []object.Value
+		for _, k := range h.Keys {
+			if v, _ := h.Get(k); object.IsNil(v) {
+				drop = append(drop, k)
+			}
+		}
+		if len(drop) == 0 {
+			return object.NilV
+		}
+		for _, k := range drop {
+			h.Delete(k)
+		}
+		return self
+	})
 
 	// Range.
 	vm.cRange.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
