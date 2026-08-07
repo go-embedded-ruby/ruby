@@ -1,6 +1,9 @@
 package vm_test
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestEnumerableExtraMethods covers Enumerable methods added in the prelude so
 // every Enumerable (Range, Hash, Struct, Enumerator) gains them, not just Array:
@@ -37,6 +40,50 @@ func TestEnumerableExtraMethods(t *testing.T) {
 // customEnum defines a fresh #each-only Enumerable used to prove the prelude's
 // first/take/drop work over any Enumerable, not just Array/Range.
 const customEnum = "class E\n include Enumerable\n def initialize(*a) @a=a end\n def each; @a.each { |x| yield x } end\nend\n"
+
+// TestEnumerableChunkWhileSliceWhen covers Enumerable#chunk_while/#slice_when
+// added in the prelude to MRI 3.4/4.0: they return an Enumerator of runs split
+// between adjacent pairs (chunk_while where the block is false, slice_when where
+// it is true), call the block exactly length-1 times, raise ArgumentError with
+// no block, keep a single element as one run, drop no empty run at the edges,
+// gather multi-value yields, and work over any Enumerable. MRI Ruby 4.0.5.
+func TestEnumerableChunkWhileSliceWhen(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// both return an Enumerator.
+		{customEnum + `p E.new(1, 2, 4).chunk_while { |a, b| b - a == 1 }.class`, "Enumerator\n"},
+		{customEnum + `p E.new(1, 2, 4).slice_when { |a, b| b - a != 1 }.class`, "Enumerator\n"},
+		// splitting: chunk_while keeps a run while true; slice_when cuts where true.
+		{customEnum + `p E.new(10, 9, 7, 6, 4, 3, 2, 1).chunk_while { |i, j| i - 1 == j }.to_a`, "[[10, 9], [7, 6], [4, 3, 2, 1]]\n"},
+		{customEnum + `p E.new(10, 9, 7, 6, 4, 3, 2, 1).slice_when { |i, j| i - 1 != j }.to_a`, "[[10, 9], [7, 6], [4, 3, 2, 1]]\n"},
+		// block called length-1 times.
+		{customEnum + `n = 0; E.new(1, 2, 3, 4, 5).chunk_while { |a, b| n += 1; true }.to_a; p n`, "4\n"},
+		{customEnum + `n = 0; E.new(1, 2, 3, 4, 5).slice_when { |a, b| n += 1; false }.to_a; p n`, "4\n"},
+		// single element -> one run; empty -> no runs; slice_when small cases.
+		{`p [1].chunk_while { |a, b| a.even? }.to_a`, "[[1]]\n"},
+		{customEnum + `p E.new.chunk_while { |a, b| true }.to_a`, "[]\n"},
+		{customEnum + `p E.new.slice_when { |a, b| raise }.to_a`, "[]\n"},
+		{customEnum + `p E.new(42).slice_when { |a, b| raise }.to_a`, "[[42]]\n"},
+		// slice_when cutting at every boundary yields singletons.
+		{customEnum + `p E.new(10, 9, 7, 6).slice_when { true }.to_a`, "[[10], [9], [7], [6]]\n"},
+		// multi-value yields gather into whole Arrays before pairing.
+		{"class M2\n include Enumerable\n def each; yield 1, 2; end\nend\n" +
+			`p M2.new.slice_when { true }.to_a`, "[[[1, 2]]]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// no block -> ArgumentError.
+	for _, src := range []string{
+		customEnum + `E.new(1, 2, 3).chunk_while`,
+		customEnum + `E.new(1, 2, 3).slice_when`,
+	} {
+		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
+			t.Errorf("src=%q got=%v want ArgumentError", src, err)
+		}
+	}
+}
 
 // TestEnumerableFirstTakeDrop covers Enumerable#first/#take/#drop added in the
 // prelude: leading elements over any Enumerable, count coercion via #to_int,

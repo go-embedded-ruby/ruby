@@ -576,12 +576,15 @@ module Enumerable
     r
   end
 
-  # chunk_while / slice_when split the element stream into runs at each pair where
-  # the block (does not) hold. They return the Array of runs (MRI returns a lazy
-  # Enumerator; the materialised values match).
+  # chunk_while / slice_when split the element stream into runs at each adjacent
+  # pair (i, j) for which the block does not hold (chunk_while) / does hold
+  # (slice_when). Both require a block (ArgumentError otherwise), call it exactly
+  # length-1 times, and return an Enumerator of the runs (MRI's is lazy; the
+  # materialised values match). A single element yields one run of that element.
   def chunk_while
+    raise ArgumentError, "tried to create Proc object without a block" unless block_given?
     a = to_a
-    return [] if a.empty?
+    return [].to_enum(:each) if a.empty?
     chunks = []
     cur = [a[0]]
     i = 1
@@ -595,12 +598,13 @@ module Enumerable
       i = i + 1
     end
     chunks << cur
-    chunks
+    chunks.to_enum(:each)
   end
 
   def slice_when
+    raise ArgumentError, "tried to create Proc object without a block" unless block_given?
     a = to_a
-    return [] if a.empty?
+    return [].to_enum(:each) if a.empty?
     chunks = []
     cur = [a[0]]
     i = 1
@@ -614,7 +618,7 @@ module Enumerable
       i = i + 1
     end
     chunks << cur
-    chunks
+    chunks.to_enum(:each)
   end
 
   # chunk groups consecutive elements sharing the block's value into
