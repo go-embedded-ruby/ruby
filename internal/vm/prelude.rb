@@ -676,6 +676,57 @@ module Enumerable
     result.to_enum(:each) { nil }
   end
 
+  # slice_before / slice_after split the element stream into runs, starting a new
+  # run just before (slice_before) / just after (slice_after) each element that
+  # matches. The boundary test is either a block over the element or `pat === x`
+  # for a single pattern argument — never both, and exactly one must be given
+  # (ArgumentError otherwise). Both return an Enumerator of the runs (its #size is
+  # nil) and gather multi-value yields into whole Arrays. Empty runs are never
+  # produced, even when the first or last element matches.
+  def slice_before(*args)
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 1)" if args.length > 1
+    if block_given?
+      raise ArgumentError, "both pattern and block are given" unless args.empty?
+    else
+      raise ArgumentError, "wrong number of arguments (given 0, expected 1)" if args.empty?
+      pat = args[0]
+    end
+    runs = []
+    cur = nil
+    __each_packed { |x|
+      if block_given? ? yield(x) : (pat === x)
+        runs << cur unless cur.nil?
+        cur = [x]
+      else
+        cur = [] if cur.nil?
+        cur << x
+      end
+    }
+    runs << cur unless cur.nil?
+    runs.to_enum(:each) { nil }
+  end
+
+  def slice_after(*args)
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 1)" if args.length > 1
+    if block_given?
+      raise ArgumentError, "both pattern and block are given" unless args.empty?
+    else
+      raise ArgumentError, "wrong number of arguments (given 0, expected 1)" if args.empty?
+      pat = args[0]
+    end
+    runs = []
+    cur = []
+    __each_packed { |x|
+      cur << x
+      if block_given? ? yield(x) : (pat === x)
+        runs << cur
+        cur = []
+      end
+    }
+    runs << cur unless cur.empty?
+    runs.to_enum(:each) { nil }
+  end
+
   def minmax_by
     [min_by { |x| yield(x) }, max_by { |x| yield(x) }]
   end
