@@ -501,26 +501,49 @@ module Enumerable
     r
   end
 
+  # each_slice(n) yields consecutive, non-overlapping groups of n elements (the
+  # final group may be shorter). each_cons(n) yields every overlapping window of
+  # n elements. Both coerce n through #to_int, reject n <= 0 (ArgumentError), and
+  # stream lazily so a break stops iteration early and unbounded sources work.
+  # With no block they return a sized Enumerator (size is nil unless the receiver
+  # answers #size); with a block they return self.
   def each_slice(n)
-    return enum_for(:each_slice, n) unless block_given?
-    a = to_a
-    i = 0
-    while i < a.length
-      yield(a[i, n])
-      i = i + n
+    n = __enum_int_arg(n)
+    raise ArgumentError, "invalid slice size" if n <= 0
+    unless block_given?
+      return enum_for(:each_slice, n) {
+        (sz = size if respond_to?(:size)) ? (sz + n - 1) / n : nil
+      }
     end
-    nil
+    buf = []
+    __each_packed { |x|
+      buf << x
+      if buf.length == n
+        yield(buf)
+        buf = []
+      end
+    }
+    yield(buf) unless buf.empty?
+    self
   end
 
   def each_cons(n)
-    return enum_for(:each_cons, n) unless block_given?
-    a = to_a
-    i = 0
-    while i + n <= a.length
-      yield(a[i, n])
-      i = i + 1
+    n = __enum_int_arg(n)
+    raise ArgumentError, "invalid size" if n <= 0
+    unless block_given?
+      return enum_for(:each_cons, n) {
+        if sz = (size if respond_to?(:size))
+          sz - n + 1 < 0 ? 0 : sz - n + 1
+        end
+      }
     end
-    nil
+    window = []
+    __each_packed { |x|
+      window << x
+      window.shift if window.length > n
+      yield(window.dup) if window.length == n
+    }
+    self
   end
 
   # first / take return the leading elements, stopping iteration as soon as

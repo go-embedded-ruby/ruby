@@ -1,6 +1,9 @@
 package vm_test
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestEnumerableExtraMethods covers Enumerable methods added in the prelude so
 // every Enumerable (Range, Hash, Struct, Enumerator) gains them, not just Array:
@@ -76,6 +79,72 @@ func TestEnumerableFirstTakeDrop(t *testing.T) {
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// sizedEnum defines an #each-only Enumerable that also answers #size, used to
+// prove each_slice/each_cons return a sized Enumerator when the source knows its
+// size (and nil when it does not — customEnum above has no #size).
+const sizedEnum = "class S\n include Enumerable\n def initialize(*a) @a=a end\n def each; @a.each { |x| yield x } end\n def size; @a.size end\nend\n"
+
+// TestEnumerableEachSliceCons covers Enumerable#each_slice/#each_cons added in
+// the prelude: non-overlapping groups vs sliding windows over any Enumerable,
+// #to_int coercion of n, the n<=0 ArgumentError, returning self with a block and
+// a sized Enumerator without one (size nil when the source lacks #size), lazy
+// streaming that stops on break, and gathered multi-value yields. MRI Ruby 4.0.5.
+func TestEnumerableEachSliceCons(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// grouping / windowing over a custom Enumerable, with a block and without.
+		{customEnum + `r = []; E.new(7, 6, 5, 4, 3, 2, 1).each_slice(3) { |g| r << g }; p r`, "[[7, 6, 5], [4, 3, 2], [1]]\n"},
+		{customEnum + `p E.new(4, 3, 2, 1).each_cons(3).to_a`, "[[4, 3, 2], [3, 2, 1]]\n"},
+		{customEnum + `p E.new(7, 6, 5, 4, 3, 2, 1).each_slice(3).to_a`, "[[7, 6, 5], [4, 3, 2], [1]]\n"},
+		// n >= length: slice yields one short group; cons(len) one window, cons(len+1) none.
+		{customEnum + `p E.new(4, 3, 2, 1).each_slice(9).to_a`, "[[4, 3, 2, 1]]\n"},
+		{customEnum + `p E.new(4, 3, 2, 1).each_cons(4).to_a`, "[[4, 3, 2, 1]]\n"},
+		{customEnum + `p E.new(4, 3, 2, 1).each_cons(5).to_a`, "[]\n"},
+		// returns self when a block is given.
+		{customEnum + `e = E.new(1, 2, 3); p e.each_slice(2) {}.equal?(e)`, "true\n"},
+		{customEnum + `e = E.new(1, 2, 3); p e.each_cons(2) {}.equal?(e)`, "true\n"},
+		// #to_int coercion of n (Float truncates; #to_int object honoured).
+		{customEnum + `r = []; E.new(7, 6, 5, 4, 3, 2, 1).each_slice(3.3) { |g| r << g }; p r`, "[[7, 6, 5], [4, 3, 2], [1]]\n"},
+		{customEnum + `class I; def to_int; 3; end; end; p E.new(4, 3, 2, 1).each_slice(I.new) { |g| break g.length }`, "3\n"},
+		// Enumerator#size: ceil(size/n) for slice, size-n+1 (>=0) for cons, when sized.
+		{sizedEnum + `p S.new(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).each_slice(3).size`, "4\n"},
+		{sizedEnum + `p S.new(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).each_slice(10).size`, "1\n"},
+		{sizedEnum + `p S.new.each_slice(10).size`, "0\n"},
+		{sizedEnum + `p S.new(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).each_cons(3).size`, "8\n"},
+		{sizedEnum + `p S.new(1, 2, 3).each_cons(20).size`, "0\n"},
+		{sizedEnum + `p S.new.each_cons(10).size`, "0\n"},
+		// size is nil when the source Enumerable does not answer #size.
+		{customEnum + `p E.new(1, 2, 3, 4).each_slice(8).size`, "nil\n"},
+		{customEnum + `p E.new(1, 2, 3, 4).each_cons(8).size`, "nil\n"},
+		// lazy streaming: break stops iteration; only as much as needed is yielded.
+		{"class C\n include Enumerable\n def initialize(*a) @a=a; @n=0 end\n attr_reader :n\n def each; @a.each { |x| @n+=1; yield x } end\nend\n" +
+			`c = C.new(1, 2, :stop, 9, 9); r = c.each_slice(2) { |g| break 42 if g[0] == :stop }; p [r, c.n]`, "[42, 4]\n"},
+		{"class C\n include Enumerable\n def initialize(*a) @a=a; @n=0 end\n attr_reader :n\n def each; @a.each { |x| @n+=1; yield x } end\nend\n" +
+			`c = C.new(1, 2, :stop, 9, 9); r = c.each_cons(2) { |g| break 42 if g[-1] == :stop }; p [r, c.n]`, "[42, 3]\n"},
+		// multi-value yields gather into whole Arrays.
+		{"class M\n include Enumerable\n def each; yield 1, 2; yield 3, 4, 5; yield 6, 7, 8, 9; end\nend\n" +
+			`p M.new.each_slice(2).to_a`, "[[[1, 2], [3, 4, 5]], [[6, 7, 8, 9]]]\n"},
+		{"class M\n include Enumerable\n def each; yield 1, 2; yield 3, 4, 5; yield 6, 7, 8, 9; end\nend\n" +
+			`p M.new.each_cons(2).to_a`, "[[[1, 2], [3, 4, 5]], [[3, 4, 5], [6, 7, 8, 9]]]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// n <= 0 raises ArgumentError, for both the block and no-block forms.
+	for _, src := range []string{
+		customEnum + `E.new(1, 2).each_slice(0) {}`,
+		customEnum + `E.new(1, 2).each_slice(-2) {}`,
+		customEnum + `E.new(1, 2).each_slice(0)`,
+		customEnum + `E.new(1, 2).each_cons(0) {}`,
+		customEnum + `E.new(1, 2).each_cons(-2)`,
+	} {
+		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
+			t.Errorf("src=%q got=%v want ArgumentError", src, err)
 		}
 	}
 }
