@@ -79,3 +79,26 @@ func TestEnumerableFirstTakeDrop(t *testing.T) {
 		}
 	}
 }
+
+// TestEnumerableUniqCompact covers Enumerable#uniq and #compact added in the
+// prelude: uniq removes duplicates (by value, or by a block's key) keeping the
+// first occurrence and gathers multi-value yields into whole Arrays; compact
+// drops nil (including a zero-argument yield). Asserted against MRI Ruby 4.0.5.
+func TestEnumerableUniqCompact(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p [1, 2, 2, 3, 3, 3, 1].each.uniq`, "[1, 2, 3]\n"},
+		{`p [1.0, 1].each.uniq`, "[1.0, 1]\n"}, // eql? semantics: 1.0 and 1 differ
+		{`p [0, 1, 2, 3].each.uniq { |n| n.even? }`, "[0, 1]\n"},
+		{`p({a: 1, b: 1, c: 2}.uniq { |_, v| v })`, "[[:a, 1], [:c, 2]]\n"},
+		{`p Enumerator.new { |y| y.yield 1, 2 }.uniq`, "[[1, 2]]\n"},
+		{`p Enumerator.new { |y| y.yield; y.yield :v }.uniq`, "[nil, :v]\n"},
+		{`p [nil, 1, 2, nil, true, false].each.compact`, "[1, 2, true, false]\n"},
+		{`p Enumerator.new { |y| y.yield 1, 2 }.compact`, "[[1, 2]]\n"},
+		{`p Enumerator.new { |y| y.yield; y.yield :v }.compact`, "[:v]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}

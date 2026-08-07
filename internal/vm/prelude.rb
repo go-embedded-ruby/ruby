@@ -64,7 +64,16 @@ module Enumerable
   # multi-parameter block downstream (`map { |x, i| }`) auto-splats the packed
   # Array exactly as MRI does — without each method handling arity itself.
   def __each_packed
-    each { |*a| yield(a.empty? ? nil : (a.size == 1 ? a[0] : a)) }
+    each { |*a| yield(__pack(a)) }
+  end
+
+  # __pack applies CRuby's rb_enum_values_pack to one #each yield's arguments:
+  # zero arguments become nil, a lone value stays scalar, several gather into an
+  # Array. Collection methods iterate via __each_packed; the predicates below
+  # instead forward the raw arguments to their block (so block arity governs)
+  # and only pack for the pattern / no-block forms, exactly as MRI does.
+  def __pack(a)
+    a.empty? ? nil : (a.size == 1 ? a[0] : a)
   end
 
   # __enum_int_arg coerces a count argument the way MRI's rb_num2long does for
@@ -128,12 +137,15 @@ module Enumerable
   end
 
   def count(*args)
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
     n = 0
-    if args.empty?
-      __each_packed { |x| n = n + 1 if !block_given? || yield(x) }
-    else
+    if !args.empty?
       item = args[0]
-      __each_packed { |x| n = n + 1 if x == item }
+      each { |*a| n = n + 1 if __pack(a) == item }
+    elsif block_given?
+      each { |*a| n = n + 1 if yield(*a) }
+    else
+      each { |*a| n = n + 1 }
     end
     n
   end
@@ -266,31 +278,90 @@ module Enumerable
   # records whether a pattern was actually passed.
   def any?(pattern = (no_pat = true; nil))
     blk = block_given?
-    result = false
-    __each_packed do |x|
-      truth = no_pat ? (blk ? yield(x) : x) : (pattern === x)
-      result = true if truth
+    catch(:__enum_any) do
+      each { |*a|
+        truth = no_pat ? (blk ? yield(*a) : __pack(a)) : (pattern === __pack(a))
+        throw :__enum_any, true if truth
+      }
+      false
     end
-    result
   end
 
   def all?(pattern = (no_pat = true; nil))
     blk = block_given?
-    result = true
-    __each_packed do |x|
-      truth = no_pat ? (blk ? yield(x) : x) : (pattern === x)
-      result = false unless truth
+    catch(:__enum_all) do
+      each { |*a|
+        truth = no_pat ? (blk ? yield(*a) : __pack(a)) : (pattern === __pack(a))
+        throw :__enum_all, false unless truth
+      }
+      true
     end
-    result
   end
 
   def none?(pattern = (no_pat = true; nil))
     blk = block_given?
-    result = true
-    __each_packed do |x|
-      truth = no_pat ? (blk ? yield(x) : x) : (pattern === x)
-      result = false if truth
+    catch(:__enum_none) do
+      each { |*a|
+        truth = no_pat ? (blk ? yield(*a) : __pack(a)) : (pattern === __pack(a))
+        throw :__enum_none, false if truth
+      }
+      true
     end
+  end
+
+  # one? is true when exactly one element (or pattern/block match) is truthy. It
+  # stops as soon as a second match is seen. Like any?/all?/none? the block form
+  # forwards raw #each arguments (block arity governs) while the pattern form
+  # matches against the packed value.
+  def one?(pattern = (no_pat = true; nil))
+    blk = block_given?
+    n = 0
+    catch(:__enum_one) do
+      each { |*a|
+        truth = no_pat ? (blk ? yield(*a) : __pack(a)) : (pattern === __pack(a))
+        if truth
+          n = n + 1
+          throw :__enum_one if n > 1
+        end
+      }
+    end
+    n == 1
+  end
+
+  # uniq returns the elements with duplicates removed, keeping first occurrence.
+  # Without a block elements are compared by #hash and #eql? (through a Hash);
+  # with a block the block's return value is the uniqueness key. Multi-value
+  # yields are gathered into whole Arrays.
+  def uniq
+    result = []
+    keys = []
+    hashes = []
+    __each_packed { |x|
+      key = block_given? ? yield(x) : x
+      h = key.hash
+      seen = false
+      i = 0
+      while i < keys.length
+        if hashes[i] == h && keys[i].eql?(key)
+          seen = true
+          break
+        end
+        i = i + 1
+      end
+      unless seen
+        keys << key
+        hashes << h
+        result << x
+      end
+    }
+    result
+  end
+
+  # compact returns the elements with every nil removed (a zero-argument yield
+  # packs to nil and is dropped too).
+  def compact
+    result = []
+    __each_packed { |x| result << x unless x.nil? }
     result
   end
 
