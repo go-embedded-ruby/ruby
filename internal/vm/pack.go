@@ -20,6 +20,9 @@ import (
 //	v/V          little-endian unsigned 16/32-bit
 //	a/A/Z        binary string (null-padded / space-padded / null-terminated)
 //	H/h          hex string, high/low nibble first
+//	b/B          bit string, low/high bit first
+//	m            base64-encoded string (RFC 2045 / RFC 4648, count-0 variant)
+//	M            quoted-printable-encoded string
 //	U            UTF-8 character / codepoint
 //
 // The integer directives s/S/i/I/l/L/q/Q/j/J accept the byte-order modifiers
@@ -31,7 +34,8 @@ func (vm *VM) registerPackUnpack() {
 	vm.cArray.define("pack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		elems := self.(*object.Array).Elems
 		fmtStr := vm.packFormat(args)
-		return object.NewStringBytesEnc(vm.packBytes(elems, fmtStr), "ASCII-8BIT")
+		out, enc := vm.packBytes(elems, fmtStr)
+		return object.NewStringBytesEnc(out, enc)
 	})
 	vm.cString.define("unpack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := self.(*object.String).Bytes()
@@ -172,7 +176,7 @@ func isPackCode(c byte) bool {
 	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'I', 'i', 'J', 'j',
 		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U',
 		'f', 'F', 'd', 'D', 'e', 'E', 'g', 'G',
-		'x', 'X', '@', 'b', 'B':
+		'x', 'X', '@', 'b', 'B', 'm', 'M':
 		return true
 	}
 	return false
@@ -373,7 +377,7 @@ func (vm *VM) packIntArg(v object.Value) uint64 {
 }
 
 // packBytes serialises elems according to fmtStr.
-func (vm *VM) packBytes(elems []object.Value, fmtStr string) []byte {
+func (vm *VM) packBytes(elems []object.Value, fmtStr string) ([]byte, string) {
 	dirs := parseFormat(fmtStr, "pack")
 	out := []byte{}
 	idx := 0
@@ -453,9 +457,42 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) []byte {
 			out = packHex(out, d, vm.packStrArg(next()))
 		case d.code == 'B' || d.code == 'b':
 			out = packBits(out, d, vm.packStrArg(next()))
+		case d.code == 'm':
+			out = packBase64(out, d, vm.packStrArg(next()))
+		case d.code == 'M':
+			out = qpencode(out, []byte(vm.displayStr(next())), packQPLen(d))
 		}
 	}
-	return out
+	return out, packEncoding(dirs)
+}
+
+// packEncoding computes the encoding MRI associates with a pack result. It
+// starts optimistic at US-ASCII; a 'U' directive upgrades that to UTF-8; the
+// base64/quoted-printable/uuencode directives 'm'/'M'/'u' keep it (they emit
+// only ASCII); every other directive can emit arbitrary bytes and so drops the
+// result to ASCII-8BIT (BINARY).
+func packEncoding(dirs []packDir) string {
+	enc := 1 // 1 = US-ASCII, 2 = UTF-8, 0 = ASCII-8BIT
+	for _, d := range dirs {
+		switch d.code {
+		case 'U':
+			if enc == 1 {
+				enc = 2
+			}
+		case 'm', 'M', 'u':
+			// keep the current encoding
+		default:
+			enc = 0
+		}
+	}
+	switch enc {
+	case 1:
+		return "US-ASCII"
+	case 2:
+		return "UTF-8"
+	default:
+		return "ASCII-8BIT"
+	}
 }
 
 // isIntDir reports whether d is one of the integer directives.
@@ -597,6 +634,307 @@ func hexNibble(c byte) byte {
 	return c & 0x0f
 }
 
+// b64Table is the MRI base64 alphabet used by the 'm' directive.
+const b64Table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+// b64Rev maps a byte to its base64 value, or -1 when it is not a base64
+// character. Built once from b64Table.
+var b64Rev = func() [256]int {
+	var t [256]int
+	for i := range t {
+		t[i] = -1
+	}
+	for i := 0; i < len(b64Table); i++ {
+		t[b64Table[i]] = i
+	}
+	return t
+}()
+
+// b64val returns c's base64 value, or -1 when c is not a base64 character.
+func b64val(c byte) int { return b64Rev[c] }
+
+// b64EncodeChunk appends the base64 encoding of the ≤3-byte chunk s to out,
+// with '=' padding for a final short group and, when tailLF, a trailing newline
+// — matching MRI's encodes() for the 'm' directive.
+func b64EncodeChunk(out, s []byte, tailLF bool) []byte {
+	i := 0
+	n := len(s)
+	for i+3 <= n {
+		c0, c1, c2 := s[i], s[i+1], s[i+2]
+		out = append(out,
+			b64Table[(c0>>2)&0x3f],
+			b64Table[((c0<<4)&0x30)|((c1>>4)&0x0f)],
+			b64Table[((c1<<2)&0x3c)|((c2>>6)&0x03)],
+			b64Table[c2&0x3f])
+		i += 3
+	}
+	switch n - i {
+	case 2:
+		c0, c1 := s[i], s[i+1]
+		out = append(out,
+			b64Table[(c0>>2)&0x3f],
+			b64Table[((c0<<4)&0x30)|((c1>>4)&0x0f)],
+			b64Table[(c1<<2)&0x3c],
+			'=')
+	case 1:
+		c0 := s[i]
+		out = append(out,
+			b64Table[(c0>>2)&0x3f],
+			b64Table[(c0<<4)&0x30],
+			'=', '=')
+	}
+	if tailLF {
+		out = append(out, '\n')
+	}
+	return out
+}
+
+// packBase64 implements Array#pack's 'm' directive. With an explicit count of 0
+// the whole string is encoded on a single line with no trailing newline;
+// otherwise the count sets the number of input bytes per line (defaulting to 45
+// for a count of 0<count≤2, '*', or no count, and rounded down to a multiple of
+// 3 above that), each line terminated by a newline.
+func packBase64(out []byte, d packDir, b []byte) []byte {
+	if d.explicit && d.count == 0 {
+		return b64EncodeChunk(out, b, false)
+	}
+	length := d.count
+	if length <= 2 {
+		length = 45
+	} else {
+		length = length / 3 * 3
+	}
+	for len(b) > 0 {
+		todo := length
+		if len(b) < todo {
+			todo = len(b)
+		}
+		out = b64EncodeChunk(out, b[:todo], true)
+		b = b[todo:]
+	}
+	return out
+}
+
+// packQPLen resolves the maximum line length for the 'M' (quoted-printable)
+// directive: a count of 0, 1, '*', or no count means 72; otherwise the count.
+func packQPLen(d packDir) int {
+	length := d.count
+	if length <= 1 {
+		length = 72
+	}
+	return length
+}
+
+// hexUpper is the uppercase hex alphabet used by quoted-printable encoding.
+const hexUpper = "0123456789ABCDEF"
+
+// qpencode appends the quoted-printable encoding of from to out, wrapping lines
+// with a "=\n" soft break once a line would exceed length characters. It mirrors
+// MRI's qpencode(): bytes >126, control bytes other than tab/newline, and '='
+// are emitted as "=XX"; a trailing space or tab before a literal newline is
+// protected with "="; and a soft break is appended at the end unless the last
+// line is empty.
+func qpencode(out, from []byte, length int) []byte {
+	n := 0
+	prev := -1
+	for _, s := range from {
+		switch {
+		case s > 126 || (s < 32 && s != '\n' && s != '\t') || s == '=':
+			out = append(out, '=', hexUpper[s>>4], hexUpper[s&0x0f])
+			n += 3
+			prev = -1
+		case s == '\n':
+			if prev == ' ' || prev == '\t' {
+				out = append(out, '=', s)
+			}
+			out = append(out, s)
+			n = 0
+			prev = int(s)
+		default:
+			out = append(out, s)
+			n++
+			prev = int(s)
+		}
+		if n > length {
+			out = append(out, '=', '\n')
+			n = 0
+			prev = '\n'
+		}
+	}
+	if n > 0 {
+		out = append(out, '=', '\n')
+	}
+	return out
+}
+
+// hex2num decodes a single hex digit to its value, or -1 for a non-hex byte.
+func hex2num(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10
+	}
+	return -1
+}
+
+// base64Strict decodes s as strict base64 (the count-0 form of the 'm'
+// directive), reporting ok=false on any invalid character or malformed padding.
+func base64Strict(s []byte) ([]byte, bool) {
+	var out []byte
+	pos, end := 0, len(s)
+	a, b, c, dd := -1, -1, 0, 0
+	for pos < end {
+		a, b, c, dd = -1, -1, -1, -1
+		a = b64val(s[pos])
+		pos++
+		if pos >= end || a == -1 {
+			return nil, false
+		}
+		b = b64val(s[pos])
+		pos++
+		if pos >= end || b == -1 {
+			return nil, false
+		}
+		if s[pos] == '=' {
+			if pos+2 == end && s[pos+1] == '=' {
+				break
+			}
+			return nil, false
+		}
+		c = b64val(s[pos])
+		pos++
+		if pos >= end || c == -1 {
+			return nil, false
+		}
+		if pos+1 == end && s[pos] == '=' {
+			break
+		}
+		dd = b64val(s[pos])
+		pos++
+		if dd == -1 {
+			return nil, false
+		}
+		out = append(out, byte(a<<2|b>>4), byte(b<<4|c>>2), byte(c<<6|dd))
+	}
+	if c == -1 {
+		out = append(out, byte(a<<2|b>>4))
+		if b&0xf != 0 {
+			return nil, false
+		}
+	} else if dd == -1 {
+		out = append(out, byte(a<<2|b>>4), byte(b<<4|c>>2))
+		if c&0x3 != 0 {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+// base64Lenient decodes s as base64 the way the counted 'm' directive does:
+// non-base64 characters are skipped and a truncated final group still yields
+// its available bytes.
+func base64Lenient(s []byte) []byte {
+	var out []byte
+	pos, end := 0, len(s)
+	a, b, c, dd := -1, -1, -1, -1
+	for pos < end {
+		a, b, c, dd = -1, -1, -1, -1
+		for pos < end {
+			if a = b64val(s[pos]); a != -1 {
+				break
+			}
+			pos++
+		}
+		if pos >= end {
+			break
+		}
+		pos++
+		for pos < end {
+			if b = b64val(s[pos]); b != -1 {
+				break
+			}
+			pos++
+		}
+		if pos >= end {
+			break
+		}
+		pos++
+		for pos < end && s[pos] != '=' {
+			if c = b64val(s[pos]); c != -1 {
+				break
+			}
+			pos++
+		}
+		if pos >= end || s[pos] == '=' {
+			break
+		}
+		pos++
+		for pos < end && s[pos] != '=' {
+			if dd = b64val(s[pos]); dd != -1 {
+				break
+			}
+			pos++
+		}
+		if pos >= end || s[pos] == '=' {
+			break
+		}
+		pos++
+		out = append(out, byte(a<<2|b>>4), byte(b<<4|c>>2), byte(c<<6|dd))
+		a = -1
+	}
+	if a != -1 && b != -1 {
+		if c == -1 {
+			out = append(out, byte(a<<2|b>>4))
+		} else {
+			out = append(out, byte(a<<2|b>>4), byte(b<<4|c>>2))
+		}
+	}
+	return out
+}
+
+// qpdecode decodes quoted-printable data, mirroring MRI's unpack 'M': "=XX"
+// escapes decode to a byte, "=\n" (and "=\r\n") soft breaks are dropped, and a
+// malformed or truncated escape leaves the remainder of the input verbatim.
+func qpdecode(s []byte) []byte {
+	var out []byte
+	pos, end := 0, len(s)
+	ss := 0
+	for pos < end {
+		if s[pos] == '=' {
+			pos++
+			if pos == end {
+				break
+			}
+			if pos+1 < end && s[pos] == '\r' && s[pos+1] == '\n' {
+				pos++
+			}
+			if s[pos] != '\n' {
+				c1 := hex2num(s[pos])
+				if c1 == -1 {
+					break
+				}
+				pos++
+				if pos == end {
+					break
+				}
+				c2 := hex2num(s[pos])
+				if c2 == -1 {
+					break
+				}
+				out = append(out, byte(c1<<4|c2))
+			}
+		} else {
+			out = append(out, s[pos])
+		}
+		pos++
+		ss = pos
+	}
+	return append(out, s[ss:]...)
+}
+
 // unpackElems deserialises data according to fmtStr.
 func unpackElems(data []byte, fmtStr string) []object.Value {
 	dirs := parseFormat(fmtStr, "unpack")
@@ -707,6 +1045,22 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			}
 			out = append(out, object.NewString(unpackBits(data[pos:], d.code, n)))
 			pos += (n + 7) / 8
+		case d.code == 'm':
+			var dec []byte
+			if d.explicit && d.count == 0 {
+				var ok bool
+				if dec, ok = base64Strict(data[pos:]); !ok {
+					raise("ArgumentError", "invalid base64")
+				}
+			} else {
+				dec = base64Lenient(data[pos:])
+			}
+			pos = len(data)
+			out = append(out, object.NewStringBytesEnc(dec, "ASCII-8BIT"))
+		case d.code == 'M':
+			dec := qpdecode(data[pos:])
+			pos = len(data)
+			out = append(out, object.NewStringBytesEnc(dec, "ASCII-8BIT"))
 		}
 	}
 	return out
