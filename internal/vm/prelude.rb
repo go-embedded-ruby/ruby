@@ -8,22 +8,43 @@
 # Comparable derives the ordering operators from `<=>`. A class mixes it in and
 # defines `<=>`; everything else follows.
 module Comparable
+  # __compare drives every ordering operator: it sends `<=>` and, when that
+  # returns nil (the two are incomparable), raises the same ArgumentError MRI's
+  # rb_cmperr produces. The right-hand operand is rendered by #inspect when it is
+  # an immediate (Integer/Float/Symbol/nil/true/false) and by its class name
+  # otherwise — e.g. `comparison of Foo with 1 failed` vs `... with String failed`.
+  def __compare(other)
+    cmp = (self <=> other)
+    if cmp.nil?
+      right = case other
+              when Integer, Float, Symbol, nil, true, false
+                other.inspect
+              else
+                other.class
+              end
+      raise ArgumentError, "comparison of #{self.class} with #{right} failed"
+    end
+    cmp
+  end
+
   def <(other)
-    (self <=> other) < 0
+    __compare(other) < 0
   end
 
   def <=(other)
-    (self <=> other) <= 0
+    __compare(other) <= 0
   end
 
   def >(other)
-    (self <=> other) > 0
+    __compare(other) > 0
   end
 
   def >=(other)
-    (self <=> other) >= 0
+    __compare(other) >= 0
   end
 
+  # Comparable#== is deliberately lenient: an incomparable pair (`<=>` returning
+  # nil) is simply unequal rather than an error, matching MRI.
   def ==(other)
     (self <=> other) == 0
   end
@@ -38,19 +59,29 @@ module Comparable
     end
   end
 
-  def clamp(min, max = nil)
-    if min.is_a?(Range)
-      raise ArgumentError, "cannot clamp with an exclusive range" if min.exclude_end?
-      lo = min.begin
-      hi = min.end
-      return lo if !lo.nil? && self < lo
-      return hi if !hi.nil? && self > hi
-      self
+  # clamp bounds self to a [min, max] interval, accepting either two arguments or
+  # a single Range. A one-argument non-Range call is a TypeError, an exclusive
+  # Range or a min greater than max is an ArgumentError, and a nil bound leaves
+  # that side unbounded — all exactly as MRI.
+  def clamp(*args)
+    if args.size == 1 && args[0].is_a?(Range)
+      range = args[0]
+      raise ArgumentError, "cannot clamp with an exclusive range" if range.exclude_end?
+      min = range.begin
+      max = range.end
+    elsif args.size == 2
+      min, max = args
+    elsif args.size == 1
+      raise TypeError, "wrong argument type #{args[0].class} (expected Range)"
     else
-      return min if !min.nil? && self < min
-      return max if !max.nil? && self > max
-      self
+      raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 1..2)"
     end
+    if !min.nil? && !max.nil? && min > max
+      raise ArgumentError, "min argument must be less than or equal to max argument"
+    end
+    return min if !min.nil? && self < min
+    return max if !max.nil? && self > max
+    self
   end
 end
 
