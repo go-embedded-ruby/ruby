@@ -3233,6 +3233,44 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
+	// Hash#<= is subset-by-pair: true when every (key, value) pair of the
+	// receiver is present in other, values compared with valueEqual (MRI's
+	// rb_equal, so 1 and 1.0 match). A non-Hash argument is coerced via #to_hash;
+	// one without #to_hash raises TypeError "no implicit conversion of X into
+	// Hash" (matching MRI's rb_check_hash_type + Check_Type).
+	vm.cHash.define("<=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(hashSubset(self.(*object.Hash), vm.toHash(args[0])))
+	})
+	// Hash#< is proper-subset: <= and strictly smaller (fewer pairs). Because a
+	// subset with equal size is an equal hash, the size test alone distinguishes
+	// proper from improper containment.
+	vm.cHash.define("<", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h, other := self.(*object.Hash), vm.toHash(args[0])
+		return object.Bool(h.Len() < other.Len() && hashSubset(h, other))
+	})
+	// Hash#>= is superset-by-pair: every pair of other is present in the receiver.
+	vm.cHash.define(">=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(hashSubset(vm.toHash(args[0]), self.(*object.Hash)))
+	})
+	// Hash#> is proper-superset: >= and strictly larger.
+	vm.cHash.define(">", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h, other := self.(*object.Hash), vm.toHash(args[0])
+		return object.Bool(h.Len() > other.Len() && hashSubset(other, h))
+	})
+	// Hash#to_proc returns a unary lambda that looks a key up in the hash:
+	// pr.call(k) == h[k]. Lookup goes through #[], so a default value or
+	// default_proc is honored just as for a direct index. It captures the hash by
+	// reference, so later mutations are visible through the proc. As a lambda it is
+	// arity-strict (exactly 1 argument), raising ArgumentError otherwise, and
+	// Proc#lambda? is true.
+	vm.cHash.define("to_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &Proc{isLambda: true, nativeArity: 1, native: func(vm *VM, args []object.Value) object.Value {
+			if len(args) != 1 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+			}
+			return vm.send(self, "[]", args, nil)
+		}}
+	})
 	// flatten returns the key/value pairs as one flat Array. The default depth is
 	// 1 (the pair wrappers are removed but Array values are left intact); a depth
 	// >= 2 recurses that many further levels into nested Array values. A
@@ -4921,6 +4959,23 @@ func illFormedUTF8Len(s string) int {
 // pair (matching Ruby).
 func hashPair(k, v object.Value) *object.Array {
 	return object.NewArray(k, v)
+}
+
+// hashSubset reports whether every (key, value) pair of sub is present in sup,
+// with values compared by valueEqual (MRI's rb_equal). It backs Hash#<= / #< /
+// #>= / #>: a hash is a subset of another when all its pairs are contained.
+func hashSubset(sub, sup *object.Hash) bool {
+	if sub.Len() > sup.Len() {
+		return false
+	}
+	for _, k := range sub.Keys {
+		sv, _ := sub.Get(k)
+		pv, present := sup.Get(k)
+		if !present || !valueEqual(sv, pv) {
+			return false
+		}
+	}
+	return true
 }
 
 // spaceship compares two values via their <=> method, raising ArgumentError if
