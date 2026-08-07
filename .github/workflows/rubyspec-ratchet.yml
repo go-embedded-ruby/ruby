@@ -25,4 +25,10 @@ jobs:
       - run: go version
       - name: Run ruby/spec ratchet
         shell: bash
+        # Raise the per-file timeout above run.sh's 25s default: a few heavy spec
+        # files (large core suites) can exceed 25s on a loaded/degraded runner and
+        # then "fail to load", dropping ~150 examples each and producing a spurious
+        # below-floor REGRESSION. 60s absorbs that jitter without masking real hangs.
+        env:
+          TIMEOUT: "60"
         run: scripts/conformance/rubyspec/run.sh
