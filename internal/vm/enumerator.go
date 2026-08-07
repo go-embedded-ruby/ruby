@@ -188,6 +188,20 @@ func (vm *VM) registerEnumerator() {
 	})
 }
 
+// enumPack packs the arguments of one #each yield into a single value, matching
+// CRuby's rb_enum_values_pack: a zero-argument yield becomes nil, a lone value
+// stays scalar, and several values gather into an Array.
+func enumPack(args []object.Value) object.Value {
+	switch len(args) {
+	case 0:
+		return object.NilV
+	case 1:
+		return args[0]
+	default:
+		return object.NewArrayFromSlice(append([]object.Value{}, args...))
+	}
+}
+
 // enumStop is the sentinel panic used by enumTake to unwind out of a possibly
 // unbounded #each once enough elements have been collected.
 type enumStop struct{}
@@ -200,11 +214,7 @@ func (vm *VM) enumTake(e *Enumerator, n int) (out []object.Value) {
 	}
 	out = make([]object.Value, 0, n)
 	collect := &Proc{native: func(_ *VM, args []object.Value) object.Value {
-		if len(args) == 1 {
-			out = append(out, args[0])
-		} else {
-			out = append(out, object.NewArrayFromSlice(append([]object.Value{}, args...)))
-		}
+		out = append(out, enumPack(args))
 		if len(out) >= n {
 			panic(enumStop{})
 		}
@@ -233,11 +243,7 @@ func (vm *VM) enumTake(e *Enumerator, n int) (out []object.Value) {
 func (vm *VM) enumMaterialize(e *Enumerator) []object.Value {
 	out := []object.Value{}
 	collect := func(args []object.Value) {
-		if len(args) == 1 {
-			out = append(out, args[0])
-		} else {
-			out = append(out, object.NewArrayFromSlice(append([]object.Value{}, args...)))
-		}
+		out = append(out, enumPack(args))
 	}
 	if e.block != nil { // generator block: run it with a collecting yielder
 		vm.callBlock(e.block, []object.Value{&yielder{emit: collect}})

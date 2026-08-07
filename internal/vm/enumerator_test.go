@@ -41,6 +41,14 @@ func TestEnumerator(t *testing.T) {
 		// each with a block on the enumerator forwards to the underlying method;
 		// with no block it returns the enumerator itself.
 		{`p [1, 2, 3].each.each.to_a`, "[1, 2, 3]\n"},
+		// Value packing (rb_enum_values_pack): a zero-argument source yield packs
+		// to nil, a lone value stays scalar, several values gather to an Array —
+		// covered through to_a (materialize) and first/take.
+		{`p Enumerator.new { |y| y.yield }.to_a`, "[nil]\n"},
+		{`p Enumerator.new { |y| y.yield }.first`, "nil\n"},
+		{`p Enumerator.new { |y| y.yield }.take(1)`, "[nil]\n"},
+		{`p Enumerator.new { |y| y.yield 1, 2 }.to_a`, "[[1, 2]]\n"},
+		{`p Enumerator.new { |y| y.yield 1, 2 }.take(1)`, "[[1, 2]]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
