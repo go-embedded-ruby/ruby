@@ -328,6 +328,43 @@ module Enumerable
     n == 1
   end
 
+  # uniq returns the elements with duplicates removed, keeping first occurrence.
+  # Without a block elements are compared by #hash and #eql? (through a Hash);
+  # with a block the block's return value is the uniqueness key. Multi-value
+  # yields are gathered into whole Arrays.
+  def uniq
+    result = []
+    keys = []
+    hashes = []
+    __each_packed { |x|
+      key = block_given? ? yield(x) : x
+      h = key.hash
+      seen = false
+      i = 0
+      while i < keys.length
+        if hashes[i] == h && keys[i].eql?(key)
+          seen = true
+          break
+        end
+        i = i + 1
+      end
+      unless seen
+        keys << key
+        hashes << h
+        result << x
+      end
+    }
+    result
+  end
+
+  # compact returns the elements with every nil removed (a zero-argument yield
+  # packs to nil and is dropped too).
+  def compact
+    result = []
+    __each_packed { |x| result << x unless x.nil? }
+    result
+  end
+
   def each_with_index
     return enum_for(:each_with_index) unless block_given?
     i = 0
