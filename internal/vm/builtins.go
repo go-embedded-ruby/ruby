@@ -3743,25 +3743,9 @@ func (vm *VM) bootstrap() {
 		}
 		return object.IntValue(a % b)
 	})
-	// round / truncate with ndigits >= 0 leave an Integer unchanged; with ndigits
-	// < 0 they round/truncate to the nearest 10**(-ndigits) (round is half away
-	// from zero, truncate toward zero).
-	vm.cInteger.define("round", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		n := intArgOr(args, 0)
-		if n >= 0 {
-			return self
-		}
-		pow, ok := pow10(-n)
-		if !ok {
-			return object.IntValue(0) // 10**(-n) exceeds any int64, so it rounds to 0
-		}
-		a, neg := absSign(intOf(self))
-		r := ((a + pow/2) / pow) * pow
-		if neg {
-			r = -r
-		}
-		return object.IntValue(r)
-	})
+	// truncate with ndigits >= 0 leaves an Integer unchanged; with ndigits < 0 it
+	// truncates toward zero to the nearest 10**(-ndigits). Integer#round is defined
+	// (with the half: keyword) in registerNumericEdges, which runs later.
 	vm.cInteger.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intArgOr(args, 0)
 		if n >= 0 {
@@ -3886,22 +3870,8 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("floor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return floatRound(floatOf(self), args, math.Floor)
 	})
-	vm.cFloat.define("round", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		f := floatOf(self)
-		ndigits := 0
-		if len(args) > 0 {
-			ndigits = int(intArg(args[0]))
-		}
-		// ndigits > 0 rounds to that many decimals and stays a Float; ndigits <= 0
-		// rounds to an integer (or a power of ten) and returns an Integer — MRI's
-		// Float#round contract.
-		pow := math.Pow(10, float64(ndigits))
-		r := math.Round(f*pow) / pow
-		if ndigits > 0 {
-			return object.Float(r)
-		}
-		return object.IntValue(int64(r))
-	})
+	// Float#round is defined (with the half: keyword) in registerNumericEdges,
+	// which runs later and overrides any definition here.
 	vm.cFloat.define("divmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := floatOf(self)
 		b, ok := toFloat(args[0])
@@ -4076,6 +4046,9 @@ func (vm *VM) bootstrap() {
 	vm.registerEtc()        // Etc module (real pw/grp via os/user; systmpdir); needs Struct + Enumerable
 	vm.registerConcurrent() // concurrent-ruby shell (collections alias core; ThreadLocalVar)
 	vm.registerENV()        // ENV: Hash-like view of the process environment over os
+	// Numeric edge methods (Integer#[]/#size/#ord/#round, Float#round(half:),
+	// #next_float/#prev_float): run last so the round overrides win.
+	vm.registerNumericEdges()
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,
