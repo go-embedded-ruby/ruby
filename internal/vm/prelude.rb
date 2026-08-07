@@ -64,7 +64,26 @@ module Enumerable
   # multi-parameter block downstream (`map { |x, i| }`) auto-splats the packed
   # Array exactly as MRI does — without each method handling arity itself.
   def __each_packed
-    each { |*a| yield(a.size == 1 ? a[0] : a) }
+    each { |*a| yield(a.empty? ? nil : (a.size == 1 ? a[0] : a)) }
+  end
+
+  # __enum_int_arg coerces a count argument the way MRI's rb_num2long does for
+  # first/take/drop: Integers pass through, Floats truncate, anything else must
+  # answer #to_int (and yield an Integer); a non-numeric argument is a TypeError.
+  # Counts beyond the machine-long range are a RangeError, exactly like MRI.
+  def __enum_int_arg(n)
+    if n.is_a?(Integer)
+      v = n
+    elsif n.is_a?(Float)
+      v = n.to_int
+    elsif n.respond_to?(:to_int)
+      v = n.to_int
+      raise TypeError, "can't convert #{n.class} to Integer (#{n.class}#to_int gives #{v.class})" unless v.is_a?(Integer)
+    else
+      raise TypeError, "no implicit conversion of #{n.class} into Integer"
+    end
+    raise RangeError, "bignum too big to convert into 'long'" if v > 9223372036854775807 || v < -9223372036854775808
+    v
   end
 
   def to_a
@@ -431,6 +450,59 @@ module Enumerable
       i = i + 1
     end
     nil
+  end
+
+  # first / take return the leading elements, stopping iteration as soon as
+  # enough have been gathered (ThrowingEach and lazy sources must not be fully
+  # consumed). first with no argument returns the single leading element (or
+  # nil); with a count both return an Array. drop returns everything after the
+  # first n. Counts coerce through #to_int and reject negatives, like MRI.
+  def first(*args)
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
+    if args.empty?
+      result = nil
+      catch(:__enum_first) do
+        __each_packed { |x| result = x; throw :__enum_first }
+      end
+      return result
+    end
+    n = __enum_int_arg(args[0])
+    raise ArgumentError, "attempt to take negative size" if n < 0
+    return [] if n == 0
+    r = []
+    catch(:__enum_first) do
+      __each_packed { |x|
+        r << x
+        throw :__enum_first if r.length >= n
+      }
+    end
+    r
+  end
+
+  def take(n)
+    n = __enum_int_arg(n)
+    raise ArgumentError, "attempt to take negative size" if n < 0
+    return [] if n == 0
+    r = []
+    catch(:__enum_take) do
+      __each_packed { |x|
+        r << x
+        throw :__enum_take if r.length >= n
+      }
+    end
+    r
+  end
+
+  def drop(n)
+    n = __enum_int_arg(n)
+    raise ArgumentError, "attempt to drop negative size" if n < 0
+    r = []
+    i = 0
+    __each_packed { |x|
+      r << x if i >= n
+      i = i + 1
+    }
+    r
   end
 
   # chunk_while / slice_when split the element stream into runs at each pair where

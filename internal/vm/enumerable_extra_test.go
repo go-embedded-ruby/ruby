@@ -33,3 +33,49 @@ func TestEnumerableExtraMethods(t *testing.T) {
 		}
 	}
 }
+
+// customEnum defines a fresh #each-only Enumerable used to prove the prelude's
+// first/take/drop work over any Enumerable, not just Array/Range.
+const customEnum = "class E\n include Enumerable\n def initialize(*a) @a=a end\n def each; @a.each { |x| yield x } end\nend\n"
+
+// TestEnumerableFirstTakeDrop covers Enumerable#first/#take/#drop added in the
+// prelude: leading elements over any Enumerable, count coercion via #to_int,
+// negative-count and non-numeric errors, early termination, gathered multi
+// yields, and the RangeError for out-of-range counts. Asserted against MRI 4.0.5.
+func TestEnumerableFirstTakeDrop(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// first with no argument returns the leading element (or nil when empty).
+		{customEnum + `p E.new(2, 3, 4).first`, "2\n"},
+		{customEnum + `p E.new.first`, "nil\n"},
+		// first / take with a count return leading Arrays; drop returns the rest.
+		{customEnum + `p E.new(4, 3, 2, 1, 0).first(2)`, "[4, 3]\n"},
+		{customEnum + `p E.new(4, 3, 2, 1, 0).take(3)`, "[4, 3, 2]\n"},
+		{customEnum + `p E.new(4, 3, 2, 1, 0).drop(2)`, "[2, 1, 0]\n"},
+		{customEnum + `p E.new(1, 2).first(0)`, "[]\n"},
+		{customEnum + `p E.new(1, 2).take(0)`, "[]\n"},
+		{customEnum + `p E.new(1, 2, 3).first(9)`, "[1, 2, 3]\n"},
+		{customEnum + `p E.new(1, 2, 3).drop(9)`, "[]\n"},
+		{customEnum + `p E.new(1, 2, 3).drop(0)`, "[1, 2, 3]\n"},
+		// #to_int coercion: a Float truncates, an object answering #to_int works.
+		{customEnum + `p E.new(4, 3, 2, 1).take(2.9)`, "[4, 3]\n"},
+		{customEnum + `p E.new(4, 3, 2, 1).drop(2.9)`, "[2, 1]\n"},
+		{customEnum + `class I; def to_int; 2; end; end; p E.new(4, 3, 2, 1).take(I.new)`, "[4, 3]\n"},
+		{customEnum + `class I; def to_int; 1; end; end; p E.new(4, 3, 2, 1).drop(I.new)`, "[3, 2, 1]\n"},
+		// multi-value yields gather into whole Arrays.
+		{"class M\n include Enumerable\n def each; yield 1, 2; yield 3, 4; end\nend\np M.new.take(1)", "[[1, 2]]\n"},
+		// errors: negative count, non-numeric, wrong arity, out-of-range.
+		{customEnum + `begin; E.new(1).take(-1); rescue ArgumentError; p :arg; end`, ":arg\n"},
+		{customEnum + `begin; E.new(1).drop(-1); rescue ArgumentError; p :arg; end`, ":arg\n"},
+		{customEnum + `begin; E.new(1).first(1, 2); rescue ArgumentError; p :arg; end`, ":arg\n"},
+		{customEnum + `begin; E.new(1).take("x"); rescue TypeError; p :type; end`, ":type\n"},
+		{customEnum + `begin; E.new(1).drop(nil); rescue TypeError; p :type; end`, ":type\n"},
+		{customEnum + `class B; def to_int; "no"; end; end; begin; E.new(1).take(B.new); rescue TypeError; p :type; end`, ":type\n"},
+		{customEnum + `begin; E.new.first(0x8000_0000_0000_0000); rescue RangeError; p :range; end`, ":range\n"},
+		{customEnum + `begin; E.new.drop(-0x8000_0000_0000_0001); rescue RangeError; p :range; end`, ":range\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
