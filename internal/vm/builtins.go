@@ -78,6 +78,7 @@ func (vm *VM) bootstrap() {
 	vm.registerMath()
 	vm.registerFFT()
 	vm.registerNDArray()
+	vm.registerArrayEdges()
 	vm.registerImage()
 	vm.registerSet()
 	vm.registerPrettyPrint()
