@@ -403,6 +403,9 @@ func (vm *VM) bootstrap() {
 	exc("NoMethodError", "NameError")
 	exc("ZeroDivisionError", "StandardError")
 	exc("RangeError", "StandardError")
+	// FloatDomainError < RangeError: a non-finite Float (Infinity/NaN) coerced to
+	// an exact value, e.g. Integer(Float::INFINITY) or (1.0/0).to_r.
+	exc("FloatDomainError", "RangeError")
 	exc("IndexError", "StandardError")
 	exc("KeyError", "IndexError")
 	exc("StopIteration", "IndexError")
@@ -723,28 +726,59 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cObject.define("raise", nativeRaise)
 	vm.cObject.define("Integer", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		args, doRaise := popExceptionKwarg(args)
+		// fail either raises (the default) or, under `exception: false`, yields nil.
+		fail := func(class, format string, a ...interface{}) object.Value {
+			if doRaise {
+				raise(class, format, a...)
+			}
+			return object.NilV
+		}
 		switch v := args[0].(type) {
 		case object.Integer:
 			return v
 		case object.Float:
-			return object.IntValue(int64(v))
+			// A non-finite Float has no Integer value: Integer(Infinity)/Integer(NaN)
+			// is a FloatDomainError in MRI (suppressed to nil under exception: false).
+			f := float64(v)
+			if math.IsInf(f, 0) {
+				if f > 0 {
+					return fail("FloatDomainError", "Infinity")
+				}
+				return fail("FloatDomainError", "-Infinity")
+			}
+			if math.IsNaN(f) {
+				return fail("FloatDomainError", "NaN")
+			}
+			return object.IntValue(int64(f))
 		case *object.String:
 			base := 0 // no explicit base: auto-detect a 0x/0b/0o/0 prefix (and allow _)
 			if len(args) > 1 {
 				base = int(intArg(args[1]))
+				// A valid radix is 0 (auto-detect) or 2..36; anything else is rejected
+				// with MRI's "invalid radix" message before the value is even examined.
+				if base != 0 && (base < 2 || base > 36) {
+					return fail("ArgumentError", "invalid radix %d", base)
+				}
 			}
 			// Go's ParseInt only accepts a radix prefix (0x/0b/0o/0d) with base 0,
 			// so strip a prefix that matches the explicit base, as MRI allows.
 			n, err := strconv.ParseInt(stripRadixPrefix(strings.TrimSpace(v.Str()), base), base, 64)
 			if err != nil {
-				raise("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
+				return fail("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
 			}
 			return object.IntValue(n)
 		}
-		raise("TypeError", "can't convert %s into Integer", args[0].Inspect())
-		return object.NilV
+		return fail("TypeError", "can't convert %s into Integer", args[0].Inspect())
 	})
 	vm.cObject.define("Float", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		args, doRaise := popExceptionKwarg(args)
+		fail := func(class, format string, a ...interface{}) object.Value {
+			if doRaise {
+				raise(class, format, a...)
+			}
+			return object.NilV
+		}
 		switch v := args[0].(type) {
 		case object.Float:
 			return v
@@ -753,12 +787,11 @@ func (vm *VM) bootstrap() {
 		case *object.String:
 			f, err := strconv.ParseFloat(strings.TrimSpace(v.Str()), 64)
 			if err != nil {
-				raise("ArgumentError", "invalid value for Float(): %s", v.Inspect())
+				return fail("ArgumentError", "invalid value for Float(): %s", v.Inspect())
 			}
 			return object.Float(f)
 		}
-		raise("TypeError", "can't convert %s into Float", args[0].Inspect())
-		return object.NilV
+		return fail("TypeError", "can't convert %s into Float", args[0].Inspect())
 	})
 	vm.cObject.define("String", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.send(args[0], "to_s", nil, nil)
@@ -5466,12 +5499,57 @@ func cvarNameArg(v object.Value) string {
 // stripRadixPrefix removes a leading 0x/0b/0o/0d (after an optional sign) when it
 // matches base, so strconv.ParseInt — which only honours the prefix with base 0 —
 // accepts e.g. Integer("0xff", 16).
+// popExceptionKwarg splits a trailing keyword Hash off the positional arguments
+// of Integer()/Float() and reports whether a conversion failure should raise.
+// A literal `exception: false` suppresses the error (the caller returns nil);
+// the default, and any other value, keeps the raising behaviour. A trailing
+// Hash is only treated as keywords when at least one positional argument
+// precedes it, so `Integer({})` still reaches the TypeError path.
+func popExceptionKwarg(args []object.Value) ([]object.Value, bool) {
+	if len(args) <= 1 {
+		return args, true
+	}
+	h, ok := args[len(args)-1].(*object.Hash)
+	if !ok {
+		return args, true
+	}
+	doRaise := true
+	var unknown []string
+	for _, k := range h.Keys {
+		if sym, isSym := k.(object.Symbol); isSym && sym == object.Symbol("exception") {
+			v, _ := h.Get(k)
+			doRaise = v.Truthy()
+			continue
+		}
+		unknown = append(unknown, k.Inspect())
+	}
+	// Only exception: is accepted; any other key is MRI's unknown-keyword error
+	// ("unknown keyword: :foo" / "unknown keywords: :a, :b").
+	if len(unknown) > 0 {
+		word := "keyword"
+		if len(unknown) > 1 {
+			word = "keywords"
+		}
+		raise("ArgumentError", "unknown %s: %s", word, strings.Join(unknown, ", "))
+	}
+	return args[:len(args)-1], doRaise
+}
+
 func stripRadixPrefix(s string, base int) string {
 	sign := ""
 	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
 		sign, s = s[:1], s[1:]
 	}
-	pfx := map[int]string{16: "0x", 2: "0b", 8: "0o", 10: "0d"}[base]
+	// For an explicit base, strip a matching radix prefix (Go's ParseInt reads a
+	// prefix only with base 0). For base 0 Go already understands 0x/0b/0o and a
+	// leading-zero octal, but NOT Ruby's 0d decimal prefix — so strip just that,
+	// leaving the remainder to parse as decimal under base 0.
+	var pfx string
+	if base == 0 {
+		pfx = "0d"
+	} else {
+		pfx = map[int]string{16: "0x", 2: "0b", 8: "0o", 10: "0d"}[base]
+	}
 	if pfx != "" && len(s) >= 2 && strings.ToLower(s[:2]) == pfx {
 		s = s[2:]
 	}
