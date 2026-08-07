@@ -172,7 +172,7 @@ func isPackCode(c byte) bool {
 	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'I', 'i', 'J', 'j',
 		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U',
 		'f', 'F', 'd', 'D', 'e', 'E', 'g', 'G',
-		'x', 'X', '@':
+		'x', 'X', '@', 'b', 'B':
 		return true
 	}
 	return false
@@ -451,6 +451,8 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) []byte {
 			out = packString(out, d, vm.packStrArg(next()))
 		case d.code == 'H' || d.code == 'h':
 			out = packHex(out, d, vm.packStrArg(next()))
+		case d.code == 'B' || d.code == 'b':
+			out = packBits(out, d, vm.packStrArg(next()))
 		}
 	}
 	return out
@@ -500,6 +502,53 @@ func packString(out []byte, d packDir, b []byte) []byte {
 		out = append(out, pad)
 	}
 	return out
+}
+
+// packBits implements the B/b directives: each of the count characters (default
+// 1; '*' = the whole string) contributes its low bit, packed MSB-first (B) or
+// LSB-first (b) into successive bytes.
+func packBits(out []byte, d packDir, b []byte) []byte {
+	n := d.count
+	if d.star {
+		n = len(b)
+	}
+	var cur byte
+	for i := 0; i < n; i++ {
+		var bit byte
+		if i < len(b) {
+			bit = b[i] & 1
+		}
+		if d.code == 'B' { // most-significant bit first
+			cur |= bit << uint(7-i%8)
+		} else { // b: least-significant bit first
+			cur |= bit << uint(i%8)
+		}
+		if i%8 == 7 {
+			out = append(out, cur)
+			cur = 0
+		}
+	}
+	if n%8 != 0 {
+		out = append(out, cur)
+	}
+	return out
+}
+
+// unpackBits reads n bits from data as a "0"/"1" string, MSB-first (B) or
+// LSB-first (b).
+func unpackBits(data []byte, code byte, n int) string {
+	out := make([]byte, 0, n)
+	for i := 0; i < n; i++ {
+		b := data[i/8]
+		var bit byte
+		if code == 'B' {
+			bit = (b >> uint(7-i%8)) & 1
+		} else {
+			bit = (b >> uint(i%8)) & 1
+		}
+		out = append(out, '0'+bit)
+	}
+	return string(out)
 }
 
 // packHex implements the H/h directives: each nibble of the count consumes one
@@ -650,6 +699,14 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			}
 			out = append(out, object.NewString(unpackHex(data[pos:], d.code, n)))
 			pos += (n + 1) / 2
+		case d.code == 'B' || d.code == 'b':
+			n := d.count
+			avail := (len(data) - pos) * 8
+			if d.star || n > avail {
+				n = avail
+			}
+			out = append(out, object.NewString(unpackBits(data[pos:], d.code, n)))
+			pos += (n + 7) / 8
 		}
 	}
 	return out

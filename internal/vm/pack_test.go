@@ -138,6 +138,19 @@ func TestPackUnpack(t *testing.T) {
 		{"unpack_at_default_zero", `p "\x01\x02\x03\x04".unpack("C2@C")`, "[1, 2, 1]\n"},
 		{"unpack_at_star_noop", `p "\x01\x02\x03\x04".unpack("C2@*C")`, "[1, 2, 3]\n"},
 		{"unpack_at_beyond", `p "\x01\x02\x03\x04".unpack("C2@4C")`, "[1, 2, nil]\n"},
+
+		// b/B bit strings: B is MSB-first, b is LSB-first; bit = char & 1.
+		{"pack_B_one", `p ["1"].pack("B").bytes`, "[128]\n"},
+		{"pack_b_one", `p ["1"].pack("b").bytes`, "[1]\n"},
+		{"pack_B_byte", `p ["01000001"].pack("B*")`, "\"A\"\n"},
+		{"pack_b_byte", `p ["10000010"].pack("b*")`, "\"A\"\n"},
+		{"pack_B_star_multibyte", `p ["1101010011000011"].pack("B*").bytes`, "[212, 195]\n"},
+		{"unpack_B8", `p "\x83".unpack("B8")`, "[\"10000011\"]\n"},
+		{"unpack_b8", `p "\x83".unpack("b8")`, "[\"11000001\"]\n"},
+		{"unpack_B_cap", `p "\x83".unpack("B25")`, "[\"10000011\"]\n"},
+		{"unpack_B_multi", `p "\xd4\xc3".unpack("B5B*")`, "[\"11010\", \"11000011\"]\n"},
+		{"unpack_b_star", `p "A".unpack("b*")`, "[\"10000010\"]\n"},
+		{"roundtrip_B", `p "hello".unpack("B*").pack("B*")`, "\"hello\"\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
