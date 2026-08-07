@@ -1,6 +1,9 @@
 package vm_test
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestEnumerableExtraMethods covers Enumerable methods added in the prelude so
 // every Enumerable (Range, Hash, Struct, Enumerator) gains them, not just Array:
@@ -37,6 +40,55 @@ func TestEnumerableExtraMethods(t *testing.T) {
 // customEnum defines a fresh #each-only Enumerable used to prove the prelude's
 // first/take/drop work over any Enumerable, not just Array/Range.
 const customEnum = "class E\n include Enumerable\n def initialize(*a) @a=a end\n def each; @a.each { |x| yield x } end\nend\n"
+
+// TestEnumerableSliceBeforeAfter covers Enumerable#slice_before/#slice_after
+// added in the prelude to MRI 3.4/4.0: they start a new run just before
+// (slice_before) / just after (slice_after) each element matching a block or a
+// `pat === x` pattern, return an Enumerator (its #size nil), never emit an empty
+// run at the edges, gather multi-value yields, and reject a missing/extra
+// argument or pattern+block together. Verified over a custom Enumerable. MRI 4.0.5.
+func TestEnumerableSliceBeforeAfter(t *testing.T) {
+	const be = "@enum = E.new(7, 6, 5, 4, 3, 2, 1); "
+	cases := []struct{ src, want string }{
+		// both return an Enumerator whose #size is nil.
+		{customEnum + be + `p @enum.slice_before(3).class`, "Enumerator\n"},
+		{customEnum + be + `p @enum.slice_before(3).size`, "nil\n"},
+		{customEnum + be + `p @enum.slice_after(3).class`, "Enumerator\n"},
+		{customEnum + be + `p @enum.slice_after(3).size`, "nil\n"},
+		// block form: split before / after matching elements.
+		{customEnum + be + `p @enum.slice_before { |i| i == 6 || i == 2 }.to_a`, "[[7], [6, 5, 4, 3], [2, 1]]\n"},
+		{customEnum + be + `p @enum.slice_after { |i| i == 6 || i == 2 }.to_a`, "[[7, 6], [5, 4, 3, 2], [1]]\n"},
+		// pattern form via ===.
+		{customEnum + be + `p @enum.slice_before(4).to_a`, "[[7, 6, 5], [4, 3, 2, 1]]\n"},
+		{customEnum + be + `p @enum.slice_after(4).to_a`, "[[7, 6, 5, 4], [3, 2, 1]]\n"},
+		// no empty run when the match is on the first or the last element.
+		{customEnum + be + `p @enum.slice_before { true }.to_a`, "[[7], [6], [5], [4], [3], [2], [1]]\n"},
+		{customEnum + be + `p @enum.slice_after { true }.to_a`, "[[7], [6], [5], [4], [3], [2], [1]]\n"},
+		// multi-value yields gather into whole Arrays.
+		{"class MS\n include Enumerable\n def each; yield 1, 2; yield 3, 4, 5; yield 6, 7, 8, 9; end\nend\n" +
+			`p MS.new.slice_before { |i| i == [3, 4, 5] }.to_a`, "[[[1, 2]], [[3, 4, 5], [6, 7, 8, 9]]]\n"},
+		{"class MS\n include Enumerable\n def each; yield 1, 2; yield 3, 4, 5; yield 6, 7, 8, 9; end\nend\n" +
+			`p MS.new.slice_after { |i| i == [3, 4, 5] }.to_a`, "[[[1, 2], [3, 4, 5]], [[6, 7, 8, 9]]]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// ArgumentError: no argument+no block, too many args, or pattern AND block.
+	for _, src := range []string{
+		customEnum + be + `@enum.slice_before`,
+		customEnum + be + `@enum.slice_before("one", "two")`,
+		customEnum + be + `@enum.slice_before(1) {}`,
+		customEnum + be + `@enum.slice_after`,
+		customEnum + be + `@enum.slice_after("one", "two")`,
+		customEnum + be + `@enum.slice_after(42) { |i| i == 6 }`,
+	} {
+		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
+			t.Errorf("src=%q got=%v want ArgumentError", src, err)
+		}
+	}
+}
 
 // TestEnumerableFirstTakeDrop covers Enumerable#first/#take/#drop added in the
 // prelude: leading elements over any Enumerable, count coercion via #to_int,
