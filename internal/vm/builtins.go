@@ -4043,6 +4043,9 @@ func (vm *VM) bootstrap() {
 	vm.registerEtc()        // Etc module (real pw/grp via os/user; systmpdir); needs Struct + Enumerable
 	vm.registerConcurrent() // concurrent-ruby shell (collections alias core; ThreadLocalVar)
 	vm.registerENV()        // ENV: Hash-like view of the process environment over os
+	// Numeric edge methods (Integer#[]/#size/#ord/#round, Float#round(half:),
+	// #next_float/#prev_float): run last so the round overrides win.
+	vm.registerNumericEdges()
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,

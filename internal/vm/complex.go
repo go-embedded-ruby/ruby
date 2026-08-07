@@ -124,6 +124,18 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 	cNumeric.define("divmod", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewArray(divOf(self, args[0]), modOf(self, args[0]))
 	})
+	// nonzero? returns nil when self#zero? is true (dispatching through #zero? so
+	// a Numeric subclass's own definition is honoured), otherwise self.
+	cNumeric.define("nonzero?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if vm.send(self, "zero?", nil, nil).Truthy() {
+			return object.NilV
+		}
+		return self
+	})
+	// A generic Numeric is not an Integer; Integer overrides this with true.
+	cNumeric.define("integer?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.False
+	})
 }
 
 // asComplexVal coerces a real number to a Complex (zero imaginary part); a
