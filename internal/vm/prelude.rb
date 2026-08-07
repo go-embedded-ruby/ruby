@@ -618,18 +618,35 @@ module Enumerable
   end
 
   # chunk groups consecutive elements sharing the block's value into
-  # [value, [elements...]] runs.
+  # [value, [elements...]] runs, returning an Enumerator of those pairs (its
+  # #size is nil). A block value of nil or :_separator drops the element and
+  # breaks the current run; :_alone puts its element in a chunk of its own; any
+  # other Symbol beginning with an underscore is reserved (RuntimeError). With no
+  # block it returns an Enumerator whose #with_index (etc.) supplies the block.
   def chunk
+    return enum_for(:chunk) { nil } unless block_given?
     result = []
+    open = false # is there a run the current key may extend?
     __each_packed { |x|
       k = yield(x)
-      if result.empty? || result[-1][0] != k
+      if k.nil? || k == :_separator
+        open = false
+      elsif k == :_alone
         result << [k, [x]]
+        open = false
       else
-        result[-1][1] << x
+        if k.is_a?(Symbol) && k.to_s.start_with?("_")
+          raise RuntimeError, "symbols beginning with an underscore are reserved"
+        end
+        if open && result[-1][0] == k
+          result[-1][1] << x
+        else
+          result << [k, [x]]
+          open = true
+        end
       end
     }
-    result
+    result.to_enum(:each) { nil }
   end
 
   def minmax_by

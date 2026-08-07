@@ -18,6 +18,10 @@ type Enumerator struct {
 	// block, when set, is an Enumerator.new { |y| … } generator: it is run with a
 	// yielder rather than driving recv.meth.
 	block *Proc
+	// sizeBlock, when set (via enum_for/to_enum given a block), computes #size on
+	// demand — its result (which may be nil) is returned verbatim, matching MRI's
+	// size-block enumerators. When nil, #size falls back to materialising.
+	sizeBlock *Proc
 
 	buf  []object.Value // materialised on first next/peek/to_a
 	have bool
@@ -83,13 +87,15 @@ func (vm *VM) registerEnumerator() {
 			return &Enumerator{block: blk}
 		}}
 
-	// Kernel#enum_for / #to_enum: build an Enumerator for self.meth(*rest).
-	enumForFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// Kernel#enum_for / #to_enum: build an Enumerator for self.meth(*rest). A block
+	// supplies the enumerator's #size (called lazily, its result — possibly nil —
+	// returned as-is), as in `enum_for(:each_slice, n) { … }`.
+	enumForFn := func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		meth, rest := "each", []object.Value(nil)
 		if len(args) > 0 {
 			meth, rest = args[0].ToS(), args[1:]
 		}
-		return &Enumerator{recv: self, meth: meth, args: rest}
+		return &Enumerator{recv: self, meth: meth, args: rest, sizeBlock: blk}
 	}
 	vm.cObject.define("enum_for", enumForFn)
 	vm.cObject.define("to_enum", enumForFn)
@@ -111,7 +117,11 @@ func (vm *VM) registerEnumerator() {
 		return object.NewArrayFromSlice(vm.enumMaterialize(self.(*Enumerator)))
 	})
 	d("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(vm.enumMaterialize(self.(*Enumerator)))))
+		e := self.(*Enumerator)
+		if e.sizeBlock != nil {
+			return vm.callBlock(e.sizeBlock, nil)
+		}
+		return object.IntValue(int64(len(vm.enumMaterialize(e))))
 	})
 	d("next", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		e := self.(*Enumerator)
