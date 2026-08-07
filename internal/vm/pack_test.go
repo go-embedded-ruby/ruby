@@ -161,6 +161,118 @@ func TestPackUnpack(t *testing.T) {
 	}
 }
 
+// TestPackUnpackBase64QP exercises the 'm' (base64) and 'M' (quoted-printable)
+// directives for both pack and unpack, plus the result-encoding association
+// (US-ASCII / UTF-8 / ASCII-8BIT) that pack now derives from the directives.
+func TestPackUnpackBase64QP(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		// pack 'm' base64: 1/2/3-byte groups and padding, trailing newline.
+		{"pack_m_1", `p ["a"].pack("m") == "YQ==\n"`, "true\n"},
+		{"pack_m_2", `p ["ab"].pack("m") == "YWI=\n"`, "true\n"},
+		{"pack_m_3", `p ["abc"].pack("m") == "YWJj\n"`, "true\n"},
+		{"pack_m_empty", `p ["" ].pack("m") == ""`, "true\n"},
+		{"pack_m_star", `p ["a"].pack("m*") == "YQ==\n"`, "true\n"},
+		// count > 2 sets the per-line input length, rounded down to a multiple of 3.
+		{"pack_m_count3", `p ["abcdefg"].pack("m3") == "YWJj\nZGVm\nZw==\n"`, "true\n"},
+		{"pack_m_count4_rounds", `p ["abcdefg"].pack("m4") == "YWJj\nZGVm\nZw==\n"`, "true\n"},
+		// default line length is 45 input bytes.
+		{"pack_m_wrap45", `s="a"*50; p ["#{s}"].pack("m") == "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh\nYWFhYWE=\n"`, "true\n"},
+		// count 0: single line, no trailing newline.
+		{"pack_m0_3", `p ["abc"].pack("m0") == "YWJj"`, "true\n"},
+		{"pack_m0_1", `p ["a"].pack("m0") == "YQ=="`, "true\n"},
+		{"pack_m_enc", `p ["abcd"].pack("m").encoding.name`, "\"US-ASCII\"\n"},
+
+		// pack 'M' quoted-printable.
+		{"pack_M_soft_break", `p ["a"].pack("M") == "a=\n"`, "true\n"},
+		{"pack_M_ends_nl", `p ["a\n"].pack("M") == "a\n"`, "true\n"},
+		{"pack_M_eq", `p ["="].pack("M") == "=3D=\n"`, "true\n"},
+		{"pack_M_ctrl", `p ["\x00"].pack("M") == "=00=\n"`, "true\n"},
+		{"pack_M_high", `p ["\xff"].pack("M") == "=FF=\n"`, "true\n"},
+		{"pack_M_tab_literal", `p ["a\tb"].pack("M") == "a\tb=\n"`, "true\n"},
+		{"pack_M_tab_before_nl", `p ["\t\n"].pack("M") == "\t=\n\n"`, "true\n"},
+		{"pack_M_space_before_nl", `p [" \n"].pack("M") == " =\n\n"`, "true\n"},
+		{"pack_M_wrap", `p ["abcdefghi"].pack("M3") == "abcd=\nefgh=\ni=\n"`, "true\n"},
+		{"pack_M0_default72", `p ["a"].pack("M0") == "a=\n"`, "true\n"},
+		{"pack_M_symbol", `p [:sym].pack("M") == "sym=\n"`, "true\n"},
+		{"pack_M_nil", `p [nil].pack("M") == ""`, "true\n"},
+		{"pack_M_int", `p [1].pack("M") == "1=\n"`, "true\n"},
+		{"pack_M_non_string_to_s", `o=Object.new; def o.to_s; 2; end; p [o].pack("M").class`, "String\n"},
+		{"pack_M_enc", `p ["abcd"].pack("M").encoding.name`, "\"US-ASCII\"\n"},
+
+		// pack result-encoding association.
+		{"enc_U_utf8", `p [65].pack("U").encoding.name`, "\"UTF-8\"\n"},
+		{"enc_C_binary", `p [65].pack("C").encoding.name`, "\"ASCII-8BIT\"\n"},
+		{"enc_empty_usascii", `p [].pack("").encoding.name`, "\"US-ASCII\"\n"},
+		{"enc_U_then_m", `p [65,"a"].pack("Um").encoding.name`, "\"UTF-8\"\n"},
+		{"enc_m_then_C", `p ["a",65].pack("mC").encoding.name`, "\"ASCII-8BIT\"\n"},
+
+		// unpack 'm' base64 (lenient by default).
+		{"unpack_m", `p "YWJj\nREVG\n".unpack("m") == ["abcDEF"]`, "true\n"},
+		{"unpack_m_pad1", `p "YQ==\n".unpack("m") == ["a"]`, "true\n"},
+		{"unpack_m_empty", `p "".unpack("m") == [""]`, "true\n"},
+		{"unpack_m_excess_dirs", `p "YWJj\n".unpack("mm") == ["abc", ""]`, "true\n"},
+		{"unpack_m_skip_invalid", `p "dGV%zdA==".unpack("m") == ["test"]`, "true\n"},
+		{"unpack_m_partial2", `p "YQ".unpack("m") == ["a"]`, "true\n"},
+		{"unpack_m_partial3", `p "YWI".unpack("m") == ["ab"]`, "true\n"},
+		{"unpack_m_only_a", `p "Y".unpack("m") == [""]`, "true\n"},
+		{"unpack_m_all_junk", `p "%%%".unpack("m") == [""]`, "true\n"},
+		{"unpack_m_eq_c", `p "YQ==".unpack("m") == ["a"]`, "true\n"},
+		{"unpack_m_eq_d", `p "YWI=".unpack("m") == ["ab"]`, "true\n"},
+		{"unpack_m_b_skip", `p "Y%WJj".unpack("m") == ["abc"]`, "true\n"},
+		{"unpack_m_c_skip", `p "YW%Jj".unpack("m") == ["abc"]`, "true\n"},
+		{"unpack_m_enc", `p "Ojs8PT4/QA==\n".unpack("m").first.encoding.name`, "\"ASCII-8BIT\"\n"},
+
+		// unpack 'm0' strict base64.
+		{"unpack_m0", `p "dGVzdA==".unpack("m0") == ["test"]`, "true\n"},
+		{"unpack_m0_pad1", `p "YWI=".unpack("m0") == ["ab"]`, "true\n"},
+		{"unpack_m0_pad2", `p "YQ==".unpack("m0") == ["a"]`, "true\n"},
+
+		// unpack 'M' quoted-printable.
+		{"unpack_M", `p "a=\nb=\nc=\n".unpack("M") == ["abc"]`, "true\n"},
+		{"unpack_M_eq", `p "=3D=\n".unpack("M") == ["="]`, "true\n"},
+		{"unpack_M_crlf", `p "a=\r\nb".unpack("M") == ["ab"]`, "true\n"},
+		{"unpack_M_incomplete", `p "foo=".unpack("M") == ["foo="]`, "true\n"},
+		{"unpack_M_incomplete2", `p "foo=4".unpack("M") == ["foo=4"]`, "true\n"},
+		{"unpack_M_lower_hex", `p "=6a".unpack("M").first.bytes == [106]`, "true\n"},
+		{"unpack_M_bad_hex", `p "a=zz".unpack("M") == ["a=zz"]`, "true\n"},
+		{"unpack_M_bad_hex2", `p "=4z".unpack("M") == ["=4z"]`, "true\n"},
+		{"unpack_M_high", `p "=FF=\n".unpack("M").first.bytes == [255]`, "true\n"},
+		{"unpack_M_excess_dirs", `p "a=\n".unpack("MM") == ["a", ""]`, "true\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPackUnpackBase64Errors covers the strict base64 (m0) validation raises.
+func TestPackUnpackBase64Errors(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"m0_short_a", `"A".unpack("m0")`, "invalid base64"},
+		{"m0_bad_a", `"=".unpack("m0")`, "invalid base64"},
+		{"m0_short_b", `"AA".unpack("m0")`, "invalid base64"},
+		{"m0_bad_b", `"A@A".unpack("m0")`, "invalid base64"},
+		{"m0_bad_pad_len", `"AB=".unpack("m0")`, "invalid base64"},
+		{"m0_bad_pad_char", `"AB=C".unpack("m0")`, "invalid base64"},
+		{"m0_bad_c", `"AB@=".unpack("m0")`, "invalid base64"},
+		{"m0_bad_d", `"ABC@".unpack("m0")`, "invalid base64"},
+		{"m0_pad1_nonzero", `"YR==".unpack("m0")`, "invalid base64"},
+		{"m0_pad2_nonzero", `"YWH=".unpack("m0")`, "invalid base64"},
+		{"m0_invalid_char", `"dGV%zdA==".unpack("m0")`, "invalid base64"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runErr(t, tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("src=%q: got err=%v, want containing %q", tc.src, err, tc.want)
+			}
+		})
+	}
+}
+
 // TestPackUnpackModifiers exercises the integer byte-order ('<' / '>') and
 // native-size ('!' / '_') modifiers, the i/I/j/J directives, comments and
 // whitespace, and Bignum-valued 64-bit round-trips. Host is little-endian
