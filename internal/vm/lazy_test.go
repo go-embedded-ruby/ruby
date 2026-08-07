@@ -118,6 +118,14 @@ func TestLazy(t *testing.T) {
 		{`p (1..Float::INFINITY).lazy.map { |x| x * 2 }.eager.first(3)`, "[2, 4, 6]\n"},
 		{`p (1..Float::INFINITY).lazy.select { |x| x.even? }.eager.take(3)`, "[2, 4, 6]\n"},
 		{`p [1, 2, 3].lazy.map { |x| x * 10 }.eager.to_a`, "[10, 20, 30]\n"},
+		// A completed run may itself satisfy the first/take quota — both while
+		// pulling (a :_alone element that first flushes the open run) and during the
+		// finish flush of the last buffered run.
+		{`p [1, 1, 2].lazy.chunk { |x| x == 2 ? :_alone : 1 }.first(1)`, "[[1, [1, 1]]]\n"},
+		{`p [1, 3].lazy.chunk_while { |a, b| false }.first(2)`, "[[1], [3]]\n"},
+		{`p [1, 1].lazy.chunk { |x| x }.first(1)`, "[[1, [1, 1]]]\n"},
+		// slice_after with a pattern argument (rather than a block).
+		{`p [1, 3, 4].lazy.slice_after(->(x) { x.even? }).to_a`, "[[1, 3, 4]]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
