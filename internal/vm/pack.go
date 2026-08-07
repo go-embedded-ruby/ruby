@@ -70,12 +70,13 @@ func (vm *VM) packFormat(args []object.Value) string {
 // the '*' wildcard ("all remaining"), and the byte-order / native-size
 // modifiers that followed the letter.
 type packDir struct {
-	code   byte
-	count  int
-	star   bool
-	little bool // '<' modifier
-	big    bool // '>' modifier
-	bang   bool // '!' or '_' modifier
+	code     byte
+	count    int
+	star     bool
+	explicit bool // an explicit decimal count was given (distinguishes '@' default)
+	little   bool // '<' modifier
+	big      bool // '>' modifier
+	bang     bool // '!' or '_' modifier
 }
 
 // parseFormat splits a pack/unpack format string into directives. A directive
@@ -135,6 +136,7 @@ func parseFormat(fmtStr, verb string) []packDir {
 				i++
 			}
 			d.count = n
+			d.explicit = true
 		}
 		dirs = append(dirs, d)
 	}
@@ -169,7 +171,8 @@ func isPackCode(c byte) bool {
 	switch c {
 	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'I', 'i', 'J', 'j',
 		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U',
-		'f', 'F', 'd', 'D', 'e', 'E', 'g', 'G':
+		'f', 'F', 'd', 'D', 'e', 'E', 'g', 'G',
+		'x', 'X', '@':
 		return true
 	}
 	return false
@@ -415,6 +418,35 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) []byte {
 			for k := 0; k < count; k++ {
 				out = utf8.AppendRune(out, rune(toInt(next())))
 			}
+		case d.code == 'x':
+			n := d.count
+			if d.star {
+				n = 0
+			}
+			for k := 0; k < n; k++ {
+				out = append(out, 0)
+			}
+		case d.code == 'X':
+			n := d.count
+			if d.star {
+				n = 0
+			}
+			if n > len(out) {
+				raise("ArgumentError", "X outside of string")
+			}
+			out = out[:len(out)-n]
+		case d.code == '@':
+			n := d.count // implicit count of one when unspecified
+			if d.star {
+				n = len(out)
+			}
+			if n <= len(out) {
+				out = out[:n]
+			} else {
+				for len(out) < n {
+					out = append(out, 0)
+				}
+			}
 		case d.code == 'a' || d.code == 'A' || d.code == 'Z':
 			out = packString(out, d, vm.packStrArg(next()))
 		case d.code == 'H' || d.code == 'h':
@@ -569,6 +601,32 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 				r, sz := utf8.DecodeRune(data[pos:])
 				out = append(out, object.IntValue(int64(r)))
 				pos += sz
+			}
+		case d.code == 'x':
+			n := d.count
+			if d.star {
+				n = len(data) - pos
+			}
+			if pos+n > len(data) {
+				raise("ArgumentError", "x outside of string")
+			}
+			pos += n
+		case d.code == 'X':
+			n := d.count // 'X*' backs up one byte, like a bare 'X'
+			if n > pos {
+				raise("ArgumentError", "X outside of string")
+			}
+			pos -= n
+		case d.code == '@':
+			if !d.star { // '*' has no effect on '@'
+				n := 0 // implicit count of zero when unspecified
+				if d.explicit {
+					n = d.count
+				}
+				if n > len(data) {
+					raise("ArgumentError", "@ outside of string")
+				}
+				pos = n
 			}
 		case d.code == 'a' || d.code == 'A' || d.code == 'Z':
 			var seg []byte
