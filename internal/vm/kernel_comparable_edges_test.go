@@ -111,6 +111,9 @@ func TestKernelIntegerFloat(t *testing.T) {
 		{"int_ex_false_nil", `p Integer(nil, exception: false)`, "nil\n"},
 		{"int_ex_false_inf", `p Integer(1.0/0, exception: false)`, "nil\n"},
 		{"int_ex_true_ok", `p Integer("42", exception: true)`, "42\n"},
+		{"int_empty_kwargs", `p Integer("42", **{})`, "42\n"},
+		{"int_kwargs_from_hash", `h = {exception: false}
+p Integer("bad", **h)`, "nil\n"},
 		{"float_plain", `p Float("1.5")`, "1.5\n"},
 		{"float_whitespace", `p Float("  1.5e3 ")`, "1500.0\n"},
 		{"float_from_int", `p Float(3)`, "3.0\n"},
@@ -138,6 +141,8 @@ func TestKernelIntegerFloat(t *testing.T) {
 		{"int_nan", `Integer(0.0/0)`, "FloatDomainError", "NaN"},
 		{"float_bad_value", `Float("bad")`, "ArgumentError", `invalid value for Float(): "bad"`},
 		{"float_nil_type", `Float(nil)`, "TypeError", "can't convert nil into Float"},
+		{"int_unknown_kw", `Integer("42", foo: 1)`, "ArgumentError", "unknown keyword: :foo"},
+		{"int_unknown_kws", `Integer("42", foo: 1, bar: 2)`, "ArgumentError", "unknown keywords: :foo, :bar"},
 	}
 	for _, tc := range errTests {
 		t.Run(tc.name, func(t *testing.T) {

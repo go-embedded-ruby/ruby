@@ -5505,15 +5505,33 @@ func cvarNameArg(v object.Value) string {
 // Hash is only treated as keywords when at least one positional argument
 // precedes it, so `Integer({})` still reaches the TypeError path.
 func popExceptionKwarg(args []object.Value) ([]object.Value, bool) {
-	if len(args) > 1 {
-		if h, ok := args[len(args)-1].(*object.Hash); ok {
-			if v, found := h.Get(object.Symbol("exception")); found {
-				return args[:len(args)-1], v.Truthy()
-			}
-			return args[:len(args)-1], true
-		}
+	if len(args) <= 1 {
+		return args, true
 	}
-	return args, true
+	h, ok := args[len(args)-1].(*object.Hash)
+	if !ok {
+		return args, true
+	}
+	doRaise := true
+	var unknown []string
+	for _, k := range h.Keys {
+		if sym, isSym := k.(object.Symbol); isSym && sym == object.Symbol("exception") {
+			v, _ := h.Get(k)
+			doRaise = v.Truthy()
+			continue
+		}
+		unknown = append(unknown, k.Inspect())
+	}
+	// Only exception: is accepted; any other key is MRI's unknown-keyword error
+	// ("unknown keyword: :foo" / "unknown keywords: :a, :b").
+	if len(unknown) > 0 {
+		word := "keyword"
+		if len(unknown) > 1 {
+			word = "keywords"
+		}
+		raise("ArgumentError", "unknown %s: %s", word, strings.Join(unknown, ", "))
+	}
+	return args[:len(args)-1], doRaise
 }
 
 func stripRadixPrefix(s string, base int) string {
