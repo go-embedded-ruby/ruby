@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -108,6 +109,58 @@ func (vm *VM) registerLazy() {
 	d("with_index", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return self.(*LazyEnum).with(lazyOp{kind: "with_index", n: int(intArgOr(args, 0)), blk: blk})
 	})
+	// chunk_while / slice_when split the stream into runs at each adjacent pair
+	// (a, b) for which the block does not hold (chunk_while) / does hold
+	// (slice_when). Both require a block. Truly lazy: a completed run is emitted
+	// downstream as soon as its boundary is seen, so an infinite source whose runs
+	// are finite (e.g. .chunk_while { |a, b| b % 3 != 0 }) can be driven by first.
+	reqBlock := func(kind string) NativeFn {
+		return func(_ *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+			if blk == nil {
+				raise("ArgumentError", "tried to create Proc object without a block")
+			}
+			return self.(*LazyEnum).with(lazyOp{kind: kind, blk: blk})
+		}
+	}
+	d("chunk_while", reqBlock("chunk_while"))
+	d("slice_when", reqBlock("slice_when"))
+	// chunk groups consecutive elements sharing the block's value into
+	// [value, [elements...]] runs. A block value of nil or :_separator drops the
+	// element and closes the current run; :_alone puts its element in its own run;
+	// any other Symbol beginning with an underscore is reserved (RuntimeError).
+	// Without a block MRI returns a Lazy awaiting the block, so we return self.
+	d("chunk", func(_ *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return self
+		}
+		return self.(*LazyEnum).with(lazyOp{kind: "chunk", blk: blk})
+	})
+	// slice_before / slice_after split the stream into runs, starting a new run
+	// just before (slice_before) / just after (slice_after) each element that
+	// matches. The boundary test is a block over the element or `pat === x` for a
+	// single pattern argument — exactly one must be given.
+	sliceFn := func(kind string) NativeFn {
+		return func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			if blk != nil {
+				if len(args) > 0 {
+					raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+				}
+				return self.(*LazyEnum).with(lazyOp{kind: kind, blk: blk})
+			}
+			if len(args) != 1 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+			}
+			return self.(*LazyEnum).with(lazyOp{kind: kind, pat: args[0]})
+		}
+	}
+	d("slice_before", sliceFn("slice_before"))
+	d("slice_after", sliceFn("slice_after"))
+	// eager returns a non-lazy Enumerator over this pipeline: its terminal
+	// operations (first/take) drive #each element-by-element, so it stays usable on
+	// an infinite source while returning an ordinary (non-lazy) Enumerator.
+	d("eager", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &Enumerator{recv: self, meth: "each"}
+	})
 	d("lazy", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
 
 	toA := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -130,9 +183,13 @@ func (vm *VM) registerLazy() {
 		if blk == nil {
 			return l
 		}
-		for _, v := range vm.lazyForce(l, -1) {
+		// Incremental: drive the pipeline one element at a time so a break (or an
+		// early-abort panic from an eager Enumerator's #first/#take) unwinds without
+		// materialising an unbounded source.
+		vm.lazyRun(l, func(v object.Value) bool {
 			vm.callBlock(blk, []object.Value{v})
-		}
+			return true
+		})
 		return l
 	})
 }
@@ -206,13 +263,39 @@ func (vm *VM) collectEach(recv object.Value) []object.Value {
 
 // lazyForce pulls from the source, applying the op chain to each element, until
 // want elements are produced (want < 0 means all — only safe for finite/limited
-// chains). Each source element is threaded through the ops by feed, which
-// recurses op-by-op so that expanding ops (flat_map) and index/zip-carrying ops
-// compose the same way MRI's fibered lazy pipeline does.
+// chains). It is a thin collector over lazyRun.
 func (vm *VM) lazyForce(le *LazyEnum, want int) []object.Value {
 	if want == 0 {
 		return nil
 	}
+	var out []object.Value
+	vm.lazyRun(le, func(v object.Value) bool {
+		out = append(out, v)
+		return !(want >= 0 && len(out) >= want)
+	})
+	return out
+}
+
+// chunkState is the per-op accumulator for the grouping ops (chunk_while,
+// slice_when, chunk, slice_before, slice_after): a run is buffered and only
+// emitted downstream once its boundary is seen (or the source is exhausted),
+// which is what makes those ops truly lazy over an infinite source.
+type chunkState struct {
+	buf     []object.Value // the run being accumulated
+	prev    object.Value   // previous element (chunk_while / slice_when)
+	hasPrev bool           // a run exists (chunk_while / slice_when / slice_before)
+	key     object.Value   // current run's chunk key (chunk)
+	open    bool           // there is an open run the key may extend (chunk)
+}
+
+// lazyRun pulls from the source and threads each element through the op chain,
+// invoking sink for every value reaching the chain's end. sink returns false to
+// stop early (e.g. once a `first`/`take` quota is met). When the source is
+// exhausted without an early stop, grouping ops flush their buffered runs. Each
+// source element is threaded by feed, which recurses op-by-op so that expanding
+// ops (flat_map), grouping ops, and index/zip-carrying ops compose the same way
+// MRI's fibered lazy pipeline does.
+func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 	src := vm.lazySource(le.recv)
 	n := len(le.ops)
 	// Per-op mutable run state.
@@ -221,6 +304,7 @@ func (vm *VM) lazyForce(le *LazyEnum, want int) []object.Value {
 	idx := make([]int, n)                             // with_index counter
 	seen := make([][]object.Value, n)                 // uniq keys
 	zpull := make([][]func() (object.Value, bool), n) // zip other sources
+	cst := make([]*chunkState, n)                     // grouping-op accumulators
 	for i, op := range le.ops {
 		switch op.kind {
 		case "take", "drop":
@@ -235,17 +319,36 @@ func (vm *VM) lazyForce(le *LazyEnum, want int) []object.Value {
 				ps[j] = vm.lazySource(o)
 			}
 			zpull[i] = ps
+		case "chunk_while", "slice_when", "chunk", "slice_before", "slice_after":
+			cst[i] = &chunkState{}
 		}
 	}
-	var out []object.Value
 	stop := false
 	// feed threads v through ops[i:]; it returns false to abort the whole pull
 	// (want satisfied, or a take/take_while boundary reached).
 	var feed func(i int, v object.Value) bool
+	// emitBuf flushes a grouping op's buffered run downstream as one Array and
+	// clears it; emitRun does the same for chunk's [key, [elems]] pair.
+	emitBuf := func(i int, st *chunkState) bool {
+		if len(st.buf) == 0 {
+			return true
+		}
+		grp := object.NewArrayFromSlice(st.buf)
+		st.buf = nil
+		return feed(i+1, grp)
+	}
+	emitRun := func(i int, st *chunkState) bool {
+		if !st.open {
+			return true
+		}
+		grp := object.NewArrayFromSlice([]object.Value{st.key, object.NewArrayFromSlice(st.buf)})
+		st.open = false
+		st.buf = nil
+		return feed(i+1, grp)
+	}
 	feed = func(i int, v object.Value) bool {
 		if i == n {
-			out = append(out, v)
-			if want >= 0 && len(out) >= want {
+			if !sink(v) {
 				stop = true
 				return false
 			}
@@ -331,6 +434,104 @@ func (vm *VM) lazyForce(le *LazyEnum, want int) []object.Value {
 				}
 			}
 			return feed(i+1, object.NewArrayFromSlice(row))
+		case "chunk_while":
+			st := cst[i]
+			if !st.hasPrev {
+				st.buf = []object.Value{v}
+				st.prev = v
+				st.hasPrev = true
+				return true
+			}
+			keep := vm.callBlock(op.blk, []object.Value{st.prev, v}).Truthy()
+			st.prev = v
+			if keep {
+				st.buf = append(st.buf, v)
+				return true
+			}
+			if !emitBuf(i, st) {
+				return false
+			}
+			st.buf = []object.Value{v}
+			return true
+		case "slice_when":
+			st := cst[i]
+			if !st.hasPrev {
+				st.buf = []object.Value{v}
+				st.prev = v
+				st.hasPrev = true
+				return true
+			}
+			brk := vm.callBlock(op.blk, []object.Value{st.prev, v}).Truthy()
+			st.prev = v
+			if brk {
+				if !emitBuf(i, st) {
+					return false
+				}
+				st.buf = []object.Value{v}
+				return true
+			}
+			st.buf = append(st.buf, v)
+			return true
+		case "chunk":
+			st := cst[i]
+			k := vm.callBlock(op.blk, []object.Value{v})
+			drop, alone, reserved := chunkKeyKind(k)
+			if reserved {
+				raise("RuntimeError", "symbols beginning with an underscore are reserved")
+			}
+			if drop {
+				return emitRun(i, st)
+			}
+			if alone {
+				if !emitRun(i, st) {
+					return false
+				}
+				pair := object.NewArrayFromSlice([]object.Value{k, object.NewArrayFromSlice([]object.Value{v})})
+				return feed(i+1, pair)
+			}
+			if st.open && valueEql(st.key, k) {
+				st.buf = append(st.buf, v)
+				return true
+			}
+			if !emitRun(i, st) {
+				return false
+			}
+			st.key = k
+			st.buf = []object.Value{v}
+			st.open = true
+			return true
+		case "slice_before":
+			st := cst[i]
+			var match bool
+			if op.blk != nil {
+				match = vm.callBlock(op.blk, []object.Value{v}).Truthy()
+			} else {
+				match = vm.send(op.pat, "===", []object.Value{v}, nil).Truthy()
+			}
+			if match {
+				if st.hasPrev && !emitBuf(i, st) {
+					return false
+				}
+				st.buf = []object.Value{v}
+				st.hasPrev = true
+				return true
+			}
+			st.hasPrev = true
+			st.buf = append(st.buf, v)
+			return true
+		case "slice_after":
+			st := cst[i]
+			st.buf = append(st.buf, v)
+			var match bool
+			if op.blk != nil {
+				match = vm.callBlock(op.blk, []object.Value{v}).Truthy()
+			} else {
+				match = vm.send(op.pat, "===", []object.Value{v}, nil).Truthy()
+			}
+			if match {
+				return emitBuf(i, st)
+			}
+			return true
 		case "take_while":
 			if !vm.callBlock(op.blk, []object.Value{v}).Truthy() {
 				stop = true
@@ -361,6 +562,25 @@ func (vm *VM) lazyForce(le *LazyEnum, want int) []object.Value {
 		}
 		return feed(i+1, v)
 	}
+	// finish flushes each grouping op's pending run once the source is exhausted,
+	// threading it through the ops downstream (which may themselves group).
+	var finish func(i int) bool
+	finish = func(i int) bool {
+		if i == n {
+			return true
+		}
+		switch le.ops[i].kind {
+		case "chunk_while", "slice_when", "slice_before", "slice_after":
+			if !emitBuf(i, cst[i]) {
+				return false
+			}
+		case "chunk":
+			if !emitRun(i, cst[i]) {
+				return false
+			}
+		}
+		return finish(i + 1)
+	}
 	for !stop {
 		v, ok := src()
 		if !ok {
@@ -370,7 +590,32 @@ func (vm *VM) lazyForce(le *LazyEnum, want int) []object.Value {
 			break
 		}
 	}
-	return out
+	if !stop {
+		finish(0)
+	}
+}
+
+// chunkKeyKind classifies a value returned by chunk's block: nil or :_separator
+// drop the element (drop), :_alone forces its own run (alone), and any other
+// Symbol beginning with an underscore is reserved (reserved).
+func chunkKeyKind(k object.Value) (drop, alone, reserved bool) {
+	if _, isNil := k.(object.Nil); isNil {
+		return true, false, false
+	}
+	s, ok := k.(object.Symbol)
+	if !ok {
+		return false, false, false
+	}
+	switch string(s) {
+	case "_separator":
+		return true, false, false
+	case "_alone":
+		return false, true, false
+	}
+	if strings.HasPrefix(string(s), "_") {
+		return false, false, true
+	}
+	return false, false, false
 }
 
 // lazyGrepValue returns the value grep/grep_v should emit for a match: the

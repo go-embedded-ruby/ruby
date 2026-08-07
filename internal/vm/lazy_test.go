@@ -78,6 +78,54 @@ func TestLazy(t *testing.T) {
 		// Longer mixed chain over an infinite source.
 		{`p (1..Float::INFINITY).lazy.map { |x| x * 2 }.flat_map { |x| [x, x] }.select { |x| x > 4 }.first(4)`,
 			"[6, 6, 8, 8]\n"},
+		// chunk_while / slice_when: runs split at adjacent pairs. Truly lazy — a
+		// completed run is emitted the moment its boundary is seen, so an infinite
+		// source with finite runs terminates under first.
+		{`p (1..Float::INFINITY).lazy.chunk_while { |a, b| b % 3 != 0 }.first(2)`, "[[1, 2], [3, 4, 5]]\n"},
+		{`p [1, 1, 2, 3, 3, 4].lazy.chunk_while { |a, b| a == b }.to_a`, "[[1, 1], [2], [3, 3], [4]]\n"},
+		{`p [3, 1, 4].lazy.chunk_while { |a, b| a < b }.force`, "[[3], [1, 4]]\n"},
+		{`p [10].lazy.chunk_while { |a, b| true }.to_a`, "[[10]]\n"}, // single element → one run
+		{`p [].lazy.chunk_while { |a, b| true }.to_a`, "[]\n"},       // empty → no runs
+		{`p (1..Float::INFINITY).lazy.slice_when { |a, b| b % 3 == 0 }.first(2)`, "[[1, 2], [3, 4, 5]]\n"},
+		{`p [1, 2, 4, 5, 7].lazy.slice_when { |a, b| b - a > 1 }.to_a`, "[[1, 2], [4, 5], [7]]\n"},
+		// chunk: consecutive equal keys grouped as [key, [elems]]; nil/:_separator
+		// drop, :_alone stands alone, lazy over an infinite source.
+		{`p (1..Float::INFINITY).lazy.chunk { |x| x % 3 }.first(3)`, "[[1, [1]], [2, [2]], [0, [3]]]\n"},
+		{`p [1, 2, 2, 3].lazy.chunk { |x| x }.force`, "[[1, [1]], [2, [2, 2]], [3, [3]]]\n"},
+		{`p [1, 2, 3, 4, 5].lazy.chunk { |x| x < 3 ? :a : :_separator }.force`, "[[:a, [1, 2]]]\n"},
+		{`p [1, 2, 3].lazy.chunk { |x| :_alone }.force`, "[[:_alone, [1]], [:_alone, [2]], [:_alone, [3]]]\n"},
+		{`p [1, 2, 3].lazy.chunk { |x| nil }.force`, "[]\n"}, // all dropped
+		{`p [].lazy.chunk { |x| x }.force`, "[]\n"},
+		{`p [1, 2].lazy.chunk.class`, "Enumerator::Lazy\n"}, // no block → awaiting Lazy
+		// chunk chained downstream: keys/runs feed further lazy ops.
+		{`p (1..Float::INFINITY).lazy.chunk { |x| x % 2 }.select { |k, v| k == 0 }.first(2)`,
+			"[[0, [2]], [0, [4]]]\n"},
+		{`p (1..Float::INFINITY).lazy.chunk_while { |a, b| b % 3 != 0 }.map { |r| r.sum }.first(3)`,
+			"[3, 12, 21]\n"},
+		// slice_before / slice_after: block or pattern boundary; lazy over infinite.
+		{`p (1..Float::INFINITY).lazy.slice_before { |x| x % 3 == 0 }.first(2)`, "[[1, 2], [3, 4, 5]]\n"},
+		{`p [1, 2, 4, 9, 11].lazy.slice_before(&:even?).force`, "[[1], [2], [4, 9, 11]]\n"},
+		{`p [1, 3, 5, 2].lazy.slice_before(->(x) { x.even? }).to_a`, "[[1, 3, 5], [2]]\n"}, // pattern arg
+		{`p [1, 2, 4, 5].lazy.slice_before { |x| x > 3 }.first(1)`, "[[1, 2]]\n"},
+		{`p (1..Float::INFINITY).lazy.slice_after { |x| x % 3 == 0 }.first(2)`, "[[1, 2, 3], [4, 5, 6]]\n"},
+		{`p [1, 2, 4, 9, 10].lazy.slice_after(&:even?).force`, "[[1, 2], [4], [9, 10]]\n"},
+		{`p [2, 4, 6].lazy.slice_after(&:even?).to_a`, "[[2], [4], [6]]\n"}, // every element a boundary
+		{`p [].lazy.slice_before { |x| true }.to_a`, "[]\n"},
+		{`p [].lazy.slice_after { |x| true }.to_a`, "[]\n"},
+		// eager: returns an ordinary Enumerator that still drives the pipeline
+		// element-by-element, so first/take stay usable on an infinite source.
+		{`p (1..Float::INFINITY).lazy.eager.class`, "Enumerator\n"},
+		{`p (1..Float::INFINITY).lazy.map { |x| x * 2 }.eager.first(3)`, "[2, 4, 6]\n"},
+		{`p (1..Float::INFINITY).lazy.select { |x| x.even? }.eager.take(3)`, "[2, 4, 6]\n"},
+		{`p [1, 2, 3].lazy.map { |x| x * 10 }.eager.to_a`, "[10, 20, 30]\n"},
+		// A completed run may itself satisfy the first/take quota — both while
+		// pulling (a :_alone element that first flushes the open run) and during the
+		// finish flush of the last buffered run.
+		{`p [1, 1, 2].lazy.chunk { |x| x == 2 ? :_alone : 1 }.first(1)`, "[[1, [1, 1]]]\n"},
+		{`p [1, 3].lazy.chunk_while { |a, b| false }.first(2)`, "[[1], [3]]\n"},
+		{`p [1, 1].lazy.chunk { |x| x }.first(1)`, "[[1, [1, 1]]]\n"},
+		// slice_after with a pattern argument (rather than a block).
+		{`p [1, 3, 4].lazy.slice_after(->(x) { x.even? }).to_a`, "[[1, 3, 4]]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -102,5 +150,29 @@ func TestLazy(t *testing.T) {
 		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "can't iterate") {
 			t.Errorf("src=%q got %v want TypeError", src, err)
 		}
+	}
+	// chunk_while / slice_when require a block.
+	for _, src := range []string{`[1, 2, 3].lazy.chunk_while`, `[1, 2, 3].lazy.slice_when`} {
+		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "without a block") {
+			t.Errorf("src=%q got %v want ArgumentError (without a block)", src, err)
+		}
+	}
+	// slice_before / slice_after need exactly one of a block or a pattern arg.
+	for _, src := range []string{
+		`[1, 2, 3].lazy.slice_before`,            // neither → given 0, expected 1
+		`[1, 2, 3].lazy.slice_after`,             // neither → given 0, expected 1
+		`[1, 2, 3].lazy.slice_before(1, 2)`,      // two args → given 2, expected 1
+		`[1, 2, 3].lazy.slice_before(1) { |x| }`, // both → given 1, expected 0
+		`[1, 2, 3].lazy.slice_after(1) { |x| }`,
+	} {
+		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "wrong number of arguments") {
+			t.Errorf("src=%q got %v want ArgumentError (wrong number of arguments)", src, err)
+		}
+	}
+	// chunk: a Symbol beginning with an underscore (other than :_separator /
+	// :_alone) is reserved.
+	if err := runErr(t, `[1].lazy.chunk { |x| :_reserved }.force`); err == nil ||
+		!strings.Contains(err.Error(), "reserved") {
+		t.Errorf("chunk reserved-symbol: got %v want RuntimeError (reserved)", err)
 	}
 }
