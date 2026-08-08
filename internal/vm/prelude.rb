@@ -420,6 +420,23 @@ module Enumerable
     r
   end
 
+  # collect_concat is the classic alias of flat_map.
+  def collect_concat(&blk)
+    return enum_for(:collect_concat) unless block_given?
+    flat_map(&blk)
+  end
+
+  # each_entry yields each element as MRI's rb_enum_values_pack packs it: a lone
+  # value stays scalar, a multi-value #each yield gathers into an Array, and a
+  # zero-argument yield becomes nil. Unlike map/select (whose block arity governs
+  # a multi-value yield), each_entry always hands the block one packed value. With
+  # no block it returns a sized Enumerator; with a block it returns self.
+  def each_entry
+    return enum_for(:each_entry) { size if respond_to?(:size) } unless block_given?
+    __each_packed { |x| yield(x) }
+    self
+  end
+
   def each_with_object(memo)
     return enum_for(:each_with_object, memo) unless block_given?
     __each_packed { |x| yield(x, memo) }
@@ -460,28 +477,62 @@ module Enumerable
     h
   end
 
-  def tally
-    h = {}
+  # tally counts occurrences into a Hash of element => count. With a Hash argument
+  # it accumulates INTO (and returns) that hash: a missing key starts at 0, an
+  # existing count must already be an Integer (else TypeError), and a non-Hash
+  # argument is a TypeError. More than one argument is an ArgumentError.
+  def tally(*args)
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
+    if args.empty?
+      h = {}
+    else
+      a = args[0]
+      raise TypeError, "no implicit conversion of #{a.nil? ? "nil" : a.class} into Hash" unless a.is_a?(Hash)
+      h = a
+    end
     __each_packed { |x|
-      h[x] = (h[x] || 0) + 1
+      if h.key?(x)
+        c = h[x]
+        unless c.is_a?(Integer)
+          tn = c.nil? ? "nil" : (c == true ? "true" : (c == false ? "false" : c.class))
+          raise TypeError, "wrong argument type #{tn} (expected Integer)"
+        end
+      else
+        c = 0
+      end
+      h[x] = c + 1
     }
     h
   end
 
+  # zip pairs each element with the correspondingly-indexed element of every other
+  # collection (a shorter operand pads with nil). Each other is taken via #to_ary
+  # or, failing that, #to_a so any Enumerable works. With a block each row is
+  # yielded and zip returns nil; without one it returns the Array of rows.
   def zip(*others)
-    r = []
+    others = others.map { |o| o.respond_to?(:to_ary) ? o.to_ary : o.to_a }
+    blk = block_given?
+    r = blk ? nil : []
     i = 0
     __each_packed { |x|
       row = [x]
       others.each { |o| row << o[i] }
-      r << row
+      if blk
+        yield(row)
+      else
+        r << row
+      end
       i = i + 1
     }
     r
   end
 
   # find_index(value) / find_index { |x| } — the index of the first match, or nil.
+  # With neither a value nor a block it returns an Enumerator; a second argument
+  # is an ArgumentError.
   def find_index(*args)
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
+    return enum_for(:find_index) if args.empty? && !block_given?
     idx = nil
     i = 0
     __each_packed { |x|
@@ -758,7 +809,10 @@ module Enumerable
     runs.to_enum(:each) { nil }
   end
 
+  # minmax_by returns [min, max] compared by the block's mapped value (an empty
+  # collection gives [nil, nil]); with no block it returns an Enumerator.
   def minmax_by
+    return enum_for(:minmax_by) unless block_given?
     [min_by { |x| yield(x) }, max_by { |x| yield(x) }]
   end
 
