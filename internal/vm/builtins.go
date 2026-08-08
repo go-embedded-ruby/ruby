@@ -1351,6 +1351,48 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cString.define("succ", succStr)
 	vm.cString.define("next", succStr)
+	succBang := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		checkFrozen(s)
+		s.SetBytes([]byte(succString(s.Str())))
+		return s
+	}
+	vm.cString.define("succ!", succBang)
+	vm.cString.define("next!", succBang)
+	vm.cString.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(stringChr(strOf(self)))
+	})
+	vm.cString.define("setbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		checkFrozen(s)
+		b := s.MutableBytes()
+		i := toInt(args[0])
+		if i < 0 {
+			i += int64(len(b)) // negative indexes count from the end
+		}
+		if i < 0 || i >= int64(len(b)) {
+			raise("IndexError", "index %d out of string", toInt(args[0]))
+		}
+		b[i] = byte(toInt(args[1]))
+		return args[1]
+	})
+	vm.cString.define("sum", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		bits := 16
+		if len(args) > 0 {
+			bits = int(toInt(args[0]))
+		}
+		return object.IntValue(stringSum(strOf(self), bits))
+	})
+	vm.cString.define("upto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "upto", args...)
+		}
+		excl := len(args) > 1 && truthyValue(args[1])
+		stringUpto(strOf(self), strArg(args[0]), excl, func(cur string) {
+			vm.callBlock(blk, []object.Value{object.NewString(cur)})
+		})
+		return self
+	})
 	vm.cString.define("strip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(strings.Trim(strOf(self), wsCutset))
 	})
@@ -1568,52 +1610,31 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("center", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(padString(strOf(self), args, 'c'))
 	})
-	vm.cString.define("tr", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		from := expandCharSet(strArg(args[0]))
-		to := expandCharSet(strArg(args[1]))
-		out := make([]byte, 0, len(strOf(self)))
-		for i := 0; i < len(strOf(self)); i++ {
-			b := strOf(self)[i]
-			if idx := byteIndex(from, b); idx >= 0 {
-				if len(to) == 0 {
-					continue // empty replacement deletes
-				}
-				if idx >= len(to) {
-					idx = len(to) - 1
-				}
-				out = append(out, to[idx])
-			} else {
-				out = append(out, b)
-			}
-		}
-		return object.NewStringBytes(out)
+	trFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewStringBytes([]byte(trString(strOf(self), strArg(args[0]), strArg(args[1]), false)))
+	}
+	vm.cString.define("tr", trFn)
+	trSFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewStringBytes([]byte(trString(strOf(self), strArg(args[0]), strArg(args[1]), true)))
+	}
+	vm.cString.define("tr_s", trSFn)
+	vm.cString.define("tr!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), false) })
+	})
+	vm.cString.define("tr_s!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), true) })
 	})
 	vm.cString.define("count", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		set := expandCharSet(strArg(args[0]))
-		n := 0
-		for i := 0; i < len(strOf(self)); i++ {
-			if byteIndex(set, strOf(self)[i]) >= 0 {
-				n++
-			}
-		}
-		return object.IntValue(int64(n))
+		return object.IntValue(int64(stringCount(strOf(self), args)))
 	})
 	vm.cString.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		set := expandCharSet(strArg(args[0]))
-		out := make([]byte, 0, len(strOf(self)))
-		for i := 0; i < len(strOf(self)); i++ {
-			if byteIndex(set, strOf(self)[i]) < 0 {
-				out = append(out, strOf(self)[i])
-			}
-		}
-		return object.NewStringBytes(out)
+		return object.NewStringBytes([]byte(stringDelete(strOf(self), args)))
+	})
+	vm.cString.define("delete!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strBang(self, func(s string) string { return stringDelete(s, args) })
 	})
 	vm.cString.define("squeeze", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		sets := make([]string, len(args))
-		for i, a := range args {
-			sets[i] = strArg(a)
-		}
-		return object.NewStringBytes([]byte(squeezeStr(strOf(self), sets...)))
+		return object.NewStringBytes([]byte(stringSqueeze(strOf(self), args)))
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		var res object.Value
@@ -1736,11 +1757,7 @@ func (vm *VM) bootstrap() {
 		return strBang(self, chopStr)
 	})
 	vm.cString.define("squeeze!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		sets := make([]string, len(args))
-		for i, a := range args {
-			sets[i] = strArg(a)
-		}
-		return strBang(self, func(s string) string { return squeezeStr(s, sets...) })
+		return strBang(self, func(s string) string { return stringSqueeze(s, args) })
 	})
 	vm.cString.define("sub!", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.strSubBang(self, args, blk, false)
@@ -4721,35 +4738,6 @@ func (vm *VM) transformKey(k object.Value, mapping *object.Hash, blk *Proc) obje
 	return k
 }
 
-// squeezeStr collapses each run of identical bytes to a single byte. When one
-// or more character-set arguments are given only runs of bytes that belong to
-// the intersection of those sets are collapsed (matching String#squeeze).
-func squeezeStr(s string, sets ...string) string {
-	var set []byte
-	squeezeAll := len(sets) == 0
-	if !squeezeAll {
-		set = expandCharSet(sets[0])
-		for _, extra := range sets[1:] {
-			next := expandCharSet(extra)
-			keep := set[:0]
-			for _, b := range set {
-				if byteIndex(next, b) >= 0 {
-					keep = append(keep, b)
-				}
-			}
-			set = keep
-		}
-	}
-	out := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		if i > 0 && s[i] == s[i-1] && (squeezeAll || byteIndex(set, s[i]) >= 0) {
-			continue
-		}
-		out = append(out, s[i])
-	}
-	return string(out)
-}
-
 // strSubBang backs String#sub!/#gsub!: it applies the same substitution as
 // sub/gsub and writes the result back, returning the receiver when it changed
 // and nil otherwise.
@@ -5770,33 +5758,6 @@ func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
 		}
 	}
 	return cur
-}
-
-// expandCharSet expands a tr/count/delete character set, turning `a-z` ranges
-// into their bytes (ASCII).
-func expandCharSet(s string) []byte {
-	var out []byte
-	for i := 0; i < len(s); i++ {
-		if i+2 < len(s) && s[i+1] == '-' {
-			for ch := s[i]; ch <= s[i+2]; ch++ {
-				out = append(out, ch)
-			}
-			i += 2
-		} else {
-			out = append(out, s[i])
-		}
-	}
-	return out
-}
-
-// byteIndex returns the index of b in set, or -1.
-func byteIndex(set []byte, b byte) int {
-	for i, c := range set {
-		if c == b {
-			return i
-		}
-	}
-	return -1
 }
 
 // padString implements ljust/rjust/center ('l'/'r'/'c'): pad s with the pad
