@@ -5,77 +5,112 @@
 package vm
 
 import (
-	rbset "github.com/go-ruby-set/set"
+	"strings"
 
-	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// Set binds github.com/go-ruby-set/set — the pure-Go, MRI-4.0.5-faithful port of
-// Ruby's Set stdlib — into rbgo. The library does all of the membership,
-// set algebra, iteration ordering, predicates and the MRI 4.0 "Set[…]" inspect
-// rendering; this file is only the thin shell that maps Ruby values onto the
-// library's any-typed member model and supplies the Ruby hash/eql? semantics
-// through the library's Hasher.
+// Set is rbgo's Ruby Set. Like MRI's set.rb it is a thin shell over a Hash whose
+// keys are the members (the value is always true); the backing object.Hash owns
+// membership, the canonical key→member mapping, first-insertion order and the
+// compare_by_identity flag, so there is no parallel store to keep in sync. Using
+// object.Hash means members are keyed by the very #hash/#eql? semantics rbgo's
+// Hash keys use — including content equality for Array/Hash/Set members and the
+// CustomKeyHook path for objects that override #hash/#eql? — exactly as MRI's
+// Hash-backed Set does.
 //
-// A go-ruby-set Set built with NewWith(hasher) keys its members through the
-// host function (here setKey), so two distinct String objects with the same
-// bytes are the same member while a Symbol of the same name is a different one,
-// exactly as MRI's hash/eql? protocol — the very semantics rbgo already uses for
-// Hash keys. The original Ruby value for each canonical key is recovered for
-// each/to_a/inspect through the order-preserving vals/order table, which is also
-// what the Bag type and the YAML emitter read, so they keep working unchanged.
-
-// Set is the Ruby wrapper around a go-ruby-set Set. The library Set holds the
-// original Ruby value as its member, keyed through setKey, so it is the single
-// source of truth for membership, the canonical key→value mapping and the
-// insertion order — there is no parallel store to keep in sync, and an algebra
-// result already carries the Ruby values in MRI order in one pass.
+// The bulk of the Ruby-observable Set API (algebra, predicates, higher-order
+// methods, aliases, Enumerable mix-in, initialize/each_entry protocol) lives in
+// the prelude, reopening `class Set` on top of the primitives registered here.
 type Set struct {
-	s *rbset.Set // members are the Ruby values, keyed by setKey
+	h         *object.Hash // member -> true, keyed by the member's #hash/#eql?
+	iterating int          // >0 while an #each is in progress (structural-mod guard)
+}
+
+// checkIter raises the RuntimeError MRI raises when a Set is structurally
+// modified while an #each over it is in progress.
+func (s *Set) checkIter(what string) {
+	if s.iterating > 0 {
+		raise("RuntimeError", "can't %s during iteration", what)
+	}
 }
 
 func (s *Set) ToS() string     { return s.repr() }
 func (s *Set) Inspect() string { return s.repr() }
 func (s *Set) Truthy() bool    { return true }
 
-// repr renders MRI 4.0's "Set[1, 2, 3]" (empty: "Set[]"), members in insertion
-// order, each rendered with Ruby #inspect. The library owns the format; we feed
-// it the canonical-key → Ruby-value lookup so members inspect as Ruby values.
+// repr renders MRI 3.4's "#<Set: {1, 2, 3}>" (empty: "#<Set: {}>"), members in
+// insertion order each rendered with Ruby #inspect, with a cycle guard so a Set
+// that (transitively) contains itself renders "#<Set: {...}>" instead of looping.
 func (s *Set) repr() string {
 	if !object.ReprEnter(s) {
-		return "Set[...]" // s is a member of itself
+		return "#<Set: {...}>"
 	}
 	defer object.ReprLeave(s)
-	return s.s.Inspect(func(m any) string { return m.(object.Value).Inspect() })
+	var b strings.Builder
+	b.WriteString("#<Set: {")
+	for i, k := range s.h.Keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(k.Inspect())
+	}
+	b.WriteString("}>")
+	return b.String()
 }
 
-// newSet builds an empty Ruby Set wrapper. The library Set keys its members
-// through setKey, so any Ruby value (including reference types) is an accepted
-// member and the stored member is the Ruby value itself.
-func newSet() *Set {
-	return &Set{s: rbset.NewWith(func(elem any) any { return setKey(elem.(object.Value)) })}
-}
-
-// wrap adorns a library Set (whose members are Ruby values keyed by setKey) as a
-// Ruby Set wrapper without copying — used to surface algebra results, which the
-// library already returns with the Ruby member values in MRI insertion order.
-func wrap(s *rbset.Set) *Set { return &Set{s: s} }
+// newSet builds an empty Ruby Set wrapper over a fresh content-keyed Hash. It is
+// also the constructor other bindings (e.g. redis) use to surface a Ruby Set.
+func newSet() *Set { return &Set{h: object.NewHash()} }
 
 // each calls fn for every member (a Ruby value) in insertion order, in a single
-// pass over the library's tables (no per-element membership re-lookup).
+// pass over the backing Hash's key slice.
 func (s *Set) each(fn func(object.Value)) {
-	s.s.EachPair(func(_, member any) { fn(member.(object.Value)) })
+	for _, k := range s.h.Keys {
+		fn(k)
+	}
 }
 
 // size returns the member count.
-func (s *Set) size() int { return s.s.Size() }
+func (s *Set) size() int { return s.h.Len() }
 
-// setKey marshals a Ruby value to a canonical comparable Go key, raising
-// TypeError for a value that cannot be a Set member is NOT done here — like a
-// Hash key, every Ruby value is a valid member. A String keys by its byte
-// content (distinct from a Symbol of the same name, as in Hash keys); the other
-// immutable value types key by themselves.
+// add inserts a Ruby value (idempotent), preserving first-insertion order.
+func (s *Set) add(v object.Value) { s.h.Set(v, object.True) }
+
+// delete removes a Ruby value (a no-op when absent).
+func (s *Set) delete(v object.Value) { s.h.Delete(v) }
+
+// has reports membership.
+func (s *Set) has(v object.Value) bool { _, ok := s.h.Get(v); return ok }
+
+// eq reports Set equality by members (ignoring the compare_by_identity flag,
+// which the Ruby #== layer checks): same size and every member of s present in o.
+// It backs the operator-level == fast path for two native Sets.
+func (s *Set) eq(o *Set) bool {
+	if s.size() != o.size() {
+		return false
+	}
+	for _, k := range s.h.Keys {
+		if !o.has(k) {
+			return false
+		}
+	}
+	return true
+}
+
+// toArray materialises the Set into a Ruby Array in insertion order.
+func (s *Set) toArray() object.Value {
+	out := make([]object.Value, len(s.h.Keys))
+	copy(out, s.h.Keys)
+	return object.NewArrayFromSlice(out)
+}
+
+// setKey marshals a Ruby value to a canonical comparable Go key for the Bag
+// multiset and the Concurrent::Map / TSort bindings (Set itself now keys members
+// through its backing Hash). A String keys by its byte content (distinct from a
+// Symbol of the same name); the other immutable value types key by themselves;
+// any other object keys by identity, exactly like a Hash key with default
+// (non-content) semantics.
 func setKey(v object.Value) any {
 	switch x := v.(type) {
 	case object.Integer:
@@ -93,86 +128,22 @@ func setKey(v object.Value) any {
 	case *object.String:
 		return "str:" + string(x.Bytes())
 	}
-	// Any other object is a valid Set member in Ruby — it keys by identity
-	// (object equality / hash), exactly like a Hash key. A reference-typed Ruby
-	// value is a Go pointer, which is comparable, so the pointer itself is a
-	// stable per-object key. This lets a Set hold arbitrary objects (e.g. Puppet
-	// resources, model nodes) the way MRI does.
 	return v
 }
 
-// add inserts a Ruby value, preserving first-insertion order (idempotent). The
-// library stores the Ruby value as the member and keeps the canonical key→value
-// mapping and order itself, so there is nothing else to update.
-func (s *Set) add(v object.Value) { s.s.Add(v) }
-
-// delete removes a Ruby value (a no-op when absent).
-func (s *Set) delete(v object.Value) { s.s.Delete(v) }
-
-// setArg asserts an argument is a Set, raising TypeError otherwise.
-func setArg(v object.Value) *Set {
-	s, ok := v.(*Set)
-	if !ok {
-		raise("TypeError", "value must be a Set")
-	}
-	return s
-}
-
-// seed adds every element of an enumerable (Array or Set) to s.
-func (s *Set) seed(v object.Value) {
-	switch e := v.(type) {
-	case *object.Array:
-		for _, el := range e.Elems {
-			s.add(el)
-		}
-	case *Set:
-		e.each(s.add)
-	default:
-		raise("TypeError", "value must be enumerable (Array or Set)")
-	}
-}
-
-// copy returns a shallow clone: a new Set holding the same members in the same
-// insertion order (the Ruby values are shared, as MRI's Set#dup does).
-func (s *Set) copy() *Set { return wrap(s.s.Dup()) }
-
-// toArray materialises the Set into a Ruby Array in insertion order.
-func (s *Set) toArray() object.Value {
-	src := s.s.ToSlice()
-	out := make([]object.Value, len(src))
-	for i, m := range src {
-		out[i] = m.(object.Value)
-	}
-	return object.NewArrayFromSlice(out)
-}
-
-// setOp implements the Set operator fast path reached from binary(): + is union
-// and - is difference (& | << dispatch as ordinary methods). The right operand
-// must be a Set.
-func setOp(op bytecode.Op, a *Set, b object.Value) object.Value {
-	switch op {
-	case bytecode.OpAdd:
-		return wrap(a.s.Union(setArg(b).s))
-	case bytecode.OpSub:
-		return wrap(a.s.Difference(setArg(b).s))
-	}
-	return raise("NoMethodError", "undefined method '%s' for a Set", op)
-}
-
-// registerSet installs the Set class, its constructor and instance methods.
+// registerSet installs the Set class, its constructor and the native primitives
+// the prelude's `class Set` reopening builds the full API on top of.
 func (vm *VM) registerSet() {
 	vm.cSet = newClass("Set", vm.cObject)
 	vm.consts["Set"] = vm.cSet
 
-	// Set.new(enumerable=nil): empty, or seeded from an Array/Set.
+	// Set.new(enumerable=nil, &block): allocate an empty Set, then run the
+	// (prelude, private) #initialize which seeds it via the each_entry/each
+	// protocol and applies the block, exactly like MRI's Class#new.
 	vm.cSet.smethods["new"] = &Method{name: "new", owner: vm.cSet,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 			s := newSet()
-			if len(args) > 0 {
-				if _, isNil := args[0].(object.Nil); !isNil {
-					s.seed(args[0])
-				}
-			}
+			vm.send(s, "initialize", args, blk)
 			return s
 		}}
 	// Set[a, b, …] builds a Set from its arguments (MRI's Set.[]).
@@ -188,334 +159,85 @@ func (vm *VM) registerSet() {
 	d := func(name string, fn NativeFn) { vm.cSet.define(name, fn) }
 	self := func(v object.Value) *Set { return v.(*Set) }
 
-	addFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+	d("add", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
-		s.add(args[0])
-		return s
-	}
-	d("add", addFn)
-	d("<<", addFn)
-
-	d("add?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		s := self(v)
-		if s.s.Include(args[0]) {
-			return object.NilV
-		}
+		s.checkIter("add to set")
 		s.add(args[0])
 		return s
 	})
 	d("delete", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
+		s.checkIter("delete from set")
 		s.delete(args[0])
 		return s
 	})
-
-	includeFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.Include(args[0]))
-	}
-	d("include?", includeFn)
-	d("member?", includeFn)
-	d("===", includeFn)
-
-	sizeFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self(v).s.Size()))
-	}
-	d("size", sizeFn)
-	d("length", sizeFn)
-	d("count", sizeFn)
-
-	d("empty?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.Empty())
+	d("include?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).has(args[0]))
+	})
+	d("size", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).size()))
 	})
 	d("clear", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self(v)
-		s.s.Clear()
-		return s
-	})
-
-	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (each)")
-		}
-		s := self(v)
-		s.each(func(m object.Value) { vm.callBlock(blk, []object.Value{m}) })
+		s.checkIter("clear set")
+		s.h.Clear()
 		return s
 	})
 	d("to_a", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self(v).toArray()
 	})
-	d("to_set", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return v
-	})
 
-	unionFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := self(v), setArg(args[0])
-		return wrap(a.s.Union(b.s))
-	}
-	d("|", unionFn)
-	d("union", unionFn)
-
-	interFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := self(v), setArg(args[0])
-		return wrap(a.s.Intersection(b.s))
-	}
-	d("&", interFn)
-	d("intersection", interFn)
-
-	diffFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := self(v), setArg(args[0])
-		return wrap(a.s.Difference(b.s))
-	}
-	d("difference", diffFn)
-
-	subsetFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.SubsetQ(setArg(args[0]).s))
-	}
-	d("subset?", subsetFn)
-	d("<=", subsetFn)
-	d("superset?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.SupersetQ(setArg(args[0]).s))
-	})
-	d(">=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self(v).s.SupersetQ(setArg(args[0]).s))
-	})
-
-	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		b, ok := args[0].(*Set)
-		if !ok {
-			return object.False
-		}
-		return object.Bool(self(v).s.EqualQ(b.s))
-	})
-
-	d("merge", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+	// __each yields every member in insertion order and returns self; the prelude
+	// #each wraps it to return an Enumerator when called without a block.
+	d("__each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
 		s := self(v)
-		for _, a := range args {
-			s.seed(a)
-		}
+		s.iterating++
+		defer func() { s.iterating-- }()
+		s.each(func(m object.Value) { vm.callBlock(blk, []object.Value{m}) })
 		return s
 	})
 
-	// map / collect: yield each member, collect the block results into a new
-	// Array (MRI's Set#map/#collect return an Array, not a Set).
-	mapFn := func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (map)")
-		}
+	// compare_by_identity switches membership to object identity and rehashes the
+	// existing members; returns self. compare_by_identity? reports the flag.
+	d("compare_by_identity", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self(v)
-		out := make([]object.Value, 0, s.size())
-		s.each(func(m object.Value) { out = append(out, vm.callBlock(blk, []object.Value{m})) })
-		return object.NewArrayFromSlice(out)
-	}
-	d("map", mapFn)
-	d("collect", mapFn)
+		s.h.CompareByIdentity()
+		return s
+	})
+	d("compare_by_identity?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).h.Identity)
+	})
 
-	// select / filter: a new Set of the members for which the block is truthy.
-	selectFn := func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (select)")
-		}
+	// __replace_cbi(flag) empties the Set and sets its compare_by_identity flag to
+	// flag, returning self. The prelude's #replace / #map! / #flatten! use it to
+	// reset contents while controlling whether the identity flag is retained.
+	d("__replace_cbi", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self(v)
-		out := newSet()
-		s.each(func(m object.Value) {
-			if vm.callBlock(blk, []object.Value{m}).Truthy() {
-				out.add(m)
-			}
-		})
-		return out
-	}
-	d("select", selectFn)
-	d("filter", selectFn)
-
-	// reject: a new Set of the members for which the block is falsy.
-	d("reject", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (reject)")
-		}
-		s := self(v)
-		out := newSet()
-		s.each(func(m object.Value) {
-			if !vm.callBlock(blk, []object.Value{m}).Truthy() {
-				out.add(m)
-			}
-		})
-		return out
+		s.checkIter("modify set")
+		s.h.Clear()
+		s.h.Identity = args[0].Truthy()
+		return s
 	})
 
-	// find / detect: the first member (insertion order) for which the block is
-	// truthy, or nil when none match.
-	findFn := func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (find)")
-		}
-		s := self(v)
-		for _, m := range s.s.ToSlice() {
-			mv := m.(object.Value)
-			if vm.callBlock(blk, []object.Value{mv}).Truthy() {
-				return mv
-			}
-		}
-		return object.NilV
-	}
-	d("find", findFn)
-	d("detect", findFn)
-
-	// all?: true when the block is truthy for every member (true on the empty set).
-	d("all?", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (all?)")
-		}
-		s := self(v)
-		for _, m := range s.s.ToSlice() {
-			if !vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
-				return object.False
-			}
-		}
-		return object.True
-	})
-
-	// any?: true when the block is truthy for some member (false on the empty set).
-	d("any?", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (any?)")
-		}
-		s := self(v)
-		for _, m := range s.s.ToSlice() {
-			if vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
-				return object.True
-			}
-		}
-		return object.False
-	})
-
-	// none?: true when the block is truthy for no member (true on the empty set).
-	d("none?", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (none?)")
-		}
-		s := self(v)
-		for _, m := range s.s.ToSlice() {
-			if vm.callBlock(blk, []object.Value{m.(object.Value)}).Truthy() {
-				return object.False
-			}
-		}
-		return object.True
-	})
-
-	// ^: symmetric difference — a new Set of the members in exactly one operand.
-	d("^", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := self(v), setArg(args[0])
-		return wrap(a.s.XorSym(b.s))
-	})
-
-	// disjoint?: true when the two sets share no member.
-	d("disjoint?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.DisjointQ(b.s))
-	})
-	// intersect?: the negation of disjoint? (the sets share at least one member).
-	d("intersect?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.IntersectQ(b.s))
-	})
-
-	// <: proper subset — a subset of the argument and not equal to it.
-	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.ProperSubsetQ(b.s))
-	})
-	// >: proper superset — the argument is a proper subset of the receiver.
-	d(">", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := self(v), setArg(args[0])
-		return object.Bool(a.s.ProperSupersetQ(b.s))
-	})
-
-	// dup / clone: a shallow copy with the same members in insertion order.
+	// dup / clone: a shallow copy with the same members, insertion order and
+	// compare_by_identity flag (ReplaceWith carries the flag across).
 	dupFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self(v).copy()
+		n := newSet()
+		n.h.ReplaceWith(self(v).h)
+		return n
 	}
 	d("dup", dupFn)
 	d("clone", dupFn)
 
-	// sort: a new Array of the members ordered by <=>. Materialise into an Array
-	// and reuse the VM's Array#sort (which folds through spaceship), so mixed
-	// incomparable members raise the very ArgumentError Array#sort raises.
-	d("sort", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.send(self(v).toArray(), "sort", nil, nil)
-	})
-
-	// min / max: the smallest / largest member by <=> (nil on the empty set, as
-	// MRI's Enumerable#min/#max). The fold uses the VM's spaceship helper.
-	d("min", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return setExtreme(vm, self(v), -1)
-	})
-	d("max", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return setExtreme(vm, self(v), 1)
-	})
-
-	// sum(init=0): fold the members with + starting from init, reusing the VM's
-	// add (binaryOp OpAdd) — so it agrees with Array#sum / numeric coercions.
-	d("sum", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		acc := object.Value(object.IntValue(0))
-		if len(args) > 0 {
-			acc = args[0]
-		}
-		s := self(v)
-		s.each(func(m object.Value) { acc = vm.binaryOp(bytecode.OpAdd, acc, m) })
-		return acc
-	})
-
-	// reduce / inject: Enumerable reduce with a block {|acc, x| ...}. An optional
-	// initial value seeds the accumulator; without one the first member seeds it
-	// (and reduce of the empty set with no initial value is nil, as in MRI). This
-	// is the documented block-form subset — the symbol-operator form is omitted.
-	reduceFn := func(vm *VM, v object.Value, args []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (reduce)")
-		}
-		s := self(v)
-		members := s.s.ToSlice()
-		var acc object.Value
-		i := 0
-		if len(args) > 0 {
-			acc = args[0]
-		} else {
-			if len(members) == 0 {
-				return object.NilV
-			}
-			acc = members[0].(object.Value)
-			i = 1
-		}
-		for ; i < len(members); i++ {
-			acc = vm.callBlock(blk, []object.Value{acc, members[i].(object.Value)})
-		}
-		return acc
-	}
-	d("reduce", reduceFn)
-	d("inject", reduceFn)
-
-	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).repr())
-	})
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).repr())
 	})
-}
 
-// setExtreme folds the members of s to the minimum (want=-1) or maximum
-// (want=1) by the VM's spaceship (<=>), returning nil for the empty set. Mixed
-// incomparable members surface the ArgumentError spaceship raises.
-func setExtreme(vm *VM, s *Set, want int) object.Value {
-	members := s.s.ToSlice()
-	if len(members) == 0 {
-		return object.NilV
-	}
-	best := members[0].(object.Value)
-	for _, m := range members[1:] {
-		cur := m.(object.Value)
-		if cmp := vm.spaceship(cur, best); (want < 0 && cmp < 0) || (want > 0 && cmp > 0) {
-			best = cur
-		}
-	}
-	return best
+	// Genuine built-in aliases share one Method record, so Set.instance_method of
+	// each name compares equal to its original (as MRI models these aliases).
+	aliasBuiltin(vm.cSet, "<<", "add")
+	aliasBuiltin(vm.cSet, "member?", "include?")
+	aliasBuiltin(vm.cSet, "===", "include?")
+	aliasBuiltin(vm.cSet, "length", "size")
+	aliasBuiltin(vm.cSet, "inspect", "to_s")
 }

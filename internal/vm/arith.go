@@ -65,11 +65,11 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return rationalOp(op, a, b)
 	}
 
-	// Set algebra: + (union) and - (difference) reach the operator fast path
-	// (the other combinators — & | << — dispatch as methods). The right operand
-	// must be a Set.
-	if as, ok := a.(*Set); ok {
-		return setOp(op, as, b)
+	// Set: + (union) and - (difference) are intercepted in binaryOp and dispatched
+	// as methods; any other arithmetic operator reaching here (e.g. Set * Set) is
+	// undefined, matching MRI's NoMethodError.
+	if _, ok := a.(*Set); ok {
+		return raise("NoMethodError", "undefined method '%s' for an instance of Set", arithOpName(op))
 	}
 
 	// IPAddr arithmetic: ip + n / ip - n (shift the address by a whole-number
@@ -293,6 +293,15 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		// etc. work. Built-in value types keep the inline path (and its coercion
 		// errors).
 		if _, isObj := a.(*RObject); isObj {
+			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
+		// A Set dispatches its + (union) / - (difference) as methods so the prelude
+		// definitions — which accept any Enumerable, retain the compare_by_identity
+		// flag and raise ArgumentError on a non-Enumerable — run rather than the
+		// VM-less path. Only + and - are Set operators; any other arithmetic
+		// operator falls through to binary, which raises NoMethodError (routing it
+		// back through vm.send would loop via the operator-opcode fallback).
+		if _, isSet := a.(*Set); isSet && (op == bytecode.OpAdd || op == bytecode.OpSub) {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
 		// A URI dispatches its arithmetic operator (only + is defined, resolving a
@@ -805,7 +814,7 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		return ok && av.Exclusive == bv.Exclusive && valueEqualRec(av.Lo, bv.Lo, seen) && valueEqualRec(av.Hi, bv.Hi, seen)
 	case *Set:
 		bv, ok := b.(*Set)
-		return ok && av.s.EqualQ(bv.s)
+		return ok && av.eq(bv)
 	case *IPAddr:
 		bv, ok := b.(*IPAddr)
 		return ok && av.ip.Eql(bv.ip)
