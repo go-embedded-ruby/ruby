@@ -1,102 +1,185 @@
 package vm
 
-import "github.com/go-embedded-ruby/ruby/internal/object"
+import (
+	"reflect"
+	"strings"
 
-// setupStruct installs the Struct class. Struct.new(:a, :b) is a singleton
-// method that mints a fresh subclass whose instances carry the named members as
-// instance variables, with accessors and the usual value methods.
+	"github.com/go-embedded-ruby/ruby/internal/object"
+)
+
+// structDef records the member layout of a Struct subclass minted by
+// Struct.new. kwInit is a tri-state: kwUnset (Struct.new(:a) — positional),
+// kwTrue (keyword_init: true — keyword-only) or kwFalse (keyword_init: false —
+// positional, same as unset). It is stored on the RClass and resolved through
+// the superclass chain by structDefOf.
+type structDef struct {
+	names  []string
+	kwInit int8
+}
+
+const (
+	kwUnset int8 = iota
+	kwTrue
+	kwFalse
+)
+
+// structDefOf returns the nearest structDef up c's superclass chain, or nil when
+// c is not a Struct subclass. Walking the chain lets `class Foo < Struct.new(:a)`
+// (and deeper subclasses like StructClasses::Honda) share their parent's members.
+func structDefOf(c *RClass) *structDef {
+	for ; c != nil; c = c.super {
+		if c.structDef != nil {
+			return c.structDef
+		}
+	}
+	return nil
+}
+
+// structValues returns the live member-value slice of the Struct instance self
+// (which every caller reaches only for a genuine Struct instance).
+func structValues(self object.Value) []object.Value {
+	return self.(*RObject).structVals
+}
+
+// setupStruct installs the Struct class. Struct.new(:a, :b) mints a fresh
+// subclass whose instances carry the named members (stored in RObject.structVals,
+// not in instance variables — matching MRI), with per-member accessors. The value
+// methods (#[], #to_a, #==, #hash, #inspect, …) live on Struct itself and read
+// the member layout from the instance's class, so a module included into a
+// subclass can still override them (MRI ancestry: subclass → included module →
+// Struct).
 func setupStruct(vm *VM) {
 	cStruct := newClass("Struct", vm.cObject)
 	vm.consts["Struct"] = cStruct
-	cStruct.smethods["new"] = &Method{name: "new", owner: cStruct, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		// A trailing options hash carries keyword_init: it is not a member name.
-		kwInit := false
+
+	// Struct.new mints a subclass. Inherited by direct subclasses of Struct
+	// (class Apple < Struct; Apple.new("X", :a) defines the constant in Apple's
+	// namespace), so the receiver class drives the parent and the name scope.
+	cStruct.smethods["new"] = &Method{name: "new", owner: cStruct, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		base := self.(*RClass)
+		kwInit := kwUnset
+		// A trailing Hash carrying keyword_init: is the options hash, not a member.
+		// A trailing Hash WITHOUT keyword_init: is left in args, where the member
+		// loop rejects it (TypeError) — matching Struct.new(:a, {name: 'x'}).
 		if n := len(args); n > 0 {
 			if h, ok := args[n-1].(*object.Hash); ok {
 				if v, present := h.Get(object.Symbol("keyword_init")); present {
-					kwInit = v.Truthy()
+					switch {
+					case object.IsNil(v):
+						kwInit = kwUnset
+					case v.Truthy():
+						kwInit = kwTrue
+					default:
+						kwInit = kwFalse
+					}
 					args = args[:n-1]
 				}
 			}
 		}
-		names := make([]string, len(args))
-		for i, a := range args {
-			names[i] = a.ToS()
+		// The first argument, when a String (or nil, or #to_str-able), names the
+		// struct as a constant under the receiver; a Symbol first argument is a
+		// member, and no name is assigned.
+		name := ""
+		haveName := false
+		if len(args) > 0 {
+			switch a0 := args[0].(type) {
+			case object.Nil:
+				haveName, args = true, args[1:]
+			case *object.String:
+				name, haveName, args = a0.Str(), true, args[1:]
+			case object.Symbol:
+				// a member; leave in args
+			default:
+				if vm.respondsTo(a0, "to_str") {
+					name, haveName, args = vm.send(a0, "to_str", nil, nil).ToS(), true, args[1:]
+				}
+			}
 		}
-		sub := vm.newStructClass(cStruct, names, kwInit)
+		names := make([]string, len(args))
+		seen := map[string]bool{}
+		for i, a := range args {
+			var nm string
+			switch v := a.(type) {
+			case object.Symbol:
+				nm = string(v)
+			case *object.String:
+				nm = v.Str()
+			default:
+				raise("TypeError", "%s is not a symbol nor a string", a.Inspect())
+			}
+			if seen[nm] {
+				raise("ArgumentError", "duplicate member: %s", nm)
+			}
+			seen[nm] = true
+			names[i] = nm
+		}
+		sub := vm.newStructClass(base, names, kwInit)
+		if haveName && name != "" {
+			if !validConstName(name) {
+				raise("NameError", "identifier %s needs to be constant", name)
+			}
+			if _, exists := base.consts[name]; exists {
+				vm.warnRedefineConst(base, name)
+			}
+			vm.assignConstIn(base, name, sub)
+		}
 		if blk != nil {
-			// Struct.new(:a) { def m; …; end } evaluates the body in the new
-			// subclass, just like class_eval, so it can add methods/constants. The
-			// block was written in some lexical scope (e.g. inside `module Outer`), so
-			// bare-constant lookup in the body must reach that scope: record the
-			// block's captured lexical scope as the new class's lexParent so
-			// resolveConst walks sub -> Outer and finds constants like an included
-			// module defined alongside the Struct.new call (matches MRI).
+			// The block is class-evaluated (self = the new class), so it can define
+			// methods/constants and set class ivars; it also receives the class as its
+			// block parameter (Struct.new(:a) { |cls| … }). Record the block's captured
+			// lexical scope as lexParent so bare-constant lookup in the body reaches the
+			// scope it was written in (matches MRI).
 			if blk.cref != nil && blk.cref != vm.cObject {
 				sub.lexParent = blk.cref
 			}
-			vm.classEval(sub, blk, nil)
+			vm.classEval(sub, blk, []object.Value{sub})
 		}
 		return sub
 	}}
-}
 
-// newStructClass builds the anonymous subclass returned by Struct.new. With
-// kwInit, instances are constructed from keyword arguments (S.new(a: 1, b: 2))
-// rather than positionally.
-func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClass {
-	sub := newClass("", parent)
-	// Its own `new` allocates an instance (overriding Struct.new, which would
-	// otherwise be inherited and make yet another class).
-	sub.smethods["new"] = &Method{name: "new", owner: sub, native: nativeNew}
+	// --- shared value methods (defined on Struct, read members per instance) ---
 
-	for _, nm := range names {
-		ivar := "@" + nm
-		// initialize always populates every member ivar, so a plain map read
-		// (no presence check) always returns the stored value.
-		sub.define(nm, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-			return self.(*RObject).ivars[ivar]
-		})
-		sub.define(nm+"=", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-			self.(*RObject).ivars[ivar] = a[0]
-			return a[0]
-		})
-	}
-
-	values := func(self object.Value) []object.Value {
+	cStruct.define("initialize", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
 		o := self.(*RObject)
-		out := make([]object.Value, len(names))
-		for i, nm := range names {
-			out[i] = o.ivars["@"+nm]
+		d := structDefOf(o.class)
+		names := d.names
+		if o.structVals == nil { // a bare `class X < Struct` with no members
+			o.structVals = make([]object.Value, len(names))
+			for i := range o.structVals {
+				o.structVals[i] = object.NilV
+			}
 		}
-		return out
-	}
-
-	sub.define("initialize", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-		o := self.(*RObject)
-		if kwInit {
-			// Members come from a keyword hash; absent members are nil, unknown
-			// keys raise, exactly as MRI's keyword_init structs do.
-			h := object.NewHash()
-			if len(a) > 0 {
+		if d.kwInit == kwTrue {
+			// Members come from a keyword hash; missing members stay nil, unknown keys
+			// raise, and a positional (non-hash) argument is a wrong-arg-count error.
+			var h *object.Hash
+			if len(a) > 1 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(a))
+			}
+			if len(a) == 1 {
 				hh, ok := a[0].(*object.Hash)
-				if !ok || len(a) > 1 {
-					raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(a))
+				if !ok {
+					raise("ArgumentError", "wrong number of arguments (given 1, expected 0)")
 				}
 				h = hh
 			}
-			member := map[string]bool{}
-			for _, nm := range names {
-				member[nm] = true
-				v, ok := h.Get(object.Symbol(nm))
-				if !ok {
-					v = object.NilV
-				}
-				o.ivars["@"+nm] = v
+			member := map[string]int{}
+			for i, nm := range names {
+				member[nm] = i
 			}
-			for _, k := range h.Keys {
-				if sym, ok := k.(object.Symbol); !ok || !member[string(sym)] {
-					raise("ArgumentError", "unknown keyword: %s", k.Inspect())
+			if h != nil {
+				var unknown []string
+				for _, k := range h.Keys {
+					sym, ok := k.(object.Symbol)
+					if idx, member := member[string(sym)]; ok && member {
+						v, _ := h.Get(k)
+						o.structVals[idx] = v
+					} else {
+						unknown = append(unknown, k.Inspect())
+					}
+				}
+				if len(unknown) > 0 {
+					raise("ArgumentError", "unknown keyword%s: %s", plural(len(unknown)), strings.Join(unknown, ", "))
 				}
 			}
 			return object.NilV
@@ -104,47 +187,168 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 		if len(a) > len(names) {
 			raise("ArgumentError", "struct size differs")
 		}
-		for i, nm := range names {
+		for i := range names {
 			if i < len(a) {
-				o.ivars["@"+nm] = a[i]
+				o.structVals[i] = a[i]
 			} else {
-				o.ivars["@"+nm] = object.NilV
+				o.structVals[i] = object.NilV
 			}
 		}
 		return object.NilV
 	})
-	sub.define("members", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		out := make([]object.Value, len(names))
+
+	cStruct.define("members", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return structMemberSyms(structDefOf(self.(*RObject).class).names)
+	})
+
+	cStruct.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "each")
+		}
+		for _, v := range structValues(self) {
+			vm.callBlock(blk, []object.Value{v})
+		}
+		return self
+	})
+
+	cStruct.define("each_pair", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "each_pair")
+		}
+		names := structDefOf(self.(*RObject).class).names
+		vals := structValues(self)
 		for i, nm := range names {
-			out[i] = object.Symbol(nm)
+			vm.callBlock(blk, []object.Value{object.Symbol(nm), vals[i]})
+		}
+		return self
+	})
+
+	cStruct.define("[]", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		if len(a) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(a))
+		}
+		names := structDefOf(self.(*RObject).class).names
+		vals := structValues(self)
+		switch k := a[0].(type) {
+		case object.Integer:
+			return vals[structIndex(int(k), len(vals))]
+		case object.Symbol:
+			return vals[structNameIndex(string(k), names)]
+		case *object.String:
+			return vals[structNameIndex(k.Str(), names)]
+		default:
+			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
+			return object.NilV
+		}
+	})
+
+	cStruct.define("[]=", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		o := self.(*RObject)
+		if o.frozen {
+			vm.raiseFrozen(self)
+		}
+		names := structDefOf(o.class).names
+		switch k := a[0].(type) {
+		case object.Integer:
+			o.structVals[structIndex(int(k), len(names))] = a[1]
+		case object.Symbol:
+			o.structVals[structNameIndex(string(k), names)] = a[1]
+		case *object.String:
+			o.structVals[structNameIndex(k.Str(), names)] = a[1]
+		default:
+			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
+		}
+		return a[1]
+	})
+
+	toA := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		vals := structValues(self)
+		out := make([]object.Value, len(vals))
+		copy(out, vals)
+		return object.NewArrayFromSlice(out)
+	}
+	cStruct.define("to_a", toA)
+	// #values and #deconstruct are true aliases of #to_a (shared Method record, so
+	// Struct.instance_method(:deconstruct) == Struct.instance_method(:to_a)).
+	aliasBuiltin(cStruct, "values", "to_a")
+	aliasBuiltin(cStruct, "deconstruct", "to_a")
+
+	cStruct.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		names := structDefOf(self.(*RObject).class).names
+		vals := structValues(self)
+		h := object.NewHash()
+		for i, nm := range names {
+			if blk != nil {
+				res := vm.callBlock(blk, []object.Value{object.Symbol(nm), vals[i]})
+				pair, ok := res.(*object.Array)
+				if !ok {
+					raise("TypeError", "wrong element type %s (expected array)", classNameOf(res))
+				}
+				if len(pair.Elems) != 2 {
+					raise("ArgumentError", "element has wrong array length (expected 2, was %d)", len(pair.Elems))
+				}
+				h.Set(pair.Elems[0], pair.Elems[1])
+			} else {
+				h.Set(object.Symbol(nm), vals[i])
+			}
+		}
+		return h
+	})
+
+	cStruct.define("deconstruct_keys", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		if len(a) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(a))
+		}
+		names := structDefOf(self.(*RObject).class).names
+		vals := structValues(self)
+		h := object.NewHash()
+		if object.IsNil(a[0]) { // deconstruct_keys(nil) → every member
+			for i, nm := range names {
+				h.Set(object.Symbol(nm), vals[i])
+			}
+			return h
+		}
+		keys, ok := a[0].(*object.Array)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Array)", classNameOf(a[0]))
+		}
+		if len(keys.Elems) > len(names) {
+			return h // more keys than members: MRI returns {} without inspecting them
+		}
+		for _, k := range keys.Elems {
+			idx, found := structDeconstructIndex(vm, k, names)
+			if !found {
+				break // stop at the first key that names no member / index out of range
+			}
+			h.Set(k, vals[idx])
+		}
+		return h
+	})
+
+	cStruct.define("values_at", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		vals := structValues(self)
+		out := []object.Value{}
+		for _, arg := range a {
+			if rng, ok := arg.(*object.Range); ok {
+				out = append(out, structRangeValues(rng, vals)...)
+				continue
+			}
+			i, ok := arg.(object.Integer)
+			if !ok {
+				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(arg))
+			}
+			out = append(out, vals[structIndex(int(i), len(vals))])
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	toA := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(values(self))
-	}
-	sub.define("to_a", toA)
-	sub.define("values", toA)
-	sub.define("deconstruct", toA)
-	sizeFn := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(names)))
-	}
-	sub.define("size", sizeFn)
-	sub.define("length", sizeFn)
-	toH := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		h := object.NewHash()
-		vals := values(self)
-		for i, nm := range names {
-			h.Set(object.Symbol(nm), vals[i])
+
+	cStruct.define("dig", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		if len(a) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
-		return h
-	}
-	sub.define("to_h", toH)
-	// deconstruct_keys backs case/in hash patterns; the requested-key list is
-	// advisory, so we return the full member hash.
-	sub.define("deconstruct_keys", toH)
-	sub.define("[]", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-		vals := values(self)
+		names := structDefOf(self.(*RObject).class).names
+		vals := structValues(self)
+		var v object.Value
 		switch k := a[0].(type) {
 		case object.Integer:
 			idx := int(k)
@@ -152,111 +356,355 @@ func (vm *VM) newStructClass(parent *RClass, names []string, kwInit bool) *RClas
 				idx += len(vals)
 			}
 			if idx < 0 || idx >= len(vals) {
-				raise("IndexError", "offset %d too large for struct(size:%d)", int(k), len(vals))
+				return object.NilV
 			}
-			return vals[idx]
+			v = vals[idx]
 		case object.Symbol:
-			return structMember(string(k), names, vals)
+			v = vals[structNameIndex(string(k), names)]
 		case *object.String:
-			return structMember(k.Str(), names, vals)
+			v = vals[structNameIndex(k.Str(), names)]
 		default:
 			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
+		}
+		if len(a) == 1 {
+			return v
+		}
+		if object.IsNil(v) {
 			return object.NilV
 		}
+		return vm.send(v, "dig", a[1:], nil)
 	})
-	sub.define("==", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-		other, ok := a[0].(*RObject)
-		if !ok || other.class != self.(*RObject).class {
-			return object.False
-		}
-		sv, ov := values(self), values(other)
-		for i := range sv {
-			if !valueEqual(sv[i], ov[i]) {
-				return object.False
-			}
-		}
-		return object.True
-	})
-	// Struct is Enumerable: each yields the member values in order, and the
-	// Enumerable mixin then supplies map/select/min/sum/… on top of it.
-	sub.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (each)")
-		}
-		for _, v := range values(self) {
-			vm.callBlock(blk, []object.Value{v})
-		}
-		return self
-	})
-	// []= assigns a member by index, Symbol or String name (the inverse of []),
-	// raising the same errors for an out-of-range index or unknown name.
-	sub.define("[]=", func(_ *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
-		o := self.(*RObject)
-		switch k := a[0].(type) {
-		case object.Integer:
-			idx := int(k)
-			if idx < 0 {
-				idx += len(names)
-			}
-			if idx < 0 || idx >= len(names) {
-				raise("IndexError", "offset %d too large for struct(size:%d)", int(k), len(names))
-			}
-			o.ivars["@"+names[idx]] = a[1]
-		case object.Symbol:
-			structSetMember(o, string(k), names, a[1])
-		case *object.String:
-			structSetMember(o, k.Str(), names, a[1])
-		default:
-			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
-		}
-		return a[1]
-	})
-	// each_pair yields [member, value] pairs in declaration order.
-	sub.define("each_pair", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (each_pair)")
-		}
-		vals := values(self)
-		for i, nm := range names {
-			vm.callBlock(blk, []object.Value{object.Symbol(nm), vals[i]})
-		}
-		return self
-	})
-	// Class-level members: Etc::Passwd.members and friends read the member list
-	// off the Struct class itself.
-	memberSyms := make([]object.Value, len(names))
-	for i, nm := range names {
-		memberSyms[i] = object.Symbol(nm)
+
+	sizeFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(len(structValues(self))))
 	}
+	cStruct.define("size", sizeFn)
+	aliasBuiltin(cStruct, "length", "size")
+
+	cStruct.define("==", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		return object.Bool(vm.structEqual(self, a[0], false, nil))
+	})
+	cStruct.define("eql?", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		return object.Bool(vm.structEqual(self, a[0], true, nil))
+	})
+	cStruct.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(vm.structHash(self.(*RObject), nil))
+	})
+
+	cStruct.define("to_s", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*RObject)
+		names := structDefOf(o.class).names
+		vals := o.structVals
+		var b strings.Builder
+		b.WriteString("#<struct")
+		if o.class.name != "" { // the real class name, never #name (which may be overridden)
+			b.WriteString(" ")
+			b.WriteString(o.class.name)
+		}
+		for i, nm := range names {
+			if i == 0 {
+				b.WriteString(" ")
+			} else {
+				b.WriteString(", ")
+			}
+			b.WriteString(nm)
+			b.WriteString("=")
+			b.WriteString(vm.inspectStr(vals[i]))
+		}
+		b.WriteString(">")
+		return object.NewString(b.String())
+	})
+	// #inspect is an alias of #to_s (shared Method record).
+	aliasBuiltin(cStruct, "inspect", "to_s")
+
+	bumpMethodSerial()
+}
+
+// newStructClass builds the anonymous subclass returned by Struct.new: it records
+// the member layout, installs the per-member accessors and the class-level
+// helpers (.new which pre-allocates the member slots, .[] as a synonym for .new,
+// and .members), then returns it. base is the receiver of Struct.new (Struct
+// itself, or a direct subclass of it).
+func (vm *VM) newStructClass(base *RClass, names []string, kwInit int8) *RClass {
+	// Struct is Enumerable (map/select/min/sum/… on top of #each). Enumerable is
+	// installed by the prelude, after Struct's bootstrap, so mix it into Struct
+	// lazily here — every Struct subclass is minted after the prelude has loaded.
+	cStruct := vm.consts["Struct"].(*RClass)
+	if en, ok := vm.consts["Enumerable"].(*RClass); ok && !hasInclude(cStruct, en) {
+		cStruct.includes = append(cStruct.includes, en)
+	}
+	sub := newClass("", base)
+	sub.structDef = &structDef{names: names, kwInit: kwInit}
+
+	// .new allocates the instance AND its member slots before #initialize runs, so
+	// a subclass whose #initialize sets a member before calling super finds the
+	// slots ready (StructClasses::Honda does exactly that).
+	structAlloc := &Method{name: "new", owner: sub, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		cls := self.(*RClass)
+		obj := &RObject{class: cls, ivars: map[string]object.Value{}}
+		d := structDefOf(cls)
+		obj.structVals = make([]object.Value, len(d.names))
+		for i := range obj.structVals {
+			obj.structVals[i] = object.NilV
+		}
+		vm.send(obj, "initialize", args, blk)
+		return obj
+	}}
+	sub.smethods["new"] = structAlloc
+	// Struct[] (i.e. the subclass's .[]) is a synonym for .new.
+	sub.smethods["[]"] = structAlloc
+
+	for i, nm := range names {
+		idx := i
+		sub.define(nm, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+			return self.(*RObject).structVals[idx]
+		})
+		sub.define(nm+"=", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+			o := self.(*RObject)
+			if o.frozen {
+				vm.raiseFrozen(self)
+			}
+			o.structVals[idx] = a[0]
+			return a[0]
+		})
+	}
+
+	// Class-level .members reads the layout off the Struct class itself. It lives
+	// only on classes minted by Struct.new (not on Struct or a plain `class X <
+	// Struct`), matching MRI.
 	sub.smethods["members"] = &Method{name: "members", owner: sub,
 		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.NewArrayFromSlice(append([]object.Value(nil), memberSyms...))
+			return structMemberSyms(names)
 		}}
-	sub.includes = append(sub.includes, vm.consts["Enumerable"].(*RClass))
-	bumpMethodSerial()
 	return sub
 }
 
-// structSetMember assigns the named member's ivar on a Struct instance, raising
-// NameError when the name is not a member.
-func structSetMember(o *RObject, name string, names []string, v object.Value) {
-	for _, nm := range names {
-		if nm == name {
-			o.ivars["@"+nm] = v
-			return
+// hasInclude reports whether module m is already in c's include list.
+func hasInclude(c, m *RClass) bool {
+	for _, inc := range c.includes {
+		if inc == m {
+			return true
 		}
 	}
-	raise("NameError", "no member '%s' in struct", name)
+	return false
 }
 
-// structMember returns the value for a member looked up by name, or raises
-// NameError when no such member exists.
-func structMember(name string, names []string, vals []object.Value) object.Value {
+// structMemberSyms returns a fresh Array of the member names as Symbols.
+func structMemberSyms(names []string) object.Value {
+	out := make([]object.Value, len(names))
+	for i, nm := range names {
+		out[i] = object.Symbol(nm)
+	}
+	return object.NewArrayFromSlice(out)
+}
+
+// structIndex resolves a possibly-negative member index against a struct of the
+// given size, raising the MRI IndexError (with the "too large" / "too small"
+// wording) when out of range.
+func structIndex(i, size int) int {
+	idx := i
+	if idx < 0 {
+		idx += size
+	}
+	if idx < 0 {
+		raise("IndexError", "offset %d too small for struct(size:%d)", i, size)
+	}
+	if idx >= size {
+		raise("IndexError", "offset %d too large for struct(size:%d)", i, size)
+	}
+	return idx
+}
+
+// structNameIndex resolves a member name to its index, raising NameError when the
+// name is not a member.
+func structNameIndex(name string, names []string) int {
 	for i, nm := range names {
 		if nm == name {
-			return vals[i]
+			return i
 		}
 	}
 	raise("NameError", "no member '%s' in struct", name)
-	return object.NilV
+	return 0
+}
+
+// structRangeValues returns the member values selected by a Range for
+// #values_at: indices past the end contribute nil, and a start that is negative
+// out of range (or past the end) raises RangeError — matching MRI.
+func structRangeValues(rng *object.Range, vals []object.Value) []object.Value {
+	size := len(vals)
+	lo := 0
+	if !object.IsNil(rng.Lo) {
+		lo = int(intArg(rng.Lo))
+		if lo < 0 {
+			lo += size
+		}
+		if lo < 0 || lo > size {
+			raise("RangeError", "%s out of range", rng.Inspect())
+		}
+	}
+	hi := size // endless range runs to the last member
+	if !object.IsNil(rng.Hi) {
+		hi = int(intArg(rng.Hi))
+		if hi < 0 {
+			hi += size
+		}
+		if !rng.Exclusive {
+			hi++
+		}
+	}
+	if hi < lo {
+		hi = lo
+	}
+	out := make([]object.Value, 0, hi-lo)
+	for i := lo; i < hi; i++ {
+		if i >= 0 && i < size {
+			out = append(out, vals[i])
+		} else {
+			out = append(out, object.NilV)
+		}
+	}
+	return out
+}
+
+// structDeconstructIndex resolves a #deconstruct_keys key to a member index.
+// Symbol/String keys look up by name; anything else is coerced to an Integer
+// (directly or via #to_int) and used as a position. A name/position that does not
+// exist returns found=false so the caller stops; a non-coercible key raises
+// TypeError.
+func structDeconstructIndex(vm *VM, k object.Value, names []string) (int, bool) {
+	switch key := k.(type) {
+	case object.Symbol:
+		return structFind(string(key), names)
+	case *object.String:
+		return structFind(key.Str(), names)
+	case object.Integer:
+		return structPos(int(key), len(names))
+	default:
+		if vm.respondsTo(k, "to_int") {
+			iv := vm.send(k, "to_int", nil, nil)
+			i, ok := iv.(object.Integer)
+			if !ok {
+				raise("TypeError", "can't convert %s into Integer", classNameOf(k))
+			}
+			return structPos(int(i), len(names))
+		}
+		raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(k))
+		return 0, false
+	}
+}
+
+// structFind returns the index of a named member, or found=false when absent.
+func structFind(name string, names []string) (int, bool) {
+	for i, nm := range names {
+		if nm == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// structPos resolves a possibly-negative position, or found=false when out of range.
+func structPos(i, size int) (int, bool) {
+	idx := i
+	if idx < 0 {
+		idx += size
+	}
+	if idx < 0 || idx >= size {
+		return 0, false
+	}
+	return idx, true
+}
+
+// structEqual implements Struct#== (eql=false) and Struct#eql? (eql=true): true
+// when other is a Struct of the same class whose members are correspondingly
+// == (resp. eql?). Struct-valued members recurse (with a pair cycle guard so
+// mutually-recursive structs compare as equal rather than looping); other member
+// types compare through valueEqual / valueEql.
+func (vm *VM) structEqual(a, b object.Value, eql bool, seen map[[2]*RObject]bool) bool {
+	if a == b {
+		return true
+	}
+	oa, ok1 := a.(*RObject)
+	ob, ok2 := b.(*RObject)
+	if !ok1 || !ok2 || oa.class != ob.class {
+		return false
+	}
+	d := structDefOf(oa.class)
+	if d == nil {
+		return false
+	}
+	pair := [2]*RObject{oa, ob}
+	if seen[pair] {
+		return true
+	}
+	if seen == nil {
+		seen = map[[2]*RObject]bool{}
+	}
+	seen[pair] = true
+	defer delete(seen, pair)
+	for i := range d.names {
+		av, bv := oa.structVals[i], ob.structVals[i]
+		if sa, ok := av.(*RObject); ok && structDefOf(sa.class) != nil {
+			if sb, ok := bv.(*RObject); ok && structDefOf(sb.class) != nil {
+				if !vm.structEqual(av, bv, eql, seen) {
+					return false
+				}
+				continue
+			}
+		}
+		if eql {
+			if !valueEql(av, bv) {
+				return false
+			}
+		} else if !valueEqual(av, bv) {
+			return false
+		}
+	}
+	return true
+}
+
+// structHash combines the struct class identity with each member's hash. A cycle
+// guard contributes a fixed sentinel for a re-entered struct so a self- or
+// mutually-recursive struct hashes without looping.
+func (vm *VM) structHash(o *RObject, seen map[*RObject]bool) int64 {
+	if seen[o] {
+		return 0x27d4eb2f
+	}
+	if seen == nil {
+		seen = map[*RObject]bool{}
+	}
+	seen[o] = true
+	defer delete(seen, o)
+	h := int64(reflect.ValueOf(o.class).Pointer())
+	for _, v := range o.structVals {
+		var hv int64
+		if so, ok := v.(*RObject); ok && structDefOf(so.class) != nil {
+			hv = vm.structHash(so, seen)
+		} else {
+			hv = vm.hashValue(v)
+		}
+		h = h*31 + hv
+	}
+	return h
+}
+
+// validConstName reports whether s is a valid (ASCII) Ruby constant name: an
+// uppercase letter followed by word characters.
+func validConstName(s string) bool {
+	if s == "" || s[0] < 'A' || s[0] > 'Z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if c != '_' && (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
+		}
+	}
+	return true
+}
+
+// warnRedefineConst emits MRI's "already initialized constant" warning to
+// $stderr when Struct.new(name, …) overwrites an existing constant.
+func (vm *VM) warnRedefineConst(scope *RClass, name string) {
+	vm.send(vm.main, "warn", []object.Value{object.NewString("warning: already initialized constant " + scopedNameFor(scope, name))}, nil)
 }

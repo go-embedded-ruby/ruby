@@ -62,30 +62,31 @@ func TestEtcLookupsFound(t *testing.T) {
 	if !ok {
 		t.Fatalf("getpwuid not an object: %#v", pw)
 	}
-	if o.ivars["@name"].ToS() != "root" || o.ivars["@uid"] != object.Integer(0) {
-		t.Fatalf("passwd fields: %#v", o.ivars)
+	// Struct members live in structVals: [name, passwd, uid, gid, gecos, dir, shell].
+	if o.structVals[0].ToS() != "root" || o.structVals[2] != object.Integer(0) {
+		t.Fatalf("passwd fields: %#v", o.structVals)
 	}
 	if o.class.name != "Etc::Passwd" {
 		t.Fatalf("class = %q", o.class.name)
 	}
 
 	// no argument -> current user (etcCurrentUID); nil argument is the same.
-	if v := callEtc(t, vm, "getpwuid", nil); v.(*RObject).ivars["@name"].ToS() != "root" {
+	if v := callEtc(t, vm, "getpwuid", nil); v.(*RObject).structVals[0].ToS() != "root" {
 		t.Fatalf("getpwuid() current user wrong")
 	}
-	if v := callEtc(t, vm, "getpwuid", []object.Value{object.NilV}); v.(*RObject).ivars["@name"].ToS() != "root" {
+	if v := callEtc(t, vm, "getpwuid", []object.Value{object.NilV}); v.(*RObject).structVals[0].ToS() != "root" {
 		t.Fatalf("getpwuid(nil) wrong")
 	}
 
 	// getpwnam, getgrgid, getgrnam, systmpdir all succeed.
-	if callEtc(t, vm, "getpwnam", []object.Value{object.NewString("root")}).(*RObject).ivars["@name"].ToS() != "root" {
+	if callEtc(t, vm, "getpwnam", []object.Value{object.NewString("root")}).(*RObject).structVals[0].ToS() != "root" {
 		t.Fatalf("getpwnam wrong")
 	}
 	gr := callEtc(t, vm, "getgrgid", []object.Value{object.Integer(0)}).(*RObject)
-	if gr.ivars["@name"].ToS() != "wheel" || gr.class.name != "Etc::Group" {
-		t.Fatalf("getgrgid: %#v", gr.ivars)
+	if gr.structVals[0].ToS() != "wheel" || gr.class.name != "Etc::Group" {
+		t.Fatalf("getgrgid: %#v", gr.structVals)
 	}
-	if callEtc(t, vm, "getgrnam", []object.Value{object.NewString("wheel")}).(*RObject).ivars["@name"].ToS() != "wheel" {
+	if callEtc(t, vm, "getgrnam", []object.Value{object.NewString("wheel")}).(*RObject).structVals[0].ToS() != "wheel" {
 		t.Fatalf("getgrnam wrong")
 	}
 	if callEtc(t, vm, "systmpdir", nil).ToS() != "/seam-tmp" {

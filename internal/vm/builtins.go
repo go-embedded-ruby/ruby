@@ -5961,7 +5961,15 @@ func dupValue(v object.Value) object.Value {
 		for k, val := range x.ivars {
 			ivars[k] = val
 		}
-		return &RObject{class: x.class, ivars: ivars}
+		dup := &RObject{class: x.class, ivars: ivars}
+		// A Struct instance carries its members in structVals (not ivars), so the
+		// copy must clone that slice too or the duplicate would report all-nil
+		// members (and Struct#hash/#== would diverge from the original).
+		if x.structVals != nil {
+			dup.structVals = make([]object.Value, len(x.structVals))
+			copy(dup.structVals, x.structVals)
+		}
+		return dup
 	default:
 		return v
 	}
