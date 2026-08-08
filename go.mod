@@ -20,6 +20,7 @@ require (
 	github.com/go-ruby-actionpack/actionpack v0.0.0-20260706115418-8ba13fbf84e5
 	github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a
 	github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4
+	github.com/go-ruby-activeldap/activeldap v0.0.0-20260808201041-fcc6b6341768
 	github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6
 	github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e4

@@ -280,6 +280,8 @@ github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a h1:N
 github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a/go.mod h1:n9SEnqxWmYIXKgtrIZEiRvGui0lWdCd2GJELRpa44ls=
 github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4 h1:vRJAWboG75rQWpfTiNQ8XkFRJ1Am9RNKdRKSlTLQBiA=
 github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4/go.mod h1:HBZ9KJKoGTzo4h6/5+gaYyzMYWQtucT660mE68zHZGw=
+github.com/go-ruby-activeldap/activeldap v0.0.0-20260808201041-fcc6b6341768 h1:o9Pdvex6j0X4CGZBmoVDR2ZcVS4EGu+jyi3F6GTxNk8=
+github.com/go-ruby-activeldap/activeldap v0.0.0-20260808201041-fcc6b6341768/go.mod h1:EY+VvxoLxV18Qkh4FxFt7yeOVCHItmr070jb24F+zZQ=
 github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a h1:d8kCh4DxIJEQJhd/ZD6niTnxEzWgnZ5NlOmxfdBRDZQ=
 github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a/go.mod h1:tIZ2td8/ApPpR4CfEJYKAelJ/RplKcaqvRm3NyEbiyY=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6 h1:m4vrjxuJ9Cp+4QohRvpAbAqsKRaF9Ki8jzic8IPx/9c=
@@ -534,8 +536,6 @@ github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e h1:Orev3pHC09Ggh
 github.com/go-ruby-rdoc/rdoc v0.0.0-20260702162339-c866323cc54e/go.mod h1:NBlCj+x2SBtdDSKDvTTCVRoWd9tGPWcUwPvE2nKvYSM=
 github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92 h1:EXqNsTpyz5KPZURl94uOjcIIyJ0mCyMA7/AFAXvFgdg=
 github.com/go-ruby-redis/redis v0.0.0-20260701125752-5de216f6ad92/go.mod h1:gt67ft80L9J5DpRGe+x3qPy2hg1g75aWQ6h52inm7og=
-github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08 h1:2ULLhB9SUBzHngWYrbltWEmt7jCbA1SvweZsmKwdilM=
-github.com/go-ruby-regexp/regexp v0.0.0-20260703193131-c52ca89ccd08/go.mod h1:+0nK2X+aCPMO91bPMM/DT1OFUIzFQeoTPGkkOR3kd84=
 github.com/go-ruby-regexp/regexp v0.0.0-20260807185050-0533785e97b7 h1:80wVgqj9UmMIPgyo/AVFd4P+NZPrvmvJtCFg9xwklD4=
 github.com/go-ruby-regexp/regexp v0.0.0-20260807185050-0533785e97b7/go.mod h1:Xgx6MB0JFe/GEd9ANJli4TvzQt2mekfp44bFkMet+js=
 github.com/go-ruby-reline/reline v0.0.0-20260630130257-c3cc9ab10454 h1:0/ezMBgDjcImtgwSsra0MBiF0JuQyoapr6KVC+CjFHk=

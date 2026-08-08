@@ -711,6 +711,14 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		// subclass such as URI::HTTP), so it reports that class for `class` /
 		// `is_a?` while every instance method lives on URI::Generic.
 		return x.cls
+	case *ALDirectoryObj:
+		return x.cls
+	case *ALConnectionObj:
+		return x.cls
+	case *ALModelObj:
+		return x.cls
+	case *ALRecordObj:
+		return x.cls
 	case *CSVRow:
 		// A CSV::Row wrapper reports CSV::Row; its instance methods (field/[]/
 		// to_a/to_h/headers/…) live on that class.
