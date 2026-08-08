@@ -140,15 +140,11 @@ func setupStruct(vm *VM) {
 	// --- shared value methods (defined on Struct, read members per instance) ---
 
 	cStruct.define("initialize", func(vm *VM, self object.Value, a []object.Value, _ *Proc) object.Value {
+		// structVals is always pre-allocated by the subclass's .new (structAlloc)
+		// before #initialize runs, so it is never nil here.
 		o := self.(*RObject)
 		d := structDefOf(o.class)
 		names := d.names
-		if o.structVals == nil { // a bare `class X < Struct` with no members
-			o.structVals = make([]object.Value, len(names))
-			for i := range o.structVals {
-				o.structVals[i] = object.NilV
-			}
-		}
 		if d.kwInit == kwTrue {
 			// Members come from a keyword hash; missing members stay nil, unknown keys
 			// raise, and a positional (non-hash) argument is a wrong-arg-count error.
@@ -170,16 +166,20 @@ func setupStruct(vm *VM) {
 			if h != nil {
 				var unknown []string
 				for _, k := range h.Keys {
-					sym, ok := k.(object.Symbol)
-					if idx, member := member[string(sym)]; ok && member {
+					sym, isSym := k.(object.Symbol)
+					if idx, ok := member[string(sym)]; isSym && ok {
 						v, _ := h.Get(k)
 						o.structVals[idx] = v
+					} else if isSym {
+						unknown = append(unknown, string(sym))
 					} else {
 						unknown = append(unknown, k.Inspect())
 					}
 				}
 				if len(unknown) > 0 {
-					raise("ArgumentError", "unknown keyword%s: %s", plural(len(unknown)), strings.Join(unknown, ", "))
+					// MRI's Struct keyword error always uses the plural "keywords" and
+					// names the bare symbols (no leading colon).
+					raise("ArgumentError", "unknown keywords: %s", strings.Join(unknown, ", "))
 				}
 			}
 			return object.NilV
@@ -371,6 +371,9 @@ func setupStruct(vm *VM) {
 		}
 		if object.IsNil(v) {
 			return object.NilV
+		}
+		if !vm.respondsTo(v, "dig") {
+			raise("TypeError", "%s does not have #dig method", classNameOf(v))
 		}
 		return vm.send(v, "dig", a[1:], nil)
 	})
@@ -629,10 +632,9 @@ func (vm *VM) structEqual(a, b object.Value, eql bool, seen map[[2]*RObject]bool
 	if !ok1 || !ok2 || oa.class != ob.class {
 		return false
 	}
+	// oa is the #== / #eql? receiver, always a Struct instance, so its class
+	// always carries a structDef.
 	d := structDefOf(oa.class)
-	if d == nil {
-		return false
-	}
 	pair := [2]*RObject{oa, ob}
 	if seen[pair] {
 		return true

@@ -128,12 +128,12 @@ func TestPBStructIndexAssign(t *testing.T) {
 }
 
 // TestPBStructEachPair covers Struct#each_pair (yield order) and its no-block
-// LocalJumpError branch.
+// Enumerator branch (MRI returns an Enumerator, matching Struct#each).
 func TestPBStructEachPair(t *testing.T) {
 	if got := runSrc(t, `S = Struct.new(:a, :b); s = S.new(1, 2); s.each_pair { |k, v| print "#{k}=#{v} " }`); got != "a=1 b=2 " {
 		t.Errorf("each_pair => %q", got)
 	}
-	if got := runSrc(t, `S = Struct.new(:a); p(begin; S.new(1).each_pair; rescue => err; err.class.name; end)`); got != `"LocalJumpError"` {
+	if got := runSrc(t, `S = Struct.new(:a); p S.new(1).each_pair.class.name`); got != `"Enumerator"` {
 		t.Errorf("each_pair no-block => %q", got)
 	}
 }
