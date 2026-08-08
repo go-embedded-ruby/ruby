@@ -258,6 +258,11 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 	switch v.(type) {
 	case *DigestObj, *BCryptPassword:
 		return true
+	case *Set:
+		// Set#== compares members (and the compare_by_identity flag), accepts a
+		// Set-like Enumerable, and is defined in the prelude, so `set == other`
+		// must dispatch that method rather than fall to the value-equality path.
+		return true
 	case *UnboundMethod:
 		// UnboundMethod#== compares by the underlying method definition (so an alias
 		// equals its original), not object identity.
