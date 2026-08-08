@@ -22,11 +22,21 @@ func TestArrayBsearch(t *testing.T) {
 		{`p([].bsearch { |x| true })`, "nil\n"},           // empty → nil
 		// find-minimum with nil (behaves like false → look right).
 		{`p([1, 2, 3, 4].bsearch { |x| x >= 3 ? true : nil })`, "3\n"},
-		// find-any mode (Numeric): 0 hits, positive→left, negative→right.
+		// find-any mode (Numeric): 0 hits, negative→left, positive→right (MRI
+		// rb_bsearch_index: smaller = cmp < 0).
 		{`p([1, 3, 5, 7].bsearch { |x| x - 5 })`, "5\n"},   // exact hit
 		{`p([1, 3, 7, 9].bsearch { |x| x - 5 })`, "nil\n"}, // converges without a hit
 		{`p([0, 4, 7, 10, 12].bsearch { |x| 1 - x / 4 })`, "7\n"},
 		{`p([0, 4, 7, 10, 12].bsearch { |x| 4 - x / 2 })`, "nil\n"},
+		// Navigation cases that require the correct sign: the exact hit is NOT at
+		// the first probed midpoint, so an inverted sign walks away from it and
+		// wrongly returns nil (regression guard for the find-any convention).
+		{`p([1, 2, 3, 4, 5, 6, 7].bsearch { |x| 6 - x })`, "6\n"},
+		{`p([1, 2, 3, 4, 5, 6, 7].bsearch_index { |x| 6 - x })`, "5\n"},
+		{`p([1, 2, 3, 4, 5, 6, 7, 8, 9].bsearch { |x| 2 - x })`, "2\n"},
+		// A block with the WRONG monotonicity (x <=> target) navigates away from
+		// the target under MRI's convention, matching Ruby's nil result.
+		{`p([1, 2, 3, 4, 5, 6, 7].bsearch { |x| x <=> 5 })`, "nil\n"},
 		// Float block results are numeric too (find-any exact hit returns the Float).
 		{`p([1.0, 2.0, 3.0].bsearch { |x| 2.0 - x })`, "2.0\n"},
 		// bsearch_index projects the index (or nil).

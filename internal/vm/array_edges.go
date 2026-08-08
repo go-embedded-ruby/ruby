@@ -146,7 +146,7 @@ func (vm *VM) registerArrayEdges() {
 // arrayBsearchIndex runs MRI's rb_ary_bsearch_index over elems. The block result
 // selects the mode per iteration: true/false/nil drive find-minimum (true means
 // "search left" and marks the range as satisfiable), while a Numeric drives
-// find-any (0 is an immediate hit, a positive value searches left, a negative one
+// find-any (0 is an immediate hit, a negative value searches left, a positive one
 // searches right). Any other result raises TypeError. It returns the resolved
 // index and whether a matching element exists.
 func (vm *VM) arrayBsearchIndex(elems []object.Value, blk *Proc) (int, bool) {
@@ -170,7 +170,10 @@ func (vm *VM) arrayBsearchIndex(elems []object.Value, blk *Proc) (int, bool) {
 			switch c := vm.spaceship(val, object.IntValue(0)); {
 			case c == 0:
 				return mid, true // find-any: exact hit
-			case c > 0:
+			case c < 0:
+				// MRI rb_bsearch_index: a negative block result means the
+				// wanted element is at or before mid, so narrow to the left half
+				// (smaller). A positive result narrows to the right.
 				smaller = true
 			}
 		}
