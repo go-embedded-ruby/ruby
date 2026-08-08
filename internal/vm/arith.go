@@ -799,7 +799,7 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 				return false
 			}
 		}
-		return true
+		return hashIdentityMatch(av, bv)
 	case *object.Range:
 		bv, ok := b.(*object.Range)
 		return ok && av.Exclusive == bv.Exclusive && valueEqualRec(av.Lo, bv.Lo, seen) && valueEqualRec(av.Hi, bv.Hi, seen)
@@ -909,9 +909,16 @@ func valueEqlRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 				return false
 			}
 		}
-		return true
+		return hashIdentityMatch(av, bv)
 	}
 	return a == b // identity for nil/true/false and other reference types
+}
+
+// hashIdentityMatch reports whether two content-equal hashes also agree on their
+// compare_by_identity state: MRI treats {1=>2}.compare_by_identity as unequal to
+// a plain {1=>2}, but two empty hashes are equal regardless of the flag.
+func hashIdentityMatch(a, b *object.Hash) bool {
+	return a.Len() == 0 || a.Identity == b.Identity
 }
 
 func toFloat(v object.Value) (float64, bool) {
