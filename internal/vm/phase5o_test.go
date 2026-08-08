@@ -1,7 +1,6 @@
 package vm_test
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -28,8 +27,9 @@ func TestStructEnumerable(t *testing.T) {
 }
 
 func TestStructEachNoBlock(t *testing.T) {
-	src := "Point = Struct.new(:x)\nPoint.new(1).each"
-	if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-		t.Fatalf("got %v want LocalJumpError", err)
+	// MRI returns an Enumerator when #each is called without a block.
+	src := "Point = Struct.new(:x)\np Point.new(1).each.class"
+	if got := eval(t, src); got != "Enumerator\n" {
+		t.Fatalf("got %q want Enumerator", got)
 	}
 }

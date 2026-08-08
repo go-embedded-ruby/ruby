@@ -47,11 +47,11 @@ func (vm *VM) registerEtc() {
 			return p, mod.consts["Group"].(*RClass)
 		}
 		passwd = vm.newStructClass(cStruct,
-			[]string{"name", "passwd", "uid", "gid", "gecos", "dir", "shell"}, false)
+			[]string{"name", "passwd", "uid", "gid", "gecos", "dir", "shell"}, kwFalse)
 		passwd.name, passwd.named = "Etc::Passwd", true
 		mod.consts["Passwd"] = passwd
 		group = vm.newStructClass(cStruct,
-			[]string{"name", "passwd", "gid", "mem"}, false)
+			[]string{"name", "passwd", "gid", "mem"}, kwFalse)
 		group.name, group.named = "Etc::Group", true
 		mod.consts["Group"] = group
 		return passwd, group
@@ -60,22 +60,28 @@ func (vm *VM) registerEtc() {
 	newPasswd := func(u *user.User) object.Value {
 		passwd, _ := ensureClasses()
 		o := &RObject{class: passwd, ivars: map[string]object.Value{}}
-		o.ivars["@name"] = object.NewString(u.Username)
-		o.ivars["@passwd"] = object.NewString("x")
-		o.ivars["@uid"] = atoiOr0(u.Uid)
-		o.ivars["@gid"] = atoiOr0(u.Gid)
-		o.ivars["@gecos"] = object.NewString(u.Name)
-		o.ivars["@dir"] = object.NewString(u.HomeDir)
-		o.ivars["@shell"] = object.NewString("/bin/sh")
+		// Struct members live in structVals (positionally), not in @ivars.
+		o.structVals = []object.Value{
+			object.NewString(u.Username),
+			object.NewString("x"),
+			atoiOr0(u.Uid),
+			atoiOr0(u.Gid),
+			object.NewString(u.Name),
+			object.NewString(u.HomeDir),
+			object.NewString("/bin/sh"),
+		}
 		return o
 	}
 	newGroup := func(g *user.Group) object.Value {
 		_, group := ensureClasses()
 		o := &RObject{class: group, ivars: map[string]object.Value{}}
-		o.ivars["@name"] = object.NewString(g.Name)
-		o.ivars["@passwd"] = object.NewString("x")
-		o.ivars["@gid"] = atoiOr0(g.Gid)
-		o.ivars["@mem"] = object.NewArray()
+		// Struct members live in structVals (positionally), not in @ivars.
+		o.structVals = []object.Value{
+			object.NewString(g.Name),
+			object.NewString("x"),
+			atoiOr0(g.Gid),
+			object.NewArray(),
+		}
 		return o
 	}
 

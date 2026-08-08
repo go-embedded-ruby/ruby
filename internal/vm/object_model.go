@@ -203,6 +203,11 @@ type RClass struct {
 	// frozen records Object#freeze on the class/module object itself, reported by
 	// Object#frozen? and enforced by structural mutators (e.g. attr_*).
 	frozen bool
+	// structDef, when non-nil, marks this class as a Struct subclass minted by
+	// Struct.new and records its member layout. It is resolved through the
+	// superclass chain (structDefOf) so a `class Foo < Struct.new(:a)` subclass
+	// shares its parent's members. nil for every non-Struct class. See struct.go.
+	structDef *structDef
 }
 
 func newClass(name string, super *RClass) *RClass {
@@ -253,6 +258,14 @@ type RObject struct {
 	// dispatched against it (see callNative), while user methods, ivars and
 	// identity stay with the RObject.
 	builtin object.Value
+	// structVals holds the member values of a Struct instance, positionally by
+	// member index. It is allocated (sized to the member count) when the instance
+	// is created, before #initialize runs, so a subclass whose #initialize writes
+	// a member before calling super finds the slot ready. It is nil for every
+	// non-Struct object. Members live here — not in ivars — so, matching MRI, a
+	// Struct's #instance_variables stays empty and @member ivar access is
+	// independent of the accessor (see struct.go).
+	structVals []object.Value
 }
 
 // singletonClass returns o's singleton class, creating it on first use. Its
