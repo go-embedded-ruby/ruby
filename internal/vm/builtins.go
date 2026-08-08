@@ -3424,31 +3424,20 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("exclude_end?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Range).Exclusive)
 	})
+	// include?/member?/=== treat their argument as a plain value to test for
+	// membership (comparison-based here). cover? additionally accepts a Range and
+	// answers range-in-range containment (see rangeCoverRange).
 	rangeCover := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		r := self.(*object.Range)
-		v := args[0]
-		// cover? is comparison-based: an incomparable member is simply not
-		// covered (Ruby returns false rather than raising). A nil bound is open.
-		if _, isNil := r.Lo.(object.Nil); !isNil {
-			lc, lok := rangeCmp(v, r.Lo)
-			if !lok || lc < 0 {
-				return object.False
-			}
-		}
-		if _, isNil := r.Hi.(object.Nil); isNil {
-			return object.True
-		}
-		hc, hok := rangeCmp(v, r.Hi)
-		if !hok {
-			return object.False
-		}
-		if r.Exclusive {
-			return object.Bool(hc < 0)
-		}
-		return object.Bool(hc <= 0)
+		return object.Bool(rangeCoverValue(self.(*object.Range), args[0]))
 	}
 	vm.cRange.define("include?", rangeCover)
-	vm.cRange.define("cover?", rangeCover)
+	vm.cRange.define("cover?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		r := self.(*object.Range)
+		if o, ok := args[0].(*object.Range); ok {
+			return object.Bool(rangeCoverRange(r, o))
+		}
+		return object.Bool(rangeCoverValue(r, args[0]))
+	})
 	vm.cRange.define("member?", rangeCover)
 	vm.cRange.define("===", rangeCover)
 	vm.cRange.define("min", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -3503,7 +3492,9 @@ func (vm *VM) bootstrap() {
 	rangeSizeFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(rangeSize(self.(*object.Range)))
 	}
-	vm.cRange.define("size", rangeSizeFn)
+	vm.cRange.define("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.rangeSizeVal(self.(*object.Range))
+	})
 	vm.cRange.define("count", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		// Bare count is the range size; with a block or argument it counts
 		// matching elements (Enumerable#count).
@@ -4066,6 +4057,9 @@ func (vm *VM) bootstrap() {
 	// Numeric edge methods (Integer#[]/#size/#ord/#round, Float#round(half:),
 	// #next_float/#prev_float): run last so the round overrides win.
 	vm.registerNumericEdges()
+	// Range edge methods (#reverse_each, #entries); runs after the prelude so the
+	// range-specific definitions win over any inherited Enumerable ones.
+	vm.registerRangeEdges()
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,
