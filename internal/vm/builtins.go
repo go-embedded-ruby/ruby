@@ -482,6 +482,7 @@ func (vm *VM) bootstrap() {
 	vm.registerNetPOP()            // Net::POP3/Net::POPMail (require "net/pop"), backed by go-ruby-net-pop codec; socket = injected IO seam; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL
 	vm.registerNetSFTP()           // Net::SFTP client (require "net/sftp"), backed by go-ruby-net-sftp codec; SSH channel = injected IO seam; nests under Net, after registerNetHTTP
 	vm.registerNetFTP()            // real Net::FTP over the socket transport; after registerNetHTTP (Net module) + registerSocket/registerOpenSSL
+	vm.registerNetLDAP()           // Net::LDAP client (require "net/ldap"/"net-ldap"/"ldap"), backed by go-ruby-ldap over github.com/go-ldap/ldap/v3; nests under Net, after registerNetHTTP (Net module); needs StandardError for Net::LDAP::Error
 	vm.registerResolv()            // Resolv (real IPv4/IPv6 parse; DNS sockets stubbed); needs StandardError
 	vm.registerTimeout()           // Timeout module (loadable shell); needs RuntimeError
 	vm.registerTimecop()           // Timecop module (require "timecop"), backed by go-ruby-timecop; drives vm.clock behind Time.now/Date.today/DateTime.now
