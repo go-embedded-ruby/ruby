@@ -39,23 +39,24 @@ func (s *Set) ToS() string     { return s.repr() }
 func (s *Set) Inspect() string { return s.repr() }
 func (s *Set) Truthy() bool    { return true }
 
-// repr renders MRI 3.4's "#<Set: {1, 2, 3}>" (empty: "#<Set: {}>"), members in
-// insertion order each rendered with Ruby #inspect, with a cycle guard so a Set
-// that (transitively) contains itself renders "#<Set: {...}>" instead of looping.
+// repr renders MRI 4.0's "Set[1, 2, 3]" (empty: "Set[]"), members in insertion
+// order each rendered with Ruby #inspect, with a cycle guard so a Set that
+// (transitively) contains itself renders "Set[...]" instead of looping. (Ruby 4.0
+// replaced the older "#<Set: {…}>" form with the "Set[…]" literal form.)
 func (s *Set) repr() string {
 	if !object.ReprEnter(s) {
-		return "#<Set: {...}>"
+		return "Set[...]"
 	}
 	defer object.ReprLeave(s)
 	var b strings.Builder
-	b.WriteString("#<Set: {")
+	b.WriteString("Set[")
 	for i, k := range s.h.Keys {
 		if i > 0 {
 			b.WriteString(", ")
 		}
 		b.WriteString(k.Inspect())
 	}
-	b.WriteString("}>")
+	b.WriteString("]")
 	return b.String()
 }
 

@@ -10,27 +10,27 @@ import (
 // seeding protocol, membership (by #hash/#eql?, including container and nested-Set
 // members), cardinality, mutation, iteration, conversion, the algebra operators
 // (each accepting any Enumerable), the subset/superset/comparison predicates, the
-// higher-order methods and the MRI "#<Set: {…}>" inspection — every value
+// higher-order methods and the MRI "Set[…]" inspection — every value
 // asserted against MRI 3.4's stdlib Set.
 func TestSet(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// Construction + inspect (insertion order, duplicates collapsed).
-		{`p Set.new`, "#<Set: {}>\n"},
-		{`p Set.new([1, 2, 2, 3])`, "#<Set: {1, 2, 3}>\n"},
-		{`p Set.new(nil)`, "#<Set: {}>\n"},
-		{`p Set[1, 2, 2, 3]`, "#<Set: {1, 2, 3}>\n"},
-		{`p Set[]`, "#<Set: {}>\n"},
-		{`p Set.new(Set.new([1, 2]))`, "#<Set: {1, 2}>\n"},            // seed from another Set
-		{`p Set.new({})`, "#<Set: {}>\n"},                             // an (empty) Hash is enumerable
-		{`p Set.new([1, 2, 3]) { |x| x * x }`, "#<Set: {1, 4, 9}>\n"}, // block preprocesses
-		{`p Set.new([]) { |x| x }`, "#<Set: {}>\n"},                   // empty enum + block
-		{`puts Set.new([1, 2])`, "#<Set: {1, 2}>\n"},                  // to_s == inspect
-		{`p Set.new([1, 2]).inspect`, "\"#<Set: {1, 2}>\"\n"},
-		{`p Set.new([1, 2]).to_s`, "\"#<Set: {1, 2}>\"\n"},
+		{`p Set.new`, "Set[]\n"},
+		{`p Set.new([1, 2, 2, 3])`, "Set[1, 2, 3]\n"},
+		{`p Set.new(nil)`, "Set[]\n"},
+		{`p Set[1, 2, 2, 3]`, "Set[1, 2, 3]\n"},
+		{`p Set[]`, "Set[]\n"},
+		{`p Set.new(Set.new([1, 2]))`, "Set[1, 2]\n"},            // seed from another Set
+		{`p Set.new({})`, "Set[]\n"},                             // an (empty) Hash is enumerable
+		{`p Set.new([1, 2, 3]) { |x| x * x }`, "Set[1, 4, 9]\n"}, // block preprocesses
+		{`p Set.new([]) { |x| x }`, "Set[]\n"},                   // empty enum + block
+		{`puts Set.new([1, 2])`, "Set[1, 2]\n"},                  // to_s == inspect
+		{`p Set.new([1, 2]).inspect`, "\"Set[1, 2]\"\n"},
+		{`p Set.new([1, 2]).to_s`, "\"Set[1, 2]\"\n"},
 		// A Set that contains itself renders with the cycle marker.
-		{`s = Set.new; s.add(s); p s`, "#<Set: {#<Set: {...}>}>\n"},
+		{`s = Set.new; s.add(s); p s`, "Set[Set[...]]\n"},
 		// Heterogeneous members (String distinct from Symbol, Bignum, Float, …).
-		{`p Set.new(["a", :a, 1, 1.5, true, nil])`, "#<Set: {\"a\", :a, 1, 1.5, true, nil}>\n"},
+		{`p Set.new(["a", :a, 1, 1.5, true, nil])`, "Set[\"a\", :a, 1, 1.5, true, nil]\n"},
 		{`p Set.new([10 ** 30, 10 ** 30]).size`, "1\n"}, // Bignum keying
 		// Container members key by content (#hash/#eql?), like MRI's Hash-backed Set.
 		{`p Set.new([[1, 2], [1, 2]]).size`, "1\n"},
@@ -42,15 +42,15 @@ func TestSet(t *testing.T) {
 		{`class O; end; p Set.new([O.new, O.new]).size`, "2\n"},
 		{`o = Object.new; s = Set.new; s << o << o; p s.size`, "1\n"},
 		// add / << / add?
-		{`s = Set.new([1]); s.add(2); p s`, "#<Set: {1, 2}>\n"},
-		{`s = Set.new([1]); s << 2 << 3; p s`, "#<Set: {1, 2, 3}>\n"},
+		{`s = Set.new([1]); s.add(2); p s`, "Set[1, 2]\n"},
+		{`s = Set.new([1]); s << 2 << 3; p s`, "Set[1, 2, 3]\n"},
 		{`s = Set.new([1]); s.add(1); p s.size`, "1\n"}, // idempotent
-		{`s = Set.new([1]); p s.add?(2)`, "#<Set: {1, 2}>\n"},
+		{`s = Set.new([1]); p s.add?(2)`, "Set[1, 2]\n"},
 		{`s = Set.new([1]); p s.add?(1)`, "nil\n"}, // already present
 		// delete / delete? (present and absent).
-		{`s = Set.new([1, 2, 3]); s.delete(2); p s`, "#<Set: {1, 3}>\n"},
-		{`s = Set.new([1, 2]); s.delete(9); p s`, "#<Set: {1, 2}>\n"},
-		{`s = Set.new([1, 2]); p s.delete?(1)`, "#<Set: {2}>\n"},
+		{`s = Set.new([1, 2, 3]); s.delete(2); p s`, "Set[1, 3]\n"},
+		{`s = Set.new([1, 2]); s.delete(9); p s`, "Set[1, 2]\n"},
+		{`s = Set.new([1, 2]); p s.delete?(1)`, "Set[2]\n"},
 		{`s = Set.new([1, 2]); p s.delete?(9)`, "nil\n"},
 		// membership + case equality + aliases.
 		{`p Set.new([1, 2]).include?(2)`, "true\n"},
@@ -63,29 +63,29 @@ func TestSet(t *testing.T) {
 		{`p Set.new([1, 2, 3, 4]).count(&:even?)`, "2\n"}, // Enumerable#count with a block
 		{`p Set.new.empty?`, "true\n"},
 		{`p Set.new([1]).empty?`, "false\n"},
-		{`s = Set.new([1, 2]); s.clear; p s`, "#<Set: {}>\n"},
+		{`s = Set.new([1, 2]); s.clear; p s`, "Set[]\n"},
 		// iteration / conversion / Enumerator.
 		{`Set.new([1, 2, 3]).each { |x| print x }`, "123"},
-		{`p Set.new([1, 2, 3]).each { |x| x }`, "#<Set: {1, 2, 3}>\n"}, // returns self
-		{`p Set.new([1, 2]).each.class`, "Enumerator\n"},               // no block → Enumerator
+		{`p Set.new([1, 2, 3]).each { |x| x }`, "Set[1, 2, 3]\n"}, // returns self
+		{`p Set.new([1, 2]).each.class`, "Enumerator\n"},          // no block → Enumerator
 		{`p Set.new([3, 1, 2]).to_a`, "[3, 1, 2]\n"},
 		{`p Set.new([1]).to_set.equal?(Set.new([1]).to_set)`, "false\n"}, // sanity: distinct objects
 		{`s = Set.new([1]); p s.to_set.equal?(s)`, "true\n"},             // Set#to_set is self
 		{`p [1, 2, 2, 3].to_set.class`, "Set\n"},                         // Enumerable#to_set
 		{`p((1..3).to_set { |x| x * 2 }.to_a.sort)`, "[2, 4, 6]\n"},      // to_set with a block
 		// union (| / union / +): accepts any Enumerable; a's order first.
-		{`p(Set.new([1, 2]) | Set.new([2, 3]))`, "#<Set: {1, 2, 3}>\n"},
-		{`p(Set.new([1, 2]) | [2, 3])`, "#<Set: {1, 2, 3}>\n"},
-		{`p Set.new([1]).union([2])`, "#<Set: {1, 2}>\n"},
-		{`p(Set.new([1, 2]) + [3])`, "#<Set: {1, 2, 3}>\n"},
+		{`p(Set.new([1, 2]) | Set.new([2, 3]))`, "Set[1, 2, 3]\n"},
+		{`p(Set.new([1, 2]) | [2, 3])`, "Set[1, 2, 3]\n"},
+		{`p Set.new([1]).union([2])`, "Set[1, 2]\n"},
+		{`p(Set.new([1, 2]) + [3])`, "Set[1, 2, 3]\n"},
 		// intersection (& / intersection).
-		{`p(Set.new([1, 2, 3]) & [2, 3, 4])`, "#<Set: {2, 3}>\n"},
-		{`p Set.new([1, 2]).intersection([2])`, "#<Set: {2}>\n"},
+		{`p(Set.new([1, 2, 3]) & [2, 3, 4])`, "Set[2, 3]\n"},
+		{`p Set.new([1, 2]).intersection([2])`, "Set[2]\n"},
 		// difference (- / difference) and subtract (mutating).
-		{`p(Set.new([1, 2, 3]) - [2])`, "#<Set: {1, 3}>\n"},
-		{`p Set.new([1, 2, 3]).difference([1, 3])`, "#<Set: {2}>\n"},
+		{`p(Set.new([1, 2, 3]) - [2])`, "Set[1, 3]\n"},
+		{`p Set.new([1, 2, 3]).difference([1, 3])`, "Set[2]\n"},
 		{`s = Set.new([1, 2, 3]); p s.subtract([2]).equal?(s)`, "true\n"},
-		{`s = Set.new([1, 2, 3]); s.subtract([2]); p s`, "#<Set: {1, 3}>\n"},
+		{`s = Set.new([1, 2, 3]); s.subtract([2]); p s`, "Set[1, 3]\n"},
 		// symmetric difference.
 		{`p((Set.new([1, 2]) ^ [2, 3]).to_a.sort)`, "[1, 3]\n"},
 		{`p((Set.new([1, 2, 3]) ^ Set.new([1, 2, 3])).to_a)`, "[]\n"},
@@ -122,11 +122,11 @@ func TestSet(t *testing.T) {
 		{`p(Set[].hash == Set[1, 2, 3].hash)`, "false\n"},
 		// merge (mutating, accepts several enumerables); returns self.
 		{`s = Set.new([1]); p s.merge([2, 3], Set.new([4])).equal?(s)`, "true\n"},
-		{`s = Set.new([1]); s.merge([2, 3], Set.new([4])); p s`, "#<Set: {1, 2, 3, 4}>\n"},
+		{`s = Set.new([1]); s.merge([2, 3], Set.new([4])); p s`, "Set[1, 2, 3, 4]\n"},
 		// replace (Set arg vs any Enumerable), returns self.
 		{`s = Set.new([1, 2]); p s.replace([3, 4]).equal?(s)`, "true\n"},
-		{`s = Set.new([1, 2]); s.replace(Set.new([9])); p s`, "#<Set: {9}>\n"},
-		{`s = Set.new([1, 2]); s.reset; p s`, "#<Set: {1, 2}>\n"},
+		{`s = Set.new([1, 2]); s.replace(Set.new([9])); p s`, "Set[9]\n"},
+		{`s = Set.new([1, 2]); s.reset; p s`, "Set[1, 2]\n"},
 		// select / reject / map / collect come from Enumerable → Array results.
 		{`p Set.new([1, 2, 3, 4]).select { |x| x.even? }.class`, "Array\n"},
 		{`p Set.new([1, 2, 3, 4]).select { |x| x.even? }.sort`, "[2, 4]\n"},
@@ -135,16 +135,16 @@ func TestSet(t *testing.T) {
 		{`p Set.new([1, 2, 3]).find { |x| x > 1 }`, "2\n"},
 		// bang mutators keep_if / delete_if / select! / reject! / map!.
 		{`s = Set.new([1, 2, 3, 4]); p s.keep_if { |x| x.even? }.equal?(s)`, "true\n"},
-		{`s = Set.new([1, 2, 3, 4]); s.keep_if { |x| x.even? }; p s`, "#<Set: {2, 4}>\n"},
+		{`s = Set.new([1, 2, 3, 4]); s.keep_if { |x| x.even? }; p s`, "Set[2, 4]\n"},
 		{`s = Set.new([1, 2, 3, 4]); p s.delete_if { |x| x.even? }.equal?(s)`, "true\n"},
-		{`s = Set.new([1, 2, 3, 4]); s.delete_if { |x| x.even? }; p s`, "#<Set: {1, 3}>\n"},
-		{`s = Set.new([1, 2, 3]); p s.select! { |x| x > 1 }`, "#<Set: {2, 3}>\n"}, // changed → self
-		{`s = Set.new([1, 2, 3]); p s.select! { |x| true }`, "nil\n"},             // unchanged → nil
-		{`s = Set.new([1, 2, 3]); p s.filter! { |x| x > 1 }`, "#<Set: {2, 3}>\n"}, // alias
-		{`s = Set.new([1, 2, 3]); p s.reject! { |x| x > 1 }`, "#<Set: {1}>\n"},    // changed → self
-		{`s = Set.new([1, 2, 3]); p s.reject! { |x| false }`, "nil\n"},            // unchanged → nil
+		{`s = Set.new([1, 2, 3, 4]); s.delete_if { |x| x.even? }; p s`, "Set[1, 3]\n"},
+		{`s = Set.new([1, 2, 3]); p s.select! { |x| x > 1 }`, "Set[2, 3]\n"}, // changed → self
+		{`s = Set.new([1, 2, 3]); p s.select! { |x| true }`, "nil\n"},        // unchanged → nil
+		{`s = Set.new([1, 2, 3]); p s.filter! { |x| x > 1 }`, "Set[2, 3]\n"}, // alias
+		{`s = Set.new([1, 2, 3]); p s.reject! { |x| x > 1 }`, "Set[1]\n"},    // changed → self
+		{`s = Set.new([1, 2, 3]); p s.reject! { |x| false }`, "nil\n"},       // unchanged → nil
 		{`s = Set.new([1, 2, 3]); p s.map! { |x| x * 2 }.equal?(s)`, "true\n"},
-		{`s = Set.new([1, 2, 3]); s.collect! { |x| x * 2 }; p s`, "#<Set: {2, 4, 6}>\n"}, // alias
+		{`s = Set.new([1, 2, 3]); s.collect! { |x| x * 2 }; p s`, "Set[2, 4, 6]\n"}, // alias
 		// Enumerator (no block) forms of the bang/higher-order methods.
 		{`p Set.new([1, 2]).select!.class`, "Enumerator\n"},
 		{`p Set.new([1, 2]).reject!.class`, "Enumerator\n"},
@@ -154,7 +154,7 @@ func TestSet(t *testing.T) {
 		{`p Set.new([1, 2]).classify.class`, "Enumerator\n"},
 		{`p Set.new([1, 2]).divide.class`, "Enumerator\n"},
 		// classify / divide / flatten / join.
-		{`p Set.new([1, 2, 3, 4]).classify { |x| x.even? }`, "{false => #<Set: {1, 3}>, true => #<Set: {2, 4}>}\n"},
+		{`p Set.new([1, 2, 3, 4]).classify { |x| x.even? }`, "{false => Set[1, 3], true => Set[2, 4]}\n"},
 		{`p Set.new([1, 2, 3, 4]).divide { |x| x.even? }.map { |s| s.to_a.sort }.sort`, "[[1, 3], [2, 4]]\n"},
 		{`p Set[1, 3, 4, 6].divide { |x, y| (x - y).abs == 1 }.map { |s| s.to_a.sort }.sort`, "[[1], [3, 4], [6]]\n"},
 		{`p Set.new([1, 2, Set.new([3, 4, Set.new([5, 6])])]).flatten.to_a.sort`, "[1, 2, 3, 4, 5, 6]\n"},
