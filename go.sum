@@ -291,6 +291,8 @@ github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a h1:N
 github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a/go.mod h1:n9SEnqxWmYIXKgtrIZEiRvGui0lWdCd2GJELRpa44ls=
 github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4 h1:vRJAWboG75rQWpfTiNQ8XkFRJ1Am9RNKdRKSlTLQBiA=
 github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4/go.mod h1:HBZ9KJKoGTzo4h6/5+gaYyzMYWQtucT660mE68zHZGw=
+github.com/go-ruby-activeldap/activeldap v0.0.0-20260808201041-fcc6b6341768 h1:o9Pdvex6j0X4CGZBmoVDR2ZcVS4EGu+jyi3F6GTxNk8=
+github.com/go-ruby-activeldap/activeldap v0.0.0-20260808201041-fcc6b6341768/go.mod h1:EY+VvxoLxV18Qkh4FxFt7yeOVCHItmr070jb24F+zZQ=
 github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a h1:d8kCh4DxIJEQJhd/ZD6niTnxEzWgnZ5NlOmxfdBRDZQ=
 github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a/go.mod h1:tIZ2td8/ApPpR4CfEJYKAelJ/RplKcaqvRm3NyEbiyY=
 github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6 h1:m4vrjxuJ9Cp+4QohRvpAbAqsKRaF9Ki8jzic8IPx/9c=

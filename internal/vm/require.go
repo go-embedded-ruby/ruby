@@ -95,6 +95,7 @@ var providedFeatures = map[string]bool{
 	"sinatra": true, "sinatra/base": true,
 	"capybara": true, "capybara/dsl": true,
 	"active_record": true, "activerecord": true,
+	"active_ldap": true, "activeldap": true,
 	"kaminari":     true,
 	"paper_trail":  true,
 	"active_model": true, "activemodel": true,
