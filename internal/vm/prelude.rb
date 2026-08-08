@@ -132,6 +132,13 @@ module Enumerable
     r
   end
 
+  # to_set: a new Set of the elements (each preprocessed by the block, if given),
+  # as MRI's Enumerable#to_set. Defined here so every Enumerable — Array, Range,
+  # Hash, … — can be turned into a Set.
+  def to_set(&block)
+    Set.new(self, &block)
+  end
+
   # to_h: each element (or each yield of the block) must be a [key, value] pair.
   def to_h
     h = {}
@@ -874,6 +881,370 @@ class Hash
   # The deconstruct_keys protocol for case/in hash patterns: a Hash returns
   # itself (the requested key list is advisory, so we ignore it).
   def deconstruct_keys(keys)
+    self
+  end
+end
+
+# Set — MRI's collection of unique members with set algebra. The membership,
+# insertion order, compare_by_identity flag and the core mutators/accessors are
+# native primitives (internal/vm/set.go, over an object.Hash of member => true);
+# this reopening layers the rest of the API on top exactly as MRI's set.rb layers
+# it over a Hash: the Enumerable mix-in, the algebra and predicate operators (each
+# accepting any Enumerable), the higher-order methods and the genuine aliases.
+class Set
+  include Enumerable
+
+  # __do_with_enum yields each element of an Enumerable through #each_entry when it
+  # provides one (MRI's preferred protocol, which spec mocks rely on) else #each,
+  # raising ArgumentError for a value that is neither — the check every seeding and
+  # algebra method funnels through.
+  def __do_with_enum(enum, &block)
+    if enum.respond_to?(:each_entry)
+      enum.each_entry(&block)
+    elsif enum.respond_to?(:each)
+      enum.each(&block)
+    else
+      raise ArgumentError, "value must be enumerable"
+    end
+  end
+  private :__do_with_enum
+
+  # initialize(enum = nil) seeds the (already-allocated, empty) Set from an
+  # Enumerable, preprocessing each element through the block when one is given.
+  def initialize(enum = nil, &block)
+    return if enum.nil?
+    if block
+      __do_with_enum(enum) { |o| add(block.call(o)) }
+    else
+      __do_with_enum(enum) { |o| add(o) }
+    end
+  end
+  private :initialize
+
+  # each yields every member and returns self; without a block it returns an
+  # Enumerator, so Set is a full Enumerable and `set.each` is chainable.
+  def each(&block)
+    return enum_for(:each) { size } unless block
+    __each(&block)
+    self
+  end
+
+  def empty?
+    size == 0
+  end
+
+  # add? / delete? are the query mutators: like #add / #delete but returning nil
+  # when the member was already present / already absent (no change), else self.
+  def add?(o)
+    include?(o) ? nil : add(o)
+  end
+
+  def delete?(o)
+    include?(o) ? delete(o) : nil
+  end
+
+  # | / union / + : a new Set with the members of self and the given Enumerable.
+  # Retains self's compare_by_identity flag (dup carries it).
+  def |(other)
+    n = dup
+    __do_with_enum(other) { |o| n.add(o) }
+    n
+  end
+  alias union |
+  alias + |
+
+  # & / intersection: a new (plain, non-identity) Set of the members shared by
+  # self and the given Enumerable.
+  def &(other)
+    n = self.class.new
+    __do_with_enum(other) { |o| n.add(o) if include?(o) }
+    n
+  end
+  alias intersection &
+
+  # - / difference: a new Set of self's members excluding those in the Enumerable.
+  # Retains self's compare_by_identity flag.
+  def -(other)
+    n = dup
+    __do_with_enum(other) { |o| n.delete(o) }
+    n
+  end
+  alias difference -
+
+  # ^ : symmetric difference — a new (plain) Set of the members in exactly one of
+  # self and the Enumerable.
+  def ^(other)
+    n = self.class.new(other)
+    each { |o| n.include?(o) ? n.delete(o) : n.add(o) }
+    n
+  end
+
+  # merge(*enums): add every element of each Enumerable to self, returning self.
+  def merge(*enums)
+    enums.each { |enum| __do_with_enum(enum) { |o| add(o) } }
+    self
+  end
+
+  # subtract(enum): remove every element of the Enumerable from self, return self.
+  def subtract(other)
+    __do_with_enum(other) { |o| delete(o) }
+    self
+  end
+
+  # replace(other): make self hold exactly other's members. A Set argument
+  # transfers its compare_by_identity flag; any other Enumerable leaves self's flag
+  # untouched.
+  def replace(other)
+    if other.is_a?(Set)
+      __replace_cbi(other.compare_by_identity?)
+      other.each { |o| add(o) }
+    else
+      raise ArgumentError, "value must be enumerable" unless other.respond_to?(:each_entry) || other.respond_to?(:each)
+      __replace_cbi(compare_by_identity?)
+      __do_with_enum(other) { |o| add(o) }
+    end
+    self
+  end
+
+  # reset rehashes the members (call after mutating a member in place), returns
+  # self.
+  def reset
+    vals = to_a
+    __replace_cbi(compare_by_identity?)
+    vals.each { |o| add(o) }
+    self
+  end
+
+  # subset? / <= : self ⊆ other (other must be a Set-like object).
+  def subset?(other)
+    raise ArgumentError, "value must be a set" unless other.is_a?(Set)
+    return false if size > other.size
+    all? { |o| other.include?(o) }
+  end
+  alias <= subset?
+
+  # proper_subset? / < : self ⊂ other (strict).
+  def proper_subset?(other)
+    raise ArgumentError, "value must be a set" unless other.is_a?(Set)
+    return false if size >= other.size
+    all? { |o| other.include?(o) }
+  end
+  alias < proper_subset?
+
+  # superset? / >= : self ⊇ other.
+  def superset?(other)
+    raise ArgumentError, "value must be a set" unless other.is_a?(Set)
+    return false if size < other.size
+    other.all? { |o| include?(o) }
+  end
+  alias >= superset?
+
+  # proper_superset? / > : self ⊃ other (strict).
+  def proper_superset?(other)
+    raise ArgumentError, "value must be a set" unless other.is_a?(Set)
+    return false if size <= other.size
+    other.all? { |o| include?(o) }
+  end
+  alias > proper_superset?
+
+  # <=> : 0 when equal, -1 when a proper subset, +1 when a proper superset, nil
+  # when the sets are incomparable or other is not Set-like.
+  def <=>(other)
+    return nil unless other.is_a?(Set)
+    case size <=> other.size
+    when -1 then subset?(other) ? -1 : nil
+    when 1 then superset?(other) ? 1 : nil
+    else self == other ? 0 : nil
+    end
+  end
+
+  # == : true when other is a Set-like object with the same members and the same
+  # compare_by_identity flag. eql? is the same test.
+  def ==(other)
+    return true if equal?(other)
+    return false unless other.is_a?(Set)
+    if other.respond_to?(:compare_by_identity?) && compare_by_identity? != other.compare_by_identity?
+      return false
+    end
+    return false unless size == other.size
+    all? { |o| other.include?(o) }
+  end
+  alias eql? ==
+
+  # hash : equal for equal Sets, order-independent (the members' hashes are sorted
+  # so ordering does not matter, then hashed as an Array).
+  def hash
+    to_a.map(&:hash).sort.hash
+  end
+
+  # disjoint? / intersect? : whether self and other share no / at least one member
+  # (other may be any Set-like object).
+  def disjoint?(other)
+    if size < other.size
+      none? { |o| other.include?(o) }
+    else
+      other.none? { |o| include?(o) }
+    end
+  end
+
+  def intersect?(other)
+    !disjoint?(other)
+  end
+
+  # delete_if / keep_if : remove members for which the block is truthy / falsy,
+  # always returning self (an Enumerator without a block).
+  def delete_if(&block)
+    return enum_for(:delete_if) { size } unless block
+    to_a.each { |o| delete(o) if block.call(o) }
+    self
+  end
+
+  def keep_if(&block)
+    return enum_for(:keep_if) { size } unless block
+    to_a.each { |o| delete(o) unless block.call(o) }
+    self
+  end
+
+  # select! / filter! / reject! : like keep_if / delete_if but returning nil when
+  # nothing changed (an Enumerator without a block).
+  def select!(&block)
+    return enum_for(:select!) { size } unless block
+    n = size
+    keep_if(&block)
+    size == n ? nil : self
+  end
+  alias filter! select!
+
+  def reject!(&block)
+    return enum_for(:reject!) { size } unless block
+    n = size
+    delete_if(&block)
+    size == n ? nil : self
+  end
+
+  # map! / collect! : replace each member with the block's result, returning self.
+  # Does not retain the compare_by_identity flag (the rebuilt members are new).
+  def map!(&block)
+    return enum_for(:map!) { size } unless block
+    vals = to_a.map(&block)
+    __replace_cbi(false)
+    vals.each { |o| add(o) }
+    self
+  end
+  alias collect! map!
+
+  # classify(&block): a Hash mapping each block result to the Set of members that
+  # produced it (an Enumerator without a block).
+  def classify(&block)
+    return enum_for(:classify) { size } unless block
+    h = {}
+    each do |o|
+      k = block.call(o)
+      (h[k] ||= self.class.new) << o
+    end
+    h
+  end
+
+  # divide(&block): partition self into a Set of subsets. With a 1-argument block
+  # each subset shares a block value; with a 2-argument block the block is a
+  # relation and the subsets are the strongly-connected components of the induced
+  # digraph (an Enumerator without a block).
+  def divide(&func)
+    return enum_for(:divide) { size } unless func
+    if func.arity == 2
+      __divide_graph(&func)
+    else
+      self.class.new(classify(&func).values)
+    end
+  end
+
+  def __divide_graph(&func)
+    items = to_a
+    n = items.size
+    adj = Array.new(n) { [] }
+    n.times do |i|
+      n.times do |j|
+        adj[i] << j if func.call(items[i], items[j])
+      end
+    end
+    idx = 0
+    indices = Array.new(n)
+    low = Array.new(n, 0)
+    onstack = Array.new(n, false)
+    stack = []
+    comps = []
+    connect = nil
+    connect = lambda do |v|
+      indices[v] = idx
+      low[v] = idx
+      idx += 1
+      stack.push(v)
+      onstack[v] = true
+      adj[v].each do |w|
+        if indices[w].nil?
+          connect.call(w)
+          low[v] = low[w] if low[w] < low[v]
+        elsif onstack[w]
+          low[v] = indices[w] if indices[w] < low[v]
+        end
+      end
+      if low[v] == indices[v]
+        comp = []
+        loop do
+          w = stack.pop
+          onstack[w] = false
+          comp << items[w]
+          break if w == v
+        end
+        comps << comp
+      end
+    end
+    n.times { |v| connect.call(v) if indices[v].nil? }
+    self.class.new(comps.map { |c| self.class.new(c) })
+  end
+  private :__divide_graph
+
+  # flatten : a new (plain) Set with every nested Set recursively expanded.
+  # flatten! flattens self in place, returning self when it changed and nil when
+  # it did not. Both raise ArgumentError on a Set that (transitively) contains
+  # itself.
+  def flatten
+    self.class.new.flatten_merge(self, {})
+  end
+
+  def flatten!
+    if any? { |o| o.is_a?(Set) }
+      replace(flatten)
+      self
+    else
+      nil
+    end
+  end
+
+  # flatten_merge(other, seen) merges other into self, expanding nested Sets and
+  # raising ArgumentError when it revisits a Set already on the current path.
+  def flatten_merge(other, seen = {})
+    other.each do |o|
+      if o.is_a?(Set)
+        raise ArgumentError, "tried to flatten recursive Set" if seen[o.object_id]
+        seen[o.object_id] = true
+        flatten_merge(o, seen)
+        seen.delete(o.object_id)
+      else
+        add(o)
+      end
+    end
+    self
+  end
+  protected :flatten_merge
+
+  # join : Array#join over the members (in insertion order).
+  def join(sep = nil)
+    to_a.join(sep)
+  end
+
+  # to_set returns self (a Set is already a Set).
+  def to_set
     self
   end
 end

@@ -719,6 +719,17 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *ALRecordObj:
 		return x.cls
+	case *LDAPConn:
+		// The Net::LDAP binding builds for every target (its go-ldap transport is
+		// pure-Go net code that compiles for wasm), so its value types carry their
+		// class here in the shared switch rather than in classOfExtBinding.
+		return x.cls
+	case *LDAPEntry:
+		return x.cls
+	case *LDAPFilter:
+		return x.cls
+	case *LDAPResult:
+		return x.cls
 	case *CSVRow:
 		// A CSV::Row wrapper reports CSV::Row; its instance methods (field/[]/
 		// to_a/to_h/headers/…) live on that class.

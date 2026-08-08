@@ -6,6 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/beevik/etree v1.6.0
 	github.com/dolthub/go-mysql-server v0.20.0
+	github.com/glauth/ldap v0.0.0-20260718202943-34c5f9b3cbf1
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/time v0.0.0-20260727203506-b0e9511265ce
@@ -92,6 +93,7 @@ require (
 	github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5
 	github.com/go-ruby-kaminari/kaminari v0.0.0-20260707193800-fc9fecf9afe6
 	github.com/go-ruby-kramdown/kramdown v0.0.0-20260717070109-6152f7f5a931
+	github.com/go-ruby-ldap/ldap v0.0.0-20260808195309-d90a141d64f9
 	github.com/go-ruby-liquid/liquid v0.0.0-20260727135843-2b7bb06a45c2
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
 	github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e
@@ -210,6 +212,7 @@ require (
 	filippo.io/age v1.3.1 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	filippo.io/hpke v0.4.0 // indirect
+	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.14.5 // indirect
 	github.com/abtreece/confd v0.41.2 // indirect
@@ -271,6 +274,7 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
+	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-augeas/augeas v0.0.0-20260709163741-0ed2afd8169a // indirect
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
@@ -281,6 +285,7 @@ require (
 	github.com/go-hocon/hocon v0.0.0-20260709172937-6d69e3b57178 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
+	github.com/go-ldap/ldap/v3 v3.4.14 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-opentype/bidi v0.2.0 // indirect
@@ -407,7 +412,7 @@ require (
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
