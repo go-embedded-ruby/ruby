@@ -3019,6 +3019,47 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
+	// fetch_values(*keys) returns an Array of the values for the given keys, in
+	// the order requested. A missing key uses the block's result (called with the
+	// key) when a block is given, else raises KeyError with MRI's "key not found:
+	// %p" message. With no keys it returns []. Unlike values_at, a bare missing
+	// key is an error rather than nil.
+	vm.cHash.define("fetch_values", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		h := self.(*object.Hash)
+		out := make([]object.Value, 0, len(args))
+		for _, k := range args {
+			if v, ok := h.Get(k); ok {
+				out = append(out, v)
+				continue
+			}
+			if blk != nil {
+				out = append(out, vm.callBlock(blk, []object.Value{k}))
+				continue
+			}
+			raise("KeyError", "key not found: %s", k.Inspect())
+		}
+		return object.NewArrayFromSlice(out)
+	})
+	// replace(other) discards the receiver's contents and copies other's pairs,
+	// default value, default proc and compare_by_identity flag, returning self.
+	// other is coerced with #to_hash (a non-convertible argument raises TypeError).
+	vm.cHash.define("replace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		h.ReplaceWith(vm.toHash(args[0]))
+		return h
+	})
+	// compare_by_identity switches the receiver to identity-based key comparison
+	// (distinct objects with equal content become distinct keys) and returns self,
+	// rehashing existing entries so they stay reachable by their original objects.
+	vm.cHash.define("compare_by_identity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		h.CompareByIdentity()
+		return h
+	})
+	// compare_by_identity? reports whether the receiver compares keys by identity.
+	vm.cHash.define("compare_by_identity?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*object.Hash).Identity)
+	})
 	vm.cHash.define("transform_values", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "transform_values")
@@ -5906,6 +5947,10 @@ func dupValue(v object.Value) object.Value {
 		return object.NewArrayFromSlice(elems)
 	case *object.Hash:
 		h := object.NewHash()
+		// A compare_by_identity hash keeps its identity comparison across dup/clone
+		// (MRI persists the flag), so switch the copy into identity mode before
+		// inserting so keys are stored by object identity like the original.
+		h.Identity = x.Identity
 		for _, k := range x.Keys {
 			val, _ := x.Get(k)
 			h.Set(k, val)

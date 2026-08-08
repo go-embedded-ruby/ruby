@@ -473,6 +473,13 @@ type Hash struct {
 	// precedence over Default. Both nil ⇒ a missing key reads as nil.
 	Default     Value
 	DefaultProc Value
+	// Identity, set by Hash#compare_by_identity, switches key comparison from the
+	// content-addressed default (two #eql? values coincide) to object identity:
+	// distinct objects with equal content become distinct keys, while immediate
+	// values (Integer/Symbol/…) still compare by value since they are singletons.
+	// When set, the strVals fast path is bypassed and hashKey returns the key
+	// object itself so the backing map compares by Go pointer identity.
+	Identity bool
 }
 
 // strKey is the comparable map key for a Ruby String, distinct from a Symbol of
@@ -502,6 +509,72 @@ func strContentKey(k Value) ([]byte, bool) {
 		return s.Bytes(), true
 	}
 	return nil, false
+}
+
+// strFast reports the String fast-path content bytes for k, but only when the
+// hash uses the default (content) comparison. In compare_by_identity mode every
+// key — String included — must route through the general hashKey path so it is
+// keyed by object identity, so strFast reports ok=false and the fast path is
+// skipped.
+func (h *Hash) strFast(k Value) ([]byte, bool) {
+	if h.Identity {
+		return nil, false
+	}
+	return strContentKey(k)
+}
+
+// snapshot returns the value remembered in Keys for k. In compare_by_identity
+// mode the key is stored as-is so its object identity (used as the map key) is
+// preserved for iteration and later lookups; otherwise it defers to snapshotKey,
+// which freezes a String copy.
+func (h *Hash) snapshot(k Value) Value {
+	if h.Identity {
+		return k
+	}
+	return snapshotKey(k)
+}
+
+// CompareByIdentity switches the hash into identity comparison mode, rehashing
+// any existing entries so they remain reachable by their original key objects.
+// Calling it on a hash already in identity mode is a no-op.
+func (h *Hash) CompareByIdentity() {
+	if h.Identity {
+		return
+	}
+	keys := h.Keys
+	vals := make([]Value, len(keys))
+	for i, k := range keys {
+		vals[i] = h.value(k)
+	}
+	h.Keys = nil
+	h.vals = map[any]Value{}
+	h.strVals = nil
+	h.keyBucket = nil
+	h.Identity = true
+	for i, k := range keys {
+		h.Set(k, vals[i])
+	}
+}
+
+// ReplaceWith discards every entry of h and copies the contents, default value,
+// default proc and compare_by_identity flag of o, backing Hash#replace. The flag
+// is taken from o (so replace both transfers and clears identity mode).
+func (h *Hash) ReplaceWith(o *Hash) {
+	keys := o.Keys
+	vals := make([]Value, len(keys))
+	for i, k := range keys {
+		vals[i] = o.value(k)
+	}
+	h.Keys = nil
+	h.vals = map[any]Value{}
+	h.strVals = nil
+	h.keyBucket = nil
+	h.Identity = o.Identity
+	h.Default = o.Default
+	h.DefaultProc = o.DefaultProc
+	for i, k := range keys {
+		h.Set(k, vals[i])
+	}
 }
 
 // hashKey normalises a key to its comparable map form.
@@ -537,6 +610,14 @@ type customBucket struct {
 // is routed through CustomKeyHook and reuseBucket so it follows Ruby semantics
 // rather than Go pointer identity.
 func (h *Hash) hashKey(k Value) any {
+	// In compare_by_identity mode the key object itself is the comparable map key,
+	// so the backing map distinguishes entries by Go pointer (reference types) or
+	// value (immediates) rather than by content. This is checked before every other
+	// normalisation — including the CustomKeyHook walk — because identity mode must
+	// not call the key's #hash/#eql?.
+	if h.Identity {
+		return k
+	}
 	if u, ok := k.(KeyUnwrapper); ok {
 		if v, wrapped := u.HashUnwrap(); wrapped {
 			k = v
@@ -651,7 +732,7 @@ func NewHashCap(n int) *Hash {
 // through the allocation-free strVals fast path; every other key type takes the
 // general hashKey path.
 func (h *Hash) Get(k Value) (Value, bool) {
-	if b, ok := strContentKey(k); ok {
+	if b, ok := h.strFast(k); ok {
 		if e := h.strVals[string(b)]; e != nil { // string(b) elided: no copy
 			return e.v, true
 		}
@@ -666,7 +747,7 @@ func (h *Hash) Get(k Value) (Value, bool) {
 // (no allocation), and only a genuine insert dups+freezes the key snapshot and
 // allocates the owned key string.
 func (h *Hash) Set(k, v Value) {
-	if b, ok := strContentKey(k); ok {
+	if b, ok := h.strFast(k); ok {
 		if e := h.strVals[string(b)]; e != nil { // overwrite: string(b) elided
 			e.v = v
 			return
@@ -680,7 +761,7 @@ func (h *Hash) Set(k, v Value) {
 	}
 	hk := h.hashKey(k)
 	if _, ok := h.vals[hk]; !ok {
-		snap := snapshotKey(k)
+		snap := h.snapshot(k)
 		h.Keys = append(h.Keys, snap)
 		if cb, isCustom := hk.(customBucket); isCustom {
 			if h.keyBucket == nil {
@@ -696,7 +777,7 @@ func (h *Hash) Set(k, v Value) {
 // repr while iterating Keys, so the entry always exists), dispatching to the same
 // fast path as Get.
 func (h *Hash) value(k Value) Value {
-	if b, ok := strContentKey(k); ok {
+	if b, ok := h.strFast(k); ok {
 		return h.strVals[string(b)].v
 	}
 	return h.vals[h.hashKey(k)]
@@ -718,7 +799,7 @@ func (h *Hash) Clear() {
 // is removed from the strVals fast path (and its snapshot from Keys); every other
 // key type takes the general hashKey path.
 func (h *Hash) Delete(k Value) (Value, bool) {
-	if b, ok := strContentKey(k); ok {
+	if b, ok := h.strFast(k); ok {
 		e := h.strVals[string(b)]
 		if e == nil {
 			return NilV, false
