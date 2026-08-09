@@ -57,12 +57,12 @@ func TestDate(t *testing.T) {
 		{`p Date.new(2026, 6, 29).ctime`, "\"Mon Jun 29 00:00:00 2026\"\n"},
 		{`p Date.new(2026, 6, 29).asctime`, "\"Mon Jun 29 00:00:00 2026\"\n"},
 		{`p Date.new(2026, 6, 29).jisx0301`, "\"R08.06.29\"\n"},
-		// + days / - days, and Date - Date = day count between.
+		// + days / - days, and Date - Date = MRI's Rational day count between.
 		{`puts (Date.new(2026, 6, 29) + 10).to_s`, "2026-07-09\n"},
 		{`puts (Date.new(2026, 6, 29) - 10).to_s`, "2026-06-19\n"},
-		{`p(Date.new(2026, 7, 9) - Date.new(2026, 6, 29))`, "10\n"},
-		{`p(Date.new(2026, 6, 29) - Date.new(2026, 7, 9))`, "-10\n"},    // negative span
-		{`puts Date.new(2026, 6, 29).send(:+, 1).to_s`, "2026-06-30\n"}, // method send agrees
+		{`p(Date.new(2026, 7, 9) - Date.new(2026, 6, 29))`, "(10/1)\n"},
+		{`p(Date.new(2026, 6, 29) - Date.new(2026, 7, 9))`, "(-10/1)\n"}, // negative span
+		{`puts Date.new(2026, 6, 29).send(:+, 1).to_s`, "2026-06-30\n"},  // method send agrees
 		{`puts Date.new(2026, 6, 29).send(:-, 1).to_s`, "2026-06-28\n"},
 		// next / succ (the following day).
 		{`puts Date.new(2026, 6, 29).next.to_s`, "2026-06-30\n"},
@@ -237,6 +237,8 @@ func TestDateErrors(t *testing.T) {
 		{`DateTime.new(2026, 6, 29, 0, 0, 0, "bogus")`, "Date::Error"},                 // unparsable zone
 		{`DateTime.new(2026, 6, 29, 0, 0, 0, [])`, "TypeError"},                        // offset wrong type
 		{`DateTime.new(2026, 25, 29)`, "Date::Error"},                                  // invalid datetime field
+		{`Date.new(2026, 6, 29).zone`, "NoMethodError"},                                // zone is DateTime-only
+		{`Date.new(2026, 6, 29).sec_fraction`, "NoMethodError"},                        // sec_fraction is DateTime-only
 	} {
 		err := runErr(t, c.src)
 		if c.want == "" {
@@ -247,6 +249,91 @@ func TestDateErrors(t *testing.T) {
 		}
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)
+		}
+	}
+}
+
+// TestDateConformance covers the MRI methods added to the go-ruby-date binding:
+// the Lilian day / calendar-system / validity queries, sec_fraction / zone /
+// xmlschema, eql? / hash / === (which key on the absolute instant or the calendar
+// day as MRI does), to_datetime / to_time, DateTime#iso8601(n) and the
+// DateTime.jd / .ordinal / .commercial constructors. Every expectation is the
+// literal `ruby -rdate` output for the fixed date 2026-06-29 (a Monday, ISO week
+// 27, yday 180, jd 2461221). Values are asserted against MRI 4.0.5.
+func TestDateConformance(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		// Lilian day, reform sentinel and calendar system.
+		{`p Date.new(2026, 6, 29).ld`, "162061\n"},
+		// start is MRI's reform sentinel as a Float (asserted via to_i / class, as
+		// rbgo's Float#inspect renders 2299161.0 in a different notation).
+		{`p Date.new(2026, 6, 29).start.to_i`, "2299161\n"},
+		{`p Date.new(2026, 6, 29).start.class`, "Float\n"},
+		{`p Date.new(2026, 6, 29).julian?`, "false\n"},
+		{`p Date.new(2026, 6, 29).gregorian?`, "true\n"},
+		// Validity class methods.
+		{`p Date.valid_date?(2026, 2, 29)`, "false\n"},
+		{`p Date.valid_civil?(2024, 2, 29)`, "true\n"},
+		{`p Date.valid_jd?(2461221)`, "true\n"},
+		{`p Date.valid_jd?(nil)`, "false\n"},
+		{`p Date.valid_ordinal?(2026, 400)`, "false\n"},
+		{`p Date.valid_ordinal?(2026, 180)`, "true\n"},
+		{`p Date.valid_commercial?(2026, 60, 1)`, "false\n"},
+		{`p Date.valid_commercial?(2026, 27, 1)`, "true\n"},
+		// xmlschema (the MRI alias of iso8601) on a Date and a DateTime.
+		{`p Date.new(2026, 6, 29).xmlschema`, "\"2026-06-29\"\n"},
+		{`p DateTime.new(2026, 6, 29, 12, 30, 45, "+02:00").xmlschema`, "\"2026-06-29T12:30:45+02:00\"\n"},
+		// eql? / hash / === over the absolute instant (== is instant, === is the day).
+		{`p Date.new(2026, 6, 29).eql?(DateTime.new(2026, 6, 29))`, "true\n"},
+		{`p Date.new(2026, 6, 29).eql?(DateTime.new(2026, 6, 29, 12))`, "false\n"},
+		{`p Date.new(2026, 6, 29).eql?(5)`, "false\n"},
+		{`p(Date.new(2026, 6, 29).hash == DateTime.new(2026, 6, 29).hash)`, "true\n"},
+		{`p(Date.new(2026, 6, 29).hash == DateTime.new(2026, 6, 29, 12).hash)`, "false\n"},
+		// Same instant, different offset → equal (==, eql?, hash all agree).
+		{`p(DateTime.new(2026, 6, 29, 12, 0, 0, "+02:00") == DateTime.new(2026, 6, 29, 10, 0, 0, "Z"))`, "true\n"},
+		{`p(DateTime.new(2026, 6, 29, 12, 0, 0, "+02:00").hash == DateTime.new(2026, 6, 29, 10, 0, 0, "Z").hash)`, "true\n"},
+		{`p(Date.new(2026, 6, 29) === DateTime.new(2026, 6, 29, 12, 30))`, "true\n"},
+		{`p(Date.new(2026, 6, 29) === Date.new(2026, 6, 30))`, "false\n"},
+		{`p(Date.new(2026, 6, 29) === 5)`, "false\n"},
+		// A UTC shift that borrows across midnight (offset later than the wall clock)
+		// still hashes / compares equal to the same instant expressed in UTC.
+		{`p(DateTime.new(2026, 6, 29, 1, 0, 0, "+02:00") == DateTime.new(2026, 6, 28, 23, 0, 0, "Z"))`, "true\n"},
+		{`p(DateTime.new(2026, 6, 29, 1, 0, 0, "+02:00").hash == DateTime.new(2026, 6, 28, 23, 0, 0, "Z").hash)`, "true\n"},
+		{`p(DateTime.new(2026, 6, 29, 1, 0, 0, "+02:00") - DateTime.new(2026, 6, 28, 23, 0, 0, "Z"))`, "(0/1)\n"},
+		// Hash de-duplicates equal-instant keys.
+		{`p({Date.new(2026, 6, 29) => 1}[DateTime.new(2026, 6, 29)])`, "1\n"},
+		// sec_fraction and zone (integer-second construction only — the library's
+		// NewDateTime carries whole seconds, so sec_fraction is always 0/1 here).
+		{`p DateTime.new(2026, 6, 29, 12, 0, 0).sec_fraction`, "(0/1)\n"},
+		{`p DateTime.new(2026, 6, 29, 12, 0, 0, "+02:00").zone`, "\"+02:00\"\n"},
+		{`p DateTime.new(2026, 6, 29, 12, 0, 0, "-0530").zone`, "\"-05:30\"\n"},
+		// to_datetime: promote a Date to midnight UTC; identity on a DateTime.
+		{`p Date.new(2026, 6, 29).to_datetime.to_s`, "\"2026-06-29T00:00:00+00:00\"\n"},
+		{`p Date.new(2026, 6, 29).to_datetime.class`, "DateTime\n"},
+		{`p DateTime.new(2026, 6, 29, 12).to_datetime.to_s`, "\"2026-06-29T12:00:00+00:00\"\n"},
+		// to_time: a DateTime keeps its offset; a plain Date is local midnight (assert
+		// only the tz-independent calendar parts and the zeroed clock).
+		{`p DateTime.new(2026, 6, 29, 12, 30, 45, "+02:00").to_time.strftime("%Y-%m-%d %H:%M:%S %z")`,
+			"\"2026-06-29 12:30:45 +0200\"\n"},
+		{`p DateTime.new(2026, 6, 29, 12, 30, 45, "+02:00").to_time.class`, "Time\n"},
+		{`t = Date.new(2026, 6, 29).to_time; p [t.class, t.year, t.month, t.day, t.hour, t.min, t.sec]`,
+			"[Time, 2026, 6, 29, 0, 0, 0]\n"},
+		// DateTime#iso8601(n) fractional-seconds precision.
+		{`p DateTime.new(2026, 6, 29, 12, 30, 45, "+02:00").iso8601`, "\"2026-06-29T12:30:45+02:00\"\n"},
+		{`p DateTime.new(2026, 6, 29, 12, 30, 45, "+02:00").iso8601(3)`, "\"2026-06-29T12:30:45.000+02:00\"\n"},
+		{`p Date.new(2026, 6, 29).iso8601(3)`, "\"2026-06-29\"\n"}, // a plain Date ignores precision
+		// DateTime.jd / .ordinal / .commercial with an optional wall clock + offset.
+		{`p DateTime.jd(2461221, 12, 30, 0, "+02:00").to_s`, "\"2026-06-29T12:30:00+02:00\"\n"},
+		{`p DateTime.jd(2461221).to_s`, "\"2026-06-29T00:00:00+00:00\"\n"},
+		{`p DateTime.jd(2461221).class`, "DateTime\n"},
+		{`p DateTime.ordinal(2026, 180, 12).to_s`, "\"2026-06-29T12:00:00+00:00\"\n"},
+		{`p DateTime.commercial(2026, 27, 1, 9).to_s`, "\"2026-06-29T09:00:00+00:00\"\n"},
+		{`p DateTime.commercial(2026, 27, 1).to_s`, "\"2026-06-29T00:00:00+00:00\"\n"},
+		// DateTime - DateTime yields the exact Rational fraction of a day.
+		{`p(DateTime.new(2026, 6, 29, 12) - DateTime.new(2026, 6, 29))`, "(1/2)\n"},
+		{`p(DateTime.new(2026, 6, 30) - DateTime.new(2026, 6, 29, 6))`, "(3/4)\n"},
+	} {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}
 }
