@@ -35,6 +35,35 @@ func TestBinding(t *testing.T) {
 		{`p binding.is_a?(Binding)`, "true\n"},
 		// A binding captured inside a method sees that method's locals and self.
 		{`def m; a = 3; binding; end; b = m; puts b.local_variable_get(:a)`, "3\n"},
+		// source_location: nil when the capturing ISeq carries no file (the test
+		// harness compiles from a bare string). The VM tracks no per-line info, so a
+		// file-backed binding would report line 0 (see Proc#source_location).
+		{`p binding.source_location`, "nil\n"},
+		// dup / clone: a distinct object, but a shallow copy. A write to an existing
+		// local through either copy is shared (same environment); a new local set on
+		// one copy stays private to it.
+		{`b = binding; p b.equal?(b.dup)`, "false\n"},
+		{`p binding.dup.class`, "Binding\n"},
+		{`p binding.clone.class`, "Binding\n"},
+		{`b1 = binding; b2 = b1.dup; b1.local_variable_set(:x, 37); p b2.local_variable_defined?(:x)`, "false\n"},
+		{`a = 1; b1 = binding; b2 = b1.dup; b1.local_variable_set(:a, 5); p b2.local_variable_get(:a)`, "5\n"},
+		// eval that assigns a new top-scope local adds it to the binding (persists
+		// across calls, surfaces in local_variables, visible to a later eval).
+		{`b1 = binding; eval("a = 1", b1); p eval("a", b1)`, "1\n"},
+		{`b = binding; b.eval("q = 5"); p b.local_variable_defined?(:q)`, "true\n"},
+		{`b = binding; b.eval("x = 72"); p b.local_variables`, "[:x, :b]\n"},
+		{`b = binding; b.eval("number = 10"); b.local_variable_set(:number, 20); p b.local_variable_get(:number)`, "20\n"},
+		// An eval-created local does not leak into a dup taken before the eval.
+		{`b = binding; b2 = b.dup; b.eval("x = 72"); p b2.local_variables`, "[:b, :b2]\n"},
+		// A local declared only inside a nested def/block in the eval does not leak
+		// to the binding's scope; a `case` subject (an anonymous "" local) is dropped.
+		{`b = binding; b.eval("def mm; yy = 1; end"); p b.local_variables`, "[:b]\n"},
+		{`b = binding; b.eval("case [1, 2]; in [a, c]; end"); p b.local_variables`, "[:c, :a, :b]\n"},
+		// set/eval interleaving keeps MRI's most-recently-added-first ordering.
+		{`x = 1; b = binding; b.local_variable_set(:s, 1); b.eval("e = 2"); p b.local_variables`, "[:e, :s, :x, :b]\n"},
+		// A name argument responding to #to_str is coerced (get/set/defined?).
+		{`class N1; def to_str; "num"; end; end; b = binding; b.local_variable_set(N1.new, 10); p b.local_variable_get(N1.new)`, "10\n"},
+		{`class N2; def to_str; "num"; end; end; b = binding; b.local_variable_set(:num, 3); p b.local_variable_defined?(N2.new)`, "true\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -49,6 +78,8 @@ func TestBinding(t *testing.T) {
 		{`binding.eval(42)`, "no implicit conversion of Integer into String"},
 		{`binding.eval("(")`, "SyntaxError"},     // parse failure
 		{`binding.eval("retry")`, "SyntaxError"}, // parses, fails to compile
+		// A name argument whose #to_str returns a non-String is rejected.
+		{`class Bad; def to_str; 5; end; end; binding.local_variable_get(Bad.new)`, "not a symbol nor a string"},
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
