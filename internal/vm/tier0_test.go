@@ -273,13 +273,13 @@ func TestDefinedControlFlow(t *testing.T) {
 	})
 }
 
-// TestReflectionInspect covers UnboundMethod's string representation. rbgo uses
-// the "#<UnboundMethod: Owner#name>" core form (MRI 4.0.5 also appends the
-// parameter signature and source location, which this VM does not track).
+// TestReflectionInspect covers UnboundMethod's string representation: the MRI
+// "#<UnboundMethod: Owner#name(params)>" form (MRI 4.0.5 also appends a source
+// location, which this VM tracks only when the method was loaded from a file).
 func TestReflectionInspect(t *testing.T) {
 	checkCases(t, []runCase{
-		{`class C; def foo; end; end; p C.instance_method(:foo).to_s`, "\"#<UnboundMethod: C#foo>\"\n"},
-		{`class C; def foo; end; end; p C.instance_method(:foo).inspect`, "\"#<UnboundMethod: C#foo>\"\n"},
+		{`class C; def foo; end; end; p C.instance_method(:foo).to_s`, "\"#<UnboundMethod: C#foo()>\"\n"},
+		{`class C; def foo; end; end; p C.instance_method(:foo).inspect`, "\"#<UnboundMethod: C#foo()>\"\n"},
 		{`class C; def foo; end; end; p(!!C.instance_method(:foo))`, "true\n"},
 	})
 }

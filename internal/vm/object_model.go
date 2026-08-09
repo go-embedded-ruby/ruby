@@ -164,6 +164,13 @@ type Method struct {
 	// copy. The zero value (false) is safe-by-default: an unmarked native always
 	// gets the copy. Only set via defineNR after auditing the body.
 	nonRetaining bool
+	// origName records the name the method was originally defined with, preserved
+	// through define_method transplants of a native body (whose iseq is nil, so it
+	// cannot be recovered from iseq.Name) — e.g. define_method(:my, Kernel
+	// .instance_method(:is_a?)) keeps origName "is_a?". Empty means "recover from
+	// iseq.Name when present, else fall back to name" (see methodOriginalName), so
+	// a plain def and an `alias` (which shares the iseq) need not set it.
+	origName string
 }
 
 // RClass is a class (the live, mutable method table that makes monkey-patching,
