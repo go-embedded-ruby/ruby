@@ -8,7 +8,6 @@ import (
 	"math/big"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	msgpack "github.com/go-ruby-msgpack/msgpack"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -87,7 +86,7 @@ func toMsgpack(v object.Value) msgpack.Value {
 		}
 		return m
 	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(n.t.Unix(), 0).UTC()
 	}
 	// An unmapped value: hand it to the library, which returns the pack error
 	// msgpackPack turns into a Ruby ArgumentError.
@@ -134,7 +133,7 @@ func fromMsgpack(vm *VM, v msgpack.Value) object.Value {
 		}
 		return h
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return unixTime(n.Unix())
 	case *msgpack.Ext:
 		raise("ArgumentError", "unsupported MessagePack extension type %d", n.Type)
 	}

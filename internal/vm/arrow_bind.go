@@ -13,7 +13,6 @@ import (
 	"sort"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	libarrow "github.com/go-ruby-arrow/arrow"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -74,7 +73,7 @@ func arrowValueToScalar(v object.Value) any {
 	case object.Symbol:
 		return string(n)
 	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(n.t.Unix(), 0).UTC()
 	case *object.Array:
 		out := make([]any, len(n.Elems))
 		for i, el := range n.Elems {
@@ -136,7 +135,7 @@ func arrowScalarToRuby(v any) object.Value {
 	case string:
 		return object.NewString(n)
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return unixTime(n.Unix())
 	case []any:
 		out := make([]object.Value, len(n))
 		for i, el := range n {

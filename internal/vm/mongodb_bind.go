@@ -12,7 +12,6 @@ import (
 	"math"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	mongodb "github.com/go-ruby-mongodb/mongodb"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -273,7 +272,7 @@ func (vm *VM) rubyToBSON(v object.Value) any {
 	case *object.Hash:
 		return vm.rubyHashToDocument(x)
 	case *Time:
-		return mongodb.NewDateTime(stdtime.Unix(x.t.ToUnix(), 0).UTC())
+		return mongodb.NewDateTime(stdtime.Unix(x.t.Unix(), 0).UTC())
 	case *MongoObjectId:
 		return x.id
 	default:
@@ -340,7 +339,7 @@ func (vm *VM) bsonToRuby(v any) object.Value {
 	case mongodb.ObjectId:
 		return vm.newObjectId(x)
 	case mongodb.DateTime:
-		return &Time{t: gotime.FromUnix(int64(x) / 1000)}
+		return unixTime(int64(x) / 1000)
 	default:
 		return object.NewString(fmt.Sprintf("%v", x))
 	}

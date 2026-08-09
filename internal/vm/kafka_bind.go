@@ -13,7 +13,6 @@ import (
 
 	kafka "github.com/go-ruby-kafka/kafka"
 
-	gotime "github.com/go-composites/time/src"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -218,7 +217,7 @@ func int32ArrayToRuby(ns []int32) object.Value {
 // kafkaTime renders a message CreateTime as a Ruby Time, whole-second resolution
 // (matching the resolution the Time binding exposes through go-composites/time).
 func kafkaTime(t stdtime.Time) object.Value {
-	return &Time{t: gotime.FromUnix(t.Unix())}
+	return unixTime(t.Unix())
 }
 
 // raiseKafkaError re-raises a library error as its matching Kafka::* exception.

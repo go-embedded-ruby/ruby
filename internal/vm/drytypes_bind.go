@@ -10,7 +10,6 @@ import (
 	"strings"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	drystruct "github.com/go-ruby-dry-struct/dry-struct"
 	drytypes "github.com/go-ruby-dry-types/dry-types"
 
@@ -227,7 +226,7 @@ func dryToGo(v object.Value) any {
 		}
 		return m
 	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(n.t.Unix(), 0).UTC()
 	}
 	return v
 }
@@ -268,7 +267,7 @@ func dryFromGo(vm *VM, v any) object.Value {
 	case drytypes.Date:
 		return object.NewString(n.String())
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return unixTime(n.Unix())
 	case *drystruct.Struct:
 		// A nested struct value: wrap it as a DryStruct reporting the Ruby subclass
 		// named by its StructType (registered when the subclass was defined).

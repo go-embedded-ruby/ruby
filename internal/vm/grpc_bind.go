@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"time"
 
-	gotime "github.com/go-composites/time/src"
 	libgrpc "github.com/go-ruby-grpc/grpc"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -606,7 +605,7 @@ func grpcHashToMetadata(h *object.Hash) libgrpc.Metadata {
 
 // grpcTimeValue wraps a Go instant as a Ruby Time (whole seconds).
 func (vm *VM) grpcTimeValue(t time.Time) object.Value {
-	return &Time{t: gotime.FromUnix(t.Unix())}
+	return unixTime(t.Unix())
 }
 
 // grpcDurationOf reads a Ruby Integer/Float number of seconds as a Duration.

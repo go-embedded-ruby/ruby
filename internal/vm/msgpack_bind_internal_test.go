@@ -67,7 +67,7 @@ func TestMsgpackFromBridge(t *testing.T) {
 	}
 	// A time.Time maps to a Ruby Time carrying the same instant.
 	tm, ok := fromMsgpack(vm, stdtime.Unix(100, 0)).(*Time)
-	if !ok || tm.t.ToUnix() != 100 {
+	if !ok || tm.t.Unix() != 100 {
 		t.Errorf("time -> %#v", fromMsgpack(vm, stdtime.Unix(100, 0)))
 	}
 	// An unsupported extension raises ArgumentError.

@@ -7,7 +7,6 @@ package vm
 import (
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	tzinfo "github.com/go-ruby-tzinfo/tzinfo"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -77,7 +76,7 @@ func rubyTimeArg(args []object.Value) stdtime.Time {
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
 	}
-	return stdtime.Unix(timeArg(args[0]).t.ToUnix(), 0).UTC()
+	return stdtime.Unix(timeArg(args[0]).t.Unix(), 0).UTC()
 }
 
 // goTimeToRuby wraps a Go time.Time as an rbgo Time (whole-second resolution,
@@ -86,26 +85,9 @@ func rubyTimeArg(args []object.Value) stdtime.Time {
 // The instant is carried in the Go time.Time's OWN location, not forced to UTC:
 // MRI renders strftime / to_s in the Time's local zone (the wall clock of that
 // zone), so a Chronic parse of "2016-05-27 12:00:00" or a TZInfo local
-// conversion must keep its wall clock and offset. We round-trip through
-// RFC3339 (which encodes the numeric offset) so gotime's Parse rebuilds a
-// composite whose Format renders that same wall clock; getutc / UTC re-shifts
-// to UTC as MRI does. FromUnix would discard the offset and render UTC-shifted.
+// conversion must keep its wall clock and offset. Since rbgo's Time now holds a
+// Go time.Time directly, we keep that location; getutc / UTC re-shifts to UTC as
+// MRI does.
 func goTimeToRuby(t stdtime.Time) object.Value {
-	// Truncate to whole seconds (the rest of the Time surface is second
-	// resolution) while preserving the location, then encode the offset via
-	// RFC3339 for zonedFromRFC3339 to reconstruct.
-	t = t.Truncate(stdtime.Second)
-	return &Time{t: zonedFromRFC3339(t.Format(stdtime.RFC3339), t.Unix())}
-}
-
-// zonedFromRFC3339 rebuilds a gotime composite from an RFC3339 string, keeping
-// the numeric offset it encodes so Format renders the wall clock of that zone.
-// The RFC3339 rendering of any valid time.Time parses cleanly; the error path
-// falls back to the UTC instant so a malformed input can never panic.
-func zonedFromRFC3339(rfc3339 string, unix int64) gotime.Interface {
-	r := gotime.Parse(stdtime.RFC3339, rfc3339)
-	if r.HasError() {
-		return gotime.FromUnix(unix)
-	}
-	return r.Payload().(gotime.Interface)
+	return &Time{t: t.Truncate(stdtime.Second)}
 }

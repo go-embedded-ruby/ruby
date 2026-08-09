@@ -123,7 +123,7 @@ func deviseFromRuby(v object.Value) any {
 	case object.Integer:
 		return int(x)
 	case *Time:
-		return stdtime.Unix(x.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(x.t.Unix(), 0).UTC()
 	default:
 		return nil
 	}
@@ -201,7 +201,7 @@ func (c *DeviseConfig) wireNow() func() stdtime.Time {
 	return func() stdtime.Time {
 		v := c.vm.callBlock(c.now, nil)
 		if t, ok := v.(*Time); ok {
-			return stdtime.Unix(t.t.ToUnix(), 0).UTC()
+			return stdtime.Unix(t.t.Unix(), 0).UTC()
 		}
 		return stdtime.Now().UTC()
 	}

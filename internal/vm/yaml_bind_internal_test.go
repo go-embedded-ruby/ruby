@@ -175,7 +175,7 @@ func TestYAMLBindFromScalars(t *testing.T) {
 		t.Errorf("float64 -> %v", c.conv(float64(2.5)))
 	}
 	tm := c.conv(stdtime.Unix(0, 0).UTC())
-	if rt, ok := tm.(*Time); !ok || rt.t.ToUnix() != 0 {
+	if rt, ok := tm.(*Time); !ok || rt.t.Unix() != 0 {
 		t.Errorf("time.Time -> %T", tm)
 	}
 	if cl, ok := c.conv(yaml.Class("String")).(*RClass); !ok || cl.ToS() != "String" {
@@ -302,7 +302,7 @@ func TestYAMLBindFromTimeConstruct(t *testing.T) {
 	want := int64(1_600_000_000)
 	v := c.conv(stdtime.Unix(want, 0).UTC())
 	rt, ok := v.(*Time)
-	if !ok || rt.t.ToUnix() != want {
+	if !ok || rt.t.Unix() != want {
 		t.Fatalf("time round trip -> %T %v", v, v)
 	}
 }

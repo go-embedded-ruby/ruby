@@ -8,7 +8,6 @@ import (
 	"strings"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -215,7 +214,7 @@ func (vm *VM) registerFile() {
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
 		}
-		return &Time{t: gotime.FromUnix(fi.ModTime().Unix())}
+		return unixTime(fi.ModTime().Unix())
 	})
 	delete := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, a := range args {
@@ -591,7 +590,7 @@ func chownID(v object.Value) int {
 // seconds-since-epoch) to a whole number of Unix seconds.
 func timeArgUnix(v object.Value) int64 {
 	if t, ok := v.(*Time); ok {
-		return t.t.ToUnix()
+		return t.t.Unix()
 	}
 	return timeSeconds(v)
 }

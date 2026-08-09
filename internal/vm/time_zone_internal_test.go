@@ -36,7 +36,7 @@ func TestGoTimeToRubyPreservesWallClock(t *testing.T) {
 	}
 
 	// The absolute instant is preserved regardless of the rendered zone.
-	if got := rt.t.ToUnix(); got != src.Unix() {
+	if got := rt.t.Unix(); got != src.Unix() {
 		t.Errorf("ToUnix = %d, want %d (instant must be preserved)", got, src.Unix())
 	}
 }
@@ -70,21 +70,7 @@ func TestGoTimeToRubySubSecondTruncated(t *testing.T) {
 	if got := rt.t.Format(rubyLayout("%H:%M:%S")); got != "06:00:00" {
 		t.Errorf("truncated strftime = %q, want %q", got, "06:00:00")
 	}
-	if got := rt.t.ToUnix(); got != src.Truncate(stdtime.Second).Unix() {
+	if got := rt.t.Unix(); got != src.Truncate(stdtime.Second).Unix() {
 		t.Errorf("ToUnix = %d, want %d", got, src.Truncate(stdtime.Second).Unix())
-	}
-}
-
-// TestZonedFromRFC3339Fallback exercises the defensive error branch: a string
-// that is not valid RFC3339 falls back to the supplied UTC instant rather than
-// panicking. (goTimeToRuby never feeds it a bad string, but the guard exists so
-// a hypothetical malformed layout is safe.)
-func TestZonedFromRFC3339Fallback(t *testing.T) {
-	got := zonedFromRFC3339("not-a-timestamp", 0)
-	if got.ToUnix() != 0 {
-		t.Errorf("fallback ToUnix = %d, want 0", got.ToUnix())
-	}
-	if s := got.Format("2006-01-02 15:04:05"); s != "1970-01-01 00:00:00" {
-		t.Errorf("fallback render = %q, want epoch UTC", s)
 	}
 }

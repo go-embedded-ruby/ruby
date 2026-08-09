@@ -9,7 +9,6 @@ import (
 
 	rss "github.com/go-ruby-rss/rss"
 
-	gotime "github.com/go-composites/time/src"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -128,7 +127,7 @@ func rssTime(tp *stdtime.Time) object.Value {
 	if tp == nil {
 		return object.NilV
 	}
-	return &Time{t: gotime.FromUnix(tp.Unix())}
+	return unixTime(tp.Unix())
 }
 
 // rssStrArray wraps a library []string (e.g. an item's categories) as a Ruby

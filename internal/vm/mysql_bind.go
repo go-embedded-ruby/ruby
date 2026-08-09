@@ -10,7 +10,6 @@ import (
 	"math/big"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	date "github.com/go-ruby-date/date"
 	mysql "github.com/go-ruby-mysql/mysql"
 
@@ -96,7 +95,7 @@ func (vm *VM) mysqlValue(v mysql.Value) object.Value {
 	case mysql.Date:
 		return mysqlDate(n)
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return unixTime(n.Unix())
 	case string:
 		return object.NewString(n)
 	case []byte:
@@ -149,7 +148,7 @@ func mysqlBind(v object.Value) any {
 	case object.Symbol:
 		return string(n)
 	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(n.t.Unix(), 0).UTC()
 	case *BigDecimal:
 		return n.ToS()
 	case *Date:

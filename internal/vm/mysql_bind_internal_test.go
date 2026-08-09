@@ -12,7 +12,6 @@ import (
 	"testing"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	date "github.com/go-ruby-date/date"
 	mysql "github.com/go-ruby-mysql/mysql"
 
@@ -59,7 +58,7 @@ func TestMySQLDateError(t *testing.T) {
 // types the mysql library's prepared-statement path accepts.
 func TestMySQLBind(t *testing.T) {
 	bin := object.NewStringBytesEnc([]byte{0x41, 0x42}, "ASCII-8BIT")
-	tm := &Time{t: gotime.FromUnix(1000)}
+	tm := unixTime(1000)
 	dec := newDecimalString("3.14")
 	rd, _ := date.NewDate(2026, 1, 2)
 	dt := &Date{d: rd}

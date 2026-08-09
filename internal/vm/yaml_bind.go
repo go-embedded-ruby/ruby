@@ -9,7 +9,6 @@ import (
 	"strings"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	yaml "github.com/go-ruby-yaml/yaml"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -156,7 +155,7 @@ func (c *yamlToCtx) conv(v object.Value) yaml.Value {
 	case *object.Hash:
 		return c.convHash(n)
 	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(n.t.Unix(), 0).UTC()
 	case *object.Range:
 		return c.convRange(n)
 	case *RObject:
@@ -361,7 +360,7 @@ func (c *yamlFromCtx) conv(v yaml.Value) object.Value {
 	case *yaml.Map:
 		return c.convMap(n)
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return unixTime(n.Unix())
 	case *yaml.Range:
 		return c.convRange(n)
 	case *yaml.Object:

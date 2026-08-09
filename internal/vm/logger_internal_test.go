@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	gotime "github.com/go-composites/time/src"
 	lg "github.com/go-ruby-logger/logger"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
@@ -523,7 +522,7 @@ func TestLoggerFormatterClass(t *testing.T) {
 	vm.registerLogger() // ensure the class exists (also installed at construction)
 	fc := vm.cLoggerFormatter
 	lf := fc.smethods["new"].native(vm, nil, nil, nil)
-	tm := &Time{t: gotime.FromUnix(fixedInstant.Unix())}
+	tm := unixTime(fixedInstant.Unix())
 	args := []object.Value{
 		object.NewString("DEBUG"), tm, object.NewString("prog"), object.NewString("hello"),
 	}
