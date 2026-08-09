@@ -113,6 +113,29 @@ func TestProcConversions(t *testing.T) {
 	}
 }
 
+// TestProcGoLevelStringify covers the Go-level Proc.ToS()/Inspect() value-
+// interface methods, which fire when a proc is stringified outside Ruby method
+// dispatch: `puts proc` renders through ToS() (displayStr uses the Go interface
+// for a non-RObject), while inspecting a container that holds a proc renders each
+// element through Inspect().
+func TestProcGoLevelStringify(t *testing.T) {
+	tests := []struct{ name, src, want string }{
+		{"puts_proc", `puts proc{}`, "#<Proc>\n"},
+		{"puts_lambda", `puts lambda{}`, "#<Proc (lambda)>\n"},
+		{"puts_symproc", `puts :foo.to_proc`, "#<Proc (&:foo)>\n"},
+		{"inspect_in_array", `p [proc{}]`, "[#<Proc>]\n"},
+		{"inspect_lambda_in_array", `p [lambda{}]`, "[#<Proc (lambda)>]\n"},
+		{"inspect_in_hash", `p({k: proc{}})`, "{k: #<Proc>}\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestProcCallSemantics covers the call-shape differences between a proc and a
 // lambda: a proc pads/drops/auto-splats leniently while a lambda binds with
 // method semantics and raises ArgumentError on a mismatch.
