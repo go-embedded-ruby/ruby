@@ -32,6 +32,10 @@ func (vm *VM) registerEval() {
 		iseq.Name = "(eval)"
 		// Run against the caller's self/definee with a fresh local scope; a runtime
 		// RubyError from the evaluated code propagates (and is rescuable) as usual.
+		// eval is transparent to Kernel#__method__ / #__callee__: the evaluated code
+		// inherits the caller's method context (eval "__method__" inside a method
+		// reports that method), so hand exec the caller's pair.
+		vm.pendingMethodCtx = vm.currentMethodCtxPtr()
 		return vm.exec(iseq, self, nil, vm.classOf(self), "", nil, nil, nil, nil)
 	})
 }
