@@ -51,7 +51,7 @@ func (vm *VM) registerProcMethods() {
 			env:     p.env,
 			self:    p.self,
 			definee: vm.blockDefinee(p),
-			names:   append([]string(nil), p.iseq.Locals...),
+			names:   append([]string(nil), p.defLocals...),
 		}
 	})
 

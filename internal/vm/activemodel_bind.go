@@ -212,7 +212,7 @@ func amMessage(v object.Value) any {
 		p := m
 		return func(mod activemodel.Model) string {
 			rm := mod.(*amModel)
-			return rm.vm.callBlockSelf(p, rm.inst, nil).ToS()
+			return rm.vm.amCallProc(p, rm.inst).ToS()
 		}
 	}
 	return nil
@@ -224,6 +224,19 @@ func amMessageOpt(h *object.Hash) any {
 		return amMessage(v)
 	}
 	return nil
+}
+
+// amCallProc invokes an ActiveModel proc/lambda callable (an if:/unless:
+// condition, a :message, a numericality bound or an error type) against the model
+// instance. A zero-arity callable is instance_exec'd (self = instance, no args);
+// any other callable is called with the instance as its argument. This mirrors
+// ActiveModel's own arity handling and lets a strict lambda (->(record){…}) —
+// which raises on an argument-count mismatch — receive the record.
+func (vm *VM) amCallProc(p *Proc, inst object.Value) object.Value {
+	if p.arityVal() == 0 {
+		return vm.callBlockSelf(p, inst, nil)
+	}
+	return vm.callBlockSelf(p, inst, []object.Value{inst})
 }
 
 // amCondition builds a single if:/unless: predicate: a Symbol/String names a model
@@ -238,7 +251,7 @@ func (vm *VM) amCondition(v object.Value) activemodel.Condition {
 		p := t
 		return activemodel.ProcCond(func(m activemodel.Model) any {
 			rm := m.(*amModel)
-			return goOfRuby(rm.vm.callBlockSelf(p, rm.inst, nil))
+			return goOfRuby(rm.vm.amCallProc(p, rm.inst))
 		})
 	}
 	raise("ArgumentError", "if/unless must be a symbol, string or proc")
@@ -548,7 +561,7 @@ func (vm *VM) amBound(v object.Value) any {
 		p := t
 		return func(m activemodel.Model) any {
 			rm := m.(*amModel)
-			return goOfRuby(rm.vm.callBlockSelf(p, rm.inst, nil))
+			return goOfRuby(rm.vm.amCallProc(p, rm.inst))
 		}
 	}
 	return goOfRuby(v)
@@ -635,7 +648,7 @@ func (vm *VM) amErrorType(v object.Value) any {
 		return func(m activemodel.Model) any {
 			rm := m.(*amModel)
 			// Re-map so a proc that returns a Symbol/String keeps its type.
-			return rm.vm.amErrorType(rm.vm.callBlockSelf(p, rm.inst, nil))
+			return rm.vm.amErrorType(rm.vm.amCallProc(p, rm.inst))
 		}
 	}
 	return goOfRuby(v)

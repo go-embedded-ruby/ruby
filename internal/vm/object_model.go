@@ -67,8 +67,12 @@ type Proc struct {
 	nativeArity int
 	// symName is set on a Symbol#to_proc synthesized Proc (the symbol's name), so
 	// Proc#to_s can render MRI's `(&:name)` form for it.
-	symName  string
-	isLambda bool // true for lambda { } / ->(){}: backs Proc#lambda?
+	symName string
+	// defLocals are the local-variable names of the frame where this block literal
+	// was written — i.e. the names that index env.slots. Proc#binding uses them to
+	// name the closure's locals so eval(str, proc.binding) can reach them.
+	defLocals []string
+	isLambda  bool // true for lambda { } / ->(){}: backs Proc#lambda?
 	// breakLive is true while this block is being yielded through a call that can
 	// catch its `break` (sendCatchBreak). A `break` in a block whose yielding call
 	// has already returned — a proc invoked later via Proc#call — is a "break from
@@ -128,8 +132,8 @@ const (
 
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
 type Method struct {
-	name   string
-	native NativeFn
+	name     string
+	native   NativeFn
 	iseq     *bytecode.ISeq
 	proc     *Proc          // for define_method: a block-backed method body
 	compiled CompiledMethod // AOT-lowered native body (rbgo build); preferred when set
