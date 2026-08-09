@@ -68,6 +68,8 @@ func TestMethodArity(t *testing.T) {
 		{`p "x".method(:upcase).arity`, "-1\n"},
 		// UnboundMethod#arity agrees.
 		{`class C; def f(a, b=1); end; end; p C.instance_method(:f).arity`, "-2\n"},
+		// A method whose body is a native (ISeq-less) Proc reports the Proc's arity.
+		{`class C; define_method(:g, "x".method(:upcase).to_proc); end; p C.new.method(:g).arity`, "-1\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -153,6 +155,7 @@ func TestMethodToSInspect(t *testing.T) {
 		{`class K; def orig; end; alias_method :ren, :orig; end; p K.new.method(:ren).inspect`, "\"#<Method: K#ren(orig)()>\"\n"},
 		{`class C; def f(a:, b: 2, **r); end; end; p C.new.method(:f).inspect`, "\"#<Method: C#f(a:, b: ..., **r)>\"\n"},
 		{`class C; def f(*, **, &); end; end; p C.new.method(:f).inspect`, "\"#<Method: C#f(*, **, &)>\"\n"},
+		{`class C; def f(a, **nil); end; end; p C.new.method(:f).inspect`, "\"#<Method: C#f(a, **nil)>\"\n"},
 		{`p "x".method(:upcase).inspect`, "\"#<Method: String#upcase(*)>\"\n"},
 		// #inspect is an alias of #to_s (one shared record) for both classes.
 		{`p(Method.instance_method(:inspect) == Method.instance_method(:to_s))`, "true\n"},
