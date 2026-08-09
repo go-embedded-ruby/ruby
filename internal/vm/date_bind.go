@@ -567,6 +567,7 @@ func strptimeHash(d *date.Date) object.Value {
 // Date and DateTime (DateTime inherits them).
 func (vm *VM) registerDateAccessors() {
 	d := func(name string, fn NativeFn) { vm.cDate.define(name, fn) }
+	dt := func(name string, fn NativeFn) { vm.cDateTime.define(name, fn) }
 	self := func(v object.Value) *date.Date { return v.(*Date).d }
 	intM := func(get func(*date.Date) int) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -616,16 +617,17 @@ func (vm *VM) registerDateAccessors() {
 		return object.Float(float64(date.ITALY))
 	})
 
-	// offset — MRI's DateTime#offset, the Rational fraction of a day east of UTC;
-	// zone renders that same offset as a "+HH:MM" string; sec_fraction is the
-	// sub-second part as a Rational fraction of a second.
+	// offset — MRI's DateTime#offset, the Rational fraction of a day east of UTC.
 	d("offset", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return offsetRational(self(v).Offset())
 	})
-	d("zone", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	// zone (the "+HH:MM" string) and sec_fraction (the sub-second part as a Rational
+	// fraction of a second) are DateTime-only in MRI — a plain Date carries neither,
+	// so they are defined on DateTime, not inherited from Date.
+	dt("zone", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(formatZone(self(v).Offset()))
 	})
-	d("sec_fraction", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+	dt("sec_fraction", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Rational{R: new(big.Rat).SetFrac64(self(v).SecFractionNanos(), int64(1e9))}
 	})
 

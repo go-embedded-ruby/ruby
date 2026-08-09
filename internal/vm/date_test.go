@@ -237,6 +237,8 @@ func TestDateErrors(t *testing.T) {
 		{`DateTime.new(2026, 6, 29, 0, 0, 0, "bogus")`, "Date::Error"},                 // unparsable zone
 		{`DateTime.new(2026, 6, 29, 0, 0, 0, [])`, "TypeError"},                        // offset wrong type
 		{`DateTime.new(2026, 25, 29)`, "Date::Error"},                                  // invalid datetime field
+		{`Date.new(2026, 6, 29).zone`, "NoMethodError"},                                // zone is DateTime-only
+		{`Date.new(2026, 6, 29).sec_fraction`, "NoMethodError"},                        // sec_fraction is DateTime-only
 	} {
 		err := runErr(t, c.src)
 		if c.want == "" {
@@ -292,6 +294,11 @@ func TestDateConformance(t *testing.T) {
 		{`p(Date.new(2026, 6, 29) === DateTime.new(2026, 6, 29, 12, 30))`, "true\n"},
 		{`p(Date.new(2026, 6, 29) === Date.new(2026, 6, 30))`, "false\n"},
 		{`p(Date.new(2026, 6, 29) === 5)`, "false\n"},
+		// A UTC shift that borrows across midnight (offset later than the wall clock)
+		// still hashes / compares equal to the same instant expressed in UTC.
+		{`p(DateTime.new(2026, 6, 29, 1, 0, 0, "+02:00") == DateTime.new(2026, 6, 28, 23, 0, 0, "Z"))`, "true\n"},
+		{`p(DateTime.new(2026, 6, 29, 1, 0, 0, "+02:00").hash == DateTime.new(2026, 6, 28, 23, 0, 0, "Z").hash)`, "true\n"},
+		{`p(DateTime.new(2026, 6, 29, 1, 0, 0, "+02:00") - DateTime.new(2026, 6, 28, 23, 0, 0, "Z"))`, "(0/1)\n"},
 		// Hash de-duplicates equal-instant keys.
 		{`p({Date.new(2026, 6, 29) => 1}[DateTime.new(2026, 6, 29)])`, "1\n"},
 		// sec_fraction and zone (integer-second construction only — the library's
@@ -299,7 +306,6 @@ func TestDateConformance(t *testing.T) {
 		{`p DateTime.new(2026, 6, 29, 12, 0, 0).sec_fraction`, "(0/1)\n"},
 		{`p DateTime.new(2026, 6, 29, 12, 0, 0, "+02:00").zone`, "\"+02:00\"\n"},
 		{`p DateTime.new(2026, 6, 29, 12, 0, 0, "-0530").zone`, "\"-05:30\"\n"},
-		{`p Date.new(2026, 6, 29).zone`, "\"+00:00\"\n"},
 		// to_datetime: promote a Date to midnight UTC; identity on a DateTime.
 		{`p Date.new(2026, 6, 29).to_datetime.to_s`, "\"2026-06-29T00:00:00+00:00\"\n"},
 		{`p Date.new(2026, 6, 29).to_datetime.class`, "DateTime\n"},
