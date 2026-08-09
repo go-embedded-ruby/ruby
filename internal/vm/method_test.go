@@ -41,7 +41,7 @@ func TestMethodErrors(t *testing.T) {
 	if err := runErr(t, `Object.new.method(:nope)`); err == nil || !strings.Contains(err.Error(), "NameError") {
 		t.Errorf("missing method: got %v", err)
 	}
-	if got := eval(t, "class C; def f; end; end\np C.new.method(:f).inspect"); got != "\"#<Method: C#f>\"\n" {
+	if got := eval(t, "class C; def f; end; end\np C.new.method(:f).inspect"); got != "\"#<Method: C#f()>\"\n" {
 		t.Errorf("inspect got %q", got)
 	}
 }

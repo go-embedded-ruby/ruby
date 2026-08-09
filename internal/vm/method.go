@@ -1,8 +1,7 @@
 package vm
 
 import (
-	"fmt"
-
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -12,11 +11,21 @@ type BoundMethod struct {
 	recv object.Value
 	name string
 	m    *Method
+	// vm is the interpreter the method belongs to, kept so ToS can render the
+	// receiver's class and the method's parameters (MRI's #<Method: …> form).
+	vm *VM
+}
+
+// newBoundMethod builds a Method bound to recv, resolved under name to m.
+func (vm *VM) newBoundMethod(recv object.Value, name string, m *Method) *BoundMethod {
+	return &BoundMethod{recv: recv, name: name, m: m, vm: vm}
 }
 
 // every Method created by define / OpDefineMethod / define_(singleton_)method
 // carries a non-nil owner, so b.m.owner is always set.
-func (b *BoundMethod) ToS() string     { return fmt.Sprintf("#<Method: %s#%s>", b.m.owner.name, b.name) }
+func (b *BoundMethod) ToS() string {
+	return b.vm.formatCallableString("Method", b.recv, b.name, b.m)
+}
 func (b *BoundMethod) Inspect() string { return b.ToS() }
 func (b *BoundMethod) Truthy() bool    { return true }
 
@@ -31,7 +40,7 @@ func (vm *VM) registerMethod() {
 		if m == nil {
 			return raise("NameError", "undefined method '%s' for %s", name, vm.classOf(self).name)
 		}
-		return &BoundMethod{recv: self, name: name, m: m}
+		return vm.newBoundMethod(self, name, m)
 	})
 
 	call := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -79,20 +88,81 @@ func (vm *VM) resolveMethod(recv object.Value, name string) *Method {
 	return undefAsNil(lookupMethod(c, name))
 }
 
-// methodArity reports a method's arity in Ruby's convention: the required count,
-// or -(required+1) when there are optional/splat params. Native methods report
-// -1 (variadic).
+// methodArity reports a method's arity in Ruby's convention. It mirrors MRI's
+// rb_iseq_arity: the count is the required positional parameters (leading plus
+// any after a *splat) plus one when the method has a required keyword. The result
+// is that count when the method takes a fixed number of arguments, or -(count+1)
+// when it is variadic — i.e. it has an optional positional or a splat, or it
+// accepts extra keywords (an optional keyword or a **rest) without demanding any
+// required keyword. A required keyword keeps the arity non-negative even
+// alongside optional keywords or a **rest. Native methods report -1 (variadic).
 func methodArity(m *Method) int {
-	switch {
-	case m.iseq != nil:
-		iseq := m.iseq
-		if iseq.SplatIndex < 0 && iseq.NumRequired == len(iseq.Params) {
-			return iseq.NumRequired
+	is := methodISeq(m)
+	if is == nil {
+		if m.proc != nil {
+			return m.proc.arityVal()
 		}
-		return -(iseq.NumRequired + 1)
-	case m.proc != nil:
-		return m.proc.arityVal()
-	default:
 		return -1
 	}
+	reqKw, optKw := keywordCounts(is)
+	req := iseqRequiredPositional(is)
+	if reqKw > 0 {
+		req++
+	}
+	extraKeywords := (optKw > 0 || is.KwRestSlot >= 0) && reqKw == 0
+	if iseqHasOptional(is) || is.SplatIndex >= 0 || extraKeywords {
+		return -(req + 1)
+	}
+	return req
+}
+
+// methodISeq returns the ISeq that backs m's parameter shape: its own for a
+// def/alias, or its block body's for a define_method-created method. nil for a
+// native (or a define_method whose Proc carries no ISeq).
+func methodISeq(m *Method) *bytecode.ISeq {
+	switch {
+	case m.iseq != nil:
+		return m.iseq
+	case m.proc != nil:
+		return m.proc.iseq
+	default:
+		return nil
+	}
+}
+
+// iseqRequiredPositional counts an ISeq's required positional parameters: the
+// NumRequired leading ones plus any required parameters after a *splat (the
+// "post" params, which occupy the Params slots following SplatIndex).
+func iseqRequiredPositional(is *bytecode.ISeq) int {
+	req := is.NumRequired
+	if is.SplatIndex >= 0 {
+		req += len(is.Params) - is.SplatIndex - 1
+	}
+	return req
+}
+
+// iseqHasOptional reports whether an ISeq has at least one optional positional
+// parameter: with a splat, the slots between NumRequired and SplatIndex; without
+// one, everything after NumRequired (post-without-splat is treated as optional,
+// which the ISeq encoding does not distinguish).
+func iseqHasOptional(is *bytecode.ISeq) bool {
+	if is.SplatIndex >= 0 {
+		return is.SplatIndex > is.NumRequired
+	}
+	return len(is.Params) > is.NumRequired
+}
+
+// keywordCounts reports how many of an ISeq's keyword parameters are required
+// and how many are optional. A **nil "no keywords" marker (recorded as the
+// sentinel keyword-rest name "nil") is not a keyword parameter, so it counts as
+// neither.
+func keywordCounts(is *bytecode.ISeq) (required, optional int) {
+	for _, req := range is.KwRequired {
+		if req {
+			required++
+		} else {
+			optional++
+		}
+	}
+	return required, optional
 }
