@@ -11,7 +11,7 @@ import (
 // registerKramdown installs the Kramdown module (require "kramdown"):
 // Kramdown::Document.new(src, options).to_html and the one-shot
 // Kramdown.to_html(src, options). The parser and HTML renderer live in the
-// github.com/go-ruby-kramdown/kramdown library — the pure-Go kramdown core that
+// github.com/go-kramdown/kramdown library — the pure-Go kramdown core that
 // backs the `kramdown` gem — and this module is the thin wiring that maps a Ruby
 // Markdown String (and an options Hash) to a single kramdown.ToHTML call (see
 // kramdown_bind.go). The Kramdown::Document class is the gem's public entry

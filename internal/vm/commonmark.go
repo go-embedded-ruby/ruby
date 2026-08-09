@@ -11,7 +11,7 @@ import (
 // registerCommonmark installs the Commonmark module (require "commonmark"):
 // Commonmark.render_html(md, opts) and the commonmarker-style String#to_html /
 // Commonmark.to_html. The parser and HTML renderer live in the
-// github.com/go-ruby-commonmark/commonmark library — the pure-Go CommonMark core
+// github.com/go-commonmark/commonmark library — the pure-Go CommonMark core
 // that backs the `commonmarker` gem — and this module is the thin wiring that maps
 // a Ruby Markdown String (and an options Hash / Array of extension symbols) to a
 // single commonmark.ToHTML call (see commonmark_bind.go). Both Commonmark and

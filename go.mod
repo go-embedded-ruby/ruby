@@ -7,12 +7,18 @@ require (
 	github.com/beevik/etree v1.6.0
 	github.com/dolthub/go-mysql-server v0.20.0
 	github.com/glauth/ldap v0.0.0-20260718202943-34c5f9b3cbf1
+	github.com/go-commonmark/commonmark v0.1.0
 	github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/time v0.0.0-20260727203506-b0e9511265ce
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
 	github.com/go-images/images v0.0.0-20260702213524-ea366b42f216
+	github.com/go-kramdown/kramdown v0.1.0
+	github.com/go-liquid/liquid v0.1.0
+	github.com/go-mustache/mustache v0.1.0
 	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
+	github.com/go-nokogiri/nokogiri v0.1.0
+	github.com/go-rouge/rouge v0.1.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260707193337-00a96ee353d7
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
@@ -45,7 +51,6 @@ require (
 	github.com/go-ruby-cgi/cgi v0.0.0-20260629151926-ac1c4d37a56c
 	github.com/go-ruby-chronic/chronic v0.0.0-20260702143618-a66a197ca555
 	github.com/go-ruby-cmath/cmath v0.0.0-20260629152837-67a84137d824
-	github.com/go-ruby-commonmark/commonmark v0.0.0-20260701104528-2d4001975689
 	github.com/go-ruby-concurrent-ruby/concurrent-ruby v0.0.0-20260706115615-cdd5a0c72f9e
 	github.com/go-ruby-confd/confd v0.0.0-20260710134358-1e2c7e6882ca
 	github.com/go-ruby-connection-pool/connection-pool v0.0.0-20260706115620-287a916e348b
@@ -87,14 +92,12 @@ require (
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260703162306-c9957c9959e1
 	github.com/go-ruby-irb/irb v0.0.0-20260630203552-657e348289b2
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260702144712-895482f62ac3
-	github.com/go-ruby-jekyll/jekyll v0.0.0-20260727160455-b77b24a0e6e3
+	github.com/go-ruby-jekyll/jekyll v0.0.0-20260809094251-f16598210693
 	github.com/go-ruby-json/json v0.0.0-20260703161943-3c4f2e0302d2
 	github.com/go-ruby-jwt/jwt v0.0.0-20260705184902-40cd404d3c65
 	github.com/go-ruby-kafka/kafka v0.0.0-20260704121222-eb98884730d5
 	github.com/go-ruby-kaminari/kaminari v0.0.0-20260707193800-fc9fecf9afe6
-	github.com/go-ruby-kramdown/kramdown v0.0.0-20260717070109-6152f7f5a931
 	github.com/go-ruby-ldap/ldap v0.0.0-20260808195309-d90a141d64f9
-	github.com/go-ruby-liquid/liquid v0.0.0-20260727135843-2b7bb06a45c2
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
 	github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
@@ -105,7 +108,6 @@ require (
 	github.com/go-ruby-mongodb/mongodb v0.0.0-20260704115215-792ff280c51b
 	github.com/go-ruby-msgpack/msgpack v0.0.0-20260630150113-002078d2af90
 	github.com/go-ruby-multi-json/multi-json v0.0.0-20260710080957-4d9df1e7bc10
-	github.com/go-ruby-mustache/mustache v0.0.0-20260701123847-26d5e451677a
 	github.com/go-ruby-mysql/mysql v0.0.0-20260704103258-b9ed4a15ba9d
 	github.com/go-ruby-nats/nats v0.0.0-20260704105415-42cce800b0e7
 	github.com/go-ruby-net-ftp/net-ftp v0.0.0-20260630142044-917edc09066e
@@ -114,7 +116,6 @@ require (
 	github.com/go-ruby-net-pop/net-pop v0.0.0-20260630142109-66d7036032f5
 	github.com/go-ruby-net-sftp/net-sftp v0.0.0-20260630142744-9be6f27056d7
 	github.com/go-ruby-net-smtp/net-smtp v0.0.0-20260630142921-0151ad2e87f5
-	github.com/go-ruby-nokogiri/nokogiri v0.0.0-20260702164556-6e939959240e
 	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260702151234-88fab8d845a1
 	github.com/go-ruby-observer/observer v0.0.0-20260630080708-c3a02da51f79
 	github.com/go-ruby-oidc/oidc v0.0.0-20260705185218-08dab6b22572
@@ -156,19 +157,17 @@ require (
 	github.com/go-ruby-rexml/rexml v0.0.0-20260629154021-5fb0f287ee8b
 	github.com/go-ruby-roda/roda v0.0.0-20260706120235-cf7106a48eaa
 	github.com/go-ruby-rolify/rolify v0.0.0-20260707193227-5d9011931b4b
-	github.com/go-ruby-rouge/rouge v0.0.0-20260717073527-64efd2552805
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260701142854-896858beadc8
 	github.com/go-ruby-rspec/rspec v0.0.0-20260702145830-12badaeb0d75
 	github.com/go-ruby-rss/rss v0.0.0-20260630123856-ba95b4fb73c9
 	github.com/go-ruby-rubocop/rubocop v0.0.0-20260702170528-0a89da6e9147
 	github.com/go-ruby-rubygems/rubygems v0.0.0-20260630142147-63db192adc4d
 	github.com/go-ruby-saml/saml v0.0.0-20260704115648-11caa3fa0e1f
-	github.com/go-ruby-sass/sass v0.0.0-20260727152834-0a0e6d3c2540
+	github.com/go-ruby-sass/sass v0.0.0-20260803122427-20e227828c1d
 	github.com/go-ruby-scanf/scanf v0.0.0-20260629150220-414dbb31c386
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260630081933-3f81ff7d7fb0
 	github.com/go-ruby-semantic-puppet/semantic-puppet v0.0.0-20260709173436-e205318864ed
 	github.com/go-ruby-sequel/sequel v0.0.0-20260702151352-66413b601977
-	github.com/go-ruby-set/set v0.0.0-20260703174407-246794df3ec2
 	github.com/go-ruby-shellwords/shellwords v0.0.0-20260629114104-e941e4210818
 	github.com/go-ruby-shrine/shrine v0.0.0-20260707193645-b6db612b0012
 	github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260706120339-331f956ff069
@@ -194,11 +193,11 @@ require (
 	github.com/go-ruby-widgets/mvvm v0.1.0
 	github.com/go-ruby-widgets/tui v0.1.0
 	github.com/go-ruby-widgets/widgets v0.9.0
-	github.com/go-ruby-xslt/xslt v0.0.0-20260702171958-146eaf3f0176
 	github.com/go-ruby-yaml/yaml v0.0.0-20260706120500-56d458798003
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
 	github.com/go-webauthn/webauthn v0.17.4
+	github.com/go-xslt/xslt v0.1.0
 	github.com/nats-io/nats-server/v2 v2.14.3
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/russellhaering/goxmldsig v1.6.0
@@ -296,7 +295,7 @@ require (
 	github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e // indirect
 	github.com/go-regexp/engine v0.1.0 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
-	github.com/go-scss/scss v0.0.0-20260727152331-b7fc31f3fb34 // indirect
+	github.com/go-scss/scss v0.0.0-20260803114742-42d746e6ec68 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
 	github.com/go-simd/base64 v0.0.0-20260703160615-1d0b2dddc996 // indirect
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect

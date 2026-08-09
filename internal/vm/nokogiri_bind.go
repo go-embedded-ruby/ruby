@@ -5,14 +5,14 @@
 package vm
 
 import (
-	nokogiri "github.com/go-ruby-nokogiri/nokogiri"
+	nokogiri "github.com/go-nokogiri/nokogiri"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // This file is the thin binding between rbgo's Ruby object graph (object.Value)
 // and the interpreter-independent DOM / query model of
-// github.com/go-ruby-nokogiri/nokogiri (pure-Go, no cgo, no libxml2). The HTML
+// github.com/go-nokogiri/nokogiri (pure-Go, no cgo, no libxml2). The HTML
 // and XML parsers, the CSS-to-XPath translator and the XPath engine live in that
 // library; rbgo only maps a Ruby markup String onto Nokogiri.HTML / Nokogiri.XML
 // and wraps the resulting Document / Node / NodeSet in the shells the Nokogiri

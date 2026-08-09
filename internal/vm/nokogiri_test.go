@@ -75,7 +75,7 @@ p root.at_xpath("//a").parent.name`, "2\n\"root\"\n"},
 		// #to_html round-trips a fragment.
 		{`require "nokogiri"
 doc = Nokogiri::XML("<a><b>x</b></a>")
-p doc.at_xpath("//a").to_xml`, "\"<a><b>x</b></a>\"\n"},
+p doc.at_xpath("//a").to_xml`, "\"<a>\\n  <b>x</b>\\n</a>\"\n"}, // to_xml pretty-prints element children (libxml2 2-space indent), as real Nokogiri does
 		// Node-level #css (rooted at the node) and #[]= mutation.
 		{`require "nokogiri"
 doc = Nokogiri::HTML("<div><span>one</span><span>two</span></div>")

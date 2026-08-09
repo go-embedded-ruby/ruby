@@ -5,13 +5,13 @@
 package vm
 
 import (
-	commonmark "github.com/go-ruby-commonmark/commonmark"
+	commonmark "github.com/go-commonmark/commonmark"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // This file is the thin binding between rbgo's Ruby object graph and the
-// interpreter-independent github.com/go-ruby-commonmark/commonmark renderer. The
+// interpreter-independent github.com/go-commonmark/commonmark renderer. The
 // parser and HTML renderer live in that library; rbgo only maps the Markdown
 // source String and an options value to a single commonmark.ToHTML call, so the
 // commonmarker-faithful HTML the Commonmark module relies on is preserved by

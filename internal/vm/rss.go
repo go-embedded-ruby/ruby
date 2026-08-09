@@ -130,42 +130,94 @@ func (vm *VM) registerRSSRss(cRss, cChannel, cItem, cImage, cGuid *RClass) {
 	ch := func(self object.Value) *rss.Channel { return self.(*RSSChannel).c }
 	d(cChannel, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).Title) })
 	d(cChannel, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).Link) })
-	d(cChannel, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).Description) })
-	d(cChannel, "language", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).Language) })
-	d(cChannel, "copyright", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).Copyright) })
-	d(cChannel, "managingEditor", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).ManagingEditor) })
-	d(cChannel, "webMaster", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).WebMaster) })
-	d(cChannel, "generator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).Generator) })
+	d(cChannel, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(ch(self).Description)
+	})
+	d(cChannel, "language", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(ch(self).Language)
+	})
+	d(cChannel, "copyright", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(ch(self).Copyright)
+	})
+	d(cChannel, "managingEditor", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(ch(self).ManagingEditor)
+	})
+	d(cChannel, "webMaster", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(ch(self).WebMaster)
+	})
+	d(cChannel, "generator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(ch(self).Generator)
+	})
 	d(cChannel, "docs", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).Docs) })
 	d(cChannel, "ttl", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(ch(self).TTL) })
-	d(cChannel, "pubDate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(ch(self).PubDate) })
-	d(cChannel, "lastBuildDate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(ch(self).LastBuildDate) })
-	d(cChannel, "date", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(ch(self).DCDate) })
-	d(cChannel, "image", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssImage(ch(self).Image) })
-	d(cChannel, "categories", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStrArray(ch(self).Categories) })
-	d(cChannel, "items", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssItems(ch(self).Items) })
+	d(cChannel, "pubDate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssTime(ch(self).PubDate)
+	})
+	d(cChannel, "lastBuildDate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssTime(ch(self).LastBuildDate)
+	})
+	d(cChannel, "date", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssTime(ch(self).DCDate)
+	})
+	d(cChannel, "image", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssImage(ch(self).Image)
+	})
+	d(cChannel, "categories", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStrArray(ch(self).Categories)
+	})
+	d(cChannel, "items", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssItems(ch(self).Items)
+	})
 
 	it := func(self object.Value) *rss.Item { return self.(*RSSItem).i }
 	d(cItem, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(it(self).Title) })
 	d(cItem, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(it(self).Link) })
-	d(cItem, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(it(self).Description) })
+	d(cItem, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(it(self).Description)
+	})
 	d(cItem, "author", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(it(self).Author) })
-	d(cItem, "comments", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(it(self).Comments) })
-	d(cItem, "pubDate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(it(self).PubDate) })
-	d(cItem, "date", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(it(self).DCDate) })
-	d(cItem, "dc_creator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(it(self).DCCreator) })
-	d(cItem, "dc_subject", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(it(self).DCSubject) })
-	d(cItem, "content_encoded", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(it(self).ContentEncoded) })
-	d(cItem, "categories", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStrArray(it(self).Categories) })
+	d(cItem, "comments", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(it(self).Comments)
+	})
+	d(cItem, "pubDate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssTime(it(self).PubDate)
+	})
+	d(cItem, "date", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssTime(it(self).DCDate)
+	})
+	d(cItem, "dc_creator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(it(self).DCCreator)
+	})
+	d(cItem, "dc_subject", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(it(self).DCSubject)
+	})
+	d(cItem, "content_encoded", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(it(self).ContentEncoded)
+	})
+	d(cItem, "categories", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStrArray(it(self).Categories)
+	})
 	d(cItem, "guid", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssGuid(it(self).Guid) })
 
-	d(cImage, "url", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSImage).im.URL) })
-	d(cImage, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSImage).im.Title) })
-	d(cImage, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSImage).im.Link) })
-	d(cImage, "width", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSImage).im.Width) })
-	d(cImage, "height", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSImage).im.Height) })
+	d(cImage, "url", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSImage).im.URL)
+	})
+	d(cImage, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSImage).im.Title)
+	})
+	d(cImage, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSImage).im.Link)
+	})
+	d(cImage, "width", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSImage).im.Width)
+	})
+	d(cImage, "height", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSImage).im.Height)
+	})
 
-	d(cGuid, "content", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSGuid).g.Content) })
+	d(cGuid, "content", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSGuid).g.Content)
+	})
 	d(cGuid, "isPermaLink", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*RSSGuid).g.IsPermaLink)
 	})
@@ -207,30 +259,60 @@ func (vm *VM) registerRSSRDF(cRDF, cChannel, cItem, cImage, cText *RClass) {
 	d(cChannel, "about", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(c(self).About) })
 	d(cChannel, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(c(self).Title) })
 	d(cChannel, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(c(self).Link) })
-	d(cChannel, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(c(self).Description) })
+	d(cChannel, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(c(self).Description)
+	})
 	d(cChannel, "date", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(c(self).DCDate) })
-	d(cChannel, "dc_creator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(c(self).DCCreator) })
+	d(cChannel, "dc_creator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(c(self).DCCreator)
+	})
 
 	i := func(self object.Value) *rss.RDFItem { return self.(*RSSRDFItem).i }
 	d(cItem, "about", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(i(self).About) })
 	d(cItem, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(i(self).Title) })
 	d(cItem, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(i(self).Link) })
-	d(cItem, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(i(self).Description) })
+	d(cItem, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(i(self).Description)
+	})
 	d(cItem, "date", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(i(self).DCDate) })
-	d(cItem, "dc_creator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(i(self).DCCreator) })
-	d(cItem, "dc_subject", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(i(self).DCSubject) })
-	d(cItem, "content_encoded", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(i(self).ContentEncoded) })
+	d(cItem, "dc_creator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(i(self).DCCreator)
+	})
+	d(cItem, "dc_subject", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(i(self).DCSubject)
+	})
+	d(cItem, "content_encoded", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(i(self).ContentEncoded)
+	})
 
-	d(cImage, "about", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFImage).im.About) })
-	d(cImage, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFImage).im.Title) })
-	d(cImage, "url", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFImage).im.URL) })
-	d(cImage, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFImage).im.Link) })
+	d(cImage, "about", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFImage).im.About)
+	})
+	d(cImage, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFImage).im.Title)
+	})
+	d(cImage, "url", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFImage).im.URL)
+	})
+	d(cImage, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFImage).im.Link)
+	})
 
-	d(cText, "about", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFTextinput).t.About) })
-	d(cText, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFTextinput).t.Title) })
-	d(cText, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFTextinput).t.Description) })
-	d(cText, "name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFTextinput).t.Name) })
-	d(cText, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSRDFTextinput).t.Link) })
+	d(cText, "about", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFTextinput).t.About)
+	})
+	d(cText, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFTextinput).t.Title)
+	})
+	d(cText, "description", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFTextinput).t.Description)
+	})
+	d(cText, "name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFTextinput).t.Name)
+	})
+	d(cText, "link", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSRDFTextinput).t.Link)
+	})
 }
 
 // registerRSSAtom installs the Atom (RSS::Atom::Feed) accessor surface.
@@ -238,20 +320,40 @@ func (vm *VM) registerRSSAtom(cFeed, cEntry, cLink, cPerson, cCategory *RClass) 
 	d := func(c *RClass, name string, fn NativeFn) { c.define(name, fn) }
 
 	f := func(self object.Value) *rss.AtomFeed { return self.(*RSSAtomFeed).f }
-	d(cFeed, "feed_type", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(f(self).FeedType()) })
-	d(cFeed, "to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(f(self).String()) })
+	d(cFeed, "feed_type", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(f(self).FeedType())
+	})
+	d(cFeed, "to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(f(self).String())
+	})
 	d(cFeed, "id", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(f(self).ID) })
 	d(cFeed, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(f(self).Title) })
-	d(cFeed, "subtitle", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(f(self).Subtitle) })
+	d(cFeed, "subtitle", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(f(self).Subtitle)
+	})
 	d(cFeed, "rights", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(f(self).Rights) })
-	d(cFeed, "generator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(f(self).Generator) })
-	d(cFeed, "updated", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(f(self).Updated) })
-	d(cFeed, "authors", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssAtomPersons(f(self).Authors) })
-	d(cFeed, "links", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssAtomLinks(f(self).Links) })
-	d(cFeed, "categories", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssAtomCategories(f(self).Categories) })
-	d(cFeed, "entries", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssAtomEntries(f(self).Entries) })
+	d(cFeed, "generator", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(f(self).Generator)
+	})
+	d(cFeed, "updated", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssTime(f(self).Updated)
+	})
+	d(cFeed, "authors", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssAtomPersons(f(self).Authors)
+	})
+	d(cFeed, "links", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssAtomLinks(f(self).Links)
+	})
+	d(cFeed, "categories", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssAtomCategories(f(self).Categories)
+	})
+	d(cFeed, "entries", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssAtomEntries(f(self).Entries)
+	})
 	// RSS::Atom::Feed#items aliases #entries, the common cross-dialect accessor.
-	d(cFeed, "items", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssAtomEntries(f(self).Entries) })
+	d(cFeed, "items", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssAtomEntries(f(self).Entries)
+	})
 
 	e := func(self object.Value) *rss.AtomEntry { return self.(*RSSAtomEntry).e }
 	d(cEntry, "id", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(e(self).ID) })
@@ -259,22 +361,52 @@ func (vm *VM) registerRSSAtom(cFeed, cEntry, cLink, cPerson, cCategory *RClass) 
 	d(cEntry, "summary", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(e(self).Summary) })
 	d(cEntry, "content", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(e(self).Content) })
 	d(cEntry, "rights", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(e(self).Rights) })
-	d(cEntry, "updated", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(e(self).Updated) })
-	d(cEntry, "published", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssTime(e(self).Published) })
-	d(cEntry, "authors", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssAtomPersons(e(self).Authors) })
-	d(cEntry, "links", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssAtomLinks(e(self).Links) })
-	d(cEntry, "categories", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssAtomCategories(e(self).Categories) })
+	d(cEntry, "updated", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssTime(e(self).Updated)
+	})
+	d(cEntry, "published", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssTime(e(self).Published)
+	})
+	d(cEntry, "authors", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssAtomPersons(e(self).Authors)
+	})
+	d(cEntry, "links", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssAtomLinks(e(self).Links)
+	})
+	d(cEntry, "categories", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssAtomCategories(e(self).Categories)
+	})
 
-	d(cLink, "href", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomLink).l.Href) })
-	d(cLink, "rel", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomLink).l.Rel) })
-	d(cLink, "type", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomLink).l.Type) })
-	d(cLink, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomLink).l.Title) })
+	d(cLink, "href", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomLink).l.Href)
+	})
+	d(cLink, "rel", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomLink).l.Rel)
+	})
+	d(cLink, "type", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomLink).l.Type)
+	})
+	d(cLink, "title", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomLink).l.Title)
+	})
 
-	d(cPerson, "name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomPerson).p.Name) })
-	d(cPerson, "uri", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomPerson).p.URI) })
-	d(cPerson, "email", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomPerson).p.Email) })
+	d(cPerson, "name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomPerson).p.Name)
+	})
+	d(cPerson, "uri", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomPerson).p.URI)
+	})
+	d(cPerson, "email", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomPerson).p.Email)
+	})
 
-	d(cCategory, "term", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomCategory).c.Term) })
-	d(cCategory, "scheme", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomCategory).c.Scheme) })
-	d(cCategory, "label", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return rssStr(self.(*RSSAtomCategory).c.Label) })
+	d(cCategory, "term", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomCategory).c.Term)
+	})
+	d(cCategory, "scheme", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomCategory).c.Scheme)
+	})
+	d(cCategory, "label", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return rssStr(self.(*RSSAtomCategory).c.Label)
+	})
 }

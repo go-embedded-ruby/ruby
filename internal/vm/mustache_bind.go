@@ -5,20 +5,20 @@
 package vm
 
 import (
-	mustache "github.com/go-ruby-mustache/mustache"
+	mustache "github.com/go-mustache/mustache"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // This file is the thin binding between rbgo's Ruby object graph and the
-// interpreter-independent github.com/go-ruby-mustache/mustache engine. The
+// interpreter-independent github.com/go-mustache/mustache engine. The
 // template compiler and renderer live in that library; rbgo only maps a context
 // value into the library's `any` value model — nil, bool, integers, floats,
 // String, Symbol, ordered Hash (*mustache.Map), Array ([]any) and Proc/lambda
 // (mustache.Lambda) — so the spec-faithful rendering the Mustache module relies on
 // is preserved by construction.
 
-// toMustache maps a Ruby value into the go-ruby-mustache value model. A Hash
+// toMustache maps a Ruby value into the go-mustache value model. A Hash
 // becomes an insertion-ordered *mustache.Map (so `{{name}}` resolves against
 // either a String or Symbol key), an Array becomes []any, and a Proc becomes a
 // mustache.Lambda that calls back into the VM with the unrendered section body.

@@ -5,16 +5,16 @@
 package vm
 
 import (
-	nokogiri "github.com/go-ruby-nokogiri/nokogiri"
-	xslt "github.com/go-ruby-xslt/xslt"
+	nokogiri "github.com/go-nokogiri/nokogiri"
+	xslt "github.com/go-xslt/xslt"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // NokogiriXSLTStylesheet is the Ruby wrapper around a *xslt.Stylesheet — a
 // compiled XSLT 1.0 stylesheet (Nokogiri::XSLT::Stylesheet). The real transform
-// engine lives in the github.com/go-ruby-xslt/xslt library, a pure-Go XSLT 1.0
-// processor over the go-ruby-nokogiri XML DOM + XPath engine (so the whole path
+// engine lives in the github.com/go-xslt/xslt library, a pure-Go XSLT 1.0
+// processor over the go-nokogiri XML DOM + XPath engine (so the whole path
 // stays CGO-free). This shell wires Nokogiri::XSLT(str) to a compiled stylesheet
 // whose #transform(doc) returns a Nokogiri document and #apply_to(doc) returns
 // the serialised output String, mirroring the gem's libxslt surface.

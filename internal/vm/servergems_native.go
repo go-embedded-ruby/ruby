@@ -49,5 +49,5 @@ func (vm *VM) registerServerGems() {
 	vm.registerBundler()           // Bundler: Gemfile/Gemfile.lock codec + resolver (require "bundler"), backed by go-ruby-bundler; needs StandardError for Bundler::BundlerError
 	vm.registerMinitest()          // Minitest::Assertions + Test lifecycle (require "minitest"), backed by go-ruby-minitest; needs StandardError for Minitest::Assertion
 	vm.registerMinitestSpec()      // Minitest::Spec + spec DSL (describe/it/before/after/let), the must_*/wont_* expectations, and the autorun runner/reporter (require "minitest/autorun" / "minitest/spec"); layers on registerMinitest's Test + assertions
-	vm.registerJekyll()            // Jekyll.configuration / build + Jekyll::Site (require "jekyll"), backed by go-ruby-jekyll (static-site build/render over go-ruby-liquid); needs StandardError for Jekyll::Error
+	vm.registerJekyll()            // Jekyll.configuration / build + Jekyll::Site (require "jekyll"), backed by go-ruby-jekyll (static-site build/render over go-liquid); needs StandardError for Jekyll::Error
 }
