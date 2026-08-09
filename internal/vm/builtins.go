@@ -3973,8 +3973,10 @@ func (vm *VM) bootstrap() {
 	vm.cClass.define("new", nativeNew)
 	// allocate creates an uninitialized instance (no initialize call), as MRI's
 	// Class#allocate — used by frameworks that construct then initialize manually.
-	vm.cClass.define("allocate", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &RObject{class: self.(*RClass), ivars: map[string]object.Value{}}
+	vm.cClass.define("allocate", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		obj := &RObject{class: self.(*RClass), ivars: map[string]object.Value{}}
+		vm.registerLiveObject(obj)
+		return obj
 	})
 	// Class.new([superclass]) { body } builds an anonymous class (super defaults
 	// to Object); the block, if any, runs as the class body. Dispatched only for
@@ -3990,6 +3992,7 @@ func (vm *VM) bootstrap() {
 				super = s
 			}
 			c := newClass("", super)
+			vm.registerLiveClass(c)
 			if blk != nil {
 				vm.classEval(c, blk, nil)
 			}
@@ -4006,6 +4009,7 @@ func (vm *VM) bootstrap() {
 			m := newClass("", nil)
 			m.isModule = true
 			m.defaultVis, m.funcMode = visPublic, false
+			vm.registerLiveClass(m)
 			if blk != nil {
 				vm.classEval(m, blk, nil)
 			}
@@ -4087,6 +4091,7 @@ func (vm *VM) bootstrap() {
 func nativeNew(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 	class := self.(*RClass)
 	obj := &RObject{class: class, ivars: map[string]object.Value{}}
+	vm.registerLiveObject(obj)
 	vm.send(obj, "initialize", args, blk)
 	return obj
 }
@@ -4097,6 +4102,7 @@ func nativeNew(vm *VM, self object.Value, args []object.Value, blk *Proc) object
 // unwrap), so each value type's own constructor semantics are reused unchanged.
 func (vm *VM) newBuiltinSubclass(recv *RClass, zero object.Value, args []object.Value, blk *Proc) object.Value {
 	obj := &RObject{class: recv, ivars: map[string]object.Value{}, builtin: zero}
+	vm.registerLiveObject(obj)
 	vm.send(obj, "initialize", args, blk)
 	return obj
 }

@@ -88,13 +88,13 @@ p [A.public_method_defined?(:a), A.private_method_defined?(:b), A.protected_meth
 		{`m = /(\w+)(\d+)/.match("abc123"); p m[0, 9]`, "[\"abc123\", \"abc12\", \"3\"]\n"}, // length clamps to end
 		{`m = /(\w+)(\d+)/.match("abc123"); p m[1, -1]`, "nil\n"},                           // negative length -> nil
 
-		// ObjectSpace: finalizer API + reflective no-ops.
+		// ObjectSpace: finalizer API + reflective walkers.
 		{`p ObjectSpace.define_finalizer(Object.new) { |i| }`, "[0, #<Proc>]\n"},
 		{`pr = proc { }; p ObjectSpace.define_finalizer(Object.new, pr)[1].equal?(pr)`, "true\n"}, // explicit callable
 		{`o = Object.new; p ObjectSpace.undefine_finalizer(o).equal?(o)`, "true\n"},
-		{`p ObjectSpace.each_object`, "0\n"},
+		{`p ObjectSpace.each_object.class`, "Enumerator\n"},        // no block -> Enumerator
 		{`p ObjectSpace.garbage_collect`, "nil\n"},
-		{`p ObjectSpace.count_objects`, "{}\n"},
+		{`h = ObjectSpace.count_objects; p [h.class, h[:TOTAL] >= h[:FREE]]`, "[Hash, true]\n"},
 		{`require "fiber"; require "objspace"; p :ok`, ":ok\n"},
 
 		// Concurrent::ThreadLocalVar honours a default block lazily.
