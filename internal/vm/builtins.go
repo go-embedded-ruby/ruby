@@ -5417,13 +5417,14 @@ func (vm *VM) filterVisibility(self object.Value, candidates []object.Value, kee
 		} else {
 			m = undefAsNil(lookupMethod(vm.dispatchClass(self), name))
 		}
-		if m == nil {
-			if keep(visPublic) {
-				out = append(out, n)
-			}
-			continue
+		// A candidate whose Method cannot be resolved counts as public (defensive:
+		// the candidate sets only carry resolvable, non-undef names, so m is set in
+		// practice — the default just keeps the walk nil-safe).
+		vis := visPublic
+		if m != nil {
+			vis = vm.sendVisibilityOf(self, name, m)
 		}
-		if keep(vm.sendVisibilityOf(self, name, m)) {
+		if keep(vis) {
 			out = append(out, n)
 		}
 	}
