@@ -12,7 +12,7 @@ import (
 // Rouge.highlight(text, lexer, formatter) convenience, Rouge::Lexer.find(name)
 // and Rouge::Formatter.find(tag) for the class-based lookups, and the token
 // hierarchy accessor Rouge::Token[qualname]. The lexers, the regex-lexer engine
-// and the HTML formatters live in the github.com/go-ruby-rouge/rouge library — the
+// and the HTML formatters live in the github.com/go-rouge/rouge library — the
 // pure-Go port of the `rouge` gem — and this module is the thin wiring that maps a
 // Ruby source String and lexer/formatter names to a single rouge.Highlight call
 // (see rouge_bind.go). The Rouge::Error tree is registered so an unknown

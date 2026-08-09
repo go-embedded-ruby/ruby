@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	nokogiri "github.com/go-ruby-nokogiri/nokogiri"
+	nokogiri "github.com/go-nokogiri/nokogiri"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )

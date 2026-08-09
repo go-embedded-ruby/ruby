@@ -14,7 +14,7 @@ import (
 
 // This file is the `require "jekyll"` binding: it wires the
 // interpreter-independent github.com/go-ruby-jekyll/jekyll static-site generator
-// (config resolution, the document/render/permalink pipeline over go-ruby-liquid,
+// (config resolution, the document/render/permalink pipeline over go-liquid,
 // Markdown and Sass conversion) into rbgo's object graph. The library's programmatic
 // surface is LoadConfig(source, files) -> Config, NewSite(cfg) and site.Build(); this
 // binding maps it to the gem-faithful trio Jekyll.configuration(overrides) ->

@@ -10,7 +10,7 @@ import (
 	"math/big"
 	"testing"
 
-	liquid "github.com/go-ruby-liquid/liquid"
+	liquid "github.com/go-liquid/liquid"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )

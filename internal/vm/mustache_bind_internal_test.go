@@ -7,7 +7,7 @@ package vm
 import (
 	"testing"
 
-	mustache "github.com/go-ruby-mustache/mustache"
+	mustache "github.com/go-mustache/mustache"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )

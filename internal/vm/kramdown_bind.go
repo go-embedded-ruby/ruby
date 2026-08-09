@@ -5,13 +5,13 @@
 package vm
 
 import (
-	kramdown "github.com/go-ruby-kramdown/kramdown"
+	kramdown "github.com/go-kramdown/kramdown"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // This file is the thin binding between rbgo's Ruby object graph and the
-// interpreter-independent github.com/go-ruby-kramdown/kramdown renderer. The
+// interpreter-independent github.com/go-kramdown/kramdown renderer. The
 // parser and HTML renderer live in that library; rbgo only maps the Markdown
 // source String and an options Hash to a single kramdown.ToHTML call, so the
 // kramdown-faithful HTML the Kramdown module relies on is preserved by

@@ -446,12 +446,12 @@ puts require("prawn")
 // including the unrecognised default of each and the String (not Symbol) form.
 func TestPrawnStyleAndAlign(t *testing.T) {
 	styles := map[object.Value]prawn.Style{
-		object.Symbol("normal"):        prawn.StyleNormal,
-		object.Symbol("bold"):          prawn.StyleBold,
-		object.Symbol("italic"):        prawn.StyleItalic,
-		object.Symbol("bold_italic"):   prawn.StyleBoldItalic,
-		object.Symbol("weird"):         prawn.StyleNormal, // default arm
-		object.NewString("bold"):       prawn.StyleBold,   // String form of prawnSymOrStr
+		object.Symbol("normal"):      prawn.StyleNormal,
+		object.Symbol("bold"):        prawn.StyleBold,
+		object.Symbol("italic"):      prawn.StyleItalic,
+		object.Symbol("bold_italic"): prawn.StyleBoldItalic,
+		object.Symbol("weird"):       prawn.StyleNormal, // default arm
+		object.NewString("bold"):     prawn.StyleBold,   // String form of prawnSymOrStr
 	}
 	for v, want := range styles {
 		if got := prawnStyle(v); got != want {

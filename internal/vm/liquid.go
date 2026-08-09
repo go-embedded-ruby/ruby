@@ -11,7 +11,7 @@ import (
 // registerLiquid installs the Liquid module and its Liquid::Template class
 // (require "liquid"): Liquid::Template.parse(src, error_mode: …) followed by
 // tmpl.render(assigns) / tmpl.render!(assigns), the Shopify `liquid` gem's core
-// API. The parser and renderer live in the github.com/go-ruby-liquid/liquid
+// API. The parser and renderer live in the github.com/go-liquid/liquid
 // library — the pure-Go Liquid engine that backs the gem — and this module is the
 // thin wiring that maps a Ruby template String (and an assigns Hash) to a single
 // liquid.Parse / Template.Render call (see liquid_bind.go). The Liquid::Error

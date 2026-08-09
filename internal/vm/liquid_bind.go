@@ -5,13 +5,13 @@
 package vm
 
 import (
-	liquid "github.com/go-ruby-liquid/liquid"
+	liquid "github.com/go-liquid/liquid"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // This file is the thin binding between rbgo's Ruby object graph and the
-// interpreter-independent github.com/go-ruby-liquid/liquid engine. The parser and
+// interpreter-independent github.com/go-liquid/liquid engine. The parser and
 // renderer live in that library; rbgo only maps the template source String, an
 // error-mode keyword and an assigns Hash to liquid.Parse / Template.Render, so the
 // gem-faithful rendered output the Liquid module relies on is preserved by
@@ -159,7 +159,7 @@ func liquidKey(k object.Value) string {
 	return k.ToS()
 }
 
-// toLiquid maps a Ruby value into the go-ruby-liquid value tree (nil / bool / int64
+// toLiquid maps a Ruby value into the go-liquid value tree (nil / bool / int64
 // / float64 / string / []any / map[string]any). A Ruby object with no direct model
 // shape is handed the engine its #to_s text, so a Drop-less custom object still
 // renders as a string.

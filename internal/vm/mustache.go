@@ -5,7 +5,7 @@
 package vm
 
 import (
-	mustache "github.com/go-ruby-mustache/mustache"
+	mustache "github.com/go-mustache/mustache"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -14,7 +14,7 @@ import (
 // Mustache.render(template, context) — the one-shot form of the gem's
 // Mustache.render — and Mustache.new + #render / #render(template, context) for
 // the class-based view API. The template compiler and renderer live in the
-// github.com/go-ruby-mustache/mustache library; this module is the thin wiring
+// github.com/go-mustache/mustache library; this module is the thin wiring
 // that maps a Ruby template String and a context (a Hash / Array / scalar / proc)
 // to the library's value model around a single mustache.Render call (see
 // mustache_bind.go). The Mustache::Error tree is registered so a re-raised parse

@@ -5,7 +5,7 @@
 package vm
 
 import (
-	nokogiri "github.com/go-ruby-nokogiri/nokogiri"
+	nokogiri "github.com/go-nokogiri/nokogiri"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -13,7 +13,7 @@ import (
 // NokogiriDocument is the Ruby wrapper around a *nokogiri.Document — a parsed
 // HTML or XML tree (Nokogiri::HTML::Document / Nokogiri::XML::Document). The HTML
 // and XML parsers, the CSS-to-XPath translator and the XPath engine all live in
-// the github.com/go-ruby-nokogiri/nokogiri library (pure-Go, no cgo, no libxml2);
+// the github.com/go-nokogiri/nokogiri library (pure-Go, no cgo, no libxml2);
 // this shell is the thin wiring that maps a Ruby markup String to a Document and
 // exposes the node-navigation and query surface (see nokogiri_bind.go).
 type NokogiriDocument struct {

@@ -101,22 +101,22 @@ func (v *RSSRDFTextinput) ToS() string   { return "#<RSS::RDF::Textinput>" }
 func (v *RSSRDFTextinput) Inspect() string {
 	return "#<RSS::RDF::Textinput>"
 }
-func (v *RSSRDFTextinput) Truthy() bool     { return true }
-func (v *RSSAtomFeed) ToS() string          { return "#<RSS::Atom::Feed>" }
-func (v *RSSAtomFeed) Inspect() string      { return "#<RSS::Atom::Feed>" }
-func (v *RSSAtomFeed) Truthy() bool         { return true }
-func (v *RSSAtomEntry) ToS() string         { return "#<RSS::Atom::Feed::Entry>" }
-func (v *RSSAtomEntry) Inspect() string     { return "#<RSS::Atom::Feed::Entry>" }
-func (v *RSSAtomEntry) Truthy() bool        { return true }
-func (v *RSSAtomLink) ToS() string          { return "#<RSS::Atom::Link>" }
-func (v *RSSAtomLink) Inspect() string      { return "#<RSS::Atom::Link>" }
-func (v *RSSAtomLink) Truthy() bool         { return true }
-func (v *RSSAtomPerson) ToS() string        { return "#<RSS::Atom::Person>" }
-func (v *RSSAtomPerson) Inspect() string    { return "#<RSS::Atom::Person>" }
-func (v *RSSAtomPerson) Truthy() bool       { return true }
-func (v *RSSAtomCategory) ToS() string      { return "#<RSS::Atom::Category>" }
-func (v *RSSAtomCategory) Inspect() string  { return "#<RSS::Atom::Category>" }
-func (v *RSSAtomCategory) Truthy() bool     { return true }
+func (v *RSSRDFTextinput) Truthy() bool    { return true }
+func (v *RSSAtomFeed) ToS() string         { return "#<RSS::Atom::Feed>" }
+func (v *RSSAtomFeed) Inspect() string     { return "#<RSS::Atom::Feed>" }
+func (v *RSSAtomFeed) Truthy() bool        { return true }
+func (v *RSSAtomEntry) ToS() string        { return "#<RSS::Atom::Feed::Entry>" }
+func (v *RSSAtomEntry) Inspect() string    { return "#<RSS::Atom::Feed::Entry>" }
+func (v *RSSAtomEntry) Truthy() bool       { return true }
+func (v *RSSAtomLink) ToS() string         { return "#<RSS::Atom::Link>" }
+func (v *RSSAtomLink) Inspect() string     { return "#<RSS::Atom::Link>" }
+func (v *RSSAtomLink) Truthy() bool        { return true }
+func (v *RSSAtomPerson) ToS() string       { return "#<RSS::Atom::Person>" }
+func (v *RSSAtomPerson) Inspect() string   { return "#<RSS::Atom::Person>" }
+func (v *RSSAtomPerson) Truthy() bool      { return true }
+func (v *RSSAtomCategory) ToS() string     { return "#<RSS::Atom::Category>" }
+func (v *RSSAtomCategory) Inspect() string { return "#<RSS::Atom::Category>" }
+func (v *RSSAtomCategory) Truthy() bool    { return true }
 
 // rssStr wraps a library scalar as a Ruby String.
 func rssStr(s string) object.Value { return object.NewString(s) }

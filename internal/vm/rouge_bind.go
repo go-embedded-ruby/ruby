@@ -5,13 +5,13 @@
 package vm
 
 import (
-	rouge "github.com/go-ruby-rouge/rouge"
+	rouge "github.com/go-rouge/rouge"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // This file is the thin binding between rbgo's Ruby object graph and the
-// interpreter-independent github.com/go-ruby-rouge/rouge highlighter. The lexers,
+// interpreter-independent github.com/go-rouge/rouge highlighter. The lexers,
 // the regex-lexer engine and the HTML formatters live in that library; rbgo only
 // maps the source String and lexer/formatter names to rouge.Highlight /
 // rouge.FindLexer / rouge.FindFormatter, so the gem-faithful HTML the Rouge module
