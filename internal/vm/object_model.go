@@ -752,6 +752,10 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.cNDArray
 	case *Image:
 		return vm.cImage
+	case *WeakMapObj:
+		return x.cls
+	case *WeakKeyMapObj:
+		return x.cls
 	case *StringScanner:
 		return vm.cStringScanner
 	case *OptionParser:
