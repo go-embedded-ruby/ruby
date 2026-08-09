@@ -238,30 +238,30 @@ type VM struct {
 	// anyRefinements becomes true the first time Module#refine mints a Refinement.
 	// It gates the refinement-aware branch of method dispatch so that programs
 	// which never touch refinements pay nothing (the send fast path is unchanged).
-	anyRefinements bool
-	cInteger, cFloat, cString, cSymbol     *RClass
-	cComplex, cRational                    *RClass
-	cNDArray, cImage                       *RClass
-	cSet                                   *RClass
-	cPStore                                *RClass // the PStore class (require "pstore"), backed by go-ruby-pstore
-	cPStoreError                           *RClass // PStore::Error
-	cPrettyPrint                           *RClass // the PrettyPrint class (require "prettyprint")
-	cMatrix                                *RClass // the Matrix class (require "matrix")
-	cVector                                *RClass // the Vector class (require "matrix")
-	cExceptionForMatrix                    *RClass // the ExceptionForMatrix module (require "matrix")
-	cErrDimensionMismatch                  *RClass // ExceptionForMatrix::ErrDimensionMismatch
-	cErrNotRegular                         *RClass // ExceptionForMatrix::ErrNotRegular
-	cErrOperationNotDefined                *RClass // ExceptionForMatrix::ErrOperationNotDefined
-	cGetoptLong                            *RClass // the GetoptLong class (require "getoptlong"), backed by go-ruby-getoptlong
-	cIPAddr                                *RClass // the IPAddr class (require "ipaddr"), backed by go-ruby-ipaddr
-	cIPAddrError                           *RClass // IPAddr::Error
-	cIPAddrInvalidAddressError             *RClass // IPAddr::InvalidAddressError
-	cIPAddrInvalidPrefixError              *RClass // IPAddr::InvalidPrefixError
-	cIPAddrAddressFamilyError              *RClass // IPAddr::AddressFamilyError
-	cCMath                                 *RClass // the CMath module (require "cmath")
-	cDidYouMean                            *RClass // the DidYouMean module (require "did_you_mean")
-	cSpellChecker                          *RClass // DidYouMean::SpellChecker, backed by go-ruby-did-you-mean
-	cTime                                  *RClass
+	anyRefinements                     bool
+	cInteger, cFloat, cString, cSymbol *RClass
+	cComplex, cRational                *RClass
+	cNDArray, cImage                   *RClass
+	cSet                               *RClass
+	cPStore                            *RClass // the PStore class (require "pstore"), backed by go-ruby-pstore
+	cPStoreError                       *RClass // PStore::Error
+	cPrettyPrint                       *RClass // the PrettyPrint class (require "prettyprint")
+	cMatrix                            *RClass // the Matrix class (require "matrix")
+	cVector                            *RClass // the Vector class (require "matrix")
+	cExceptionForMatrix                *RClass // the ExceptionForMatrix module (require "matrix")
+	cErrDimensionMismatch              *RClass // ExceptionForMatrix::ErrDimensionMismatch
+	cErrNotRegular                     *RClass // ExceptionForMatrix::ErrNotRegular
+	cErrOperationNotDefined            *RClass // ExceptionForMatrix::ErrOperationNotDefined
+	cGetoptLong                        *RClass // the GetoptLong class (require "getoptlong"), backed by go-ruby-getoptlong
+	cIPAddr                            *RClass // the IPAddr class (require "ipaddr"), backed by go-ruby-ipaddr
+	cIPAddrError                       *RClass // IPAddr::Error
+	cIPAddrInvalidAddressError         *RClass // IPAddr::InvalidAddressError
+	cIPAddrInvalidPrefixError          *RClass // IPAddr::InvalidPrefixError
+	cIPAddrAddressFamilyError          *RClass // IPAddr::AddressFamilyError
+	cCMath                             *RClass // the CMath module (require "cmath")
+	cDidYouMean                        *RClass // the DidYouMean module (require "did_you_mean")
+	cSpellChecker                      *RClass // DidYouMean::SpellChecker, backed by go-ruby-did-you-mean
+	cTime                              *RClass
 	// clock is the per-VM controllable time source behind Time.now / Date.today /
 	// DateTime.now. It is always present; empty (unmocked) it reports the real
 	// wall clock through its Now seam (wired to nowUnix, the same determinism seam

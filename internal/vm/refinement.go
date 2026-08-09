@@ -143,10 +143,8 @@ func (vm *VM) refinementScope(self object.Value) *RClass {
 // native such as `using`) is a method body rather than a class/module/top-level
 // body or block — those push a non-empty frame name, methods a non-empty one.
 func (vm *VM) inMethodScope() bool {
-	if n := len(vm.frameNames); n > 0 {
-		return vm.frameNames[n-1] != ""
-	}
-	return false
+	n := len(vm.frameNames)
+	return n > 0 && vm.frameNames[n-1] != ""
 }
 
 // refinementParent gives the next enclosing scope to consult for active
