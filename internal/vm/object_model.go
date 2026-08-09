@@ -510,8 +510,10 @@ func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
 			return v
 		}
 	}
-	raise("NameError", "uninitialized constant %s::%s", cls.ToS(), name)
-	return object.NilV
+	// An unresolved Recv::Name routes through #const_missing on the receiver, whose
+	// default (Module#const_missing) raises NameError. A user override may return a
+	// value or raise a different error.
+	return vm.constMissing(cls, name)
 }
 
 // nesting returns the lexical nesting list for a cref (Module.nesting): the cref

@@ -96,6 +96,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSingleton()
 	vm.registerMethod()
 	vm.registerModuleExtras()
+	vm.registerModuleResiduals()
 	vm.registerRefinements()
 	vm.registerReflection()
 	vm.registerMethodReflect()
@@ -661,6 +662,12 @@ func (vm *VM) bootstrap() {
 		setIvar(self, backtraceIvar, normalizeBacktrace(v))
 		return getIvar(self, backtraceIvar)
 	})
+	// NameError#name: the name (Symbol) that could not be resolved, stamped into
+	// the exception's @name ivar at raise time (see raiseNameError, invoked by the
+	// default Module#const_missing). nil when no name was recorded.
+	vm.consts["NameError"].(*RClass).define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@name")
+	})
 	// full_message: the MRI-shaped multi-line report — the first frame, the message
 	// and class, then "\tfrom <frame>" for each remaining frame. With no captured
 	// backtrace it degrades to just the detailed message (message + class).
@@ -949,9 +956,9 @@ func (vm *VM) bootstrap() {
 		all := len(args) == 0 || args[0].Truthy() // instance_methods(false) = own only
 		return object.NewArrayFromSlice(vm.methodNames(self.(*RClass), all))
 	})
-	vm.cModule.define("const_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.scopedConst(self.(*RClass), constNameArg(args[0]))
-	})
+	// Module#const_get / #const_defined? live in module_residuals.go
+	// (registerModuleResiduals), which supports scoped paths, the inherit flag,
+	// #to_str coercion and the #const_missing hook.
 	// Class-variable reflection. Names arrive as a Symbol or String (e.g. :@@x);
 	// the @@-prefixed name is the key in the cvars table. Lookups walk the
 	// superclass chain via cvarOwner, mirroring how @@name resolves at runtime.
@@ -1033,32 +1040,6 @@ func (vm *VM) bootstrap() {
 		}
 		delete(table, name)
 		return val
-	})
-	vm.cModule.define("const_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := constNameArg(args[0])
-		// The optional second argument controls whether ancestors are consulted
-		// (default true). With inherit=false only the receiver's own table is
-		// checked — Puppet's classgen relies on this to decide a fresh redefinition.
-		inherit := len(args) < 2 || args[1].Truthy()
-		cls := self.(*RClass)
-		// A pending autoload counts as defined for const_defined?, which (unlike
-		// const_get) must NOT trigger the require — it just reports presence.
-		if !inherit {
-			_, ok := cls.consts[name]
-			_, al := cls.autoloads[name]
-			return object.Bool(ok || al)
-		}
-		for c := cls; c != nil; c = c.super {
-			if _, ok := c.consts[name]; ok {
-				return object.True
-			}
-			if _, ok := c.autoloads[name]; ok {
-				return object.True
-			}
-		}
-		_, defined := vm.consts[name]
-		_, pending := vm.cObject.autoloads[name]
-		return object.Bool(defined || pending)
 	})
 	// Module#constants returns the names (as symbols) of the constants defined
 	// directly in the module/class. With inherit (the default, true) the constants
