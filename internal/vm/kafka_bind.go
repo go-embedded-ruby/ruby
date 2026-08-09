@@ -13,7 +13,6 @@ import (
 
 	kafka "github.com/go-ruby-kafka/kafka"
 
-
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 

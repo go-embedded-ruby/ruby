@@ -9,7 +9,6 @@ import (
 
 	rss "github.com/go-ruby-rss/rss"
 
-
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 

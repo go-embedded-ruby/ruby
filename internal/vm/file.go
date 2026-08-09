@@ -592,5 +592,5 @@ func timeArgUnix(v object.Value) int64 {
 	if t, ok := v.(*Time); ok {
 		return t.t.Unix()
 	}
-	return timeSeconds(v)
+	return int64(numFloat(v))
 }

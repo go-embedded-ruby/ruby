@@ -75,19 +75,6 @@ func timeArg(v object.Value) *Time {
 	return t
 }
 
-// timeSeconds marshals a Ruby Integer or Float to a whole number of seconds,
-// raising TypeError for anything else.
-func timeSeconds(v object.Value) int64 {
-	switch n := v.(type) {
-	case object.Integer:
-		return int64(n)
-	case object.Float:
-		return int64(n)
-	}
-	raise("TypeError", "no implicit conversion of %s into seconds", v.Inspect())
-	return 0
-}
-
 // payloadTime unwraps a go-composites Result whose payload is a parsed instant,
 // re-homing it onto a Go time.Time (via RFC3339 so the numeric offset survives),
 // and raising ArgumentError when the parse failed.
@@ -96,10 +83,8 @@ func payloadTime(r goresult.Interface) *Time {
 		raise("ArgumentError", "%s", r.Error().Message())
 	}
 	gi := r.Payload().(gotime.Interface)
-	st, err := stdtime.Parse(stdtime.RFC3339, gi.Format(stdtime.RFC3339))
-	if err != nil {
-		raise("ArgumentError", "%s", err.Error())
-	}
+	// gi.Format(RFC3339) always renders valid RFC3339, so the re-parse never errors.
+	st, _ := stdtime.Parse(stdtime.RFC3339, gi.Format(stdtime.RFC3339))
 	return &Time{t: st}
 }
 
@@ -161,7 +146,7 @@ func (vm *VM) registerTime() {
 		return object.Float(float64(self(v).t.UnixNano()) / 1e9)
 	})
 	d("to_r", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return ratValue(big.NewRat(self(v).t.UnixNano(), 1e9))
+		return &object.Rational{R: big.NewRat(self(v).t.UnixNano(), 1e9)}
 	})
 
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -215,7 +200,7 @@ func (vm *VM) registerTime() {
 		if ns == 0 {
 			return object.IntValue(0)
 		}
-		return ratValue(big.NewRat(int64(ns), 1e9))
+		return &object.Rational{R: big.NewRat(int64(ns), 1e9)}
 	})
 	d("yday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.YearDay()))
@@ -351,16 +336,6 @@ func (vm *VM) registerTime() {
 	d("hash", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(self(v).t.UnixNano())
 	})
-}
-
-// ratValue wraps a big.Rat as either a Ruby Integer (when it is whole) or a
-// Rational — matching MRI, whose Rational#... results collapse to Integer when
-// the denominator is 1.
-func ratValue(r *big.Rat) object.Value {
-	if r.IsInt() {
-		return object.IntValue(r.Num().Int64())
-	}
-	return &object.Rational{R: r}
 }
 
 // timeZoneKw pops a trailing keyword hash carrying in: <zone> off args, returning
@@ -561,9 +536,11 @@ func buildTime(pos []object.Value, usec float64, loc *stdtime.Location) *Time {
 	sec := int(secF)
 	ns := int64((secF-float64(sec))*1e9) + int64(usec*1000)
 
+	// MRI range-checks each field, then normalises overflow (Feb 30 → Mar 2,
+	// hour 24 → next day, sec 60 → next minute) exactly as Go's time.Date does.
 	checkRange("mon", month, 1, 12)
-	checkRange("mday", day, 1, daysIn(month, year))
-	checkRange("hour", hour, 0, 23)
+	checkRange("mday", day, 1, 31)
+	checkRange("hour", hour, 0, 24)
 	checkRange("min", min, 0, 59)
 	checkRange("sec", sec, 0, 60)
 	return &Time{t: stdtime.Date(year, stdtime.Month(month), day, hour, min, sec, int(ns), loc)}
@@ -583,22 +560,6 @@ func checkRange(field string, v, lo, hi int) {
 	if v < lo || v > hi {
 		raise("ArgumentError", "%s out of range", field)
 	}
-}
-
-// daysIn returns the number of days in the given 1-based month of year.
-func daysIn(month, year int) int {
-	switch month {
-	case 1, 3, 5, 7, 8, 10, 12:
-		return 31
-	case 4, 6, 9, 11:
-		return 30
-	case 2:
-		if year%4 == 0 && (year%100 != 0 || year%400 == 0) {
-			return 29
-		}
-		return 28
-	}
-	return 31 // an out-of-range month; checkRange("mon", …) rejects it first.
 }
 
 // roundFn builds Time#round / #floor / #ceil. add is (*big.Int).Add for round /

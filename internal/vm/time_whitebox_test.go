@@ -3,7 +3,6 @@ package vm
 import (
 	"testing"
 
-
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 )
 
@@ -27,4 +26,16 @@ func TestTimeOpDefault(t *testing.T) {
 	wantRaise(t, "NoMethodError", func() {
 		timeOp(bytecode.OpMul, unixTime(0), unixTime(0))
 	})
+}
+
+// TestModNegative covers mod's Euclidean-positive branch for a negative
+// dividend — a defensive path the strftime callers (which only ever pass
+// non-negative operands) never reach through the interpreter.
+func TestModNegative(t *testing.T) {
+	if got := mod(-5, 3); got != 1 {
+		t.Errorf("mod(-5, 3) = %d, want 1", got)
+	}
+	if got := mod(-1, 12); got != 11 {
+		t.Errorf("mod(-1, 12) = %d, want 11", got)
+	}
 }
