@@ -6,7 +6,9 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
+	stdtime "time"
 
 	date "github.com/go-ruby-date/date"
 
@@ -119,21 +121,94 @@ func payloadDate(d *date.Date, err error) *Date {
 }
 
 // dateOp implements the Date operator fast path reached from binary(): d + n
-// shifts forward by n days, d - n shifts back, and d - other yields the whole
-// number of days between the two dates (an Integer; MRI's Date#- is a Rational we
-// render as the plain day count — the library's Diff resolution). A non-Date,
-// non-Integer right operand raises TypeError via dateDays.
+// shifts forward by n days, d - n shifts back, and d - other yields the number of
+// days between the two dates as MRI's Rational (a whole day count reduces to
+// n/1, and a sub-day span between two DateTimes to its exact fraction). A
+// non-Date, non-Integer right operand raises TypeError via dateDays.
 func dateOp(op bytecode.Op, a *Date, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
 		return &Date{d: a.d.Plus(dateDays(b))}
 	case bytecode.OpSub:
 		if other, ok := b.(*Date); ok {
-			return object.IntValue(int64(a.d.Diff(other.d)))
+			return dateDiffRational(a.d, other.d)
 		}
 		return &Date{d: a.d.Minus(dateDays(b))}
 	}
 	return raise("NoMethodError", "undefined method '%s' for a Date", op)
+}
+
+// dateNsPerDay is the number of nanoseconds in a day — the denominator of the
+// astronomical-day arithmetic shared by the diff, hash and instant helpers.
+const dateNsPerDay = 86_400 * int64(1e9)
+
+// dateDiffRational renders Date#- / DateTime#- as MRI's Rational number of days
+// between two values, measured on the absolute (UTC) time line so a DateTime's
+// wall clock and offset are honoured: the astronomical-day difference contributes
+// whole days and the difference of the within-day UTC nanoseconds the fraction.
+// big.Rat reduces the result (10 days -> 10/1, twelve hours -> 1/2).
+func dateDiffRational(a, b *date.Date) object.Value {
+	ajd, ans := dateUTCInstant(a)
+	bjd, bns := dateUTCInstant(b)
+	diff := int64(ajd-bjd)*dateNsPerDay + (ans - bns)
+	return &object.Rational{R: new(big.Rat).SetFrac64(diff, dateNsPerDay)}
+}
+
+// dateUTCInstant returns the value's absolute instant as an astronomical day
+// count and the nanoseconds within that UTC day, shifting the local time-of-day
+// (NsecOfDay) by the offset and carrying across midnight — the same reduction
+// dateInspect performs. Two values that name the same moment share this pair
+// regardless of their local civil day or stored offset, so it is the canonical
+// key for #hash, #eql? and the diff.
+func dateUTCInstant(d *date.Date) (int, int64) {
+	ns := d.NsecOfDay() - int64(d.Offset())*int64(1e9)
+	carry := floorDivDay(ns)
+	return d.Jd() + carry, ns - int64(carry)*dateNsPerDay
+}
+
+// floorDivDay is the floored quotient of ns by a whole day, so a negative
+// remainder (a UTC-shift that borrows across midnight) rounds toward minus
+// infinity as the calendar requires.
+func floorDivDay(ns int64) int {
+	q := ns / dateNsPerDay
+	if ns%dateNsPerDay != 0 && ns < 0 {
+		q--
+	}
+	return int(q)
+}
+
+// formatZone renders a UTC offset in seconds as MRI's "+HH:MM" / "-HH:MM" zone
+// string (DateTime#zone and the iso8601 suffix).
+func formatZone(secs int) string {
+	sign := "+"
+	if secs < 0 {
+		sign = "-"
+		secs = -secs
+	}
+	return fmt.Sprintf("%s%02d:%02d", sign, secs/3600, (secs%3600)/60)
+}
+
+// dtTimeArgs reads the optional hour / minute / second triple beginning at index
+// i of a DateTime class-method's arguments, each defaulting to 0.
+func dtTimeArgs(args []object.Value, i int) (h, mi, s int) {
+	if len(args) > i {
+		h = int(intArg(args[i]))
+	}
+	if len(args) > i+1 {
+		mi = int(intArg(args[i+1]))
+	}
+	if len(args) > i+2 {
+		s = int(intArg(args[i+2]))
+	}
+	return
+}
+
+// dtOffsetArg reads the optional offset argument at index i, defaulting to UTC.
+func dtOffsetArg(args []object.Value, i int) int {
+	if len(args) > i {
+		return offsetSeconds(args[i])
+	}
+	return 0
 }
 
 // dateCmp returns -1/0/1 ordering two Dates through the library's Cmp.
@@ -383,6 +458,65 @@ func (vm *VM) registerDateConstructors() {
 	sm(vm.cDateTime, "strptime", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return payloadDate(date.Strptime(strArg(args[0]), strptimeFormat(args)))
 	})
+
+	// DateTime.jd(jd[, h, min, s, offset]) / .ordinal(y, yday, ...) /
+	// .commercial(cwy, cw, cwd, ...) — the astronomical, ordinal and week-date
+	// constructors carrying a wall clock. The calendar day is resolved by the plain
+	// Date constructor, then re-expressed as a DateTime at the given time of day.
+	sm(vm.cDateTime, "jd", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return dateTimeFromDate(date.DateJD(int(intArgOr(args, 0))), args, 1)
+	})
+	sm(vm.cDateTime, "ordinal", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		y := -4712
+		if len(args) > 0 {
+			y = int(intArg(args[0]))
+		}
+		return dateTimeFromDate(payloadDate(date.Ordinal(y, int(intArgOr(args[1:], 1)))).d, args, 2)
+	})
+	sm(vm.cDateTime, "commercial", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		cwy, cw, cwd := -4712, 1, 1
+		if len(args) > 0 {
+			cwy = int(intArg(args[0]))
+		}
+		if len(args) > 1 {
+			cw = int(intArg(args[1]))
+		}
+		if len(args) > 2 {
+			cwd = int(intArg(args[2]))
+		}
+		return dateTimeFromDate(payloadDate(date.Commercial(cwy, cw, cwd)).d, args, 3)
+	})
+
+	// Date.valid_civil?(y, m, d) and its alias valid_date? — true when the calendar
+	// date exists (no Feb 30, no reform-gap day); valid_jd? — true for any Integer
+	// Julian Day Number; valid_ordinal?(y, yday) and valid_commercial?(cwy, cw, cwd)
+	// — the ordinal and week-date validity, each probing the matching constructor.
+	validCivil := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		_, err := date.NewDate(int(intArg(args[0])), int(intArg(args[1])), int(intArg(args[2])))
+		return object.Bool(err == nil)
+	}
+	sm(vm.cDate, "valid_civil?", validCivil)
+	sm(vm.cDate, "valid_date?", validCivil)
+	sm(vm.cDate, "valid_jd?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		_, ok := args[0].(object.Integer)
+		return object.Bool(ok)
+	})
+	sm(vm.cDate, "valid_ordinal?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		_, err := date.Ordinal(int(intArg(args[0])), int(intArg(args[1])))
+		return object.Bool(err == nil)
+	})
+	sm(vm.cDate, "valid_commercial?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		_, err := date.Commercial(int(intArg(args[0])), int(intArg(args[1])), int(intArg(args[2])))
+		return object.Bool(err == nil)
+	})
+}
+
+// dateTimeFromDate re-expresses an already-resolved calendar date as a DateTime
+// at the hour / minute / second / offset carried in args from index i — the
+// shared tail of DateTime.jd / .ordinal / .commercial.
+func dateTimeFromDate(base *date.Date, args []object.Value, i int) object.Value {
+	h, mi, s := dtTimeArgs(args, i)
+	return payloadDate(date.NewDateTime(base.Year(), base.Month(), base.Day(), h, mi, s, dtOffsetArg(args, i+3)))
 }
 
 // toDate downgrades a value the library may have produced as a DateTime (Parse /
@@ -460,17 +594,64 @@ func (vm *VM) registerDateAccessors() {
 	d("min", intM((*date.Date).Min))
 	d("sec", intM((*date.Date).Sec))
 
+	// ld — the Lilian Day number (days since the 1582 Gregorian reform, jd 2299160).
+	d("ld", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).Jd() - 2299160))
+	})
+
 	d("leap?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).Leap())
 	})
-	// offset — MRI's DateTime#offset, the Rational fraction of a day east of UTC.
+	// julian? / gregorian? — which calendar the day falls under relative to the
+	// reform sentinel (always Date::ITALY here, as every construction defaults to
+	// it), so every representable date is Gregorian.
+	d("julian?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).Jd() < date.ITALY)
+	})
+	d("gregorian?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).Jd() >= date.ITALY)
+	})
+	// start — MRI's reform sentinel as a Float (Date::ITALY, 2299161.0).
+	d("start", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Float(float64(date.ITALY))
+	})
+
+	// offset — MRI's DateTime#offset, the Rational fraction of a day east of UTC;
+	// zone renders that same offset as a "+HH:MM" string; sec_fraction is the
+	// sub-second part as a Rational fraction of a second.
 	d("offset", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return offsetRational(self(v).Offset())
 	})
+	d("zone", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(formatZone(self(v).Offset()))
+	})
+	d("sec_fraction", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Rational{R: new(big.Rat).SetFrac64(self(v).SecFractionNanos(), int64(1e9))}
+	})
+
 	// to_date — the plain calendar date (strips the time-of-day); to_datetime
-	// promotes to a DateTime at midnight UTC.
+	// promotes a plain Date to a DateTime at midnight UTC and returns a DateTime
+	// unchanged (as MRI does — DateTime#to_datetime is the identity).
 	d("to_date", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Date{d: self(v).ToDate()}
+	})
+	d("to_datetime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		dd := self(v)
+		if dd.IsDateTime() {
+			return v
+		}
+		return payloadDate(date.NewDateTime(dd.Year(), dd.Month(), dd.Day(), 0, 0, 0, 0))
+	})
+	// to_time — a Time at the same instant: a DateTime keeps its own offset as a
+	// fixed zone, a plain Date becomes local midnight (as MRI's Date#to_time does).
+	d("to_time", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		dd := self(v)
+		if dd.IsDateTime() {
+			loc := stdtime.FixedZone("", dd.Offset())
+			return &Time{t: stdtime.Date(dd.Year(), stdtime.Month(dd.Month()), dd.Day(),
+				dd.Hour(), dd.Min(), dd.Sec(), int(dd.SecFractionNanos()), loc)}
+		}
+		return &Time{t: stdtime.Date(dd.Year(), stdtime.Month(dd.Month()), dd.Day(), 0, 0, 0, 0, stdtime.Local)}
 	})
 }
 
@@ -568,7 +749,23 @@ func (vm *VM) registerDateFormat() {
 	d("strftime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).Strftime(strArg(args[0])))
 	})
-	d("iso8601", strM((*date.Date).Iso8601))
+	// iso8601([n]) — the ISO 8601 date (and, for a DateTime, the wall clock and
+	// offset). An optional precision n appends n fractional-second digits, which
+	// only a DateTime carries; a plain Date has no time part and ignores it, as
+	// MRI's Date#iso8601 does. xmlschema is MRI's alias.
+	iso := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		dd := self(v)
+		if !dd.IsDateTime() {
+			return object.NewString(dd.Iso8601())
+		}
+		out := dd.Strftime("%FT%T")
+		if len(args) > 0 && int(intArg(args[0])) > 0 {
+			out += "." + fracDigits(int(dd.SecFractionNanos()), int(intArg(args[0])))
+		}
+		return object.NewString(out + formatZone(dd.Offset()))
+	}
+	d("iso8601", iso)
+	d("xmlschema", iso)
 	d("rfc3339", strM((*date.Date).Rfc3339))
 	d("rfc2822", strM((*date.Date).Rfc2822))
 	d("rfc822", strM((*date.Date).Rfc2822))
@@ -606,5 +803,24 @@ func (vm *VM) registerDateCompare() {
 	d(">=", cmpBool(func(c int64) bool { return c >= 0 }))
 	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(dateEqual(self(v), args[0]))
+	})
+	// eql? is == restricted to a Date operand (no numeric coercion) and, like ==,
+	// compares the absolute instant — so a Date equals a midnight-UTC DateTime but
+	// not a noon one.
+	d("eql?", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		other, ok := args[0].(*Date)
+		return object.Bool(ok && self(v).d.Cmp(other.d) == 0)
+	})
+	// === compares only the calendar day (the local Julian Day Number), so a Date
+	// case-matches any DateTime that falls on it regardless of the time of day.
+	d("===", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		other, ok := args[0].(*Date)
+		return object.Bool(ok && self(v).d.Jd() == other.d.Jd())
+	})
+	// hash keys on the absolute instant, so two values that compare equal (== /
+	// eql?) share a hash even when their local day and stored offset differ.
+	d("hash", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		jd, ns := dateUTCInstant(self(v).d)
+		return object.IntValue(int64(jd)*dateNsPerDay + ns)
 	})
 }
