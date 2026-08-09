@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -14,10 +13,13 @@ type UnboundMethod struct {
 	name  string
 	owner *RClass // the module/class the method was extracted from
 	m     *Method
+	// vm is the interpreter the method belongs to, kept so ToS can render the
+	// method's parameters (MRI's #<UnboundMethod: …> form).
+	vm *VM
 }
 
 func (u *UnboundMethod) ToS() string {
-	return fmt.Sprintf("#<UnboundMethod: %s#%s>", u.owner.name, u.name)
+	return u.vm.formatCallableString("UnboundMethod", nil, u.name, u.m)
 }
 func (u *UnboundMethod) Inspect() string { return u.ToS() }
 func (u *UnboundMethod) Truthy() bool    { return true }
@@ -37,7 +39,7 @@ func (vm *VM) registerReflection() {
 		if m == nil || m.undefined {
 			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
 		}
-		return &UnboundMethod{name: name, owner: m.owner, m: m}
+		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm}
 	})
 
 	// Module#method_defined?(:m): true if m resolves up the ancestor chain.
@@ -94,7 +96,7 @@ func (vm *VM) registerReflection() {
 	cUnbound.define("bind", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		u := self.(*UnboundMethod)
 		vm.checkBindable(u, args[0])
-		return &BoundMethod{recv: args[0], name: u.name, m: u.m}
+		return vm.newBoundMethod(args[0], u.name, u.m)
 	})
 	// UnboundMethod#bind_call(obj, *args, &blk): bind then invoke in one step.
 	cUnbound.define("bind_call", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -116,7 +118,7 @@ func (vm *VM) registerReflection() {
 	// Method#unbind → UnboundMethod.
 	vm.cMethod.define("unbind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*BoundMethod)
-		return &UnboundMethod{name: b.name, owner: b.m.owner, m: b.m}
+		return &UnboundMethod{name: b.name, owner: b.m.owner, m: b.m, vm: vm}
 	})
 }
 

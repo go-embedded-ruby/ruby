@@ -98,6 +98,7 @@ func (vm *VM) bootstrap() {
 	vm.registerModuleExtras()
 	vm.registerReflection()
 	vm.registerMethodReflect()
+	vm.registerMethodReflect2()
 	vm.registerModuleReflect()
 	vm.registerVersionConstants()
 	vm.registerKernelIntrospection()
@@ -1189,12 +1190,14 @@ func (vm *VM) bootstrap() {
 			switch src := args[1].(type) {
 			case *BoundMethod:
 				cm := *src.m
+				cm.origName = methodOriginalName(src.m)
 				cm.name, cm.owner = name, cls
 				cls.methods[name] = &cm
 				bumpMethodSerial()
 				return object.Symbol(name)
 			case *UnboundMethod:
 				cm := *src.m
+				cm.origName = methodOriginalName(src.m)
 				cm.name, cm.owner = name, cls
 				cls.methods[name] = &cm
 				bumpMethodSerial()
