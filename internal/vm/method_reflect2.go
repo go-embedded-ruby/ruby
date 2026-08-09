@@ -5,6 +5,8 @@
 package vm
 
 import (
+	"strings"
+
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -185,14 +187,23 @@ func methodSourceLocation(m *Method) object.Value {
 }
 
 // methodParameters builds a method's MRI #parameters array: each entry is
-// [kind, name] (or a bare [kind] for a native method or a **nil marker). The
-// positional shape — leading required, optionals, a *rest, then post required —
-// is read from the iseq, followed by the keyword, keyword-rest and block params.
+// [kind, name] (or a bare [kind] for a native method or a **nil marker). A
+// method reports its required positionals as :req (Proc#parameters shares the
+// same builder but may report them as :opt — see buildParamsList).
 func methodParameters(m *Method) object.Value {
-	is := methodISeq(m)
+	return object.NewArray(buildParamsList(methodISeq(m), "req")...)
+}
+
+// buildParamsList builds the MRI #parameters descriptor list shared by
+// Method#parameters and Proc#parameters. reqKind selects the symbol used for a
+// required positional (:req for a method or a lambda, :opt for a non-lambda
+// proc, which never enforces its positionals). The positional shape — leading
+// required, optionals, a *rest, then post-splat required — is read from the
+// iseq, followed by the keyword, keyword-rest and block parameters. A nil iseq
+// is a native (ISeq-less) callable: MRI reports a single catch-all rest.
+func buildParamsList(is *bytecode.ISeq, reqKind string) []object.Value {
 	if is == nil {
-		// A native (or ISeq-less) method: MRI reports a single catch-all rest.
-		return object.NewArray(object.NewArray(object.Symbol("rest")))
+		return []object.Value{object.NewArray(object.Symbol("rest"))}
 	}
 	var out []object.Value
 	for i, name := range is.Params {
@@ -200,9 +211,9 @@ func methodParameters(m *Method) object.Value {
 		case i == is.SplatIndex:
 			out = append(out, paramPair("rest", displayAnon(name, fwdRestSentinel, "*")))
 		case i < is.NumRequired || (is.SplatIndex >= 0 && i > is.SplatIndex):
-			out = append(out, paramPair("req", name))
+			out = append(out, positionalParam(reqKind, name))
 		default:
-			out = append(out, paramPair("opt", name))
+			out = append(out, positionalParam("opt", name))
 		}
 	}
 	for i, kn := range is.KwNames {
@@ -222,7 +233,17 @@ func methodParameters(m *Method) object.Value {
 	if is.BlockSlot >= 0 {
 		out = append(out, paramPair("block", displayAnon(localName(is, is.BlockSlot), fwdBlockSentinel, "&")))
 	}
-	return object.NewArray(out...)
+	return out
+}
+
+// positionalParam builds a positional parameter descriptor. A destructuring
+// parameter (`(a, b)`) has no top-level name, so MRI reports it as a bare
+// [kind]; a plain parameter reports [kind, name].
+func positionalParam(kind, name string) object.Value {
+	if name == "" || strings.HasPrefix(name, "(") {
+		return object.NewArray(object.Symbol(kind))
+	}
+	return paramPair(kind, name)
 }
 
 // paramPair builds a [kind, name] parameter descriptor.

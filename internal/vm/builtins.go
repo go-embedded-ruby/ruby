@@ -99,6 +99,7 @@ func (vm *VM) bootstrap() {
 	vm.registerReflection()
 	vm.registerMethodReflect()
 	vm.registerMethodReflect2()
+	vm.registerProcMethods()
 	vm.registerModuleReflect()
 	vm.registerVersionConstants()
 	vm.registerKernelIntrospection()
@@ -372,7 +373,7 @@ func (vm *VM) bootstrap() {
 	vm.cSymbol.define("to_proc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		name := string(self.(object.Symbol))
 		// :sym.to_proc is { |recv, *rest| recv.sym(*rest) } — arity -2 as in MRI.
-		return &Proc{nativeArity: -2, native: func(vm *VM, args []object.Value) object.Value {
+		return &Proc{nativeArity: -2, symName: name, native: func(vm *VM, args []object.Value) object.Value {
 			return vm.send(args[0], name, args[1:], nil)
 		}}
 	})
