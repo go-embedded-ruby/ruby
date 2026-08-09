@@ -223,6 +223,27 @@ type RClass struct {
 	// frozen records Object#freeze on the class/module object itself, reported by
 	// Object#frozen? and enforced by structural mutators (e.g. attr_*).
 	frozen bool
+	// isRefinement marks an anonymous Refinement module minted by Module#refine.
+	// Its class reports as Refinement (see classOf) rather than Module, and it
+	// carries refinedClass/refHolder. It holds the method definitions from the
+	// refine block and is what dispatch consults when the refinement is active.
+	isRefinement bool
+	// refinedClass, on a refinement module, is the class or module it refines
+	// (Refinement#target). nil on every non-refinement class/module.
+	refinedClass *RClass
+	// refHolder, on a refinement module, is the module whose #refine minted it —
+	// used so that inside a refinement method body all of that module's sibling
+	// refinements are active (MRI: refinements from the same module see each other).
+	refHolder *RClass
+	// refinements, on a refinement-holder module, maps each refined class to the
+	// single anonymous Refinement module accumulating its definitions, so repeated
+	// refine(C) reuse one module (Module#refinements returns the values). nil until
+	// this module's first refine.
+	refinements map[*RClass]*RClass
+	// usedModules records the modules activated by `using` in this lexical scope,
+	// in call order — the source both for Module#used_modules and for refinement
+	// dispatch. nil until this scope's first using.
+	usedModules []*RClass
 	// structDef, when non-nil, marks this class as a Struct subclass minted by
 	// Struct.new and records its member layout. It is resolved through the
 	// superclass chain (structDefOf) so a `class Foo < Struct.new(:a)` subclass
@@ -706,7 +727,11 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.class
 	case *RClass:
 		// A module's class is Module; a class's class is Class. (Matches MRI:
-		// `String.class == Class`, `Comparable.class == Module`.)
+		// `String.class == Class`, `Comparable.class == Module`.) An anonymous
+		// module minted by Module#refine reports its class as Refinement.
+		if x.isRefinement {
+			return vm.cRefinement
+		}
 		if x.isModule {
 			return vm.cModule
 		}
