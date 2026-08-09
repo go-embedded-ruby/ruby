@@ -10,8 +10,9 @@ type Binding struct {
 	env     *Env
 	self    object.Value
 	definee *RClass
+	file    string   // source file the binding was captured in ("" for compiled-in code)
 	names   []string // slot index → local name (original ISeq locals, then injected ones)
-	added   []string // names injected via local_variable_set, in insertion order
+	added   []string // names injected via local_variable_set/eval, in insertion order
 }
 
 func (b *Binding) ToS() string     { return "#<Binding>" }
@@ -38,6 +39,35 @@ func (vm *VM) registerBinding() {
 	cBinding.define("receiver", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*Binding).self
 	})
+	// source_location reports [file, line] for where the binding was captured, or
+	// nil when no source is known (compiled-in code such as the prelude, whose
+	// ISeq carries no File). As with Proc#source_location the VM does not track
+	// per-instruction line numbers, so the line is reported as 0 — the array shape
+	// ([String, Integer]) is what callers depend on.
+	cBinding.define("source_location", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		b := self.(*Binding)
+		if b.file == "" {
+			return object.NilV
+		}
+		return object.NewArray(object.NewString(b.file), object.IntValue(0))
+	})
+	// dup / clone return a shallow copy: the environment is shared (so a write to
+	// an existing local through one copy is visible through the other, as MRI
+	// does), but the name/injected lists are independent, so a local_variable_set
+	// (or eval-created local) on the copy does not leak into the original.
+	bindingDup := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		b := self.(*Binding)
+		return &Binding{
+			env:     b.env,
+			self:    b.self,
+			definee: b.definee,
+			file:    b.file,
+			names:   append([]string(nil), b.names...),
+			added:   append([]string(nil), b.added...),
+		}
+	}
+	cBinding.define("dup", bindingDup)
+	cBinding.define("clone", bindingDup)
 	cBinding.define("local_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*Binding)
 		seen := map[string]bool{}
@@ -58,18 +88,18 @@ func (vm *VM) registerBinding() {
 		}
 		return object.NewArrayFromSlice(elems)
 	})
-	cBinding.define("local_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cBinding.define("local_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := self.(*Binding)
-		name := bindingVarName(args[0])
+		name := vm.bindingVarName(args[0])
 		i := b.slotOf(name)
 		if i < 0 {
 			raise("NameError", "local variable '%s' is not defined for %s", name, b.ToS())
 		}
 		return b.env.slots[i]
 	})
-	cBinding.define("local_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cBinding.define("local_variable_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := self.(*Binding)
-		name := bindingVarName(args[0])
+		name := vm.bindingVarName(args[0])
 		if i := b.slotOf(name); i >= 0 {
 			b.env.slots[i] = args[1]
 		} else {
@@ -81,22 +111,28 @@ func (vm *VM) registerBinding() {
 		}
 		return args[1]
 	})
-	cBinding.define("local_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*Binding).slotOf(bindingVarName(args[0])) >= 0)
+	cBinding.define("local_variable_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*Binding).slotOf(vm.bindingVarName(args[0])) >= 0)
 	})
 }
 
-// bindingVarName coerces a Symbol/String local-variable name to a Go string.
-func bindingVarName(v object.Value) string {
+// bindingVarName coerces a local-variable name argument to a Go string: a Symbol
+// or String directly, otherwise an object responding to #to_str (MRI's implicit
+// String conversion). Anything else raises TypeError with MRI's message.
+func (vm *VM) bindingVarName(v object.Value) string {
 	switch n := v.(type) {
 	case object.Symbol:
 		return string(n)
 	case *object.String:
 		return n.Str()
-	default:
-		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
-		return ""
 	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s.Str()
+		}
+	}
+	raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	return ""
 }
 
 // bindingEval lives in binding_eval_open.go / binding_eval_closed.go: it needs
