@@ -65,7 +65,14 @@ type Proc struct {
 	// whose body is Go rather than an ISeq; nativeArity backs Proc#arity for it.
 	native      func(vm *VM, args []object.Value) object.Value
 	nativeArity int
-	isLambda    bool // true for lambda { } / ->(){}: backs Proc#lambda?
+	// symName is set on a Symbol#to_proc synthesized Proc (the symbol's name), so
+	// Proc#to_s can render MRI's `(&:name)` form for it.
+	symName string
+	// defLocals are the local-variable names of the frame where this block literal
+	// was written — i.e. the names that index env.slots. Proc#binding uses them to
+	// name the closure's locals so eval(str, proc.binding) can reach them.
+	defLocals []string
+	isLambda  bool // true for lambda { } / ->(){}: backs Proc#lambda?
 	// breakLive is true while this block is being yielded through a call that can
 	// catch its `break` (sendCatchBreak). A `break` in a block whose yielding call
 	// has already returned — a proc invoked later via Proc#call — is a "break from
@@ -107,8 +114,8 @@ type Proc struct {
 	dmDirect bool
 }
 
-func (p *Proc) ToS() string     { return "#<Proc>" }
-func (p *Proc) Inspect() string { return "#<Proc>" }
+func (p *Proc) ToS() string     { return procToS(p) }
+func (p *Proc) Inspect() string { return procToS(p) }
 func (p *Proc) Truthy() bool    { return true }
 
 // visibility is a Ruby method's access level: public (the default), private or
@@ -125,8 +132,8 @@ const (
 
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
 type Method struct {
-	name   string
-	native NativeFn
+	name     string
+	native   NativeFn
 	iseq     *bytecode.ISeq
 	proc     *Proc          // for define_method: a block-backed method body
 	compiled CompiledMethod // AOT-lowered native body (rbgo build); preferred when set
@@ -1756,18 +1763,36 @@ func (p *Proc) arityVal() int {
 	if p.native != nil {
 		return p.nativeArity
 	}
-	// A *splat is always variadic: -(required + 1). Optional params are variadic
-	// for a lambda too, but a non-lambda proc reports the positive required count.
-	if p.iseq.SplatIndex >= 0 {
-		return -(p.iseq.NumRequired + 1)
-	}
-	if p.iseq.NumRequired < len(p.iseq.Params) {
-		if p.isLambda {
-			return -(p.iseq.NumRequired + 1)
+	is := p.iseq
+	// Required count: the leading required positionals, plus one when any keyword
+	// is mandatory (a single required-keyword group counts as one required arg).
+	req := is.NumRequired
+	hasReqKw, hasOptKw := false, is.KwRestSlot >= 0
+	for _, r := range is.KwRequired {
+		if r {
+			hasReqKw = true
+		} else {
+			hasOptKw = true
 		}
-		return p.iseq.NumRequired
 	}
-	return len(p.iseq.Params)
+	if hasReqKw {
+		req++
+	}
+	// A *splat is always variadic. For a lambda, an optional positional, an
+	// optional keyword or a keyword-rest also makes it variadic; a non-lambda proc
+	// stays fixed on those and reports the positive required count.
+	end := len(is.Params)
+	if is.SplatIndex >= 0 {
+		end = is.SplatIndex
+	}
+	variadic := is.SplatIndex >= 0
+	if p.isLambda {
+		variadic = variadic || end > is.NumRequired || hasOptKw
+	}
+	if variadic {
+		return -(req + 1)
+	}
+	return req
 }
 
 // toBlock coerces a &block-pass value into a *Proc: nil for nil, the Proc
@@ -1885,6 +1910,14 @@ func (vm *VM) classEvalString(cls *RClass, src string) object.Value {
 // bindBlockArgs maps call args onto a block's parameters, with the auto-splat a
 // multi-parameter block applies to a single Array argument.
 func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
+	if p.isLambda {
+		// A lambda binds its arguments with method semantics, not block semantics:
+		// no auto-splat of a lone Array, and no lenient padding/truncation. Hand the
+		// args straight to exec, whose own arity check raises ArgumentError on a
+		// count mismatch and whose splat/optional/keyword binding shapes them exactly
+		// as an ordinary method call would.
+		return args
+	}
 	// A block with keyword params consumes a trailing keyword hash exactly as a
 	// method does. Peel it off before positional shaping (auto-splat, padding,
 	// arity truncation) and re-append it so exec's keyword binding still sees it.

@@ -339,6 +339,10 @@ p w.valid?`, "true\n"},
 		{amModel + `Widget.validates :name, presence: true, unless: ->(r) { true }
 w = Widget.new
 p w.valid?`, "true\n"},
+		// if: zero-arity proc — instance_exec'd against the record (no argument).
+		{amModel + `Widget.validates :name, presence: true, if: -> { false }
+w = Widget.new
+p w.valid?`, "true\n"},
 		// if: array of conditions
 		{amModel + `Widget.validates :name, presence: true, if: [:a?, :b?]
 w = Widget.new

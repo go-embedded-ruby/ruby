@@ -1469,7 +1469,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -1588,7 +1588,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the home method's arguments
@@ -1617,7 +1617,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				argsArr := pop().(*object.Array)
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, argsArr.Elems, superBlk))
@@ -1899,7 +1899,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:
