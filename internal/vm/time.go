@@ -66,6 +66,39 @@ func (t *Time) ToS() string     { return t.repr(false) }
 func (t *Time) Inspect() string { return t.repr(true) }
 func (t *Time) Truthy() bool    { return true }
 
+// iso8601Str renders MRI Time#iso8601 / #xmlschema (require "time"):
+// "%Y-%m-%dT%H:%M:%S", an optional n-digit ".NNN" fractional-second part, then
+// the zone — "Z" for a UTC instant, "+HH:MM" (%:z) otherwise.
+func (t *Time) iso8601Str(fracN int) string {
+	out := strftime(t, "%Y-%m-%dT%H:%M:%S")
+	if fracN > 0 {
+		out += "." + fracDigits(t.t.Nanosecond(), fracN)
+	}
+	if t.t.Location() == stdtime.UTC {
+		return out + "Z"
+	}
+	_, off := t.t.Zone()
+	return out + signedOffset(off, ":")
+}
+
+// rfc2822Str renders MRI Time#rfc2822 / #rfc822 (require "time"):
+// "%a, %d %b %Y %H:%M:%S %z", where a UTC instant reports RFC 2822's
+// "unknown local zone" marker "-0000" rather than "+0000".
+func (t *Time) rfc2822Str() string {
+	out := strftime(t, "%a, %d %b %Y %H:%M:%S ")
+	if t.t.Location() == stdtime.UTC {
+		return out + "-0000"
+	}
+	_, off := t.t.Zone()
+	return out + signedOffset(off, "")
+}
+
+// httpdateStr renders MRI Time#httpdate (require "time"): the instant converted
+// to GMT as "%a, %d %b %Y %H:%M:%S GMT".
+func (t *Time) httpdateStr() string {
+	return strftime(&Time{t: t.t.UTC()}, "%a, %d %b %Y %H:%M:%S") + " GMT"
+}
+
 // timeArg asserts an argument is a Time, raising TypeError otherwise.
 func timeArg(v object.Value) *Time {
 	t, ok := v.(*Time)
@@ -164,6 +197,22 @@ func (vm *VM) registerTime() {
 	})
 	d("asctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(strftime(self(v), "%a %b %e %H:%M:%S %Y"))
+	})
+
+	// require "time" formatters. iso8601 / xmlschema take an optional
+	// fraction_digits count (default 0); rfc2822 / rfc822 / httpdate take none.
+	iso := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(self(v).iso8601Str(int(intArgOr(args, 0))))
+	}
+	d("iso8601", iso)
+	d("xmlschema", iso)
+	rfc2822 := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self(v).rfc2822Str())
+	}
+	d("rfc2822", rfc2822)
+	d("rfc822", rfc2822)
+	d("httpdate", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self(v).httpdateStr())
 	})
 
 	// Field accessors.

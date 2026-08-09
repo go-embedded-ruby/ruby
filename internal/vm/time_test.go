@@ -92,6 +92,43 @@ func TestTime(t *testing.T) {
 		{`p Time.at(1000).subsec`, "0\n"},
 		{`p Time.at(0).gmtime.zone`, "\"UTC\"\n"},
 		{`p Time.at(1000).gmtime.to_i`, "1000\n"},
+
+		// require "time" named formatters, asserted against ruby 4.0.5 on a fixed
+		// UTC instant carrying a sub-second fraction (2026-06-21T12:34:56.789012Z).
+		// iso8601 / xmlschema: a UTC instant renders the "Z" suffix; the optional
+		// fraction_digits count appends n truncated fractional-second digits.
+		{`require "time"; p Time.utc(2026, 6, 21, 12, 34, 56, 789012).iso8601`,
+			"\"2026-06-21T12:34:56Z\"\n"},
+		{`require "time"; p Time.utc(2026, 6, 21, 12, 34, 56, 789012).iso8601(3)`,
+			"\"2026-06-21T12:34:56.789Z\"\n"},
+		{`require "time"; p Time.utc(2026, 6, 21, 12, 34, 56, 789012).iso8601(6)`,
+			"\"2026-06-21T12:34:56.789012Z\"\n"},
+		{`require "time"; p Time.utc(2026, 6, 21, 12, 34, 56, 789012).xmlschema(3)`,
+			"\"2026-06-21T12:34:56.789Z\"\n"},
+		// rfc2822 / rfc822: a UTC instant reports RFC 2822's "-0000" unknown-zone
+		// marker; httpdate always renders the instant in GMT.
+		{`require "time"; p Time.utc(2026, 6, 21, 12, 34, 56).rfc2822`,
+			"\"Sun, 21 Jun 2026 12:34:56 -0000\"\n"},
+		{`require "time"; p Time.utc(2026, 6, 21, 12, 34, 56).rfc822`,
+			"\"Sun, 21 Jun 2026 12:34:56 -0000\"\n"},
+		{`require "time"; p Time.utc(2026, 6, 21, 12, 34, 56).httpdate`,
+			"\"Sun, 21 Jun 2026 12:34:56 GMT\"\n"},
+		// A fixed-offset instant: iso8601 uses "%:z" (+02:00), rfc2822 uses "%z"
+		// (+0200), and httpdate converts back to GMT (10:34:56).
+		{`require "time"; p Time.new(2026, 6, 21, 12, 34, 56, "+02:00").iso8601`,
+			"\"2026-06-21T12:34:56+02:00\"\n"},
+		{`require "time"; p Time.new(2026, 6, 21, 12, 34, 56, "+02:00").iso8601(3)`,
+			"\"2026-06-21T12:34:56.000+02:00\"\n"},
+		{`require "time"; p Time.new(2026, 6, 21, 12, 34, 56, "+02:00").rfc2822`,
+			"\"Sun, 21 Jun 2026 12:34:56 +0200\"\n"},
+		{`require "time"; p Time.new(2026, 6, 21, 12, 34, 56, "+02:00").httpdate`,
+			"\"Sun, 21 Jun 2026 10:34:56 GMT\"\n"},
+		// A "+00:00" offset is not utc? — iso8601 renders "+00:00" (not "Z") and
+		// rfc2822 renders "+0000" (not the utc "-0000").
+		{`require "time"; p Time.new(2026, 6, 21, 12, 34, 56, "+00:00").iso8601`,
+			"\"2026-06-21T12:34:56+00:00\"\n"},
+		{`require "time"; p Time.new(2026, 6, 21, 12, 34, 56, "+00:00").rfc2822`,
+			"\"Sun, 21 Jun 2026 12:34:56 +0000\"\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
