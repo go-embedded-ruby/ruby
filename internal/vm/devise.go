@@ -520,7 +520,7 @@ func (vm *VM) registerDeviseResourceConfirmLock(cls *RClass, self func(object.Va
 	// --- Timeoutable ---
 	d("timedout?", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		t := timeArg(args[0])
-		return object.Bool(self(v).rec.TimedOut(stdtime.Unix(t.t.ToUnix(), 0).UTC()))
+		return object.Bool(self(v).rec.TimedOut(stdtime.Unix(t.t.Unix(), 0).UTC()))
 	})
 	d("timeout_in", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		dur, ok := self(v).rec.TimeoutIn()

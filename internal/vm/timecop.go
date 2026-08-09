@@ -7,8 +7,6 @@ package vm
 import (
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
-
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -32,7 +30,7 @@ func (vm *VM) nowInstant() stdtime.Time { return vm.clock.Current() }
 // timeFromInstant wraps a Go instant in the Ruby Time value (whole-second
 // resolution, matching Time.now / Time.at), used for the values Timecop.freeze /
 // travel / return_to_baseline hand back and for the block-form yield argument.
-func timeFromInstant(t stdtime.Time) *Time { return &Time{t: gotime.FromUnix(t.Unix())} }
+func timeFromInstant(t stdtime.Time) *Time { return &Time{t: t} }
 
 // timecopInstant resolves the optional time argument of Timecop.freeze / travel
 // (index i) to a Go instant. With no argument it is the current mock now; a Time
@@ -45,7 +43,7 @@ func (vm *VM) timecopInstant(args []object.Value, i int) stdtime.Time {
 	}
 	switch v := args[i].(type) {
 	case *Time:
-		return stdtime.Unix(v.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(v.t.Unix(), 0).UTC()
 	case *Date:
 		return dateInstant(v)
 	case object.Integer:

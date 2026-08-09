@@ -13,7 +13,6 @@ import (
 	"testing"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	libarrow "github.com/go-ruby-arrow/arrow"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -76,7 +75,7 @@ func TestArrowValueToScalar(t *testing.T) {
 	if got := arrowValueToScalar(object.Symbol("sym")); got != "sym" {
 		t.Errorf("Symbol -> %#v; want \"sym\"", got)
 	}
-	tm := &Time{t: gotime.FromUnix(1000)}
+	tm := unixTime(1000)
 	if got, ok := arrowValueToScalar(tm).(stdtime.Time); !ok || got.Unix() != 1000 {
 		t.Errorf("Time -> %#v; want time.Time@1000", got)
 	}

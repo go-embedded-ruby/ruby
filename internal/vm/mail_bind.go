@@ -7,7 +7,6 @@ package vm
 import (
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	mail "github.com/go-ruby-mail/mail"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -138,7 +137,7 @@ func mailDateValue(m mailMsg) object.Value {
 	if !ok {
 		return object.NilV
 	}
-	return &Time{t: gotime.FromUnix(t.Unix())}
+	return unixTime(t.Unix())
 }
 
 // mailPartsArray wraps a slice of parts into a Ruby Array of Mail::Message

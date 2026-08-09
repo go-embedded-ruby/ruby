@@ -8,7 +8,6 @@ import (
 	"math/big"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	toml "github.com/go-ruby-toml/toml"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -83,7 +82,7 @@ func toTOML(v object.Value) toml.Value {
 		}
 		return m
 	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(n.t.Unix(), 0).UTC()
 	}
 	// An unmapped value: hand it to the library, which returns the dump error
 	// tomlDump turns into a Ruby ArgumentError.
@@ -131,16 +130,16 @@ func fromTOML(vm *VM, v toml.Value) object.Value {
 	case *toml.Map:
 		return fromTOMLMap(vm, n)
 	case toml.OffsetDateTime:
-		return &Time{t: gotime.FromUnix(n.Time.Unix())}
+		return unixTime(n.Time.Unix())
 	case toml.LocalDateTime:
 		t := stdtime.Date(n.Year, stdtime.Month(n.Month), n.Day, n.Hour, n.Minute, n.Second, n.Nanosecond, stdtime.UTC)
-		return &Time{t: gotime.FromUnix(t.Unix())}
+		return unixTime(t.Unix())
 	case toml.LocalDate:
 		t := stdtime.Date(n.Year, stdtime.Month(n.Month), n.Day, 0, 0, 0, 0, stdtime.UTC)
-		return &Time{t: gotime.FromUnix(t.Unix())}
+		return unixTime(t.Unix())
 	case toml.LocalTime:
 		t := stdtime.Date(1970, 1, 1, n.Hour, n.Minute, n.Second, n.Nanosecond, stdtime.UTC)
-		return &Time{t: gotime.FromUnix(t.Unix())}
+		return unixTime(t.Unix())
 	}
 	// The parser only ever produces the cases above; anything else is nil.
 	return object.NilV

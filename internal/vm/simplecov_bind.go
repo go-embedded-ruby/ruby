@@ -7,7 +7,6 @@ package vm
 import (
 	"regexp"
 
-	gotime "github.com/go-composites/time/src"
 	simplecov "github.com/go-ruby-simplecov/simplecov"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -101,7 +100,7 @@ func (vm *VM) simpleCovSourceArray(files []*simplecov.SourceFile, root string) *
 // simpleCovTime wraps a Unix instant (whole seconds) as a Ruby Time, matching how
 // SimpleCov stamps a result's created_at from a resultset timestamp.
 func (vm *VM) simpleCovTime(unix int64) object.Value {
-	return &Time{t: gotime.FromUnix(unix)}
+	return unixTime(unix)
 }
 
 // simpleCovLinesToHits converts a Ruby line-hit Array (one element per source

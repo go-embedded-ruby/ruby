@@ -49,7 +49,7 @@ func chronicOptions(h *object.Hash) (chronic.Options, bool) {
 	}
 	if v, ok := h.Get(object.Symbol("now")); ok {
 		if t, isT := v.(*Time); isT {
-			o.Now = stdtime.Unix(t.t.ToUnix(), 0).UTC()
+			o.Now = stdtime.Unix(t.t.Unix(), 0).UTC()
 		}
 	}
 	if v, ok := h.Get(object.Symbol("context")); ok {

@@ -42,9 +42,9 @@ func TestTime(t *testing.T) {
 		// + / - seconds (Duration-backed), and Time - Time = seconds between.
 		{`p((Time.at(1000) + 60).to_i)`, "1060\n"},
 		{`p((Time.at(1000) - 60).to_i)`, "940\n"},
-		{`p((Time.at(1000) + 1.9).to_i)`, "1001\n"}, // Float seconds truncate
-		{`p(Time.at(2000) - Time.at(1000))`, "1000\n"},
-		{`p Time.at(1000).send(:+, 5).to_i`, "1005\n"}, // explicit method send agrees
+		{`p((Time.at(1000) + 1.9).to_i)`, "1001\n"},      // Float seconds truncate
+		{`p(Time.at(2000) - Time.at(1000))`, "1000.0\n"}, // Time − Time → Float seconds (MRI)
+		{`p Time.at(1000).send(:+, 5).to_i`, "1005\n"},   // explicit method send agrees
 		{`p Time.at(1000).send(:-, 5).to_i`, "995\n"},
 		// Ordering: <=> and the boolean operators.
 		{`p(Time.at(1000) <=> Time.at(2000))`, "-1\n"},

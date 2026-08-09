@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	gotime "github.com/go-composites/time/src"
 	lg "github.com/go-ruby-logger/logger"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -279,7 +278,7 @@ func (lo *Logger) add(sev lg.Severity, message object.Value, progname object.Val
 // user formatter.
 func (lo *Logger) emitCustom(sev lg.Severity, prog string, raw object.Value) {
 	now := lo.l.Now()
-	t := &Time{t: gotime.FromUnix(now.Unix())}
+	t := unixTime(now.Unix())
 	args := []object.Value{
 		object.NewString(lg.SeverityLabel(sev)),
 		t,
@@ -706,7 +705,7 @@ func loggerMsg(vm *VM, v object.Value) any {
 // current instant (the formatter is timestamp-tolerant).
 func loggerTimeOf(v object.Value) time.Time {
 	if t, ok := v.(*Time); ok {
-		return time.Unix(t.t.ToUnix(), 0)
+		return time.Unix(t.t.Unix(), 0)
 	}
 	return time.Now()
 }

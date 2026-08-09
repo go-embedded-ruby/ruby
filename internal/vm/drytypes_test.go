@@ -11,7 +11,6 @@ import (
 	"testing"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	drytypes "github.com/go-ruby-dry-types/dry-types"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -188,7 +187,7 @@ func TestDryToGo(t *testing.T) {
 		t.Error("hash")
 	}
 	// A Time maps to a Go time.Time.
-	tm := &Time{t: gotime.FromUnix(1_700_000_000)}
+	tm := unixTime(1_700_000_000)
 	if _, ok := dryToGo(tm).(stdtime.Time); !ok {
 		t.Error("time")
 	}

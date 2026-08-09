@@ -12,7 +12,6 @@ import (
 	"testing"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	libbleve "github.com/go-ruby-bleve/bleve"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -85,7 +84,7 @@ func TestBleveFloatAndTime(t *testing.T) {
 	assertRaises(t, "TypeError", func() { bleveFloat(object.NewString("x")) })
 	assertRaises(t, "TypeError", func() { bleveTime(object.NewString("x")) })
 
-	tm := &Time{t: gotime.FromUnix(1000)}
+	tm := unixTime(1000)
 	if bleveTime(tm).Unix() != 1000 {
 		t.Errorf("bleveTime mismatch")
 	}

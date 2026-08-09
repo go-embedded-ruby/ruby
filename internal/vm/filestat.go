@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 
-	gotime "github.com/go-composites/time/src"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -160,7 +159,7 @@ func inGroup(gid int64) bool {
 
 // statTime wraps a stat timestamp as a Ruby Time (whole-second resolution, like
 // the rest of rbgo's Time surface).
-func statTime(unix int64) *Time { return &Time{t: gotime.FromUnix(unix)} }
+func statTime(unix int64) *Time { return unixTime(unix) }
 
 // osStat / osLstat are seams over os.Stat / os.Lstat so the missing-path error
 // branch is reachable without depending on real filesystem state.

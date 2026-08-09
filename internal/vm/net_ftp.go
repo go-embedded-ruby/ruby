@@ -13,7 +13,6 @@ import (
 	"strings"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	netftp "github.com/go-ruby-net-ftp/net-ftp"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -570,7 +569,7 @@ func (vm *VM) ftpMtime(f *ftpObj, file string) object.Value {
 	if err != nil {
 		raise("Net::FTPProtoError", "invalid time-val: %s", raw)
 	}
-	return &Time{t: gotime.FromUnix(t.Unix()).UTC()}
+	return unixTime(t.Unix())
 }
 
 // ftpMlst sends MLST, requires the 250 multiline reply, and parses its middle
@@ -750,5 +749,5 @@ func (vm *VM) ftpFacts(e netftp.MLSxEntry) object.Value {
 // ftpTimeVal builds a UTC Ruby Time from an MLSx time-val's components.
 func (vm *VM) ftpTimeVal(t netftp.MLSxTime) object.Value {
 	sec := stdtime.Date(t.Year, stdtime.Month(t.Month), t.Day, t.Hour, t.Min, t.Sec, 0, stdtime.UTC).Unix()
-	return &Time{t: gotime.FromUnix(sec).UTC()}
+	return unixTime(sec)
 }

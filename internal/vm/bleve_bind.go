@@ -11,7 +11,6 @@ import (
 	"math/big"
 	stdtime "time"
 
-	gotime "github.com/go-composites/time/src"
 	libbleve "github.com/go-ruby-bleve/bleve"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -86,7 +85,7 @@ func bleveValueToGo(v object.Value) interface{} {
 	case object.Symbol:
 		return string(n)
 	case *Time:
-		return stdtime.Unix(n.t.ToUnix(), 0).UTC()
+		return stdtime.Unix(n.t.Unix(), 0).UTC()
 	case *object.Array:
 		out := make([]interface{}, len(n.Elems))
 		for i, el := range n.Elems {
@@ -125,7 +124,7 @@ func bleveFieldToValue(v interface{}) object.Value {
 	case string:
 		return object.NewString(n)
 	case stdtime.Time:
-		return &Time{t: gotime.FromUnix(n.Unix())}
+		return unixTime(n.Unix())
 	case []interface{}:
 		out := make([]object.Value, len(n))
 		for i, el := range n {
@@ -364,7 +363,7 @@ func bleveTime(v object.Value) stdtime.Time {
 	if !ok {
 		raise("TypeError", "expected a Time, got %s", v.Inspect())
 	}
-	return stdtime.Unix(t.t.ToUnix(), 0).UTC()
+	return stdtime.Unix(t.t.Unix(), 0).UTC()
 }
 
 // bleveArity raises a Ruby ArgumentError when fewer than want arguments were

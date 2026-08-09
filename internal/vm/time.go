@@ -1,44 +1,69 @@
 package vm
 
 import (
+	"math/big"
 	"strconv"
 	"strings"
 	stdtime "time"
 
 	goresult "github.com/go-composites/result/src"
 	gotime "github.com/go-composites/time/src"
-	goduration "github.com/go-composites/time/src/duration"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
 // nowUnix is the seam for Time.now's only source of non-determinism — Go's wall
-// clock — so tests can pin it. go-composites/time deliberately omits Now().
+// clock — so tests can pin it. The VM's controllable clock (vm.clock, which
+// Timecop drives) reads through this, and Time.now reads vm.nowInstant().
 var nowUnix = func() int64 { return stdtime.Now().Unix() }
 
-// Time binds github.com/go-composites/time — extending the go-composites
-// consumer story begun by Set — into Ruby. A go-composites Time wraps an
-// instant (Go's time.Time under the hood) and is deterministic by construction:
-// it has no Now(), so the only non-deterministic constructor, Time.now, is built
-// here from Go's stdlib time.Now().Unix() and fed to the composite's FromUnix —
-// the non-determinism is the caller's, kept out of go-composites/time. Durations
-// for the +/- arithmetic come from the composite's Duration sub-package.
-//
-// Time holds the go-composites Time.Interface directly (mirroring how Set holds
-// its go-composites Set), so every Ruby instant is just a thin shell over the
-// composite value and all behaviour flows through that one interface.
-
-// Time is the Ruby wrapper around a go-composites Time.
+// Time is the Ruby Time wrapper around Go's time.Time. Backing Time with the
+// stdlib instant gives nanosecond sub-second precision, fixed-offset zones
+// (time.FixedZone) and the calendar arithmetic MRI's Time needs — a UTC Time
+// carries time.UTC as its location, a zoned Time a fixed offset, and a local
+// Time time.Local. Timecop still drives Time.now through vm.clock (nowInstant),
+// so the clock seam is preserved.
 type Time struct {
-	t gotime.Interface
+	t stdtime.Time
 }
 
-// repr renders MRI-ish "2026-06-21 12:00:00 +0000" from the composite instant.
-func (t *Time) repr() string { return t.t.Format("2006-01-02 15:04:05 -0700") }
+// unixTime builds a whole-second UTC Ruby Time from a Unix timestamp — the
+// constructor the non-Time bindings (file mtimes, DB/serialiser instants, …)
+// reach for when they have only a Unix second count.
+func unixTime(sec int64) *Time { return &Time{t: stdtime.Unix(sec, 0).UTC()} }
 
-func (t *Time) ToS() string     { return t.repr() }
-func (t *Time) Inspect() string { return t.repr() }
+// offsetString renders a Time's UTC offset as "+0000" (MRI %z), used by the
+// to_s / inspect representation. A UTC-location Time reports "+0000".
+func (t *Time) offsetString() string {
+	_, off := t.t.Zone()
+	return signedOffset(off, "")
+}
+
+// fracString renders the sub-second part as ".NNN…" with trailing zeros trimmed
+// (MRI 4.0 inspect), or "" when the instant is on a whole second.
+func (t *Time) fracString() string {
+	ns := t.t.Nanosecond()
+	if ns == 0 {
+		return ""
+	}
+	s := strings.TrimRight(pad(int64(ns), 9), "0")
+	return "." + s
+}
+
+// repr renders MRI's "2026-06-21 12:34:56 +0000"; when withFrac the sub-second
+// fraction is included (inspect, not to_s).
+func (t *Time) repr(withFrac bool) string {
+	base := t.t.Format("2006-01-02 15:04:05")
+	frac := ""
+	if withFrac {
+		frac = t.fracString()
+	}
+	return base + frac + " " + t.offsetString()
+}
+
+func (t *Time) ToS() string     { return t.repr(false) }
+func (t *Time) Inspect() string { return t.repr(true) }
 func (t *Time) Truthy() bool    { return true }
 
 // timeArg asserts an argument is a Time, raising TypeError otherwise.
@@ -50,167 +75,239 @@ func timeArg(v object.Value) *Time {
 	return t
 }
 
-// timeSeconds marshals a Ruby Integer or Float to a whole number of seconds,
-// raising TypeError for anything else (mirroring the Integer/Float ↔ int64
-// marshalling the task calls for).
-func timeSeconds(v object.Value) int64 {
-	switch n := v.(type) {
-	case object.Integer:
-		return int64(n)
-	case object.Float:
-		return int64(n)
-	}
-	raise("TypeError", "no implicit conversion of %s into seconds", v.Inspect())
-	return 0
-}
-
-// payloadTime unwraps a go-composites Result whose payload is a Time, raising a
-// Ruby ArgumentError carrying the composite's Error message when the parse
-// failed (so a malformed input is a Ruby exception, not a Go panic).
+// payloadTime unwraps a go-composites Result whose payload is a parsed instant,
+// re-homing it onto a Go time.Time (via RFC3339 so the numeric offset survives),
+// and raising ArgumentError when the parse failed.
 func payloadTime(r goresult.Interface) *Time {
 	if r.HasError() {
 		raise("ArgumentError", "%s", r.Error().Message())
 	}
-	return &Time{t: r.Payload().(gotime.Interface)}
+	gi := r.Payload().(gotime.Interface)
+	// gi.Format(RFC3339) always renders valid RFC3339, so the re-parse never errors.
+	st, _ := stdtime.Parse(stdtime.RFC3339, gi.Format(stdtime.RFC3339))
+	return &Time{t: st}
 }
 
 // registerTime installs the Time class, its class constructors and instance
-// methods, all delegating to the go-composites Time.Interface.
+// methods.
 func (vm *VM) registerTime() {
 	vm.cTime = newClass("Time", vm.cObject)
 	vm.consts["Time"] = vm.cTime
 
-	// Time.at(seconds) → FromUnix. Accepts an Integer or Float (truncated).
-	vm.cTime.smethods["at"] = &Method{name: "at", owner: vm.cTime,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return &Time{t: gotime.FromUnix(timeSeconds(args[0]))}
-		}}
-	// Time.now → the VM's controllable clock (go-composites/time has no Now() by
-	// design). Unmocked, the clock reports nowUnix's instant; under a require
-	// "timecop" freeze/travel/scale it reports the mocked instant. Whole-second
-	// resolution, as FromUnix takes Unix seconds.
-	vm.cTime.smethods["now"] = &Method{name: "now", owner: vm.cTime,
-		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-			return &Time{t: gotime.FromUnix(vm.nowInstant().Unix())}
-		}}
-	// Time.parse(str) → the composite's lenient ParseAny (the shared real-world
-	// date-format zoo — RFC 822/1123/2822/3339/5322, asctime, HTTP-date, ISO 8601,
-	// date-only and 2-digit years, with named-zone abbreviations resolved to real
-	// offsets), so Time.parse is as forgiving as MRI's rather than RFC3339-only.
-	// The leniency lives in go-composites/time (backed by go-datetime/dates); rbgo
-	// only unwraps the same Result. An unrecognised input raises ArgumentError.
-	vm.cTime.smethods["parse"] = &Method{name: "parse", owner: vm.cTime,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return payloadTime(gotime.ParseAny(strArg(args[0])))
-		}}
-	// Time.strptime(str, fmt) → Parse(rubyLayout(fmt), str); raises on failure.
-	vm.cTime.smethods["strptime"] = &Method{name: "strptime", owner: vm.cTime,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return payloadTime(gotime.Parse(rubyLayout(strArg(args[1])), strArg(args[0])))
-		}}
+	sm := func(name string, fn NativeFn) {
+		vm.cTime.smethods[name] = &Method{name: name, owner: vm.cTime, native: fn}
+	}
+	// Time.at(time, subsec = nil, unit = :microsecond, in: nil).
+	sm("at", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return timeAt(args)
+	})
+	// Time.now → the VM's controllable clock (Timecop drives it), optionally in a
+	// given zone via the in: keyword.
+	sm("now", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		loc, _ := timeZoneKw(args)
+		n := vm.nowInstant()
+		if loc != nil {
+			n = n.In(loc)
+		}
+		return &Time{t: n}
+	})
+	// Time.new(...) → now with no args, else year[,mon,day,hour,min,sec,zone];
+	// the zone may be the 7th positional argument or the in: keyword (MRI 4.0).
+	sm("new", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.timeNew(args)
+	})
+	// Time.utc / Time.gm(year[,mon,day,hour,min,sec,usec]) → a UTC instant.
+	utc := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return timeFromCalendar(args, stdtime.UTC)
+	}
+	sm("utc", utc)
+	sm("gm", utc)
+	// Time.local / Time.mktime(...) → the same, in the local zone.
+	local := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return timeFromCalendar(args, stdtime.Local)
+	}
+	sm("local", local)
+	sm("mktime", local)
+	// Time.parse / Time.strptime keep the go-composites lenient parsers.
+	sm("parse", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return payloadTime(gotime.ParseAny(strArg(args[0])))
+	})
+	sm("strptime", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return payloadTime(gotime.Parse(rubyLayout(strArg(args[1])), strArg(args[0])))
+	})
 
 	d := func(name string, fn NativeFn) { vm.cTime.define(name, fn) }
 	self := func(v object.Value) *Time { return v.(*Time) }
 
 	d("to_i", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(self(v).t.ToUnix())
+		return object.IntValue(self(v).t.Unix())
 	})
 	d("to_f", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Float(float64(self(v).t.ToUnix()))
+		return object.Float(float64(self(v).t.UnixNano()) / 1e9)
+	})
+	d("to_r", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Rational{R: big.NewRat(self(v).t.UnixNano(), 1e9)}
 	})
 
-	toSFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).repr())
-	}
-	d("to_s", toSFn)
-	d("inspect", toSFn)
+	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self(v).repr(false))
+	})
+	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self(v).repr(true))
+	})
 
-	// strftime(fmt): translate the Ruby/strftime directives to a Go layout, then
-	// delegate to the composite's Format.
 	d("strftime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).t.Format(rubyLayout(strArg(args[0]))))
+		return object.NewString(strftime(self(v), strArg(args[0])))
+	})
+	d("ctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(strftime(self(v), "%a %b %e %H:%M:%S %Y"))
+	})
+	d("asctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(strftime(self(v), "%a %b %e %H:%M:%S %Y"))
 	})
 
-	// Field accessors, derived from the underlying instant via Format directives.
-	field := func(layout string) NativeFn {
-		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			n, _ := strconv.ParseInt(self(v).t.Format(layout), 10, 64)
-			return object.IntValue(n)
-		}
+	// Field accessors.
+	d("year", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Year()))
+	})
+	monthFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Month()))
 	}
-	d("year", field("2006"))
-	d("month", field("1"))
-	d("mon", field("1"))
-	d("day", field("2"))
-	d("mday", field("2"))
-	d("hour", field("15"))
-	d("min", field("4"))
-	d("sec", field("5"))
-
-	// wday → day of week 0..6 (Sunday=0), derived from the instant by formatting
-	// the weekday name ("Mon", … via the Mon directive) and mapping it to MRI's
-	// numbering. Following the year/month/… accessors, this stays Format-driven.
+	d("month", monthFn)
+	d("mon", monthFn)
+	dayFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Day()))
+	}
+	d("day", dayFn)
+	d("mday", dayFn)
+	d("hour", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Hour()))
+	})
+	d("min", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Minute()))
+	})
+	d("sec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Second()))
+	})
+	d("usec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Nanosecond() / 1000))
+	})
+	d("nsec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Nanosecond()))
+	})
+	d("subsec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		ns := self(v).t.Nanosecond()
+		if ns == 0 {
+			return object.IntValue(0)
+		}
+		return &object.Rational{R: big.NewRat(int64(ns), 1e9)}
+	})
+	d("yday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.YearDay()))
+	})
 	d("wday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(weekday(self(v)))
+		return object.IntValue(int64(self(v).t.Weekday()))
 	})
-	// Weekday predicates: sunday? … saturday?, booleans off wday.
-	weekdayPred := func(want int64) NativeFn {
+
+	// POSIX time-value accessors.
+	d("tv_sec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(self(v).t.Unix())
+	})
+	d("tv_usec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Nanosecond() / 1000))
+	})
+	d("tv_nsec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(self(v).t.Nanosecond()))
+	})
+
+	// Weekday predicates.
+	weekdayPred := func(want stdtime.Weekday) NativeFn {
 		return func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-			return object.Bool(weekday(self(v)) == want)
+			return object.Bool(self(v).t.Weekday() == want)
 		}
 	}
-	d("sunday?", weekdayPred(0))
-	d("monday?", weekdayPred(1))
-	d("tuesday?", weekdayPred(2))
-	d("wednesday?", weekdayPred(3))
-	d("thursday?", weekdayPred(4))
-	d("friday?", weekdayPred(5))
-	d("saturday?", weekdayPred(6))
+	d("sunday?", weekdayPred(stdtime.Sunday))
+	d("monday?", weekdayPred(stdtime.Monday))
+	d("tuesday?", weekdayPred(stdtime.Tuesday))
+	d("wednesday?", weekdayPred(stdtime.Wednesday))
+	d("thursday?", weekdayPred(stdtime.Thursday))
+	d("friday?", weekdayPred(stdtime.Friday))
+	d("saturday?", weekdayPred(stdtime.Saturday))
 
-	// utc / getutc → UTC (same instant, UTC location).
-	utcFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &Time{t: self(v).t.UTC()}
-	}
-	d("utc", utcFn)
-	d("getutc", utcFn)
-	// gmtime converts the receiver to UTC. MRI mutates the receiver in place and
-	// returns it; with our whole-second instants converting to a UTC instant is
-	// equivalent, and serialization paths (report/storage YAML) only read it back.
-	d("gmtime", utcFn)
-
-	// POSIX time-value accessors. tv_sec is the whole-second Unix time (== to_i);
-	// our instants carry whole-second resolution, so the sub-second parts are all
-	// zero. These let Puppet's report summary (Time.now.tv_sec) and Time#to_yaml
-	// emit a value without raising.
-	d("tv_sec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(self(v).t.ToUnix())
-	})
-	zeroFn := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(0)
-	}
-	d("tv_usec", zeroFn)
-	d("usec", zeroFn)
-	d("tv_nsec", zeroFn)
-	d("nsec", zeroFn)
-	d("subsec", zeroFn)
-
-	// zone → abbreviated zone name ("UTC", "CET", …).
+	// Zone queries.
 	d("zone", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).t.Zone())
+		name, _ := self(v).t.Zone()
+		if name == "" {
+			return object.NilV
+		}
+		return object.NewString(name)
+	})
+	offsetFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		_, off := self(v).t.Zone()
+		return object.IntValue(int64(off))
+	}
+	d("utc_offset", offsetFn)
+	d("gmt_offset", offsetFn)
+	d("gmtoff", offsetFn)
+	utcPred := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).t.Location() == stdtime.UTC)
+	}
+	d("utc?", utcPred)
+	d("gmt?", utcPred)
+	dstFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).t.IsDST())
+	}
+	d("dst?", dstFn)
+	d("isdst", dstFn)
+
+	// Conversions. utc/gmtime/localtime mutate the receiver and return it (MRI);
+	// getutc/getlocal return a new Time.
+	toUTC := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		self(v).t = self(v).t.UTC()
+		return v
+	}
+	d("utc", toUTC)
+	d("gmtime", toUTC)
+	d("localtime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		self(v).t = self(v).t.In(localtimeLoc(args))
+		return v
+	})
+	d("getutc", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &Time{t: self(v).t.UTC()}
+	})
+	d("getlocal", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return &Time{t: self(v).t.In(localtimeLoc(args))}
 	})
 
-	// + seconds → Add(Duration). - seconds → Add(-Duration); - Time → seconds.
-	// These mirror the operator fast path (timeOp) so `send(:+, n)` agrees with
-	// the `t + n` syntax.
+	// round / floor / ceil to ndigits sub-second digits (default 0).
+	d("round", roundFn((*big.Int).Add, true))
+	d("floor", roundFn(nil, false))
+	d("ceil", roundFn((*big.Int).Add, false))
+
+	// to_a → [sec, min, hour, mday, mon, year, wday, yday, isdst, zone].
+	d("to_a", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := self(v).t
+		name, _ := t.Zone()
+		zone := object.Value(object.NilV)
+		if name != "" {
+			zone = object.NewString(name)
+		}
+		return object.NewArray(
+			object.IntValue(int64(t.Second())), object.IntValue(int64(t.Minute())),
+			object.IntValue(int64(t.Hour())), object.IntValue(int64(t.Day())),
+			object.IntValue(int64(t.Month())), object.IntValue(int64(t.Year())),
+			object.IntValue(int64(t.Weekday())), object.IntValue(int64(t.YearDay())),
+			object.Bool(t.IsDST()), zone,
+		)
+	})
+
+	// Arithmetic and ordering.
 	d("+", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return timeOp(bytecode.OpAdd, self(v), args[0])
 	})
 	d("-", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return timeOp(bytecode.OpSub, self(v), args[0])
 	})
-
-	// Comparison: <=> via Before/After/Equal (nil for a non-Time, as in MRI),
-	// and the boolean operators / == built on it.
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := args[0].(*Time)
 		if !ok {
@@ -230,51 +327,302 @@ func (vm *VM) registerTime() {
 	d(">=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(!self(v).t.Before(timeArg(args[0]).t))
 	})
-	d("==", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+	eqFn := func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := args[0].(*Time)
-		if !ok {
-			return object.False
-		}
-		return object.Bool(self(v).t.Equal(other.t))
+		return object.Bool(ok && self(v).t.Equal(other.t))
+	}
+	d("==", eqFn)
+	d("eql?", eqFn)
+	d("hash", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(self(v).t.UnixNano())
 	})
 }
 
+// timeZoneKw pops a trailing keyword hash carrying in: <zone> off args, returning
+// the resolved location (nil when absent) and the remaining positional args.
+func timeZoneKw(args []object.Value) (*stdtime.Location, []object.Value) {
+	if n := len(args); n > 0 {
+		if h, ok := args[n-1].(*object.Hash); ok {
+			if z, ok := h.Get(object.Symbol("in")); ok {
+				return parseZone(strArg(z)), args[:n-1]
+			}
+		}
+	}
+	return nil, args
+}
+
+// localtimeLoc resolves the optional offset argument of localtime / getlocal:
+// none → the local zone, a string offset → that fixed zone.
+func localtimeLoc(args []object.Value) *stdtime.Location {
+	if len(args) == 0 {
+		return stdtime.Local
+	}
+	return parseZone(strArg(args[0]))
+}
+
+// parseZone turns a Ruby zone argument — "UTC"/"Z" or a numeric offset in
+// "+HH", "+HHMM", "+HH:MM", "+HH:MM:SS" (and ':'-free) form — into a Go location,
+// raising ArgumentError for anything it cannot read.
+func parseZone(s string) *stdtime.Location {
+	if s == "UTC" || s == "Z" {
+		return stdtime.UTC
+	}
+	sign := 1
+	body := s
+	switch {
+	case strings.HasPrefix(s, "+"):
+		body = s[1:]
+	case strings.HasPrefix(s, "-"):
+		sign, body = -1, s[1:]
+	default:
+		raise("ArgumentError", "%q is not a valid offset", s)
+	}
+	body = strings.ReplaceAll(body, ":", "")
+	if len(body) != 2 && len(body) != 4 && len(body) != 6 {
+		raise("ArgumentError", "%q is not a valid offset", s)
+	}
+	off := 0
+	for i := 0; i < len(body); i += 2 {
+		n, err := strconv.Atoi(body[i : i+2])
+		if err != nil {
+			raise("ArgumentError", "%q is not a valid offset", s)
+		}
+		off = off*60 + n
+	}
+	// off has folded in HH(:MM(:SS)) as base-60 digits; scale to seconds.
+	switch len(body) {
+	case 2:
+		off *= 3600
+	case 4:
+		off *= 60
+	}
+	return stdtime.FixedZone("", sign*off)
+}
+
+// timeAt implements Time.at(time, subsec = nil, unit = :microsecond, in:).
+func timeAt(args []object.Value) *Time {
+	loc, pos := timeZoneKw(args)
+	if len(pos) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
+	}
+	var t stdtime.Time
+	switch a := pos[0].(type) {
+	case *Time:
+		t = a.t
+	default:
+		sec, ns := splitSeconds(numFloat(pos[0]))
+		if len(pos) >= 2 {
+			ns += int64(numFloat(pos[1]) * float64(unitNanos(pos, 2)))
+		}
+		t = stdtime.Unix(sec, ns)
+	}
+	if loc == nil {
+		loc = stdtime.UTC
+	} else {
+		t = t.In(loc)
+		return &Time{t: t}
+	}
+	// A Time source keeps its own zone; a numeric source defaults to UTC.
+	if _, isTime := pos[0].(*Time); isTime {
+		return &Time{t: t}
+	}
+	return &Time{t: t.In(loc)}
+}
+
+// unitNanos reads the optional unit symbol (index i) of Time.at, returning the
+// nanoseconds one such unit is worth (:millisecond/:microsecond/:nanosecond;
+// default microsecond).
+func unitNanos(pos []object.Value, i int) int64 {
+	if len(pos) <= i {
+		return 1000
+	}
+	switch pos[i].(object.Symbol) {
+	case "millisecond":
+		return 1_000_000
+	case "microsecond", "usec":
+		return 1000
+	case "nanosecond", "nsec":
+		return 1
+	}
+	raise("ArgumentError", "unexpected unit: %s", pos[i].Inspect())
+	return 0
+}
+
+// splitSeconds decomposes a floating second count into whole seconds and the
+// remaining nanoseconds (rounded).
+func splitSeconds(f float64) (int64, int64) {
+	whole := int64(f)
+	ns := int64((f - float64(whole)) * 1e9)
+	if ns < 0 { // negative fraction: borrow a second so ns stays in [0,1e9)
+		whole--
+		ns += 1e9
+	}
+	return whole, ns
+}
+
+// numFloat marshals a Ruby Integer / Float / Rational to a float64, raising
+// TypeError otherwise.
+func numFloat(v object.Value) float64 {
+	switch n := v.(type) {
+	case object.Integer:
+		return float64(n)
+	case object.Float:
+		return float64(n)
+	case *object.Rational:
+		f, _ := n.R.Float64()
+		return f
+	}
+	raise("TypeError", "no implicit conversion of %s into Time", v.Inspect())
+	return 0
+}
+
+// numInt marshals a Ruby Integer / Float to an int, raising TypeError otherwise.
+func numInt(v object.Value) int {
+	switch n := v.(type) {
+	case object.Integer:
+		return int(n)
+	case object.Float:
+		return int(n)
+	}
+	raise("TypeError", "no implicit conversion into Integer")
+	return 0
+}
+
+// timeNew implements Time.new: no positional args → now (optionally zoned), else
+// year[,mon,day,hour,min,sec,zone] with an optional in: keyword overriding the
+// positional zone.
+func (vm *VM) timeNew(args []object.Value) *Time {
+	kwLoc, pos := timeZoneKw(args)
+	if len(pos) == 0 {
+		n := vm.nowInstant()
+		if kwLoc != nil {
+			n = n.In(kwLoc)
+		}
+		return &Time{t: n}
+	}
+	loc := stdtime.Local
+	if len(pos) >= 7 {
+		loc = parseZone(strArg(pos[6]))
+	}
+	if kwLoc != nil {
+		loc = kwLoc
+	}
+	return buildTime(pos, 0, loc)
+}
+
+// timeFromCalendar implements Time.utc / Time.local: year[,mon,day,hour,min,sec,
+// usec] in the given location.
+func timeFromCalendar(args []object.Value, loc *stdtime.Location) *Time {
+	usec := 0.0
+	if len(args) >= 7 {
+		usec = numFloat(args[6])
+	}
+	return buildTime(args, usec, loc)
+}
+
+// buildTime assembles a Time from calendar parts (with usec added in), validating
+// each field's range the way MRI does before handing normalised parts to Go's
+// time.Date.
+func buildTime(pos []object.Value, usec float64, loc *stdtime.Location) *Time {
+	year := numInt(pos[0])
+	month := partOr(pos, 1, 1)
+	day := partOr(pos, 2, 1)
+	hour := partOr(pos, 3, 0)
+	min := partOr(pos, 4, 0)
+	secF := 0.0
+	if len(pos) >= 6 {
+		secF = numFloat(pos[5])
+	}
+	sec := int(secF)
+	ns := int64((secF-float64(sec))*1e9) + int64(usec*1000)
+
+	// MRI range-checks each field, then normalises overflow (Feb 30 → Mar 2,
+	// hour 24 → next day, sec 60 → next minute) exactly as Go's time.Date does.
+	checkRange("mon", month, 1, 12)
+	checkRange("mday", day, 1, 31)
+	checkRange("hour", hour, 0, 24)
+	checkRange("min", min, 0, 59)
+	checkRange("sec", sec, 0, 60)
+	return &Time{t: stdtime.Date(year, stdtime.Month(month), day, hour, min, sec, int(ns), loc)}
+}
+
+// partOr returns the integer calendar part at index i, or def when it is absent.
+func partOr(pos []object.Value, i, def int) int {
+	if len(pos) <= i {
+		return def
+	}
+	return numInt(pos[i])
+}
+
+// checkRange raises MRI's "<field> out of range" ArgumentError when v is outside
+// [lo, hi].
+func checkRange(field string, v, lo, hi int) {
+	if v < lo || v > hi {
+		raise("ArgumentError", "%s out of range", field)
+	}
+}
+
+// roundFn builds Time#round / #floor / #ceil. add is (*big.Int).Add for round /
+// ceil (nil for floor); half selects round's nearest-neighbour bias.
+func roundFn(add func(z, x, y *big.Int) *big.Int, half bool) NativeFn {
+	return func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		digits := 0
+		if len(args) > 0 {
+			digits = numInt(args[0])
+		}
+		t := v.(*Time).t
+		sec, ns := t.Unix(), int64(t.Nanosecond())
+		total := big.NewInt(sec)
+		total.Mul(total, big.NewInt(1e9))
+		total.Add(total, big.NewInt(ns))
+
+		unit := big.NewInt(1)
+		if digits < 9 {
+			unit.Exp(big.NewInt(10), big.NewInt(int64(9-digits)), nil)
+		}
+		q, r := new(big.Int), new(big.Int)
+		q.DivMod(total, unit, r)
+		if half { // round: bump the quotient when the remainder reaches half a unit.
+			twice := new(big.Int).Mul(r, big.NewInt(2))
+			if twice.Cmp(unit) >= 0 {
+				q.Add(q, big.NewInt(1))
+			}
+		} else if add != nil && r.Sign() > 0 { // ceil: bump on any remainder.
+			add(q, q, big.NewInt(1))
+		}
+		q.Mul(q, unit)
+		newSec := new(big.Int).Div(q, big.NewInt(1e9)).Int64()
+		newNs := new(big.Int).Mod(q, big.NewInt(1e9)).Int64()
+		return &Time{t: stdtime.Unix(newSec, newNs).In(t.Location())}
+	}
+}
+
 // timeOp implements the Time operator fast path reached from binary(): t + secs
-// shifts forward by a Duration, t - secs shifts back, and t - other yields the
-// whole seconds between the two instants (an Integer, as MRI gives a Float we
-// truncate to seconds — the composite's Sub resolution). A non-Time, non-numeric
-// right operand raises TypeError via timeSeconds.
+// shifts forward, t - secs shifts back, and t - other yields the Float seconds
+// between the two instants. A non-Time, non-numeric right operand raises via
+// numFloat / timeSeconds.
 func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
-		return timeShift(a, timeSeconds(b))
+		return timeShift(a, numFloat(b))
 	case bytecode.OpSub:
 		if other, ok := b.(*Time); ok {
-			return object.IntValue(a.t.Sub(other.t).ToSeconds())
+			d := a.t.Sub(other.t)
+			return object.Float(d.Seconds())
 		}
-		return timeShift(a, -timeSeconds(b))
+		return timeShift(a, -numFloat(b))
 	}
 	return raise("NoMethodError", "undefined method '%s' for a Time", op)
 }
 
-// timeShift shifts a Time by sec seconds via the composite's Duration
-// arithmetic. The non-null Add Result always carries a payload.
-func timeShift(t *Time, sec int64) object.Value {
-	r := t.t.Add(goduration.FromSeconds(sec))
-	return &Time{t: r.Payload().(gotime.Interface)}
+// timeShift shifts a Time forward by sec seconds (which may be fractional),
+// preserving its location.
+func timeShift(t *Time, sec float64) object.Value {
+	whole, ns := splitSeconds(sec)
+	return &Time{t: t.t.Add(stdtime.Duration(whole)*stdtime.Second + stdtime.Duration(ns)*stdtime.Nanosecond)}
 }
 
-// weekdayNum maps the abbreviated weekday name produced by the "Mon" Format
-// directive to MRI's wday numbering (Sunday=0 … Saturday=6).
-var weekdayNum = map[string]int64{
-	"Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6,
-}
-
-// weekday derives a Time's day-of-week (0..6, Sunday=0) from the underlying
-// instant via the "Mon" Format directive, mirroring the year/month/… accessors.
-func weekday(t *Time) int64 { return weekdayNum[t.t.Format("Mon")] }
-
-// timeCmp returns -1/0/1 ordering two Times through Before/After/Equal.
+// timeCmp returns -1/0/1 ordering two Times.
 func timeCmp(a, b *Time) int64 {
 	switch {
 	case a.t.Before(b.t):
@@ -292,33 +640,314 @@ func timeEqual(a *Time, other object.Value) bool {
 	return ok && a.t.Equal(b.t)
 }
 
-// strftimeToGo maps Ruby/C strftime directives to the corresponding Go
-// reference-time tokens, so strftime / strptime can drive the composite's
-// Format / Parse (which speak Go layouts).
-var strftimeToGo = map[byte]string{
-	'Y': "2006",
-	'y': "06",
-	'm': "01",
-	'd': "02",
-	'e': "_2",
-	'H': "15",
-	'I': "03",
-	'M': "04",
-	'S': "05",
-	'p': "PM",
-	'P': "pm",
-	'A': "Monday",
-	'a': "Mon",
-	'B': "January",
-	'b': "Jan",
-	'Z': "MST",
-	'z': "-0700",
-	'j': "002",
-	'%': "%",
+// ---- strftime -------------------------------------------------------------
+
+// pad renders n as a zero-padded decimal at least width wide.
+func pad(n int64, width int) string {
+	s := strconv.FormatInt(n, 10)
+	for len(s) < width {
+		s = "0" + s
+	}
+	return s
 }
 
-// rubyLayout converts a strftime format string ("%Y-%m-%d") into a Go layout
-// ("2006-01-02"); unknown directives and literal text pass through verbatim.
+// signedOffset renders an offset in seconds with the given inner separator
+// ("" → "+0900", ":" → "+09:00", "::" is handled by the caller adding seconds).
+func signedOffset(off int, sep string) string {
+	sign := "+"
+	if off < 0 {
+		sign, off = "-", -off
+	}
+	hh, mm := off/3600, (off%3600)/60
+	return sign + pad(int64(hh), 2) + sep + pad(int64(mm), 2)
+}
+
+// strftimeExpand rewrites the compound directives (%c %D %F %R %r %T %X %x %h)
+// into their primitive expansions.
+var strftimeExpand = map[byte]string{
+	'c': "%a %b %e %H:%M:%S %Y",
+	'D': "%m/%d/%y",
+	'x': "%m/%d/%y",
+	'F': "%Y-%m-%d",
+	'R': "%H:%M",
+	'r': "%I:%M:%S %p",
+	'T': "%H:%M:%S",
+	'X': "%H:%M:%S",
+	'h': "%b",
+}
+
+// strftime formats a Time per Ruby's strftime directive set: flags (-_0^#),
+// an optional width, then a directive. Unknown directives pass through verbatim.
+func strftime(t *Time, format string) string {
+	var b strings.Builder
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' || i+1 >= len(format) {
+			b.WriteByte(format[i])
+			continue
+		}
+		j := i + 1
+		flags, width, colons := "", -1, 0
+		for j < len(format) && strings.IndexByte("-_0^#", format[j]) >= 0 {
+			flags += string(format[j])
+			j++
+		}
+		for j < len(format) && format[j] == ':' {
+			colons++
+			j++
+		}
+		w := 0
+		for j < len(format) && format[j] >= '0' && format[j] <= '9' {
+			w = w*10 + int(format[j]-'0')
+			width = w
+			j++
+		}
+		if j >= len(format) {
+			b.WriteString(format[i:])
+			break
+		}
+		dir := format[j]
+		if exp, ok := strftimeExpand[dir]; ok {
+			b.WriteString(strftime(t, exp))
+			i = j
+			continue
+		}
+		out, ok := strftimeField(t, dir, colons, width)
+		if !ok {
+			b.WriteString(format[i : j+1])
+			i = j
+			continue
+		}
+		b.WriteString(applyFlags(out.val, flags, out.width, out.pad, width))
+		i = j
+	}
+	return b.String()
+}
+
+// field carries a directive's raw value plus its default field width and pad.
+type field struct {
+	val   string
+	width int
+	pad   byte
+}
+
+// strftimeField computes a single directive's value (ignoring flags/width, which
+// applyFlags layers on), reporting ok=false for an unknown directive.
+func strftimeField(t *Time, dir byte, colons, width int) (field, bool) {
+	tm := t.t
+	num := func(n int64, w int) field { return field{val: strconv.FormatInt(n, 10), width: w, pad: '0'} }
+	str := func(s string) field { return field{val: s, width: 0, pad: ' '} }
+	_, off := tm.Zone()
+	switch dir {
+	case 'Y':
+		return num(int64(tm.Year()), 4), true
+	case 'C':
+		return num(int64(tm.Year()/100), 2), true
+	case 'y':
+		return num(int64(mod(tm.Year(), 100)), 2), true
+	case 'm':
+		return num(int64(tm.Month()), 2), true
+	case 'd':
+		return num(int64(tm.Day()), 2), true
+	case 'e':
+		return field{val: strconv.Itoa(tm.Day()), width: 2, pad: ' '}, true
+	case 'H':
+		return num(int64(tm.Hour()), 2), true
+	case 'k':
+		return field{val: strconv.Itoa(tm.Hour()), width: 2, pad: ' '}, true
+	case 'I':
+		return num(int64(hour12(tm.Hour())), 2), true
+	case 'l':
+		return field{val: strconv.Itoa(hour12(tm.Hour())), width: 2, pad: ' '}, true
+	case 'M':
+		return num(int64(tm.Minute()), 2), true
+	case 'S':
+		return num(int64(tm.Second()), 2), true
+	case 'L':
+		return field{val: fracDigits(tm.Nanosecond(), 3), width: 0, pad: '0'}, true
+	case 'N':
+		w := 9
+		if width > 0 {
+			w = width
+		}
+		return field{val: fracDigits(tm.Nanosecond(), w), width: 0, pad: '0'}, true
+	case 'j':
+		return num(int64(tm.YearDay()), 3), true
+	case 'p':
+		return str(ampm(tm.Hour(), true)), true
+	case 'P':
+		return str(ampm(tm.Hour(), false)), true
+	case 'A':
+		return str(tm.Weekday().String()), true
+	case 'a':
+		return str(tm.Weekday().String()[:3]), true
+	case 'B':
+		return str(tm.Month().String()), true
+	case 'b':
+		return str(tm.Month().String()[:3]), true
+	case 'u':
+		return num(int64(isoWeekday(tm.Weekday())), 0), true
+	case 'w':
+		return num(int64(tm.Weekday()), 0), true
+	case 's':
+		return num(tm.Unix(), 0), true
+	case 'z':
+		return str(zoneOffset(off, colons)), true
+	case 'Z':
+		return str(zoneName(tm)), true
+	case 'U':
+		return num(int64(weekOfYear(tm, stdtime.Sunday)), 2), true
+	case 'W':
+		return num(int64(weekOfYear(tm, stdtime.Monday)), 2), true
+	case 'G':
+		y, _ := tm.ISOWeek()
+		return num(int64(y), 4), true
+	case 'V':
+		_, wk := tm.ISOWeek()
+		return num(int64(wk), 2), true
+	case 'n':
+		return str("\n"), true
+	case 't':
+		return str("\t"), true
+	case '%':
+		return str("%"), true
+	}
+	return field{}, false
+}
+
+// applyFlags lays strftime's flags and explicit width over a field's raw value:
+// '-' drops padding, '_' pads with spaces, '0' pads with zeros, '^' upcases and
+// '#' swaps case; an explicit width widens beyond the field's default.
+func applyFlags(val, flags string, defWidth int, defPad byte, width int) string {
+	pad := defPad
+	noPad := false
+	for _, f := range flags {
+		switch f {
+		case '-':
+			noPad = true
+		case '_':
+			pad = ' '
+		case '0':
+			pad = '0'
+		case '^':
+			val = strings.ToUpper(val)
+		case '#':
+			val = swapCase(val)
+		}
+	}
+	w := defWidth
+	if width > 0 {
+		w = width
+	}
+	if noPad {
+		w = 0
+	}
+	for len(val) < w {
+		val = string(pad) + val
+	}
+	return val
+}
+
+// mod returns a Euclidean-positive modulus.
+func mod(a, m int) int { return ((a % m) + m) % m }
+
+// hour12 maps a 24-hour clock hour to its 12-hour equivalent (0 and 12 → 12).
+func hour12(h int) int {
+	h = mod(h, 12)
+	if h == 0 {
+		return 12
+	}
+	return h
+}
+
+// ampm renders AM/PM (upper) or am/pm (lower) for the given hour.
+func ampm(h int, upper bool) string {
+	s := "am"
+	if h >= 12 {
+		s = "pm"
+	}
+	if upper {
+		return strings.ToUpper(s)
+	}
+	return s
+}
+
+// isoWeekday maps Go's Sunday=0 weekday to ISO's Monday=1…Sunday=7.
+func isoWeekday(w stdtime.Weekday) int {
+	if w == stdtime.Sunday {
+		return 7
+	}
+	return int(w)
+}
+
+// fracDigits renders the first n digits of a nanosecond value (zero-padded to 9
+// then truncated/extended), used by %L and %N.
+func fracDigits(ns, n int) string {
+	s := pad(int64(ns), 9)
+	if n <= 9 {
+		return s[:n]
+	}
+	return s + strings.Repeat("0", n-9)
+}
+
+// zoneOffset renders %z / %:z / %::z for an offset in seconds.
+func zoneOffset(off, colons int) string {
+	switch colons {
+	case 1:
+		return signedOffset(off, ":")
+	case 2:
+		sign := "+"
+		a := off
+		if a < 0 {
+			sign, a = "-", -a
+		}
+		return sign + pad(int64(a/3600), 2) + ":" + pad(int64((a%3600)/60), 2) + ":" + pad(int64(a%60), 2)
+	default:
+		return signedOffset(off, "")
+	}
+}
+
+// zoneName renders %Z: the zone's name, or its numeric offset when it is a bare
+// fixed-offset zone.
+func zoneName(tm stdtime.Time) string {
+	name, off := tm.Zone()
+	if name == "" {
+		return signedOffset(off, ":")
+	}
+	return name
+}
+
+// weekOfYear computes %U (start=Sunday) / %W (start=Monday): the count of whole
+// start-of-week days elapsed in the year.
+func weekOfYear(tm stdtime.Time, start stdtime.Weekday) int {
+	wday := int(tm.Weekday()-start+7) % 7
+	return (tm.YearDay() - wday + 6) / 7
+}
+
+// swapCase inverts the case of every ASCII letter (strftime's '#' flag).
+func swapCase(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		switch {
+		case c >= 'a' && c <= 'z':
+			b[i] = c - 32
+		case c >= 'A' && c <= 'Z':
+			b[i] = c + 32
+		}
+	}
+	return string(b)
+}
+
+// strftimeToGo maps Ruby/C strftime directives to Go reference-time tokens so
+// strptime can drive the go-composites Parse (which speaks Go layouts).
+var strftimeToGo = map[byte]string{
+	'Y': "2006", 'y': "06", 'm': "01", 'd': "02", 'e': "_2",
+	'H': "15", 'I': "03", 'M': "04", 'S': "05", 'p': "PM", 'P': "pm",
+	'A': "Monday", 'a': "Mon", 'B': "January", 'b': "Jan",
+	'Z': "MST", 'z': "-0700", 'j': "002", '%': "%",
+}
+
+// rubyLayout converts a strftime format string into a Go layout; unknown
+// directives and literal text pass through verbatim.
 func rubyLayout(format string) string {
 	var b strings.Builder
 	for i := 0; i < len(format); i++ {

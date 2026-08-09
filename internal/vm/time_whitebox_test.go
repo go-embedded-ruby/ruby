@@ -3,8 +3,6 @@ package vm
 import (
 	"testing"
 
-	gotime "github.com/go-composites/time/src"
-
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 )
 
@@ -15,8 +13,8 @@ func TestTimeNowSeam(t *testing.T) {
 	defer func() { nowUnix = saved }()
 	nowUnix = func() int64 { return 1782045296 }
 
-	tm := &Time{t: gotime.FromUnix(nowUnix())}
-	if got := tm.t.ToUnix(); got != 1782045296 {
+	tm := unixTime(nowUnix())
+	if got := tm.t.Unix(); got != 1782045296 {
 		t.Fatalf("seamed Time.now = %d, want 1782045296", got)
 	}
 }
@@ -26,6 +24,18 @@ func TestTimeNowSeam(t *testing.T) {
 // opcode is the only way to exercise the fallthrough.
 func TestTimeOpDefault(t *testing.T) {
 	wantRaise(t, "NoMethodError", func() {
-		timeOp(bytecode.OpMul, &Time{t: gotime.FromUnix(0)}, &Time{t: gotime.FromUnix(0)})
+		timeOp(bytecode.OpMul, unixTime(0), unixTime(0))
 	})
+}
+
+// TestModNegative covers mod's Euclidean-positive branch for a negative
+// dividend — a defensive path the strftime callers (which only ever pass
+// non-negative operands) never reach through the interpreter.
+func TestModNegative(t *testing.T) {
+	if got := mod(-5, 3); got != 1 {
+		t.Errorf("mod(-5, 3) = %d, want 1", got)
+	}
+	if got := mod(-1, 12); got != 11 {
+		t.Errorf("mod(-1, 12) = %d, want 11", got)
+	}
 }
