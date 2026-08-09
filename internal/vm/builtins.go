@@ -96,6 +96,7 @@ func (vm *VM) bootstrap() {
 	vm.registerSingleton()
 	vm.registerMethod()
 	vm.registerModuleExtras()
+	vm.registerRefinements()
 	vm.registerReflection()
 	vm.registerMethodReflect()
 	vm.registerMethodReflect2()

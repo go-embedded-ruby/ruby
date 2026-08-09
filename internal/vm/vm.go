@@ -234,6 +234,11 @@ type VM struct {
 
 	cBasicObject, cObject, cModule, cClass *RClass
 	cKernel                                *RClass // the Kernel module (included into Object; its methods live on cObject)
+	cRefinement                            *RClass // the Refinement class (a Module subclass; instances are the anonymous modules Module#refine creates)
+	// anyRefinements becomes true the first time Module#refine mints a Refinement.
+	// It gates the refinement-aware branch of method dispatch so that programs
+	// which never touch refinements pay nothing (the send fast path is unchanged).
+	anyRefinements bool
 	cInteger, cFloat, cString, cSymbol     *RClass
 	cComplex, cRational                    *RClass
 	cNDArray, cImage                       *RClass
@@ -1430,6 +1435,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// (operator fallback / method_missing) falls back to send.
 					base := len(stack) - argc
 					recv := stack[base-1]
+					if vm.anyRefinements {
+						if rm := vm.refinedMethod(definee, recv, name); rm != nil {
+							if in.Flags&bytecode.FlagSendExplicit != 0 {
+								vm.checkVisibility(recv, name, rm, self)
+							}
+							res := vm.invokeInPlace(rm, recv, stack[base:], nil)
+							stack = stack[:base-1]
+							stack = append(stack, res)
+							pc++
+							continue
+						}
+					}
 					if _, isClass := recv.(*RClass); !isClass {
 						if m := vm.lookupCached(&caches[pc], recv, name); m != nil {
 							// An explicit-receiver send enforces method visibility
@@ -1470,6 +1487,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
 					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					if vm.anyRefinements {
+						if rm := vm.refinedMethod(definee, recv, name); rm != nil {
+							push(vm.invokeInPlace(rm, recv, callArgs, blk))
+							pc++
+							continue
+						}
+					}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -1480,7 +1504,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				stack = stack[:len(stack)-argc]
 				recv := pop()
 				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
-				push(vm.dispatchSend(recv, iseq.Names[in.A], callArgs, vm.toBlock(blockVal)))
+				bname := iseq.Names[in.A]
+				bblk := vm.toBlock(blockVal)
+				if vm.anyRefinements {
+					if rm := vm.refinedMethod(definee, recv, bname); rm != nil {
+						push(vm.invokeInPlace(rm, recv, callArgs, bblk))
+						pc++
+						continue
+					}
+				}
+				push(vm.dispatchSend(recv, bname, callArgs, bblk))
 			case bytecode.OpDefineMethod:
 				name := iseq.Names[in.A]
 				m := &Method{name: name, iseq: iseq.Children[in.B], owner: definee, vis: definee.defaultVis}
@@ -2155,6 +2188,15 @@ func (vm *VM) asModuleParent(v object.Value) *RClass {
 func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string, args []object.Value, blk *Proc) object.Value {
 	if methodName == "" {
 		raise("RuntimeError", "super called outside of method")
+	}
+	// super inside a refinement method resolves in the refined class only — its
+	// own method and normal ancestor chain — skipping every other active
+	// refinement (MRI: "looks only in the refined class").
+	if definee.isRefinement {
+		if m := lookupMethod(definee.refinedClass, methodName); m != nil && !m.undefined {
+			return vm.invoke(m, self, args, blk)
+		}
+		raise("NoMethodError", "super: no superclass method '%s'", methodName)
 	}
 	// super resolves to the next definition of methodName after the current
 	// method's owner (definee) in the receiver's ancestor chain — so it walks
