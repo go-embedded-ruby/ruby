@@ -258,43 +258,34 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(vm.hashValue(self))
 	})
-	vm.cObject.define("methods", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cObject.define("methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// #methods lists the receiver's public and protected methods (private
+		// excluded, as MRI). With a false argument it lists only the receiver's own
+		// singleton methods; otherwise its instance methods including inherited ones.
+		keep := func(v visibility) bool { return v != visPrivate }
+		if len(args) > 0 && !args[0].Truthy() {
+			return vm.filterVisibility(self, vm.singletonMethodNames(self, false), keep)
+		}
 		c := vm.classOf(self)
 		if o, ok := self.(*RObject); ok && o.singleton != nil {
 			c = o.singleton // its super is the real class, so the walk picks up both
 		}
-		return object.NewArrayFromSlice(vm.methodNames(c, true))
+		return vm.filterVisibility(self, vm.methodNames(c, true), keep)
 	})
 	vm.cObject.define("public_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Like #methods, but restricted to PUBLIC methods (excluding private and
 		// protected). An `all`/`false` argument selects inherited vs own.
-		all := len(args) == 0 || args[0].Truthy()
-		var candidates []object.Value
-		if _, ok := self.(*RClass); ok {
-			// For a class/module the callable methods are its singleton (class) methods,
-			// as with #singleton_methods.
-			candidates = vm.singletonMethodNames(self, all)
-		} else {
-			c := vm.classOf(self)
-			if o, ok := self.(*RObject); ok && o.singleton != nil {
-				c = o.singleton
-			}
-			candidates = vm.methodNames(c, all)
-		}
-		var out []object.Value
-		for _, n := range candidates {
-			name := string(n.(object.Symbol))
-			var m *Method
-			if cls, ok := self.(*RClass); ok {
-				m = vm.resolveClassMethod(cls, name)
-			} else {
-				m = undefAsNil(lookupMethod(vm.dispatchClass(self), name))
-			}
-			if m == nil || vm.sendVisibilityOf(self, name, m) == visPublic {
-				out = append(out, n)
-			}
-		}
-		return object.NewArrayFromSlice(out)
+		return vm.reflectMethodNames(self, args, visPublic)
+	})
+	vm.cObject.define("private_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// The names of the receiver's privately-accessible methods (an object's
+		// private instance methods, or a class's private singleton methods). An
+		// `all`/`false` argument selects inherited vs own, as MRI.
+		return vm.reflectMethodNames(self, args, visPrivate)
+	})
+	vm.cObject.define("protected_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// The names of the receiver's protected methods, mirroring #private_methods.
+		return vm.reflectMethodNames(self, args, visProtected)
 	})
 	vm.cObject.define("singleton_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Default includes singleton methods inherited from the receiver's
@@ -5388,6 +5379,59 @@ func (vm *VM) methodNames(c *RClass, all bool) []object.Value {
 		out[i] = object.Symbol(n)
 	}
 	return out
+}
+
+// reflectMethodNames backs #public_methods / #private_methods / #protected_methods:
+// it lists the receiver's applicable method names filtered to the target
+// visibility want. The candidate set is the receiver's singleton (class) methods
+// when self is a class/module — as with #singleton_methods — otherwise its
+// instance methods (through its per-object singleton class when it has one). A
+// leading `all`/`false` argument (default true) selects inherited methods vs the
+// receiver's own. A name whose Method cannot be resolved is treated as public, so
+// #public_methods keeps it while the other two drop it.
+func (vm *VM) reflectMethodNames(self object.Value, args []object.Value, want visibility) object.Value {
+	all := len(args) == 0 || args[0].Truthy()
+	var candidates []object.Value
+	if _, isClass := self.(*RClass); isClass {
+		candidates = vm.singletonMethodNames(self, all)
+	} else {
+		c := vm.classOf(self)
+		if o, ok := self.(*RObject); ok && o.singleton != nil {
+			c = o.singleton
+		}
+		candidates = vm.methodNames(c, all)
+	}
+	return vm.filterVisibility(self, candidates, func(v visibility) bool { return v == want })
+}
+
+// filterVisibility keeps the candidate method names whose effective send-time
+// visibility on self satisfies keep, resolving each name against self's class
+// methods (when self is a class/module) or its instance-method chain. A name
+// whose Method cannot be resolved is treated as public, so it survives a keep
+// that accepts public and is dropped by one that does not.
+func (vm *VM) filterVisibility(self object.Value, candidates []object.Value, keep func(visibility) bool) object.Value {
+	cls, isClass := self.(*RClass)
+	var out []object.Value
+	for _, n := range candidates {
+		name := string(n.(object.Symbol))
+		var m *Method
+		if isClass {
+			m = vm.resolveClassMethod(cls, name)
+		} else {
+			m = undefAsNil(lookupMethod(vm.dispatchClass(self), name))
+		}
+		// A candidate whose Method cannot be resolved counts as public (defensive:
+		// the candidate sets only carry resolvable, non-undef names, so m is set in
+		// practice — the default just keeps the walk nil-safe).
+		vis := visPublic
+		if m != nil {
+			vis = vm.sendVisibilityOf(self, name, m)
+		}
+		if keep(vis) {
+			out = append(out, n)
+		}
+	}
+	return object.NewArrayFromSlice(out)
 }
 
 // singletonMethodNames returns the singleton-method names of self as sorted

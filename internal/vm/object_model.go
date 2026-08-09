@@ -87,6 +87,12 @@ type Proc struct {
 	superName    string
 	superDefinee *RClass
 	superArgs    []object.Value
+	// methodCtx is the __method__/__callee__ pair the enclosing method exposes,
+	// captured when this block literal was created. A block is transparent to
+	// Kernel#__method__ / #__callee__ just as it is to yield/super, so running the
+	// block adopts this pair (see exec), letting __method__ inside a block report
+	// the surrounding method — or nil for a block written at the top level.
+	methodCtx frameMethod
 	// dmBody marks this Proc activation as the body of a define_method-created
 	// method. Such a body anchors an *explicit* `super(args)`, but MRI forbids a
 	// bare `super` (implicit argument forwarding) from it, so the frame raises in
@@ -119,8 +125,8 @@ const (
 
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
 type Method struct {
-	name     string
-	native   NativeFn
+	name   string
+	native NativeFn
 	iseq     *bytecode.ISeq
 	proc     *Proc          // for define_method: a block-backed method body
 	compiled CompiledMethod // AOT-lowered native body (rbgo build); preferred when set
@@ -593,7 +599,10 @@ func (vm *VM) aliasMethod(definee *RClass, newName, oldName string) {
 		raise("NameError", "undefined method '%s' for class '%s'", oldName, definee.name)
 	}
 	// Copy the method record under the new name, retargeting its name while
-	// keeping the original body, owner and any AOT-compiled form.
+	// keeping the original body, owner and any AOT-compiled form. The original
+	// name is recovered through the alias by methodOriginalName (an iseq-backed
+	// method shares its iseq, whose Name is the original; a transplanted body
+	// pins origName), so Kernel#__method__ reports it through the alias.
 	clone := *m
 	clone.name = newName
 	clone.undefined = false
@@ -1732,6 +1741,10 @@ func (vm *VM) invokeBody(m *Method, self object.Value, args []object.Value, blk 
 		// define_method body may call super (matching MRI).
 		return vm.callProcMethod(m.proc, self, args, blk, m.name, m.owner)
 	}
+	// Hand exec this frame's __method__/__callee__ pair: __method__ reports the
+	// method's original name (unchanged through an alias), __callee__ the name it
+	// was called by (m.name — the alias when aliased).
+	vm.pendingMethodCtx = &frameMethod{orig: methodOriginalName(m), callee: m.name}
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, m.lexScope)
 }
 
@@ -1841,6 +1854,9 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 	anchored.superName, anchored.superDefinee, anchored.superArgs = name, owner, args
 	anchored.dmBody = true
 	anchored.dmDirect = true // this frame IS the method body: its `return` is a return target
+	// The define_method body IS the method: __method__ / __callee__ both report the
+	// method name it was defined under (and a block nested in the body inherits it).
+	anchored.methodCtx = frameMethod{orig: name, callee: name}
 	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, &anchored, nil)
 }
 

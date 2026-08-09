@@ -85,15 +85,40 @@ func rubyPlatformFor(arch, os string) string {
 
 // registerKernelIntrospection installs Kernel#caller, #at_exit and #__method__.
 func (vm *VM) registerKernelIntrospection() {
-	// __method__: the name of the method the call sits in, or nil at the top
-	// level / in a block-only context. __method__ is itself native and pushes no
-	// frame, so the top of frameNames is its caller's method name.
+	// __method__: the definition-original name of the method the call sits in, or
+	// nil at the top level / in a class body. It is native and pushes no frame, so
+	// the top of frameMethods is its caller's pair; it reports orig, so an aliased
+	// method still reports the name its body was defined under. Transparent through
+	// blocks and eval, which inherit the enclosing method's pair.
 	vm.cObject.define("__method__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		if name := vm.currentMethodName(); name != "" {
+		if name := vm.currentMethodCtx().orig; name != "" {
 			return object.Symbol(name)
 		}
 		return object.NilV
 	})
+
+	// __callee__: like __method__ but the name the method was *called* by — the
+	// alias for an aliased method, and otherwise identical. nil at the top level /
+	// in a class body; transparent through blocks and eval.
+	vm.cObject.define("__callee__", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		if name := vm.currentMethodCtx().callee; name != "" {
+			return object.Symbol(name)
+		}
+		return object.NilV
+	})
+	// __method__ and __callee__ are private instance methods in MRI (callable only
+	// without an explicit receiver).
+	vm.setInstanceVisibility(vm.cObject, "__method__", visPrivate)
+	vm.setInstanceVisibility(vm.cObject, "__callee__", visPrivate)
+	// MRI defines them as Kernel module functions: a private instance method of
+	// Kernel and a public method on the Kernel module itself. The bodies run on
+	// Object (above); mirroring the records onto Kernel makes the introspection
+	// reflect that (Kernel.private_instance_methods / .public_methods).
+	for _, name := range []string{"__method__", "__callee__"} {
+		fn := vm.cObject.methods[name].native
+		vm.cKernel.methods[name] = &Method{name: name, owner: vm.cKernel, native: fn, vis: visPrivate}
+		vm.cKernel.smethods[name] = &Method{name: name, owner: vm.cKernel, native: fn}
+	}
 
 	// caller: a best-effort backtrace as a String array, outermost-first omitted
 	// like MRI — it excludes the frame that called caller and lists the rest from
@@ -177,13 +202,21 @@ func (vm *VM) currentFile() string {
 	return vm.scriptName
 }
 
-// currentMethodName returns the name of the innermost real (named) method frame,
-// or "" when none. Native frames push nothing, so the top entry is the Ruby
-// method that called the native introspection method.
-func (vm *VM) currentMethodName() string {
-	// exec always pushes a frame name ("" for top-level/class/block bodies)
-	// before any native method can run, so the stack is never empty here.
-	return vm.frameNames[len(vm.frameNames)-1]
+// currentMethodCtx returns the __method__/__callee__ pair of the frame on top of
+// the stack — the Ruby frame that called the native introspection method (a
+// native pushes no frame). exec always pushes a frame (even for top-level / class
+// bodies, whose pair is empty and reports nil) before any native can run, so the
+// stack is never empty here; this backs Kernel#__method__ / #__callee__ directly.
+func (vm *VM) currentMethodCtx() frameMethod {
+	return vm.frameMethods[len(vm.frameMethods)-1]
+}
+
+// currentMethodCtxPtr returns a heap copy of currentMethodCtx for handing to the
+// next exec frame via pendingMethodCtx (Kernel#eval, so eval'd code inherits the
+// caller's method context).
+func (vm *VM) currentMethodCtxPtr() *frameMethod {
+	ctx := vm.currentMethodCtx()
+	return &ctx
 }
 
 // callerFrames builds caller's String array. It drops the topmost frame (the one

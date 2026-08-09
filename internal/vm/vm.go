@@ -447,6 +447,26 @@ type VM struct {
 	// caller's cref on top. GVL-guarded.
 	frameCrefs []*RClass
 
+	// frameMethods mirrors frameNames one-for-one (pushed in lockstep with
+	// frameCrefs), recording the __method__/__callee__ answer each frame should
+	// report: a real method frame carries its definition-original name and its
+	// called name (they differ only for an aliased method); a block/eval frame
+	// inherits the enclosing method's pair (so __method__ inside a block reports
+	// the surrounding method); a class body / top-level frame carries the empty
+	// pair, which reports nil. A native method (which pushes no frame) sees its
+	// caller's entry on top, so Kernel#__method__ / #__callee__ read the top.
+	// GVL-guarded.
+	frameMethods []frameMethod
+
+	// pendingMethodCtx, when non-nil, is the frameMethod that the next exec frame
+	// should adopt instead of deriving one from its methodName. invokeBody sets it
+	// so a method frame reports the method's original+called names, and Kernel#eval
+	// sets it so eval'd code inherits the caller's __method__/__callee__. It is
+	// read and cleared at the top of exec (single-goroutine under the GVL, consumed
+	// synchronously before any nested call), so a caller that does not set it
+	// leaves the frame to derive its own pair. GVL-guarded.
+	pendingMethodCtx *frameMethod
+
 	// children records finished synthetic child processes (Process.spawn /
 	// Kernel.fork), so Process.waitpid2 can report each one's exit status.
 	// childPidSeq assigns the next synthetic pid. GVL-guarded.
@@ -813,6 +833,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 				vm.frameNames = vm.frameNames[:0]
 				vm.frameFiles = vm.frameFiles[:0]
 				vm.frameCrefs = vm.frameCrefs[:0]
+				vm.frameMethods = vm.frameMethods[:0]
 				vm.fileStack = vm.fileStack[:0]
 				vm.runAtExit()
 				result, err = object.NilV, nil
@@ -826,6 +847,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 				vm.frameNames = vm.frameNames[:0]
 				vm.frameFiles = vm.frameFiles[:0]
 				vm.frameCrefs = vm.frameCrefs[:0]
+				vm.frameMethods = vm.frameMethods[:0]
 				vm.fileStack = vm.fileStack[:0]
 				vm.runAtExit()
 				result, err = object.NilV, nil
@@ -840,6 +862,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 				vm.frameNames = vm.frameNames[:0]
 				vm.frameFiles = vm.frameFiles[:0]
 				vm.frameCrefs = vm.frameCrefs[:0]
+				vm.frameMethods = vm.frameMethods[:0]
 				vm.fileStack = vm.fileStack[:0]
 				vm.runAtExit()
 				result, err = object.NilV, nil
@@ -856,6 +879,7 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 			vm.frameNames = vm.frameNames[:0]
 			vm.frameFiles = vm.frameFiles[:0]
 			vm.frameCrefs = vm.frameCrefs[:0]
+			vm.frameMethods = vm.frameMethods[:0]
 			vm.fileStack = vm.fileStack[:0]
 			result, err = nil, rerr
 		}
@@ -924,7 +948,33 @@ func plural(n int) string {
 	return ""
 }
 
+// frameMethod records what Kernel#__method__ and #__callee__ report for a frame:
+// orig is the method's definition-original name (returned by __method__) and
+// callee is the name the method was invoked by (returned by __callee__). The two
+// differ only for an aliased method; both are "" for a class body / top level,
+// which report nil. A block or eval frame inherits the pair of the method it was
+// written in, so introspection is transparent through blocks and eval.
+type frameMethod struct {
+	orig   string
+	callee string
+}
+
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc, methodLexScope *RClass) (execResult object.Value) {
+	// Determine this frame's __method__/__callee__ pair before any nested call can
+	// disturb pendingMethodCtx: a block inherits the pair captured on the block
+	// Proc, an invokeBody/eval caller supplies one via pendingMethodCtx, and any
+	// other frame derives it from methodName (empty for class bodies / top level).
+	pend := vm.pendingMethodCtx
+	vm.pendingMethodCtx = nil
+	var fm frameMethod
+	switch {
+	case selfBlock != nil:
+		fm = selfBlock.methodCtx
+	case pend != nil:
+		fm = *pend
+	default:
+		fm = frameMethod{orig: methodName, callee: methodName}
+	}
 	var kwargs *object.Hash
 	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
 		kwargs = vm.bindKeywords(iseq, &args)
@@ -1010,6 +1060,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// frameCrefs mirrors frameNames too; the cref is filled in below once lexCref
 	// is known (a nil placeholder keeps the stacks aligned until then).
 	vm.frameCrefs = append(vm.frameCrefs, nil)
+	// frameMethods mirrors frameNames/frameCrefs, carrying this frame's
+	// __method__/__callee__ pair (computed above from block / pending / methodName).
+	vm.frameMethods = append(vm.frameMethods, fm)
 	// Track the source file of frames that carry one (loaded files), so __FILE__
 	// reports the file of the executing ISeq even across calls into other files.
 	// Like frameNames, an exception unwinding past here is reset at the Run
@@ -1154,6 +1207,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				vm.frameNames = vm.frameNames[:frameNamesDepth-1]
 				vm.frameFiles = vm.frameFiles[:frameFilesDepth-1]
 				vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth-1]
+				vm.frameMethods = vm.frameMethods[:frameCrefsDepth-1]
 				vm.requireDirs = vm.requireDirs[:requireDirsDepth]
 				if pushedFile {
 					vm.fileStack = vm.fileStack[:fileStackDepth-1]
@@ -1415,7 +1469,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 					push(vm.dispatchSend(recv, name, callArgs, blk))
 				}
 			case bytecode.OpSendBlockArg:
@@ -1534,7 +1588,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				var superArgs []object.Value
 				if in.B == 1 { // bare super forwards the home method's arguments
@@ -1563,7 +1617,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				argsArr := pop().(*object.Array)
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, argsArr.Elems, superBlk))
@@ -1845,7 +1899,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
 			case bytecode.OpSendArrayBlockArg:
@@ -1882,6 +1936,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						vm.frameNames = vm.frameNames[:frameNamesDepth]
 						vm.frameFiles = vm.frameFiles[:frameFilesDepth]
 						vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth]
+						vm.frameMethods = vm.frameMethods[:frameCrefsDepth]
 						vm.fileStack = vm.fileStack[:fileStackDepth]
 						vm.requireDirs = vm.requireDirs[:requireDirsDepth]
 					}
@@ -1929,6 +1984,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	vm.frameNames = vm.frameNames[:len(vm.frameNames)-1]
 	vm.frameFiles = vm.frameFiles[:len(vm.frameFiles)-1]
 	vm.frameCrefs = vm.frameCrefs[:len(vm.frameCrefs)-1]
+	vm.frameMethods = vm.frameMethods[:len(vm.frameMethods)-1]
 	if pushedFile {
 		vm.fileStack = vm.fileStack[:len(vm.fileStack)-1]
 	}
