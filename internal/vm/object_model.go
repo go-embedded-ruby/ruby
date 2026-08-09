@@ -125,14 +125,8 @@ const (
 
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
 type Method struct {
-	name string
-	// origName is the method's definition-original name, set only when it differs
-	// from name — i.e. on an alias, where name is the alias but origName stays the
-	// name the body was defined under. An empty origName means "same as name". It
-	// backs Kernel#__method__, which reports the original name even through an
-	// alias, while __callee__ reports name (the called alias). See originalName.
-	origName string
-	native   NativeFn
+	name   string
+	native NativeFn
 	iseq     *bytecode.ISeq
 	proc     *Proc          // for define_method: a block-backed method body
 	compiled CompiledMethod // AOT-lowered native body (rbgo build); preferred when set
@@ -605,25 +599,15 @@ func (vm *VM) aliasMethod(definee *RClass, newName, oldName string) {
 		raise("NameError", "undefined method '%s' for class '%s'", oldName, definee.name)
 	}
 	// Copy the method record under the new name, retargeting its name while
-	// keeping the original body, owner and any AOT-compiled form. origName is
-	// pinned to the source method's original name so Kernel#__method__ still
-	// reports it through the alias (and through a chain of aliases).
+	// keeping the original body, owner and any AOT-compiled form. The original
+	// name is recovered through the alias by methodOriginalName (an iseq-backed
+	// method shares its iseq, whose Name is the original; a transplanted body
+	// pins origName), so Kernel#__method__ reports it through the alias.
 	clone := *m
 	clone.name = newName
-	clone.origName = m.originalName()
 	clone.undefined = false
 	definee.methods[newName] = &clone
 	bumpMethodSerial()
-}
-
-// originalName is the method's definition-original name: origName when set (an
-// alias pins it to the source method's original), otherwise name. It is what
-// Kernel#__method__ reports, whereas #__callee__ reports name.
-func (m *Method) originalName() string {
-	if m.origName != "" {
-		return m.origName
-	}
-	return m.name
 }
 
 // undefMethod implements `undef name` on definee: it installs a tombstone so the
@@ -1760,7 +1744,7 @@ func (vm *VM) invokeBody(m *Method, self object.Value, args []object.Value, blk 
 	// Hand exec this frame's __method__/__callee__ pair: __method__ reports the
 	// method's original name (unchanged through an alias), __callee__ the name it
 	// was called by (m.name — the alias when aliased).
-	vm.pendingMethodCtx = &frameMethod{orig: m.originalName(), callee: m.name}
+	vm.pendingMethodCtx = &frameMethod{orig: methodOriginalName(m), callee: m.name}
 	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, m.lexScope)
 }
 
