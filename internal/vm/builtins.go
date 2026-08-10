@@ -1569,16 +1569,32 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cString.define("to_sym", strToSym)
 	vm.cString.define("intern", strToSym) // MRI alias of String#to_sym
-	// scrub replaces invalid byte sequences with a replacement string (the Unicode
-	// replacement char U+FFFD by default), returning a valid UTF-8 string.
-	vm.cString.define("scrub", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		repl := "�"
-		if len(args) > 0 {
-			if _, isNil := args[0].(object.Nil); !isNil {
-				repl = strArg(args[0])
-			}
+	// scrub replaces each ill-formed byte sequence with a replacement (the encoding's
+	// U+FFFD, or an explicit String / block result), returning a valid copy in the
+	// receiver's encoding. scrub! does the same in place, returning self.
+	vm.cString.define("scrub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.stringScrub(self, args, blk, false)
+	})
+	vm.cString.define("scrub!", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.stringScrub(self, args, blk, true)
+	})
+	// -@ returns a frozen copy (self when already frozen); +@ returns a mutable copy
+	// (self when already mutable), matching MRI's String#-@ / #+@.
+	vm.cString.define("-@", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		if s.Frozen {
+			return s
 		}
-		return object.NewString(scrubUTF8(strOf(self), repl))
+		d := s.Dup()
+		d.Frozen = true
+		return d
+	})
+	vm.cString.define("+@", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		if s.Frozen {
+			return s.Dup()
+		}
+		return s
 	})
 	vm.cString.define("ljust", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(padString(strOf(self), args, 'l'))
