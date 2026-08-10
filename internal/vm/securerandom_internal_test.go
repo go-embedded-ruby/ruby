@@ -40,6 +40,11 @@ func TestSecureRandomDeterministic(t *testing.T) {
 		{`require "securerandom"; p SecureRandom.random_bytes(5).bytesize`, "5\n"},
 		// uuid v4: version nibble 4 at byte 6, variant 10x at byte 8 over 00..0f.
 		{`require "securerandom"; puts SecureRandom.uuid`, "00010203-0405-4607-8809-0a0b0c0d0e0f\n"},
+		// uuid_v4 is an alias of uuid, so it renders the same layout.
+		{`require "securerandom"; puts SecureRandom.uuid_v4`, "00010203-0405-4607-8809-0a0b0c0d0e0f\n"},
+		// bytes / gen_random are random_bytes aliases over the 00 01 02 ... stream.
+		{`require "securerandom"; puts SecureRandom.gen_random(4).unpack1("H*")`, "00010203\n"},
+		{`require "securerandom"; puts SecureRandom.bytes(4).unpack1("H*")`, "00010203\n"},
 		// uuid v7: 48-bit ms timestamp prefix, version nibble 7, 10x variant.
 		{`require "securerandom"; p (SecureRandom.uuid_v7 =~ /\A\h{8}-\h{4}-7\h{3}-[89ab]\h{3}-\h{12}\z/) == 0`, "true\n"},
 		// alphanumeric draws from the default A-Za-z0-9 alphabet.

@@ -258,6 +258,10 @@ func hasCustomEq(_ *VM, v object.Value) bool {
 	switch v.(type) {
 	case *DigestObj, *BCryptPassword:
 		return true
+	case *RandomObj:
+		// Random#== compares generator state (the MT vector, its index, and the
+		// seed), not object identity, so `rng == other` must dispatch its own ==.
+		return true
 	case *Set:
 		// Set#== compares members (and the compare_by_identity flag), accepts a
 		// Set-like Enumerable, and is defined in the prelude, so `set == other`
