@@ -24,10 +24,14 @@ func (vm *VM) registerSecureRandom() {
 	// swapping secureRandRead reseeds this generator too.
 	gen := securerandom.New(seamSource{})
 
-	def("random_bytes", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	binaryBytes := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		// Random bytes are binary, not UTF-8: tag ASCII-8BIT so length == bytesize.
 		return object.NewStringBytesEnc(gen.RandomBytes(countArg(args, 16)), "ASCII-8BIT")
-	})
+	}
+	// random_bytes and its aliases bytes / gen_random all yield n binary bytes.
+	def("random_bytes", binaryBytes)
+	def("bytes", binaryBytes)
+	def("gen_random", binaryBytes)
 	def("hex", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(gen.Hex(countArg(args, 16)))
 	})
@@ -42,9 +46,11 @@ func (vm *VM) registerSecureRandom() {
 	def("alphanumeric", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(gen.Alphanumeric(countArg(args, 16)))
 	})
-	def("uuid", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+	uuidV4 := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(gen.Uuid())
-	})
+	}
+	def("uuid", uuidV4)
+	def("uuid_v4", uuidV4)
 	def("uuid_v7", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(gen.UuidV7())
 	})
