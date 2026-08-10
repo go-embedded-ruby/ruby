@@ -1,8 +1,6 @@
 package vm
 
 import (
-	"unicode/utf8"
-
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -138,11 +136,22 @@ func (vm *VM) registerEncoding() {
 		defExternal = vm.encodingArg(args[0])
 		return args[0]
 	})
-	sdef("default_internal", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NilV
+	sdef("default_internal", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		if vm.defInternalEnc == nil {
+			return object.NilV
+		}
+		return vm.defInternalEnc
 	})
-	sdef("default_internal=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return args[0] // accepted but not applied — rbgo strings stay UTF-8
+	sdef("default_internal=", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// nil clears it (MRI's default); otherwise remember the Encoding so
+		// force_encoding("internal") can resolve it. rbgo strings stay UTF-8 either
+		// way — only the reported default and the "internal" alias track this.
+		if _, isNil := args[0].(object.Nil); isNil {
+			vm.defInternalEnc = nil
+		} else {
+			vm.defInternalEnc = vm.encodingArg(args[0])
+		}
+		return args[0]
 	})
 	sdef("locale_charmap", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString("UTF-8")
@@ -346,7 +355,8 @@ func (vm *VM) registerStringEncoding() {
 	})
 	vm.cString.define("force_encoding", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		s.Enc = vm.encodingName(args[0])
+		checkFrozen(s)
+		s.Enc = vm.forceEncodingName(args[0])
 		return s
 	})
 	vm.cString.define("b", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -359,8 +369,7 @@ func (vm *VM) registerStringEncoding() {
 	})
 	vm.cString.define("valid_encoding?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		// Binary is always valid; a UTF-8 string is valid iff it decodes cleanly.
-		return object.Bool(s.IsBinary() || utf8.Valid(s.Bytes()))
+		return object.Bool(validInEncoding(s.Bytes(), s.EncName()))
 	})
 	vm.registerStringEncodeMethods()
 }
