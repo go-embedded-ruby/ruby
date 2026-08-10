@@ -391,7 +391,9 @@ type VM struct {
 	cTrueClass, cFalseClass, cNilClass *RClass
 	cRegexp, cMatchData                *RClass
 	cException                         *RClass
-	curExc                             object.Value // most recently rescued exception (for bare `raise`)
+	backtraceLocationClass             *RClass        // Thread::Backtrace::Location (Exception#backtrace_locations)
+	curExc                             object.Value   // most recently rescued exception (for bare `raise`)
+	catchTags                          []object.Value // active Kernel#catch tags, innermost last (for Kernel#throw)
 
 	loaded        map[string]bool   // require/require_relative: features loaded once
 	featureHooks  map[string]func() // built-in feature -> body run once on its first require (e.g. shellwords)

@@ -219,7 +219,14 @@ func (vm *VM) bootstrap() {
 		frameNamesDepth := len(vm.frameNames)
 		frameFilesDepth := len(vm.frameFiles)
 		requireDirsDepth := len(vm.requireDirs)
+		// Register this catch's tag so a Kernel#throw can tell a matched throw (an
+		// unwind to here) from an unmatched one (an UncaughtThrowError). The depth
+		// is restored in the defer, covering both the normal return and a throw
+		// unwinding straight past this frame.
+		catchTagsDepth := len(vm.catchTags)
+		vm.catchTags = append(vm.catchTags, tag)
 		defer func() {
+			vm.catchTags = vm.catchTags[:catchTagsDepth]
 			if r := recover(); r != nil {
 				// Tags match by identity (== on the interface): a Symbol by value, a
 				// reference by pointer — exactly Ruby's equal?.
@@ -236,12 +243,25 @@ func (vm *VM) bootstrap() {
 		}()
 		return vm.callBlock(blk, []object.Value{tag})
 	})
-	vm.cObject.define("throw", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cObject.define("throw", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
 		var val object.Value = object.NilV
 		if len(args) > 1 {
 			val = args[1]
 		}
-		panic(throwSignal{tag: args[0], value: val})
+		// A throw whose tag matches an active catch unwinds to it; a throw with no
+		// matching catch is an UncaughtThrowError raised here — a real (rescuable)
+		// exception carrying the tag and value, as MRI.
+		for i := len(vm.catchTags) - 1; i >= 0; i-- {
+			if vm.catchTags[i] == args[0] {
+				panic(throwSignal{tag: args[0], value: val})
+			}
+		}
+		vm.raiseWithIvars("UncaughtThrowError", "uncaught throw "+args[0].Inspect(),
+			map[string]object.Value{"@tag": args[0], "@value": val})
+		return object.NilV
 	})
 	vm.cObject.define("equal?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Object identity: reference types compare by pointer, the immutable
@@ -619,9 +639,12 @@ func (vm *VM) bootstrap() {
 
 	// Exception instance protocol: initialize stores @message; message/to_s
 	// return it (or the class name when unset).
-	cException.define("initialize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if len(args) > 0 {
-			self.(*RObject).ivars["@message"] = object.NewString(args[0].ToS())
+	cException.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// A nil (or absent) argument leaves @message unset, so #message falls back
+		// to the class name (Exception.new(nil).message == "Exception"); any other
+		// argument is coerced to its string form via #to_s.
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			setIvar(self, "@message", object.NewString(vm.exceptionMessageArg(args[0])))
 		}
 		return object.NilV
 	})
@@ -643,14 +666,19 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
-	// backtrace_locations: best-effort — this VM has no Thread::Backtrace::Location
-	// objects, so it returns the same String array as #backtrace (callers that only
-	// stringify locations still work).
-	cException.define("backtrace_locations", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if bt := getIvar(self, backtraceIvar); bt != object.NilV {
-			return bt
+	// backtrace_locations: the captured frames as Thread::Backtrace::Location
+	// value objects (parsed from the stored "path:lineno:in 'label'" strings), or
+	// nil when the exception has never been raised — matching MRI.
+	cException.define("backtrace_locations", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		bt, ok := getIvar(self, backtraceIvar).(*object.Array)
+		if !ok {
+			return object.NilV
 		}
-		return object.NilV
+		locs := make([]object.Value, len(bt.Elems))
+		for i, f := range bt.Elems {
+			locs[i] = vm.backtraceLocation(f.ToS())
+		}
+		return object.NewArrayFromSlice(locs)
 	})
 	// set_backtrace: replace the backtrace with a String, an Array of String, or
 	// nil (clearing it). Anything else is a TypeError, as MRI.
@@ -668,16 +696,25 @@ func (vm *VM) bootstrap() {
 	vm.consts["NameError"].(*RClass).define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return getIvar(self, "@name")
 	})
-	// full_message: the MRI-shaped multi-line report — the first frame, the message
-	// and class, then "\tfrom <frame>" for each remaining frame. With no captured
-	// backtrace it degrades to just the detailed message (message + class).
-	cException.define("full_message", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.exceptionFullMessage(self))
+	// full_message(highlight:, order:): the MRI-shaped multi-line report. order:
+	// :top (default) leads with the raise-site frame + detailed message then the
+	// "\tfrom <frame>" tail; order: :bottom prints a "Traceback (most recent call
+	// last):" header, the frames outermost-first, and the raise-site + message
+	// last. highlight: true wraps the message and class name in ANSI bold/underline
+	// (the terminal form); highlight defaults to false here (no TTY).
+	cException.define("full_message", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		highlight, order := parseFullMessageOpts(args)
+		return object.NewString(vm.exceptionFullMessage(self, highlight, order))
 	})
-	// detailed_message: "<message> (<ClassName>)", the body full_message embeds.
-	cException.define("detailed_message", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(vm.exceptionDetailedMessage(self))
+	// detailed_message(highlight:, **opts): "<message> (<ClassName>)", the body
+	// full_message embeds. highlight: true adds the ANSI emphasis; extra keywords
+	// are accepted and ignored (MRI passes library-specific opts through).
+	cException.define("detailed_message", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		highlight, _ := parseFullMessageOpts(args)
+		return object.NewString(vm.exceptionDetailedMessage(self, highlight))
 	})
+
+	vm.registerExceptionMethods(cException)
 
 	// Kernel (on Object).
 	vm.cObject.define("puts", nativePuts)
@@ -704,8 +741,21 @@ func (vm *VM) bootstrap() {
 		return object.NilV
 	})
 	vm.cBasicObject.define("method_missing", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := args[0].ToS()
-		return raise("NoMethodError", "undefined method '%s' for %s", name, vm.classOf(self).name)
+		// args[0] is the missing method name (a Symbol), args[1:] the call's own
+		// arguments. Stamp them so NoMethodError#name/#receiver/#args report the
+		// failed call, as MRI.
+		nameSym, ok := args[0].(object.Symbol)
+		if !ok {
+			nameSym = object.Symbol(args[0].ToS())
+		}
+		var callArgs object.Value
+		if len(args) > 1 {
+			callArgs = object.NewArrayFromSlice(append([]object.Value(nil), args[1:]...))
+		}
+		vm.raiseWithIvars("NoMethodError",
+			"undefined method '"+string(nameSym)+"' for "+vm.classOf(self).name,
+			map[string]object.Value{"@name": nameSym, "@receiver": self, "@args": callArgs})
+		return object.NilV
 	})
 	isAFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		target := classArg(args[0])
@@ -3027,7 +3077,8 @@ func (vm *VM) bootstrap() {
 		if len(args) > 1 {
 			return args[1]
 		}
-		raise("KeyError", "key not found: %s", args[0].Inspect())
+		vm.raiseWithIvars("KeyError", "key not found: "+args[0].Inspect(),
+			map[string]object.Value{"@key": args[0], "@receiver": self})
 		return object.NilV
 	})
 	vm.cHash.define("dig", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -3059,7 +3110,8 @@ func (vm *VM) bootstrap() {
 				out = append(out, vm.callBlock(blk, []object.Value{k}))
 				continue
 			}
-			raise("KeyError", "key not found: %s", k.Inspect())
+			vm.raiseWithIvars("KeyError", "key not found: "+k.Inspect(),
+				map[string]object.Value{"@key": k, "@receiver": self})
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -5705,10 +5757,17 @@ func (vm *VM) excError(exc object.Value) RubyError {
 
 // nativeRaise implements Kernel#raise: a message string (RuntimeError), an
 // exception class (instantiated), an exception instance (re-raised), or a
-// class + message pair.
+// class + message pair — plus the cause: keyword, which sets the raised
+// exception's #cause (nil suppressing the automatic link to $!). With no
+// positional argument the exception being handled is re-raised (or a fresh
+// RuntimeError); a lone cause: with no exception is an ArgumentError, as MRI.
 func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	args, causeGiven, causeVal := popCauseKwarg(args)
 	switch len(args) {
 	case 0:
+		if causeGiven {
+			raise("ArgumentError", "only cause is given with no arguments")
+		}
 		// Bare `raise` re-raises the exception currently being handled, else a
 		// fresh RuntimeError.
 		if !object.IsNil(vm.curExc) {
@@ -5717,7 +5776,9 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 		panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
 			[]object.Value{object.NewString("unhandled exception")}, nil))))
 	default:
-		panic(vm.excError(vm.captureBacktrace(vm.raiseExceptionObject(args))))
+		exc := vm.raiseExceptionObject(args)
+		vm.applyRaiseCause(exc, causeGiven, causeVal)
+		panic(vm.excError(vm.captureBacktrace(exc)))
 	}
 }
 
@@ -5815,36 +5876,86 @@ func (vm *VM) exceptionMessageText(self object.Value) string {
 	return vm.classOf(self).name
 }
 
-// exceptionDetailedMessage renders "<message> (<ClassName>)", the body MRI's
-// Exception#detailed_message produces (highlight off) and that full_message and
-// the uncaught-exception printer embed.
-func (vm *VM) exceptionDetailedMessage(self object.Value) string {
-	return vm.exceptionMessageText(self) + " (" + vm.classOf(self).name + ")"
+// parseFullMessageOpts reads the highlight:/order: keywords of full_message /
+// detailed_message from a trailing options Hash. highlight defaults to false (no
+// TTY under the test/CLI harness) and order to "top". Unknown keywords are
+// ignored, matching MRI's tolerance of library-specific detailed_message opts.
+func parseFullMessageOpts(args []object.Value) (highlight bool, order string) {
+	order = "top"
+	if len(args) == 0 {
+		return highlight, order
+	}
+	h, ok := args[len(args)-1].(*object.Hash)
+	if !ok {
+		return highlight, order
+	}
+	if v, ok := h.Get(object.Symbol("highlight")); ok {
+		highlight = v.Truthy()
+	}
+	if v, ok := h.Get(object.Symbol("order")); ok {
+		if s, ok := v.(object.Symbol); ok {
+			order = string(s)
+		}
+	}
+	return highlight, order
 }
 
-// exceptionFullMessage renders the MRI-shaped multi-line report:
+// exceptionDetailedMessage renders "<message> (<ClassName>)", the body MRI's
+// Exception#detailed_message produces and that full_message embeds. With
+// highlight it wraps the message bold and the class name bold-underline, matching
+// MRI's terminal form.
+func (vm *VM) exceptionDetailedMessage(self object.Value, highlight bool) string {
+	msg := vm.exceptionMessageText(self)
+	cls := vm.classOf(self).name
+	if highlight {
+		return "\x1b[1m" + msg + " (\x1b[1;4m" + cls + "\x1b[m\x1b[1m)\x1b[m"
+	}
+	return msg + " (" + cls + ")"
+}
+
+// exceptionFullMessage renders the MRI-shaped multi-line report. order: :top (the
+// default) leads with the raise-site frame and the detailed message, then a
+// "\tfrom <frame>" line per remaining frame:
 //
 //	<file>:<line>:in '<label>': <message> (<ClassName>)
 //		from <frame>
-//		from ...
 //
-// The leading "<frame>: " prefix and the "\tfrom" tail come from the captured
-// backtrace; with no backtrace it degrades to just the detailed message. Line
-// numbers are 0 (the parser carries no positions) and the source-snippet/caret
-// lines MRI prints are omitted, but the file+label chain matches.
-func (vm *VM) exceptionFullMessage(self object.Value) string {
-	detailed := vm.exceptionDetailedMessage(self)
+// order: :bottom prints a "Traceback (most recent call last):" header, the outer
+// frames numbered outermost-first, and the raise-site + message last. With no
+// backtrace it degrades to just the detailed message. Line numbers are 0 (the
+// parser carries no positions) and the source-snippet/caret lines MRI prints are
+// omitted, but the file+label chain matches.
+func (vm *VM) exceptionFullMessage(self object.Value, highlight bool, order string) string {
+	detailed := vm.exceptionDetailedMessage(self, highlight)
 	bt, ok := getIvar(self, backtraceIvar).(*object.Array)
 	if !ok || len(bt.Elems) == 0 {
 		return detailed
 	}
+	frames := bt.Elems
 	var b strings.Builder
-	b.WriteString(bt.Elems[0].ToS())
+	if order == "bottom" {
+		b.WriteString("Traceback (most recent call last):\n")
+		for i := len(frames) - 1; i >= 1; i-- {
+			b.WriteString("\t")
+			b.WriteString(strconv.Itoa(i))
+			b.WriteString(": from ")
+			b.WriteString(frames[i].ToS())
+			b.WriteString("\n")
+		}
+		b.WriteString(frames[0].ToS())
+		b.WriteString(": ")
+		b.WriteString(detailed)
+		b.WriteString("\n")
+		return b.String()
+	}
+	b.WriteString(frames[0].ToS())
 	b.WriteString(": ")
 	b.WriteString(detailed)
-	for _, f := range bt.Elems[1:] {
-		b.WriteString("\n\tfrom ")
+	b.WriteString("\n")
+	for _, f := range frames[1:] {
+		b.WriteString("\tfrom ")
 		b.WriteString(f.ToS())
+		b.WriteString("\n")
 	}
 	return b.String()
 }
@@ -6076,7 +6187,9 @@ func isFrozen(v object.Value) bool {
 // raiseFrozen raises FrozenError for a modification attempt on a frozen object,
 // mirroring MRI's "can't modify frozen <class>: <inspect>" message.
 func (vm *VM) raiseFrozen(self object.Value) {
-	raise("FrozenError", "can't modify frozen %s: %s", vm.classOf(self).name, vm.inspectStr(self))
+	vm.raiseWithIvars("FrozenError",
+		"can't modify frozen "+vm.classOf(self).name+": "+vm.inspectStr(self),
+		map[string]object.Value{"@receiver": self})
 }
 
 // arrayKeepIf mutates a in place, keeping the elements for which the block's
