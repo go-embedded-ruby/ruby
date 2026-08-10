@@ -43,6 +43,8 @@ func TestIODescriptorsStringIO(t *testing.T) {
 		{`require "stringio"; p StringIO.new("a;b;").gets(";", chomp: true)`, "\"a\"\n"},
 		{`require "stringio"; p StringIO.new("abc").gets(nil, 2)`, "\"ab\"\n"},
 		{`require "stringio"; p StringIO.new("abc").gets(chomp: true)`, "\"abc\"\n"},
+		// a single gets with a 0 limit yields "" (it does not loop).
+		{`require "stringio"; p StringIO.new("ab").gets(0)`, "\"\"\n"},
 		{`require "stringio"; s = StringIO.new("a\nb\nc\n"); s.readlines; p s.lineno`, "3\n"},
 		{`require "stringio"; s = StringIO.new("a\nb\n"); p s.readlines(chomp: true)`, "[\"a\", \"b\"]\n"},
 		// lineno.
@@ -121,6 +123,10 @@ func TestIODescriptorsErrors(t *testing.T) {
 		{`require "stringio"; StringIO.new("").sysread(1)`, "end of file reached"},
 		// sysread argument validation.
 		{`require "stringio"; StringIO.new("ab").sysread(-1)`, "negative length"},
+		// a 0 limit on a line-iterating read is rejected (it would never advance).
+		{`require "stringio"; StringIO.new("ab").readlines(0)`, "invalid limit: 0 for readlines"},
+		{`require "stringio"; StringIO.new("ab").each_line(0) { |x| }`, "invalid limit: 0 for each_line"},
+		{`require "stringio"; StringIO.new("ab").each(0) { |x| }`, "invalid limit: 0 for each_line"},
 		// unget type errors.
 		{`require "stringio"; StringIO.new("ab").ungetbyte([])`, "into Integer"},
 		{`require "stringio"; StringIO.new("ab").ungetc([])`, "into String"},
@@ -140,6 +146,9 @@ func TestIODescriptorsErrors(t *testing.T) {
 		{fmt.Sprintf(`File.write(%s, "abc"); File.open(%s, "r+") { |f| f.pwrite("x", -1) }`, q(path), q(path)), "Invalid argument"},
 		// pread into a frozen buffer.
 		{fmt.Sprintf(`File.write(%s, "abc"); File.open(%s) { |f| f.pread(2, 0, "xx".freeze) }`, q(path), q(path)), "frozen String"},
+		// class-method line iterators reject a 0 limit too.
+		{fmt.Sprintf(`File.write(%s, "a\nb\n"); IO.foreach(%s, 0) { |x| }`, q(path), q(path)), "invalid limit: 0 for foreach"},
+		{fmt.Sprintf(`File.write(%s, "a\nb\n"); IO.readlines(%s, 0)`, q(path), q(path)), "invalid limit: 0 for readlines"},
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {

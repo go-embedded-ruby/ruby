@@ -93,6 +93,7 @@ func defIOReadExtra(cls *RClass) {
 	each := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
+		checkGetsLimit(args, "each_line")
 		for {
 			v := ioGets(o, args)
 			if v == object.NilV {

@@ -551,6 +551,8 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("readlines", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		ioCheckReadable(o)
+		checkGetsLimit(args, "readlines")
 		var lines []object.Value
 		for {
 			v := ioGets(o, args)
@@ -563,6 +565,8 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("each_line", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		o := self.(*IOObj)
+		ioCheckReadable(o)
+		checkGetsLimit(args, "each_line")
 		for {
 			v := ioGets(o, args)
 			if v == object.NilV {
@@ -628,6 +632,16 @@ func parseGetsArgs(args []object.Value) (sep getsSep, limit int, chomp bool) {
 		}
 	}
 	return sep, limit, chomp
+}
+
+// checkGetsLimit raises ArgumentError for an explicit limit of 0 on a
+// line-iterating read (readlines/each_line/foreach/each): a 0-byte line never
+// advances the cursor, so MRI rejects it rather than looping. A single #gets(0)
+// is allowed (it just returns "") and does not go through this guard.
+func checkGetsLimit(args []object.Value, meth string) {
+	if _, limit, _ := parseGetsArgs(args); limit == 0 {
+		raise("ArgumentError", "invalid limit: 0 for %s", meth)
+	}
 }
 
 // getsSep is a resolved line separator for ioGetsLine.
