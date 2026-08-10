@@ -18,6 +18,7 @@ import (
 // uid/gid/… report their defaults without pretending to be real numbers.
 type statFields struct {
 	uid, gid, ino, dev, nlink, blksize int64
+	rdev, blocks                       int64
 	hasSys                             bool
 }
 
@@ -48,6 +49,15 @@ var (
 	statEuid   = os.Geteuid
 	statEgid   = os.Getegid
 	statGroups = func() []int { g, _ := os.Getgroups(); return g }
+)
+
+// statRuid / statRgid are the real-user-id seams behind the *_real? access
+// predicates (readable_real?/writable_real?/executable_real?), which check the
+// process's real (rather than effective) identity. Tests override them to drive
+// the owner/group/other branches deterministically.
+var (
+	statRuid = os.Getuid
+	statRgid = os.Getgid
 )
 
 // newFileStat builds a FileStat from an fs.FileInfo, extracting the POSIX fields.
@@ -123,9 +133,23 @@ func (s *FileStat) ftype() string {
 // always read and write, and may execute when any execute bit is set — matching
 // MRI's File::Stat#readable?/writable?/executable?.
 func (s *FileStat) accessible(want int) bool {
+	return s.permFor(statEuid(), statEgid(), want)
+}
+
+// accessibleReal is accessible against the process's real (not effective) user
+// and group ids — the identity MRI's *_real? predicates consult.
+func (s *FileStat) accessibleReal(want int) bool {
+	return s.permFor(statRuid(), statRgid(), want)
+}
+
+// permFor is the shared owner/group/other permission decision for a given
+// (uid, gid) identity. Root (uid 0) may always read and write, and may execute
+// when any execute bit is set; otherwise the owner, group or other triad is
+// chosen the way POSIX eaccess does. The supplementary-group set (statGroups)
+// is consulted for the group triad regardless of which identity is checked.
+func (s *FileStat) permFor(uid, gid, want int) bool {
 	perm := int(s.fi.Mode().Perm())
-	euid := statEuid()
-	if euid == 0 {
+	if uid == 0 {
 		if want == 1 { // execute: at least one x bit must be set
 			return perm&0o111 != 0
 		}
@@ -133,9 +157,9 @@ func (s *FileStat) accessible(want int) bool {
 	}
 	var shift uint
 	switch {
-	case s.sys.hasSys && int64(euid) == s.sys.uid:
+	case s.sys.hasSys && int64(uid) == s.sys.uid:
 		shift = 6 // owner triad
-	case s.sys.hasSys && inGroup(s.sys.gid):
+	case s.sys.hasSys && inGroupFor(s.sys.gid, gid):
 		shift = 3 // group triad
 	default:
 		shift = 0 // other triad
@@ -143,18 +167,41 @@ func (s *FileStat) accessible(want int) bool {
 	return perm&(want<<shift) != 0
 }
 
-// inGroup reports whether gid is the effective gid or one of the supplementary
-// groups (used to pick the group permission triad).
-func inGroup(gid int64) bool {
-	if int64(statEgid()) == gid {
+// inGroupFor reports whether fileGid is the given primary gid or one of the
+// process's supplementary groups (used to pick the group permission triad).
+func inGroupFor(fileGid int64, gid int) bool {
+	if int64(gid) == fileGid {
 		return true
 	}
 	for _, g := range statGroups() {
-		if int64(g) == gid {
+		if int64(g) == fileGid {
 			return true
 		}
 	}
 	return false
+}
+
+// devMajor / devMinor decompose a device number into its major and minor parts.
+// The encoding follows glibc's gnu_dev_major / gnu_dev_minor (the Linux layout,
+// which CI runs against); on other platforms the result is still a stable
+// integer, which is all MRI's File::Stat#dev_major / #rdev_major guarantee.
+func devMajor(dev int64) int64 {
+	d := uint64(dev)
+	return int64((d>>8)&0xfff | ((d >> 32) &^ 0xfff))
+}
+
+func devMinor(dev int64) int64 {
+	d := uint64(dev)
+	return int64(d&0xff | ((d >> 12) &^ 0xff))
+}
+
+// devPart applies a major/minor decomposition to a device number, returning nil
+// (as MRI does) when the platform carries no real POSIX device model.
+func devPart(s *FileStat, dev int64, part func(int64) int64) object.Value {
+	if !s.sys.hasSys {
+		return object.NilV
+	}
+	return object.IntValue(part(dev))
 }
 
 // statTime wraps a stat timestamp as a Ruby Time (whole-second resolution, like
@@ -321,6 +368,76 @@ func (vm *VM) registerFileStat() {
 	})
 	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).Inspect())
+	})
+
+	// Special mode bits, read straight off the file mode.
+	d("setuid?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).fi.Mode()&fs.ModeSetuid != 0)
+	})
+	d("setgid?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).fi.Mode()&fs.ModeSetgid != 0)
+	})
+	d("sticky?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).fi.Mode()&fs.ModeSticky != 0)
+	})
+	// world_readable? mirrors world_writable?: the permission integer when the
+	// other-read bit is set, else nil (MRI).
+	d("world_readable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		perm := int64(self(v).fi.Mode().Perm())
+		if perm&0o004 != 0 {
+			return object.IntValue(perm)
+		}
+		return object.NilV
+	})
+	// grpowned? is true when the file's gid is the process's effective gid or one
+	// of its supplementary groups (false without real POSIX ids, i.e. on Windows).
+	d("grpowned?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self(v)
+		return object.Bool(s.sys.hasSys && inGroupFor(s.sys.gid, statEgid()))
+	})
+	d("readable_real?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).accessibleReal(4))
+	})
+	d("writable_real?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).accessibleReal(2))
+	})
+	d("executable_real?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self(v).accessibleReal(1))
+	})
+	// rdev is the device id a special file represents (0 for a regular file); it is
+	// always an Integer, matching MRI on every platform.
+	d("rdev", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(self(v).sys.rdev)
+	})
+	// blocks is the number of 512-byte blocks allocated; nil where the platform
+	// cannot report it (Windows), a non-negative Integer otherwise.
+	d("blocks", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self(v)
+		if !s.sys.hasSys {
+			return object.NilV
+		}
+		return object.IntValue(s.sys.blocks)
+	})
+	// dev_major / dev_minor / rdev_major / rdev_minor decompose dev / rdev; nil on
+	// platforms without the POSIX device model (Windows), an Integer otherwise.
+	d("dev_major", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return devPart(self(v), self(v).sys.dev, devMajor)
+	})
+	d("dev_minor", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return devPart(self(v), self(v).sys.dev, devMinor)
+	})
+	d("rdev_major", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return devPart(self(v), self(v).sys.rdev, devMajor)
+	})
+	d("rdev_minor", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return devPart(self(v), self(v).sys.rdev, devMinor)
+	})
+	// birthtime: Go's portable stat surface (fs.FileInfo) does not expose the
+	// creation time, and it is unavailable on Linux without statx, so — as MRI does
+	// on unsupported platforms/filesystems — it raises NotImplementedError.
+	d("birthtime", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		raise("NotImplementedError", "birthtime() function is unimplemented")
+		return object.NilV
 	})
 
 	// File.stat / File.lstat class methods on the File class.

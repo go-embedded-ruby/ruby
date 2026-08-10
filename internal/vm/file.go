@@ -317,7 +317,20 @@ func (vm *VM) registerFile() {
 	def("readable?", access(4))
 	def("writable?", access(2))
 	def("executable?", access(1))
-	def("executable_real?", access(1))
+	// The *_real? predicates consult the process's real (not effective) identity.
+	realAccess := func(want int) NativeFn {
+		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			p := pathArg(vm, args[0])
+			fi, err := osStat(p)
+			if err != nil {
+				return object.Bool(false)
+			}
+			return object.Bool(newFileStat(fi, p).accessibleReal(want))
+		}
+	}
+	def("readable_real?", realAccess(4))
+	def("writable_real?", realAccess(2))
+	def("executable_real?", realAccess(1))
 
 	// Size predicates. File.size? returns the byte size, or nil when the file is
 	// missing or empty (so it doubles as an existence-and-non-empty test); File.zero?
@@ -337,6 +350,81 @@ func (vm *VM) registerFile() {
 	}
 	def("zero?", zero)
 	def("empty?", zero)
+
+	// Type predicates that delegate to a following stat and degrade to false for a
+	// missing path (MRI's File.pipe?/socket?/…). statTest wraps the stat-and-test.
+	statTest := func(pred func(*FileStat) bool) NativeFn {
+		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			p := pathArg(vm, args[0])
+			fi, err := os.Stat(p)
+			if err != nil {
+				return object.Bool(false)
+			}
+			return object.Bool(pred(newFileStat(fi, p)))
+		}
+	}
+	def("pipe?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeNamedPipe != 0 }))
+	def("socket?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeSocket != 0 }))
+	def("blockdev?", statTest(func(s *FileStat) bool {
+		m := s.fi.Mode()
+		return m&os.ModeDevice != 0 && m&os.ModeCharDevice == 0
+	}))
+	def("chardev?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeCharDevice != 0 }))
+	def("setuid?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeSetuid != 0 }))
+	def("setgid?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeSetgid != 0 }))
+	def("sticky?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeSticky != 0 }))
+	def("owned?", statTest(func(s *FileStat) bool { return s.sys.hasSys && int64(statEuid()) == s.sys.uid }))
+	def("grpowned?", statTest(func(s *FileStat) bool { return s.sys.hasSys && inGroupFor(s.sys.gid, statEgid()) }))
+
+	// world_readable? / world_writable?: the permission integer when the relevant
+	// "other" bit is set, else nil; a missing path is nil rather than an error.
+	worldPerm := func(bit int64) NativeFn {
+		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			fi, err := os.Stat(pathArg(vm, args[0]))
+			if err != nil {
+				return object.NilV
+			}
+			if perm := int64(fi.Mode().Perm()); perm&bit != 0 {
+				return object.IntValue(perm)
+			}
+			return object.NilV
+		}
+	}
+	def("world_readable?", worldPerm(0o004))
+	def("world_writable?", worldPerm(0o002))
+
+	// identical? reports whether two paths refer to the same file (same device and
+	// inode), following symlinks; false when either path is missing.
+	def("identical?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		fi1, err1 := os.Stat(pathArg(vm, args[0]))
+		fi2, err2 := os.Stat(pathArg(vm, args[1]))
+		return object.Bool(err1 == nil && err2 == nil && os.SameFile(fi1, fi2))
+	})
+
+	// atime / ctime return the file's access / change Time (whole-second, like
+	// mtime — Go's portable stat exposes only ModTime, so both report it). A missing
+	// file raises Errno::ENOENT, as MRI does.
+	modTimeOf := func(vm *VM, args []object.Value) object.Value {
+		p := pathArg(vm, args[0])
+		fi, err := os.Stat(p)
+		if err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
+		}
+		return unixTime(fi.ModTime().Unix())
+	}
+	def("atime", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value { return modTimeOf(vm, args) })
+	def("ctime", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value { return modTimeOf(vm, args) })
+	// birthtime: unavailable through Go's portable stat surface (and on Linux
+	// without statx), so — matching MRI on unsupported platforms — it raises
+	// Errno::ENOENT for a missing path and NotImplementedError otherwise.
+	def("birthtime", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := pathArg(vm, args[0])
+		if _, err := os.Stat(p); err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_birthtime - %s", p)
+		}
+		raise("NotImplementedError", "birthtime() function is unimplemented")
+		return object.NilV
+	})
 }
 
 // fileChmod / fileChown / fileLchown / fileChtimes are seams over the os package

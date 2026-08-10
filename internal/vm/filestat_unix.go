@@ -32,6 +32,8 @@ func statSys(fi fs.FileInfo) statFields {
 		dev:     int64(st.Dev),
 		nlink:   int64(st.Nlink),
 		blksize: int64(st.Blksize),
+		rdev:    int64(st.Rdev),
+		blocks:  int64(st.Blocks),
 		hasSys:  true,
 	}
 }
