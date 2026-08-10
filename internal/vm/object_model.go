@@ -1355,6 +1355,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *FileStat:
 		return vm.cFileStat
+	case *DirObj:
+		return vm.consts["Dir"].(*RClass)
 	case *BigDecimal:
 		return vm.cBigDecimal
 	case *Tms:
