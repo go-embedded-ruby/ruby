@@ -70,7 +70,30 @@ func (vm *VM) registerFile() {
 	for name, val := range fileFlagConsts {
 		cFile.consts[name] = object.IntValue(val)
 	}
+	// File::FNM_* flag constants for File.fnmatch? / Dir.glob (values match MRI).
+	// FNM_SYSCASE is 0 on the case-sensitive POSIX platforms the gate runs on.
+	for name, val := range map[string]int64{
+		"FNM_NOESCAPE": fnmNoEscape, "FNM_PATHNAME": fnmPathname, "FNM_DOTMATCH": fnmDotMatch,
+		"FNM_CASEFOLD": fnmCaseFold, "FNM_EXTGLOB": fnmExtGlob, "FNM_SYSCASE": fnmSysCase,
+	} {
+		cFile.consts[name] = object.IntValue(val)
+	}
 	def := func(name string, fn NativeFn) { cFile.smethods[name] = &Method{name: name, owner: cFile, native: fn} }
+
+	// File.fnmatch?(pattern, path, flags=0) and its alias File.fnmatch test path
+	// against a shell glob pattern, returning true/false. flags is an FNM_* OR.
+	fnmatchFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 2 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2..3)", len(args))
+		}
+		flags := 0
+		if len(args) == 3 {
+			flags = int(intArg(args[2]))
+		}
+		return object.Bool(fnmatch(strArg(args[0]), pathArg(vm, args[1]), flags))
+	}
+	def("fnmatch?", fnmatchFn)
+	def("fnmatch", fnmatchFn)
 
 	def("basename", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 1 || len(args) > 2 {
