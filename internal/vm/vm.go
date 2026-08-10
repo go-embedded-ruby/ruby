@@ -391,7 +391,9 @@ type VM struct {
 	cTrueClass, cFalseClass, cNilClass *RClass
 	cRegexp, cMatchData                *RClass
 	cException                         *RClass
-	curExc                             object.Value // most recently rescued exception (for bare `raise`)
+	backtraceLocationClass             *RClass        // Thread::Backtrace::Location (Exception#backtrace_locations)
+	curExc                             object.Value   // most recently rescued exception (for bare `raise`)
+	catchTags                          []object.Value // active Kernel#catch tags, innermost last (for Kernel#throw)
 
 	loaded        map[string]bool   // require/require_relative: features loaded once
 	featureHooks  map[string]func() // built-in feature -> body run once on its first require (e.g. shellwords)
@@ -1806,9 +1808,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					t := homeTarget()
 					val := pop()
 					// The home method activation has already returned (its Proc outlived
-					// it): MRI raises "unexpected return" here, catchable by rescue.
+					// it): MRI raises "unexpected return" here, catchable by rescue, with
+					// #reason :return and #exit_value the returned value.
 					if !t.live {
-						raise("LocalJumpError", "unexpected return")
+						vm.raiseWithIvars("LocalJumpError", "unexpected return",
+							map[string]object.Value{"@reason": object.Symbol("return"), "@exit_value": val})
 					}
 					panic(returnSignal{target: t, value: val})
 				}
@@ -1977,6 +1981,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	}
 
 	if iseqHasHandler(iseq) {
+		// $! ($ERROR_INFO / vm.curExc) is scoped to this frame's rescue clauses:
+		// save it here and restore on normal completion so a handled exception does
+		// not leak out as the "current exception" once the frame returns — the way
+		// MRI reverts $! when a rescue clause exits. This keeps Exception#cause from
+		// auto-linking a fresh raise to a stale, already-handled exception.
+		prevCurExc := vm.curExc
 		// This frame can rescue: run under a recover that, on a Ruby exception with
 		// a live handler, unwinds the operand stack and resumes at the rescue pc;
 		// other panics (or no handler) re-propagate. The loop re-enters after a
@@ -2030,6 +2040,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				runChunk()
 			}()
 		}
+		// Reached only on the frame's normal completion (an unhandled exception
+		// panics straight past here): revert $! to what it was on entry.
+		vm.curExc = prevCurExc
 	} else {
 		// No begin/rescue in this ISeq: run the loop directly. A panic propagates
 		// to an enclosing frame's handler (or the Run boundary) with no per-frame

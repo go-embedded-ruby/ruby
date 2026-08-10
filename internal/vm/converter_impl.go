@@ -344,7 +344,7 @@ func (vm *VM) primitiveConvert(c *converterObj, args []object.Value) object.Valu
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(pos[1]))
 	}
-	checkFrozen(dst)
+	vm.checkFrozen(dst)
 
 	offset := len(dst.Bytes())
 	if len(pos) > 2 && pos[2] != object.NilV {

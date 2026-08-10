@@ -49,6 +49,10 @@ func (vm *VM) registerFile() {
 		"EADDRINUSE", "EINTR", "ECHILD", "ENOMEM", "EXDEV", "EMFILE", "ENFILE",
 	} {
 		c := newClass("Errno::"+name, syscallErr)
+		// Each Errno::Exxx carries its platform errno number as the class constant
+		// Errno::ENOENT::Errno (2 on this host), which SystemCallError#errno reads
+		// back. Values come from the host syscall table so they match the host MRI.
+		c.consts["Errno"] = object.IntValue(errnoNumbers[name])
 		errno.consts[name] = c
 		vm.consts["Errno::"+name] = c
 	}

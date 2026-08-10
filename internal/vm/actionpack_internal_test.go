@@ -424,14 +424,18 @@ AroundRaiseController.dispatch(:boom)
 		t.Errorf("around raise = %q, want RuntimeError", got)
 	}
 
+	// A bare (non-Ruby) unwind signal must surface untouched through acRecover's
+	// re-raise. A Kernel#throw with no matching catch is now a rescuable
+	// UncaughtThrowError (a RubyError), so this uses Find.prune, which panics a raw
+	// throwSignal past the action body when invoked outside a Find.find block.
 	throwSrc := `
 class ThrowController < ActionController::Base
-  def t; throw :nope; end
+  def t; require "find"; Find.prune; end
 end
 ThrowController.dispatch(:t)
 `
 	if got := acRunErr(t, throwSrc); got == "" {
-		t.Error("throw should surface an uncaught error")
+		t.Error("an escaping signal should surface an uncaught error")
 	}
 
 	badQuery := `
