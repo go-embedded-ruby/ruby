@@ -4940,14 +4940,12 @@ func pathArg(vm *VM, v object.Value) string {
 }
 
 // scrubUTF8 returns s with every ill-formed UTF-8 byte sequence replaced by repl,
-// so the result is valid UTF-8 (backing String#scrub). Valid runs are copied
-// verbatim; each *maximal ill-formed subpart* collapses to a single repl, matching
-// MRI — so a truncated multibyte lead followed by valid continuation bytes (e.g.
-// "\xE3\x81") counts as one replacement, not one per byte.
+// so the result is valid UTF-8 (the encode :invalid=>:replace path). Valid runs are
+// copied verbatim; each *maximal ill-formed subpart* collapses to a single repl,
+// matching MRI — so a truncated multibyte lead followed by valid continuation bytes
+// (e.g. "\xE3\x81") counts as one replacement, not one per byte. Callers pass only
+// already-invalid input, so no fast path for wholly-valid strings is needed.
 func scrubUTF8(s, repl string) string {
-	if utf8.ValidString(s) {
-		return s
-	}
 	var b strings.Builder
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
