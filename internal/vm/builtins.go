@@ -1442,6 +1442,34 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
+	vm.cString.define("grapheme_clusters", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		pieces := graphemeClusters(s.Str())
+		out := make([]object.Value, len(pieces))
+		for i, g := range pieces {
+			out[i] = graphemePiece(g, s.Enc)
+		}
+		return object.NewArrayFromSlice(out)
+	})
+	vm.cString.define("each_grapheme_cluster", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "each_grapheme_cluster")
+		}
+		s := self.(*object.String)
+		for _, g := range graphemeClusters(s.Str()) {
+			vm.callBlock(blk, []object.Value{graphemePiece(g, s.Enc)})
+		}
+		return self
+	})
+	vm.cString.define("byteindex", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.strByteindex(self.(*object.String), args)
+	})
+	vm.cString.define("byterindex", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.strByterindex(self.(*object.String), args)
+	})
+	vm.cString.define("bytesplice", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.strBytesplice(self.(*object.String), args)
+	})
 	vm.cString.define("each_byte", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "each_byte")
