@@ -4,6 +4,7 @@ import (
 	crand "crypto/rand"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
+	securerandom "github.com/go-ruby-securerandom/securerandom"
 )
 
 // randomSeed draws a non-deterministic seed for Random.new / srand with no
@@ -25,6 +26,10 @@ type RandomObj struct {
 	mt   [624]uint32
 	mti  int
 	seed int64
+	// fmtr formats this generator's MT19937 byte stream through
+	// go-ruby-securerandom (hex/base64/urlsafe_base64/uuid/uuid_v7), so a seeded
+	// Random reproduces MRI's Random::Formatter output byte for byte.
+	fmtr *securerandom.SecureRandom
 }
 
 func (r *RandomObj) ToS() string     { return "#<Random>" }
@@ -39,7 +44,38 @@ func newRandom(seed int64) *RandomObj {
 	} else {
 		r.initByArray(key)
 	}
+	r.fmtr = securerandom.New(randomByteSource{r})
 	return r
+}
+
+// randomByteSource feeds a RandomObj's MT19937 byte stream into the
+// Random::Formatter helpers. Each formatter method issues one random_bytes draw,
+// so a single Read per call keeps the word alignment identical to MRI's
+// fill_random_bytes and the formatted output matches MRI bit for bit.
+type randomByteSource struct{ r *RandomObj }
+
+func (s randomByteSource) Read(p []byte) (int, error) {
+	s.r.fillBytes(p)
+	return len(p), nil
+}
+
+// fillBytes writes len(p) random bytes, taking each MT19937 32-bit word
+// little-endian and discarding the unused tail of the final word — MRI's
+// Random#bytes / fill_random_bytes layout.
+func (r *RandomObj) fillBytes(p []byte) {
+	for i := 0; i < len(p); i += 4 {
+		w := r.genrandInt32()
+		for k := 0; k < 4 && i+k < len(p); k++ {
+			p[i+k] = byte(w >> (8 * uint(k)))
+		}
+	}
+}
+
+// equalState reports whether o is a Random in exactly the same generator state
+// (the full MT vector, its index, and the seed), so future output is identical —
+// MRI's Random#== semantics.
+func (r *RandomObj) equalState(o *RandomObj) bool {
+	return r.mt == o.mt && r.mti == o.mti && r.seed == o.seed
 }
 
 // seedKey turns a seed into the 32-bit little-endian word array MRI feeds to
@@ -232,6 +268,128 @@ func (vm *VM) randRange(r *RandomObj, rg *object.Range) object.Value {
 	return object.Float(flo + r.res53()*(fhi-flo))
 }
 
+// randomNumberValue implements Random::Formatter#random_number: it mirrors
+// Random#rand for a positive Integer, a positive Float (scaled res53), or a
+// Range, but a non-positive / non-numeric argument (n <= 0) yields a Float in
+// [0, 1) instead of raising. A non-numeric, non-Range argument is an
+// ArgumentError, as in MRI.
+func (vm *VM) randomNumberValue(r *RandomObj, args []object.Value) object.Value {
+	if len(args) == 0 {
+		return object.Float(r.res53())
+	}
+	switch a := args[0].(type) {
+	case object.Integer:
+		if a > 0 {
+			return object.IntValue(int64(r.limitedRand(uint64(a) - 1)))
+		}
+		return object.Float(r.res53())
+	case object.Float:
+		if a > 0 {
+			return object.Float(r.res53() * float64(a))
+		}
+		return object.Float(r.res53())
+	case *object.Range:
+		return vm.randRange(r, a)
+	}
+	raise("ArgumentError", "invalid argument - %s", args[0].Inspect())
+	return object.NilV
+}
+
+// alnumChars is MRI's Random::Formatter::ALPHANUMERIC source: A-Z, then a-z,
+// then 0-9, each as a one-character string.
+var alnumChars = buildAlnum()
+
+func buildAlnum() []string {
+	out := make([]string, 0, 62)
+	for c := byte('A'); c <= 'Z'; c++ {
+		out = append(out, string(c))
+	}
+	for c := byte('a'); c <= 'z'; c++ {
+		out = append(out, string(c))
+	}
+	for c := byte('0'); c <= '9'; c++ {
+		out = append(out, string(c))
+	}
+	return out
+}
+
+// chooseAlnum reproduces MRI's Random::Formatter#choose over this generator's
+// MT19937 stream: it batches m base-size digits per random_number(limit) draw
+// (limit the largest power of size that fits in 0x100000000), emitting the
+// least-significant digit first, then a final partial batch — so a seeded
+// Random#alphanumeric matches MRI. A single-element source has no batch large
+// enough (MRI would loop forever); we return n copies of that element, the limit
+// of MRI's intent, and an empty source yields "".
+func (r *RandomObj) chooseAlnum(source []string, n int) string {
+	size := len(source)
+	if n <= 0 || size == 0 {
+		return ""
+	}
+	if size == 1 {
+		var out []byte
+		for i := 0; i < n; i++ {
+			out = append(out, source[0]...)
+		}
+		return string(out)
+	}
+	limit := int64(size)
+	m := 1
+	for limit*int64(size) <= 0x100000000 {
+		limit *= int64(size)
+		m++
+	}
+	var out []byte
+	emit := func(count int) {
+		rs := int64(r.limitedRand(uint64(limit) - 1))
+		for i := 0; i < count; i++ {
+			out = append(out, source[rs%int64(size)]...)
+			rs /= int64(size)
+		}
+	}
+	for m <= n {
+		emit(m)
+		n -= m
+	}
+	if n > 0 {
+		emit(n)
+	}
+	return string(out)
+}
+
+// countArgOr returns the first positional integer of args (default def), skipping
+// a trailing keyword Hash and treating an explicit nil as absent — the arity of
+// Random::Formatter's byte-count methods (hex/base64/random_bytes/…).
+func countArgOr(args []object.Value, def int) int {
+	if len(args) > 0 {
+		if _, isHash := args[len(args)-1].(*object.Hash); isHash {
+			args = args[:len(args)-1]
+		}
+	}
+	return countArg(args, def)
+}
+
+// charsKwarg returns the alphanumeric source: the chars: keyword Array when
+// present (its elements as strings), else the default A-Za-z0-9 alphabet. A
+// non-Array chars: value is a TypeError, as in MRI.
+func charsKwarg(args []object.Value) []string {
+	if len(args) > 0 {
+		if h, ok := args[len(args)-1].(*object.Hash); ok {
+			if v, found := h.Get(object.Symbol("chars")); found {
+				arr, ok := v.(*object.Array)
+				if !ok {
+					raise("TypeError", "no implicit conversion of %s into Array", v.Inspect())
+				}
+				out := make([]string, len(arr.Elems))
+				for i, e := range arr.Elems {
+					out[i] = e.ToS()
+				}
+				return out
+			}
+		}
+	}
+	return alnumChars
+}
+
 func (vm *VM) registerRandom() {
 	cRandom := newClass("Random", vm.cObject)
 	vm.consts["Random"] = cRandom
@@ -253,28 +411,83 @@ func (vm *VM) registerRandom() {
 	})
 	cRandom.define("bytes", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*RandomObj)
-		n := int(intArg(args[0]))
-		b := make([]byte, n)
-		for i := 0; i < n; i += 4 {
-			w := r.genrandInt32()
-			for k := 0; k < 4 && i+k < n; k++ {
-				b[i+k] = byte(w >> (8 * uint(k)))
-			}
-		}
+		b := make([]byte, int(intArg(args[0])))
+		r.fillBytes(b)
 		return object.NewStringBytes(b)
 	})
+	cRandom.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := args[0].(*RandomObj)
+		return object.Bool(ok && self.(*RandomObj).equalState(o))
+	})
+
+	// Random::Formatter (require "random/formatter"): the byte-count methods draw
+	// this generator's MT19937 stream through fmtr so seeded output matches MRI.
+	cRandom.define("random_bytes", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewStringBytesEnc(self.(*RandomObj).fmtr.RandomBytes(countArgOr(args, 16)), "ASCII-8BIT")
+	})
+	cRandom.define("hex", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(self.(*RandomObj).fmtr.Hex(countArgOr(args, 16)))
+	})
+	cRandom.define("base64", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(self.(*RandomObj).fmtr.Base64(countArgOr(args, 16)))
+	})
+	cRandom.define("urlsafe_base64", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		padding := len(args) > 1 && args[1].Truthy()
+		return object.NewString(self.(*RandomObj).fmtr.UrlsafeBase64(countArgOr(args, 16), padding))
+	})
+	uuidV4 := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self.(*RandomObj).fmtr.Uuid())
+	}
+	cRandom.define("uuid", uuidV4)
+	cRandom.define("uuid_v4", uuidV4)
+	cRandom.define("uuid_v7", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self.(*RandomObj).fmtr.UuidV7())
+	})
+	cRandom.define("alphanumeric", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(self.(*RandomObj).chooseAlnum(charsKwarg(args), countArgOr(args, 16)))
+	})
+	cRandom.define("random_number", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.randomNumberValue(self.(*RandomObj), args)
+	})
+
+	// Class-side singleton methods operate on the process-wide default generator,
+	// exactly as Kernel#rand/#srand do (they share vm.defaultRandom).
+	cRandom.smethods["rand"] = &Method{name: "rand", owner: cRandom, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.randValue(vm.defaultRandom, args)
+	}}
+	cRandom.smethods["bytes"] = &Method{name: "bytes", owner: cRandom, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		b := make([]byte, int(intArg(args[0])))
+		vm.defaultRandom.fillBytes(b)
+		return object.NewStringBytesEnc(b, "ASCII-8BIT")
+	}}
+	cRandom.smethods["random_number"] = &Method{name: "random_number", owner: cRandom, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.randomNumberValue(vm.defaultRandom, args)
+	}}
+	cRandom.smethods["new_seed"] = &Method{name: "new_seed", owner: cRandom, native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.IntValue(randomSeed())
+	}}
+	cRandom.smethods["srand"] = &Method{name: "srand", owner: cRandom, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.reseedDefault(args)
+	}}
 
 	// Kernel#rand / #srand operate on a process-wide default generator.
 	vm.cObject.define("rand", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.kernelRandValue(vm.defaultRandom, args)
 	})
 	vm.cObject.define("srand", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		prev := vm.defaultRandom.seed
-		seed := randomSeed()
-		if len(args) > 0 {
-			seed = intArg(args[0])
-		}
-		vm.defaultRandom = newRandom(seed)
-		return object.IntValue(prev)
+		return vm.reseedDefault(args)
 	})
+}
+
+// reseedDefault reseeds the process-wide default generator (a given seed, else a
+// fresh entropy seed) and returns the previous seed, the shared behaviour of
+// Kernel#srand and Random.srand.
+func (vm *VM) reseedDefault(args []object.Value) object.Value {
+	prev := vm.defaultRandom.seed
+	seed := randomSeed()
+	if len(args) > 0 {
+		seed = intArg(args[0])
+	}
+	vm.defaultRandom = newRandom(seed)
+	return object.IntValue(prev)
 }

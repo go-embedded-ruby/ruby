@@ -25,7 +25,7 @@ var providedFeatures = map[string]bool{
 	"base64": true, "digest": true, "json": true, "multi_json": true, "zlib": true,
 	"digest/md5": true, "digest/sha1": true, "digest/sha2": true,
 	"digest/rmd160": true, "digest/bubblebabble": true,
-	"stringio": true, "securerandom": true,
+	"stringio": true, "securerandom": true, "random/formatter": true,
 	"English": true, "ostruct": true, "benchmark": true,
 	"forwardable": true, "delegate": true, "pathname": true, "uri": true,
 	"tmpdir": true, "openssl": true, "timeout": true, "rbconfig": true,
