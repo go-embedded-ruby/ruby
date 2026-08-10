@@ -115,6 +115,136 @@ func (vm *VM) registerDir() {
 		}
 		return object.NilV
 	})
+
+	vm.registerDirInstance(cDir)
+}
+
+// DirObj is the Ruby Dir *instance*: an open directory handle with a snapshot of
+// its entries (".", ".." and the sorted names) and a read cursor. It is a
+// first-class object.Value, dispatched through the Dir class.
+type DirObj struct {
+	path    string
+	entries []string
+	pos     int
+	closed  bool
+}
+
+func (d *DirObj) ToS() string     { return "#<Dir:" + d.path + ">" }
+func (d *DirObj) Inspect() string { return d.ToS() }
+func (d *DirObj) Truthy() bool    { return true }
+
+// openDirObj snapshots a directory's entries into a DirObj, raising Errno::ENOENT
+// (a SystemCallError) when the path is not a readable directory — matching MRI's
+// Dir.new / Dir.open.
+func openDirObj(path string) *DirObj {
+	entries := append([]string{".", ".."}, dirNames(path)...)
+	return &DirObj{path: path, entries: entries}
+}
+
+// registerDirInstance installs Dir.new / Dir.open and the Dir instance methods
+// (read/tell/seek/pos/rewind/path/close/each/…). Operations on a closed handle
+// raise IOError, as MRI does; path/to_path keep working after close.
+func (vm *VM) registerDirInstance(cDir *RClass) {
+	self := func(v object.Value) *DirObj { return v.(*DirObj) }
+	// checkOpen raises IOError for a method that requires an open handle.
+	checkOpen := func(d *DirObj) {
+		if d.closed {
+			raise("IOError", "closed directory")
+		}
+	}
+
+	cDir.smethods["new"] = &Method{name: "new", owner: cDir, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return openDirObj(pathArg(vm, args[0]))
+	}}
+	cDir.smethods["open"] = &Method{name: "open", owner: cDir, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		d := openDirObj(pathArg(vm, args[0]))
+		if blk == nil {
+			return d
+		}
+		// A block form closes the handle on the way out — even if the block raises.
+		defer func() { d.closed = true }()
+		return vm.callBlock(blk, []object.Value{d})
+	}}
+
+	d := func(name string, fn NativeFn) { cDir.define(name, fn) }
+
+	d("read", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		if dir.pos >= len(dir.entries) {
+			return object.NilV
+		}
+		name := dir.entries[dir.pos]
+		dir.pos++
+		return object.NewString(name)
+	})
+	d("pos", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		return object.IntValue(int64(dir.pos))
+	})
+	// tell is an alias of pos (same Method identity, as MRI's spec checks).
+	cDir.methods["tell"] = cDir.methods["pos"]
+	d("seek", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		dir.pos = int(intArg(args[0]))
+		return dir // seek returns the Dir instance
+	})
+	d("pos=", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		dir.pos = int(intArg(args[0]))
+		return args[0] // pos= returns its argument
+	})
+	d("rewind", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		dir.pos = 0
+		return dir
+	})
+	d("to_path", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self(v).path) // works even on a closed handle
+	})
+	cDir.methods["path"] = cDir.methods["to_path"] // path is an alias of to_path
+	// fileno: rbgo's Dir has no underlying file descriptor, so — as MRI does on
+	// platforms without dirfd — it raises NotImplementedError (but IOError first
+	// when the handle is already closed).
+	d("fileno", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		checkOpen(self(v))
+		raise("NotImplementedError", "fileno() function is unimplemented on this machine")
+		return object.NilV
+	})
+	d("close", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		self(v).closed = true // idempotent: closing an already-closed Dir is a no-op
+		return object.NilV
+	})
+	d("each", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		if blk == nil {
+			return enumFor(dir, "each")
+		}
+		for _, n := range dir.entries {
+			vm.callBlock(blk, []object.Value{object.NewString(n)})
+		}
+		dir.pos = len(dir.entries) // each leaves the cursor at the end (MRI)
+		return dir
+	})
+	d("each_child", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		if blk == nil {
+			return enumFor(dir, "each_child")
+		}
+		for _, n := range dir.entries {
+			if n == "." || n == ".." {
+				continue
+			}
+			vm.callBlock(blk, []object.Value{object.NewString(n)})
+		}
+		return dir
+	})
 }
 
 // osUserHomeDir is a seam over os.UserHomeDir so the no-HOME error path is
