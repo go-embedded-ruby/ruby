@@ -149,7 +149,10 @@ func (vm *VM) registerExceptionMethods(cException *RClass) {
 	// class-level Errno constant (Errno::ENOENT::Errno). nil for a bare
 	// SystemCallError with no errno.
 	vm.consts["SystemCallError"].(*RClass).define("errno", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		for c := vm.classOf(self); c != nil; c = c.super {
+		// Walk the class ancestry up to (but not including) Object, whose constant
+		// table is the top level and holds the unrelated Errno *module*. Each
+		// Errno::Exxx carries its own integer Errno constant.
+		for c := vm.classOf(self); c != nil && c != vm.cObject; c = c.super {
 			if e, ok := c.consts["Errno"]; ok {
 				return e
 			}
@@ -235,10 +238,9 @@ func popCauseKwarg(args []object.Value) (rest []object.Value, given bool, cause 
 // panics — the way an internal raise that must carry data (NoMethodError#name,
 // KeyError#key, UncaughtThrowError#tag ...) reaches a rescue.
 func (vm *VM) raiseWithIvars(class, msg string, ivars map[string]object.Value) {
-	cls, ok := vm.consts[class].(*RClass)
-	if !ok {
-		cls = vm.consts["StandardError"].(*RClass)
-	}
+	// class is always one of the built-in exception constants stamped by an
+	// internal raise site, so the assertion holds.
+	cls := vm.consts[class].(*RClass)
 	iv := map[string]object.Value{"@message": object.NewString(msg)}
 	order := []string{"@message"}
 	for k, v := range ivars {
@@ -256,10 +258,8 @@ func (vm *VM) raiseWithIvars(class, msg string, ivars map[string]object.Value) {
 // parsed from a captured backtrace line ("path:lineno:in 'label'") and answers
 // #path, #lineno, #label, #to_s and #inspect.
 func (vm *VM) registerBacktraceLocation() {
-	thread, ok := vm.consts["Thread"].(*RClass)
-	if !ok {
-		return
-	}
+	// Thread is registered before the Exception protocol, so it is always present.
+	thread := vm.consts["Thread"].(*RClass)
 	backtrace := newClass("Thread::Backtrace", vm.cObject)
 	thread.consts["Backtrace"] = backtrace
 	loc := newClass("Thread::Backtrace::Location", vm.cObject)

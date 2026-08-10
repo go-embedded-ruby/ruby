@@ -1382,7 +1382,7 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("next", succStr)
 	succBang := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		s.SetBytes([]byte(succString(s.Str())))
 		return s
 	}
@@ -1393,7 +1393,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("setbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		b := s.MutableBytes()
 		i := toInt(args[0])
 		if i < 0 {
@@ -1692,10 +1692,10 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cString.define("tr_s", trSFn)
 	vm.cString.define("tr!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), false) })
+		return vm.strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), false) })
 	})
 	vm.cString.define("tr_s!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), true) })
+		return vm.strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), true) })
 	})
 	vm.cString.define("count", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(stringCount(strOf(self), args)))
@@ -1704,7 +1704,7 @@ func (vm *VM) bootstrap() {
 		return object.NewStringBytes([]byte(stringDelete(strOf(self), args)))
 	})
 	vm.cString.define("delete!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strBang(self, func(s string) string { return stringDelete(s, args) })
+		return vm.strBang(self, func(s string) string { return stringDelete(s, args) })
 	})
 	vm.cString.define("squeeze", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewStringBytes([]byte(stringSqueeze(strOf(self), args)))
@@ -1750,7 +1750,7 @@ func (vm *VM) bootstrap() {
 	// Integer its UTF-8 code point.
 	strConcatFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		for _, a := range args {
 			s.SetBytes(append(s.MutableBytes(), strAppendBytes(a)...))
 		}
@@ -1760,13 +1760,13 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("concat", strConcatFn)
 	vm.cString.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		s.SetBytes([]byte(strArg(args[0])))
 		return s
 	})
 	vm.cString.define("prepend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		var head []byte
 		for _, a := range args {
 			head = append(head, strAppendBytes(a)...)
@@ -1776,7 +1776,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("insert", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		r := []rune(s.Str())
 		at := int(intArg(args[0]))
 		if at < 0 {
@@ -1792,45 +1792,45 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		s.SetBytes(nil)
 		return s
 	})
 	vm.cString.define("upcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, strings.ToUpper)
+		return vm.strBang(self, strings.ToUpper)
 	})
 	vm.cString.define("downcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, strings.ToLower)
+		return vm.strBang(self, strings.ToLower)
 	})
 	vm.cString.define("capitalize!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, capitalizeStr)
+		return vm.strBang(self, capitalizeStr)
 	})
 	vm.cString.define("swapcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, swapcaseStr)
+		return vm.strBang(self, swapcaseStr)
 	})
 	vm.cString.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		s.SetBytes([]byte(reverseStr(s.Str())))
 		return s
 	})
 	vm.cString.define("strip!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, func(x string) string { return strings.Trim(x, wsCutset) })
+		return vm.strBang(self, func(x string) string { return strings.Trim(x, wsCutset) })
 	})
 	vm.cString.define("lstrip!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, func(x string) string { return strings.TrimLeft(x, wsCutset) })
+		return vm.strBang(self, func(x string) string { return strings.TrimLeft(x, wsCutset) })
 	})
 	vm.cString.define("rstrip!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, func(x string) string { return strings.TrimRight(x, wsCutset) })
+		return vm.strBang(self, func(x string) string { return strings.TrimRight(x, wsCutset) })
 	})
 	vm.cString.define("chomp!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strBang(self, func(s string) string { return chompSep(s, args) })
+		return vm.strBang(self, func(s string) string { return chompSep(s, args) })
 	})
 	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strBang(self, chopStr)
+		return vm.strBang(self, chopStr)
 	})
 	vm.cString.define("squeeze!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strBang(self, func(s string) string { return stringSqueeze(s, args) })
+		return vm.strBang(self, func(s string) string { return stringSqueeze(s, args) })
 	})
 	vm.cString.define("sub!", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.strSubBang(self, args, blk, false)
@@ -1839,10 +1839,10 @@ func (vm *VM) bootstrap() {
 		return vm.strSubBang(self, args, blk, true)
 	})
 	vm.cString.define("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return stringIndexAssign(self.(*object.String), args)
+		return vm.stringIndexAssign(self.(*object.String), args)
 	})
 	vm.cString.define("slice!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return stringSliceBang(self.(*object.String), args)
+		return vm.stringSliceBang(self.(*object.String), args)
 	})
 
 	// Array.
@@ -4757,10 +4757,12 @@ func normIndex(i int64, n int) int {
 	return int(i)
 }
 
-// checkFrozen raises FrozenError when a mutator is applied to a frozen string.
-func checkFrozen(s *object.String) {
+// checkFrozen raises FrozenError when a mutator is applied to a frozen string,
+// stamping the string as the exception's #receiver (as MRI).
+func (vm *VM) checkFrozen(s *object.String) {
 	if s.Frozen {
-		raise("FrozenError", "can't modify frozen String: %s", s.Inspect())
+		vm.raiseWithIvars("FrozenError", "can't modify frozen String: "+s.Inspect(),
+			map[string]object.Value{"@receiver": s})
 	}
 }
 
@@ -4779,9 +4781,9 @@ func strAppendBytes(a object.Value) []byte {
 
 // strBang applies a pure transform to the receiver in place. As a Ruby bang
 // method it returns the (mutated) receiver when the content changed, else nil.
-func strBang(self object.Value, fn func(string) string) object.Value {
+func (vm *VM) strBang(self object.Value, fn func(string) string) object.Value {
 	s := self.(*object.String)
-	checkFrozen(s)
+	vm.checkFrozen(s)
 	out := fn(s.Str())
 	if out == s.Str() {
 		return object.NilV
@@ -4859,7 +4861,7 @@ func (vm *VM) transformKey(k object.Value, mapping *object.Hash, blk *Proc) obje
 // and nil otherwise.
 func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, global bool) object.Value {
 	s := self.(*object.String)
-	checkFrozen(s)
+	vm.checkFrozen(s)
 	// gsub!(pattern) with no replacement and no block yields an Enumerator bound
 	// to gsub! on this receiver (so materialising it mutates the string); sub!
 	// raises ArgumentError, as MRI does.
@@ -4880,8 +4882,8 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 // stringIndexAssign backs String#[]=: it replaces the indexed slice (an index,
 // a start+length, or a Range) with the replacement string and returns the
 // replacement (Ruby's result for an assignment).
-func stringIndexAssign(s *object.String, args []object.Value) object.Value {
-	checkFrozen(s)
+func (vm *VM) stringIndexAssign(s *object.String, args []object.Value) object.Value {
+	vm.checkFrozen(s)
 	r := []rune(s.Str())
 	n := len(r)
 	rhs := args[len(args)-1]
@@ -4926,8 +4928,8 @@ func stringAssignSpan(args []object.Value, n int) (start, length int) {
 
 // stringSliceBang backs String#slice!: it removes the indexed slice from the
 // receiver and returns it (nil when the index does not select anything).
-func stringSliceBang(s *object.String, args []object.Value) object.Value {
-	checkFrozen(s)
+func (vm *VM) stringSliceBang(s *object.String, args []object.Value) object.Value {
+	vm.checkFrozen(s)
 	// A binary (ASCII-8BIT) string slices by BYTES and the removed span stays
 	// binary, matching MRI; a UTF-8 string slices by characters.
 	if s.IsBinary() {

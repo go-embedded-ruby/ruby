@@ -190,9 +190,12 @@ func TestIRBEvalFrontEndErrors(t *testing.T) {
 }
 
 // TestIRBEvalRepropagatesSignal covers irbEval's non-exception recovery branch:
-// a break/throw/return signal is not a Ruby exception the REPL can display, so
-// it must re-propagate to the enclosing Run boundary (which turns an uncaught
-// throw into an UncaughtThrowError) rather than being swallowed.
+// a bare break/throw/return signal is not a Ruby exception the REPL can display,
+// so it must re-propagate to the enclosing Run boundary (which turns an uncaught
+// throw into an UncaughtThrowError) rather than being swallowed. A Kernel#throw
+// with no matching catch now raises a rescuable UncaughtThrowError directly, so
+// this exercises the branch with Find.prune, which panics a raw throwSignal past
+// exec when invoked outside a Find.find block.
 func TestIRBEvalRepropagatesSignal(t *testing.T) {
 	vm := New(&bytes.Buffer{})
 	b := &Binding{env: &Env{}, self: vm.main, definee: vm.cObject}
@@ -205,6 +208,6 @@ func TestIRBEvalRepropagatesSignal(t *testing.T) {
 			t.Fatalf("expected a non-RubyError signal, got RubyError %v", r)
 		}
 	}()
-	vm.irbEval(b, "throw :zzz")
+	vm.irbEval(b, `require "find"; Find.prune`)
 	t.Fatal("irbEval should have re-panicked")
 }

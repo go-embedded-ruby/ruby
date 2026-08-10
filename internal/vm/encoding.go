@@ -355,7 +355,7 @@ func (vm *VM) registerStringEncoding() {
 	})
 	vm.cString.define("force_encoding", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		s.Enc = vm.forceEncodingName(args[0])
 		return s
 	})

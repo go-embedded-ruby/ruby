@@ -161,7 +161,7 @@ func runeLenAt(s string, i int) int {
 //	bytesplice(range, str)
 //	bytesplice(range, str, str_range)
 func (vm *VM) strBytesplice(self *object.String, args []object.Value) object.Value {
-	checkFrozen(self)
+	vm.checkFrozen(self)
 	var dstBeg, dstLen int
 	var repl string
 	switch len(args) {

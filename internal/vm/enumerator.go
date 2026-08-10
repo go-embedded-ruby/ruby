@@ -23,9 +23,10 @@ type Enumerator struct {
 	// size-block enumerators. When nil, #size falls back to materialising.
 	sizeBlock *Proc
 
-	buf  []object.Value // materialised on first next/peek/to_a
-	have bool
-	pos  int
+	buf    []object.Value // materialised on first next/peek/to_a
+	have   bool
+	pos    int
+	finish object.Value // the underlying iteration's return value (StopIteration#result)
 }
 
 // yielder is the object passed to an Enumerator.new generator block; `y << v`
@@ -127,7 +128,8 @@ func (vm *VM) registerEnumerator() {
 		e := self.(*Enumerator)
 		buf := vm.enumBuffer(e)
 		if e.pos >= len(buf) {
-			raise("StopIteration", "iteration reached an end")
+			vm.raiseWithIvars("StopIteration", "iteration reached an end",
+				map[string]object.Value{"@result": e.finish})
 		}
 		v := buf[e.pos]
 		e.pos++
@@ -137,7 +139,8 @@ func (vm *VM) registerEnumerator() {
 		e := self.(*Enumerator)
 		buf := vm.enumBuffer(e)
 		if e.pos >= len(buf) {
-			raise("StopIteration", "iteration reached an end")
+			vm.raiseWithIvars("StopIteration", "iteration reached an end",
+				map[string]object.Value{"@result": e.finish})
 		}
 		return buf[e.pos]
 	})
@@ -256,10 +259,14 @@ func (vm *VM) enumMaterialize(e *Enumerator) []object.Value {
 		out = append(out, enumPack(args))
 	}
 	if e.block != nil { // generator block: run it with a collecting yielder
-		vm.callBlock(e.block, []object.Value{&yielder{emit: collect}})
+		// The generator block's own return value is the iteration's finish value,
+		// surfaced as StopIteration#result when #next runs past the last element.
+		e.finish = vm.callBlock(e.block, []object.Value{&yielder{emit: collect}})
 		return out
 	}
-	vm.send(e.recv, e.meth, e.args, &Proc{native: func(_ *VM, args []object.Value) object.Value {
+	// The driven method's return value (e.g. Array#each returns the receiver) is
+	// the finish value reported by StopIteration#result.
+	e.finish = vm.send(e.recv, e.meth, e.args, &Proc{native: func(_ *VM, args []object.Value) object.Value {
 		collect(args)
 		return object.NilV
 	}})

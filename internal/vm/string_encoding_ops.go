@@ -271,7 +271,7 @@ func (vm *VM) stringScrub(self object.Value, args []object.Value, blk *Proc, ban
 	repl := vm.scrubReplacer(enc, args, blk)
 	out, _ := scrubWalk(s.Bytes(), scan, repl)
 	if bang {
-		checkFrozen(s)
+		vm.checkFrozen(s)
 		s.SetBytes(out)
 		return s
 	}
