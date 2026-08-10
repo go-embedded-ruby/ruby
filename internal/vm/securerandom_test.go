@@ -25,6 +25,13 @@ func TestSecureRandom(t *testing.T) {
 		{`require "securerandom"; f = SecureRandom.random_number(2.5); p [f.is_a?(Float), f >= 0, f < 2.5, SecureRandom.random_number(0.0).is_a?(Float)]`, "[true, true, true, true]\n"},
 		// Successive calls differ.
 		{`require "securerandom"; p SecureRandom.hex != SecureRandom.hex`, "true\n"},
+		// bytes / gen_random are random_bytes aliases (bytes defaults to 16).
+		{`require "securerandom"; p [SecureRandom.bytes(5).bytesize, SecureRandom.bytes.bytesize, SecureRandom.gen_random(7).bytesize]`, "[5, 16, 7]\n"},
+		{`require "securerandom"; p SecureRandom.bytes(4).encoding.to_s`, "\"ASCII-8BIT\"\n"},
+		// uuid_v4 is an alias of uuid.
+		{`require "securerandom"; p (SecureRandom.uuid_v4 =~ /\A\h{8}-\h{4}-4\h{3}-[89ab]\h{3}-\h{12}\z/) == 0`, "true\n"},
+		// alphanumeric honours an explicit chars: alphabet.
+		{`require "securerandom"; p (SecureRandom.alphanumeric(12, chars: ["x", "y"]) =~ /\A[xy]{12}\z/) == 0`, "true\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
