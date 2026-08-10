@@ -39,10 +39,8 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
 		o := openFileIO(cFile, pathArg(vm, pos[0]), "r")
-		var sep []object.Value
-		if len(pos) > 1 {
-			sep = pos[1:2]
-		}
+		sep := pos[1:]
+		checkGetsLimit(sep, "foreach")
 		var lines []object.Value
 		for v := ioGets(o, sep); v != object.NilV; v = ioGets(o, sep) {
 			if blk != nil {
@@ -62,10 +60,8 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
 		o := openFileIO(cFile, pathArg(vm, pos[0]), "r")
-		var sep []object.Value
-		if len(pos) > 1 {
-			sep = pos[1:2]
-		}
+		sep := pos[1:]
+		checkGetsLimit(sep, "readlines")
 		var lines []object.Value
 		for v := ioGets(o, sep); v != object.NilV; v = ioGets(o, sep) {
 			lines = append(lines, v)
