@@ -44,7 +44,15 @@ func (vm *VM) registerSecureRandom() {
 		return object.NewString(gen.UrlsafeBase64(countArg(args, 16), padding))
 	})
 	def("alphanumeric", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(gen.Alphanumeric(countArg(args, 16)))
+		// An optional chars: keyword Array overrides the default A-Za-z0-9 source.
+		if len(args) > 0 {
+			if h, ok := args[len(args)-1].(*object.Hash); ok {
+				if _, found := h.Get(object.Symbol("chars")); found {
+					return object.NewString(gen.Alphanumeric(countArgOr(args, 16), charsKwarg(args)...))
+				}
+			}
+		}
+		return object.NewString(gen.Alphanumeric(countArgOr(args, 16)))
 	})
 	uuidV4 := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(gen.Uuid())
