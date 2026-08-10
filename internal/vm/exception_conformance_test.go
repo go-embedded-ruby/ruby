@@ -74,6 +74,18 @@ func TestExceptionProtocol(t *testing.T) {
 		{"catch_default_tag", `p catch { |t| throw t, 7 }`, "7\n"},
 		{"uncaught_rescuable", `begin; throw :zzz, 42; rescue UncaughtThrowError => e; p [e.tag, e.value, e.message]; end`, "[:zzz, 42, \"uncaught throw :zzz\"]\n"},
 		{"uncaught_novalue", `begin; throw :q; rescue UncaughtThrowError => e; p [e.tag, e.value]; end`, "[:q, nil]\n"},
+		// autoCause branches: re-raising the exception being handled adds no cause
+		// (it would be its own cause); an exception already carrying a cause keeps it.
+		{"cause_reraise_self", `begin; raise "x"; rescue => e; begin; raise e; rescue => r; p r.cause; end; end`, "nil\n"},
+		{"cause_preset_kept", `c = ArgumentError.new("c"); e = RuntimeError.new("e"); begin; raise e, cause: c; rescue; end; begin; raise "z"; rescue; begin; raise e; rescue => r; p r.cause.message; end; end`, "\"c\"\n"},
+		// parseFullMessageOpts branches: a non-hash positional argument and a
+		// non-symbol order: value both fall back to the defaults (highlight off, top).
+		{"full_nonhash_arg", `e = RuntimeError.new("m"); e.set_backtrace(["a:1:in 'f'"]); p e.full_message(:whatever)`, "\"a:1:in 'f': m (RuntimeError)\\n\"\n"},
+		{"full_order_nonsym", `e = RuntimeError.new("m"); e.set_backtrace(["a:1:in 'f'"]); p e.full_message(order: "bottom")`, "\"a:1:in 'f': m (RuntimeError)\\n\"\n"},
+		// popCauseKwarg branches: a trailing 1-key hash that is not :cause, and a
+		// trailing multi-key hash, are both left as the raise's message argument.
+		{"raise_hash_msg", `begin; raise StandardError, {foo: 1}; rescue => e; p e.message; end`, "\"{foo: 1}\"\n"},
+		{"raise_hash_multi", `begin; raise StandardError, {a: 1, b: 2}; rescue => e; p e.message; end`, "\"{a: 1, b: 2}\"\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,6 +127,10 @@ func TestExceptionRaiseErrors(t *testing.T) {
 		{"exception_arity", `RuntimeError.new("x").exception(1, 2)`, "wrong number of arguments"},
 		{"throw_no_args", `throw`, "wrong number of arguments"},
 		{"catch_no_block", `catch(:x)`, "no block given"},
+		// A raw throwSignal that escapes to the Run boundary (Find.prune outside a
+		// Find.find block) is turned into an UncaughtThrowError there; Kernel#throw
+		// with no matching catch now raises it directly instead.
+		{"prune_run_boundary", `require "find"; Find.prune`, "uncaught throw"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
