@@ -74,7 +74,17 @@ func (e *Enumerator) Inspect() string {
 		}
 		return "#<Enumerator::Chain: [" + strings.Join(parts, ", ") + "]>"
 	}
-	s := "#<Enumerator: " + e.recv.Inspect() + ":" + e.meth
+	// A generator (Enumerator.new) or produce enumerator has no driven receiver;
+	// MRI shows an internal Generator/Producer object there (its address, which we
+	// can't reproduce), so render a stable placeholder and default the method name.
+	recvStr, meth := "#<Enumerator::Generator>", e.meth
+	if e.recv != nil {
+		recvStr = e.recv.Inspect()
+	}
+	if meth == "" {
+		meth = "each"
+	}
+	s := "#<Enumerator: " + recvStr + ":" + meth
 	if len(e.args) > 0 {
 		parts := make([]string, len(e.args))
 		for i, a := range e.args {
@@ -205,6 +215,9 @@ func (vm *VM) registerEnumerator() {
 		if e.sizeBlock != nil {
 			return vm.callBlock(e.sizeBlock, nil)
 		}
+		if e.block != nil {
+			return object.NilV // a bare generator's size is unknown (MRI returns nil)
+		}
 		return object.IntValue(int64(len(vm.enumMaterialize(e))))
 	})
 	d("next", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -323,7 +336,7 @@ func (vm *VM) enumProduce(args []object.Value, blk *Proc) object.Value {
 			}
 		}
 		if len(bad) > 0 {
-			raise("ArgumentError", "unknown keywords: "+strings.Join(bad, ", "))
+			raise("ArgumentError", "unknown keywords: %s", strings.Join(bad, ", "))
 		}
 	}
 	if len(pos) > 1 {
