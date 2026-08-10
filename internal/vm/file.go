@@ -425,6 +425,92 @@ func (vm *VM) registerFile() {
 		raise("NotImplementedError", "birthtime() function is unimplemented")
 		return object.NilV
 	})
+
+	// link / symlink create a hard / symbolic link and return 0; an existing target
+	// raises Errno::EEXIST, a missing source directory Errno::ENOENT (MRI). Both
+	// require exactly two path arguments.
+	def("link", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		old, nw := twoPaths(vm, args)
+		if err := os.Link(old, nw); err != nil {
+			raiseLinkErr(err, "rb_file_s_link", old)
+		}
+		return object.IntValue(0)
+	})
+	def("symlink", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		old, nw := twoPaths(vm, args)
+		if err := os.Symlink(old, nw); err != nil {
+			raiseLinkErr(err, "rb_file_s_symlink", old)
+		}
+		return object.IntValue(0)
+	})
+	// readlink returns the target of a symbolic link. A missing path raises
+	// Errno::ENOENT; a path that is not a symlink raises Errno::EINVAL (MRI).
+	def("readlink", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := pathArg(vm, args[0])
+		dest, err := os.Readlink(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				raise("Errno::ENOENT", "No such file or directory @ rb_readlink - %s", p)
+			}
+			raise("Errno::EINVAL", "Invalid argument @ rb_readlink - %s", p)
+		}
+		return object.NewString(toSlash(dest))
+	})
+	// truncate resizes a file to the given length, returning 0; a missing path
+	// raises Errno::ENOENT.
+	def("truncate", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := pathArg(vm, args[0])
+		if err := os.Truncate(p, intArg(args[1])); err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_truncate - %s", p)
+		}
+		return object.IntValue(0)
+	})
+	// realdirpath is realpath but the last path component need not exist: every
+	// symlink is resolved where possible, and an absent leaf is joined onto the
+	// resolved directory. A missing intermediate directory raises Errno::ENOENT.
+	def("realdirpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(realdirpath(fileExpand(pathArg(vm, args[0]), args[1:], true)))
+	})
+	// File.path returns the string (or #to_path) form of its argument unchanged —
+	// no expansion, matching MRI.
+	def("path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.NewString(pathArg(vm, args[0]))
+	})
+}
+
+// twoPaths coerces exactly two path arguments for File.link / File.symlink,
+// raising ArgumentError for any other arity (matching MRI's arity check, which
+// fires before the paths are examined).
+func twoPaths(vm *VM, args []object.Value) (string, string) {
+	if len(args) != 2 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
+	}
+	return pathArg(vm, args[0]), pathArg(vm, args[1])
+}
+
+// raiseLinkErr maps an os.Link / os.Symlink failure to the MRI errno: an existing
+// target is Errno::EEXIST, anything else Errno::ENOENT.
+func raiseLinkErr(err error, marker, src string) {
+	if os.IsExist(err) {
+		raise("Errno::EEXIST", "File exists @ %s - %s", marker, src)
+	}
+	raise("Errno::ENOENT", "No such file or directory @ %s - %s", marker, src)
+}
+
+// realdirpath resolves an already-expanded absolute path's symlinks, tolerating a
+// non-existent leaf: if the whole path resolves it is returned, otherwise the
+// parent directory is resolved and the leaf re-joined. A missing parent raises
+// Errno::ENOENT.
+func realdirpath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(filepath.FromSlash(p)); err == nil {
+		return toSlash(resolved)
+	}
+	dir, base := rubyDirname(p), rubyBasename(p)
+	resolvedDir, err := filepath.EvalSymlinks(filepath.FromSlash(dir))
+	if err != nil {
+		raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", dir)
+	}
+	return toSlash(filepath.Join(resolvedDir, base))
 }
 
 // fileChmod / fileChown / fileLchown / fileChtimes are seams over the os package
