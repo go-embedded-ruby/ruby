@@ -188,13 +188,14 @@ func TestPBStringScrub(t *testing.T) {
 	if got := runSrc(t, `puts "héllo".scrub == "héllo"`); got != "true" {
 		t.Errorf("scrub valid => %q", got)
 	}
-	// Invalid byte (0xFF) collapses to the default U+FFFD: the 3-byte replacement
-	// turns a 3-byte input into a 5-byte output.
-	if got := runSrc(t, `s = [97, 255, 98].pack("C*"); p s.scrub.bytes`); got != "[97, 239, 191, 189, 98]" {
+	// Invalid byte (0xFF) in a UTF-8 string collapses to the default U+FFFD: the
+	// 3-byte replacement turns a 3-byte input into a 5-byte output. (pack yields an
+	// ASCII-8BIT string, on which scrub is a no-op, so the input is tagged UTF-8.)
+	if got := runSrc(t, `s = [97, 255, 98].pack("C*").force_encoding("utf-8"); p s.scrub.bytes`); got != "[97, 239, 191, 189, 98]" {
 		t.Errorf("scrub default repl => %q", got)
 	}
 	// Explicit replacement string.
-	if got := runSrc(t, `s = [97, 255, 98].pack("C*"); puts s.scrub("?")`); got != "a?b" {
+	if got := runSrc(t, `s = [97, 255, 98].pack("C*").force_encoding("utf-8"); puts s.scrub("?")`); got != "a?b" {
 		t.Errorf("scrub custom repl => %q", got)
 	}
 }

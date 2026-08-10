@@ -384,6 +384,7 @@ type VM struct {
 	cConverter                         *RClass
 	encodings                          map[string]*encodingObj // canonical name -> interned Encoding
 	encLookup                          map[string]*encodingObj // lowercased name/alias -> interned Encoding
+	defInternalEnc                     *encodingObj            // Encoding.default_internal (nil = MRI's default)
 	cLazy                              *RClass
 	lastMatch                          object.Value            // $~: last regexp MatchData (or nil)
 	globals                            map[string]object.Value // user-assigned $globals
@@ -1414,7 +1415,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				a := pop()
 				push(vm.binaryOp(in.Op, a, b))
 			case bytecode.OpNeg:
-				push(negate(pop()))
+				negArg := pop()
+				if s, ok := negArg.(*object.String); ok { // -"str" is String#-@ (a frozen copy)
+					push(vm.send(s, "-@", nil, nil))
+				} else {
+					push(negate(negArg))
+				}
 			case bytecode.OpNot:
 				push(object.Bool(!pop().Truthy()))
 			case bytecode.OpTruthy:
