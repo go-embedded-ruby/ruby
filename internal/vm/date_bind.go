@@ -322,6 +322,7 @@ func (vm *VM) registerDate() {
 	vm.consts["DateTime"] = vm.cDateTime
 
 	vm.registerDateConstructors()
+	vm.registerStrictDateParsers()
 	vm.registerDateAccessors()
 	vm.registerDateArithmetic()
 	vm.registerDateFormat()

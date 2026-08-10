@@ -168,6 +168,9 @@ func (vm *VM) registerTime() {
 	sm("strptime", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return payloadTime(gotime.Parse(rubyLayout(strArg(args[1])), strArg(args[0])))
 	})
+	// The strict "require 'time'" parsers (iso8601 / xmlschema / rfc2822 / rfc822
+	// / httpdate), each accepting only its own wire format.
+	vm.registerStrictTimeParsers()
 
 	d := func(name string, fn NativeFn) { vm.cTime.define(name, fn) }
 	self := func(v object.Value) *Time { return v.(*Time) }
