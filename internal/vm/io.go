@@ -24,6 +24,9 @@ type IOObj struct {
 	label    string // "STDOUT"/"STDERR"/"STDIN" for inspect
 	path     string // backing file path for a File stream (else "")
 	writable bool   // a File opened for writing — flush the buffer on flush/close
+	lineno   int    // #lineno — advanced by each successful line read (gets/readline)
+	rdClosed bool   // #close_read was called — reads raise "not opened for reading"
+	wrClosed bool   // #close_write was called — writes raise "not opened for writing"
 
 	// Pipe ends (IO.pipe) share a single byte buffer in *pipe. The write end
 	// appends; the read end drains from pipe.rpos. Because subprocess execution
@@ -109,11 +112,14 @@ func (vm *VM) registerIO() {
 	vm.consts["IO"] = cIO
 	defIOWrite(cIO)
 	defStringIORead(cIO) // IO carries the read protocol too ($stdin, File streams)
+	defIOReadExtra(cIO)
+	defIOSeekable(cIO) // pread/pwrite/sysseek/binmode?/autoclose — IO+File, not StringIO
 
 	cStringIO := newClass("StringIO", vm.cObject)
 	vm.consts["StringIO"] = cStringIO
 	defIOWrite(cStringIO)
 	defStringIORead(cStringIO)
+	defIOReadExtra(cStringIO)
 	cStringIO.smethods["new"] = &Method{name: "new", owner: cStringIO, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		o := &IOObj{cls: cStringIO, isStr: true}
 		if len(args) > 0 {
@@ -473,6 +479,7 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("read", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		ioCheckReadable(o)
 		o.pipeRefresh()
 		// An optional second argument is an output-buffer String: the read fills it
 		// (and is returned in its place), and it is cleared when the read yields nil.
@@ -519,6 +526,8 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("getc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		ioCheckReadable(o)
+		o.pipeRefresh()
 		if o.pos >= len(o.buf) {
 			return object.NilV
 		}
@@ -529,6 +538,7 @@ func defStringIORead(cls *RClass) {
 	})
 	gets := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		ioCheckReadable(o)
 		return ioGets(o, args)
 	}
 	cls.define("gets", gets)
@@ -574,38 +584,99 @@ func defStringIORead(cls *RClass) {
 }
 
 // ioGets reads one line (up to and including the separator, default "\n") from a
-// StringIO, returning nil at end of input.
+// StringIO, returning nil at end of input. It accepts MRI's (sep, limit, chomp:)
+// argument shapes: a leading Integer positional is the byte limit (separator
+// defaults to "\n"); a String or nil is the separator, optionally followed by an
+// Integer limit; a trailing chomp: true strips the separator from the result. A
+// successful (non-nil) read advances #lineno.
 func ioGets(o *IOObj, args []object.Value) object.Value {
 	o.pipeRefresh()
-	if o.pos >= len(o.buf) {
-		return object.NilV
+	sep, limit, chomp := parseGetsArgs(args)
+	v := ioGetsLine(o, sep, limit, chomp)
+	if v != object.NilV {
+		o.lineno++
 	}
-	sep := "\n"
+	return v
+}
+
+// parseGetsArgs decodes the (sep, limit, chomp:) arguments of gets/readline/
+// each_line. sepSet is false when the separator defaults to "\n"; a nil separator
+// (read the whole remainder) is reported as sepSet with sep == "" and nilSep.
+func parseGetsArgs(args []object.Value) (sep getsSep, limit int, chomp bool) {
+	sep, limit = getsSep{s: "\n"}, -1
+	if h, ok := lastHash(args); ok {
+		if v, ok := h.Get(object.Symbol("chomp")); ok {
+			chomp = v.Truthy()
+		}
+		args = args[:len(args)-1]
+	}
 	if len(args) > 0 {
 		switch a := args[0].(type) {
+		case object.Integer:
+			limit = int(a)
 		case *object.String:
-			sep = a.Str()
-			if sep == "" { // an empty separator selects paragraph mode
-				return ioGetsParagraph(o)
-			}
+			sep = getsSep{s: a.Str(), set: true}
 		default:
-			if args[0] == object.NilV { // a nil separator reads the entire remainder
-				s := object.NewString(string(o.buf[o.pos:]))
-				o.pos = len(o.buf)
-				return s
+			if args[0] == object.NilV {
+				sep = getsSep{s: "", set: true, nilSep: true}
 			}
 		}
 	}
-	rest := o.buf[o.pos:]
-	if i := strings.Index(string(rest), sep); i >= 0 {
-		end := o.pos + i + len(sep)
-		s := object.NewString(string(o.buf[o.pos:end]))
-		o.pos = end
-		return s
+	if len(args) > 1 {
+		if n, ok := args[1].(object.Integer); ok {
+			limit = int(n)
+		}
 	}
-	s := object.NewString(string(rest))
-	o.pos = len(o.buf)
-	return s
+	return sep, limit, chomp
+}
+
+// getsSep is a resolved line separator for ioGetsLine.
+type getsSep struct {
+	s      string
+	set    bool // an explicit separator was given (else the "\n" default)
+	nilSep bool // an explicit nil separator: read the whole remainder as one line
+}
+
+// ioGetsLine reads one line honouring the separator, an optional byte limit
+// (negative for none) and chomp, advancing the cursor. It returns nil at EOF.
+func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
+	if o.pos >= len(o.buf) {
+		return object.NilV
+	}
+	if sep.set && sep.s == "" && !sep.nilSep { // an empty separator selects paragraph mode
+		return ioGetsParagraph(o)
+	}
+	rest := o.buf[o.pos:]
+	end := len(o.buf) // default: read to end (nil separator, or separator not found)
+	if !sep.nilSep {
+		if i := strings.Index(string(rest), sep.s); i >= 0 {
+			end = o.pos + i + len(sep.s)
+		}
+	}
+	if limit >= 0 && o.pos+limit < end {
+		end = o.pos + limit
+	}
+	line := o.buf[o.pos:end]
+	o.pos = end
+	if chomp && !sep.nilSep {
+		line = getsChomp(line, sep.s)
+	}
+	return object.NewString(string(line))
+}
+
+// getsChomp removes a single trailing separator run from line (the "\n" default
+// also strips a preceding "\r", matching MRI's universal-newline chomp).
+func getsChomp(line []byte, sep string) []byte {
+	if sep == "\n" {
+		if n := len(line); n > 0 && line[n-1] == '\n' {
+			line = line[:n-1]
+			if n := len(line); n > 0 && line[n-1] == '\r' {
+				line = line[:n-1]
+			}
+		}
+		return line
+	}
+	return []byte(strings.TrimSuffix(string(line), sep))
 }
 
 // ioGetsParagraph implements gets/each_line paragraph mode (an empty separator):
@@ -707,10 +778,26 @@ func (vm *VM) inspectStr(v object.Value) string {
 	return v.Inspect()
 }
 
-// ioCheckOpen raises IOError when writing to a closed stream.
+// ioCheckOpen raises IOError when writing to a closed stream (fully closed, or
+// with its write half shut by #close_write).
 func ioCheckOpen(o *IOObj) {
 	if o.closed {
 		raise("IOError", "closed stream")
+	}
+	if o.wrClosed {
+		raise("IOError", "not opened for writing")
+	}
+}
+
+// ioCheckReadable raises IOError when reading from a stream whose read half is
+// unavailable: a fully closed stream ("closed stream") or one shut for reading by
+// #close_read ("not opened for reading").
+func ioCheckReadable(o *IOObj) {
+	if o.closed {
+		raise("IOError", "closed stream")
+	}
+	if o.rdClosed {
+		raise("IOError", "not opened for reading")
 	}
 }
 
