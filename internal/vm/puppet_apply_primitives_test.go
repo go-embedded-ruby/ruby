@@ -92,7 +92,7 @@ p [A.public_method_defined?(:a), A.private_method_defined?(:b), A.protected_meth
 		{`p ObjectSpace.define_finalizer(Object.new) { |i| }`, "[0, #<Proc>]\n"},
 		{`pr = proc { }; p ObjectSpace.define_finalizer(Object.new, pr)[1].equal?(pr)`, "true\n"}, // explicit callable
 		{`o = Object.new; p ObjectSpace.undefine_finalizer(o).equal?(o)`, "true\n"},
-		{`p ObjectSpace.each_object.class`, "Enumerator\n"}, // no block -> Enumerator
+		{`p ObjectSpace.each_object.class`, "Enumerator\n"},        // no block -> Enumerator
 		{`p ObjectSpace.garbage_collect`, "nil\n"},
 		{`h = ObjectSpace.count_objects; p [h.class, h[:TOTAL] >= h[:FREE]]`, "[Hash, true]\n"},
 		{`require "fiber"; require "objspace"; p :ok`, ":ok\n"},
