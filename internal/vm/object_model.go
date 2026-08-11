@@ -249,6 +249,11 @@ type RClass struct {
 	// superclass chain (structDefOf) so a `class Foo < Struct.new(:a)` subclass
 	// shares its parent's members. nil for every non-Struct class. See struct.go.
 	structDef *structDef
+	// dataDef, when non-nil, marks this class as a Data subclass minted by
+	// Data.define and records its member layout. Like structDef it is resolved
+	// through the superclass chain (dataDefOf) so a `class Foo < SomeData` subclass
+	// shares its parent's members. nil for every non-Data class. See data.go.
+	dataDef *dataDef
 }
 
 func newClass(name string, super *RClass) *RClass {

@@ -4172,6 +4172,7 @@ func (vm *VM) bootstrap() {
 
 	vm.installRegexp()
 	setupStruct(vm)
+	setupData(vm) // Data.define immutable value objects (Ruby 3.2+); shares structVals storage
 	// These depend on Struct (Etc::Passwd/Group) and the core collections, so they
 	// run after setupStruct and the prelude-defined Enumerable/Hash/Array.
 	vm.registerEtc()        // Etc module (real pw/grp via os/user; systmpdir); needs Struct + Enumerable
