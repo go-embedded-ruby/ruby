@@ -632,9 +632,9 @@ func (vm *VM) structEqual(a, b object.Value, eql bool, seen map[[2]*RObject]bool
 	if !ok1 || !ok2 || oa.class != ob.class {
 		return false
 	}
-	// oa is the #== / #eql? receiver, always a Struct instance, so its class
-	// always carries a structDef.
-	d := structDefOf(oa.class)
+	// oa is the #== / #eql? receiver, always a Struct or Data instance, so its
+	// class always carries a member layout (structDef or dataDef).
+	names, _ := memberDefNames(oa.class)
 	pair := [2]*RObject{oa, ob}
 	if seen[pair] {
 		return true
@@ -644,10 +644,10 @@ func (vm *VM) structEqual(a, b object.Value, eql bool, seen map[[2]*RObject]bool
 	}
 	seen[pair] = true
 	defer delete(seen, pair)
-	for i := range d.names {
+	for i := range names {
 		av, bv := oa.structVals[i], ob.structVals[i]
-		if sa, ok := av.(*RObject); ok && structDefOf(sa.class) != nil {
-			if sb, ok := bv.(*RObject); ok && structDefOf(sb.class) != nil {
+		if sa, ok := av.(*RObject); ok && hasMemberDef(sa.class) {
+			if sb, ok := bv.(*RObject); ok && hasMemberDef(sb.class) {
 				if !vm.structEqual(av, bv, eql, seen) {
 					return false
 				}
@@ -680,7 +680,7 @@ func (vm *VM) structHash(o *RObject, seen map[*RObject]bool) int64 {
 	h := int64(reflect.ValueOf(o.class).Pointer())
 	for _, v := range o.structVals {
 		var hv int64
-		if so, ok := v.(*RObject); ok && structDefOf(so.class) != nil {
+		if so, ok := v.(*RObject); ok && hasMemberDef(so.class) {
 			hv = vm.structHash(so, seen)
 		} else {
 			hv = vm.hashValue(v)
