@@ -452,6 +452,20 @@ type VM struct {
 	// GVL-guarded.
 	finalizers map[int64][]object.Value
 
+	// GC module observable-contract state. rbgo runs on Go's garbage collector,
+	// so these back MRI's GC.enable/disable/stress/measure_total_time/auto_compact
+	// and GC::Profiler as best-effort togglable flags whose observable transitions
+	// (return the previous state, round-trip a boolean) the specs assert. Actual
+	// reclamation stays Go's job; GC.start forces a Go collection so the count and
+	// pause-time counters advance. GVL-guarded.
+	gcDisabled          bool         // GC.disable state; enable/disable return the previous value of this
+	gcSavedGCPercent    int          // debug.SetGCPercent value captured on disable, restored on enable
+	gcStress            object.Value // GC.stress mode (bool or Integer flags); nil reads as false
+	gcMeasureTotalTime  bool         // GC.measure_total_time (defaults true, set in registerGC)
+	gcAutoCompact       bool         // GC.auto_compact toggle
+	gcProfilerEnabled   bool         // GC::Profiler.enabled?
+	gcProfilerTotalTime float64      // GC::Profiler.total_time accumulator (seconds)
+
 	// atExit holds Kernel#at_exit blocks, run in LIFO order when Run completes
 	// normally. GVL-guarded.
 	atExit []*Proc

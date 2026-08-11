@@ -491,6 +491,7 @@ func (vm *VM) bootstrap() {
 	vm.registerProcess()          // Process module — identity + clock_gettime
 	vm.registerSpawn()            // IO.pipe / read_nonblock / select + Process.spawn/waitpid2 + Kernel.fork/exec
 	vm.registerObjectSpace()      // ObjectSpace module — finalizer API + reflective no-ops
+	vm.registerGC()               // GC module + GC::Profiler — observable-contract shim over Go's GC
 	vm.registerOpenSSL()          // OpenSSL (real digest/HMAC/random + PKI/TLS shell); needs StandardError
 	vm.registerSocket()           // TCPSocket/TCPServer (net) + OpenSSL::SSL::SSLSocket (crypto/tls); after registerOpenSSL (upgrades its SSL shell)
 	vm.registerNetHTTP()          // net/http + net/https loadable shell; needs StandardError
