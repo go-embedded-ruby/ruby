@@ -69,7 +69,7 @@ func TestComplex(t *testing.T) {
 func TestComplexErrors(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
 		{`Complex("a")`, "ArgumentError"}, // an unparseable String is ArgumentError (MRI's "invalid value for convert()")
-		{`Complex(1, "b")`, "TypeError"}, // a non-real second argument is still a TypeError
+		{`Complex(1, "b")`, "TypeError"},  // a non-real second argument is still a TypeError
 		{`Complex(1, 2) + "x"`, "TypeError"},
 		{`true + Complex(1, 1)`, "TypeError"},
 		{`Complex(1, 2) % 1`, "NoMethodError"},

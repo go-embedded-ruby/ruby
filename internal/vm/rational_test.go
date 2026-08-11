@@ -243,7 +243,7 @@ func TestRationalKernel(t *testing.T) {
 		{`Rational(true)`, "TypeError"},
 		{`Rational(Object.new)`, "TypeError"},
 		{`Rational(Float::INFINITY)`, "FloatDomainError"}, // an infinite Float has no exact Rational (MRI's FloatDomainError)
-		{`Rational(Object.new, 2)`, "TypeError"}, // first of two args not convertible
+		{`Rational(Object.new, 2)`, "TypeError"},          // first of two args not convertible
 		{`Rational(1, Object.new)`, "TypeError"},
 		{`Rational(1, 0.0)`, "ZeroDivisionError"},
 	} {
