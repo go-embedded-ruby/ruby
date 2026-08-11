@@ -953,64 +953,6 @@ func namedGroups(source string) []string {
 	return names
 }
 
-// nameIndex pairs a named capture with its 1-based group index.
-type nameIndex struct {
-	name string
-	idx  int
-}
-
-// captureNameIndices walks a regexp source and returns, for each (?<name>…) /
-// (?'name'…) capture, its 1-based group index (counting every capturing group —
-// numbered and named — left to right). Escapes and character classes are
-// skipped so a paren after a backslash or inside [ ] is not miscounted, and the
-// (?:…), (?=…), (?<=…), (?flags) and (?>…) forms do not add a group.
-func captureNameIndices(source string) []nameIndex {
-	var out []nameIndex
-	group := 0
-	inClass := false
-	for i := 0; i < len(source); i++ {
-		c := source[i]
-		if c == '\\' {
-			i++ // skip the escaped byte
-			continue
-		}
-		if inClass {
-			if c == ']' {
-				inClass = false
-			}
-			continue
-		}
-		switch c {
-		case '[':
-			inClass = true
-		case '(':
-			if i+1 < len(source) && source[i+1] == '?' {
-				// A named capture is (?<name>… (but not the (?<= / (?<! lookbehinds)
-				// or the (?'name'… form; any other (? sequence is a non-capturing or
-				// assertion group and adds no capture index.
-				if i+3 < len(source) && source[i+2] == '<' && source[i+3] != '=' && source[i+3] != '!' {
-					group++
-					j := i + 3
-					for j < len(source) && source[j] != '>' {
-						j++
-					}
-					out = append(out, nameIndex{name: source[i+3 : j], idx: group})
-				} else if i+2 < len(source) && source[i+2] == '\'' {
-					group++
-					j := i + 3
-					for j < len(source) && source[j] != '\'' {
-						j++
-					}
-					out = append(out, nameIndex{name: source[i+3 : j], idx: group})
-				}
-			} else {
-				group++ // a bare ( is a numbered capture
-			}
-		}
-	}
-	return out
-}
-
 // dedupNames returns names with duplicates removed, keeping first-seen order.
 func dedupNames(names []string) []string {
 	seen := map[string]bool{}
@@ -1033,19 +975,6 @@ func regexpNamesArray(source string) object.Value {
 		out[i] = object.NewString(n)
 	}
 	return object.NewArrayFromSlice(out)
-}
-
-// groupIndicesFor returns the Array elements (Integers) of the group indices a
-// capture name refers to in re's source (more than one only for the duplicate
-// names MRI permits).
-func groupIndicesFor(re *Regexp, name string) []object.Value {
-	var out []object.Value
-	for _, ni := range captureNameIndices(re.source) {
-		if ni.name == name {
-			out = append(out, object.IntValue(int64(ni.idx)))
-		}
-	}
-	return out
 }
 
 // groupValue returns group i of a match as a Ruby value: nil for a
@@ -1203,14 +1132,14 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.define("names", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return regexpNamesArray(reArg(self).source)
 	})
-	// Regexp#named_captures maps each capture name to the Array of the group
-	// indices that share it (MRI groups duplicate names under one key).
+	// Regexp#named_captures maps each capture name to the Array of its group
+	// indices. Because Ruby forbids mixing named and numbered captures, the named
+	// groups are the only capturing groups, so the k-th named group (skipping
+	// non-capturing groups, which namedGroups already ignores) has index k.
 	vm.cRegexp.define("named_captures", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		re := reArg(self)
 		h := object.NewHash()
-		for _, name := range dedupNames(namedGroups(re.source)) {
-			idxs := groupIndicesFor(re, name)
-			h.Set(object.NewString(name), object.NewArrayFromSlice(idxs))
+		for i, name := range namedGroups(reArg(self).source) {
+			h.Set(object.NewString(name), object.NewArrayFromSlice([]object.Value{object.IntValue(int64(i + 1))}))
 		}
 		return h
 	})
@@ -1340,8 +1269,14 @@ func (vm *VM) installRegexp() {
 	// Symbol instead of String.
 	vm.cMatchData.define("named_captures", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
-		sv := matchDataKw(args, "symbolize_names")
-		symbolize := !object.IsNil(sv) && sv.Truthy()
+		symbolize := false
+		if len(args) > 0 {
+			if kw, ok := args[len(args)-1].(*object.Hash); ok {
+				if sv, ok := kw.Get(object.Symbol("symbolize_names")); ok {
+					symbolize = !object.IsNil(sv) && sv.Truthy()
+				}
+			}
+		}
 		h := object.NewHash()
 		for _, name := range dedupNames(namedGroups(m.re.source)) {
 			h.Set(namedKey(name, symbolize), groupValue(m, m.md.IndexOfName(name)))
@@ -1491,12 +1426,9 @@ func stringLike(v object.Value) (string, bool) {
 }
 
 // offset returns the character offset of group i's begin (end=false) or end
-// (end=true), nil for a non-participating group, raising IndexError when i is
-// out of range.
+// (end=true), nil for a non-participating group. Callers resolve and validate
+// the group index (via indexForKey) before calling.
 func (m *MatchData) offset(i int64, end bool) object.Value {
-	if i < 0 || int(i) > m.md.NGroups() {
-		raise("IndexError", "index %d out of matches", i)
-	}
 	var b int
 	if end {
 		b = m.md.End(int(i))
@@ -1676,22 +1608,6 @@ func (m *MatchData) equalTo(other *MatchData) bool {
 		m.subject == other.subject &&
 		m.byteOff+m.md.Begin(0) == other.byteOff+other.md.Begin(0) &&
 		m.byteOff+m.md.End(0) == other.byteOff+other.md.End(0)
-}
-
-// matchDataKw returns the value of a keyword option from the trailing Hash of a
-// MatchData method call, or nil when absent.
-func matchDataKw(args []object.Value, name string) object.Value {
-	if len(args) == 0 {
-		return object.NilV
-	}
-	h, ok := args[len(args)-1].(*object.Hash)
-	if !ok {
-		return object.NilV
-	}
-	if v, ok := h.Get(object.Symbol(name)); ok {
-		return v
-	}
-	return object.NilV
 }
 
 // namedKey returns a capture-name Hash key as a Symbol (symbolize) or String.
