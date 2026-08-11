@@ -839,7 +839,10 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		return uriEqual(av, b)
 	case *Regexp:
 		bv, ok := b.(*Regexp)
-		return ok && av.source == bv.source && orderFlags(av.flags) == orderFlags(bv.flags)
+		return ok && av.source == bv.source && av.optionBits() == bv.optionBits()
+	case *MatchData:
+		bv, ok := b.(*MatchData)
+		return ok && av.equalTo(bv)
 	case object.Bool:
 		bv, ok := b.(object.Bool)
 		return ok && av == bv

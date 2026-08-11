@@ -3,6 +3,7 @@ package vm
 import (
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -25,6 +26,72 @@ type Regexp struct {
 	// which Ruby 3.0+ freezes; Object#frozen? reports it. Runtime constructions
 	// (Regexp.new / Regexp.compile) leave it false, matching MRI.
 	frozen bool
+	// fixedEnc / noEnc record the FIXEDENCODING (Regexp::FIXEDENCODING, 16) and
+	// NOENCODING (Regexp::NOENCODING, 32) option bits. They are reflected by
+	// #options, #encoding and #fixed_encoding? but do not change matching (the
+	// engine matches by UTF-8 code point or raw byte per its own encoding).
+	fixedEnc bool
+	noEnc    bool
+	// timeout is the per-Regexp match time limit as a Float (seconds), or nil
+	// when none was requested. It is reported by #timeout and, when set, applied
+	// to the direct match paths via the engine's WithTimeout.
+	timeout object.Value
+}
+
+// matcher returns the engine Regexp to match with: the receiver's compiled
+// program, wrapped with the per-Regexp timeout when one was requested (the copy
+// shares the heavy matcher state, so this is cheap).
+func (r *Regexp) matcher() *onig.Regexp {
+	if f, ok := r.timeout.(object.Float); ok {
+		return r.re.WithTimeout(time.Duration(float64(f) * float64(time.Second)))
+	}
+	return r.re
+}
+
+// optionBits returns the Integer option mask MRI's Regexp#options exposes:
+// IGNORECASE|EXTENDED|MULTILINE from the i/m/x flag letters, plus the
+// FIXEDENCODING|NOENCODING bits from the encoding options.
+func (r *Regexp) optionBits() int64 {
+	var bits int64
+	if strings.ContainsRune(r.flags, 'i') {
+		bits |= reIgnoreCase
+	}
+	if strings.ContainsRune(r.flags, 'x') {
+		bits |= reExtended
+	}
+	if strings.ContainsRune(r.flags, 'm') {
+		bits |= reMultiline
+	}
+	if r.fixedEnc {
+		bits |= reFixedEncoding
+	}
+	if r.noEnc {
+		bits |= reNoEncoding
+	}
+	return bits
+}
+
+// encodingName returns the canonical name of the encoding Regexp#encoding
+// reports: an ASCII-only source is US-ASCII; a source with a non-ASCII byte is
+// UTF-8, or ASCII-8BIT (BINARY) when the NOENCODING option is set.
+func (r *Regexp) encodingName() string {
+	if asciiOnly([]byte(r.source)) {
+		return "US-ASCII"
+	}
+	if r.noEnc {
+		return "ASCII-8BIT"
+	}
+	return "UTF-8"
+}
+
+// isFixedEncoding backs Regexp#fixed_encoding?: true when the FIXEDENCODING
+// option was requested or the source is tied to a concrete non-ASCII encoding (a
+// non-ASCII source that is not the encoding-agnostic BINARY form).
+func (r *Regexp) isFixedEncoding() bool {
+	if r.fixedEnc {
+		return true
+	}
+	return !asciiOnly([]byte(r.source)) && !r.noEnc
 }
 
 func (r *Regexp) ToS() string {
@@ -131,11 +198,14 @@ func (vm *VM) compileLiteralRegexp(source, flags string) object.Value {
 	return r
 }
 
-// Regexp option bits, matching MRI's Regexp::IGNORECASE/EXTENDED/MULTILINE.
+// Regexp option bits, matching MRI's Regexp::IGNORECASE/EXTENDED/MULTILINE and
+// the encoding options FIXEDENCODING/NOENCODING.
 const (
-	reIgnoreCase = 1
-	reExtended   = 2
-	reMultiline  = 4
+	reIgnoreCase    = 1
+	reExtended      = 2
+	reMultiline     = 4
+	reFixedEncoding = 16
+	reNoEncoding    = 32
 )
 
 // regexpNew backs Regexp.new / Regexp.compile. The first argument is either a
@@ -145,6 +215,15 @@ const (
 // as option letters (i/m/x), nil/false select no options and any other truthy
 // value selects IGNORECASE (the legacy form MRI still accepts).
 func (vm *VM) regexpNew(args []object.Value) object.Value {
+	// Peel a trailing keyword Hash (the only keyword MRI accepts here is
+	// timeout:); the remaining positional arguments are the source and options.
+	var timeout object.Value = object.NilV
+	if h := regexpKwHash(args); h != nil {
+		if t, ok := h.Get(object.Symbol("timeout")); ok {
+			timeout = coerceTimeout(t)
+		}
+		args = args[:len(args)-1]
+	}
 	if len(args) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
 	}
@@ -152,17 +231,64 @@ func (vm *VM) regexpNew(args []object.Value) object.Value {
 	case *Regexp:
 		// Copy the source Regexp; MRI warns when options are also given but still
 		// reuses the original's options, so we ignore any extra arguments here.
-		return vm.compileRegexp(src.source, src.flags)
+		r := vm.compileRegexp(src.source, src.flags).(*Regexp)
+		r.fixedEnc, r.noEnc = src.fixedEnc, src.noEnc
+		if _, ok := timeout.(object.Float); ok {
+			r.timeout = timeout
+		} else {
+			r.timeout = src.timeout
+		}
+		return r
 	case *object.String:
-		flags := ""
+		flags, fixedEnc, noEnc := "", false, false
 		if len(args) >= 2 {
 			flags = regexpOptionFlags(args[1])
+			fixedEnc, noEnc = regexpEncodingBits(args[1])
 		}
-		return vm.compileRegexp(src.Str(), flags)
+		r := vm.compileRegexp(src.Str(), flags).(*Regexp)
+		r.fixedEnc, r.noEnc, r.timeout = fixedEnc, noEnc, timeout
+		return r
 	default:
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 		return object.NilVal()
 	}
+}
+
+// regexpKwHash returns the trailing keyword Hash of a Regexp.new argument list,
+// or nil when the last argument is not a Hash (positional options).
+func regexpKwHash(args []object.Value) *object.Hash {
+	if len(args) == 0 {
+		return nil
+	}
+	h, _ := args[len(args)-1].(*object.Hash)
+	return h
+}
+
+// coerceTimeout converts a timeout: keyword value into the Float (seconds) that
+// #timeout reports: an Integer or Float becomes a Float, nil stays nil, and any
+// other type raises TypeError as MRI does.
+func coerceTimeout(v object.Value) object.Value {
+	switch t := v.(type) {
+	case object.Nil:
+		return object.NilV
+	case object.Integer:
+		return object.Float(float64(t))
+	case object.Float:
+		return t
+	default:
+		raise("TypeError", "no implicit conversion to float from %s", classNameOf(v))
+		return object.NilV
+	}
+}
+
+// regexpEncodingBits reports whether the FIXEDENCODING / NOENCODING option bits
+// are set in an Integer options argument (they are meaningless for the String
+// option-letter form, which returns false, false).
+func regexpEncodingBits(v object.Value) (fixed, no bool) {
+	if bits, ok := v.(object.Integer); ok {
+		return int(bits)&reFixedEncoding != 0, int(bits)&reNoEncoding != 0
+	}
+	return false, false
 }
 
 // regexpOptionFlags converts the second argument of Regexp.new into the engine's
@@ -259,7 +385,7 @@ func strMatchRegexp(v object.Value) *Regexp {
 // runMatch matches re against subject, returning a MatchData value or nil. It
 // also records the result as $~ (the last match).
 func (vm *VM) runMatch(re *Regexp, subject string) object.Value {
-	md := re.re.Match(subject)
+	md := re.matcher().Match(subject)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
@@ -284,7 +410,7 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 		return object.NilV
 	}
 	byteOff := charToByte(subject, int(pos))
-	md := re.re.Match(subject[byteOff:])
+	md := re.matcher().Match(subject[byteOff:])
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
@@ -325,6 +451,16 @@ func (vm *VM) gvar(name string) object.Value {
 	case "$'":
 		if ok {
 			return object.NewString(md.md.Post())
+		}
+	case "$+":
+		// The last capture group that participated (highest-numbered match), or
+		// nil when there were no groups or none participated.
+		if ok {
+			for i := md.md.NGroups(); i >= 1; i-- {
+				if md.md.Begin(i) >= 0 {
+					return object.NewString(md.md.Str(i))
+				}
+			}
 		}
 	default:
 		if n, isGroup := gvarGroup(name); isGroup {
@@ -422,7 +558,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 	var results []object.Value
 	pos := 0
 	for pos <= len(subject) {
-		md := re.re.Match(subject[pos:])
+		md := re.matcher().Match(subject[pos:])
 		if md == nil {
 			break
 		}
@@ -533,7 +669,7 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 		if limit > 0 && pieces+1 == limit {
 			break
 		}
-		md := re.re.Match(subject[search:])
+		md := re.matcher().Match(subject[search:])
 		if md == nil {
 			break
 		}
@@ -629,7 +765,7 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 	pos := 0    // byte cursor into subject (start of the not-yet-emitted tail)
 	search := 0 // byte cursor where the next search begins
 	for search <= len(subject) {
-		md := re.re.Match(subject[search:])
+		md := re.matcher().Match(subject[search:])
 		if md == nil {
 			break
 		}
@@ -677,7 +813,7 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 	pos := 0    // byte cursor into subject (start of the not-yet-emitted tail)
 	search := 0 // byte cursor where the next search begins
 	for search <= len(subject) {
-		md := re.re.Match(subject[search:])
+		md := re.matcher().Match(subject[search:])
 		if md == nil {
 			break
 		}
@@ -817,6 +953,101 @@ func namedGroups(source string) []string {
 	return names
 }
 
+// nameIndex pairs a named capture with its 1-based group index.
+type nameIndex struct {
+	name string
+	idx  int
+}
+
+// captureNameIndices walks a regexp source and returns, for each (?<name>…) /
+// (?'name'…) capture, its 1-based group index (counting every capturing group —
+// numbered and named — left to right). Escapes and character classes are
+// skipped so a paren after a backslash or inside [ ] is not miscounted, and the
+// (?:…), (?=…), (?<=…), (?flags) and (?>…) forms do not add a group.
+func captureNameIndices(source string) []nameIndex {
+	var out []nameIndex
+	group := 0
+	inClass := false
+	for i := 0; i < len(source); i++ {
+		c := source[i]
+		if c == '\\' {
+			i++ // skip the escaped byte
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+		case '(':
+			if i+1 < len(source) && source[i+1] == '?' {
+				// A named capture is (?<name>… (but not the (?<= / (?<! lookbehinds)
+				// or the (?'name'… form; any other (? sequence is a non-capturing or
+				// assertion group and adds no capture index.
+				if i+3 < len(source) && source[i+2] == '<' && source[i+3] != '=' && source[i+3] != '!' {
+					group++
+					j := i + 3
+					for j < len(source) && source[j] != '>' {
+						j++
+					}
+					out = append(out, nameIndex{name: source[i+3 : j], idx: group})
+				} else if i+2 < len(source) && source[i+2] == '\'' {
+					group++
+					j := i + 3
+					for j < len(source) && source[j] != '\'' {
+						j++
+					}
+					out = append(out, nameIndex{name: source[i+3 : j], idx: group})
+				}
+			} else {
+				group++ // a bare ( is a numbered capture
+			}
+		}
+	}
+	return out
+}
+
+// dedupNames returns names with duplicates removed, keeping first-seen order.
+func dedupNames(names []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// regexpNamesArray is the Array of a source's capture names (deduplicated,
+// first-appearance order), shared by Regexp#names and MatchData#names.
+func regexpNamesArray(source string) object.Value {
+	names := dedupNames(namedGroups(source))
+	out := make([]object.Value, len(names))
+	for i, n := range names {
+		out[i] = object.NewString(n)
+	}
+	return object.NewArrayFromSlice(out)
+}
+
+// groupIndicesFor returns the Array elements (Integers) of the group indices a
+// capture name refers to in re's source (more than one only for the duplicate
+// names MRI permits).
+func groupIndicesFor(re *Regexp, name string) []object.Value {
+	var out []object.Value
+	for _, ni := range captureNameIndices(re.source) {
+		if ni.name == name {
+			out = append(out, object.IntValue(int64(ni.idx)))
+		}
+	}
+	return out
+}
+
 // groupValue returns group i of a match as a Ruby value: nil for a
 // non-participating group, else the captured substring.
 func groupValue(m *MatchData, i int) object.Value {
@@ -835,6 +1066,8 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.consts["IGNORECASE"] = object.IntValue(reIgnoreCase)
 	vm.cRegexp.consts["EXTENDED"] = object.IntValue(reExtended)
 	vm.cRegexp.consts["MULTILINE"] = object.IntValue(reMultiline)
+	vm.cRegexp.consts["FIXEDENCODING"] = object.IntValue(reFixedEncoding)
+	vm.cRegexp.consts["NOENCODING"] = object.IntValue(reNoEncoding)
 
 	// Regexp.new(str_or_regexp[, options]) / Regexp.compile(...) build a Regexp at
 	// runtime. A Regexp argument is copied (its options are reused); a String is
@@ -900,19 +1133,7 @@ func (vm *VM) installRegexp() {
 		return object.NewString(reArg(self).source)
 	})
 	vm.cRegexp.define("options", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		// The integer option bitmask MRI exposes: IGNORECASE | EXTENDED | MULTILINE.
-		f := reArg(self).flags
-		var bits int64
-		if strings.ContainsRune(f, 'i') {
-			bits |= reIgnoreCase
-		}
-		if strings.ContainsRune(f, 'x') {
-			bits |= reExtended
-		}
-		if strings.ContainsRune(f, 'm') {
-			bits |= reMultiline
-		}
-		return object.IntValue(bits)
+		return object.IntValue(reArg(self).optionBits())
 	})
 	vm.cRegexp.define("casefold?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(strings.ContainsRune(reArg(self).flags, 'i'))
@@ -927,7 +1148,22 @@ func (vm *VM) installRegexp() {
 		if _, isNil := args[0].(object.Nil); isNil {
 			return object.False
 		}
-		return object.Bool(reArg(self).re.MatchString(strArg(args[0])))
+		re := reArg(self)
+		subject := strArg(args[0])
+		// match?(str, pos): probe from character offset pos, without touching $~
+		// (the predicate form has no match-data side effect).
+		if len(args) >= 2 {
+			nChars := int64(utf8.RuneCountInString(subject))
+			pos := intArg(args[1])
+			if pos < 0 {
+				pos += nChars
+			}
+			if pos < 0 || pos > nChars {
+				return object.False
+			}
+			return object.Bool(re.matcher().MatchString(subject[charToByte(subject, int(pos)):]))
+		}
+		return object.Bool(re.matcher().MatchString(subject))
 	})
 	vm.cRegexp.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if _, isNil := args[0].(object.Nil); isNil {
@@ -951,7 +1187,7 @@ func (vm *VM) installRegexp() {
 			return object.False
 		}
 		re := reArg(self)
-		md := re.re.Match(s)
+		md := re.matcher().Match(s)
 		if md == nil {
 			vm.lastMatch = object.NilV
 			return object.False
@@ -961,6 +1197,82 @@ func (vm *VM) installRegexp() {
 		vm.lastMatch = &MatchData{md: md, subject: s, re: re}
 		return object.True
 	})
+
+	// Regexp#names lists the names of the (?<name>…) capture groups in order of
+	// first appearance, without duplicates (MRI collapses repeated names).
+	vm.cRegexp.define("names", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return regexpNamesArray(reArg(self).source)
+	})
+	// Regexp#named_captures maps each capture name to the Array of the group
+	// indices that share it (MRI groups duplicate names under one key).
+	vm.cRegexp.define("named_captures", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		re := reArg(self)
+		h := object.NewHash()
+		for _, name := range dedupNames(namedGroups(re.source)) {
+			idxs := groupIndicesFor(re, name)
+			h.Set(object.NewString(name), object.NewArrayFromSlice(idxs))
+		}
+		return h
+	})
+	// Regexp#== / #eql? compare the source and the full option mask (i/m/x plus
+	// the encoding options); a non-Regexp operand is never equal.
+	reEqual := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		other, ok := args[0].(*Regexp)
+		if !ok {
+			return object.False
+		}
+		a := reArg(self)
+		return object.Bool(a.source == other.source && a.optionBits() == other.optionBits())
+	}
+	vm.cRegexp.define("==", reEqual)
+	vm.cRegexp.define("eql?", reEqual)
+	// Regexp#hash is consistent with #== / #eql?: equal Regexps hash equal.
+	vm.cRegexp.define("hash", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		r := reArg(self)
+		return object.IntValue(fnvHash(r.source) ^ r.optionBits())
+	})
+	// Regexp#encoding returns the Encoding the pattern is associated with.
+	vm.cRegexp.define("encoding", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.internEncoding(reArg(self).encodingName())
+	})
+	// Regexp#fixed_encoding? reports whether the Regexp is tied to a specific
+	// (non-ASCII) encoding rather than matching any ASCII-compatible string.
+	vm.cRegexp.define("fixed_encoding?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(reArg(self).isFixedEncoding())
+	})
+	// Regexp#~ matches the Regexp against $_ (the last line read by Kernel#gets),
+	// returning the character offset of the match or nil. It records $~.
+	vm.cRegexp.define("~", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		line, ok := vm.globals["$_"]
+		if !ok {
+			line = object.NilV
+		}
+		return vm.regexpMatchIndex(reArg(self), line)
+	})
+	// Regexp#timeout returns this Regexp's own match-time limit as a Float
+	// (seconds), or nil when none was set at construction. It does not fall back
+	// to the Regexp.timeout default.
+	vm.cRegexp.define("timeout", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if t := reArg(self).timeout; t != nil {
+			return t
+		}
+		return object.NilV
+	})
+
+	// Regexp.timeout / Regexp.timeout= read and write the process-wide default
+	// match-time limit (a Float in seconds, or nil for no limit).
+	vm.cRegexp.smethods["timeout"] = &Method{name: "timeout", owner: vm.cRegexp,
+		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			if vm.regexpTimeout == nil {
+				return object.NilV
+			}
+			return vm.regexpTimeout
+		}}
+	vm.cRegexp.smethods["timeout="] = &Method{name: "timeout=", owner: vm.cRegexp,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			vm.regexpTimeout = coerceTimeout(args[0])
+			return args[0]
+		}}
 
 	mdArg := func(v object.Value) *MatchData { return v.(*MatchData) }
 
@@ -1009,33 +1321,97 @@ func (vm *VM) installRegexp() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cMatchData.define("begin", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return mdArg(self).offset(intArg(args[0]), false)
+		m := mdArg(self)
+		return m.offset(int64(m.indexForKey(args[0])), false)
 	})
 	vm.cMatchData.define("end", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return mdArg(self).offset(intArg(args[0]), true)
-	})
-	vm.cMatchData.define("named_captures", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
+		return m.offset(int64(m.indexForKey(args[0])), true)
+	})
+	// MatchData#offset(n_or_name) is the [begin, end] character-offset pair of the
+	// group; [nil, nil] for a group that did not participate.
+	vm.cMatchData.define("offset", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := mdArg(self)
+		idx := int64(m.indexForKey(args[0]))
+		return object.NewArrayFromSlice([]object.Value{m.offset(idx, false), m.offset(idx, true)})
+	})
+	// MatchData#named_captures maps each capture name to its captured substring
+	// (nil when the group did not participate); symbolize_names: true keys by
+	// Symbol instead of String.
+	vm.cMatchData.define("named_captures", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := mdArg(self)
+		sv := matchDataKw(args, "symbolize_names")
+		symbolize := !object.IsNil(sv) && sv.Truthy()
 		h := object.NewHash()
-		for _, name := range namedGroups(m.re.source) {
-			h.Set(object.NewString(name), groupValue(m, m.md.IndexOfName(name)))
+		for _, name := range dedupNames(namedGroups(m.re.source)) {
+			h.Set(namedKey(name, symbolize), groupValue(m, m.md.IndexOfName(name)))
 		}
 		return h
+	})
+	vm.cMatchData.define("names", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return regexpNamesArray(mdArg(self).re.source)
+	})
+	vm.cMatchData.define("regexp", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return mdArg(self).re
+	})
+	vm.cMatchData.define("string", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// MRI returns a frozen copy of the original subject.
+		return object.NewFrozenStringView(mdArg(self).subject)
+	})
+	// MatchData#deconstruct is the Array of captures (groups 1..n), for array
+	// pattern matching (`in [a, b]`).
+	vm.cMatchData.define("deconstruct", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		m := mdArg(self)
+		out := make([]object.Value, 0, m.md.NGroups())
+		for i := 1; i <= m.md.NGroups(); i++ {
+			out = append(out, groupValue(m, i))
+		}
+		return object.NewArrayFromSlice(out)
+	})
+	// MatchData#deconstruct_keys(keys) is the symbol-keyed named captures, for
+	// hash pattern matching (`in {name:}`). keys nil selects them all; otherwise
+	// only the requested Symbol keys are returned, and the walk stops at the first
+	// key that is not a capture name (matching MRI).
+	vm.cMatchData.define("deconstruct_keys", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return mdArg(self).deconstructKeys(args[0])
+	})
+	// MatchData#values_at(*args) selects groups by Integer index, name, or Range,
+	// like #[] applied to each argument.
+	vm.cMatchData.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := mdArg(self)
+		var out []object.Value
+		for _, a := range args {
+			if rng, ok := a.(*object.Range); ok {
+				out = append(out, m.rangeValuesAt(rng)...)
+				continue
+			}
+			out = append(out, m.at(a))
+		}
+		return object.NewArrayFromSlice(out)
+	})
+	// MatchData#== / #eql? compare the source Regexp, the subject, and the matched
+	// span; a non-MatchData operand is never equal.
+	mdEqual := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		other, ok := args[0].(*MatchData)
+		if !ok {
+			return object.False
+		}
+		a := mdArg(self)
+		return object.Bool(a.equalTo(other))
+	}
+	vm.cMatchData.define("==", mdEqual)
+	vm.cMatchData.define("eql?", mdEqual)
+	vm.cMatchData.define("hash", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		m := mdArg(self)
+		return object.IntValue(fnvHash(m.re.source+"\x00"+m.md.Str(0)) ^ int64(m.byteOff+m.md.Begin(0)))
 	})
 	vm.cMatchData.define("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		// The Range and (start, length) forms slice the array of all groups
 		// (whole match at 0, then each capture) — md[1..] is how callers grab just
 		// the captures, as Puppet's parse_title does.
-		groups := func() []object.Value {
-			out := make([]object.Value, 0, m.md.NGroups()+1)
-			for i := 0; i <= m.md.NGroups(); i++ {
-				out = append(out, groupValue(m, i))
-			}
-			return out
-		}
 		if rng, ok := args[0].(*object.Range); ok {
-			all := groups()
+			all := m.allGroups()
 			start, length, ok := sliceRange(len(all), rng)
 			if !ok {
 				return object.NilV
@@ -1045,7 +1421,7 @@ func (vm *VM) installRegexp() {
 			return object.NewArrayFromSlice(out)
 		}
 		if len(args) == 2 { // md[start, length]
-			all := groups()
+			all := m.allGroups()
 			start := normIndex(intArg(args[0]), len(all))
 			length := int(intArg(args[1]))
 			if start < 0 || start > len(all) || length < 0 {
@@ -1075,7 +1451,7 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(subject))
 	}
-	md := re.re.Match(s)
+	md := re.matcher().Match(s)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
@@ -1088,7 +1464,7 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 // whole match (no extra arg) or the numbered/named capture group, and nil when
 // the pattern does not match. $~ is updated, as in MRI.
 func (vm *VM) stringRegexpIndex(s string, re *Regexp, rest []object.Value) object.Value {
-	md := re.re.Match(s)
+	md := re.matcher().Match(s)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
@@ -1138,11 +1514,7 @@ func (m *MatchData) offset(i int64, end bool) object.Value {
 func (m *MatchData) at(key object.Value) object.Value {
 	switch k := key.(type) {
 	case object.Integer:
-		idx := int(k)
-		if idx < 0 || idx > m.md.NGroups() {
-			return object.NilV
-		}
-		return groupValue(m, idx)
+		return m.intGroup(int(k))
 	case *object.String:
 		return m.byName(k.Str())
 	case object.Symbol:
@@ -1153,6 +1525,24 @@ func (m *MatchData) at(key object.Value) object.Value {
 	}
 }
 
+// intGroup returns group i as MatchData#[] does for an Integer: a positive index
+// selects that group (nil past the last); a negative index counts back from the
+// group count, and — matching MRI — a negative index that lands on 0 is out of
+// range (the whole match is reachable only by the literal 0).
+func (m *MatchData) intGroup(i int) object.Value {
+	n := m.md.NGroups()
+	if i < 0 {
+		i += n + 1
+		if i <= 0 {
+			return object.NilV
+		}
+	}
+	if i > n {
+		return object.NilV
+	}
+	return groupValue(m, i)
+}
+
 // byName resolves a named-group capture, raising IndexError if no group has the
 // name.
 func (m *MatchData) byName(name string) object.Value {
@@ -1161,4 +1551,153 @@ func (m *MatchData) byName(name string) object.Value {
 		raise("IndexError", "undefined group name reference: %s", name)
 	}
 	return groupValue(m, i)
+}
+
+// indexForKey resolves a #begin/#end/#offset key to a group index: an Integer
+// out of range raises IndexError; a String/Symbol name is resolved (IndexError
+// when unknown); any other type raises TypeError.
+func (m *MatchData) indexForKey(key object.Value) int {
+	switch k := key.(type) {
+	case object.Integer:
+		i := int(k)
+		if i < 0 || i > m.md.NGroups() {
+			raise("IndexError", "index %d out of matches", i)
+		}
+		return i
+	case *object.String:
+		return m.nameIndex(k.Str())
+	case object.Symbol:
+		return m.nameIndex(string(k))
+	default:
+		raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(key))
+		return 0
+	}
+}
+
+// nameIndex resolves a capture name to its group index, raising IndexError when
+// no group has the name.
+func (m *MatchData) nameIndex(name string) int {
+	i := m.md.IndexOfName(name)
+	if i < 0 {
+		raise("IndexError", "undefined group name reference: %s", name)
+	}
+	return i
+}
+
+// allGroups returns every group (whole match at 0, then each capture) as a Ruby
+// value slice.
+func (m *MatchData) allGroups() []object.Value {
+	out := make([]object.Value, 0, m.md.NGroups()+1)
+	for i := 0; i <= m.md.NGroups(); i++ {
+		out = append(out, groupValue(m, i))
+	}
+	return out
+}
+
+// rangeValuesAt implements the Range form of MatchData#values_at: the range
+// endpoints are resolved against the group count (num_regs = NGroups+1), then the
+// concrete index sequence is walked, yielding the group (or nil past the last
+// group) at each — so an over-long range pads with nil, as MRI does. A begin that
+// is still negative after resolution raises RangeError.
+func (m *MatchData) rangeValuesAt(r *object.Range) []object.Value {
+	n := m.md.NGroups() + 1
+	lo := 0
+	if !object.IsNil(r.Lo) {
+		lo = int(intArg(r.Lo))
+		if lo < 0 {
+			lo += n
+		}
+	}
+	hi := n - 1
+	if !object.IsNil(r.Hi) {
+		hi = int(intArg(r.Hi))
+		if hi < 0 {
+			hi += n
+		}
+		if r.Exclusive {
+			hi--
+		}
+	}
+	if lo < 0 {
+		raise("RangeError", "%s out of range", r.Inspect())
+	}
+	var out []object.Value
+	for j := lo; j <= hi; j++ {
+		if j >= 0 && j <= m.md.NGroups() {
+			out = append(out, groupValue(m, j))
+		} else {
+			out = append(out, object.NilV)
+		}
+	}
+	return out
+}
+
+// deconstructKeys implements MatchData#deconstruct_keys(keys): a nil keys
+// argument returns all named captures (Symbol-keyed); an Array of Symbols
+// returns just those captures, stopping at the first key that is not a capture
+// name and short-circuiting to an empty Hash when more keys are requested than
+// there are named captures. A non-Array, non-nil keys argument, or a non-Symbol
+// element, raises TypeError.
+func (m *MatchData) deconstructKeys(keys object.Value) object.Value {
+	h := object.NewHash()
+	if object.IsNil(keys) {
+		for _, name := range dedupNames(namedGroups(m.re.source)) {
+			h.Set(object.Symbol(name), groupValue(m, m.md.IndexOfName(name)))
+		}
+		return h
+	}
+	arr, ok := keys.(*object.Array)
+	if !ok {
+		raise("TypeError", "wrong argument type %s (expected Array)", classNameOf(keys))
+	}
+	if len(arr.Elems) > len(dedupNames(namedGroups(m.re.source))) {
+		return h
+	}
+	for _, k := range arr.Elems {
+		sym, ok := k.(object.Symbol)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Symbol)", classNameOf(k))
+		}
+		i := m.md.IndexOfName(string(sym))
+		if i < 0 {
+			break
+		}
+		h.Set(sym, groupValue(m, i))
+	}
+	return h
+}
+
+// equalTo backs MatchData#== / #eql?: two matches are equal when they come from
+// an equal Regexp (same source and options), over the same subject, and cover
+// the same byte span.
+func (m *MatchData) equalTo(other *MatchData) bool {
+	return m.re.source == other.re.source &&
+		m.re.optionBits() == other.re.optionBits() &&
+		m.subject == other.subject &&
+		m.byteOff+m.md.Begin(0) == other.byteOff+other.md.Begin(0) &&
+		m.byteOff+m.md.End(0) == other.byteOff+other.md.End(0)
+}
+
+// matchDataKw returns the value of a keyword option from the trailing Hash of a
+// MatchData method call, or nil when absent.
+func matchDataKw(args []object.Value, name string) object.Value {
+	if len(args) == 0 {
+		return object.NilV
+	}
+	h, ok := args[len(args)-1].(*object.Hash)
+	if !ok {
+		return object.NilV
+	}
+	if v, ok := h.Get(object.Symbol(name)); ok {
+		return v
+	}
+	return object.NilV
+}
+
+// namedKey returns a capture-name Hash key as a Symbol (symbolize) or String.
+func namedKey(name string, symbolize bool) object.Value {
+	if symbolize {
+		return object.Symbol(name)
+	}
+	return object.NewString(name)
 }

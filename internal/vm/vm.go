@@ -388,6 +388,7 @@ type VM struct {
 	defInternalEnc                     *encodingObj            // Encoding.default_internal (nil = MRI's default)
 	cLazy                              *RClass
 	lastMatch                          object.Value            // $~: last regexp MatchData (or nil)
+	regexpTimeout                      object.Value            // Regexp.timeout default (Float seconds or nil)
 	globals                            map[string]object.Value // user-assigned $globals
 	cTrueClass, cFalseClass, cNilClass *RClass
 	cRegexp, cMatchData                *RClass
