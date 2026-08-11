@@ -435,4 +435,111 @@ func (vm *VM) registerNumericEdges() {
 		ndigits, mode := roundArgs(args)
 		return floRound(floatOf(self), ndigits, mode)
 	})
+
+	// --- Integer bit-predicate residuals (Ruby 2.5+) ---
+	// allbits?/anybits?/nobits? test the receiver against a bit mask. The mask is
+	// coerced with Integer#to_int semantics (a Float mask truncates; a String mask
+	// raises "no implicit conversion of String into Integer"), matching MRI.
+	andMask := func(vm *VM, self object.Value, args []object.Value) (and, mask *big.Int) {
+		mask = vm.arefToInt(args[0])
+		return new(big.Int).And(bigVal(self), mask), mask
+	}
+	vm.cInteger.define("allbits?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		and, mask := andMask(vm, self, args)
+		return object.Bool(and.Cmp(mask) == 0)
+	})
+	vm.cInteger.define("anybits?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		and, _ := andMask(vm, self, args)
+		return object.Bool(and.Sign() != 0)
+	})
+	vm.cInteger.define("nobits?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		and, _ := andMask(vm, self, args)
+		return object.Bool(and.Sign() == 0)
+	})
+
+	// Integer#ceildiv (Ruby 3.2+): the quotient rounded toward +Infinity, defined
+	// as -((-self).div(other)). Delegating to #div inherits its floor semantics,
+	// its numeric coercion of Float/Rational operands, and its ZeroDivisionError.
+	vm.cInteger.define("ceildiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		neg := object.NormInt(new(big.Int).Neg(bigVal(self)))
+		q := vm.send(neg, "div", []object.Value{args[0]}, nil)
+		return object.NormInt(new(big.Int).Neg(bigVal(q)))
+	})
+
+	// Integer#quo: an exact quotient. A Float operand yields a Float (like #fdiv);
+	// an Integer/Rational operand yields a Rational. A zero divisor raises.
+	vm.cInteger.define("quo", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if f, ok := args[0].(object.Float); ok {
+			sf, _ := toFloat(self)
+			return object.Float(sf / float64(f))
+		}
+		den, ok := ratOf(args[0])
+		if !ok {
+			raise("TypeError", "%s can't be coerced into Rational", coerceName(args[0]))
+		}
+		if den.Sign() == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		return &object.Rational{R: new(big.Rat).Quo(new(big.Rat).SetInt(bigVal(self)), den)}
+	})
+
+	// Float#quo is #fdiv — an exact Float quotient (a zero divisor gives ±Infinity).
+	aliasBuiltin(vm.cFloat, "quo", "fdiv")
+
+	// Float#remainder: self - other*(self/other).truncate — the remainder keeps the
+	// dividend's sign (unlike #modulo/%). A zero divisor raises ZeroDivisionError.
+	vm.cFloat.define("remainder", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		b, ok := toFloat(args[0])
+		if !ok {
+			raise("TypeError", "%s can't be coerced into Float", vm.classOf(args[0]).name)
+		}
+		if b == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		a := floatOf(self)
+		return object.Float(a - b*math.Trunc(a/b))
+	})
+
+	// Float#step — mirrors Integer#step: an enumerator without a block, otherwise
+	// walking [self, limit] by step (default 1), yielding Floats via numericStep.
+	vm.cFloat.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		if blk == nil {
+			return enumFor(self, "step", args...)
+		}
+		step := object.Value(object.IntValue(1))
+		if len(args) > 1 {
+			step = args[1]
+		}
+		vm.numericStep(blk, self, args[0], step, false)
+		return self
+	})
+}
+
+// ratOf converts an Integer/Bignum/Rational value to a *big.Rat for exact
+// arithmetic, reporting false for any other (non-coercible) value.
+func ratOf(v object.Value) (*big.Rat, bool) {
+	switch x := v.(type) {
+	case object.Integer:
+		return new(big.Rat).SetInt64(int64(x)), true
+	case *object.Bignum:
+		return new(big.Rat).SetInt(x.I), true
+	case *object.Rational:
+		return x.R, true
+	}
+	return nil, false
+}
+
+// coerceName names a value the way MRI does in "X can't be coerced" errors:
+// nil/true/false by their literal, everything else by class name.
+func coerceName(v object.Value) string {
+	switch v.(type) {
+	case object.Nil:
+		return "nil"
+	case object.Bool:
+		return v.ToS()
+	}
+	return classNameOf(v)
 }
