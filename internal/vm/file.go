@@ -400,18 +400,21 @@ func (vm *VM) registerFile() {
 	def("setuid?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeSetuid != 0 }))
 	def("setgid?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeSetgid != 0 }))
 	def("sticky?", statTest(func(s *FileStat) bool { return s.fi.Mode()&os.ModeSticky != 0 }))
-	def("owned?", statTest(func(s *FileStat) bool { return s.sys.hasSys && int64(statEuid()) == s.sys.uid }))
-	def("grpowned?", statTest(func(s *FileStat) bool { return s.sys.hasSys && inGroupFor(s.sys.gid, statEgid()) }))
+	def("owned?", statTest(func(s *FileStat) bool { return statOwned(s) }))
+	def("grpowned?", statTest(func(s *FileStat) bool { return statGrpowned(s) }))
 
 	// world_readable? / world_writable?: the permission integer when the relevant
 	// "other" bit is set, else nil; a missing path is nil rather than an error.
+	// statPerm supplies the platform-faithful bits (raw on POSIX; MSVCRT 0644/0444
+	// on Windows, where the group/other write bits are never set — see
+	// filestat_windows.go), so world_writable? is nil on Windows as MRI reports.
 	worldPerm := func(bit int64) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			fi, err := os.Stat(pathArg(vm, args[0]))
 			if err != nil {
 				return object.NilV
 			}
-			if perm := int64(fi.Mode().Perm()); perm&bit != 0 {
+			if perm := statPerm(fi); perm&bit != 0 {
 				return object.IntValue(perm)
 			}
 			return object.NilV

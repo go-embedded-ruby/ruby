@@ -370,14 +370,12 @@ func globPattern(pat, base string, flags int) []string {
 // matches to directories, and delegates the segment walk to globWalk.
 func globExpanded(pat, base string, flags int, out *[]string) {
 	segs := strings.Split(pat, "/")
-	fsDir, outPrefix := base, ""
-	if fsDir == "" {
-		fsDir = "."
-	}
-	if len(segs) > 0 && segs[0] == "" { // absolute pattern
-		fsDir, outPrefix = "/", "/"
-		segs = segs[1:]
-	}
+	// globStart resolves the walk's start directory and output prefix, consuming
+	// any leading absolute-root segment. On POSIX that is only a leading "" (a
+	// "/foo" pattern); on Windows it also recognises a drive-letter root such as
+	// "C:/foo" (see glob_windows.go), so an absolute Windows pattern globs from
+	// its drive rather than being mistaken for a relative name under base.
+	fsDir, outPrefix, segs := globStart(base, segs)
 	dirOnly := false
 	for len(segs) > 0 && segs[len(segs)-1] == "" { // trailing '/': directories only
 		dirOnly = true

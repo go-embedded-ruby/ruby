@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -295,8 +296,15 @@ func TestFileStatWorldWritable(t *testing.T) {
 	vm := New(nil)
 	m := vm.cFileStat.methods["world_writable?"]
 	ww := &FileStat{fi: fakeInfo{mode: 0o777}}
-	if got := m.native(vm, ww, nil, nil); got != object.Integer(0o777) {
-		t.Errorf("world_writable? 0777: got %v want 511", got)
+	// On Windows statPerm masks the group/other write bits (MSVCRT reports 0644/
+	// 0444), so even a crafted 0o777 mode has no other-write bit and reports nil —
+	// matching MRI, which never returns non-nil from world_writable? on Windows.
+	var want object.Value = object.Integer(0o777)
+	if runtime.GOOS == "windows" {
+		want = object.NilV
+	}
+	if got := m.native(vm, ww, nil, nil); got != want {
+		t.Errorf("world_writable? 0777: got %v want %v", got, want)
 	}
 	now := &FileStat{fi: fakeInfo{mode: 0o755}}
 	if got := m.native(vm, now, nil, nil); got != object.NilV {

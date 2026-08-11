@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
@@ -220,10 +221,14 @@ func TestDirGlobRuby(t *testing.T) {
 	}
 
 	// Absolute-path patterns (independent of cwd), including the root and a
-	// directory-only trailing slash.
+	// directory-only trailing slash. Glob patterns use forward slashes on every
+	// platform: on Windows a backslash is a glob escape (ruby itself returns []
+	// for a "C:\\dir\\*" pattern), so a Windows caller passes "C:/dir/*", which
+	// globStart resolves from the drive root — hence ToSlash on the temp dir.
+	absDir := filepath.ToSlash(dir)
 	abs := []struct{ src, want string }{
-		{fmt.Sprintf(`p Dir.glob(%q).map { |f| File.basename(f) }.sort`, dir+"/*"), `["a", "top.rb"]` + "\n"},
-		{fmt.Sprintf(`p Dir.glob(%q).size`, dir+"/**/*.rb"), "4\n"},
+		{fmt.Sprintf(`p Dir.glob(%q).map { |f| File.basename(f) }.sort`, absDir+"/*"), `["a", "top.rb"]` + "\n"},
+		{fmt.Sprintf(`p Dir.glob(%q).size`, absDir+"/**/*.rb"), "4\n"},
 		{`p Dir.glob("/") == ["/"]`, "true\n"},
 	}
 	for _, c := range abs {
