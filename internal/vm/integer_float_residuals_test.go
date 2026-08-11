@@ -135,8 +135,8 @@ func TestFloatRemainder(t *testing.T) {
 		{`p (-7.0).remainder(3)`, "-1.0\n"},
 		{`p 7.0.remainder(-3)`, "1.0\n"},
 		{`p 7.0.remainder(3.5)`, "0.0\n"},
-		{`p (0.0 / 0).remainder(3)`, "NaN\n"},  // NaN dividend
-		{`p (1.0 / 0).remainder(3)`, "NaN\n"},  // Infinity dividend
+		{`p (0.0 / 0).remainder(3)`, "NaN\n"}, // NaN dividend
+		{`p (1.0 / 0).remainder(3)`, "NaN\n"}, // Infinity dividend
 		{`p (-7.5).remainder(3)`, "-1.5\n"},
 	}
 	for _, c := range cases {
@@ -158,10 +158,10 @@ func TestFloatRemainder(t *testing.T) {
 // asserted against MRI Ruby 4.0.5.
 func TestFloatStep(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{`p 1.0.step(3.0).to_a`, "[1.0, 2.0, 3.0]\n"},             // default step, enumerator
+		{`p 1.0.step(3.0).to_a`, "[1.0, 2.0, 3.0]\n"}, // default step, enumerator
 		{`p 1.0.step(3.0, 0.5).to_a`, "[1.0, 1.5, 2.0, 2.5, 3.0]\n"},
-		{`p 5.0.step(1.0, -2.0).to_a`, "[5.0, 3.0, 1.0]\n"},      // negative step
-		{`p 1.0.step(3.0) { |x| }`, "1.0\n"},                      // block form returns self
+		{`p 5.0.step(1.0, -2.0).to_a`, "[5.0, 3.0, 1.0]\n"}, // negative step
+		{`p 1.0.step(3.0) { |x| }`, "1.0\n"},                // block form returns self
 		{`a = []; 1.0.step(2.0, 0.25) { |x| a << x }; p a`, "[1.0, 1.25, 1.5, 1.75, 2.0]\n"},
 	}
 	for _, c := range cases {
