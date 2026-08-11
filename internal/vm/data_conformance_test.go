@@ -71,6 +71,9 @@ func TestDataConformance(t *testing.T) {
 		{`Foo = Data.define(:a, :b); p Foo.new(1, 2).deconstruct_keys([:a, :b, :a])`, "{}\n"}, // more keys than members
 		{`Foo = Data.define(:a, :b); p Foo.new(1, 2).deconstruct_keys([:z, :a])`, "{}\n"},     // first not a member -> stop
 		{`Foo = Data.define(:a, :b); p Foo.new(1, 2).deconstruct_keys([:a, :z])`, "{a: 1}\n"}, // stop at first miss
+		// a key that is neither Symbol nor String is coerced with #to_str.
+		{`Foo = Data.define(:a, :b); k = Object.new; def k.to_str; "b"; end; p Foo.new(1, 2).deconstruct_keys([k])`, "{\"b\" => 2}\n"},
+		{`Foo = Data.define(:a, :b); k = Object.new; def k.to_str; "a"; end; p Foo.new(k => 5, b: 2).a`, "5\n"},
 
 		// --- pattern matching ---------------------------------------------------
 		{`Foo = Data.define(:a, :b); case Foo.new(1, 2); in Foo(a:, b:); p [a, b]; end`, "[1, 2]\n"},

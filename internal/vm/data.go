@@ -345,9 +345,10 @@ func (vm *VM) dataNew(cls *RClass, args []object.Value, blk *Proc) object.Value 
 }
 
 // splitDataKwargs separates a native Data call's arguments into its trailing
-// keyword Hash and the leading positional arguments. An empty trailing Hash
-// (Ruby's elided `**{}`) is treated as "no keywords", so `Point.new(1, **{})`
-// stays positional. Returns (nil, args) when no keyword Hash is present.
+// keyword Hash and the leading positional arguments, returning (nil, args) when
+// no keyword Hash is present. An empty keyword splat (`Point.new(1, **{})`) is
+// elided by the caller before the native runs, so it never reaches here and
+// stays positional.
 func splitDataKwargs(args []object.Value) (*object.Hash, []object.Value) {
 	m := len(args)
 	if m == 0 {
@@ -356,9 +357,6 @@ func splitDataKwargs(args []object.Value) (*object.Hash, []object.Value) {
 	h, ok := args[m-1].(*object.Hash)
 	if !ok {
 		return nil, args
-	}
-	if len(h.Keys) == 0 {
-		return nil, args[:m-1]
 	}
 	return h, args[:m-1]
 }
