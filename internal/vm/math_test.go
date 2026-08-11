@@ -45,6 +45,13 @@ func TestMathConstantsAndValues(t *testing.T) {
 		{`p Math.log(0)`, "-Infinity\n"},
 		{`p Math.log(8, 2).round(9)`, "3.0\n"},
 		{`p Math.log(0, 10)`, "-Infinity\n"},
+		// A Bignum too large for float64 keeps full precision (bit-length reduction)
+		// instead of overflowing to Infinity.
+		{`p Math.log2(2**10001 + 45677544234809571)`, "10001.0\n"},
+		{`p Math.log(2**5000).round(6)`, "3465.735903\n"},
+		{`p Math.log10(10**400).round(6)`, "400.0\n"},
+		{`p Math.log(2**10000, 2**5000).round(6)`, "2.0\n"},             // huge Bignum base too
+		{`p Math.log2(2**101 + 45677544234809571).round(5)`, "101.0\n"}, // small Bignum: direct path
 		// Binary.
 		{`p Math.hypot(3, 4)`, "5.0\n"},
 		{`p Math.atan2(1, 1).round(9)`, "0.785398163\n"},
@@ -91,6 +98,7 @@ func TestMathDomainErrors(t *testing.T) {
 		{`Math.acos(2)`, dom("acos")},
 		{`Math.atanh(2)`, dom("atanh")},
 		{`Math.acosh(0.5)`, dom("acosh")},
+		{`Math.log2(-(2**5000))`, dom("log2")},           // negative Bignum via mathLogArg
 		{`Math.gamma(-1)`, dom("gamma")},                 // negative integer
 		{`Math.gamma(-Float::INFINITY)`, dom("gamma")},   // -Infinity
 		{`Math.lgamma(-Float::INFINITY)`, dom("lgamma")}, // -Infinity

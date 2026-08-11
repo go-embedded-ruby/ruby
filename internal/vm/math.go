@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math"
+	"math/big"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -30,6 +31,23 @@ func mathFloat(vm *VM, v object.Value) float64 {
 	}
 	raise("TypeError", "can't convert %s into Float", name)
 	return 0
+}
+
+// mathLogArg coerces x for the logarithm family, returning (mantissa, exp2)
+// with x == mantissa * 2**exp2. A positive Bignum too large for float64 (whose
+// direct conversion would overflow to +Infinity) is reduced to its top 53 bits
+// with the dropped bit count folded into exp2, so the logarithm stays finite and
+// full-precision like MRI; every other value coerces through mathFloat with
+// exp2 == 0.
+func mathLogArg(vm *VM, v object.Value) (float64, int) {
+	if b, ok := v.(*object.Bignum); ok && b.I.Sign() > 0 {
+		if n := b.I.BitLen(); n > 1023 {
+			shift := n - 53
+			top := new(big.Int).Rsh(b.I, uint(shift))
+			return float64(top.Int64()), shift
+		}
+	}
+	return mathFloat(vm, v), 0
 }
 
 // mathDomainError raises Math::DomainError with MRI's exact message, which names
@@ -151,14 +169,26 @@ func (vm *VM) registerMath() {
 			return object.Float(f(x))
 		})
 	}
-	neg := func(x float64) bool { return x < 0 }            // log family: x < 0
 	unit := func(x float64) bool { return x < -1 || x > 1 } // asin/acos/atanh: |x| > 1
-	unaryDom("log2", math.Log2, neg)
-	unaryDom("log10", math.Log10, neg)
 	unaryDom("asin", math.Asin, unit)
 	unaryDom("acos", math.Acos, unit)
 	unaryDom("atanh", math.Atanh, unit)
 	unaryDom("acosh", math.Acosh, func(x float64) bool { return x < 1 })
+
+	// logFamily installs a base-2/e/10 logarithm: it raises DomainError - name for
+	// a negative argument and combines the mantissa/exponent split from mathLogArg
+	// so a huge Bignum keeps full precision instead of overflowing to Infinity.
+	logFamily := func(name string, combine func(mantissa float64, exp2 int) float64) {
+		install(name, func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			m, e := mathLogArg(vm, args[0])
+			if m < 0 {
+				mathDomainError(name)
+			}
+			return object.Float(combine(m, e))
+		})
+	}
+	logFamily("log2", func(m float64, e int) float64 { return math.Log2(m) + float64(e) })
+	logFamily("log10", func(m float64, e int) float64 { return math.Log10(m) + float64(e)*(math.Ln2/math.Ln10) })
 
 	// sqrt raises for a negative argument and normalises sqrt(-0.0) to +0.0 (Go
 	// returns -0.0, MRI returns +0.0).
@@ -177,17 +207,17 @@ func (vm *VM) registerMath() {
 	// log(x) is the natural log; log(x, base) divides by log(base). A negative x
 	// or base raises DomainError - log; log(0) is -Infinity.
 	install("log", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		x := mathFloat(vm, args[0])
-		if x < 0 {
+		m, e := mathLogArg(vm, args[0])
+		if m < 0 {
 			mathDomainError("log")
 		}
-		lx := math.Log(x)
+		lx := math.Log(m) + float64(e)*math.Ln2
 		if len(args) > 1 {
-			base := mathFloat(vm, args[1])
-			if base < 0 {
+			bm, be := mathLogArg(vm, args[1])
+			if bm < 0 {
 				mathDomainError("log")
 			}
-			return object.Float(lx / math.Log(base))
+			return object.Float(lx / (math.Log(bm) + float64(be)*math.Ln2))
 		}
 		return object.Float(lx)
 	})

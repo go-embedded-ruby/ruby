@@ -433,7 +433,10 @@ func (vm *VM) bootstrap() {
 	exc("RegexpError", "StandardError")
 	exc("NoMatchingPatternError", "StandardError")
 	exc("NoMatchingPatternKeyError", "NoMatchingPatternError")
-	exc("Math::DomainError", "StandardError")
+	// Math::DomainError must also be reachable through the Math module's own
+	// constant table so Ruby-level `Math::DomainError` resolves (registerMath
+	// created the module earlier), mirroring the Encoding::* error nesting.
+	vm.consts["Math"].(*RClass).consts["DomainError"] = exc("Math::DomainError", "StandardError")
 	// EncodingError < StandardError and Encoding's transcoding errors under it.
 	vm.registerEncodingErrors()
 	// Encoding::Converter, the stateful transcoder (needs the error classes above).
