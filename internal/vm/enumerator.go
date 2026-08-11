@@ -444,10 +444,10 @@ func (vm *VM) enumFiber(e *Enumerator) *Fiber {
 // exhausted (recording its finish value). An exception thrown by the source
 // resets the fiber (so a later #next restarts) and propagates.
 func (vm *VM) enumPull(e *Enumerator) (*object.Array, bool) {
+	// enumFiber returns a live fiber here: a fiber only dies mid-resume (handled
+	// below), after which the caller sets e.ended and the e.ended guards in
+	// enumNextRaw/enumPeekRaw prevent re-entry until #rewind (which nils extFiber).
 	f := vm.enumFiber(e)
-	if f.state == fibDead {
-		return nil, false
-	}
 	val := vm.enumResume(e, f)
 	if f.state == fibDead {
 		e.finish = val

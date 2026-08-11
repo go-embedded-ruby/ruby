@@ -94,6 +94,12 @@ p [1, 2].each.with_index(o).to_a`, "[[1, 1], [2, 2]]\n"},
 		{`e = [1, 2, 3].select; en = e.with_index; p en.instance_of?(Enumerator)`, "true\n"},
 		{`p [1, 2, 3].each.with_index.size`, "3\n"},
 
+		// a bare generator's #inspect uses the Generator placeholder + default :each
+		{`p Enumerator.new { |y| y << 1 }.inspect`, "\"#<Enumerator: #<Enumerator::Generator>:each>\"\n"},
+		// with_object / each_with_object with NO block returns an Enumerator
+		{`p [1, 2].each.with_object("m").class`, "Enumerator\n"},
+		{`p [3, 4].each.each_with_object("z").class`, "Enumerator\n"},
+
 		// --- with_object / each_with_object ---
 		{`p [1, 2, 3].each.with_object([]) { |x, memo| memo << x * 2 }`, "[2, 4, 6]\n"},
 		{`p [1, 2, 3].each.with_object("z") { |x, m| }`, "\"z\"\n"},
@@ -124,6 +130,10 @@ p [1, 2].each.with_index(o).to_a`, "[[1, 1], [2, 2]]\n"},
 		{`e = [1].each; e.next
 begin; e.next; rescue StopIteration; end
 e.next`, "StopIteration"},
+		// peek after the enumerator is already ended (e.ended already set) re-raises
+		{`e = [1].each; e.next
+begin; e.next; rescue StopIteration; end
+e.peek`, "StopIteration"},
 		// with_index with a non-convertible argument raises TypeError
 		{`[1, 2].each.with_index("1") { |*i| i }`, "TypeError"},
 		// with_object with no argument raises ArgumentError
