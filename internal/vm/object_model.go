@@ -726,9 +726,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	// switch (and the values it handles) compiles for GOOS=js GOARCH=wasm. On wasm
 	// the seam always reports false (those value types can never be constructed
 	// there); natively it maps each to its class exactly as an inline case would.
-	if c, ok := vm.classOfExtBinding(v); ok {
-		return c
-	}
+	//
+	// The seam is consulted AFTER the main switch below, not before: the exotic
+	// binding value types it handles are disjoint from the common types here, so
+	// the order never changes the result — but checking it first made every hot
+	// classOf (a plain Integer, an RObject) pay for a ~90-case type switch that
+	// always misses. Deferring it keeps the hot path on the common cases.
 	switch x := v.(type) {
 	case *RObject:
 		return x.class
@@ -1635,6 +1638,12 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return x.cls
 	case *object.Main:
 		return vm.cObject
+	}
+	// Rare wasm-incompatible binding value types (GRPC/Kafka/Mongo/Arrow/Etcd/…):
+	// consulted only after the common cases above miss, so plain values never pay
+	// for this ~90-case switch. See the note at the top of classOf.
+	if c, ok := vm.classOfExtBinding(v); ok {
+		return c
 	}
 	// Platform-gated value types (e.g. the AF_UNIX sockets, compiled only on
 	// non-Windows) report their Ruby class through classOfPlatform rather than a
