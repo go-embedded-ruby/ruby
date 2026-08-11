@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -83,8 +84,14 @@ func TestFileStatGrpowned(t *testing.T) {
 	defer restoreIdentitySeams()
 	statEgid = func() int { return 2000 }
 	statGroups = func() []int { return nil }
-	if callStat(t, "grpowned?", &FileStat{fi: fakeInfo{}, sys: statFields{gid: 2000, hasSys: true}}) != object.True {
-		t.Errorf("grpowned? matching egid: want true")
+	// On Windows grpowned? is always false (no gid model — statGrpowned returns
+	// false regardless of the crafted gid), matching MRI on Windows.
+	var wantMatch object.Value = object.True
+	if runtime.GOOS == "windows" {
+		wantMatch = object.False
+	}
+	if callStat(t, "grpowned?", &FileStat{fi: fakeInfo{}, sys: statFields{gid: 2000, hasSys: true}}) != wantMatch {
+		t.Errorf("grpowned? matching egid: want %v", wantMatch)
 	}
 	if callStat(t, "grpowned?", &FileStat{fi: fakeInfo{}, sys: statFields{gid: 3, hasSys: true}}) != object.False {
 		t.Errorf("grpowned? non-member: want false")
@@ -167,6 +174,19 @@ func TestFileLevelPredicates(t *testing.T) {
 	}
 	os.Chmod(filepath.FromSlash(priv), 0o600)
 
+	// Two assertions read the POSIX permission model, which Windows lacks: it has
+	// only a read-only bit, so a writable file always stats as MSVCRT 0644 and a
+	// read-only one as 0444, and there is no group ownership. Both wants below are
+	// verified against ruby 4.0.6 (aarch64-mingw-ucrt) on Windows — owned? true /
+	// grpowned? false, and world_writable? nil (0644 has no other-write) while
+	// world_readable? is 420 (0644) even for the file created 0600.
+	ownWant := "[\"TrueClass\", \"TrueClass\"]\n"
+	worldWant := "[\"Integer\", nil]\n"
+	if runtime.GOOS == "windows" {
+		ownWant = "[\"TrueClass\", \"FalseClass\"]\n"
+		worldWant = "[\"NilClass\", 420]\n"
+	}
+
 	cases := []struct{ src, want string }{
 		// Type predicates on a regular file are false; missing path is false.
 		{`p [File.pipe?("` + reg + `"), File.socket?("` + reg + `"), File.blockdev?("` + reg + `"), File.chardev?("` + reg + `")]`,
@@ -175,15 +195,16 @@ func TestFileLevelPredicates(t *testing.T) {
 			"[false, false, false]\n"},
 		{`p [File.pipe?("/no/x"), File.socket?("/no/x"), File.setuid?("/no/x"), File.blockdev?("/no/x"), File.chardev?("/no/x")]`,
 			"[false, false, false, false, false]\n"},
-		// owned?/grpowned? return booleans (runner owns the temp file).
+		// owned?/grpowned? return booleans (runner owns the temp file; on Windows
+		// MRI reports owned? true but grpowned? false — see ownWant above).
 		{`p [File.owned?("` + reg + `").class.to_s, File.grpowned?("` + reg + `").class.to_s]`,
-			"[\"TrueClass\", \"TrueClass\"]\n"},
+			ownWant},
 		{`p [File.owned?("/no/x"), File.grpowned?("/no/x")]`, "[false, false]\n"},
 		// world_readable?/world_writable?: Integer when the bit is set, else nil.
 		{`p [File.world_readable?("` + reg + `").class.to_s, File.world_writable?("` + reg + `")]`,
 			"[\"Integer\", nil]\n"},
 		{`p [File.world_writable?("` + wworld + `").class.to_s, File.world_readable?("` + priv + `")]`,
-			"[\"Integer\", nil]\n"},
+			worldWant},
 		{`p [File.world_readable?("/no/x"), File.world_writable?("/no/x")]`, "[nil, nil]\n"},
 		// identical?: same path true, distinct false, missing false.
 		{`p [File.identical?("` + reg + `", "` + reg + `"), File.identical?("` + reg + `", "` + priv + `"), File.identical?("` + reg + `", "/no/x")]`,

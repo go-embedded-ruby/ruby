@@ -6,6 +6,7 @@ package vm
 
 import (
 	"os/user"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -144,7 +145,10 @@ func TestFileExpandPath(t *testing.T) {
 		{`p File.expand_path("////some/path")`, "\"////some/path\"\n"},
 		{`p File.expand_path("/some////path")`, "\"/some/path\"\n"},
 		{`p File.expand_path("a", "/base")`, "\"/base/a\"\n"},
-		{`p File.expand_path("a", nil).start_with?("/")`, "true\n"},
+		// A nil base means the current directory — assert that exact semantic
+		// rather than a leading "/", which is POSIX-only (on Windows an absolute
+		// path starts with a drive letter, e.g. "C:/…/a").
+		{`p File.expand_path("a", nil) == File.expand_path("a", Dir.pwd)`, "true\n"},
 		// absolute_path leaves ~ literal (no HOME expansion).
 		{`p File.absolute_path("~", "/base")`, "\"/base/~\"\n"},
 	}
@@ -153,11 +157,16 @@ func TestFileExpandPath(t *testing.T) {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}
-	// ~user: the current user resolves, an unknown user raises ArgumentError.
-	if u, err := user.Current(); err == nil {
-		src := `p File.expand_path("~` + u.Username + `").is_a?(String)`
-		if got := runFS(t, src); got != "true\n" {
-			t.Errorf("~user current: got %q", got)
+	// ~user: the current user resolves to a home directory. This is a POSIX passwd
+	// concept — MRI on Windows raises ArgumentError ("can't find user …") for
+	// ~user (verified against ruby 4.0.6), so the resolution assertion is
+	// POSIX-only. The unknown-user ArgumentError below holds on every platform.
+	if runtime.GOOS != "windows" {
+		if u, err := user.Current(); err == nil {
+			src := `p File.expand_path("~` + u.Username + `").is_a?(String)`
+			if got := runFS(t, src); got != "true\n" {
+				t.Errorf("~user current: got %q", got)
+			}
 		}
 	}
 	if got := runFSErr(t, `File.expand_path("~no_such_user_rbgo_xyz_123")`); got != "ArgumentError" {

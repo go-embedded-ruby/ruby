@@ -319,8 +319,7 @@ func (vm *VM) registerFileStat() {
 		return object.IntValue(self(v).sys.blksize)
 	})
 	d("owned?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self(v)
-		return object.Bool(s.sys.hasSys && int64(statEuid()) == s.sys.uid)
+		return object.Bool(statOwned(self(v)))
 	})
 	d("readable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).accessible(4))
@@ -332,8 +331,7 @@ func (vm *VM) registerFileStat() {
 		return object.Bool(self(v).accessible(1))
 	})
 	d("world_writable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self(v)
-		perm := int64(s.fi.Mode().Perm())
+		perm := statPerm(self(v).fi)
 		if perm&0o002 != 0 {
 			return object.IntValue(perm) // MRI returns the perm bits when world-writable
 		}
@@ -383,7 +381,7 @@ func (vm *VM) registerFileStat() {
 	// world_readable? mirrors world_writable?: the permission integer when the
 	// other-read bit is set, else nil (MRI).
 	d("world_readable?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		perm := int64(self(v).fi.Mode().Perm())
+		perm := statPerm(self(v).fi)
 		if perm&0o004 != 0 {
 			return object.IntValue(perm)
 		}
@@ -392,8 +390,7 @@ func (vm *VM) registerFileStat() {
 	// grpowned? is true when the file's gid is the process's effective gid or one
 	// of its supplementary groups (false without real POSIX ids, i.e. on Windows).
 	d("grpowned?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self(v)
-		return object.Bool(s.sys.hasSys && inGroupFor(s.sys.gid, statEgid()))
+		return object.Bool(statGrpowned(self(v)))
 	})
 	d("readable_real?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).accessibleReal(4))
