@@ -377,6 +377,7 @@ type VM struct {
 	cProc                              *RClass
 	cMethod                            *RClass
 	cEnumerator                        *RClass
+	cEnumeratorChain                   *RClass
 	cYielder                           *RClass
 	cWeakMap                           *RClass
 	cWeakKeyMap                        *RClass

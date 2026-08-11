@@ -304,6 +304,12 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isSet := a.(*Set); isSet && (op == bytecode.OpAdd || op == bytecode.OpSub) {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// An Enumerator dispatches its + (Enumerator#+ builds an Enumerator::Chain of
+		// self and the operand) as a method rather than falling into the numeric
+		// coercion path.
+		if _, isEnum := a.(*Enumerator); isEnum && op == bytecode.OpAdd {
+			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
 		// A URI dispatches its arithmetic operator (only + is defined, resolving a
 		// reference) as a method, so the binding's merge — which needs the VM to
 		// wrap the result — runs with a live VM rather than the VM-less binary path.

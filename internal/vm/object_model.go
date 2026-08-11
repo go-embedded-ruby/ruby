@@ -1392,6 +1392,9 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *UnboundMethod:
 		return vm.consts["UnboundMethod"].(*RClass)
 	case *Enumerator:
+		if x.isChain {
+			return vm.cEnumeratorChain
+		}
 		return vm.cEnumerator
 	case *yielder:
 		return vm.cYielder
