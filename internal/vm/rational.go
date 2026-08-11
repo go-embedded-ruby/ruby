@@ -27,36 +27,75 @@ func toRat(v object.Value) (*big.Rat, bool) {
 	return nil, false
 }
 
-// ratFromValue converts a value to an exact *big.Rat for Kernel#Rational: an
-// Integer/Bignum is n/1, a Float uses its exact binary value (Float#to_r), a
-// Rational passes through, and any other object is converted through a #to_r
-// method that must return a Rational. ok is false when no faithful conversion
-// exists. Lookup uses the static method table (not respond_to?) so a BasicObject
-// without to_r fails cleanly rather than dispatching respond_to? it lacks.
-func (vm *VM) ratFromValue(v object.Value) (*big.Rat, bool) {
+// rationalComponent resolves a Kernel#Rational() argument to an exact *big.Rat,
+// raising the MRI-matching error on failure. An Integer/Bignum is n/1; a Float
+// uses its exact binary value (a non-finite Float is a FloatDomainError); a
+// Rational passes through; a String is parsed with String#to_r's grammar (an
+// invalid one is an ArgumentError, matching MRI's "invalid value for convert()");
+// a Complex contributes its real part when the imaginary part is zero and is a
+// RangeError otherwise. Any other object is converted through #to_r (which must
+// return a Rational) or, failing that, #to_int; a value answering neither is a
+// TypeError. Method lookup uses the static table so a BasicObject without the
+// method fails cleanly rather than dispatching a respond_to? it lacks.
+func (vm *VM) rationalComponent(v object.Value) *big.Rat {
 	switch n := v.(type) {
 	case object.Integer:
-		return new(big.Rat).SetInt64(int64(n)), true
+		return new(big.Rat).SetInt64(int64(n))
 	case *object.Bignum:
-		return new(big.Rat).SetInt(n.I), true
+		return new(big.Rat).SetInt(n.I)
 	case object.Float:
-		if math.IsInf(float64(n), 0) || math.IsNaN(float64(n)) {
-			return nil, false
+		f := float64(n)
+		if math.IsInf(f, 0) || math.IsNaN(f) {
+			raise("FloatDomainError", "%s", object.Float(n).ToS())
 		}
-		return new(big.Rat).SetFloat64(float64(n)), true
+		return new(big.Rat).SetFloat64(f)
 	case *object.Rational:
-		return new(big.Rat).Set(n.R), true
+		return new(big.Rat).Set(n.R)
+	case *object.String:
+		r, ok := stringToR(n.Str(), true)
+		if !ok {
+			raise("ArgumentError", "invalid value for convert(): %s", n.Inspect())
+		}
+		return r.R
+	case *object.Complex:
+		if !imagNumericZero(n.Im) {
+			raise("RangeError", "can't convert %s into Rational", n.Inspect())
+		}
+		return vm.rationalComponent(n.Re)
 	case object.Nil, object.Bool:
 		// MRI's Rational() rejects nil/true/false with a TypeError even though
-		// NilClass#to_r / the others exist, so the #to_r fallback below is skipped.
-		return nil, false
+		// NilClass#to_r (and the others) exist, so the #to_r fallback is skipped.
+		raise("TypeError", "can't convert %s into Rational", vm.inspectName(v))
 	}
 	if vm.findMethod(v, "to_r") != nil {
-		if r, ok := vm.send(v, "to_r", nil, nil).(*object.Rational); ok {
-			return new(big.Rat).Set(r.R), true
+		res := vm.send(v, "to_r", nil, nil)
+		if r, ok := res.(*object.Rational); ok {
+			return new(big.Rat).Set(r.R)
 		}
+		name := vm.classOf(v).name
+		raise("TypeError", "can't convert %s to Rational (%s#to_r gives %s)", name, name, vm.classOf(res).name)
 	}
-	return nil, false
+	if vm.findMethod(v, "to_int") != nil {
+		return vm.rationalComponent(vm.send(v, "to_int", nil, nil))
+	}
+	raise("TypeError", "can't convert %s into Rational", vm.inspectName(v))
+	return nil
+}
+
+// makeRational builds the Rational for a validated Kernel#Rational() call: one
+// argument is that value coerced to a Rational; two arguments divide the first by
+// the second (a zero divisor is a ZeroDivisionError). Every failure path raises,
+// so the constructor can wrap it for exception: false.
+func (vm *VM) makeRational(args []object.Value) object.Value {
+	num := vm.rationalComponent(args[0])
+	if len(args) == 1 {
+		return &object.Rational{R: num}
+	}
+	den := vm.rationalComponent(args[1])
+	if den.Sign() == 0 {
+		return raise("ZeroDivisionError", "divided by 0")
+	}
+	return &object.Rational{R: new(big.Rat).Quo(num, den)}
 }
 
 // inspectName names a value for a coercion error message: nil/true/false by
@@ -370,25 +409,15 @@ func ratPrecision(args []object.Value) int64 {
 // registerRational installs Kernel#Rational and the Rational instance methods.
 func (vm *VM) registerRational() {
 	vm.cObject.define("Rational", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		if len(args) == 1 {
-			r, ok := vm.ratFromValue(args[0])
-			if !ok {
-				return raise("TypeError", "can't convert %s into Rational", vm.inspectName(args[0]))
-			}
-			return &object.Rational{R: r}
-		}
-		num, ok := vm.ratFromValue(args[0])
-		if !ok {
-			return raise("TypeError", "can't convert %s into Rational", vm.inspectName(args[0]))
-		}
-		den, ok := vm.ratFromValue(args[1])
-		if !ok {
-			return raise("TypeError", "can't convert %s into Rational", vm.inspectName(args[1]))
-		}
-		if den.Sign() == 0 {
-			return raise("ZeroDivisionError", "divided by 0")
-		}
-		return &object.Rational{R: new(big.Rat).Quo(num, den)}
+		args, doRaise := popExceptionKwarg(args)
+		return vm.numericCtor(doRaise, func() object.Value { return vm.makeRational(args) })
+	})
+
+	// String#to_r parses a rational literal leniently (unrecognised input yields
+	// Rational(0, 1)); a zero denominator ("1/0") raises ZeroDivisionError.
+	vm.cString.define("to_r", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		r, _ := stringToR(self.(*object.String).Str(), false)
+		return r
 	})
 
 	rval := func(self object.Value) *object.Rational { return self.(*object.Rational) }
@@ -411,6 +440,9 @@ func (vm *VM) registerRational() {
 	vm.cRational.define("to_int", toI)
 	vm.cRational.define("to_r", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
+	})
+	vm.cRational.define("to_c", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Complex{Re: self, Im: object.IntValue(0)}
 	})
 	vm.cRational.define("abs", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &object.Rational{R: new(big.Rat).Abs(rval(self).R)}

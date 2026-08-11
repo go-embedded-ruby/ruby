@@ -136,6 +136,15 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 	cNumeric.define("integer?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.False
 	})
+	// i returns the pure-imaginary Complex(0, self). It lives on Numeric so every
+	// real number answers it; Complex (which is not a real number) undefs it.
+	cNumeric.define("i", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Complex{Re: object.IntValue(0), Im: self}
+	})
+	// Every Numeric is a real number (Complex overrides this with false).
+	cNumeric.define("real?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.True
+	})
 }
 
 // asComplexVal coerces a real number to a Complex (zero imaginary part); a
@@ -225,21 +234,51 @@ func complexFloat(v object.Value) float64 {
 	return f
 }
 
+// makeComplex builds the Complex for a validated Kernel#Complex() call. A single
+// String argument is parsed with String#to_c's grammar (an invalid one is an
+// ArgumentError, matching MRI's "invalid value for convert()"). Otherwise the
+// first argument is the real part and an optional second the imaginary part, each
+// required to be a real number (a non-real part is a TypeError). Every failure
+// path raises, so the constructor can wrap it for exception: false.
+func makeComplex(args []object.Value) object.Value {
+	if s, ok := args[0].(*object.String); ok && len(args) == 1 {
+		c, ok := stringToC(s.Str(), true)
+		if !ok {
+			return raise("ArgumentError", "invalid value for convert(): %s", s.Inspect())
+		}
+		return c
+	}
+	re := args[0]
+	im := object.Value(object.IntValue(0))
+	if len(args) > 1 {
+		im = args[1]
+	}
+	if _, ok := toFloat(re); !ok {
+		return raise("TypeError", "can't convert %s into Complex", re.Inspect())
+	}
+	if _, ok := toFloat(im); !ok {
+		return raise("TypeError", "can't convert %s into Complex", im.Inspect())
+	}
+	return &object.Complex{Re: re, Im: im}
+}
+
 // registerComplex installs Kernel#Complex and the Complex instance methods.
 func (vm *VM) registerComplex() {
-	vm.cObject.define("Complex", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		re := args[0]
-		im := object.Value(object.IntValue(0))
-		if len(args) > 1 {
-			im = args[1]
-		}
-		if _, ok := toFloat(re); !ok {
-			return raise("TypeError", "can't convert %s into Complex", re.Inspect())
-		}
-		if _, ok := toFloat(im); !ok {
-			return raise("TypeError", "can't convert %s into Complex", im.Inspect())
-		}
-		return &object.Complex{Re: re, Im: im}
+	vm.cObject.define("Complex", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		args, doRaise := popExceptionKwarg(args)
+		return vm.numericCtor(doRaise, func() object.Value { return makeComplex(args) })
+	})
+
+	// Integer#to_c / Float#to_c wrap a real number as Complex(self, 0); String#to_c
+	// parses a complex literal leniently (unrecognised input yields Complex(0, 0)).
+	realToC := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &object.Complex{Re: self, Im: object.IntValue(0)}
+	}
+	vm.cInteger.define("to_c", realToC)
+	vm.cFloat.define("to_c", realToC)
+	vm.cString.define("to_c", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		c, _ := stringToC(self.(*object.String).Str(), false)
+		return c
 	})
 
 	// Complex::I is the imaginary unit, Complex(0, 1).
@@ -437,12 +476,15 @@ func (vm *VM) registerComplex() {
 		return vm.send(c.Re, "<=>", []object.Value{oreal}, nil)
 	})
 
-	// negative? / positive? are undefined on Complex (an unordered number). A
-	// tombstone hides the generic Numeric definitions that would otherwise be
-	// inherited; it is installed directly (not via undef) because those Numeric
-	// methods are registered after this hook runs.
-	vm.cComplex.methods["negative?"] = &Method{name: "negative?", owner: vm.cComplex, undefined: true}
-	vm.cComplex.methods["positive?"] = &Method{name: "positive?", owner: vm.cComplex, undefined: true}
+	// A Complex is unordered, so the sign predicates (negative?/positive?), the
+	// Comparable ordering operators, and the pure-imaginary constructor #i are all
+	// undefined on it — each raises NoMethodError rather than being inherited from
+	// Numeric/Comparable (Complex keeps #<=>, which yields nil for a non-real pair,
+	// and #==). A tombstone is installed directly (not via undef) because those
+	// Numeric methods are registered after this hook runs.
+	for _, name := range []string{"negative?", "positive?", "i", "<", "<=", ">", ">=", "clamp", "between?"} {
+		vm.cComplex.methods[name] = &Method{name: name, owner: vm.cComplex, undefined: true}
+	}
 
 	// True aliases share one Method record so Complex.instance_method(:angle) ==
 	// Complex.instance_method(:arg), matching MRI.
@@ -547,16 +589,31 @@ func complexRectangular(args []object.Value) object.Value {
 	return &object.Complex{Re: re, Im: im}
 }
 
+// polarReal reads a real value for Complex.polar's modulus/argument: a real
+// number yields its float value, and a Complex whose imaginary part is zero
+// yields its real part's value. ok is false for a Complex with a non-zero
+// imaginary part or any non-numeric value ("not a real").
+func polarReal(v object.Value) (float64, bool) {
+	if c, ok := v.(*object.Complex); ok {
+		if !imagNumericZero(c.Im) {
+			return 0, false
+		}
+		v = c.Re
+	}
+	return toFloat(v)
+}
+
 // complexPolar builds a Complex from an absolute value and angle (MRI's
-// Complex.polar); the result carries Float parts.
+// Complex.polar); the result carries Float parts. Each argument may be a real
+// number or a Complex with a zero imaginary part.
 func complexPolar(args []object.Value) object.Value {
-	abs, ok := toFloat(args[0])
+	abs, ok := polarReal(args[0])
 	if !ok {
 		return raise("TypeError", "not a real")
 	}
 	ang := 0.0
 	if len(args) > 1 {
-		ang, ok = toFloat(args[1])
+		ang, ok = polarReal(args[1])
 		if !ok {
 			return raise("TypeError", "not a real")
 		}
