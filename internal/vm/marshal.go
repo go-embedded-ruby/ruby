@@ -21,22 +21,100 @@ func (vm *VM) registerMarshal() {
 	vm.consts["Marshal"] = mod
 	def := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
 
-	def("dump", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		mv := toMarshalValue(args[0], map[object.Value]marshal.Value{})
-		return object.NewString(string(marshal.Dump(mv)))
-	})
-	def("load", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s, ok := args[0].(*object.String)
-		if !ok {
-			raise("TypeError", "instance of IO needed")
+	// Marshal.dump(obj, io=nil, limit=-1): serialize obj. When an IO-like second
+	// argument is given the bytes are written to it and it is returned; otherwise
+	// the bytes are returned as a String. The depth limit is accepted for arity
+	// but not enforced.
+	def("dump", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
 		}
-		v, err := marshal.Load([]byte(s.Str()))
-		if err != nil {
-			raise("ArgumentError", "%s", err.Error())
+		data := vm.marshalDump(args[0])
+		if io := marshalDumpIO(vm, args); io != nil {
+			vm.send(io, "write", []object.Value{object.NewStringBytes(data)}, nil)
+			return io
 		}
-		return fromMarshalValue(v, map[marshal.Value]object.Value{})
+		return object.NewStringBytes(data)
 	})
-	def("restore", mod.smethods["load"].native) // Marshal.restore is an alias for load
+
+	// Marshal.load(source, proc=nil, freeze:) / Marshal.restore: deserialize from
+	// a String or IO. A proc (positional or block) is called on each loaded
+	// object; the freeze: keyword deep-freezes the result.
+	load := func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		freeze := false
+		rest := args[1:]
+		if n := len(rest); n > 0 {
+			if h, ok := rest[n-1].(*object.Hash); ok && marshalIsKwargs(h) {
+				freeze = marshalKwFreeze(h)
+				rest = rest[:n-1]
+			}
+		}
+		proc := blk
+		if len(rest) > 0 && !object.IsNil(rest[0]) {
+			if p, ok := rest[0].(*Proc); ok {
+				proc = p
+			}
+		}
+		data := marshalLoadSource(vm, args[0])
+		return vm.marshalLoad(data, proc, freeze)
+	}
+	def("load", load)
+	def("restore", load) // Marshal.restore is an alias for load
+}
+
+// marshalDumpIO returns the IO destination for Marshal.dump, or nil when the
+// call has no IO argument. The second argument is an IO when it is non-nil and
+// responds to #write; a bare Integer there is the depth limit, not an IO.
+func marshalDumpIO(vm *VM, args []object.Value) object.Value {
+	if len(args) < 2 || object.IsNil(args[1]) {
+		return nil
+	}
+	if _, ok := args[1].(object.Integer); ok {
+		return nil
+	}
+	if vm.respondsToDynamic(args[1], "write") {
+		return args[1]
+	}
+	return nil
+}
+
+// marshalLoadSource returns the raw bytes of a Marshal.load source: a String
+// directly, or the result of #read on an IO-like object.
+func marshalLoadSource(vm *VM, src object.Value) []byte {
+	if s, ok := src.(*object.String); ok {
+		return s.Bytes()
+	}
+	if vm.respondsToDynamic(src, "read") {
+		r := vm.send(src, "read", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Bytes()
+		}
+	}
+	raise("TypeError", "instance of IO needed")
+	return nil // unreachable
+}
+
+// marshalIsKwargs reports whether h is a keyword-argument hash (all Symbol keys)
+// as opposed to a positional Hash argument.
+func marshalIsKwargs(h *object.Hash) bool {
+	if len(h.Keys) == 0 {
+		return false
+	}
+	for _, k := range h.Keys {
+		if _, ok := k.(object.Symbol); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// marshalKwFreeze reads the freeze: keyword's truthiness from a kwargs hash.
+func marshalKwFreeze(h *object.Hash) bool {
+	v, ok := h.Get(object.Symbol("freeze"))
+	return ok && v.Truthy()
 }
 
 // toMarshalValue converts a VM value to the marshal engine's value model. seen
