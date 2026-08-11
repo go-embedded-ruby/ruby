@@ -22,6 +22,7 @@ func TestMarshal(t *testing.T) {
 		{`p Marshal.dump(-(2**70)).bytes`, "[4, 8, 108, 45, 10, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0]\n"},
 		{`p Marshal.dump(3.14).bytes`, "[4, 8, 102, 9, 51, 46, 49, 52]\n"},
 		{`p Marshal.dump(100.0).bytes`, "[4, 8, 102, 8, 49, 101, 50]\n"},
+		{`p Marshal.dump(0.0).bytes`, "[4, 8, 102, 6, 48]\n"},
 		{`p Marshal.dump(-0.0).bytes`, "[4, 8, 102, 7, 45, 48]\n"},
 		{`p Marshal.dump(1.0/0).bytes`, "[4, 8, 102, 8, 105, 110, 102]\n"},
 		{`p Marshal.dump(-1.0/0).bytes`, "[4, 8, 102, 9, 45, 105, 110, 102]\n"},
@@ -102,6 +103,40 @@ func TestMarshal(t *testing.T) {
 		// --- IO source / destination ---------------------------------------
 		{`require "stringio"; io = StringIO.new; Marshal.dump([1, 2], io); io.rewind; p Marshal.load(io)`, "[1, 2]\n"},
 
+		// --- float formatting branches ------------------------------------
+		{`p Marshal.dump(-2.5).bytes`, "[4, 8, 102, 9, 45, 50, 46, 53]\n"},
+		{`p Marshal.dump(1200.0).bytes`, "[4, 8, 102, 10, 49, 46, 50, 101, 51]\n"},
+		{`p Marshal.dump(12.0).bytes`, "[4, 8, 102, 7, 49, 50]\n"},
+		{`p Marshal.dump(0.1).bytes`, "[4, 8, 102, 8, 48, 46, 49]\n"},
+		{`p Marshal.dump(1e100).bytes`, "[4, 8, 102, 10, 49, 101, 49, 48, 48]\n"},
+		{`p Marshal.dump(-1).bytes`, "[4, 8, 105, 250]\n"},
+		{`p Marshal.load(Marshal.dump(-123)) == -123`, "true\n"},
+		{`p Marshal.load(Marshal.dump(122)) == 122`, "true\n"},
+		{`p Marshal.load(Marshal.dump(-1.0/0)).infinite?`, "-1\n"},
+		{`p Marshal.load(Marshal.dump(1200.0)) == 1200.0`, "true\n"},
+
+		// --- shared references across the full type set --------------------
+		{`r = /x/; c = Marshal.load(Marshal.dump([r, r])); p c[0].equal?(c[1])`, "true\n"},
+		{`z = Complex(1, 2); c = Marshal.load(Marshal.dump([z, z])); p c[0].equal?(c[1])`, "true\n"},
+		{`z = Rational(1, 2); c = Marshal.load(Marshal.dump([z, z])); p c[0].equal?(c[1])`, "true\n"},
+		{`z = 1..2; c = Marshal.load(Marshal.dump([z, z])); p c[0].equal?(c[1])`, "true\n"},
+		{`c = Marshal.load(Marshal.dump([String, String])); p c[0].equal?(c[1])`, "true\n"},
+		{`t = Time.at(5).utc; c = Marshal.load(Marshal.dump([t, t])); p c[0].equal?(c[1])`, "true\n"},
+		{`class MShare; end; o = MShare.new; c = Marshal.load(Marshal.dump([o, o])); p c[0].equal?(c[1])`, "true\n"},
+
+		// --- Bignum-backed Rational, nested class, named encoding ----------
+		{`p Marshal.load(Marshal.dump(Rational(2**70, 3))) == Rational(2**70, 3)`, "true\n"},
+		{`module MOuter; class MInner; end; end; p Marshal.load(Marshal.dump(MOuter::MInner)) == MOuter::MInner`, "true\n"},
+		{`s = "abc".encode("EUC-JP"); p Marshal.load(Marshal.dump(s)).encoding.name`, "\"EUC-JP\"\n"},
+
+		// --- freeze: on a Regexp ------------------------------------------
+		{`p Marshal.load(Marshal.dump(/x/), freeze: true).frozen?`, "true\n"},
+
+		// --- Marshal.dump arity: limit / nil / non-IO second argument -----
+		{`p Marshal.dump(5, 3).bytes`, "[4, 8, 105, 10]\n"},
+		{`p Marshal.dump(5, nil).bytes`, "[4, 8, 105, 10]\n"},
+		{`p Marshal.dump(5, Object.new).bytes`, "[4, 8, 105, 10]\n"},
+
 		// --- version constants + restore alias -----------------------------
 		{`p Marshal::MAJOR_VERSION`, "4\n"},
 		{`p Marshal::MINOR_VERSION`, "8\n"},
@@ -124,6 +159,16 @@ func TestMarshal(t *testing.T) {
 		{`Marshal.dump`, "wrong number of arguments"},
 		{`Marshal.load`, "wrong number of arguments"},
 		{`Marshal.dump(Class.new)`, "anonymous class"},
+		{"Marshal.load(\"\\x04\\b@\\x06\")", "dump format error"},                // object link out of range
+		{"Marshal.load(\"\\x04\\bo0\")", "dump format error"},                    // symbol expected, got tag '0'
+		{"Marshal.load(\"\\x04\\bo;\\x06\")", "dump format error"},               // symbol back-ref out of range
+		{"Marshal.load(\"\\x04\\b\\\"\\xfa\")", "marshal data too short"},        // negative byte length
+		{"Marshal.load(\"\\x04\\bU:\\x06Zi\\x06\")", "undefined class/module Z"}, // unknown UserMarshal class
+		{"Marshal.load(\"\\x04\\bU:\\fComplexi\\n\")", "marshal data too short"}, // Complex payload not a 2-array
+		{"Marshal.load(\"\\x04\\bu:\\tTime\\x00\")", "marshal data too short"},   // Time payload shorter than 8 bytes
+		{"Marshal.load(\"\\x04\\bS:\\vStringi\\x06\")", "is not a Struct"},       // Struct class isn't a Struct
+		{`class BadD; def _dump(l); 5; end; end; Marshal.dump(BadD.new)`, "_dump() must return String"},
+		{`Marshal.dump(Class.new.new)`, "anonymous class"},
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {

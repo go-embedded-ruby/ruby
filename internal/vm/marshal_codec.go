@@ -707,17 +707,22 @@ func (r *mReader) readClassRef(module bool) object.Value {
 
 func (r *mReader) readUserMarshal() object.Value {
 	className := r.readSymbol()
+	// The value carries the same object identity as its marshal_dump payload's
+	// container, so it is registered before the payload is read (matching the
+	// dump-side id order) so shared/cyclic references resolve.
 	switch className {
 	case "Complex":
+		c := &object.Complex{}
+		r.register(c)
 		arr := r.mustArray(r.readValue(), 2)
-		c := &object.Complex{Re: arr.Elems[0], Im: arr.Elems[1]}
-		return r.register(c)
+		c.Re, c.Im = arr.Elems[0], arr.Elems[1]
+		return c
 	case "Rational":
+		rat := &object.Rational{R: new(big.Rat)}
+		r.register(rat)
 		arr := r.mustArray(r.readValue(), 2)
-		num := marshalBigInt(arr.Elems[0])
-		den := marshalBigInt(arr.Elems[1])
-		rat := &object.Rational{R: new(big.Rat).SetFrac(num, den)}
-		return r.register(rat)
+		rat.R.SetFrac(marshalBigInt(arr.Elems[0]), marshalBigInt(arr.Elems[1]))
+		return rat
 	}
 	cls := r.vm.marshalClass(className)
 	o := &RObject{class: cls, ivars: map[string]object.Value{}}
