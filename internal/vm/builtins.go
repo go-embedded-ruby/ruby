@@ -314,9 +314,13 @@ func (vm *VM) bootstrap() {
 		// Default includes singleton methods inherited from the receiver's
 		// superclasses (a class's class methods); a false argument restricts to the
 		// receiver's own. For a plain object the singleton methods are those on its
-		// per-object singleton class.
+		// per-object singleton class. Like Ruby's singleton_methods, PRIVATE
+		// singleton methods are excluded (public and protected are returned), so the
+		// candidate set is filtered by effective send-time visibility just as
+		// public_methods/protected_methods do via reflectMethodNames.
 		all := len(args) == 0 || args[0].Truthy()
-		return object.NewArrayFromSlice(vm.singletonMethodNames(self, all))
+		candidates := vm.singletonMethodNames(self, all)
+		return vm.filterVisibility(self, candidates, func(v visibility) bool { return v != visPrivate })
 	})
 	vm.cObject.define("frozen?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(isFrozen(self))
@@ -5572,8 +5576,12 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 	}
 	if c, ok := self.(*RClass); ok {
 		collect(c.smethods)
-		collectMeta(c)
+		// Class methods received from `extend`ed modules (c.meta.includes) sit on the
+		// singleton class's ancestors, so like the superclass chain below they are
+		// inherited: collected only when all is true. singleton_methods(false)
+		// returns just the class's own `def self.x` methods.
 		if all {
+			collectMeta(c)
 			for s := c.super; s != nil; s = s.super {
 				collect(s.smethods)
 				collectMeta(s)
@@ -5581,8 +5589,13 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 		}
 	} else if sc := vm.objSingleton(self); sc != nil {
 		collect(sc.methods)
-		for i := len(sc.includes) - 1; i >= 0; i-- {
-			collectTree(sc.includes[i])
+		// Methods gained from `extend`ed modules live on the singleton class's
+		// ancestors, so they count as inherited: included only when all is true.
+		// singleton_methods(false) returns just the object's own singleton methods.
+		if all {
+			for i := len(sc.includes) - 1; i >= 0; i-- {
+				collectTree(sc.includes[i])
+			}
 		}
 	}
 	sort.Strings(names)
