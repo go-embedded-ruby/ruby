@@ -900,7 +900,13 @@ func (vm *VM) bootstrap() {
 			f, _ := new(big.Float).SetInt(v.I).Float64()
 			return object.Float(f)
 		case *object.String:
-			f, err := strconv.ParseFloat(strings.TrimSpace(v.Str()), 64)
+			norm, ok := normalizeFloatLiteral(v.Str())
+			if !ok {
+				// An illegal underscore that Go's ParseFloat would nonetheless accept
+				// (e.g. one adjacent to the 0x prefix) — MRI rejects it.
+				return fail("ArgumentError", "invalid value for Float(): %s", v.Inspect())
+			}
+			f, err := strconv.ParseFloat(norm, 64)
 			if err != nil {
 				// An out-of-range literal is not malformed: MRI yields ±Infinity
 				// (overflow) or 0.0 (underflow), which is exactly what ParseFloat
@@ -5838,6 +5844,61 @@ func intFromString(raw string, base int) (object.Value, bool) {
 		return object.NormInt(z), true
 	}
 	return nil, false
+}
+
+// normalizeFloatLiteral rewrites a Kernel#Float string argument into the form
+// Go's strconv.ParseFloat accepts while preserving MRI's semantics. A decimal
+// literal is returned trimmed (ParseFloat already honours its underscores). A
+// hexadecimal float has its digit-separator underscores stripped and, when it
+// carries no binary exponent (e.g. "0x10", "0x0.8", "-0x1.8"), gains a "p0" —
+// MRI reads a bare hex float as scaled by 2**0, whereas ParseFloat requires the
+// p-exponent. ok is false for a hex literal whose underscore is misplaced —
+// which the caller must reject, because Go's ParseFloat is more lenient than MRI
+// there (it accepts an underscore adjacent to the 0x prefix).
+func normalizeFloatLiteral(raw string) (string, bool) {
+	s := strings.TrimSpace(raw)
+	sign, body := "", s
+	if len(body) > 0 && (body[0] == '+' || body[0] == '-') {
+		sign, body = body[:1], body[1:]
+	}
+	if len(body) < 2 || body[0] != '0' || (body[1] != 'x' && body[1] != 'X') {
+		return s, true // decimal: ParseFloat handles it (including underscores)
+	}
+	stripped, ok := hexFloatStripUnderscores(body)
+	if !ok {
+		return s, false // an illegal underscore MRI rejects
+	}
+	body = stripped
+	if !strings.ContainsAny(body, "pP") {
+		body += "p0" // a bare hex float is scaled by 2**0
+	}
+	return sign + body, true
+}
+
+// hexFloatStripUnderscores removes digit-separator underscores from a hex-float
+// body ("0x…"), accepting a '_' only strictly between two hexadecimal digits
+// (0-9a-fA-F) — so an underscore adjacent to the "0x" prefix, the radix point or
+// the p/P exponent marker is rejected (MRI: "0x1_0"→16, "0xa_b"→171, but
+// "0x1_p0"/"0x_1" raise). ok is false for an illegal placement, so the caller
+// rejects the literal. A body without an underscore is returned unchanged.
+func hexFloatStripUnderscores(body string) (string, bool) {
+	if !strings.Contains(body, "_") {
+		return body, true
+	}
+	isHex := func(c byte) bool {
+		return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+	}
+	var b strings.Builder
+	for i := 0; i < len(body); i++ {
+		if body[i] == '_' {
+			if i == 0 || i == len(body)-1 || !isHex(body[i-1]) || !isHex(body[i+1]) {
+				return "", false
+			}
+			continue
+		}
+		b.WriteByte(body[i])
+	}
+	return b.String(), true
 }
 
 // stripDigitUnderscores removes MRI's digit-separator underscores from a numeric
