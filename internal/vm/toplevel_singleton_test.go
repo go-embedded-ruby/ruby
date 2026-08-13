@@ -82,3 +82,70 @@ p who.equal?(self)`,
 		t.Errorf("immediate self singleton def: got %v, want TypeError", err)
 	}
 }
+
+// TestSingletonMethodsVisibilityAndScope covers the two MRI rules
+// Kernel#singleton_methods obeys, beyond merely listing names: PRIVATE singleton
+// methods are excluded (only public and protected are returned), and a false
+// argument restricts the result to the receiver's OWN singleton methods,
+// excluding those gained from `extend`ed modules (which live on the singleton
+// class's ancestors and so count as inherited). All wants verified against ruby
+// 4.0.6.
+func TestSingletonMethodsVisibilityAndScope(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{
+			"excludes private, keeps public and protected",
+			`o = Object.new
+def o.pub; end
+def o.pro; end
+def o.pri; end
+class << o; protected :pro; private :pri; end
+p o.singleton_methods.sort`,
+			"[:pro, :pub]\n",
+		},
+		{
+			"false excludes a class's extended-module methods, keeps own",
+			`module MM; def mm_pub; end; def mm_pri; end; private :mm_pri; end
+class CC; def self.own; end; extend MM; end
+p CC.singleton_methods(false).sort`,
+			"[:own]\n",
+		},
+		{
+			"true includes a class's public extended-module methods",
+			`module MM2; def mm_pub; end; end
+class CC2; def self.own; end; extend MM2; end
+p CC2.singleton_methods(true).include?(:mm_pub)`,
+			"true\n",
+		},
+		{
+			"true still excludes a private extended-module method",
+			`module MM3; def mm_pri; end; private :mm_pri; end
+class CC3; extend MM3; end
+p CC3.singleton_methods(true).include?(:mm_pri)`,
+			"false\n",
+		},
+		{
+			"false excludes a plain object's extended-module methods, keeps own",
+			`module MM4; def mm_pub; end; end
+ob = Object.new
+def ob.own2; end
+ob.extend(MM4)
+p ob.singleton_methods(false).sort`,
+			"[:own2]\n",
+		},
+		{
+			"true includes a plain object's extended-module methods",
+			`module MM5; def mm_pub; end; end
+ob = Object.new
+ob.extend(MM5)
+p ob.singleton_methods(true).include?(:mm_pub)`,
+			"true\n",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := eval(t, c.src); got != c.want {
+				t.Errorf("src=%q\ngot=%q\nwant=%q", c.src, got, c.want)
+			}
+		})
+	}
+}
