@@ -786,7 +786,7 @@ func (vm *VM) bootstrap() {
 		return object.Bool(vm.classOf(self) == classArg(args[0]))
 	})
 	vm.cObject.define("raise", nativeRaise)
-	vm.cObject.define("Integer", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cObject.define("Integer", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
 		// fail either raises (the default) or, under `exception: false`, yields nil.
 		fail := func(class, format string, a ...interface{}) object.Value {
@@ -795,8 +795,35 @@ func (vm *VM) bootstrap() {
 			}
 			return object.NilV
 		}
+		base := 0 // no explicit base: auto-detect a 0x/0b/0o/0 prefix (and allow _)
+		hasBase := len(args) > 1
+		if hasBase {
+			// The base itself is coerced with #to_int, and a valid radix is 0
+			// (auto-detect) or 2..36 — anything else is MRI's "invalid radix".
+			base = int(vm.toIntCoerce(args[1]))
+			if base != 0 && (base < 2 || base > 36) {
+				return fail("ArgumentError", "invalid radix %d", base)
+			}
+		}
+		// A base only makes sense for a String (or #to_str) value; giving one for a
+		// numeric argument is an ArgumentError in MRI. nil is rejected as a
+		// TypeError first, matching MRI's ordering.
+		if hasBase {
+			switch args[0].(type) {
+			case object.Nil:
+				return fail("TypeError", "can't convert nil into Integer")
+			case object.Integer, *object.Bignum, object.Float:
+				return fail("ArgumentError", "base specified for non string value")
+			}
+		}
 		switch v := args[0].(type) {
+		case object.Nil:
+			// nil defines #to_i (→ 0) but Integer(nil) still raises, so it is
+			// rejected before the coercion protocol below would call it.
+			return fail("TypeError", "can't convert nil into Integer")
 		case object.Integer:
+			return v
+		case *object.Bignum:
 			return v
 		case object.Float:
 			// A non-finite Float has no Integer value: Integer(Infinity)/Integer(NaN)
@@ -811,28 +838,48 @@ func (vm *VM) bootstrap() {
 			if math.IsNaN(f) {
 				return fail("FloatDomainError", "NaN")
 			}
-			return object.IntValue(int64(f))
+			// A Float beyond int64's range truncates to a Bignum (int64(f) would
+			// overflow to a bogus value), matching Integer(2e100).
+			if f >= -9223372036854775808.0 && f < 9223372036854775808.0 {
+				return object.IntValue(int64(f))
+			}
+			bi, _ := new(big.Float).SetFloat64(f).Int(nil)
+			return object.NormInt(bi)
 		case *object.String:
-			base := 0 // no explicit base: auto-detect a 0x/0b/0o/0 prefix (and allow _)
-			if len(args) > 1 {
-				base = int(intArg(args[1]))
-				// A valid radix is 0 (auto-detect) or 2..36; anything else is rejected
-				// with MRI's "invalid radix" message before the value is even examined.
-				if base != 0 && (base < 2 || base > 36) {
-					return fail("ArgumentError", "invalid radix %d", base)
-				}
+			if r, ok := intFromString(v.Str(), base); ok {
+				return r
 			}
-			// Go's ParseInt only accepts a radix prefix (0x/0b/0o/0d) with base 0,
-			// so strip a prefix that matches the explicit base, as MRI allows.
-			n, err := strconv.ParseInt(stripRadixPrefix(strings.TrimSpace(v.Str()), base), base, 64)
-			if err != nil {
-				return fail("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
-			}
-			return object.IntValue(n)
+			return fail("ArgumentError", "invalid value for Integer(): %s", v.Inspect())
 		}
-		return fail("TypeError", "can't convert %s into Integer", args[0].Inspect())
+		// Any other object converts through MRI's protocol: #to_int (must yield an
+		// Integer), else #to_str (parsed like a String literal), else #to_i.
+		other := args[0]
+		if vm.respondsToDynamic(other, "to_int") {
+			if r := vm.send(other, "to_int", nil, nil); isIntegerVal(r) {
+				return r
+			}
+		}
+		if vm.respondsToDynamic(other, "to_str") {
+			if s, ok := vm.send(other, "to_str", nil, nil).(*object.String); ok {
+				if r, ok := intFromString(s.Str(), base); ok {
+					return r
+				}
+				return fail("ArgumentError", "invalid value for Integer(): %s", s.Inspect())
+			}
+		}
+		if vm.respondsToDynamic(other, "to_i") {
+			r := vm.send(other, "to_i", nil, nil)
+			if isIntegerVal(r) {
+				return r
+			}
+			// #to_i answered with a non-Integer: MRI names the offending result's
+			// class in the message ("... to Integer (X#to_i gives NilClass)").
+			return fail("TypeError", "can't convert %s to Integer (%s#to_i gives %s)",
+				vm.convErrName(other), vm.convErrName(other), vm.classOf(r).name)
+		}
+		return fail("TypeError", "can't convert %s into Integer", vm.convErrName(other))
 	})
-	vm.cObject.define("Float", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cObject.define("Float", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
 		fail := func(class, format string, a ...interface{}) object.Value {
 			if doRaise {
@@ -841,18 +888,38 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 		switch v := args[0].(type) {
+		case object.Nil:
+			// nil defines #to_f (→ 0.0) but Float(nil) still raises, so it is
+			// rejected before the coercion protocol below would call it.
+			return fail("TypeError", "can't convert nil into Float")
 		case object.Float:
 			return v
 		case object.Integer:
 			return object.Float(float64(v))
+		case *object.Bignum:
+			f, _ := new(big.Float).SetInt(v.I).Float64()
+			return object.Float(f)
 		case *object.String:
 			f, err := strconv.ParseFloat(strings.TrimSpace(v.Str()), 64)
 			if err != nil {
+				// An out-of-range literal is not malformed: MRI yields ±Infinity
+				// (overflow) or 0.0 (underflow), which is exactly what ParseFloat
+				// returns alongside ErrRange.
+				if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
+					return object.Float(f)
+				}
 				return fail("ArgumentError", "invalid value for Float(): %s", v.Inspect())
 			}
 			return object.Float(f)
 		}
-		return fail("TypeError", "can't convert %s into Float", args[0].Inspect())
+		// Any other object converts through MRI's protocol via #to_f.
+		other := args[0]
+		if vm.respondsToDynamic(other, "to_f") {
+			if f, ok := vm.send(other, "to_f", nil, nil).(object.Float); ok {
+				return f
+			}
+		}
+		return fail("TypeError", "can't convert %s into Float", vm.convErrName(other))
 	})
 	vm.cObject.define("String", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.send(args[0], "to_s", nil, nil)
@@ -5702,6 +5769,90 @@ func stripRadixPrefix(s string, base int) string {
 		s = s[2:]
 	}
 	return sign + s
+}
+
+// intFromString parses a Kernel#Integer string argument in the given base — 0
+// auto-detects a 0x/0b/0o/0d prefix (and a leading-zero octal), 2..36 forces the
+// radix. It matches MRI: underscores may separate digits, surrounding whitespace
+// is ignored, and a syntactically valid literal beyond int64's range yields a
+// Bignum rather than failing. ok is false for a malformed value, which the caller
+// turns into "invalid value for Integer()".
+func intFromString(raw string, base int) (object.Value, bool) {
+	cleaned := stripRadixPrefix(strings.TrimSpace(raw), base)
+	// Go's ParseInt accepts an underscore digit-separator only with base 0; for an
+	// explicit base, apply MRI's rule (a single '_' strictly between two digits)
+	// and strip them so "1_1" parses in base 10 as it does base-0.
+	if base != 0 {
+		s, ok := stripDigitUnderscores(cleaned)
+		if !ok {
+			return nil, false
+		}
+		cleaned = s
+	}
+	n, err := strconv.ParseInt(cleaned, base, 64)
+	if err == nil {
+		return object.IntValue(n), true
+	}
+	// Only a genuine overflow (valid digits, out of int64 range) falls back to
+	// big.Int; a syntax error stays a failure so "1__1"/"_1" are still rejected.
+	// ErrRange guarantees the digits are well formed, so SetString cannot fail on
+	// the same cleaned string and base.
+	if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
+		z, _ := new(big.Int).SetString(cleaned, base)
+		return object.NormInt(z), true
+	}
+	return nil, false
+}
+
+// stripDigitUnderscores removes MRI's digit-separator underscores from a numeric
+// literal, accepting a '_' only strictly between two alphanumeric digits (so a
+// leading, trailing, doubled or sign/prefix-adjacent underscore is rejected).
+// ok is false for a misplaced underscore. A string without any underscore is
+// returned unchanged.
+func stripDigitUnderscores(s string) (string, bool) {
+	if !strings.Contains(s, "_") {
+		return s, true
+	}
+	isDigit := func(c byte) bool {
+		return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '_' {
+			if i == 0 || i == len(s)-1 || !isDigit(s[i-1]) || !isDigit(s[i+1]) {
+				return "", false
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String(), true
+}
+
+// isIntegerVal reports whether v is an Integer or Bignum — the results Kernel#
+// Integer's #to_int / #to_i coercion protocol accepts as a successful conversion.
+func isIntegerVal(v object.Value) bool {
+	switch v.(type) {
+	case object.Integer, *object.Bignum:
+		return true
+	}
+	return false
+}
+
+// convErrName names v for the "can't convert %s into ..." TypeError Kernel#Integer
+// and Kernel#Float raise for an unconvertible argument: MRI prints the keyword for
+// true/false and the class name for everything else (Object, Symbol, a user
+// class's own name), never the value's inspect form. nil is handled by its own
+// switch case in the callers (it is rejected before the coercion protocol), so it
+// never reaches here.
+func (vm *VM) convErrName(v object.Value) string {
+	if b, ok := v.(object.Bool); ok {
+		if bool(b) {
+			return "true"
+		}
+		return "false"
+	}
+	return vm.classOf(v).name
 }
 
 // classIsA reports whether class c is, inherits from, or includes/prepends
