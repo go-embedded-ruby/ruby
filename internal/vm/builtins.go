@@ -4256,6 +4256,42 @@ func (vm *VM) bootstrap() {
 	// Range edge methods (#reverse_each, #entries); runs after the prelude so the
 	// range-specific definitions win over any inherited Enumerable ones.
 	vm.registerRangeEdges()
+	// Split the Kernel module functions into a private instance method + a public
+	// Kernel-module method, as MRI does — runs last, once every listed method is
+	// defined above.
+	vm.registerKernelModuleFunctions()
+}
+
+// registerKernelModuleFunctions applies MRI's module_function split to the Kernel
+// methods that carry it: each becomes a PRIVATE instance method (so `Integer(x)`
+// works but `obj.Integer(x)` does not) and a PUBLIC method on the Kernel module
+// itself (so `Kernel.Integer(x)` works and it appears in Kernel.public_methods).
+// The bodies live on Object; this only reflects the visibility split MRI reports
+// through Kernel.private_instance_methods / Kernel.public_methods, mirroring the
+// records onto cKernel exactly as __method__/__callee__ already do. The set is
+// Kernel.private_instance_methods(false) from ruby 4.0.6 intersected with what
+// rbgo defines; a name absent on this build (e.g. fork/exec/system under wasm) is
+// simply skipped. Runs after every listed method is registered.
+func (vm *VM) registerKernelModuleFunctions() {
+	names := []string{
+		"Array", "Complex", "Float", "Integer", "Rational", "String",
+		"__dir__", "abort", "at_exit", "autoload", "autoload?", "caller",
+		"catch", "eval", "exec", "exit", "exit!", "fork", "format", "lambda",
+		"load", "loop", "open", "p", "print", "printf", "proc", "puts",
+		"raise", "rand", "require", "require_relative", "sleep", "sprintf",
+		"srand", "system", "throw", "trap", "warn",
+	}
+	for _, name := range names {
+		if m := vm.cObject.methods[name]; m != nil {
+			m.vis = visPrivate
+			priv := *m
+			priv.owner, priv.vis = vm.cKernel, visPrivate
+			vm.cKernel.methods[name] = &priv
+			pub := *m
+			pub.owner, pub.vis = vm.cKernel, visPublic
+			vm.cKernel.smethods[name] = &pub
+		}
+	}
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,
