@@ -98,3 +98,36 @@ func TestKernelFloatConvert(t *testing.T) {
 		}
 	}
 }
+
+// TestKernelFloatHexString covers Kernel#Float's hexadecimal string form: a bare
+// hex float (no binary exponent), a fractional part, a sign, a p-exponent, and
+// the digit-separator underscore — legal strictly between two hex digits and
+// rejected next to the 0x prefix or the p exponent (even though Go's ParseFloat
+// would accept a prefix-adjacent one). Verified against ruby 4.0.6.
+func TestKernelFloatHexString(t *testing.T) {
+	values := []struct{ src, want string }{
+		{`p Float("0x10")`, "16.0"},   // bare hex float (== 0x10p0)
+		{`p Float("0x0.8")`, "0.5"},   // fractional part
+		{`p Float("-0x10")`, "-16.0"}, // sign
+		{`p Float("0x1p4")`, "16.0"},  // explicit binary exponent
+		{`p Float("0x1.8p1")`, "3.0"},
+		{`p Float("0x1_0")`, "16.0"},   // underscore between hex digits
+		{`p Float("0xa_b")`, "171.0"},  // underscore between a-f digits
+		{`p Float("0x1_0a")`, "266.0"}, // ruby 3.4.3+: underscore allowed with a-f
+	}
+	for _, c := range values {
+		if got := eval(t, c.src); got != c.want+"\n" {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want+"\n")
+		}
+	}
+
+	// Misplaced underscores raise, even the 0x-prefix-adjacent one ParseFloat alone
+	// would accept.
+	for _, src := range []string{
+		`Float("0x_1")`, `Float("0x_10p10")`, `Float("0x10p_10")`, `Float("0x1_p0")`,
+	} {
+		if class, _ := evalErr(t, src); class != "ArgumentError" {
+			t.Errorf("src=%q got %s want ArgumentError", src, class)
+		}
+	}
+}
