@@ -754,18 +754,31 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		if bv, ok := b.(object.Integer); ok {
 			return av == bv
 		}
-		if bv, ok := b.(object.Float); ok {
-			return float64(av) == float64(bv)
+		if bf, ok := b.(object.Float); ok {
+			// Exact even for an int64 beyond a double's 53-bit mantissa: compare the
+			// integer against the float's exact rational value, as MRI does.
+			c, ok := cmpBigFloat(big.NewInt(int64(av)), float64(bf))
+			return ok && c == 0
 		}
 	case object.Float:
+		// Against any integer (Integer or Bignum) compare exactly through the
+		// integer's value rather than rounding it to a double first: a Bignum that
+		// merely rounds to av is not equal to it (1e100 != 10**100), while a Bignum
+		// that IS av's exact value is (Integer(2e100) == 2e100).
+		if bi, ok := object.BigOf(b); ok {
+			c, ok := cmpBigFloat(bi, float64(av))
+			return ok && c == 0
+		}
 		if bf, ok := toFloat(b); ok {
 			return float64(av) == bf
 		}
 	case *object.Bignum:
-		// A Bignum is, by construction, outside int64 range, so it can only equal
-		// another Bignum of the same magnitude.
-		if bv, ok := b.(*object.Bignum); ok {
-			return av.I.Cmp(bv.I) == 0
+		if bi, ok := object.BigOf(b); ok {
+			return av.I.Cmp(bi) == 0
+		}
+		if bf, ok := b.(object.Float); ok {
+			c, ok := cmpBigFloat(av.I, float64(bf))
+			return ok && c == 0
 		}
 	case *object.String:
 		bv, ok := b.(*object.String)
