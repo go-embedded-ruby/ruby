@@ -250,6 +250,21 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 			}
 			return object.Bool(eq)
 		}
+		// A built-in Integer/Float/Bignum compared against a non-numeric right
+		// operand runs MRI's reflexive coercion: Numeric#== returns `other == self`,
+		// so `1 == obj` dispatches obj's == (letting a user #== match a number).
+		// numeric-vs-numeric keeps the structural compare below; Complex/Rational
+		// keep their own component-wise equality (complexEqual/rationalEqual).
+		switch a.(type) {
+		case object.Integer, object.Float, *object.Bignum:
+			if !isNumericValue(b) {
+				eq := vm.send(b, "==", []object.Value{a}, nil).Truthy()
+				if op == bytecode.OpNeq {
+					eq = !eq
+				}
+				return object.Bool(eq)
+			}
+		}
 		return binary(op, a, b)
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
 		if hasFastOrdering(a) {
