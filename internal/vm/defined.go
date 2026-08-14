@@ -104,14 +104,9 @@ func (vm *VM) respondsTo(recv object.Value, name string) bool {
 	if _, ok := operatorOpcode(name); ok {
 		return true
 	}
-	// `!` is a universal BasicObject method (the compiler implements it as a fast
-	// path rather than a method table entry), so every object responds to it.
-	if name == "!" {
-		return true
-	}
-	// Unary `-@`/`+@` are now generic Numeric methods and `~` is an Integer method,
-	// so they are all found by findMethod above; no numeric fast-path special-case
-	// is needed here.
+	// `!`/`!=`/`==` are now real BasicObject methods and the unary `-@`/`+@`/`~`
+	// are Numeric/Integer methods, so findMethod above already answers for them;
+	// no operator fast-path special-case is needed here.
 	return false
 }
 
