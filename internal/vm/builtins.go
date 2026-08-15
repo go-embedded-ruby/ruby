@@ -263,7 +263,7 @@ func (vm *VM) bootstrap() {
 			map[string]object.Value{"@tag": args[0], "@value": val})
 		return object.NilV
 	})
-	vm.cObject.define("equal?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cBasicObject.define("equal?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Object identity: reference types compare by pointer, the immutable
 		// value types by value (Go interface equality gives exactly this).
 		return object.Bool(self == args[0])
@@ -277,7 +277,7 @@ func (vm *VM) bootstrap() {
 		return vm.objectID(self)
 	}
 	vm.cObject.define("object_id", objectIDFn)
-	vm.cObject.define("__id__", objectIDFn)
+	vm.cBasicObject.define("__id__", objectIDFn)
 	vm.cObject.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(vm.hashValue(self))
 	})
@@ -362,13 +362,13 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("instance_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewArrayFromSlice(ivarNamesInOrder(self))
 	})
-	vm.cObject.define("instance_eval", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cBasicObject.define("instance_eval", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
 		return vm.callBlockSelf(blk, self, nil)
 	})
-	vm.cObject.define("instance_exec", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+	vm.cBasicObject.define("instance_exec", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
@@ -748,6 +748,16 @@ func (vm *VM) bootstrap() {
 	vm.cBasicObject.define("initialize", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NilV
 	})
+	// ! and != are BasicObject instance methods (dispatchable via send, and
+	// overridable), alongside the operators the bytecode also lowers them to.
+	// !obj is the boolean negation of obj's truthiness; a != b is !(a == b),
+	// dispatching == so a user-defined == is honoured.
+	vm.cBasicObject.define("!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(!self.Truthy())
+	})
+	vm.cBasicObject.define("!=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(!vm.send(self, "==", args, nil).Truthy())
+	})
 	vm.cBasicObject.define("method_missing", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// args[0] is the missing method name (a Symbol), args[1:] the call's own
 		// arguments. Stamp them so NoMethodError#name/#receiver/#args report the
@@ -765,6 +775,11 @@ func (vm *VM) bootstrap() {
 			map[string]object.Value{"@name": nameSym, "@receiver": self, "@args": callArgs})
 		return object.NilV
 	})
+	// initialize and method_missing are PRIVATE instance methods of BasicObject
+	// (as in MRI): callable via new/super and the dispatch fallback, never listed
+	// in instance_methods, only in private_instance_methods.
+	vm.setInstanceVisibility(vm.cBasicObject, "initialize", visPrivate)
+	vm.setInstanceVisibility(vm.cBasicObject, "method_missing", visPrivate)
 	isAFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		target := classArg(args[0])
 		if classIsA(vm.classOf(self), target) {
@@ -945,7 +960,7 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cObject.define("send", sendFn)
 	// __send__ is the can't-be-overridden alias of send; both ignore visibility.
-	vm.cObject.define("__send__", sendFn)
+	vm.cBasicObject.define("__send__", sendFn)
 	// public_send dispatches only public methods: a private/protected target
 	// raises NoMethodError just as an explicit-receiver call would.
 	vm.cObject.define("public_send", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
@@ -1006,7 +1021,7 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("yield_self", thenFn)
 	// Default equality: object identity for instances, structural for value
 	// types (Comparable#== and user-defined == override this via dispatch).
-	vm.cObject.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cBasicObject.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(rubyEqual(self, args[0]))
 	})
 	// Default <=>: 0 when the two are the same object, nil otherwise — the MRI
@@ -1085,7 +1100,10 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cModule.define("instance_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		all := len(args) == 0 || args[0].Truthy() // instance_methods(false) = own only
-		return object.NewArrayFromSlice(vm.methodNames(self.(*RClass), all))
+		// MRI's instance_methods lists the public and protected methods, never the
+		// private ones (those are private_instance_methods).
+		return object.NewArrayFromSlice(vm.methodNamesMatching(self.(*RClass), all,
+			func(v visibility) bool { return v != visPrivate }))
 	})
 	// Module#const_get / #const_defined? live in module_residuals.go
 	// (registerModuleResiduals), which supports scoped paths, the inherit flag,

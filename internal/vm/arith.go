@@ -462,8 +462,6 @@ func operatorOpcode(name string) (bytecode.Op, bool) {
 		return bytecode.OpDiv, true
 	case "%":
 		return bytecode.OpMod, true
-	case "!=":
-		return bytecode.OpNeq, true
 	}
 	return 0, false
 }

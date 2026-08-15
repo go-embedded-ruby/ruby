@@ -34,6 +34,16 @@ func (vm *VM) registerModuleReflect() {
 // definition of a name wins, so a re-visibilised override in a derived class
 // shadows the inherited access level, and an `undef` tombstone hides the name.
 func (vm *VM) methodNamesByVis(c *RClass, all bool, want visibility) []object.Value {
+	return vm.methodNamesMatching(c, all, func(v visibility) bool { return v == want })
+}
+
+// methodNamesMatching returns, as sorted Symbols, the names of self's instance
+// methods whose effective visibility (honouring any per-class override) satisfies
+// keep. It is the shared walk behind public/private/protected_instance_methods
+// (each a single-visibility match) and instance_methods (which keeps everything
+// except private). With all true the receiver's ancestors are included; the
+// nearest definition of a name wins and an `undef` tombstone hides the name.
+func (vm *VM) methodNamesMatching(c *RClass, all bool, keep func(visibility) bool) []object.Value {
 	seen := map[string]bool{}
 	undef := map[string]bool{}
 	var names []string
@@ -51,7 +61,7 @@ func (vm *VM) methodNamesByVis(c *RClass, all bool, want visibility) []object.Va
 				continue
 			}
 			seen[n] = true
-			if instanceVisibility(c, n, m) == want {
+			if keep(instanceVisibility(c, n, m)) {
 				names = append(names, n)
 			}
 		}
