@@ -202,14 +202,19 @@ func (vm *VM) formatObjFloat(o *RObject) (float64, error, bool) {
 // `invalid value for Integer(): <inspect>` (the library promotes it to an
 // ArgumentError).
 func parseFormatInteger(s, inspect string) (*big.Int, error) {
-	clean := strings.ReplaceAll(strings.TrimSpace(s), "_", "")
-	z, ok := new(big.Int).SetString(clean, 0)
+	// A String operand for %d/%i/%u/%o/%b/%x/%X is parsed exactly as Kernel#Integer
+	// would (base 0: prefix-detected radix, and MRI's strict digit-separator rule
+	// where a single '_' is legal only between two digits). Route through the same
+	// intFromString primitive rather than a blind underscore strip, so
+	// "0777"->511, "0b1101_0000"->208, but "123__456"/"_1"/"08" raise ArgumentError.
+	v, ok := intFromString(s, 0)
 	if !ok {
 		return nil, &format.Error{
 			Class:   "ArgumentError",
 			Message: "invalid value for Integer(): " + inspect,
 		}
 	}
+	z, _ := object.BigOf(v)
 	return z, nil
 }
 
