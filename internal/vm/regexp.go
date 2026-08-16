@@ -762,8 +762,9 @@ func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global b
 // advances past its end. With global=false only the first match is replaced.
 func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) object.Value {
 	var b strings.Builder
-	pos := 0    // byte cursor into subject (start of the not-yet-emitted tail)
-	search := 0 // byte cursor where the next search begins
+	pos := 0                           // byte cursor into subject (start of the not-yet-emitted tail)
+	search := 0                        // byte cursor where the next search begins
+	last := object.Value(object.NilV)  // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
 		md := re.matcher().Match(subject[search:])
 		if md == nil {
@@ -772,10 +773,13 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 		mBegin := search + md.Begin(0)
 		mEnd := search + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
-		// Expose this match through $~ / $1.. so a replacement block (and MRI's
-		// post-sub $~) sees the captures. md's offsets are relative to the slice
-		// it matched, so the MatchData's subject must be that same slice.
-		vm.lastMatch = &MatchData{md: md, subject: subject[search:], re: re}
+		// Expose this match through $~ / $1.. so a replacement block sees the
+		// captures. md's offsets are relative to the searched slice, so carry the
+		// FULL subject with byteOff=search — then MatchData#string is the whole
+		// receiver and #offset/#begin are absolute, as MRI reports inside the block.
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: search}
+		vm.lastMatch = cur
+		last = cur
 		if blk != nil {
 			res := vm.callBlock(blk, []object.Value{object.NewString(md.Str(0))})
 			b.WriteString(vm.send(res, "to_s", nil, nil).ToS())
@@ -801,6 +805,9 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 			break
 		}
 	}
+	// MRI leaves $~ as the last match (or nil when there was none) after the call,
+	// even if a block reassigned $~ via its own match.
+	vm.lastMatch = last
 	b.WriteString(subject[pos:]) // remaining tail
 	return object.NewString(b.String())
 }
@@ -810,8 +817,9 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 // has no such key. $~ / $1.. are updated per match, as in the block form.
 func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) object.Value {
 	var b strings.Builder
-	pos := 0    // byte cursor into subject (start of the not-yet-emitted tail)
-	search := 0 // byte cursor where the next search begins
+	pos := 0                          // byte cursor into subject (start of the not-yet-emitted tail)
+	search := 0                       // byte cursor where the next search begins
+	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
 		md := re.matcher().Match(subject[search:])
 		if md == nil {
@@ -820,7 +828,11 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 		mBegin := search + md.Begin(0)
 		mEnd := search + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
-		vm.lastMatch = &MatchData{md: md, subject: subject[search:], re: re}
+		// Carry the FULL subject with byteOff=search so $~ reports absolute
+		// offsets and the whole receiver (see gsub).
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: search}
+		vm.lastMatch = cur
+		last = cur
 		// Look the match up with Hash#[] (not a bare Get) so a missing key runs the
 		// hash's default value / default_proc, exactly as MRI does. A nil result
 		// (no matching key and no default) contributes nothing; any other value is
@@ -846,6 +858,8 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 			break
 		}
 	}
+	// $~ is the last match (or nil when none), even after a default_proc reset it.
+	vm.lastMatch = last
 	b.WriteString(subject[pos:]) // remaining tail
 	return object.NewString(b.String())
 }
