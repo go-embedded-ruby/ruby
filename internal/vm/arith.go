@@ -296,6 +296,14 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 				}
 			}
 		}
+		// String#* (repeat) needs a live VM: the count is coerced with MRI's
+		// NUM2LONG semantics (Float truncates, a Bignum raises RangeError, any other
+		// object is taken through #to_int), and an out-of-range count raises rather
+		// than looping/overflowing, so route it through stringTimes rather than the
+		// VM-less stringOp path.
+		if as, ok := a.(*object.String); ok && op == bytecode.OpMul {
+			return vm.stringTimes(as, b)
+		}
 		// String % args is Kernel#sprintf with the format as receiver; it needs a
 		// live VM for MRI argument coercion (%s#to_s, %p#inspect, %d#to_int/#to_i,
 		// %f#to_f, %{name}#to_s), so route it through the VM-aware formatter rather
@@ -554,6 +562,72 @@ func floatOp(op bytecode.Op, a, b float64) object.Value {
 	return raise("VMError", "bad float op %s", op)
 }
 
+// repeatLong converts a String#*/Array#* count to a machine long the way MRI's
+// NUM2LONG does: a Float truncates toward zero (Infinity/NaN raise
+// FloatDomainError), a Bignum that cannot fit a long raises RangeError, and any
+// other object is coerced through #to_int. It is the shared front-end for the
+// repeat operators, which then apply their own negative / overflow checks.
+func (vm *VM) repeatLong(b object.Value) int64 {
+	switch v := b.(type) {
+	case object.Integer:
+		return int64(v)
+	case *object.Bignum:
+		// A Bignum whose value still fits a machine long converts: a negative
+		// literal at the long's minimum (-0x8000_0000_0000_0000) reaches here boxed
+		// rather than normalised. Only a genuinely out-of-range Bignum raises.
+		if v.I.IsInt64() {
+			return v.I.Int64()
+		}
+		raise("RangeError", "bignum too big to convert into `long'")
+	case object.Float:
+		f := float64(v)
+		if math.IsNaN(f) {
+			raise("FloatDomainError", "NaN")
+		}
+		if math.IsInf(f, 0) {
+			if f > 0 {
+				raise("FloatDomainError", "Infinity")
+			}
+			raise("FloatDomainError", "-Infinity")
+		}
+		return int64(f)
+	default:
+		if vm.respondsToDynamic(b, "to_int") {
+			return vm.repeatLong(vm.send(b, "to_int", nil, nil))
+		}
+	}
+	// Reached only when b has no integer coercion (the default without #to_int);
+	// the other cases return or raise above. Kept in one block with the tail
+	// return so the raise path covers it.
+	raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(b).name)
+	return 0
+}
+
+// stringTimes implements String#* (repeat) with MRI's coercion and bounds: the
+// count is converted like NUM2LONG (see repeatLong), a negative count raises
+// ArgumentError, and a result whose byte length would overflow a machine long
+// raises ArgumentError rather than allocating (so an empty receiver returns ""
+// for any in-range count without looping). The result is always a base String
+// in the receiver's encoding.
+func (vm *VM) stringTimes(a *object.String, b object.Value) object.Value {
+	n := vm.repeatLong(b)
+	if n < 0 {
+		raise("ArgumentError", "negative argument")
+	}
+	src := a.Bytes()
+	if len(src) == 0 || n == 0 {
+		return object.NewStringBytesEnc(nil, a.Enc) // empty result, no allocation/looping
+	}
+	if n > int64(math.MaxInt/len(src)) {
+		raise("ArgumentError", "argument too big")
+	}
+	out := make([]byte, 0, len(src)*int(n))
+	for i := int64(0); i < n; i++ {
+		out = append(out, src...)
+	}
+	return object.NewStringBytesEnc(out, a.Enc)
+}
+
 func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
@@ -564,21 +638,9 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 		out := make([]byte, 0, len(a.Bytes())+len(bs.Bytes()))
 		out = append(append(out, a.Bytes()...), bs.Bytes()...)
 		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
-	case bytecode.OpMul:
-		n, ok := b.(object.Integer)
-		if !ok {
-			raise("TypeError", "no implicit conversion of %s into Integer", b.Inspect())
-		}
-		if n < 0 {
-			raise("ArgumentError", "negative argument")
-		}
-		out := make([]byte, 0, len(a.Bytes())*int(n))
-		for i := int64(0); i < int64(n); i++ {
-			out = append(out, a.Bytes()...)
-		}
-		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
-	// String % args (OpMod) is intercepted in binaryOp and routed through the
-	// VM-aware formatter, so it never reaches this VM-less path.
+	// String#* (OpMul) is intercepted in binaryOp and routed through stringTimes
+	// (NUM2LONG coercion + bounds checks), and String % args (OpMod) through the
+	// VM-aware formatter, so neither reaches this VM-less path.
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
 		bs, ok := b.(*object.String)
 		if !ok {
