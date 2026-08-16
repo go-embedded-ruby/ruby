@@ -130,6 +130,17 @@ const (
 	visProtected
 )
 
+// attrKind labels a method that attr_reader/attr_writer/attr_accessor
+// synthesised, so #parameters can report the accessor's argument shape rather
+// than a native method's default.
+type attrKind uint8
+
+const (
+	notAttr attrKind = iota
+	attrReaderMethod          // no arguments → parameters []
+	attrWriterMethod          // one required value → parameters [[:req]]
+)
+
 // Method is a Ruby method: either native (Go) or an ISeq (compiled Ruby).
 type Method struct {
 	name     string
@@ -157,6 +168,10 @@ type Method struct {
 	// instance_methods all treat the name as absent (a call routes to
 	// method_missing → NoMethodError).
 	undefined bool
+	// attrKind marks a method synthesised by attr_reader/attr_writer/attr_accessor,
+	// so #parameters reports MRI's [] (a reader) or [[:req]] (a writer) instead of
+	// a native method's default [[:rest]]. The zero value means "not an attr".
+	attrKind attrKind
 	// nonRetaining marks a native method whose body provably does NOT retain the
 	// args slice beyond the call (it never stores the slice in a field, returns
 	// it, or hands it to something that keeps it — it only reads elements and
