@@ -694,6 +694,15 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 			// Empty match: an empty match at the very start is skipped; otherwise
 			// it ends the current character field. Advance one character.
 			if mBegin >= len(subject) {
+				// A zero-width match at end-of-string closes the final character
+				// field (with its captures) and leaves a trailing empty field, which
+				// the post-loop tail append produces — kept unless limit 0 strips it.
+				if mBegin != last {
+					out = append(out, object.NewStringView(subject[last:mBegin]))
+					out = append(out, captureFields(md)...)
+					pieces++
+					last = mBegin
+				}
 				break
 			}
 			if mBegin == last {
