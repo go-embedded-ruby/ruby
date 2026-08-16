@@ -97,6 +97,12 @@ func (vm *VM) resolveMethod(recv object.Value, name string) *Method {
 // required keyword. A required keyword keeps the arity non-negative even
 // alongside optional keywords or a **rest. Native methods report -1 (variadic).
 func methodArity(m *Method) int {
+	switch m.attrKind {
+	case attrReaderMethod:
+		return 0
+	case attrWriterMethod:
+		return 1
+	}
 	is := methodISeq(m)
 	if is == nil {
 		if m.proc != nil {
