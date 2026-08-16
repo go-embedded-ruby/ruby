@@ -1645,8 +1645,17 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cString.define("split", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.stringSplit(strOf(self), args)
+	vm.cString.define("split", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		res := vm.stringSplit(strOf(self), args)
+		if blk == nil {
+			return res
+		}
+		// The block form yields each split substring and returns the receiver
+		// itself (MRI); an empty receiver yields nothing and still returns self.
+		for _, sub := range res.(*object.Array).Elems {
+			vm.callBlock(blk, []object.Value{sub})
+		}
+		return self
 	})
 	vm.cString.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(strings.Contains(strOf(self), strArg(args[0])))
