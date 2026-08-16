@@ -465,13 +465,21 @@ def ruby_cmd(*a, **k); ::Kernel.raise(SpecSkip, "ruby_cmd unsupported"); end
 
 # ---------------- example runner ----------------
 class SpecContext
-  attr_reader :desc, :examples, :before_each, :after_each
+  attr_reader :desc, :examples, :before_each, :after_each, :before_all
   def initialize(desc, parent)
     @desc = desc
     @examples = []
     @before_each = parent ? parent.before_each.dup : []
     @after_each = parent ? parent.after_each.dup : []
-    @before_all = []
+    # Inherit ancestor `before :all` blocks so their instance variables are set on
+    # THIS context object too. Each shim context is a distinct object that its
+    # examples instance_eval against, and a nested describe (or an it_behaves_like
+    # shared context) runs its examples on its own object — so without inheriting
+    # the enclosing describe's before(:all) (e.g. numeric/step's `@step = ->...`),
+    # those ivars would be nil in the nested examples. Replaying an ivar-setup
+    # before(:all) per descendant is idempotent; mspec likewise makes before(:all)
+    # state visible to nested groups.
+    @before_all = parent ? parent.before_all.dup : []
   end
   def it(d, &blk); @examples << [d, blk]; end
   def specify(d = nil, &blk); @examples << [d, blk]; end
