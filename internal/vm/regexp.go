@@ -821,11 +821,13 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 		mEnd := search + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
 		vm.lastMatch = &MatchData{md: md, subject: subject[search:], re: re}
-		if v, ok := h.Get(object.NewString(md.Str(0))); ok {
-			// Missing keys (and an explicit nil value) contribute nothing.
-			if _, isNil := v.(object.Nil); !isNil {
-				b.WriteString(vm.send(v, "to_s", nil, nil).ToS())
-			}
+		// Look the match up with Hash#[] (not a bare Get) so a missing key runs the
+		// hash's default value / default_proc, exactly as MRI does. A nil result
+		// (no matching key and no default) contributes nothing; any other value is
+		// coerced with #to_s.
+		v := vm.send(h, "[]", []object.Value{object.NewString(md.Str(0))}, nil)
+		if _, isNil := v.(object.Nil); !isNil {
+			b.WriteString(vm.send(v, "to_s", nil, nil).ToS())
 		}
 		pos = mEnd
 		if mEnd == mBegin { // empty match: emit one char, step forward
