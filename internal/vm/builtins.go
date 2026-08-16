@@ -6393,6 +6393,7 @@ func (vm *VM) defineAttrs(cls *RClass, names []object.Value, reader, writer bool
 				return getIvar(self, ivar)
 			})
 			cls.methods[base].vis = vis
+			cls.methods[base].attrKind = attrReaderMethod
 			created = append(created, object.Symbol(base))
 		}
 		if writer {
@@ -6405,6 +6406,7 @@ func (vm *VM) defineAttrs(cls *RClass, names []object.Value, reader, writer bool
 				return a[0]
 			})
 			cls.methods[w].vis = vis
+			cls.methods[w].attrKind = attrWriterMethod
 			created = append(created, object.Symbol(w))
 		}
 	}

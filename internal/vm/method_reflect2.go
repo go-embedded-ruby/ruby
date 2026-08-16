@@ -191,6 +191,15 @@ func methodSourceLocation(m *Method) object.Value {
 // method reports its required positionals as :req (Proc#parameters shares the
 // same builder but may report them as :opt — see buildParamsList).
 func methodParameters(m *Method) object.Value {
+	// attr_reader/attr_writer accessors are native, so they would otherwise report
+	// a native method's default [[:rest]]; MRI reports a reader as taking no
+	// arguments and a writer as one required (anonymous) value.
+	switch m.attrKind {
+	case attrReaderMethod:
+		return object.NewArray()
+	case attrWriterMethod:
+		return object.NewArray(object.NewArray(object.Symbol("req")))
+	}
 	return object.NewArray(buildParamsList(methodISeq(m), "req")...)
 }
 
