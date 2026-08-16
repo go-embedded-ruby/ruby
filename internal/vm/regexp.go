@@ -598,9 +598,24 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 // remainder); a limit <= 0 keeps trailing empty fields, while the absent or
 // zero limit strips them.
 func (vm *VM) stringSplit(subject string, args []object.Value) object.Value {
+	// A pattern that is neither a String, a Regexp nor nil is converted with
+	// #to_str, and a non-Integer limit with #to_int, exactly as MRI does. Copy the
+	// slice before rewriting the pattern so the caller's arguments are untouched.
+	if len(args) >= 1 {
+		switch args[0].(type) {
+		case *object.String, *Regexp, object.Nil:
+		default:
+			if vm.respondsToDynamic(args[0], "to_str") {
+				args = append([]object.Value(nil), args...)
+				args[0] = vm.send(args[0], "to_str", nil, nil)
+			}
+		}
+	}
 	limit := 0
 	if len(args) >= 2 {
-		limit = int(intArg(args[1]))
+		// A nil limit is not a default — MRI raises TypeError for split(p, nil) —
+		// so coerceInt handles it (nil has no #to_int) alongside real conversions.
+		limit = int(coerceInt(vm, args[1]))
 	}
 	if splitOnWhitespace(args) {
 		return splitWhitespace(subject, limit)
