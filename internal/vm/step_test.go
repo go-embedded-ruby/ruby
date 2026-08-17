@@ -35,19 +35,28 @@ func TestStep(t *testing.T) {
 		}
 	}
 	// step can't be 0 (integer and float walks) raises ArgumentError; missing the
-	// Integer#step limit raises too; a non-numeric range can't be stepped (the
-	// same TypeError Range#each already raises for non-integer endpoints).
+	// Integer#step limit raises too; a String range with a 0 step raises the same.
 	for _, src := range []string{
 		`(1..3).step(0) { |x| }`,
 		`(1.0..3.0).step(0.0) { |x| }`,
 		`1.step(3, 0) { |x| }`,
 		`1.step`,
+		`("a".."c").step(0) { |x| }`,
 	} {
 		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
 			t.Errorf("src=%q got=%v want ArgumentError", src, err)
 		}
 	}
-	if err := runErr(t, `("a".."c").step(1) { |x| }`); err == nil || !strings.Contains(err.Error(), "TypeError") {
-		t.Errorf("string-range step: got=%v want TypeError", err)
+	// A String range steps by #succ (see TestRangeStepString); a Float step over
+	// one raises TypeError.
+	if got := eval(t, `a = []; ("a".."c").step(1) { |x| a << x }; p a`); got != "[\"a\", \"b\", \"c\"]\n" {
+		t.Errorf("string-range step: got=%q", got)
+	}
+	if err := runErr(t, `("a".."c").step(1.5) { |x| }`); err == nil || !strings.Contains(err.Error(), "TypeError") {
+		t.Errorf("string-range float step: got=%v want TypeError", err)
+	}
+	// A range whose endpoints are neither numeric nor String cannot be stepped.
+	if err := runErr(t, `(:a..:c).step(1) { |x| }`); err == nil || !strings.Contains(err.Error(), "TypeError") {
+		t.Errorf("symbol-range step: got=%v want TypeError", err)
 	}
 }
