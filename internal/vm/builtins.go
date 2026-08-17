@@ -3815,6 +3815,35 @@ func (vm *VM) bootstrap() {
 			step = args[0]
 		}
 		r := self.(*object.Range)
+		// A String range steps by #succ: MRI requires an Integer step and yields
+		// every step-th element of the begin..end succ-walk. An endless String
+		// range (e.g. "A"..) walks forever — the caller's block breaks out.
+		_, hiIsStr := r.Hi.(*object.String)
+		if loS, ok := r.Lo.(*object.String); ok && (object.IsNil(r.Hi) || hiIsStr) {
+			n, isInt := step.(object.Integer)
+			if !isInt {
+				raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(step).name)
+			}
+			switch {
+			case n == 0:
+				raise("ArgumentError", "step can't be 0")
+			case n < 0:
+				raise("ArgumentError", "step can't be negative")
+			}
+			if object.IsNil(r.Hi) {
+				for cur := loS.Str(); ; {
+					vm.callBlock(blk, []object.Value{object.NewString(cur)})
+					for k := int64(0); k < int64(n); k++ {
+						cur = succString(cur)
+					}
+				}
+			}
+			elems := strRangeElems(loS.Str(), r.Hi.(*object.String).Str(), r.Exclusive)
+			for i := 0; i < len(elems); i += int(n) {
+				vm.callBlock(blk, []object.Value{elems[i]})
+			}
+			return r
+		}
 		vm.numericStep(blk, r.Lo, r.Hi, step, r.Exclusive)
 		return r
 	})
