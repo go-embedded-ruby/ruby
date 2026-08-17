@@ -1427,6 +1427,12 @@ func (vm *VM) bootstrap() {
 	// String. Methods over the mutable byte-based String (length/chars/index are
 	// rune-aware for UTF-8). strOf reads the receiver's current contents.
 	strOf := func(self object.Value) string { return self.(*object.String).Str() }
+	// strEncOf builds a result String carrying the receiver's encoding, for the
+	// transforms (upcase, reverse, strip, …) that MRI keeps in the same encoding
+	// as self. An empty Enc is the UTF-8 default, so UTF-8 receivers are unaffected.
+	strEncOf := func(self object.Value, s string) object.Value {
+		return object.NewStringBytesEnc([]byte(s), self.(*object.String).Enc)
+	}
 	strLen := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		// A binary (ASCII-8BIT) string counts bytes; otherwise characters.
 		s := self.(*object.String)
@@ -1446,10 +1452,10 @@ func (vm *VM) bootstrap() {
 		return object.Bool(len(strOf(self)) == 0)
 	})
 	vm.cString.define("upcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(strings.ToUpper(strOf(self)))
+		return strEncOf(self, strings.ToUpper(strOf(self)))
 	})
 	vm.cString.define("downcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(strings.ToLower(strOf(self)))
+		return strEncOf(self, strings.ToLower(strOf(self)))
 	})
 	vm.cString.define("casecmp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := args[0].(*object.String)
@@ -1466,13 +1472,13 @@ func (vm *VM) bootstrap() {
 		return object.Bool(strings.EqualFold(strOf(self), o.Str()))
 	})
 	vm.cString.define("capitalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(capitalizeStr(strOf(self)))
+		return strEncOf(self, capitalizeStr(strOf(self)))
 	})
 	vm.cString.define("swapcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(swapcaseStr(strOf(self)))
+		return strEncOf(self, swapcaseStr(strOf(self)))
 	})
 	vm.cString.define("reverse", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(reverseStr(strOf(self)))
+		return strEncOf(self, reverseStr(strOf(self)))
 	})
 	succStr := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(succString(strOf(self)))
@@ -1522,13 +1528,13 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cString.define("strip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(strings.Trim(strOf(self), wsCutset))
+		return strEncOf(self, strings.Trim(strOf(self), wsCutset))
 	})
 	vm.cString.define("lstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(strings.TrimLeft(strOf(self), wsCutset))
+		return strEncOf(self, strings.TrimLeft(strOf(self), wsCutset))
 	})
 	vm.cString.define("rstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(strings.TrimRight(strOf(self), wsCutset))
+		return strEncOf(self, strings.TrimRight(strOf(self), wsCutset))
 	})
 	vm.cString.define("chomp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(chompSep(strOf(self), args))
