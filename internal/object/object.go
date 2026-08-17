@@ -237,6 +237,12 @@ func (s *String) TakeFrom(o *String) { s.b, s.view, s.isView = o.b, o.view, o.is
 // carved out of an already-immutable Go string.
 func NewStringView(s string) *String { return &String{view: s, isView: true} }
 
+// NewStringViewEnc is NewStringView carrying an explicit encoding name, for
+// results (e.g. String#split pieces) that must inherit their source's encoding
+// rather than the UTF-8 default. An empty enc is the UTF-8 default, so this is
+// identical to NewStringView there.
+func NewStringViewEnc(s, enc string) *String { return &String{view: s, isView: true, Enc: enc} }
+
 // Bytes returns the string's bytes for READ-ONLY use, without copying. Callers
 // MUST NOT mutate the returned slice; use MutableBytes for in-place mutation.
 // For a view this aliases the underlying immutable Go string, so mutating it
