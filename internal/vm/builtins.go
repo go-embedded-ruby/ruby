@@ -1537,10 +1537,10 @@ func (vm *VM) bootstrap() {
 		return strEncOf(self, strings.TrimRight(strOf(self), wsCutset))
 	})
 	vm.cString.define("chomp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(chompSep(strOf(self), args))
+		return strEncOf(self, chompSep(strOf(self), args))
 	})
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(chopStr(strOf(self)))
+		return strEncOf(self, chopStr(strOf(self)))
 	})
 	vm.cString.define("chars", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		var out []object.Value
@@ -1798,11 +1798,11 @@ func (vm *VM) bootstrap() {
 		return object.NewString(padString(strOf(self), args, 'c'))
 	})
 	trFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewStringBytes([]byte(trString(strOf(self), strArg(args[0]), strArg(args[1]), false)))
+		return strEncOf(self, trString(strOf(self), strArg(args[0]), strArg(args[1]), false))
 	}
 	vm.cString.define("tr", trFn)
 	trSFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewStringBytes([]byte(trString(strOf(self), strArg(args[0]), strArg(args[1]), true)))
+		return strEncOf(self, trString(strOf(self), strArg(args[0]), strArg(args[1]), true))
 	}
 	vm.cString.define("tr_s", trSFn)
 	vm.cString.define("tr!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -1815,13 +1815,13 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(stringCount(strOf(self), args)))
 	})
 	vm.cString.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewStringBytes([]byte(stringDelete(strOf(self), args)))
+		return strEncOf(self, stringDelete(strOf(self), args))
 	})
 	vm.cString.define("delete!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.strBang(self, func(s string) string { return stringDelete(s, args) })
 	})
 	vm.cString.define("squeeze", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewStringBytes([]byte(stringSqueeze(strOf(self), args)))
+		return strEncOf(self, stringSqueeze(strOf(self), args))
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		var res object.Value
