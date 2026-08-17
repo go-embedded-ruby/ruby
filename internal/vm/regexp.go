@@ -597,7 +597,10 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 // splitting once limit-1 fields have been taken (the last field is the unsplit
 // remainder); a limit <= 0 keeps trailing empty fields, while the absent or
 // zero limit strips them.
-func (vm *VM) stringSplit(subject string, args []object.Value) object.Value {
+// stringSplit implements String#split; enc is the receiver's encoding, which
+// every result substring inherits (MRI keeps split pieces in the same encoding
+// as self).
+func (vm *VM) stringSplit(subject, enc string, args []object.Value) object.Value {
 	// A pattern that is neither a String, a Regexp nor nil is converted with
 	// #to_str, and a non-Integer limit with #to_int, exactly as MRI does. Copy the
 	// slice before rewriting the pattern so the caller's arguments are untouched.
@@ -618,10 +621,10 @@ func (vm *VM) stringSplit(subject string, args []object.Value) object.Value {
 		limit = int(coerceInt(vm, args[1]))
 	}
 	if splitOnWhitespace(args) {
-		return splitWhitespace(subject, limit)
+		return splitWhitespace(subject, limit, enc)
 	}
 	re := scanRegexp(args[0])
-	return splitRegexp(re, subject, limit)
+	return splitRegexp(re, subject, limit, enc)
 }
 
 // splitOnWhitespace reports whether the split should use awk-style whitespace
@@ -642,7 +645,7 @@ func splitOnWhitespace(args []object.Value) bool {
 
 // splitWhitespace implements awk-style whitespace splitting with an optional
 // field limit.
-func splitWhitespace(subject string, limit int) object.Value {
+func splitWhitespace(subject string, limit int, enc string) object.Value {
 	var out []object.Value
 	i := 0
 	n := len(subject)
@@ -654,14 +657,14 @@ func splitWhitespace(subject string, limit int) object.Value {
 			break
 		}
 		if limit > 0 && len(out)+1 == limit {
-			out = append(out, object.NewStringView(subject[i:]))
+			out = append(out, object.NewStringViewEnc(subject[i:], enc))
 			return object.NewArrayFromSlice(out)
 		}
 		start := i
 		for i < n && !isASCIISpace(subject[i]) {
 			i++
 		}
-		out = append(out, object.NewStringView(subject[start:i]))
+		out = append(out, object.NewStringViewEnc(subject[start:i], enc))
 	}
 	return object.NewArrayFromSlice(out)
 }
@@ -672,7 +675,7 @@ func isASCIISpace(c byte) bool {
 
 // splitRegexp splits subject on matches of re, interpolating captured groups
 // and honouring the field limit (see stringSplit).
-func splitRegexp(re *Regexp, subject string, limit int) object.Value {
+func splitRegexp(re *Regexp, subject string, limit int, enc string) object.Value {
 	if subject == "" {
 		return object.NewArray()
 	}
@@ -698,8 +701,8 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 				// field (with its captures) and leaves a trailing empty field, which
 				// the post-loop tail append produces — kept unless limit 0 strips it.
 				if mBegin != last {
-					out = append(out, object.NewStringView(subject[last:mBegin]))
-					out = append(out, captureFields(md)...)
+					out = append(out, object.NewStringViewEnc(subject[last:mBegin], enc))
+					out = append(out, captureFields(md, enc)...)
 					pieces++
 					last = mBegin
 				}
@@ -710,21 +713,21 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 				search = mBegin + w
 				continue
 			}
-			out = append(out, object.NewStringView(subject[last:mBegin]))
-			out = append(out, captureFields(md)...)
+			out = append(out, object.NewStringViewEnc(subject[last:mBegin], enc))
+			out = append(out, captureFields(md, enc)...)
 			pieces++
 			last = mBegin
 			_, w := utf8.DecodeRuneInString(subject[mBegin:])
 			search = mBegin + w
 			continue
 		}
-		out = append(out, object.NewStringView(subject[last:mBegin]))
-		out = append(out, captureFields(md)...)
+		out = append(out, object.NewStringViewEnc(subject[last:mBegin], enc))
+		out = append(out, captureFields(md, enc)...)
 		pieces++
 		last = mEnd
 		search = mEnd
 	}
-	out = append(out, object.NewStringView(subject[last:]))
+	out = append(out, object.NewStringViewEnc(subject[last:], enc))
 	if limit == 0 {
 		// Strip trailing empty fields (the default behaviour).
 		for len(out) > 0 {
@@ -739,12 +742,13 @@ func splitRegexp(re *Regexp, subject string, limit int) object.Value {
 }
 
 // captureFields returns the participating capture groups of a split delimiter
-// match, in order. Non-participating groups are dropped (Ruby omits them).
-func captureFields(md *onig.MatchData) []object.Value {
+// match, in order, each in the receiver's encoding enc. Non-participating groups
+// are dropped (Ruby omits them).
+func captureFields(md *onig.MatchData, enc string) []object.Value {
 	var out []object.Value
 	for i := 1; i <= md.NGroups(); i++ {
 		if md.Begin(i) >= 0 {
-			out = append(out, object.NewStringView(md.Str(i)))
+			out = append(out, object.NewStringViewEnc(md.Str(i), enc))
 		}
 	}
 	return out

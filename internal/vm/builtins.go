@@ -1646,7 +1646,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("split", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		res := vm.stringSplit(strOf(self), args)
+		res := vm.stringSplit(strOf(self), self.(*object.String).Enc, args)
 		if blk == nil {
 			return res
 		}
