@@ -2916,11 +2916,19 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("min_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		return vm.arrayByExtreme(self.(*object.Array), blk, "min_by", -1)
+	vm.cArray.define("min_by", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		a := self.(*object.Array)
+		if blk != nil && len(args) > 0 && !object.IsNil(args[0]) {
+			return vm.arrayByExtremeN(a, blk, int(coerceInt(vm, args[0])), -1)
+		}
+		return vm.arrayByExtreme(a, blk, "min_by", -1)
 	})
-	vm.cArray.define("max_by", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		return vm.arrayByExtreme(self.(*object.Array), blk, "max_by", 1)
+	vm.cArray.define("max_by", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		a := self.(*object.Array)
+		if blk != nil && len(args) > 0 && !object.IsNil(args[0]) {
+			return vm.arrayByExtremeN(a, blk, int(coerceInt(vm, args[0])), 1)
+		}
+		return vm.arrayByExtreme(a, blk, "max_by", 1)
 	})
 	vm.cArray.define("each_with_object", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) < 1 {
@@ -5323,6 +5331,38 @@ func (vm *VM) arrayByExtreme(a *object.Array, blk *Proc, name string, want int) 
 		}
 	}
 	return best
+}
+
+// arrayByExtremeN implements the n-argument form of min_by/max_by: it returns an
+// Array of the n elements with the smallest (want=-1) or largest (want=1) block
+// value, ordered by that value (ties keep their original order). n is clamped to
+// the collection size; a negative n raises ArgumentError.
+func (vm *VM) arrayByExtremeN(a *object.Array, blk *Proc, n, want int) object.Value {
+	if n < 0 {
+		raise("ArgumentError", "negative size (%d)", n)
+	}
+	type keyed struct {
+		key, val object.Value
+	}
+	pairs := make([]keyed, len(a.Elems))
+	for i, e := range a.Elems {
+		pairs[i] = keyed{vm.callBlock(blk, []object.Value{e}), e}
+	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		c := sign(vm.spaceship(pairs[i].key, pairs[j].key))
+		if want < 0 {
+			return c < 0 // min_by: ascending key
+		}
+		return c > 0 // max_by: descending key
+	})
+	if n > len(pairs) {
+		n = len(pairs)
+	}
+	out := make([]object.Value, n)
+	for i := 0; i < n; i++ {
+		out[i] = pairs[i].val
+	}
+	return object.NewArrayFromSlice(out)
 }
 
 func sign(n int) int {

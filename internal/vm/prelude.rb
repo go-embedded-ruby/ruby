@@ -190,14 +190,14 @@ module Enumerable
 
   # min_by / max_by / sort_by delegate to Array's native implementations via the
   # pair/element list, so any Enumerable (Hash, Range, Struct, …) gains them.
-  def min_by
-    return enum_for(:min_by) unless block_given?
-    to_a.min_by { |x| yield(x) }
+  def min_by(*args)
+    return enum_for(:min_by, *args) unless block_given?
+    to_a.min_by(*args) { |x| yield(x) }
   end
 
-  def max_by
-    return enum_for(:max_by) unless block_given?
-    to_a.max_by { |x| yield(x) }
+  def max_by(*args)
+    return enum_for(:max_by, *args) unless block_given?
+    to_a.max_by(*args) { |x| yield(x) }
   end
 
   def sort_by
