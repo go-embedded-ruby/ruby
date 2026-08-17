@@ -1542,10 +1542,18 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, chopStr(strOf(self)))
 	})
-	vm.cString.define("chars", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("chars", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		enc := self.(*object.String).Enc // each character keeps the receiver's encoding
+		if blk != nil {
+			// The block form yields each character and returns the receiver (MRI).
+			for _, r := range strOf(self) {
+				vm.callBlock(blk, []object.Value{object.NewStringViewEnc(string(r), enc)})
+			}
+			return self
+		}
 		var out []object.Value
 		for _, r := range strOf(self) {
-			out = append(out, object.NewStringView(string(r)))
+			out = append(out, object.NewStringViewEnc(string(r), enc))
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -1592,8 +1600,9 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "each_char")
 		}
+		enc := self.(*object.String).Enc // each character keeps the receiver's encoding
 		for _, r := range strOf(self) {
-			vm.callBlock(blk, []object.Value{object.NewStringView(string(r))})
+			vm.callBlock(blk, []object.Value{object.NewStringViewEnc(string(r), enc)})
 		}
 		return self
 	})
