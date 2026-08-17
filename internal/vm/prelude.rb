@@ -66,7 +66,11 @@ module Comparable
   def clamp(*args)
     if args.size == 1 && args[0].is_a?(Range)
       range = args[0]
-      raise ArgumentError, "cannot clamp with an exclusive range" if range.exclude_end?
+      # An exclusive range is rejected only when it has a finite end; an endless
+      # `a...` has no end, so its exclusivity is irrelevant and MRI allows it.
+      if range.exclude_end? && !range.end.nil?
+        raise ArgumentError, "cannot clamp with an exclusive range"
+      end
       min = range.begin
       max = range.end
     elsif args.size == 2
@@ -76,11 +80,24 @@ module Comparable
     else
       raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 1..2)"
     end
-    if !min.nil? && !max.nil? && min > max
-      raise ArgumentError, "min argument must be less than or equal to max argument"
+    # Compare through <=> (like MRI), so bounds/self that only define <=> — not the
+    # Comparable `<`/`>` operators — still clamp; a nil comparison is an error.
+    if !min.nil? && !max.nil?
+      c = (min <=> max)
+      if c.nil? || c > 0
+        raise ArgumentError, "min argument must be less than or equal to max argument"
+      end
     end
-    return min if !min.nil? && self < min
-    return max if !max.nil? && self > max
+    unless min.nil?
+      c = (self <=> min)
+      raise ArgumentError, "comparison of #{self.class} with #{min} failed" if c.nil?
+      return min if c < 0
+    end
+    unless max.nil?
+      c = (self <=> max)
+      raise ArgumentError, "comparison of #{self.class} with #{max} failed" if c.nil?
+      return max if c > 0
+    end
     self
   end
 end
