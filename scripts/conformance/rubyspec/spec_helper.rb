@@ -579,7 +579,7 @@ def describe(d, *a, &blk)
 end
 def context(d, *a, &blk); describe(d, *a, &blk); end
 
-def it_behaves_like(desc, meth, obj = nil)
+def it_behaves_like(desc, meth = nil, obj = nil)
   blk = $shared[desc]
   parent = $ctx_stack.last
   if blk.nil?
@@ -588,10 +588,18 @@ def it_behaves_like(desc, meth, obj = nil)
     return
   end
   ctx = SpecContext.new("shared #{desc}", parent)
-  ctx.instance_variable_set(:@method, meth)
-  ctx.instance_variable_set(:@object, obj)
-  # re-assert @method/@object before each example (mspec sets via before)
-  ctx.before(:each) { @method = meth; @object = obj }
+  # meth/obj are optional: a nested `it_should_behave_like :name` (no args) runs a
+  # shared block INSIDE another and must inherit @method/@object from the enclosing
+  # context's before hooks — setting them here (to nil) would clobber the inherited
+  # values. Only install the re-assert when they are actually provided.
+  if meth || obj
+    ctx.instance_variable_set(:@method, meth)
+    ctx.instance_variable_set(:@object, obj)
+    ctx.before(:each) do
+      @method = meth if meth
+      @object = obj if obj
+    end
+  end
   $ctx_stack.push(ctx)
   begin
     ctx.instance_eval(&blk)
@@ -602,7 +610,7 @@ def it_behaves_like(desc, meth, obj = nil)
   end
   ctx.run
 end
-def it_should_behave_like(desc, meth, obj = nil); it_behaves_like(desc, meth, obj); end
+def it_should_behave_like(desc, meth = nil, obj = nil); it_behaves_like(desc, meth, obj); end
 
 # some specs call these at top level
 def before(*a); end

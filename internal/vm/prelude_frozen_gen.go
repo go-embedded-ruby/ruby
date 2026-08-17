@@ -2101,7 +2101,7 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "cycle",
-						Insns: []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 52}, {Op: 25}, {Op: 28, A: 14}, {Op: 5}, {Op: 1}, {Op: 11}, {Op: 30, B: 2}, {Op: 53}, {Op: 26, A: 15}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 26}, {Op: 2}, {Op: 53}, {Op: 26, A: 27}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 28, A: 34}, {Op: 5}, {Op: 30, A: 4, C: 1}, {Op: 26, A: 36}, {Op: 11}, {Op: 30, A: 5, C: 2, Flags: 1}, {Op: 9}, {Op: 2}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 54}, {Op: 27, A: 5}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 52}, {Op: 25}, {Op: 28, A: 14}, {Op: 5}, {Op: 1}, {Op: 11}, {Op: 30, B: 2, C: 1}, {Op: 53}, {Op: 26, A: 15}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 26}, {Op: 2}, {Op: 53}, {Op: 26, A: 27}, {Op: 2}, {Op: 9}, {Op: 11}, {Op: 30, A: 3, Flags: 1}, {Op: 28, A: 34}, {Op: 5}, {Op: 30, A: 4, C: 2}, {Op: 26, A: 36}, {Op: 11}, {Op: 30, A: 5, C: 3, Flags: 1}, {Op: 9}, {Op: 2}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("cycle"),
 						},
@@ -2114,6 +2114,22 @@ func embeddedPrelude() *bytecode.ISeq {
 						NumLocals:   2,
 						Locals:      []string{"n", "a"},
 						Children: []*bytecode.ISeq{
+							&bytecode.ISeq{
+								Name:  "<block>",
+								Insns: []bytecode.Instr{{Op: 5}, {Op: 1}, {Op: 30, B: 1}, {Op: 28, A: 7}, {Op: 5}, {Op: 30, A: 1}, {Op: 26, A: 8}, {Op: 2}, {Op: 12}, {Op: 9}, {Op: 11}, {Op: 30, A: 2, Flags: 1}, {Op: 10}, {Op: 27, A: 18}, {Op: 9}, {Op: 11}, {Op: 1, A: 1}, {Op: 22}, {Op: 28, A: 21}, {Op: 11}, {Op: 26, A: 36}, {Op: 11, B: 1}, {Op: 30, A: 2, Flags: 1}, {Op: 28, A: 27}, {Op: 33, A: 3}, {Op: 34, A: 4}, {Op: 26, A: 36}, {Op: 11, B: 1}, {Op: 1, A: 1}, {Op: 20}, {Op: 28, A: 33}, {Op: 1, A: 1}, {Op: 26, A: 36}, {Op: 11}, {Op: 11, B: 1}, {Op: 15}, {Op: 53}},
+								Consts: []object.Value{
+									object.Symbol("size"),
+									object.IntValue(0),
+								},
+								Names:       []string{"respond_to?", "size", "nil?", "Float", "INFINITY"},
+								NumRequired: 0,
+								SplatIndex:  -1,
+								KwRestSlot:  -1,
+								BlockSlot:   -1,
+								NumLocals:   1,
+								Locals:      []string{"sz"},
+								Super:       "",
+							},
 							&bytecode.ISeq{
 								Name:        "<block>",
 								Insns:       []bytecode.Instr{{Op: 11, A: 1, B: 1}, {Op: 30, C: 1, Flags: 1}, {Op: 53}},
