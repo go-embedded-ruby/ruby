@@ -470,16 +470,18 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "min_by",
-						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, C: 1, Flags: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 14}, {Op: 5}, {Op: 6}, {Op: 1}, {Op: 6, A: 1}, {Op: 61}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62}, {Op: 53}, {Op: 26, A: 15}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 6}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, A: 2, C: 1, Flags: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("min_by"),
 						},
 						Names:       []string{"enum_for", "to_a", "min_by"},
+						Params:      []string{"args"},
 						NumRequired: 0,
-						SplatIndex:  -1,
+						SplatIndex:  0,
 						KwRestSlot:  -1,
 						BlockSlot:   -1,
-						NumLocals:   0,
+						NumLocals:   1,
+						Locals:      []string{"args"},
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "<block>",
@@ -498,16 +500,18 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "max_by",
-						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 8}, {Op: 5}, {Op: 1}, {Op: 30, B: 1}, {Op: 53}, {Op: 26, A: 9}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 30, A: 2, C: 1, Flags: 1}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 52}, {Op: 25}, {Op: 28, A: 14}, {Op: 5}, {Op: 6}, {Op: 1}, {Op: 6, A: 1}, {Op: 61}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62}, {Op: 53}, {Op: 26, A: 15}, {Op: 2}, {Op: 9}, {Op: 5}, {Op: 30, A: 1}, {Op: 6}, {Op: 11}, {Op: 60}, {Op: 61}, {Op: 62, A: 2, C: 1, Flags: 1}, {Op: 53}},
 						Consts: []object.Value{
 							object.Symbol("max_by"),
 						},
 						Names:       []string{"enum_for", "to_a", "max_by"},
+						Params:      []string{"args"},
 						NumRequired: 0,
-						SplatIndex:  -1,
+						SplatIndex:  0,
 						KwRestSlot:  -1,
 						BlockSlot:   -1,
-						NumLocals:   0,
+						NumLocals:   1,
+						Locals:      []string{"args"},
 						Children: []*bytecode.ISeq{
 							&bytecode.ISeq{
 								Name:        "<block>",
