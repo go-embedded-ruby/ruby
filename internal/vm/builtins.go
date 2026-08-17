@@ -3844,6 +3844,11 @@ func (vm *VM) bootstrap() {
 			}
 			return r
 		}
+		// An endless numeric range (m..) steps forever; the block breaks out.
+		if object.IsNil(r.Hi) {
+			vm.numericStepEndless(blk, r.Lo, step)
+			return r
+		}
 		vm.numericStep(blk, r.Lo, r.Hi, step, r.Exclusive)
 		return r
 	})
@@ -6924,6 +6929,37 @@ func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive boo
 			break
 		}
 		vm.callBlock(blk, []object.Value{object.Float(v)})
+	}
+}
+
+// numericStepEndless walks an endless numeric Range#step (m.. with no upper
+// bound): it yields lo, lo+step, lo+2*step, … forever, and the caller's block is
+// expected to break out. Integer begin and Integer step yield Integers; any
+// Float participant yields Floats computed as lo+i*step (not accumulated, so
+// float error does not drift). A non-numeric begin raises the same TypeError as
+// the bounded path.
+func (vm *VM) numericStepEndless(blk *Proc, loV, stepV object.Value) {
+	li, loInt := loV.(object.Integer)
+	si, stepInt := stepV.(object.Integer)
+	if loInt && stepInt {
+		step := int64(si)
+		if step == 0 {
+			raise("ArgumentError", "step can't be 0")
+		}
+		for i := int64(li); ; i += step {
+			vm.callBlock(blk, []object.Value{object.IntValue(i)})
+		}
+	}
+	lo, ok1 := toFloat(loV)
+	step, ok2 := toFloat(stepV)
+	if !ok1 || !ok2 {
+		raise("TypeError", "can't iterate from %s", loV.Inspect())
+	}
+	if step == 0 {
+		raise("ArgumentError", "step can't be 0")
+	}
+	for i := 0; ; i++ {
+		vm.callBlock(blk, []object.Value{object.Float(lo + float64(i)*step)})
 	}
 }
 
