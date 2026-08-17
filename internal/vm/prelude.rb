@@ -826,7 +826,22 @@ module Enumerable
   # cycle(n) yields every element n times (forever when n is nil — use break to
   # stop). With no block it returns an Enumerator (finite only when n is given).
   def cycle(n = nil)
-    return enum_for(:cycle, n) unless block_given?
+    unless block_given?
+      # Give the Enumerator a size so #size does not materialise an endless cycle:
+      # unknown when the receiver has no #size, Float::INFINITY for an unbounded
+      # cycle of a non-empty receiver, else size * n (0 for an empty receiver or a
+      # non-positive n). Mirrors MRI's enum_cycle_size.
+      return enum_for(:cycle, n) do
+        sz = respond_to?(:size) ? size : nil
+        if sz.nil? || sz == 0
+          sz
+        elsif n.nil?
+          Float::INFINITY
+        else
+          n <= 0 ? 0 : sz * n
+        end
+      end
+    end
     a = to_a
     return nil if a.empty?
     if n.nil?
