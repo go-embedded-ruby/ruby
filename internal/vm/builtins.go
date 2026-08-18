@@ -3845,7 +3845,7 @@ func (vm *VM) bootstrap() {
 			return r.Hi
 		}
 		elems := rangeElems(r)
-		n := clampCount(intArg(args[0]), len(elems))
+		n := clampCount(vm.repeatLong(args[0]), len(elems))
 		out := make([]object.Value, n)
 		copy(out, elems[len(elems)-n:])
 		return object.NewArrayFromSlice(out)
@@ -3869,54 +3869,76 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cRange.define("member?", rangeCover)
 	vm.cRange.define("===", rangeCover)
-	vm.cRange.define("min", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cRange.define("min", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		r := self.(*object.Range)
 		if len(args) > 0 { // min(n): the n smallest (the range is ascending)
+			if object.IsNil(r.Lo) {
+				raise("RangeError", "cannot get the minimum of beginless range")
+			}
 			elems := rangeElems(r)
-			n := clampCount(intArg(args[0]), len(elems))
+			n := clampCount(vm.repeatLong(args[0]), len(elems))
 			out := make([]object.Value, n)
 			copy(out, elems[:n])
 			return object.NewArrayFromSlice(out)
 		}
-		lo, _, ok := rangeInts(r)
-		if !ok { // non-integer (e.g. String) range: the first iterated element
-			elems := rangeElems(r)
-			if len(elems) == 0 {
-				return object.NilV
-			}
-			return elems[0]
+		if blk != nil {
+			return vm.rangeExtremeByBlock(r, blk, true)
 		}
-		if rangeSize(r) == 0 {
+		// The minimum is the begin, computed from the endpoints without iterating
+		// (so Float/Time/Comparable ranges work): beginless raises, an empty range
+		// is nil, otherwise the begin.
+		if object.IsNil(r.Lo) {
+			raise("RangeError", "cannot get the minimum of beginless range")
+		}
+		if rangeEmpty(vm, r) {
 			return object.NilV
 		}
-		return object.IntValue(lo)
+		return r.Lo
 	})
-	vm.cRange.define("max", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cRange.define("max", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		r := self.(*object.Range)
 		if len(args) > 0 { // max(n): the n largest, descending
+			if object.IsNil(r.Hi) {
+				raise("RangeError", "cannot get the maximum of endless range")
+			}
 			elems := rangeElems(r)
-			n := clampCount(intArg(args[0]), len(elems))
+			n := clampCount(vm.repeatLong(args[0]), len(elems))
 			out := make([]object.Value, n)
 			for i := 0; i < n; i++ {
 				out[i] = elems[len(elems)-1-i]
 			}
 			return object.NewArrayFromSlice(out)
 		}
-		_, hi, ok := rangeInts(r)
-		if !ok { // non-integer range: the last iterated element
-			elems := rangeElems(r)
-			if len(elems) == 0 {
-				return object.NilV
-			}
-			return elems[len(elems)-1]
+		if blk != nil {
+			return vm.rangeExtremeByBlock(r, blk, false)
 		}
-		if rangeSize(r) == 0 {
+		// The maximum comes from the endpoints without iterating: endless raises, an
+		// empty range is nil, an inclusive range is the end. An exclusive range with
+		// an Integer end is end-1; with any other end it is the last element reached
+		// by #succ (a String range yields it, a Float range raises TypeError).
+		if object.IsNil(r.Hi) {
+			raise("RangeError", "cannot get the maximum of endless range")
+		}
+		if rangeEmpty(vm, r) {
 			return object.NilV
 		}
 		if r.Exclusive {
-			return object.IntValue(hi - 1)
+			// An Integer (or Bignum) end excludes by yielding its predecessor.
+			switch r.Hi.(type) {
+			case object.Integer, *object.Bignum:
+				return vm.send(r.Hi, "-", []object.Value{object.IntValue(1)}, nil)
+			}
+			// A numeric (Float/Rational) end, or a beginless range, has no
+			// predecessor reachable by #succ.
+			if object.IsNil(r.Lo) || isNumericValue(r.Hi) {
+				raise("TypeError", "cannot exclude non Integer end value")
+			}
+			// A non-empty iterable range (e.g. String): the last element before
+			// the excluded end. Emptiness was already handled by rangeEmpty above.
+			elems := rangeElems(r)
+			return elems[len(elems)-1]
 		}
-		return object.IntValue(hi)
+		return r.Hi
 	})
 	rangeSizeFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(rangeSize(self.(*object.Range)))
@@ -7247,6 +7269,34 @@ func rangeCmp(a, b object.Value) (ord int, ok bool) {
 		return strings.Compare(as.Str(), bs.Str()), true
 	}
 	return 0, false
+}
+
+// rangeEmpty reports whether r contains no elements: its begin compares greater
+// than its end (or equal, when the end is excluded). A beginless or endless range
+// is never empty in this sense.
+func rangeEmpty(vm *VM, r *object.Range) bool {
+	if object.IsNil(r.Lo) || object.IsNil(r.Hi) {
+		return false
+	}
+	c := vm.spaceship(r.Lo, r.Hi)
+	return c > 0 || (r.Exclusive && c == 0)
+}
+
+// rangeExtremeByBlock returns the minimum (isMin) or maximum element of r using a
+// comparison block, iterating the range as Enumerable#min/#max do.
+func (vm *VM) rangeExtremeByBlock(r *object.Range, blk *Proc, isMin bool) object.Value {
+	elems := rangeElems(r)
+	if len(elems) == 0 {
+		return object.NilV
+	}
+	best := elems[0]
+	for _, e := range elems[1:] {
+		c, _ := vm.callBlock(blk, []object.Value{e, best}).(object.Integer)
+		if (isMin && c < 0) || (!isMin && c > 0) {
+			best = e
+		}
+	}
+	return best
 }
 
 // rangeInts extracts integer endpoints. ok is false when either endpoint is not
