@@ -489,6 +489,9 @@ type Hash struct {
 	// When set, the strVals fast path is bypassed and hashKey returns the key
 	// object itself so the backing map compares by Go pointer identity.
 	Identity bool
+	// Frozen marks the Hash as frozen (Hash#freeze); an in-place mutator raises
+	// FrozenError. Default false, so ordinary hashes are unaffected.
+	Frozen bool
 }
 
 // strKey is the comparable map key for a Ruby String, distinct from a Symbol of

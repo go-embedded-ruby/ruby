@@ -183,6 +183,8 @@ func (vm *VM) bootstrap() {
 			o.Frozen = true
 		case *object.Array:
 			o.Frozen = true
+		case *object.Hash:
+			o.Frozen = true
 		case *RObject:
 			o.frozen = true
 		case *RClass:
@@ -2986,6 +2988,7 @@ func (vm *VM) bootstrap() {
 	// Reused by Hash.new for both Hash and its subclasses.
 	hashInit := func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h) // re-initialising a frozen hash raises (a fresh one is not frozen)
 		switch {
 		case blk != nil:
 			if len(args) != 0 {
@@ -3089,7 +3092,9 @@ func (vm *VM) bootstrap() {
 		return vm.hashDefault(h, args[0])
 	})
 	vm.cHash.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*object.Hash).Set(args[0], args[1])
+		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
+		h.Set(args[0], args[1])
 		return args[1]
 	})
 	vm.cHash.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -3103,6 +3108,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		h.Clear()
 		return h
 	})
@@ -3195,6 +3201,7 @@ func (vm *VM) bootstrap() {
 	})
 	mergeBang := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		mergeInto(vm, h, args, blk)
 		return h
 	}
@@ -3278,6 +3285,7 @@ func (vm *VM) bootstrap() {
 	// other is coerced with #to_hash (a non-convertible argument raises TypeError).
 	vm.cHash.define("replace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		h.ReplaceWith(vm.toHash(args[0]))
 		return h
 	})
@@ -3286,6 +3294,7 @@ func (vm *VM) bootstrap() {
 	// rehashing existing entries so they stay reachable by their original objects.
 	vm.cHash.define("compare_by_identity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		h.CompareByIdentity()
 		return h
 	})
@@ -3326,6 +3335,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "transform_values!")
 		}
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			h.Set(k, vm.callBlock(blk, []object.Value{v}))
@@ -3341,6 +3351,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "transform_keys!")
 		}
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		// Compute the new keys first, then rebuild in place so a new key never
 		// collides with an old one mid-iteration.
 		keys := append([]object.Value{}, h.Keys...)
@@ -3391,7 +3402,9 @@ func (vm *VM) bootstrap() {
 		return out
 	})
 	vm.cHash.define("store", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*object.Hash).Set(args[0], args[1])
+		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
+		h.Set(args[0], args[1])
 		return args[1]
 	})
 	// default / default= and default_proc / default_proc= manage the value (or
@@ -3411,6 +3424,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("default=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		h.Default = args[0]
 		h.DefaultProc = nil
 		return args[0]
@@ -3424,6 +3438,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("default_proc=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		switch p := args[0].(type) {
 		case object.Nil:
 			h.DefaultProc = nil
@@ -3437,7 +3452,9 @@ func (vm *VM) bootstrap() {
 		return args[0]
 	})
 	vm.cHash.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		v, _ := self.(*object.Hash).Delete(args[0])
+		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
+		v, _ := h.Delete(args[0])
 		return v
 	})
 	hashHasValue := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -3506,6 +3523,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "delete_if")
 		}
+		vm.checkHashFrozen(self.(*object.Hash))
 		hashDeleteWhere(vm, self.(*object.Hash), blk, true)
 		return self
 	})
@@ -3513,6 +3531,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "reject!")
 		}
+		vm.checkHashFrozen(self.(*object.Hash))
 		if hashDeleteWhere(vm, self.(*object.Hash), blk, true) == 0 {
 			return object.NilV
 		}
@@ -3522,6 +3541,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "keep_if")
 		}
+		vm.checkHashFrozen(self.(*object.Hash))
 		hashDeleteWhere(vm, self.(*object.Hash), blk, false)
 		return self
 	})
@@ -3529,6 +3549,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "select!")
 		}
+		vm.checkHashFrozen(self.(*object.Hash))
 		if hashDeleteWhere(vm, self.(*object.Hash), blk, false) == 0 {
 			return object.NilV
 		}
@@ -3631,6 +3652,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("compact!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
 		var drop []object.Value
 		for _, k := range h.Keys {
 			if v, _ := h.Get(k); object.IsNil(v) {
@@ -6590,6 +6612,8 @@ func isFrozen(v object.Value) bool {
 		return x.Frozen
 	case *object.Array:
 		return x.Frozen
+	case *object.Hash:
+		return x.Frozen
 	case *Regexp:
 		return x.frozen
 	case *RObject:
@@ -6605,6 +6629,13 @@ func isFrozen(v object.Value) bool {
 func (vm *VM) checkArrayFrozen(a *object.Array) {
 	if a.Frozen {
 		vm.raiseFrozen(a)
+	}
+}
+
+// checkHashFrozen is the Hash counterpart of checkArrayFrozen.
+func (vm *VM) checkHashFrozen(h *object.Hash) {
+	if h.Frozen {
+		vm.raiseFrozen(h)
 	}
 }
 
