@@ -2377,6 +2377,52 @@ func (vm *VM) bootstrap() {
 		a.Elems = out
 		return a
 	})
+	// #shuffle returns a new array with the elements in random order; #shuffle!
+	// shuffles the receiver in place. A random: keyword supplies a custom RNG.
+	vm.cArray.define("shuffle", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		out := append([]object.Value(nil), a.Elems...)
+		vm.fisherYates(out, vm.rngKwarg(args))
+		return object.NewArrayFromSlice(out)
+	})
+	vm.cArray.define("shuffle!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
+		vm.fisherYates(a.Elems, vm.rngKwarg(args))
+		return a
+	})
+	// #sample returns one random element (nil when empty) or, given a count, an
+	// array of up to count distinct elements. A random: keyword supplies a custom
+	// RNG; the count converts via #to_int and must be non-negative.
+	vm.cArray.define("sample", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		rng := vm.rngKwarg(args)
+		pos := args
+		if trailingKwHash(args) != nil {
+			pos = args[:len(args)-1]
+		}
+		n := len(a.Elems)
+		if len(pos) == 0 {
+			if n == 0 {
+				return object.NilV
+			}
+			return a.Elems[vm.drawIndex(rng, n)]
+		}
+		count := int(vm.repeatLong(pos[0]))
+		if count < 0 {
+			raise("ArgumentError", "negative sample number")
+		}
+		if count > n {
+			count = n
+		}
+		// Partial Fisher-Yates over a copy: the first count slots hold the sample.
+		pool := append([]object.Value(nil), a.Elems...)
+		for i := 0; i < count; i++ {
+			j := i + vm.drawIndex(rng, n-i)
+			pool[i], pool[j] = pool[j], pool[i]
+		}
+		return object.NewArrayFromSlice(pool[:count])
+	})
 	vm.cArray.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -4670,6 +4716,45 @@ func (vm *VM) coerceRangeBounds(r *object.Range) *object.Range {
 		return r
 	}
 	return object.NewRange(lo, hi, r.Exclusive)
+}
+
+// rngKwarg returns the object passed as the random: keyword of a shuffle/sample
+// call, or nil when absent (then the VM's default generator is used).
+func (vm *VM) rngKwarg(args []object.Value) object.Value {
+	if h := trailingKwHash(args); h != nil {
+		if v, ok := h.Get(object.SymVal("random")); ok && !object.IsNil(v) {
+			return v
+		}
+	}
+	return nil
+}
+
+// drawIndex returns a random index in [0, bound) (bound must be >= 1). With rng
+// nil it draws from the VM's default generator; otherwise it calls rng.rand(bound)
+// and interprets the result MRI-style — a Float scales to floor(f*bound); any
+// other value converts via #to_int and must land in [0, bound) or RangeError.
+func (vm *VM) drawIndex(rng object.Value, bound int) int {
+	if rng == nil {
+		return int(vm.defaultRandom.limitedRand(uint64(bound) - 1))
+	}
+	v := vm.send(rng, "rand", []object.Value{object.IntValue(int64(bound))}, nil)
+	if f, ok := v.(object.Float); ok {
+		return int(float64(f) * float64(bound))
+	}
+	idx := vm.repeatLong(v)
+	if idx < 0 || idx >= int64(bound) {
+		raise("RangeError", "random number too big %d", idx)
+	}
+	return int(idx)
+}
+
+// fisherYates shuffles s in place using rng (nil = the default generator),
+// drawing each swap partner from the unshuffled prefix as MRI's Array#shuffle.
+func (vm *VM) fisherYates(s []object.Value, rng object.Value) {
+	for i := len(s) - 1; i >= 1; i-- {
+		j := vm.drawIndex(rng, i+1)
+		s[i], s[j] = s[j], s[i]
+	}
 }
 
 func (vm *VM) arrayArefSpan(a *object.Array, args []object.Value) (start, length int, isSpan, ok bool) {
