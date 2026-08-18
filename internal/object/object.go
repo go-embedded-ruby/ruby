@@ -408,7 +408,10 @@ func isSymLetter(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c 
 
 // Array is a mutable, ordered list. It is a reference type (used as *Array), so
 // aliasing and in-place mutation (push, []=) behave as in Ruby.
-type Array struct{ Elems []Value }
+type Array struct {
+	Elems  []Value
+	Frozen bool
+}
 
 func (a *Array) repr() string {
 	if !ReprEnter(a) {
