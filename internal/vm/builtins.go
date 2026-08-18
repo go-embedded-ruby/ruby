@@ -5414,25 +5414,90 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 // replacement (Ruby's result for an assignment).
 func (vm *VM) stringIndexAssign(s *object.String, args []object.Value) object.Value {
 	vm.checkFrozen(s)
+	rhs := args[len(args)-1]
+	// A String subclass selector is unwrapped to the value it wraps.
+	arg0 := args[0]
+	if u, ok := arg0.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			arg0 = w
+		}
+	}
+	// Regexp form: replace the whole match, or a capture group.
+	if re, ok := arg0.(*Regexp); ok {
+		return vm.stringAssignRegexp(s, re, args[1:len(args)-1], rhs)
+	}
+	// String form: replace the first occurrence of the substring.
+	if sub, ok := arg0.(*object.String); ok && len(args) == 2 {
+		return vm.stringAssignSubstr(s, sub.Str(), rhs)
+	}
+	repl := vm.coerceFormatString(rhs)
 	r := []rune(s.Str())
 	n := len(r)
-	rhs := args[len(args)-1]
-	repl := strArg(rhs)
-	start, length := stringAssignSpan(args, n)
+	start, length := vm.stringAssignSpan(args, n)
 	out := append(append(append([]rune{}, r[:start]...), []rune(repl)...), r[start+length:]...)
 	s.SetBytes([]byte(string(out)))
 	return rhs
 }
 
+// stringAssignRegexp replaces the match (or capture group) of re in s with rhs,
+// setting $~; a missing match, or an out-of-range/non-participating group, raises
+// IndexError (unlike #[], which reads nil).
+func (vm *VM) stringAssignRegexp(s *object.String, re *Regexp, groupArgs []object.Value, rhs object.Value) object.Value {
+	subject := s.Str()
+	md := re.matcher().Match(subject)
+	if md == nil {
+		vm.lastMatch = object.NilV
+		raise("IndexError", "regexp not matched")
+	}
+	m := &MatchData{md: md, subject: subject, re: re}
+	vm.lastMatch = m
+	gi := 0
+	if len(groupArgs) > 0 {
+		gi = int(vm.repeatLong(groupArgs[0]))
+		ng := md.NGroups()
+		if gi < 0 {
+			gi += ng + 1
+			if gi <= 0 { // a negative index cannot reach the whole-match group 0
+				raise("IndexError", "index %d out of regexp", gi)
+			}
+		}
+		if gi > ng {
+			raise("IndexError", "index %d out of regexp", gi)
+		}
+	}
+	bstart, bend := md.Begin(gi), md.End(gi)
+	if bstart < 0 {
+		raise("IndexError", "regexp group %d not matched", gi)
+	}
+	repl := vm.coerceFormatString(rhs)
+	s.SetBytes([]byte(subject[:bstart] + repl + subject[bend:]))
+	return rhs
+}
+
+// stringAssignSubstr replaces the first occurrence of sub in s with rhs, raising
+// IndexError when sub is absent.
+func (vm *VM) stringAssignSubstr(s *object.String, sub string, rhs object.Value) object.Value {
+	subject := s.Str()
+	i := strings.Index(subject, sub)
+	if i < 0 {
+		raise("IndexError", "string not matched")
+	}
+	repl := vm.coerceFormatString(rhs)
+	s.SetBytes([]byte(subject[:i] + repl + subject[i+len(sub):]))
+	return rhs
+}
+
 // stringAssignSpan resolves the [index] / [start, len] / [range] target of a
 // String#[]= into a (start, length) span, raising the IndexError/RangeError
-// Ruby raises for an out-of-range target.
-func stringAssignSpan(args []object.Value, n int) (start, length int) {
+// Ruby raises for an out-of-range target. Indices and Range bounds convert
+// through #to_int.
+func (vm *VM) stringAssignSpan(args []object.Value, n int) (start, length int) {
 	if len(args) == 3 {
-		start = normIndex(intArg(args[0]), n)
-		length = int(intArg(args[1]))
+		idx := vm.repeatLong(args[0]) // #to_int is invoked exactly once
+		start = normIndex(idx, n)
+		length = int(vm.repeatLong(args[1]))
 		if start < 0 || start > n {
-			raise("IndexError", "index %d out of string", intArg(args[0]))
+			raise("IndexError", "index %d out of string", idx)
 		}
 		if length < 0 {
 			raise("IndexError", "negative length %d", length)
@@ -5443,15 +5508,19 @@ func stringAssignSpan(args []object.Value, n int) (start, length int) {
 		return start, length
 	}
 	if rng, ok := args[0].(*object.Range); ok {
-		st, ln, ok := sliceRange(n, rng)
+		st, ln, ok := sliceRange(n, vm.coerceRangeBounds(rng))
 		if !ok {
 			raise("RangeError", "%s out of range", rng.Inspect())
 		}
 		return st, ln
 	}
-	start = normIndex(intArg(args[0]), n)
-	if start < 0 || start >= n {
-		raise("IndexError", "index %d out of string", intArg(args[0]))
+	idx := vm.repeatLong(args[0])
+	start = normIndex(idx, n)
+	if start < 0 || start > n {
+		raise("IndexError", "index %d out of string", idx)
+	}
+	if start == n { // index == length appends: replace no characters
+		return start, 0
 	}
 	return start, 1
 }
