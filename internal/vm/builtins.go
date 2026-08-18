@@ -3521,6 +3521,27 @@ func (vm *VM) bootstrap() {
 		v, _ := h.Delete(args[0])
 		return v
 	})
+	// #shift removes the first inserted pair and returns it as [key, value], or
+	// nil when the hash is empty (ruby 3.4+).
+	vm.cHash.define("shift", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
+		if h.Len() == 0 {
+			return object.NilV
+		}
+		k := h.Keys[0]
+		v, _ := h.Get(k)
+		h.Delete(k)
+		return object.NewArrayFromSlice([]object.Value{k, v})
+	})
+	// #rehash recomputes every key's hash (e.g. after a mutable key changed) and
+	// returns self; keys that have become #eql? collapse to the first inserted.
+	vm.cHash.define("rehash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		vm.checkHashFrozen(h)
+		h.Rehash()
+		return h
+	})
 	hashHasValue := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {

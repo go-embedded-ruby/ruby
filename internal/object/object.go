@@ -568,6 +568,48 @@ func (h *Hash) CompareByIdentity() {
 	}
 }
 
+// storedValue returns the value currently held for a stored key object, using
+// the identity-keyed bucket map for custom keys so it stays correct even when the
+// key's #hash has since changed (unlike value(), which recomputes the hash).
+func (h *Hash) storedValue(k Value) Value {
+	if b, ok := strContentKey(k); ok {
+		if e := h.strVals[string(b)]; e != nil {
+			return e.v
+		}
+	}
+	if cb, ok := h.keyBucket[k]; ok {
+		return h.vals[cb]
+	}
+	// A plain user object is stored under its own interface as the map key
+	// (hashKey's identity fallback). Look that up directly, before recomputing
+	// hashKey — a key that has since gained a custom #hash would otherwise route
+	// to a different, empty bucket and yield a nil value.
+	if v, ok := h.vals[k]; ok {
+		return v
+	}
+	return h.vals[h.hashKey(k)]
+}
+
+// Rehash rebuilds the internal tables from the current key objects, so a key
+// whose #hash changed becomes reachable again and any keys that have since become
+// #eql? collapse to the first inserted (Hash#rehash). Values are recovered
+// through storedValue, then each key is re-inserted in insertion order — which
+// re-invokes the custom-key hook (Ruby #hash) for each key.
+func (h *Hash) Rehash() {
+	keys := h.Keys
+	vals := make([]Value, len(keys))
+	for i, k := range keys {
+		vals[i] = h.storedValue(k)
+	}
+	h.Keys = nil
+	h.vals = map[any]Value{}
+	h.strVals = nil
+	h.keyBucket = nil
+	for i, k := range keys {
+		h.Set(k, vals[i])
+	}
+}
+
 // ReplaceWith discards every entry of h and copies the contents, default value,
 // default proc and compare_by_identity flag of o, backing Hash#replace. The flag
 // is taken from o (so replace both transfers and clears identity mode).
