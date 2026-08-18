@@ -1851,7 +1851,8 @@ func (vm *VM) bootstrap() {
 		return res
 	}
 	vm.cString.define("[]", strIndexFn)
-	vm.cString.define("slice", strIndexFn)
+	// #slice is a true alias of #[] (shares the exact method record).
+	aliasBuiltin(vm.cString, "slice", "[]")
 	vm.cString.define("ord", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := strOf(self)
 		if s == "" {
@@ -5459,12 +5460,29 @@ func stringAssignSpan(args []object.Value, n int) (start, length int) {
 // receiver and returns it (nil when the index does not select anything).
 func (vm *VM) stringSliceBang(s *object.String, args []object.Value) object.Value {
 	vm.checkFrozen(s)
+	// A String subclass instance is unwrapped to its underlying value so a
+	// substring argument dispatches by the string it wraps.
+	arg0 := args[0]
+	if u, ok := arg0.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			arg0 = w
+		}
+	}
+	// Regexp form: delete and return the whole match, or a capture group, of re.
+	if re, ok := arg0.(*Regexp); ok {
+		return vm.stringSliceBangRegexp(s, re, args[1:])
+	}
+	// String form: delete and return the first occurrence of the substring.
+	if sub, ok := arg0.(*object.String); ok && len(args) == 1 {
+		return vm.stringSliceBangSubstr(s, sub.Str())
+	}
 	// A binary (ASCII-8BIT) string slices by BYTES and the removed span stays
-	// binary, matching MRI; a UTF-8 string slices by characters.
+	// binary, matching MRI; a UTF-8 string slices by characters. Index and length
+	// convert through #to_int.
 	if s.IsBinary() {
 		b := s.Bytes()
 		n := len(b)
-		start, length, ok := sliceSpan(args, n)
+		start, length, ok := vm.sliceSpan(args, n)
 		if !ok {
 			return object.NilV
 		}
@@ -5474,23 +5492,74 @@ func (vm *VM) stringSliceBang(s *object.String, args []object.Value) object.Valu
 	}
 	r := []rune(s.Str())
 	n := len(r)
-	start, length, ok := sliceSpan(args, n)
+	start, length, ok := vm.sliceSpan(args, n)
 	if !ok {
 		return object.NilV
 	}
 	removed := string(r[start : start+length])
 	out := append(append([]rune{}, r[:start]...), r[start+length:]...)
 	s.SetBytes([]byte(string(out)))
-	return object.NewString(removed)
+	return object.NewStringBytesEnc([]byte(removed), s.Enc)
+}
+
+// stringSliceBangRegexp deletes and returns the match (or capture group) of re in
+// s, setting $~; it returns nil (with $~ = nil) when there is no match.
+func (vm *VM) stringSliceBangRegexp(s *object.String, re *Regexp, rest []object.Value) object.Value {
+	subject := s.Str()
+	md := re.matcher().Match(subject)
+	if md == nil {
+		vm.lastMatch = object.NilV
+		return object.NilV
+	}
+	m := &MatchData{md: md, subject: subject, re: re}
+	vm.lastMatch = m
+	gi := 0
+	if len(rest) > 0 {
+		// The capture index converts via #to_int; a negative index counts back
+		// from the last group; an out-of-range index yields nil (not IndexError).
+		gi = int(vm.repeatLong(rest[0]))
+		ng := md.NGroups()
+		if gi < 0 {
+			gi += ng + 1
+			if gi <= 0 { // a negative index cannot reach the whole-match group 0
+				return object.NilV
+			}
+		}
+		if gi > ng {
+			return object.NilV
+		}
+	}
+	bstart, bend := md.Begin(gi), md.End(gi)
+	if bstart < 0 {
+		// The capture group is in range but did not participate: slice! returns an
+		// empty string and deletes nothing (unlike #[], which returns nil).
+		return object.NewStringBytesEnc(nil, s.Enc)
+	}
+	removed := subject[bstart:bend]
+	s.SetBytes([]byte(subject[:bstart] + subject[bend:]))
+	return object.NewStringBytesEnc([]byte(removed), s.Enc)
+}
+
+// stringSliceBangSubstr deletes and returns the first occurrence of sub in s, or
+// nil when sub is absent.
+func (vm *VM) stringSliceBangSubstr(s *object.String, sub string) object.Value {
+	subject := s.Str()
+	i := strings.Index(subject, sub)
+	if i < 0 {
+		return object.NilV
+	}
+	s.SetBytes([]byte(subject[:i] + subject[i+len(sub):]))
+	return object.NewStringBytesEnc([]byte(sub), s.Enc)
 }
 
 // sliceSpan resolves the [index] / [start, len] / [range] argument of slice!
 // into a (start, length) span, reporting ok=false for an out-of-range selector
-// (slice! then returns nil rather than raising).
-func sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
+// (slice! then returns nil rather than raising). Integer arguments and Range
+// bounds convert through #to_int.
+func (vm *VM) sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
 	if len(args) == 2 {
-		start = normIndex(intArg(args[0]), n)
-		length = int(intArg(args[1]))
+		start = normIndex(vm.repeatLong(args[0]), n)
+		length = int(vm.repeatLong(args[1]))
 		if start < 0 || start > n || length < 0 {
 			return 0, 0, false
 		}
@@ -5500,9 +5569,9 @@ func sliceSpan(args []object.Value, n int) (start, length int, ok bool) {
 		return start, length, true
 	}
 	if rng, isR := args[0].(*object.Range); isR {
-		return sliceRange(n, rng)
+		return sliceRange(n, vm.coerceRangeBounds(rng))
 	}
-	start = normIndex(intArg(args[0]), n)
+	start = normIndex(vm.repeatLong(args[0]), n)
 	if start < 0 || start >= n {
 		return 0, 0, false
 	}
