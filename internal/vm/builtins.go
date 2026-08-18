@@ -181,6 +181,8 @@ func (vm *VM) bootstrap() {
 		switch o := self.(type) {
 		case *object.String:
 			o.Frozen = true
+		case *object.Array:
+			o.Frozen = true
 		case *RObject:
 			o.frozen = true
 		case *RClass:
@@ -1984,6 +1986,7 @@ func (vm *VM) bootstrap() {
 	arrayInit := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		// Array.new / Array.new(other) / Array.new(n[, val]) / Array.new(n) { |i| }
 		arr := self.(*object.Array)
+		vm.checkArrayFrozen(arr) // re-initialising a frozen array raises (a fresh one is not frozen)
 		if len(args) == 1 {
 			if a, ok := args[0].(*object.Array); ok {
 				arr.Elems = append([]object.Value{}, a.Elems...)
@@ -2078,16 +2081,19 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("fill", arrayFill)
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		a.Elems = append(a.Elems, args...)
 		return a
 	})
 	vm.cArray.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		a.Elems = append(a.Elems, args[0])
 		return a
 	})
 	vm.cArray.define("pop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		if len(args) > 0 { // pop(n) removes and returns the last n as an array
 			n := int(intArg(args[0]))
 			if n < 0 {
@@ -2110,6 +2116,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("shift", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		if len(args) > 0 { // shift(n) removes and returns the first n as an array
 			n := int(intArg(args[0]))
 			if n < 0 {
@@ -2131,6 +2138,7 @@ func (vm *VM) bootstrap() {
 	})
 	unshift := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		a.Elems = append(append([]object.Value{}, args...), a.Elems...)
 		return a
 	}
@@ -2142,6 +2150,7 @@ func (vm *VM) bootstrap() {
 	// With no objects the array is returned unchanged.
 	vm.cArray.define("insert", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
@@ -2172,6 +2181,7 @@ func (vm *VM) bootstrap() {
 		// Remove every element == the argument; return it, or (a block's result,
 		// else nil) when nothing matched.
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		found := false
 		var out []object.Value
 		for _, e := range a.Elems {
@@ -2195,6 +2205,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "delete_if")
 		}
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		var out []object.Value
 		for _, e := range a.Elems {
 			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
@@ -2206,6 +2217,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("concat", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		for _, arg := range args {
 			other, ok := arg.(*object.Array)
 			if !ok {
@@ -2217,11 +2229,13 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		a.Elems = nil
 		return a
 	})
 	vm.cArray.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		other, ok := args[0].(*object.Array)
 		if !ok {
 			raise("TypeError", "no implicit conversion of %s into Array", classNameOf(args[0]))
@@ -2231,6 +2245,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("rotate!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		if n := len(a.Elems); n > 0 {
 			k := 1
 			if len(args) > 0 {
@@ -2298,6 +2313,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		// Range form: a[range] = value.
 		if rng, ok := args[0].(*object.Range); ok {
 			start, length, ok := sliceRange(len(a.Elems), rng)
@@ -2444,6 +2460,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "map!")
 		}
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		for i := range a.Elems {
 			a.Elems[i] = vm.callBlock(blk, []object.Value{a.Elems[i]})
 		}
@@ -2453,20 +2470,25 @@ func (vm *VM) bootstrap() {
 	vm.aliasMethod(vm.cArray, "collect!", "map!")
 	vm.cArray.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		for i, j := 0, len(a.Elems)-1; i < j; i, j = i+1, j-1 {
 			a.Elems[i], a.Elems[j] = a.Elems[j], a.Elems[i]
 		}
 		return self
 	})
 	vm.cArray.define("sort!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		vm.sortSlice(self.(*object.Array).Elems, blk)
+		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
+		vm.sortSlice(a.Elems, blk)
 		return self
 	})
 	selectBang := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "select!")
 		}
-		return arrayKeepIf(vm, self.(*object.Array), blk, true)
+		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
+		return arrayKeepIf(vm, a, blk, true)
 	}
 	vm.cArray.define("select!", selectBang)
 	vm.cArray.define("filter!", selectBang)
@@ -2474,10 +2496,13 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "reject!")
 		}
-		return arrayKeepIf(vm, self.(*object.Array), blk, false)
+		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
+		return arrayKeepIf(vm, a, blk, false)
 	})
 	vm.cArray.define("compact!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		var out []object.Value
 		for _, e := range a.Elems {
 			if _, isNil := e.(object.Nil); !isNil {
@@ -2492,6 +2517,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("uniq!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		out := vm.arrayUniq(a.Elems, blk)
 		if len(out) == len(a.Elems) {
 			return object.NilV
@@ -2521,6 +2547,7 @@ func (vm *VM) bootstrap() {
 			depth = int(intArg(args[0]))
 		}
 		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
 		out, changed := flattenDepthChanged(a.Elems, depth)
 		if !changed {
 			return object.NilV
@@ -5431,6 +5458,7 @@ const maxFillSize = 1 << 40
 // already-filled elements in place (the array is never truncated).
 func arrayFill(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 	a := self.(*object.Array)
+	vm.checkArrayFrozen(a)
 	var item object.Value
 	rest := args
 	if blk == nil {
@@ -6560,6 +6588,8 @@ func isFrozen(v object.Value) bool {
 		return true
 	case *object.String:
 		return x.Frozen
+	case *object.Array:
+		return x.Frozen
 	case *Regexp:
 		return x.frozen
 	case *RObject:
@@ -6568,6 +6598,14 @@ func isFrozen(v object.Value) bool {
 		return x.frozen
 	}
 	return false
+}
+
+// checkArrayFrozen raises FrozenError (with the MRI message and @receiver) when a
+// is frozen, for the in-place Array mutators to call before modifying.
+func (vm *VM) checkArrayFrozen(a *object.Array) {
+	if a.Frozen {
+		vm.raiseFrozen(a)
+	}
 }
 
 // raiseFrozen raises FrozenError for a modification attempt on a frozen object,
