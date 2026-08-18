@@ -2283,35 +2283,99 @@ func (vm *VM) bootstrap() {
 	// #[] and #[]= only read args and copy element *values* into the array (or a
 	// freshly allocated result); they never retain the args slice, so the OpSend
 	// fast path may hand them the live operand-stack region (defineNR).
-	vm.cArray.defineNR("[]", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	arrayAref := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		if rng, ok := args[0].(*object.Range); ok {
-			start, length, ok := sliceRange(len(a.Elems), rng)
-			if !ok {
-				return object.NilV
-			}
-			out := make([]object.Value, length)
-			copy(out, a.Elems[start:start+length])
-			return object.NewArrayFromSlice(out)
+		start, length, isSpan, ok := vm.arrayArefSpan(a, args)
+		if !ok {
+			return object.NilV
 		}
-		if len(args) == 2 { // a[start, len]
-			start := normIndex(intArg(args[0]), len(a.Elems))
-			length := int(intArg(args[1]))
-			if start < 0 || start > len(a.Elems) || length < 0 {
-				return object.NilV
-			}
-			end := start + length
-			if end > len(a.Elems) {
-				end = len(a.Elems)
-			}
-			out := make([]object.Value, end-start)
-			copy(out, a.Elems[start:end])
-			return object.NewArrayFromSlice(out)
+		if !isSpan {
+			return a.Elems[start]
 		}
-		if i, ok := arrayIndex(a, intArg(args[0])); ok {
+		out := make([]object.Value, length)
+		copy(out, a.Elems[start:start+length])
+		return object.NewArrayFromSlice(out)
+	}
+	vm.cArray.defineNR("[]", arrayAref)
+	// #slice is a true alias of #[] (shares the exact method record, so
+	// Array.instance_method(:slice) == Array.instance_method(:[]), as in MRI);
+	// #at takes a single integer index only.
+	aliasBuiltin(vm.cArray, "slice", "[]")
+	vm.cArray.define("at", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		a := self.(*object.Array)
+		if i, ok := arrayIndex(a, vm.repeatLong(args[0])); ok {
 			return a.Elems[i]
 		}
 		return object.NilV
+	})
+	// #slice! removes and returns the addressed element or span (#[] semantics).
+	vm.cArray.define("slice!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
+		start, length, isSpan, ok := vm.arrayArefSpan(a, args)
+		if !ok {
+			return object.NilV
+		}
+		if !isSpan {
+			v := a.Elems[start]
+			a.Elems = append(a.Elems[:start], a.Elems[start+1:]...)
+			return v
+		}
+		out := make([]object.Value, length)
+		copy(out, a.Elems[start:start+length])
+		a.Elems = append(a.Elems[:start], a.Elems[start+length:]...)
+		return object.NewArrayFromSlice(out)
+	})
+	// #delete_at removes and returns the element at index, nil when out of range.
+	vm.cArray.define("delete_at", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
+		i, ok := arrayIndex(a, vm.repeatLong(args[0]))
+		if !ok {
+			return object.NilV
+		}
+		v := a.Elems[i]
+		a.Elems = append(a.Elems[:i], a.Elems[i+1:]...)
+		return v
+	})
+	// #keep_if is #select! that always returns self (not nil when unchanged).
+	vm.cArray.define("keep_if", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "keep_if")
+		}
+		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
+		arrayKeepIf(vm, a, blk, true)
+		return a
+	})
+	// #sort_by! sorts in place by the block's key and returns self.
+	vm.cArray.define("sort_by!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			return enumFor(self, "sort_by!")
+		}
+		a := self.(*object.Array)
+		vm.checkArrayFrozen(a)
+		// Snapshot the elements: the block may mutate the array while keys are
+		// computed, so the sort must read from the fixed original, not live a.Elems.
+		elems := append([]object.Value(nil), a.Elems...)
+		keys := make([]object.Value, len(elems))
+		for i, e := range elems {
+			keys[i] = vm.callBlock(blk, []object.Value{e})
+		}
+		idx := make([]int, len(elems))
+		for i := range idx {
+			idx[i] = i
+		}
+		sort.SliceStable(idx, func(i, j int) bool { return vm.spaceship(keys[idx[i]], keys[idx[j]]) < 0 })
+		out := make([]object.Value, len(idx))
+		for i, k := range idx {
+			out[i] = elems[k]
+		}
+		a.Elems = out
+		return a
 	})
 	vm.cArray.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
@@ -4560,6 +4624,54 @@ func arrayIndex(a *object.Array, i int64) (int, bool) {
 		return 0, false
 	}
 	return int(i), true
+}
+
+// arrayArefSpan resolves Array#[]/#slice/#slice! arguments to a location in a.
+// A lone in-range index yields isSpan=false with length 1; a Range or (start,
+// length) pair yields isSpan=true spanning [start, start+length). ok is false
+// only when the request falls entirely outside the array (aref returns nil) —
+// an empty-but-valid span (e.g. a[1..0]) returns ok=true, isSpan=true, length 0.
+// coerceRangeBounds returns a Range whose endpoints are Integers (or nil for an
+// endless/beginless bound), converting any other endpoint through #to_int as MRI
+// does for slice/aref range arguments. When both endpoints are already Integer
+// or nil the original range is returned unchanged.
+func (vm *VM) coerceRangeBounds(r *object.Range) *object.Range {
+	conv := func(v object.Value) object.Value {
+		switch v.(type) {
+		case object.Nil, object.Integer:
+			return v
+		default:
+			return object.IntValue(vm.repeatLong(v))
+		}
+	}
+	lo, hi := conv(r.Lo), conv(r.Hi)
+	if lo == r.Lo && hi == r.Hi {
+		return r
+	}
+	return object.NewRange(lo, hi, r.Exclusive)
+}
+
+func (vm *VM) arrayArefSpan(a *object.Array, args []object.Value) (start, length int, isSpan, ok bool) {
+	if rng, isR := args[0].(*object.Range); isR {
+		// A non-nil, non-Integer endpoint converts via #to_int (e.g. a[obj..obj]).
+		s, l, r := sliceRange(len(a.Elems), vm.coerceRangeBounds(rng))
+		return s, l, true, r
+	}
+	if len(args) == 2 { // a[start, len] — start and length convert via #to_int.
+		s := normIndex(vm.repeatLong(args[0]), len(a.Elems))
+		l := int(vm.repeatLong(args[1]))
+		if s < 0 || s > len(a.Elems) || l < 0 {
+			return 0, 0, true, false
+		}
+		if s+l > len(a.Elems) {
+			l = len(a.Elems) - s
+		}
+		return s, l, true, true
+	}
+	if i, isok := arrayIndex(a, vm.repeatLong(args[0])); isok {
+		return i, 1, false, true
+	}
+	return 0, 0, false, false
 }
 
 // Kernel#puts/print/p write through the current $stdout (an IOObj), so a host
