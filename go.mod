@@ -12,7 +12,7 @@ require (
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/time v0.0.0-20260727203506-b0e9511265ce
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
-	github.com/go-images/images v0.0.0-20260702213524-ea366b42f216
+	github.com/go-images/images v0.0.0-20260811115337-bc5d586f8e38
 	github.com/go-kramdown/kramdown v0.1.0
 	github.com/go-liquid/liquid v0.1.0
 	github.com/go-mustache/mustache v0.1.0
@@ -123,7 +123,7 @@ require (
 	github.com/go-ruby-openbao/openbao v0.0.0-20260707160751-fcf5670a4d6d
 	github.com/go-ruby-openstack/openstack v0.0.0-20260710213906-771c80a1b6cf
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260704112350-643c5c130c9c
-	github.com/go-ruby-opentype/opentype v0.1.0
+	github.com/go-ruby-opentype/opentype v0.2.0
 	github.com/go-ruby-optparse/optparse v0.0.0-20260629093110-6b69a6b03546
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260630080835-69fcd87e76bf
 	github.com/go-ruby-pagy/pagy v0.0.0-20260707193354-a84fe1d16a86
@@ -192,7 +192,7 @@ require (
 	github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b
 	github.com/go-ruby-widgets/mvvm v0.1.0
 	github.com/go-ruby-widgets/tui v0.1.0
-	github.com/go-ruby-widgets/widgets v0.9.0
+	github.com/go-ruby-widgets/widgets v0.10.4
 	github.com/go-ruby-yaml/yaml v0.0.0-20260706120500-56d458798003
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
@@ -204,7 +204,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260702233442-45013cfc5f26
 	go.etcd.io/etcd/server/v3 v3.6.13
-	golang.org/x/text v0.40.0
+	golang.org/x/text v0.41.0
 )
 
 require (
@@ -278,19 +278,21 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
+	github.com/go-crdt/crdt v0.19.0 // indirect
 	github.com/go-datetime/dates v0.1.0 // indirect
 	github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 // indirect
+	github.com/go-gfx/gfx v0.6.0 // indirect
 	github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9 // indirect
 	github.com/go-hocon/hocon v0.0.0-20260709172937-6d69e3b57178 // indirect
+	github.com/go-iconoir/iconoir v0.2.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.14 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-opentype/bidi v0.2.0 // indirect
-	github.com/go-opentype/fonts v0.4.1 // indirect
-	github.com/go-opentype/opentype v0.5.0 // indirect
-	github.com/go-opentype/shape v0.3.3 // indirect
+	github.com/go-opentype/fonts v0.8.0 // indirect
+	github.com/go-opentype/opentype v0.6.0 // indirect
+	github.com/go-opentype/shape v0.5.0 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e // indirect
 	github.com/go-regexp/engine v0.1.0 // indirect
@@ -301,12 +303,13 @@ require (
 	github.com/go-simd/crc32 v0.0.0-20260703213456-a1976694a16e // indirect
 	github.com/go-simd/hex v0.0.0-20260627054622-d04d429c6aea // indirect
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
+	github.com/go-typeset/bidi v0.3.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/x v0.2.6 // indirect
-	github.com/go-widgets/mvvm v0.3.0 // indirect
-	github.com/go-widgets/painter v0.2.0 // indirect
-	github.com/go-widgets/toolkit v0.114.0 // indirect
-	github.com/go-widgets/tui v0.55.0 // indirect
+	github.com/go-widgets/mvvm v0.8.0 // indirect
+	github.com/go-widgets/painter v0.11.0 // indirect
+	github.com/go-widgets/toolkit v0.203.0 // indirect
+	github.com/go-widgets/tui v0.58.0 // indirect
 	github.com/go-zookeeper/zk v1.0.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -409,15 +412,15 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
-	golang.org/x/image v0.43.0 // indirect
-	golang.org/x/mod v0.37.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
+	golang.org/x/telemetry v0.0.0-20260708182218-49f421fb7959 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.47.0 // indirect
+	golang.org/x/tools v0.48.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/grpc v1.82.0 // indirect
