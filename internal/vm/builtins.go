@@ -4280,12 +4280,24 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cInteger.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		n := intOf(self)
-		if n < 0 || n > 255 {
-			raise("RangeError", "%d out of char range", n)
+	vm.cInteger.define("chr", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if _, big := self.(*object.Bignum); big {
+			raise("RangeError", "bignum out of char range")
 		}
-		return object.NewString(string([]byte{byte(n)}))
+		n := intOf(self)
+		if len(args) == 0 {
+			// No encoding: a 7-bit value is US-ASCII, an 8-bit value is ASCII-8BIT.
+			if n < 0 || n > 255 {
+				raise("RangeError", "%d out of char range", n)
+			}
+			enc := "US-ASCII"
+			if n > 127 {
+				enc = "ASCII-8BIT"
+			}
+			return object.NewStringBytesEnc([]byte{byte(n)}, enc)
+		}
+		enc := vm.encodingName(args[0])
+		return object.NewStringBytesEnc(chrEncode(n, enc), enc)
 	})
 	vm.cInteger.define("upto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) < 1 {
@@ -4600,6 +4612,30 @@ func (vm *VM) hashDefault(h *object.Hash, key object.Value) object.Value {
 }
 
 // intArg coerces an argument used as an array index to int64, or raises.
+// chrEncode encodes the codepoint n as the bytes of a one-character string in
+// encoding enc, backing Integer#chr(enc). UTF-8 accepts any scalar value (a
+// surrogate or out-of-range value raises RangeError); US-ASCII accepts 0..127;
+// ASCII-8BIT and other single-byte encodings accept 0..255.
+func chrEncode(n int64, enc string) []byte {
+	switch enc {
+	case "UTF-8":
+		if n < 0 || n > 0x10FFFF || (n >= 0xD800 && n <= 0xDFFF) {
+			raise("RangeError", "%d out of char range", n)
+		}
+		return []byte(string(rune(n)))
+	case "US-ASCII":
+		if n < 0 || n > 127 {
+			raise("RangeError", "%d out of char range", n)
+		}
+		return []byte{byte(n)}
+	default: // ASCII-8BIT/BINARY and single-byte encodings hold one 0..255 byte
+		if n < 0 || n > 255 {
+			raise("RangeError", "%d out of char range", n)
+		}
+		return []byte{byte(n)}
+	}
+}
+
 func intArg(v object.Value) int64 {
 	if i, ok := v.(object.Integer); ok {
 		return int64(i)
