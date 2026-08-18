@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -322,32 +324,77 @@ func (s *String) ToS() string { return s.Str() }
 func (s *String) Inspect() string {
 	var b strings.Builder
 	b.WriteByte('"')
-	rs := []rune(s.Str())
-	for i := 0; i < len(rs); i++ {
-		switch r := rs[i]; r {
-		case '"':
-			b.WriteString(`\"`)
-		case '\\':
-			b.WriteString(`\\`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\t':
-			b.WriteString(`\t`)
-		case '#':
-			// Escape `#` only before the interpolation sigils, as Ruby does, so the
-			// inspected form round-trips.
-			if i+1 < len(rs) && (rs[i+1] == '{' || rs[i+1] == '$' || rs[i+1] == '@') {
+	data := s.Bytes()
+	// Only a UTF-8 string decodes multibyte runes and uses \u notation; a binary,
+	// US-ASCII or other-encoding string escapes every non-printable byte as \xXX.
+	utf8enc := s.Enc == "" || s.Enc == "UTF-8"
+	for i := 0; i < len(data); {
+		c := data[i]
+		// Named escapes, quote/backslash, and `#` before an interpolation sigil are
+		// escaped regardless of encoding.
+		if esc, ok := inspectNamedEscape[c]; ok {
+			b.WriteString(esc)
+			i++
+			continue
+		}
+		if c == '#' {
+			if i+1 < len(data) && (data[i+1] == '{' || data[i+1] == '$' || data[i+1] == '@') {
 				b.WriteString(`\#`)
 			} else {
 				b.WriteByte('#')
 			}
-		default:
-			b.WriteRune(r)
+			i++
+			continue
 		}
+		if c >= 0x20 && c < 0x7f { // printable ASCII
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		// A valid, printable multibyte character (UTF-8 strings only) is kept; a
+		// non-printable one is escaped \uXXXX / \u{…}.
+		if utf8enc && c >= 0x80 {
+			if r, size := utf8.DecodeRune(data[i:]); r != utf8.RuneError || size > 1 {
+				if inspectEscapesRune(r) {
+					// Every escaped rune (a Cc control or U+2028/U+2029) is in the BMP.
+					fmt.Fprintf(&b, `\u%04X`, r)
+				} else { // MRI keeps format/space/printable characters verbatim
+					b.WriteString(string(r))
+				}
+				i += size
+				continue
+			}
+		}
+		// A control byte (0x00–0x1F, 0x7F) in a UTF-8 string escapes as \uXXXX;
+		// everything else — any byte of a binary string, or an invalid UTF-8 byte —
+		// escapes as \xXX.
+		if utf8enc && c < 0x80 {
+			fmt.Fprintf(&b, `\u%04X`, c)
+		} else {
+			fmt.Fprintf(&b, `\x%02X`, c)
+		}
+		i++
 	}
 	b.WriteByte('"')
 	return b.String()
 }
+
+// inspectNamedEscape maps the control bytes String#inspect renders with a named
+// backslash escape, in every encoding.
+var inspectNamedEscape = map[byte]string{
+	'"': `\"`, '\\': `\\`,
+	0x07: `\a`, 0x08: `\b`, 0x09: `\t`, 0x0a: `\n`,
+	0x0b: `\v`, 0x0c: `\f`, 0x0d: `\r`, 0x1b: `\e`,
+}
+
+// inspectEscapesRune reports whether String#inspect escapes a decoded rune with
+// \u notation rather than emitting it verbatim: MRI escapes control characters
+// (Cc) and the line/paragraph separators (U+2028/U+2029), keeping every other
+// character — including format characters (Cf) and non-ASCII spaces (Zs).
+func inspectEscapesRune(r rune) bool {
+	return unicode.IsControl(r) || r == 0x2028 || r == 0x2029
+}
+
 func (s *String) Truthy() bool { return true }
 
 // Symbol is an interned name (:foo). It is an immutable value type, so equality

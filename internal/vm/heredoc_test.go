@@ -41,8 +41,9 @@ func TestHeredocs(t *testing.T) {
 // exercise the remaining lexer branches.
 func TestHeredocEdgeCases(t *testing.T) {
 	// CRLF line endings: the terminator is recognised despite the trailing \r;
-	// the body keeps its \r, matching MRI.
-	if got := eval(t, "x = <<E\r\nbody\r\nE\r\np x"); got != "\"body\r\\n\"\n" {
+	// the body keeps its \r, which String#inspect renders as the escape \r
+	// (matching MRI 4.0.6).
+	if got := eval(t, "x = <<E\r\nbody\r\nE\r\np x"); got != "\"body\\r\\n\"\n" {
 		t.Errorf("crlf heredoc = %q", got)
 	}
 	// An unterminated heredoc consumes the rest of the input as its body (so
