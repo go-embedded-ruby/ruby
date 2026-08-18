@@ -1583,20 +1583,22 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("byteslice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return byteslice(self.(*object.String), args)
 	})
-	vm.cString.define("lines", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		segs := splitLines(strOf(self))
-		out := make([]object.Value, len(segs))
-		for i, seg := range segs {
-			out[i] = object.NewStringView(seg)
+	vm.cString.define("lines", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		segs := vm.stringLineSegs(self, args)
+		if blk != nil { // with a block #lines yields each line and returns self
+			for _, seg := range segs {
+				vm.callBlock(blk, []object.Value{seg})
+			}
+			return self
 		}
-		return object.NewArrayFromSlice(out)
+		return object.NewArrayFromSlice(segs)
 	})
-	vm.cString.define("each_line", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cString.define("each_line", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_line")
+			return enumFor(self, "each_line", args...)
 		}
-		for _, seg := range splitLines(strOf(self)) {
-			vm.callBlock(blk, []object.Value{object.NewStringView(seg)})
+		for _, seg := range vm.stringLineSegs(self, args) {
+			vm.callBlock(blk, []object.Value{seg})
 		}
 		return self
 	})
@@ -6721,21 +6723,140 @@ func absInt(n int64) int64 {
 	return n
 }
 
-// splitLines splits on "\n", keeping each separator attached to its line (Ruby
-// String#lines semantics). An empty string yields no lines.
-func splitLines(s string) []string {
+// stringLineSegs splits the receiver into line segments for String#lines /
+// #each_line, honouring the optional record separator (default "\n"; nil = the
+// whole string; "" = paragraph mode) and a chomp: keyword that strips the
+// separator from each segment. Every segment keeps the receiver's encoding.
+func (vm *VM) stringLineSegs(self object.Value, args []object.Value) []object.Value {
+	chomp := false
+	pos := args
+	if h := trailingKwHash(args); h != nil {
+		if v, ok := h.Get(object.SymVal("chomp")); ok {
+			chomp = v.Truthy()
+		}
+		pos = args[:len(args)-1]
+	}
+	str := self.(*object.String)
+	s := str.Str()
+	enc := str.Enc
+	var segs []string
+	switch {
+	case s == "":
+		// no segments
+	case len(pos) > 0 && object.IsNil(pos[0]):
+		// A nil separator yields the whole string as a single line.
+		whole := s
+		if chomp {
+			whole = chompSeg(whole, "\n")
+		}
+		segs = []string{whole}
+	default:
+		sep := "\n"
+		if len(pos) > 0 {
+			sep = vm.coerceFormatString(pos[0])
+		}
+		if sep == "" {
+			segs = splitParagraphs(s, chomp)
+		} else {
+			segs = splitLinesSep(s, sep, chomp)
+		}
+	}
+	out := make([]object.Value, len(segs))
+	for i, seg := range segs {
+		out[i] = object.NewStringViewEnc(seg, enc)
+	}
+	return out
+}
+
+// splitLinesSep splits s on the record separator sep (non-empty), keeping the
+// separator attached to each line unless chomp strips it; a trailing chunk with
+// no separator is emitted as-is.
+func splitLinesSep(s, sep string, chomp bool) []string {
 	var out []string
 	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, s[start:i+1])
-			start = i + 1
+	for {
+		i := strings.Index(s[start:], sep)
+		if i < 0 {
+			break
 		}
+		end := start + i + len(sep)
+		seg := s[start:end]
+		if chomp {
+			seg = chompSeg(seg, sep)
+		}
+		out = append(out, seg)
+		start = end
 	}
 	if start < len(s) {
 		out = append(out, s[start:])
 	}
 	return out
+}
+
+// termLen reports the length of the line terminator at s[i] — 2 for "\r\n", 1 for
+// "\n", 0 for anything else — so paragraph mode can treat CRLF and LF uniformly.
+func termLen(s string, i int) int {
+	if i >= len(s) {
+		return 0
+	}
+	if s[i] == '\n' {
+		return 1
+	}
+	if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
+		return 2
+	}
+	return 0
+}
+
+// splitParagraphs implements paragraph mode (a "" separator): each paragraph runs
+// up to and including the first blank line — two consecutive line terminators
+// (each "\n" or "\r\n") — keeping exactly those two; any further terminators are
+// then skipped. Leading blank lines are NOT dropped: they form their own
+// paragraph, matching MRI. chomp strips trailing newlines from each paragraph.
+func splitParagraphs(s string, chomp bool) []string {
+	var out []string
+	i := 0
+	for i < len(s) {
+		start := i
+		segEnd := len(s)
+		next := len(s)
+		for i < len(s) {
+			t := termLen(s, i)
+			if t == 0 {
+				i++
+				continue
+			}
+			if t2 := termLen(s, i+t); t2 > 0 { // a blank line ends the paragraph
+				segEnd = i + t + t2
+				next = segEnd
+				for n := termLen(s, next); n > 0; n = termLen(s, next) {
+					next += n
+				}
+				break
+			}
+			i += t
+		}
+		seg := s[start:segEnd]
+		if chomp {
+			seg = strings.TrimRight(seg, "\r\n")
+		}
+		out = append(out, seg)
+		i = next
+	}
+	return out
+}
+
+// chompSeg removes a trailing record separator from seg. For the default "\n" it
+// strips a trailing "\r\n" or "\n" (as String#lines(chomp: true) does — a lone
+// "\r" is kept); otherwise it strips exactly sep.
+func chompSeg(seg, sep string) string {
+	if sep == "\n" {
+		if strings.HasSuffix(seg, "\r\n") {
+			return seg[:len(seg)-2]
+		}
+		return strings.TrimSuffix(seg, "\n")
+	}
+	return strings.TrimSuffix(seg, sep)
 }
 
 // defineAttrs installs reader and/or writer accessors on cls for each named
