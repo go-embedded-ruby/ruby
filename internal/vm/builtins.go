@@ -1803,14 +1803,14 @@ func (vm *VM) bootstrap() {
 		}
 		return s
 	})
-	vm.cString.define("ljust", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(padString(strOf(self), args, 'l'))
+	vm.cString.define("ljust", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, vm.padString(strOf(self), args, 'l'))
 	})
-	vm.cString.define("rjust", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(padString(strOf(self), args, 'r'))
+	vm.cString.define("rjust", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, vm.padString(strOf(self), args, 'r'))
 	})
-	vm.cString.define("center", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(padString(strOf(self), args, 'c'))
+	vm.cString.define("center", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, vm.padString(strOf(self), args, 'c'))
 	})
 	trFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, trString(strOf(self), strArg(args[0]), strArg(args[1]), false))
@@ -1904,18 +1904,22 @@ func (vm *VM) bootstrap() {
 		s.SetBytes(append(head, s.Bytes()...))
 		return s
 	})
-	vm.cString.define("insert", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("insert", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
+		// The inserted string converts via #to_str before the index is checked (MRI
+		// raises TypeError for an unconvertible value even when the index is out of
+		// range); the index converts via #to_int.
+		ins := []rune(vm.coerceFormatString(args[1]))
 		r := []rune(s.Str())
-		at := int(intArg(args[0]))
+		idx := vm.repeatLong(args[0])
+		at := int(idx)
 		if at < 0 {
 			at += len(r) + 1
 		}
 		if at < 0 || at > len(r) {
-			raise("IndexError", "index %d out of string", intArg(args[0]))
+			raise("IndexError", "index %d out of string", idx)
 		}
-		ins := []rune(strArg(args[1]))
 		out := append(append(append([]rune{}, r[:at]...), ins...), r[at:]...)
 		s.SetBytes([]byte(string(out)))
 		return s
@@ -6838,11 +6842,11 @@ func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
 
 // padString implements ljust/rjust/center ('l'/'r'/'c'): pad s with the pad
 // string (default " ") to a rune width. Extra padding for center goes right.
-func padString(s string, args []object.Value, side byte) string {
-	width := int(intArg(args[0]))
+func (vm *VM) padString(s string, args []object.Value, side byte) string {
+	width := int(vm.repeatLong(args[0])) // #to_int coercion of the width
 	pad := " "
 	if len(args) > 1 {
-		pad = strArg(args[1])
+		pad = vm.coerceFormatString(args[1]) // #to_str coercion of the pad string
 	}
 	if pad == "" {
 		raise("ArgumentError", "zero width padding")
