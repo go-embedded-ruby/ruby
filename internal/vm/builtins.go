@@ -1678,10 +1678,10 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cString.define("include?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(strings.Contains(strOf(self), strArg(args[0])))
+	vm.cString.define("include?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(strings.Contains(strOf(self), vm.strPatternCompat(self, args[0])))
 	})
-	vm.cString.define("start_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("start_with?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := strOf(self)
 		for _, a := range args { // true if any prefix matches; a Regexp must match at offset 0
 			if re, ok := a.(*Regexp); ok {
@@ -1690,17 +1690,17 @@ func (vm *VM) bootstrap() {
 				}
 				continue
 			}
-			if strings.HasPrefix(s, strArg(a)) {
+			if strings.HasPrefix(s, vm.strPatternCompat(self, a)) {
 				return object.True
 			}
 		}
 		return object.False
 	})
-	vm.cString.define("end_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(strings.HasSuffix(strOf(self), strArg(args[0])))
+	vm.cString.define("end_with?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(strings.HasSuffix(strOf(self), vm.strPatternCompat(self, args[0])))
 	})
-	vm.cString.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, needle := strOf(self), strArg(args[0])
+	vm.cString.define("index", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s, needle := strOf(self), vm.strPatternCompat(self, args[0])
 		r := []rune(s)
 		start := 0
 		if len(args) > 1 { // optional character offset (negative counts from the end)
@@ -1722,8 +1722,8 @@ func (vm *VM) bootstrap() {
 		}
 		return object.IntValue(int64(utf8.RuneCountInString(s[:byteStart+byteIdx])))
 	})
-	vm.cString.define("rindex", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		byteIdx := strings.LastIndex(strOf(self), strArg(args[0]))
+	vm.cString.define("rindex", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		byteIdx := strings.LastIndex(strOf(self), vm.strPatternCompat(self, args[0]))
 		if byteIdx < 0 {
 			return object.NilV
 		}
@@ -5456,9 +5456,25 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 // stringIndexAssign backs String#[]=: it replaces the indexed slice (an index,
 // a start+length, or a Range) with the replacement string and returns the
 // replacement (Ruby's result for an assignment).
+// strPatternCompat coerces a search pattern to its Go string; when the pattern is
+// a String whose encoding is incompatible with self.s, it raises
+// Encoding::CompatibilityError, matching MRI.s search methods.
+func (vm *VM) strPatternCompat(self, pat object.Value) string {
+	if ps, ok := pat.(*object.String); ok {
+		vm.combinedEncName(self.(*object.String), ps) // raises if the encodings are incompatible
+		return ps.Str()
+	}
+	return strArg(pat)
+}
+
 func (vm *VM) stringIndexAssign(s *object.String, args []object.Value) object.Value {
 	vm.checkFrozen(s)
 	rhs := args[len(args)-1]
+	// The replacement.s encoding is negotiated with the receiver.s (before any
+	// mutation, so an incompatible pair raises without changing the string).
+	if rs, ok := rhs.(*object.String); ok {
+		s.Enc = vm.combinedEncName(s, rs)
+	}
 	// A String subclass selector is unwrapped to the value it wraps.
 	arg0 := args[0]
 	if u, ok := arg0.(object.KeyUnwrapper); ok {
