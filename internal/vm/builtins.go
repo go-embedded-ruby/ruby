@@ -1878,15 +1878,46 @@ func (vm *VM) bootstrap() {
 	// String mutation (in-place). Every mutator guards against a frozen receiver.
 	// `<<` and concat append each argument: a String contributes its bytes, an
 	// Integer its UTF-8 code point.
-	strConcatFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	strConcatFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
 		for _, a := range args {
-			s.SetBytes(append(s.MutableBytes(), strAppendBytes(a)...))
+			if u, ok := a.(object.KeyUnwrapper); ok { // a String subclass instance
+				if w, wrapped := u.HashUnwrap(); wrapped {
+					a = w
+				}
+			}
+			switch v := a.(type) {
+			case *object.String:
+				s.Enc = vm.combinedEncName(s, v) // negotiate encodings (raises if incompatible)
+				s.SetBytes(append(s.MutableBytes(), v.Bytes()...))
+			case object.Integer:
+				b, enc := codepointAppend(int64(v), s.EncName())
+				s.Enc = enc
+				s.SetBytes(append(s.MutableBytes(), b...))
+			case *object.Bignum:
+				raise("RangeError", "bignum out of char range")
+			default:
+				// Any other argument converts via #to_str (a NoMethodError raised inside
+				// #to_str propagates; a missing #to_str is a TypeError).
+				if vm.respondsToDynamic(a, "to_str") {
+					if rs, ok := vm.send(a, "to_str", nil, nil).(*object.String); ok {
+						s.Enc = vm.combinedEncName(s, rs)
+						s.SetBytes(append(s.MutableBytes(), rs.Bytes()...))
+						continue
+					}
+				}
+				raise("TypeError", "no implicit conversion of %s into String", classNameOf(a))
+			}
 		}
 		return s
 	}
-	vm.cString.define("<<", strConcatFn)
+	vm.cString.define("<<", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) != 1 { // #<< takes exactly one argument (unlike #concat)
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return strConcatFn(vm, self, args, blk)
+	})
 	vm.cString.define("concat", strConcatFn)
 	vm.cString.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
@@ -4663,6 +4694,17 @@ func chrEncode(n int64, enc string) []byte {
 	}
 }
 
+// codepointAppend encodes the codepoint n for `String#<<`/#concat with an Integer
+// argument, returning its bytes and the resulting string encoding. It mirrors
+// chrEncode but, like MRI, promotes a US-ASCII receiver to ASCII-8BIT when the
+// codepoint is 128..255 (an 8-bit byte that US-ASCII cannot hold).
+func codepointAppend(n int64, enc string) ([]byte, string) {
+	if enc == "US-ASCII" && n >= 128 && n <= 255 {
+		return []byte{byte(n)}, "ASCII-8BIT"
+	}
+	return chrEncode(n, enc), enc
+}
+
 func intArg(v object.Value) int64 {
 	if i, ok := v.(object.Integer); ok {
 		return int64(i)
@@ -5300,14 +5342,12 @@ func (vm *VM) checkFrozen(s *object.String) {
 	}
 }
 
-// strAppendBytes is the byte contribution of a `<<`/concat/prepend argument: a
-// String contributes its bytes, an Integer its UTF-8 code point.
+// strAppendBytes is the byte contribution of a #prepend argument: a String
+// contributes its bytes; any other value is a TypeError (unlike #<<, #prepend
+// does not take an Integer codepoint).
 func strAppendBytes(a object.Value) []byte {
-	switch v := a.(type) {
-	case *object.String:
+	if v, ok := a.(*object.String); ok {
 		return v.Bytes()
-	case object.Integer:
-		return []byte(string(rune(v)))
 	}
 	raise("TypeError", "no implicit conversion of %s into String", classNameOf(a))
 	return nil

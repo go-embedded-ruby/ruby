@@ -302,6 +302,18 @@ func (vm *VM) encodingCompatible(a, b object.Value) object.Value {
 	return object.NilV
 }
 
+// combinedEncName returns the encoding name of the string formed by combining a
+// and b (append, concatenation, replacement), following MRI's compatibility
+// negotiation; it raises Encoding::CompatibilityError when the two are
+// incompatible.
+func (vm *VM) combinedEncName(a, b *object.String) string {
+	r := vm.encodingCompatible(a, b)
+	if object.IsNil(r) {
+		raise("Encoding::CompatibilityError", "incompatible character encodings: %s and %s", a.EncName(), b.EncName())
+	}
+	return r.(*encodingObj).name
+}
+
 // encodingArg resolves an Encoding.find / force_encoding argument to a registry
 // object: an Encoding is returned as-is, a String (or #to_str) is looked up
 // case-insensitively, a Symbol (and anything else) raises TypeError, and an
