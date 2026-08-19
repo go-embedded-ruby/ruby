@@ -1765,6 +1765,9 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Float(parseLeadingFloat(strOf(self)))
 	})
+	vm.cString.define("oct", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strOct(strOf(self))
+	})
 	vm.cString.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
@@ -5135,6 +5138,66 @@ func digitValue(c byte) int {
 		return int(c-'A') + 10
 	}
 	return 99
+}
+
+// strOct implements String#oct: it reads a leading integer — optional whitespace,
+// an optional sign, an optional 0x/0b/0o/0d base prefix (default octal), then the
+// digits valid for that base (with the single-underscore separator rule) — and
+// stops at the first invalid character, returning 0 when no digits are present.
+func strOct(s string) object.Value {
+	i, n := 0, len(s)
+	for i < n {
+		switch s[i] {
+		case ' ', '\t', '\n', '\r', '\v', '\f':
+			i++
+			continue
+		}
+		break
+	}
+	neg := false
+	if i < n && (s[i] == '+' || s[i] == '-') {
+		neg = s[i] == '-'
+		i++
+	}
+	base := 8
+	if i+1 < n && s[i] == '0' {
+		switch s[i+1] {
+		case 'x', 'X':
+			base, i = 16, i+2
+		case 'b', 'B':
+			base, i = 2, i+2
+		case 'o', 'O':
+			base, i = 8, i+2
+		case 'd', 'D':
+			base, i = 10, i+2
+		}
+	}
+	var digits []byte
+	prevUnderscore := false
+	for i < n {
+		if s[i] == '_' {
+			if len(digits) == 0 || prevUnderscore {
+				break
+			}
+			prevUnderscore = true
+			i++
+			continue
+		}
+		if digitValue(s[i]) >= base {
+			break
+		}
+		digits = append(digits, s[i])
+		prevUnderscore = false
+		i++
+	}
+	if len(digits) == 0 {
+		return object.IntValue(0)
+	}
+	z, _ := new(big.Int).SetString(string(digits), base)
+	if neg {
+		z.Neg(z)
+	}
+	return object.NormInt(z)
 }
 
 // parseLeadingFloat mimics String#to_f: parse the longest leading float, 0.0 if
