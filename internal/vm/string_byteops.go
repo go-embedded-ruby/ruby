@@ -64,7 +64,9 @@ func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Valu
 		vm.lastMatch = &MatchData{md: md, subject: s, re: needle, byteOff: off}
 		return object.IntValue(int64(off + md.Begin(0)))
 	default:
-		idx := strings.Index(s[off:], stringConv(args[0]).Str())
+		ns := stringConv(args[0])
+		vm.combinedEncName(self, ns) // raises Encoding::CompatibilityError if incompatible
+		idx := strings.Index(s[off:], ns.Str())
 		if idx < 0 {
 			return object.NilV
 		}
@@ -98,7 +100,9 @@ func (vm *VM) strByterindex(self *object.String, args []object.Value) object.Val
 	case *Regexp:
 		return vm.byterindexRegexp(s, needle, off)
 	default:
-		return byterindexString(s, stringConv(args[0]).Str(), off, n)
+		ns := stringConv(args[0])
+		vm.combinedEncName(self, ns) // raises Encoding::CompatibilityError if incompatible
+		return byterindexString(s, ns.Str(), off, n)
 	}
 }
 
