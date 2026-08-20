@@ -790,9 +790,9 @@ func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global b
 // advances past its end. With global=false only the first match is replaced.
 func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) object.Value {
 	var b strings.Builder
-	pos := 0                           // byte cursor into subject (start of the not-yet-emitted tail)
-	search := 0                        // byte cursor where the next search begins
-	last := object.Value(object.NilV)  // $~ after the call: last match, or nil when there is none
+	pos := 0                          // byte cursor into subject (start of the not-yet-emitted tail)
+	search := 0                       // byte cursor where the next search begins
+	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
 		md := re.matcher().Match(subject[search:])
 		if md == nil {

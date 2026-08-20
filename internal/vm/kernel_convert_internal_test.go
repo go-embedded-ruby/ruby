@@ -17,7 +17,7 @@ func TestKernelIntegerConvert(t *testing.T) {
 		{`p Integer(3.9)`, "3"},   // truncates toward zero
 		{`p Integer(-2.5)`, "-2"}, // "
 		{`p Integer(2e100)`, "20000000000000000318057822195198360936721617127890562779562655115495677544340762121626939971713630208"}, // huge Float → Bignum
-		{`p Integer(10**40)`, "10000000000000000000000000000000000000000"},                                                       // Bignum passes through
+		{`p Integer(10**40)`, "10000000000000000000000000000000000000000"},                                                            // Bignum passes through
 		{`p Integer("11")`, "11"},
 		{`p Integer("0xff")`, "255"},   // 0x auto-detected at base 0
 		{`p Integer("0b101")`, "5"},    // 0b
@@ -26,14 +26,14 @@ func TestKernelIntegerConvert(t *testing.T) {
 		{`p Integer("1_1", 10)`, "11"}, // underscore, explicit base
 		{`p Integer("777", 8)`, "511"},
 		{`p Integer("z", 36)`, "35"},
-		{`p Integer("9" * 30)`, "999999999999999999999999999999"},                                     // out of int64 → Bignum
-		{`o = Object.new; def o.to_int; 42; end; p Integer(o)`, "42"},                                 // #to_int
-		{`o = Object.new; def o.to_i; 7; end; p Integer(o)`, "7"},                                     // #to_i
-		{`o = Object.new; def o.to_int; nil; end; def o.to_i; 5; end; p Integer(o)`, "5"},             // to_int nil → to_i
-		{`o = Object.new; def o.to_str; "55"; end; p Integer(o)`, "55"},                               // #to_str parsed
-		{`o = Object.new; def o.to_int; "x"; end; def o.to_i; 9; end; p Integer(o)`, "9"},             // to_int non-Integer → to_i
-		{`p Integer("x", exception: false)`, "nil"},                                                   // exception: false swallows
-		{`p Integer(nil, exception: false)`, "nil"},                                                   // "
+		{`p Integer("9" * 30)`, "999999999999999999999999999999"},                         // out of int64 → Bignum
+		{`o = Object.new; def o.to_int; 42; end; p Integer(o)`, "42"},                     // #to_int
+		{`o = Object.new; def o.to_i; 7; end; p Integer(o)`, "7"},                         // #to_i
+		{`o = Object.new; def o.to_int; nil; end; def o.to_i; 5; end; p Integer(o)`, "5"}, // to_int nil → to_i
+		{`o = Object.new; def o.to_str; "55"; end; p Integer(o)`, "55"},                   // #to_str parsed
+		{`o = Object.new; def o.to_int; "x"; end; def o.to_i; 9; end; p Integer(o)`, "9"}, // to_int non-Integer → to_i
+		{`p Integer("x", exception: false)`, "nil"},                                       // exception: false swallows
+		{`p Integer(nil, exception: false)`, "nil"},                                       // "
 	}
 	for _, c := range values {
 		if got := eval(t, c.src); got != c.want+"\n" {
@@ -74,8 +74,8 @@ func TestKernelFloatConvert(t *testing.T) {
 		{`p Float(5)`, "5.0"},
 		{`p Float(10**40).infinite?`, "nil"}, // finite Bignum → finite Float
 		{`p Float("1.5")`, "1.5"},
-		{`p Float("1_000.5")`, "1000.5"},       // underscores
-		{`p Float("1e400")`, "Infinity"},       // overflow → Infinity, not an error
+		{`p Float("1_000.5")`, "1000.5"},                            // underscores
+		{`p Float("1e400")`, "Infinity"},                            // overflow → Infinity, not an error
 		{`o = Object.new; def o.to_f; 2.5; end; p Float(o)`, "2.5"}, // #to_f
 		{`p Float("x", exception: false)`, "nil"},
 	}

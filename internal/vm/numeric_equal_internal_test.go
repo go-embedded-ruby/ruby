@@ -14,17 +14,17 @@ import "testing"
 // Integer(2e100) == 2e100 wrongly false).
 func TestBignumFloatEqual(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{`p Integer(2e100) == 2e100`, "true"},        // Bignum == exact-value Float
-		{`p 2e100 == Integer(2e100)`, "true"},        // reversed
-		{`p (10**100) == 1e100`, "false"},            // 1e100 rounds, != exact 10**100
-		{`p 1e100 == (10**100)`, "false"},            // reversed
-		{`p (10**100) == (10**100).to_f`, "false"},   // to_f rounds
-		{`p (10**20) == 1e20`, "true"},               // 1e20 is exactly 10**20
-		{`p (2**70) == 2.0**70`, "true"},             // power of two: exact
-		{`p ((10**100) <=> 1e100)`, "-1"},            // spaceship already exact
-		{`p 2 == 2.0`, "true"},                       // small Integer vs Float
-		{`p 2.0 == 2`, "true"},                       // reversed
-		{`p 2.eql?(2.0)`, "false"},                   // eql? does not cross types
+		{`p Integer(2e100) == 2e100`, "true"},         // Bignum == exact-value Float
+		{`p 2e100 == Integer(2e100)`, "true"},         // reversed
+		{`p (10**100) == 1e100`, "false"},             // 1e100 rounds, != exact 10**100
+		{`p 1e100 == (10**100)`, "false"},             // reversed
+		{`p (10**100) == (10**100).to_f`, "false"},    // to_f rounds
+		{`p (10**20) == 1e20`, "true"},                // 1e20 is exactly 10**20
+		{`p (2**70) == 2.0**70`, "true"},              // power of two: exact
+		{`p ((10**100) <=> 1e100)`, "-1"},             // spaceship already exact
+		{`p 2 == 2.0`, "true"},                        // small Integer vs Float
+		{`p 2.0 == 2`, "true"},                        // reversed
+		{`p 2.eql?(2.0)`, "false"},                    // eql? does not cross types
 		{`p (10**100).eql?((10**100).to_f)`, "false"}, // "
 	}
 	for _, c := range cases {

@@ -280,6 +280,21 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 	o := &IOObj{cls: cls, isStr: true, path: p}
 	switch mode[0] {
 	case 'r':
+		if notRegular(p) {
+			// Nothing that is not a regular file can be read whole, because
+			// some of them do not end: File.open("/dev/zero") allocated 83 GB
+			// here and killed a CI runner before the open returned. A character
+			// device, a fifo or a socket opens with an empty buffer instead, so
+			// the position arithmetic works — which is all core/io/seek_spec.rb
+			// asks of /dev/zero — and a read sees end-of-file rather than the
+			// machine going away.
+			//
+			// That reads see nothing is a limit of a buffer-backed IO rather
+			// than a decision: see IOObj, whose whole model is the file's bytes
+			// in memory, and which is that way for stated reasons.
+			o.writable = strings.Contains(mode, "+")
+			break
+		}
 		b, err := os.ReadFile(p)
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
@@ -294,12 +309,24 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
 		}
 	case 'a':
+		if notRegular(p) {
+			o.writable = true // as above: nothing to append to that can be read
+			break
+		}
 		b, _ := os.ReadFile(p) // append to the existing content (or a new file)
 		o.buf, o.pos, o.writable = b, len(b), true
 	default:
 		raise("ArgumentError", "invalid access mode %s", mode)
 	}
 	return o
+}
+
+// notRegular reports whether a path names something other than a regular file —
+// a device, a fifo, a socket. A path that does not exist is not one of those:
+// the caller raises ENOENT for it, and answering true here would swallow that.
+func notRegular(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.Mode().IsRegular()
 }
 
 // ioFlush writes a writable file stream's buffer back to disk.

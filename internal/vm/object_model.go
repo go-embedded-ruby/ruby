@@ -136,7 +136,7 @@ const (
 type attrKind uint8
 
 const (
-	notAttr attrKind = iota
+	notAttr          attrKind = iota
 	attrReaderMethod          // no arguments → parameters []
 	attrWriterMethod          // one required value → parameters [[:req]]
 )
