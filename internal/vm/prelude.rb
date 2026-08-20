@@ -217,6 +217,10 @@ module Enumerable
     to_a.max_by(*args) { |x| yield(x) }
   end
 
+  def sort(&block)
+    to_a.sort(&block)
+  end
+
   def sort_by
     return enum_for(:sort_by) unless block_given?
     to_a.sort_by { |x| yield(x) }

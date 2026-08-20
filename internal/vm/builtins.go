@@ -2905,6 +2905,89 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
+	vm.cArray.define("repeated_combination", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		k := int(vm.repeatLong(args[0]))
+		// No block: a lazy Enumerator that re-reads self when iterated (MRI sees
+		// later mutations of the array), with an explicit combinatorial #size.
+		if blk == nil {
+			return enumForSized(self, "repeated_combination", func(vm *VM) object.Value {
+				kk := int(vm.repeatLong(args[0]))
+				if kk < 0 {
+					return object.IntValue(0)
+				}
+				n := len(self.(*object.Array).Elems)
+				return object.NormInt(binomialBig(n+kk-1, kk))
+			}, args...)
+		}
+		// Work from a defensive copy so a block mutating self mid-iteration can
+		// neither be seen nor panic (MRI generates every tuple up front).
+		elems := append([]object.Value(nil), self.(*object.Array).Elems...)
+		n := len(elems)
+		switch {
+		case k == 0:
+			vm.callBlock(blk, []object.Value{object.NewArray()})
+		case k > 0 && n > 0:
+			idx := make([]int, k) // non-decreasing indices, all starting at 0
+			for {
+				pick := make([]object.Value, k)
+				for i, j := range idx {
+					pick[i] = elems[j]
+				}
+				vm.callBlock(blk, []object.Value{object.NewArrayFromSlice(pick)})
+				i := k - 1
+				for i >= 0 && idx[i] == n-1 {
+					i--
+				}
+				if i < 0 {
+					break
+				}
+				idx[i]++
+				for j := i + 1; j < k; j++ {
+					idx[j] = idx[i] // repetition allowed: keep non-decreasing
+				}
+			}
+		}
+		// k < 0, or k > 0 with an empty receiver, yields nothing.
+		return self
+	})
+	vm.cArray.define("repeated_permutation", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		k := int(vm.repeatLong(args[0]))
+		if blk == nil {
+			return enumForSized(self, "repeated_permutation", func(vm *VM) object.Value {
+				kk := int(vm.repeatLong(args[0]))
+				if kk < 0 {
+					return object.IntValue(0)
+				}
+				n := len(self.(*object.Array).Elems)
+				return object.NormInt(new(big.Int).Exp(big.NewInt(int64(n)), big.NewInt(int64(kk)), nil))
+			}, args...)
+		}
+		elems := append([]object.Value(nil), self.(*object.Array).Elems...)
+		n := len(elems)
+		switch {
+		case k == 0:
+			vm.callBlock(blk, []object.Value{object.NewArray()})
+		case k > 0 && n > 0:
+			idx := make([]int, k) // base-n counter, rightmost digit fastest
+			for {
+				pick := make([]object.Value, k)
+				for i, j := range idx {
+					pick[i] = elems[j]
+				}
+				vm.callBlock(blk, []object.Value{object.NewArrayFromSlice(pick)})
+				i := k - 1
+				for i >= 0 && idx[i] == n-1 {
+					idx[i] = 0
+					i--
+				}
+				if i < 0 {
+					break
+				}
+				idx[i]++
+			}
+		}
+		return self
+	})
 	vm.cArray.define("take_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "take_while")
@@ -6263,6 +6346,25 @@ func (vm *VM) arrayAssoc(a *object.Array, key object.Value, idx int) object.Valu
 		}
 	}
 	return object.NilV
+}
+
+// binomialBig returns the binomial coefficient C(n, k) as a big.Int, backing the
+// #size of Array#repeated_combination. The sole caller only ever passes k >= 0;
+// C(n, 0) is 1 for every n (including the n = -1 that an empty receiver with
+// k = 0 produces), and C(n, k) is 0 once k exceeds n.
+func binomialBig(n, k int) *big.Int {
+	if k == 0 {
+		return big.NewInt(1)
+	}
+	if k > n {
+		return big.NewInt(0)
+	}
+	res := big.NewInt(1)
+	for i := 1; i <= k; i++ {
+		res.Mul(res, big.NewInt(int64(n-k+i)))
+		res.Div(res, big.NewInt(int64(i)))
+	}
+	return res
 }
 
 // isJoinImmediate reports whether a value is a simple immediate whose #to_s
