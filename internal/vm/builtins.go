@@ -4247,12 +4247,18 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cRange.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			return enumFor(self, "step", args...)
-		}
 		step := object.Value(object.IntValue(1))
 		if len(args) > 0 {
 			step = args[0]
+		}
+		if blk == nil {
+			// With a size, for the reason Integer#step has one: without it
+			// Enumerator#size counts by walking, and (1..Float::INFINITY).step
+			// never finishes walking.
+			r := self.(*object.Range)
+			return enumForSized(self, "step", func(*VM) object.Value {
+				return rangeStepSize(r, step)
+			}, args...)
 		}
 		r := self.(*object.Range)
 		// A String range steps by #succ: MRI requires an Integer step and yields
@@ -4737,12 +4743,18 @@ func (vm *VM) bootstrap() {
 		if len(args) < 1 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 		}
-		if blk == nil {
-			return enumFor(self, "step", args...)
-		}
 		step := object.Value(object.IntValue(1))
 		if len(args) > 1 {
 			step = args[1]
+		}
+		if blk == nil {
+			// With a size, so that Enumerator#size can answer without walking
+			// the sequence. Asked to count 1.step(Float::INFINITY) it never
+			// would: it allocated 30.9 GB before a CI runner died under it.
+			limit := args[0]
+			return enumForSized(self, "step", func(*VM) object.Value {
+				return stepSize(self, limit, step)
+			}, args...)
 		}
 		vm.numericStep(blk, self, args[0], step, false)
 		return self
@@ -8094,4 +8106,72 @@ func stepInRange(v, hi, step float64, exclusive bool) bool {
 		return v > hi
 	}
 	return v >= hi-eps
+}
+
+// stepSize is how many values a step sequence yields, worked out rather than
+// counted.
+//
+// Enumerator#size falls back to enumerating whatever cannot tell it its own
+// length, which is right for a sequence that ends and fatal for one that does
+// not: 1.step(Float::INFINITY).size allocated 30.9 GB and took a CI runner with
+// it. MRI computes this and so does this.
+//
+// A step of zero raises, as MRI does — asking the size is enough to get the
+// error, not only running the sequence. An argument that is not a number has no
+// size to give and reports the nil MRI reports for an unknown one.
+func stepSize(from, limit, step object.Value) object.Value {
+	f, okF := toFloat(from)
+	l, okL := toFloat(limit)
+	s, okS := toFloat(step)
+	if !okF || !okL || !okS {
+		return object.NilV
+	}
+	if s == 0 {
+		raise("ArgumentError", "step can't be 0")
+	}
+	if math.IsInf(l, 0) {
+		// Travelling towards an end that never comes yields for ever; away from
+		// it yields nothing at all.
+		if (s > 0) == (l > 0) {
+			return object.Float(math.Inf(1))
+		}
+		return object.IntValue(0)
+	}
+	n := math.Floor((l-f)/s) + 1
+	if math.IsNaN(n) || n < 0 {
+		return object.IntValue(0)
+	}
+	return object.IntValue(int64(n))
+}
+
+// rangeStepSize is how many values a Range#step sequence yields.
+//
+// Only a numeric range can say: a String range steps by #succ and MRI reports
+// nil for its size rather than counting the walk, which is also the honest
+// answer for an endless one.
+func rangeStepSize(r *object.Range, step object.Value) object.Value {
+	if object.IsNil(r.Hi) {
+		if s, ok := toFloat(step); ok && s == 0 {
+			raise("ArgumentError", "step can't be 0")
+		}
+		return object.Float(math.Inf(1)) // endless, so endlessly many
+	}
+	if _, ok := toFloat(r.Lo); !ok {
+		return object.NilV
+	}
+	if _, ok := toFloat(r.Hi); !ok {
+		return object.NilV
+	}
+	hi := r.Hi
+	if r.Exclusive {
+		// An excluded end is one short, which stepSize counts by moving the
+		// limit a whole step back rather than by subtracting one from a count
+		// that may not be integral.
+		if h, ok := toFloat(hi); ok {
+			if s, ok := toFloat(step); ok && s != 0 {
+				hi = object.Float(math.Nextafter(h, h-s))
+			}
+		}
+	}
+	return stepSize(r.Lo, hi, step)
 }
