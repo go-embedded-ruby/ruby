@@ -1699,6 +1699,39 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("end_with?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(strings.HasSuffix(strOf(self), vm.strPatternCompat(self, args[0])))
 	})
+	vm.cString.define("delete_prefix", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		b := s.Bytes()
+		n := vm.deletedAffixLen(s, args[0], false)
+		return object.NewStringBytesEnc(append([]byte(nil), b[n:]...), s.EncName())
+	})
+	vm.cString.define("delete_suffix", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		b := s.Bytes()
+		n := vm.deletedAffixLen(s, args[0], true)
+		return object.NewStringBytesEnc(append([]byte(nil), b[:len(b)-n]...), s.EncName())
+	})
+	vm.cString.define("delete_prefix!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		vm.checkFrozen(s)
+		n := vm.deletedAffixLen(s, args[0], false)
+		if n == 0 {
+			return object.NilV
+		}
+		s.SetBytes(append([]byte(nil), s.Bytes()[n:]...))
+		return s
+	})
+	vm.cString.define("delete_suffix!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		vm.checkFrozen(s)
+		n := vm.deletedAffixLen(s, args[0], true)
+		if n == 0 {
+			return object.NilV
+		}
+		b := s.Bytes()
+		s.SetBytes(append([]byte(nil), b[:len(b)-n]...))
+		return s
+	})
 	vm.cString.define("index", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s, needle := strOf(self), vm.strPatternCompat(self, args[0])
 		r := []rune(s)
@@ -5541,6 +5574,53 @@ func normIndex(i int64, n int) int {
 		return int(i) + n
 	}
 	return int(i)
+}
+
+// affixString coerces a String#delete_prefix/#delete_suffix argument to a
+// String via #to_str, raising TypeError when it is not a String and has no
+// (String-returning) #to_str.
+func (vm *VM) affixString(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return nil
+}
+
+// deletedAffixLen returns how many bytes String#delete_prefix/#delete_suffix
+// should strip (suffix selects the end): the argument is coerced via #to_str,
+// then a broken (invalid-encoding) or empty affix strips nothing, the encodings
+// must be compatible (rb_enc_check, which raises otherwise), and the affix must
+// match at the chosen end on a full byte boundary.
+func (vm *VM) deletedAffixLen(s *object.String, arg object.Value, suffix bool) int {
+	affix := vm.affixString(arg)
+	ab := affix.Bytes()
+	if len(ab) == 0 || !validInEncoding(ab, affix.EncName()) {
+		return 0
+	}
+	vm.combinedEncName(s, affix) // rb_enc_check: raises Encoding::CompatibilityError on incompatibility
+	sb := s.Bytes()
+	if len(sb) < len(ab) {
+		return 0
+	}
+	if suffix {
+		if string(sb[len(sb)-len(ab):]) == string(ab) {
+			return len(ab)
+		}
+		return 0
+	}
+	if string(sb[:len(ab)]) == string(ab) {
+		return len(ab)
+	}
+	return 0
 }
 
 // checkFrozen raises FrozenError when a mutator is applied to a frozen string,
