@@ -2974,6 +2974,12 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
+	vm.cArray.define("assoc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.arrayAssoc(self.(*object.Array), args[0], 0)
+	})
+	vm.cArray.define("rassoc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.arrayAssoc(self.(*object.Array), args[0], 1)
+	})
 	vm.cArray.define("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		n := int(intArg(args[0]))
@@ -6231,6 +6237,32 @@ func asArray(v object.Value) (*object.Array, bool) {
 		}
 	}
 	return nil, false
+}
+
+// arrayAssoc backs Array#assoc (idx 0) and Array#rassoc (idx 1): it returns the
+// first contained array whose element at idx == key. Genuine arrays are used
+// as-is (identity preserved); other elements are coerced via #to_ary, and any
+// element that is neither an array nor #to_ary-convertible (or is too short) is
+// skipped. Returns nil when nothing matches.
+func (vm *VM) arrayAssoc(a *object.Array, key object.Value, idx int) object.Value {
+	for _, e := range a.Elems {
+		arr, ok := asArray(e)
+		if !ok {
+			if !vm.respondsToDynamic(e, "to_ary") {
+				continue
+			}
+			if arr, ok = asArray(vm.send(e, "to_ary", nil, nil)); !ok {
+				continue
+			}
+		}
+		if len(arr.Elems) <= idx {
+			continue
+		}
+		if vm.binaryOp(bytecode.OpEq, arr.Elems[idx], key).Truthy() {
+			return arr
+		}
+	}
+	return object.NilV
 }
 
 // isJoinImmediate reports whether a value is a simple immediate whose #to_s
