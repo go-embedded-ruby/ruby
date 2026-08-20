@@ -17,7 +17,7 @@ import "io/fs"
 // owned? is true when the file's uid is the process's effective uid;
 // grpowned? when its gid is the effective gid or a supplementary group. Both
 // need real POSIX ids (hasSys), so a FileInfo without a *Stat_t reports false.
-func statOwned(s *FileStat) bool   { return s.sys.hasSys && int64(statEuid()) == s.sys.uid }
+func statOwned(s *FileStat) bool    { return s.sys.hasSys && int64(statEuid()) == s.sys.uid }
 func statGrpowned(s *FileStat) bool { return s.sys.hasSys && inGroupFor(s.sys.gid, statEgid()) }
 
 // statPerm returns the permission bits world_readable?/world_writable? test.

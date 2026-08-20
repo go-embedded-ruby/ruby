@@ -22,8 +22,8 @@ func TestBasicObjectCoreMethods(t *testing.T) {
 		// A bare BasicObject has the core methods (no Kernel).
 		{`b = BasicObject.new; p b.__send__(:equal?, b)`, "true"},
 		{`b = BasicObject.new; p b.__send__(:==, b)`, "true"},
-		{`b = BasicObject.new; p b.__send__(:!)`, "false"},           // b is truthy
-		{`b = BasicObject.new; p b.__send__(:!=, b)`, "false"},       // == self
+		{`b = BasicObject.new; p b.__send__(:!)`, "false"},     // b is truthy
+		{`b = BasicObject.new; p b.__send__(:!=, b)`, "false"}, // == self
 		{`b = BasicObject.new; p b.__send__(:__id__).class`, "Integer"},
 		// ! and != as dispatched methods (Object inherits them from BasicObject).
 		{`p 1.send(:!)`, "false"},
