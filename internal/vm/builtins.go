@@ -2907,10 +2907,32 @@ func (vm *VM) bootstrap() {
 			}
 			lists = append(lists, la.Elems)
 		}
-		// Cartesian product, last list varying fastest (MRI order).
-		out := []object.Value{object.NewArray()}
+		// How long the result will be, worked out before any of it is built.
+		//
+		// MRI does this and raises rather than trying: the product of eleven
+		// hundred-element arrays has 10^22 entries, which overflows the length
+		// of an array long before it exhausts memory. Without the check the
+		// interpreter simply allocates until the machine dies — which is what
+		// it did to a CI runner, taking the ruby/spec ratchet lane with it.
+		// core/array/product_spec.rb calls this "an unreasonable number of
+		// products" and expects RangeError.
+		total := 1
 		for _, list := range lists {
-			var next []object.Value
+			if len(list) == 0 {
+				total = 0 // an empty list makes an empty product
+				break
+			}
+			if total > math.MaxInt/len(list) {
+				raise("RangeError", "too big to product")
+			}
+			total *= len(list)
+		}
+
+		// Cartesian product, last list varying fastest (MRI order).
+		out := make([]object.Value, 0, 1)
+		out = append(out, object.NewArray())
+		for _, list := range lists {
+			next := make([]object.Value, 0, len(out)*len(list))
 			for _, prefix := range out {
 				for _, e := range list {
 					row := append(append([]object.Value{}, prefix.(*object.Array).Elems...), e)
