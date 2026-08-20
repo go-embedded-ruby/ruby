@@ -23,6 +23,12 @@ jobs:
         with:
           go-version: stable
       - run: go version
+      - name: What the runner has to start with
+        run: |
+          echo "== cpus ==";   nproc
+          echo "== memory =="; free -m
+          echo "== disk ==";   df -h /
+
       - name: Run ruby/spec ratchet
         shell: bash
         # Raise the per-file timeout above run.sh's 25s default: a few heavy spec
@@ -31,4 +37,42 @@ jobs:
         # below-floor REGRESSION. 60s absorbs that jitter without masking real hangs.
         env:
           TIMEOUT: "60"
-        run: scripts/conformance/rubyspec/run.sh
+        # The lane dies intermittently with "the runner has received a
+        # shutdown signal", three to five minutes into a sweep that takes nine
+        # when it finishes. This watcher is what found out why, on its first
+        # failure: memory available fell from 9325 MB to 269 MB in thirty
+        # seconds, and the runner was gone two seconds later.
+        #
+        # Four spec files ask for tens of gigabytes on their own — measured over
+        # the whole corpus, peak resident set per file:
+        #
+        #   core/io/seek_spec.rb                            63.9 GB
+        #   language/singleton_class_spec.rb                59.4 GB
+        #   core/array/product_spec.rb                      37.4 GB
+        #   core/enumerator/arithmetic_sequence/size_spec.rb 34.8 GB
+        #   core/enumerator/lazy/flat_map_spec.rb           17.6 GB
+        #   core/string/multiply_spec.rb                     6.2 GB
+        #
+        # against a runner with sixteen. Whichever of them the sweep reaches
+        # first takes the machine with it, which is why the failure moves around
+        # and why it sometimes finishes. They are runaway allocations in rbgo —
+        # MRI does not materialise any of these — and they are worth fixing
+        # there rather than worked around here.
+        #
+        # The watcher stays: it is what will say so next time, instead of the
+        # shrug this lane produced for three days.
+        run: |
+          ( while true; do
+              printf '[watch %s] disk_avail=%s mem_avail=%sMB load=%s\n' \
+                "$(date -u +%H:%M:%S)" \
+                "$(df -h --output=avail / | tail -1 | tr -d ' ')" \
+                "$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)" \
+                "$(cut -d' ' -f1-3 /proc/loadavg)"
+              sleep 30
+            done ) &
+          watcher=$!
+          # The child sleep outlives a kill of the subshell alone, and the runner
+          # would then report an orphan it had to terminate — noise in the very
+          # log this exists to make readable.
+          trap 'pkill -P "$watcher" 2>/dev/null; kill "$watcher" 2>/dev/null; true' EXIT
+          scripts/conformance/rubyspec/run.sh
