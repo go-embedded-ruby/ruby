@@ -2136,6 +2136,23 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
+	// Class.try_convert: coerce the argument to the class via its implicit
+	// conversion method, or return nil when it does not respond.
+	for _, tc := range []struct {
+		cls  *RClass
+		meth string
+	}{
+		{vm.cArray, "to_ary"},
+		{vm.cHash, "to_hash"},
+		{vm.cString, "to_str"},
+		{vm.cInteger, "to_int"},
+	} {
+		cls, meth := tc.cls, tc.meth
+		cls.smethods["try_convert"] = &Method{name: "try_convert", owner: cls,
+			native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+				return vm.tryConvert(args[0], cls, meth)
+			}}
+	}
 	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if len(args) == 0 {
@@ -6386,6 +6403,30 @@ func (vm *VM) arrayAssoc(a *object.Array, key object.Value, idx int) object.Valu
 			return arr
 		}
 	}
+	return object.NilV
+}
+
+// tryConvert backs Array/Hash/String/Integer.try_convert: an object that is
+// already a kind of target is returned unchanged; otherwise, if it responds to
+// the named conversion method (#to_ary/#to_hash/#to_str/#to_int), that is called
+// and its result must be nil or a kind of target — anything else is a TypeError.
+// An object that does not respond to the conversion method yields nil.
+func (vm *VM) tryConvert(obj object.Value, target *RClass, meth string) object.Value {
+	if classIsA(vm.classOf(obj), target) {
+		return obj
+	}
+	if !vm.respondsToDynamic(obj, meth) {
+		return object.NilV
+	}
+	res := vm.send(obj, meth, nil, nil)
+	if object.IsNil(res) {
+		return object.NilV
+	}
+	if classIsA(vm.classOf(res), target) {
+		return res
+	}
+	raise("TypeError", "can't convert %s into %s (%s#%s gives %s)",
+		vm.classOf(obj).name, target.name, vm.classOf(obj).name, meth, vm.classOf(res).name)
 	return object.NilV
 }
 
