@@ -2095,6 +2095,47 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
+	vm.cArray.define("fetch", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
+		a := self.(*object.Array).Elems
+		v, orig, ok := vm.arrayFetchAt(a, args[0])
+		if ok {
+			return v
+		}
+		if blk != nil {
+			// The block supersedes a default argument. MRI also warns "block
+			// supersedes default value argument" on that clash, but rbgo's
+			// Kernel#warn currently writes to stdout rather than stderr, so
+			// emitting it here would pollute program output (and the only spec
+			// asserting it uses the stderr-based `complain` matcher); omit it
+			// until warn is routed to stderr. MRI passes the ORIGINAL index
+			// object to the block, not the #to_int result.
+			return vm.callBlock(blk, []object.Value{args[0]})
+		}
+		if len(args) == 2 {
+			return args[1]
+		}
+		raise("IndexError", "index %d outside of array bounds: %d...%d", orig, -int64(len(a)), int64(len(a)))
+		return object.NilV
+	})
+	vm.cArray.define("fetch_values", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		a := self.(*object.Array).Elems
+		out := make([]object.Value, 0, len(args))
+		for _, idxV := range args {
+			v, orig, ok := vm.arrayFetchAt(a, idxV)
+			switch {
+			case ok:
+				out = append(out, v)
+			case blk != nil:
+				out = append(out, vm.callBlock(blk, []object.Value{idxV}))
+			default:
+				raise("IndexError", "index %d outside of array bounds: %d...%d", orig, -int64(len(a)), int64(len(a)))
+			}
+		}
+		return object.NewArrayFromSlice(out)
+	})
 	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if len(args) == 0 {
@@ -6346,6 +6387,22 @@ func (vm *VM) arrayAssoc(a *object.Array, key object.Value, idx int) object.Valu
 		}
 	}
 	return object.NilV
+}
+
+// arrayFetchAt resolves one index for Array#fetch/#fetch_values: it coerces idxV
+// via #to_int (NUM2LONG), counts a negative index back from the end, and returns
+// the element with ok=true when in bounds. orig is the (pre-adjustment) coerced
+// index, reused for the out-of-bounds IndexError message so #to_int runs once.
+func (vm *VM) arrayFetchAt(a []object.Value, idxV object.Value) (elem object.Value, orig int64, ok bool) {
+	orig = vm.repeatLong(idxV)
+	idx := orig
+	if idx < 0 {
+		idx += int64(len(a))
+	}
+	if idx >= 0 && idx < int64(len(a)) {
+		return a[idx], orig, true
+	}
+	return object.NilV, orig, false
 }
 
 // binomialBig returns the binomial coefficient C(n, k) as a big.Int, backing the
