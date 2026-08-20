@@ -301,6 +301,13 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		// object is taken through #to_int), and an out-of-range count raises rather
 		// than looping/overflowing, so route it through stringTimes rather than the
 		// VM-less stringOp path.
+		// String#+ needs a live VM too: it negotiates encodings (raising
+		// Encoding::CompatibilityError on an incompatible pair) and converts a
+		// non-String argument via #to_str, so route it through stringPlus rather
+		// than the VM-less stringOp path.
+		if as, ok := a.(*object.String); ok && op == bytecode.OpAdd {
+			return vm.stringPlus(as, b)
+		}
 		if as, ok := a.(*object.String); ok && op == bytecode.OpMul {
 			return vm.stringTimes(as, b)
 		}
@@ -603,6 +610,26 @@ func (vm *VM) repeatLong(b object.Value) int64 {
 	return 0
 }
 
+// stringPlus implements String#+ (concatenation): a non-String argument is
+// converted via #to_str (a NoMethodError raised inside #to_str propagates; a
+// missing or non-String result is a TypeError), the two encodings are negotiated
+// (raising Encoding::CompatibilityError when incompatible), and a fresh String in
+// the resulting encoding is returned.
+func (vm *VM) stringPlus(a *object.String, b object.Value) object.Value {
+	bs, ok := b.(*object.String)
+	if !ok {
+		if vm.respondsToDynamic(b, "to_str") {
+			bs, ok = vm.send(b, "to_str", nil, nil).(*object.String)
+		}
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into String", classNameOf(b))
+		}
+	}
+	enc := vm.combinedEncName(a, bs)
+	out := append(append([]byte{}, a.Bytes()...), bs.Bytes()...)
+	return object.NewStringBytesEnc(out, enc)
+}
+
 // stringTimes implements String#* (repeat) with MRI's coercion and bounds: the
 // count is converted like NUM2LONG (see repeatLong), a negative count raises
 // ArgumentError, and a result whose byte length would overflow a machine long
@@ -630,17 +657,10 @@ func (vm *VM) stringTimes(a *object.String, b object.Value) object.Value {
 
 func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 	switch op {
-	case bytecode.OpAdd:
-		bs, ok := b.(*object.String)
-		if !ok {
-			raise("TypeError", "no implicit conversion of %s into String", b.Inspect())
-		}
-		out := make([]byte, 0, len(a.Bytes())+len(bs.Bytes()))
-		out = append(append(out, a.Bytes()...), bs.Bytes()...)
-		return object.NewStringBytesEnc(out, a.Enc) // result keeps the receiver's encoding
-	// String#* (OpMul) is intercepted in binaryOp and routed through stringTimes
-	// (NUM2LONG coercion + bounds checks), and String % args (OpMod) through the
-	// VM-aware formatter, so neither reaches this VM-less path.
+	// String#+ (OpAdd), #* (OpMul) and % (OpMod) are all intercepted in binaryOp
+	// and routed through the VM-aware stringPlus / stringTimes / formatString (for
+	// #to_str coercion, encoding negotiation and NUM2LONG bounds), so none reaches
+	// this VM-less path.
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
 		bs, ok := b.(*object.String)
 		if !ok {
