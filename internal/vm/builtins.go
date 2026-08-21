@@ -2112,6 +2112,26 @@ func (vm *VM) bootstrap() {
 			}
 			return arr
 		}}
+	// Range.new(begin, end, exclude_end = false) builds a Range value (the third
+	// argument is exclusive when truthy, as MRI treats any non-false value). The
+	// endpoints must be comparable with #<=> unless one is nil (a beginless or
+	// endless range); a nil comparison is a "bad value for range" and an exception
+	// from #<=> propagates. A subclass instance wraps the range.
+	vm.cRange.smethods["new"] = &Method{name: "new", owner: vm.cRange,
+		native: func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) < 2 || len(args) > 3 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 2..3)", len(args))
+			}
+			lo, hi := args[0], args[1]
+			if !object.IsNil(lo) && !object.IsNil(hi) && object.IsNil(vm.send(lo, "<=>", []object.Value{hi}, nil)) {
+				raise("ArgumentError", "bad value for range")
+			}
+			r := object.NewRange(lo, hi, len(args) == 3 && args[2].Truthy())
+			if recv := self.(*RClass); recv != vm.cRange {
+				return &RObject{class: recv, ivars: map[string]object.Value{}, builtin: r}
+			}
+			return r
+		}}
 	vm.cArray.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array).Elems
 		out := make([]object.Value, len(args))
