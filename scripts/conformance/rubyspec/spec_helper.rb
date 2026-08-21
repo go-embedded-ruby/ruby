@@ -438,12 +438,18 @@ def platform_is(*args)
   match = args.empty? ? true : args.any? { |s| PLATFORMS.include?(s) }
   match &&= (opts[:wordsize].nil? || opts[:wordsize] == WORDSIZE)
   match &&= (opts[:pointer_size].nil? || opts[:pointer_size] == WORDSIZE / 8)
+  # c_long_size guards examples written for a platform whose C long is narrower
+  # than this one. Ignoring it ran a 32-bit-only example here:
+  # "abc" * ((2 ** 31) - 1) is a legal six-gigabyte string on a 64-bit platform,
+  # and building it took 6.5 GB out of a CI runner's sixteen.
+  match &&= (opts[:c_long_size].nil? || opts[:c_long_size] == WORDSIZE)
   yield if match && block_given?
 end
 def platform_is_not(*args)
   opts = args.last.is_a?(Hash) ? args.pop : {}
   match = args.any? { |s| PLATFORMS.include?(s) }
   match ||= (!opts[:wordsize].nil? && opts[:wordsize] != WORDSIZE)
+  match ||= (!opts[:c_long_size].nil? && opts[:c_long_size] != WORDSIZE)
   yield if !match && block_given?
 end
 def not_supported_on(*engines); yield if !engines.include?(:ruby) && block_given?; end
