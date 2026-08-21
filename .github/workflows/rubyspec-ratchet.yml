@@ -71,8 +71,24 @@ jobs:
               sleep 30
             done ) &
           watcher=$!
-          # The child sleep outlives a kill of the subshell alone, and the runner
-          # would then report an orphan it had to terminate — noise in the very
-          # log this exists to make readable.
-          trap 'pkill -P "$watcher" 2>/dev/null; kill "$watcher" 2>/dev/null; true' EXIT
+          # Take the ratchet's own status and exit with it, rather than leaving
+          # the step's status to whatever tearing down the watcher leaves behind.
+          #
+          # An EXIT trap did the tearing down at first, and twice reported a run
+          # that had printed "ruby/spec ratchet OK" as a failure — "Terminated",
+          # then exit 1. The race is not reproducible on demand, which is reason
+          # to remove the mechanism rather than to keep timing it: the status is
+          # captured before anything is killed, and handed back explicitly.
+          #
+          # The child sleep outlives a kill of the subshell alone, so it is
+          # killed first and waited for — otherwise the runner reports an orphan
+          # it had to terminate, which is noise in the very log this exists to
+          # make readable.
+          set +e
           scripts/conformance/rubyspec/run.sh
+          status=$?
+          set -e
+          pkill -P "$watcher" 2>/dev/null || true
+          kill "$watcher" 2>/dev/null || true
+          wait "$watcher" 2>/dev/null || true
+          exit "$status"
