@@ -3241,11 +3241,27 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := self.(*object.Array).Elems
+		sa := self.(*object.Array)
 		b, ok := args[0].(*object.Array)
 		if !ok {
 			return object.NilV
 		}
+		// Comparing a pair already being compared means the two descend into
+		// each other, and MRI calls that equal at this point rather than going
+		// round again: `a = []; a << a; a <=> a` is 0. The path is on the VM
+		// because the recursion leaves here and comes back through #<=>
+		// dispatch, so it cannot be carried in an argument.
+		pair := [2]*object.Array{sa, b}
+		if vm.cmpPath[pair] {
+			return object.IntValue(0)
+		}
+		if vm.cmpPath == nil {
+			vm.cmpPath = map[[2]*object.Array]bool{}
+		}
+		vm.cmpPath[pair] = true
+		defer delete(vm.cmpPath, pair)
+
+		a := sa.Elems
 		be := b.Elems
 		n := len(a)
 		if len(be) < n {
@@ -6278,10 +6294,22 @@ func sign(n int) int {
 
 // flattenDepth flattens nested arrays up to depth levels (-1 = fully).
 func flattenDepth(elems []object.Value, depth int) []object.Value {
+	return flattenDepthIn(elems, depth, map[*object.Array]bool{})
+}
+
+// flattenDepthIn is flattenDepth remembering the arrays it is inside. A
+// self-referential array has no flattening, and MRI says so rather than trying:
+// without this it allocated 1.1 GB and did not finish.
+func flattenDepthIn(elems []object.Value, depth int, path map[*object.Array]bool) []object.Value {
 	var out []object.Value
 	for _, e := range elems {
 		if sub, ok := e.(*object.Array); ok && depth != 0 {
-			out = append(out, flattenDepth(sub.Elems, depth-1)...)
+			if path[sub] {
+				raise("ArgumentError", "tried to flatten recursive array")
+			}
+			path[sub] = true
+			out = append(out, flattenDepthIn(sub.Elems, depth-1, path)...)
+			delete(path, sub)
 		} else {
 			out = append(out, e)
 		}
@@ -6294,12 +6322,23 @@ func flattenDepth(elems []object.Value, depth int) []object.Value {
 // bang form must return nil when nothing changed, which length alone cannot
 // detect (e.g. [[1]] flattens to [1] with the same length).
 func flattenDepthChanged(elems []object.Value, depth int) ([]object.Value, bool) {
+	return flattenDepthChangedIn(elems, depth, map[*object.Array]bool{})
+}
+
+// flattenDepthChangedIn carries the same cycle path flattenDepthIn does: the
+// bang form must refuse a self-referential array for the same reason.
+func flattenDepthChangedIn(elems []object.Value, depth int, path map[*object.Array]bool) ([]object.Value, bool) {
 	var out []object.Value
 	changed := false
 	for _, e := range elems {
 		if sub, ok := e.(*object.Array); ok && depth != 0 {
+			if path[sub] {
+				raise("ArgumentError", "tried to flatten recursive array")
+			}
 			changed = true
-			inner, _ := flattenDepthChanged(sub.Elems, depth-1)
+			path[sub] = true
+			inner, _ := flattenDepthChangedIn(sub.Elems, depth-1, path)
+			delete(path, sub)
 			out = append(out, inner...)
 		} else {
 			out = append(out, e)
