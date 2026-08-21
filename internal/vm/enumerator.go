@@ -55,6 +55,19 @@ type Enumerator struct {
 	finish   object.Value
 }
 
+// forPull returns a copy of e carrying its definition and none of its
+// external-iteration state, so it can be pulled from the start without moving
+// the cursor #next and #peek share. See lazySource, which drives a lazy pipeline
+// with it.
+func (e *Enumerator) forPull() *Enumerator {
+	c := *e
+	c.extFiber, c.peekArgs, c.peeked, c.ended, c.finish = nil, nil, false, false, nil
+	if e.isChain {
+		c.entered = make([]bool, len(e.chainParts))
+	}
+	return &c
+}
+
 // yielder is the object passed to an Enumerator.new generator block; `y << v`
 // and `y.yield(v)` feed values into the enumeration.
 type yielder struct{ emit func(args []object.Value) }
