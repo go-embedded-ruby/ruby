@@ -541,7 +541,14 @@ func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
 // terminates the lexParent chain) is not part of nesting.
 func (vm *VM) nesting(cref *RClass) []*RClass {
 	var out []*RClass
-	for c := cref; c != nil && c != vm.cObject; c = c.lexParent {
+	// Stop at a repeat as well as at the top. A lexical chain is shaped by the
+	// program — `class << o; CONST = self; end` used to make a class its own
+	// lexical parent — and a walk with no end here allocated 17 GB and killed a
+	// CI runner. ancestors has guarded itself this way all along; this is the
+	// same guard for the same reason.
+	seen := map[*RClass]bool{}
+	for c := cref; c != nil && c != vm.cObject && !seen[c]; c = c.lexParent {
+		seen[c] = true
 		out = append(out, c)
 	}
 	return out

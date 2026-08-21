@@ -2108,8 +2108,33 @@ func (vm *VM) assignConstIn(scope *RClass, name string, val object.Value) {
 	if c, ok := val.(*RClass); ok && !c.named {
 		c.name = scopedNameFor(scope, name)
 		c.named = true
-		c.lexParent = lexParentFor(scope)
+		// Unless that would make c its own lexical ancestor. A class bound to a
+		// constant inside its own body does exactly that:
+		//
+		//	class << o
+		//	  CONST = self    # scope and value are the same singleton class
+		//	end
+		//
+		// Nothing is nested in itself, and recording it that way made every
+		// later bare-constant read in that scope walk a ring.
+		if p := lexParentFor(scope); !lexicallyReaches(p, c) {
+			c.lexParent = p
+		}
 	}
+}
+
+// lexicallyReaches reports whether c is start or one of its lexical parents —
+// i.e. whether recording start as c's lexParent would close a ring. It stops at
+// a repeat, because it may be asked about a chain that already has one.
+func lexicallyReaches(start, c *RClass) bool {
+	seen := map[*RClass]bool{}
+	for s := start; s != nil && !seen[s]; s = s.lexParent {
+		if s == c {
+			return true
+		}
+		seen[s] = true
+	}
+	return false
 }
 
 // lexParentFor returns the lexParent to record for a class/module nested in
