@@ -197,7 +197,8 @@ func (vm *VM) registerLazy() {
 // lazySource returns a restartable pull function over le.recv: successive calls
 // yield the next source element until it returns ok=false. Integer ranges
 // (including endless and Float::INFINITY-bounded) are walked by counter; arrays
-// by index; any other Enumerable is materialised once (so it must be finite).
+// by index; an Enumerator is pulled one element at a time; any other Enumerable
+// is materialised once (so it must be finite).
 func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
 	switch r := recv.(type) {
 	case *object.Array:
@@ -240,6 +241,28 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
 			v := object.IntValue(i)
 			i++
 			return v, true
+		}
+	case *Enumerator:
+		// Pulled, not materialised. An Enumerator.new { |y| loop { … } } has no
+		// end, and reading it whole allocated 8 GB before a CI runner died under
+		// it — which is the thing lazy exists to avoid, defeated at its source.
+		//
+		// The machinery is the one behind Enumerator#next: a fiber that runs the
+		// source until it yields and then suspends. Pulling runs on a copy of the
+		// enumerator, because each terminal operation starts from the beginning —
+		// e.lazy.first(3) twice gives the same three values, and would not if
+		// this advanced the caller's own cursor.
+		//
+		// A pipeline that stops early leaves that fiber suspended, exactly as an
+		// abandoned #next does. That is the existing behaviour of external
+		// iteration here, not something this adds.
+		pull := r.forPull()
+		return func() (object.Value, bool) {
+			w, ok := vm.enumPull(pull)
+			if !ok {
+				return object.NilVal(), false
+			}
+			return enumPack(w.Elems), true
 		}
 	default:
 		buf := vm.collectEach(recv)
