@@ -195,6 +195,12 @@ func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
 
 // VM holds I/O, the top-level self, the constant table and the base classes.
 type VM struct {
+	// cmpPath holds the array pairs Array#<=> is in the middle of comparing, so
+	// two arrays that descend into each other are called equal instead of
+	// compared for ever. It lives here rather than in an argument because the
+	// recursion leaves the builtin and returns through method dispatch.
+	cmpPath map[[2]*object.Array]bool
+
 	out    io.Writer
 	errOut io.Writer // $stderr/STDERR sink; defaults to out (no separate stream)
 	main   object.Value
@@ -664,11 +670,7 @@ func (vm *VM) hashValue(self object.Value) int64 {
 		// while Complex(1, 2) and Complex(2, 1) differ.
 		return vm.hashValue(v.Re)*31 + vm.hashValue(v.Im)
 	case *object.Array:
-		h := int64(1)
-		for _, e := range v.Elems {
-			h = h*31 + vm.hashValue(e)
-		}
-		return h
+		return vm.hashArray(v, nil)
 	}
 	// Any other object: a stable hash derived from its identity id.
 	return vm.refID(self)
@@ -687,6 +689,33 @@ func (vm *VM) refID(self object.Value) int64 {
 	vm.nextObjID += 8
 	vm.objIDs[self] = vm.nextObjID
 	return vm.nextObjID
+}
+
+// hashArray folds an array's elements, remembering the arrays it is inside so a
+// self-referential one ends instead of recursing for ever. `a = []; a << a`
+// costs 1.1 GB and never finishes without this; MRI answers an Integer.
+//
+// A repeat contributes a constant rather than being skipped, so [a] and [a, a]
+// still differ.
+func (vm *VM) hashArray(a *object.Array, path map[*object.Array]bool) int64 {
+	if path[a] {
+		return 9
+	}
+	if path == nil {
+		path = map[*object.Array]bool{}
+	}
+	path[a] = true
+	defer delete(path, a)
+
+	h := int64(1)
+	for _, e := range a.Elems {
+		if sub, ok := e.(*object.Array); ok {
+			h = h*31 + vm.hashArray(sub, path)
+			continue
+		}
+		h = h*31 + vm.hashValue(e)
+	}
+	return h
 }
 
 // fnvHash is a small deterministic 64-bit FNV-1a fold over s, used by hashValue
