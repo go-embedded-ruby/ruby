@@ -4773,23 +4773,20 @@ func (vm *VM) bootstrap() {
 	})
 
 	vm.cInteger.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		if len(args) < 1 {
-			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
-		}
-		step := object.Value(object.IntValue(1))
-		if len(args) > 1 {
-			step = args[1]
-		}
+		limit, step := vm.stepBounds(args)
 		if blk == nil {
 			// With a size, so that Enumerator#size can answer without walking
 			// the sequence. Asked to count 1.step(Float::INFINITY) it never
 			// would: it allocated 30.9 GB before a CI runner died under it.
-			limit := args[0]
 			return enumForSized(self, "step", func(*VM) object.Value {
 				return stepSize(self, limit, step)
 			}, args...)
 		}
-		vm.numericStep(blk, self, args[0], step, false)
+		if object.IsNil(limit) {
+			vm.numericStepEndless(blk, self, step)
+		} else {
+			vm.numericStep(blk, self, limit, step, false)
+		}
 		return self
 	})
 
@@ -8076,11 +8073,68 @@ func succString(s string) string {
 	return string(append([]byte{1}, b...)) // every byte overflowed
 }
 
+// stepBounds resolves the (limit, step) pair of a Numeric#step call from its
+// positional and keyword (to:/by:) arguments. A limit or step may be given
+// positionally or by keyword but not both; an unknown keyword, a zero step, or
+// more than two positional arguments raises ArgumentError. A missing limit is
+// returned as nil, meaning an unbounded (endless) walk.
+func (vm *VM) stepBounds(args []object.Value) (limit, step object.Value) {
+	limit, step = object.NilV, object.Value(object.IntValue(1))
+	pos := args
+	kw := trailingKwHash(args)
+	if kw != nil {
+		pos = args[:len(args)-1]
+	}
+	if len(pos) > 2 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
+	}
+	hasLimit, hasStep := false, false
+	if len(pos) >= 1 {
+		limit, hasLimit = pos[0], true
+	}
+	if len(pos) >= 2 {
+		step, hasStep = pos[1], true
+	}
+	if kw != nil {
+		if v, ok := kw.Get(object.SymVal("to")); ok {
+			if hasLimit {
+				raise("ArgumentError", "to is given twice")
+			}
+			limit = v
+		}
+		if v, ok := kw.Get(object.SymVal("by")); ok {
+			if hasStep {
+				raise("ArgumentError", "step is given twice")
+			}
+			step = v
+		}
+		for _, k := range kw.Keys {
+			if k != object.SymVal("to") && k != object.SymVal("by") {
+				raise("ArgumentError", "unknown keyword: %s", k.Inspect())
+			}
+		}
+	}
+	if valueEqual(step, object.IntValue(0)) {
+		raise("ArgumentError", "step can't be 0")
+	}
+	return limit, step
+}
+
+// rejectStringStep raises ArgumentError for a String step, which MRI refuses to
+// coerce even when it looks numeric ("2" / "0.1" / "1/3"); other types fall
+// through to the normal numeric handling.
+func rejectStringStep(step object.Value) {
+	if _, ok := step.(*object.String); ok {
+		raise("ArgumentError", "step can't be String")
+	}
+}
+
 // numericStep drives Range#step / Integer#step: it yields lo, lo+step, … toward
 // hi (inclusive unless exclusive). All-integer operands keep an integer walk
 // (exact); any float operand switches to an index-based float walk that avoids
 // accumulated drift. step must be non-zero.
 func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive bool) {
+	rejectStringStep(stepV)
 	li, loInt := loV.(object.Integer)
 	hi2, hiInt := hiV.(object.Integer)
 	si, stepInt := stepV.(object.Integer)
@@ -8104,6 +8158,15 @@ func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive boo
 	if step == 0 {
 		raise("ArgumentError", "step can't be 0")
 	}
+	if math.IsInf(step, 0) {
+		// An infinite step yields only the start value (once), when it lies on the
+		// correct side of the limit — the next term would be another Infinity, so
+		// walking lo+i*step would loop forever otherwise.
+		if stepInRange(lo, hi, step, exclusive) {
+			vm.callBlock(blk, []object.Value{object.Float(lo)})
+		}
+		return
+	}
 	for i := 0; ; i++ {
 		v := lo + float64(i)*step
 		if !stepInRange(v, hi, step, exclusive) {
@@ -8120,6 +8183,7 @@ func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive boo
 // float error does not drift). A non-numeric begin raises the same TypeError as
 // the bounded path.
 func (vm *VM) numericStepEndless(blk *Proc, loV, stepV object.Value) {
+	rejectStringStep(stepV)
 	li, loInt := loV.(object.Integer)
 	si, stepInt := stepV.(object.Integer)
 	if loInt && stepInt {
@@ -8173,14 +8237,29 @@ func stepInRange(v, hi, step float64, exclusive bool) bool {
 // error, not only running the sequence. An argument that is not a number has no
 // size to give and reports the nil MRI reports for an unknown one.
 func stepSize(from, limit, step object.Value) object.Value {
+	rejectStringStep(step)
 	f, okF := toFloat(from)
-	l, okL := toFloat(limit)
 	s, okS := toFloat(step)
-	if !okF || !okL || !okS {
+	if !okF || !okS {
 		return object.NilV
 	}
 	if s == 0 {
 		raise("ArgumentError", "step can't be 0")
+	}
+	if object.IsNil(limit) {
+		return object.Float(math.Inf(1)) // unbounded: endlessly many
+	}
+	l, okL := toFloat(limit)
+	if !okL {
+		return object.NilV
+	}
+	if math.IsInf(s, 0) {
+		// An infinite step yields at most the start value: just it when it lies on
+		// the correct side of the limit, nothing when it is already past it.
+		if (s > 0 && f <= l) || (s < 0 && f >= l) {
+			return object.IntValue(1)
+		}
+		return object.IntValue(0)
 	}
 	if math.IsInf(l, 0) {
 		// Travelling towards an end that never comes yields for ever; away from

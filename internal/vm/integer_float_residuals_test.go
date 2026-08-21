@@ -170,9 +170,10 @@ func TestFloatStep(t *testing.T) {
 		}
 	}
 
-	// No limit argument raises ArgumentError; a zero step raises ArgumentError.
-	if err := runErr(t, `1.0.step { |x| }`); err == nil || !strings.Contains(err.Error(), "given 0") {
-		t.Errorf("step (no args) err=%v, want ArgumentError", err)
+	// A bare Float#step (no limit) is an unbounded walk of step 1.0, matching MRI
+	// (the block must break out); a zero step raises ArgumentError.
+	if got := eval(t, `r = []; 1.0.step { |x| r << x; break if x >= 3.0 }; p r`); got != "[1.0, 2.0, 3.0]\n" {
+		t.Errorf("bare Float#step got=%q, want unbounded walk", got)
 	}
 	if err := runErr(t, `1.0.step(3.0, 0) { |x| }`); err == nil || !strings.Contains(err.Error(), "step can't be 0") {
 		t.Errorf("step(3.0,0) err=%v, want step can't be 0", err)

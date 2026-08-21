@@ -503,17 +503,17 @@ func (vm *VM) registerNumericEdges() {
 	// Float#step — mirrors Integer#step: an enumerator without a block, otherwise
 	// walking [self, limit] by step (default 1), yielding Floats via numericStep.
 	vm.cFloat.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		if len(args) < 1 {
-			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
-		}
+		limit, step := vm.stepBounds(args)
 		if blk == nil {
-			return enumFor(self, "step", args...)
+			return enumForSized(self, "step", func(*VM) object.Value {
+				return stepSize(self, limit, step)
+			}, args...)
 		}
-		step := object.Value(object.IntValue(1))
-		if len(args) > 1 {
-			step = args[1]
+		if object.IsNil(limit) {
+			vm.numericStepEndless(blk, self, step)
+		} else {
+			vm.numericStep(blk, self, limit, step, false)
 		}
-		vm.numericStep(blk, self, args[0], step, false)
 		return self
 	})
 }

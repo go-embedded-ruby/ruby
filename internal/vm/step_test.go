@@ -34,13 +34,13 @@ func TestStep(t *testing.T) {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}
-	// step can't be 0 (integer and float walks) raises ArgumentError; missing the
-	// Integer#step limit raises too; a String range with a 0 step raises the same.
+	// step can't be 0 (integer and float walks) raises ArgumentError; a String
+	// range with a 0 step raises the same. (A bare Integer#step with no limit is
+	// an unbounded walk, not an error — see TestNumericStepKeyword.)
 	for _, src := range []string{
 		`(1..3).step(0) { |x| }`,
 		`(1.0..3.0).step(0.0) { |x| }`,
 		`1.step(3, 0) { |x| }`,
-		`1.step`,
 		`("a".."c").step(0) { |x| }`,
 	} {
 		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
