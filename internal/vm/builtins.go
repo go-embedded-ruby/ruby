@@ -4477,6 +4477,20 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cInteger.define("coerce", coerce)
 	vm.cFloat.define("coerce", coerce)
+	// Numeric#coerce is the generic fallback a Numeric subclass inherits (Integer
+	// and Float override it above): same-class returns [other, self] unchanged,
+	// otherwise both are converted with Kernel#Float (dispatching #to_f, and
+	// raising the same errors as Float() for a non-convertible value). self is
+	// converted first, matching MRI's error precedence.
+	cNumeric.define("coerce", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		other := args[0]
+		if vm.classOf(self) == vm.classOf(other) {
+			return object.NewArray(other, self)
+		}
+		sf := vm.send(vm.main, "Float", []object.Value{self}, nil)
+		of := vm.send(vm.main, "Float", []object.Value{other}, nil)
+		return object.NewArray(of, sf)
+	})
 	vm.cInteger.define("bit_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
 		if n < 0 {
