@@ -82,6 +82,27 @@ func (vm *VM) registerModuleExtras() {
 		return setVis(vm, self, args, visProtected)
 	})
 
+	// Top-level private/public/protected: at the top level self is `main`, whose
+	// default definee is Object, so `private :foo` (or a bare `private`) sets the
+	// visibility of Object's instance methods — exactly as MRI's main object does
+	// through private methods on its singleton class.
+	if sc, ok := vm.ensureSingleton(vm.main); ok {
+		for _, tv := range []struct {
+			name string
+			vis  visibility
+		}{
+			{"private", visPrivate},
+			{"public", visPublic},
+			{"protected", visProtected},
+		} {
+			vis := tv.vis
+			sc.methods[tv.name] = &Method{name: tv.name, owner: sc,
+				native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+					return setVis(vm, vm.cObject, args, vis)
+				}}
+		}
+	}
+
 	// private_class_method / public_class_method: set the named class methods'
 	// visibility — including ones inherited from Class such as `new`, recorded as a
 	// per-receiver override (see setClassMethodVisibility). Returns self, as MRI.
