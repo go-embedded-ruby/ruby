@@ -2186,6 +2186,17 @@ func (vm *VM) bootstrap() {
 				return vm.tryConvert(args[0], cls, meth)
 			}}
 	}
+	// Integer.sqrt(n) returns the integer square root ⌊√n⌋; the argument is
+	// coerced via #to_int (so a Float or #to_int object works) and a negative
+	// value raises Math::DomainError.
+	vm.cInteger.smethods["sqrt"] = &Method{name: "sqrt", owner: vm.cInteger,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			n := vm.integerArg(args[0])
+			if n.Sign() < 0 {
+				raise("Math::DomainError", "Numerical argument is out of domain - \"isqrt\"")
+			}
+			return object.NormInt(new(big.Int).Sqrt(n))
+		}}
 	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if len(args) == 0 {
@@ -6518,6 +6529,26 @@ func (vm *VM) arrayAssoc(a *object.Array, key object.Value, idx int) object.Valu
 		}
 	}
 	return object.NilV
+}
+
+// integerArg coerces v to a big.Int for Integer.sqrt: an Integer or Bignum is
+// used directly, any other value is converted via #to_int (so a Float or a
+// user #to_int object works), and a value with no (Integer-returning) #to_int
+// raises TypeError.
+func (vm *VM) integerArg(v object.Value) *big.Int {
+	if b, ok := object.BigOf(v); ok {
+		return b
+	}
+	if vm.respondsToDynamic(v, "to_int") {
+		r := vm.send(v, "to_int", nil, nil)
+		if b, ok := object.BigOf(r); ok {
+			return b
+		}
+		raise("TypeError", "can't convert %s to Integer (%s#to_int gives %s)",
+			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(v))
+	return nil
 }
 
 // tryConvert backs Array/Hash/String/Integer.try_convert: an object that is
