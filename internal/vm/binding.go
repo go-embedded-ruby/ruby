@@ -33,6 +33,12 @@ func (vm *VM) registerBinding() {
 	cBinding := newClass("Binding", vm.cObject)
 	vm.consts["Binding"] = cBinding
 
+	// TOPLEVEL_BINDING is a Binding for the top level: its self is main and its
+	// definee is Object, so TOPLEVEL_BINDING.eval("def m; end" / "private :m")
+	// defines and sets visibility on Object exactly as top-level code does. It
+	// starts with no locals of its own.
+	vm.consts["TOPLEVEL_BINDING"] = &Binding{env: &Env{}, self: vm.main, definee: vm.cObject}
+
 	cBinding.define("eval", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.bindingEval(self.(*Binding), args[0])
 	})
