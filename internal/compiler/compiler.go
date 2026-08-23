@@ -8,6 +8,7 @@ package compiler
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -26,10 +27,13 @@ func (e compileError) Error() string { return e.msg }
 // links to the enclosing builder and isBlock is true, so local resolution can
 // reach enclosing locals by depth.
 type builder struct {
-	name        string
-	insns       []bytecode.Instr
-	consts      []object.Value
-	constIdx    map[object.Value]int
+	name     string
+	insns    []bytecode.Instr
+	consts   []object.Value
+	constIdx map[object.Value]int
+	// floatIdx pools Float literals by their bits rather than by their value;
+	// see addConst for why they cannot share constIdx.
+	floatIdx    map[uint64]int
 	names       []string
 	locals      []string
 	params      []string
@@ -45,7 +49,7 @@ type builder struct {
 }
 
 func newBuilder(name string, params []string) *builder {
-	b := &builder{name: name, constIdx: map[object.Value]int{}, params: params, numRequired: len(params), splatIndex: -1, kwRestSlot: -1, blockSlot: -1}
+	b := &builder{name: name, constIdx: map[object.Value]int{}, floatIdx: map[uint64]int{}, params: params, numRequired: len(params), splatIndex: -1, kwRestSlot: -1, blockSlot: -1}
 	for _, p := range params {
 		b.localSlot(p) // params occupy slots 0..n-1, in order
 	}
@@ -83,6 +87,25 @@ func (b *builder) here() int { return len(b.insns) }
 func (b *builder) patch(at, target int) { b.insns[at].A = target }
 
 func (b *builder) addConst(v object.Value) int {
+	// A Float is pooled by its bits, not by its value. Two floats can be equal
+	// and not be the same number: -0.0 == 0.0 is true and the two hash alike,
+	// so a map keyed on the value hands the second literal the first one's
+	// slot — `p 0.0` followed by `p(-0.0)` printed 0.0 twice, and reversing
+	// the two lines printed -0.0 twice. Whichever the file mentioned first won.
+	//
+	// NaN is the mirror image: it is equal to nothing, itself included, so it
+	// matched no entry and took a fresh slot every time it appeared. Bits pool
+	// both correctly.
+	if f, ok := v.(object.Float); ok {
+		bits := math.Float64bits(float64(f))
+		if i, ok := b.floatIdx[bits]; ok {
+			return i
+		}
+		i := len(b.consts)
+		b.consts = append(b.consts, v)
+		b.floatIdx[bits] = i
+		return i
+	}
 	if i, ok := b.constIdx[v]; ok {
 		return i
 	}

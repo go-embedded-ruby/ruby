@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -299,5 +300,44 @@ func TestRewriteAnonKwSplatUnchanged(t *testing.T) {
 	got, changed := c.rewriteAnonKwSplat(h)
 	if changed || got != h {
 		t.Fatalf("rewriteAnonKwSplat(explicit hash) = (%p, %v), want (%p, false)", got, changed, h)
+	}
+}
+
+// TestAddConstPoolsFloatsByBits pins the reason Float literals do not share the
+// value-keyed constant pool. Two floats can be equal without being the same
+// number, and one can be unequal to itself, so equality is the wrong question
+// to ask of a literal that has to survive to run time exactly as written.
+func TestAddConstPoolsFloatsByBits(t *testing.T) {
+	b := newBuilder("<t>", nil)
+	negZero := object.Float(math.Copysign(0, -1))
+	posZero := object.Float(0)
+	nan := object.Float(math.NaN())
+
+	// -0.0 == 0.0, so a value-keyed pool hands the second literal the first
+	// one's slot and the file's later mention prints as its earlier one.
+	i, j := b.addConst(posZero), b.addConst(negZero)
+	if i == j {
+		t.Fatalf("0.0 and -0.0 share slot %d; they are equal but not the same number", i)
+	}
+	if got := math.Signbit(float64(b.consts[i].(object.Float))); got {
+		t.Errorf("slot %d holds a negative zero, want positive", i)
+	}
+	if got := math.Signbit(float64(b.consts[j].(object.Float))); !got {
+		t.Errorf("slot %d holds a positive zero, want negative", j)
+	}
+
+	// The same number asked for twice keeps one slot, which is the whole point
+	// of pooling — including NaN, which is equal to nothing, itself included,
+	// and so took a fresh slot on every mention.
+	if a, c := b.addConst(posZero), b.addConst(posZero); a != c || a != i {
+		t.Errorf("0.0 pooled to %d then %d, want %d both times", a, c, i)
+	}
+	if a, c := b.addConst(nan), b.addConst(nan); a != c {
+		t.Errorf("NaN took slots %d and %d, want one slot", a, c)
+	}
+
+	// Non-Float constants still go through the value-keyed pool.
+	if a, c := b.addConst(object.Integer(7)), b.addConst(object.Integer(7)); a != c {
+		t.Errorf("Integer(7) took slots %d and %d, want one slot", a, c)
 	}
 }

@@ -49,3 +49,26 @@ func TestFloatExponentLiterals(t *testing.T) {
 		}
 	}
 }
+
+// TestFloatLiteralZeroSigns covers what the compiler's constant pool must not
+// lose: a zero's sign, and a NaN's identity as a fresh constant. Both are
+// literals whose printed form differs from a literal they compare equal (or
+// unequal) to, so a pool keyed on the value gets them wrong — whichever of
+// 0.0 / -0.0 the file mentioned first used to win both lines. Asserted
+// against MRI Ruby 4.0.5.
+func TestFloatLiteralZeroSigns(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{"p 0.0\np(-0.0)", "0.0\n-0.0\n"},
+		{"p(-0.0)\np 0.0", "-0.0\n0.0\n"},
+		{`p [0.0, -0.0]`, "[0.0, -0.0]\n"},
+		{`p 0.0 == -0.0`, "true\n"}, // equal, and still not interchangeable
+		{`p (0.0).zero? && (-0.0).zero?`, "true\n"},
+		{`p 1.0 / -0.0`, "-Infinity\n"}, // the sign is load-bearing, not cosmetic
+		{`p 1.0 / 0.0`, "Infinity\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
