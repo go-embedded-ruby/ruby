@@ -497,7 +497,21 @@ func (vm *VM) registerNumericEdges() {
 			raise("ZeroDivisionError", "divided by 0")
 		}
 		a := floatOf(self)
-		return object.Float(a - b*math.Trunc(a/b))
+		r := a - b*math.Trunc(a/b)
+		if r == 0 {
+			// A zero has a sign, and Ruby's is the dividend's, never the
+			// divisor's: (-7.0).remainder(3.5) is -0.0 where 7.0.remainder(3.5)
+			// is 0.0, and 7.0.remainder(-3.5) is still 0.0.
+			//
+			// The subtraction reaches neither reliably. Where it cancels,
+			// x - x is +0.0 whatever x was, so (-7.0).remainder(3.5) answered
+			// 0.0 on every architecture; and loong64 under qemu answered -0.0
+			// for 7.0.remainder(3.5), which has had the nightly red since
+			// 2026-08-12. Stating the sign costs one comparison and settles
+			// both directions at once.
+			return object.Float(math.Copysign(0, a))
+		}
+		return object.Float(r)
 	})
 
 	// Float#step — mirrors Integer#step: an enumerator without a block, otherwise

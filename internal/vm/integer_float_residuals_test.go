@@ -135,6 +135,14 @@ func TestFloatRemainder(t *testing.T) {
 		{`p (-7.0).remainder(3)`, "-1.0\n"},
 		{`p 7.0.remainder(-3)`, "1.0\n"},
 		{`p 7.0.remainder(3.5)`, "0.0\n"},
+		// A zero has a sign, and it is the DIVIDEND's, never the divisor's.
+		// The subtraction reaches that on its own wherever the arithmetic rounds
+		// as IEEE 754 says; loong64 under qemu returned -0.0 for the line above,
+		// which had the nightly red, so the sign is now stated outright.
+		{`p (-7.0).remainder(3.5)`, "-0.0\n"},
+		{`p 7.0.remainder(-3.5)`, "0.0\n"},
+		{`p (-7.0).remainder(-3.5)`, "-0.0\n"},
+		{`p (-0.0).remainder(3.0)`, "-0.0\n"},
 		{`p (0.0 / 0).remainder(3)`, "NaN\n"}, // NaN dividend
 		{`p (1.0 / 0).remainder(3)`, "NaN\n"}, // Infinity dividend
 		{`p (-7.5).remainder(3)`, "-1.5\n"},
