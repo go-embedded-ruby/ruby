@@ -1,9 +1,28 @@
 package vm_test
 
 import (
+	"encoding/binary"
 	"strings"
 	"testing"
 )
+
+// native returns whichever of the two byte orders this machine actually packs
+// in. S/s, L/l, I/i, Q/q, J/j and f/F/d/D are *native*-endian by definition, so
+// an expectation spelled out in one order is an expectation that only holds on
+// half the architectures — and this suite runs on s390x, which is the other
+// half. Its nightly has been red every night since 2026-08-07 over exactly the
+// nine subtests below.
+//
+// The explicitly-ordered directives (n, N, v, V, e, E, g, G and the < >
+// modifiers) are not affected and keep their literal expectations.
+func native(le, be string) string {
+	var b [2]byte
+	binary.NativeEndian.PutUint16(b[:], 1)
+	if b[0] == 0 {
+		return be
+	}
+	return le
+}
 
 // TestPackUnpack exercises every supported Array#pack / String#unpack directive
 // and round-trip, asserting on byte content (via .bytes) so binary strings can
@@ -19,19 +38,19 @@ func TestPackUnpack(t *testing.T) {
 		{"unpack_c_signed", `p [255].pack("C").unpack("c")`, "[-1]\n"},
 		{"unpack_C_unsigned", `p [255].pack("C").unpack("C")`, "[255]\n"},
 
-		// S / s (native little-endian 16-bit)
-		{"pack_S", `p [258].pack("S").bytes`, "[2, 1]\n"},
-		{"pack_s", `p [258].pack("s").bytes`, "[2, 1]\n"},
+		// S / s (native-endian 16-bit)
+		{"pack_S", `p [258].pack("S").bytes`, native("[2, 1]\n", "[1, 2]\n")},
+		{"pack_s", `p [258].pack("s").bytes`, native("[2, 1]\n", "[1, 2]\n")},
 		{"unpack_S", `p [258].pack("S").unpack("S")`, "[258]\n"},
 		{"unpack_s_neg", `p [-2].pack("s").unpack("s")`, "[-2]\n"},
 
-		// L / l (native little-endian 32-bit)
-		{"pack_L", `p [16909060].pack("L").bytes`, "[4, 3, 2, 1]\n"},
+		// L / l (native-endian 32-bit)
+		{"pack_L", `p [16909060].pack("L").bytes`, native("[4, 3, 2, 1]\n", "[1, 2, 3, 4]\n")},
 		{"unpack_L", `p [16909060].pack("L").unpack("L")`, "[16909060]\n"},
 		{"unpack_l_neg", `p [-3].pack("l").unpack("l")`, "[-3]\n"},
 
-		// Q / q (native little-endian 64-bit)
-		{"pack_Q", `p [1].pack("Q").bytes`, "[1, 0, 0, 0, 0, 0, 0, 0]\n"},
+		// Q / q (native-endian 64-bit)
+		{"pack_Q", `p [1].pack("Q").bytes`, native("[1, 0, 0, 0, 0, 0, 0, 0]\n", "[0, 0, 0, 0, 0, 0, 0, 1]\n")},
 		{"unpack_Q", `p [123456789].pack("Q").unpack("Q")`, "[123456789]\n"},
 		{"unpack_q_neg", `p [-5].pack("q").unpack("q")`, "[-5]\n"},
 
@@ -98,13 +117,13 @@ func TestPackUnpack(t *testing.T) {
 		{"unpack_U_empty", `p "".unpack("U*")`, "[]\n"},
 		{"unpack_a_empty_star", `p "".unpack("a*")`, "[\"\"]\n"},
 
-		// Float directives f/F/d/D (native, host LE), e/E (LE), g/G (BE).
-		{"pack_f", `p [1.5].pack("f").bytes`, "[0, 0, 192, 63]\n"},
-		{"pack_F_alias", `p [1.5].pack("F").bytes`, "[0, 0, 192, 63]\n"},
+		// Float directives f/F/d/D (native), e/E (LE), g/G (BE).
+		{"pack_f", `p [1.5].pack("f").bytes`, native("[0, 0, 192, 63]\n", "[63, 192, 0, 0]\n")},
+		{"pack_F_alias", `p [1.5].pack("F").bytes`, native("[0, 0, 192, 63]\n", "[63, 192, 0, 0]\n")},
 		{"pack_e_le", `p [1.5].pack("e").bytes`, "[0, 0, 192, 63]\n"},
 		{"pack_g_be", `p [1.5].pack("g").bytes`, "[63, 192, 0, 0]\n"},
-		{"pack_d", `p [1.5].pack("d").bytes`, "[0, 0, 0, 0, 0, 0, 248, 63]\n"},
-		{"pack_D_alias", `p [1.5].pack("D").bytes`, "[0, 0, 0, 0, 0, 0, 248, 63]\n"},
+		{"pack_d", `p [1.5].pack("d").bytes`, native("[0, 0, 0, 0, 0, 0, 248, 63]\n", "[63, 248, 0, 0, 0, 0, 0, 0]\n")},
+		{"pack_D_alias", `p [1.5].pack("D").bytes`, native("[0, 0, 0, 0, 0, 0, 248, 63]\n", "[63, 248, 0, 0, 0, 0, 0, 0]\n")},
 		{"pack_E_le", `p [1.5].pack("E").bytes`, "[0, 0, 0, 0, 0, 0, 248, 63]\n"},
 		{"pack_G_be", `p [1.5].pack("G").bytes`, "[63, 248, 0, 0, 0, 0, 0, 0]\n"},
 		{"roundtrip_d_star", `p [1.5, -2.25].pack("d*").unpack("d*")`, "[1.5, -2.25]\n"},
@@ -301,7 +320,7 @@ func TestPackUnpackModifiers(t *testing.T) {
 		{"pack_Q_bang_width", `p [1].pack("Q!").bytes.length`, "8\n"},
 		{"pack_j_bang_width", `p [1].pack("j!").bytes.length`, "8\n"},
 		// i / I (native C int, 32-bit) and j / J (intptr_t, 64-bit)
-		{"pack_i", `p [1].pack("i").bytes`, "[1, 0, 0, 0]\n"},
+		{"pack_i", `p [1].pack("i").bytes`, native("[1, 0, 0, 0]\n", "[0, 0, 0, 1]\n")},
 		{"pack_I_be", `p [1].pack("I>").bytes`, "[0, 0, 0, 1]\n"},
 		{"unpack_i_le", `p "abcd".unpack("i<")`, "[1684234849]\n"},
 		{"unpack_I_le", `p "abcd".unpack("I<")`, "[1684234849]\n"},
