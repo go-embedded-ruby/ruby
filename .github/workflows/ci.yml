@@ -103,8 +103,10 @@ jobs:
           GOWASIRUNTIME: wazero
         run: |
           GOOS=wasip1 GOARCH=wasm go vet ./cmd/rbgo ./internal/vm
-          # Exercise the wasm build-tagged statSys (internal/vm/filestat_wasm.go)
-          # by running its covering test as a wasm binary under wazero.
+          # Two things run as a wasm binary under wazero: the wasm build-tagged
+          # statSys (internal/vm/filestat_wasm.go), and the end-to-end claim that
+          # a program with an observable effect has one. The build steps above
+          # prove the module links; only this proves it interprets.
           GOOS=wasip1 GOARCH=wasm go test -c -o vm.test.wasm ./internal/vm
           "$(go env GOPATH)/bin/wazero" run -mount=/tmp:/tmp -env TMPDIR=/tmp \
-            vm.test.wasm -test.run 'TestStatSysExtract' -test.v
+            vm.test.wasm -test.run 'TestStatSysExtract|TestRunsAProgramOnThisHost' -test.v
