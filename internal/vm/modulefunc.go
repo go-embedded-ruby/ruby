@@ -101,6 +101,13 @@ func (vm *VM) registerModuleExtras() {
 					return setVis(vm, vm.cObject, args, vis)
 				}}
 		}
+		// Top-level define_method also operates on Object, the default definee:
+		// `define_method(:m){…}` defines Object#m by forwarding to the Module
+		// method on Object.
+		sc.methods["define_method"] = &Method{name: "define_method", owner: sc,
+			native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+				return vm.send(vm.cObject, "define_method", args, blk)
+			}}
 	}
 
 	// private_class_method / public_class_method: set the named class methods'
