@@ -17,6 +17,23 @@ import (
 // range-in-range variant) and Range#size (the endless/beginless/Float edges) are
 // wired in the bootstrap itself and delegate to helpers defined here.
 func (vm *VM) registerRangeEdges() {
+	// bsearch finds an element by binary search over the range's numeric domain
+	// (see rangeBsearch); without a block it returns an Enumerator.
+	vm.cRange.define("bsearch", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		r := self.(*object.Range)
+		// A non-numeric bound cannot be searched — MRI reports this even without a
+		// block, before returning the Enumerator.
+		for _, b := range []object.Value{r.Lo, r.Hi} {
+			if !object.IsNil(b) && !bsearchNumeric(b) {
+				raise("TypeError", "can't do binary search for %s", vm.classOf(b).name)
+			}
+		}
+		if blk == nil {
+			// bsearch has no meaningful element count, so its Enumerator #size is nil.
+			return enumForSized(self, "bsearch", func(*VM) object.Value { return object.NilV })
+		}
+		return vm.rangeBsearch(r, blk)
+	})
 	// reverse_each yields the elements from end down to begin. rbgo materialises
 	// the range forward (via rangeElems) and walks the slice backwards, so it
 	// requires a range that can be enumerated: an endless range (nil end) or a
