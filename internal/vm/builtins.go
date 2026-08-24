@@ -1401,11 +1401,8 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cSymbol.define("succ", symSucc)
 	vm.cSymbol.define("next", symSucc)
-	symIndex := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return stringIndex(symStr(self), args) // [] / slice yield a String, like MRI
-	}
-	vm.cSymbol.define("[]", symIndex)
-	vm.cSymbol.define("slice", symIndex)
+	// Symbol#[] / #slice run the whole String#[] protocol against the symbol's
+	// name (they are registered after strIndexFn is defined, below).
 	vm.cSymbol.define("start_with?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := symStr(self)
 		for _, a := range args {
@@ -1900,6 +1897,14 @@ func (vm *VM) bootstrap() {
 		return res
 	}
 	vm.cString.define("[]", strIndexFn)
+	// Symbol#[] / #slice yield a String by running the full String#[] protocol
+	// (Integer/Range/String/Regexp with capture groups, setting $~) against the
+	// symbol's name, exactly like sym.to_s[...].
+	symIndexFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return strIndexFn(vm, object.NewString(symStr(self)), args, blk)
+	}
+	vm.cSymbol.define("[]", symIndexFn)
+	vm.cSymbol.define("slice", symIndexFn)
 	// #slice is a true alias of #[] (shares the exact method record).
 	aliasBuiltin(vm.cString, "slice", "[]")
 	vm.cString.define("ord", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -5524,9 +5529,6 @@ func parseLeadingFloat(s string) float64 {
 
 // stringIndex implements String#[]: s[i], s[i, len], and s[range], all
 // rune-indexed, returning nil for an out-of-range start.
-func stringIndex(s string, args []object.Value) object.Value {
-	return stringIndexEnc(s, args, false)
-}
 
 // stringIndexEnc implements String#[] / #slice indexing. When binary is true the
 // receiver is ASCII-8BIT, so the integer index/length forms count BYTES (not
