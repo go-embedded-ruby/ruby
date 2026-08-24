@@ -43,6 +43,11 @@ func (vm *VM) bindingEval(b *Binding, srcV object.Value) object.Value {
 		iseq, _ = compiler.CompileWithLocals(prog, b.names)
 	}
 	iseq.Name = "(eval)"
+	// eval is transparent to Kernel#__method__ / #__callee__: the evaluated code
+	// inherits the caller's method context (so `eval("__method__")`, which routes
+	// through the caller's binding, reports the enclosing method), matching the
+	// no-binding eval path.
+	vm.pendingMethodCtx = vm.currentMethodCtxPtr()
 	return vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil, nil)
 }
 
