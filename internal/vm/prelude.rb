@@ -26,6 +26,7 @@ module Comparable
     end
     cmp
   end
+  private :__compare # an internal helper, not part of Comparable's public API
 
   def <(other)
     __compare(other) < 0
@@ -142,6 +143,9 @@ module Enumerable
     raise RangeError, "bignum too big to convert into 'long'" if v > 9223372036854775807 || v < -9223372036854775808
     v
   end
+  # These are internal iteration/coercion helpers, not part of Enumerable's
+  # public API (MRI does not expose them).
+  private :__each_packed, :__pack, :__enum_int_arg
 
   def to_a
     r = []
