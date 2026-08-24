@@ -1465,6 +1465,13 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(strOf(self)) == 0)
 	})
+	vm.cString.define("dump", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// Always a plain (never frozen, never subclass) String in the receiver's
+		// encoding; a non-ASCII-compatible source additionally carries a
+		// .force_encoding suffix inside the dumped text (see (*String).Dump).
+		s := self.(*object.String)
+		return object.NewStringBytesEnc([]byte(s.Dump()), s.EncName())
+	})
 	vm.cString.define("upcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, strings.ToUpper(strOf(self)))
 	})
