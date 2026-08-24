@@ -1885,11 +1885,14 @@ func (vm *VM) bootstrap() {
 		return strEncOf(self, stringSqueeze(strOf(self), args))
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
 		var res object.Value
 		if re, ok := args[0].(*Regexp); ok { // s[/re/] / s[/re/, group]
 			res = vm.stringRegexpIndex(strOf(self), re, args[1:])
 		} else {
-			res = stringIndexEnc(strOf(self), args, self.(*object.String).IsBinary())
+			res = stringIndexEnc(strOf(self), vm.coerceStrIndexArgs(args), self.(*object.String).IsBinary())
 		}
 		if sub, ok := res.(*object.String); ok { // a slice keeps the receiver's encoding
 			sub.Enc = self.(*object.String).Enc
@@ -5116,6 +5119,48 @@ func (vm *VM) coerceRangeBounds(r *object.Range) *object.Range {
 		return r
 	}
 	return object.NewRange(lo, hi, r.Exclusive)
+}
+
+// asRangeValue unwraps v to its underlying *object.Range: directly for a plain
+// Range, or via the builtin field for an instance of a user subclass of Range
+// (class R < Range; R.new(1,3) is an RObject wrapping a *object.Range). Argument
+// values are not builtin-unwrapped by dispatch the way a receiver is, so String#[]
+// and friends must unwrap a Range argument themselves.
+func asRangeValue(v object.Value) (*object.Range, bool) {
+	if r, ok := v.(*object.Range); ok {
+		return r, true
+	}
+	if o, ok := v.(*RObject); ok {
+		if r, ok := o.builtin.(*object.Range); ok {
+			return r, true
+		}
+	}
+	return nil, false
+}
+
+// coerceStrIndexArgs normalizes the argument(s) of String#[] (and, by delegation,
+// Symbol#[]) to the plain values stringIndexEnc expects, applying MRI's implicit
+// conversions the raw slice logic does not: a Float or #to_int object index/length
+// becomes an Integer (truncated toward zero), and a Range argument — including a
+// Range subclass or one with Float/#to_int bounds — becomes a *object.Range with
+// Integer bounds. A lone String argument (the substring form) passes through
+// untouched. Non-convertible values raise TypeError from repeatLong, matching MRI.
+// The caller (strIndexFn) has already validated the 1..2 arity.
+func (vm *VM) coerceStrIndexArgs(args []object.Value) []object.Value {
+	if len(args) == 1 {
+		if _, ok := args[0].(*object.String); ok {
+			return args // s[substr]
+		}
+		if r, ok := asRangeValue(args[0]); ok {
+			return []object.Value{vm.coerceRangeBounds(r)}
+		}
+		return []object.Value{object.IntValue(vm.repeatLong(args[0]))}
+	}
+	// len == 2: (index, length).
+	return []object.Value{
+		object.IntValue(vm.repeatLong(args[0])),
+		object.IntValue(vm.repeatLong(args[1])),
+	}
 }
 
 // rngKwarg returns the object passed as the random: keyword of a shuffle/sample
