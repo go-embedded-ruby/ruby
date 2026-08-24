@@ -316,7 +316,7 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		// %f#to_f, %{name}#to_s), so route it through the VM-aware formatter rather
 		// than the VM-less stringOp path.
 		if as, ok := a.(*object.String); ok && op == bytecode.OpMod {
-			return object.NewString(vm.formatString(as.Str(), formatArgs(b)))
+			return object.NewString(vm.formatString(as.Str(), vm.vmFormatArgs(b)))
 		}
 		// A user object (RObject with no builtin backing) that defines an
 		// arithmetic operator dispatches to it, so `Pathname + str`, a Money `+`,
