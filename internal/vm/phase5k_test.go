@@ -32,9 +32,13 @@ func TestInstanceReflection(t *testing.T) {
 }
 
 func TestInstanceEvalNoBlock(t *testing.T) {
-	for _, src := range []string{`5.instance_eval`, `5.instance_exec`} {
-		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-			t.Fatalf("src=%q got %v want LocalJumpError", src, err)
-		}
+	// instance_exec is block-only, so with no block (and no args) it raises
+	// LocalJumpError. instance_eval also accepts a String form, so no block and no
+	// args is instead a wrong-number-of-arguments ArgumentError, as MRI reports.
+	if err := runErr(t, `5.instance_exec`); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
+		t.Fatalf("instance_exec got %v want LocalJumpError", err)
+	}
+	if err := runErr(t, `5.instance_eval`); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
+		t.Fatalf("instance_eval got %v want ArgumentError", err)
 	}
 }

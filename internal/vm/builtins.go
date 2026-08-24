@@ -366,11 +366,24 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("instance_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewArrayFromSlice(ivarNamesInOrder(self))
 	})
-	vm.cBasicObject.define("instance_eval", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (yield)")
+	vm.cBasicObject.define("instance_eval", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk != nil {
+			if len(args) != 0 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+			}
+			return vm.callBlockSelf(blk, self, nil)
 		}
-		return vm.callBlockSelf(blk, self, nil)
+		// String form: instance_eval("code" [, filename [, lineno]]) evaluates the
+		// source with self as the receiver and its singleton class as the definee.
+		if len(args) < 1 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
+		}
+		src := vm.coerceFormatString(args[0])
+		file := vm.currentFile()
+		if len(args) >= 2 {
+			file = vm.coerceFormatString(args[1]) // filename, coerced via #to_str
+		}
+		return vm.instanceEvalString(self, src, file)
 	})
 	vm.cBasicObject.define("instance_exec", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
