@@ -379,6 +379,74 @@ func (s *String) Inspect() string {
 	return b.String()
 }
 
+// Dump returns the String#dump representation: the receiver wrapped in double
+// quotes with every non-printable byte, quote, backslash, and interpolation
+// sigil replaced by a backslash escape so the result is a valid Ruby String
+// literal that reproduces the receiver. It differs from Inspect in that a UTF-8
+// multibyte character is always escaped (\uXXXX up to U+FFFF, \u{XXXX…} above)
+// rather than kept verbatim, and a single-byte control (0x00–0x1F, 0x7F) escapes
+// as \xHH rather than \uXXXX. When the encoding is not ASCII-compatible the
+// literal is followed by .force_encoding("NAME"), matching MRI.
+func (s *String) Dump() string {
+	var b strings.Builder
+	b.WriteByte('"')
+	data := s.Bytes()
+	utf8enc := s.Enc == "" || s.Enc == "UTF-8"
+	for i := 0; i < len(data); {
+		c := data[i]
+		if esc, ok := inspectNamedEscape[c]; ok {
+			b.WriteString(esc)
+			i++
+			continue
+		}
+		if c == '#' {
+			if i+1 < len(data) && (data[i+1] == '{' || data[i+1] == '$' || data[i+1] == '@') {
+				b.WriteString(`\#`)
+			} else {
+				b.WriteByte('#')
+			}
+			i++
+			continue
+		}
+		if c >= 0x20 && c < 0x7f { // printable ASCII, kept verbatim
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		// A UTF-8 multibyte character always escapes to \u notation (upper-case
+		// hex): \uXXXX in the BMP, \u{XXXXXX} above it.
+		if utf8enc && c >= 0x80 {
+			if r, size := utf8.DecodeRune(data[i:]); r != utf8.RuneError || size > 1 {
+				if r > 0xFFFF {
+					fmt.Fprintf(&b, `\u{%X}`, r)
+				} else {
+					fmt.Fprintf(&b, `\u%04X`, r)
+				}
+				i += size
+				continue
+			}
+		}
+		// Every other non-printable byte — a single-byte control in any encoding,
+		// a high byte of a non-UTF-8 string, or an invalid UTF-8 byte — escapes as
+		// \xHH with upper-case hex.
+		fmt.Fprintf(&b, `\x%02X`, c)
+		i++
+	}
+	b.WriteByte('"')
+	if !asciiCompatibleEnc(s.EncName()) {
+		b.WriteString(`.force_encoding("` + s.EncName() + `")`)
+	}
+	return b.String()
+}
+
+// asciiCompatibleEnc reports whether an encoding shares the ASCII code points in
+// their usual single-byte positions, as MRI's rb_enc_asciicompat does. Only the
+// wide fixed-width Unicode encodings (UTF-16/UTF-32 families) are not compatible;
+// String#dump appends .force_encoding for those.
+func asciiCompatibleEnc(name string) bool {
+	return !strings.HasPrefix(name, "UTF-16") && !strings.HasPrefix(name, "UTF-32")
+}
+
 // inspectNamedEscape maps the control bytes String#inspect renders with a named
 // backslash escape, in every encoding.
 var inspectNamedEscape = map[byte]string{
