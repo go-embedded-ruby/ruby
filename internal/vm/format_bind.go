@@ -299,9 +299,27 @@ func raiseFormatError(err error) {
 // stays a one-element argument list, which formatString both treats as a
 // positional operand and exposes as the %<name>/%{name} hash (MRI's behaviour
 // where "%<a>d %s" % {a: 1} formats the hash for both forms).
-func formatArgs(b object.Value) []object.Value {
-	if arr, ok := b.(*object.Array); ok {
-		return arr.Elems
+// vmFormatArgs turns the right-hand side of String#% into the positional
+// argument list. An Array is spread; a Hash is kept whole (for %{name}/%<name>
+// references); any other object is converted with #to_ary when it responds —
+// an Array result is spread, a nil result falls back to a single argument, and a
+// non-Array result raises TypeError, as MRI does; otherwise it is a single
+// argument.
+func (vm *VM) vmFormatArgs(b object.Value) []object.Value {
+	switch b.(type) {
+	case *object.Array:
+		return b.(*object.Array).Elems
+	case *object.Hash:
+		return []object.Value{b}
+	}
+	if vm.respondsToDynamic(b, "to_ary") {
+		if r := vm.send(b, "to_ary", nil, nil); !object.IsNil(r) {
+			if arr, ok := r.(*object.Array); ok {
+				return arr.Elems
+			}
+			raise("TypeError", "can't convert %s to Array (%s#to_ary gives %s)",
+				vm.classOf(b).name, vm.classOf(b).name, vm.classOf(r).name)
+		}
 	}
 	return []object.Value{b}
 }
