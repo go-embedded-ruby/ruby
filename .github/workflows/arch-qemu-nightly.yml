@@ -46,9 +46,18 @@ jobs:
           go-version: stable
       - run: sudo apt-get update && sudo apt-get install -y qemu-user-static
       - name: Test under qemu (${{ matrix.goarch }})
-        # qemu-user emulation is ~50-100x slower than native; the heaviest lane
-        # (s390x, the slowest target) can exceed Go's default 10m test-binary
-        # timeout on the full vm suite. Give the emulated lanes generous headroom
-        # so a slow-but-correct run isn't killed as a false failure. (On real
-        # s390x silicon the same suite runs natively in seconds.)
-        run: GOARCH=${{ matrix.goarch }} go test -timeout=30m -exec=${{ matrix.qemu }} ./...
+        # qemu-user emulation is ~50-100x slower than native, so the wall here is
+        # not a hang detector: it is the only thing that decides whether a
+        # slow-but-correct run counts. It has to sit well clear of what the run
+        # actually takes, and 30m did not. Measured on internal/vm, the heaviest
+        # package, in run 32661057000 (all four green):
+        #
+        #     loong64   990s      riscv64  1204s
+        #     ppc64le  1284s      s390x    1754s   <- 46s under a 1800s wall
+        #
+        # The very next run of the same tree died at 1801.594s with
+        # "panic: test timed out after 30m0s" and no failing test — a 2.6%
+        # margin, which ordinary runner variance crosses. 60m puts s390x at
+        # about half the wall, which is what "generous headroom" was meant to
+        # say. (On real s390x silicon the same suite runs natively in seconds.)
+        run: GOARCH=${{ matrix.goarch }} go test -timeout=60m -exec=${{ matrix.qemu }} ./...
