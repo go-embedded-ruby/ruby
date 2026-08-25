@@ -176,7 +176,7 @@ func isPackCode(c byte) bool {
 	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'I', 'i', 'J', 'j',
 		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U',
 		'f', 'F', 'd', 'D', 'e', 'E', 'g', 'G',
-		'x', 'X', '@', 'b', 'B', 'm', 'M':
+		'x', 'X', '@', 'b', 'B', 'm', 'M', 'u':
 		return true
 	}
 	return false
@@ -461,6 +461,8 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) ([]byte, string) {
 			out = packBase64(out, d, vm.packStrArg(next()))
 		case d.code == 'M':
 			out = qpencode(out, []byte(vm.displayStr(next())), packQPLen(d))
+		case d.code == 'u':
+			out = packUuencode(out, d, vm.packStrArg(next()))
 		}
 	}
 	return out, packEncoding(dirs)
@@ -1059,6 +1061,10 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			out = append(out, object.NewStringBytesEnc(dec, "ASCII-8BIT"))
 		case d.code == 'M':
 			dec := qpdecode(data[pos:])
+			pos = len(data)
+			out = append(out, object.NewStringBytesEnc(dec, "ASCII-8BIT"))
+		case d.code == 'u':
+			dec := uudecode(data[pos:])
 			pos = len(data)
 			out = append(out, object.NewStringBytesEnc(dec, "ASCII-8BIT"))
 		}
