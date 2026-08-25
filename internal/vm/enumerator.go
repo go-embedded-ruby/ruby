@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math"
+	"math/big"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -37,6 +38,9 @@ type Enumerator struct {
 	produceInit object.Value
 	produceHas  bool
 
+	// isProduct marks an Enumerator::Product (built by Enumerator.product): a plain
+	// generator Enumerator whose only distinction is the class it reports.
+	isProduct bool
 	// isChain marks an Enumerator::Chain: #each iterates chainParts in turn, and
 	// entered[i] records whether part i has been iterated (so #rewind can rewind,
 	// in reverse, exactly the parts that were entered).
@@ -136,6 +140,15 @@ func (vm *VM) registerEnumerator() {
 	vm.cEnumeratorChain.smethods["new"] = &Method{name: "new", owner: vm.cEnumeratorChain,
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			return newChain(append([]object.Value{}, args...))
+		}}
+
+	// Enumerator::Product — the subclass Enumerator.product returns.
+	vm.cEnumeratorProduct = newClass("Enumerator::Product", vm.cEnumerator)
+	vm.cEnumeratorProduct.consts = vm.cEnumerator.consts
+	vm.cEnumerator.consts["Product"] = vm.cEnumeratorProduct
+	vm.cEnumerator.smethods["product"] = &Method{name: "product", owner: vm.cEnumerator,
+		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+			return vm.enumProduct(args, blk)
 		}}
 
 	// Enumerator::Yielder — `y << v` / `y.yield(v)` feed the generator's values in.
@@ -360,6 +373,89 @@ func (vm *VM) enumProduce(args []object.Value, blk *Proc) object.Value {
 		e.produceInit, e.produceHas = pos[0], true
 	}
 	return e
+}
+
+// enumProduct implements Enumerator.product. It returns an Enumerator::Product
+// over the Cartesian product of its enumerable arguments, each consumed through
+// #each_entry lazily and afresh at every outer step — so an infinite source
+// yields an infinite product and a one-shot source is drained once. Keyword
+// arguments are rejected. With a block it iterates the product and returns nil.
+func (vm *VM) enumProduct(args []object.Value, blk *Proc) object.Value {
+	if h := trailingKwHash(args); h != nil {
+		bad := make([]string, len(h.Keys))
+		for i, k := range h.Keys {
+			bad[i] = k.Inspect()
+		}
+		raise("ArgumentError", "unknown keywords: %s", strings.Join(bad, ", "))
+	}
+	sources := append([]object.Value{}, args...)
+
+	// #size is the product of the sources' sizes: 1 for no sources, Float::INFINITY
+	// when any is infinite, and nil when any is unknown.
+	var size object.Value = object.IntValue(1)
+	for _, e := range sources {
+		if !vm.respondsToDynamic(e, "size") {
+			size = object.NilV
+			break
+		}
+		s := vm.send(e, "size", nil, nil)
+		if object.IsNil(s) {
+			size = object.NilV
+			break
+		}
+		size = productSize(size, s)
+	}
+
+	gen := &Proc{native: func(vm *VM, gargs []object.Value) object.Value {
+		y := gargs[0]
+		var combine func(rest, prefix []object.Value)
+		combine = func(rest, prefix []object.Value) {
+			if len(rest) == 0 {
+				vm.send(y, "<<", []object.Value{object.NewArrayFromSlice(append([]object.Value{}, prefix...))}, nil)
+				return
+			}
+			first, tail := rest[0], rest[1:]
+			step := &Proc{native: func(vm *VM, a []object.Value) object.Value {
+				// each_entry yields one entry per element; a multi-value yield keeps
+				// only its first value, a bare yield contributes nil — as MRI does.
+				var x object.Value = object.NilV
+				if len(a) > 0 {
+					x = a[0]
+				}
+				combine(tail, append(append([]object.Value{}, prefix...), x))
+				return object.NilV
+			}}
+			vm.send(first, "each_entry", nil, step)
+		}
+		combine(sources, nil)
+		return object.NilV
+	}}
+
+	e := &Enumerator{isProduct: true, block: gen, sizeSpec: size, sizeSpecSet: true}
+	if blk == nil {
+		return e
+	}
+	vm.send(e, "each", nil, blk)
+	return object.NilV
+}
+
+// productSize multiplies two finite-or-infinite #size values under
+// Enumerator.product's rules: an infinite factor makes the product infinite;
+// otherwise the two Integer sizes multiply. The caller stops at the first nil
+// (unknown) size, so neither argument here is nil.
+func productSize(a, b object.Value) object.Value {
+	if isInfFloat(a) || isInfFloat(b) {
+		return object.Float(math.Inf(1))
+	}
+	an, _ := object.BigOf(a)
+	bn, _ := object.BigOf(b)
+	return object.NormInt(new(big.Int).Mul(an, bn))
+}
+
+// isInfFloat reports whether v is a positive-infinite Float.
+func isInfFloat(v object.Value) bool {
+	f, ok := v.(object.Float)
+	return ok && math.IsInf(float64(f), 1)
 }
 
 // enumResolveSize resolves a stored #size specification: a callable (Proc or any
