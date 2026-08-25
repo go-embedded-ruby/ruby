@@ -4490,11 +4490,11 @@ func (vm *VM) bootstrap() {
 	})
 	// Bitwise / shift operators (arbitrary precision via big.Int, so a left shift
 	// promotes to a Bignum and bitwise ops work on Bignums too).
-	vm.cInteger.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return shiftInt(bigVal(self), intArg(args[0]))
+	vm.cInteger.define("<<", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.integerShift(bigVal(self), args[0], false)
 	})
-	vm.cInteger.define(">>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return shiftInt(bigVal(self), -intArg(args[0]))
+	vm.cInteger.define(">>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.integerShift(bigVal(self), args[0], true)
 	})
 	vm.cInteger.define("&", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NormInt(new(big.Int).And(bigVal(self), bigArg(args[0])))
@@ -7971,6 +7971,67 @@ func shiftInt(a *big.Int, n int64) object.Value {
 		return object.NormInt(new(big.Int).Lsh(a, uint(n)))
 	}
 	return object.NormInt(new(big.Int).Rsh(a, uint(-n)))
+}
+
+// integerShift implements Integer#<< (right=false) and Integer#>> (right=true).
+// The common case — a machine-int shift amount — takes the fast path straight to
+// shiftInt; otherwise the amount is coerced via #to_int and a shift amount that
+// does not fit a machine int is handled degenerately (see integerShiftBig).
+func (vm *VM) integerShift(a *big.Int, arg object.Value, right bool) object.Value {
+	if i, ok := arg.(object.Integer); ok {
+		n := int64(i)
+		if right {
+			n = -n
+		}
+		return shiftInt(a, n)
+	}
+	m := vm.shiftCount(arg)
+	if right {
+		m = new(big.Int).Neg(m)
+	}
+	return vm.integerShiftBig(a, m)
+}
+
+// shiftCount coerces a shift argument to an integer count: an Integer or Bignum
+// directly, otherwise via #to_int (which must return an Integer). It matches
+// MRI's TypeErrors for a non-integer that has no #to_int and for a #to_int that
+// returns a non-integer.
+func (vm *VM) shiftCount(arg object.Value) *big.Int {
+	if z, ok := object.BigOf(arg); ok {
+		return z
+	}
+	if vm.respondsToDynamic(arg, "to_int") {
+		r := vm.send(arg, "to_int", nil, nil)
+		if z, ok := object.BigOf(r); ok {
+			return z
+		}
+		raise("TypeError", "can't convert %s to Integer (%s#to_int gives %s)",
+			vm.classOf(arg).name, vm.classOf(arg).name, vm.classOf(r).name)
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(arg).name)
+	return nil
+}
+
+// integerShiftBig applies a shift by an amount m that (once its sign is folded in)
+// may be a Bignum. A machine-int amount still goes through shiftInt; a Bignum
+// amount is degenerate: a huge right shift collapses to 0 (or -1 for a negative
+// receiver), a huge left shift of zero stays 0, and any other huge left shift
+// would exceed addressable memory, so it raises RangeError as MRI does.
+func (vm *VM) integerShiftBig(a, m *big.Int) object.Value {
+	if m.IsInt64() {
+		return shiftInt(a, m.Int64())
+	}
+	if m.Sign() < 0 {
+		if a.Sign() < 0 {
+			return object.IntValue(-1)
+		}
+		return object.IntValue(0)
+	}
+	if a.Sign() == 0 {
+		return object.IntValue(0)
+	}
+	raise("RangeError", "shift width too big")
+	return nil
 }
 
 // gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.
