@@ -176,7 +176,7 @@ func isPackCode(c byte) bool {
 	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'I', 'i', 'J', 'j',
 		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U',
 		'f', 'F', 'd', 'D', 'e', 'E', 'g', 'G',
-		'x', 'X', '@', 'b', 'B', 'm', 'M', 'u':
+		'x', 'X', '@', 'b', 'B', 'm', 'M', 'u', 'w':
 		return true
 	}
 	return false
@@ -463,6 +463,18 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) ([]byte, string) {
 			out = qpencode(out, []byte(vm.displayStr(next())), packQPLen(d))
 		case d.code == 'u':
 			out = packUuencode(out, d, vm.packStrArg(next()))
+		case d.code == 'w':
+			count := d.count
+			if d.star {
+				count = len(elems) - idx
+			}
+			for k := 0; k < count; k++ {
+				z := vm.packBERArg(next())
+				if z.Sign() < 0 {
+					raise("ArgumentError", "can't compress negative numbers")
+				}
+				out = packBER(out, z)
+			}
 		}
 	}
 	return out, packEncoding(dirs)
@@ -1067,6 +1079,14 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			dec := uudecode(data[pos:])
 			pos = len(data)
 			out = append(out, object.NewStringBytesEnc(dec, "ASCII-8BIT"))
+		case d.code == 'w':
+			// A BER integer is variable-length, so '*' means "until the input is
+			// exhausted"; a numeric count decodes at most that many.
+			for k := 0; (d.star || k < d.count) && pos < len(data); k++ {
+				var z *big.Int
+				z, pos = berDecodeAt(data, pos)
+				out = append(out, object.NormInt(z))
+			}
 		}
 	}
 	return out
