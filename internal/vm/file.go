@@ -71,17 +71,24 @@ func (vm *VM) registerFile() {
 	// (File::RDWR | File::CREAT | File::EXCL) which File.open then maps back to a
 	// mode string. We fix the numeric values here rather than reflecting the host's
 	// so behaviour is identical on every OS the gate runs on.
-	for name, val := range fileFlagConsts {
-		cFile.consts[name] = object.IntValue(val)
-	}
-	// File::FNM_* flag constants for File.fnmatch? / Dir.glob (values match MRI).
-	// FNM_SYSCASE is 0 on the case-sensitive POSIX platforms the gate runs on.
-	for name, val := range map[string]int64{
+	fnmConsts := map[string]int64{
 		"FNM_NOESCAPE": fnmNoEscape, "FNM_PATHNAME": fnmPathname, "FNM_DOTMATCH": fnmDotMatch,
 		"FNM_CASEFOLD": fnmCaseFold, "FNM_EXTGLOB": fnmExtGlob, "FNM_SYSCASE": fnmSysCase,
-	} {
-		cFile.consts[name] = object.IntValue(val)
 	}
+	// File::Constants is the module that carries the open-mode, flock and fnmatch
+	// flag constants; File includes it, so both File::RDONLY and
+	// File::Constants::RDONLY resolve and File::Constants.const_defined? sees them.
+	// FNM_SYSCASE is 0 on the case-sensitive POSIX platforms the gate runs on.
+	fileConstants := newClass("File::Constants", nil)
+	fileConstants.isModule = true
+	cFile.consts["Constants"] = fileConstants
+	for _, m := range []map[string]int64{fileFlagConsts, fileExtraConsts, fnmConsts} {
+		for name, val := range m {
+			fileConstants.consts[name] = object.IntValue(val)
+			cFile.consts[name] = object.IntValue(val)
+		}
+	}
+	cFile.includes = append(cFile.includes, fileConstants)
 	def := func(name string, fn NativeFn) { cFile.smethods[name] = &Method{name: name, owner: cFile, native: fn} }
 
 	// File.fnmatch?(pattern, path, flags=0) and its alias File.fnmatch test path

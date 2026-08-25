@@ -227,10 +227,20 @@ const (
 	fO_TRUNC  = 0x200
 )
 
-// fileFlagConsts maps File::Constants names to their numeric flag value.
+// fileFlagConsts maps File::Constants open-mode names to their numeric flag
+// value (a bitwise OR of these is what File.open's integer-mode form accepts).
 var fileFlagConsts = map[string]int64{
 	"RDONLY": fO_RDONLY, "WRONLY": fO_WRONLY, "RDWR": fO_RDWR,
 	"APPEND": fO_APPEND, "CREAT": fO_CREAT, "EXCL": fO_EXCL, "TRUNC": fO_TRUNC,
+}
+
+// fileExtraConsts holds the remaining File::Constants that are not open-mode
+// flags: the flock() operations (LOCK_*) and the open flags rbgo does not act on
+// but which must still be defined (fixed to their canonical Linux values here, as
+// the specs only assert the constants exist).
+var fileExtraConsts = map[string]int64{
+	"LOCK_SH": 0x1, "LOCK_EX": 0x2, "LOCK_NB": 0x4, "LOCK_UN": 0x8,
+	"NONBLOCK": 0x800, "NOCTTY": 0x100, "SYNC": 0x101000, "SHARE_DELETE": 0x0,
 }
 
 // flagsToMode maps an integer open-mode (a bitwise OR of File::RDWR/CREAT/...) to
