@@ -438,6 +438,16 @@ module Enumerable
     self
   end
 
+  # reverse_each buffers the elements (through to_a, so a multi-value each
+  # gathers each yield into an array) and passes them to the block in reverse
+  # order, returning the receiver. With no block it returns an Enumerator whose
+  # size is the receiver's own size when it has one, and nil otherwise.
+  def reverse_each(&block)
+    return enum_for(:reverse_each) { respond_to?(:size) ? size : nil } unless block
+    to_a.reverse_each(&block)
+    self
+  end
+
   def flat_map
     return enum_for(:flat_map) unless block_given?
     r = []
