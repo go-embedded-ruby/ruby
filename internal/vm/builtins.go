@@ -1465,6 +1465,30 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(strOf(self)) == 0)
 	})
+	vm.cString.define("append_as_bytes", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Append each argument's bytes to the receiver in place, never changing its
+		// encoding (so the result may become invalidly encoded). A String appends
+		// its raw bytes; an Integer appends its least-significant byte (wrapping
+		// negatives). Only String and Integer are accepted — no #to_str/#to_int
+		// coercion — and any other argument is a TypeError.
+		s := self.(*object.String)
+		vm.checkFrozen(s)
+		b := append([]byte(nil), s.Bytes()...)
+		for _, a := range args {
+			switch v := a.(type) {
+			case *object.String:
+				b = append(b, v.Bytes()...)
+			case object.Integer:
+				b = append(b, byte(int64(v)))
+			case *object.Bignum:
+				b = append(b, byte(new(big.Int).Mod(v.I, big.NewInt(256)).Int64()))
+			default:
+				raise("TypeError", "wrong argument type %s (expected String or Integer)", vm.classOf(a).name)
+			}
+		}
+		s.SetBytes(b)
+		return s
+	})
 	vm.cString.define("dump", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		// Always a plain (never frozen, never subclass) String. The escaped text is
 		// pure ASCII, so it keeps the receiver's encoding when that is ASCII-
