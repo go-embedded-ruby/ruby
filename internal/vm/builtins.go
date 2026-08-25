@@ -1827,6 +1827,9 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("oct", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strOct(strOf(self))
 	})
+	vm.cString.define("hex", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return strHex(strOf(self))
+	})
 	vm.cString.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
@@ -5496,6 +5499,39 @@ func digitValue(c byte) int {
 // digits valid for that base (with the single-underscore separator rule) — and
 // stops at the first invalid character, returning 0 when no digits are present.
 func strOct(s string) object.Value {
+	i, neg := inumSignSkip(s)
+	base := 8
+	if i+1 < len(s) && s[i] == '0' {
+		switch s[i+1] {
+		case 'x', 'X':
+			base, i = 16, i+2
+		case 'b', 'B':
+			base, i = 2, i+2
+		case 'o', 'O':
+			base, i = 8, i+2
+		case 'd', 'D':
+			base, i = 10, i+2
+		}
+	}
+	return accumInum(s, i, base, neg)
+}
+
+// strHex implements String#hex: the string is read as a base-16 integer, with an
+// optional leading sign and an optional "0x"/"0X" prefix (no other radix prefix
+// is special, since b/d/o are themselves hex digits). It shares the digit scan
+// and stop rules with strOct via accumInum, and returns 0 when no hex digit
+// follows.
+func strHex(s string) object.Value {
+	i, neg := inumSignSkip(s)
+	if i+1 < len(s) && s[i] == '0' && (s[i+1] == 'x' || s[i+1] == 'X') {
+		i += 2
+	}
+	return accumInum(s, i, 16, neg)
+}
+
+// inumSignSkip skips leading ASCII whitespace and an optional sign, returning the
+// index of the first following character and whether the sign was negative.
+func inumSignSkip(s string) (int, bool) {
 	i, n := 0, len(s)
 	for i < n {
 		switch s[i] {
@@ -5510,22 +5546,16 @@ func strOct(s string) object.Value {
 		neg = s[i] == '-'
 		i++
 	}
-	base := 8
-	if i+1 < n && s[i] == '0' {
-		switch s[i+1] {
-		case 'x', 'X':
-			base, i = 16, i+2
-		case 'b', 'B':
-			base, i = 2, i+2
-		case 'o', 'O':
-			base, i = 8, i+2
-		case 'd', 'D':
-			base, i = 10, i+2
-		}
-	}
+	return i, neg
+}
+
+// accumInum scans the base-`base` digits of s starting at i (allowing a single
+// underscore between digits) up to the first invalid character, and returns the
+// resulting Integer, negated when neg, or 0 when no digit is present.
+func accumInum(s string, i, base int, neg bool) object.Value {
 	var digits []byte
 	prevUnderscore := false
-	for i < n {
+	for i < len(s) {
 		if s[i] == '_' {
 			if len(digits) == 0 || prevUnderscore {
 				break
