@@ -2412,3 +2412,54 @@ class Tempfile
     end
   end
 end
+
+# Warning is the module Ruby routes warnings through. Warning.warn writes a
+# message to $stderr and can be overridden; Warning.[] / Warning.[]= read and
+# toggle whether each warning category is enabled.
+module Warning
+  @warning_categories = {
+    deprecated: false,
+    experimental: true,
+    performance: false,
+    strict_unused_block: false,
+  }
+
+  class << self
+    # Warning.[](category) reports whether the category's warnings are enabled. A
+    # non-Symbol raises TypeError; an unknown category raises ArgumentError.
+    def [](category)
+      unless category.is_a?(Symbol)
+        raise TypeError, "wrong argument type #{category.class} (expected Symbol)"
+      end
+      unless @warning_categories.key?(category)
+        raise ArgumentError, "unknown category: #{category}"
+      end
+      @warning_categories[category]
+    end
+
+    # Warning.[]=(category, flag) enables or disables the category, with the same
+    # validation as Warning.[].
+    def []=(category, flag)
+      unless category.is_a?(Symbol)
+        raise TypeError, "wrong argument type #{category.class} (expected Symbol)"
+      end
+      unless @warning_categories.key?(category)
+        raise ArgumentError, "unknown category: #{category}"
+      end
+      @warning_categories[category] = flag
+    end
+
+    # Warning.categories lists the known warning categories.
+    def categories
+      @warning_categories.keys
+    end
+  end
+
+  # Warning.warn writes the message to $stderr unchanged and returns nil. It is a
+  # module function (via extend self) so it can be overridden by redefining it.
+  def warn(message, category: nil)
+    $stderr.write(message)
+    nil
+  end
+  extend self
+end
