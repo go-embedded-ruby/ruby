@@ -605,6 +605,23 @@ go tool cover -func=cov.out | tail -1
 
 If a parent `go.work` is present, prefix commands with `GOWORK=off`.
 
+### ruby/spec ratchet
+
+Behavioural conformance against Ruby's executable spec suite is tracked as a
+**shrink-only ratchet**. [`scripts/conformance/rubyspec/run.sh`](scripts/conformance/rubyspec/run.sh)
+runs the ruby/spec **language + core** suites through rbgo under a minimal
+MSpec-compatible shim and sums the passing examples; a per-PR CI lane fails if
+that total drops below the frozen floor in
+[`FLOOR`](scripts/conformance/rubyspec/FLOOR), so language + core conformance is
+measured on every change and can only go up (**15,400+** passing examples and
+climbing). It complements the differential oracle below: the ratchet is the
+absolute floor, the oracle catches divergences the specs don't cover.
+
+```bash
+scripts/conformance/rubyspec/run.sh          # measure vs the floor
+UPDATE_FLOOR=1 scripts/conformance/rubyspec/run.sh   # print the new floor after a win
+```
+
 ### CI layering
 
 Per-PR CI is a **fast native gate**: the `-race` + 100 %-coverage suite on

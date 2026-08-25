@@ -687,9 +687,27 @@ native codegen.)
 method serial), **small-integer interning** (fixnum cache), and **Env-struct
 pooling** (capture-tracked, halving per-call allocations) — plus a large, ongoing
 **MRI-differential conformance** effort closing stdlib gaps batch by batch against
-Ruby 4.0.5. **Still ahead:** broaden the ruby/spec subset; the remaining
-hot-path optimisations (the operand-stack/value-stack redesign) were assessed and
-deferred as high-churn for their gain.
+Ruby 4.0. The **ruby/spec language + core suites run in CI as a shrink-only
+ratchet** (`scripts/conformance/rubyspec/`, MSpec-compatible shim): every PR must
+keep the passing-example total at or above the frozen floor, so conformance is
+tracked and can only go up. Recent batches added, among others, `String#dump` /
+`#undump` / `#hex` / `#append_as_bytes`, the `Array#pack` / `String#unpack`
+`u` (uuencode) and `w` (BER) directives, and `#numerator` / `#denominator` on
+Integer / Float / Numeric — each landed at 100 % package coverage with a
+zero-regression sweep.
+
+**Still ahead:** the bulk of the remaining fail/error mass is in **deep
+subsystems**, not isolated methods — `IO` (real file descriptors + transcoding),
+`File` / `Dir` / `ARGF`, `Time`, `Process` / `spawn`, `ENV`, and `Marshal`
+(byte-exact) — plus cross-repo engines (`go-ruby-regexp` character classes,
+`go-ruby-format`) and the front-end carrying **source positions** (backtraces,
+`__LINE__`, `const_source_location` currently report line 0). The `library/`
+suites (socket, net-\*, openssl, zlib, …) are a further, largely
+networking/OS-bound frontier. Contained single-method gaps (case-mapping
+special-casing, `Range#include?`/`#cover?` edges, string index/chomp/gsub
+corners) are shrinking and continue to land one PR at a time. The remaining
+hot-path optimisation (the operand-stack/value-stack redesign) was assessed and
+deferred as high-churn for its gain.
 
 **Conformance & benchmark ladder (real-world corpora).** Beyond ruby/spec, validate
 against progressively harder real Ruby, and benchmark against other implementations:
