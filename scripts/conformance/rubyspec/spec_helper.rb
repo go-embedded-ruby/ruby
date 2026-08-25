@@ -194,7 +194,7 @@ def new_fd(name, mode = "w:utf-8")
 end
 def infinity_value; 1.0/0.0; end
 def nan_value; 0.0/0.0; end
-def bignum_value(plus = 0); 0x8000_0000_0000_0000 + plus; end
+def bignum_value(plus = 0); (2**64) + plus; end
 def fixnum_max; 0x3fff_ffff_ffff_ffff; end
 def fixnum_min; -0x4000_0000_0000_0000; end
 def max_long; 0x7fff_ffff_ffff_ffff; end
