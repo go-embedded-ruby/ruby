@@ -885,6 +885,41 @@ end
 # (Integer/Float/Rational/Complex inherit it); String mixes it in directly.
 class Numeric
   include Comparable
+
+  # A Numeric is treated as its exact rational value: #numerator and
+  # #denominator delegate to that of #to_r. Integer and Float override these
+  # below with cheaper, non-finite-aware versions.
+  def numerator
+    to_r.numerator
+  end
+
+  def denominator
+    to_r.denominator
+  end
+end
+
+class Integer
+  # An Integer is its own numerator over a denominator of 1.
+  def numerator
+    self
+  end
+
+  def denominator
+    1
+  end
+end
+
+class Float
+  # A finite Float uses the numerator/denominator of its exact rational value; a
+  # non-finite one (Infinity or NaN) has no rational form, so #numerator returns
+  # the Float itself and #denominator returns 1, matching MRI.
+  def numerator
+    finite? ? to_r.numerator : self
+  end
+
+  def denominator
+    finite? ? to_r.denominator : 1
+  end
 end
 
 class String
