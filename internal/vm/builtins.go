@@ -1465,12 +1465,21 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(strOf(self)) == 0)
 	})
-	vm.cString.define("dump", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		// Always a plain (never frozen, never subclass) String in the receiver's
-		// encoding; a non-ASCII-compatible source additionally carries a
-		// .force_encoding suffix inside the dumped text (see (*String).Dump).
+	vm.cString.define("dump", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// Always a plain (never frozen, never subclass) String. The escaped text is
+		// pure ASCII, so it keeps the receiver's encoding when that is ASCII-
+		// compatible, but a non-ASCII-compatible source degrades to US-ASCII and
+		// carries a .force_encoding suffix inside the dumped text (see
+		// (*String).Dump) — this is what lets String#undump read it back.
 		s := self.(*object.String)
-		return object.NewStringBytesEnc([]byte(s.Dump()), s.EncName())
+		enc := s.EncName()
+		if e, ok := vm.findEncoding(enc); ok && !e.asciiCompat {
+			enc = "US-ASCII"
+		}
+		return object.NewStringBytesEnc([]byte(s.Dump()), enc)
+	})
+	vm.cString.define("undump", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.stringUndump(self.(*object.String))
 	})
 	vm.cString.define("upcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, strings.ToUpper(strOf(self)))
