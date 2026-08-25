@@ -4496,14 +4496,14 @@ func (vm *VM) bootstrap() {
 	vm.cInteger.define(">>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.integerShift(bigVal(self), args[0], true)
 	})
-	vm.cInteger.define("&", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NormInt(new(big.Int).And(bigVal(self), bigArg(args[0])))
+	vm.cInteger.define("&", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.integerBitOp(bigVal(self), args[0], "&", (*big.Int).And)
 	})
-	vm.cInteger.define("|", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NormInt(new(big.Int).Or(bigVal(self), bigArg(args[0])))
+	vm.cInteger.define("|", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.integerBitOp(bigVal(self), args[0], "|", (*big.Int).Or)
 	})
-	vm.cInteger.define("^", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NormInt(new(big.Int).Xor(bigVal(self), bigArg(args[0])))
+	vm.cInteger.define("^", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.integerBitOp(bigVal(self), args[0], "^", (*big.Int).Xor)
 	})
 	vm.cInteger.define("~", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NormInt(new(big.Int).Not(bigVal(self)))
@@ -7961,6 +7961,26 @@ func bigArg(v object.Value) *big.Int {
 		return b
 	}
 	raise("TypeError", "%s can't be coerced into Integer", classNameOf(v))
+	return nil
+}
+
+// integerBitOp applies a bitwise operator (&, |, ^) to an Integer receiver. An
+// Integer or Bignum right operand is combined directly; any other operand except
+// a Float runs Ruby's coerce protocol — rhs.coerce(self) yields a [x, y] pair and
+// the operator is re-dispatched on it — while a Float (and anything without
+// #coerce) raises a TypeError, matching MRI, which does not coerce a Float here.
+func (vm *VM) integerBitOp(a *big.Int, arg object.Value, name string, op func(z, x, y *big.Int) *big.Int) object.Value {
+	if b, ok := object.BigOf(arg); ok {
+		return object.NormInt(op(new(big.Int), a, b))
+	}
+	if _, isFloat := arg.(object.Float); !isFloat && vm.respondsToDynamic(arg, "coerce") {
+		pair := vm.send(arg, "coerce", []object.Value{object.NormInt(a)}, nil)
+		if arr, ok := pair.(*object.Array); ok && len(arr.Elems) == 2 {
+			return vm.send(arr.Elems[0], name, []object.Value{arr.Elems[1]}, nil)
+		}
+		raise("TypeError", "coerce must return [x, y]")
+	}
+	raise("TypeError", "%s can't be coerced into Integer", vm.classOf(arg).name)
 	return nil
 }
 
