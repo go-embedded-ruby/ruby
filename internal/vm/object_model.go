@@ -1425,6 +1425,9 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		if x.isChain {
 			return vm.cEnumeratorChain
 		}
+		if x.isProduct {
+			return vm.cEnumeratorProduct
+		}
 		return vm.cEnumerator
 	case *yielder:
 		return vm.cYielder
