@@ -4363,6 +4363,24 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each")
 		}
 		r := self.(*object.Range)
+		// An endless range cannot be materialised: iterate it lazily (the block
+		// breaks out). A String walks by #succ and an Integer/Bignum counts up;
+		// any other begin (e.g. a Float) has no successor and can't be iterated.
+		if object.IsNil(r.Hi) {
+			if loS, ok := r.Lo.(*object.String); ok {
+				for cur := loS.Str(); ; {
+					vm.callBlock(blk, []object.Value{object.NewString(cur)})
+					cur = succString(cur)
+				}
+			}
+			switch r.Lo.(type) {
+			case object.Integer, *object.Bignum:
+				for n := new(big.Int).Set(bigVal(r.Lo)); ; n = new(big.Int).Add(n, big.NewInt(1)) {
+					vm.callBlock(blk, []object.Value{object.NormInt(n)})
+				}
+			}
+			raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+		}
 		for _, e := range rangeElems(r) {
 			vm.callBlock(blk, []object.Value{e})
 		}
