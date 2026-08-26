@@ -958,6 +958,11 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		_, ok := b.(object.Nil)
 		return ok
 	}
+	// Two IO::Buffers are equal when both are live and hold the same bytes.
+	if ab, ok := a.(*ioBuffer); ok {
+		bb, ok := b.(*ioBuffer)
+		return ok && !ab.freed && !bb.freed && string(ab.data) == string(bb.data)
+	}
 	// Reference types not handled above (classes, procs, …) compare by identity,
 	// which is Ruby's default Object#==.
 	return a == b

@@ -1429,6 +1429,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 			return vm.cEnumeratorProduct
 		}
 		return vm.cEnumerator
+	case *ioBuffer:
+		return vm.cIOBuffer
 	case *yielder:
 		return vm.cYielder
 	case *encodingObj:
