@@ -4534,14 +4534,12 @@ func (vm *VM) bootstrap() {
 		return object.NormInt(new(big.Int).Not(bigVal(self)))
 	})
 	vm.cInteger.define("gcd", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.IntValue(gcdInt(intOf(self), intArg(args[0])))
+		a, _ := object.BigOf(self)
+		return object.NormInt(bigGCD(a, integerGcdArg(args[0])))
 	})
 	vm.cInteger.define("lcm", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := intOf(self), intArg(args[0])
-		if a == 0 || b == 0 {
-			return object.IntValue(0)
-		}
-		return object.IntValue(absInt(a / gcdInt(a, b) * b))
+		a, _ := object.BigOf(self)
+		return object.NormInt(bigLCM(a, integerGcdArg(args[0])))
 	})
 	fdiv := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a, _ := toFloat(self)
@@ -4608,30 +4606,16 @@ func (vm *VM) bootstrap() {
 		}
 		return object.IntValue(c)
 	})
-	vm.cInteger.define("divmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := intOf(self), intArg(args[0])
-		if b == 0 {
-			raise("ZeroDivisionError", "divided by 0")
-		}
-		return object.NewArray(object.IntValue(floorDiv(a, b)), object.IntValue(floorMod(a, b)))
+	vm.cInteger.define("divmod", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.integerDivmod(self, args[0])
 	})
 	vm.cInteger.define("gcdlcm", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a, b := intOf(self), intArg(args[0])
-		g := gcdInt(a, b)
-		var lcm int64
-		if a != 0 && b != 0 {
-			lcm = absInt(a / g * b)
-		}
-		return object.NewArray(object.IntValue(g), object.IntValue(lcm))
+		a, _ := object.BigOf(self)
+		b := integerGcdArg(args[0])
+		return object.NewArray(object.NormInt(bigGCD(a, b)), object.NormInt(bigLCM(a, b)))
 	})
-	vm.cInteger.define("remainder", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		// remainder truncates toward zero (keeping the dividend's sign), unlike %
-		// which floors — exactly Go's % operator.
-		a, b := intOf(self), intArg(args[0])
-		if b == 0 {
-			raise("ZeroDivisionError", "divided by 0")
-		}
-		return object.IntValue(a % b)
+	vm.cInteger.define("remainder", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.integerRemainder(self, args[0])
 	})
 	// truncate with ndigits >= 0 leaves an Integer unchanged; with ndigits < 0 it
 	// truncates toward zero to the nearest 10**(-ndigits). Integer#round is defined
@@ -7636,14 +7620,6 @@ func powNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.V
 	return object.Float(math.Pow(a, b))
 }
 
-// absInt is the absolute value of an int64.
-func absInt(n int64) int64 {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
-
 // stringLineSegs splits the receiver into line segments for String#lines /
 // #each_line, honouring the optional record separator (default "\n"; nil = the
 // whole string; "" = paragraph mode) and a chomp: keyword that strips the
@@ -7979,16 +7955,6 @@ func bigVal(v object.Value) *big.Int {
 	return b
 }
 
-// bigArg returns an integer argument as a *big.Int, raising TypeError when the
-// argument is not an Integer/Bignum (as Ruby's bitwise operators do).
-func bigArg(v object.Value) *big.Int {
-	if b, ok := object.BigOf(v); ok {
-		return b
-	}
-	raise("TypeError", "%s can't be coerced into Integer", classNameOf(v))
-	return nil
-}
-
 // integerBitOp applies a bitwise operator (&, |, ^) to an Integer receiver. An
 // Integer or Bignum right operand is combined directly; any other operand except
 // a Float runs Ruby's coerce protocol — rhs.coerce(self) yields a [x, y] pair and
@@ -8122,15 +8088,6 @@ func (vm *VM) integerShiftBig(a, m *big.Int) object.Value {
 	}
 	raise("RangeError", "shift width too big")
 	return nil
-}
-
-// gcdInt is the (non-negative) greatest common divisor by Euclid's algorithm.
-func gcdInt(a, b int64) int64 {
-	a, b = absInt(a), absInt(b)
-	for b != 0 {
-		a, b = b, a%b
-	}
-	return a
 }
 
 // rubyEqual is the default Object#== : pointer identity for instances, and
