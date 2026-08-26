@@ -148,13 +148,60 @@ func (vm *VM) registerIO() {
 	vm.consts["STDOUT"], vm.consts["STDERR"], vm.consts["STDIN"] = stdout, stderr, stdin
 	vm.globals["$stdout"], vm.globals["$stderr"], vm.globals["$stdin"] = stdout, stderr, stdin
 
-	// Kernel#warn writes each message (newline-terminated) to the current $stderr.
+	// Kernel#warn builds one message — each argument on its own line, a newline
+	// appended only when it does not already end with one — and routes it through
+	// Warning.warn(message, category:) so a program that overrides Warning.warn (or
+	// reads the category) sees it, as in MRI. A String category is converted to a
+	// Symbol (anything else is a TypeError); a category whose warnings are disabled
+	// (Warning[category] is false) is dropped, and an unknown category raises. The
+	// uplevel: keyword is validated (a negative or non-Integer value raises) but not
+	// acted on, as rbgo has no caller line to prepend. With no message it does
+	// nothing.
 	vm.cObject.define("warn", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		o := vm.curStderr()
-		for _, a := range args {
-			vm.ioPutsValue(o, a)
+		var category object.Value = object.NilV
+		pos := args
+		if kw := trailingKwHash(args); kw != nil {
+			pos = args[:len(args)-1]
+			if v, ok := kw.Get(object.SymVal("category")); ok {
+				category = v
+			}
+			if v, ok := kw.Get(object.SymVal("uplevel")); ok && !object.IsNil(v) {
+				n, isInt := v.(object.Integer)
+				if !isInt {
+					raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(v).name)
+				}
+				if int64(n) < 0 {
+					raise("ArgumentError", "negative level (%d)", int64(n))
+				}
+			}
 		}
-		return object.NilV
+		var b strings.Builder
+		for _, a := range pos {
+			s := vm.displayStr(a)
+			b.WriteString(s)
+			if !strings.HasSuffix(s, "\n") {
+				b.WriteByte('\n')
+			}
+		}
+		if b.Len() == 0 {
+			return object.NilV
+		}
+		if !object.IsNil(category) {
+			switch c := category.(type) {
+			case object.Symbol:
+			case *object.String:
+				category = object.Symbol(c.Str())
+			default:
+				raise("TypeError", "no implicit conversion of %s into Symbol", vm.classOf(category).name)
+			}
+			// Warning[category] filters the message (and raises for an unknown one).
+			if !vm.send(vm.consts["Warning"], "[]", []object.Value{category}, nil).Truthy() {
+				return object.NilV
+			}
+		}
+		kw := object.NewHash()
+		kw.Set(object.SymVal("category"), category)
+		return vm.send(vm.consts["Warning"], "warn", []object.Value{object.NewString(b.String()), kw}, nil)
 	})
 
 	// File streams: File.open returns a buffered, file-backed IO carrying the
