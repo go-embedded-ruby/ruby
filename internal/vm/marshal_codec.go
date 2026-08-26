@@ -297,6 +297,18 @@ func (d *mDumper) writeObject(o *RObject) {
 	if d.link(o) {
 		return
 	}
+	// An object singleton-extended by one or more modules is prefixed with an 'e'
+	// container per module (last-extended first, matching MRI's ancestry order).
+	if o.singleton != nil {
+		inc := o.singleton.includes
+		for i := len(inc) - 1; i >= 0; i-- {
+			if inc[i].name == "" {
+				raise("TypeError", "can't dump anonymous class %s", inc[i].ToS())
+			}
+			d.buf = append(d.buf, 'e')
+			d.writeSymbol(inc[i].name)
+		}
+	}
 	if d.vm.respondsTo(o, "marshal_dump") {
 		val := d.vm.send(o, "marshal_dump", nil, nil)
 		d.emitUserMarshal(o.class.name, val)
@@ -320,6 +332,27 @@ func (d *mDumper) writeObject(o *RObject) {
 		for i, name := range sd.names {
 			d.writeSymbol(name)
 			d.writeValue(o.structVals[i])
+		}
+		return
+	}
+	// An instance of a user subclass of a built-in value type (Array/Hash/
+	// String/Range/...) dumps as 'C' — the class name followed by the wrapped
+	// built-in value. Any instance variables are carried by an outer 'I' wrapper,
+	// as MRI does for objects whose payload type has no inline ivar slot.
+	if o.builtin != nil {
+		names := o.liveIvarNames()
+		if len(names) > 0 {
+			d.buf = append(d.buf, 'I')
+		}
+		d.buf = append(d.buf, 'C')
+		d.writeSymbol(o.class.name)
+		d.writeValue(o.builtin)
+		if len(names) > 0 {
+			d.writeLong(len(names))
+			for _, name := range names {
+				d.writeSymbol(name)
+				d.writeValue(o.ivars[name])
+			}
 		}
 		return
 	}
@@ -523,6 +556,10 @@ func (r *mReader) readObject() (object.Value, bool) {
 		return r.freezeValue(r.readHash(tag == '}')), true
 	case 'o':
 		return r.freezeValue(r.readObj()), true
+	case 'e':
+		return r.freezeValue(r.readExtended()), true
+	case 'C':
+		return r.freezeValue(r.readSubclass()), true
 	case 'S':
 		return r.freezeValue(r.readStruct()), true
 	case 'c':
@@ -654,6 +691,29 @@ func (r *mReader) readObj() object.Value {
 		name := r.readSymbol()
 		setIvar(o, name, r.readValue())
 	}
+	return o
+}
+
+// readExtended reads the 'e' container: a module name followed by the object
+// that was singleton-extended with it. The base is re-extended on load. 'e'
+// carries no link id of its own — the wrapped object is what gets registered.
+func (r *mReader) readExtended() object.Value {
+	modName := r.readSymbol()
+	mod := r.vm.marshalClass(modName)
+	base, _ := r.readObject()
+	r.vm.send(base, "extend", []object.Value{mod}, nil)
+	return base
+}
+
+// readSubclass reads the 'C' container: a user subclass of a built-in value
+// type, whose wrapped built-in value follows the class name. The outer object
+// is registered before the payload so the link ids match the dump side.
+func (r *mReader) readSubclass() object.Value {
+	className := r.readSymbol()
+	cls := r.vm.marshalClass(className)
+	o := &RObject{class: cls, ivars: map[string]object.Value{}}
+	r.register(o)
+	o.builtin = r.readValue()
 	return o
 }
 
