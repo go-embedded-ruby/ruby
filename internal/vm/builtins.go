@@ -4226,6 +4226,14 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cRange.define("member?", rangeCover)
 	vm.cRange.define("===", rangeCover)
+	// Range#overlap?(other) reports whether the two ranges share any element.
+	vm.cRange.define("overlap?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := args[0].(*object.Range)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Range)", vm.classOf(args[0]).name)
+		}
+		return object.Bool(rangeOverlap(self.(*object.Range), o))
+	})
 	vm.cRange.define("min", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		r := self.(*object.Range)
 		if len(args) > 0 { // min(n): the n smallest (the range is ascending)

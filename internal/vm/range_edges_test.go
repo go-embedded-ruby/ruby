@@ -166,3 +166,34 @@ func TestRangeReverseEachErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestRangeOverlap covers Range#overlap? — shared-element detection with
+// inclusive/exclusive ends, unbounded sides, empty/backward ranges and the
+// non-Range TypeError. Asserted against MRI Ruby 4.0.6.
+func TestRangeOverlap(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p (1..5).overlap?(3..7)`, "true\n"},
+		{`p (1..5).overlap?(6..8)`, "false\n"},
+		{`p (1..5).overlap?(5..8)`, "true\n"},   // inclusive ends touch
+		{`p (1...5).overlap?(5..8)`, "false\n"}, // exclusive end just misses
+		{`p (1..5).overlap?(10..)`, "false\n"},  // endless other, disjoint
+		{`p (..5).overlap?(3..)`, "true\n"},     // beginless meets endless
+		{`p (1..3).overlap?(4..2)`, "false\n"},  // backward (empty) other
+		{`p (1..5).overlap?(5..1)`, "false\n"},  // empty other touching self's end
+		{`p (1...1).overlap?(0..2)`, "false\n"}, // empty self
+		{`p ("a".."c").overlap?("b".."d")`, "true\n"},
+		{`p (1.0..2.0).overlap?(1.5..3.0)`, "true\n"},
+		{`p (1..5).overlap?("a".."z")`, "false\n"}, // incomparable bounds
+		{`p ("a".."z").overlap?(1..5)`, "false\n"},
+		{`p (1..).overlap?("a".."z")`, "false\n"}, // endless self, incomparable
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+	if err := runErr(t, `(1..5).overlap?(3)`); err == nil ||
+		!strings.Contains(err.Error(), "wrong argument type Integer (expected Range)") {
+		t.Errorf("overlap?(non-Range): err=%v", err)
+	}
+}
