@@ -209,11 +209,12 @@ type RClass struct {
 	// named reports whether this class/module has acquired a permanent name yet.
 	// An anonymous class (Class.new / Module.new) starts unnamed; the first time
 	// it is assigned to a constant it takes that constant's qualified name.
-	named    bool
-	isModule bool
-	meta     *RClass // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
-	metaOf   *RClass // when this RClass is a metaclass, the class it is the metaclass of (else nil); routes `class << c` visibility directives to c's class methods
-	funcMode bool    // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
+	named       bool
+	isModule    bool
+	meta        *RClass // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
+	metaOf      *RClass // when this RClass is a metaclass, the class it is the metaclass of (else nil); routes `class << c` visibility directives to c's class methods
+	isSingleton bool    // true for a singleton class — a class metaclass or a per-object singleton (reported by Module#singleton_class?)
+	funcMode    bool    // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
 	// defaultVis is the access level applied to subsequent `def`s in this body,
 	// set by a bare `private` / `protected` / `public` with no args. It resets to
 	// visPublic at the start of each class/module body (a fresh RClass starts at
@@ -335,6 +336,7 @@ type RObject struct {
 func (vm *VM) singletonClass(o *RObject) *RClass {
 	if o.singleton == nil {
 		o.singleton = newClass("", o.class)
+		o.singleton.isSingleton = true
 	}
 	return o.singleton
 }
@@ -398,6 +400,7 @@ func (vm *VM) ensureSingleton(v object.Value) (*RClass, bool) {
 		return sc, true
 	}
 	sc := newClass("", vm.classOf(v))
+	sc.isSingleton = true
 	vm.extSingletons[v] = sc
 	return sc, true
 }
@@ -422,6 +425,7 @@ func (c *RClass) metaClass() *RClass {
 		mc := newClass("#<Class:"+c.name+">", nil)
 		mc.methods = c.smethods // alias: defs here become class methods of c
 		mc.metaOf = c           // back-pointer: lets `private :foo` in `class << c` reach c's class methods
+		mc.isSingleton = true
 		// The metaclass superclass is the superclass's metaclass, so a class-method
 		// `super` (def self.foo / class << self) walks to the inherited class method:
 		// #<Class:Child> -> #<Class:Base> -> ... This mirrors MRI's metaclass chain.
