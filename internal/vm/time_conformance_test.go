@@ -242,6 +242,49 @@ func TestTimeZoneOffsetForms(t *testing.T) {
 		{`p Time.new(2026,1,1,0,0,0,"+09:30:15").utc_offset`, "34215\n"}, // +HH:MM:SS
 		{`p Time.new(2026,1,1,0,0,0,"UTC").utc?`, "true\n"},
 		{`p Time.new(2026,1,1,0,0,0,"Z").utc?`, "true\n"},
+		// A military-zone letter: A..I, K..M, N..Y, Z (J is excluded).
+		{`p Time.new(2026,1,1,0,0,0,"A").utc_offset`, "3600\n"},
+		{`p Time.new(2026,1,1,0,0,0,"K").utc_offset`, "36000\n"},
+		{`p Time.new(2026,1,1,0,0,0,"M").utc_offset`, "43200\n"},
+		{`p Time.new(2026,1,1,0,0,0,"N").utc_offset`, "-3600\n"},
+		{`p Time.new(2026,1,1,0,0,0,"Y").utc_offset`, "-43200\n"},
+		// An Integer offset in seconds, and the in: keyword.
+		{`p Time.new(2026,1,1,0,0,0,3600).utc_offset`, "3600\n"},
+		{`p Time.new(2026,1,1,0,0,0,-19800).utc_offset`, "-19800\n"},
+		{`p Time.new(2026,1,1,0,0,0, in: 7200).utc_offset`, "7200\n"},
+		// Offsets a whole day or larger, and a Bignum offset, are out of range.
+		{`begin; Time.new(2026,1,1,0,0,0,86400); rescue ArgumentError => e; p e.message; end`, "\"utc_offset out of range\"\n"},
+		{`begin; Time.new(2026,1,1,0,0,0,-86400); rescue ArgumentError => e; p e.message; end`, "\"utc_offset out of range\"\n"},
+		{`begin; Time.new(2026,1,1,0,0,0,2**70); rescue ArgumentError => e; p e.message; end`, "\"utc_offset out of range\"\n"},
+		// Malformed String offsets, and an object that is no exact number.
+		{`begin; Time.new(2026,1,1,0,0,0,"J"); rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+		{`begin; Time.new(2026,1,1,0,0,0,"+24:00"); rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+		{`begin; Time.new(2026,1,1,0,0,0,"+09:99"); rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+		{`begin; Time.new(2026,1,1,0,0,0,"3600"); rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+		{`begin; Time.new(2026,1,1,0,0,0,Object.new); rescue TypeError => e; p e.message; end`, "\"can't convert Object into an exact number\"\n"},
+	} {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestTimeCalendarCoercion covers Time.new / Time.utc calendar fields: an
+// Integer or Float directly, #to_int coercion, a nil field falling back to the
+// default, and the two TypeError paths (no #to_int, and #to_int giving a
+// non-Integer). Verified against ruby 4.0.6.
+func TestTimeCalendarCoercion(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		{`class I5; def to_int; 5; end; end; p Time.utc(2020, I5.new).month`, "5\n"},
+		{`p Time.utc(2020, 3.9).month`, "3\n"},
+		{`p Time.utc(2020, nil, nil).mday`, "1\n"},
+		{`begin; Time.utc(2020, Object.new); rescue TypeError => e; p e.message; end`, "\"no implicit conversion of Object into Integer\"\n"},
+		{`class Bad; def to_int; "x"; end; end; begin; Time.utc(2020, Bad.new); rescue TypeError => e; p e.message; end`, "\"can't convert Bad to Integer (Bad#to_int gives String)\"\n"},
+		{`class Big; def to_int; 2**63 + 100; end; end; begin; Time.utc(2020, Big.new); rescue RangeError => e; p e.message; end`, "\"bignum too big to convert into 'long'\"\n"},
+		// getlocal / round share the same offset and integer coercion.
+		{`p Time.utc(2020,1,1,12).getlocal(3600).utc_offset`, "3600\n"},
+		{`p Time.utc(2020,1,1,12).getlocal("+05:00").utc_offset`, "18000\n"},
+		{`p Time.at(1.23456).round(2.9).to_f`, "1.23\n"},
 	} {
 		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)

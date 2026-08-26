@@ -131,16 +131,16 @@ func (vm *VM) registerTime() {
 		vm.cTime.smethods[name] = &Method{name: name, owner: vm.cTime, native: fn}
 	}
 	// Time.at(time, subsec = nil, unit = :microsecond, in: nil).
-	sm("at", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return timeAt(args)
+	sm("at", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.timeAt(args)
 	})
 	// Time.now → the VM's controllable clock (Timecop drives it), optionally in a
 	// given zone via the in: keyword.
 	sm("now", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		loc, _ := timeZoneKw(args)
+		zone, _ := timeZoneKw(args)
 		n := vm.nowInstant()
-		if loc != nil {
-			n = n.In(loc)
+		if zone != nil {
+			n = n.In(vm.newTimeOffset(zone))
 		}
 		return &Time{t: n}
 	})
@@ -150,14 +150,14 @@ func (vm *VM) registerTime() {
 		return vm.timeNew(args)
 	})
 	// Time.utc / Time.gm(year[,mon,day,hour,min,sec,usec]) → a UTC instant.
-	utc := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return timeFromCalendar(args, stdtime.UTC)
+	utc := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.timeFromCalendar(args, stdtime.UTC)
 	}
 	sm("utc", utc)
 	sm("gm", utc)
 	// Time.local / Time.mktime(...) → the same, in the local zone.
-	local := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return timeFromCalendar(args, stdtime.Local)
+	local := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.timeFromCalendar(args, stdtime.Local)
 	}
 	sm("local", local)
 	sm("mktime", local)
@@ -321,14 +321,14 @@ func (vm *VM) registerTime() {
 	d("utc", toUTC)
 	d("gmtime", toUTC)
 	d("localtime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		self(v).t = self(v).t.In(localtimeLoc(args))
+		self(v).t = self(v).t.In(vm.localtimeLoc(args))
 		return v
 	})
 	d("getutc", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Time{t: self(v).t.UTC()}
 	})
 	d("getlocal", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Time{t: self(v).t.In(localtimeLoc(args))}
+		return &Time{t: self(v).t.In(vm.localtimeLoc(args))}
 	})
 
 	// round / floor / ceil to ndigits sub-second digits (default 0).
@@ -392,11 +392,11 @@ func (vm *VM) registerTime() {
 
 // timeZoneKw pops a trailing keyword hash carrying in: <zone> off args, returning
 // the resolved location (nil when absent) and the remaining positional args.
-func timeZoneKw(args []object.Value) (*stdtime.Location, []object.Value) {
+func timeZoneKw(args []object.Value) (object.Value, []object.Value) {
 	if n := len(args); n > 0 {
 		if h, ok := args[n-1].(*object.Hash); ok {
 			if z, ok := h.Get(object.Symbol("in")); ok {
-				return parseZone(strArg(z)), args[:n-1]
+				return z, args[:n-1]
 			}
 		}
 	}
@@ -404,58 +404,24 @@ func timeZoneKw(args []object.Value) (*stdtime.Location, []object.Value) {
 }
 
 // localtimeLoc resolves the optional offset argument of localtime / getlocal:
-// none → the local zone, a string offset → that fixed zone.
-func localtimeLoc(args []object.Value) *stdtime.Location {
+// none → the local zone, else the same utc_offset forms Time.new accepts
+// (String or Integer seconds).
+func (vm *VM) localtimeLoc(args []object.Value) *stdtime.Location {
 	if len(args) == 0 {
 		return stdtime.Local
 	}
-	return parseZone(strArg(args[0]))
-}
-
-// parseZone turns a Ruby zone argument — "UTC"/"Z" or a numeric offset in
-// "+HH", "+HHMM", "+HH:MM", "+HH:MM:SS" (and ':'-free) form — into a Go location,
-// raising ArgumentError for anything it cannot read.
-func parseZone(s string) *stdtime.Location {
-	if s == "UTC" || s == "Z" {
-		return stdtime.UTC
-	}
-	sign := 1
-	body := s
-	switch {
-	case strings.HasPrefix(s, "+"):
-		body = s[1:]
-	case strings.HasPrefix(s, "-"):
-		sign, body = -1, s[1:]
-	default:
-		raise("ArgumentError", "%q is not a valid offset", s)
-	}
-	body = strings.ReplaceAll(body, ":", "")
-	if len(body) != 2 && len(body) != 4 && len(body) != 6 {
-		raise("ArgumentError", "%q is not a valid offset", s)
-	}
-	off := 0
-	for i := 0; i < len(body); i += 2 {
-		n, err := strconv.Atoi(body[i : i+2])
-		if err != nil {
-			raise("ArgumentError", "%q is not a valid offset", s)
-		}
-		off = off*60 + n
-	}
-	// off has folded in HH(:MM(:SS)) as base-60 digits; scale to seconds.
-	switch len(body) {
-	case 2:
-		off *= 3600
-	case 4:
-		off *= 60
-	}
-	return stdtime.FixedZone("", sign*off)
+	return vm.newTimeOffset(args[0])
 }
 
 // timeAt implements Time.at(time, subsec = nil, unit = :microsecond, in:).
-func timeAt(args []object.Value) *Time {
-	loc, pos := timeZoneKw(args)
+func (vm *VM) timeAt(args []object.Value) *Time {
+	zone, pos := timeZoneKw(args)
 	if len(pos) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1..)")
+	}
+	var loc *stdtime.Location
+	if zone != nil {
+		loc = vm.newTimeOffset(zone)
 	}
 	var t stdtime.Time
 	switch a := pos[0].(type) {
@@ -528,15 +494,31 @@ func numFloat(v object.Value) float64 {
 	return 0
 }
 
-// numInt marshals a Ruby Integer / Float to an int, raising TypeError otherwise.
-func numInt(v object.Value) int {
+// timeInt coerces a calendar field to an int the way MRI does: an Integer or
+// Float directly, otherwise via #to_int (whose result must itself be an
+// Integer), else a class-named TypeError.
+func (vm *VM) timeInt(v object.Value) int {
 	switch n := v.(type) {
 	case object.Integer:
 		return int(n)
 	case object.Float:
 		return int(n)
 	}
-	raise("TypeError", "no implicit conversion into Integer")
+	// A Bignum, or any object with #to_int, is coerced through the protocol; a
+	// Bignum answers #to_int with itself, so it lands in the result switch below.
+	if vm.respondsTo(v, "to_int") {
+		r := vm.send(v, "to_int", nil, nil)
+		switch n := r.(type) {
+		case object.Integer:
+			return int(n)
+		case *object.Bignum:
+			// Every rbgo Bignum is outside int64, so no calendar field can hold one.
+			raise("RangeError", "bignum too big to convert into 'long'")
+		}
+		raise("TypeError", "can't convert %s to Integer (%s#to_int gives %s)",
+			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(v).name)
 	return 0
 }
 
@@ -544,43 +526,129 @@ func numInt(v object.Value) int {
 // year[,mon,day,hour,min,sec,zone] with an optional in: keyword overriding the
 // positional zone.
 func (vm *VM) timeNew(args []object.Value) *Time {
-	kwLoc, pos := timeZoneKw(args)
+	kwZone, pos := timeZoneKw(args)
 	if len(pos) == 0 {
 		n := vm.nowInstant()
-		if kwLoc != nil {
-			n = n.In(kwLoc)
+		if kwZone != nil {
+			n = n.In(vm.newTimeOffset(kwZone))
 		}
 		return &Time{t: n}
 	}
 	loc := stdtime.Local
 	if len(pos) >= 7 {
-		loc = parseZone(strArg(pos[6]))
+		loc = vm.newTimeOffset(pos[6])
 	}
-	if kwLoc != nil {
-		loc = kwLoc
+	if kwZone != nil {
+		loc = vm.newTimeOffset(kwZone)
 	}
-	return buildTime(pos, 0, loc)
+	return vm.buildTime(pos, 0, loc)
+}
+
+// newTimeOffset resolves Time.new's utc_offset / in: argument to a location: a
+// String in "(+|-)HH[:MM[:SS]]", "UTC"/"Z" or single military-letter form; or an
+// Integer number of seconds in (-86400, 86400). Anything else is a TypeError, as
+// MRI reports for an object it cannot read as an exact number.
+func (vm *VM) newTimeOffset(v object.Value) *stdtime.Location {
+	switch x := v.(type) {
+	case *object.String:
+		return parseUtcOffset(x.Str())
+	case object.Integer:
+		return fixedOffsetLoc(int(x))
+	case *object.Bignum:
+		raise("ArgumentError", "utc_offset out of range")
+	}
+	raise("TypeError", "can't convert %s into an exact number", vm.classOf(v).name)
+	return nil
+}
+
+// fixedOffsetLoc turns a numeric utc_offset into a fixed zone, rejecting a
+// magnitude of a whole day or more the way MRI does.
+func fixedOffsetLoc(sec int) *stdtime.Location {
+	if sec <= -86400 || sec >= 86400 {
+		raise("ArgumentError", "utc_offset out of range")
+	}
+	return stdtime.FixedZone("", sec)
+}
+
+// parseUtcOffset reads Time.new's String utc_offset, raising MRI's exact
+// ArgumentError for any form it does not recognise.
+func parseUtcOffset(s string) *stdtime.Location {
+	if s == "UTC" {
+		return stdtime.UTC
+	}
+	// A single military-zone letter: A..I = +1..+9h, K..M = +10..+12h,
+	// N..Y = -1..-12h, Z = UTC ('J', the local zone, is intentionally excluded).
+	if len(s) == 1 {
+		c := s[0]
+		switch {
+		case c >= 'A' && c <= 'I':
+			return fixedOffsetLoc(int(c-'A'+1) * 3600)
+		case c >= 'K' && c <= 'M':
+			return fixedOffsetLoc(int(c-'K'+10) * 3600)
+		case c >= 'N' && c <= 'Y':
+			return fixedOffsetLoc(-int(c-'N'+1) * 3600)
+		case c == 'Z':
+			return stdtime.UTC
+		}
+		raiseBadOffset(s)
+	}
+	sign := 1
+	switch {
+	case strings.HasPrefix(s, "+"):
+	case strings.HasPrefix(s, "-"):
+		sign = -1
+	default:
+		raiseBadOffset(s)
+	}
+	body := strings.ReplaceAll(s[1:], ":", "")
+	if len(body) != 2 && len(body) != 4 && len(body) != 6 {
+		raiseBadOffset(s)
+	}
+	hh, mm, ss := 0, 0, 0
+	for i := 0; i < len(body); i += 2 {
+		n, err := strconv.Atoi(body[i : i+2])
+		if err != nil {
+			raiseBadOffset(s)
+		}
+		switch i {
+		case 0:
+			hh = n
+		case 2:
+			mm = n
+		case 4:
+			ss = n
+		}
+	}
+	if hh > 23 || mm > 59 || ss > 59 {
+		raiseBadOffset(s)
+	}
+	return fixedOffsetLoc(sign * (hh*3600 + mm*60 + ss))
+}
+
+func raiseBadOffset(s string) {
+	raise("ArgumentError",
+		"\"+HH:MM\", \"-HH:MM\", \"UTC\" or \"A\"..\"I\",\"K\"..\"Z\" expected for utc_offset: %s", s)
 }
 
 // timeFromCalendar implements Time.utc / Time.local: year[,mon,day,hour,min,sec,
 // usec] in the given location.
-func timeFromCalendar(args []object.Value, loc *stdtime.Location) *Time {
+func (vm *VM) timeFromCalendar(args []object.Value, loc *stdtime.Location) *Time {
 	usec := 0.0
 	if len(args) >= 7 {
 		usec = numFloat(args[6])
 	}
-	return buildTime(args, usec, loc)
+	return vm.buildTime(args, usec, loc)
 }
 
 // buildTime assembles a Time from calendar parts (with usec added in), validating
 // each field's range the way MRI does before handing normalised parts to Go's
 // time.Date.
-func buildTime(pos []object.Value, usec float64, loc *stdtime.Location) *Time {
-	year := numInt(pos[0])
-	month := partOr(pos, 1, 1)
-	day := partOr(pos, 2, 1)
-	hour := partOr(pos, 3, 0)
-	min := partOr(pos, 4, 0)
+func (vm *VM) buildTime(pos []object.Value, usec float64, loc *stdtime.Location) *Time {
+	year := vm.timeInt(pos[0])
+	month := vm.partOr(pos, 1, 1)
+	day := vm.partOr(pos, 2, 1)
+	hour := vm.partOr(pos, 3, 0)
+	min := vm.partOr(pos, 4, 0)
 	secF := 0.0
 	if len(pos) >= 6 {
 		secF = numFloat(pos[5])
@@ -598,12 +666,13 @@ func buildTime(pos []object.Value, usec float64, loc *stdtime.Location) *Time {
 	return &Time{t: stdtime.Date(year, stdtime.Month(month), day, hour, min, sec, int(ns), loc)}
 }
 
-// partOr returns the integer calendar part at index i, or def when it is absent.
-func partOr(pos []object.Value, i, def int) int {
-	if len(pos) <= i {
+// partOr returns the integer calendar part at index i, or def when it is absent
+// or nil (MRI treats a nil calendar field as "use the default").
+func (vm *VM) partOr(pos []object.Value, i, def int) int {
+	if len(pos) <= i || object.IsNil(pos[i]) {
 		return def
 	}
-	return numInt(pos[i])
+	return vm.timeInt(pos[i])
 }
 
 // checkRange raises MRI's "<field> out of range" ArgumentError when v is outside
@@ -617,10 +686,10 @@ func checkRange(field string, v, lo, hi int) {
 // roundFn builds Time#round / #floor / #ceil. add is (*big.Int).Add for round /
 // ceil (nil for floor); half selects round's nearest-neighbour bias.
 func roundFn(add func(z, x, y *big.Int) *big.Int, half bool) NativeFn {
-	return func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+	return func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		digits := 0
 		if len(args) > 0 {
-			digits = numInt(args[0])
+			digits = vm.timeInt(args[0])
 		}
 		t := v.(*Time).t
 		sec, ns := t.Unix(), int64(t.Nanosecond())
