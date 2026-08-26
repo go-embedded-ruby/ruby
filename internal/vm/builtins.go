@@ -4157,7 +4157,7 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*object.Range).Lo
 	})
-	vm.cRange.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cRange.define("first", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
 		if len(args) == 0 {
 			return r.Lo
@@ -4179,7 +4179,7 @@ func (vm *VM) bootstrap() {
 			}
 			return object.NewArrayFromSlice(out)
 		}
-		elems := rangeElems(r)
+		elems := vm.rangeElemsV(r)
 		n = clampCount(int64(n), len(elems))
 		out := make([]object.Value, n)
 		copy(out, elems[:n])
@@ -4188,7 +4188,7 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("end", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*object.Range).Hi
 	})
-	vm.cRange.define("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cRange.define("last", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
 		if _, isNil := r.Hi.(object.Nil); isNil {
 			raise("RangeError", "cannot get the last element of endless range")
@@ -4196,7 +4196,7 @@ func (vm *VM) bootstrap() {
 		if len(args) == 0 {
 			return r.Hi
 		}
-		elems := rangeElems(r)
+		elems := vm.rangeElemsV(r)
 		n := clampCount(vm.repeatLong(args[0]), len(elems))
 		out := make([]object.Value, n)
 		copy(out, elems[len(elems)-n:])
@@ -4227,7 +4227,7 @@ func (vm *VM) bootstrap() {
 			if object.IsNil(r.Lo) {
 				raise("RangeError", "cannot get the minimum of beginless range")
 			}
-			elems := rangeElems(r)
+			elems := vm.rangeElemsV(r)
 			n := clampCount(vm.repeatLong(args[0]), len(elems))
 			out := make([]object.Value, n)
 			copy(out, elems[:n])
@@ -4253,7 +4253,7 @@ func (vm *VM) bootstrap() {
 			if object.IsNil(r.Hi) {
 				raise("RangeError", "cannot get the maximum of endless range")
 			}
-			elems := rangeElems(r)
+			elems := vm.rangeElemsV(r)
 			n := clampCount(vm.repeatLong(args[0]), len(elems))
 			out := make([]object.Value, n)
 			for i := 0; i < n; i++ {
@@ -4287,7 +4287,7 @@ func (vm *VM) bootstrap() {
 			}
 			// A non-empty iterable range (e.g. String): the last element before
 			// the excluded end. Emptiness was already handled by rangeEmpty above.
-			elems := rangeElems(r)
+			elems := vm.rangeElemsV(r)
 			return elems[len(elems)-1]
 		}
 		return r.Hi
@@ -4317,8 +4317,8 @@ func (vm *VM) bootstrap() {
 		}
 		return object.IntValue(n)
 	})
-	vm.cRange.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(rangeElems(self.(*object.Range)))
+	vm.cRange.define("to_a", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewArrayFromSlice(vm.rangeElemsV(self.(*object.Range)))
 	})
 	// take(n) mirrors first(n) (it works on endless ranges); drop(n) needs the
 	// full materialised range, so it is bounded only.
@@ -4339,14 +4339,14 @@ func (vm *VM) bootstrap() {
 			}
 			return object.NewArrayFromSlice(out)
 		}
-		elems := rangeElems(r)
+		elems := vm.rangeElemsV(r)
 		n = clampCount(int64(n), len(elems))
 		out := make([]object.Value, n)
 		copy(out, elems[:n])
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cRange.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		elems := rangeElems(self.(*object.Range))
+	vm.cRange.define("drop", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		elems := vm.rangeElemsV(self.(*object.Range))
 		n := int(intArg(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
@@ -4379,9 +4379,15 @@ func (vm *VM) bootstrap() {
 					vm.callBlock(blk, []object.Value{object.NormInt(n)})
 				}
 			}
+			// A Symbol/Time/other #succ-responder walks forever too.
+			if vm.respondsToDynamic(r.Lo, "succ") {
+				for cur := r.Lo; ; cur = vm.send(cur, "succ", nil, nil) {
+					vm.callBlock(blk, []object.Value{cur})
+				}
+			}
 			raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
 		}
-		for _, e := range rangeElems(r) {
+		for _, e := range vm.rangeElemsV(r) {
 			vm.callBlock(blk, []object.Value{e})
 		}
 		return r
@@ -4390,7 +4396,7 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			return enumFor(self, "map")
 		}
-		elems := rangeElems(self.(*object.Range))
+		elems := vm.rangeElemsV(self.(*object.Range))
 		out := make([]object.Value, len(elems))
 		for i, e := range elems {
 			out[i] = vm.callBlock(blk, []object.Value{e})
@@ -8004,6 +8010,51 @@ func (vm *VM) integerBitOp(a *big.Int, arg object.Value, name string, op func(z,
 
 // shiftInt shifts a left by n bits (right by -n when n is negative), promoting
 // to a Bignum as needed and demoting a result that fits back into an Integer.
+// rangeElemsV materialises a bounded range's elements. An Integer or String
+// range uses the fast rangeElems path; any other begin (a Symbol, Time, or other
+// #succ-responder) is walked by #succ, collecting begin, begin.succ, … while the
+// value has not passed end under #<=> (inclusive stops once #<=> is > 0,
+// exclusive once it is >= 0). A begin without #succ cannot be iterated.
+func (vm *VM) rangeElemsV(r *object.Range) []object.Value {
+	switch lo := r.Lo.(type) {
+	case object.Integer, *object.Bignum, *object.String:
+		return rangeElems(r)
+	case object.Symbol:
+		// A Symbol range walks like a String range — via the byte/#succ scan that
+		// makes (:A..:z) finite — then re-symbolises. An endless Symbol range has no
+		// element list, so materialising it raises like any endless range.
+		hi, ok := r.Hi.(object.Symbol)
+		if !ok {
+			raise("RangeError", "cannot convert endless range to an array")
+		}
+		strs := strRangeElems(string(lo), string(hi), r.Exclusive)
+		out := make([]object.Value, len(strs))
+		for i, s := range strs {
+			out[i] = object.Symbol(s.(*object.String).Str())
+		}
+		return out
+	}
+	if !vm.respondsToDynamic(r.Lo, "succ") {
+		raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+	}
+	var out []object.Value
+	for cur := r.Lo; ; cur = vm.send(cur, "succ", nil, nil) {
+		cmp, ok := vm.send(cur, "<=>", []object.Value{r.Hi}, nil).(object.Integer)
+		if !ok {
+			break
+		}
+		if r.Exclusive {
+			if int64(cmp) >= 0 {
+				break
+			}
+		} else if int64(cmp) > 0 {
+			break
+		}
+		out = append(out, cur)
+	}
+	return out
+}
+
 func shiftInt(a *big.Int, n int64) object.Value {
 	if n >= 0 {
 		return object.NormInt(new(big.Int).Lsh(a, uint(n)))
@@ -8295,6 +8346,19 @@ func rangeElems(r *object.Range) []object.Value {
 // value passes end or — after the next succ — grows longer than end. That post-
 // succ length guard is what makes ("aa".."b") yield just ["aa"] (MRI semantics).
 func strRangeElems(lo, hi string, exclusive bool) []object.Value {
+	// MRI iterates a single-byte..single-byte range by byte value — so "A".."z"
+	// walks through the punctuation between 'Z' and 'a' (58 elements) rather than
+	// stopping at 'Z' the way String#succ (Z -> AA) would.
+	if len(lo) == 1 && len(hi) == 1 {
+		var out []object.Value
+		for c := int(lo[0]); c <= int(hi[0]); c++ {
+			if exclusive && c == int(hi[0]) {
+				break
+			}
+			out = append(out, object.NewString(string([]byte{byte(c)})))
+		}
+		return out
+	}
 	var out []object.Value
 	cur := lo
 	for {
