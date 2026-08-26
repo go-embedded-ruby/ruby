@@ -30,11 +30,12 @@ func (vm *VM) registerMarshal() {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
 		}
 		data := vm.marshalDump(args[0])
+		// Marshal.dump always returns an ASCII-8BIT (BINARY) string.
 		if io := marshalDumpIO(vm, args); io != nil {
-			vm.send(io, "write", []object.Value{object.NewStringBytes(data)}, nil)
+			vm.send(io, "write", []object.Value{object.NewStringBytesEnc(data, "ASCII-8BIT")}, nil)
 			return io
 		}
-		return object.NewStringBytes(data)
+		return object.NewStringBytesEnc(data, "ASCII-8BIT")
 	})
 
 	// Marshal.load(source, proc=nil, freeze:) / Marshal.restore: deserialize from

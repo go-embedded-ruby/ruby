@@ -137,6 +137,23 @@ func TestMarshal(t *testing.T) {
 		{`p Marshal.dump(5, nil).bytes`, "[4, 8, 105, 10]\n"},
 		{`p Marshal.dump(5, Object.new).bytes`, "[4, 8, 105, 10]\n"},
 
+		// --- Marshal.dump always returns an ASCII-8BIT (BINARY) string -----
+		{`p Marshal.dump(42).encoding.name`, "\"ASCII-8BIT\"\n"},
+		{`p Marshal.dump("hi").encoding.name`, "\"ASCII-8BIT\"\n"},
+
+		// --- 'C': instances of a user subclass of a built-in value type ----
+		{`class UA < Array; end; p Marshal.dump(UA.new([1, 2])).bytes`, "[4, 8, 67, 58, 7, 85, 65, 91, 7, 105, 6, 105, 7]\n"},
+		{`class UH < Hash; end; p Marshal.dump(UH.new).bytes`, "[4, 8, 67, 58, 7, 85, 72, 123, 0]\n"},
+		{`class UA2 < Array; end; a = UA2.new([1]); a.instance_variable_set(:@x, 7); p Marshal.dump(a).bytes`, "[4, 8, 73, 67, 58, 8, 85, 65, 50, 91, 6, 105, 6, 6, 58, 7, 64, 120, 105, 12]\n"},
+		{`class UA3 < Array; end; c = Marshal.load(Marshal.dump(UA3.new([4, 5]))); p [c.class.name, c.to_a]`, "[\"UA3\", [4, 5]]\n"},
+		{`class UA4 < Array; end; a = UA4.new([1]); a.instance_variable_set(:@y, 9); c = Marshal.load(Marshal.dump(a)); p c.instance_variable_get(:@y)`, "9\n"},
+		{`class UA5 < Array; end; o = UA5.new; c = Marshal.load(Marshal.dump([o, o])); p c[0].equal?(c[1])`, "true\n"},
+
+		// --- 'e': a singleton-extended object ------------------------------
+		{`module ME; end; o = Object.new; o.extend(ME); p Marshal.dump(o).bytes`, "[4, 8, 101, 58, 7, 77, 69, 111, 58, 11, 79, 98, 106, 101, 99, 116, 0]\n"},
+		{`module ME2; def tag; :ok; end; end; o = Object.new; o.extend(ME2); c = Marshal.load(Marshal.dump(o)); p c.tag`, ":ok\n"},
+		{`o = Object.new; o.extend(Module.new); begin; Marshal.dump(o); rescue TypeError => e; p e.message.start_with?("can't dump anonymous"); end`, "true\n"},
+
 		// --- version constants + restore alias -----------------------------
 		{`p Marshal::MAJOR_VERSION`, "4\n"},
 		{`p Marshal::MINOR_VERSION`, "8\n"},
