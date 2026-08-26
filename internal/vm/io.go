@@ -110,6 +110,16 @@ func (o *IOObj) pipeWriterClosed() bool {
 func (vm *VM) registerIO() {
 	cIO := newClass("IO", vm.cObject)
 	vm.consts["IO"] = cIO
+	// The IO#seek whence constants live on IO (File inherits them, File < IO). IO
+	// also mixes in File::Constants so IO::RDONLY and friends resolve, as in MRI.
+	for name, val := range map[string]int64{
+		"SEEK_SET": 0, "SEEK_CUR": 1, "SEEK_END": 2, "SEEK_DATA": 3, "SEEK_HOLE": 4,
+	} {
+		cIO.consts[name] = object.IntValue(val)
+	}
+	if fc, ok := vm.consts["File"].(*RClass).consts["Constants"].(*RClass); ok {
+		cIO.includes = append(cIO.includes, fc)
+	}
 	defIOWrite(cIO)
 	defStringIORead(cIO) // IO carries the read protocol too ($stdin, File streams)
 	defIOReadExtra(cIO)
