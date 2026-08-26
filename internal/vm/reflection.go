@@ -2,6 +2,7 @@ package vm
 
 import (
 	"reflect"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -40,6 +41,58 @@ func (vm *VM) registerReflection() {
 			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
 		}
 		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm}
+	})
+
+	// Module#public_instance_method(:m): like #instance_method, but the resolved
+	// method must be public — a private or protected one raises NameError.
+	vm.cModule.define("public_instance_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		name := nameArg(args[0])
+		m := vm.lookupForModuleOp(mod, name)
+		if m == nil || m.undefined {
+			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
+		}
+		if vis := instanceVisibility(mod, name, m); vis != visPublic {
+			kind := "private"
+			if vis == visProtected {
+				kind = "protected"
+			}
+			raise("NameError", "method '%s' for class '%s' is %s", name, mod.name, kind)
+		}
+		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm}
+	})
+
+	// Module#singleton_class?: true when the receiver is a singleton class — a
+	// per-object singleton or a class metaclass — false for an ordinary class or
+	// module.
+	vm.cModule.define("singleton_class?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*RClass).isSingleton)
+	})
+
+	// Module#set_temporary_name(name) gives an anonymous module a temporary name
+	// (or clears it with nil) without making it permanent, so a later constant
+	// assignment can still name it. A permanently-named module, a constant path,
+	// or an empty string is rejected the way MRI does.
+	vm.cModule.define("set_temporary_name", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		if mod.named {
+			raise("RuntimeError", "can't change permanent name")
+		}
+		if object.IsNil(args[0]) {
+			mod.name = ""
+			return mod
+		}
+		name := strArg(args[0])
+		switch {
+		case name == "":
+			raise("ArgumentError", "empty class/module name")
+		case strings.Contains(name, "::") || constNameWellFormed(name):
+			// A name that reads as a constant (or a constant path) is rejected, so a
+			// temporary name is never mistaken for a real, permanently-assigned one.
+			raise("ArgumentError", "the temporary name must not be a constant path to avoid confusion")
+		}
+		mod.name = name
+		return mod
 	})
 
 	// Module#method_defined?(:m): true if m resolves up the ancestor chain.

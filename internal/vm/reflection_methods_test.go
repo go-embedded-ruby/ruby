@@ -1,6 +1,9 @@
 package vm_test
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestInstanceMethodsAndSymbolCompare covers Module#instance_methods,
 // Object#methods, and Symbol#<=> / Symbol being Comparable. Asserted against MRI
@@ -28,6 +31,42 @@ p [A.instance_methods(false).sort, A.instance_methods.include?(:mm)]`, "[[:foo],
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestModuleReflectionC37 covers Module#module_exec, #singleton_class?,
+// #public_instance_method and #set_temporary_name, asserted against MRI 4.0.6.
+func TestModuleReflectionC37(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// module_exec runs the block with the module as self, passing arguments.
+		{`class C1; end; C1.module_exec(7) { |x| define_method(:v) { x } }; p C1.new.v`, "7\n"},
+		// singleton_class?: a per-object singleton and a class metaclass are
+		// singletons; an ordinary class or module is not.
+		{`p [Integer.singleton_class?, Integer.singleton_class.singleton_class?, Object.new.singleton_class.singleton_class?, Module.new.singleton_class?]`, "[false, true, true, false]\n"},
+		// public_instance_method returns an UnboundMethod for a public method.
+		{`class C2; def foo; 1; end; end; m = C2.public_instance_method(:foo); p [m.class, m.bind(C2.new).call]`, "[UnboundMethod, 1]\n"},
+		// set_temporary_name assigns and clears a non-permanent name.
+		{`m = Module.new; m.set_temporary_name("handy"); n1 = m.name; m.set_temporary_name(nil); p [n1, m.name]`, "[\"handy\", nil]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+
+	errs := []struct{ src, want string }{
+		{`class C3; private def foo; end; end; C3.public_instance_method(:foo)`, "is private"},
+		{`class C3b; protected def bar; end; end; C3b.public_instance_method(:bar)`, "is protected"},
+		{`class C3c; end; C3c.public_instance_method(:nope)`, "undefined method 'nope'"},
+		{`Object.set_temporary_name("x")`, "can't change permanent name"},
+		{`Module.new.set_temporary_name("Foo::Bar")`, "must not be a constant path"},
+		{`Module.new.set_temporary_name("Const")`, "must not be a constant path"},
+		{`Module.new.set_temporary_name("")`, "empty class/module name"},
+	}
+	for _, c := range errs {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q err=%v, want substring %q", c.src, err, c.want)
 		}
 	}
 }

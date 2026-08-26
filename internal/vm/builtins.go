@@ -1316,12 +1316,16 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cModule.define("class_eval", classEvalFn)
 	vm.cModule.define("module_eval", classEvalFn)
-	vm.cModule.define("class_exec", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+	classExec := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
 		return vm.classEval(self.(*RClass), blk, args)
-	})
+	}
+	vm.cModule.define("class_exec", classExec)
+	// Module#module_exec is Module#class_exec (the block runs with the module as
+	// self and receives the given arguments).
+	vm.cModule.define("module_exec", classExec)
 	vm.cModule.define("define_method", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		cls := self.(*RClass)
 		name := nameArg(args[0])
