@@ -507,6 +507,7 @@ func (vm *VM) bootstrap() {
 
 	vm.registerFile()             // needs the exception hierarchy (Errno::ENOENT < StandardError)
 	vm.registerIO()               // IO/StringIO + $stdout/$stderr/$stdin (needs IOError/EOFError)
+	vm.registerIOBuffer()         // IO::Buffer (in-memory byte buffer); after registerIO so IO exists
 	vm.registerDir()              // Dir (reuses the Errno module set up by registerFile)
 	vm.registerTmpdir()           // Dir.tmpdir / Dir.mktmpdir (layers onto Dir; require "tmpdir")
 	vm.registerProcess()          // Process module — identity + clock_gettime
