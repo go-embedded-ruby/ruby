@@ -61,7 +61,8 @@ func TestBignum(t *testing.T) {
 
 func TestBignumErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
-		{"out_of_range_method", `(2 ** 100).gcd(2)`, "RangeError"},
+		// A Bignum receiver divided or modulo'd by zero still raises, even though
+		// #gcd et al. now accept Bignum operands (see TestIntegerBignumDivision).
 		{"div_zero", `(2 ** 100) / 0`, "ZeroDivisionError"},
 		{"mod_zero", `(2 ** 100) % 0`, "ZeroDivisionError"},
 	}
