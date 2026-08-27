@@ -3270,6 +3270,28 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
+	// rindex searches backward from the end: rindex(obj) → the last index whose
+	// element == obj; rindex { |e| … } → the last index whose block is truthy (an
+	// argument, if given, wins over the block); no argument and no block → a sized
+	// Enumerator. Returns nil when nothing matches.
+	vm.cArray.define("rindex", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		a := self.(*object.Array)
+		if len(args) == 0 && blk == nil {
+			return enumForSized(self, "rindex", func(*VM) object.Value { return object.IntValue(int64(len(a.Elems))) })
+		}
+		for i := len(a.Elems) - 1; i >= 0; i-- {
+			var match bool
+			if len(args) > 0 {
+				match = valueEqual(a.Elems[i], args[0])
+			} else {
+				match = vm.callBlock(blk, []object.Value{a.Elems[i]}).Truthy()
+			}
+			if match {
+				return object.IntValue(int64(i))
+			}
+		}
+		return object.NilV
+	})
 	vm.cArray.define("assoc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.arrayAssoc(self.(*object.Array), args[0], 0)
 	})
