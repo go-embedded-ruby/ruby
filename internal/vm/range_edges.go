@@ -230,3 +230,43 @@ func rangeSizeFloatEnd(lo, hf float64, excl bool) object.Value {
 	}
 	return object.IntValue(int64(math.Floor(diff)) + 1)
 }
+
+// rangeOverlap implements Range#overlap? — whether self and o share at least one
+// element. It mirrors MRI's range_overlap: the ranges are disjoint when one's
+// end is below the other's begin (touching ends count only when both endpoints
+// are inclusive), and an empty (backward, or same-endpoint exclusive) range
+// overlaps nothing. A nil bound is treated as an infinity. Incomparable bounds
+// report no overlap.
+func rangeOverlap(self, o *object.Range) bool {
+	// self.end below o.begin, or o.end below self.begin → disjoint.
+	if !object.IsNil(self.Hi) && !object.IsNil(o.Lo) {
+		c, ok := rangeCmp(self.Hi, o.Lo)
+		if !ok || c < 0 || (c == 0 && (self.Exclusive || o.Exclusive)) {
+			return false
+		}
+	}
+	if !object.IsNil(o.Hi) && !object.IsNil(self.Lo) {
+		c, ok := rangeCmp(o.Hi, self.Lo)
+		if !ok || c < 0 || (c == 0 && (self.Exclusive || o.Exclusive)) {
+			return false
+		}
+	}
+	// Either range being empty (begin past end, or equal with an exclusive end)
+	// means it holds no elements, so nothing overlaps it.
+	if rangeIsEmpty(self) || rangeIsEmpty(o) {
+		return false
+	}
+	return true
+}
+
+// rangeIsEmpty reports whether a bounded range holds no elements: its begin lies
+// past its end, or the two coincide with an exclusive end. An unbounded range is
+// never empty.
+func rangeIsEmpty(r *object.Range) bool {
+	if object.IsNil(r.Lo) || object.IsNil(r.Hi) {
+		return false
+	}
+	// A valid range always has comparable bounds, so rangeCmp reports a result.
+	c, _ := rangeCmp(r.Lo, r.Hi)
+	return c > 0 || (c == 0 && r.Exclusive)
+}
