@@ -176,3 +176,25 @@ func TestArrayCycle(t *testing.T) {
 		}
 	}
 }
+
+// TestArrayRindex covers Array#rindex — value form, block form (with the
+// argument winning over a block), the no-argument sized Enumerator and the
+// no-match nil. Asserted against MRI Ruby 4.0.6.
+func TestArrayRindex(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p [1, 2, 3, 2, 1].rindex(2)`, "3\n"},
+		{`p [1, 2, 3].rindex(9)`, "nil\n"},
+		{`p [].rindex(1)`, "nil\n"},
+		{`p [1, 2, 3, 2, 1].rindex { |x| x == 2 }`, "3\n"},
+		{`p [1, 2, 3].rindex { |x| x > 5 }`, "nil\n"},
+		{`p [1, 2, 3].rindex.class`, "Enumerator\n"},
+		{`p [1, 2, 3, 2].rindex.to_a`, "[2, 3, 2, 1]\n"},
+		{`e = [1, 2, 3, 2].rindex; p e.each { |x| x == 2 }`, "3\n"},
+		{`p [1, 2, 3, 2, 1].rindex(2) { |x| x == 3 }`, "3\n"}, // argument wins over block
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
