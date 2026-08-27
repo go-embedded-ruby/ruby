@@ -91,3 +91,29 @@ func TestUnicodeNormalizeProvidedFeature(t *testing.T) {
 		t.Errorf(`require "unicode_normalize" got=%q want "true\nfalse\n"`, got)
 	}
 }
+
+// TestUnicodeNormalizeBang covers String#unicode_normalize! — in-place
+// normalization returning self, the always-self result even when unchanged, and
+// the argument-before-frozen error ordering. Asserted against MRI Ruby 4.0.6.
+func TestUnicodeNormalizeBang(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`s = "à"; r = s.unicode_normalize!(:nfc); p [r.equal?(s), s.length]`, "[true, 1]\n"},
+		{`p "abc".unicode_normalize!`, "\"abc\"\n"},
+		{`s = "ﬁ"; s.unicode_normalize!(:nfkc); p s`, "\"fi\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+	errs := []struct{ src, want string }{
+		{`"x".freeze.unicode_normalize!`, "can't modify frozen String"},
+		{`"abc".unicode_normalize!(:bad)`, "Invalid normalization form bad."},
+		{`"x".freeze.unicode_normalize!(:bad)`, "Invalid normalization form bad."}, // form checked first
+	}
+	for _, c := range errs {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q err=%v, want substring %q", c.src, err, c.want)
+		}
+	}
+}
