@@ -73,4 +73,14 @@ func (vm *VM) registerStringUnicodeNormalize() {
 		form := normForm(args)
 		return object.Bool(norm.IsNormalized(normSource(self), form))
 	})
+	// unicode_normalize! normalizes the receiver in place and returns self (even
+	// when already normalized). The form argument is validated before the frozen
+	// check, matching MRI.
+	vm.cString.define("unicode_normalize!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		form := normForm(args)
+		s := self.(*object.String)
+		vm.checkFrozen(s)
+		s.SetBytes([]byte(norm.Normalize(normSource(self), form)))
+		return self
+	})
 }
