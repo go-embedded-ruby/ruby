@@ -3550,6 +3550,24 @@ func (vm *VM) bootstrap() {
 			}
 			return h
 		}}
+	// Hash.ruby2_keywords_hash(hash) returns a copy of hash flagged as a keyword
+	// hash for `*args` forwarding; Hash.ruby2_keywords_hash? reports that flag.
+	// Both raise TypeError for a non-Hash argument.
+	vm.cHash.smethods["ruby2_keywords_hash"] = &Method{name: "ruby2_keywords_hash", owner: vm.cHash,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			h := hashArgOrRaise(vm, args[0])
+			out := object.NewHash()
+			for _, k := range h.Keys {
+				v, _ := h.Get(k)
+				out.Set(k, v)
+			}
+			out.Ruby2Keywords = true
+			return out
+		}}
+	vm.cHash.smethods["ruby2_keywords_hash?"] = &Method{name: "ruby2_keywords_hash?", owner: vm.cHash,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			return object.Bool(hashArgOrRaise(vm, args[0]).Ruby2Keywords)
+		}}
 	// #[] reads args[0] and returns a stored/default value; #[]= copies element
 	// values into the hash. Neither retains the args slice, so both take the
 	// no-copy OpSend fast path (defineNR).
@@ -3959,6 +3977,17 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cHash.define("has_value?", hashHasValue)
 	vm.cHash.define("value?", hashHasValue)
+	// Hash#key(value): the first key whose value equals value (by ==), else nil.
+	vm.cHash.define("key", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		for _, k := range h.Keys {
+			v, _ := h.Get(k)
+			if valueEqual(v, args[0]) {
+				return k
+			}
+		}
+		return object.NilV
+	})
 	// select/reject return a Hash (unlike Enumerable's Array forms), so they are
 	// native rather than inherited.
 	vm.cHash.define("select", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
