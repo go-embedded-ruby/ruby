@@ -607,6 +607,10 @@ type Hash struct {
 	// Frozen marks the Hash as frozen (Hash#freeze); an in-place mutator raises
 	// FrozenError. Default false, so ordinary hashes are unaffected.
 	Frozen bool
+	// Ruby2Keywords flags a hash built by Hash.ruby2_keywords_hash, marking it as
+	// a keyword-argument hash for `*args`-style forwarding (reported by
+	// Hash.ruby2_keywords_hash?). Default false.
+	Ruby2Keywords bool
 }
 
 // strKey is the comparable map key for a Ruby String, distinct from a Symbol of

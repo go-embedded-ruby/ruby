@@ -120,3 +120,32 @@ func TestHashCompareByIdentity(t *testing.T) {
 		}
 	}
 }
+
+// TestHashKeyAndRuby2Keywords covers Hash#key (reverse value lookup) and the
+// Hash.ruby2_keywords_hash / ruby2_keywords_hash? pair, asserted against MRI
+// Ruby 4.0.6.
+func TestHashKeyAndRuby2Keywords(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p({a: 1, b: 2, c: 1}.key(1))`, ":a\n"},
+		{`p({a: 1}.key(9))`, "nil\n"},
+		{`p({"x" => 5}.key(5))`, "\"x\"\n"},
+		{`kh = Hash.ruby2_keywords_hash({a: 1}); p [kh, Hash.ruby2_keywords_hash?(kh)]`, "[{a: 1}, true]\n"},
+		{`p Hash.ruby2_keywords_hash?({a: 1})`, "false\n"},
+		// The original hash is unchanged; only the returned copy carries the flag.
+		{`h = {a: 1}; Hash.ruby2_keywords_hash(h); p Hash.ruby2_keywords_hash?(h)`, "false\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+	errs := []struct{ src, want string }{
+		{`Hash.ruby2_keywords_hash?(5)`, "wrong argument type Integer (expected Hash)"},
+		{`Hash.ruby2_keywords_hash("x")`, "wrong argument type String (expected Hash)"},
+	}
+	for _, c := range errs {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q err=%v, want substring %q", c.src, err, c.want)
+		}
+	}
+}
