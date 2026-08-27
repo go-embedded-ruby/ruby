@@ -33,3 +33,20 @@ func TestStructKeywordInit(t *testing.T) {
 		}
 	}
 }
+
+// TestStructKeywordInitPredicate covers Struct#keyword_init? — the tri-state
+// class method (nil when omitted, true / false when given), inherited by a
+// subclass. Asserted against MRI Ruby 4.0.6.
+func TestStructKeywordInitPredicate(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p Struct.new(:a, :b).keyword_init?`, "nil\n"},
+		{`p Struct.new(:a, keyword_init: true).keyword_init?`, "true\n"},
+		{`p Struct.new(:a, keyword_init: false).keyword_init?`, "false\n"},
+		{`class KSub < Struct.new(:a, keyword_init: true); end; p KSub.keyword_init?`, "true\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}

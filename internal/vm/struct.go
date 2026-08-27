@@ -114,6 +114,19 @@ func setupStruct(vm *VM) {
 			names[i] = nm
 		}
 		sub := vm.newStructClass(base, names, kwInit)
+		// keyword_init? is a class method of each minted subclass (never of Struct
+		// itself): true / false when keyword_init: was given, nil when it was omitted.
+		sub.smethods["keyword_init?"] = &Method{name: "keyword_init?", owner: sub,
+			native: func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+				switch structDefOf(self.(*RClass)).kwInit {
+				case kwTrue:
+					return object.True
+				case kwFalse:
+					return object.False
+				default:
+					return object.NilV
+				}
+			}}
 		if haveName && name != "" {
 			if !validConstName(name) {
 				raise("NameError", "identifier %s needs to be constant", name)
