@@ -145,6 +145,24 @@ func registerNumericGeneric(vm *VM, cNumeric *RClass) {
 	cNumeric.define("real?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.True
 	})
+	// zero? is self == 0, dispatched so a subclass's own #== / #<=> decides. This
+	// is also what the #nonzero? above relies on.
+	cNumeric.define("zero?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(vm.send(self, "==", []object.Value{object.IntValue(0)}, nil).Truthy())
+	})
+	// real returns self: a real number is its own real part.
+	cNumeric.define("real", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	// floor / ceil / round / truncate fall back to operating on #to_f, so a Numeric
+	// subclass that only defines #to_f still rounds; the optional digits argument is
+	// forwarded to Float's own implementation.
+	for _, name := range []string{"floor", "ceil", "round", "truncate"} {
+		m := name
+		cNumeric.define(m, func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			return vm.send(vm.send(self, "to_f", nil, nil), m, args, nil)
+		})
+	}
 }
 
 // asComplexVal coerces a real number to a Complex (zero imaginary part); a
