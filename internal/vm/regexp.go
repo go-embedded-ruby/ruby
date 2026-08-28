@@ -1308,6 +1308,21 @@ func (vm *VM) installRegexp() {
 		idx := int64(m.indexForKey(args[0]))
 		return object.NewArrayFromSlice([]object.Value{m.offset(idx, false), m.offset(idx, true)})
 	})
+	// bytebegin / byteend / byteoffset are the byte-index counterparts of begin /
+	// end / offset (Ruby 3.2+): they skip the byte-to-character conversion.
+	vm.cMatchData.define("bytebegin", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := mdArg(self)
+		return m.byteOffset(int64(m.indexForKey(args[0])), false)
+	})
+	vm.cMatchData.define("byteend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := mdArg(self)
+		return m.byteOffset(int64(m.indexForKey(args[0])), true)
+	})
+	vm.cMatchData.define("byteoffset", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		m := mdArg(self)
+		idx := int64(m.indexForKey(args[0]))
+		return object.NewArrayFromSlice([]object.Value{m.byteOffset(idx, false), m.byteOffset(idx, true)})
+	})
 	// MatchData#named_captures maps each capture name to its captured substring
 	// (nil when the group did not participate); symbolize_names: true keys by
 	// Symbol instead of String.
@@ -1483,6 +1498,22 @@ func (m *MatchData) offset(i int64, end bool) object.Value {
 		return object.NilV
 	}
 	return object.IntValue(int64(byteToChar(m.subject, b+m.byteOff)))
+}
+
+// byteOffset is offset without the byte-to-character conversion: it returns the
+// raw byte index of the group's start (or end), or nil for a group that did not
+// participate. It backs #bytebegin / #byteend / #byteoffset.
+func (m *MatchData) byteOffset(i int64, end bool) object.Value {
+	var b int
+	if end {
+		b = m.md.End(int(i))
+	} else {
+		b = m.md.Begin(int(i))
+	}
+	if b < 0 {
+		return object.NilV
+	}
+	return object.IntValue(int64(b + m.byteOff))
 }
 
 // at implements MatchData#[]: an Integer selects a group by index; a String or
