@@ -2268,6 +2268,7 @@ func (vm *VM) bootstrap() {
 		{vm.cHash, "to_hash"},
 		{vm.cString, "to_str"},
 		{vm.cInteger, "to_int"},
+		{vm.cRegexp, "to_regexp"},
 	} {
 		cls, meth := tc.cls, tc.meth
 		cls.smethods["try_convert"] = &Method{name: "try_convert", owner: cls,

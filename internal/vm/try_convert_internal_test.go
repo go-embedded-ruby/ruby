@@ -40,6 +40,15 @@ begin; Array.try_convert(Bad.new); rescue TypeError => e; p e.message; end`,
 		{`class BadI; def to_int; "s"; end; end
 begin; Integer.try_convert(BadI.new); rescue TypeError => e; p e.message; end`,
 			`"can't convert BadI into Integer (BadI#to_int gives String)"`},
+		// Regexp.try_convert (via #to_regexp) and IO.try_convert (via #to_io).
+		{`p Regexp.try_convert(/x/)`, `/x/`},
+		{`p Regexp.try_convert("x")`, `nil`},
+		{`class RC; def to_regexp; /custom/; end; end; p Regexp.try_convert(RC.new)`, `/custom/`},
+		{`p IO.try_convert($stdout).equal?($stdout)`, `true`},
+		{`p IO.try_convert("x")`, `nil`},
+		{`class Bad2; def to_regexp; 42; end; end
+begin; Regexp.try_convert(Bad2.new); rescue TypeError => e; p e.message; end`,
+			`"can't convert Bad2 into Regexp (Bad2#to_regexp gives Integer)"`},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want+"\n" {
