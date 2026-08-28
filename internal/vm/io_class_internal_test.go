@@ -199,3 +199,32 @@ func TestIOClassHelpers(t *testing.T) {
 		t.Error("modeBase wrong")
 	}
 }
+
+// TestIOCopyStream covers IO.copy_stream across path and StringIO sources and
+// destinations, the copy_length and src_offset arguments, and the
+// src_offset-for-non-IO ArgumentError. Paths use Dir.mktmpdir so the test is
+// cross-platform. Asserted against MRI Ruby 4.0.6.
+func TestIOCopyStream(t *testing.T) {
+	pre := `require "tmpdir"; require "stringio"; `
+	cases := []struct{ src, want string }{
+		// StringIO → StringIO, with and without a copy length.
+		{pre + `a = StringIO.new("abcdef"); b = StringIO.new; n = IO.copy_stream(a, b); p [n, b.string]`, "[6, \"abcdef\"]\n"},
+		{pre + `a = StringIO.new("abcdef"); b = StringIO.new; n = IO.copy_stream(a, b, 3); p [n, b.string]`, "[3, \"abc\"]\n"},
+		// path → path, path → StringIO, StringIO → path, and length+offset on a path.
+		{pre + `Dir.mktmpdir { |d| s = File.join(d, "s"); t = File.join(d, "t"); File.write(s, "hello"); n = IO.copy_stream(s, t); p [n, File.read(t)] }`, "[5, \"hello\"]\n"},
+		{pre + `Dir.mktmpdir { |d| s = File.join(d, "s"); File.write(s, "world"); b = StringIO.new; n = IO.copy_stream(s, b); p [n, b.string] }`, "[5, \"world\"]\n"},
+		{pre + `Dir.mktmpdir { |d| t = File.join(d, "t"); a = StringIO.new("data"); n = IO.copy_stream(a, t); p [n, File.read(t)] }`, "[4, \"data\"]\n"},
+		{pre + `Dir.mktmpdir { |d| s = File.join(d, "s"); t = File.join(d, "t"); File.write(s, "abcdef"); n = IO.copy_stream(s, t, 3, 2); p [n, File.read(t)] }`, "[3, \"cde\"]\n"},
+		// A length read past EOF copies nothing.
+		{pre + `a = StringIO.new(""); b = StringIO.new; n = IO.copy_stream(a, b, 5); p [n, b.string]`, "[0, \"\"]\n"},
+		// src_offset is rejected for a non-IO (StringIO) source.
+		{pre + `a = StringIO.new("abcdef"); b = StringIO.new; begin; IO.copy_stream(a, b, 3, 2); rescue ArgumentError => e; p e.message; end`, "\"cannot specify src_offset for non-IO\"\n"},
+		// Fewer than two arguments is an ArgumentError.
+		{pre + `begin; IO.copy_stream(StringIO.new("x")); rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
