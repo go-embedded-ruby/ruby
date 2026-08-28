@@ -287,3 +287,25 @@ func TestMatchGlobals(t *testing.T) {
 		{`"ab".match(/(a)(b)/); p $~.class`, "MatchData\n"},
 	})
 }
+
+// TestMatchDataByteOffsets covers MatchData#bytebegin / #byteend / #byteoffset —
+// the byte-index counterparts of begin / end / offset, including a multibyte
+// subject, a named group, a non-participating group and the invalid-key
+// IndexError. Asserted against MRI Ruby 4.0.6.
+func TestMatchDataByteOffsets(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`m = "héllo wörld".match(/(l+)o (w)/); p [m.bytebegin(0), m.byteend(0), m.byteoffset(0)]`, "[3, 8, [3, 8]]\n"},
+		{`m = "héllo wörld".match(/(l+)o (w)/); p [m.bytebegin(1), m.byteoffset(2)]`, "[3, [7, 8]]\n"},
+		{`m = "héllo".match(/l/); p [m.begin(0), m.bytebegin(0)]`, "[2, 3]\n"},
+		{`m = "abc".match(/(?<g>b)/); p [m.bytebegin(:g), m.byteoffset(:g)]`, "[1, [1, 2]]\n"},
+		{`mm = "abc".match(/(x)?b/); p [mm.bytebegin(1), mm.byteoffset(1)]`, "[nil, [nil, nil]]\n"},
+	})
+	for _, src := range []string{
+		`"abc".match(/b/).byteoffset(:nope)`,
+		`"abc".match(/b/).bytebegin(5)`,
+	} {
+		if err := runErr(t, src); err == nil {
+			t.Errorf("src=%q: expected IndexError, got nil", src)
+		}
+	}
+}
