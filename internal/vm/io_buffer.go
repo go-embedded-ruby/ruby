@@ -22,6 +22,7 @@ type ioBuffer struct {
 	data     []byte
 	readonly bool
 	external bool // memory owned elsewhere (.for copies a String, .string yields)
+	borrowed bool // a slice sharing another buffer's memory — neither external nor internal
 	freed    bool
 }
 
@@ -207,12 +208,49 @@ func (vm *VM) registerIOBuffer() {
 	pred("empty?", func(b *ioBuffer) bool { return !b.freed && len(b.data) == 0 })
 	pred("valid?", func(b *ioBuffer) bool { return true })
 	pred("external?", func(b *ioBuffer) bool { return !b.freed && b.external })
-	pred("internal?", func(b *ioBuffer) bool { return !b.freed && !b.external })
+	pred("internal?", func(b *ioBuffer) bool { return !b.freed && !b.external && !b.borrowed })
 	pred("mapped?", func(b *ioBuffer) bool { return false })
 	pred("shared?", func(b *ioBuffer) bool { return false })
 	pred("private?", func(b *ioBuffer) bool { return false })
 	pred("locked?", func(b *ioBuffer) bool { return false })
 	pred("readonly?", func(b *ioBuffer) bool { return b.readonly })
+
+	// slice(offset = 0, length = size - offset) returns a buffer that shares this
+	// buffer's memory over the given range, so writes through the slice are visible
+	// in the original. Like MRI's slice it reports as internal, inherits the
+	// read-only flag, and can itself be resized; an out-of-range range raises
+	// ArgumentError.
+	dm("slice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		b := self.(*ioBuffer)
+		data := b.live()
+		off := 0
+		if len(args) > 0 {
+			off = int(intArg(args[0]))
+		}
+		length := len(data) - off
+		if len(args) > 1 {
+			length = int(intArg(args[1]))
+		}
+		if off < 0 || length < 0 || off+length > len(data) {
+			raise("ArgumentError", "Specified offset+length is bigger than the buffer size!")
+		}
+		return &ioBuffer{data: data[off : off+length : off+length], readonly: b.readonly, borrowed: true}
+	})
+	// resize(size) reallocates the buffer to the new size, preserving the leading
+	// bytes (a larger buffer is zero-filled). An external buffer (from .for /
+	// .string, or a slice) cannot be resized.
+	dm("resize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		b := self.(*ioBuffer)
+		b.live()
+		if b.external {
+			raise("IO::Buffer::AccessError", "Cannot resize external buffer!")
+		}
+		nd := make([]byte, int(intArg(args[0])))
+		copy(nd, b.data)
+		b.data = nd
+		b.borrowed = false
+		return b
+	})
 
 	dm("free", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*ioBuffer)
