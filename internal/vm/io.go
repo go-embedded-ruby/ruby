@@ -27,6 +27,8 @@ type IOObj struct {
 	lineno   int    // #lineno — advanced by each successful line read (gets/readline)
 	rdClosed bool   // #close_read was called — reads raise "not opened for reading"
 	wrClosed bool   // #close_write was called — writes raise "not opened for writing"
+	extEnc   string // external encoding name, "" ⇒ Encoding.default_external
+	intEnc   string // internal encoding name, "" ⇒ none (nil)
 
 	// Pipe ends (IO.pipe) share a single byte buffer in *pipe. The write end
 	// appends; the read end drains from pipe.rpos. Because subprocess execution
@@ -511,6 +513,57 @@ func defIOWrite(cls *RClass) {
 	cls.define("tty?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Bool(false) })
 	cls.define("isatty", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Bool(false) })
 	cls.define("binmode", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
+
+	// external_encoding: the stream's external encoding — the one set explicitly
+	// (at creation or via #set_encoding), else Encoding.default_external.
+	cls.define("external_encoding", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.extEnc != "" {
+			if e, ok := vm.findEncoding(o.extEnc); ok {
+				return e
+			}
+		}
+		// A write-only stream with no explicit encoding reports nil (unless a
+		// default internal encoding forces transcoding); a readable one reports
+		// Encoding.default_external.
+		if o.writable && object.IsNil(vm.send(vm.cEncoding, "default_internal", nil, nil)) {
+			return object.NilV
+		}
+		return vm.send(vm.cEncoding, "default_external", nil, nil)
+	})
+	// internal_encoding: the encoding reads are transcoded to, or nil when none.
+	cls.define("internal_encoding", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.intEnc != "" {
+			if e, ok := vm.findEncoding(o.intEnc); ok {
+				return e
+			}
+		}
+		return object.NilV
+	})
+	// set_encoding(ext, int = nil): set the external (and optional internal)
+	// encoding. ext may be an Encoding, an encoding name, or a combined
+	// "external:internal" string; a nil argument clears that side. Returns self.
+	cls.define("set_encoding", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		o.extEnc, o.intEnc = "", ""
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			if s, ok := args[0].(*object.String); ok {
+				if i := strings.IndexByte(s.Str(), ':'); i >= 0 && len(args) == 1 {
+					o.extEnc = vm.lookupEncodingName(s.Str()[:i]).name
+					o.intEnc = vm.lookupEncodingName(s.Str()[i+1:]).name
+				} else {
+					o.extEnc = vm.encodingArg(args[0]).name
+				}
+			} else {
+				o.extEnc = vm.encodingArg(args[0]).name
+			}
+		}
+		if len(args) > 1 && !object.IsNil(args[1]) {
+			o.intEnc = vm.encodingArg(args[1]).name
+		}
+		return o
+	})
 }
 
 // defStringIORead defines the reading half of the protocol, plus the cursor and
