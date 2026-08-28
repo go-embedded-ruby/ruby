@@ -120,6 +120,11 @@ func (vm *VM) registerIO() {
 	if fc, ok := vm.consts["File"].(*RClass).consts["Constants"].(*RClass); ok {
 		cIO.includes = append(cIO.includes, fc)
 	}
+	// IO.try_convert(obj): obj if it is an IO, else its #to_io conversion, else nil.
+	cIO.smethods["try_convert"] = &Method{name: "try_convert", owner: cIO,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			return vm.tryConvert(args[0], cIO, "to_io")
+		}}
 	defIOWrite(cIO)
 	defStringIORead(cIO) // IO carries the read protocol too ($stdin, File streams)
 	defIOReadExtra(cIO)
