@@ -1956,6 +1956,29 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cSymbol.define("[]", symIndexFn)
 	vm.cSymbol.define("slice", symIndexFn)
+	// casecmp / casecmp? compare symbol names case-insensitively, but only against
+	// another Symbol — any other argument yields nil, as MRI does (String is never
+	// coerced here). They delegate to the String comparison of the two names.
+	symCasecmp := func(meth string) NativeFn {
+		return func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			other, ok := args[0].(object.Symbol)
+			if !ok {
+				return object.NilV
+			}
+			return vm.send(object.NewString(symStr(self)), meth,
+				[]object.Value{object.NewString(string(other))}, nil)
+		}
+	}
+	vm.cSymbol.define("casecmp", symCasecmp("casecmp"))
+	vm.cSymbol.define("casecmp?", symCasecmp("casecmp?"))
+	// match / match? run the pattern (a Regexp or String) against the symbol name
+	// by delegating to String, so #match still sets $~.
+	vm.cSymbol.define("match", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(object.NewString(symStr(self)), "match", args, blk)
+	})
+	vm.cSymbol.define("match?", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(object.NewString(symStr(self)), "match?", args, blk)
+	})
 	// #slice is a true alias of #[] (shares the exact method record).
 	aliasBuiltin(vm.cString, "slice", "[]")
 	vm.cString.define("ord", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {

@@ -34,3 +34,27 @@ func TestSymbolIndex(t *testing.T) {
 		}
 	}
 }
+
+// TestSymbolCasecmpMatch covers Symbol#casecmp / #casecmp? (Symbol-only,
+// case-insensitive name comparison) and #match / #match? (delegating to the name
+// string, with #match setting $~). Asserted against MRI Ruby 4.0.6.
+func TestSymbolCasecmpMatch(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p :Hello.casecmp(:hELLO)`, "0"},
+		{`p :abc.casecmp(:abd)`, "-1"},
+		{`p :abc.casecmp("ABC")`, "nil"}, // a String argument is not compared
+		{`p :abc.casecmp(1)`, "nil"},
+		{`p :Hello.casecmp?(:hELLO)`, "true"},
+		{`p :abc.casecmp?("ABC")`, "nil"},
+		{`p :hello.match?(/l+/)`, "true"},
+		{`p :hello.match?("z")`, "false"},
+		{`p :hello.match(/l+/).class`, "MatchData"},
+		{`:hello.match(/l+/); p $~[0]`, `"ll"`},
+		{`p :hello.match(/z/)`, "nil"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want+"\n" {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want+"\n")
+		}
+	}
+}
