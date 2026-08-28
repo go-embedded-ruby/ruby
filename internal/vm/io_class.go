@@ -33,6 +33,54 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 	def("binwrite", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.ioWriteFile(args)
 	})
+	// IO.copy_stream(src, dst, copy_length = nil, src_offset = nil): copy bytes from
+	// src to dst, each of which may be a path String or an IO. Returns the number
+	// of bytes copied. src_offset is honoured for a path but rejected for a
+	// (non-fd) IO such as StringIO, matching MRI.
+	def("copy_stream", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2..4)", len(args))
+		}
+		length, hasLen := -1, false
+		if len(args) >= 3 && !object.IsNil(args[2]) {
+			length, hasLen = int(intArg(args[2])), true
+		}
+		srcOffset, hasOff := -1, false
+		if len(args) >= 4 && !object.IsNil(args[3]) {
+			srcOffset, hasOff = int(intArg(args[3])), true
+		}
+		var data *object.String
+		if p, ok := args[0].(*object.String); ok {
+			ra := []object.Value{p}
+			if hasLen {
+				ra = append(ra, object.IntValue(int64(length)))
+				if hasOff {
+					ra = append(ra, object.IntValue(int64(srcOffset)))
+				}
+			}
+			data = vm.ioReadFile(ra, true).(*object.String)
+		} else {
+			if hasOff {
+				raise("ArgumentError", "cannot specify src_offset for non-IO")
+			}
+			var ra []object.Value
+			if hasLen {
+				ra = append(ra, object.IntValue(int64(length)))
+			}
+			r := vm.send(args[0], "read", ra, nil)
+			if s, ok := r.(*object.String); ok {
+				data = s
+			} else {
+				data = object.NewString("")
+			}
+		}
+		if p, ok := args[1].(*object.String); ok {
+			vm.ioWriteFile([]object.Value{p, data})
+		} else {
+			vm.send(args[1], "write", []object.Value{data}, nil)
+		}
+		return object.IntValue(int64(len(data.Bytes())))
+	})
 	def("foreach", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		pos, _ := splitIOOpts(args)
 		if len(pos) == 0 {
