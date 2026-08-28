@@ -72,9 +72,21 @@ func TestIOBuffer(t *testing.T) {
 		{`b = IO::Buffer.new(6); b.set_string("abcdef", 0, 3); p b.get_string(0, 3)`, `"abc"`},
 		{`b = IO::Buffer.new(6); b.set_string("abcdef", 0, 2, 2); p b.get_string(0, 2)`, `"cd"`},
 		{`begin; IO::Buffer.new(2).set_value(:U32, 0, 1); rescue ArgumentError => e; p e.class; end`, `ArgumentError`},
+		// slice shares memory (a write through the slice shows in the original),
+		// inherits read-only, and reports as neither internal nor external.
+		{`b = IO::Buffer.new(5); s = b.slice(1, 2); s.set_string("XY"); p b.get_string.bytes`, `[0, 88, 89, 0, 0]`},
+		{`b = IO::Buffer.for("hello"); s = b.slice(1, 3); p [s.get_string, s.readonly?, s.internal?, s.external?]`, `["ell", true, false, false]`},
+		{`b = IO::Buffer.for("hello"); p [b.slice.get_string, b.slice(2).get_string]`, `["hello", "llo"]`},
+		// resize preserves the leading bytes; growing a slice detaches it (now internal).
+		{`b = IO::Buffer.new(4); b.set_string("abcd"); b.resize(6); p [b.size, b.get_string(0, 4)]`, `[6, "abcd"]`},
+		{`b = IO::Buffer.new(4); b.set_string("abcd"); b.resize(2); p b.get_string`, `"ab"`},
+		{`b = IO::Buffer.new(4); s = b.slice(0, 2); s.resize(5); p [s.size, s.internal?]`, `[5, true]`},
 		// free nullifies the buffer.
 		{`b = IO::Buffer.new(4); b.free; p [b.null?, b.size, b.internal?, b.to_s]`, `[true, 0, false, "#<IO::Buffer 0x0000000000000000+0 NULL>"]`},
 		// Error paths.
+		{`begin; IO::Buffer.for("hello").slice(3, 10); rescue ArgumentError => e; p e.message; end`, `"Specified offset+length is bigger than the buffer size!"`},
+		{`begin; IO::Buffer.for("x").resize(5); rescue IO::Buffer::AccessError => e; p e.message; end`, `"Cannot resize external buffer!"`},
+		{`begin; b = IO::Buffer.new(2); b.free; b.slice(0, 1); rescue IO::Buffer::AccessError => e; p e.class; end`, `IO::Buffer::AccessError`},
 		{`begin; IO::Buffer.for("x").set_string("y"); rescue IO::Buffer::AccessError => e; p e.message; end`, `"Buffer is not writable!"`},
 		{`begin; IO::Buffer.for("x").set_value(:U8, 0, 1); rescue IO::Buffer::AccessError => e; p e.class; end`, `IO::Buffer::AccessError`},
 		{`begin; b = IO::Buffer.new(2); b.free; b.get_string; rescue IO::Buffer::AccessError => e; p e.message; end`, `"The buffer is not allocated!"`},
