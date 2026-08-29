@@ -47,6 +47,21 @@ end`
 		// The singleton ARGF draws from ARGV, and #argv returns it.
 		{with(`ARGV.replace([f1, f2]); p [ARGF.read, ARGF.argv]`), "[\"l1\\nl2\\nl3\\n\", []]\n"},
 		{`p ARGF.class.new.class.name`, "\"ARGF.class\"\n"},
+		// each_char / each_byte / each_codepoint, with a block and as Enumerators.
+		{with(`a = ARGF.class.new(f2); p a.each_char.to_a`), "[\"l\", \"3\", \"\\n\"]\n"},
+		{with(`a = ARGF.class.new(f2); out = []; a.each_char { |c| out << c }; p out`), "[\"l\", \"3\", \"\\n\"]\n"},
+		{with(`a = ARGF.class.new(f2); p a.each_byte.to_a`), "[108, 51, 10]\n"},
+		{with(`a = ARGF.class.new(f2); p a.each_codepoint.to_a`), "[108, 51, 10]\n"},
+		// getbyte / readbyte.
+		{with(`a = ARGF.class.new(f2); p [a.getbyte, a.getbyte]`), "[108, 51]\n"},
+		{with(`a = ARGF.class.new(f2); a.read; p (a.readbyte rescue :eof)`), ":eof\n"},
+		// file: the current file's IO, nil once every input is consumed.
+		{with(`a = ARGF.class.new(f1); p a.file.is_a?(IO)`), "true\n"},
+		{with(`a = ARGF.class.new(f1); a.close; p a.file`), "nil\n"},
+		{with(`p ARGF.class.new(f2).readbyte`), "108\n"},
+		// eof / path / to_a / each are true aliases of eof? / filename / readlines /
+		// each_line.
+		{`p [ARGF.class.instance_method(:eof) == ARGF.class.instance_method(:eof?), ARGF.class.instance_method(:path) == ARGF.class.instance_method(:filename), ARGF.class.instance_method(:to_a) == ARGF.class.instance_method(:readlines)]`, "[true, true, true]\n"},
 		// Native display / truthiness (ToS via interpolation, Inspect via Array, Truthy).
 		{with(`p "x#{ARGF.class.new(f1)}"`), "\"xARGF\"\n"},
 		{with(`p [ARGF.class.new(f1)]`), "[ARGF]\n"},

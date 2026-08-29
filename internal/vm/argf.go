@@ -183,7 +183,7 @@ func (vm *VM) registerARGF() {
 		}
 	}
 	d("each_line", eachLine)
-	d("each", eachLine)
+	aliasBuiltin(cls, "each", "each_line")
 
 	// readlines / to_a: every remaining line as an Array.
 	readlines := func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
@@ -197,14 +197,14 @@ func (vm *VM) registerARGF() {
 		}
 	}
 	d("readlines", readlines)
-	d("to_a", readlines)
+	aliasBuiltin(cls, "to_a", "readlines")
 
 	// eof? / eof: true when the current stream is exhausted and no file remains.
 	eof := func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).ensure() == nil)
 	}
 	d("eof?", eof)
-	d("eof", eof)
+	aliasBuiltin(cls, "eof", "eof?")
 
 	// lineno / lineno=: the cumulative line number ($.).
 	d("lineno", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -225,7 +225,7 @@ func (vm *VM) registerARGF() {
 		return object.NewString(a.curName)
 	}
 	d("filename", filename)
-	d("path", filename)
+	aliasBuiltin(cls, "path", "filename")
 
 	// to_io / file: the underlying IO of the current file.
 	d("to_io", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -271,5 +271,55 @@ func (vm *VM) registerARGF() {
 			raise("EOFError", "end of file reached")
 		}
 		return c
+	})
+	// getbyte / readbyte: the next byte across the files.
+	d("getbyte", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self(v).ensure()
+		if o == nil {
+			return object.NilV
+		}
+		return vm.send(o, "getbyte", nil, nil)
+	})
+	d("readbyte", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		b := vm.send(v, "getbyte", nil, nil)
+		if object.IsNil(b) {
+			raise("EOFError", "end of file reached")
+		}
+		return b
+	})
+
+	// each_byte / each_char / each_codepoint yield every unit across the files;
+	// with no block each returns an Enumerator.
+	iter := func(name, one string, conv func(vm *VM, c object.Value) object.Value) NativeFn {
+		return func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+			if blk == nil {
+				return enumFor(v, name)
+			}
+			for {
+				c := vm.send(v, one, nil, nil)
+				if object.IsNil(c) {
+					return v
+				}
+				vm.callBlock(blk, []object.Value{conv(vm, c)})
+			}
+		}
+	}
+	same := func(_ *VM, c object.Value) object.Value { return c }
+	d("each_byte", iter("each_byte", "getbyte", same))
+	d("each_char", iter("each_char", "getc", same))
+	d("each_codepoint", iter("each_codepoint", "getc", func(vm *VM, c object.Value) object.Value {
+		return vm.send(c, "ord", nil, nil)
+	}))
+
+	// file: the IO of the file currently being read.
+	d("file", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self(v)
+		if !a.started {
+			a.ensure()
+		}
+		if a.cur != nil {
+			return a.cur
+		}
+		return object.NilV
 	})
 }
