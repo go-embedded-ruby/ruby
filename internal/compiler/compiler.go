@@ -839,6 +839,12 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		b.emit(bytecode.OpBinding, 0, 0)
 		return
 	}
+	// __ENCODING__ is the source encoding keyword; rbgo scripts are UTF-8, so it is
+	// Encoding::UTF_8.
+	if v.Recv == nil && v.Block == nil && v.Name == "__ENCODING__" && len(v.Args) == 0 {
+		c.compileNode(&ast.ScopedConst{Recv: &ast.ConstRef{Name: "Encoding"}, Name: "UTF_8"})
+		return
+	}
 	// A bare eval(str) with no explicit binding evaluates against the caller's
 	// binding, so it can see (and assign) the caller's local variables — exactly
 	// like eval(str, binding). Rewrite it to that two-argument form using the
