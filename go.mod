@@ -16,7 +16,7 @@ require (
 	github.com/go-kramdown/kramdown v0.1.0
 	github.com/go-liquid/liquid v0.1.0
 	github.com/go-mustache/mustache v0.1.0
-	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
+	github.com/go-ndarray/ndarray v0.0.0-20260805203447-1a4cfae8f207
 	github.com/go-nokogiri/nokogiri v0.1.0
 	github.com/go-rouge/rouge v0.1.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260707193337-00a96ee353d7
@@ -204,6 +204,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260702233442-45013cfc5f26
 	go.etcd.io/etcd/server/v3 v3.6.13
+	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.41.0
 )
 
@@ -419,7 +420,6 @@ require (
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260708182218-49f421fb7959 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
