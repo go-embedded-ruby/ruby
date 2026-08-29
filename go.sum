@@ -303,6 +303,8 @@ github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38 h1:j0VAUKCGN
 github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38/go.mod h1:PgAtItdQBv87Wog0Q7rnbwhqsupDC0pDXDlZgSv6nvA=
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe h1:oYFDl+kcAkTOXwJEmAw1SgpuEyOc9shzkMclrc1P4nI=
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe/go.mod h1:Bh8Vr5Vy9UO7JqU5f6myUOWl0jjnnvtlGdIVTBbdLRw=
+github.com/go-ruby-acme/acme v0.0.0-20260820043150-9d97eebae17a h1:gP5OUSuzUIKwbx8ZXVUv4RDU+HJHFooQXkPb47ZIbxw=
+github.com/go-ruby-acme/acme v0.0.0-20260820043150-9d97eebae17a/go.mod h1:qRkhKdwqgZQAJDp3/xUdGl/dr991cpw7G4cx8MWC9d4=
 github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783 h1:VAFOmKa1u2HKA2LFQhelusPVIAtgp+wAOkXl8IjURbQ=
 github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783/go.mod h1:5DS3icNZKImRwvDP7Kf9IHv+9d6EYtcvRpBALgh/s/Y=
 github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260706115414-f116fa6c4917 h1:f1xzBCccdUn49fRLh8XBn/d9OHpcrNa46w6aW0hGjyY=
@@ -1184,6 +1186,8 @@ golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9/go.mod h1:LzIPMQfyMNhhGPh
 golang.org/x/crypto v0.0.0-20210921155107-089bfa567519/go.mod h1:GvvjBRRGRdwPK5ydBHafDWAxML/pGHZbMvKqRZ5+Abc=
 golang.org/x/crypto v0.54.0 h1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw=
 golang.org/x/crypto v0.54.0/go.mod h1:KWL8ny2AZdGR2cWmzeHrp2azQPGogOv+HeQaVEXC2dk=
+golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=
+golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xis=
 golang.org/x/exp v0.0.0-20190121172915-509febef88a4/go.mod h1:CJ0aWSM057203Lf6IL+f9T1iT9GByDxfZKAQTCR3kQA=
 golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa h1:Zt3DZoOFFYkKhDT3v7Lm9FDMEV06GpzjG2jrqW+QTE0=
 golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa/go.mod h1:K79w1Vqn7PoiZn+TkNpx3BUWUQksGO3JcVX6qIjytmA=
