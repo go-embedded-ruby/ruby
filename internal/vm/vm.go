@@ -388,6 +388,7 @@ type VM struct {
 	cIOBuffer                          *RClass
 	cARGF                              *RClass
 	nextFd                             int
+	fdTable                            map[int]*IOObj
 	cYielder                           *RClass
 	cWeakMap                           *RClass
 	cWeakKeyMap                        *RClass

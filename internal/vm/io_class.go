@@ -21,6 +21,34 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		cIO.smethods[name] = m
 		cFile.smethods[name] = m
 	}
+	// IO.new(fd, mode = "r", **opts) / IO.for_fd wrap an existing descriptor. rbgo
+	// has no real fds, so the descriptor is looked up in the synthetic fd table
+	// (populated by #fileno); an unknown one raises Errno::EBADF. The result is a
+	// fresh IO carrying the mode's read/write intent and encoding.
+	forFd := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		pos, opts := splitIOOpts(args)
+		if len(pos) < 1 || len(pos) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
+		}
+		fd := int(vm.repeatLong(pos[0]))
+		if _, ok := vm.fdTable[fd]; !ok {
+			raise("Errno::EBADF", "Bad file descriptor - fd %d", fd)
+		}
+		mode := ""
+		if len(pos) >= 2 && !object.IsNil(pos[1]) {
+			mode = strArg(pos[1])
+		}
+		if opts != nil {
+			if m, ok := opts.Get(object.Symbol("mode")); ok && !object.IsNil(m) {
+				mode = strArg(m)
+			}
+		}
+		res := &IOObj{cls: cIO, isStr: true, writable: strings.ContainsAny(mode, "wa+")}
+		vm.applyIOMode(res, mode, opts)
+		return res
+	}
+	cIO.smethods["for_fd"] = &Method{name: "for_fd", owner: cIO, native: forFd}
+	cIO.smethods["new"] = &Method{name: "new", owner: cIO, native: forFd}
 	def("read", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.ioReadFile(args, false)
 	})
@@ -362,6 +390,42 @@ func encOpt(opts *object.Hash) (object.Value, bool) {
 		return v, true
 	}
 	return nil, false
+}
+
+// applyIOMode sets the external/internal encoding of a stream from a mode string
+// ("w:ext[:int]") and/or the :external_encoding / :internal_encoding / :encoding
+// options, canonicalising each name.
+func (vm *VM) applyIOMode(o *IOObj, mode string, opts *object.Hash) {
+	if i := strings.IndexByte(mode, ':'); i >= 0 {
+		enc := mode[i+1:]
+		if j := strings.IndexByte(enc, ':'); j >= 0 {
+			o.extEnc = vm.lookupEncodingName(enc[:j]).name
+			o.intEnc = vm.lookupEncodingName(enc[j+1:]).name
+		} else if enc != "" {
+			o.extEnc = vm.lookupEncodingName(enc).name
+		}
+	}
+	if opts == nil {
+		return
+	}
+	if v, ok := opts.Get(object.Symbol("external_encoding")); ok && !object.IsNil(v) {
+		o.extEnc = vm.encodingArg(v).name
+	}
+	if v, ok := opts.Get(object.Symbol("internal_encoding")); ok && !object.IsNil(v) {
+		o.intEnc = vm.encodingArg(v).name
+	}
+	if v, ok := opts.Get(object.Symbol("encoding")); ok && !object.IsNil(v) {
+		// A String :encoding may be a combined "external:internal"; an Encoding is a
+		// single external encoding.
+		if s, isStr := v.(*object.String); isStr {
+			if j := strings.IndexByte(s.Str(), ':'); j >= 0 {
+				o.extEnc = vm.lookupEncodingName(s.Str()[:j]).name
+				o.intEnc = vm.lookupEncodingName(s.Str()[j+1:]).name
+				return
+			}
+		}
+		o.extEnc = vm.encodingArg(v).name
+	}
 }
 
 // ioOptEncoding returns the canonical encoding name selected by the :encoding /
