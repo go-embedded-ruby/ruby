@@ -398,6 +398,39 @@ func (vm *VM) bootstrap() {
 		return object.NewString(vm.formatString(vm.coerceFormatString(args[0]), args[1:]))
 	}
 	vm.cObject.define("format", formatFn)
+	// Kernel#test(cmd, file1, file2 = nil): a single-character file test, delegating
+	// to the matching File query. cmd is the ?x character literal (an Integer) or a
+	// one-character String.
+	vm.cObject.define("test", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2..3)", len(args))
+		}
+		var c byte
+		switch cmd := args[0].(type) {
+		case object.Integer:
+			c = byte(cmd)
+		case *object.String:
+			if len(cmd.Str()) == 0 {
+				raise("ArgumentError", "argument for test is not a valid command")
+			}
+			c = cmd.Str()[0]
+		default:
+			raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(args[0]).name)
+		}
+		cFile := vm.consts["File"].(*RClass)
+		meth := map[byte]string{
+			'e': "exist?", 'f': "file?", 'd': "directory?",
+			'r': "readable?", 'R': "readable?", 'w': "writable?", 'W': "writable?",
+			'x': "executable?", 'X': "executable?", 'l': "symlink?",
+			's': "size?", 'z': "zero?", 'M': "mtime", 'A': "atime", 'C': "ctime",
+		}[c]
+		if meth == "" {
+			raise("ArgumentError", "unknown command '?%c'", c)
+		}
+		return vm.send(cFile, meth, []object.Value{args[1]}, nil)
+	})
+	// Kernel#test is a private method, so it does not show up in respond_to?.
+	vm.setInstanceVisibility(vm.cObject, "test", visPrivate)
 	vm.cObject.define("sprintf", formatFn)
 	vm.cObject.define("printf", nativePrintf)
 	vm.cObject.define("proc", func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
