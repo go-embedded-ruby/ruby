@@ -167,3 +167,20 @@ func TestEncodingCompatible(t *testing.T) {
 		}
 	}
 }
+
+// TestEncodingKeyword covers the __ENCODING__ keyword, which evaluates to the
+// source encoding (Encoding::UTF_8 for rbgo's UTF-8 scripts) at the top level, in
+// a method body and as a sub-expression. Asserted against MRI Ruby 4.0.6.
+func TestEncodingKeyword(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p __ENCODING__`, "#<Encoding:UTF-8>\n"},
+		{`p __ENCODING__ == Encoding::UTF_8`, "true\n"},
+		{`p [1, __ENCODING__.name]`, "[1, \"UTF-8\"]\n"},
+		{`def m; __ENCODING__; end; p m.name`, "\"UTF-8\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
