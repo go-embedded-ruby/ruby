@@ -305,6 +305,8 @@ github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe h1:oYFDl+kcAkTOX
 github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe/go.mod h1:Bh8Vr5Vy9UO7JqU5f6myUOWl0jjnnvtlGdIVTBbdLRw=
 github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783 h1:VAFOmKa1u2HKA2LFQhelusPVIAtgp+wAOkXl8IjURbQ=
 github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783/go.mod h1:5DS3icNZKImRwvDP7Kf9IHv+9d6EYtcvRpBALgh/s/Y=
+github.com/go-ruby-actioncable/actioncable v0.0.0-20260717061354-49297951bc19 h1:X9M8MkgKcLdaXoV1NN7zsVSB6vznJ0tw+2uC5FVPaOU=
+github.com/go-ruby-actioncable/actioncable v0.0.0-20260717061354-49297951bc19/go.mod h1:5DS3icNZKImRwvDP7Kf9IHv+9d6EYtcvRpBALgh/s/Y=
 github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260706115414-f116fa6c4917 h1:f1xzBCccdUn49fRLh8XBn/d9OHpcrNa46w6aW0hGjyY=
 github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260706115414-f116fa6c4917/go.mod h1:CgixBW5KpbPEx+8SCZJQbeVa2WLNB7ObGRRCsjDEY+Y=
 github.com/go-ruby-actionpack/actionpack v0.0.0-20260706115418-8ba13fbf84e5 h1:+CxMtA9K0j7BWiWdq+/rMfgeWjViJStyfVKcvMlDSvA=
