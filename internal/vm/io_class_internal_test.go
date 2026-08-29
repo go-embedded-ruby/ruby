@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -221,6 +222,38 @@ func TestIOCopyStream(t *testing.T) {
 		{pre + `a = StringIO.new("abcdef"); b = StringIO.new; begin; IO.copy_stream(a, b, 3, 2); rescue ArgumentError => e; p e.message; end`, "\"cannot specify src_offset for non-IO\"\n"},
 		// Fewer than two arguments is an ArgumentError.
 		{pre + `begin; IO.copy_stream(StringIO.new("x")); rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestIOForFd covers IO.new / IO.for_fd wrapping a synthetic descriptor: an IO
+// instance is created for a live fd, #to_int coerces the argument, the mode's
+// read/write intent and encoding (from the mode string or options) are applied,
+// an unknown fd raises Errno::EBADF, and the arity is 1..2. Files are created
+// under Dir.mktmpdir for portability. Asserted against MRI Ruby 4.0.6.
+func TestIOForFd(t *testing.T) {
+	fd := `require "tmpdir"
+Dir.mktmpdir do |d|
+  fd = File.open(File.join(d, "f"), "w").fileno
+  ` + "%s\nend"
+	wrap := func(body string) string { return fmt.Sprintf(fd, body) }
+	cases := []struct{ src, want string }{
+		{wrap(`p IO.new(fd, "w").instance_of?(IO)`), "true\n"},
+		{wrap(`p IO.for_fd(fd, "w").instance_of?(IO)`), "true\n"},
+		{wrap(`p IO.for_fd(fd, "w").write("foo")`), "3\n"},
+		{wrap(`io = IO.new(fd, "w:utf-8:ISO-8859-1"); p [io.external_encoding.to_s, io.internal_encoding.to_s]`), "[\"UTF-8\", \"ISO-8859-1\"]\n"},
+		{wrap(`io = IO.new(fd, "w", external_encoding: "utf-8", internal_encoding: "ibm866"); p [io.external_encoding.to_s, io.internal_encoding.to_s]`), "[\"UTF-8\", \"IBM866\"]\n"},
+		{wrap(`io = IO.new(fd, mode: "w:utf-8"); p io.external_encoding.to_s`), "\"UTF-8\"\n"},
+		{wrap(`io = IO.new(fd, "w", encoding: "utf-8"); p io.external_encoding.to_s`), "\"UTF-8\"\n"},
+		{wrap(`io = IO.new(fd, "w", encoding: "utf-8:ibm866"); p [io.external_encoding.to_s, io.internal_encoding.to_s]`), "[\"UTF-8\", \"IBM866\"]\n"},
+		{wrap(`obj = Object.new; d2 = fd; obj.define_singleton_method(:to_int) { d2 }; p IO.new(obj, "w").instance_of?(IO)`), "true\n"},
+		{wrap(`begin; IO.new(-999, "r"); rescue Errno::EBADF => e; p e.class; end`), "Errno::EBADF\n"},
+		{wrap(`begin; IO.new; rescue ArgumentError => e; p e.class; end`), "ArgumentError\n"},
+		{wrap(`begin; IO.new(fd, "r", "x"); rescue ArgumentError => e; p e.class; end`), "ArgumentError\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

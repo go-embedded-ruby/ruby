@@ -138,6 +138,7 @@ func (vm *VM) registerIO() {
 	// real file descriptors, so this is an identity, not an OS fd. StringIO has no
 	// #fileno, so it is defined only here on IO. A closed stream raises IOError.
 	vm.nextFd = 2 // synthetic descriptors for non-standard streams start at 3
+	vm.fdTable = map[int]*IOObj{}
 	fileno := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		if o.closed {
@@ -145,15 +146,19 @@ func (vm *VM) registerIO() {
 		}
 		switch o.label {
 		case "STDIN":
+			vm.fdTable[0] = o
 			return object.IntValue(0)
 		case "STDOUT":
+			vm.fdTable[1] = o
 			return object.IntValue(1)
 		case "STDERR":
+			vm.fdTable[2] = o
 			return object.IntValue(2)
 		}
 		if o.fd == 0 {
 			vm.nextFd++
 			o.fd = vm.nextFd
+			vm.fdTable[o.fd] = o
 		}
 		return object.IntValue(int64(o.fd))
 	}
