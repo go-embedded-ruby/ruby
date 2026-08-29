@@ -387,6 +387,7 @@ type VM struct {
 	cEnumeratorProduct                 *RClass
 	cIOBuffer                          *RClass
 	cARGF                              *RClass
+	nextFd                             int
 	cYielder                           *RClass
 	cWeakMap                           *RClass
 	cWeakKeyMap                        *RClass
