@@ -233,6 +233,8 @@ github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa h1:C7LXruttK94q
 github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa/go.mod h1:6cSkTkpvobmk2/FSOCRu928lYmWCp87HyCSffyQFhVk=
 github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381 h1:lefnD/dZINKBoIevcl16pbzh1A8B9jifm9rhenBkWUg=
 github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381/go.mod h1:U8jOcQwbbSwQ3E5geccvv0lkwNv89piHYG/Jj1w18JQ=
+github.com/go-composites/result v0.0.0-20260703061355-ee6ab615836f h1:bD8LagzrISY3mgGDPbvXW0CehfNYl6xXEqbO0RrMJLU=
+github.com/go-composites/result v0.0.0-20260703061355-ee6ab615836f/go.mod h1:U8jOcQwbbSwQ3E5geccvv0lkwNv89piHYG/Jj1w18JQ=
 github.com/go-composites/time v0.0.0-20260727203506-b0e9511265ce h1:s6sem+/vqY6ckwdCpuaxxfH9aZ0o9dvGfkC5RvJk6xg=
 github.com/go-composites/time v0.0.0-20260727203506-b0e9511265ce/go.mod h1:1VK0+gCw8h5qSeMcDt0pKujvEBR99f3j+xtfJ8KQSG4=
 github.com/go-crdt/collab v0.18.0 h1:/2o4Sv1hgYVgXu+8MPaDR1sXGBqS7OJ4f7lMDYXNCUg=
