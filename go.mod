@@ -12,7 +12,7 @@ require (
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/time v0.0.0-20260727203506-b0e9511265ce
 	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
-	github.com/go-images/images v0.0.0-20260811115337-bc5d586f8e38
+	github.com/go-images/images v0.0.0-20260815210351-4a50ef5ab734
 	github.com/go-kramdown/kramdown v0.1.0
 	github.com/go-liquid/liquid v0.1.0
 	github.com/go-mustache/mustache v0.1.0
@@ -204,6 +204,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260702233442-45013cfc5f26
 	go.etcd.io/etcd/server/v3 v3.6.13
+	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.41.0
 )
 
@@ -375,6 +376,8 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
+	github.com/sergeymakinen/go-bmp v1.0.0 // indirect
+	github.com/sergeymakinen/go-ico v1.0.0 // indirect
 	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
@@ -419,7 +422,6 @@ require (
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260708182218-49f421fb7959 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
