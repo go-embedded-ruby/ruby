@@ -1460,6 +1460,8 @@ func (vm *VM) classOf(v object.Value) *RClass {
 		return vm.consts["ConditionVariable"].(*RClass)
 	case *IOObj:
 		return x.cls
+	case *argfObj:
+		return vm.cARGF
 	case *RelineHistory:
 		return x.cls
 	case *tcpSocket:

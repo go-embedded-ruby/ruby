@@ -192,6 +192,16 @@ end
 def new_fd(name, mode = "w:utf-8")
   File.open(name, mode).fileno
 end
+# mspec's ARGF helper: bind @argf to a fresh ARGF reading the given files for the
+# duration of the block.
+def argf(argv)
+  @argf = ARGF.class.new(*argv)
+  begin
+    yield
+  ensure
+    @argf = nil
+  end
+end
 def infinity_value; 1.0/0.0; end
 def nan_value; 0.0/0.0; end
 def bignum_value(plus = 0); (2**64) + plus; end
