@@ -76,6 +76,16 @@ end`
 		{with(`p ARGF.class.new(f2).readchar`), "\"l\"\n"},
 		{with(`a = ARGF.class.new(f1); a.read; p a.to_io`), "nil\n"},
 		{with(`p ARGF.class.new(f1).filename == f1`), "true\n"},
+		// pos / tell / seek / rewind / fileno / encodings delegate to the current file.
+		{with(`a = ARGF.class.new(f1); a.gets; p [a.pos, a.tell]`), "[3, 3]\n"},
+		{with(`a = ARGF.class.new(f1); a.gets; a.rewind; p [a.gets, a.lineno]`), "[\"l1\\n\", 1]\n"},
+		{with(`a = ARGF.class.new(f2); a.seek(1); p a.read`), "\"3\\n\"\n"},
+		{with(`a = ARGF.class.new(f2); a.pos = 2; p a.read`), "\"\\n\"\n"},
+		{with(`a = ARGF.class.new(f1); p [a.fileno.is_a?(Integer), a.to_i.is_a?(Integer)]`), "[true, true]\n"},
+		{with(`a = ARGF.class.new(f1); a.set_encoding("UTF-8", "ISO-8859-1"); p [a.external_encoding.to_s, a.internal_encoding.to_s]`), "[\"UTF-8\", \"ISO-8859-1\"]\n"},
+		// After close there is no stream, so a delegating call raises.
+		{with(`a = ARGF.class.new(f1); a.close; p(a.pos rescue :err)`), ":err\n"},
+		{with(`a = ARGF.class.new(f1); a.close; p(a.rewind rescue :err)`), ":err\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

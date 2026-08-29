@@ -75,6 +75,16 @@ func (a *argfObj) ensure() *IOObj {
 	}
 }
 
+// curIO returns the current stream (selecting the first input if reading has not
+// started), even when it is at EOF — unlike ensure, which skips past an exhausted
+// file. It is nil only when there is no input at all.
+func (a *argfObj) curIO() *IOObj {
+	if !a.started {
+		a.ensure()
+	}
+	return a.cur
+}
+
 // bumpLine advances ARGF's line counter and mirrors it into $. as MRI does.
 func (a *argfObj) bumpLine() {
 	a.lineno++
@@ -310,6 +320,39 @@ func (vm *VM) registerARGF() {
 	d("each_codepoint", iter("each_codepoint", "getc", func(vm *VM, c object.Value) object.Value {
 		return vm.send(c, "ord", nil, nil)
 	}))
+
+	// pos / tell / pos= / seek / fileno / to_i delegate to the current file's IO
+	// (which carries the byte cursor and descriptor).
+	delegate := func(meth string) NativeFn {
+		return func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+			o := self(v).curIO()
+			if o == nil {
+				raise("ArgumentError", "no stream")
+			}
+			return vm.send(o, meth, args, nil)
+		}
+	}
+	d("pos", delegate("pos"))
+	d("tell", delegate("tell"))
+	d("pos=", delegate("pos="))
+	d("seek", delegate("seek"))
+	d("fileno", delegate("fileno"))
+	d("to_i", delegate("fileno"))
+	d("set_encoding", delegate("set_encoding"))
+	d("external_encoding", delegate("external_encoding"))
+	d("internal_encoding", delegate("internal_encoding"))
+	// rewind returns the current file to its start and resets the line counter.
+	d("rewind", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		a := self(v)
+		o := a.curIO()
+		if o == nil {
+			raise("ArgumentError", "no stream to rewind")
+		}
+		o.pos = 0
+		a.lineno = 0
+		a.vm.globals["$."] = object.IntValue(0)
+		return object.IntValue(0)
+	})
 
 	// file: the IO of the file currently being read.
 	d("file", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
