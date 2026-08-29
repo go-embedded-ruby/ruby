@@ -29,6 +29,7 @@ type IOObj struct {
 	wrClosed bool   // #close_write was called — writes raise "not opened for writing"
 	extEnc   string // external encoding name, "" ⇒ Encoding.default_external
 	intEnc   string // internal encoding name, "" ⇒ none (nil)
+	fd       int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
 
 	// Pipe ends (IO.pipe) share a single byte buffer in *pipe. The write end
 	// appends; the read end drains from pipe.rpos. Because subprocess execution
@@ -131,6 +132,33 @@ func (vm *VM) registerIO() {
 	defStringIORead(cIO) // IO carries the read protocol too ($stdin, File streams)
 	defIOReadExtra(cIO)
 	defIOSeekable(cIO) // pread/pwrite/sysseek/binmode?/autoclose — IO+File, not StringIO
+
+	// fileno / to_i: the stream's descriptor. The standard streams are 0/1/2; any
+	// other IO gets a distinct synthetic descriptor on first request. rbgo has no
+	// real file descriptors, so this is an identity, not an OS fd. StringIO has no
+	// #fileno, so it is defined only here on IO. A closed stream raises IOError.
+	vm.nextFd = 2 // synthetic descriptors for non-standard streams start at 3
+	fileno := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		switch o.label {
+		case "STDIN":
+			return object.IntValue(0)
+		case "STDOUT":
+			return object.IntValue(1)
+		case "STDERR":
+			return object.IntValue(2)
+		}
+		if o.fd == 0 {
+			vm.nextFd++
+			o.fd = vm.nextFd
+		}
+		return object.IntValue(int64(o.fd))
+	}
+	cIO.define("fileno", fileno)
+	cIO.define("to_i", fileno)
 
 	cStringIO := newClass("StringIO", vm.cObject)
 	vm.consts["StringIO"] = cStringIO

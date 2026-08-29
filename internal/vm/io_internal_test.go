@@ -43,3 +43,20 @@ func TestIOEncodingMethods(t *testing.T) {
 		}
 	}
 }
+
+// TestIOFileno covers IO#fileno / #to_i: the standard streams report 0/1/2, any
+// other stream gets a distinct descriptor that is stable across calls, and a
+// closed stream raises IOError. Asserted against MRI Ruby 4.0.6.
+func TestIOFileno(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p [$stdin.fileno, $stdout.fileno, $stderr.fileno]`, "[0, 1, 2]\n"},
+		{`p $stdout.to_i`, "1\n"},
+		{`r, w = IO.pipe; p [r.fileno.is_a?(Integer), r.fileno != w.fileno, r.fileno == r.fileno]`, "[true, true, true]\n"},
+		{`r, w = IO.pipe; r.close; begin; r.fileno; rescue IOError => e; p e.class; end`, "IOError\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
