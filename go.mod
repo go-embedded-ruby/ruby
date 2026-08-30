@@ -191,8 +191,8 @@ require (
 	github.com/go-ruby-webmock/webmock v0.0.0-20260707191733-fd7c005e27e9
 	github.com/go-ruby-webrick/webrick v0.0.0-20260630133907-a1380ee7733b
 	github.com/go-ruby-widgets/mvvm v0.1.0
-	github.com/go-ruby-widgets/tui v0.1.0
-	github.com/go-ruby-widgets/widgets v0.10.7
+	github.com/go-ruby-widgets/tui v0.3.0
+	github.com/go-ruby-widgets/widgets v0.11.0
 	github.com/go-ruby-yaml/yaml v0.0.0-20260706120500-56d458798003
 	github.com/go-ruby-zeitwerk/zeitwerk v0.0.0-20260706163820-cda238c0e98c
 	github.com/go-ruby-zlib/zlib v0.0.0-20260704053046-1ff8c43f4f67
@@ -280,14 +280,14 @@ require (
 	github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 // indirect
 	github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 // indirect
 	github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa // indirect
-	github.com/go-crdt/collab v0.18.0 // indirect
-	github.com/go-crdt/crdt v0.25.0 // indirect
+	github.com/go-crdt/collab v0.25.0 // indirect
+	github.com/go-crdt/crdt v0.31.0 // indirect
 	github.com/go-datetime/dates v0.1.0 // indirect
 	github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 // indirect
-	github.com/go-gfx/gfx v0.6.0 // indirect
+	github.com/go-gfx/gfx v0.11.0 // indirect
 	github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9 // indirect
 	github.com/go-hocon/hocon v0.0.0-20260709172937-6d69e3b57178 // indirect
-	github.com/go-iconoir/iconoir v0.2.0 // indirect
+	github.com/go-icons/iconoir v0.2.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.14 // indirect
@@ -299,7 +299,7 @@ require (
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e // indirect
 	github.com/go-regexp/engine v0.1.0 // indirect
-	github.com/go-richdoc/richdoc v0.1.0 // indirect
+	github.com/go-richdoc/richdoc v0.2.0 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
 	github.com/go-scss/scss v0.0.0-20260803114742-42d746e6ec68 // indirect
 	github.com/go-simd/adler32 v0.0.0-20260703095822-b2b45fec563b // indirect
@@ -312,8 +312,8 @@ require (
 	github.com/go-webauthn/x v0.2.6 // indirect
 	github.com/go-widgets/mvvm v0.8.0 // indirect
 	github.com/go-widgets/painter v0.11.0 // indirect
-	github.com/go-widgets/toolkit v0.224.0 // indirect
-	github.com/go-widgets/tui v0.58.0 // indirect
+	github.com/go-widgets/toolkit v0.288.0 // indirect
+	github.com/go-widgets/tui v0.61.0 // indirect
 	github.com/go-zookeeper/zk v1.0.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
