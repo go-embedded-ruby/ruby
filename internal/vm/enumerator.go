@@ -41,6 +41,16 @@ type Enumerator struct {
 	// isProduct marks an Enumerator::Product (built by Enumerator.product): a plain
 	// generator Enumerator whose only distinction is the class it reports.
 	isProduct bool
+
+	// isArithSeq marks an Enumerator::ArithmeticSequence (built by Numeric#step
+	// without a block): a step-driven Enumerator that additionally answers
+	// #begin/#end/#step/#exclude_end?/#last from the defining triple below. asEnd is
+	// nil for an endless sequence (m.step with no limit).
+	isArithSeq bool
+	asBegin    object.Value
+	asEnd      object.Value
+	asStep     object.Value
+	asExcl     bool
 	// isChain marks an Enumerator::Chain: #each iterates chainParts in turn, and
 	// entered[i] records whether part i has been iterated (so #rewind can rewind,
 	// in reverse, exactly the parts that were entered).
@@ -150,6 +160,49 @@ func (vm *VM) registerEnumerator() {
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 			return vm.enumProduct(args, blk)
 		}}
+
+	// Enumerator::ArithmeticSequence — the subclass Numeric#step (and #step on an
+	// Integer/Float) returns when called without a block. It is a step-driven
+	// Enumerator (its #each/#to_a/#first/#size all reuse the inherited step
+	// machinery) that additionally exposes the defining triple.
+	vm.cArithSeq = newClass("Enumerator::ArithmeticSequence", vm.cEnumerator)
+	vm.cArithSeq.consts = vm.cEnumerator.consts
+	vm.cEnumerator.consts["ArithmeticSequence"] = vm.cArithSeq
+	vm.cArithSeq.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self.(*Enumerator).asBegin
+	})
+	vm.cArithSeq.define("end", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self.(*Enumerator).asEnd
+	})
+	vm.cArithSeq.define("step", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self.(*Enumerator).asStep
+	})
+	vm.cArithSeq.define("exclude_end?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*Enumerator).asExcl)
+	})
+	// #last materialises the (necessarily bounded) sequence; MRI refuses it for an
+	// endless one rather than looping for ever.
+	vm.cArithSeq.define("last", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		e := self.(*Enumerator)
+		if object.IsNil(e.asEnd) {
+			raise("RangeError", "cannot get the last element of endless arithmetic sequence")
+		}
+		elems := vm.enumMaterialize(e)
+		if len(args) == 0 {
+			if len(elems) == 0 {
+				return object.NilV
+			}
+			return elems[len(elems)-1]
+		}
+		n := int(intArg(args[0]))
+		if n < 0 {
+			raise("ArgumentError", "negative array size")
+		}
+		if n > len(elems) {
+			n = len(elems)
+		}
+		return object.NewArrayFromSlice(append([]object.Value{}, elems[len(elems)-n:]...))
+	})
 
 	// Enumerator::Yielder — `y << v` / `y.yield(v)` feed the generator's values in.
 	vm.cYielder = newClass("Enumerator::Yielder", vm.cObject)
