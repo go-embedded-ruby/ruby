@@ -227,6 +227,8 @@ github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6 h1:gJG8ekSggli
 github.com/go-composites/array v0.0.0-20260621062820-1aa11b71d5d6/go.mod h1:hhWmL0cQYEqlwbktG0uhz17sTRDcq1Gtgs1FO9aI+gU=
 github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62 h1:HcBdYJtXHSQ8AoGdyfpN5CU19d3dZ11kv13IxXWpcd8=
 github.com/go-composites/bag v0.0.0-20260621180003-a1aa1a8eec62/go.mod h1:7Fnlw3jRLBt7bLkwddO8zdOAD1d4PRYhE1M3wPvTe6c=
+github.com/go-composites/bag v0.0.0-20260703061228-a4d351ad9170 h1:8Lr0McD+5JGvtDxTPv+b0UsIOrD99c1ft34SDamCRiI=
+github.com/go-composites/bag v0.0.0-20260703061228-a4d351ad9170/go.mod h1:7Fnlw3jRLBt7bLkwddO8zdOAD1d4PRYhE1M3wPvTe6c=
 github.com/go-composites/error v0.0.0-20260621061850-8f949885a586 h1:gA6h4DA7NSiDoqwYDMUlQ2LO/dWx3VBq41nHIMQJskI=
 github.com/go-composites/error v0.0.0-20260621061850-8f949885a586/go.mod h1:9Lf1BQDdG/DDzw+WaWctBOzk69PTLjREAiPcKfSUilU=
 github.com/go-composites/null v0.0.0-20260621061849-c8074799d5aa h1:C7LXruttK94qEUNp4HV5Cqcxt+kp5NXSB0nxKVa0N+c=
