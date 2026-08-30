@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -167,10 +168,23 @@ type Compiler struct {
 	ctxs         []*loopCtx // innermost-last stack of break/next targets
 	retryTargets []int      // innermost-last stack of begin-body PCs for `retry`
 	stack        []*builder
+	// srcEnc is the source file's encoding (from a `# encoding:` magic comment),
+	// canonicalised to a registry name, or "" for the UTF-8 default. When set, a
+	// string literal is tagged with it (see newStrLit) so a literal in a
+	// `# encoding: binary` file is BINARY, matching MRI.
+	srcEnc string
 }
 
-// Compile lowers a Program into the top-level ISeq.
+// Compile lowers a Program into the top-level ISeq, treating string literals as
+// UTF-8 (the default source encoding).
 func Compile(prog *ast.Program) (iseq *bytecode.ISeq, err error) {
+	return CompileWithEncoding(prog, "")
+}
+
+// CompileWithEncoding lowers a Program whose source declared srcEnc (a canonical
+// encoding name, or "" for UTF-8) via a `# encoding:` magic comment, so string
+// literals carry that encoding.
+func CompileWithEncoding(prog *ast.Program, srcEnc string) (iseq *bytecode.ISeq, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			// Unchecked: a non-compileError is an internal bug and re-panics as a
@@ -178,11 +192,85 @@ func Compile(prog *ast.Program) (iseq *bytecode.ISeq, err error) {
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{}
+	c := &Compiler{srcEnc: srcEnc}
 	c.push(newBuilder("<main>", nil))
 	c.compileBody(prog.Body)
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	return c.pop().build(), nil
+}
+
+// newStrLit builds the String constant for a source literal, tagging it with the
+// source file's encoding when one was declared. A literal whose bytes are valid
+// multi-byte UTF-8 is left UTF-8 regardless: such content comes from a `\u` escape
+// (or literal Unicode), which MRI always encodes as UTF-8 even in a non-UTF-8
+// source. Pure-ASCII and byte-oriented (`\x`) content take the source encoding.
+func (c *Compiler) newStrLit(s string) object.Value {
+	if c.srcEnc != "" {
+		b := []byte(s)
+		if !(utf8.Valid(b) && !asciiOnlyBytes(b)) {
+			return object.NewStringBytesEnc(b, c.srcEnc)
+		}
+	}
+	return object.NewString(s)
+}
+
+// asciiOnlyBytes reports whether every byte is 7-bit ASCII.
+func asciiOnlyBytes(b []byte) bool {
+	for _, x := range b {
+		if x >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// MagicSourceEncoding returns the canonical registry encoding name declared by a
+// `# encoding:` / `# coding:` magic comment on the first line of src (or the
+// second when the first is a shebang), or "" for UTF-8 or no declaration. Only the
+// encodings the negotiation cares about are recognised by canonical spelling;
+// anything else (including plain UTF-8) yields "" so literals keep the default.
+func MagicSourceEncoding(src string) string {
+	line, rest, _ := strings.Cut(src, "\n")
+	if strings.HasPrefix(strings.TrimSpace(line), "#!") {
+		line, _, _ = strings.Cut(rest, "\n")
+	}
+	name := magicEncodingName(line)
+	switch strings.ToLower(name) {
+	case "binary", "ascii-8bit":
+		return "ASCII-8BIT"
+	case "us-ascii", "ascii":
+		return "US-ASCII"
+	}
+	return ""
+}
+
+// magicEncodingName extracts the value of a `coding:`/`encoding:` field from a
+// comment line (e.g. `# -*- coding: binary -*-` or `# encoding: binary`), or "".
+func magicEncodingName(line string) string {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "#") {
+		return ""
+	}
+	low := strings.ToLower(line)
+	i := strings.Index(low, "coding")
+	if i < 0 {
+		return ""
+	}
+	rest := line[i+len("coding"):]
+	rest = strings.TrimLeft(rest, ":= \t")
+	// The value ends at the first whitespace or a `-*-` terminator.
+	end := len(rest)
+	for j, r := range rest {
+		if r == ' ' || r == '\t' || r == ';' {
+			end = j
+			break
+		}
+		if strings.HasPrefix(rest[j:], "-*-") {
+			end = j
+			break
+		}
+	}
+	return strings.TrimSpace(rest[:end])
 }
 
 // CompileWithLocals lowers prog for a Binding eval: it compiles in a child scope
@@ -254,7 +342,7 @@ func (c *Compiler) compileNode(n ast.Node) {
 		// Integer/Float, or a Rational for the combined `ri` form).
 		b.emit(bytecode.OpPushConst, b.addConst(&object.Complex{Re: object.IntValue(0), Im: numericValue(v.Value)}), 0)
 	case *ast.StringLit:
-		b.emit(bytecode.OpPushConst, b.addConst(object.NewString(v.Value)), 0)
+		b.emit(bytecode.OpPushConst, b.addConst(c.newStrLit(v.Value)), 0)
 	case *ast.StrInterp:
 		// Concatenate each part coerced with to_s onto a growing string.
 		b.emit(bytecode.OpPushConst, b.addConst(object.NewString("")), 0)

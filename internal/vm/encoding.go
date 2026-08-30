@@ -96,9 +96,9 @@ func (vm *VM) registerEncoding() {
 	vm.cEncoding.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self.(*encodingObj).name)
 	})
-	vm.cEncoding.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self.(*encodingObj).name)
-	})
+	// Encoding#to_s is a true alias of #name (they share one Method record, so
+	// Encoding.instance_method(:to_s) == Encoding.instance_method(:name), as MRI).
+	vm.cEncoding.methods["to_s"] = vm.cEncoding.methods["name"]
 	vm.cEncoding.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self.(*encodingObj).Inspect())
 	})
@@ -199,37 +199,43 @@ func (vm *VM) registerEncoding() {
 }
 
 // encOperand is one argument to Encoding.compatible?, reduced to what the
-// negotiation needs: its governing encoding, its bytes (for String/Symbol content),
-// and whether it carries content at all (a String or Symbol) versus being a bare
-// Encoding object.
+// negotiation needs: its governing encoding, its bytes (for String content), and
+// whether it is a real String (whose byte content — its coderange — participates)
+// as opposed to a Symbol, Regexp or bare Encoding (whose declared encoding alone
+// participates, exactly as MRI treats every non-T_STRING encoding-capable object).
 type encOperand struct {
-	enc        *encodingObj
-	bytes      []byte
-	stringLike bool
-	ok         bool
+	enc   *encodingObj
+	bytes []byte
+	isStr bool
+	ok    bool
 }
 
-// is7bit reports whether the operand is ASCII-only *for compatibility purposes*:
-// its encoding must be ASCII-compatible AND every byte 7-bit. Content in a
-// non-ASCII-compatible encoding (UTF-16, ISO-2022-JP, …) is never 7-bit even when
-// empty or all-ASCII, matching MRI's coderange (rb_enc_str_coderange).
+// is7bit reports whether a String operand is ASCII-only *for compatibility
+// purposes* (MRI's ENC_CODERANGE_7BIT): its encoding must be ASCII-compatible AND
+// every byte 7-bit. Content in a non-ASCII-compatible encoding (UTF-16,
+// ISO-2022-JP, …) is never 7-bit even when empty or all-ASCII.
 func (o encOperand) is7bit() bool { return o.enc.asciiCompat && asciiOnly(o.bytes) }
 
-// encOperandOf reduces a compatibility argument to an encOperand: a String keeps
-// its tagged encoding and bytes; a Symbol is US-ASCII when ASCII-only else UTF-8;
-// an Encoding is itself (no content); anything else has no encoding, making the
-// pair incompatible. (Regexp operands are a named residual.)
+// encOperandOf reduces a compatibility argument to an encOperand:
+//   - a String keeps its tagged encoding and bytes (isStr, so its coderange is
+//     consulted below);
+//   - a Symbol, Regexp or Encoding contributes only its declared encoding (not a
+//     String, so its content coderange is never examined) — a Symbol is US-ASCII
+//     when ASCII-only else UTF-8, a Regexp reports its source encoding, and an
+//     Encoding is itself;
+//   - anything else has no encoding, making the pair incompatible.
 func (vm *VM) encOperandOf(v object.Value) encOperand {
 	switch x := v.(type) {
 	case *object.String:
-		return encOperand{enc: vm.internEncoding(x.EncName()), bytes: x.Bytes(), stringLike: true, ok: true}
+		return encOperand{enc: vm.internEncoding(x.EncName()), bytes: x.Bytes(), isStr: true, ok: true}
 	case object.Symbol:
-		b := []byte(string(x))
 		name := "UTF-8"
-		if asciiOnly(b) {
+		if asciiOnly([]byte(string(x))) {
 			name = "US-ASCII"
 		}
-		return encOperand{enc: vm.encodings[name], bytes: b, stringLike: true, ok: true}
+		return encOperand{enc: vm.encodings[name], ok: true}
+	case *Regexp:
+		return encOperand{enc: vm.internEncoding(x.encodingName()), ok: true}
 	case *encodingObj:
 		return encOperand{enc: x, ok: true}
 	}
@@ -238,65 +244,67 @@ func (vm *VM) encOperandOf(v object.Value) encOperand {
 
 // encodingCompatible is Encoding.compatible?(obj1, obj2): the encoding of the
 // string that would result from concatenating the two, or nil if they cannot be
-// combined. It follows MRI's rb_enc_compatible negotiation:
-//
-//   - identical encodings are always compatible;
-//   - an empty second string yields the first's encoding;
-//   - against an empty first string, the second's encoding wins unless the first
-//     is ASCII-compatible and the second is 7-bit;
-//   - otherwise both encodings must be ASCII-compatible, and the 7-bit (ASCII-only)
-//     operand adopts the other's encoding; two non-7-bit operands are incompatible.
+// combined. It follows MRI's rb_enc_compatible / enc_compatible_latter negotiation
+// faithfully, including the String-vs-non-String distinction (only a real String's
+// byte coderange participates; a Symbol/Regexp/Encoding contributes its declared
+// encoding, with US-ASCII the special "same as contents" case).
 func (vm *VM) encodingCompatible(a, b object.Value) object.Value {
 	oa := vm.encOperandOf(a)
 	ob := vm.encOperandOf(b)
 	if !oa.ok || !ob.ok {
 		return object.NilV
 	}
-	e1, e2 := oa.enc, ob.enc
-	if e1 == e2 {
-		return e1
+	enc1, enc2 := oa.enc, ob.enc
+	// Identical encodings are always compatible.
+	if enc1 == enc2 {
+		return enc1
 	}
-	if ob.stringLike && len(ob.bytes) == 0 {
-		return e1
+	// An empty second String takes the first's encoding.
+	if ob.isStr && len(ob.bytes) == 0 {
+		return enc1
 	}
-	if oa.stringLike && ob.stringLike && len(oa.bytes) == 0 {
-		if e1.asciiCompat && ob.is7bit() {
-			return e1
+	// An empty first String yields the second's encoding, unless the first is
+	// ASCII-compatible and the second is 7-bit (then the first's).
+	if oa.isStr && ob.isStr && len(oa.bytes) == 0 {
+		if enc1.asciiCompat && ob.is7bit() {
+			return enc1
 		}
-		return e2
+		return enc2
 	}
-	if !e1.asciiCompat || !e2.asciiCompat {
+	// From here both encodings must be ASCII-compatible.
+	if !enc1.asciiCompat || !enc2.asciiCompat {
 		return object.NilV
 	}
-	if oa.stringLike && ob.stringLike {
-		// Two content operands: the 7-bit (ASCII-only) one adopts the other's
-		// encoding; two non-7-bit operands are incompatible.
-		if ob.is7bit() {
-			return e1
-		}
-		if oa.is7bit() {
-			return e2
-		}
-		return object.NilV
+	// A non-String whose declared encoding is US-ASCII contributes the other
+	// operand's encoding (MRI's "objects whose encoding is the same of contents").
+	if !ob.isStr && enc2.name == "US-ASCII" {
+		return enc1
 	}
-	if oa.stringLike != ob.stringLike {
-		// One content operand, one bare Encoding. Verified against MRI in both
-		// argument orders: a US-ASCII Encoding always keeps the string's own
-		// encoding; otherwise, when the string is ASCII-only, the result is the
-		// second operand's encoding (the Encoding when it is second, the string's
-		// encoding when the Encoding is first); a non-ASCII string is incompatible.
-		str, enc, encSecond := oa, e2, true
-		if !oa.stringLike {
-			str, enc, encSecond = ob, e1, false
-		}
-		if enc.name == "US-ASCII" {
-			return str.enc
-		}
-		if str.is7bit() {
-			if encSecond {
-				return enc
+	if !oa.isStr && enc1.name == "US-ASCII" {
+		return enc2
+	}
+	// Orient so s1 is the String (if either is). enc1/enc2 keep referring to the
+	// original operand positions, as in MRI where only str1/str2 are swapped.
+	s1, s2 := oa, ob
+	if !oa.isStr {
+		s1, s2 = ob, oa
+	}
+	if s1.isStr {
+		cr1 := s1.is7bit()
+		if s2.isStr {
+			cr2 := s2.is7bit()
+			if cr1 != cr2 {
+				if cr1 {
+					return enc2
+				}
+				return enc1
 			}
-			return str.enc
+			if cr2 {
+				return enc1
+			}
+		}
+		if cr1 {
+			return enc2
 		}
 	}
 	return object.NilV

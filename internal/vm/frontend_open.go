@@ -21,5 +21,5 @@ func openParseCompile(src string) (*bytecode.ISeq, error) {
 	if err != nil {
 		return nil, err
 	}
-	return compiler.Compile(prog)
+	return compiler.CompileWithEncoding(prog, compiler.MagicSourceEncoding(src))
 }
