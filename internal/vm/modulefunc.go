@@ -170,6 +170,36 @@ func (vm *VM) registerModuleExtras() {
 	}
 	vm.cModule.define("private_constant", constVisibility)
 	vm.cModule.define("public_constant", constVisibility)
+
+	// Module#deprecate_constant(*names): mark existing constants so that reading
+	// them warns (when Warning[:deprecated] is on). An undefined name is a
+	// NameError.
+	vm.cModule.define("deprecate_constant", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		for _, a := range args {
+			name := nameArg(a)
+			if _, ok := mod.consts[name]; !ok {
+				raise("NameError", "constant %s not defined", scopedNameFor(mod, name))
+			}
+			if mod.deprecatedConsts == nil {
+				mod.deprecatedConsts = map[string]bool{}
+			}
+			mod.deprecatedConsts[name] = true
+		}
+		return mod
+	})
+}
+
+// warnDeprecatedConst emits MRI's "constant X::Y is deprecated" warning when a
+// deprecated constant is read, but only while Warning[:deprecated] is enabled.
+func (vm *VM) warnDeprecatedConst(scope *RClass, name string) {
+	w := vm.consts["Warning"]
+	if !vm.send(w, "[]", []object.Value{object.Symbol("deprecated")}, nil).Truthy() {
+		return
+	}
+	vm.send(w, "warn", []object.Value{
+		object.NewString("warning: constant " + scopedNameFor(scope, name) + " is deprecated\n"),
+	}, nil)
 }
 
 // nameArg coerces a method-name argument (a String or Symbol) to its string,

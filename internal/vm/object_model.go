@@ -209,12 +209,13 @@ type RClass struct {
 	// named reports whether this class/module has acquired a permanent name yet.
 	// An anonymous class (Class.new / Module.new) starts unnamed; the first time
 	// it is assigned to a constant it takes that constant's qualified name.
-	named       bool
-	isModule    bool
-	meta        *RClass // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
-	metaOf      *RClass // when this RClass is a metaclass, the class it is the metaclass of (else nil); routes `class << c` visibility directives to c's class methods
-	isSingleton bool    // true for a singleton class — a class metaclass or a per-object singleton (reported by Module#singleton_class?)
-	funcMode    bool    // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
+	named            bool
+	isModule         bool
+	meta             *RClass         // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
+	metaOf           *RClass         // when this RClass is a metaclass, the class it is the metaclass of (else nil); routes `class << c` visibility directives to c's class methods
+	isSingleton      bool            // true for a singleton class — a class metaclass or a per-object singleton (reported by Module#singleton_class?)
+	deprecatedConsts map[string]bool // constants marked by Module#deprecate_constant; access warns
+	funcMode         bool            // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
 	// defaultVis is the access level applied to subsequent `def`s in this body,
 	// set by a bare `private` / `protected` / `public` with no args. It resets to
 	// visPublic at the start of each class/module body (a fresh RClass starts at
@@ -526,6 +527,9 @@ func (vm *VM) constInAncestors(cls *RClass, name string) (object.Value, bool) {
 // the flat top-level table, so M::File is distinct from the top-level File.
 func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
 	if v, ok := vm.constInAncestors(cls, name); ok {
+		if cls.deprecatedConsts != nil && cls.deprecatedConsts[name] {
+			vm.warnDeprecatedConst(cls, name)
+		}
 		return v
 	}
 	// A pending autoload on the receiver or an ancestor: require it and retry.
