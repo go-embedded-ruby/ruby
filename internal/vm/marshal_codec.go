@@ -40,11 +40,17 @@ type mDumper struct {
 	syms   map[string]int       // symbol name -> symbol-table index
 	objs   map[object.Value]int // composite/object identity -> object-link index
 	nextID int
+	// limit is the remaining recursion budget (Marshal.dump's third argument).
+	// It counts down one level per nested value; a negative limit (the default
+	// -1) never reaches zero and so imposes no bound. Reaching zero at the entry
+	// of any value raises, matching MRI's "exceed depth limit".
+	limit int
 }
 
-// marshalDump returns the Ruby Marshal encoding of v.
-func (vm *VM) marshalDump(v object.Value) []byte {
-	d := &mDumper{vm: vm, syms: map[string]int{}, objs: map[object.Value]int{}}
+// marshalDump returns the Ruby Marshal encoding of v, honouring the given
+// recursion limit (-1 for unlimited).
+func (vm *VM) marshalDump(v object.Value, limit int) []byte {
+	d := &mDumper{vm: vm, syms: map[string]int{}, objs: map[object.Value]int{}, limit: limit}
 	d.buf = []byte{marshalMajor, marshalMinor}
 	d.writeValue(v)
 	return d.buf
@@ -68,6 +74,14 @@ func (d *mDumper) link(v object.Value) bool {
 }
 
 func (d *mDumper) writeValue(v object.Value) {
+	// Enforce Marshal.dump's recursion limit: a zero budget at the entry of any
+	// value is an error, and each nested value is written with one less. A
+	// negative budget (the -1 default) never hits zero, so it is unbounded.
+	if d.limit == 0 {
+		raise("ArgumentError", "exceed depth limit")
+	}
+	d.limit--
+	defer func() { d.limit++ }()
 	switch x := v.(type) {
 	case object.Nil:
 		d.buf = append(d.buf, '0')
@@ -82,7 +96,12 @@ func (d *mDumper) writeValue(v object.Value) {
 	case object.Integer:
 		d.writeInt(big.NewInt(int64(x)))
 	case *object.Bignum:
-		d.writeInt(x.I)
+		// A Bignum is a heap object, so repeated references link like any other
+		// composite (unlike a Fixnum-range Integer, which is immediate).
+		if d.link(x) {
+			return
+		}
+		d.writeBignumBody(x.I)
 	case object.Float:
 		d.newID()
 		d.buf = append(d.buf, 'f')
@@ -158,7 +177,16 @@ func (d *mDumper) writeInt(b *big.Int) {
 			return
 		}
 	}
+	// An Integer outside the marshal Fixnum range dumps in the Bignum 'l' form
+	// and consumes an object-link id, but is immediate so it is never linked.
 	d.newID()
+	d.writeBignumBody(b)
+}
+
+// writeBignumBody emits the 'l' Bignum payload (sign, 16-bit-short count,
+// little-endian magnitude). It does not allocate an object-link id; the caller
+// does that (writeInt via newID, or writeValue via link for a *Bignum object).
+func (d *mDumper) writeBignumBody(b *big.Int) {
 	d.buf = append(d.buf, 'l')
 	if b.Sign() < 0 {
 		d.buf = append(d.buf, '-')
@@ -201,6 +229,13 @@ func (d *mDumper) writeString(s *object.String) {
 func (d *mDumper) writeHash(h *object.Hash) {
 	if !object.IsNil(h.DefaultProc) {
 		raise("TypeError", "can't dump hash with default proc")
+	}
+	// A Hash put into compare_by_identity mode carries no inline flag in the
+	// stream, so MRI wraps it in a 'C' container naming the Hash class; loading
+	// that container re-applies compare_by_identity.
+	if h.Identity {
+		d.buf = append(d.buf, 'C')
+		d.writeSymbol("Hash")
 	}
 	if h.Default != nil {
 		d.buf = append(d.buf, '}')
@@ -247,6 +282,9 @@ func (d *mDumper) writeRegexp(r *Regexp) {
 
 func (d *mDumper) writeClassRef(c *RClass) {
 	if c.name == "" {
+		if c.isModule {
+			raise("TypeError", "can't dump anonymous module %s", c.ToS())
+		}
 		raise("TypeError", "can't dump anonymous class %s", c.ToS())
 	}
 	if c.isModule {
@@ -303,6 +341,12 @@ func (d *mDumper) writeTime(t *Time) {
 func (d *mDumper) writeObject(o *RObject) {
 	if d.link(o) {
 		return
+	}
+	// Every path below names o.class; an instance of an anonymous class cannot be
+	// dumped, whatever hook (marshal_dump / _dump / Struct / builtin subclass /
+	// plain object) it would otherwise take.
+	if o.class.name == "" {
+		raise("TypeError", "can't dump anonymous class %s", o.class.ToS())
 	}
 	// An object singleton-extended by one or more modules is prefixed with an 'e'
 	// container per module (last-extended first, matching MRI's ancestry order).
@@ -363,8 +407,16 @@ func (d *mDumper) writeObject(o *RObject) {
 		}
 		return
 	}
-	if o.class.name == "" {
-		raise("TypeError", "can't dump anonymous class %s", o.class.ToS())
+	// A plain object (no marshal_dump / _dump / Struct / builtin payload) whose
+	// singleton class carries per-object methods (def obj.foo) or its own ivars
+	// (class << obj; @v = …) cannot be marshaled. A singleton that only holds
+	// extend-ed modules has no own methods or ivars and is emitted via 'e' above.
+	if o.singleton != nil && (len(o.singleton.methods) > 0 || len(o.singleton.ivars) > 0) {
+		raise("TypeError", "singleton can't be dumped")
+	}
+	if d.vm.marshalIsException(o.class) {
+		d.writeException(o)
+		return
 	}
 	d.buf = append(d.buf, 'o')
 	d.writeSymbol(o.class.name)
@@ -374,6 +426,41 @@ func (d *mDumper) writeObject(o *RObject) {
 		d.writeSymbol(name)
 		d.writeValue(o.ivars[name])
 	}
+}
+
+// writeException emits an Exception (or subclass) instance. MRI leads with the
+// :mesg and :bt pseudo-ivars (the message and backtrace, or nil), which rbgo
+// keeps in @message and @__backtrace__, and then the object's remaining ivars in
+// assignment order.
+func (d *mDumper) writeException(o *RObject) {
+	var others []string
+	for _, n := range o.liveIvarNames() {
+		if n == "@message" || n == "@__backtrace__" {
+			continue
+		}
+		others = append(others, n)
+	}
+	d.buf = append(d.buf, 'o')
+	d.writeSymbol(o.class.name)
+	d.writeLong(2 + len(others))
+	d.writeSymbol("mesg")
+	d.writeExceptionField(o.ivars["@message"])
+	d.writeSymbol("bt")
+	d.writeExceptionField(o.ivars["@__backtrace__"])
+	for _, n := range others {
+		d.writeSymbol(n)
+		d.writeValue(o.ivars[n])
+	}
+}
+
+// writeExceptionField writes a :mesg / :bt value, emitting nil when the backing
+// ivar is unset or nil.
+func (d *mDumper) writeExceptionField(v object.Value) {
+	if v == nil || object.IsNil(v) {
+		d.buf = append(d.buf, '0')
+		return
+	}
+	d.writeValue(v)
 }
 
 // liveIvarNames returns the object's instance-variable names in first-assignment
@@ -398,6 +485,21 @@ func (d *mDumper) writeSymbol(name string) {
 	if id, ok := d.syms[name]; ok {
 		d.buf = append(d.buf, ';')
 		d.writeLong(id)
+		return
+	}
+	// A symbol carrying non-ASCII bytes is, by rbgo's UTF-8 default, a UTF-8
+	// symbol; MRI wraps such a symbol in an 'I' container with the :E => true
+	// encoding ivar (a pure-ASCII symbol stays a bare ':' with no wrapper). The
+	// symbol itself is interned before the E ivar so their table indices match
+	// MRI's first-appearance order and a repeated encoded symbol links back.
+	if !marshalIsASCII(name) {
+		d.buf = append(d.buf, 'I')
+		d.syms[name] = len(d.syms)
+		d.buf = append(d.buf, ':')
+		d.writeBytes(name)
+		d.writeLong(1)
+		d.writeSymbol("E")
+		d.buf = append(d.buf, 'T')
 		return
 	}
 	d.syms[name] = len(d.syms)
@@ -523,11 +625,14 @@ func (r *mReader) register(v object.Value) object.Value {
 }
 
 // readValue reads one value and, unless it is a bare symbol or an object link,
-// hands it to the load proc (whose return value MRI ignores).
+// hands it to the load proc. MRI uses the proc's return value in place of the
+// loaded object (so a proc can transform each object, and the top-level result
+// is the proc's return for the outermost object); freezing, when requested, has
+// already been applied to the object the proc receives.
 func (r *mReader) readValue() object.Value {
 	v, eligible := r.readObject()
 	if eligible && r.proc != nil {
-		r.vm.callBlock(r.proc, []object.Value{v})
+		return r.vm.callBlock(r.proc, []object.Value{v})
 	}
 	return v
 }
@@ -573,6 +678,8 @@ func (r *mReader) readObject() (object.Value, bool) {
 		return r.readClassRef(false), true
 	case 'm':
 		return r.readClassRef(true), true
+	case 'M':
+		return r.readOldModule(), true
 	case 'U':
 		return r.freezeValue(r.readUserMarshal()), true
 	case 'u':
@@ -608,6 +715,12 @@ func (r *mReader) readBignum() object.Value {
 
 func (r *mReader) readFloat() object.Value {
 	s := string(r.bytes(r.long()))
+	// Older MRI dumps append a NUL followed by extra mantissa bytes for full
+	// precision (e.g. "1.3\0\314\315"); the human-readable decimal before the
+	// NUL already round-trips, so parse only that prefix.
+	if i := strings.IndexByte(s, 0); i >= 0 {
+		s = s[:i]
+	}
 	var f float64
 	switch s {
 	case "inf":
@@ -693,12 +806,42 @@ func (r *mReader) readObj() object.Value {
 	cls := r.vm.marshalClass(className)
 	o := &RObject{class: cls, ivars: map[string]object.Value{}}
 	r.register(o)
+	isExc := r.vm.marshalIsException(cls)
 	n := r.long()
 	for i := 0; i < n; i++ {
 		name := r.readSymbol()
-		setIvar(o, name, r.readValue())
+		val := r.readValue()
+		// MRI serialises an Exception's message and backtrace as the special
+		// pseudo-ivars :mesg and :bt; rbgo keeps them in @message and
+		// @__backtrace__. A nil value means "unset", so it is left off entirely.
+		if isExc {
+			switch name {
+			case "mesg":
+				if !object.IsNil(val) {
+					setIvar(o, "@message", val)
+				}
+				continue
+			case "bt":
+				if !object.IsNil(val) {
+					setIvar(o, "@__backtrace__", val)
+				}
+				continue
+			}
+		}
+		setIvar(o, name, val)
 	}
 	return o
+}
+
+// marshalIsException reports whether cls is Exception or one of its subclasses,
+// so the :mesg / :bt pseudo-ivars are mapped onto rbgo's message/backtrace.
+func (vm *VM) marshalIsException(cls *RClass) bool {
+	for _, a := range vm.ancestors(cls) {
+		if a == vm.cException {
+			return true
+		}
+	}
+	return false
 }
 
 // readExtended reads the 'e' container: a module name followed by the object
@@ -718,6 +861,16 @@ func (r *mReader) readExtended() object.Value {
 func (r *mReader) readSubclass() object.Value {
 	className := r.readSymbol()
 	cls := r.vm.marshalClass(className)
+	// 'C:Hash' wrapping a Hash payload is MRI's carrier for a compare_by_identity
+	// Hash of the plain Hash class (not a user subclass): rebuild the Hash itself
+	// and re-apply compare_by_identity, sharing the container's single object id.
+	if cls == r.vm.cHash {
+		inner := r.readValue()
+		if ih, ok := inner.(*object.Hash); ok {
+			ih.CompareByIdentity()
+		}
+		return inner
+	}
 	o := &RObject{class: cls, ivars: map[string]object.Value{}}
 	r.register(o)
 	o.builtin = r.readValue()
@@ -765,11 +918,26 @@ func (r *mReader) readStruct() object.Value {
 	return o
 }
 
+// readClassRef reads a 'c' (class), 'm' (module), or — via readOldModule — an 'M'
+// (old class-or-module) reference. 'c' insists the name resolve to a real Class
+// and 'm' to a Module; 'M' accepts either, matching MRI's legacy reader.
 func (r *mReader) readClassRef(module bool) object.Value {
 	name := string(r.bytes(r.long()))
 	cls := r.vm.marshalClass(name)
-	_ = module
+	if module && !cls.isModule {
+		raise("ArgumentError", "%s does not refer to module", name)
+	}
+	if !module && cls.isModule {
+		raise("ArgumentError", "%s does not refer to class", name)
+	}
 	return r.register(cls)
+}
+
+// readOldModule reads the legacy 'M' reference, which names either a class or a
+// module without distinguishing them.
+func (r *mReader) readOldModule() object.Value {
+	name := string(r.bytes(r.long()))
+	return r.register(r.vm.marshalClass(name))
 }
 
 func (r *mReader) readUserMarshal() object.Value {
@@ -827,7 +995,10 @@ func (r *mReader) readRegexp(_ bool) object.Value {
 	return r.register(re)
 }
 
-// readSymbol reads a ':' new symbol (interning it) or a ';' back-reference.
+// readSymbol reads a ':' new symbol (interning it), a ';' back-reference, or an
+// 'I'-wrapped encoded symbol. rbgo symbols carry no per-symbol encoding, so the
+// wrapper's encoding ivars (:E / :encoding) are read past and discarded; the
+// symbol name (UTF-8 bytes) is returned unchanged.
 func (r *mReader) readSymbol() string {
 	tag := r.byte()
 	switch tag {
@@ -841,6 +1012,14 @@ func (r *mReader) readSymbol() string {
 			raise("ArgumentError", "dump format error (bad symbol)")
 		}
 		return r.syms[idx]
+	case 'I':
+		name := r.readSymbol()
+		n := r.long()
+		for i := 0; i < n; i++ {
+			r.readSymbol()
+			r.readValue()
+		}
+		return name
 	default:
 		raise("ArgumentError", "dump format error(0x%x)", tag)
 		return "" // unreachable

@@ -128,7 +128,7 @@ func TestMarshalTimeNonUTC(t *testing.T) {
 	vm := New(io.Discard)
 	loc := stdtime.FixedZone("X", 2*3600)
 	tm := &Time{t: stdtime.Date(1970, 1, 1, 2, 0, 0, 0, loc)}
-	b := vm.marshalDump(tm)
+	b := vm.marshalDump(tm, -1)
 	// The UTC bit (0x40) must be clear: byte index 15 is the high byte of the
 	// packed "p" word (2 header + I u :Time <len> + 3 low payload bytes).
 	if b[15]&0x40 != 0 {

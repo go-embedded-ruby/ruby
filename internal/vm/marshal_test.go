@@ -97,7 +97,7 @@ func TestMarshal(t *testing.T) {
 		// --- freeze: kwarg + load proc -------------------------------------
 		{`p Marshal.load(Marshal.dump("x"), freeze: true).frozen?`, "true\n"},
 		{`class MFrz; end; p Marshal.load(Marshal.dump(MFrz.new), freeze: true).frozen?`, "true\n"},
-		{`seen = []; Marshal.load(Marshal.dump([1, 2]), proc { |o| seen << o }); p seen`, "[1, 2, [1, 2]]\n"},
+		{`seen = []; Marshal.load(Marshal.dump([1, 2]), proc { |o| seen << o; o }); p seen`, "[1, 2, [1, 2]]\n"},
 		{`seen = []; Marshal.load(Marshal.dump([7])) { |o| seen << o.class }; p seen`, "[Integer, Array]\n"},
 
 		// --- IO source / destination ---------------------------------------
@@ -135,7 +135,6 @@ func TestMarshal(t *testing.T) {
 		// --- Marshal.dump arity: limit / nil / non-IO second argument -----
 		{`p Marshal.dump(5, 3).bytes`, "[4, 8, 105, 10]\n"},
 		{`p Marshal.dump(5, nil).bytes`, "[4, 8, 105, 10]\n"},
-		{`p Marshal.dump(5, Object.new).bytes`, "[4, 8, 105, 10]\n"},
 
 		// --- Marshal.dump always returns an ASCII-8BIT (BINARY) string -----
 		{`p Marshal.dump(42).encoding.name`, "\"ASCII-8BIT\"\n"},
@@ -186,6 +185,7 @@ func TestMarshal(t *testing.T) {
 		{"Marshal.load(\"\\x04\\bS:\\vStringi\\x06\")", "is not a Struct"},       // Struct class isn't a Struct
 		{`class BadD; def _dump(l); 5; end; end; Marshal.dump(BadD.new)`, "_dump() must return String"},
 		{`Marshal.dump(Class.new.new)`, "anonymous class"},
+		{`Marshal.dump(5, Object.new)`, "IO needed"}, // non-writable second arg is not a valid IO
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
