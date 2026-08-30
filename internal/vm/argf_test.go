@@ -80,6 +80,7 @@ end`
 		{with(`a = ARGF.class.new(f1); a.gets; p [a.pos, a.tell]`), "[3, 3]\n"},
 		{with(`a = ARGF.class.new(f1); a.gets; a.rewind; p [a.gets, a.lineno]`), "[\"l1\\n\", 1]\n"},
 		{with(`a = ARGF.class.new(f2); a.seek(1); p a.read`), "\"3\\n\"\n"},
+		{with(`a = ARGF.class.new(f1); p a.readpartial(3)`), "\"l1\\n\"\n"},
 		{with(`a = ARGF.class.new(f2); a.pos = 2; p a.read`), "\"\\n\"\n"},
 		{with(`a = ARGF.class.new(f1); p [a.fileno.is_a?(Integer), a.to_i.is_a?(Integer)]`), "[true, true]\n"},
 		{with(`a = ARGF.class.new(f1); a.set_encoding("UTF-8", "ISO-8859-1"); p [a.external_encoding.to_s, a.internal_encoding.to_s]`), "[\"UTF-8\", \"ISO-8859-1\"]\n"},

@@ -60,3 +60,24 @@ func TestIOFileno(t *testing.T) {
 		}
 	}
 }
+
+// TestIOReadpartial covers StringIO#readpartial: reading up to a length, the
+// output-buffer form, the zero-length "" case, EOFError at end of input, a
+// negative length ArgumentError and IOError on a closed stream. Asserted against
+// MRI Ruby 4.0.6.
+func TestIOReadpartial(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`require "stringio"; s = StringIO.new("hello world"); p [s.readpartial(5), s.readpartial(100)]`, "[\"hello\", \" world\"]\n"},
+		{`require "stringio"; s = StringIO.new("abc"); buf = "x"; r = s.readpartial(2, buf); p [r, buf.equal?(r)]`, "[\"ab\", true]\n"},
+		{`require "stringio"; p StringIO.new("abc").readpartial(0)`, "\"\"\n"},
+		{`require "stringio"; s = StringIO.new("hi"); s.readpartial(2); begin; s.readpartial(5); rescue EOFError => e; p e.class; end`, "EOFError\n"},
+		{`require "stringio"; begin; StringIO.new("x").readpartial(-1); rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+		{`require "stringio"; s = StringIO.new("x"); s.close; begin; s.readpartial(5); rescue IOError => e; p e.class; end`, "IOError\n"},
+		{`require "stringio"; s = StringIO.new("hi"); begin; s.readpartial(2, "z".freeze); rescue FrozenError => e; p e.class; end`, "FrozenError\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
