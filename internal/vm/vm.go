@@ -1358,7 +1358,24 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				val := pop()
 				other, ok := val.(*object.Hash)
 				if !ok {
-					raise("TypeError", "no implicit conversion of %s into Hash", vm.classOf(val).name)
+					// A `**operand` keyword splat that is not already a Hash: nil
+					// contributes nothing (`f(**nil)` ≡ `f()`), and any other value is
+					// coerced via #to_hash — matching MRI's implicit keyword-splat
+					// conversion. A value with no #to_hash, or whose #to_hash yields a
+					// non-Hash, is a TypeError.
+					if val == object.NilV {
+						break
+					}
+					if !vm.respondsToDynamic(val, "to_hash") {
+						raise("TypeError", "no implicit conversion of %s into Hash", vm.classOf(val).name)
+					}
+					r := vm.send(val, "to_hash", nil, nil)
+					h, hok := r.(*object.Hash)
+					if !hok {
+						raise("TypeError", "can't convert %s to Hash (%s#to_hash gives %s)",
+							vm.classOf(val).name, vm.classOf(val).name, vm.classOf(r).name)
+					}
+					other = h
 				}
 				acc := stack[len(stack)-1].(*object.Hash)
 				for _, k := range other.Keys {
