@@ -247,6 +247,8 @@ github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0 h1:1PUT8X4gKZsXEV
 github.com/go-facter/facter v0.0.0-20260708052836-752b1a3edee0/go.mod h1:ghuoOHWXdq5dE3GLPDiz3Uy0ORrvK+1hB7QC997ez2U=
 github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb h1:kDAxBx5Tvd3PfDIqCgV3J4cpXejsJOOsiKGYQiDTJB4=
 github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb/go.mod h1:KcAewzZmZpMxeylWZGp0/R9p03sInnPQW8B4ttL6WCc=
+github.com/go-fft/fft v0.0.0-20260805204914-c8a7736375d8 h1:NrZ0mNj4DPIC8RcFAe6uS7wXp3SsLQXa/sa08ev8diw=
+github.com/go-fft/fft v0.0.0-20260805204914-c8a7736375d8/go.mod h1:KcAewzZmZpMxeylWZGp0/R9p03sInnPQW8B4ttL6WCc=
 github.com/go-gfx/gfx v0.6.0 h1:sQkGEmB9YLouHxrscwvS4OW6oELsTtrKtQqsNdJ8L8Q=
 github.com/go-gfx/gfx v0.6.0/go.mod h1:bFt/MWyYWRU3Ic9IaB8XOC9KLMMHRRmahMk4FaIGK7g=
 github.com/go-hiera/hiera v0.0.0-20260708051558-73bff6edd0e9 h1:SydVW8z9lhzfLFvLTsaUPoNmStmdp/09DmI7Vwxz9QE=

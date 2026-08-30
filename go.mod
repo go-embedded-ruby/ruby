@@ -11,7 +11,7 @@ require (
 	github.com/go-composites/bag v0.0.0-20260703061228-a4d351ad9170
 	github.com/go-composites/result v0.0.0-20260621164801-bc2eac479381
 	github.com/go-composites/time v0.0.0-20260727203506-b0e9511265ce
-	github.com/go-fft/fft v0.0.0-20260620110530-0e3ca1747acb
+	github.com/go-fft/fft v0.0.0-20260805204914-c8a7736375d8
 	github.com/go-images/images v0.0.0-20260811115337-bc5d586f8e38
 	github.com/go-kramdown/kramdown v0.1.0
 	github.com/go-liquid/liquid v0.1.0
