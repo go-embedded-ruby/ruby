@@ -4274,30 +4274,19 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("first", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := self.(*object.Range)
 		if len(args) == 0 {
+			// Bare #first is the begin — but a beginless range has no first element.
+			if object.IsNil(r.Lo) {
+				raise("RangeError", "cannot get the first element of beginless range")
+			}
 			return r.Lo
 		}
-		n := int(intArg(args[0]))
+		// The count is coerced with #to_int (so a Float truncates and a mock_int
+		// works); a negative count is an error, like Array#first.
+		n := int(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "negative array size")
 		}
-		// An endless range generates its first n elements directly; a bounded one
-		// caps the count to its materialised size.
-		if _, isNil := r.Hi.(object.Nil); isNil {
-			lo, ok := r.Lo.(object.Integer)
-			if !ok {
-				raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
-			}
-			out := make([]object.Value, n)
-			for i := range out {
-				out[i] = object.IntValue(int64(lo) + int64(i))
-			}
-			return object.NewArrayFromSlice(out)
-		}
-		elems := vm.rangeElemsV(r)
-		n = clampCount(int64(n), len(elems))
-		out := make([]object.Value, n)
-		copy(out, elems[:n])
-		return object.NewArrayFromSlice(out)
+		return object.NewArrayFromSlice(vm.rangeFirstN(r, n))
 	})
 	vm.cRange.define("end", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*object.Range).Hi
@@ -4319,22 +4308,36 @@ func (vm *VM) bootstrap() {
 	vm.cRange.define("exclude_end?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Range).Exclusive)
 	})
-	// include?/member?/=== treat their argument as a plain value to test for
-	// membership (comparison-based here). cover? additionally accepts a Range and
-	// answers range-in-range containment (see rangeCoverRange).
-	rangeCover := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(rangeCoverValue(self.(*object.Range), args[0]))
+	// include?/member? test discrete membership (MRI's range_include_internal:
+	// #<=> cover logic for linear/String endpoints, a #succ-walk with #== for
+	// custom Comparable ranges). === uses pure cover? logic on the argument.
+	// cover? additionally accepts a Range and answers range-in-range containment.
+	// All four require exactly one argument (MRI raises ArgumentError otherwise).
+	rangeArgCheck := func(args []object.Value) {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
 	}
-	vm.cRange.define("include?", rangeCover)
-	vm.cRange.define("cover?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	rangeIncludeFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		rangeArgCheck(args)
+		return object.Bool(vm.rangeInclude(self.(*object.Range), args[0]))
+	}
+	vm.cRange.define("include?", rangeIncludeFn)
+	vm.cRange.define("cover?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		rangeArgCheck(args)
 		r := self.(*object.Range)
 		if o, ok := args[0].(*object.Range); ok {
-			return object.Bool(rangeCoverRange(r, o))
+			return object.Bool(vm.rangeCoverRange(r, o))
 		}
-		return object.Bool(rangeCoverValue(r, args[0]))
+		return object.Bool(vm.rangeCoverValueV(r, args[0]))
 	})
-	vm.cRange.define("member?", rangeCover)
-	vm.cRange.define("===", rangeCover)
+	// member? is a true alias of include? (Range.instance_method(:member?) ==
+	// Range.instance_method(:include?)), so it must share the same method entry.
+	vm.cRange.methods["member?"] = vm.cRange.methods["include?"]
+	vm.cRange.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		rangeArgCheck(args)
+		return object.Bool(vm.rangeCoverValueV(self.(*object.Range), args[0]))
+	})
 	// Range#overlap?(other) reports whether the two ranges share any element.
 	vm.cRange.define("overlap?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := args[0].(*object.Range)
@@ -4349,11 +4352,13 @@ func (vm *VM) bootstrap() {
 			if object.IsNil(r.Lo) {
 				raise("RangeError", "cannot get the minimum of beginless range")
 			}
-			elems := vm.rangeElemsV(r)
-			n := clampCount(vm.repeatLong(args[0]), len(elems))
-			out := make([]object.Value, n)
-			copy(out, elems[:n])
-			return object.NewArrayFromSlice(out)
+			n := int(vm.toIntCoerce(args[0]))
+			if n < 0 {
+				raise("ArgumentError", "negative array size")
+			}
+			// The n smallest of an ascending range are its first n — counted up
+			// directly, so a Bignum-bounded or endless integer range works.
+			return object.NewArrayFromSlice(vm.rangeFirstN(r, n))
 		}
 		if blk != nil {
 			return vm.rangeExtremeByBlock(r, blk, true)
@@ -4374,6 +4379,11 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 { // max(n): the n largest, descending
 			if object.IsNil(r.Hi) {
 				raise("RangeError", "cannot get the maximum of endless range")
+			}
+			// A beginless range cannot be walked from its start, so its n largest
+			// are unobtainable (MRI raises RangeError rather than iterating).
+			if object.IsNil(r.Lo) {
+				raise("RangeError", "cannot get the maximum of beginless range")
 			}
 			elems := vm.rangeElemsV(r)
 			n := clampCount(vm.repeatLong(args[0]), len(elems))
@@ -4397,9 +4407,14 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 		if r.Exclusive {
-			// An Integer (or Bignum) end excludes by yielding its predecessor.
+			// An Integer (or Bignum) end excludes by yielding its predecessor — but
+			// only for a bounded range: excluding an Integer end still requires an
+			// Integer begin (MRI 3.x), so a beginless exclusive Integer range raises.
 			switch r.Hi.(type) {
 			case object.Integer, *object.Bignum:
+				if object.IsNil(r.Lo) {
+					raise("TypeError", "cannot exclude end value with non Integer begin value")
+				}
 				return vm.send(r.Hi, "-", []object.Value{object.IntValue(1)}, nil)
 			}
 			// A numeric (Float/Rational) end, or a beginless range, has no
@@ -4529,6 +4544,37 @@ func (vm *VM) bootstrap() {
 		step := object.Value(object.IntValue(1))
 		if len(args) > 0 {
 			step = args[0]
+		}
+		r0 := self.(*object.Range)
+		// A beginless range has no starting point to count from. MRI reports this
+		// as an ArgumentError whenever iteration is actually attempted (a block) or
+		// the range/step is not a plain numeric one; a numeric beginless range asked
+		// only for its enumerator (no block) is allowed through.
+		if object.IsNil(r0.Lo) {
+			if vm.linearObjectP(r0.Hi) && isNumericValue(step) {
+				if blk != nil {
+					raise("ArgumentError", "#step iteration for beginless ranges is meaningless")
+				}
+			} else {
+				raise("ArgumentError", "#step for non-numeric beginless ranges is meaningless")
+			}
+		}
+		// A zero numeric step never advances. For a numeric range that is an error:
+		// without a block MRI raises eagerly when the Enumerator is built, and with
+		// a block the numeric walkers below raise it — so only the no-block case is
+		// handled here. For a non-numeric bounded range (Time, custom) a zero step
+		// simply yields nothing.
+		if isZeroNumeric(step) {
+			if isNumericValue(r0.Lo) || isNumericValue(r0.Hi) {
+				if blk == nil {
+					raise("ArgumentError", "step can't be 0")
+				}
+			} else if !object.IsNil(r0.Lo) && !object.IsNil(r0.Hi) {
+				if blk == nil {
+					return enumForSized(self, "step", func(*VM) object.Value { return object.NilV }, args...)
+				}
+				return r0
+			}
 		}
 		if blk == nil {
 			// With a size, for the reason Integer#step has one: without it
@@ -5036,7 +5082,7 @@ func (vm *VM) bootstrap() {
 			// the sequence. Asked to count 1.step(Float::INFINITY) it never
 			// would: it allocated 30.9 GB before a CI runner died under it.
 			return enumForSized(self, "step", func(*VM) object.Value {
-				return stepSize(self, limit, step)
+				return stepSize(self, limit, step, false)
 			}, args...)
 		}
 		if object.IsNil(limit) {
@@ -8117,6 +8163,12 @@ func (vm *VM) integerBitOp(a *big.Int, arg object.Value, name string, op func(z,
 func (vm *VM) rangeElemsV(r *object.Range) []object.Value {
 	switch lo := r.Lo.(type) {
 	case object.Integer, *object.Bignum, *object.String:
+		// An endless integer/string range has no finite element list; MRI reports
+		// this as a RangeError (e.g. (1..).to_a), distinct from the TypeError a
+		// beginless or non-iterable begin raises below.
+		if object.IsNil(r.Hi) {
+			raise("RangeError", "cannot convert endless range to an array")
+		}
 		return rangeElems(r)
 	case object.Symbol:
 		// A Symbol range walks like a String range — via the byte/#succ scan that
@@ -8137,7 +8189,7 @@ func (vm *VM) rangeElemsV(r *object.Range) []object.Value {
 		raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
 	}
 	var out []object.Value
-	for cur := r.Lo; ; cur = vm.send(cur, "succ", nil, nil) {
+	for cur := r.Lo; ; {
 		cmp, ok := vm.send(cur, "<=>", []object.Value{r.Hi}, nil).(object.Integer)
 		if !ok {
 			break
@@ -8150,6 +8202,13 @@ func (vm *VM) rangeElemsV(r *object.Range) []object.Value {
 			break
 		}
 		out = append(out, cur)
+		// Once the inclusive end has been reached (#<=> == 0) MRI stops without
+		// asking it for a successor — so a mock end that never defines #succ, or a
+		// Time whose successor is a fresh object, is never sent #succ past the end.
+		if !r.Exclusive && int64(cmp) == 0 {
+			break
+		}
+		cur = vm.send(cur, "succ", nil, nil)
 	}
 	return out
 }
@@ -8361,20 +8420,95 @@ func rangeEmpty(vm *VM, r *object.Range) bool {
 }
 
 // rangeExtremeByBlock returns the minimum (isMin) or maximum element of r using a
-// comparison block, iterating the range as Enumerable#min/#max do.
+// comparison block, iterating the range as Enumerable#min/#max do. A block-driven
+// extreme has to materialise the range, so an unbounded range raises RangeError
+// (MRI: "cannot get the minimum/maximum … with custom comparison method"). The
+// block's return value is reduced to a sign the way MRI's rb_cmpint does — via
+// #> and #< against 0 — so a non-Integer comparison result still works.
 func (vm *VM) rangeExtremeByBlock(r *object.Range, blk *Proc, isMin bool) object.Value {
+	if object.IsNil(r.Lo) || object.IsNil(r.Hi) {
+		which := "maximum"
+		if isMin {
+			which = "minimum"
+		}
+		raise("RangeError", "cannot get the %s of unbounded range with custom comparison method", which)
+	}
 	elems := rangeElems(r)
 	if len(elems) == 0 {
 		return object.NilV
 	}
 	best := elems[0]
 	for _, e := range elems[1:] {
-		c, _ := vm.callBlock(blk, []object.Value{e, best}).(object.Integer)
+		c := vm.blockCmpSign(vm.callBlock(blk, []object.Value{e, best}))
 		if (isMin && c < 0) || (!isMin && c > 0) {
 			best = e
 		}
 	}
 	return best
+}
+
+// blockCmpSign reduces a comparison block's result to -1/0/1 using MRI's rb_cmpint
+// rules: an Integer keeps its sign; any other value is probed with #>(0) and then
+// #<(0), so a custom object that answers those participates in min/max.
+func (vm *VM) blockCmpSign(v object.Value) int {
+	if i, ok := v.(object.Integer); ok {
+		switch {
+		case i < 0:
+			return -1
+		case i > 0:
+			return 1
+		default:
+			return 0
+		}
+	}
+	zero := []object.Value{object.IntValue(0)}
+	if vm.send(v, ">", zero, nil).Truthy() {
+		return 1
+	}
+	if vm.send(v, "<", zero, nil).Truthy() {
+		return -1
+	}
+	return 0
+}
+
+// rangeFirstN returns the first n elements of r (n already non-negative). An
+// Integer/Bignum begin counts upward without materialising the range, so a huge
+// or endless integer range answers quickly ((0...2**64).first(2) == [0, 1]). An
+// endless String begin walks #succ; any other endless begin cannot be iterated
+// (TypeError). A bounded non-integer begin materialises via rangeElemsV.
+func (vm *VM) rangeFirstN(r *object.Range, n int) []object.Value {
+	if isIntegerValue(r.Lo) {
+		out := make([]object.Value, 0, n)
+		cur := new(big.Int).Set(bigVal(r.Lo))
+		for len(out) < n {
+			if !object.IsNil(r.Hi) {
+				if hb, ok := object.BigOf(r.Hi); ok {
+					c := cur.Cmp(hb)
+					if (r.Exclusive && c >= 0) || (!r.Exclusive && c > 0) {
+						break
+					}
+				} else if cmp := vm.spaceship(object.NormInt(cur), r.Hi); (r.Exclusive && cmp >= 0) || (!r.Exclusive && cmp > 0) {
+					break
+				}
+			}
+			out = append(out, object.NormInt(new(big.Int).Set(cur)))
+			cur.Add(cur, big.NewInt(1))
+		}
+		return out
+	}
+	if object.IsNil(r.Hi) {
+		if loS, ok := r.Lo.(*object.String); ok {
+			out := make([]object.Value, 0, n)
+			for cur := loS.Str(); len(out) < n; cur = succString(cur) {
+				out = append(out, object.NewString(cur))
+			}
+			return out
+		}
+		raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+	}
+	elems := vm.rangeElemsV(r)
+	m := clampCount(int64(n), len(elems))
+	return append([]object.Value(nil), elems[:m]...)
 }
 
 // rangeInts extracts integer endpoints. ok is false when either endpoint is not
@@ -8449,6 +8583,37 @@ func strRangeElems(lo, hi string, exclusive bool) []object.Value {
 		}
 		return out
 	}
+	// For ASCII endpoints, rbgo's #succ matches MRI's exactly, so the succ-walk
+	// follows MRI's rb_str_upto_each: yield begin, begin.succ, … stopping once the
+	// value would grow longer than end or reach end.succ. This is what makes
+	// ('a'..'ab') yield a…z, aa, ab (rather than stopping at the first value that
+	// sorts past end). A multibyte endpoint keeps the conservative lexical walk
+	// below, because rbgo's byte-wise #succ diverges from MRI's block-aware #succ
+	// once a character leaves its script's alnum region.
+	if isASCIIStr(lo) && isASCIIStr(hi) {
+		if strings.Compare(lo, hi) > 0 || (exclusive && lo == hi) {
+			return nil
+		}
+		afterEnd := succString(hi)
+		var out []object.Value
+		for cur := lo; cur != afterEnd; {
+			var next string
+			hasNext := false
+			if exclusive || cur != hi {
+				next = succString(cur)
+				hasNext = true
+			}
+			out = append(out, object.NewString(cur))
+			if !hasNext { // current was the (included) end
+				break
+			}
+			cur = next
+			if (exclusive && cur == hi) || len(cur) > len(hi) || cur == "" {
+				break
+			}
+		}
+		return out
+	}
 	var out []object.Value
 	cur := lo
 	for {
@@ -8469,6 +8634,17 @@ func strRangeElems(lo, hi string, exclusive bool) []object.Value {
 		cur = next
 	}
 	return out
+}
+
+// isASCIIStr reports whether every byte of s is ASCII (< 0x80), so its #succ walk
+// coincides with MRI's.
+func isASCIIStr(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 func isAlnumByte(c byte) bool {
@@ -8574,6 +8750,16 @@ func (vm *VM) stepBounds(args []object.Value) (limit, step object.Value) {
 		raise("ArgumentError", "step can't be 0")
 	}
 	return limit, step
+}
+
+// isZeroNumeric reports whether v is a numeric value equal to zero (0, 0.0, a
+// zero Bignum/Rational). A non-numeric value is never zero here.
+func isZeroNumeric(v object.Value) bool {
+	if !isNumericValue(v) {
+		return false
+	}
+	f, ok := toFloat(v)
+	return ok && f == 0
 }
 
 // rejectStringStep raises ArgumentError for a String step, which MRI refuses to
@@ -8692,16 +8878,17 @@ func stepInRange(v, hi, step float64, exclusive bool) bool {
 // A step of zero raises, as MRI does — asking the size is enough to get the
 // error, not only running the sequence. An argument that is not a number has no
 // size to give and reports the nil MRI reports for an unknown one.
-func stepSize(from, limit, step object.Value) object.Value {
+func stepSize(from, limit, step object.Value, excl bool) object.Value {
 	rejectStringStep(step)
 	f, okF := toFloat(from)
 	s, okS := toFloat(step)
 	if !okF || !okS {
 		return object.NilV
 	}
-	if s == 0 {
-		raise("ArgumentError", "step can't be 0")
-	}
+	// A zero step is rejected eagerly by every caller (Range#step, Integer#step,
+	// Numeric#step) before the size Enumerator is built, so it never reaches here;
+	// were one to slip through, the index scan below simply yields 0 rather than
+	// looping, since (l-f)/0 is ±Inf/NaN and int64(that)+2 is out of [0, …).
 	if object.IsNil(limit) {
 		return object.Float(math.Inf(1)) // unbounded: endlessly many
 	}
@@ -8725,11 +8912,22 @@ func stepSize(from, limit, step object.Value) object.Value {
 		}
 		return object.IntValue(0)
 	}
-	n := math.Floor((l-f)/s) + 1
-	if math.IsNaN(n) || n < 0 {
-		return object.IntValue(0)
+	// The count must agree with what the walk actually yields, so it is derived
+	// from the same in-range predicate (stepInRange) rather than a closed form:
+	// the yielded terms are f, f+s, f+2s, … for a contiguous run of indices
+	// starting at 0, so the size is (last valid index)+1. (l-f)/s estimates that
+	// index; scanning down from just past it finds the largest in-range index,
+	// which is what makes a term landing just inside or just outside the boundary
+	// (e.g. 1.0 + 3*18.2 = 55.599999999999994 < 55.6) counted the same way the walk
+	// counts it.
+	est := (l - f) / s
+	k := int64(math.Floor(est)) + 2
+	for ; k >= 0; k-- {
+		if stepInRange(f+float64(k)*s, l, s, excl) {
+			return object.IntValue(k + 1)
+		}
 	}
-	return object.IntValue(int64(n))
+	return object.IntValue(0)
 }
 
 // rangeStepSize is how many values a Range#step sequence yields.
@@ -8739,9 +8937,6 @@ func stepSize(from, limit, step object.Value) object.Value {
 // answer for an endless one.
 func rangeStepSize(r *object.Range, step object.Value) object.Value {
 	if object.IsNil(r.Hi) {
-		if s, ok := toFloat(step); ok && s == 0 {
-			raise("ArgumentError", "step can't be 0")
-		}
 		return object.Float(math.Inf(1)) // endless, so endlessly many
 	}
 	if _, ok := toFloat(r.Lo); !ok {
@@ -8750,16 +8945,5 @@ func rangeStepSize(r *object.Range, step object.Value) object.Value {
 	if _, ok := toFloat(r.Hi); !ok {
 		return object.NilV
 	}
-	hi := r.Hi
-	if r.Exclusive {
-		// An excluded end is one short, which stepSize counts by moving the
-		// limit a whole step back rather than by subtracting one from a count
-		// that may not be integral.
-		if h, ok := toFloat(hi); ok {
-			if s, ok := toFloat(step); ok && s != 0 {
-				hi = object.Float(math.Nextafter(h, h-s))
-			}
-		}
-	}
-	return stepSize(r.Lo, hi, step)
+	return stepSize(r.Lo, r.Hi, step, r.Exclusive)
 }

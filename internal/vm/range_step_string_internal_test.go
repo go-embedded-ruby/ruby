@@ -27,8 +27,9 @@ func TestRangeStepString(t *testing.T) {
 		{`p (("A".."G").step(2.0) {}) rescue p $!.class`, "TypeError"},
 		{`p (("A".."G").step([]) {}) rescue p $!.class`, "TypeError"},
 		{`p (("A"..).step(2.0) {}) rescue p $!.class`, "TypeError"},
-		// A zero or negative step is rejected.
-		{`p (("A".."G").step(0) {}) rescue p $!.class`, "ArgumentError"},
+		// A zero step over a non-numeric range does not advance (and #step returns
+		// self), matching MRI; a negative step is still rejected here.
+		{`p (("A".."G").step(0) {})`, `"A".."G"`},
 		{`p (("A".."G").step(-1) {}) rescue p $!.class`, "ArgumentError"},
 		// A numeric range is unaffected (still uses the arithmetic path).
 		{`a = []; (1..7).step(2) { |x| a << x }; p a`, `[1, 3, 5, 7]`},

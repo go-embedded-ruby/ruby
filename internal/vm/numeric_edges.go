@@ -527,7 +527,7 @@ func (vm *VM) registerNumericEdges() {
 		limit, step := vm.stepBounds(args)
 		if blk == nil {
 			return enumForSized(self, "step", func(*VM) object.Value {
-				return stepSize(self, limit, step)
+				return stepSize(self, limit, step, false)
 			}, args...)
 		}
 		if object.IsNil(limit) {

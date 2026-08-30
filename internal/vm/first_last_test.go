@@ -51,7 +51,6 @@ func TestFirstLastErrors(t *testing.T) {
 		{"range_last_neg", `(1..5).last(-1)`, "negative array size"},
 		{"endless_last", `(1..).last`, "cannot get the last element of endless range"},
 		{"endless_last_n", `(1..).last(2)`, "cannot get the last element of endless range"},
-		{"endless_first_noninteger", `("a"..).first(2)`, "can't iterate from"},
 		{"range_take_neg", `(1..5).take(-1)`, "attempt to take negative size"},
 		{"range_drop_neg", `(1..5).drop(-1)`, "attempt to drop negative size"},
 		{"endless_take_noninteger", `("a"..).take(2)`, "can't iterate from"},
