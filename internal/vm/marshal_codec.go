@@ -259,24 +259,31 @@ func (d *mDumper) writeClassRef(c *RClass) {
 
 // writeTime emits Time's user-defined dump: the 8-byte packed form (MRI's
 // time_mdump), I-wrapped with the :zone / :offset ivars.
-func (d *mDumper) writeTime(t *Time) {
+// timeDumpBytes packs a Time into MRI's 8-byte marshal/_dump form (two
+// little-endian uint32s: the date/UTC-flag word and the time/usec word).
+func timeDumpBytes(t *Time) []byte {
 	tt := t.t.UTC()
 	year, mon, mday := tt.Date()
 	hour, min, sec := tt.Clock()
 	usec := tt.Nanosecond() / 1000
-	utc := t.t.Location() == stdtime.UTC
 	p := uint32(0x80000000) | uint32((year-1900)<<14) | uint32((int(mon)-1)<<10) | uint32(mday<<5) | uint32(hour)
-	if utc {
+	if t.t.Location() == stdtime.UTC {
 		p |= 0x40000000
 	}
 	s := uint32(min<<26) | uint32(sec<<20) | uint32(usec)
 	var payload [8]byte
 	encbinary.LittleEndian.PutUint32(payload[0:4], p)
 	encbinary.LittleEndian.PutUint32(payload[4:8], s)
+	return payload[:]
+}
+
+func (d *mDumper) writeTime(t *Time) {
+	utc := t.t.Location() == stdtime.UTC
+	payload := timeDumpBytes(t)
 
 	d.buf = append(d.buf, 'I', 'u')
 	d.writeSymbol("Time")
-	d.writeBytes(string(payload[:]))
+	d.writeBytes(string(payload))
 	if utc {
 		d.writeLong(1)
 		d.writeSymbol("zone")

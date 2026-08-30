@@ -175,6 +175,21 @@ func (vm *VM) registerTime() {
 	d := func(name string, fn NativeFn) { vm.cTime.define(name, fn) }
 	self := func(v object.Value) *Time { return v.(*Time) }
 
+	// Time#_dump / Time._load are the private Marshal hooks: _dump packs the 8-byte
+	// form, _load rebuilds a Time from it.
+	d("_dump", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewStringBytesEnc(timeDumpBytes(self(v)), "ASCII-8BIT")
+	})
+	vm.setInstanceVisibility(vm.cTime, "_dump", visPrivate)
+	vm.cTime.smethods["_load"] = &Method{name: "_load", owner: vm.cTime, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		s, ok := args[0].(*object.String)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
+		}
+		return marshalLoadTime([]byte(s.Str()))
+	}}
+	vm.setClassMethodVisibility(vm.cTime, "_load", visPrivate)
+
 	d("to_i", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(self(v).t.Unix())
 	})

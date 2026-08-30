@@ -291,3 +291,20 @@ func TestTimeCalendarCoercion(t *testing.T) {
 		}
 	}
 }
+
+// TestTimeDumpLoad covers the private Marshal hooks Time#_dump / Time._load: the
+// 8-byte ASCII-8BIT packed form, its round-trip, the privacy, and the
+// non-String _load TypeError. Asserted against MRI Ruby 4.0.6.
+func TestTimeDumpLoad(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		{`d = Time.utc(2020, 1, 2, 3, 4, 5).send(:_dump); p [d.class, d.encoding.to_s, d.bytesize]`, "[String, \"ASCII-8BIT\", 8]\n"},
+		{`t = Time.utc(2021, 7, 8, 9, 10, 11); p Time.send(:_load, t.send(:_dump)) == t`, "true\n"},
+		{`p [Time.private_instance_methods(false).include?(:_dump), Time.respond_to?(:_dump)]`, "[true, false]\n"},
+		{`p Time.private_methods(false).include?(:_load)`, "true\n"},
+		{`begin; Time.send(:_load, 42); rescue TypeError => e; p e.class; end`, "TypeError\n"},
+	} {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
