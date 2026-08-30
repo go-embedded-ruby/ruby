@@ -36,6 +36,11 @@ type Regexp struct {
 	// when none was requested. It is reported by #timeout and, when set, applied
 	// to the direct match paths via the engine's WithTimeout.
 	timeout object.Value
+	// srcEnc is the encoding of the String a runtime Regexp.new was built from,
+	// which #encoding reports when the source has a non-ASCII byte (e.g. a Regexp
+	// built from a EUC-JP or BINARY String keeps that encoding). Empty for a source
+	// literal, whose non-ASCII source is UTF-8 by default.
+	srcEnc string
 }
 
 // matcher returns the engine Regexp to match with: the receiver's compiled
@@ -80,6 +85,9 @@ func (r *Regexp) encodingName() string {
 	}
 	if r.noEnc {
 		return "ASCII-8BIT"
+	}
+	if r.srcEnc != "" {
+		return r.srcEnc
 	}
 	return "UTF-8"
 }
@@ -247,6 +255,7 @@ func (vm *VM) regexpNew(args []object.Value) object.Value {
 		}
 		r := vm.compileRegexp(src.Str(), flags).(*Regexp)
 		r.fixedEnc, r.noEnc, r.timeout = fixedEnc, noEnc, timeout
+		r.srcEnc = src.EncName()
 		return r
 	default:
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))

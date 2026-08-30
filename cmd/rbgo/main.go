@@ -71,7 +71,7 @@ func run(src, name string) error {
 	if err != nil {
 		return err
 	}
-	iseq, err := compiler.Compile(prog)
+	iseq, err := compiler.CompileWithEncoding(prog, compiler.MagicSourceEncoding(src))
 	if err != nil {
 		return err
 	}
