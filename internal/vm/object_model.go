@@ -1430,6 +1430,9 @@ func (vm *VM) classOf(v object.Value) *RClass {
 	case *UnboundMethod:
 		return vm.consts["UnboundMethod"].(*RClass)
 	case *Enumerator:
+		if x.isArithSeq {
+			return vm.cArithSeq
+		}
 		if x.isChain {
 			return vm.cEnumeratorChain
 		}

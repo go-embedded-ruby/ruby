@@ -5078,13 +5078,9 @@ func (vm *VM) bootstrap() {
 	vm.cInteger.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		limit, step := vm.stepBounds(args)
 		if blk == nil {
-			// With a size, so that Enumerator#size can answer without walking
-			// the sequence. Asked to count 1.step(Float::INFINITY) it never
-			// would: it allocated 30.9 GB before a CI runner died under it.
-			return enumForSized(self, "step", func(*VM) object.Value {
-				return stepSize(self, limit, step, false)
-			}, args...)
+			return vm.stepEnum(self, self, limit, step, false, args...)
 		}
+		vm.numericStepArgCheck(step)
 		if object.IsNil(limit) {
 			vm.numericStepEndless(blk, self, step)
 		} else {
@@ -8764,11 +8760,61 @@ func isZeroNumeric(v object.Value) bool {
 
 // rejectStringStep raises ArgumentError for a String step, which MRI refuses to
 // coerce even when it looks numeric ("2" / "0.1" / "1/3"); other types fall
-// through to the normal numeric handling.
+// through to the normal numeric handling. Used by the shared Range#step / #step
+// walkers, whose String message is inherited by Range (Numeric#step raises its
+// own, MRI-matching message earlier — see numericStepArgCheck).
 func rejectStringStep(step object.Value) {
 	if _, ok := step.(*object.String); ok {
 		raise("ArgumentError", "step can't be String")
 	}
+}
+
+// rejectUncomparableStep raises the ArgumentError MRI's Numeric#step (Integer#step
+// / Float#step, but NOT Range#step) gives for a non-numeric, non-nil step that its
+// internal `step <=> 0` comparison cannot handle — its message quotes the class
+// ("comparison of String with 0 failed", likewise for a Symbol), even when the
+// value looks numeric ("2"). A numeric or nil step passes through.
+func (vm *VM) rejectUncomparableStep(step object.Value) {
+	if !object.IsNil(step) && !isNumericValue(step) {
+		raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(step).name)
+	}
+}
+
+// numericStepArgCheck validates a block-driven Numeric#step: rejectUncomparableStep
+// plus MRI's rule that a nil step is a TypeError ("step must be numeric") rather
+// than the silent step-of-1 the no-block (#size) path tolerates.
+func (vm *VM) numericStepArgCheck(step object.Value) {
+	if object.IsNil(step) {
+		raise("TypeError", "step must be numeric")
+	}
+	vm.rejectUncomparableStep(step)
+}
+
+// arithSeq builds an Enumerator::ArithmeticSequence for recv.step(args) with the
+// given defining triple and on-demand #size. It reuses the ordinary step-driven,
+// size-bearing Enumerator, tagging it so #class and the sequence accessors change.
+func (vm *VM) arithSeq(recv, begin, end, step object.Value, excl bool, size func(*VM) object.Value, args ...object.Value) *Enumerator {
+	e := enumForSized(recv, "step", size, args...)
+	e.isArithSeq = true
+	e.asBegin, e.asEnd, e.asStep, e.asExcl = begin, end, step, excl
+	return e
+}
+
+// stepEnum is the no-block result of Integer#step / Float#step: an
+// Enumerator::ArithmeticSequence for a numeric step (MRI 2.6+), or a plain
+// size-bearing Enumerator for a non-numeric one — a String step yields an
+// Enumerator whose #size raises only when asked, matching MRI. Both drive
+// recv.step(args); a size is attached either way so #size answers without walking
+// an unbounded sequence.
+func (vm *VM) stepEnum(recv, begin, limit, step object.Value, excl bool, args ...object.Value) *Enumerator {
+	size := func(vm *VM) object.Value {
+		vm.rejectUncomparableStep(step) // a String step's #size raises, MRI-style
+		return stepSize(begin, limit, step, excl)
+	}
+	if isNumericValue(step) {
+		return vm.arithSeq(recv, begin, limit, step, excl, size, args...)
+	}
+	return enumForSized(recv, "step", size, args...)
 }
 
 // numericStep drives Range#step / Integer#step: it yields lo, lo+step, … toward

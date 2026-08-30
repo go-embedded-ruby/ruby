@@ -526,10 +526,9 @@ func (vm *VM) registerNumericEdges() {
 	vm.cFloat.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		limit, step := vm.stepBounds(args)
 		if blk == nil {
-			return enumForSized(self, "step", func(*VM) object.Value {
-				return stepSize(self, limit, step, false)
-			}, args...)
+			return vm.stepEnum(self, self, limit, step, false, args...)
 		}
+		vm.numericStepArgCheck(step)
 		if object.IsNil(limit) {
 			vm.numericStepEndless(blk, self, step)
 		} else {
