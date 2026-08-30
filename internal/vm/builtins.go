@@ -1423,17 +1423,17 @@ func (vm *VM) bootstrap() {
 	vm.cSymbol.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(symStr(self) == "")
 	})
-	vm.cSymbol.define("upcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(strings.ToUpper(symStr(self)))
+	vm.cSymbol.define("upcase", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Symbol(caseMapUTF8(symStr(self), caseUpcase, parseCaseOptions(caseUpcase, args)))
 	})
-	vm.cSymbol.define("downcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(strings.ToLower(symStr(self)))
+	vm.cSymbol.define("downcase", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Symbol(caseMapUTF8(symStr(self), caseDowncase, parseCaseOptions(caseDowncase, args)))
 	})
-	vm.cSymbol.define("capitalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(capitalizeStr(symStr(self)))
+	vm.cSymbol.define("capitalize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Symbol(caseMapUTF8(symStr(self), caseCapitalize, parseCaseOptions(caseCapitalize, args)))
 	})
-	vm.cSymbol.define("swapcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Symbol(swapcaseStr(symStr(self)))
+	vm.cSymbol.define("swapcase", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Symbol(caseMapUTF8(symStr(self), caseSwapcase, parseCaseOptions(caseSwapcase, args)))
 	})
 	symSucc := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(succString(symStr(self)))
@@ -1544,11 +1544,11 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("undump", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.stringUndump(self.(*object.String))
 	})
-	vm.cString.define("upcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, strings.ToUpper(strOf(self)))
+	vm.cString.define("upcase", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringCaseMap(self, caseUpcase, args)
 	})
-	vm.cString.define("downcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, strings.ToLower(strOf(self)))
+	vm.cString.define("downcase", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringCaseMap(self, caseDowncase, args)
 	})
 	vm.cString.define("casecmp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := args[0].(*object.String)
@@ -1564,11 +1564,11 @@ func (vm *VM) bootstrap() {
 		}
 		return object.Bool(strings.EqualFold(strOf(self), o.Str()))
 	})
-	vm.cString.define("capitalize", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, capitalizeStr(strOf(self)))
+	vm.cString.define("capitalize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringCaseMap(self, caseCapitalize, args)
 	})
-	vm.cString.define("swapcase", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, swapcaseStr(strOf(self)))
+	vm.cString.define("swapcase", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringCaseMap(self, caseSwapcase, args)
 	})
 	vm.cString.define("reverse", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, reverseStr(strOf(self)))
@@ -2123,17 +2123,17 @@ func (vm *VM) bootstrap() {
 		s.SetBytes(nil)
 		return s
 	})
-	vm.cString.define("upcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, strings.ToUpper)
+	vm.cString.define("upcase!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringCaseMapBang(self, caseUpcase, args)
 	})
-	vm.cString.define("downcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, strings.ToLower)
+	vm.cString.define("downcase!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringCaseMapBang(self, caseDowncase, args)
 	})
-	vm.cString.define("capitalize!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, capitalizeStr)
+	vm.cString.define("capitalize!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringCaseMapBang(self, caseCapitalize, args)
 	})
-	vm.cString.define("swapcase!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, swapcaseStr)
+	vm.cString.define("swapcase!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.stringCaseMapBang(self, caseSwapcase, args)
 	})
 	vm.cString.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
@@ -5502,30 +5502,6 @@ func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value 
 // wsCutset is the whitespace stripped by String#strip and friends, matching
 // Ruby (space, tab, newline, carriage return, form feed, vertical tab, NUL).
 const wsCutset = " \t\n\r\f\v\x00"
-
-func capitalizeStr(s string) string {
-	if s == "" {
-		return ""
-	}
-	r := []rune(strings.ToLower(s))
-	r[0] = unicode.ToUpper(r[0])
-	return string(r)
-}
-
-func swapcaseStr(s string) string {
-	out := make([]rune, 0, len(s))
-	for _, r := range s {
-		switch {
-		case unicode.IsUpper(r):
-			out = append(out, unicode.ToLower(r))
-		case unicode.IsLower(r):
-			out = append(out, unicode.ToUpper(r))
-		default:
-			out = append(out, r)
-		}
-	}
-	return string(out)
-}
 
 func reverseStr(s string) string {
 	r := []rune(s)
