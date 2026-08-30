@@ -20,7 +20,7 @@ require (
 	github.com/go-nokogiri/nokogiri v0.1.0
 	github.com/go-rouge/rouge v0.1.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260707193337-00a96ee353d7
-	github.com/go-ruby-abbrev/abbrev v0.0.0-20260629150957-97117892cd38
+	github.com/go-ruby-abbrev/abbrev v0.0.0-20260717061206-761e82f6c6c3
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783
 	github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260706115414-f116fa6c4917
