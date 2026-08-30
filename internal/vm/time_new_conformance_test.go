@@ -152,6 +152,14 @@ func TestTimeNewConformance(t *testing.T) {
 		{`class TZN; def utc_to_local(t); t + 3600; end; end; p Time.new(in: TZN.new).utc_offset`, "3600\n"},
 		// #local_to_utc returning a bare Integer / an object answering #to_i.
 		{`z=Object.new; def z.local_to_utc(t); (t.to_i - 3600); end; p Time.new(2000,1,1,12,0,0,z).utc_offset`, "3600\n"},
+		// Bare Time.new is the current instant; a nil 7th positional is no zone.
+		{`p Time.new.is_a?(Time)`, "true\n"},
+		{`p Time.new(2000,1,1,0,0,0,nil).year`, "2000\n"},
+		// Signed String calendar fields (Kernel#Integer semantics).
+		{`p Time.utc(2000, "+3").mon`, "3\n"},
+		{`p Time.utc("-44").year`, "-44\n"},
+		// Time#+ (via send, off the operator fast path) shifts by a Rational.
+		{`p Time.utc(2000,1,1,0,0,0).send(:+, Rational(3,2)).nsec`, "500000000\n"},
 	} {
 		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
@@ -201,8 +209,10 @@ func TestTimeNewConformanceErrors(t *testing.T) {
 		// out of range.
 		{`z=Object.new; def z.local_to_utc(t); Time.utc(t.year,t.mon,t.day+1,t.hour,t.min,t.sec); end; Time.new(2000,1,1,12,0,0,z)`, "utc_offset out of range"},
 		{`z=Object.new; def z.local_to_utc(t); 10**20; end; Time.new(2000,1,1,12,0,0,z)`, "utc_offset out of range"},
-		// A non-numeral String field is an Integer() error.
+		{`z=Object.new; def z.local_to_utc(t); o=Object.new; def o.to_i; 10**20; end; o; end; Time.new(2000,1,1,12,0,0,z)`, "utc_offset out of range"},
+		// A non-numeral String field, or a bare sign, is an Integer() error.
 		{`Time.utc(2000, "zzz")`, "invalid value for Integer()"},
+		{`Time.utc(2000, "+")`, "invalid value for Integer()"},
 	} {
 		got := eval(t, "begin\n"+c.src+"\nrescue => e\n  puts e.message\nend")
 		if !strings.Contains(got, c.want) {
@@ -220,6 +230,10 @@ func TestTimeNewConformanceErrors(t *testing.T) {
 		{`Time.at(0, "0")`, "TypeError"},                                         // String subsec
 		{`Time.at(Time.now, 500000)`, "TypeError"},                               // Time source with subsec
 		{`Time.new(2000, {})`, "TypeError"},                                      // trailing non-kwargs hash → month coercion fails
+		{`Time.utc(2000,1,1,0,0, Object.new)`, "TypeError"},                      // seconds: not numeric / String / #to_int / #to_r
+		{`Time.utc(2000,1,1,0,0,0).send(:+, "x")`, "TypeError"},                  // Time#+ non-numeric
+		// #local_to_utc result whose #to_i is not an Integer (internal guard).
+		{`z=Object.new; def z.local_to_utc(t); o=Object.new; def o.to_i; "x"; end; o; end; Time.new(2000,1,1,12,0,0,z)`, "TypeError"},
 	} {
 		err := runErr(t, c.src)
 		if err == nil || !strings.Contains(err.Error(), c.cls) {

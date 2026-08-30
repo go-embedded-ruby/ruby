@@ -915,11 +915,10 @@ func (vm *VM) timeNewFromString(s *object.String, kwZone, precision object.Value
 	checkRange("min", min, 0, 59)
 	checkRange("sec", sec, 0, 60)
 
+	// prec is clamped to [0, 9], so truncating to prec also bounds the fraction
+	// to the nanosecond resolution the backing instant can hold.
 	if len(fracDigits) > prec {
 		fracDigits = fracDigits[:prec]
-	}
-	if len(fracDigits) > 9 {
-		fracDigits = fracDigits[:9]
 	}
 	ns := 0
 	if fracDigits != "" {
