@@ -222,7 +222,7 @@ func TestTimeConformanceErrors(t *testing.T) {
 		{`Time.at(0, 1, :furlong)`, "ArgumentError"},          // bad unit
 		{`Time.at()`, "ArgumentError"},                        // no positional argument
 		{`Time.at("x")`, "TypeError"},                         // non-numeric
-		{`Time.new("x")`, "TypeError"},                        // non-integer year
+		{`Time.new("x")`, "ArgumentError"},                    // Ruby 3.2+ String form: unparseable
 		{`Time.at(0) + "x"`, "TypeError"},                     // + non-numeric
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
