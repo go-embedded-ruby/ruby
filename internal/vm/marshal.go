@@ -29,9 +29,20 @@ func (vm *VM) registerMarshal() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
 		}
-		data := vm.marshalDump(args[0])
+		io := marshalDumpIO(vm, args)
+		// A non-nil second argument that is neither the depth-limit Integer nor a
+		// writable IO is a TypeError (mirroring MRI's "instance of IO needed").
+		if io == nil && len(args) >= 2 && !object.IsNil(args[1]) {
+			if _, isInt := args[1].(object.Integer); !isInt {
+				raise("TypeError", "instance of IO needed")
+			}
+		}
+		data := vm.marshalDump(args[0], marshalDumpLimit(args))
 		// Marshal.dump always returns an ASCII-8BIT (BINARY) string.
-		if io := marshalDumpIO(vm, args); io != nil {
+		if io != nil {
+			if vm.respondsToDynamic(io, "binmode") {
+				vm.send(io, "binmode", nil, nil)
+			}
 			vm.send(io, "write", []object.Value{object.NewStringBytesEnc(data, "ASCII-8BIT")}, nil)
 			return io
 		}
@@ -66,6 +77,23 @@ func (vm *VM) registerMarshal() {
 	def("restore", load) // Marshal.restore is an alias for load
 }
 
+// marshalDumpLimit reads Marshal.dump's depth limit from its arguments: the
+// Integer second argument of the two-argument dump(obj, limit) form, or the
+// third argument of dump(obj, io, limit). Absent, the limit is -1 (unbounded).
+func marshalDumpLimit(args []object.Value) int {
+	if len(args) >= 2 {
+		if n, ok := args[1].(object.Integer); ok {
+			return int(n)
+		}
+		if len(args) >= 3 {
+			if n, ok := args[2].(object.Integer); ok {
+				return int(n)
+			}
+		}
+	}
+	return -1
+}
+
 // marshalDumpIO returns the IO destination for Marshal.dump, or nil when the
 // call has no IO argument. The second argument is an IO when it is non-nil and
 // responds to #write; a bare Integer there is the depth limit, not an IO.
@@ -91,6 +119,11 @@ func marshalLoadSource(vm *VM, src object.Value) []byte {
 	if vm.respondsToDynamic(src, "read") {
 		r := vm.send(src, "read", nil, nil)
 		if s, ok := r.(*object.String); ok {
+			// An IO that yields no bytes is at end of file; MRI reports this as
+			// EOFError (distinct from the ArgumentError a truncated String raises).
+			if len(s.Bytes()) == 0 {
+				raise("EOFError", "end of file reached")
+			}
 			return s.Bytes()
 		}
 	}
