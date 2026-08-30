@@ -16,7 +16,7 @@ func TestMarshalConformance(t *testing.T) {
 			`p Marshal.dump(["€a".to_sym, "€b".to_sym]).bytes`,
 			"[4, 8, 91, 7, 73, 58, 9, 226, 130, 172, 97, 6, 58, 6, 69, 84, 73, 58, 9, 226, 130, 172, 98, 6, 59, 6, 84]\n"},
 		{"sym_encoded_roundtrip",
-			`p Marshal.load(Marshal.dump(:€x))`, ":\"€x\"\n"},
+			`p Marshal.load(Marshal.dump(:€x))`, ":€x\n"},
 		{"sym_ascii_unwrapped",
 			`p Marshal.dump(:sym).bytes`, "[4, 8, 58, 8, 115, 121, 109]\n"},
 		// A non-ASCII ivar name is likewise wrapped on dump and unwrapped on load.
