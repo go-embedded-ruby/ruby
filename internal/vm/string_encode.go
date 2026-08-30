@@ -15,10 +15,12 @@ type transcodeOpts struct {
 	undefReplace     bool   // undef: :replace — substitute characters absent from the target
 	replace          string // replace: "..." — the substitution string
 	hasReplace       bool
-	crNewline        bool   // cr_newline: replace \n and \r\n with \r
-	crlfNewline      bool   // crlf_newline: replace \n with \r\n
-	universalNewline bool   // universal_newline: replace \r\n and \r with \n
-	xml              string // xml: :text or :attr — HTML/XML-escape the text
+	crNewline        bool         // cr_newline: replace \n and \r\n with \r
+	crlfNewline      bool         // crlf_newline: replace \n with \r\n
+	universalNewline bool         // universal_newline: replace \r\n and \r with \n
+	xml              string       // xml: :text or :attr — HTML/XML-escape the text
+	fallback         object.Value // fallback: a Hash/Proc/Method/#[]-object mapping an unrepresentable character to its substitute
+	hasFallback      bool
 }
 
 // isUnicodeEncoding reports whether name is one of Ruby's Unicode encodings, for
@@ -75,6 +77,9 @@ func parseEncodeOpts(h *object.Hash) transcodeOpts {
 			raise("ArgumentError", "unexpected value for xml option: %s", v.Inspect())
 		}
 	}
+	if v, ok := sym("fallback"); ok && truthyValue(v) {
+		o.fallback, o.hasFallback = v, true
+	}
 	return o
 }
 
@@ -96,6 +101,56 @@ func applyXML(s string, o transcodeOpts) string {
 }
 
 func truthyValue(v object.Value) bool { return v != object.NilV && v != object.Bool(false) }
+
+// charEncodableIn reports whether rune r can be represented in encoding `to`. The
+// :fallback pre-pass uses it to route only the genuinely unrepresentable
+// characters through the fallback, leaving the rest for the normal encoder.
+func charEncodableIn(r rune, to string) bool {
+	switch to {
+	case "UTF-8", "UTF-16", "UTF-16LE", "UTF-16BE", "UTF-32", "UTF-32LE", "UTF-32BE":
+		return true
+	case "US-ASCII", "ASCII-8BIT":
+		return r < 0x80
+	case "ISO-8859-1":
+		return r < 0x100
+	}
+	if enc, ok := xtextEncodings[to]; ok {
+		_, err := enc.NewEncoder().Bytes([]byte(string(r)))
+		return err == nil
+	}
+	// An unknown target has no codec; leave the character in place so the encoder
+	// raises Encoding::ConverterNotFoundError rather than the fallback masking it.
+	return true
+}
+
+// applyFallback rewrites the UTF-8 intermediate u, replacing each character that
+// cannot be represented in the target `to` with the result of the :fallback
+// option — a Hash, Proc, Method or any object queried with #[], passed the
+// character as a String. A nil result (a Hash miss included) leaves the character
+// in place for the normal undefined-conversion error; a non-String, non-nil
+// result raises TypeError, matching MRI. It is called only when undef: :replace is
+// off (that option pre-empts the fallback entirely).
+func (vm *VM) applyFallback(u, to string, fb object.Value) string {
+	var b strings.Builder
+	for _, r := range u {
+		if charEncodableIn(r, to) {
+			b.WriteRune(r)
+			continue
+		}
+		res := vm.send(fb, "[]", []object.Value{object.NewString(string(r))}, nil)
+		switch v := res.(type) {
+		case *object.String:
+			b.WriteString(v.Str())
+		default:
+			if res == object.NilV {
+				b.WriteRune(r)
+				continue
+			}
+			raise("TypeError", "no implicit conversion of %s into String", vm.classOf(res).name)
+		}
+	}
+	return b.String()
+}
 
 // applyNewline rewrites newline sequences in the UTF-8 intermediate per the
 // cr_newline / crlf_newline / universal_newline options.
@@ -335,6 +390,12 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 	inter := vm.decodeToUTF8(s.Bytes(), from, opts, repl)
 	inter = applyNewline(inter, opts)
 	inter = applyXML(inter, opts)
+	// The :fallback option supplies substitutes for unrepresentable characters,
+	// but only where undef: :replace does not already handle them — that option
+	// pre-empts the fallback (MRI never consults it once undef substitution is on).
+	if opts.hasFallback && !opts.undefReplace {
+		inter = vm.applyFallback(inter, to, opts.fallback)
+	}
 	out := vm.encodeFromUTF8(inter, to, opts, repl)
 	return object.NewStringBytesEnc(out, to)
 }

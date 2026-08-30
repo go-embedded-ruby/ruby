@@ -101,3 +101,52 @@ func TestStringEncode(t *testing.T) {
 		}
 	}
 }
+
+// TestStringEncodeFallback covers String#encode's :fallback option: a Hash, Proc
+// or #[]-object supplies substitutes for characters unrepresentable in the target.
+// Each value expectation was verified byte-for-byte against MRI Ruby 4.0.6.
+func TestStringEncodeFallback(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// Proc and Hash fallbacks; only the unrepresentable character is routed
+		// through, encodable ones pass straight to the encoder.
+		{`p "aéb".encode("US-ASCII", fallback: ->(c){ "?" })`, "\"a?b\"\n"},
+		{`p "aéb".encode("US-ASCII", fallback: {"é"=>"e"})`, "\"aeb\"\n"},
+		// The Proc receives the offending character as a String (c.ord == 233).
+		{`p "aéb".encode("US-ASCII", fallback: ->(c){ c.ord.to_s })`, "\"a233b\"\n"},
+		// undef: :replace pre-empts the fallback entirely (é becomes "?", not "e").
+		{`p "aéb".encode("US-ASCII", fallback: {"é"=>"e"}, undef: :replace)`, "\"a?b\"\n"},
+		// A Latin-1 target keeps representable characters (é, 0xE9) and only falls
+		// back for the truly absent one (€).
+		{`p "aé€b".encode("ISO-8859-1", fallback: {"€"=>"EUR"}).encode("utf-8")`, "\"aéEURb\"\n"},
+		// An x/text target (Shift_JIS) honours the fallback the same way.
+		{`p "a€b".encode("Shift_JIS", fallback: {"€"=>"E"}).bytes`, "[97, 69, 98]\n"},
+		// A target that can represent every character never consults the fallback.
+		{`p "aé".encode("UTF-16LE", fallback: {"x"=>"y"}).encode("utf-8")`, "\"aé\"\n"},
+		// The fallback Hash is keyed by the character in its own (UTF-8) encoding.
+		{`p "aéb".encode("US-ASCII", fallback: {"é".encode("UTF-8")=>"E"})`, "\"aEb\"\n"},
+		// Any object answering #[] serves as a fallback.
+		{`class EncFB; def [](c); "_"; end; end; p "aéb".encode("US-ASCII", fallback: EncFB.new)`, "\"a_b\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+
+	errCases := []struct{ src, substr string }{
+		// A Hash miss or a nil Proc result leaves the character for the normal
+		// undefined-conversion error (MRI-verified).
+		{`"aéb".encode("US-ASCII", fallback: {"x"=>"y"})`, "UndefinedConversionError"},
+		{`"aéb".encode("US-ASCII", fallback: ->(c){ nil })`, "UndefinedConversionError"},
+		// A non-String, non-nil fallback result is a TypeError (MRI-verified).
+		{`"aéb".encode("US-ASCII", fallback: ->(c){ 42 })`, "no implicit conversion of Integer into String"},
+		// A target rbgo has no codec for is a named residual: the fallback cannot
+		// mask the missing converter (rbgo raises where MRI would transcode natively).
+		{`"aéb".encode("IBM437", fallback: {"é"=>"e"})`, "ConverterNotFoundError"},
+	}
+	for _, c := range errCases {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.substr) {
+			t.Errorf("src=%q err=%v, want containing %q", c.src, err, c.substr)
+		}
+	}
+}
