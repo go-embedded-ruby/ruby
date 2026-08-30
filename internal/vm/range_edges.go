@@ -75,21 +75,60 @@ func isIntegerValue(v object.Value) bool {
 	return false
 }
 
-// rangeCoverValue is the comparison-based membership test shared by Range#cover?,
-// #include?, #member? and #=== for a plain (non-Range) argument: v is covered
-// when it is not below begin and not past end. A nil bound is open on that side,
-// and an incomparable value is simply not covered (MRI returns false, not error).
-func rangeCoverValue(r *object.Range, v object.Value) bool {
+// rangeCmpV compares a <=> b by dispatching Ruby's #<=> through the VM, so that
+// custom Comparable objects, Numeric subclasses and Time all order correctly (the
+// pure rangeCmp only understands built-in numerics and strings). It returns the
+// comparison sign and whether the two values were comparable at all — a #<=> that
+// returns nil (or any non-Integer) yields ok=false, exactly as MRI's r_less
+// treats an incomparable pair.
+func (vm *VM) rangeCmpV(a, b object.Value) (int, bool) {
+	r := vm.send(a, "<=>", []object.Value{b}, nil)
+	n, ok := r.(object.Integer)
+	if !ok {
+		return 0, false
+	}
+	switch {
+	case n < 0:
+		return -1, true
+	case n > 0:
+		return 1, true
+	default:
+		return 0, true
+	}
+}
+
+// linearObjectP mirrors MRI's linear_object_p: a value whose position on the
+// number/time line is well defined — any Numeric (built-in or a Numeric subclass)
+// or a Time. Range#include? uses cover? (pure #<=>) logic when either endpoint is
+// such a value, rather than walking discrete successors.
+func (vm *VM) linearObjectP(v object.Value) bool {
+	if isNumericValue(v) {
+		return true
+	}
+	cls := vm.classOf(v)
+	if num := vm.cInteger.super; num != nil && classIsA(cls, num) {
+		return true
+	}
+	return classIsA(cls, vm.cTime)
+}
+
+// rangeCoverValueV is MRI's r_cover_p — the comparison-based membership test
+// shared by Range#cover?, #=== and (for linear/String endpoints) #include? on a
+// plain argument. The low bound is checked as begin <=> v (so the endpoint, not
+// the argument, drives coercion — matching which object receives #coerce/#<=>),
+// the high bound as v <=> end. A nil bound is open on that side; an incomparable
+// value is simply not covered (MRI answers false, never raising).
+func (vm *VM) rangeCoverValueV(r *object.Range, v object.Value) bool {
 	if !object.IsNil(r.Lo) {
-		lc, lok := rangeCmp(v, r.Lo)
-		if !lok || lc < 0 {
+		lc, lok := vm.rangeCmpV(r.Lo, v)
+		if !lok || lc > 0 {
 			return false
 		}
 	}
 	if object.IsNil(r.Hi) {
 		return true
 	}
-	hc, hok := rangeCmp(v, r.Hi)
+	hc, hok := vm.rangeCmpV(v, r.Hi)
 	if !hok {
 		return false
 	}
@@ -99,11 +138,11 @@ func rangeCoverValue(r *object.Range, v object.Value) bool {
 	return hc <= 0
 }
 
-// rangeEndCmp compares two range ends the way MRI's r_less does for cover?: a nil
+// rangeEndCmpV compares two range ends the way MRI's r_less does for cover?: a nil
 // end is +infinity, so nil vs nil compares equal and nil (self endless) vs a
 // finite end compares greater. The bool is false when the two ends are of
-// incomparable types.
-func rangeEndCmp(a, b object.Value) (int, bool) {
+// incomparable types. It dispatches #<=> so generic comparable bounds work.
+func (vm *VM) rangeEndCmpV(a, b object.Value) (int, bool) {
 	aNil, bNil := object.IsNil(a), object.IsNil(b)
 	if aNil && bNil {
 		return 0, true
@@ -111,25 +150,16 @@ func rangeEndCmp(a, b object.Value) (int, bool) {
 	if aNil {
 		return 1, true
 	}
-	return rangeCmp(a, b)
-}
-
-// rangeExclMax returns the greatest value an exclusive range attains (for the
-// mixed-exclusivity branch of cover?): for Integer ends that is end-1. Any other
-// end type (notably Float, which has no discrete predecessor) reports false so
-// cover? conservatively answers false, as MRI does when Range#max raises.
-func rangeExclMax(o *object.Range) (object.Value, bool) {
-	if hi, ok := o.Hi.(object.Integer); ok {
-		return object.IntValue(int64(hi) - 1), true
-	}
-	return nil, false
+	return vm.rangeCmpV(a, b)
 }
 
 // rangeCoverRange implements Range#cover? when the argument is itself a Range: it
 // answers whether the whole of o lies within self, mirroring MRI's
 // r_cover_range_p (begin containment, end comparison with exclusive-end fix-ups,
-// and rejection of empty/backward/unbounded-past-self arguments).
-func rangeCoverRange(self, o *object.Range) bool {
+// and rejection of empty/backward/unbounded-past-self arguments). It dispatches
+// #<=> so generic comparable bounds (a Numeric subclass, a Comparable object) are
+// ordered by their own comparison, not just the built-in numeric/string cases.
+func (vm *VM) rangeCoverRange(self, o *object.Range) bool {
 	begNil, endNil := object.IsNil(self.Lo), object.IsNil(self.Hi)
 	vBegNil, vEndNil := object.IsNil(o.Lo), object.IsNil(o.Hi)
 
@@ -146,16 +176,16 @@ func rangeCoverRange(self, o *object.Range) bool {
 		if o.Exclusive {
 			thresh = -1
 		}
-		if c, _ := rangeCmp(o.Lo, o.Hi); c > thresh {
+		if c, ok := vm.rangeCmpV(o.Lo, o.Hi); ok && c > thresh {
 			return false
 		}
 	}
 	// o's begin must be a covered value of self.
-	if !vBegNil && !rangeCoverValue(self, o.Lo) {
+	if !vBegNil && !vm.rangeCoverValueV(self, o.Lo) {
 		return false
 	}
 
-	cmp, ok := rangeEndCmp(self.Hi, o.Hi)
+	cmp, ok := vm.rangeEndCmpV(self.Hi, o.Hi)
 	if !ok {
 		return false
 	}
@@ -165,17 +195,87 @@ func rangeCoverRange(self, o *object.Range) bool {
 	if self.Exclusive { // self exclusive, o inclusive: self must end strictly past o
 		return cmp > 0
 	}
-	// self inclusive, o exclusive: self may still cover o if o's greatest value
-	// (max, for a discrete end) does not exceed self's end.
+	// self inclusive, o exclusive, self.end < o.end: self still covers o when o's
+	// greatest value does not exceed self.end. For a discrete end that greatest
+	// value is o.end's predecessor, so — mirroring MRI's r_cover_range_p — self
+	// covers o iff self.end's successor reaches or passes o.end (self.end.succ >=
+	// o.end). An end without #succ (e.g. a Float) has no such neighbour, so cover
+	// conservatively answers false.
 	if cmp >= 0 {
 		return true
 	}
-	max, ok := rangeExclMax(o)
-	if !ok {
+	if !vm.respondsToDynamic(self.Hi, "succ") {
 		return false
 	}
-	mc, ok := rangeCmp(self.Hi, max)
-	return ok && mc >= 0
+	sc, ok := vm.rangeCmpV(vm.send(self.Hi, "succ", nil, nil), o.Hi)
+	return ok && sc >= 0
+}
+
+// rangeInclude implements Range#include? / #member? — MRI's range_include_internal
+// with string_use_cover = 0. When either endpoint is a linear object (Numeric or
+// Time), or when both endpoints are nil and the argument itself is linear, it
+// falls back to the pure #<=> cover test. When both endpoints are Strings it does
+// a discrete #succ-walk membership test comparing with #== (so ('a'..'ab') covers
+// 'aa' but not 'ac'). Every other shape — a beginless/endless String range, a
+// custom Comparable range, (nil..nil) with a non-linear argument — is iterated by
+// Enumerable#include?, which walks #succ and raises TypeError when the range
+// cannot be enumerated. This matches MRI's routing to rb_call_super.
+func (vm *VM) rangeInclude(r *object.Range, val object.Value) bool {
+	beg, end := r.Lo, r.Hi
+	begNil, endNil := object.IsNil(beg), object.IsNil(end)
+	if vm.linearObjectP(beg) || vm.linearObjectP(end) ||
+		(begNil && endNil && vm.linearObjectP(val)) {
+		return vm.rangeCoverValueV(r, val)
+	}
+	_, begStr := beg.(*object.String)
+	_, endStr := end.(*object.String)
+	if begStr && endStr {
+		return vm.strIncludeRangeP(r, val)
+	}
+	// Fall back to Enumerable#include?: walk the range's elements (via #succ) and
+	// compare with #==. A beginless or endless range (including (nil..nil) with a
+	// non-linear argument) cannot be enumerated, so — like MRI's super call, whose
+	// #each raises here — it is a TypeError; rangeElemsV likewise raises for a
+	// bounded begin that lacks #succ.
+	if begNil || endNil {
+		raise("TypeError", "can't iterate from %s", vm.classOf(beg).name)
+	}
+	for _, e := range vm.rangeElemsV(r) {
+		if vm.send(e, "==", []object.Value{val}, nil).Truthy() {
+			return true
+		}
+	}
+	return false
+}
+
+// strIncludeRangeP is the discrete membership test for a String..String range
+// (MRI's rb_str_include_range_p with string_use_cover = 0): the argument is
+// coerced to a String via #to_str (a non-String that does not respond to #to_str
+// is simply not a member; a #to_str that returns a non-String raises TypeError),
+// then tested against the range's succ-walked elements with String equality.
+func (vm *VM) strIncludeRangeP(r *object.Range, val object.Value) bool {
+	s, ok := val.(*object.String)
+	if !ok {
+		if !vm.respondsToDynamic(val, "to_str") {
+			return false
+		}
+		conv := vm.send(val, "to_str", nil, nil)
+		cs, isStr := conv.(*object.String)
+		if !isStr {
+			raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+				vm.classOf(val).name, vm.classOf(val).name, vm.classOf(conv).name)
+		}
+		s = cs
+	}
+	target := s.Str()
+	beg := r.Lo.(*object.String).Str()
+	end := r.Hi.(*object.String).Str()
+	for _, e := range strRangeElems(beg, end, r.Exclusive) {
+		if e.(*object.String).Str() == target {
+			return true
+		}
+	}
+	return false
 }
 
 // rangeSizeVal is Range#size with MRI 3.4/4.0 semantics. An Integer begin yields

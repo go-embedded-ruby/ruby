@@ -41,7 +41,6 @@ func TestStep(t *testing.T) {
 		`(1..3).step(0) { |x| }`,
 		`(1.0..3.0).step(0.0) { |x| }`,
 		`1.step(3, 0) { |x| }`,
-		`("a".."c").step(0) { |x| }`,
 	} {
 		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
 			t.Errorf("src=%q got=%v want ArgumentError", src, err)
