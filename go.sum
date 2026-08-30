@@ -527,6 +527,10 @@ github.com/go-ruby-parser/parser v0.1.4 h1:PXET/DwT4CKzGuBs/XWMoNczw2AFo84BndzZ7
 github.com/go-ruby-parser/parser v0.1.4/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-parser/parser v0.1.5 h1:dSdg7ByWOn59gHscsxlSDQR+Xd/1hooIZgkJY6ASKtM=
 github.com/go-ruby-parser/parser v0.1.5/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
+github.com/go-ruby-parser/parser v0.1.6 h1:q6GEdtf6Dkl0BiiNvrGmHePLIPfFEfjEd6aRrcF8uvI=
+github.com/go-ruby-parser/parser v0.1.6/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
+github.com/go-ruby-parser/parser v0.1.7 h1:drBCs/DNLgzs+IB2Pqifpl1arwh05PyDj069QdFWkG8=
+github.com/go-ruby-parser/parser v0.1.7/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b h1:/ZN1eLOg0oH4wF8qmd6NOyB4ENYthx6wFwOpZiPhRIE=
 github.com/go-ruby-pathname/pathname v0.0.0-20260629151955-d8d2c4e5f81b/go.mod h1:IvW5q5Kyl5l3hrYwiHylOEmk5hpGSo7XqcmUXBHF5H0=
 github.com/go-ruby-pg/pg v0.0.0-20260702135906-e5650264cc5d h1:JKIZD+pJQ64/nla4DHdzMLnc4/v45MyYwnjACwS6dyM=
