@@ -46,6 +46,136 @@ func TestToSAndInspect(t *testing.T) {
 	}
 }
 
+// TestSymbolInspectPredicate exercises every branch of the bare-vs-quoted
+// decision in Symbol#inspect (isPlainSymbol / isSpecialGlobalName). Expected
+// values were verified against MRI 4.0.x with a UTF-8 default external encoding.
+func TestSymbolInspectPredicate(t *testing.T) {
+	tests := []struct {
+		name    string
+		inspect string
+	}{
+		// Identifiers, constants, trailing ? ! =.
+		{"fred", ":fred"},
+		{"Bar", ":Bar"},
+		{"_x", ":_x"},
+		{"fred?", ":fred?"},
+		{"fred!", ":fred!"},
+		{"foo=", ":foo="},
+		{"Foo=", ":Foo="},
+		{"a=b", `:"a=b"`},
+		{"foo?=", `:"foo?="`},
+		// Instance / class / global names.
+		{"@ruby", ":@ruby"},
+		{"@@ruby", ":@@ruby"},
+		{"$ruby", ":$ruby"},
+		{"$ruby!", `:"$ruby!"`},
+		{"@ruby?", `:"@ruby?"`},
+		{"@@ruby!", `:"@@ruby!"`},
+		{"@x=", `:"@x="`},
+		{"@", `:"@"`},
+		{"@@", `:"@@"`},
+		{"$", `:"$"`},
+		// Special globals.
+		{"$-w", ":$-w"},
+		{"$-ww", `:"$-ww"`},
+		{"$-", `:"$-"`},
+		{"$-ä", ":$-ä"},
+		{"$+", ":$+"},
+		{"$~", ":$~"},
+		{"$_", ":$_"},
+		{"$0", ":$0"},
+		{"$00", `:"$00"`},
+		{"$1234", ":$1234"},
+		{"$ä", ":$ä"},
+		// Operators.
+		{"+", ":+"},
+		{"-", ":-"},
+		{"*", ":*"},
+		{"**", ":**"},
+		{"***", `:"***"`},
+		{"/", ":/"},
+		{"%", ":%"},
+		{"==", ":=="},
+		{"===", ":==="},
+		{"====", `:"===="`},
+		{"=", `:"="`},
+		{"=~", ":=~"},
+		{"=>", `:"=>"`},
+		{"<", ":<"},
+		{"<=", ":<="},
+		{"<=>", ":<=>"},
+		{"<<", ":<<"},
+		{">", ":>"},
+		{">=", ":>="},
+		{">>", ":>>"},
+		{"&", ":&"},
+		{"|", ":|"},
+		{"^", ":^"},
+		{"~", ":~"},
+		{"~x", `:"~x"`},
+		{"+@", ":+@"},
+		{"-@", ":-@"},
+		{"[]", ":[]"},
+		{"[]=", ":[]="},
+		{"[", `:"["`},
+		{"`", ":`"},
+		{"!", ":!"},
+		{"!=", ":!="},
+		{"!~", ":!~"},
+		{"!x", `:"!x"`},
+		// Non-ASCII identifiers print bare; punctuation/space/empty are quoted.
+		{"äöü", ":äöü"},
+		{"测", ":测"},
+		{"±", ":±"},
+		{"a±b", ":a±b"},
+		{"ä=", ":ä="},
+		{"1abc", `:"1abc"`},
+		{"foo bar", `:"foo bar"`},
+		{"", `:""`},
+		{"foo-bar", `:"foo-bar"`},
+		// Invalid UTF-8 (binary) bodies are always quoted.
+		{"foo\xA4", `:"foo\xA4"`},
+	}
+	for _, tc := range tests {
+		if got := Symbol(tc.name).Inspect(); got != tc.inspect {
+			t.Errorf("Symbol(%q).Inspect() = %q, want %q", tc.name, got, tc.inspect)
+		}
+	}
+}
+
+// TestSymbolHashLabel exercises the stricter bare-vs-quoted label decision used
+// by Hash#inspect for symbol keys (isSymLabel). Verified against MRI 4.0.x.
+func TestSymbolHashLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		inspect string
+	}{
+		{"foo", "{foo: 1}"},
+		{"Bar", "{Bar: 1}"},
+		{"foo?", "{foo?: 1}"},
+		{"foo!", "{foo!: 1}"},
+		{"_x", "{_x: 1}"},
+		{"äöü", "{äöü: 1}"},
+		{"あ?", "{あ?: 1}"},
+		{"foo=", `{"foo=": 1}`}, // attrset -> quoted
+		{"@x", `{"@x": 1}`},     // ivar -> quoted
+		{"$x", `{"$x": 1}`},     // gvar -> quoted
+		{"+", `{"+": 1}`},       // operator -> quoted
+		{"`", "{\"`\": 1}"},
+		{"a?b", `{"a?b": 1}`}, // '?' not final -> quoted
+		{"a??", `{"a??": 1}`},
+		{"0", `{"0": 1}`},
+		{"foo\xA4", `{"foo\xA4": 1}`}, // invalid UTF-8 -> quoted
+	}
+	for _, tc := range tests {
+		h := NewHash()
+		h.Set(Symbol(tc.name), Integer(1))
+		if got := h.Inspect(); got != tc.inspect {
+			t.Errorf("Hash{Symbol(%q):1}.Inspect() = %q, want %q", tc.name, got, tc.inspect)
+		}
+	}
+}
+
 func TestHashOps(t *testing.T) {
 	h := NewHash()
 	if h.Len() != 0 || h.repr() != "{}" {

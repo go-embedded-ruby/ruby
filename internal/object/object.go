@@ -479,47 +479,202 @@ func (s Symbol) Inspect() string {
 }
 func (s Symbol) Truthy() bool { return true }
 
-// plainOperatorSymbols are the operator names a symbol prints bare (`:+`).
-var plainOperatorSymbols = map[string]bool{
-	"+": true, "-": true, "*": true, "/": true, "%": true, "**": true,
-	"==": true, "===": true, "!=": true, "<": true, ">": true, "<=": true,
-	">=": true, "<=>": true, "<<": true, ">>": true, "&": true, "|": true,
-	"^": true, "~": true, "!": true, "[]": true, "[]=": true, "+@": true,
-	"-@": true, "=~": true,
-}
+// symbol type classes, mirroring MRI's ID_* categories. They differ only in
+// which trailing suffixes an identifier body may carry: a local or constant name
+// admits a single `=` (attribute-setter), while a global/instance/class name
+// admits neither `=` nor `?`/`!`.
+const (
+	symLocal = iota
+	symConst
+	symGlobal
+	symInstance
+	symClass
+)
 
 // isPlainSymbol reports whether s prints as a bare `:name` rather than a quoted
-// `:"…"`: an operator name, or an identifier (optionally @/@@/$-prefixed, with a
-// single trailing ? ! or =).
+// `:"…"`. It mirrors MRI's rb_enc_symname_type (a symbol prints bare exactly when
+// that returns a type other than -1): an operator method name, or an identifier
+// optionally prefixed by `@`/`@@`/`$` (with a special-global-variable form for
+// `$`) and optionally suffixed by `?`/`!`/`=` as the class permits. Any byte
+// >= 0x80 of a valid-UTF-8 body counts as an identifier character, so non-ASCII
+// letters print bare (`:äöü`); a body that is not valid UTF-8 (e.g. a binary
+// byte string) is always quoted.
 func isPlainSymbol(s string) bool {
+	if s == "" || !utf8.ValidString(s) {
+		return false
+	}
+	e := len(s)
+	m := 0
+	class := symLocal
+	switch c := s[0]; {
+	case c == '$':
+		if isSpecialGlobalName(s[1:]) {
+			return true
+		}
+		m, class = 1, symGlobal
+	case c == '@':
+		m, class = 1, symInstance
+		if m < e && s[m] == '@' {
+			m, class = 2, symClass
+		}
+	case c == '<':
+		m = 1
+		if m < e {
+			switch s[m] {
+			case '<':
+				m++
+			case '=':
+				m++
+				if m < e && s[m] == '>' {
+					m++
+				}
+			}
+		}
+		return m == e
+	case c == '>':
+		m = 1
+		if m < e && (s[m] == '>' || s[m] == '=') {
+			m++
+		}
+		return m == e
+	case c == '=':
+		m = 1
+		if m >= e {
+			return false
+		}
+		switch s[m] {
+		case '~':
+			m++
+		case '=':
+			m++
+			if m < e && s[m] == '=' {
+				m++
+			}
+		default:
+			return false
+		}
+		return m == e
+	case c == '*':
+		m = 1
+		if m < e && s[m] == '*' {
+			m++
+		}
+		return m == e
+	case c == '+' || c == '-':
+		m = 1
+		if m < e && s[m] == '@' {
+			m++
+		}
+		return m == e
+	case c == '|' || c == '^' || c == '&' || c == '/' || c == '%' || c == '~' || c == '`':
+		return e == 1
+	case c == '[':
+		m = 1
+		if m >= e || s[m] != ']' {
+			return false
+		}
+		m++
+		if m < e && s[m] == '=' {
+			m++
+		}
+		return m == e
+	case c == '!':
+		if e == 1 {
+			return true
+		}
+		return e == 2 && (s[1] == '=' || s[1] == '~')
+	default:
+		if c >= 'A' && c <= 'Z' {
+			class = symConst
+		}
+	}
+	// Identifier body (for a bare name, or following a @/@@/$ prefix).
+	if m >= e || !isSymIdentStart(s[m]) {
+		return false
+	}
+	for m++; m < e && isSymIdentChar(s[m]); m++ {
+	}
+	if m >= e {
+		return true
+	}
+	switch s[m] {
+	case '!', '?':
+		if class == symGlobal || class == symInstance || class == symClass {
+			return false
+		}
+		m++
+	case '=':
+		if class != symLocal && class != symConst {
+			return false
+		}
+		m++
+	default:
+		return false
+	}
+	return m == e
+}
+
+// isSymLabel reports whether s prints as a bare hash label `name:` (Ruby 3.4+
+// hash inspect) rather than a quoted label `"name":`. This is stricter than
+// isPlainSymbol: only a local or constant identifier with an optional single
+// trailing `?` or `!` qualifies — operator names, `@`/`@@`/`$`-prefixed names,
+// and attribute-setter (`=`) names are all quoted.
+func isSymLabel(s string) bool {
+	if s == "" || !utf8.ValidString(s) || !isSymIdentStart(s[0]) {
+		return false
+	}
+	i := 1
+	for ; i < len(s) && isSymIdentChar(s[i]); i++ {
+	}
+	if i == len(s) {
+		return true
+	}
+	return i == len(s)-1 && (s[i] == '?' || s[i] == '!')
+}
+
+// isSymIdentStart reports whether c may begin a symbol identifier body: an ASCII
+// letter or underscore, or any byte of a (valid-UTF-8) multibyte character.
+func isSymIdentStart(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0x80
+}
+
+// isSymIdentChar reports whether c may continue a symbol identifier body: an
+// identifier start, or an ASCII digit.
+func isSymIdentChar(c byte) bool {
+	return isSymIdentStart(c) || (c >= '0' && c <= '9')
+}
+
+// isSpecialGlobalName reports whether s (the text after a leading `$`) is one of
+// MRI's special global-variable names, which print bare: a single punctuation
+// character from a fixed set (`$~`, `$&`, `$'`, `$+`, `$0`, …), `$-` followed by
+// exactly one identifier character (`$-w`), or a run of digits with no leading
+// zero (`$1234`). It mirrors MRI's is_special_global_name.
+func isSpecialGlobalName(s string) bool {
 	if s == "" {
 		return false
 	}
-	if plainOperatorSymbols[s] {
+	switch s[0] {
+	case '~', '*', '$', '?', '!', '@', '/', '\\', ';', ',', '.', '=', ':',
+		'<', '>', '"', '&', '`', '\'', '+', '0':
+		return len(s) == 1
+	case '-':
+		if len(s) < 2 || !isSymIdentChar(s[1]) {
+			return false
+		}
+		if s[1] < 0x80 {
+			return len(s) == 2
+		}
+		_, sz := utf8.DecodeRuneInString(s[1:])
+		return 1+sz == len(s)
+	default:
+		for i := 0; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				return false
+			}
+		}
 		return true
 	}
-	i := 0
-	switch {
-	case strings.HasPrefix(s, "@@"):
-		i = 2
-	case s[0] == '@' || s[0] == '$':
-		i = 1
-	}
-	if i >= len(s) || !(isSymLetter(s[i]) || s[i] == '_') {
-		return false
-	}
-	for i++; i < len(s); i++ {
-		c := s[i]
-		if isSymLetter(c) || (c >= '0' && c <= '9') || c == '_' {
-			continue
-		}
-		// A trailing ? ! or = is allowed only as the final character.
-		return (c == '?' || c == '!' || c == '=') && i == len(s)-1
-	}
-	return true
 }
-
-func isSymLetter(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') }
 
 // Array is a mutable, ordered list. It is a reference type (used as *Array), so
 // aliasing and in-place mutation (push, []=) behave as in Ruby.
@@ -1023,9 +1178,9 @@ func (h *Hash) repr() string {
 		// Ruby 4.0 (since 3.4) inspect: symbol keys use the label form
 		// `name: value`; all other keys use `key => value` with spaces.
 		if sym, ok := k.(Symbol); ok {
-			// A plain symbol key uses the bare label `name:`; one that needs
-			// quoting uses the quoted label `"name":`.
-			if isPlainSymbol(string(sym)) {
+			// A label-shaped symbol key uses the bare label `name:`; one that
+			// needs quoting uses the quoted label `"name":`.
+			if isSymLabel(string(sym)) {
 				b.WriteString(string(sym) + ": " + v.Inspect())
 			} else {
 				b.WriteString(NewString(string(sym)).Inspect() + ": " + v.Inspect())
