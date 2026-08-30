@@ -336,6 +336,7 @@ func (vm *VM) registerARGF() {
 	d("tell", delegate("tell"))
 	d("pos=", delegate("pos="))
 	d("seek", delegate("seek"))
+	d("readpartial", delegate("readpartial"))
 	d("fileno", delegate("fileno"))
 	d("to_i", delegate("fileno"))
 	d("set_encoding", delegate("set_encoding"))

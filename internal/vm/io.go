@@ -709,6 +709,44 @@ func defStringIORead(cls *RClass) {
 		o.pos = len(o.buf)
 		return result(data, false)
 	})
+	// readpartial(maxlen, out = nil): read up to maxlen bytes, blocking only until
+	// some are available. On the in-memory buffer that is the leading maxlen bytes;
+	// a zero maxlen yields ""; reading at end of input raises EOFError.
+	cls.define("readpartial", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		ioCheckReadable(o)
+		o.pipeRefresh()
+		n := int(toInt(args[0]))
+		if n < 0 {
+			raise("ArgumentError", "negative length %d given", n)
+		}
+		var buf *object.String
+		if len(args) > 1 {
+			if b, ok := args[1].(*object.String); ok {
+				buf = b
+			}
+		}
+		fill := func(data []byte) object.Value {
+			if buf != nil {
+				if buf.Frozen {
+					raise("FrozenError", "can't modify frozen String: %s", buf.Inspect())
+				}
+				buf.SetBytes(append([]byte(nil), data...))
+				return buf
+			}
+			return object.NewStringBytes(append([]byte(nil), data...))
+		}
+		if n == 0 {
+			return fill(nil)
+		}
+		if o.pos >= len(o.buf) {
+			raise("EOFError", "end of file reached")
+		}
+		end := min(o.pos+n, len(o.buf))
+		data := o.buf[o.pos:end]
+		o.pos = end
+		return fill(data)
+	})
 	cls.define("getc", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
