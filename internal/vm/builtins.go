@@ -4559,14 +4559,17 @@ func (vm *VM) bootstrap() {
 				raise("ArgumentError", "#step for non-numeric beginless ranges is meaningless")
 			}
 		}
-		// A zero numeric step never advances. For a numeric range that is an error
-		// (raised eagerly, even without a block); for a non-numeric bounded range
-		// (Time, custom) it simply yields nothing.
+		// A zero numeric step never advances. For a numeric range that is an error:
+		// without a block MRI raises eagerly when the Enumerator is built, and with
+		// a block the numeric walkers below raise it — so only the no-block case is
+		// handled here. For a non-numeric bounded range (Time, custom) a zero step
+		// simply yields nothing.
 		if isZeroNumeric(step) {
 			if isNumericValue(r0.Lo) || isNumericValue(r0.Hi) {
-				raise("ArgumentError", "step can't be 0")
-			}
-			if !object.IsNil(r0.Lo) && !object.IsNil(r0.Hi) {
+				if blk == nil {
+					raise("ArgumentError", "step can't be 0")
+				}
+			} else if !object.IsNil(r0.Lo) && !object.IsNil(r0.Hi) {
 				if blk == nil {
 					return enumForSized(self, "step", func(*VM) object.Value { return object.NilV }, args...)
 				}
@@ -8160,14 +8163,14 @@ func (vm *VM) integerBitOp(a *big.Int, arg object.Value, name string, op func(z,
 // value has not passed end under #<=> (inclusive stops once #<=> is > 0,
 // exclusive once it is >= 0). A begin without #succ cannot be iterated.
 func (vm *VM) rangeElemsV(r *object.Range) []object.Value {
-	// An endless range with a real begin has no finite element list; MRI reports
-	// this as a RangeError (e.g. (1..).to_a), distinct from the TypeError a
-	// beginless or non-iterable begin raises below.
-	if !object.IsNil(r.Lo) && object.IsNil(r.Hi) {
-		raise("RangeError", "cannot convert endless range to an array")
-	}
 	switch lo := r.Lo.(type) {
 	case object.Integer, *object.Bignum, *object.String:
+		// An endless integer/string range has no finite element list; MRI reports
+		// this as a RangeError (e.g. (1..).to_a), distinct from the TypeError a
+		// beginless or non-iterable begin raises below.
+		if object.IsNil(r.Hi) {
+			raise("RangeError", "cannot convert endless range to an array")
+		}
 		return rangeElems(r)
 	case object.Symbol:
 		// A Symbol range walks like a String range — via the byte/#succ scan that
@@ -8884,9 +8887,10 @@ func stepSize(from, limit, step object.Value, excl bool) object.Value {
 	if !okF || !okS {
 		return object.NilV
 	}
-	if s == 0 {
-		raise("ArgumentError", "step can't be 0")
-	}
+	// A zero step is rejected eagerly by every caller (Range#step, Integer#step,
+	// Numeric#step) before the size Enumerator is built, so it never reaches here;
+	// were one to slip through, the index scan below simply yields 0 rather than
+	// looping, since (l-f)/0 is ±Inf/NaN and int64(that)+2 is out of [0, …).
 	if object.IsNil(limit) {
 		return object.Float(math.Inf(1)) // unbounded: endlessly many
 	}
@@ -8919,9 +8923,6 @@ func stepSize(from, limit, step object.Value, excl bool) object.Value {
 	// (e.g. 1.0 + 3*18.2 = 55.599999999999994 < 55.6) counted the same way the walk
 	// counts it.
 	est := (l - f) / s
-	if math.IsNaN(est) {
-		return object.IntValue(0)
-	}
 	k := int64(math.Floor(est)) + 2
 	for ; k >= 0; k-- {
 		if stepInRange(f+float64(k)*s, l, s, excl) {
@@ -8938,9 +8939,6 @@ func stepSize(from, limit, step object.Value, excl bool) object.Value {
 // answer for an endless one.
 func rangeStepSize(r *object.Range, step object.Value) object.Value {
 	if object.IsNil(r.Hi) {
-		if s, ok := toFloat(step); ok && s == 0 {
-			raise("ArgumentError", "step can't be 0")
-		}
 		return object.Float(math.Inf(1)) // endless, so endlessly many
 	}
 	if _, ok := toFloat(r.Lo); !ok {

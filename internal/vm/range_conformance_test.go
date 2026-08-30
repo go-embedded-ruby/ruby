@@ -310,3 +310,89 @@ p((1..4).min {|a, b| Cmp.new(a <=> b) })`
 		t.Errorf("got=%q want=%q", got, "1\n")
 	}
 }
+
+// TestRangeCoverageEdges exercises branches the primary tests reach only through
+// ASCII / Integer inputs: blockCmpSign's Integer-zero and #>/#< result signs, the
+// non-ASCII String #succ walk, a custom-#succ element overshooting the end, and
+// the size Enumerator's nil paths for non-numeric step/limit. Values checked
+// against MRI where the range is well-formed; the malformed ranges (which MRI
+// rejects at construction but rbgo tolerates) assert rbgo's own handling.
+func TestRangeCoverageEdges(t *testing.T) {
+	cmp := `
+class Cmp
+  def initialize(n); @n = n; end
+  def >(o); @n > o; end
+  def <(o); @n < o; end
+end
+`
+	cases := []struct{ name, src, want string }{
+		// blockCmpSign: Integer sign branches (<0, >0, ==0).
+		{"blkcmp_int_zero", `p((1..3).min {|a, b| 0 })`, "1\n"},
+		{"blkcmp_int_pos", `p((1..3).min {|a, b| 5 })`, "1\n"},
+		{"blkcmp_int_max_pos", `p((1..3).max {|a, b| 5 })`, "3\n"},
+		// blockCmpSign: non-Integer result decided by #< (negative) and #> (positive).
+		{"blkcmp_obj_neg", cmp + `p((1..3).min {|a, b| Cmp.new(-1) })`, "3\n"},
+		{"blkcmp_obj_pos", cmp + `p((1..4).max {|a, b| Cmp.new(a <=> b) })`, "4\n"},
+		// blockCmpSign: a result that is neither #>0 nor #<0 is treated as equal (0).
+		{"blkcmp_obj_zero", `
+class Neu
+  def >(o); false; end
+  def <(o); false; end
+end
+p((1..3).min {|a, b| Neu.new })`, "1\n"},
+
+		// strRangeElems non-ASCII #succ walk (and isASCIIStr's non-ASCII return).
+		{"nonascii_walk", `p(("\u{3a3}".."\u{3a9}").to_a)`, "[\"Σ\", \"Τ\", \"Υ\", \"Φ\", \"Χ\", \"Ψ\", \"Ω\"]\n"},
+		{"nonascii_backward", `p(("\u{3a9}".."\u{3a3}").to_a)`, "[]\n"},
+		{"nonascii_len_overshoot", `p(("a\u{3a3}".."b").to_a)`, "[\"aΣ\"]\n"},
+
+		// rangeElemsV #succ path: an element whose #succ overshoots the end.
+		{"succ_overshoot", `
+class Mul
+  include Comparable
+  def initialize(n); @n = n; end
+  attr_reader :n
+  def <=>(o); @n <=> o.n; end
+  def succ; Mul.new(@n * 10); end
+end
+p((Mul.new(1)..Mul.new(50)).to_a.map(&:n))`, "[1, 10]\n"},
+
+		// step Enumerator size: nil for a non-numeric step or a non-numeric limit.
+		{"size_nonnumeric_step", `p((1..10).step(Object.new).size)`, "nil\n"},
+		{"size_nonnumeric_end", `p((1.."z").step(2).size)`, "nil\n"},
+		{"size_nonnumeric_int_step_limit", `p(1.step("z", 2).size)`, "nil\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRangeCoverageErrors exercises the remaining raising branches: a #to_str that
+// returns a non-String (in the String-range membership test) and an endless
+// Symbol range (which cannot be materialised).
+func TestRangeCoverageErrors(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"to_str_non_string", `
+o = Object.new
+def o.to_str; 1; end
+('a'..'aa').include?(o)`, "TypeError"},
+		{"symbol_endless", `(:a..).to_a`, "RangeError"},
+		// A zero step with a block reaches the numeric walkers, which raise it (the
+		// no-block enum path raises eagerly instead — see TestRangeErrors).
+		{"step_zero_block_bounded", `(1..3).step(0) { |x| }`, "ArgumentError"},
+		{"step_zero_block_endless_int", `(1..).step(0) { |x| break }`, "ArgumentError"},
+		{"step_zero_block_endless_float", `(1.0..).step(0.0) { |x| break }`, "ArgumentError"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runErr(t, tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("src=%q: got err=%v, want containing %q", tc.src, err, tc.want)
+			}
+		})
+	}
+}
