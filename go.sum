@@ -313,10 +313,14 @@ github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783 h1
 github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783/go.mod h1:5DS3icNZKImRwvDP7Kf9IHv+9d6EYtcvRpBALgh/s/Y=
 github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260706115414-f116fa6c4917 h1:f1xzBCccdUn49fRLh8XBn/d9OHpcrNa46w6aW0hGjyY=
 github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260706115414-f116fa6c4917/go.mod h1:CgixBW5KpbPEx+8SCZJQbeVa2WLNB7ObGRRCsjDEY+Y=
+github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260826130123-195cd880b185 h1:zbRpEa8leqzHQ1bdoTmrA2jhbtFzZ9xZUaTJUzvlZJY=
+github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260826130123-195cd880b185/go.mod h1:lmJhhLFVbIhvXAEHagyfic4JIANbZ1N3zX8b6Zd0YaM=
 github.com/go-ruby-actionpack/actionpack v0.0.0-20260706115418-8ba13fbf84e5 h1:+CxMtA9K0j7BWiWdq+/rMfgeWjViJStyfVKcvMlDSvA=
 github.com/go-ruby-actionpack/actionpack v0.0.0-20260706115418-8ba13fbf84e5/go.mod h1:3lXE8Ou6UitS4sOxQhn/KCI6eKLdREUcFxsky4oMEbk=
 github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a h1:NhatSlzDFDTNAIYng5hhUltGPS0O5xiPr5efQ+RsL9k=
 github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a/go.mod h1:n9SEnqxWmYIXKgtrIZEiRvGui0lWdCd2GJELRpa44ls=
+github.com/go-ruby-actionview/actionview v0.0.0-20260825130933-98b7c44f4c14 h1:yAwk/bMaPTj7mP59Xff/UJLEM9UfdT6mOgSGBNsnkXA=
+github.com/go-ruby-actionview/actionview v0.0.0-20260825130933-98b7c44f4c14/go.mod h1:r3cP1hcxRxflbAS1vqeXQIJkAbyChCxe/GWBmfgnEXY=
 github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4 h1:vRJAWboG75rQWpfTiNQ8XkFRJ1Am9RNKdRKSlTLQBiA=
 github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4/go.mod h1:HBZ9KJKoGTzo4h6/5+gaYyzMYWQtucT660mE68zHZGw=
 github.com/go-ruby-activeldap/activeldap v0.0.0-20260808201041-fcc6b6341768 h1:o9Pdvex6j0X4CGZBmoVDR2ZcVS4EGu+jyi3F6GTxNk8=
@@ -329,6 +333,8 @@ github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e
 github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e4/go.mod h1:+aVqjlgBiR8H5b1t7tPht4OVAAYCxa/KPQAbv7WzC/M=
 github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180 h1:zOgsDyqYyTOA8IU4WsurHggTd4DvXfraPTrrR7RxBUs=
 github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180/go.mod h1:ykSisArfgmpZFoV0y0irolshuOdSPyALFz/wWCJiaEE=
+github.com/go-ruby-activesupport/activesupport v0.0.0-20260820071506-344413ecaa5f h1:dUPhMtIOtGvwnXLsgBZH3t/XsI7xANhtFg0knSp+mDw=
+github.com/go-ruby-activesupport/activesupport v0.0.0-20260820071506-344413ecaa5f/go.mod h1:ykSisArfgmpZFoV0y0irolshuOdSPyALFz/wWCJiaEE=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795 h1:UPDrh2pXuwewmbZiEM5SWg26Hy/08mw4MJnCszwGUEk=
 github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795/go.mod h1:4gG3enh3yJ4fpQWjNuzsLbB01vF8XINKkgqsHdfL9O4=
 github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a h1:qLSOUbDALcDFcWTw2jfzSYz2S7SXKCeTuAPLvJrlhiw=
@@ -467,6 +473,8 @@ github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277 h1:XfUzDZqZW
 github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277/go.mod h1:9+5E2AAIpErKRtzJ7zqZSfptjlD/XcD/ni6H9jpO37Y=
 github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e h1:mBJm+ZY0JP4pKMEiIfTPcfUuGL+8ACLmQEVb3q/yu/E=
 github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e/go.mod h1:YJN6l0WpGBz87UAbyHGqnH14iwABfjvrZPUunn9OrNs=
+github.com/go-ruby-mail/mail v0.0.0-20260717070235-fe48e8a63a7c h1:h+RWYqZv0XVtmtd+HHur06xfut+XhIIvsq6HmVyGsSU=
+github.com/go-ruby-mail/mail v0.0.0-20260717070235-fe48e8a63a7c/go.mod h1:YJN6l0WpGBz87UAbyHGqnH14iwABfjvrZPUunn9OrNs=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f h1:IIBuHgiQJbssGPhrUbagvP74febWhmKxiNk7IQq1//g=
 github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f/go.mod h1:UpjSgWGcQSNt0ARWuHKwf0P55LkwZ65vuqoRPSKctZ8=
 github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca h1:jerobsJZBFXJa/2ktK8DEDU/Yf5CmX12oRkrezKq/XQ=
@@ -1196,6 +1204,8 @@ golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9/go.mod h1:LzIPMQfyMNhhGPh
 golang.org/x/crypto v0.0.0-20210921155107-089bfa567519/go.mod h1:GvvjBRRGRdwPK5ydBHafDWAxML/pGHZbMvKqRZ5+Abc=
 golang.org/x/crypto v0.54.0 h1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw=
 golang.org/x/crypto v0.54.0/go.mod h1:KWL8ny2AZdGR2cWmzeHrp2azQPGogOv+HeQaVEXC2dk=
+golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=
+golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xis=
 golang.org/x/exp v0.0.0-20190121172915-509febef88a4/go.mod h1:CJ0aWSM057203Lf6IL+f9T1iT9GByDxfZKAQTCR3kQA=
 golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa h1:Zt3DZoOFFYkKhDT3v7Lm9FDMEV06GpzjG2jrqW+QTE0=
 golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa/go.mod h1:K79w1Vqn7PoiZn+TkNpx3BUWUQksGO3JcVX6qIjytmA=
@@ -1238,6 +1248,8 @@ golang.org/x/net v0.0.0-20210410081132-afb366fc7cd1/go.mod h1:9tjilg8BloeKEkVJvy
 golang.org/x/net v0.0.0-20220722155237-a158d28d115b/go.mod h1:XRhObCWvk6IyKnWLug+ECip1KBveYUHfp+8e9klMJ9c=
 golang.org/x/net v0.57.0 h1:K5+3DljvIuDG9/Jv9rvyMywYNFCQ9RSUY6OOTTkT+tE=
 golang.org/x/net v0.57.0/go.mod h1:KpXc8iv+r3XplLAG/f7Jsf9RPszJzdR0f58q9vGOuEU=
+golang.org/x/net v0.58.0 h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=
+golang.org/x/net v0.58.0/go.mod h1:YwCddHnFlT7eLQqVprV19OnhLGtc5xOKgE0RyqgfWAU=
 golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
 golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421/go.mod h1:gOpvHmFTYa4IltrdGE7lF6nIHvwfUNPOp7c8zoXwtLw=
 golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=

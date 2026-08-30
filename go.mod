@@ -23,15 +23,15 @@ require (
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260717061206-761e82f6c6c3
 	github.com/go-ruby-acme/acme v0.0.0-20260704112859-415fad2a4cbe
 	github.com/go-ruby-actioncable/actioncable v0.0.0-20260706115409-19f2e354a783
-	github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260706115414-f116fa6c4917
+	github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260826130123-195cd880b185
 	github.com/go-ruby-actionpack/actionpack v0.0.0-20260706115418-8ba13fbf84e5
-	github.com/go-ruby-actionview/actionview v0.0.0-20260706115423-0e293eed051a
+	github.com/go-ruby-actionview/actionview v0.0.0-20260825130933-98b7c44f4c14
 	github.com/go-ruby-activejob/activejob v0.0.0-20260706172137-830f5bbe94b4
 	github.com/go-ruby-activeldap/activeldap v0.0.0-20260808201041-fcc6b6341768
 	github.com/go-ruby-activemodel/activemodel v0.0.0-20260706115433-f36d70b64b7a
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260702222646-da57bd9e07f6
 	github.com/go-ruby-activestorage/activestorage v0.0.0-20260706115443-60cd3e2689e4
-	github.com/go-ruby-activesupport/activesupport v0.0.0-20260706115447-2ae51cb37180
+	github.com/go-ruby-activesupport/activesupport v0.0.0-20260820071506-344413ecaa5f
 	github.com/go-ruby-addressable/addressable v0.0.0-20260701121828-b1a644c57795
 	github.com/go-ruby-age/age v0.0.0-20260704110143-130f93385e8a
 	github.com/go-ruby-arrow/arrow v0.0.0-20260704111100-7f2676cd9dda
@@ -99,7 +99,7 @@ require (
 	github.com/go-ruby-kaminari/kaminari v0.0.0-20260707193800-fc9fecf9afe6
 	github.com/go-ruby-ldap/ldap v0.0.0-20260808195309-d90a141d64f9
 	github.com/go-ruby-logger/logger v0.0.0-20260630081511-870e2ee3f277
-	github.com/go-ruby-mail/mail v0.0.0-20260701122047-67f8e8ec1d6e
+	github.com/go-ruby-mail/mail v0.0.0-20260717070235-fe48e8a63a7c
 	github.com/go-ruby-marshal/marshal v0.0.0-20260622114304-27ed1baddd9f
 	github.com/go-ruby-matrix/matrix v0.0.0-20260630052510-d60a23f08aca
 	github.com/go-ruby-mime-types/mime-types v0.0.0-20260630150449-4e5a308a8847
@@ -414,11 +414,11 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/mod v0.38.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260708182218-49f421fb7959 // indirect
 	golang.org/x/term v0.45.0 // indirect
