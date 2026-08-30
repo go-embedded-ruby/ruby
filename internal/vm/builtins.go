@@ -4866,10 +4866,10 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cFloat.define("to_i", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(floatOf(self)))
+		return floatToInt(floatOf(self))
 	})
 	vm.cFloat.define("to_int", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(floatOf(self)))
+		return floatToInt(floatOf(self))
 	})
 	vm.cFloat.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return floatRound(floatOf(self), args, math.Ceil)
@@ -5253,7 +5253,29 @@ func floatRound(f float64, args []object.Value, fn func(float64) float64) object
 	if ndigits > 0 {
 		return object.Float(r)
 	}
-	return object.IntValue(int64(r))
+	return floatToInt(r)
+}
+
+// floatToInt converts a Float to an Integer as MRI's flo2int does: a non-finite
+// value (NaN or ±Infinity) has no integer and raises FloatDomainError; a finite
+// value truncates toward zero into an Integer/Bignum. It backs the Integer-valued
+// Float conversions (#to_i, #to_int, and #ceil/#floor/#round/#truncate without a
+// positive ndigits), which previously returned 0 for NaN or crashed.
+func floatToInt(f float64) object.Value {
+	if math.IsNaN(f) {
+		raise("FloatDomainError", "NaN")
+	}
+	if math.IsInf(f, 1) {
+		raise("FloatDomainError", "Infinity")
+	}
+	if math.IsInf(f, -1) {
+		raise("FloatDomainError", "-Infinity")
+	}
+	if f >= math.MinInt64 && f < math.MaxInt64 {
+		return object.IntValue(int64(f))
+	}
+	bi, _ := big.NewFloat(math.Trunc(f)).Int(nil)
+	return object.NormInt(bi)
 }
 
 // clampCount validates a `first(n)`/`last(n)` count: it must be non-negative

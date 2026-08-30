@@ -157,6 +157,14 @@ func dbl2ival(x float64) object.Value {
 // floRound is the full CRuby flo_round contract: it returns an Integer for
 // ndigits <= 0 and a Float for ndigits > 0, applying the selected half mode.
 func floRound(number float64, ndigits int, mode roundMode) object.Value {
+	if math.IsNaN(number) || math.IsInf(number, 0) {
+		// With a positive ndigits the result is a Float and keeps NaN/±Infinity;
+		// an Integer result has no value for a non-finite Float (FloatDomainError).
+		if ndigits > 0 {
+			return object.Float(number)
+		}
+		return floatToInt(number)
+	}
 	if number == 0.0 {
 		if ndigits > 0 {
 			return object.Float(number)
@@ -171,21 +179,20 @@ func floRound(number float64, ndigits int, mode roundMode) object.Value {
 	if ndigits == 0 {
 		return dbl2ival(applyRoundMode(mode, number, 1.0))
 	}
-	if !math.IsInf(number, 0) && !math.IsNaN(number) {
-		_, binexp := math.Frexp(number)
-		if floatRoundOverflow(ndigits, binexp) {
-			return object.Float(number)
-		}
-		if floatRoundUnderflow(ndigits, binexp) {
-			return object.Float(0)
-		}
-		if ndigits >= dblDig { // !ACCURATE_POW10 — fall back to exact rational
-			return floRoundByRational(number, ndigits, mode)
-		}
-		f := math.Pow(10, float64(ndigits))
-		return object.Float(applyRoundMode(mode, number, f) / f)
+	// number is finite and non-zero here (NaN/±Infinity returned above), so
+	// ndigits > 0 always yields a Float.
+	_, binexp := math.Frexp(number)
+	if floatRoundOverflow(ndigits, binexp) {
+		return object.Float(number)
 	}
-	return object.Float(number) // NaN / ±Infinity
+	if floatRoundUnderflow(ndigits, binexp) {
+		return object.Float(0)
+	}
+	if ndigits >= dblDig { // !ACCURATE_POW10 — fall back to exact rational
+		return floRoundByRational(number, ndigits, mode)
+	}
+	f := math.Pow(10, float64(ndigits))
+	return object.Float(applyRoundMode(mode, number, f) / f)
 }
 
 // floRoundByRational rounds with ndigits beyond a double's accurate power of ten
