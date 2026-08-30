@@ -2225,6 +2225,7 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			super = sc.(*RClass)
 		}
 		class = newClass(scopedNameFor(parent, name), super)
+		vm.registerLiveClass(class) // so super.subclasses (and ObjectSpace) can find it
 		// A compact (scoped) definition's lexical nesting is only itself, so its
 		// lexParent terminates the chain (nil); a bare nested definition records its
 		// enclosing scope so the body sees the surrounding namespace.

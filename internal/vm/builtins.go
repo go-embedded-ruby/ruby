@@ -5015,6 +5015,19 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
+	// Class#subclasses: the classes that directly inherit from self (in no
+	// particular order), excluding singleton classes and any included/prepended
+	// modules. Walks the live-class table populated as classes are defined.
+	vm.cClass.define("subclasses", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		parent := self.(*RClass)
+		out := object.NewArray()
+		for _, w := range vm.liveClasses {
+			if c := w.Value(); c != nil && c.super == parent && !c.isModule && !c.isSingleton {
+				out.Elems = append(out.Elems, c)
+			}
+		}
+		return out
+	})
 
 	vm.cInteger.define("step", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		limit, step := vm.stepBounds(args)
