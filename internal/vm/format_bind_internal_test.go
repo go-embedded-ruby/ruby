@@ -128,5 +128,5 @@ func TestRaiseFormatErrorFallback(t *testing.T) {
 			t.Fatalf("want ArgumentError boom, got %v", re)
 		}
 	}()
-	raiseFormatError(errors.New("boom"))
+	New(io.Discard).raiseFormatError(errors.New("boom"), nil)
 }

@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"errors"
 	"math/big"
 	"strconv"
 	"strings"
@@ -209,26 +210,43 @@ func parseFormatInteger(s, inspect string) (*big.Int, error) {
 	// "0777"->511, "0b1101_0000"->208, but "123__456"/"_1"/"08" raise ArgumentError.
 	v, ok := intFromString(s, 0)
 	if !ok {
-		return nil, &format.Error{
-			Class:   "ArgumentError",
-			Message: "invalid value for Integer(): " + inspect,
-		}
+		// Return only the message: the format engine promotes a non-nil parse
+		// error to an ArgumentError by wrapping err.Error(), so a *format.Error
+		// here (whose Error() is "Class: Message") would double the class prefix.
+		return nil, errors.New("invalid value for Integer(): " + inspect)
 	}
 	z, _ := object.BigOf(v)
 	return z, nil
 }
 
-// parseFormatFloat parses a String operand for a float conversion as MRI's
-// Float() does for sprintf: surrounding whitespace is trimmed. A malformed
-// value yields a non-nil error whose message matches MRI's
-// `invalid value for Float(): <inspect>`.
+// parseFormatFloat parses a String operand for a float conversion exactly as
+// MRI's Kernel#Float does (the "%e/%f/%g behaves as if calling Kernel#Float"
+// rule): it honours a "0x…" hexadecimal-float literal ("0xA" -> 10.0), applies
+// MRI's strict digit-separator underscore placement, and treats an out-of-range
+// magnitude as ±Inf / 0.0 (overflow/underflow) rather than an error — routing
+// through the same normalizeFloatLiteral primitive as Kernel#Float so the two
+// stay byte-for-byte identical. A genuinely malformed value yields a non-nil
+// error whose message matches MRI's `invalid value for Float(): <inspect>` (the
+// library promotes it to an ArgumentError).
 func parseFormatFloat(s, inspect string) (float64, error) {
-	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	// Return only the message: the format engine promotes a non-nil parse error
+	// to an ArgumentError by wrapping err.Error(), so a *format.Error here (whose
+	// Error() is "Class: Message") would double the class prefix.
+	badFloat := func() error {
+		return errors.New("invalid value for Float(): " + inspect)
+	}
+	norm, ok := normalizeFloatLiteral(s)
+	if !ok {
+		return 0, badFloat()
+	}
+	f, err := strconv.ParseFloat(norm, 64)
 	if err != nil {
-		return 0, &format.Error{
-			Class:   "ArgumentError",
-			Message: "invalid value for Float(): " + inspect,
+		// An out-of-range literal is not malformed: MRI yields ±Infinity (overflow)
+		// or 0.0 (underflow), which is exactly what ParseFloat returns with ErrRange.
+		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
+			return f, nil
 		}
+		return 0, badFloat()
 	}
 	return f, nil
 }
@@ -277,7 +295,7 @@ func (vm *VM) formatString(fmtStr string, args []object.Value) string {
 	}
 	out, err := format.Format(fmtStr, vals, vm.formatNamedArgs(args))
 	if err != nil {
-		raiseFormatError(err)
+		vm.raiseFormatError(err, args)
 	}
 	return out
 }
@@ -286,12 +304,42 @@ func (vm *VM) formatString(fmtStr string, args []object.Value) string {
 // exception: a *format.Error carries the MRI exception class and message
 // (ArgumentError / KeyError / TypeError) verbatim; any other error (which the
 // library never produces, but is handled defensively) surfaces as an
-// ArgumentError. It never returns.
-func raiseFormatError(err error) {
-	if fe, ok := err.(*format.Error); ok {
-		raise(fe.Class, "%s", fe.Message)
+// ArgumentError. Every KeyError the engine raises comes from an unmatched
+// %<name>/%{name} reference, which is possible only when the sole operand is a
+// hash; that KeyError is re-raised with MRI's #key (the missing key as a Symbol)
+// and #receiver (that hash) set, so `rescue KeyError => e; e.key; e.receiver`
+// behave as MRI does. args is the positional operand list. It never returns.
+func (vm *VM) raiseFormatError(err error, args []object.Value) {
+	fe, ok := err.(*format.Error)
+	if !ok {
+		raise("ArgumentError", "%s", err.Error())
 	}
-	raise("ArgumentError", "%s", err.Error())
+	if fe.Class == "KeyError" {
+		var receiver object.Value
+		if len(args) == 1 {
+			if h, isHash := args[0].(*object.Hash); isHash {
+				receiver = h
+			}
+		}
+		vm.raiseWithIvars("KeyError", fe.Message, map[string]object.Value{
+			"@key":      object.Symbol(namedKeyFromMessage(fe.Message)),
+			"@receiver": receiver,
+		})
+	}
+	raise(fe.Class, "%s", fe.Message)
+}
+
+// namedKeyFromMessage extracts the referenced key from the format engine's
+// unmatched-reference KeyError message, which is `key{NAME} not found` for a
+// %{NAME} reference and `key<NAME> not found` for a %<NAME> one; either bracket
+// style yields the same MRI #key. The NAME token never itself contains a
+// reference bracket (such a byte would terminate the reference), so trimming the
+// fixed prefix/suffix and the surrounding brackets recovers it exactly.
+func namedKeyFromMessage(msg string) string {
+	inner := strings.TrimPrefix(strings.TrimSuffix(msg, " not found"), "key")
+	return strings.TrimFunc(inner, func(r rune) bool {
+		return r == '{' || r == '}' || r == '<' || r == '>'
+	})
 }
 
 // formatArgs unpacks the right-hand operand of String#%: an Array spreads into
