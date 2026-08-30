@@ -16,7 +16,7 @@ require (
 	github.com/go-kramdown/kramdown v0.1.0
 	github.com/go-liquid/liquid v0.1.0
 	github.com/go-mustache/mustache v0.1.0
-	github.com/go-ndarray/ndarray v0.0.0-20260620170009-555bfc31e7a3
+	github.com/go-ndarray/ndarray v0.0.0-20260805203447-1a4cfae8f207
 	github.com/go-nokogiri/nokogiri v0.1.0
 	github.com/go-rouge/rouge v0.1.0
 	github.com/go-ruby-aasm/aasm v0.0.0-20260707193337-00a96ee353d7
