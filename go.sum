@@ -295,6 +295,10 @@ github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e h1:5CU5wIZJpj5eW/
 github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e/go.mod h1:AaqsDdZnb05OGpLo4iZpZzf243+L4I0dxCZ71gfyKU0=
 github.com/go-regexp/engine v0.1.0 h1:DnQjXFwUldJOcyau/0TAjhl244xC5nFfWy6YJ5aUlVY=
 github.com/go-regexp/engine v0.1.0/go.mod h1:8rju5lq5OkskQh9+m+FjBP6965giMPUdIOdrvFrbqn4=
+github.com/go-regexp/engine v0.1.1 h1:mbFP7FlO03eugqzmtjkrIcj9W39HryO1Qyx7wMUCcp4=
+github.com/go-regexp/engine v0.1.1/go.mod h1:8rju5lq5OkskQh9+m+FjBP6965giMPUdIOdrvFrbqn4=
+github.com/go-regexp/engine v0.1.2 h1:NS8QqIQ0gG8wJw8Nn4P4P49UL6FB7FCWVvwYOC57low=
+github.com/go-regexp/engine v0.1.2/go.mod h1:8rju5lq5OkskQh9+m+FjBP6965giMPUdIOdrvFrbqn4=
 github.com/go-richdoc/richdoc v0.2.0 h1:z9cLox9MoInZL6fIlweMzgDT/VqgnB2ZucSIEaRFglY=
 github.com/go-richdoc/richdoc v0.2.0/go.mod h1:aCX8ulqg5CoKqSWgWeEWul1Oj0d2VxQeaQNI0+jsm7c=
 github.com/go-rouge/rouge v0.1.0 h1:Ne+YRqsm1JloOKCYDs63scI0QzPUVw61y+vUn0+P6BY=
