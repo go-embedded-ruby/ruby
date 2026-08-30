@@ -70,3 +70,22 @@ func TestModuleReflectionC37(t *testing.T) {
 		}
 	}
 }
+
+// TestClassSubclasses covers Class#subclasses: the classes directly inheriting
+// from self, excluding included/prepended modules and deeper descendants.
+// Asserted against MRI Ruby 4.0.6.
+func TestClassSubclasses(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`class SubA; end; class SubB < SubA; end; class SubC < SubA; end; p SubA.subclasses.map(&:name).sort`, "[\"SubB\", \"SubC\"]\n"},
+		{`p Class.new.subclasses`, "[]\n"},
+		{`class SubD; end; class SubE < SubD; end; class SubF < SubE; end; p SubD.subclasses.map(&:name)`, "[\"SubE\"]\n"},
+		// A module mixed into the parent is not a subclass.
+		{`parent = Class.new; child = Class.new(parent); parent.include(Module.new); p parent.subclasses == [child]`, "true\n"},
+		{`parent = Class.new; child = Class.new(parent); parent.prepend(Module.new); p parent.subclasses == [child]`, "true\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
