@@ -89,3 +89,35 @@ func TestClassSubclasses(t *testing.T) {
 		}
 	}
 }
+
+// TestModuleDeprecateConstant covers Module#deprecate_constant: marking existing
+// constants (returning self), the NameError for an undefined name, and the
+// deprecation warning on read via constant scope and const_get — emitted only
+// while Warning[:deprecated] is enabled. Asserted against MRI Ruby 4.0.6.
+func TestModuleDeprecateConstant(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`module DcA; X = 1; deprecate_constant :X; end; p DcA::X`, "1\n"},
+		{`module DcB; Y = 2; end; p DcB.deprecate_constant(:Y).equal?(DcB)`, "true\n"},
+		// The warning fires on scoped access and const_get when enabled...
+		{`require "stringio"
+module DcC; Z = 3; deprecate_constant :Z; end
+Warning[:deprecated] = true; $stderr = StringIO.new
+DcC::Z; DcC.const_get(:Z); DcC.const_get("Z")
+p $stderr.string.scan("is deprecated").length`, "3\n"},
+		// ...and stays silent when disabled.
+		{`require "stringio"
+module DcD; W = 4; deprecate_constant :W; end
+Warning[:deprecated] = false; $stderr = StringIO.new
+DcD::W
+p $stderr.string`, "\"\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+	if err := runErr(t, `module DcE; deprecate_constant :Nope; end`); err == nil ||
+		!strings.Contains(err.Error(), "constant DcE::Nope not defined") {
+		t.Errorf("deprecate_constant(undefined): err=%v", err)
+	}
+}

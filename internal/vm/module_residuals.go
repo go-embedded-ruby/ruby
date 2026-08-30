@@ -25,7 +25,16 @@ func (vm *VM) registerModuleResiduals() {
 	// unresolved name through #const_missing on the module where it was sought.
 	vm.cModule.define("const_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		inherit := len(args) < 2 || args[1].Truthy()
-		return vm.moduleConstGet(self.(*RClass), args[0], inherit)
+		mod := self.(*RClass)
+		v := vm.moduleConstGet(mod, args[0], inherit)
+		if mod.deprecatedConsts != nil {
+			if s, ok := args[0].(*object.String); ok && mod.deprecatedConsts[s.Str()] {
+				vm.warnDeprecatedConst(mod, s.Str())
+			} else if sym, ok := args[0].(object.Symbol); ok && mod.deprecatedConsts[string(sym)] {
+				vm.warnDeprecatedConst(mod, string(sym))
+			}
+		}
+		return v
 	})
 
 	// Module#const_defined?(name, inherit=true): report whether name resolves,
