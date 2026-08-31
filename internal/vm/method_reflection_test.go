@@ -107,8 +107,9 @@ func TestMethodOriginalName(t *testing.T) {
 		{`class C; define_method(:mine, ::Kernel.instance_method(:is_a?)); end; p C.new.method(:mine).original_name`, ":is_a?\n"},
 		// A block-defined method's original name is the name it was defined under.
 		{`class C; define_method(:f){}; end; p C.new.method(:f).original_name`, ":f\n"},
-		// An instance-method transplant keeps the iseq's original name.
-		{`class S; def orig; end; end; class C; define_method(:copy, S.instance_method(:orig)); end; p C.new.method(:copy).original_name`, ":orig\n"},
+		// An instance-method transplant keeps the iseq's original name (the target is
+		// a subclass of the source, as MRI's bind-compatibility rule requires).
+		{`class S; def orig; end; end; class C < S; define_method(:copy, S.instance_method(:orig)); end; p C.new.method(:copy).original_name`, ":orig\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
