@@ -2364,17 +2364,48 @@ func (vm *VM) bootstrap() {
 		}}
 	vm.cArray.define("values_at", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array).Elems
-		out := make([]object.Value, len(args))
-		for i, idxV := range args {
-			idx := int(intArg(idxV))
+		out := make([]object.Value, 0, len(args))
+		appendAt := func(idx int) {
 			if idx < 0 {
 				idx += len(a)
 			}
 			if idx >= 0 && idx < len(a) {
-				out[i] = a[idx]
+				out = append(out, a[idx])
 			} else {
-				out[i] = object.NilV
+				out = append(out, object.NilV)
 			}
+		}
+		for _, idxV := range args {
+			// A Range argument (or Range subclass) expands to its span, padding
+			// out-of-bounds positions with nil; a begin still negative after
+			// normalisation is a RangeError, matching MRI's rb_range_beg_len.
+			if rng, ok := asRangeValue(idxV); ok {
+				rng = vm.coerceRangeBounds(rng)
+				beg := 0
+				if _, isNil := rng.Lo.(object.Nil); !isNil {
+					beg = int(intArg(rng.Lo))
+					if beg < 0 {
+						if beg += len(a); beg < 0 {
+							raise("RangeError", "%s out of range", rng.Inspect())
+						}
+					}
+				}
+				end := len(a)
+				if _, isNil := rng.Hi.(object.Nil); !isNil {
+					end = int(intArg(rng.Hi))
+					if end < 0 {
+						end += len(a)
+					}
+					if !rng.Exclusive {
+						end++
+					}
+				}
+				for i := beg; i < end; i++ {
+					appendAt(i)
+				}
+				continue
+			}
+			appendAt(int(vm.repeatLong(idxV)))
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -2550,7 +2581,8 @@ func (vm *VM) bootstrap() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
-		idx := int(intArg(args[0]))
+		raw := vm.repeatLong(args[0])
+		idx := int(raw)
 		ins := args[1:]
 		if len(ins) == 0 {
 			return a
@@ -2559,7 +2591,7 @@ func (vm *VM) bootstrap() {
 		if idx < 0 {
 			idx += len(a.Elems) + 1
 			if idx < 0 {
-				raise("IndexError", "index %d too small for array; minimum: %d", int(intArg(args[0])), -len(a.Elems)-1)
+				raise("IndexError", "index %d too small for array; minimum: %d", raw, -len(a.Elems)-1)
 			}
 		}
 		if idx > len(a.Elems) {
@@ -2645,7 +2677,7 @@ func (vm *VM) bootstrap() {
 		if n := len(a.Elems); n > 0 {
 			k := 1
 			if len(args) > 0 {
-				k = int(intArg(args[0]))
+				k = int(vm.repeatLong(args[0]))
 			}
 			k = ((k % n) + n) % n
 			a.Elems = append(append([]object.Value{}, a.Elems[k:]...), a.Elems[:k]...)
@@ -2820,39 +2852,47 @@ func (vm *VM) bootstrap() {
 	vm.cArray.defineNR("[]=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		// Range form: a[range] = value.
-		if rng, ok := args[0].(*object.Range); ok {
-			start, length, ok := sliceRange(len(a.Elems), rng)
+		// Range form: a[range] = value (a Range subclass is unwrapped by asRangeValue;
+		// non-Integer endpoints are coerced through #to_int by coerceRangeBounds).
+		if rng, ok := asRangeValue(args[0]); ok {
+			rng = vm.coerceRangeBounds(rng)
+			start, length, ok := arrayAssignRange(len(a.Elems), rng)
 			if !ok {
 				raise("RangeError", "%s out of range", rng.Inspect())
 			}
 			val := args[1]
-			arraySpliceAssign(a, start, length, val)
+			vm.arraySpliceAssign(a, start, length, val)
 			return val
 		}
 		// Start/length form: a[start, len] = value.
 		if len(args) == 3 {
-			start := normIndex(intArg(args[0]), len(a.Elems))
-			length := int(intArg(args[1]))
+			raw := vm.repeatLong(args[0])
+			start := normIndex(raw, len(a.Elems))
+			length := int(vm.repeatLong(args[1]))
 			if start < 0 {
-				raise("IndexError", "index %d out of array", intArg(args[0]))
+				raise("IndexError", "index %d too small for array; minimum: -%d", raw, len(a.Elems))
 			}
 			if length < 0 {
 				raise("IndexError", "negative length (%d)", length)
 			}
 			val := args[2]
-			arraySpliceAssign(a, start, length, val)
+			vm.arraySpliceAssign(a, start, length, val)
 			return val
 		}
-		// Single-index form: a[i] = value.
-		i, n := intArg(args[0]), int64(len(a.Elems))
+		// Single-index form: a[i] = value. Assigning at or beyond the end grows the
+		// array, padding the gap with nil; a still-negative index is out of bounds.
+		raw := vm.repeatLong(args[0])
+		i, n := raw, int64(len(a.Elems))
 		if i < 0 {
 			i += n
+			if i < 0 {
+				raise("IndexError", "index %d too small for array; minimum: -%d", raw, n)
+			}
 		}
-		if i < 0 || i > n {
-			raise("IndexError", "index %d out of array", intArg(args[0]))
-		}
-		if i == n {
+		if i >= n {
+			for int64(len(a.Elems)) < i {
+				a.Elems = append(a.Elems, object.NilV)
+			}
 			a.Elems = append(a.Elems, args[1])
 		} else {
 			a.Elems[i] = args[1]
@@ -2932,7 +2972,14 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("dig", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.digValue(self, args)
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		a := self.(*object.Array)
+		if i, ok := arrayIndex(a, intArg(args[0])); ok {
+			return vm.digRest(a.Elems[i], args[1:])
+		}
+		return object.NilV
 	})
 	vm.cArray.define("uniq", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		return object.NewArrayFromSlice(vm.arrayUniq(self.(*object.Array).Elems, blk))
@@ -3042,15 +3089,15 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
-		if len(args) > 0 {
-			depth = int(intArg(args[0]))
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		return object.NewArrayFromSlice(flattenDepth(self.(*object.Array).Elems, depth))
 	})
 	vm.cArray.define("flatten!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
-		if len(args) > 0 {
-			depth = int(intArg(args[0]))
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -3160,10 +3207,13 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		lists := [][]object.Value{self.(*object.Array).Elems}
 		for _, a := range args {
-			la, ok := a.(*object.Array)
+			la, ok := asArray(a)
+			if !ok && vm.respondsToDynamic(a, "to_ary") {
+				la, ok = asArray(vm.send(a, "to_ary", nil, nil))
+			}
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(a).name)
 			}
@@ -3202,6 +3252,14 @@ func (vm *VM) bootstrap() {
 				}
 			}
 			out = next
+		}
+		// With a block, MRI yields each combination in turn and returns the receiver;
+		// without one it returns the array of combinations.
+		if blk != nil {
+			for _, row := range out {
+				vm.callBlock(blk, []object.Value{row})
+			}
+			return self
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -3397,7 +3455,7 @@ func (vm *VM) bootstrap() {
 		}
 		shift := 1
 		if len(args) > 0 {
-			shift = int(intArg(args[0]))
+			shift = int(vm.repeatLong(args[0]))
 		}
 		shift = ((shift % n) + n) % n
 		out := make([]object.Value, n)
@@ -6111,13 +6169,46 @@ func sliceRange(n int, r *object.Range) (int, int, bool) {
 	return lo, hi - lo, true
 }
 
+// arrayAssignRange resolves an Array#[]= Range argument to a (start, length) span
+// for slice assignment. Endpoints are already Integer or nil (coerceRangeBounds).
+// Unlike the read-side sliceRange, a begin at or beyond the end is valid (the
+// array is padded); ok is false only when the begin is still negative after
+// normalisation, which MRI reports as a RangeError.
+func arrayAssignRange(n int, r *object.Range) (start, length int, ok bool) {
+	beg := 0
+	if _, isNil := r.Lo.(object.Nil); !isNil {
+		beg = normIndex(intArg(r.Lo), n)
+		if beg < 0 {
+			return 0, 0, false
+		}
+	}
+	if _, isNil := r.Hi.(object.Nil); isNil {
+		length = n - beg
+		if length < 0 {
+			length = 0
+		}
+		return beg, length, true
+	}
+	end := normIndex(intArg(r.Hi), n)
+	if !r.Exclusive {
+		end++
+	}
+	length = end - beg
+	if length < 0 {
+		length = 0
+	}
+	return beg, length, true
+}
+
 // arraySpliceAssign implements Ruby's a[start, length] = value slice assignment.
 // start is already resolved to a non-negative offset; length is non-negative.
 // If start is beyond the current end, the array is padded with nil. The replaced
-// span is the `length` elements at start (clamped to the end). When value is an
-// Array its elements are spliced in; any other value (including nil) becomes a
-// single element.
-func arraySpliceAssign(a *object.Array, start, length int, value object.Value) {
+// span is the `length` elements at start (clamped to the end). A genuine Array
+// (including a subclass) is spliced in element-by-element; a non-Array that
+// responds to #to_ary is converted (its result spliced); any other value
+// (including nil) becomes a single element. The return value of the caller is
+// always the original rhs, never the #to_ary result.
+func (vm *VM) arraySpliceAssign(a *object.Array, start, length int, value object.Value) {
 	// Pad with nil so the array reaches start.
 	for len(a.Elems) < start {
 		a.Elems = append(a.Elems, object.NilV)
@@ -6127,11 +6218,20 @@ func arraySpliceAssign(a *object.Array, start, length int, value object.Value) {
 		end = len(a.Elems)
 	}
 	var repl []object.Value
-	if arr, ok := value.(*object.Array); ok {
+	if arr, ok := asArray(value); ok {
 		repl = arr.Elems
+	} else if vm.respondsToDynamic(value, "to_ary") {
+		if arr, ok := asArray(vm.send(value, "to_ary", nil, nil)); ok {
+			repl = arr.Elems
+		} else {
+			repl = []object.Value{value}
+		}
 	} else {
 		repl = []object.Value{value}
 	}
+	// Copy repl defensively: it may alias a.Elems (e.g. a[0,2] = a), which the
+	// in-place rebuild below would otherwise corrupt mid-splice.
+	repl = append([]object.Value(nil), repl...)
 	tail := append([]object.Value{}, a.Elems[end:]...)
 	out := append(a.Elems[:start:start], repl...)
 	a.Elems = append(out, tail...)
@@ -8002,30 +8102,38 @@ func (vm *VM) exceptionFullMessage(self object.Value, highlight bool, order stri
 	return b.String()
 }
 
-// digValue implements Hash#dig: walk nested Hashes/Arrays by successive keys,
-// returning nil as soon as a step is missing.
+// digValue implements Hash#dig: fetch the value at the first key and, via
+// digRest, dig into it with the rest — returning nil as soon as a step is
+// missing and raising ArgumentError when no keys are given.
 func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
-	for _, k := range keys {
-		switch c := cur.(type) {
-		case object.Nil:
-			return object.NilV
-		case *object.Hash:
-			v, ok := c.Get(k)
-			if !ok {
-				return object.NilV
-			}
-			cur = v
-		case *object.Array:
-			if i, ok := arrayIndex(c, intArg(k)); ok {
-				cur = c.Elems[i]
-			} else {
-				cur = object.NilV
-			}
-		default:
-			raise("TypeError", "%s does not have #dig method", vm.classOf(cur).name)
-		}
+	if len(keys) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 	}
-	return cur
+	// The only caller is Hash#dig, so cur is always a Hash: fetch at the first key,
+	// then continue with the remaining keys.
+	v, ok := cur.(*object.Hash).Get(keys[0])
+	if !ok {
+		return object.NilV
+	}
+	return vm.digRest(v, keys[1:])
+}
+
+// digRest continues an Array#dig / Hash#dig walk after the container's value v at
+// the current key has been fetched. With no keys left it is the result; a nil
+// value short-circuits to nil; otherwise MRI digs into v by calling v's own #dig
+// with the remaining keys (so a redefined or mocked #dig is honoured), and a value
+// without #dig is a TypeError rather than a NoMethodError.
+func (vm *VM) digRest(v object.Value, keys []object.Value) object.Value {
+	if len(keys) == 0 {
+		return v
+	}
+	if object.IsNil(v) {
+		return object.NilV
+	}
+	if !vm.respondsToDynamic(v, "dig") {
+		raise("TypeError", "%s does not have #dig method", vm.classOf(v).name)
+	}
+	return vm.send(v, "dig", keys, nil)
 }
 
 // padString implements ljust/rjust/center ('l'/'r'/'c'): pad s with the pad
