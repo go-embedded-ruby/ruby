@@ -1149,10 +1149,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		// always required and bind from the TAIL of the argument list; the splat
 		// captures whatever is left in the middle.
 		npost := len(iseq.Params) - si - 1
-		avail := len(args) - npost // args available to the leading params + splat
-		if avail < 0 {
-			avail = 0
-		}
+		// args available to the leading params + splat, after reserving the post
+		// params. The arity check above (minReq includes npost) guarantees
+		// len(args) >= npost, so this is never negative.
+		avail := len(args) - npost
 		nbind := si
 		if nbind > avail {
 			nbind = avail
@@ -1828,14 +1828,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						// and splat/post rebinding.
 						superArgs = zsuperArgs(iseq, env)
 					} else {
+						// A bare super inside a block forwards the home method's arguments
+						// as captured when the block was created (a block is transparent to
+						// super, like yield). The method frame's own reconstruction — which
+						// re-reads the current parameter locals, keywords included — is the
+						// selfBlock == nil path above.
 						superArgs = homeSuperArgs
-						// Keyword arguments were peeled off args into env.kwargs on entry;
-						// re-attach them as the trailing hash so bare super forwards them
-						// too. (A block forwards the home method's positional args as
-						// captured.)
-						if env.kwargs != nil && len(env.kwargs.Keys) > 0 {
-							superArgs = append(append([]object.Value(nil), homeSuperArgs...), env.kwargs)
-						}
 					}
 				} else {
 					superArgs = make([]object.Value, in.A)
