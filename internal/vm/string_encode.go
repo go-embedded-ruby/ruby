@@ -2,6 +2,7 @@ package vm
 
 import (
 	binpkg "encoding/binary"
+	"fmt"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -100,6 +101,22 @@ func applyXML(s string, o transcodeOpts) string {
 	return s
 }
 
+// xmlEscapeUndef replaces every character of the xml-escaped intermediate that
+// the target `to` cannot represent with an upper-case hexadecimal numeric
+// character reference (&#xHH;) — MRI's xml: :text / :attr rendering of an
+// otherwise-undefined character.
+func xmlEscapeUndef(s, to string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if charEncodableIn(r, to) {
+			b.WriteRune(r)
+			continue
+		}
+		fmt.Fprintf(&b, "&#x%X;", r)
+	}
+	return b.String()
+}
+
 func truthyValue(v object.Value) bool { return v != object.NilV && v != object.Bool(false) }
 
 // charEncodableIn reports whether rune r can be represented in encoding `to`. The
@@ -127,10 +144,18 @@ func charEncodableIn(r rune, to string) bool {
 // cannot be represented in the target `to` with the result of the :fallback
 // option — a Hash, Proc, Method or any object queried with #[], passed the
 // character as a String. A nil result (a Hash miss included) leaves the character
-// in place for the normal undefined-conversion error; a non-String, non-nil
-// result raises TypeError, matching MRI. It is called only when undef: :replace is
-// off (that option pre-empts the fallback entirely).
+// in place for the normal undefined-conversion error; a non-String result is put
+// through #to_str (never #to_s), and anything that yields no String raises
+// TypeError, matching MRI. A substitute that is itself unrepresentable in the
+// target raises ArgumentError "too big fallback string". It is called only when
+// undef: :replace is off (that option pre-empts the fallback entirely).
 func (vm *VM) applyFallback(u, to string, fb object.Value) string {
+	// An object that cannot be queried with #[] is no fallback at all: the
+	// unrepresentable character falls through to the normal undefined-conversion
+	// error (MRI looks for #[], and finding none never substitutes).
+	if !vm.respondsToDynamic(fb, "[]") {
+		return u
+	}
 	var b strings.Builder
 	for _, r := range u {
 		if charEncodableIn(r, to) {
@@ -138,16 +163,30 @@ func (vm *VM) applyFallback(u, to string, fb object.Value) string {
 			continue
 		}
 		res := vm.send(fb, "[]", []object.Value{object.NewString(string(r))}, nil)
-		switch v := res.(type) {
-		case *object.String:
-			b.WriteString(v.Str())
-		default:
-			if res == object.NilV {
-				b.WriteRune(r)
-				continue
+		if res == object.NilV {
+			b.WriteRune(r)
+			continue
+		}
+		s, ok := res.(*object.String)
+		if !ok {
+			// MRI converts a non-String result with #to_str, but never #to_s.
+			if vm.respondsToDynamic(res, "to_str") {
+				if conv, isStr := vm.send(res, "to_str", nil, nil).(*object.String); isStr {
+					s, ok = conv, true
+				}
 			}
+		}
+		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", vm.classOf(res).name)
 		}
+		// The substitute must itself be representable in the target; MRI rejects one
+		// that is not with ArgumentError "too big fallback string".
+		for _, rr := range s.Str() {
+			if !charEncodableIn(rr, to) {
+				raise("ArgumentError", "too big fallback string")
+			}
+		}
+		b.WriteString(s.Str())
 	}
 	return b.String()
 }
@@ -390,6 +429,11 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 	inter := vm.decodeToUTF8(s.Bytes(), from, opts, repl)
 	inter = applyNewline(inter, opts)
 	inter = applyXML(inter, opts)
+	// Under xml:, a character absent from the destination is rendered as a numeric
+	// character reference rather than raising an undefined-conversion error.
+	if opts.xml != "" {
+		inter = xmlEscapeUndef(inter, to)
+	}
 	// The :fallback option supplies substitutes for unrepresentable characters,
 	// but only where undef: :replace does not already handle them — that option
 	// pre-empts the fallback (MRI never consults it once undef substitution is on).
@@ -408,6 +452,9 @@ func (vm *VM) registerStringEncodeMethods() {
 	})
 	vm.cString.define("encode!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
+		// #encode! mutates in place, so a frozen receiver is a FrozenError — even for
+		// a no-op transcoding (utf-8 to utf-8), which MRI still refuses.
+		vm.checkFrozen(s)
 		enc := vm.stringEncode(s, args)
 		s.SetBytes(append([]byte(nil), enc.Bytes()...))
 		s.Enc = enc.Enc

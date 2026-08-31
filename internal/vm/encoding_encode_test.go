@@ -142,7 +142,7 @@ func TestStringEncodeFallback(t *testing.T) {
 		{`"aéb".encode("US-ASCII", fallback: ->(c){ 42 })`, "no implicit conversion of Integer into String"},
 		// A target rbgo has no codec for is a named residual: the fallback cannot
 		// mask the missing converter (rbgo raises where MRI would transcode natively).
-		{`"aéb".encode("IBM437", fallback: {"é"=>"e"})`, "ConverterNotFoundError"},
+		{`"aéb".encode("Emacs-Mule", fallback: {"é"=>"e"})`, "ConverterNotFoundError"},
 	}
 	for _, c := range errCases {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.substr) {

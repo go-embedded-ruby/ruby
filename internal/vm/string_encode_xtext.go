@@ -40,6 +40,7 @@ var xtextEncodings = map[string]encoding.Encoding{
 	"Windows-1257": charmap.Windows1257,
 	"Windows-1258": charmap.Windows1258,
 	"Windows-874":  charmap.Windows874,
+	"IBM437":       charmap.CodePage437,
 	"Windows-31J":  japanese.ShiftJIS,
 	"Shift_JIS":    japanese.ShiftJIS,
 	"EUC-JP":       japanese.EUCJP,
