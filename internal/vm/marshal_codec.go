@@ -386,6 +386,20 @@ func (d *mDumper) writeObject(o *RObject) {
 		}
 		return
 	}
+	// A Data (Ruby 3.2+ immutable value object, minted by Data.define) marshals
+	// with the same 'S' container as a Struct — the class name followed by each
+	// member name/value pair — because MRI stores a Data's members the same way it
+	// stores a Struct's. The real class name is used (never a #name override).
+	if dd := dataDefOf(o.class); dd != nil {
+		d.buf = append(d.buf, 'S')
+		d.writeSymbol(o.class.name)
+		d.writeLong(len(dd.names))
+		for i, name := range dd.names {
+			d.writeSymbol(name)
+			d.writeValue(o.structVals[i])
+		}
+		return
+	}
 	// An instance of a user subclass of a built-in value type (Array/Hash/
 	// String/Range/...) dumps as 'C' — the class name followed by the wrapped
 	// built-in value. Any instance variables are carried by an outer 'I' wrapper,
@@ -899,21 +913,29 @@ func (r *mReader) readRange() object.Value {
 func (r *mReader) readStruct() object.Value {
 	className := r.readSymbol()
 	cls := r.vm.marshalClass(className)
-	sd := structDefOf(cls)
-	if sd == nil {
+	// The 'S' container carries both Struct and Data (Ruby 3.2+ immutable value)
+	// instances, whose members are stored the same way; memberDefNames resolves
+	// either layout. A Data loads as a frozen instance, matching MRI's immutability
+	// (independent of the freeze: kwarg).
+	names, ok := memberDefNames(cls)
+	if !ok {
 		raise("TypeError", "%s is not a Struct", className)
 	}
-	o := &RObject{class: cls, ivars: map[string]object.Value{}, structVals: make([]object.Value, len(sd.names))}
+	isData := dataDefOf(cls) != nil
+	o := &RObject{class: cls, ivars: map[string]object.Value{}, structVals: make([]object.Value, len(names))}
 	r.register(o)
 	n := r.long()
 	for i := 0; i < n; i++ {
 		name := r.readSymbol()
 		val := r.readValue()
-		for idx, m := range sd.names {
+		for idx, m := range names {
 			if m == name {
 				o.structVals[idx] = val
 			}
 		}
+	}
+	if isData {
+		o.frozen = true
 	}
 	return o
 }
