@@ -759,10 +759,32 @@ func defStringIORead(cls *RClass) {
 		o.pos += sz
 		return s
 	})
-	gets := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// setLineGlobals records a successful line read the way MRI's IO#gets family
+	// does. $. always becomes the reading IO's line number (a StringIO updates it
+	// too). $_ (the "last read line") is set only by the single-line readers —
+	// gets/readline (lastLine true) — not by the bulk readlines/each_line, which
+	// leave $_ alone, matching MRI.
+	setLineGlobals := func(vm *VM, o *IOObj, v object.Value, lastLine bool) {
+		if v == object.NilV {
+			return
+		}
+		vm.globals["$."] = object.IntValue(int64(o.lineno))
+		if lastLine {
+			vm.globals["$_"] = v
+		}
+	}
+	gets := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
-		return ioGets(o, args)
+		v := ioGets(o, args)
+		if v == object.NilV {
+			// Reading past the last line clears $_ (but leaves $. reporting the
+			// final line number), matching MRI.
+			vm.globals["$_"] = object.NilV
+		} else {
+			setLineGlobals(vm, o, v, true)
+		}
+		return v
 	}
 	cls.define("gets", gets)
 	cls.define("readline", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -772,7 +794,7 @@ func defStringIORead(cls *RClass) {
 		}
 		return v
 	})
-	cls.define("readlines", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("readlines", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
 		checkGetsLimit(args, "readlines")
@@ -782,6 +804,7 @@ func defStringIORead(cls *RClass) {
 			if v == object.NilV {
 				break
 			}
+			setLineGlobals(vm, o, v, false)
 			lines = append(lines, v)
 		}
 		return object.NewArrayFromSlice(lines)
@@ -795,6 +818,7 @@ func defStringIORead(cls *RClass) {
 			if v == object.NilV {
 				break
 			}
+			setLineGlobals(vm, o, v, false)
 			vm.callBlock(blk, []object.Value{v})
 		}
 		return self
