@@ -157,6 +157,18 @@ func TestDefineMethodBodyConformance(t *testing.T) {
 			end
 			p $added`, "[:hooked]\n"},
 		{"returns_symbol", `p Class.new { }.send(:define_method, "n") { true }`, ":n\n"},
+		{"module_owner_permissive", `
+			m = Module.new { def foo; :from_mod; end }
+			k = Class.new { define_method(:bar, m.instance_method(:foo)) }
+			p k.new.bar`, ":from_mod\n"},
+		{"object_owner_permissive", `
+			k = Class.new(BasicObject) do
+				define_method(:iof, ::Object.instance_method(:instance_of?))
+			end
+			p k.new.iof(k)`, "true\n"},
+		{"initialize_copy_private", `
+			k = Class.new { define_method(:initialize_copy) { |o| } }
+			p k.private_instance_methods(false).include?(:initialize_copy)`, "true\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,5 +176,19 @@ func TestDefineMethodBodyConformance(t *testing.T) {
 				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestDefineMethodSingletonBind covers the singleton-owner branch of the
+// transplant bind check: a singleton method re-homed onto an unrelated class
+// raises MRI's distinct "different class" TypeError.
+func TestDefineMethodSingletonBind(t *testing.T) {
+	src := `
+		c = Class.new { class << self; def foo; end; end }
+		m = c.method(:foo)
+		Class.new { define_method(:bar, m) }`
+	err := runErr(t, src)
+	if err == nil || !strings.Contains(err.Error(), "can't bind singleton method to a different class") {
+		t.Errorf("got err=%v, want singleton bind TypeError", err)
 	}
 }
