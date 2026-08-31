@@ -200,6 +200,9 @@ func TestStringCharsetResiduals(t *testing.T) {
 		{"tr_to_str_args", `class TA; def to_str; "e"; end; end; class TB; def to_str; "i"; end; end; p "hello".tr(TA.new, TB.new)`, "\"hillo\"\n"},
 		{"tr_reversed_range_raises", `begin; "x".tr("z-a", "y"); rescue ArgumentError; puts "ae"; end`, "ae\n"},
 		{"count_to_str_arg", `class CA; def to_str; "l"; end; end; p "hello".count(CA.new)`, "2\n"},
+		{"tr_bang_to_str", `class T1; def to_str; "el"; end; end; class T2; def to_str; "ip"; end; end; s = "hello"; s.tr!(T1.new, T2.new); p s`, "\"hippo\"\n"},
+		{"tr_s_bang_to_str", `s = "aabbcc"; s.tr_s!("a-c", "*"); p s`, "\"*\"\n"},
+		{"delete_bang_to_str", `class D1; def to_str; "l"; end; end; s = "hello"; s.delete!(D1.new); p s`, "\"heo\"\n"},
 	})
 }
 
