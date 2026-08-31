@@ -34,36 +34,74 @@ func (vm *VM) registerRangeEdges() {
 		}
 		return vm.rangeBsearch(r, blk)
 	})
-	// reverse_each yields the elements from end down to begin. rbgo materialises
-	// the range forward (via rangeElems) and walks the slice backwards, so it
-	// requires a range that can be enumerated: an endless range (nil end) or a
-	// begin that is neither an Integer nor a String cannot be iterated and raises
-	// a TypeError naming the offending class, exactly like MRI. Without a block it
-	// returns an Enumerator whose #size is the Range#size.
+	// reverse_each yields the elements from end down to begin. An endless range
+	// (nil end) has no greatest element to descend from, so it raises TypeError.
+	// A beginless range with an Integer end descends from that end forever (the
+	// block breaks out, e.g. via take); a beginless range whose end is not an
+	// Integer can't be counted down and raises naming the (nil) begin's class.
+	// A bounded range is materialised forward via rangeElemsV — which handles
+	// Integer, String, Symbol and any #succ object, and itself raises "can't
+	// iterate from <class>" for a begin that cannot be enumerated — then walked
+	// backwards. Without a block it returns an Enumerator whose #size is the
+	// Range#size.
 	vm.cRange.define("reverse_each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		r := self.(*object.Range)
 		if blk == nil {
-			return enumForSized(self, "reverse_each", func(vm *VM) object.Value { return vm.rangeSizeVal(r) })
+			return enumForSized(self, "reverse_each", func(vm *VM) object.Value { return vm.rangeReverseSizeVal(r) })
 		}
 		if object.IsNil(r.Hi) {
 			return raise("TypeError", "can't iterate from %s", vm.classOf(r.Hi).name)
 		}
-		switch r.Lo.(type) {
-		case object.Integer, *object.String:
-		default:
+		if object.IsNil(r.Lo) {
+			if isIntegerValue(r.Hi) {
+				n := new(big.Int).Set(bigVal(r.Hi))
+				if r.Exclusive {
+					n.Sub(n, big.NewInt(1))
+				}
+				for {
+					vm.callBlock(blk, []object.Value{object.NormInt(n)})
+					n = new(big.Int).Sub(n, big.NewInt(1))
+				}
+			}
 			return raise("TypeError", "can't iterate from %s", vm.classOf(r.Lo).name)
 		}
-		elems := rangeElems(r)
+		elems := vm.rangeElemsV(r)
 		for i := len(elems) - 1; i >= 0; i-- {
 			vm.callBlock(blk, []object.Value{elems[i]})
 		}
 		return r
 	})
 
-	// entries is a straight alias of to_a.
-	vm.cRange.define("entries", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(rangeElems(self.(*object.Range)))
-	})
+	// entries is a true alias of to_a (Range.instance_method(:entries) ==
+	// Range.instance_method(:to_a)), so it shares the same method object rather
+	// than wrapping a second implementation.
+	aliasBuiltin(vm.cRange, "entries", "to_a")
+}
+
+// rangeReverseSizeVal is the #size of a Range#reverse_each Enumerator (MRI 4.0),
+// which descends from the range's end. An Integer begin counts forward like
+// Range#size (a Float or nil end still yields the whole-step count). A beginless
+// range with an Integer end descends forever (Float::INFINITY). A String/Symbol
+// begin has no numeric count (nil). Any other shape — a Float or nil begin, or a
+// beginless range whose end is not an Integer — cannot be counted down and
+// raises a TypeError naming the END's class, since reverse iteration starts from
+// the end (so (1.1..3).reverse_each.size reports "can't iterate from Integer").
+func (vm *VM) rangeReverseSizeVal(r *object.Range) object.Value {
+	switch {
+	case isIntegerValue(r.Lo):
+		return vm.rangeSizeVal(r)
+	case object.IsNil(r.Lo):
+		if isIntegerValue(r.Hi) {
+			return object.Float(math.Inf(1))
+		}
+		return raise("TypeError", "can't iterate from %s", vm.classOf(r.Hi).name)
+	default:
+		switch r.Lo.(type) {
+		case *object.String, object.Symbol:
+			return object.NilV
+		}
+		return raise("TypeError", "can't iterate from %s", vm.classOf(r.Hi).name)
+	}
 }
 
 // isIntegerValue reports whether v is an Integer or Bignum (an exact integer).

@@ -1208,16 +1208,32 @@ func (r *Range) sep() string {
 	}
 	return ".."
 }
-func (r *Range) ToS() string     { return rangeEnd(r.Lo, false) + r.sep() + rangeEnd(r.Hi, false) }
-func (r *Range) Inspect() string { return rangeEnd(r.Lo, true) + r.sep() + rangeEnd(r.Hi, true) }
+func (r *Range) ToS() string { return rangeEnd(r.Lo) + r.sep() + rangeEnd(r.Hi) }
 
-// rangeEnd renders one endpoint, or "" for a nil (beginless/endless) bound.
-func rangeEnd(v Value, inspect bool) string {
+// Inspect mirrors MRI's range_inspect: a nil bound normally renders empty, but
+// when BOTH bounds are nil each is shown as "nil" — so (nil..nil).inspect is
+// "nil..nil" while (1..).inspect stays "1.." and (..1).inspect stays "..1". The
+// rule (per MRI) is: show begin when begin is non-nil OR end is nil; show end
+// when begin is nil OR end is non-nil.
+func (r *Range) Inspect() string {
+	_, begNil := r.Lo.(Nil)
+	_, endNil := r.Hi.(Nil)
+	beg, end := "", ""
+	if !begNil || endNil {
+		beg = r.Lo.Inspect()
+	}
+	if begNil || !endNil {
+		end = r.Hi.Inspect()
+	}
+	return beg + r.sep() + end
+}
+
+// rangeEnd renders one endpoint for #to_s, or "" for a nil (beginless/endless)
+// bound — MRI's range_to_s applies rb_obj_as_string (i.e. #to_s) to each bound,
+// so nil.to_s = "" and (nil..nil).to_s = "..".
+func rangeEnd(v Value) string {
 	if _, ok := v.(Nil); ok {
 		return ""
-	}
-	if inspect {
-		return v.Inspect()
 	}
 	return v.ToS()
 }

@@ -51,6 +51,9 @@ type Enumerator struct {
 	asEnd      object.Value
 	asStep     object.Value
 	asExcl     bool
+	// asMethod is the constructing method name shown by ArithmeticSequence#inspect
+	// for a Range receiver ("step" or "%"); "" defaults to "step".
+	asMethod string
 	// isChain marks an Enumerator::Chain: #each iterates chainParts in turn, and
 	// entered[i] records whether part i has been iterated (so #rewind can rewind,
 	// in reverse, exactly the parts that were entered).
@@ -180,6 +183,24 @@ func (vm *VM) registerEnumerator() {
 	vm.cArithSeq.define("exclude_end?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Enumerator).asExcl)
 	})
+	// #inspect / #to_s mirror MRI's arith_seq_inspect: a Range receiver reads
+	// ((begin..end).step(step)) — or .%(step) when built by Range#% — while a
+	// Numeric receiver reads (begin.step(end, step)). A nil begin/end (an
+	// unbounded sequence) renders empty on that side, as Range#inspect does.
+	arithSeqInspect := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		e := self.(*Enumerator)
+		if _, isRange := e.recv.(*object.Range); isRange {
+			meth := e.asMethod
+			if meth == "" {
+				meth = "step"
+			}
+			rng := object.NewRange(e.asBegin, e.asEnd, e.asExcl)
+			return object.NewString("((" + rng.Inspect() + ")." + meth + "(" + e.asStep.Inspect() + "))")
+		}
+		return object.NewString("(" + e.asBegin.Inspect() + ".step(" + e.asEnd.Inspect() + ", " + e.asStep.Inspect() + "))")
+	}
+	vm.cArithSeq.define("inspect", arithSeqInspect)
+	vm.cArithSeq.define("to_s", arithSeqInspect)
 	// #last materialises the (necessarily bounded) sequence; MRI refuses it for an
 	// endless one rather than looping for ever.
 	vm.cArithSeq.define("last", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {

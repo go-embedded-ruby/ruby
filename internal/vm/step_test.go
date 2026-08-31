@@ -27,7 +27,10 @@ func TestStep(t *testing.T) {
 		{`p 10.step(1, -2).to_a`, "[10, 8, 6, 4, 2]\n"},
 		{`p 1.step(10).to_a`, "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n"}, // default step 1
 		{`p 1.step(5) { |i| }`, "1\n"},                             // block form returns self
-		{`p (1..5).step(2).class`, "Enumerator\n"},
+		// A numeric range's blockless #step is an Enumerator::ArithmeticSequence
+		// (MRI 2.6+); a String range's stays a plain Enumerator.
+		{`p (1..5).step(2).class`, "Enumerator::ArithmeticSequence\n"},
+		{`p ("a".."e").step(2).class`, "Enumerator\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

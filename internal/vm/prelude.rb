@@ -44,10 +44,17 @@ module Comparable
     __compare(other) >= 0
   end
 
-  # Comparable#== is deliberately lenient: an incomparable pair (`<=>` returning
-  # nil) is simply unequal rather than an error, matching MRI.
+  # Comparable#== is lenient about an incomparable pair — a `<=>` returning nil
+  # is simply unequal (false), not an error. A non-nil result is reduced to a
+  # sign the way MRI's rb_cmpint does: zero (including 0.0) means equal, and a
+  # non-zero result is validated with #> / #< against 0, which raises the same
+  # ArgumentError the ordering operators do for a bogus result such as a String.
   def ==(other)
-    (self <=> other) == 0
+    cmp = (self <=> other)
+    return false if cmp.nil?
+    return true if cmp == 0
+    cmp > 0 || cmp < 0
+    false
   end
 
   def between?(min, max)
@@ -1028,6 +1035,32 @@ end
 
 class Range
   include Enumerable
+
+  # Range#== is true when other is a Range (or subclass) with == begin, == end
+  # and the same exclude_end? flag, dispatching #== on the endpoints so that
+  # custom Comparable endpoints and Range subclasses compare by value (MRI's
+  # range_eq). Range#eql? is the same test but compares endpoints with #eql?
+  # (so 0..1 is not eql? to 0..1.0, though it is ==).
+  def ==(other)
+    return true if equal?(other)
+    return false unless other.is_a?(Range)
+    self.begin == other.begin && self.end == other.end &&
+      exclude_end? == other.exclude_end?
+  end
+
+  def eql?(other)
+    return true if equal?(other)
+    return false unless other.is_a?(Range)
+    self.begin.eql?(other.begin) && self.end.eql?(other.end) &&
+      exclude_end? == other.exclude_end?
+  end
+
+  # Range#hash mixes the two endpoints and the exclusive flag so that equal
+  # ranges (same begin, end and exclude_end?) hash alike and an inclusive range
+  # differs from its exclusive twin.
+  def hash
+    [self.begin, self.end, exclude_end?].hash
+  end
 end
 
 # Hash is Enumerable too: Hash#each yields a [key, value] pair, so map/find/count
