@@ -147,53 +147,48 @@ module Enumerable
   # public API (MRI does not expose them).
   private :__each_packed, :__pack, :__enum_int_arg
 
-  def to_a
+  # to_a (aka entries): collect the elements. Any arguments are forwarded to
+  # #each, as MRI does (a custom #each may take and act on them).
+  def to_a(*args)
     r = []
-    __each_packed { |x| r << x }
+    each(*args) { |*a| r << __pack(a) }
     r
   end
+  alias entries to_a
 
   # to_set: a new Set of the elements (each preprocessed by the block, if given),
   # as MRI's Enumerable#to_set. Defined here so every Enumerable — Array, Range,
   # Hash, … — can be turned into a Set.
-  def to_set(&block)
-    Set.new(self, &block)
+  def to_set(klass = Set, *args, &block)
+    klass.new(self, *args, &block)
   end
 
   # to_h: each element (or each yield of the block) must be a [key, value] pair.
-  def to_h
+  # A non-Array pair is coerced with #to_ary (MRI's rb_check_array_type). Any
+  # arguments are forwarded to #each.
+  def to_h(*args)
     h = {}
-    __each_packed { |x|
-      pair = block_given? ? yield(x) : x
-      raise TypeError, "wrong element type #{pair.class} (expected array)" unless pair.is_a?(Array)
-      raise ArgumentError, "element has wrong array length (expected 2, was #{pair.length})" unless pair.length == 2
-      h[pair[0]] = pair[1]
+    each(*args) { |*a|
+      pair = block_given? ? yield(*a) : __pack(a)
+      ary = Array.try_convert(pair)
+      raise TypeError, "wrong element type #{pair.class} (expected array)" if ary.nil?
+      raise ArgumentError, "element has wrong array length (expected 2, was #{ary.length})" unless ary.length == 2
+      h[ary[0]] = ary[1]
     }
     h
   end
 
   def map
-    return enum_for(:map) unless block_given?
+    return enum_for(:map) { size if respond_to?(:size) } unless block_given?
     r = []
-    __each_packed { |x| r << yield(x) }
+    each { |*a| r << yield(*a) }
     r
   end
 
-  # collect/filter/detect are the classic aliases of map/select/find.
-  def collect(&blk)
-    return enum_for(:collect) unless block_given?
-    map(&blk)
-  end
-
-  def filter(&blk)
-    return enum_for(:filter) unless block_given?
-    select(&blk)
-  end
-
-  def detect(&blk)
-    return enum_for(:detect) unless block_given?
-    find(&blk)
-  end
+  # collect/filter/detect are the classic aliases of map/select/find. They are
+  # genuine aliases (sharing the same method entry) so that, as in MRI,
+  # Enumerable.instance_method(:collect) == Enumerable.instance_method(:map).
+  alias collect map
 
   def count(*args)
     raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
@@ -212,12 +207,12 @@ module Enumerable
   # min_by / max_by / sort_by delegate to Array's native implementations via the
   # pair/element list, so any Enumerable (Hash, Range, Struct, …) gains them.
   def min_by(*args)
-    return enum_for(:min_by, *args) unless block_given?
+    return enum_for(:min_by, *args) { size if respond_to?(:size) } unless block_given?
     to_a.min_by(*args) { |x| yield(x) }
   end
 
   def max_by(*args)
-    return enum_for(:max_by, *args) unless block_given?
+    return enum_for(:max_by, *args) { size if respond_to?(:size) } unless block_given?
     to_a.max_by(*args) { |x| yield(x) }
   end
 
@@ -226,83 +221,124 @@ module Enumerable
   end
 
   def sort_by
-    return enum_for(:sort_by) unless block_given?
+    return enum_for(:sort_by) { size if respond_to?(:size) } unless block_given?
     to_a.sort_by { |x| yield(x) }
   end
 
   def select
-    return enum_for(:select) unless block_given?
+    return enum_for(:select) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x| r << x if yield(x) }
     r
   end
+  alias filter select
 
   def reject
-    return enum_for(:reject) unless block_given?
+    return enum_for(:reject) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x| r << x unless yield(x) }
     r
   end
 
-  def find
-    return enum_for(:find) unless block_given?
+  # find(ifnone = nil): returns the first element for which the block is truthy.
+  # When none matches, calls the ifnone proc (if given) and returns its result,
+  # else nil. ifnone is passed through to the enumerator when no block is given.
+  def find(ifnone = nil)
+    return enum_for(:find, ifnone) { nil } unless block_given?
+    found = false
     result = nil
     __each_packed { |x|
-      if result == nil
-        result = x if yield(x)
+      unless found
+        if yield(x)
+          result = x
+          found = true
+        end
       end
     }
-    result
+    return result if found
+    ifnone.nil? ? nil : ifnone.call
   end
+  alias detect find
 
   def include?(value)
     found = false
     __each_packed { |x| found = true if x == value }
     found
   end
+  alias member? include?
 
+  # sum folds the elements (each mapped through the block, if given) onto init.
+  # Once a Float is involved it switches to Kahan-Babuska-Neumaier compensated
+  # summation, as MRI does, so a long run of floats sums without drift.
   def sum(init = 0)
     total = init
-    __each_packed { |x| total = total + (block_given? ? yield(x) : x) }
-    total
+    compensation = 0.0
+    float_mode = total.is_a?(Float)
+    __each_packed { |x|
+      v = block_given? ? yield(x) : x
+      if !float_mode && v.is_a?(Float)
+        total = total.to_f
+        float_mode = true
+      end
+      if float_mode && v.is_a?(Float)
+        t = total + v
+        compensation += total.abs >= v.abs ? (total - t) + v : (v - t) + total
+        total = t
+      else
+        total = total + v
+      end
+    }
+    float_mode ? total + compensation : total
   end
 
-  def min(n = nil)
-    return to_a.sort.first(n) unless n.nil? # min(n): the n smallest, ascending
+  # min/max/minmax compare with the block when one is given, else with <=>.
+  # A nil comparison (incomparable elements, or a block returning nil) raises
+  # ArgumentError, as in MRI. Multi-value #each yields are gathered into an
+  # Array element (via __each_packed) and compared as arrays.
+  def min(n = nil, &block)
+    return to_a.sort(&block).first(n) unless n.nil? # min(n): the n smallest, ascending
     result = nil
     first = true
     __each_packed { |x|
       if first
         result = x
         first = false
-      elsif x < result
-        result = x
+      else
+        c = block ? block.call(x, result) : (x <=> result)
+        raise ArgumentError, "comparison of #{x.class} with #{result.class} failed" if c.nil?
+        result = x if c < 0
       end
     }
     result
   end
 
-  def max(n = nil)
-    return to_a.sort.last(n).reverse unless n.nil? # max(n): the n largest, descending
+  def max(n = nil, &block)
+    return to_a.sort(&block).last(n).reverse unless n.nil? # max(n): the n largest, descending
     result = nil
     first = true
     __each_packed { |x|
       if first
         result = x
         first = false
-      elsif x > result
-        result = x
+      else
+        c = block ? block.call(x, result) : (x <=> result)
+        raise ArgumentError, "comparison of #{x.class} with #{result.class} failed" if c.nil?
+        result = x if c > 0
       end
     }
     result
   end
 
-  def minmax
-    [min, max]
+  def minmax(&block)
+    [min(&block), max(&block)]
   end
 
   def reduce(*args)
     # Forms: reduce { |a, b| }, reduce(init) { }, reduce(:op), reduce(init, :op).
+    # The operator may be a Symbol or a String (or anything with #to_str); when a
+    # single argument is given it is the initial value if a block is present and
+    # otherwise the operator, exactly as MRI decides.
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 1..2)" if args.length > 2
     sym = nil
     has_init = false
     init = nil
@@ -310,11 +346,22 @@ module Enumerable
       init = args[0]
       sym = args[1]
       has_init = true
-    elsif args.length == 1 && args[0].is_a?(Symbol)
-      sym = args[0]
     elsif args.length == 1
-      init = args[0]
-      has_init = true
+      if block_given?
+        init = args[0]
+        has_init = true
+      else
+        sym = args[0]
+      end
+    elsif !block_given?
+      raise ArgumentError, "wrong number of arguments (given 0, expected 1..2)"
+    end
+    unless sym.nil? || sym.is_a?(Symbol) || sym.is_a?(String)
+      if sym.respond_to?(:to_str)
+        sym = sym.to_str
+      else
+        raise TypeError, "#{sym.inspect} is not a symbol nor a string"
+      end
     end
     acc = init
     started = has_init
@@ -331,9 +378,7 @@ module Enumerable
     acc
   end
 
-  def inject(*args, &blk)
-    reduce(*args, &blk)
-  end
+  alias inject reduce
 
   # any?/all?/none? follow MRI's three forms: with a pattern argument each element
   # is tested with `pattern === x`; with a block the block result is used; with
@@ -428,11 +473,11 @@ module Enumerable
     result
   end
 
-  def each_with_index
-    return enum_for(:each_with_index) unless block_given?
+  def each_with_index(*args)
+    return enum_for(:each_with_index, *args) { size if respond_to?(:size) } unless block_given?
     i = 0
-    __each_packed { |x|
-      yield(x, i)
+    each(*args) { |*a|
+      yield(__pack(a), i)
       i = i + 1
     }
     self
@@ -449,44 +494,42 @@ module Enumerable
   end
 
   def flat_map
-    return enum_for(:flat_map) unless block_given?
+    return enum_for(:flat_map) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x|
       v = yield(x)
-      if v.is_a?(Array)
-        v.each { |e| r << e }
-      else
+      ary = Array.try_convert(v)
+      if ary.nil?
         r << v
+      else
+        ary.each { |e| r << e }
       end
     }
     r
   end
 
   # collect_concat is the classic alias of flat_map.
-  def collect_concat(&blk)
-    return enum_for(:collect_concat) unless block_given?
-    flat_map(&blk)
-  end
+  alias collect_concat flat_map
 
   # each_entry yields each element as MRI's rb_enum_values_pack packs it: a lone
   # value stays scalar, a multi-value #each yield gathers into an Array, and a
   # zero-argument yield becomes nil. Unlike map/select (whose block arity governs
   # a multi-value yield), each_entry always hands the block one packed value. With
   # no block it returns a sized Enumerator; with a block it returns self.
-  def each_entry
-    return enum_for(:each_entry) { size if respond_to?(:size) } unless block_given?
-    __each_packed { |x| yield(x) }
+  def each_entry(*args)
+    return enum_for(:each_entry, *args) { size if respond_to?(:size) } unless block_given?
+    each(*args) { |*a| yield(__pack(a)) }
     self
   end
 
   def each_with_object(memo)
-    return enum_for(:each_with_object, memo) unless block_given?
+    return enum_for(:each_with_object, memo) { size if respond_to?(:size) } unless block_given?
     __each_packed { |x| yield(x, memo) }
     memo
   end
 
   def filter_map
-    return enum_for(:filter_map) unless block_given?
+    return enum_for(:filter_map) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x|
       v = yield(x)
@@ -496,7 +539,7 @@ module Enumerable
   end
 
   def partition
-    return enum_for(:partition) unless block_given?
+    return enum_for(:partition) { size if respond_to?(:size) } unless block_given?
     yes = []
     no = []
     __each_packed { |x|
@@ -510,7 +553,7 @@ module Enumerable
   end
 
   def group_by
-    return enum_for(:group_by) unless block_given?
+    return enum_for(:group_by) { size if respond_to?(:size) } unless block_given?
     h = {}
     __each_packed { |x|
       k = yield(x)
@@ -529,7 +572,14 @@ module Enumerable
       h = {}
     else
       a = args[0]
-      raise TypeError, "no implicit conversion of #{a.nil? ? "nil" : a.class} into Hash" unless a.is_a?(Hash)
+      unless a.is_a?(Hash)
+        if a.respond_to?(:to_hash)
+          a = a.to_hash
+          raise TypeError, "can't convert #{args[0].class} to Hash (#{args[0].class}#to_hash gives #{a.class})" unless a.is_a?(Hash)
+        else
+          raise TypeError, "no implicit conversion of #{a.nil? ? "nil" : a.class} into Hash"
+        end
+      end
       h = a
     end
     __each_packed { |x|
@@ -549,10 +599,19 @@ module Enumerable
 
   # zip pairs each element with the correspondingly-indexed element of every other
   # collection (a shorter operand pads with nil). Each other is taken via #to_ary
-  # or, failing that, #to_a so any Enumerable works. With a block each row is
-  # yielded and zip returns nil; without one it returns the Array of rows.
+  # or, failing that, an Enumerator from #to_enum(:each) so any Enumerable works;
+  # an argument that responds to neither raises TypeError. With a block each row
+  # is yielded and zip returns nil; without one it returns the Array of rows.
   def zip(*others)
-    others = others.map { |o| o.respond_to?(:to_ary) ? o.to_ary : o.to_a }
+    others = others.map { |o|
+      if o.respond_to?(:to_ary)
+        o.to_ary
+      elsif o.respond_to?(:each)
+        o.to_enum(:each).to_a
+      else
+        raise TypeError, "wrong argument type #{o.class} (must respond to :each)"
+      end
+    }
     blk = block_given?
     r = blk ? nil : []
     i = 0
@@ -574,20 +633,17 @@ module Enumerable
   # is an ArgumentError.
   def find_index(*args)
     raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
-    return enum_for(:find_index) if args.empty? && !block_given?
+    return enum_for(:find_index) { nil } if args.empty? && !block_given?
     idx = nil
     i = 0
-    __each_packed { |x|
-      idx = i if idx.nil? && (args.empty? ? yield(x) : x == args[0])
+    each { |*a|
+      idx = i if idx.nil? && (args.empty? ? yield(*a) : __pack(a) == args[0])
       i = i + 1
     }
     idx
   end
 
-  def find_all(&blk)
-    return enum_for(:find_all) unless block_given?
-    select(&blk)
-  end
+  alias find_all select
 
   # grep selects the elements that pattern === matches (and maps them through the
   # block, if given); grep_v keeps the non-matching ones.
@@ -604,18 +660,22 @@ module Enumerable
   end
 
   def take_while
-    return enum_for(:take_while) unless block_given?
+    return enum_for(:take_while) { nil } unless block_given?
     r = []
     taking = true
-    __each_packed { |x|
-      taking = false if taking && !yield(x)
-      r << x if taking
+    each { |*a|
+      next unless taking
+      if yield(*a)
+        r << __pack(a)
+      else
+        taking = false
+      end
     }
     r
   end
 
   def drop_while
-    return enum_for(:drop_while) unless block_given?
+    return enum_for(:drop_while) { nil } unless block_given?
     r = []
     dropping = true
     __each_packed { |x|
@@ -854,7 +914,7 @@ module Enumerable
   # minmax_by returns [min, max] compared by the block's mapped value (an empty
   # collection gives [nil, nil]); with no block it returns an Enumerator.
   def minmax_by
-    return enum_for(:minmax_by) unless block_given?
+    return enum_for(:minmax_by) { size if respond_to?(:size) } unless block_given?
     [min_by { |x| yield(x) }, max_by { |x| yield(x) }]
   end
 
@@ -877,12 +937,24 @@ module Enumerable
         end
       end
     end
-    a = to_a
-    return nil if a.empty?
+    # A non-positive count does nothing and must not touch #each at all.
+    unless n.nil?
+      n = __enum_int_arg(n)
+      return nil if n <= 0
+    end
+    # The first pass drives #each directly (so a block that breaks stops without
+    # buffering the rest), buffering the packed elements for the later cycles.
+    buffer = []
+    each { |*a|
+      v = __pack(a)
+      buffer << v
+      yield(v)
+    }
+    return nil if buffer.empty?
     if n.nil?
-      loop { a.each { |x| yield(x) } }
+      loop { buffer.each { |x| yield(x) } }
     else
-      n.times { a.each { |x| yield(x) } }
+      (n - 1).times { buffer.each { |x| yield(x) } }
     end
     nil
   end
