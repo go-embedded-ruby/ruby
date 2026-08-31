@@ -164,7 +164,7 @@ func (vm *VM) registerARGF() {
 			return object.NilV
 		}
 		// ensure guarantees o has bytes, so ioGets yields a line here.
-		line := ioGets(o, args)
+		line := vm.ioGets(o, args)
 		a.bumpLine()
 		return line
 	})

@@ -1,6 +1,8 @@
 package vm_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -111,6 +113,162 @@ func TestIOResiduals(t *testing.T) {
 		{req + `StringIO.new("x\ny").each_line(0) { |l| l }`, "invalid limit: 0 for each_line"},
 		// An invalid StringIO mode string.
 		{req + `StringIO.new(+"x", "z")`, "invalid access mode"},
+	}
+	for _, c := range errs {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q got=%v want error containing %q", c.src, err, c.want)
+		}
+	}
+}
+
+// TestIOClassReaders covers the IO.readlines / IO.foreach class methods'
+// separator/limit/$/ and chomp handling, and the mode-flag decoding, against
+// MRI Ruby 4.0.6. The reader class methods open a real file, so a temp file is
+// written first.
+func TestIOClassReaders(t *testing.T) {
+	dir := filepath.ToSlash(t.TempDir())
+	write := func(name, content string) string {
+		p := dir + "/" + name
+		if err := os.WriteFile(filepath.FromSlash(p), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return `"` + p + `"`
+	}
+	cases := []struct{ src, want string }{
+		// A #to_str-convertible separator splits the lines.
+		func() (c struct{ src, want string }) {
+			c.src = `o = Object.new; def o.to_str; ">"; end; p IO.readlines(` + write("r1", "a>b>c") + `, o)`
+			c.want = "[\"a>\", \"b>\", \"c\"]\n"
+			return
+		}(),
+		// An Integer limit caps each line's byte length.
+		func() (c struct{ src, want string }) {
+			c.src = `p IO.readlines(` + write("r2", "hello world") + `, 4)`
+			c.want = "[\"hell\", \"o wo\", \"rld\"]\n"
+			return
+		}(),
+		// The default separator follows $/.
+		func() (c struct{ src, want string }) {
+			c.src = `$/ = " "; r = IO.readlines(` + write("r3", "an example here") + `); $/ = "\n"; p r`
+			c.want = "[\"an \", \"example \", \"here\"]\n"
+			return
+		}(),
+		// chomp: as a keyword option strips the separator.
+		func() (c struct{ src, want string }) {
+			c.src = `p IO.readlines(` + write("r4", "x\ny\n") + `, chomp: true)`
+			c.want = "[\"x\", \"y\"]\n"
+			return
+		}(),
+		// IO.foreach with a block yields each line; the separator is honoured.
+		func() (c struct{ src, want string }) {
+			c.src = `a = []; IO.foreach(` + write("r5", "p>q>r") + `, ">") { |l| a << l }; p a`
+			c.want = "[\"p>\", \"q>\", \"r\"]\n"
+			return
+		}(),
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+
+	// A zero limit for the line-iterating class readers is rejected.
+	if err := runErr(t, `IO.readlines(`+write("e1", "x\ny")+`, 0)`); err == nil || !strings.Contains(err.Error(), "invalid limit: 0 for readlines") {
+		t.Errorf("IO.readlines(path, 0) got %v", err)
+	}
+}
+
+// TestStringIOModeFlags covers the remaining StringIO mode variants — a+, w+,
+// binary/text suffixes, and encoding-tagged modes — against MRI Ruby 4.0.6.
+func TestStringIOModeFlags(t *testing.T) {
+	const req = `require "stringio"; `
+	cases := []struct{ src, want string }{
+		// "a+" appends on write but is readable from the start.
+		{req + `s = StringIO.new(+"data", "a+"); a = s.read; s.write("X"); p [a, s.string]`,
+			"[\"data\", \"dataX\"]\n"},
+		// "w+" truncates yet stays readable and writable.
+		{req + `s = StringIO.new(+"data", "w+"); s.write("hi"); s.rewind; p [s.read, s.string]`,
+			"[\"hi\", \"hi\"]\n"},
+		// A "rb" (binary) suffix keeps read access; a trailing :enc is tolerated.
+		{req + `p [StringIO.new(+"x", "rb").read, StringIO.new(+"x", "r:utf-8").read]`,
+			"[\"x\", \"x\"]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestIOResidualBranches exercises the less-travelled branches of the reader/
+// writer paths so they are covered: enumerator forms, recursive-array puts,
+// paragraph mode on a real IO (two-newline rule, chomp with and without a
+// terminating run, leading blanks, EOF), a real-String read buffer, and File
+// modes that gate reads/writes. Values verified against MRI Ruby 4.0.6.
+func TestIOResidualBranches(t *testing.T) {
+	const req = `require "stringio"; `
+	cases := []struct{ src, want string }{
+		// Enumerator forms (no block) iterate correctly and report #size nil.
+		{req + `p StringIO.new("ab").each_char.to_a`, "[\"a\", \"b\"]\n"},
+		{req + `p StringIO.new("ab").each_byte.to_a`, "[97, 98]\n"},
+		{req + `p StringIO.new("x\ny\n").each_line.to_a`, "[\"x\\n\", \"y\\n\"]\n"},
+		{req + `p StringIO.new("ab").each_char.size`, "nil\n"},
+		// puts writes [...] for a self-referential array and appends a newline only
+		// when the string does not already end in one.
+		{req + `a = [1]; a << a; s = StringIO.new; s.puts(a); p s.string`, "\"1\\n[...]\\n\"\n"},
+		{req + `s = StringIO.new; s.puts("x\n", "y"); p s.string`, "\"x\\ny\\n\"\n"},
+		{req + `s = StringIO.new; s.puts([]); p s.string`, "\"\"\n"},
+		// Paragraph mode edges: leading blank lines skipped; chomp strips a
+		// terminating run but keeps a lone EOF newline; nil at true EOF.
+		{req + `p StringIO.new("\n\nabc").gets("")`, "\"abc\"\n"},
+		{req + `p StringIO.new("a\n\nb\n").each_line("", chomp: true).to_a`, "[\"a\", \"b\\n\"]\n"},
+		{req + `s = StringIO.new("x"); s.read; p s.gets("")`, "nil\n"},
+		// A real String read buffer is filled in place and returned.
+		{req + `s = StringIO.new("hello"); b = +"z"; r = s.read(3, b); p [r, b, r.equal?(b)]`,
+			"[\"hel\", \"hel\", true]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestFileModeAccess covers openFileIO's mode-driven read/write gating: a File
+// opened write-only rejects reads, append-only rejects reads and appends every
+// write at end, and read-only rejects writes. Verified against MRI Ruby 4.0.6.
+func TestFileModeAccess(t *testing.T) {
+	dir := filepath.ToSlash(t.TempDir())
+	path := func(name, content string) string {
+		p := dir + "/" + name
+		if err := os.WriteFile(filepath.FromSlash(p), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return `"` + p + `"`
+	}
+	// Append mode writes at end and reports the appended content on reopen.
+	a1 := path("a1", "base")
+	if got := eval(t, `File.open(`+a1+`, "a") { |f| f.write("+more") }; p File.read(`+a1+`)`); got != "\"base+more\"\n" {
+		t.Errorf("append-mode File = %q", got)
+	}
+	oks := []struct{ src, want string }{
+		// Paragraph mode on a real File keeps only the two terminating newlines.
+		{`p(File.open(` + path("pg", "a\n\n\nb") + `, "r") { |f| f.gets("") })`, "\"a\\n\\n\"\n"},
+		// A character device (non-regular) opens with an empty buffer, so a read
+		// sees end-of-file rather than an unbounded stream.
+		{`p(File.open("/dev/null", "r") { |f| f.read })`, "\"\"\n"},
+		// A write-only File with no explicit encoding reports a nil external encoding.
+		{`p(File.open(` + path("we", "") + `, "w") { |f| f.external_encoding })`, "nil\n"},
+	}
+	for _, c := range oks {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	errs := []struct{ src, want string }{
+		{`File.open(` + path("w1", "x") + `, "w") { |f| f.read }`, "not opened for reading"},
+		{`File.open(` + path("a2", "x") + `, "a") { |f| f.gets }`, "not opened for reading"},
+		{`File.open(` + path("r1", "x") + `, "r") { |f| f.write("y") }`, "not opened for writing"},
 	}
 	for _, c := range errs {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {

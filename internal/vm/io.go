@@ -941,51 +941,13 @@ func defStringIORead(cls *RClass) {
 	cls.methods["each"] = cls.methods["each_line"]
 }
 
-// ioGets reads one line (up to and including the separator, default "\n") from a
-// StringIO, returning nil at end of input. It accepts MRI's (sep, limit, chomp:)
-// argument shapes: a leading Integer positional is the byte limit (separator
-// defaults to "\n"); a String or nil is the separator, optionally followed by an
-// Integer limit; a trailing chomp: true strips the separator from the result. A
-// successful (non-nil) read advances #lineno.
-func ioGets(o *IOObj, args []object.Value) object.Value {
-	o.pipeRefresh()
-	sep, limit, chomp := parseGetsArgs(args)
-	v := ioGetsLine(o, sep, limit, chomp)
-	if v != object.NilV {
-		o.lineno++
-	}
-	return v
-}
-
-// parseGetsArgs decodes the (sep, limit, chomp:) arguments of gets/readline/
-// each_line. sepSet is false when the separator defaults to "\n"; a nil separator
-// (read the whole remainder) is reported as sepSet with sep == "" and nilSep.
-func parseGetsArgs(args []object.Value) (sep getsSep, limit int, chomp bool) {
-	sep, limit = getsSep{s: "\n"}, -1
-	if h, ok := lastHash(args); ok {
-		if v, ok := h.Get(object.Symbol("chomp")); ok {
-			chomp = v.Truthy()
-		}
-		args = args[:len(args)-1]
-	}
-	if len(args) > 0 {
-		switch a := args[0].(type) {
-		case object.Integer:
-			limit = int(a)
-		case *object.String:
-			sep = getsSep{s: a.Str(), set: true}
-		default:
-			if args[0] == object.NilV {
-				sep = getsSep{s: "", set: true, nilSep: true}
-			}
-		}
-	}
-	if len(args) > 1 {
-		if n, ok := args[1].(object.Integer); ok {
-			limit = int(n)
-		}
-	}
-	return sep, limit, chomp
+// ioGets reads one line from o using MRI's (sep, limit, chomp:) argument shapes,
+// returning nil at end of input and advancing #lineno on a successful read. It is
+// the single-shot entry used by ARGF#gets and the IRB reader; the coercion and
+// $/ default live in resolveGetsArgs, shared with the StringIO/IO gets family.
+func (vm *VM) ioGets(o *IOObj, args []object.Value) object.Value {
+	sep, limit, chomp := vm.resolveGetsArgs(args)
+	return vm.ioGetsResolved(o, sep, limit, chomp)
 }
 
 // enumSizeNil is the #size block for a reader Enumerator (each_line/each_char/
@@ -1072,16 +1034,6 @@ func (vm *VM) defaultGetsSep() getsSep {
 // never advance the cursor).
 func checkResolvedLimit(limit int, meth string) {
 	if limit == 0 {
-		raise("ArgumentError", "invalid limit: 0 for %s", meth)
-	}
-}
-
-// checkGetsLimit raises ArgumentError for an explicit limit of 0 on a
-// line-iterating read (readlines/each_line/foreach/each): a 0-byte line never
-// advances the cursor, so MRI rejects it rather than looping. A single #gets(0)
-// is allowed (it just returns "") and does not go through this guard.
-func checkGetsLimit(args []object.Value, meth string) {
-	if _, limit, _ := parseGetsArgs(args); limit == 0 {
 		raise("ArgumentError", "invalid limit: 0 for %s", meth)
 	}
 }
