@@ -234,15 +234,23 @@ module Enumerable
     r
   end
 
-  def find
-    return enum_for(:find) { nil } unless block_given?
+  # find(ifnone = nil): returns the first element for which the block is truthy.
+  # When none matches, calls the ifnone proc (if given) and returns its result,
+  # else nil. ifnone is passed through to the enumerator when no block is given.
+  def find(ifnone = nil)
+    return enum_for(:find, ifnone) { nil } unless block_given?
+    found = false
     result = nil
     __each_packed { |x|
-      if result == nil
-        result = x if yield(x)
+      unless found
+        if yield(x)
+          result = x
+          found = true
+        end
       end
     }
-    result
+    return result if found
+    ifnone.nil? ? nil : ifnone.call
   end
   alias detect find
 
@@ -258,42 +266,54 @@ module Enumerable
     total
   end
 
-  def min(n = nil)
-    return to_a.sort.first(n) unless n.nil? # min(n): the n smallest, ascending
+  # min/max/minmax compare with the block when one is given, else with <=>.
+  # A nil comparison (incomparable elements, or a block returning nil) raises
+  # ArgumentError, as in MRI. Multi-value #each yields are gathered into an
+  # Array element (via __each_packed) and compared as arrays.
+  def min(n = nil, &block)
+    return to_a.sort(&block).first(n) unless n.nil? # min(n): the n smallest, ascending
     result = nil
     first = true
     __each_packed { |x|
       if first
         result = x
         first = false
-      elsif x < result
-        result = x
+      else
+        c = block ? block.call(x, result) : (x <=> result)
+        raise ArgumentError, "comparison of #{x.class} with #{result.class} failed" if c.nil?
+        result = x if c < 0
       end
     }
     result
   end
 
-  def max(n = nil)
-    return to_a.sort.last(n).reverse unless n.nil? # max(n): the n largest, descending
+  def max(n = nil, &block)
+    return to_a.sort(&block).last(n).reverse unless n.nil? # max(n): the n largest, descending
     result = nil
     first = true
     __each_packed { |x|
       if first
         result = x
         first = false
-      elsif x > result
-        result = x
+      else
+        c = block ? block.call(x, result) : (x <=> result)
+        raise ArgumentError, "comparison of #{x.class} with #{result.class} failed" if c.nil?
+        result = x if c > 0
       end
     }
     result
   end
 
-  def minmax
-    [min, max]
+  def minmax(&block)
+    [min(&block), max(&block)]
   end
 
   def reduce(*args)
     # Forms: reduce { |a, b| }, reduce(init) { }, reduce(:op), reduce(init, :op).
+    # The operator may be a Symbol or a String (or anything with #to_str); when a
+    # single argument is given it is the initial value if a block is present and
+    # otherwise the operator, exactly as MRI decides.
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 1..2)" if args.length > 2
     sym = nil
     has_init = false
     init = nil
@@ -301,11 +321,22 @@ module Enumerable
       init = args[0]
       sym = args[1]
       has_init = true
-    elsif args.length == 1 && args[0].is_a?(Symbol)
-      sym = args[0]
     elsif args.length == 1
-      init = args[0]
-      has_init = true
+      if block_given?
+        init = args[0]
+        has_init = true
+      else
+        sym = args[0]
+      end
+    elsif !block_given?
+      raise ArgumentError, "wrong number of arguments (given 0, expected 1..2)"
+    end
+    unless sym.nil? || sym.is_a?(Symbol) || sym.is_a?(String)
+      if sym.respond_to?(:to_str)
+        sym = sym.to_str
+      else
+        raise TypeError, "#{sym.inspect} is not a symbol nor a string"
+      end
     end
     acc = init
     started = has_init
