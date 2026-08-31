@@ -92,7 +92,7 @@ func TestStringEncode(t *testing.T) {
 		{`"\x61\x00\x00".dup.force_encoding("utf-32le").encode("utf-8")`, "InvalidByteSequenceError"},
 		{`"\x80\x00\x00\x00".dup.force_encoding("utf-32be").encode("utf-8")`, "InvalidByteSequenceError"},
 		{`"\x00\xd8".dup.force_encoding("utf-16le").encode("utf-8")`, "InvalidByteSequenceError"},
-		{`"abc".encode("utf-8", "no-such-enc")`, "unknown encoding name"},
+		{`"abc".encode("utf-8", "no-such-enc")`, "code converter not found (no-such-enc to UTF-8)"},
 		{`"abc".encode("utf-8", xml: :bogus)`, "unexpected value for xml option"},
 	}
 	for _, c := range errCases {

@@ -401,6 +401,42 @@ func encodeUTF32(u string, be bool) []byte {
 	return b
 }
 
+// encodeEncName resolves a String#encode positional encoding argument to its
+// name. An Encoding is taken as-is; a String (or a #to_str result) is canonicalised
+// through the registry, but an unregistered name is returned verbatim rather than
+// raising — #encode reports an unusable destination as a missing converter, not as
+// the unknown-encoding ArgumentError that Encoding.find would raise.
+func (vm *VM) encodeEncName(v object.Value) string {
+	resolve := func(s string) string {
+		if e, ok := vm.findEncoding(s); ok {
+			return e.name
+		}
+		return s
+	}
+	switch e := v.(type) {
+	case *encodingObj:
+		return e.name
+	case *object.String:
+		return resolve(e.Str())
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return resolve(s.Str())
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return ""
+}
+
+// encAsciiCompat reports whether the registered encoding `name` is
+// ASCII-compatible; an unregistered name is treated as not compatible.
+func (vm *VM) encAsciiCompat(name string) bool {
+	if e, ok := vm.findEncoding(name); ok {
+		return e.asciiCompat
+	}
+	return false
+}
+
 // stringEncode implements String#encode(dst = default, src = self.encoding, **opts).
 func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String {
 	var positional []object.Value
@@ -415,15 +451,30 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 	to := s.EncName()
 	from := s.EncName()
 	if len(positional) >= 1 {
-		to = vm.encodingArg(positional[0]).name
+		to = vm.encodeEncName(positional[0])
+	} else if vm.defInternalEnc != nil {
+		// With no destination given, #encode transcodes to Encoding.default_internal
+		// when one is set (otherwise it is a copy in the source encoding).
+		to = vm.defInternalEnc.name
 	}
 	if len(positional) >= 2 {
-		from = vm.encodingArg(positional[1]).name
+		from = vm.encodeEncName(positional[1])
 	}
 
 	repl := opts.replace
 	if !opts.hasReplace {
 		repl = defaultReplacement(to)
+	}
+
+	// A destination rbgo cannot transcode into (a dummy encoding like Emacs-Mule,
+	// or an unregistered name) has no converter. MRI still succeeds when the whole
+	// string is 7-bit ASCII and both encodings are ASCII-compatible — the bytes are
+	// identical — and otherwise raises Encoding::ConverterNotFoundError.
+	if !encodingSupported(to) {
+		if asciiOnly(s.Bytes()) && vm.encAsciiCompat(to) && vm.encAsciiCompat(from) {
+			return object.NewStringBytesEnc(append([]byte(nil), s.Bytes()...), to)
+		}
+		raise("Encoding::ConverterNotFoundError", "code converter not found (%s to %s)", from, to)
 	}
 
 	inter := vm.decodeToUTF8(s.Bytes(), from, opts, repl)
