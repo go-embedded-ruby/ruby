@@ -60,10 +60,10 @@ func (vm *VM) registerRangeEdges() {
 		return r
 	})
 
-	// entries is a straight alias of to_a.
-	vm.cRange.define("entries", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(rangeElems(self.(*object.Range)))
-	})
+	// entries is a true alias of to_a (Range.instance_method(:entries) ==
+	// Range.instance_method(:to_a)), so it shares the same method object rather
+	// than wrapping a second implementation.
+	aliasBuiltin(vm.cRange, "entries", "to_a")
 }
 
 // isIntegerValue reports whether v is an Integer or Bignum (an exact integer).

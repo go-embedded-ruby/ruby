@@ -117,18 +117,18 @@ func embeddedPrelude() *bytecode.ISeq {
 					},
 					&bytecode.ISeq{
 						Name:  "==",
-						Insns: []bytecode.Instr{{Op: 5}, {Op: 11}, {Op: 30, B: 1}, {Op: 1}, {Op: 22}, {Op: 53}},
+						Insns: []bytecode.Instr{{Op: 5}, {Op: 11}, {Op: 30, B: 1}, {Op: 12, A: 1}, {Op: 9}, {Op: 11, A: 1}, {Op: 30, A: 1, Flags: 1}, {Op: 28, A: 11}, {Op: 4}, {Op: 53}, {Op: 26, A: 12}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 1}, {Op: 22}, {Op: 28, A: 20}, {Op: 3}, {Op: 53}, {Op: 26, A: 21}, {Op: 2}, {Op: 9}, {Op: 11, A: 1}, {Op: 1}, {Op: 19}, {Op: 10}, {Op: 27, A: 31}, {Op: 9}, {Op: 11, A: 1}, {Op: 1}, {Op: 18}, {Op: 9}, {Op: 4}, {Op: 53}},
 						Consts: []object.Value{
 							object.IntValue(0),
 						},
-						Names:       []string{"<=>"},
+						Names:       []string{"<=>", "nil?"},
 						Params:      []string{"other"},
 						NumRequired: 1,
 						SplatIndex:  -1,
 						KwRestSlot:  -1,
 						BlockSlot:   -1,
-						NumLocals:   1,
-						Locals:      []string{"other"},
+						NumLocals:   2,
+						Locals:      []string{"other", "cmp"},
 						Super:       "",
 					},
 					&bytecode.ISeq{

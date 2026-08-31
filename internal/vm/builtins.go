@@ -4359,6 +4359,28 @@ func (vm *VM) bootstrap() {
 	// member? is a true alias of include? (Range.instance_method(:member?) ==
 	// Range.instance_method(:include?)), so it must share the same method entry.
 	vm.cRange.methods["member?"] = vm.cRange.methods["include?"]
+	// Range#initialize(begin, end, exclude_end = false) is the private initializer
+	// behind Range.new. On an already-constructed Range — a raw *object.Range
+	// literal / Range.new result, which is frozen — it raises FrozenError; on a
+	// freshly Range.allocate'd instance (an unfrozen RObject) it fills in the
+	// bounds. It enforces arity 2..3 (ArgumentError otherwise) and the same
+	// comparable-endpoints check as Range.new (a nil #<=> — e.g. two plain
+	// Objects — is an ArgumentError "bad value for range").
+	vm.cRange.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if _, raw := self.(*object.Range); raw || isFrozen(self) {
+			vm.raiseFrozen(self)
+		}
+		if len(args) < 2 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2..3)", len(args))
+		}
+		lo, hi := args[0], args[1]
+		if !object.IsNil(lo) && !object.IsNil(hi) && object.IsNil(vm.send(lo, "<=>", []object.Value{hi}, nil)) {
+			raise("ArgumentError", "bad value for range")
+		}
+		self.(*RObject).builtin = object.NewRange(lo, hi, len(args) == 3 && args[2].Truthy())
+		return object.NilV
+	})
+	vm.setInstanceVisibility(vm.cRange, "initialize", visPrivate)
 	vm.cRange.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		rangeArgCheck(args)
 		return object.Bool(vm.rangeCoverValueV(self.(*object.Range), args[0]))
@@ -4462,8 +4484,14 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cRange.define("count", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		// Bare count is the range size; with a block or argument it counts
-		// matching elements (Enumerable#count).
+		// matching elements (Enumerable#count). An unbounded range (a nil begin
+		// or end) holds infinitely many elements, so MRI's range_count returns
+		// Float::INFINITY — even for a String/Float bound whose #size is nil.
 		if blk == nil && len(args) == 0 {
+			r := self.(*object.Range)
+			if object.IsNil(r.Lo) || object.IsNil(r.Hi) {
+				return object.Float(math.Inf(1))
+			}
 			return rangeSizeFn(vm, self, args, blk)
 		}
 		arr := vm.send(self, "to_a", nil, nil).(*object.Array)
@@ -4616,28 +4644,32 @@ func (vm *VM) bootstrap() {
 		// range (e.g. "A"..) walks forever — the caller's block breaks out.
 		_, hiIsStr := r.Hi.(*object.String)
 		if loS, ok := r.Lo.(*object.String); ok && (object.IsNil(r.Hi) || hiIsStr) {
-			n, isInt := step.(object.Integer)
-			if !isInt {
-				raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(step).name)
-			}
-			switch {
-			case n == 0:
-				raise("ArgumentError", "step can't be 0")
-			case n < 0:
-				raise("ArgumentError", "step can't be negative")
-			}
-			if object.IsNil(r.Hi) {
-				for cur := loS.Str(); ; {
-					vm.callBlock(blk, []object.Value{object.NewString(cur)})
-					for k := int64(0); k < int64(n); k++ {
-						cur = succString(cur)
+			if n, isInt := step.(object.Integer); isInt {
+				switch {
+				case n == 0:
+					raise("ArgumentError", "step can't be 0")
+				case n < 0:
+					raise("ArgumentError", "step can't be negative")
+				}
+				if object.IsNil(r.Hi) {
+					for cur := loS.Str(); ; {
+						vm.callBlock(blk, []object.Value{object.NewString(cur)})
+						for k := int64(0); k < int64(n); k++ {
+							cur = succString(cur)
+						}
 					}
 				}
+				elems := strRangeElems(loS.Str(), r.Hi.(*object.String).Str(), r.Exclusive)
+				for i := 0; i < len(elems); i += int(n) {
+					vm.callBlock(blk, []object.Value{elems[i]})
+				}
+				return r
 			}
-			elems := strRangeElems(loS.Str(), r.Hi.(*object.String).Str(), r.Exclusive)
-			for i := 0; i < len(elems); i += int(n) {
-				vm.callBlock(blk, []object.Value{elems[i]})
-			}
+			// MRI 4.0 (3.4+): a non-Integer step advances String elements by #+
+			// rather than #succ — ("A".."AAA").step("A") yields "A","AA","AAA". An
+			// incompatible step (a Float, an Array, …) makes String#+ raise
+			// TypeError, exactly as MRI does when it tries begin + step.
+			vm.rangeStepByPlus(blk, r, step)
 			return r
 		}
 		// An endless numeric range (m..) steps forever; the block breaks out.
@@ -8241,7 +8273,9 @@ func (vm *VM) rangeElemsV(r *object.Range) []object.Value {
 		return out
 	}
 	if !vm.respondsToDynamic(r.Lo, "succ") {
-		raise("TypeError", "can't iterate from %s", r.Lo.Inspect())
+		// MRI names the offending endpoint's class (e.g. "can't iterate from
+		// NilClass" for a beginless range, "can't iterate from Float"), not its value.
+		raise("TypeError", "can't iterate from %s", vm.classOf(r.Lo).name)
 	}
 	var out []object.Value
 	for cur := r.Lo; ; {
@@ -8266,6 +8300,41 @@ func (vm *VM) rangeElemsV(r *object.Range) []object.Value {
 		cur = vm.send(cur, "succ", nil, nil)
 	}
 	return out
+}
+
+// rangeStepByPlus walks a bounded or endless range forward by repeatedly adding
+// step with #+, yielding each value that has not passed end under #<=> (MRI
+// 4.0's non-Integer String#step, e.g. ("A".."AAA").step("A")). An endless range
+// walks until the block breaks; a bounded range stops once the next value would
+// pass end (inclusive stops after the value equal to end, exclusive before it).
+// begin + step dispatches String#+ (or the element's own #+), which raises
+// TypeError for an incompatible step exactly as MRI does.
+func (vm *VM) rangeStepByPlus(blk *Proc, r *object.Range, step object.Value) {
+	cur := r.Lo
+	if object.IsNil(r.Hi) {
+		for {
+			vm.callBlock(blk, []object.Value{cur})
+			cur = vm.send(cur, "+", []object.Value{step}, nil)
+		}
+	}
+	for {
+		c, ok := vm.rangeCmpV(cur, r.Hi)
+		if !ok {
+			return
+		}
+		if r.Exclusive {
+			if c >= 0 {
+				return
+			}
+		} else if c > 0 {
+			return
+		}
+		vm.callBlock(blk, []object.Value{cur})
+		if !r.Exclusive && c == 0 {
+			return
+		}
+		cur = vm.send(cur, "+", []object.Value{step}, nil)
+	}
 }
 
 func shiftInt(a *big.Int, n int64) object.Value {
