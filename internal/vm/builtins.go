@@ -5235,12 +5235,46 @@ func chrEncode(n int64, enc string) []byte {
 			raise("RangeError", "%d out of char range", n)
 		}
 		return []byte{byte(n)}
-	default: // ASCII-8BIT/BINARY and single-byte encodings hold one 0..255 byte
+	default:
+		// A legacy multibyte encoding (EUC-JP, Shift_JIS, …) interprets the Integer
+		// as a big-endian byte sequence that must form exactly one valid character
+		// (MRI's rb_enc_mbcput + precise-mbclen check); a lone lead byte such as
+		// 0x81 in EUC-JP is in byte range yet not a character, so it raises
+		// "invalid codepoint" rather than the plain "out of char range".
+		if codec, isMB := xtextEncodings[enc]; isMB {
+			if n >= 0 {
+				be := bigEndianBytes(uint64(n))
+				if out, err := codec.NewDecoder().Bytes(be); err == nil &&
+					utf8.RuneCount(out) == 1 && !strings.ContainsRune(string(out), utf8.RuneError) {
+					return be
+				}
+			}
+			raise("RangeError", "invalid codepoint 0x%x in %s", n, enc)
+		}
+		// ASCII-8BIT/BINARY and single-byte encodings hold one 0..255 byte.
 		if n < 0 || n > 255 {
 			raise("RangeError", "%d out of char range", n)
 		}
 		return []byte{byte(n)}
 	}
+}
+
+// bigEndianBytes returns n as its minimal big-endian byte sequence (a single
+// zero byte for 0). It is how an Integer codepoint is unpacked into the encoded
+// bytes for a legacy multibyte encoding.
+func bigEndianBytes(n uint64) []byte {
+	if n == 0 {
+		return []byte{0}
+	}
+	var b []byte
+	for n > 0 {
+		b = append(b, byte(n))
+		n >>= 8
+	}
+	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
+		b[i], b[j] = b[j], b[i]
+	}
+	return b
 }
 
 // codepointAppend encodes the codepoint n for `String#<<`/#concat with an Integer
