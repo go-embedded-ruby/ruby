@@ -267,10 +267,28 @@ module Enumerable
   end
   alias member? include?
 
+  # sum folds the elements (each mapped through the block, if given) onto init.
+  # Once a Float is involved it switches to Kahan-Babuska-Neumaier compensated
+  # summation, as MRI does, so a long run of floats sums without drift.
   def sum(init = 0)
     total = init
-    __each_packed { |x| total = total + (block_given? ? yield(x) : x) }
-    total
+    compensation = 0.0
+    float_mode = total.is_a?(Float)
+    __each_packed { |x|
+      v = block_given? ? yield(x) : x
+      if !float_mode && v.is_a?(Float)
+        total = total.to_f
+        float_mode = true
+      end
+      if float_mode && v.is_a?(Float)
+        t = total + v
+        compensation += total.abs >= v.abs ? (total - t) + v : (v - t) + total
+        total = t
+      else
+        total = total + v
+      end
+    }
+    float_mode ? total + compensation : total
   end
 
   # min/max/minmax compare with the block when one is given, else with <=>.
@@ -581,10 +599,19 @@ module Enumerable
 
   # zip pairs each element with the correspondingly-indexed element of every other
   # collection (a shorter operand pads with nil). Each other is taken via #to_ary
-  # or, failing that, #to_a so any Enumerable works. With a block each row is
-  # yielded and zip returns nil; without one it returns the Array of rows.
+  # or, failing that, an Enumerator from #to_enum(:each) so any Enumerable works;
+  # an argument that responds to neither raises TypeError. With a block each row
+  # is yielded and zip returns nil; without one it returns the Array of rows.
   def zip(*others)
-    others = others.map { |o| o.respond_to?(:to_ary) ? o.to_ary : o.to_a }
+    others = others.map { |o|
+      if o.respond_to?(:to_ary)
+        o.to_ary
+      elsif o.respond_to?(:each)
+        o.to_enum(:each).to_a
+      else
+        raise TypeError, "wrong argument type #{o.class} (must respond to :each)"
+      end
+    }
     blk = block_given?
     r = blk ? nil : []
     i = 0
@@ -910,12 +937,24 @@ module Enumerable
         end
       end
     end
-    a = to_a
-    return nil if a.empty?
+    # A non-positive count does nothing and must not touch #each at all.
+    unless n.nil?
+      n = __enum_int_arg(n)
+      return nil if n <= 0
+    end
+    # The first pass drives #each directly (so a block that breaks stops without
+    # buffering the rest), buffering the packed elements for the later cycles.
+    buffer = []
+    each { |*a|
+      v = __pack(a)
+      buffer << v
+      yield(v)
+    }
+    return nil if buffer.empty?
     if n.nil?
-      loop { a.each { |x| yield(x) } }
+      loop { buffer.each { |x| yield(x) } }
     else
-      n.times { a.each { |x| yield(x) } }
+      (n - 1).times { buffer.each { |x| yield(x) } }
     end
     nil
   end
