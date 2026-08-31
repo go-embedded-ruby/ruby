@@ -52,6 +52,12 @@ func (vm *VM) splatToArray(v object.Value) object.Value {
 		if a, ok := r.(*object.Array); ok {
 			return a
 		}
+		// MRI treats a nil #to_a result as "no conversion available" and wraps the
+		// object in a one-element Array, exactly as for an object without #to_a; a
+		// non-nil, non-Array result is the error.
+		if object.IsNil(r) {
+			return object.NewArray(v)
+		}
 		raise("TypeError", "can't convert %s to Array (%s#to_a gives %s)",
 			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
 	}

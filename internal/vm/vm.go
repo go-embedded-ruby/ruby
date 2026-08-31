@@ -993,6 +993,19 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 	for _, kn := range iseq.KwNames {
 		valid[object.Symbol(kn)] = true
 	}
+	// MRI reports a missing REQUIRED keyword before an unknown one: m(b: 1) on
+	// def m(a:) raises "missing keyword: :a", not "unknown keyword: :b".
+	var missing []string
+	for i, kn := range iseq.KwNames {
+		if iseq.KwRequired[i] {
+			if _, ok := kwargs.Get(object.SymVal(kn)); !ok {
+				missing = append(missing, ":"+kn)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		raise("ArgumentError", "missing keyword%s: %s", plural(len(missing)), strings.Join(missing, ", "))
+	}
 	// With a **rest param, surplus keywords are captured rather than rejected.
 	if iseq.KwRestSlot < 0 {
 		var unknown []string
@@ -1006,18 +1019,18 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 			raise("ArgumentError", "unknown keyword%s: %s", plural(len(unknown)), strings.Join(unknown, ", "))
 		}
 	}
-	var missing []string
-	for i, kn := range iseq.KwNames {
-		if iseq.KwRequired[i] {
-			if _, ok := kwargs.Get(object.SymVal(kn)); !ok {
-				missing = append(missing, ":"+kn)
-			}
-		}
-	}
-	if len(missing) > 0 {
-		raise("ArgumentError", "missing keyword%s: %s", plural(len(missing)), strings.Join(missing, ", "))
-	}
 	return kwargs
+}
+
+// alwaysPrivateMethodName reports whether a method name is one MRI defines with
+// private visibility unconditionally (the object-initialization and
+// respond-to-missing hooks), independent of the surrounding default visibility.
+func alwaysPrivateMethodName(name string) bool {
+	switch name {
+	case "initialize", "initialize_copy", "initialize_clone", "initialize_dup", "respond_to_missing?":
+		return true
+	}
+	return false
 }
 
 // plural returns "s" when n > 1, for "keyword"/"keywords" in error messages.
@@ -1045,6 +1058,46 @@ type frameMethod struct {
 // `&b`, while `yield` inside the proc still reaches the block captured where the
 // proc was defined (block). Passing blockArg == block preserves the old
 // behaviour everywhere it is not deliberately split.
+// zsuperArgs reconstructs the argument list an implicit `super` (bare `super`,
+// no parentheses) forwards to the parent method. MRI passes the CURRENT values
+// of the calling method's formal parameters — reading the local slots — rather
+// than the arguments the method was originally called with, so any reassignment
+// in the body, a filled-in optional or keyword default, and splat/post
+// rebinding are all reflected. Positional params contribute their slot value
+// (the splat slice is spliced in place); keyword params and any **kwrest are
+// gathered into a trailing hash, appended only when non-empty.
+func zsuperArgs(iseq *bytecode.ISeq, env *Env) []object.Value {
+	out := make([]object.Value, 0, len(iseq.Params)+1)
+	for i := 0; i < len(iseq.Params); i++ {
+		if i == iseq.SplatIndex {
+			if arr, ok := env.slots[i].(*object.Array); ok {
+				out = append(out, arr.Elems...)
+			}
+			continue
+		}
+		out = append(out, env.slots[i])
+	}
+	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
+		h := object.NewHash()
+		base := len(iseq.Params)
+		for i, kn := range iseq.KwNames {
+			h.Set(object.SymVal(kn), env.slots[base+i])
+		}
+		if iseq.KwRestSlot >= 0 {
+			if kr, ok := env.slots[iseq.KwRestSlot].(*object.Hash); ok {
+				for _, k := range kr.Keys {
+					v, _ := kr.Get(k)
+					h.Set(k, v)
+				}
+			}
+		}
+		if h.Len() > 0 {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock, blockArg *Proc, methodLexScope *RClass) (execResult object.Value) {
 	// Determine this frame's __method__/__callee__ pair before any nested call can
 	// disturb pendingMethodCtx: a block inherits the pair captured on the block
@@ -1065,15 +1118,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
 		kwargs = vm.bindKeywords(iseq, &args)
 	}
-	if len(args) < iseq.NumRequired || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
+	// minReq is the true minimum arity: the leading required params plus any
+	// required "post" params after a *splat (def m(a,*b,c) requires 2, not 1).
+	minReq := iseqRequiredPositional(iseq)
+	if len(args) < minReq || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
 		var expected string
 		switch {
 		case iseq.SplatIndex >= 0:
-			expected = fmt.Sprintf("%d+", iseq.NumRequired)
-		case iseq.NumRequired == len(iseq.Params):
-			expected = fmt.Sprintf("%d", iseq.NumRequired)
+			expected = fmt.Sprintf("%d+", minReq)
+		case minReq == len(iseq.Params):
+			expected = fmt.Sprintf("%d", minReq)
 		default:
-			expected = fmt.Sprintf("%d..%d", iseq.NumRequired, len(iseq.Params))
+			expected = fmt.Sprintf("%d..%d", minReq, len(iseq.Params))
 		}
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %s)", len(args), expected)
 	}
@@ -1089,16 +1145,29 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	}
 	if iseq.SplatIndex >= 0 {
 		si := iseq.SplatIndex
-		nbind := len(args)
-		if nbind > si {
-			nbind = si
+		// Params after the splat ("post" params, e.g. c in def m(a,*b,c)) are
+		// always required and bind from the TAIL of the argument list; the splat
+		// captures whatever is left in the middle.
+		npost := len(iseq.Params) - si - 1
+		// args available to the leading params + splat, after reserving the post
+		// params. The arity check above (minReq includes npost) guarantees
+		// len(args) >= npost, so this is never negative.
+		avail := len(args) - npost
+		nbind := si
+		if nbind > avail {
+			nbind = avail
 		}
 		copy(env.slots[:nbind], args[:nbind])
 		rest := []object.Value{}
-		if len(args) > si {
-			rest = append(rest, args[si:]...)
+		if avail > si {
+			rest = append(rest, args[si:avail]...)
 		}
 		env.slots[si] = object.NewArrayFromSlice(rest)
+		for j := 0; j < npost; j++ {
+			if srcIdx := len(args) - npost + j; srcIdx >= 0 && srcIdx < len(args) {
+				env.slots[si+1+j] = args[srcIdx]
+			}
+		}
 	} else {
 		copy(env.slots, args)
 	}
@@ -1245,7 +1314,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// `yield` and `return`: inside a method the anchor is the method itself; inside
 	// a block the anchor is inherited from the enclosing block (so `super` nested
 	// through several blocks still reaches the home method).
-	homeSuperName, homeSuperDefinee, homeSuperArgs := methodName, definee, args
+	//
+	// The anchor NAME is the method's ORIGINAL name (fm.orig), not the name it was
+	// invoked by: for an aliased method (`alias_method :name3, :name`), a bare
+	// `super` resolves the original `name` above the alias's owner, matching MRI —
+	// __method__, not __callee__. For a plain def the two coincide.
+	homeSuperName, homeSuperDefinee, homeSuperArgs := fm.orig, definee, args
 	homeDmBody := false
 	if selfBlock != nil {
 		homeSuperName, homeSuperDefinee, homeSuperArgs = selfBlock.superName, selfBlock.superDefinee, selfBlock.superArgs
@@ -1639,9 +1713,22 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// the new Method's own vis governs (MRI: redefining resets to the
 				// current default visibility).
 				delete(definee.visOverrides, name)
-				// In module_function (no-arg) mode, a def is private as an instance
-				// method but public as the module/singleton method.
-				if definee.funcMode {
+				// A `def` executed INSIDE a running method body is always public in
+				// MRI, regardless of the class's persisted default visibility (which
+				// only governs defs written directly in a class/module body). A block
+				// frame (selfBlock != nil), a class/module body, and the top level
+				// (methodName == "") all keep the class default. In module_function
+				// (no-arg) mode, a def is private as an instance method but public as
+				// the module/singleton method.
+				switch {
+				case selfBlock == nil && methodName != "":
+					m.vis = visPublic
+				case definee.funcMode:
+					m.vis = visPrivate
+				}
+				// A handful of core hook methods are always defined private,
+				// regardless of the surrounding default visibility (MRI).
+				if alwaysPrivateMethodName(name) {
 					m.vis = visPrivate
 				}
 				definee.methods[name] = m
@@ -1734,13 +1821,19 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						// MRI forbids implicit-argument super from a define_method body.
 						raise("RuntimeError", "implicit argument passing of super from method defined by define_method() is not supported. Specify all arguments explicitly.")
 					}
-					superArgs = homeSuperArgs
-					// Keyword arguments were peeled off args into env.kwargs on entry;
-					// re-attach them as the trailing hash so bare super forwards them too.
-					// (Only the method's own frame carries kwargs; a block forwards the
-					// home method's positional args as captured.)
-					if selfBlock == nil && env.kwargs != nil && len(env.kwargs.Keys) > 0 {
-						superArgs = append(append([]object.Value(nil), homeSuperArgs...), env.kwargs)
+					if selfBlock == nil {
+						// zsuper: MRI forwards the CURRENT values of the method's formal
+						// parameters, not the original argument list. This reflects any
+						// reassignment in the body, filled-in optional/keyword defaults,
+						// and splat/post rebinding.
+						superArgs = zsuperArgs(iseq, env)
+					} else {
+						// A bare super inside a block forwards the home method's arguments
+						// as captured when the block was created (a block is transparent to
+						// super, like yield). The method frame's own reconstruction — which
+						// re-reads the current parameter locals, keywords included — is the
+						// selfBlock == nil path above.
+						superArgs = homeSuperArgs
 					}
 				} else {
 					superArgs = make([]object.Value, in.A)
@@ -2342,8 +2435,15 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 	}
 	// super resolves to the next definition of methodName after the current
 	// method's owner (definee) in the receiver's ancestor chain — so it walks
-	// prepended and included modules, not just the superclass.
-	anc := vm.ancestors(vm.classOf(self))
+	// prepended and included modules, not just the superclass. When the receiver
+	// carries a per-object singleton class, the chain begins there (its super is
+	// the object's class), so a `super` from a singleton method — `def obj.foo`,
+	// or define_method on the singleton class — reaches the class-level definition.
+	startClass := vm.classOf(self)
+	if sc := vm.objSingleton(self); sc != nil {
+		startClass = sc
+	}
+	anc := vm.ancestors(startClass)
 	start := -1
 	for i, k := range anc {
 		if k == definee {
@@ -2351,13 +2451,21 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 			break
 		}
 	}
-	if start >= 0 {
+	// Locate the next definition of methodName above definee. An `undef`
+	// tombstone (m.undefined) is a blocker: it is the "next definition" and it is
+	// not callable, so the search stops there and super falls through to
+	// method_missing / NoMethodError rather than reaching a still-defined ancestor
+	// above the blocker (and rather than crashing on its nil body).
+	var found *Method
+	switch {
+	case start >= 0:
 		for _, k := range anc[start+1:] {
 			if m, ok := k.methods[methodName]; ok {
-				return vm.invoke(m, self, args, blk)
+				found = m
+				break
 			}
 		}
-	} else if definee.metaOf != nil {
+	case definee.metaOf != nil:
 		// definee is a metaclass: the current method was defined in a `class << self`
 		// body, so its class-method super walks the metaclass chain
 		// (#<Class:Child> -> #<Class:Base> -> ...). Each metaclass's method table
@@ -2365,13 +2473,25 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 		// class method.
 		for k := definee.super; k != nil; k = k.super {
 			if m, ok := k.methods[methodName]; ok {
-				return vm.invoke(m, self, args, blk)
+				found = m
+				break
 			}
 		}
-	} else if m := lookupSMethod(definee.super, methodName); m != nil {
+	default:
 		// definee is the class itself, outside the receiver's ancestry: this is a
 		// class-method super (def self.foo), so walk the singleton-method chain.
-		return vm.invoke(m, self, args, blk)
+		found = lookupSMethod(definee.super, methodName)
+	}
+	if found != nil && !found.undefined {
+		return vm.invoke(found, self, args, blk)
+	}
+	// No callable superclass method. MRI routes a failed super through
+	// method_missing: a user-defined one handles it, while the default (on
+	// BasicObject) reports the super-specific message below. Dispatch only a
+	// genuine override so the default path keeps that exact message.
+	if mm := lookupMethod(vm.classOf(self), "method_missing"); mm != nil && !mm.undefined && mm.owner != vm.cBasicObject {
+		mmArgs := append([]object.Value{object.SymVal(methodName)}, args...)
+		return vm.invoke(mm, self, mmArgs, blk)
 	}
 	raise("NoMethodError", "super: no superclass method '%s'", methodName)
 	return object.NilV
