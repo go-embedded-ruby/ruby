@@ -3004,15 +3004,15 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
-		if len(args) > 0 {
-			depth = int(intArg(args[0]))
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		return object.NewArrayFromSlice(flattenDepth(self.(*object.Array).Elems, depth))
 	})
 	vm.cArray.define("flatten!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
-		if len(args) > 0 {
-			depth = int(intArg(args[0]))
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -3122,10 +3122,13 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		lists := [][]object.Value{self.(*object.Array).Elems}
 		for _, a := range args {
-			la, ok := a.(*object.Array)
+			la, ok := asArray(a)
+			if !ok && vm.respondsToDynamic(a, "to_ary") {
+				la, ok = asArray(vm.send(a, "to_ary", nil, nil))
+			}
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(a).name)
 			}
@@ -3164,6 +3167,14 @@ func (vm *VM) bootstrap() {
 				}
 			}
 			out = next
+		}
+		// With a block, MRI yields each combination in turn and returns the receiver;
+		// without one it returns the array of combinations.
+		if blk != nil {
+			for _, row := range out {
+				vm.callBlock(blk, []object.Value{row})
+			}
+			return self
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -7849,27 +7860,42 @@ func (vm *VM) exceptionFullMessage(self object.Value, highlight bool, order stri
 // digValue implements Hash#dig: walk nested Hashes/Arrays by successive keys,
 // returning nil as soon as a step is missing.
 func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
-	for _, k := range keys {
-		switch c := cur.(type) {
-		case object.Nil:
-			return object.NilV
-		case *object.Hash:
-			v, ok := c.Get(k)
-			if !ok {
-				return object.NilV
-			}
-			cur = v
-		case *object.Array:
-			if i, ok := arrayIndex(c, intArg(k)); ok {
-				cur = c.Elems[i]
-			} else {
-				cur = object.NilV
-			}
-		default:
-			raise("TypeError", "%s does not have #dig method", vm.classOf(cur).name)
-		}
+	if len(keys) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 	}
-	return cur
+	// Extract the value at the first key from the current container.
+	var v object.Value
+	switch c := cur.(type) {
+	case object.Nil:
+		return object.NilV
+	case *object.Hash:
+		vv, ok := c.Get(keys[0])
+		if !ok {
+			return object.NilV
+		}
+		v = vv
+	case *object.Array:
+		if i, ok := arrayIndex(c, intArg(keys[0])); ok {
+			v = c.Elems[i]
+		} else {
+			return object.NilV
+		}
+	default:
+		raise("TypeError", "%s does not have #dig method", vm.classOf(cur).name)
+	}
+	if len(keys) == 1 {
+		return v
+	}
+	if object.IsNil(v) {
+		return object.NilV
+	}
+	// MRI digs into the extracted value by calling its own #dig with the remaining
+	// keys, so a redefined (or mocked) #dig is honoured; a value without #dig is a
+	// TypeError rather than a NoMethodError.
+	if !vm.respondsToDynamic(v, "dig") {
+		raise("TypeError", "%s does not have #dig method", vm.classOf(v).name)
+	}
+	return vm.send(v, "dig", keys[1:], nil)
 }
 
 // padString implements ljust/rjust/center ('l'/'r'/'c'): pad s with the pad
