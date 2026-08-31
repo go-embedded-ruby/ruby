@@ -1597,7 +1597,6 @@ func (vm *VM) bootstrap() {
 		return object.NewString(succString(strOf(self)))
 	}
 	vm.cString.define("succ", succStr)
-	vm.cString.define("next", succStr)
 	succBang := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
@@ -1605,7 +1604,10 @@ func (vm *VM) bootstrap() {
 		return s
 	}
 	vm.cString.define("succ!", succBang)
-	vm.cString.define("next!", succBang)
+	// #next and #next! are true aliases of #succ / #succ! (they share the same
+	// Method object, so instance_method(:next) == instance_method(:succ)).
+	vm.aliasMethod(vm.cString, "next", "succ")
+	vm.aliasMethod(vm.cString, "next!", "succ!")
 	vm.cString.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(stringChr(strOf(self)))
 	})
@@ -1670,8 +1672,14 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cString.define("bytes", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("bytes", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		s := strOf(self)
+		if blk != nil { // the block form yields each byte and returns the receiver (MRI)
+			for i := 0; i < len(s); i++ {
+				vm.callBlock(blk, []object.Value{object.IntValue(int64(s[i]))})
+			}
+			return self
+		}
 		out := make([]object.Value, len(s))
 		for i := 0; i < len(s); i++ {
 			out[i] = object.IntValue(int64(s[i]))
@@ -1704,7 +1712,8 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("each_line", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_line", args...)
+			// MRI reports this enumerator's #size as nil (the line count is unknown).
+			return enumForSized(self, "each_line", func(*VM) object.Value { return object.NilV }, args...)
 		}
 		for _, seg := range vm.stringLineSegs(self, args) {
 			vm.callBlock(blk, []object.Value{seg})
@@ -1768,7 +1777,13 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cString.define("codepoints", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("codepoints", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk != nil { // the block form yields each codepoint and returns the receiver (MRI)
+			for _, r := range strOf(self) {
+				vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
+			}
+			return self
+		}
 		var out []object.Value
 		for _, r := range strOf(self) {
 			out = append(out, object.IntValue(int64(r)))
@@ -1985,31 +2000,34 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("center", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, vm.padString(strOf(self), args, 'c'))
 	})
-	trFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, trString(strOf(self), strArg(args[0]), strArg(args[1]), false))
+	trFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, trString(strOf(self), vm.strTrArg(args[0]), vm.strTrArg(args[1]), false))
 	}
 	vm.cString.define("tr", trFn)
-	trSFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, trString(strOf(self), strArg(args[0]), strArg(args[1]), true))
+	trSFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, trString(strOf(self), vm.strTrArg(args[0]), vm.strTrArg(args[1]), true))
 	}
 	vm.cString.define("tr_s", trSFn)
-	vm.cString.define("tr!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), false) })
+	vm.cString.define("tr!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		from, to := vm.strTrArg(args[0]), vm.strTrArg(args[1])
+		return vm.strBang(self, func(s string) string { return trString(s, from, to, false) })
 	})
-	vm.cString.define("tr_s!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), true) })
+	vm.cString.define("tr_s!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		from, to := vm.strTrArg(args[0]), vm.strTrArg(args[1])
+		return vm.strBang(self, func(s string) string { return trString(s, from, to, true) })
 	})
-	vm.cString.define("count", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(stringCount(strOf(self), args)))
+	vm.cString.define("count", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(stringCount(strOf(self), vm.coerceSetArgs(args))))
 	})
-	vm.cString.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, stringDelete(strOf(self), args))
+	vm.cString.define("delete", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, stringDelete(strOf(self), vm.coerceSetArgs(args)))
 	})
-	vm.cString.define("delete!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return stringDelete(s, args) })
+	vm.cString.define("delete!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		sets := vm.coerceSetArgs(args)
+		return vm.strBang(self, func(s string) string { return stringDelete(s, sets) })
 	})
-	vm.cString.define("squeeze", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, stringSqueeze(strOf(self), args))
+	vm.cString.define("squeeze", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, stringSqueeze(strOf(self), vm.coerceSetArgs(args)))
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 1 || len(args) > 2 {
@@ -2165,10 +2183,11 @@ func (vm *VM) bootstrap() {
 		return strConcatFn(vm, self, args, blk)
 	})
 	vm.cString.define("concat", strConcatFn)
-	vm.cString.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("replace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
-		s.SetBytes([]byte(strArg(args[0])))
+		repl, _ := vm.strCoerceArg(args[0]) // a non-String source converts via #to_str
+		s.SetBytes([]byte(repl))
 		return s
 	})
 	vm.cString.define("prepend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -6354,6 +6373,24 @@ func (vm *VM) casecmpOther(self, other object.Value) (string, bool) {
 	return os.Str(), true
 }
 
+// strTrArg coerces one character-set argument of tr/tr_s/count/delete/squeeze to
+// a Go string, converting a non-String via #to_str (unwrapping a String
+// subclass), exactly as MRI does.
+func (vm *VM) strTrArg(v object.Value) string {
+	s, _ := vm.strCoerceArg(v)
+	return s
+}
+
+// coerceSetArgs replaces each character-set argument with the String its #to_str
+// yields, so the charset routines that read them see real Strings.
+func (vm *VM) coerceSetArgs(args []object.Value) []object.Value {
+	out := make([]object.Value, len(args))
+	for i, a := range args {
+		out[i] = object.NewString(vm.strTrArg(a))
+	}
+	return out
+}
+
 // regexpSep reports whether v is a Regexp (after unwrapping a subclass wrapper),
 // used by the separator methods that accept either a String or a Regexp.
 func regexpSep(v object.Value) (*Regexp, bool) {
@@ -8093,6 +8130,9 @@ func (vm *VM) stringLineSegs(self object.Value, args []object.Value) []object.Va
 		sep := "\n"
 		if len(pos) > 0 {
 			sep = vm.coerceFormatString(pos[0])
+		} else if rs, ok := vm.gvar("$/").(*object.String); ok {
+			// With no separator argument the record separator $/ is used (default "\n").
+			sep = rs.Str()
 		}
 		if sep == "" {
 			segs = splitParagraphs(s, chomp)

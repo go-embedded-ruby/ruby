@@ -671,6 +671,16 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 // every result substring inherits (MRI keeps split pieces in the same encoding
 // as self).
 func (vm *VM) stringSplit(subject, enc string, args []object.Value) object.Value {
+	// A nil or absent pattern falls back to $; (the field separator): when $; is a
+	// String it becomes the pattern; a nil $; keeps awk-style whitespace mode.
+	if len(args) == 0 || object.IsNil(args[0]) {
+		switch fs := vm.gvar("$;").(type) {
+		case *object.String:
+			args = replaceSplitPattern(args, fs)
+		case *Regexp:
+			args = replaceSplitPattern(args, fs)
+		}
+	}
 	// A pattern that is neither a String, a Regexp nor nil is converted with
 	// #to_str, and a non-Integer limit with #to_int, exactly as MRI does. Copy the
 	// slice before rewriting the pattern so the caller's arguments are untouched.
@@ -695,6 +705,17 @@ func (vm *VM) stringSplit(subject, enc string, args []object.Value) object.Value
 	}
 	re := scanRegexp(args[0])
 	return splitRegexp(re, subject, limit, enc)
+}
+
+// replaceSplitPattern returns args with the pattern (args[0]) set to pat,
+// appending it when args was empty. The input slice is never mutated.
+func replaceSplitPattern(args []object.Value, pat object.Value) []object.Value {
+	if len(args) == 0 {
+		return []object.Value{pat}
+	}
+	out := append([]object.Value(nil), args...)
+	out[0] = pat
+	return out
 }
 
 // splitOnWhitespace reports whether the split should use awk-style whitespace
@@ -735,6 +756,12 @@ func splitWhitespace(subject string, limit int, enc string) object.Value {
 			i++
 		}
 		out = append(out, object.NewStringViewEnc(subject[start:i], enc))
+	}
+	// With an explicit non-zero limit, a run of trailing whitespace yields one
+	// trailing empty field (awk mode collapses it to a single ""); the default
+	// (limit 0) suppresses trailing empty fields.
+	if limit != 0 && n > 0 && isASCIISpace(subject[n-1]) {
+		out = append(out, object.NewStringViewEnc("", enc))
 	}
 	return object.NewArrayFromSlice(out)
 }

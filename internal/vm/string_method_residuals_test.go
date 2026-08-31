@@ -94,7 +94,17 @@ func TestStringCasecmpResiduals(t *testing.T) {
 		{"q_sharp_s", `p "ß".casecmp?("ss")`, "true\n"},
 		{"q_unrelated", `p "Ã".casecmp?("Ä")`, "false\n"},
 		{"q_nil_unconvertible", `p "abc".casecmp?(123)`, "nil\n"},
+		{"incompatible_encoding_nil", `p "あれ".casecmp("れ".encode("EUC-JP"))`, "nil\n"},
+		{"q_incompatible_encoding_nil", `p "あれ".casecmp?("れ".encode("EUC-JP"))`, "nil\n"},
 	})
+}
+
+func TestStringCoerceArgNonStringToStr(t *testing.T) {
+	// #to_str returning a non-String raises TypeError with MRI's message.
+	err := runErr(t, `class B; def to_str; 5; end; end; "x".chomp(B.new)`)
+	if err == nil || !strings.Contains(err.Error(), "can't convert B to String (B#to_str gives Integer)") {
+		t.Fatalf("chomp(bad to_str): %v", err)
+	}
 }
 
 func TestStringChompResiduals(t *testing.T) {
@@ -121,6 +131,55 @@ func TestStringPartitionResiduals(t *testing.T) {
 		{"rpartition_no_match", `p "hello".rpartition("x")`, "[\"\", \"\", \"hello\"]\n"},
 		{"partition_to_str", `class LP; def to_str; "l"; end; end; p "hello".partition(LP.new)`, "[\"he\", \"l\", \"lo\"]\n"},
 		{"partition_typeerror", `begin; "hello".partition(5); rescue TypeError; puts "te"; end`, "te\n"},
+	})
+}
+
+func TestStringCharsetResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"tr_multibyte_to_single", `p "über".tr("ü", "u")`, "\"uber\"\n"},
+		{"tr_single_to_multibyte", `p "uber".tr("u", "ü")`, "\"über\"\n"},
+		{"tr_negate", `p "hello".tr("^aeiou", "*")`, "\"*e**o\"\n"},
+		{"tr_range", `p "hello".tr("a-y", "b-z")`, "\"ifmmp\"\n"},
+		{"tr_s_squeeze", `p "mississippi".tr_s("sp", "*")`, "\"mi*i*i*i\"\n"},
+		{"count_multibyte", `p "abcが".count("が")`, "1\n"},
+		{"delete_multibyte", `p "我倒是".delete("倒")`, "\"我是\"\n"},
+		{"delete_to_str", `class DF; def to_str; "l"; end; end; p "hello".delete(DF.new)`, "\"heo\"\n"},
+		{"squeeze_range", `p "aaabbbccc".squeeze("a-b")`, "\"abccc\"\n"},
+		{"tr_to_str_args", `class TA; def to_str; "e"; end; end; class TB; def to_str; "i"; end; end; p "hello".tr(TA.new, TB.new)`, "\"hillo\"\n"},
+		{"tr_reversed_range_raises", `begin; "x".tr("z-a", "y"); rescue ArgumentError; puts "ae"; end`, "ae\n"},
+		{"count_to_str_arg", `class CA; def to_str; "l"; end; end; p "hello".count(CA.new)`, "2\n"},
+	})
+}
+
+func TestStringBytesCodepointsBlock(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"bytes_block_returns_self", `p "ab".bytes { |b| }`, "\"ab\"\n"},
+		{"bytes_block_yields", `a=[]; "ab".bytes { |b| a << b }; p a`, "[97, 98]\n"},
+		{"codepoints_block_returns_self", `p "ab".codepoints { |c| }`, "\"ab\"\n"},
+		{"codepoints_block_yields", `a=[]; "abcd".codepoints { |c| a << c }; p a`, "[97, 98, 99, 100]\n"},
+		{"bytes_no_block", `p "ab".bytes`, "[97, 98]\n"},
+	})
+}
+
+func TestStringSplitResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"awk_trailing_positive_limit", `p " 1 2 ".split(" ", 3)`, "[\"1\", \"2\", \"\"]\n"},
+		{"awk_trailing_neg_limit", `p " a  b  ".split(" ", -1)`, "[\"a\", \"b\", \"\"]\n"},
+		{"awk_no_trailing_default", `p " a  b  ".split(" ")`, "[\"a\", \"b\"]\n"},
+		{"awk_limit_remainder", `p " 1 2 ".split(" ", 2)`, "[\"1\", \"2 \"]\n"},
+		{"dollar_semi_string", `$; = ","; r = "x,y,z".split(nil); $; = nil; p r`, "[\"x\", \"y\", \"z\"]\n"},
+		{"dollar_semi_regexp", `$; = /:/; r = "1:2:".split(nil, -1); $; = nil; p r`, "[\"1\", \"2\", \"\"]\n"},
+		{"dollar_semi_nil_whitespace", `$; = nil; p "a b c".split`, "[\"a\", \"b\", \"c\"]\n"},
+	})
+}
+
+func TestStringMiscResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"replace_to_str", `class RP; def to_str; "hi"; end; end; p "x".replace(RP.new)`, "\"hi\"\n"},
+		{"next_is_succ", `p "az".next`, "\"ba\"\n"},
+		{"next_bang", `s = "az"; s.next!; p s`, "\"ba\"\n"},
+		{"each_line_size_nil", `p "a\nb\nc".each_line.size`, "nil\n"},
+		{"each_line_custom_dollar_slash", `$/ = ":"; r = []; "a:b:c".each_line { |l| r << l }; $/ = nil; p r`, "[\"a:\", \"b:\", \"c\"]\n"},
 	})
 }
 
