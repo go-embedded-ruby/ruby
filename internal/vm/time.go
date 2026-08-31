@@ -56,15 +56,80 @@ func (t *Time) fracString() string {
 	return "." + s
 }
 
+// subsecValue renders Time#subsec: the exact fraction of a second as a Rational,
+// or the Integer 0 on a whole second (MRI keeps 0 an Integer, not 0/1).
+func (t *Time) subsecValue() object.Value {
+	ns := t.t.Nanosecond()
+	if ns == 0 {
+		return object.IntValue(0)
+	}
+	return &object.Rational{R: big.NewRat(int64(ns), 1e9)}
+}
+
+// zoneValue renders Time#zone: the Ruby timezone object when the Time carries
+// one, else the fixed/named zone abbreviation, or nil when the zone is unnamed.
+func (t *Time) zoneValue() object.Value {
+	if z := t.zoneObj; z != nil {
+		return z
+	}
+	name, _ := t.t.Zone()
+	if name == "" {
+		return object.NilV
+	}
+	return object.NewString(name)
+}
+
+// timeDeconstructKeys is the field set Time#deconstruct_keys(nil) returns, in
+// MRI's order.
+var timeDeconstructKeys = []string{
+	"year", "month", "day", "yday", "wday", "hour", "min", "sec", "subsec", "dst", "zone",
+}
+
+// fieldValue resolves one Time#deconstruct_keys field name to its value, with ok
+// false for a name that is not a field.
+func (t *Time) fieldValue(key string) (object.Value, bool) {
+	tm := t.t
+	switch key {
+	case "year":
+		return object.IntValue(int64(tm.Year())), true
+	case "month":
+		return object.IntValue(int64(tm.Month())), true
+	case "day":
+		return object.IntValue(int64(tm.Day())), true
+	case "yday":
+		return object.IntValue(int64(tm.YearDay())), true
+	case "wday":
+		return object.IntValue(int64(tm.Weekday())), true
+	case "hour":
+		return object.IntValue(int64(tm.Hour())), true
+	case "min":
+		return object.IntValue(int64(tm.Minute())), true
+	case "sec":
+		return object.IntValue(int64(tm.Second())), true
+	case "subsec":
+		return t.subsecValue(), true
+	case "dst":
+		return object.Bool(tm.IsDST()), true
+	case "zone":
+		return t.zoneValue(), true
+	}
+	return nil, false
+}
+
 // repr renders MRI's "2026-06-21 12:34:56 +0000"; when withFrac the sub-second
-// fraction is included (inspect, not to_s).
+// fraction is included (inspect, not to_s). A UTC instant reports the zone as
+// "UTC" rather than the "+0000" offset, matching MRI's to_s / inspect.
 func (t *Time) repr(withFrac bool) string {
 	base := t.t.Format("2006-01-02 15:04:05")
 	frac := ""
 	if withFrac {
 		frac = t.fracString()
 	}
-	return base + frac + " " + t.offsetString()
+	zone := t.offsetString()
+	if t.t.Location() == stdtime.UTC {
+		zone = "UTC"
+	}
+	return base + frac + " " + zone
 }
 
 func (t *Time) ToS() string     { return t.repr(false) }
@@ -258,11 +323,7 @@ func (vm *VM) registerTime() {
 		return object.IntValue(int64(self(v).t.Nanosecond()))
 	})
 	d("subsec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		ns := self(v).t.Nanosecond()
-		if ns == 0 {
-			return object.IntValue(0)
-		}
-		return &object.Rational{R: big.NewRat(int64(ns), 1e9)}
+		return self(v).subsecValue()
 	})
 	d("yday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.YearDay()))
@@ -287,14 +348,7 @@ func (vm *VM) registerTime() {
 
 	// Zone queries.
 	d("zone", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if z := self(v).zoneObj; z != nil {
-			return z
-		}
-		name, _ := self(v).t.Zone()
-		if name == "" {
-			return object.NilV
-		}
-		return object.NewString(name)
+		return self(v).zoneValue()
 	})
 	offsetFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		_, off := self(v).t.Zone()
@@ -351,6 +405,39 @@ func (vm *VM) registerTime() {
 		)
 	})
 
+	// deconstruct_keys(keys) backs pattern matching (MRI 4.0): nil returns the
+	// whole field hash; an Array returns just the requested Symbol keys that name
+	// a field, ignoring (not raising on) non-Symbol or unknown keys; any other
+	// argument raises TypeError.
+	d("deconstruct_keys", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		t := self(v)
+		h := object.NewHash()
+		if object.IsNil(args[0]) {
+			for _, k := range timeDeconstructKeys {
+				val, _ := t.fieldValue(k)
+				h.Set(object.Symbol(k), val)
+			}
+			return h
+		}
+		arr, ok := args[0].(*object.Array)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Array or nil)", vm.classOf(args[0]).name)
+		}
+		for _, k := range arr.Elems {
+			sym, ok := k.(object.Symbol)
+			if !ok {
+				continue // a non-Symbol key is ignored, not an error
+			}
+			if val, ok := t.fieldValue(string(sym)); ok {
+				h.Set(sym, val)
+			}
+		}
+		return h
+	})
+
 	// Arithmetic and ordering.
 	d("+", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return timeOp(bytecode.OpAdd, self(v), args[0])
@@ -358,12 +445,25 @@ func (vm *VM) registerTime() {
 	d("-", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return timeOp(bytecode.OpSub, self(v), args[0])
 	})
-	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		other, ok := args[0].(*Time)
-		if !ok {
+	d("<=>", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		if other, ok := args[0].(*Time); ok {
+			return object.IntValue(timeCmp(self(v), other))
+		}
+		// A non-Time argument: MRI reverses the comparison — it asks the other
+		// object for `other <=> self` and inverts the sign of the answer (nil
+		// stays nil), dispatching the sign test through the result's own #>/#<.
+		r := vm.send(args[0], "<=>", []object.Value{v}, nil)
+		if object.IsNil(r) {
 			return object.NilV
 		}
-		return object.IntValue(timeCmp(self(v), other))
+		switch {
+		case vm.send(r, ">", []object.Value{object.IntValue(0)}, nil).Truthy():
+			return object.IntValue(-1)
+		case vm.send(r, "<", []object.Value{object.IntValue(0)}, nil).Truthy():
+			return object.IntValue(1)
+		default:
+			return object.IntValue(0)
+		}
 	})
 	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).t.Before(timeArg(args[0]).t))

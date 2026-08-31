@@ -18,13 +18,13 @@ func TestTimeConstructors(t *testing.T) {
 		// Time.utc / Time.gm — a whole UTC instant and its parts.
 		{`p Time.utc(2026,6,21,12,34,56).to_i`, "1782045296\n"},
 		{`p Time.gm(2026,6,21,12,34,56).to_i`, "1782045296\n"},
-		{`puts Time.utc(2026,6,21,12,34,56)`, "2026-06-21 12:34:56 +0000\n"},
-		// Defaulted trailing parts.
-		{`puts Time.utc(2026)`, "2026-01-01 00:00:00 +0000\n"},
-		{`puts Time.utc(2026,6)`, "2026-06-01 00:00:00 +0000\n"},
-		{`puts Time.utc(2026,6,21)`, "2026-06-21 00:00:00 +0000\n"},
-		{`puts Time.utc(2026,6,21,12)`, "2026-06-21 12:00:00 +0000\n"},
-		{`puts Time.utc(2026,6,21,12,34)`, "2026-06-21 12:34:00 +0000\n"},
+		{`puts Time.utc(2026,6,21,12,34,56)`, "2026-06-21 12:34:56 UTC\n"},
+		// Defaulted trailing parts. A UTC instant labels its zone "UTC" (MRI).
+		{`puts Time.utc(2026)`, "2026-01-01 00:00:00 UTC\n"},
+		{`puts Time.utc(2026,6)`, "2026-06-01 00:00:00 UTC\n"},
+		{`puts Time.utc(2026,6,21)`, "2026-06-21 00:00:00 UTC\n"},
+		{`puts Time.utc(2026,6,21,12)`, "2026-06-21 12:00:00 UTC\n"},
+		{`puts Time.utc(2026,6,21,12,34)`, "2026-06-21 12:34:00 UTC\n"},
 		// 7th arg to utc/local is microseconds (Float sub-usec allowed).
 		{`p Time.utc(2026,6,21,12,34,56,789012.5).nsec`, "789012500\n"},
 		{`p Time.utc(2026,6,21,12,34,56,500).usec`, "500\n"},
@@ -32,9 +32,9 @@ func TestTimeConstructors(t *testing.T) {
 		{`p Time.utc(2026,6.9,1).mon`, "6\n"},
 		{`p Time.utc(2026,6,1,5.7).hour`, "5\n"},
 		// Overflow normalises the way MRI (and Go) do.
-		{`puts Time.utc(2026,2,30)`, "2026-03-02 00:00:00 +0000\n"},
-		{`puts Time.utc(2026,1,1,24)`, "2026-01-02 00:00:00 +0000\n"},
-		{`puts Time.utc(2026,1,1,0,0,60)`, "2026-01-01 00:01:00 +0000\n"},
+		{`puts Time.utc(2026,2,30)`, "2026-03-02 00:00:00 UTC\n"},
+		{`puts Time.utc(2026,1,1,24)`, "2026-01-02 00:00:00 UTC\n"},
+		{`puts Time.utc(2026,1,1,0,0,60)`, "2026-01-01 00:01:00 UTC\n"},
 		// Time.local / Time.mktime — local zone (assert only TZ-independent facts).
 		{`p Time.local(2026,6,21).year`, "2026\n"},
 		{`p Time.mktime(2026,6,21).mon`, "6\n"},
@@ -194,9 +194,9 @@ func TestTimeStrftime(t *testing.T) {
 		{`puts Time.utc(2026,1,1,13,0,0).strftime("%I %l %P")`, "01  1 pm\n"},
 		// inspect includes the sub-second fraction (trailing zeros trimmed); to_s
 		// does not.
-		{base + `p t.inspect`, "\"2026-06-21 12:34:56 +0000\"\n"},
-		{`p Time.utc(2026,6,21,12,34,56,789012.5).inspect`, "\"2026-06-21 12:34:56.7890125 +0000\"\n"},
-		{`p Time.utc(2026,6,21,12,34,56,789012.5).to_s`, "\"2026-06-21 12:34:56 +0000\"\n"},
+		{base + `p t.inspect`, "\"2026-06-21 12:34:56 UTC\"\n"},
+		{`p Time.utc(2026,6,21,12,34,56,789012.5).inspect`, "\"2026-06-21 12:34:56.7890125 UTC\"\n"},
+		{`p Time.utc(2026,6,21,12,34,56,789012.5).to_s`, "\"2026-06-21 12:34:56 UTC\"\n"},
 		// ctime / asctime.
 		{base + `puts t.ctime`, "Sun Jun 21 12:34:56 2026\n"},
 		{base + `puts t.asctime`, "Sun Jun 21 12:34:56 2026\n"},

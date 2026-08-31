@@ -1,6 +1,9 @@
 package vm_test
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestTimeAliasIdentity pins the documented Time method aliases as sharing a
 // single method entry, exactly as MRI 4.0.6 does: Time.instance_method(:alias)
@@ -67,6 +70,83 @@ func TestTimeStrftimeDirectives(t *testing.T) {
 		{base + `p t.strftime("%^ha")`, "\"FEBa\"\n"},
 		{base + `p t.strftime("%10h")`, "\"       Feb\"\n"},
 		{base + `p t.strftime("%_010h")`, "\"0000000Feb\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestTimeDeconstructKeys covers Time#deconstruct_keys (MRI 4.0 pattern
+// matching): nil yields the whole field hash; an Array yields the requested
+// Symbol fields, ignoring non-Symbol and unknown keys; a non-Array/non-nil
+// argument is a TypeError and a missing argument an ArgumentError.
+func TestTimeDeconstructKeys(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p Time.utc(2022, 10, 5, 13, 30).deconstruct_keys(nil)`,
+			"{year: 2022, month: 10, day: 5, yday: 278, wday: 3, hour: 13, min: 30, sec: 0, subsec: 0, dst: false, zone: \"UTC\"}\n"},
+		{`p Time.utc(2022, 10, 5, 13, 39).deconstruct_keys([:zone, :subsec])`, "{zone: \"UTC\", subsec: 0}\n"},
+		{`p Time.utc(2022, 10, 5, 13, 30).deconstruct_keys([])`, "{}\n"},
+		// Non-Symbol keys are ignored.
+		{`p Time.utc(2022, 10, 5, 13, 30).deconstruct_keys(['year', []])`, "{}\n"},
+		// Unknown Symbol keys are skipped, processing continues past them.
+		{`p Time.utc(2022, 10, 5, 13, 30).deconstruct_keys([:year, :a, :month, :b, :day])`, "{year: 2022, month: 10, day: 5}\n"},
+		// A sub-second time reports a Rational subsec.
+		{`p Time.utc(2022, 10, 5, 13, 30, 0, 500000).deconstruct_keys([:subsec])`, "{subsec: (1/2)}\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	errCases := []struct{ src, want string }{
+		{`Time.utc(2022, 10, 5).deconstruct_keys`, "ArgumentError"},
+		{`Time.utc(2022, 10, 5).deconstruct_keys(1)`, "TypeError"},
+		{`Time.utc(2022, 10, 5).deconstruct_keys("x")`, "TypeError"},
+		{`Time.utc(2022, 10, 5).deconstruct_keys(:x)`, "TypeError"},
+	}
+	for _, c := range errCases {
+		err := runErr(t, c.src)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q: got err=%v, want containing %q", c.src, err, c.want)
+		}
+	}
+}
+
+// TestTimeInspectUTCZone covers repr: a UTC-location Time labels its zone "UTC"
+// (not the "+0000" offset) in both #to_s and #inspect, while a fixed-offset Time
+// keeps the numeric offset — matching MRI 4.0.6.
+func TestTimeInspectUTCZone(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p Time.utc(2000, 1, 1, 20, 15, 1).to_s`, "\"2000-01-01 20:15:01 UTC\"\n"},
+		{`p Time.utc(2000, 1, 1, 20, 15, 1).inspect`, "\"2000-01-01 20:15:01 UTC\"\n"},
+		{`p Time.utc(2007, 11, 1, 15, 25, 0, 123456).inspect`, "\"2007-11-01 15:25:00.123456 UTC\"\n"},
+		// A fixed-offset instant keeps its numeric offset in both forms.
+		{`p Time.at(0).getlocal("+00:00").to_s`, "\"1970-01-01 00:00:00 +0000\"\n"},
+		{`p Time.at(0).getlocal("+05:30").inspect`, "\"1970-01-01 05:30:00 +0530\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestTimeSpaceshipNonTime covers Time#<=> with a non-Time argument: MRI reverses
+// the comparison (other <=> self) and inverts the sign, returning nil when that
+// yields nil.
+func TestTimeSpaceshipNonTime(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// A Comparable-ish object whose reverse <=> is positive/negative/zero.
+		{`
+class C
+  def initialize(r) @r = r end
+  def <=>(o) @r end
+end
+t = Time.utc(2020, 1, 1)
+p [t <=> C.new(1), t <=> C.new(-1), t <=> C.new(0), t <=> C.new(nil)]`,
+			"[-1, 1, 0, nil]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
