@@ -60,6 +60,22 @@ func TestArrayHashValueEquality(t *testing.T) {
 		// [NaN] == [NaN] is true because Array#== checks #equal? per element first,
 		// while a bare NaN == NaN stays false.
 		{"p [[Float::NAN] == [Float::NAN], Float::NAN == Float::NAN]", "[true, false]\n"},
+
+		// A built-in-with-custom-== member on the RIGHT still drives element equality
+		// (the reflexive fall-through): 1 == Set[1] is false, so the arrays differ.
+		{"require 'set'; p([1] == [Set[1]])", "false\n"},
+
+		// Array#== vs a non-Array: a plain value, a user object without #to_ary, and
+		// one with #to_ary (which dispatches other == self).
+		{"p([1] == 1)", "false\n"},
+		{"p([1] == Object.new)", "false\n"},
+		{"class AL; def respond_to?(m, *); m == :to_ary; end; def ==(o); o == [1]; end; end; p([1] == AL.new)", "true\n"},
+
+		// Hash#== treats a Hash subclass structurally (both orders), and a non-Hash
+		// answering #to_hash dispatches other == self; a plain non-Hash is not equal.
+		{"class MH < Hash; end; h = MH.new; h[:a] = 1; p [h == {a: 1}, {a: 1} == h]", "[true, true]\n"},
+		{"p({a: 1} == 5)", "false\n"},
+		{"class HL; def respond_to?(m, *); m == :to_hash; end; def ==(o); true; end; end; p({a: 1} == HL.new)", "true\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -88,6 +104,11 @@ func TestArrayHashSetOpsAndEql(t *testing.T) {
 		{k + "p [K.new(1), K.new(2)].intersection([K.new(2)], [K.new(2)]).size", "1\n"},
 		// A #hash mismatch keeps members distinct even when #eql? would say equal.
 		{"class H; def eql?(o); true; end; def hash; object_id; end; end; p [H.new, H.new].uniq.size", "2\n"},
+		// A Bignum #hash is folded to a bucket like any other.
+		{"class B; def hash; 10**40; end; def eql?(o); o.is_a?(B); end; end; p [B.new, B.new].uniq.size", "1\n"},
+		// A non-Integer #hash raises TypeError, as in MRI.
+		{"class N; def hash; \"x\"; end; def eql?(o); true; end; end; " +
+			"p(([N.new, N.new].uniq rescue $!.class))", "TypeError\n"},
 
 		// Value-type set operations keep eql? (not ==) semantics: 1 and 1.0 differ.
 		{"p [[1, 1.0, 1].uniq, [1] | [1.0], [1, 1.0] - [1]]", "[[1, 1.0], [1, 1.0], [1.0]]\n"},
@@ -95,6 +116,14 @@ func TestArrayHashSetOpsAndEql(t *testing.T) {
 		// Hash#eql? and Array#eql? dispatch each member's #eql?.
 		{k + "p({1 => K.new(5)}.eql?({1 => K.new(5)}))", "true\n"},
 		{k + "p [K.new(3)].eql?([K.new(3)])", "true\n"},
+		// An Array-subclass member in an eql? comparison is unwrapped to its array.
+		{"class MA < Array; end; p([MA.new([1])].eql?([[1]]))", "true\n"},
+		// Two mutually recursive hashes are eql? (the recursive-pair terminates).
+		{"h1 = {}; h2 = {}; h1[:x] = h1; h2[:x] = h2; p(h1.eql?(h2))", "true\n"},
+
+		// A Set member (built-in value equality) inside a Struct compares by value
+		// through the VM-less Struct#== path.
+		{"require 'set'; S = Struct.new(:a); p(S.new(Set[1]) == S.new(Set[1]))", "true\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

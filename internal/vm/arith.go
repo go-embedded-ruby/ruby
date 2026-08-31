@@ -345,9 +345,11 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		// the argument. It routes through the VM so a member's own #eql?/#hash is
 		// dispatched (MRI's rb_ary_diff), which the VM-less arrayOp path cannot do.
 		if aa, ok := a.(*object.Array); ok && op == bytecode.OpSub {
-			if bb, ok := b.(*object.Array); ok {
-				return object.NewArrayFromSlice(vm.arrayDifferenceEql(aa.Elems, bb.Elems))
+			bb, ok := b.(*object.Array)
+			if !ok {
+				return raise("TypeError", "no implicit conversion of %s into Array", b.Inspect())
 			}
+			return object.NewArrayFromSlice(vm.arrayDifferenceEql(aa.Elems, bb.Elems))
 		}
 		// An Enumerator dispatches its + (Enumerator#+ builds an Enumerator::Chain of
 		// self and the operand) as a method rather than falling into the numeric
@@ -696,9 +698,9 @@ func stringOp(op bytecode.Op, a *object.String, b object.Value) object.Value {
 	return raise("NoMethodError", "undefined method '%s' for a String", op)
 }
 
-// arrayOp applies a fast-path operator with an Array receiver: + concatenates,
-// - removes (set difference, keeping order/duplicates of the left), and * either
-// repeats (Integer) or joins (String).
+// arrayOp applies a fast-path operator with an Array receiver: + concatenates and
+// * either repeats (Integer) or joins (String). Array#- (difference) is handled
+// in binaryOp, which has the VM needed to dispatch each member's #eql?/#hash.
 func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
@@ -708,18 +710,6 @@ func arrayOp(op bytecode.Op, a *object.Array, b object.Value) object.Value {
 		}
 		out := make([]object.Value, 0, len(a.Elems)+len(bb.Elems))
 		out = append(append(out, a.Elems...), bb.Elems...)
-		return object.NewArrayFromSlice(out)
-	case bytecode.OpSub:
-		bb, ok := b.(*object.Array)
-		if !ok {
-			raise("TypeError", "no implicit conversion of %s into Array", b.Inspect())
-		}
-		var out []object.Value
-		for _, e := range a.Elems {
-			if !arrayIncludes(bb.Elems, e) {
-				out = append(out, e)
-			}
-		}
 		return object.NewArrayFromSlice(out)
 	case bytecode.OpMul:
 		// Array * String (join with a separator) is intercepted in binaryOp and
@@ -771,16 +761,16 @@ func (vm *VM) needsEqlDispatch(v object.Value) bool {
 // dispatched (and only same-bucket members are then compared). A value type uses
 // the built-in structural hash.
 func (vm *VM) eqlHashCode(v object.Value) int64 {
-	if vm.needsEqlDispatch(v) {
-		switch h := vm.send(v, "hash", nil, nil).(type) {
-		case object.Integer:
-			return int64(h)
-		case *object.Bignum:
-			return h.I.Int64()
-		}
-		return 0
+	if !vm.needsEqlDispatch(v) {
+		return vm.hashValue(v)
 	}
-	return vm.hashValue(v)
+	h := vm.send(v, "hash", nil, nil)
+	rh, ok := hashAsInt(h)
+	if !ok {
+		// MRI requires #hash to return an Integer and raises otherwise.
+		raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(h).name)
+	}
+	return rh
 }
 
 // eqlKeys reports MRI eql?-equality of two set-operation members: the identity
@@ -849,17 +839,6 @@ func (vm *VM) arrayDifferenceEql(a, b []object.Value) []object.Value {
 		}
 	}
 	return out
-}
-
-// arrayIncludes backs the VM-less Array#- fast path (value elements only); the
-// VM-aware operator in binaryOp routes object-bearing arrays through eql? dispatch.
-func arrayIncludes(elems []object.Value, v object.Value) bool {
-	for _, e := range elems {
-		if valueEql(e, v) {
-			return true
-		}
-	}
-	return false
 }
 
 func negate(v object.Value) object.Value {
@@ -941,11 +920,8 @@ func (vm *VM) rbEqualElem(a, b object.Value, seen map[eqPair]struct{}) bool {
 // the matching container type: MRI accepts one that answers the conversion method
 // (#to_ary / #to_hash) by dispatching `other == self` (rb_equal). Restricted to
 // user objects — the only values that carry such a coercion without being the
-// container type — and a no-op without a live VM.
+// container type. Callers invoke it only with a live VM.
 func (vm *VM) reflexiveContainerEq(self, other object.Value, conv string) bool {
-	if vm == nil {
-		return false
-	}
 	if _, isObj := other.(*RObject); !isObj {
 		return false
 	}
@@ -1048,7 +1024,7 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 		if !ok {
 			// Array#== with a non-Array that answers #to_ary: MRI dispatches
 			// `other == self` (rb_equal), so an Array-like object compares equal.
-			return vm.reflexiveContainerEq(a, b, "to_ary")
+			return vm != nil && vm.reflexiveContainerEq(a, b, "to_ary")
 		}
 		if len(av.Elems) != len(bv.Elems) {
 			return false
@@ -1078,7 +1054,7 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 		}
 		if !ok {
 			// Hash#== with a non-Hash that answers #to_hash dispatches `other == self`.
-			return vm.reflexiveContainerEq(a, b, "to_hash")
+			return vm != nil && vm.reflexiveContainerEq(a, b, "to_hash")
 		}
 		if av.Len() != bv.Len() {
 			return false
@@ -1262,15 +1238,13 @@ func valueEqlRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 		}
 		return hashIdentityMatch(av, bv)
 	}
-	// A user object whose class defines #eql? (or #hash-based equality) dispatches
-	// it — MRI's rb_eql, used per member by Array#eql? / Hash#eql?. Guarded so
-	// VM-less callers keep plain identity.
+	// A user object whose class defines #eql? dispatches it — MRI's rb_eql, used per
+	// member by Array#eql? / Hash#eql?. Unlike ==, rb_eql has no reflexive rule, so
+	// only the receiver's #eql? is consulted. Guarded so VM-less callers keep plain
+	// identity.
 	if vm != nil {
 		if _, isObj := a.(*RObject); isObj {
 			return a == b || vm.send(a, "eql?", []object.Value{b}, nil).Truthy()
-		}
-		if _, isObj := b.(*RObject); isObj {
-			return a == b || vm.send(b, "eql?", []object.Value{a}, nil).Truthy()
 		}
 	}
 	return a == b // identity for nil/true/false and other reference types
