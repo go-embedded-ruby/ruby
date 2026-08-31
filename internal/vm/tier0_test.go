@@ -179,7 +179,9 @@ func TestReflection(t *testing.T) {
 		{`class C; def foo; 11; end; end; m = C.new.method(:foo); p m.unbind.bind(C.new).call`, "11\n"},
 		// define_method from an (Unbound)Method.
 		{`class C; def foo; 3; end; end; class C; define_method(:bar, instance_method(:foo)); end; p C.new.bar`, "3\n"},
-		{`class C; def foo; 7; end; end; m = C.new.method(:foo); class D; end; D.define_method(:g, m); p D.new.g`, "7\n"},
+		// A bound Method transplants onto the owner or a subclass of it (MRI rejects an
+		// unrelated target with "bind argument must be a subclass of ...").
+		{`class C; def foo; 7; end; end; m = C.new.method(:foo); class D < C; end; D.define_method(:g, m); p D.new.g`, "7\n"},
 		// method_defined?.
 		{`class C; def foo; end; end; p [C.method_defined?(:foo), C.method_defined?(:nope)]`, "[true, false]\n"},
 	})
