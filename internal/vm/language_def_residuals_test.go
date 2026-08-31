@@ -100,6 +100,28 @@ func TestSplatToArrayNilToA(t *testing.T) {
 	}
 }
 
+// TestSuperFallsBackToMethodMissing covers a `super` that finds no callable
+// superclass method: it must not invoke an `undef` tombstone (which has a nil
+// body and crashed), and it routes to a user-defined method_missing while a
+// plain failure still raises the super-specific NoMethodError.
+func TestSuperFallsBackToMethodMissing(t *testing.T) {
+	// undef'd ancestor method + user method_missing: super reaches method_missing.
+	got := eval(t, `class A; undef_method :is_a?; end
+	  class B < A
+	    def is_a?(x); super; end
+	    def method_missing(*a); "mm:#{a[0]}"; end
+	  end
+	  p B.new.is_a?(Hash)`)
+	if got != "\"mm:is_a?\"\n" {
+		t.Errorf("super->method_missing: got %q", got)
+	}
+	// no super method and only the default method_missing: super-specific error.
+	err := runErr(t, `class A; def f; super; end; end; A.new.f`)
+	if err == nil || !strings.Contains(err.Error(), "super: no superclass method 'f'") {
+		t.Errorf("plain super fail: got %v", err)
+	}
+}
+
 // TestKeywordAndArityErrors covers the keyword/arity error paths: a missing
 // required keyword is reported before an unknown one, and the post-splat arity
 // minimum is enforced.

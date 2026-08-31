@@ -2441,13 +2441,21 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 			break
 		}
 	}
-	if start >= 0 {
+	// Locate the next definition of methodName above definee. An `undef`
+	// tombstone (m.undefined) is a blocker: it is the "next definition" and it is
+	// not callable, so the search stops there and super falls through to
+	// method_missing / NoMethodError rather than reaching a still-defined ancestor
+	// above the blocker (and rather than crashing on its nil body).
+	var found *Method
+	switch {
+	case start >= 0:
 		for _, k := range anc[start+1:] {
 			if m, ok := k.methods[methodName]; ok {
-				return vm.invoke(m, self, args, blk)
+				found = m
+				break
 			}
 		}
-	} else if definee.metaOf != nil {
+	case definee.metaOf != nil:
 		// definee is a metaclass: the current method was defined in a `class << self`
 		// body, so its class-method super walks the metaclass chain
 		// (#<Class:Child> -> #<Class:Base> -> ...). Each metaclass's method table
@@ -2455,13 +2463,25 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 		// class method.
 		for k := definee.super; k != nil; k = k.super {
 			if m, ok := k.methods[methodName]; ok {
-				return vm.invoke(m, self, args, blk)
+				found = m
+				break
 			}
 		}
-	} else if m := lookupSMethod(definee.super, methodName); m != nil {
+	default:
 		// definee is the class itself, outside the receiver's ancestry: this is a
 		// class-method super (def self.foo), so walk the singleton-method chain.
-		return vm.invoke(m, self, args, blk)
+		found = lookupSMethod(definee.super, methodName)
+	}
+	if found != nil && !found.undefined {
+		return vm.invoke(found, self, args, blk)
+	}
+	// No callable superclass method. MRI routes a failed super through
+	// method_missing: a user-defined one handles it, while the default (on
+	// BasicObject) reports the super-specific message below. Dispatch only a
+	// genuine override so the default path keeps that exact message.
+	if mm := lookupMethod(vm.classOf(self), "method_missing"); mm != nil && !mm.undefined && mm.owner != vm.cBasicObject {
+		mmArgs := append([]object.Value{object.SymVal(methodName)}, args...)
+		return vm.invoke(mm, self, mmArgs, blk)
 	}
 	raise("NoMethodError", "super: no superclass method '%s'", methodName)
 	return object.NilV
