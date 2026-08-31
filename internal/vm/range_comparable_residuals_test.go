@@ -164,6 +164,11 @@ p(a)`, "[\"A\", \"AA\"]\n"},
 a = []
 ("A"..).step("A") { |x| break if x > "AAA"; a << x }
 p(a)`, "[\"A\", \"AA\", \"AAA\"]\n"},
+		// A backward String range steps to nothing (begin already past end).
+		{"step_plus_backward", `
+a = []
+("D".."A").step("A") { |x| a << x }
+p(a)`, "[]\n"},
 		// The existing Integer-step (via #succ) path still works.
 		{"step_int_succ", `
 a = []

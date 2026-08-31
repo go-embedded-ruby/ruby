@@ -8336,10 +8336,9 @@ func (vm *VM) rangeStepByPlus(blk *Proc, r *object.Range, step object.Value) {
 		}
 	}
 	for {
-		c, ok := vm.rangeCmpV(cur, r.Hi)
-		if !ok {
-			return
-		}
+		// cur and end are both Strings on this path (String#+ keeps cur a String, or
+		// raises for an incompatible step), so #<=> always yields a comparison.
+		c, _ := vm.rangeCmpV(cur, r.Hi)
 		if r.Exclusive {
 			if c >= 0 {
 				return
