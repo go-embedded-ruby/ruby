@@ -2057,6 +2057,17 @@ func (vm *VM) bootstrap() {
 	strConcatFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
+		// Freeze any argument that aliases the receiver before the loop mutates it,
+		// so `a.concat(a, a)` contributes a's INITIAL value at every position (MRI:
+		// "hellohellohello", not "hellohellohellohello").
+		if len(args) > 1 {
+			args = append([]object.Value(nil), args...)
+			for i, a := range args {
+				if str, ok := a.(*object.String); ok && str == s {
+					args[i] = str.Dup()
+				}
+			}
+		}
 		for _, a := range args {
 			if u, ok := a.(object.KeyUnwrapper); ok { // a String subclass instance
 				if w, wrapped := u.HashUnwrap(); wrapped {

@@ -139,8 +139,9 @@ func TestConverterConvert(t *testing.T) {
 		{`c = Encoding::Converter.new("utf-8","iso-8859-1"); c.finish; c.convert("a")`, "convert after finish"},
 		// A trailing incomplete sequence buffers, then #finish raises.
 		{`c = Encoding::Converter.new("euc-jp","iso-8859-1"); c.convert("\xa4".b); c.finish`, "incomplete"},
-		// Destination without a codec: even ASCII is undefined.
-		{`Encoding::Converter.new("utf-8","UTF-7").convert("a")`, "UndefinedConversionError"},
+		// Destination without a codec: MRI rejects the pair at construction time
+		// (rb_econv_open) rather than at convert time.
+		{`Encoding::Converter.new("utf-8","UTF-7").convert("a")`, "ConverterNotFoundError"},
 		{`Encoding::Converter.new("utf-8","shift_jis").convert("😀")`, "UndefinedConversionError"},
 	}
 	for _, c := range errCases {
@@ -210,7 +211,6 @@ func TestConverterPrimitive(t *testing.T) {
 		// x/text source fallback: a bare invalid high byte and a truncated lead.
 		{`c = Encoding::Converter.new("shift_jis","utf-8"); s = "\xfd\xfd\xfd\xfd".b; p c.primitive_convert(s, String.new)`, ":invalid_byte_sequence\n"},
 		{`c = Encoding::Converter.new("shift_jis","utf-8"); p c.primitive_convert("\x82".b, String.new, nil, nil, partial_input: true)`, ":source_buffer_empty\n"},
-		{`c = Encoding::Converter.new("UTF-7","utf-8"); s = "\x80".b; p c.primitive_convert(s, String.new)`, ":invalid_byte_sequence\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

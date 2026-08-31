@@ -37,20 +37,62 @@ func (vm *VM) converterNew(args []object.Value) object.Value {
 	if len(args) < 2 {
 		raise("ArgumentError", "wrong number of arguments (given %d, expected 2..3)", len(args))
 	}
-	c := &converterObj{
-		src:    vm.encodingArg(args[0]).name,
-		dst:    vm.encodingArg(args[1]).name,
-		status: "source_buffer_empty",
+	// MRI resolves both endpoints through rb_econv_open: an unknown name, an
+	// identical src/dst, or a pair with no available codec all raise
+	// ConverterNotFoundError (never ArgumentError). An unresolvable name is kept
+	// verbatim in the message; a resolvable one is canonicalised.
+	src, srcOK := vm.converterEncName(args[0])
+	dst, dstOK := vm.converterEncName(args[1])
+	if !srcOK || !dstOK || src == dst || !vm.converterDeliverable(src, dst) {
+		raise("Encoding::ConverterNotFoundError", "code converter not found (%s to %s)", src, dst)
 	}
-	if c.src == c.dst {
-		raise("Encoding::ConverterNotFoundError", "code converter not found (%s to %s)", c.src, c.dst)
-	}
+	c := &converterObj{src: src, dst: dst, status: "source_buffer_empty"}
 	c.repl, c.replEnc = defaultReplacementBytes(c.dst)
 
 	if len(args) >= 3 {
 		vm.applyConverterOpts(c, args[2])
 	}
 	return c
+}
+
+// converterEncName resolves one Converter.new endpoint to a canonical encoding
+// name. An Encoding, or a String / #to_str naming a registered encoding, yields
+// (canonicalName, true); an unregistered name yields the raw string with
+// ok=false, so the caller raises ConverterNotFoundError keeping the name exactly
+// as given (as MRI does). A non-String, non-Encoding raises TypeError.
+func (vm *VM) converterEncName(v object.Value) (string, bool) {
+	switch e := v.(type) {
+	case *encodingObj:
+		return e.name, true
+	case *object.String:
+		if enc, ok := vm.findEncoding(e.Str()); ok {
+			return enc.name, true
+		}
+		return e.Str(), false
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			if enc, ok := vm.findEncoding(s.Str()); ok {
+				return enc.name, true
+			}
+			return s.Str(), false
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return "", false
+}
+
+// converterDeliverable reports whether rbgo can build every hop of a src→dst
+// conversion (both names already canonical and distinct). It mirrors the hop
+// check buildConvpath performs, without allocating the path Array.
+func (vm *VM) converterDeliverable(src, dst string) bool {
+	path := pathList(src, dst)
+	for i := 0; i+1 < len(path); i++ {
+		if !vm.hopConvertible(path[i], path[i+1]) {
+			return false
+		}
+	}
+	return true
 }
 
 // applyConverterOpts reads Converter.new's third argument: an options Hash (its
