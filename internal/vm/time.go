@@ -1292,6 +1292,7 @@ var strftimeExpand = map[byte]string{
 	'T': "%H:%M:%S",
 	'X': "%H:%M:%S",
 	'h': "%b",
+	'v': "%e-%^b-%Y", // VMS/Oracle date, e.g. " 3-FEB-2001"
 }
 
 // strftime formats a Time per Ruby's strftime directive set: flags (-_0^#),
@@ -1325,7 +1326,10 @@ func strftime(t *Time, format string) string {
 		}
 		dir := format[j]
 		if exp, ok := strftimeExpand[dir]; ok {
-			b.WriteString(strftime(t, exp))
+			// A composite/alias directive expands to a sub-format; the parsed
+			// flags and explicit width still apply to its rendered result, so
+			// `%^h` upcases (%b → FEB) and `%10h` right-pads to width 10.
+			b.WriteString(applyFlags(strftime(t, exp), flags, 0, ' ', width))
 			i = j
 			continue
 		}
@@ -1419,6 +1423,9 @@ func strftimeField(t *Time, dir byte, colons, width int) (field, bool) {
 	case 'G':
 		y, _ := tm.ISOWeek()
 		return num(int64(y), 4), true
+	case 'g':
+		y, _ := tm.ISOWeek()
+		return num(int64(mod(y, 100)), 2), true
 	case 'V':
 		_, wk := tm.ISOWeek()
 		return num(int64(wk), 2), true

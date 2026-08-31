@@ -48,6 +48,33 @@ func TestTimeAliasBehavior(t *testing.T) {
 	}
 }
 
+// TestTimeStrftimeDirectives covers the strftime additions: %g (two-digit
+// commercial/ISO week year), %v (the VMS/Oracle date, an alias of %e-%^b-%Y),
+// and the GNU flag modifiers applying through an alias directive (%^h upcases
+// %b, with width and pad flags composing), all matched against MRI 4.0.6.
+func TestTimeStrftimeDirectives(t *testing.T) {
+	// A fixed UTC instant keeps the assertions zone-independent.
+	base := `t = Time.utc(2001, 2, 3, 4, 5, 6); `
+	cases := []struct{ src, want string }{
+		{base + `p t.strftime("%g")`, "\"01\"\n"},
+		{base + `p Time.utc(2000, 4, 6).strftime("%g")`, "\"00\"\n"},
+		{base + `p t.strftime("%v")`, "\" 3-FEB-2001\"\n"},
+		{base + `p t.strftime("%v") == t.strftime("%e-%^b-%Y")`, "true\n"},
+		{base + `p t.strftime("%^h")`, "\"FEB\"\n"},
+		{base + `p t.strftime("%^_5h")`, "\"  FEB\"\n"},
+		{base + `p t.strftime("%0^5h")`, "\"00FEB\"\n"},
+		{base + `p t.strftime("%0-^5h")`, "\"FEB\"\n"},
+		{base + `p t.strftime("%^ha")`, "\"FEBa\"\n"},
+		{base + `p t.strftime("%10h")`, "\"       Feb\"\n"},
+		{base + `p t.strftime("%_010h")`, "\"0000000Feb\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestTimeShiftPreservesZone covers timeShift: Time#+ and Time#- keep both the
 // receiver's UTC-ness / fixed offset and its Ruby timezone object, as MRI does.
 func TestTimeShiftPreservesZone(t *testing.T) {
