@@ -253,8 +253,49 @@ func (d *mDumper) writeHash(h *object.Hash) {
 	}
 }
 
+// encodingASCIICompatible reports whether an encoding name denotes an
+// ASCII-compatible encoding — one whose ASCII bytes stand for ASCII characters.
+// The wide Unicode transformation formats (UTF-16/UTF-32, in any endianness) are
+// the exceptions Marshal cares about: a Regexp over such a source keeps that
+// encoding even when every byte happens to be ASCII.
+func encodingASCIICompatible(name string) bool {
+	u := strings.ToUpper(name)
+	return !strings.HasPrefix(u, "UTF-16") && !strings.HasPrefix(u, "UTF-32")
+}
+
+// regexpMarshalFixed reports whether the Regexp is dumped with the
+// ARG_ENCODING_FIXED (0x10) option bit set. MRI sets it when FIXEDENCODING was
+// requested or the source is otherwise tied to a concrete encoding: a byte
+// outside ASCII, or an ASCII-incompatible source encoding (UTF-16/UTF-32) even
+// with ASCII-only bytes. A NOENCODING (/n) Regexp is not fixed.
+func regexpMarshalFixed(r *Regexp) bool {
+	if r.fixedEnc {
+		return true
+	}
+	if r.noEnc {
+		return false
+	}
+	if r.srcEnc != "" && !encodingASCIICompatible(r.srcEnc) {
+		return true
+	}
+	return !marshalIsASCII(r.source)
+}
+
+// regexpMarshalEnc returns the encoding name Marshal records for the Regexp,
+// which is the encoding of the compiled Regexp (#encoding). When the Regexp is
+// fixed to a concrete source encoding, that encoding is recorded even for an
+// ASCII-only source (so a Windows-1251 or UTF-16 Regexp keeps its encoding);
+// otherwise #encoding's own rule applies (US-ASCII for an ASCII-only source, the
+// source encoding for a binary or wide one). An "ASCII-8BIT" result is dumped
+// bare, with no encoding ivar.
+func regexpMarshalEnc(r *Regexp) string {
+	if regexpMarshalFixed(r) && r.srcEnc != "" {
+		return r.srcEnc
+	}
+	return r.encodingName()
+}
+
 func (d *mDumper) writeRegexp(r *Regexp) {
-	nonASCII := !marshalIsASCII(r.source)
 	opt := 0
 	if strings.ContainsRune(r.flags, 'i') {
 		opt |= reIgnoreCase
@@ -265,18 +306,35 @@ func (d *mDumper) writeRegexp(r *Regexp) {
 	if strings.ContainsRune(r.flags, 'm') {
 		opt |= reMultiline
 	}
-	if nonASCII {
-		opt |= 16 // ARG_ENCODING_FIXED, set for a non-ASCII (UTF-8) source
+	if regexpMarshalFixed(r) {
+		opt |= reFixedEncoding
+	}
+	if r.noEnc {
+		opt |= reNoEncoding
+	}
+	enc := regexpMarshalEnc(r)
+	if enc == "ASCII-8BIT" {
+		// A binary (ASCII-8BIT) Regexp carries no encoding ivar, so it is emitted
+		// bare — no 'I' wrapper.
+		d.buf = append(d.buf, '/')
+		d.writeBytes(r.source)
+		d.buf = append(d.buf, byte(opt))
+		return
 	}
 	d.buf = append(d.buf, 'I', '/')
 	d.writeBytes(r.source)
 	d.buf = append(d.buf, byte(opt))
 	d.writeLong(1)
-	d.writeSymbol("E")
-	if nonASCII {
+	switch enc {
+	case "UTF-8":
+		d.writeSymbol("E")
 		d.buf = append(d.buf, 'T')
-	} else {
+	case "US-ASCII":
+		d.writeSymbol("E")
 		d.buf = append(d.buf, 'F')
+	default:
+		d.writeSymbol("encoding")
+		d.writeValue(object.NewStringBytesEnc([]byte(enc), "ASCII-8BIT"))
 	}
 }
 
@@ -381,6 +439,20 @@ func (d *mDumper) writeObject(o *RObject) {
 		d.writeSymbol(o.class.name)
 		d.writeLong(len(sd.names))
 		for i, name := range sd.names {
+			d.writeSymbol(name)
+			d.writeValue(o.structVals[i])
+		}
+		return
+	}
+	// A Data (Ruby 3.2+ immutable value object, minted by Data.define) marshals
+	// with the same 'S' container as a Struct — the class name followed by each
+	// member name/value pair — because MRI stores a Data's members the same way it
+	// stores a Struct's. The real class name is used (never a #name override).
+	if dd := dataDefOf(o.class); dd != nil {
+		d.buf = append(d.buf, 'S')
+		d.writeSymbol(o.class.name)
+		d.writeLong(len(dd.names))
+		for i, name := range dd.names {
 			d.writeSymbol(name)
 			d.writeValue(o.structVals[i])
 		}
@@ -792,7 +864,20 @@ func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 			}
 		}
 	case *Regexp:
-		// :E only refines the source encoding; the compiled Regexp needs nothing.
+		// The encoding ivar records the Regexp's source encoding, which #encoding
+		// reports (and a re-dump reproduces); the compiled matcher is unaffected.
+		switch name {
+		case "E":
+			if val.Truthy() {
+				b.srcEnc = "UTF-8"
+			} else {
+				b.srcEnc = "US-ASCII"
+			}
+		case "encoding":
+			if s, ok := val.(*object.String); ok {
+				b.srcEnc = s.Str()
+			}
+		}
 	default:
 		setIvar(base, name, val)
 	}
@@ -899,21 +984,29 @@ func (r *mReader) readRange() object.Value {
 func (r *mReader) readStruct() object.Value {
 	className := r.readSymbol()
 	cls := r.vm.marshalClass(className)
-	sd := structDefOf(cls)
-	if sd == nil {
+	// The 'S' container carries both Struct and Data (Ruby 3.2+ immutable value)
+	// instances, whose members are stored the same way; memberDefNames resolves
+	// either layout. A Data loads as a frozen instance, matching MRI's immutability
+	// (independent of the freeze: kwarg).
+	names, ok := memberDefNames(cls)
+	if !ok {
 		raise("TypeError", "%s is not a Struct", className)
 	}
-	o := &RObject{class: cls, ivars: map[string]object.Value{}, structVals: make([]object.Value, len(sd.names))}
+	isData := dataDefOf(cls) != nil
+	o := &RObject{class: cls, ivars: map[string]object.Value{}, structVals: make([]object.Value, len(names))}
 	r.register(o)
 	n := r.long()
 	for i := 0; i < n; i++ {
 		name := r.readSymbol()
 		val := r.readValue()
-		for idx, m := range sd.names {
+		for idx, m := range names {
 			if m == name {
 				o.structVals[idx] = val
 			}
 		}
+	}
+	if isData {
+		o.frozen = true
 	}
 	return o
 }
@@ -992,6 +1085,14 @@ func (r *mReader) readRegexp(_ bool) object.Value {
 		flags += "x"
 	}
 	re := r.vm.compileRegexp(source, flags)
+	if rx, ok := re.(*Regexp); ok {
+		// A non-ASCII source is already treated as fixed-encoding by its content,
+		// exactly as a source literal is, so recording the FIXED bit for it would
+		// make a loaded /café/ unequal to the literal /café/ (whose fixedEnc field
+		// is false). Only an ASCII-only source needs the bit carried explicitly.
+		rx.fixedEnc = opt&reFixedEncoding != 0 && marshalIsASCII(source)
+		rx.noEnc = opt&reNoEncoding != 0
+	}
 	return r.register(re)
 }
 
