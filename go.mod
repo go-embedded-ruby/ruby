@@ -74,7 +74,7 @@ require (
 	github.com/go-ruby-faraday/faraday v0.0.0-20260704105000-d9589491af46
 	github.com/go-ruby-fast-gettext/fast-gettext v0.0.0-20260709172829-8beb2fbc96a8
 	github.com/go-ruby-find/find v0.0.0-20260630081030-35072d185272
-	github.com/go-ruby-format/format v0.0.0-20260815195335-4038d17b79a1
+	github.com/go-ruby-format/format v0.0.0-20260831115501-f58c7d12507c
 	github.com/go-ruby-friendly-id/friendly-id v0.0.0-20260707195609-ff85fef61060
 	github.com/go-ruby-getoptlong/getoptlong v0.0.0-20260629150025-1a1bfd19bc49
 	github.com/go-ruby-grape/grape v0.0.0-20260702151528-455377c8c7c3
