@@ -56,6 +56,74 @@ func TestStringRindexResiduals(t *testing.T) {
 	})
 }
 
+func TestStringSubGsubResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"backref_plus_last_paren", `p "hello".gsub(/(l)o/, '<\+>')`, "\"hel<l>\"\n"},
+		{"backref_plus_no_capture", `p "hello".sub(/l/, '<\+>')`, "\"he<>lo\"\n"},
+		{"sub_ignores_block", `p "food".sub(/f/, "g"){"w"}`, "\"good\"\n"},
+		{"gsub_ignores_block", `p "food".gsub(/o/, "0"){"w"}`, "\"f00d\"\n"},
+		{"sub_to_str_replacement", `class R; def to_str; "X"; end; end; p "abc".sub(/b/, R.new)`, "\"aXc\"\n"},
+		{"sub_to_str_pattern", `class P; def to_str; "b"; end; end; p "abc".sub(P.new, "X")`, "\"aXc\"\n"},
+		{"gsub_hash", `p "hello".gsub(/[el]/, "e" => "3", "l" => "1")`, "\"h311o\"\n"},
+		{"gsub_enum_size_nil", `p "hello".gsub(/l/).size`, "nil\n"},
+	})
+}
+
+func TestStringScanResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"basic", `p "cruel world".scan(/\w+/)`, "[\"cruel\", \"world\"]\n"},
+		{"sets_match", `"hello.".scan(/.(.)/); p $~[0]`, "\"o.\"\n"},
+		{"match_nil_after_none", `"hello.".scan(/xyz/); p $~`, "nil\n"},
+		{"block_sees_match", `m=[]; "hello".scan(/([aeiou])/){ m << $~.offset(0) }; p m`, "[[1, 2], [4, 5]]\n"},
+		{"restores_after_block", `"hello".scan(/./){ "ok".match(/./) }; p $~[0]`, "\"o\"\n"},
+		{"to_str_pattern", `class SP; def to_str; "o"; end; end; p "o_o".scan(SP.new)`, "[\"o\", \"o\"]\n"},
+	})
+}
+
+func TestStringCasecmpResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"ascii", `p "A".casecmp("a")`, "0\n"},
+		{"nonascii_no_fold", `p "Ã".casecmp("ã")`, "-1\n"},
+		{"nonascii_umlaut", `p "Ã".casecmp("Ä")`, "-1\n"},
+		{"no_fold_sharp_s", `p "ß".casecmp("ss")`, "1\n"},
+		{"to_str", `class CO; def to_str; "abc"; end; end; p "abc".casecmp(CO.new)`, "0\n"},
+		{"nil_when_unconvertible", `p "abc".casecmp(123)`, "nil\n"},
+		{"subclass", `class MS < String; end; p "a".casecmp(MS.new("b"))`, "-1\n"},
+		{"q_equal", `p "abc".casecmp?("ABC")`, "true\n"},
+		{"q_unicode_fold", `p "äöü".casecmp?("ÄÖÜ")`, "true\n"},
+		{"q_sharp_s", `p "ß".casecmp?("ss")`, "true\n"},
+		{"q_unrelated", `p "Ã".casecmp?("Ä")`, "false\n"},
+		{"q_nil_unconvertible", `p "abc".casecmp?(123)`, "nil\n"},
+	})
+}
+
+func TestStringChompResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"newline_sep_removes_cr", `p "abc\r\r".chomp("\n")`, "\"abc\\r\"\n"},
+		{"newline_sep_crlf", `p "abc\r\n\r\n".chomp("\n")`, "\"abc\\r\\n\"\n"},
+		{"nil_no_chomp", `p "abc\r\n".chomp(nil)`, "\"abc\\r\\n\"\n"},
+		{"custom_dollar_slash", `$/ = "cdef"; p "abcdef".chomp`, "\"ab\"\n"},
+		{"default_smart", `$/ = "\n"; p "abc\r\r".chomp`, "\"abc\\r\"\n"},
+		{"to_str_arg", `class ChA; def to_str; "bc"; end; end; p "abc".chomp(ChA.new)`, "\"a\"\n"},
+		{"paragraph_mode", `p "abc\n\n\n".chomp("")`, "\"abc\"\n"},
+		{"bang_nil_returns_nil", `p "abc".chomp!(nil)`, "nil\n"},
+	})
+}
+
+func TestStringPartitionResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"partition_regexp", `p "hello!".partition(/l./)`, "[\"he\", \"ll\", \"o!\"]\n"},
+		{"rpartition_regexp", `p "hello!".rpartition(/l./)`, "[\"hel\", \"lo\", \"!\"]\n"},
+		{"partition_sets_globals", `"hello!".partition(/(.l)(.o)/); p [$1, $2]`, "[\"el\", \"lo\"]\n"},
+		{"partition_string", `p "hello".partition("l")`, "[\"he\", \"l\", \"lo\"]\n"},
+		{"rpartition_string", `p "hello".rpartition("l")`, "[\"hel\", \"l\", \"o\"]\n"},
+		{"partition_no_match", `p "hello".partition("x")`, "[\"hello\", \"\", \"\"]\n"},
+		{"rpartition_no_match", `p "hello".rpartition("x")`, "[\"\", \"\", \"hello\"]\n"},
+		{"partition_to_str", `class LP; def to_str; "l"; end; end; p "hello".partition(LP.new)`, "[\"he\", \"l\", \"lo\"]\n"},
+		{"partition_typeerror", `begin; "hello".partition(5); rescue TypeError; puts "te"; end`, "te\n"},
+	})
+}
+
 func TestStringIndexRindexErrorMessages(t *testing.T) {
 	if err := runErr(t, `"abc".index(nil)`); err == nil || !strings.Contains(err.Error(), "no implicit conversion") {
 		t.Fatalf("index(nil): %v", err)

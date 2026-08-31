@@ -444,6 +444,20 @@ func (vm *VM) strIndexRegexp(re *Regexp, subject string, off int) object.Value {
 	return object.IntValue(int64(byteToChar(subject, byteOff+md.Begin(0))))
 }
 
+// lastRegexpMatch returns the match of re that begins at the largest byte offset
+// in subject (the rightmost match, as String#rpartition selects it), or nil when
+// there is none. It probes anchored matches from the end toward the start, so the
+// whole string stays visible to anchors and lookbehind.
+func (vm *VM) lastRegexpMatch(re *Regexp, subject string) *MatchData {
+	for p := len(subject); p >= 0; p-- {
+		md := re.matcher().MatchAt(subject, p)
+		if md != nil && md.Begin(0) == p {
+			return &MatchData{md: md, subject: subject, re: re}
+		}
+	}
+	return nil
+}
+
 // strRindexRegexp implements String#rindex with a Regexp: it returns the largest
 // character index p (p <= limit) at which re matches starting exactly at p,
 // setting $~ (nil when there is no such match). limit has been clamped to the
@@ -597,15 +611,28 @@ func regexpEscapeLiteral(s string) string {
 // it terminates; a non-empty match advances past its end.
 func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) object.Value {
 	var results []object.Value
+	enc := "" // result substrings inherit the receiver's encoding
+	if s, ok := self.(*object.String); ok {
+		enc = s.Enc
+	}
+	last := object.Value(object.NilV) // $~ after the call: last match, or nil when none
 	pos := 0
 	for pos <= len(subject) {
 		md := re.matcher().Match(subject[pos:])
 		if md == nil {
 			break
 		}
-		elem := scanElement(md)
+		elem := scanElement(md, enc)
+		// Expose this match through $~ / $1.. (with the whole subject and an
+		// absolute byteOff so MatchData#string, #begin and #offset are correct).
+		// MRI leaves $~ set to the last match after scan returns, even if a block
+		// reassigned it, so re-set it after the block runs.
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: pos}
+		vm.lastMatch = cur
+		last = cur
 		if blk != nil {
 			vm.callBlock(blk, []object.Value{elem})
+			vm.lastMatch = cur
 		} else {
 			results = append(results, elem)
 		}
@@ -622,6 +649,8 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 			pos += matchEnd
 		}
 	}
+	// $~ is the last match (or nil when there was none), as MRI leaves it.
+	vm.lastMatch = last
 	if blk != nil {
 		return self
 	}
@@ -803,23 +832,46 @@ func captureFields(md *onig.MatchData, enc string) []object.Value {
 // gsub returns an Enumerator over the matches; sub raises ArgumentError, as MRI
 // does.
 func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global bool) object.Value {
-	re := scanRegexp(args[0])
+	re := vm.subRegexp(args[0])
+	// A replacement argument takes precedence over a block: MRI ignores the block
+	// when a String or Hash replacement is also supplied.
+	if len(args) >= 2 {
+		if h, ok := args[1].(*object.Hash); ok {
+			return vm.gsubHash(re, subject, h, global)
+		}
+		repl, _ := vm.strCoerceArg(args[1]) // a non-String replacement converts via #to_str
+		return vm.gsub(re, subject, repl, nil, global)
+	}
 	if blk != nil {
 		return vm.gsub(re, subject, "", blk, global)
 	}
-	if len(args) < 2 {
-		if !global {
-			raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
+	if !global {
+		raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
+	}
+	// gsub(pattern) with no replacement and no block → an Enumerator yielding
+	// the matched substrings; supports #with_index, #to_a, etc. via the
+	// receiver+method form, replaying gsub with the enumerator's block. MRI reports
+	// this enumerator's #size as nil (the match count is not known ahead of time).
+	return enumForSized(object.NewString(subject), "gsub",
+		func(*VM) object.Value { return object.NilV }, args[0])
+}
+
+// subRegexp coerces the pattern argument of String#sub/#gsub into a Regexp: a
+// Regexp passes through; anything else is coerced to a String (via #to_str,
+// unwrapping a String subclass) and matched literally, exactly as MRI does.
+func (vm *VM) subRegexp(v object.Value) *Regexp {
+	if u, ok := v.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			v = w
 		}
-		// gsub(pattern) with no replacement and no block → an Enumerator yielding
-		// the matched substrings; supports #with_index, #to_a, etc. via the
-		// receiver+method form, replaying gsub with the enumerator's block.
-		return enumFor(object.NewString(subject), "gsub", args[0])
 	}
-	if h, ok := args[1].(*object.Hash); ok {
-		return vm.gsubHash(re, subject, h, global)
+	if r, ok := v.(*Regexp); ok {
+		return r
 	}
-	return vm.gsub(re, subject, strArg(args[1]), nil, global)
+	s, _ := vm.strCoerceArg(v)
+	src := regexpEscapeLiteral(s)
+	re, _ := onig.Compile(src)
+	return &Regexp{re: re, source: src}
 }
 
 // gsub implements String#sub (global=false) and String#gsub (global=true) over
@@ -958,6 +1010,16 @@ func expandReplacement(tmpl string, md *onig.MatchData, pre, post string) string
 		case n == '&':
 			b.WriteString(md.Str(0))
 			i++
+		case n == '+':
+			// \+ inserts the last capture group that participated (highest-numbered),
+			// or nothing when there were no captures or none participated.
+			for gi := md.NGroups(); gi >= 1; gi-- {
+				if md.Begin(gi) >= 0 {
+					b.WriteString(md.Str(gi))
+					break
+				}
+			}
+			i++
 		case n == '`':
 			b.WriteString(pre)
 			i++
@@ -992,18 +1054,20 @@ func expandReplacement(tmpl string, md *onig.MatchData, pre, post string) string
 }
 
 // scanElement builds one String#scan result element from a match: the whole
-// match (no groups) or the array of captures (one or more groups).
-func scanElement(md *onig.MatchData) object.Value {
+// match (no groups) or the array of captures (one or more groups). Every result
+// substring inherits enc, the receiver's encoding (MRI keeps scan pieces in the
+// same encoding as self).
+func scanElement(md *onig.MatchData, enc string) object.Value {
 	n := md.NGroups()
 	if n == 0 {
-		return object.NewString(md.Str(0))
+		return object.NewStringViewEnc(md.Str(0), enc)
 	}
 	caps := make([]object.Value, n)
 	for i := 1; i <= n; i++ {
 		if md.Begin(i) < 0 {
 			caps[i-1] = object.NilV
 		} else {
-			caps[i-1] = object.NewStringView(md.Str(i))
+			caps[i-1] = object.NewStringViewEnc(md.Str(i), enc)
 		}
 	}
 	return object.NewArrayFromSlice(caps)

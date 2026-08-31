@@ -1564,19 +1564,25 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("downcase", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.stringCaseMap(self, caseDowncase, args)
 	})
-	vm.cString.define("casecmp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*object.String)
-		if !ok { // like <=>, a non-String operand compares to nil
+	vm.cString.define("casecmp", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := vm.casecmpOther(self, args[0])
+		if !ok { // a non-String (no #to_str) or an incompatible encoding compares to nil
 			return object.NilV
 		}
-		return object.IntValue(int64(strings.Compare(strings.ToLower(strOf(self)), strings.ToLower(o.Str()))))
+		// casecmp folds ASCII A-Z only, then compares byte for byte (non-ASCII bytes
+		// are never folded), matching MRI.
+		return object.IntValue(int64(strings.Compare(asciiDowncase(strOf(self)), asciiDowncase(o))))
 	})
-	vm.cString.define("casecmp?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*object.String)
+	vm.cString.define("casecmp?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := vm.casecmpOther(self, args[0])
 		if !ok {
 			return object.NilV
 		}
-		return object.Bool(strings.EqualFold(strOf(self), o.Str()))
+		// casecmp? applies full Unicode case folding (so ß equals "ss" and ÄÖÜ equals
+		// äöü), unlike casecmp's ASCII-only fold.
+		a := caseMapUTF8(strOf(self), caseDowncase, caseFlags{fold: true})
+		b := caseMapUTF8(o, caseDowncase, caseFlags{fold: true})
+		return object.Bool(a == b)
 	})
 	vm.cString.define("capitalize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.stringCaseMap(self, caseCapitalize, args)
@@ -1643,8 +1649,8 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("rstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, strings.TrimRight(strOf(self), wsCutset))
 	})
-	vm.cString.define("chomp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, chompSep(strOf(self), args))
+	vm.cString.define("chomp", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, vm.chompSep(strOf(self), args))
 	})
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, chopStr(strOf(self)))
@@ -1908,7 +1914,7 @@ func (vm *VM) bootstrap() {
 		return vm.runMatch(strMatchRegexp(args[0]), strOf(self))
 	})
 	vm.cString.define("scan", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return vm.scan(scanRegexp(args[0]), strOf(self), self, blk)
+		return vm.scan(vm.subRegexp(args[0]), strOf(self), self, blk)
 	})
 	vm.cString.define("sub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.stringSub(strOf(self), args, blk, false)
@@ -2061,19 +2067,47 @@ func (vm *VM) bootstrap() {
 		}
 		return object.IntValue(int64([]rune(s)[0]))
 	})
-	vm.cString.define("partition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, sep := strOf(self), strArg(args[0])
+	vm.cString.define("partition", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := strOf(self)
+		enc := self.(*object.String).Enc
+		if re, ok := regexpSep(args[0]); ok {
+			md := re.matcher().Match(s)
+			if md == nil {
+				vm.lastMatch = object.NilV
+				return object.NewArray(strEncOf(self, s), strEncOf(self, ""), strEncOf(self, ""))
+			}
+			vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+			b, e := md.Begin(0), md.End(0)
+			return object.NewArray(object.NewStringBytesEnc([]byte(s[:b]), enc),
+				object.NewStringBytesEnc([]byte(s[b:e]), enc), object.NewStringBytesEnc([]byte(s[e:]), enc))
+		}
+		sep, sepObj := vm.strCoerceArg(args[0])
 		if i := strings.Index(s, sep); i >= 0 {
-			return object.NewArray(object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):]))
+			return object.NewArray(object.NewStringBytesEnc([]byte(s[:i]), enc),
+				object.NewStringBytesEnc([]byte(sep), sepObj.Enc), object.NewStringBytesEnc([]byte(s[i+len(sep):]), enc))
 		}
-		return object.NewArray(object.NewString(s), object.NewString(""), object.NewString(""))
+		return object.NewArray(strEncOf(self, s), strEncOf(self, ""), strEncOf(self, ""))
 	})
-	vm.cString.define("rpartition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, sep := strOf(self), strArg(args[0])
-		if i := strings.LastIndex(s, sep); i >= 0 {
-			return object.NewArray(object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):]))
+	vm.cString.define("rpartition", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := strOf(self)
+		enc := self.(*object.String).Enc
+		if re, ok := regexpSep(args[0]); ok {
+			m := vm.lastRegexpMatch(re, s)
+			if m == nil {
+				vm.lastMatch = object.NilV
+				return object.NewArray(strEncOf(self, ""), strEncOf(self, ""), strEncOf(self, s))
+			}
+			vm.lastMatch = m
+			b, e := m.byteOff+m.md.Begin(0), m.byteOff+m.md.End(0)
+			return object.NewArray(object.NewStringBytesEnc([]byte(s[:b]), enc),
+				object.NewStringBytesEnc([]byte(s[b:e]), enc), object.NewStringBytesEnc([]byte(s[e:]), enc))
 		}
-		return object.NewArray(object.NewString(""), object.NewString(""), object.NewString(s))
+		sep, sepObj := vm.strCoerceArg(args[0])
+		if i := strings.LastIndex(s, sep); i >= 0 {
+			return object.NewArray(object.NewStringBytesEnc([]byte(s[:i]), enc),
+				object.NewStringBytesEnc([]byte(sep), sepObj.Enc), object.NewStringBytesEnc([]byte(s[i+len(sep):]), enc))
+		}
+		return object.NewArray(strEncOf(self, ""), strEncOf(self, ""), strEncOf(self, s))
 	})
 
 	// String mutation (in-place). Every mutator guards against a frozen receiver.
@@ -2201,7 +2235,7 @@ func (vm *VM) bootstrap() {
 		return vm.strBang(self, func(x string) string { return strings.TrimRight(x, wsCutset) })
 	})
 	vm.cString.define("chomp!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return chompSep(s, args) })
+		return vm.strBang(self, func(s string) string { return vm.chompSep(s, args) })
 	})
 	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.strBang(self, chopStr)
@@ -5660,14 +5694,33 @@ func reverseStr(s string) string {
 }
 
 // chompSep implements String#chomp's optional separator argument, matching MRI:
-//   - no argument (or an explicit nil): remove one trailing line ending.
+//   - no argument: use $/ (the record separator, default "\n"); a nil $/ disables
+//     chomping.
+//   - an explicit nil argument: no chomping (returns self unchanged).
+//   - the default separator "\n" (from $/ or given explicitly): smart mode —
+//     remove one trailing \r\n, \n, or \r.
 //   - "" (empty): paragraph mode — remove ALL trailing newlines (\r\n / \n).
-//   - any other string: remove that exact suffix once, if present.
-func chompSep(s string, args []object.Value) string {
-	if len(args) == 0 || args[0] == object.NilV {
-		return chompStr(s)
+//   - any other string (converted with #to_str): remove that exact suffix once.
+func (vm *VM) chompSep(s string, args []object.Value) string {
+	var sep string
+	if len(args) == 0 {
+		rs := vm.gvar("$/")
+		if object.IsNil(rs) { // $/ = nil (or unset) means the default record separator
+			sep = "\n"
+		} else if rss, ok := rs.(*object.String); ok {
+			sep = rss.Str()
+		} else {
+			sep = "\n"
+		}
+	} else {
+		if object.IsNil(args[0]) { // chomp(nil): do not chomp at all
+			return s
+		}
+		sep, _ = vm.strCoerceArg(args[0])
 	}
-	sep := strArg(args[0])
+	if sep == "\n" {
+		return chompStr(s) // smart mode: one trailing \r\n, \n, or \r
+	}
 	if sep == "" {
 		// Paragraph mode: strip every trailing \n (treating \r\n as one), so a run
 		// of blank lines at the end collapses away.
@@ -6222,7 +6275,8 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 		if !global {
 			raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
 		}
-		return enumFor(s, "gsub!", args[0])
+		// MRI reports this enumerator's #size as nil (the match count is unknown).
+		return enumForSized(s, "gsub!", func(*VM) object.Value { return object.NilV }, args[0])
 	}
 	res := vm.stringSub(s.Str(), args, blk, global).(*object.String)
 	if res.Str() == s.Str() {
@@ -6271,6 +6325,58 @@ func (vm *VM) strCoerceArg(v object.Value) (string, *object.String) {
 	}
 	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
 	return "", nil
+}
+
+// casecmpOther coerces the argument of String#casecmp / #casecmp? to a Go
+// string: a String (or a String subclass, unwrapped) or a value with #to_str
+// yields (str, true); a value that cannot become a String, or one whose encoding
+// is incompatible with self, yields ("", false) so the caller returns nil —
+// both methods answer nil in those cases rather than raising.
+func (vm *VM) casecmpOther(self, other object.Value) (string, bool) {
+	if u, ok := other.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			other = w
+		}
+	}
+	os, ok := other.(*object.String)
+	if !ok {
+		if !vm.respondsToDynamic(other, "to_str") {
+			return "", false
+		}
+		r := vm.send(other, "to_str", nil, nil)
+		if os, ok = r.(*object.String); !ok {
+			return "", false
+		}
+	}
+	if object.IsNil(vm.encodingCompatible(self.(*object.String), os)) {
+		return "", false
+	}
+	return os.Str(), true
+}
+
+// regexpSep reports whether v is a Regexp (after unwrapping a subclass wrapper),
+// used by the separator methods that accept either a String or a Regexp.
+func regexpSep(v object.Value) (*Regexp, bool) {
+	if u, ok := v.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			v = w
+		}
+	}
+	r, ok := v.(*Regexp)
+	return r, ok
+}
+
+// asciiDowncase lowercases only the ASCII letters A-Z of s, leaving every other
+// byte (including non-ASCII bytes of a multibyte character) untouched — the fold
+// String#casecmp applies before its byte comparison.
+func asciiDowncase(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+		}
+	}
+	return string(b)
 }
 
 // strSearchArg coerces the search argument of String#index / String#rindex. A
