@@ -1836,22 +1836,32 @@ func (vm *VM) bootstrap() {
 		return s
 	})
 	vm.cString.define("index", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, needle := strOf(self), vm.strPatternCompat(self, args[0])
-		r := []rune(s)
+		s := strOf(self)
+		needle, re, isRe := vm.strSearchArg(self, args[0])
+		nChars := utf8.RuneCountInString(s)
 		start := 0
 		if len(args) > 1 { // optional character offset (negative counts from the end)
-			start = int(intArg(args[1]))
+			start = int(vm.repeatLong(args[1]))
 			if start < 0 {
-				start += len(r)
+				start += nChars
 			}
 			if start < 0 {
+				if isRe { // a Regexp search always clears $~, even out of range
+					vm.lastMatch = object.NilV
+				}
 				return object.NilV
 			}
 		}
-		if start > len(r) {
+		if start > nChars {
+			if isRe {
+				vm.lastMatch = object.NilV
+			}
 			return object.NilV
 		}
-		byteStart := len(string(r[:start]))
+		if isRe {
+			return vm.strIndexRegexp(re, s, start)
+		}
+		byteStart := charToByte(s, start)
 		byteIdx := strings.Index(s[byteStart:], needle)
 		if byteIdx < 0 {
 			return object.NilV
@@ -1859,11 +1869,26 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(utf8.RuneCountInString(s[:byteStart+byteIdx])))
 	})
 	vm.cString.define("rindex", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		byteIdx := strings.LastIndex(strOf(self), vm.strPatternCompat(self, args[0]))
-		if byteIdx < 0 {
-			return object.NilV
+		s := strOf(self)
+		needle, re, isRe := vm.strSearchArg(self, args[0])
+		nChars := utf8.RuneCountInString(s)
+		limit := nChars
+		if len(args) > 1 { // optional character offset (negative counts from the end)
+			limit = int(vm.repeatLong(args[1]))
+			if limit < 0 {
+				limit += nChars
+			}
+			if limit < 0 {
+				return object.NilV
+			}
+			if limit > nChars {
+				limit = nChars
+			}
 		}
-		return object.IntValue(int64(utf8.RuneCountInString(strOf(self)[:byteIdx])))
+		if isRe {
+			return vm.strRindexRegexp(re, s, limit)
+		}
+		return strRindexString(s, needle, limit)
 	})
 	vm.cString.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		re, ok := args[0].(*Regexp)
@@ -6219,6 +6244,84 @@ func (vm *VM) strPatternCompat(self, pat object.Value) string {
 		return ps.Str()
 	}
 	return strArg(pat)
+}
+
+// strCoerceArg coerces v to a Go string the way String search/replace methods
+// accept their argument: a String (or a String subclass instance, unwrapped)
+// is taken directly; any other value is converted with #to_str. A value that is
+// neither a String nor defines #to_str raises TypeError with MRI's message. The
+// second result is the String object the bytes came from, for callers that need
+// its encoding.
+func (vm *VM) strCoerceArg(v object.Value) (string, *object.String) {
+	if u, ok := v.(object.KeyUnwrapper); ok { // a String subclass instance
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			v = w
+		}
+	}
+	if s, ok := v.(*object.String); ok {
+		return s.Str(), s
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Str(), s
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	}
+	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+	return "", nil
+}
+
+// strSearchArg coerces the search argument of String#index / String#rindex. A
+// Regexp (or a Regexp reached after unwrapping a subclass) passes through as
+// (_, re, true). Otherwise the value is coerced to a String with #to_str, its
+// encoding negotiated with self (raising Encoding::CompatibilityError when the
+// two are incompatible), and returned as the needle.
+func (vm *VM) strSearchArg(self, pat object.Value) (needle string, re *Regexp, isRe bool) {
+	if u, ok := pat.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			pat = w
+		}
+	}
+	if r, ok := pat.(*Regexp); ok {
+		return "", r, true
+	}
+	s, so := vm.strCoerceArg(pat)
+	vm.combinedEncName(self.(*object.String), so) // raises on incompatible encodings
+	return s, nil, false
+}
+
+// runeMatchAt reports whether needle occurs in runes starting exactly at rune
+// index p.
+func runeMatchAt(runes, needle []rune, p int) bool {
+	if p < 0 || p+len(needle) > len(runes) {
+		return false
+	}
+	for i, r := range needle {
+		if runes[p+i] != r {
+			return false
+		}
+	}
+	return true
+}
+
+// strRindexString returns the largest rune index p <= limit at which needle
+// occurs in s (nil when there is none). limit has been clamped to the rune count
+// by the caller. An empty needle matches at limit itself.
+func strRindexString(s, needle string, limit int) object.Value {
+	runes := []rune(s)
+	needleRunes := []rune(needle)
+	maxStart := limit
+	if len(needleRunes) > 0 && maxStart > len(runes)-len(needleRunes) {
+		maxStart = len(runes) - len(needleRunes)
+	}
+	for p := maxStart; p >= 0; p-- {
+		if runeMatchAt(runes, needleRunes, p) {
+			return object.IntValue(int64(p))
+		}
+	}
+	return object.NilV
 }
 
 func (vm *VM) stringIndexAssign(s *object.String, args []object.Value) object.Value {

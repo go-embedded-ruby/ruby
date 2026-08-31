@@ -429,6 +429,38 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 	return m
 }
 
+// strIndexRegexp implements String#index with a Regexp: it finds the leftmost
+// match at or after character offset off (matching the full subject so anchors
+// and \G honour the offset), sets $~ (nil on no match) and returns the character
+// index of the match start, or nil. off may equal the character count.
+func (vm *VM) strIndexRegexp(re *Regexp, subject string, off int) object.Value {
+	byteOff := charToByte(subject, off)
+	md := re.matcher().Match(subject[byteOff:]) // leftmost match in the tail; \G pins to its start
+	if md == nil {
+		vm.lastMatch = object.NilV
+		return object.NilV
+	}
+	vm.lastMatch = &MatchData{md: md, subject: subject, re: re, byteOff: byteOff}
+	return object.IntValue(int64(byteToChar(subject, byteOff+md.Begin(0))))
+}
+
+// strRindexRegexp implements String#rindex with a Regexp: it returns the largest
+// character index p (p <= limit) at which re matches starting exactly at p,
+// setting $~ (nil when there is no such match). limit has been clamped to the
+// character count by the caller.
+func (vm *VM) strRindexRegexp(re *Regexp, subject string, limit int) object.Value {
+	for p := limit; p >= 0; p-- {
+		bytep := charToByte(subject, p)
+		md := re.matcher().MatchAt(subject, bytep)
+		if md != nil && md.Begin(0) == bytep {
+			vm.lastMatch = &MatchData{md: md, subject: subject, re: re}
+			return object.IntValue(int64(p))
+		}
+	}
+	vm.lastMatch = object.NilV
+	return object.NilV
+}
+
 // gvar reads a global variable. The match-data specials derive from $~ (the
 // last match); any other name reads as nil (uninitialised global).
 func (vm *VM) gvar(name string) object.Value {
