@@ -14,7 +14,11 @@ jobs:
   # Build, vet, race-test, and enforce 100% coverage. The interpreter is
   # ordinary architecture-independent Go; the `internal/ast` package is excluded
   # from the gate because it holds only statement-free interface witnesses
-  # (empty marker methods, which the cover tool cannot attribute).
+  # (empty marker methods, which the cover tool cannot attribute). The full suite
+  # runs under -race on all three OS lanes, but the 100% coverage gate is enforced
+  # on the POSIX lanes (ubuntu, macOS) only: windows cannot execute a few POSIX-only
+  # paths (e.g. the "/dev/null" character device), so its coverage is structurally
+  # below 100% — see the gate step below.
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -44,8 +48,18 @@ jobs:
           echo "---------------------------------------------------"
           cov=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
           echo "coverage: ${cov}%"
-          awk -v t="$cov" 'BEGIN { exit !(t+0 >= 100.0) }' || {
-            echo "::error::coverage ${cov}% < 100%"; exit 1; }
+          # The 100% gate is enforced on the POSIX lanes (ubuntu, macOS) only.
+          # Windows cannot execute a handful of POSIX-only code paths — e.g. opening
+          # "/dev/null" as a character device — so its measured coverage is
+          # structurally below 100%. The suite still RUNS in full under -race on
+          # windows to catch real, platform-specific failures (only coverage is not
+          # gated there).
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            echo "coverage gate not enforced on windows (POSIX-only paths unreachable)"
+          else
+            awk -v t="$cov" 'BEGIN { exit !(t+0 >= 100.0) }' || {
+              echo "::error::coverage ${cov}% < 100%"; exit 1; }
+          fi
 
   # Per-PR arch gate: the two GitHub-hosted NATIVE targets only. amd64 and arm64
   # both have real runners, so these lanes stay fast and block merges. rbgo is
