@@ -67,6 +67,17 @@ func TestAlwaysPrivateMethodDefs(t *testing.T) {
 		// reopening a class with a normal def stays public
 		{`class C; end; class C; def foo; end; end
 		  p C.public_instance_methods(false).include?(:foo)`, "true\n"},
+		// a def executed INSIDE a method body is always public, even when the
+		// class default visibility was set to private in the class body
+		{`class C; private; def do_def; def new_def; 1; end; end; end
+		  o = C.new; o.send(:do_def)
+		  p C.public_instance_methods(false).include?(:new_def)`, "true\n"},
+		// the private default still governs the directly-written method
+		{`class C; private; def do_def; def new_def; 1; end; end; end
+		  p C.private_instance_methods(false).include?(:do_def)`, "true\n"},
+		// a def inside a block at class-body level DOES follow the class default
+		{`class D; private; [1].each { def blk_def; 2; end }; end
+		  p D.private_instance_methods(false).include?(:blk_def)`, "true\n"},
 	}
 	for _, tc := range cases {
 		if got := eval(t, tc.src); got != tc.want {

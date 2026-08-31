@@ -1708,9 +1708,17 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// the new Method's own vis governs (MRI: redefining resets to the
 				// current default visibility).
 				delete(definee.visOverrides, name)
-				// In module_function (no-arg) mode, a def is private as an instance
-				// method but public as the module/singleton method.
-				if definee.funcMode {
+				// A `def` executed INSIDE a running method body is always public in
+				// MRI, regardless of the class's persisted default visibility (which
+				// only governs defs written directly in a class/module body). A block
+				// frame (selfBlock != nil), a class/module body, and the top level
+				// (methodName == "") all keep the class default. In module_function
+				// (no-arg) mode, a def is private as an instance method but public as
+				// the module/singleton method.
+				switch {
+				case selfBlock == nil && methodName != "":
+					m.vis = visPublic
+				case definee.funcMode:
 					m.vis = visPrivate
 				}
 				// A handful of core hook methods are always defined private,
