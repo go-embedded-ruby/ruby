@@ -1039,7 +1039,13 @@ type frameMethod struct {
 	callee string
 }
 
-func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock *Proc, methodLexScope *RClass) (execResult object.Value) {
+// blockArg is the block reified by a `&b` block parameter (iseq.BlockSlot). It is
+// normally the same as block (a method's block backs both `&b` and a bare
+// `yield`), but for Proc#call they diverge: the block passed to `.call` binds
+// `&b`, while `yield` inside the proc still reaches the block captured where the
+// proc was defined (block). Passing blockArg == block preserves the old
+// behaviour everywhere it is not deliberately split.
+func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock, blockArg *Proc, methodLexScope *RClass) (execResult object.Value) {
 	// Determine this frame's __method__/__callee__ pair before any nested call can
 	// disturb pendingMethodCtx: a block inherits the pair captured on the block
 	// Proc, an invokeBody/eval caller supplies one via pendingMethodCtx, and any
@@ -1120,10 +1126,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			env.slots[iseq.KwRestSlot] = rest
 		}
 	}
-	// &block reifies the method's block as a Proc (nil → no block given).
+	// &block reifies the block bound to `&b` as a Proc (nil → no block given).
+	// This is blockArg, which for a plain method equals block but for Proc#call is
+	// the block passed to `.call` rather than the proc's captured yield-block.
 	if iseq.BlockSlot >= 0 {
-		if block != nil {
-			env.slots[iseq.BlockSlot] = block
+		if blockArg != nil {
+			env.slots[iseq.BlockSlot] = blockArg
 		} else {
 			env.slots[iseq.BlockSlot] = object.NilV
 		}
@@ -1682,7 +1690,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if sc.lexParent == nil && definee != nil && definee != vm.cObject {
 					sc.lexParent = definee
 				}
-				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil, nil))
+				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil, nil, nil))
 			case bytecode.OpAlias:
 				vm.aliasMethod(definee, iseq.Names[in.A], iseq.Names[in.B])
 				push(object.NilV)
@@ -2261,7 +2269,7 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 	// module_function mode (MRI resets these on every (re)open).
 	class.defaultVis, class.funcMode = visPublic, false
 	adoptReopenLexParent(class, parent, scoped)
-	return vm.exec(body, class, nil, class, "", nil, nil, nil, nil)
+	return vm.exec(body, class, nil, class, "", nil, nil, nil, nil, nil)
 }
 
 // adoptReopenLexParent upgrades a class/module's lexParent when it is reopened
@@ -2303,7 +2311,7 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 	}
 	mod.defaultVis, mod.funcMode = visPublic, false
 	adoptReopenLexParent(mod, parent, scoped)
-	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil)
+	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil, nil)
 }
 
 // asModuleParent coerces a popped value to the class/module that a scoped

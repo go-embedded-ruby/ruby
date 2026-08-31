@@ -48,7 +48,7 @@ func (vm *VM) bindingEval(b *Binding, srcV object.Value) object.Value {
 	// through the caller's binding, reports the enclosing method), matching the
 	// no-binding eval path.
 	vm.pendingMethodCtx = vm.currentMethodCtxPtr()
-	return vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil, nil)
+	return vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil, nil, nil)
 }
 
 // bindingNewLocals returns the named top-scope locals a compiled eval body

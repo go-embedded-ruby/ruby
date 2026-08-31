@@ -1842,7 +1842,7 @@ func (vm *VM) invokeBody(m *Method, self object.Value, args []object.Value, blk 
 	// method's original name (unchanged through an alias), __callee__ the name it
 	// was called by (m.name — the alias when aliased).
 	vm.pendingMethodCtx = &frameMethod{orig: methodOriginalName(m), callee: m.name}
-	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, m.lexScope)
+	return vm.exec(m.iseq, self, args, m.owner, m.name, nil, blk, nil, blk, m.lexScope)
 }
 
 // callBlock invokes a captured block with args. Block arity is lenient: extra
@@ -1928,7 +1928,20 @@ func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) obj
 		copy(cp, args)
 		return p.native(vm, cp)
 	}
-	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p, nil)
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p, p.block, nil)
+}
+
+// callProcWithBlock invokes a proc/lambda through Proc#call/[]/=== with the block
+// the caller passed to that call. That block (blk) binds the proc's own `&b`
+// block parameter, while a bare `yield` inside the proc still reaches the block
+// captured where the proc was defined (p.block) — the two diverge, matching MRI.
+func (vm *VM) callProcWithBlock(p *Proc, args []object.Value, blk *Proc) object.Value {
+	if p.native != nil {
+		cp := make([]object.Value, len(args))
+		copy(cp, args)
+		return p.native(vm, cp)
+	}
+	return vm.exec(p.iseq, p.self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p, blk, nil)
 }
 
 // blockDefinee returns the definee a block body runs with: the block's captured
@@ -1972,7 +1985,7 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 	// The define_method body IS the method: __method__ / __callee__ both report the
 	// method name it was defined under (and a block nested in the body inherits it).
 	anchored.methodCtx = frameMethod{orig: name, callee: name}
-	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, &anchored, nil)
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, &anchored, body, nil)
 }
 
 // classEval runs a block as class_eval/module_eval would: self and the method
@@ -1981,7 +1994,7 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 func (vm *VM) classEval(cls *RClass, p *Proc, args []object.Value) object.Value {
 	// class_eval/module_eval always receive a literal (ISeq) block, never a
 	// synthesized native Proc, so no native fast path is needed here.
-	return vm.exec(p.iseq, cls, vm.bindBlockArgs(p, args), cls, "", p.env, p.block, p, nil)
+	return vm.exec(p.iseq, cls, vm.bindBlockArgs(p, args), cls, "", p.env, p.block, p, p.block, nil)
 }
 
 // classEvalString runs Ruby source as class_eval/module_eval would for the
@@ -1994,7 +2007,7 @@ func (vm *VM) classEvalString(cls *RClass, src string) object.Value {
 		return raise("SyntaxError", "%s", cerr.Error())
 	}
 	iseq.Name = "(eval)"
-	return vm.exec(iseq, cls, nil, cls, "", nil, nil, nil, nil)
+	return vm.exec(iseq, cls, nil, cls, "", nil, nil, nil, nil, nil)
 }
 
 // bindBlockArgs maps call args onto a block's parameters, with the auto-splat a

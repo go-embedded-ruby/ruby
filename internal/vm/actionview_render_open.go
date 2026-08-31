@@ -61,7 +61,7 @@ func (vm *VM) actionViewInlineRender(b *ActionViewBase, tmpl string, locals map[
 	slots := make([]object.Value, len(vals))
 	copy(slots, vals)
 	parent := &Env{slots: slots}
-	res := vm.exec(iseq, b, nil, b.cls, "", parent, nil, nil, nil)
+	res := vm.exec(iseq, b, nil, b.cls, "", parent, nil, nil, nil, nil)
 	return avToS(res)
 }
 

@@ -22,7 +22,7 @@ func (vm *VM) instanceEvalString(self object.Value, src, file string) object.Val
 		definee = vm.classOf(self)
 	}
 	vm.pendingMethodCtx = vm.currentMethodCtxPtr()
-	return vm.exec(iseq, self, nil, definee, "", nil, nil, nil, nil)
+	return vm.exec(iseq, self, nil, definee, "", nil, nil, nil, nil, nil)
 }
 
 // registerEval installs Kernel#eval — the embedded front-end's reason for being.
@@ -57,6 +57,6 @@ func (vm *VM) registerEval() {
 		// inherits the caller's method context (eval "__method__" inside a method
 		// reports that method), so hand exec the caller's pair.
 		vm.pendingMethodCtx = vm.currentMethodCtxPtr()
-		return vm.exec(iseq, self, nil, vm.classOf(self), "", nil, nil, nil, nil)
+		return vm.exec(iseq, self, nil, vm.classOf(self), "", nil, nil, nil, nil, nil)
 	})
 }

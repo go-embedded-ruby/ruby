@@ -122,8 +122,10 @@ func (vm *VM) bootstrap() {
 	vm.registerBenchmark() // Benchmark module (require "benchmark"), backed by go-ruby-benchmark
 	vm.registerScanf()     // String#scanf / IO#scanf / Kernel#scanf (require "scanf"), backed by go-ruby-scanf
 
-	procCall := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.callBlock(self.(*Proc), args)
+	procCall := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// The block passed to `.call` (blk) binds the proc's own `&b` parameter;
+		// a bare `yield` inside the proc still reaches its captured block.
+		return vm.callProcWithBlock(self.(*Proc), args, blk)
 	}
 	vm.cProc.smethods["new"] = &Method{name: "new", owner: vm.cProc,
 		native: func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -8853,6 +8855,14 @@ func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive boo
 		if stepInRange(lo, hi, step, exclusive) {
 			vm.callBlock(blk, []object.Value{object.Float(lo)})
 		}
+		return
+	}
+	if math.IsInf(lo, 0) {
+		// A non-finite start makes every term lo+i*step the same non-finite value,
+		// so the progress loop below could never terminate. MRI's step count is
+		// (hi-lo)/step — NaN when hi is also infinite, negative when hi is finite —
+		// so it yields nothing here. (An infinite start with an infinite step is
+		// handled above.)
 		return
 	}
 	for i := 0; ; i++ {

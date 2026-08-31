@@ -69,7 +69,7 @@ func (vm *VM) irbEval(b *Binding, code string) (result object.Value, errClass, e
 			result, errClass, errMsg, raised = nil, rerr.Class, rerr.Message, true
 		}
 	}()
-	result = vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil, nil)
+	result = vm.exec(iseq, b.self, nil, b.definee, "", b.env, nil, nil, nil, nil)
 	return result, "", "", false
 }
 
