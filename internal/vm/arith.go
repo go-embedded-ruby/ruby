@@ -265,7 +265,14 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 				return object.Bool(eq)
 			}
 		}
-		return binary(op, a, b)
+		// The structural compare is VM-aware so that an Array/Hash operand compares
+		// its elements with each element's own Ruby #== (MRI's rb_equal per element),
+		// not by Go identity.
+		eq := vm.vmValueEqual(a, b)
+		if op == bytecode.OpNeq {
+			eq = !eq
+		}
+		return object.Bool(eq)
 	case bytecode.OpLt, bytecode.OpGt, bytecode.OpLe, bytecode.OpGe:
 		if hasFastOrdering(a) {
 			// A built-in number compared against a non-numeric right operand runs
@@ -810,10 +817,34 @@ func negate(v object.Value) object.Value {
 type eqPair struct{ a, b object.Value }
 
 func valueEqual(a, b object.Value) bool {
-	return valueEqualRec(a, b, nil)
+	return valueEqualRec(nil, a, b, nil)
 }
 
-func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
+// vmValueEqual is the VM-aware form of valueEqual: it compares two values
+// structurally like valueEqual, but every leaf whose own #== matters — a user
+// object (RObject) or a built-in with a custom #== (Digest, Set, …) — has that
+// Ruby #== dispatched, matching MRI's rb_equal. This is what makes Array#== and
+// Hash#== compare their elements by value (an element with a redefined #==
+// participates) rather than by Go identity. A nil VM falls back to the
+// structural-only comparison, so VM-less callers keep their current behaviour.
+func (vm *VM) vmValueEqual(a, b object.Value) bool {
+	return valueEqualRec(vm, a, b, nil)
+}
+
+func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
+	// With a live VM, a leaf whose class defines its own #== (a user object, or a
+	// built-in like Digest/Set/BCrypt::Password) dispatches that method — MRI's
+	// rb_equal, which is what Array#== / Hash#== use per element. The identity
+	// shortcut mirrors rb_equal's `a == b` pointer check, which also terminates a
+	// self-referential element without recursing into its #==.
+	if vm != nil {
+		if _, isObj := a.(*RObject); isObj {
+			return a == b || vm.send(a, "==", []object.Value{b}, nil).Truthy()
+		}
+		if hasCustomEq(vm, a) {
+			return a == b || vm.send(a, "==", []object.Value{b}, nil).Truthy()
+		}
+	}
 	// Complex compares component-wise, and equals a real number when its
 	// imaginary part is zero (Complex(2, 0) == 2), in either operand order.
 	if ac, ok := a.(*object.Complex); ok {
@@ -896,7 +927,7 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		seen[key] = struct{}{}
 		defer delete(seen, key)
 		for i := range av.Elems {
-			if !valueEqualRec(av.Elems[i], bv.Elems[i], seen) {
+			if !valueEqualRec(vm, av.Elems[i], bv.Elems[i], seen) {
 				return false
 			}
 		}
@@ -918,14 +949,14 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		for _, k := range av.Keys {
 			ae, _ := av.Get(k)
 			be, present := bv.Get(k)
-			if !present || !valueEqualRec(ae, be, seen) {
+			if !present || !valueEqualRec(vm, ae, be, seen) {
 				return false
 			}
 		}
 		return hashIdentityMatch(av, bv)
 	case *object.Range:
 		bv, ok := b.(*object.Range)
-		return ok && av.Exclusive == bv.Exclusive && valueEqualRec(av.Lo, bv.Lo, seen) && valueEqualRec(av.Hi, bv.Hi, seen)
+		return ok && av.Exclusive == bv.Exclusive && valueEqualRec(vm, av.Lo, bv.Lo, seen) && valueEqualRec(vm, av.Hi, bv.Hi, seen)
 	case *Set:
 		bv, ok := b.(*Set)
 		return ok && av.eq(bv)
@@ -962,6 +993,17 @@ func valueEqualRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 	if ab, ok := a.(*ioBuffer); ok {
 		bb, ok := b.(*ioBuffer)
 		return ok && !ab.freed && !bb.freed && string(ab.data) == string(bb.data)
+	}
+	// A structural mismatch where the right operand defines its own #== runs MRI's
+	// reflexive rule: a built-in that fails to match on the left (e.g. 1 == obj)
+	// dispatches `other == self`, so a user #== that matches a number still wins.
+	if vm != nil {
+		if _, isObj := b.(*RObject); isObj {
+			return a == b || vm.send(b, "==", []object.Value{a}, nil).Truthy()
+		}
+		if hasCustomEq(vm, b) {
+			return a == b || vm.send(b, "==", []object.Value{a}, nil).Truthy()
+		}
 	}
 	// Reference types not handled above (classes, procs, …) compare by identity,
 	// which is Ruby's default Object#==.

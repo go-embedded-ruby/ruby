@@ -68,10 +68,11 @@ func TestExceptionObjectFallback(t *testing.T) {
 }
 
 func TestRubyEqualValueTypes(t *testing.T) {
-	if !rubyEqual(object.Integer(5), object.Integer(5)) {
+	vm := bareVM()
+	if !vm.rubyEqual(object.Integer(5), object.Integer(5)) {
 		t.Error("5 == 5 should be true")
 	}
-	if rubyEqual(object.Integer(5), object.NewString("x")) {
+	if vm.rubyEqual(object.Integer(5), object.NewString("x")) {
 		t.Error("5 == \"x\" should be false")
 	}
 }
