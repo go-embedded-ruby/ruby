@@ -211,9 +211,6 @@ func (vm *VM) registerTime() {
 	d("strftime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(strftime(self(v), strArg(args[0])))
 	})
-	d("ctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(strftime(self(v), "%a %b %e %H:%M:%S %Y"))
-	})
 	d("asctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(strftime(self(v), "%a %b %e %H:%M:%S %Y"))
 	})
@@ -224,7 +221,6 @@ func (vm *VM) registerTime() {
 		return object.NewString(self(v).iso8601Str(int(intArgOr(args, 0))))
 	}
 	d("iso8601", iso)
-	d("xmlschema", iso)
 	rfc2822 := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).rfc2822Str())
 	}
@@ -242,12 +238,10 @@ func (vm *VM) registerTime() {
 		return object.IntValue(int64(self(v).t.Month()))
 	}
 	d("month", monthFn)
-	d("mon", monthFn)
 	dayFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.Day()))
 	}
 	d("day", dayFn)
-	d("mday", dayFn)
 	d("hour", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.Hour()))
 	})
@@ -275,17 +269,6 @@ func (vm *VM) registerTime() {
 	})
 	d("wday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.Weekday()))
-	})
-
-	// POSIX time-value accessors.
-	d("tv_sec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(self(v).t.Unix())
-	})
-	d("tv_usec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self(v).t.Nanosecond() / 1000))
-	})
-	d("tv_nsec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self(v).t.Nanosecond()))
 	})
 
 	// Weekday predicates.
@@ -318,18 +301,14 @@ func (vm *VM) registerTime() {
 		return object.IntValue(int64(off))
 	}
 	d("utc_offset", offsetFn)
-	d("gmt_offset", offsetFn)
-	d("gmtoff", offsetFn)
 	utcPred := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).t.Location() == stdtime.UTC)
 	}
 	d("utc?", utcPred)
-	d("gmt?", utcPred)
 	dstFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).t.IsDST())
 	}
 	d("dst?", dstFn)
-	d("isdst", dstFn)
 
 	// Conversions. utc/gmtime/localtime mutate the receiver and return it (MRI);
 	// getutc/getlocal return a new Time.
@@ -338,7 +317,6 @@ func (vm *VM) registerTime() {
 		return v
 	}
 	d("utc", toUTC)
-	d("gmtime", toUTC)
 	d("localtime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).t = self(v).t.In(vm.localtimeLoc(args))
 		return v
@@ -347,7 +325,6 @@ func (vm *VM) registerTime() {
 		return &Time{t: self(v).t.UTC()}
 	}
 	d("getutc", getutc)
-	d("getgm", getutc)
 	d("getlocal", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return &Time{t: self(v).t.In(vm.localtimeLoc(args))}
 	})
@@ -409,6 +386,21 @@ func (vm *VM) registerTime() {
 	d("hash", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(self(v).t.UnixNano())
 	})
+
+	// True aliases share one Method record so Time.instance_method(:mon) ==
+	// Time.instance_method(:month), matching MRI 4.0.6 (Time#mday, #tv_sec,
+	// #gmt_offset, #gmtoff, #gmt?, #isdst, #gmtime, #getgm, #ctime and
+	// #xmlschema are all documented aliases).
+	for _, pair := range [][2]string{
+		{"mon", "month"}, {"mday", "day"},
+		{"tv_sec", "to_i"}, {"tv_usec", "usec"}, {"tv_nsec", "nsec"},
+		{"gmt_offset", "utc_offset"}, {"gmtoff", "utc_offset"},
+		{"gmt?", "utc?"}, {"isdst", "dst?"},
+		{"gmtime", "utc"}, {"getgm", "getutc"},
+		{"ctime", "asctime"}, {"xmlschema", "iso8601"},
+	} {
+		vm.cTime.methods[pair[0]] = vm.cTime.methods[pair[1]]
+	}
 }
 
 // timeZoneKw pops a trailing keyword hash carrying in: <zone> off args, returning
