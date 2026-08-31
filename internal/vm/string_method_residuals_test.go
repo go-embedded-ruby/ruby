@@ -78,6 +78,19 @@ func TestStringSubArityError(t *testing.T) {
 	if err := runErr(t, `"hello".sub(/l/)`); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
 		t.Fatalf("sub arity: %v", err)
 	}
+	// sub! with a pattern but no replacement and no block raises ArgumentError.
+	if err := runErr(t, `"hello".sub!(/l/)`); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
+		t.Fatalf("sub! arity: %v", err)
+	}
+}
+
+func TestStringSubBangResiduals(t *testing.T) {
+	evalCases(t, []struct{ name, src, want string }{
+		{"gsub_bang_changes", `s = "hello"; s.gsub!(/l/, "L"); p s`, "\"heLLo\"\n"},
+		{"gsub_bang_no_change_nil", `p "hello".gsub!(/z/, "Z")`, "nil\n"},
+		{"gsub_bang_enum_size_nil", `p "abc".gsub!(/a/).size`, "nil\n"},
+		{"gsub_bang_enum_materialize", `s = "aaa"; e = s.gsub!(/a/); e.each { |m| }; p s`, "\"\"\n"},
+	})
 }
 
 func TestStringScanResiduals(t *testing.T) {
