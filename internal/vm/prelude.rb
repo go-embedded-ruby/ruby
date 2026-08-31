@@ -147,27 +147,33 @@ module Enumerable
   # public API (MRI does not expose them).
   private :__each_packed, :__pack, :__enum_int_arg
 
-  def to_a
+  # to_a (aka entries): collect the elements. Any arguments are forwarded to
+  # #each, as MRI does (a custom #each may take and act on them).
+  def to_a(*args)
     r = []
-    __each_packed { |x| r << x }
+    each(*args) { |*a| r << __pack(a) }
     r
   end
+  alias entries to_a
 
   # to_set: a new Set of the elements (each preprocessed by the block, if given),
   # as MRI's Enumerable#to_set. Defined here so every Enumerable — Array, Range,
   # Hash, … — can be turned into a Set.
-  def to_set(&block)
-    Set.new(self, &block)
+  def to_set(klass = Set, *args, &block)
+    klass.new(self, *args, &block)
   end
 
   # to_h: each element (or each yield of the block) must be a [key, value] pair.
-  def to_h
+  # A non-Array pair is coerced with #to_ary (MRI's rb_check_array_type). Any
+  # arguments are forwarded to #each.
+  def to_h(*args)
     h = {}
-    __each_packed { |x|
-      pair = block_given? ? yield(x) : x
-      raise TypeError, "wrong element type #{pair.class} (expected array)" unless pair.is_a?(Array)
-      raise ArgumentError, "element has wrong array length (expected 2, was #{pair.length})" unless pair.length == 2
-      h[pair[0]] = pair[1]
+    each(*args) { |*a|
+      pair = block_given? ? yield(*a) : __pack(a)
+      ary = Array.try_convert(pair)
+      raise TypeError, "wrong element type #{pair.class} (expected array)" if ary.nil?
+      raise ArgumentError, "element has wrong array length (expected 2, was #{ary.length})" unless ary.length == 2
+      h[ary[0]] = ary[1]
     }
     h
   end
@@ -175,7 +181,7 @@ module Enumerable
   def map
     return enum_for(:map) { size if respond_to?(:size) } unless block_given?
     r = []
-    __each_packed { |x| r << yield(x) }
+    each { |*a| r << yield(*a) }
     r
   end
 
@@ -259,6 +265,7 @@ module Enumerable
     __each_packed { |x| found = true if x == value }
     found
   end
+  alias member? include?
 
   def sum(init = 0)
     total = init
@@ -448,11 +455,11 @@ module Enumerable
     result
   end
 
-  def each_with_index
-    return enum_for(:each_with_index) { size if respond_to?(:size) } unless block_given?
+  def each_with_index(*args)
+    return enum_for(:each_with_index, *args) { size if respond_to?(:size) } unless block_given?
     i = 0
-    __each_packed { |x|
-      yield(x, i)
+    each(*args) { |*a|
+      yield(__pack(a), i)
       i = i + 1
     }
     self
@@ -491,9 +498,9 @@ module Enumerable
   # zero-argument yield becomes nil. Unlike map/select (whose block arity governs
   # a multi-value yield), each_entry always hands the block one packed value. With
   # no block it returns a sized Enumerator; with a block it returns self.
-  def each_entry
-    return enum_for(:each_entry) { size if respond_to?(:size) } unless block_given?
-    __each_packed { |x| yield(x) }
+  def each_entry(*args)
+    return enum_for(:each_entry, *args) { size if respond_to?(:size) } unless block_given?
+    each(*args) { |*a| yield(__pack(a)) }
     self
   end
 
@@ -547,7 +554,14 @@ module Enumerable
       h = {}
     else
       a = args[0]
-      raise TypeError, "no implicit conversion of #{a.nil? ? "nil" : a.class} into Hash" unless a.is_a?(Hash)
+      unless a.is_a?(Hash)
+        if a.respond_to?(:to_hash)
+          a = a.to_hash
+          raise TypeError, "can't convert #{args[0].class} to Hash (#{args[0].class}#to_hash gives #{a.class})" unless a.is_a?(Hash)
+        else
+          raise TypeError, "no implicit conversion of #{a.nil? ? "nil" : a.class} into Hash"
+        end
+      end
       h = a
     end
     __each_packed { |x|
@@ -595,8 +609,8 @@ module Enumerable
     return enum_for(:find_index) { nil } if args.empty? && !block_given?
     idx = nil
     i = 0
-    __each_packed { |x|
-      idx = i if idx.nil? && (args.empty? ? yield(x) : x == args[0])
+    each { |*a|
+      idx = i if idx.nil? && (args.empty? ? yield(*a) : __pack(a) == args[0])
       i = i + 1
     }
     idx
@@ -622,9 +636,13 @@ module Enumerable
     return enum_for(:take_while) { nil } unless block_given?
     r = []
     taking = true
-    __each_packed { |x|
-      taking = false if taking && !yield(x)
-      r << x if taking
+    each { |*a|
+      next unless taking
+      if yield(*a)
+        r << __pack(a)
+      else
+        taking = false
+      end
     }
     r
   end
