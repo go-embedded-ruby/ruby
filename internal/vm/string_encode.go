@@ -131,13 +131,12 @@ func charEncodableIn(r rune, to string) bool {
 	case "ISO-8859-1":
 		return r < 0x100
 	}
-	if enc, ok := xtextEncodings[to]; ok {
-		_, err := enc.NewEncoder().Bytes([]byte(string(r)))
-		return err == nil
-	}
-	// An unknown target has no codec; leave the character in place so the encoder
-	// raises Encoding::ConverterNotFoundError rather than the fallback masking it.
-	return true
+	// A supported non-core target is always in the x/text table: stringEncode has
+	// already rejected any target lacking a converter, so charEncodableIn — reached
+	// only from the post-decode passes — never sees an unknown encoding.
+	enc := xtextEncodings[to]
+	_, err := enc.NewEncoder().Bytes([]byte(string(r)))
+	return err == nil
 }
 
 // applyFallback rewrites the UTF-8 intermediate u, replacing each character that
@@ -335,8 +334,9 @@ func (vm *VM) decodeUTF32(src []byte, be bool, o transcodeOpts, repl string) str
 
 // encodeFromUTF8 encodes the UTF-8 intermediate u into encoding `to`. Characters
 // absent from the target raise Encoding::UndefinedConversionError, unless
-// undef:replace substitutes them; an unsupported target raises
-// Encoding::ConverterNotFoundError.
+// undef:replace substitutes them. Its callers (stringEncode's early converter
+// check, and caseMapBytes which first decodes) guarantee `to` has a converter, so
+// a non-core target is one of the x/text codecs.
 func (vm *VM) encodeFromUTF8(u, to string, o transcodeOpts, repl string) []byte {
 	switch to {
 	case "UTF-8":
@@ -350,11 +350,7 @@ func (vm *VM) encodeFromUTF8(u, to string, o transcodeOpts, repl string) []byte 
 	case "UTF-32LE", "UTF-32BE":
 		return encodeUTF32(u, to == "UTF-32BE")
 	}
-	if b, ok := xtextEncode(u, to, o.undefReplace, repl); ok {
-		return b
-	}
-	raise("Encoding::ConverterNotFoundError", "code converter not found (UTF-8 to %s)", to)
-	return nil
+	return xtextEncode(u, to, o.undefReplace, repl)
 }
 
 // encodeByteRange encodes each rune of u to a single byte when it is below limit

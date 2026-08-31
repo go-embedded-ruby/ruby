@@ -54,6 +54,10 @@ func TestEncodeResiduals(t *testing.T) {
 		// A registered but converter-less destination with non-ASCII data has no
 		// converter either.
 		{`[0x80].pack("C").force_encoding("BINARY").encode("Emacs-Mule")`, "code converter not found (ASCII-8BIT to Emacs-Mule)"},
+		// An encoding argument that is neither an Encoding, a String, nor #to_str
+		// convertible is a TypeError.
+		{`"abc".encode(42)`, "no implicit conversion of Integer into String"},
+		{`"abc".encode(:utf8)`, "no implicit conversion of Symbol into String"},
 		// #encode! refuses a frozen receiver, even for a no-op transcoding.
 		{`"foo".freeze.encode!("utf-8")`, "FrozenError"},
 		{`"foo".freeze.encode!("euc-jp")`, "FrozenError"},
