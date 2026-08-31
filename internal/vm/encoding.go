@@ -384,8 +384,12 @@ func (vm *VM) registerStringEncoding() {
 		d.Enc = "ASCII-8BIT"
 		return d
 	})
-	vm.cString.define("ascii_only?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(asciiOnly(self.(*object.String).Bytes()))
+	vm.cString.define("ascii_only?", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// #ascii_only? is ENC_CODERANGE_7BIT: content in a non-ASCII-compatible
+		// encoding (UTF-16/32, …) is never 7-bit, even when empty or all-ASCII in
+		// bytes, so it reports false regardless of the bytes.
+		s := self.(*object.String)
+		return object.Bool(vm.internEncoding(s.EncName()).asciiCompat && asciiOnly(s.Bytes()))
 	})
 	vm.cString.define("valid_encoding?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)

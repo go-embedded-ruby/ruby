@@ -107,6 +107,24 @@ func TestConcatAliasedReceiver(t *testing.T) {
 	}
 }
 
+// TestAsciiOnlyEncoding covers that #ascii_only? is the 7-bit coderange, not a
+// bare byte scan: content in a non-ASCII-compatible encoding is never 7-bit,
+// even when empty or all-ASCII in bytes.
+func TestAsciiOnlyEncoding(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p "abc".ascii_only?`, "true\n"},
+		{`p "".ascii_only?`, "true\n"}, // empty UTF-8 is 7-bit
+		{`p "".force_encoding("UTF-16LE").ascii_only?`, "false\n"},
+		{`p "abc".force_encoding("UTF-16BE").ascii_only?`, "false\n"},
+		{`p "\xe3\x81\x82".ascii_only?`, "false\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q: got %q want %q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestConcatMultibyteCodepoint covers appending an Integer codepoint to a string
 // in a legacy multibyte encoding: a valid codepoint is unpacked big-endian, an
 // in-range but non-character byte (a lone lead byte) raises RangeError, and
