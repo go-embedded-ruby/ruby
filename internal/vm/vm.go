@@ -1314,7 +1314,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// `yield` and `return`: inside a method the anchor is the method itself; inside
 	// a block the anchor is inherited from the enclosing block (so `super` nested
 	// through several blocks still reaches the home method).
-	homeSuperName, homeSuperDefinee, homeSuperArgs := methodName, definee, args
+	//
+	// The anchor NAME is the method's ORIGINAL name (fm.orig), not the name it was
+	// invoked by: for an aliased method (`alias_method :name3, :name`), a bare
+	// `super` resolves the original `name` above the alias's owner, matching MRI —
+	// __method__, not __callee__. For a plain def the two coincide.
+	homeSuperName, homeSuperDefinee, homeSuperArgs := fm.orig, definee, args
 	homeDmBody := false
 	if selfBlock != nil {
 		homeSuperName, homeSuperDefinee, homeSuperArgs = selfBlock.superName, selfBlock.superDefinee, selfBlock.superArgs
@@ -2432,8 +2437,15 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 	}
 	// super resolves to the next definition of methodName after the current
 	// method's owner (definee) in the receiver's ancestor chain — so it walks
-	// prepended and included modules, not just the superclass.
-	anc := vm.ancestors(vm.classOf(self))
+	// prepended and included modules, not just the superclass. When the receiver
+	// carries a per-object singleton class, the chain begins there (its super is
+	// the object's class), so a `super` from a singleton method — `def obj.foo`,
+	// or define_method on the singleton class — reaches the class-level definition.
+	startClass := vm.classOf(self)
+	if sc := vm.objSingleton(self); sc != nil {
+		startClass = sc
+	}
+	anc := vm.ancestors(startClass)
 	start := -1
 	for i, k := range anc {
 		if k == definee {

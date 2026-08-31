@@ -122,6 +122,36 @@ func TestSuperFallsBackToMethodMissing(t *testing.T) {
 	}
 }
 
+// TestSuperResolution covers super from a per-object singleton method and from
+// an aliased method: the singleton method reaches the class-level definition,
+// and the alias anchors super on the method's original name/owner (MRI).
+func TestSuperResolution(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// super from a `def obj.foo` singleton method reaches the class method
+		{`class Foo; def foobar(a); a << :foo; end; end
+		  o = Foo.new
+		  def o.foobar(a); a << :singleton; super; end
+		  p o.foobar([])`, "[:singleton, :foo]\n"},
+		// super from a define_method on the singleton class using an unbound method
+		{`fc = Class.new { def bar; "bar"; end }
+		  m = Module.new { def bar; "super_" + super; end }
+		  foo = fc.new
+		  foo.singleton_class.define_method(:bar, m.instance_method(:bar))
+		  p foo.bar`, "\"super_bar\"\n"},
+		// aliased method: super uses the ORIGINAL name, resolving above the alias's
+		// owner rather than looping on the alias name
+		{`class A1; def name; [:a1]; end; end
+		  class A2 < A1; def name; [:a2] + super; end; end
+		  class A3 < A2; alias_method :name3, :name; end
+		  p A3.new.name3`, "[:a2, :a1]\n"},
+	}
+	for _, tc := range cases {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+		}
+	}
+}
+
 // TestKeywordAndArityErrors covers the keyword/arity error paths: a missing
 // required keyword is reported before an unknown one, and the post-splat arity
 // minimum is enforced.
