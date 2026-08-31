@@ -3,6 +3,7 @@ package vm_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -256,13 +257,18 @@ func TestFileModeAccess(t *testing.T) {
 	oks := []struct{ src, want string }{
 		// Paragraph mode on a real File keeps only the two terminating newlines.
 		{`p(File.open(` + path("pg", "a\n\n\nb") + `, "r") { |f| f.gets("") })`, "\"a\\n\\n\"\n"},
-		// A character device (non-regular) opens with an empty buffer, so a read
-		// sees end-of-file rather than an unbounded stream; appending to one just
-		// reports the byte count without buffering readable content.
-		{`p(File.open("/dev/null", "r") { |f| f.read })`, "\"\"\n"},
-		{`p(File.open("/dev/null", "a") { |f| f.write("x") })`, "1\n"},
 		// A write-only File with no explicit encoding reports a nil external encoding.
 		{`p(File.open(` + path("we", "") + `, "w") { |f| f.external_encoding })`, "nil\n"},
+	}
+	if runtime.GOOS != "windows" {
+		// A character device (non-regular) opens with an empty buffer, so a read
+		// sees end-of-file rather than an unbounded stream; appending to one just
+		// reports the byte count without buffering readable content. /dev/null is
+		// POSIX-only (Windows spells the null device NUL), so gate these two.
+		oks = append(oks,
+			struct{ src, want string }{`p(File.open("/dev/null", "r") { |f| f.read })`, "\"\"\n"},
+			struct{ src, want string }{`p(File.open("/dev/null", "a") { |f| f.write("x") })`, "1\n"},
+		)
 	}
 	for _, c := range oks {
 		if got := eval(t, c.src); got != c.want {
