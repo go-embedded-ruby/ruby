@@ -25,8 +25,9 @@ type IOObj struct {
 	path     string // backing file path for a File stream (else "")
 	writable bool   // a File opened for writing — flush the buffer on flush/close
 	lineno   int    // #lineno — advanced by each successful line read (gets/readline)
-	rdClosed bool   // #close_read was called — reads raise "not opened for reading"
-	wrClosed bool   // #close_write was called — writes raise "not opened for writing"
+	rdClosed bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
+	wrClosed bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
+	appendMode bool // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
 	extEnc   string // external encoding name, "" ⇒ Encoding.default_external
 	intEnc   string // internal encoding name, "" ⇒ none (nil)
 	fd       int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
@@ -77,6 +78,9 @@ func (o *IOObj) writeBytes(p []byte) int {
 		return len(p)
 	}
 	if o.isStr {
+		if o.appendMode { // append mode: every write lands at end, ignoring position
+			o.pos = len(o.buf)
+		}
 		if end := o.pos + len(p); end > len(o.buf) {
 			o.buf = append(o.buf, make([]byte, end-len(o.buf))...)
 		}
@@ -170,14 +174,40 @@ func (vm *VM) registerIO() {
 	defIOWrite(cStringIO)
 	defStringIORead(cStringIO)
 	defIOReadExtra(cStringIO)
-	cStringIO.smethods["new"] = &Method{name: "new", owner: cStringIO, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	cStringIO.smethods["new"] = &Method{name: "new", owner: cStringIO, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		o := &IOObj{cls: cStringIO, isStr: true}
-		if len(args) > 0 {
-			if s, ok := args[0].(*object.String); ok {
-				o.buf = append([]byte(nil), s.Bytes()...)
-			} else {
+		// A trailing options Hash may carry mode: (StringIO.new(str, mode: "r")).
+		mode, modeGiven := "", false
+		if h, ok := lastHash(args); ok {
+			if v, ok := h.Get(object.Symbol("mode")); ok {
+				mode, modeGiven = stringIOModeString(v), true
+			}
+			args = args[:len(args)-1]
+		}
+		frozenSrc := false
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			s, ok := args[0].(*object.String)
+			if !ok {
 				raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 			}
+			o.buf = append([]byte(nil), s.Bytes()...)
+			frozenSrc = s.Frozen
+		}
+		if len(args) > 1 && !object.IsNil(args[1]) {
+			mode, modeGiven = stringIOModeString(args[1]), true
+		}
+		if !modeGiven {
+			// With no explicit mode, a frozen backing string opens read-only; a
+			// mutable one (or none) is read/write, matching MRI.
+			mode = "r+"
+			if frozenSrc {
+				mode = "r"
+			}
+		}
+		read, write, trunc, appnd := stringIOModeFlags(mode)
+		o.rdClosed, o.wrClosed, o.appendMode = !read, !write, appnd
+		if trunc {
+			o.buf = nil
 		}
 		return o
 	}}
@@ -377,6 +407,39 @@ func fileMode(args []object.Value) string {
 	return "r"
 }
 
+// stringIOModeString normalises a StringIO mode argument (a String like "r+" or
+// an Integer bit-OR of File::Constants flags) to an access-mode string.
+func stringIOModeString(v object.Value) string {
+	if i, ok := v.(object.Integer); ok {
+		return flagsToMode(int64(i))
+	}
+	return strArg(v)
+}
+
+// stringIOModeFlags decodes a StringIO access mode ("r", "r+", "w", "w+", "a",
+// "a+") into its capabilities: whether reads and writes are permitted, whether
+// the buffer is truncated on open ("w"/"w+"), and whether writes append ("a"/"a+").
+// The mode may carry trailing flags (":BINARY", "b", "t"), which do not affect
+// these bits. An unrecognised mode raises ArgumentError, as MRI does.
+func stringIOModeFlags(mode string) (read, write, trunc, appnd bool) {
+	base := mode
+	if i := strings.IndexByte(base, ':'); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.TrimRight(base, "bt")
+	plus := strings.Contains(base, "+")
+	switch {
+	case strings.HasPrefix(base, "r"):
+		return true, plus, false, false
+	case strings.HasPrefix(base, "w"):
+		return plus, true, true, false
+	case strings.HasPrefix(base, "a"):
+		return plus, true, false, true
+	}
+	raise("ArgumentError", "invalid access mode %s", mode)
+	return false, false, false, false
+}
+
 // openFileIO opens path into a buffered, file-backed IOObj per mode (r/w/a, with
 // an optional "+" making a read mode writable). The file's bytes are read into
 // the buffer; writes accumulate there and are flushed back on flush/close.
@@ -425,6 +488,17 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 	default:
 		raise("ArgumentError", "invalid access mode %s", mode)
 	}
+	// Enforce the mode's access half: a write-only ("w"/"a") stream raises on
+	// read, a read-only ("r") stream raises on write, matching MRI. A "+" mode
+	// permits both. Append modes ("a"/"a+") force every write to end-of-buffer.
+	plus := strings.Contains(mode, "+")
+	switch mode[0] {
+	case 'w', 'a':
+		o.rdClosed = !plus
+		o.appendMode = mode[0] == 'a'
+	case 'r':
+		o.wrClosed = !plus
+	}
 	return o
 }
 
@@ -466,26 +540,42 @@ func (vm *VM) curIO(global string, w io.Writer, label string) *IOObj {
 // defIOWrite defines the writing half of the IO protocol on cls (shared by IO
 // and StringIO).
 func defIOWrite(cls *RClass) {
-	cls.define("write", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("write", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckOpen(o)
 		n := 0
 		for _, a := range args {
-			n += o.writeStr(a.ToS())
+			n += o.writeStr(vm.displayStr(a))
 		}
 		return object.IntValue(int64(n))
 	})
-	cls.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("<<", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckOpen(o)
-		o.writeStr(args[0].ToS())
+		o.writeStr(vm.displayStr(args[0]))
 		return self
 	})
 	cls.define("print", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckOpen(o)
-		for _, a := range args {
-			o.writeStr(vm.displayStr(a))
+		// With no arguments, #print writes $_ (the last line read). Multiple
+		// arguments are separated by the output field separator $, (when set) and
+		// the whole is terminated by the output record separator $\ (when set).
+		if len(args) == 0 {
+			if lastLine := vm.gvar("$_"); !object.IsNil(lastLine) {
+				o.writeStr(vm.displayStr(lastLine))
+			}
+		} else {
+			ofs, ofsSet := vm.optStrGlobal("$,")
+			for i, a := range args {
+				if i > 0 && ofsSet {
+					o.writeStr(ofs)
+				}
+				o.writeStr(vm.displayStr(a))
+			}
+		}
+		if ors, ok := vm.optStrGlobal("$\\"); ok {
+			o.writeStr(ors)
 		}
 		return object.NilV
 	})
@@ -662,17 +752,17 @@ func defStringIORead(cls *RClass) {
 		}
 		return object.IntValue(0)
 	})
-	cls.define("read", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("read", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
 		o.pipeRefresh()
-		// An optional second argument is an output-buffer String: the read fills it
-		// (and is returned in its place), and it is cleared when the read yields nil.
+		lengthGiven := len(args) > 0 && !object.IsNil(args[0])
+		// An optional second argument is an output-buffer String (coerced via
+		// #to_str): the read fills it (and is returned in its place), and it is
+		// cleared when the read yields nil.
 		var buf *object.String
 		if len(args) > 1 {
-			if b, ok := args[1].(*object.String); ok {
-				buf = b
-			}
+			buf = vm.ioBufferArg(args[1])
 		}
 		result := func(data []byte, isNil bool) object.Value {
 			if buf != nil {
@@ -689,10 +779,15 @@ func defStringIORead(cls *RClass) {
 			if isNil {
 				return object.NilV
 			}
+			// read(length) returns a binary (ASCII-8BIT) String; read with no
+			// length returns the remainder in the stream's default encoding.
+			if lengthGiven {
+				return object.NewStringBytesEnc(append([]byte(nil), data...), "ASCII-8BIT")
+			}
 			return object.NewStringBytes(append([]byte(nil), data...))
 		}
-		if len(args) > 0 && args[0] != object.NilV {
-			n := int(toInt(args[0]))
+		if lengthGiven {
+			n := int(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative length %d given", n)
 			}
@@ -776,7 +871,8 @@ func defStringIORead(cls *RClass) {
 	gets := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
-		v := ioGets(o, args)
+		sep, limit, chomp := vm.resolveGetsArgs(args)
+		v := vm.ioGetsResolved(o, sep, limit, chomp)
 		if v == object.NilV {
 			// Reading past the last line clears $_ (but leaves $. reporting the
 			// final line number), matching MRI.
@@ -797,10 +893,11 @@ func defStringIORead(cls *RClass) {
 	cls.define("readlines", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
-		checkGetsLimit(args, "readlines")
+		sep, limit, chomp := vm.resolveGetsArgs(args)
+		checkResolvedLimit(limit, "readlines")
 		var lines []object.Value
 		for {
-			v := ioGets(o, args)
+			v := vm.ioGetsResolved(o, sep, limit, chomp)
 			if v == object.NilV {
 				break
 			}
@@ -812,9 +909,10 @@ func defStringIORead(cls *RClass) {
 	cls.define("each_line", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
-		checkGetsLimit(args, "each_line")
+		sep, limit, chomp := vm.resolveGetsArgs(args)
+		checkResolvedLimit(limit, "each_line")
 		for {
-			v := ioGets(o, args)
+			v := vm.ioGetsResolved(o, sep, limit, chomp)
 			if v == object.NilV {
 				break
 			}
@@ -832,6 +930,9 @@ func defStringIORead(cls *RClass) {
 		}
 		return self
 	})
+	// #each is a true alias of #each_line — it must share the method entry so
+	// IO.instance_method(:each) == IO.instance_method(:each_line), as in MRI.
+	cls.methods["each"] = cls.methods["each_line"]
 }
 
 // ioGets reads one line (up to and including the separator, default "\n") from a
@@ -881,6 +982,77 @@ func parseGetsArgs(args []object.Value) (sep getsSep, limit int, chomp bool) {
 	return sep, limit, chomp
 }
 
+// ioGetsResolved reads one line from o with already-resolved (sep, limit, chomp)
+// — the coercion of the separator/limit arguments has been done once by the
+// caller so a bulk reader (readlines/each_line) never re-runs a #to_str/#to_int
+// side effect per line. A successful (non-nil) read advances #lineno.
+func (vm *VM) ioGetsResolved(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
+	o.pipeRefresh()
+	v := ioGetsLine(o, sep, limit, chomp)
+	if v != object.NilV {
+		o.lineno++
+	}
+	return v
+}
+
+// resolveGetsArgs decodes the (sep, limit, chomp:) arguments of the StringIO/IO
+// gets family, coercing a non-String separator via #to_str and a non-Integer
+// limit via #to_int exactly once, and defaulting the separator to $/ (the input
+// record separator) when none is given. A nil separator selects whole-remainder
+// mode; an Integer first positional is the byte limit.
+func (vm *VM) resolveGetsArgs(args []object.Value) (sep getsSep, limit int, chomp bool) {
+	sep, limit = vm.defaultGetsSep(), -1
+	if h, ok := lastHash(args); ok {
+		if v, ok := h.Get(object.Symbol("chomp")); ok {
+			chomp = v.Truthy()
+		}
+		args = args[:len(args)-1]
+	}
+	if len(args) > 0 {
+		switch a := args[0].(type) {
+		case object.Integer:
+			limit = int(a)
+		case *object.String:
+			sep = getsSep{s: a.Str(), set: true}
+		default:
+			switch {
+			case object.IsNil(args[0]):
+				sep = getsSep{s: "", set: true, nilSep: true}
+			case vm.respondsToDynamic(args[0], "to_str"):
+				// A #to_str-convertible first argument is the separator (MRI checks
+				// the String conversion before the Integer one).
+				sep = getsSep{s: string(vm.strArgConv(args, 0)), set: true}
+			default:
+				// Otherwise a single non-String positional is the byte limit,
+				// coerced via #to_int (gets(obj) where obj defines only #to_int).
+				limit = int(vm.toIntCoerce(args[0]))
+			}
+		}
+	}
+	if len(args) > 1 && !object.IsNil(args[1]) {
+		limit = int(vm.toIntCoerce(args[1]))
+	}
+	return sep, limit, chomp
+}
+
+// defaultGetsSep returns the separator used when gets is called with no explicit
+// one: the input record separator $/ when it holds a String, else "\n".
+func (vm *VM) defaultGetsSep() getsSep {
+	if s, ok := vm.gvar("$/").(*object.String); ok {
+		return getsSep{s: s.Str(), set: true}
+	}
+	return getsSep{s: "\n"}
+}
+
+// checkResolvedLimit raises ArgumentError for an explicit limit of 0 on a
+// line-iterating read (readlines/each_line), matching MRI (a 0-byte line would
+// never advance the cursor).
+func checkResolvedLimit(limit int, meth string) {
+	if limit == 0 {
+		raise("ArgumentError", "invalid limit: 0 for %s", meth)
+	}
+}
+
 // checkGetsLimit raises ArgumentError for an explicit limit of 0 on a
 // line-iterating read (readlines/each_line/foreach/each): a 0-byte line never
 // advances the cursor, so MRI rejects it rather than looping. A single #gets(0)
@@ -905,7 +1077,7 @@ func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 		return object.NilV
 	}
 	if sep.set && sep.s == "" && !sep.nilSep { // an empty separator selects paragraph mode
-		return ioGetsParagraph(o)
+		return ioGetsParagraph(o, limit)
 	}
 	rest := o.buf[o.pos:]
 	end := len(o.buf) // default: read to end (nil separator, or separator not found)
@@ -941,9 +1113,13 @@ func getsChomp(line []byte, sep string) []byte {
 }
 
 // ioGetsParagraph implements gets/each_line paragraph mode (an empty separator):
-// leading blank lines are skipped, then the paragraph up to and including the run
-// of two or more newlines that terminates it (or end of input) is returned.
-func ioGetsParagraph(o *IOObj) object.Value {
+// leading blank lines are skipped, then the paragraph up to the run of two or
+// more newlines that terminates it (or end of input) is returned. A non-negative
+// limit caps the number of bytes returned. A StringIO keeps the whole terminating
+// newline run in the result, whereas a real IO/File keeps only the two newlines
+// that close the paragraph (the rest are skipped as leading blanks on the next
+// read) — matching MRI, whose StringIO and IO differ here.
+func ioGetsParagraph(o *IOObj, limit int) object.Value {
 	for o.pos < len(o.buf) && o.buf[o.pos] == '\n' { // skip leading blank lines
 		o.pos++
 	}
@@ -951,16 +1127,23 @@ func ioGetsParagraph(o *IOObj) object.Value {
 		return object.NilV
 	}
 	start := o.pos
+	end := len(o.buf)
 	if idx := strings.Index(string(o.buf[start:]), "\n\n"); idx >= 0 {
-		end := start + idx
+		end = start + idx
 		for end < len(o.buf) && o.buf[end] == '\n' { // consume the whole newline run
 			end++
 		}
-		o.pos = end
-		return object.NewString(string(o.buf[start:end]))
+		if !(o.cls != nil && o.cls.name == "StringIO") { // real IO keeps only two
+			if two := start + idx + 2; two < end {
+				end = two
+			}
+		}
 	}
-	o.pos = len(o.buf)
-	return object.NewString(string(o.buf[start:]))
+	if limit >= 0 && start+limit < end {
+		end = start + limit
+	}
+	o.pos = end
+	return object.NewString(string(o.buf[start:end]))
 }
 
 // ioPuts writes args to o with Kernel#puts semantics (arrays flattened, a
@@ -1003,11 +1186,46 @@ func (vm *VM) ioPutsValueRec(o *IOObj, v object.Value, seen map[*object.Array]st
 		}
 		return
 	}
+	// A non-Array object that implements #to_ary is expanded like an Array (each
+	// element on its own line), matching MRI's puts — which tries #to_ary before
+	// falling back to #to_s.
+	if vm.respondsToDynamic(v, "to_ary") {
+		if arr, ok := vm.send(v, "to_ary", nil, nil).(*object.Array); ok {
+			vm.ioPutsValueRec(o, arr, seen)
+			return
+		}
+	}
 	if s := vm.displayStr(v); strings.HasSuffix(s, "\n") {
 		o.writeStr(s)
 	} else {
 		o.writeStr(s + "\n")
 	}
+}
+
+// optStrGlobal reads a global that is meaningful only when set to a String — the
+// output field/record separators $, and $\ that #print honours. It reports the
+// separator and whether one is in effect (a nil or unset global ⇒ false).
+func (vm *VM) optStrGlobal(name string) (string, bool) {
+	if s, ok := vm.gvar(name).(*object.String); ok {
+		return s.Str(), true
+	}
+	return "", false
+}
+
+// ioBufferArg resolves the output-buffer argument of #read/#readpartial to a
+// mutable String, coercing a non-String via #to_str (as MRI does). Anything that
+// is neither a String nor #to_str-convertible raises TypeError.
+func (vm *VM) ioBufferArg(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return nil
 }
 
 // displayStr renders v the way Kernel#print / #puts / String() do: a user object

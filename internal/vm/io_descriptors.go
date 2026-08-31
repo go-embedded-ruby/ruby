@@ -90,20 +90,11 @@ func defIOReadExtra(cls *RClass) {
 		}
 		return self
 	})
-	each := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		o := self.(*IOObj)
-		ioCheckReadable(o)
-		checkGetsLimit(args, "each_line")
-		for {
-			v := ioGets(o, args)
-			if v == object.NilV {
-				break
-			}
-			vm.callBlock(blk, []object.Value{v})
-		}
-		return self
-	}
-	cls.define("each", each)
+	// #each is a true alias of #each_line (defined in defStringIORead, which runs
+	// before defIOReadExtra): they must share the method entry so
+	// IO.instance_method(:each) == IO.instance_method(:each_line), as in MRI, and
+	// #each inherits each_line's separator/limit/$/ handling.
+	cls.methods["each"] = cls.methods["each_line"]
 	cls.define("sysread", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
