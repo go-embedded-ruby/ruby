@@ -86,6 +86,20 @@ func TestAlwaysPrivateMethodDefs(t *testing.T) {
 	}
 }
 
+// TestSplatToArrayNilToA covers the splat (*obj) coercion when the object's
+// #to_a returns nil: MRI wraps the object in a one-element array rather than
+// raising, while a non-nil non-Array #to_a result is still a TypeError.
+func TestSplatToArrayNilToA(t *testing.T) {
+	if got := eval(t, `class M; def to_a; nil; end; end
+	  a = [*M.new]; p a.size; p a[0].class`); got != "1\nM\n" {
+		t.Errorf("nil to_a splat: got %q", got)
+	}
+	err := runErr(t, `class N; def to_a; 5; end; end; [*N.new]`)
+	if err == nil || !strings.Contains(err.Error(), "can't convert N to Array (N#to_a gives Integer)") {
+		t.Errorf("non-array to_a: got %v", err)
+	}
+}
+
 // TestKeywordAndArityErrors covers the keyword/arity error paths: a missing
 // required keyword is reported before an unknown one, and the post-splat arity
 // minimum is enforced.
