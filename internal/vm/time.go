@@ -56,15 +56,80 @@ func (t *Time) fracString() string {
 	return "." + s
 }
 
+// subsecValue renders Time#subsec: the exact fraction of a second as a Rational,
+// or the Integer 0 on a whole second (MRI keeps 0 an Integer, not 0/1).
+func (t *Time) subsecValue() object.Value {
+	ns := t.t.Nanosecond()
+	if ns == 0 {
+		return object.IntValue(0)
+	}
+	return &object.Rational{R: big.NewRat(int64(ns), 1e9)}
+}
+
+// zoneValue renders Time#zone: the Ruby timezone object when the Time carries
+// one, else the fixed/named zone abbreviation, or nil when the zone is unnamed.
+func (t *Time) zoneValue() object.Value {
+	if z := t.zoneObj; z != nil {
+		return z
+	}
+	name, _ := t.t.Zone()
+	if name == "" {
+		return object.NilV
+	}
+	return object.NewString(name)
+}
+
+// timeDeconstructKeys is the field set Time#deconstruct_keys(nil) returns, in
+// MRI's order.
+var timeDeconstructKeys = []string{
+	"year", "month", "day", "yday", "wday", "hour", "min", "sec", "subsec", "dst", "zone",
+}
+
+// fieldValue resolves one Time#deconstruct_keys field name to its value, with ok
+// false for a name that is not a field.
+func (t *Time) fieldValue(key string) (object.Value, bool) {
+	tm := t.t
+	switch key {
+	case "year":
+		return object.IntValue(int64(tm.Year())), true
+	case "month":
+		return object.IntValue(int64(tm.Month())), true
+	case "day":
+		return object.IntValue(int64(tm.Day())), true
+	case "yday":
+		return object.IntValue(int64(tm.YearDay())), true
+	case "wday":
+		return object.IntValue(int64(tm.Weekday())), true
+	case "hour":
+		return object.IntValue(int64(tm.Hour())), true
+	case "min":
+		return object.IntValue(int64(tm.Minute())), true
+	case "sec":
+		return object.IntValue(int64(tm.Second())), true
+	case "subsec":
+		return t.subsecValue(), true
+	case "dst":
+		return object.Bool(tm.IsDST()), true
+	case "zone":
+		return t.zoneValue(), true
+	}
+	return nil, false
+}
+
 // repr renders MRI's "2026-06-21 12:34:56 +0000"; when withFrac the sub-second
-// fraction is included (inspect, not to_s).
+// fraction is included (inspect, not to_s). A UTC instant reports the zone as
+// "UTC" rather than the "+0000" offset, matching MRI's to_s / inspect.
 func (t *Time) repr(withFrac bool) string {
 	base := t.t.Format("2006-01-02 15:04:05")
 	frac := ""
 	if withFrac {
 		frac = t.fracString()
 	}
-	return base + frac + " " + t.offsetString()
+	zone := t.offsetString()
+	if t.t.Location() == stdtime.UTC {
+		zone = "UTC"
+	}
+	return base + frac + " " + zone
 }
 
 func (t *Time) ToS() string     { return t.repr(false) }
@@ -211,9 +276,6 @@ func (vm *VM) registerTime() {
 	d("strftime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewString(strftime(self(v), strArg(args[0])))
 	})
-	d("ctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(strftime(self(v), "%a %b %e %H:%M:%S %Y"))
-	})
 	d("asctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(strftime(self(v), "%a %b %e %H:%M:%S %Y"))
 	})
@@ -224,7 +286,6 @@ func (vm *VM) registerTime() {
 		return object.NewString(self(v).iso8601Str(int(intArgOr(args, 0))))
 	}
 	d("iso8601", iso)
-	d("xmlschema", iso)
 	rfc2822 := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self(v).rfc2822Str())
 	}
@@ -242,12 +303,10 @@ func (vm *VM) registerTime() {
 		return object.IntValue(int64(self(v).t.Month()))
 	}
 	d("month", monthFn)
-	d("mon", monthFn)
 	dayFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.Day()))
 	}
 	d("day", dayFn)
-	d("mday", dayFn)
 	d("hour", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.Hour()))
 	})
@@ -264,28 +323,13 @@ func (vm *VM) registerTime() {
 		return object.IntValue(int64(self(v).t.Nanosecond()))
 	})
 	d("subsec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		ns := self(v).t.Nanosecond()
-		if ns == 0 {
-			return object.IntValue(0)
-		}
-		return &object.Rational{R: big.NewRat(int64(ns), 1e9)}
+		return self(v).subsecValue()
 	})
 	d("yday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.YearDay()))
 	})
 	d("wday", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self(v).t.Weekday()))
-	})
-
-	// POSIX time-value accessors.
-	d("tv_sec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(self(v).t.Unix())
-	})
-	d("tv_usec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self(v).t.Nanosecond() / 1000))
-	})
-	d("tv_nsec", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self(v).t.Nanosecond()))
 	})
 
 	// Weekday predicates.
@@ -304,32 +348,21 @@ func (vm *VM) registerTime() {
 
 	// Zone queries.
 	d("zone", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		if z := self(v).zoneObj; z != nil {
-			return z
-		}
-		name, _ := self(v).t.Zone()
-		if name == "" {
-			return object.NilV
-		}
-		return object.NewString(name)
+		return self(v).zoneValue()
 	})
 	offsetFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		_, off := self(v).t.Zone()
 		return object.IntValue(int64(off))
 	}
 	d("utc_offset", offsetFn)
-	d("gmt_offset", offsetFn)
-	d("gmtoff", offsetFn)
 	utcPred := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).t.Location() == stdtime.UTC)
 	}
 	d("utc?", utcPred)
-	d("gmt?", utcPred)
 	dstFn := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).t.IsDST())
 	}
 	d("dst?", dstFn)
-	d("isdst", dstFn)
 
 	// Conversions. utc/gmtime/localtime mutate the receiver and return it (MRI);
 	// getutc/getlocal return a new Time.
@@ -338,7 +371,6 @@ func (vm *VM) registerTime() {
 		return v
 	}
 	d("utc", toUTC)
-	d("gmtime", toUTC)
 	d("localtime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		self(v).t = self(v).t.In(vm.localtimeLoc(args))
 		return v
@@ -347,7 +379,6 @@ func (vm *VM) registerTime() {
 		return &Time{t: self(v).t.UTC()}
 	}
 	d("getutc", getutc)
-	d("getgm", getutc)
 	d("getlocal", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return &Time{t: self(v).t.In(vm.localtimeLoc(args))}
 	})
@@ -374,6 +405,39 @@ func (vm *VM) registerTime() {
 		)
 	})
 
+	// deconstruct_keys(keys) backs pattern matching (MRI 4.0): nil returns the
+	// whole field hash; an Array returns just the requested Symbol keys that name
+	// a field, ignoring (not raising on) non-Symbol or unknown keys; any other
+	// argument raises TypeError.
+	d("deconstruct_keys", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		t := self(v)
+		h := object.NewHash()
+		if object.IsNil(args[0]) {
+			for _, k := range timeDeconstructKeys {
+				val, _ := t.fieldValue(k)
+				h.Set(object.Symbol(k), val)
+			}
+			return h
+		}
+		arr, ok := args[0].(*object.Array)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Array or nil)", vm.classOf(args[0]).name)
+		}
+		for _, k := range arr.Elems {
+			sym, ok := k.(object.Symbol)
+			if !ok {
+				continue // a non-Symbol key is ignored, not an error
+			}
+			if val, ok := t.fieldValue(string(sym)); ok {
+				h.Set(sym, val)
+			}
+		}
+		return h
+	})
+
 	// Arithmetic and ordering.
 	d("+", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return timeOp(bytecode.OpAdd, self(v), args[0])
@@ -381,12 +445,25 @@ func (vm *VM) registerTime() {
 	d("-", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return timeOp(bytecode.OpSub, self(v), args[0])
 	})
-	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		other, ok := args[0].(*Time)
-		if !ok {
+	d("<=>", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		if other, ok := args[0].(*Time); ok {
+			return object.IntValue(timeCmp(self(v), other))
+		}
+		// A non-Time argument: MRI reverses the comparison — it asks the other
+		// object for `other <=> self` and inverts the sign of the answer (nil
+		// stays nil), dispatching the sign test through the result's own #>/#<.
+		r := vm.send(args[0], "<=>", []object.Value{v}, nil)
+		if object.IsNil(r) {
 			return object.NilV
 		}
-		return object.IntValue(timeCmp(self(v), other))
+		switch {
+		case vm.send(r, ">", []object.Value{object.IntValue(0)}, nil).Truthy():
+			return object.IntValue(-1)
+		case vm.send(r, "<", []object.Value{object.IntValue(0)}, nil).Truthy():
+			return object.IntValue(1)
+		default:
+			return object.IntValue(0)
+		}
 	})
 	d("<", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).t.Before(timeArg(args[0]).t))
@@ -409,6 +486,21 @@ func (vm *VM) registerTime() {
 	d("hash", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(self(v).t.UnixNano())
 	})
+
+	// True aliases share one Method record so Time.instance_method(:mon) ==
+	// Time.instance_method(:month), matching MRI 4.0.6 (Time#mday, #tv_sec,
+	// #gmt_offset, #gmtoff, #gmt?, #isdst, #gmtime, #getgm, #ctime and
+	// #xmlschema are all documented aliases).
+	for _, pair := range [][2]string{
+		{"mon", "month"}, {"mday", "day"},
+		{"tv_sec", "to_i"}, {"tv_usec", "usec"}, {"tv_nsec", "nsec"},
+		{"gmt_offset", "utc_offset"}, {"gmtoff", "utc_offset"},
+		{"gmt?", "utc?"}, {"isdst", "dst?"},
+		{"gmtime", "utc"}, {"getgm", "getutc"},
+		{"ctime", "asctime"}, {"xmlschema", "iso8601"},
+	} {
+		vm.cTime.methods[pair[0]] = vm.cTime.methods[pair[1]]
+	}
 }
 
 // timeZoneKw pops a trailing keyword hash carrying in: <zone> off args, returning
@@ -1222,7 +1314,7 @@ func roundFn(add func(z, x, y *big.Int) *big.Int, half bool) NativeFn {
 // timeOp implements the Time operator fast path reached from binary(): t + secs
 // shifts forward, t - secs shifts back, and t - other yields the Float seconds
 // between the two instants. A non-Time, non-numeric right operand raises via
-// numFloat / timeSeconds.
+// numFloat.
 func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
@@ -1238,10 +1330,14 @@ func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
 }
 
 // timeShift shifts a Time forward by sec seconds (which may be fractional),
-// preserving its location.
+// preserving both its location and its Ruby timezone object so that, per MRI,
+// (t + n).zone keeps the zone t was built with.
 func timeShift(t *Time, sec float64) object.Value {
 	whole, ns := splitSeconds(sec)
-	return &Time{t: t.t.Add(stdtime.Duration(whole)*stdtime.Second + stdtime.Duration(ns)*stdtime.Nanosecond)}
+	return &Time{
+		t:       t.t.Add(stdtime.Duration(whole)*stdtime.Second + stdtime.Duration(ns)*stdtime.Nanosecond),
+		zoneObj: t.zoneObj,
+	}
 }
 
 // timeCmp returns -1/0/1 ordering two Times.
@@ -1296,6 +1392,7 @@ var strftimeExpand = map[byte]string{
 	'T': "%H:%M:%S",
 	'X': "%H:%M:%S",
 	'h': "%b",
+	'v': "%e-%^b-%Y", // VMS/Oracle date, e.g. " 3-FEB-2001"
 }
 
 // strftime formats a Time per Ruby's strftime directive set: flags (-_0^#),
@@ -1329,7 +1426,10 @@ func strftime(t *Time, format string) string {
 		}
 		dir := format[j]
 		if exp, ok := strftimeExpand[dir]; ok {
-			b.WriteString(strftime(t, exp))
+			// A composite/alias directive expands to a sub-format; the parsed
+			// flags and explicit width still apply to its rendered result, so
+			// `%^h` upcases (%b → FEB) and `%10h` right-pads to width 10.
+			b.WriteString(applyFlags(strftime(t, exp), flags, 0, ' ', width))
 			i = j
 			continue
 		}
@@ -1423,6 +1523,9 @@ func strftimeField(t *Time, dir byte, colons, width int) (field, bool) {
 	case 'G':
 		y, _ := tm.ISOWeek()
 		return num(int64(y), 4), true
+	case 'g':
+		y, _ := tm.ISOWeek()
+		return num(int64(mod(y, 100)), 2), true
 	case 'V':
 		_, wk := tm.ISOWeek()
 		return num(int64(wk), 2), true

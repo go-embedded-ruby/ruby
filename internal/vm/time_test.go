@@ -16,11 +16,12 @@ func TestTime(t *testing.T) {
 		{`p Time.at(1000).to_i`, "1000\n"},
 		{`p Time.at(1000.9).to_i`, "1000\n"}, // Float seconds truncate
 		{`p Time.at(0).to_f`, "0.0\n"},
-		// to_s / inspect (RFC-ish, UTC offset).
-		{`puts Time.at(0)`, "1970-01-01 00:00:00 +0000\n"},
-		{`p Time.at(0).to_s`, "\"1970-01-01 00:00:00 +0000\"\n"},
-		{`p Time.at(0).inspect`, "\"1970-01-01 00:00:00 +0000\"\n"},
-		{`p [Time.at(0)]`, "[1970-01-01 00:00:00 +0000]\n"}, // Go-level Inspect, via Array#inspect
+		// to_s / inspect. rbgo's Time.at is a deterministic UTC instant (utc? is
+		// true, #zone is "UTC"), so MRI labels the zone "UTC", not "+0000".
+		{`puts Time.at(0)`, "1970-01-01 00:00:00 UTC\n"},
+		{`p Time.at(0).to_s`, "\"1970-01-01 00:00:00 UTC\"\n"},
+		{`p Time.at(0).inspect`, "\"1970-01-01 00:00:00 UTC\"\n"},
+		{`p [Time.at(0)]`, "[1970-01-01 00:00:00 UTC]\n"}, // Go-level Inspect, via Array#inspect
 		// strftime.
 		{`puts Time.at(0).strftime("%Y-%m-%d %H:%M:%S")`, "1970-01-01 00:00:00\n"},
 		{`puts Time.at(0).strftime("%Y/%m/%d")`, "1970/01/01\n"},
