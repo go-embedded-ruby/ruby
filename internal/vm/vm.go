@@ -1022,6 +1022,17 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 	return kwargs
 }
 
+// alwaysPrivateMethodName reports whether a method name is one MRI defines with
+// private visibility unconditionally (the object-initialization and
+// respond-to-missing hooks), independent of the surrounding default visibility.
+func alwaysPrivateMethodName(name string) bool {
+	switch name {
+	case "initialize", "initialize_copy", "initialize_clone", "initialize_dup", "respond_to_missing?":
+		return true
+	}
+	return false
+}
+
 // plural returns "s" when n > 1, for "keyword"/"keywords" in error messages.
 func plural(n int) string {
 	if n > 1 {
@@ -1700,6 +1711,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// In module_function (no-arg) mode, a def is private as an instance
 				// method but public as the module/singleton method.
 				if definee.funcMode {
+					m.vis = visPrivate
+				}
+				// A handful of core hook methods are always defined private,
+				// regardless of the surrounding default visibility (MRI).
+				if alwaysPrivateMethodName(name) {
 					m.vis = visPrivate
 				}
 				definee.methods[name] = m

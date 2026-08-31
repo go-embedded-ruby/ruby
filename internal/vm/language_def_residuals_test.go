@@ -52,6 +52,29 @@ func TestLanguageDefResiduals(t *testing.T) {
 	}
 }
 
+// TestAlwaysPrivateMethodDefs covers the core hook methods MRI always defines
+// with private visibility regardless of the surrounding default.
+func TestAlwaysPrivateMethodDefs(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`class C; def initialize; end; def initialize_copy(o); end
+		  def initialize_dup(o); end; def initialize_clone(o); end
+		  def respond_to_missing?(a,b); end; def normal; end; end
+		  p C.private_instance_methods(false).sort`,
+			"[:initialize, :initialize_clone, :initialize_copy, :initialize_dup, :respond_to_missing?]\n"},
+		// a normal method is still public
+		{`class C; def initialize; end; def normal; end; end
+		  p C.public_instance_methods(false).include?(:normal)`, "true\n"},
+		// reopening a class with a normal def stays public
+		{`class C; end; class C; def foo; end; end
+		  p C.public_instance_methods(false).include?(:foo)`, "true\n"},
+	}
+	for _, tc := range cases {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+		}
+	}
+}
+
 // TestKeywordAndArityErrors covers the keyword/arity error paths: a missing
 // required keyword is reported before an unknown one, and the post-splat arity
 // minimum is enforced.
