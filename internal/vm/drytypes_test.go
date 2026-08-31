@@ -219,7 +219,7 @@ func TestDryFromGo(t *testing.T) {
 	check(drytypes.Symbol("s"), ":s")
 	check([]any{int64(1)}, "[1]")
 	check(drytypes.Date{Year: 2026, Month: 6, Day: 30}, "\"2026-06-30\"")
-	check(stdtime.Unix(1_700_000_000, 0), "2023-11-14 22:13:20 +0000")
+	check(stdtime.Unix(1_700_000_000, 0), "2023-11-14 22:13:20 UTC")
 	check(drytypes.Undefined, "nil")
 	// An unmapped value falls through to nil.
 	check(struct{}{}, "nil")
