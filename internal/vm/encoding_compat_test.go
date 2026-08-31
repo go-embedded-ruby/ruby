@@ -64,16 +64,29 @@ func TestConverterNewTypeError(t *testing.T) {
 }
 
 // TestConverterNewValidPair confirms a genuinely deliverable pair still
-// constructs (the deliverability check must not over-reject).
+// constructs (the deliverability check must not over-reject). The final case
+// resolves an endpoint through #to_str.
 func TestConverterNewValidPair(t *testing.T) {
 	for _, src := range []string{
 		`p Encoding::Converter.new("utf-8", "utf-16le").class.name`,
 		`p Encoding::Converter.new("euc-jp", "utf-8").class.name`,
 		`p Encoding::Converter.new(Encoding::UTF_8, Encoding::SHIFT_JIS).class.name`,
+		`o = Object.new; def o.to_str; "utf-16le"; end; p Encoding::Converter.new(o, "utf-8").class.name`,
 	} {
 		if got := eval(t, src); got != "\"Encoding::Converter\"\n" {
 			t.Errorf("src=%q: got %q", src, got)
 		}
+	}
+}
+
+// TestConverterNewToStrUnknown resolves an endpoint through #to_str to an
+// unregistered name: the raw #to_str result is kept in the not-found message.
+func TestConverterNewToStrUnknown(t *testing.T) {
+	src := `o = Object.new; def o.to_str; "bogus-enc"; end; Encoding::Converter.new(o, "utf-8")`
+	err := runErr(t, src)
+	if err == nil || !strings.Contains(err.Error(), "ConverterNotFoundError") ||
+		!strings.Contains(err.Error(), "code converter not found (bogus-enc to UTF-8)") {
+		t.Errorf("src=%q: got %v", src, err)
 	}
 }
 
@@ -103,6 +116,7 @@ func TestConcatMultibyteCodepoint(t *testing.T) {
 		{`s = "".force_encoding("euc-jp"); s.concat(0xa4a2); p s.bytes`, "[164, 162]\n"},
 		{`s = "".force_encoding("shift_jis"); s.concat(0x82a0); p s.bytes`, "[130, 160]\n"},
 		{`p 0xa4a2.chr("euc-jp").bytes`, "[164, 162]\n"},
+		{`p 0.chr("euc-jp").bytes`, "[0]\n"}, // codepoint 0 unpacks to a single NUL byte
 		{`s = "".force_encoding("iso-8859-1"); s.concat(0x81); p s.bytes`, "[129]\n"},
 	}
 	for _, c := range ok {
