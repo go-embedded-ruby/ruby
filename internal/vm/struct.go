@@ -197,6 +197,24 @@ func setupStruct(vm *VM) {
 			}
 			return object.NilV
 		}
+		// keyword_init unset (Ruby 3.2 auto-detect): a lone Hash argument whose keys
+		// are all Symbols naming members is taken as keyword initialisation. MRI
+		// decides this from the caller's keyword flag, which our calling convention
+		// does not carry to a native method, so we approximate it by the keys naming
+		// members — a Hash with any non-member or non-Symbol key stays a positional
+		// value (so Struct.new(:a).new(b: 1) still stores {b: 1} in member a).
+		if d.kwInit == kwUnset && len(a) == 1 && len(names) > 0 {
+			if h, ok := a[0].(*object.Hash); ok && structHashAllMembers(h, names) {
+				for i, nm := range names {
+					if v, present := h.Get(object.Symbol(nm)); present {
+						o.structVals[i] = v
+					} else {
+						o.structVals[i] = object.NilV
+					}
+				}
+				return object.NilV
+			}
+		}
 		if len(a) > len(names) {
 			raise("ArgumentError", "struct size differs")
 		}
@@ -209,6 +227,9 @@ func setupStruct(vm *VM) {
 		}
 		return object.NilV
 	})
+	// MRI keeps Struct#initialize private (Car.private_instance_methods includes
+	// :initialize).
+	vm.setInstanceVisibility(cStruct, "initialize", visPrivate)
 
 	cStruct.define("members", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return structMemberSyms(structDefOf(self.(*RObject).class).names)
@@ -231,7 +252,11 @@ func setupStruct(vm *VM) {
 		names := structDefOf(self.(*RObject).class).names
 		vals := structValues(self)
 		for i, nm := range names {
-			vm.callBlock(blk, []object.Value{object.Symbol(nm), vals[i]})
+			// MRI yields ONE two-element Array per pair (like Hash#each): a `|k, v|`
+			// block auto-splats it, while a single-parameter block (or an Enumerator
+			// consumer, e.g. each_pair.map { |var| var }) receives the [name, value]
+			// Array whole.
+			vm.callBlock(blk, []object.Value{object.NewArrayFromSlice([]object.Value{object.Symbol(nm), vals[i]})})
 		}
 		return self
 	})
@@ -293,14 +318,10 @@ func setupStruct(vm *VM) {
 		for i, nm := range names {
 			if blk != nil {
 				res := vm.callBlock(blk, []object.Value{object.Symbol(nm), vals[i]})
-				pair, ok := res.(*object.Array)
-				if !ok {
-					raise("TypeError", "wrong element type %s (expected array)", classNameOf(res))
-				}
-				if len(pair.Elems) != 2 {
-					raise("ArgumentError", "element has wrong array length (expected 2, was %d)", len(pair.Elems))
-				}
-				h.Set(pair.Elems[0], pair.Elems[1])
+				// MRI coerces the returned pair with #to_ary (never #to_a); a non-Array,
+				// non-to_ary object is a TypeError naming the object's real class.
+				key, val := dataToHPair(vm, res)
+				h.Set(key, val)
 			} else {
 				h.Set(object.Symbol(nm), vals[i])
 			}
@@ -323,7 +344,7 @@ func setupStruct(vm *VM) {
 		}
 		keys, ok := a[0].(*object.Array)
 		if !ok {
-			raise("TypeError", "wrong argument type %s (expected Array)", classNameOf(a[0]))
+			raise("TypeError", "wrong argument type %s (expected Array or nil)", classNameOf(a[0]))
 		}
 		if len(keys.Elems) > len(names) {
 			return h // more keys than members: MRI returns {} without inspecting them
@@ -373,9 +394,19 @@ func setupStruct(vm *VM) {
 			}
 			v = vals[idx]
 		case object.Symbol:
-			v = vals[structNameIndex(string(k), names)]
+			// Unlike #[], #dig with a name that is not a member returns nil (treating
+			// the missing member as nil) rather than raising NameError.
+			if i, found := structFind(string(k), names); found {
+				v = vals[i]
+			} else {
+				v = object.NilV
+			}
 		case *object.String:
-			v = vals[structNameIndex(k.Str(), names)]
+			if i, found := structFind(k.Str(), names); found {
+				v = vals[i]
+			} else {
+				v = object.NilV
+			}
 		default:
 			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a[0]))
 		}
@@ -413,7 +444,7 @@ func setupStruct(vm *VM) {
 		vals := o.structVals
 		var b strings.Builder
 		b.WriteString("#<struct")
-		if o.class.name != "" { // the real class name, never #name (which may be overridden)
+		if namedThroughNesting(o.class) { // the real class name, never #name (which may be overridden)
 			b.WriteString(" ")
 			b.WriteString(o.class.name)
 		}
@@ -495,6 +526,24 @@ func (vm *VM) newStructClass(base *RClass, names []string, kwInit int8) *RClass 
 	return sub
 }
 
+// namedThroughNesting reports whether c has a permanent classpath — its own name
+// and every enclosing lexical namespace are named. MRI's Struct/Data #inspect
+// (rb_class_path_cached) shows the class name only for such classes, omitting it
+// for an anonymous class and for a class nested in an anonymous namespace (e.g.
+// `class Foo < Struct.new(:a)` defined inside `Class.new`): the name our object
+// model records ("Foo") is not the permanent path MRI would cache.
+func namedThroughNesting(c *RClass) bool {
+	if c.name == "" {
+		return false
+	}
+	for p := c.lexParent; p != nil; p = p.lexParent {
+		if p.name == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // hasInclude reports whether module m is already in c's include list.
 func hasInclude(c, m *RClass) bool {
 	for _, inc := range c.includes {
@@ -503,6 +552,26 @@ func hasInclude(c, m *RClass) bool {
 		}
 	}
 	return false
+}
+
+// structHashAllMembers reports whether every key of a non-empty Hash is a Symbol
+// naming a member — the shape that Struct#initialize (keyword_init unset) treats
+// as keyword initialisation.
+func structHashAllMembers(h *object.Hash, names []string) bool {
+	if len(h.Keys) == 0 {
+		return false
+	}
+	member := make(map[string]bool, len(names))
+	for _, nm := range names {
+		member[nm] = true
+	}
+	for _, k := range h.Keys {
+		sym, ok := k.(object.Symbol)
+		if !ok || !member[string(sym)] {
+			return false
+		}
+	}
+	return true
 }
 
 // structMemberSyms returns a fresh Array of the member names as Symbols.
@@ -600,7 +669,7 @@ func structDeconstructIndex(vm *VM, k object.Value, names []string) (int, bool) 
 			iv := vm.send(k, "to_int", nil, nil)
 			i, ok := iv.(object.Integer)
 			if !ok {
-				raise("TypeError", "can't convert %s into Integer", classNameOf(k))
+				raise("TypeError", "can't convert %s into Integer", vm.classOf(k).name)
 			}
 			return structPos(int(i), len(names))
 		}

@@ -1,10 +1,24 @@
 package vm
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// anonClassRepr renders an anonymous class/module the way MRI does inside a
+// recursive Data #inspect sentinel — "#<Class:0x…>" / "#<Module:0x…>" with the
+// class's identity address — so a self-referential anonymous Data prints
+// "#<data #<Class:0x…>:...>" (matching MRI's rb_class_name fallback).
+func anonClassRepr(c *RClass) string {
+	kind := "Class"
+	if c.isModule {
+		kind = "Module"
+	}
+	return fmt.Sprintf("#<%s:0x%016x>", kind, reflect.ValueOf(c).Pointer())
+}
 
 // dataDef records the member layout of a Data subclass minted by Data.define.
 // Unlike structDef there is no keyword-init tri-state: a Data class always
@@ -413,7 +427,7 @@ func dataToHPair(vm *VM, res object.Value) (object.Value, object.Value) {
 			}
 		}
 		if !ok {
-			raise("TypeError", "wrong element type %s (expected array)", classNameOf(res))
+			raise("TypeError", "wrong element type %s (expected array)", vm.classOf(res).name)
 		}
 	}
 	if len(arr.Elems) != 2 {
@@ -430,15 +444,15 @@ func (vm *VM) dataInspect(o *RObject) string {
 	names := dataDefOf(o.class).names
 	if !object.ReprEnter(o) {
 		nm := o.class.name
-		if nm == "" {
-			nm = o.class.ToS() // anonymous: #<Class …>
+		if !namedThroughNesting(o.class) {
+			nm = anonClassRepr(o.class) // anonymous / non-permanent path: #<Class:0x…>
 		}
 		return "#<data " + nm + ":...>"
 	}
 	defer object.ReprLeave(o)
 	var b strings.Builder
 	b.WriteString("#<data")
-	if o.class.name != "" { // the real class name, never #name (which may be overridden)
+	if namedThroughNesting(o.class) { // the real class name, never #name (which may be overridden)
 		b.WriteString(" ")
 		b.WriteString(o.class.name)
 	}

@@ -220,7 +220,7 @@ func TestStructConformanceErrors(t *testing.T) {
 
 		// deconstruct_keys errors.
 		{`S = Struct.new(:a); S.new(1).deconstruct_keys`, "wrong number of arguments (given 0, expected 1)"},
-		{`S = Struct.new(:a); S.new(1).deconstruct_keys(5)`, "wrong argument type Integer (expected Array)"},
+		{`S = Struct.new(:a); S.new(1).deconstruct_keys(5)`, "wrong argument type Integer (expected Array or nil)"},
 		{`S = Struct.new(:a, :b); S.new(1, 2).deconstruct_keys([0, []])`, "no implicit conversion of Array into Integer"},
 		{`S = Struct.new(:a, :b); k = Object.new; def k.to_int; "x"; end; S.new(1, 2).deconstruct_keys([k])`, "can't convert Object into Integer"},
 	}
