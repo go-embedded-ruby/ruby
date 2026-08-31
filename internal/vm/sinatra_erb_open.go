@@ -42,5 +42,5 @@ func (vm *VM) sinatraErbEval(sc *SinatraCtx, src string, names []string, vals []
 	slots := make([]object.Value, len(vals))
 	copy(slots, vals)
 	parent := &Env{slots: slots}
-	return vm.exec(iseq, sc, nil, vm.classOf(sc), "", parent, block, nil, nil)
+	return vm.exec(iseq, sc, nil, vm.classOf(sc), "", parent, block, nil, block, nil)
 }

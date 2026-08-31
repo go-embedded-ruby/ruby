@@ -33,7 +33,7 @@ func (vm *VM) runTop(iseq *bytecode.ISeq) object.Value {
 		vm.mainArmed = false // fire once, for the user program only (not nested require/eval)
 		return compiledMainFn(vm)
 	}
-	return vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil)
+	return vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil, nil)
 }
 
 // aotBlockArgs shapes a native block's raw yield arguments to its np fixed
