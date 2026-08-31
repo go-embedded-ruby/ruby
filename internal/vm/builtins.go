@@ -5721,15 +5721,12 @@ func reverseStr(s string) string {
 //   - "" (empty): paragraph mode — remove ALL trailing newlines (\r\n / \n).
 //   - any other string (converted with #to_str): remove that exact suffix once.
 func (vm *VM) chompSep(s string, args []object.Value) string {
-	var sep string
+	sep := "\n"
 	if len(args) == 0 {
-		rs := vm.gvar("$/")
-		if object.IsNil(rs) { // $/ = nil (or unset) means the default record separator
-			sep = "\n"
-		} else if rss, ok := rs.(*object.String); ok {
+		// No argument → use $/ (the record separator); a non-String $/ (nil default
+		// included) means the default "\n".
+		if rss, ok := vm.gvar("$/").(*object.String); ok {
 			sep = rss.Str()
-		} else {
-			sep = "\n"
 		}
 	} else {
 		if object.IsNil(args[0]) { // chomp(nil): do not chomp at all

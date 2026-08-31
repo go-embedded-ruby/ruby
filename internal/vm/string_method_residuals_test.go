@@ -53,6 +53,7 @@ func TestStringRindexResiduals(t *testing.T) {
 		{"nil_offset_typeerror", `begin; "str".rindex("st", nil); rescue TypeError; puts "te"; end`, "te\n"},
 		{"integer_typeerror", `begin; "hello".rindex(42); rescue TypeError; puts "te"; end`, "te\n"},
 		{"string_form_keeps_match", `$~ = nil; "hello".rindex("ll"); p $~`, "nil\n"},
+		{"regexp_no_match_nil", `p "hello".rindex(/xyz/)`, "nil\n"},
 	})
 }
 
@@ -66,7 +67,17 @@ func TestStringSubGsubResiduals(t *testing.T) {
 		{"sub_to_str_pattern", `class P; def to_str; "b"; end; end; p "abc".sub(P.new, "X")`, "\"aXc\"\n"},
 		{"gsub_hash", `p "hello".gsub(/[el]/, "e" => "3", "l" => "1")`, "\"h311o\"\n"},
 		{"gsub_enum_size_nil", `p "hello".gsub(/l/).size`, "nil\n"},
+		{"gsub_block_only", `p "hello".gsub(/l/) { |m| m.upcase }`, "\"heLLo\"\n"},
+		{"gsub_string_pattern", `p "hello".gsub("l", "L")`, "\"heLLo\"\n"},
+		{"gsub_subclass_pattern", `class SubP < String; end; p "hello".gsub(SubP.new("l"), "L")`, "\"heLLo\"\n"},
 	})
+}
+
+func TestStringSubArityError(t *testing.T) {
+	// sub with a pattern but no replacement and no block raises ArgumentError.
+	if err := runErr(t, `"hello".sub(/l/)`); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
+		t.Fatalf("sub arity: %v", err)
+	}
 }
 
 func TestStringScanResiduals(t *testing.T) {
@@ -156,6 +167,7 @@ func TestStringPartitionResiduals(t *testing.T) {
 		{"rpartition_string", `p "hello".rpartition("l")`, "[\"hel\", \"l\", \"o\"]\n"},
 		{"partition_no_match", `p "hello".partition("x")`, "[\"hello\", \"\", \"\"]\n"},
 		{"rpartition_no_match", `p "hello".rpartition("x")`, "[\"\", \"\", \"hello\"]\n"},
+		{"rpartition_regexp_no_match", `p "hello".rpartition(/xyz/)`, "[\"\", \"\", \"hello\"]\n"},
 		{"partition_to_str", `class LP; def to_str; "l"; end; end; p "hello".partition(LP.new)`, "[\"he\", \"l\", \"lo\"]\n"},
 		{"partition_typeerror", `begin; "hello".partition(5); rescue TypeError; puts "te"; end`, "te\n"},
 	})
