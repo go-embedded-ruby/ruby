@@ -110,15 +110,16 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		return object.IntValue(int64(len(data.Bytes())))
 	})
 	def("foreach", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		pos, _ := splitIOOpts(args)
+		pos, opts := splitIOOpts(args)
 		if len(pos) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
 		o := openFileIO(cFile, pathArg(vm, pos[0]), "r")
-		sep := pos[1:]
-		checkGetsLimit(sep, "foreach")
+		sep, limit, chomp := vm.resolveGetsArgs(pos[1:])
+		chomp = optChomp(opts, chomp)
+		checkResolvedLimit(limit, "foreach")
 		var lines []object.Value
-		for v := ioGets(o, sep); v != object.NilV; v = ioGets(o, sep) {
+		for v := vm.ioGetsResolved(o, sep, limit, chomp); v != object.NilV; v = vm.ioGetsResolved(o, sep, limit, chomp) {
 			if blk != nil {
 				vm.callBlock(blk, []object.Value{v})
 			} else {
@@ -131,15 +132,16 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		return object.NilV
 	})
 	def("readlines", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		pos, _ := splitIOOpts(args)
+		pos, opts := splitIOOpts(args)
 		if len(pos) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
 		o := openFileIO(cFile, pathArg(vm, pos[0]), "r")
-		sep := pos[1:]
-		checkGetsLimit(sep, "readlines")
+		sep, limit, chomp := vm.resolveGetsArgs(pos[1:])
+		chomp = optChomp(opts, chomp)
+		checkResolvedLimit(limit, "readlines")
 		var lines []object.Value
-		for v := ioGets(o, sep); v != object.NilV; v = ioGets(o, sep) {
+		for v := vm.ioGetsResolved(o, sep, limit, chomp); v != object.NilV; v = vm.ioGetsResolved(o, sep, limit, chomp) {
 			lines = append(lines, v)
 		}
 		return object.NewArrayFromSlice(lines)

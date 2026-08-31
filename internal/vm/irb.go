@@ -106,7 +106,7 @@ func (vm *VM) irbRun(b *Binding, in, out *IOObj, mode irb.PromptMode, mainStr st
 		verdict, opens := irb.CheckCode(buf)
 		out.writeStr(irb.GeneratePrompt(mode, ctx, opens, verdict == irb.More, lineNo, true, mode.AutoIndent))
 
-		line := ioGets(in, nil)
+		line := vm.ioGets(in, nil)
 		s, ok := line.(*object.String)
 		if !ok {
 			out.writeStr("\n")
