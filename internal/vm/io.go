@@ -14,23 +14,23 @@ import (
 // in-memory byte buffer with a read/write cursor. The two share the write path
 // so puts/print/printf/<< work uniformly, and StringIO adds the read methods.
 type IOObj struct {
-	cls      *RClass // IO, StringIO or File — so classOf/is_a? are exact
-	w        io.Writer
-	buf      []byte // StringIO / File content (buffered in memory)
-	pos      int    // read/write cursor
-	isStr    bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
-	sync     bool
-	closed   bool
-	label    string // "STDOUT"/"STDERR"/"STDIN" for inspect
-	path     string // backing file path for a File stream (else "")
-	writable bool   // a File opened for writing — flush the buffer on flush/close
-	lineno   int    // #lineno — advanced by each successful line read (gets/readline)
-	rdClosed bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
-	wrClosed bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
-	appendMode bool // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
-	extEnc   string // external encoding name, "" ⇒ Encoding.default_external
-	intEnc   string // internal encoding name, "" ⇒ none (nil)
-	fd       int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
+	cls        *RClass // IO, StringIO or File — so classOf/is_a? are exact
+	w          io.Writer
+	buf        []byte // StringIO / File content (buffered in memory)
+	pos        int    // read/write cursor
+	isStr      bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
+	sync       bool
+	closed     bool
+	label      string // "STDOUT"/"STDERR"/"STDIN" for inspect
+	path       string // backing file path for a File stream (else "")
+	writable   bool   // a File opened for writing — flush the buffer on flush/close
+	lineno     int    // #lineno — advanced by each successful line read (gets/readline)
+	rdClosed   bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
+	wrClosed   bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
+	appendMode bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
+	extEnc     string // external encoding name, "" ⇒ Encoding.default_external
+	intEnc     string // internal encoding name, "" ⇒ none (nil)
+	fd         int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
 
 	// Pipe ends (IO.pipe) share a single byte buffer in *pipe. The write end
 	// appends; the read end drains from pipe.rpos. Because subprocess execution
@@ -580,9 +580,8 @@ func defIOWrite(cls *RClass) {
 		return object.NilV
 	})
 	cls.define("puts", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		ioCheckOpen(o)
-		vm.ioPuts(o, args)
+		ioCheckOpen(self.(*IOObj))
+		vm.ioPuts(self, args)
 		return object.NilV
 	})
 	cls.define("printf", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -908,7 +907,10 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("each_line", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		o := self.(*IOObj)
-		ioCheckReadable(o)
+		if blk == nil { // no block ⇒ an Enumerator (buildable even on a closed stream)
+			return enumForSized(self, "each_line", enumSizeNil, args...)
+		}
+		ioCheckReadable(o) // iterating a closed/unreadable stream raises, as in MRI
 		sep, limit, chomp := vm.resolveGetsArgs(args)
 		checkResolvedLimit(limit, "each_line")
 		for {
@@ -923,6 +925,10 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("each_char", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		o := self.(*IOObj)
+		if blk == nil { // no block ⇒ an Enumerator (buildable even on a closed stream)
+			return enumForSized(self, "each_char", enumSizeNil)
+		}
+		ioCheckReadable(o) // iterating a closed/unreadable stream raises, as in MRI
 		for o.pos < len(o.buf) {
 			r, sz := utf8.DecodeRune(o.buf[o.pos:])
 			o.pos += sz
@@ -982,6 +988,11 @@ func parseGetsArgs(args []object.Value) (sep getsSep, limit int, chomp bool) {
 	return sep, limit, chomp
 }
 
+// enumSizeNil is the #size block for a reader Enumerator (each_line/each_char/
+// each_byte with no block): the number of elements a buffered read will yield is
+// not known in advance, so #size is nil, matching MRI.
+func enumSizeNil(*VM) object.Value { return object.NilV }
+
 // ioGetsResolved reads one line from o with already-resolved (sep, limit, chomp)
 // — the coercion of the separator/limit arguments has been done once by the
 // caller so a bulk reader (readlines/each_line) never re-runs a #to_str/#to_int
@@ -1035,6 +1046,18 @@ func (vm *VM) resolveGetsArgs(args []object.Value) (sep getsSep, limit int, chom
 	return sep, limit, chomp
 }
 
+// optChomp returns whether chomp is in effect given a separated options Hash
+// (IO.readlines/foreach carry their keyword arguments there rather than as a
+// trailing positional Hash): a chomp: entry in opts overrides the incoming value.
+func optChomp(opts *object.Hash, cur bool) bool {
+	if opts != nil {
+		if v, ok := opts.Get(object.Symbol("chomp")); ok {
+			return v.Truthy()
+		}
+	}
+	return cur
+}
+
 // defaultGetsSep returns the separator used when gets is called with no explicit
 // one: the input record separator $/ when it holds a String, else "\n".
 func (vm *VM) defaultGetsSep() getsSep {
@@ -1077,7 +1100,7 @@ func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 		return object.NilV
 	}
 	if sep.set && sep.s == "" && !sep.nilSep { // an empty separator selects paragraph mode
-		return ioGetsParagraph(o, limit)
+		return ioGetsParagraph(o, limit, chomp)
 	}
 	rest := o.buf[o.pos:]
 	end := len(o.buf) // default: read to end (nil separator, or separator not found)
@@ -1119,7 +1142,7 @@ func getsChomp(line []byte, sep string) []byte {
 // newline run in the result, whereas a real IO/File keeps only the two newlines
 // that close the paragraph (the rest are skipped as leading blanks on the next
 // read) — matching MRI, whose StringIO and IO differ here.
-func ioGetsParagraph(o *IOObj, limit int) object.Value {
+func ioGetsParagraph(o *IOObj, limit int, chomp bool) object.Value {
 	for o.pos < len(o.buf) && o.buf[o.pos] == '\n' { // skip leading blank lines
 		o.pos++
 	}
@@ -1128,7 +1151,9 @@ func ioGetsParagraph(o *IOObj, limit int) object.Value {
 	}
 	start := o.pos
 	end := len(o.buf)
+	sepFound := false
 	if idx := strings.Index(string(o.buf[start:]), "\n\n"); idx >= 0 {
+		sepFound = true
 		end = start + idx
 		for end < len(o.buf) && o.buf[end] == '\n' { // consume the whole newline run
 			end++
@@ -1143,35 +1168,40 @@ func ioGetsParagraph(o *IOObj, limit int) object.Value {
 		end = start + limit
 	}
 	o.pos = end
-	return object.NewString(string(o.buf[start:end]))
+	line := o.buf[start:end]
+	if chomp && sepFound { // chomp strips the terminating newline run (the paragraph
+		for len(line) > 0 && line[len(line)-1] == '\n' { // separator), not a lone EOF "\n"
+			line = line[:len(line)-1]
+		}
+	}
+	return object.NewString(string(line))
 }
 
-// ioPuts writes args to o with Kernel#puts semantics (arrays flattened, a
-// trailing newline added unless already present; no args ⇒ a lone newline). It
-// is a VM method so each value is stringified through its (possibly
-// user-defined) #to_s, matching MRI.
-func (vm *VM) ioPuts(o *IOObj, args []object.Value) {
+// ioPuts writes args to self with Kernel#puts semantics (arrays flattened, a
+// trailing newline added unless already present; no args ⇒ a lone newline).
+// Every piece is emitted through self's #write method (via vm.send) rather than
+// the buffer directly, so a stream that overrides #write sees puts's output, as
+// in MRI; each value is also stringified through its (possibly user-defined)
+// #to_s.
+func (vm *VM) ioPuts(self object.Value, args []object.Value) {
+	write := func(s string) { vm.send(self, "write", []object.Value{object.NewString(s)}, nil) }
 	if len(args) == 0 {
-		o.writeStr("\n")
+		write("\n")
 		return
 	}
 	for _, a := range args {
-		vm.ioPutsValue(o, a)
+		vm.ioPutsValueRec(write, a, nil)
 	}
 }
 
-func (vm *VM) ioPutsValue(o *IOObj, v object.Value) {
-	vm.ioPutsValueRec(o, v, nil)
-}
-
-// ioPutsValueRec is ioPutsValue with a guard against a self-referential array:
-// puts recurses into nested arrays (each element on its own line), so a member
-// that is its own container is written as "[...]" (as MRI does) rather than
-// looping forever. seen tracks the arrays currently being expanded.
-func (vm *VM) ioPutsValueRec(o *IOObj, v object.Value, seen map[*object.Array]struct{}) {
+// ioPutsValueRec emits one puts value through write, guarding against a
+// self-referential array: puts recurses into nested arrays (each element on its
+// own line), so a member that is its own container is written as "[...]" (as MRI
+// does) rather than looping forever. seen tracks the arrays currently expanding.
+func (vm *VM) ioPutsValueRec(write func(string), v object.Value, seen map[*object.Array]struct{}) {
 	if arr, ok := v.(*object.Array); ok {
 		if _, rec := seen[arr]; rec {
-			o.writeStr("[...]\n")
+			write("[...]\n")
 			return
 		}
 		if seen == nil {
@@ -1182,7 +1212,7 @@ func (vm *VM) ioPutsValueRec(o *IOObj, v object.Value, seen map[*object.Array]st
 		// An empty array writes nothing (MRI), unlike a no-arg puts which writes a
 		// lone newline.
 		for _, e := range arr.Elems {
-			vm.ioPutsValueRec(o, e, seen)
+			vm.ioPutsValueRec(write, e, seen)
 		}
 		return
 	}
@@ -1191,14 +1221,14 @@ func (vm *VM) ioPutsValueRec(o *IOObj, v object.Value, seen map[*object.Array]st
 	// falling back to #to_s.
 	if vm.respondsToDynamic(v, "to_ary") {
 		if arr, ok := vm.send(v, "to_ary", nil, nil).(*object.Array); ok {
-			vm.ioPutsValueRec(o, arr, seen)
+			vm.ioPutsValueRec(write, arr, seen)
 			return
 		}
 	}
 	if s := vm.displayStr(v); strings.HasSuffix(s, "\n") {
-		o.writeStr(s)
+		write(s)
 	} else {
-		o.writeStr(s + "\n")
+		write(s + "\n")
 	}
 }
 

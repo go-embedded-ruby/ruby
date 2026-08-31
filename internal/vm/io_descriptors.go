@@ -81,7 +81,10 @@ func defIOReadExtra(cls *RClass) {
 	})
 	cls.define("each_byte", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		o := self.(*IOObj)
-		ioCheckReadable(o)
+		if blk == nil { // no block ⇒ an Enumerator (buildable even on a closed stream)
+			return enumForSized(self, "each_byte", enumSizeNil)
+		}
+		ioCheckReadable(o) // iterating a closed/unreadable stream raises, as in MRI
 		o.pipeRefresh()
 		for o.pos < len(o.buf) {
 			b := o.buf[o.pos]
