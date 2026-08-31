@@ -221,6 +221,8 @@ func TestIOResidualBranches(t *testing.T) {
 		// Paragraph mode edges: leading blank lines skipped; chomp strips a
 		// terminating run but keeps a lone EOF newline; nil at true EOF.
 		{req + `p StringIO.new("\n\nabc").gets("")`, "\"abc\"\n"},
+		// A buffer of only blank lines is consumed to EOF and yields nil.
+		{req + `p StringIO.new("\n\n").gets("")`, "nil\n"},
 		{req + `p StringIO.new("a\n\nb\n").each_line("", chomp: true).to_a`, "[\"a\", \"b\\n\"]\n"},
 		{req + `s = StringIO.new("x"); s.read; p s.gets("")`, "nil\n"},
 		// A real String read buffer is filled in place and returned.
