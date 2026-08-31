@@ -36,9 +36,39 @@ func TestTimeAliasBehavior(t *testing.T) {
 		{`p Time.utc(2020, 3, 1, 12, 0, 0).gmt_offset`, "0\n"},
 		{`p Time.utc(2020, 3, 1, 12, 0, 0).gmtoff`, "0\n"},
 		{`p Time.utc(2020, 3, 1, 12, 0, 0).gmt?`, "true\n"},
+		{`p Time.utc(2020, 3, 1, 12, 0, 0).isdst`, "false\n"},
 		{`p Time.utc(2020, 3, 1, 12, 0, 0).getgm.utc?`, "true\n"},
 		{`p Time.utc(2020, 3, 1, 12, 0, 0).ctime`, "\"Sun Mar  1 12:00:00 2020\"\n"},
 		{`p Time.utc(2020, 3, 1, 12, 0, 0).xmlschema`, "\"2020-03-01T12:00:00Z\"\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestTimeShiftPreservesZone covers timeShift: Time#+ and Time#- keep both the
+// receiver's UTC-ness / fixed offset and its Ruby timezone object, as MRI does.
+func TestTimeShiftPreservesZone(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// A UTC receiver stays UTC after a shift.
+		{`p (Time.utc(2020, 3, 1, 12, 0, 0) + 10).utc?`, "true\n"},
+		{`p (Time.utc(2020, 3, 1, 12, 0, 0) - 10).utc?`, "true\n"},
+		// A fixed-offset receiver keeps its offset.
+		{`p (Time.at(0).getlocal("+05:00") + 1).utc_offset`, "18000\n"},
+		{`p (Time.at(0).getlocal("-07:00") - 1).utc_offset`, "-25200\n"},
+		// A Rational shift via the explicit method call is lossless to the second.
+		{`p Time.at(0).+(Rational(3, 2)).usec`, "500000\n"},
+		// A timezone object rides along through +/-.
+		{`
+class TZ
+  def utc_to_local(t) t end
+  def local_to_utc(t) t end
+  def name; "TZ"; end
+end
+t = Time.new(2020, 3, 1, 12, 0, 0, TZ.new)
+p [(t + 10).zone.name, (t - 10).zone.name]`, "[\"TZ\", \"TZ\"]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

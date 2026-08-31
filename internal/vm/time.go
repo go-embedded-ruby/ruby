@@ -1214,7 +1214,7 @@ func roundFn(add func(z, x, y *big.Int) *big.Int, half bool) NativeFn {
 // timeOp implements the Time operator fast path reached from binary(): t + secs
 // shifts forward, t - secs shifts back, and t - other yields the Float seconds
 // between the two instants. A non-Time, non-numeric right operand raises via
-// numFloat / timeSeconds.
+// numFloat.
 func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
 	switch op {
 	case bytecode.OpAdd:
@@ -1230,10 +1230,14 @@ func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
 }
 
 // timeShift shifts a Time forward by sec seconds (which may be fractional),
-// preserving its location.
+// preserving both its location and its Ruby timezone object so that, per MRI,
+// (t + n).zone keeps the zone t was built with.
 func timeShift(t *Time, sec float64) object.Value {
 	whole, ns := splitSeconds(sec)
-	return &Time{t: t.t.Add(stdtime.Duration(whole)*stdtime.Second + stdtime.Duration(ns)*stdtime.Nanosecond)}
+	return &Time{
+		t:       t.t.Add(stdtime.Duration(whole)*stdtime.Second + stdtime.Duration(ns)*stdtime.Nanosecond),
+		zoneObj: t.zoneObj,
+	}
 }
 
 // timeCmp returns -1/0/1 ordering two Times.
