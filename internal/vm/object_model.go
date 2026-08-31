@@ -1982,10 +1982,16 @@ func (vm *VM) callProcMethod(p *Proc, self object.Value, args []object.Value, bl
 	anchored.superName, anchored.superDefinee, anchored.superArgs = name, owner, args
 	anchored.dmBody = true
 	anchored.dmDirect = true // this frame IS the method body: its `return` is a return target
+	// A define_method body always binds its arguments with method (lambda) arity
+	// semantics, regardless of whether the source was a block or a non-lambda Proc:
+	// MRI raises ArgumentError on a count mismatch and never auto-splats a lone Array.
+	// Marking the anchored copy as a lambda routes bindBlockArgs down that path so
+	// exec's own arity check fires. break/redo inside also take lambda semantics.
+	anchored.isLambda = true
 	// The define_method body IS the method: __method__ / __callee__ both report the
 	// method name it was defined under (and a block nested in the body inherits it).
 	anchored.methodCtx = frameMethod{orig: name, callee: name}
-	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, body, &anchored, body, nil)
+	return vm.exec(p.iseq, self, vm.bindBlockArgs(&anchored, args), vm.blockDefinee(p), "", p.env, body, &anchored, body, nil)
 }
 
 // classEval runs a block as class_eval/module_eval would: self and the method

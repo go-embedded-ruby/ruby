@@ -1362,43 +1362,55 @@ func (vm *VM) bootstrap() {
 	// Module#module_exec is Module#class_exec (the block runs with the module as
 	// self and receives the given arguments).
 	vm.cModule.define("module_exec", classExec)
-	vm.cModule.define("define_method", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+	vm.cModule.define("define_method", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		cls := self.(*RClass)
-		name := nameArg(args[0])
+		if isFrozen(cls) {
+			vm.raiseFrozen(cls)
+		}
+		name := vm.defineMethodName(args[0])
+		vis := vm.defineMethodVis(cls, name)
 		// A Method / UnboundMethod second argument transplants that method's body
 		// under the new name and owner (Ruby allows define_method(:m, other_method)).
+		// The target class must be compatible with the source method's owner.
 		if len(args) > 1 {
 			switch src := args[1].(type) {
 			case *BoundMethod:
+				vm.checkTransplantBindable(cls, src.m.owner)
 				cm := *src.m
 				cm.origName = methodOriginalName(src.m)
-				cm.name, cm.owner = name, cls
+				cm.name, cm.owner, cm.vis = name, cls, vis
 				cls.methods[name] = &cm
 				bumpMethodSerial()
+				vm.fireMethodAdded(cls, name)
 				return object.Symbol(name)
 			case *UnboundMethod:
+				vm.checkTransplantBindable(cls, src.owner)
 				cm := *src.m
 				cm.origName = methodOriginalName(src.m)
-				cm.name, cm.owner = name, cls
+				cm.name, cm.owner, cm.vis = name, cls, vis
 				cls.methods[name] = &cm
 				bumpMethodSerial()
+				vm.fireMethodAdded(cls, name)
 				return object.Symbol(name)
 			}
 		}
+		// A Proc second argument is the body and takes precedence over any block
+		// also passed at the call site (MRI). A non-Proc second argument that got
+		// past the Method/UnboundMethod cases above is a type error.
 		body := blk
-		if body == nil {
-			if len(args) > 1 {
-				p, ok := args[1].(*Proc)
-				if !ok {
-					raise("TypeError", "wrong argument type %s (expected Proc)", classNameOf(args[1]))
-				}
-				body = p
-			} else {
-				raise("ArgumentError", "tried to create a method without a block")
+		if len(args) > 1 {
+			p, ok := args[1].(*Proc)
+			if !ok {
+				raise("TypeError", "wrong argument type %s (expected Proc/Method/UnboundMethod)", vm.classOf(args[1]).name)
 			}
+			body = p
 		}
-		cls.methods[name] = &Method{name: name, proc: body, owner: cls}
+		if body == nil {
+			raise("ArgumentError", "tried to create a method without a block")
+		}
+		cls.methods[name] = &Method{name: name, proc: body, owner: cls, vis: vis}
 		bumpMethodSerial()
+		vm.fireMethodAdded(cls, name)
 		return object.Symbol(name)
 	})
 

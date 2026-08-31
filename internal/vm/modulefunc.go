@@ -216,3 +216,75 @@ func nameArg(v object.Value) string {
 		return ""
 	}
 }
+
+// defineMethodName coerces define_method's name argument. A Symbol or String is
+// taken directly; any other object is converted through #to_str, and a #to_str
+// that returns a non-String raises TypeError with MRI's "can't convert" message.
+// An object without #to_str raises the "is not a symbol nor a string" TypeError.
+func (vm *VM) defineMethodName(v object.Value) string {
+	switch x := v.(type) {
+	case object.Symbol:
+		return string(x)
+	case *object.String:
+		return x.Str()
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Str()
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			classNameOf(v), classNameOf(v), classNameOf(r))
+	}
+	raise("TypeError", "%s is not a symbol nor a string", vm.inspectStr(v))
+	return ""
+}
+
+// defineMethodVis is the visibility a method created by define_method receives.
+// :initialize and :initialize_copy are always private. Otherwise the method takes
+// the receiver's current default visibility: MRI uses the caller frame's default
+// visibility only when the definee equals the receiver module, and public
+// otherwise — and a `private`/`public` directive lands on its frame's self, so the
+// receiver's own defaultVis carries the directive exactly in that "definee equals
+// receiver" case (a class/module body or a class_eval on the receiver) and stays
+// at the receiver's untouched default when the directive was issued elsewhere.
+func (vm *VM) defineMethodVis(cls *RClass, name string) visibility {
+	if name == "initialize" || name == "initialize_copy" {
+		return visPrivate
+	}
+	return cls.defaultVis
+}
+
+// checkTransplantBindable raises TypeError when a Method/UnboundMethod whose
+// method is owned by owner cannot be re-homed onto cls by define_method. A method
+// owned by a Class (or a singleton class) may only move onto that class or one of
+// its subclasses; a method owned by an ordinary Module may move anywhere. The
+// singleton case carries MRI's distinct "different class" message.
+func (vm *VM) checkTransplantBindable(cls, owner *RClass) {
+	if owner == nil || owner.isModule {
+		return
+	}
+	// rbgo models the Kernel methods (instance_of?, respond_to?, …) as Object
+	// instance methods, so an UnboundMethod pulled from Object reports Object as its
+	// owner where MRI reports Kernel (a Module). Treat the universal roots as
+	// permissive owners so such a method can be re-homed onto any class, including a
+	// BasicObject subclass — matching MRI's module-owner rule.
+	if owner == vm.cObject || owner == vm.cBasicObject {
+		return
+	}
+	if classIsA(cls, owner) {
+		return
+	}
+	if owner.isSingleton {
+		raise("TypeError", "can't bind singleton method to a different class")
+	}
+	raise("TypeError", "bind argument must be a subclass of %s", owner.name)
+}
+
+// fireMethodAdded invokes cls.method_added(:name) when cls defines that hook as a
+// singleton method, mirroring the OpDefineMethod path for `def`.
+func (vm *VM) fireMethodAdded(cls *RClass, name string) {
+	if hook := lookupSMethod(cls, "method_added"); hook != nil {
+		vm.invoke(hook, cls, []object.Value{object.SymVal(name)}, nil)
+	}
+}
