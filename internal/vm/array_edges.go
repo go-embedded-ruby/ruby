@@ -42,11 +42,11 @@ func (vm *VM) registerArrayEdges() {
 	// difference keeps every element of the receiver that is eql? to no element of
 	// any argument array — duplicates in the receiver are preserved, exactly like a
 	// chained `-`.
-	vm.cArray.define("difference", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("difference", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		others := arrArgs(args)
 		var out []object.Value
 		for _, e := range self.(*object.Array).Elems {
-			if !inAnyArray(others, e) {
+			if !vm.inAnyArray(others, e) {
 				out = append(out, e)
 			}
 		}
@@ -54,12 +54,12 @@ func (vm *VM) registerArrayEdges() {
 	})
 	// union concatenates the receiver and every argument, then removes eql?
 	// duplicates keeping first-seen order — a multi-argument, de-duplicating `|`.
-	vm.cArray.define("union", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("union", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		others := arrArgs(args)
 		var out []object.Value
 		add := func(elems []object.Value) {
 			for _, e := range elems {
-				if !arrayIncludes(out, e) {
+				if !vm.arrayIncludesEql(out, e) {
 					out = append(out, e)
 				}
 			}
@@ -73,14 +73,14 @@ func (vm *VM) registerArrayEdges() {
 	// intersection keeps each element of the receiver that is eql? to some element
 	// of every argument array, de-duplicated in receiver order. With no arguments
 	// it is simply the receiver de-duplicated (like #uniq under eql?).
-	vm.cArray.define("intersection", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("intersection", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		others := arrArgs(args)
 		var out []object.Value
 		for _, e := range self.(*object.Array).Elems {
-			if arrayIncludes(out, e) {
+			if vm.arrayIncludesEql(out, e) {
 				continue // already emitted → keep the result de-duplicated
 			}
-			if inAllArrays(others, e) {
+			if vm.inAllArrays(others, e) {
 				out = append(out, e)
 			}
 		}
@@ -88,10 +88,10 @@ func (vm *VM) registerArrayEdges() {
 	})
 	// intersect? reports whether the receiver and the one argument array share any
 	// element (compared with eql?), short-circuiting on the first match.
-	vm.cArray.define("intersect?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("intersect?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other := arrArg(args[0])
 		for _, e := range self.(*object.Array).Elems {
-			if arrayIncludes(other.Elems, e) {
+			if vm.arrayIncludesEql(other.Elems, e) {
 				return object.True
 			}
 		}
@@ -214,9 +214,9 @@ func arrArgs(args []object.Value) []*object.Array {
 }
 
 // inAnyArray reports whether v is eql? to an element of any of the arrays.
-func inAnyArray(arrs []*object.Array, v object.Value) bool {
+func (vm *VM) inAnyArray(arrs []*object.Array, v object.Value) bool {
 	for _, a := range arrs {
-		if arrayIncludes(a.Elems, v) {
+		if vm.arrayIncludesEql(a.Elems, v) {
 			return true
 		}
 	}
@@ -225,9 +225,9 @@ func inAnyArray(arrs []*object.Array, v object.Value) bool {
 
 // inAllArrays reports whether v is eql? to an element of every array (vacuously
 // true when there are none).
-func inAllArrays(arrs []*object.Array, v object.Value) bool {
+func (vm *VM) inAllArrays(arrs []*object.Array, v object.Value) bool {
 	for _, a := range arrs {
-		if !arrayIncludes(a.Elems, v) {
+		if !vm.arrayIncludesEql(a.Elems, v) {
 			return false
 		}
 	}

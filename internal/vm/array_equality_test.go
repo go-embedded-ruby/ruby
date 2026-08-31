@@ -52,6 +52,74 @@ func TestArrayHashValueEquality(t *testing.T) {
 
 		// A built-in with a custom #== as an element (Set) is compared by value.
 		{"require 'set'; p [[Set[1, 2]] == [Set[2, 1]], [Set[1]] == [Set[2]]]", "[true, false]\n"},
+
+		// An Array subclass is still an Array: == compares structurally, in both
+		// operand orders and through an explicit method send.
+		{"class ML < Array; end; p [ML.new([1, 2]) == [1, 2], [1, 2] == ML.new([1, 2]), ML.new([1, 2]).send(:==, [1, 2])]", "[true, true, true]\n"},
+
+		// [NaN] == [NaN] is true because Array#== checks #equal? per element first,
+		// while a bare NaN == NaN stays false.
+		{"p [[Float::NAN] == [Float::NAN], Float::NAN == Float::NAN]", "[true, false]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestArrayHashSetOpsAndEql covers the eql?/hash-based operations (uniq, &, |, -,
+// difference, union, intersection) dispatching a member's own #eql?/#hash, and
+// Hash#eql? / Array#eql? dispatching member #eql?. Asserted against MRI Ruby 4.0.
+func TestArrayHashSetOpsAndEql(t *testing.T) {
+	// A class with value-based #eql?/#hash keyed on @n.
+	k := "class K; attr_reader :n; def initialize(n); @n = n; end; " +
+		"def eql?(o); o.is_a?(K) && o.n == @n; end; def hash; @n; end; end\n"
+
+	cases := []struct{ src, want string }{
+		// uniq groups by #hash then #eql?.
+		{k + "p [K.new(1), K.new(1), K.new(2)].uniq.size", "2\n"},
+		// & / | / - dispatch #eql?/#hash.
+		{k + "p ([K.new(1), K.new(2)] & [K.new(2)]).size", "1\n"},
+		{k + "p ([K.new(1)] | [K.new(1), K.new(2)]).size", "2\n"},
+		{k + "p ([K.new(1), K.new(2)] - [K.new(1)]).size", "1\n"},
+		{k + "p [K.new(1), K.new(2)].difference([K.new(2)]).size", "1\n"},
+		{k + "p [K.new(1)].union([K.new(1)], [K.new(3)]).size", "2\n"},
+		{k + "p [K.new(1), K.new(2)].intersection([K.new(2)], [K.new(2)]).size", "1\n"},
+		// A #hash mismatch keeps members distinct even when #eql? would say equal.
+		{"class H; def eql?(o); true; end; def hash; object_id; end; end; p [H.new, H.new].uniq.size", "2\n"},
+
+		// Value-type set operations keep eql? (not ==) semantics: 1 and 1.0 differ.
+		{"p [[1, 1.0, 1].uniq, [1] | [1.0], [1, 1.0] - [1]]", "[[1, 1.0], [1, 1.0], [1.0]]\n"},
+
+		// Hash#eql? and Array#eql? dispatch each member's #eql?.
+		{k + "p({1 => K.new(5)}.eql?({1 => K.new(5)}))", "true\n"},
+		{k + "p [K.new(3)].eql?([K.new(3)])", "true\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestArrayComparison covers Array#<=> : returning an element's raw non-zero <=>
+// result, length ordering, #to_ary coercion of the argument, and subclass
+// handling. Asserted against MRI Ruby 4.0.
+func TestArrayComparison(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{"p([1, 2, 3] <=> [1, 2, 3])", "0\n"},
+		{"p([1, 2] <=> [1, 2, 3])", "-1\n"},
+		{"p([1, 2, 3] <=> [1, 2])", "1\n"},
+		{"p([1, 2, 3] <=> [1, 5, 3])", "-1\n"},
+		// The element's raw non-zero <=> result propagates (here a nil → nil).
+		{"class C; def <=>(o); nil; end; end; p([C.new] <=> [C.new])", "nil\n"},
+		// A non-Array argument answering #to_ary is converted.
+		{"class TA; def to_ary; [1, 2, 3]; end; end; p([1, 2, 3] <=> TA.new)", "0\n"},
+		// An Array subclass argument is compared structurally (no #to_ary call).
+		{"class ML < Array; end; p([5, 6, 7] <=> ML.new([5, 6, 7]))", "0\n"},
+		// A non-array-like argument is incomparable.
+		{"p([] <=> false)", "nil\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

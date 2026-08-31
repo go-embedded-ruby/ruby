@@ -274,10 +274,11 @@ func (vm *VM) bootstrap() {
 		// value types by value (Go interface equality gives exactly this).
 		return object.Bool(self == args[0])
 	})
-	vm.cObject.define("eql?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		// Like ==, but with no numeric coercion (see valueEql); the value types
-		// reach this through Object since none override it.
-		return object.Bool(valueEql(self, args[0]))
+	vm.cObject.define("eql?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Like ==, but with no numeric coercion (see valueEql); Array/Hash members
+		// have their own #eql? dispatched. The value types reach this through Object
+		// since none override it.
+		return object.Bool(vm.rubyEql(self, args[0]))
 	})
 	objectIDFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.objectID(self)
@@ -2849,23 +2850,23 @@ func (vm *VM) bootstrap() {
 	})
 	// Set intersection (&) and union (|): both deduplicate, keeping first-seen
 	// order, matching Ruby.
-	vm.cArray.define("&", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("&", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		b := arrArg(args[0])
 		var out []object.Value
 		for _, e := range a.Elems {
-			if arrayIncludes(b.Elems, e) && !arrayIncludes(out, e) {
+			if vm.arrayIncludesEql(b.Elems, e) && !vm.arrayIncludesEql(out, e) {
 				out = append(out, e)
 			}
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("|", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("|", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		b := arrArg(args[0])
 		var out []object.Value
 		for _, e := range append(append([]object.Value{}, a.Elems...), b.Elems...) {
-			if !arrayIncludes(out, e) {
+			if !vm.arrayIncludesEql(out, e) {
 				out = append(out, e)
 			}
 		}
@@ -3407,7 +3408,18 @@ func (vm *VM) bootstrap() {
 		sa := self.(*object.Array)
 		b, ok := args[0].(*object.Array)
 		if !ok {
-			return object.NilV
+			// An Array subclass is already array-like (unwrap it, never calling
+			// #to_ary); any other object is converted via #to_ary, and a value that
+			// does not convert makes the arrays incomparable (nil).
+			if o, isObj := args[0].(*RObject); isObj {
+				b, ok = o.builtin.(*object.Array)
+			}
+			if !ok && vm.respondsToDynamic(args[0], "to_ary") {
+				b, ok = asArray(vm.send(args[0], "to_ary", nil, nil))
+			}
+			if !ok {
+				return object.NilV
+			}
 		}
 		// Comparing a pair already being compared means the two descend into
 		// each other, and MRI calls that equal at this point rather than going
@@ -3431,11 +3443,11 @@ func (vm *VM) bootstrap() {
 			n = len(be)
 		}
 		for i := 0; i < n; i++ {
-			c, ok := vm.send(a[i], "<=>", []object.Value{be[i]}, nil).(object.Integer)
-			if !ok {
-				return object.NilV // an incomparable pair makes the arrays incomparable
-			}
-			if c != 0 {
+			// MRI returns the element's raw <=> result the moment it is not the
+			// Integer 0 — so a -1/+1, a nil (incomparable), or any other object all
+			// propagate unchanged; only an exact 0 continues to the next pair.
+			c := vm.send(a[i], "<=>", []object.Value{be[i]}, nil)
+			if iv, isInt := c.(object.Integer); !isInt || iv != 0 {
 				return c
 			}
 		}
@@ -8295,9 +8307,15 @@ func (vm *VM) integerShiftBig(a, m *big.Int) object.Value {
 // structural equality for the immutable value types.
 func (vm *VM) rubyEqual(a, b object.Value) bool {
 	if ao, ok := a.(*RObject); ok {
+		// An instance of a built-in subclass (Array/Hash/String/…) that adds no
+		// #== of its own inherits the built-in's value equality, so compare as the
+		// wrapped value — e.g. MyArray[1, 2, 3] == [1, 2, 3].
+		if !object.IsNil(ao.builtin) {
+			return vm.vmValueEqual(ao.builtin, b)
+		}
 		// This is BasicObject#== itself (the default), reached only when the
-		// receiver defined no closer #==, so a user object compares by identity —
-		// dispatching #== here would recurse back into this method forever.
+		// receiver defined no closer #==, so a plain user object compares by
+		// identity — dispatching #== here would recurse back into this method.
 		bo, ok := b.(*RObject)
 		return ok && ao == bo
 	}

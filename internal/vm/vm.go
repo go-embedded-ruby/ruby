@@ -618,7 +618,11 @@ func (vm *VM) installHashKeyHook() {
 			raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(hv).name)
 		}
 		eql := func(stored object.Value) bool {
-			return vm.send(k, "eql?", []object.Value{stored}, nil).Truthy()
+			// A key is #eql? to itself; MRI's table never re-sends #eql? for the
+			// identical object (this is what lets a self-comparison — e.g. Hash#==
+			// fetching its own key's value — avoid a spurious, and in mspec
+			// forbidden, #eql? call, and matches a non-reflexive #eql? too).
+			return stored == k || vm.send(k, "eql?", []object.Value{stored}, nil).Truthy()
 		}
 		return rh, eql, true
 	}

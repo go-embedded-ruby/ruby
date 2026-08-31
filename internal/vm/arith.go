@@ -341,6 +341,14 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isSet := a.(*Set); isSet && (op == bytecode.OpAdd || op == bytecode.OpSub) {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// Array#- (difference) removes each receiver element #eql? to some element of
+		// the argument. It routes through the VM so a member's own #eql?/#hash is
+		// dispatched (MRI's rb_ary_diff), which the VM-less arrayOp path cannot do.
+		if aa, ok := a.(*object.Array); ok && op == bytecode.OpSub {
+			if bb, ok := b.(*object.Array); ok {
+				return object.NewArrayFromSlice(vm.arrayDifferenceEql(aa.Elems, bb.Elems))
+			}
+		}
 		// An Enumerator dispatches its + (Enumerator#+ builds an Enumerator::Chain of
 		// self and the operand) as a method rather than falling into the numeric
 		// coercion path.
@@ -747,34 +755,104 @@ func (vm *VM) curried(p *Proc, need int, got []object.Value) *Proc {
 	}}
 }
 
-// arrayUniq returns elems with duplicates removed, keeping first-seen order and
-// comparing with eql?. With a block, elements are distinguished by the block's
-// return value rather than the element itself.
+// needsEqlDispatch reports whether a set-operation member's own #eql? / #hash may
+// be user-defined and so must be dispatched (a user object, or a built-in whose
+// class defines a value-based equality such as Set). A plain value type keeps the
+// built-in structural eql?/hash, which is both correct and cheaper.
+func (vm *VM) needsEqlDispatch(v object.Value) bool {
+	if _, ok := v.(*RObject); ok {
+		return true
+	}
+	return hasCustomEq(vm, v)
+}
+
+// eqlHashCode is the bucketing hash for the set operations: MRI groups members by
+// #hash before ever calling #eql?, so an object with a custom #hash has it
+// dispatched (and only same-bucket members are then compared). A value type uses
+// the built-in structural hash.
+func (vm *VM) eqlHashCode(v object.Value) int64 {
+	if vm.needsEqlDispatch(v) {
+		switch h := vm.send(v, "hash", nil, nil).(type) {
+		case object.Integer:
+			return int64(h)
+		case *object.Bignum:
+			return h.I.Int64()
+		}
+		return 0
+	}
+	return vm.hashValue(v)
+}
+
+// eqlKeys reports MRI eql?-equality of two set-operation members: the identity
+// short-circuit first — so a member equals itself without #eql? being sent, even
+// a deliberately non-reflexive one — then a dispatched #eql? when either side may
+// define it, else the built-in structural eql?.
+func (vm *VM) eqlKeys(a, b object.Value) bool {
+	if a == b {
+		return true
+	}
+	if vm.needsEqlDispatch(a) || vm.needsEqlDispatch(b) {
+		return vm.send(a, "eql?", []object.Value{b}, nil).Truthy()
+	}
+	return valueEql(a, b)
+}
+
+// arrayUniq returns elems with duplicates removed, keeping first-seen order.
+// Members are grouped by #hash (eqlHashCode) and, within a bucket, compared with
+// #eql? (eqlKeys), matching MRI: a redefined #hash/#eql? participates, and #eql?
+// is never asked across differing hash codes. With a block, elements are
+// distinguished by the block's return value rather than the element itself.
 func (vm *VM) arrayUniq(elems []object.Value, blk *Proc) []object.Value {
-	var out, keys []object.Value
+	var out []object.Value
+	buckets := map[int64][]object.Value{}
 	for _, e := range elems {
 		key := e
 		if blk != nil {
 			key = vm.callBlock(blk, []object.Value{e})
 		}
+		h := vm.eqlHashCode(key)
 		seen := false
-		for _, k := range keys {
-			if valueEql(key, k) {
+		for _, k := range buckets[h] {
+			if vm.eqlKeys(key, k) {
 				seen = true
 				break
 			}
 		}
 		if !seen {
-			keys = append(keys, key)
+			buckets[h] = append(buckets[h], key)
 			out = append(out, e)
 		}
 	}
 	return out
 }
 
-// arrayIncludes backs the set operators &, | and - (difference), which compare
-// with eql? — so e.g. 1 and 1.0 are distinct members. Membership tests like
-// include?/index/count use == instead and do not go through here.
+// arrayIncludesEql backs the set operators &, |, - and their named forms, which
+// compare members with #eql? (so e.g. 1 and 1.0 are distinct, and a user #eql?
+// participates). Membership tests like include?/index/count use == instead and do
+// not go through here.
+func (vm *VM) arrayIncludesEql(elems []object.Value, v object.Value) bool {
+	for _, e := range elems {
+		if vm.eqlKeys(e, v) {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayDifferenceEql implements Array#- : every receiver element that is #eql? to
+// no element of the argument, receiver duplicates preserved.
+func (vm *VM) arrayDifferenceEql(a, b []object.Value) []object.Value {
+	var out []object.Value
+	for _, e := range a {
+		if !vm.arrayIncludesEql(b, e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// arrayIncludes backs the VM-less Array#- fast path (value elements only); the
+// VM-aware operator in binaryOp routes object-bearing arrays through eql? dispatch.
 func arrayIncludes(elems []object.Value, v object.Value) bool {
 	for _, e := range elems {
 		if valueEql(e, v) {
@@ -829,6 +907,52 @@ func valueEqual(a, b object.Value) bool {
 // structural-only comparison, so VM-less callers keep their current behaviour.
 func (vm *VM) vmValueEqual(a, b object.Value) bool {
 	return valueEqualRec(vm, a, b, nil)
+}
+
+// identityEqual is rb_equal's `#equal?` short-circuit: two values that are the
+// same object are equal without any further comparison. Two Floats with the same
+// bit pattern count as identical too — this is what makes `[NaN] == [NaN]` true
+// (Array#== compares elements with rb_equal, and NaN.equal?(NaN) holds for the
+// shared flonum) while a bare `NaN == NaN` stays false.
+func identityEqual(a, b object.Value) bool {
+	if a == b {
+		return true
+	}
+	if af, ok := a.(object.Float); ok {
+		if bf, ok := b.(object.Float); ok {
+			return math.Float64bits(float64(af)) == math.Float64bits(float64(bf))
+		}
+	}
+	return false
+}
+
+// rbEqualElem compares two container members the way MRI's rb_equal does: the
+// #equal? identity short-circuit first, then the full value comparison (which
+// dispatches a member's own #== when the VM is live). A nil VM keeps the plain
+// structural comparison for VM-less callers.
+func (vm *VM) rbEqualElem(a, b object.Value, seen map[eqPair]struct{}) bool {
+	if vm != nil && identityEqual(a, b) {
+		return true
+	}
+	return valueEqualRec(vm, a, b, seen)
+}
+
+// reflexiveContainerEq handles Array#== / Hash#== against an operand that is not
+// the matching container type: MRI accepts one that answers the conversion method
+// (#to_ary / #to_hash) by dispatching `other == self` (rb_equal). Restricted to
+// user objects — the only values that carry such a coercion without being the
+// container type — and a no-op without a live VM.
+func (vm *VM) reflexiveContainerEq(self, other object.Value, conv string) bool {
+	if vm == nil {
+		return false
+	}
+	if _, isObj := other.(*RObject); !isObj {
+		return false
+	}
+	if !vm.send(other, "respond_to?", []object.Value{object.Symbol(conv)}, nil).Truthy() {
+		return false
+	}
+	return self == other || vm.send(other, "==", []object.Value{self}, nil).Truthy()
 }
 
 func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
@@ -914,7 +1038,19 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 		return ok && av == bv
 	case *object.Array:
 		bv, ok := b.(*object.Array)
-		if !ok || len(av.Elems) != len(bv.Elems) {
+		if !ok {
+			// An Array subclass instance is still a T_ARRAY to MRI, compared
+			// structurally (its #to_ary is never consulted), so unwrap it.
+			if o, isObj := b.(*RObject); isObj {
+				bv, ok = o.builtin.(*object.Array)
+			}
+		}
+		if !ok {
+			// Array#== with a non-Array that answers #to_ary: MRI dispatches
+			// `other == self` (rb_equal), so an Array-like object compares equal.
+			return vm.reflexiveContainerEq(a, b, "to_ary")
+		}
+		if len(av.Elems) != len(bv.Elems) {
 			return false
 		}
 		key := eqPair{av, bv}
@@ -927,14 +1063,24 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 		seen[key] = struct{}{}
 		defer delete(seen, key)
 		for i := range av.Elems {
-			if !valueEqualRec(vm, av.Elems[i], bv.Elems[i], seen) {
+			if !vm.rbEqualElem(av.Elems[i], bv.Elems[i], seen) {
 				return false
 			}
 		}
 		return true
 	case *object.Hash:
 		bv, ok := b.(*object.Hash)
-		if !ok || av.Len() != bv.Len() {
+		if !ok {
+			// A Hash subclass instance is still a T_HASH, compared structurally.
+			if o, isObj := b.(*RObject); isObj {
+				bv, ok = o.builtin.(*object.Hash)
+			}
+		}
+		if !ok {
+			// Hash#== with a non-Hash that answers #to_hash dispatches `other == self`.
+			return vm.reflexiveContainerEq(a, b, "to_hash")
+		}
+		if av.Len() != bv.Len() {
 			return false
 		}
 		key := eqPair{av, bv}
@@ -949,14 +1095,14 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 		for _, k := range av.Keys {
 			ae, _ := av.Get(k)
 			be, present := bv.Get(k)
-			if !present || !valueEqualRec(vm, ae, be, seen) {
+			if !present || !vm.rbEqualElem(ae, be, seen) {
 				return false
 			}
 		}
 		return hashIdentityMatch(av, bv)
 	case *object.Range:
 		bv, ok := b.(*object.Range)
-		return ok && av.Exclusive == bv.Exclusive && valueEqualRec(vm, av.Lo, bv.Lo, seen) && valueEqualRec(vm, av.Hi, bv.Hi, seen)
+		return ok && av.Exclusive == bv.Exclusive && vm.rbEqualElem(av.Lo, bv.Lo, seen) && vm.rbEqualElem(av.Hi, bv.Hi, seen)
 	case *Set:
 		bv, ok := b.(*Set)
 		return ok && av.eq(bv)
@@ -1015,10 +1161,42 @@ func valueEqualRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 // their members with eql? too. A built-in value subclass instance is compared as
 // the value it wraps; everything else falls back to object identity.
 func valueEql(a, b object.Value) bool {
-	return valueEqlRec(a, b, nil)
+	return valueEqlRec(nil, a, b, nil)
 }
 
-func valueEqlRec(a, b object.Value, seen map[eqPair]struct{}) bool {
+// vmValueEql is the VM-aware form of valueEql: Array/Hash members whose own #eql?
+// matters (a user object) have it dispatched, matching MRI's rb_eql per member,
+// so e.g. Hash#eql? compares values with each value's #eql?. A nil VM keeps the
+// structural-only comparison.
+func (vm *VM) vmValueEql(a, b object.Value) bool {
+	return valueEqlRec(vm, a, b, nil)
+}
+
+// rubyEql backs Object#eql?: an instance of a built-in subclass compares as its
+// wrapped value, a plain user object by identity (dispatching #eql? here would
+// recurse), and every other value structurally with member #eql? dispatched.
+func (vm *VM) rubyEql(a, b object.Value) bool {
+	if ao, ok := a.(*RObject); ok {
+		if !object.IsNil(ao.builtin) {
+			return vm.vmValueEql(ao.builtin, b)
+		}
+		bo, ok := b.(*RObject)
+		return ok && ao == bo
+	}
+	return vm.vmValueEql(a, b)
+}
+
+// rbEqlElem compares two container members the way MRI's rb_eql does: the
+// #equal? identity short-circuit first, then the value comparison (dispatching a
+// member's own #eql? when the VM is live).
+func (vm *VM) rbEqlElem(a, b object.Value, seen map[eqPair]struct{}) bool {
+	if vm != nil && identityEqual(a, b) {
+		return true
+	}
+	return valueEqlRec(vm, a, b, seen)
+}
+
+func valueEqlRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 	if o, ok := a.(*RObject); ok && !object.IsNil(o.builtin) {
 		a = o.builtin
 	}
@@ -1056,7 +1234,7 @@ func valueEqlRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		seen[key] = struct{}{}
 		defer delete(seen, key)
 		for i := range av.Elems {
-			if !valueEqlRec(av.Elems[i], bv.Elems[i], seen) {
+			if !vm.rbEqlElem(av.Elems[i], bv.Elems[i], seen) {
 				return false
 			}
 		}
@@ -1078,11 +1256,22 @@ func valueEqlRec(a, b object.Value, seen map[eqPair]struct{}) bool {
 		for _, k := range av.Keys {
 			v1, _ := av.Get(k)
 			v2, present := bv.Get(k)
-			if !present || !valueEqlRec(v1, v2, seen) {
+			if !present || !vm.rbEqlElem(v1, v2, seen) {
 				return false
 			}
 		}
 		return hashIdentityMatch(av, bv)
+	}
+	// A user object whose class defines #eql? (or #hash-based equality) dispatches
+	// it — MRI's rb_eql, used per member by Array#eql? / Hash#eql?. Guarded so
+	// VM-less callers keep plain identity.
+	if vm != nil {
+		if _, isObj := a.(*RObject); isObj {
+			return a == b || vm.send(a, "eql?", []object.Value{b}, nil).Truthy()
+		}
+		if _, isObj := b.(*RObject); isObj {
+			return a == b || vm.send(b, "eql?", []object.Value{a}, nil).Truthy()
+		}
 	}
 	return a == b // identity for nil/true/false and other reference types
 }
