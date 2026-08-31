@@ -6360,12 +6360,10 @@ func (vm *VM) casecmpOther(self, other object.Value) (string, bool) {
 	os, ok := other.(*object.String)
 	if !ok {
 		if !vm.respondsToDynamic(other, "to_str") {
-			return "", false
+			return "", false // no String conversion at all → nil
 		}
-		r := vm.send(other, "to_str", nil, nil)
-		if os, ok = r.(*object.String); !ok {
-			return "", false
-		}
+		// A #to_str that returns a non-String raises TypeError (strCoerceArg), as MRI.
+		_, os = vm.strCoerceArg(other)
 	}
 	if object.IsNil(vm.encodingCompatible(self.(*object.String), os)) {
 		return "", false
@@ -6436,11 +6434,8 @@ func (vm *VM) strSearchArg(self, pat object.Value) (needle string, re *Regexp, i
 }
 
 // runeMatchAt reports whether needle occurs in runes starting exactly at rune
-// index p.
+// index p. The caller guarantees 0 <= p and p+len(needle) <= len(runes).
 func runeMatchAt(runes, needle []rune, p int) bool {
-	if p < 0 || p+len(needle) > len(runes) {
-		return false
-	}
 	for i, r := range needle {
 		if runes[p+i] != r {
 			return false

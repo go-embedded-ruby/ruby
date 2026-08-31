@@ -105,6 +105,33 @@ func TestStringCoerceArgNonStringToStr(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "can't convert B to String (B#to_str gives Integer)") {
 		t.Fatalf("chomp(bad to_str): %v", err)
 	}
+	// casecmp with a #to_str that returns a non-String also raises TypeError.
+	err = runErr(t, `class B2; def to_str; 42; end; end; "abc".casecmp(B2.new)`)
+	if err == nil || !strings.Contains(err.Error(), "can't convert B2 to String") {
+		t.Fatalf("casecmp(bad to_str): %v", err)
+	}
+}
+
+func TestStringSearchIncompatibleEncoding(t *testing.T) {
+	// index/rindex negotiate the needle's encoding and raise on incompatibility.
+	for _, m := range []string{"index", "rindex"} {
+		err := runErr(t, `"あ".`+m+`("れ".encode("EUC-JP"))`)
+		if err == nil || !strings.Contains(err.Error(), "CompatibilityError") {
+			t.Fatalf("%s incompatible encoding: %v", m, err)
+		}
+	}
+}
+
+func TestStringPartitionSubclassSeparator(t *testing.T) {
+	// A String-subclass separator is unwrapped (regexpSep) and matched literally.
+	if got := eval(t, `class SubSep < String; end; p "hello".partition(SubSep.new("l"))`); got != "[\"he\", \"l\", \"lo\"]\n" {
+		t.Fatalf("partition subclass sep: %q", got)
+	}
+	// split with no positional argument falling back to $; exercises the empty-args
+	// substitution path.
+	if got := eval(t, `$; = ","; r = "a,b".split; $; = nil; p r`); got != "[\"a\", \"b\"]\n" {
+		t.Fatalf("split no-arg $;: %q", got)
+	}
 }
 
 func TestStringChompResiduals(t *testing.T) {
