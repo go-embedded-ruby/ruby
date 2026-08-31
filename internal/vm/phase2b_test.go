@@ -53,7 +53,7 @@ func TestArrays(t *testing.T) {
 
 func TestArrayErrors(t *testing.T) {
 	tests := []struct{ src, want string }{
-		{"a = [1]\na[5] = 9", "IndexError"},
+		// A[i]=v beyond the end auto-grows (MRI) — no error; see TestArrayIndexAssignGrows.
 		{"a = [1]\na[-5] = 9", "IndexError"},
 		{`p [1]["x"]`, "TypeError"},
 	}
@@ -61,5 +61,13 @@ func TestArrayErrors(t *testing.T) {
 		if err := runErr(t, tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("src=%q got %v want %q", tc.src, err, tc.want)
 		}
+	}
+}
+
+// TestArrayIndexAssignGrows pins MRI's Array#[]= auto-grow: assigning at or beyond
+// the current end pads the gap with nil rather than raising IndexError.
+func TestArrayIndexAssignGrows(t *testing.T) {
+	if got := eval(t, "a = [1]\na[5] = 9\np a"); got != "[1, nil, nil, nil, nil, 9]\n" {
+		t.Errorf("auto-grow got %q", got)
 	}
 }
