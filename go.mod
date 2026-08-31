@@ -298,7 +298,7 @@ require (
 	github.com/go-opentype/shape v0.5.0 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260708052910-1416bf219e47 // indirect
 	github.com/go-puppet/puppet v0.0.0-20260710130746-3ef04469bb7e // indirect
-	github.com/go-regexp/engine v0.1.2 // indirect
+	github.com/go-regexp/engine v0.1.3 // indirect
 	github.com/go-richdoc/richdoc v0.2.0 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260709170525-affabfaa9f08 // indirect
 	github.com/go-scss/scss v0.0.0-20260803114742-42d746e6ec68 // indirect
