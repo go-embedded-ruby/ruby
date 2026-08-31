@@ -4632,11 +4632,18 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			// With a size, for the reason Integer#step has one: without it
 			// Enumerator#size counts by walking, and (1..Float::INFINITY).step
-			// never finishes walking.
+			// never finishes walking. A numeric range (a Numeric begin, or a
+			// beginless range with a Numeric end) with a numeric step returns an
+			// Enumerator::ArithmeticSequence — exposing #begin/#end/#step — exactly
+			// like MRI; a non-numeric range (a String range) stays a plain
+			// Enumerator.
 			r := self.(*object.Range)
-			return enumForSized(self, "step", func(*VM) object.Value {
-				return rangeStepSize(r, step)
-			}, args...)
+			size := func(*VM) object.Value { return rangeStepSize(r, step) }
+			numericRange := isNumericValue(r.Lo) || (object.IsNil(r.Lo) && isNumericValue(r.Hi))
+			if numericRange && isNumericValue(step) {
+				return vm.arithSeq(self, r.Lo, r.Hi, step, r.Exclusive, size, args...)
+			}
+			return enumForSized(self, "step", size, args...)
 		}
 		r := self.(*object.Range)
 		// A String range steps by #succ: MRI requires an Integer step and yields
@@ -4679,6 +4686,17 @@ func (vm *VM) bootstrap() {
 		}
 		vm.numericStep(blk, r.Lo, r.Hi, step, r.Exclusive)
 		return r
+	})
+	// Range#%(step) is MRI's alias for Range#step, so it shares the iteration and
+	// (no-block) ArithmeticSequence machinery — the only difference is that the
+	// sequence remembers it was built by #% so its #inspect reads
+	// "((1..10).%(2))" rather than "((1..10).step(2))".
+	vm.cRange.define("%", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		res := vm.send(self, "step", args, blk)
+		if e, ok := res.(*Enumerator); ok && e.isArithSeq {
+			e.asMethod = "%"
+		}
+		return res
 	})
 
 	// Integer methods.

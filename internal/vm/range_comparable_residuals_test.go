@@ -193,6 +193,94 @@ p(a)`, "[\"A\", \"C\", \"E\", \"G\"]\n"},
 	}
 }
 
+// TestRangeStepArithSeqAndPercent covers Range#step without a block returning an
+// Enumerator::ArithmeticSequence for a numeric range (with #begin/#end/#step and
+// the MRI #inspect), a plain Enumerator for a String range, and Range#% as the
+// step-alias whose sequence inspects with a percent sign.
+func TestRangeStepArithSeqAndPercent(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"step_class", `p((1..10).step(2).class)`, "Enumerator::ArithmeticSequence\n"},
+		{"step_beginless_class", `p((..10).step(2).class)`, "Enumerator::ArithmeticSequence\n"},
+		{"step_endless_class", `p((1..).step(2).class)`, "Enumerator::ArithmeticSequence\n"},
+		{"step_str_class", `p(('a'..'e').step(2).class)`, "Enumerator\n"},
+		{"step_begin", `p((1..10).step(2).begin)`, "1\n"},
+		{"step_end", `p((1..10).step(2).end)`, "10\n"},
+		{"step_step", `p((1..10).step(2).step)`, "2\n"},
+		{"step_to_a", `p((1..10).step(2).to_a)`, "[1, 3, 5, 7, 9]\n"},
+		{"step_inspect", `p((1..10).step(2).inspect)`, "\"((1..10).step(2))\"\n"},
+		{"pct_class", `p(((1..10) % 2).class)`, "Enumerator::ArithmeticSequence\n"},
+		{"pct_begin", `p(((1..10) % 2).begin)`, "1\n"},
+		{"pct_end", `p(((1..10) % 2).end)`, "10\n"},
+		{"pct_step", `p(((1..10) % 2).step)`, "2\n"},
+		{"pct_to_a", `p(((1..10) % 2).to_a)`, "[1, 3, 5, 7, 9]\n"},
+		{"pct_inspect", `p(((1..10) % 2).inspect)`, "\"((1..10).%(2))\"\n"},
+		{"numeric_step_inspect", `p(1.step(10, 2).inspect)`, "\"(1.step(10, 2))\"\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRangeReverseEach covers reverse_each's descent: bounded Integer/String/
+// Symbol ranges, a beginless Integer range (descends forever, taken via an
+// Enumerator), and the reverse-Enumerator #size (forward count, Infinity for a
+// beginless Integer end, nil for a String begin, and a TypeError naming the
+// end's class for a non-countable begin).
+func TestRangeReverseEachResiduals(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"rev_int", `
+a = []
+(1..3).reverse_each { |i| a << i }
+p(a)`, "[3, 2, 1]\n"},
+		{"rev_int_excl", `
+a = []
+(1...3).reverse_each { |i| a << i }
+p(a)`, "[2, 1]\n"},
+		{"rev_str", `
+a = []
+('A'..'D').reverse_each { |i| a << i }
+p(a)`, "[\"D\", \"C\", \"B\", \"A\"]\n"},
+		{"rev_sym", `
+a = []
+(:A..:D).reverse_each { |i| a << i }
+p(a)`, "[:D, :C, :B, :A]\n"},
+		{"rev_beginless_int", `p((..5).reverse_each.take(3))`, "[5, 4, 3]\n"},
+		{"rev_beginless_int_excl", `p((...5).reverse_each.take(3))`, "[4, 3, 2]\n"},
+		{"rev_size_int", `p((1..3).reverse_each.size)`, "3\n"},
+		{"rev_size_float_end", `p((1..3.3).reverse_each.size)`, "3\n"},
+		{"rev_size_beginless_inf", `p((..3).reverse_each.size)`, "Infinity\n"},
+		{"rev_size_str_nil", `p(('a'..'z').reverse_each.size)`, "nil\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+	errCases := []struct{ name, src, msg string }{
+		{"rev_endless", `(1..).reverse_each { |x| x }`, "can't iterate from NilClass"},
+		{"rev_beginless_str", `(..'a').reverse_each { |x| x }`, "can't iterate from NilClass"},
+		{"rev_size_float_begin", `(1.1..3).reverse_each.size`, "can't iterate from Integer"},
+		{"rev_size_float_begin_float_end", `(1.1..3.3).reverse_each.size`, "can't iterate from Float"},
+		{"rev_size_nil_float_end", `(nil..3.3).reverse_each.size`, "can't iterate from Float"},
+		{"rev_size_nilnil", `(nil..nil).reverse_each.size`, "can't iterate from NilClass"},
+		{"rev_time_no_succ", `(Time.now..Time.now).reverse_each { |x| x }`, "can't iterate from Time"},
+	}
+	for _, tc := range errCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runErr(t, tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.msg) {
+				t.Errorf("src=%q: got err=%v, want containing %q", tc.src, err, tc.msg)
+			}
+		})
+	}
+}
+
 // TestComparableEqualCmpint covers Comparable#== under the rb_cmpint rule: nil is
 // unequal, a zero (including 0.0) result is equal, and a non-nil, non-comparison
 // result (a String) raises ArgumentError.

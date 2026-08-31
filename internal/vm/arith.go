@@ -340,6 +340,12 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		if _, isEnum := a.(*Enumerator); isEnum && op == bytecode.OpAdd {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
 		}
+		// A Range dispatches its % operator (Range#% is Range#step, producing an
+		// Enumerator::ArithmeticSequence) as a method rather than the numeric
+		// modulo path, which would reject the Range receiver.
+		if _, isRange := a.(*object.Range); isRange && op == bytecode.OpMod {
+			return vm.send(a, "%", []object.Value{b}, nil)
+		}
 		// A URI dispatches its arithmetic operator (only + is defined, resolving a
 		// reference) as a method, so the binding's merge — which needs the VM to
 		// wrap the result — runs with a live VM rather than the VM-less binary path.

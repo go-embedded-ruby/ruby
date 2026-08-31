@@ -137,6 +137,11 @@ func TestRangeReverseEach(t *testing.T) {
 		{"enum_size", `p((1..3).reverse_each.size)`, "3\n"},
 		{"enum_size_excl", `p((1...3).reverse_each.size)`, "2\n"},
 		{"enum_size_float_end", `p((1..3.3).reverse_each.size)`, "3\n"},
+		// A beginless Integer range descends from its end forever (MRI 4.0); the
+		// Enumerator's take bounds it.
+		{"beginless_int", `p((..5).reverse_each.take(3))`, "[5, 4, 3]\n"},
+		{"beginless_int_excl", `p((...5).reverse_each.take(3))`, "[4, 3, 2]\n"},
+		{"symbol", "a=[]\n(:A..:D).reverse_each{|i| a<<i}\np a", "[:D, :C, :B, :A]\n"},
 		{"entries", `p((1..4).entries)`, "[1, 2, 3, 4]\n"},
 		{"entries_string", `p(("a".."c").entries)`, "[\"a\", \"b\", \"c\"]\n"},
 	}
@@ -150,12 +155,13 @@ func TestRangeReverseEach(t *testing.T) {
 }
 
 // TestRangeReverseEachErrors covers the non-iterable reverse_each cases: an endless
-// range and a begin that is neither Integer nor String, each naming its class.
+// range, a Float begin, and a beginless range whose end is not an Integer (so it
+// cannot be counted down) — each naming the offending class.
 func TestRangeReverseEachErrors(t *testing.T) {
 	tests := []struct{ name, src, want string }{
 		{"endless", `(1..).reverse_each.take(3)`, "can't iterate from NilClass"},
 		{"float_begin", `(1.5..2.5).reverse_each{|x| x}`, "can't iterate from Float"},
-		{"beginless", `(..5).reverse_each{|x| x}`, "can't iterate from NilClass"},
+		{"beginless_string", `(..'a').reverse_each{|x| x}`, "can't iterate from NilClass"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
