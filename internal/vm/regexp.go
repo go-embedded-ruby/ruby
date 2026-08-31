@@ -429,6 +429,52 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 	return m
 }
 
+// strIndexRegexp implements String#index with a Regexp: it finds the leftmost
+// match at or after character offset off (matching the full subject so anchors
+// and \G honour the offset), sets $~ (nil on no match) and returns the character
+// index of the match start, or nil. off may equal the character count.
+func (vm *VM) strIndexRegexp(re *Regexp, subject string, off int) object.Value {
+	byteOff := charToByte(subject, off)
+	md := re.matcher().Match(subject[byteOff:]) // leftmost match in the tail; \G pins to its start
+	if md == nil {
+		vm.lastMatch = object.NilV
+		return object.NilV
+	}
+	vm.lastMatch = &MatchData{md: md, subject: subject, re: re, byteOff: byteOff}
+	return object.IntValue(int64(byteToChar(subject, byteOff+md.Begin(0))))
+}
+
+// lastRegexpMatch returns the match of re that begins at the largest byte offset
+// in subject (the rightmost match, as String#rpartition selects it), or nil when
+// there is none. It probes anchored matches from the end toward the start, so the
+// whole string stays visible to anchors and lookbehind.
+func (vm *VM) lastRegexpMatch(re *Regexp, subject string) *MatchData {
+	for p := len(subject); p >= 0; p-- {
+		md := re.matcher().MatchAt(subject, p)
+		if md != nil && md.Begin(0) == p {
+			return &MatchData{md: md, subject: subject, re: re}
+		}
+	}
+	return nil
+}
+
+// strRindexRegexp implements String#rindex with a Regexp: it returns the largest
+// character index p (p <= limit) at which re matches starting exactly at p,
+// setting $~ (nil when there is no such match). limit has been clamped to the
+// character count by the caller.
+func (vm *VM) strRindexRegexp(re *Regexp, subject string, limit int) object.Value {
+	for p := limit; p >= 0; p-- {
+		bytep := charToByte(subject, p)
+		md := re.matcher().MatchAt(subject, bytep)
+		if md != nil && md.Begin(0) == bytep {
+			vm.lastMatch = &MatchData{md: md, subject: subject, re: re}
+			return object.IntValue(int64(p))
+		}
+	}
+	vm.lastMatch = object.NilV
+	return object.NilV
+}
+
 // gvar reads a global variable. The match-data specials derive from $~ (the
 // last match); any other name reads as nil (uninitialised global).
 func (vm *VM) gvar(name string) object.Value {
@@ -565,15 +611,28 @@ func regexpEscapeLiteral(s string) string {
 // it terminates; a non-empty match advances past its end.
 func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) object.Value {
 	var results []object.Value
+	enc := "" // result substrings inherit the receiver's encoding
+	if s, ok := self.(*object.String); ok {
+		enc = s.Enc
+	}
+	last := object.Value(object.NilV) // $~ after the call: last match, or nil when none
 	pos := 0
 	for pos <= len(subject) {
 		md := re.matcher().Match(subject[pos:])
 		if md == nil {
 			break
 		}
-		elem := scanElement(md)
+		elem := scanElement(md, enc)
+		// Expose this match through $~ / $1.. (with the whole subject and an
+		// absolute byteOff so MatchData#string, #begin and #offset are correct).
+		// MRI leaves $~ set to the last match after scan returns, even if a block
+		// reassigned it, so re-set it after the block runs.
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: pos}
+		vm.lastMatch = cur
+		last = cur
 		if blk != nil {
 			vm.callBlock(blk, []object.Value{elem})
+			vm.lastMatch = cur
 		} else {
 			results = append(results, elem)
 		}
@@ -590,6 +649,8 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 			pos += matchEnd
 		}
 	}
+	// $~ is the last match (or nil when there was none), as MRI leaves it.
+	vm.lastMatch = last
 	if blk != nil {
 		return self
 	}
@@ -610,6 +671,16 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 // every result substring inherits (MRI keeps split pieces in the same encoding
 // as self).
 func (vm *VM) stringSplit(subject, enc string, args []object.Value) object.Value {
+	// A nil or absent pattern falls back to $; (the field separator): when $; is a
+	// String it becomes the pattern; a nil $; keeps awk-style whitespace mode.
+	if len(args) == 0 || object.IsNil(args[0]) {
+		switch fs := vm.gvar("$;").(type) {
+		case *object.String:
+			args = replaceSplitPattern(args, fs)
+		case *Regexp:
+			args = replaceSplitPattern(args, fs)
+		}
+	}
 	// A pattern that is neither a String, a Regexp nor nil is converted with
 	// #to_str, and a non-Integer limit with #to_int, exactly as MRI does. Copy the
 	// slice before rewriting the pattern so the caller's arguments are untouched.
@@ -634,6 +705,17 @@ func (vm *VM) stringSplit(subject, enc string, args []object.Value) object.Value
 	}
 	re := scanRegexp(args[0])
 	return splitRegexp(re, subject, limit, enc)
+}
+
+// replaceSplitPattern returns args with the pattern (args[0]) set to pat,
+// appending it when args was empty. The input slice is never mutated.
+func replaceSplitPattern(args []object.Value, pat object.Value) []object.Value {
+	if len(args) == 0 {
+		return []object.Value{pat}
+	}
+	out := append([]object.Value(nil), args...)
+	out[0] = pat
+	return out
 }
 
 // splitOnWhitespace reports whether the split should use awk-style whitespace
@@ -674,6 +756,12 @@ func splitWhitespace(subject string, limit int, enc string) object.Value {
 			i++
 		}
 		out = append(out, object.NewStringViewEnc(subject[start:i], enc))
+	}
+	// With an explicit non-zero limit, a run of trailing whitespace yields one
+	// trailing empty field (awk mode collapses it to a single ""); the default
+	// (limit 0) suppresses trailing empty fields.
+	if limit != 0 && n > 0 && isASCIISpace(subject[n-1]) {
+		out = append(out, object.NewStringViewEnc("", enc))
 	}
 	return object.NewArrayFromSlice(out)
 }
@@ -771,23 +859,46 @@ func captureFields(md *onig.MatchData, enc string) []object.Value {
 // gsub returns an Enumerator over the matches; sub raises ArgumentError, as MRI
 // does.
 func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global bool) object.Value {
-	re := scanRegexp(args[0])
+	re := vm.subRegexp(args[0])
+	// A replacement argument takes precedence over a block: MRI ignores the block
+	// when a String or Hash replacement is also supplied.
+	if len(args) >= 2 {
+		if h, ok := args[1].(*object.Hash); ok {
+			return vm.gsubHash(re, subject, h, global)
+		}
+		repl, _ := vm.strCoerceArg(args[1]) // a non-String replacement converts via #to_str
+		return vm.gsub(re, subject, repl, nil, global)
+	}
 	if blk != nil {
 		return vm.gsub(re, subject, "", blk, global)
 	}
-	if len(args) < 2 {
-		if !global {
-			raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
+	if !global {
+		raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
+	}
+	// gsub(pattern) with no replacement and no block → an Enumerator yielding
+	// the matched substrings; supports #with_index, #to_a, etc. via the
+	// receiver+method form, replaying gsub with the enumerator's block. MRI reports
+	// this enumerator's #size as nil (the match count is not known ahead of time).
+	return enumForSized(object.NewString(subject), "gsub",
+		func(*VM) object.Value { return object.NilV }, args[0])
+}
+
+// subRegexp coerces the pattern argument of String#sub/#gsub into a Regexp: a
+// Regexp passes through; anything else is coerced to a String (via #to_str,
+// unwrapping a String subclass) and matched literally, exactly as MRI does.
+func (vm *VM) subRegexp(v object.Value) *Regexp {
+	if u, ok := v.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			v = w
 		}
-		// gsub(pattern) with no replacement and no block → an Enumerator yielding
-		// the matched substrings; supports #with_index, #to_a, etc. via the
-		// receiver+method form, replaying gsub with the enumerator's block.
-		return enumFor(object.NewString(subject), "gsub", args[0])
 	}
-	if h, ok := args[1].(*object.Hash); ok {
-		return vm.gsubHash(re, subject, h, global)
+	if r, ok := v.(*Regexp); ok {
+		return r
 	}
-	return vm.gsub(re, subject, strArg(args[1]), nil, global)
+	s, _ := vm.strCoerceArg(v)
+	src := regexpEscapeLiteral(s)
+	re, _ := onig.Compile(src)
+	return &Regexp{re: re, source: src}
 }
 
 // gsub implements String#sub (global=false) and String#gsub (global=true) over
@@ -926,6 +1037,16 @@ func expandReplacement(tmpl string, md *onig.MatchData, pre, post string) string
 		case n == '&':
 			b.WriteString(md.Str(0))
 			i++
+		case n == '+':
+			// \+ inserts the last capture group that participated (highest-numbered),
+			// or nothing when there were no captures or none participated.
+			for gi := md.NGroups(); gi >= 1; gi-- {
+				if md.Begin(gi) >= 0 {
+					b.WriteString(md.Str(gi))
+					break
+				}
+			}
+			i++
 		case n == '`':
 			b.WriteString(pre)
 			i++
@@ -960,18 +1081,20 @@ func expandReplacement(tmpl string, md *onig.MatchData, pre, post string) string
 }
 
 // scanElement builds one String#scan result element from a match: the whole
-// match (no groups) or the array of captures (one or more groups).
-func scanElement(md *onig.MatchData) object.Value {
+// match (no groups) or the array of captures (one or more groups). Every result
+// substring inherits enc, the receiver's encoding (MRI keeps scan pieces in the
+// same encoding as self).
+func scanElement(md *onig.MatchData, enc string) object.Value {
 	n := md.NGroups()
 	if n == 0 {
-		return object.NewString(md.Str(0))
+		return object.NewStringViewEnc(md.Str(0), enc)
 	}
 	caps := make([]object.Value, n)
 	for i := 1; i <= n; i++ {
 		if md.Begin(i) < 0 {
 			caps[i-1] = object.NilV
 		} else {
-			caps[i-1] = object.NewStringView(md.Str(i))
+			caps[i-1] = object.NewStringViewEnc(md.Str(i), enc)
 		}
 	}
 	return object.NewArrayFromSlice(caps)

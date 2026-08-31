@@ -1565,19 +1565,25 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("downcase", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.stringCaseMap(self, caseDowncase, args)
 	})
-	vm.cString.define("casecmp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*object.String)
-		if !ok { // like <=>, a non-String operand compares to nil
+	vm.cString.define("casecmp", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := vm.casecmpOther(self, args[0])
+		if !ok { // a non-String (no #to_str) or an incompatible encoding compares to nil
 			return object.NilV
 		}
-		return object.IntValue(int64(strings.Compare(strings.ToLower(strOf(self)), strings.ToLower(o.Str()))))
+		// casecmp folds ASCII A-Z only, then compares byte for byte (non-ASCII bytes
+		// are never folded), matching MRI.
+		return object.IntValue(int64(strings.Compare(asciiDowncase(strOf(self)), asciiDowncase(o))))
 	})
-	vm.cString.define("casecmp?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, ok := args[0].(*object.String)
+	vm.cString.define("casecmp?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o, ok := vm.casecmpOther(self, args[0])
 		if !ok {
 			return object.NilV
 		}
-		return object.Bool(strings.EqualFold(strOf(self), o.Str()))
+		// casecmp? applies full Unicode case folding (so ß equals "ss" and ÄÖÜ equals
+		// äöü), unlike casecmp's ASCII-only fold.
+		a := caseMapUTF8(strOf(self), caseDowncase, caseFlags{fold: true})
+		b := caseMapUTF8(o, caseDowncase, caseFlags{fold: true})
+		return object.Bool(a == b)
 	})
 	vm.cString.define("capitalize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.stringCaseMap(self, caseCapitalize, args)
@@ -1592,7 +1598,6 @@ func (vm *VM) bootstrap() {
 		return object.NewString(succString(strOf(self)))
 	}
 	vm.cString.define("succ", succStr)
-	vm.cString.define("next", succStr)
 	succBang := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
@@ -1600,7 +1605,10 @@ func (vm *VM) bootstrap() {
 		return s
 	}
 	vm.cString.define("succ!", succBang)
-	vm.cString.define("next!", succBang)
+	// #next and #next! are true aliases of #succ / #succ! (they share the same
+	// Method object, so instance_method(:next) == instance_method(:succ)).
+	vm.aliasMethod(vm.cString, "next", "succ")
+	vm.aliasMethod(vm.cString, "next!", "succ!")
 	vm.cString.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(stringChr(strOf(self)))
 	})
@@ -1644,8 +1652,8 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("rstrip", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, strings.TrimRight(strOf(self), wsCutset))
 	})
-	vm.cString.define("chomp", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, chompSep(strOf(self), args))
+	vm.cString.define("chomp", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, vm.chompSep(strOf(self), args))
 	})
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, chopStr(strOf(self)))
@@ -1665,8 +1673,14 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cString.define("bytes", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("bytes", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		s := strOf(self)
+		if blk != nil { // the block form yields each byte and returns the receiver (MRI)
+			for i := 0; i < len(s); i++ {
+				vm.callBlock(blk, []object.Value{object.IntValue(int64(s[i]))})
+			}
+			return self
+		}
 		out := make([]object.Value, len(s))
 		for i := 0; i < len(s); i++ {
 			out[i] = object.IntValue(int64(s[i]))
@@ -1699,7 +1713,8 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("each_line", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_line", args...)
+			// MRI reports this enumerator's #size as nil (the line count is unknown).
+			return enumForSized(self, "each_line", func(*VM) object.Value { return object.NilV }, args...)
 		}
 		for _, seg := range vm.stringLineSegs(self, args) {
 			vm.callBlock(blk, []object.Value{seg})
@@ -1763,7 +1778,13 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cString.define("codepoints", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("codepoints", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		if blk != nil { // the block form yields each codepoint and returns the receiver (MRI)
+			for _, r := range strOf(self) {
+				vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
+			}
+			return self
+		}
 		var out []object.Value
 		for _, r := range strOf(self) {
 			out = append(out, object.IntValue(int64(r)))
@@ -1837,22 +1858,32 @@ func (vm *VM) bootstrap() {
 		return s
 	})
 	vm.cString.define("index", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, needle := strOf(self), vm.strPatternCompat(self, args[0])
-		r := []rune(s)
+		s := strOf(self)
+		needle, re, isRe := vm.strSearchArg(self, args[0])
+		nChars := utf8.RuneCountInString(s)
 		start := 0
 		if len(args) > 1 { // optional character offset (negative counts from the end)
-			start = int(intArg(args[1]))
+			start = int(vm.repeatLong(args[1]))
 			if start < 0 {
-				start += len(r)
+				start += nChars
 			}
 			if start < 0 {
+				if isRe { // a Regexp search always clears $~, even out of range
+					vm.lastMatch = object.NilV
+				}
 				return object.NilV
 			}
 		}
-		if start > len(r) {
+		if start > nChars {
+			if isRe {
+				vm.lastMatch = object.NilV
+			}
 			return object.NilV
 		}
-		byteStart := len(string(r[:start]))
+		if isRe {
+			return vm.strIndexRegexp(re, s, start)
+		}
+		byteStart := charToByte(s, start)
 		byteIdx := strings.Index(s[byteStart:], needle)
 		if byteIdx < 0 {
 			return object.NilV
@@ -1860,11 +1891,26 @@ func (vm *VM) bootstrap() {
 		return object.IntValue(int64(utf8.RuneCountInString(s[:byteStart+byteIdx])))
 	})
 	vm.cString.define("rindex", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		byteIdx := strings.LastIndex(strOf(self), vm.strPatternCompat(self, args[0]))
-		if byteIdx < 0 {
-			return object.NilV
+		s := strOf(self)
+		needle, re, isRe := vm.strSearchArg(self, args[0])
+		nChars := utf8.RuneCountInString(s)
+		limit := nChars
+		if len(args) > 1 { // optional character offset (negative counts from the end)
+			limit = int(vm.repeatLong(args[1]))
+			if limit < 0 {
+				limit += nChars
+			}
+			if limit < 0 {
+				return object.NilV
+			}
+			if limit > nChars {
+				limit = nChars
+			}
 		}
-		return object.IntValue(int64(utf8.RuneCountInString(strOf(self)[:byteIdx])))
+		if isRe {
+			return vm.strRindexRegexp(re, s, limit)
+		}
+		return strRindexString(s, needle, limit)
 	})
 	vm.cString.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		re, ok := args[0].(*Regexp)
@@ -1884,7 +1930,7 @@ func (vm *VM) bootstrap() {
 		return vm.runMatch(strMatchRegexp(args[0]), strOf(self))
 	})
 	vm.cString.define("scan", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return vm.scan(scanRegexp(args[0]), strOf(self), self, blk)
+		return vm.scan(vm.subRegexp(args[0]), strOf(self), self, blk)
 	})
 	vm.cString.define("sub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.stringSub(strOf(self), args, blk, false)
@@ -1955,31 +2001,34 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("center", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, vm.padString(strOf(self), args, 'c'))
 	})
-	trFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, trString(strOf(self), strArg(args[0]), strArg(args[1]), false))
+	trFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, trString(strOf(self), vm.strTrArg(args[0]), vm.strTrArg(args[1]), false))
 	}
 	vm.cString.define("tr", trFn)
-	trSFn := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, trString(strOf(self), strArg(args[0]), strArg(args[1]), true))
+	trSFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, trString(strOf(self), vm.strTrArg(args[0]), vm.strTrArg(args[1]), true))
 	}
 	vm.cString.define("tr_s", trSFn)
-	vm.cString.define("tr!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), false) })
+	vm.cString.define("tr!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		from, to := vm.strTrArg(args[0]), vm.strTrArg(args[1])
+		return vm.strBang(self, func(s string) string { return trString(s, from, to, false) })
 	})
-	vm.cString.define("tr_s!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return trString(s, strArg(args[0]), strArg(args[1]), true) })
+	vm.cString.define("tr_s!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		from, to := vm.strTrArg(args[0]), vm.strTrArg(args[1])
+		return vm.strBang(self, func(s string) string { return trString(s, from, to, true) })
 	})
-	vm.cString.define("count", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(stringCount(strOf(self), args)))
+	vm.cString.define("count", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.IntValue(int64(stringCount(strOf(self), vm.coerceSetArgs(args))))
 	})
-	vm.cString.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, stringDelete(strOf(self), args))
+	vm.cString.define("delete", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, stringDelete(strOf(self), vm.coerceSetArgs(args)))
 	})
-	vm.cString.define("delete!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return stringDelete(s, args) })
+	vm.cString.define("delete!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		sets := vm.coerceSetArgs(args)
+		return vm.strBang(self, func(s string) string { return stringDelete(s, sets) })
 	})
-	vm.cString.define("squeeze", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, stringSqueeze(strOf(self), args))
+	vm.cString.define("squeeze", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return strEncOf(self, stringSqueeze(strOf(self), vm.coerceSetArgs(args)))
 	})
 	strIndexFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 1 || len(args) > 2 {
@@ -2037,19 +2086,47 @@ func (vm *VM) bootstrap() {
 		}
 		return object.IntValue(int64([]rune(s)[0]))
 	})
-	vm.cString.define("partition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, sep := strOf(self), strArg(args[0])
+	vm.cString.define("partition", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := strOf(self)
+		enc := self.(*object.String).Enc
+		if re, ok := regexpSep(args[0]); ok {
+			md := re.matcher().Match(s)
+			if md == nil {
+				vm.lastMatch = object.NilV
+				return object.NewArray(strEncOf(self, s), strEncOf(self, ""), strEncOf(self, ""))
+			}
+			vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+			b, e := md.Begin(0), md.End(0)
+			return object.NewArray(object.NewStringBytesEnc([]byte(s[:b]), enc),
+				object.NewStringBytesEnc([]byte(s[b:e]), enc), object.NewStringBytesEnc([]byte(s[e:]), enc))
+		}
+		sep, sepObj := vm.strCoerceArg(args[0])
 		if i := strings.Index(s, sep); i >= 0 {
-			return object.NewArray(object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):]))
+			return object.NewArray(object.NewStringBytesEnc([]byte(s[:i]), enc),
+				object.NewStringBytesEnc([]byte(sep), sepObj.Enc), object.NewStringBytesEnc([]byte(s[i+len(sep):]), enc))
 		}
-		return object.NewArray(object.NewString(s), object.NewString(""), object.NewString(""))
+		return object.NewArray(strEncOf(self, s), strEncOf(self, ""), strEncOf(self, ""))
 	})
-	vm.cString.define("rpartition", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		s, sep := strOf(self), strArg(args[0])
-		if i := strings.LastIndex(s, sep); i >= 0 {
-			return object.NewArray(object.NewString(s[:i]), object.NewString(sep), object.NewString(s[i+len(sep):]))
+	vm.cString.define("rpartition", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		s := strOf(self)
+		enc := self.(*object.String).Enc
+		if re, ok := regexpSep(args[0]); ok {
+			m := vm.lastRegexpMatch(re, s)
+			if m == nil {
+				vm.lastMatch = object.NilV
+				return object.NewArray(strEncOf(self, ""), strEncOf(self, ""), strEncOf(self, s))
+			}
+			vm.lastMatch = m
+			b, e := m.byteOff+m.md.Begin(0), m.byteOff+m.md.End(0)
+			return object.NewArray(object.NewStringBytesEnc([]byte(s[:b]), enc),
+				object.NewStringBytesEnc([]byte(s[b:e]), enc), object.NewStringBytesEnc([]byte(s[e:]), enc))
 		}
-		return object.NewArray(object.NewString(""), object.NewString(""), object.NewString(s))
+		sep, sepObj := vm.strCoerceArg(args[0])
+		if i := strings.LastIndex(s, sep); i >= 0 {
+			return object.NewArray(object.NewStringBytesEnc([]byte(s[:i]), enc),
+				object.NewStringBytesEnc([]byte(sep), sepObj.Enc), object.NewStringBytesEnc([]byte(s[i+len(sep):]), enc))
+		}
+		return object.NewArray(strEncOf(self, ""), strEncOf(self, ""), strEncOf(self, s))
 	})
 
 	// String mutation (in-place). Every mutator guards against a frozen receiver.
@@ -2107,10 +2184,11 @@ func (vm *VM) bootstrap() {
 		return strConcatFn(vm, self, args, blk)
 	})
 	vm.cString.define("concat", strConcatFn)
-	vm.cString.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("replace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
-		s.SetBytes([]byte(strArg(args[0])))
+		repl, _ := vm.strCoerceArg(args[0]) // a non-String source converts via #to_str
+		s.SetBytes([]byte(repl))
 		return s
 	})
 	vm.cString.define("prepend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -2177,7 +2255,7 @@ func (vm *VM) bootstrap() {
 		return vm.strBang(self, func(x string) string { return strings.TrimRight(x, wsCutset) })
 	})
 	vm.cString.define("chomp!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return chompSep(s, args) })
+		return vm.strBang(self, func(s string) string { return vm.chompSep(s, args) })
 	})
 	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.strBang(self, chopStr)
@@ -5647,14 +5725,30 @@ func reverseStr(s string) string {
 }
 
 // chompSep implements String#chomp's optional separator argument, matching MRI:
-//   - no argument (or an explicit nil): remove one trailing line ending.
+//   - no argument: use $/ (the record separator, default "\n"); a nil $/ disables
+//     chomping.
+//   - an explicit nil argument: no chomping (returns self unchanged).
+//   - the default separator "\n" (from $/ or given explicitly): smart mode —
+//     remove one trailing \r\n, \n, or \r.
 //   - "" (empty): paragraph mode — remove ALL trailing newlines (\r\n / \n).
-//   - any other string: remove that exact suffix once, if present.
-func chompSep(s string, args []object.Value) string {
-	if len(args) == 0 || args[0] == object.NilV {
-		return chompStr(s)
+//   - any other string (converted with #to_str): remove that exact suffix once.
+func (vm *VM) chompSep(s string, args []object.Value) string {
+	sep := "\n"
+	if len(args) == 0 {
+		// No argument → use $/ (the record separator); a non-String $/ (nil default
+		// included) means the default "\n".
+		if rss, ok := vm.gvar("$/").(*object.String); ok {
+			sep = rss.Str()
+		}
+	} else {
+		if object.IsNil(args[0]) { // chomp(nil): do not chomp at all
+			return s
+		}
+		sep, _ = vm.strCoerceArg(args[0])
 	}
-	sep := strArg(args[0])
+	if sep == "\n" {
+		return chompStr(s) // smart mode: one trailing \r\n, \n, or \r
+	}
 	if sep == "" {
 		// Paragraph mode: strip every trailing \n (treating \r\n as one), so a run
 		// of blank lines at the end collapses away.
@@ -6209,7 +6303,8 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 		if !global {
 			raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
 		}
-		return enumFor(s, "gsub!", args[0])
+		// MRI reports this enumerator's #size as nil (the match count is unknown).
+		return enumForSized(s, "gsub!", func(*VM) object.Value { return object.NilV }, args[0])
 	}
 	res := vm.stringSub(s.Str(), args, blk, global).(*object.String)
 	if res.Str() == s.Str() {
@@ -6231,6 +6326,149 @@ func (vm *VM) strPatternCompat(self, pat object.Value) string {
 		return ps.Str()
 	}
 	return strArg(pat)
+}
+
+// strCoerceArg coerces v to a Go string the way String search/replace methods
+// accept their argument: a String (or a String subclass instance, unwrapped)
+// is taken directly; any other value is converted with #to_str. A value that is
+// neither a String nor defines #to_str raises TypeError with MRI's message. The
+// second result is the String object the bytes came from, for callers that need
+// its encoding.
+func (vm *VM) strCoerceArg(v object.Value) (string, *object.String) {
+	if u, ok := v.(object.KeyUnwrapper); ok { // a String subclass instance
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			v = w
+		}
+	}
+	if s, ok := v.(*object.String); ok {
+		return s.Str(), s
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Str(), s
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	}
+	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+	return "", nil
+}
+
+// casecmpOther coerces the argument of String#casecmp / #casecmp? to a Go
+// string: a String (or a String subclass, unwrapped) or a value with #to_str
+// yields (str, true); a value that cannot become a String, or one whose encoding
+// is incompatible with self, yields ("", false) so the caller returns nil —
+// both methods answer nil in those cases rather than raising.
+func (vm *VM) casecmpOther(self, other object.Value) (string, bool) {
+	if u, ok := other.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			other = w
+		}
+	}
+	os, ok := other.(*object.String)
+	if !ok {
+		if !vm.respondsToDynamic(other, "to_str") {
+			return "", false // no String conversion at all → nil
+		}
+		// A #to_str that returns a non-String raises TypeError (strCoerceArg), as MRI.
+		_, os = vm.strCoerceArg(other)
+	}
+	if object.IsNil(vm.encodingCompatible(self.(*object.String), os)) {
+		return "", false
+	}
+	return os.Str(), true
+}
+
+// strTrArg coerces one character-set argument of tr/tr_s/count/delete/squeeze to
+// a Go string, converting a non-String via #to_str (unwrapping a String
+// subclass), exactly as MRI does.
+func (vm *VM) strTrArg(v object.Value) string {
+	s, _ := vm.strCoerceArg(v)
+	return s
+}
+
+// coerceSetArgs replaces each character-set argument with the String its #to_str
+// yields, so the charset routines that read them see real Strings.
+func (vm *VM) coerceSetArgs(args []object.Value) []object.Value {
+	out := make([]object.Value, len(args))
+	for i, a := range args {
+		out[i] = object.NewString(vm.strTrArg(a))
+	}
+	return out
+}
+
+// regexpSep reports whether v is a Regexp (after unwrapping a subclass wrapper),
+// used by the separator methods that accept either a String or a Regexp.
+func regexpSep(v object.Value) (*Regexp, bool) {
+	if u, ok := v.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			v = w
+		}
+	}
+	r, ok := v.(*Regexp)
+	return r, ok
+}
+
+// asciiDowncase lowercases only the ASCII letters A-Z of s, leaving every other
+// byte (including non-ASCII bytes of a multibyte character) untouched — the fold
+// String#casecmp applies before its byte comparison.
+func asciiDowncase(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
+// strSearchArg coerces the search argument of String#index / String#rindex. A
+// Regexp (or a Regexp reached after unwrapping a subclass) passes through as
+// (_, re, true). Otherwise the value is coerced to a String with #to_str, its
+// encoding negotiated with self (raising Encoding::CompatibilityError when the
+// two are incompatible), and returned as the needle.
+func (vm *VM) strSearchArg(self, pat object.Value) (needle string, re *Regexp, isRe bool) {
+	if u, ok := pat.(object.KeyUnwrapper); ok {
+		if w, wrapped := u.HashUnwrap(); wrapped {
+			pat = w
+		}
+	}
+	if r, ok := pat.(*Regexp); ok {
+		return "", r, true
+	}
+	s, so := vm.strCoerceArg(pat)
+	vm.combinedEncName(self.(*object.String), so) // raises on incompatible encodings
+	return s, nil, false
+}
+
+// runeMatchAt reports whether needle occurs in runes starting exactly at rune
+// index p. The caller guarantees 0 <= p and p+len(needle) <= len(runes).
+func runeMatchAt(runes, needle []rune, p int) bool {
+	for i, r := range needle {
+		if runes[p+i] != r {
+			return false
+		}
+	}
+	return true
+}
+
+// strRindexString returns the largest rune index p <= limit at which needle
+// occurs in s (nil when there is none). limit has been clamped to the rune count
+// by the caller. An empty needle matches at limit itself.
+func strRindexString(s, needle string, limit int) object.Value {
+	runes := []rune(s)
+	needleRunes := []rune(needle)
+	maxStart := limit
+	if len(needleRunes) > 0 && maxStart > len(runes)-len(needleRunes) {
+		maxStart = len(runes) - len(needleRunes)
+	}
+	for p := maxStart; p >= 0; p-- {
+		if runeMatchAt(runes, needleRunes, p) {
+			return object.IntValue(int64(p))
+		}
+	}
+	return object.NilV
 }
 
 func (vm *VM) stringIndexAssign(s *object.String, args []object.Value) object.Value {
@@ -7896,6 +8134,9 @@ func (vm *VM) stringLineSegs(self object.Value, args []object.Value) []object.Va
 		sep := "\n"
 		if len(pos) > 0 {
 			sep = vm.coerceFormatString(pos[0])
+		} else if rs, ok := vm.gvar("$/").(*object.String); ok {
+			// With no separator argument the record separator $/ is used (default "\n").
+			sep = rs.Str()
 		}
 		if sep == "" {
 			segs = splitParagraphs(s, chomp)
