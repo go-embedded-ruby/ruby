@@ -257,8 +257,10 @@ func TestFileModeAccess(t *testing.T) {
 		// Paragraph mode on a real File keeps only the two terminating newlines.
 		{`p(File.open(` + path("pg", "a\n\n\nb") + `, "r") { |f| f.gets("") })`, "\"a\\n\\n\"\n"},
 		// A character device (non-regular) opens with an empty buffer, so a read
-		// sees end-of-file rather than an unbounded stream.
+		// sees end-of-file rather than an unbounded stream; appending to one just
+		// reports the byte count without buffering readable content.
 		{`p(File.open("/dev/null", "r") { |f| f.read })`, "\"\"\n"},
+		{`p(File.open("/dev/null", "a") { |f| f.write("x") })`, "1\n"},
 		// A write-only File with no explicit encoding reports a nil external encoding.
 		{`p(File.open(` + path("we", "") + `, "w") { |f| f.external_encoding })`, "nil\n"},
 	}
