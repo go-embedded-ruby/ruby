@@ -105,6 +105,24 @@ func (vm *VM) formatDispatchStr(o *RObject, name string) string {
 	return r.ToS()
 }
 
+// formatRespondsTo reports whether recv answers name for a sprintf coercion,
+// the way MRI's rb_check_funcall probes it: a real method (including one on a
+// singleton) answers directly, and an object that provides #respond_to? (so
+// also #respond_to_missing? dispatch) is consulted dynamically. Unlike
+// respondsToDynamic it never *sends* #respond_to? to an object that does not
+// have it, so a BasicObject operand (which lacks #respond_to?) is probed
+// without raising NoMethodError — matching MRI, which answers this at the C
+// level for every object.
+func (vm *VM) formatRespondsTo(recv object.Value, name string) bool {
+	if vm.respondsTo(recv, name) {
+		return true
+	}
+	if vm.respondsTo(recv, "respond_to?") {
+		return vm.send(recv, "respond_to?", []object.Value{object.Symbol(name)}, nil).Truthy()
+	}
+	return false
+}
+
 // CoerceChar resolves a user object's %c operand with MRI's to_str-then-to_int
 // protocol (sprintf.c's 'c' case): a String operand is used natively by the
 // engine, so this hook only fires for a non-String, non-Integer value. It
@@ -113,9 +131,9 @@ func (vm *VM) formatDispatchStr(o *RObject, name string) string {
 // otherwise #to_int — an Integer result feeds the code-point rendering, a
 // non-Integer result raises TypeError "can't convert X into Integer". An object
 // answering neither raises TypeError "no implicit conversion of X into Integer",
-// exactly as MRI's NUM2INT does. Method presence is probed through the method
-// table (not #respond_to?), so a BasicObject that defines only #to_str is
-// coerced without touching a method it does not have. A non-RObject (String,
+// exactly as MRI's NUM2INT does. Method presence is probed with
+// formatRespondsTo, so a BasicObject that defines only #to_str is coerced
+// without ever being sent a #respond_to? it does not have. A non-RObject (String,
 // Integer, nil, Array) returns ok=false so the engine keeps its Kind-based path
 // and its own "no implicit conversion" / "invalid character" errors.
 func (fv formatValue) CoerceChar() (format.Value, bool) {
@@ -124,14 +142,14 @@ func (fv formatValue) CoerceChar() (format.Value, bool) {
 		return nil, false
 	}
 	vm := fv.vm
-	if vm.respondsTo(o, "to_str") {
+	if vm.formatRespondsTo(o, "to_str") {
 		r := vm.send(o, "to_str", nil, nil)
 		if s, isStr := r.(*object.String); isStr {
 			return formatValue{v: s, vm: vm}, true
 		}
 		raise("TypeError", "can't convert %s into String", vm.classOf(o).name)
 	}
-	if vm.respondsTo(o, "to_int") {
+	if vm.formatRespondsTo(o, "to_int") {
 		r := vm.send(o, "to_int", nil, nil)
 		if _, isInt := object.BigOf(r); isInt {
 			return formatValue{v: r, vm: vm}, true
@@ -411,7 +429,7 @@ func (vm *VM) vmFormatArgs(b object.Value) []object.Value {
 	case *object.Hash:
 		return []object.Value{b}
 	}
-	if vm.respondsToDynamic(b, "to_ary") {
+	if vm.formatRespondsTo(b, "to_ary") {
 		if r := vm.send(b, "to_ary", nil, nil); !object.IsNil(r) {
 			if arr, ok := r.(*object.Array); ok {
 				return arr.Elems
