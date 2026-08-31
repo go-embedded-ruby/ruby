@@ -2894,7 +2894,14 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("dig", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.digValue(self, args)
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		a := self.(*object.Array)
+		if i, ok := arrayIndex(a, intArg(args[0])); ok {
+			return vm.digRest(a.Elems[i], args[1:])
+		}
+		return object.NilV
 	})
 	vm.cArray.define("uniq", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		return object.NewArrayFromSlice(vm.arrayUniq(self.(*object.Array).Elems, blk))
@@ -7857,45 +7864,38 @@ func (vm *VM) exceptionFullMessage(self object.Value, highlight bool, order stri
 	return b.String()
 }
 
-// digValue implements Hash#dig: walk nested Hashes/Arrays by successive keys,
-// returning nil as soon as a step is missing.
+// digValue implements Hash#dig: fetch the value at the first key and, via
+// digRest, dig into it with the rest — returning nil as soon as a step is
+// missing and raising ArgumentError when no keys are given.
 func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
 	if len(keys) == 0 {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 	}
-	// Extract the value at the first key from the current container.
-	var v object.Value
-	switch c := cur.(type) {
-	case object.Nil:
+	// The only caller is Hash#dig, so cur is always a Hash: fetch at the first key,
+	// then continue with the remaining keys.
+	v, ok := cur.(*object.Hash).Get(keys[0])
+	if !ok {
 		return object.NilV
-	case *object.Hash:
-		vv, ok := c.Get(keys[0])
-		if !ok {
-			return object.NilV
-		}
-		v = vv
-	case *object.Array:
-		if i, ok := arrayIndex(c, intArg(keys[0])); ok {
-			v = c.Elems[i]
-		} else {
-			return object.NilV
-		}
-	default:
-		raise("TypeError", "%s does not have #dig method", vm.classOf(cur).name)
 	}
-	if len(keys) == 1 {
+	return vm.digRest(v, keys[1:])
+}
+
+// digRest continues an Array#dig / Hash#dig walk after the container's value v at
+// the current key has been fetched. With no keys left it is the result; a nil
+// value short-circuits to nil; otherwise MRI digs into v by calling v's own #dig
+// with the remaining keys (so a redefined or mocked #dig is honoured), and a value
+// without #dig is a TypeError rather than a NoMethodError.
+func (vm *VM) digRest(v object.Value, keys []object.Value) object.Value {
+	if len(keys) == 0 {
 		return v
 	}
 	if object.IsNil(v) {
 		return object.NilV
 	}
-	// MRI digs into the extracted value by calling its own #dig with the remaining
-	// keys, so a redefined (or mocked) #dig is honoured; a value without #dig is a
-	// TypeError rather than a NoMethodError.
 	if !vm.respondsToDynamic(v, "dig") {
 		raise("TypeError", "%s does not have #dig method", vm.classOf(v).name)
 	}
-	return vm.send(v, "dig", keys[1:], nil)
+	return vm.send(v, "dig", keys, nil)
 }
 
 // padString implements ljust/rjust/center ('l'/'r'/'c'): pad s with the pad

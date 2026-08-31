@@ -39,6 +39,10 @@ func TestArrayElementSetResiduals(t *testing.T) {
 		{"o=Object.new; def o.to_ary; 42; end; a=[1,2,3]; a[0,1]=o; p(a[0].class)", "Object\n"},
 		// Range self-assignment must not corrupt mid-splice (repl aliases a.Elems).
 		{"a=[1,2,3]; a[0,2]=a; p a", "[1, 2, 3, 3]\n"},
+		// Endless range with begin beyond the end (nil-Hi negative-length clamp).
+		{"a=[1,2,3]; a[5..]=['x']; p a", "[1, 2, 3, nil, nil, \"x\"]\n"},
+		// Inverted range implies a zero-width insert (non-nil-Hi negative-length clamp).
+		{"a=[1,2,3]; a[3..1]=['x']; p a", "[1, 2, 3, \"x\"]\n"},
 	}
 	for _, tc := range cases {
 		if got := eval(t, tc.src); got != tc.want {
@@ -121,6 +125,11 @@ func TestArrayDigResiduals(t *testing.T) {
 		{"p [[1,{a: 2}]].dig(0, 1, :a)", "2\n"},
 		// A redefined/overridden #dig on the extracted value is honoured.
 		{"o=Object.new; def o.dig(*a); a.sum; end; p [[o]].dig(0, 0, 10, 20)", "30\n"},
+		// Hash#dig shares the same continuation (digRest): hit, miss, and nested.
+		{"p({a: 1}.dig(:a))", "1\n"},
+		{"p({a: 1}.dig(:z))", "nil\n"},
+		{"p({a: {b: 2}}.dig(:a, :b))", "2\n"},
+		{"p({a: nil}.dig(:a, :b))", "nil\n"},
 	}
 	for _, tc := range cases {
 		if got := eval(t, tc.src); got != tc.want {
@@ -129,6 +138,9 @@ func TestArrayDigResiduals(t *testing.T) {
 	}
 	if err := runErr(t, "[1,2,3].dig"); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
 		t.Errorf("dig no-args: got %v", err)
+	}
+	if err := runErr(t, "{a: 1}.dig"); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
+		t.Errorf("hash dig no-args: got %v", err)
 	}
 	if err := runErr(t, "[1,2].dig(0, 0)"); err == nil || !strings.Contains(err.Error(), "does not have #dig method") {
 		t.Errorf("dig into Integer: got %v", err)
