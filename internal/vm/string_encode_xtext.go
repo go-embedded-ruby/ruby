@@ -40,6 +40,7 @@ var xtextEncodings = map[string]encoding.Encoding{
 	"Windows-1257": charmap.Windows1257,
 	"Windows-1258": charmap.Windows1258,
 	"Windows-874":  charmap.Windows874,
+	"IBM437":       charmap.CodePage437,
 	"Windows-31J":  japanese.ShiftJIS,
 	"Shift_JIS":    japanese.ShiftJIS,
 	"EUC-JP":       japanese.EUCJP,
@@ -65,25 +66,24 @@ func xtextDecode(src []byte, from string) (string, bool) {
 	return string(out), true
 }
 
-// xtextEncode encodes the UTF-8 string u into encoding `to` using x/text. ok is
-// false when `to` has no x/text codec. A character absent from the target raises
-// Encoding::UndefinedConversionError unless undefReplace substitutes it.
-func xtextEncode(u, to string, undefReplace bool, repl string) ([]byte, bool) {
-	enc, ok := xtextEncodings[to]
-	if !ok {
-		return nil, false
-	}
+// xtextEncode encodes the UTF-8 string u into encoding `to` using x/text. `to` is
+// guaranteed to be one of the x/text codecs — encodeFromUTF8 reaches here only for
+// a target that already passed the converter check. A character absent from the
+// target raises Encoding::UndefinedConversionError unless undefReplace substitutes
+// it.
+func xtextEncode(u, to string, undefReplace bool, repl string) []byte {
+	enc := xtextEncodings[to]
 	if undefReplace {
 		// ReplaceUnsupported substitutes unrepresentable runes with SUB (0x1A) and
 		// never errors; swap SUB for the requested replacement string afterwards.
 		out, _ := encoding.ReplaceUnsupported(enc.NewEncoder()).Bytes([]byte(u))
-		return replaceBytes(out, 0x1a, repl), true
+		return replaceBytes(out, 0x1a, repl)
 	}
 	out, err := enc.NewEncoder().Bytes([]byte(u))
 	if err != nil {
 		raise("Encoding::UndefinedConversionError", "from UTF-8 to %s", to)
 	}
-	return out, true
+	return out
 }
 
 // replaceBytes replaces every occurrence of the single byte b in s with repl.

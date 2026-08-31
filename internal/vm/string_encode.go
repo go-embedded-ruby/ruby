@@ -2,6 +2,7 @@ package vm
 
 import (
 	binpkg "encoding/binary"
+	"fmt"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -100,6 +101,22 @@ func applyXML(s string, o transcodeOpts) string {
 	return s
 }
 
+// xmlEscapeUndef replaces every character of the xml-escaped intermediate that
+// the target `to` cannot represent with an upper-case hexadecimal numeric
+// character reference (&#xHH;) — MRI's xml: :text / :attr rendering of an
+// otherwise-undefined character.
+func xmlEscapeUndef(s, to string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if charEncodableIn(r, to) {
+			b.WriteRune(r)
+			continue
+		}
+		fmt.Fprintf(&b, "&#x%X;", r)
+	}
+	return b.String()
+}
+
 func truthyValue(v object.Value) bool { return v != object.NilV && v != object.Bool(false) }
 
 // charEncodableIn reports whether rune r can be represented in encoding `to`. The
@@ -114,23 +131,30 @@ func charEncodableIn(r rune, to string) bool {
 	case "ISO-8859-1":
 		return r < 0x100
 	}
-	if enc, ok := xtextEncodings[to]; ok {
-		_, err := enc.NewEncoder().Bytes([]byte(string(r)))
-		return err == nil
-	}
-	// An unknown target has no codec; leave the character in place so the encoder
-	// raises Encoding::ConverterNotFoundError rather than the fallback masking it.
-	return true
+	// A supported non-core target is always in the x/text table: stringEncode has
+	// already rejected any target lacking a converter, so charEncodableIn — reached
+	// only from the post-decode passes — never sees an unknown encoding.
+	enc := xtextEncodings[to]
+	_, err := enc.NewEncoder().Bytes([]byte(string(r)))
+	return err == nil
 }
 
 // applyFallback rewrites the UTF-8 intermediate u, replacing each character that
 // cannot be represented in the target `to` with the result of the :fallback
 // option — a Hash, Proc, Method or any object queried with #[], passed the
 // character as a String. A nil result (a Hash miss included) leaves the character
-// in place for the normal undefined-conversion error; a non-String, non-nil
-// result raises TypeError, matching MRI. It is called only when undef: :replace is
-// off (that option pre-empts the fallback entirely).
+// in place for the normal undefined-conversion error; a non-String result is put
+// through #to_str (never #to_s), and anything that yields no String raises
+// TypeError, matching MRI. A substitute that is itself unrepresentable in the
+// target raises ArgumentError "too big fallback string". It is called only when
+// undef: :replace is off (that option pre-empts the fallback entirely).
 func (vm *VM) applyFallback(u, to string, fb object.Value) string {
+	// An object that cannot be queried with #[] is no fallback at all: the
+	// unrepresentable character falls through to the normal undefined-conversion
+	// error (MRI looks for #[], and finding none never substitutes).
+	if !vm.respondsToDynamic(fb, "[]") {
+		return u
+	}
 	var b strings.Builder
 	for _, r := range u {
 		if charEncodableIn(r, to) {
@@ -138,16 +162,30 @@ func (vm *VM) applyFallback(u, to string, fb object.Value) string {
 			continue
 		}
 		res := vm.send(fb, "[]", []object.Value{object.NewString(string(r))}, nil)
-		switch v := res.(type) {
-		case *object.String:
-			b.WriteString(v.Str())
-		default:
-			if res == object.NilV {
-				b.WriteRune(r)
-				continue
+		if res == object.NilV {
+			b.WriteRune(r)
+			continue
+		}
+		s, ok := res.(*object.String)
+		if !ok {
+			// MRI converts a non-String result with #to_str, but never #to_s.
+			if vm.respondsToDynamic(res, "to_str") {
+				if conv, isStr := vm.send(res, "to_str", nil, nil).(*object.String); isStr {
+					s, ok = conv, true
+				}
 			}
+		}
+		if !ok {
 			raise("TypeError", "no implicit conversion of %s into String", vm.classOf(res).name)
 		}
+		// The substitute must itself be representable in the target; MRI rejects one
+		// that is not with ArgumentError "too big fallback string".
+		for _, rr := range s.Str() {
+			if !charEncodableIn(rr, to) {
+				raise("ArgumentError", "too big fallback string")
+			}
+		}
+		b.WriteString(s.Str())
 	}
 	return b.String()
 }
@@ -296,8 +334,9 @@ func (vm *VM) decodeUTF32(src []byte, be bool, o transcodeOpts, repl string) str
 
 // encodeFromUTF8 encodes the UTF-8 intermediate u into encoding `to`. Characters
 // absent from the target raise Encoding::UndefinedConversionError, unless
-// undef:replace substitutes them; an unsupported target raises
-// Encoding::ConverterNotFoundError.
+// undef:replace substitutes them. Its callers (stringEncode's early converter
+// check, and caseMapBytes which first decodes) guarantee `to` has a converter, so
+// a non-core target is one of the x/text codecs.
 func (vm *VM) encodeFromUTF8(u, to string, o transcodeOpts, repl string) []byte {
 	switch to {
 	case "UTF-8":
@@ -311,11 +350,7 @@ func (vm *VM) encodeFromUTF8(u, to string, o transcodeOpts, repl string) []byte 
 	case "UTF-32LE", "UTF-32BE":
 		return encodeUTF32(u, to == "UTF-32BE")
 	}
-	if b, ok := xtextEncode(u, to, o.undefReplace, repl); ok {
-		return b
-	}
-	raise("Encoding::ConverterNotFoundError", "code converter not found (UTF-8 to %s)", to)
-	return nil
+	return xtextEncode(u, to, o.undefReplace, repl)
 }
 
 // encodeByteRange encodes each rune of u to a single byte when it is below limit
@@ -362,6 +397,42 @@ func encodeUTF32(u string, be bool) []byte {
 	return b
 }
 
+// encodeEncName resolves a String#encode positional encoding argument to its
+// name. An Encoding is taken as-is; a String (or a #to_str result) is canonicalised
+// through the registry, but an unregistered name is returned verbatim rather than
+// raising — #encode reports an unusable destination as a missing converter, not as
+// the unknown-encoding ArgumentError that Encoding.find would raise.
+func (vm *VM) encodeEncName(v object.Value) string {
+	resolve := func(s string) string {
+		if e, ok := vm.findEncoding(s); ok {
+			return e.name
+		}
+		return s
+	}
+	switch e := v.(type) {
+	case *encodingObj:
+		return e.name
+	case *object.String:
+		return resolve(e.Str())
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return resolve(s.Str())
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return ""
+}
+
+// encAsciiCompat reports whether the registered encoding `name` is
+// ASCII-compatible; an unregistered name is treated as not compatible.
+func (vm *VM) encAsciiCompat(name string) bool {
+	if e, ok := vm.findEncoding(name); ok {
+		return e.asciiCompat
+	}
+	return false
+}
+
 // stringEncode implements String#encode(dst = default, src = self.encoding, **opts).
 func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String {
 	var positional []object.Value
@@ -376,10 +447,14 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 	to := s.EncName()
 	from := s.EncName()
 	if len(positional) >= 1 {
-		to = vm.encodingArg(positional[0]).name
+		to = vm.encodeEncName(positional[0])
+	} else if vm.defInternalEnc != nil {
+		// With no destination given, #encode transcodes to Encoding.default_internal
+		// when one is set (otherwise it is a copy in the source encoding).
+		to = vm.defInternalEnc.name
 	}
 	if len(positional) >= 2 {
-		from = vm.encodingArg(positional[1]).name
+		from = vm.encodeEncName(positional[1])
 	}
 
 	repl := opts.replace
@@ -387,9 +462,25 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 		repl = defaultReplacement(to)
 	}
 
+	// A destination rbgo cannot transcode into (a dummy encoding like Emacs-Mule,
+	// or an unregistered name) has no converter. MRI still succeeds when the whole
+	// string is 7-bit ASCII and both encodings are ASCII-compatible — the bytes are
+	// identical — and otherwise raises Encoding::ConverterNotFoundError.
+	if !encodingSupported(to) {
+		if asciiOnly(s.Bytes()) && vm.encAsciiCompat(to) && vm.encAsciiCompat(from) {
+			return object.NewStringBytesEnc(append([]byte(nil), s.Bytes()...), to)
+		}
+		raise("Encoding::ConverterNotFoundError", "code converter not found (%s to %s)", from, to)
+	}
+
 	inter := vm.decodeToUTF8(s.Bytes(), from, opts, repl)
 	inter = applyNewline(inter, opts)
 	inter = applyXML(inter, opts)
+	// Under xml:, a character absent from the destination is rendered as a numeric
+	// character reference rather than raising an undefined-conversion error.
+	if opts.xml != "" {
+		inter = xmlEscapeUndef(inter, to)
+	}
 	// The :fallback option supplies substitutes for unrepresentable characters,
 	// but only where undef: :replace does not already handle them — that option
 	// pre-empts the fallback (MRI never consults it once undef substitution is on).
@@ -408,6 +499,9 @@ func (vm *VM) registerStringEncodeMethods() {
 	})
 	vm.cString.define("encode!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
+		// #encode! mutates in place, so a frozen receiver is a FrozenError — even for
+		// a no-op transcoding (utf-8 to utf-8), which MRI still refuses.
+		vm.checkFrozen(s)
 		enc := vm.stringEncode(s, args)
 		s.SetBytes(append([]byte(nil), enc.Bytes()...))
 		s.Enc = enc.Enc

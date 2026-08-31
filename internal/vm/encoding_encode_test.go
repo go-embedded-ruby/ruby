@@ -92,7 +92,7 @@ func TestStringEncode(t *testing.T) {
 		{`"\x61\x00\x00".dup.force_encoding("utf-32le").encode("utf-8")`, "InvalidByteSequenceError"},
 		{`"\x80\x00\x00\x00".dup.force_encoding("utf-32be").encode("utf-8")`, "InvalidByteSequenceError"},
 		{`"\x00\xd8".dup.force_encoding("utf-16le").encode("utf-8")`, "InvalidByteSequenceError"},
-		{`"abc".encode("utf-8", "no-such-enc")`, "unknown encoding name"},
+		{`"abc".encode("utf-8", "no-such-enc")`, "code converter not found (no-such-enc to UTF-8)"},
 		{`"abc".encode("utf-8", xml: :bogus)`, "unexpected value for xml option"},
 	}
 	for _, c := range errCases {
@@ -142,7 +142,7 @@ func TestStringEncodeFallback(t *testing.T) {
 		{`"aéb".encode("US-ASCII", fallback: ->(c){ 42 })`, "no implicit conversion of Integer into String"},
 		// A target rbgo has no codec for is a named residual: the fallback cannot
 		// mask the missing converter (rbgo raises where MRI would transcode natively).
-		{`"aéb".encode("IBM437", fallback: {"é"=>"e"})`, "ConverterNotFoundError"},
+		{`"aéb".encode("Emacs-Mule", fallback: {"é"=>"e"})`, "ConverterNotFoundError"},
 	}
 	for _, c := range errCases {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.substr) {
