@@ -122,8 +122,8 @@ func TestArrayHashSetOpsAndEql(t *testing.T) {
 		{"h1 = {}; h2 = {}; h1[:x] = h1; h2[:x] = h2; p(h1.eql?(h2))", "true\n"},
 
 		// A Set member (built-in value equality) inside a Struct compares by value
-		// through the VM-less Struct#== path.
-		{"require 'set'; S = Struct.new(:a); p(S.new(Set[1]) == S.new(Set[1]))", "true\n"},
+		// through the VM-less Struct#== path — equal, unequal, and size-mismatched.
+		{"require 'set'; S = Struct.new(:a); p [S.new(Set[1]) == S.new(Set[1]), S.new(Set[1]) == S.new(Set[2]), S.new(Set[1]) == S.new(Set[1, 2])]", "[true, false, false]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
