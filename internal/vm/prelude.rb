@@ -173,27 +173,16 @@ module Enumerable
   end
 
   def map
-    return enum_for(:map) unless block_given?
+    return enum_for(:map) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x| r << yield(x) }
     r
   end
 
-  # collect/filter/detect are the classic aliases of map/select/find.
-  def collect(&blk)
-    return enum_for(:collect) unless block_given?
-    map(&blk)
-  end
-
-  def filter(&blk)
-    return enum_for(:filter) unless block_given?
-    select(&blk)
-  end
-
-  def detect(&blk)
-    return enum_for(:detect) unless block_given?
-    find(&blk)
-  end
+  # collect/filter/detect are the classic aliases of map/select/find. They are
+  # genuine aliases (sharing the same method entry) so that, as in MRI,
+  # Enumerable.instance_method(:collect) == Enumerable.instance_method(:map).
+  alias collect map
 
   def count(*args)
     raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
@@ -212,12 +201,12 @@ module Enumerable
   # min_by / max_by / sort_by delegate to Array's native implementations via the
   # pair/element list, so any Enumerable (Hash, Range, Struct, …) gains them.
   def min_by(*args)
-    return enum_for(:min_by, *args) unless block_given?
+    return enum_for(:min_by, *args) { size if respond_to?(:size) } unless block_given?
     to_a.min_by(*args) { |x| yield(x) }
   end
 
   def max_by(*args)
-    return enum_for(:max_by, *args) unless block_given?
+    return enum_for(:max_by, *args) { size if respond_to?(:size) } unless block_given?
     to_a.max_by(*args) { |x| yield(x) }
   end
 
@@ -226,26 +215,27 @@ module Enumerable
   end
 
   def sort_by
-    return enum_for(:sort_by) unless block_given?
+    return enum_for(:sort_by) { size if respond_to?(:size) } unless block_given?
     to_a.sort_by { |x| yield(x) }
   end
 
   def select
-    return enum_for(:select) unless block_given?
+    return enum_for(:select) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x| r << x if yield(x) }
     r
   end
+  alias filter select
 
   def reject
-    return enum_for(:reject) unless block_given?
+    return enum_for(:reject) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x| r << x unless yield(x) }
     r
   end
 
   def find
-    return enum_for(:find) unless block_given?
+    return enum_for(:find) { nil } unless block_given?
     result = nil
     __each_packed { |x|
       if result == nil
@@ -254,6 +244,7 @@ module Enumerable
     }
     result
   end
+  alias detect find
 
   def include?(value)
     found = false
@@ -331,9 +322,7 @@ module Enumerable
     acc
   end
 
-  def inject(*args, &blk)
-    reduce(*args, &blk)
-  end
+  alias inject reduce
 
   # any?/all?/none? follow MRI's three forms: with a pattern argument each element
   # is tested with `pattern === x`; with a block the block result is used; with
@@ -429,7 +418,7 @@ module Enumerable
   end
 
   def each_with_index
-    return enum_for(:each_with_index) unless block_given?
+    return enum_for(:each_with_index) { size if respond_to?(:size) } unless block_given?
     i = 0
     __each_packed { |x|
       yield(x, i)
@@ -449,24 +438,22 @@ module Enumerable
   end
 
   def flat_map
-    return enum_for(:flat_map) unless block_given?
+    return enum_for(:flat_map) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x|
       v = yield(x)
-      if v.is_a?(Array)
-        v.each { |e| r << e }
-      else
+      ary = Array.try_convert(v)
+      if ary.nil?
         r << v
+      else
+        ary.each { |e| r << e }
       end
     }
     r
   end
 
   # collect_concat is the classic alias of flat_map.
-  def collect_concat(&blk)
-    return enum_for(:collect_concat) unless block_given?
-    flat_map(&blk)
-  end
+  alias collect_concat flat_map
 
   # each_entry yields each element as MRI's rb_enum_values_pack packs it: a lone
   # value stays scalar, a multi-value #each yield gathers into an Array, and a
@@ -480,13 +467,13 @@ module Enumerable
   end
 
   def each_with_object(memo)
-    return enum_for(:each_with_object, memo) unless block_given?
+    return enum_for(:each_with_object, memo) { size if respond_to?(:size) } unless block_given?
     __each_packed { |x| yield(x, memo) }
     memo
   end
 
   def filter_map
-    return enum_for(:filter_map) unless block_given?
+    return enum_for(:filter_map) { size if respond_to?(:size) } unless block_given?
     r = []
     __each_packed { |x|
       v = yield(x)
@@ -496,7 +483,7 @@ module Enumerable
   end
 
   def partition
-    return enum_for(:partition) unless block_given?
+    return enum_for(:partition) { size if respond_to?(:size) } unless block_given?
     yes = []
     no = []
     __each_packed { |x|
@@ -510,7 +497,7 @@ module Enumerable
   end
 
   def group_by
-    return enum_for(:group_by) unless block_given?
+    return enum_for(:group_by) { size if respond_to?(:size) } unless block_given?
     h = {}
     __each_packed { |x|
       k = yield(x)
@@ -574,7 +561,7 @@ module Enumerable
   # is an ArgumentError.
   def find_index(*args)
     raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)" if args.length > 1
-    return enum_for(:find_index) if args.empty? && !block_given?
+    return enum_for(:find_index) { nil } if args.empty? && !block_given?
     idx = nil
     i = 0
     __each_packed { |x|
@@ -584,10 +571,7 @@ module Enumerable
     idx
   end
 
-  def find_all(&blk)
-    return enum_for(:find_all) unless block_given?
-    select(&blk)
-  end
+  alias find_all select
 
   # grep selects the elements that pattern === matches (and maps them through the
   # block, if given); grep_v keeps the non-matching ones.
@@ -604,7 +588,7 @@ module Enumerable
   end
 
   def take_while
-    return enum_for(:take_while) unless block_given?
+    return enum_for(:take_while) { nil } unless block_given?
     r = []
     taking = true
     __each_packed { |x|
@@ -615,7 +599,7 @@ module Enumerable
   end
 
   def drop_while
-    return enum_for(:drop_while) unless block_given?
+    return enum_for(:drop_while) { nil } unless block_given?
     r = []
     dropping = true
     __each_packed { |x|
@@ -854,7 +838,7 @@ module Enumerable
   # minmax_by returns [min, max] compared by the block's mapped value (an empty
   # collection gives [nil, nil]); with no block it returns an Enumerator.
   def minmax_by
-    return enum_for(:minmax_by) unless block_given?
+    return enum_for(:minmax_by) { size if respond_to?(:size) } unless block_given?
     [min_by { |x| yield(x) }, max_by { |x| yield(x) }]
   end
 
