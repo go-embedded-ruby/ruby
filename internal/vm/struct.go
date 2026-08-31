@@ -747,29 +747,50 @@ func (vm *VM) structEqual(a, b object.Value, eql bool, seen map[[2]*RObject]bool
 	return true
 }
 
-// structHash combines the struct class identity with each member's hash. A cycle
-// guard contributes a fixed sentinel for a re-entered struct so a self- or
-// mutually-recursive struct hashes without looping.
-func (vm *VM) structHash(o *RObject, seen map[*RObject]bool) int64 {
-	if seen[o] {
-		return 0x27d4eb2f
+// structHash combines the struct class identity with each member's hash. When the
+// member graph contains a cycle (a self- or mutually-recursive struct) the whole
+// hash collapses to a class-only value: MRI's rb_struct_hash runs under
+// rb_exec_recursive_outer, which on detecting recursion unwinds to the OUTERMOST
+// struct and returns a hash computed from its class alone (members skipped). That
+// makes every recursive struct of a class hash alike — necessary because such
+// structs are #eql? by short-circuiting on the shared cyclic member, and #eql?
+// objects must hash equal (see core/struct/hash_spec "recursive structs").
+func (vm *VM) structHash(o *RObject, _ map[*RObject]bool) int64 {
+	if h, recursed := vm.structHashWalk(o, map[*RObject]bool{}); !recursed {
+		return h
 	}
-	if seen == nil {
-		seen = map[*RObject]bool{}
+	return structClassOnlyHash(o.class)
+}
+
+// structHashWalk folds the class identity with each member's hash, tracking the
+// set of structs on the current path so a back-edge to one of them is reported as
+// recursion (recursed=true) rather than followed into a loop. The fold value is
+// meaningful only when recursed is false.
+func (vm *VM) structHashWalk(o *RObject, path map[*RObject]bool) (int64, bool) {
+	if path[o] {
+		return 0, true
 	}
-	seen[o] = true
-	defer delete(seen, o)
-	h := int64(reflect.ValueOf(o.class).Pointer())
+	path[o] = true
+	defer delete(path, o)
+	h := structClassOnlyHash(o.class)
 	for _, v := range o.structVals {
-		var hv int64
 		if so, ok := v.(*RObject); ok && hasMemberDef(so.class) {
-			hv = vm.structHash(so, seen)
+			hv, recursed := vm.structHashWalk(so, path)
+			if recursed {
+				return 0, true
+			}
+			h = h*31 + hv
 		} else {
-			hv = vm.hashValue(v)
+			h = h*31 + vm.hashValue(v)
 		}
-		h = h*31 + hv
 	}
-	return h
+	return h, false
+}
+
+// structClassOnlyHash is the hash contributed by a Struct/Data class's identity —
+// the base of the member fold, and also the whole hash of a recursive struct.
+func structClassOnlyHash(c *RClass) int64 {
+	return int64(reflect.ValueOf(c).Pointer())
 }
 
 // validConstName reports whether s is a valid (ASCII) Ruby constant name: an

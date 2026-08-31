@@ -8,16 +8,13 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// anonClassRepr renders an anonymous class/module the way MRI does inside a
-// recursive Data #inspect sentinel — "#<Class:0x…>" / "#<Module:0x…>" with the
-// class's identity address — so a self-referential anonymous Data prints
-// "#<data #<Class:0x…>:...>" (matching MRI's rb_class_name fallback).
+// anonClassRepr renders an anonymous Data subclass the way MRI does inside a
+// recursive Data #inspect sentinel — "#<Class:0x…>" with the class's identity
+// address — so a self-referential anonymous Data prints "#<data #<Class:0x…>:...>"
+// (matching MRI's rb_class_name fallback). It is only ever called for a Data
+// class, which is always a Class (never a module).
 func anonClassRepr(c *RClass) string {
-	kind := "Class"
-	if c.isModule {
-		kind = "Module"
-	}
-	return fmt.Sprintf("#<%s:0x%016x>", kind, reflect.ValueOf(c).Pointer())
+	return fmt.Sprintf("#<Class:0x%016x>", reflect.ValueOf(c).Pointer())
 }
 
 // dataDef records the member layout of a Data subclass minted by Data.define.
