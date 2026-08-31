@@ -54,6 +54,11 @@ func (vm *VM) registerLazy() {
 	vm.cRange.define("lazy", makeLazy)
 	vm.cHash.define("lazy", makeLazy)
 	vm.cEnumerator.define("lazy", makeLazy)
+	// Every Enumerable (a class that mixes in Enumerable and defines #each) gets
+	// #lazy too; the source is driven through #each (see lazySource's default).
+	if en, ok := vm.consts["Enumerable"].(*RClass); ok {
+		en.define("lazy", makeLazy)
+	}
 
 	d := func(name string, fn NativeFn) { vm.cLazy.define(name, fn) }
 	chain := func(kind string) NativeFn {
