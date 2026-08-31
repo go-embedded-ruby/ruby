@@ -274,10 +274,11 @@ func (vm *VM) bootstrap() {
 		// value types by value (Go interface equality gives exactly this).
 		return object.Bool(self == args[0])
 	})
-	vm.cObject.define("eql?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		// Like ==, but with no numeric coercion (see valueEql); the value types
-		// reach this through Object since none override it.
-		return object.Bool(valueEql(self, args[0]))
+	vm.cObject.define("eql?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Like ==, but with no numeric coercion (see valueEql); Array/Hash members
+		// have their own #eql? dispatched. The value types reach this through Object
+		// since none override it.
+		return object.Bool(vm.rubyEql(self, args[0]))
 	})
 	objectIDFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.objectID(self)
@@ -1075,8 +1076,8 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("yield_self", thenFn)
 	// Default equality: object identity for instances, structural for value
 	// types (Comparable#== and user-defined == override this via dispatch).
-	vm.cBasicObject.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(rubyEqual(self, args[0]))
+	vm.cBasicObject.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(vm.rubyEqual(self, args[0]))
 	})
 	// Default <=>: 0 when the two are the same object, nil otherwise — the MRI
 	// Object#<=>. It compares by identity (like #equal?) rather than sending #==,
@@ -2502,7 +2503,7 @@ func (vm *VM) bootstrap() {
 		found := false
 		var out []object.Value
 		for _, e := range a.Elems {
-			if valueEqual(e, args[0]) {
+			if vm.vmValueEqual(e, args[0]) {
 				found = true
 			} else {
 				out = append(out, e)
@@ -2583,9 +2584,9 @@ func (vm *VM) bootstrap() {
 		}
 		return a
 	})
-	arrayInclude := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	arrayInclude := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		for _, e := range self.(*object.Array).Elems {
-			if valueEqual(e, args[0]) {
+			if vm.vmValueEqual(e, args[0]) {
 				return object.True
 			}
 		}
@@ -2860,23 +2861,23 @@ func (vm *VM) bootstrap() {
 	})
 	// Set intersection (&) and union (|): both deduplicate, keeping first-seen
 	// order, matching Ruby.
-	vm.cArray.define("&", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("&", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		b := arrArg(args[0])
 		var out []object.Value
 		for _, e := range a.Elems {
-			if arrayIncludes(b.Elems, e) && !arrayIncludes(out, e) {
+			if vm.arrayIncludesEql(b.Elems, e) && !vm.arrayIncludesEql(out, e) {
 				out = append(out, e)
 			}
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("|", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("|", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		b := arrArg(args[0])
 		var out []object.Value
 		for _, e := range append(append([]object.Value{}, a.Elems...), b.Elems...) {
-			if !arrayIncludes(out, e) {
+			if !vm.arrayIncludesEql(out, e) {
 				out = append(out, e)
 			}
 		}
@@ -3345,9 +3346,9 @@ func (vm *VM) bootstrap() {
 		}
 		return vm.arrayJoin(a, sep, map[*object.Array]bool{})
 	})
-	vm.cArray.define("index", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("index", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		for i, e := range self.(*object.Array).Elems {
-			if valueEqual(e, args[0]) {
+			if vm.vmValueEqual(e, args[0]) {
 				return object.IntValue(int64(i))
 			}
 		}
@@ -3365,7 +3366,7 @@ func (vm *VM) bootstrap() {
 		for i := len(a.Elems) - 1; i >= 0; i-- {
 			var match bool
 			if len(args) > 0 {
-				match = valueEqual(a.Elems[i], args[0])
+				match = vm.vmValueEqual(a.Elems[i], args[0])
 			} else {
 				match = vm.callBlock(blk, []object.Value{a.Elems[i]}).Truthy()
 			}
@@ -3418,7 +3419,18 @@ func (vm *VM) bootstrap() {
 		sa := self.(*object.Array)
 		b, ok := args[0].(*object.Array)
 		if !ok {
-			return object.NilV
+			// An Array subclass is already array-like (unwrap it, never calling
+			// #to_ary); any other object is converted via #to_ary, and a value that
+			// does not convert makes the arrays incomparable (nil).
+			if o, isObj := args[0].(*RObject); isObj {
+				b, ok = o.builtin.(*object.Array)
+			}
+			if !ok && vm.respondsToDynamic(args[0], "to_ary") {
+				b, ok = asArray(vm.send(args[0], "to_ary", nil, nil))
+			}
+			if !ok {
+				return object.NilV
+			}
 		}
 		// Comparing a pair already being compared means the two descend into
 		// each other, and MRI calls that equal at this point rather than going
@@ -3442,11 +3454,11 @@ func (vm *VM) bootstrap() {
 			n = len(be)
 		}
 		for i := 0; i < n; i++ {
-			c, ok := vm.send(a[i], "<=>", []object.Value{be[i]}, nil).(object.Integer)
-			if !ok {
-				return object.NilV // an incomparable pair makes the arrays incomparable
-			}
-			if c != 0 {
+			// MRI returns the element's raw <=> result the moment it is not the
+			// Integer 0 — so a -1/+1, a nil (incomparable), or any other object all
+			// propagate unchanged; only an exact 0 continues to the next pair.
+			c := vm.send(a[i], "<=>", []object.Value{be[i]}, nil)
+			if iv, isInt := c.(object.Integer); !isInt || iv != 0 {
 				return c
 			}
 		}
@@ -4070,11 +4082,11 @@ func (vm *VM) bootstrap() {
 		h.Rehash()
 		return h
 	})
-	hashHasValue := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	hashHasValue := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
-			if valueEqual(v, args[0]) {
+			if vm.vmValueEqual(v, args[0]) {
 				return object.True
 			}
 		}
@@ -4083,11 +4095,11 @@ func (vm *VM) bootstrap() {
 	vm.cHash.define("has_value?", hashHasValue)
 	vm.cHash.define("value?", hashHasValue)
 	// Hash#key(value): the first key whose value equals value (by ==), else nil.
-	vm.cHash.define("key", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.define("key", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
-			if valueEqual(v, args[0]) {
+			if vm.vmValueEqual(v, args[0]) {
 				return k
 			}
 		}
@@ -4183,21 +4195,21 @@ func (vm *VM) bootstrap() {
 	// assoc/rassoc scan the pairs in insertion order and return the first
 	// [key, value] whose key (assoc) or value (rassoc) is Ruby-== to the
 	// argument, or nil when none matches. They never consult the default.
-	vm.cHash.define("assoc", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.define("assoc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
-			if valueEqual(k, args[0]) {
+			if vm.vmValueEqual(k, args[0]) {
 				v, _ := h.Get(k)
 				return hashPair(k, v)
 			}
 		}
 		return object.NilV
 	})
-	vm.cHash.define("rassoc", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.define("rassoc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
-			if valueEqual(v, args[0]) {
+			if vm.vmValueEqual(v, args[0]) {
 				return hashPair(k, v)
 			}
 		}
@@ -4209,23 +4221,23 @@ func (vm *VM) bootstrap() {
 	// one without #to_hash raises TypeError "no implicit conversion of X into
 	// Hash" (matching MRI's rb_check_hash_type + Check_Type).
 	vm.cHash.define("<=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(hashSubset(self.(*object.Hash), vm.toHash(args[0])))
+		return object.Bool(vm.hashSubset(self.(*object.Hash), vm.toHash(args[0])))
 	})
 	// Hash#< is proper-subset: <= and strictly smaller (fewer pairs). Because a
 	// subset with equal size is an equal hash, the size test alone distinguishes
 	// proper from improper containment.
 	vm.cHash.define("<", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h, other := self.(*object.Hash), vm.toHash(args[0])
-		return object.Bool(h.Len() < other.Len() && hashSubset(h, other))
+		return object.Bool(h.Len() < other.Len() && vm.hashSubset(h, other))
 	})
 	// Hash#>= is superset-by-pair: every pair of other is present in the receiver.
 	vm.cHash.define(">=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(hashSubset(vm.toHash(args[0]), self.(*object.Hash)))
+		return object.Bool(vm.hashSubset(vm.toHash(args[0]), self.(*object.Hash)))
 	})
 	// Hash#> is proper-superset: >= and strictly larger.
 	vm.cHash.define(">", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h, other := self.(*object.Hash), vm.toHash(args[0])
-		return object.Bool(h.Len() > other.Len() && hashSubset(other, h))
+		return object.Bool(h.Len() > other.Len() && vm.hashSubset(other, h))
 	})
 	// Hash#to_proc returns a unary lambda that looks a key up in the hash:
 	// pr.call(k) == h[k]. Lookup goes through #[], so a default value or
@@ -4473,7 +4485,7 @@ func (vm *VM) bootstrap() {
 				if vm.callBlock(blk, []object.Value{e}).Truthy() {
 					n++
 				}
-			} else if valueEqual(e, args[0]) {
+			} else if vm.vmValueEqual(e, args[0]) {
 				n++
 			}
 		}
@@ -6556,14 +6568,14 @@ func hashPair(k, v object.Value) *object.Array {
 // hashSubset reports whether every (key, value) pair of sub is present in sup,
 // with values compared by valueEqual (MRI's rb_equal). It backs Hash#<= / #< /
 // #>= / #>: a hash is a subset of another when all its pairs are contained.
-func hashSubset(sub, sup *object.Hash) bool {
+func (vm *VM) hashSubset(sub, sup *object.Hash) bool {
 	if sub.Len() > sup.Len() {
 		return false
 	}
 	for _, k := range sub.Keys {
 		sv, _ := sub.Get(k)
 		pv, present := sup.Get(k)
-		if !present || !valueEqual(sv, pv) {
+		if !present || !vm.vmValueEqual(sv, pv) {
 			return false
 		}
 	}
@@ -8338,12 +8350,23 @@ func (vm *VM) integerShiftBig(a, m *big.Int) object.Value {
 
 // rubyEqual is the default Object#== : pointer identity for instances, and
 // structural equality for the immutable value types.
-func rubyEqual(a, b object.Value) bool {
+func (vm *VM) rubyEqual(a, b object.Value) bool {
 	if ao, ok := a.(*RObject); ok {
+		// An instance of a built-in subclass (Array/Hash/String/…) that adds no
+		// #== of its own inherits the built-in's value equality, so compare as the
+		// wrapped value — e.g. MyArray[1, 2, 3] == [1, 2, 3].
+		if !object.IsNil(ao.builtin) {
+			return vm.vmValueEqual(ao.builtin, b)
+		}
+		// This is BasicObject#== itself (the default), reached only when the
+		// receiver defined no closer #==, so a plain user object compares by
+		// identity — dispatching #== here would recurse back into this method.
 		bo, ok := b.(*RObject)
 		return ok && ao == bo
 	}
-	return valueEqual(a, b)
+	// A built-in container receiver compares structurally, with each element's own
+	// Ruby #== dispatched (MRI's rb_equal per element).
+	return vm.vmValueEqual(a, b)
 }
 
 // spaceshipNumeric implements Integer#<=> and Float#<=>: -1/0/1 across the
