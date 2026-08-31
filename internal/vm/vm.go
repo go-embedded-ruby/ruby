@@ -993,6 +993,19 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 	for _, kn := range iseq.KwNames {
 		valid[object.Symbol(kn)] = true
 	}
+	// MRI reports a missing REQUIRED keyword before an unknown one: m(b: 1) on
+	// def m(a:) raises "missing keyword: :a", not "unknown keyword: :b".
+	var missing []string
+	for i, kn := range iseq.KwNames {
+		if iseq.KwRequired[i] {
+			if _, ok := kwargs.Get(object.SymVal(kn)); !ok {
+				missing = append(missing, ":"+kn)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		raise("ArgumentError", "missing keyword%s: %s", plural(len(missing)), strings.Join(missing, ", "))
+	}
 	// With a **rest param, surplus keywords are captured rather than rejected.
 	if iseq.KwRestSlot < 0 {
 		var unknown []string
@@ -1005,17 +1018,6 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 		if len(unknown) > 0 {
 			raise("ArgumentError", "unknown keyword%s: %s", plural(len(unknown)), strings.Join(unknown, ", "))
 		}
-	}
-	var missing []string
-	for i, kn := range iseq.KwNames {
-		if iseq.KwRequired[i] {
-			if _, ok := kwargs.Get(object.SymVal(kn)); !ok {
-				missing = append(missing, ":"+kn)
-			}
-		}
-	}
-	if len(missing) > 0 {
-		raise("ArgumentError", "missing keyword%s: %s", plural(len(missing)), strings.Join(missing, ", "))
 	}
 	return kwargs
 }
@@ -1045,6 +1047,46 @@ type frameMethod struct {
 // `&b`, while `yield` inside the proc still reaches the block captured where the
 // proc was defined (block). Passing blockArg == block preserves the old
 // behaviour everywhere it is not deliberately split.
+// zsuperArgs reconstructs the argument list an implicit `super` (bare `super`,
+// no parentheses) forwards to the parent method. MRI passes the CURRENT values
+// of the calling method's formal parameters — reading the local slots — rather
+// than the arguments the method was originally called with, so any reassignment
+// in the body, a filled-in optional or keyword default, and splat/post
+// rebinding are all reflected. Positional params contribute their slot value
+// (the splat slice is spliced in place); keyword params and any **kwrest are
+// gathered into a trailing hash, appended only when non-empty.
+func zsuperArgs(iseq *bytecode.ISeq, env *Env) []object.Value {
+	out := make([]object.Value, 0, len(iseq.Params)+1)
+	for i := 0; i < len(iseq.Params); i++ {
+		if i == iseq.SplatIndex {
+			if arr, ok := env.slots[i].(*object.Array); ok {
+				out = append(out, arr.Elems...)
+			}
+			continue
+		}
+		out = append(out, env.slots[i])
+	}
+	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
+		h := object.NewHash()
+		base := len(iseq.Params)
+		for i, kn := range iseq.KwNames {
+			h.Set(object.SymVal(kn), env.slots[base+i])
+		}
+		if iseq.KwRestSlot >= 0 {
+			if kr, ok := env.slots[iseq.KwRestSlot].(*object.Hash); ok {
+				for _, k := range kr.Keys {
+					v, _ := kr.Get(k)
+					h.Set(k, v)
+				}
+			}
+		}
+		if h.Len() > 0 {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock, blockArg *Proc, methodLexScope *RClass) (execResult object.Value) {
 	// Determine this frame's __method__/__callee__ pair before any nested call can
 	// disturb pendingMethodCtx: a block inherits the pair captured on the block
@@ -1065,15 +1107,18 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
 		kwargs = vm.bindKeywords(iseq, &args)
 	}
-	if len(args) < iseq.NumRequired || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
+	// minReq is the true minimum arity: the leading required params plus any
+	// required "post" params after a *splat (def m(a,*b,c) requires 2, not 1).
+	minReq := iseqRequiredPositional(iseq)
+	if len(args) < minReq || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
 		var expected string
 		switch {
 		case iseq.SplatIndex >= 0:
-			expected = fmt.Sprintf("%d+", iseq.NumRequired)
-		case iseq.NumRequired == len(iseq.Params):
-			expected = fmt.Sprintf("%d", iseq.NumRequired)
+			expected = fmt.Sprintf("%d+", minReq)
+		case minReq == len(iseq.Params):
+			expected = fmt.Sprintf("%d", minReq)
 		default:
-			expected = fmt.Sprintf("%d..%d", iseq.NumRequired, len(iseq.Params))
+			expected = fmt.Sprintf("%d..%d", minReq, len(iseq.Params))
 		}
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %s)", len(args), expected)
 	}
@@ -1089,16 +1134,29 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	}
 	if iseq.SplatIndex >= 0 {
 		si := iseq.SplatIndex
-		nbind := len(args)
-		if nbind > si {
-			nbind = si
+		// Params after the splat ("post" params, e.g. c in def m(a,*b,c)) are
+		// always required and bind from the TAIL of the argument list; the splat
+		// captures whatever is left in the middle.
+		npost := len(iseq.Params) - si - 1
+		avail := len(args) - npost // args available to the leading params + splat
+		if avail < 0 {
+			avail = 0
+		}
+		nbind := si
+		if nbind > avail {
+			nbind = avail
 		}
 		copy(env.slots[:nbind], args[:nbind])
 		rest := []object.Value{}
-		if len(args) > si {
-			rest = append(rest, args[si:]...)
+		if avail > si {
+			rest = append(rest, args[si:avail]...)
 		}
 		env.slots[si] = object.NewArrayFromSlice(rest)
+		for j := 0; j < npost; j++ {
+			if srcIdx := len(args) - npost + j; srcIdx >= 0 && srcIdx < len(args) {
+				env.slots[si+1+j] = args[srcIdx]
+			}
+		}
 	} else {
 		copy(env.slots, args)
 	}
@@ -1734,13 +1792,21 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						// MRI forbids implicit-argument super from a define_method body.
 						raise("RuntimeError", "implicit argument passing of super from method defined by define_method() is not supported. Specify all arguments explicitly.")
 					}
-					superArgs = homeSuperArgs
-					// Keyword arguments were peeled off args into env.kwargs on entry;
-					// re-attach them as the trailing hash so bare super forwards them too.
-					// (Only the method's own frame carries kwargs; a block forwards the
-					// home method's positional args as captured.)
-					if selfBlock == nil && env.kwargs != nil && len(env.kwargs.Keys) > 0 {
-						superArgs = append(append([]object.Value(nil), homeSuperArgs...), env.kwargs)
+					if selfBlock == nil {
+						// zsuper: MRI forwards the CURRENT values of the method's formal
+						// parameters, not the original argument list. This reflects any
+						// reassignment in the body, filled-in optional/keyword defaults,
+						// and splat/post rebinding.
+						superArgs = zsuperArgs(iseq, env)
+					} else {
+						superArgs = homeSuperArgs
+						// Keyword arguments were peeled off args into env.kwargs on entry;
+						// re-attach them as the trailing hash so bare super forwards them
+						// too. (A block forwards the home method's positional args as
+						// captured.)
+						if env.kwargs != nil && len(env.kwargs.Keys) > 0 {
+							superArgs = append(append([]object.Value(nil), homeSuperArgs...), env.kwargs)
+						}
 					}
 				} else {
 					superArgs = make([]object.Value, in.A)
