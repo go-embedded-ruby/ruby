@@ -36,6 +36,13 @@ func TestRegexpQuoteEscapeResiduals(t *testing.T) {
 		{`print Regexp.escape("\t\n\r\f\v")`, "\\t\\n\\r\\f\\v"},
 		{`print Regexp.quote(:symbol)`, "symbol"},
 		{`p Regexp.method(:escape) == Regexp.method(:quote)`, "true\n"},
+		// #to_str coercion of a non-String/Symbol operand, and its failure modes.
+		{`o = Object.new; def o.to_str; "a.b"; end; print Regexp.quote(o)`, "a\\.b"},
+		{`begin; Regexp.quote(Object.new); rescue => e; p e.class; end`, "TypeError\n"},
+		{`o = Object.new; def o.to_str; []; end; begin; Regexp.quote(o); rescue => e; p e.class; end`, "TypeError\n"},
+		// A source containing a backslash exercises the escape branch of the '/'
+		// escaping without double-escaping the already-escaped slash.
+		{`p(/\d\/x/)`, "/\\d\\/x/\n"},
 	})
 }
 
