@@ -126,17 +126,97 @@ func (r *Regexp) isFixedEncoding() bool {
 func (r *Regexp) ToS() string {
 	// Ruby's Regexp#to_s renders the (?on-off:src) form, where the on-set is the
 	// present flags and the off-set is the absent ones, always in m, i, x order.
-	on := orderFlags(r.flags)
+	// When the whole pattern is a single option/non-capturing group spanning the
+	// entire source, MRI hoists that group's options into the outer form and drops
+	// the wrapping group, e.g. /(?i:.)/ => "(?i-mx:.)" and /(?:x)/ => "(?-mix:x)".
+	base := r.flags
+	src := r.source
+	if gon, goff, body, ok := singleWholeGroup(src); ok {
+		src = body
+		base = mergeInlineFlags(r.flags, gon, goff)
+	}
+	on := orderFlags(base)
 	off := ""
 	for _, f := range "mix" {
-		if !strings.ContainsRune(r.flags, f) {
+		if !strings.ContainsRune(base, f) {
 			off += string(f)
 		}
 	}
 	if off != "" {
 		off = "-" + off
 	}
-	return "(?" + on + off + ":" + escapeForwardSlashes(r.source) + ")"
+	return "(?" + on + off + ":" + escapeForwardSlashes(src) + ")"
+}
+
+// singleWholeGroup reports whether src is exactly one option or non-capturing
+// group — `(?flags:…)`, `(?flags-flags:…)` or `(?:…)` — whose closing paren is
+// the last character, returning the group's on/off inline flag letters and its
+// body. Named groups, look-around and capturing groups do not qualify (MRI keeps
+// those wrapped), and a group that closes before the end (so more of the pattern
+// follows) does not span the whole source.
+func singleWholeGroup(src string) (on, off, body string, ok bool) {
+	if !strings.HasPrefix(src, "(?") {
+		return "", "", "", false
+	}
+	i := 2
+	for i < len(src) && (src[i] == 'm' || src[i] == 'i' || src[i] == 'x') {
+		on += string(src[i])
+		i++
+	}
+	if i < len(src) && src[i] == '-' {
+		i++
+		for i < len(src) && (src[i] == 'm' || src[i] == 'i' || src[i] == 'x') {
+			off += string(src[i])
+			i++
+		}
+	}
+	if i >= len(src) || src[i] != ':' {
+		return "", "", "", false
+	}
+	bodyStart := i + 1
+	depth, inClass := 1, false
+	for j := bodyStart; j < len(src); j++ {
+		switch src[j] {
+		case '\\':
+			j++ // skip the escaped byte
+		case '[':
+			if !inClass {
+				inClass = true
+			}
+		case ']':
+			inClass = false
+		case '(':
+			if !inClass {
+				depth++
+			}
+		case ')':
+			if !inClass {
+				depth--
+				if depth == 0 {
+					// Spans the whole source only if this is the final byte.
+					if j == len(src)-1 {
+						return on, off, src[bodyStart:j], true
+					}
+					return "", "", "", false
+				}
+			}
+		}
+	}
+	return "", "", "", false
+}
+
+// mergeInlineFlags folds a hoisted group's inline on/off flag letters into the
+// Regexp's own flags: a flag is on when the outer flags or the group's on-set
+// enable it and the group's off-set does not disable it.
+func mergeInlineFlags(outer, on, off string) string {
+	out := ""
+	for _, f := range "mix" {
+		enabled := strings.ContainsRune(outer, f) || strings.ContainsRune(on, f)
+		if enabled && !strings.ContainsRune(off, f) {
+			out += string(f)
+		}
+	}
+	return out
 }
 
 // Inspect renders /source/flags, escaping unescaped '/' in the source.

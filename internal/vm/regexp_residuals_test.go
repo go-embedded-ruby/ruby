@@ -39,6 +39,26 @@ func TestRegexpQuoteEscapeResiduals(t *testing.T) {
 	})
 }
 
+// TestRegexpToSCollapse covers Regexp#to_s hoisting a single whole-pattern option
+// or non-capturing group into the outer (?on-off:body) form, and leaving patterns
+// that are not one spanning group wrapped.
+func TestRegexpToSCollapse(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`puts(/(?i:.)/.to_s)`, "(?i-mx:.)\n"},
+		{`puts(/(?i:nothing)/.to_s)`, "(?i-mx:nothing)\n"},
+		{`puts(/(?:x)/.to_s)`, "(?-mix:x)\n"},
+		{`puts(/(?i-m:a)/.to_s)`, "(?i-mx:a)\n"},
+		{`puts(/(?mmmmix-miiiix:)/.to_s)`, "(?-mix:)\n"},
+		{`puts(/(?i:a)/i.to_s)`, "(?i-mx:a)\n"},
+		// Not one spanning group: the wrapper stays.
+		{`puts(/(?i:a)b/.to_s)`, "(?-mix:(?i:a)b)\n"},
+		{`puts(/(?i:a)(?m:b)/.to_s)`, "(?-mix:(?i:a)(?m:b))\n"},
+		{`puts(/(?=5)/.to_s)`, "(?-mix:(?=5))\n"},
+		// A group closing inside a character class does not end the span early.
+		{`puts(/(?:[)])/.to_s)`, "(?-mix:[)])\n"},
+	})
+}
+
 // TestRegexpInspectSlash covers the forward-slash escaping of #inspect and #to_s,
 // without double-escaping an already-escaped slash.
 func TestRegexpInspectSlash(t *testing.T) {
