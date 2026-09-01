@@ -61,11 +61,13 @@ func TestHashMethodResiduals(t *testing.T) {
 		{"enum_size_tk", `puts({a: 1, b: 2}.transform_keys.size)`, "2\n"},
 
 		// --- inspect / to_s ---
-		{"inspect_basic", `p({a: 1, "b" => 2})`, "{a: 1, \"b\" => 2}\n"},
-		{"inspect_empty", `p({})`, "{}\n"},
-		{"inspect_labels", `p({a: 1, a!: 2, a?: 3})`, "{a: 1, a!: 2, a?: 3}\n"},
-		{"inspect_quoted_labels", `p({:"<=>" => 1, :"@a" => 2, :"[]=" => 3, :"" => 4})`, "{\"<=>\": 1, \"@a\": 2, \"[]=\": 3, \"\": 4}\n"},
-		{"inspect_recursive", `h = {}; h[0] = h; p h`, "{0 => {...}}\n"},
+		// These call #inspect explicitly (rather than via p) so they route through
+		// Hash#inspect, exercising every symbol-label branch of symIsPlainLabel.
+		{"inspect_basic", `puts({a: 1, "b" => 2}.inspect)`, "{a: 1, \"b\" => 2}\n"},
+		{"inspect_empty", `puts({}.inspect)`, "{}\n"},
+		{"inspect_labels", `puts({a: 1, a!: 2, a?: 3, :"a=" => 4}.inspect)`, "{a: 1, a!: 2, a?: 3, \"a=\": 4}\n"},
+		{"inspect_quoted_labels", `puts({:"<=>" => 1, :"@a" => 2, :"[]=" => 3, :"" => 4}.inspect)`, "{\"<=>\": 1, \"@a\": 2, \"[]=\": 3, \"\": 4}\n"},
+		{"inspect_recursive", `h = {}; h[0] = h; puts h.inspect`, "{0 => {...}}\n"},
 		{"inspect_custom", `class M; def inspect; "MI"; end; end; puts({a: M.new}.inspect)`, "{a: MI}\n"},
 		{"to_s_alias_func", `puts({a: 1}.to_s)`, "{a: 1}\n"},
 
