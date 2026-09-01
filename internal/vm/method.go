@@ -48,8 +48,12 @@ func (vm *VM) registerMethod() {
 		return vm.invoke(b.m, b.recv, args, blk)
 	}
 	vm.cMethod.define("call", call)
-	vm.cMethod.define("[]", call)
-	vm.cMethod.define("===", call)
+	// Method#[] and Method#=== are genuine built-in aliases of Method#call: MRI
+	// exposes them as the same method definition, so #instance_method(:[]) equals
+	// #instance_method(:call). aliasBuiltin shares the one *Method record (a fresh
+	// define would compare unequal even with an identical body).
+	aliasBuiltin(vm.cMethod, "[]", "call")
+	aliasBuiltin(vm.cMethod, "===", "call")
 	vm.cMethod.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(self.(*BoundMethod).name)
 	})
