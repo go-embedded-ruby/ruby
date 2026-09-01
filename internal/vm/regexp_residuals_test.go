@@ -96,6 +96,24 @@ func TestRegexpInitialize(t *testing.T) {
 	})
 }
 
+// TestRegexpNewToStr covers Regexp.new coercing a non-String/Regexp source via
+// #to_str, and the TypeError when #to_str yields a non-String.
+func TestRegexpNewToStr(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`o = Object.new; def o.to_str; "a.b"; end; p Regexp.new(o).source`, "\"a.b\"\n"},
+		{`o = Object.new; def o.to_str; []; end; begin; Regexp.new(o); rescue TypeError => e; p(e.message.include?("can't convert Object into String")); end`, "true\n"},
+		{`begin; Regexp.new(1); rescue => e; p e.class; end`, "TypeError\n"},
+	})
+}
+
+// TestRegexpLastMatchToInt covers Regexp.last_match coercing a non-Integer index
+// argument through #to_int.
+func TestRegexpLastMatchToInt(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`"THX1138".match(/(.)(.)/); o = Object.new; def o.to_int; 1; end; p Regexp.last_match(o)`, "\"T\"\n"},
+	})
+}
+
 // TestRegexpCaseCompareToStr covers Regexp#=== coercing a string-like operand
 // through #to_str (and still clearing $~ / returning false for a non-string).
 func TestRegexpCaseCompareToStr(t *testing.T) {

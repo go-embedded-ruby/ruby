@@ -278,19 +278,36 @@ func (vm *VM) regexpNew(args []object.Value) object.Value {
 		}
 		return r
 	case *object.String:
-		flags, fixedEnc, noEnc := "", false, false
-		if len(args) >= 2 {
-			flags = regexpOptionFlags(args[1])
-			fixedEnc, noEnc = regexpEncodingBits(args[1])
-		}
-		r := vm.compileRegexp(src.Str(), flags).(*Regexp)
-		r.fixedEnc, r.noEnc, r.timeout = fixedEnc, noEnc, timeout
-		r.srcEnc = src.EncName()
-		return r
+		return vm.regexpFromString(src, args, timeout)
 	default:
+		// A non-String, non-Regexp source is coerced with #to_str, matching MRI.
+		if vm.respondsToDynamic(args[0], "to_str") {
+			conv := vm.send(args[0], "to_str", nil, nil)
+			s, ok := conv.(*object.String)
+			if !ok {
+				raise("TypeError", "can't convert %s into String (%s#to_str gives %s)",
+					classNameOf(args[0]), classNameOf(args[0]), classNameOf(conv))
+			}
+			return vm.regexpFromString(s, args, timeout)
+		}
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
 		return object.NilVal()
 	}
+}
+
+// regexpFromString builds a Regexp from a String source and the optional second
+// (options) argument, tagging the FIXEDENCODING/NOENCODING bits, timeout and the
+// source encoding. Shared by the direct String path and the #to_str-coerced path.
+func (vm *VM) regexpFromString(src *object.String, args []object.Value, timeout object.Value) object.Value {
+	flags, fixedEnc, noEnc := "", false, false
+	if len(args) >= 2 {
+		flags = regexpOptionFlags(args[1])
+		fixedEnc, noEnc = regexpEncodingBits(args[1])
+	}
+	r := vm.compileRegexp(src.Str(), flags).(*Regexp)
+	r.fixedEnc, r.noEnc, r.timeout = fixedEnc, noEnc, timeout
+	r.srcEnc = src.EncName()
+	return r
 }
 
 // regexpKwHash returns the trailing keyword Hash of a Regexp.new argument list,
@@ -1356,7 +1373,19 @@ func (vm *VM) installRegexp() {
 			if len(args) == 0 {
 				return md
 			}
-			return vm.send(md, "[]", []object.Value{args[0]}, nil)
+			// An index argument that is not already an Integer/String/Symbol is
+			// coerced to an Integer via #to_int, matching MRI's rb_reg_nth_match path.
+			key := args[0]
+			switch key.(type) {
+			case object.Integer, *object.String, object.Symbol:
+			default:
+				if vm.respondsToDynamic(key, "to_int") {
+					if iv, ok := vm.send(key, "to_int", nil, nil).(object.Integer); ok {
+						key = iv
+					}
+				}
+			}
+			return vm.send(md, "[]", []object.Value{key}, nil)
 		}}
 
 	// Regexp.union(pat, ...) / Regexp.union([pat, ...]) builds one Regexp matching
