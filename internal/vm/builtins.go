@@ -3837,12 +3837,12 @@ func (vm *VM) bootstrap() {
 		h.Set(args[0], args[1])
 		return args[1]
 	})
-	vm.cHash.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*object.Hash).Len()))
-	})
 	vm.cHash.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self.(*object.Hash).Len()))
 	})
+	// length is a true alias of size (Hash.instance_method(:length) ==
+	// Hash.instance_method(:size)).
+	aliasBuiltin(vm.cHash, "length", "size")
 	vm.cHash.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*object.Hash).Len() == 0)
 	})
@@ -3856,10 +3856,15 @@ func (vm *VM) bootstrap() {
 		_, ok := self.(*object.Hash).Get(args[0])
 		return object.Bool(ok)
 	}
+	// key?, has_key?, include? and member? are genuine built-in aliases in MRI —
+	// they share one method definition, so Hash.instance_method(:has_key?) ==
+	// Hash.instance_method(:include?). Install the record once and alias the rest
+	// (a separate #define per name would make four distinct definitions that
+	// compare unequal as UnboundMethods).
 	vm.cHash.define("key?", hashKeyP)
-	vm.cHash.define("has_key?", hashKeyP)
-	vm.cHash.define("include?", hashKeyP)
-	vm.cHash.define("member?", hashKeyP)
+	aliasBuiltin(vm.cHash, "has_key?", "key?")
+	aliasBuiltin(vm.cHash, "include?", "key?")
+	aliasBuiltin(vm.cHash, "member?", "key?")
 	vm.cHash.define("keys", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		ks := make([]object.Value, len(h.Keys))
@@ -3877,7 +3882,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each")
+			return hashSizedEnum(self, "each")
 		}
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
@@ -3890,7 +3895,7 @@ func (vm *VM) bootstrap() {
 	bumpMethodSerial()
 	vm.cHash.define("each_key", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_key")
+			return hashSizedEnum(self, "each_key")
 		}
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
@@ -3900,7 +3905,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("each_value", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_value")
+			return hashSizedEnum(self, "each_value")
 		}
 		h := self.(*object.Hash)
 		for _, k := range h.Keys {
@@ -3914,10 +3919,9 @@ func (vm *VM) bootstrap() {
 	// hashes may be merged left to right.
 	mergeInto := func(vm *VM, dst *object.Hash, others []object.Value, blk *Proc) {
 		for _, o := range others {
-			other, ok := o.(*object.Hash)
-			if !ok {
-				raise("TypeError", "no implicit conversion into Hash")
-			}
+			// A non-Hash argument is coerced with #to_hash (MRI raises
+			// "no implicit conversion of X into Hash" when it cannot convert).
+			other := vm.toHash(o)
 			for _, k := range other.Keys {
 				v, _ := other.Get(k)
 				if blk != nil {
@@ -3931,7 +3935,11 @@ func (vm *VM) bootstrap() {
 	}
 	vm.cHash.define("merge", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		h := self.(*object.Hash)
-		out := object.NewHash()
+		out := newHashLike(h)
+		// merge (unlike slice/except/select) carries over the receiver's default
+		// value and default_proc, matching MRI.
+		out.Default = h.Default
+		out.DefaultProc = h.DefaultProc
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			out.Set(k, v)
@@ -3946,10 +3954,12 @@ func (vm *VM) bootstrap() {
 		return h
 	}
 	vm.cHash.define("merge!", mergeBang)
-	vm.cHash.define("update", mergeBang) // update is an alias for merge!
+	// update is a true alias of merge! (shared record: instance_method(:update)
+	// == instance_method(:merge!)).
+	aliasBuiltin(vm.cHash, "update", "merge!")
 	vm.cHash.define("slice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
-		out := object.NewHash()
+		out := newHashLike(h)
 		for _, k := range args {
 			if v, ok := h.Get(k); ok {
 				out.Set(k, v)
@@ -3962,7 +3972,7 @@ func (vm *VM) bootstrap() {
 		// argument's object identity — a previous identity-keyed Go map dropped
 		// nothing, since stored keys are distinct objects from the arguments).
 		h := self.(*object.Hash)
-		out := object.NewHash()
+		out := newHashLike(h)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			out.Set(k, v)
@@ -4044,10 +4054,10 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("transform_values", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "transform_values")
+			return hashSizedEnum(self, "transform_values")
 		}
 		h := self.(*object.Hash)
-		out := object.NewHash()
+		out := newHashLike(h)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			out.Set(k, vm.callBlock(blk, []object.Value{v}))
@@ -4060,7 +4070,7 @@ func (vm *VM) bootstrap() {
 			mapping, _ = args[0].(*object.Hash)
 		}
 		if mapping == nil && blk == nil {
-			return enumFor(self, "transform_keys")
+			return hashSizedEnum(self, "transform_keys")
 		}
 		h := self.(*object.Hash)
 		out := object.NewHash()
@@ -4072,7 +4082,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("transform_values!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "transform_values!")
+			return hashSizedEnum(self, "transform_values!")
 		}
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h)
@@ -4088,7 +4098,7 @@ func (vm *VM) bootstrap() {
 			mapping, _ = args[0].(*object.Hash)
 		}
 		if mapping == nil && blk == nil {
-			return enumFor(self, "transform_keys!")
+			return hashSizedEnum(self, "transform_keys!")
 		}
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h)
@@ -4141,12 +4151,9 @@ func (vm *VM) bootstrap() {
 		}
 		return out
 	})
-	vm.cHash.define("store", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		h := self.(*object.Hash)
-		vm.checkHashFrozen(h)
-		h.Set(args[0], args[1])
-		return args[1]
-	})
+	// store is a true alias of []= (shared record: instance_method(:store) ==
+	// instance_method(:[]=)).
+	aliasBuiltin(vm.cHash, "store", "[]=")
 	// default / default= and default_proc / default_proc= manage the value (or
 	// block) returned for an absent key. The static default and the default block
 	// are mutually exclusive in MRI: setting one clears the other.
@@ -4228,8 +4235,9 @@ func (vm *VM) bootstrap() {
 		}
 		return object.False
 	}
-	vm.cHash.define("has_value?", hashHasValue)
 	vm.cHash.define("value?", hashHasValue)
+	// has_value? is a true alias of value?.
+	aliasBuiltin(vm.cHash, "has_value?", "value?")
 	// Hash#key(value): the first key whose value equals value (by ==), else nil.
 	vm.cHash.define("key", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
@@ -4245,13 +4253,17 @@ func (vm *VM) bootstrap() {
 	// native rather than inherited.
 	vm.cHash.define("select", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "select")
+			return hashSizedEnum(self, "select")
 		}
 		h := self.(*object.Hash)
-		out := object.NewHash()
+		out := newHashLike(h)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
-			if vm.callBlock(blk, []object.Value{hashPair(k, v)}).Truthy() {
+			// select/reject yield the key and value as two separate arguments
+			// (unlike each/map, which yield a single [key, value] pair), so a
+			// |*args| block sees [key, value] and a single-parameter block sees
+			// the key. Matches MRI.
+			if vm.callBlock(blk, []object.Value{k, v}).Truthy() {
 				out.Set(k, v)
 			}
 		}
@@ -4259,13 +4271,13 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("reject", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "reject")
+			return hashSizedEnum(self, "reject")
 		}
 		h := self.(*object.Hash)
-		out := object.NewHash()
+		out := newHashLike(h)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
-			if !vm.callBlock(blk, []object.Value{hashPair(k, v)}).Truthy() {
+			if !vm.callBlock(blk, []object.Value{k, v}).Truthy() {
 				out.Set(k, v)
 			}
 		}
@@ -4281,7 +4293,9 @@ func (vm *VM) bootstrap() {
 		removed := 0
 		for _, k := range keys {
 			v, _ := h.Get(k)
-			if vm.callBlock(blk, []object.Value{hashPair(k, v)}).Truthy() == want {
+			// delete_if/keep_if and reject!/select! yield the key and value as two
+			// separate arguments (like select/reject), matching MRI.
+			if vm.callBlock(blk, []object.Value{k, v}).Truthy() == want {
 				h.Delete(k)
 				removed++
 			}
@@ -4293,7 +4307,7 @@ func (vm *VM) bootstrap() {
 	// reject! and select! return nil when they removed nothing, matching MRI.
 	vm.cHash.define("delete_if", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "delete_if")
+			return hashSizedEnum(self, "delete_if")
 		}
 		vm.checkHashFrozen(self.(*object.Hash))
 		hashDeleteWhere(vm, self.(*object.Hash), blk, true)
@@ -4301,7 +4315,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("reject!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "reject!")
+			return hashSizedEnum(self, "reject!")
 		}
 		vm.checkHashFrozen(self.(*object.Hash))
 		if hashDeleteWhere(vm, self.(*object.Hash), blk, true) == 0 {
@@ -4311,7 +4325,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("keep_if", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "keep_if")
+			return hashSizedEnum(self, "keep_if")
 		}
 		vm.checkHashFrozen(self.(*object.Hash))
 		hashDeleteWhere(vm, self.(*object.Hash), blk, false)
@@ -4319,7 +4333,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cHash.define("select!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "select!")
+			return hashSizedEnum(self, "select!")
 		}
 		vm.checkHashFrozen(self.(*object.Hash))
 		if hashDeleteWhere(vm, self.(*object.Hash), blk, false) == 0 {
@@ -4327,7 +4341,10 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cHash.define("filter!", vm.cHash.methods["select!"].native)
+	// filter is a true alias of select and filter! of select! (shared records, so
+	// Hash.instance_method(:filter) == Hash.instance_method(:select)).
+	aliasBuiltin(vm.cHash, "filter", "select")
+	aliasBuiltin(vm.cHash, "filter!", "select!")
 	// assoc/rassoc scan the pairs in insertion order and return the first
 	// [key, value] whose key (assoc) or value (rassoc) is Ruby-== to the
 	// argument, or nil when none matches. They never consult the default.
@@ -4411,7 +4428,7 @@ func (vm *VM) bootstrap() {
 	// returning self, or nil when nothing was removed.
 	vm.cHash.define("compact", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
-		out := object.NewHash()
+		out := newHashLike(h)
 		for _, k := range h.Keys {
 			v, _ := h.Get(k)
 			if !object.IsNil(v) {
@@ -4439,6 +4456,47 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
+	// Hash#inspect renders the hash in MRI 4.0 form ({sym: v, key => v}), calling
+	// #inspect on every key and value through the object's own (possibly Ruby-
+	// level) method — unlike the low-level repr used for internal formatting,
+	// which cannot dispatch to a user-defined #inspect. to_s is a true alias.
+	vm.cHash.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		h := self.(*object.Hash)
+		if h.Len() == 0 {
+			return object.NewString("{}")
+		}
+		if !object.ReprEnter(h) {
+			return object.NewString("{...}") // h is nested inside itself
+		}
+		defer object.ReprLeave(h)
+		var b strings.Builder
+		b.WriteByte('{')
+		for i, k := range h.Keys {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			v, _ := h.Get(k)
+			if sym, ok := k.(object.Symbol); ok {
+				// A symbol key uses the label form `name:`. A plain-identifier
+				// symbol prints bare (a: 1); any other symbol — an operator,
+				// ivar-shaped or otherwise non-identifier name — is quoted using
+				// the string-inspect form ("<=>": 1), matching MRI's label rule
+				// (which is stricter than Symbol#inspect's bare form: :<=> inspects
+				// bare but its hash label is quoted).
+				name := string(sym)
+				if symIsPlainLabel(name) {
+					b.WriteString(name + ": " + vm.inspectStr(v))
+				} else {
+					b.WriteString(object.NewString(name).Inspect() + ": " + vm.inspectStr(v))
+				}
+			} else {
+				b.WriteString(vm.inspectStr(k) + " => " + vm.inspectStr(v))
+			}
+		}
+		b.WriteByte('}')
+		return object.NewString(b.String())
+	})
+	aliasBuiltin(vm.cHash, "to_s", "inspect")
 
 	// Range.
 	vm.cRange.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -6951,6 +7009,56 @@ func illFormedUTF8Len(s string) int {
 // pair (matching Ruby).
 func hashPair(k, v object.Value) *object.Array {
 	return object.NewArray(k, v)
+}
+
+// symIsPlainLabel reports whether a symbol name prints bare as a Hash label
+// (name:) rather than quoted ("name":). It is MRI's rule for the 4.0 hash
+// inspect form: a leading identifier byte (letter/underscore/multibyte),
+// identifier bytes after it, with an optional single trailing ? or !. Anything
+// else — an operator, ivar/gvar sigil, `=`-suffixed setter, empty string — is
+// quoted. It mirrors the object package's internal isSymLabel, replicated here
+// because Hash#inspect must dispatch element #inspect through the VM.
+func symIsPlainLabel(s string) bool {
+	if s == "" || !utf8.ValidString(s) || !symLabelStart(s[0]) {
+		return false
+	}
+	i := 1
+	for ; i < len(s) && symLabelChar(s[i]); i++ {
+	}
+	if i == len(s) {
+		return true
+	}
+	return i == len(s)-1 && (s[i] == '?' || s[i] == '!')
+}
+
+func symLabelStart(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0x80
+}
+
+func symLabelChar(c byte) bool { return symLabelStart(c) || (c >= '0' && c <= '9') }
+
+// hashSizedEnum builds the block-less Enumerator for a Hash iteration method
+// whose #size is the receiver's current length. A size block matters beyond
+// reporting #size: without it Enumerator#size materialises the enumerator by
+// actually running the method, which for the in-place forms (transform_values!,
+// select!, …) would mutate the hash. MRI's Hash enumerators are all sized.
+func hashSizedEnum(self object.Value, meth string) *Enumerator {
+	return enumForSized(self, meth, func(*VM) object.Value {
+		return object.IntValue(int64(self.(*object.Hash).Len()))
+	})
+}
+
+// newHashLike returns a fresh empty Hash that inherits src's compare_by_identity
+// flag. The flag must be set before any key is inserted, because identity mode
+// changes key comparison — under it two ==-equal but non-identical keys stay
+// distinct. MRI's Hash#select/#reject/#merge/#compact/#slice/#except/#transform_values
+// and friends all propagate the flag to the hash they return.
+func newHashLike(src *object.Hash) *object.Hash {
+	out := object.NewHash()
+	if src.Identity {
+		out.CompareByIdentity()
+	}
+	return out
 }
 
 // hashSubset reports whether every (key, value) pair of sub is present in sup,
