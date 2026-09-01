@@ -671,6 +671,9 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 		}
 		return object.Float(floatOf(self) / b)
 	})
+	// Float#quo is a true alias of #fdiv; re-establish it now that #fdiv has been
+	// redefined above (the earlier alias pointed at the previous #fdiv record).
+	aliasBuiltin(vm.cFloat, "quo", "fdiv")
 
 	// --- Integer#div — floored quotient, MRI operand rules ---
 	// An Integer/Bignum divisor gives a floored Integer; a Float divisor floors
