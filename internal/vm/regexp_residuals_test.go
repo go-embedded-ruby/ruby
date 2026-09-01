@@ -96,6 +96,37 @@ func TestRegexpInitialize(t *testing.T) {
 	})
 }
 
+// TestRegexpCaseCompareToStr covers Regexp#=== coercing a string-like operand
+// through #to_str (and still clearing $~ / returning false for a non-string).
+func TestRegexpCaseCompareToStr(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`o = Object.new; def o.to_str; "abc"; end; p(/b/ === o)`, "true\n"},
+		{`o = Object.new; def o.to_str; "xyz"; end; p(/b/ === o)`, "false\n"},
+		{`p(/b/ === 5)`, "false\n"},
+	})
+}
+
+// TestMatchDataInspectNamed covers MatchData#inspect: when the pattern has named
+// groups only those are shown (by name), omitting unnamed numbered groups;
+// otherwise every numbered group is shown.
+func TestMatchDataInspectNamed(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`p "abc def ghi".match(/(?<first>\w+)\s+(?<last>\w+)\s+(\w+)/).inspect`,
+			"\"#<MatchData \\\"abc def ghi\\\" first:\\\"abc\\\" last:\\\"def\\\">\"\n"},
+		{`p "ab".match(/(.)(.)/).inspect`,
+			"\"#<MatchData \\\"ab\\\" 1:\\\"a\\\" 2:\\\"b\\\">\"\n"},
+	})
+}
+
+// TestMatchDataDeconstructKeysArity covers the zero-argument ArgumentError of
+// MatchData#deconstruct_keys.
+func TestMatchDataDeconstructKeysArity(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`begin; "a".match(/(?<x>.)/).deconstruct_keys; rescue ArgumentError => e; p e.message; end`,
+			"\"wrong number of arguments (given 0, expected 1)\"\n"},
+	})
+}
+
 // TestMatchDataMatchMethod covers MatchData#match(n) / #match(name) (Ruby 3.4):
 // the scalar subset of #[], returning nil for a non-participating group.
 func TestMatchDataMatchMethod(t *testing.T) {

@@ -175,15 +175,21 @@ func (m *MatchData) Inspect() string { return "#<MatchData " + matchDataInspect(
 func (m *MatchData) Truthy() bool    { return true }
 
 // matchDataInspect renders the body of MatchData#inspect: the whole match
-// inspected, then each group as ` i:capture` (or ` name:capture` for named
-// groups).
+// inspected, then each group as ` i:capture`. When the pattern has any named
+// group, MRI shows ONLY the named groups (by name) and omits the unnamed
+// numbered ones; otherwise it shows every numbered group.
 func matchDataInspect(m *MatchData) string {
 	var b strings.Builder
 	b.WriteString(object.NewString(m.md.Str(0)).Inspect())
 	idxToName := indexToName(m)
+	hasNames := len(idxToName) > 0
 	for i := 1; i <= m.md.NGroups(); i++ {
+		nm, named := idxToName[i]
+		if hasNames && !named {
+			continue
+		}
 		b.WriteByte(' ')
-		if nm, ok := idxToName[i]; ok {
+		if named {
 			b.WriteString(nm)
 		} else {
 			b.WriteString(strconv.Itoa(i))
@@ -1432,6 +1438,14 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s, ok := stringLike(args[0])
 		if !ok {
+			// A string-like object is accepted via #to_str (MRI's rb_check_string_type).
+			if vm.respondsToDynamic(args[0], "to_str") {
+				if str, isStr := vm.send(args[0], "to_str", nil, nil).(*object.String); isStr {
+					s, ok = str.Str(), true
+				}
+			}
+		}
+		if !ok {
 			// A non-string operand never matches and clears $~, as MRI does (so a
 			// case/when over a non-string subject leaves no stale last match).
 			vm.lastMatch = object.NilV
@@ -1648,6 +1662,9 @@ func (vm *VM) installRegexp() {
 	// only the requested Symbol keys are returned, and the walk stops at the first
 	// key that is not a capture name (matching MRI).
 	vm.cMatchData.define("deconstruct_keys", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
 		return mdArg(self).deconstructKeys(args[0])
 	})
 	// MatchData#values_at(*args) selects groups by Integer index, name, or Range,
