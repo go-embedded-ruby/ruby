@@ -76,6 +76,27 @@ func (r *Regexp) optionBits() int64 {
 	return bits
 }
 
+// escapeForwardSlashes backslash-escapes each unescaped '/' in a regexp source
+// for #to_s / #inspect, the way MRI renders it, without double-escaping a '/'
+// that is already preceded by a backslash (a backslash escapes the next byte).
+func escapeForwardSlashes(src string) string {
+	var b strings.Builder
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		if c == '\\' && i+1 < len(src) {
+			b.WriteByte(c)
+			b.WriteByte(src[i+1])
+			i++
+			continue
+		}
+		if c == '/' {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
 // encodingName returns the canonical name of the encoding Regexp#encoding
 // reports: an ASCII-only source is US-ASCII; a source with a non-ASCII byte is
 // UTF-8, or ASCII-8BIT (BINARY) when the NOENCODING option is set.
@@ -115,11 +136,14 @@ func (r *Regexp) ToS() string {
 	if off != "" {
 		off = "-" + off
 	}
-	return "(?" + on + off + ":" + r.source + ")"
+	return "(?" + on + off + ":" + escapeForwardSlashes(r.source) + ")"
 }
 
-func (r *Regexp) Inspect() string { return "/" + r.source + "/" + orderFlags(r.flags) }
-func (r *Regexp) Truthy() bool    { return true }
+// Inspect renders /source/flags, escaping unescaped '/' in the source.
+func (r *Regexp) Inspect() string {
+	return "/" + escapeForwardSlashes(r.source) + "/" + orderFlags(r.flags)
+}
+func (r *Regexp) Truthy() bool { return true }
 
 // orderFlags returns the present flags in Ruby's canonical m, i, x order.
 func orderFlags(flags string) string {
@@ -597,6 +621,54 @@ func (vm *VM) regexpOperandStr(v object.Value) string {
 		return x.Str()
 	case object.Symbol:
 		return string(x)
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s.Str()
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+	return ""
+}
+
+// regexpUnion implements Regexp.union, following MRI's structure. With no
+// arguments it matches nothing (/(?!)/). A single argument is special: a Regexp
+// (or #to_regexp) is returned verbatim, an Array recurses as the pattern list,
+// and a lone String/Symbol becomes a single quoted pattern. Two or more patterns
+// are joined by '|', each Regexp contributing its #to_s and each other operand
+// coerced via #to_str only (a Symbol raises TypeError here, unlike the lone case).
+func (vm *VM) regexpUnion(args []object.Value) object.Value {
+	if len(args) == 0 {
+		return vm.regexpNew([]object.Value{object.NewString("(?!)")})
+	}
+	if len(args) == 1 {
+		if re, ok := vm.toRegexpOperand(args[0]); ok {
+			return re
+		}
+		if arr, ok := args[0].(*object.Array); ok {
+			return vm.regexpUnion(arr.Elems)
+		}
+		// A lone String/Symbol: one quoted pattern, never an alternation.
+		return vm.regexpNew([]object.Value{object.NewString(regexpEscapeLiteral(vm.regexpOperandStr(args[0])))})
+	}
+	sources := make([]string, len(args))
+	for i, a := range args {
+		if re, ok := vm.toRegexpOperand(a); ok {
+			sources[i] = re.ToS()
+		} else {
+			sources[i] = regexpEscapeLiteral(vm.regexpUnionStr(a))
+		}
+	}
+	return vm.regexpNew([]object.Value{object.NewString(strings.Join(sources, "|"))})
+}
+
+// regexpUnionStr coerces a non-Regexp operand of a multi-pattern Regexp.union to
+// a String via #to_str only (MRI's rb_check_string_type): a String is taken
+// directly, anything else must supply #to_str, and a Symbol — which has none —
+// raises TypeError, unlike the single-argument union or Regexp.quote.
+func (vm *VM) regexpUnionStr(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
 	}
 	if vm.respondsToDynamic(v, "to_str") {
 		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
@@ -1215,7 +1287,15 @@ func groupValue(m *MatchData, i int) object.Value {
 // installRegexp registers the Regexp and MatchData method tables. It runs at the
 // end of bootstrap so the classes already exist as constants.
 func (vm *VM) installRegexp() {
-	reArg := func(v object.Value) *Regexp { return v.(*Regexp) }
+	// reArg unwraps the Regexp receiver, raising TypeError for an uninitialized
+	// one (Regexp.allocate without a call to #initialize), as MRI does.
+	reArg := func(v object.Value) *Regexp {
+		r, ok := v.(*Regexp)
+		if !ok {
+			raise("TypeError", "uninitialized Regexp")
+		}
+		return r
+	}
 
 	// Regexp option constants (MRI values): IGNORECASE=1, EXTENDED=2, MULTILINE=4.
 	vm.cRegexp.consts["IGNORECASE"] = object.IntValue(reIgnoreCase)
@@ -1266,40 +1346,7 @@ func (vm *VM) installRegexp() {
 	// it matches nothing, as MRI.
 	vm.cRegexp.smethods["union"] = &Method{name: "union", owner: vm.cRegexp,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			if len(args) == 0 {
-				return vm.regexpNew([]object.Value{object.NewString("(?!)")})
-			}
-			// A single argument is special: a Regexp (or to_regexp) is returned
-			// verbatim, an Array is treated as the pattern list, and a String/Symbol
-			// becomes a lone quoted pattern (never wrapped in an alternation).
-			if len(args) == 1 {
-				if re, ok := vm.toRegexpOperand(args[0]); ok {
-					return re
-				}
-				if arr, ok := args[0].(*object.Array); ok {
-					if len(arr.Elems) == 0 {
-						return vm.regexpNew([]object.Value{object.NewString("(?!)")})
-					}
-					// A single-element list of one Regexp is still returned verbatim.
-					if len(arr.Elems) == 1 {
-						if re, ok := vm.toRegexpOperand(arr.Elems[0]); ok {
-							return re
-						}
-					}
-					args = arr.Elems
-				}
-			}
-			sources := make([]string, len(args))
-			for i, a := range args {
-				if re, ok := vm.toRegexpOperand(a); ok {
-					// A Regexp contributes its #to_s so its own options ride along,
-					// e.g. Regexp.union(/dogs/, /cats/i) => /(?-mix:dogs)|(?i-mx:cats)/.
-					sources[i] = re.ToS()
-				} else {
-					sources[i] = regexpEscapeLiteral(vm.regexpOperandStr(a))
-				}
-			}
-			return vm.regexpNew([]object.Value{object.NewString(strings.Join(sources, "|"))})
+			return vm.regexpUnion(args)
 		}}
 
 	vm.cRegexp.define("source", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -1338,15 +1385,33 @@ func (vm *VM) installRegexp() {
 		}
 		return object.Bool(re.matcher().MatchString(subject))
 	})
-	vm.cRegexp.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cRegexp.define("match", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		re := reArg(self)
+		// A nil subject never matches and resets $~ to nil (so a later Regexp.last_match
+		// sees no match), returning nil without yielding to any block.
 		if _, isNil := args[0].(object.Nil); isNil {
+			vm.lastMatch = object.NilV
 			return object.NilV
 		}
-		// match(str, pos): start scanning at character offset pos (defaults to 0).
+		// The subject is coerced like any Regexp operand: a Symbol yields its name,
+		// anything else is taken via #to_str (Integer/Exception raise TypeError).
+		subject := vm.regexpOperandStr(args[0])
+		var md object.Value
 		if len(args) >= 2 {
-			return vm.runMatchFrom(reArg(self), strArg(args[0]), intArg(args[1]))
+			// match(str, pos): start scanning at character offset pos.
+			md = vm.runMatchFrom(re, subject, intArg(args[1]))
+		} else {
+			md = vm.runMatch(re, subject)
 		}
-		return vm.runMatch(reArg(self), strArg(args[0]))
+		// With a block, a successful match yields the MatchData and the block's value
+		// is returned; a failed match returns nil and never yields.
+		if blk != nil {
+			if _, isNil := md.(object.Nil); isNil {
+				return object.NilV
+			}
+			return vm.callBlock(blk, []object.Value{md})
+		}
+		return md
 	})
 	vm.cRegexp.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.regexpMatchIndex(reArg(self), args[0])
@@ -1493,34 +1558,34 @@ func (vm *VM) installRegexp() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cMatchData.define("begin", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cMatchData.define("begin", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
-		return m.offset(int64(m.indexForKey(args[0])), false)
+		return m.offset(int64(m.indexForKey(vm, args[0])), false)
 	})
-	vm.cMatchData.define("end", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cMatchData.define("end", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
-		return m.offset(int64(m.indexForKey(args[0])), true)
+		return m.offset(int64(m.indexForKey(vm, args[0])), true)
 	})
 	// MatchData#offset(n_or_name) is the [begin, end] character-offset pair of the
 	// group; [nil, nil] for a group that did not participate.
-	vm.cMatchData.define("offset", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cMatchData.define("offset", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
-		idx := int64(m.indexForKey(args[0]))
+		idx := int64(m.indexForKey(vm, args[0]))
 		return object.NewArrayFromSlice([]object.Value{m.offset(idx, false), m.offset(idx, true)})
 	})
 	// bytebegin / byteend / byteoffset are the byte-index counterparts of begin /
 	// end / offset (Ruby 3.2+): they skip the byte-to-character conversion.
-	vm.cMatchData.define("bytebegin", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cMatchData.define("bytebegin", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
-		return m.byteOffset(int64(m.indexForKey(args[0])), false)
+		return m.byteOffset(int64(m.indexForKey(vm, args[0])), false)
 	})
-	vm.cMatchData.define("byteend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cMatchData.define("byteend", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
-		return m.byteOffset(int64(m.indexForKey(args[0])), true)
+		return m.byteOffset(int64(m.indexForKey(vm, args[0])), true)
 	})
-	vm.cMatchData.define("byteoffset", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cMatchData.define("byteoffset", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
-		idx := int64(m.indexForKey(args[0]))
+		idx := int64(m.indexForKey(vm, args[0]))
 		return object.NewArrayFromSlice([]object.Value{m.byteOffset(idx, false), m.byteOffset(idx, true)})
 	})
 	// MatchData#named_captures maps each capture name to its captured substring
@@ -1630,6 +1695,12 @@ func (vm *VM) installRegexp() {
 			return object.NewArrayFromSlice(out)
 		}
 		return m.at(args[0])
+	})
+	// MatchData#match(n) (Ruby 3.4) returns the single group by index or name — the
+	// scalar subset of #[] (no Range or (start, length) form), nil for a group that
+	// did not participate.
+	vm.cMatchData.define("match", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return mdArg(self).at(args[0])
 	})
 }
 
@@ -1762,8 +1833,9 @@ func (m *MatchData) byName(name string) object.Value {
 
 // indexForKey resolves a #begin/#end/#offset key to a group index: an Integer
 // out of range raises IndexError; a String/Symbol name is resolved (IndexError
-// when unknown); any other type raises TypeError.
-func (m *MatchData) indexForKey(key object.Value) int {
+// when unknown); any other type is coerced through #to_int (raising TypeError
+// when it has none), matching MRI.
+func (m *MatchData) indexForKey(vm *VM, key object.Value) int {
 	switch k := key.(type) {
 	case object.Integer:
 		i := int(k)
@@ -1776,6 +1848,11 @@ func (m *MatchData) indexForKey(key object.Value) int {
 	case object.Symbol:
 		return m.nameIndex(string(k))
 	default:
+		if vm.respondsToDynamic(key, "to_int") {
+			if iv, ok := vm.send(key, "to_int", nil, nil).(object.Integer); ok {
+				return m.indexForKey(vm, iv)
+			}
+		}
 		raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(key))
 		return 0
 	}
