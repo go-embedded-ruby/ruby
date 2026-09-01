@@ -319,19 +319,25 @@ func (vm *VM) lazySize(l *LazyEnum) object.Value {
 	default:
 		return object.NilV
 	}
+	// Only an Integer or positive-infinite Float is a size the op chain can reason
+	// about; anything else (nil, a finite Float, a non-numeric) is unknown.
+	if _, ok := sz.(object.Integer); !ok && !isInfFloat(sz) {
+		return object.NilV
+	}
 	for _, op := range l.ops {
+		sz = lazyOpSize(op, sz)
 		if object.IsNil(sz) {
 			return object.NilV
 		}
-		sz = lazyOpSize(op, sz)
 	}
 	return sz
 }
 
-// lazyOpSize maps a known incoming size through one op: map/with_index/zip keep
-// it, take bounds it to its count (min, or the count itself for an infinite
-// source), drop subtracts its count (flooring at 0, infinity staying infinite),
-// and every filtering/reshaping op makes it unknown.
+// lazyOpSize maps a known incoming size (always an Integer or positive-infinite
+// Float, per lazySize) through one op: map/with_index/zip keep it, take bounds it
+// to its count (min, or the count itself for an infinite source), drop subtracts
+// its count (flooring at 0, infinity staying infinite), and every
+// filtering/reshaping op makes it unknown (nil).
 func lazyOpSize(op lazyOp, sz object.Value) object.Value {
 	switch op.kind {
 	case "map", "with_index", "zip":
@@ -341,26 +347,20 @@ func lazyOpSize(op lazyOp, sz object.Value) object.Value {
 		if isInfFloat(sz) {
 			return object.IntValue(n)
 		}
-		if i, ok := sz.(object.Integer); ok {
-			if int64(i) < n {
-				return sz
-			}
-			return object.IntValue(n)
+		if int64(sz.(object.Integer)) < n {
+			return sz
 		}
-		return object.NilV
+		return object.IntValue(n)
 	case "drop":
 		n := int64(op.n)
 		if isInfFloat(sz) {
 			return sz
 		}
-		if i, ok := sz.(object.Integer); ok {
-			d := int64(i) - n
-			if d < 0 {
-				d = 0
-			}
-			return object.IntValue(d)
+		d := int64(sz.(object.Integer)) - n
+		if d < 0 {
+			d = 0
 		}
-		return object.NilV
+		return object.IntValue(d)
 	default:
 		return object.NilV
 	}
@@ -771,10 +771,9 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 			}
 			return feed(i+1, v, multi)
 		case "take":
-			if rem[i] <= 0 {
-				stop = true
-				return false
-			}
+			// A saturated take never reaches feed: the pre-loop takeSaturated check
+			// (and this op stopping the pull the moment its quota is met, below) keep
+			// rem[i] > 0 on entry, so take(0) drives the source zero times.
 			rem[i]--
 			if !feed(i+1, v, multi) {
 				return false

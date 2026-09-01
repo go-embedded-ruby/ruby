@@ -72,6 +72,8 @@ p $seen`, ":ret\n[:x, :y]\n"},
 		{`p Enumerator::Lazy.allocate.inspect`, "\"#<Enumerator::Lazy: uninitialized>\"\n"},
 		// a live enumerator still inspects normally
 		{`p [1, 2].each.inspect`, "\"#<Enumerator: [1, 2]:each>\"\n"},
+		// a live lazy inspects through its own Inspect
+		{`p (1..3).lazy.map { |x| x }.inspect`, "\"#<Enumerator::Lazy: 1..3:map>\"\n"},
 
 		// --- Enumerator::Lazy.new ---
 		{`r = Object.new
@@ -124,6 +126,9 @@ p l.to_enum.class`, "Enumerator::Lazy\n"},
 p l.to_enum.equal?(l)`, "false\n"},
 		{`p Enumerator::Lazy.new(Object.new, 100) {}.to_enum { 30 }.size`, "30\n"},
 		{`p Enumerator::Lazy.new(Object.new, 100) {}.to_enum.size`, "nil\n"},
+		// to_enum(meth, ...) drives self.meth lazily when forced
+		{`p (1..5).lazy.to_enum(:each).first(3)`, "[1, 2, 3]\n"},
+		{`p (1..5).lazy.to_enum.first(3)`, "[1, 2, 3]\n"},
 
 		// --- aliases share the method object ---
 		{`p Enumerator::Lazy.instance_method(:collect) == Enumerator::Lazy.instance_method(:map)`, "true\n"},
@@ -185,9 +190,13 @@ def o.each; $out << :before; yield 0; end
 o.to_enum.lazy.take(0).force
 p $out`, "[]\n"},
 		{`p (1..Float::INFINITY).lazy.map { |x| x }.take(3).force`, "[1, 2, 3]\n"},
+		// take followed by an early-stopping terminal unwinds through take
+		{`p (1..10).lazy.take(5).first(2)`, "[1, 2]\n"},
 
 		// --- eager/force still work ---
 		{`p [1, 2, 3].lazy.map { |x| x * 2 }.to_a`, "[2, 4, 6]\n"},
+		// a lazy over a Chain enumerator pulls it fresh (forPull rewinds a chain)
+		{`p (1..2).each.chain([3, 4]).lazy.map { |x| x }.force`, "[1, 2, 3, 4]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
