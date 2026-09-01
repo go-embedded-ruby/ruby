@@ -139,11 +139,23 @@ func (vm *VM) bootstrap() {
 	// copies for the rarer native-block target, so the OpSend fast path may hand
 	// them the live operand-stack region without a defensive copy (defineNR).
 	vm.cProc.defineNR("call", procCall)
-	vm.cProc.defineNR("[]", procCall)
-	vm.cProc.defineNR("yield", procCall)
-	// Proc#=== is an alias of #call, so a proc/lambda can be used as a case /
-	// grep pattern (pattern === element).
-	vm.cProc.define("===", procCall)
+	// Proc#[], #yield and #=== are genuine built-in aliases of Proc#call: MRI
+	// exposes them as the same method definition, so #instance_method(:[]) equals
+	// #instance_method(:call) (and #=== lets a proc/lambda act as a case / grep
+	// pattern). aliasBuiltin shares the one non-retaining *Method record; a fresh
+	// define would compare unequal even with an identical body.
+	aliasBuiltin(vm.cProc, "[]", "call")
+	aliasBuiltin(vm.cProc, "yield", "call")
+	aliasBuiltin(vm.cProc, "===", "call")
+	// Proc#== is identity equality (a Proc never equals a distinct Proc, even one
+	// with the same body and environment; a #dup returns the same object, so it
+	// equals its original). Proc#eql? is the same definition. Defining it on Proc
+	// — rather than inheriting BasicObject#== — is what MRI does, so #== shows up
+	// in Proc.public_instance_methods(false) and pairs with #eql?.
+	vm.cProc.define("==", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(self == args[0])
+	})
+	aliasBuiltin(vm.cProc, "eql?", "==")
 	vm.cProc.define("arity", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self.(*Proc).arityVal()))
 	})
@@ -171,8 +183,21 @@ func (vm *VM) bootstrap() {
 		}
 		if len(args) > 0 {
 			need = int(intArg(args[0]))
+			// A lambda enforces its arity, so currying it to an arity it cannot
+			// satisfy — fewer than its required positionals, or more than it will
+			// accept when it has no splat — raises, exactly as calling it would. A
+			// non-lambda proc never enforces arity, so it curries to any width.
+			if p.isLambda {
+				required, total, hasSplat := procPositionalInfo(p.iseq)
+				if need < required || (!hasSplat && need > total) {
+					raise("ArgumentError", "wrong number of arguments (given %d, expected %d)", need, required)
+				}
+			}
 		}
-		return vm.curried(p, need, nil)
+		// The curried Proc keeps the receiver's lambda-ness (and propagates it to
+		// every partial application), so ->{}.curry.lambda? is true while
+		// proc{}.curry.lambda? is false.
+		return vm.curriedProc(p, need, p.isLambda, nil)
 	})
 	dupFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return dupValue(self)
