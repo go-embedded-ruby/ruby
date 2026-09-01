@@ -314,8 +314,19 @@ func (vm *VM) registerEnumerator() {
 	}
 	d("inspect", inspectFn)
 	d("to_s", inspectFn)
-	d("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	d("each", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		e := self.(*Enumerator)
+		if len(args) > 0 {
+			// #each(*extra) appends the extra arguments to the receiver's #each call:
+			// a fresh enumerator with the wider argument list, run (or returned) here.
+			ne := *e
+			ne.args = append(append([]object.Value{}, e.args...), args...)
+			ne.extFiber, ne.peeked, ne.ended = nil, false, false
+			if blk == nil {
+				return &ne
+			}
+			return vm.enumRunEach(&ne, blk)
+		}
 		if blk == nil {
 			return e
 		}
