@@ -3711,6 +3711,12 @@ func (vm *VM) bootstrap() {
 	hashInit := func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h) // re-initialising a frozen hash raises (a fresh one is not frozen)
+		// initialize (re)sets the default handling: it always clears both the
+		// static default and the default proc first, so re-invoking it on an
+		// existing hash resets them (Hash#initialize is a real, if private,
+		// resettable method). The static default and the proc are mutually
+		// exclusive.
+		h.Default, h.DefaultProc = nil, nil
 		switch {
 		case blk != nil:
 			if len(args) != 0 {
@@ -3725,6 +3731,9 @@ func (vm *VM) bootstrap() {
 		return self
 	}
 	vm.cHash.define("initialize", hashInit)
+	// Hash#initialize is private, like MRI's (Hash.private_instance_methods
+	// includes :initialize).
+	vm.setInstanceVisibility(vm.cHash, "initialize", visPrivate)
 	vm.cHash.smethods["new"] = &Method{name: "new", owner: vm.cHash,
 		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 			if recv := self.(*RClass); recv != vm.cHash {
@@ -3770,12 +3779,29 @@ func (vm *VM) bootstrap() {
 			h := object.NewHash()
 			// Hash[[[k,v],…]] / Hash[existing_hash] / Hash[k1,v1,k2,v2,…].
 			if len(args) == 1 {
-				switch a := args[0].(type) {
+				a0 := args[0]
+				// A single non-Array/Hash argument is coerced: first via #to_hash
+				// (returning a copy of that hash), else via #to_ary (treated as the
+				// array-of-pairs form). MRI tries the conversions in this order.
+				if _, isArr := a0.(*object.Array); !isArr {
+					if _, isHash := a0.(*object.Hash); !isHash {
+						if vm.respondsToDynamic(a0, "to_hash") {
+							if conv, ok := vm.send(a0, "to_hash", nil, nil).(*object.Hash); ok {
+								a0 = conv
+							}
+						} else if vm.respondsToDynamic(a0, "to_ary") {
+							if conv, ok := vm.send(a0, "to_ary", nil, nil).(*object.Array); ok {
+								a0 = conv
+							}
+						}
+					}
+				}
+				switch a := a0.(type) {
 				case *object.Array:
 					for i, e := range a.Elems {
 						pair, ok := e.(*object.Array)
 						if !ok {
-							raise("ArgumentError", "wrong element type %s at %d (expected array)", vm.classOf(e).name, i)
+							raise("ArgumentError", "wrong element type %s at %d (expected array)", coerceName(e), i)
 						}
 						if len(pair.Elems) < 1 || len(pair.Elems) > 2 {
 							raise("ArgumentError", "invalid number of elements (%d for 1..2)", len(pair.Elems))
@@ -3809,7 +3835,9 @@ func (vm *VM) bootstrap() {
 	vm.cHash.smethods["ruby2_keywords_hash"] = &Method{name: "ruby2_keywords_hash", owner: vm.cHash,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			h := hashArgOrRaise(vm, args[0])
-			out := object.NewHash()
+			out := newHashLike(h) // preserves the compare_by_identity flag
+			out.Default = h.Default
+			out.DefaultProc = h.DefaultProc
 			for _, k := range h.Keys {
 				v, _ := h.Get(k)
 				out.Set(k, v)
@@ -3983,6 +4011,9 @@ func (vm *VM) bootstrap() {
 		return out
 	})
 	vm.cHash.define("fetch", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
 		if v, ok := self.(*object.Hash).Get(args[0]); ok {
 			return v
 		}
@@ -4141,6 +4172,11 @@ func (vm *VM) bootstrap() {
 			v, _ := h.Get(k)
 			res := vm.callBlock(blk, []object.Value{k, v})
 			pair, ok := res.(*object.Array)
+			if !ok && vm.respondsToDynamic(res, "to_ary") {
+				// A non-Array pair is coerced with #to_ary (but not #to_a), matching
+				// MRI.
+				pair, ok = vm.send(res, "to_ary", nil, nil).(*object.Array)
+			}
 			if !ok {
 				raise("TypeError", "wrong element type %s (expected array)", vm.classOf(res).name)
 			}
@@ -4150,6 +4186,11 @@ func (vm *VM) bootstrap() {
 			out.Set(pair.Elems[0], pair.Elems[1])
 		}
 		return out
+	})
+	// to_hash returns the receiver itself (a plain Hash and, in MRI, an instance
+	// of a Hash subclass alike), unlike to_h which produces a plain-Hash copy.
+	vm.cHash.define("to_hash", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
 	})
 	// store is a true alias of []= (shared record: instance_method(:store) ==
 	// instance_method(:[]=)).
@@ -4183,6 +4224,19 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NilV
 	})
+	// setDefaultProc installs p as the default proc, clearing the static default.
+	// A lambda must be able to accept the two arguments (hash, key) the proc is
+	// called with: a fixed-arity lambda whose arity is not 2 is a TypeError, like
+	// MRI. A non-lambda proc imposes no such constraint.
+	setDefaultProc := func(h *object.Hash, p *Proc) {
+		if p.isLambda {
+			if a := p.arityVal(); a >= 0 && a != 2 {
+				raise("TypeError", "default_proc takes two arguments (2 for %d)", a)
+			}
+		}
+		h.DefaultProc = p
+		h.Default = nil
+	}
 	vm.cHash.define("default_proc=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h)
@@ -4190,18 +4244,29 @@ func (vm *VM) bootstrap() {
 		case object.Nil:
 			h.DefaultProc = nil
 		case *Proc:
-			h.DefaultProc = p
-			h.Default = nil
+			setDefaultProc(h, p)
 		default:
 			// MRI coerces via #to_proc; without that, only a Proc or nil is valid.
+			// The assignment expression still evaluates to the original argument.
+			if vm.respondsToDynamic(args[0], "to_proc") {
+				if pr, ok := vm.send(args[0], "to_proc", nil, nil).(*Proc); ok {
+					setDefaultProc(h, pr)
+					return args[0]
+				}
+			}
 			raise("TypeError", "no implicit conversion of %s into Proc", vm.classOf(args[0]).name)
 		}
 		return args[0]
 	})
-	vm.cHash.define("delete", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.define("delete", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h)
-		v, _ := h.Delete(args[0])
+		v, ok := h.Delete(args[0])
+		if !ok && blk != nil {
+			// When the key is absent and a block is supplied, MRI calls the block
+			// with the key and returns its result instead of nil.
+			return vm.callBlock(blk, []object.Value{args[0]})
+		}
 		return v
 	})
 	// #shift removes the first inserted pair and returns it as [key, value], or
@@ -8268,10 +8333,13 @@ func (vm *VM) digValue(cur object.Value, keys []object.Value) object.Value {
 		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 	}
 	// The only caller is Hash#dig, so cur is always a Hash: fetch at the first key,
-	// then continue with the remaining keys.
-	v, ok := cur.(*object.Hash).Get(keys[0])
+	// then continue with the remaining keys. A missing key reads through the
+	// hash's default (value or proc) exactly as Hash#[] would, so dig respects a
+	// Hash.new default and can keep digging into it.
+	h := cur.(*object.Hash)
+	v, ok := h.Get(keys[0])
 	if !ok {
-		return object.NilV
+		v = vm.hashDefault(h, keys[0])
 	}
 	return vm.digRest(v, keys[1:])
 }
