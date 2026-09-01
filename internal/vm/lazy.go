@@ -141,13 +141,24 @@ func (vm *VM) registerLazy() {
 	})
 	// zip pairs each element with the corresponding elements of the other
 	// sources (padding with nil once a source is exhausted).
-	d("zip", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("zip", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Each argument must be list-like (respond to #each); MRI validates this when
+		// #zip is called, before any element is pulled.
+		for _, a := range args {
+			if _, isArr := a.(*object.Array); !isArr && !vm.respondsToDynamic(a, "each") {
+				raise("TypeError", "wrong argument type %s (must respond to :each)", vm.classOf(a).name)
+			}
+		}
 		return self.(*LazyEnum).with(lazyOp{kind: "zip", others: append([]object.Value{}, args...)})
 	})
 	// with_index(offset = 0): optional block maps (element, index); without a
 	// block each element becomes the pair [element, index].
-	d("with_index", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return self.(*LazyEnum).with(lazyOp{kind: "with_index", n: int(intArgOr(args, 0)), blk: blk})
+	d("with_index", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		off := 0
+		if len(args) > 0 && !object.IsNil(args[0]) { // a nil offset means "start at 0"
+			off = int(coerceInt(vm, args[0]))
+		}
+		return self.(*LazyEnum).with(lazyOp{kind: "with_index", n: off, blk: blk})
 	})
 	// chunk_while / slice_when split the stream into runs at each adjacent pair
 	// (a, b) for which the block does not hold (chunk_while) / does hold
@@ -560,8 +571,12 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 			return true
 		case "flat_map":
 			w := vm.callBlock(op.blk, []object.Value{v})
-			if arr, ok := w.(*object.Array); ok {
-				for _, e := range arr.Elems {
+			// MRI flattens an Array, or a value that responds to both #each and
+			// #force (an Enumerator::Lazy) — the latter forced to an Array first. A
+			// plain Enumerator (responds to #each but not #force) is passed through
+			// unflattened.
+			if arr, ok := lazyFlattenable(vm, w); ok {
+				for _, e := range arr {
 					if !feed(i+1, e) {
 						return false
 					}
@@ -736,7 +751,17 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 				return false
 			}
 			rem[i]--
-			return feed(i+1, v)
+			if !feed(i+1, v) {
+				return false
+			}
+			// Stop pulling once the quota is met, rather than waiting to reject the
+			// next element — so take(n).force drives the source exactly n times (and
+			// never triggers a source that raises on its n+1-th step).
+			if rem[i] == 0 {
+				stop = true
+				return false
+			}
+			return true
 		case "drop":
 			if rem[i] > 0 {
 				rem[i]--
@@ -765,7 +790,20 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 		}
 		return finish(i + 1)
 	}
+	// takeSaturated reports whether a take op has already met its quota, so the
+	// source need not be driven at all — take(0) then drives it zero times.
+	takeSaturated := func() bool {
+		for i, op := range le.ops {
+			if op.kind == "take" && rem[i] <= 0 {
+				return true
+			}
+		}
+		return false
+	}
 	for !stop {
+		if takeSaturated() {
+			break
+		}
 		v, ok := src()
 		if !ok {
 			break
@@ -800,6 +838,23 @@ func chunkKeyKind(k object.Value) (drop, alone, reserved bool) {
 		return false, false, true
 	}
 	return false, false, false
+}
+
+// lazyFlattenable reports whether flat_map should flatten w, returning its
+// elements when so: an Array flattens to its own elements; a value responding to
+// both #each and #force (an Enumerator::Lazy) is forced to an Array and
+// flattened. Anything else (including a plain Enumerator, which has #each but not
+// #force) is not flattened.
+func lazyFlattenable(vm *VM, w object.Value) ([]object.Value, bool) {
+	if arr, ok := w.(*object.Array); ok {
+		return arr.Elems, true
+	}
+	if vm.respondsToDynamic(w, "force") && vm.respondsToDynamic(w, "each") {
+		if arr, ok := vm.send(w, "force", nil, nil).(*object.Array); ok {
+			return arr.Elems, true
+		}
+	}
+	return nil, false
 }
 
 // lazyGrepValue returns the value grep/grep_v should emit for a match: the
