@@ -83,6 +83,7 @@ class InfNil;     def infinite?; nil; end; end
 		{"cmp_int", `puts(1.5 <=> 5)`, "-1\n"},
 		{"cmp_rational", `puts(1.5 <=> Rational(3, 2))`, "0\n"},
 		{"cmp_inf_infpos", coercePrelude + `puts(Float::INFINITY <=> InfPos.new)`, "0\n"},
+		{"cmp_neg_inf_infpos", coercePrelude + `puts(-Float::INFINITY <=> InfPos.new)`, "-1\n"},
 		{"cmp_inf_infneg", coercePrelude + `puts(Float::INFINITY <=> InfNeg.new)`, "1\n"},
 		{"cmp_inf_infnil", coercePrelude + `puts(Float::INFINITY <=> InfNil.new)`, "1\n"},
 		{"cmp_coerce", coercePrelude + `puts(2.33 <=> ModCoerce.new)`, "1\n"},
