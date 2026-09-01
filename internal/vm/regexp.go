@@ -587,15 +587,65 @@ func scanRegexp(v object.Value) *Regexp {
 // matches literally. Only the operators special at top level are escaped (the
 // engine rejects superfluous escapes such as \-); control and other bytes are
 // emitted verbatim, which the byte-oriented engine matches literally.
+// regexpOperandStr converts a Regexp operand (for Regexp.quote/escape/union of a
+// non-Regexp) to its string form the way MRI's reg_operand does: a String is
+// taken directly, a Symbol yields its name, and anything else is coerced via
+// #to_str (raising TypeError when it has none).
+func (vm *VM) regexpOperandStr(v object.Value) string {
+	switch x := v.(type) {
+	case *object.String:
+		return x.Str()
+	case object.Symbol:
+		return string(x)
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s.Str()
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+	return ""
+}
+
+// toRegexpOperand reports whether v is a Regexp or converts to one via #to_regexp,
+// returning that Regexp. It never raises: a value without #to_regexp is simply not
+// a Regexp operand.
+func (vm *VM) toRegexpOperand(v object.Value) (*Regexp, bool) {
+	if re, ok := v.(*Regexp); ok {
+		return re, true
+	}
+	if vm.respondsToDynamic(v, "to_regexp") {
+		if re, ok := vm.send(v, "to_regexp", nil, nil).(*Regexp); ok {
+			return re, true
+		}
+	}
+	return nil, false
+}
+
 func regexpEscapeLiteral(s string) string {
-	const meta = `.*+?()[]{}|^$\`
+	// The metacharacters MRI's rb_reg_quote backslash-escapes; note '-' and ' '
+	// and '#' are included and '/' is NOT (it is not special outside a literal).
+	const meta = `[]{}()|-*.\?+^$ #`
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if strings.IndexByte(meta, c) >= 0 {
-			b.WriteByte('\\')
+		switch c {
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\v':
+			b.WriteString(`\v`)
+		default:
+			if strings.IndexByte(meta, c) >= 0 {
+				b.WriteByte('\\')
+			}
+			b.WriteByte(c)
 		}
-		b.WriteByte(c)
 	}
 	return b.String()
 }
@@ -1185,13 +1235,15 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.smethods["compile"] = &Method{name: "compile", owner: vm.cRegexp, native: reNew.native}
 
 	// Regexp.escape(str) / Regexp.quote(str): the string with regex metacharacters
-	// escaped so it matches literally.
+	// escaped so it matches literally. A Symbol is accepted (its name is quoted),
+	// matching MRI's reg_operand handling.
 	reEscape := &Method{name: "escape", owner: vm.cRegexp,
-		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(regexpEscapeLiteral(strArg(args[0])))
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			return object.NewString(regexpEscapeLiteral(vm.regexpOperandStr(args[0])))
 		}}
 	vm.cRegexp.smethods["escape"] = reEscape
-	vm.cRegexp.smethods["quote"] = &Method{name: "quote", owner: vm.cRegexp, native: reEscape.native}
+	// quote shares escape's *Method so `Regexp.method(:escape) == Regexp.method(:quote)`.
+	vm.cRegexp.smethods["quote"] = reEscape
 
 	// Regexp.last_match returns the MatchData of the most recent match ($~), or
 	// with an Integer / name argument the corresponding capture (Regexp.last_match(1)
@@ -1209,26 +1261,42 @@ func (vm *VM) installRegexp() {
 		}}
 
 	// Regexp.union(pat, ...) / Regexp.union([pat, ...]) builds one Regexp matching
-	// any of the patterns. A Regexp argument contributes its source; a String is
-	// escaped to match literally. With no arguments it matches nothing, as MRI.
+	// any of the patterns. A Regexp argument contributes its #to_s (so its options
+	// ride along); a String/Symbol is escaped to match literally. With no arguments
+	// it matches nothing, as MRI.
 	vm.cRegexp.smethods["union"] = &Method{name: "union", owner: vm.cRegexp,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			// A single Array argument is the list of patterns.
-			if len(args) == 1 {
-				if arr, ok := args[0].(*object.Array); ok {
-					args = arr.Elems
-				}
-			}
 			if len(args) == 0 {
 				return vm.regexpNew([]object.Value{object.NewString("(?!)")})
 			}
+			// A single argument is special: a Regexp (or to_regexp) is returned
+			// verbatim, an Array is treated as the pattern list, and a String/Symbol
+			// becomes a lone quoted pattern (never wrapped in an alternation).
+			if len(args) == 1 {
+				if re, ok := vm.toRegexpOperand(args[0]); ok {
+					return re
+				}
+				if arr, ok := args[0].(*object.Array); ok {
+					if len(arr.Elems) == 0 {
+						return vm.regexpNew([]object.Value{object.NewString("(?!)")})
+					}
+					// A single-element list of one Regexp is still returned verbatim.
+					if len(arr.Elems) == 1 {
+						if re, ok := vm.toRegexpOperand(arr.Elems[0]); ok {
+							return re
+						}
+					}
+					args = arr.Elems
+				}
+			}
 			sources := make([]string, len(args))
 			for i, a := range args {
-				switch v := a.(type) {
-				case *Regexp:
-					sources[i] = v.source
-				default:
-					sources[i] = regexpEscapeLiteral(strArg(a))
+				if re, ok := vm.toRegexpOperand(a); ok {
+					// A Regexp contributes its #to_s so its own options ride along,
+					// e.g. Regexp.union(/dogs/, /cats/i) => /(?-mix:dogs)|(?i-mx:cats)/.
+					sources[i] = re.ToS()
+				} else {
+					sources[i] = regexpEscapeLiteral(vm.regexpOperandStr(a))
 				}
 			}
 			return vm.regexpNew([]object.Value{object.NewString(strings.Join(sources, "|"))})
