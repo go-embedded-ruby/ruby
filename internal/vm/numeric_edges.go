@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 
@@ -536,6 +537,170 @@ func (vm *VM) registerNumericEdges() {
 		}
 		return self
 	})
+
+	vm.registerNumericAliasesAndEdges()
+}
+
+// registerNumericAliasesAndEdges installs the residual alias tables and the
+// coerce/fdiv/modulo edge cases that MRI 4.0 defines. It runs at the end of
+// registerNumericEdges (so its definitions win) and is split out only to keep
+// the parent function readable.
+func (vm *VM) registerNumericAliasesAndEdges() {
+	floatOf := func(self object.Value) float64 { return float64(self.(object.Float)) }
+	cNumeric := vm.cComplex.super // Complex < Numeric, so this is the Numeric class
+
+	// --- Method aliases (true aliases: instance_method(:a) == instance_method(:b)).
+	// The alias specs compare the two UnboundMethods for identity, so each pair
+	// must share a single method-table entry rather than be two closures.
+	aliasBuiltin(cNumeric, "modulo", "%")
+	aliasBuiltin(cNumeric, "magnitude", "abs")
+	aliasBuiltin(cNumeric, "conj", "conjugate")
+	aliasBuiltin(cNumeric, "imag", "imaginary")
+	aliasBuiltin(cNumeric, "rect", "rectangular")
+	aliasBuiltin(cNumeric, "angle", "arg")
+	aliasBuiltin(cNumeric, "phase", "arg")
+	aliasBuiltin(vm.cInteger, "inspect", "to_s")
+	aliasBuiltin(vm.cInteger, "magnitude", "abs")
+	aliasBuiltin(vm.cInteger, "next", "succ")
+	aliasBuiltin(vm.cFloat, "inspect", "to_s")
+	aliasBuiltin(vm.cFloat, "to_int", "to_i")
+	aliasBuiltin(vm.cFloat, "magnitude", "abs")
+
+	// --- Integer#coerce / Float#coerce via Kernel#Float ---
+	// MRI coerces a non-Integer operand of Integer#coerce with rb_Float (parsing a
+	// String, dispatching #to_f on an object, raising ArgumentError/TypeError like
+	// Float()); an Integer/Bignum operand stays exact and returns [other, self].
+	vm.cInteger.define("coerce", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		checkArgc(args, 1, "coerce")
+		other := args[0]
+		if _, ok := object.BigOf(other); ok {
+			return object.NewArray(other, self)
+		}
+		of := vm.send(vm.main, "Float", []object.Value{other}, nil)
+		sf := vm.send(vm.main, "Float", []object.Value{self}, nil)
+		return object.NewArray(of, sf)
+	})
+	// Float#coerce converts the operand with Kernel#Float and returns [other, self]
+	// (self is already a Float).
+	vm.cFloat.define("coerce", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		checkArgc(args, 1, "coerce")
+		of := vm.send(vm.main, "Float", []object.Value{args[0]}, nil)
+		return object.NewArray(of, self)
+	})
+
+	// --- Integer#fdiv — exact division so huge Bignums round correctly ---
+	// self.to_f / other.to_f overflows to Inf/Inf = NaN for operands beyond a
+	// double's range; MRI divides exactly (rb_big_fdiv) so 1.fdiv(10**323) is
+	// 1e-323 rather than 0.0 and (10**400).fdiv(10**402) is 0.01 rather than NaN.
+	vm.cInteger.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		checkArgc(args, 1, "fdiv")
+		other := args[0]
+		if f, ok := other.(object.Float); ok {
+			sf, _ := toFloat(self)
+			return object.Float(sf / float64(f))
+		}
+		a, _ := object.BigOf(self)
+		if b, ok := object.BigOf(other); ok {
+			if b.Sign() == 0 { // 1.fdiv(0) is ±Infinity, not a division error
+				sf, _ := toFloat(self)
+				return object.Float(sf / 0.0)
+			}
+			q, _ := new(big.Rat).SetFrac(a, b).Float64()
+			return object.Float(q)
+		}
+		if r, ok := other.(*object.Rational); ok {
+			if r.R.Sign() == 0 {
+				sf, _ := toFloat(self)
+				return object.Float(sf / 0.0)
+			}
+			q, _ := new(big.Rat).Quo(new(big.Rat).SetInt(a), r.R).Float64()
+			return object.Float(q)
+		}
+		return vm.numCoerceDispatch(self, other, "fdiv")
+	})
+
+	// Float#fdiv is exactly one argument, then float division (a zero divisor
+	// yields ±Infinity, never a ZeroDivisionError); a non-numeric divisor is
+	// coerced, matching Numeric#coerce ("into Float").
+	vm.cFloat.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		checkArgc(args, 1, "fdiv")
+		b, ok := toFloat(args[0])
+		if !ok {
+			raise("TypeError", "%s can't be coerced into Float", vm.classOf(args[0]).name)
+		}
+		return object.Float(floatOf(self) / b)
+	})
+
+	// --- Integer#div — floored quotient, MRI operand rules ---
+	// An Integer/Bignum divisor gives a floored Integer; a Float divisor floors
+	// self.to_f/other but raises ZeroDivisionError on a 0.0 divisor (unlike
+	// Float#/); a Rational divisor floors the exact quotient; anything else runs
+	// the coerce protocol (other.coerce(self) then #div on the pair).
+	vm.cInteger.define("div", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		checkArgc(args, 1, "div")
+		other := args[0]
+		if b, ok := object.BigOf(other); ok {
+			if b.Sign() == 0 {
+				raise("ZeroDivisionError", "divided by 0")
+			}
+			a, _ := object.BigOf(self)
+			q, _ := bigFloorDivmod(a, b)
+			return object.NormInt(q)
+		}
+		if f, ok := other.(object.Float); ok {
+			if float64(f) == 0 {
+				raise("ZeroDivisionError", "divided by 0")
+			}
+			a, _ := toFloat(self)
+			return floatToInt(math.Floor(a / float64(f)))
+		}
+		if _, ok := other.(*object.Rational); ok {
+			q := vm.send(self, "/", []object.Value{other}, nil)
+			return vm.send(q, "floor", nil, nil)
+		}
+		return vm.numCoerceDispatch(self, other, "div")
+	})
+
+	// --- Float#% / #modulo / #divmod — MRI Inf/NaN and sign rules ---
+	// ruby_float_mod: fmod, but a non-finite divisor of a finite dividend returns
+	// the dividend, and the result takes the divisor's sign (so 4.2 % Infinity is
+	// 4.2 and 4.2 % -Infinity is -Infinity). A zero divisor raises; a non-numeric
+	// divisor is coerced (mock#coerce, then re-dispatch %).
+	vm.cFloat.define("%", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		checkArgc(args, 1, "%")
+		b, ok := toFloat(args[0])
+		if !ok {
+			return vm.numCoerceDispatch(self, args[0], "%")
+		}
+		if b == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		return object.Float(rubyFloatMod(floatOf(self), b))
+	})
+	aliasBuiltin(vm.cFloat, "modulo", "%")
+	// Float#divmod: an Integer quotient (floored) and a Float modulo. A NaN or
+	// Infinite quotient has no Integer value, so MRI raises FloatDomainError; a
+	// zero divisor raises ZeroDivisionError.
+	vm.cFloat.define("divmod", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		checkArgc(args, 1, "divmod")
+		b, ok := toFloat(args[0])
+		if !ok {
+			raise("TypeError", "%s can't be coerced into Float", vm.classOf(args[0]).name)
+		}
+		if b == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		a := floatOf(self)
+		q := floatToInt(math.Floor(a / b)) // FloatDomainError for NaN/±Infinity
+		return object.NewArray(q, object.Float(rubyFloatMod(a, b)))
+	})
+
+	// --- Zero-or-one / exactly-one argument-count guards MRI enforces ---
+	guardOneArg(vm.cInteger, "gcd", "lcm", "gcdlcm")
+	guardNoArg(vm.cInteger, "to_r")
+	guardAtMostOneArg(vm.cInteger, "rationalize")
+	guardAtMostOneArg(vm.cFloat, "rationalize")
+	guardNoArg(cNumeric, "imaginary", "real", "rectangular")
 }
 
 // ratOf converts an Integer/Bignum/Rational value to a *big.Rat for exact
@@ -551,6 +716,63 @@ func ratOf(v object.Value) (*big.Rat, bool) {
 	}
 	return nil, false
 }
+
+// rubyFloatMod is CRuby's ruby_float_mod: fmod(x, y), except a non-finite
+// divisor of a finite dividend returns the dividend, and the result is made to
+// carry the divisor's sign (adding y when they differ). It matches MRI's
+// Float#% for every finite/Infinite/NaN and signed-zero combination.
+func rubyFloatMod(x, y float64) float64 {
+	mod := math.Mod(x, y)
+	if math.IsInf(y, 0) && !math.IsInf(x, 0) && !math.IsNaN(x) {
+		mod = x
+	}
+	if mod != 0 && (y < 0) != (mod < 0) {
+		mod += y
+	}
+	return mod
+}
+
+// checkArgc raises MRI's ArgumentError when a method that takes exactly n
+// positional arguments is called with a different count.
+func checkArgc(args []object.Value, n int, _ string) {
+	if len(args) != n {
+		raise("ArgumentError", "%s", argcMessage(len(args), n, n))
+	}
+}
+
+// argcMessage renders MRI's "wrong number of arguments" text for a given/min/max
+// triple ("expected N" when the bounds are equal, "expected min..max" otherwise).
+func argcMessage(given, min, max int) string {
+	if min == max {
+		return fmt.Sprintf("wrong number of arguments (given %d, expected %d)", given, min)
+	}
+	return fmt.Sprintf("wrong number of arguments (given %d, expected %d..%d)", given, min, max)
+}
+
+// guardArgc re-wraps each named method of cls with a positional-argument-count
+// check ([min, max]; max < 0 means unbounded), preserving the original body.
+// A name the class does not define is skipped.
+func guardArgc(cls *RClass, min, max int, names ...string) {
+	for _, name := range names {
+		m, ok := cls.methods[name]
+		if !ok {
+			continue
+		}
+		orig := m.native
+		cls.define(name, func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			if len(args) < min || (max >= 0 && len(args) > max) {
+				raise("ArgumentError", "%s", argcMessage(len(args), min, max))
+			}
+			return orig(vm, self, args, blk)
+		})
+	}
+}
+
+// guardOneArg / guardNoArg / guardAtMostOneArg apply the three arity shapes MRI
+// enforces on these numeric methods.
+func guardOneArg(cls *RClass, names ...string)       { guardArgc(cls, 1, 1, names...) }
+func guardNoArg(cls *RClass, names ...string)        { guardArgc(cls, 0, 0, names...) }
+func guardAtMostOneArg(cls *RClass, names ...string) { guardArgc(cls, 0, 1, names...) }
 
 // coerceName names a value the way MRI does in "X can't be coerced" errors:
 // nil/true/false by their literal, everything else by class name.

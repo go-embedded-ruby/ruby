@@ -191,8 +191,11 @@ func intFloatCompare(op bytecode.Op, a *big.Int, f float64, floatLeft bool) obje
 }
 
 // bigOp performs an arbitrary-precision integer operation, normalizing the
-// result back to an Integer when it fits. big.Int Div/Mod are Euclidean, which
-// matches Ruby's floored division (a non-negative modulus).
+// result back to an Integer when it fits. Ruby's division is floored: the
+// modulo takes the sign of the divisor, so a negative divisor gives a
+// non-positive modulo (13 % -4 == -3), unlike big.Int's Euclidean Div/Mod
+// (which always give a non-negative remainder). bigFloorDivmod supplies the
+// floored quotient and remainder for both signs.
 func bigOp(op bytecode.Op, a, b *big.Int) object.Value {
 	switch op {
 	case bytecode.OpAdd:
@@ -205,12 +208,14 @@ func bigOp(op bytecode.Op, a, b *big.Int) object.Value {
 		if b.Sign() == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return object.NormInt(new(big.Int).Div(a, b))
+		q, _ := bigFloorDivmod(a, b)
+		return object.NormInt(q)
 	case bytecode.OpMod:
 		if b.Sign() == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return object.NormInt(new(big.Int).Mod(a, b))
+		_, r := bigFloorDivmod(a, b)
+		return object.NormInt(r)
 	case bytecode.OpLt:
 		return object.Bool(a.Cmp(b) < 0)
 	case bytecode.OpGt:
@@ -580,7 +585,13 @@ func floatOp(op bytecode.Op, a, b float64) object.Value {
 	case bytecode.OpDiv:
 		return object.Float(a / b) // matches Ruby: 1.0/0 => Infinity
 	case bytecode.OpMod:
-		return object.Float(floatMod(a, b))
+		// Ruby's Float#% raises on a zero divisor (unlike C fmod) and, for a
+		// non-finite divisor or a signed zero, follows ruby_float_mod rather than
+		// a plain remainder (4.2 % Infinity is 4.2, -0.0 % 42 is -0.0).
+		if b == 0 {
+			raise("ZeroDivisionError", "divided by 0")
+		}
+		return object.Float(rubyFloatMod(a, b))
 	case bytecode.OpLt:
 		return object.Bool(a < b)
 	case bytecode.OpGt:
@@ -1292,14 +1303,6 @@ func floorDiv(a, b int64) int64 {
 
 func floorMod(a, b int64) int64 {
 	m := a % b
-	if m != 0 && ((m < 0) != (b < 0)) {
-		m += b
-	}
-	return m
-}
-
-func floatMod(a, b float64) float64 {
-	m := a - b*float64(int64(a/b))
 	if m != 0 && ((m < 0) != (b < 0)) {
 		m += b
 	}

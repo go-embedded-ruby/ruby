@@ -77,8 +77,8 @@ func TestClassOfUnknown(t *testing.T) {
 }
 
 func TestFloatModSign(t *testing.T) {
-	if got := floatMod(-7.5, 2.0); got != 0.5 {
-		t.Errorf("floatMod(-7.5,2.0)=%v want 0.5", got)
+	if got := rubyFloatMod(-7.5, 2.0); got != 0.5 {
+		t.Errorf("rubyFloatMod(-7.5,2.0)=%v want 0.5", got)
 	}
 }
 
