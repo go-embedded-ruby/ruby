@@ -3,6 +3,7 @@ package vm
 import (
 	"math"
 	"math/big"
+	"math/cmplx"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -179,7 +180,7 @@ func ratPow(ra, rb *big.Rat) object.Value {
 	if !rb.IsInt() {
 		af, _ := ra.Float64()
 		bf, _ := rb.Float64()
-		return object.Float(math.Pow(af, bf))
+		return realPow(af, bf)
 	}
 	e := rb.Num()
 	base := ra
@@ -199,6 +200,18 @@ func ratPow(ra, rb *big.Rat) object.Value {
 	pn := new(big.Int).Exp(base.Num(), e, nil)
 	pd := new(big.Int).Exp(base.Denom(), e, nil)
 	return &object.Rational{R: new(big.Rat).SetFrac(pn, pd)}
+}
+
+// realPow raises the real base to the real exponent. A negative base with a
+// non-whole exponent has no real value, so MRI returns the principal Complex
+// root (exp(exp·ln base)); every other case yields a Float. This is why
+// Rational(-3, 2) ** 1.5 and Rational(-3, 4) ** Rational(-4, 3) are Complex.
+func realPow(base, exp float64) object.Value {
+	if base < 0 && exp != math.Trunc(exp) {
+		p := cmplx.Pow(complex(base, 0), complex(exp, 0))
+		return &object.Complex{Re: object.Float(real(p)), Im: object.Float(imag(p))}
+	}
+	return object.Float(math.Pow(base, exp))
 }
 
 // rationalEqual reports equality, coercing an Integer (Rational(2,1) == 2) or a
@@ -452,9 +465,9 @@ func (vm *VM) registerRational() {
 	})
 	vm.cRational.define("**", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		r := rval(self).R
-		if ef, ok := args[0].(object.Float); ok { // Float exponent → Float result
+		if ef, ok := args[0].(object.Float); ok { // Float exponent
 			rf, _ := r.Float64()
-			return object.Float(math.Pow(rf, float64(ef)))
+			return realPow(rf, float64(ef))
 		}
 		eb, ok := toRat(args[0])
 		if !ok {
@@ -521,11 +534,22 @@ func (vm *VM) registerRational() {
 		return m
 	})
 
-	// quo is the exact-division alias of #/, routed through the operator so it
-	// picks up the same numeric-coercion protocol.
-	vm.cRational.define("quo", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.send(self, "/", []object.Value{args[0]}, nil)
+	// Rational#/ is a real method (so Rational.instance_method(:/) resolves)
+	// routed through the operator fast path, and #quo is its true alias sharing
+	// the one Method record — Rational.instance_method(:quo) ==
+	// Rational.instance_method(:/).
+	vm.cRational.define("/", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.binaryOp(bytecode.OpDiv, self, args[0])
 	})
+	vm.cRational.methods["quo"] = vm.cRational.methods["/"]
+
+	// marshal_dump is the private hook Marshal uses to serialise a Rational: the
+	// two-element [numerator, denominator] array (MRI's Rational#marshal_dump).
+	vm.cRational.define("marshal_dump", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		r := rval(self).R
+		return object.NewArray(object.NormInt(r.Num()), object.NormInt(r.Denom()))
+	})
+	vm.setInstanceVisibility(vm.cRational, "marshal_dump", visPrivate)
 
 	vm.cRational.define("coerce", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		other := args[0]

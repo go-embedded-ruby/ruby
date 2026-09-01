@@ -177,6 +177,40 @@ func asComplexVal(v object.Value) (*object.Complex, bool) {
 	return nil, false
 }
 
+// valueIsNumeric reports whether v is a Ruby Numeric — a built-in numeric value
+// or an instance of a user subclass of Numeric (whose ancestry includes the
+// Numeric class). MRI requires a Complex component to be a Numeric.
+func (vm *VM) valueIsNumeric(v object.Value) bool {
+	if isNumericValue(v) {
+		return true
+	}
+	cNumeric := vm.cComplex.super // Complex < Numeric, so this is the Numeric class
+	for _, a := range vm.ancestors(vm.classOf(v)) {
+		if a == cNumeric {
+			return true
+		}
+	}
+	return false
+}
+
+// realComponent validates and canonicalises a value used as a Complex real or
+// imaginary part, following MRI: the value must be a real Numeric. A Complex
+// whose imaginary part is zero contributes its real part; a Complex with a
+// non-zero imaginary part, or any non-Numeric (or a Numeric answering #real?
+// with false), is not a real. ok is false in those rejecting cases.
+func (vm *VM) realComponent(v object.Value) (object.Value, bool) {
+	if c, ok := v.(*object.Complex); ok {
+		if imagNumericZero(c.Im) {
+			return c.Re, true
+		}
+		return nil, false
+	}
+	if vm.valueIsNumeric(v) && vm.send(v, "real?", nil, nil).Truthy() {
+		return v, true
+	}
+	return nil, false
+}
+
 // complexEqual reports Complex equality, including Complex(x, 0) == x.
 func complexEqual(c *object.Complex, other object.Value) bool {
 	if oc, ok := other.(*object.Complex); ok {
@@ -207,11 +241,18 @@ func complexOp(op bytecode.Op, a *object.Complex, b object.Value) object.Value {
 		im := binary(bytecode.OpAdd, binary(bytecode.OpMul, a.Re, bc.Im), binary(bytecode.OpMul, a.Im, bc.Re))
 		return &object.Complex{Re: re, Im: im}
 	case bytecode.OpDiv:
+		// A real divisor (imaginary part zero) divides each component directly, so
+		// dividing by a Float 0.0 gives ±Infinity per component with the correct
+		// sign (MRI's Complex(20, 40) / 0.0 == Complex(Infinity, Infinity)) rather
+		// than the 0/0 = NaN the general formula would produce. numQuo keeps
+		// Integer/Rational parts exact and raises ZeroDivisionError on an exact 0.
+		if imagNumericZero(bc.Im) {
+			return &object.Complex{Re: numQuo(a.Re, bc.Re), Im: numQuo(a.Im, bc.Re)}
+		}
 		// (a+bi)/(c+di) = ((ac+bd) + (bc−ad)i)/(c²+d²). This stays exact on
 		// Integer/Rational components (each final division is quo, so 3/2 becomes
 		// Rational(3,2) rather than an integer floor) and drops to Float only when a
-		// Float component is present. A real integer 0 divisor raises
-		// ZeroDivisionError; a Float 0.0 divisor yields non-finite components.
+		// Float component is present.
 		c, d := bc.Re, bc.Im
 		den := binary(bytecode.OpAdd, binary(bytecode.OpMul, c, c), binary(bytecode.OpMul, d, d))
 		reNum := binary(bytecode.OpAdd, binary(bytecode.OpMul, a.Re, c), binary(bytecode.OpMul, a.Im, d))
@@ -258,7 +299,7 @@ func complexFloat(v object.Value) float64 {
 // first argument is the real part and an optional second the imaginary part, each
 // required to be a real number (a non-real part is a TypeError). Every failure
 // path raises, so the constructor can wrap it for exception: false.
-func makeComplex(args []object.Value) object.Value {
+func (vm *VM) makeComplex(args []object.Value) object.Value {
 	if s, ok := args[0].(*object.String); ok && len(args) == 1 {
 		c, ok := stringToC(s.Str(), true)
 		if !ok {
@@ -266,16 +307,20 @@ func makeComplex(args []object.Value) object.Value {
 		}
 		return c
 	}
-	re := args[0]
+	// A lone Complex argument is returned unchanged (MRI's Complex(Complex(1,2))).
+	if c, ok := args[0].(*object.Complex); ok && len(args) == 1 {
+		return c
+	}
+	re, ok := vm.realComponent(args[0])
+	if !ok {
+		return raise("TypeError", "can't convert %s into Complex", vm.classOf(args[0]).name)
+	}
 	im := object.Value(object.IntValue(0))
 	if len(args) > 1 {
-		im = args[1]
-	}
-	if _, ok := toFloat(re); !ok {
-		return raise("TypeError", "can't convert %s into Complex", re.Inspect())
-	}
-	if _, ok := toFloat(im); !ok {
-		return raise("TypeError", "can't convert %s into Complex", im.Inspect())
+		im, ok = vm.realComponent(args[1])
+		if !ok {
+			return raise("TypeError", "not a real")
+		}
 	}
 	return &object.Complex{Re: re, Im: im}
 }
@@ -284,7 +329,7 @@ func makeComplex(args []object.Value) object.Value {
 func (vm *VM) registerComplex() {
 	vm.cObject.define("Complex", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
-		return vm.numericCtor(doRaise, func() object.Value { return makeComplex(args) })
+		return vm.numericCtor(doRaise, func() object.Value { return vm.makeComplex(args) })
 	})
 
 	// Integer#to_c / Float#to_c wrap a real number as Complex(self, 0); String#to_c
@@ -355,11 +400,11 @@ func (vm *VM) registerComplex() {
 		return object.NewArray(mag, ang)
 	})
 
-	vm.cComplex.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(cval(self).ToS())
+	vm.cComplex.define("to_s", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(vm.complexFormat(cval(self), false))
 	})
-	vm.cComplex.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(cval(self).Inspect())
+	vm.cComplex.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(vm.complexFormat(cval(self), true))
 	})
 
 	// A Complex is never real and never an integer, whatever its parts.
@@ -427,6 +472,14 @@ func (vm *VM) registerComplex() {
 		return object.NormInt(complexDenominator(cval(self)))
 	})
 
+	// marshal_dump is the private hook Marshal uses to serialise a Complex: the
+	// two-element [real, imaginary] array (MRI's Complex#marshal_dump).
+	vm.cComplex.define("marshal_dump", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		c := cval(self)
+		return object.NewArray(c.Re, c.Im)
+	})
+	vm.setInstanceVisibility(vm.cComplex, "marshal_dump", visPrivate)
+
 	vm.cComplex.define("fdiv", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		c := cval(self)
 		return &object.Complex{
@@ -446,9 +499,13 @@ func (vm *VM) registerComplex() {
 		return raise("TypeError", "%s can't be coerced into Complex", vm.classOf(other).name)
 	})
 
-	vm.cComplex.define("quo", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.send(self, "/", []object.Value{args[0]}, nil)
+	// Complex#/ is a real method (so Complex.instance_method(:/) resolves) routed
+	// through the operator fast path, and #quo is its true alias, sharing the one
+	// Method record — Complex.instance_method(:quo) == Complex.instance_method(:/).
+	vm.cComplex.define("/", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.binaryOp(bytecode.OpDiv, self, args[0])
 	})
+	vm.cComplex.methods["quo"] = vm.cComplex.methods["/"]
 
 	vm.cComplex.define("**", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		exp := args[0]
@@ -515,8 +572,8 @@ func (vm *VM) registerComplex() {
 	}
 
 	// Class constructors Complex.rectangular / .rect / .polar.
-	rectCtor := &Method{name: "rectangular", owner: vm.cComplex, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return complexRectangular(args)
+	rectCtor := &Method{name: "rectangular", owner: vm.cComplex, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.complexRectangular(args)
 	}}
 	vm.cComplex.smethods["rectangular"] = rectCtor
 	vm.cComplex.smethods["rect"] = rectCtor
@@ -591,20 +648,79 @@ func complexNumerator(c *object.Complex) object.Value {
 }
 
 // complexRectangular builds Complex(re, im=0) from real arguments (MRI's
-// Complex.rectangular), raising TypeError on a non-real part.
-func complexRectangular(args []object.Value) object.Value {
-	re := args[0]
+// Complex.rectangular), raising TypeError on a non-real part. A Complex argument
+// whose imaginary part is zero contributes its real part (so
+// Complex.rectangular(1.0+0i, 2+0.0i) == Complex(1.0, 2)); a non-zero imaginary
+// part is not a real.
+func (vm *VM) complexRectangular(args []object.Value) object.Value {
+	re, ok := vm.realComponent(args[0])
+	if !ok {
+		return raise("TypeError", "not a real")
+	}
 	im := object.Value(object.IntValue(0))
 	if len(args) > 1 {
-		im = args[1]
-	}
-	if _, ok := toFloat(re); !ok {
-		return raise("TypeError", "not a real")
-	}
-	if _, ok := toFloat(im); !ok {
-		return raise("TypeError", "not a real")
+		im, ok = vm.realComponent(args[1])
+		if !ok {
+			return raise("TypeError", "not a real")
+		}
 	}
 	return &object.Complex{Re: re, Im: im}
+}
+
+// complexFormat renders a Complex for #to_s (insp=false) or #inspect (insp=true).
+// When both parts are plain built-in numbers the exact object-level formatter is
+// used (it handles Float -0.0 / Infinity / NaN). Otherwise — a Numeric-subclass
+// part — MRI builds the string from the parts' own #to_s / #inspect: the sign is
+// taken from `imag < 0`, a trailing `*` is inserted before `i` when the
+// imaginary string does not end in a digit, and inspect wraps the whole in
+// parentheses.
+func (vm *VM) complexFormat(c *object.Complex, insp bool) string {
+	if formattableComplexPart(c.Re) && formattableComplexPart(c.Im) {
+		if insp {
+			return c.Inspect()
+		}
+		return c.ToS()
+	}
+	meth := "to_s"
+	if insp {
+		meth = "inspect"
+	}
+	reStr := vm.strVal(vm.send(c.Re, meth, nil, nil))
+	im := c.Im
+	sign := "+"
+	if vm.send(c.Im, "<", []object.Value{object.IntValue(0)}, nil).Truthy() {
+		sign = "-"
+		im = vm.send(c.Im, "-@", nil, nil)
+	}
+	imStr := vm.strVal(vm.send(im, meth, nil, nil))
+	tail := "i"
+	if n := len(imStr); n == 0 || imStr[n-1] < '0' || imStr[n-1] > '9' {
+		tail = "*i"
+	}
+	s := reStr + sign + imStr + tail
+	if insp {
+		return "(" + s + ")"
+	}
+	return s
+}
+
+// formattableComplexPart reports whether a Complex part is a built-in number the
+// object-level formatter renders directly (Integer/Bignum/Float/Rational).
+func formattableComplexPart(v object.Value) bool {
+	switch v.(type) {
+	case object.Integer, *object.Bignum, object.Float, *object.Rational:
+		return true
+	}
+	return false
+}
+
+// strVal returns the Go string of a value expected to be a Ruby String (the
+// result of #to_s / #inspect); a non-String falls back to its own inspect.
+func (vm *VM) strVal(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	return v.Inspect()
 }
 
 // polarReal reads a real value for Complex.polar's modulus/argument: a real
