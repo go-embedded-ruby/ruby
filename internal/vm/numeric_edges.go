@@ -24,10 +24,51 @@ import (
 // are shared with the Rational rounding path (see rational.go): roundArgs peels
 // the ndigits and mode with the same ratPrecision / ratHalfMode helpers.
 
-// roundArgs splits a round argument list into its integer ndigits (default 0)
-// and the `half:` rounding mode, validating the mode even when ndigits >= 0.
-func roundArgs(args []object.Value) (ndigits int, mode roundMode) {
-	return int(ratPrecision(args)), ratHalfMode(args)
+// roundNdigits splits a round argument list into its ndigits (default 0) and
+// the `half:` rounding mode. Unlike the plain ratPrecision reader it follows
+// MRI's NUM2INT contract for ndigits: the value is coerced through #to_int, a
+// magnitude beyond a C int raises RangeError (a Bignum or a Float ±Infinity
+// included), and a finite Float truncates toward zero.
+func (vm *VM) roundNdigits(args []object.Value) (ndigits int, mode roundMode) {
+	mode = ratHalfMode(args)
+	for _, a := range args {
+		if _, ok := a.(*object.Hash); ok { // the half: keyword hash
+			continue
+		}
+		return vm.toRoundInt(a), mode
+	}
+	return 0, mode
+}
+
+// toRoundInt coerces a round precision argument to a C-int-range Go int the way
+// MRI's rb_num2int does, raising RangeError when the value cannot fit.
+func (vm *VM) toRoundInt(a object.Value) int {
+	switch v := a.(type) {
+	case object.Integer:
+		if int64(v) < math.MinInt32 || int64(v) > math.MaxInt32 {
+			raise("RangeError", "integer %d too big to convert to `int'", int64(v))
+		}
+		return int(v)
+	case *object.Bignum:
+		raise("RangeError", "bignum too big to convert into `long'")
+	case object.Float:
+		f := math.Trunc(float64(v))
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) || f < math.MinInt32 || f > math.MaxInt32 {
+			raise("RangeError", "float %s out of range of integer", v.ToS())
+		}
+		return int(f)
+	}
+	if vm.respondsToDynamic(a, "to_int") {
+		r := vm.send(a, "to_int", nil, nil)
+		switch r.(type) {
+		case object.Integer, *object.Bignum:
+			return vm.toRoundInt(r)
+		}
+		raise("TypeError", "can't convert %s to Integer (%s#to_int gives %s)",
+			classNameOf(a), classNameOf(a), classNameOf(r))
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(a))
+	return 0
 }
 
 // --- Float rounding, ported from CRuby numeric.c ---------------------------
@@ -422,8 +463,8 @@ func (vm *VM) registerNumericEdges() {
 	})
 
 	// Integer#round — MRI-faithful, honouring negative ndigits and `half:`.
-	vm.cInteger.define("round", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		ndigits, mode := roundArgs(args)
+	vm.cInteger.define("round", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		ndigits, mode := vm.roundNdigits(args)
 		if ndigits >= 0 {
 			return self
 		}
@@ -439,8 +480,8 @@ func (vm *VM) registerNumericEdges() {
 	})
 
 	// Float#round — MRI-faithful, honouring `half:` and the ndigits contract.
-	vm.cFloat.define("round", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		ndigits, mode := roundArgs(args)
+	vm.cFloat.define("round", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		ndigits, mode := vm.roundNdigits(args)
 		return floRound(floatOf(self), ndigits, mode)
 	})
 
@@ -693,6 +734,65 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 		a := floatOf(self)
 		q := floatToInt(math.Floor(a / b)) // FloatDomainError for NaN/±Infinity
 		return object.NewArray(q, object.Float(rubyFloatMod(a, b)))
+	})
+
+	// Integer#bit_length — the number of bits in the two's-complement
+	// representation (excluding the sign). The earlier definition used a machine
+	// long and raised RangeError for a Bignum; compute it over big.Int so a
+	// Bignum answers (a negative number uses ~n, since -n-1 has the same magnitude
+	// pattern as MRI's leftmost-0-bit count).
+	vm.cInteger.define("bit_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		n := bigVal(self)
+		if n.Sign() < 0 {
+			n = new(big.Int).Not(n) // ~n = -n-1
+		}
+		return object.IntValue(int64(n.BitLen()))
+	})
+
+	// --- Float#<=> — NaN, an infinite receiver vs #infinite?, and #coerce ---
+	// A NaN on either side makes the pair unordered (nil). An infinite receiver
+	// compared against a non-numeric that answers #infinite? orders by sign
+	// (Infinity <=> obj.infinite?, treating nil as a finite 0). A non-numeric with
+	// #coerce runs the coercion protocol, and a #coerce that does not return a
+	// two-element Array raises TypeError; anything else is unordered (nil).
+	vm.cFloat.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := floatOf(self)
+		other := args[0]
+		if bi, ok := object.BigOf(other); ok { // Integer / Bignum, compared exactly
+			if c, ok := cmpBigFloat(bi, a); ok {
+				return object.IntValue(int64(-c))
+			}
+			return object.NilV // a is NaN
+		}
+		switch other.(type) {
+		case object.Float, *object.Rational:
+			b, _ := toFloat(other)
+			if math.IsNaN(a) || math.IsNaN(b) {
+				return object.NilV
+			}
+			return object.IntValue(int64(cmpFloat(a, b)))
+		}
+		if math.IsInf(a, 0) && vm.respondsToDynamic(other, "infinite?") {
+			rhs := int64(0) // #infinite? == nil means the other value is finite
+			if i := vm.send(other, "infinite?", nil, nil); !object.IsNil(i) {
+				if iv, ok := i.(object.Integer); ok {
+					rhs = int64(iv)
+				}
+			}
+			lhs := int64(1)
+			if a < 0 {
+				lhs = -1
+			}
+			return object.IntValue(int64(cmpInt64(lhs, rhs)))
+		}
+		if vm.respondsToDynamic(other, "coerce") {
+			pair := vm.send(other, "coerce", []object.Value{self}, nil)
+			if arr, ok := pair.(*object.Array); ok && len(arr.Elems) == 2 {
+				return vm.send(arr.Elems[0], "<=>", []object.Value{arr.Elems[1]}, nil)
+			}
+			raise("TypeError", "coerce must return [x, y]")
+		}
+		return object.NilV
 	})
 
 	// --- Zero-or-one / exactly-one argument-count guards MRI enforces ---
