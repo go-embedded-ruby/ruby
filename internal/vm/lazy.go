@@ -14,6 +14,16 @@ import (
 type LazyEnum struct {
 	recv object.Value
 	ops  []lazyOp
+	// sizeSpec, when sizeSpecSet, is the size given to Enumerator::Lazy.new(obj,
+	// size) { … }: it seeds #size (an Integer/nil verbatim, or a callable invoked on
+	// demand) in place of the source's own #size. Carried across #with so ops thread
+	// through it. When unset, #size starts from the source's #size (if any).
+	sizeSpec    object.Value
+	sizeSpecSet bool
+	// ext caches the Enumerator that drives this pipeline for external iteration
+	// (#next/#peek/#rewind), pulling one element at a time through a fiber so the
+	// pipeline is never over-evaluated (and an infinite source stays usable).
+	ext *Enumerator
 }
 
 type lazyOp struct {
@@ -38,12 +48,40 @@ func (l *LazyEnum) Truthy() bool    { return true }
 // with returns a copy of l with one more transformation appended.
 func (l *LazyEnum) with(op lazyOp) *LazyEnum {
 	ops := append(append([]lazyOp{}, l.ops...), op)
-	return &LazyEnum{recv: l.recv, ops: ops}
+	return &LazyEnum{recv: l.recv, ops: ops, sizeSpec: l.sizeSpec, sizeSpecSet: l.sizeSpecSet}
 }
 
 func (vm *VM) registerLazy() {
 	vm.cLazy = newClass("Enumerator::Lazy", vm.cEnumerator)
 	vm.cEnumerator.consts["Lazy"] = vm.cLazy
+
+	// Enumerator::Lazy.new(obj, size = nil) { |yielder, *values| … } builds a lazy
+	// enumerator whose block is run once per element of obj.each, receiving a yielder
+	// (its `<<`/`yield` feed the pipeline) followed by that element's yielded values.
+	// The optional size seeds #size (Integer/nil verbatim, or a callable on demand).
+	vm.cLazy.smethods["new"] = &Method{name: "new", owner: vm.cLazy,
+		native: func(_ *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+			if blk == nil {
+				raise("ArgumentError", "tried to call lazy new without a block")
+			}
+			if len(args) == 0 {
+				raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+			}
+			src := args[0]
+			gen := &Proc{native: func(vm *VM, gargs []object.Value) object.Value {
+				y := gargs[0]
+				step := &Proc{native: func(vm *VM, vals []object.Value) object.Value {
+					vm.callBlock(blk, append([]object.Value{y}, vals...))
+					return object.NilV
+				}}
+				return vm.send(src, "each", nil, step)
+			}}
+			le := &LazyEnum{recv: &Enumerator{block: gen}}
+			if len(args) > 1 {
+				le.sizeSpec, le.sizeSpecSet = args[1], true
+			}
+			return le
+		}}
 
 	makeLazy := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &LazyEnum{recv: self}
@@ -70,13 +108,10 @@ func (vm *VM) registerLazy() {
 		}
 	}
 	d("map", chain("map"))
-	d("collect", chain("map"))
 	d("select", chain("select"))
-	d("filter", chain("select"))
 	d("reject", chain("reject"))
 	d("filter_map", chain("filter_map"))
 	d("flat_map", chain("flat_map"))
-	d("collect_concat", chain("flat_map"))
 	d("take_while", chain("take_while"))
 	d("drop_while", chain("drop_while"))
 	d("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -197,6 +232,127 @@ func (vm *VM) registerLazy() {
 		})
 		return l
 	})
+	// #size threads the source's size through the pipeline: filtering/reshaping ops
+	// (select, flat_map, grep, uniq, chunk, …) make it unknown (nil); map/with_index/
+	// zip keep it; take/drop bound it — see lazyOpSize.
+	d("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.lazySize(self.(*LazyEnum))
+	})
+	// External iteration over the lazy pipeline (#next/#peek/#rewind/…): driven by a
+	// cached Enumerator so each pull advances the pipeline one element at a time,
+	// never over-evaluating and never materialising an infinite source.
+	lazyExt := func(self object.Value) *Enumerator {
+		l := self.(*LazyEnum)
+		if l.ext == nil {
+			l.ext = &Enumerator{recv: l, meth: "each"}
+		}
+		return l.ext
+	}
+	d("next", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return enumPack(vm.enumNextRaw(lazyExt(self)).Elems)
+	})
+	d("next_values", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.enumNextRaw(lazyExt(self))
+	})
+	d("peek", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return enumPack(vm.enumPeekRaw(lazyExt(self)).Elems)
+	})
+	d("peek_values", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.enumPeekRaw(lazyExt(self))
+	})
+	d("rewind", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		e := lazyExt(self)
+		e.extFiber, e.peeked, e.ended = nil, false, false
+		return self
+	})
+	// enum_for / to_enum on a Lazy return a fresh Lazy that drives self.meth(*rest)
+	// lazily (through a generator Enumerator pulled one element at a time). A block
+	// supplies #size (returned verbatim, possibly nil) as elsewhere.
+	lazyToEnum := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		l := self.(*LazyEnum)
+		meth, rest := "each", []object.Value(nil)
+		if len(args) > 0 {
+			meth, rest = args[0].ToS(), args[1:]
+		}
+		gen := &Proc{native: func(vm *VM, gargs []object.Value) object.Value {
+			y := gargs[0]
+			step := &Proc{native: func(vm *VM, a []object.Value) object.Value {
+				vm.send(y, "yield", a, nil)
+				return object.NilV
+			}}
+			return vm.send(l, meth, rest, step)
+		}}
+		return &LazyEnum{recv: &Enumerator{block: gen, sizeBlock: blk}}
+	}
+	d("to_enum", lazyToEnum)
+	// Alias the shared Method objects so instance_method identities match MRI
+	// (Enumerator::Lazy#collect == #map, #filter == #select, …) and the Lazy method
+	// whitelist (instance_methods(false)) carries every expected name.
+	alias := func(name, of string) { vm.cLazy.methods[name] = vm.cLazy.methods[of] }
+	alias("collect", "map")
+	alias("filter", "select")
+	alias("find_all", "select")
+	alias("collect_concat", "flat_map")
+	alias("enum_for", "to_enum")
+}
+
+// lazySize threads the source's #size through the op chain. A filtering or
+// reshaping op makes the size unknown (nil); once unknown it stays unknown.
+func (vm *VM) lazySize(l *LazyEnum) object.Value {
+	var sz object.Value
+	switch {
+	case l.sizeSpecSet:
+		sz = vm.enumResolveSize(l.sizeSpec)
+	case vm.respondsToDynamic(l.recv, "size"):
+		sz = vm.send(l.recv, "size", nil, nil)
+	default:
+		return object.NilV
+	}
+	for _, op := range l.ops {
+		if object.IsNil(sz) {
+			return object.NilV
+		}
+		sz = lazyOpSize(op, sz)
+	}
+	return sz
+}
+
+// lazyOpSize maps a known incoming size through one op: map/with_index/zip keep
+// it, take bounds it to its count (min, or the count itself for an infinite
+// source), drop subtracts its count (flooring at 0, infinity staying infinite),
+// and every filtering/reshaping op makes it unknown.
+func lazyOpSize(op lazyOp, sz object.Value) object.Value {
+	switch op.kind {
+	case "map", "with_index", "zip":
+		return sz
+	case "take":
+		n := int64(op.n)
+		if isInfFloat(sz) {
+			return object.IntValue(n)
+		}
+		if i, ok := sz.(object.Integer); ok {
+			if int64(i) < n {
+				return sz
+			}
+			return object.IntValue(n)
+		}
+		return object.NilV
+	case "drop":
+		n := int64(op.n)
+		if isInfFloat(sz) {
+			return sz
+		}
+		if i, ok := sz.(object.Integer); ok {
+			d := int64(i) - n
+			if d < 0 {
+				d = 0
+			}
+			return object.IntValue(d)
+		}
+		return object.NilV
+	default:
+		return object.NilV
+	}
 }
 
 // lazySource returns a restartable pull function over le.recv: successive calls
