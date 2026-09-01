@@ -165,7 +165,16 @@ func TestMatchDataOffsetErrors(t *testing.T) {
 		{`begin; "ab".match(/(?<a>.)/).offset(:z); rescue => e; p [e.class, e.message]; end`,
 			"[IndexError, \"undefined group name reference: z\"]\n"},
 		{`begin; "ab".match(/(?<a>.)/).begin(:z); rescue => e; p e.class; end`, "IndexError\n"},
-		{`begin; "ab".match(/(.)/).begin(3.5); rescue => e; p e.class; end`, "TypeError\n"},
+		// A Float argument is coerced with #to_int (3.5 -> 3), then range-checked:
+		// index 3 is out of range for a single-group match, so IndexError, as MRI.
+		{`begin; "ab".match(/(.)/).begin(3.5); rescue => e; p [e.class, e.message]; end`,
+			"[IndexError, \"index 3 out of matches\"]\n"},
+		// An in-range Float coerces and succeeds (1.9 -> 1); group 1 starts at 0.
+		{`p "ab".match(/(.)(.)/).begin(1.9)`, "0\n"},
+		// An object with a #to_int returning an in-range index is accepted.
+		{`o = Object.new; def o.to_int; 2; end; p "ab".match(/(.)(.)/).begin(o)`, "1\n"},
+		// An object with no #to_int (nor String/Symbol) raises TypeError.
+		{`begin; "ab".match(/(.)/).begin(Object.new); rescue => e; p e.class; end`, "TypeError\n"},
 	})
 }
 

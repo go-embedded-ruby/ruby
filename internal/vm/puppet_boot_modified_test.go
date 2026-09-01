@@ -241,8 +241,9 @@ func TestPBRegexpNewBranches(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{`puts Regexp.escape("a.b*c")`, `a\.b\*c`},
 		{`puts Regexp.quote("a.b*c")`, `a\.b\*c`},
-		// String member is escaped, Regexp member contributes its source.
-		{`puts Regexp.union("a.b", /cd/).source`, `a\.b|cd`},
+		// String member is escaped, Regexp member contributes its #to_s (with its
+		// options), as MRI: Regexp.union("a.b", /cd/).source => "a\\.b|(?-mix:cd)".
+		{`puts Regexp.union("a.b", /cd/).source`, `a\.b|(?-mix:cd)`},
 		// Single Array argument is the pattern list.
 		{`puts Regexp.union(["x", "y"]).source`, "x|y"},
 		// No arguments -> a pattern that matches nothing.
