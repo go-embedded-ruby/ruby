@@ -65,6 +65,37 @@ func TestRegexpMatchResiduals(t *testing.T) {
 	})
 }
 
+// TestRegexpMatchDataAliases covers the genuine built-in aliases (shared method
+// records) and the small Ruby-3.4 accessors added alongside them.
+func TestRegexpMatchDataAliases(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`p Regexp.instance_method(:eql?) == Regexp.instance_method(:==)`, "true\n"},
+		{`p MatchData.instance_method(:eql?) == MatchData.instance_method(:==)`, "true\n"},
+		{`p MatchData.instance_method(:length) == MatchData.instance_method(:size)`, "true\n"},
+		{`p MatchData.instance_method(:deconstruct) == MatchData.instance_method(:captures)`, "true\n"},
+		// #deconstruct still behaves as #captures.
+		{`p "hi".match(/(.)(.)/).deconstruct`, "[\"h\", \"i\"]\n"},
+		// MatchData#match_length: character length of a group, nil when absent.
+		{`p(/(.)(.)(\d+)(\d)/.match("THX1138.").match_length(3))`, "3\n"},
+		{`p(/\d+(\w)?/.match("THX1138.").match_length(1))`, "nil\n"},
+		{`m = "haystack".match(/(?<t>t(?<a>ack))/); p m.match_length(:t)`, "4\n"},
+		// MatchData.allocate is undefined.
+		{`begin; MatchData.allocate; rescue => e; p e.class; end`, "NoMethodError\n"},
+	})
+}
+
+// TestRegexpInitialize covers the private #initialize that always refuses: a
+// frozen literal raises FrozenError, an already-initialized non-literal (and a
+// subclass instance) raises TypeError, and #initialize is registered private.
+func TestRegexpInitialize(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`p Regexp.private_instance_methods(false).include?(:initialize)`, "true\n"},
+		{`begin; //.send(:initialize, ""); rescue => e; p e.class; end`, "FrozenError\n"},
+		{`begin; Regexp.new("").send(:initialize, ""); rescue => e; p e.class; end`, "TypeError\n"},
+		{`r = Class.new(Regexp).new(""); begin; r.send(:initialize, ""); rescue => e; p e.class; end`, "TypeError\n"},
+	})
+}
+
 // TestMatchDataMatchMethod covers MatchData#match(n) / #match(name) (Ruby 3.4):
 // the scalar subset of #[], returning nil for a non-participating group.
 func TestMatchDataMatchMethod(t *testing.T) {

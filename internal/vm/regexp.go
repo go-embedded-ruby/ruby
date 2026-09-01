@@ -1314,6 +1314,19 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.smethods["new"] = reNew
 	vm.cRegexp.smethods["compile"] = &Method{name: "compile", owner: vm.cRegexp, native: reNew.native}
 
+	// Regexp#initialize is a private method that a user can never usefully call: a
+	// Regexp is fully built by Regexp.new / a literal, so re-running #initialize on
+	// a frozen literal raises FrozenError and on an already-initialized non-literal
+	// raises TypeError ("already initialized regexp"), matching MRI (< 4.1).
+	vm.cRegexp.define("initialize", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if isFrozen(self) {
+			vm.raiseFrozen(self)
+		}
+		raise("TypeError", "already initialized regexp")
+		return object.NilV
+	})
+	vm.setInstanceVisibility(vm.cRegexp, "initialize", visPrivate)
+
 	// Regexp.escape(str) / Regexp.quote(str): the string with regex metacharacters
 	// escaped so it matches literally. A Symbol is accepted (its name is quoted),
 	// matching MRI's reg_operand handling.
@@ -1463,7 +1476,8 @@ func (vm *VM) installRegexp() {
 		return object.Bool(a.source == other.source && a.optionBits() == other.optionBits())
 	}
 	vm.cRegexp.define("==", reEqual)
-	vm.cRegexp.define("eql?", reEqual)
+	// #eql? is a genuine alias of #== (shared record).
+	aliasBuiltin(vm.cRegexp, "eql?", "==")
 	// Regexp#hash is consistent with #== / #eql?: equal Regexps hash equal.
 	vm.cRegexp.define("hash", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		r := reArg(self)
@@ -1514,6 +1528,14 @@ func (vm *VM) installRegexp() {
 
 	mdArg := func(v object.Value) *MatchData { return v.(*MatchData) }
 
+	// MatchData.allocate is undefined (a MatchData can only arise from a match), so
+	// it raises NoMethodError rather than returning an uninitialized object — see
+	// https://bugs.ruby-lang.org/issues/16294.
+	vm.cMatchData.smethods["allocate"] = &Method{name: "allocate", owner: vm.cMatchData,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			raise("NoMethodError", "undefined method 'allocate' for class MatchData")
+			return object.NilV
+		}}
 	vm.cMatchData.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(mdArg(self).md.Str(0))
 	})
@@ -1539,9 +1561,9 @@ func (vm *VM) installRegexp() {
 	vm.cMatchData.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(mdArg(self).md.NGroups() + 1))
 	})
-	vm.cMatchData.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(mdArg(self).md.NGroups() + 1))
-	})
+	// MatchData#length is a genuine alias of #size (shared record, so
+	// MatchData.instance_method(:length) == MatchData.instance_method(:size)).
+	aliasBuiltin(vm.cMatchData, "length", "size")
 	vm.cMatchData.define("to_a", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		out := make([]object.Value, 0, m.md.NGroups()+1)
@@ -1618,15 +1640,9 @@ func (vm *VM) installRegexp() {
 		return object.NewFrozenStringView(mdArg(self).subject)
 	})
 	// MatchData#deconstruct is the Array of captures (groups 1..n), for array
-	// pattern matching (`in [a, b]`).
-	vm.cMatchData.define("deconstruct", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		m := mdArg(self)
-		out := make([]object.Value, 0, m.md.NGroups())
-		for i := 1; i <= m.md.NGroups(); i++ {
-			out = append(out, groupValue(m, i))
-		}
-		return object.NewArrayFromSlice(out)
-	})
+	// pattern matching (`in [a, b]`); it is a genuine alias of #captures (shared
+	// record, so MatchData.instance_method(:deconstruct) == …(:captures)).
+	aliasBuiltin(vm.cMatchData, "deconstruct", "captures")
 	// MatchData#deconstruct_keys(keys) is the symbol-keyed named captures, for
 	// hash pattern matching (`in {name:}`). keys nil selects them all; otherwise
 	// only the requested Symbol keys are returned, and the walk stops at the first
@@ -1659,7 +1675,8 @@ func (vm *VM) installRegexp() {
 		return object.Bool(a.equalTo(other))
 	}
 	vm.cMatchData.define("==", mdEqual)
-	vm.cMatchData.define("eql?", mdEqual)
+	// #eql? is a genuine alias of #== (shared record).
+	aliasBuiltin(vm.cMatchData, "eql?", "==")
 	vm.cMatchData.define("hash", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		m := mdArg(self)
 		return object.IntValue(fnvHash(m.re.source+"\x00"+m.md.Str(0)) ^ int64(m.byteOff+m.md.Begin(0)))
@@ -1701,6 +1718,16 @@ func (vm *VM) installRegexp() {
 	// did not participate.
 	vm.cMatchData.define("match", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return mdArg(self).at(args[0])
+	})
+	// MatchData#match_length(n) (Ruby 3.4) is the character length of that group's
+	// match, or nil when the group did not participate.
+	vm.cMatchData.define("match_length", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		v := mdArg(self).at(args[0])
+		s, ok := v.(*object.String)
+		if !ok {
+			return object.NilV
+		}
+		return object.IntValue(int64(utf8.RuneCountInString(s.Str())))
 	})
 }
 
