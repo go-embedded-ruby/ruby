@@ -14,6 +14,16 @@ import (
 type LazyEnum struct {
 	recv object.Value
 	ops  []lazyOp
+	// sizeSpec, when sizeSpecSet, is the size given to Enumerator::Lazy.new(obj,
+	// size) { … }: it seeds #size (an Integer/nil verbatim, or a callable invoked on
+	// demand) in place of the source's own #size. Carried across #with so ops thread
+	// through it. When unset, #size starts from the source's #size (if any).
+	sizeSpec    object.Value
+	sizeSpecSet bool
+	// ext caches the Enumerator that drives this pipeline for external iteration
+	// (#next/#peek/#rewind), pulling one element at a time through a fiber so the
+	// pipeline is never over-evaluated (and an infinite source stays usable).
+	ext *Enumerator
 }
 
 type lazyOp struct {
@@ -38,12 +48,40 @@ func (l *LazyEnum) Truthy() bool    { return true }
 // with returns a copy of l with one more transformation appended.
 func (l *LazyEnum) with(op lazyOp) *LazyEnum {
 	ops := append(append([]lazyOp{}, l.ops...), op)
-	return &LazyEnum{recv: l.recv, ops: ops}
+	return &LazyEnum{recv: l.recv, ops: ops, sizeSpec: l.sizeSpec, sizeSpecSet: l.sizeSpecSet}
 }
 
 func (vm *VM) registerLazy() {
 	vm.cLazy = newClass("Enumerator::Lazy", vm.cEnumerator)
 	vm.cEnumerator.consts["Lazy"] = vm.cLazy
+
+	// Enumerator::Lazy.new(obj, size = nil) { |yielder, *values| … } builds a lazy
+	// enumerator whose block is run once per element of obj.each, receiving a yielder
+	// (its `<<`/`yield` feed the pipeline) followed by that element's yielded values.
+	// The optional size seeds #size (Integer/nil verbatim, or a callable on demand).
+	vm.cLazy.smethods["new"] = &Method{name: "new", owner: vm.cLazy,
+		native: func(_ *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+			if blk == nil {
+				raise("ArgumentError", "tried to call lazy new without a block")
+			}
+			if len(args) == 0 {
+				raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+			}
+			src := args[0]
+			gen := &Proc{native: func(vm *VM, gargs []object.Value) object.Value {
+				y := gargs[0]
+				step := &Proc{native: func(vm *VM, vals []object.Value) object.Value {
+					vm.callBlock(blk, append([]object.Value{y}, vals...))
+					return object.NilV
+				}}
+				return vm.send(src, "each", nil, step)
+			}}
+			le := &LazyEnum{recv: &Enumerator{block: gen}}
+			if len(args) > 1 {
+				le.sizeSpec, le.sizeSpecSet = args[1], true
+			}
+			return le
+		}}
 
 	makeLazy := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &LazyEnum{recv: self}
@@ -70,13 +108,10 @@ func (vm *VM) registerLazy() {
 		}
 	}
 	d("map", chain("map"))
-	d("collect", chain("map"))
 	d("select", chain("select"))
-	d("filter", chain("select"))
 	d("reject", chain("reject"))
 	d("filter_map", chain("filter_map"))
 	d("flat_map", chain("flat_map"))
-	d("collect_concat", chain("flat_map"))
 	d("take_while", chain("take_while"))
 	d("drop_while", chain("drop_while"))
 	d("take", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -106,13 +141,24 @@ func (vm *VM) registerLazy() {
 	})
 	// zip pairs each element with the corresponding elements of the other
 	// sources (padding with nil once a source is exhausted).
-	d("zip", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("zip", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// Each argument must be list-like (respond to #each); MRI validates this when
+		// #zip is called, before any element is pulled.
+		for _, a := range args {
+			if _, isArr := a.(*object.Array); !isArr && !vm.respondsToDynamic(a, "each") {
+				raise("TypeError", "wrong argument type %s (must respond to :each)", vm.classOf(a).name)
+			}
+		}
 		return self.(*LazyEnum).with(lazyOp{kind: "zip", others: append([]object.Value{}, args...)})
 	})
 	// with_index(offset = 0): optional block maps (element, index); without a
 	// block each element becomes the pair [element, index].
-	d("with_index", func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return self.(*LazyEnum).with(lazyOp{kind: "with_index", n: int(intArgOr(args, 0)), blk: blk})
+	d("with_index", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		off := 0
+		if len(args) > 0 && !object.IsNil(args[0]) { // a nil offset means "start at 0"
+			off = int(coerceInt(vm, args[0]))
+		}
+		return self.(*LazyEnum).with(lazyOp{kind: "with_index", n: off, blk: blk})
 	})
 	// chunk_while / slice_when split the stream into runs at each adjacent pair
 	// (a, b) for which the block does not hold (chunk_while) / does hold
@@ -197,24 +243,148 @@ func (vm *VM) registerLazy() {
 		})
 		return l
 	})
+	// #size threads the source's size through the pipeline: filtering/reshaping ops
+	// (select, flat_map, grep, uniq, chunk, …) make it unknown (nil); map/with_index/
+	// zip keep it; take/drop bound it — see lazyOpSize.
+	d("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.lazySize(self.(*LazyEnum))
+	})
+	// External iteration over the lazy pipeline (#next/#peek/#rewind/…): driven by a
+	// cached Enumerator so each pull advances the pipeline one element at a time,
+	// never over-evaluating and never materialising an infinite source.
+	lazyExt := func(self object.Value) *Enumerator {
+		l := self.(*LazyEnum)
+		if l.ext == nil {
+			l.ext = &Enumerator{recv: l, meth: "each"}
+		}
+		return l.ext
+	}
+	d("next", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return enumPack(vm.enumNextRaw(lazyExt(self)).Elems)
+	})
+	d("next_values", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.enumNextRaw(lazyExt(self))
+	})
+	d("peek", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return enumPack(vm.enumPeekRaw(lazyExt(self)).Elems)
+	})
+	d("peek_values", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.enumPeekRaw(lazyExt(self))
+	})
+	d("rewind", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		e := lazyExt(self)
+		e.extFiber, e.peeked, e.ended = nil, false, false
+		return self
+	})
+	// enum_for / to_enum on a Lazy return a fresh Lazy that drives self.meth(*rest)
+	// lazily (through a generator Enumerator pulled one element at a time). A block
+	// supplies #size (returned verbatim, possibly nil) as elsewhere.
+	lazyToEnum := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		l := self.(*LazyEnum)
+		meth, rest := "each", []object.Value(nil)
+		if len(args) > 0 {
+			meth, rest = args[0].ToS(), args[1:]
+		}
+		gen := &Proc{native: func(vm *VM, gargs []object.Value) object.Value {
+			y := gargs[0]
+			step := &Proc{native: func(vm *VM, a []object.Value) object.Value {
+				vm.send(y, "yield", a, nil)
+				return object.NilV
+			}}
+			return vm.send(l, meth, rest, step)
+		}}
+		return &LazyEnum{recv: &Enumerator{block: gen, sizeBlock: blk}}
+	}
+	d("to_enum", lazyToEnum)
+	// Alias the shared Method objects so instance_method identities match MRI
+	// (Enumerator::Lazy#collect == #map, #filter == #select, …) and the Lazy method
+	// whitelist (instance_methods(false)) carries every expected name.
+	alias := func(name, of string) { vm.cLazy.methods[name] = vm.cLazy.methods[of] }
+	alias("collect", "map")
+	alias("filter", "select")
+	alias("find_all", "select")
+	alias("collect_concat", "flat_map")
+	alias("enum_for", "to_enum")
+}
+
+// lazySize threads the source's #size through the op chain. A filtering or
+// reshaping op makes the size unknown (nil); once unknown it stays unknown.
+func (vm *VM) lazySize(l *LazyEnum) object.Value {
+	var sz object.Value
+	switch {
+	case l.sizeSpecSet:
+		sz = vm.enumResolveSize(l.sizeSpec)
+	case vm.respondsToDynamic(l.recv, "size"):
+		sz = vm.send(l.recv, "size", nil, nil)
+	default:
+		return object.NilV
+	}
+	// Only an Integer or positive-infinite Float is a size the op chain can reason
+	// about; anything else (nil, a finite Float, a non-numeric) is unknown.
+	if _, ok := sz.(object.Integer); !ok && !isInfFloat(sz) {
+		return object.NilV
+	}
+	for _, op := range l.ops {
+		sz = lazyOpSize(op, sz)
+		if object.IsNil(sz) {
+			return object.NilV
+		}
+	}
+	return sz
+}
+
+// lazyOpSize maps a known incoming size (always an Integer or positive-infinite
+// Float, per lazySize) through one op: map/with_index/zip keep it, take bounds it
+// to its count (min, or the count itself for an infinite source), drop subtracts
+// its count (flooring at 0, infinity staying infinite), and every
+// filtering/reshaping op makes it unknown (nil).
+func lazyOpSize(op lazyOp, sz object.Value) object.Value {
+	switch op.kind {
+	case "map", "with_index", "zip":
+		return sz
+	case "take":
+		n := int64(op.n)
+		if isInfFloat(sz) {
+			return object.IntValue(n)
+		}
+		if int64(sz.(object.Integer)) < n {
+			return sz
+		}
+		return object.IntValue(n)
+	case "drop":
+		n := int64(op.n)
+		if isInfFloat(sz) {
+			return sz
+		}
+		d := int64(sz.(object.Integer)) - n
+		if d < 0 {
+			d = 0
+		}
+		return object.IntValue(d)
+	default:
+		return object.NilV
+	}
 }
 
 // lazySource returns a restartable pull function over le.recv: successive calls
 // yield the next source element until it returns ok=false. Integer ranges
 // (including endless and Float::INFINITY-bounded) are walked by counter; arrays
 // by index; an Enumerator is pulled one element at a time; any other Enumerable
-// is materialised once (so it must be finite).
-func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
+// is materialised once (so it must be finite). The second result is the raw yield
+// arguments when the source yielded several values at once (rb_yield_values2
+// semantics: a single-argument block then sees only the first) — nil for an
+// ordinary single-value element.
+func (vm *VM) lazySource(recv object.Value) func() (object.Value, []object.Value, bool) {
 	switch r := recv.(type) {
 	case *object.Array:
 		i := 0
-		return func() (object.Value, bool) {
+		return func() (object.Value, []object.Value, bool) {
 			if i < len(r.Elems) {
 				v := r.Elems[i]
 				i++
-				return v, true
+				return v, nil, true
 			}
-			return object.NilVal(), false
+			return object.NilVal(), nil, false
 		}
 	case *object.Range:
 		lo, ok := r.Lo.(object.Integer)
@@ -239,13 +409,13 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
 		if r.Exclusive && !unbounded {
 			hi--
 		}
-		return func() (object.Value, bool) {
+		return func() (object.Value, []object.Value, bool) {
 			if !unbounded && i > hi {
-				return object.NilVal(), false
+				return object.NilVal(), nil, false
 			}
 			v := object.IntValue(i)
 			i++
-			return v, true
+			return v, nil, true
 		}
 	case *Enumerator:
 		// Pulled, not materialised. An Enumerator.new { |y| loop { … } } has no
@@ -262,23 +432,29 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, bool) {
 		// abandoned #next does. That is the existing behaviour of external
 		// iteration here, not something this adds.
 		pull := r.forPull()
-		return func() (object.Value, bool) {
+		return func() (object.Value, []object.Value, bool) {
 			w, ok := vm.enumPull(pull)
 			if !ok {
-				return object.NilVal(), false
+				return object.NilVal(), nil, false
 			}
-			return enumPack(w.Elems), true
+			// A yield of several values (or none) is carried as raw args so a
+			// single-argument downstream block sees only the first; a lone value is
+			// an ordinary single-value element.
+			if len(w.Elems) == 1 {
+				return w.Elems[0], nil, true
+			}
+			return enumPack(w.Elems), w.Elems, true
 		}
 	default:
 		buf := vm.collectEach(recv)
 		i := 0
-		return func() (object.Value, bool) {
+		return func() (object.Value, []object.Value, bool) {
 			if i < len(buf) {
 				v := buf[i]
 				i++
-				return v, true
+				return v, nil, true
 			}
-			return object.NilVal(), false
+			return object.NilVal(), nil, false
 		}
 	}
 }
@@ -327,12 +503,12 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 	src := vm.lazySource(le.recv)
 	n := len(le.ops)
 	// Per-op mutable run state.
-	rem := make([]int, n)                             // take / drop remaining
-	dropping := make([]bool, n)                       // drop_while latch
-	idx := make([]int, n)                             // with_index counter
-	seen := make([][]object.Value, n)                 // uniq keys
-	zpull := make([][]func() (object.Value, bool), n) // zip other sources
-	cst := make([]*chunkState, n)                     // grouping-op accumulators
+	rem := make([]int, n)                                             // take / drop remaining
+	dropping := make([]bool, n)                                       // drop_while latch
+	idx := make([]int, n)                                             // with_index counter
+	seen := make([][]object.Value, n)                                 // uniq keys
+	zpull := make([][]func() (object.Value, []object.Value, bool), n) // zip other sources
+	cst := make([]*chunkState, n)                                     // grouping-op accumulators
 	for i, op := range le.ops {
 		switch op.kind {
 		case "take", "drop":
@@ -342,7 +518,7 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 		case "with_index":
 			idx[i] = op.n // starting offset
 		case "zip":
-			ps := make([]func() (object.Value, bool), len(op.others))
+			ps := make([]func() (object.Value, []object.Value, bool), len(op.others))
 			for j, o := range op.others {
 				ps[j] = vm.lazySource(o)
 			}
@@ -352,9 +528,21 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 		}
 	}
 	stop := false
-	// feed threads v through ops[i:]; it returns false to abort the whole pull
-	// (want satisfied, or a take/take_while boundary reached).
-	var feed func(i int, v object.Value) bool
+	// feed threads one element through ops[i:]; it returns false to abort the whole
+	// pull (want satisfied, or a take/take_while boundary reached). v is the
+	// element's gathered value; multi, when non-nil, is the raw arguments a
+	// multi-value source yield produced (v == enumPack(multi)), so a block sees them
+	// by ordinary arity — a single-parameter block takes only the first. Values a
+	// filter passes through keep their multi; a value an op computes is single (nil).
+	var feed func(i int, v object.Value, multi []object.Value) bool
+	// blockArgs is the argument list to call an op's block with: the raw multi-value
+	// arguments when present, else the lone gathered value.
+	blockArgs := func(v object.Value, multi []object.Value) []object.Value {
+		if multi != nil {
+			return multi
+		}
+		return []object.Value{v}
+	}
 	// emitBuf flushes a grouping op's buffered run downstream as one Array and
 	// clears it; emitRun does the same for chunk's [key, [elems]] pair.
 	emitBuf := func(i int, st *chunkState) bool {
@@ -363,7 +551,7 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 		}
 		grp := object.NewArrayFromSlice(st.buf)
 		st.buf = nil
-		return feed(i+1, grp)
+		return feed(i+1, grp, nil)
 	}
 	emitRun := func(i int, st *chunkState) bool {
 		if !st.open {
@@ -372,9 +560,9 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 		grp := object.NewArrayFromSlice([]object.Value{st.key, object.NewArrayFromSlice(st.buf)})
 		st.open = false
 		st.buf = nil
-		return feed(i+1, grp)
+		return feed(i+1, grp, nil)
 	}
-	feed = func(i int, v object.Value) bool {
+	feed = func(i int, v object.Value, multi []object.Value) bool {
 		if i == n {
 			if !sink(v) {
 				stop = true
@@ -385,52 +573,60 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 		op := le.ops[i]
 		switch op.kind {
 		case "map":
-			return feed(i+1, vm.callBlock(op.blk, []object.Value{v}))
+			return feed(i+1, vm.callBlock(op.blk, blockArgs(v, multi)), nil)
 		case "select":
+			// select/reject (like Enumerable#select) hand the block the *gathered*
+			// value of a multi-value yield, not the splatted arguments — unlike
+			// map/flat_map above — while still forwarding the multi downstream.
 			if vm.callBlock(op.blk, []object.Value{v}).Truthy() {
-				return feed(i+1, v)
+				return feed(i+1, v, multi)
 			}
 			return true
 		case "reject":
 			if !vm.callBlock(op.blk, []object.Value{v}).Truthy() {
-				return feed(i+1, v)
+				return feed(i+1, v, multi)
 			}
 			return true
 		case "filter_map":
-			w := vm.callBlock(op.blk, []object.Value{v})
+			w := vm.callBlock(op.blk, blockArgs(v, multi))
 			if w.Truthy() {
-				return feed(i+1, w)
+				return feed(i+1, w, nil)
 			}
 			return true
 		case "flat_map":
-			w := vm.callBlock(op.blk, []object.Value{v})
-			if arr, ok := w.(*object.Array); ok {
-				for _, e := range arr.Elems {
-					if !feed(i+1, e) {
+			w := vm.callBlock(op.blk, blockArgs(v, multi))
+			// MRI flattens an Array, or a value that responds to both #each and
+			// #force (an Enumerator::Lazy) — the latter forced to an Array first. A
+			// plain Enumerator (responds to #each but not #force) is passed through
+			// unflattened.
+			if arr, ok := lazyFlattenable(vm, w); ok {
+				for _, e := range arr {
+					if !feed(i+1, e, nil) {
 						return false
 					}
 				}
 				return true
 			}
-			return feed(i+1, w)
+			return feed(i+1, w, nil)
 		case "grep":
 			if vm.send(op.pat, "===", []object.Value{v}, nil).Truthy() {
-				return feed(i+1, vm.lazyGrepValue(op.blk, v))
+				return feed(i+1, vm.lazyGrepValue(op.blk, v), nil)
 			}
 			return true
 		case "grep_v":
 			if !vm.send(op.pat, "===", []object.Value{v}, nil).Truthy() {
-				return feed(i+1, vm.lazyGrepValue(op.blk, v))
+				return feed(i+1, vm.lazyGrepValue(op.blk, v), nil)
 			}
 			return true
 		case "compact":
 			if _, isNil := v.(object.Nil); isNil {
 				return true
 			}
-			return feed(i+1, v)
+			return feed(i+1, v, multi)
 		case "uniq":
 			key := v
 			if op.blk != nil {
+				// uniq's key block, like select's, sees the gathered value.
 				key = vm.callBlock(op.blk, []object.Value{v})
 			}
 			for _, k := range seen[i] {
@@ -439,7 +635,7 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 				}
 			}
 			seen[i] = append(seen[i], key)
-			return feed(i+1, v)
+			return feed(i+1, v, multi)
 		case "with_index":
 			j := idx[i]
 			idx[i]++
@@ -448,20 +644,20 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 				// With a block, MRI evaluates it for its side effects and passes
 				// the original item downstream (the block's result is ignored).
 				vm.callBlock(op.blk, []object.Value{v, jv})
-				return feed(i+1, v)
+				return feed(i+1, v, multi)
 			}
-			return feed(i+1, object.NewArrayFromSlice([]object.Value{v, jv}))
+			return feed(i+1, object.NewArrayFromSlice([]object.Value{v, jv}), nil)
 		case "zip":
 			row := make([]object.Value, len(zpull[i])+1)
 			row[0] = v
 			for j, pf := range zpull[i] {
-				if e, ok := pf(); ok {
+				if e, _, ok := pf(); ok {
 					row[j+1] = e
 				} else {
 					row[j+1] = object.NilV
 				}
 			}
-			return feed(i+1, object.NewArrayFromSlice(row))
+			return feed(i+1, object.NewArrayFromSlice(row), nil)
 		case "chunk_while":
 			st := cst[i]
 			if !st.hasPrev {
@@ -515,7 +711,7 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 					return false
 				}
 				pair := object.NewArrayFromSlice([]object.Value{k, object.NewArrayFromSlice([]object.Value{v})})
-				return feed(i+1, pair)
+				return feed(i+1, pair, nil)
 			}
 			if st.open && valueEql(st.key, k) {
 				st.buf = append(st.buf, v)
@@ -561,26 +757,35 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 			}
 			return true
 		case "take_while":
-			if !vm.callBlock(op.blk, []object.Value{v}).Truthy() {
+			if !vm.callBlock(op.blk, blockArgs(v, multi)).Truthy() {
 				stop = true
 				return false
 			}
-			return feed(i+1, v)
+			return feed(i+1, v, multi)
 		case "drop_while":
 			if dropping[i] {
-				if vm.callBlock(op.blk, []object.Value{v}).Truthy() {
+				if vm.callBlock(op.blk, blockArgs(v, multi)).Truthy() {
 					return true
 				}
 				dropping[i] = false
 			}
-			return feed(i+1, v)
+			return feed(i+1, v, multi)
 		case "take":
-			if rem[i] <= 0 {
+			// A saturated take never reaches feed: the pre-loop takeSaturated check
+			// (and this op stopping the pull the moment its quota is met, below) keep
+			// rem[i] > 0 on entry, so take(0) drives the source zero times.
+			rem[i]--
+			if !feed(i+1, v, multi) {
+				return false
+			}
+			// Stop pulling once the quota is met, rather than waiting to reject the
+			// next element — so take(n).force drives the source exactly n times (and
+			// never triggers a source that raises on its n+1-th step).
+			if rem[i] == 0 {
 				stop = true
 				return false
 			}
-			rem[i]--
-			return feed(i+1, v)
+			return true
 		case "drop":
 			if rem[i] > 0 {
 				rem[i]--
@@ -588,7 +793,7 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 			}
 			// Past the drop count: fall through to pass v downstream.
 		}
-		return feed(i+1, v)
+		return feed(i+1, v, multi)
 	}
 	// finish flushes each grouping op's pending run once the source is exhausted,
 	// threading it through the ops downstream (which may themselves group).
@@ -609,12 +814,25 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 		}
 		return finish(i + 1)
 	}
+	// takeSaturated reports whether a take op has already met its quota, so the
+	// source need not be driven at all — take(0) then drives it zero times.
+	takeSaturated := func() bool {
+		for i, op := range le.ops {
+			if op.kind == "take" && rem[i] <= 0 {
+				return true
+			}
+		}
+		return false
+	}
 	for !stop {
-		v, ok := src()
+		if takeSaturated() {
+			break
+		}
+		v, multi, ok := src()
 		if !ok {
 			break
 		}
-		if !feed(0, v) {
+		if !feed(0, v, multi) {
 			break
 		}
 	}
@@ -644,6 +862,23 @@ func chunkKeyKind(k object.Value) (drop, alone, reserved bool) {
 		return false, false, true
 	}
 	return false, false, false
+}
+
+// lazyFlattenable reports whether flat_map should flatten w, returning its
+// elements when so: an Array flattens to its own elements; a value responding to
+// both #each and #force (an Enumerator::Lazy) is forced to an Array and
+// flattened. Anything else (including a plain Enumerator, which has #each but not
+// #force) is not flattened.
+func lazyFlattenable(vm *VM, w object.Value) ([]object.Value, bool) {
+	if arr, ok := w.(*object.Array); ok {
+		return arr.Elems, true
+	}
+	if vm.respondsToDynamic(w, "force") && vm.respondsToDynamic(w, "each") {
+		if arr, ok := vm.send(w, "force", nil, nil).(*object.Array); ok {
+			return arr.Elems, true
+		}
+	}
+	return nil, false
 }
 
 // lazyGrepValue returns the value grep/grep_v should emit for a match: the

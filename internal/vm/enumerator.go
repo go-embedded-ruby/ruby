@@ -70,6 +70,12 @@ type Enumerator struct {
 	peeked   bool
 	ended    bool
 	finish   object.Value
+	// feedVal (when feedSet) is the value #feed queued for the source's next
+	// `yield` to return during external iteration; it is consumed the next time the
+	// driving fiber resumes past a yield. #feed refuses a second value before the
+	// first is consumed (TypeError), and #rewind discards a pending one.
+	feedVal object.Value
+	feedSet bool
 }
 
 // forPull returns a copy of e carrying its definition and none of its
@@ -86,8 +92,12 @@ func (e *Enumerator) forPull() *Enumerator {
 }
 
 // yielder is the object passed to an Enumerator.new generator block; `y << v`
-// and `y.yield(v)` feed values into the enumeration.
-type yielder struct{ emit func(args []object.Value) }
+// and `y.yield(v)` feed values into the enumeration. emit returns the value the
+// downstream consumer produced for this yield — the #feed value during external
+// iteration — which `y.yield` surfaces as its own result (MRI's Yielder#yield).
+type yielder struct {
+	emit func(args []object.Value) object.Value
+}
 
 func (y *yielder) ToS() string     { return "#<Enumerator::Yielder>" }
 func (y *yielder) Inspect() string { return y.ToS() }
@@ -230,12 +240,22 @@ func (vm *VM) registerEnumerator() {
 	vm.cYielder.consts = vm.cEnumerator.consts // (scope is cosmetic; share the map)
 	vm.cEnumerator.consts["Yielder"] = vm.cYielder
 	vm.cYielder.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
 		self.(*yielder).emit(args)
 		return self // << chains
 	})
 	vm.cYielder.define("yield", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*yielder).emit(args)
-		return object.NilV
+		return self.(*yielder).emit(args)
+	})
+	// &yielder passes the yielder as a block: its #to_proc calls #<< (so
+	// `str.each_line(&y)` feeds each line into the enumeration).
+	vm.cYielder.define("to_proc", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		y := self.(*yielder)
+		return &Proc{native: func(vm *VM, args []object.Value) object.Value {
+			return y.emit(args)
+		}}
 	})
 	// Enumerator.new(size = nil) { |y| … } builds a generator-block enumerator. An
 	// optional leading argument sets #size (an Integer/nil returned verbatim, or a
@@ -279,8 +299,34 @@ func (vm *VM) registerEnumerator() {
 	}
 
 	d := func(name string, fn NativeFn) { vm.cEnumerator.define(name, fn) }
-	d("each", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	// #inspect / #to_s: a live Enumerator or Lazy renders through its Go Inspect;
+	// a bare instance from Class#allocate (never #initialize-d) reads
+	// "#<ClassName: uninitialized>", as MRI shows for an uninitialized enumerator.
+	inspectFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		switch v := self.(type) {
+		case *Enumerator:
+			return object.NewString(v.Inspect())
+		case *LazyEnum:
+			return object.NewString(v.Inspect())
+		default:
+			return object.NewString("#<" + vm.classOf(self).name + ": uninitialized>")
+		}
+	}
+	d("inspect", inspectFn)
+	d("to_s", inspectFn)
+	d("each", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		e := self.(*Enumerator)
+		if len(args) > 0 {
+			// #each(*extra) appends the extra arguments to the receiver's #each call:
+			// a fresh enumerator with the wider argument list, run (or returned) here.
+			ne := *e
+			ne.args = append(append([]object.Value{}, e.args...), args...)
+			ne.extFiber, ne.peeked, ne.ended = nil, false, false
+			if blk == nil {
+				return &ne
+			}
+			return vm.enumRunEach(&ne, blk)
+		}
 		if blk == nil {
 			return e
 		}
@@ -332,9 +378,21 @@ func (vm *VM) registerEnumerator() {
 	d("peek_values", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.enumPeekRaw(self.(*Enumerator))
 	})
+	d("feed", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		e := self.(*Enumerator)
+		if e.feedSet {
+			raise("TypeError", "feed value already set")
+		}
+		var v object.Value = object.NilV
+		if len(args) > 0 {
+			v = args[0]
+		}
+		e.feedVal, e.feedSet = v, true
+		return object.NilV
+	})
 	d("rewind", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		e := self.(*Enumerator)
-		e.extFiber, e.peeked, e.ended = nil, false, false
+		e.extFiber, e.peeked, e.ended, e.feedSet = nil, false, false, false
 		if e.isChain {
 			// Rewind the parts that were iterated, in reverse, and forget them.
 			for i := len(e.chainParts) - 1; i >= 0; i-- {
@@ -378,7 +436,10 @@ func (vm *VM) registerEnumerator() {
 		return vm.enumRunEach(e, wrapper)
 	}
 	d("with_index", withIndex)
-	d("each_with_index", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	d("each_with_index", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) > 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
 		return withIndex(vm, self, nil, blk) // each_with_index ignores any offset
 	})
 	// with_object is MRI's alias of each_with_object; share the one Method so
@@ -557,8 +618,8 @@ func (vm *VM) enumRunEach(e *Enumerator, blk *Proc) object.Value {
 	case e.produceBlk != nil:
 		return vm.enumRunProduce(e, blk)
 	case e.block != nil:
-		return vm.callBlock(e.block, []object.Value{&yielder{emit: func(args []object.Value) {
-			vm.callBlock(blk, args)
+		return vm.callBlock(e.block, []object.Value{&yielder{emit: func(args []object.Value) object.Value {
+			return vm.callBlock(blk, args)
 		}}})
 	default:
 		return vm.send(e.recv, e.meth, e.args, blk)
@@ -613,6 +674,12 @@ func (vm *VM) enumFiber(e *Enumerator) *Fiber {
 			collect := &Proc{native: func(vm *VM, args []object.Value) object.Value {
 				wrapper := object.NewArrayFromSlice(append([]object.Value{}, args...))
 				vm.fiberYield([]object.Value{wrapper})
+				// On resume, hand the source's `yield` any value #feed queued.
+				if e.feedSet {
+					fv := e.feedVal
+					e.feedVal, e.feedSet = nil, false
+					return fv
+				}
 				return object.NilV
 			}}
 			return vm.enumRunEach(e, collect)
