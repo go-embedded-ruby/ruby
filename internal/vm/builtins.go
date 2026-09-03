@@ -5079,45 +5079,10 @@ func (vm *VM) bootstrap() {
 		a, _ := object.BigOf(self)
 		return object.NormInt(bigLCM(a, integerGcdArg(args[0])))
 	})
-	fdiv := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a, _ := toFloat(self)
-		b, ok := toFloat(args[0])
-		if !ok {
-			// MRI names the receiver's class in the coercion error (Integer#fdiv
-			// reports "into Integer", Float#fdiv "into Float").
-			raise("TypeError", "%s can't be coerced into %s", vm.classOf(args[0]).name, vm.classOf(self).name)
-		}
-		return object.Float(a / b)
-	}
-	vm.cInteger.define("fdiv", fdiv)
-	vm.cFloat.define("fdiv", fdiv)
-	coerce := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		other := args[0]
-		_, selfInt := self.(object.Integer)
-		_, otherInt := other.(object.Integer)
-		if selfInt && otherInt {
-			return object.NewArray(other, self)
-		}
-		sf, _ := toFloat(self) // self is always numeric here
-		of, ok := toFloat(other)
-		if !ok { // MRI coerces via Float(other), so mirror its errors
-			if s, isStr := other.(*object.String); isStr {
-				raise("ArgumentError", "invalid value for Float(): %s", s.Inspect())
-			}
-			// MRI names nil/true/false by value, everything else by class.
-			name := vm.classOf(other).name
-			switch other.(type) {
-			case object.Nil:
-				name = "nil"
-			case object.Bool:
-				name = other.ToS()
-			}
-			raise("TypeError", "can't convert %s into Float", name)
-		}
-		return object.NewArray(object.Float(of), object.Float(sf))
-	}
-	vm.cInteger.define("coerce", coerce)
-	vm.cFloat.define("coerce", coerce)
+	// Integer#fdiv / Float#fdiv and Integer#coerce / Float#coerce are defined in
+	// registerNumericEdges (numeric_edges.go), which runs after this and supersedes
+	// them with MRI-exact versions; only the shared Numeric#coerce fallback lives
+	// here now.
 	// Numeric#coerce is the generic fallback a Numeric subclass inherits (Integer
 	// and Float override it above): same-class returns [other, self] unchanged,
 	// otherwise both are converted with Kernel#Float (dispatching #to_f, and
@@ -5132,18 +5097,8 @@ func (vm *VM) bootstrap() {
 		of := vm.send(vm.main, "Float", []object.Value{other}, nil)
 		return object.NewArray(of, sf)
 	})
-	vm.cInteger.define("bit_length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		n := intOf(self)
-		if n < 0 {
-			n = ^n
-		}
-		var c int64
-		for n > 0 {
-			c++
-			n >>= 1
-		}
-		return object.IntValue(c)
-	})
+	// Integer#bit_length is defined in registerNumericEdges (numeric_edges.go),
+	// which handles Bignums; the fixnum-only version that was here is superseded.
 	vm.cInteger.define("divmod", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.integerDivmod(self, args[0])
 	})
@@ -5296,19 +5251,8 @@ func (vm *VM) bootstrap() {
 	})
 	// Float#round is defined (with the half: keyword) in registerNumericEdges,
 	// which runs later and overrides any definition here.
-	vm.cFloat.define("divmod", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := floatOf(self)
-		b, ok := toFloat(args[0])
-		if !ok {
-			raise("TypeError", "%s can't be coerced into Float", vm.classOf(args[0]).name)
-		}
-		if b == 0 {
-			raise("ZeroDivisionError", "divided by 0")
-		}
-		// Floored division: the quotient is an Integer, the modulo a Float.
-		q := math.Floor(a / b)
-		return object.NewArray(object.IntValue(int64(q)), object.Float(a-b*q))
-	})
+	// Float#divmod is defined in registerNumericEdges (numeric_edges.go), which
+	// supersedes this version.
 	vm.cFloat.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// Truncate toward zero. ndigits > 0 keeps a Float; otherwise an Integer.
 		return floatRound(floatOf(self), args, math.Trunc)
