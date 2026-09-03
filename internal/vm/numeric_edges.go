@@ -752,52 +752,6 @@ func (vm *VM) registerNumericAliasesAndEdges() {
 		return object.IntValue(int64(n.BitLen()))
 	})
 
-	// --- Float#<=> — NaN, an infinite receiver vs #infinite?, and #coerce ---
-	// A NaN on either side makes the pair unordered (nil). An infinite receiver
-	// compared against a non-numeric that answers #infinite? orders by sign
-	// (Infinity <=> obj.infinite?, treating nil as a finite 0). A non-numeric with
-	// #coerce runs the coercion protocol, and a #coerce that does not return a
-	// two-element Array raises TypeError; anything else is unordered (nil).
-	vm.cFloat.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		a := floatOf(self)
-		other := args[0]
-		if bi, ok := object.BigOf(other); ok { // Integer / Bignum, compared exactly
-			if c, ok := cmpBigFloat(bi, a); ok {
-				return object.IntValue(int64(-c))
-			}
-			return object.NilV // a is NaN
-		}
-		switch other.(type) {
-		case object.Float, *object.Rational:
-			b, _ := toFloat(other)
-			if math.IsNaN(a) || math.IsNaN(b) {
-				return object.NilV
-			}
-			return object.IntValue(int64(cmpFloat(a, b)))
-		}
-		if math.IsInf(a, 0) && vm.respondsToDynamic(other, "infinite?") {
-			rhs := int64(0) // #infinite? == nil means the other value is finite
-			if i := vm.send(other, "infinite?", nil, nil); !object.IsNil(i) {
-				if iv, ok := i.(object.Integer); ok {
-					rhs = int64(iv)
-				}
-			}
-			lhs := int64(1)
-			if a < 0 {
-				lhs = -1
-			}
-			return object.IntValue(int64(cmpInt64(lhs, rhs)))
-		}
-		if vm.respondsToDynamic(other, "coerce") {
-			pair := vm.send(other, "coerce", []object.Value{self}, nil)
-			if arr, ok := pair.(*object.Array); ok && len(arr.Elems) == 2 {
-				return vm.send(arr.Elems[0], "<=>", []object.Value{arr.Elems[1]}, nil)
-			}
-			raise("TypeError", "coerce must return [x, y]")
-		}
-		return object.NilV
-	})
-
 	// --- Zero-or-one / exactly-one argument-count guards MRI enforces ---
 	guardOneArg(vm.cInteger, "gcd", "lcm", "gcdlcm")
 	guardNoArg(vm.cInteger, "to_r")

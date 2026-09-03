@@ -9005,10 +9005,8 @@ func (vm *VM) rubyEqual(a, b object.Value) bool {
 	return vm.vmValueEqual(a, b)
 }
 
-// spaceshipNumeric implements Integer#<=>: -1/0/1 across the numeric tower, nil
-// for a non-numeric argument. (Float#<=> has its own definition in
-// registerNumericEdges, which handles the Float-receiver cases, so this needs no
-// Float-self branch.)
+// spaceshipNumeric implements Integer#<=> and Float#<=>: -1/0/1 across the
+// numeric tower, nil for a non-numeric argument.
 func spaceshipNumeric(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 	other := args[0]
 	// Compare two integers (Integer or Bignum) exactly; only fall back to float
@@ -9030,6 +9028,15 @@ func spaceshipNumeric(vm *VM, self object.Value, args []object.Value, _ *Proc) o
 				return object.IntValue(int64(c))
 			}
 			return object.NilV // NaN
+		}
+	}
+	// Float <=> Integer (self is Float, other is a big/small Integer): exact too.
+	if af, ok := self.(object.Float); ok {
+		if bb, ok := object.BigOf(other); ok {
+			if c, ok := cmpBigFloat(bb, float64(af)); ok {
+				return object.IntValue(int64(-c))
+			}
+			return object.NilV
 		}
 	}
 	a, _ := toFloat(self)

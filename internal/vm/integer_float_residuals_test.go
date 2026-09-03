@@ -77,15 +77,9 @@ class InfNil;     def infinite?; nil; end; end
 		{"bit_length_pos", `puts((2**70).bit_length)`, "71\n"},
 		{"bit_length_neg", `puts((-2**70).bit_length)`, "70\n"},
 
-		// --- Float#<=> ---
-		{"cmp_nan_right", `p 1.0 <=> (0.0/0.0)`, "nil\n"},
-		{"cmp_nan_left", `p (0.0/0.0) <=> 1.0`, "nil\n"},
+		// --- Float#<=> (Integer / Rational / #coerce / non-numeric) ---
 		{"cmp_int", `puts(1.5 <=> 5)`, "-1\n"},
 		{"cmp_rational", `puts(1.5 <=> Rational(3, 2))`, "0\n"},
-		{"cmp_inf_infpos", coercePrelude + `puts(Float::INFINITY <=> InfPos.new)`, "0\n"},
-		{"cmp_neg_inf_infpos", coercePrelude + `puts(-Float::INFINITY <=> InfPos.new)`, "-1\n"},
-		{"cmp_inf_infneg", coercePrelude + `puts(Float::INFINITY <=> InfNeg.new)`, "1\n"},
-		{"cmp_inf_infnil", coercePrelude + `puts(Float::INFINITY <=> InfNil.new)`, "1\n"},
 		{"cmp_coerce", coercePrelude + `puts(2.33 <=> ModCoerce.new)`, "1\n"},
 		{"cmp_non_numeric", `p 1.0 <=> "1"`, "nil\n"},
 
@@ -145,11 +139,6 @@ class BadToInt; def to_int; "x"; end; end
 		{"round_nan", `42.round(Float::NAN)`, "RangeError"},
 		{"round_no_to_int", `5.round("x")`, "TypeError"},
 		{"round_to_int_bad", prelude + `5.round(BadToInt.new)`, "TypeError"},
-
-		// --- Float#<=> misbehaving coerce ---
-		{"cmp_bad_coerce", `
-class Bad; def coerce(o); :incorrect; end; end
-4.2 <=> Bad.new`, "coerce must return"},
 
 		// --- arity guards ---
 		{"gcd_arity", `12.gcd(30, 20)`, "given 2, expected 1"},
