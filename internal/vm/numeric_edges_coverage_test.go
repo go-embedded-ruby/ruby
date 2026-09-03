@@ -70,6 +70,18 @@ func TestNumericEdgesCoverage(t *testing.T) {
 		{`(2**70) / -3`, "-393530540239137101142"},
 		{`(7.0 % 3.0)`, "1.0"},
 		{`(-7.0 % 3.0)`, "2.0"},
+		// Numeric#<=> across every exact/float/Bignum path, NaN (nil), and a
+		// non-numeric operand (nil) — dispatched through the method (via #send) so
+		// it exercises spaceshipNumeric rather than the inlined comparison opcode.
+		{`1.send(:"<=>", 2)`, "-1"},
+		{`5.send(:"<=>", 5)`, "0"},
+		{`(2**70).send(:"<=>", 2**71)`, "-1"},
+		{`(2**70).send(:"<=>", 1.0e30)`, "-1"},
+		{`(2**70).send(:"<=>", 0.0/0.0)`, "nil"},
+		{`1.0.send(:"<=>", 2**70)`, "-1"},
+		{`(0.0/0.0).send(:"<=>", 2**70)`, "nil"},
+		{`1.5.send(:"<=>", 2)`, "-1"},
+		{`1.send(:"<=>", "x")`, "nil"},
 	}
 	for _, c := range ok {
 		if got := eval(t, "p ("+c.expr+")"); got != c.want+"\n" {
@@ -80,6 +92,12 @@ func TestNumericEdgesCoverage(t *testing.T) {
 	// Float#step with a block walks [self, limit] by step.
 	if got := eval(t, `r = []; 1.0.step(2.0, 0.5) { |x| r << x }; p r`); got != "[1.0, 1.5, 2.0]\n" {
 		t.Errorf("Float#step block form = %q", got)
+	}
+
+	// Numeric <=> with a non-numeric operand that defines #coerce: the value runs
+	// the coerce protocol and re-dispatches <=> on the returned pair.
+	if got := eval(t, `class Cz; def coerce(o); [o, 0]; end; end; p (5.send(:"<=>", Cz.new))`); got != "1\n" {
+		t.Errorf("spaceshipNumeric coerce form = %q", got)
 	}
 
 	errs := []struct{ src, want string }{
