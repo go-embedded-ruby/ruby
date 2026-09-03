@@ -125,6 +125,32 @@ func procToS(p *Proc) string {
 	return s + ">"
 }
 
+// curriedProc builds a curried Proc that gathers arguments across successive
+// calls until it has at least need of them, then invokes p with the lot. Each
+// intermediate proc it returns carries the same lam (lambda-ness) as the
+// original, so #lambda? is preserved through every partial application. It is the
+// lambda-aware sibling of curried (which is fixed to a lambda result).
+func (vm *VM) curriedProc(p *Proc, need int, lam bool, got []object.Value) *Proc {
+	return &Proc{isLambda: lam, nativeArity: -1, native: func(vm *VM, args []object.Value) object.Value {
+		all := append(append([]object.Value{}, got...), args...)
+		if len(all) >= need {
+			return vm.callBlock(p, all)
+		}
+		return vm.curriedProc(p, need, lam, all)
+	}}
+}
+
+// procPositionalInfo reports a proc's positional-parameter shape for lambda curry
+// validation: the count of required positionals (leading plus any after a splat),
+// the total number of positional slots, and whether it has a *splat. A native or
+// sourceless proc has no fixed shape, so it accepts any arity (hasSplat true).
+func procPositionalInfo(is *bytecode.ISeq) (required, total int, hasSplat bool) {
+	if is == nil {
+		return 0, 0, true
+	}
+	return iseqRequiredPositional(is), len(is.Params), is.SplatIndex >= 0
+}
+
 // trailingKwHash returns the trailing keyword Hash of a native call's argument
 // list, or nil when the last argument is not a Hash.
 func trailingKwHash(args []object.Value) *object.Hash {
