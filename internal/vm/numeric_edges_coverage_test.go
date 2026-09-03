@@ -82,6 +82,7 @@ func TestNumericEdgesCoverage(t *testing.T) {
 		{`(0.0/0.0).send(:"<=>", 2**70)`, "nil"},
 		{`1.5.send(:"<=>", 2)`, "-1"},
 		{`1.send(:"<=>", "x")`, "nil"},
+		{`1.send(:"<=>", Rational(1, 2))`, "1"}, // Integer <=> Rational: toFloat fallback
 	}
 	for _, c := range ok {
 		if got := eval(t, "p ("+c.expr+")"); got != c.want+"\n" {
