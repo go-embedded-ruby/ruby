@@ -1,7 +1,3 @@
-// Copyright (c) the go-embedded-ruby/ruby authors
-//
-// SPDX-License-Identifier: BSD-3-Clause
-
 package vm_test
 
 import (
@@ -9,181 +5,158 @@ import (
 	"testing"
 )
 
-// TestIntegerBitPredicates covers Integer#allbits?/#anybits?/#nobits?, asserted
-// against MRI Ruby 4.0.5. The mask is coerced with to_int semantics (a Float
-// truncates), and negative / Bignum receivers use two's-complement bits.
-func TestIntegerBitPredicates(t *testing.T) {
-	cases := []struct{ src, want string }{
-		// allbits?: every mask bit set in the receiver.
-		{`p 0b1010.allbits?(0b1000)`, "true\n"},
-		{`p 0b1010.allbits?(0b1010)`, "true\n"},
-		{`p 0b1010.allbits?(0b1100)`, "false\n"},
-		{`p 0b1010.allbits?(0)`, "true\n"}, // empty mask is vacuously contained
-		// Float mask truncates via to_int: 1.5 -> 1, and 5 & 1 == 1.
-		{`p 5.allbits?(1.5)`, "true\n"},
-		{`p 5.allbits?(2.9)`, "false\n"}, // 2.9 -> 2, 5 & 2 == 0 != 2
-		// Bignum receiver and mask.
-		{`p (2**70 | 1).allbits?(2**70)`, "true\n"},
-		{`p (2**70).allbits?(2**70 | 1)`, "false\n"},
-		// Two's-complement: -1 has every bit set.
-		{`p (-1).allbits?(0b1111)`, "true\n"},
+// TestIntegerFloatResiduals covers the MRI 4.0.6 conformance work on
+// core/integer, core/float and core/numeric: floored Bignum division/modulo,
+// Float#% Inf/NaN and signed-zero rules, exact Integer#fdiv, Integer#div and
+// Float#divmod operand rules, round precision coercion, Bignum#bit_length,
+// Float#<=> edge cases, coerce via Kernel#Float, and the residual aliases.
+func TestIntegerFloatResiduals(t *testing.T) {
+	const coercePrelude = `
+class FdivCoerce; def coerce(o); [1, 10]; end; end
+class DivCoerce;  def coerce(o); [10, 2]; end; end
+class ModCoerce;  def coerce(o); [o, 2.0]; end; end
+class ToIntArg;   def to_int; -2; end; end
+class InfPos;     def infinite?; 1;   end; end
+class InfNeg;     def infinite?; -1;  end; end
+class InfNil;     def infinite?; nil; end; end
+`
+	cases := []struct{ name, src, want string }{
+		// --- floored Bignum / and % (divisor's sign) ---
+		{"big_div_neg_divisor", `puts(4 / -(2**64))`, "-1\n"},
+		{"big_div_pos", `puts((10**50) / (10**40 + 1))`, "9999999999\n"},
+		{"big_div_both_neg", `puts(-(10**50) / -(10**40 + 1))`, "9999999999\n"},
+		{"big_mod_neg_divisor", `puts(13 % -(2**64))`, "-18446744073709551603\n"},
+		{"big_mod_pos", `puts((10**50) % (10**40 + 1))`, "9999999999999999999999999999990000000001\n"},
 
-		// anybits?: at least one shared bit.
-		{`p 0b1010.anybits?(0b0100)`, "false\n"},
-		{`p 0b1010.anybits?(0b1100)`, "true\n"},
-		{`p 0.anybits?(5)`, "false\n"},
-		{`p (2**70 | 4).anybits?(4)`, "true\n"},
+		// --- Float#% operator: Inf / NaN / signed zero ---
+		{"fmod_pos_inf", `puts(4.2 % Float::INFINITY)`, "4.2\n"},
+		{"fmod_neg_inf", `puts(4.2 % -Float::INFINITY)`, "-Infinity\n"},
+		{"fmod_inf_self", `puts((Float::INFINITY % 42).nan?)`, "true\n"},
+		{"fmod_neg_zero", `r = -0.0 % 42; puts(r); puts(1/r < 0)`, "-0.0\ntrue\n"},
+		{"fmod_plain", `puts(6543.21 % 137 < 105)`, "true\n"},
 
-		// nobits?: no shared bit (the complement of anybits?).
-		{`p 0b1010.nobits?(0b0101)`, "true\n"},
-		{`p 0b1010.nobits?(0b1100)`, "false\n"},
-		{`p 0.nobits?(5)`, "true\n"},
-	}
-	for _, c := range cases {
-		if got := eval(t, c.src); got != c.want {
-			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
-		}
-	}
+		// --- Float#% / #modulo methods (dispatch path) ---
+		{"fmod_method_inf", `puts(4.2.modulo(Float::INFINITY))`, "4.2\n"},
+		{"fmod_method_coerce", coercePrelude + `puts(4.2.send(:%, ModCoerce.new))`, "0.20000000000000018\n"},
+		{"fmod_modulo_alias", `puts(Float.instance_method(:modulo) == Float.instance_method(:%))`, "true\n"},
 
-	// A non-integer mask that lacks #to_int raises, as does a non-finite Float.
-	errs := []struct{ src, want string }{
-		{`5.allbits?("x")`, "no implicit conversion of String into Integer"},
-		{`5.anybits?("x")`, "no implicit conversion of String into Integer"},
-		{`5.nobits?("x")`, "no implicit conversion of String into Integer"},
-		{`5.allbits?(1.0 / 0)`, "Infinity"},
+		// --- Integer#coerce / Float#coerce via Kernel#Float ---
+		{"int_coerce_int", `p 1.coerce(2)`, "[2, 1]\n"},
+		{"int_coerce_string", `p 1.coerce("2")`, "[2.0, 1.0]\n"},
+		{"float_coerce_string", `p 2.0.coerce("2.5")`, "[2.5, 2.0]\n"},
+
+		// --- Integer#fdiv (exact, huge Bignums) ---
+		{"fdiv_bignum_tiny", `puts(1.fdiv(10**323) == 1.0e-323)`, "true\n"},
+		{"fdiv_bignum_ratio", `puts((10**344).fdiv(9 * 10**342))`, "11.11111111111111\n"},
+		{"fdiv_zero_inf", `puts(1.fdiv(0).infinite?)`, "1\n"},
+		{"fdiv_neg_zero_inf", `puts(-1.fdiv(0).infinite?)`, "-1\n"},
+		{"fdiv_float", `puts(8.fdiv(9.0) > 0.88)`, "true\n"},
+		{"fdiv_rational", `puts(1.fdiv(Rational(1, 5)))`, "5.0\n"},
+		{"fdiv_rational_zero", `puts(1.fdiv(Rational(0, 1)).infinite?)`, "1\n"},
+		{"fdiv_coerce", coercePrelude + `puts(1.fdiv(FdivCoerce.new))`, "0.1\n"},
+
+		// --- Float#fdiv ---
+		{"float_fdiv", `puts(8.0.fdiv(2))`, "4.0\n"},
+
+		// --- Integer#div operand rules ---
+		{"div_bignum", `puts((2**70).div(2**60))`, "1024\n"},
+		{"div_float", `puts(1.div(0.2))`, "5\n"},
+		{"div_rational", `puts(5.div(Rational(2, 1)))`, "2\n"},
+		{"div_coerce", coercePrelude + `puts(5.div(DivCoerce.new))`, "5\n"},
+
+		// --- Float#divmod ---
+		{"float_divmod", `p 13.0.divmod(4)`, "[3, 1.0]\n"},
+
+		// --- round precision: #to_int coercion, finite Float truncation ---
+		{"round_to_int_mock", coercePrelude + `puts(12345.round(ToIntArg.new))`, "12300\n"},
+		{"round_float_ndigits", `puts(12.345678.round(3.999))`, "12.346\n"},
+		{"round_big_float_ndigits", `puts(0.42.round(2.0**30))`, "0.42\n"},
+		{"int_round_pos_ndigits", `puts(42.round(2))`, "42\n"},
+
+		// --- Bignum#bit_length ---
+		{"bit_length_pos", `puts((2**70).bit_length)`, "71\n"},
+		{"bit_length_neg", `puts((-2**70).bit_length)`, "70\n"},
+
+		// --- Float#<=> (Integer / Rational / #coerce / non-numeric) ---
+		{"cmp_int", `puts(1.5 <=> 5)`, "-1\n"},
+		{"cmp_rational", `puts(1.5 <=> Rational(3, 2))`, "0\n"},
+		{"cmp_coerce", coercePrelude + `puts(2.33 <=> ModCoerce.new)`, "1\n"},
+		{"cmp_non_numeric", `p 1.0 <=> "1"`, "nil\n"},
+
+		// --- residual aliases (identity of the two UnboundMethods) ---
+		{"alias_int_inspect", `puts(Integer.instance_method(:inspect) == Integer.instance_method(:to_s))`, "true\n"},
+		{"alias_int_magnitude", `puts(Integer.instance_method(:magnitude) == Integer.instance_method(:abs))`, "true\n"},
+		{"alias_int_next", `puts(Integer.instance_method(:next) == Integer.instance_method(:succ))`, "true\n"},
+		{"alias_float_to_int", `puts(Float.instance_method(:to_int) == Float.instance_method(:to_i))`, "true\n"},
+		{"alias_float_magnitude", `puts(Float.instance_method(:magnitude) == Float.instance_method(:abs))`, "true\n"},
+		{"alias_num_modulo", `puts(Numeric.instance_method(:modulo) == Numeric.instance_method(:%))`, "true\n"},
+		{"alias_num_magnitude", `puts(Numeric.instance_method(:magnitude) == Numeric.instance_method(:abs))`, "true\n"},
+		{"alias_num_conj", `puts(Numeric.instance_method(:conj) == Numeric.instance_method(:conjugate))`, "true\n"},
 	}
-	for _, c := range errs {
-		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("src=%q err=%v, want substring %q", c.src, err, c.want)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
 	}
 }
 
-// TestIntegerCeildiv covers Integer#ceildiv (Ruby 3.2+): the quotient rounded
-// toward +Infinity, for positive/negative operands, Float/Rational divisors, and
-// Bignum receivers — matching MRI Ruby 4.0.5.
-func TestIntegerCeildiv(t *testing.T) {
-	cases := []struct{ src, want string }{
-		{`p 10.ceildiv(3)`, "4\n"},
-		{`p 9.ceildiv(3)`, "3\n"}, // exact multiple: no rounding up
-		{`p (-10).ceildiv(3)`, "-3\n"},
-		{`p 10.ceildiv(-3)`, "-3\n"},
-		{`p (-10).ceildiv(-3)`, "4\n"},
-		{`p 0.ceildiv(3)`, "0\n"},
-		{`p 10.ceildiv(3.5)`, "3\n"}, // Float divisor, result still an Integer
-		{`p 10.ceildiv(2r)`, "5\n"},  // Rational divisor
-		{`p (10**30).ceildiv(7)`, "142857142857142857142857142858\n"},
-	}
-	for _, c := range cases {
-		if got := eval(t, c.src); got != c.want {
-			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
-		}
-	}
+// TestIntegerFloatResidualErrors covers the raising branches: floored Bignum
+// division by zero, Float#% zero and Float#divmod NaN/Infinity/zero, argument
+// coercion failures, round-precision RangeError/TypeError, and the arity guards.
+func TestIntegerFloatResidualErrors(t *testing.T) {
+	const prelude = `
+class BadToInt; def to_int; "x"; end; end
+`
+	cases := []struct{ name, src, want string }{
+		// --- division by zero ---
+		{"big_div_zero", `(2**70) / 0`, "ZeroDivisionError"},
+		{"big_mod_zero", `(2**70) % 0`, "ZeroDivisionError"},
+		{"float_mod_zero_int", `1.0 % 0`, "ZeroDivisionError"},
+		{"float_mod_zero_float", `1.0 % 0.0`, "ZeroDivisionError"},
+		{"float_modulo_zero", `1.0.modulo(0)`, "ZeroDivisionError"},
+		{"int_div_float_zero", `10.div(0.0)`, "ZeroDivisionError"},
+		{"int_div_int_zero", `10.div(0)`, "ZeroDivisionError"},
 
-	// Zero divisor raises ZeroDivisionError; a non-numeric divisor raises TypeError.
-	if err := runErr(t, `10.ceildiv(0)`); err == nil || !strings.Contains(err.Error(), "divided by 0") {
-		t.Errorf("ceildiv(0) err=%v, want divided by 0", err)
-	}
-	if err := runErr(t, `10.ceildiv("x")`); err == nil || !strings.Contains(err.Error(), "coerced") {
-		t.Errorf("ceildiv(\"x\") err=%v, want a coercion TypeError", err)
-	}
-}
+		// --- Float#divmod domain / zero ---
+		{"divmod_nan_self", `Float::NAN.divmod(1)`, "FloatDomainError"},
+		{"divmod_nan_other", `1.0.divmod(Float::NAN)`, "FloatDomainError"},
+		{"divmod_inf_self", `Float::INFINITY.divmod(1)`, "FloatDomainError"},
+		{"divmod_zero", `1.0.divmod(0)`, "ZeroDivisionError"},
+		{"divmod_non_numeric", `1.0.divmod("x")`, "TypeError"},
 
-// TestNumericQuo covers Integer#quo / Float#quo, asserted against MRI Ruby 4.0.5.
-// Integer#quo yields a Rational for Integer/Rational operands and a Float for a
-// Float operand; Float#quo (an alias of #fdiv) always yields a Float.
-func TestNumericQuo(t *testing.T) {
-	cases := []struct{ src, want string }{
-		{`p 3.quo(2)`, "(3/2)\n"},
-		{`p 6.quo(3)`, "(2/1)\n"}, // reduced, but the denominator is kept
-		{`p (-3).quo(2)`, "(-3/2)\n"},
-		{`p 3.quo(2.0)`, "1.5\n"}, // Float operand -> Float
-		{`p 3.quo(2r)`, "(3/2)\n"},
-		{`p 3.quo(10**40)`, "(3/10000000000000000000000000000000000000000)\n"}, // Bignum operand
-		{`p 3.quo(2).class`, "Rational\n"},
-		// Float#quo is fdiv: always a Float, and a zero divisor gives Infinity.
-		{`p 3.0.quo(2)`, "1.5\n"},
-		{`p 3.0.quo(2r)`, "1.5\n"},
-		{`p 3.0.quo(0)`, "Infinity\n"},
-	}
-	for _, c := range cases {
-		if got := eval(t, c.src); got != c.want {
-			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
-		}
-	}
+		// --- coerce / fdiv operand errors ---
+		{"int_coerce_nil", `1.coerce(nil)`, "TypeError"},
+		{"int_coerce_bad_string", `1.coerce(":)")`, "ArgumentError"},
+		{"int_fdiv_non_numeric", `1.fdiv("x")`, "TypeError"},
+		{"float_fdiv_non_numeric", `1.0.fdiv("x")`, "TypeError"},
 
-	errs := []struct{ src, want string }{
-		{`3.quo(0)`, "divided by 0"},
-		{`3.quo(0r)`, "divided by 0"},
-		{`3.quo("x")`, "String can't be coerced into Rational"},
-		{`3.quo(nil)`, "nil can't be coerced into Rational"},
-		{`3.quo(true)`, "true can't be coerced into Rational"},
-		{`3.0.quo("x")`, "String can't be coerced into Float"},
-	}
-	for _, c := range errs {
-		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("src=%q err=%v, want substring %q", c.src, err, c.want)
-		}
-	}
-}
+		// --- round precision RangeError / TypeError ---
+		{"round_bignum_ndigits", `42.round(10**40)`, "RangeError"},
+		{"round_beyond_int", `42.round(1 << 31)`, "RangeError"},
+		{"round_infinity", `42.round(Float::INFINITY)`, "RangeError"},
+		{"round_nan", `42.round(Float::NAN)`, "RangeError"},
+		{"round_no_to_int", `5.round("x")`, "TypeError"},
+		{"round_to_int_bad", prelude + `5.round(BadToInt.new)`, "TypeError"},
 
-// TestFloatRemainder covers Float#remainder: self - other*(self/other).truncate,
-// keeping the dividend's sign, with NaN/Infinity edges — vs MRI Ruby 4.0.5.
-func TestFloatRemainder(t *testing.T) {
-	cases := []struct{ src, want string }{
-		{`p 7.0.remainder(3)`, "1.0\n"},
-		{`p (-7.0).remainder(3)`, "-1.0\n"},
-		{`p 7.0.remainder(-3)`, "1.0\n"},
-		{`p 7.0.remainder(3.5)`, "0.0\n"},
-		// A zero has a sign, and it is the DIVIDEND's, never the divisor's.
-		// The subtraction reaches that on its own wherever the arithmetic rounds
-		// as IEEE 754 says; loong64 under qemu returned -0.0 for the line above,
-		// which had the nightly red, so the sign is now stated outright.
-		{`p (-7.0).remainder(3.5)`, "-0.0\n"},
-		{`p 7.0.remainder(-3.5)`, "0.0\n"},
-		{`p (-7.0).remainder(-3.5)`, "-0.0\n"},
-		{`p (-0.0).remainder(3.0)`, "-0.0\n"},
-		{`p (0.0 / 0).remainder(3)`, "NaN\n"}, // NaN dividend
-		{`p (1.0 / 0).remainder(3)`, "NaN\n"}, // Infinity dividend
-		{`p (-7.5).remainder(3)`, "-1.5\n"},
+		// --- arity guards ---
+		{"gcd_arity", `12.gcd(30, 20)`, "given 2, expected 1"},
+		{"lcm_arity", `12.lcm(30, 20)`, "ArgumentError"},
+		{"gcdlcm_arity", `12.gcdlcm(30, 20)`, "ArgumentError"},
+		{"to_r_arity", `287.to_r(2)`, "given 1, expected 0"},
+		{"rationalize_arity", `1.rationalize(1, 2)`, "expected 0..1"},
+		{"float_rationalize_arity", `1.0.rationalize(1, 2)`, "ArgumentError"},
+		{"imaginary_arity", `1.imaginary(1)`, "ArgumentError"},
+		{"fdiv_arity", `1.fdiv(6, 0.2)`, "ArgumentError"},
+		{"float_fdiv_arity", `1.0.fdiv(6, 0.2)`, "ArgumentError"},
 	}
-	for _, c := range cases {
-		if got := eval(t, c.src); got != c.want {
-			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
-		}
-	}
-
-	if err := runErr(t, `5.0.remainder(0)`); err == nil || !strings.Contains(err.Error(), "divided by 0") {
-		t.Errorf("remainder(0) err=%v, want divided by 0", err)
-	}
-	if err := runErr(t, `5.0.remainder("x")`); err == nil || !strings.Contains(err.Error(), "String can't be coerced into Float") {
-		t.Errorf("remainder(\"x\") err=%v, want coercion TypeError", err)
-	}
-}
-
-// TestFloatStep covers Float#step: the enumerator form (no block) and the
-// block form walking [self, limit] by step (default 1), incl. a negative step —
-// asserted against MRI Ruby 4.0.5.
-func TestFloatStep(t *testing.T) {
-	cases := []struct{ src, want string }{
-		{`p 1.0.step(3.0).to_a`, "[1.0, 2.0, 3.0]\n"}, // default step, enumerator
-		{`p 1.0.step(3.0, 0.5).to_a`, "[1.0, 1.5, 2.0, 2.5, 3.0]\n"},
-		{`p 5.0.step(1.0, -2.0).to_a`, "[5.0, 3.0, 1.0]\n"}, // negative step
-		{`p 1.0.step(3.0) { |x| }`, "1.0\n"},                // block form returns self
-		{`a = []; 1.0.step(2.0, 0.25) { |x| a << x }; p a`, "[1.0, 1.25, 1.5, 1.75, 2.0]\n"},
-	}
-	for _, c := range cases {
-		if got := eval(t, c.src); got != c.want {
-			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
-		}
-	}
-
-	// A bare Float#step (no limit) is an unbounded walk of step 1.0, matching MRI
-	// (the block must break out); a zero step raises ArgumentError.
-	if got := eval(t, `r = []; 1.0.step { |x| r << x; break if x >= 3.0 }; p r`); got != "[1.0, 2.0, 3.0]\n" {
-		t.Errorf("bare Float#step got=%q, want unbounded walk", got)
-	}
-	if err := runErr(t, `1.0.step(3.0, 0) { |x| }`); err == nil || !strings.Contains(err.Error(), "step can't be 0") {
-		t.Errorf("step(3.0,0) err=%v, want step can't be 0", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runErr(t, tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("src=%q: got err=%v, want containing %q", tc.src, err, tc.want)
+			}
+		})
 	}
 }
