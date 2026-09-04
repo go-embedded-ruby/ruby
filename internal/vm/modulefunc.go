@@ -21,7 +21,7 @@ func (vm *VM) registerModuleExtras() {
 			return object.NilV
 		}
 		for _, a := range args {
-			name := nameArg(a)
+			name := vm.defineMethodName(a)
 			m := vm.lookupForModuleOp(mod, name)
 			if m == nil || m.undefined {
 				raise("NameError", "undefined method '%s' for module '%s'", name, mod.name)
@@ -131,7 +131,10 @@ func (vm *VM) registerModuleExtras() {
 	// a Symbol (MRI returns a Symbol since 3.0).
 	vm.cModule.define("alias_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
-		newName, oldName := nameArg(args[0]), nameArg(args[1])
+		if mod.frozen {
+			vm.raiseFrozen(mod)
+		}
+		newName, oldName := vm.defineMethodName(args[0]), vm.defineMethodName(args[1])
 		vm.aliasMethod(mod, newName, oldName)
 		return object.Symbol(newName)
 	})
@@ -142,7 +145,26 @@ func (vm *VM) registerModuleExtras() {
 	vm.cModule.define("undef_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
 		for _, a := range args {
-			vm.undefMethod(mod, nameArg(a))
+			// MRI coerces each name (a TypeError on a non-name) BEFORE it consults
+			// the receiver's frozen state, and a frozen check (per name) precedes the
+			// existence check — so a bad name beats FrozenError, FrozenError beats the
+			// missing-name NameError, and no arguments raise nothing at all.
+			name := vm.defineMethodName(a)
+			if mod.frozen {
+				vm.raiseFrozen(mod)
+			}
+			// A name defined nowhere in the receiver's own+ancestor chain is a
+			// NameError whose wording distinguishes a module from a class and names
+			// the receiver by its #to_s (MRI). The default undefMethod message says
+			// "class" for every receiver, so screen the miss here first.
+			if m := lookupMethod(mod, name); m == nil || m.undefined {
+				kind := "class"
+				if mod.isModule {
+					kind = "module"
+				}
+				raise("NameError", "undefined method '%s' for %s '%s'", name, kind, mod.ToS())
+			}
+			vm.undefMethod(mod, name)
 		}
 		return mod
 	})
@@ -153,7 +175,12 @@ func (vm *VM) registerModuleExtras() {
 	vm.cModule.define("remove_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
 		for _, a := range args {
-			name := nameArg(a)
+			// Same ordering as undef_method: coerce the name (TypeError) before the
+			// frozen check, and raise nothing for a call with no arguments.
+			name := vm.defineMethodName(a)
+			if mod.frozen {
+				vm.raiseFrozen(mod)
+			}
 			if _, ok := mod.methods[name]; !ok {
 				raise("NameError", "method '%s' not defined in %s", name, mod.ToS())
 			}
@@ -163,9 +190,18 @@ func (vm *VM) registerModuleExtras() {
 		return mod
 	})
 
-	// Constant-visibility directives: not enforced (constants are not access-
-	// controlled here), so accept the names and return self, as MRI does.
-	constVisibility := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	// Constant-visibility directives: the access control itself is not enforced
+	// (reads are not screened here), but MRI validates that every named constant is
+	// defined DIRECTLY on the receiver — an inherited or missing name is a NameError
+	// — before returning self. Each name is a String or Symbol.
+	constVisibility := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		for _, a := range args {
+			name := nameArg(a)
+			if _, ok := mod.consts[name]; !ok {
+				raise("NameError", "constant %s not defined", scopedNameFor(mod, name))
+			}
+		}
 		return self
 	}
 	vm.cModule.define("private_constant", constVisibility)
@@ -188,6 +224,13 @@ func (vm *VM) registerModuleExtras() {
 		}
 		return mod
 	})
+
+	// module_function and the bare visibility directives are PRIVATE instance
+	// methods of Module (MRI): usable as a functional call inside a class/module
+	// body but not as `mod.private(:x)` through an explicit receiver.
+	for _, n := range []string{"module_function", "private", "public", "protected"} {
+		vm.cModule.methods[n].vis = visPrivate
+	}
 }
 
 // warnDeprecatedConst emits MRI's "constant X::Y is deprecated" warning when a
