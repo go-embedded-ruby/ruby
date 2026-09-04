@@ -3338,7 +3338,10 @@ func (vm *VM) bootstrap() {
 		}
 		return acc
 	})
-	vm.cArray.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cArray.define("to_h", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
 		h := object.NewHash()
 		a := self.(*object.Array)
 		// Live-index loop so a block that grows the array processes the new tail.
@@ -3347,7 +3350,12 @@ func (vm *VM) bootstrap() {
 			if blk != nil { // to_h { |x| [k, v] } maps each element to a pair
 				e = vm.callBlock(blk, []object.Value{e})
 			}
-			pair, ok := e.(*object.Array)
+			// Each element must be a [key, value] pair: an Array directly, or a value
+			// convertible with #to_ary (MRI's to_h coerces non-array contents).
+			pair, ok := asArray(e)
+			if !ok && vm.respondsToDynamic(e, "to_ary") {
+				pair, ok = asArray(vm.send(e, "to_ary", nil, nil))
+			}
 			if !ok {
 				raise("TypeError", "wrong element type %s at %d (expected array)", vm.classOf(e).name, i)
 			}
@@ -7708,6 +7716,12 @@ func (vm *VM) arrayInspect(a *object.Array, path map[*object.Array]bool) *object
 func (vm *VM) inspectElement(e object.Value, path map[*object.Array]bool) []byte {
 	if arr, ok := e.(*object.Array); ok {
 		return vm.arrayInspect(arr, path).Bytes()
+	}
+	// An element that does not answer #inspect (e.g. a bare BasicObject subclass,
+	// which lacks even #respond_to?) uses its native rendering rather than raising
+	// NoMethodError. A static lookup avoids dispatching anything on such a receiver.
+	if !vm.respondsTo(e, "inspect") {
+		return []byte(e.Inspect())
 	}
 	return []byte(vm.objAsString(vm.send(e, "inspect", nil, nil)))
 }
