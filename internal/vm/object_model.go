@@ -220,6 +220,7 @@ type RClass struct {
 	meta             *RClass         // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
 	metaOf           *RClass         // when this RClass is a metaclass, the class it is the metaclass of (else nil); routes `class << c` visibility directives to c's class methods
 	isSingleton      bool            // true for a singleton class — a class metaclass or a per-object singleton (reported by Module#singleton_class?)
+	attached         object.Value    // for a per-object singleton class, the object it belongs to; drives the singleton_method_added/removed/undefined hooks. nil for a metaclass (use metaOf) and every non-singleton class.
 	deprecatedConsts map[string]bool // constants marked by Module#deprecate_constant; access warns
 	funcMode         bool            // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
 	// defaultVis is the access level applied to subsequent `def`s in this body,
@@ -344,6 +345,7 @@ func (vm *VM) singletonClass(o *RObject) *RClass {
 	if o.singleton == nil {
 		o.singleton = newClass("", o.class)
 		o.singleton.isSingleton = true
+		o.singleton.attached = o
 	}
 	return o.singleton
 }
@@ -358,6 +360,7 @@ func (vm *VM) defineSingletonMethod(recv object.Value, name string, iseq *byteco
 	if t, ok := recv.(*RClass); ok {
 		t.smethods[name] = &Method{name: name, iseq: iseq, owner: t}
 		bumpMethodSerial()
+		vm.fireSingletonMethodHook(recv, "singleton_method_added", name)
 		return
 	}
 	// Any other object — an *RObject, the top-level main object, or a
@@ -371,6 +374,7 @@ func (vm *VM) defineSingletonMethod(recv object.Value, name string, iseq *byteco
 	}
 	sc.methods[name] = &Method{name: name, iseq: iseq, owner: sc}
 	bumpMethodSerial() // adding a singleton method can change what a cached send resolves to
+	vm.fireSingletonMethodHook(recv, "singleton_method_added", name)
 }
 
 // objSingleton returns the existing per-object singleton class for any value, or
@@ -408,6 +412,7 @@ func (vm *VM) ensureSingleton(v object.Value) (*RClass, bool) {
 	}
 	sc := newClass("", vm.classOf(v))
 	sc.isSingleton = true
+	sc.attached = v
 	vm.extSingletons[v] = sc
 	return sc, true
 }
@@ -679,22 +684,50 @@ func (vm *VM) aliasMethod(definee *RClass, newName, oldName string) {
 	clone.undefined = false
 	definee.methods[newName] = &clone
 	bumpMethodSerial()
+	if definee.isSingleton {
+		// An alias made in a singleton class (class << obj; alias new old) adds a
+		// singleton method, so it fires singleton_method_added on the attached object.
+		vm.fireSingletonMethodHook(vm.attachedObject(definee), "singleton_method_added", newName)
+	}
 }
 
 // undefMethod implements `undef name` on definee: it installs a tombstone so the
 // name resolves to "undefined" — hiding any inherited definition and making a
 // call route to method_missing (NoMethodError). Undefining a name that resolves
 // nowhere raises NameError, as in MRI.
+// resolvableForUndef reports whether name may be undefined on mod: either it is
+// defined somewhere in mod's own+ancestor chain, or — for a singleton class whose
+// superclass chain does not bridge to its attached object's full method
+// resolution (a metaclass reaches Class's instance methods, and ultimately
+// BasicObject's, only through the object, not through its super chain) — the name
+// resolves on that attached object. This makes `class << self; undef_method
+// :singleton_method_added` on a metaclass legal, as in MRI.
+func (vm *VM) resolvableForUndef(mod *RClass, name string) bool {
+	if m := lookupMethod(mod, name); m != nil && !m.undefined {
+		return true
+	}
+	if !mod.isSingleton {
+		return false
+	}
+	att := vm.attachedObject(mod)
+	return att != nil && vm.findMethod(att, name) != nil
+}
+
 func (vm *VM) undefMethod(definee *RClass, name string) {
 	// undef_method resolves only through the receiver's own+ancestor chain (no
 	// Kernel→Object bridge): MRI raises for a method defined on Object when undef'd
 	// via the Kernel module, and a subclass undef'ing an inherited Kernel method
 	// (e.g. respond_to_missing?) resolves through normal ancestor lookup anyway.
-	if m := lookupMethod(definee, name); m == nil || m.undefined {
+	if !vm.resolvableForUndef(definee, name) {
 		raise("NameError", "undefined method '%s' for class '%s'", name, definee.name)
 	}
 	definee.methods[name] = &Method{name: name, owner: definee, undefined: true}
 	bumpMethodSerial()
+	if definee.isSingleton {
+		// Undefining a method in a singleton class (class << obj; undef_method :m)
+		// fires singleton_method_undefined on the attached object.
+		vm.fireSingletonMethodHook(vm.attachedObject(definee), "singleton_method_undefined", name)
+	}
 }
 
 func lookupOwnOrIncluded(c *RClass, name string) *Method {
@@ -1755,7 +1788,11 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 			return vm.binaryOp(op, recv, args[0])
 		}
 	}
-	mm := lookupMethod(c, "method_missing")
+	// Resolve method_missing the way a real send would: a class/module receiver
+	// consults its singleton (class) methods first, so `def self.method_missing` on
+	// the receiver — or on an ancestor's singleton — handles an unknown class method
+	// before falling back to the generic Class/BasicObject default.
+	mm := vm.resolveSingletonHook(recv, "method_missing")
 	mmArgs := append([]object.Value{object.SymVal(name)}, args...)
 	return vm.invoke(mm, recv, mmArgs, blk)
 }
@@ -1935,6 +1972,43 @@ func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) obj
 		return p.native(vm, cp)
 	}
 	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p, p.block, nil)
+}
+
+// callBlockInstanceEval runs a block under instance_eval / instance_exec: like
+// callBlockSelf, but the frame's definee is self's singleton class rather than
+// the block's captured lexical scope, so a `def` inside the block becomes a
+// singleton method of self (a class method for a class/module receiver) and does
+// not leak onto the block's home namespace. Constant *lookup* still follows the
+// block's textual nesting (exec derives lexCref from the block's cref), matching
+// MRI. An immediate receiver has no singleton class, so its class stands in — a
+// read-only block still runs.
+func (vm *VM) callBlockInstanceEval(p *Proc, self object.Value, args []object.Value) object.Value {
+	if p.native != nil {
+		cp := make([]object.Value, len(args))
+		copy(cp, args)
+		return p.native(vm, cp)
+	}
+	// The frame's definee stays the block's lexical scope (so constants, class
+	// variables and `class`/`module` reopenings resolve lexically); only a `def`
+	// is redirected, via pendingEvalMethodDefinee, to self's singleton class. It is
+	// set last — after arg binding — so exec is the very next frame to consume it.
+	boundArgs := vm.bindBlockArgs(p, args)
+	definee := vm.blockDefinee(p)
+	vm.pendingEvalMethodDefinee = vm.instanceEvalDefinee(self)
+	return vm.exec(p.iseq, self, boundArgs, definee, "", p.env, p.block, p, p.block, nil)
+}
+
+// instanceEvalDefinee is the class a `def` inside self.instance_eval / instance_exec
+// lands on: self's singleton class (a class/module's metaclass, else a per-object
+// singleton class). An immediate receiver has none, so classOf stands in.
+func (vm *VM) instanceEvalDefinee(self object.Value) *RClass {
+	if c, ok := self.(*RClass); ok {
+		return c.metaClass()
+	}
+	if sc, ok := vm.ensureSingleton(self); ok {
+		return sc
+	}
+	return vm.classOf(self)
 }
 
 // callProcWithBlock invokes a proc/lambda through Proc#call/[]/=== with the block

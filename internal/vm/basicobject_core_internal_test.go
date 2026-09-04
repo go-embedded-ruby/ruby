@@ -15,10 +15,12 @@ import "testing"
 func TestBasicObjectCoreMethods(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// The public instance-method set matches MRI exactly (no initialize /
-		// method_missing, which are private).
+		// method_missing / singleton_method_* hooks, which are private).
 		{`p BasicObject.instance_methods(false).sort`,
 			"[:!, :!=, :==, :__id__, :__send__, :equal?, :instance_eval, :instance_exec]"},
-		{`p BasicObject.private_instance_methods(false).sort`, "[:initialize, :method_missing]"},
+		// The private set includes the singleton-method definition hooks (MRI 4.0.6).
+		{`p BasicObject.private_instance_methods(false).sort`,
+			"[:initialize, :method_missing, :singleton_method_added, :singleton_method_removed, :singleton_method_undefined]"},
 		// A bare BasicObject has the core methods (no Kernel).
 		{`b = BasicObject.new; p b.__send__(:equal?, b)`, "true"},
 		{`b = BasicObject.new; p b.__send__(:==, b)`, "true"},

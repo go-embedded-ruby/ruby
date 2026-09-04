@@ -157,7 +157,7 @@ func (vm *VM) registerModuleExtras() {
 			// NameError whose wording distinguishes a module from a class and names
 			// the receiver by its #to_s (MRI). The default undefMethod message says
 			// "class" for every receiver, so screen the miss here first.
-			if m := lookupMethod(mod, name); m == nil || m.undefined {
+			if !vm.resolvableForUndef(mod, name) {
 				kind := "class"
 				if mod.isModule {
 					kind = "module"
@@ -185,8 +185,13 @@ func (vm *VM) registerModuleExtras() {
 				raise("NameError", "method '%s' not defined in %s", name, mod.ToS())
 			}
 			delete(mod.methods, name)
+			bumpMethodSerial()
+			if mod.isSingleton {
+				// Removing a method from a singleton class (class << obj; remove_method :m)
+				// fires singleton_method_removed on the attached object.
+				vm.fireSingletonMethodHook(vm.attachedObject(mod), "singleton_method_removed", name)
+			}
 		}
-		bumpMethodSerial()
 		return mod
 	})
 
@@ -330,4 +335,71 @@ func (vm *VM) fireMethodAdded(cls *RClass, name string) {
 	if hook := lookupSMethod(cls, "method_added"); hook != nil {
 		vm.invoke(hook, cls, []object.Value{object.SymVal(name)}, nil)
 	}
+}
+
+// attachedObject returns the object a singleton class belongs to — the class
+// itself for a metaclass (def self.foo lands on its owner's class methods), and
+// the recorded object for a per-object singleton class. It is the receiver of the
+// singleton_method_added/removed/undefined hooks for defs made in that class.
+func (vm *VM) attachedObject(sc *RClass) object.Value {
+	if sc.metaOf != nil {
+		return sc.metaOf
+	}
+	return sc.attached
+}
+
+// fireMethodDefined runs the definition hook for a method just installed on cls:
+// singleton_method_added on the attached object when cls is a singleton class
+// (per-object singleton or a class metaclass), and method_added otherwise — the
+// same split MRI makes.
+func (vm *VM) fireMethodDefined(cls *RClass, name string) {
+	if cls.isSingleton {
+		vm.fireSingletonMethodHook(vm.attachedObject(cls), "singleton_method_added", name)
+		return
+	}
+	vm.fireMethodAdded(cls, name)
+}
+
+// fireSingletonMethodHook invokes recv.<hook>(:name) — one of
+// singleton_method_added / singleton_method_removed / singleton_method_undefined
+// — when defining, removing, or undefining a singleton method of recv. MRI fires
+// these on the object that owns the singleton method. The BasicObject default is
+// a private no-op, so the hook is dispatched only when recv provides an override
+// (owner is not BasicObject) or has had the hook undefined — in which case the
+// send routes to method_missing, raising NoMethodError by default, exactly as MRI
+// does for an undef'd hook.
+func (vm *VM) fireSingletonMethodHook(recv object.Value, hook, name string) {
+	m := vm.resolveSingletonHook(recv, hook)
+	if m == nil || (!m.undefined && m.owner == vm.cBasicObject) {
+		// No hook resolves, or it is the BasicObject default no-op: nothing observable.
+		return
+	}
+	if m.undefined {
+		// The hook was undef'd on recv, so the call routes to method_missing — which
+		// raises NoMethodError by default. Invoke it directly (rather than through
+		// send) because an undef'd class method is found as a tombstone by
+		// lookupSMethod, which send would invoke instead of routing to method_missing.
+		mm := vm.resolveSingletonHook(recv, "method_missing")
+		vm.invoke(mm, recv, []object.Value{object.SymVal(hook), object.SymVal(name)}, nil)
+		return
+	}
+	vm.invoke(m, recv, []object.Value{object.SymVal(name)}, nil)
+}
+
+// resolveSingletonHook finds the method recv would dispatch for a hook name,
+// mirroring send's resolution order (a class receiver's singleton/class methods
+// first, then a per-object singleton class, then the instance-method chain) but
+// returning an undef'd tombstone rather than nil so callers can tell a removed
+// hook apart from the BasicObject default.
+func (vm *VM) resolveSingletonHook(recv object.Value, name string) *Method {
+	if cls, ok := recv.(*RClass); ok {
+		if m := lookupSMethod(cls, name); m != nil {
+			return m
+		}
+	}
+	c := vm.classOf(recv)
+	if sc := vm.objSingleton(recv); sc != nil {
+		c = sc
+	}
+	return lookupMethod(c, name)
 }
