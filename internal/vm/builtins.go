@@ -2686,6 +2686,16 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("fill", arrayFill)
+	// Array#inspect renders each element through its own Ruby-level #inspect (so a
+	// user-defined or mocked #inspect is honoured), following MRI's rb_inspect →
+	// rb_obj_as_string: a non-String #inspect result is passed through #to_s, and
+	// if that is still not a String the object's default #<Class:0x…> identity is
+	// used (never #to_str; a #to_s exception propagates). A self-referential array
+	// renders as "[...]". #to_s is the classic alias.
+	vm.cArray.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.arrayInspect(self.(*object.Array), map[*object.Array]bool{})
+	})
+	vm.aliasMethod(vm.cArray, "to_s", "inspect")
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -3173,7 +3183,7 @@ func (vm *VM) bootstrap() {
 	// order, matching Ruby.
 	vm.cArray.define("&", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		b := arrArg(args[0])
+		b := vm.toAryArg(args[0])
 		var out []object.Value
 		for _, e := range a.Elems {
 			if vm.arrayIncludesEql(b.Elems, e) && !vm.arrayIncludesEql(out, e) {
@@ -3184,7 +3194,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("|", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		b := arrArg(args[0])
+		b := vm.toAryArg(args[0])
 		var out []object.Value
 		for _, e := range append(append([]object.Value{}, a.Elems...), b.Elems...) {
 			if !vm.arrayIncludesEql(out, e) {
@@ -7139,6 +7149,34 @@ func arrArg(v object.Value) *object.Array {
 	return nil
 }
 
+// toAryArg coerces a set-operation argument (Array#|, #&, #-, #union,
+// #intersection, #difference, #intersect?) to an *object.Array. An Array — or an
+// Array subclass — is used directly, without calling #to_ary (MRI does not
+// convert subclasses); any other value is converted through #to_ary, whose result
+// must be an Array. A value answering neither raises the same TypeError MRI's
+// rb_to_array_type raises, naming the class.
+func (vm *VM) toAryArg(v object.Value) *object.Array {
+	if a, ok := asArray(v); ok {
+		return a
+	}
+	if vm.respondsToDynamic(v, "to_ary") {
+		if a, ok := asArray(vm.send(v, "to_ary", nil, nil)); ok {
+			return a
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(v).name)
+	return nil
+}
+
+// toAryArgs coerces each set-operation argument through toAryArg.
+func (vm *VM) toAryArgs(args []object.Value) []*object.Array {
+	out := make([]*object.Array, len(args))
+	for i, a := range args {
+		out[i] = vm.toAryArg(a)
+	}
+	return out
+}
+
 func strArg(v object.Value) string {
 	if s, ok := v.(*object.String); ok {
 		return s.Str()
@@ -7616,6 +7654,59 @@ func (vm *VM) arrayJoin(a *object.Array, sep *object.String, path map[*object.Ar
 		add(vm.joinElement(e, sep, path))
 	}
 	return object.NewStringBytesEnc(buf, resEnc)
+}
+
+// arrayInspect renders an array as "[e0, e1, …]" for Array#inspect. The path set
+// holds the arrays currently being inspected so a cycle at any depth renders as
+// "[...]" rather than looping. The result string's encoding starts US-ASCII (so
+// an empty array inspects as US-ASCII, matching MRI) and widens to UTF-8 once a
+// non-ASCII byte appears.
+func (vm *VM) arrayInspect(a *object.Array, path map[*object.Array]bool) *object.String {
+	if path[a] {
+		return object.NewStringBytesEnc([]byte("[...]"), "US-ASCII")
+	}
+	path[a] = true
+	defer delete(path, a)
+	buf := []byte{'['}
+	for i := range a.Elems {
+		if i > 0 {
+			buf = append(buf, ',', ' ')
+		}
+		buf = append(buf, vm.inspectElement(a.Elems[i], path)...)
+	}
+	buf = append(buf, ']')
+	enc := "US-ASCII"
+	for _, b := range buf {
+		if b >= 0x80 {
+			enc = "UTF-8"
+			break
+		}
+	}
+	return object.NewStringBytesEnc(buf, enc)
+}
+
+// inspectElement returns the inspected bytes of one array element. A nested array
+// recurses with the shared path so mutual/self recursion is detected; any other
+// element is rendered by objAsString(element.inspect).
+func (vm *VM) inspectElement(e object.Value, path map[*object.Array]bool) []byte {
+	if arr, ok := e.(*object.Array); ok {
+		return vm.arrayInspect(arr, path).Bytes()
+	}
+	return []byte(vm.objAsString(vm.send(e, "inspect", nil, nil)))
+}
+
+// objAsString mirrors MRI's rb_obj_as_string: a String is returned as-is; any
+// other value is passed through #to_s (whose exception propagates), and if that
+// is still not a String the value's default #<Class:0x…> identity is used. #to_str
+// is never consulted.
+func (vm *VM) objAsString(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	if s, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
+		return s.Str()
+	}
+	return vm.objectIdentityRepr(v)
 }
 
 // joinElement converts one array element to its String piece for Array#join: a

@@ -43,7 +43,7 @@ func (vm *VM) registerArrayEdges() {
 	// any argument array — duplicates in the receiver are preserved, exactly like a
 	// chained `-`.
 	vm.cArray.define("difference", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		others := arrArgs(args)
+		others := vm.toAryArgs(args)
 		var out []object.Value
 		for _, e := range self.(*object.Array).Elems {
 			if !vm.inAnyArray(others, e) {
@@ -55,7 +55,7 @@ func (vm *VM) registerArrayEdges() {
 	// union concatenates the receiver and every argument, then removes eql?
 	// duplicates keeping first-seen order — a multi-argument, de-duplicating `|`.
 	vm.cArray.define("union", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		others := arrArgs(args)
+		others := vm.toAryArgs(args)
 		var out []object.Value
 		add := func(elems []object.Value) {
 			for _, e := range elems {
@@ -74,7 +74,7 @@ func (vm *VM) registerArrayEdges() {
 	// of every argument array, de-duplicated in receiver order. With no arguments
 	// it is simply the receiver de-duplicated (like #uniq under eql?).
 	vm.cArray.define("intersection", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		others := arrArgs(args)
+		others := vm.toAryArgs(args)
 		var out []object.Value
 		for _, e := range self.(*object.Array).Elems {
 			if vm.arrayIncludesEql(out, e) {
@@ -89,7 +89,7 @@ func (vm *VM) registerArrayEdges() {
 	// intersect? reports whether the receiver and the one argument array share any
 	// element (compared with eql?), short-circuiting on the first match.
 	vm.cArray.define("intersect?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		other := arrArg(args[0])
+		other := vm.toAryArg(args[0])
 		for _, e := range self.(*object.Array).Elems {
 			if vm.arrayIncludesEql(other.Elems, e) {
 				return object.True
@@ -203,16 +203,6 @@ func arrayCycleSize(vm *VM, length int, args []object.Value, hasN bool) object.V
 		return object.IntValue(0)
 	}
 	return object.IntValue(int64(length) * count)
-}
-
-// arrArgs coerces every argument to an Array (raising TypeError otherwise),
-// backing the multi-argument set operations.
-func arrArgs(args []object.Value) []*object.Array {
-	out := make([]*object.Array, len(args))
-	for i, a := range args {
-		out[i] = arrArg(a)
-	}
-	return out
 }
 
 // inAnyArray reports whether v is eql? to an element of any of the arrays.
