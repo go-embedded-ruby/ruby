@@ -2159,10 +2159,12 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("gsub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.stringSub(strOf(self), args, blk, true)
 	})
-	vm.cString.define("to_i", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("to_i", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		base := 10
 		if len(args) > 0 {
-			base = int(intArg(args[0]))
+			// The base is coerced through #to_int (MRI's rb_num2long), so a Float
+			// or a #to_int object works and a non-integer raises TypeError.
+			base = int(vm.integerArg(args[0]).Int64())
 		}
 		return stringToInt(strOf(self), base)
 	})
@@ -6356,7 +6358,13 @@ func stringToInt(s string, base int) object.Value {
 		}
 	}
 	if base == 0 {
-		base = 10
+		// With no base and no explicit 0x/0b/0o/0d prefix, a leading '0' selects
+		// octal (MRI: "017".to_i(0) == 15), everything else decimal.
+		if len(s) > 0 && s[0] == '0' {
+			base = 8
+		} else {
+			base = 10
+		}
 	}
 	var digits []byte
 	prevDigit := false
