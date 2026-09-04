@@ -57,7 +57,7 @@ p((Time.utc(1970, 1, 1, 0, 0, 0) + o).sec)`); got != "5\n" {
 		`Time.now + "1"`,
 		`Time.now + nil`,
 		`Time.now + Object.new`,
-		`o = Object.new; def o.to_r; Rational(3, 2); end; Time.now + o`, // to_r but no to_int
+		`o = Object.new; def o.to_r; Rational(3, 2); end; Time.now + o`,              // to_r but no to_int
 		`o = Object.new; def o.to_int; "x"; end; def o.to_r; "y"; end; Time.now + o`, // to_r returns non-number
 	}
 	for _, src := range rejects {
