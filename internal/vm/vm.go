@@ -201,6 +201,12 @@ type VM struct {
 	// recursion leaves the builtin and returns through method dispatch.
 	cmpPath map[[2]*object.Array]bool
 
+	// invcmpPath guards String#<=> against an operand whose own #<=> inverts the
+	// comparison (def other.<=>(x); x <=> self; end): the (self, other) pair being
+	// inverted is recorded so re-entering it returns nil (MRI's rb_invcmp via
+	// rb_exec_recursive_paired) rather than recurring for ever.
+	invcmpPath map[[2]object.Value]bool
+
 	out    io.Writer
 	errOut io.Writer // $stderr/STDERR sink; defaults to out (no separate stream)
 	main   object.Value

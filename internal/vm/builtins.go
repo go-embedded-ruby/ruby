@@ -1685,13 +1685,32 @@ func (vm *VM) bootstrap() {
 	vm.cInteger.define("pow", powNumeric)
 	vm.cFloat.define("**", powNumeric)
 	vm.cFloat.define("pow", powNumeric)
-	vm.cString.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.String)
-		b, ok := args[0].(*object.String)
-		if !ok {
-			return object.NilV
+		if b := stringOrSubclassBytes(args[0]); b != nil {
+			return object.IntValue(int64(strings.Compare(a.Str(), b.Str())))
 		}
-		return object.IntValue(int64(strings.Compare(a.Str(), b.Str())))
+		// Not a String: MRI's rb_check_string_type first tries #to_str and compares
+		// against its result; otherwise it inverts `other <=> self` (rb_invcmp).
+		if vm.respondsToDynamic(args[0], "to_str") {
+			if s, ok := vm.send(args[0], "to_str", nil, nil).(*object.String); ok {
+				return object.IntValue(int64(strings.Compare(a.Str(), s.Str())))
+			}
+		}
+		return vm.spaceshipInvert(self, args[0])
+	})
+	vm.cString.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.String)
+		if b := stringOrSubclassBytes(args[0]); b != nil {
+			return object.Bool(a.Str() == b.Str())
+		}
+		// A non-String that answers #to_str: MRI's rb_str_equal defers to
+		// `other == self` (it only checks that #to_str is defined, never calling
+		// it). Anything else is unequal.
+		if vm.respondsToDynamic(args[0], "to_str") {
+			return object.Bool(vm.send(args[0], "==", []object.Value{self}, nil).Truthy())
+		}
+		return object.False
 	})
 
 	// String. Methods over the mutable byte-based String (length/chars/index are
@@ -1809,8 +1828,8 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("succ!", succBang)
 	// #next and #next! are true aliases of #succ / #succ! (they share the same
 	// Method object, so instance_method(:next) == instance_method(:succ)).
-	vm.aliasMethod(vm.cString, "next", "succ")
-	vm.aliasMethod(vm.cString, "next!", "succ!")
+	aliasBuiltin(vm.cString, "next", "succ")
+	aliasBuiltin(vm.cString, "next!", "succ!")
 	vm.cString.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(stringChr(strOf(self)))
 	})
@@ -2159,14 +2178,12 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
-	vm.cString.define("to_str", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self
-	})
+	aliasBuiltin(vm.cString, "to_str", "to_s") // MRI alias of String#to_s
 	strToSym := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(strOf(self))
 	}
 	vm.cString.define("to_sym", strToSym)
-	vm.cString.define("intern", strToSym) // MRI alias of String#to_sym
+	aliasBuiltin(vm.cString, "intern", "to_sym") // MRI alias of String#to_sym
 	// scrub replaces each ill-formed byte sequence with a replacement (the encoding's
 	// U+FFFD, or an explicit String / block result), returning a valid copy in the
 	// receiver's encoding. scrub! does the same in place, returning self.
@@ -6193,6 +6210,44 @@ func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value 
 // Ruby (space, tab, newline, carriage return, form feed, vertical tab, NUL).
 const wsCutset = " \t\n\r\f\v\x00"
 
+// stringOrSubclassBytes returns the underlying *object.String for a String or
+// for an instance of a user subclass of String (whose bytes live in
+// RObject.builtin), and nil for anything else. It performs no #to_str
+// conversion, so callers use it to accept a String or String subclass by value
+// while leaving the coercion of other objects to their own path.
+func stringOrSubclassBytes(v object.Value) *object.String {
+	switch s := v.(type) {
+	case *object.String:
+		return s
+	case *RObject:
+		if b, ok := s.builtin.(*object.String); ok {
+			return b
+		}
+	}
+	return nil
+}
+
+// spaceshipInvert implements MRI's rb_invcmp for String#<=>: when the operand is
+// not a directly-comparable String it evaluates `other <=> self` and returns the
+// negated Integer, or nil when that yields nil or a non-Integer. The (self,
+// other) pair is guarded so a mutually-inverting operand
+// (def other.<=>(x); x <=> self; end) returns nil rather than recurring forever.
+func (vm *VM) spaceshipInvert(self, other object.Value) object.Value {
+	key := [2]object.Value{self, other}
+	if vm.invcmpPath[key] {
+		return object.NilV
+	}
+	if vm.invcmpPath == nil {
+		vm.invcmpPath = map[[2]object.Value]bool{}
+	}
+	vm.invcmpPath[key] = true
+	defer delete(vm.invcmpPath, key)
+	if r, ok := vm.send(other, "<=>", []object.Value{self}, nil).(object.Integer); ok {
+		return object.IntValue(-int64(r))
+	}
+	return object.NilV
+}
+
 func reverseStr(s string) string {
 	r := []rune(s)
 	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
@@ -6431,36 +6486,62 @@ func accumInum(s string, i, base int, neg bool) object.Value {
 }
 
 // parseLeadingFloat mimics String#to_f: parse the longest leading float, 0.0 if
-// none.
+// none. A single underscore between two digits is permitted (and dropped) in the
+// integer, fractional and exponent runs, matching MRI's rb_str_to_dbl. Only
+// genuine ASCII whitespace (space, tab, newline, vtab, formfeed, CR) is skipped
+// before the number — a NUL or other non-printable byte terminates it instead.
 func parseLeadingFloat(s string) float64 {
-	s = strings.TrimLeft(s, wsCutset)
+	s = strings.TrimLeft(s, " \t\n\v\f\r")
+	var b strings.Builder
 	i := 0
-	if i < len(s) && (s[i] == '+' || s[i] == '-') {
-		i++
-	}
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		i++
-	}
-	if i < len(s) && s[i] == '.' {
-		i++
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
+	isDigit := func(c byte) bool { return c >= '0' && c <= '9' }
+	// scanDigits copies a run of digits into b, dropping a single underscore that
+	// sits between two digits; it reports whether it copied at least one digit.
+	scanDigits := func() bool {
+		any := false
+		for i < len(s) {
+			if isDigit(s[i]) {
+				b.WriteByte(s[i])
+				i++
+				any = true
+				continue
+			}
+			if s[i] == '_' && any && i+1 < len(s) && isDigit(s[i+1]) {
+				i++ // a single inter-digit underscore is dropped
+				continue
+			}
+			break
 		}
+		return any
+	}
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		b.WriteByte(s[i])
+		i++
+	}
+	scanDigits()
+	if i < len(s) && s[i] == '.' {
+		b.WriteByte('.')
+		i++
+		scanDigits()
 	}
 	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
-		j := i + 1
-		if j < len(s) && (s[j] == '+' || s[j] == '-') {
-			j++
+		// The exponent is committed only when at least one digit follows the
+		// (optionally signed) marker; otherwise "5e" / "1.2e_x3" keep the mantissa.
+		pre := b.String()
+		save := i
+		b.WriteByte(s[i])
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			b.WriteByte(s[i])
+			i++
 		}
-		k := j
-		for k < len(s) && s[k] >= '0' && s[k] <= '9' {
-			k++
-		}
-		if k > j {
-			i = k
+		if !scanDigits() {
+			i = save
+			b.Reset()
+			b.WriteString(pre)
 		}
 	}
-	f, err := strconv.ParseFloat(s[:i], 64)
+	f, err := strconv.ParseFloat(b.String(), 64)
 	if err != nil {
 		return 0
 	}
