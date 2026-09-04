@@ -107,6 +107,7 @@ func TestStringIOResiduals(t *testing.T) {
 		{req + `s = StringIO.new(+"x"); p [s.close_read, s.close_read]`, "[nil, nil]\n"},
 		{req + `s = StringIO.new(+"x"); p s.close_write`, "nil\n"},
 		{req + `s = StringIO.new(+"x"); s.close_read; s.close_write; p s.closed?`, "true\n"},
+		{req + `s = StringIO.new(+"x"); s.close_write; s.close_read; p s.closed?`, "true\n"},
 
 		// --- Enumerable mixin ---------------------------------------------------
 		{req + `p StringIO.include?(Enumerable)`, "true\n"},
