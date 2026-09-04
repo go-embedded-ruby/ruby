@@ -199,11 +199,91 @@ func (vm *VM) bootstrap() {
 		// proc{}.curry.lambda? is false.
 		return vm.curriedProc(p, need, p.isLambda, nil)
 	})
-	dupFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return dupValue(self)
+	// dup makes a shallow copy and runs #initialize_dup (→ #initialize_copy) on it;
+	// unlike clone it copies neither the frozen state nor the singleton class.
+	vm.cObject.define("dup", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		cp := dupValue(self)
+		if cp != self { // an immediate value dups to itself and skips the hook
+			vm.send(cp, "initialize_dup", []object.Value{self}, nil)
+		}
+		return cp
+	})
+	// clone additionally copies the singleton class and the frozen state, and runs
+	// #initialize_clone. A freeze: keyword (true/false/nil) overrides the copied
+	// frozen state and is forwarded to #initialize_clone; anything else is an error.
+	vm.cObject.define("clone", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		freezeVal, freezeGiven := object.Value(object.NilV), false
+		if len(args) > 0 {
+			if h, ok := args[len(args)-1].(*object.Hash); ok {
+				for _, k := range h.Keys {
+					if sym, isSym := k.(object.Symbol); isSym && sym == object.Symbol("freeze") {
+						freezeVal, _ = h.Get(k)
+						freezeGiven = true
+						continue
+					}
+					raise("ArgumentError", "unknown keyword: %s", k.Inspect())
+				}
+			}
+		}
+		if freezeGiven {
+			switch freezeVal.(type) {
+			case object.Bool, object.Nil:
+			default:
+				raise("ArgumentError", "unexpected value for freeze: %s", vm.classOf(freezeVal).name)
+			}
+		}
+		cp := dupValue(self)
+		if cp == self { // an immediate value clones to itself
+			return cp
+		}
+		vm.cloneSingleton(self, cp)
+		if freezeGiven {
+			kw := object.NewHash()
+			kw.Set(object.Symbol("freeze"), freezeVal)
+			vm.send(cp, "initialize_clone", []object.Value{self, kw}, nil)
+		} else {
+			vm.send(cp, "initialize_clone", []object.Value{self}, nil)
+		}
+		// freeze: true/false wins; freeze: nil or no keyword copies the original's
+		// frozen state.
+		doFreeze := isFrozen(self)
+		if b, ok := freezeVal.(object.Bool); ok {
+			doFreeze = bool(b)
+		}
+		if doFreeze {
+			vm.send(cp, "freeze", nil, nil)
+		}
+		return cp
+	})
+	// initialize_copy/dup/clone are Kernel's private copy hooks. The default
+	// initialize_copy validates the receiver (frozen / same-class) and is a no-op
+	// otherwise; initialize_dup and initialize_clone delegate to it and return self.
+	vm.cKernel.define("initialize_copy", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		orig := args[0]
+		if self == orig { // copying from itself does nothing (even when frozen)
+			return self
+		}
+		if isFrozen(self) {
+			vm.raiseFrozen(self)
+		}
+		if vm.classOf(self) != vm.classOf(orig) {
+			raise("TypeError", "initialize_copy should take same class object")
+		}
+		return self
+	})
+	vm.cKernel.define("initialize_dup", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		vm.send(self, "initialize_copy", []object.Value{args[0]}, nil)
+		return self
+	})
+	vm.cKernel.define("initialize_clone", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// A trailing freeze: keyword (from clone(freeze:)) is accepted and ignored
+		// by the default hook; the positional original is always args[0].
+		vm.send(self, "initialize_copy", []object.Value{args[0]}, nil)
+		return self
+	})
+	for _, n := range []string{"initialize_copy", "initialize_dup", "initialize_clone"} {
+		vm.setInstanceVisibility(vm.cKernel, n, visPrivate)
 	}
-	vm.cObject.define("dup", dupFn)
-	vm.cObject.define("clone", dupFn)
 	vm.cObject.define("freeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		switch o := self.(type) {
 		case *object.String:
@@ -214,6 +294,11 @@ func (vm *VM) bootstrap() {
 			o.Frozen = true
 		case *RObject:
 			o.frozen = true
+			// Freezing an object also freezes an already-materialised singleton
+			// class, matching MRI (a lazily-created one stays unfrozen until used).
+			if o.singleton != nil {
+				o.singleton.frozen = true
+			}
 		case *RClass:
 			o.frozen = true
 		}
@@ -1023,17 +1108,82 @@ func (vm *VM) bootstrap() {
 		return fail("TypeError", "can't convert %s into Float", vm.convErrName(other))
 	})
 	vm.cObject.define("String", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.send(args[0], "to_s", nil, nil)
-	})
-	vm.cObject.define("Array", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		switch v := args[0].(type) {
-		case object.Nil:
-			return object.NewArray()
-		case *object.Array:
+		v := args[0]
+		// A String (or String-subclass instance) is returned as-is: #to_s is not
+		// called, matching MRI's rb_check_string_type shortcut.
+		if classIsA(vm.classOf(v), vm.cString) {
 			return v
-		default:
-			return object.NewArray(v)
 		}
+		// An overridden #respond_to? that answers false for :to_s hides an existing
+		// #to_s, so no conversion is attempted — MRI raises TypeError.
+		respondsToS := vm.send(v, "respond_to?", []object.Value{object.Symbol("to_s")}, nil).Truthy()
+		if !respondsToS && vm.findMethod(v, "to_s") != nil {
+			raise("TypeError", "can't convert %s into String", vm.convErrName(v))
+		}
+		// Call #to_s. When it is undefined (and only the default #method_missing is
+		// present) the dispatch raises NoMethodError, which rb_String turns into a
+		// TypeError; a #method_missing that answers instead yields its value.
+		r, ok := vm.stringConvToS(v)
+		if !ok {
+			raise("TypeError", "can't convert %s into String", vm.convErrName(v))
+		}
+		if classIsA(vm.classOf(r), vm.cString) {
+			return r
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_s gives %s)",
+			vm.convErrName(v), vm.convErrName(v), vm.classOf(r).name)
+		return object.NilV
+	})
+	vm.cObject.define("Array", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// A real Array is returned untouched — neither #to_ary nor #to_a is called.
+		if a, ok := args[0].(*object.Array); ok {
+			return a
+		}
+		v := args[0]
+		// #to_ary first (private included), then #to_a, mirroring MRI's rb_Array:
+		// each may return nil to decline; a non-Array, non-nil result is a
+		// TypeError; if neither yields an Array, the argument is wrapped as [v].
+		for _, conv := range []string{"to_ary", "to_a"} {
+			if !vm.respondsToDynamic(v, conv) {
+				continue
+			}
+			r := vm.send(v, conv, nil, nil)
+			if object.IsNil(r) {
+				continue
+			}
+			if a, ok := r.(*object.Array); ok {
+				return a
+			}
+			raise("TypeError", "can't convert %s to Array (%s#%s gives %s)",
+				vm.convErrName(v), vm.convErrName(v), conv, vm.classOf(r).name)
+		}
+		return object.NewArray(v)
+	})
+	vm.cObject.define("Hash", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// A real Hash is returned untouched; nil and an empty Array both become {}
+		// (MRI's special cases). Otherwise #to_hash converts, and anything that
+		// neither is a Hash nor answers #to_hash with one is a TypeError.
+		switch v := args[0].(type) {
+		case *object.Hash:
+			return v
+		case object.Nil:
+			return object.NewHash()
+		case *object.Array:
+			if len(v.Elems) == 0 {
+				return object.NewHash()
+			}
+		}
+		v := args[0]
+		if vm.respondsToDynamic(v, "to_hash") {
+			r := vm.send(v, "to_hash", nil, nil)
+			if h, ok := r.(*object.Hash); ok {
+				return h
+			}
+			raise("TypeError", "can't convert %s to Hash (%s#to_hash gives %s)",
+				vm.convErrName(v), vm.convErrName(v), vm.classOf(r).name)
+		}
+		raise("TypeError", "can't convert %s into Hash", vm.convErrName(v))
+		return object.NilV
 	})
 	sendFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.send(self, vm.methodNameArg(args[0]), args[1:], blk)
@@ -5455,7 +5605,7 @@ func (vm *VM) bootstrap() {
 // simply skipped. Runs after every listed method is registered.
 func (vm *VM) registerKernelModuleFunctions() {
 	names := []string{
-		"Array", "Complex", "Float", "Integer", "Rational", "String",
+		"Array", "Complex", "Float", "Hash", "Integer", "Rational", "String",
 		"__dir__", "abort", "at_exit", "autoload", "autoload?", "caller",
 		"catch", "eval", "exec", "exit", "exit!", "fork", "format", "lambda",
 		"load", "loop", "open", "p", "print", "printf", "proc", "puts",
@@ -7540,6 +7690,24 @@ func (vm *VM) integerArg(v object.Value) *big.Int {
 // the named conversion method (#to_ary/#to_hash/#to_str/#to_int), that is called
 // and its result must be nil or a kind of target — anything else is a TypeError.
 // An object that does not respond to the conversion method yields nil.
+// stringConvToS calls #to_s on v for Kernel#String, returning (result, true). A
+// NoMethodError — v has no usable #to_s (e.g. it was undef'd and only the
+// default #method_missing remains) — is reported as ok=false so the caller
+// raises the TypeError that MRI's rb_String produces, rather than letting the
+// NoMethodError escape. Any other exception propagates unchanged.
+func (vm *VM) stringConvToS(v object.Value) (res object.Value, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if re, isRE := r.(RubyError); isRE && re.Class == "NoMethodError" {
+				res, ok = object.NilV, false
+				return
+			}
+			panic(r)
+		}
+	}()
+	return vm.send(v, "to_s", nil, nil), true
+}
+
 func (vm *VM) tryConvert(obj object.Value, target *RClass, meth string) object.Value {
 	if classIsA(vm.classOf(obj), target) {
 		return obj
@@ -8589,6 +8757,46 @@ func (vm *VM) defineAttrs(cls *RClass, names []object.Value, reader, writer bool
 // dupValue shallow-copies a value (Object#dup/#clone). Reference types get a
 // fresh container with the same elements; immutable value types are their own
 // copy.
+// cloneSingleton gives dst a fresh copy of src's singleton class, when src has
+// one, so Object#clone carries over per-object methods, singleton-included
+// modules and singleton constants (MRI clones the metaclass). It handles both an
+// *RObject's inline singleton and the side-table singleton of a reference value
+// (Array/Hash/String). The copied methods are re-owned by the new singleton so
+// `super` still resolves up the object's class chain, and the new singleton's
+// superclass is dst's class.
+func (vm *VM) cloneSingleton(src, dst object.Value) {
+	sc := vm.objSingleton(src)
+	if sc == nil {
+		return
+	}
+	ns := newClass("", vm.classOf(dst))
+	ns.isSingleton = true
+	for name, m := range sc.methods {
+		cp := *m
+		cp.owner = ns
+		ns.methods[name] = &cp
+	}
+	ns.includes = append(ns.includes, sc.includes...)
+	ns.prepends = append(ns.prepends, sc.prepends...)
+	for name, val := range sc.consts {
+		ns.consts[name] = val
+	}
+	if sc.visOverrides != nil {
+		ns.visOverrides = make(map[string]visibility, len(sc.visOverrides))
+		for name, vis := range sc.visOverrides {
+			ns.visOverrides[name] = vis
+		}
+	}
+	if do, ok := dst.(*RObject); ok {
+		do.singleton = ns
+		return
+	}
+	if vm.extSingletons == nil {
+		vm.extSingletons = map[object.Value]*RClass{}
+	}
+	vm.extSingletons[dst] = ns
+}
+
 func dupValue(v object.Value) object.Value {
 	switch x := v.(type) {
 	case *object.String:
@@ -8614,6 +8822,11 @@ func dupValue(v object.Value) object.Value {
 			ivars[k] = val
 		}
 		dup := &RObject{class: x.class, ivars: ivars}
+		// Preserve instance-variable insertion order so the copy's
+		// #instance_variables (and #inspect) match the original's ordering.
+		if x.ivarOrder != nil {
+			dup.ivarOrder = append([]string(nil), x.ivarOrder...)
+		}
 		// A Struct instance carries its members in structVals (not ivars), so the
 		// copy must clone that slice too or the duplicate would report all-nil
 		// members (and Struct#hash/#== would diverge from the original).
@@ -8632,6 +8845,9 @@ func dupValue(v object.Value) object.Value {
 func isFrozen(v object.Value) bool {
 	switch x := v.(type) {
 	case object.Integer, object.Float, object.Symbol, object.Bool, object.Nil:
+		return true
+	case *object.Bignum, *object.Complex, *object.Rational:
+		// Numeric value objects are immutable in Ruby, hence always frozen.
 		return true
 	case *object.String:
 		return x.Frozen
