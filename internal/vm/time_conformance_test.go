@@ -186,8 +186,9 @@ func TestTimeStrftime(t *testing.T) {
 		{base + `puts t.strftime("%Q")`, "%Q\n"},
 		{base + `puts t.strftime("done %")`, "done %\n"},
 		{base + `puts t.strftime("x%-")`, "x%-\n"},
-		// %Z on a fixed-offset zone renders the numeric offset; %z sign both ways.
-		{`puts Time.new(2026,1,1,0,0,0,"+09:00").strftime("%Z")`, "+09:00\n"},
+		// %Z is empty for a fixed-offset zone (MRI emits no abbreviation, unlike
+		// #inspect which shows the numeric offset).
+		{`p Time.new(2026,1,1,0,0,0,"+09:00").strftime("%Z")`, "\"\"\n"},
 		{`puts Time.new(2026,1,1,0,0,0,"-05:30").strftime("%z|%:z|%::z")`, "-0530|-05:30|-05:30:00\n"},
 		// hour12 wrap: midnight and noon both render 12.
 		{`puts Time.utc(2026,1,1,0,0,0).strftime("%I %p")`, "12 AM\n"},
