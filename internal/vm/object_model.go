@@ -187,6 +187,12 @@ type Method struct {
 	// iseq.Name when present, else fall back to name" (see methodOriginalName), so
 	// a plain def and an `alias` (which shares the iseq) need not set it.
 	origName string
+	// viaMissing marks the synthetic Method that Object#method returns for a name
+	// answered only through respond_to_missing? (its body forwards to
+	// method_missing). Two such Methods on the same receiver with the same name
+	// are one and the same method to MRI even though each is a distinct record, so
+	// equality keys on the name rather than the record pointer.
+	viaMissing bool
 }
 
 // RClass is a class (the live, mutable method table that makes monkey-patching,

@@ -21,6 +21,22 @@ func (vm *VM) newBoundMethod(recv object.Value, name string, m *Method) *BoundMe
 	return &BoundMethod{recv: recv, name: name, m: m, vm: vm}
 }
 
+// methodMissingMethod builds the synthetic Method returned by Object#method for
+// a name the receiver only answers via respond_to_missing?. Its owner is the
+// receiver's class (so Method#owner reports it) and its body forwards to
+// method_missing(name, *args, &blk), resolved dynamically at call time.
+func (vm *VM) methodMissingMethod(recv object.Value, name string) *Method {
+	return &Method{
+		name:       name,
+		owner:      vm.classOf(recv),
+		viaMissing: true,
+		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			fwd := append([]object.Value{object.Symbol(name)}, args...)
+			return vm.send(self, "method_missing", fwd, blk)
+		},
+	}
+}
+
 // every Method created by define / OpDefineMethod / define_(singleton_)method
 // carries a non-nil owner, so b.m.owner is always set.
 func (b *BoundMethod) ToS() string {
@@ -38,6 +54,14 @@ func (vm *VM) registerMethod() {
 		name := args[0].ToS()
 		m := vm.resolveMethod(self, name)
 		if m == nil {
+			// A name the receiver answers only through respond_to_missing? (with
+			// include_private true) still yields a callable Method whose body routes
+			// to method_missing dynamically — MRI resolves method_missing at call
+			// time, so redefining it after the fact changes the result and the
+			// original name is never invoked even if it later comes to exist.
+			if vm.send(self, "respond_to_missing?", []object.Value{object.Symbol(name), object.True}, nil).Truthy() {
+				return vm.newBoundMethod(self, name, vm.methodMissingMethod(self, name))
+			}
 			return raise("NameError", "undefined method '%s' for %s", name, vm.classOf(self).name)
 		}
 		return vm.newBoundMethod(self, name, m)

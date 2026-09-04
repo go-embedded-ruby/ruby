@@ -31,6 +31,28 @@ func methodDefKey(m *Method) uintptr {
 	}
 }
 
+// methodSameDef reports whether two Method records share an underlying
+// definition. A method_missing-backed Method (Object#method for a name answered
+// only via respond_to_missing?) has no shared record, so two of them are equal
+// exactly when they carry the same name; otherwise the definition-key rule
+// applies.
+func methodSameDef(a, b *Method) bool {
+	if a.viaMissing || b.viaMissing {
+		return a.viaMissing && b.viaMissing && a.name == b.name
+	}
+	return methodDefKey(a) == methodDefKey(b)
+}
+
+// methodDefHash gives a Method a hash that agrees with methodSameDef: a
+// method_missing-backed Method hashes on its name (so two equal ones agree),
+// every other on its definition-key pointer.
+func methodDefHash(m *Method) int64 {
+	if m.viaMissing {
+		return fnvHash("mm:" + m.name)
+	}
+	return int64(methodDefKey(m))
+}
+
 // registerMethodReflect adds the reflection operators that compare, hash,
 // compose and curry Method objects (and the composition operators on Proc,
 // which share the same semantics). Behaviour matches MRI 3.4.
@@ -42,7 +64,7 @@ func (vm *VM) registerMethodReflect() {
 		if !ok {
 			return object.False
 		}
-		return object.Bool(a.recv == b.recv && methodDefKey(a.m) == methodDefKey(b.m))
+		return object.Bool(a.recv == b.recv && methodSameDef(a.m, b.m))
 	}
 	vm.cMethod.define("==", methodEq)
 	// Method#eql? is an alias of Method#== (they share one record, so
@@ -50,7 +72,7 @@ func (vm *VM) registerMethodReflect() {
 	aliasBuiltin(vm.cMethod, "eql?", "==")
 	vm.cMethod.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*BoundMethod)
-		return object.IntValue(vm.hashValue(b.recv) ^ int64(methodDefKey(b.m)))
+		return object.IntValue(vm.hashValue(b.recv) ^ methodDefHash(b.m))
 	})
 
 	// Method#>> and Method#<< compose the method with another callable.
