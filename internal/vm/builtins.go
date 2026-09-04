@@ -2473,35 +2473,52 @@ func (vm *VM) bootstrap() {
 		// Array.new / Array.new(other) / Array.new(n[, val]) / Array.new(n) { |i| }
 		arr := self.(*object.Array)
 		vm.checkArrayFrozen(arr) // re-initialising a frozen array raises (a fresh one is not frozen)
-		if len(args) == 1 {
-			if a, ok := args[0].(*object.Array); ok {
-				arr.Elems = append([]object.Value{}, a.Elems...)
-				return self
-			}
+		if len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..2)", len(args))
 		}
 		if len(args) == 0 {
 			arr.Elems = nil
 			return self
 		}
-		n := intArg(args[0])
+		// A single non-Integer argument is treated as another array to copy: an Array
+		// (or subclass) directly, else through #to_ary (MRI's rb_check_array_type).
+		// Only when that yields nothing does the argument become a size via #to_int.
+		if len(args) == 1 && !isIntegerVal(args[0]) {
+			if src, ok := asArray(args[0]); ok {
+				arr.Elems = append([]object.Value{}, src.Elems...)
+				return self
+			}
+			if vm.respondsToDynamic(args[0], "to_ary") {
+				if src, ok := asArray(vm.send(args[0], "to_ary", nil, nil)); ok {
+					arr.Elems = append([]object.Value{}, src.Elems...)
+					return self
+				}
+			}
+		}
+		if _, isBig := args[0].(*object.Bignum); isBig {
+			raise("ArgumentError", "array size too big")
+		}
+		n := vm.toIntCoerce(args[0])
 		if n < 0 {
 			raise("ArgumentError", "negative array size")
 		}
-		out := make([]object.Value, n)
-		for i := range out {
+		// Build the array incrementally so that if the block calls break, the array
+		// is left holding the elements produced before the break, as MRI does.
+		arr.Elems = make([]object.Value, 0, n)
+		for i := int64(0); i < n; i++ {
 			switch {
 			case blk != nil:
-				out[i] = vm.callBlock(blk, []object.Value{object.IntValue(int64(i))})
+				arr.Elems = append(arr.Elems, vm.callBlock(blk, []object.Value{object.IntValue(i)}))
 			case len(args) >= 2:
-				out[i] = args[1]
+				arr.Elems = append(arr.Elems, args[1])
 			default:
-				out[i] = object.NilV
+				arr.Elems = append(arr.Elems, object.NilV)
 			}
 		}
-		arr.Elems = out
 		return self
 	}
 	vm.cArray.define("initialize", arrayInit)
+	vm.setInstanceVisibility(vm.cArray, "initialize", visPrivate) // MRI keeps #initialize private
 	vm.cArray.smethods["new"] = &Method{name: "new", owner: vm.cArray,
 		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 			if recv := self.(*RClass); recv != vm.cArray {
@@ -2659,7 +2676,7 @@ func (vm *VM) bootstrap() {
 			}
 			return object.NormInt(new(big.Int).Sqrt(n))
 		}}
-	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("first", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if len(args) == 0 {
 			if len(a.Elems) == 0 {
@@ -2667,12 +2684,15 @@ func (vm *VM) bootstrap() {
 			}
 			return a.Elems[0]
 		}
-		n := clampCount(intArg(args[0]), len(a.Elems))
+		if _, isBig := args[0].(*object.Bignum); isBig {
+			raise("RangeError", "bignum too big to convert into 'long'")
+		}
+		n := clampCount(vm.toIntCoerce(args[0]), len(a.Elems))
 		out := make([]object.Value, n)
 		copy(out, a.Elems[:n])
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("last", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if len(args) == 0 {
 			if len(a.Elems) == 0 {
@@ -2680,29 +2700,46 @@ func (vm *VM) bootstrap() {
 			}
 			return a.Elems[len(a.Elems)-1]
 		}
-		n := clampCount(intArg(args[0]), len(a.Elems))
+		n := clampCount(vm.toIntCoerce(args[0]), len(a.Elems))
 		out := make([]object.Value, n)
 		copy(out, a.Elems[len(a.Elems)-n:])
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cArray.define("fill", arrayFill)
+	// Array#inspect renders each element through its own Ruby-level #inspect (so a
+	// user-defined or mocked #inspect is honoured), following MRI's rb_inspect →
+	// rb_obj_as_string: a non-String #inspect result is passed through #to_s, and
+	// if that is still not a String the object's default #<Class:0x…> identity is
+	// used (never #to_str; a #to_s exception propagates). A self-referential array
+	// renders as "[...]". #to_s is the classic alias.
+	vm.cArray.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.arrayInspect(self.(*object.Array), map[*object.Array]bool{})
+	})
+	// #to_s is a true alias of #inspect: share the same method entry so
+	// Array.instance_method(:to_s) == Array.instance_method(:inspect), as in MRI.
+	vm.cArray.methods["to_s"] = vm.cArray.methods["inspect"]
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
 		a.Elems = append(a.Elems, args...)
 		return a
 	})
+	// #append is a true alias of #push (shared entry for UnboundMethod identity).
+	vm.cArray.methods["append"] = vm.cArray.methods["push"]
 	vm.cArray.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
 		a.Elems = append(a.Elems, args[0])
 		return a
 	})
-	vm.cArray.define("pop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("pop", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
+		if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
 		if len(args) > 0 { // pop(n) removes and returns the last n as an array
-			n := int(intArg(args[0]))
+			n := int(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -2721,11 +2758,14 @@ func (vm *VM) bootstrap() {
 		a.Elems = a.Elems[:len(a.Elems)-1]
 		return v
 	})
-	vm.cArray.define("shift", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("shift", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
+		if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
 		if len(args) > 0 { // shift(n) removes and returns the first n as an array
-			n := int(intArg(args[0]))
+			n := int(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -2750,7 +2790,12 @@ func (vm *VM) bootstrap() {
 		return a
 	}
 	vm.cArray.define("unshift", unshift)
-	vm.cArray.define("prepend", unshift)
+	// #prepend is a true alias of #unshift: share the entry for identity.
+	vm.cArray.methods["prepend"] = vm.cArray.methods["unshift"]
+	// Array#to_ary returns self (the implicit Array-conversion protocol point).
+	vm.cArray.define("to_ary", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
 	// Array#insert(index, *objects): insert the objects before the element at
 	// index (or, for a negative index, after the element index counts back to —
 	// so -1 appends). Inserting past the end pads the gap with nil, as in MRI.
@@ -2789,7 +2834,6 @@ func (vm *VM) bootstrap() {
 		// Remove every element == the argument; return it, or (a block's result,
 		// else nil) when nothing matched.
 		a := self.(*object.Array)
-		vm.checkArrayFrozen(a)
 		found := false
 		var out []object.Value
 		for _, e := range a.Elems {
@@ -2799,8 +2843,12 @@ func (vm *VM) bootstrap() {
 				out = append(out, e)
 			}
 		}
-		a.Elems = out
 		if found {
+			// Only an actual removal is a modification: a frozen array raises here,
+			// but delete of an absent element on a frozen array is a no-op (returns
+			// nil / the block result) without raising, matching MRI.
+			vm.checkArrayFrozen(a)
+			a.Elems = out
 			return args[0]
 		}
 		if blk != nil {
@@ -2814,24 +2862,26 @@ func (vm *VM) bootstrap() {
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		var out []object.Value
-		for _, e := range a.Elems {
-			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
-				out = append(out, e)
-			}
-		}
-		a.Elems = out
+		// keep=false: drop elements the block finds truthy. Shares the in-place,
+		// panic-safe, live-growth compaction with keep_if/select!/reject!.
+		arrayKeepIf(vm, a, blk, false)
 		return a
 	})
 	vm.cArray.define("concat", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		for _, arg := range args {
-			other, ok := arg.(*object.Array)
-			if !ok {
-				raise("TypeError", "no implicit conversion of %s into Array", classNameOf(arg))
-			}
-			a.Elems = append(a.Elems, other.Elems...)
+		// Coerce every argument to an Array first (an Array subclass directly, else
+		// through #to_ary) so a #to_ary that inspects the receiver sees it unchanged,
+		// and a bad argument raises before any element is appended.
+		others := vm.toAryArgs(args)
+		// Snapshot each argument's current contents before appending, so concat(self)
+		// or a repeated self argument uses the pre-concat elements (MRI copies first).
+		snaps := make([][]object.Value, len(others))
+		for i, other := range others {
+			snaps[i] = append([]object.Value(nil), other.Elems...)
+		}
+		for _, s := range snaps {
+			a.Elems = append(a.Elems, s...)
 		}
 		return a
 	})
@@ -2844,10 +2894,8 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		other, ok := args[0].(*object.Array)
-		if !ok {
-			raise("TypeError", "no implicit conversion of %s into Array", classNameOf(args[0]))
-		}
+		// #replace coerces its argument to an Array (subclass directly, else #to_ary).
+		other := vm.toAryArg(args[0])
 		a.Elems = append([]object.Value(nil), other.Elems...)
 		return a
 	})
@@ -3087,9 +3135,11 @@ func (vm *VM) bootstrap() {
 		if blk.native != nil {
 			// A synthesized native block (e.g. &:to_s, a Go-compiled AOT closure)
 			// runs opaque Go code that could retain the args slice, so each yield
-			// gets its own fresh slice.
-			for _, e := range a.Elems {
-				vm.callBlock(blk, []object.Value{e})
+			// gets its own fresh slice. Iterate by live index (not range, which
+			// snapshots the slice header) so elements the block appends are seen —
+			// Ruby's Array#each visits by an internal index while i < length.
+			for i := 0; i < len(a.Elems); i++ {
+				vm.callBlock(blk, []object.Value{a.Elems[i]})
 			}
 			return a
 		}
@@ -3098,10 +3148,12 @@ func (vm *VM) bootstrap() {
 		// synchronously at frame entry, before any block bytecode runs, and never
 		// aliases the passed slice. So a single 1-element scratch slice, private to
 		// this call (re-entrant each gets its own), can be reused across iterations
-		// without a capturing block observing the next iteration's overwrite.
+		// without a capturing block observing the next iteration's overwrite. The
+		// live-index loop lets the block grow the array and have the new tail
+		// yielded, matching Ruby.
 		scratch := make([]object.Value, 1)
-		for _, e := range a.Elems {
-			scratch[0] = e
+		for i := 0; i < len(a.Elems); i++ {
+			scratch[0] = a.Elems[i]
 			vm.callBlock(blk, scratch)
 		}
 		return a
@@ -3111,9 +3163,11 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "map")
 		}
 		a := self.(*object.Array)
-		out := make([]object.Value, len(a.Elems))
-		for i, e := range a.Elems {
-			out[i] = vm.callBlock(blk, []object.Value{e})
+		// Live-index loop: a block that grows the array has the new tail mapped
+		// too (Ruby's Array#map tolerates size increase during iteration).
+		out := make([]object.Value, 0, len(a.Elems))
+		for i := 0; i < len(a.Elems); i++ {
+			out = append(out, vm.callBlock(blk, []object.Value{a.Elems[i]}))
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -3128,14 +3182,22 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "select")
 		}
 		a := self.(*object.Array)
+		// Live-index loop: elements the block appends are also tested (Ruby's
+		// Array#select tolerates size increase during iteration).
 		out := make([]object.Value, 0, len(a.Elems))
-		for _, e := range a.Elems {
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
 			if vm.callBlock(blk, []object.Value{e}).Truthy() {
 				out = append(out, e)
 			}
 		}
 		return object.NewArrayFromSlice(out)
 	})
+	// #collect and #filter are true aliases of #map and #select. Defining them on
+	// Array with the shared record (rather than leaving Enumerable's alias to win)
+	// makes Array.instance_method(:collect)/(:filter) == (:map)/(:select), as MRI.
+	aliasBuiltin(vm.cArray, "collect", "map")
+	aliasBuiltin(vm.cArray, "filter", "select")
 	// reduce/inject are native for the same reason (and #inject delegates here via
 	// the prelude). The fold mirrors Enumerable#reduce exactly — the (init, sym),
 	// (sym), (init) and bare-block forms, the "no block given" yield error, and the
@@ -3168,7 +3230,7 @@ func (vm *VM) bootstrap() {
 	// order, matching Ruby.
 	vm.cArray.define("&", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		b := arrArg(args[0])
+		b := vm.toAryArg(args[0])
 		var out []object.Value
 		for _, e := range a.Elems {
 			if vm.arrayIncludesEql(b.Elems, e) && !vm.arrayIncludesEql(out, e) {
@@ -3179,7 +3241,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("|", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		b := arrArg(args[0])
+		b := vm.toAryArg(args[0])
 		var out []object.Value
 		for _, e := range append(append([]object.Value{}, a.Elems...), b.Elems...) {
 			if !vm.arrayIncludesEql(out, e) {
@@ -3194,13 +3256,16 @@ func (vm *VM) bootstrap() {
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		for i := range a.Elems {
+		// Live-index loop so elements the block appends are also mapped in place
+		// (Ruby's Array#map! tolerates size increase during iteration).
+		for i := 0; i < len(a.Elems); i++ {
 			a.Elems[i] = vm.callBlock(blk, []object.Value{a.Elems[i]})
 		}
 		return self
 	})
-	// collect! is the classic alias of map! (as collect is of map).
-	vm.aliasMethod(vm.cArray, "collect!", "map!")
+	// collect! is the classic alias of map! (as collect is of map). Share the
+	// method record so Array.instance_method(:collect!) == (:map!), as in MRI.
+	aliasBuiltin(vm.cArray, "collect!", "map!")
 	vm.cArray.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -3224,7 +3289,8 @@ func (vm *VM) bootstrap() {
 		return arrayKeepIf(vm, a, blk, true)
 	}
 	vm.cArray.define("select!", selectBang)
-	vm.cArray.define("filter!", selectBang)
+	// #filter! is a true alias of #select! (shared record for identity).
+	aliasBuiltin(vm.cArray, "filter!", "select!")
 	vm.cArray.define("reject!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "reject!")
@@ -3267,21 +3333,21 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("flatten", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 && !object.IsNil(args[0]) {
 			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
-		return object.NewArrayFromSlice(flattenDepth(self.(*object.Array).Elems, depth))
+		return object.NewArrayFromSlice(vm.flattenDepth(self.(*object.Array).Elems, depth))
 	})
-	vm.cArray.define("flatten!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("flatten!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 && !object.IsNil(args[0]) {
 			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		out, changed := flattenDepthChanged(a.Elems, depth)
+		out, changed := vm.flattenDepthIn(a.Elems, depth, map[*object.Array]bool{})
 		if !changed {
 			return object.NilV
 		}
@@ -3293,7 +3359,10 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			acc = args[0]
 		}
-		for _, e := range self.(*object.Array).Elems {
+		a := self.(*object.Array)
+		// Live-index loop so a block that grows the array folds the new tail too.
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
 			if blk != nil { // sum { |x| ... } maps each element before adding
 				e = vm.callBlock(blk, []object.Value{e})
 			}
@@ -3301,13 +3370,24 @@ func (vm *VM) bootstrap() {
 		}
 		return acc
 	})
-	vm.cArray.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cArray.define("to_h", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
 		h := object.NewHash()
-		for i, e := range self.(*object.Array).Elems {
+		a := self.(*object.Array)
+		// Live-index loop so a block that grows the array processes the new tail.
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
 			if blk != nil { // to_h { |x| [k, v] } maps each element to a pair
 				e = vm.callBlock(blk, []object.Value{e})
 			}
-			pair, ok := e.(*object.Array)
+			// Each element must be a [key, value] pair: an Array directly, or a value
+			// convertible with #to_ary (MRI's to_h coerces non-array contents).
+			pair, ok := asArray(e)
+			if !ok && vm.respondsToDynamic(e, "to_ary") {
+				pair, ok = asArray(vm.send(e, "to_ary", nil, nil))
+			}
 			if !ok {
 				raise("TypeError", "wrong element type %s at %d (expected array)", vm.classOf(e).name, i)
 			}
@@ -3365,12 +3445,19 @@ func (vm *VM) bootstrap() {
 		if len(rows) == 0 {
 			return object.NewArray()
 		}
+		// Coerce each row to an Array (a subclass directly, else through #to_ary) so
+		// transpose accepts array-like rows without returning subclass instances.
+		mat := make([]*object.Array, len(rows))
 		var width int
 		for i, r := range rows {
-			ra, ok := r.(*object.Array)
+			ra, ok := asArray(r)
+			if !ok && vm.respondsToDynamic(r, "to_ary") {
+				ra, ok = asArray(vm.send(r, "to_ary", nil, nil))
+			}
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(r).name)
 			}
+			mat[i] = ra
 			if i == 0 {
 				width = len(ra.Elems)
 			} else if len(ra.Elems) != width {
@@ -3379,9 +3466,9 @@ func (vm *VM) bootstrap() {
 		}
 		out := make([]object.Value, width)
 		for j := 0; j < width; j++ {
-			col := make([]object.Value, len(rows))
-			for i, r := range rows {
-				col[i] = r.(*object.Array).Elems[j]
+			col := make([]object.Value, len(mat))
+			for i, ra := range mat {
+				col[i] = ra.Elems[j]
 			}
 			out[j] = object.NewArrayFromSlice(col)
 		}
@@ -3390,10 +3477,9 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		lists := [][]object.Value{self.(*object.Array).Elems}
 		for _, a := range args {
-			la, ok := asArray(a)
-			if !ok && vm.respondsToDynamic(a, "to_ary") {
-				la, ok = asArray(vm.send(a, "to_ary", nil, nil))
-			}
+			// checkArrayType coerces via #to_ary, including a #to_ary reached only
+			// through #method_missing (respond_to_missing?-aware), matching MRI.
+			la, ok := vm.checkArrayType(a)
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(a).name)
 			}
@@ -3484,7 +3570,7 @@ func (vm *VM) bootstrap() {
 		elems := self.(*object.Array).Elems
 		k := len(elems)
 		if len(args) > 0 {
-			k = int(intArg(args[0]))
+			k = int(vm.toIntCoerce(args[0]))
 		}
 		var perms []object.Value
 		if k >= 0 && k <= len(elems) {
@@ -3606,7 +3692,10 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "take_while")
 		}
 		var out []object.Value
-		for _, e := range self.(*object.Array).Elems {
+		a := self.(*object.Array)
+		// Live-index loop so elements the block appends are considered too.
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
 			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
 				break
 			}
@@ -3680,6 +3769,12 @@ func (vm *VM) bootstrap() {
 			return enumForSized(self, "rindex", func(*VM) object.Value { return object.IntValue(int64(len(a.Elems))) })
 		}
 		for i := len(a.Elems) - 1; i >= 0; i-- {
+			// A block may shrink the array; realign to the new end and re-check size
+			// each step so we never index past it (MRI rechecks RARRAY_LEN too).
+			if i >= len(a.Elems) {
+				i = len(a.Elems)
+				continue
+			}
 			var match bool
 			if len(args) > 0 {
 				match = vm.vmValueEqual(a.Elems[i], args[0])
@@ -3711,9 +3806,9 @@ func (vm *VM) bootstrap() {
 		copy(out, a.Elems[:n])
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("drop", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		n := int(intArg(args[0]))
+		n := int(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
 		}
@@ -3840,19 +3935,24 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "sort_by")
 		}
 		a := self.(*object.Array)
-		keys := make([]object.Value, len(a.Elems))
-		for i, e := range a.Elems {
-			keys[i] = vm.callBlock(blk, []object.Value{e})
+		// Live-index loop: a block that grows the array has the new tail keyed and
+		// sorted too. Snapshot each element beside its key so a later append cannot
+		// desync the two parallel slices.
+		var elems, keys []object.Value
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
+			elems = append(elems, e)
+			keys = append(keys, vm.callBlock(blk, []object.Value{e}))
 		}
 		// Sort an index permutation so each element stays paired with its key.
-		idx := make([]int, len(a.Elems))
+		idx := make([]int, len(elems))
 		for i := range idx {
 			idx[i] = i
 		}
 		sort.SliceStable(idx, func(i, j int) bool { return vm.spaceship(keys[idx[i]], keys[idx[j]]) < 0 })
 		out := make([]object.Value, len(idx))
 		for i, k := range idx {
-			out[i] = a.Elems[k]
+			out[i] = elems[k]
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -4655,7 +4755,7 @@ func (vm *VM) bootstrap() {
 	// 1 (the pair wrappers are removed but Array values are left intact); a depth
 	// >= 2 recurses that many further levels into nested Array values. A
 	// non-Integer argument raises TypeError (via intArg).
-	vm.cHash.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.define("flatten", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := 1
 		if len(args) > 0 {
 			depth = int(intArg(args[0]))
@@ -4666,7 +4766,7 @@ func (vm *VM) bootstrap() {
 			v, _ := h.Get(k)
 			pairs = append(pairs, hashPair(k, v))
 		}
-		return object.NewArrayFromSlice(flattenDepth(pairs, depth))
+		return object.NewArrayFromSlice(vm.flattenDepth(pairs, depth))
 	})
 	// compact returns a copy without the nil-valued pairs, preserving the
 	// receiver's default value and default proc. compact! removes them in place,
@@ -7118,6 +7218,34 @@ func arrArg(v object.Value) *object.Array {
 	return nil
 }
 
+// toAryArg coerces a set-operation argument (Array#|, #&, #-, #union,
+// #intersection, #difference, #intersect?) to an *object.Array. An Array — or an
+// Array subclass — is used directly, without calling #to_ary (MRI does not
+// convert subclasses); any other value is converted through #to_ary, whose result
+// must be an Array. A value answering neither raises the same TypeError MRI's
+// rb_to_array_type raises, naming the class.
+func (vm *VM) toAryArg(v object.Value) *object.Array {
+	if a, ok := asArray(v); ok {
+		return a
+	}
+	if vm.respondsToDynamic(v, "to_ary") {
+		if a, ok := asArray(vm.send(v, "to_ary", nil, nil)); ok {
+			return a
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(v).name)
+	return nil
+}
+
+// toAryArgs coerces each set-operation argument through toAryArg.
+func (vm *VM) toAryArgs(args []object.Value) []*object.Array {
+	out := make([]*object.Array, len(args))
+	for i, a := range args {
+		out[i] = vm.toAryArg(a)
+	}
+	return out
+}
+
 func strArg(v object.Value) string {
 	if s, ok := v.(*object.String); ok {
 		return s.Str()
@@ -7287,15 +7415,34 @@ func (vm *VM) sortSlice(out []object.Value, blk *Proc) {
 		return
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		r := vm.callBlock(blk, []object.Value{out[i], out[j]})
-		c, ok := r.(object.Integer)
-		if !ok {
-			// MRI compares the block's result against 0, so a non-Integer fails as
-			// "comparison of <result class> with 0 failed".
-			raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(r).name)
-		}
-		return c < 0
+		return vm.blockCmpToZero(vm.callBlock(blk, []object.Value{out[i], out[j]})) < 0
 	})
+}
+
+// blockCmpToZero turns a sort/comparator block's result into a three-way sign,
+// like MRI's rb_cmpint: an Integer (or Bignum) contributes its own sign directly,
+// and anything else is compared against 0 through #<=>. A #<=> that does not
+// return an Integer is "comparison of <class> with 0 failed".
+func (vm *VM) blockCmpToZero(r object.Value) int {
+	switch v := r.(type) {
+	case object.Integer:
+		switch {
+		case v < 0:
+			return -1
+		case v > 0:
+			return 1
+		default:
+			return 0
+		}
+	case *object.Bignum:
+		return bigVal(v).Sign()
+	}
+	res := vm.send(r, "<=>", []object.Value{object.IntValue(0)}, nil)
+	n, ok := res.(object.Integer)
+	if !ok {
+		raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(r).name)
+	}
+	return int(n)
 }
 
 // arrayByExtreme implements min_by/max_by: the element whose block key is
@@ -7361,52 +7508,72 @@ func sign(n int) int {
 	}
 }
 
-// flattenDepth flattens nested arrays up to depth levels (-1 = fully).
-func flattenDepth(elems []object.Value, depth int) []object.Value {
-	return flattenDepthIn(elems, depth, map[*object.Array]bool{})
+// checkArrayType is MRI's rb_check_array_type (via rb_check_funcall): an Array
+// (or subclass) converts to itself; any other value is offered #to_ary when it
+// defines one directly, or — for a #to_ary reachable only through
+// #method_missing — when respond_to_missing?(:to_ary, true) is true. A #to_ary
+// returning nil means "not an array" (no error); a non-nil non-Array result is a
+// TypeError. Immediates never convert, and a receiver without even
+// #respond_to_missing? (a bare BasicObject) is simply not converted rather than
+// being sent a message it cannot answer.
+func (vm *VM) checkArrayType(v object.Value) (*object.Array, bool) {
+	if a, ok := asArray(v); ok {
+		return a, true
+	}
+	if isJoinImmediate(v) {
+		return nil, false
+	}
+	switch {
+	case vm.respondsTo(v, "to_ary"):
+		// a real #to_ary method exists — call it below
+	case vm.respondsTo(v, "respond_to_missing?") &&
+		vm.send(v, "respond_to_missing?", []object.Value{object.Symbol("to_ary"), object.True}, nil).Truthy():
+		// #to_ary is served through #method_missing — call it below
+	default:
+		return nil, false
+	}
+	r := vm.send(v, "to_ary", nil, nil)
+	if object.IsNil(r) {
+		return nil, false
+	}
+	if a, ok := asArray(r); ok {
+		return a, true
+	}
+	raise("TypeError", "can't convert %s to Array (%s#to_ary gives %s)",
+		vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	return nil, false
 }
 
-// flattenDepthIn is flattenDepth remembering the arrays it is inside. A
-// self-referential array has no flattening, and MRI says so rather than trying:
-// without this it allocated 1.1 GB and did not finish.
-func flattenDepthIn(elems []object.Value, depth int, path map[*object.Array]bool) []object.Value {
-	var out []object.Value
-	for _, e := range elems {
-		if sub, ok := e.(*object.Array); ok && depth != 0 {
-			if path[sub] {
-				raise("ArgumentError", "tried to flatten recursive array")
-			}
-			path[sub] = true
-			out = append(out, flattenDepthIn(sub.Elems, depth-1, path)...)
-			delete(path, sub)
-		} else {
-			out = append(out, e)
-		}
-	}
+func (vm *VM) flattenDepth(elems []object.Value, depth int) []object.Value {
+	out, _ := vm.flattenDepthIn(elems, depth, map[*object.Array]bool{})
 	return out
 }
 
-// flattenDepthChanged flattens like flattenDepth but also reports whether any
-// nested array was actually expanded. flatten!/flatten share semantics, but the
-// bang form must return nil when nothing changed, which length alone cannot
-// detect (e.g. [[1]] flattens to [1] with the same length).
-func flattenDepthChanged(elems []object.Value, depth int) ([]object.Value, bool) {
-	return flattenDepthChangedIn(elems, depth, map[*object.Array]bool{})
-}
-
-// flattenDepthChangedIn carries the same cycle path flattenDepthIn does: the
-// bang form must refuse a self-referential array for the same reason.
-func flattenDepthChangedIn(elems []object.Value, depth int, path map[*object.Array]bool) ([]object.Value, bool) {
+// flattenDepthIn flattens up to depth (unbounded when negative), remembering the
+// arrays it is inside so a self-referential array raises rather than looping (MRI
+// says so; without this it allocated 1.1 GB and did not finish). An element that
+// is not an Array but converts through #to_ary (checkArrayType) is flattened too.
+// It also reports whether anything was expanded, which flatten! needs to return
+// nil when nothing changed (length alone cannot tell: [[1]] → [1] keeps length).
+func (vm *VM) flattenDepthIn(elems []object.Value, depth int, path map[*object.Array]bool) ([]object.Value, bool) {
 	var out []object.Value
 	changed := false
 	for _, e := range elems {
-		if sub, ok := e.(*object.Array); ok && depth != 0 {
+		var sub *object.Array
+		if depth != 0 {
+			if a, ok := e.(*object.Array); ok {
+				sub = a
+			} else if a, ok := vm.checkArrayType(e); ok {
+				sub = a
+			}
+		}
+		if sub != nil {
 			if path[sub] {
 				raise("ArgumentError", "tried to flatten recursive array")
 			}
 			changed = true
 			path[sub] = true
-			inner, _ := flattenDepthChangedIn(sub.Elems, depth-1, path)
+			inner, _ := vm.flattenDepthIn(sub.Elems, depth-1, path)
 			delete(path, sub)
 			out = append(out, inner...)
 		} else {
@@ -7595,6 +7762,65 @@ func (vm *VM) arrayJoin(a *object.Array, sep *object.String, path map[*object.Ar
 		add(vm.joinElement(e, sep, path))
 	}
 	return object.NewStringBytesEnc(buf, resEnc)
+}
+
+// arrayInspect renders an array as "[e0, e1, …]" for Array#inspect. The path set
+// holds the arrays currently being inspected so a cycle at any depth renders as
+// "[...]" rather than looping. The result string's encoding starts US-ASCII (so
+// an empty array inspects as US-ASCII, matching MRI) and widens to UTF-8 once a
+// non-ASCII byte appears.
+func (vm *VM) arrayInspect(a *object.Array, path map[*object.Array]bool) *object.String {
+	if path[a] {
+		return object.NewStringBytesEnc([]byte("[...]"), "US-ASCII")
+	}
+	path[a] = true
+	defer delete(path, a)
+	buf := []byte{'['}
+	for i := range a.Elems {
+		if i > 0 {
+			buf = append(buf, ',', ' ')
+		}
+		buf = append(buf, vm.inspectElement(a.Elems[i], path)...)
+	}
+	buf = append(buf, ']')
+	enc := "US-ASCII"
+	for _, b := range buf {
+		if b >= 0x80 {
+			enc = "UTF-8"
+			break
+		}
+	}
+	return object.NewStringBytesEnc(buf, enc)
+}
+
+// inspectElement returns the inspected bytes of one array element. A nested array
+// recurses with the shared path so mutual/self recursion is detected; any other
+// element is rendered by objAsString(element.inspect).
+func (vm *VM) inspectElement(e object.Value, path map[*object.Array]bool) []byte {
+	if arr, ok := e.(*object.Array); ok {
+		return vm.arrayInspect(arr, path).Bytes()
+	}
+	// An element that does not answer #inspect (e.g. a bare BasicObject subclass,
+	// which lacks even #respond_to?) uses its native rendering rather than raising
+	// NoMethodError. A static lookup avoids dispatching anything on such a receiver.
+	if !vm.respondsTo(e, "inspect") {
+		return []byte(e.Inspect())
+	}
+	return []byte(vm.objAsString(vm.send(e, "inspect", nil, nil)))
+}
+
+// objAsString mirrors MRI's rb_obj_as_string: a String is returned as-is; any
+// other value is passed through #to_s (whose exception propagates), and if that
+// is still not a String the value's default #<Class:0x…> identity is used. #to_str
+// is never consulted.
+func (vm *VM) objAsString(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	if s, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
+		return s.Str()
+	}
+	return vm.objectIdentityRepr(v)
 }
 
 // joinElement converts one array element to its String piece for Array#join: a
@@ -9001,17 +9227,40 @@ func arrayReduce(vm *VM, a *object.Array, args []object.Value, blk *Proc) object
 	return acc
 }
 
+// arrayKeepIf compacts a in place: it keeps every element whose block result's
+// truthiness equals keep (keep=true for keep_if/select!, false for the removing
+// reject!/delete_if). Compaction is in place with a two-pointer walk so that if
+// the block raises partway, the array is left as MRI leaves it — the decided
+// prefix followed by the raising element and the untouched tail. The live-index
+// loop also lets a block that grows the array have the new tail considered.
+// Returns nil when nothing was removed (Array#select!/#reject! signal "no
+// change" that way), else a.
 func arrayKeepIf(vm *VM, a *object.Array, blk *Proc, keep bool) object.Value {
-	var out []object.Value
-	for _, e := range a.Elems {
+	w := 0
+	i := 0
+	defer func() {
+		if r := recover(); r != nil {
+			// The block raised at index i. a.Elems[:w] holds the kept prefix; the
+			// raising element a.Elems[i] and everything after it are retained.
+			if i < len(a.Elems) {
+				a.Elems = append(a.Elems[:w], a.Elems[i:]...)
+			} else {
+				a.Elems = a.Elems[:w]
+			}
+			panic(r)
+		}
+	}()
+	for i = 0; i < len(a.Elems); i++ {
+		e := a.Elems[i]
 		if vm.callBlock(blk, []object.Value{e}).Truthy() == keep {
-			out = append(out, e)
+			a.Elems[w] = e
+			w++
 		}
 	}
-	if len(out) == len(a.Elems) {
+	if w == len(a.Elems) {
 		return object.NilV
 	}
-	a.Elems = out
+	a.Elems = a.Elems[:w]
 	return a
 }
 
