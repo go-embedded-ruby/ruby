@@ -1964,6 +1964,43 @@ func (vm *VM) callBlockSelf(p *Proc, self object.Value, args []object.Value) obj
 	return vm.exec(p.iseq, self, vm.bindBlockArgs(p, args), vm.blockDefinee(p), "", p.env, p.block, p, p.block, nil)
 }
 
+// callBlockInstanceEval runs a block under instance_eval / instance_exec: like
+// callBlockSelf, but the frame's definee is self's singleton class rather than
+// the block's captured lexical scope, so a `def` inside the block becomes a
+// singleton method of self (a class method for a class/module receiver) and does
+// not leak onto the block's home namespace. Constant *lookup* still follows the
+// block's textual nesting (exec derives lexCref from the block's cref), matching
+// MRI. An immediate receiver has no singleton class, so its class stands in — a
+// read-only block still runs.
+func (vm *VM) callBlockInstanceEval(p *Proc, self object.Value, args []object.Value) object.Value {
+	if p.native != nil {
+		cp := make([]object.Value, len(args))
+		copy(cp, args)
+		return p.native(vm, cp)
+	}
+	// The frame's definee stays the block's lexical scope (so constants, class
+	// variables and `class`/`module` reopenings resolve lexically); only a `def`
+	// is redirected, via pendingEvalMethodDefinee, to self's singleton class. It is
+	// set last — after arg binding — so exec is the very next frame to consume it.
+	boundArgs := vm.bindBlockArgs(p, args)
+	definee := vm.blockDefinee(p)
+	vm.pendingEvalMethodDefinee = vm.instanceEvalDefinee(self)
+	return vm.exec(p.iseq, self, boundArgs, definee, "", p.env, p.block, p, p.block, nil)
+}
+
+// instanceEvalDefinee is the class a `def` inside self.instance_eval / instance_exec
+// lands on: self's singleton class (a class/module's metaclass, else a per-object
+// singleton class). An immediate receiver has none, so classOf stands in.
+func (vm *VM) instanceEvalDefinee(self object.Value) *RClass {
+	if c, ok := self.(*RClass); ok {
+		return c.metaClass()
+	}
+	if sc, ok := vm.ensureSingleton(self); ok {
+		return sc
+	}
+	return vm.classOf(self)
+}
+
 // callProcWithBlock invokes a proc/lambda through Proc#call/[]/=== with the block
 // the caller passed to that call. That block (blk) binds the proc's own `&b`
 // block parameter, while a bare `yield` inside the proc still reaches the block

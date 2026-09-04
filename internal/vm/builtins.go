@@ -484,7 +484,9 @@ func (vm *VM) bootstrap() {
 			if len(args) != 0 {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 			}
-			return vm.callBlockSelf(blk, self, nil)
+			// The block is yielded self (so `instance_eval {|o| ... }` sees the
+			// receiver) and runs with self's singleton class as the definee.
+			return vm.callBlockInstanceEval(blk, self, []object.Value{self})
 		}
 		// String form: instance_eval("code" [, filename [, lineno]]) evaluates the
 		// source with self as the receiver and its singleton class as the definee.
@@ -502,7 +504,9 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
-		return vm.callBlockSelf(blk, self, args)
+		// instance_exec runs the block with self as receiver and self's singleton
+		// class as the definee, passing along the caller's arguments as block args.
+		return vm.callBlockInstanceEval(blk, self, args)
 	})
 	formatFn := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) == 0 {

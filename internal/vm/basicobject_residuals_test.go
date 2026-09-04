@@ -78,6 +78,52 @@ end`, "MA inst\n"},
 	}
 }
 
+// TestInstanceEvalDefinee covers instance_eval / instance_exec running a block
+// with self's singleton class as the method-def target while keeping the block's
+// lexical scope for constants, class variables and class reopenings (MRI).
+func TestInstanceEvalDefinee(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// The block is yielded self.
+		{`p "hola".instance_eval {|o| o }`, "\"hola\"\n"},
+		// A def binds to the receiver only, not to every instance of its class.
+		{`o = Object.new
+o.instance_eval { def foo; 1; end }
+p o.foo
+p Object.new.respond_to?(:foo)`, "1\nfalse\n"},
+		// instance_eval on a class defines a class (singleton) method.
+		{`c = Class.new
+c.instance_eval { def cm; 9; end }
+p c.cm`, "9\n"},
+		// A `class` reopening inside the block resolves lexically (top-level Bar),
+		// not under the receiver's singleton class.
+		{`class IEBar; end
+ob = Object.new
+ob.instance_eval { class IEBar; def z; 3; end; end }
+p IEBar.new.z`, "3\n"},
+		// A class variable inside the block resolves in the block's lexical class.
+		{`class IECVar
+  @@n = 41
+  def blk; ->(*){ @@n } end
+end
+p Object.new.instance_eval(&IECVar.new.blk)`, "41\n"},
+		// A read-only block runs on an immediate (which has no singleton class).
+		{`p 5.instance_eval { self }`, "5\n"},
+		// instance_exec passes its arguments to the block and runs against self.
+		{`o = Object.new
+o.instance_exec(7) {|x| @v = x }
+p o.instance_variable_get(:@v)`, "7\n"},
+		// A def inside instance_eval fires singleton_method_added on the receiver.
+		{`o = Object.new
+def o.singleton_method_added(n); puts n; end
+o.instance_eval { def m2; end }`, "singleton_method_added\nm2\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestSingletonHookUndefRaises covers the undef'd-hook path with no user
 // method_missing: the definition routes to the default method_missing, which
 // raises NoMethodError naming the hook.

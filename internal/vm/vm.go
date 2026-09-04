@@ -523,6 +523,14 @@ type VM struct {
 	// leaves the frame to derive its own pair. GVL-guarded.
 	pendingMethodCtx *frameMethod
 
+	// pendingEvalMethodDefinee, when non-nil, is the class a `def` in the next exec
+	// frame lands on instead of the frame's definee — set by instance_eval /
+	// instance_exec to the receiver's singleton class, so a method defined in the
+	// block becomes a singleton method of the receiver while the block's constants
+	// and class variables still resolve against its lexical scope. Read and cleared
+	// at the top of exec, consumed synchronously before any nested call. GVL-guarded.
+	pendingEvalMethodDefinee *RClass
+
 	// children records finished synthetic child processes (Process.spawn /
 	// Kernel.fork), so Process.waitpid2 can report each one's exit status.
 	// childPidSeq assigns the next synthetic pid. GVL-guarded.
@@ -1109,6 +1117,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// other frame derives it from methodName (empty for class bodies / top level).
 	pend := vm.pendingMethodCtx
 	vm.pendingMethodCtx = nil
+	// Captured here, before arg/keyword binding can run user code and start a
+	// nested frame that would consume it: the instance_eval/exec method-def target
+	// (self's singleton class), applied to methodDefinee once the frame is set up.
+	pendEvalDef := vm.pendingEvalMethodDefinee
+	vm.pendingEvalMethodDefinee = nil
 	var fm frameMethod
 	switch {
 	case selfBlock != nil:
@@ -1355,6 +1368,17 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// Now that this frame's lexical scope is settled, record it so Module.nesting
 	// (a native, which pushes no frame of its own) can read the call site's cref.
 	vm.frameCrefs[frameCrefsDepth-1] = lexCref
+
+	// methodDefinee is the class a `def` (and `alias`/`undef`) in this frame lands
+	// on. It is the definee, except under instance_eval/instance_exec, where the
+	// method-def target is switched to the receiver's singleton class while the
+	// frame's definee stays the block's lexical scope — so constants, class
+	// variables and `class`/`module` reopenings in the block keep resolving
+	// lexically (as MRI), and only method definition targets the singleton.
+	methodDefinee := definee
+	if pendEvalDef != nil {
+		methodDefinee = pendEvalDef
+	}
 
 	// Every frame catches a returnSignal aimed at its own selfTarget (a local
 	// return/next routed through an ensure, or a non-local return whose home is
@@ -1699,24 +1723,26 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				push(vm.dispatchSend(recv, bname, callArgs, bblk))
 			case bytecode.OpDefineMethod:
 				name := iseq.Names[in.A]
-				m := &Method{name: name, iseq: iseq.Children[in.B], owner: definee, vis: definee.defaultVis}
-				// Under class_eval/module_eval the def lands on the eval receiver
-				// (definee) while its bare-constant lookup must follow the block's
-				// textual nesting (lexCref) — record that scope when the two differ so
-				// the method body resolves constants as MRI does.
-				if lexCref != definee {
+				// methodDefinee is the definee, except under instance_eval/instance_exec
+				// where the def lands on the receiver's singleton class instead.
+				m := &Method{name: name, iseq: iseq.Children[in.B], owner: methodDefinee, vis: methodDefinee.defaultVis}
+				// Under class_eval/module_eval/instance_eval the def lands on the eval
+				// receiver (methodDefinee) while its bare-constant lookup must follow the
+				// block's textual nesting (lexCref) — record that scope when the two
+				// differ so the method body resolves constants as MRI does.
+				if lexCref != methodDefinee {
 					m.lexScope = lexCref
 				}
 				// Attach the AOT-compiled body only on the first definition of
 				// this name; a redefinition gets a fresh, interpreted Method
 				// (deopt), since the compiled body matched the original source.
-				if _, redef := definee.methods[name]; !redef {
-					m.compiled = compiledFor(definee.name, name)
+				if _, redef := methodDefinee.methods[name]; !redef {
+					m.compiled = compiledFor(methodDefinee.name, name)
 				}
 				// A redefinition clears any stale per-receiver visibility override so
 				// the new Method's own vis governs (MRI: redefining resets to the
 				// current default visibility).
-				delete(definee.visOverrides, name)
+				delete(methodDefinee.visOverrides, name)
 				// A `def` executed INSIDE a running method body is always public in
 				// MRI, regardless of the class's persisted default visibility (which
 				// only governs defs written directly in a class/module body). A block
@@ -1727,7 +1753,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				switch {
 				case selfBlock == nil && methodName != "":
 					m.vis = visPublic
-				case definee.funcMode:
+				case methodDefinee.funcMode:
 					m.vis = visPrivate
 				}
 				// A handful of core hook methods are always defined private,
@@ -1735,17 +1761,17 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if alwaysPrivateMethodName(name) {
 					m.vis = visPrivate
 				}
-				definee.methods[name] = m
-				if definee.funcMode {
+				methodDefinee.methods[name] = m
+				if methodDefinee.funcMode {
 					sm := *m
 					sm.vis = visPublic
-					definee.smethods[name] = &sm
+					methodDefinee.smethods[name] = &sm
 				}
 				bumpMethodSerial() // a (re)definition can change what a cached send resolves to
-				// Hook: definee.method_added(:name) for a def into a normal class, or
-				// (attached object).singleton_method_added(:name) for a def into a
-				// singleton class (class << obj; def m — and class << self; def m).
-				vm.fireMethodDefined(definee, name)
+				// Hook: methodDefinee.method_added(:name) for a def into a normal class,
+				// or (attached object).singleton_method_added(:name) for a def into a
+				// singleton class (class << obj; def m; instance_eval { def m }).
+				vm.fireMethodDefined(methodDefinee, name)
 				// `def foo; end` evaluates to :foo (MRI), which is what makes
 				// `private def foo; end` mark the just-defined method.
 				push(object.SymVal(name))
@@ -1782,10 +1808,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				}
 				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil, nil, nil))
 			case bytecode.OpAlias:
-				vm.aliasMethod(definee, iseq.Names[in.A], iseq.Names[in.B])
+				vm.aliasMethod(methodDefinee, iseq.Names[in.A], iseq.Names[in.B])
 				push(object.NilV)
 			case bytecode.OpUndef:
-				vm.undefMethod(definee, iseq.Names[in.A])
+				vm.undefMethod(methodDefinee, iseq.Names[in.A])
 				push(object.NilV)
 			case bytecode.OpDefineClass:
 				// Bare `class B` nests into the current lexical scope (definee).
