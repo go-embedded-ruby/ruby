@@ -3477,10 +3477,9 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("product", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		lists := [][]object.Value{self.(*object.Array).Elems}
 		for _, a := range args {
-			la, ok := asArray(a)
-			if !ok && vm.respondsToDynamic(a, "to_ary") {
-				la, ok = asArray(vm.send(a, "to_ary", nil, nil))
-			}
+			// checkArrayType coerces via #to_ary, including a #to_ary reached only
+			// through #method_missing (respond_to_missing?-aware), matching MRI.
+			la, ok := vm.checkArrayType(a)
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(a).name)
 			}
@@ -7416,15 +7415,34 @@ func (vm *VM) sortSlice(out []object.Value, blk *Proc) {
 		return
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		r := vm.callBlock(blk, []object.Value{out[i], out[j]})
-		c, ok := r.(object.Integer)
-		if !ok {
-			// MRI compares the block's result against 0, so a non-Integer fails as
-			// "comparison of <result class> with 0 failed".
-			raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(r).name)
-		}
-		return c < 0
+		return vm.blockCmpToZero(vm.callBlock(blk, []object.Value{out[i], out[j]})) < 0
 	})
+}
+
+// blockCmpToZero turns a sort/comparator block's result into a three-way sign,
+// like MRI's rb_cmpint: an Integer (or Bignum) contributes its own sign directly,
+// and anything else is compared against 0 through #<=>. A #<=> that does not
+// return an Integer is "comparison of <class> with 0 failed".
+func (vm *VM) blockCmpToZero(r object.Value) int {
+	switch v := r.(type) {
+	case object.Integer:
+		switch {
+		case v < 0:
+			return -1
+		case v > 0:
+			return 1
+		default:
+			return 0
+		}
+	case *object.Bignum:
+		return bigVal(v).Sign()
+	}
+	res := vm.send(r, "<=>", []object.Value{object.IntValue(0)}, nil)
+	n, ok := res.(object.Integer)
+	if !ok {
+		raise("ArgumentError", "comparison of %s with 0 failed", vm.classOf(r).name)
+	}
+	return int(n)
 }
 
 // arrayByExtreme implements min_by/max_by: the element whose block key is
