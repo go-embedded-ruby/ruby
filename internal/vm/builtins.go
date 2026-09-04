@@ -214,6 +214,11 @@ func (vm *VM) bootstrap() {
 			o.Frozen = true
 		case *RObject:
 			o.frozen = true
+			// Freezing an object also freezes an already-materialised singleton
+			// class, matching MRI (a lazily-created one stays unfrozen until used).
+			if o.singleton != nil {
+				o.singleton.frozen = true
+			}
 		case *RClass:
 			o.frozen = true
 		}
@@ -1023,17 +1028,82 @@ func (vm *VM) bootstrap() {
 		return fail("TypeError", "can't convert %s into Float", vm.convErrName(other))
 	})
 	vm.cObject.define("String", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.send(args[0], "to_s", nil, nil)
-	})
-	vm.cObject.define("Array", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		switch v := args[0].(type) {
-		case object.Nil:
-			return object.NewArray()
-		case *object.Array:
+		v := args[0]
+		// A String (or String-subclass instance) is returned as-is: #to_s is not
+		// called, matching MRI's rb_check_string_type shortcut.
+		if classIsA(vm.classOf(v), vm.cString) {
 			return v
-		default:
-			return object.NewArray(v)
 		}
+		// An overridden #respond_to? that answers false for :to_s hides an existing
+		// #to_s, so no conversion is attempted — MRI raises TypeError.
+		respondsToS := vm.send(v, "respond_to?", []object.Value{object.Symbol("to_s")}, nil).Truthy()
+		if !respondsToS && vm.findMethod(v, "to_s") != nil {
+			raise("TypeError", "can't convert %s into String", vm.convErrName(v))
+		}
+		// Call #to_s. When it is undefined (and only the default #method_missing is
+		// present) the dispatch raises NoMethodError, which rb_String turns into a
+		// TypeError; a #method_missing that answers instead yields its value.
+		r, ok := vm.stringConvToS(v)
+		if !ok {
+			raise("TypeError", "can't convert %s into String", vm.convErrName(v))
+		}
+		if classIsA(vm.classOf(r), vm.cString) {
+			return r
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_s gives %s)",
+			vm.convErrName(v), vm.convErrName(v), vm.classOf(r).name)
+		return object.NilV
+	})
+	vm.cObject.define("Array", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// A real Array is returned untouched — neither #to_ary nor #to_a is called.
+		if a, ok := args[0].(*object.Array); ok {
+			return a
+		}
+		v := args[0]
+		// #to_ary first (private included), then #to_a, mirroring MRI's rb_Array:
+		// each may return nil to decline; a non-Array, non-nil result is a
+		// TypeError; if neither yields an Array, the argument is wrapped as [v].
+		for _, conv := range []string{"to_ary", "to_a"} {
+			if !vm.respondsToDynamic(v, conv) {
+				continue
+			}
+			r := vm.send(v, conv, nil, nil)
+			if object.IsNil(r) {
+				continue
+			}
+			if a, ok := r.(*object.Array); ok {
+				return a
+			}
+			raise("TypeError", "can't convert %s to Array (%s#%s gives %s)",
+				vm.convErrName(v), vm.convErrName(v), conv, vm.classOf(r).name)
+		}
+		return object.NewArray(v)
+	})
+	vm.cObject.define("Hash", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// A real Hash is returned untouched; nil and an empty Array both become {}
+		// (MRI's special cases). Otherwise #to_hash converts, and anything that
+		// neither is a Hash nor answers #to_hash with one is a TypeError.
+		switch v := args[0].(type) {
+		case *object.Hash:
+			return v
+		case object.Nil:
+			return object.NewHash()
+		case *object.Array:
+			if len(v.Elems) == 0 {
+				return object.NewHash()
+			}
+		}
+		v := args[0]
+		if vm.respondsToDynamic(v, "to_hash") {
+			r := vm.send(v, "to_hash", nil, nil)
+			if h, ok := r.(*object.Hash); ok {
+				return h
+			}
+			raise("TypeError", "can't convert %s to Hash (%s#to_hash gives %s)",
+				vm.convErrName(v), vm.convErrName(v), vm.classOf(r).name)
+		}
+		raise("TypeError", "can't convert %s into Hash", vm.convErrName(v))
+		return object.NilV
 	})
 	sendFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.send(self, vm.methodNameArg(args[0]), args[1:], blk)
@@ -5455,7 +5525,7 @@ func (vm *VM) bootstrap() {
 // simply skipped. Runs after every listed method is registered.
 func (vm *VM) registerKernelModuleFunctions() {
 	names := []string{
-		"Array", "Complex", "Float", "Integer", "Rational", "String",
+		"Array", "Complex", "Float", "Hash", "Integer", "Rational", "String",
 		"__dir__", "abort", "at_exit", "autoload", "autoload?", "caller",
 		"catch", "eval", "exec", "exit", "exit!", "fork", "format", "lambda",
 		"load", "loop", "open", "p", "print", "printf", "proc", "puts",
@@ -7540,6 +7610,24 @@ func (vm *VM) integerArg(v object.Value) *big.Int {
 // the named conversion method (#to_ary/#to_hash/#to_str/#to_int), that is called
 // and its result must be nil or a kind of target — anything else is a TypeError.
 // An object that does not respond to the conversion method yields nil.
+// stringConvToS calls #to_s on v for Kernel#String, returning (result, true). A
+// NoMethodError — v has no usable #to_s (e.g. it was undef'd and only the
+// default #method_missing remains) — is reported as ok=false so the caller
+// raises the TypeError that MRI's rb_String produces, rather than letting the
+// NoMethodError escape. Any other exception propagates unchanged.
+func (vm *VM) stringConvToS(v object.Value) (res object.Value, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if re, isRE := r.(RubyError); isRE && re.Class == "NoMethodError" {
+				res, ok = object.NilV, false
+				return
+			}
+			panic(r)
+		}
+	}()
+	return vm.send(v, "to_s", nil, nil), true
+}
+
 func (vm *VM) tryConvert(obj object.Value, target *RClass, meth string) object.Value {
 	if classIsA(vm.classOf(obj), target) {
 		return obj
@@ -8632,6 +8720,9 @@ func dupValue(v object.Value) object.Value {
 func isFrozen(v object.Value) bool {
 	switch x := v.(type) {
 	case object.Integer, object.Float, object.Symbol, object.Bool, object.Nil:
+		return true
+	case *object.Bignum, *object.Complex, *object.Rational:
+		// Numeric value objects are immutable in Ruby, hence always frozen.
 		return true
 	case *object.String:
 		return x.Frozen
