@@ -27,9 +27,11 @@ func TestFileMetaOps(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// chmod returns the number of paths; multiple paths sum.
 		{`p File.chmod(0o600, "` + f + `")`, "1\n"},
-		// utime returns the count; accepts a Time and an Integer second count.
+		// utime returns the count; accepts a Time, and Integer/Float/Rational
+		// second counts (each coerced to whole Unix seconds).
 		{`p File.utime(Time.now, Time.now, "` + f + `")`, "1\n"},
 		{`p File.utime(0, 0, "` + f + `")`, "1\n"},
+		{`p File.utime(Rational(3, 2), 2.0, "` + f + `")`, "1\n"},
 		// chown with nil ids leaves them unchanged and still reports the count.
 		{`p File.chown(nil, nil, "` + f + `")`, "1\n"},
 		{`p File.lchown(nil, nil, "` + f + `")`, "1\n"},
@@ -46,6 +48,10 @@ func TestFileMetaOps(t *testing.T) {
 		if got := runFS(t, c.src); got != c.want {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
+	}
+	// A non-numeric utime second count is a TypeError (numFloat rejects it).
+	if got := runFSErr(t, `File.utime(:bad, 0, "`+f+`")`); got != "TypeError" {
+		t.Errorf("utime(:bad): got %q want TypeError", got)
 	}
 }
 
