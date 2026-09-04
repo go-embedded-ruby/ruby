@@ -90,10 +90,11 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return matrixOp(op, a, b)
 	}
 
-	// Time arithmetic: t + secs / t - secs (shift by a Duration) and t - other
-	// (the seconds between two instants) reach the operator fast path.
-	if at, ok := a.(*Time); ok {
-		return timeOp(op, at, b)
+	// Time reaches the VM-less path only for an operator other than + / - (those
+	// are intercepted in binaryOp, which has the VM needed for MRI's num_exact
+	// coercion). Every other arithmetic operator on a Time is undefined.
+	if _, ok := a.(*Time); ok {
+		return raise("NoMethodError", "undefined method '%s' for an instance of Time", arithOpName(op))
 	}
 
 	// Date arithmetic: d + n / d - n (shift by a whole number of days) and
@@ -398,6 +399,14 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		// markup with `f.label + f.text_field` rather than hitting the coercion path.
 		if _, isSB := a.(*SafeBufferVal); isSB {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
+		// Time arithmetic (t + n / t - n, and t - other) needs a live VM: MRI's
+		// num_exact coercion of the shift amount (Integer/Rational kept exact, a
+		// Float taken through its exact #to_r, any other object via #to_r, while a
+		// String or nil is rejected) and the nanosecond-exact result both require
+		// dispatch the VM-less binary path cannot do.
+		if at, ok := a.(*Time); ok && (op == bytecode.OpAdd || op == bytecode.OpSub) {
+			return vm.timeArith(op, at, b)
 		}
 		// Numeric coercion protocol: when a built-in number is combined with a
 		// non-numeric object that answers #coerce, MRI calls other.coerce(self)

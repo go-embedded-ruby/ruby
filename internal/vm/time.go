@@ -439,11 +439,11 @@ func (vm *VM) registerTime() {
 	})
 
 	// Arithmetic and ordering.
-	d("+", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return timeOp(bytecode.OpAdd, self(v), args[0])
+	d("+", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.timeArith(bytecode.OpAdd, self(v), args[0])
 	})
-	d("-", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return timeOp(bytecode.OpSub, self(v), args[0])
+	d("-", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.timeArith(bytecode.OpSub, self(v), args[0])
 	})
 	d("<=>", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if other, ok := args[0].(*Time); ok {
@@ -1311,31 +1311,87 @@ func roundFn(add func(z, x, y *big.Int) *big.Int, half bool) NativeFn {
 	}
 }
 
-// timeOp implements the Time operator fast path reached from binary(): t + secs
-// shifts forward, t - secs shifts back, and t - other yields the Float seconds
-// between the two instants. A non-Time, non-numeric right operand raises via
-// numFloat.
-func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
-	switch op {
-	case bytecode.OpAdd:
-		return timeShift(a, numFloat(b))
-	case bytecode.OpSub:
-		if other, ok := b.(*Time); ok {
-			d := a.t.Sub(other.t)
-			return object.Float(d.Seconds())
+// timeArith implements Time#+ and Time#-. Subtracting another Time yields the
+// Float number of seconds between the two instants; otherwise the operand is a
+// shift amount, coerced to an exact Rational number of seconds (MRI's num_exact)
+// and applied to the nanosecond, preserving the receiver's location and zone.
+func (vm *VM) timeArith(op bytecode.Op, a *Time, b object.Value) object.Value {
+	if bt, ok := b.(*Time); ok {
+		if op == bytecode.OpSub {
+			return object.Float(a.t.Sub(bt.t).Seconds())
 		}
-		return timeShift(a, -numFloat(b))
+		// Adding two Times is meaningless — MRI rejects it outright.
+		raise("TypeError", "time + time?")
 	}
-	return raise("NoMethodError", "undefined method '%s' for a Time", op)
+	delta := vm.timeDeltaRat(b)
+	if op == bytecode.OpSub {
+		delta = new(big.Rat).Neg(delta)
+	}
+	return a.shiftByRat(delta)
 }
 
-// timeShift shifts a Time forward by sec seconds (which may be fractional),
-// preserving both its location and its Ruby timezone object so that, per MRI,
-// (t + n).zone keeps the zone t was built with.
-func timeShift(t *Time, sec float64) object.Value {
-	whole, ns := splitSeconds(sec)
+// timeDeltaRat coerces a Time#+/#- shift amount to an exact Rational number of
+// seconds, following MRI's num_exact: an Integer/Bignum or Rational is exact, a
+// Float is taken through its exact binary #to_r, and any other object is coerced
+// via #to_r only when it *also* answers #to_int (else via #to_int alone), while a
+// String or nil — and an object answering neither — is rejected outright.
+func (vm *VM) timeDeltaRat(v object.Value) *big.Rat {
+	switch n := v.(type) {
+	case object.Float:
+		r := new(big.Rat).SetFloat64(float64(n))
+		if r == nil { // NaN or ±Infinity has no exact rational
+			raise("FloatDomainError", "%s", n.Inspect())
+		}
+		return r
+	case *object.Rational:
+		return new(big.Rat).Set(n.R)
+	case *object.String, object.Nil:
+		// Rejected before any coercion, matching MRI's num_exact.
+	default:
+		if bi, ok := object.BigOf(v); ok { // Integer or Bignum
+			return new(big.Rat).SetInt(bi)
+		}
+		if vm.respondsToDynamic(v, "to_int") {
+			if vm.respondsToDynamic(v, "to_r") {
+				return valueToRat(vm.send(v, "to_r", nil, nil))
+			}
+			return valueToRat(vm.send(v, "to_int", nil, nil))
+		}
+	}
+	raise("TypeError", "can't convert %s into an exact number", vm.classOf(v).name)
+	return nil
+}
+
+// valueToRat converts an Integer/Bignum/Rational (as returned by #to_r or
+// #to_int) to a big.Rat, raising TypeError on any other result.
+func valueToRat(v object.Value) *big.Rat {
+	if r, ok := v.(*object.Rational); ok {
+		return new(big.Rat).Set(r.R)
+	}
+	if bi, ok := object.BigOf(v); ok {
+		return new(big.Rat).SetInt(bi)
+	}
+	raise("TypeError", "can't convert into an exact number")
+	return nil
+}
+
+// shiftByRat returns the Time advanced by delta seconds (which may carry a
+// sub-nanosecond fraction), computed exactly and floored to the nanosecond, with
+// the receiver's location and Ruby timezone object carried onto the result.
+func (t *Time) shiftByRat(delta *big.Rat) *Time {
+	// Current instant in nanoseconds, exact: unix*1e9 + nanosecond.
+	nano := new(big.Int).Add(
+		new(big.Int).Mul(big.NewInt(t.t.Unix()), big.NewInt(1e9)),
+		big.NewInt(int64(t.t.Nanosecond())),
+	)
+	cur := new(big.Rat).SetInt(nano)
+	cur.Add(cur, new(big.Rat).Mul(delta, big.NewRat(1e9, 1)))
+	// Floor to whole nanoseconds (Div floors toward -inf for a positive denom).
+	fl := new(big.Int).Div(cur.Num(), cur.Denom())
+	sec := new(big.Int).Div(fl, big.NewInt(1e9))
+	ns := new(big.Int).Sub(fl, new(big.Int).Mul(sec, big.NewInt(1e9)))
 	return &Time{
-		t:       t.t.Add(stdtime.Duration(whole)*stdtime.Second + stdtime.Duration(ns)*stdtime.Nanosecond),
+		t:       stdtime.Unix(sec.Int64(), ns.Int64()).In(t.t.Location()),
 		zoneObj: t.zoneObj,
 	}
 }
