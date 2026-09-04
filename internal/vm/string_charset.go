@@ -292,6 +292,23 @@ func leftPadZero(s string, width int) string {
 // it iterates numerically, preserving beg's width; otherwise it walks String#succ
 // results, stopping when the current value passes end.
 func stringUpto(beg, end string, excl bool, yield func(string)) {
+	// Both endpoints a single ASCII byte: iterate by codepoint so the run covers
+	// non-alphanumeric ASCII too ("9".upto("A") yields "9",":",…,"@","A"), matching
+	// MRI's single-character fast path rather than String#succ (which would jump
+	// "9" to "10" and stop on the length change).
+	if len(beg) == 1 && len(end) == 1 && beg[0] < 0x80 && end[0] < 0x80 {
+		for c := beg[0]; ; c++ {
+			if excl {
+				if c >= end[0] {
+					break
+				}
+			} else if c > end[0] {
+				break
+			}
+			yield(string(rune(c)))
+		}
+		return
+	}
 	if allDigits(beg) && allDigits(end) {
 		hi, _ := new(big.Int).SetString(end, 10)
 		cur, _ := new(big.Int).SetString(beg, 10)

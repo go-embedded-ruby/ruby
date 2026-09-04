@@ -1856,10 +1856,13 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("upto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "upto", args...)
+			// The returned Enumerator reports an unknown (nil) size, as MRI does.
+			return enumForSized(self, "upto", func(_ *VM) object.Value { return object.NilV }, args...)
 		}
 		excl := len(args) > 1 && truthyValue(args[1])
-		stringUpto(strOf(self), strArg(args[0]), excl, func(cur string) {
+		// The end argument is coerced through #to_str (so a #to_str object works),
+		// raising TypeError otherwise — matching MRI, which rejects Integer/Symbol.
+		stringUpto(strOf(self), vm.affixString(args[0]).Str(), excl, func(cur string) {
 			vm.callBlock(blk, []object.Value{object.NewString(cur)})
 		})
 		return self
@@ -1909,6 +1912,9 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("getbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
 		s := strOf(self)
 		i := toInt(args[0])
 		if i < 0 {
@@ -2031,12 +2037,22 @@ func (vm *VM) bootstrap() {
 		s := strOf(self)
 		for _, a := range args { // true if any prefix matches; a Regexp must match at offset 0
 			if re, ok := a.(*Regexp); ok {
-				if md := re.re.Match(s); md != nil && md.Begin(0) == 0 {
+				// A matching Regexp sets $~ (so $1.. and Regexp.last_match are live);
+				// a non-match clears it to nil, as MRI does.
+				if md := re.matcher().Match(s); md != nil && md.Begin(0) == 0 {
+					vm.lastMatch = &MatchData{md: md, subject: s, re: re}
 					return object.True
 				}
+				vm.lastMatch = object.NilV
 				continue
 			}
-			if strings.HasPrefix(s, vm.strPatternCompat(self, a)) {
+			// A non-Regexp prefix is coerced through #to_str (so a #to_str object
+			// works), raising TypeError when it is neither a String nor convertible;
+			// combinedEncName then raises Encoding::CompatibilityError for an
+			// incompatible pair, as MRI does.
+			pre, sobj := vm.strCoerceArg(a)
+			vm.combinedEncName(self.(*object.String), sobj)
+			if strings.HasPrefix(s, pre) {
 				return object.True
 			}
 		}
