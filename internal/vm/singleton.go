@@ -24,6 +24,7 @@ func (vm *VM) registerSingleton() {
 		if t, ok := self.(*RClass); ok {
 			t.smethods[name] = &Method{name: name, proc: body, owner: t}
 			bumpMethodSerial()
+			vm.fireSingletonMethodHook(self, "singleton_method_added", name)
 			return object.Symbol(name)
 		}
 		sc, ok := vm.ensureSingleton(self)
@@ -32,6 +33,7 @@ func (vm *VM) registerSingleton() {
 		}
 		sc.methods[name] = &Method{name: name, proc: body, owner: sc}
 		bumpMethodSerial()
+		vm.fireSingletonMethodHook(self, "singleton_method_added", name)
 		return object.Symbol(name)
 	})
 

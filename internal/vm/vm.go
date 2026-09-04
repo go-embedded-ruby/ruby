@@ -1742,11 +1742,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					definee.smethods[name] = &sm
 				}
 				bumpMethodSerial() // a (re)definition can change what a cached send resolves to
-				// Hook: definee.method_added(:name) for instance-method defs, if
-				// the class/module defines the hook (singleton method).
-				if hook := lookupSMethod(definee, "method_added"); hook != nil {
-					vm.invoke(hook, definee, []object.Value{object.SymVal(name)}, nil)
-				}
+				// Hook: definee.method_added(:name) for a def into a normal class, or
+				// (attached object).singleton_method_added(:name) for a def into a
+				// singleton class (class << obj; def m — and class << self; def m).
+				vm.fireMethodDefined(definee, name)
 				// `def foo; end` evaluates to :foo (MRI), which is what makes
 				// `private def foo; end` mark the just-defined method.
 				push(object.SymVal(name))

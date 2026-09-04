@@ -214,6 +214,7 @@ type RClass struct {
 	meta             *RClass         // lazily-created metaclass for `class << SomeClass`; its methods map IS this class's smethods
 	metaOf           *RClass         // when this RClass is a metaclass, the class it is the metaclass of (else nil); routes `class << c` visibility directives to c's class methods
 	isSingleton      bool            // true for a singleton class — a class metaclass or a per-object singleton (reported by Module#singleton_class?)
+	attached         object.Value    // for a per-object singleton class, the object it belongs to; drives the singleton_method_added/removed/undefined hooks. nil for a metaclass (use metaOf) and every non-singleton class.
 	deprecatedConsts map[string]bool // constants marked by Module#deprecate_constant; access warns
 	funcMode         bool            // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
 	// defaultVis is the access level applied to subsequent `def`s in this body,
@@ -338,6 +339,7 @@ func (vm *VM) singletonClass(o *RObject) *RClass {
 	if o.singleton == nil {
 		o.singleton = newClass("", o.class)
 		o.singleton.isSingleton = true
+		o.singleton.attached = o
 	}
 	return o.singleton
 }
@@ -352,6 +354,7 @@ func (vm *VM) defineSingletonMethod(recv object.Value, name string, iseq *byteco
 	if t, ok := recv.(*RClass); ok {
 		t.smethods[name] = &Method{name: name, iseq: iseq, owner: t}
 		bumpMethodSerial()
+		vm.fireSingletonMethodHook(recv, "singleton_method_added", name)
 		return
 	}
 	// Any other object — an *RObject, the top-level main object, or a
@@ -365,6 +368,7 @@ func (vm *VM) defineSingletonMethod(recv object.Value, name string, iseq *byteco
 	}
 	sc.methods[name] = &Method{name: name, iseq: iseq, owner: sc}
 	bumpMethodSerial() // adding a singleton method can change what a cached send resolves to
+	vm.fireSingletonMethodHook(recv, "singleton_method_added", name)
 }
 
 // objSingleton returns the existing per-object singleton class for any value, or
@@ -402,6 +406,7 @@ func (vm *VM) ensureSingleton(v object.Value) (*RClass, bool) {
 	}
 	sc := newClass("", vm.classOf(v))
 	sc.isSingleton = true
+	sc.attached = v
 	vm.extSingletons[v] = sc
 	return sc, true
 }
@@ -673,22 +678,50 @@ func (vm *VM) aliasMethod(definee *RClass, newName, oldName string) {
 	clone.undefined = false
 	definee.methods[newName] = &clone
 	bumpMethodSerial()
+	if definee.isSingleton {
+		// An alias made in a singleton class (class << obj; alias new old) adds a
+		// singleton method, so it fires singleton_method_added on the attached object.
+		vm.fireSingletonMethodHook(vm.attachedObject(definee), "singleton_method_added", newName)
+	}
 }
 
 // undefMethod implements `undef name` on definee: it installs a tombstone so the
 // name resolves to "undefined" — hiding any inherited definition and making a
 // call route to method_missing (NoMethodError). Undefining a name that resolves
 // nowhere raises NameError, as in MRI.
+// resolvableForUndef reports whether name may be undefined on mod: either it is
+// defined somewhere in mod's own+ancestor chain, or — for a singleton class whose
+// superclass chain does not bridge to its attached object's full method
+// resolution (a metaclass reaches Class's instance methods, and ultimately
+// BasicObject's, only through the object, not through its super chain) — the name
+// resolves on that attached object. This makes `class << self; undef_method
+// :singleton_method_added` on a metaclass legal, as in MRI.
+func (vm *VM) resolvableForUndef(mod *RClass, name string) bool {
+	if m := lookupMethod(mod, name); m != nil && !m.undefined {
+		return true
+	}
+	if !mod.isSingleton {
+		return false
+	}
+	att := vm.attachedObject(mod)
+	return att != nil && vm.findMethod(att, name) != nil
+}
+
 func (vm *VM) undefMethod(definee *RClass, name string) {
 	// undef_method resolves only through the receiver's own+ancestor chain (no
 	// Kernel→Object bridge): MRI raises for a method defined on Object when undef'd
 	// via the Kernel module, and a subclass undef'ing an inherited Kernel method
 	// (e.g. respond_to_missing?) resolves through normal ancestor lookup anyway.
-	if m := lookupMethod(definee, name); m == nil || m.undefined {
+	if !vm.resolvableForUndef(definee, name) {
 		raise("NameError", "undefined method '%s' for class '%s'", name, definee.name)
 	}
 	definee.methods[name] = &Method{name: name, owner: definee, undefined: true}
 	bumpMethodSerial()
+	if definee.isSingleton {
+		// Undefining a method in a singleton class (class << obj; undef_method :m)
+		// fires singleton_method_undefined on the attached object.
+		vm.fireSingletonMethodHook(vm.attachedObject(definee), "singleton_method_undefined", name)
+	}
 }
 
 func lookupOwnOrIncluded(c *RClass, name string) *Method {

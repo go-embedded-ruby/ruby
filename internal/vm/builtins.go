@@ -945,6 +945,18 @@ func (vm *VM) bootstrap() {
 			map[string]object.Value{"@name": nameSym, "@receiver": self, "@args": callArgs})
 		return object.NilV
 	})
+	// The singleton-method definition hooks: private no-op instance methods on
+	// BasicObject that MRI calls on an object whenever a singleton method is added
+	// to, removed from, or undefined on it. The VM fires them (see
+	// fireSingletonMethodHook) only when overridden, so the defaults here mainly
+	// satisfy private_instance_methods and a direct call.
+	singletonHookNoop := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NilV
+	}
+	for _, hook := range []string{"singleton_method_added", "singleton_method_removed", "singleton_method_undefined"} {
+		vm.cBasicObject.define(hook, singletonHookNoop)
+		vm.setInstanceVisibility(vm.cBasicObject, hook, visPrivate)
+	}
 	// initialize and method_missing are PRIVATE instance methods of BasicObject
 	// (as in MRI): callable via new/super and the dispatch fallback, never listed
 	// in instance_methods, only in private_instance_methods.
@@ -1562,7 +1574,7 @@ func (vm *VM) bootstrap() {
 				cm.name, cm.owner, cm.vis = name, cls, vis
 				cls.methods[name] = &cm
 				bumpMethodSerial()
-				vm.fireMethodAdded(cls, name)
+				vm.fireMethodDefined(cls, name)
 				return object.Symbol(name)
 			case *UnboundMethod:
 				vm.checkTransplantBindable(cls, src.owner)
@@ -1571,7 +1583,7 @@ func (vm *VM) bootstrap() {
 				cm.name, cm.owner, cm.vis = name, cls, vis
 				cls.methods[name] = &cm
 				bumpMethodSerial()
-				vm.fireMethodAdded(cls, name)
+				vm.fireMethodDefined(cls, name)
 				return object.Symbol(name)
 			}
 		}
@@ -1591,7 +1603,7 @@ func (vm *VM) bootstrap() {
 		}
 		cls.methods[name] = &Method{name: name, proc: body, owner: cls, vis: vis}
 		bumpMethodSerial()
-		vm.fireMethodAdded(cls, name)
+		vm.fireMethodDefined(cls, name)
 		return object.Symbol(name)
 	})
 
@@ -8832,6 +8844,7 @@ func (vm *VM) cloneSingleton(src, dst object.Value) {
 	}
 	ns := newClass("", vm.classOf(dst))
 	ns.isSingleton = true
+	ns.attached = dst // the clone owns this singleton class; hooks fire on it
 	for name, m := range sc.methods {
 		cp := *m
 		cp.owner = ns
