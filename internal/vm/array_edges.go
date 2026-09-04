@@ -106,7 +106,9 @@ func (vm *VM) registerArrayEdges() {
 			n := len(a.Elems)
 			return enumForSized(self, "each_index", func(*VM) object.Value { return object.IntValue(int64(n)) })
 		}
-		for i := range a.Elems {
+		// Live-index loop so indices for elements the block appends are yielded too
+		// (Ruby's Array#each_index tolerates size increase during iteration).
+		for i := 0; i < len(a.Elems); i++ {
 			vm.callBlock(blk, []object.Value{object.IntValue(int64(i))})
 		}
 		return self

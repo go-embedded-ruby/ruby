@@ -2814,13 +2814,9 @@ func (vm *VM) bootstrap() {
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		var out []object.Value
-		for _, e := range a.Elems {
-			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
-				out = append(out, e)
-			}
-		}
-		a.Elems = out
+		// keep=false: drop elements the block finds truthy. Shares the in-place,
+		// panic-safe, live-growth compaction with keep_if/select!/reject!.
+		arrayKeepIf(vm, a, blk, false)
 		return a
 	})
 	vm.cArray.define("concat", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -3203,7 +3199,9 @@ func (vm *VM) bootstrap() {
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		for i := range a.Elems {
+		// Live-index loop so elements the block appends are also mapped in place
+		// (Ruby's Array#map! tolerates size increase during iteration).
+		for i := 0; i < len(a.Elems); i++ {
 			a.Elems[i] = vm.callBlock(blk, []object.Value{a.Elems[i]})
 		}
 		return self
@@ -9024,17 +9022,40 @@ func arrayReduce(vm *VM, a *object.Array, args []object.Value, blk *Proc) object
 	return acc
 }
 
+// arrayKeepIf compacts a in place: it keeps every element whose block result's
+// truthiness equals keep (keep=true for keep_if/select!, false for the removing
+// reject!/delete_if). Compaction is in place with a two-pointer walk so that if
+// the block raises partway, the array is left as MRI leaves it — the decided
+// prefix followed by the raising element and the untouched tail. The live-index
+// loop also lets a block that grows the array have the new tail considered.
+// Returns nil when nothing was removed (Array#select!/#reject! signal "no
+// change" that way), else a.
 func arrayKeepIf(vm *VM, a *object.Array, blk *Proc, keep bool) object.Value {
-	var out []object.Value
-	for _, e := range a.Elems {
+	w := 0
+	i := 0
+	defer func() {
+		if r := recover(); r != nil {
+			// The block raised at index i. a.Elems[:w] holds the kept prefix; the
+			// raising element a.Elems[i] and everything after it are retained.
+			if i < len(a.Elems) {
+				a.Elems = append(a.Elems[:w], a.Elems[i:]...)
+			} else {
+				a.Elems = a.Elems[:w]
+			}
+			panic(r)
+		}
+	}()
+	for i = 0; i < len(a.Elems); i++ {
+		e := a.Elems[i]
 		if vm.callBlock(blk, []object.Value{e}).Truthy() == keep {
-			out = append(out, e)
+			a.Elems[w] = e
+			w++
 		}
 	}
-	if len(out) == len(a.Elems) {
+	if w == len(a.Elems) {
 		return object.NilV
 	}
-	a.Elems = out
+	a.Elems = a.Elems[:w]
 	return a
 }
 
