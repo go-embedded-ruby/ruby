@@ -2676,7 +2676,7 @@ func (vm *VM) bootstrap() {
 			}
 			return object.NormInt(new(big.Int).Sqrt(n))
 		}}
-	vm.cArray.define("first", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("first", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if len(args) == 0 {
 			if len(a.Elems) == 0 {
@@ -2684,12 +2684,15 @@ func (vm *VM) bootstrap() {
 			}
 			return a.Elems[0]
 		}
-		n := clampCount(intArg(args[0]), len(a.Elems))
+		if _, isBig := args[0].(*object.Bignum); isBig {
+			raise("RangeError", "bignum too big to convert into 'long'")
+		}
+		n := clampCount(vm.toIntCoerce(args[0]), len(a.Elems))
 		out := make([]object.Value, n)
 		copy(out, a.Elems[:n])
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("last", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("last", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		if len(args) == 0 {
 			if len(a.Elems) == 0 {
@@ -2697,7 +2700,7 @@ func (vm *VM) bootstrap() {
 			}
 			return a.Elems[len(a.Elems)-1]
 		}
-		n := clampCount(intArg(args[0]), len(a.Elems))
+		n := clampCount(vm.toIntCoerce(args[0]), len(a.Elems))
 		out := make([]object.Value, n)
 		copy(out, a.Elems[len(a.Elems)-n:])
 		return object.NewArrayFromSlice(out)
@@ -2725,11 +2728,14 @@ func (vm *VM) bootstrap() {
 		a.Elems = append(a.Elems, args[0])
 		return a
 	})
-	vm.cArray.define("pop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("pop", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
+		if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
 		if len(args) > 0 { // pop(n) removes and returns the last n as an array
-			n := int(intArg(args[0]))
+			n := int(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -2748,11 +2754,14 @@ func (vm *VM) bootstrap() {
 		a.Elems = a.Elems[:len(a.Elems)-1]
 		return v
 	})
-	vm.cArray.define("shift", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("shift", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
+		if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
 		if len(args) > 0 { // shift(n) removes and returns the first n as an array
-			n := int(intArg(args[0]))
+			n := int(vm.toIntCoerce(args[0]))
 			if n < 0 {
 				raise("ArgumentError", "negative array size")
 			}
@@ -2849,12 +2858,18 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("concat", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		for _, arg := range args {
-			other, ok := arg.(*object.Array)
-			if !ok {
-				raise("TypeError", "no implicit conversion of %s into Array", classNameOf(arg))
-			}
-			a.Elems = append(a.Elems, other.Elems...)
+		// Coerce every argument to an Array first (an Array subclass directly, else
+		// through #to_ary) so a #to_ary that inspects the receiver sees it unchanged,
+		// and a bad argument raises before any element is appended.
+		others := vm.toAryArgs(args)
+		// Snapshot each argument's current contents before appending, so concat(self)
+		// or a repeated self argument uses the pre-concat elements (MRI copies first).
+		snaps := make([][]object.Value, len(others))
+		for i, other := range others {
+			snaps[i] = append([]object.Value(nil), other.Elems...)
+		}
+		for _, s := range snaps {
+			a.Elems = append(a.Elems, s...)
 		}
 		return a
 	})
@@ -2867,10 +2882,8 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("replace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		other, ok := args[0].(*object.Array)
-		if !ok {
-			raise("TypeError", "no implicit conversion of %s into Array", classNameOf(args[0]))
-		}
+		// #replace coerces its argument to an Array (subclass directly, else #to_ary).
+		other := vm.toAryArg(args[0])
 		a.Elems = append([]object.Value(nil), other.Elems...)
 		return a
 	})
@@ -3532,7 +3545,7 @@ func (vm *VM) bootstrap() {
 		elems := self.(*object.Array).Elems
 		k := len(elems)
 		if len(args) > 0 {
-			k = int(intArg(args[0]))
+			k = int(vm.toIntCoerce(args[0]))
 		}
 		var perms []object.Value
 		if k >= 0 && k <= len(elems) {
@@ -3731,6 +3744,12 @@ func (vm *VM) bootstrap() {
 			return enumForSized(self, "rindex", func(*VM) object.Value { return object.IntValue(int64(len(a.Elems))) })
 		}
 		for i := len(a.Elems) - 1; i >= 0; i-- {
+			// A block may shrink the array; realign to the new end and re-check size
+			// each step so we never index past it (MRI rechecks RARRAY_LEN too).
+			if i >= len(a.Elems) {
+				i = len(a.Elems)
+				continue
+			}
 			var match bool
 			if len(args) > 0 {
 				match = vm.vmValueEqual(a.Elems[i], args[0])
@@ -3762,9 +3781,9 @@ func (vm *VM) bootstrap() {
 		copy(out, a.Elems[:n])
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("drop", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("drop", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
-		n := int(intArg(args[0]))
+		n := int(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("ArgumentError", "attempt to drop negative size")
 		}
