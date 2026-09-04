@@ -48,6 +48,24 @@ func TestProcToSBinaryEncoding(t *testing.T) {
 	}
 }
 
+// TestProcPostSplatBindingLenient covers that a non-lambda proc with post-splat
+// required parameters (|*a, b|, |a, *b, c|) is lenient: too few arguments fill
+// the post parameters with nil and leave the splat empty rather than raising.
+func TestProcPostSplatBindingLenient(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"star_a_b_none", `p (proc { |*a, b| [a, b] }).call`, "[[], nil]\n"},
+		{"a_star_b_c_one", `p (proc { |a, *b, c| [a, b, c] }).call(1)`, "[1, [], nil]\n"},
+		{"a_star_b_c_none", `p (proc { |a, *b, c| [a, b, c] }).call`, "[nil, [], nil]\n"},
+		{"a_star_b_c_many", `p (proc { |a, *b, c| [a, b, c] }).call(1, 2, 3, 4)`, "[1, [2, 3], 4]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("%s => %q, want %q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
 // missingSrc is a class that answers :ghost only through respond_to_missing? +
 // method_missing, used by the Method-via-missing tests.
 const missingSrc = `

@@ -2065,9 +2065,14 @@ func (vm *VM) bindBlockPositionals(p *Proc, args []object.Value) []object.Value 
 	if p.iseq.SplatIndex >= 0 {
 		// A *rest block param has variable arity: pad up to the required
 		// positionals, then pass every argument through so exec's splat binding
-		// collects the rest (instead of the fixed-arity truncation below).
-		if len(args) < p.iseq.NumRequired {
-			padded := make([]object.Value, p.iseq.NumRequired)
+		// collects the rest (instead of the fixed-arity truncation below). The
+		// required count includes the post-splat parameters (`|*a, b|`, `|a, *b, c|`)
+		// — a lenient proc fills those with nil (and leaves the splat empty) rather
+		// than raising, so the pad target is the leading required plus the post
+		// count, and the padding nils land at the tail where the post params bind.
+		required := p.iseq.NumRequired + (np - p.iseq.SplatIndex - 1)
+		if len(args) < required {
+			padded := make([]object.Value, required)
 			copy(padded, args)
 			for i := len(args); i < len(padded); i++ {
 				padded[i] = object.NilV
