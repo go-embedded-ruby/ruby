@@ -183,6 +183,14 @@ func (vm *VM) checkBindable(u *UnboundMethod, recv object.Value) {
 	// singleton class. classOf(recv) returns the regular class and never reaches
 	// the singleton in its super chain, so also walk from recv's own singleton
 	// class — recv is trivially an instance of it — before rejecting the bind.
+	// A method whose owner is a Module (not a Class) may be bound to ANY
+	// object — MRI only enforces the kind_of? rule for methods owned by a
+	// Class. This covers `Mod.instance_method(:foo).bind(anything)` and Kernel
+	// methods (`Object.instance_method(:instance_of?)`) bound onto unrelated
+	// receivers such as a BasicObject.
+	if u.owner != nil && u.owner.isModule {
+		return
+	}
 	if classIsA(vm.classOf(recv), u.owner) {
 		return
 	}

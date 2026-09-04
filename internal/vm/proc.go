@@ -77,9 +77,9 @@ func (vm *VM) registerProcMethods() {
 	// since the VM tracks no per-instruction line), but carries the meaningful,
 	// deterministic tags: " (lambda)" for a lambda and " (&:name)" for a
 	// Symbol#to_proc proc. #inspect is the same method record as #to_s (MRI
-	// aliases them).
+	// aliases them). MRI tags the result ASCII-8BIT (BINARY), so match that.
 	vm.cProc.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(procToS(self.(*Proc)))
+		return object.NewStringViewEnc(procToS(self.(*Proc)), "ASCII-8BIT")
 	})
 	aliasBuiltin(vm.cProc, "inspect", "to_s")
 }
