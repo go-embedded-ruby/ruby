@@ -167,6 +167,74 @@ String(S3.new)`, "ArgumentError"},
 	}
 }
 
+// TestKernelDupClone covers Object#dup / Object#clone: the #initialize_copy hook
+// (via #initialize_dup / #initialize_clone), clone's frozen-state and singleton
+// copying, and the freeze: keyword handling.
+func TestKernelDupClone(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"dup_immediate", `p 1.dup`, "1\n"},
+		{"clone_immediate", `p 1.clone`, "1\n"},
+		{"dup_calls_initialize_copy", `
+class D1
+  attr_accessor :obj
+  def initialize; @obj = :orig; end
+  def initialize_copy(o); @obj = :copied; end
+end
+p D1.new.dup.obj`, ":copied\n"},
+		{"dup_not_frozen", `p [1].freeze.dup.frozen?`, "false\n"},
+		{"clone_copies_frozen", `p [1].freeze.clone.frozen?`, "true\n"},
+		{"clone_freeze_false", `p [1].freeze.clone(freeze: false).frozen?`, "false\n"},
+		{"clone_freeze_true", `p [1].clone(freeze: true).frozen?`, "true\n"},
+		{"clone_freeze_nil", `p [1].freeze.clone(freeze: nil).frozen?`, "true\n"},
+		{"clone_singleton_method", `
+o = Object.new
+def o.special; :yes; end
+p o.clone.special`, ":yes\n"},
+		{"clone_singleton_on_array", `
+a = [1, 2]
+def a.tag; :t; end
+p a.clone.tag`, ":t\n"},
+		{"clone_no_singleton", `p Object.new.clone.class`, "Object\n"},
+		{"initialize_clone_kwargs", `
+class CF
+  def initialize_clone(other, **kw); @rec = kw; end
+  attr_reader :rec
+end
+p CF.new.clone(freeze: true).rec`, "{freeze: true}\n"},
+		{"initialize_copy_same", `o = Object.new; p o.send(:initialize_copy, o).equal?(o)`, "true\n"},
+		{"initialize_dup_returns_self", `a = Object.new; p a.send(:initialize_dup, Object.new).equal?(a)`, "true\n"},
+		{"initialize_clone_returns_self", `a = Object.new; p a.send(:initialize_clone, Object.new).equal?(a)`, "true\n"},
+		{"initialize_clone_freeze_kw", `a = Object.new; p a.send(:initialize_clone, Object.new, freeze: true).equal?(a)`, "true\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestKernelDupCloneErrors(t *testing.T) {
+	cases := []struct{ name, src, wantClass string }{
+		{"clone_freeze_bad", `Object.new.clone(freeze: 1)`, "ArgumentError"},
+		{"clone_unknown_kw", `Object.new.clone(foo: 1)`, "ArgumentError"},
+		{"initialize_copy_frozen", `Object.new.freeze.send(:initialize_copy, Object.new)`, "FrozenError"},
+		{"initialize_copy_diff_class", `
+klass = Class.new
+sub = Class.new(klass)
+klass.new.send(:initialize_copy, sub.new)`, "TypeError"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runErr(t, tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.wantClass) {
+				t.Errorf("src=%q: want %s, got %v", tc.src, tc.wantClass, err)
+			}
+		})
+	}
+}
+
 // TestKernelNumericFrozen covers that Bignum, Complex and Rational report as
 // frozen (immutable value objects), alongside the singleton-class freezing that
 // Object#freeze performs.

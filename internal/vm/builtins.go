@@ -199,11 +199,91 @@ func (vm *VM) bootstrap() {
 		// proc{}.curry.lambda? is false.
 		return vm.curriedProc(p, need, p.isLambda, nil)
 	})
-	dupFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return dupValue(self)
+	// dup makes a shallow copy and runs #initialize_dup (→ #initialize_copy) on it;
+	// unlike clone it copies neither the frozen state nor the singleton class.
+	vm.cObject.define("dup", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		cp := dupValue(self)
+		if cp != self { // an immediate value dups to itself and skips the hook
+			vm.send(cp, "initialize_dup", []object.Value{self}, nil)
+		}
+		return cp
+	})
+	// clone additionally copies the singleton class and the frozen state, and runs
+	// #initialize_clone. A freeze: keyword (true/false/nil) overrides the copied
+	// frozen state and is forwarded to #initialize_clone; anything else is an error.
+	vm.cObject.define("clone", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		freezeVal, freezeGiven := object.Value(object.NilV), false
+		if len(args) > 0 {
+			if h, ok := args[len(args)-1].(*object.Hash); ok {
+				for _, k := range h.Keys {
+					if sym, isSym := k.(object.Symbol); isSym && sym == object.Symbol("freeze") {
+						freezeVal, _ = h.Get(k)
+						freezeGiven = true
+						continue
+					}
+					raise("ArgumentError", "unknown keyword: %s", k.Inspect())
+				}
+			}
+		}
+		if freezeGiven {
+			switch freezeVal.(type) {
+			case object.Bool, object.Nil:
+			default:
+				raise("ArgumentError", "unexpected value for freeze: %s", vm.classOf(freezeVal).name)
+			}
+		}
+		cp := dupValue(self)
+		if cp == self { // an immediate value clones to itself
+			return cp
+		}
+		vm.cloneSingleton(self, cp)
+		if freezeGiven {
+			kw := object.NewHash()
+			kw.Set(object.Symbol("freeze"), freezeVal)
+			vm.send(cp, "initialize_clone", []object.Value{self, kw}, nil)
+		} else {
+			vm.send(cp, "initialize_clone", []object.Value{self}, nil)
+		}
+		// freeze: true/false wins; freeze: nil or no keyword copies the original's
+		// frozen state.
+		doFreeze := isFrozen(self)
+		if b, ok := freezeVal.(object.Bool); ok {
+			doFreeze = bool(b)
+		}
+		if doFreeze {
+			vm.send(cp, "freeze", nil, nil)
+		}
+		return cp
+	})
+	// initialize_copy/dup/clone are Kernel's private copy hooks. The default
+	// initialize_copy validates the receiver (frozen / same-class) and is a no-op
+	// otherwise; initialize_dup and initialize_clone delegate to it and return self.
+	vm.cKernel.define("initialize_copy", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		orig := args[0]
+		if self == orig { // copying from itself does nothing (even when frozen)
+			return self
+		}
+		if isFrozen(self) {
+			vm.raiseFrozen(self)
+		}
+		if vm.classOf(self) != vm.classOf(orig) {
+			raise("TypeError", "initialize_copy should take same class object")
+		}
+		return self
+	})
+	vm.cKernel.define("initialize_dup", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		vm.send(self, "initialize_copy", []object.Value{args[0]}, nil)
+		return self
+	})
+	vm.cKernel.define("initialize_clone", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// A trailing freeze: keyword (from clone(freeze:)) is accepted and ignored
+		// by the default hook; the positional original is always args[0].
+		vm.send(self, "initialize_copy", []object.Value{args[0]}, nil)
+		return self
+	})
+	for _, n := range []string{"initialize_copy", "initialize_dup", "initialize_clone"} {
+		vm.setInstanceVisibility(vm.cKernel, n, visPrivate)
 	}
-	vm.cObject.define("dup", dupFn)
-	vm.cObject.define("clone", dupFn)
 	vm.cObject.define("freeze", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		switch o := self.(type) {
 		case *object.String:
@@ -8677,6 +8757,46 @@ func (vm *VM) defineAttrs(cls *RClass, names []object.Value, reader, writer bool
 // dupValue shallow-copies a value (Object#dup/#clone). Reference types get a
 // fresh container with the same elements; immutable value types are their own
 // copy.
+// cloneSingleton gives dst a fresh copy of src's singleton class, when src has
+// one, so Object#clone carries over per-object methods, singleton-included
+// modules and singleton constants (MRI clones the metaclass). It handles both an
+// *RObject's inline singleton and the side-table singleton of a reference value
+// (Array/Hash/String). The copied methods are re-owned by the new singleton so
+// `super` still resolves up the object's class chain, and the new singleton's
+// superclass is dst's class.
+func (vm *VM) cloneSingleton(src, dst object.Value) {
+	sc := vm.objSingleton(src)
+	if sc == nil {
+		return
+	}
+	ns := newClass("", vm.classOf(dst))
+	ns.isSingleton = true
+	for name, m := range sc.methods {
+		cp := *m
+		cp.owner = ns
+		ns.methods[name] = &cp
+	}
+	ns.includes = append(ns.includes, sc.includes...)
+	ns.prepends = append(ns.prepends, sc.prepends...)
+	for name, val := range sc.consts {
+		ns.consts[name] = val
+	}
+	if sc.visOverrides != nil {
+		ns.visOverrides = make(map[string]visibility, len(sc.visOverrides))
+		for name, vis := range sc.visOverrides {
+			ns.visOverrides[name] = vis
+		}
+	}
+	if do, ok := dst.(*RObject); ok {
+		do.singleton = ns
+		return
+	}
+	if vm.extSingletons == nil {
+		vm.extSingletons = map[object.Value]*RClass{}
+	}
+	vm.extSingletons[dst] = ns
+}
+
 func dupValue(v object.Value) object.Value {
 	switch x := v.(type) {
 	case *object.String:
@@ -8702,6 +8822,11 @@ func dupValue(v object.Value) object.Value {
 			ivars[k] = val
 		}
 		dup := &RObject{class: x.class, ivars: ivars}
+		// Preserve instance-variable insertion order so the copy's
+		// #instance_variables (and #inspect) match the original's ordering.
+		if x.ivarOrder != nil {
+			dup.ivarOrder = append([]string(nil), x.ivarOrder...)
+		}
 		// A Struct instance carries its members in structVals (not ivars), so the
 		// copy must clone that slice too or the duplicate would report all-nil
 		// members (and Struct#hash/#== would diverge from the original).
