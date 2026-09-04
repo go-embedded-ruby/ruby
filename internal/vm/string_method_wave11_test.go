@@ -64,6 +64,8 @@ func TestStringWave11(t *testing.T) {
 		{"upto_letters", `a = []; "a".upto("c") { |s| a << s }; p a`, "[\"a\", \"b\", \"c\"]\n"},
 		{"upto_to_str", `o = Object.new; def o.to_str; "abd"; end; a = []; "abc".upto(o) { |s| a << s }; p a`, "[\"abc\", \"abd\"]\n"},
 		{"upto_digits", `a = []; "8".upto("11") { |s| a << s }; p a`, "[\"8\", \"9\", \"10\", \"11\"]\n"},
+		{"upto_digits_excl", `a = []; "8".upto("12", true) { |s| a << s }; p a`, "[\"8\", \"9\", \"10\", \"11\"]\n"},
+		{"upto_multichar_excl", `a = []; "az".upto("bb", true) { |s| a << s }; p a`, "[\"az\", \"ba\"]\n"},
 		{"upto_size_nil", `p "a".upto("b").size`, "nil\n"},
 
 		// --- String#start_with?: coercion + $~ ---
