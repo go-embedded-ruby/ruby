@@ -556,6 +556,16 @@ func (vm *VM) registerTime() {
 	}
 }
 
+// mixinTimeComparable adds Comparable to Time's ancestry so Time.include?
+// (Comparable) is true (MRI mixes it in); Time's own #<=> already drives the
+// comparison operators, and Comparable adds #between?/#clamp. Run after the
+// prelude, which defines the Comparable module.
+func (vm *VM) mixinTimeComparable() {
+	if cmp, ok := vm.consts["Comparable"].(*RClass); ok {
+		vm.cTime.includes = append(vm.cTime.includes, cmp)
+	}
+}
+
 // timeZoneKw pops a trailing keyword hash carrying in: <zone> off args, returning
 // the resolved location (nil when absent) and the remaining positional args.
 func timeZoneKw(args []object.Value) (object.Value, []object.Value) {

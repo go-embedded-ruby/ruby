@@ -128,6 +128,23 @@ func TestTimeSubNanosecond(t *testing.T) {
 	}
 }
 
+// TestTimeIncludesComparable pins that Time mixes in Comparable (MRI does), so
+// Time.include?(Comparable) is true and Comparable's #between?/#clamp work off
+// Time's own #<=>.
+func TestTimeIncludesComparable(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p Time.include?(Comparable)`, "true\n"},
+		{`p Time.ancestors.include?(Comparable)`, "true\n"},
+		{`p Time.utc(2020).between?(Time.utc(2019), Time.utc(2021))`, "true\n"},
+		{`p Time.utc(2022).clamp(Time.utc(2019), Time.utc(2021)) == Time.utc(2021)`, "true\n"},
+	}
+	for _, tc := range cases {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+		}
+	}
+}
+
 // TestTimeNewStringPrecision pins Time.new(String, precision:)'s sub-second
 // truncation to MRI 4.0.6: the default keeps 9 digits, precision: nil or a
 // negative count keeps every digit (into the sub-nanosecond frac), an explicit
