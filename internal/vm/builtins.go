@@ -742,7 +742,12 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewString(vm.classOf(self).name)
 	}
-	cException.define("message", excMessage)
+	// Exception#message is defined as `to_s` in MRI, so a subclass that overrides
+	// #to_s changes what #message reports — dispatch through #to_s rather than
+	// reading @message directly.
+	cException.define("message", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.send(self, "to_s", nil, nil)
+	})
 	cException.define("to_s", excMessage)
 
 	// backtrace: the captured frame list (Array of String), or nil when the
@@ -851,7 +856,7 @@ func (vm *VM) bootstrap() {
 			callArgs = object.NewArrayFromSlice(append([]object.Value(nil), args[1:]...))
 		}
 		vm.raiseWithIvars("NoMethodError",
-			"undefined method '"+string(nameSym)+"' for "+vm.classOf(self).name,
+			"undefined method '"+string(nameSym)+"' for "+vm.undefinedMethodReceiver(self),
 			map[string]object.Value{"@name": nameSym, "@receiver": self, "@args": callArgs})
 		return object.NilV
 	})

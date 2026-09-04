@@ -9,11 +9,71 @@
 package vm
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// undefinedMethodReceiver formats the "for …" tail MRI 4.0 appends to an
+// "undefined method 'x'" NoMethodError, describing the receiver the failed call
+// targeted. MRI renders nil/true/false literally; a named class or module as
+// "class Name" / "module Name" and an anonymous one as "class #<Class:0x…>" /
+// "module #<Module:0x…>"; an object carrying a per-object singleton class through
+// its own #inspect-shaped "#<Class:0x…>" identity string (built here, never by
+// dispatching #inspect); and any other object as "an instance of <ClassName>"
+// (or the anonymous class's "#<Class:0x…>" repr when the class is unnamed).
+func (vm *VM) undefinedMethodReceiver(self object.Value) string {
+	if object.IsNil(self) {
+		return "nil"
+	}
+	if b, ok := self.(object.Bool); ok {
+		if bool(b) {
+			return "true"
+		}
+		return "false"
+	}
+	if c, ok := self.(*RClass); ok {
+		kind := "class"
+		if c.isModule {
+			kind = "module"
+		}
+		return kind + " " + vm.classDisplayName(c)
+	}
+	if vm.objSingleton(self) != nil {
+		return vm.objectIdentityRepr(self)
+	}
+	return "an instance of " + vm.classDisplayName(vm.classOf(self))
+}
+
+// classDisplayName returns the class/module's name through its own (overridable)
+// #name method — matching MRI, which builds the "for class …" / "an instance of
+// …" message from receiver.name — or the anonymous "#<Class:0x…>" /
+// "#<Module:0x…>" identity when #name yields no String (an anonymous class).
+func (vm *VM) classDisplayName(c *RClass) string {
+	if n, ok := vm.send(c, "name", nil, nil).(*object.String); ok {
+		return n.Str()
+	}
+	return vm.anonClassOrModuleRepr(c)
+}
+
+// anonClassOrModuleRepr renders an anonymous class or module as MRI's
+// "#<Class:0x…>" / "#<Module:0x…>" identity string.
+func (vm *VM) anonClassOrModuleRepr(c *RClass) string {
+	kind := "Class"
+	if c.isModule {
+		kind = "Module"
+	}
+	return fmt.Sprintf("#<%s:0x%016x>", kind, uint64(vm.refID(c)))
+}
+
+// objectIdentityRepr renders an ordinary object as MRI's default
+// "#<ClassName:0x…>" #inspect form, built directly (never dispatching a
+// user-defined #inspect).
+func (vm *VM) objectIdentityRepr(self object.Value) string {
+	return fmt.Sprintf("#<%s:0x%016x>", vm.classOf(self).name, uint64(vm.refID(self)))
+}
 
 // causeIvar holds an exception's cause (another exception, or nil). MRI keeps the
 // cause in a hidden field; rbgo stores it in a double-underscore ivar so casual
@@ -81,15 +141,47 @@ func (vm *VM) registerExceptionMethods(cException *RClass) {
 	})
 
 	cNameError := vm.consts["NameError"].(*RClass)
+	// NameError.new(msg = nil, name = nil, receiver:) — the name that could not be
+	// resolved is the second positional and the receiver an optional keyword, both
+	// stamped so #name/#receiver report what the caller passed (MRI's signature).
+	cNameError.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		args = vm.stampReceiverKwarg(self, args)
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			setIvar(self, "@message", object.NewString(vm.exceptionMessageArg(args[0])))
+		}
+		if len(args) > 1 {
+			setIvar(self, "@name", args[1])
+		}
+		return object.NilV
+	})
 	// NameError#receiver: the object on which the missing name was looked up.
 	// MRI raises an ArgumentError ("no receiver is available") when none was
 	// recorded; rbgo records one at every method-dispatch NameError, so an unset
-	// receiver only happens for a bare NameError.new — return nil there.
+	// receiver only happens for a bare NameError.new — return nil there. (Const /
+	// class-variable NameErrors do not yet record a receiver either, so raising
+	// here would regress those cases; see the receiver_spec residuals.)
 	cNameError.define("receiver", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return getIvar(self, "@receiver")
 	})
 
 	cNoMethodError := vm.consts["NoMethodError"].(*RClass)
+	// NoMethodError.new(msg = nil, name = nil, args = [], priv = false, receiver:)
+	// — MRI's signature: the message, the missing method name, the call's own
+	// arguments, a private-call flag (accepted and ignored here) and the receiver
+	// keyword, stamped so #name/#args/#receiver report the failed call.
+	cNoMethodError.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		args = vm.stampReceiverKwarg(self, args)
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			setIvar(self, "@message", object.NewString(vm.exceptionMessageArg(args[0])))
+		}
+		if len(args) > 1 {
+			setIvar(self, "@name", args[1])
+		}
+		if len(args) > 2 {
+			setIvar(self, "@args", args[2])
+		}
+		return object.NilV
+	})
 	// NoMethodError#args: the arguments passed in the failed call (empty array by
 	// default). #name is inherited from NameError (defined in builtins.go).
 	cNoMethodError.define("args", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -212,6 +304,25 @@ func (vm *VM) applyRaiseCause(exc object.Value, causeGiven bool, causeVal object
 		raise("TypeError", "exception object expected")
 	}
 	setIvar(exc, causeIvar, causeVal)
+}
+
+// stampReceiverKwarg peels a trailing `receiver:` keyword off a NameError /
+// NoMethodError constructor argument list, stamping @receiver, and returns the
+// remaining positional args. The trailing Hash is consumed only when it carries a
+// :receiver key, so a genuine positional Hash argument is left untouched.
+func (vm *VM) stampReceiverKwarg(self object.Value, args []object.Value) []object.Value {
+	if len(args) == 0 {
+		return args
+	}
+	h, ok := args[len(args)-1].(*object.Hash)
+	if !ok {
+		return args
+	}
+	if v, ok := h.Get(object.Symbol("receiver")); ok {
+		setIvar(self, "@receiver", v)
+		return args[:len(args)-1]
+	}
+	return args
 }
 
 // popCauseKwarg splits a trailing `cause:` keyword out of a Kernel#raise argument

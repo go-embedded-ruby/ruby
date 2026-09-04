@@ -77,7 +77,7 @@ func TestErrorMessages(t *testing.T) {
 	if err == nil || err.Error() == "" {
 		t.Fatal("expected non-empty parse error")
 	}
-	if e := runErr(t, `1.foo`); e == nil || e.Error() != "NoMethodError: undefined method 'foo' for Integer" {
+	if e := runErr(t, `1.foo`); e == nil || e.Error() != "NoMethodError: undefined method 'foo' for an instance of Integer" {
 		t.Fatalf("runtime error message = %v", e)
 	}
 }
