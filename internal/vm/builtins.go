@@ -8234,17 +8234,45 @@ func parseFullMessageOpts(args []object.Value) (highlight bool, order string) {
 	return highlight, order
 }
 
-// exceptionDetailedMessage renders "<message> (<ClassName>)", the body MRI's
-// Exception#detailed_message produces and that full_message embeds. With
-// highlight it wraps the message bold and the class name bold-underline, matching
-// MRI's terminal form.
+// exceptionDetailedMessage renders the body MRI's Exception#detailed_message
+// produces and that full_message embeds. With a non-empty message on a named
+// class it is "<message> (<ClassName>)"; highlight wraps the message bold and the
+// class name bold-underline, matching MRI's terminal form.
+//
+// The empty-message and anonymous-class cases follow MRI's special-casing: an
+// empty message on an anonymous class shows the class's "#<Class:0x…>"
+// representation, on the exact RuntimeError class shows "unhandled exception",
+// and on any other named class shows just the class name — never a "(…)" suffix.
+// A non-empty message on an anonymous class shows just the message.
 func (vm *VM) exceptionDetailedMessage(self object.Value, highlight bool) string {
 	msg := vm.exceptionMessageText(self)
-	cls := vm.classOf(self).name
-	if highlight {
-		return "\x1b[1m" + msg + " (\x1b[1;4m" + cls + "\x1b[m\x1b[1m)\x1b[m"
+	cls := vm.classOf(self)
+	anonymous := cls.name == ""
+	if msg == "" {
+		var label string
+		switch {
+		case anonymous:
+			label = anonClassRepr(cls)
+		case cls == vm.consts["RuntimeError"].(*RClass):
+			label = "unhandled exception"
+		default:
+			label = cls.name
+		}
+		if highlight {
+			return "\x1b[1;4m" + label + "\x1b[m"
+		}
+		return label
 	}
-	return msg + " (" + cls + ")"
+	if anonymous {
+		if highlight {
+			return "\x1b[1m" + msg
+		}
+		return msg
+	}
+	if highlight {
+		return "\x1b[1m" + msg + " (\x1b[1;4m" + cls.name + "\x1b[m\x1b[1m)\x1b[m"
+	}
+	return msg + " (" + cls.name + ")"
 }
 
 // exceptionFullMessage renders the MRI-shaped multi-line report. order: :top (the
@@ -8260,7 +8288,7 @@ func (vm *VM) exceptionDetailedMessage(self object.Value, highlight bool) string
 // parser carries no positions) and the source-snippet/caret lines MRI prints are
 // omitted, but the file+label chain matches.
 func (vm *VM) exceptionFullMessage(self object.Value, highlight bool, order string) string {
-	detailed := vm.exceptionDetailedMessage(self, highlight)
+	detailed := vm.fullMessageDetailed(self, highlight)
 	bt, ok := getIvar(self, backtraceIvar).(*object.Array)
 	if !ok || len(bt.Elems) == 0 {
 		return detailed
@@ -8292,6 +8320,34 @@ func (vm *VM) exceptionFullMessage(self object.Value, highlight bool, order stri
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// fullMessageDetailed obtains the detailed-message body full_message embeds by
+// DISPATCHING to the exception's own #detailed_message (so a singleton override
+// is honoured), passing the resolved highlight: flag. MRI coerces the result to a
+// String via #to_str, and when the exception does not respond to
+// #detailed_message — or it yields a value that is neither a String nor #to_str
+// convertible (notably nil) — falls back to the class name, bold-underlined under
+// highlight.
+func (vm *VM) fullMessageDetailed(self object.Value, highlight bool) string {
+	if vm.respondsToDynamic(self, "detailed_message") {
+		h := object.NewHash()
+		h.Set(object.Symbol("highlight"), object.Bool(highlight))
+		res := vm.send(self, "detailed_message", []object.Value{h}, nil)
+		if s, ok := res.(*object.String); ok {
+			return s.Str()
+		}
+		if vm.respondsToDynamic(res, "to_str") {
+			if s, ok := vm.send(res, "to_str", nil, nil).(*object.String); ok {
+				return s.Str()
+			}
+		}
+	}
+	cls := vm.classOf(self).name
+	if highlight {
+		return "\x1b[1;4m" + cls + "\x1b[m"
+	}
+	return cls
 }
 
 // digValue implements Hash#dig: fetch the value at the first key and, via
