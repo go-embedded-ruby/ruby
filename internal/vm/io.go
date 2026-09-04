@@ -713,6 +713,9 @@ func defStringIORead(cls *RClass) {
 			o.syncStr()
 			return o.strObj
 		}
+		if o.cls != nil && o.cls.name == "StringIO" { // bare-allocated, not yet initialised
+			raise("IOError", "uninitialized stream")
+		}
 		return object.NewString(string(o.buf))
 	})
 	cls.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -985,7 +988,20 @@ func defStringIORead(cls *RClass) {
 // in stringIOSetup), #string=, #each_codepoint, and the StringIO-specific
 // overrides of #sync/#binmode/#close_read/#close_write/#fcntl whose behaviour
 // differs from a real IO's.
+// includeStringIOEnumerable mixes Enumerable into StringIO (whose #each yields
+// lines), as in MRI. It runs after the prelude, where Enumerable is defined.
+func (vm *VM) includeStringIOEnumerable() {
+	if c, ok := vm.consts["StringIO"].(*RClass); ok {
+		if en, ok := vm.consts["Enumerable"].(*RClass); ok {
+			c.includes = append(c.includes, en)
+		}
+	}
+}
+
 func defStringIOExtra(vm *VM, cls *RClass) {
+	// StringIO::VERSION — the bundled stringio gem version (specs guard behaviour on
+	// it via version_is / guard blocks). Matches MRI 4.0.6's stringio 3.2.0.
+	cls.consts["VERSION"] = object.NewFrozenStringView("3.2.0")
 	// StringIO.allocate returns a bare, uninitialised StringIO (an IOObj rather
 	// than the generic RObject) so a following #initialize / #reopen can populate
 	// it — the StringIO.allocate; io.send(:initialize, ...) construction MRI allows.
