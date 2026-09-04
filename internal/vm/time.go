@@ -32,6 +32,39 @@ type Time struct {
 	// was built with, or nil for a plain offset/UTC/local Time. When set, #zone
 	// returns this object rather than the fixed-zone name.
 	zoneObj object.Value
+	// frac carries the sub-nanosecond part of the sub-second, in seconds and in
+	// the range [0, 1e-9), that Go's nanosecond-resolution instant cannot hold —
+	// nil when the instant lands exactly on a nanosecond. MRI keeps a Time's
+	// sub-second as an exact Rational, so #subsec / #to_r (and the arithmetic that
+	// feeds them) must preserve digits past the ninth; the nanosecond-granular
+	// fields (#nsec, #usec, rendering) read only the whole-nanosecond part and are
+	// unaffected.
+	frac *big.Rat
+}
+
+// subsecRat returns the Time's exact sub-second as a Rational number of seconds in
+// [0, 1): the whole-nanosecond part plus any sub-nanosecond frac.
+func (t *Time) subsecRat() *big.Rat {
+	r := big.NewRat(int64(t.t.Nanosecond()), 1e9)
+	if t.frac != nil {
+		r.Add(r, t.frac)
+	}
+	return r
+}
+
+// newTimeExact builds a Time at an exact number of seconds since the epoch,
+// flooring to the nanosecond for the backing instant and keeping any
+// sub-nanosecond remainder in frac, in the given location with the given zone.
+func newTimeExact(totalSec *big.Rat, loc *stdtime.Location, zoneObj object.Value) *Time {
+	nsRat := new(big.Rat).Mul(totalSec, big.NewRat(1e9, 1))
+	fl := new(big.Int).Div(nsRat.Num(), nsRat.Denom()) // floor toward -inf
+	var frac *big.Rat
+	if rem := new(big.Rat).Sub(nsRat, new(big.Rat).SetInt(fl)); rem.Sign() != 0 {
+		frac = rem.Quo(rem, big.NewRat(1e9, 1)) // nanoseconds → seconds
+	}
+	sec := new(big.Int).Div(fl, big.NewInt(1e9))
+	ns := new(big.Int).Sub(fl, new(big.Int).Mul(sec, big.NewInt(1e9)))
+	return &Time{t: stdtime.Unix(sec.Int64(), ns.Int64()).In(loc), zoneObj: zoneObj, frac: frac}
 }
 
 // localLoc resolves the machine's current local timezone, honouring a TZ set at
@@ -76,11 +109,10 @@ func (t *Time) fracString() string {
 // subsecValue renders Time#subsec: the exact fraction of a second as a Rational,
 // or the Integer 0 on a whole second (MRI keeps 0 an Integer, not 0/1).
 func (t *Time) subsecValue() object.Value {
-	ns := t.t.Nanosecond()
-	if ns == 0 {
+	if t.t.Nanosecond() == 0 && t.frac == nil {
 		return object.IntValue(0)
 	}
-	return &object.Rational{R: big.NewRat(int64(ns), 1e9)}
+	return &object.Rational{R: t.subsecRat()}
 }
 
 // zoneValue renders Time#zone: the Ruby timezone object when the Time carries
@@ -280,7 +312,9 @@ func (vm *VM) registerTime() {
 		return object.Float(float64(self(v).t.UnixNano()) / 1e9)
 	})
 	d("to_r", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Rational{R: big.NewRat(self(v).t.UnixNano(), 1e9)}
+		tt := self(v)
+		r := new(big.Rat).SetInt64(tt.t.Unix())
+		return &object.Rational{R: r.Add(r, tt.subsecRat())}
 	})
 
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -582,8 +616,35 @@ func (vm *VM) timeAt(args []object.Value) *Time {
 	if hasZone {
 		return vm.applyInstantZone(sec, ns, zone)
 	}
-	// A numeric source with no zone keeps rbgo's deterministic UTC instant.
+	// A numeric source with no zone keeps rbgo's deterministic UTC instant. A lone
+	// Float/Rational argument is placed exactly so any sub-nanosecond part of the
+	// value survives (MRI keeps the sub-second as an exact Rational).
+	if r, ok := atExactSeconds(pos); ok {
+		return newTimeExact(r, stdtime.UTC, nil)
+	}
 	return &Time{t: stdtime.Unix(sec, ns).UTC()}
+}
+
+// atExactSeconds returns the exact seconds of Time.at's argument as a Rational
+// (ok=true) for the lone-Float/Rational form that can carry sub-nanosecond
+// precision; every other form (integer, coerced, or with an explicit subsecond
+// argument) is nanosecond-granular and handled by the (sec, ns) path. A
+// non-finite Float has no instant, so it raises FloatDomainError as MRI does.
+func atExactSeconds(pos []object.Value) (*big.Rat, bool) {
+	if len(pos) != 1 {
+		return nil, false
+	}
+	switch n := pos[0].(type) {
+	case object.Float:
+		r := new(big.Rat).SetFloat64(float64(n))
+		if r == nil {
+			raise("FloatDomainError", "%s", n.Inspect())
+		}
+		return r, true
+	case *object.Rational:
+		return new(big.Rat).Set(n.R), true
+	}
+	return nil, false
 }
 
 // timeAtSeconds resolves Time.at's numeric first argument to whole seconds plus a
@@ -1412,24 +1473,14 @@ func valueToRat(v object.Value) *big.Rat {
 }
 
 // shiftByRat returns the Time advanced by delta seconds (which may carry a
-// sub-nanosecond fraction), computed exactly and floored to the nanosecond, with
-// the receiver's location and Ruby timezone object carried onto the result.
+// sub-nanosecond fraction), computed exactly from the receiver's own exact
+// instant so precision beyond the nanosecond is preserved, with the receiver's
+// location and Ruby timezone object carried onto the result.
 func (t *Time) shiftByRat(delta *big.Rat) *Time {
-	// Current instant in nanoseconds, exact: unix*1e9 + nanosecond.
-	nano := new(big.Int).Add(
-		new(big.Int).Mul(big.NewInt(t.t.Unix()), big.NewInt(1e9)),
-		big.NewInt(int64(t.t.Nanosecond())),
-	)
-	cur := new(big.Rat).SetInt(nano)
-	cur.Add(cur, new(big.Rat).Mul(delta, big.NewRat(1e9, 1)))
-	// Floor to whole nanoseconds (Div floors toward -inf for a positive denom).
-	fl := new(big.Int).Div(cur.Num(), cur.Denom())
-	sec := new(big.Int).Div(fl, big.NewInt(1e9))
-	ns := new(big.Int).Sub(fl, new(big.Int).Mul(sec, big.NewInt(1e9)))
-	return &Time{
-		t:       stdtime.Unix(sec.Int64(), ns.Int64()).In(t.t.Location()),
-		zoneObj: t.zoneObj,
-	}
+	cur := new(big.Rat).SetInt64(t.t.Unix())
+	cur.Add(cur, t.subsecRat())
+	cur.Add(cur, delta)
+	return newTimeExact(cur, t.t.Location(), t.zoneObj)
 }
 
 // timeCmp returns -1/0/1 ordering two Times.

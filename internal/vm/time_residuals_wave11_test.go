@@ -97,6 +97,37 @@ p Time.utc(2010, 1, 1, 0, 0, MyNum.new).nsec`, "500000000\n"},
 	}
 }
 
+// TestTimeSubNanosecond pins MRI's exact sub-second: precision past the ninth
+// digit, carried through Time.at and Time#+/#-, survives in #subsec and #to_r
+// (while the nanosecond-granular #nsec/#usec are unchanged), and a non-finite
+// Time.at Float raises FloatDomainError.
+func TestTimeSubNanosecond(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// Addition keeps 15 significant sub-second digits.
+		{`p((Time.at(0) + Rational(8_999_999_999_999_999, 1_000_000_000_000_000)).subsec)`,
+			"(999999999999999/1000000000000000)\n"},
+		{`p((Time.at(0) - Rational(1_000_000_000_000_001, 1_000_000_000_000_000)).subsec)`,
+			"(999999999999999/1000000000000000)\n"},
+		// A Float base preserves its exact binary value through subtraction.
+		{`t = Time.at(0.777777); t -= 0.654321; p t.usec`, "123456\n"},
+		// The whole-nanosecond fields ignore the sub-nanosecond part.
+		{`t = Time.at(0) + Rational(8_999_999_999_999_999, 1_000_000_000_000_000); p t.nsec`, "999999999\n"},
+		{`t = Time.at(0) + Rational(8_999_999_999_999_999, 1_000_000_000_000_000); p t.usec`, "999999\n"},
+		// A Rational within nanosecond resolution keeps subsec exact and adds no frac.
+		{`p Time.at(Rational(3, 2)).subsec`, "(1/2)\n"},
+		{`p Time.at(Rational(11, 10)).to_r`, "(11/10)\n"},
+	}
+	for _, tc := range cases {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+		}
+	}
+	// A non-finite Float has no instant.
+	if err := runErr(t, `Time.at(Float::INFINITY)`); err == nil || !strings.Contains(err.Error(), "FloatDomainError") {
+		t.Errorf("Time.at(Infinity): expected FloatDomainError, got %v", err)
+	}
+}
+
 // TestTimeGetlocalTimezoneObject pins Time#getlocal / Time#localtime with a
 // timezone object (one answering #utc_to_local): the instant is rendered through
 // that object exactly as Time.at(in: zone), the object becomes the result's zone,
