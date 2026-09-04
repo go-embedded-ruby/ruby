@@ -1782,7 +1782,11 @@ func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Pro
 			return vm.binaryOp(op, recv, args[0])
 		}
 	}
-	mm := lookupMethod(c, "method_missing")
+	// Resolve method_missing the way a real send would: a class/module receiver
+	// consults its singleton (class) methods first, so `def self.method_missing` on
+	// the receiver — or on an ancestor's singleton — handles an unknown class method
+	// before falling back to the generic Class/BasicObject default.
+	mm := vm.resolveSingletonHook(recv, "method_missing")
 	mmArgs := append([]object.Value{object.SymVal(name)}, args...)
 	return vm.invoke(mm, recv, mmArgs, blk)
 }

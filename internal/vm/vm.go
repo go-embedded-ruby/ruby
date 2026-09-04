@@ -1657,9 +1657,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					if _, isClass := recv.(*RClass); !isClass {
 						if m := vm.lookupCached(&caches[pc], recv, name); m != nil {
 							// An explicit-receiver send enforces method visibility
-							// (private/protected); an implicit or `self.` send does not.
+							// (private/protected); an implicit or `self.` send does not. A
+							// blocked call routes to #method_missing (or raises).
 							if in.Flags&bytecode.FlagSendExplicit != 0 {
-								vm.checkVisibility(recv, name, m, self)
+								if res, done := vm.explicitBlockedRoute(recv, name, m, stack[base:], nil, self); done {
+									stack = stack[:base-1]
+									stack = append(stack, res)
+									pc++
+									continue
+								}
 							}
 							// Pass the args in place from the operand stack: invoke
 							// (→ exec / a native method) consumes them before this frame
@@ -1681,8 +1687,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// passed directly here — no per-call args copy. The region is read
 					// (and copied into the callee's env by exec, or defensively by
 					// invokeInPlace) before this frame truncates the stack below.
-					vm.enforceSendVis(in.Flags, recv, name, self)
-					res := vm.send(recv, name, stack[base:], nil)
+					res, done := vm.enforceSendVisRoute(in.Flags, recv, name, stack[base:], nil, self)
+					if !done {
+						res = vm.send(recv, name, stack[base:], nil)
+					}
 					stack = stack[:base-1]
 					stack = append(stack, res)
 				} else {
@@ -1690,10 +1698,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					copy(callArgs, stack[len(stack)-argc:])
 					stack = stack[:len(stack)-argc]
 					recv := pop()
-					vm.enforceSendVis(in.Flags, recv, name, self)
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
 					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					if res, done := vm.enforceSendVisRoute(in.Flags, recv, name, callArgs, blk, self); done {
+						push(res)
+						pc++
+						continue
+					}
 					if vm.anyRefinements {
 						if rm := vm.refinedMethod(definee, recv, name); rm != nil {
 							push(vm.invokeInPlace(rm, recv, callArgs, blk))

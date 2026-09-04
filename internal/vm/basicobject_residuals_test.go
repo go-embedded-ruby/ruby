@@ -124,6 +124,91 @@ o.instance_eval { def m2; end }`, "singleton_method_added\nm2\n"},
 	}
 }
 
+// TestMethodMissingVisibilityRouting covers a private/protected call reaching the
+// receiver's #method_missing, an undefined class method reaching a singleton
+// #method_missing, and — with no #method_missing — a NoMethodError whose
+// receiver/name are stamped. All match MRI.
+func TestMethodMissingVisibilityRouting(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// A blocked private call reaches #method_missing (with the name and args).
+		{`class MMC
+  def method_missing(*a) [:mm, *a] end
+  def priv; end
+  private :priv
+end
+p MMC.new.priv
+p MMC.new.priv(1, 2)`, "[:mm, :priv]\n[:mm, :priv, 1, 2]\n"},
+		// A blocked protected call (from outside) reaches #method_missing.
+		{`class MMP
+  def method_missing(*a) :mm end
+  def prot; end
+  protected :prot
+end
+p MMP.new.prot`, ":mm\n"},
+		// A literal block flows through to #method_missing.
+		{`class MMB
+  def method_missing(*a, &b) b.call end
+  def priv; end
+  private :priv
+end
+p MMB.new.priv { 42 }`, "42\n"},
+		// An undefined CLASS method reaches a singleton #method_missing.
+		{`class MMS
+  def self.method_missing(*a) [:smm, *a] end
+end
+p MMS.undefined_thing(3)`, "[:smm, :undefined_thing, 3]\n"},
+		// A private CLASS method reaches a singleton #method_missing when blocked.
+		{`class MMPCM
+  def self.method_missing(*a) [:g, *a] end
+  def self.pcm; end
+  private_class_method :pcm
+end
+p MMPCM.pcm`, "[:g, :pcm]\n"},
+		// A protected call between two kin instances is still allowed (not blocked).
+		{`class Kin
+  def initialize(v) @v = v end
+  def gt(o) val > o.val end
+  protected
+  def val; @v end
+end
+p Kin.new(5).gt(Kin.new(3))`, "true\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestBlockedCallNoMethodMissing covers the raise path: a private/protected call
+// with no #method_missing raises NoMethodError stamped with receiver and name.
+func TestBlockedCallNoMethodMissing(t *testing.T) {
+	got := eval(t, `class NoMM
+  def priv; end
+  private :priv
+end
+o = NoMM.new
+begin
+  o.priv
+rescue NoMethodError => e
+  p e.receiver.equal?(o)
+  p e.name
+end`)
+	if got != "true\n:priv\n" {
+		t.Fatalf("got %q", got)
+	}
+	// The splat / block-argument send forms use the raise-only gate; a blocked
+	// private call there still raises NoMethodError.
+	err := runErr(t, `class NoMM2
+  def priv; end
+  private :priv
+end
+NoMM2.new.priv(*[1])`)
+	if err == nil || !strings.Contains(err.Error(), "private method 'priv'") {
+		t.Fatalf("want private-method NoMethodError, got %v", err)
+	}
+}
+
 // TestSingletonHookUndefRaises covers the undef'd-hook path with no user
 // method_missing: the definition routes to the default method_missing, which
 // raises NoMethodError naming the hook.
