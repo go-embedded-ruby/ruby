@@ -393,23 +393,39 @@ func fileMode(args []object.Value) string {
 	return "r"
 }
 
-// stringIOModeArg normalises a StringIO mode argument to an access-mode string:
-// an Integer is a bit-OR of File::Constants flags, a String is taken directly,
-// and any other object is converted via #to_str (raising TypeError otherwise).
-func stringIOModeArg(vm *VM, v object.Value) string {
-	if i, ok := v.(object.Integer); ok {
-		return flagsToMode(int64(i))
-	}
-	if s, ok := v.(*object.String); ok {
-		return s.Str()
+// stringIOModeVal resolves a StringIO mode argument to either an Integer flag set
+// or a String access mode: Integer and String are taken directly, and any other
+// object is converted via #to_str (raising TypeError otherwise). Keeping the
+// Integer form (rather than mapping it to an fopen-style string) preserves the
+// O_TRUNC / access bits that a lossy string mapping would drop.
+func stringIOModeVal(vm *VM, v object.Value) object.Value {
+	switch v.(type) {
+	case object.Integer, *object.String:
+		return v
 	}
 	if vm.respondsToDynamic(v, "to_str") {
 		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
-			return s.Str()
+			return s
 		}
 	}
 	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
-	return ""
+	return nil
+}
+
+// stringIOFlagBits decodes an Integer StringIO mode (a bit-OR of IO/File open
+// flags) into its capabilities. The access bits (RDONLY/WRONLY/RDWR) set read /
+// write; O_TRUNC empties the buffer; O_APPEND forces writes to the end. Unlike a
+// mapping through an fopen-style string, a bare WRONLY does not imply truncation.
+func stringIOFlagBits(flags int64) (read, write, trunc, appnd bool) {
+	switch flags & 0x3 { // O_RDONLY / O_WRONLY / O_RDWR
+	case fO_WRONLY:
+		read, write = false, true
+	case fO_RDWR:
+		read, write = true, true
+	default: // fO_RDONLY
+		read, write = true, false
+	}
+	return read, write, flags&fO_TRUNC != 0, flags&fO_APPEND != 0
 }
 
 // stringIOModeFlags decodes a StringIO access mode ("r", "r+", "w", "w+", "a",
@@ -1104,12 +1120,12 @@ func stringIOSetup(vm *VM, o *IOObj, args []object.Value) {
 	o.closed, o.strNil, o.appendMode = false, false, false
 	o.extEnc, o.intEnc = "", ""
 
-	mode, modeGiven := "", false
+	var modeVal object.Value // Integer flag set or String access mode, once resolved
 	binGiven, binVal, textGiven, encGiven := false, false, false, false
 	if h, ok := lastHash(args); ok {
 		args = args[:len(args)-1]
 		if v, ok := h.Get(object.Symbol("mode")); ok && !object.IsNil(v) {
-			mode, modeGiven = stringIOModeArg(vm, v), true
+			modeVal = stringIOModeVal(vm, v)
 		}
 		if v, ok := h.Get(object.Symbol("binmode")); ok {
 			binGiven, binVal = true, v.Truthy()
@@ -1125,17 +1141,23 @@ func stringIOSetup(vm *VM, o *IOObj, args []object.Value) {
 	}
 	// A second positional argument is the mode, overriding a :mode option.
 	if len(args) > 1 && !object.IsNil(args[1]) {
-		mode, modeGiven = stringIOModeArg(vm, args[1]), true
+		modeVal = stringIOModeVal(vm, args[1])
 	}
+	// The ":"/"b"/"t" flags only exist on a String mode; an Integer flag set never
+	// carries them, so these checks and the binary detection apply to a String mode.
+	modeStr, _ := modeVal.(*object.String)
+	modeBase := ""
+	if modeStr != nil {
+		modeBase = modeStr.Str()
+		if i := strings.IndexByte(modeBase, ':'); i >= 0 {
+			modeBase = modeBase[:i]
+		}
+	}
+	modeHasBT := strings.ContainsAny(modeBase, "bt")
 	// Reject the ways MRI forbids specifying an encoding or the binary/text choice
 	// twice: an encoding both in the mode string and as an option; binmode /
 	// textmode both as a b/t mode flag and as an option, or as two options at once.
-	modeBase := mode
-	if i := strings.IndexByte(modeBase, ':'); i >= 0 {
-		modeBase = modeBase[:i]
-	}
-	modeHasBT := strings.ContainsAny(modeBase, "bt")
-	if encGiven && strings.Contains(mode, ":") {
+	if encGiven && modeStr != nil && strings.Contains(modeStr.Str(), ":") {
 		raise("ArgumentError", "encoding specified twice")
 	}
 	if (binGiven || textGiven) && modeHasBT {
@@ -1149,15 +1171,19 @@ func stringIOSetup(vm *VM, o *IOObj, args []object.Value) {
 	if len(args) > 0 && !object.IsNil(args[0]) {
 		s = stringIOStrArg(vm, args[0])
 	}
-	if !modeGiven {
+	read, write, trunc, appnd := true, true, false, false
+	switch {
+	case modeVal == nil:
 		// With no explicit mode, a frozen backing string opens read-only; a mutable
 		// one (or none) is read/write, matching MRI.
-		mode = "r+"
 		if s != nil && s.Frozen {
-			mode = "r"
+			write = false
 		}
+	case modeStr != nil:
+		read, write, trunc, appnd = stringIOModeFlags(modeStr.Str())
+	default: // Integer flag set (IO::RDONLY | IO::TRUNC | ...)
+		read, write, trunc, appnd = stringIOFlagBits(int64(modeVal.(object.Integer)))
 	}
-	read, write, trunc, appnd := stringIOModeFlags(mode)
 	if s != nil && s.Frozen {
 		if write {
 			raise("Errno::EACCES", "Permission denied")
