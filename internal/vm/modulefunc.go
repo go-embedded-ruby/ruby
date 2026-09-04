@@ -190,9 +190,18 @@ func (vm *VM) registerModuleExtras() {
 		return mod
 	})
 
-	// Constant-visibility directives: not enforced (constants are not access-
-	// controlled here), so accept the names and return self, as MRI does.
-	constVisibility := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	// Constant-visibility directives: the access control itself is not enforced
+	// (reads are not screened here), but MRI validates that every named constant is
+	// defined DIRECTLY on the receiver — an inherited or missing name is a NameError
+	// — before returning self. Each name is a String or Symbol.
+	constVisibility := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		for _, a := range args {
+			name := nameArg(a)
+			if _, ok := mod.consts[name]; !ok {
+				raise("NameError", "constant %s not defined", scopedNameFor(mod, name))
+			}
+		}
 		return self
 	}
 	vm.cModule.define("private_constant", constVisibility)

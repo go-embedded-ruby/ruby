@@ -100,6 +100,35 @@ func TestModuleDirectivesArePrivate(t *testing.T) {
 	}
 }
 
+// TestConstantVisibilityValidation covers private_constant / public_constant:
+// each named constant must be defined directly on the receiver (an inherited or
+// missing name is a NameError), and a valid call returns the receiver. The
+// access control itself is not enforced. Verified against MRI.
+func TestConstantVisibilityValidation(t *testing.T) {
+	errCases := []string{
+		// A constant inherited from a superclass is not "defined in" the subclass.
+		"c1 = Class.new\nc1.const_set(:Foo, true)\nc2 = Class.new(c1)\nc2.send(:private_constant, :Foo)",
+		// A name defined nowhere.
+		"Module.new.send(:private_constant, :Nope)",
+		"Module.new.send(:public_constant, :Nope)",
+	}
+	for _, src := range errCases {
+		if class, _ := evalErr(t, src); class != "NameError" {
+			t.Errorf("%q: got class %s want NameError", src, class)
+		}
+	}
+	// A valid directive (own constant, String or Symbol name) returns the receiver.
+	okCases := []struct{ src, want string }{
+		{"m = Module.new\nm.const_set(:X, 1)\np m.send(:private_constant, :X).equal?(m)", "true\n"},
+		{"m = Module.new\nm.const_set(:X, 1)\np m.send(:public_constant, \"X\").equal?(m)", "true\n"},
+	}
+	for _, c := range okCases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("%q: got %q want %q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestNameArgToStrCoercion checks that module_function and alias_method coerce a
 // non-Symbol/String name argument through #to_str (MRI), rather than rejecting
 // it outright.
