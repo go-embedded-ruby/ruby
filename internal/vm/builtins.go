@@ -3333,21 +3333,21 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
-	vm.cArray.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("flatten", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 && !object.IsNil(args[0]) {
 			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
-		return object.NewArrayFromSlice(flattenDepth(self.(*object.Array).Elems, depth))
+		return object.NewArrayFromSlice(vm.flattenDepth(self.(*object.Array).Elems, depth))
 	})
-	vm.cArray.define("flatten!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("flatten!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := -1
 		if len(args) > 0 && !object.IsNil(args[0]) {
 			depth = int(vm.repeatLong(args[0])) // #to_int coercion (a nil depth is unbounded)
 		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
-		out, changed := flattenDepthChanged(a.Elems, depth)
+		out, changed := vm.flattenDepthIn(a.Elems, depth, map[*object.Array]bool{})
 		if !changed {
 			return object.NilV
 		}
@@ -4756,7 +4756,7 @@ func (vm *VM) bootstrap() {
 	// 1 (the pair wrappers are removed but Array values are left intact); a depth
 	// >= 2 recurses that many further levels into nested Array values. A
 	// non-Integer argument raises TypeError (via intArg).
-	vm.cHash.define("flatten", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cHash.define("flatten", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		depth := 1
 		if len(args) > 0 {
 			depth = int(intArg(args[0]))
@@ -4767,7 +4767,7 @@ func (vm *VM) bootstrap() {
 			v, _ := h.Get(k)
 			pairs = append(pairs, hashPair(k, v))
 		}
-		return object.NewArrayFromSlice(flattenDepth(pairs, depth))
+		return object.NewArrayFromSlice(vm.flattenDepth(pairs, depth))
 	})
 	// compact returns a copy without the nil-valued pairs, preserving the
 	// receiver's default value and default proc. compact! removes them in place,
@@ -7490,52 +7490,72 @@ func sign(n int) int {
 	}
 }
 
-// flattenDepth flattens nested arrays up to depth levels (-1 = fully).
-func flattenDepth(elems []object.Value, depth int) []object.Value {
-	return flattenDepthIn(elems, depth, map[*object.Array]bool{})
+// checkArrayType is MRI's rb_check_array_type (via rb_check_funcall): an Array
+// (or subclass) converts to itself; any other value is offered #to_ary when it
+// defines one directly, or — for a #to_ary reachable only through
+// #method_missing — when respond_to_missing?(:to_ary, true) is true. A #to_ary
+// returning nil means "not an array" (no error); a non-nil non-Array result is a
+// TypeError. Immediates never convert, and a receiver without even
+// #respond_to_missing? (a bare BasicObject) is simply not converted rather than
+// being sent a message it cannot answer.
+func (vm *VM) checkArrayType(v object.Value) (*object.Array, bool) {
+	if a, ok := asArray(v); ok {
+		return a, true
+	}
+	if isJoinImmediate(v) {
+		return nil, false
+	}
+	switch {
+	case vm.respondsTo(v, "to_ary"):
+		// a real #to_ary method exists — call it below
+	case vm.respondsTo(v, "respond_to_missing?") &&
+		vm.send(v, "respond_to_missing?", []object.Value{object.Symbol("to_ary"), object.True}, nil).Truthy():
+		// #to_ary is served through #method_missing — call it below
+	default:
+		return nil, false
+	}
+	r := vm.send(v, "to_ary", nil, nil)
+	if object.IsNil(r) {
+		return nil, false
+	}
+	if a, ok := asArray(r); ok {
+		return a, true
+	}
+	raise("TypeError", "can't convert %s to Array (%s#to_ary gives %s)",
+		vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	return nil, false
 }
 
-// flattenDepthIn is flattenDepth remembering the arrays it is inside. A
-// self-referential array has no flattening, and MRI says so rather than trying:
-// without this it allocated 1.1 GB and did not finish.
-func flattenDepthIn(elems []object.Value, depth int, path map[*object.Array]bool) []object.Value {
-	var out []object.Value
-	for _, e := range elems {
-		if sub, ok := e.(*object.Array); ok && depth != 0 {
-			if path[sub] {
-				raise("ArgumentError", "tried to flatten recursive array")
-			}
-			path[sub] = true
-			out = append(out, flattenDepthIn(sub.Elems, depth-1, path)...)
-			delete(path, sub)
-		} else {
-			out = append(out, e)
-		}
-	}
+func (vm *VM) flattenDepth(elems []object.Value, depth int) []object.Value {
+	out, _ := vm.flattenDepthIn(elems, depth, map[*object.Array]bool{})
 	return out
 }
 
-// flattenDepthChanged flattens like flattenDepth but also reports whether any
-// nested array was actually expanded. flatten!/flatten share semantics, but the
-// bang form must return nil when nothing changed, which length alone cannot
-// detect (e.g. [[1]] flattens to [1] with the same length).
-func flattenDepthChanged(elems []object.Value, depth int) ([]object.Value, bool) {
-	return flattenDepthChangedIn(elems, depth, map[*object.Array]bool{})
-}
-
-// flattenDepthChangedIn carries the same cycle path flattenDepthIn does: the
-// bang form must refuse a self-referential array for the same reason.
-func flattenDepthChangedIn(elems []object.Value, depth int, path map[*object.Array]bool) ([]object.Value, bool) {
+// flattenDepthIn flattens up to depth (unbounded when negative), remembering the
+// arrays it is inside so a self-referential array raises rather than looping (MRI
+// says so; without this it allocated 1.1 GB and did not finish). An element that
+// is not an Array but converts through #to_ary (checkArrayType) is flattened too.
+// It also reports whether anything was expanded, which flatten! needs to return
+// nil when nothing changed (length alone cannot tell: [[1]] → [1] keeps length).
+func (vm *VM) flattenDepthIn(elems []object.Value, depth int, path map[*object.Array]bool) ([]object.Value, bool) {
 	var out []object.Value
 	changed := false
 	for _, e := range elems {
-		if sub, ok := e.(*object.Array); ok && depth != 0 {
+		var sub *object.Array
+		if depth != 0 {
+			if a, ok := e.(*object.Array); ok {
+				sub = a
+			} else if a, ok := vm.checkArrayType(e); ok {
+				sub = a
+			}
+		}
+		if sub != nil {
 			if path[sub] {
 				raise("ArgumentError", "tried to flatten recursive array")
 			}
 			changed = true
 			path[sub] = true
-			inner, _ := flattenDepthChangedIn(sub.Elems, depth-1, path)
+			inner, _ := vm.flattenDepthIn(sub.Elems, depth-1, path)
 			delete(path, sub)
 			out = append(out, inner...)
 		} else {
