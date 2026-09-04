@@ -32,6 +32,17 @@ type IOObj struct {
 	intEnc     string // internal encoding name, "" ⇒ none (nil)
 	fd         int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
 
+	// strObj is the live String object backing a StringIO — MRI's StringIO holds
+	// (and mutates in place) the very String passed to it, so #string returns that
+	// same object (identity) and writes/truncation are visible through it. buf is
+	// kept in sync with strObj on every mutation. strNil marks a StringIO whose
+	// backing string has been dropped (set to nil), as StringIO.open does after
+	// yielding: #string then returns nil.
+	strObj    *object.String
+	strNil    bool
+	rdModeOff bool // StringIO opened without a read half (write-only mode) — #close_read raises
+	wrModeOff bool // StringIO opened without a write half (read-only mode) — #close_write raises
+
 	// Pipe ends (IO.pipe) share a single byte buffer in *pipe. The write end
 	// appends; the read end drains from pipe.rpos. Because subprocess execution
 	// in this VM is synchronous (Process.spawn / Kernel.exec run to completion
@@ -86,6 +97,7 @@ func (o *IOObj) writeBytes(p []byte) int {
 		}
 		copy(o.buf[o.pos:], p)
 		o.pos += len(p)
+		o.syncStr()
 		return len(p)
 	}
 	n, _ := o.w.Write(p)
@@ -93,6 +105,16 @@ func (o *IOObj) writeBytes(p []byte) int {
 }
 
 func (o *IOObj) writeStr(s string) int { return o.writeBytes([]byte(s)) }
+
+// syncStr mirrors the working buffer back into the backing String object of a
+// StringIO so that #string (which returns that very object) and any external
+// reference to it observe writes and truncation. It is a no-op for a real IO or
+// a File (no backing String object).
+func (o *IOObj) syncStr() {
+	if o.strObj != nil {
+		o.strObj.SetBytes(o.buf)
+	}
+}
 
 // pipeRefresh snapshots a pipe reader's shared buffer into the IOObj's own
 // buf/pos view so the existing StringIO read methods (read/gets/eof?) operate on
@@ -174,43 +196,7 @@ func (vm *VM) registerIO() {
 	defIOWrite(cStringIO)
 	defStringIORead(cStringIO)
 	defIOReadExtra(cStringIO)
-	cStringIO.smethods["new"] = &Method{name: "new", owner: cStringIO, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		o := &IOObj{cls: cStringIO, isStr: true}
-		// A trailing options Hash may carry mode: (StringIO.new(str, mode: "r")).
-		mode, modeGiven := "", false
-		if h, ok := lastHash(args); ok {
-			if v, ok := h.Get(object.Symbol("mode")); ok {
-				mode, modeGiven = stringIOModeString(v), true
-			}
-			args = args[:len(args)-1]
-		}
-		frozenSrc := false
-		if len(args) > 0 && !object.IsNil(args[0]) {
-			s, ok := args[0].(*object.String)
-			if !ok {
-				raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
-			}
-			o.buf = append([]byte(nil), s.Bytes()...)
-			frozenSrc = s.Frozen
-		}
-		if len(args) > 1 && !object.IsNil(args[1]) {
-			mode, modeGiven = stringIOModeString(args[1]), true
-		}
-		if !modeGiven {
-			// With no explicit mode, a frozen backing string opens read-only; a
-			// mutable one (or none) is read/write, matching MRI.
-			mode = "r+"
-			if frozenSrc {
-				mode = "r"
-			}
-		}
-		read, write, trunc, appnd := stringIOModeFlags(mode)
-		o.rdClosed, o.wrClosed, o.appendMode = !read, !write, appnd
-		if trunc {
-			o.buf = nil
-		}
-		return o
-	}}
+	defStringIOExtra(vm, cStringIO)
 
 	stdout := &IOObj{cls: cIO, w: vm.out, label: "STDOUT"}
 	stderr := &IOObj{cls: cIO, w: vm.errOut, label: "STDERR"}
@@ -407,13 +393,23 @@ func fileMode(args []object.Value) string {
 	return "r"
 }
 
-// stringIOModeString normalises a StringIO mode argument (a String like "r+" or
-// an Integer bit-OR of File::Constants flags) to an access-mode string.
-func stringIOModeString(v object.Value) string {
+// stringIOModeArg normalises a StringIO mode argument to an access-mode string:
+// an Integer is a bit-OR of File::Constants flags, a String is taken directly,
+// and any other object is converted via #to_str (raising TypeError otherwise).
+func stringIOModeArg(vm *VM, v object.Value) string {
 	if i, ok := v.(object.Integer); ok {
 		return flagsToMode(int64(i))
 	}
-	return strArg(v)
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s.Str()
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return ""
 }
 
 // stringIOModeFlags decodes a StringIO access mode ("r", "r+", "w", "w+", "a",
@@ -633,7 +629,8 @@ func defIOWrite(cls *RClass) {
 		return object.Bool(self.(*IOObj).closed)
 	})
 	cls.define("tty?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Bool(false) })
-	cls.define("isatty", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Bool(false) })
+	// #isatty is a true alias of #tty?, as in MRI.
+	cls.methods["isatty"] = cls.methods["tty?"]
 	cls.define("binmode", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
 
 	// external_encoding: the stream's external encoding — the one set explicitly
@@ -692,63 +689,88 @@ func defIOWrite(cls *RClass) {
 // content methods, on StringIO.
 func defStringIORead(cls *RClass) {
 	cls.define("string", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(string(self.(*IOObj).buf))
-	})
-	cls.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*IOObj).buf)))
+		o := self.(*IOObj)
+		if o.strNil { // backing string dropped (StringIO.open after its block)
+			return object.NilV
+		}
+		if o.strObj != nil { // return the backing object itself, kept in sync
+			o.syncStr()
+			return o.strObj
+		}
+		return object.NewString(string(o.buf))
 	})
 	cls.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(len(self.(*IOObj).buf)))
 	})
+	// #size is a true alias of #length (identical UnboundMethod), as in MRI.
+	cls.methods["size"] = cls.methods["length"]
 	cls.define("eof?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		o.pipeRefresh()
 		return object.Bool(o.pos >= len(o.buf))
 	})
-	cls.define("eof", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		o.pipeRefresh()
-		return object.Bool(o.pos >= len(o.buf))
-	})
+	// #eof is a true alias of #eof?, as in MRI.
+	cls.methods["eof"] = cls.methods["eof?"]
 	cls.define("pos", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self.(*IOObj).pos))
 	})
-	cls.define("tell", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*IOObj).pos))
-	})
-	cls.define("pos=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).pos = int(toInt(args[0]))
+	// #tell is a true alias of #pos, as in MRI.
+	cls.methods["tell"] = cls.methods["pos"]
+	cls.define("pos=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		n := int(vm.toIntCoerce(args[0]))
+		if n < 0 {
+			raise("Errno::EINVAL", "Invalid argument")
+		}
+		self.(*IOObj).pos = n
 		return args[0]
 	})
-	cls.define("seek", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("seek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
-		amount := int(toInt(args[0]))
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		amount := int(vm.toIntCoerce(args[0]))
 		whence := 0
 		if len(args) > 1 {
-			whence = int(toInt(args[1]))
+			whence = int(vm.toIntCoerce(args[1]))
 		}
+		var newPos int
 		switch whence {
 		case 1: // SEEK_CUR
-			o.pos += amount
+			newPos = o.pos + amount
 		case 2: // SEEK_END
-			o.pos = len(o.buf) + amount
-		default: // SEEK_SET
-			o.pos = amount
+			newPos = len(o.buf) + amount
+		case 0: // SEEK_SET
+			newPos = amount
+		default:
+			raise("Errno::EINVAL", "Invalid argument")
 		}
+		if newPos < 0 {
+			raise("Errno::EINVAL", "Invalid argument")
+		}
+		o.pos = newPos
 		return object.IntValue(0)
 	})
 	cls.define("rewind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).pos = 0
+		o := self.(*IOObj)
+		o.pos, o.lineno = 0, 0 // #rewind resets both the position and the line number
 		return object.IntValue(0)
 	})
-	cls.define("truncate", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("truncate", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
-		n := int(toInt(args[0]))
+		if o.wrClosed { // a read-only stream cannot be truncated
+			raise("IOError", "not opened for writing")
+		}
+		n := int(vm.toIntCoerce(args[0]))
+		if n < 0 {
+			raise("Errno::EINVAL", "Invalid argument")
+		}
 		if n < len(o.buf) {
 			o.buf = o.buf[:n]
 		} else if n > len(o.buf) {
 			o.buf = append(o.buf, make([]byte, n-len(o.buf))...)
 		}
+		o.syncStr()
 		return object.IntValue(0)
 	})
 	cls.define("read", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -939,6 +961,255 @@ func defStringIORead(cls *RClass) {
 	// #each is a true alias of #each_line — it must share the method entry so
 	// IO.instance_method(:each) == IO.instance_method(:each_line), as in MRI.
 	cls.methods["each"] = cls.methods["each_line"]
+}
+
+// defStringIOExtra installs the StringIO-only surface that MRI adds on top of the
+// shared read/write protocol: the allocate/new/open class methods, the private
+// #initialize and #reopen instance methods (which share the backing-string setup
+// in stringIOSetup), #string=, #each_codepoint, and the StringIO-specific
+// overrides of #sync/#binmode/#close_read/#close_write/#fcntl whose behaviour
+// differs from a real IO's.
+func defStringIOExtra(vm *VM, cls *RClass) {
+	// StringIO.allocate returns a bare, uninitialised StringIO (an IOObj rather
+	// than the generic RObject) so a following #initialize / #reopen can populate
+	// it — the StringIO.allocate; io.send(:initialize, ...) construction MRI allows.
+	cls.smethods["allocate"] = &Method{name: "allocate", owner: cls, native: func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return &IOObj{cls: self.(*RClass), isStr: true}
+	}}
+	cls.smethods["new"] = &Method{name: "new", owner: cls, native: func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := &IOObj{cls: self.(*RClass), isStr: true}
+		stringIOSetup(vm, o, args)
+		return o
+	}}
+	// StringIO.open(...) { |io| ... } opens like .new and, when a block is given,
+	// yields self, then closes it AND drops its backing string (#string ⇒ nil)
+	// afterwards — even if the block raises — returning the block's value. Without
+	// a block it behaves exactly like .new.
+	cls.smethods["open"] = &Method{name: "open", owner: cls, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		o := &IOObj{cls: self.(*RClass), isStr: true}
+		stringIOSetup(vm, o, args)
+		if blk == nil {
+			return o
+		}
+		defer func() { o.closed, o.strNil, o.strObj = true, true, nil }()
+		return vm.callBlock(blk, []object.Value{o})
+	}}
+	cls.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		stringIOSetup(vm, self.(*IOObj), args)
+		return self
+	})
+	vm.setInstanceVisibility(cls, "initialize", visPrivate) // MRI keeps #initialize private
+	cls.define("reopen", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		// A single non-String argument is (converted to) a StringIO whose backing
+		// string and mode self adopts — MRI tries #to_strio here, never #to_str.
+		if len(args) == 1 && !object.IsNil(args[0]) {
+			if _, isStr := args[0].(*object.String); !isStr {
+				src, ok := stringIOToStrIO(vm, args[0])
+				if !ok {
+					raise("TypeError", "no implicit conversion of %s into StringIO", classNameOf(args[0]))
+				}
+				o.buf, o.strObj, o.strNil = src.buf, src.strObj, false
+				o.pos, o.lineno, o.appendMode = 0, 0, src.appendMode
+				o.rdClosed, o.wrClosed, o.closed = src.rdClosed, src.wrClosed, false
+				o.rdModeOff, o.wrModeOff = src.rdModeOff, src.wrModeOff
+				return o
+			}
+		}
+		stringIOSetup(vm, o, args)
+		return o
+	})
+	// #string= replaces the backing string (coercing via #to_str), resetting the
+	// position and line number, and returns the assigned string.
+	cls.define("string=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		s := stringIOStrArg(vm, args[0])
+		o.strObj, o.buf, o.strNil = s, s.MutableBytes(), false
+		o.pos, o.lineno = 0, 0
+		return s
+	})
+	cls.define("each_codepoint", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		o := self.(*IOObj)
+		if blk == nil { // no block ⇒ an Enumerator (buildable even on a closed stream)
+			return enumForSized(self, "each_codepoint", enumSizeNil)
+		}
+		ioCheckReadable(o) // iterating an unreadable stream raises, as in MRI
+		for o.pos < len(o.buf) {
+			r, sz := utf8.DecodeRune(o.buf[o.pos:])
+			if r == utf8.RuneError && sz <= 1 { // a lone continuation / invalid byte
+				raise("ArgumentError", "invalid byte sequence in UTF-8")
+			}
+			o.pos += sz
+			vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
+		}
+		return self
+	})
+	// StringIO#sync is always true and cannot be turned off, unlike a real IO's.
+	cls.define("sync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(true)
+	})
+	cls.define("sync=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return args[0]
+	})
+	// StringIO#binmode sets the external encoding to ASCII-8BIT (BINARY), clears
+	// any internal encoding, and returns self.
+	cls.define("binmode", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		o.extEnc, o.intEnc = "ASCII-8BIT", ""
+		return self
+	})
+	// StringIO#close_read / #close_write raise IOError when the stream was opened
+	// without the corresponding half (a write-only stream has no read half to
+	// close, and vice versa), matching MRI. A half already shut by a prior
+	// close_read/close_write is idempotent, not an error.
+	cls.define("close_read", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.rdModeOff {
+			raise("IOError", "not opened for reading")
+		}
+		o.rdClosed = true
+		if o.wrClosed {
+			o.closed = true
+		}
+		return object.NilV
+	})
+	cls.define("close_write", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.wrModeOff {
+			raise("IOError", "not opened for writing")
+		}
+		ioFlush(o)
+		o.wrClosed = true
+		if o.rdClosed {
+			o.closed = true
+		}
+		return object.NilV
+	})
+	// StringIO#fcntl is unsupported, as in MRI.
+	cls.define("fcntl", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		raise("NotImplementedError", "fcntl() function is unimplemented on this machine")
+		return object.NilV
+	})
+}
+
+// stringIOSetup populates (or resets, for #reopen / #initialize on an existing
+// object) a StringIO IOObj from its (string, mode, options) arguments, matching
+// MRI's StringIO#initialize: the passed String becomes the live backing object,
+// the mode (a String, an Integer flag set, or a :mode option) fixes the read /
+// write / append / truncate capabilities, and a frozen backing string raises
+// Errno::EACCES for a writable mode or FrozenError for a truncating one.
+func stringIOSetup(vm *VM, o *IOObj, args []object.Value) {
+	o.isStr = true
+	o.pos, o.lineno = 0, 0
+	o.closed, o.strNil, o.appendMode = false, false, false
+	o.extEnc, o.intEnc = "", ""
+
+	mode, modeGiven := "", false
+	binGiven, binVal, textGiven, encGiven := false, false, false, false
+	if h, ok := lastHash(args); ok {
+		args = args[:len(args)-1]
+		if v, ok := h.Get(object.Symbol("mode")); ok && !object.IsNil(v) {
+			mode, modeGiven = stringIOModeArg(vm, v), true
+		}
+		if v, ok := h.Get(object.Symbol("binmode")); ok {
+			binGiven, binVal = true, v.Truthy()
+		}
+		if _, ok := h.Get(object.Symbol("textmode")); ok {
+			textGiven = true
+		}
+		for _, k := range []string{"encoding", "external_encoding", "internal_encoding"} {
+			if _, ok := h.Get(object.Symbol(k)); ok {
+				encGiven = true
+			}
+		}
+	}
+	// A second positional argument is the mode, overriding a :mode option.
+	if len(args) > 1 && !object.IsNil(args[1]) {
+		mode, modeGiven = stringIOModeArg(vm, args[1]), true
+	}
+	// Reject the ways MRI forbids specifying an encoding or the binary/text choice
+	// twice: an encoding both in the mode string and as an option; binmode /
+	// textmode both as a b/t mode flag and as an option, or as two options at once.
+	modeBase := mode
+	if i := strings.IndexByte(modeBase, ':'); i >= 0 {
+		modeBase = modeBase[:i]
+	}
+	modeHasBT := strings.ContainsAny(modeBase, "bt")
+	if encGiven && strings.Contains(mode, ":") {
+		raise("ArgumentError", "encoding specified twice")
+	}
+	if (binGiven || textGiven) && modeHasBT {
+		raise("ArgumentError", "mode specified twice")
+	}
+	if binGiven && textGiven {
+		raise("ArgumentError", "both textmode and binmode specified")
+	}
+
+	var s *object.String
+	if len(args) > 0 && !object.IsNil(args[0]) {
+		s = stringIOStrArg(vm, args[0])
+	}
+	if !modeGiven {
+		// With no explicit mode, a frozen backing string opens read-only; a mutable
+		// one (or none) is read/write, matching MRI.
+		mode = "r+"
+		if s != nil && s.Frozen {
+			mode = "r"
+		}
+	}
+	read, write, trunc, appnd := stringIOModeFlags(mode)
+	if s != nil && s.Frozen {
+		if write {
+			raise("Errno::EACCES", "Permission denied")
+		}
+		if trunc {
+			raise("FrozenError", "can't modify frozen String: %s", s.Inspect())
+		}
+	}
+	if s == nil {
+		s = object.NewString("")
+	} else if trunc {
+		s.SetBytes(nil) // truncate the backing string in place, keeping its identity/encoding
+	}
+	o.strObj = s
+	o.buf = s.MutableBytes()
+	if strings.Contains(modeBase, "b") || (binGiven && binVal) {
+		o.extEnc = "ASCII-8BIT"
+	}
+	o.rdClosed, o.wrClosed = !read, !write
+	o.rdModeOff, o.wrModeOff = !read, !write
+	o.appendMode = appnd
+}
+
+// stringIOStrArg coerces a StringIO backing-string argument to a String object,
+// returning the very object passed (so #string preserves identity) or the result
+// of #to_str, and raising TypeError when neither applies.
+func stringIOStrArg(vm *VM, v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return nil
+}
+
+// stringIOToStrIO resolves a #reopen source that must be a StringIO: the object
+// itself when it is one, or the result of #to_strio. It never falls back to
+// #to_str — MRI's single-argument #reopen does not try a String conversion.
+func stringIOToStrIO(vm *VM, v object.Value) (*IOObj, bool) {
+	if o, ok := v.(*IOObj); ok && o.isStr {
+		return o, true
+	}
+	if vm.respondsToDynamic(v, "to_strio") {
+		if o, ok := vm.send(v, "to_strio", nil, nil).(*IOObj); ok {
+			return o, true
+		}
+	}
+	return nil, false
 }
 
 // ioGets reads one line from o using MRI's (sep, limit, chomp:) argument shapes,
