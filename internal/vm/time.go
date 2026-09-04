@@ -1055,12 +1055,16 @@ func (vm *VM) timeNewFromString(s *object.String, kwZone, precision object.Value
 		raise("ArgumentError", "time string should have ASCII compatible encoding")
 	}
 	str := s.Str()
+	// prec is the number of sub-second digits kept: 9 by default, an explicit
+	// non-negative count (which may exceed 9, landing in the sub-nanosecond frac),
+	// or "keep everything" for precision: nil or a negative count.
 	prec := 9
-	if hasPrec && !object.IsNil(precision) {
-		prec = vm.timeInt(precision)
-	}
-	if prec < 0 || prec > 9 {
-		prec = 9
+	if hasPrec {
+		if object.IsNil(precision) {
+			prec = -1
+		} else if prec = vm.timeInt(precision); prec < 0 {
+			prec = -1
+		}
 	}
 
 	year, mon, day, hour, min, sec := 0, 1, 1, 0, 0, 0
@@ -1104,15 +1108,10 @@ func (vm *VM) timeNewFromString(s *object.String, kwZone, precision object.Value
 	checkRange("min", min, 0, 59)
 	checkRange("sec", sec, 0, 60)
 
-	// prec is clamped to [0, 9], so truncating to prec also bounds the fraction
-	// to the nanosecond resolution the backing instant can hold.
-	if len(fracDigits) > prec {
+	if prec >= 0 && len(fracDigits) > prec {
 		fracDigits = fracDigits[:prec]
 	}
-	ns := 0
-	if fracDigits != "" {
-		ns = atoi(fracDigits + strings.Repeat("0", 9-len(fracDigits)))
-	}
+	ns, frac := splitFracDigits(fracDigits)
 
 	loc := localLoc()
 	switch {
@@ -1121,7 +1120,33 @@ func (vm *VM) timeNewFromString(s *object.String, kwZone, precision object.Value
 	case kwZone != nil && !object.IsNil(kwZone):
 		loc = vm.newTimeOffset(kwZone)
 	}
-	return &Time{t: stdtime.Date(year, stdtime.Month(mon), day, hour, min, sec, ns, loc)}
+	return &Time{t: stdtime.Date(year, stdtime.Month(mon), day, hour, min, sec, ns, loc), frac: frac}
+}
+
+// splitFracDigits converts a decimal sub-second digit string (e.g. "123456789876"
+// for 0.123456789876 s) into the whole-nanosecond count and any sub-nanosecond
+// remainder in seconds — nil when the string holds nine digits or fewer, or when
+// the digits past the ninth are all zero.
+func splitFracDigits(digits string) (int, *big.Rat) {
+	if digits == "" {
+		return 0, nil
+	}
+	nsPart := digits
+	if len(nsPart) > 9 {
+		nsPart = nsPart[:9]
+	}
+	ns := atoi(nsPart + strings.Repeat("0", 9-len(nsPart)))
+	if len(digits) <= 9 {
+		return ns, nil
+	}
+	extra := digits[9:]
+	num, _ := new(big.Int).SetString(extra, 10)
+	if num.Sign() == 0 {
+		return ns, nil
+	}
+	den := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(len(extra))), nil)
+	frac := new(big.Rat).SetFrac(num, den)        // fraction of one nanosecond
+	return ns, frac.Quo(frac, big.NewRat(1e9, 1)) // → seconds
 }
 
 // timeCantParse raises MRI's ArgumentError for an unparseable Time.new String.

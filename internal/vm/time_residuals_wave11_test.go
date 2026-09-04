@@ -128,6 +128,36 @@ func TestTimeSubNanosecond(t *testing.T) {
 	}
 }
 
+// TestTimeNewStringPrecision pins Time.new(String, precision:)'s sub-second
+// truncation to MRI 4.0.6: the default keeps 9 digits, precision: nil or a
+// negative count keeps every digit (into the sub-nanosecond frac), an explicit
+// count truncates, and digits past the ninth that are all zero add no frac.
+func TestTimeNewStringPrecision(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// Default precision keeps 9 digits.
+		{`p Time.new("2021-12-25 00:00:00.123456789876 +09:00").subsec`, "(123456789/1000000000)\n"},
+		// precision: nil keeps all 12 digits.
+		{`p Time.new("2021-12-25 00:00:00.123456789876 +09:00", precision: nil).subsec`,
+			"(30864197469/250000000000)\n"},
+		// A negative precision also keeps everything.
+		{`p Time.new("2021-12-25 00:00:00.123456789876 +09:00", precision: -1).subsec`,
+			"(30864197469/250000000000)\n"},
+		// An explicit count truncates.
+		{`p Time.new("2021-12-25 00:00:00.123456789876 +09:00", precision: 3).subsec`, "(123/1000)\n"},
+		{`p Time.new("2021-12-25 00:00:00 +09:00", precision: 0).subsec`, "0\n"},
+		// Trailing zeros past the ninth digit add no sub-nanosecond frac.
+		{`p Time.new("2021-12-25 00:00:00.123456789000 +09:00", precision: nil).subsec`,
+			"(123456789/1000000000)\n"},
+		// A whole-second string has no fraction at all.
+		{`p Time.new("2021-12-25 00:00:00 +09:00").subsec`, "0\n"},
+	}
+	for _, tc := range cases {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+		}
+	}
+}
+
 // TestTimeGetlocalTimezoneObject pins Time#getlocal / Time#localtime with a
 // timezone object (one answering #utc_to_local): the instant is rendered through
 // that object exactly as Time.at(in: zone), the object becomes the result's zone,
