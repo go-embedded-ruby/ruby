@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math/big"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,6 +32,22 @@ type Time struct {
 	// was built with, or nil for a plain offset/UTC/local Time. When set, #zone
 	// returns this object rather than the fixed-zone name.
 	zoneObj object.Value
+}
+
+// localLoc resolves the machine's current local timezone, honouring a TZ set at
+// runtime — a spec's with_timezone helper assigns ENV['TZ'], which rbgo writes
+// through to the process environment. An IANA name is loaded from Go's tzdata; an
+// empty TZ keeps the process zone; and an unloadable name falls back to UTC,
+// matching MRI's treatment of an unrecognised TZ as UTC.
+func localLoc() *stdtime.Location {
+	tz := os.Getenv("TZ")
+	if tz == "" {
+		return stdtime.Local
+	}
+	if loc, err := stdtime.LoadLocation(tz); err == nil {
+		return loc
+	}
+	return stdtime.UTC
 }
 
 // unixTime builds a whole-second UTC Ruby Time from a Unix timestamp — the
@@ -223,7 +240,7 @@ func (vm *VM) registerTime() {
 	vm.cTime.smethods["gm"] = utcM
 	// Time.local / Time.mktime(...) → the same, in the local zone.
 	localM := &Method{name: "local", owner: vm.cTime, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.timeFromCalendar(args, stdtime.Local)
+		return vm.timeFromCalendar(args, localLoc())
 	}}
 	vm.cTime.smethods["local"] = localM
 	vm.cTime.smethods["mktime"] = localM
@@ -535,7 +552,7 @@ func (vm *VM) getlocalTime(recv *Time, args []object.Value) *Time {
 // (String or Integer seconds).
 func (vm *VM) localtimeLoc(args []object.Value) *stdtime.Location {
 	if len(args) == 0 {
-		return stdtime.Local
+		return localLoc()
 	}
 	return vm.newTimeOffset(args[0])
 }
@@ -744,7 +761,7 @@ func (vm *VM) timeNew(args []object.Value) *Time {
 		cal = pos[:6]
 	}
 	if zoneArg == nil {
-		return vm.buildTime(cal, 0, false, stdtime.Local)
+		return vm.buildTime(cal, 0, false, localLoc())
 	}
 	if vm.respondsToDynamic(zoneArg, "local_to_utc") {
 		return vm.buildTimeZoneObjectNew(cal, zoneArg)
@@ -947,7 +964,12 @@ func parseUtcOffset(s string) *stdtime.Location {
 	if mm > 59 || ss > 59 {
 		raiseBadOffset(s)
 	}
-	return fixedOffsetLoc(sign * (hh*3600 + mm*60 + ss))
+	total := sign * (hh*3600 + mm*60 + ss)
+	if total == 0 && sign < 0 {
+		// "-00:00" is RFC 3339's unknown-offset UTC: MRI reports its zone as "UTC".
+		return stdtime.UTC
+	}
+	return fixedOffsetLoc(total)
 }
 
 func raiseBadOffset(s string) {
@@ -1031,7 +1053,7 @@ func (vm *VM) timeNewFromString(s *object.String, kwZone, precision object.Value
 		ns = atoi(fracDigits + strings.Repeat("0", 9-len(fracDigits)))
 	}
 
-	loc := stdtime.Local
+	loc := localLoc()
 	switch {
 	case strLoc != nil:
 		loc = strLoc
@@ -1701,13 +1723,11 @@ func zoneOffset(off, colons int) string {
 	}
 }
 
-// zoneName renders %Z: the zone's name, or its numeric offset when it is a bare
-// fixed-offset zone.
+// zoneName renders %Z: the zone's abbreviation, or the empty string for a bare
+// fixed-offset zone — MRI's Time#strftime emits nothing for an offset-only zone
+// (unlike #inspect, which shows the numeric offset).
 func zoneName(tm stdtime.Time) string {
-	name, off := tm.Zone()
-	if name == "" {
-		return signedOffset(off, ":")
-	}
+	name, _ := tm.Zone()
 	return name
 }
 

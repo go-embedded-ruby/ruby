@@ -127,3 +127,46 @@ Time.utc(2000, 1, 1, 12, 0, 0).getlocal(z)`); err == nil || !strings.Contains(er
 		t.Errorf("getlocal(bad zone): expected TypeError, got %v", err)
 	}
 }
+
+// TestTimeLocalTimezoneEnv pins rbgo's local timezone resolution to the runtime
+// TZ (as a spec's with_timezone sets via ENV['TZ']): an IANA name is honoured
+// with DST, while an unloadable name defaults to UTC — the source restoring TZ so
+// the process default (used by every other example) is unchanged.
+func TestTimeLocalTimezoneEnv(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// IANA name, DST-aware: winter EST, summer EDT.
+		{`ENV["TZ"] = "America/New_York"
+r = [Time.new(2001, 1, 1, 0, 0, 0).zone, Time.new(2001, 7, 1, 0, 0, 0).zone]
+ENV.delete("TZ")
+p r`, `["EST", "EDT"]` + "\n"},
+		// An unloadable TZ falls back to UTC (offset 0), matching MRI.
+		{`ENV["TZ"] = "hello-foo"
+r = Time.new(2001, 1, 1, 0, 0, 0).utc_offset
+ENV.delete("TZ")
+p r`, "0\n"},
+	}
+	for _, tc := range cases {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+		}
+	}
+}
+
+// TestTimeZoneStrings pins Time#zone / strftime("%Z") for the UTC and
+// fixed-offset string forms: "-00:00" is RFC 3339 unknown-offset UTC (zone
+// "UTC"), a plain numeric offset has no zone name (nil / ""), matching MRI 4.0.6.
+func TestTimeZoneStrings(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p Time.new(2022, 1, 1, 0, 0, 0, "-00:00").zone`, "\"UTC\"\n"},
+		{`p Time.new(2022, 1, 1, 0, 0, 0, "UTC").zone`, "\"UTC\"\n"},
+		{`p Time.new(2022, 1, 1, 0, 0, 0, 3600).zone`, "nil\n"},
+		// strftime %Z is empty for an offset-only zone (unlike #inspect).
+		{`p Time.new(2000, 1, 1, 0, 0, 0, 42).strftime("%Z")`, "\"\"\n"},
+		{`p Time.utc(2000).strftime("%Z")`, "\"UTC\"\n"},
+	}
+	for _, tc := range cases {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+		}
+	}
+}
