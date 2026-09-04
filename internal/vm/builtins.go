@@ -2473,35 +2473,52 @@ func (vm *VM) bootstrap() {
 		// Array.new / Array.new(other) / Array.new(n[, val]) / Array.new(n) { |i| }
 		arr := self.(*object.Array)
 		vm.checkArrayFrozen(arr) // re-initialising a frozen array raises (a fresh one is not frozen)
-		if len(args) == 1 {
-			if a, ok := args[0].(*object.Array); ok {
-				arr.Elems = append([]object.Value{}, a.Elems...)
-				return self
-			}
+		if len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..2)", len(args))
 		}
 		if len(args) == 0 {
 			arr.Elems = nil
 			return self
 		}
-		n := intArg(args[0])
+		// A single non-Integer argument is treated as another array to copy: an Array
+		// (or subclass) directly, else through #to_ary (MRI's rb_check_array_type).
+		// Only when that yields nothing does the argument become a size via #to_int.
+		if len(args) == 1 && !isIntegerVal(args[0]) {
+			if src, ok := asArray(args[0]); ok {
+				arr.Elems = append([]object.Value{}, src.Elems...)
+				return self
+			}
+			if vm.respondsToDynamic(args[0], "to_ary") {
+				if src, ok := asArray(vm.send(args[0], "to_ary", nil, nil)); ok {
+					arr.Elems = append([]object.Value{}, src.Elems...)
+					return self
+				}
+			}
+		}
+		if _, isBig := args[0].(*object.Bignum); isBig {
+			raise("ArgumentError", "array size too big")
+		}
+		n := vm.toIntCoerce(args[0])
 		if n < 0 {
 			raise("ArgumentError", "negative array size")
 		}
-		out := make([]object.Value, n)
-		for i := range out {
+		// Build the array incrementally so that if the block calls break, the array
+		// is left holding the elements produced before the break, as MRI does.
+		arr.Elems = make([]object.Value, 0, n)
+		for i := int64(0); i < n; i++ {
 			switch {
 			case blk != nil:
-				out[i] = vm.callBlock(blk, []object.Value{object.IntValue(int64(i))})
+				arr.Elems = append(arr.Elems, vm.callBlock(blk, []object.Value{object.IntValue(i)}))
 			case len(args) >= 2:
-				out[i] = args[1]
+				arr.Elems = append(arr.Elems, args[1])
 			default:
-				out[i] = object.NilV
+				arr.Elems = append(arr.Elems, object.NilV)
 			}
 		}
-		arr.Elems = out
 		return self
 	}
 	vm.cArray.define("initialize", arrayInit)
+	vm.setInstanceVisibility(vm.cArray, "initialize", visPrivate) // MRI keeps #initialize private
 	vm.cArray.smethods["new"] = &Method{name: "new", owner: vm.cArray,
 		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 			if recv := self.(*RClass); recv != vm.cArray {
