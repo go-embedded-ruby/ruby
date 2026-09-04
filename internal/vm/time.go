@@ -371,16 +371,18 @@ func (vm *VM) registerTime() {
 		return v
 	}
 	d("utc", toUTC)
-	d("localtime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		self(v).t = self(v).t.In(vm.localtimeLoc(args))
+	d("localtime", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		local := vm.getlocalTime(self(v), args)
+		self(v).t = local.t
+		self(v).zoneObj = local.zoneObj
 		return v
 	})
 	getutc := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Time{t: self(v).t.UTC()}
 	}
 	d("getutc", getutc)
-	d("getlocal", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Time{t: self(v).t.In(vm.localtimeLoc(args))}
+	d("getlocal", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.getlocalTime(self(v), args)
 	})
 
 	// round / floor / ceil to ndigits sub-second digits (default 0).
@@ -514,6 +516,18 @@ func timeZoneKw(args []object.Value) (object.Value, []object.Value) {
 		}
 	}
 	return nil, args
+}
+
+// getlocalTime computes the local representation of recv used by Time#getlocal
+// (and, mutating the receiver, Time#localtime): with no argument the machine's
+// local zone, with a timezone object (one answering #utc_to_local) that zone —
+// rendered through the object exactly as Time.at(in: zone) — and otherwise the
+// same utc_offset forms Time.new accepts.
+func (vm *VM) getlocalTime(recv *Time, args []object.Value) *Time {
+	if len(args) > 0 && vm.respondsToDynamic(args[0], "utc_to_local") {
+		return vm.timeInZoneObject(recv.t.Unix(), int64(recv.t.Nanosecond()), args[0])
+	}
+	return &Time{t: recv.t.In(vm.localtimeLoc(args))}
 }
 
 // localtimeLoc resolves the optional offset argument of localtime / getlocal:
@@ -1151,8 +1165,8 @@ func (vm *VM) timeSecParts(v object.Value) (int, int64) {
 	case object.Float:
 		return floatSecParts(float64(n))
 	case *object.Rational:
-		f, _ := n.R.Float64()
-		return floatSecParts(f)
+		s, ns := ratSecNs(n.R)
+		return int(s), ns
 	case *object.String:
 		return parseRubyInt(n.Str()), 0
 	}
@@ -1163,8 +1177,8 @@ func (vm *VM) timeSecParts(v object.Value) (int, int64) {
 	}
 	if vm.isNumeric(v) && vm.respondsToDynamic(v, "to_r") {
 		if r, ok := vm.send(v, "to_r", nil, nil).(*object.Rational); ok {
-			f, _ := r.R.Float64()
-			return floatSecParts(f)
+			s, ns := ratSecNs(r.R)
+			return int(s), ns
 		}
 	}
 	raise("TypeError", "no implicit conversion of %s into Time", v.Inspect())
