@@ -919,7 +919,13 @@ func (vm *VM) bootstrap() {
 	// class descending directly from BasicObject — which does not inherit Object —
 	// still allocates (new → initialize) and reports NoMethodError through
 	// method_missing rather than dereferencing a nil method record.
-	vm.cBasicObject.define("initialize", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cBasicObject.define("initialize", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// The default initialize takes no arguments (MRI): BasicObject.new / Object.new
+		// with arguments, or a subclass that forwards them here via `super`, is an
+		// ArgumentError.
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
 		return object.NilV
 	})
 	// ! and != are BasicObject instance methods (dispatchable via send, and

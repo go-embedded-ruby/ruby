@@ -112,6 +112,8 @@ p Object.new.instance_eval(&IECVar.new.blk)`, "41\n"},
 		{`o = Object.new
 o.instance_exec(7) {|x| @v = x }
 p o.instance_variable_get(:@v)`, "7\n"},
+		// A native block (Symbol#to_proc) is yielded self and runs against it.
+		{`p "abc".instance_eval(&:upcase)`, "\"ABC\"\n"},
 		// A def inside instance_eval fires singleton_method_added on the receiver.
 		{`o = Object.new
 def o.singleton_method_added(n); puts n; end
@@ -197,15 +199,32 @@ end`)
 	if got != "true\n:priv\n" {
 		t.Fatalf("got %q", got)
 	}
+	// A blocked protected call with no #method_missing raises the protected-method
+	// NoMethodError (the visProtected raise branch).
+	if err := runErr(t, `class ProtNoMM
+  def prot; end
+  protected :prot
+end
+ProtNoMM.new.prot`); err == nil || !strings.Contains(err.Error(), "protected method 'prot'") {
+		t.Fatalf("want protected-method NoMethodError, got %v", err)
+	}
 	// The splat / block-argument send forms use the raise-only gate; a blocked
-	// private call there still raises NoMethodError.
-	err := runErr(t, `class NoMM2
+	// private call there still raises NoMethodError — for an object receiver
+	// (dispatchClass branch)...
+	if err := runErr(t, `class NoMM2
   def priv; end
   private :priv
 end
-NoMM2.new.priv(*[1])`)
-	if err == nil || !strings.Contains(err.Error(), "private method 'priv'") {
+NoMM2.new.priv(*[1])`); err == nil || !strings.Contains(err.Error(), "private method 'priv'") {
 		t.Fatalf("want private-method NoMethodError, got %v", err)
+	}
+	// ...and for a class receiver's private class method (resolveClassMethod branch).
+	if err := runErr(t, `class NoMM3
+  def self.pcm; end
+  private_class_method :pcm
+end
+NoMM3.pcm(*[])`); err == nil || !strings.Contains(err.Error(), "private method 'pcm'") {
+		t.Fatalf("want private class-method NoMethodError, got %v", err)
 	}
 }
 
@@ -243,6 +262,25 @@ func TestUndefMissingMethodStillRaises(t *testing.T) {
 	err := runErr(t, `class UndefMissing; undef_method :never_defined; end`)
 	if err == nil || !strings.Contains(err.Error(), "NameError") {
 		t.Fatalf("want NameError for undef of undefined method, got %v", err)
+	}
+}
+
+// TestDefaultInitializeRejectsArgs covers BasicObject#initialize taking no
+// arguments: new with arguments (and a subclass forwarding them via super) is an
+// ArgumentError, while a zero-arg new still works.
+func TestDefaultInitializeRejectsArgs(t *testing.T) {
+	if got := eval(t, `p Object.new.class`); got != "Object\n" {
+		t.Fatalf("zero-arg new broke: %q", got)
+	}
+	for _, src := range []string{
+		`BasicObject.new(1)`,
+		`Object.new(1, 2)`,
+		`class SuperFwd; def initialize(x); super; end; end
+SuperFwd.new(1)`,
+	} {
+		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
+			t.Errorf("src=%q want ArgumentError, got %v", src, err)
+		}
 	}
 }
 
