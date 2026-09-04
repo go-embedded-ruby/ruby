@@ -69,6 +69,8 @@ func TestArrayInspectDispatch(t *testing.T) {
 		{`class D; def inspect; self; end; def to_s; "dee"; end; end; puts [D.new].inspect`, "[dee]\n"},
 		{`a=[1]; a<<a; puts a.inspect`, "[1, [...]]\n"},
 		{`puts [].inspect`, "[]\n"},
+		// A non-ASCII element widens the result encoding to UTF-8.
+		{`p(["café"].inspect.encoding.name)`, `"UTF-8"` + "\n"},
 		{`puts [1,[2,3]].inspect`, "[1, [2, 3]]\n"},
 		// #to_s is a true alias of #inspect (shared UnboundMethod).
 		{`p(Array.instance_method(:to_s) == Array.instance_method(:inspect))`, "true\n"},
@@ -220,6 +222,7 @@ p [MM.new,6].flatten`, "[4, 5, 6]\n"},
 func TestArraySortBlockCmp(t *testing.T) {
 	runCases(t, []struct{ src, want string }{
 		{`p [3,1,2].sort{|a,b| a-b}`, "[1, 2, 3]\n"},            // small Integer sign
+		{`p [1,1,2].sort{|a,b| a-b}`, "[1, 1, 2]\n"},            // zero result → equal
 		{`p [3,1,2].sort{|a,b| (a-b)*(10**20)}`, "[1, 2, 3]\n"}, // Bignum sign
 		{`p [3,1,2].sort{|a,b| (a-b).to_f}`, "[1, 2, 3]\n"},     // Float via <=> 0
 		{`begin; [1,2].sort{|a,b| "x"}; rescue ArgumentError=>e; puts e.message; end`,
