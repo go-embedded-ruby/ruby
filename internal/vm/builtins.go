@@ -2715,13 +2715,17 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.arrayInspect(self.(*object.Array), map[*object.Array]bool{})
 	})
-	vm.aliasMethod(vm.cArray, "to_s", "inspect")
+	// #to_s is a true alias of #inspect: share the same method entry so
+	// Array.instance_method(:to_s) == Array.instance_method(:inspect), as in MRI.
+	vm.cArray.methods["to_s"] = vm.cArray.methods["inspect"]
 	vm.cArray.define("push", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
 		a.Elems = append(a.Elems, args...)
 		return a
 	})
+	// #append is a true alias of #push (shared entry for UnboundMethod identity).
+	vm.cArray.methods["append"] = vm.cArray.methods["push"]
 	vm.cArray.define("<<", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -2786,7 +2790,12 @@ func (vm *VM) bootstrap() {
 		return a
 	}
 	vm.cArray.define("unshift", unshift)
-	vm.cArray.define("prepend", unshift)
+	// #prepend is a true alias of #unshift: share the entry for identity.
+	vm.cArray.methods["prepend"] = vm.cArray.methods["unshift"]
+	// Array#to_ary returns self (the implicit Array-conversion protocol point).
+	vm.cArray.define("to_ary", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
 	// Array#insert(index, *objects): insert the objects before the element at
 	// index (or, for a negative index, after the element index counts back to —
 	// so -1 appends). Inserting past the end pads the gap with nil, as in MRI.
@@ -2825,7 +2834,6 @@ func (vm *VM) bootstrap() {
 		// Remove every element == the argument; return it, or (a block's result,
 		// else nil) when nothing matched.
 		a := self.(*object.Array)
-		vm.checkArrayFrozen(a)
 		found := false
 		var out []object.Value
 		for _, e := range a.Elems {
@@ -2835,8 +2843,12 @@ func (vm *VM) bootstrap() {
 				out = append(out, e)
 			}
 		}
-		a.Elems = out
 		if found {
+			// Only an actual removal is a modification: a frozen array raises here,
+			// but delete of an absent element on a frozen array is a no-op (returns
+			// nil / the block result) without raising, matching MRI.
+			vm.checkArrayFrozen(a)
+			a.Elems = out
 			return args[0]
 		}
 		if blk != nil {
@@ -3181,6 +3193,11 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
+	// #collect and #filter are true aliases of #map and #select. Defining them on
+	// Array with the shared record (rather than leaving Enumerable's alias to win)
+	// makes Array.instance_method(:collect)/(:filter) == (:map)/(:select), as MRI.
+	aliasBuiltin(vm.cArray, "collect", "map")
+	aliasBuiltin(vm.cArray, "filter", "select")
 	// reduce/inject are native for the same reason (and #inject delegates here via
 	// the prelude). The fold mirrors Enumerable#reduce exactly — the (init, sym),
 	// (sym), (init) and bare-block forms, the "no block given" yield error, and the
@@ -3246,8 +3263,9 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	// collect! is the classic alias of map! (as collect is of map).
-	vm.aliasMethod(vm.cArray, "collect!", "map!")
+	// collect! is the classic alias of map! (as collect is of map). Share the
+	// method record so Array.instance_method(:collect!) == (:map!), as in MRI.
+	aliasBuiltin(vm.cArray, "collect!", "map!")
 	vm.cArray.define("reverse!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
@@ -3271,7 +3289,8 @@ func (vm *VM) bootstrap() {
 		return arrayKeepIf(vm, a, blk, true)
 	}
 	vm.cArray.define("select!", selectBang)
-	vm.cArray.define("filter!", selectBang)
+	// #filter! is a true alias of #select! (shared record for identity).
+	aliasBuiltin(vm.cArray, "filter!", "select!")
 	vm.cArray.define("reject!", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			return enumFor(self, "reject!")
@@ -3426,12 +3445,19 @@ func (vm *VM) bootstrap() {
 		if len(rows) == 0 {
 			return object.NewArray()
 		}
+		// Coerce each row to an Array (a subclass directly, else through #to_ary) so
+		// transpose accepts array-like rows without returning subclass instances.
+		mat := make([]*object.Array, len(rows))
 		var width int
 		for i, r := range rows {
-			ra, ok := r.(*object.Array)
+			ra, ok := asArray(r)
+			if !ok && vm.respondsToDynamic(r, "to_ary") {
+				ra, ok = asArray(vm.send(r, "to_ary", nil, nil))
+			}
 			if !ok {
 				raise("TypeError", "no implicit conversion of %s into Array", vm.classOf(r).name)
 			}
+			mat[i] = ra
 			if i == 0 {
 				width = len(ra.Elems)
 			} else if len(ra.Elems) != width {
@@ -3440,9 +3466,9 @@ func (vm *VM) bootstrap() {
 		}
 		out := make([]object.Value, width)
 		for j := 0; j < width; j++ {
-			col := make([]object.Value, len(rows))
-			for i, r := range rows {
-				col[i] = r.(*object.Array).Elems[j]
+			col := make([]object.Value, len(mat))
+			for i, ra := range mat {
+				col[i] = ra.Elems[j]
 			}
 			out[j] = object.NewArrayFromSlice(col)
 		}
