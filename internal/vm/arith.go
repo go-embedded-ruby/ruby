@@ -271,6 +271,20 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 				return object.Bool(eq)
 			}
 		}
+		// A String compared against a non-String operand that answers #to_str
+		// defers to `other == self` (MRI's rb_str_equal only checks that #to_str is
+		// defined, never calling it), matching String#==. A String / String-subclass
+		// right operand was already reduced to *object.String above, so it takes the
+		// structural byte compare below.
+		if as, isStr := a.(*object.String); isStr {
+			if _, bStr := b.(*object.String); !bStr && vm.respondsToDynamic(b, "to_str") {
+				eq := vm.send(b, "==", []object.Value{as}, nil).Truthy()
+				if op == bytecode.OpNeq {
+					eq = !eq
+				}
+				return object.Bool(eq)
+			}
+		}
 		// The structural compare is VM-aware so that an Array/Hash operand compares
 		// its elements with each element's own Ruby #== (MRI's rb_equal per element),
 		// not by Go identity.

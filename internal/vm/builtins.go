@@ -1685,13 +1685,32 @@ func (vm *VM) bootstrap() {
 	vm.cInteger.define("pow", powNumeric)
 	vm.cFloat.define("**", powNumeric)
 	vm.cFloat.define("pow", powNumeric)
-	vm.cString.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.String)
-		b, ok := args[0].(*object.String)
-		if !ok {
-			return object.NilV
+		if b := stringOrSubclassBytes(args[0]); b != nil {
+			return object.IntValue(int64(strings.Compare(a.Str(), b.Str())))
 		}
-		return object.IntValue(int64(strings.Compare(a.Str(), b.Str())))
+		// Not a String: MRI's rb_check_string_type first tries #to_str and compares
+		// against its result; otherwise it inverts `other <=> self` (rb_invcmp).
+		if vm.respondsToDynamic(args[0], "to_str") {
+			if s, ok := vm.send(args[0], "to_str", nil, nil).(*object.String); ok {
+				return object.IntValue(int64(strings.Compare(a.Str(), s.Str())))
+			}
+		}
+		return vm.spaceshipInvert(self, args[0])
+	})
+	vm.cString.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*object.String)
+		if b := stringOrSubclassBytes(args[0]); b != nil {
+			return object.Bool(a.Str() == b.Str())
+		}
+		// A non-String that answers #to_str: MRI's rb_str_equal defers to
+		// `other == self` (it only checks that #to_str is defined, never calling
+		// it). Anything else is unequal.
+		if vm.respondsToDynamic(args[0], "to_str") {
+			return object.Bool(vm.send(args[0], "==", []object.Value{self}, nil).Truthy())
+		}
+		return object.False
 	})
 
 	// String. Methods over the mutable byte-based String (length/chars/index are
@@ -1809,8 +1828,8 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("succ!", succBang)
 	// #next and #next! are true aliases of #succ / #succ! (they share the same
 	// Method object, so instance_method(:next) == instance_method(:succ)).
-	vm.aliasMethod(vm.cString, "next", "succ")
-	vm.aliasMethod(vm.cString, "next!", "succ!")
+	aliasBuiltin(vm.cString, "next", "succ")
+	aliasBuiltin(vm.cString, "next!", "succ!")
 	vm.cString.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(stringChr(strOf(self)))
 	})
@@ -1837,10 +1856,13 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("upto", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "upto", args...)
+			// The returned Enumerator reports an unknown (nil) size, as MRI does.
+			return enumForSized(self, "upto", func(_ *VM) object.Value { return object.NilV }, args...)
 		}
 		excl := len(args) > 1 && truthyValue(args[1])
-		stringUpto(strOf(self), strArg(args[0]), excl, func(cur string) {
+		// The end argument is coerced through #to_str (so a #to_str object works),
+		// raising TypeError otherwise — matching MRI, which rejects Integer/Symbol.
+		stringUpto(strOf(self), vm.affixString(args[0]).Str(), excl, func(cur string) {
 			vm.callBlock(blk, []object.Value{object.NewString(cur)})
 		})
 		return self
@@ -1890,6 +1912,9 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("getbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
 		s := strOf(self)
 		i := toInt(args[0])
 		if i < 0 {
@@ -2012,12 +2037,22 @@ func (vm *VM) bootstrap() {
 		s := strOf(self)
 		for _, a := range args { // true if any prefix matches; a Regexp must match at offset 0
 			if re, ok := a.(*Regexp); ok {
-				if md := re.re.Match(s); md != nil && md.Begin(0) == 0 {
+				// A matching Regexp sets $~ (so $1.. and Regexp.last_match are live);
+				// a non-match clears it to nil, as MRI does.
+				if md := re.matcher().Match(s); md != nil && md.Begin(0) == 0 {
+					vm.lastMatch = &MatchData{md: md, subject: s, re: re}
 					return object.True
 				}
+				vm.lastMatch = object.NilV
 				continue
 			}
-			if strings.HasPrefix(s, vm.strPatternCompat(self, a)) {
+			// A non-Regexp prefix is coerced through #to_str (so a #to_str object
+			// works), raising TypeError when it is neither a String nor convertible;
+			// combinedEncName then raises Encoding::CompatibilityError for an
+			// incompatible pair, as MRI does.
+			pre, sobj := vm.strCoerceArg(a)
+			vm.combinedEncName(self.(*object.String), sobj)
+			if strings.HasPrefix(s, pre) {
 				return object.True
 			}
 		}
@@ -2140,10 +2175,12 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("gsub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.stringSub(strOf(self), args, blk, true)
 	})
-	vm.cString.define("to_i", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("to_i", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		base := 10
 		if len(args) > 0 {
-			base = int(intArg(args[0]))
+			// The base is coerced through #to_int (MRI's rb_num2long), so a Float
+			// or a #to_int object works and a non-integer raises TypeError.
+			base = int(vm.integerArg(args[0]).Int64())
 		}
 		return stringToInt(strOf(self), base)
 	})
@@ -2159,14 +2196,12 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
 	})
-	vm.cString.define("to_str", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return self
-	})
+	aliasBuiltin(vm.cString, "to_str", "to_s") // MRI alias of String#to_s
 	strToSym := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Symbol(strOf(self))
 	}
 	vm.cString.define("to_sym", strToSym)
-	vm.cString.define("intern", strToSym) // MRI alias of String#to_sym
+	aliasBuiltin(vm.cString, "intern", "to_sym") // MRI alias of String#to_sym
 	// scrub replaces each ill-formed byte sequence with a replacement (the encoding's
 	// U+FFFD, or an explicit String / block result), returning a valid copy in the
 	// receiver's encoding. scrub! does the same in place, returning self.
@@ -6193,6 +6228,44 @@ func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value 
 // Ruby (space, tab, newline, carriage return, form feed, vertical tab, NUL).
 const wsCutset = " \t\n\r\f\v\x00"
 
+// stringOrSubclassBytes returns the underlying *object.String for a String or
+// for an instance of a user subclass of String (whose bytes live in
+// RObject.builtin), and nil for anything else. It performs no #to_str
+// conversion, so callers use it to accept a String or String subclass by value
+// while leaving the coercion of other objects to their own path.
+func stringOrSubclassBytes(v object.Value) *object.String {
+	switch s := v.(type) {
+	case *object.String:
+		return s
+	case *RObject:
+		if b, ok := s.builtin.(*object.String); ok {
+			return b
+		}
+	}
+	return nil
+}
+
+// spaceshipInvert implements MRI's rb_invcmp for String#<=>: when the operand is
+// not a directly-comparable String it evaluates `other <=> self` and returns the
+// negated Integer, or nil when that yields nil or a non-Integer. The (self,
+// other) pair is guarded so a mutually-inverting operand
+// (def other.<=>(x); x <=> self; end) returns nil rather than recurring forever.
+func (vm *VM) spaceshipInvert(self, other object.Value) object.Value {
+	key := [2]object.Value{self, other}
+	if vm.invcmpPath[key] {
+		return object.NilV
+	}
+	if vm.invcmpPath == nil {
+		vm.invcmpPath = map[[2]object.Value]bool{}
+	}
+	vm.invcmpPath[key] = true
+	defer delete(vm.invcmpPath, key)
+	if r, ok := vm.send(other, "<=>", []object.Value{self}, nil).(object.Integer); ok {
+		return object.IntValue(-int64(r))
+	}
+	return object.NilV
+}
+
 func reverseStr(s string) string {
 	r := []rune(s)
 	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
@@ -6301,7 +6374,13 @@ func stringToInt(s string, base int) object.Value {
 		}
 	}
 	if base == 0 {
-		base = 10
+		// With no base and no explicit 0x/0b/0o/0d prefix, a leading '0' selects
+		// octal (MRI: "017".to_i(0) == 15), everything else decimal.
+		if len(s) > 0 && s[0] == '0' {
+			base = 8
+		} else {
+			base = 10
+		}
 	}
 	var digits []byte
 	prevDigit := false
@@ -6431,36 +6510,62 @@ func accumInum(s string, i, base int, neg bool) object.Value {
 }
 
 // parseLeadingFloat mimics String#to_f: parse the longest leading float, 0.0 if
-// none.
+// none. A single underscore between two digits is permitted (and dropped) in the
+// integer, fractional and exponent runs, matching MRI's rb_str_to_dbl. Only
+// genuine ASCII whitespace (space, tab, newline, vtab, formfeed, CR) is skipped
+// before the number — a NUL or other non-printable byte terminates it instead.
 func parseLeadingFloat(s string) float64 {
-	s = strings.TrimLeft(s, wsCutset)
+	s = strings.TrimLeft(s, " \t\n\v\f\r")
+	var b strings.Builder
 	i := 0
-	if i < len(s) && (s[i] == '+' || s[i] == '-') {
-		i++
-	}
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		i++
-	}
-	if i < len(s) && s[i] == '.' {
-		i++
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
+	isDigit := func(c byte) bool { return c >= '0' && c <= '9' }
+	// scanDigits copies a run of digits into b, dropping a single underscore that
+	// sits between two digits; it reports whether it copied at least one digit.
+	scanDigits := func() bool {
+		any := false
+		for i < len(s) {
+			if isDigit(s[i]) {
+				b.WriteByte(s[i])
+				i++
+				any = true
+				continue
+			}
+			if s[i] == '_' && any && i+1 < len(s) && isDigit(s[i+1]) {
+				i++ // a single inter-digit underscore is dropped
+				continue
+			}
+			break
 		}
+		return any
+	}
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		b.WriteByte(s[i])
+		i++
+	}
+	scanDigits()
+	if i < len(s) && s[i] == '.' {
+		b.WriteByte('.')
+		i++
+		scanDigits()
 	}
 	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
-		j := i + 1
-		if j < len(s) && (s[j] == '+' || s[j] == '-') {
-			j++
+		// The exponent is committed only when at least one digit follows the
+		// (optionally signed) marker; otherwise "5e" / "1.2e_x3" keep the mantissa.
+		pre := b.String()
+		save := i
+		b.WriteByte(s[i])
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			b.WriteByte(s[i])
+			i++
 		}
-		k := j
-		for k < len(s) && s[k] >= '0' && s[k] <= '9' {
-			k++
-		}
-		if k > j {
-			i = k
+		if !scanDigits() {
+			i = save
+			b.Reset()
+			b.WriteString(pre)
 		}
 	}
-	f, err := strconv.ParseFloat(s[:i], 64)
+	f, err := strconv.ParseFloat(b.String(), 64)
 	if err != nil {
 		return 0
 	}
