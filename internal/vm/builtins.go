@@ -3087,9 +3087,11 @@ func (vm *VM) bootstrap() {
 		if blk.native != nil {
 			// A synthesized native block (e.g. &:to_s, a Go-compiled AOT closure)
 			// runs opaque Go code that could retain the args slice, so each yield
-			// gets its own fresh slice.
-			for _, e := range a.Elems {
-				vm.callBlock(blk, []object.Value{e})
+			// gets its own fresh slice. Iterate by live index (not range, which
+			// snapshots the slice header) so elements the block appends are seen —
+			// Ruby's Array#each visits by an internal index while i < length.
+			for i := 0; i < len(a.Elems); i++ {
+				vm.callBlock(blk, []object.Value{a.Elems[i]})
 			}
 			return a
 		}
@@ -3098,10 +3100,12 @@ func (vm *VM) bootstrap() {
 		// synchronously at frame entry, before any block bytecode runs, and never
 		// aliases the passed slice. So a single 1-element scratch slice, private to
 		// this call (re-entrant each gets its own), can be reused across iterations
-		// without a capturing block observing the next iteration's overwrite.
+		// without a capturing block observing the next iteration's overwrite. The
+		// live-index loop lets the block grow the array and have the new tail
+		// yielded, matching Ruby.
 		scratch := make([]object.Value, 1)
-		for _, e := range a.Elems {
-			scratch[0] = e
+		for i := 0; i < len(a.Elems); i++ {
+			scratch[0] = a.Elems[i]
 			vm.callBlock(blk, scratch)
 		}
 		return a
@@ -3111,9 +3115,11 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "map")
 		}
 		a := self.(*object.Array)
-		out := make([]object.Value, len(a.Elems))
-		for i, e := range a.Elems {
-			out[i] = vm.callBlock(blk, []object.Value{e})
+		// Live-index loop: a block that grows the array has the new tail mapped
+		// too (Ruby's Array#map tolerates size increase during iteration).
+		out := make([]object.Value, 0, len(a.Elems))
+		for i := 0; i < len(a.Elems); i++ {
+			out = append(out, vm.callBlock(blk, []object.Value{a.Elems[i]}))
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -3128,8 +3134,11 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "select")
 		}
 		a := self.(*object.Array)
+		// Live-index loop: elements the block appends are also tested (Ruby's
+		// Array#select tolerates size increase during iteration).
 		out := make([]object.Value, 0, len(a.Elems))
-		for _, e := range a.Elems {
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
 			if vm.callBlock(blk, []object.Value{e}).Truthy() {
 				out = append(out, e)
 			}
@@ -3293,7 +3302,10 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 {
 			acc = args[0]
 		}
-		for _, e := range self.(*object.Array).Elems {
+		a := self.(*object.Array)
+		// Live-index loop so a block that grows the array folds the new tail too.
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
 			if blk != nil { // sum { |x| ... } maps each element before adding
 				e = vm.callBlock(blk, []object.Value{e})
 			}
@@ -3303,7 +3315,10 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cArray.define("to_h", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		h := object.NewHash()
-		for i, e := range self.(*object.Array).Elems {
+		a := self.(*object.Array)
+		// Live-index loop so a block that grows the array processes the new tail.
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
 			if blk != nil { // to_h { |x| [k, v] } maps each element to a pair
 				e = vm.callBlock(blk, []object.Value{e})
 			}
@@ -3606,7 +3621,10 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "take_while")
 		}
 		var out []object.Value
-		for _, e := range self.(*object.Array).Elems {
+		a := self.(*object.Array)
+		// Live-index loop so elements the block appends are considered too.
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
 			if !vm.callBlock(blk, []object.Value{e}).Truthy() {
 				break
 			}
@@ -3840,19 +3858,24 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "sort_by")
 		}
 		a := self.(*object.Array)
-		keys := make([]object.Value, len(a.Elems))
-		for i, e := range a.Elems {
-			keys[i] = vm.callBlock(blk, []object.Value{e})
+		// Live-index loop: a block that grows the array has the new tail keyed and
+		// sorted too. Snapshot each element beside its key so a later append cannot
+		// desync the two parallel slices.
+		var elems, keys []object.Value
+		for i := 0; i < len(a.Elems); i++ {
+			e := a.Elems[i]
+			elems = append(elems, e)
+			keys = append(keys, vm.callBlock(blk, []object.Value{e}))
 		}
 		// Sort an index permutation so each element stays paired with its key.
-		idx := make([]int, len(a.Elems))
+		idx := make([]int, len(elems))
 		for i := range idx {
 			idx[i] = i
 		}
 		sort.SliceStable(idx, func(i, j int) bool { return vm.spaceship(keys[idx[i]], keys[idx[j]]) < 0 })
 		out := make([]object.Value, len(idx))
 		for i, k := range idx {
-			out[i] = a.Elems[k]
+			out[i] = elems[k]
 		}
 		return object.NewArrayFromSlice(out)
 	})
