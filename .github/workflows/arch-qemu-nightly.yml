@@ -41,7 +41,7 @@ jobs:
           - { goarch: s390x,   qemu: qemu-s390x-static }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       # This has not hung here. It hung in go-crdt/crdt, on the same runner

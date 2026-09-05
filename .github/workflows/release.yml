@@ -44,7 +44,7 @@ jobs:
           - { goos: wasip1,  goarch: wasm,   ext: .wasm }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: Build rbgo-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
