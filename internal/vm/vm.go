@@ -855,19 +855,20 @@ func New(out io.Writer) *VM {
 	vm.consts["ARGV"] = argv
 	vm.globals["$*"] = argv
 	vm.installPrelude()
-	vm.registerEnumerator()       // after the prelude so it can mix in Enumerable
-	vm.registerActiveSupport()    // ActiveSupport::Inflector + core extensions (require "active_support" / "active_support/all"), backed by go-ruby-activesupport; after the prelude so the Enumerable module (which its core-ext extends) exists
-	vm.registerActionView()       // ActionView::Base view context (tag/url/form/text/number helpers + render) + FormBuilder + PartialIteration + ActiveSupport::SafeBuffer / String#html_safe (require "action_view"), backed by go-ruby-actionview; the URLFor (routes) and RenderTemplate seams wire to Ruby callables, the inline-render default evals ERB through the already-bound go-ruby-erb compiler; after registerActiveSupport (SafeBuffer nests under ActiveSupport) and after the bootstrap ERB/Erubi registration (escaping/compiler surface); #render stays a dispatchable method for a later actionpack/actionmailer binding
-	vm.registerLazy()             // after Enumerator (Enumerator::Lazy is built on it)
-	vm.mixinTimeComparable()      // Time includes Comparable (its #<=> drives Comparable); after the prelude so the module exists
-	vm.registerFileStat()         // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
-	vm.registerIPAddr()           // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
-	vm.registerPathname()         // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class
-	vm.registerOstruct()          // OpenStruct data ops (to_h/inspect/dig/delete_field/==), backed by go-ruby-ostruct; after the prelude so it reopens the prelude-defined class
-	vm.registerLogger()           // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
-	vm.registerPStore()           // PStore (require "pstore"), backed by go-ruby-pstore; after the prelude so PStore::Error < StandardError
-	vm.includeMySQLEnumerable()   // Mysql2::Result mixes in Enumerable; after the prelude so the module exists
-	vm.includeWeakMapEnumerable() // ObjectSpace::WeakMap mixes in Enumerable; after the prelude so the module exists
+	vm.registerEnumerator()        // after the prelude so it can mix in Enumerable
+	vm.registerActiveSupport()     // ActiveSupport::Inflector + core extensions (require "active_support" / "active_support/all"), backed by go-ruby-activesupport; after the prelude so the Enumerable module (which its core-ext extends) exists
+	vm.registerActionView()        // ActionView::Base view context (tag/url/form/text/number helpers + render) + FormBuilder + PartialIteration + ActiveSupport::SafeBuffer / String#html_safe (require "action_view"), backed by go-ruby-actionview; the URLFor (routes) and RenderTemplate seams wire to Ruby callables, the inline-render default evals ERB through the already-bound go-ruby-erb compiler; after registerActiveSupport (SafeBuffer nests under ActiveSupport) and after the bootstrap ERB/Erubi registration (escaping/compiler surface); #render stays a dispatchable method for a later actionpack/actionmailer binding
+	vm.registerLazy()              // after Enumerator (Enumerator::Lazy is built on it)
+	vm.mixinTimeComparable()       // Time includes Comparable (its #<=> drives Comparable); after the prelude so the module exists
+	vm.registerFileStat()          // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
+	vm.registerIPAddr()            // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
+	vm.registerPathname()          // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class
+	vm.registerOstruct()           // OpenStruct data ops (to_h/inspect/dig/delete_field/==), backed by go-ruby-ostruct; after the prelude so it reopens the prelude-defined class
+	vm.registerLogger()            // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
+	vm.registerPStore()            // PStore (require "pstore"), backed by go-ruby-pstore; after the prelude so PStore::Error < StandardError
+	vm.includeMySQLEnumerable()    // Mysql2::Result mixes in Enumerable; after the prelude so the module exists
+	vm.includeWeakMapEnumerable()  // ObjectSpace::WeakMap mixes in Enumerable; after the prelude so the module exists
+	vm.includeStringIOEnumerable() // StringIO mixes in Enumerable; after the prelude so the module exists
 	vm.installHashKeyHook()
 	// The prelude and built-ins are loaded; arm the level-2 AOT top level so the
 	// next Run (the user program) dispatches to the compiled aotMain, if one was
