@@ -301,6 +301,11 @@ func (vm *VM) bootstrap() {
 			}
 		case *RClass:
 			o.frozen = true
+		default:
+			// Bound/UnboundMethod (and any future boxed value) freeze via state.
+			if b, ok := self.(boxed); ok {
+				b.state().frozen = true
+			}
 		}
 		return self
 	})
@@ -9250,6 +9255,14 @@ func dupValue(v object.Value) object.Value {
 			copy(dup.structVals, x.structVals)
 		}
 		return dup
+	case *BoundMethod:
+		cp := *x
+		cp.methodValueState = copyMethodState(x.methodValueState)
+		return &cp
+	case *UnboundMethod:
+		cp := *x
+		cp.methodValueState = copyMethodState(x.methodValueState)
+		return &cp
 	default:
 		return v
 	}
@@ -9276,6 +9289,10 @@ func isFrozen(v object.Value) bool {
 		return x.frozen
 	case *RClass:
 		return x.frozen
+	}
+	// Bound/UnboundMethod track their frozen flag in the embedded state.
+	if b, ok := v.(boxed); ok {
+		return b.state().frozen
 	}
 	return false
 }

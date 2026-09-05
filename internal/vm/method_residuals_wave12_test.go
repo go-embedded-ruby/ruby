@@ -160,6 +160,89 @@ func TestSuperMethodFollowsOriginalName(t *testing.T) {
 	}
 }
 
+// TestMethodValueStateCopyAndFreeze covers instance variables, freeze/frozen?
+// and #dup/#clone copy semantics for BoundMethod and UnboundMethod: #dup and
+// #clone copy instance variables, #dup resets the frozen flag while #clone
+// preserves it, and setting an ivar on a frozen method raises FrozenError.
+func TestMethodValueStateCopyAndFreeze(t *testing.T) {
+	tests := []struct {
+		name, src, want string
+	}{
+		{
+			"bound_ivars_set_and_read",
+			`m = Object.new.method(:method)
+m.instance_variable_set(:@a, 1)
+m.instance_variable_set(:@b, 2)
+puts m.instance_variables.inspect
+puts m.instance_variable_get(:@a)`,
+			"[:@a, :@b]\n1\n",
+		},
+		{
+			"unbound_ivars_set_and_read",
+			`u = Object.instance_method(:method)
+u.instance_variable_set(:@x, 9)
+puts u.instance_variables.inspect
+puts u.instance_variable_get(:@x)`,
+			"[:@x]\n9\n",
+		},
+		{
+			"bound_dup_copies_ivars_resets_frozen",
+			`m = Object.new.method(:method)
+m.instance_variable_set(:@ivar, 1)
+m.freeze
+d = m.dup
+puts d.instance_variables.inspect
+puts d.frozen?`,
+			"[:@ivar]\nfalse\n",
+		},
+		{
+			"bound_clone_preserves_frozen",
+			`m = Object.new.method(:method)
+m.freeze
+puts m.frozen?
+puts m.clone.frozen?`,
+			"true\ntrue\n",
+		},
+		{
+			"unbound_clone_preserves_frozen",
+			`u = Object.instance_method(:method)
+u.freeze
+puts u.frozen?
+puts u.clone.frozen?
+puts u.dup.frozen?`,
+			"true\ntrue\nfalse\n",
+		},
+		{
+			"dup_without_ivars_is_distinct",
+			`m = Object.new.method(:method)
+d = m.dup
+puts m.equal?(d)
+puts m == d
+puts d.instance_variables.inspect`,
+			"false\ntrue\n[]\n",
+		},
+		{
+			"set_ivar_on_frozen_method_raises",
+			`m = Object.new.method(:method)
+m.freeze
+begin
+  m.instance_variable_set(:@z, 1)
+  puts "no-raise"
+rescue FrozenError
+  puts "frozen"
+end`,
+			"frozen\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSuperMethodPlainInheritance keeps the ordinary class-inheritance chain
 // working (no alias, no module owners): super_method walks class supers.
 func TestSuperMethodPlainInheritance(t *testing.T) {

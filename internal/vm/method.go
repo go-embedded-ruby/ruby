@@ -14,6 +14,7 @@ type BoundMethod struct {
 	// vm is the interpreter the method belongs to, kept so ToS can render the
 	// receiver's class and the method's parameters (MRI's #<Method: …> form).
 	vm *VM
+	methodValueState
 }
 
 // newBoundMethod builds a Method bound to recv, resolved under name to m.

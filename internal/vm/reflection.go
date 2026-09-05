@@ -7,6 +7,39 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
+// methodValueState holds the mutable Ruby-object state a BoundMethod or
+// UnboundMethod carries beyond its immutable definition: instance variables
+// (with insertion order, so #instance_variables matches MRI) and a frozen flag.
+// It is embedded in both so the shared ivar / freeze / copy helpers can reach it
+// through the boxed interface, exactly as RObject exposes its own ivars.
+type methodValueState struct {
+	ivars     map[string]object.Value
+	ivarOrder []string
+	frozen    bool
+}
+
+func (s *methodValueState) state() *methodValueState { return s }
+
+// boxed is implemented by the reflection value types (Bound/UnboundMethod) that,
+// unlike the generic RObject, are Go structs yet still carry instance variables
+// and a frozen flag (in an embedded methodValueState).
+type boxed interface{ state() *methodValueState }
+
+// copyMethodState deep-copies instance variables for #dup/#clone and resets the
+// frozen flag (a plain #dup is never frozen; Object#clone re-freezes afterwards
+// when the original was frozen).
+func copyMethodState(s methodValueState) methodValueState {
+	out := methodValueState{}
+	if s.ivars != nil {
+		out.ivars = make(map[string]object.Value, len(s.ivars))
+		for k, v := range s.ivars {
+			out.ivars[k] = v
+		}
+		out.ivarOrder = append([]string(nil), s.ivarOrder...)
+	}
+	return out
+}
+
 // UnboundMethod is a method detached from any receiver, produced by
 // Module#instance_method or Method#unbind. It is re-bound to a compatible
 // receiver with #bind / #bind_call.
@@ -24,6 +57,7 @@ type UnboundMethod struct {
 	// vm is the interpreter the method belongs to, kept so ToS can render the
 	// method's parameters (MRI's #<UnboundMethod: …> form).
 	vm *VM
+	methodValueState
 }
 
 func (u *UnboundMethod) ToS() string {
