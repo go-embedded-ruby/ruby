@@ -90,10 +90,11 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return matrixOp(op, a, b)
 	}
 
-	// Time arithmetic: t + secs / t - secs (shift by a Duration) and t - other
-	// (the seconds between two instants) reach the operator fast path.
-	if at, ok := a.(*Time); ok {
-		return timeOp(op, at, b)
+	// Time reaches the VM-less path only for an operator other than + / - (those
+	// are intercepted in binaryOp, which has the VM needed for MRI's num_exact
+	// coercion). Every other arithmetic operator on a Time is undefined.
+	if _, ok := a.(*Time); ok {
+		return raise("NoMethodError", "undefined method '%s' for an instance of Time", arithOpName(op))
 	}
 
 	// Date arithmetic: d + n / d - n (shift by a whole number of days) and
@@ -271,6 +272,20 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 				return object.Bool(eq)
 			}
 		}
+		// A String compared against a non-String operand that answers #to_str
+		// defers to `other == self` (MRI's rb_str_equal only checks that #to_str is
+		// defined, never calling it), matching String#==. A String / String-subclass
+		// right operand was already reduced to *object.String above, so it takes the
+		// structural byte compare below.
+		if as, isStr := a.(*object.String); isStr {
+			if _, bStr := b.(*object.String); !bStr && vm.respondsToDynamic(b, "to_str") {
+				eq := vm.send(b, "==", []object.Value{as}, nil).Truthy()
+				if op == bytecode.OpNeq {
+					eq = !eq
+				}
+				return object.Bool(eq)
+			}
+		}
 		// The structural compare is VM-aware so that an Array/Hash operand compares
 		// its elements with each element's own Ruby #== (MRI's rb_equal per element),
 		// not by Go identity.
@@ -398,6 +413,14 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 		// markup with `f.label + f.text_field` rather than hitting the coercion path.
 		if _, isSB := a.(*SafeBufferVal); isSB {
 			return vm.send(a, arithOpName(op), []object.Value{b}, nil)
+		}
+		// Time arithmetic (t + n / t - n, and t - other) needs a live VM: MRI's
+		// num_exact coercion of the shift amount (Integer/Rational kept exact, a
+		// Float taken through its exact #to_r, any other object via #to_r, while a
+		// String or nil is rejected) and the nanosecond-exact result both require
+		// dispatch the VM-less binary path cannot do.
+		if at, ok := a.(*Time); ok && (op == bytecode.OpAdd || op == bytecode.OpSub) {
+			return vm.timeArith(op, at, b)
 		}
 		// Numeric coercion protocol: when a built-in number is combined with a
 		// non-numeric object that answers #coerce, MRI calls other.coerce(self)

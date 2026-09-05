@@ -201,6 +201,12 @@ type VM struct {
 	// recursion leaves the builtin and returns through method dispatch.
 	cmpPath map[[2]*object.Array]bool
 
+	// invcmpPath guards String#<=> against an operand whose own #<=> inverts the
+	// comparison (def other.<=>(x); x <=> self; end): the (self, other) pair being
+	// inverted is recorded so re-entering it returns nil (MRI's rb_invcmp via
+	// rb_exec_recursive_paired) rather than recurring for ever.
+	invcmpPath map[[2]object.Value]bool
+
 	out    io.Writer
 	errOut io.Writer // $stderr/STDERR sink; defaults to out (no separate stream)
 	main   object.Value
@@ -853,6 +859,7 @@ func New(out io.Writer) *VM {
 	vm.registerActiveSupport()     // ActiveSupport::Inflector + core extensions (require "active_support" / "active_support/all"), backed by go-ruby-activesupport; after the prelude so the Enumerable module (which its core-ext extends) exists
 	vm.registerActionView()        // ActionView::Base view context (tag/url/form/text/number helpers + render) + FormBuilder + PartialIteration + ActiveSupport::SafeBuffer / String#html_safe (require "action_view"), backed by go-ruby-actionview; the URLFor (routes) and RenderTemplate seams wire to Ruby callables, the inline-render default evals ERB through the already-bound go-ruby-erb compiler; after registerActiveSupport (SafeBuffer nests under ActiveSupport) and after the bootstrap ERB/Erubi registration (escaping/compiler surface); #render stays a dispatchable method for a later actionpack/actionmailer binding
 	vm.registerLazy()              // after Enumerator (Enumerator::Lazy is built on it)
+	vm.mixinTimeComparable()       // Time includes Comparable (its #<=> drives Comparable); after the prelude so the module exists
 	vm.registerFileStat()          // File::Stat / FileTest; after the prelude so File::Stat can mix in Comparable
 	vm.registerIPAddr()            // IPAddr (require "ipaddr"), backed by go-ruby-ipaddr; after the prelude so IPAddr can mix in Comparable
 	vm.registerPathname()          // Pathname lexical ops (cleanpath/relative_path_from/...), backed by go-ruby-pathname; after the prelude so it reopens the prelude-defined class

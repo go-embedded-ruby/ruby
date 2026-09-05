@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math/big"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,6 +32,55 @@ type Time struct {
 	// was built with, or nil for a plain offset/UTC/local Time. When set, #zone
 	// returns this object rather than the fixed-zone name.
 	zoneObj object.Value
+	// frac carries the sub-nanosecond part of the sub-second, in seconds and in
+	// the range [0, 1e-9), that Go's nanosecond-resolution instant cannot hold —
+	// nil when the instant lands exactly on a nanosecond. MRI keeps a Time's
+	// sub-second as an exact Rational, so #subsec / #to_r (and the arithmetic that
+	// feeds them) must preserve digits past the ninth; the nanosecond-granular
+	// fields (#nsec, #usec, rendering) read only the whole-nanosecond part and are
+	// unaffected.
+	frac *big.Rat
+}
+
+// subsecRat returns the Time's exact sub-second as a Rational number of seconds in
+// [0, 1): the whole-nanosecond part plus any sub-nanosecond frac.
+func (t *Time) subsecRat() *big.Rat {
+	r := big.NewRat(int64(t.t.Nanosecond()), 1e9)
+	if t.frac != nil {
+		r.Add(r, t.frac)
+	}
+	return r
+}
+
+// newTimeExact builds a Time at an exact number of seconds since the epoch,
+// flooring to the nanosecond for the backing instant and keeping any
+// sub-nanosecond remainder in frac, in the given location with the given zone.
+func newTimeExact(totalSec *big.Rat, loc *stdtime.Location, zoneObj object.Value) *Time {
+	nsRat := new(big.Rat).Mul(totalSec, big.NewRat(1e9, 1))
+	fl := new(big.Int).Div(nsRat.Num(), nsRat.Denom()) // floor toward -inf
+	var frac *big.Rat
+	if rem := new(big.Rat).Sub(nsRat, new(big.Rat).SetInt(fl)); rem.Sign() != 0 {
+		frac = rem.Quo(rem, big.NewRat(1e9, 1)) // nanoseconds → seconds
+	}
+	sec := new(big.Int).Div(fl, big.NewInt(1e9))
+	ns := new(big.Int).Sub(fl, new(big.Int).Mul(sec, big.NewInt(1e9)))
+	return &Time{t: stdtime.Unix(sec.Int64(), ns.Int64()).In(loc), zoneObj: zoneObj, frac: frac}
+}
+
+// localLoc resolves the machine's current local timezone, honouring a TZ set at
+// runtime — a spec's with_timezone helper assigns ENV['TZ'], which rbgo writes
+// through to the process environment. An IANA name is loaded from Go's tzdata; an
+// empty TZ keeps the process zone; and an unloadable name falls back to UTC,
+// matching MRI's treatment of an unrecognised TZ as UTC.
+func localLoc() *stdtime.Location {
+	tz := os.Getenv("TZ")
+	if tz == "" {
+		return stdtime.Local
+	}
+	if loc, err := stdtime.LoadLocation(tz); err == nil {
+		return loc
+	}
+	return stdtime.UTC
 }
 
 // unixTime builds a whole-second UTC Ruby Time from a Unix timestamp — the
@@ -59,11 +109,10 @@ func (t *Time) fracString() string {
 // subsecValue renders Time#subsec: the exact fraction of a second as a Rational,
 // or the Integer 0 on a whole second (MRI keeps 0 an Integer, not 0/1).
 func (t *Time) subsecValue() object.Value {
-	ns := t.t.Nanosecond()
-	if ns == 0 {
+	if t.t.Nanosecond() == 0 && t.frac == nil {
 		return object.IntValue(0)
 	}
-	return &object.Rational{R: big.NewRat(int64(ns), 1e9)}
+	return &object.Rational{R: t.subsecRat()}
 }
 
 // zoneValue renders Time#zone: the Ruby timezone object when the Time carries
@@ -223,7 +272,7 @@ func (vm *VM) registerTime() {
 	vm.cTime.smethods["gm"] = utcM
 	// Time.local / Time.mktime(...) → the same, in the local zone.
 	localM := &Method{name: "local", owner: vm.cTime, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.timeFromCalendar(args, stdtime.Local)
+		return vm.timeFromCalendar(args, localLoc())
 	}}
 	vm.cTime.smethods["local"] = localM
 	vm.cTime.smethods["mktime"] = localM
@@ -263,7 +312,9 @@ func (vm *VM) registerTime() {
 		return object.Float(float64(self(v).t.UnixNano()) / 1e9)
 	})
 	d("to_r", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return &object.Rational{R: big.NewRat(self(v).t.UnixNano(), 1e9)}
+		tt := self(v)
+		r := new(big.Rat).SetInt64(tt.t.Unix())
+		return &object.Rational{R: r.Add(r, tt.subsecRat())}
 	})
 
 	d("to_s", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -371,16 +422,18 @@ func (vm *VM) registerTime() {
 		return v
 	}
 	d("utc", toUTC)
-	d("localtime", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		self(v).t = self(v).t.In(vm.localtimeLoc(args))
+	d("localtime", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		local := vm.getlocalTime(self(v), args)
+		self(v).t = local.t
+		self(v).zoneObj = local.zoneObj
 		return v
 	})
 	getutc := func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &Time{t: self(v).t.UTC()}
 	}
 	d("getutc", getutc)
-	d("getlocal", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return &Time{t: self(v).t.In(vm.localtimeLoc(args))}
+	d("getlocal", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.getlocalTime(self(v), args)
 	})
 
 	// round / floor / ceil to ndigits sub-second digits (default 0).
@@ -439,11 +492,11 @@ func (vm *VM) registerTime() {
 	})
 
 	// Arithmetic and ordering.
-	d("+", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return timeOp(bytecode.OpAdd, self(v), args[0])
+	d("+", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.timeArith(bytecode.OpAdd, self(v), args[0])
 	})
-	d("-", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
-		return timeOp(bytecode.OpSub, self(v), args[0])
+	d("-", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.timeArith(bytecode.OpSub, self(v), args[0])
 	})
 	d("<=>", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		if other, ok := args[0].(*Time); ok {
@@ -503,6 +556,16 @@ func (vm *VM) registerTime() {
 	}
 }
 
+// mixinTimeComparable adds Comparable to Time's ancestry so Time.include?
+// (Comparable) is true (MRI mixes it in); Time's own #<=> already drives the
+// comparison operators, and Comparable adds #between?/#clamp. Run after the
+// prelude, which defines the Comparable module.
+func (vm *VM) mixinTimeComparable() {
+	if cmp, ok := vm.consts["Comparable"].(*RClass); ok {
+		vm.cTime.includes = append(vm.cTime.includes, cmp)
+	}
+}
+
 // timeZoneKw pops a trailing keyword hash carrying in: <zone> off args, returning
 // the resolved location (nil when absent) and the remaining positional args.
 func timeZoneKw(args []object.Value) (object.Value, []object.Value) {
@@ -516,12 +579,24 @@ func timeZoneKw(args []object.Value) (object.Value, []object.Value) {
 	return nil, args
 }
 
+// getlocalTime computes the local representation of recv used by Time#getlocal
+// (and, mutating the receiver, Time#localtime): with no argument the machine's
+// local zone, with a timezone object (one answering #utc_to_local) that zone —
+// rendered through the object exactly as Time.at(in: zone) — and otherwise the
+// same utc_offset forms Time.new accepts.
+func (vm *VM) getlocalTime(recv *Time, args []object.Value) *Time {
+	if len(args) > 0 && vm.respondsToDynamic(args[0], "utc_to_local") {
+		return vm.timeInZoneObject(recv.t.Unix(), int64(recv.t.Nanosecond()), args[0])
+	}
+	return &Time{t: recv.t.In(vm.localtimeLoc(args))}
+}
+
 // localtimeLoc resolves the optional offset argument of localtime / getlocal:
 // none → the local zone, else the same utc_offset forms Time.new accepts
 // (String or Integer seconds).
 func (vm *VM) localtimeLoc(args []object.Value) *stdtime.Location {
 	if len(args) == 0 {
-		return stdtime.Local
+		return localLoc()
 	}
 	return vm.newTimeOffset(args[0])
 }
@@ -551,8 +626,35 @@ func (vm *VM) timeAt(args []object.Value) *Time {
 	if hasZone {
 		return vm.applyInstantZone(sec, ns, zone)
 	}
-	// A numeric source with no zone keeps rbgo's deterministic UTC instant.
+	// A numeric source with no zone keeps rbgo's deterministic UTC instant. A lone
+	// Float/Rational argument is placed exactly so any sub-nanosecond part of the
+	// value survives (MRI keeps the sub-second as an exact Rational).
+	if r, ok := atExactSeconds(pos); ok {
+		return newTimeExact(r, stdtime.UTC, nil)
+	}
 	return &Time{t: stdtime.Unix(sec, ns).UTC()}
+}
+
+// atExactSeconds returns the exact seconds of Time.at's argument as a Rational
+// (ok=true) for the lone-Float/Rational form that can carry sub-nanosecond
+// precision; every other form (integer, coerced, or with an explicit subsecond
+// argument) is nanosecond-granular and handled by the (sec, ns) path. A
+// non-finite Float has no instant, so it raises FloatDomainError as MRI does.
+func atExactSeconds(pos []object.Value) (*big.Rat, bool) {
+	if len(pos) != 1 {
+		return nil, false
+	}
+	switch n := pos[0].(type) {
+	case object.Float:
+		r := new(big.Rat).SetFloat64(float64(n))
+		if r == nil {
+			raise("FloatDomainError", "%s", n.Inspect())
+		}
+		return r, true
+	case *object.Rational:
+		return new(big.Rat).Set(n.R), true
+	}
+	return nil, false
 }
 
 // timeAtSeconds resolves Time.at's numeric first argument to whole seconds plus a
@@ -730,7 +832,7 @@ func (vm *VM) timeNew(args []object.Value) *Time {
 		cal = pos[:6]
 	}
 	if zoneArg == nil {
-		return vm.buildTime(cal, 0, false, stdtime.Local)
+		return vm.buildTime(cal, 0, false, localLoc())
 	}
 	if vm.respondsToDynamic(zoneArg, "local_to_utc") {
 		return vm.buildTimeZoneObjectNew(cal, zoneArg)
@@ -933,7 +1035,12 @@ func parseUtcOffset(s string) *stdtime.Location {
 	if mm > 59 || ss > 59 {
 		raiseBadOffset(s)
 	}
-	return fixedOffsetLoc(sign * (hh*3600 + mm*60 + ss))
+	total := sign * (hh*3600 + mm*60 + ss)
+	if total == 0 && sign < 0 {
+		// "-00:00" is RFC 3339's unknown-offset UTC: MRI reports its zone as "UTC".
+		return stdtime.UTC
+	}
+	return fixedOffsetLoc(total)
 }
 
 func raiseBadOffset(s string) {
@@ -958,12 +1065,16 @@ func (vm *VM) timeNewFromString(s *object.String, kwZone, precision object.Value
 		raise("ArgumentError", "time string should have ASCII compatible encoding")
 	}
 	str := s.Str()
+	// prec is the number of sub-second digits kept: 9 by default, an explicit
+	// non-negative count (which may exceed 9, landing in the sub-nanosecond frac),
+	// or "keep everything" for precision: nil or a negative count.
 	prec := 9
-	if hasPrec && !object.IsNil(precision) {
-		prec = vm.timeInt(precision)
-	}
-	if prec < 0 || prec > 9 {
-		prec = 9
+	if hasPrec {
+		if object.IsNil(precision) {
+			prec = -1
+		} else if prec = vm.timeInt(precision); prec < 0 {
+			prec = -1
+		}
 	}
 
 	year, mon, day, hour, min, sec := 0, 1, 1, 0, 0, 0
@@ -1007,24 +1118,45 @@ func (vm *VM) timeNewFromString(s *object.String, kwZone, precision object.Value
 	checkRange("min", min, 0, 59)
 	checkRange("sec", sec, 0, 60)
 
-	// prec is clamped to [0, 9], so truncating to prec also bounds the fraction
-	// to the nanosecond resolution the backing instant can hold.
-	if len(fracDigits) > prec {
+	if prec >= 0 && len(fracDigits) > prec {
 		fracDigits = fracDigits[:prec]
 	}
-	ns := 0
-	if fracDigits != "" {
-		ns = atoi(fracDigits + strings.Repeat("0", 9-len(fracDigits)))
-	}
+	ns, frac := splitFracDigits(fracDigits)
 
-	loc := stdtime.Local
+	loc := localLoc()
 	switch {
 	case strLoc != nil:
 		loc = strLoc
 	case kwZone != nil && !object.IsNil(kwZone):
 		loc = vm.newTimeOffset(kwZone)
 	}
-	return &Time{t: stdtime.Date(year, stdtime.Month(mon), day, hour, min, sec, ns, loc)}
+	return &Time{t: stdtime.Date(year, stdtime.Month(mon), day, hour, min, sec, ns, loc), frac: frac}
+}
+
+// splitFracDigits converts a decimal sub-second digit string (e.g. "123456789876"
+// for 0.123456789876 s) into the whole-nanosecond count and any sub-nanosecond
+// remainder in seconds — nil when the string holds nine digits or fewer, or when
+// the digits past the ninth are all zero.
+func splitFracDigits(digits string) (int, *big.Rat) {
+	if digits == "" {
+		return 0, nil
+	}
+	nsPart := digits
+	if len(nsPart) > 9 {
+		nsPart = nsPart[:9]
+	}
+	ns := atoi(nsPart + strings.Repeat("0", 9-len(nsPart)))
+	if len(digits) <= 9 {
+		return ns, nil
+	}
+	extra := digits[9:]
+	num, _ := new(big.Int).SetString(extra, 10)
+	if num.Sign() == 0 {
+		return ns, nil
+	}
+	den := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(len(extra))), nil)
+	frac := new(big.Rat).SetFrac(num, den)        // fraction of one nanosecond
+	return ns, frac.Quo(frac, big.NewRat(1e9, 1)) // → seconds
 }
 
 // timeCantParse raises MRI's ArgumentError for an unparseable Time.new String.
@@ -1151,8 +1283,8 @@ func (vm *VM) timeSecParts(v object.Value) (int, int64) {
 	case object.Float:
 		return floatSecParts(float64(n))
 	case *object.Rational:
-		f, _ := n.R.Float64()
-		return floatSecParts(f)
+		s, ns := ratSecNs(n.R)
+		return int(s), ns
 	case *object.String:
 		return parseRubyInt(n.Str()), 0
 	}
@@ -1163,8 +1295,8 @@ func (vm *VM) timeSecParts(v object.Value) (int, int64) {
 	}
 	if vm.isNumeric(v) && vm.respondsToDynamic(v, "to_r") {
 		if r, ok := vm.send(v, "to_r", nil, nil).(*object.Rational); ok {
-			f, _ := r.R.Float64()
-			return floatSecParts(f)
+			s, ns := ratSecNs(r.R)
+			return int(s), ns
 		}
 	}
 	raise("TypeError", "no implicit conversion of %s into Time", v.Inspect())
@@ -1311,33 +1443,79 @@ func roundFn(add func(z, x, y *big.Int) *big.Int, half bool) NativeFn {
 	}
 }
 
-// timeOp implements the Time operator fast path reached from binary(): t + secs
-// shifts forward, t - secs shifts back, and t - other yields the Float seconds
-// between the two instants. A non-Time, non-numeric right operand raises via
-// numFloat.
-func timeOp(op bytecode.Op, a *Time, b object.Value) object.Value {
-	switch op {
-	case bytecode.OpAdd:
-		return timeShift(a, numFloat(b))
-	case bytecode.OpSub:
-		if other, ok := b.(*Time); ok {
-			d := a.t.Sub(other.t)
-			return object.Float(d.Seconds())
+// timeArith implements Time#+ and Time#-. Subtracting another Time yields the
+// Float number of seconds between the two instants; otherwise the operand is a
+// shift amount, coerced to an exact Rational number of seconds (MRI's num_exact)
+// and applied to the nanosecond, preserving the receiver's location and zone.
+func (vm *VM) timeArith(op bytecode.Op, a *Time, b object.Value) object.Value {
+	if bt, ok := b.(*Time); ok {
+		if op == bytecode.OpSub {
+			return object.Float(a.t.Sub(bt.t).Seconds())
 		}
-		return timeShift(a, -numFloat(b))
+		// Adding two Times is meaningless — MRI rejects it outright.
+		raise("TypeError", "time + time?")
 	}
-	return raise("NoMethodError", "undefined method '%s' for a Time", op)
+	delta := vm.timeDeltaRat(b)
+	if op == bytecode.OpSub {
+		delta = new(big.Rat).Neg(delta)
+	}
+	return a.shiftByRat(delta)
 }
 
-// timeShift shifts a Time forward by sec seconds (which may be fractional),
-// preserving both its location and its Ruby timezone object so that, per MRI,
-// (t + n).zone keeps the zone t was built with.
-func timeShift(t *Time, sec float64) object.Value {
-	whole, ns := splitSeconds(sec)
-	return &Time{
-		t:       t.t.Add(stdtime.Duration(whole)*stdtime.Second + stdtime.Duration(ns)*stdtime.Nanosecond),
-		zoneObj: t.zoneObj,
+// timeDeltaRat coerces a Time#+/#- shift amount to an exact Rational number of
+// seconds, following MRI's num_exact: an Integer/Bignum or Rational is exact, a
+// Float is taken through its exact binary #to_r, and any other object is coerced
+// via #to_r only when it *also* answers #to_int (else via #to_int alone), while a
+// String or nil — and an object answering neither — is rejected outright.
+func (vm *VM) timeDeltaRat(v object.Value) *big.Rat {
+	switch n := v.(type) {
+	case object.Float:
+		r := new(big.Rat).SetFloat64(float64(n))
+		if r == nil { // NaN or ±Infinity has no exact rational
+			raise("FloatDomainError", "%s", n.Inspect())
+		}
+		return r
+	case *object.Rational:
+		return new(big.Rat).Set(n.R)
+	case *object.String, object.Nil:
+		// Rejected before any coercion, matching MRI's num_exact.
+	default:
+		if bi, ok := object.BigOf(v); ok { // Integer or Bignum
+			return new(big.Rat).SetInt(bi)
+		}
+		if vm.respondsToDynamic(v, "to_int") {
+			if vm.respondsToDynamic(v, "to_r") {
+				return valueToRat(vm.send(v, "to_r", nil, nil))
+			}
+			return valueToRat(vm.send(v, "to_int", nil, nil))
+		}
 	}
+	raise("TypeError", "can't convert %s into an exact number", vm.classOf(v).name)
+	return nil
+}
+
+// valueToRat converts an Integer/Bignum/Rational (as returned by #to_r or
+// #to_int) to a big.Rat, raising TypeError on any other result.
+func valueToRat(v object.Value) *big.Rat {
+	if r, ok := v.(*object.Rational); ok {
+		return new(big.Rat).Set(r.R)
+	}
+	if bi, ok := object.BigOf(v); ok {
+		return new(big.Rat).SetInt(bi)
+	}
+	raise("TypeError", "can't convert into an exact number")
+	return nil
+}
+
+// shiftByRat returns the Time advanced by delta seconds (which may carry a
+// sub-nanosecond fraction), computed exactly from the receiver's own exact
+// instant so precision beyond the nanosecond is preserved, with the receiver's
+// location and Ruby timezone object carried onto the result.
+func (t *Time) shiftByRat(delta *big.Rat) *Time {
+	cur := new(big.Rat).SetInt64(t.t.Unix())
+	cur.Add(cur, t.subsecRat())
+	cur.Add(cur, delta)
+	return newTimeExact(cur, t.t.Location(), t.zoneObj)
 }
 
 // timeCmp returns -1/0/1 ordering two Times.
@@ -1631,13 +1809,11 @@ func zoneOffset(off, colons int) string {
 	}
 }
 
-// zoneName renders %Z: the zone's name, or its numeric offset when it is a bare
-// fixed-offset zone.
+// zoneName renders %Z: the zone's abbreviation, or the empty string for a bare
+// fixed-offset zone — MRI's Time#strftime emits nothing for an offset-only zone
+// (unlike #inspect, which shows the numeric offset).
 func zoneName(tm stdtime.Time) string {
-	name, off := tm.Zone()
-	if name == "" {
-		return signedOffset(off, ":")
-	}
+	name, _ := tm.Zone()
 	return name
 }
 
