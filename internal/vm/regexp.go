@@ -41,6 +41,15 @@ type Regexp struct {
 	// built from a EUC-JP or BINARY String keeps that encoding). Empty for a source
 	// literal, whose non-ASCII source is UTF-8 by default.
 	srcEnc string
+	// nameMap is set only when the source has capture-group names the engine
+	// cannot compile as written — duplicate names (Ruby allows several groups to
+	// share a name) or names with non-ASCII characters. compileRegexp then rewrites
+	// each named group to a unique ASCII synthetic name the engine accepts and
+	// records, per original name, the synthetic names of its groups in source
+	// order. Name resolution (MatchData#[], #begin, #named_captures, …) goes through
+	// this map. It is nil for the common case, whose names the engine handles
+	// directly, leaving that path unchanged.
+	nameMap map[string][]string
 }
 
 // matcher returns the engine Regexp to match with: the receiver's compiled
@@ -285,7 +294,7 @@ func matchDataInspect(m *MatchData) string {
 func indexToName(m *MatchData) map[int]string {
 	out := map[int]string{}
 	for _, name := range namedGroups(m.re.source) {
-		if i := m.md.IndexOfName(name); i >= 0 {
+		if i := m.indexOfName(name); i >= 0 {
 			out[i] = name
 		}
 	}
@@ -300,11 +309,247 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 		// Translate the Ruby flags into an inline (?imx) prefix the engine accepts.
 		prefix = "(?" + imx + ")"
 	}
-	re, err := onig.Compile(prefix + source)
+	// The engine does not accept Ruby's \uHHHH / \u{…} escapes, duplicate capture
+	// names, or non-ASCII capture names. Translate the escapes to literal
+	// characters and, when needed, rewrite named groups to synthetic ASCII names —
+	// both no-ops for sources that do not use those features.
+	engineSrc := translateUnicodeEscapes(prefix + source)
+	engineSrc, nameMap := rewriteNamedGroups(engineSrc)
+	re, err := onig.Compile(engineSrc)
 	if err != nil {
 		raise("RegexpError", "%s: /%s/", err.Error(), source)
 	}
-	return &Regexp{re: re, source: source, flags: flags}
+	return &Regexp{re: re, source: source, flags: flags, nameMap: nameMap}
+}
+
+// translateUnicodeEscapes rewrites Ruby's \uHHHH and \u{codepoint …} escapes into
+// the literal characters they denote, which the engine matches directly (it has no
+// \u escape of its own). A code point that is an ASCII metacharacter is emitted
+// backslash-escaped so it keeps its literal meaning; other characters are emitted
+// verbatim (raw UTF-8 for non-ASCII). Any \u that is not a well-formed escape, and
+// every other escape sequence, is copied through untouched. Sources without \u are
+// returned unchanged.
+func translateUnicodeEscapes(src string) string {
+	if !strings.Contains(src, `\u`) {
+		return src
+	}
+	var b strings.Builder
+	for i := 0; i < len(src); {
+		if src[i] != '\\' || i+1 >= len(src) {
+			b.WriteByte(src[i])
+			i++
+			continue
+		}
+		if src[i+1] != 'u' {
+			// Some other escape (\\, \(, …): copy both bytes so the second is never
+			// mistaken for the start of a fresh escape.
+			b.WriteByte(src[i])
+			b.WriteByte(src[i+1])
+			i += 2
+			continue
+		}
+		if i+2 < len(src) && src[i+2] == '{' {
+			if end := strings.IndexByte(src[i+3:], '}'); end >= 0 {
+				if runes, ok := parseUnicodeBraceBody(src[i+3 : i+3+end]); ok {
+					for _, r := range runes {
+						emitLiteralRune(&b, r)
+					}
+					i += 3 + end + 1
+					continue
+				}
+			}
+			// Unterminated or malformed \u{…}: copy the \u through and rescan.
+			b.WriteByte(src[i])
+			b.WriteByte(src[i+1])
+			i += 2
+			continue
+		}
+		if i+6 <= len(src) {
+			if r, ok := parseHexRune(src[i+2 : i+6]); ok {
+				emitLiteralRune(&b, r)
+				i += 6
+				continue
+			}
+		}
+		// \u without four hex digits and without a brace: leave it for the engine.
+		b.WriteByte(src[i])
+		b.WriteByte(src[i+1])
+		i += 2
+	}
+	return b.String()
+}
+
+// parseUnicodeBraceBody parses the body of a \u{…} escape: whitespace-separated
+// runs of 1–6 hex digits, each a code point. It returns ok=false if any run is not
+// valid hex or is out of the Unicode range.
+func parseUnicodeBraceBody(body string) ([]rune, bool) {
+	var runes []rune
+	for _, tok := range strings.Fields(body) {
+		r, ok := parseHexRune(tok)
+		if !ok {
+			return nil, false
+		}
+		runes = append(runes, r)
+	}
+	return runes, true
+}
+
+// parseHexRune parses 1–6 hex digits as a code point, rejecting an empty or
+// over-long string, a non-hex digit, or a value past U+10FFFF.
+func parseHexRune(s string) (rune, bool) {
+	if len(s) == 0 || len(s) > 6 {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(s, 16, 32)
+	if err != nil || v > 0x10FFFF {
+		return 0, false
+	}
+	return rune(v), true
+}
+
+// emitLiteralRune writes r to b as a regex fragment that matches exactly that
+// character: ASCII letters and digits verbatim, other printable ASCII backslash-
+// escaped (so a metacharacter like '.' stays literal), ASCII controls and space as
+// a \xHH byte escape, and non-ASCII as raw UTF-8.
+func emitLiteralRune(b *strings.Builder, r rune) {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		b.WriteByte(byte(r))
+	case r >= 0x21 && r <= 0x7e:
+		b.WriteByte('\\')
+		b.WriteByte(byte(r))
+	case r < 0x80:
+		const hexDigits = "0123456789ABCDEF"
+		b.WriteString(`\x`)
+		b.WriteByte(hexDigits[r>>4])
+		b.WriteByte(hexDigits[r&0xf])
+	default:
+		b.WriteRune(r)
+	}
+}
+
+// rewriteNamedGroups makes a source the engine can compile when it has capture
+// names the engine rejects: duplicate names or non-ASCII names. It renames every
+// named group to a unique ASCII synthetic name and rewrites \k / \g name
+// references to match, returning the rewritten source and a map from each original
+// name to its groups' synthetic names in source order. When no such name is
+// present it returns the source unchanged and a nil map, so ordinary patterns take
+// the engine's own name handling. A gated pattern never compiled before, so any
+// handling here is strictly an improvement over the previous hard failure.
+func rewriteNamedGroups(src string) (string, map[string][]string) {
+	if !needsNameRewrite(namedGroups(src)) {
+		return src, nil
+	}
+	nameMap := map[string][]string{}
+	var b strings.Builder
+	counter := 0
+	inClass := false
+	classFirst := false
+	for i := 0; i < len(src); {
+		c := src[i]
+		if c == '\\' && i+1 < len(src) {
+			// A \k<name>/\k'name' backreference or \g<name>/\g'name' subroutine call
+			// to a renamed group must be rewritten too; numbered references, and any
+			// name not (yet) defined, are left alone. Escapes inside a class are never
+			// references, so only rewrite outside a class.
+			if !inClass && (src[i+1] == 'k' || src[i+1] == 'g') && i+2 < len(src) {
+				var closeCh byte
+				switch src[i+2] {
+				case '<':
+					closeCh = '>'
+				case '\'':
+					closeCh = '\''
+				}
+				if closeCh != 0 {
+					j := i + 3
+					for j < len(src) && src[j] != closeCh {
+						j++
+					}
+					if j < len(src) {
+						if syns, ok := nameMap[src[i+3:j]]; ok {
+							b.WriteByte('\\')
+							b.WriteByte(src[i+1])
+							b.WriteByte(src[i+2])
+							b.WriteString(syns[len(syns)-1])
+							b.WriteByte(closeCh)
+							i = j + 1
+							continue
+						}
+					}
+				}
+			}
+			b.WriteByte(c)
+			b.WriteByte(src[i+1])
+			classFirst = false
+			i += 2
+			continue
+		}
+		if inClass {
+			b.WriteByte(c)
+			if c == ']' && !classFirst {
+				inClass = false
+			}
+			classFirst = false
+			i++
+			continue
+		}
+		if c == '[' {
+			b.WriteByte(c)
+			i++
+			inClass = true
+			classFirst = true
+			if i < len(src) && src[i] == '^' {
+				b.WriteByte('^')
+				i++
+			}
+			continue
+		}
+		if c == '(' && i+3 < len(src) && src[i+1] == '?' && src[i+2] == '<' &&
+			src[i+3] != '=' && src[i+3] != '!' {
+			j := i + 3
+			for j < len(src) && src[j] != '>' {
+				j++
+			}
+			if j < len(src) {
+				counter++
+				syn := syntheticName(counter)
+				name := src[i+3 : j]
+				nameMap[name] = append(nameMap[name], syn)
+				b.WriteString("(?<")
+				b.WriteString(syn)
+				b.WriteByte('>')
+				i = j + 1
+				continue
+			}
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return b.String(), nameMap
+}
+
+// needsNameRewrite reports whether the parsed capture names force a rewrite: the
+// engine rejects a name that repeats or that carries a non-ASCII byte.
+func needsNameRewrite(names []string) bool {
+	seen := map[string]bool{}
+	for _, n := range names {
+		if seen[n] {
+			return true
+		}
+		seen[n] = true
+		for i := 0; i < len(n); i++ {
+			if n[i] >= 0x80 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// syntheticName is the nth synthetic capture name. Every original name is renamed,
+// so these ASCII names cannot collide with a name the source still uses.
+func syntheticName(n int) string {
+	return "g" + strconv.Itoa(n)
 }
 
 // compileLiteralRegexp compiles a Regexp for a source-literal occurrence and
@@ -1748,7 +1993,7 @@ func (vm *VM) installRegexp() {
 		}
 		h := object.NewHash()
 		for _, name := range dedupNames(namedGroups(m.re.source)) {
-			h.Set(namedKey(name, symbolize), groupValue(m, m.md.IndexOfName(name)))
+			h.Set(namedKey(name, symbolize), groupValue(m, m.indexOfName(name)))
 		}
 		return h
 	})
@@ -1974,10 +2219,43 @@ func (m *MatchData) intGroup(i int) object.Value {
 	return groupValue(m, i)
 }
 
+// indexOfName resolves a capture name to a group index. For an ordinary pattern it
+// defers to the engine. For a pattern whose names were rewritten (duplicate or
+// non-ASCII names) it applies Ruby's rule for a name shared by several groups:
+// return the highest-indexed group with that name that participated in the match,
+// or — when none participated — the highest-indexed group (so its value reads as
+// nil). It returns -1 when no group has the name.
+func (m *MatchData) indexOfName(name string) int {
+	if m.re == nil || m.re.nameMap == nil {
+		return m.md.IndexOfName(name)
+	}
+	syns, ok := m.re.nameMap[name]
+	if !ok {
+		return -1
+	}
+	best, bestMatched := -1, -1
+	for _, syn := range syns {
+		idx := m.md.IndexOfName(syn)
+		if idx < 0 {
+			continue
+		}
+		if idx > best {
+			best = idx
+		}
+		if idx > bestMatched && m.md.Begin(idx) >= 0 {
+			bestMatched = idx
+		}
+	}
+	if bestMatched >= 0 {
+		return bestMatched
+	}
+	return best
+}
+
 // byName resolves a named-group capture, raising IndexError if no group has the
 // name.
 func (m *MatchData) byName(name string) object.Value {
-	i := m.md.IndexOfName(name)
+	i := m.indexOfName(name)
 	if i < 0 {
 		raise("IndexError", "undefined group name reference: %s", name)
 	}
@@ -2014,7 +2292,7 @@ func (m *MatchData) indexForKey(vm *VM, key object.Value) int {
 // nameIndex resolves a capture name to its group index, raising IndexError when
 // no group has the name.
 func (m *MatchData) nameIndex(name string) int {
-	i := m.md.IndexOfName(name)
+	i := m.indexOfName(name)
 	if i < 0 {
 		raise("IndexError", "undefined group name reference: %s", name)
 	}
@@ -2079,7 +2357,7 @@ func (m *MatchData) deconstructKeys(keys object.Value) object.Value {
 	h := object.NewHash()
 	if object.IsNil(keys) {
 		for _, name := range dedupNames(namedGroups(m.re.source)) {
-			h.Set(object.Symbol(name), groupValue(m, m.md.IndexOfName(name)))
+			h.Set(object.Symbol(name), groupValue(m, m.indexOfName(name)))
 		}
 		return h
 	}
@@ -2095,7 +2373,7 @@ func (m *MatchData) deconstructKeys(keys object.Value) object.Value {
 		if !ok {
 			raise("TypeError", "wrong argument type %s (expected Symbol)", classNameOf(k))
 		}
-		i := m.md.IndexOfName(string(sym))
+		i := m.indexOfName(string(sym))
 		if i < 0 {
 			break
 		}
