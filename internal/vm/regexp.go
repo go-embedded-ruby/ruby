@@ -381,7 +381,8 @@ func translateUnicodeEscapes(src string) string {
 
 // parseUnicodeBraceBody parses the body of a \u{…} escape: whitespace-separated
 // runs of 1–6 hex digits, each a code point. It returns ok=false if any run is not
-// valid hex or is out of the Unicode range.
+// valid hex or is out of the Unicode range, or if the list is empty (Ruby rejects
+// \u{} as an invalid Unicode list).
 func parseUnicodeBraceBody(body string) ([]rune, bool) {
 	var runes []rune
 	for _, tok := range strings.Fields(body) {
@@ -390,6 +391,9 @@ func parseUnicodeBraceBody(body string) ([]rune, bool) {
 			return nil, false
 		}
 		runes = append(runes, r)
+	}
+	if len(runes) == 0 {
+		return nil, false
 	}
 	return runes, true
 }
@@ -444,7 +448,6 @@ func rewriteNamedGroups(src string) (string, map[string][]string) {
 	var b strings.Builder
 	counter := 0
 	inClass := false
-	classFirst := false
 	for i := 0; i < len(src); {
 		c := src[i]
 		if c == '\\' && i+1 < len(src) {
@@ -480,28 +483,25 @@ func rewriteNamedGroups(src string) (string, map[string][]string) {
 			}
 			b.WriteByte(c)
 			b.WriteByte(src[i+1])
-			classFirst = false
 			i += 2
 			continue
 		}
 		if inClass {
+			// Inside a character class '(?<' is not a group and '\k'/'\g' are not
+			// references; only the closing ']' (an escaped one was consumed above)
+			// matters. Ruby rejects an empty class, so a valid pattern never opens
+			// with ']', and the first ']' seen here closes the class.
 			b.WriteByte(c)
-			if c == ']' && !classFirst {
+			if c == ']' {
 				inClass = false
 			}
-			classFirst = false
 			i++
 			continue
 		}
 		if c == '[' {
 			b.WriteByte(c)
-			i++
 			inClass = true
-			classFirst = true
-			if i < len(src) && src[i] == '^' {
-				b.WriteByte('^')
-				i++
-			}
+			i++
 			continue
 		}
 		if c == '(' && i+3 < len(src) && src[i+1] == '?' && src[i+2] == '<' &&
@@ -2235,10 +2235,9 @@ func (m *MatchData) indexOfName(name string) int {
 	}
 	best, bestMatched := -1, -1
 	for _, syn := range syns {
+		// Every name in nameMap was emitted into the compiled pattern, so the engine
+		// always knows the synthetic name (idx >= 0).
 		idx := m.md.IndexOfName(syn)
-		if idx < 0 {
-			continue
-		}
 		if idx > best {
 			best = idx
 		}
