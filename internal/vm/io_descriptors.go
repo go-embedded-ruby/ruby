@@ -137,6 +137,9 @@ func defIOReadExtra(cls *RClass) {
 	})
 	cls.define("close_read", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		if o.rdModeOff { // a StringIO opened write-only has no read half to close (MRI)
+			raise("IOError", "not opened for reading")
+		}
 		o.rdClosed = true
 		if o.wrClosed { // both halves shut ⇒ the stream is fully closed
 			o.closed = true
@@ -145,6 +148,9 @@ func defIOReadExtra(cls *RClass) {
 	})
 	cls.define("close_write", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		if o.wrModeOff { // a StringIO opened read-only has no write half to close (MRI)
+			raise("IOError", "not opened for writing")
+		}
 		ioFlush(o)
 		o.wrClosed = true
 		if o.rdClosed {

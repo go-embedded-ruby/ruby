@@ -1090,33 +1090,8 @@ func defStringIOExtra(vm *VM, cls *RClass) {
 		o.extEnc, o.intEnc = "ASCII-8BIT", ""
 		return self
 	})
-	// StringIO#close_read / #close_write raise IOError when the stream was opened
-	// without the corresponding half (a write-only stream has no read half to
-	// close, and vice versa), matching MRI. A half already shut by a prior
-	// close_read/close_write is idempotent, not an error.
-	cls.define("close_read", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		if o.rdModeOff {
-			raise("IOError", "not opened for reading")
-		}
-		o.rdClosed = true
-		if o.wrClosed {
-			o.closed = true
-		}
-		return object.NilV
-	})
-	cls.define("close_write", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		if o.wrModeOff {
-			raise("IOError", "not opened for writing")
-		}
-		ioFlush(o)
-		o.wrClosed = true
-		if o.rdClosed {
-			o.closed = true
-		}
-		return object.NilV
-	})
+	// StringIO#close_read / #close_write (the mode-off IOError guard) live in the
+	// shared defIOReadExtra, keyed on rdModeOff/wrModeOff which only StringIO sets.
 	// StringIO#fcntl is unsupported, as in MRI.
 	cls.define("fcntl", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		raise("NotImplementedError", "fcntl() function is unimplemented on this machine")
