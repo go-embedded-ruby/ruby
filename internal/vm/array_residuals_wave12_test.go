@@ -257,7 +257,9 @@ func TestPackPointer(t *testing.T) {
 		{`p(["hello"].pack("p").unpack("p"))`, "[\"hello\"]\n"},
 		{`p(["hello"].pack("P").unpack("P3"))`, "[\"hel\"]\n"}, // P count truncation
 		{`p([nil].pack("P").unpack("J"))`, "[0]\n"},
-		{`p([nil].pack("P").unpack("P5"))`, "[nil]\n"}, // null pointer unpacks to nil
+		{`p([nil].pack("P").unpack("P5"))`, "[nil]\n"},      // null pointer unpacks to nil
+		{`p("".unpack("P"))`, "[]\n"},                       // too few bytes -> no element
+		{`p(["hi"].pack("P").unpack("P10"))`, "[\"hi\"]\n"}, // count clamped to length
 	})
 }
 

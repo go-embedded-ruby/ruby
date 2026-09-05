@@ -1225,9 +1225,9 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			// Pointer: read a native-width word and recover the string pack
 			// registered for it. An unknown or null pointer unpacks to nil; 'P'
 			// takes the leading count bytes, 'p' the whole registered string.
+			// Too few bytes for a whole pointer yields no element at all (MRI).
 			w := ptrSpec.width
 			if pos+w > len(data) {
-				out = append(out, object.NilV)
 				continue
 			}
 			id := getUint(data[pos:pos+w], ptrSpec)
