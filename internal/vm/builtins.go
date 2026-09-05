@@ -2519,12 +2519,12 @@ func (vm *VM) bootstrap() {
 	})
 
 	// Array.
-	vm.cArray.define("length", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(len(self.(*object.Array).Elems)))
-	})
 	vm.cArray.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(len(self.(*object.Array).Elems)))
 	})
+	// #length is a true alias of #size (shares the exact method record, so
+	// Array.instance_method(:length) == Array.instance_method(:size), as in MRI).
+	aliasBuiltin(vm.cArray, "length", "size")
 	vm.cArray.define("empty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(len(self.(*object.Array).Elems) == 0)
 	})
@@ -2588,6 +2588,21 @@ func (vm *VM) bootstrap() {
 			}
 			arr := object.NewArray()
 			arrayInit(vm, arr, args, blk)
+			return arr
+		}}
+	// Array.allocate returns a fully-formed, empty Array (not the generic
+	// Class#allocate RObject, which would make Array#size/#<< fail). It takes no
+	// arguments; a subclass allocation wraps the empty array without running
+	// #initialize, matching MRI.
+	vm.cArray.smethods["allocate"] = &Method{name: "allocate", owner: vm.cArray,
+		native: func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) != 0 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+			}
+			arr := object.NewArray()
+			if recv, ok := self.(*RClass); ok && recv != vm.cArray {
+				return &RObject{class: recv, ivars: map[string]object.Value{}, builtin: arr}
+			}
 			return arr
 		}}
 	// Array[a, b, c] (and any subclass's inherited []) builds an array from its
@@ -2947,7 +2962,10 @@ func (vm *VM) bootstrap() {
 		}
 		return a
 	})
-	vm.cArray.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("clear", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
 		a := self.(*object.Array)
 		vm.checkArrayFrozen(a)
 		a.Elems = nil
@@ -3001,6 +3019,13 @@ func (vm *VM) bootstrap() {
 	// fast path may hand them the live operand-stack region (defineNR).
 	arrayAref := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.Array)
+		// a[(m..n).step(k)] — an Enumerator::ArithmeticSequence selects a strided
+		// slice (MRI 2.6+).
+		if len(args) == 1 {
+			if e, ok := args[0].(*Enumerator); ok && e.isArithSeq {
+				return vm.arrayArefArithSeq(a, e)
+			}
+		}
 		start, length, isSpan, ok := vm.arrayArefSpan(a, args)
 		if !ok {
 			return object.NilV
@@ -3220,7 +3245,10 @@ func (vm *VM) bootstrap() {
 		}
 		return a
 	})
-	vm.cArray.define("map", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cArray.define("map", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
 		if blk == nil {
 			return enumFor(self, "map")
 		}
@@ -3417,20 +3445,11 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.define("sum", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		acc := object.Value(object.IntValue(0))
+		init := object.Value(object.IntValue(0))
 		if len(args) > 0 {
-			acc = args[0]
+			init = args[0]
 		}
-		a := self.(*object.Array)
-		// Live-index loop so a block that grows the array folds the new tail too.
-		for i := 0; i < len(a.Elems); i++ {
-			e := a.Elems[i]
-			if blk != nil { // sum { |x| ... } maps each element before adding
-				e = vm.callBlock(blk, []object.Value{e})
-			}
-			acc = vm.binaryOp(bytecode.OpAdd, acc, e)
-		}
-		return acc
+		return vm.arraySum(self.(*object.Array), init, blk)
 	})
 	vm.cArray.define("to_h", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) != 0 {
@@ -3629,6 +3648,18 @@ func (vm *VM) bootstrap() {
 		return self
 	})
 	vm.cArray.define("permutation", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// No block: a lazy Enumerator that re-reads self when iterated (MRI sees a
+		// later mutation of the array), with an explicit descending-factorial #size.
+		if blk == nil {
+			return enumForSized(self, "permutation", func(vm *VM) object.Value {
+				n := len(self.(*object.Array).Elems)
+				kk := n
+				if len(args) > 0 {
+					kk = int(vm.toIntCoerce(args[0]))
+				}
+				return object.NormInt(permutationCountBig(n, kk))
+			}, args...)
+		}
 		elems := self.(*object.Array).Elems
 		k := len(elems)
 		if len(args) > 0 {
@@ -3657,9 +3688,6 @@ func (vm *VM) bootstrap() {
 				}
 			}
 			gen(0)
-		}
-		if blk == nil {
-			return enumFor(object.NewArrayFromSlice(perms), "each")
 		}
 		for _, pr := range perms {
 			vm.callBlock(blk, []object.Value{pr})
@@ -3813,14 +3841,34 @@ func (vm *VM) bootstrap() {
 		}
 		return vm.arrayJoin(a, sep, map[*object.Array]bool{})
 	})
-	vm.cArray.define("index", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		for i, e := range self.(*object.Array).Elems {
-			if vm.vmValueEqual(e, args[0]) {
+	// index(obj) → first index whose element == obj; index { |e| … } → first index
+	// whose block is truthy (an argument, if given, wins over the block); no
+	// argument and no block → an Enumerator. #find_index is a true alias (shared
+	// record, so Array.instance_method(:index) == Array.instance_method(:find_index),
+	// as in MRI — both are the same C function there). The live-index loop lets a
+	// block that grows the array scan the appended tail too.
+	vm.cArray.define("index", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
+		a := self.(*object.Array)
+		if len(args) == 0 && blk == nil {
+			return enumFor(self, "index")
+		}
+		for i := 0; i < len(a.Elems); i++ {
+			var match bool
+			if len(args) > 0 {
+				match = vm.vmValueEqual(a.Elems[i], args[0])
+			} else {
+				match = vm.callBlock(blk, []object.Value{a.Elems[i]}).Truthy()
+			}
+			if match {
 				return object.IntValue(int64(i))
 			}
 		}
 		return object.NilV
 	})
+	aliasBuiltin(vm.cArray, "find_index", "index")
 	// rindex searches backward from the end: rindex(obj) → the last index whose
 	// element == obj; rindex { |e| … } → the last index whose block is truthy (an
 	// argument, if given, wins over the block); no argument and no block → a sized
@@ -3828,7 +3876,8 @@ func (vm *VM) bootstrap() {
 	vm.cArray.define("rindex", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		a := self.(*object.Array)
 		if len(args) == 0 && blk == nil {
-			return enumForSized(self, "rindex", func(*VM) object.Value { return object.IntValue(int64(len(a.Elems))) })
+			// MRI's rindex Enumerator reports an unknown (nil) size.
+			return enumForSized(self, "rindex", func(*VM) object.Value { return object.NilV })
 		}
 		for i := len(a.Elems) - 1; i >= 0; i-- {
 			// A block may shrink the array; realign to the new end and re-check size
@@ -6119,14 +6168,20 @@ func (vm *VM) fisherYates(s []object.Value, rng object.Value) {
 }
 
 func (vm *VM) arrayArefSpan(a *object.Array, args []object.Value) (start, length int, isSpan, ok bool) {
-	if rng, isR := args[0].(*object.Range); isR {
+	// A Range (or a user subclass of Range, e.g. ArraySpecs::MyRange) selects a
+	// span. Passing a Range together with a length is a TypeError (MRI tries to
+	// coerce the Range to the integer index of an a[i, len] call and fails).
+	if rng, isR := asRangeValue(args[0]); isR {
+		if len(args) == 2 {
+			raise("TypeError", "no implicit conversion of Range into Integer")
+		}
 		// A non-nil, non-Integer endpoint converts via #to_int (e.g. a[obj..obj]).
 		s, l, r := sliceRange(len(a.Elems), vm.coerceRangeBounds(rng))
 		return s, l, true, r
 	}
 	if len(args) == 2 { // a[start, len] — start and length convert via #to_int.
-		s := normIndex(vm.repeatLong(args[0]), len(a.Elems))
-		l := int(vm.repeatLong(args[1]))
+		s := normIndex(vm.arrayArefLong(args[0]), len(a.Elems))
+		l := int(vm.arrayArefLong(args[1]))
 		if s < 0 || s > len(a.Elems) || l < 0 {
 			return 0, 0, true, false
 		}
@@ -6135,10 +6190,118 @@ func (vm *VM) arrayArefSpan(a *object.Array, args []object.Value) (start, length
 		}
 		return s, l, true, true
 	}
-	if i, isok := arrayIndex(a, vm.repeatLong(args[0])); isok {
+	if i, isok := arrayIndex(a, vm.arrayArefLong(args[0])); isok {
 		return i, 1, false, true
 	}
 	return 0, 0, false, false
+}
+
+// arrayArefLong coerces an Array#[] index or length argument to an int64 with
+// MRI's out-of-Fixnum-range semantics: a Bignum, or a Float whose magnitude
+// reaches 2**63, raises RangeError rather than silently overflowing the int64
+// conversion (a[2.0**63] and a[1, 8e19] both raise). Any smaller Float truncates
+// toward zero and every other value follows the usual #to_int coercion.
+func (vm *VM) arrayArefLong(v object.Value) int64 {
+	if f, ok := v.(object.Float); ok {
+		d := float64(f)
+		if !math.IsNaN(d) && !math.IsInf(d, 0) &&
+			(d >= 9223372036854775808.0 || d < -9223372036854775808.0) {
+			raise("RangeError", "float %g out of range of integer", d)
+		}
+	}
+	return vm.repeatLong(v)
+}
+
+// arrayArefArithSeq implements Array#[] indexed by an Enumerator::ArithmeticSequence
+// (e.g. a[(0..).step(2)] or a[(5..).step(-2)]). It selects the array elements at
+// the sequence's begin, begin+step, … positions bounded by its range, resolving
+// negative and endless/beginless endpoints against the array length. A begin
+// position past the end yields nil; when |step| > 1 and the sequence's declared
+// span extends past the array, MRI raises RangeError. Verified against MRI 4.0.6.
+func (vm *VM) arrayArefArithSeq(a *object.Array, e *Enumerator) object.Value {
+	n := len(a.Elems)
+	step := int(vm.repeatLong(e.asStep))
+	if step == 0 {
+		// A fractional step (e.g. .step(0.5)) truncates to 0; MRI rejects it here.
+		raise("ArgumentError", "slice step cannot be zero")
+	}
+	// RangeError guard for |step| > 1: replicate MRI's strict beg/len computation
+	// (the endpoints swap for a negative step) and reject a span whose begin or
+	// length reaches beyond the array.
+	if step > 1 || step < -1 {
+		sb, se, sExcl := e.asBegin, e.asEnd, e.asExcl
+		if step < 0 {
+			sb, se = se, sb
+		}
+		beg := int64(0)
+		if !object.IsNil(sb) {
+			if beg = vm.repeatLong(sb); beg < 0 {
+				beg += int64(n)
+			}
+		}
+		end := int64(-1)
+		if object.IsNil(se) {
+			sExcl = false
+		} else if end = vm.repeatLong(se); end < 0 {
+			end += int64(n)
+		}
+		if !sExcl {
+			end++
+		}
+		clen := end - beg
+		if clen < 0 {
+			clen = 0
+		}
+		if beg < 0 || beg > int64(n) || clen > int64(n) {
+			raise("RangeError", "Enumerator::ArithmeticSequence has too large index")
+		}
+	}
+	// Orient the range so [loV, hiV] runs low→high: for a negative step the
+	// range's begin/end swap and its (end-attached) exclusivity moves to the low
+	// bound; the walk then runs downward from the top of the span.
+	var loV, hiV object.Value
+	var exclLow, exclHigh bool
+	if step < 0 {
+		loV, hiV, exclLow = e.asEnd, e.asBegin, e.asExcl
+	} else {
+		loV, hiV, exclHigh = e.asBegin, e.asEnd, e.asExcl
+	}
+	lo := 0
+	if !object.IsNil(loV) {
+		// A low bound (the walk's conceptual begin) still out of the array after
+		// resolving a negative index — below 0 or past the end — is nil, exactly
+		// like a[k..] with k < -length or k > length.
+		if lo = normIndex(vm.repeatLong(loV), n); lo < 0 || lo > n {
+			return object.NilV
+		}
+	}
+	if exclLow {
+		lo++
+	}
+	hi := n
+	if !object.IsNil(hiV) {
+		if hi = normIndex(vm.repeatLong(hiV), n); !exclHigh {
+			hi++
+		}
+		if hi > n {
+			hi = n
+		}
+	}
+	out := []object.Value{}
+	if step > 0 {
+		for i := lo; i < hi; i += step {
+			if i >= 0 && i < n {
+				out = append(out, a.Elems[i])
+			}
+		}
+	} else {
+		for i := hi - 1; i >= lo; i += step {
+			if i >= 0 && i < n {
+				out = append(out, a.Elems[i])
+			}
+		}
+	}
+	return object.NewArrayFromSlice(out)
 }
 
 // Kernel#puts/print/p write through the current $stdout (an IOObj), so a host
@@ -7727,6 +7890,82 @@ const maxFillSize = 1 << 40
 // end (or start) is past the current length, and returns self. The block form
 // stores block(i) at each index, so a block raising mid-iteration leaves the
 // already-filled elements in place (the array is never truncated).
+// arraySum implements Array#sum with MRI's exact-then-Kahan folding: Integer,
+// Bignum and Rational elements accumulate exactly through Ruby #+, the first
+// Float switches to Kahan–Babuška–Neumaier compensated summation (so a run of
+// floats sums without drift — [x, y, …].sum is exact where reduce(:+) is not),
+// and a non-numeric element (or accumulator) falls back to plain #+. A block, if
+// given, maps each element before it is added; the live-index loop folds a tail
+// the block appends. Verified against MRI 4.0.6.
+func (vm *VM) arraySum(a *object.Array, init object.Value, blk *Proc) object.Value {
+	const (
+		sumExact = iota
+		sumFloat
+		sumGeneric
+	)
+	v := init
+	phase := sumExact
+	var f, c float64
+	if fv, ok := init.(object.Float); ok {
+		phase, f = sumFloat, float64(fv)
+	}
+	for i := 0; i < len(a.Elems); i++ {
+		e := a.Elems[i]
+		if blk != nil { // sum { |x| ... } maps each element before adding
+			e = vm.callBlock(blk, []object.Value{e})
+		}
+		if phase == sumFloat {
+			if x, ok := toFloat(e); ok {
+				f, c = kahanAdd(f, c, x)
+				continue
+			}
+			// A non-numeric element ends the Kahan run: materialise the sum so far
+			// and keep folding the rest through Ruby #+.
+			v, phase = object.Float(f+c), sumGeneric
+		} else if phase == sumExact {
+			if x, ok := e.(object.Float); ok {
+				if fv, okv := toFloat(v); okv {
+					f, c = kahanAdd(fv, 0, float64(x))
+					phase = sumFloat
+					continue
+				}
+			}
+		}
+		v = vm.binaryOp(bytecode.OpAdd, v, e)
+	}
+	if phase == sumFloat {
+		return object.Float(f + c)
+	}
+	return v
+}
+
+// kahanAdd performs one Kahan–Babuška–Neumaier compensated-summation step,
+// adding x to the running sum f with running compensation c and returning the
+// updated pair. NaN and infinities follow MRI's Array#sum rules: a NaN in either
+// operand makes the sum NaN, +∞ added to −∞ is NaN, and any other infinity wins.
+func kahanAdd(f, c, x float64) (float64, float64) {
+	switch {
+	case math.IsNaN(f):
+		return f, c
+	case math.IsNaN(x):
+		return x, c
+	case math.IsInf(x, 0):
+		if math.IsInf(f, 0) && math.Signbit(x) != math.Signbit(f) {
+			return math.NaN(), c
+		}
+		return x, c
+	case math.IsInf(f, 0):
+		return f, c
+	}
+	t := f + x
+	if math.Abs(f) >= math.Abs(x) {
+		c += (f - t) + x
+	} else {
+		c += (x - t) + f
+	}
+	return t, c
+}
+
 func arrayFill(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 	a := self.(*object.Array)
 	vm.checkArrayFrozen(a)
@@ -8121,6 +8360,21 @@ func binomialBig(n, k int) *big.Int {
 	for i := 1; i <= k; i++ {
 		res.Mul(res, big.NewInt(int64(n-k+i)))
 		res.Div(res, big.NewInt(int64(i)))
+	}
+	return res
+}
+
+// permutationCountBig returns the number of k-permutations of n items,
+// n!/(n-k)! (the descending factorial n·(n-1)·…·(n-k+1)), as a big.Int — the
+// #size of Array#permutation. It is 1 when k is 0 (including the empty receiver's
+// P(0, 0)) and 0 once k exceeds n or is negative.
+func permutationCountBig(n, k int) *big.Int {
+	if k < 0 || k > n {
+		return big.NewInt(0)
+	}
+	res := big.NewInt(1)
+	for i := 0; i < k; i++ {
+		res.Mul(res, big.NewInt(int64(n-i)))
 	}
 	return res
 }

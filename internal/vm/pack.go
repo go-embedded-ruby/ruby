@@ -4,10 +4,41 @@ import (
 	binpkg "encoding/binary"
 	"math"
 	"math/big"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// ptrSpec is the native-width encoding of a machine pointer, shared by the P/p
+// directives (an 8-byte native-endian word on the LP64 platforms rbgo targets).
+var ptrSpec = intSpec{8, binpkg.NativeEndian, false}
+
+// packPtrTable backs the P/p (pointer) directives. A real machine pointer cannot
+// round-trip through pure Go, so pack registers the referenced string under a
+// synthetic, monotonically increasing id and emits that id as a native-width
+// word; unpack looks the string back up. Ids are never reused (so a value packed
+// and later unpacked resolves), and a null pointer is the reserved id 0.
+var packPtrTable = struct {
+	mu   sync.Mutex
+	m    map[uint64]*object.String
+	next uint64
+}{m: map[uint64]*object.String{}}
+
+func registerPackPtr(s *object.String) uint64 {
+	packPtrTable.mu.Lock()
+	defer packPtrTable.mu.Unlock()
+	packPtrTable.next++
+	packPtrTable.m[packPtrTable.next] = s
+	return packPtrTable.next
+}
+
+func lookupPackPtr(id uint64) (*object.String, bool) {
+	packPtrTable.mu.Lock()
+	defer packPtrTable.mu.Unlock()
+	s, ok := packPtrTable.m[id]
+	return s, ok
+}
 
 // registerPackUnpack installs Array#pack and String#unpack/#unpack1, supporting
 // the common format directives with MRI-compatible semantics:
@@ -31,10 +62,23 @@ import (
 // long, i.e. 64-bit on LP64). Each directive takes an optional count N, or '*'
 // for "all remaining"; spaces in the format are ignored.
 func (vm *VM) registerPackUnpack() {
-	vm.cArray.define("pack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cArray.define("pack", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		elems := self.(*object.Array).Elems
-		fmtStr := vm.packFormat(args)
-		out, enc := vm.packBytes(elems, fmtStr)
+		// The buffer: keyword (a trailing kwargs Hash) directs the packed bytes into
+		// an existing String, which is mutated and returned. Packing begins at the
+		// buffer's current end (an @ directive then repositions absolutely), so the
+		// result keeps the buffer's leading content and encoding.
+		buf := vm.packBuffer(args)
+		var initial []byte
+		if buf != nil {
+			vm.checkFrozen(buf)
+			initial = buf.Bytes()
+		}
+		out, enc := vm.packBytes(elems, vm.packFormat(args), initial)
+		if buf != nil {
+			buf.SetBytes(out)
+			return buf
+		}
 		return object.NewStringBytesEnc(out, enc)
 	})
 	vm.cString.define("unpack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -68,6 +112,26 @@ func (vm *VM) packFormat(args []object.Value) string {
 	}
 	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 	return ""
+}
+
+// packBuffer returns the String named by Array#pack's buffer: keyword (a trailing
+// kwargs Hash), or nil when the option is absent. A non-String buffer is a
+// TypeError. packFormat still reads the format from args[0]; the trailing Hash it
+// simply ignores.
+func (vm *VM) packBuffer(args []object.Value) *object.String {
+	h := trailingKwHash(args)
+	if h == nil {
+		return nil
+	}
+	v, ok := h.Get(object.Symbol("buffer"))
+	if !ok {
+		return nil
+	}
+	s, isStr := v.(*object.String)
+	if !isStr {
+		raise("TypeError", "buffer must be String, not %s", classNameOf(v))
+	}
+	return s
 }
 
 // packDir is one parsed directive: its letter, a count, whether the count was
@@ -176,7 +240,7 @@ func isPackCode(c byte) bool {
 	case 'C', 'c', 'S', 's', 'L', 'l', 'Q', 'q', 'I', 'i', 'J', 'j',
 		'n', 'N', 'v', 'V', 'a', 'A', 'Z', 'H', 'h', 'U',
 		'f', 'F', 'd', 'D', 'e', 'E', 'g', 'G',
-		'x', 'X', '@', 'b', 'B', 'm', 'M', 'u', 'w':
+		'x', 'X', '@', 'b', 'B', 'm', 'M', 'u', 'w', 'P', 'p':
 		return true
 	}
 	return false
@@ -376,10 +440,62 @@ func (vm *VM) packIntArg(v object.Value) uint64 {
 	return 0
 }
 
+// packUnicodeArg coerces a 'U' (Unicode codepoint) pack argument to a codepoint
+// in the range MRI's UTF-8 packer accepts: an Integer is used directly, any other
+// object is converted through #to_int (which must return an Integer, else
+// TypeError). A negative value or one above 0x7FFFFFFF is out of range (RangeError).
+func (vm *VM) packUnicodeArg(v object.Value) uint32 {
+	switch n := v.(type) {
+	case object.Integer:
+		if n < 0 || int64(n) > 0x7FFFFFFF {
+			raise("RangeError", "pack(U): value out of range")
+		}
+		return uint32(n)
+	case *object.Bignum:
+		// A Bignum is always outside int64, hence far above 0x7FFFFFFF (or below 0).
+		raise("RangeError", "pack(U): value out of range")
+	}
+	if vm.respondsToDynamic(v, "to_int") {
+		r := vm.send(v, "to_int", nil, nil)
+		switch r.(type) {
+		case object.Integer, *object.Bignum:
+			return vm.packUnicodeArg(r)
+		}
+		raise("TypeError", "can't convert %s to Integer (%s#to_int gives %s)",
+			classNameOf(v), classNameOf(v), classNameOf(r))
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(v))
+	return 0
+}
+
+// appendPackU appends the MRI extended-UTF-8 encoding of a codepoint (up to
+// 0x7FFFFFFF, six bytes) to out. Unlike Go's utf8.AppendRune it does not clamp at
+// U+10FFFF, so [0x110000].pack("U") yields the raw four-byte form MRI produces.
+func appendPackU(out []byte, uv uint32) []byte {
+	switch {
+	case uv <= 0x7f:
+		return append(out, byte(uv))
+	case uv <= 0x7ff:
+		return append(out, byte(0xc0|(uv>>6)), byte(0x80|(uv&0x3f)))
+	case uv <= 0xffff:
+		return append(out, byte(0xe0|(uv>>12)), byte(0x80|((uv>>6)&0x3f)), byte(0x80|(uv&0x3f)))
+	case uv <= 0x1fffff:
+		return append(out, byte(0xf0|(uv>>18)), byte(0x80|((uv>>12)&0x3f)),
+			byte(0x80|((uv>>6)&0x3f)), byte(0x80|(uv&0x3f)))
+	case uv <= 0x3ffffff:
+		return append(out, byte(0xf8|(uv>>24)), byte(0x80|((uv>>18)&0x3f)),
+			byte(0x80|((uv>>12)&0x3f)), byte(0x80|((uv>>6)&0x3f)), byte(0x80|(uv&0x3f)))
+	default: // uv <= 0x7fffffff
+		return append(out, byte(0xfc|(uv>>30)), byte(0x80|((uv>>24)&0x3f)),
+			byte(0x80|((uv>>18)&0x3f)), byte(0x80|((uv>>12)&0x3f)),
+			byte(0x80|((uv>>6)&0x3f)), byte(0x80|(uv&0x3f)))
+	}
+}
+
 // packBytes serialises elems according to fmtStr.
-func (vm *VM) packBytes(elems []object.Value, fmtStr string) ([]byte, string) {
+func (vm *VM) packBytes(elems []object.Value, fmtStr string, initial []byte) ([]byte, string) {
 	dirs := parseFormat(fmtStr, "pack")
-	out := []byte{}
+	out := append([]byte{}, initial...)
 	idx := 0
 	next := func() object.Value {
 		if idx >= len(elems) {
@@ -420,7 +536,7 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) ([]byte, string) {
 				count = len(elems) - idx
 			}
 			for k := 0; k < count; k++ {
-				out = utf8.AppendRune(out, rune(toInt(next())))
+				out = appendPackU(out, vm.packUnicodeArg(next()))
 			}
 		case d.code == 'x':
 			n := d.count
@@ -452,7 +568,14 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) ([]byte, string) {
 				}
 			}
 		case d.code == 'a' || d.code == 'A' || d.code == 'Z':
-			out = packString(out, d, vm.packStrArg(next()))
+			// A nil argument packs as an empty string (padded with spaces for A,
+			// NULs for a/Z), matching MRI — it is not coerced via #to_str.
+			arg := next()
+			var b []byte
+			if !object.IsNil(arg) {
+				b = vm.packStrArg(arg)
+			}
+			out = packString(out, d, b)
 		case d.code == 'H' || d.code == 'h':
 			out = packHex(out, d, vm.packStrArg(next()))
 		case d.code == 'B' || d.code == 'b':
@@ -475,6 +598,17 @@ func (vm *VM) packBytes(elems []object.Value, fmtStr string) ([]byte, string) {
 				}
 				out = packBER(out, z)
 			}
+		case d.code == 'P' || d.code == 'p':
+			// Pointer: emit a native-width word standing in for a pointer to the
+			// argument string (nil is a null pointer). The referenced string is
+			// registered so a later unpack("P"/"p") can recover it.
+			arg := next()
+			var id uint64
+			if !object.IsNil(arg) {
+				b := vm.packStrArg(arg)
+				id = registerPackPtr(object.NewStringBytesEnc(append([]byte(nil), b...), "ASCII-8BIT"))
+			}
+			out = putUint(out, id, ptrSpec)
 		}
 	}
 	return out, packEncoding(dirs)
@@ -1086,6 +1220,31 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 				var z *big.Int
 				z, pos = berDecodeAt(data, pos)
 				out = append(out, object.NormInt(z))
+			}
+		case d.code == 'P' || d.code == 'p':
+			// Pointer: read a native-width word and recover the string pack
+			// registered for it. An unknown or null pointer unpacks to nil; 'P'
+			// takes the leading count bytes, 'p' the whole registered string.
+			// Too few bytes for a whole pointer yields no element at all (MRI).
+			w := ptrSpec.width
+			if pos+w > len(data) {
+				continue
+			}
+			id := getUint(data[pos:pos+w], ptrSpec)
+			pos += w
+			s, ok := lookupPackPtr(id)
+			switch {
+			case !ok:
+				out = append(out, object.NilV)
+			case d.code == 'p':
+				out = append(out, object.NewStringBytesEnc(append([]byte(nil), s.Bytes()...), "ASCII-8BIT"))
+			default: // 'P' takes the leading count bytes
+				b := s.Bytes()
+				n := d.count
+				if n > len(b) {
+					n = len(b)
+				}
+				out = append(out, object.NewStringBytesEnc(append([]byte(nil), b[:n]...), "ASCII-8BIT"))
 			}
 		}
 	}
