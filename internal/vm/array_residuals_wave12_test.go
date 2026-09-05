@@ -168,6 +168,89 @@ func TestArrayPermutationLazyEnumerator(t *testing.T) {
 	})
 }
 
+// TestPackUnicode covers Array#pack('U') across every codepoint width of MRI's
+// extended UTF-8 (1..6 bytes, including values above U+10FFFF that Go's own
+// encoder would clamp), the count/'*' modifiers, and #to_int coercion of the
+// argument. Every expectation was checked against MRI 4.0.6.
+func TestPackUnicode(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`p([0x41].pack("U").bytes)`, "[65]\n"},
+		{`p([0x85].pack("U").bytes)`, "[194, 133]\n"},
+		{`p([0x3042].pack("U").bytes)`, "[227, 129, 130]\n"},
+		{`p([0x110000].pack("U").bytes)`, "[244, 144, 128, 128]\n"},
+		{`p([0x200000].pack("U").bytes)`, "[248, 136, 128, 128, 128]\n"},
+		{`p([0x7FFFFFFF].pack("U").bytes)`, "[253, 191, 191, 191, 191, 191]\n"},
+		{`p([65,66].pack("U*").bytes)`, "[65, 66]\n"},
+		{`p([65,66,67].pack("U2").bytes)`, "[65, 66]\n"},
+		{`p([65].pack("U").encoding.to_s)`, "\"UTF-8\"\n"},
+		// #to_int coerces the argument.
+		{`o=Object.new; def o.to_int; 66; end; p([o].pack("U").bytes)`, "[66]\n"},
+	})
+	// Out-of-range and bad-coercion errors.
+	errCases := []struct{ src, want string }{
+		{`[-1].pack("U")`, "RangeError"},
+		{`[2**32].pack("U")`, "RangeError"}, // fits int64, exceeds 0x7FFFFFFF
+		{`[2**64].pack("U")`, "RangeError"}, // Bignum
+		{`o=Object.new; def o.to_int; "5"; end; [o].pack("U")`, "TypeError"},
+		{`[Object.new].pack("U")`, "no implicit conversion of Object into Integer"},
+	}
+	for _, c := range errCases {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q expected %q, got %v", c.src, c.want, err)
+		}
+	}
+}
+
+// TestPackStringNil covers a/A/Z packing a nil argument as an empty string
+// (padded with spaces for A, NULs for a/Z), matching MRI 4.0.6.
+func TestPackStringNil(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`p([nil].pack("A3"))`, "\"   \"\n"},
+		{`p([nil].pack("a3"))`, "\"\\x00\\x00\\x00\"\n"},
+		{`p([nil].pack("Z3"))`, "\"\\x00\\x00\\x00\"\n"},
+		{`p([nil].pack("a*"))`, "\"\"\n"},
+	})
+}
+
+// TestPackBuffer covers Array#pack's :buffer option: appending to the buffer's
+// content, absolute repositioning with @, the buffer being the returned object,
+// encoding preservation, and the TypeError / FrozenError guards. Verified against
+// MRI 4.0.6.
+func TestPackBuffer(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`b=+"123"; r=[65,66,67].pack("ccc", buffer: b); p r; p r.equal?(b)`, "\"123ABC\"\ntrue\n"},
+		{`p([65,66,67].pack("@3ccc", buffer: +"123456"))`, "\"123ABC\"\n"},
+		{`p([65,66,67].pack("@6ccc", buffer: +"123"))`, "\"123\\u0000\\u0000\\u0000ABC\"\n"},
+		{`p([65,66,67].pack("@3ccc", buffer: +"1234567890"))`, "\"123ABC\"\n"},
+		{`buf=''.encode(Encoding::ISO_8859_1); [65].pack("c", buffer: buf); p buf.encoding.to_s`,
+			"\"ISO-8859-1\"\n"},
+	})
+	errCases := []struct{ src, want string }{
+		{`[65].pack("ccc", buffer: [])`, "buffer must be String, not Array"},
+		{`[65].pack("c", buffer: "x".freeze)`, "FrozenError"},
+	}
+	for _, c := range errCases {
+		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("src=%q expected %q, got %v", c.src, c.want, err)
+		}
+	}
+}
+
+// TestPackPointer covers the P/p (pointer) directives: pack emits a native-width
+// word and unpack recovers the registered string (P by leading count, p whole);
+// nil packs a null pointer that unpacks to nil, and reads it as integer 0.
+// Verified against MRI 4.0.6.
+func TestPackPointer(t *testing.T) {
+	runCases(t, []struct{ src, want string }{
+		{`p(["hello"].pack("P").size == [0].pack("J").size)`, "true\n"},
+		{`p(["hello"].pack("P").unpack("P5"))`, "[\"hello\"]\n"},
+		{`p(["hello"].pack("p").unpack("p"))`, "[\"hello\"]\n"},
+		{`p(["hello"].pack("P").unpack("P3"))`, "[\"hel\"]\n"}, // P count truncation
+		{`p([nil].pack("P").unpack("J"))`, "[0]\n"},
+		{`p([nil].pack("P").unpack("P5"))`, "[nil]\n"}, // null pointer unpacks to nil
+	})
+}
+
 // TestArrayEnumeratorUnknownSize covers the wave-12 fix that gives the block-less
 // #bsearch / #bsearch_index / #rindex Enumerators an unknown (nil) size, as MRI
 // does, while the ordinary #map Enumerator keeps its known size.
