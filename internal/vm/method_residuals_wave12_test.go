@@ -146,8 +146,13 @@ func TestSuperMethodFollowsOriginalName(t *testing.T) {
 			"WHA\n",
 		},
 		{
-			"super_method_nil_at_top_returns_nil",
+			"unbound_super_method_nil_at_top_returns_nil",
 			inheritedModulesSrc + `puts WHC.instance_method(:derp).super_method.super_method.inspect`,
+			"nil\n",
+		},
+		{
+			"bound_super_method_nil_at_top_returns_nil",
+			inheritedModulesSrc + `puts WHC.new.method(:derp).super_method.super_method.inspect`,
 			"nil\n",
 		},
 	}
@@ -220,6 +225,16 @@ puts m.equal?(d)
 puts m == d
 puts d.instance_variables.inspect`,
 			"false\ntrue\n[]\n",
+		},
+		{
+			// A non-boxed, non-listed value (a Proc) still travels the freeze/frozen?
+			// default fall-through without being affected, so the added branches stay
+			// scoped to Bound/UnboundMethod.
+			"proc_freeze_is_untracked_fall_through",
+			`p = proc { 1 }
+p.freeze
+puts p.frozen?`,
+			"false\n",
 		},
 		{
 			"set_ivar_on_frozen_method_raises",
