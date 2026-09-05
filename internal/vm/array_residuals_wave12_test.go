@@ -21,6 +21,9 @@ func TestArrayAliasesAndArity(t *testing.T) {
 		// Array.allocate is a real, mutable, empty Array.
 		{`a = Array.allocate; p a.instance_of?(Array); p a.size; a << 1; p a`,
 			"true\n0\n[1]\n"},
+		// A subclass allocates an (empty) instance of the subclass.
+		{`class SubA < Array; end; a = SubA.allocate; p a.class; p a.size`,
+			"SubA\n0\n"},
 	})
 }
 
@@ -56,6 +59,9 @@ func TestArrayArefArithmeticSequence(t *testing.T) {
 		{`p([0,1,2,3,4,5][(0..8).step(-1)])`, "nil\n"}, // begin past the end (step < 0)
 		{`p([0,1,2,3,4,5][(9..).step(-1)])`, "[5, 4, 3, 2, 1, 0]\n"},
 		{`p([0,1,2,3,4,5][(-3..).step(-2)])`, "[3, 1]\n"},
+		// A begin still out of the array after negative-index resolution is nil.
+		{`p([0,1,2,3,4,5][(-9..).step(1)])`, "nil\n"},
+		{`p([0,1,2,3,4,5][(..-9).step(-1)])`, "nil\n"},
 	})
 }
 
@@ -68,6 +74,7 @@ func TestArrayArefArithSeqErrors(t *testing.T) {
 		{`[0,1,2,3,4,5][(2..8).step(2)]`, "RangeError"},
 		{`[0,1,2,3,4,5][(8..2).step(-2)]`, "RangeError"},
 		{`[0,1,2,3,4,5][(7..).step(2)]`, "RangeError"},
+		{`[0,1,2,3,4,5][(-9..).step(2)]`, "RangeError"}, // begin below 0 after resolution
 		{`[0,1,2,3,4,5][(0..5).step(0.5)]`, "slice step cannot be zero"},
 	}
 	for _, c := range cases {
@@ -165,6 +172,7 @@ func TestArrayPermutationLazyEnumerator(t *testing.T) {
 		{`p([1,2,3].permutation(5).size)`, "0\n"}, // k > n
 		{`p([].permutation.size)`, "1\n"},
 		{`p([1,2,3].permutation(2).to_a.length)`, "6\n"},
+		{`p([1,2,3].permutation(5).to_a)`, "[]\n"}, // k > n yields nothing
 	})
 }
 
@@ -224,6 +232,8 @@ func TestPackBuffer(t *testing.T) {
 		{`p([65,66,67].pack("@3ccc", buffer: +"1234567890"))`, "\"123ABC\"\n"},
 		{`buf=''.encode(Encoding::ISO_8859_1); [65].pack("c", buffer: buf); p buf.encoding.to_s`,
 			"\"ISO-8859-1\"\n"},
+		// A trailing keyword hash without :buffer is ignored (no buffer redirection).
+		{`p([65].pack("C", other: 1))`, "\"A\"\n"},
 	})
 	errCases := []struct{ src, want string }{
 		{`[65].pack("ccc", buffer: [])`, "buffer must be String, not Array"},

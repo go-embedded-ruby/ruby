@@ -6247,7 +6247,7 @@ func (vm *VM) arrayArefArithSeq(a *object.Array, e *Enumerator) object.Value {
 		if clen < 0 {
 			clen = 0
 		}
-		if beg > int64(n) || clen > int64(n) {
+		if beg < 0 || beg > int64(n) || clen > int64(n) {
 			raise("RangeError", "Enumerator::ArithmeticSequence has too large index")
 		}
 	}
@@ -6263,15 +6263,12 @@ func (vm *VM) arrayArefArithSeq(a *object.Array, e *Enumerator) object.Value {
 	}
 	lo := 0
 	if !object.IsNil(loV) {
-		lo = normIndex(vm.repeatLong(loV), n)
-	}
-	// A low bound (the walk's conceptual begin) past the end is nil, exactly like
-	// a[k..] with k > length.
-	if lo > n {
-		return object.NilV
-	}
-	if lo < 0 {
-		lo = 0
+		// A low bound (the walk's conceptual begin) still out of the array after
+		// resolving a negative index — below 0 or past the end — is nil, exactly
+		// like a[k..] with k < -length or k > length.
+		if lo = normIndex(vm.repeatLong(loV), n); lo < 0 || lo > n {
+			return object.NilV
+		}
 	}
 	if exclLow {
 		lo++
