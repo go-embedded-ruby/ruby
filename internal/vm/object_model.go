@@ -2206,9 +2206,13 @@ func getIvar(self object.Value, name string) object.Value {
 
 func setIvar(self object.Value, name string, v object.Value) {
 	if t := ivarTable(self); t != nil {
-		if o, ok := self.(*RObject); ok {
-			if _, exists := t[name]; !exists {
+		if _, exists := t[name]; !exists {
+			switch o := self.(type) {
+			case *RObject:
 				o.ivarOrder = append(o.ivarOrder, name)
+			case boxed:
+				st := o.state()
+				st.ivarOrder = append(st.ivarOrder, name)
 			}
 		}
 		t[name] = v
@@ -2224,6 +2228,16 @@ func ivarNamesInOrder(self object.Value) []object.Value {
 		out := make([]object.Value, 0, len(o.ivarOrder))
 		for _, n := range o.ivarOrder {
 			if _, live := o.ivars[n]; live {
+				out = append(out, object.Symbol(n))
+			}
+		}
+		return out
+	}
+	if b, ok := self.(boxed); ok {
+		st := b.state()
+		out := make([]object.Value, 0, len(st.ivarOrder))
+		for _, n := range st.ivarOrder {
+			if _, live := st.ivars[n]; live {
 				out = append(out, object.Symbol(n))
 			}
 		}
@@ -2257,6 +2271,14 @@ func ivarTable(self object.Value) map[string]object.Value {
 			o.ivars = map[string]object.Value{}
 		}
 		return o.ivars
+	}
+	// Bound/UnboundMethod carry their ivars in an embedded methodValueState.
+	if b, ok := self.(boxed); ok {
+		st := b.state()
+		if st.ivars == nil {
+			st.ivars = map[string]object.Value{}
+		}
+		return st.ivars
 	}
 	return nil
 }

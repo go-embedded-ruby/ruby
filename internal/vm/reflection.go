@@ -7,16 +7,57 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
+// methodValueState holds the mutable Ruby-object state a BoundMethod or
+// UnboundMethod carries beyond its immutable definition: instance variables
+// (with insertion order, so #instance_variables matches MRI) and a frozen flag.
+// It is embedded in both so the shared ivar / freeze / copy helpers can reach it
+// through the boxed interface, exactly as RObject exposes its own ivars.
+type methodValueState struct {
+	ivars     map[string]object.Value
+	ivarOrder []string
+	frozen    bool
+}
+
+func (s *methodValueState) state() *methodValueState { return s }
+
+// boxed is implemented by the reflection value types (Bound/UnboundMethod) that,
+// unlike the generic RObject, are Go structs yet still carry instance variables
+// and a frozen flag (in an embedded methodValueState).
+type boxed interface{ state() *methodValueState }
+
+// copyMethodState deep-copies instance variables for #dup/#clone and resets the
+// frozen flag (a plain #dup is never frozen; Object#clone re-freezes afterwards
+// when the original was frozen).
+func copyMethodState(s methodValueState) methodValueState {
+	out := methodValueState{}
+	if s.ivars != nil {
+		out.ivars = make(map[string]object.Value, len(s.ivars))
+		for k, v := range s.ivars {
+			out.ivars[k] = v
+		}
+		out.ivarOrder = append([]string(nil), s.ivarOrder...)
+	}
+	return out
+}
+
 // UnboundMethod is a method detached from any receiver, produced by
 // Module#instance_method or Method#unbind. It is re-bound to a compatible
 // receiver with #bind / #bind_call.
 type UnboundMethod struct {
 	name  string
-	owner *RClass // the module/class the method was extracted from
+	owner *RClass // the module/class that DEFINES the method (its #owner)
 	m     *Method
+	// origin is the class/module the UnboundMethod was extracted FROM — the
+	// receiver of Module#instance_method, or the bound method's dispatch class for
+	// Method#unbind (always set by every constructor). It usually equals owner,
+	// but differs when the method is defined in a module included into origin;
+	// #super_method walks origin's full ancestor list so a `super` that crosses
+	// between two modules mixed into the same class is found.
+	origin *RClass
 	// vm is the interpreter the method belongs to, kept so ToS can render the
 	// method's parameters (MRI's #<UnboundMethod: …> form).
 	vm *VM
+	methodValueState
 }
 
 func (u *UnboundMethod) ToS() string {
@@ -40,7 +81,7 @@ func (vm *VM) registerReflection() {
 		if m == nil || m.undefined {
 			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
 		}
-		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm}
+		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm, origin: mod}
 	})
 
 	// Module#public_instance_method(:m): like #instance_method, but the resolved
@@ -59,7 +100,7 @@ func (vm *VM) registerReflection() {
 			}
 			raise("NameError", "method '%s' for class '%s' is %s", name, mod.name, kind)
 		}
-		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm}
+		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm, origin: mod}
 	})
 
 	// Module#singleton_class?: true when the receiver is a singleton class — a
@@ -168,10 +209,12 @@ func (vm *VM) registerReflection() {
 		return sc
 	})
 
-	// Method#unbind → UnboundMethod.
-	vm.cMethod.define("unbind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	// Method#unbind → UnboundMethod. The extraction origin is the class the bound
+	// method dispatched on (its singleton class when it has one), so a later
+	// #super_method walks the same ancestor chain the original send would.
+	vm.cMethod.define("unbind", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*BoundMethod)
-		return &UnboundMethod{name: b.name, owner: b.m.owner, m: b.m, vm: vm}
+		return &UnboundMethod{name: b.name, owner: b.m.owner, m: b.m, vm: vm, origin: vm.dispatchClass(b.recv)}
 	})
 }
 
