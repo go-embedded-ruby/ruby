@@ -21,7 +21,8 @@ func (vm *VM) registerArrayEdges() {
 	// does.
 	vm.cArray.define("bsearch", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "bsearch")
+			// MRI's bsearch Enumerator reports an unknown (nil) size.
+			return enumForSized(self, "bsearch", func(*VM) object.Value { return object.NilV })
 		}
 		elems := self.(*object.Array).Elems
 		if i, found := vm.arrayBsearchIndex(elems, blk); found {
@@ -31,7 +32,8 @@ func (vm *VM) registerArrayEdges() {
 	})
 	vm.cArray.define("bsearch_index", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "bsearch_index")
+			// MRI's bsearch_index Enumerator reports an unknown (nil) size.
+			return enumForSized(self, "bsearch_index", func(*VM) object.Value { return object.NilV })
 		}
 		if i, found := vm.arrayBsearchIndex(self.(*object.Array).Elems, blk); found {
 			return object.IntValue(int64(i))
