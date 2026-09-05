@@ -12,8 +12,15 @@ import (
 // receiver with #bind / #bind_call.
 type UnboundMethod struct {
 	name  string
-	owner *RClass // the module/class the method was extracted from
+	owner *RClass // the module/class that DEFINES the method (its #owner)
 	m     *Method
+	// origin is the class/module the UnboundMethod was extracted FROM — the
+	// receiver of Module#instance_method, or the bound method's dispatch class for
+	// Method#unbind (always set by every constructor). It usually equals owner,
+	// but differs when the method is defined in a module included into origin;
+	// #super_method walks origin's full ancestor list so a `super` that crosses
+	// between two modules mixed into the same class is found.
+	origin *RClass
 	// vm is the interpreter the method belongs to, kept so ToS can render the
 	// method's parameters (MRI's #<UnboundMethod: …> form).
 	vm *VM
@@ -40,7 +47,7 @@ func (vm *VM) registerReflection() {
 		if m == nil || m.undefined {
 			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
 		}
-		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm}
+		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm, origin: mod}
 	})
 
 	// Module#public_instance_method(:m): like #instance_method, but the resolved
@@ -59,7 +66,7 @@ func (vm *VM) registerReflection() {
 			}
 			raise("NameError", "method '%s' for class '%s' is %s", name, mod.name, kind)
 		}
-		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm}
+		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm, origin: mod}
 	})
 
 	// Module#singleton_class?: true when the receiver is a singleton class — a
@@ -168,10 +175,12 @@ func (vm *VM) registerReflection() {
 		return sc
 	})
 
-	// Method#unbind → UnboundMethod.
-	vm.cMethod.define("unbind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	// Method#unbind → UnboundMethod. The extraction origin is the class the bound
+	// method dispatched on (its singleton class when it has one), so a later
+	// #super_method walks the same ancestor chain the original send would.
+	vm.cMethod.define("unbind", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*BoundMethod)
-		return &UnboundMethod{name: b.name, owner: b.m.owner, m: b.m, vm: vm}
+		return &UnboundMethod{name: b.name, owner: b.m.owner, m: b.m, vm: vm, origin: vm.dispatchClass(b.recv)}
 	})
 }
 

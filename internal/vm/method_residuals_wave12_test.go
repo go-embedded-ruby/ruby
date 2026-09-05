@@ -1,0 +1,180 @@
+package vm_test
+
+import (
+	"strings"
+	"testing"
+)
+
+// TestMethodInspectHeads covers the receiver/owner head rendering of
+// Method#inspect (vm.methodHead) across MRI's cases: a genuine class method
+// (Recv.name / Child(Parent).name), a module method reaching a class object via
+// its metaclass (#<Class:Recv>(Owner)#name), an ordinary instance method
+// (Recv#name and Recv(Owner)#name), an anonymous class instance, and a
+// per-object singleton method.
+func TestMethodInspectHeads(t *testing.T) {
+	tests := []struct {
+		name, src, want string
+	}{
+		{
+			"def_self_class_method",
+			`class WHClsP; def self.cm; end; end
+puts WHClsP.method(:cm).inspect.start_with?("#<Method: WHClsP.cm")`,
+			"true\n",
+		},
+		{
+			"inherited_class_method_shows_owner",
+			`class WHClsP2; def self.cm; end; end
+class WHClsC2 < WHClsP2; end
+puts WHClsC2.method(:cm).inspect.start_with?("#<Method: WHClsC2(WHClsP2).cm")`,
+			"true\n",
+		},
+		{
+			"module_instance_method_on_class_via_metaclass",
+			`puts String.method(:include).inspect.start_with?("#<Method: #<Class:String>(Module)#include")`,
+			"true\n",
+		},
+		{
+			"extended_module_method_on_class_via_metaclass",
+			`m = Module.new { def whbar; end }
+c = Class.new
+c.extend(m)
+s = c.method(:whbar).inspect
+puts s.start_with?("#<Method: #<Class:#{c.inspect}>(#{m.inspect})#whbar")`,
+			"true\n",
+		},
+		{
+			"ordinary_instance_method_same_class",
+			`class WHOrd; def foo; end; end
+puts WHOrd.new.method(:foo).inspect.start_with?("#<Method: WHOrd#foo")`,
+			"true\n",
+		},
+		{
+			"ordinary_instance_method_from_module_owner",
+			`module WHMod; def bar; end; end
+class WHInc; include WHMod; end
+puts WHInc.new.method(:bar).inspect.start_with?("#<Method: WHInc(WHMod)#bar")`,
+			"true\n",
+		},
+		{
+			"anonymous_class_instance_uses_hash_separator",
+			`k = Class.new { def orig; end; alias_method :ren, :orig }
+puts k.new.method(:ren).inspect.include?("#ren(orig)")`,
+			"true\n",
+		},
+		{
+			"per_object_singleton_method_uses_dot",
+			`o = Object.new
+def o.foo; end
+puts o.method(:foo).inspect.start_with?("#<Method: #<Object")
+puts o.method(:foo).inspect.include?(">.foo")`,
+			"true\ntrue\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestUnboundMethodInspectHead covers UnboundMethod#inspect head rendering: a
+// named module owner inspects to its name, a per-object singleton owner inspects
+// to its #<Class> form.
+func TestUnboundMethodInspectHead(t *testing.T) {
+	tests := []struct {
+		name, src, want string
+	}{
+		{
+			"named_module_owner",
+			`module WHUMod; def bar; end; end
+class WHUInc; include WHUMod; end
+puts WHUInc.instance_method(:bar).inspect.start_with?("#<UnboundMethod: WHUMod#bar")`,
+			"true\n",
+		},
+		{
+			"per_object_singleton_owner",
+			`o = Object.new
+def o.foo; end
+u = o.method(:foo).unbind
+puts u.inspect.start_with?("#<UnboundMethod: #{o.singleton_class}#foo")`,
+			"true\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// inheritedModulesSrc builds two private modules whose #derp forms a super chain
+// (B#derp calls super into A#derp) both included into a class C, with a public
+// visibility change and an alias — the JRuby #7240 scenario. super_method must
+// follow the ORIGINAL definition across the two modules (reaching A, skipping B)
+// and must not stop at the alias name.
+const inheritedModulesSrc = `module WHA; private; def derp(m); "A"; end; end
+module WHB; private; def derp; "B" + super("s"); end; end
+class WHC; include WHA; include WHB; public :derp; alias_method :meow, :derp; end
+`
+
+func TestSuperMethodFollowsOriginalName(t *testing.T) {
+	tests := []struct {
+		name, src, want string
+	}{
+		{
+			"bound_visibility_changed_super",
+			inheritedModulesSrc + `puts WHC.new.method(:derp).super_method.owner`,
+			"WHA\n",
+		},
+		{
+			"bound_aliased_super_owner",
+			inheritedModulesSrc + `puts WHC.new.method(:meow).super_method.owner`,
+			"WHA\n",
+		},
+		{
+			"unbound_visibility_changed_super",
+			inheritedModulesSrc + `puts WHC.instance_method(:derp).super_method.owner`,
+			"WHA\n",
+		},
+		{
+			"unbound_aliased_super_owner",
+			inheritedModulesSrc + `puts WHC.instance_method(:meow).super_method.owner`,
+			"WHA\n",
+		},
+		{
+			"super_method_nil_at_top_returns_nil",
+			inheritedModulesSrc + `puts WHC.instance_method(:derp).super_method.super_method.inspect`,
+			"nil\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSuperMethodPlainInheritance keeps the ordinary class-inheritance chain
+// working (no alias, no module owners): super_method walks class supers.
+func TestSuperMethodPlainInheritance(t *testing.T) {
+	src := `class WHP; def m; end; end
+class WHQ < WHP; def m; end; end
+class WHR < WHQ; def m; end; end
+puts WHR.new.method(:m).super_method.owner
+puts WHR.instance_method(:m).super_method.owner
+puts WHR.instance_method(:m).super_method.super_method.owner`
+	got := eval(t, src)
+	want := "WHQ\nWHQ\nWHP\n"
+	if got != want {
+		t.Errorf("got=%q want=%q", got, want)
+	}
+	if strings.Contains(got, "nil") {
+		t.Errorf("unexpected nil in super_method chain: %q", got)
+	}
+}

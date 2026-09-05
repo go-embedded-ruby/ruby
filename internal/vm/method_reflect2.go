@@ -53,10 +53,14 @@ func (vm *VM) registerMethodReflect2() {
 		return object.Symbol(methodOriginalName(self.(*UnboundMethod).m))
 	})
 
-	// #super_method.
+	// #super_method. The super search follows the method's ORIGINAL name — an
+	// alias (alias_method :meow, :derp) reaches super along the definition it
+	// copied, not its alias name — so `super` from an aliased or a
+	// visibility-changed inherited method finds the same ancestor MRI's `super`
+	// would (see methodOriginalName).
 	vm.cMethod.define("super_method", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*BoundMethod)
-		sm := vm.superMethodAfter(vm.dispatchAncestors(b.recv), b.m.owner, b.name)
+		sm := vm.superMethodAfter(vm.dispatchAncestors(b.recv), b.m.owner, methodOriginalName(b.m))
 		if sm == nil {
 			return object.NilV
 		}
@@ -64,11 +68,16 @@ func (vm *VM) registerMethodReflect2() {
 	})
 	cUnbound.define("super_method", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		u := self.(*UnboundMethod)
-		sm := vm.superMethodAfter(vm.ancestors(u.owner), u.owner, u.name)
+		// Walk the ancestors of the class the UnboundMethod was extracted from
+		// (u.origin), not those of its defining module: a module owner's own
+		// ancestor list stops at the module, so a `super` that must cross into
+		// another module included in the same class (module B's derp calling into
+		// module A's derp, both included in class C) would otherwise be lost.
+		sm := vm.superMethodAfter(vm.ancestors(u.origin), u.owner, methodOriginalName(u.m))
 		if sm == nil {
 			return object.NilV
 		}
-		return &UnboundMethod{name: u.name, owner: sm.owner, m: sm, vm: vm}
+		return &UnboundMethod{name: u.name, owner: sm.owner, m: sm, vm: vm, origin: u.origin}
 	})
 
 	// #to_s and its alias #inspect (a shared record, so
@@ -289,15 +298,9 @@ func localName(is *bytecode.ISeq, slot int) string {
 // "(orig)" annotation appears only when the lookup name differs from the original
 // name, and the location suffix only when the source file is known.
 func (vm *VM) formatCallableString(kind string, recv object.Value, name string, m *Method) string {
-	head, sep := m.owner.name, "#"
+	head, sep := m.owner.ToS(), "#" // UnboundMethod: the defining class/module, inspected
 	if kind == "Method" {
-		if m.owner.name == "" {
-			head, sep = vm.send(recv, "inspect", nil, nil).ToS(), "."
-		} else if recvClass := vm.classOf(recv); recvClass == m.owner {
-			head = recvClass.name
-		} else {
-			head = recvClass.name + "(" + m.owner.name + ")"
-		}
+		head, sep = vm.methodHead(recv, name, m)
 	}
 	disp := name
 	if orig := methodOriginalName(m); orig != name {
@@ -308,6 +311,56 @@ func (vm *VM) formatCallableString(kind string, recv object.Value, name string, 
 		s += " " + is.File + ":0"
 	}
 	return s + ">"
+}
+
+// methodHead renders the "receiver#owner" (or "receiver.owner") portion of a
+// bound Method's #<Method: …> form, and the separator (# or .) that follows it,
+// matching MRI. A class/module receiver is shown through its metaclass:
+//   - a genuine class method (def self.m — reached through the singleton-method
+//     table) reads as `Recv.m`, with `(Owner)` when inherited: `Child(Parent).m`;
+//   - any other method reaching the class object (an included/extended module
+//     method such as Module#include, a Kernel method) reads as
+//     `#<Class:Recv>(Owner)#m`.
+//
+// An ordinary object shows its class, with `(Owner)` when the method is defined
+// in an ancestor; a per-object singleton method (def obj.m) shows the receiver's
+// own inspect with a `.` separator.
+func (vm *VM) methodHead(recv object.Value, name string, m *Method) (head, sep string) {
+	owner := m.owner
+	if cls, ok := recv.(*RClass); ok {
+		if sm := lookupOwnClassMethod(cls, name); sm == m {
+			head = cls.ToS()
+			if owner != cls {
+				head += "(" + owner.ToS() + ")"
+			}
+			return head, "."
+		}
+		return "#<Class:" + cls.ToS() + ">(" + owner.ToS() + ")", "#"
+	}
+	if owner.isSingleton && owner.metaOf == nil {
+		// A per-object singleton method (def obj.m): head is the receiver's inspect.
+		return vm.send(recv, "inspect", nil, nil).ToS(), "."
+	}
+	recvClass := vm.classOf(recv)
+	if recvClass == owner {
+		return recvClass.ToS(), "#"
+	}
+	return recvClass.ToS() + "(" + owner.ToS() + ")", "#"
+}
+
+// lookupOwnClassMethod resolves name among the genuine class (singleton) methods
+// defined with `def self.name` — the smethods tables walked up the super chain —
+// but NOT modules mixed into a metaclass via extend. It distinguishes, for
+// #<Method: …> rendering, a real class method (shown as `Recv.name`) from a
+// module method that merely reaches the class object (shown through its
+// metaclass as `#<Class:Recv>(Owner)#name`).
+func lookupOwnClassMethod(c *RClass, name string) *Method {
+	for ; c != nil; c = c.super {
+		if m, ok := c.smethods[name]; ok {
+			return m
+		}
+	}
+	return nil
 }
 
 // formatParamList renders a method's parameters as MRI's #<Method: …> signature
