@@ -48,8 +48,10 @@ func TestRegexpNew(t *testing.T) {
 		// A Regexp argument is copied, reusing its options.
 		{`p Regexp.new(/foo/i)`, "/foo/i\n"},
 		{`p Regexp.new(/bar/mix)`, "/bar/mix\n"},
-		// Extra options on a Regexp argument are ignored (its own options win).
-		{`p Regexp.new(/baz/i, Regexp::MULTILINE)`, "/baz/i\n"},
+		// Extra options on a Regexp argument are ignored (its own options win), and
+		// MRI warns "flags ignored" — unconditionally, here shared with stdout —
+		// exactly as verified against MRI 4.0.5.
+		{`p Regexp.new(/baz/i, Regexp::MULTILINE)`, "warning: flags ignored\n/baz/i\n"},
 		// A compiled Regexp.new actually matches with the requested options.
 		{`p "ABC".match?(Regexp.new("abc", Regexp::IGNORECASE))`, "true\n"},
 		{`p "ABC".match?(Regexp.new("abc"))`, "false\n"},

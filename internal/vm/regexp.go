@@ -106,16 +106,55 @@ func escapeForwardSlashes(src string) string {
 	return b.String()
 }
 
+// encAsciiCompat maps every registered encoding name (and alias) to its
+// ASCII-compatibility flag, built once from the encoding registry. It lets the
+// Regexp encoding helpers — which have no VM in hand — decide whether a source
+// encoding (UTF-16LE/BE, UTF-32, …) is one that fixes the pattern regardless of
+// its ASCII content.
+var encAsciiCompat = func() map[string]bool {
+	m := make(map[string]bool, len(encTable)*2)
+	for _, info := range encTable {
+		m[info.name] = info.asciiCompat
+		for _, a := range info.aliases {
+			m[a] = info.asciiCompat
+		}
+	}
+	return m
+}()
+
+// encIsASCIICompat reports whether the named encoding is ASCII-compatible. An
+// unknown name is treated as ASCII-compatible (the conservative default that
+// leaves the common US-ASCII/UTF-8 paths unchanged).
+func encIsASCIICompat(name string) bool {
+	c, ok := encAsciiCompat[name]
+	return !ok || c
+}
+
 // encodingName returns the canonical name of the encoding Regexp#encoding
-// reports: an ASCII-only source is US-ASCII; a source with a non-ASCII byte is
-// UTF-8, or ASCII-8BIT (BINARY) when the NOENCODING option is set.
+// reports. A source built from a non-ASCII-compatible String (UTF-16LE, …) is
+// fixed to that encoding whatever its bytes; otherwise an ASCII-only source is
+// US-ASCII (or the FIXEDENCODING source encoding when pinned), and a source with
+// a non-ASCII byte is its source encoding (UTF-8 by default, ASCII-8BIT/BINARY
+// under NOENCODING).
 func (r *Regexp) encodingName() string {
+	// A non-ASCII-compatible source encoding (UTF-16LE/BE, UTF-32, …) fixes the
+	// pattern to that encoding even when every source byte is ASCII, as MRI does:
+	// Regexp.new("a".encode("UTF-16LE")).encoding == UTF-16LE.
+	if r.srcEnc != "" && !encIsASCIICompat(r.srcEnc) {
+		return r.srcEnc
+	}
 	if asciiOnly([]byte(r.source)) {
 		// A \u escape resolving to a non-ASCII code point fixes the pattern to
 		// UTF-8 even though the source bytes are all ASCII: MRI reports
 		// /\u{9879}/.encoding == UTF-8 (re.c unescape_unicode → rb_utf8_encoding).
 		if sourceHasNonASCIIUnicodeEscape(r.source) {
 			return "UTF-8"
+		}
+		// FIXEDENCODING pins an ASCII-only pattern to its source String's encoding
+		// (MRI: Regexp.new("a".encode("UTF-8"), Regexp::FIXEDENCODING).encoding
+		// == UTF-8, while the US-ASCII source stays US-ASCII).
+		if r.fixedEnc && r.srcEnc != "" {
+			return r.srcEnc
 		}
 		return "US-ASCII"
 	}
@@ -129,14 +168,18 @@ func (r *Regexp) encodingName() string {
 }
 
 // isFixedEncoding backs Regexp#fixed_encoding?: true when the FIXEDENCODING
-// option was requested, a \u escape ties the pattern to UTF-8, or the source is
-// tied to a concrete non-ASCII encoding (a non-ASCII source that is not the
+// option was requested, a \u escape ties the pattern to UTF-8, the source
+// encoding is non-ASCII-compatible (UTF-16LE, …), or the source is tied to a
+// concrete non-ASCII encoding (a non-ASCII source that is not the
 // encoding-agnostic BINARY form).
 func (r *Regexp) isFixedEncoding() bool {
 	if r.fixedEnc {
 		return true
 	}
 	if sourceHasNonASCIIUnicodeEscape(r.source) {
+		return true
+	}
+	if r.srcEnc != "" && !encIsASCIICompat(r.srcEnc) {
 		return true
 	}
 	return !asciiOnly([]byte(r.source)) && !r.noEnc
@@ -370,25 +413,80 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 	}
 	// The engine does not accept Ruby's \uHHHH / \u{…} escapes, duplicate capture
 	// names, or non-ASCII capture names. Translate the escapes to literal
-	// characters and, when needed, rewrite named groups to synthetic ASCII names —
-	// both no-ops for sources that do not use those features.
-	engineSrc := translateUnicodeEscapes(prefix + source)
+	// characters (raising the Ruby-specific message for a malformed one, against
+	// the original source) and, when needed, rewrite named groups to synthetic
+	// ASCII names — both no-ops for sources that do not use those features.
+	engineSrc := translateUnicodeEscapes(prefix+source, source)
 	engineSrc, nameMap := rewriteNamedGroups(engineSrc)
 	re, err := onig.Compile(engineSrc)
 	if err != nil {
-		raise("RegexpError", "%s: /%s/", err.Error(), source)
+		raise("RegexpError", "%s: /%s/", mapRegexpEngineError(err.Error()), source)
 	}
 	return &Regexp{re: re, source: source, flags: flags, nameMap: nameMap}
+}
+
+// mapRegexpEngineError rewrites the go-ruby-regexp engine's diagnostic for the
+// cases where MRI's Onigmo uses different wording the ruby/spec suite pins. Only
+// the message body is changed; compileRegexp appends the ": /source/" suffix MRI
+// shows. Any message not listed is passed through unchanged.
+func mapRegexpEngineError(msg string) string {
+	switch {
+	case strings.Contains(msg, "trailing backslash"):
+		// MRI: /\/ raises "too short escape sequence".
+		return "too short escape sequence"
+	case strings.Contains(msg, "missing closing ]"):
+		// MRI: /^[$/ raises "premature end of char-class".
+		return "premature end of char-class"
+	}
+	return msg
+}
+
+// classifyUnicodeBrace names the RegexpError MRI raises for a malformed \u{…}
+// body (the caller has already found it invalid via parseUnicodeBraceBody): a
+// token that is all hex but longer than six digits or above U+10FFFF is an
+// "invalid Unicode range", anything else (an empty list, or a token with a
+// non-hex digit) is an "invalid Unicode list" (re.c unescape_unicode_list).
+func classifyUnicodeBrace(body string) string {
+	for _, tok := range strings.Fields(body) {
+		if allHex(tok) && (len(tok) > 6 || !inUnicodeRange(tok)) {
+			return "invalid Unicode range"
+		}
+	}
+	return "invalid Unicode list"
+}
+
+// allHex reports whether s is non-empty and every byte is a hexadecimal digit.
+func allHex(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// inUnicodeRange reports whether the hex string denotes a code point at or below
+// U+10FFFF (the caller has already checked it is all hex).
+func inUnicodeRange(hex string) bool {
+	v, err := strconv.ParseInt(hex, 16, 64)
+	return err == nil && v <= 0x10FFFF
 }
 
 // translateUnicodeEscapes rewrites Ruby's \uHHHH and \u{codepoint …} escapes into
 // the literal characters they denote, which the engine matches directly (it has no
 // \u escape of its own). A code point that is an ASCII metacharacter is emitted
 // backslash-escaped so it keeps its literal meaning; other characters are emitted
-// verbatim (raw UTF-8 for non-ASCII). Any \u that is not a well-formed escape, and
-// every other escape sequence, is copied through untouched. Sources without \u are
-// returned unchanged.
-func translateUnicodeEscapes(src string) string {
+// verbatim (raw UTF-8 for non-ASCII). A malformed escape raises the exact
+// RegexpError MRI raises against rawSource (re.c unescape_unicode_*): a \u without
+// four hex digits is an "invalid Unicode escape", and a \u{…} that is empty or
+// holds a non-hex token / out-of-range code point is an "invalid Unicode list" /
+// "invalid Unicode range". An unterminated \u{ and every other escape sequence are
+// copied through untouched; sources without \u are returned unchanged.
+func translateUnicodeEscapes(src, rawSource string) string {
 	if !strings.Contains(src, `\u`) {
 		return src
 	}
@@ -409,15 +507,18 @@ func translateUnicodeEscapes(src string) string {
 		}
 		if i+2 < len(src) && src[i+2] == '{' {
 			if end := strings.IndexByte(src[i+3:], '}'); end >= 0 {
-				if runes, ok := parseUnicodeBraceBody(src[i+3 : i+3+end]); ok {
-					for _, r := range runes {
-						emitLiteralRune(&b, r)
-					}
-					i += 3 + end + 1
-					continue
+				body := src[i+3 : i+3+end]
+				runes, ok := parseUnicodeBraceBody(body)
+				if !ok {
+					raise("RegexpError", "%s: /%s/", classifyUnicodeBrace(body), rawSource)
 				}
+				for _, r := range runes {
+					emitLiteralRune(&b, r)
+				}
+				i += 3 + end + 1
+				continue
 			}
-			// Unterminated or malformed \u{…}: copy the \u through and rescan.
+			// Unterminated \u{ : copy the \u through; the engine reports it.
 			b.WriteByte(src[i])
 			b.WriteByte(src[i+1])
 			i += 2
@@ -430,10 +531,9 @@ func translateUnicodeEscapes(src string) string {
 				continue
 			}
 		}
-		// \u without four hex digits and without a brace: leave it for the engine.
-		b.WriteByte(src[i])
-		b.WriteByte(src[i+1])
-		i += 2
+		// \u without four hex digits and without a brace: MRI's "invalid Unicode
+		// escape".
+		raise("RegexpError", "invalid Unicode escape: /%s/", rawSource)
 	}
 	return b.String()
 }
@@ -651,8 +751,14 @@ func (vm *VM) regexpNew(args []object.Value) object.Value {
 	}
 	switch src := args[0].(type) {
 	case *Regexp:
-		// Copy the source Regexp; MRI warns when options are also given but still
-		// reuses the original's options, so we ignore any extra arguments here.
+		// Copy the source Regexp; MRI warns "flags ignored" when options are also
+		// given (a non-nil second positional argument) but still reuses the
+		// original's options, so any extra argument is otherwise ignored here.
+		if len(args) >= 2 {
+			if _, isNil := args[1].(object.Nil); !isNil {
+				vm.send(vm.main, "warn", []object.Value{object.NewString("warning: flags ignored")}, nil)
+			}
+		}
 		r := vm.compileRegexp(src.source, src.flags).(*Regexp)
 		r.fixedEnc, r.noEnc = src.fixedEnc, src.noEnc
 		if _, ok := timeout.(object.Float); ok {
@@ -685,7 +791,7 @@ func (vm *VM) regexpNew(args []object.Value) object.Value {
 func (vm *VM) regexpFromString(src *object.String, args []object.Value, timeout object.Value) object.Value {
 	flags, fixedEnc, noEnc := "", false, false
 	if len(args) >= 2 {
-		flags = regexpOptionFlags(args[1])
+		flags = vm.regexpOptionFlags(args[1])
 		fixedEnc, noEnc = regexpEncodingBits(args[1])
 	}
 	r := vm.compileRegexp(src.Str(), flags).(*Regexp)
@@ -732,8 +838,12 @@ func regexpEncodingBits(v object.Value) (fixed, no bool) {
 }
 
 // regexpOptionFlags converts the second argument of Regexp.new into the engine's
-// "imx" flag-letter string.
-func regexpOptionFlags(v object.Value) string {
+// "imx" flag-letter string. An Integer is decoded bitwise, a String is read as
+// option letters, and true/false select IGNORECASE / nothing. Any other object
+// is the legacy form MRI still accepts with a (verbose) warning and without
+// calling #to_int: "expected true or false as ignorecase: <inspect>", treating a
+// truthy value as IGNORECASE.
+func (vm *VM) regexpOptionFlags(v object.Value) string {
 	switch opt := v.(type) {
 	case object.Nil:
 		return ""
@@ -741,11 +851,16 @@ func regexpOptionFlags(v object.Value) string {
 		return flagsFromBits(int(opt))
 	case *object.String:
 		return flagsFromLetters(opt.Str())
-	default:
-		// nil/false → none; any other truthy value → IGNORECASE (legacy form).
-		if !v.Truthy() {
-			return ""
+	case object.Bool:
+		if bool(opt) {
+			return "i"
 		}
+		return ""
+	default:
+		// Any other object is the legacy form: MRI warns (verbose) "expected true
+		// or false as ignorecase: <inspect>" without calling #to_int. A non-nil,
+		// non-false object is always truthy, so it selects IGNORECASE.
+		vm.rbWarn("warning: expected true or false as ignorecase: %s", vm.inspectStr(v))
 		return "i"
 	}
 }
@@ -819,6 +934,16 @@ func strMatchRegexp(v object.Value) *Regexp {
 	default:
 		raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
 		return nil
+	}
+}
+
+// checkSubjectEncoding raises ArgumentError when the match subject is a String
+// whose bytes are not valid in its own encoding, matching MRI's
+// rb_reg_prepare_enc ("invalid byte sequence in <enc>"). A non-String subject
+// (Symbol, or an object coerced via #to_str) is left to the caller's coercion.
+func (vm *VM) checkSubjectEncoding(v object.Value) {
+	if s, ok := v.(*object.String); ok && !validInEncoding(s.Bytes(), s.EncName()) {
+		raise("ArgumentError", "invalid byte sequence in %s", s.EncName())
 	}
 }
 
@@ -1038,12 +1163,14 @@ func (vm *VM) regexpOperandStr(v object.Value) string {
 	return ""
 }
 
-// regexpUnion implements Regexp.union, following MRI's structure. With no
+// regexpUnion implements Regexp.union, following MRI's rb_reg_s_union. With no
 // arguments it matches nothing (/(?!)/). A single argument is special: a Regexp
 // (or #to_regexp) is returned verbatim, an Array recurses as the pattern list,
-// and a lone String/Symbol becomes a single quoted pattern. Two or more patterns
-// are joined by '|', each Regexp contributing its #to_s and each other operand
-// coerced via #to_str only (a Symbol raises TypeError here, unlike the lone case).
+// and a lone String/Symbol becomes a single quoted pattern (carrying the quote's
+// encoding). Two or more patterns are joined by '|', each Regexp contributing its
+// #to_s and each other operand coerced via #to_str only (a Symbol raises
+// TypeError here, unlike the lone case). The result's encoding is negotiated
+// across the operands, raising ArgumentError when they conflict.
 func (vm *VM) regexpUnion(args []object.Value) object.Value {
 	if len(args) == 0 {
 		return vm.regexpNew([]object.Value{object.NewString("(?!)")})
@@ -1055,35 +1182,99 @@ func (vm *VM) regexpUnion(args []object.Value) object.Value {
 		if arr, ok := args[0].(*object.Array); ok {
 			return vm.regexpUnion(arr.Elems)
 		}
-		// A lone String/Symbol: one quoted pattern, never an alternation.
-		return vm.regexpNew([]object.Value{object.NewString(regexpEscapeLiteral(vm.regexpOperandStr(args[0])))})
+		// A lone String/Symbol: one quoted pattern, never an alternation. The
+		// quoted source keeps the operand's quote encoding (US-ASCII for ASCII-only
+		// ASCII-compatible content, otherwise the operand's encoding), so e.g.
+		// Regexp.union("a".encode("UTF-16LE")).encoding == UTF-16LE.
+		raw := vm.regexpOperandStr(args[0])
+		enc := regexpQuoteResultEnc(raw, regexpOperandEncName(args[0]))
+		quoted := object.NewStringBytesEnc([]byte(regexpEscapeLiteral(raw)), enc)
+		return vm.regexpNew([]object.Value{quoted})
 	}
+
+	// Two or more patterns: build the joined source and negotiate the result
+	// encoding, mirroring MRI's three-way tracking (an ASCII-incompatible
+	// encoding, an ASCII-compatible fixed encoding, and whether any operand was
+	// ASCII-only). A second, different member of either fixed set is a conflict, as
+	// is mixing an ASCII-incompatible encoding with an ASCII-only or fixed operand.
 	sources := make([]string, len(args))
-	for i, a := range args {
-		if re, ok := vm.toRegexpOperand(a); ok {
-			sources[i] = re.ToS()
-		} else {
-			sources[i] = regexpEscapeLiteral(vm.regexpUnionStr(a))
+	var asciiIncompat, asciiCompatFixed string
+	hasAsciiOnly := false
+	setOrConflict := func(slot *string, enc string) {
+		if *slot == "" {
+			*slot = enc
+		} else if *slot != enc {
+			raise("ArgumentError", "incompatible encodings: %s and %s", *slot, enc)
 		}
 	}
-	return vm.regexpNew([]object.Value{object.NewString(strings.Join(sources, "|"))})
+	for i, a := range args {
+		var enc string
+		if re, ok := vm.toRegexpOperand(a); ok {
+			sources[i] = re.ToS()
+			enc = re.encodingName()
+			switch {
+			case !encIsASCIICompat(enc):
+				setOrConflict(&asciiIncompat, enc)
+			case re.isFixedEncoding():
+				setOrConflict(&asciiCompatFixed, enc)
+			default:
+				hasAsciiOnly = true
+			}
+		} else {
+			s := vm.unionStringOperand(a)
+			sources[i] = regexpEscapeLiteral(s.Str())
+			enc = s.EncName()
+			switch {
+			case !encIsASCIICompat(enc):
+				setOrConflict(&asciiIncompat, enc)
+			case asciiOnly(s.Bytes()):
+				hasAsciiOnly = true
+			default:
+				setOrConflict(&asciiCompatFixed, enc)
+			}
+		}
+		// After each operand, an ASCII-incompatible encoding cannot coexist with an
+		// ASCII-only operand or an ASCII-compatible fixed encoding (checked here so
+		// the first such combination raises, in argument order, as MRI does).
+		if asciiIncompat != "" {
+			if hasAsciiOnly {
+				raise("ArgumentError", "ASCII incompatible encoding: %s", asciiIncompat)
+			}
+			if asciiCompatFixed != "" {
+				raise("ArgumentError", "incompatible encodings: %s and %s", asciiIncompat, asciiCompatFixed)
+			}
+		}
+	}
+
+	result := vm.regexpNew([]object.Value{object.NewString(strings.Join(sources, "|"))}).(*Regexp)
+	// The result encoding is the ASCII-incompatible one if any, else the
+	// ASCII-compatible fixed one if any, else US-ASCII (MRI associates ASCII-8BIT
+	// with an all-ASCII source, which a Regexp reports as US-ASCII). For the first
+	// two, pin the encoding so an all-ASCII joined source still reports it.
+	switch {
+	case asciiIncompat != "":
+		result.srcEnc, result.fixedEnc = asciiIncompat, true
+	case asciiCompatFixed != "":
+		result.srcEnc, result.fixedEnc = asciiCompatFixed, true
+	}
+	return result
 }
 
-// regexpUnionStr coerces a non-Regexp operand of a multi-pattern Regexp.union to
-// a String via #to_str only (MRI's rb_check_string_type): a String is taken
+// unionStringOperand coerces a non-Regexp operand of a multi-pattern Regexp.union
+// to the String whose bytes and encoding the negotiation reads: a String is taken
 // directly, anything else must supply #to_str, and a Symbol — which has none —
-// raises TypeError, unlike the single-argument union or Regexp.quote.
-func (vm *VM) regexpUnionStr(v object.Value) string {
+// raises TypeError, matching MRI's StringValue in rb_reg_s_union.
+func (vm *VM) unionStringOperand(v object.Value) *object.String {
 	if s, ok := v.(*object.String); ok {
-		return s.Str()
+		return s
 	}
 	if vm.respondsToDynamic(v, "to_str") {
 		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
-			return s.Str()
+			return s
 		}
 	}
 	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
-	return ""
+	return nil
 }
 
 // toRegexpOperand reports whether v is a Regexp or converts to one via #to_regexp,
@@ -1141,10 +1332,13 @@ func regexpOperandEncName(v object.Value) string {
 }
 
 // regexpQuoteResultEnc is the encoding MRI tags on a Regexp.quote / .escape
-// result: US-ASCII when the (raw, pre-escape) operand holds only ASCII bytes,
-// otherwise the operand's own encoding.
+// result: US-ASCII when the (raw, pre-escape) operand holds only ASCII bytes AND
+// its encoding is ASCII-compatible, otherwise the operand's own encoding. A
+// non-ASCII-compatible operand (UTF-16LE, …) keeps its encoding even for ASCII
+// content, as MRI does: Regexp.quote("a".encode("UTF-16LE")).encoding ==
+// UTF-16LE.
 func regexpQuoteResultEnc(raw, inputEnc string) string {
-	if asciiOnly([]byte(raw)) {
+	if asciiOnly([]byte(raw)) && encIsASCIICompat(inputEnc) {
 		return "US-ASCII"
 	}
 	return inputEnc
@@ -1772,6 +1966,16 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.consts["FIXEDENCODING"] = object.IntValue(reFixedEncoding)
 	vm.cRegexp.consts["NOENCODING"] = object.IntValue(reNoEncoding)
 
+	// Regexp::TimeoutError < RegexpError is MRI's error for a match exceeding
+	// Regexp.timeout. The constant is defined for API parity; the pure-Go engine
+	// reports a timed-out match as a non-match (Match returns nil, indistinguishable
+	// from no match), so it is a real class but is never raised at match time here.
+	if reErr, ok := vm.consts["RegexpError"].(*RClass); ok {
+		to := newClass("Regexp::TimeoutError", reErr)
+		vm.cRegexp.consts["TimeoutError"] = to
+		vm.consts["Regexp::TimeoutError"] = to
+	}
+
 	// Regexp.new(str_or_regexp[, options]) / Regexp.compile(...) build a Regexp at
 	// runtime. A Regexp argument is copied (its options are reused); a String is
 	// compiled with the options decoded from the second argument.
@@ -1870,7 +2074,7 @@ func (vm *VM) installRegexp() {
 				str := vm.regexpOperandStr(args[0])
 				flags := ""
 				if len(args) >= 2 {
-					flags = regexpOptionFlags(args[1])
+					flags = vm.regexpOptionFlags(args[1])
 				}
 				// Compile to reject a malformed pattern (RegexpError), as MRI does.
 				source = vm.compileRegexp(str, flags).(*Regexp).source
@@ -1879,7 +2083,12 @@ func (vm *VM) installRegexp() {
 		}}
 
 	vm.cRegexp.define("source", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(reArg(self).source)
+		// The source String carries the Regexp's own encoding: US-ASCII for an
+		// ASCII-only pattern, otherwise the pattern's encoding (UTF-8 for a \u
+		// escape, or the encoding of the String the Regexp was built from), matching
+		// MRI's rb_reg_source.
+		r := reArg(self)
+		return object.NewStringBytesEnc([]byte(r.source), r.encodingName())
 	})
 	vm.cRegexp.define("options", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(reArg(self).optionBits())
@@ -1897,6 +2106,7 @@ func (vm *VM) installRegexp() {
 		if _, isNil := args[0].(object.Nil); isNil {
 			return object.False
 		}
+		vm.checkSubjectEncoding(args[0])
 		re := reArg(self)
 		subject := strArg(args[0])
 		// match?(str, pos): probe from character offset pos, without touching $~
@@ -1922,6 +2132,7 @@ func (vm *VM) installRegexp() {
 			vm.lastMatch = object.NilV
 			return object.NilV
 		}
+		vm.checkSubjectEncoding(args[0])
 		// The subject is coerced like any Regexp operand: a Symbol yields its name,
 		// anything else is taken via #to_str (Integer/Exception raise TypeError).
 		subject := vm.regexpOperandStr(args[0])
