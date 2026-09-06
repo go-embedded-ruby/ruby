@@ -4102,6 +4102,11 @@ func (vm *VM) bootstrap() {
 	hashInit := func(_ *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h) // re-initialising a frozen hash raises (a fresh one is not frozen)
+		// Hash.new(capacity: n) / Hash.new(default, capacity: n): a trailing
+		// {capacity: …} keyword hash is only a preallocation hint (rbgo does not
+		// preallocate), so it is dropped before the positional default is read —
+		// Hash.new(capacity: 42).default is nil, not the keyword hash itself.
+		args = stripHashCapacityKwarg(args)
 		// initialize (re)sets the default handling: it always clears both the
 		// static default and the default proc first, so re-invoking it on an
 		// existing hash resets them (Hash#initialize is a real, if private,
@@ -4240,6 +4245,20 @@ func (vm *VM) bootstrap() {
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			return object.Bool(hashArgOrRaise(vm, args[0]).Ruby2Keywords)
 		}}
+	// Hash.allocate returns a fully-formed, empty Hash (Class#allocate builds a
+	// bare RObject with no backing value, so Hash.allocate.size would fail to find
+	// the *object.Hash). A subclass gets a fresh Hash wrapped so its class identity
+	// is kept, mirroring how Hash.new builds subclass instances.
+	vm.cHash.smethods["allocate"] = &Method{name: "allocate", owner: vm.cHash,
+		native: func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+			h := object.NewHash()
+			if recv := self.(*RClass); recv != vm.cHash {
+				obj := &RObject{class: recv, ivars: map[string]object.Value{}, builtin: h}
+				vm.registerLiveObject(obj)
+				return obj
+			}
+			return h
+		}}
 	// #[] reads args[0] and returns a stored/default value; #[]= copies element
 	// values into the hash. Neither retains the args slice, so both take the
 	// no-copy OpSend fast path (defineNR).
@@ -4304,10 +4323,9 @@ func (vm *VM) bootstrap() {
 			return hashSizedEnum(self, "each")
 		}
 		h := self.(*object.Hash)
-		for _, k := range h.Keys {
-			v, _ := h.Get(k)
+		vm.hashEachLive(h, func(k, v object.Value) {
 			vm.callBlock(blk, []object.Value{hashPair(k, v)})
-		}
+		})
 		return h
 	})
 	vm.cHash.methods["each_pair"] = vm.cHash.methods["each"]
@@ -4317,9 +4335,9 @@ func (vm *VM) bootstrap() {
 			return hashSizedEnum(self, "each_key")
 		}
 		h := self.(*object.Hash)
-		for _, k := range h.Keys {
+		vm.hashEachLive(h, func(k, _ object.Value) {
 			vm.callBlock(blk, []object.Value{k})
-		}
+		})
 		return h
 	})
 	vm.cHash.define("each_value", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
@@ -4327,10 +4345,9 @@ func (vm *VM) bootstrap() {
 			return hashSizedEnum(self, "each_value")
 		}
 		h := self.(*object.Hash)
-		for _, k := range h.Keys {
-			v, _ := h.Get(k)
+		vm.hashEachLive(h, func(_, v object.Value) {
 			vm.callBlock(blk, []object.Value{v})
-		}
+		})
 		return h
 	})
 	// mergeInto folds each other hash into dst. On a key already present, a block
@@ -4524,20 +4541,26 @@ func (vm *VM) bootstrap() {
 		}
 		h := self.(*object.Hash)
 		vm.checkHashFrozen(h)
-		// Compute the new keys first, then rebuild in place so a new key never
-		// collides with an old one mid-iteration.
-		keys := append([]object.Value{}, h.Keys...)
-		newKeys := make([]object.Value, len(keys))
+		// Transform in place one key at a time, mirroring MRI: snapshot the pairs
+		// up front, then for each old key compute its replacement. A `break` in the
+		// block unwinds out of the method, leaving the keys processed so far
+		// transformed and the rest untouched — transform_keys! is not atomic. An
+		// old key is deleted before its replacement is stored unless it was itself
+		// produced as a replacement earlier, so a key rewritten onto an already
+		// re-keyed slot is not dropped (and the surviving order matches MRI's).
+		keys := append([]object.Value(nil), h.Keys...)
 		vals := make([]object.Value, len(keys))
 		for i, k := range keys {
 			vals[i], _ = h.Get(k)
-			newKeys[i] = vm.transformKey(k, mapping, blk)
 		}
-		for _, k := range keys {
-			h.Delete(k)
-		}
-		for i := range newKeys {
-			h.Set(newKeys[i], vals[i])
+		newKeys := object.NewHash()
+		for i, k := range keys {
+			nk := vm.transformKey(k, mapping, blk)
+			if _, seen := newKeys.Get(k); !seen {
+				h.Delete(k)
+			}
+			h.Set(nk, vals[i])
+			newKeys.Set(nk, object.NilV)
 		}
 		return h
 	})
@@ -7070,6 +7093,38 @@ func simplestRatBetween(lo, hi *big.Rat) *big.Rat {
 // transformKey computes a replacement key for Hash#transform_keys(!): a mapping
 // hash takes precedence when it contains the key, otherwise the block (if any)
 // is applied, and failing both the key is left unchanged.
+// hashEachLive walks a hash for Hash#each/#each_key/#each_value over a snapshot
+// of the keys, so deleting the current entry (or one shifted by Delete's in-place
+// compaction) during the block does not disturb the cursor. Like MRI it visits
+// each key still present exactly once and skips one removed ahead of the cursor;
+// the value is read fresh each step so an in-block reassignment shows through.
+func (vm *VM) hashEachLive(h *object.Hash, fn func(k, v object.Value)) {
+	keys := append([]object.Value(nil), h.Keys...)
+	for _, k := range keys {
+		v, ok := h.Get(k)
+		if !ok {
+			continue // removed earlier in this same iteration
+		}
+		fn(k, v)
+	}
+}
+
+// stripHashCapacityKwarg drops a trailing {capacity: …} keyword hash from a
+// Hash.new / Hash#initialize argument list. rbgo has no keyword/positional
+// separation at the native boundary, so only a hash whose sole key is the Symbol
+// :capacity is treated as the capacity: hint; any other trailing hash (including
+// one with additional keys) stays a positional default value.
+func stripHashCapacityKwarg(args []object.Value) []object.Value {
+	if n := len(args); n > 0 {
+		if h, ok := args[n-1].(*object.Hash); ok && h.Len() == 1 {
+			if _, isCap := h.Get(object.Symbol("capacity")); isCap {
+				return args[:n-1]
+			}
+		}
+	}
+	return args
+}
+
 func (vm *VM) transformKey(k object.Value, mapping *object.Hash, blk *Proc) object.Value {
 	if mapping != nil {
 		if nk, ok := mapping.Get(k); ok {
