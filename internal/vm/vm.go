@@ -1505,7 +1505,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpNewRange:
 				hi := pop()
 				lo := pop()
-				push(object.NewRange(lo, hi, in.A == 1))
+				push(vm.newRange(lo, hi, in.A == 1, false))
 			case bytecode.OpPop:
 				pop()
 			case bytecode.OpDup:
