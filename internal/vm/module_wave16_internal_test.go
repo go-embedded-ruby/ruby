@@ -48,7 +48,11 @@ func TestWave16NameCoercion(t *testing.T) {
 // malformed name raises NameError, while a valid name returns the removed value.
 func TestWave16RemoveClassVariable(t *testing.T) {
 	if got := eval(t, "c = Class.new\nc.class_variable_set(:@@x, 9)\np c.send(:remove_class_variable, :@@x)"); got != "9\n" {
-		t.Errorf("remove_class_variable value: got %q", got)
+		t.Errorf("remove_class_variable value (symbol): got %q", got)
+	}
+	// A String name exercises cvarNameArg's *object.String arm.
+	if got := eval(t, "c = Class.new\nc.class_variable_set(:@@y, 8)\np c.send(:remove_class_variable, \"@@y\")"); got != "8\n" {
+		t.Errorf("remove_class_variable value (string): got %q", got)
 	}
 	if cls, _ := evalErr(t, "Class.new.send(:remove_class_variable, 123)"); cls != "TypeError" {
 		t.Errorf("remove_class_variable non-name: got %s", cls)
