@@ -1817,7 +1817,7 @@ func (vm *VM) bootstrap() {
 		if b := stringOrSubclassBytes(args[0]); b != nil {
 			// Equal bytes are not enough: rb_str_equal also requires the encodings to
 			// be comparable, so "\xff" tagged UTF-8 and ISO-8859-1 are unequal.
-			return object.Bool(a.Str() == b.Str() && vm.strComparable(a, b))
+			return object.Bool(vm.strComparable(a, b) && a.Str() == b.Str())
 		}
 		// A non-String that answers #to_str: MRI's rb_str_equal defers to
 		// `other == self` (it only checks that #to_str is defined, never calling
@@ -2370,14 +2370,18 @@ func (vm *VM) bootstrap() {
 		}
 		return s
 	})
+	pad := func(vm *VM, self object.Value, args []object.Value, side byte) object.Value {
+		str, enc := vm.padString(self.(*object.String), args, side)
+		return object.NewStringBytesEnc([]byte(str), enc)
+	}
 	vm.cString.define("ljust", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, vm.padString(strOf(self), args, 'l'))
+		return pad(vm, self, args, 'l')
 	})
 	vm.cString.define("rjust", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, vm.padString(strOf(self), args, 'r'))
+		return pad(vm, self, args, 'r')
 	})
 	vm.cString.define("center", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, vm.padString(strOf(self), args, 'c'))
+		return pad(vm, self, args, 'c')
 	})
 	trFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, trString(strOf(self), vm.strTrArg(args[0]), vm.strTrArg(args[1]), false))
@@ -2586,8 +2590,12 @@ func (vm *VM) bootstrap() {
 		vm.checkFrozen(s)
 		// The inserted string converts via #to_str before the index is checked (MRI
 		// raises TypeError for an unconvertible value even when the index is out of
-		// range); the index converts via #to_int.
-		ins := []rune(vm.coerceFormatString(args[1]))
+		// range); the two encodings are negotiated (raising
+		// Encoding::CompatibilityError, and the receiver adopts the combined
+		// encoding); the index converts via #to_int.
+		insStr, insObj := vm.strCoerceArg(args[1])
+		newEnc := vm.combinedEncName(s, insObj)
+		ins := []rune(insStr)
 		r := []rune(s.Str())
 		idx := vm.repeatLong(args[0])
 		at := int(idx)
@@ -2599,6 +2607,7 @@ func (vm *VM) bootstrap() {
 		}
 		out := append(append(append([]rune{}, r[:at]...), ins...), r[at:]...)
 		s.SetBytes([]byte(string(out)))
+		s.Enc = newEnc
 		return s
 	})
 	vm.cString.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -9555,28 +9564,35 @@ func (vm *VM) digRest(v object.Value, keys []object.Value) object.Value {
 
 // padString implements ljust/rjust/center ('l'/'r'/'c'): pad s with the pad
 // string (default " ") to a rune width. Extra padding for center goes right.
-func (vm *VM) padString(s string, args []object.Value, side byte) string {
+func (vm *VM) padString(self *object.String, args []object.Value, side byte) (string, string) {
+	s := self.Str()
 	width := int(vm.repeatLong(args[0])) // #to_int coercion of the width
 	pad := " "
+	enc := self.EncName()
 	if len(args) > 1 {
-		pad = vm.coerceFormatString(args[1]) // #to_str coercion of the pad string
+		p, po := vm.strCoerceArg(args[1]) // #to_str coercion of the pad (subclasses unwrap)
+		pad = p
+		// rb_str_justify negotiates the encodings up front (before the width test),
+		// so an incompatible pad raises Encoding::CompatibilityError and the result
+		// carries the combined encoding (e.g. IBM437 padded with "あ" gives UTF-8).
+		enc = vm.combinedEncName(self, po)
 	}
 	if pad == "" {
 		raise("ArgumentError", "zero width padding")
 	}
 	n := utf8.RuneCountInString(s)
 	if n >= width {
-		return s
+		return s, enc
 	}
 	total := width - n
 	switch side {
 	case 'r':
-		return makePad(pad, total) + s
+		return makePad(pad, total) + s, enc
 	case 'c':
 		left := total / 2
-		return makePad(pad, left) + s + makePad(pad, total-left)
+		return makePad(pad, left) + s + makePad(pad, total-left), enc
 	default: // 'l'
-		return s + makePad(pad, total)
+		return s + makePad(pad, total), enc
 	}
 }
 
