@@ -122,7 +122,9 @@ func (y *yielder) Truthy() bool    { return true }
 // can't reproduce deterministically, so ToS reuses Inspect.)
 func (e *Enumerator) Inspect() string {
 	if e.uninitialized() {
-		return "#<" + enumeratorClassName(e) + ": uninitialized>"
+		// Only Enumerator.allocate produces an uninitialized enumerator, and it
+		// carries none of the subclass flags, so the class name is always plain.
+		return "#<Enumerator: uninitialized>"
 	}
 	if e.isChain {
 		parts := make([]string, len(e.chainParts))
@@ -153,21 +155,6 @@ func (e *Enumerator) Inspect() string {
 }
 func (e *Enumerator) ToS() string  { return e.Inspect() }
 func (e *Enumerator) Truthy() bool { return true }
-
-// enumeratorClassName is the Ruby class name shown in an Enumerator's #inspect,
-// used for the uninitialized ("#<Enumerator: uninitialized>") form where no
-// receiver is available to derive it from. An allocated-but-uninitialized
-// enumerator carries none of the subclass flags, so this reads "Enumerator".
-func enumeratorClassName(e *Enumerator) string {
-	switch {
-	case e.isArithSeq:
-		return "Enumerator::ArithmeticSequence"
-	case e.isProduct:
-		return "Enumerator::Product"
-	default:
-		return "Enumerator"
-	}
-}
 
 // enumFor builds an Enumerator for recv.meth(*args).
 func enumFor(recv object.Value, meth string, args ...object.Value) *Enumerator {
@@ -338,18 +325,16 @@ func (vm *VM) registerEnumerator() {
 	}
 
 	d := func(name string, fn NativeFn) { vm.cEnumerator.define(name, fn) }
-	// #inspect / #to_s: a live Enumerator or Lazy renders through its Go Inspect;
-	// a bare instance from Class#allocate (never #initialize-d) reads
-	// "#<ClassName: uninitialized>", as MRI shows for an uninitialized enumerator.
-	inspectFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		switch v := self.(type) {
-		case *Enumerator:
-			return object.NewString(v.Inspect())
-		case *LazyEnum:
-			return object.NewString(v.Inspect())
-		default:
-			return object.NewString("#<" + vm.classOf(self).name + ": uninitialized>")
+	// #inspect / #to_s render through the receiver's Go Inspect. An instance from
+	// Class#allocate (never #initialize-d) is still a typed *Enumerator/*LazyEnum
+	// whose Inspect reports the "#<ClassName: uninitialized>" form MRI shows, so no
+	// separate uninitialized branch is needed. The receiver is always one of the
+	// two concrete types (subclasses inherit the typed allocate above).
+	inspectFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if l, ok := self.(*LazyEnum); ok {
+			return object.NewString(l.Inspect())
 		}
+		return object.NewString(self.(*Enumerator).Inspect())
 	}
 	d("inspect", inspectFn)
 	d("to_s", inspectFn)
@@ -358,10 +343,7 @@ func (vm *VM) registerEnumerator() {
 	// private method, requires a block (ArgumentError otherwise, with MRI's Proc
 	// message), refuses a frozen receiver (FrozenError), and returns self.
 	d("initialize", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		e, ok := self.(*Enumerator)
-		if !ok {
-			raise("TypeError", "not an Enumerator")
-		}
+		e := self.(*Enumerator)
 		if isFrozen(e) {
 			vm.raiseFrozen(e)
 		}

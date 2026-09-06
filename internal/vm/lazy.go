@@ -101,10 +101,7 @@ func (vm *VM) registerLazy() {
 	// requires a block (ArgumentError), refuses a frozen receiver (FrozenError),
 	// returns self.
 	vm.cLazy.define("initialize", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		l, ok := self.(*LazyEnum)
-		if !ok {
-			raise("TypeError", "not an Enumerator::Lazy")
-		}
+		l := self.(*LazyEnum)
 		if isFrozen(l) {
 			vm.raiseFrozen(l)
 		}
@@ -553,6 +550,14 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, []object.Value
 		// A pipeline that stops early leaves that fiber suspended, exactly as an
 		// abandoned #next does. That is the existing behaviour of external
 		// iteration here, not something this adds.
+		//
+		// forPull copies the enumerator's definition and drives its stored recv.meth
+		// directly, which bypasses a singleton #each (`def enum.each; …`) the copy
+		// cannot carry. When #each is overridden, drive the original object's
+		// dispatched #each through a fiber instead, so the override is honoured.
+		if m := vm.resolveMethod(r, "each"); m != nil && m != vm.cEnumerator.methods["each"] {
+			return vm.fiberPullEach(r)
+		}
 		pull := r.forPull()
 		return func() (object.Value, []object.Value, bool) {
 			w, ok := vm.enumPull(pull)
@@ -585,6 +590,36 @@ func (vm *VM) lazySource(recv object.Value) func() (object.Value, []object.Value
 // machinery so a multi-value yield (Hash pairs, etc.) is handled identically.
 func (vm *VM) collectEach(recv object.Value) []object.Value {
 	return vm.enumMaterialize(&Enumerator{recv: recv, meth: "each"})
+}
+
+// fiberPullEach returns a restartable pull over recv's dispatched #each, driven
+// one element at a time through a fiber (like enumPull) so an infinite source
+// stays usable and a singleton/overridden #each is honoured. Each call returns
+// the next yield's gathered value plus, for a multi-value yield, the raw
+// arguments (so a single-parameter downstream block sees only the first).
+func (vm *VM) fiberPullEach(recv object.Value) func() (object.Value, []object.Value, bool) {
+	var f *Fiber
+	return func() (object.Value, []object.Value, bool) {
+		if f == nil {
+			driver := &Proc{native: func(vm *VM, _ []object.Value) object.Value {
+				collect := &Proc{native: func(vm *VM, args []object.Value) object.Value {
+					vm.fiberYield([]object.Value{object.NewArrayFromSlice(append([]object.Value{}, args...))})
+					return object.NilV
+				}}
+				return vm.send(recv, "each", nil, collect)
+			}}
+			f = newFiber(vm.currentThread, driver)
+		}
+		val := vm.fiberResume(f, nil)
+		if f.state == fibDead {
+			return object.NilVal(), nil, false
+		}
+		w := val.(*object.Array)
+		if len(w.Elems) == 1 {
+			return w.Elems[0], nil, true
+		}
+		return enumPack(w.Elems), w.Elems, true
+	}
 }
 
 // lazyForce pulls from the source, applying the op chain to each element, until
