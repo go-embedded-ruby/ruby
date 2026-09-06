@@ -1340,7 +1340,7 @@ func (vm *VM) bootstrap() {
 		mod := self.(*RClass)
 		target, ok := args[0].(*RClass)
 		if !ok {
-			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
+			raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(args[0]).name)
 		}
 		vm.mixinModule(mod, target, false)
 		return mod
@@ -1352,7 +1352,7 @@ func (vm *VM) bootstrap() {
 		mod := self.(*RClass)
 		target, ok := args[0].(*RClass)
 		if !ok {
-			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
+			raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(args[0]).name)
 		}
 		vm.mixinModule(mod, target, true)
 		return mod
@@ -1394,7 +1394,7 @@ func (vm *VM) bootstrap() {
 		// TypeError, matching MRI's rb_mod_include_p (Check_Type T_MODULE).
 		mod, ok := args[0].(*RClass)
 		if !ok || !mod.isModule {
-			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
+			raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(args[0]).name)
 		}
 		me := self.(*RClass)
 		for _, k := range vm.ancestors(me) {
@@ -8768,11 +8768,9 @@ func (vm *VM) moduleToSStr(c *RClass) string {
 		case c.metaOf != nil:
 			inner = vm.moduleToSStr(c.metaOf)
 		case c.attached != nil:
-			if ac, ok := c.attached.(*RClass); ok {
-				inner = vm.moduleToSStr(ac)
-			} else {
-				inner = vm.objectIdentityRepr(c.attached)
-			}
+			// attached is the object of a per-object singleton; a class/module
+			// singleton uses metaOf instead, so this is always a non-class object.
+			inner = vm.objectIdentityRepr(c.attached)
 		default:
 			inner = vm.anonClassOrModuleRepr(c)
 		}
@@ -8796,7 +8794,7 @@ func (vm *VM) checkModuleArgs(op string, args []object.Value) {
 	for _, a := range args {
 		mod, ok := a.(*RClass)
 		if !ok || !mod.isModule {
-			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(a))
+			raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(a).name)
 		}
 		if mod.isRefinement {
 			raise("TypeError", "Cannot %s refinement", op)
@@ -8816,7 +8814,7 @@ func (vm *VM) mixinModule(mod, target *RClass, prepend bool) {
 	// rebound onto a Class receiver (Module.instance_method(:append_features).
 	// bind(Class.new).call(...)); the include/prepend path always passes a module.
 	if !mod.isModule {
-		raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(mod))
+		raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(mod).name)
 	}
 	if target.frozen {
 		vm.raiseFrozen(target)

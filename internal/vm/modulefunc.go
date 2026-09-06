@@ -141,9 +141,8 @@ func (vm *VM) registerModuleExtras() {
 		// one under such a name, alias included, forces it private (vm_method.c
 		// check_definition_visibility / rb_scope_visibility_set special-cases).
 		if alwaysPrivateName(newName) {
-			if m := mod.methods[newName]; m != nil {
-				m.vis = visPrivate
-			}
+			// aliasMethod always installs mod.methods[newName], so it is present here.
+			mod.methods[newName].vis = visPrivate
 		}
 		return object.Symbol(newName)
 	})
