@@ -11,6 +11,10 @@ import (
 // the +/- arithmetic (Duration-backed), and the ordering / equality operators —
 // each value asserted against MRI's Time semantics on a fixed UTC instant.
 func TestTime(t *testing.T) {
+	// Time.at defaults to the local timezone (as in MRI). Pin TZ to UTC so these
+	// cases render on a fixed UTC instant deterministically on any machine, rather
+	// than depending on the tester's wall-clock zone.
+	t.Setenv("TZ", "UTC")
 	cases := []struct{ src, want string }{
 		// Construction + to_i (Time.at from a Unix timestamp, UTC).
 		{`p Time.at(1000).to_i`, "1000\n"},
