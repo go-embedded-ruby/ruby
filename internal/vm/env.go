@@ -412,22 +412,12 @@ func (vm *VM) registerENV() {
 	def("empty?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(envCount() == 0)
 	})
-	// inspect renders ENV like a Hash literal, but with MRI's env_inspect spacing:
-	// "key"=>value with no spaces around "=>" (unlike Hash#inspect, which spaces
-	// them in Ruby 3.4+). Keys and values are inspected as Strings.
+	// inspect renders ENV like a Hash of its String pairs. It uses the same
+	// Hash#inspect rendering (with the "key" => value spacing MRI 4.0.5 produces in
+	// a normal environment), which is what the process ENV shows there and matches
+	// byte-for-byte.
 	def("inspect", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		var b strings.Builder
-		b.WriteByte('{')
-		for i, p := range envPairs() {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString(p[0].Inspect())
-			b.WriteString("=>")
-			b.WriteString(p[1].Inspect())
-		}
-		b.WriteByte('}')
-		return object.NewString(b.String())
+		return object.NewString(envHash().Inspect())
 	})
 	def("to_s", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString("ENV")

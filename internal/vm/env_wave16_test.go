@@ -158,8 +158,8 @@ func TestENVWave16(t *testing.T) {
 		{`ENV.clear; ENV["A"]="1"; v=Object.new; def v.to_str; "1"; end; p ENV.value?(v)`, `true`},
 		{`ENV.clear; ENV["A"]="1"; v=Object.new; def v.to_str; "1"; end; p ENV.rassoc(v)`, `["A", "1"]`},
 
-		// inspect (MRI env_inspect spacing, no spaces around =>) and to_s.
-		{`ENV.clear; ENV["A"]="1"; ENV["B"]="2"; p ENV.inspect`, `"{\"A\"=>\"1\", \"B\"=>\"2\"}"`},
+		// inspect renders as a Hash of the pairs (MRI 4.0.5 normal-env spacing) and to_s.
+		{`ENV.clear; ENV["A"]="1"; ENV["B"]="2"; p ENV.inspect`, `"{\"A\" => \"1\", \"B\" => \"2\"}"`},
 		{`ENV.clear; p ENV.inspect`, `"{}"`},
 		{`p ENV.to_s`, `"ENV"`},
 		{`p ENV.rehash`, `nil`},
