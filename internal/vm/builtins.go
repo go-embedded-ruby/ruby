@@ -5848,6 +5848,7 @@ func (vm *VM) registerKernelModuleFunctions() {
 	names := []string{
 		"Array", "Complex", "Float", "Hash", "Integer", "Rational", "String",
 		"__dir__", "abort", "at_exit", "autoload", "autoload?", "caller",
+		"caller_locations",
 		"catch", "eval", "exec", "exit", "exit!", "fork", "format", "lambda",
 		"load", "loop", "open", "p", "print", "printf", "proc", "puts",
 		"raise", "rand", "require", "require_relative", "sleep", "sprintf",
@@ -8963,20 +8964,37 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 		if !object.IsNil(vm.curExc) {
 			panic(vm.excError(vm.captureBacktrace(vm.curExc)))
 		}
+		// A bare `raise` with nothing being handled raises RuntimeError with an
+		// empty message, as MRI does (its #message then reports the class name).
 		panic(vm.excError(vm.captureBacktrace(vm.send(vm.consts["RuntimeError"].(*RClass), "new",
-			[]object.Value{object.NewString("unhandled exception")}, nil))))
+			[]object.Value{object.NewString("")}, nil))))
 	default:
 		exc := vm.raiseExceptionObject(args)
+		// A cause: that reaches the exception being raised through its own cause
+		// chain is a circular reference — MRI rejects it before linking. cause == exc
+		// itself is not circular (it is simply not set); the walk starts one link in.
+		if causeGiven && !object.IsNil(causeVal) && causeVal != exc {
+			for c := getIvar(causeVal, causeIvar); !object.IsNil(c); c = getIvar(c, causeIvar) {
+				if c == exc {
+					raise("ArgumentError", "circular causes")
+				}
+			}
+		}
 		vm.applyRaiseCause(exc, causeGiven, causeVal)
 		panic(vm.excError(vm.captureBacktrace(exc)))
 	}
 }
 
 // raiseExceptionObject builds the exception object for a raise from a non-empty
-// argument list, matching MRI's Kernel#raise coercion: a String becomes a
-// RuntimeError with that message; an exception Class is instantiated (with the
-// message when a class+message pair is given); an exception instance is used
-// as-is. Anything else is a TypeError. It does NOT capture a backtrace or
+// argument list, matching MRI's make_exception (eval.c). A lone String is
+// shorthand for a RuntimeError with that message. Otherwise the first argument's
+// #exception method is invoked — with the second argument as its message when a
+// message is present (a class+message pair, then, instantiates via
+// Exception.exception == .new; a bare exception instance returns itself, or a
+// re-messaged copy). An object that does not respond to #exception (a plain
+// object, true/false/nil, a String with extra positional args) is a TypeError
+// "exception class/object expected"; one whose #exception returns a non-Exception
+// is a TypeError "exception object expected". It does NOT capture a backtrace or
 // panic — callers do that (Kernel#raise raises here and now; Thread#raise queues
 // the object for the target thread, where the backtrace is captured). Shared so
 // Thread#raise coerces its arguments exactly like Kernel#raise.
@@ -8987,26 +9005,23 @@ func (vm *VM) raiseExceptionObject(args []object.Value) object.Value {
 			return vm.send(vm.consts["RuntimeError"].(*RClass), "new", []object.Value{s}, nil)
 		}
 	}
-	// Otherwise the first argument must be an exception class (instantiated, with
-	// the message when a second argument is present) or an exception instance
-	// (used as-is). Anything else — a String with extra arguments, a non-exception
-	// class or object, true/false/nil — is a TypeError, matching MRI.
-	switch a := args[0].(type) {
-	case *RClass:
-		if classIsA(a, vm.consts["Exception"].(*RClass)) {
-			var ctorArgs []object.Value
-			if len(args) >= 2 {
-				ctorArgs = []object.Value{args[1]}
-			}
-			return vm.send(a, "new", ctorArgs, nil)
-		}
-	case *RObject:
-		if classIsA(vm.classOf(a), vm.consts["Exception"].(*RClass)) {
-			return a
-		}
+	first := args[0]
+	// MRI calls first.exception(msg?) — the message is the SECOND positional
+	// argument only (a third argument, the backtrace, is applied separately by the
+	// caller). An object with no #exception (which includes true/false/nil and a
+	// String carrying extra positional args) cannot be an exception.
+	if !vm.respondsTo(first, "exception") {
+		raise("TypeError", "exception class/object expected")
 	}
-	raise("TypeError", "exception class/object expected")
-	return object.NilV
+	var excArgs []object.Value
+	if len(args) >= 2 {
+		excArgs = []object.Value{args[1]}
+	}
+	exc := vm.send(first, "exception", excArgs, nil)
+	if !classIsA(vm.classOf(exc), vm.consts["Exception"].(*RClass)) {
+		raise("TypeError", "exception object expected")
+	}
+	return exc
 }
 
 // captureBacktrace stamps the current frame stack onto exc as its backtrace, the
