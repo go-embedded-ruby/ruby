@@ -100,6 +100,9 @@ func (o *IOObj) writeBytes(p []byte) int {
 		copy(o.buf[o.pos:], p)
 		o.pos += len(p)
 		o.syncStr()
+		if o.sync { // sync=true: a File's writes reach disk immediately (no buffering)
+			ioFlush(o)
+		}
 		return len(p)
 	}
 	n, _ := o.w.Write(p)
@@ -605,22 +608,27 @@ func defIOWrite(cls *RClass) {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
-		o.writeStr(vm.formatString(args[0].ToS(), args[1:]))
+		// rb_io_printf: the format is coerced with StringValue (#to_str).
+		o.writeStr(vm.formatString(string(vm.strToStr(args[0])), args[1:]))
 		return object.NilV
 	})
-	cls.define("putc", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("putc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckOpen(o)
-		switch a := args[0].(type) {
-		case object.Integer:
-			o.writeBytes([]byte{byte(a)})
-		case *object.String:
-			if len(a.Bytes()) > 0 {
-				o.writeBytes(a.Bytes()[:1])
+		// rb_io_putc: a String yields its first character; anything else is coerced
+		// with NUM2CHR (#to_int, then the low byte), so nil/false/true raise
+		// TypeError. The single-character String is written through #write (so a
+		// subclass' or mock's #write observes it), and the original argument returns.
+		var ch []byte
+		if s, ok := args[0].(*object.String); ok {
+			if b := s.Bytes(); len(b) > 0 {
+				_, sz := utf8.DecodeRune(b)
+				ch = b[:sz]
 			}
-		default:
-			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
+		} else {
+			ch = []byte{byte(vm.toIntCoerce(args[0]))}
 		}
+		vm.send(self, "write", []object.Value{object.NewStringBytes(ch)}, nil)
 		return args[0]
 	})
 	cls.define("flush", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
