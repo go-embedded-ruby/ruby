@@ -1305,34 +1305,82 @@ func (vm *VM) bootstrap() {
 		return object.Bool(classIsA(vm.classOf(args[0]), self.(*RClass)))
 	})
 
-	// Module (Class inherits these).
+	// Module (Class inherits these). Module#include(*mods) validates each argument
+	// is a non-refinement Module, then — in REVERSE order — invokes the private
+	// hook pair mods[i].append_features(self) and mods[i].included(self), exactly
+	// as MRI's rb_mod_include (eval.c). Routing through append_features lets a
+	// module override it (and lets a spec observe the call); the default
+	// append_features does the actual mix-in.
 	vm.cModule.define("include", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		target := self.(*RClass)
-		for _, a := range args {
-			mod := a.(*RClass)
-			target.includes = append(target.includes, mod)
-			bumpMethodSerial()
-			// Hook: module.included(base), fired per included module if it defines
-			// the hook (singleton method).
-			if hook := lookupSMethod(mod, "included"); hook != nil {
-				vm.invoke(hook, mod, []object.Value{target}, nil)
-			}
+		vm.checkModuleArgs("include", args)
+		for i := len(args) - 1; i >= 0; i-- {
+			mod := args[i].(*RClass)
+			vm.send(mod, "append_features", []object.Value{target}, nil)
+			vm.send(mod, "included", []object.Value{target}, nil)
 		}
 		return target
 	})
 	vm.cModule.define("prepend", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		target := self.(*RClass)
-		for _, a := range args {
-			mod := a.(*RClass)
-			target.prepends = append(target.prepends, mod)
-			bumpMethodSerial()
-			// Hook: module.prepended(base), mirroring included.
-			if hook := lookupSMethod(mod, "prepended"); hook != nil {
-				vm.invoke(hook, mod, []object.Value{target}, nil)
-			}
+		vm.checkModuleArgs("prepend", args)
+		for i := len(args) - 1; i >= 0; i-- {
+			mod := args[i].(*RClass)
+			vm.send(mod, "prepend_features", []object.Value{target}, nil)
+			vm.send(mod, "prepended", []object.Value{target}, nil)
 		}
 		return target
 	})
+	// Module#append_features(mod) (private): the default include mechanism, called
+	// as includedModule.append_features(target). It refuses a cyclic include
+	// (ArgumentError) and a frozen target (FrozenError), then records self in the
+	// target's include list. Reference: ruby/ruby v3_4_0 eval.c
+	// rb_mod_append_features / rb_include_module.
+	vm.cModule.define("append_features", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		target, ok := args[0].(*RClass)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
+		}
+		vm.mixinModule(mod, target, false)
+		return mod
+	})
+	// Module#prepend_features(mod) (private): the default prepend mechanism,
+	// mirroring append_features but inserting self ahead of the target's own
+	// methods. Reference: ruby/ruby v3_4_0 eval.c rb_mod_prepend_features.
+	vm.cModule.define("prepend_features", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		target, ok := args[0].(*RClass)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
+		}
+		vm.mixinModule(mod, target, true)
+		return mod
+	})
+	// The default no-op mix-in / definition hooks MRI defines as private instance
+	// methods of Module (each rb_obj_dummy1, returning nil): a user overrides them
+	// with `def self.included(base)` etc. Reference: ruby/ruby v3_4_0 object.c
+	// (rb_define_private_method(rb_cModule, "included"/"extended"/…, rb_obj_dummy1)).
+	for _, hook := range []string{"included", "extended", "prepended", "method_added", "method_removed", "method_undefined", "const_added"} {
+		vm.cModule.define(hook, func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return object.NilV
+		})
+	}
+	// append_features / prepend_features and every mix-in / definition hook are
+	// PRIVATE instance methods of Module in MRI (object.c, eval.c): reachable as a
+	// functional call or through the include/prepend/def machinery, but not as
+	// `mod.append_features(x)` with an explicit receiver.
+	for _, n := range []string{"append_features", "prepend_features", "included", "extended", "prepended", "method_added", "method_removed", "method_undefined", "const_added"} {
+		vm.cModule.methods[n].vis = visPrivate
+	}
+	// MRI undefines append_features / prepend_features on Class
+	// (rb_undef_method(rb_cClass, …)), so Class.private_instance_methods omits
+	// them and a rebind onto a Class receiver has no method to reach. An undefined
+	// tombstone halts ancestor lookup, hiding the inherited Module definition from
+	// method listing without removing it for module receivers.
+	for _, n := range []string{"append_features", "prepend_features"} {
+		vm.cClass.methods[n] = &Method{name: n, owner: vm.cClass, undefined: true}
+	}
 	vm.cModule.define("ancestors", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		anc := vm.ancestors(self.(*RClass))
 		out := make([]object.Value, len(anc))
@@ -1342,8 +1390,10 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cModule.define("include?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// The argument must be a Module — a Class or any other object raises
+		// TypeError, matching MRI's rb_mod_include_p (Check_Type T_MODULE).
 		mod, ok := args[0].(*RClass)
-		if !ok {
+		if !ok || !mod.isModule {
 			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
 		}
 		me := self.(*RClass)
@@ -8655,6 +8705,56 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 // constNameArg coerces a const_get/const_set/const_defined? name (a Symbol or
 // String) to its text, rejecting a name that does not begin with an uppercase
 // letter — as Ruby does.
+// checkModuleArgs validates the arguments of Module#include / #prepend: at least
+// one argument (else ArgumentError), each a Module — never a Class or other
+// object (else TypeError "wrong argument type X (expected Module)") — and not a
+// refinement (else TypeError "Cannot <op> refinement"). Reference: ruby/ruby
+// v3_4_0 eval.c rb_mod_include / rb_mod_prepend.
+func (vm *VM) checkModuleArgs(op string, args []object.Value) {
+	if len(args) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+	}
+	for _, a := range args {
+		mod, ok := a.(*RClass)
+		if !ok || !mod.isModule {
+			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(a))
+		}
+		if mod.isRefinement {
+			raise("TypeError", "Cannot %s refinement", op)
+		}
+	}
+}
+
+// mixinModule is the shared body of Module#append_features / #prepend_features:
+// it records mod as included into (prepend=false) or prepended onto
+// (prepend=true) target. It refuses a frozen target (FrozenError) and a cyclic
+// mix-in — target already lying in mod's own ancestry — with ArgumentError
+// "cyclic include detected". Reference: ruby/ruby v3_4_0 eval.c
+// rb_include_module / cyclic_prepend detection.
+func (vm *VM) mixinModule(mod, target *RClass, prepend bool) {
+	// The receiver being mixed in must itself be a Module — MRI's rb_include_module
+	// does Check_Type(module, T_MODULE). This only bites when append_features is
+	// rebound onto a Class receiver (Module.instance_method(:append_features).
+	// bind(Class.new).call(...)); the include/prepend path always passes a module.
+	if !mod.isModule {
+		raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(mod))
+	}
+	if target.frozen {
+		vm.raiseFrozen(target)
+	}
+	for _, a := range vm.ancestors(mod) {
+		if a == target {
+			raise("ArgumentError", "cyclic include detected")
+		}
+	}
+	if prepend {
+		target.prepends = append(target.prepends, mod)
+	} else {
+		target.includes = append(target.includes, mod)
+	}
+	bumpMethodSerial()
+}
+
 func constNameArg(v object.Value) string {
 	var name string
 	switch n := v.(type) {
