@@ -58,7 +58,10 @@ func TestRegexpEncoding(t *testing.T) {
 		{`p(/é/.encoding)`, "#<Encoding:UTF-8>\n"},
 		{`p(/abc/.fixed_encoding?)`, "false\n"},
 		{`p(/é/.fixed_encoding?)`, "true\n"},
-		{`p(Regexp.new("abc", Regexp::FIXEDENCODING).encoding)`, "#<Encoding:US-ASCII>\n"},
+		// FIXEDENCODING pins an ASCII-only pattern to its source String's encoding,
+		// so a default (UTF-8) "abc" reports UTF-8, not US-ASCII (verified against
+		// MRI 4.0.5: Regexp.new("abc", Regexp::FIXEDENCODING).encoding == UTF-8).
+		{`p(Regexp.new("abc", Regexp::FIXEDENCODING).encoding)`, "#<Encoding:UTF-8>\n"},
 		{`p(Regexp.new("abc", Regexp::FIXEDENCODING).fixed_encoding?)`, "true\n"},
 		{`p(Regexp.new("é", Regexp::FIXEDENCODING).encoding)`, "#<Encoding:UTF-8>\n"},
 		{`p(Regexp.new("abc", Regexp::NOENCODING).encoding)`, "#<Encoding:US-ASCII>\n"},
