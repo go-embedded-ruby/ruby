@@ -70,12 +70,6 @@ class BeCloseMatcher
   def failure_message; "expected to be close to #{@exp} (+/- #{@tol})"; end
 end
 
-class ComplainMatcher
-  def initialize(*a); end
-  def matches?(actual); actual.call if actual.respond_to?(:call); true; end
-  def failure_message; "complain"; end
-end
-
 TOLERANCE = 0.00003
 # Faithful to real mspec (mspec/lib/mspec/matchers/be_close.rb): a top-level
 # (Object) constant, generously large "to account for GC, context switches,
@@ -121,23 +115,27 @@ class ComplainMatcher
   def matches?(callable)
     require "stringio"
     old_err, $stderr = $stderr, StringIO.new
-    set_v = !@verbose.nil?
-    old_v = $VERBOSE if set_v
-    $VERBOSE = @verbose if set_v
+    # mspec runs the block under $VERBOSE = false by default, or the given
+    # verbose: value; it never leaves the ambient level in place.
+    old_v = $VERBOSE
+    $VERBOSE = @verbose.nil? ? false : @verbose
     begin
       callable.call
     ensure
-      $VERBOSE = old_v if set_v
+      $VERBOSE = old_v
       out = $stderr.string
       $stderr = old_err
     end
-    if @pat.nil?
-      !out.empty?
-    elsif @pat.is_a?(Regexp)
-      !!(out =~ @pat)
-    else
-      out == @pat
+    # A constraining pattern must match, but a warning is still required: mspec
+    # ends on `warning.empty? ? false : true` even after a successful match.
+    unless @pat.nil?
+      if @pat.is_a?(Regexp)
+        return false unless out =~ @pat
+      else
+        return false unless out == @pat
+      end
     end
+    !out.empty?
   end
   def failure_message; "expected a warning#{@pat ? " matching #{@pat.inspect}" : ''}"; end
 end
