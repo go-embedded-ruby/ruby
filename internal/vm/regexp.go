@@ -117,15 +117,6 @@ func (r *Regexp) encodingName() string {
 		if sourceHasNonASCIIUnicodeEscape(r.source) {
 			return "UTF-8"
 		}
-		// FIXEDENCODING requested for an ASCII-only source: MRI fixes it to the
-		// source String's own encoding (UTF-8 for a literal / default String),
-		// rather than the US-ASCII it would otherwise infer.
-		if r.fixedEnc {
-			if r.srcEnc != "" {
-				return r.srcEnc
-			}
-			return "UTF-8"
-		}
 		return "US-ASCII"
 	}
 	if r.noEnc {
