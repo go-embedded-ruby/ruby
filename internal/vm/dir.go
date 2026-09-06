@@ -2,6 +2,7 @@ package vm
 
 import (
 	"os"
+	"os/user"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -22,7 +23,19 @@ func (vm *VM) registerDir() {
 
 	def("pwd", dirPwd)
 	def("getwd", dirPwd)
-	def("home", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+	// Dir.home(user=nil): with no argument (or nil) the current user's home,
+	// reading $HOME first and falling back to the passwd database; with a user
+	// name, that user's home from the passwd database, raising ArgumentError when
+	// the user does not exist (ruby/ruby v3_4_0 dir.c dir_s_home / rb_home_dir_of).
+	def("home", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 0 && args[0] != object.NilV {
+			name := strArg(args[0])
+			h, err := userHomeDir(name)
+			if err != nil {
+				raise("ArgumentError", "user %s doesn't exist", name)
+			}
+			return object.NewString(toSlash(h))
+		}
 		return object.NewString(toSlash(dirHomeStr()))
 	})
 	def("entries", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -76,13 +89,20 @@ func (vm *VM) registerDir() {
 		}
 		return object.Bool(len(dirNames(p)) == 0)
 	})
-	def("mkdir", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := strArg(args[0])
-		if err := os.Mkdir(p, 0o755); err != nil {
-			if os.IsExist(err) {
-				raise("Errno::EEXIST", "File exists @ dir_s_mkdir - %s", p)
-			}
-			raise("Errno::ENOENT", "No such file or directory @ dir_s_mkdir - %s", p)
+	// Dir.mkdir(path, mode=0777): the path is a rb_get_path argument (#to_path,
+	// encoding/NUL checks) and the mode is coerced with #to_int, defaulting to
+	// 0777 (the OS applies umask), matching dir.c dir_s_mkdir / check_dirname.
+	def("mkdir", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
+		p := vm.filePathArg(args[0])
+		mode := int64(0o777)
+		if len(args) == 2 {
+			mode = coerceInt(vm, args[1])
+		}
+		if err := os.Mkdir(p, os.FileMode(mode)&os.ModePerm); err != nil {
+			raiseMkdirErr(err, p)
 		}
 		return object.IntValue(0)
 	})
@@ -263,14 +283,45 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 // testable without manipulating the process environment.
 var osUserHomeDir = os.UserHomeDir
 
-// dirHomeStr returns the user's home directory (OS-native), raising ArgumentError
-// when it cannot be determined, as MRI's Dir.home / Dir.chdir do.
-func dirHomeStr() string {
-	h, err := osUserHomeDir()
+// osCurrentUserHome is a seam over the passwd-database lookup of the current
+// user's home directory (getpwuid), used as Dir.home's fallback when $HOME is
+// unset — matching MRI's rb_default_home_dir. It is a var so the fallback and
+// its failure branch are testable without depending on the runner's passwd db.
+var osCurrentUserHome = func() (string, error) {
+	u, err := user.Current()
 	if err != nil {
-		raise("ArgumentError", "couldn't find HOME environment -- expanding `~'")
+		return "", err
 	}
-	return h
+	return u.HomeDir, nil
+}
+
+// dirHomeStr returns the user's home directory (OS-native), reading $HOME first
+// and falling back to the passwd database when it is unset (MRI's
+// rb_default_home_dir), raising ArgumentError only when neither yields a home.
+func dirHomeStr() string {
+	if h, err := osUserHomeDir(); err == nil && h != "" {
+		return h
+	}
+	if h, err := osCurrentUserHome(); err == nil && h != "" {
+		return h
+	}
+	raise("ArgumentError", "couldn't find HOME environment -- expanding `~'")
+	return ""
+}
+
+// raiseMkdirErr maps an os.Mkdir failure to the MRI errno Dir.mkdir raises: an
+// existing entry is Errno::EEXIST, a permission failure (e.g. an unwritable
+// parent) Errno::EACCES — a SystemCallError, as the spec requires — and any
+// other failure (a missing intermediate directory) Errno::ENOENT.
+func raiseMkdirErr(err error, path string) {
+	switch {
+	case os.IsExist(err):
+		raise("Errno::EEXIST", "File exists @ dir_s_mkdir - %s", path)
+	case os.IsPermission(err):
+		raise("Errno::EACCES", "Permission denied @ dir_s_mkdir - %s", path)
+	default:
+		raise("Errno::ENOENT", "No such file or directory @ dir_s_mkdir - %s", path)
+	}
 }
 
 func dirPwd(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
