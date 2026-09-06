@@ -744,16 +744,25 @@ func defStringIORead(cls *RClass) {
 	// #eof is a true alias of #eof?, as in MRI.
 	cls.methods["eof"] = cls.methods["eof?"]
 	cls.define("pos", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*IOObj).pos))
+		o := self.(*IOObj)
+		// A real IO/File raises on a closed stream; StringIO#pos tolerates it (MRI).
+		if o.closed && !ioIsStringIO(o) {
+			raise("IOError", "closed stream")
+		}
+		return object.IntValue(int64(o.pos))
 	})
 	// #tell is a true alias of #pos, as in MRI.
 	cls.methods["tell"] = cls.methods["pos"]
 	cls.define("pos=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed && !ioIsStringIO(o) { // real IO/File raises; StringIO tolerates it
+			raise("IOError", "closed stream")
+		}
 		n := int(vm.toIntCoerce(args[0]))
 		if n < 0 {
 			raise("Errno::EINVAL", "Invalid argument")
 		}
-		self.(*IOObj).pos = n
+		o.pos = n
 		return args[0]
 	})
 	cls.define("seek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -764,7 +773,7 @@ func defStringIORead(cls *RClass) {
 		amount := int(vm.toIntCoerce(args[0]))
 		whence := 0
 		if len(args) > 1 {
-			whence = int(vm.toIntCoerce(args[1]))
+			whence = vm.seekWhence(args[1])
 		}
 		var newPos int
 		switch whence {
@@ -990,17 +999,72 @@ func defStringIORead(cls *RClass) {
 		}
 		return self
 	})
+	// #each_codepoint (rb_io_each_codepoint, io.c) yields each character's integer
+	// codepoint from the current position; MRI raises ArgumentError on an invalid /
+	// incomplete byte sequence and returns an Enumerator (size nil) with no block.
+	// It lives here on the shared read protocol so File/IO carry it, not only
+	// StringIO.
+	cls.define("each_codepoint", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		o := self.(*IOObj)
+		if blk == nil { // no block ⇒ an Enumerator (buildable even on a closed stream)
+			return enumForSized(self, "each_codepoint", enumSizeNil)
+		}
+		ioCheckReadable(o) // iterating an unreadable stream raises, as in MRI
+		for o.pos < len(o.buf) {
+			r, sz := utf8.DecodeRune(o.buf[o.pos:])
+			if r == utf8.RuneError && sz <= 1 { // a lone continuation / invalid byte
+				raise("ArgumentError", "invalid byte sequence in UTF-8")
+			}
+			o.pos += sz
+			vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
+		}
+		return self
+	})
 	// #each is a true alias of #each_line — it must share the method entry so
 	// IO.instance_method(:each) == IO.instance_method(:each_line), as in MRI.
 	cls.methods["each"] = cls.methods["each_line"]
 }
 
+// seekWhence resolves a seek / sysseek whence argument to a SEEK_* constant,
+// mirroring MRI's interpret_seek_whence (io.c): the symbols :SET/:CUR/:END and
+// :DATA/:HOLE map to their constants, and anything else is coerced through
+// #to_int (a Symbol that is not one of those raises the Integer TypeError).
+func (vm *VM) seekWhence(v object.Value) int {
+	if s, ok := v.(object.Symbol); ok {
+		switch string(s) {
+		case "SET":
+			return 0
+		case "CUR":
+			return 1
+		case "END":
+			return 2
+		case "DATA":
+			return 3
+		case "HOLE":
+			return 4
+		}
+		raise("TypeError", "no implicit conversion of Symbol into Integer")
+	}
+	return int(vm.toIntCoerce(v))
+}
+
+// ioIsStringIO reports whether o is a StringIO (or a subclass), which — unlike a
+// real IO/File — tolerates #pos / #pos= on a closed stream rather than raising.
+func ioIsStringIO(o *IOObj) bool {
+	for c := o.cls; c != nil; c = c.super {
+		if c.name == "StringIO" {
+			return true
+		}
+	}
+	return false
+}
+
 // defStringIOExtra installs the StringIO-only surface that MRI adds on top of the
 // shared read/write protocol: the allocate/new/open class methods, the private
 // #initialize and #reopen instance methods (which share the backing-string setup
-// in stringIOSetup), #string=, #each_codepoint, and the StringIO-specific
-// overrides of #sync/#binmode/#close_read/#close_write/#fcntl whose behaviour
-// differs from a real IO's.
+// in stringIOSetup), #string=, and the StringIO-specific overrides of
+// #sync/#binmode/#close_read/#close_write/#fcntl whose behaviour differs from a
+// real IO's.
 // includeStringIOEnumerable mixes Enumerable into StringIO (whose #each yields
 // lines), as in MRI. It runs after the prelude, where Enumerable is defined.
 func (vm *VM) includeStringIOEnumerable() {
@@ -1072,22 +1136,6 @@ func defStringIOExtra(vm *VM, cls *RClass) {
 		o.strObj, o.buf, o.strNil = s, s.MutableBytes(), false
 		o.pos, o.lineno = 0, 0
 		return s
-	})
-	cls.define("each_codepoint", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		o := self.(*IOObj)
-		if blk == nil { // no block ⇒ an Enumerator (buildable even on a closed stream)
-			return enumForSized(self, "each_codepoint", enumSizeNil)
-		}
-		ioCheckReadable(o) // iterating an unreadable stream raises, as in MRI
-		for o.pos < len(o.buf) {
-			r, sz := utf8.DecodeRune(o.buf[o.pos:])
-			if r == utf8.RuneError && sz <= 1 { // a lone continuation / invalid byte
-				raise("ArgumentError", "invalid byte sequence in UTF-8")
-			}
-			o.pos += sz
-			vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
-		}
-		return self
 	})
 	// StringIO#sync is always true and cannot be turned off, unlike a real IO's.
 	cls.define("sync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {

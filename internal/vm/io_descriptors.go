@@ -64,18 +64,16 @@ func defIOReadExtra(cls *RClass) {
 		}
 		return object.NilV
 	})
-	cls.define("ungetc", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("ungetc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
-		switch a := args[0].(type) {
-		case object.Integer:
+		// rb_io_ungetc: an Integer is the codepoint (encoded to bytes); anything else
+		// is coerced with StringValue (#to_str), so nil / a non-String object raises
+		// "no implicit conversion of <x> into String".
+		if a, ok := args[0].(object.Integer); ok {
 			ioUnget(o, []byte(string(rune(a))))
-		case *object.String:
-			ioUnget(o, a.Bytes())
-		default:
-			if args[0] != object.NilV {
-				raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
-			}
+		} else {
+			ioUnget(o, vm.strToStr(args[0]))
 		}
 		return object.NilV
 	})
@@ -131,8 +129,9 @@ func defIOReadExtra(cls *RClass) {
 	cls.define("lineno", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(int64(self.(*IOObj).lineno))
 	})
-	cls.define("lineno=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).lineno = int(intArg(args[0]))
+	cls.define("lineno=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// rb_io_set_lineno: NUM2INT coerces via #to_int (a Float truncates).
+		self.(*IOObj).lineno = int(vm.toIntCoerce(args[0]))
 		return args[0]
 	})
 	cls.define("close_read", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -215,10 +214,14 @@ func defIOSeekable(cls *RClass) {
 		o.writable = true // a written File flushes its buffer back on flush/close
 		return object.IntValue(int64(len(data)))
 	})
-	cls.define("sysseek", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("sysseek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
-		amount := int(intArg(args[0]))
-		switch whenceArg(args) {
+		amount := int(vm.toIntCoerce(args[0])) // NUM2OFFT: coerces via #to_int
+		whence := 0
+		if len(args) > 1 {
+			whence = vm.seekWhence(args[1]) // accepts :SET/:CUR/:END symbols
+		}
+		switch whence {
 		case 1: // SEEK_CUR
 			o.pos += amount
 		case 2: // SEEK_END
@@ -245,14 +248,6 @@ func defIOSeekable(cls *RClass) {
 	cls.define("fdatasync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(0)
 	})
-}
-
-// whenceArg returns the SEEK_* whence of a seek-style argument list (default 0).
-func whenceArg(args []object.Value) int {
-	if len(args) > 1 {
-		return int(intArg(args[1]))
-	}
-	return 0
 }
 
 // ioUnget inserts p immediately before the cursor (leaving the cursor on the
