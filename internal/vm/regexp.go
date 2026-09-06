@@ -111,6 +111,12 @@ func escapeForwardSlashes(src string) string {
 // UTF-8, or ASCII-8BIT (BINARY) when the NOENCODING option is set.
 func (r *Regexp) encodingName() string {
 	if asciiOnly([]byte(r.source)) {
+		// A \u escape resolving to a non-ASCII code point fixes the pattern to
+		// UTF-8 even though the source bytes are all ASCII: MRI reports
+		// /\u{9879}/.encoding == UTF-8 (re.c unescape_unicode → rb_utf8_encoding).
+		if sourceHasNonASCIIUnicodeEscape(r.source) {
+			return "UTF-8"
+		}
 		return "US-ASCII"
 	}
 	if r.noEnc {
@@ -123,13 +129,66 @@ func (r *Regexp) encodingName() string {
 }
 
 // isFixedEncoding backs Regexp#fixed_encoding?: true when the FIXEDENCODING
-// option was requested or the source is tied to a concrete non-ASCII encoding (a
-// non-ASCII source that is not the encoding-agnostic BINARY form).
+// option was requested, a \u escape ties the pattern to UTF-8, or the source is
+// tied to a concrete non-ASCII encoding (a non-ASCII source that is not the
+// encoding-agnostic BINARY form).
 func (r *Regexp) isFixedEncoding() bool {
 	if r.fixedEnc {
 		return true
 	}
+	if sourceHasNonASCIIUnicodeEscape(r.source) {
+		return true
+	}
 	return !asciiOnly([]byte(r.source)) && !r.noEnc
+}
+
+// sourceHasNonASCIIUnicodeEscape reports whether the pattern source contains a
+// \uHHHH or \u{…} escape that resolves to a code point above U+007F. MRI fixes
+// such a pattern to UTF-8 encoding (an all-ASCII \u escape like A leaves the
+// pattern US-ASCII). A backslash that is itself escaped (\\u) does not begin an
+// escape, so the scan skips two bytes after every backslash it does not consume.
+func sourceHasNonASCIIUnicodeEscape(src string) bool {
+	for i := 0; i < len(src); {
+		if src[i] != '\\' {
+			i++
+			continue
+		}
+		if i+1 >= len(src) {
+			return false
+		}
+		if src[i+1] != 'u' {
+			// Some other escape (\\, \(, …): consume both bytes so the second is
+			// never mistaken for the start of a fresh escape.
+			i += 2
+			continue
+		}
+		if i+2 < len(src) && src[i+2] == '{' {
+			if end := strings.IndexByte(src[i+3:], '}'); end >= 0 {
+				if runes, ok := parseUnicodeBraceBody(src[i+3 : i+3+end]); ok {
+					for _, r := range runes {
+						if r > 0x7f {
+							return true
+						}
+					}
+					i += 3 + end + 1
+					continue
+				}
+			}
+			i += 2
+			continue
+		}
+		if i+6 <= len(src) {
+			if r, ok := parseHexRune(src[i+2 : i+6]); ok {
+				if r > 0x7f {
+					return true
+				}
+				i += 6
+				continue
+			}
+		}
+		i += 2
+	}
+	return false
 }
 
 func (r *Regexp) ToS() string {
@@ -1070,6 +1129,27 @@ func regexpEscapeLiteral(s string) string {
 	return b.String()
 }
 
+// regexpOperandEncName reports the encoding name of a Regexp.escape / .quote
+// operand. A String contributes its own encoding; a Symbol (or #to_str result)
+// is taken as UTF-8, which only matters when it carries a non-ASCII byte, since
+// an all-ASCII operand yields a US-ASCII result regardless.
+func regexpOperandEncName(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.EncName()
+	}
+	return "UTF-8"
+}
+
+// regexpQuoteResultEnc is the encoding MRI tags on a Regexp.quote / .escape
+// result: US-ASCII when the (raw, pre-escape) operand holds only ASCII bytes,
+// otherwise the operand's own encoding.
+func regexpQuoteResultEnc(raw, inputEnc string) string {
+	if asciiOnly([]byte(raw)) {
+		return "US-ASCII"
+	}
+	return inputEnc
+}
+
 // scan implements String#scan: it finds every non-overlapping match of re in
 // subject left to right. With no capture groups each result element is the
 // whole match; with one or more groups each element is the array of that
@@ -1599,6 +1679,46 @@ func namedGroups(source string) []string {
 	return names
 }
 
+// patternHasBackrefOrCall reports whether a regexp source uses a construct that
+// breaks linear-time matching: a numbered back-reference (\1…\9), a named
+// back-reference (\k<name> / \k'name'), or a subexpression call (\g<name> /
+// \g'name'). These are exactly the features that disable the engine's memoised
+// matching (HasBackref / HasCall), so their absence is Regexp.linear_time?.
+// Escapes inside a character class are never references (\1 there is octal), so
+// the scan tracks class nesting; a backslash it does not recognise consumes its
+// escaped byte so that byte cannot start a spurious match.
+func patternHasBackrefOrCall(src string) bool {
+	inClass := false
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		if c == '\\' {
+			if i+1 >= len(src) {
+				return false
+			}
+			n := src[i+1]
+			if !inClass {
+				if n >= '1' && n <= '9' {
+					return true // numbered back-reference
+				}
+				if (n == 'k' || n == 'g') && i+2 < len(src) && (src[i+2] == '<' || src[i+2] == '\'') {
+					return true // named back-reference (\k) or subexpression call (\g)
+				}
+			}
+			i++ // skip the escaped byte
+			continue
+		}
+		switch {
+		case inClass:
+			if c == ']' {
+				inClass = false
+			}
+		case c == '[':
+			inClass = true
+		}
+	}
+	return false
+}
+
 // dedupNames returns names with duplicates removed, keeping first-seen order.
 func dedupNames(names []string) []string {
 	seen := map[string]bool{}
@@ -1680,7 +1800,12 @@ func (vm *VM) installRegexp() {
 	// matching MRI's reg_operand handling.
 	reEscape := &Method{name: "escape", owner: vm.cRegexp,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.NewString(regexpEscapeLiteral(vm.regexpOperandStr(args[0])))
+			raw := vm.regexpOperandStr(args[0])
+			// MRI's rb_reg_quote sets the result encoding from the input: US-ASCII
+			// when only ASCII characters are present (whatever the input was tagged),
+			// otherwise the input String's own encoding (UTF-8, ASCII-8BIT/BINARY, …).
+			return object.NewStringBytesEnc([]byte(regexpEscapeLiteral(raw)),
+				regexpQuoteResultEnc(raw, regexpOperandEncName(args[0])))
 		}}
 	vm.cRegexp.smethods["escape"] = reEscape
 	// quote shares escape's *Method so `Regexp.method(:escape) == Regexp.method(:quote)`.
@@ -1720,6 +1845,37 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.smethods["union"] = &Method{name: "union", owner: vm.cRegexp,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			return vm.regexpUnion(args)
+		}}
+
+	// Regexp.linear_time?(re_or_str[, flags]) reports whether matching the pattern
+	// is guaranteed linear in the subject length. MRI's memoised backtracking is
+	// linear for every construct except a back-reference or a subexpression call
+	// (\g), which is exactly the go-ruby-regexp engine's own "may memoise" test
+	// (memoize = !HasBackref && !HasCall). A String argument is compiled (honouring
+	// its flags, which do not affect linearity); a Regexp argument ignores any
+	// flags and warns, matching MRI's rb_reg_s_linear_time_p.
+	vm.cRegexp.smethods["linear_time?"] = &Method{name: "linear_time?", owner: vm.cRegexp,
+		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) == 0 {
+				raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+			}
+			var source string
+			switch a := args[0].(type) {
+			case *Regexp:
+				if len(args) >= 2 {
+					vm.send(vm.main, "warn", []object.Value{object.NewString("warning: flags ignored")}, nil)
+				}
+				source = a.source
+			default:
+				str := vm.regexpOperandStr(args[0])
+				flags := ""
+				if len(args) >= 2 {
+					flags = regexpOptionFlags(args[1])
+				}
+				// Compile to reject a malformed pattern (RegexpError), as MRI does.
+				source = vm.compileRegexp(str, flags).(*Regexp).source
+			}
+			return object.Bool(!patternHasBackrefOrCall(source))
 		}}
 
 	vm.cRegexp.define("source", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -1825,11 +1981,22 @@ func (vm *VM) installRegexp() {
 	// Regexp#named_captures maps each capture name to the Array of its group
 	// indices. Because Ruby forbids mixing named and numbered captures, the named
 	// groups are the only capturing groups, so the k-th named group (skipping
-	// non-capturing groups, which namedGroups already ignores) has index k.
+	// non-capturing groups, which namedGroups already ignores) has index k. When a
+	// name repeats (Ruby allows it), all its group indices are collected into the
+	// one Array, keyed at the name's first appearance — MRI:
+	// /(?<is>.)(?<pat>.)(?<is>.)/.named_captures == {"is"=>[1,3], "pat"=>[2]}.
 	vm.cRegexp.define("named_captures", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		h := object.NewHash()
+		idxByName := map[string][]object.Value{}
+		var order []string
 		for i, name := range namedGroups(reArg(self).source) {
-			h.Set(object.NewString(name), object.NewArrayFromSlice([]object.Value{object.IntValue(int64(i + 1))}))
+			if _, seen := idxByName[name]; !seen {
+				order = append(order, name)
+			}
+			idxByName[name] = append(idxByName[name], object.IntValue(int64(i+1)))
+		}
+		h := object.NewHash()
+		for _, name := range order {
+			h.Set(object.NewString(name), object.NewArrayFromSlice(idxByName[name]))
 		}
 		return h
 	})

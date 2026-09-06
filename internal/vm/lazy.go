@@ -236,9 +236,18 @@ func (vm *VM) registerLazy() {
 		}
 		// Incremental: drive the pipeline one element at a time so a break (or an
 		// early-abort panic from an eager Enumerator's #first/#take) unwinds without
-		// materialising an unbounded source.
-		vm.lazyRun(l, func(v object.Value) bool {
-			vm.callBlock(blk, []object.Value{v})
+		// materialising an unbounded source. A bare lazy (no ops) forwards a
+		// multi-value source yield to the block by ordinary arity, so { |x| } sees
+		// the first value and { |*a| } the whole tuple — as MRI's fibered lazy #each
+		// does. Once any op has run, MRI packs a multi-value yield into a single
+		// Array element (rb_enum_values_pack), so the block receives that lone value.
+		spreadMulti := len(l.ops) == 0
+		vm.lazyRun(l, func(v object.Value, multi []object.Value) bool {
+			if spreadMulti && multi != nil {
+				vm.callBlock(blk, multi)
+			} else {
+				vm.callBlock(blk, []object.Value{v})
+			}
 			return true
 		})
 		return l
@@ -473,7 +482,7 @@ func (vm *VM) lazyForce(le *LazyEnum, want int) []object.Value {
 		return nil
 	}
 	var out []object.Value
-	vm.lazyRun(le, func(v object.Value) bool {
+	vm.lazyRun(le, func(v object.Value, _ []object.Value) bool {
 		out = append(out, v)
 		return !(want >= 0 && len(out) >= want)
 	})
@@ -499,7 +508,7 @@ type chunkState struct {
 // source element is threaded by feed, which recurses op-by-op so that expanding
 // ops (flat_map), grouping ops, and index/zip-carrying ops compose the same way
 // MRI's fibered lazy pipeline does.
-func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
+func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value, []object.Value) bool) {
 	src := vm.lazySource(le.recv)
 	n := len(le.ops)
 	// Per-op mutable run state.
@@ -564,7 +573,7 @@ func (vm *VM) lazyRun(le *LazyEnum, sink func(object.Value) bool) {
 	}
 	feed = func(i int, v object.Value, multi []object.Value) bool {
 		if i == n {
-			if !sink(v) {
+			if !sink(v, multi) {
 				stop = true
 				return false
 			}
