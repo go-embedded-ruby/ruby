@@ -245,10 +245,18 @@ func defIOSeekable(cls *RClass) {
 		return object.Bool(o.binmode)
 	})
 	cls.define("autoclose?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(!self.(*IOObj).noAutoclose)
+		o := self.(*IOObj)
+		if o.closed { // MRI: #autoclose? cannot be queried on a closed IO
+			raise("IOError", "closed stream")
+		}
+		return object.Bool(!o.noAutoclose)
 	})
 	cls.define("autoclose=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).noAutoclose = !args[0].Truthy()
+		o := self.(*IOObj)
+		if o.closed { // MRI: #autoclose= cannot be set on a closed IO
+			raise("IOError", "closed stream")
+		}
+		o.noAutoclose = !args[0].Truthy()
 		return args[0]
 	})
 	cls.define("fdatasync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {

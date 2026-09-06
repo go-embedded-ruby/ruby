@@ -825,6 +825,7 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("rewind", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		ioClosedRealIO(o)      // real IO/File raises on a closed stream; StringIO tolerates it
 		o.pos, o.lineno = 0, 0 // #rewind resets both the position and the line number
 		return object.IntValue(0)
 	})
@@ -1361,6 +1362,11 @@ func (vm *VM) resolveGetsArgs(args []object.Value) (sep getsSep, limit int, chom
 			chomp = v.Truthy()
 		}
 		args = args[:len(args)-1]
+	}
+	// gets/readline/each_line take at most a separator and a limit (chomp: is a
+	// keyword, stripped above); more positional arguments raise ArgumentError.
+	if len(args) > 2 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 0..2)", len(args))
 	}
 	if len(args) > 0 {
 		switch a := args[0].(type) {
