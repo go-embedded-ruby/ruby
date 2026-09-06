@@ -256,7 +256,8 @@ func (vm *VM) hopConvertible(from, to string) bool {
 func encodingSupported(name string) bool {
 	switch name {
 	case "UTF-8", "US-ASCII", "ASCII-8BIT", "ISO-8859-1",
-		"UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE":
+		"UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE",
+		"UTF8-MAC":
 		return true
 	}
 	_, ok := xtextEncodings[name]
@@ -324,7 +325,7 @@ func (vm *VM) converterConvert(c *converterObj, v object.Value) object.Value {
 	}
 	in := append(append([]byte(nil), c.readAgain...), vm.strToStr(v)...)
 	c.readAgain = nil
-	out, _, status, errBytes, readAgain := vm.stepLoop(c, in, -1)
+	out, _, status, errBytes, readAgain, _ := vm.stepLoop(c, in, -1)
 	switch status {
 	case "invalid_byte_sequence":
 		vm.setConvError(c, "invalid_byte_sequence", errBytes, readAgain, false)
@@ -406,7 +407,40 @@ func (vm *VM) primitiveConvert(c *converterObj, args []object.Value) object.Valu
 		}
 	}
 
-	out, consumed, status, errBytes, readAgain := vm.stepLoop(c, in, size)
+	// Output held from a previous destination_buffer_full is flushed first; only the
+	// remaining destination room is offered to the conversion of new source.
+	carried := c.pendingOut
+	c.pendingOut = nil
+	room := size
+	if size >= 0 {
+		room = size - len(carried)
+		if room < 0 {
+			room = 0
+		}
+	}
+
+	out, consumed, status, errBytes, readAgain, overflow := vm.stepLoop(c, in, room)
+
+	// Combine the carried output with this pass's output, then apply the destination
+	// cap: bytes past it (plus any stepLoop overflow) are held for the next call.
+	produced := append(append([]byte(nil), carried...), out...)
+	var hold []byte
+	if size >= 0 && len(produced) > size {
+		hold = append(hold, produced[size:]...)
+		produced = produced[:size]
+	}
+	hold = append(hold, overflow...)
+	if len(hold) > 0 {
+		c.pendingOut = hold
+		// Unwritten output means the destination is full — unless the pass stopped on
+		// a source error, which takes priority and keeps its bytes unconsumed.
+		switch status {
+		case "invalid_byte_sequence", "undefined_conversion", "incomplete_input":
+		default:
+			status = "destination_buffer_full"
+		}
+	}
+
 	if partial && status == "incomplete_input" {
 		status = "source_buffer_empty"
 	} else if !partial && status == "source_buffer_empty" {
@@ -419,7 +453,7 @@ func (vm *VM) primitiveConvert(c *converterObj, args []object.Value) object.Valu
 	if offset < len(base) {
 		base = base[:offset]
 	}
-	dst.SetBytes(append(append([]byte(nil), base...), out...))
+	dst.SetBytes(append(append([]byte(nil), base...), produced...))
 	dst.Enc = c.dst
 
 	// Consume the converted bytes from the source String (when one was given).
@@ -445,11 +479,15 @@ func (vm *VM) primitiveConvert(c *converterObj, args []object.Value) object.Valu
 
 // stepLoop is the shared conversion engine for #convert and #primitive_convert.
 // It decodes src character by character in the source encoding, encodes each into
-// the destination encoding, and stops at the first error or when appending the
-// next character would exceed size (a byte cap; negative means unlimited). It
+// the destination encoding, and stops at the first error or when a character's
+// encoded bytes no longer fit within size (a byte cap; negative means unlimited).
+// When a character overflows the cap the bytes that fit go to out, the remainder
+// to overflow, that character is consumed, and the loop stops with
+// "destination_buffer_full" — the caller carries overflow to the next call. It
 // returns the produced bytes, the number of source bytes consumed, a status
-// string, and the erroneous / read-again bytes for the error statuses.
-func (vm *VM) stepLoop(c *converterObj, in []byte, size int) (out []byte, consumed int, status string, errBytes, readAgain []byte) {
+// string, the erroneous / read-again bytes for the error statuses, and the
+// overflow bytes.
+func (vm *VM) stepLoop(c *converterObj, in []byte, size int) (out []byte, consumed int, status string, errBytes, readAgain, overflow []byte) {
 	pos := 0
 	for pos < len(in) {
 		r, n, rl, st := vm.decodeCharFrom(in[pos:], c.src)
@@ -457,32 +495,37 @@ func (vm *VM) stepLoop(c *converterObj, in []byte, size int) (out []byte, consum
 		case stepIncomplete:
 			if c.invalidReplace {
 				out = appendCapped(out, c.repl, size)
-				return out, len(in), "finished", nil, nil
+				return out, len(in), "finished", nil, nil, nil
 			}
-			return out, len(in), "incomplete_input", in[pos:], nil
+			return out, len(in), "incomplete_input", in[pos:], nil, nil
 		case stepInvalid:
 			if c.invalidReplace {
 				out = appendCapped(out, c.repl, size)
 				pos += n + rl
 				continue
 			}
-			return out, pos + n + rl, "invalid_byte_sequence", in[pos : pos+n], in[pos+n : pos+n+rl]
+			return out, pos + n + rl, "invalid_byte_sequence", in[pos : pos+n], in[pos+n : pos+n+rl], nil
 		}
 		eb, okEnc := vm.encodeCharTo(r, c.dst)
 		if !okEnc {
 			if c.undefReplace {
 				eb = c.repl
 			} else {
-				return out, pos + n, "undefined_conversion", []byte(string(r)), nil
+				return out, pos + n, "undefined_conversion", []byte(string(r)), nil, nil
 			}
 		}
 		if size >= 0 && len(out)+len(eb) > size {
-			return out, pos, "destination_buffer_full", nil, nil
+			// The character does not fit: write the prefix that fits, hold the rest,
+			// consume the character, and stop with the destination full.
+			room := size - len(out)
+			out = append(out, eb[:room]...)
+			overflow = append(overflow, eb[room:]...)
+			return out, pos + n, "destination_buffer_full", nil, nil, overflow
 		}
 		out = append(out, eb...)
 		pos += n
 	}
-	return out, len(in), "source_buffer_empty", nil, nil
+	return out, len(in), "source_buffer_empty", nil, nil, nil
 }
 
 // appendCapped appends add to out unless doing so would exceed a non-negative

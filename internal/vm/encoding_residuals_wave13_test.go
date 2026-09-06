@@ -36,6 +36,38 @@ p Encoding.find("internal").name`,
 			`ec = Encoding::Converter.new("UTF-8", Encoding.find("macCyrillic"))
 p ec.convert("А").bytes`,
 			"[128]\n"},
+		// Encoding::Converter#primitive_convert carries output that did not fit the
+		// destination to the next call: successive calls with a growing byte cap flush
+		// the held byte before converting the next character (MRI's output-buffer
+		// carryover), so three one-byte conversions accumulate to "aabbb".
+		{"primconv_carryover",
+			`ec = Encoding::Converter.new("utf-8", "iso-8859-1")
+dest = +"aa"
+r1 = ec.primitive_convert(+"b", dest, nil, 0)
+r2 = ec.primitive_convert(+"b", dest, nil, 1)
+r3 = ec.primitive_convert(+"b", dest, nil, 2)
+p [r1, r2, r3, dest]`,
+			"[:destination_buffer_full, :destination_buffer_full, :finished, \"aabbb\"]\n"},
+		// A character whose encoding is larger than the destination cap returns
+		// :destination_buffer_full with the whole source consumed (the produced bytes
+		// are held), matching MRI.
+		{"primconv_buffer_full_clears_source",
+			`ec = Encoding::Converter.new("utf-8", "iso-2022-jp")
+s = +"\u{9999}"
+r = ec.primitive_convert(s, +"", 0, 2)
+p [r, s]`,
+			"[:destination_buffer_full, \"\"]\n"},
+		// UTF8-MAC (HFS+ NFD) is a valid Converter destination: a precomposed
+		// character is emitted in canonical decomposition (é -> "e" + combining acute),
+		// while an ASCII run is unchanged.
+		{"utf8mac_encode_nfd",
+			`ec = Encoding::Converter.new("UTF-8", "UTF8-MAC")
+p ec.convert("é").bytes`,
+			"[101, 204, 129]\n"},
+		{"utf8mac_encode_ascii",
+			`ec = Encoding::Converter.new("UTF-8", "UTF8-MAC")
+p ec.convert("abc").bytes`,
+			"[97, 98, 99]\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
