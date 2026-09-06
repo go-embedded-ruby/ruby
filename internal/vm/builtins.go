@@ -1405,11 +1405,24 @@ func (vm *VM) bootstrap() {
 		return object.False
 	})
 	vm.cModule.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if c := self.(*RClass); c.name != "" {
+		// A singleton class has no name (MRI returns nil), even though it carries an
+		// internal "#<Class:…>" label; an anonymous module/class is likewise nil.
+		if c := self.(*RClass); !c.isSingleton && c.name != "" {
 			return object.NewString(c.name)
 		}
-		return object.NilV // anonymous class/module
+		return object.NilV
 	})
+	// Module#to_s / #inspect render the module's identity: a permanent name for a
+	// named module/class, "#<refinement:Target@Holder>" for a refinement,
+	// "#<Class:INNER>" for a singleton class (INNER being the attached object's or
+	// class's identity), and the "#<Module:0x…>" / "#<Class:0x…>" address form for
+	// an anonymous one. Reference: ruby/ruby v3_4_0 object.c rb_mod_to_s.
+	vm.cModule.define("to_s", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(vm.moduleToSStr(self.(*RClass)))
+	})
+	// Module#inspect is an alias of Module#to_s — it shares the same method record
+	// so Module.instance_method(:inspect) == Module.instance_method(:to_s) (MRI).
+	aliasBuiltin(vm.cModule, "inspect", "to_s")
 	vm.cModule.define("instance_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		all := len(args) == 0 || args[0].Truthy() // instance_methods(false) = own only
 		// MRI's instance_methods lists the public and protected methods, never the
@@ -1581,6 +1594,26 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 	}
+	// Module#<=>(other): 0 when equal, -1 when self is a descendant of other, +1
+	// when an ancestor, and nil when the two are unrelated OR other is not a
+	// module/class (MRI returns nil rather than raising). Reference: ruby/ruby
+	// v3_4_0 object.c rb_mod_cmp.
+	vm.cModule.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*RClass)
+		b, ok := args[0].(*RClass)
+		if !ok {
+			return object.NilV
+		}
+		switch {
+		case a == b:
+			return object.IntValue(0)
+		case classIsA(a, b):
+			return object.IntValue(-1)
+		case classIsA(b, a):
+			return object.IntValue(1)
+		}
+		return object.NilV
+	})
 	vm.cModule.define("<", classCmpOp(func(c int) bool { return c < 0 }))
 	vm.cModule.define("<=", classCmpOp(func(c int) bool { return c <= 0 }))
 	vm.cModule.define(">", classCmpOp(func(c int) bool { return c > 0 }))
@@ -8705,6 +8738,41 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 // constNameArg coerces a const_get/const_set/const_defined? name (a Symbol or
 // String) to its text, rejecting a name that does not begin with an uppercase
 // letter — as Ruby does.
+// moduleToSStr builds Module#to_s / #inspect for c: a permanent name when named,
+// "#<refinement:Target@Holder>" for a refinement module, "#<Class:INNER>" for a
+// singleton class (INNER being the identity of the class/module or object it is
+// the singleton of), and the anonymous "#<Class:0x…>" / "#<Module:0x…>" address
+// form otherwise. Reference: ruby/ruby v3_4_0 object.c rb_mod_to_s.
+func (vm *VM) moduleToSStr(c *RClass) string {
+	if c.isRefinement && c.refinedClass != nil {
+		holder := ""
+		if c.refHolder != nil {
+			holder = c.refHolder.name
+		}
+		return "#<refinement:" + c.refinedClass.name + "@" + holder + ">"
+	}
+	if c.isSingleton {
+		var inner string
+		switch {
+		case c.metaOf != nil:
+			inner = vm.moduleToSStr(c.metaOf)
+		case c.attached != nil:
+			if ac, ok := c.attached.(*RClass); ok {
+				inner = vm.moduleToSStr(ac)
+			} else {
+				inner = vm.objectIdentityRepr(c.attached)
+			}
+		default:
+			inner = vm.anonClassOrModuleRepr(c)
+		}
+		return "#<Class:" + inner + ">"
+	}
+	if c.name != "" {
+		return c.name
+	}
+	return vm.anonClassOrModuleRepr(c)
+}
+
 // checkModuleArgs validates the arguments of Module#include / #prepend: at least
 // one argument (else ArgumentError), each a Module — never a Class or other
 // object (else TypeError "wrong argument type X (expected Module)") — and not a
