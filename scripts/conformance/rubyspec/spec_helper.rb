@@ -112,8 +112,61 @@ class BeComputedByMatcher
   def failure_message; @bad || "be_computed_by(#{@sym}) mismatch"; end
 end
 def be_computed_by(sym, *extra); BeComputedByMatcher.new(sym, *extra); end
-def complain(*a); raise SpecSkip, "complain matcher unsupported"; end
-def output(*a); raise SpecSkip, "output matcher unsupported"; end
+# complain: the block should (or should_not) write a warning to $stderr. An
+# optional String (exact) or Regexp (match) constrains the warning text; the
+# verbose: keyword runs the block under that $VERBOSE. Mirrors mspec's
+# ComplainMatcher (mspec/lib/mspec/matchers/complain.rb).
+class ComplainMatcher
+  def initialize(pat, verbose); @pat, @verbose = pat, verbose; end
+  def matches?(callable)
+    require "stringio"
+    old_err, $stderr = $stderr, StringIO.new
+    set_v = !@verbose.nil?
+    old_v = $VERBOSE if set_v
+    $VERBOSE = @verbose if set_v
+    begin
+      callable.call
+    ensure
+      $VERBOSE = old_v if set_v
+      out = $stderr.string
+      $stderr = old_err
+    end
+    if @pat.nil?
+      !out.empty?
+    elsif @pat.is_a?(Regexp)
+      !!(out =~ @pat)
+    else
+      out == @pat
+    end
+  end
+  def failure_message; "expected a warning#{@pat ? " matching #{@pat.inspect}" : ''}"; end
+end
+def complain(pat = nil, verbose: nil); ComplainMatcher.new(pat, verbose); end
+
+# output: capture $stdout (and, with a second argument, $stderr) around the block
+# and match each against a String (exact) or Regexp. Mirrors mspec's
+# OutputMatcher. output_to_fd (real fd redirection) stays unsupported.
+class OutputMatcher
+  def initialize(out, err); @out, @err = out, err; end
+  def matches?(callable)
+    require "stringio"
+    oo, $stdout = $stdout, StringIO.new
+    oe, $stderr = $stderr, StringIO.new
+    begin
+      callable.call
+    ensure
+      so, se = $stdout.string, $stderr.string
+      $stdout, $stderr = oo, oe
+    end
+    ok = true
+    ok &&= match_stream(@out, so) unless @out.nil?
+    ok &&= match_stream(@err, se) unless @err.nil?
+    ok
+  end
+  def match_stream(pat, s); pat.is_a?(Regexp) ? !!(s =~ pat) : (s == pat); end
+  def failure_message; "output did not match"; end
+end
+def output(out = nil, err = nil); OutputMatcher.new(out, err); end
 def output_to_fd(*a); raise SpecSkip, "output_to_fd matcher unsupported"; end
 
 class RaiseMatcher
