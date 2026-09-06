@@ -76,6 +76,20 @@ type Enumerator struct {
 	// first is consumed (TypeError), and #rewind discards a pending one.
 	feedVal object.Value
 	feedSet bool
+
+	// methodValueState makes an Enumerator a boxed value: it carries the frozen
+	// flag (so #freeze/#frozen? and Enumerator#initialize's FrozenError work) and
+	// any instance variables set on it, exactly as BoundMethod does. The zero value
+	// is an unfrozen enumerator with no ivars.
+	methodValueState
+}
+
+// uninitialized reports whether e came from Class#allocate and was never given a
+// source: MRI renders such an enumerator as "#<Enumerator: uninitialized>" and
+// raises when it is iterated. Every real constructor sets at least one of these,
+// so an all-zero Enumerator is exactly the allocated-but-uninitialized one.
+func (e *Enumerator) uninitialized() bool {
+	return e.recv == nil && e.block == nil && e.produceBlk == nil && !e.isChain
 }
 
 // forPull returns a copy of e carrying its definition and none of its
@@ -107,6 +121,11 @@ func (y *yielder) Truthy() bool    { return true }
 // #<Enumerator::Chain: [parts]>). (MRI's #to_s shows the object address, which we
 // can't reproduce deterministically, so ToS reuses Inspect.)
 func (e *Enumerator) Inspect() string {
+	if e.uninitialized() {
+		// Only Enumerator.allocate produces an uninitialized enumerator, and it
+		// carries none of the subclass flags, so the class name is always plain.
+		return "#<Enumerator: uninitialized>"
+	}
 	if e.isChain {
 		parts := make([]string, len(e.chainParts))
 		for i, p := range e.chainParts {
@@ -271,6 +290,13 @@ func (vm *VM) registerEnumerator() {
 			}
 			return e
 		}}
+	// Enumerator.allocate yields an uninitialized Enumerator (a distinct Go value
+	// so the instance methods work once #initialize gives it a source), rather than
+	// the generic *RObject Class#allocate would produce.
+	vm.cEnumerator.smethods["allocate"] = &Method{name: "allocate", owner: vm.cEnumerator,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return &Enumerator{}
+		}}
 	// Enumerator.produce(initial = nil, size: Float::INFINITY) { |prev| … }.
 	vm.cEnumerator.smethods["produce"] = &Method{name: "produce", owner: vm.cEnumerator,
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
@@ -299,21 +325,41 @@ func (vm *VM) registerEnumerator() {
 	}
 
 	d := func(name string, fn NativeFn) { vm.cEnumerator.define(name, fn) }
-	// #inspect / #to_s: a live Enumerator or Lazy renders through its Go Inspect;
-	// a bare instance from Class#allocate (never #initialize-d) reads
-	// "#<ClassName: uninitialized>", as MRI shows for an uninitialized enumerator.
-	inspectFn := func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		switch v := self.(type) {
-		case *Enumerator:
-			return object.NewString(v.Inspect())
-		case *LazyEnum:
-			return object.NewString(v.Inspect())
-		default:
-			return object.NewString("#<" + vm.classOf(self).name + ": uninitialized>")
+	// #inspect / #to_s render through the receiver's Go Inspect. An instance from
+	// Class#allocate (never #initialize-d) is still a typed *Enumerator/*LazyEnum
+	// whose Inspect reports the "#<ClassName: uninitialized>" form MRI shows, so no
+	// separate uninitialized branch is needed. The receiver is always one of the
+	// two concrete types (subclasses inherit the typed allocate above).
+	inspectFn := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if l, ok := self.(*LazyEnum); ok {
+			return object.NewString(l.Inspect())
 		}
+		return object.NewString(self.(*Enumerator).Inspect())
 	}
 	d("inspect", inspectFn)
 	d("to_s", inspectFn)
+	// Enumerator#initialize(size = nil) { |y| … } configures an allocated (or
+	// re-initialised) Enumerator as a generator, mirroring Enumerator.new. It is a
+	// private method, requires a block (ArgumentError otherwise, with MRI's Proc
+	// message), refuses a frozen receiver (FrozenError), and returns self.
+	d("initialize", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		e := self.(*Enumerator)
+		if isFrozen(e) {
+			vm.raiseFrozen(e)
+		}
+		if blk == nil {
+			raise("ArgumentError", "tried to create Proc object without a block")
+		}
+		if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
+		*e = Enumerator{block: blk, methodValueState: e.methodValueState}
+		if len(args) == 1 {
+			e.sizeSpec, e.sizeSpecSet = args[0], true
+		}
+		return e
+	})
+	vm.cEnumerator.methods["initialize"].vis = visPrivate
 	d("each", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		e := self.(*Enumerator)
 		if len(args) > 0 {
