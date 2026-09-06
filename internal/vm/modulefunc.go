@@ -136,6 +136,15 @@ func (vm *VM) registerModuleExtras() {
 		}
 		newName, oldName := vm.defineMethodName(args[0]), vm.defineMethodName(args[1])
 		vm.aliasMethod(mod, newName, oldName)
+		// A handful of names (the initialize family and respond_to_missing?) are
+		// always private in MRI, whatever the source method's visibility — defining
+		// one under such a name, alias included, forces it private (vm_method.c
+		// check_definition_visibility / rb_scope_visibility_set special-cases).
+		if alwaysPrivateName(newName) {
+			if m := mod.methods[newName]; m != nil {
+				m.vis = visPrivate
+			}
+		}
 		return object.Symbol(newName)
 	})
 
@@ -162,7 +171,14 @@ func (vm *VM) registerModuleExtras() {
 				if mod.isModule {
 					kind = "module"
 				}
-				raise("NameError", "undefined method '%s' for %s '%s'", name, kind, mod.ToS())
+				// A class/module metaclass names the class it is the metaclass of
+				// ("String", not "#<Class:String>") in this error, matching MRI's
+				// rb_class_name resolution for the receiver.
+				recv := vm.moduleToSStr(mod)
+				if mod.isSingleton && mod.metaOf != nil {
+					recv = vm.moduleToSStr(mod.metaOf)
+				}
+				raise("NameError", "undefined method '%s' for %s '%s'", name, kind, recv)
 			}
 			vm.undefMethod(mod, name)
 		}
@@ -290,6 +306,36 @@ func (vm *VM) coerceNameArg(v object.Value) string {
 			cn, cn, vm.classOf(r).name)
 	}
 	raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	return ""
+}
+
+// alwaysPrivateName reports whether name is one that MRI keeps private no matter
+// how it is defined — the initialize family and respond_to_missing? (vm_method.c
+// forces their visibility to private). method_missing is deliberately NOT here:
+// MRI leaves it at the caller's visibility.
+func alwaysPrivateName(name string) bool {
+	switch name {
+	case "initialize", "initialize_copy", "initialize_clone", "initialize_dup", "respond_to_missing?":
+		return true
+	}
+	return false
+}
+
+// coerceToString converts v to a Go string through MRI's implicit String
+// conversion (#to_str): a String is taken directly, another object is sent
+// #to_str, and a missing #to_str or a non-String result raises TypeError "no
+// implicit conversion of X into String". Used where MRI applies rb_to_str /
+// rb_check_string_type (e.g. the eval-string and filename of Module#module_eval).
+func (vm *VM) coerceToString(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s.Str()
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
 	return ""
 }
 

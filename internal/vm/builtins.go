@@ -1640,33 +1640,44 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(vm.defineAttrs(self.(*RClass), args, true, true))
 	})
 	classEvalFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		// String form — class_eval("def m; end", file, line) — compiles the source
-		// and runs it with the class as both self and the method-definition target,
-		// so a `def` in the source becomes one of the class's instance methods. The
-		// optional file/line trailing arguments are accepted for MRI compatibility
-		// (they steer error reporting only) and otherwise ignored.
-		if blk == nil {
-			if len(args) > 0 {
-				if s, ok := args[0].(*object.String); ok {
-					return vm.classEvalString(self.(*RClass), string(s.Bytes()))
-				}
+		// Block form — class_eval { … } — runs the block with the class as self and
+		// as the method-definition target. MRI rejects any positional argument
+		// alongside a block (ArgumentError). Reference: ruby/ruby v3_4_0 vm_eval.c
+		// specific_eval / rb_mod_module_eval.
+		cls := self.(*RClass)
+		if blk != nil {
+			if len(args) != 0 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 			}
-			raise("LocalJumpError", "no block given (yield)")
+			return vm.classEval(cls, blk, nil)
 		}
-		return vm.classEval(self.(*RClass), blk, nil)
+		// String form — class_eval("def m; end", file, line): 1..3 arguments, the
+		// first being the source (coerced via #to_str) and the optional second the
+		// filename (also #to_str-coerced; it steers error reporting only). A count
+		// outside 1..3 is an ArgumentError.
+		if len(args) < 1 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
+		}
+		src := vm.coerceToString(args[0])
+		if len(args) >= 2 {
+			vm.coerceToString(args[1])
+		}
+		return vm.classEvalString(cls, src)
 	}
-	vm.cModule.define("class_eval", classEvalFn)
+	// Module#class_eval is an alias of Module#module_eval — a shared method record,
+	// so Module.instance_method(:class_eval) == Module.instance_method(:module_eval).
 	vm.cModule.define("module_eval", classEvalFn)
+	aliasBuiltin(vm.cModule, "class_eval", "module_eval")
 	classExec := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
 		return vm.classEval(self.(*RClass), blk, args)
 	}
-	vm.cModule.define("class_exec", classExec)
-	// Module#module_exec is Module#class_exec (the block runs with the module as
-	// self and receives the given arguments).
+	// Module#module_exec runs the block with the module as self and the given
+	// arguments; Module#class_exec is its alias (shared record).
 	vm.cModule.define("module_exec", classExec)
+	aliasBuiltin(vm.cModule, "class_exec", "module_exec")
 	vm.cModule.define("define_method", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		cls := self.(*RClass)
 		if isFrozen(cls) {
