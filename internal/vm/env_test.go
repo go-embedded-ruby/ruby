@@ -193,10 +193,14 @@ p acc.sort`)
 		t.Fatalf("each: %q", got)
 	}
 
-	// no-block path raises LocalJumpError.
-	c := catchRaise(func() { callEnv(t, vm, "each", nil, nil) })
-	if c != "LocalJumpError" {
-		t.Fatalf("each no-block: got %q", c)
+	// no-block path returns a sized Enumerator, matching MRI ENV.each/each_pair
+	// (env_each_pair uses RETURN_SIZED_ENUMERATOR).
+	e, ok := callEnv(t, vm, "each", nil, nil).(*Enumerator)
+	if !ok {
+		t.Fatalf("each no-block did not return an Enumerator")
+	}
+	if e.meth != "each_pair" {
+		t.Fatalf("each enumerator method = %q, want each_pair", e.meth)
 	}
 }
 
