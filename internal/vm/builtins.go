@@ -2350,6 +2350,10 @@ func (vm *VM) bootstrap() {
 	})
 	aliasBuiltin(vm.cString, "to_str", "to_s") // MRI alias of String#to_s
 	strToSym := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		if !validInEncoding(s.Bytes(), s.EncName()) { // a broken string cannot become a Symbol
+			raise("EncodingError", "invalid symbol in encoding %s :%s", s.EncName(), s.Inspect())
+		}
 		return object.Symbol(strOf(self))
 	}
 	vm.cString.define("to_sym", strToSym)
@@ -6311,8 +6315,8 @@ func asRangeValue(v object.Value) (*object.Range, bool) {
 // The caller (strIndexFn) has already validated the 1..2 arity.
 func (vm *VM) coerceStrIndexArgs(args []object.Value) []object.Value {
 	if len(args) == 1 {
-		if _, ok := args[0].(*object.String); ok {
-			return args // s[substr]
+		if sub := stringOrSubclassBytes(args[0]); sub != nil {
+			return []object.Value{sub} // s[substr] — a String or a String subclass
 		}
 		if r, ok := asRangeValue(args[0]); ok {
 			return []object.Value{vm.coerceRangeBounds(r)}
@@ -7730,7 +7734,7 @@ func (vm *VM) sliceSpan(args []object.Value, n int) (start, length int, ok bool)
 		}
 		return start, length, true
 	}
-	if rng, isR := args[0].(*object.Range); isR {
+	if rng, isR := asRangeValue(args[0]); isR { // a Range (or Range subclass) argument
 		return sliceRange(n, vm.coerceRangeBounds(rng))
 	}
 	start = normIndex(vm.repeatLong(args[0]), n)

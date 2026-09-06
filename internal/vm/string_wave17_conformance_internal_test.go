@@ -335,3 +335,26 @@ func TestStringCodepointsInvalidEncoding(t *testing.T) {
 		}
 	}
 }
+
+// TestStringSubclassIndexSliceToSym covers String#[] accepting a String subclass
+// as a substring argument (returning a plain String), String#slice! accepting a
+// Range subclass, and String#to_sym raising EncodingError on a broken string.
+// Verified against MRI 4.0.5.
+func TestStringSubclassIndexSliceToSym(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p "hello"[Class.new(String).new("ell")]`, `"ell"`},
+		{`p "hello"[Class.new(String).new("zzz")]`, `nil`},
+		{`p "hello".dup.tap { |s| s.slice!(Class.new(Range).new(1, 3)) }`, `"ho"`},
+		{`p "hello".dup.slice!(Class.new(Range).new(1, 3))`, `"ell"`},
+		{`p "abc".to_sym`, `:abc`},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want+"\n" {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want+"\n")
+		}
+	}
+	if cls, msg := evalErr(t, `"\xC3".dup.force_encoding("UTF-8").to_sym`); cls != "EncodingError" ||
+		msg != `invalid symbol in encoding UTF-8 :"\xC3"` {
+		t.Errorf("to_sym on broken string: class=%q msg=%q", cls, msg)
+	}
+}
