@@ -50,6 +50,7 @@ var xtextEncodings = map[string]encoding.Encoding{
 	"GB18030":      simplifiedchinese.GB18030,
 	"Big5":         traditionalchinese.Big5,
 	"macRoman":     charmap.Macintosh,
+	"macCyrillic":  charmap.MacintoshCyrillic,
 }
 
 // xtextDecode decodes src (in encoding `from`) to a UTF-8 string using x/text.

@@ -570,7 +570,8 @@ func (vm *VM) converterPutback(c *converterObj, args []object.Value) object.Valu
 	b := c.readAgain[len(c.readAgain)-n:]
 	out := object.NewStringBytesEnc(append([]byte(nil), b...), c.src)
 	c.readAgain = c.readAgain[:len(c.readAgain)-n]
-	c.errReadAgain = c.readAgain
+	// #putback does not disturb #primitive_errinfo: MRI keeps reporting the
+	// original read-again bytes after a putback, so c.errReadAgain is left as set.
 	return out
 }
 
