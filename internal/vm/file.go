@@ -737,15 +737,23 @@ func (vm *VM) pathStr(v object.Value) *object.String {
 // two guards fire before the path is examined, matching MRI.
 func (vm *VM) filePathArg(v object.Value) string {
 	s := vm.pathStr(v)
-	if e, ok := vm.findEncoding(s.EncName()); ok && !e.asciiCompat {
-		raise("Encoding::CompatibilityError", "path name must be ASCII-compatible (%s): %s",
-			s.EncName(), s.Inspect())
-	}
+	vm.checkPathEncoding(s)
 	str := s.Str()
 	if strings.IndexByte(str, 0) >= 0 {
 		raise("ArgumentError", "path name contains null byte")
 	}
 	return str
+}
+
+// checkPathEncoding raises Encoding::CompatibilityError when a path (or glob
+// pattern) string carries an ASCII-incompatible encoding, mirroring MRI's
+// check_path_encoding (file.c). It is shared by filePathArg and Dir.glob's
+// pattern coercion (globPatternStr).
+func (vm *VM) checkPathEncoding(s *object.String) {
+	if e, ok := vm.findEncoding(s.EncName()); ok && !e.asciiCompat {
+		raise("Encoding::CompatibilityError", "path name must be ASCII-compatible (%s): %s",
+			s.EncName(), s.Inspect())
+	}
 }
 
 // isAbsPath reports whether p is absolute, recognising both the forward-slash

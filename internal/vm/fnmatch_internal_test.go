@@ -245,17 +245,21 @@ func TestDirGlobRuby(t *testing.T) {
 	}
 }
 
-// TestGlobPatternDirect covers globPattern branches that are awkward to reach
-// through the interpreter: an unreadable base directory and multi-pattern dedup.
+// TestGlobPatternDirect covers globExpanded branches that are awkward to reach
+// through the interpreter: a base-relative recursive walk and an unreadable base
+// directory (which yields no matches).
 func TestGlobPatternDirect(t *testing.T) {
 	dir := globTree(t)
-	got := globPattern("**/*.rb", dir, 0) // base set => results are relative to it
+	var got []string
+	globExpanded("**/*.rb", dir, 0, &got) // base set => results are relative to it
 	sort.Strings(got)
 	want := []string{"a/b/c/z.rb", "a/b/y.rb", "a/x.rb", "top.rb"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("globPattern absolute: %v", got)
+		t.Errorf("globExpanded absolute: %v", got)
 	}
-	if got := globPattern("*", dir+"/missing", 0); got != nil {
-		t.Errorf("globPattern unreadable base: %v", got)
+	var missing []string
+	globExpanded("*", dir+"/missing", 0, &missing)
+	if missing != nil {
+		t.Errorf("globExpanded unreadable base: %v", missing)
 	}
 }
