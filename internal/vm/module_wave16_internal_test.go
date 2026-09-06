@@ -43,6 +43,21 @@ func TestWave16NameCoercion(t *testing.T) {
 	}
 }
 
+// TestWave16RemoveClassVariable covers Module#remove_class_variable's name
+// coercion (cvarNameArg): a non-Symbol/String argument raises TypeError and a
+// malformed name raises NameError, while a valid name returns the removed value.
+func TestWave16RemoveClassVariable(t *testing.T) {
+	if got := eval(t, "c = Class.new\nc.class_variable_set(:@@x, 9)\np c.send(:remove_class_variable, :@@x)"); got != "9\n" {
+		t.Errorf("remove_class_variable value: got %q", got)
+	}
+	if cls, _ := evalErr(t, "Class.new.send(:remove_class_variable, 123)"); cls != "TypeError" {
+		t.Errorf("remove_class_variable non-name: got %s", cls)
+	}
+	if cls, _ := evalErr(t, "Class.new.send(:remove_class_variable, :foo)"); cls != "NameError" {
+		t.Errorf("remove_class_variable malformed: got %s", cls)
+	}
+}
+
 // TestWave16FrozenAndRemoveConst covers the frozen guards on Module#const_set and
 // #class_variable_set and the autoload-entry removal path of #remove_const.
 func TestWave16FrozenAndRemoveConst(t *testing.T) {
@@ -112,6 +127,7 @@ func TestWave16FeatureMethods(t *testing.T) {
 		{"module CyA; end\nmodule CyB; include CyA; end\nCyA.include(CyB)", "ArgumentError", "cyclic include detected"},
 		{"m = Module.new\nc = Class.new.freeze\nm.send(:append_features, c)", "FrozenError", ""},
 		{"Module.new.send(:append_features, 5)", "TypeError", "wrong argument type Integer (expected Module)"},
+		{"Module.new.send(:prepend_features, 5)", "TypeError", "wrong argument type Integer (expected Module)"},
 		{"Module.instance_method(:append_features).bind(Class.new).call(Module.new)", "TypeError", "wrong argument type Class (expected Module)"},
 	}
 	for _, c := range errs {
@@ -206,6 +222,9 @@ func TestWave16ModuleEval(t *testing.T) {
 		{"Module.new.module_eval(\"1\", \"f\", 1, 2)", "ArgumentError", "wrong number of arguments (given 4, expected 1..3)"},
 		{"Module.new.module_eval(Object.new)", "TypeError", "no implicit conversion of Object into String"},
 		{"Module.new.module_eval(\"1\", Object.new)", "TypeError", "no implicit conversion of Object into String"},
+		// #to_str present but returning a non-String still raises (coerceToString
+		// falls through the conversion to the TypeError).
+		{"o = Object.new\ndef o.to_str; 1; end\nModule.new.module_eval(o)", "TypeError", "no implicit conversion of Object into String"},
 	}
 	for _, c := range errs {
 		if cls, msg := evalErr(t, c.src); cls != c.class || msg != c.msg {
