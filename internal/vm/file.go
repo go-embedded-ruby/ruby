@@ -99,18 +99,22 @@ func (vm *VM) registerFile() {
 		}
 		flags := 0
 		if len(args) == 3 {
-			flags = int(intArg(args[2]))
+			// MRI coerces the flags argument with rb_to_int (NUM2INT), so a
+			// non-Integer that answers #to_int is accepted rather than a TypeError.
+			flags = int(coerceInt(vm, args[2]))
 		}
-		return object.Bool(fnmatch(strArg(args[0]), pathArg(vm, args[1]), flags))
+		return object.Bool(fnmatch(strArg(args[0]), vm.filePathArg(args[1]), flags))
 	}
-	def("fnmatch?", fnmatchFn)
+	// File.fnmatch? is a genuine alias of File.fnmatch (they share one method
+	// record, so File.method(:fnmatch?) == File.method(:fnmatch)), matching MRI.
 	def("fnmatch", fnmatchFn)
+	cFile.smethods["fnmatch?"] = cFile.smethods["fnmatch"]
 
 	def("basename", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) < 1 || len(args) > 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 		}
-		base := rubyBasename(pathArg(vm, args[0]))
+		base := rubyBasename(vm.filePathArg(args[0]))
 		if len(args) > 1 {
 			base = stripBaseSuffix(base, strArg(args[1]))
 		}
@@ -127,7 +131,7 @@ func (vm *VM) registerFile() {
 				raise("ArgumentError", "negative level: %d", level)
 			}
 		}
-		p := pathArg(vm, args[0])
+		p := vm.filePathArg(args[0])
 		// A level > 1 strips that many trailing components; dirname is idempotent at
 		// the root/"." so a level that exceeds the depth converges rather than looping.
 		for i := 0; i < level; i++ {
@@ -143,13 +147,13 @@ func (vm *VM) registerFile() {
 		if len(args) != 1 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 		}
-		return object.NewString(rubyExtname(rubyBasename(pathArg(vm, args[0]))))
+		return object.NewString(rubyExtname(rubyBasename(vm.filePathArg(args[0]))))
 	})
 	def("split", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		if len(args) != 1 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 		}
-		p := pathArg(vm, args[0])
+		p := vm.filePathArg(args[0])
 		return object.NewArray(object.NewString(rubyDirname(p)), object.NewString(rubyBasename(p)))
 	})
 	def("join", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -185,13 +189,13 @@ func (vm *VM) registerFile() {
 		return object.NewString(fileJoin(parts))
 	})
 	def("expand_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:], true))
+		return object.NewString(vm.fileExpand(vm.filePathArg(args[0]), args[1:], true))
 	})
 	// absolute_path resolves a path to an absolute one against an optional base
 	// directory (defaulting to the CWD), like expand_path but without ~ expansion.
 	// Puppet uses it with relative paths and an explicit base, where the two agree.
 	def("absolute_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(fileExpand(pathArg(vm, args[0]), args[1:], false))
+		return object.NewString(vm.fileExpand(vm.filePathArg(args[0]), args[1:], false))
 	})
 	def("absolute_path?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(path.IsAbs(toSlash(pathArg(vm, args[0]))))
@@ -221,7 +225,7 @@ func (vm *VM) registerFile() {
 	// Errno::ENOENT is raised. An optional second argument is the base directory
 	// a relative path is resolved against.
 	def("realpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := fileExpand(pathArg(vm, args[0]), args[1:], true)
+		p := vm.fileExpand(vm.filePathArg(args[0]), args[1:], true)
 		resolved, err := filepath.EvalSymlinks(p)
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
@@ -506,12 +510,12 @@ func (vm *VM) registerFile() {
 	// symlink is resolved where possible, and an absent leaf is joined onto the
 	// resolved directory. A missing intermediate directory raises Errno::ENOENT.
 	def("realdirpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(realdirpath(fileExpand(pathArg(vm, args[0]), args[1:], true)))
+		return object.NewString(realdirpath(vm.fileExpand(vm.filePathArg(args[0]), args[1:], true)))
 	})
 	// File.path returns the string (or #to_path) form of its argument unchanged —
 	// no expansion, matching MRI.
 	def("path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(pathArg(vm, args[0]))
+		return object.NewString(vm.filePathArg(args[0]))
 	})
 }
 
@@ -700,6 +704,50 @@ func coerceInt(vm *VM, v object.Value) int64 {
 	return 0
 }
 
+// pathStr coerces a path-like argument to its *object.String form the way MRI's
+// rb_get_path_check_to_string (file.c) does: a String is taken directly,
+// otherwise #to_path then #to_str is tried, and a non-String result or a value
+// that responds to neither raises TypeError. The *object.String (not a bare
+// string) is returned so filePathArg can inspect the source encoding.
+func (vm *VM) pathStr(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	for _, m := range []string{"to_path", "to_str"} {
+		if vm.respondsToDynamic(v, m) {
+			r := vm.send(v, m, nil, nil)
+			s, ok := r.(*object.String)
+			if !ok {
+				raise("TypeError", "can't convert %s to String (%s#%s gives %s)",
+					vm.classOf(v).name, vm.classOf(v).name, m, vm.classOf(r).name)
+			}
+			return s
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+	return nil
+}
+
+// filePathArg coerces v to a filesystem-path string exactly as MRI's rb_get_path
+// (rb_get_path_check_convert, file.c v3_4_0): after the #to_path/#to_str
+// conversion, check_path_encoding raises Encoding::CompatibilityError for an
+// ASCII-incompatible encoding (e.g. UTF-16/UTF-32), then a NUL byte raises
+// ArgumentError ("path name contains null byte"). Path-algebra entry points
+// (File.basename/dirname/extname/split/path and Dir.mkdir …) use this so those
+// two guards fire before the path is examined, matching MRI.
+func (vm *VM) filePathArg(v object.Value) string {
+	s := vm.pathStr(v)
+	if e, ok := vm.findEncoding(s.EncName()); ok && !e.asciiCompat {
+		raise("Encoding::CompatibilityError", "path name must be ASCII-compatible (%s): %s",
+			s.EncName(), s.Inspect())
+	}
+	str := s.Str()
+	if strings.IndexByte(str, 0) >= 0 {
+		raise("ArgumentError", "path name contains null byte")
+	}
+	return str
+}
+
 // isAbsPath reports whether p is absolute, recognising both the forward-slash
 // rooted form ("/x") and — on Windows — a drive-letter root ("C:/x"). rbgo keeps
 // paths forward-slashed internally, so path.IsAbs alone would treat a Windows
@@ -713,7 +761,7 @@ func isAbsPath(p string) bool {
 // user's home directory, a relative path is resolved against the optional base
 // (default: the working directory), and the result is cleaned (so .. and . collapse)
 // while a leading run of two or more separators is preserved (POSIX / MRI).
-func fileExpand(p string, rest []object.Value, expandTilde bool) string {
+func (vm *VM) fileExpand(p string, rest []object.Value, expandTilde bool) string {
 	if expandTilde {
 		p = expandTildePath(p)
 	}
@@ -722,7 +770,9 @@ func fileExpand(p string, rest []object.Value, expandTilde bool) string {
 	}
 	base := ""
 	if len(rest) > 0 && rest[0] != object.NilV {
-		base = fileExpand(strArg(rest[0]), nil, expandTilde)
+		// The base directory is a path-like argument too, so MRI coerces it via
+		// rb_get_path (#to_path) — not a bare String check — before expanding it.
+		base = vm.fileExpand(vm.filePathArg(rest[0]), nil, expandTilde)
 	} else if wd, err := os.Getwd(); err == nil {
 		base = toSlash(wd)
 	}
