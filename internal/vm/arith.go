@@ -233,6 +233,18 @@ func bigOp(op bytecode.Op, a, b *big.Int) object.Value {
 // comparisons keep the Phase 0 fast path; everything else dispatches as a
 // method so user classes (and the embedded-Ruby Comparable mixin) can define
 // `<`, `<=`, `>`, `>=` and `==`.
+// hasCustomNeq reports whether a's class overrides `!=` — that is, defines it
+// anywhere below BasicObject (whose default `!=` returns !(self == other)). When
+// it does, the OpNeq opcode must dispatch that method rather than invert `==`.
+func (vm *VM) hasCustomNeq(a object.Value) bool {
+	for c := vm.classOf(a); c != nil && c != vm.cBasicObject; c = c.super {
+		if lookupOwnOrIncluded(c, "!=") != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 	// An instance of a user subclass of a built-in value type uses that value's
 	// own operators (so a String-subclass "+", an Array-subclass "*", and the
@@ -245,6 +257,13 @@ func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {
 	}
 	switch op {
 	case bytecode.OpEq, bytecode.OpNeq:
+		// `!=` is a real method — BasicObject#!= returns !(self == other) — so the
+		// inline "invert ==" shortcut is only valid for the default. A receiver
+		// that OVERRIDES #!= must dispatch its own method (MRI calls it), rather
+		// than have the opcode compute !(self == other).
+		if op == bytecode.OpNeq && vm.hasCustomNeq(a) {
+			return vm.send(a, "!=", []object.Value{b}, nil)
+		}
 		// Objects dispatch `==` (so Object identity, a user `==`, or
 		// Comparable#== all apply); a builtin instance whose class defines its own
 		// `==` (e.g. Digest::Instance#==, which compares hex digests) dispatches it
