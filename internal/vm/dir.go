@@ -2,6 +2,7 @@ package vm
 
 import (
 	"os"
+	"os/user"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -22,7 +23,19 @@ func (vm *VM) registerDir() {
 
 	def("pwd", dirPwd)
 	def("getwd", dirPwd)
-	def("home", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+	// Dir.home(user=nil): with no argument (or nil) the current user's home,
+	// reading $HOME first and falling back to the passwd database; with a user
+	// name, that user's home from the passwd database, raising ArgumentError when
+	// the user does not exist (ruby/ruby v3_4_0 dir.c dir_s_home / rb_home_dir_of).
+	def("home", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 0 && args[0] != object.NilV {
+			name := strArg(args[0])
+			h, err := userHomeDir(name)
+			if err != nil {
+				raise("ArgumentError", "user %s doesn't exist", name)
+			}
+			return object.NewString(toSlash(h))
+		}
 		return object.NewString(toSlash(dirHomeStr()))
 	})
 	def("entries", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -76,13 +89,20 @@ func (vm *VM) registerDir() {
 		}
 		return object.Bool(len(dirNames(p)) == 0)
 	})
-	def("mkdir", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := strArg(args[0])
-		if err := os.Mkdir(p, 0o755); err != nil {
-			if os.IsExist(err) {
-				raise("Errno::EEXIST", "File exists @ dir_s_mkdir - %s", p)
-			}
-			raise("Errno::ENOENT", "No such file or directory @ dir_s_mkdir - %s", p)
+	// Dir.mkdir(path, mode=0777): the path is a rb_get_path argument (#to_path,
+	// encoding/NUL checks) and the mode is coerced with #to_int, defaulting to
+	// 0777 (the OS applies umask), matching dir.c dir_s_mkdir / check_dirname.
+	def("mkdir", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
+		p := vm.filePathArg(args[0])
+		mode := int64(0o777)
+		if len(args) == 2 {
+			mode = coerceInt(vm, args[1])
+		}
+		if err := os.Mkdir(p, os.FileMode(mode)&os.ModePerm); err != nil {
+			raiseMkdirErr(err, p)
 		}
 		return object.IntValue(0)
 	})
@@ -263,14 +283,45 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 // testable without manipulating the process environment.
 var osUserHomeDir = os.UserHomeDir
 
-// dirHomeStr returns the user's home directory (OS-native), raising ArgumentError
-// when it cannot be determined, as MRI's Dir.home / Dir.chdir do.
-func dirHomeStr() string {
-	h, err := osUserHomeDir()
+// osCurrentUserHome is a seam over the passwd-database lookup of the current
+// user's home directory (getpwuid), used as Dir.home's fallback when $HOME is
+// unset — matching MRI's rb_default_home_dir. It is a var so the fallback and
+// its failure branch are testable without depending on the runner's passwd db.
+var osCurrentUserHome = func() (string, error) {
+	u, err := user.Current()
 	if err != nil {
-		raise("ArgumentError", "couldn't find HOME environment -- expanding `~'")
+		return "", err
 	}
-	return h
+	return u.HomeDir, nil
+}
+
+// dirHomeStr returns the user's home directory (OS-native), reading $HOME first
+// and falling back to the passwd database when it is unset (MRI's
+// rb_default_home_dir), raising ArgumentError only when neither yields a home.
+func dirHomeStr() string {
+	if h, err := osUserHomeDir(); err == nil && h != "" {
+		return h
+	}
+	if h, err := osCurrentUserHome(); err == nil && h != "" {
+		return h
+	}
+	raise("ArgumentError", "couldn't find HOME environment -- expanding `~'")
+	return ""
+}
+
+// raiseMkdirErr maps an os.Mkdir failure to the MRI errno Dir.mkdir raises: an
+// existing entry is Errno::EEXIST, a permission failure (e.g. an unwritable
+// parent) Errno::EACCES — a SystemCallError, as the spec requires — and any
+// other failure (a missing intermediate directory) Errno::ENOENT.
+func raiseMkdirErr(err error, path string) {
+	switch {
+	case os.IsExist(err):
+		raise("Errno::EEXIST", "File exists @ dir_s_mkdir - %s", path)
+	case os.IsPermission(err):
+		raise("Errno::EACCES", "Permission denied @ dir_s_mkdir - %s", path)
+	default:
+		raise("Errno::ENOENT", "No such file or directory @ dir_s_mkdir - %s", path)
+	}
 }
 
 func dirPwd(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -310,7 +361,13 @@ func parseGlobArgs(vm *VM, args []object.Value) (base string, sortR bool, flags 
 				base = pathArg(vm, v)
 			}
 			if v, ok := h.Get(object.Symbol("sort")); ok {
-				sortR = v.Truthy()
+				// MRI accepts only true or false for sort:, raising ArgumentError
+				// ("expected true or false as sort: …") for anything else (dir.c
+				// glob keyword handling).
+				if v != object.True && v != object.False {
+					raise("ArgumentError", "expected true or false as sort: %s", v.Inspect())
+				}
+				sortR = v == object.True
 			}
 			if v, ok := h.Get(object.Symbol("flags")); ok && v != object.NilV {
 				flags = int(intArg(v))
@@ -321,26 +378,50 @@ func parseGlobArgs(vm *VM, args []object.Value) (base string, sortR bool, flags 
 }
 
 // globPatternArg coerces a Dir.glob pattern argument — a String or an Array of
-// Strings — into a slice of pattern strings.
+// Strings — into a slice of pattern strings, applying MRI's GlobPathValue checks
+// to each (see globPatternStr).
 func globPatternArg(vm *VM, v object.Value) []string {
 	if arr, ok := v.(*object.Array); ok {
 		out := make([]string, len(arr.Elems))
 		for i, e := range arr.Elems {
-			out[i] = strArg(e)
+			out[i] = vm.globPatternStr(e)
 		}
 		return out
 	}
-	return []string{pathArg(vm, v)}
+	return []string{vm.globPatternStr(v)}
 }
 
-// globResult runs every pattern, coalesces and (by default) sorts the matches,
-// then either yields each to a block (returning nil) or returns them as an Array.
+// globPatternStr coerces one glob-pattern argument to a string the way MRI's
+// GlobPathValue does: convert via #to_path/#to_str, reject an ASCII-incompatible
+// encoding with Encoding::CompatibilityError, and reject an embedded NUL with
+// ArgumentError ("nul-separated glob pattern is deprecated" — dir.c rb_push_glob).
+func (vm *VM) globPatternStr(v object.Value) string {
+	s := vm.pathStr(v)
+	vm.checkPathEncoding(s)
+	str := s.Str()
+	if strings.IndexByte(str, 0) >= 0 {
+		raise("ArgumentError", "nul-separated glob pattern is deprecated")
+	}
+	return str
+}
+
+// globResult globs every pattern and either yields each match to a block
+// (returning nil) or returns the matches as an Array. Each brace expansion is an
+// independent sub-glob: MRI sorts (when sort:) and de-duplicates it on its own,
+// then concatenates the sub-globs in brace order — so duplicates ACROSS brace
+// alternatives or repeated patterns are preserved (Dir["*","*"] doubles its
+// matches) and the final list is not globally re-sorted (dir.c ruby_brace_expand
+// drives one ruby_glob0 per expansion).
 func globResult(vm *VM, patterns []string, flags int, base string, sortR bool, blk *Proc) object.Value {
 	var matches []string
+	escape := flags&fnmNoEscape == 0
 	for _, pat := range patterns {
-		matches = append(matches, globPattern(pat, base, flags)...)
+		for _, expanded := range braceExpand(pat, escape) {
+			var sub []string
+			globExpanded(expanded, base, flags, &sub)
+			matches = append(matches, sortedUnique(sub, sortR)...)
+		}
 	}
-	matches = sortedUnique(matches, sortR)
 	if blk != nil {
 		for _, m := range matches {
 			vm.callBlock(blk, []object.Value{object.NewString(m)})
@@ -354,21 +435,15 @@ func globResult(vm *VM, patterns []string, flags int, base string, sortR bool, b
 	return object.NewArrayFromSlice(elems)
 }
 
-// globPattern returns the existing filesystem paths under base that match one
-// glob pattern, expanding '{a,b}' braces first (glob always honours braces) and
-// walking each resulting pattern against the real directory tree.
-func globPattern(pat, base string, flags int) []string {
-	var out []string
-	for _, expanded := range braceExpand(pat, flags&fnmNoEscape == 0) {
-		globExpanded(expanded, base, flags, &out)
-	}
-	return out
-}
-
 // globExpanded walks one brace-free pattern. It resolves the start directory
 // (base, or '/' for an absolute pattern), records whether a trailing '/' restricts
-// matches to directories, and delegates the segment walk to globWalk.
+// matches to directories, and delegates the segment walk to globWalk. An empty
+// pattern matches nothing (MRI's Dir.glob("") is []), so it is short-circuited
+// before the leading-"" rule could mistake it for an absolute root.
 func globExpanded(pat, base string, flags int, out *[]string) {
+	if pat == "" {
+		return
+	}
 	segs := strings.Split(pat, "/")
 	// globStart resolves the walk's start directory and output prefix, consuming
 	// any leading absolute-root segment. On POSIX that is only a leading "" (a
@@ -387,7 +462,10 @@ func globExpanded(pat, base string, flags int, out *[]string) {
 		}
 		return
 	}
-	globWalk(fsDir, outPrefix, segs, dirOnly, flags, out)
+	// litPath starts true: the walk begins on a real (base or root) directory
+	// reached by no wildcard, so a terminal segment may match the synthetic "."
+	// (globWalk's dot rule).
+	globWalk(fsDir, outPrefix, segs, dirOnly, true, flags, out)
 }
 
 // globWalk matches the remaining pattern segments against the directory fsDir,
@@ -397,7 +475,14 @@ func globExpanded(pat, base string, flags int, out *[]string) {
 // '..' and explicit hidden names work; other segments are matched against the
 // directory's entries, with a synthetic '.' offered for a terminal segment so
 // MRI's inclusion of "." under a matching pattern is reproduced.
-func globWalk(fsDir, outPrefix string, segs []string, dirOnly bool, flags int, out *[]string) {
+//
+// litPath records whether fsDir was reached through literal path components only
+// (never a matched wildcard or a '**' recursion). MRI matches the synthetic "."
+// for a terminal segment only on such an all-literal path (so Dir["nested/.*"]
+// yields "nested/." but Dir["*/.*"] does not), or — for a '**'-bearing pattern —
+// at the top level under FNM_DOTMATCH (Dir.glob("**/.*", File::FNM_DOTMATCH)
+// yields "." but the plain form does not).
+func globWalk(fsDir, outPrefix string, segs []string, dirOnly, litPath bool, flags int, out *[]string) {
 	period := flags&fnmDotMatch == 0
 	nocase := flags&fnmCaseFold != 0
 	escape := flags&fnmNoEscape == 0
@@ -414,14 +499,19 @@ func globWalk(fsDir, outPrefix string, segs []string, dirOnly bool, flags int, o
 				*out = append(*out, outPrefix)
 			}
 		} else {
-			globWalk(fsDir, outPrefix, rest, dirOnly, flags, out) // rest matches here (zero levels)
+			// The zero-level match reaches rest through '**', so litPath is false.
+			globWalk(fsDir, outPrefix, rest, dirOnly, false, flags, out)
 		}
 		for _, name := range readDirNames(fsDir) {
 			if period && strings.HasPrefix(name, ".") {
 				continue // do not recurse into a hidden directory without DOTMATCH
 			}
-			if child := fsJoin(fsDir, name); isDirFS(child) {
-				globWalk(child, outPrefix+name+"/", segs, dirOnly, flags, out)
+			// '**' descends into real subdirectories only: a symlink to a directory
+			// is matched as an entry (by the zero-level walk above) but never
+			// traversed, matching MRI (glob_helper's do_lstat gate) — which also
+			// avoids symlink cycles. Recursion is through '**', so litPath is false.
+			if child := fsJoin(fsDir, name); isRealDirFS(child) {
+				globWalk(child, outPrefix+name+"/", segs, dirOnly, false, flags, out)
 			}
 		}
 		return
@@ -433,28 +523,35 @@ func globWalk(fsDir, outPrefix string, segs []string, dirOnly bool, flags int, o
 	}
 
 	// A metacharacter-free segment is resolved by a direct stat (matching MRI and
-	// letting '.', '..' and explicit hidden names through unconditionally).
+	// letting '.', '..' and explicit hidden names through unconditionally). It is a
+	// literal component, so the recursion keeps litPath unchanged.
 	if lit, ok := literalSegment(matchSeg, escape); ok {
-		globEmit(fsDir, outPrefix, lit, rest, isLast, dirOnly, flags, out)
+		globEmit(fsDir, outPrefix, lit, rest, isLast, dirOnly, litPath, flags, out)
 		return
 	}
 
 	names := readDirNames(fsDir)
-	if isLast {
+	// The synthetic "." (a terminal segment matching the current directory) is
+	// offered only on an all-literal path, or at the top level of a '**'-bearing
+	// pattern under FNM_DOTMATCH (period false).
+	topLevel := outPrefix == "" || outPrefix == "/"
+	if isLast && (litPath || (!period && topLevel)) {
 		names = append(names, ".") // MRI matches "." (never "..") for a terminal segment
 	}
 	for _, name := range names {
 		if !matchSegment(matchSeg, name, escape, nocase, period) {
 			continue
 		}
-		globEmit(fsDir, outPrefix, name, rest, isLast, dirOnly, flags, out)
+		// A wildcard match reaches its child through a metacharacter, so litPath
+		// becomes false for the recursion.
+		globEmit(fsDir, outPrefix, name, rest, isLast, dirOnly, false, flags, out)
 	}
 }
 
 // globEmit records a matched entry name: as a terminal result (honouring the
 // directory-only trailing slash) when no pattern segments remain, or by recursing
 // into it when it is an existing directory and more segments follow.
-func globEmit(fsDir, outPrefix, name string, rest []string, isLast, dirOnly bool, flags int, out *[]string) {
+func globEmit(fsDir, outPrefix, name string, rest []string, isLast, dirOnly, litPath bool, flags int, out *[]string) {
 	matchedPath := outPrefix + name
 	if isLast {
 		full := fsJoin(fsDir, name)
@@ -470,7 +567,7 @@ func globEmit(fsDir, outPrefix, name string, rest []string, isLast, dirOnly bool
 		return
 	}
 	if child := fsJoin(fsDir, name); isDirFS(child) {
-		globWalk(child, matchedPath+"/", rest, dirOnly, flags, out)
+		globWalk(child, matchedPath+"/", rest, dirOnly, litPath, flags, out)
 	}
 }
 
@@ -521,9 +618,18 @@ func fsJoin(dir, name string) string {
 	}
 }
 
-// isDirFS reports whether p is an existing directory.
+// isDirFS reports whether p is an existing directory, following a final symlink
+// (used for explicit path segments, which MRI resolves).
 func isDirFS(p string) bool {
 	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
+}
+
+// isRealDirFS reports whether p is a directory that is not itself a symlink
+// (os.Lstat does not follow the final component), so a '**' walk descends into
+// real subdirectories only — never through a symlink to a directory.
+func isRealDirFS(p string) bool {
+	fi, err := os.Lstat(p)
 	return err == nil && fi.IsDir()
 }
 
