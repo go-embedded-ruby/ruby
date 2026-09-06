@@ -4227,10 +4227,12 @@ func (vm *VM) bootstrap() {
 		}}
 	// Hash.ruby2_keywords_hash(hash) returns a copy of hash flagged as a keyword
 	// hash for `*args` forwarding; Hash.ruby2_keywords_hash? reports that flag.
-	// Both raise TypeError for a non-Hash argument.
+	// Both accept an instance of a Hash subclass and raise TypeError for a
+	// non-Hash argument. The copy keeps the argument's class, so calling it on a
+	// subclass instance returns an instance of that subclass.
 	vm.cHash.smethods["ruby2_keywords_hash"] = &Method{name: "ruby2_keywords_hash", owner: vm.cHash,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			h := hashArgOrRaise(vm, args[0])
+			h, src := hashOrSubclassArg(vm, args[0])
 			out := newHashLike(h) // preserves the compare_by_identity flag
 			out.Default = h.Default
 			out.DefaultProc = h.DefaultProc
@@ -4239,11 +4241,17 @@ func (vm *VM) bootstrap() {
 				out.Set(k, v)
 			}
 			out.Ruby2Keywords = true
+			if src != nil { // subclass instance: keep its class identity
+				obj := &RObject{class: src.class, ivars: map[string]object.Value{}, builtin: out}
+				vm.registerLiveObject(obj)
+				return obj
+			}
 			return out
 		}}
 	vm.cHash.smethods["ruby2_keywords_hash?"] = &Method{name: "ruby2_keywords_hash?", owner: vm.cHash,
 		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			return object.Bool(hashArgOrRaise(vm, args[0]).Ruby2Keywords)
+			h, _ := hashOrSubclassArg(vm, args[0])
+			return object.Bool(h.Ruby2Keywords)
 		}}
 	// Hash.allocate returns a fully-formed, empty Hash (Class#allocate builds a
 	// bare RObject with no backing value, so Hash.allocate.size would fail to find
@@ -7107,6 +7115,20 @@ func (vm *VM) hashEachLive(h *object.Hash, fn func(k, v object.Value)) {
 		}
 		fn(k, v)
 	}
+}
+
+// hashOrSubclassArg unwraps v to its backing *object.Hash for the
+// Hash.ruby2_keywords_hash family. It accepts a plain Hash and an instance of a
+// user subclass of Hash (an RObject wrapping a Hash); for the latter it also
+// returns that RObject so the result can be rebuilt with the same class. Any
+// other value raises the MRI "wrong argument type X (expected Hash)" TypeError.
+func hashOrSubclassArg(vm *VM, v object.Value) (*object.Hash, *RObject) {
+	if o, ok := v.(*RObject); ok {
+		if h, ok := o.builtin.(*object.Hash); ok {
+			return h, o
+		}
+	}
+	return hashArgOrRaise(vm, v), nil
 }
 
 // stripHashCapacityKwarg drops a trailing {capacity: …} keyword hash from a

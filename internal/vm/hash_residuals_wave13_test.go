@@ -4,7 +4,39 @@
 
 package vm_test
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestHashRuby2KeywordsHashSubclass covers Hash.ruby2_keywords_hash /
+// ruby2_keywords_hash? accepting an instance of a Hash subclass: the copy keeps
+// the subclass class and the keyword flag, the predicate reads the flag off
+// either form, and a non-Hash still raises TypeError. Matches MRI Ruby 4.0
+// (ruby/spec core/hash/ruby2_keywords_hash).
+func TestHashRuby2KeywordsHashSubclass(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// Subclass instance: result is an instance of the subclass, flagged, equal.
+		{`class MH1 < Hash; end; h = MH1.new; h[:a] = 1; kw = Hash.ruby2_keywords_hash(h)
+p [kw.class == MH1, Hash.ruby2_keywords_hash?(h), Hash.ruby2_keywords_hash?(kw), kw == h]`,
+			"[true, false, true, true]\n"},
+		// Plain hash still returns a plain Hash, flagged (src == nil branch).
+		{`kw = Hash.ruby2_keywords_hash({a: 1}); p [kw.class, Hash.ruby2_keywords_hash?(kw)]`,
+			"[Hash, true]\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// A non-Hash RObject (inner unwrap fails) and a non-RObject non-Hash both
+	// raise the MRI TypeError.
+	for _, src := range []string{`Hash.ruby2_keywords_hash(Object.new)`, `Hash.ruby2_keywords_hash(1)`} {
+		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "expected Hash") {
+			t.Errorf("src=%q err=%v, want TypeError \"expected Hash\"", src, err)
+		}
+	}
+}
 
 // TestHashNewCapacityKwarg covers Hash.new / Hash#initialize accepting a
 // trailing {capacity: n} keyword hash as a preallocation hint that rbgo ignores:
