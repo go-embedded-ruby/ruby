@@ -68,6 +68,17 @@ p ec.convert("é").bytes`,
 			`ec = Encoding::Converter.new("UTF-8", "UTF8-MAC")
 p ec.convert("abc").bytes`,
 			"[97, 98, 99]\n"},
+		// When the output held from a previous call itself exceeds a later call's byte
+		// cap, only what fits is flushed and the rest stays held: a multi-byte
+		// character split across three capped calls still assembles the exact bytes.
+		{"primconv_carryover_exceeds_cap",
+			`ec = Encoding::Converter.new("utf-8", "utf-16be")
+d = +""
+r1 = ec.primitive_convert(+"A", d, nil, 1)
+r2 = ec.primitive_convert(+"", d, nil, 0)
+r3 = ec.primitive_convert(+"", d, nil, 5)
+p [r1, r2, r3, d.bytes]`,
+			"[:destination_buffer_full, :destination_buffer_full, :finished, [0, 65]]\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,6 +94,9 @@ p ec.convert("abc").bytes`,
 	errCases := []struct{ name, src, want string }{
 		{"default_external_nil", `Encoding.default_external = nil`, "default external can not be nil"},
 		{"maccyrillic_undef", `"\u{6543}".encode("macCyrillic")`, "from UTF-8 to macCyrillic"},
+		// A character an x/text-backed destination codec cannot represent drives the
+		// converter's undefined-conversion path (encodeCharTo's encoder-error branch).
+		{"sjis_undef", `Encoding::Converter.new("UTF-8", "Shift_JIS").convert("\u{1F600}")`, "UndefinedConversionError"},
 	}
 	for _, tc := range errCases {
 		t.Run(tc.name, func(t *testing.T) {
