@@ -773,7 +773,13 @@ func defStringIORead(cls *RClass) {
 		amount := int(vm.toIntCoerce(args[0]))
 		whence := 0
 		if len(args) > 1 {
-			whence = vm.seekWhence(args[1])
+			// IO#seek accepts the :SET/:CUR/:END whence symbols; StringIO#seek
+			// (strio_seek) does not — a Symbol there raises the Integer TypeError.
+			if ioIsStringIO(o) {
+				whence = int(vm.toIntCoerce(args[1]))
+			} else {
+				whence = vm.seekWhence(args[1])
+			}
 		}
 		var newPos int
 		switch whence {

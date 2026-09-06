@@ -69,11 +69,17 @@ func defIOReadExtra(cls *RClass) {
 		ioCheckReadable(o)
 		// rb_io_ungetc: an Integer is the codepoint (encoded to bytes); anything else
 		// is coerced with StringValue (#to_str), so nil / a non-String object raises
-		// "no implicit conversion of <x> into String".
-		if a, ok := args[0].(object.Integer); ok {
-			ioUnget(o, []byte(string(rune(a))))
-		} else {
-			ioUnget(o, vm.strToStr(args[0]))
+		// "no implicit conversion of <x> into String". StringIO#ungetc (strio_ungetc)
+		// diverges only for nil, which it treats as a no-op.
+		switch {
+		case object.IsNil(args[0]) && ioIsStringIO(o):
+			// StringIO#ungetc(nil): no-op.
+		default:
+			if a, ok := args[0].(object.Integer); ok {
+				ioUnget(o, []byte(string(rune(a))))
+			} else {
+				ioUnget(o, vm.strToStr(args[0]))
+			}
 		}
 		return object.NilV
 	})
