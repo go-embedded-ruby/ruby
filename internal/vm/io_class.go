@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -31,24 +32,68 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
 		}
 		fd := int(vm.repeatLong(pos[0]))
-		if _, ok := vm.fdTable[fd]; !ok {
+		src, ok := vm.fdTable[fd]
+		if !ok {
 			raise("Errno::EBADF", "Bad file descriptor - fd %d", fd)
 		}
-		mode := ""
-		if len(pos) >= 2 && !object.IsNil(pos[1]) {
-			mode = strArg(pos[1])
+		if src.closed {
+			raise("IOError", "closed stream")
 		}
-		if opts != nil {
-			if m, ok := opts.Get(object.Symbol("mode")); ok && !object.IsNil(m) {
-				mode = strArg(m)
+		ms := vm.ioResolveModeEnc(pos, opts)
+		// Wrap the underlying descriptor's buffer/path so writes reach the same
+		// backing store the fd names (MRI shares the OS fd). The mode governs the
+		// read/write intent and encoding of the fresh wrapper.
+		res := &IOObj{cls: cIO, isStr: true, buf: src.buf, path: src.path,
+			binmode: ms.binmode, noAutoclose: ms.noAutoclose,
+			extEnc: ms.extEnc, intEnc: ms.intEnc}
+		if ms.explicit {
+			// An explicit mode must be compatible with the descriptor's current mode
+			// (io.c io_reopen / rb_update_max_fd path: EINVAL when e.g. a write-only fd
+			// is opened for reading).
+			if (ms.readable && src.rdClosed) || (ms.writable && src.wrClosed) {
+				raise("Errno::EINVAL", "Invalid argument")
 			}
+			res.writable, res.appendMode = ms.writable, ms.appendMode
+			res.rdClosed, res.wrClosed = !ms.readable, !ms.writable
+		} else {
+			// No explicit mode: the wrapper inherits the descriptor's actual access
+			// half (MRI derives it from the fd via fcntl(F_GETFL)).
+			res.writable, res.appendMode = src.writable, src.appendMode
+			res.rdClosed, res.wrClosed = src.rdClosed, src.wrClosed
 		}
-		res := &IOObj{cls: cIO, isStr: true, writable: strings.ContainsAny(mode, "wa+")}
-		vm.applyIOMode(res, mode, opts)
+		if res.appendMode {
+			res.pos = len(res.buf)
+		}
 		return res
 	}
 	cIO.smethods["for_fd"] = &Method{name: "for_fd", owner: cIO, native: forFd}
 	cIO.smethods["new"] = &Method{name: "new", owner: cIO, native: forFd}
+	// IO.open(fd, mode = "r", **opts) is IO.new plus a block: it yields the wrapped
+	// stream then, in an ensure, closes it — via the Ruby-level #close so an
+	// overridden #close runs (io.c rb_io_s_open + io_close). The block's value is
+	// returned. A #close that raises propagates, EXCEPT an IOError whose message is
+	// "closed stream", which is swallowed (and leaves no last error); when both the
+	// block and #close raise, the block's exception is the one that propagates.
+	cIO.smethods["open"] = &Method{name: "open", owner: cIO, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		oVal := forFd(vm, self, args, nil)
+		o, ok := oVal.(*IOObj)
+		if !ok || blk == nil {
+			return oVal
+		}
+		var ret object.Value
+		blockRec := recoverAny(func() { ret = vm.callBlock(blk, []object.Value{o}) })
+		closeRec := recoverAny(func() { vm.send(o, "close", nil, nil) })
+		if re, isRE := closeRec.(RubyError); isRE && re.Class == "IOError" && re.Message == "closed stream" {
+			closeRec = nil // MRI ignores a "closed stream" IOError from the ensure close
+		}
+		if blockRec != nil {
+			panic(blockRec) // the block's exception (or break/return) is primary
+		}
+		if closeRec != nil {
+			panic(closeRec)
+		}
+		return ret
+	}}
 	def("read", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.ioReadFile(args, false)
 	})
@@ -394,40 +439,275 @@ func encOpt(opts *object.Hash) (object.Value, bool) {
 	return nil, false
 }
 
-// applyIOMode sets the external/internal encoding of a stream from a mode string
-// ("w:ext[:int]") and/or the :external_encoding / :internal_encoding / :encoding
-// options, canonicalising each name.
-func (vm *VM) applyIOMode(o *IOObj, mode string, opts *object.Hash) {
-	if i := strings.IndexByte(mode, ':'); i >= 0 {
-		enc := mode[i+1:]
-		if j := strings.IndexByte(enc, ':'); j >= 0 {
-			o.extEnc = vm.lookupEncodingName(enc[:j]).name
-			o.intEnc = vm.lookupEncodingName(enc[j+1:]).name
-		} else if enc != "" {
-			o.extEnc = vm.lookupEncodingName(enc).name
+// ioModeSpec is the decoded access mode + encoding of an IO.new/IO.open/IO.for_fd
+// request: the read/write/append/binmode intent plus the resolved external and
+// internal encoding names ("" ⇒ default/none). It mirrors MRI's
+// rb_io_extract_modeenc bookkeeping (io.c).
+type ioModeSpec struct {
+	readable, writable, appendMode, binmode, textmode, noAutoclose bool
+	extEnc, intEnc                                                 string
+	hasEnc                                                         bool // the mode STRING carried a ":enc" suffix
+	explicit                                                       bool // a mode argument (or :mode option) was given
+}
+
+// ioResolveModeEnc decodes the (fd, mode, **opts) arguments of IO.new / IO.open
+// into an ioModeSpec, following io.c rb_io_extract_modeenc: a String or Integer
+// mode argument, an overriding :mode option (an error if the positional mode is
+// also given), :binmode / :textmode with their "specified twice" / "both …"
+// conflicts, and the :encoding / :external_encoding / :internal_encoding options
+// (an error when the mode string already named an encoding).
+func (vm *VM) ioResolveModeEnc(pos []object.Value, opts *object.Hash) ioModeSpec {
+	var ms ioModeSpec
+	vmodeGiven := false
+	if len(pos) >= 2 && !object.IsNil(pos[1]) {
+		vm.resolveVmode(pos[1], &ms)
+		vmodeGiven = true
+	}
+	if opts != nil {
+		if m, ok := opts.Get(object.Symbol("mode")); ok && !object.IsNil(m) {
+			if vmodeGiven {
+				raise("ArgumentError", "mode specified twice")
+			}
+			vm.resolveVmode(m, &ms)
+			vmodeGiven = true
 		}
 	}
-	if opts == nil {
+	ms.explicit = vmodeGiven
+	if !vmodeGiven {
+		ms.readable = true // no explicit mode ⇒ the wrapper inherits the fd's mode
+	}
+	if opts != nil {
+		extractBinmode(opts, &ms)
+	}
+	// A binary stream defaults to ASCII-8BIT external encoding unless the mode
+	// string already named one (a later :encoding option may still override it).
+	if ms.binmode && !ms.hasEnc && ms.extEnc == "" {
+		ms.extEnc = "ASCII-8BIT"
+	}
+	if opts != nil {
+		if vm.extractEncodingOption(opts, &ms) && ms.hasEnc {
+			raise("ArgumentError", "encoding specified twice")
+		}
+		if v, ok := opts.Get(object.Symbol("autoclose")); ok {
+			ms.noAutoclose = !v.Truthy()
+		}
+	}
+	return ms
+}
+
+// resolveVmode decodes a single mode argument (the positional mode or a :mode
+// option) into ms: an Integer (via #to_int) is an open-flag set; otherwise the
+// value is coerced with #to_str and parsed as an fopen-style mode string.
+func (vm *VM) resolveVmode(v object.Value, ms *ioModeSpec) {
+	if i, ok := v.(object.Integer); ok {
+		flagsModeSpec(int64(i), ms)
 		return
 	}
-	if v, ok := opts.Get(object.Symbol("external_encoding")); ok && !object.IsNil(v) {
-		o.extEnc = vm.encodingArg(v).name
+	if vm.respondsToDynamic(v, "to_int") {
+		flagsModeSpec(vm.repeatLong(v), ms)
+		return
 	}
-	if v, ok := opts.Get(object.Symbol("internal_encoding")); ok && !object.IsNil(v) {
-		o.intEnc = vm.encodingArg(v).name
+	s, ok := v.(*object.String)
+	if !ok && vm.respondsToDynamic(v, "to_str") {
+		s, ok = vm.send(v, "to_str", nil, nil).(*object.String)
 	}
-	if v, ok := opts.Get(object.Symbol("encoding")); ok && !object.IsNil(v) {
-		// A String :encoding may be a combined "external:internal"; an Encoding is a
-		// single external encoding.
-		if s, isStr := v.(*object.String); isStr {
+	if !ok {
+		raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	}
+	vm.parseModeString(s.Str(), ms)
+}
+
+// flagsModeSpec fills the read/write/append intent of ms from an integer open-flag
+// set (a bitwise OR of File::RDONLY/WRONLY/RDWR/APPEND).
+func flagsModeSpec(flags int64, ms *ioModeSpec) {
+	switch flags & 0x3 {
+	case fO_RDONLY:
+		ms.readable = true
+	case fO_WRONLY:
+		ms.writable = true
+	default: // RDWR
+		ms.readable, ms.writable = true, true
+	}
+	if flags&fO_APPEND != 0 {
+		ms.writable, ms.appendMode = true, true
+	}
+}
+
+// parseModeString fills ms from an fopen-style mode string ("r"/"w"/"a" with an
+// optional "+"/"b"/"t" and a trailing ":ext[:int]" encoding), matching MRI's
+// rb_io_modestr_fmode + parse_mode_enc. An empty or malformed base raises
+// ArgumentError.
+func (vm *VM) parseModeString(mode string, ms *ioModeSpec) {
+	base := mode
+	if i := strings.IndexByte(mode, ':'); i >= 0 {
+		base, ms.hasEnc = mode[:i], true
+		vm.parseEncPart(mode[i+1:], ms)
+	}
+	if base == "" {
+		raise("ArgumentError", "invalid access mode %s", mode)
+	}
+	switch base[0] {
+	case 'r':
+		ms.readable = true
+	case 'w':
+		ms.writable = true
+	case 'a':
+		ms.writable, ms.appendMode = true, true
+	default:
+		raise("ArgumentError", "invalid access mode %s", mode)
+	}
+	for _, c := range base[1:] {
+		switch c {
+		case '+':
+			ms.readable, ms.writable = true, true
+		case 'b':
+			if ms.textmode {
+				raise("ArgumentError", "invalid access mode %s", mode)
+			}
+			ms.binmode = true
+		case 't':
+			if ms.binmode {
+				raise("ArgumentError", "invalid access mode %s", mode)
+			}
+			ms.textmode = true
+		case 'x': // exclusive-create flag; no effect on the fmode intent
+		default:
+			raise("ArgumentError", "invalid access mode %s", mode)
+		}
+	}
+}
+
+// parseEncPart resolves the "ext[:int]" encoding suffix of a mode string into
+// ms.extEnc / ms.intEnc. An "-" internal encoding (or one equal to the external)
+// leaves the internal encoding unset (no transcoding).
+func (vm *VM) parseEncPart(enc string, ms *ioModeSpec) {
+	ext, intn := enc, ""
+	if j := strings.IndexByte(enc, ':'); j >= 0 {
+		ext, intn = enc[:j], enc[j+1:]
+	}
+	if ext != "" {
+		ms.extEnc = vm.lookupEncodingName(ext).name
+	}
+	if intn != "" && intn != "-" {
+		ms.intEnc = vm.lookupEncodingName(intn).name
+		if ms.intEnc == ms.extEnc {
+			ms.intEnc = ""
+		}
+	}
+}
+
+// extractBinmode applies the :textmode / :binmode options to ms, raising the
+// ArgumentError conflicts MRI's extract_binmode does ("textmode specified twice",
+// "binmode specified twice", "both textmode and binmode specified").
+func extractBinmode(opts *object.Hash, ms *ioModeSpec) {
+	if v, ok := opts.Get(object.Symbol("textmode")); ok && !object.IsNil(v) {
+		if ms.textmode {
+			raise("ArgumentError", "textmode specified twice")
+		}
+		if ms.binmode {
+			raise("ArgumentError", "both textmode and binmode specified")
+		}
+		if v.Truthy() {
+			ms.textmode = true
+		}
+	}
+	if v, ok := opts.Get(object.Symbol("binmode")); ok && !object.IsNil(v) {
+		if ms.binmode {
+			raise("ArgumentError", "binmode specified twice")
+		}
+		if ms.textmode {
+			raise("ArgumentError", "both textmode and binmode specified")
+		}
+		if v.Truthy() {
+			ms.binmode = true
+		}
+	}
+	// (MRI's extract_binmode has a final "both … specified" guard here; it is
+	// unreachable in rbgo because the two branches above already reject every mode
+	// string / option combination that could set both flags.)
+}
+
+// extractEncodingOption applies the :encoding / :external_encoding /
+// :internal_encoding options to ms, following io.c rb_io_extract_encoding_option:
+// a present :external_encoding or :internal_encoding makes a sibling :encoding be
+// ignored (with a warning when $VERBOSE is set); an internal encoding of nil or
+// "-" — or one equal to the external — leaves the internal encoding unset. It
+// returns whether any encoding was extracted.
+func (vm *VM) extractEncodingOption(opts *object.Hash, ms *ioModeSpec) bool {
+	encV, hasEnc := opts.Get(object.Symbol("encoding"))
+	if hasEnc && object.IsNil(encV) {
+		hasEnc = false
+	}
+	extV, hasExt := opts.Get(object.Symbol("external_encoding"))
+	if hasExt && object.IsNil(extV) {
+		hasExt = false
+	}
+	intV, hasInt := opts.Get(object.Symbol("internal_encoding"))
+	if (hasExt || hasInt) && hasEnc {
+		which := "external"
+		if !hasExt {
+			which = "internal"
+		}
+		vm.rbWarn("Ignoring encoding parameter '%s': %s_encoding is used", vm.displayStr(encV), which)
+		hasEnc = false
+	}
+	if hasExt {
+		ms.extEnc = vm.encodingArg(extV).name
+	}
+	if hasInt {
+		switch {
+		case object.IsNil(intV), isDashString(intV):
+			ms.intEnc = ""
+		default:
+			ms.intEnc = vm.encodingArg(intV).name
+		}
+		if ms.intEnc != "" && ms.intEnc == ms.extEnc {
+			ms.intEnc = ""
+		}
+	}
+	if hasEnc {
+		if s, ok := encV.(*object.String); ok {
 			if j := strings.IndexByte(s.Str(), ':'); j >= 0 {
-				o.extEnc = vm.lookupEncodingName(s.Str()[:j]).name
-				o.intEnc = vm.lookupEncodingName(s.Str()[j+1:]).name
-				return
+				ms.extEnc = vm.lookupEncodingName(s.Str()[:j]).name
+				ms.intEnc = vm.lookupEncodingName(s.Str()[j+1:]).name
+				if ms.intEnc == ms.extEnc {
+					ms.intEnc = ""
+				}
+				return true
 			}
 		}
-		o.extEnc = vm.encodingArg(v).name
+		ms.extEnc = vm.encodingArg(encV).name
+		return true
 	}
+	return hasExt || hasInt
+}
+
+// recoverAny runs fn and returns whatever it panics with (a RubyError, or a
+// break/return/throw control signal), or nil when it returns normally. It lets a
+// caller run an ensure step (IO.open's close) before re-raising the first panic.
+func recoverAny(fn func()) (rec any) {
+	defer func() { rec = recover() }()
+	fn()
+	return nil
+}
+
+// isDashString reports whether v is the String "-" (the internal_encoding value
+// MRI treats as "no transcoding").
+func isDashString(v object.Value) bool {
+	s, ok := v.(*object.String)
+	return ok && s.Str() == "-"
+}
+
+// rbWarn emits an MRI rb_warn-style warning line to the current $stderr, but only
+// when $VERBOSE is non-nil (false or true) — the gate rb_warn applies. Writing to
+// curStderr (rather than Kernel#warn) keeps the warning off stdout while still
+// honouring a $stderr reassigned to a StringIO (mspec's `complain` matcher). Used
+// for the encoding options that IO.new silently overrides.
+func (vm *VM) rbWarn(format string, a ...any) {
+	if object.IsNil(vm.globals["$VERBOSE"]) {
+		return
+	}
+	vm.curStderr().writeStr(fmt.Sprintf(format, a...) + "\n")
 }
 
 // ioOptEncoding returns the canonical encoding name selected by the :encoding /

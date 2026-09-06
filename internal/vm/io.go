@@ -14,23 +14,25 @@ import (
 // in-memory byte buffer with a read/write cursor. The two share the write path
 // so puts/print/printf/<< work uniformly, and StringIO adds the read methods.
 type IOObj struct {
-	cls        *RClass // IO, StringIO or File — so classOf/is_a? are exact
-	w          io.Writer
-	buf        []byte // StringIO / File content (buffered in memory)
-	pos        int    // read/write cursor
-	isStr      bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
-	sync       bool
-	closed     bool
-	label      string // "STDOUT"/"STDERR"/"STDIN" for inspect
-	path       string // backing file path for a File stream (else "")
-	writable   bool   // a File opened for writing — flush the buffer on flush/close
-	lineno     int    // #lineno — advanced by each successful line read (gets/readline)
-	rdClosed   bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
-	wrClosed   bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
-	appendMode bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
-	extEnc     string // external encoding name, "" ⇒ Encoding.default_external
-	intEnc     string // internal encoding name, "" ⇒ none (nil)
-	fd         int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
+	cls         *RClass // IO, StringIO or File — so classOf/is_a? are exact
+	w           io.Writer
+	buf         []byte // StringIO / File content (buffered in memory)
+	pos         int    // read/write cursor
+	isStr       bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
+	sync        bool
+	closed      bool
+	label       string // "STDOUT"/"STDERR"/"STDIN" for inspect
+	path        string // backing file path for a File stream (else "")
+	writable    bool   // a File opened for writing — flush the buffer on flush/close
+	lineno      int    // #lineno — advanced by each successful line read (gets/readline)
+	rdClosed    bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
+	wrClosed    bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
+	appendMode  bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
+	extEnc      string // external encoding name, "" ⇒ Encoding.default_external
+	intEnc      string // internal encoding name, "" ⇒ none (nil)
+	fd          int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
+	binmode     bool   // opened in binary mode ("b"/binmode:) — #binmode? is true
+	noAutoclose bool   // autoclose: false was requested — #autoclose? is false
 
 	// strObj is the live String object backing a StringIO — MRI's StringIO holds
 	// (and mutates in place) the very String passed to it, so #string returns that
@@ -647,7 +649,18 @@ func defIOWrite(cls *RClass) {
 	cls.define("tty?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Bool(false) })
 	// #isatty is a true alias of #tty?, as in MRI.
 	cls.methods["isatty"] = cls.methods["tty?"]
-	cls.define("binmode", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value { return self })
+	// IO#binmode marks the stream binary (#binmode? true) and, as MRI's
+	// rb_io_ascii8bit_binmode does, sets the external encoding to ASCII-8BIT and
+	// clears the internal encoding.
+	cls.define("binmode", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		o.binmode = true
+		o.extEnc, o.intEnc = "ASCII-8BIT", ""
+		return self
+	})
 
 	// external_encoding: the stream's external encoding — the one set explicitly
 	// (at creation or via #set_encoding), else Encoding.default_external.
@@ -1087,6 +1100,7 @@ func defStringIOExtra(vm *VM, cls *RClass) {
 	// any internal encoding, and returns self.
 	cls.define("binmode", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		o.binmode = true
 		o.extEnc, o.intEnc = "ASCII-8BIT", ""
 		return self
 	})
