@@ -120,11 +120,34 @@ func (vm *VM) registerKernelIntrospection() {
 		vm.cKernel.smethods[name] = &Method{name: name, owner: vm.cKernel, native: fn}
 	}
 
-	// caller: a best-effort backtrace as a String array, outermost-first omitted
-	// like MRI — it excludes the frame that called caller and lists the rest from
-	// nearest to the top level. Without source line tracking the line is 0.
-	vm.cObject.define("caller", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewArrayFromSlice(vm.callerFrames())
+	// caller(start=1, length=nil) / caller(range): a best-effort backtrace as a
+	// String array, listed nearest-first. Like MRI, `start` omits that many
+	// innermost levels (caller == caller(1) drops the frame that called caller;
+	// caller(0) keeps it), `length` caps the count, and a Range selects levels the
+	// way Array#[] slices caller(0). A start past the top returns nil (distinct from
+	// []). Without source line tracking the line is 0.
+	vm.cObject.define("caller", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		frames, present := vm.callerSlice(args)
+		if !present {
+			return object.NilV
+		}
+		return object.NewArrayFromSlice(frames)
+	})
+
+	// caller_locations(start=1, length=nil) / caller_locations(range): like #caller
+	// but each level is a Thread::Backtrace::Location value object (answering #path,
+	// #lineno, #label, #absolute_path, #to_s) instead of a plain String. It shares
+	// #caller's argument handling exactly, including the nil-for-overshoot result.
+	vm.cObject.define("caller_locations", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		frames, present := vm.callerSlice(args)
+		if !present {
+			return object.NilV
+		}
+		locs := make([]object.Value, len(frames))
+		for i, f := range frames {
+			locs[i] = vm.backtraceLocation(f.ToS())
+		}
+		return object.NewArrayFromSlice(locs)
 	})
 
 	// __FILE__: the path of the file currently executing. During a require it is
@@ -219,11 +242,49 @@ func (vm *VM) currentMethodCtxPtr() *frameMethod {
 	return &ctx
 }
 
-// callerFrames builds caller's String array. It drops the topmost frame (the one
-// that invoked caller) and walks outward, formatting each as MRI does, with a
-// placeholder line number since this VM does not yet track source positions.
-func (vm *VM) callerFrames() []object.Value {
-	return vm.backtraceFrames(1)
+// callerSlice selects the levels Kernel#caller / #caller_locations return from the
+// argument list, applying MRI's semantics over caller(0) — backtraceFrames(0),
+// the current frame stack nearest-first. A Range slices that list exactly like
+// Array#[] (endless, beginless and negative bounds included); an Integer start
+// (default 1) omits that many innermost levels, with an optional non-negative
+// length cap. A negative start/length is an ArgumentError, as MRI; a start past
+// the top of the stack yields (nil, false) so the caller returns Ruby nil,
+// distinct from an empty array (an exactly-past-the-end start yields []). The
+// start/length are coerced through #to_int, so a Float level truncates.
+func (vm *VM) callerSlice(args []object.Value) ([]object.Value, bool) {
+	full := vm.backtraceFrames(0)
+	fullArr := object.NewArrayFromSlice(full)
+	// Range form: forward to Array#[], which already handles every bound shape.
+	if len(args) >= 1 {
+		if _, isRange := args[0].(*object.Range); isRange {
+			res := vm.send(fullArr, "[]", []object.Value{args[0]}, nil)
+			if object.IsNil(res) {
+				return nil, false
+			}
+			return res.(*object.Array).Elems, true
+		}
+	}
+	start := int64(1)
+	if len(args) >= 1 {
+		start = vm.toIntCoerce(args[0])
+	}
+	if start < 0 {
+		raise("ArgumentError", "negative level (%d)", start)
+	}
+	// A start-only call is caller(0)[start..]: at most len(full) elements from
+	// start, which Array#[](start, len(full)+1) yields with the right nil/[] edges.
+	length := int64(len(full)) + 1
+	if len(args) >= 2 && !object.IsNil(args[1]) {
+		length = vm.toIntCoerce(args[1])
+		if length < 0 {
+			raise("ArgumentError", "negative size (%d)", length)
+		}
+	}
+	res := vm.send(fullArr, "[]", []object.Value{object.IntValue(start), object.IntValue(length)}, nil)
+	if object.IsNil(res) {
+		return nil, false
+	}
+	return res.(*object.Array).Elems, true
 }
 
 // backtraceFrames renders the current frame stack as an MRI-shaped backtrace

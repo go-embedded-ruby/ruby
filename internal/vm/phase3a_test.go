@@ -52,7 +52,11 @@ func TestRaise(t *testing.T) {
 		{"class", `raise TypeError`, "TypeError: TypeError"},
 		{"class_message", `raise ArgumentError, "bad arg"`, "ArgumentError: bad arg"},
 		{"instance", "e = RuntimeError.new(\"oops\")\nraise e", "RuntimeError: oops"},
-		{"bare", `raise`, "RuntimeError: unhandled exception"},
+		// MRI 4.0: a bare `raise` with no current exception raises RuntimeError with
+		// an EMPTY message (`raise; rescue=>e; e.message` => ""). "unhandled exception"
+		// is only the display default of RuntimeError#detailed_message, not the message
+		// itself — see exception_residuals_test.go. err.Error() is "RuntimeError: ".
+		{"bare", `raise`, "RuntimeError: "},
 		{"non_exception", `raise 5`, "TypeError"},
 		{"is_a_bad_arg", `5.is_a?(3)`, "TypeError"},
 		{"instance_of_bad_arg", `5.instance_of?("x")`, "TypeError"},
