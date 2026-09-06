@@ -23,10 +23,18 @@ func TestClassEval(t *testing.T) {
 }
 
 func TestClassEvalNoBlock(t *testing.T) {
-	for _, src := range []string{`class C\nend\nC.class_eval`, `class C\nend\nC.class_exec`} {
-		s := strings.ReplaceAll(src, `\n`, "\n")
-		if err := runErr(t, s); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-			t.Fatalf("src=%q got %v want LocalJumpError", s, err)
+	// class_eval accepts a string form, so with neither a block nor a string it
+	// raises ArgumentError (MRI: "wrong number of arguments (given 0, expected
+	// 1..3)"). class_exec has no string form, so it raises LocalJumpError. Verified
+	// against ruby 4.0.5.
+	cases := []struct{ src, want string }{
+		{`class C\nend\nC.class_eval`, "ArgumentError"},
+		{`class C\nend\nC.class_exec`, "LocalJumpError"},
+	}
+	for _, c := range cases {
+		s := strings.ReplaceAll(c.src, `\n`, "\n")
+		if err := runErr(t, s); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("src=%q got %v want %s", s, err, c.want)
 		}
 	}
 }

@@ -76,10 +76,10 @@ func (vm *VM) registerReflection() {
 	// Module#instance_method(:m) → UnboundMethod resolved up the ancestor chain.
 	vm.cModule.define("instance_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
-		name := nameArg(args[0])
+		name := vm.coerceNameArg(args[0])
 		m := vm.lookupForModuleOp(mod, name)
 		if m == nil || m.undefined {
-			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
+			vm.raiseNameError("undefined method '"+name+"' for class '"+mod.name+"'", name)
 		}
 		return &UnboundMethod{name: name, owner: m.owner, m: m, vm: vm, origin: mod}
 	})
@@ -88,10 +88,10 @@ func (vm *VM) registerReflection() {
 	// method must be public — a private or protected one raises NameError.
 	vm.cModule.define("public_instance_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
-		name := nameArg(args[0])
+		name := vm.coerceNameArg(args[0])
 		m := vm.lookupForModuleOp(mod, name)
 		if m == nil || m.undefined {
-			raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
+			vm.raiseNameError("undefined method '"+name+"' for class '"+mod.name+"'", name)
 		}
 		if vis := instanceVisibility(mod, name, m); vis != visPublic {
 			kind := "private"
@@ -137,10 +137,25 @@ func (vm *VM) registerReflection() {
 	})
 
 	// Module#method_defined?(:m): true if m resolves up the ancestor chain.
+	// Module#method_defined?(name, inherit=true): true when a PUBLIC or PROTECTED
+	// method by that name resolves (private methods are never matched — MRI's
+	// rb_mod_method_defined). With inherit=false only the receiver's own methods
+	// are considered, not ancestors'. The name is coerced through #to_str.
+	// Reference: ruby/ruby v3_4_0 vm_method.c rb_mod_method_defined / basic_obj_respond_to.
 	vm.cModule.define("method_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
-		m := vm.lookupForModuleOp(mod, nameArg(args[0]))
-		return object.Bool(m != nil && !m.undefined)
+		name := vm.coerceNameArg(args[0])
+		inherit := len(args) < 2 || args[1].Truthy()
+		var m *Method
+		if inherit {
+			m = vm.lookupForModuleOp(mod, name)
+		} else {
+			m = mod.methods[name]
+		}
+		if m == nil || m.undefined {
+			return object.False
+		}
+		return object.Bool(instanceVisibility(mod, name, m) != visPrivate)
 	})
 
 	// Module#public_method_defined?/#private_method_defined?/#protected_method_defined?:
@@ -150,8 +165,14 @@ func (vm *VM) registerReflection() {
 	definedWithVis := func(want visibility) NativeFn {
 		return func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			mod := self.(*RClass)
-			name := nameArg(args[0])
-			m := vm.lookupForModuleOp(mod, name)
+			name := vm.coerceNameArg(args[0])
+			inherit := len(args) < 2 || args[1].Truthy()
+			var m *Method
+			if inherit {
+				m = vm.lookupForModuleOp(mod, name)
+			} else {
+				m = mod.methods[name]
+			}
 			if m == nil || m.undefined {
 				return object.False
 			}

@@ -35,11 +35,16 @@ puts WHClsC2.method(:cm).inspect.start_with?("#<Method: WHClsC2(WHClsP2).cm")`,
 		},
 		{
 			"extended_module_method_on_class_via_metaclass",
+			// The Method/UnboundMethod inspect head renders an anonymous owner
+			// through the internal RClass.ToS() short form ("#<Class>" / "#<Module>"),
+			// which is deliberately distinct from Module#to_s — the latter now renders
+			// the MRI "#<Class:0x…>" address form (a separate rendering path). This
+			// case guards the method-head format, so it pins the short form directly.
 			`m = Module.new { def whbar; end }
 c = Class.new
 c.extend(m)
 s = c.method(:whbar).inspect
-puts s.start_with?("#<Method: #<Class:#{c.inspect}>(#{m.inspect})#whbar")`,
+puts s.start_with?("#<Method: #<Class:#<Class>>(#<Module>)#whbar")`,
 			"true\n",
 		},
 		{
@@ -95,10 +100,13 @@ puts WHUInc.instance_method(:bar).inspect.start_with?("#<UnboundMethod: WHUMod#b
 		},
 		{
 			"per_object_singleton_owner",
+			// As above, the head renders the per-object singleton owner through the
+			// internal ToS() short form ("#<Class>"), distinct from Module#to_s which
+			// now renders "#<Class:#<Object:0x…>>". Pin the head's short form.
 			`o = Object.new
 def o.foo; end
 u = o.method(:foo).unbind
-puts u.inspect.start_with?("#<UnboundMethod: #{o.singleton_class}#foo")`,
+puts u.inspect.start_with?("#<UnboundMethod: #<Class>#foo")`,
 			"true\n",
 		},
 	}

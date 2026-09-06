@@ -42,18 +42,19 @@ func TestNestedConstantNamespacing(t *testing.T) {
 // constant change qualifies named classes; an anonymous one falls through to the
 // "#<Class>" placeholder rendering).
 func TestAnonymousClassToS(t *testing.T) {
+	// Module#to_s / #inspect render an anonymous class as MRI's "#<Class:0x…>"
+	// address form (object.c rb_mod_to_s), verified against ruby 4.0.5.
 	tests := []struct {
 		name string
 		src  string
-		want string
 	}{
-		{"anon_class", `p Class.new.to_s`, "\"#<Class>\"\n"},
-		{"anon_class_inspect", `p Class.new.inspect`, "\"#<Class>\"\n"},
+		{"anon_class", `p((Class.new.to_s =~ /\A#<Class:0x\h+>\z/) != nil)`},
+		{"anon_class_inspect", `p((Class.new.inspect =~ /\A#<Class:0x\h+>\z/) != nil)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := eval(t, tt.src); got != tt.want {
-				t.Fatalf("eval(%q) = %q, want %q", tt.src, got, tt.want)
+			if got := eval(t, tt.src); got != "true\n" {
+				t.Fatalf("eval(%q) = %q, want %q", tt.src, got, "true\n")
 			}
 		})
 	}

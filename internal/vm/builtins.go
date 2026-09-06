@@ -1305,34 +1305,82 @@ func (vm *VM) bootstrap() {
 		return object.Bool(classIsA(vm.classOf(args[0]), self.(*RClass)))
 	})
 
-	// Module (Class inherits these).
+	// Module (Class inherits these). Module#include(*mods) validates each argument
+	// is a non-refinement Module, then — in REVERSE order — invokes the private
+	// hook pair mods[i].append_features(self) and mods[i].included(self), exactly
+	// as MRI's rb_mod_include (eval.c). Routing through append_features lets a
+	// module override it (and lets a spec observe the call); the default
+	// append_features does the actual mix-in.
 	vm.cModule.define("include", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		target := self.(*RClass)
-		for _, a := range args {
-			mod := a.(*RClass)
-			target.includes = append(target.includes, mod)
-			bumpMethodSerial()
-			// Hook: module.included(base), fired per included module if it defines
-			// the hook (singleton method).
-			if hook := lookupSMethod(mod, "included"); hook != nil {
-				vm.invoke(hook, mod, []object.Value{target}, nil)
-			}
+		vm.checkModuleArgs("include", args)
+		for i := len(args) - 1; i >= 0; i-- {
+			mod := args[i].(*RClass)
+			vm.send(mod, "append_features", []object.Value{target}, nil)
+			vm.send(mod, "included", []object.Value{target}, nil)
 		}
 		return target
 	})
 	vm.cModule.define("prepend", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		target := self.(*RClass)
-		for _, a := range args {
-			mod := a.(*RClass)
-			target.prepends = append(target.prepends, mod)
-			bumpMethodSerial()
-			// Hook: module.prepended(base), mirroring included.
-			if hook := lookupSMethod(mod, "prepended"); hook != nil {
-				vm.invoke(hook, mod, []object.Value{target}, nil)
-			}
+		vm.checkModuleArgs("prepend", args)
+		for i := len(args) - 1; i >= 0; i-- {
+			mod := args[i].(*RClass)
+			vm.send(mod, "prepend_features", []object.Value{target}, nil)
+			vm.send(mod, "prepended", []object.Value{target}, nil)
 		}
 		return target
 	})
+	// Module#append_features(mod) (private): the default include mechanism, called
+	// as includedModule.append_features(target). It refuses a cyclic include
+	// (ArgumentError) and a frozen target (FrozenError), then records self in the
+	// target's include list. Reference: ruby/ruby v3_4_0 eval.c
+	// rb_mod_append_features / rb_include_module.
+	vm.cModule.define("append_features", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		target, ok := args[0].(*RClass)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(args[0]).name)
+		}
+		vm.mixinModule(mod, target, false)
+		return mod
+	})
+	// Module#prepend_features(mod) (private): the default prepend mechanism,
+	// mirroring append_features but inserting self ahead of the target's own
+	// methods. Reference: ruby/ruby v3_4_0 eval.c rb_mod_prepend_features.
+	vm.cModule.define("prepend_features", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		target, ok := args[0].(*RClass)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(args[0]).name)
+		}
+		vm.mixinModule(mod, target, true)
+		return mod
+	})
+	// The default no-op mix-in / definition hooks MRI defines as private instance
+	// methods of Module (each rb_obj_dummy1, returning nil): a user overrides them
+	// with `def self.included(base)` etc. Reference: ruby/ruby v3_4_0 object.c
+	// (rb_define_private_method(rb_cModule, "included"/"extended"/…, rb_obj_dummy1)).
+	for _, hook := range []string{"included", "extended", "prepended", "method_added", "method_removed", "method_undefined", "const_added"} {
+		vm.cModule.define(hook, func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return object.NilV
+		})
+	}
+	// append_features / prepend_features and every mix-in / definition hook are
+	// PRIVATE instance methods of Module in MRI (object.c, eval.c): reachable as a
+	// functional call or through the include/prepend/def machinery, but not as
+	// `mod.append_features(x)` with an explicit receiver.
+	for _, n := range []string{"append_features", "prepend_features", "included", "extended", "prepended", "method_added", "method_removed", "method_undefined", "const_added"} {
+		vm.cModule.methods[n].vis = visPrivate
+	}
+	// MRI undefines append_features / prepend_features on Class
+	// (rb_undef_method(rb_cClass, …)), so Class.private_instance_methods omits
+	// them and a rebind onto a Class receiver has no method to reach. An undefined
+	// tombstone halts ancestor lookup, hiding the inherited Module definition from
+	// method listing without removing it for module receivers.
+	for _, n := range []string{"append_features", "prepend_features"} {
+		vm.cClass.methods[n] = &Method{name: n, owner: vm.cClass, undefined: true}
+	}
 	vm.cModule.define("ancestors", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		anc := vm.ancestors(self.(*RClass))
 		out := make([]object.Value, len(anc))
@@ -1342,9 +1390,11 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cModule.define("include?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// The argument must be a Module — a Class or any other object raises
+		// TypeError, matching MRI's rb_mod_include_p (Check_Type T_MODULE).
 		mod, ok := args[0].(*RClass)
-		if !ok {
-			raise("TypeError", "wrong argument type %s (expected Module)", classNameOf(args[0]))
+		if !ok || !mod.isModule {
+			raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(args[0]).name)
 		}
 		me := self.(*RClass)
 		for _, k := range vm.ancestors(me) {
@@ -1355,11 +1405,24 @@ func (vm *VM) bootstrap() {
 		return object.False
 	})
 	vm.cModule.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		if c := self.(*RClass); c.name != "" {
+		// A singleton class has no name (MRI returns nil), even though it carries an
+		// internal "#<Class:…>" label; an anonymous module/class is likewise nil.
+		if c := self.(*RClass); !c.isSingleton && c.name != "" {
 			return object.NewString(c.name)
 		}
-		return object.NilV // anonymous class/module
+		return object.NilV
 	})
+	// Module#to_s / #inspect render the module's identity: a permanent name for a
+	// named module/class, "#<refinement:Target@Holder>" for a refinement,
+	// "#<Class:INNER>" for a singleton class (INNER being the attached object's or
+	// class's identity), and the "#<Module:0x…>" / "#<Class:0x…>" address form for
+	// an anonymous one. Reference: ruby/ruby v3_4_0 object.c rb_mod_to_s.
+	vm.cModule.define("to_s", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(vm.moduleToSStr(self.(*RClass)))
+	})
+	// Module#inspect is an alias of Module#to_s — it shares the same method record
+	// so Module.instance_method(:inspect) == Module.instance_method(:to_s) (MRI).
+	aliasBuiltin(vm.cModule, "inspect", "to_s")
 	vm.cModule.define("instance_methods", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		all := len(args) == 0 || args[0].Truthy() // instance_methods(false) = own only
 		// MRI's instance_methods lists the public and protected methods, never the
@@ -1374,16 +1437,19 @@ func (vm *VM) bootstrap() {
 	// the @@-prefixed name is the key in the cvars table. Lookups walk the
 	// superclass chain via cvarOwner, mirroring how @@name resolves at runtime.
 	vm.cModule.define("class_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := cvarNameArg(args[0])
+		name := vm.coerceCvarName(args[0])
 		if c := cvarOwner(self.(*RClass), name); c != nil {
 			return c.cvars[name]
 		}
 		raise("NameError", "uninitialized class variable %s in %s", name, self.(*RClass).name)
 		return object.NilV
 	})
-	vm.cModule.define("class_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := cvarNameArg(args[0])
+	vm.cModule.define("class_variable_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		cls := self.(*RClass)
+		if cls.frozen {
+			vm.raiseFrozen(cls)
+		}
+		name := vm.coerceCvarName(args[0])
 		if c := cvarOwner(cls, name); c != nil {
 			c.cvars[name] = args[1]
 		} else {
@@ -1391,8 +1457,8 @@ func (vm *VM) bootstrap() {
 		}
 		return args[1]
 	})
-	vm.cModule.define("class_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(cvarOwner(self.(*RClass), cvarNameArg(args[0])) != nil)
+	vm.cModule.define("class_variable_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(cvarOwner(self.(*RClass), vm.coerceCvarName(args[0])) != nil)
 	})
 	vm.cModule.define("class_variables", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// class_variables(inherit=true): own variables, then ancestors', each
@@ -1423,8 +1489,11 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cModule.define("const_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := constNameArg(args[0])
 		cls := self.(*RClass)
+		if cls.frozen {
+			vm.raiseFrozen(cls)
+		}
+		name := vm.coerceConstName(args[0])
 		// Route through assignConstIn so an anonymous class/module bound here gains
 		// the qualified name of its constant (Ruby's "permanent name on first
 		// constant binding" rule) — the same path a `Foo::Bar = ...` literal takes.
@@ -1439,8 +1508,16 @@ func (vm *VM) bootstrap() {
 	// generator that redefines a constant (Puppet's classgen does this) removes the
 	// stale binding before installing the new one.
 	vm.cModule.define("remove_const", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := constNameArg(args[0])
+		name := vm.coerceConstName(args[0])
 		cls := self.(*RClass)
+		// A pending (not-yet-run) autoload registered for this name is removed too,
+		// returning nil — MRI's rb_mod_remove_const drops the autoload entry.
+		if cls.autoloads != nil {
+			if _, ok := cls.autoloads[name]; ok {
+				delete(cls.autoloads, name)
+				return object.NilV
+			}
+		}
 		table := cls.consts
 		if cls == vm.cObject {
 			table = vm.consts
@@ -1517,6 +1594,26 @@ func (vm *VM) bootstrap() {
 			return object.NilV
 		}
 	}
+	// Module#<=>(other): 0 when equal, -1 when self is a descendant of other, +1
+	// when an ancestor, and nil when the two are unrelated OR other is not a
+	// module/class (MRI returns nil rather than raising). Reference: ruby/ruby
+	// v3_4_0 object.c rb_mod_cmp.
+	vm.cModule.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		a := self.(*RClass)
+		b, ok := args[0].(*RClass)
+		if !ok {
+			return object.NilV
+		}
+		switch {
+		case a == b:
+			return object.IntValue(0)
+		case classIsA(a, b):
+			return object.IntValue(-1)
+		case classIsA(b, a):
+			return object.IntValue(1)
+		}
+		return object.NilV
+	})
 	vm.cModule.define("<", classCmpOp(func(c int) bool { return c < 0 }))
 	vm.cModule.define("<=", classCmpOp(func(c int) bool { return c <= 0 }))
 	vm.cModule.define(">", classCmpOp(func(c int) bool { return c > 0 }))
@@ -1543,33 +1640,44 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(vm.defineAttrs(self.(*RClass), args, true, true))
 	})
 	classEvalFn := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		// String form — class_eval("def m; end", file, line) — compiles the source
-		// and runs it with the class as both self and the method-definition target,
-		// so a `def` in the source becomes one of the class's instance methods. The
-		// optional file/line trailing arguments are accepted for MRI compatibility
-		// (they steer error reporting only) and otherwise ignored.
-		if blk == nil {
-			if len(args) > 0 {
-				if s, ok := args[0].(*object.String); ok {
-					return vm.classEvalString(self.(*RClass), string(s.Bytes()))
-				}
+		// Block form — class_eval { … } — runs the block with the class as self and
+		// as the method-definition target. MRI rejects any positional argument
+		// alongside a block (ArgumentError). Reference: ruby/ruby v3_4_0 vm_eval.c
+		// specific_eval / rb_mod_module_eval.
+		cls := self.(*RClass)
+		if blk != nil {
+			if len(args) != 0 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 			}
-			raise("LocalJumpError", "no block given (yield)")
+			return vm.classEval(cls, blk, nil)
 		}
-		return vm.classEval(self.(*RClass), blk, nil)
+		// String form — class_eval("def m; end", file, line): 1..3 arguments, the
+		// first being the source (coerced via #to_str) and the optional second the
+		// filename (also #to_str-coerced; it steers error reporting only). A count
+		// outside 1..3 is an ArgumentError.
+		if len(args) < 1 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
+		}
+		src := vm.coerceToString(args[0])
+		if len(args) >= 2 {
+			vm.coerceToString(args[1])
+		}
+		return vm.classEvalString(cls, src)
 	}
-	vm.cModule.define("class_eval", classEvalFn)
+	// Module#class_eval is an alias of Module#module_eval — a shared method record,
+	// so Module.instance_method(:class_eval) == Module.instance_method(:module_eval).
 	vm.cModule.define("module_eval", classEvalFn)
+	aliasBuiltin(vm.cModule, "class_eval", "module_eval")
 	classExec := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
 		return vm.classEval(self.(*RClass), blk, args)
 	}
-	vm.cModule.define("class_exec", classExec)
-	// Module#module_exec is Module#class_exec (the block runs with the module as
-	// self and receives the given arguments).
+	// Module#module_exec runs the block with the module as self and the given
+	// arguments; Module#class_exec is its alias (shared record).
 	vm.cModule.define("module_exec", classExec)
+	aliasBuiltin(vm.cModule, "class_exec", "module_exec")
 	vm.cModule.define("define_method", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		cls := self.(*RClass)
 		if isFrozen(cls) {
@@ -8641,6 +8749,89 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 // constNameArg coerces a const_get/const_set/const_defined? name (a Symbol or
 // String) to its text, rejecting a name that does not begin with an uppercase
 // letter — as Ruby does.
+// moduleToSStr builds Module#to_s / #inspect for c: a permanent name when named,
+// "#<refinement:Target@Holder>" for a refinement module, "#<Class:INNER>" for a
+// singleton class (INNER being the identity of the class/module or object it is
+// the singleton of), and the anonymous "#<Class:0x…>" / "#<Module:0x…>" address
+// form otherwise. Reference: ruby/ruby v3_4_0 object.c rb_mod_to_s.
+func (vm *VM) moduleToSStr(c *RClass) string {
+	if c.isRefinement && c.refinedClass != nil {
+		holder := ""
+		if c.refHolder != nil {
+			holder = c.refHolder.name
+		}
+		return "#<refinement:" + c.refinedClass.name + "@" + holder + ">"
+	}
+	if c.isSingleton {
+		var inner string
+		switch {
+		case c.metaOf != nil:
+			inner = vm.moduleToSStr(c.metaOf)
+		case c.attached != nil:
+			// attached is the object of a per-object singleton; a class/module
+			// singleton uses metaOf instead, so this is always a non-class object.
+			inner = vm.objectIdentityRepr(c.attached)
+		default:
+			inner = vm.anonClassOrModuleRepr(c)
+		}
+		return "#<Class:" + inner + ">"
+	}
+	if c.name != "" {
+		return c.name
+	}
+	return vm.anonClassOrModuleRepr(c)
+}
+
+// checkModuleArgs validates the arguments of Module#include / #prepend: at least
+// one argument (else ArgumentError), each a Module — never a Class or other
+// object (else TypeError "wrong argument type X (expected Module)") — and not a
+// refinement (else TypeError "Cannot <op> refinement"). Reference: ruby/ruby
+// v3_4_0 eval.c rb_mod_include / rb_mod_prepend.
+func (vm *VM) checkModuleArgs(op string, args []object.Value) {
+	if len(args) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+	}
+	for _, a := range args {
+		mod, ok := a.(*RClass)
+		if !ok || !mod.isModule {
+			raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(a).name)
+		}
+		if mod.isRefinement {
+			raise("TypeError", "Cannot %s refinement", op)
+		}
+	}
+}
+
+// mixinModule is the shared body of Module#append_features / #prepend_features:
+// it records mod as included into (prepend=false) or prepended onto
+// (prepend=true) target. It refuses a frozen target (FrozenError) and a cyclic
+// mix-in — target already lying in mod's own ancestry — with ArgumentError
+// "cyclic include detected". Reference: ruby/ruby v3_4_0 eval.c
+// rb_include_module / cyclic_prepend detection.
+func (vm *VM) mixinModule(mod, target *RClass, prepend bool) {
+	// The receiver being mixed in must itself be a Module — MRI's rb_include_module
+	// does Check_Type(module, T_MODULE). This only bites when append_features is
+	// rebound onto a Class receiver (Module.instance_method(:append_features).
+	// bind(Class.new).call(...)); the include/prepend path always passes a module.
+	if !mod.isModule {
+		raise("TypeError", "wrong argument type %s (expected Module)", vm.classOf(mod).name)
+	}
+	if target.frozen {
+		vm.raiseFrozen(target)
+	}
+	for _, a := range vm.ancestors(mod) {
+		if a == target {
+			raise("ArgumentError", "cyclic include detected")
+		}
+	}
+	if prepend {
+		target.prepends = append(target.prepends, mod)
+	} else {
+		target.includes = append(target.includes, mod)
+	}
+	bumpMethodSerial()
+}
+
 func constNameArg(v object.Value) string {
 	var name string
 	switch n := v.(type) {

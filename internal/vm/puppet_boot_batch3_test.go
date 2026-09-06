@@ -22,8 +22,9 @@ func TestClassEvalString(t *testing.T) {
 		{"module M; end\nM.module_eval(\"def z; 3; end\")\nclass D; include M; end\np D.new.z", "3\n"},
 		// constants/expressions in the source run with the class as self.
 		{"class C; end\nC.class_eval(\"K = 7\")\np C::K", "7\n"},
-		// no block and no string still raises LocalJumpError, as MRI does.
-		{"class C; end\nbegin\n  C.class_eval\nrescue LocalJumpError => e\n  puts \"caught\"\nend", "caught\n"},
+		// no block and no string raises ArgumentError (class_eval has a string form),
+		// as MRI does — verified against ruby 4.0.5.
+		{"class C; end\nbegin\n  C.class_eval\nrescue ArgumentError => e\n  puts \"caught\"\nend", "caught\n"},
 		// a syntax error in the source raises SyntaxError.
 		{"class C; end\nbegin\n  C.class_eval(\"def (\")\nrescue SyntaxError\n  puts \"syn\"\nend", "syn\n"},
 	}

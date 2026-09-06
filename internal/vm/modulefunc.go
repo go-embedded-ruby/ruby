@@ -136,6 +136,14 @@ func (vm *VM) registerModuleExtras() {
 		}
 		newName, oldName := vm.defineMethodName(args[0]), vm.defineMethodName(args[1])
 		vm.aliasMethod(mod, newName, oldName)
+		// A handful of names (the initialize family and respond_to_missing?) are
+		// always private in MRI, whatever the source method's visibility — defining
+		// one under such a name, alias included, forces it private (vm_method.c
+		// check_definition_visibility / rb_scope_visibility_set special-cases).
+		if alwaysPrivateName(newName) {
+			// aliasMethod always installs mod.methods[newName], so it is present here.
+			mod.methods[newName].vis = visPrivate
+		}
 		return object.Symbol(newName)
 	})
 
@@ -162,7 +170,14 @@ func (vm *VM) registerModuleExtras() {
 				if mod.isModule {
 					kind = "module"
 				}
-				raise("NameError", "undefined method '%s' for %s '%s'", name, kind, mod.ToS())
+				// A class/module metaclass names the class it is the metaclass of
+				// ("String", not "#<Class:String>") in this error, matching MRI's
+				// rb_class_name resolution for the receiver.
+				recv := vm.moduleToSStr(mod)
+				if mod.isSingleton && mod.metaOf != nil {
+					recv = vm.moduleToSStr(mod.metaOf)
+				}
+				raise("NameError", "undefined method '%s' for %s '%s'", name, kind, recv)
 			}
 			vm.undefMethod(mod, name)
 		}
@@ -263,6 +278,86 @@ func nameArg(v object.Value) string {
 		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
 		return ""
 	}
+}
+
+// coerceNameArg converts a name argument (a method, constant or class-variable
+// name) to its string form the way MRI's rb_check_id/rb_to_id does: a Symbol or
+// String is taken directly, and any other object is converted through #to_str.
+// A missing #to_str raises TypeError "X is not a symbol nor a string"; a #to_str
+// that returns a non-String raises "can't convert A to String (A#to_str gives
+// B)". It performs no name-shape validation — callers that need it (const/cvar)
+// layer their own check on the result. Reference: ruby/ruby v3_4_0 vm_method.c
+// rb_check_id / rb_to_id and variable.c rb_check_id_cstr callers.
+func (vm *VM) coerceNameArg(v object.Value) string {
+	switch x := v.(type) {
+	case object.Symbol:
+		return string(x)
+	case *object.String:
+		return x.Str()
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Str()
+		}
+		cn := vm.classOf(v).name
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			cn, cn, vm.classOf(r).name)
+	}
+	raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	return ""
+}
+
+// alwaysPrivateName reports whether name is one that MRI keeps private no matter
+// how it is defined — the initialize family and respond_to_missing? (vm_method.c
+// forces their visibility to private). method_missing is deliberately NOT here:
+// MRI leaves it at the caller's visibility.
+func alwaysPrivateName(name string) bool {
+	switch name {
+	case "initialize", "initialize_copy", "initialize_clone", "initialize_dup", "respond_to_missing?":
+		return true
+	}
+	return false
+}
+
+// coerceToString converts v to a Go string through MRI's implicit String
+// conversion (#to_str): a String is taken directly, another object is sent
+// #to_str, and a missing #to_str or a non-String result raises TypeError "no
+// implicit conversion of X into String". Used where MRI applies rb_to_str /
+// rb_check_string_type (e.g. the eval-string and filename of Module#module_eval).
+func (vm *VM) coerceToString(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s.Str()
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return ""
+}
+
+// coerceConstName is coerceNameArg followed by MRI's constant-name shape check
+// (an uppercase first letter): the name must read as a constant or a NameError
+// "wrong constant name X" is raised. Used by Module#const_set / #remove_const.
+func (vm *VM) coerceConstName(v object.Value) string {
+	name := vm.coerceNameArg(v)
+	if !constNameWellFormed(name) {
+		raise("NameError", "wrong constant name %s", name)
+	}
+	return name
+}
+
+// coerceCvarName is coerceNameArg followed by MRI's class-variable-name shape
+// check (a "@@" prefix and at least one further character), raising NameError
+// otherwise. Used by Module#class_variable_get / _set / _defined?.
+func (vm *VM) coerceCvarName(v object.Value) string {
+	name := vm.coerceNameArg(v)
+	if len(name) < 3 || name[0] != '@' || name[1] != '@' {
+		raise("NameError", "`%s' is not allowed as a class variable name", name)
+	}
+	return name
 }
 
 // defineMethodName coerces define_method's name argument. A Symbol or String is
