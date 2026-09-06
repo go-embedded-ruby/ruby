@@ -74,7 +74,9 @@ func (vm *VM) registerMarshal() {
 		return vm.marshalLoad(data, proc, freeze)
 	}
 	def("load", load)
-	def("restore", load) // Marshal.restore is an alias for load
+	// Marshal.restore is a true alias of Marshal.load: it shares the one method
+	// record so Marshal.method(:restore) == Marshal.method(:load), as in MRI.
+	mod.smethods["restore"] = mod.smethods["load"]
 }
 
 // marshalDumpLimit reads Marshal.dump's depth limit from its arguments: the

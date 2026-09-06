@@ -626,13 +626,15 @@ func (vm *VM) timeAt(args []object.Value) *Time {
 	if hasZone {
 		return vm.applyInstantZone(sec, ns, zone)
 	}
-	// A numeric source with no zone keeps rbgo's deterministic UTC instant. A lone
-	// Float/Rational argument is placed exactly so any sub-nanosecond part of the
-	// value survives (MRI keeps the sub-second as an exact Rational).
+	// A numeric source with no zone yields a Time in the current local timezone
+	// (MRI's Time.at defaults to local, not UTC). A lone Float/Rational argument is
+	// placed exactly so any sub-nanosecond part of the value survives (MRI keeps
+	// the sub-second as an exact Rational).
+	loc := localLoc()
 	if r, ok := atExactSeconds(pos); ok {
-		return newTimeExact(r, stdtime.UTC, nil)
+		return newTimeExact(r, loc, nil)
 	}
-	return &Time{t: stdtime.Unix(sec, ns).UTC()}
+	return &Time{t: stdtime.Unix(sec, ns).In(loc)}
 }
 
 // atExactSeconds returns the exact seconds of Time.at's argument as a Rational
@@ -792,7 +794,9 @@ func (vm *VM) timeNow(args []object.Value) *Time {
 	zone, _, _, _ := popTimeKwargs(args)
 	n := vm.nowInstant()
 	if zone == nil || object.IsNil(zone) {
-		return &Time{t: n}
+		// Time.now is in the current local timezone (MRI), not the UTC instant the
+		// clock hands back.
+		return &Time{t: n.In(localLoc())}
 	}
 	return vm.applyInstantZone(n.Unix(), int64(n.Nanosecond()), zone)
 }
@@ -806,7 +810,8 @@ func (vm *VM) timeNew(args []object.Value) *Time {
 	if len(pos) == 0 {
 		n := vm.nowInstant()
 		if kwZone == nil || object.IsNil(kwZone) {
-			return &Time{t: n}
+			// Time.new with no arguments is Time.now — local timezone, not UTC.
+			return &Time{t: n.In(localLoc())}
 		}
 		return vm.applyInstantZone(n.Unix(), int64(n.Nanosecond()), kwZone)
 	}
