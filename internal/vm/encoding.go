@@ -125,15 +125,21 @@ func (vm *VM) registerEncoding() {
 	// values Puppet's log_runtime_environment and IO setup read. The setters are
 	// accepted (and remembered) so code that brackets work in an encoding override
 	// runs; rbgo's string layer remains UTF-8 regardless.
-	defExternal := vm.encodings["UTF-8"]
+	vm.defExternalEnc = vm.encodings["UTF-8"]
 	sdef := func(name string, fn NativeFn) {
 		vm.cEncoding.smethods[name] = &Method{name: name, owner: vm.cEncoding, native: fn}
 	}
-	sdef("default_external", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return defExternal
+	sdef("default_external", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.defExternalEnc
 	})
 	sdef("default_external=", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		defExternal = vm.encodingArg(args[0])
+		// MRI rejects nil with ArgumentError (not the TypeError encodingArg would
+		// raise), and setting the default also redirects the "external",
+		// "filesystem" and "locale" names Encoding.find resolves.
+		if _, isNil := args[0].(object.Nil); isNil {
+			raise("ArgumentError", "default external can not be nil")
+		}
+		vm.defExternalEnc = vm.encodingArg(args[0])
 		return args[0]
 	})
 	sdef("default_internal", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -157,8 +163,22 @@ func (vm *VM) registerEncoding() {
 		return object.NewString("UTF-8")
 	})
 	// Encoding.find(name) resolves a name (or a pass-through Encoding) to the
-	// registry object, raising ArgumentError for an unknown name as MRI does.
+	// registry object, raising ArgumentError for an unknown name as MRI does. The
+	// dynamic names track the current process defaults: "external"/"filesystem"/
+	// "locale" are Encoding.default_external, and "internal" is
+	// Encoding.default_internal (nil when unset).
 	sdef("find", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if s, ok := args[0].(*object.String); ok {
+			switch lower(s.Str()) {
+			case "external", "filesystem", "locale":
+				return vm.defExternalEnc
+			case "internal":
+				if vm.defInternalEnc == nil {
+					return object.NilV
+				}
+				return vm.defInternalEnc
+			}
+		}
 		return vm.encodingArg(args[0])
 	})
 	// Encoding.list returns every registered (non-alias) encoding, in registration

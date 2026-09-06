@@ -16,10 +16,11 @@ import (
 // codecs), driving them through a byte-at-a-time conversion loop so the
 // #primitive_convert state machine (status symbols, source-buffer consumption,
 // #primitive_errinfo, #last_error, #putback) matches MRI for the common single
-// conversion step. The residual — MRI's internal output-buffer carryover across
-// #primitive_convert calls (the "� spills into the next buffer" behaviour)
-// and the multi-hop stateful decorators (ISO-2022-JP escape-state #finish) — is
-// documented at the methods that would need it.
+// conversion step. Output that does not fit a #primitive_convert destination is
+// held in pendingOut and flushed on the next call (MRI's internal output-buffer
+// carryover). The remaining residual — the multi-hop stateful decorators
+// (ISO-2022-JP escape-state #finish) — is documented at the methods that would
+// need it.
 type converterObj struct {
 	src, dst string // canonical source / destination encoding names
 
@@ -41,6 +42,7 @@ type converterObj struct {
 	lastErrExc   object.Value
 
 	pendingIncomplete []byte // incomplete tail buffered by #convert for #finish
+	pendingOut        []byte // converted output that did not fit the destination, flushed on the next #primitive_convert
 	finished          bool   // #finish has been called (stream closed)
 }
 

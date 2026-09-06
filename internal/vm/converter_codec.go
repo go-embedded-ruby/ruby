@@ -7,6 +7,8 @@ package vm
 import (
 	binpkg "encoding/binary"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // decodeCharFrom decodes the next character of in, interpreted in encoding
@@ -223,6 +225,10 @@ func (vm *VM) encodeCharTo(r rune, to string) ([]byte, bool) {
 		return encodeUTF32(string(r), false), true
 	case "UTF-32BE":
 		return encodeUTF32(string(r), true), true
+	case "UTF8-MAC":
+		// UTF8-MAC (a.k.a. UTF-8-MAC / HFS+) is UTF-8 in canonical decomposition
+		// (NFD), so each character is encoded as its NFD bytes.
+		return norm.NFD.Bytes([]byte(string(r))), true
 	}
 	enc, ok := xtextEncodings[to]
 	if !ok {

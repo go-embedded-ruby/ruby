@@ -404,6 +404,7 @@ type VM struct {
 	encodings                          map[string]*encodingObj // canonical name -> interned Encoding
 	encLookup                          map[string]*encodingObj // lowercased name/alias -> interned Encoding
 	defInternalEnc                     *encodingObj            // Encoding.default_internal (nil = MRI's default)
+	defExternalEnc                     *encodingObj            // Encoding.default_external (UTF-8 unless reset)
 	cLazy                              *RClass
 	lastMatch                          object.Value            // $~: last regexp MatchData (or nil)
 	regexpTimeout                      object.Value            // Regexp.timeout default (Float seconds or nil)
