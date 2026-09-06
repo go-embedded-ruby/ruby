@@ -265,6 +265,56 @@ func nameArg(v object.Value) string {
 	}
 }
 
+// coerceNameArg converts a name argument (a method, constant or class-variable
+// name) to its string form the way MRI's rb_check_id/rb_to_id does: a Symbol or
+// String is taken directly, and any other object is converted through #to_str.
+// A missing #to_str raises TypeError "X is not a symbol nor a string"; a #to_str
+// that returns a non-String raises "can't convert A to String (A#to_str gives
+// B)". It performs no name-shape validation — callers that need it (const/cvar)
+// layer their own check on the result. Reference: ruby/ruby v3_4_0 vm_method.c
+// rb_check_id / rb_to_id and variable.c rb_check_id_cstr callers.
+func (vm *VM) coerceNameArg(v object.Value) string {
+	switch x := v.(type) {
+	case object.Symbol:
+		return string(x)
+	case *object.String:
+		return x.Str()
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Str()
+		}
+		cn := vm.classOf(v).name
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			cn, cn, vm.classOf(r).name)
+	}
+	raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+	return ""
+}
+
+// coerceConstName is coerceNameArg followed by MRI's constant-name shape check
+// (an uppercase first letter): the name must read as a constant or a NameError
+// "wrong constant name X" is raised. Used by Module#const_set / #remove_const.
+func (vm *VM) coerceConstName(v object.Value) string {
+	name := vm.coerceNameArg(v)
+	if !constNameWellFormed(name) {
+		raise("NameError", "wrong constant name %s", name)
+	}
+	return name
+}
+
+// coerceCvarName is coerceNameArg followed by MRI's class-variable-name shape
+// check (a "@@" prefix and at least one further character), raising NameError
+// otherwise. Used by Module#class_variable_get / _set / _defined?.
+func (vm *VM) coerceCvarName(v object.Value) string {
+	name := vm.coerceNameArg(v)
+	if len(name) < 3 || name[0] != '@' || name[1] != '@' {
+		raise("NameError", "`%s' is not allowed as a class variable name", name)
+	}
+	return name
+}
+
 // defineMethodName coerces define_method's name argument. A Symbol or String is
 // taken directly; any other object is converted through #to_str, and a #to_str
 // that returns a non-String raises TypeError with MRI's "can't convert" message.

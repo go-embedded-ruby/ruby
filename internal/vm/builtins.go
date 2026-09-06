@@ -1374,16 +1374,19 @@ func (vm *VM) bootstrap() {
 	// the @@-prefixed name is the key in the cvars table. Lookups walk the
 	// superclass chain via cvarOwner, mirroring how @@name resolves at runtime.
 	vm.cModule.define("class_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := cvarNameArg(args[0])
+		name := vm.coerceCvarName(args[0])
 		if c := cvarOwner(self.(*RClass), name); c != nil {
 			return c.cvars[name]
 		}
 		raise("NameError", "uninitialized class variable %s in %s", name, self.(*RClass).name)
 		return object.NilV
 	})
-	vm.cModule.define("class_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := cvarNameArg(args[0])
+	vm.cModule.define("class_variable_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		cls := self.(*RClass)
+		if cls.frozen {
+			vm.raiseFrozen(cls)
+		}
+		name := vm.coerceCvarName(args[0])
 		if c := cvarOwner(cls, name); c != nil {
 			c.cvars[name] = args[1]
 		} else {
@@ -1391,8 +1394,8 @@ func (vm *VM) bootstrap() {
 		}
 		return args[1]
 	})
-	vm.cModule.define("class_variable_defined?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(cvarOwner(self.(*RClass), cvarNameArg(args[0])) != nil)
+	vm.cModule.define("class_variable_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return object.Bool(cvarOwner(self.(*RClass), vm.coerceCvarName(args[0])) != nil)
 	})
 	vm.cModule.define("class_variables", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// class_variables(inherit=true): own variables, then ancestors', each
@@ -1423,8 +1426,11 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cModule.define("const_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := constNameArg(args[0])
 		cls := self.(*RClass)
+		if cls.frozen {
+			vm.raiseFrozen(cls)
+		}
+		name := vm.coerceConstName(args[0])
 		// Route through assignConstIn so an anonymous class/module bound here gains
 		// the qualified name of its constant (Ruby's "permanent name on first
 		// constant binding" rule) — the same path a `Foo::Bar = ...` literal takes.
@@ -1439,8 +1445,16 @@ func (vm *VM) bootstrap() {
 	// generator that redefines a constant (Puppet's classgen does this) removes the
 	// stale binding before installing the new one.
 	vm.cModule.define("remove_const", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := constNameArg(args[0])
+		name := vm.coerceConstName(args[0])
 		cls := self.(*RClass)
+		// A pending (not-yet-run) autoload registered for this name is removed too,
+		// returning nil — MRI's rb_mod_remove_const drops the autoload entry.
+		if cls.autoloads != nil {
+			if _, ok := cls.autoloads[name]; ok {
+				delete(cls.autoloads, name)
+				return object.NilV
+			}
+		}
 		table := cls.consts
 		if cls == vm.cObject {
 			table = vm.consts
