@@ -24,6 +24,10 @@ type LazyEnum struct {
 	// (#next/#peek/#rewind), pulling one element at a time through a fiber so the
 	// pipeline is never over-evaluated (and an infinite source stays usable).
 	ext *Enumerator
+	// methodValueState makes a LazyEnum a boxed value: it carries the frozen flag
+	// (so #freeze/#frozen? and Enumerator::Lazy#initialize's FrozenError work) and
+	// any instance variables, as on Enumerator.
+	methodValueState
 }
 
 type lazyOp struct {
@@ -36,6 +40,9 @@ type lazyOp struct {
 }
 
 func (l *LazyEnum) ToS() string {
+	if l.recv == nil { // allocated but never #initialize-d
+		return "#<Enumerator::Lazy: uninitialized>"
+	}
 	s := "#<Enumerator::Lazy: " + l.recv.Inspect()
 	for _, op := range l.ops {
 		s += ":" + op.kind
@@ -82,6 +89,47 @@ func (vm *VM) registerLazy() {
 			}
 			return le
 		}}
+	// Enumerator::Lazy.allocate yields an uninitialized Lazy (a distinct Go value so
+	// the instance methods work once #initialize gives it a source), rather than the
+	// generic *RObject Class#allocate would produce.
+	vm.cLazy.smethods["allocate"] = &Method{name: "allocate", owner: vm.cLazy,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return &LazyEnum{}
+		}}
+	// Enumerator::Lazy#initialize(obj, size = nil) { |y, *values| … } configures an
+	// allocated (or re-initialised) Lazy from a source, mirroring Lazy.new: private,
+	// requires a block (ArgumentError), refuses a frozen receiver (FrozenError),
+	// returns self.
+	vm.cLazy.define("initialize", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		l, ok := self.(*LazyEnum)
+		if !ok {
+			raise("TypeError", "not an Enumerator::Lazy")
+		}
+		if isFrozen(l) {
+			vm.raiseFrozen(l)
+		}
+		if blk == nil {
+			raise("ArgumentError", "tried to call lazy new without a block")
+		}
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		src := args[0]
+		gen := &Proc{native: func(vm *VM, gargs []object.Value) object.Value {
+			y := gargs[0]
+			step := &Proc{native: func(vm *VM, vals []object.Value) object.Value {
+				vm.callBlock(blk, append([]object.Value{y}, vals...))
+				return object.NilV
+			}}
+			return vm.send(src, "each", nil, step)
+		}}
+		*l = LazyEnum{recv: &Enumerator{block: gen}, methodValueState: l.methodValueState}
+		if len(args) > 1 {
+			l.sizeSpec, l.sizeSpecSet = args[1], true
+		}
+		return l
+	})
+	vm.cLazy.methods["initialize"].vis = visPrivate
 
 	makeLazy := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return &LazyEnum{recv: self}
@@ -141,7 +189,7 @@ func (vm *VM) registerLazy() {
 	})
 	// zip pairs each element with the corresponding elements of the other
 	// sources (padding with nil once a source is exhausted).
-	d("zip", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	d("zip", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		// Each argument must be list-like (respond to #each); MRI validates this when
 		// #zip is called, before any element is pulled.
 		for _, a := range args {
@@ -149,7 +197,17 @@ func (vm *VM) registerLazy() {
 				raise("TypeError", "wrong argument type %s (must respond to :each)", vm.classOf(a).name)
 			}
 		}
-		return self.(*LazyEnum).with(lazyOp{kind: "zip", others: append([]object.Value{}, args...)})
+		zipped := self.(*LazyEnum).with(lazyOp{kind: "zip", others: append([]object.Value{}, args...)})
+		if blk == nil {
+			return zipped
+		}
+		// Given a block, #zip behaves as Enumerable#zip: it drives the whole pipeline
+		// eagerly, calling the block with each gathered tuple, and returns nil.
+		vm.lazyRun(zipped, func(v object.Value, _ []object.Value) bool {
+			vm.callBlock(blk, []object.Value{v})
+			return true
+		})
+		return object.NilV
 	})
 	// with_index(offset = 0): optional block maps (element, index); without a
 	// block each element becomes the pair [element, index].
@@ -160,6 +218,48 @@ func (vm *VM) registerLazy() {
 		}
 		return self.(*LazyEnum).with(lazyOp{kind: "with_index", n: off, blk: blk})
 	})
+	// Enumerator::Lazy overrides Enumerable's each_with_index / each_with_object so
+	// they stay lazy-aware rather than dispatching the Enumerator natives (which
+	// assume a plain *Enumerator receiver). With no block each returns a Lazy — a
+	// with_index pipeline for each_with_index, or an [element, memo] mapping for
+	// each_with_object; with a block each drives the pipeline eagerly (as MRI's do,
+	// hanging on an infinite source) and returns self / the memo.
+	d("each_with_index", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		l := self.(*LazyEnum)
+		if len(args) > 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
+		if blk == nil {
+			return l.with(lazyOp{kind: "with_index", n: 0})
+		}
+		i := 0
+		vm.lazyRun(l, func(v object.Value, _ []object.Value) bool {
+			vm.callBlock(blk, []object.Value{v, object.IntValue(int64(i))})
+			i++
+			return true
+		})
+		return l
+	})
+	eachWithObject := func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		l := self.(*LazyEnum)
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		memo := args[0]
+		if blk == nil {
+			pair := &Proc{native: func(_ *VM, a []object.Value) object.Value {
+				return object.NewArray(enumPack(a), memo)
+			}}
+			return l.with(lazyOp{kind: "map", blk: pair})
+		}
+		vm.lazyRun(l, func(v object.Value, _ []object.Value) bool {
+			vm.callBlock(blk, []object.Value{v, memo})
+			return true
+		})
+		return memo
+	}
+	d("each_with_object", eachWithObject)
+	d("with_object", eachWithObject)
 	// chunk_while / slice_when split the stream into runs at each adjacent pair
 	// (a, b) for which the block does not hold (chunk_while) / does hold
 	// (slice_when). Both require a block. Truly lazy: a completed run is emitted
@@ -296,11 +396,24 @@ func (vm *VM) registerLazy() {
 		}
 		gen := &Proc{native: func(vm *VM, gargs []object.Value) object.Value {
 			y := gargs[0]
+			fired := false
 			step := &Proc{native: func(vm *VM, a []object.Value) object.Value {
+				fired = true
 				vm.send(y, "yield", a, nil)
 				return object.NilV
 			}}
-			return vm.send(l, meth, rest, step)
+			// Drive l.meth(*rest, &step). An eager Enumerable method (each/each_slice/
+			// each_cons/…) iterates immediately, firing step per element. A lazy
+			// transform (with_index/map/…) instead returns a fresh Lazy carrying step as
+			// its op block without iterating, so drive that Lazy's #each with a no-op
+			// sink: the op's step then fires per element, and the sink discards the
+			// values step already forwarded.
+			res := vm.send(l, meth, rest, step)
+			if lz, ok := res.(*LazyEnum); ok && !fired {
+				noop := &Proc{native: func(_ *VM, _ []object.Value) object.Value { return object.NilV }}
+				vm.send(lz, "each", nil, noop)
+			}
+			return object.NilV
 		}}
 		return &LazyEnum{recv: &Enumerator{block: gen, sizeBlock: blk}}
 	}
