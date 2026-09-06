@@ -1815,7 +1815,9 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		a := self.(*object.String)
 		if b := stringOrSubclassBytes(args[0]); b != nil {
-			return object.Bool(a.Str() == b.Str())
+			// Equal bytes are not enough: rb_str_equal also requires the encodings to
+			// be comparable, so "\xff" tagged UTF-8 and ISO-8859-1 are unequal.
+			return object.Bool(vm.strComparable(a, b) && a.Str() == b.Str())
 		}
 		// A non-String that answers #to_str: MRI's rb_str_equal defers to
 		// `other == self` (it only checks that #to_str is defined, never calling
@@ -1824,6 +1826,17 @@ func (vm *VM) bootstrap() {
 			return object.Bool(vm.send(args[0], "==", []object.Value{self}, nil).Truthy())
 		}
 		return object.False
+	})
+	vm.cString.define("eql?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// String#eql? is #== without the #to_str fallback: a non-String is never
+		// eql?, and two Strings are eql? only with equal bytes and comparable
+		// encodings (rb_str_eql).
+		a := self.(*object.String)
+		b := stringOrSubclassBytes(args[0])
+		if b == nil {
+			return object.False
+		}
+		return object.Bool(a.Str() == b.Str() && vm.strComparable(a, b))
 	})
 
 	// String. Methods over the mutable byte-based String (length/chars/index are
@@ -1946,18 +1959,19 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("chr", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(stringChr(strOf(self)))
 	})
-	vm.cString.define("setbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("setbyte", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
 		b := s.MutableBytes()
-		i := toInt(args[0])
+		orig := vm.repeatLong(args[0]) // index and value convert via #to_int
+		i := orig
 		if i < 0 {
 			i += int64(len(b)) // negative indexes count from the end
 		}
 		if i < 0 || i >= int64(len(b)) {
-			raise("IndexError", "index %d out of string", toInt(args[0]))
+			raise("IndexError", "index %d out of string", orig)
 		}
-		b[i] = byte(toInt(args[1]))
+		b[i] = byte(vm.repeatLong(args[1]))
 		return args[1]
 	})
 	vm.cString.define("sum", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -2038,8 +2052,8 @@ func (vm *VM) bootstrap() {
 		}
 		return object.IntValue(int64(s[i]))
 	})
-	vm.cString.define("byteslice", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return byteslice(self.(*object.String), args)
+	vm.cString.define("byteslice", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return byteslice(vm, self.(*object.String), args)
 	})
 	vm.cString.define("lines", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		segs := vm.stringLineSegs(self, args)
@@ -2111,15 +2125,26 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("each_codepoint", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_codepoint")
+			// The enumerator reports the character count for its #size — computed
+			// without decoding, so #size works even on an invalid-encoding string
+			// whose iteration (below) would raise.
+			return enumForSized(self, "each_codepoint", func(*VM) object.Value {
+				s := self.(*object.String)
+				if s.IsBinary() {
+					return object.IntValue(int64(len(s.Bytes())))
+				}
+				return object.IntValue(int64(utf8.RuneCountInString(s.Str())))
+			})
 		}
+		vm.checkCodepointEncoding(self.(*object.String)) // a broken string raises ArgumentError
 		for _, r := range strOf(self) {
 			vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
 		}
 		return self
 	})
 	vm.cString.define("codepoints", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk != nil { // the block form yields each codepoint and returns the receiver (MRI)
+		vm.checkCodepointEncoding(self.(*object.String)) // a broken string raises ArgumentError
+		if blk != nil {                                  // the block form yields each codepoint and returns the receiver (MRI)
 			for _, r := range strOf(self) {
 				vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
 			}
@@ -2165,14 +2190,28 @@ func (vm *VM) bootstrap() {
 			// incompatible pair, as MRI does.
 			pre, sobj := vm.strCoerceArg(a)
 			vm.combinedEncName(self.(*object.String), sobj)
-			if strings.HasPrefix(s, pre) {
+			// The prefix must end on a character boundary of self, so
+			// "\xC3\xA9".start_with?("\xC3") is false (byte 1 splits the character).
+			if strings.HasPrefix(s, pre) && charBoundary(self.(*object.String).Bytes(), len(pre), self.(*object.String).EncName()) {
 				return object.True
 			}
 		}
 		return object.False
 	})
 	vm.cString.define("end_with?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(strings.HasSuffix(strOf(self), vm.strPatternCompat(self, args[0])))
+		sb := self.(*object.String).Bytes()
+		enc := self.(*object.String).EncName()
+		for _, a := range args { // true if self ends with any suffix (each coerced via #to_str)
+			suf, sobj := vm.strCoerceArg(a)
+			vm.combinedEncName(self.(*object.String), sobj) // raises if the encodings are incompatible
+			// The suffix must begin on a character boundary of self, so
+			// "\xC3\xA9".end_with?("\xA9") is false (byte 1 is mid-character).
+			if len(suf) <= len(sb) && string(sb[len(sb)-len(suf):]) == suf &&
+				charBoundary(sb, len(sb)-len(suf), enc) {
+				return object.True
+			}
+		}
+		return object.False
 	})
 	vm.cString.define("delete_prefix", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
@@ -2311,6 +2350,10 @@ func (vm *VM) bootstrap() {
 	})
 	aliasBuiltin(vm.cString, "to_str", "to_s") // MRI alias of String#to_s
 	strToSym := func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self.(*object.String)
+		if !validInEncoding(s.Bytes(), s.EncName()) { // a broken string cannot become a Symbol
+			raise("EncodingError", "invalid symbol in encoding %s :%s", s.EncName(), s.Inspect())
+		}
 		return object.Symbol(strOf(self))
 	}
 	vm.cString.define("to_sym", strToSym)
@@ -2342,14 +2385,18 @@ func (vm *VM) bootstrap() {
 		}
 		return s
 	})
+	pad := func(vm *VM, self object.Value, args []object.Value, side byte) object.Value {
+		str, enc := vm.padString(self.(*object.String), args, side)
+		return object.NewStringBytesEnc([]byte(str), enc)
+	}
 	vm.cString.define("ljust", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, vm.padString(strOf(self), args, 'l'))
+		return pad(vm, self, args, 'l')
 	})
 	vm.cString.define("rjust", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, vm.padString(strOf(self), args, 'r'))
+		return pad(vm, self, args, 'r')
 	})
 	vm.cString.define("center", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, vm.padString(strOf(self), args, 'c'))
+		return pad(vm, self, args, 'c')
 	})
 	trFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, trString(strOf(self), vm.strTrArg(args[0]), vm.strTrArg(args[1]), false))
@@ -2537,16 +2584,18 @@ func (vm *VM) bootstrap() {
 	vm.cString.define("replace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
-		repl, _ := vm.strCoerceArg(args[0]) // a non-String source converts via #to_str
+		repl, src := vm.strCoerceArg(args[0]) // a non-String source converts via #to_str
 		s.SetBytes([]byte(repl))
+		s.Enc = src.Enc // #replace also adopts the other string's encoding (and its validity)
 		return s
 	})
-	vm.cString.define("prepend", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("prepend", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
 		vm.checkFrozen(s)
 		var head []byte
-		for _, a := range args {
-			head = append(head, strAppendBytes(a)...)
+		for _, a := range args { // each argument converts via #to_str (String subclasses unwrap)
+			_, src := vm.strCoerceArg(a)
+			head = append(head, src.Bytes()...)
 		}
 		s.SetBytes(append(head, s.Bytes()...))
 		return s
@@ -2556,8 +2605,12 @@ func (vm *VM) bootstrap() {
 		vm.checkFrozen(s)
 		// The inserted string converts via #to_str before the index is checked (MRI
 		// raises TypeError for an unconvertible value even when the index is out of
-		// range); the index converts via #to_int.
-		ins := []rune(vm.coerceFormatString(args[1]))
+		// range); the two encodings are negotiated (raising
+		// Encoding::CompatibilityError, and the receiver adopts the combined
+		// encoding); the index converts via #to_int.
+		insStr, insObj := vm.strCoerceArg(args[1])
+		newEnc := vm.combinedEncName(s, insObj)
+		ins := []rune(insStr)
 		r := []rune(s.Str())
 		idx := vm.repeatLong(args[0])
 		at := int(idx)
@@ -2569,6 +2622,7 @@ func (vm *VM) bootstrap() {
 		}
 		out := append(append(append([]rune{}, r[:at]...), ins...), r[at:]...)
 		s.SetBytes([]byte(string(out)))
+		s.Enc = newEnc
 		return s
 	})
 	vm.cString.define("clear", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -4249,20 +4303,34 @@ func (vm *VM) bootstrap() {
 	// Hash and is ignored. Reused by String.new for both String and its subclasses.
 	stringInit := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
-		content := ""
-		if len(args) > 0 {
-			switch a := args[0].(type) {
-			case *object.String:
-				content = a.Str()
-			case *object.Hash: // keyword-only arguments
-			default:
-				raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
+		pos := args
+		encName, hasEnc := "", false
+		// A trailing Hash carries the keyword options (encoding:, capacity:).
+		if n := len(args); n > 0 {
+			if h, ok := args[n-1].(*object.Hash); ok {
+				if ev, ok := h.Get(object.Symbol("encoding")); ok {
+					encName, hasEnc = vm.forceEncodingName(ev), true
+				}
+				pos = args[:n-1]
 			}
 		}
-		s.SetBytes([]byte(content))
+		// A positional argument replaces self's content and encoding through #to_str
+		// (rb_str_replace); with none, self is left unchanged — so
+		// "x".send(:initialize) keeps "x" (and a frozen receiver does not raise).
+		if len(pos) > 0 {
+			vm.checkFrozen(s)
+			repl, src := vm.strCoerceArg(pos[0])
+			s.SetBytes([]byte(repl))
+			s.Enc = src.Enc
+		}
+		if hasEnc { // encoding: overrides, matching MRI's force after the replace
+			vm.checkFrozen(s)
+			s.Enc = encName
+		}
 		return self
 	}
 	vm.cString.define("initialize", stringInit)
+	vm.setInstanceVisibility(vm.cString, "initialize", visPrivate) // MRI keeps #initialize private
 	// String.new builds a real String (it was falling through to the
 	// instance-allocating Class#new and producing a bogus object). A subclass
 	// instead wraps a String in an RObject so its class identity is preserved.
@@ -4271,7 +4339,7 @@ func (vm *VM) bootstrap() {
 			if recv := self.(*RClass); recv != vm.cString {
 				return vm.newBuiltinSubclass(recv, object.NewString(""), args, blk)
 			}
-			s := object.NewString("")
+			s := object.NewStringBytesEnc(nil, "ASCII-8BIT") // String.new defaults to a binary String
 			stringInit(vm, s, args, blk)
 			return s
 		}}
@@ -6247,8 +6315,8 @@ func asRangeValue(v object.Value) (*object.Range, bool) {
 // The caller (strIndexFn) has already validated the 1..2 arity.
 func (vm *VM) coerceStrIndexArgs(args []object.Value) []object.Value {
 	if len(args) == 1 {
-		if _, ok := args[0].(*object.String); ok {
-			return args // s[substr]
+		if sub := stringOrSubclassBytes(args[0]); sub != nil {
+			return []object.Value{sub} // s[substr] — a String or a String subclass
 		}
 		if r, ok := asRangeValue(args[0]); ok {
 			return []object.Value{vm.coerceRangeBounds(r)}
@@ -6934,7 +7002,7 @@ func stringIndexEnc(s string, args []object.Value, binary bool) object.Value {
 // range), byteslice(i, len) is len bytes from i (clamped to the end; nil for a
 // negative start out of range or a negative length), and byteslice(range) slices
 // by byte range. The result keeps the receiver's encoding.
-func byteslice(self *object.String, args []object.Value) object.Value {
+func byteslice(vm *VM, self *object.String, args []object.Value) object.Value {
 	b := []byte(self.Str())
 	n := len(b)
 	mk := func(sub []byte) object.Value {
@@ -6942,9 +7010,11 @@ func byteslice(self *object.String, args []object.Value) object.Value {
 		s.Enc = self.Enc
 		return s
 	}
+	// Indexes and lengths convert like NUM2LONG: #to_int is honoured, a Float
+	// truncates, and a value too big for a machine long raises RangeError.
 	if len(args) == 2 {
-		start := normIndex(intArg(args[0]), n)
-		length := intArg(args[1])
+		start := normIndex(vm.repeatLong(args[0]), n)
+		length := vm.repeatLong(args[1])
 		if start < 0 || start > n || length < 0 {
 			return object.NilV
 		}
@@ -6954,14 +7024,14 @@ func byteslice(self *object.String, args []object.Value) object.Value {
 		}
 		return mk(b[start:end])
 	}
-	if rng, ok := args[0].(*object.Range); ok {
-		start, length, ok := sliceRange(n, rng)
+	if rng, ok := asRangeValue(args[0]); ok { // a Range (or Range subclass) argument
+		start, length, ok := sliceRange(n, vm.coerceRangeBounds(rng))
 		if !ok {
 			return object.NilV
 		}
 		return mk(b[start : start+length])
 	}
-	i := normIndex(intArg(args[0]), n)
+	i := normIndex(vm.repeatLong(args[0]), n)
 	if i < 0 || i >= n {
 		return object.NilV
 	}
@@ -7128,17 +7198,6 @@ func (vm *VM) checkFrozen(s *object.String) {
 	}
 }
 
-// strAppendBytes is the byte contribution of a #prepend argument: a String
-// contributes its bytes; any other value is a TypeError (unlike #<<, #prepend
-// does not take an Integer codepoint).
-func strAppendBytes(a object.Value) []byte {
-	if v, ok := a.(*object.String); ok {
-		return v.Bytes()
-	}
-	raise("TypeError", "no implicit conversion of %s into String", classNameOf(a))
-	return nil
-}
-
 // strBang applies a pure transform to the receiver in place. As a Ruby bang
 // method it returns the (mutated) receiver when the content changed, else nil.
 func (vm *VM) strBang(self object.Value, fn func(string) string) object.Value {
@@ -7293,11 +7352,13 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 // a String whose encoding is incompatible with self.s, it raises
 // Encoding::CompatibilityError, matching MRI.s search methods.
 func (vm *VM) strPatternCompat(self, pat object.Value) string {
-	if ps, ok := pat.(*object.String); ok {
-		vm.combinedEncName(self.(*object.String), ps) // raises if the encodings are incompatible
-		return ps.Str()
-	}
-	return strArg(pat)
+	// A String (or String subclass, unwrapped) is taken directly; any other value
+	// is converted through #to_str, raising MRI's TypeError otherwise. The two
+	// encodings are then negotiated (raising Encoding::CompatibilityError when
+	// incompatible), as rb_str_index does for String#include?.
+	ps, so := vm.strCoerceArg(pat)
+	vm.combinedEncName(self.(*object.String), so)
+	return ps
 }
 
 // strCoerceArg coerces v to a Go string the way String search/replace methods
@@ -7673,7 +7734,7 @@ func (vm *VM) sliceSpan(args []object.Value, n int) (start, length int, ok bool)
 		}
 		return start, length, true
 	}
-	if rng, isR := args[0].(*object.Range); isR {
+	if rng, isR := asRangeValue(args[0]); isR { // a Range (or Range subclass) argument
 		return sliceRange(n, vm.coerceRangeBounds(rng))
 	}
 	start = normIndex(vm.repeatLong(args[0]), n)
@@ -7727,6 +7788,82 @@ func strArg(v object.Value) string {
 	}
 	raise("TypeError", "no implicit conversion of %s into String", v.Inspect())
 	return ""
+}
+
+// charBoundary reports whether byte offset pos in b (encoding enc) sits at the
+// head of a character — MRI's rb_enc_left_char_head(p, p+pos, e) == p+pos. It is
+// used by String#start_with?/#end_with? to reject a match that would split a
+// multibyte character (e.g. "\xC3\xA9".start_with?("\xC3") is false because byte
+// 1 is a UTF-8 continuation byte). Positions at the ends are always boundaries;
+// single-byte / ASCII-compatible encodings treat every byte as a character head.
+func charBoundary(b []byte, pos int, enc string) bool {
+	if pos <= 0 || pos >= len(b) {
+		return true
+	}
+	switch enc {
+	case "UTF-8", "":
+		return b[pos]&0xC0 != 0x80 // not a UTF-8 continuation byte
+	case "UTF-16BE":
+		if pos%2 != 0 {
+			return false
+		}
+		cur := uint16(b[pos])<<8 | uint16(b[pos+1])
+		prev := uint16(b[pos-2])<<8 | uint16(b[pos-1])
+		// A low surrogate preceded by a high surrogate is the tail of a 4-byte pair.
+		return !(cur >= 0xDC00 && cur <= 0xDFFF && prev >= 0xD800 && prev <= 0xDBFF)
+	case "UTF-16LE":
+		if pos%2 != 0 {
+			return false
+		}
+		cur := uint16(b[pos+1])<<8 | uint16(b[pos])
+		prev := uint16(b[pos-1])<<8 | uint16(b[pos-2])
+		return !(cur >= 0xDC00 && cur <= 0xDFFF && prev >= 0xD800 && prev <= 0xDBFF)
+	case "UTF-32BE", "UTF-32LE":
+		return pos%4 == 0
+	default:
+		return true
+	}
+}
+
+// checkCodepointEncoding raises ArgumentError, as MRI's rb_str_each_codepoint
+// does, when s holds bytes that are not valid in its encoding — so #codepoints /
+// #each_codepoint refuse a broken string rather than yielding replacement runes.
+func (vm *VM) checkCodepointEncoding(s *object.String) {
+	if !validInEncoding(s.Bytes(), s.EncName()) {
+		raise("ArgumentError", "invalid byte sequence in %s", s.EncName())
+	}
+}
+
+// strIs7bit reports MRI's ENC_CODERANGE_7BIT for s: an empty string qualifies in
+// any encoding, otherwise the bytes must all be 7-bit ASCII in an
+// ASCII-compatible encoding (UTF-16/32 content is never 7-bit).
+func (vm *VM) strIs7bit(s *object.String) bool {
+	b := s.Bytes()
+	if len(b) == 0 {
+		return true
+	}
+	return vm.internEncoding(s.EncName()).asciiCompat && asciiOnly(b)
+}
+
+// strComparable implements MRI's rb_str_comparable, the encoding gate on
+// String#== / #eql?: identical encodings always compare; otherwise one side must
+// be all-ASCII (7-bit) and the other's encoding ASCII-compatible. So "\xff" in
+// UTF-8 and in ISO-8859-1 are unequal (neither is 7-bit), while "hello" in the
+// two is equal (both 7-bit), and two empty strings always compare.
+func (vm *VM) strComparable(a, b *object.String) bool {
+	if a.EncName() == b.EncName() {
+		return true
+	}
+	a7, b7 := vm.strIs7bit(a), vm.strIs7bit(b)
+	if a7 {
+		if b7 || vm.internEncoding(b.EncName()).asciiCompat {
+			return true
+		}
+	}
+	if b7 && vm.internEncoding(a.EncName()).asciiCompat {
+		return true
+	}
+	return false
 }
 
 // pathArg coerces a path-like argument to a String the way MRI's File/IO entry
@@ -9451,28 +9588,35 @@ func (vm *VM) digRest(v object.Value, keys []object.Value) object.Value {
 
 // padString implements ljust/rjust/center ('l'/'r'/'c'): pad s with the pad
 // string (default " ") to a rune width. Extra padding for center goes right.
-func (vm *VM) padString(s string, args []object.Value, side byte) string {
+func (vm *VM) padString(self *object.String, args []object.Value, side byte) (string, string) {
+	s := self.Str()
 	width := int(vm.repeatLong(args[0])) // #to_int coercion of the width
 	pad := " "
+	enc := self.EncName()
 	if len(args) > 1 {
-		pad = vm.coerceFormatString(args[1]) // #to_str coercion of the pad string
+		p, po := vm.strCoerceArg(args[1]) // #to_str coercion of the pad (subclasses unwrap)
+		pad = p
+		// rb_str_justify negotiates the encodings up front (before the width test),
+		// so an incompatible pad raises Encoding::CompatibilityError and the result
+		// carries the combined encoding (e.g. IBM437 padded with "あ" gives UTF-8).
+		enc = vm.combinedEncName(self, po)
 	}
 	if pad == "" {
 		raise("ArgumentError", "zero width padding")
 	}
 	n := utf8.RuneCountInString(s)
 	if n >= width {
-		return s
+		return s, enc
 	}
 	total := width - n
 	switch side {
 	case 'r':
-		return makePad(pad, total) + s
+		return makePad(pad, total) + s, enc
 	case 'c':
 		left := total / 2
-		return makePad(pad, left) + s + makePad(pad, total-left)
+		return makePad(pad, left) + s + makePad(pad, total-left), enc
 	default: // 'l'
-		return s + makePad(pad, total)
+		return s + makePad(pad, total), enc
 	}
 }
 
