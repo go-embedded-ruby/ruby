@@ -408,3 +408,54 @@ func rangeIsEmpty(r *object.Range) bool {
 	c, _ := rangeCmp(r.Lo, r.Hi)
 	return c > 0 || (c == 0 && r.Exclusive)
 }
+
+// newRange builds a Range value, performing MRI's construction-time begin <=> end
+// comparison — a dispatch some specs observe through a mocked #<=>. When strict
+// (as Range.new and Range#initialize are) a comparison that does not order the
+// bounds is a "bad value for range" ArgumentError, matching MRI's range_init; the
+// range literal (OpNewRange) is not strict — it performs the comparison for its
+// dispatch but keeps rbgo's tolerance for an unordered literal, so a discarded
+// (1.."z") still builds as before. Either bound nil (a beginless/endless range)
+// or two Integer bounds (MRI's Fixnum fast path) skip the comparison, and any
+// exception raised by #<=> propagates.
+//
+// The strict "does not order" test mirrors MRI's Object#<=>, which answers 0 (not
+// nil) for two objects that are merely #== without defining their own #<=>: #<=>
+// is consulted first and #== only when it is nil, so two identical Regexp or bare
+// Object bounds — whose sole comparison is the identity default — still count as
+// comparable and Range.new(//, //) builds exactly as under MRI, while an endpoint
+// with a real ordering never triggers the extra #== send.
+func (vm *VM) newRange(lo, hi object.Value, exclusive, strict bool) *object.Range {
+	if !object.IsNil(lo) && !object.IsNil(hi) {
+		_, loInt := lo.(object.Integer)
+		_, hiInt := hi.(object.Integer)
+		if !(loInt && hiInt) {
+			cmp := vm.send(lo, "<=>", []object.Value{hi}, nil)
+			if strict && object.IsNil(cmp) && !vm.send(lo, "==", []object.Value{hi}, nil).Truthy() {
+				raise("ArgumentError", "bad value for range")
+			}
+		}
+	}
+	return object.NewRange(lo, hi, exclusive)
+}
+
+// coerceRangeStep resolves a Range#step step that is not itself a number to a
+// numeric one via MRI's coercion protocol: step.coerce(begin) must return a
+// two-element numeric [begin', step'] pair, which replaces the walk's begin and
+// step — so (1..3).step(obj), where obj.coerce(1) returns [1, 2], walks 1, 3. A
+// numeric step is returned unchanged; a non-numeric step with no #coerce is the
+// TypeError MRI raises for a step it cannot convert.
+func (vm *VM) coerceRangeStep(loV, stepV object.Value) (object.Value, object.Value) {
+	if isNumericValue(stepV) {
+		return loV, stepV
+	}
+	if !vm.respondsToDynamic(stepV, "coerce") {
+		raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(stepV).name)
+	}
+	pair := vm.send(stepV, "coerce", []object.Value{loV}, nil)
+	arr, ok := pair.(*object.Array)
+	if !ok || len(arr.Elems) != 2 {
+		raise("TypeError", "coerce must return [x, y]")
+	}
+	return arr.Elems[0], arr.Elems[1]
+}

@@ -2627,10 +2627,7 @@ func (vm *VM) bootstrap() {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 2..3)", len(args))
 			}
 			lo, hi := args[0], args[1]
-			if !object.IsNil(lo) && !object.IsNil(hi) && object.IsNil(vm.send(lo, "<=>", []object.Value{hi}, nil)) {
-				raise("ArgumentError", "bad value for range")
-			}
-			r := object.NewRange(lo, hi, len(args) == 3 && args[2].Truthy())
+			r := vm.newRange(lo, hi, len(args) == 3 && args[2].Truthy(), true)
 			if recv := self.(*RClass); recv != vm.cRange {
 				return &RObject{class: recv, ivars: map[string]object.Value{}, builtin: r}
 			}
@@ -5036,10 +5033,7 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2..3)", len(args))
 		}
 		lo, hi := args[0], args[1]
-		if !object.IsNil(lo) && !object.IsNil(hi) && object.IsNil(vm.send(lo, "<=>", []object.Value{hi}, nil)) {
-			raise("ArgumentError", "bad value for range")
-		}
-		self.(*RObject).builtin = object.NewRange(lo, hi, len(args) == 3 && args[2].Truthy())
+		self.(*RObject).builtin = vm.newRange(lo, hi, len(args) == 3 && args[2].Truthy(), true)
 		return object.NilV
 	})
 	vm.setInstanceVisibility(vm.cRange, "initialize", visPrivate)
@@ -10410,6 +10404,12 @@ func (vm *VM) stepEnum(recv, begin, limit, step object.Value, excl bool, args ..
 // accumulated drift. step must be non-zero.
 func (vm *VM) numericStep(blk *Proc, loV, hiV, stepV object.Value, exclusive bool) {
 	rejectStringStep(stepV)
+	// A non-numeric step on a numeric Range#step is coerced against the range's
+	// begin (MRI's numeric coercion), so (1..3).step(obj) with obj.coerce(1) =>
+	// [1, 2] walks 1, 3. Integer#step / Float#step never reach here with such a
+	// step — their numericStepArgCheck rejects it first — so this only affects
+	// Range#step, matching MRI (where Range#step coerces but Numeric#step does not).
+	loV, stepV = vm.coerceRangeStep(loV, stepV)
 	li, loInt := loV.(object.Integer)
 	hi2, hiInt := hiV.(object.Integer)
 	si, stepInt := stepV.(object.Integer)
