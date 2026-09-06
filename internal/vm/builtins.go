@@ -2125,15 +2125,26 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cString.define("each_codepoint", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			return enumFor(self, "each_codepoint")
+			// The enumerator reports the character count for its #size — computed
+			// without decoding, so #size works even on an invalid-encoding string
+			// whose iteration (below) would raise.
+			return enumForSized(self, "each_codepoint", func(*VM) object.Value {
+				s := self.(*object.String)
+				if s.IsBinary() {
+					return object.IntValue(int64(len(s.Bytes())))
+				}
+				return object.IntValue(int64(utf8.RuneCountInString(s.Str())))
+			})
 		}
+		vm.checkCodepointEncoding(self.(*object.String)) // a broken string raises ArgumentError
 		for _, r := range strOf(self) {
 			vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
 		}
 		return self
 	})
 	vm.cString.define("codepoints", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
-		if blk != nil { // the block form yields each codepoint and returns the receiver (MRI)
+		vm.checkCodepointEncoding(self.(*object.String)) // a broken string raises ArgumentError
+		if blk != nil {                                  // the block form yields each codepoint and returns the receiver (MRI)
 			for _, r := range strOf(self) {
 				vm.callBlock(blk, []object.Value{object.IntValue(int64(r))})
 			}
@@ -7807,6 +7818,15 @@ func charBoundary(b []byte, pos int, enc string) bool {
 		return pos%4 == 0
 	default:
 		return true
+	}
+}
+
+// checkCodepointEncoding raises ArgumentError, as MRI's rb_str_each_codepoint
+// does, when s holds bytes that are not valid in its encoding — so #codepoints /
+// #each_codepoint refuse a broken string rather than yielding replacement runes.
+func (vm *VM) checkCodepointEncoding(s *object.String) {
+	if !validInEncoding(s.Bytes(), s.EncName()) {
+		raise("ArgumentError", "invalid byte sequence in %s", s.EncName())
 	}
 }
 

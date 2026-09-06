@@ -304,3 +304,34 @@ func TestStringJustifyInsertEncoding(t *testing.T) {
 		}
 	}
 }
+
+// TestStringCodepointsInvalidEncoding covers String#codepoints / #each_codepoint
+// raising ArgumentError on a broken string (rb_str_each_codepoint), while the
+// enumerator's #size still reports the character count without decoding.
+// Verified against MRI 4.0.5.
+func TestStringCodepointsInvalidEncoding(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`p "café".codepoints`, `[99, 97, 102, 233]`},
+		{`p "hi".each_codepoint.to_a`, `[104, 105]`},
+		{`p "abc".b.each_codepoint.to_a`, `[97, 98, 99]`},
+		// #size does not decode, so it works on an invalid-encoding string.
+		{`p "\xDF".dup.force_encoding("UTF-8").each_codepoint.size`, "1"},
+		{`p "\xff\xff".b.each_codepoint.size`, "2"},
+		// The block form returns the receiver.
+		{`p "ab".each_codepoint { |c| }`, `"ab"`},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want+"\n" {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want+"\n")
+		}
+	}
+	for _, src := range []string{
+		`"\xDF".dup.force_encoding("UTF-8").codepoints`,
+		`"\xDF".dup.force_encoding("UTF-8").each_codepoint { |c| }`,
+		`"\xDF".dup.force_encoding("UTF-8").each_codepoint.to_a`,
+	} {
+		if cls, msg := evalErr(t, src); cls != "ArgumentError" || msg != "invalid byte sequence in UTF-8" {
+			t.Errorf("src=%q class=%q msg=%q, want ArgumentError/invalid byte sequence in UTF-8", src, cls, msg)
+		}
+	}
+}
