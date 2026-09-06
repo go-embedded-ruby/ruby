@@ -201,7 +201,8 @@ func (vm *VM) registerIO() {
 	defStringIOExtra(vm, cStringIO)
 
 	stdout := &IOObj{cls: cIO, w: vm.out, label: "STDOUT"}
-	stderr := &IOObj{cls: cIO, w: vm.errOut, label: "STDERR"}
+	// STDERR is synchronous by default (MRI: STDERR.sync == true), unlike STDOUT.
+	stderr := &IOObj{cls: cIO, w: vm.errOut, label: "STDERR", sync: true}
 	stdin := &IOObj{cls: cIO, isStr: true, label: "STDIN"} // empty input by default
 	vm.consts["STDOUT"], vm.consts["STDERR"], vm.consts["STDIN"] = stdout, stderr, stdin
 	vm.globals["$stdout"], vm.globals["$stderr"], vm.globals["$stdin"] = stdout, stderr, stdin
@@ -623,15 +624,27 @@ func defIOWrite(cls *RClass) {
 		return args[0]
 	})
 	cls.define("flush", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		ioFlush(self.(*IOObj))
+		o := self.(*IOObj)
+		ioClosedRealIO(o) // MRI: IO#flush raises on a closed stream; StringIO#flush does not
+		ioFlush(o)
 		return self
 	})
-	cls.define("fsync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.IntValue(0) })
+	cls.define("fsync", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		ioClosedRealIO(self.(*IOObj)) // as flush: real IO raises on close, StringIO does not
+		return object.IntValue(0)
+	})
+	// These sync/sync= entries serve a real IO; StringIO overrides both in
+	// defStringIOExtra (its #sync is always true), so the closed-stream guard here
+	// only ever fires for a real IO/File, which MRI makes raise IOError.
 	cls.define("sync", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.Bool(self.(*IOObj).sync)
+		o := self.(*IOObj)
+		ioClosedRealIO(o)
+		return object.Bool(o.sync)
 	})
 	cls.define("sync=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		self.(*IOObj).sync = args[0].Truthy()
+		o := self.(*IOObj)
+		ioClosedRealIO(o)
+		o.sync = args[0].Truthy()
 		return args[0]
 	})
 	cls.define("close", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -646,7 +659,10 @@ func defIOWrite(cls *RClass) {
 	cls.define("closed?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*IOObj).closed)
 	})
-	cls.define("tty?", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return object.Bool(false) })
+	cls.define("tty?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		ioClosedRealIO(self.(*IOObj)) // real IO raises on a closed stream; StringIO does not
+		return object.Bool(false)
+	})
 	// #isatty is a true alias of #tty?, as in MRI.
 	cls.methods["isatty"] = cls.methods["tty?"]
 	// IO#binmode marks the stream binary (#binmode? true) and, as MRI's
@@ -738,6 +754,7 @@ func defStringIORead(cls *RClass) {
 	cls.methods["size"] = cls.methods["length"]
 	cls.define("eof?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		ioCheckReadable(o) // MRI: eof? raises on a closed or non-readable stream
 		o.pipeRefresh()
 		return object.Bool(o.pos >= len(o.buf))
 	})
@@ -1615,6 +1632,15 @@ func ioCheckReadable(o *IOObj) {
 	}
 	if o.rdClosed {
 		raise("IOError", "not opened for reading")
+	}
+}
+
+// ioClosedRealIO raises IOError "closed stream" when a real IO/File is closed. It
+// is a no-op for a StringIO, whose #flush/#fsync/#tty?/#sync tolerate a closed
+// stream where a real IO raises (MRI).
+func ioClosedRealIO(o *IOObj) {
+	if o.closed && !ioIsStringIO(o) {
+		raise("IOError", "closed stream")
 	}
 }
 
