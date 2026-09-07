@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"math/big"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -49,19 +50,22 @@ func defIOReadExtra(cls *RClass) {
 		o.pos += sz
 		return object.NewString(string(r))
 	})
-	cls.define("ungetbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("ungetbyte", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
-		switch a := args[0].(type) {
-		case object.Integer:
-			ioUnget(o, []byte{byte(a)})
-		case *object.String:
-			ioUnget(o, a.Bytes())
-		default:
-			if args[0] != object.NilV { // a nil argument is a no-op, as in MRI
-				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
-			}
+		if object.IsNil(args[0]) { // a nil argument is a no-op, as in MRI
+			return object.NilV
 		}
+		if bi, ok := object.BigOf(args[0]); ok {
+			// rb_io_ungetbyte: an Integer/Bignum is reduced modulo 256 to a single
+			// byte (rb_int_modulo(b, 256) & 0xFF), so it never raises RangeError.
+			m := new(big.Int).Mod(bi, big.NewInt(256))
+			ioUnget(o, []byte{byte(m.Int64())})
+			return object.NilV
+		}
+		// Any other value is coerced with #to_str (StringValue), raising
+		// "no implicit conversion of <x> into String" when it cannot be.
+		ioUnget(o, vm.strToStr(args[0]))
 		return object.NilV
 	})
 	cls.define("ungetc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {

@@ -221,7 +221,7 @@ func (vm *VM) registerIO() {
 		return object.IntValue(int64(vm.ioFd(o)))
 	}
 	cIO.define("fileno", fileno)
-	cIO.define("to_i", fileno)
+	cIO.methods["to_i"] = cIO.methods["fileno"] // #to_i is a true alias of #fileno
 
 	// IO#to_io returns the IO itself (rb_io_to_io), for open or closed streams.
 	cIO.define("to_io", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -338,10 +338,13 @@ func (vm *VM) registerIO() {
 	defIOReadExtra(cStringIO)
 	defStringIOExtra(vm, cStringIO)
 
-	stdout := &IOObj{cls: cIO, w: vm.out, label: "STDOUT"}
+	// The standard streams carry their real access half: $stdout/$stderr are
+	// write-only (a read raises "not opened for reading") and $stdin read-only (a
+	// write raises "not opened for writing"), as MRI's fd modes dictate.
+	stdout := &IOObj{cls: cIO, w: vm.out, label: "STDOUT", rdClosed: true}
 	// STDERR is synchronous by default (MRI: STDERR.sync == true), unlike STDOUT.
-	stderr := &IOObj{cls: cIO, w: vm.errOut, label: "STDERR", sync: true}
-	stdin := &IOObj{cls: cIO, isStr: true, label: "STDIN"} // empty input by default
+	stderr := &IOObj{cls: cIO, w: vm.errOut, label: "STDERR", sync: true, rdClosed: true}
+	stdin := &IOObj{cls: cIO, isStr: true, label: "STDIN", wrClosed: true} // empty input by default
 	vm.consts["STDOUT"], vm.consts["STDERR"], vm.consts["STDIN"] = stdout, stderr, stdin
 	vm.globals["$stdout"], vm.globals["$stderr"], vm.globals["$stdin"] = stdout, stderr, stdin
 
@@ -853,23 +856,44 @@ func defIOWrite(cls *RClass) {
 	// "external:internal" string; a nil argument clears that side. Returns self.
 	cls.define("set_encoding", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		// A trailing Hash carries econv options (invalid:/replace:/…), not an
+		// encoding, so it is separated before the 1..2 arity is checked
+		// (rb_scan_args "11:").
+		pos, _ := splitIOOpts(args)
+		if len(pos) < 1 || len(pos) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
+		}
 		o.extEnc, o.intEnc = "", ""
-		if len(args) > 0 && !object.IsNil(args[0]) {
-			if s, ok := args[0].(*object.String); ok {
-				if i := strings.IndexByte(s.Str(), ':'); i >= 0 && len(args) == 1 {
+		if !object.IsNil(pos[0]) {
+			// A single String — or a non-Encoding coerced via #to_str
+			// (rb_check_string_type) — of the form "ext:int" names both encodings;
+			// otherwise the first argument is one external encoding.
+			s, isStr := pos[0].(*object.String)
+			if !isStr {
+				if _, isEnc := pos[0].(*encodingObj); !isEnc && vm.respondsToDynamic(pos[0], "to_str") {
+					s, isStr = vm.send(pos[0], "to_str", nil, nil).(*object.String)
+				}
+			}
+			if isStr {
+				if i := strings.IndexByte(s.Str(), ':'); i >= 0 && len(pos) == 1 {
 					o.extEnc = vm.lookupEncodingName(s.Str()[:i]).name
 					o.intEnc = vm.lookupEncodingName(s.Str()[i+1:]).name
 				} else {
-					o.extEnc = vm.encodingArg(args[0]).name
+					o.extEnc = vm.lookupEncodingName(s.Str()).name
 				}
 			} else {
-				o.extEnc = vm.encodingArg(args[0]).name
+				o.extEnc = vm.encodingArg(pos[0]).name
 			}
 		}
-		if len(args) > 1 && !object.IsNil(args[1]) {
-			o.intEnc = vm.encodingArg(args[1]).name
+		if len(pos) > 1 && !object.IsNil(pos[1]) {
+			o.intEnc = vm.encodingArg(pos[1]).name
 		}
-		return o
+		// io_encoding_set: an internal encoding equal to the external one means no
+		// transcoding, so the internal encoding is dropped (enc2 = NULL).
+		if o.intEnc == o.extEnc {
+			o.intEnc = ""
+		}
+		return self
 	})
 }
 
@@ -1087,11 +1111,9 @@ func defStringIORead(cls *RClass) {
 	// does. $. always becomes the reading IO's line number (a StringIO updates it
 	// too). $_ (the "last read line") is set only by the single-line readers —
 	// gets/readline (lastLine true) — not by the bulk readlines/each_line, which
-	// leave $_ alone, matching MRI.
+	// leave $_ alone, matching MRI. Every caller guards end-of-stream (a nil line)
+	// itself, so v is always a real line here.
 	setLineGlobals := func(vm *VM, o *IOObj, v object.Value, lastLine bool) {
-		if v == object.NilV {
-			return
-		}
 		vm.globals["$."] = object.IntValue(int64(o.lineno))
 		if lastLine {
 			vm.globals["$_"] = v
@@ -1232,12 +1254,15 @@ func ioIsStringIO(o *IOObj) bool {
 // in stringIOSetup), #string=, and the StringIO-specific overrides of
 // #sync/#binmode/#close_read/#close_write/#fcntl whose behaviour differs from a
 // real IO's.
-// includeStringIOEnumerable mixes Enumerable into StringIO (whose #each yields
-// lines), as in MRI. It runs after the prelude, where Enumerable is defined.
+// includeStringIOEnumerable mixes Enumerable into IO and StringIO (whose #each
+// yields lines), as in MRI. It runs after the prelude, where Enumerable is
+// defined.
 func (vm *VM) includeStringIOEnumerable() {
-	if c, ok := vm.consts["StringIO"].(*RClass); ok {
-		if en, ok := vm.consts["Enumerable"].(*RClass); ok {
-			c.includes = append(c.includes, en)
+	if en, ok := vm.consts["Enumerable"].(*RClass); ok {
+		for _, name := range []string{"IO", "StringIO"} {
+			if c, ok := vm.consts[name].(*RClass); ok {
+				c.includes = append(c.includes, en)
+			}
 		}
 	}
 }
