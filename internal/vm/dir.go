@@ -1,9 +1,11 @@
 package vm
 
 import (
+	"errors"
 	"os"
 	"os/user"
 	"strings"
+	"syscall"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -19,10 +21,17 @@ func (vm *VM) registerDir() {
 	// caught the original object.
 	cDir := newClass("Dir", vm.cObject)
 	vm.consts["Dir"] = cDir
+	// Dir includes Enumerable (its #each yields the entries) so Enumerable's
+	// map/select/to_a/… work on an open Dir — MRI asserts Dir.include?(Enumerable).
+	// The Enumerable module is defined by the prelude, which runs AFTER this
+	// bootstrap registration, so the mix-in is deferred to includeDirEnumerable
+	// (called post-prelude); doing it here would silently no-op.
 	def := func(name string, fn NativeFn) { cDir.smethods[name] = &Method{name: name, owner: cDir, native: fn} }
 
 	def("pwd", dirPwd)
-	def("getwd", dirPwd)
+	// getwd is a genuine alias of pwd (one shared Method record), so
+	// Dir.method(:getwd) == Dir.method(:pwd), as MRI's spec checks.
+	cDir.smethods["getwd"] = cDir.smethods["pwd"]
 	// Dir.home(user=nil): with no argument (or nil) the current user's home,
 	// reading $HOME first and falling back to the passwd database; with a user
 	// name, that user's home from the passwd database, raising ArgumentError when
@@ -38,17 +47,17 @@ func (vm *VM) registerDir() {
 		}
 		return object.NewString(toSlash(dirHomeStr()))
 	})
-	def("entries", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		names := dirNames(strArg(args[0]))
+	def("entries", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		names := dirNames(vm.filePathArg(args[0]))
 		elems := []object.Value{object.NewString("."), object.NewString("..")}
 		for _, n := range names {
 			elems = append(elems, object.NewString(n))
 		}
 		return object.NewArrayFromSlice(elems)
 	})
-	def("children", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("children", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		var elems []object.Value
-		for _, n := range dirNames(strArg(args[0])) {
+		for _, n := range dirNames(vm.filePathArg(args[0])) {
 			elems = append(elems, object.NewString(n))
 		}
 		return object.NewArrayFromSlice(elems)
@@ -78,8 +87,8 @@ func (vm *VM) registerDir() {
 	})
 	def("exist?", dirExist)
 	def("exists?", dirExist)
-	def("empty?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := strArg(args[0])
+	def("empty?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := vm.filePathArg(args[0])
 		fi, err := os.Stat(p)
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ dir_s_empty_p - %s", p)
@@ -106,20 +115,29 @@ func (vm *VM) registerDir() {
 		}
 		return object.IntValue(0)
 	})
-	rm := func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := strArg(args[0])
+	rm := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		p := vm.filePathArg(args[0])
+		// MRI's dir_s_rmdir enforces rmdir(2) semantics rather than os.Remove's
+		// unlink-or-rmdir: a non-directory must be Errno::ENOTDIR, never silently
+		// unlinked. lstat detects that case; every other failure is left to
+		// os.Remove and classified by raiseRmdirErr (EACCES / ENOTEMPTY / ENOENT).
+		if fi, err := os.Lstat(p); err == nil && !fi.IsDir() {
+			raise("Errno::ENOTDIR", "Not a directory @ dir_s_rmdir - %s", p)
+		}
 		if err := os.Remove(p); err != nil {
-			raise("Errno::ENOENT", "No such file or directory @ dir_s_rmdir - %s", p)
+			raiseRmdirErr(err, p)
 		}
 		return object.IntValue(0)
 	}
-	def("rmdir", rm)
 	def("delete", rm)
-	def("unlink", rm)
+	// rmdir and unlink are genuine aliases of delete (shared Method records), so
+	// Dir.method(:rmdir) == Dir.method(:delete), as MRI's specs check.
+	cDir.smethods["rmdir"] = cDir.smethods["delete"]
+	cDir.smethods["unlink"] = cDir.smethods["delete"]
 	def("chdir", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		var target string
 		if len(args) > 0 {
-			target = strArg(args[0])
+			target = vm.filePathArg(args[0])
 		} else {
 			target = dirHomeStr()
 		}
@@ -133,16 +151,27 @@ func (vm *VM) registerDir() {
 		}
 		return object.IntValue(0)
 	})
+	// Dir.each_child(path) yields each child name (no "." / ".."); Dir.foreach(path)
+	// yields every entry including "." and "..". Both return nil after a block and,
+	// with no block, an Enumerator over the snapshot names (MRI dir.c) — whose #size
+	// is nil, and whose iteration re-yields the names. The block-less form must not
+	// dereference a nil block (the previous version crashed there).
 	def("each_child", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		for _, n := range dirNames(strArg(args[0])) {
+		names := dirNames(vm.filePathArg(args[0]))
+		if blk == nil {
+			return dirEnumerator(names)
+		}
+		for _, n := range names {
 			vm.callBlock(blk, []object.Value{object.NewString(n)})
 		}
 		return object.NilV
 	})
 	def("foreach", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		vm.callBlock(blk, []object.Value{object.NewString(".")})
-		vm.callBlock(blk, []object.Value{object.NewString("..")})
-		for _, n := range dirNames(strArg(args[0])) {
+		names := append([]string{".", ".."}, dirNames(vm.filePathArg(args[0]))...)
+		if blk == nil {
+			return dirEnumerator(names)
+		}
+		for _, n := range names {
 			vm.callBlock(blk, []object.Value{object.NewString(n)})
 		}
 		return object.NilV
@@ -255,7 +284,9 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 		dir := self(v)
 		checkOpen(dir)
 		if blk == nil {
-			return enumFor(dir, "each")
+			// A block-less #each returns an Enumerator whose #size is nil (MRI does
+			// not pre-count a directory), backed by the current entry snapshot.
+			return dirEnumerator(dir.entries)
 		}
 		for _, n := range dir.entries {
 			vm.callBlock(blk, []object.Value{object.NewString(n)})
@@ -267,7 +298,7 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 		dir := self(v)
 		checkOpen(dir)
 		if blk == nil {
-			return enumFor(dir, "each_child")
+			return dirEnumerator(dirChildNames(dir.entries))
 		}
 		for _, n := range dir.entries {
 			if n == "." || n == ".." {
@@ -276,6 +307,36 @@ func (vm *VM) registerDirInstance(cDir *RClass) {
 			vm.callBlock(blk, []object.Value{object.NewString(n)})
 		}
 		return dir
+	})
+	// Dir#children returns the entry names of the open handle minus "." and ".."
+	// (Ruby 2.5+ dir.c dir_collect_children). It reads the snapshot, so repeated
+	// calls return the same result regardless of the read cursor.
+	d("children", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		names := dirChildNames(dir.entries)
+		elems := make([]object.Value, len(names))
+		for i, n := range names {
+			elems[i] = object.NewString(n)
+		}
+		return object.NewArrayFromSlice(elems)
+	})
+	// Dir#chdir changes the process working directory to the handle's path,
+	// returning 0 (or the block's value for the block form, which restores the
+	// previous directory afterwards and — unlike Dir.chdir — yields nil rather
+	// than the path). Ruby 3.5+ (dir.c dir_chdir0 / fdopendir path).
+	d("chdir", func(vm *VM, v object.Value, _ []object.Value, blk *Proc) object.Value {
+		dir := self(v)
+		checkOpen(dir)
+		old, _ := os.Getwd()
+		if err := os.Chdir(dir.path); err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ dir_chdir - %s", dir.path)
+		}
+		if blk != nil {
+			defer os.Chdir(old)
+			return vm.callBlock(blk, []object.Value{object.NilV})
+		}
+		return object.IntValue(0)
 	})
 }
 
@@ -329,9 +390,61 @@ func dirPwd(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 	return object.NewString(toSlash(wd))
 }
 
-func dirExist(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-	fi, err := os.Stat(strArg(args[0]))
+// includeDirEnumerable mixes the prelude-defined Enumerable module into Dir. It
+// runs post-prelude (registerDir itself runs before the prelude, so the module
+// does not exist yet there), driven from registerFileStat which also runs after
+// the prelude. Both constants always exist by then, matching the unguarded
+// mix-ins elsewhere (see registerActiveSupport / includeMySQLEnumerable).
+func (vm *VM) includeDirEnumerable() {
+	cDir := vm.consts["Dir"].(*RClass)
+	en := vm.consts["Enumerable"].(*RClass)
+	cDir.includes = append(cDir.includes, en)
+}
+
+func dirExist(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	fi, err := os.Stat(vm.filePathArg(args[0]))
 	return object.Bool(err == nil && fi.IsDir())
+}
+
+// dirEnumerator wraps a snapshot of directory entry names as the block-less
+// Enumerator MRI's Dir.foreach / Dir.each_child return: iterating it re-yields
+// the names, and its #size is nil (MRI does not pre-count a directory
+// enumerator). It is backed by an Array's #each so materialisation is a plain
+// array walk rather than a re-entrant directory read.
+// dirChildNames returns the entry names with "." and ".." removed — the
+// child-name view shared by Dir#children and the block-less Dir#each_child
+// enumerator.
+func dirChildNames(entries []string) []string {
+	var out []string
+	for _, n := range entries {
+		if n != "." && n != ".." {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func dirEnumerator(names []string) *Enumerator {
+	elems := make([]object.Value, len(names))
+	for i, n := range names {
+		elems[i] = object.NewString(n)
+	}
+	return enumForSized(object.NewArrayFromSlice(elems), "each",
+		func(*VM) object.Value { return object.NilV })
+}
+
+// raiseRmdirErr maps an os.Remove failure on a directory to the MRI errno
+// Dir.delete/rmdir raises: a permission failure is Errno::EACCES, a non-empty
+// directory Errno::ENOTEMPTY, and anything else Errno::ENOENT.
+func raiseRmdirErr(err error, path string) {
+	switch {
+	case os.IsPermission(err):
+		raise("Errno::EACCES", "Permission denied @ dir_s_rmdir - %s", path)
+	case errors.Is(err, syscall.ENOTEMPTY):
+		raise("Errno::ENOTEMPTY", "Directory not empty @ dir_s_rmdir - %s", path)
+	default:
+		raise("Errno::ENOENT", "No such file or directory @ dir_s_rmdir - %s", path)
+	}
 }
 
 // dirNames returns the directory's entry names (sorted, no "." / ".."), raising
