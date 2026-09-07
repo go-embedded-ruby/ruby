@@ -942,7 +942,7 @@ func defStringIORead(cls *RClass) {
 		if o.closed && !ioIsStringIO(o) { // real IO/File raises; StringIO tolerates it
 			raise("IOError", "closed stream")
 		}
-		n := int(vm.toIntCoerce(args[0]))
+		n := vm.ioOfftArg(args[0])
 		if n < 0 {
 			raise("Errno::EINVAL", "Invalid argument")
 		}
@@ -954,7 +954,7 @@ func defStringIORead(cls *RClass) {
 		if o.closed {
 			raise("IOError", "closed stream")
 		}
-		amount := int(vm.toIntCoerce(args[0]))
+		amount := vm.ioOfftArg(args[0])
 		whence := 0
 		if len(args) > 1 {
 			// IO#seek accepts the :SET/:CUR/:END whence symbols; StringIO#seek
@@ -1816,6 +1816,31 @@ func ioClosedRealIO(o *IOObj) {
 	if o.closed && !ioIsStringIO(o) {
 		raise("IOError", "closed stream")
 	}
+}
+
+// ioOfftArg coerces a stream position/offset argument the way MRI's NUM2OFFT
+// does: an Integer or #to_int value narrowed to the off_t (a long long) the
+// position is stored in, raising RangeError for a Bignum too large to fit.
+func (vm *VM) ioOfftArg(v object.Value) int {
+	if _, ok := v.(*object.Bignum); ok {
+		raise("RangeError", "bignum too big to convert into 'long long'")
+	}
+	return int(vm.toIntCoerce(v))
+}
+
+// ioCIntArg coerces an argument the way MRI's NUM2INT does for a value stored in
+// a C int (e.g. #lineno=): an Integer or #to_int value that fits a 32-bit int,
+// raising RangeError for a Bignum or for an in-range-Integer that still overflows
+// the int.
+func (vm *VM) ioCIntArg(v object.Value) int {
+	if _, ok := v.(*object.Bignum); ok {
+		raise("RangeError", "bignum too big to convert into 'long'")
+	}
+	n := vm.toIntCoerce(v)
+	if n < -2147483648 || n > 2147483647 { // int32 bounds
+		raise("RangeError", "integer %d too big to convert to 'int'", n)
+	}
+	return int(n)
 }
 
 // toInt coerces a small Integer position/length argument to int64 (raising for

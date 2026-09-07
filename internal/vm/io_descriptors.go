@@ -137,11 +137,20 @@ func defIOReadExtra(cls *RClass) {
 		return object.IntValue(int64(o.writeStr(args[0].ToS())))
 	})
 	cls.define("lineno", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*IOObj).lineno))
+		o := self.(*IOObj)
+		if !ioIsStringIO(o) { // rb_io_check_char_readable: a closed/write-only real IO raises
+			ioCheckReadable(o)
+		}
+		return object.IntValue(int64(o.lineno))
 	})
 	cls.define("lineno=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		// rb_io_set_lineno: NUM2INT coerces via #to_int (a Float truncates).
-		self.(*IOObj).lineno = int(vm.toIntCoerce(args[0]))
+		// rb_io_set_lineno: the stream must be char-readable (a closed/write-only
+		// real IO raises), then NUM2INT coerces via #to_int (a Float truncates).
+		o := self.(*IOObj)
+		if !ioIsStringIO(o) {
+			ioCheckReadable(o)
+		}
+		o.lineno = vm.ioCIntArg(args[0])
 		return args[0]
 	})
 	cls.define("close_read", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {

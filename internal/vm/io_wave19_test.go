@@ -344,3 +344,39 @@ func TestIOWave19StreamModes(t *testing.T) {
 		}
 	}
 }
+
+// TestIOWave19LinenoAndOfft covers IO#lineno / #lineno= char-readability checks
+// (a closed/write-only real IO raises, a StringIO does not) and the NUM2OFFT /
+// NUM2INT range errors of #pos= / #seek / #lineno= (a Bignum, and an Integer that
+// overflows a C int). Asserted against MRI Ruby 4.0.5.
+func TestIOWave19LinenoAndOfft(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.ToSlash(filepath.Join(dir, "ln.txt"))
+	rw := fmt.Sprintf("File.write(%q, \"a\\nb\\n\"); f = File.open(%q, \"r+\"); ", p, p)
+	cases := []struct{ src, want string }{
+		// a StringIO tolerates #lineno / #lineno= on a closed stream (no raise).
+		{`require "stringio"; s = StringIO.new("a"); s.close; p s.lineno`, "0\n"},
+		{`require "stringio"; s = StringIO.new("a"); s.close; s.lineno = 3; p s.lineno`, "3\n"},
+		{rw + `f.lineno = 2**30; p f.lineno`, "1073741824\n"}, // in-range value is accepted
+		{rw + `f.pos = 5; p f.pos`, "5\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	errCases := []struct{ src, class, msg string }{
+		{fmt.Sprintf("File.open(%q, \"w\") { |f| f.lineno }", p), "IOError", "not opened for reading"},
+		{fmt.Sprintf("File.open(%q, \"w\") { |f| f.lineno = 1 }", p), "IOError", "not opened for reading"},
+		{rw + `f.close; f.lineno`, "IOError", "closed stream"},
+		{rw + `f.pos = 2**128`, "RangeError", "bignum too big to convert into 'long long'"},
+		{rw + `f.seek(2**128)`, "RangeError", "bignum too big to convert into 'long long'"},
+		{rw + `f.lineno = 2**128`, "RangeError", "bignum too big to convert into 'long'"},
+		{rw + `f.lineno = 2**32`, "RangeError", "integer 4294967296 too big to convert to 'int'"},
+	}
+	for _, c := range errCases {
+		if cls, msg := evalErr(t, c.src); cls != c.class || msg != c.msg {
+			t.Errorf("src=%q: got %s: %q, want %s: %q", c.src, cls, msg, c.class, c.msg)
+		}
+	}
+}
