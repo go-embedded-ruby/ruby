@@ -365,8 +365,8 @@ func (vm *VM) bootstrap() {
 		return vm.callBlock(blk, []object.Value{tag})
 	})
 	vm.cObject.define("throw", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		if len(args) == 0 {
-			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		if len(args) == 0 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 		}
 		var val object.Value = object.NilV
 		if len(args) > 1 {
@@ -519,7 +519,9 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewString(vm.formatString(vm.coerceFormatString(args[0]), args[1:]))
 	}
-	vm.cObject.define("format", formatFn)
+	// Kernel#format is a genuine alias of Kernel#sprintf in MRI: the two names share
+	// one method definition (so Kernel.instance_method(:format) == …(:sprintf)). The
+	// shared record is installed once #sprintf is defined below.
 	// Kernel#test(cmd, file1, file2 = nil): a single-character file test, delegating
 	// to the matching File query. cmd is the ?x character literal (an Integer) or a
 	// one-character String.
@@ -554,6 +556,9 @@ func (vm *VM) bootstrap() {
 	// Kernel#test is a private method, so it does not show up in respond_to?.
 	vm.setInstanceVisibility(vm.cObject, "test", visPrivate)
 	vm.cObject.define("sprintf", formatFn)
+	// #format shares #sprintf's exact method record (see the note at its former
+	// definition site), matching MRI where they are one method.
+	aliasBuiltin(vm.cObject, "format", "sprintf")
 	vm.cObject.define("printf", nativePrintf)
 	vm.cObject.define("proc", func(_ *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
@@ -913,7 +918,17 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(self.ToS())
 	})
-	vm.cObject.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cObject.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// A plain object inspects as MRI's `#<Class:0x<addr> @iv=val, …>`: the class
+		// name, the object's address in hex, then its instance variables in
+		// first-assignment order (each value #inspect'd), or just `#<Class:0x<addr>>`
+		// when it has none. Value-type objects (Integer, Symbol, …) and Structs carry
+		// their own representation through Inspect()/their own #inspect and are left
+		// untouched; a built-in value subclass (builtin != nil) likewise keeps its
+		// wrapped value's inspect.
+		if o, ok := self.(*RObject); ok && o.builtin == nil && o.structVals == nil {
+			return object.NewString(vm.defaultObjectInspect(o))
+		}
 		return object.NewString(self.Inspect())
 	})
 	vm.cObject.define("nil?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -1099,6 +1114,24 @@ func (vm *VM) bootstrap() {
 			}
 			return object.NilV
 		}
+		// A String value (or String subclass) is parsed from its own bytes; any
+		// illegal underscore Go's ParseFloat would nonetheless accept is rejected,
+		// while an out-of-range but well-formed literal yields ±Infinity/0.0 exactly
+		// as ParseFloat reports it alongside ErrRange.
+		parseFloatLiteral := func(str string, arg object.Value) object.Value {
+			norm, ok := normalizeFloatLiteral(str)
+			if !ok {
+				return fail("ArgumentError", "invalid value for Float(): %s", arg.Inspect())
+			}
+			f, err := strconv.ParseFloat(norm, 64)
+			if err != nil {
+				if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
+					return object.Float(f)
+				}
+				return fail("ArgumentError", "invalid value for Float(): %s", arg.Inspect())
+			}
+			return object.Float(f)
+		}
 		switch v := args[0].(type) {
 		case object.Nil:
 			// nil defines #to_f (→ 0.0) but Float(nil) still raises, so it is
@@ -1112,23 +1145,15 @@ func (vm *VM) bootstrap() {
 			f, _ := new(big.Float).SetInt(v.I).Float64()
 			return object.Float(f)
 		case *object.String:
-			norm, ok := normalizeFloatLiteral(v.Str())
-			if !ok {
-				// An illegal underscore that Go's ParseFloat would nonetheless accept
-				// (e.g. one adjacent to the 0x prefix) — MRI rejects it.
-				return fail("ArgumentError", "invalid value for Float(): %s", v.Inspect())
+			return parseFloatLiteral(v.Str(), v)
+		}
+		// A String subclass instance is parsed from its wrapped bytes, NOT via #to_f
+		// — MRI's rb_convert_to_double special-cases any String (even one whose #to_f
+		// is overridden), so Float(StringSub.new("10")) is 10.0, not the override.
+		if o, ok := args[0].(*RObject); ok {
+			if s, ok := o.builtin.(*object.String); ok {
+				return parseFloatLiteral(s.Str(), args[0])
 			}
-			f, err := strconv.ParseFloat(norm, 64)
-			if err != nil {
-				// An out-of-range literal is not malformed: MRI yields ±Infinity
-				// (overflow) or 0.0 (underflow), which is exactly what ParseFloat
-				// returns alongside ErrRange.
-				if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
-					return object.Float(f)
-				}
-				return fail("ArgumentError", "invalid value for Float(): %s", v.Inspect())
-			}
-			return object.Float(f)
 		}
 		// Any other object converts through MRI's protocol via #to_f.
 		other := args[0]
@@ -1233,7 +1258,10 @@ func (vm *VM) bootstrap() {
 		return vm.send(self, name, args[1:], blk)
 	})
 	vm.cObject.define("respond_to?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		name := args[0].ToS()
+		// The name is coerced through MRI's rb_to_id rules: a Symbol/String (or a
+		// #to_str-able object) is accepted, anything else raises the same TypeError
+		// send/public_send raise ("X is not a symbol nor a string").
+		name := vm.methodNameArg(args[0])
 		includePrivate := object.Value(object.False)
 		if len(args) > 1 {
 			includePrivate = args[1]
@@ -1286,19 +1314,29 @@ func (vm *VM) bootstrap() {
 	vm.cBasicObject.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(vm.rubyEqual(self, args[0]))
 	})
-	// Default <=>: 0 when the two are the same object, nil otherwise — the MRI
-	// Object#<=>. It compares by identity (like #equal?) rather than sending #==,
-	// because a class that includes Comparable defines #== AS `(self <=> other)==0`;
-	// sending #== here would recurse into that #== and back into <=> forever.
+	// Default <=>: the MRI Object#<=> (rb_obj_cmp) — 0 when rb_equal(self, other)
+	// holds, nil otherwise. rb_equal first tests object identity (so `a <=> a`
+	// yields 0 without any dispatch, and a class that includes Comparable without
+	// defining #<=> does not recurse for the reflexive case), then sends #== and
+	// truth-tests it: an object whose #== answers a truthy value compares 0, one
+	// whose #== answers nil/false compares nil. #eql? is never consulted.
 	vm.cObject.define("<=>", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		if self == args[0] {
 			return object.IntValue(0)
 		}
+		if vm.send(self, "==", []object.Value{args[0]}, nil).Truthy() {
+			return object.IntValue(0)
+		}
 		return object.NilV
 	})
-	// Case equality. Object#=== defaults to ==; Module/Class#=== is is_a?;
-	// Range#=== is membership. These drive `case`/`when`.
+	// Case equality. Object#=== is rb_equal too: same object identity wins
+	// immediately (even when #== and #equal? are both overridden to be false),
+	// otherwise it defers to #==. Module/Class#=== is is_a?; Range#=== is
+	// membership. These drive `case`/`when`.
 	vm.cObject.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if self == args[0] {
+			return object.True
+		}
 		return object.Bool(vm.send(self, "==", []object.Value{args[0]}, nil).Truthy())
 	})
 	vm.cModule.define("===", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -6030,17 +6068,58 @@ func (vm *VM) registerKernelModuleFunctions() {
 		"raise", "rand", "require", "require_relative", "sleep", "sprintf",
 		"srand", "system", "throw", "trap", "warn",
 	}
+	// Two names that share ONE underlying Object record (a genuine built-in alias
+	// such as format/sprintf) must keep sharing after the mirror, or their mirrored
+	// UnboundMethods/Methods would compare unequal. Reuse the copies made for the
+	// first name each source record is seen under.
+	mirrored := map[*Method][2]*Method{}
 	for _, name := range names {
 		if m := vm.cObject.methods[name]; m != nil {
 			m.vis = visPrivate
+			if cp, ok := mirrored[m]; ok {
+				vm.cKernel.methods[name] = cp[0]
+				vm.cKernel.smethods[name] = cp[1]
+				continue
+			}
 			priv := *m
 			priv.owner, priv.vis = vm.cKernel, visPrivate
 			vm.cKernel.methods[name] = &priv
 			pub := *m
 			pub.owner, pub.vis = vm.cKernel, visPublic
 			vm.cKernel.smethods[name] = &pub
+			mirrored[m] = [2]*Method{&priv, &pub}
 		}
 	}
+}
+
+// defaultObjectInspect renders MRI's Object#inspect for a plain object: the class
+// name, the object's address in hex (zero-padded to 16 digits, as MRI prints a
+// pointer), and — when it has any — its instance variables in first-assignment
+// order, each value #inspect'd. Only reached for a plain RObject; value types and
+// Structs keep their own #inspect.
+func (vm *VM) defaultObjectInspect(o *RObject) string {
+	var b strings.Builder
+	b.WriteString("#<")
+	b.WriteString(o.class.name)
+	b.WriteString(":0x")
+	hex := strconv.FormatUint(uint64(vm.refID(o)), 16)
+	for i := len(hex); i < 16; i++ {
+		b.WriteByte('0')
+	}
+	b.WriteString(hex)
+	for i, nv := range ivarNamesInOrder(o) {
+		if i == 0 {
+			b.WriteByte(' ')
+		} else {
+			b.WriteString(", ")
+		}
+		name := nv.ToS()
+		b.WriteString(name)
+		b.WriteByte('=')
+		b.WriteString(vm.inspectStr(getIvar(o, name)))
+	}
+	b.WriteByte('>')
+	return b.String()
 }
 
 // nativeNew allocates an instance of the receiver class and runs initialize,
@@ -8764,7 +8843,14 @@ func (vm *VM) reflectMethodNames(self object.Value, args []object.Value, want vi
 	all := len(args) == 0 || args[0].Truthy()
 	var candidates []object.Value
 	if _, isClass := self.(*RClass); isClass {
-		candidates = vm.singletonMethodNames(self, all)
+		// #public_methods / #private_methods / #protected_methods walk the receiver's
+		// ENTIRE singleton-class chain regardless of the all flag: MRI's
+		// class_instance_method_list runs its `obj` branch (which follows the
+		// singleton supers unconditionally) before consulting all, so an inherited
+		// class method such as a superclass's `def self.x` is listed even by
+		// X.public_methods(false) — unlike X.singleton_methods(false)/X.methods(false),
+		// which report only the class's own class methods.
+		candidates = vm.singletonMethodNames(self, true)
 	} else {
 		c := vm.classOf(self)
 		if o, ok := self.(*RObject); ok && o.singleton != nil {

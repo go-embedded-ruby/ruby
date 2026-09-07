@@ -182,7 +182,8 @@ func (vm *VM) registerKernelIntrospection() {
 	// LIFO order. Returns the block as a Proc, as MRI does.
 	vm.cObject.define("at_exit", func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given")
+			// MRI raises ArgumentError("called without a block"), not a LocalJumpError.
+			raise("ArgumentError", "called without a block")
 		}
 		vm.atExit = append(vm.atExit, blk)
 		return blk
