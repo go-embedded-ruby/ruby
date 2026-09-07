@@ -89,6 +89,12 @@ func TestValueReprAndTruthy(t *testing.T) {
 	if got := eval(t, "class E\nend\np E.new"); !strings.HasPrefix(got, "#<E:0x") || !strings.HasSuffix(got, ">\n") {
 		t.Errorf("p E.new = %q, want #<E:0x...>\\n", got)
 	}
+	// Instance variables render " @a=1, @b=\"x\"" after the address, in definition
+	// order (MRI): exercises defaultObjectInspect's first-ivar and subsequent-ivar
+	// branches. Verified vs MRI 4.0.5.
+	if got := eval(t, "class E\n def initialize\n  @a = 1\n  @b = \"x\"\n end\nend\np E.new"); !strings.HasPrefix(got, "#<E:0x") || !strings.HasSuffix(got, " @a=1, @b=\"x\">\n") {
+		t.Errorf("p E.new (ivars) = %q, want #<E:0x... @a=1, @b=\"x\">\\n", got)
+	}
 }
 
 func TestObjectModelErrors(t *testing.T) {
