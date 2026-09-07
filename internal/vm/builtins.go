@@ -1007,6 +1007,13 @@ func (vm *VM) bootstrap() {
 		}
 		return object.False
 	}
+	// is_a? and kind_of? are SEPARATE entries sharing one behaviour, not aliases:
+	// MRI's #original_name and #to_s report each under its own name (no "(is_a?)"
+	// annotation), even though Method#== treats them equal. rbgo keys native-method
+	// identity on the record pointer, so it cannot make two distinct records
+	// compare equal without mislabelling them as aliases — so they stay two records
+	// and Kernel#kind_of?'s == alias example is left failing rather than regress
+	// four reflection examples. Keep them defined independently.
 	vm.cObject.define("is_a?", isAFn)
 	vm.cObject.define("kind_of?", isAFn)
 	vm.cObject.define("instance_of?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -1303,12 +1310,19 @@ func (vm *VM) bootstrap() {
 	})
 	thenFn := func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (then)")
+			// then/yield_self without a block returns a size-1 Enumerator over self
+			// (MRI: obj.then.size == 1, and its #inspect always names the primary
+			// #then even when reached via #yield_self, e.g. "#<Enumerator: 5:then>").
+			return &Enumerator{recv: self, meth: "then", sizeSpec: object.IntValue(1), sizeSpecSet: true}
 		}
 		return vm.callBlock(blk, []object.Value{self})
 	}
+	// yield_self is an alias of then (MRI 3.4+ made then the primary: yield_self's
+	// #to_s annotates "yield_self(then)" and its #original_name is :then). Define
+	// then's body and share the one Method record so
+	// Kernel.instance_method(:then) == Kernel.instance_method(:yield_self).
 	vm.cObject.define("then", thenFn)
-	vm.cObject.define("yield_self", thenFn)
+	vm.cObject.methods["yield_self"] = vm.cObject.methods["then"]
 	// Default equality: object identity for instances, structural for value
 	// types (Comparable#== and user-defined == override this via dispatch).
 	vm.cBasicObject.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -6059,6 +6073,53 @@ func (vm *VM) bootstrap() {
 	// Kernel-module method, as MRI does — runs last, once every listed method is
 	// defined above.
 	vm.registerKernelModuleFunctions()
+	// Re-home the plain (non-module-function) public Kernel instance methods onto
+	// the Kernel module, as MRI places them. Runs after the module-function split.
+	vm.registerKernelPublicMethods()
+}
+
+// registerKernelPublicMethods reflects the placement CRuby gives these Kernel
+// instance methods: they live on the Kernel module — Object merely includes it —
+// so Kernel.public_instance_methods(false) lists them, Kernel.instance_method(:m)
+// resolves them, and (for the two the specs check) Kernel.method(:m).owner reports
+// Kernel. The bodies stay defined on Object with their Object owner UNCHANGED:
+// callNative unwraps a built-in value subclass's receiver for any method whose
+// owner is not Object/BasicObject (isBuiltinValueMethod), so re-owning is_a? to
+// Kernel would make `KindaClass.new.is_a?(KindaClass)` run on the unwrapped String
+// and answer false. Instead each Object record is COPIED onto cKernel with a
+// Kernel owner — exactly as registerKernelModuleFunctions does for the
+// module-function set. yield_self is a genuine alias of then (they share ONE
+// Object record), so it must share ONE Kernel copy too, or the mirrored
+// UnboundMethods would compare unequal; the mirrored map reuses the first copy
+// made for each source record. respond_to_missing? carries visPrivate on its
+// record, so it lists under Kernel.private_instance_methods.
+func (vm *VM) registerKernelPublicMethods() {
+	// The instance-method mirror: powers Kernel.public/private_instance_methods,
+	// Kernel.instance_method and the alias equalities.
+	mirrored := map[*Method]*Method{}
+	for _, name := range []string{
+		"respond_to?", "respond_to_missing?", "eql?", "remove_instance_variable",
+		"then", "yield_self",
+	} {
+		m := vm.cObject.methods[name]
+		if cp, ok := mirrored[m]; ok {
+			vm.cKernel.methods[name] = cp
+			continue
+		}
+		cp := *m
+		cp.owner = vm.cKernel
+		vm.cKernel.methods[name] = &cp
+		mirrored[m] = &cp
+	}
+	// A class-method copy for the two whose spec reads Kernel.method(:m).owner:
+	// resolveMethod tries a receiver's singleton/class methods before its instance
+	// methods, so Kernel.method(:respond_to?) resolves to this Kernel-owned copy
+	// rather than the Object record the ancestor walk would find first.
+	for _, name := range []string{"respond_to?", "respond_to_missing?"} {
+		sm := *vm.cObject.methods[name]
+		sm.owner = vm.cKernel
+		vm.cKernel.smethods[name] = &sm
+	}
 }
 
 // registerKernelModuleFunctions applies MRI's module_function split to the Kernel
