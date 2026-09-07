@@ -18,10 +18,11 @@ func TestKernelPublicMethodsMirror(t *testing.T) {
 		{`p Kernel.public_instance_methods(false).include?(:eql?)`, "true"},
 		{`p Kernel.public_instance_methods(false).include?(:remove_instance_variable)`, "true"},
 		{`p Kernel.private_instance_methods(false).include?(:respond_to_missing?)`, "true"},
-		// Kernel#then is an alias of Kernel#yield_self, and Kernel#kind_of? of
-		// Kernel#is_a? — the mirror shares one record so the UnboundMethods are ==.
+		// Kernel#yield_self is an alias of Kernel#then — the mirror shares one record
+		// so the UnboundMethods are ==, and yield_self reports then as its original.
 		{`p Kernel.instance_method(:then) == Kernel.instance_method(:yield_self)`, "true"},
-		{`p Kernel.instance_method(:kind_of?) == Kernel.instance_method(:is_a?)`, "true"},
+		{`p Kernel.instance_method(:yield_self).original_name`, ":then"},
+		{`p Kernel.instance_method(:then).original_name`, ":then"},
 		// The two whose owner the specs read resolve to Kernel via the smethods copy.
 		{`p Kernel.method(:respond_to?).owner`, "Kernel"},
 		{`p Kernel.method(:respond_to_missing?).owner`, "Kernel"},

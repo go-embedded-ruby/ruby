@@ -1007,10 +1007,15 @@ func (vm *VM) bootstrap() {
 		}
 		return object.False
 	}
-	// kind_of? is an alias of is_a? (MRI): share the one Method record so
-	// Kernel.instance_method(:kind_of?) == Kernel.instance_method(:is_a?).
+	// is_a? and kind_of? are SEPARATE entries sharing one behaviour, not aliases:
+	// MRI's #original_name and #to_s report each under its own name (no "(is_a?)"
+	// annotation), even though Method#== treats them equal. rbgo keys native-method
+	// identity on the record pointer, so it cannot make two distinct records
+	// compare equal without mislabelling them as aliases — so they stay two records
+	// and Kernel#kind_of?'s == alias example is left failing rather than regress
+	// four reflection examples. Keep them defined independently.
 	vm.cObject.define("is_a?", isAFn)
-	vm.cObject.methods["kind_of?"] = vm.cObject.methods["is_a?"]
+	vm.cObject.define("kind_of?", isAFn)
 	vm.cObject.define("instance_of?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.Bool(vm.classOf(self) == classArg(args[0]))
 	})
@@ -1312,10 +1317,12 @@ func (vm *VM) bootstrap() {
 		}
 		return vm.callBlock(blk, []object.Value{self})
 	}
-	// then is an alias of yield_self (MRI 3.4+): define one body and share the one
-	// Method record so Kernel.instance_method(:then) == Kernel.instance_method(:yield_self).
-	vm.cObject.define("yield_self", thenFn)
-	vm.cObject.methods["then"] = vm.cObject.methods["yield_self"]
+	// yield_self is an alias of then (MRI 3.4+ made then the primary: yield_self's
+	// #to_s annotates "yield_self(then)" and its #original_name is :then). Define
+	// then's body and share the one Method record so
+	// Kernel.instance_method(:then) == Kernel.instance_method(:yield_self).
+	vm.cObject.define("then", thenFn)
+	vm.cObject.methods["yield_self"] = vm.cObject.methods["then"]
 	// Default equality: object identity for instances, structural for value
 	// types (Comparable#== and user-defined == override this via dispatch).
 	vm.cBasicObject.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -6081,18 +6088,18 @@ func (vm *VM) bootstrap() {
 // Kernel would make `KindaClass.new.is_a?(KindaClass)` run on the unwrapped String
 // and answer false. Instead each Object record is COPIED onto cKernel with a
 // Kernel owner — exactly as registerKernelModuleFunctions does for the
-// module-function set. An alias pair shares ONE Object record (set where they are
-// defined), so it must share ONE Kernel copy too, or the mirrored UnboundMethods
-// would compare unequal (then/yield_self, is_a?/kind_of?); the mirrored map reuses
-// the first copy made for each source record. respond_to_missing? carries
-// visPrivate on its record, so it lists under Kernel.private_instance_methods.
+// module-function set. yield_self is a genuine alias of then (they share ONE
+// Object record), so it must share ONE Kernel copy too, or the mirrored
+// UnboundMethods would compare unequal; the mirrored map reuses the first copy
+// made for each source record. respond_to_missing? carries visPrivate on its
+// record, so it lists under Kernel.private_instance_methods.
 func (vm *VM) registerKernelPublicMethods() {
 	// The instance-method mirror: powers Kernel.public/private_instance_methods,
 	// Kernel.instance_method and the alias equalities.
 	mirrored := map[*Method]*Method{}
 	for _, name := range []string{
 		"respond_to?", "respond_to_missing?", "eql?", "remove_instance_variable",
-		"then", "yield_self", "is_a?", "kind_of?",
+		"then", "yield_self",
 	} {
 		m := vm.cObject.methods[name]
 		if cp, ok := mirrored[m]; ok {
