@@ -74,7 +74,6 @@ func TestKernelMethods(t *testing.T) {
 func TestValueReprAndTruthy(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{"class E\nend\nputs E.new", "#<E>\n"},    // RObject.ToS
-		{"class E\nend\np E.new", "#<E>\n"},       // RObject.Inspect
 		{"class E\nend\nputs(!E.new)", "false\n"}, // RObject.Truthy (objects are truthy)
 		{"class K\nend\np K", "K\n"},              // RClass.Inspect
 		{"class K\nend\nputs(!K)", "false\n"},     // RClass.Truthy
@@ -83,6 +82,18 @@ func TestValueReprAndTruthy(t *testing.T) {
 		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
+	}
+	// RObject#inspect now carries the object address as MRI does
+	// (ruby -e 'class E;end; p E.new' => "#<E:0x...>"); match the shape since the
+	// address itself is not fixed.
+	if got := eval(t, "class E\nend\np E.new"); !strings.HasPrefix(got, "#<E:0x") || !strings.HasSuffix(got, ">\n") {
+		t.Errorf("p E.new = %q, want #<E:0x...>\\n", got)
+	}
+	// Instance variables render " @a=1, @b=\"x\"" after the address, in definition
+	// order (MRI): exercises defaultObjectInspect's first-ivar and subsequent-ivar
+	// branches. Verified vs MRI 4.0.5.
+	if got := eval(t, "class E\n def initialize\n  @a = 1\n  @b = \"x\"\n end\nend\np E.new"); !strings.HasPrefix(got, "#<E:0x") || !strings.HasSuffix(got, " @a=1, @b=\"x\">\n") {
+		t.Errorf("p E.new (ivars) = %q, want #<E:0x... @a=1, @b=\"x\">\\n", got)
 	}
 }
 

@@ -308,11 +308,13 @@ func TestPBKernelIntrospectionEdges(t *testing.T) {
 	if got := runSrc(t, `[1].each { p __method__ }`); got != "nil" {
 		t.Errorf("__method__ in block => %q", got)
 	}
-	// at_exit with a block returns that block (a Proc); without a block raises.
+	// at_exit with a block returns that block (a Proc); without a block MRI 4.0
+	// raises ArgumentError "called without a block" (ruby -e 'at_exit' confirms —
+	// not LocalJumpError), which rbgo now matches.
 	if got := runSrc(t, `r = at_exit { }; puts r.class`); got != "Proc" {
 		t.Errorf("at_exit return => %q", got)
 	}
-	if got := runSrc(t, `p(begin; at_exit; rescue => e; e.class.name; end)`); got != `"LocalJumpError"` {
+	if got := runSrc(t, `p(begin; at_exit; rescue => e; e.class.name; end)`); got != `"ArgumentError"` {
 		t.Errorf("at_exit no-block => %q", got)
 	}
 }
