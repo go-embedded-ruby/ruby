@@ -422,7 +422,33 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 	if err != nil {
 		raise("RegexpError", "%s: /%s/", mapRegexpEngineError(err.Error()), source)
 	}
-	return &Regexp{re: re, source: source, flags: flags, nameMap: nameMap}
+	r := &Regexp{re: re, source: source, flags: flags, nameMap: nameMap}
+	applyRegexpEncodingFlags(r, flags)
+	return r
+}
+
+// applyRegexpEncodingFlags sets a literal regexp's FIXEDENCODING / NOENCODING
+// state and source encoding from its trailing encoding modifiers, which the
+// parser now records alongside i/m/x/o (go-ruby-parser >= v0.1.8). Mapping per
+// MRI re.c char_to_option / rb_reg_initialize: n = ASCII-8BIT (ARG_ENCODING_NONE,
+// the NOENCODING bit), u = UTF-8, e = EUC-JP, s = Windows-31J — the last three
+// pin the pattern (ARG_ENCODING_FIXED). i/m/x/o carry no encoding. At most one
+// encoding letter is meaningful; if several appear the last wins. The canonical
+// registry names are used so encodingName()/isFixedEncoding()/optionBits() report
+// the same values as the runtime Regexp.new(str, opts) path.
+func applyRegexpEncodingFlags(r *Regexp, flags string) {
+	for i := 0; i < len(flags); i++ {
+		switch flags[i] {
+		case 'n':
+			r.noEnc, r.fixedEnc, r.srcEnc = true, false, ""
+		case 'u':
+			r.fixedEnc, r.noEnc, r.srcEnc = true, false, "UTF-8"
+		case 'e':
+			r.fixedEnc, r.noEnc, r.srcEnc = true, false, "EUC-JP"
+		case 's':
+			r.fixedEnc, r.noEnc, r.srcEnc = true, false, "Windows-31J"
+		}
+	}
 }
 
 // mapRegexpEngineError rewrites the go-ruby-regexp engine's diagnostic for the
