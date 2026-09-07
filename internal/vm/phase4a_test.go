@@ -31,8 +31,10 @@ func TestReflectionMethods(t *testing.T) {
 
 func TestReflectionErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
+		// #tap needs a block (MRI raises LocalJumpError). #then/#yield_self, unlike
+		// #tap, return a size-1 Enumerator when blockless — that positive behavior is
+		// covered by TestThenYieldSelfNoBlock — so they are not error cases here.
 		{"tap_no_block", `5.tap`, "LocalJumpError"},
-		{"then_no_block", `5.then`, "LocalJumpError"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
