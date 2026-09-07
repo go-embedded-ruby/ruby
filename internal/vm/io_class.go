@@ -225,6 +225,11 @@ func (vm *VM) ioReadFile(args []object.Value, forceBinary bool) object.Value {
 	var offset int64
 	if len(pos) > 2 && pos[2] != object.NilV {
 		if offset = intArg(pos[2]); offset < 0 {
+			// IO.binread reaches a negative offset through rb_io_seek (Errno::EINVAL);
+			// IO.read validates it in Ruby and raises ArgumentError.
+			if forceBinary {
+				raise("Errno::EINVAL", "Invalid argument @ rb_io_seek - %s", name)
+			}
 			raise("ArgumentError", "negative offset %d given", offset)
 		}
 	}
