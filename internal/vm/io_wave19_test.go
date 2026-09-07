@@ -345,6 +345,31 @@ func TestIOWave19StreamModes(t *testing.T) {
 	}
 }
 
+// TestIOWave19Sysread covers IO#sysread's buffer handling (io.c rb_io_sysread):
+// #to_str coercion of the buffer, the length==0 early return (buffer untouched,
+// or a fresh ""), and the buffer being emptied before an EOFError. Asserted
+// against MRI Ruby 4.0.5.
+func TestIOWave19Sysread(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// #to_str coercion of the buffer object.
+		{`require "stringio"; s = StringIO.new("hello"); o = Object.new; def o.to_str; @b ||= +"xx"; end; r = s.sysread(3, o); p [r.equal?(o.to_str), o.to_str]`, "[true, \"hel\"]\n"},
+		// length 0 returns the buffer untouched, or a fresh "".
+		{`require "stringio"; s = StringIO.new("hello"); b = +"keep"; r = s.sysread(0, b); p [r.equal?(b), b]`, "[true, \"keep\"]\n"},
+		{`require "stringio"; p StringIO.new("hello").sysread(0)`, "\"\"\n"},
+		// EOF empties the given buffer, then raises.
+		{`require "stringio"; s = StringIO.new(""); b = +"content"; s.sysread(1, b) rescue nil; p b.empty?`, "true\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// EOF with no buffer still raises EOFError.
+	if cls, _ := evalErr(t, `require "stringio"; StringIO.new("").sysread(1)`); cls != "EOFError" {
+		t.Errorf("sysread at EOF: got %s", cls)
+	}
+}
+
 // TestIOWave19LinenoAndOfft covers IO#lineno / #lineno= char-readability checks
 // (a closed/write-only real IO raises, a StringIO does not) and the NUM2OFFT /
 // NUM2INT range errors of #pos= / #seek / #lineno= (a Bignum, and an Integer that

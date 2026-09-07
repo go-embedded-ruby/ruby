@@ -106,7 +106,7 @@ func defIOReadExtra(cls *RClass) {
 	// IO.instance_method(:each) == IO.instance_method(:each_line), as in MRI, and
 	// #each inherits each_line's separator/limit/$/ handling.
 	cls.methods["each"] = cls.methods["each_line"]
-	cls.define("sysread", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("sysread", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
 		o.pipeRefresh()
@@ -114,16 +114,24 @@ func defIOReadExtra(cls *RClass) {
 		if n < 0 {
 			raise("ArgumentError", "negative length %d given", n)
 		}
+		// The optional output buffer is coerced with #to_str (io_setstrbuf →
+		// StringValue), as for pread.
 		var buf *object.String
 		if len(args) > 1 {
-			if b, ok := args[1].(*object.String); ok {
-				buf = b
-			}
+			buf = vm.ioBufferArg(args[1])
 		}
-		if n == 0 {
-			return ioReadResult(nil, buf) // a zero-length sysread is "" even at EOF
+		if n == 0 { // a zero-length sysread returns "" (or the buffer untouched)
+			if buf != nil {
+				return buf
+			}
+			return ioReadResult(nil, nil)
 		}
 		if o.pos >= len(o.buf) {
+			// MRI empties the output buffer (io_set_read_length to 0) before
+			// signalling end-of-file.
+			if buf != nil {
+				buf.SetBytes(nil)
+			}
 			raise("EOFError", "end of file reached")
 		}
 		end := min(o.pos+n, len(o.buf))
