@@ -250,7 +250,7 @@ func (vm *VM) registerFile() {
 		p := vm.fileExpand(vm.filePathArg(args[0]), args[1:], true)
 		resolved, err := filepath.EvalSymlinks(p)
 		if err != nil {
-			raiseRealpathErr(err, p)
+			raiseRealpathErr(p)
 		}
 		return object.NewString(toSlash(resolved))
 	})
@@ -588,7 +588,7 @@ func realdirpath(p string) string {
 	}
 	// A symlink loop is Errno::ELOOP even though realdirpath tolerates an absent
 	// leaf — the loop is a hard resolution failure, not a missing final component.
-	if errors.Is(err, syscall.ELOOP) {
+	if isSymlinkLoop(p) {
 		raise("Errno::ELOOP", "Too many levels of symbolic links @ realpath_rec - %s", p)
 	}
 	dir, base := rubyDirname(p), rubyBasename(p)
@@ -599,11 +599,20 @@ func realdirpath(p string) string {
 	return toSlash(filepath.Join(resolvedDir, base))
 }
 
+// isSymlinkLoop reports whether resolving p fails with ELOOP (a symlink cycle).
+// filepath.EvalSymlinks returns a bare "too many links" error that does NOT wrap
+// syscall.ELOOP, so the real errno is recovered by re-stating the path (os.Stat
+// follows the link and surfaces the kernel's ELOOP).
+func isSymlinkLoop(p string) bool {
+	_, err := osStat(filepath.FromSlash(p))
+	return errors.Is(err, syscall.ELOOP)
+}
+
 // raiseRealpathErr maps a File.realpath EvalSymlinks failure to the MRI errno: a
 // symbolic-link loop is Errno::ELOOP, anything else (a missing component) is
 // Errno::ENOENT.
-func raiseRealpathErr(err error, p string) {
-	if errors.Is(err, syscall.ELOOP) {
+func raiseRealpathErr(p string) {
+	if isSymlinkLoop(p) {
 		raise("Errno::ELOOP", "Too many levels of symbolic links @ realpath_rec - %s", p)
 	}
 	raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
