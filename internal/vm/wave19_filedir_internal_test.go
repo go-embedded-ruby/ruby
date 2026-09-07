@@ -11,14 +11,52 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"syscall"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// q renders an OS path as a Ruby double-quoted string literal (paths here are
+// rq renders an OS path as a Ruby double-quoted string literal (paths here are
 // plain ASCII temp dirs, so Go's quoting matches Ruby's).
 func rq(p string) string { return strconv.Quote(slash(p)) }
+
+// TestRaiseRmdirErrClassification covers every branch of raiseRmdirErr with
+// synthetic os errors (independent of the running user's privileges). It reuses
+// the shared expectRaise helper, which returns the raised RubyError's class.
+func TestRaiseRmdirErrClassification(t *testing.T) {
+	cases := []struct {
+		errno syscall.Errno
+		want  string
+	}{
+		{syscall.EACCES, "Errno::EACCES"},
+		{syscall.ENOTEMPTY, "Errno::ENOTEMPTY"},
+		{syscall.ENOENT, "Errno::ENOENT"},
+	}
+	for _, c := range cases {
+		err := &os.PathError{Op: "remove", Path: "x", Err: c.errno}
+		if got := expectRaise(t, func() { raiseRmdirErr(err, "x") }); got != c.want {
+			t.Errorf("raiseRmdirErr(%v) raised %q, want %q", c.errno, got, c.want)
+		}
+	}
+}
+
+// TestRaiseRealpathErrClassification covers raiseRealpathErr and isSymlinkLoop by
+// stubbing the osStat seam to surface a synthetic ELOOP / ENOENT, so both
+// branches are exercised without creating a real symlink cycle.
+func TestRaiseRealpathErrClassification(t *testing.T) {
+	old := osStat
+	defer func() { osStat = old }()
+
+	osStat = func(string) (os.FileInfo, error) { return nil, &os.PathError{Err: syscall.ELOOP} }
+	if got := expectRaise(t, func() { raiseRealpathErr("x") }); got != "Errno::ELOOP" {
+		t.Errorf("realpath loop raised %q, want Errno::ELOOP", got)
+	}
+	osStat = func(string) (os.FileInfo, error) { return nil, &os.PathError{Err: syscall.ENOENT} }
+	if got := expectRaise(t, func() { raiseRealpathErr("x") }); got != "Errno::ENOENT" {
+		t.Errorf("realpath missing raised %q, want Errno::ENOENT", got)
+	}
+}
 
 // --- File.ftype -----------------------------------------------------------
 
