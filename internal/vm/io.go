@@ -3,11 +3,51 @@ package vm
 import (
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
+
+// ioFd returns o's descriptor for #fileno/#to_i/#inspect: the fixed 0/1/2 for
+// the standard streams (registering them in the fd table), or a distinct
+// synthetic descriptor assigned on first request for any other stream. rbgo has
+// no OS fds, so this is an identity, not a real descriptor.
+func (vm *VM) ioFd(o *IOObj) int {
+	switch o.label {
+	case "STDIN":
+		vm.fdTable[0] = o
+		return 0
+	case "STDOUT":
+		vm.fdTable[1] = o
+		return 1
+	case "STDERR":
+		vm.fdTable[2] = o
+		return 2
+	}
+	if o.fd == 0 {
+		vm.nextFd++
+		o.fd = vm.nextFd
+		vm.fdTable[o.fd] = o
+	}
+	return o.fd
+}
+
+// ioPathString reports o's backing path (rb_io_path / rb_io_inspect's pathv): the
+// explicit File/IO path, or a standard stream's "<NAME>" pseudo-path. The bool is
+// false when no path is known (a plain fd wrapper or a pipe end), which #path
+// renders as nil and #inspect as "fd N".
+func ioPathString(o *IOObj) (string, bool) {
+	if o.path != "" {
+		return o.path, true
+	}
+	switch o.label {
+	case "STDIN", "STDOUT", "STDERR":
+		return "<" + o.label + ">", true
+	}
+	return "", false
+}
 
 // IOObj backs a Ruby IO and StringIO. A real IO (the $stdout/$stderr/$stdin
 // streams) writes to / reads from an os-level writer/reader; a StringIO is an
@@ -33,6 +73,9 @@ type IOObj struct {
 	fd          int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
 	binmode     bool   // opened in binary mode ("b"/binmode:) — #binmode? is true
 	noAutoclose bool   // autoclose: false was requested — #autoclose? is false
+	// close-on-exec defaults to set (#close_on_exec? is true), so the flag records
+	// only its clearing — a zero-value IOObj reports close-on-exec, as MRI does.
+	closeOnExecOff bool
 
 	// strObj is the live String object backing a StringIO — MRI's StringIO holds
 	// (and mutates in place) the very String passed to it, so #string returns that
@@ -175,26 +218,118 @@ func (vm *VM) registerIO() {
 		if o.closed {
 			raise("IOError", "closed stream")
 		}
-		switch o.label {
-		case "STDIN":
-			vm.fdTable[0] = o
-			return object.IntValue(0)
-		case "STDOUT":
-			vm.fdTable[1] = o
-			return object.IntValue(1)
-		case "STDERR":
-			vm.fdTable[2] = o
-			return object.IntValue(2)
-		}
-		if o.fd == 0 {
-			vm.nextFd++
-			o.fd = vm.nextFd
-			vm.fdTable[o.fd] = o
-		}
-		return object.IntValue(int64(o.fd))
+		return object.IntValue(int64(vm.ioFd(o)))
 	}
 	cIO.define("fileno", fileno)
 	cIO.define("to_i", fileno)
+
+	// IO#to_io returns the IO itself (rb_io_to_io), for open or closed streams.
+	cIO.define("to_io", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return self
+	})
+	// IO#path (rb_io_path) returns the stream's backing path: the path given at
+	// creation (File.open, or IO.new's path: option), the "<STDIN>"/"<STDOUT>"/
+	// "<STDERR>" pseudo-path of a standard stream, or nil when none is known (a
+	// plain fd wrapper or a pipe end). IO#to_path is a true alias.
+	cIO.define("path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if p, ok := ioPathString(self.(*IOObj)); ok {
+			return object.NewString(p)
+		}
+		return object.NilV
+	})
+	cIO.methods["to_path"] = cIO.methods["path"]
+	// IO#inspect (rb_io_inspect): "#<Class:PATH>" when a path is known — a closed
+	// path stream appends " (closed)" — else "#<Class:fd N>" for an open plain
+	// descriptor and "#<Class:(closed)>" once it is closed. Defining it on IO (not
+	// inheriting Object#inspect) makes IO its Method object's owner, as in MRI.
+	cIO.define("inspect", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		var b strings.Builder
+		b.WriteString("#<")
+		b.WriteString(vm.classOf(self).name)
+		b.WriteByte(':')
+		if p, ok := ioPathString(o); ok {
+			b.WriteString(p)
+			if o.closed {
+				b.WriteString(" (closed)")
+			}
+		} else if o.closed {
+			b.WriteString("(closed)")
+		} else {
+			b.WriteString("fd ")
+			b.WriteString(strconv.Itoa(vm.ioFd(o)))
+		}
+		b.WriteByte('>')
+		return object.NewString(b.String())
+	})
+	// IO#close_on_exec? / #close_on_exec= (rb_io_close_on_exec_p / _set): the flag
+	// defaults to set; assigning a false/nil value clears it, any other value sets
+	// it. Both raise IOError on a closed stream.
+	cIO.define("close_on_exec?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		return object.Bool(!o.closeOnExecOff)
+	})
+	cIO.define("close_on_exec=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		o.closeOnExecOff = !args[0].Truthy()
+		return args[0]
+	})
+	// IO#dup (rb_io_dup) returns an independent IO on a duplicated descriptor: a
+	// fresh synthetic fd, its own open/close state, and — as MRI documents — the
+	// autoclose and close-on-exec flags always set on the new object regardless of
+	// the receiver's. A closed receiver raises IOError.
+	cIO.define("dup", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		cp := *o
+		cp.fd = 0                 // a distinct descriptor is assigned on first #fileno
+		cp.noAutoclose = false    // dup always sets autoclose on the new IO
+		cp.closeOnExecOff = false // dup always sets close-on-exec on the new IO
+		vm.ioFd(&cp)              // assign it now so #fileno already differs from the receiver's
+		return &cp
+	})
+	// IO#initialize (rb_io_initialize) reassociates the receiver with an existing
+	// descriptor: the fd is coerced with #to_int (an IO/nil/String is a TypeError),
+	// looked up (an unknown one raises Errno::EBADF, a closed one IOError), and the
+	// receiver adopts its buffer, path and access mode.
+	cIO.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		pos, opts := splitIOOpts(args)
+		if len(pos) < 1 || len(pos) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
+		}
+		var fd int
+		switch fv := pos[0].(type) {
+		case object.Integer:
+			fd = int(fv)
+		default:
+			if vm.respondsToDynamic(pos[0], "to_int") {
+				fd = int(vm.repeatLong(pos[0]))
+			} else {
+				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(pos[0]))
+			}
+		}
+		src, ok := vm.fdTable[fd]
+		if !ok {
+			raise("Errno::EBADF", "Bad file descriptor - fd %d", fd)
+		}
+		if src.closed {
+			raise("IOError", "closed stream")
+		}
+		o.fd, o.closed = fd, false
+		vm.ioAdoptDescriptor(o, src, pos, opts)
+		vm.fdTable[fd] = o // #fileno now returns this descriptor for the receiver
+		return self
+	})
+	vm.setInstanceVisibility(cIO, "initialize", visPrivate) // MRI keeps #initialize private
 
 	cStringIO := newClass("StringIO", vm.cObject)
 	vm.consts["StringIO"] = cStringIO
