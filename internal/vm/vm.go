@@ -207,6 +207,13 @@ type VM struct {
 	// rb_exec_recursive_paired) rather than recurring for ever.
 	invcmpPath map[[2]object.Value]bool
 
+	// objcmpPath guards the default Object#<=>, which dispatches #==. A class that
+	// includes Comparable (whose #== is (self <=> other) == 0) without defining its
+	// own #<=> would otherwise loop <=> -> == -> <=>; recording the (self, other)
+	// pair makes the re-entry treat the objects as incomparable (nil), matching
+	// MRI's rb_exec_recursive_paired guard in cmp_equal.
+	objcmpPath map[[2]object.Value]bool
+
 	out    io.Writer
 	errOut io.Writer // $stderr/STDERR sink; defaults to out (no separate stream)
 	main   object.Value

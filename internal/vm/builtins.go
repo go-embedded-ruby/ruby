@@ -1324,6 +1324,19 @@ func (vm *VM) bootstrap() {
 		if self == args[0] {
 			return object.IntValue(0)
 		}
+		// Sending #== can re-enter this #<=> on the same pair when the receiver
+		// includes Comparable without defining its own #<=> (Comparable#== is
+		// (self <=> other) == 0). Guard the pair so the re-entry yields nil —
+		// incomparable — instead of looping, as MRI's cmp_equal does.
+		key := [2]object.Value{self, args[0]}
+		if vm.objcmpPath[key] {
+			return object.NilV
+		}
+		if vm.objcmpPath == nil {
+			vm.objcmpPath = map[[2]object.Value]bool{}
+		}
+		vm.objcmpPath[key] = true
+		defer delete(vm.objcmpPath, key)
 		if vm.send(self, "==", []object.Value{args[0]}, nil).Truthy() {
 			return object.IntValue(0)
 		}
