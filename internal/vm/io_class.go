@@ -39,31 +39,8 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		if src.closed {
 			raise("IOError", "closed stream")
 		}
-		ms := vm.ioResolveModeEnc(pos, opts)
-		// Wrap the underlying descriptor's buffer/path so writes reach the same
-		// backing store the fd names (MRI shares the OS fd). The mode governs the
-		// read/write intent and encoding of the fresh wrapper.
-		res := &IOObj{cls: cIO, isStr: true, buf: src.buf, path: src.path,
-			binmode: ms.binmode, noAutoclose: ms.noAutoclose,
-			extEnc: ms.extEnc, intEnc: ms.intEnc}
-		if ms.explicit {
-			// An explicit mode must be compatible with the descriptor's current mode
-			// (io.c io_reopen / rb_update_max_fd path: EINVAL when e.g. a write-only fd
-			// is opened for reading).
-			if (ms.readable && src.rdClosed) || (ms.writable && src.wrClosed) {
-				raise("Errno::EINVAL", "Invalid argument")
-			}
-			res.writable, res.appendMode = ms.writable, ms.appendMode
-			res.rdClosed, res.wrClosed = !ms.readable, !ms.writable
-		} else {
-			// No explicit mode: the wrapper inherits the descriptor's actual access
-			// half (MRI derives it from the fd via fcntl(F_GETFL)).
-			res.writable, res.appendMode = src.writable, src.appendMode
-			res.rdClosed, res.wrClosed = src.rdClosed, src.wrClosed
-		}
-		if res.appendMode {
-			res.pos = len(res.buf)
-		}
+		res := &IOObj{cls: cIO}
+		vm.ioAdoptDescriptor(res, src, pos, opts)
 		return res
 	}
 	cIO.smethods["for_fd"] = &Method{name: "for_fd", owner: cIO, native: forFd}
@@ -93,6 +70,27 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 			panic(closeRec)
 		}
 		return ret
+	}}
+	// IO.sysopen(path, mode = "r", perm = 0666) opens path and returns its raw
+	// descriptor (io.c rb_io_s_sysopen → rb_sysopen). rbgo has no OS fds, so the
+	// file is opened into a buffered stream, registered in the synthetic fd table
+	// (so IO.for_fd(fd) can wrap it), and its synthetic descriptor returned. The
+	// path is coerced with #to_path; the permission argument is accepted but has
+	// no effect on the in-memory model.
+	cIO.smethods["sysopen"] = &Method{name: "sysopen", owner: cIO, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 1 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
+		}
+		path := pathArg(vm, args[0])
+		mode := "r"
+		if len(args) >= 2 && !object.IsNil(args[1]) {
+			mode = fileMode(args[:2])
+		}
+		o := openFileIO(cFile, path, mode)
+		vm.nextFd++
+		o.fd = vm.nextFd
+		vm.fdTable[o.fd] = o
+		return object.IntValue(int64(o.fd))
 	}}
 	def("read", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.ioReadFile(args, false)
@@ -191,6 +189,49 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		}
 		return object.NewArrayFromSlice(lines)
 	})
+}
+
+// ioAdoptDescriptor makes o wrap the descriptor src under the mode/encoding
+// decoded from (pos, opts): the shared buffer/path, the read/write access half
+// (an explicit mode incompatible with the descriptor is EINVAL, no mode inherits
+// the descriptor's), the append position, and IO.new's optional path: override
+// (an explicit nil clears the inherited path). Shared by IO.for_fd/new and
+// IO#initialize so the two decode a descriptor identically (io.c io_initialize).
+func (vm *VM) ioAdoptDescriptor(o, src *IOObj, pos []object.Value, opts *object.Hash) {
+	ms := vm.ioResolveModeEnc(pos, opts)
+	o.isStr, o.buf, o.path = true, src.buf, src.path
+	o.binmode, o.noAutoclose = ms.binmode, ms.noAutoclose
+	o.extEnc, o.intEnc = ms.extEnc, ms.intEnc
+	if ms.explicit {
+		// An explicit mode must be compatible with the descriptor's current mode
+		// (io.c io_reopen / rb_update_max_fd path: EINVAL when e.g. a write-only fd
+		// is opened for reading).
+		if (ms.readable && src.rdClosed) || (ms.writable && src.wrClosed) {
+			raise("Errno::EINVAL", "Invalid argument")
+		}
+		o.writable, o.appendMode = ms.writable, ms.appendMode
+		o.rdClosed, o.wrClosed = !ms.readable, !ms.writable
+	} else {
+		// No explicit mode: inherit the descriptor's actual access half (MRI
+		// derives it from the fd via fcntl(F_GETFL)).
+		o.writable, o.appendMode = src.writable, src.appendMode
+		o.rdClosed, o.wrClosed = src.rdClosed, src.wrClosed
+	}
+	if o.appendMode {
+		o.pos = len(o.buf)
+	}
+	// IO.new(fd, path:) records an explicit path for #path/#inspect (io.c
+	// rb_io_extract_modeenc stores the :path option in fptr->pathv). An explicit
+	// path: — even nil — overrides the path inherited from the descriptor.
+	if opts != nil {
+		if pv, ok := opts.Get(object.Symbol("path")); ok {
+			if object.IsNil(pv) {
+				o.path = ""
+			} else {
+				o.path = pathArg(vm, pv)
+			}
+		}
+	}
 }
 
 // splitIOOpts separates a trailing options Hash (IO.read/write keyword arguments)

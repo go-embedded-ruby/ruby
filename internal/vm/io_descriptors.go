@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"math/big"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -49,19 +50,22 @@ func defIOReadExtra(cls *RClass) {
 		o.pos += sz
 		return object.NewString(string(r))
 	})
-	cls.define("ungetbyte", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("ungetbyte", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
-		switch a := args[0].(type) {
-		case object.Integer:
-			ioUnget(o, []byte{byte(a)})
-		case *object.String:
-			ioUnget(o, a.Bytes())
-		default:
-			if args[0] != object.NilV { // a nil argument is a no-op, as in MRI
-				raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
-			}
+		if object.IsNil(args[0]) { // a nil argument is a no-op, as in MRI
+			return object.NilV
 		}
+		if bi, ok := object.BigOf(args[0]); ok {
+			// rb_io_ungetbyte: an Integer/Bignum is reduced modulo 256 to a single
+			// byte (rb_int_modulo(b, 256) & 0xFF), so it never raises RangeError.
+			m := new(big.Int).Mod(bi, big.NewInt(256))
+			ioUnget(o, []byte{byte(m.Int64())})
+			return object.NilV
+		}
+		// Any other value is coerced with #to_str (StringValue), raising
+		// "no implicit conversion of <x> into String" when it cannot be.
+		ioUnget(o, vm.strToStr(args[0]))
 		return object.NilV
 	})
 	cls.define("ungetc", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -102,7 +106,7 @@ func defIOReadExtra(cls *RClass) {
 	// IO.instance_method(:each) == IO.instance_method(:each_line), as in MRI, and
 	// #each inherits each_line's separator/limit/$/ handling.
 	cls.methods["each"] = cls.methods["each_line"]
-	cls.define("sysread", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("sysread", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
 		o.pipeRefresh()
@@ -110,16 +114,24 @@ func defIOReadExtra(cls *RClass) {
 		if n < 0 {
 			raise("ArgumentError", "negative length %d given", n)
 		}
+		// The optional output buffer is coerced with #to_str (io_setstrbuf →
+		// StringValue), as for pread.
 		var buf *object.String
 		if len(args) > 1 {
-			if b, ok := args[1].(*object.String); ok {
-				buf = b
-			}
+			buf = vm.ioBufferArg(args[1])
 		}
-		if n == 0 {
-			return ioReadResult(nil, buf) // a zero-length sysread is "" even at EOF
+		if n == 0 { // a zero-length sysread returns "" (or the buffer untouched)
+			if buf != nil {
+				return buf
+			}
+			return ioReadResult(nil, nil)
 		}
 		if o.pos >= len(o.buf) {
+			// MRI empties the output buffer (io_set_read_length to 0) before
+			// signalling end-of-file.
+			if buf != nil {
+				buf.SetBytes(nil)
+			}
 			raise("EOFError", "end of file reached")
 		}
 		end := min(o.pos+n, len(o.buf))
@@ -133,11 +145,20 @@ func defIOReadExtra(cls *RClass) {
 		return object.IntValue(int64(o.writeStr(args[0].ToS())))
 	})
 	cls.define("lineno", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(int64(self.(*IOObj).lineno))
+		o := self.(*IOObj)
+		if !ioIsStringIO(o) { // rb_io_check_char_readable: a closed/write-only real IO raises
+			ioCheckReadable(o)
+		}
+		return object.IntValue(int64(o.lineno))
 	})
 	cls.define("lineno=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		// rb_io_set_lineno: NUM2INT coerces via #to_int (a Float truncates).
-		self.(*IOObj).lineno = int(vm.toIntCoerce(args[0]))
+		// rb_io_set_lineno: the stream must be char-readable (a closed/write-only
+		// real IO raises), then NUM2INT coerces via #to_int (a Float truncates).
+		o := self.(*IOObj)
+		if !ioIsStringIO(o) {
+			ioCheckReadable(o)
+		}
+		o.lineno = vm.ioCIntArg(args[0])
 		return args[0]
 	})
 	cls.define("close_read", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -178,26 +199,31 @@ func defIOReadExtra(cls *RClass) {
 // binary-mode / autoclose / fdatasync accessors. pread/pwrite address the buffer
 // by absolute offset without disturbing the cursor.
 func defIOSeekable(cls *RClass) {
-	cls.define("pread", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("pread", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
-		ioCheckReadable(o)
-		o.pipeRefresh()
-		n := int(intArg(args[0]))
+		// rb_io_pread: len (NUM2SIZET) and offset (NUM2OFFT) are coerced with
+		// #to_int, then io_setstrbuf coerces the optional buffer with #to_str —
+		// all before the maxlen==0 early return, so a non-String buffer still
+		// raises and a zero-length read leaves the buffer's bytes untouched.
+		n := int(vm.toIntCoerce(args[0]))
+		off := int(vm.toIntCoerce(args[1]))
+		var buf *object.String
+		if len(args) > 2 {
+			buf = vm.ioBufferArg(args[2])
+		}
 		if n < 0 {
 			raise("ArgumentError", "negative string size (or size too big)")
 		}
-		off := int(intArg(args[1]))
+		if n == 0 { // MRI returns the (coerced) buffer unshrunk, or a fresh ""
+			if buf != nil {
+				return buf
+			}
+			return ioReadResult(nil, nil)
+		}
+		ioCheckReadable(o)
+		o.pipeRefresh()
 		if off < 0 {
 			raise("Errno::EINVAL", "Invalid argument - pread")
-		}
-		var buf *object.String
-		if len(args) > 2 {
-			if b, ok := args[2].(*object.String); ok {
-				buf = b
-			}
-		}
-		if n == 0 {
-			return ioReadResult(nil, buf)
 		}
 		if off >= len(o.buf) {
 			raise("EOFError", "end of file reached")
@@ -205,14 +231,18 @@ func defIOSeekable(cls *RClass) {
 		data := o.buf[off:min(off+n, len(o.buf))]
 		return ioReadResult(data, buf)
 	})
-	cls.define("pwrite", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cls.define("pwrite", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		// rb_io_pwrite: a non-String object is coerced with #to_s
+		// (rb_obj_as_string) and the offset with #to_int (NUM2OFFT) before the
+		// stream is checked, so a missing #to_s surfaces as NoMethodError and a
+		// non-Integer offset as the "into Integer" TypeError.
+		data := []byte(vm.objAsString(args[0]))
+		off := int(vm.toIntCoerce(args[1]))
 		ioCheckOpen(o)
-		off := int(intArg(args[1]))
 		if off < 0 {
 			raise("Errno::EINVAL", "Invalid argument - pwrite")
 		}
-		data := []byte(args[0].ToS())
 		if end := off + len(data); end > len(o.buf) {
 			o.buf = append(o.buf, make([]byte, end-len(o.buf))...)
 		}

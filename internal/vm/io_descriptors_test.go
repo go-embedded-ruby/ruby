@@ -127,8 +127,9 @@ func TestIODescriptorsErrors(t *testing.T) {
 		{`require "stringio"; StringIO.new("ab").readlines(0)`, "invalid limit: 0 for readlines"},
 		{`require "stringio"; StringIO.new("ab").each_line(0) { |x| }`, "invalid limit: 0 for each_line"},
 		{`require "stringio"; StringIO.new("ab").each(0) { |x| }`, "invalid limit: 0 for each_line"},
-		// unget type errors.
-		{`require "stringio"; StringIO.new("ab").ungetbyte([])`, "into Integer"},
+		// unget type errors: ungetbyte coerces a non-Integer with #to_str
+		// (StringValue), so an Array is an "into String" TypeError, as in MRI.
+		{`require "stringio"; StringIO.new("ab").ungetbyte([])`, "into String"},
 		{`require "stringio"; StringIO.new("ab").ungetc([])`, "into String"},
 		// half-close then read / write.
 		{`require "stringio"; s = StringIO.new("ab"); s.close_read; s.read`, "not opened for reading"},
