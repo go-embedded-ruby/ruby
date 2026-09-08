@@ -49,13 +49,12 @@ func defIOReadExtra(cls *RClass) {
 		// One character is a full character of the stream's external encoding — a
 		// multi-byte EUC-JP/UTF-8 char, not a single byte — which is then transcoded
 		// to the internal encoding when one is set (io.c io_getc → read_all path).
+		// decodeCharFrom never reports more bytes than remain (an incomplete lead
+		// yields 0, taken as a one-byte character), so the slice below is in bounds.
 		ext, _ := vm.ioReadEnc(o)
 		_, sz, _, _ := vm.decodeCharFrom(o.buf[o.pos:], ext)
 		if sz < 1 {
-			sz = 1 // an invalid lead byte is returned as a one-byte character
-		}
-		if o.pos+sz > len(o.buf) {
-			sz = len(o.buf) - o.pos
+			sz = 1 // an invalid or truncated lead byte is a one-byte character
 		}
 		charBytes := o.buf[o.pos : o.pos+sz]
 		o.pos += sz
@@ -339,10 +338,8 @@ func defIOSeekable(cls *RClass) {
 			return object.NilV
 		}
 		o.extEnc = enc
-		if e, ok := vm.findEncoding(enc); ok {
-			return e
-		}
-		return object.NilV
+		e, _ := vm.findEncoding(enc) // every BOM name is a registered encoding
+		return e
 	})
 }
 
@@ -352,26 +349,29 @@ func defIOSeekable(cls *RClass) {
 // truncated BOM leaves the cursor where it was, and "\xFF\xFE" followed by two
 // NUL bytes is UTF-32LE while "\xFF\xFE" alone is UTF-16LE.
 func ioStripBOM(o *IOObj) string {
-	p := o.buf[o.pos:]
+	n, enc := detectBOM(o.buf[o.pos:])
+	o.pos += n
+	return enc
+}
+
+// detectBOM reports the byte length and encoding name of a leading Unicode
+// byte-order mark in p (0, "" when there is none). "\xFF\xFE" followed by two
+// NUL bytes is UTF-32LE, while "\xFF\xFE" alone is UTF-16LE (io.c io_strip_bom).
+func detectBOM(p []byte) (int, string) {
 	switch {
 	case len(p) >= 3 && p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF:
-		o.pos += 3
-		return "UTF-8"
+		return 3, "UTF-8"
 	case len(p) >= 2 && p[0] == 0xFF && p[1] == 0xFE:
 		if len(p) >= 4 && p[2] == 0x00 && p[3] == 0x00 {
-			o.pos += 4
-			return "UTF-32LE"
+			return 4, "UTF-32LE"
 		}
-		o.pos += 2
-		return "UTF-16LE"
+		return 2, "UTF-16LE"
 	case len(p) >= 2 && p[0] == 0xFE && p[1] == 0xFF:
-		o.pos += 2
-		return "UTF-16BE"
+		return 2, "UTF-16BE"
 	case len(p) >= 4 && p[0] == 0x00 && p[1] == 0x00 && p[2] == 0xFE && p[3] == 0xFF:
-		o.pos += 4
-		return "UTF-32BE"
+		return 4, "UTF-32BE"
 	}
-	return ""
+	return 0, ""
 }
 
 // ioUnget inserts p immediately before the cursor (leaving the cursor on the

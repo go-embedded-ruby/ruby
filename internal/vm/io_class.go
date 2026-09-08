@@ -305,6 +305,14 @@ func (vm *VM) ioReadFile(args []object.Value, forceBinary bool) object.Value {
 		start = int64(len(data))
 	}
 	out := data[start:]
+	// A "BOM|enc" external encoding (mode "rb:BOM|utf-8") strips a leading BOM from
+	// the file's start when one is present (io.c: the BOM overrides the named
+	// encoding). Only a read from offset 0 can see the BOM.
+	if start == 0 && modeHasBOM(mode) {
+		if n, bomEnc := detectBOM(out); bomEnc != "" {
+			out = out[n:]
+		}
+	}
 	if hasLen && int64(len(out)) > length {
 		out = out[:length]
 	}
@@ -464,6 +472,16 @@ func ioModeReadable(mode string) bool {
 func ioModeWritable(mode string) bool {
 	base := modeBase(mode)
 	return !strings.HasPrefix(base, "r") || strings.Contains(base, "+")
+}
+
+// modeHasBOM reports whether a mode string's encoding part carries the "BOM|"
+// prefix (e.g. "rb:BOM|utf-8"), which asks IO.read/File.read to strip and honour
+// a leading byte-order mark.
+func modeHasBOM(mode string) bool {
+	if i := strings.IndexByte(mode, ':'); i >= 0 {
+		return strings.HasPrefix(strings.ToUpper(mode[i+1:]), "BOM|")
+	}
+	return false
 }
 
 // modeBase strips a ":enc" encoding suffix (e.g. "w:UTF-16LE") from a mode string.
