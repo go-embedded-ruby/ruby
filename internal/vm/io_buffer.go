@@ -24,6 +24,29 @@ type ioBuffer struct {
 	external bool // memory owned elsewhere (.for copies a String, .string yields)
 	borrowed bool // a slice sharing another buffer's memory — neither external nor internal
 	freed    bool
+	locked   bool      // inside a #locked block (blocks resize/transfer, reentrant lock)
+	parent   *ioBuffer // for a slice, the buffer it was sliced from (nil for a non-slice)
+	sliceOff int       // this slice's offset within parent (only meaningful when parent != nil)
+	sliceLen int       // this slice's length within parent (only meaningful when parent != nil)
+}
+
+// sliceValid reports IO::Buffer#valid?. A non-slice is always valid (freeing it
+// does not invalidate it — io_buffer.c io_buffer_valid_p). A slice becomes
+// invalid when its source has been freed or reallocated so the slice no longer
+// falls inside it; a slice of a String-backed (external) buffer stays valid even
+// after the buffer is freed because the String keeps the memory alive.
+func (b *ioBuffer) sliceValid() bool {
+	if b.parent == nil {
+		return true
+	}
+	p := b.parent
+	if p.external {
+		return true
+	}
+	if p.freed {
+		return false
+	}
+	return b.sliceOff+b.sliceLen <= len(p.data)
 }
 
 func (b *ioBuffer) ToS() string {
@@ -92,6 +115,35 @@ func bufInt(v object.Value) int64 {
 
 func bufUint(v object.Value) uint64 { return uint64(bufInt(v)) }
 
+// bufSizeArg validates an IO::Buffer size (.new / #resize): a non-Integer raises
+// TypeError "not an Integer" and a negative value raises ArgumentError "Size
+// can't be negative!" — the exact checks and messages from io_buffer.c
+// (io_buffer_initialize / io_buffer_resize, via RB_INTEGER_TYPE_P and the
+// negative-size guard).
+func bufSizeArg(v object.Value) int64 {
+	n, ok := v.(object.Integer)
+	if !ok {
+		raise("TypeError", "not an Integer")
+	}
+	if int64(n) < 0 {
+		raise("ArgumentError", "Size can't be negative!")
+	}
+	return int64(n)
+}
+
+// bufferArgTypeName names v the way io_buffer.c's "wrong argument type %s
+// (expected IO::Buffer)" does: nil/true/false spelled in lower case, otherwise
+// the class name. classNameOf already yields "nil" for nil.
+func bufferArgTypeName(v object.Value) string {
+	if b, ok := v.(object.Bool); ok {
+		if bool(b) {
+			return "true"
+		}
+		return "false"
+	}
+	return classNameOf(v)
+}
+
 func bufFloat(v object.Value) float64 {
 	switch n := v.(type) {
 	case object.Float:
@@ -120,6 +172,9 @@ func bufferTypeName(v object.Value) (string, bufType) {
 // live returns the buffer's bytes, raising if it has been freed (the IO::Buffer
 // operations that touch memory require a live buffer).
 func (b *ioBuffer) live() []byte {
+	if b.parent != nil && !b.sliceValid() {
+		raise("IO::Buffer::InvalidatedError", "Buffer has been invalidated!")
+	}
 	if b.freed {
 		raise("IO::Buffer::AccessError", "The buffer is not allocated!")
 	}
@@ -152,9 +207,17 @@ func (vm *VM) registerIOBuffer() {
 	} {
 		cBuf.consts[name] = object.IntValue(val)
 	}
-	access := newClass("IO::Buffer::AccessError", vm.consts["RuntimeError"].(*RClass))
+	rtErr := vm.consts["RuntimeError"].(*RClass)
+	access := newClass("IO::Buffer::AccessError", rtErr)
 	cBuf.consts["AccessError"] = access
 	vm.consts["IO::Buffer::AccessError"] = access
+	// LockedError/InvalidatedError/AllocationError are all RuntimeError
+	// subclasses in io_buffer.c (rb_eIOBufferLockedError etc.).
+	for _, ex := range []string{"LockedError", "InvalidatedError", "AllocationError"} {
+		c := newClass("IO::Buffer::"+ex, rtErr)
+		cBuf.consts[ex] = c
+		vm.consts["IO::Buffer::"+ex] = c
+	}
 
 	sm := func(name string, fn NativeFn) { cBuf.smethods[name] = &Method{name: name, owner: cBuf, native: fn} }
 	dm := func(name string, fn NativeFn) { cBuf.define(name, fn) }
@@ -162,7 +225,7 @@ func (vm *VM) registerIOBuffer() {
 	sm("new", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		size := int64(65536)
 		if len(args) > 0 {
-			size = intArg(args[0])
+			size = bufSizeArg(args[0])
 		}
 		flags := int64(0)
 		if len(args) > 1 {
@@ -171,8 +234,17 @@ func (vm *VM) registerIOBuffer() {
 		return &ioBuffer{data: make([]byte, size), readonly: flags&128 != 0}
 	})
 	sm("for", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		s := vm.strArgConv(args, 0)
-		buf := &ioBuffer{data: append([]byte(nil), s...), external: true, readonly: true}
+		// io_buffer.c io_buffer_for: without a block the buffer is always a
+		// read-only copy; with a block over a *mutable* String the buffer aliases
+		// the String's bytes (writes propagate) and is writable, while a frozen
+		// String still yields a read-only buffer.
+		buf := &ioBuffer{external: true}
+		if s, ok := args[0].(*object.String); ok && blk != nil && !s.Frozen {
+			buf.data = s.MutableBytes()
+		} else {
+			buf.data = append([]byte(nil), vm.strArgConv(args, 0)...)
+			buf.readonly = true
+		}
 		if blk == nil {
 			return buf
 		}
@@ -206,13 +278,13 @@ func (vm *VM) registerIOBuffer() {
 	}
 	pred("null?", func(b *ioBuffer) bool { return b.freed })
 	pred("empty?", func(b *ioBuffer) bool { return !b.freed && len(b.data) == 0 })
-	pred("valid?", func(b *ioBuffer) bool { return true })
+	pred("valid?", func(b *ioBuffer) bool { return b.sliceValid() })
 	pred("external?", func(b *ioBuffer) bool { return !b.freed && b.external })
 	pred("internal?", func(b *ioBuffer) bool { return !b.freed && !b.external && !b.borrowed })
 	pred("mapped?", func(b *ioBuffer) bool { return false })
 	pred("shared?", func(b *ioBuffer) bool { return false })
 	pred("private?", func(b *ioBuffer) bool { return false })
-	pred("locked?", func(b *ioBuffer) bool { return false })
+	pred("locked?", func(b *ioBuffer) bool { return b.locked })
 	pred("readonly?", func(b *ioBuffer) bool { return b.readonly })
 
 	// slice(offset = 0, length = size - offset) returns a buffer that shares this
@@ -234,21 +306,34 @@ func (vm *VM) registerIOBuffer() {
 		if off < 0 || length < 0 || off+length > len(data) {
 			raise("ArgumentError", "Specified offset+length is bigger than the buffer size!")
 		}
-		return &ioBuffer{data: data[off : off+length : off+length], readonly: b.readonly, borrowed: true}
+		return &ioBuffer{data: data[off : off+length : off+length], readonly: b.readonly, borrowed: true, parent: b, sliceOff: off, sliceLen: length}
 	})
 	// resize(size) reallocates the buffer to the new size, preserving the leading
 	// bytes (a larger buffer is zero-filled). An external buffer (from .for /
 	// .string, or a slice) cannot be resized.
 	dm("resize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		b := self.(*ioBuffer)
-		b.live()
-		if b.external {
+		if b.locked {
+			raise("IO::Buffer::LockedError", "Cannot resize locked buffer!")
+		}
+		size := bufSizeArg(args[0])
+		// A live external buffer (.for/.string) cannot be resized; a *freed*
+		// (null) one may be, reallocating into a fresh internal buffer.
+		if b.external && !b.freed {
 			raise("IO::Buffer::AccessError", "Cannot resize external buffer!")
 		}
-		nd := make([]byte, int(intArg(args[0])))
+		if size == 0 {
+			b.data = nil
+			b.freed = true
+			return b
+		}
+		nd := make([]byte, size)
 		copy(nd, b.data)
 		b.data = nd
+		b.freed = false
+		b.external = false
 		b.borrowed = false
+		b.parent = nil
 		return b
 	})
 
@@ -257,6 +342,48 @@ func (vm *VM) registerIOBuffer() {
 		b.freed = true
 		b.data = nil
 		return b
+	})
+
+	// transfer (io_buffer.c io_buffer_transfer) moves this buffer's memory and its
+	// kind (external/read-only/slice) to a fresh buffer and nullifies the original,
+	// so #null? on the source becomes true. It is refused while the buffer is
+	// locked.
+	dm("transfer", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		b := self.(*ioBuffer)
+		if b.locked {
+			raise("IO::Buffer::LockedError", "Cannot transfer ownership of locked buffer!")
+		}
+		nb := &ioBuffer{
+			data:     b.data,
+			readonly: b.readonly,
+			external: b.external,
+			borrowed: b.borrowed,
+			parent:   b.parent,
+			sliceOff: b.sliceOff,
+			sliceLen: b.sliceLen,
+		}
+		b.freed = true
+		b.data = nil
+		return nb
+	})
+
+	// locked (io_buffer.c io_buffer_locked) marks the buffer locked for the
+	// duration of the block, so #locked? is true inside and structural changes
+	// (#resize/#transfer) raise LockedError. Re-entering raises "Buffer already
+	// locked!". The lock does not propagate to or from slices.
+	dm("locked", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		b := self.(*ioBuffer)
+		if blk == nil {
+			// io_buffer.c io_buffer_locked checks rb_block_given_p explicitly and
+			// raises "no block given" (no "(yield)" suffix, unlike a bare yield).
+			raise("LocalJumpError", "no block given")
+		}
+		if b.locked {
+			raise("IO::Buffer::LockedError", "Buffer already locked!")
+		}
+		b.locked = true
+		defer func() { b.locked = false }()
+		return vm.callBlock(blk, []object.Value{b})
 	})
 
 	// get_string(offset = 0, length = size - offset, encoding = BINARY).
@@ -355,19 +482,27 @@ func (vm *VM) registerIOBuffer() {
 		return object.IntValue(int64(n))
 	})
 
-	// Bitwise operators combine two equal-length buffers (or a buffer and a shorter
-	// one, repeating it) into a fresh internal buffer; ~ complements every byte.
+	// maskBytes reads the argument buffer of a binary bitwise operator, raising the
+	// io_buffer.c messages: TypeError "wrong argument type X (expected IO::Buffer)"
+	// for a non-buffer, ArgumentError for a zero-length mask.
+	maskBytes := func(v object.Value) []byte {
+		other, ok := v.(*ioBuffer)
+		if !ok {
+			raise("TypeError", "wrong argument type %s (expected IO::Buffer)", bufferArgTypeName(v))
+		}
+		ob := other.live()
+		if len(ob) == 0 {
+			raise("ArgumentError", "Other buffer has zero length!")
+		}
+		return ob
+	}
+	// Bitwise operators combine two buffers (a shorter mask is repeated across the
+	// source): &/|/^ return a fresh internal buffer, and!/or!/xor! mutate the
+	// receiver in place and return it. ~ / not! complement every byte likewise.
 	bitOp := func(name string, op func(a, b byte) byte) {
 		dm(name, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			a := self.(*ioBuffer).live()
-			other, ok := args[0].(*ioBuffer)
-			if !ok {
-				raise("TypeError", "no implicit conversion of %s into IO::Buffer", classNameOf(args[0]))
-			}
-			ob := other.live()
-			if len(ob) == 0 {
-				raise("ArgumentError", "Other buffer has zero length!")
-			}
+			ob := maskBytes(args[0])
 			out := make([]byte, len(a))
 			for i := range a {
 				out[i] = op(a[i], ob[i%len(ob)])
@@ -375,9 +510,24 @@ func (vm *VM) registerIOBuffer() {
 			return &ioBuffer{data: out}
 		})
 	}
+	bitOpBang := func(name string, op func(a, b byte) byte) {
+		dm(name, func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			b := self.(*ioBuffer)
+			b.checkWritable()
+			a := b.live()
+			ob := maskBytes(args[0])
+			for i := range a {
+				a[i] = op(a[i], ob[i%len(ob)])
+			}
+			return b
+		})
+	}
 	bitOp("&", func(a, b byte) byte { return a & b })
 	bitOp("|", func(a, b byte) byte { return a | b })
 	bitOp("^", func(a, b byte) byte { return a ^ b })
+	bitOpBang("and!", func(a, b byte) byte { return a & b })
+	bitOpBang("or!", func(a, b byte) byte { return a | b })
+	bitOpBang("xor!", func(a, b byte) byte { return a ^ b })
 	dm("~", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		a := self.(*ioBuffer).live()
 		out := make([]byte, len(a))
@@ -385,6 +535,15 @@ func (vm *VM) registerIOBuffer() {
 			out[i] = ^a[i]
 		}
 		return &ioBuffer{data: out}
+	})
+	dm("not!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		b := self.(*ioBuffer)
+		b.checkWritable()
+		a := b.live()
+		for i := range a {
+			a[i] = ^a[i]
+		}
+		return b
 	})
 
 	// == (and inspect) are handled by the shared valueEqual / Inspect paths.
