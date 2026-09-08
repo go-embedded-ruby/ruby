@@ -410,10 +410,7 @@ func (vm *VM) registerIO() {
 	cFile := vm.consts["File"].(*RClass)
 	cFile.super = cIO // File < IO, inheriting the read+write protocol; is_a?(IO) holds
 	cFile.smethods["open"] = &Method{name: "open", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		if len(args) == 0 {
-			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
-		}
-		o := vm.openFileArgs(cFile, args)
+		o := vm.openFileArgs(cFile, args) // openFileArgs rejects a missing path
 		if blk != nil {
 			defer ioFlushClose(o)
 			return vm.callBlock(blk, []object.Value{o})
@@ -525,19 +522,6 @@ func flagsToMode(flags int64) string {
 	default:
 		return "r"
 	}
-}
-
-// fileMode returns the access mode argument of File.open (default "r"). The mode
-// may be a string ("w", "r+", ...) or an integer bit-OR of File::Constants flags
-// (e.g. File::RDWR | File::CREAT | File::EXCL); a trailing opts Hash is ignored.
-func fileMode(args []object.Value) string {
-	if len(args) > 1 {
-		if i, ok := args[1].(object.Integer); ok {
-			return flagsToMode(int64(i))
-		}
-		return strArg(args[1])
-	}
-	return "r"
 }
 
 // stringIOModeVal resolves a StringIO mode argument to either an Integer flag set

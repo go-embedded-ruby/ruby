@@ -84,7 +84,7 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		path := pathArg(vm, args[0])
 		mode := "r"
 		if len(args) >= 2 && !object.IsNil(args[1]) {
-			mode = fileMode(args[:2])
+			mode = vm.vmodeString(args[1]) // Integer flag set or fopen-style String
 		}
 		o := openFileIO(cFile, path, mode)
 		vm.nextFd++
