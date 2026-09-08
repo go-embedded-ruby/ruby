@@ -309,12 +309,30 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cObject.define("loop", func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+	vm.cObject.define("loop", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) (result object.Value) {
 		if blk == nil {
-			raise("LocalJumpError", "no block given (loop)")
+			// With no block, Kernel#loop returns an infinite Enumerator over itself:
+			// `loop.each { … }` re-drives loop with that block, and its #size is
+			// Float::INFINITY. Reference: ruby/ruby v3_4_0 eval.c rb_f_loop / loop_size.
+			return &Enumerator{recv: self, meth: "loop", sizeSpec: object.Float(math.Inf(1)), sizeSpecSet: true}
 		}
-		// Runs forever; a `break` in the block unwinds to the call site (its
-		// value becomes loop's result) via the enclosing sendCatchBreak.
+		// A StopIteration (or subclass) raised in the block ends the loop cleanly and
+		// Kernel#loop returns that exception's #result (a finished iterator's value);
+		// every other exception propagates. A `break` still unwinds to the call site
+		// (its value becomes loop's result) via the enclosing sendCatchBreak — the
+		// recover here re-raises anything that is not a StopIteration, so the break
+		// signal reaches it untouched. Reference: ruby/ruby v3_4_0 eval.c rb_f_loop
+		// (rb_rescue2 over StopIteration, returning the exception's result).
+		result = object.NilV
+		defer func() {
+			if r := recover(); r != nil {
+				if re, ok := r.(RubyError); ok && vm.errIsStopIteration(re) {
+					result = vm.send(vm.exceptionObject(re), "result", nil, nil)
+					return
+				}
+				panic(r)
+			}
+		}()
 		for {
 			vm.callBlock(blk, nil)
 		}
@@ -1020,6 +1038,12 @@ func (vm *VM) bootstrap() {
 		return object.Bool(vm.classOf(self) == classArg(args[0]))
 	})
 	vm.cObject.define("raise", nativeRaise)
+	// Kernel#fail is a genuine alias of Kernel#raise in MRI: the two names share one
+	// method record, so Kernel.instance_method(:fail) == …(:raise) and
+	// Kernel.method(:fail) == …(:raise). The shared record is mirrored onto the
+	// Kernel module by registerKernelModuleFunctions ("fail" listed beside "raise").
+	// Reference: ruby/ruby v3_4_0 eval.c (rb_f_raise registered under both names).
+	aliasBuiltin(vm.cObject, "fail", "raise")
 	vm.cObject.define("Integer", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
 		// fail either raises (the default) or, under `exception: false`, yields nil.
@@ -6223,7 +6247,7 @@ func (vm *VM) registerKernelModuleFunctions() {
 		"Array", "Complex", "Float", "Hash", "Integer", "Rational", "String",
 		"__dir__", "abort", "at_exit", "autoload", "autoload?", "caller",
 		"caller_locations",
-		"catch", "eval", "exec", "exit", "exit!", "fork", "format", "lambda",
+		"catch", "eval", "exec", "exit", "exit!", "fail", "fork", "format", "lambda",
 		"load", "loop", "open", "p", "print", "printf", "proc", "puts",
 		"raise", "rand", "require", "require_relative", "sleep", "sprintf",
 		"srand", "system", "throw", "trap", "warn",
