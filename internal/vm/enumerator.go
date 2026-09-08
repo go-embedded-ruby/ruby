@@ -38,9 +38,14 @@ type Enumerator struct {
 	produceInit object.Value
 	produceHas  bool
 
-	// isProduct marks an Enumerator::Product (built by Enumerator.product): a plain
-	// generator Enumerator whose only distinction is the class it reports.
-	isProduct bool
+	// isProduct marks an Enumerator::Product (built by Enumerator.product or
+	// Enumerator::Product.new): #each walks the Cartesian product of productSources,
+	// consuming each through #each_entry. productSources is nil for an allocated but
+	// never-#initialize-d product (rendered "uninitialized"); an initialized product
+	// holds a non-nil (possibly empty) slice — Enumerator.product with no arguments
+	// yields the single empty tuple [[]].
+	isProduct      bool
+	productSources []object.Value
 
 	// isArithSeq marks an Enumerator::ArithmeticSequence (built by Numeric#step
 	// without a block): a step-driven Enumerator that additionally answers
@@ -88,8 +93,11 @@ type Enumerator struct {
 // source: MRI renders such an enumerator as "#<Enumerator: uninitialized>" and
 // raises when it is iterated. Every real constructor sets at least one of these,
 // so an all-zero Enumerator is exactly the allocated-but-uninitialized one.
+// It is only consulted for a plain Enumerator: Inspect handles the Product and
+// Chain subclasses (whose uninitialized form is productSources/chainParts nil)
+// before reaching here.
 func (e *Enumerator) uninitialized() bool {
-	return e.recv == nil && e.block == nil && e.produceBlk == nil && !e.isChain
+	return e.recv == nil && e.block == nil && e.produceBlk == nil
 }
 
 // forPull returns a copy of e carrying its definition and none of its
@@ -121,17 +129,36 @@ func (y *yielder) Truthy() bool    { return true }
 // #<Enumerator::Chain: [parts]>). (MRI's #to_s shows the object address, which we
 // can't reproduce deterministically, so ToS reuses Inspect.)
 func (e *Enumerator) Inspect() string {
-	if e.uninitialized() {
-		// Only Enumerator.allocate produces an uninitialized enumerator, and it
-		// carries none of the subclass flags, so the class name is always plain.
-		return "#<Enumerator: uninitialized>"
+	// Enumerator::Product renders its enumerables, guarding against a product that
+	// contains itself (MRI's rb_exec_recursive → "...") via the shared repr guard.
+	if e.isProduct {
+		if e.productSources == nil {
+			return "#<Enumerator::Product: uninitialized>"
+		}
+		if !object.ReprEnter(e) {
+			return "#<Enumerator::Product: ...>"
+		}
+		defer object.ReprLeave(e)
+		parts := make([]string, len(e.productSources))
+		for i, p := range e.productSources {
+			parts[i] = p.Inspect()
+		}
+		return "#<Enumerator::Product: [" + strings.Join(parts, ", ") + "]>"
 	}
 	if e.isChain {
+		if e.chainParts == nil {
+			return "#<Enumerator::Chain: uninitialized>"
+		}
 		parts := make([]string, len(e.chainParts))
 		for i, p := range e.chainParts {
 			parts[i] = p.Inspect()
 		}
 		return "#<Enumerator::Chain: [" + strings.Join(parts, ", ") + "]>"
+	}
+	if e.uninitialized() {
+		// A plain Enumerator.allocate carries none of the subclass flags, so the
+		// class name here is always the bare "Enumerator".
+		return "#<Enumerator: uninitialized>"
 	}
 	// A generator (Enumerator.new) or produce enumerator has no driven receiver;
 	// MRI shows an internal Generator/Producer object there (its address, which we
@@ -176,6 +203,9 @@ func (vm *VM) registerEnumerator() {
 	}
 
 	// Enumerator::Chain — a subclass whose instances chain several enumerables.
+	// .new and #initialize both store the parts; .allocate yields an uninitialized
+	// chain (chainParts nil), which #inspect renders "uninitialized" and #initialize
+	// later fills in. #initialize is private (MRI keeps it so).
 	vm.cEnumeratorChain = newClass("Enumerator::Chain", vm.cEnumerator)
 	vm.cEnumeratorChain.consts = vm.cEnumerator.consts
 	vm.cEnumerator.consts["Chain"] = vm.cEnumeratorChain
@@ -183,8 +213,26 @@ func (vm *VM) registerEnumerator() {
 		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			return newChain(append([]object.Value{}, args...))
 		}}
+	vm.cEnumeratorChain.smethods["allocate"] = &Method{name: "allocate", owner: vm.cEnumeratorChain,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return &Enumerator{isChain: true}
+		}}
+	vm.cEnumeratorChain.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		e := self.(*Enumerator)
+		if isFrozen(e) {
+			vm.raiseFrozen(e)
+		}
+		parts := append([]object.Value{}, args...)
+		*e = Enumerator{isChain: true, chainParts: parts, entered: make([]bool, len(parts)), methodValueState: e.methodValueState}
+		return e
+	})
+	vm.setInstanceVisibility(vm.cEnumeratorChain, "initialize", visPrivate)
 
-	// Enumerator::Product — the subclass Enumerator.product returns.
+	// Enumerator::Product — the Cartesian product Enumerator.product and
+	// Enumerator::Product.new return. .new/#initialize store the enumerables;
+	// .allocate yields an uninitialized product; #initialize/#initialize_copy are
+	// private; #size/#rewind/#each read productSources so a post-hoc
+	// #initialize_copy (or #rewind) is reflected.
 	vm.cEnumeratorProduct = newClass("Enumerator::Product", vm.cEnumerator)
 	vm.cEnumeratorProduct.consts = vm.cEnumerator.consts
 	vm.cEnumerator.consts["Product"] = vm.cEnumeratorProduct
@@ -192,6 +240,31 @@ func (vm *VM) registerEnumerator() {
 		native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 			return vm.enumProduct(args, blk)
 		}}
+	vm.cEnumeratorProduct.smethods["new"] = &Method{name: "new", owner: vm.cEnumeratorProduct,
+		native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			e := &Enumerator{isProduct: true}
+			productInit(e, args)
+			return e
+		}}
+	vm.cEnumeratorProduct.smethods["allocate"] = &Method{name: "allocate", owner: vm.cEnumeratorProduct,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			return &Enumerator{isProduct: true}
+		}}
+	vm.cEnumeratorProduct.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		e := self.(*Enumerator)
+		if isFrozen(e) {
+			vm.raiseFrozen(e)
+		}
+		productInit(e, args)
+		return e
+	})
+	vm.setInstanceVisibility(vm.cEnumeratorProduct, "initialize", visPrivate)
+	vm.cEnumeratorProduct.define("initialize_copy", productInitCopy)
+	vm.setInstanceVisibility(vm.cEnumeratorProduct, "initialize_copy", visPrivate)
+	vm.cEnumeratorProduct.define("size", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return vm.enumProductSize(self.(*Enumerator))
+	})
+	vm.cEnumeratorProduct.define("rewind", productRewind)
 
 	// Enumerator::ArithmeticSequence — the subclass Numeric#step (and #step on an
 	// Integer/Float) returns when called without a block. It is a step-driven
@@ -200,6 +273,48 @@ func (vm *VM) registerEnumerator() {
 	vm.cArithSeq = newClass("Enumerator::ArithmeticSequence", vm.cEnumerator)
 	vm.cArithSeq.consts = vm.cEnumerator.consts
 	vm.cEnumerator.consts["ArithmeticSequence"] = vm.cArithSeq
+	// MRI defines neither .new (an instance only ever comes from Numeric#step /
+	// Range#step) nor an allocator for ArithmeticSequence: .new raises NoMethodError
+	// and .allocate raises TypeError. Override the inherited Enumerator ones to match.
+	vm.cArithSeq.smethods["new"] = &Method{name: "new", owner: vm.cArithSeq,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			raise("NoMethodError", "undefined method 'new' for class Enumerator::ArithmeticSequence")
+			return object.NilV
+		}}
+	vm.cArithSeq.smethods["allocate"] = &Method{name: "allocate", owner: vm.cArithSeq,
+		native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			raise("TypeError", "allocator undefined for Enumerator::ArithmeticSequence")
+			return object.NilV
+		}}
+	// #== / #hash key on the defining triple (begin, end, step) plus exclude_end?,
+	// so two sequences built by different constructors (1.step(10,100) and
+	// (1..10).step(100)) compare and hash equal — MRI's arith_seq_eq / arith_seq_hash.
+	vm.cArithSeq.define("==", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		e := self.(*Enumerator)
+		o, ok := args[0].(*Enumerator)
+		if !ok || !o.isArithSeq {
+			return object.False
+		}
+		eq := vm.send(e.asBegin, "==", []object.Value{o.asBegin}, nil).Truthy() &&
+			vm.send(e.asEnd, "==", []object.Value{o.asEnd}, nil).Truthy() &&
+			vm.send(e.asStep, "==", []object.Value{o.asStep}, nil).Truthy() &&
+			e.asExcl == o.asExcl
+		return object.Bool(eq)
+	})
+	vm.cArithSeq.define("hash", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		e := self.(*Enumerator)
+		h := int64(1)
+		for _, v := range []object.Value{e.asBegin, e.asEnd, e.asStep} {
+			hv := vm.send(v, "hash", nil, nil)
+			if i, ok := hv.(object.Integer); ok {
+				h = h*31 + int64(i)
+			}
+		}
+		if e.asExcl {
+			h = h*31 + 1
+		}
+		return object.IntValue(h)
+	})
 	vm.cArithSeq.define("begin", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self.(*Enumerator).asBegin
 	})
@@ -523,6 +638,38 @@ func (vm *VM) registerEnumerator() {
 	d("take", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return object.NewArrayFromSlice(vm.enumTake(self.(*Enumerator), int(intArg(args[0]))))
 	})
+	// #take_while collects elements while the block is truthy and stops at the
+	// first falsy one. MRI's rb_iter_break makes it terminate even for an unbounded
+	// source (Enumerator.produce, Array#cycle); the generic Enumerable#take_while
+	// keeps iterating to the end, which would hang here — so Enumerator overrides it
+	// to break early (via the enumStop unwind #take already uses).
+	d("take_while", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		e := self.(*Enumerator)
+		if blk == nil {
+			return enumFor(self, "take_while")
+		}
+		out := []object.Value{}
+		collect := &Proc{native: func(_ *VM, cargs []object.Value) object.Value {
+			v := enumPack(cargs)
+			if !vm.callBlock(blk, []object.Value{v}).Truthy() {
+				panic(enumStop{})
+			}
+			out = append(out, v)
+			return object.NilV
+		}}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if _, ok := r.(enumStop); ok {
+						return
+					}
+					panic(r)
+				}
+			}()
+			vm.enumRunEach(e, collect)
+		}()
+		return object.NewArrayFromSlice(out)
+	})
 }
 
 // enumProduce builds the enumerator for Enumerator.produce(initial, size:) { … }.
@@ -557,9 +704,8 @@ func (vm *VM) enumProduce(args []object.Value, blk *Proc) object.Value {
 }
 
 // enumProduct implements Enumerator.product. It returns an Enumerator::Product
-// over the Cartesian product of its enumerable arguments, each consumed through
-// #each_entry lazily and afresh at every outer step — so an infinite source
-// yields an infinite product and a one-shot source is drained once. Keyword
+// over the Cartesian product of its enumerable arguments (stored on the
+// returned enumerator so #size/#rewind/#inspect can read them). Keyword
 // arguments are rejected. With a block it iterates the product and returns nil.
 func (vm *VM) enumProduct(args []object.Value, blk *Proc) object.Value {
 	if h := trailingKwHash(args); h != nil {
@@ -569,68 +715,122 @@ func (vm *VM) enumProduct(args []object.Value, blk *Proc) object.Value {
 		}
 		raise("ArgumentError", "unknown keywords: %s", strings.Join(bad, ", "))
 	}
-	sources := append([]object.Value{}, args...)
-
-	// #size is the product of the sources' sizes: 1 for no sources, Float::INFINITY
-	// when any is infinite, and nil when any is unknown.
-	var size object.Value = object.IntValue(1)
-	for _, e := range sources {
-		if !vm.respondsToDynamic(e, "size") {
-			size = object.NilV
-			break
-		}
-		s := vm.send(e, "size", nil, nil)
-		if object.IsNil(s) {
-			size = object.NilV
-			break
-		}
-		size = productSize(size, s)
-	}
-
-	gen := &Proc{native: func(vm *VM, gargs []object.Value) object.Value {
-		y := gargs[0]
-		var combine func(rest, prefix []object.Value)
-		combine = func(rest, prefix []object.Value) {
-			if len(rest) == 0 {
-				vm.send(y, "<<", []object.Value{object.NewArrayFromSlice(append([]object.Value{}, prefix...))}, nil)
-				return
-			}
-			first, tail := rest[0], rest[1:]
-			step := &Proc{native: func(vm *VM, a []object.Value) object.Value {
-				// each_entry yields one entry per element; a multi-value yield keeps
-				// only its first value, a bare yield contributes nil — as MRI does.
-				var x object.Value = object.NilV
-				if len(a) > 0 {
-					x = a[0]
-				}
-				combine(tail, append(append([]object.Value{}, prefix...), x))
-				return object.NilV
-			}}
-			vm.send(first, "each_entry", nil, step)
-		}
-		combine(sources, nil)
-		return object.NilV
-	}}
-
-	e := &Enumerator{isProduct: true, block: gen, sizeSpec: size, sizeSpecSet: true}
+	e := &Enumerator{isProduct: true}
+	productInit(e, args)
 	if blk == nil {
 		return e
 	}
-	vm.send(e, "each", nil, blk)
+	vm.enumProductEach(e, blk)
 	return object.NilV
 }
 
-// productSize multiplies two finite-or-infinite #size values under
-// Enumerator.product's rules: an infinite factor makes the product infinite;
-// otherwise the two Integer sizes multiply. The caller stops at the first nil
-// (unknown) size, so neither argument here is nil.
-func productSize(a, b object.Value) object.Value {
-	if isInfFloat(a) || isInfFloat(b) {
-		return object.Float(math.Inf(1))
+// productInit configures e as an initialized Enumerator::Product over args,
+// resetting any prior state. append onto a fresh slice yields a non-nil (so
+// "initialized", even for no arguments) copy that the product owns.
+func productInit(e *Enumerator, args []object.Value) {
+	*e = Enumerator{isProduct: true, productSources: append([]object.Value{}, args...), methodValueState: e.methodValueState}
+}
+
+// productInitCopy is Enumerator::Product#initialize_copy: it replaces the
+// receiver's enumerables with the source's. It is a no-op for a self-copy (even
+// when frozen), then rejects a frozen receiver, a source of a different class,
+// and an uninitialized source — mirroring MRI's OBJ_INIT_COPY plus the
+// "uninitialized product" guard.
+func productInitCopy(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	e := self.(*Enumerator)
+	if len(args) != 1 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
 	}
-	an, _ := object.BigOf(a)
-	bn, _ := object.BigOf(b)
-	return object.NormInt(new(big.Int).Mul(an, bn))
+	o, ok := args[0].(*Enumerator)
+	if ok && e == o {
+		return e // self-copy: nothing to do, even on a frozen receiver
+	}
+	if isFrozen(e) {
+		vm.raiseFrozen(e)
+	}
+	if !ok || vm.classOf(e) != vm.classOf(o) {
+		raise("TypeError", "initialize_copy should take same class object")
+	}
+	if o.productSources == nil {
+		raise("ArgumentError", "uninitialized product")
+	}
+	e.productSources = o.productSources
+	e.extFiber, e.peeked, e.ended, e.feedSet = nil, false, false, false
+	return e
+}
+
+// productRewind is Enumerator::Product#rewind: it rewinds each enumerable that
+// responds to #rewind, in forward order, and drops any external-iteration state.
+func productRewind(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	e := self.(*Enumerator)
+	e.extFiber, e.peeked, e.ended, e.feedSet = nil, false, false, false
+	for _, src := range e.productSources {
+		if vm.respondsTo(src, "rewind") {
+			vm.send(src, "rewind", nil, nil)
+		}
+	}
+	return e
+}
+
+// enumProductEach walks the Cartesian product of e.productSources, consuming
+// each source through #each_entry afresh at every outer step (so an infinite
+// source yields an infinite product), and forwards each combination (an Array)
+// to blk. It returns e.
+func (vm *VM) enumProductEach(e *Enumerator, blk *Proc) object.Value {
+	var combine func(rest, prefix []object.Value)
+	combine = func(rest, prefix []object.Value) {
+		if len(rest) == 0 {
+			vm.callBlock(blk, []object.Value{object.NewArrayFromSlice(append([]object.Value{}, prefix...))})
+			return
+		}
+		first, tail := rest[0], rest[1:]
+		step := &Proc{native: func(vm *VM, a []object.Value) object.Value {
+			// each_entry yields one entry per element; a multi-value yield keeps only
+			// its first value, a bare yield contributes nil — as MRI's product does.
+			var x object.Value = object.NilV
+			if len(a) > 0 {
+				x = a[0]
+			}
+			combine(tail, append(append([]object.Value{}, prefix...), x))
+			return object.NilV
+		}}
+		vm.send(first, "each_entry", nil, step)
+	}
+	combine(e.productSources, nil)
+	return e
+}
+
+// enumProductSize is Enumerator::Product#size: the product of the sources'
+// sizes. It returns 0 as soon as any source is empty; nil when any source lacks
+// #size, reports nil, or reports a non-Integer finite size (including NaN);
+// Float::INFINITY when any reports an infinite size; otherwise the Integer
+// product. Mirrors MRI's enum_product_total_size.
+func (vm *VM) enumProductSize(e *Enumerator) object.Value {
+	total := big.NewInt(1)
+	for _, src := range e.productSources {
+		if !vm.respondsToDynamic(src, "size") {
+			return object.NilV
+		}
+		switch s := vm.send(src, "size", nil, nil).(type) {
+		case object.Integer:
+			if s == 0 {
+				return object.IntValue(0)
+			}
+			total.Mul(total, big.NewInt(int64(s)))
+		case *object.Bignum:
+			// A Bignum is never zero (0 normalises to an Integer), so no zero
+			// short-circuit is needed here.
+			total.Mul(total, s.I)
+		case object.Float:
+			if math.IsInf(float64(s), 1) {
+				return object.Float(math.Inf(1))
+			}
+			return object.NilV // a finite (or NaN) Float size is not multiplied
+		default:
+			return object.NilV // nil, or a value with no integer meaning
+		}
+	}
+	return object.NormInt(total)
 }
 
 // isInfFloat reports whether v is a positive-infinite Float.
@@ -655,6 +855,8 @@ func (vm *VM) enumResolveSize(v object.Value) object.Value {
 // forwards to recv.meth. The return value is the source's finish value.
 func (vm *VM) enumRunEach(e *Enumerator, blk *Proc) object.Value {
 	switch {
+	case e.isProduct:
+		return vm.enumProductEach(e, blk)
 	case e.isChain:
 		for i, part := range e.chainParts {
 			e.entered[i] = true
