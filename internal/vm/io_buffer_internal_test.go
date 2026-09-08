@@ -108,3 +108,78 @@ func TestIOBuffer(t *testing.T) {
 		}
 	}
 }
+
+// TestIOBufferWave21 covers the wave-21 IO::Buffer additions: the
+// LockedError/InvalidatedError/AllocationError exceptions, .new/#resize size
+// validation, .for block writability (mutable vs frozen source), the in-place
+// bitwise operators and!/or!/xor!/not!, #transfer, #locked/#locked?, and slice
+// invalidation via #valid?. Every value verified byte-for-byte against ruby
+// 4.0.5.
+func TestIOBufferWave21(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// Exception constants (all RuntimeError subclasses, per io_buffer.c).
+		{`p [IO::Buffer.const_defined?(:LockedError), IO::Buffer.const_defined?(:InvalidatedError), IO::Buffer.const_defined?(:AllocationError)]`, `[true, true, true]`},
+		{`p IO::Buffer::LockedError.ancestors.include?(RuntimeError)`, `true`},
+		{`p IO::Buffer::InvalidatedError.ancestors.include?(RuntimeError)`, `true`},
+		{`p IO::Buffer::AllocationError.ancestors.include?(RuntimeError)`, `true`},
+		// .new size validation: non-Integer => TypeError, negative => ArgumentError.
+		{`begin; IO::Buffer.new(-1); rescue => e; p [e.class, e.message]; end`, `[ArgumentError, "Size can't be negative!"]`},
+		{`begin; IO::Buffer.new(0.0); rescue => e; p [e.class, e.message]; end`, `[TypeError, "not an Integer"]`},
+		{`begin; IO::Buffer.new(nil); rescue => e; p [e.class, e.message]; end`, `[TypeError, "not an Integer"]`},
+		// #resize size validation shares the same helper.
+		{`begin; IO::Buffer.new(4).resize(-1); rescue => e; p [e.class, e.message]; end`, `[ArgumentError, "Size can't be negative!"]`},
+		{`begin; IO::Buffer.new(4).resize(nil); rescue => e; p [e.class, e.message]; end`, `[TypeError, "not an Integer"]`},
+		{`begin; IO::Buffer.new(4).resize(10.0); rescue => e; p [e.class, e.message]; end`, `[TypeError, "not an Integer"]`},
+		// #resize(0) frees the buffer; a freed external buffer can be re-grown.
+		{`b = IO::Buffer.new(4); b.resize(0); p b.null?`, `true`},
+		{`b = IO::Buffer.for("test"); b.free; b.resize(10); p [b.size, b.internal?]`, `[10, true]`},
+		// .for over a mutable String (with a block) aliases it and is writable;
+		// a frozen source, or no block, yields a read-only copy.
+		{`s = +"forstring"; IO::Buffer.for(s) { |b| b.set_string("XY") }; p s`, `"XYrstring"`},
+		{`IO::Buffer.for(+"abc") { |b| p b.readonly? }`, `false`},
+		{`IO::Buffer.for("abc".freeze) { |b| p b.readonly? }`, `true`},
+		{`p IO::Buffer.for(+"abc").readonly?`, `true`},
+		{`class T21; def to_str; "hi"; end; end; IO::Buffer.for(T21.new) { |b| p b.get_string }`, `"hi"`},
+		// In-place bitwise operators mutate the receiver and return it.
+		{`IO::Buffer.for(+"12345") { |b| IO::Buffer.for(+"\xF8\x8F") { |m| r = b.and!(m); p [r.equal?(b), b.get_string.bytes] } }`, `[true, [48, 2, 48, 4, 48]]`},
+		{`IO::Buffer.for(+"\x0f\xf0") { |b| IO::Buffer.for(+"\xff\x0f") { |m| b.or!(m); p b.get_string.bytes } }`, `[255, 255]`},
+		{`IO::Buffer.for(+"\x0f\xf0") { |b| IO::Buffer.for(+"\xff\x0f") { |m| b.xor!(m); p b.get_string.bytes } }`, `[240, 255]`},
+		{`IO::Buffer.for(+"\x0f") { |b| b.not!; p b.get_string.bytes }`, `[240]`},
+		{`IO::Buffer.for(+"ab") { |b| IO::Buffer.for(+"\xff") { |m| p b.and!(m).external? } }`, `true`},
+		// In-place ops on a read-only buffer raise AccessError.
+		{`begin; IO::Buffer.for("x").and!(IO::Buffer.for("\xff")); rescue => e; p [e.class, e.message]; end`, `[IO::Buffer::AccessError, "Buffer is not writable!"]`},
+		{`begin; IO::Buffer.for("x").not!; rescue => e; p e.class; end`, `IO::Buffer::AccessError`},
+		// Bitwise-operator argument-type message (nil/true/false lower-cased).
+		{`begin; IO::Buffer.for("x") & true; rescue => e; p [e.class, e.message]; end`, `[TypeError, "wrong argument type true (expected IO::Buffer)"]`},
+		{`begin; IO::Buffer.for("x") & false; rescue => e; p e.message; end`, `"wrong argument type false (expected IO::Buffer)"`},
+		{`begin; IO::Buffer.for("x") & "y"; rescue => e; p e.message; end`, `"wrong argument type String (expected IO::Buffer)"`},
+		{`begin; IO::Buffer.for("x") & nil; rescue => e; p e.message; end`, `"wrong argument type nil (expected IO::Buffer)"`},
+		{`begin; IO::Buffer.for(+"x") { |b| b.and!(IO::Buffer.new(0)) }; rescue ArgumentError => e; p e.message; end`, `"Other buffer has zero length!"`},
+		// #transfer moves memory and kind to a fresh buffer, nullifying the source.
+		{`b = IO::Buffer.new(4); b.set_string("test"); nb = b.transfer; p [b.null?, nb.null?, nb.get_string, nb.internal?]`, `[true, false, "test", true]`},
+		{`fb = IO::Buffer.for("test"); nfb = fb.transfer; p [nfb.external?, nfb.readonly?, fb.null?]`, `[true, true, true]`},
+		{`buf = IO::Buffer.new(4); buf.set_string("test"); sl = buf.slice(0, 2); ns = sl.transfer; ns.set_string("ea"); p [sl.null?, buf.get_string]`, `[true, "east"]`},
+		{`b = IO::Buffer.new(4); b.locked { begin; b.transfer; rescue => e; p [e.class, e.message]; end }`, `[IO::Buffer::LockedError, "Cannot transfer ownership of locked buffer!"]`},
+		// #locked / #locked?: reentrancy, no-block, resize refusal, no propagation.
+		{`b = IO::Buffer.new(4); r = nil; b.locked { r = b.locked? }; p [r, b.locked?]`, `[true, false]`},
+		{`b = IO::Buffer.new(4); b.locked { begin; b.locked {}; rescue => e; p [e.class, e.message]; end }`, `[IO::Buffer::LockedError, "Buffer already locked!"]`},
+		{`begin; IO::Buffer.new(4).locked; rescue => e; p [e.class, e.message]; end`, `[LocalJumpError, "no block given"]`},
+		{`b = IO::Buffer.new(4); b.locked { begin; b.resize(8); rescue => e; p [e.class, e.message]; end }`, `[IO::Buffer::LockedError, "Cannot resize locked buffer!"]`},
+		{`b = IO::Buffer.new(4); s = b.slice(0, 2); r = nil; b.locked { r = [b.locked?, s.locked?] }; p r`, `[true, false]`},
+		// #valid?: a non-slice is always valid; a slice invalidates when its source
+		// is freed, transferred, or resized out from under it, but a slice of a
+		// String-backed buffer stays valid after the buffer is freed.
+		{`b = IO::Buffer.new(4); b.free; p b.valid?`, `true`},
+		{`b = IO::Buffer.new(4); s = b.slice(0, 2); p s.valid?`, `true`},
+		{`b = IO::Buffer.new(4); s = b.slice(0, 2); b.transfer; p [s.null?, s.valid?]`, `[false, false]`},
+		{`b = IO::Buffer.new(4); s = b.slice(0, 2); b.free; p s.valid?`, `false`},
+		{`b = IO::Buffer.new(4); s = b.slice(2, 2); b.resize(3); p s.valid?`, `false`},
+		{`b = IO::Buffer.for("alive"); s = b.slice(0, 2); b.free; p s.valid?`, `true`},
+		{`b = IO::Buffer.new(4); s = b.slice(0, 2); b.transfer; begin; s.get_string; rescue => e; p [e.class, e.message]; end`, `[IO::Buffer::InvalidatedError, "Buffer has been invalidated!"]`},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want+"\n" {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want+"\n")
+		}
+	}
+}

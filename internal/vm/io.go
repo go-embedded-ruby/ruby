@@ -816,6 +816,36 @@ func defIOWrite(cls *RClass) {
 		ioClosedRealIO(self.(*IOObj)) // as flush: real IO raises on close, StringIO does not
 		return object.IntValue(0)
 	})
+	// IO#advise(advice, offset = 0, len = 0) (rb_io_advise + advice_arg_check in
+	// io.c). rbgo has no posix_fadvise, so like MRI on a platform without it the
+	// call is a validated no-op returning nil. Argument checks, in MRI's order:
+	// a non-Symbol advice raises TypeError; an unrecognized one NotImplementedError
+	// "Unsupported advice: :sym"; a closed stream IOError; then offset and len are
+	// coerced as off_t (a non-Integer raises TypeError, a too-large Bignum
+	// RangeError).
+	cls.define("advise", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 1 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
+		}
+		sym, ok := args[0].(object.Symbol)
+		if !ok {
+			raise("TypeError", "advice must be a Symbol")
+		}
+		switch string(sym) {
+		case "normal", "sequential", "random", "willneed", "dontneed", "noreuse":
+			// recognized advice types (io.c io_advise_sym_to_const)
+		default:
+			raise("NotImplementedError", "Unsupported advice: %s", args[0].Inspect())
+		}
+		ioClosedRealIO(self.(*IOObj))
+		if len(args) > 1 && !object.IsNil(args[1]) {
+			vm.ioOfftArg(args[1]) // offset: coerced for its TypeError/RangeError checks
+		}
+		if len(args) > 2 && !object.IsNil(args[2]) {
+			vm.ioOfftArg(args[2]) // len: likewise
+		}
+		return object.NilV
+	})
 	// These sync/sync= entries serve a real IO; StringIO overrides both in
 	// defStringIOExtra (its #sync is always true), so the closed-stream guard here
 	// only ever fires for a real IO/File, which MRI makes raise IOError.
