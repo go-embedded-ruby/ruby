@@ -7,8 +7,18 @@
 package vm
 
 import (
+	"errors"
 	"io/fs"
 	"syscall"
+)
+
+// chrootFn / lutimesFn are unsupported under GOARCH=wasm: Dir.chroot and
+// File.lutime are both guarded `platform_is_not :windows` in the specs and have
+// no wasip1/js system call, so these stubs exist only to satisfy the seam the
+// shared dir.go / file.go code references.
+var (
+	chrootFn  = func(string) error { return errors.ErrUnsupported }
+	lutimesFn = func(string, int64, int64) error { return errors.ErrUnsupported }
 )
 
 // statSys is the GOARCH=wasm counterpart of the Unix syscall.Stat_t extraction.

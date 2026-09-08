@@ -344,7 +344,7 @@ func (vm *VM) registerFile() {
 		return object.IntValue(int64(len(paths)))
 	})
 	def("utime", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		at, mt := timeArgUnix(args[0]), timeArgUnix(args[1])
+		at, mt := timeArgUnixOrNow(args[0]), timeArgUnixOrNow(args[1])
 		paths := args[2:]
 		for _, a := range paths {
 			p := pathArg(vm, a)
@@ -354,6 +354,31 @@ func (vm *VM) registerFile() {
 		}
 		return object.IntValue(int64(len(paths)))
 	})
+	// File.lutime(atime, mtime, *paths) sets each path's access/modification time
+	// like File.utime but WITHOUT following a final symbolic link, returning the
+	// number of paths (file.c utime_internal with follow=TRUE -> AT_SYMLINK_NOFOLLOW).
+	// A nil atime/mtime means the current time; lutimesFn is the POSIX seam.
+	def("lutime", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2+)", len(args))
+		}
+		at, mt := timeArgUnixOrNow(args[0]), timeArgUnixOrNow(args[1])
+		paths := args[2:]
+		for _, a := range paths {
+			p := pathArg(vm, a)
+			if err := lutimesFn(p, at, mt); err != nil {
+				raise("Errno::ENOENT", "No such file or directory @ utime_failed - %s", p)
+			}
+		}
+		return object.IntValue(int64(len(paths)))
+	})
+	// NOTE: File.mkfifo (syscall.Mkfifo) is deliberately left unregistered. It is
+	// straightforward and MRI-verified, but wiring it up REGRESSES core/file:
+	// open_spec's "on a FIFO" example opens both ends of the FIFO from two Ruby
+	// threads, and rbgo's blocking File.open (io.go) deadlocks the interpreter on
+	// the FIFO open(2) handshake — hanging the whole spec file and losing its ~55
+	// passing examples. Add File.mkfifo only once File.open on a FIFO no longer
+	// blocks the scheduler (an io.go / thread-concurrency fix the io agent owns).
 	// File.umask([mask]) reads (and optionally sets) the process umask, returning
 	// the previous value — the bracket Puppet::Util.withumask uses. With no
 	// argument it reports the current umask without changing it.
@@ -958,4 +983,14 @@ func timeArgUnix(v object.Value) int64 {
 		return t.t.Unix()
 	}
 	return int64(numFloat(v))
+}
+
+// timeArgUnixOrNow is timeArgUnix with MRI's nil handling for File.utime /
+// File.lutime: a nil atime/mtime means "use the current time" (file.c
+// utime_internal leaves the timespec NULL, which utimensat reads as UTIME_NOW).
+func timeArgUnixOrNow(v object.Value) int64 {
+	if v == object.NilV {
+		return stdtime.Now().Unix()
+	}
+	return timeArgUnix(v)
 }

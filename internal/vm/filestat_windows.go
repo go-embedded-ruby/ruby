@@ -6,7 +6,19 @@
 
 package vm
 
-import "io/fs"
+import (
+	"errors"
+	"io/fs"
+)
+
+// chrootFn / lutimesFn are unsupported on Windows: Dir.chroot and File.lutime are
+// both guarded `platform_is_not :windows` in the specs, so these stubs exist only
+// to satisfy the seam the shared dir.go / file.go code references, reporting the
+// operation as unsupported.
+var (
+	chrootFn  = func(string) error { return errors.ErrUnsupported }
+	lutimesFn = func(string, int64, int64) error { return errors.ErrUnsupported }
+)
 
 // statSys is the Windows counterpart of the Unix syscall.Stat_t extraction.
 // Windows has no Stat_t (no uid/gid/inode model), so the POSIX-only fields take
