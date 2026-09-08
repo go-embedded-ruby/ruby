@@ -6,7 +6,7 @@ package vm
 
 import (
 	"math/big"
-	"unicode/utf8"
+	"os"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -39,16 +39,26 @@ func defIOReadExtra(cls *RClass) {
 		o.pos++
 		return object.IntValue(int64(b))
 	})
-	cls.define("readchar", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	cls.define("readchar", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioCheckReadable(o)
 		o.pipeRefresh()
 		if o.pos >= len(o.buf) {
 			raise("EOFError", "end of file reached")
 		}
-		r, sz := utf8.DecodeRune(o.buf[o.pos:])
+		// One character is a full character of the stream's external encoding — a
+		// multi-byte EUC-JP/UTF-8 char, not a single byte — which is then transcoded
+		// to the internal encoding when one is set (io.c io_getc → read_all path).
+		// decodeCharFrom never reports more bytes than remain (an incomplete lead
+		// yields 0, taken as a one-byte character), so the slice below is in bounds.
+		ext, _ := vm.ioReadEnc(o)
+		_, sz, _, _ := vm.decodeCharFrom(o.buf[o.pos:], ext)
+		if sz < 1 {
+			sz = 1 // an invalid or truncated lead byte is a one-byte character
+		}
+		charBytes := o.buf[o.pos : o.pos+sz]
 		o.pos += sz
-		return object.NewString(string(r))
+		return vm.ioDecodeRead(o, charBytes)
 	})
 	cls.define("ungetbyte", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -292,6 +302,76 @@ func defIOSeekable(cls *RClass) {
 	cls.define("fdatasync", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.IntValue(0)
 	})
+	// set_encoding_by_bom (io.c rb_io_set_encoding_by_bom): if the stream begins
+	// with a Unicode byte-order mark, consume it and set the external encoding to
+	// the one the BOM names, returning that Encoding; otherwise leave the stream
+	// untouched and return nil. The stream must be in binary mode with no encoding
+	// already set (ArgumentError otherwise), and a non-readable stream simply
+	// returns nil.
+	cls.define("set_encoding_by_bom", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed { // GetOpenFile: a closed stream raises IOError first
+			raise("IOError", "closed stream")
+		}
+		if !o.binmode {
+			raise("ArgumentError", "ASCII incompatible encoding needs binmode")
+		}
+		if o.intEnc != "" {
+			raise("ArgumentError", "encoding conversion is set")
+		}
+		if o.extEnc != "" && o.extEnc != "ASCII-8BIT" {
+			raise("ArgumentError", "encoding is set to %s already", o.extEnc)
+		}
+		if o.rdClosed { // a write-only stream is not readable: no BOM to strip
+			return object.NilV
+		}
+		// rbgo buffers a file's bytes at open; refresh a read-only file-backed
+		// stream from disk so a BOM written after the open (as the specs do) is
+		// visible, mirroring MRI's lazy read from the descriptor.
+		if o.path != "" && !o.writable {
+			if b, err := os.ReadFile(o.path); err == nil {
+				o.buf = b
+			}
+		}
+		enc := ioStripBOM(o)
+		if enc == "" {
+			return object.NilV
+		}
+		o.extEnc = enc
+		e, _ := vm.findEncoding(enc) // every BOM name is a registered encoding
+		return e
+	})
+}
+
+// ioStripBOM inspects the bytes at the cursor for a Unicode byte-order mark and,
+// on a full match, advances the cursor past it and returns the encoding name the
+// BOM designates ("" when none is found). It mirrors io.c io_strip_bom: a
+// truncated BOM leaves the cursor where it was, and "\xFF\xFE" followed by two
+// NUL bytes is UTF-32LE while "\xFF\xFE" alone is UTF-16LE.
+func ioStripBOM(o *IOObj) string {
+	n, enc := detectBOM(o.buf[o.pos:])
+	o.pos += n
+	return enc
+}
+
+// detectBOM reports the byte length and encoding name of a leading Unicode
+// byte-order mark in p (0, "" when there is none). "\xFF\xFE" followed by two
+// NUL bytes is UTF-32LE, while "\xFF\xFE" alone is UTF-16LE (io.c io_strip_bom).
+func detectBOM(p []byte) (int, string) {
+	switch {
+	case len(p) >= 3 && p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF:
+		return 3, "UTF-8"
+	case len(p) >= 2 && p[0] == 0xFF && p[1] == 0xFE:
+		if len(p) >= 4 && p[2] == 0x00 && p[3] == 0x00 {
+			return 4, "UTF-32LE"
+		}
+		return 2, "UTF-16LE"
+	case len(p) >= 2 && p[0] == 0xFE && p[1] == 0xFF:
+		return 2, "UTF-16BE"
+	case len(p) >= 4 && p[0] == 0x00 && p[1] == 0x00 && p[2] == 0xFE && p[3] == 0xFF:
+		return 4, "UTF-32BE"
+	}
+	return 0, ""
 }
 
 // ioUnget inserts p immediately before the cursor (leaving the cursor on the

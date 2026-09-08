@@ -410,7 +410,7 @@ func (vm *VM) registerIO() {
 	cFile := vm.consts["File"].(*RClass)
 	cFile.super = cIO // File < IO, inheriting the read+write protocol; is_a?(IO) holds
 	cFile.smethods["open"] = &Method{name: "open", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		o := openFileIO(cFile, pathArg(vm, args[0]), fileMode(args))
+		o := vm.openFileArgs(cFile, args) // openFileArgs rejects a missing path
 		if blk != nil {
 			defer ioFlushClose(o)
 			return vm.callBlock(blk, []object.Value{o})
@@ -423,7 +423,7 @@ func (vm *VM) registerIO() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
-		return openFileIO(cFile, pathArg(vm, args[0]), fileMode(args))
+		return vm.openFileArgs(cFile, args)
 	}}
 	// File instance metadata operations. Puppet's replace_file writes to a
 	// Uniquefile (a DelegateClass(File)) and then chmod/chowns it before renaming
@@ -524,19 +524,6 @@ func flagsToMode(flags int64) string {
 	}
 }
 
-// fileMode returns the access mode argument of File.open (default "r"). The mode
-// may be a string ("w", "r+", ...) or an integer bit-OR of File::Constants flags
-// (e.g. File::RDWR | File::CREAT | File::EXCL); a trailing opts Hash is ignored.
-func fileMode(args []object.Value) string {
-	if len(args) > 1 {
-		if i, ok := args[1].(object.Integer); ok {
-			return flagsToMode(int64(i))
-		}
-		return strArg(args[1])
-	}
-	return "r"
-}
-
 // stringIOModeVal resolves a StringIO mode argument to either an Integer flag set
 // or a String access mode: Integer and String are taken directly, and any other
 // object is converted via #to_str (raising TypeError otherwise). Keeping the
@@ -594,6 +581,56 @@ func stringIOModeFlags(mode string) (read, write, trunc, appnd bool) {
 	}
 	raise("ArgumentError", "invalid access mode %s", mode)
 	return false, false, false, false
+}
+
+// openFileArgs opens a file for File.open / File.new / Kernel#open, following
+// io.c rb_scan_args "12:": the arguments are (path, [mode], [perm], **opts) with
+// a trailing Hash taken as options rather than the mode. The access mode comes
+// from the positional mode (a String or an Integer flag set) or the :mode
+// option; the external/internal encoding comes from the mode string's
+// ":ext[:int]" suffix or the :encoding / :external_encoding / :internal_encoding
+// options (rb_io_extract_modeenc), and is recorded on the stream so reads honour
+// it. A trailing Hash mode argument is thus no longer mistaken for a mode String.
+func (vm *VM) openFileArgs(cls *RClass, args []object.Value) *IOObj {
+	pos, opts := splitIOOpts(args)
+	if len(pos) == 0 {
+		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+	}
+	mode := "r"
+	if len(pos) > 1 && !object.IsNil(pos[1]) {
+		mode = vm.vmodeString(pos[1])
+	} else if opts != nil {
+		if m, ok := opts.Get(object.Symbol("mode")); ok && !object.IsNil(m) {
+			mode = vm.vmodeString(m)
+		}
+	}
+	o := openFileIO(cls, pathArg(vm, pos[0]), mode)
+	ms := vm.ioResolveModeEnc(pos, opts)
+	o.extEnc, o.intEnc, o.binmode = ms.extEnc, ms.intEnc, ms.binmode
+	return o
+}
+
+// vmodeString reduces a File.open mode argument to the fopen-style base mode
+// string openFileIO understands: an Integer (or #to_int object) is mapped through
+// flagsToMode; a String is taken as-is (its ":enc" suffix is tolerated and later
+// resolved for encoding); any other object is coerced with #to_str.
+func (vm *VM) vmodeString(v object.Value) string {
+	if i, ok := v.(object.Integer); ok {
+		return flagsToMode(int64(i))
+	}
+	if s, ok := v.(*object.String); ok {
+		return s.Str()
+	}
+	if vm.respondsToDynamic(v, "to_int") {
+		return flagsToMode(vm.repeatLong(v))
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		if s, ok := vm.send(v, "to_str", nil, nil).(*object.String); ok {
+			return s.Str()
+		}
+	}
+	raise("TypeError", "no implicit conversion of %s into String", classNameOf(v))
+	return ""
 }
 
 // openFileIO opens path into a buffered, file-backed IOObj per mode (r/w/a, with
@@ -897,6 +934,46 @@ func defIOWrite(cls *RClass) {
 	})
 }
 
+// ioReadEnc returns the (external, internal) encoding names in effect for a
+// whole-stream read, filling the unset sides from Encoding.default_external and
+// Encoding.default_internal. A BINARY external encoding — or an internal equal
+// to the external — suppresses transcoding (io.c rb_io_ext_int_to_enc leaves the
+// second converter NULL), so the returned internal name is "".
+func (vm *VM) ioReadEnc(o *IOObj) (ext, intn string) {
+	ext = o.extEnc
+	if ext == "" && vm.defExternalEnc != nil {
+		ext = vm.defExternalEnc.name
+	}
+	intn = o.intEnc
+	if intn == "" && vm.defInternalEnc != nil {
+		intn = vm.defInternalEnc.name
+	}
+	if ext == "ASCII-8BIT" || intn == ext {
+		intn = ""
+	}
+	return ext, intn
+}
+
+// ioDecodeRead builds the String a whole-stream read (or a gets-family line)
+// returns from raw external bytes: when an internal encoding is in effect the
+// bytes are transcoded external→internal and tagged with it; otherwise they are
+// tagged with the external encoding unchanged (io.c io_enc_str).
+func (vm *VM) ioDecodeRead(o *IOObj, data []byte) *object.String {
+	ext, intn := vm.ioReadEnc(o)
+	b := append([]byte(nil), data...)
+	if intn == "" {
+		return object.NewStringBytesEnc(b, ext)
+	}
+	// Pure-ASCII content is byte-identical across ASCII-compatible encodings, so it
+	// is simply retagged with the internal encoding — no converter needed (this is
+	// how MRI transcodes e.g. IBM866→UTF-8 for an ASCII line).
+	if asciiOnly(b) && vm.encAsciiCompat(ext) && vm.encAsciiCompat(intn) {
+		return object.NewStringBytesEnc(b, intn)
+	}
+	src := object.NewStringBytesEnc(b, ext)
+	return vm.stringEncode(src, []object.Value{object.NewString(intn)})
+}
+
 // defStringIORead defines the reading half of the protocol, plus the cursor and
 // content methods, on StringIO.
 func defStringIORead(cls *RClass) {
@@ -1023,21 +1100,30 @@ func defStringIORead(cls *RClass) {
 					raise("FrozenError", "can't modify frozen String: %s", buf.Inspect())
 				}
 				if isNil {
-					buf.SetBytes(nil)
+					buf.SetBytes(nil) // read at EOF clears the buffer, leaving its encoding
 					return object.NilV
 				}
-				buf.SetBytes(append([]byte(nil), data...))
+				if lengthGiven {
+					// read(size, buf): the bytes are binary and the buffer's own
+					// encoding is left unchanged (io.c io_read: no transcoding path).
+					buf.SetBytes(append([]byte(nil), data...))
+					return buf
+				}
+				dec := vm.ioDecodeRead(o, data)
+				buf.SetBytes(append([]byte(nil), dec.Bytes()...))
+				buf.Enc = dec.Enc // a full read retags the buffer with the read encoding
 				return buf
 			}
 			if isNil {
 				return object.NilV
 			}
 			// read(length) returns a binary (ASCII-8BIT) String; read with no
-			// length returns the remainder in the stream's default encoding.
+			// length returns the remainder in the stream's read encoding, transcoded
+			// external→internal when an internal encoding is in effect.
 			if lengthGiven {
 				return object.NewStringBytesEnc(append([]byte(nil), data...), "ASCII-8BIT")
 			}
-			return object.NewStringBytes(append([]byte(nil), data...))
+			return vm.ioDecodeRead(o, data)
 		}
 		if lengthGiven {
 			n := int(vm.toIntCoerce(args[0]))
@@ -1506,6 +1592,12 @@ func (vm *VM) ioGetsResolved(o *IOObj, sep getsSep, limit int, chomp bool) objec
 	v := ioGetsLine(o, sep, limit, chomp)
 	if v != object.NilV {
 		o.lineno++
+		// A line is read in the external encoding (the separator is matched on those
+		// bytes) then transcoded to the internal encoding and tagged, exactly like a
+		// whole-stream read (io.c rb_io_getline_1 → io_enc_str).
+		if s, ok := v.(*object.String); ok {
+			v = vm.ioDecodeRead(o, s.Bytes())
+		}
 	}
 	return v
 }
