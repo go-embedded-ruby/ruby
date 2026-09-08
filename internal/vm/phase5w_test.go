@@ -1,7 +1,6 @@
 package vm_test
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -23,7 +22,12 @@ func TestKernelLoop(t *testing.T) {
 }
 
 func TestLoopNoBlock(t *testing.T) {
-	if err := runErr(t, `loop`); err == nil || !strings.Contains(err.Error(), "LocalJumpError") {
-		t.Fatalf("got %v want LocalJumpError", err)
+	// Kernel#loop with no block returns an infinite Enumerator over itself (MRI
+	// eval.c rb_f_loop / loop_size), not a LocalJumpError as it once did.
+	if got := eval(t, `p loop.instance_of?(Enumerator)`); got != "true\n" {
+		t.Fatalf("loop.instance_of?(Enumerator): got %q want \"true\\n\"", got)
+	}
+	if got := eval(t, `p loop.size`); got != "Infinity\n" {
+		t.Fatalf("loop.size: got %q want \"Infinity\\n\"", got)
 	}
 }
