@@ -180,6 +180,11 @@ func (vm *VM) registerModuleExtras() {
 				raise("NameError", "undefined method '%s' for %s '%s'", name, kind, recv)
 			}
 			vm.undefMethod(mod, name)
+			// undefMethod fires singleton_method_undefined for a singleton class; for
+			// an ordinary class/module the corresponding hook is Module#method_undefined.
+			if !mod.isSingleton {
+				vm.fireModuleMethodHook(mod, "method_undefined", name)
+			}
 		}
 		return mod
 	})
@@ -205,6 +210,9 @@ func (vm *VM) registerModuleExtras() {
 				// Removing a method from a singleton class (class << obj; remove_method :m)
 				// fires singleton_method_removed on the attached object.
 				vm.fireSingletonMethodHook(vm.attachedObject(mod), "singleton_method_removed", name)
+			} else {
+				// An ordinary class/module fires Module#method_removed instead.
+				vm.fireModuleMethodHook(mod, "method_removed", name)
 			}
 		}
 		return mod
@@ -427,8 +435,17 @@ func (vm *VM) checkTransplantBindable(cls, owner *RClass) {
 // fireMethodAdded invokes cls.method_added(:name) when cls defines that hook as a
 // singleton method, mirroring the OpDefineMethod path for `def`.
 func (vm *VM) fireMethodAdded(cls *RClass, name string) {
-	if hook := lookupSMethod(cls, "method_added"); hook != nil {
-		vm.invoke(hook, cls, []object.Value{object.SymVal(name)}, nil)
+	vm.fireModuleMethodHook(cls, "method_added", name)
+}
+
+// fireModuleMethodHook invokes cls.<hook>(:name) when cls defines the hook as a
+// class/singleton method (e.g. def self.method_removed) — the definition-tracking
+// hooks method_added / method_removed / method_undefined. The default is a private
+// no-op, so only a user override is observable. Reference: ruby/ruby v3_4_0
+// vm_method.c rb_add_method / remove_method / undef_method calling the hooks.
+func (vm *VM) fireModuleMethodHook(cls *RClass, hook, name string) {
+	if h := lookupSMethod(cls, hook); h != nil {
+		vm.invoke(h, cls, []object.Value{object.SymVal(name)}, nil)
 	}
 }
 
