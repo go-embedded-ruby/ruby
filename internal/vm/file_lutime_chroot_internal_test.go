@@ -33,6 +33,12 @@ func restoreFDSeams() {
 func TestFileLutime(t *testing.T) {
 	defer restoreFDSeams()
 
+	// File.lutime is registered only under the unix build tag; on Windows the
+	// method is absent (NoMethodError), so its POSIX assertions don't apply. The
+	// 100% coverage gate runs on the POSIX lanes, so coverage is unaffected.
+	if runtime.GOOS == "windows" {
+		t.Skip("File.lutime is POSIX-only")
+	}
 	if runtime.GOOS != "windows" {
 		dir := slash(t.TempDir())
 		f := dir + "/f"
@@ -72,6 +78,12 @@ func TestFileLutime(t *testing.T) {
 // dir_s_chroot, rb_sys_fail_path).
 func TestDirChroot(t *testing.T) {
 	defer restoreFDSeams()
+
+	// Dir.chroot is registered only under the unix build tag; absent on Windows
+	// (NoMethodError). The 100% coverage gate runs on the POSIX lanes.
+	if runtime.GOOS == "windows" {
+		t.Skip("Dir.chroot is POSIX-only")
+	}
 
 	// Success: seam returns nil, Dir.chroot returns 0.
 	chrootFn = func(string) error { return nil }
