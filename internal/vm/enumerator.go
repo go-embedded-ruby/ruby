@@ -93,13 +93,10 @@ type Enumerator struct {
 // source: MRI renders such an enumerator as "#<Enumerator: uninitialized>" and
 // raises when it is iterated. Every real constructor sets at least one of these,
 // so an all-zero Enumerator is exactly the allocated-but-uninitialized one.
+// It is only consulted for a plain Enumerator: Inspect handles the Product and
+// Chain subclasses (whose uninitialized form is productSources/chainParts nil)
+// before reaching here.
 func (e *Enumerator) uninitialized() bool {
-	if e.isProduct {
-		return e.productSources == nil
-	}
-	if e.isChain {
-		return e.chainParts == nil
-	}
 	return e.recv == nil && e.block == nil && e.produceBlk == nil
 }
 
@@ -821,9 +818,8 @@ func (vm *VM) enumProductSize(e *Enumerator) object.Value {
 			}
 			total.Mul(total, big.NewInt(int64(s)))
 		case *object.Bignum:
-			if s.I.Sign() == 0 {
-				return object.IntValue(0)
-			}
+			// A Bignum is never zero (0 normalises to an Integer), so no zero
+			// short-circuit is needed here.
 			total.Mul(total, s.I)
 		case object.Float:
 			if math.IsInf(float64(s), 1) {
