@@ -151,6 +151,22 @@ func (vm *VM) registerDir() {
 		}
 		return object.IntValue(0)
 	})
+	// Dir.chroot(path) changes the process root to path and returns 0 (dir.c
+	// dir_s_chroot: check_dirname then chroot(2), rb_sys_fail_path on -1). A
+	// non-privileged process cannot chroot, so the real call fails with
+	// Errno::EPERM — the behaviour the spec exercises as a regular user. The path
+	// is a rb_get_path argument (#to_path). chrootFn is a platform seam so the
+	// error mapping is testable without re-rooting the test process.
+	def("chroot", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		p := pathArg(vm, args[0])
+		if err := chrootFn(p); err != nil {
+			raiseChrootErr(err, p)
+		}
+		return object.IntValue(0)
+	})
 	// Dir.each_child(path) yields each child name (no "." / ".."); Dir.foreach(path)
 	// yields every entry including "." and "..". Both return nil after a block and,
 	// with no block, an Enumerator over the snapshot names (MRI dir.c) — whose #size
@@ -388,6 +404,24 @@ func raiseMkdirErr(err error, path string) {
 func dirPwd(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 	wd, _ := os.Getwd()
 	return object.NewString(toSlash(wd))
+}
+
+// raiseChrootErr maps a chroot(2) failure to the MRI errno Dir.chroot raises via
+// rb_sys_fail_path: a permission failure (the ordinary case for a non-root
+// process, and what macOS returns even for a missing path) is Errno::EPERM, a
+// missing directory Errno::ENOENT, a non-directory Errno::ENOTDIR, and anything
+// else falls back to Errno::EPERM. Each is a SystemCallError, as the spec checks.
+func raiseChrootErr(err error, path string) {
+	switch {
+	case os.IsPermission(err):
+		raise("Errno::EPERM", "Operation not permitted @ dir_s_chroot - %s", path)
+	case os.IsNotExist(err):
+		raise("Errno::ENOENT", "No such file or directory @ dir_s_chroot - %s", path)
+	case errors.Is(err, syscall.ENOTDIR):
+		raise("Errno::ENOTDIR", "Not a directory @ dir_s_chroot - %s", path)
+	default:
+		raise("Errno::EPERM", "Operation not permitted @ dir_s_chroot - %s", path)
+	}
 }
 
 // includeDirEnumerable mixes the prelude-defined Enumerable module into Dir. It

@@ -9,6 +9,32 @@ package vm
 import (
 	"io/fs"
 	"syscall"
+
+	"golang.org/x/sys/unix"
+)
+
+// chrootFn and lutimesFn are the POSIX seams behind Dir.chroot and File.lutime.
+// On Unix they map onto the real system calls; the windows/wasm builds supply
+// unsupported stubs (both methods are guarded `platform_is_not :windows` in the
+// specs). Each is a function variable so a whitebox test can substitute a stub
+// and drive the Errno mapping without the real syscall — chroot in particular
+// must never be allowed to re-root the test process, so its error branches are
+// exercised only through a swapped seam.
+var (
+	// Dir.chroot(path) -> 0 (dir.c dir_s_chroot, rb_sys_fail_path on -1); a
+	// non-root process fails with EPERM.
+	chrootFn = syscall.Chroot
+	// lutimesFn sets a path's access/modification time WITHOUT following a final
+	// symbolic link — utimensat(AT_FDCWD, path, ts, AT_SYMLINK_NOFOLLOW), the
+	// no-follow that distinguishes File.lutime from File.utime (file.c
+	// utime_internal passes follow=TRUE, which maps to AT_SYMLINK_NOFOLLOW).
+	lutimesFn = func(path string, atime, mtime int64) error {
+		ts := []unix.Timespec{
+			unix.NsecToTimespec(atime * int64(1e9)),
+			unix.NsecToTimespec(mtime * int64(1e9)),
+		}
+		return unix.UtimesNanoAt(unix.AT_FDCWD, path, ts, unix.AT_SYMLINK_NOFOLLOW)
+	}
 )
 
 // statSys extracts the POSIX stat fields (uid/gid/ino/dev/nlink/blksize) from an
