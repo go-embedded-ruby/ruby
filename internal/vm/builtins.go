@@ -1422,6 +1422,39 @@ func (vm *VM) bootstrap() {
 		vm.mixinModule(mod, target, true)
 		return mod
 	})
+	// Module#extend_object(obj) (private): the primitive Object#extend dispatches
+	// to. It mixes self (the module) into obj's singleton class, so the module's
+	// instance methods AND constants become available on obj — Object#extend then
+	// fires the module's #extended hook. self being a Class rather than a plain
+	// Module is a TypeError ("wrong argument type Class (expected Module)"), which
+	// rb_include_module raises for a Class operand; since extend_object is undefined
+	// on Class this only bites a rebind onto a Class receiver. A frozen obj raises
+	// FrozenError before any change. Returns obj. Reference: ruby/ruby v3_4_0
+	// object.c rb_mod_extend_object / rb_extend_object → rb_include_module.
+	vm.cModule.define("extend_object", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		if !mod.isModule {
+			raise("TypeError", "wrong argument type Class (expected Module)")
+		}
+		obj := args[0]
+		if isFrozen(obj) {
+			vm.raiseFrozen(obj)
+		}
+		if t, ok := obj.(*RClass); ok {
+			// Extending a class/module object mixes mod into its metaclass, so mod's
+			// instance methods become class methods (the same insertion `extend` makes).
+			mc := t.metaClass()
+			mc.includes = append(mc.includes, mod)
+		} else {
+			// Every value ensureSingleton cannot give a singleton class (an immediate:
+			// Integer, Symbol, Float, true/false/nil) is frozen, so the frozen check
+			// above already rejected it — a non-frozen obj here always gets a singleton.
+			sc, _ := vm.ensureSingleton(obj)
+			sc.includes = append(sc.includes, mod)
+		}
+		bumpMethodSerial()
+		return obj
+	})
 	// The default no-op mix-in / definition hooks MRI defines as private instance
 	// methods of Module (each rb_obj_dummy1, returning nil): a user overrides them
 	// with `def self.included(base)` etc. Reference: ruby/ruby v3_4_0 object.c
@@ -1435,15 +1468,15 @@ func (vm *VM) bootstrap() {
 	// PRIVATE instance methods of Module in MRI (object.c, eval.c): reachable as a
 	// functional call or through the include/prepend/def machinery, but not as
 	// `mod.append_features(x)` with an explicit receiver.
-	for _, n := range []string{"append_features", "prepend_features", "included", "extended", "prepended", "method_added", "method_removed", "method_undefined", "const_added"} {
+	for _, n := range []string{"append_features", "prepend_features", "extend_object", "included", "extended", "prepended", "method_added", "method_removed", "method_undefined", "const_added"} {
 		vm.cModule.methods[n].vis = visPrivate
 	}
-	// MRI undefines append_features / prepend_features on Class
+	// MRI undefines append_features / prepend_features / extend_object on Class
 	// (rb_undef_method(rb_cClass, …)), so Class.private_instance_methods omits
 	// them and a rebind onto a Class receiver has no method to reach. An undefined
 	// tombstone halts ancestor lookup, hiding the inherited Module definition from
 	// method listing without removing it for module receivers.
-	for _, n := range []string{"append_features", "prepend_features"} {
+	for _, n := range []string{"append_features", "prepend_features", "extend_object"} {
 		vm.cClass.methods[n] = &Method{name: n, owner: vm.cClass, undefined: true}
 	}
 	vm.cModule.define("ancestors", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -1503,7 +1536,7 @@ func (vm *VM) bootstrap() {
 	// superclass chain via cvarOwner, mirroring how @@name resolves at runtime.
 	vm.cModule.define("class_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		name := vm.coerceCvarName(args[0])
-		if c := cvarOwner(self.(*RClass), name); c != nil {
+		if c := vm.cvarOwnerAnc(self.(*RClass), name); c != nil {
 			return c.cvars[name]
 		}
 		raise("NameError", "uninitialized class variable %s in %s", name, self.(*RClass).name)
@@ -1515,7 +1548,7 @@ func (vm *VM) bootstrap() {
 			vm.raiseFrozen(cls)
 		}
 		name := vm.coerceCvarName(args[0])
-		if c := cvarOwner(cls, name); c != nil {
+		if c := vm.cvarOwnerAnc(cls, name); c != nil {
 			c.cvars[name] = args[1]
 		} else {
 			cls.cvars[name] = args[1]
@@ -1523,7 +1556,7 @@ func (vm *VM) bootstrap() {
 		return args[1]
 	})
 	vm.cModule.define("class_variable_defined?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(cvarOwner(self.(*RClass), vm.coerceCvarName(args[0])) != nil)
+		return object.Bool(vm.cvarOwnerAnc(self.(*RClass), vm.coerceCvarName(args[0])) != nil)
 	})
 	vm.cModule.define("class_variables", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// class_variables(inherit=true): own variables, then ancestors', each
@@ -1531,7 +1564,16 @@ func (vm *VM) bootstrap() {
 		inherit := len(args) == 0 || args[0].Truthy()
 		seen := map[string]bool{}
 		var names []string
-		for c := self.(*RClass); c != nil; c = c.super {
+		// class_variables shares across the whole ancestry (included modules and the
+		// superclass chain), not just the superclass chain: a variable defined in an
+		// included module is listed too. inherit=false stops at the receiver's own
+		// table. Reference: ruby/ruby v3_4_0 variable.c rb_mod_class_variables
+		// (mod_cvar_of walks the ancestor list).
+		levels := []*RClass{self.(*RClass)}
+		if inherit {
+			levels = vm.ancestors(self.(*RClass))
+		}
+		for _, c := range levels {
 			level := make([]string, 0, len(c.cvars))
 			for name := range c.cvars {
 				if !seen[name] {
@@ -1543,9 +1585,6 @@ func (vm *VM) bootstrap() {
 			// is deterministic (windows-latest runs the same test).
 			sort.Strings(level)
 			names = append(names, level...)
-			if !inherit {
-				break
-			}
 		}
 		out := make([]object.Value, len(names))
 		for i, n := range names {
@@ -1559,12 +1598,25 @@ func (vm *VM) bootstrap() {
 			vm.raiseFrozen(cls)
 		}
 		name := vm.coerceConstName(args[0])
+		// Overwriting an already-initialised constant (a real value, not a pending
+		// autoload — those live in cls.autoloads, so cls.consts misses them and no
+		// warning fires) warns "already initialized constant X". MRI uses rb_warn
+		// here, which fires whenever $VERBOSE is non-nil (false or true), suppressed
+		// only when $VERBOSE is nil. Reference: ruby/ruby v3_4_0 variable.c
+		// rb_const_set → const_set_raise / rb_warn on the already-set case.
+		if _, existed := cls.consts[name]; existed && !object.IsNil(vm.globals["$VERBOSE"]) {
+			vm.warnRedefineConst(cls, name)
+		}
 		// Route through assignConstIn so an anonymous class/module bound here gains
 		// the qualified name of its constant (Ruby's "permanent name on first
 		// constant binding" rule) — the same path a `Foo::Bar = ...` literal takes.
 		// Top-level (Object) constants live in the flat namespace that a bare
 		// constant reference reads, which assignConstIn handles for Object.
 		vm.assignConstIn(cls, name, args[1])
+		// Module#const_added(name) fires on every const_set (MRI's rb_const_set calls
+		// const_added unconditionally). The default is a private no-op; a user
+		// `def self.const_added` override observes the new constant.
+		vm.fireConstAdded(cls, name)
 		return args[1]
 	})
 	// Module#remove_const deletes a constant defined directly on the receiver and
@@ -1632,6 +1684,32 @@ func (vm *VM) bootstrap() {
 		}
 		return object.NewArrayFromSlice(out)
 	})
+	// Module.constants (the SINGLETON method, distinct from Module#constants) has
+	// two forms in MRI (rb_mod_s_constants): with no argument it returns the
+	// constants accessible in the caller's scope — at the top level, every
+	// top-level constant, equal to Object.constants; with an argument it behaves
+	// like Module#constants on the receiver (Module's own + inherited). It shadows
+	// the instance method only for the Module class and its subclasses (a plain
+	// class's `.constants` still finds the instance method through the Class chain).
+	// Reference: ruby/ruby v3_4_0 variable.c rb_mod_s_constants.
+	instConstants := vm.cModule.methods["constants"]
+	vm.cModule.smethods["constants"] = &Method{name: "constants", owner: vm.cModule,
+		native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+			if len(args) > 0 {
+				return vm.invoke(instConstants, self, args, blk)
+			}
+			names := vm.topLevelConstNames()
+			out := make([]object.Value, len(names))
+			for i, n := range names {
+				out[i] = object.Symbol(n)
+			}
+			return object.NewArrayFromSlice(out)
+		}}
+	// Module#remove_const is a PRIVATE instance method in MRI
+	// (rb_define_private_method(rb_cModule, "remove_const", …)), reachable as a
+	// functional call inside a class/module body but not through an explicit
+	// receiver — so a spec must `send(:remove_const, …)` to reach it.
+	vm.cModule.methods["remove_const"].vis = visPrivate
 	// Module#< <= > >= compare by the inheritance/inclusion hierarchy: A < B is
 	// true if A is a proper descendant of B, false if a proper ancestor (or, for
 	// <=/>=, equal), and nil when the two are unrelated.
@@ -5966,7 +6044,11 @@ func (vm *VM) bootstrap() {
 			c := newClass("", super)
 			vm.registerLiveClass(c)
 			if blk != nil {
-				vm.classEval(c, blk, nil)
+				// The block runs as the class body (self = c) AND receives c as its
+				// block argument, so `Class.new { |cls| … }` can name the new class —
+				// MRI yields the class to the block. Reference: ruby/ruby v3_4_0
+				// object.c rb_class_initialize → rb_mod_module_exec(module, 1, &module).
+				vm.classEval(c, blk, []object.Value{c})
 			}
 			return c
 		}}
@@ -5983,7 +6065,11 @@ func (vm *VM) bootstrap() {
 			m.defaultVis, m.funcMode = visPublic, false
 			vm.registerLiveClass(m)
 			if blk != nil {
-				vm.classEval(m, blk, nil)
+				// The block runs as the module body (self = m) AND receives m as its
+				// block argument, so `Module.new { |mod| … }` can name the new module —
+				// MRI yields the module to the block. Reference: ruby/ruby v3_4_0
+				// object.c rb_mod_initialize → rb_mod_module_exec(module, 1, &module).
+				vm.classEval(m, blk, []object.Value{m})
 			}
 			return m
 		}}
@@ -9127,6 +9213,56 @@ func (vm *VM) mixinModule(mod, target *RClass, prepend bool) {
 		target.includes = append(target.includes, mod)
 	}
 	bumpMethodSerial()
+}
+
+// cvarOwnerAnc returns the nearest class/module in c's ANCESTOR chain — its own
+// table, its included/prepended modules, then the superclass chain and their
+// modules — that already defines the class variable name, or nil if none does.
+// MRI shares class variables across the whole ancestry, so
+// Module#class_variable_get / _set / _defined? see (and, for _set, write through
+// to) a variable defined in an included module, not only one in a superclass.
+// Reference: ruby/ruby v3_4_0 variable.c rb_cvar_get / rb_cvar_set (cvar_front_klass
+// walks RCLASS_SUPER, which threads the included modules into the ancestor chain).
+func (vm *VM) cvarOwnerAnc(c *RClass, name string) *RClass {
+	for _, anc := range vm.ancestors(c) {
+		if _, ok := anc.cvars[name]; ok {
+			return anc
+		}
+	}
+	return nil
+}
+
+// fireConstAdded invokes cls.const_added(:name) when cls defines that hook as a
+// class/singleton method (def self.const_added), mirroring fireMethodAdded. The
+// default Module#const_added is a private no-op, so only a user override is
+// observable — MRI dispatches const_added on every rb_const_set. Reference:
+// ruby/ruby v3_4_0 variable.c const_set → rb_const_added / object.c const_added.
+func (vm *VM) fireConstAdded(cls *RClass, name string) {
+	if hook := lookupSMethod(cls, "const_added"); hook != nil {
+		vm.invoke(hook, cls, []object.Value{object.SymVal(name)}, nil)
+	}
+}
+
+// topLevelConstNames returns the sorted, de-duplicated names of every top-level
+// constant, which back the no-argument form of Module.constants (equal to
+// Object.constants in MRI). Top-level constants live in two tables in rbgo: the
+// core classes/modules registered in vm.consts and the user-defined ones written
+// to cObject.consts, so the union of the two is enumerated. Only well-formed
+// constant names are reported, filtering any internal bookkeeping key.
+func (vm *VM) topLevelConstNames() []string {
+	set := map[string]bool{}
+	for name := range vm.consts {
+		set[name] = true
+	}
+	for name := range vm.cObject.consts {
+		set[name] = true
+	}
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func constNameArg(v object.Value) string {

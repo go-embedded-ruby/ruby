@@ -44,6 +44,27 @@ func (vm *VM) registerModuleResiduals() {
 		return object.Bool(vm.moduleConstDefined(self.(*RClass), args[0], inherit))
 	})
 
+	// Module#const_source_location(name, inherit=true): in MRI this returns the
+	// [file, line] where the constant was defined, [] for a constant defined in C,
+	// or nil when the name resolves to no constant in the search path. rbgo does
+	// not record where each constant was defined, so a locatable constant cannot
+	// report its position — we return nil (the same value MRI gives an absent
+	// constant) after performing MRI's full name validation, so the NameError /
+	// TypeError contract (a lowercase or malformed name, a Symbol carrying a scope
+	// path, an empty path segment, or a #to_str that fails/returns non-String) is
+	// honoured exactly even though the location itself is unavailable. inherit is
+	// accepted for signature compatibility. Reference: ruby/ruby v3_4_0 variable.c
+	// rb_const_source_location / rb_const_source_location_at.
+	vm.cModule.define("const_source_location", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		segs, _, orig := vm.constPathSegs(args[0])
+		for _, seg := range segs {
+			if !constNameWellFormed(seg) {
+				raise("NameError", "wrong constant name %s", orig)
+			}
+		}
+		return object.NilV
+	})
+
 	// Module#const_missing(sym): the default hook, raising a NameError naming the
 	// missing constant. The toplevel (Object) form omits the "Object::" qualifier,
 	// matching MRI. The NameError carries the name so NameError#name returns it.
