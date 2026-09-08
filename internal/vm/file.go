@@ -1,11 +1,13 @@
 package vm
 
 import (
+	"errors"
 	"os"
 	"os/user"
 	"path"          // always '/'-separated, as Ruby's File is — not path/filepath
 	"path/filepath" // OS-native, only for symlink resolution (File.realpath)
 	"strings"
+	"syscall"
 	stdtime "time"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -63,6 +65,9 @@ func (vm *VM) registerFile() {
 	// is the null device. These let path-handling code branch on File::SEPARATOR
 	// etc. without a runtime error.
 	cFile.consts["SEPARATOR"] = object.NewString("/")
+	// File::Separator is MRI's mixed-case alias of File::SEPARATOR (both "/"); a
+	// separate String object is fine since the spec only checks its value.
+	cFile.consts["Separator"] = object.NewString("/")
 	cFile.consts["ALT_SEPARATOR"] = object.NilV
 	cFile.consts["PATH_SEPARATOR"] = object.NewString(":")
 	cFile.consts["NULL"] = object.NewString("/dev/null")
@@ -202,10 +207,12 @@ func (vm *VM) registerFile() {
 	})
 
 	def("exist?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		oneArg(args)
 		_, err := os.Stat(pathArg(vm, args[0]))
 		return object.Bool(err == nil)
 	})
 	def("file?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		oneArg(args)
 		fi, err := os.Stat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.Mode().IsRegular())
 	})
@@ -220,6 +227,21 @@ func (vm *VM) registerFile() {
 		fi, err := os.Lstat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.Mode()&os.ModeSymlink != 0)
 	})
+	// File.ftype(path) returns the MRI file-type string ("file"/"directory"/
+	// "link"/"characterSpecial"/…). Like MRI it lstats the path (so a symlink is
+	// "link", not its target), takes exactly one #to_path argument, and raises
+	// Errno::ENOENT for a missing path (ruby/ruby v3_4_0 file.c rb_file_s_ftype).
+	def("ftype", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		p := vm.filePathArg(args[0])
+		fi, err := osLstat(p)
+		if err != nil {
+			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_ftype - %s", p)
+		}
+		return object.NewString(newFileStat(fi, p).ftype())
+	})
 	// File.realpath returns the canonical absolute path with every symlink
 	// resolved; the path (and each component) must exist, otherwise — as in MRI —
 	// Errno::ENOENT is raised. An optional second argument is the base directory
@@ -228,7 +250,7 @@ func (vm *VM) registerFile() {
 		p := vm.fileExpand(vm.filePathArg(args[0]), args[1:], true)
 		resolved, err := filepath.EvalSymlinks(p)
 		if err != nil {
-			raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
+			raiseRealpathErr(p)
 		}
 		return object.NewString(toSlash(resolved))
 	})
@@ -264,13 +286,17 @@ func (vm *VM) registerFile() {
 		return object.IntValue(int64(len(args)))
 	}
 	def("delete", delete)
-	def("unlink", delete)
+	// unlink is a genuine alias of delete (one shared Method record), so
+	// File.method(:unlink) == File.method(:delete), as MRI's spec checks.
+	cFile.smethods["unlink"] = cFile.smethods["delete"]
 
 	// rename(old, new) atomically moves a file, returning 0 (MRI). Puppet's
 	// FileSystem#replace_file renames its written temp file over the target, so
 	// state.yaml / last_run_summary.yaml are written atomically.
 	def("rename", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		from, to := pathArg(vm, args[0]), pathArg(vm, args[1])
+		// MRI's rb_file_s_rename checks the two-argument arity before coercing the
+		// paths, so File.rename("a") raises ArgumentError rather than a TypeError.
+		from, to := twoPaths(vm, args)
 		if err := os.Rename(from, to); err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_rename - %s or %s", from, to)
 		}
@@ -282,7 +308,7 @@ func (vm *VM) registerFile() {
 	// a leading mode/owner/time argument followed by one or more paths, returning
 	// the count of paths affected (MRI semantics).
 	def("chmod", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		mode := os.FileMode(intArg(args[0]) & 0o7777)
+		mode := os.FileMode(vm.num2mode(args[0]) & 0o7777)
 		paths := args[1:]
 		for _, a := range paths {
 			p := pathArg(vm, a)
@@ -331,13 +357,16 @@ func (vm *VM) registerFile() {
 	// File.umask([mask]) reads (and optionally sets) the process umask, returning
 	// the previous value — the bracket Puppet::Util.withumask uses. With no
 	// argument it reports the current umask without changing it.
-	def("umask", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	def("umask", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
 		if len(args) == 0 {
 			cur := setUmask(0)
 			setUmask(cur) // restore: a no-arg umask is a pure read
 			return object.IntValue(int64(cur))
 		}
-		return object.IntValue(int64(setUmask(int(intArg(args[0])))))
+		return object.IntValue(int64(setUmask(int(vm.num2mode(args[0])))))
 	})
 	// Access predicates: readable?/writable?/executable? for the current effective
 	// user, plus executable_real? — thin File.stat-and-test wrappers that return
@@ -387,7 +416,9 @@ func (vm *VM) registerFile() {
 		return object.Bool(err == nil && fi.Size() == 0)
 	}
 	def("zero?", zero)
-	def("empty?", zero)
+	// empty? is a genuine alias of zero? (shared Method record), matching MRI's
+	// File.method(:zero?) == File.method(:empty?).
+	cFile.smethods["empty?"] = cFile.smethods["zero?"]
 
 	// Type predicates that delegate to a following stat and degrade to false for a
 	// missing path (MRI's File.pipe?/socket?/…). statTest wraps the stat-and-test.
@@ -437,6 +468,9 @@ func (vm *VM) registerFile() {
 	// identical? reports whether two paths refer to the same file (same device and
 	// inode), following symlinks; false when either path is missing.
 	def("identical?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
+		}
 		fi1, err1 := os.Stat(pathArg(vm, args[0]))
 		fi2, err2 := os.Stat(pathArg(vm, args[1]))
 		return object.Bool(err1 == nil && err2 == nil && os.SameFile(fi1, fi2))
@@ -502,6 +536,11 @@ func (vm *VM) registerFile() {
 	def("truncate", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		p := pathArg(vm, args[0])
 		if err := os.Truncate(p, intArg(args[1])); err != nil {
+			// A negative (invalid) length is Errno::EINVAL; a missing path is
+			// Errno::ENOENT — matching truncate(2) and MRI's rb_file_s_truncate.
+			if errors.Is(err, syscall.EINVAL) {
+				raise("Errno::EINVAL", "Invalid argument @ rb_file_s_truncate - %s", p)
+			}
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_truncate - %s", p)
 		}
 		return object.IntValue(0)
@@ -543,8 +582,14 @@ func raiseLinkErr(err error, marker, src string) {
 // parent directory is resolved and the leaf re-joined. A missing parent raises
 // Errno::ENOENT.
 func realdirpath(p string) string {
-	if resolved, err := filepath.EvalSymlinks(filepath.FromSlash(p)); err == nil {
+	resolved, err := filepath.EvalSymlinks(filepath.FromSlash(p))
+	if err == nil {
 		return toSlash(resolved)
+	}
+	// A symlink loop is Errno::ELOOP even though realdirpath tolerates an absent
+	// leaf — the loop is a hard resolution failure, not a missing final component.
+	if isSymlinkLoop(p) {
+		raise("Errno::ELOOP", "Too many levels of symbolic links @ realpath_rec - %s", p)
 	}
 	dir, base := rubyDirname(p), rubyBasename(p)
 	resolvedDir, err := filepath.EvalSymlinks(filepath.FromSlash(dir))
@@ -552,6 +597,57 @@ func realdirpath(p string) string {
 		raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", dir)
 	}
 	return toSlash(filepath.Join(resolvedDir, base))
+}
+
+// isSymlinkLoop reports whether resolving p fails with ELOOP (a symlink cycle).
+// filepath.EvalSymlinks returns a bare "too many links" error that does NOT wrap
+// syscall.ELOOP, so the real errno is recovered by re-stating the path (os.Stat
+// follows the link and surfaces the kernel's ELOOP).
+func isSymlinkLoop(p string) bool {
+	_, err := osStat(filepath.FromSlash(p))
+	return errors.Is(err, syscall.ELOOP)
+}
+
+// raiseRealpathErr maps a File.realpath EvalSymlinks failure to the MRI errno: a
+// symbolic-link loop is Errno::ELOOP, anything else (a missing component) is
+// Errno::ENOENT.
+func raiseRealpathErr(p string) {
+	if isSymlinkLoop(p) {
+		raise("Errno::ELOOP", "Too many levels of symbolic links @ realpath_rec - %s", p)
+	}
+	raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
+}
+
+// oneArg enforces the single-argument arity MRI's one-path File predicates check
+// before touching the filesystem (File.exist?/file?/…), raising the ArgumentError
+// MRI raises for any other count.
+func oneArg(args []object.Value) {
+	if len(args) != 1 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+	}
+}
+
+// num2mode coerces a File.chmod / File.umask mode argument the way MRI's
+// NUM2MODET (rb_num2int) does: an Integer is taken directly, a Bignum that does
+// not fit a C long raises RangeError, and any other value is coerced through
+// #to_int (so a mock that answers #to_int is accepted rather than a TypeError).
+// It is the mode-coercing counterpart of coerceInt, which lacks the Bignum range
+// check the chmod/umask specs exercise.
+func (vm *VM) num2mode(v object.Value) int64 {
+	switch n := v.(type) {
+	case object.Integer:
+		return int64(n)
+	case *object.Bignum:
+		if n.I.IsInt64() {
+			return n.I.Int64()
+		}
+		raise("RangeError", "bignum too big to convert into 'unsigned long'")
+	}
+	if vm.respondsTo(v, "to_int") {
+		return vm.num2mode(vm.send(v, "to_int", nil, nil))
+	}
+	raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(v).name)
+	return 0
 }
 
 // fileChmod / fileChown / fileLchown / fileChtimes are seams over the os package

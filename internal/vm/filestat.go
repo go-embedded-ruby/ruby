@@ -446,6 +446,10 @@ func (vm *VM) registerFileStat() {
 	}}
 
 	vm.registerFileTest()
+
+	// Dir includes Enumerable — deferred here because registerDir runs before the
+	// prelude that defines the module, and registerFileStat runs after it.
+	vm.includeDirEnumerable()
 }
 
 // registerFileTest installs the FileTest module — the predicate surface Puppet
