@@ -137,11 +137,13 @@ func (vm *VM) registerSpawn() {
 		o.pipeRefresh()
 		avail := len(o.buf) - o.pos
 		if avail <= 0 {
-			if o.pipeWriterClosed() {
+			// A regular stream (File/StringIO) at end-of-data, or a pipe whose write
+			// end is closed, is at EOF: clear the output buffer and raise EOFError.
+			if o.pipe == nil || o.pipeWriterClosed() {
 				ioReadResult(nil, buf) // io_set_read_length(str, 0) clears the buffer, then EOF
 				raise("EOFError", "end of file reached")
 			}
-			// No data yet and the write end is open: a real readpartial would block;
+			// A pipe with the write end still open: a real readpartial would block;
 			// the synchronous model has no more bytes coming, so report would-block.
 			raise("Errno::EAGAIN", "Resource temporarily unavailable - read would block")
 		}

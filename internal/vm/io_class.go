@@ -120,37 +120,14 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		if len(args) >= 4 && !object.IsNil(args[3]) {
 			srcOffset, hasOff = int(intArg(args[3])), true
 		}
-		var data *object.String
-		if p, ok := args[0].(*object.String); ok {
-			ra := []object.Value{p}
-			if hasLen {
-				ra = append(ra, object.IntValue(int64(length)))
-				if hasOff {
-					ra = append(ra, object.IntValue(int64(srcOffset)))
-				}
-			}
-			data = vm.ioReadFile(ra, true).(*object.String)
-		} else {
-			if hasOff {
-				raise("ArgumentError", "cannot specify src_offset for non-IO")
-			}
-			var ra []object.Value
-			if hasLen {
-				ra = append(ra, object.IntValue(int64(length)))
-			}
-			r := vm.send(args[0], "read", ra, nil)
-			if s, ok := r.(*object.String); ok {
-				data = s
-			} else {
-				data = object.NewString("")
-			}
+		// A zero-length copy transfers nothing and touches neither object — MRI
+		// never calls #read on the source nor #write on the destination.
+		if hasLen && length == 0 {
+			return object.IntValue(0)
 		}
-		if p, ok := args[1].(*object.String); ok {
-			vm.ioWriteFile([]object.Value{p, data})
-		} else {
-			vm.send(args[1], "write", []object.Value{data}, nil)
-		}
-		return object.IntValue(int64(len(data.Bytes())))
+		data := vm.copyStreamRead(args[0], length, hasLen, srcOffset, hasOff)
+		vm.copyStreamWrite(args[1], data)
+		return object.IntValue(int64(len(data)))
 	})
 	def("foreach", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		pos, opts := splitIOOpts(args)
@@ -327,6 +304,138 @@ func (vm *VM) ioReadFile(args []object.Value, forceBinary bool) object.Value {
 		return object.NewStringBytesEnc(b, enc)
 	}
 	return object.NewStringBytes(b)
+}
+
+// copyStreamRead reads the bytes IO.copy_stream should transfer from its source
+// argument: a real IO (File/pipe/StringIO), a path String or #to_path object, or
+// any object answering #readpartial/#read. io.c copy_stream:
+//   - an IO source with a src_offset is pread at that offset (only a descriptor-
+//     backed stream — a File — can; a StringIO raises "cannot specify src_offset
+//     for non-IO") without moving its position; without an offset it reads from
+//     the current position, advancing it;
+//   - a path source is read with the length/offset directly;
+//   - a bare object is drained through #readpartial (preferred) or #read(len, buf).
+func (vm *VM) copyStreamRead(src object.Value, length int, hasLen bool, srcOffset int, hasOff bool) []byte {
+	if o, ok := src.(*IOObj); ok {
+		if hasOff {
+			if ioIsStringIO(o) || o.path == "" {
+				raise("ArgumentError", "cannot specify src_offset for non-IO")
+			}
+			ioCheckReadable(o)
+			o.pipeRefresh()
+			start := srcOffset
+			if start > len(o.buf) {
+				start = len(o.buf)
+			}
+			end := len(o.buf)
+			if hasLen && start+length < end {
+				end = start + length
+			}
+			return append([]byte(nil), o.buf[start:end]...)
+		}
+		var ra []object.Value
+		if hasLen {
+			ra = append(ra, object.IntValue(int64(length)))
+		}
+		return strBytesOrEmpty(vm.send(o, "read", ra, nil))
+	}
+	if _, isStr := src.(*object.String); isStr || vm.respondsToDynamic(src, "to_path") {
+		ra := []object.Value{object.NewString(pathArg(vm, src))}
+		if hasLen || hasOff {
+			if hasLen {
+				ra = append(ra, object.IntValue(int64(length)))
+			} else {
+				ra = append(ra, object.NilV)
+			}
+			if hasOff {
+				ra = append(ra, object.IntValue(int64(srcOffset)))
+			}
+		}
+		return vm.ioReadFile(ra, true).(*object.String).Bytes()
+	}
+	if hasOff {
+		raise("ArgumentError", "cannot specify src_offset for non-IO")
+	}
+	return vm.copyStreamReadObject(src, length, hasLen)
+}
+
+// copyStreamReadObject drains a duck-typed source that is neither an IO nor a
+// path: MRI calls #readpartial(len, buf) when the object defines it, otherwise
+// #read(len, buf), looping until EOF (a nil return, a short read, or the EOFError
+// #readpartial raises).
+func (vm *VM) copyStreamReadObject(src object.Value, length int, hasLen bool) []byte {
+	const chunk = 16384
+	usePartial := vm.respondsToDynamic(src, "readpartial")
+	want := chunk
+	var out []byte
+	for {
+		if hasLen {
+			if remaining := length - len(out); remaining <= 0 {
+				break
+			} else if remaining < want {
+				want = remaining
+			}
+		}
+		buf := object.NewStringBytesEnc(nil, "ASCII-8BIT")
+		var r object.Value
+		stop := false
+		if usePartial {
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						// #readpartial signals end-of-input by raising EOFError.
+						if e, ok := rec.(RubyError); ok && e.Class == "EOFError" {
+							stop = true
+							return
+						}
+						panic(rec)
+					}
+				}()
+				r = vm.send(src, "readpartial", []object.Value{object.IntValue(int64(want)), buf}, nil)
+			}()
+		} else {
+			r = vm.send(src, "read", []object.Value{object.IntValue(int64(want)), buf}, nil)
+		}
+		if stop || object.IsNil(r) {
+			break
+		}
+		b := strBytesOrEmpty(r)
+		out = append(out, b...)
+		if !usePartial && len(b) < want { // #read returns a short/empty read at EOF
+			break
+		}
+		if len(b) == 0 {
+			break
+		}
+	}
+	return out
+}
+
+// copyStreamWrite writes the copied bytes to IO.copy_stream's destination: a real
+// IO (its buffer is flushed so a File destination reaches disk immediately, as
+// copy_stream's descriptor-level write does), a path String / #to_path object
+// (truncating write), or any object answering #write.
+func (vm *VM) copyStreamWrite(dst object.Value, data []byte) {
+	s := object.NewStringBytesEnc(append([]byte(nil), data...), "ASCII-8BIT")
+	if o, ok := dst.(*IOObj); ok {
+		vm.send(o, "write", []object.Value{s}, nil)
+		vm.send(o, "flush", nil, nil)
+		return
+	}
+	if _, isStr := dst.(*object.String); isStr || vm.respondsToDynamic(dst, "to_path") {
+		vm.ioWriteFile([]object.Value{object.NewString(pathArg(vm, dst)), s})
+		return
+	}
+	vm.send(dst, "write", []object.Value{s}, nil)
+}
+
+// strBytesOrEmpty returns v's bytes when it is a String, else an empty slice
+// (a nil read at EOF).
+func strBytesOrEmpty(v object.Value) []byte {
+	if s, ok := v.(*object.String); ok {
+		return s.Bytes()
+	}
+	return nil
 }
 
 // ioWriteFile implements IO.write / File.write / IO.binwrite / File.binwrite:
