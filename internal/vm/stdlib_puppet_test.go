@@ -224,9 +224,11 @@ K = DelegateClass(Array); p K.new([9, 8]).first`, "9\n"},
 		{"p_user_inspect", `class Z; def inspect; "<Z>"; end; end; p Z.new`, "<Z>\n"},
 		{"puts_array_flatten", `puts [1, [2, 3]]`, "1\n2\n3\n"},
 		{"puts_empty_array", `puts []; puts "after"`, "after\n"},
-		// to_s/inspect whose result is non-String falls back to the native string.
+		// #puts coerces a non-String #to_s result to the native string. #p, matching
+		// MRI's rb_inspect/rb_obj_as_string, coerces a non-String #inspect result
+		// with #to_s (here 5 -> "5"), not to the native #inspect.
 		{"puts_nonstring_to_s", `class Z; def to_s; 5; end; end; puts Z.new`, "#<Z>\n"},
-		{"p_nonstring_inspect", `class Z; def inspect; 5; end; end; p Z.new`, "#<Z>\n"},
+		{"p_nonstring_inspect", `class Z; def inspect; 5; end; end; p Z.new`, "5\n"},
 
 		// --- Kernel#hash for the value types and objects -----------------------
 		{"hash_integer", `p 5.hash`, "5\n"},
