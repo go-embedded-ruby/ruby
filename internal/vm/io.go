@@ -97,6 +97,7 @@ type IOObj struct {
 	// standard stream (STDOUT/STDERR) was rebound to via #reopen, so a forked
 	// block's writes (and Kernel.exec's captured output) land on the pipe.
 	pipe       *pipeBuf
+	pipeSynced int // bytes of pipe.data already folded into this reader's buf
 	isWriteEnd bool
 	reopened   *IOObj
 }
@@ -164,12 +165,16 @@ func (o *IOObj) syncStr() {
 	}
 }
 
-// pipeRefresh snapshots a pipe reader's shared buffer into the IOObj's own
-// buf/pos view so the existing StringIO read methods (read/gets/eof?) operate on
-// the latest pipe contents. It is a no-op for non-pipe streams.
+// pipeRefresh folds any newly written pipe bytes into the reader's own buf/pos
+// view so the existing StringIO read methods (read/gets/eof?) operate on the
+// latest pipe contents. Bytes are appended rather than the whole buffer being
+// re-snapshotted, so characters pushed back with #ungetc/#ungetbyte (which are
+// spliced into buf ahead of the cursor) survive a refresh. It is a no-op for
+// non-pipe streams.
 func (o *IOObj) pipeRefresh() {
-	if o.pipe != nil && !o.isWriteEnd {
-		o.buf = o.pipe.data
+	if o.pipe != nil && !o.isWriteEnd && o.pipeSynced < len(o.pipe.data) {
+		o.buf = append(o.buf, o.pipe.data[o.pipeSynced:]...)
+		o.pipeSynced = len(o.pipe.data)
 	}
 }
 

@@ -108,7 +108,50 @@ func (vm *VM) registerSpawn() {
 		return s
 	}
 	cIO.define("read_nonblock", nonblock)
-	cIO.define("readpartial", nonblock)
+
+	// readpartial(maxlen, outbuf = nil): a length-limited read that, unlike
+	// read_nonblock, blocks for data rather than raising EAGAIN. It returns at most
+	// maxlen bytes of whatever is already buffered; at EOF (write end closed, no
+	// bytes) it raises EOFError. io.c io_getpartial / rb_io_readpartial: a negative
+	// maxlen raises ArgumentError; a closed/unreadable stream raises IOError before
+	// the maxlen==0 shortcut; maxlen==0 returns the (cleared) buffer immediately;
+	// the output buffer receives the data and is returned (its encoding preserved),
+	// and is cleared on the EOF error path.
+	cIO.define("readpartial", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		n := vm.ioOfftArg(args[0]) // NUM2LONG (#to_int); a Bignum raises RangeError
+		if n < 0 {
+			raise("ArgumentError", "negative length %d given", n)
+		}
+		var buf *object.String
+		if len(args) > 1 && !object.IsNil(args[1]) {
+			buf, _ = args[1].(*object.String)
+		}
+		ioCheckReadable(o) // closed / read half shut → IOError, before the len==0 case
+		if n == 0 {
+			return ioReadResult(nil, buf) // empty read: the (cleared) buffer, no blocking
+		}
+		o.pipeRefresh()
+		avail := len(o.buf) - o.pos
+		if avail <= 0 {
+			if o.pipeWriterClosed() {
+				ioReadResult(nil, buf) // io_set_read_length(str, 0) clears the buffer, then EOF
+				raise("EOFError", "end of file reached")
+			}
+			// No data yet and the write end is open: a real readpartial would block;
+			// the synchronous model has no more bytes coming, so report would-block.
+			raise("Errno::EAGAIN", "Resource temporarily unavailable - read would block")
+		}
+		if n > avail {
+			n = avail
+		}
+		data := o.buf[o.pos : o.pos+n]
+		o.pos += n
+		return ioReadResult(data, buf)
+	})
 
 	// reopen rebinds a standard stream onto another IO (Puppet's safe_posix_fork
 	// does STDOUT.reopen(pipe_writer)); subsequent writes forward to the target.
