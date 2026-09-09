@@ -735,6 +735,34 @@ func (vm *VM) curIO(global string, w io.Writer, label string) *IOObj {
 	return &IOObj{cls: vm.consts["IO"].(*RClass), w: w, label: label}
 }
 
+// ioWriteAll writes every argument to o and returns the total byte count, the
+// shared core of IO#write and IO#write_nonblock. Each argument is coerced to a
+// String (rb_obj_as_string / #to_s); an all-empty write returns 0 before any
+// closed/writable check (io.c io_write returns before rb_io_check_writable when
+// the string is empty), so writing "" to a read-only or closed stream does not
+// raise, while a non-empty write does. A non-BINARY external encoding transcodes
+// each argument (ioWriteEncode).
+func (vm *VM) ioWriteAll(o *IOObj, args []object.Value) int64 {
+	strs := make([]*object.String, len(args))
+	empty := true
+	for i, a := range args {
+		s := vm.asWriteString(a)
+		strs[i] = s
+		if len(s.Bytes()) != 0 {
+			empty = false
+		}
+	}
+	if empty {
+		return 0
+	}
+	ioCheckOpen(o)
+	n := 0
+	for _, s := range strs {
+		n += o.writeBytes(vm.ioWriteEncode(o, s))
+	}
+	return int64(n)
+}
+
 // asWriteString coerces a value to the String IO#write should write, following
 // rb_obj_as_string: a String is returned unchanged (never re-coerced, so a
 // frozen argument stays untouched); anything else is sent #to_s, with a
@@ -773,29 +801,7 @@ func (vm *VM) ioWriteEncode(o *IOObj, s *object.String) []byte {
 // and StringIO).
 func defIOWrite(cls *RClass) {
 	cls.define("write", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		// Each argument is coerced to a String (rb_obj_as_string / #to_s). MRI's
-		// io_write returns 0 for an empty write before it reaches
-		// rb_io_check_writable, so writing "" to a read-only or closed stream does
-		// not raise; a non-empty write does.
-		strs := make([]*object.String, len(args))
-		empty := true
-		for i, a := range args {
-			s := vm.asWriteString(a)
-			strs[i] = s
-			if len(s.Bytes()) != 0 {
-				empty = false
-			}
-		}
-		if empty {
-			return object.IntValue(0)
-		}
-		ioCheckOpen(o)
-		n := 0
-		for _, s := range strs {
-			n += o.writeBytes(vm.ioWriteEncode(o, s))
-		}
-		return object.IntValue(int64(n))
+		return object.IntValue(vm.ioWriteAll(self.(*IOObj), args))
 	})
 	cls.define("<<", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)

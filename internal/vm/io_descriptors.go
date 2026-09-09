@@ -209,6 +209,37 @@ func defIOReadExtra(cls *RClass) {
 // binary-mode / autoclose / fdatasync accessors. pread/pwrite address the buffer
 // by absolute offset without disturbing the cursor.
 func defIOSeekable(cls *RClass) {
+	// write_nonblock(string, exception: true): a non-blocking write. To a file it
+	// writes the string and returns the byte count exactly like IO#write (io.c
+	// io_write_nonblock shares io_binwrite). To a pipe it models a finite kernel
+	// buffer: once the unread backlog reaches the pipe capacity a further write
+	// would block, so it reports would-block — raising Errno::EAGAIN, or returning
+	// :wait_writable when exception: false is given. It is an IO/File method (not
+	// StringIO).
+	cls.define("write_nonblock", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		pos, opts := splitIOOpts(args)
+		if len(pos) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		raiseOnBlock := true
+		if opts != nil {
+			if v, ok := opts.Get(object.Symbol("exception")); ok {
+				raiseOnBlock = v.Truthy()
+			}
+		}
+		if o.pipe != nil && o.isWriteEnd {
+			// A typical pipe holds 64 KiB of unread data before a write blocks.
+			const pipeCapacity = 65536
+			if len(o.pipe.data)-o.pipe.rpos >= pipeCapacity {
+				if !raiseOnBlock {
+					return object.Symbol("wait_writable")
+				}
+				raise("Errno::EAGAIN", "Resource temporarily unavailable - write would block")
+			}
+		}
+		return object.IntValue(vm.ioWriteAll(o, pos[:1]))
+	})
 	cls.define("pread", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		// rb_io_pread: len (NUM2SIZET) and offset (NUM2OFFT) are coerced with
