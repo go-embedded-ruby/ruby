@@ -48,10 +48,35 @@ func (execSentinel) Error() string { return "exec sentinel" }
 func (vm *VM) registerSpawn() {
 	cIO := vm.consts["IO"].(*RClass)
 
-	cIO.smethods["pipe"] = &Method{name: "pipe", owner: cIO, native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+	cIO.smethods["pipe"] = &Method{name: "pipe", owner: cIO, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// IO.pipe is inherited: when called on a subclass, both ends are instances
+		// of that subclass (io.c rb_io_s_pipe uses the receiver class).
+		cls := cIO
+		if c, ok := self.(*RClass); ok {
+			cls = c
+		}
+		// Encoding arguments (an optional trailing options Hash is ignored — it
+		// only carries econv flags) configure the READ end; the write end carries
+		// no external/internal encoding. With no arguments the read end captures
+		// the current Encoding defaults at creation time.
+		pos, _ := splitIOOpts(args)
+		ext, intn := vm.encPairFromArgs(pos)
+		if len(pos) == 0 {
+			if vm.defExternalEnc != nil {
+				ext = vm.defExternalEnc.name
+			}
+			if vm.defInternalEnc != nil {
+				intn = vm.defInternalEnc.name
+			}
+		}
+		// An internal encoding equal to the external means no transcoding
+		// (io.c rb_io_ext_int_to_enc leaves enc2 NULL), so it is dropped.
+		if intn == ext {
+			intn = ""
+		}
 		buf := &pipeBuf{}
-		reader := &IOObj{cls: cIO, pipe: buf, label: "pipe-r"}
-		writer := &IOObj{cls: cIO, pipe: buf, isWriteEnd: true, label: "pipe-w"}
+		reader := &IOObj{cls: cls, pipe: buf, label: "pipe-r", extEnc: ext, intEnc: intn}
+		writer := &IOObj{cls: cls, pipe: buf, isWriteEnd: true, writable: true, label: "pipe-w"}
 		pair := object.NewArray(reader, writer)
 		if blk != nil {
 			// IO.pipe { |r, w| ... } yields the pair and closes both ends after.
@@ -83,7 +108,52 @@ func (vm *VM) registerSpawn() {
 		return s
 	}
 	cIO.define("read_nonblock", nonblock)
-	cIO.define("readpartial", nonblock)
+
+	// readpartial(maxlen, outbuf = nil): a length-limited read that, unlike
+	// read_nonblock, blocks for data rather than raising EAGAIN. It returns at most
+	// maxlen bytes of whatever is already buffered; at EOF (write end closed, no
+	// bytes) it raises EOFError. io.c io_getpartial / rb_io_readpartial: a negative
+	// maxlen raises ArgumentError; a closed/unreadable stream raises IOError before
+	// the maxlen==0 shortcut; maxlen==0 returns the (cleared) buffer immediately;
+	// the output buffer receives the data and is returned (its encoding preserved),
+	// and is cleared on the EOF error path.
+	cIO.define("readpartial", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		n := vm.ioOfftArg(args[0]) // NUM2LONG (#to_int); a Bignum raises RangeError
+		if n < 0 {
+			raise("ArgumentError", "negative length %d given", n)
+		}
+		var buf *object.String
+		if len(args) > 1 && !object.IsNil(args[1]) {
+			buf, _ = args[1].(*object.String)
+		}
+		ioCheckReadable(o) // closed / read half shut → IOError, before the len==0 case
+		if n == 0 {
+			return ioReadResult(nil, buf) // empty read: the (cleared) buffer, no blocking
+		}
+		o.pipeRefresh()
+		avail := len(o.buf) - o.pos
+		if avail <= 0 {
+			// A regular stream (File/StringIO) at end-of-data, or a pipe whose write
+			// end is closed, is at EOF: clear the output buffer and raise EOFError.
+			if o.pipe == nil || o.pipeWriterClosed() {
+				ioReadResult(nil, buf) // io_set_read_length(str, 0) clears the buffer, then EOF
+				raise("EOFError", "end of file reached")
+			}
+			// A pipe with the write end still open: a real readpartial would block;
+			// the synchronous model has no more bytes coming, so report would-block.
+			raise("Errno::EAGAIN", "Resource temporarily unavailable - read would block")
+		}
+		if n > avail {
+			n = avail
+		}
+		data := o.buf[o.pos : o.pos+n]
+		o.pos += n
+		return ioReadResult(data, buf)
+	})
 
 	// reopen rebinds a standard stream onto another IO (Puppet's safe_posix_fork
 	// does STDOUT.reopen(pipe_writer)); subsequent writes forward to the target.

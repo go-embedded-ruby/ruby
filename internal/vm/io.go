@@ -97,6 +97,7 @@ type IOObj struct {
 	// standard stream (STDOUT/STDERR) was rebound to via #reopen, so a forked
 	// block's writes (and Kernel.exec's captured output) land on the pipe.
 	pipe       *pipeBuf
+	pipeSynced int // bytes of pipe.data already folded into this reader's buf
 	isWriteEnd bool
 	reopened   *IOObj
 }
@@ -164,12 +165,16 @@ func (o *IOObj) syncStr() {
 	}
 }
 
-// pipeRefresh snapshots a pipe reader's shared buffer into the IOObj's own
-// buf/pos view so the existing StringIO read methods (read/gets/eof?) operate on
-// the latest pipe contents. It is a no-op for non-pipe streams.
+// pipeRefresh folds any newly written pipe bytes into the reader's own buf/pos
+// view so the existing StringIO read methods (read/gets/eof?) operate on the
+// latest pipe contents. Bytes are appended rather than the whole buffer being
+// re-snapshotted, so characters pushed back with #ungetc/#ungetbyte (which are
+// spliced into buf ahead of the cursor) survive a refresh. It is a no-op for
+// non-pipe streams.
 func (o *IOObj) pipeRefresh() {
-	if o.pipe != nil && !o.isWriteEnd {
-		o.buf = o.pipe.data
+	if o.pipe != nil && !o.isWriteEnd && o.pipeSynced < len(o.pipe.data) {
+		o.buf = append(o.buf, o.pipe.data[o.pipeSynced:]...)
+		o.pipeSynced = len(o.pipe.data)
 	}
 }
 
@@ -730,17 +735,73 @@ func (vm *VM) curIO(global string, w io.Writer, label string) *IOObj {
 	return &IOObj{cls: vm.consts["IO"].(*RClass), w: w, label: label}
 }
 
+// ioWriteAll writes every argument to o and returns the total byte count, the
+// shared core of IO#write and IO#write_nonblock. Each argument is coerced to a
+// String (rb_obj_as_string / #to_s); an all-empty write returns 0 before any
+// closed/writable check (io.c io_write returns before rb_io_check_writable when
+// the string is empty), so writing "" to a read-only or closed stream does not
+// raise, while a non-empty write does. A non-BINARY external encoding transcodes
+// each argument (ioWriteEncode).
+func (vm *VM) ioWriteAll(o *IOObj, args []object.Value) int64 {
+	strs := make([]*object.String, len(args))
+	empty := true
+	for i, a := range args {
+		s := vm.asWriteString(a)
+		strs[i] = s
+		if len(s.Bytes()) != 0 {
+			empty = false
+		}
+	}
+	if empty {
+		return 0
+	}
+	ioCheckOpen(o)
+	n := 0
+	for _, s := range strs {
+		n += o.writeBytes(vm.ioWriteEncode(o, s))
+	}
+	return int64(n)
+}
+
+// asWriteString coerces a value to the String IO#write should write, following
+// rb_obj_as_string: a String is returned unchanged (never re-coerced, so a
+// frozen argument stays untouched); anything else is sent #to_s, with a
+// non-String result falling back to the object's default string form.
+func (vm *VM) asWriteString(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if s, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
+		return s
+	}
+	return object.NewString(v.ToS())
+}
+
+// ioWriteEncode returns the bytes a write of s should place on the stream,
+// applying MRI's write conversion (io.c do_writeconv / make_writeconv): when the
+// stream has an explicit external encoding that is not BINARY, each written
+// String is transcoded from its own encoding to that external encoding
+// (rb_str_encode), so unrepresentable characters raise
+// Encoding::UndefinedConversionError / InvalidByteSequenceError. A stream with
+// no explicit external encoding, a BINARY one, or a StringIO (whose bytes stay
+// in the backing String's encoding) writes the argument's bytes unchanged. The
+// argument String is never mutated — the conversion produces a new String.
+func (vm *VM) ioWriteEncode(o *IOObj, s *object.String) []byte {
+	ext := o.extEnc
+	if ext == "" || ext == "ASCII-8BIT" || ext == "BINARY" || ioIsStringIO(o) {
+		return s.Bytes()
+	}
+	if s.EncName() == ext {
+		return s.Bytes()
+	}
+	return vm.stringEncode(s, []object.Value{object.NewString(ext)}).Bytes()
+}
+
 // defIOWrite defines the writing half of the IO protocol on cls (shared by IO
 // and StringIO).
 func defIOWrite(cls *RClass) {
 	cls.define("write", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		ioCheckOpen(o)
-		n := 0
-		for _, a := range args {
-			n += o.writeStr(vm.displayStr(a))
-		}
-		return object.IntValue(int64(n))
+		return object.IntValue(vm.ioWriteAll(self.(*IOObj), args))
 	})
 	cls.define("<<", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
@@ -980,6 +1041,51 @@ func (vm *VM) ioReadEnc(o *IOObj) (ext, intn string) {
 	}
 	if ext == "ASCII-8BIT" || intn == ext {
 		intn = ""
+	}
+	return ext, intn
+}
+
+// stripBOMPrefix removes a leading "BOM|" marker (case-insensitive) from an
+// encoding name. MRI's rb_io_extract_encoding_option treats "BOM|UTF-8" as the
+// UTF-8 encoding plus a byte-order-mark flag; for name resolution only the
+// encoding part matters (io.c parse_mode_enc / rb_econv_prepare_options).
+func stripBOMPrefix(name string) string {
+	if len(name) >= 4 && strings.EqualFold(name[:4], "bom|") {
+		return name[4:]
+	}
+	return name
+}
+
+// encPairFromArgs resolves an (external, internal) encoding-name pair from the
+// positional encoding arguments accepted by IO.pipe (and IO.new's ext/int form):
+// the first positional may be an Encoding, an encoding name, a combined
+// "ext:int" name, or an object answering #to_str; the second, when present,
+// names the internal encoding. A leading "BOM|" marker on a name is stripped.
+// Unset sides come back as "". io.c: rb_io_extract_modeenc / io_extract_encoding.
+func (vm *VM) encPairFromArgs(pos []object.Value) (ext, intn string) {
+	if len(pos) >= 1 && !object.IsNil(pos[0]) {
+		s, isStr := pos[0].(*object.String)
+		if !isStr {
+			if _, isEnc := pos[0].(*encodingObj); !isEnc && vm.respondsToDynamic(pos[0], "to_str") {
+				s, isStr = vm.send(pos[0], "to_str", nil, nil).(*object.String)
+			}
+		}
+		if isStr {
+			name := stripBOMPrefix(s.Str())
+			// "ext:int" names both sides, but only when a single positional was
+			// given — a separate internal argument takes precedence.
+			if i := strings.IndexByte(name, ':'); i >= 0 && (len(pos) < 2 || object.IsNil(pos[1])) {
+				ext = vm.lookupEncodingName(name[:i]).name
+				intn = vm.lookupEncodingName(name[i+1:]).name
+			} else {
+				ext = vm.lookupEncodingName(name).name
+			}
+		} else {
+			ext = vm.encodingArg(pos[0]).name
+		}
+	}
+	if len(pos) >= 2 && !object.IsNil(pos[1]) {
+		intn = vm.encodingArg(pos[1]).name
 	}
 	return ext, intn
 }
@@ -1667,12 +1773,14 @@ func (vm *VM) resolveGetsArgs(args []object.Value) (sep getsSep, limit int, chom
 			default:
 				// Otherwise a single non-String positional is the byte limit,
 				// coerced via #to_int (gets(obj) where obj defines only #to_int).
-				limit = int(vm.toIntCoerce(args[0]))
+				// The limit is a C off_t, so a Bignum too large raises RangeError
+				// rather than TypeError (io.c rb_io_getline_1 / NUM2OFFT).
+				limit = vm.ioOfftArg(args[0])
 			}
 		}
 	}
 	if len(args) > 1 && !object.IsNil(args[1]) {
-		limit = int(vm.toIntCoerce(args[1]))
+		limit = vm.ioOfftArg(args[1])
 	}
 	return sep, limit, chomp
 }
