@@ -48,10 +48,35 @@ func (execSentinel) Error() string { return "exec sentinel" }
 func (vm *VM) registerSpawn() {
 	cIO := vm.consts["IO"].(*RClass)
 
-	cIO.smethods["pipe"] = &Method{name: "pipe", owner: cIO, native: func(vm *VM, _ object.Value, _ []object.Value, blk *Proc) object.Value {
+	cIO.smethods["pipe"] = &Method{name: "pipe", owner: cIO, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// IO.pipe is inherited: when called on a subclass, both ends are instances
+		// of that subclass (io.c rb_io_s_pipe uses the receiver class).
+		cls := cIO
+		if c, ok := self.(*RClass); ok {
+			cls = c
+		}
+		// Encoding arguments (an optional trailing options Hash is ignored — it
+		// only carries econv flags) configure the READ end; the write end carries
+		// no external/internal encoding. With no arguments the read end captures
+		// the current Encoding defaults at creation time.
+		pos, _ := splitIOOpts(args)
+		ext, intn := vm.encPairFromArgs(pos)
+		if len(pos) == 0 {
+			if vm.defExternalEnc != nil {
+				ext = vm.defExternalEnc.name
+			}
+			if vm.defInternalEnc != nil {
+				intn = vm.defInternalEnc.name
+			}
+		}
+		// An internal encoding equal to the external means no transcoding
+		// (io.c rb_io_ext_int_to_enc leaves enc2 NULL), so it is dropped.
+		if intn == ext {
+			intn = ""
+		}
 		buf := &pipeBuf{}
-		reader := &IOObj{cls: cIO, pipe: buf, label: "pipe-r"}
-		writer := &IOObj{cls: cIO, pipe: buf, isWriteEnd: true, label: "pipe-w"}
+		reader := &IOObj{cls: cls, pipe: buf, label: "pipe-r", extEnc: ext, intEnc: intn}
+		writer := &IOObj{cls: cls, pipe: buf, isWriteEnd: true, writable: true, label: "pipe-w"}
 		pair := object.NewArray(reader, writer)
 		if blk != nil {
 			// IO.pipe { |r, w| ... } yields the pair and closes both ends after.

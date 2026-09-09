@@ -730,15 +730,65 @@ func (vm *VM) curIO(global string, w io.Writer, label string) *IOObj {
 	return &IOObj{cls: vm.consts["IO"].(*RClass), w: w, label: label}
 }
 
+// asWriteString coerces a value to the String IO#write should write, following
+// rb_obj_as_string: a String is returned unchanged (never re-coerced, so a
+// frozen argument stays untouched); anything else is sent #to_s, with a
+// non-String result falling back to the object's default string form.
+func (vm *VM) asWriteString(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if s, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
+		return s
+	}
+	return object.NewString(v.ToS())
+}
+
+// ioWriteEncode returns the bytes a write of s should place on the stream,
+// applying MRI's write conversion (io.c do_writeconv / make_writeconv): when the
+// stream has an explicit external encoding that is not BINARY, each written
+// String is transcoded from its own encoding to that external encoding
+// (rb_str_encode), so unrepresentable characters raise
+// Encoding::UndefinedConversionError / InvalidByteSequenceError. A stream with
+// no explicit external encoding, a BINARY one, or a StringIO (whose bytes stay
+// in the backing String's encoding) writes the argument's bytes unchanged. The
+// argument String is never mutated — the conversion produces a new String.
+func (vm *VM) ioWriteEncode(o *IOObj, s *object.String) []byte {
+	ext := o.extEnc
+	if ext == "" || ext == "ASCII-8BIT" || ext == "BINARY" || ioIsStringIO(o) {
+		return s.Bytes()
+	}
+	if s.EncName() == ext {
+		return s.Bytes()
+	}
+	return vm.stringEncode(s, []object.Value{object.NewString(ext)}).Bytes()
+}
+
 // defIOWrite defines the writing half of the IO protocol on cls (shared by IO
 // and StringIO).
 func defIOWrite(cls *RClass) {
 	cls.define("write", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		// Each argument is coerced to a String (rb_obj_as_string / #to_s). MRI's
+		// io_write returns 0 for an empty write before it reaches
+		// rb_io_check_writable, so writing "" to a read-only or closed stream does
+		// not raise; a non-empty write does.
+		strs := make([]*object.String, len(args))
+		empty := true
+		for i, a := range args {
+			s := vm.asWriteString(a)
+			strs[i] = s
+			if len(s.Bytes()) != 0 {
+				empty = false
+			}
+		}
+		if empty {
+			return object.IntValue(0)
+		}
 		ioCheckOpen(o)
 		n := 0
-		for _, a := range args {
-			n += o.writeStr(vm.displayStr(a))
+		for _, s := range strs {
+			n += o.writeBytes(vm.ioWriteEncode(o, s))
 		}
 		return object.IntValue(int64(n))
 	})
@@ -980,6 +1030,51 @@ func (vm *VM) ioReadEnc(o *IOObj) (ext, intn string) {
 	}
 	if ext == "ASCII-8BIT" || intn == ext {
 		intn = ""
+	}
+	return ext, intn
+}
+
+// stripBOMPrefix removes a leading "BOM|" marker (case-insensitive) from an
+// encoding name. MRI's rb_io_extract_encoding_option treats "BOM|UTF-8" as the
+// UTF-8 encoding plus a byte-order-mark flag; for name resolution only the
+// encoding part matters (io.c parse_mode_enc / rb_econv_prepare_options).
+func stripBOMPrefix(name string) string {
+	if len(name) >= 4 && strings.EqualFold(name[:4], "bom|") {
+		return name[4:]
+	}
+	return name
+}
+
+// encPairFromArgs resolves an (external, internal) encoding-name pair from the
+// positional encoding arguments accepted by IO.pipe (and IO.new's ext/int form):
+// the first positional may be an Encoding, an encoding name, a combined
+// "ext:int" name, or an object answering #to_str; the second, when present,
+// names the internal encoding. A leading "BOM|" marker on a name is stripped.
+// Unset sides come back as "". io.c: rb_io_extract_modeenc / io_extract_encoding.
+func (vm *VM) encPairFromArgs(pos []object.Value) (ext, intn string) {
+	if len(pos) >= 1 && !object.IsNil(pos[0]) {
+		s, isStr := pos[0].(*object.String)
+		if !isStr {
+			if _, isEnc := pos[0].(*encodingObj); !isEnc && vm.respondsToDynamic(pos[0], "to_str") {
+				s, isStr = vm.send(pos[0], "to_str", nil, nil).(*object.String)
+			}
+		}
+		if isStr {
+			name := stripBOMPrefix(s.Str())
+			// "ext:int" names both sides, but only when a single positional was
+			// given — a separate internal argument takes precedence.
+			if i := strings.IndexByte(name, ':'); i >= 0 && (len(pos) < 2 || object.IsNil(pos[1])) {
+				ext = vm.lookupEncodingName(name[:i]).name
+				intn = vm.lookupEncodingName(name[i+1:]).name
+			} else {
+				ext = vm.lookupEncodingName(name).name
+			}
+		} else {
+			ext = vm.encodingArg(pos[0]).name
+		}
+	}
+	if len(pos) >= 2 && !object.IsNil(pos[1]) {
+		intn = vm.encodingArg(pos[1]).name
 	}
 	return ext, intn
 }

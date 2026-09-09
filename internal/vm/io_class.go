@@ -716,14 +716,14 @@ func (vm *VM) extractEncodingOption(opts *object.Hash, ms *ioModeSpec) bool {
 		hasEnc = false
 	}
 	if hasExt {
-		ms.extEnc = vm.encodingArg(extV).name
+		ms.extEnc = vm.encNameFromOpt(extV)
 	}
 	if hasInt {
 		switch {
 		case object.IsNil(intV), isDashString(intV):
 			ms.intEnc = ""
 		default:
-			ms.intEnc = vm.encodingArg(intV).name
+			ms.intEnc = vm.encNameFromOpt(intV)
 		}
 		if ms.intEnc != "" && ms.intEnc == ms.extEnc {
 			ms.intEnc = ""
@@ -731,19 +731,33 @@ func (vm *VM) extractEncodingOption(opts *object.Hash, ms *ioModeSpec) bool {
 	}
 	if hasEnc {
 		if s, ok := encV.(*object.String); ok {
-			if j := strings.IndexByte(s.Str(), ':'); j >= 0 {
-				ms.extEnc = vm.lookupEncodingName(s.Str()[:j]).name
-				ms.intEnc = vm.lookupEncodingName(s.Str()[j+1:]).name
+			name := stripBOMPrefix(s.Str())
+			if j := strings.IndexByte(name, ':'); j >= 0 {
+				ms.extEnc = vm.lookupEncodingName(name[:j]).name
+				ms.intEnc = vm.lookupEncodingName(name[j+1:]).name
 				if ms.intEnc == ms.extEnc {
 					ms.intEnc = ""
 				}
 				return true
 			}
+			ms.extEnc = vm.lookupEncodingName(name).name
+			return true
 		}
 		ms.extEnc = vm.encodingArg(encV).name
 		return true
 	}
 	return hasExt || hasInt
+}
+
+// encNameFromOpt resolves an encoding name from an :encoding / :external_encoding
+// / :internal_encoding option value, stripping a leading "BOM|" marker: io.c
+// rb_io_extract_encoding_option records the byte-order mark as a separate flag
+// and resolves the remainder as the encoding name.
+func (vm *VM) encNameFromOpt(v object.Value) string {
+	if s, ok := v.(*object.String); ok {
+		return vm.lookupEncodingName(stripBOMPrefix(s.Str())).name
+	}
+	return vm.encodingArg(v).name
 }
 
 // recoverAny runs fn and returns whatever it panics with (a RubyError, or a
