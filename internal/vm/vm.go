@@ -1834,6 +1834,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if sc.lexParent == nil && definee != nil && definee != vm.cObject {
 					sc.lexParent = definee
 				}
+				// A singleton class is persistent (a class's cached metaclass or an
+				// object's cached singleton), so like every ordinary class/module body
+				// its `class << obj` body must open with public default visibility and
+				// no module_function mode — otherwise a bare `private`/`protected` (or
+				// `module_function`) in one `class << obj` block would leak into a later
+				// reopened one. MRI resets scope visibility to public on every class
+				// frame push (vm_insnhelper.c), mirroring defineClassIn/defineModuleIn.
+				sc.defaultVis, sc.funcMode = visPublic, false
 				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil, nil, nil))
 			case bytecode.OpAlias:
 				vm.aliasMethod(methodDefinee, iseq.Names[in.A], iseq.Names[in.B])
