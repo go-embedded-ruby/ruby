@@ -152,26 +152,29 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		}
 		return object.IntValue(int64(len(data.Bytes())))
 	})
-	def("foreach", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+	def("foreach", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		pos, opts := splitIOOpts(args)
 		if len(pos) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		if blk == nil {
+			// No block ⇒ an Enumerator whose #size is nil (the number of lines is
+			// unknown without reading the file), re-dispatching IO.foreach with a
+			// block when iterated. io.c: rb_io_s_foreach returns enum_for(:foreach).
+			return enumForSized(self, "foreach", enumSizeNil, args...)
 		}
 		o := openFileIO(cFile, pathArg(vm, pos[0]), "r")
 		sep, limit, chomp := vm.resolveGetsArgs(pos[1:])
 		chomp = optChomp(opts, chomp)
 		checkResolvedLimit(limit, "foreach")
-		var lines []object.Value
 		for v := vm.ioGetsResolved(o, sep, limit, chomp); v != object.NilV; v = vm.ioGetsResolved(o, sep, limit, chomp) {
-			if blk != nil {
-				vm.callBlock(blk, []object.Value{v})
-			} else {
-				lines = append(lines, v)
-			}
+			// Each yield updates $. to the current line number, as MRI's gets-based
+			// foreach loop does; $_ is not the per-line variable here.
+			vm.globals["$."] = object.IntValue(int64(o.lineno))
+			vm.callBlock(blk, []object.Value{v})
 		}
-		if blk == nil { // no block ⇒ an Enumerator; approximate with the line array
-			return object.NewArrayFromSlice(lines)
-		}
+		// Reading past the last line clears $_ (io.c rb_io_getline at EOF).
+		vm.globals["$_"] = object.NilV
 		return object.NilV
 	})
 	def("readlines", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {

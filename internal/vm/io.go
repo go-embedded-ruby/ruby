@@ -1762,12 +1762,14 @@ func (vm *VM) resolveGetsArgs(args []object.Value) (sep getsSep, limit int, chom
 			default:
 				// Otherwise a single non-String positional is the byte limit,
 				// coerced via #to_int (gets(obj) where obj defines only #to_int).
-				limit = int(vm.toIntCoerce(args[0]))
+				// The limit is a C off_t, so a Bignum too large raises RangeError
+				// rather than TypeError (io.c rb_io_getline_1 / NUM2OFFT).
+				limit = vm.ioOfftArg(args[0])
 			}
 		}
 	}
 	if len(args) > 1 && !object.IsNil(args[1]) {
-		limit = int(vm.toIntCoerce(args[1]))
+		limit = vm.ioOfftArg(args[1])
 	}
 	return sep, limit, chomp
 }

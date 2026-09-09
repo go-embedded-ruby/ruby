@@ -144,7 +144,9 @@ func TestIOForeachReadlines(t *testing.T) {
 	}
 	cases := []struct{ src, want string }{
 		{`out = ""; IO.foreach("` + f + `") { |l| out << l.chomp << "." }; p out`, "\"a.b.c.\"\n"},
-		{`p IO.foreach("` + f + `").length`, "3\n"}, // no block ⇒ line array
+		{`p IO.foreach("` + f + `").to_a.length`, "3\n"},   // no block ⇒ Enumerator over the lines
+		{`p IO.foreach("` + f + `").size`, "nil\n"},        // Enumerator size is unknown (nil)
+		{`p IO.foreach("` + f + `").class`, "Enumerator\n"},
 		{`p IO.readlines("` + f + `")`, "[\"a\\n\", \"b\\n\", \"c\\n\"]\n"},
 		{`p File.readlines("` + f + `").length`, "3\n"},
 		{`p IO.readlines("` + f + `", "b")`, "[\"a\\nb\", \"\\nc\\n\"]\n"}, // explicit separator

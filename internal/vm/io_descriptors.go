@@ -262,7 +262,12 @@ func defIOSeekable(cls *RClass) {
 	})
 	cls.define("sysseek", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
-		amount := int(vm.toIntCoerce(args[0])) // NUM2OFFT: coerces via #to_int
+		if o.closed { // MRI: sysseek on a closed stream raises before coercing the offset
+			raise("IOError", "closed stream")
+		}
+		// NUM2OFFT: coerces via #to_int; a Bignum too large for the off_t raises
+		// RangeError rather than TypeError.
+		amount := vm.ioOfftArg(args[0])
 		whence := 0
 		if len(args) > 1 {
 			whence = vm.seekWhence(args[1]) // accepts :SET/:CUR/:END symbols
