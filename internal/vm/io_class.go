@@ -828,14 +828,17 @@ func (vm *VM) extractEncodingOption(opts *object.Hash, ms *ioModeSpec) bool {
 		hasEnc = false
 	}
 	if hasExt {
-		ms.extEnc = vm.encNameFromOpt(extV)
+		// A "BOM|" marker is accepted only on the :encoding option (and mode
+		// strings), not on :external_encoding / :internal_encoding — MRI resolves
+		// these as plain encoding names.
+		ms.extEnc = vm.encodingArg(extV).name
 	}
 	if hasInt {
 		switch {
 		case object.IsNil(intV), isDashString(intV):
 			ms.intEnc = ""
 		default:
-			ms.intEnc = vm.encNameFromOpt(intV)
+			ms.intEnc = vm.encodingArg(intV).name
 		}
 		if ms.intEnc != "" && ms.intEnc == ms.extEnc {
 			ms.intEnc = ""
@@ -859,17 +862,6 @@ func (vm *VM) extractEncodingOption(opts *object.Hash, ms *ioModeSpec) bool {
 		return true
 	}
 	return hasExt || hasInt
-}
-
-// encNameFromOpt resolves an encoding name from an :encoding / :external_encoding
-// / :internal_encoding option value, stripping a leading "BOM|" marker: io.c
-// rb_io_extract_encoding_option records the byte-order mark as a separate flag
-// and resolves the remainder as the encoding name.
-func (vm *VM) encNameFromOpt(v object.Value) string {
-	if s, ok := v.(*object.String); ok {
-		return vm.lookupEncodingName(stripBOMPrefix(s.Str())).name
-	}
-	return vm.encodingArg(v).name
 }
 
 // recoverAny runs fn and returns whatever it panics with (a RubyError, or a
