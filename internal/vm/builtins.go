@@ -930,6 +930,36 @@ func (vm *VM) bootstrap() {
 	vm.cObject.define("puts", nativePuts)
 	vm.cObject.define("print", nativePrint)
 	vm.cObject.define("p", nativeP)
+	// Kernel#putc forwards its single character to $stdout.putc (MRI's rb_f_putc),
+	// so a reassigned or mocked $stdout observes the write and IO#putc's coercion
+	// (#to_int for a non-String, TypeError for nil/false/true) and closed-stream
+	// IOError apply. Reference: ruby/ruby v3_4_0 io.c (rb_f_putc).
+	vm.cObject.define("putc", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		// rb_io_putc: a String yields its first character; anything else is coerced
+		// with NUM2CHR (#to_int, then the low byte), so nil/false/true raise
+		// TypeError. The one-character String is delivered through $stdout#write, so a
+		// reassigned or mocked $stdout observes it (and IO#write raises IOError on a
+		// closed stream); a $stdout that answers no #write — one MRI would have
+		// rejected at assignment — falls back to the underlying stream.
+		var ch []byte
+		if s, ok := args[0].(*object.String); ok {
+			if b := s.Bytes(); len(b) > 0 {
+				_, sz := utf8.DecodeRune(b)
+				ch = b[:sz]
+			}
+		} else {
+			ch = []byte{byte(vm.toIntCoerce(args[0]))}
+		}
+		out := vm.stdoutValue()
+		if !vm.respondsToDynamic(out, "write") {
+			out = vm.curStdout()
+		}
+		vm.send(out, "write", []object.Value{object.NewStringBytes(ch)}, nil)
+		return args[0]
+	})
 	vm.cObject.define("class", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return vm.classOf(self)
 	})
@@ -6248,7 +6278,7 @@ func (vm *VM) registerKernelModuleFunctions() {
 		"__dir__", "abort", "at_exit", "autoload", "autoload?", "caller",
 		"caller_locations",
 		"catch", "eval", "exec", "exit", "exit!", "fail", "fork", "format", "lambda",
-		"load", "loop", "open", "p", "print", "printf", "proc", "puts",
+		"load", "loop", "open", "p", "print", "printf", "proc", "putc", "puts",
 		"raise", "rand", "require", "require_relative", "sleep", "sprintf",
 		"srand", "system", "throw", "trap", "warn",
 	}
@@ -6772,8 +6802,25 @@ func (vm *VM) arrayArefArithSeq(a *object.Array, e *Enumerator) object.Value {
 // Kernel#puts/print/p write through the current $stdout (an IOObj), so a host
 // or program that reassigns $stdout — e.g. to a StringIO — captures the output,
 // as in MRI. The puts array-flattening/newline logic lives in io.go (ioPuts).
-func nativePuts(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-	vm.ioPuts(vm.curStdout(), args)
+// nativePuts implements Kernel#puts. MRI's rb_f_puts forwards to $stdout.puts so
+// a reassigned or mocked $stdout observes the call, EXCEPT when the receiver is
+// already $stdout itself, where it writes directly to avoid recursing into this
+// same method. Reference: ruby/ruby v3_4_0 io.c (rb_f_puts).
+func nativePuts(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	out := vm.stdoutValue()
+	if out != self {
+		return vm.send(out, "puts", args, nil)
+	}
+	// The receiver already IS $stdout (a custom object whose #puts resolves to this
+	// method): write straight to it, as MRI's rb_io_puts(argc, argv, recv) does, so
+	// the object's own #write receives the bytes. A $stdout that answers no #write
+	// (one MRI would have rejected at assignment) falls back to the underlying
+	// stream instead of raising.
+	if vm.respondsToDynamic(self, "write") {
+		vm.ioPuts(self, args)
+	} else {
+		vm.ioPuts(vm.curStdout(), args)
+	}
 	return object.NilV
 }
 
@@ -6834,26 +6881,88 @@ func (vm *VM) coerceFormatString(v object.Value) string {
 	return ""
 }
 
+// nativePrint implements Kernel#print. MRI's rb_f_print writes to $stdout through
+// rb_io_print (rb_io_write, i.e. $stdout.write) rather than dispatching
+// $stdout.print, so it works for any reassigned $stdout answering #write and never
+// recurses into this method. With no arguments it writes $_ (the last line read);
+// several arguments are joined by the output field separator $, and the whole is
+// terminated by the output record separator $\ when those globals are set.
+// Reference: ruby/ruby v3_4_0 io.c (rb_f_print -> rb_io_print).
 func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-	o := vm.curStdout()
-	for _, a := range args {
-		o.writeStr(vm.displayStr(a))
+	out := vm.stdoutValue()
+	// A $stdout that answers no #write (one MRI would have rejected at assignment)
+	// falls back to the underlying stream rather than raising.
+	if !vm.respondsToDynamic(out, "write") {
+		out = vm.curStdout()
+	}
+	write := func(s string) { vm.send(out, "write", []object.Value{object.NewString(s)}, nil) }
+	if len(args) == 0 {
+		if lastLine := vm.gvar("$_"); !object.IsNil(lastLine) {
+			write(vm.displayStr(lastLine))
+		}
+	} else {
+		ofs, ofsSet := vm.optStrGlobal("$,")
+		for i, a := range args {
+			if i > 0 && ofsSet {
+				write(ofs)
+			}
+			write(vm.displayStr(a))
+		}
+	}
+	if ors, ok := vm.optStrGlobal("$\\"); ok {
+		write(ors)
 	}
 	return object.NilV
+}
+
+// pInspect renders a value the way MRI's rb_inspect does for Kernel#p: it
+// dispatches the object's own #inspect (so an overridden #inspect, and the
+// per-element #inspect used inside Array/Hash/Struct, are honoured) and coerces a
+// non-String result with #to_s exactly as rb_obj_as_string does.
+//
+// When the receiver has NOT overridden #inspect — the resolved method is the
+// default Object/Kernel/BasicObject one — render through the VM's own
+// inspectStr instead. Many built-in binding values (Matrix, NDArray, IPAddr,
+// BigDecimal, Date, Bag, …) carry their representation in a Go Inspect() that
+// inspectStr calls and that no Ruby #inspect shadows; dispatching the generic
+// default would bypass them and print a bare object instead.
+func (vm *VM) pInspect(v object.Value) string {
+	// Dispatch for an ordinary object (where a user #inspect lives) and for the
+	// containers, whose Ruby #inspect renders each element through the element's
+	// own #inspect — `p [obj]` must show an overridden one, as MRI does.
+	//
+	// Every other value is a built-in or a Go-backed binding (Matrix, NDArray,
+	// IPAddr, BigDecimal, Date, Bag, Rolify, …) whose representation lives in its
+	// Go Inspect(); those classes register no Ruby #inspect of their own, so
+	// dispatching would render them through the generic one and leave every
+	// Inspect() unreachable. inspectStr takes the same path.
+	switch v.(type) {
+	case *RObject, *object.Array, *object.Hash:
+		r := vm.send(v, "inspect", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Str()
+		}
+		return vm.displayStr(r)
+	}
+	return v.Inspect()
 }
 
 func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 	o := vm.curStdout()
 	for _, a := range args {
-		o.writeStr(vm.inspectStr(a) + "\n")
+		o.writeStr(vm.pInspect(a) + "\n")
 	}
 	switch len(args) {
 	case 0:
+		// With no argument #p writes nothing and returns nil.
 		return object.NilV
 	case 1:
 		return args[0]
 	default:
-		return object.NilV // Ruby returns the args array; arrays arrive in Phase 2
+		// With several arguments #p returns them as a new Array.
+		elems := make([]object.Value, len(args))
+		copy(elems, args)
+		return object.NewArrayFromSlice(elems)
 	}
 }
 
