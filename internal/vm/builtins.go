@@ -6919,12 +6919,32 @@ func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 // dispatches the object's own #inspect (so an overridden #inspect, and the
 // per-element #inspect used inside Array/Hash/Struct, are honoured) and coerces a
 // non-String result with #to_s exactly as rb_obj_as_string does.
+//
+// When the receiver has NOT overridden #inspect — the resolved method is the
+// default Object/Kernel/BasicObject one — render through the VM's own
+// inspectStr instead. Many built-in binding values (Matrix, NDArray, IPAddr,
+// BigDecimal, Date, Bag, …) carry their representation in a Go Inspect() that
+// inspectStr calls and that no Ruby #inspect shadows; dispatching the generic
+// default would bypass them and print a bare object instead.
 func (vm *VM) pInspect(v object.Value) string {
-	r := vm.send(v, "inspect", nil, nil)
-	if s, ok := r.(*object.String); ok {
-		return s.Str()
+	// Dispatch for an ordinary object (where a user #inspect lives) and for the
+	// containers, whose Ruby #inspect renders each element through the element's
+	// own #inspect — `p [obj]` must show an overridden one, as MRI does.
+	//
+	// Every other value is a built-in or a Go-backed binding (Matrix, NDArray,
+	// IPAddr, BigDecimal, Date, Bag, Rolify, …) whose representation lives in its
+	// Go Inspect(); those classes register no Ruby #inspect of their own, so
+	// dispatching would render them through the generic one and leave every
+	// Inspect() unreachable. inspectStr takes the same path.
+	switch v.(type) {
+	case *RObject, *object.Array, *object.Hash:
+		r := vm.send(v, "inspect", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s.Str()
+		}
+		return vm.displayStr(r)
 	}
-	return vm.displayStr(r)
+	return v.Inspect()
 }
 
 func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
