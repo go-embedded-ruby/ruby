@@ -54,22 +54,28 @@ func ioPathString(o *IOObj) (string, bool) {
 // in-memory byte buffer with a read/write cursor. The two share the write path
 // so puts/print/printf/<< work uniformly, and StringIO adds the read methods.
 type IOObj struct {
-	cls         *RClass // IO, StringIO or File — so classOf/is_a? are exact
-	w           io.Writer
-	buf         []byte // StringIO / File content (buffered in memory)
-	pos         int    // read/write cursor
-	isStr       bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
-	sync        bool
-	closed      bool
-	label       string // "STDOUT"/"STDERR"/"STDIN" for inspect
-	path        string // backing file path for a File stream (else "")
-	writable    bool   // a File opened for writing — flush the buffer on flush/close
-	lineno      int    // #lineno — advanced by each successful line read (gets/readline)
-	rdClosed    bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
-	wrClosed    bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
-	appendMode  bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
-	openMode    string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
-	nonblock    bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
+	cls        *RClass // IO, StringIO or File — so classOf/is_a? are exact
+	w          io.Writer
+	buf        []byte // StringIO / File content (buffered in memory)
+	pos        int    // read/write cursor
+	isStr      bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
+	sync       bool
+	closed     bool
+	label      string // "STDOUT"/"STDERR"/"STDIN" for inspect
+	path       string // backing file path for a File stream (else "")
+	writable   bool   // a File opened for writing — flush the buffer on flush/close
+	lineno     int    // #lineno — advanced by each successful line read (gets/readline)
+	rdClosed   bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
+	wrClosed   bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
+	appendMode bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
+	openMode   string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
+	nonblock   bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
+	// encSet records that #set_encoding has resolved this stream's encodings
+	// against the defaults in force at that moment (io.c io_encoding_set →
+	// rb_io_ext_int_to_enc). An empty extEnc then means "no encoding" — MRI's
+	// fptr->encs.enc == NULL — rather than "fall back to Encoding.default_external",
+	// so a later change to the defaults cannot move it.
+	encSet      bool
 	extEnc      string // external encoding name, "" ⇒ Encoding.default_external
 	intEnc      string // internal encoding name, "" ⇒ none (nil)
 	fd          int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
@@ -218,14 +224,11 @@ func (vm *VM) registerIO() {
 	// would block" and [true, true] for those two predicates. EWOULDBLOCK is EAGAIN
 	// on every platform rbgo targets, so IO::EWOULDBLOCKWait* is the very same
 	// class under a second name, as MRI makes it.
+	eagain := vm.consts["Errno::EAGAIN"].(*RClass) // registered with File, above
 	for _, w := range []string{"WaitReadable", "WaitWritable"} {
 		mod := newClass("IO::"+w, nil)
 		mod.isModule = true
 		cIO.consts[w], vm.consts["IO::"+w] = mod, mod
-		eagain, ok := vm.consts["Errno::EAGAIN"].(*RClass)
-		if !ok {
-			continue
-		}
 		exc := newClass("IO::EAGAIN"+w, eagain)
 		exc.includes = append(exc.includes, mod)
 		for _, name := range []string{"EAGAIN" + w, "EWOULDBLOCK" + w} {
@@ -1004,10 +1007,13 @@ func defIOWrite(cls *RClass) {
 				return e
 			}
 		}
-		// A write-only stream with no explicit encoding reports nil (unless a
-		// default internal encoding forces transcoding); a readable one reports
-		// Encoding.default_external.
-		if o.writable && object.IsNil(vm.send(vm.cEncoding, "default_internal", nil, nil)) {
+		// rb_io_external_encoding: with no converter and no encoding recorded, a
+		// WRITABLE stream reports nil, while a readable one falls back to
+		// Encoding.default_external (io_read_encoding). Once #set_encoding has
+		// resolved the pair (encSet) the empty name IS the answer; otherwise the
+		// open-time resolution is reproduced lazily, and a default internal
+		// encoding is what would have forced a converter into place.
+		if ioFmodeWritable(o) && (o.encSet || object.IsNil(vm.send(vm.cEncoding, "default_internal", nil, nil))) {
 			return object.NilV
 		}
 		return vm.send(vm.cEncoding, "default_external", nil, nil)
@@ -1064,9 +1070,49 @@ func defIOWrite(cls *RClass) {
 		if o.intEnc == o.extEnc {
 			o.intEnc = ""
 		}
+		if object.IsNil(pos[0]) {
+			o.extEnc, o.intEnc = vm.extIntToEnc(o.intEnc)
+		}
+		o.encSet = true
 		return self
 	})
 }
+
+// extIntToEnc resolves a #set_encoding whose external argument was nil, which
+// io.c io_encoding_set passes to rb_io_ext_int_to_enc with a NULL external: the
+// external becomes Encoding.default_external (default_ext), and an internal that
+// was not named becomes Encoding.default_internal. When there is no internal left
+// — or it equals the external — no converter is needed, and the recorded encoding
+// is NULL precisely when the external was defaulted and differs from the
+// internal; otherwise the pair is kept and drives the converter.
+//
+// The consequence the specs pin down is that the answer is FROZEN here: a stream
+// reset with `set_encoding nil, nil` while the defaults are UTF-8 / nil reports
+// nil for both afterwards even once the defaults change, whereas one reset while
+// they are IBM437 / IBM866 reports that pair.
+func (vm *VM) extIntToEnc(named string) (ext, intn string) {
+	if vm.defExternalEnc != nil {
+		ext = vm.defExternalEnc.name
+	}
+	intn = named
+	if intn == "" && ext != "ASCII-8BIT" && vm.defInternalEnc != nil {
+		intn = vm.defInternalEnc.name
+	}
+	if intn == "" || intn == ext {
+		if intn != ext { // a defaulted external with no internal records nothing
+			return "", ""
+		}
+		return ext, ""
+	}
+	return ext, intn
+}
+
+// ioFmodeWritable reports MRI's FMODE_WRITABLE for a stream: a file opened for
+// writing, a pipe write end, or one of the writer-backed standard streams
+// ($stdout / $stderr, whose bytes go straight to an io.Writer). It is the
+// predicate rb_io_external_encoding branches on, and is deliberately not
+// o.wrClosed: a pipe READ end leaves that false while being read-only.
+func ioFmodeWritable(o *IOObj) bool { return o.writable || o.w != nil }
 
 // ioReadEnc returns the (external, internal) encoding names in effect for a
 // whole-stream read, filling the unset sides from Encoding.default_external and

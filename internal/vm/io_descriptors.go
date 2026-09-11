@@ -461,7 +461,7 @@ func defIOReopen(cls *RClass) {
 		// rb_scan_args(argc, argv, "11:") reports one argument only when no second
 		// positional mode was given; the IO form is tried only then.
 		if len(pos) == 1 {
-			if other, ok := ioCheckIO(vm, pos[0]); ok {
+			if other, ok := ioConvertIO(vm, pos[0], false); ok {
 				return ioReopenIO(vm, o, other)
 			}
 		}
@@ -530,46 +530,39 @@ func ioOflags(o *IOObj) int64 {
 	return fl
 }
 
-// ioCheckIO converts v to an IO the way io.c's rb_io_check_io does
-// (rb_check_convert_type_with_id to T_FILE through #to_io): an IO is itself; an
-// object with #to_io is converted, and a conversion that does not yield an IO is a
-// TypeError; anything else reports false so the caller can treat v as a path.
-func ioCheckIO(vm *VM, v object.Value) (*IOObj, bool) {
+// ioConvertIO converts v to an IO through #to_io. It is the one body behind
+// io.c's pair of conversions, which differ only in what a missing #to_io means:
+// rb_io_check_io (strict false, rb_check_convert_type_with_id) reports "not an
+// IO" so the caller can treat v as something else — IO#reopen treats it as a
+// path — while rb_io_get_io (strict true, rb_convert_type_with_id) raises. Both
+// raise when #to_io answers something that is not an IO, nil included.
+func ioConvertIO(vm *VM, v object.Value, strict bool) (*IOObj, bool) {
 	if o, ok := v.(*IOObj); ok {
 		return o, true
 	}
 	if !vm.respondsToDynamic(v, "to_io") {
+		if strict {
+			raise("TypeError", "no implicit conversion of %s into IO", vm.classOf(v).name)
+		}
 		return nil, false
 	}
 	r := vm.send(v, "to_io", nil, nil)
-	if object.IsNil(r) {
+	if o, ok := r.(*IOObj); ok {
+		return o, true
+	}
+	if object.IsNil(r) && !strict {
 		return nil, false
 	}
-	o, ok := r.(*IOObj)
-	if !ok {
-		raise("TypeError", "can't convert %s to IO (%s#to_io gives %s)",
-			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
-	}
-	return o, true
+	raise("TypeError", "can't convert %s to IO (%s#to_io gives %s)",
+		vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	return nil, false
 }
 
-// ioGetIO converts v to an IO the way io.c's rb_io_get_io does
-// (rb_convert_type_with_id to T_FILE through #to_io) — the strict sibling of
-// ioCheckIO: an object with no #to_io is a TypeError rather than a "not an IO"
-// answer. IO.select takes every element of its argument arrays through this.
+// ioGetIO is the strict conversion (rb_io_get_io): IO.select takes every element
+// of its argument arrays through it, so a non-IO raises rather than being
+// silently skipped.
 func ioGetIO(vm *VM, v object.Value) *IOObj {
-	if o, ok := v.(*IOObj); ok {
-		return o
-	}
-	if !vm.respondsToDynamic(v, "to_io") {
-		raise("TypeError", "no implicit conversion of %s into IO", vm.classOf(v).name)
-	}
-	r := vm.send(v, "to_io", nil, nil)
-	o, ok := r.(*IOObj)
-	if !ok {
-		raise("TypeError", "can't convert %s to IO (%s#to_io gives %s)",
-			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
-	}
+	o, _ := ioConvertIO(vm, v, true)
 	return o
 }
 
