@@ -253,10 +253,8 @@ func (vm *VM) registerIO() {
 	// `require "fcntl"` installs the Fcntl constant module (ext/fcntl/fcntl.c),
 	// and `require "io/nonblock"` the IO#nonblock accessors
 	// (ext/io/nonblock/nonblock.c) — both lazily as MRI does, so neither resolves
-	// before its require.
-	if vm.featureHooks == nil {
-		vm.featureHooks = map[string]func(){}
-	}
+	// before its require. The featureHooks map is already created by registerPrime,
+	// which runs first.
 	vm.featureHooks["fcntl"] = vm.installFcntl
 	vm.featureHooks["io/nonblock"] = func() { installIONonblock(cIO) }
 	// IO::WaitReadable / IO::WaitWritable (io.c Init_IO) are the marker modules a
@@ -2027,14 +2025,13 @@ func lastCharStart(vm *VM, s []byte, enc string) int {
 	last := 0
 	for i := 0; i < len(s); {
 		last = i
-		_, n, readLen, st := vm.decodeCharFrom(s[i:], enc)
+		_, n, _, st := vm.decodeCharFrom(s[i:], enc)
 		if st == stepIncomplete {
 			return last
 		}
-		if n <= 0 {
-			n = max(readLen, 1)
-		}
-		i += n
+		// Every codec consumes at least one byte once it has decided (an invalid
+		// lead reports a one-byte subpart), so the floor is a guard, not a branch.
+		i += max(n, 1)
 	}
 	return last
 }

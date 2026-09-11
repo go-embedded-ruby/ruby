@@ -538,6 +538,17 @@ const (
 	fdCloexec   = 1
 )
 
+// ioStdioStream reports whether o is one of the three streams MRI keeps a FILE*
+// for ($stdin / $stdout / $stderr), which #reopen freopen()s rather than
+// rb_sysopen()ing — the two take different open flags.
+func ioStdioStream(o *IOObj) bool {
+	switch o.label {
+	case "STDIN", "STDOUT", "STDERR":
+		return true
+	}
+	return false
+}
+
 // ioOflags rebuilds the open-flag set (the answer fcntl(F_GETFL) gives) from a
 // stream's recorded access mode: io.c rb_io_fmode_oflags maps FMODE_READWRITE to
 // O_RDWR, a write-only mode to O_WRONLY and FMODE_APPEND to O_APPEND. O_CREAT and
@@ -622,8 +633,7 @@ func ioReopenIO(vm *VM, o, other *IOObj) object.Value {
 	// close-on-exec is always set afresh on the reopened stream, whatever either
 	// side carried (rb_io_reopen ends with rb_fd_fix_cloexec on the new fd).
 	o.closeOnExecOff = false
-	switch o.label {
-	case "STDIN", "STDOUT", "STDERR":
+	if ioStdioStream(o) {
 		o.reopened = other
 		return o
 	}
@@ -640,23 +650,44 @@ func ioReopenIO(vm *VM, o, other *IOObj) object.Value {
 }
 
 // ioReopenPath re-binds o onto a freshly opened stream on the given path — the
-// freopen() half of io.c rb_io_reopen. With no mode argument the stream keeps the
+// second half of io.c rb_io_reopen. With no mode argument the stream keeps the
 // access mode it was opened with ("oflags = rb_io_fmode_oflags(fptr->mode)"), so
 // a writable stream re-creates (and truncates) the new file while a read-only one
 // raises Errno::ENOENT for a path that does not exist. A closed stream reopens.
+// A stream that was never opened from a path has no mode to carry over, and the
+// two branches below say what MRI does for each kind of those.
 func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) object.Value {
 	name := pathArg(vm, pos[0])
-	mode := o.openMode
-	if mode == "" {
-		mode = "r"
-	}
+	mode, keepHalves := o.openMode, false
 	explicit := (len(pos) > 1 && !object.IsNil(pos[1])) || opts != nil
-	if explicit {
+	switch {
+	case explicit:
 		if len(pos) > 1 && !object.IsNil(pos[1]) {
 			mode = vm.vmodeString(pos[1])
 		} else if m, ok := opts.Get(object.Symbol("mode")); ok && !object.IsNil(m) {
 			mode = vm.vmodeString(m)
 		}
+	case mode != "":
+		// The mode the stream was opened with carries over unchanged.
+	case ioStdioStream(o):
+		// A standard stream has a FILE* behind it, which rb_io_reopen freopen()s
+		// with the modestr its fmode maps to (rb_io_oflags_modestr) — so a write
+		// mode CREATES the file. $stdin is read-only, $stdout and $stderr
+		// write-only. MRI 4.0.5 on this host: $stdout.reopen(a missing path)
+		// succeeds and writes it.
+		mode = "r"
+		if o.rdClosed {
+			mode = "w"
+		}
+	default:
+		// Every other stream with no path behind it — a pipe end, a bare
+		// descriptor wrapper — is rb_sysopen()ed with the RAW oflags of
+		// rb_io_fmode_oflags, which carry the access half but neither O_CREAT nor
+		// O_TRUNC. So the file must already exist and its content survives, and
+		// the stream keeps its own halves. MRI 4.0.5 on this host:
+		// IO.pipe[1].reopen(a missing path) raises Errno::ENOENT, and onto a file
+		// holding "0123456789" a following write of "AB" leaves "AB23456789".
+		mode, keepHalves = "r+", true
 	}
 	// The old destination receives whatever is still buffered before the stream
 	// moves (io.c io_fflush), and the read buffer is dropped (rbuf.off = len = 0).
@@ -665,8 +696,12 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 	}
 	fresh := openFileIO(o.cls, name, modeBase(mode))
 	o.buf, o.pos, o.path = fresh.buf, fresh.pos, fresh.path
-	o.rdClosed, o.wrClosed, o.writable = fresh.rdClosed, fresh.wrClosed, fresh.writable
-	o.appendMode, o.openMode = fresh.appendMode, fresh.openMode
+	if keepHalves {
+		o.writable, o.appendMode, o.openMode = !o.wrClosed, false, ""
+	} else {
+		o.rdClosed, o.wrClosed, o.writable = fresh.rdClosed, fresh.wrClosed, fresh.writable
+		o.appendMode, o.openMode = fresh.appendMode, fresh.openMode
+	}
 	o.isStr, o.closed, o.lineno = true, false, 0
 	o.w, o.pipe, o.isWriteEnd, o.pipeSynced, o.reopened = nil, nil, false, 0, nil
 	o.closeOnExecOff = false

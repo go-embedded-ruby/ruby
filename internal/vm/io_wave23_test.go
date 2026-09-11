@@ -659,3 +659,71 @@ p [r.closed?, w.closed?]`, "[true, true]\n"},
 		}
 	}
 }
+
+// TestIOReopenNoRecordedModeWave23 covers ioReopenPath's two branches for a
+// stream that was never opened from a path, which io.c rb_io_reopen treats
+// differently: a standard stream has a FILE* and is freopen()ed with the modestr
+// its fmode maps to (so $stdout.reopen CREATES the file and $stdin.reopen reads
+// it), while a pipe end or bare descriptor wrapper is rb_sysopen()ed with the raw
+// oflags — the access half only, no O_CREAT and no O_TRUNC. Every value below was
+// produced by MRI Ruby 4.0.5 on this host.
+func TestIOReopenNoRecordedModeWave23(t *testing.T) {
+	d := w23dir(t)
+	// A pipe write end keeps its writable half and does NOT truncate: writing two
+	// bytes over "0123456789" leaves "AB23456789".
+	if got := runFS(t, `File.write("`+d+`/ex.txt", "0123456789")
+r, w = IO.pipe
+w.reopen("`+d+`/ex.txt"); w.print "AB"; w.flush
+p File.read("`+d+`/ex.txt")`); got != "\"AB23456789\"\n" {
+		t.Errorf("pipe writer reopen: got %q", got)
+	}
+	// A pipe read end keeps its readable half.
+	if got := runFS(t, `r, w = IO.pipe; r.reopen("`+d+`/two.txt"); p r.gets`); got != "\"Line 1\\n\"\n" {
+		t.Errorf("pipe reader reopen: got %q", got)
+	}
+	// Neither carries O_CREAT, so a path that does not exist is Errno::ENOENT.
+	if got := runFSErr(t, `r, w = IO.pipe; w.reopen("`+d+`/absent.txt")`); got != "Errno::ENOENT" {
+		t.Errorf("pipe writer reopen onto a missing path: got %q", got)
+	}
+	// $stdin is read-only, and reopening it reads the file.
+	if got := runFS(t, `$stdin.reopen("`+d+`/two.txt"); p $stdin.gets`); got != "\"Line 1\\n\"\n" {
+		t.Errorf("$stdin reopen: got %q", got)
+	}
+	// $stdout is write-only, and reopening it onto a path that does not exist
+	// still succeeds — freopen's "w" creates. Its output no longer reaches the
+	// captured stream, so the file is read back through a second run's value.
+	if got := runFS(t, `$stdout.reopen("`+d+`/so.txt")
+print "via reopen"
+$stdout.flush
+$stdout.reopen(STDERR)
+File.write("`+d+`/so_echo.txt", File.read("`+d+`/so.txt"))`); got != "" {
+		t.Errorf("$stdout reopen: captured stdout should be empty, got %q", got)
+	}
+	if b, err := os.ReadFile(filepath.Join(filepath.FromSlash(d), "so_echo.txt")); err != nil || string(b) != "via reopen" {
+		t.Errorf("$stdout reopen wrote %q (err %v), want %q", b, err, "via reopen")
+	}
+}
+
+// TestIOClosedHalfClosesAndPidWave23 covers the remaining guards of the
+// descriptor surface: #close_read / #close_write answer nil on an already-closed
+// NON-duplex stream (io.c returns at fptr->fd < 0, before the non-duplex
+// refusal), and IO#pid is nil for a stream with no child behind it and IOError
+// once it is closed. MRI Ruby 4.0.5 on this host prints exactly these lines.
+func TestIOClosedHalfClosesAndPidWave23(t *testing.T) {
+	d := w23dir(t)
+	cases := []struct{ src, want string }{
+		{`f = File.open("` + d + `/two.txt"); f.close; p [f.close_read, f.close_write]`,
+			"[nil, nil]\n"},
+		{`f = File.open("` + d + `/cw.txt","w"); f.close; p [f.close_read, f.close_write]`,
+			"[nil, nil]\n"},
+		{`p File.open("` + d + `/two.txt").pid`, "nil\n"},
+		{`f = File.open("` + d + `/two.txt"); f.close
+begin; f.pid; rescue => e; puts "#{e.class}: #{e.message}"; end`,
+			"IOError: closed stream\n"},
+	}
+	for _, c := range cases {
+		if got := runFS(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}
