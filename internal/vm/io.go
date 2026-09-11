@@ -68,6 +68,7 @@ type IOObj struct {
 	rdClosed    bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
 	wrClosed    bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
 	appendMode  bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
+	openMode    string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
 	extEnc      string // external encoding name, "" ⇒ Encoding.default_external
 	intEnc      string // internal encoding name, "" ⇒ none (nil)
 	fd          int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
@@ -199,6 +200,12 @@ func (vm *VM) registerIO() {
 	} {
 		cIO.consts[name] = object.IntValue(val)
 	}
+	// `require "fcntl"` installs the Fcntl constant module (ext/fcntl/fcntl.c),
+	// lazily as MRI does — the constants must not resolve before the require.
+	if vm.featureHooks == nil {
+		vm.featureHooks = map[string]func(){}
+	}
+	vm.featureHooks["fcntl"] = vm.installFcntl
 	if fc, ok := vm.consts["File"].(*RClass).consts["Constants"].(*RClass); ok {
 		cIO.includes = append(cIO.includes, fc)
 	}
@@ -645,7 +652,7 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 	if mode == "" {
 		raise("ArgumentError", "invalid access mode %s", mode)
 	}
-	o := &IOObj{cls: cls, isStr: true, path: p}
+	o := &IOObj{cls: cls, isStr: true, path: p, openMode: mode}
 	switch mode[0] {
 	case 'r':
 		if notRegular(p) {
@@ -681,7 +688,17 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 			o.writable = true // as above: nothing to append to that can be read
 			break
 		}
-		b, _ := os.ReadFile(p) // append to the existing content (or a new file)
+		b, err := os.ReadFile(p) // append to the existing content (or a new file)
+		if err != nil {
+			// O_APPEND carries O_CREAT in MRI's "a"/"a+" fmode (io.c
+			// rb_io_fmode_oflags: FMODE_APPEND ⇒ O_CREAT|O_APPEND), so the file
+			// exists on disk as soon as it is opened — `File.open(p, "a")` then
+			// `File.exist?(p)` is true before any write. Materialise it now, as
+			// the 'w' branch above does for O_CREAT|O_TRUNC.
+			if werr := os.WriteFile(p, nil, 0o644); werr != nil {
+				raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
+			}
+		}
 		o.buf, o.pos, o.writable = b, len(b), true
 	default:
 		raise("ArgumentError", "invalid access mode %s", mode)

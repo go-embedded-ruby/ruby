@@ -155,15 +155,11 @@ func (vm *VM) registerSpawn() {
 		return ioReadResult(data, buf)
 	})
 
-	// reopen rebinds a standard stream onto another IO (Puppet's safe_posix_fork
-	// does STDOUT.reopen(pipe_writer)); subsequent writes forward to the target.
-	cIO.define("reopen", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		if target, ok := args[0].(*IOObj); ok {
-			o.reopened = target
-		}
-		return self
-	})
+	// IO#reopen and IO#fcntl live in io_descriptors.go, beside the rest of the
+	// descriptor-level surface. Its standard-stream branch is what Puppet's
+	// safe_posix_fork STDOUT.reopen(pipe_writer) rides on, and what runForkBlock
+	// below snapshots and restores around a forked block.
+	defIOReopen(cIO)
 
 	// IO.select reports readiness. A reader is ready when it has buffered bytes or
 	// its write end is closed (so a subsequent read returns EOF rather than
