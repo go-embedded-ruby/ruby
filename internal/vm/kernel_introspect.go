@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"sort"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -215,6 +216,92 @@ func (vm *VM) registerKernelIntrospection() {
 		kernel.smethods["exit!"] = &Method{name: "exit!", owner: kernel, native: exitFn}
 	}
 }
+
+// registerKernelDelegates installs the Kernel global functions whose behaviour
+// CRuby defines by forwarding to another object. MRI declares each with
+// rb_define_global_function (io.c:15615-15628, process.c), which makes it a
+// private instance method reachable without a receiver AND — through the
+// Kernel module_function split registerKernelModuleFunctions applies — a public
+// method on the Kernel module; the names are listed there so the split covers
+// them.
+//
+// Every body here forwards through vm.send to the object CRuby forwards to, so
+// a spec that stubs ARGF.gets (core/kernel/gets_spec) or replaces IO.select
+// sees its replacement run, exactly as MRI's `forward(argf, idGets, …)` does.
+func (vm *VM) registerKernelDelegates() {
+	// Kernel#gets / #readline / #readlines read the ARGV-concatenated input
+	// stream: rb_f_gets, rb_f_readline and rb_f_readlines (io.c) all
+	// `forward(argf, …)` when the receiver is not ARGF itself.
+	for _, name := range []string{"gets", "readline", "readlines"} {
+		meth := name
+		vm.cObject.define(meth, func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+			return vm.send(vm.consts["ARGF"], meth, args, blk)
+		})
+	}
+
+	// Kernel#select is IO.select under another name (rb_f_select, io.c, shares
+	// select_call with rb_io_s_select).
+	vm.cObject.define("select", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(vm.consts["IO"], "select", args, blk)
+	})
+
+	// Kernel#spawn is Process.spawn (rb_f_spawn, process.c).
+	vm.cObject.define("spawn", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		return vm.send(vm.consts["Process"], "spawn", args, blk)
+	})
+
+	// Kernel#syscall invokes a system call by number. A pure-Go, CGO-free runtime
+	// has no portable way to do that, which is the situation CRuby itself is in
+	// on a platform without syscall(2): io.c ends with
+	// `#define rb_f_syscall rb_f_notimplement`, and rb_f_notimplement raises
+	// NotImplementedError with this message shape (error.c). MRI 4.0.5 on darwin
+	// answers exactly this.
+	vm.cObject.define("syscall", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return raise("NotImplementedError", "syscall() function is unimplemented on this machine")
+	})
+
+	// Kernel#` (backquote): rb_f_backquote (io.c) takes exactly one argument,
+	// puts it through StringValue (so a non-String is converted with #to_str, and
+	// anything else is a TypeError) and returns the command's output. The command
+	// runs through the same runShellCommand the `%x{…}`/backtick *literal* uses
+	// (OpXStr), so the two spellings cannot drift apart.
+	vm.cObject.define("`", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.NewString(vm.runShellCommand(vm.coerceToString(args[0])))
+	})
+
+	// Kernel#global_variables lists every defined global as a Symbol
+	// (rb_f_global_variables, variable.c, walks rb_global_tbl). The stored
+	// globals are this VM's table; the process/exception specials specialGvar
+	// answers out of VM state rather than the table ($!, $0, $$) are always
+	// defined, so they are listed too when the table has no slot for them. MRI's
+	// order is the global table's internal one and unspecified; sorting keeps the
+	// answer stable across calls (Go map iteration is randomised).
+	vm.cObject.define("global_variables", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		names := make([]string, 0, len(vm.globals)+len(alwaysDefinedGvars))
+		for n := range vm.globals {
+			names = append(names, n)
+		}
+		for _, n := range alwaysDefinedGvars {
+			if _, ok := vm.globals[n]; !ok {
+				names = append(names, n)
+			}
+		}
+		sort.Strings(names)
+		out := make([]object.Value, len(names))
+		for i, n := range names {
+			out[i] = object.Symbol(n)
+		}
+		return object.NewArrayFromSlice(out)
+	})
+}
+
+// alwaysDefinedGvars are the globals specialGvar answers from VM state instead
+// of the vm.globals table, so they are defined even with no slot in it. Kernel#
+// global_variables adds them to the table's names.
+var alwaysDefinedGvars = []string{"$!", "$0", "$$"}
 
 // currentFile returns the path of the file currently executing: the innermost
 // file being required, or the top-level script path ($0) when none is on the

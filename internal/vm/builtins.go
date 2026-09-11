@@ -6209,6 +6209,10 @@ func (vm *VM) bootstrap() {
 	// Range edge methods (#reverse_each, #entries); runs after the prelude so the
 	// range-specific definitions win over any inherited Enumerable ones.
 	vm.registerRangeEdges()
+	// The Kernel global functions whose body forwards to ARGF / IO / Process:
+	// those objects must already exist, so this runs after them and before the
+	// module-function split that reflects their visibility.
+	vm.registerKernelDelegates()
 	// Split the Kernel module functions into a private instance method + a public
 	// Kernel-module method, as MRI does — runs last, once every listed method is
 	// defined above.
@@ -6275,12 +6279,14 @@ func (vm *VM) registerKernelPublicMethods() {
 func (vm *VM) registerKernelModuleFunctions() {
 	names := []string{
 		"Array", "Complex", "Float", "Hash", "Integer", "Rational", "String",
-		"__dir__", "abort", "at_exit", "autoload", "autoload?", "caller",
+		"__dir__", "`", "abort", "at_exit", "autoload", "autoload?", "caller",
 		"caller_locations",
-		"catch", "eval", "exec", "exit", "exit!", "fail", "fork", "format", "lambda",
+		"catch", "eval", "exec", "exit", "exit!", "fail", "fork", "format", "gets",
+		"global_variables", "lambda",
 		"load", "loop", "open", "p", "print", "printf", "proc", "putc", "puts",
-		"raise", "rand", "require", "require_relative", "sleep", "sprintf",
-		"srand", "system", "throw", "trap", "warn",
+		"raise", "rand", "readline", "readlines", "require", "require_relative",
+		"select", "sleep", "spawn", "sprintf",
+		"srand", "syscall", "system", "test", "throw", "trap", "warn",
 	}
 	// Two names that share ONE underlying Object record (a genuine built-in alias
 	// such as format/sprintf) must keep sharing after the mirror, or their mirrored
