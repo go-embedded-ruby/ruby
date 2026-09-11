@@ -76,8 +76,10 @@ func (vm *VM) registerSpawn() {
 			intn = ""
 		}
 		buf := &pipeBuf{}
-		reader := &IOObj{cls: cls, pipe: buf, label: "pipe-r", extEnc: ext, intEnc: intn}
-		writer := &IOObj{cls: cls, pipe: buf, isWriteEnd: true, writable: true, label: "pipe-w"}
+		// Both ends of a pipe come back with O_NONBLOCK already set, which is what
+		// MRI 4.0.5 reports through io/nonblock on this host.
+		reader := &IOObj{cls: cls, pipe: buf, label: "pipe-r", extEnc: ext, intEnc: intn, nonblock: true}
+		writer := &IOObj{cls: cls, pipe: buf, isWriteEnd: true, writable: true, label: "pipe-w", nonblock: true}
 		pair := object.NewArray(reader, writer)
 		if blk != nil {
 			// IO.pipe { |r, w| ... } yields the pair and closes both ends after.
@@ -87,28 +89,59 @@ func (vm *VM) registerSpawn() {
 		return pair
 	}}
 
-	// read_nonblock / readpartial drain available pipe bytes; at EOF (write end
-	// closed, nothing buffered) they raise EOFError, as MRI does.
-	nonblock := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// read_nonblock(len, outbuf = nil, exception: true) — io.c io_read_nonblock.
+	// The order matters and is observable: a negative length is ArgumentError
+	// before anything else, then the output buffer is coerced (io_setstrbuf), then
+	// the stream is checked readable (GetOpenFile / rb_io_check_byte_readable), and
+	// only then does a zero length return the emptied buffer. A read that would
+	// block raises IO::EAGAINWaitReadable (or returns :wait_readable), and the
+	// descriptor is left in non-blocking mode (rb_fd_set_nonblock); at end of file
+	// the output buffer is emptied and EOFError raised (or nil returned).
+	cIO.define("read_nonblock", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		pos, opts := splitIOOpts(args)
+		if len(pos) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		n := vm.ioOfftArg(pos[0])
+		if n < 0 {
+			raise("ArgumentError", "negative length %d given", n)
+		}
+		var buf *object.String
+		if len(pos) > 1 && !object.IsNil(pos[1]) {
+			buf = vm.ioBufferArg(pos[1])
+		}
+		raiseOnBlock := true
+		if opts != nil {
+			if v, ok := opts.Get(object.Symbol("exception")); ok {
+				raiseOnBlock = v.Truthy()
+			}
+		}
+		ioCheckReadable(o)
+		if n == 0 {
+			return ioReadResult(nil, buf)
+		}
 		o.pipeRefresh()
-		if o.pos >= len(o.buf) {
-			if o.pipeWriterClosed() {
+		o.nonblock = true // rb_fd_set_nonblock on the descriptor being read
+		if avail := len(o.buf) - o.pos; avail <= 0 {
+			if o.pipe == nil || o.pipeWriterClosed() { // end of file
+				ioReadResult(nil, buf) // io_set_read_length(str, 0) empties the buffer
+				if !raiseOnBlock {
+					return object.NilV
+				}
 				raise("EOFError", "end of file reached")
 			}
-			raise("Errno::EAGAIN", "Resource temporarily unavailable - read would block")
-		}
-		n := len(o.buf) - o.pos
-		if len(args) > 0 {
-			if m := int(intArg(args[0])); m < n {
-				n = m
+			if !raiseOnBlock {
+				return object.Symbol("wait_readable")
 			}
+			raise("IO::EAGAINWaitReadable", "Resource temporarily unavailable - read would block")
+		} else if n > avail {
+			n = avail
 		}
-		s := object.NewString(string(o.buf[o.pos : o.pos+n]))
+		data := o.buf[o.pos : o.pos+n]
 		o.pos += n
-		return s
-	}
-	cIO.define("read_nonblock", nonblock)
+		return ioReadResult(data, buf)
+	})
 
 	// readpartial(maxlen, outbuf = nil): a length-limited read that, unlike
 	// read_nonblock, blocks for data rather than raising EAGAIN. It returns at most

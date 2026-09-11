@@ -69,6 +69,7 @@ type IOObj struct {
 	wrClosed    bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
 	appendMode  bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
 	openMode    string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
+	nonblock    bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
 	extEnc      string // external encoding name, "" ⇒ Encoding.default_external
 	intEnc      string // internal encoding name, "" ⇒ none (nil)
 	fd          int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
@@ -201,11 +202,36 @@ func (vm *VM) registerIO() {
 		cIO.consts[name] = object.IntValue(val)
 	}
 	// `require "fcntl"` installs the Fcntl constant module (ext/fcntl/fcntl.c),
-	// lazily as MRI does — the constants must not resolve before the require.
+	// and `require "io/nonblock"` the IO#nonblock accessors
+	// (ext/io/nonblock/nonblock.c) — both lazily as MRI does, so neither resolves
+	// before its require.
 	if vm.featureHooks == nil {
 		vm.featureHooks = map[string]func(){}
 	}
 	vm.featureHooks["fcntl"] = vm.installFcntl
+	vm.featureHooks["io/nonblock"] = func() { installIONonblock(cIO) }
+	// IO::WaitReadable / IO::WaitWritable (io.c Init_IO) are the marker modules a
+	// non-blocking read or write raises with: IO::EAGAINWaitReadable is an
+	// Errno::EAGAIN subclass that includes IO::WaitReadable, so `rescue
+	// IO::WaitReadable` and `e.is_a?(Errno::EAGAIN)` both hold — MRI 4.0.5 on this
+	// host reports IO::EAGAINWaitReadable "Resource temporarily unavailable - read
+	// would block" and [true, true] for those two predicates. EWOULDBLOCK is EAGAIN
+	// on every platform rbgo targets, so IO::EWOULDBLOCKWait* is the very same
+	// class under a second name, as MRI makes it.
+	for _, w := range []string{"WaitReadable", "WaitWritable"} {
+		mod := newClass("IO::"+w, nil)
+		mod.isModule = true
+		cIO.consts[w], vm.consts["IO::"+w] = mod, mod
+		eagain, ok := vm.consts["Errno::EAGAIN"].(*RClass)
+		if !ok {
+			continue
+		}
+		exc := newClass("IO::EAGAIN"+w, eagain)
+		exc.includes = append(exc.includes, mod)
+		for _, name := range []string{"EAGAIN" + w, "EWOULDBLOCK" + w} {
+			cIO.consts[name], vm.consts["IO::"+name] = exc, exc
+		}
+	}
 	if fc, ok := vm.consts["File"].(*RClass).consts["Constants"].(*RClass); ok {
 		cIO.includes = append(cIO.includes, fc)
 	}

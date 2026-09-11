@@ -131,7 +131,10 @@ func TestSpawnForkNoBlock(t *testing.T) {
 }
 
 // TestSpawnReadNonblock covers read_nonblock / readpartial: draining buffered
-// bytes, EAGAIN when nothing is buffered, and EOFError once the writer closes.
+// bytes, the would-block error when nothing is buffered, and EOFError once the
+// writer closes. The would-block class is IO::EAGAINWaitReadable rather than a
+// bare Errno::EAGAIN — MRI 4.0.5 on this host prints exactly the line asserted
+// below (the previous pin predated IO::WaitReadable existing here).
 func TestSpawnReadNonblock(t *testing.T) {
 	fake := func([]string) (string, int) { return "", 0 }
 	out := runSpawn(t, `r, w = IO.pipe
@@ -141,7 +144,7 @@ begin; r.read_nonblock(1); rescue => e; got << e.class.name; end
 w.close
 begin; r.read_nonblock(1); rescue => e; got << e.class.name; end
 p got`, fake)
-	if out != "[\"ab\", \"cd\", \"Errno::EAGAIN\", \"EOFError\"]\n" {
+	if out != "[\"ab\", \"cd\", \"IO::EAGAINWaitReadable\", \"EOFError\"]\n" {
 		t.Fatalf("got %q", out)
 	}
 }

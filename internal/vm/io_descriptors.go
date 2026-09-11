@@ -236,9 +236,10 @@ func defIOSeekable(cls *RClass) {
 				if !raiseOnBlock {
 					return object.Symbol("wait_writable")
 				}
-				raise("Errno::EAGAIN", "Resource temporarily unavailable - write would block")
+				raise("IO::EAGAINWaitWritable", "Resource temporarily unavailable - write would block")
 			}
 		}
+		o.nonblock = true // io_write_nonblock leaves the descriptor non-blocking
 		return object.IntValue(vm.ioWriteAll(o, pos[:1]))
 	})
 	cls.define("pread", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -654,11 +655,14 @@ func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) objec
 	return o
 }
 
-// The fcntl standard-library extension is supplied by the VM: it is a constant
-// module with no Ruby file behind it, so `require "fcntl"` must succeed without
-// finding one. Registering it here (rather than in require.go's table) keeps the
-// feature beside the IO#fcntl that consumes its constants.
-func init() { providedFeatures["fcntl"] = true }
+// The fcntl and io/nonblock standard-library extensions are supplied by the VM
+// rather than by a Ruby file, so `require "fcntl"` / `require "io/nonblock"` must
+// succeed without finding one. Registering them here (rather than in require.go's
+// table) keeps each feature beside the IO surface that implements it.
+func init() {
+	providedFeatures["fcntl"] = true
+	providedFeatures["io/nonblock"] = true
+}
 
 // installFcntl creates the Fcntl module — ext/fcntl/fcntl.c, which defines
 // nothing but constants. Only the commands IO#fcntl above actually answers are
@@ -685,4 +689,20 @@ func (vm *VM) installFcntl() {
 		}
 		mod.consts["O_"+name] = object.IntValue(val)
 	}
+}
+
+// installIONonblock adds IO#nonblock? / #nonblock= — ext/io/nonblock/nonblock.c,
+// which reads and writes O_NONBLOCK on the descriptor with fcntl(2). rbgo has no
+// descriptors, so the flag lives on the stream: a file starts blocking and a pipe
+// end starts non-blocking, which is what MRI 4.0.5 reports on this host
+// ([false, true, true] for a File and the two ends of IO.pipe). The accessors are
+// installed on the first `require "io/nonblock"`, as MRI installs them.
+func installIONonblock(cls *RClass) {
+	cls.define("nonblock?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*IOObj).nonblock)
+	})
+	cls.define("nonblock=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		self.(*IOObj).nonblock = args[0].Truthy()
+		return args[0]
+	})
 }
