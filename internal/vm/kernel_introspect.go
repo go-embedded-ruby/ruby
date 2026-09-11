@@ -190,31 +190,73 @@ func (vm *VM) registerKernelIntrospection() {
 		return blk
 	})
 
-	// Kernel#exit raises SystemExit, which unwinds to the top (running at_exit
-	// handlers there). A bare `exit` and any status argument both unwind the same
-	// way here — the embedded host has no real process, so the status is not a
-	// process code, only the signal that the program asked to stop. exit! is the
-	// same minus at_exit semantics (modelled identically). abort prints an optional
-	// message to $stderr first. Puppet's exit_on_fail calls exit(code) after
-	// logging, so these let the real CLI terminate via SystemExit rather than a
-	// NoMethodError.
-	exitFn := func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return raise("SystemExit", "exit")
-	}
-	vm.cObject.define("exit", exitFn)
-	vm.cObject.define("exit!", exitFn)
-	vm.cObject.define("abort", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		if len(args) > 0 {
-			if s, ok := args[0].(*object.String); ok {
-				fmt.Fprintln(vm.errOut, s.Str())
-			}
-		}
-		return raise("SystemExit", "exit")
+	// Kernel#exit(status = true) raises SystemExit, which unwinds to the top
+	// (running at_exit handlers there). MRI's rb_f_exit (process.c) accepts 0..1
+	// arguments, maps the status through exit_status_code and raises
+	// SystemExit.new(status, "exit") — so the status the program asked to stop
+	// with survives to the rescuer. Puppet's exit_on_fail calls exit(code) after
+	// logging and then reads the code back off the SystemExit, so discarding it
+	// was a real loss, not just a spec gap.
+	//
+	// exit!(status = false) differs only in its default (EXIT_FAILURE) and in
+	// skipping at_exit handlers; the embedded host has no process to _exit() from,
+	// so it unwinds the same way. Both are also reachable as Kernel.exit /
+	// Kernel.exit! — registerKernelModuleFunctions mirrors the records.
+	vm.cObject.define("exit", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.raiseSystemExit(vm.exitStatusArg(args, 0), "exit")
 	})
-	if kernel, ok := vm.consts["Kernel"].(*RClass); ok {
-		kernel.smethods["exit"] = &Method{name: "exit", owner: kernel, native: exitFn}
-		kernel.smethods["exit!"] = &Method{name: "exit!", owner: kernel, native: exitFn}
+	vm.cObject.define("exit!", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.raiseSystemExit(vm.exitStatusArg(args, 1), "exit")
+	})
+	// abort(message = nil): MRI's rb_f_abort (process.c) puts the message —
+	// through StringValue, so a non-String converts with #to_str — on $stderr and
+	// then raises SystemExit.new(EXIT_FAILURE, message); with no argument it
+	// exits EXIT_FAILURE with the plain "exit" message. Unlike exit, the status is
+	// never taken from the argument.
+	vm.cObject.define("abort", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
+		}
+		if len(args) == 1 {
+			msg := vm.coerceToString(args[0])
+			fmt.Fprintln(vm.errOut, msg)
+			return vm.raiseSystemExit(1, msg)
+		}
+		return vm.raiseSystemExit(1, "exit")
+	})
+}
+
+// exitStatusArg reads Kernel#exit / #exit!'s optional status argument, applying
+// MRI's arity check (0..1) and exit_status_code mapping (process.c): true is
+// EXIT_SUCCESS (0), false is EXIT_FAILURE (1), and anything else goes through
+// NUM2INT — an Integer passes, a Float truncates through #to_int, and a String,
+// nil or Array (none of which define #to_int) is a TypeError. dflt is the code
+// for a bare call: 0 for exit, 1 for exit!.
+func (vm *VM) exitStatusArg(args []object.Value, dflt int64) int64 {
+	if len(args) > 1 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
 	}
+	if len(args) == 0 {
+		return dflt
+	}
+	switch args[0] {
+	case object.Value(object.True):
+		return 0
+	case object.Value(object.False):
+		return 1
+	}
+	return vm.toIntCoerce(args[0])
+}
+
+// raiseSystemExit raises the SystemExit that Kernel#exit / #exit! / #abort stop
+// the program with, built as MRI's rb_exit does it —
+// SystemExit.new(status, message) — so #status reports the requested code and
+// #message the requested text. It never returns; the object.Value result type
+// only lets it be the tail expression of a native method body.
+func (vm *VM) raiseSystemExit(status int64, message string) object.Value {
+	exc := vm.send(vm.consts["SystemExit"].(*RClass), "new",
+		[]object.Value{object.IntValue(status), object.NewString(message)}, nil)
+	panic(vm.excError(vm.captureBacktrace(exc)))
 }
 
 // registerKernelDelegates installs the Kernel global functions whose behaviour
