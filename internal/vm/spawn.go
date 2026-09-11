@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"math"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -75,39 +76,78 @@ func (vm *VM) registerSpawn() {
 			intn = ""
 		}
 		buf := &pipeBuf{}
-		reader := &IOObj{cls: cls, pipe: buf, label: "pipe-r", extEnc: ext, intEnc: intn}
-		writer := &IOObj{cls: cls, pipe: buf, isWriteEnd: true, writable: true, label: "pipe-w"}
+		// Both ends of a pipe come back with O_NONBLOCK already set, which is what
+		// MRI 4.0.5 reports through io/nonblock on this host. Each end carries one
+		// half of the access mode (rb_io_s_pipe opens FMODE_READABLE on the read end
+		// and FMODE_WRITABLE on the write end), so reading the write end or writing
+		// the read end raises, and #close_read/#close_write close the right one.
+		reader := &IOObj{cls: cls, pipe: buf, label: "pipe-r", extEnc: ext, intEnc: intn, nonblock: true, wrClosed: true}
+		writer := &IOObj{cls: cls, pipe: buf, isWriteEnd: true, writable: true, label: "pipe-w", nonblock: true, rdClosed: true}
 		pair := object.NewArray(reader, writer)
 		if blk != nil {
 			// IO.pipe { |r, w| ... } yields the pair and closes both ends after.
-			defer func() { reader.closed, writer.closed, buf.wClosed = true, true, true }()
+			defer func() {
+				reader.closed, writer.closed = true, true
+				buf.wClosed, buf.rClosed = true, true
+			}()
 			return vm.callBlock(blk, []object.Value{reader, writer})
 		}
 		return pair
 	}}
 
-	// read_nonblock / readpartial drain available pipe bytes; at EOF (write end
-	// closed, nothing buffered) they raise EOFError, as MRI does.
-	nonblock := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	// read_nonblock(len, outbuf = nil, exception: true) — io.c io_read_nonblock.
+	// The order matters and is observable: a negative length is ArgumentError
+	// before anything else, then the output buffer is coerced (io_setstrbuf), then
+	// the stream is checked readable (GetOpenFile / rb_io_check_byte_readable), and
+	// only then does a zero length return the emptied buffer. A read that would
+	// block raises IO::EAGAINWaitReadable (or returns :wait_readable), and the
+	// descriptor is left in non-blocking mode (rb_fd_set_nonblock); at end of file
+	// the output buffer is emptied and EOFError raised (or nil returned).
+	cIO.define("read_nonblock", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		pos, opts := splitIOOpts(args)
+		if len(pos) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		n := vm.ioOfftArg(pos[0])
+		if n < 0 {
+			raise("ArgumentError", "negative length %d given", n)
+		}
+		var buf *object.String
+		if len(pos) > 1 && !object.IsNil(pos[1]) {
+			buf = vm.ioBufferArg(pos[1])
+		}
+		raiseOnBlock := true
+		if opts != nil {
+			if v, ok := opts.Get(object.Symbol("exception")); ok {
+				raiseOnBlock = v.Truthy()
+			}
+		}
+		ioCheckReadable(o)
+		if n == 0 {
+			return ioReadResult(nil, buf)
+		}
 		o.pipeRefresh()
-		if o.pos >= len(o.buf) {
-			if o.pipeWriterClosed() {
+		o.nonblock = true // rb_fd_set_nonblock on the descriptor being read
+		if avail := len(o.buf) - o.pos; avail <= 0 {
+			if o.pipe == nil || o.pipeWriterClosed() { // end of file
+				ioReadResult(nil, buf) // io_set_read_length(str, 0) empties the buffer
+				if !raiseOnBlock {
+					return object.NilV
+				}
 				raise("EOFError", "end of file reached")
 			}
-			raise("Errno::EAGAIN", "Resource temporarily unavailable - read would block")
-		}
-		n := len(o.buf) - o.pos
-		if len(args) > 0 {
-			if m := int(intArg(args[0])); m < n {
-				n = m
+			if !raiseOnBlock {
+				return object.Symbol("wait_readable")
 			}
+			raise("IO::EAGAINWaitReadable", "Resource temporarily unavailable - read would block")
+		} else if n > avail {
+			n = avail
 		}
-		s := object.NewString(string(o.buf[o.pos : o.pos+n]))
+		data := o.buf[o.pos : o.pos+n]
 		o.pos += n
-		return s
-	}
-	cIO.define("read_nonblock", nonblock)
+		return ioReadResult(data, buf)
+	})
 
 	// readpartial(maxlen, outbuf = nil): a length-limited read that, unlike
 	// read_nonblock, blocks for data rather than raising EAGAIN. It returns at most
@@ -155,39 +195,74 @@ func (vm *VM) registerSpawn() {
 		return ioReadResult(data, buf)
 	})
 
-	// reopen rebinds a standard stream onto another IO (Puppet's safe_posix_fork
-	// does STDOUT.reopen(pipe_writer)); subsequent writes forward to the target.
-	cIO.define("reopen", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o := self.(*IOObj)
-		if target, ok := args[0].(*IOObj); ok {
-			o.reopened = target
-		}
-		return self
-	})
+	// IO#reopen and IO#fcntl live in io_descriptors.go, beside the rest of the
+	// descriptor-level surface. Its standard-stream branch is what Puppet's
+	// safe_posix_fork STDOUT.reopen(pipe_writer) rides on, and what runForkBlock
+	// below snapshots and restores around a forked block.
+	defIOReopen(cIO)
 
-	// IO.select reports readiness. A reader is ready when it has buffered bytes or
-	// its write end is closed (so a subsequent read returns EOF rather than
-	// blocking). Writers and exception sets are always reported ready, matching the
-	// non-blocking, fully-synchronous model.
-	cIO.smethods["select"] = &Method{name: "select", owner: cIO, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	// IO.popen([env,] cmd, mode = "r", **opts) — io.c rb_io_s_popen, which peels a
+	// trailing options Hash and then a leading environment Hash before reading the
+	// command and the mode, and pipe_open, which gives back a stream whose
+	// readable/writable halves follow that mode (so "r" raises IOError on write and
+	// "w" raises IOError on read). With a block the stream is yielded and closed
+	// afterwards (popen_finish → pipe_close), and $? carries the child's status.
+	//
+	// The child runs TO COMPLETION here and its output is buffered, which is the
+	// process model this whole file is built on (see the header): there is no
+	// concurrent child, so nothing the parent writes afterwards can reach its
+	// standard input — the child is run with an empty one. Everything else about
+	// the stream is real: the write half accepts bytes and reports their count,
+	// close_write/close_read shut the halves, and the mode gates both.
+	cIO.smethods["popen"] = &Method{name: "popen", owner: cIO, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		cls := cIO
+		if c, ok := self.(*RClass); ok {
+			cls = c
+		}
+		o := vm.popenOpen(cls, args)
+		if blk == nil {
+			return o
+		}
+		defer func() { o.closed, o.rdClosed, o.wrClosed = true, true, true }()
+		return vm.callBlock(blk, []object.Value{o})
+	}}
+
+	// IO.select(read, write, except, timeout) reports readiness. io.c rb_f_select
+	// converts the timeout first (rb_time_interval), then select_internal type-
+	// checks each of the three sets with Check_Type(T_ARRAY) and puts every element
+	// through rb_io_get_io (#to_io) — so a non-Array set, a non-IO element and a
+	// bad timeout all raise before any readiness is examined. The SUPPLIED object
+	// is what comes back in the result, not its #to_io conversion.
+	//
+	// Readiness itself follows this VM's synchronous model: a regular (buffer-
+	// backed) stream is always ready, as select(2) reports a regular file; a pipe
+	// reader is ready when it has buffered bytes or its write end is closed (so a
+	// subsequent read returns EOF rather than blocking) and a pipe writer is never
+	// read-ready; writers and exception sets are always reported ready.
+	cIO.smethods["select"] = &Method{name: "select", owner: cIO, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..4)")
+		}
+		if len(args) > 3 && !object.IsNil(args[3]) {
+			if f := mutexSleepDur(args[3]); math.IsNaN(f) {
+				raise("RangeError", "NaN out of Time range")
+			}
+		}
 		readReady := object.NewArray()
-		if len(args) > 0 {
-			if rs, ok := args[0].(*object.Array); ok {
-				for _, v := range rs.Elems {
-					if o, ok := v.(*IOObj); ok {
-						o.pipeRefresh()
-						if o.pos < len(o.buf) || o.pipeWriterClosed() {
-							readReady.Elems = append(readReady.Elems, o)
-						}
-					}
-				}
+		for _, v := range selectSet(vm, args, 0) {
+			o := ioGetIO(vm, v)
+			o.pipeRefresh()
+			if ioSelectReadable(o) {
+				readReady.Elems = append(readReady.Elems, v)
 			}
 		}
 		writeReady := object.NewArray()
-		if len(args) > 1 {
-			if ws, ok := args[1].(*object.Array); ok {
-				writeReady.Elems = append(writeReady.Elems, ws.Elems...)
-			}
+		for _, v := range selectSet(vm, args, 1) {
+			ioGetIO(vm, v)
+			writeReady.Elems = append(writeReady.Elems, v)
+		}
+		for _, v := range selectSet(vm, args, 2) { // type-checked, never reported ready
+			ioGetIO(vm, v)
 		}
 		if len(readReady.Elems) == 0 && len(writeReady.Elems) == 0 {
 			return object.NilV
@@ -197,6 +272,32 @@ func (vm *VM) registerSpawn() {
 
 	vm.registerProcessSpawn()
 	vm.registerKernelExec()
+}
+
+// selectSet returns the elements of IO.select's i-th argument set. A missing or
+// nil set is empty; anything that is not an Array is the TypeError
+// select_internal's Check_Type(T_ARRAY) raises.
+func selectSet(vm *VM, args []object.Value, i int) []object.Value {
+	if i >= len(args) || object.IsNil(args[i]) {
+		return nil
+	}
+	arr, ok := args[i].(*object.Array)
+	if !ok {
+		raise("TypeError", "wrong argument type %s (expected Array)", vm.classOf(args[i]).name)
+	}
+	return arr.Elems
+}
+
+// ioSelectReadable reports whether a read on o would return without blocking. A
+// pipe end answers from the shared buffer (its write end never reads); anything
+// else is a regular, fully-buffered stream, which select(2) always reports
+// readable — including at end of file, where the read returns nil rather than
+// blocking.
+func ioSelectReadable(o *IOObj) bool {
+	if o.pipe != nil {
+		return !o.isWriteEnd && (o.pos < len(o.buf) || o.pipe.wClosed)
+	}
+	return true
 }
 
 // registerProcessSpawn adds spawn / waitpid2 / setsid / Status to the Process
@@ -440,4 +541,56 @@ func shellish(cmd []string) (string, bool) {
 		return s, true
 	}
 	return s, false
+}
+
+// popenOpen builds the stream IO.popen hands back. It splits the arguments the
+// way io.c rb_io_s_popen does — a trailing options Hash, then a leading
+// environment Hash, then the command and an optional mode — runs the command,
+// and returns a buffered stream holding its output whose access halves follow
+// the mode (pipe_open passes fmode straight through). $? is set to the child's
+// status, and #pid reports it.
+func (vm *VM) popenOpen(cls *RClass, args []object.Value) *IOObj {
+	pos := args
+	if len(pos) > 1 {
+		if _, ok := pos[len(pos)-1].(*object.Hash); ok {
+			pos = pos[:len(pos)-1] // exec options; none of them are honoured here
+		}
+	}
+	if len(pos) > 1 {
+		if _, ok := pos[0].(*object.Hash); ok {
+			pos = pos[1:] // leading environment Hash — runCaptured takes no environment
+		}
+	}
+	if len(pos) < 1 || len(pos) > 2 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
+	}
+	mode := "r"
+	if len(pos) > 1 && !object.IsNil(pos[1]) {
+		mode = modeBase(vm.vmodeString(pos[1]))
+	}
+	// "-" asks pipe_open to fork the interpreter itself (is_popen_fork), which
+	// needs a working fork; MRI raises exactly this without one.
+	if s, ok := pos[0].(*object.String); ok && s.Str() == "-" {
+		raise("NotImplementedError", "fork() function is unimplemented on this machine")
+	}
+	out, code := runCaptured(spawnCommand(pos[:1]))
+	pid := vm.recordChild(code)
+	vm.globals["$?"] = vm.newProcessStatus(pid, code)
+	o := &IOObj{cls: cls, isStr: true, buf: []byte(out), label: "popen", nonblock: true,
+		popen: &popenProc{pid: pid}, openMode: mode}
+	// pipe_open hands back a stream whose halves are exactly the mode's: a bare
+	// "r" cannot be written and a bare "w" cannot be read, while any "+" mode is
+	// duplex (which is what IO#close_read / #close_write call a duplexed stream).
+	plus := strings.Contains(mode, "+")
+	o.rdClosed = !plus && mode != "r"
+	o.wrClosed = !plus && mode == "r"
+	o.duplex = plus // FMODE_DUPLEX: only a "+" popen has two independent halves
+	return o
+}
+
+// popenProc records the child IO.popen ran, so #pid can report it and writes to
+// the stream have somewhere to go that is not the buffer being read.
+type popenProc struct {
+	pid   int64
+	stdin []byte
 }

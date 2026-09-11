@@ -54,20 +54,28 @@ func ioPathString(o *IOObj) (string, bool) {
 // in-memory byte buffer with a read/write cursor. The two share the write path
 // so puts/print/printf/<< work uniformly, and StringIO adds the read methods.
 type IOObj struct {
-	cls         *RClass // IO, StringIO or File — so classOf/is_a? are exact
-	w           io.Writer
-	buf         []byte // StringIO / File content (buffered in memory)
-	pos         int    // read/write cursor
-	isStr       bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
-	sync        bool
-	closed      bool
-	label       string // "STDOUT"/"STDERR"/"STDIN" for inspect
-	path        string // backing file path for a File stream (else "")
-	writable    bool   // a File opened for writing — flush the buffer on flush/close
-	lineno      int    // #lineno — advanced by each successful line read (gets/readline)
-	rdClosed    bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
-	wrClosed    bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
-	appendMode  bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
+	cls        *RClass // IO, StringIO or File — so classOf/is_a? are exact
+	w          io.Writer
+	buf        []byte // StringIO / File content (buffered in memory)
+	pos        int    // read/write cursor
+	isStr      bool   // buffer-backed (StringIO / File) vs writer-backed (real IO)
+	sync       bool
+	closed     bool
+	label      string // "STDOUT"/"STDERR"/"STDIN" for inspect
+	path       string // backing file path for a File stream (else "")
+	writable   bool   // a File opened for writing — flush the buffer on flush/close
+	lineno     int    // #lineno — advanced by each successful line read (gets/readline)
+	rdClosed   bool   // #close_read (or a write-only mode) — reads raise "not opened for reading"
+	wrClosed   bool   // #close_write (or a read-only mode) — writes raise "not opened for writing"
+	appendMode bool   // opened in append mode ("a"/"a+") — every write lands at end-of-buffer
+	openMode   string // the fopen-style access mode a file stream was opened with ("r", "w+", "ab"…)
+	nonblock   bool   // O_NONBLOCK is set (io/nonblock): false for a file, true for a pipe end
+	// encSet records that #set_encoding has resolved this stream's encodings
+	// against the defaults in force at that moment (io.c io_encoding_set →
+	// rb_io_ext_int_to_enc). An empty extEnc then means "no encoding" — MRI's
+	// fptr->encs.enc == NULL — rather than "fall back to Encoding.default_external",
+	// so a later change to the defaults cannot move it.
+	encSet      bool
 	extEnc      string // external encoding name, "" ⇒ Encoding.default_external
 	intEnc      string // internal encoding name, "" ⇒ none (nil)
 	fd          int    // synthetic file descriptor for #fileno (0 ⇒ not yet assigned)
@@ -100,13 +108,42 @@ type IOObj struct {
 	pipeSynced int // bytes of pipe.data already folded into this reader's buf
 	isWriteEnd bool
 	reopened   *IOObj
+
+	// duplex marks MRI's FMODE_DUPLEX: a stream with independent read and write
+	// halves, which only IO.popen in a "+" mode creates. It is what #close_read /
+	// #close_write mean by "duplexed" — a File opened "r+" is readable AND writable
+	// but NOT duplex, and shutting one of its halves is an error.
+	duplex bool
+
+	// popen marks a stream IO.popen created and records the child it ran. That
+	// child has already finished — the process model above is synchronous — so buf
+	// holds its whole output; bytes written to the stream are kept in popen.stdin,
+	// out of the buffer being read, and cannot reach a child that is already gone.
+	popen *popenProc
 }
 
-// pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair.
+// pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair. Each
+// end records its own closing: wClosed is EOF for the reader, and rClosed is the
+// broken pipe a further write reports (Errno::EPIPE).
 type pipeBuf struct {
 	data    []byte
 	rpos    int
 	wClosed bool
+	rClosed bool
+}
+
+// pipeEndClosed records the closing of one end of a pipe on the shared buffer, so
+// the other end sees what closing it means: a closed write end is end-of-file for
+// the reader, and a closed read end makes a further write a broken pipe.
+func (o *IOObj) pipeEndClosed() {
+	if o.pipe == nil {
+		return
+	}
+	if o.isWriteEnd {
+		o.pipe.wClosed = true
+		return
+	}
+	o.pipe.rClosed = true
 }
 
 func (o *IOObj) ToS() string {
@@ -131,7 +168,21 @@ func (o *IOObj) writeBytes(p []byte) int {
 		o = cur
 	}
 	if o.pipe != nil && o.isWriteEnd {
+		// Writing a pipe whose read end has gone is a broken pipe. MRI 4.0.5
+		// reports Errno::EPIPE "Broken pipe" and does not die from SIGPIPE, which
+		// is what core/io/shared/write.rb asserts for #write, #syswrite and
+		// #write_nonblock alike.
+		if o.pipe.rClosed {
+			raise("Errno::EPIPE", "Broken pipe")
+		}
 		o.pipe.data = append(o.pipe.data, p...)
+		return len(p)
+	}
+	// A stream from IO.popen buffers the child's whole output; a write must not
+	// land in it. See popenProc: the child has already finished, so the bytes are
+	// kept and counted but go nowhere.
+	if o.popen != nil {
+		o.popen.stdin = append(o.popen.stdin, p...)
 		return len(p)
 	}
 	if o.isStr {
@@ -199,6 +250,32 @@ func (vm *VM) registerIO() {
 	} {
 		cIO.consts[name] = object.IntValue(val)
 	}
+	// `require "fcntl"` installs the Fcntl constant module (ext/fcntl/fcntl.c),
+	// and `require "io/nonblock"` the IO#nonblock accessors
+	// (ext/io/nonblock/nonblock.c) — both lazily as MRI does, so neither resolves
+	// before its require. The featureHooks map is already created by registerPrime,
+	// which runs first.
+	vm.featureHooks["fcntl"] = vm.installFcntl
+	vm.featureHooks["io/nonblock"] = func() { installIONonblock(cIO) }
+	// IO::WaitReadable / IO::WaitWritable (io.c Init_IO) are the marker modules a
+	// non-blocking read or write raises with: IO::EAGAINWaitReadable is an
+	// Errno::EAGAIN subclass that includes IO::WaitReadable, so `rescue
+	// IO::WaitReadable` and `e.is_a?(Errno::EAGAIN)` both hold — MRI 4.0.5 on this
+	// host reports IO::EAGAINWaitReadable "Resource temporarily unavailable - read
+	// would block" and [true, true] for those two predicates. EWOULDBLOCK is EAGAIN
+	// on every platform rbgo targets, so IO::EWOULDBLOCKWait* is the very same
+	// class under a second name, as MRI makes it.
+	eagain := vm.consts["Errno::EAGAIN"].(*RClass) // registered with File, above
+	for _, w := range []string{"WaitReadable", "WaitWritable"} {
+		mod := newClass("IO::"+w, nil)
+		mod.isModule = true
+		cIO.consts[w], vm.consts["IO::"+w] = mod, mod
+		exc := newClass("IO::EAGAIN"+w, eagain)
+		exc.includes = append(exc.includes, mod)
+		for _, name := range []string{"EAGAIN" + w, "EWOULDBLOCK" + w} {
+			cIO.consts[name], vm.consts["IO::"+name] = exc, exc
+		}
+	}
 	if fc, ok := vm.consts["File"].(*RClass).consts["Constants"].(*RClass); ok {
 		cIO.includes = append(cIO.includes, fc)
 	}
@@ -228,6 +305,19 @@ func (vm *VM) registerIO() {
 	cIO.define("fileno", fileno)
 	cIO.methods["to_i"] = cIO.methods["fileno"] // #to_i is a true alias of #fileno
 
+	// IO#pid (rb_io_pid): the pid of the child a stream was opened onto — only
+	// IO.popen makes one — and nil for every other stream. A closed stream raises
+	// IOError, as GetOpenFile does.
+	cIO.define("pid", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		if o.popen == nil {
+			return object.NilV
+		}
+		return object.IntValue(o.popen.pid)
+	})
 	// IO#to_io returns the IO itself (rb_io_to_io), for open or closed streams.
 	cIO.define("to_io", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self
@@ -645,7 +735,7 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 	if mode == "" {
 		raise("ArgumentError", "invalid access mode %s", mode)
 	}
-	o := &IOObj{cls: cls, isStr: true, path: p}
+	o := &IOObj{cls: cls, isStr: true, path: p, openMode: mode}
 	switch mode[0] {
 	case 'r':
 		if notRegular(p) {
@@ -681,7 +771,17 @@ func openFileIO(cls *RClass, p, mode string) *IOObj {
 			o.writable = true // as above: nothing to append to that can be read
 			break
 		}
-		b, _ := os.ReadFile(p) // append to the existing content (or a new file)
+		b, err := os.ReadFile(p) // append to the existing content (or a new file)
+		if err != nil {
+			// O_APPEND carries O_CREAT in MRI's "a"/"a+" fmode (io.c
+			// rb_io_fmode_oflags: FMODE_APPEND ⇒ O_CREAT|O_APPEND), so the file
+			// exists on disk as soon as it is opened — `File.open(p, "a")` then
+			// `File.exist?(p)` is true before any write. Materialise it now, as
+			// the 'w' branch above does for O_CREAT|O_TRUNC.
+			if werr := os.WriteFile(p, nil, 0o644); werr != nil {
+				raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
+			}
+		}
 		o.buf, o.pos, o.writable = b, len(b), true
 	default:
 		raise("ArgumentError", "invalid access mode %s", mode)
@@ -924,9 +1024,7 @@ func defIOWrite(cls *RClass) {
 	cls.define("close", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioFlush(o)
-		if o.pipe != nil && o.isWriteEnd {
-			o.pipe.wClosed = true // signal EOF to the read end
-		}
+		o.pipeEndClosed()
 		o.closed = true
 		return object.NilV
 	})
@@ -961,10 +1059,13 @@ func defIOWrite(cls *RClass) {
 				return e
 			}
 		}
-		// A write-only stream with no explicit encoding reports nil (unless a
-		// default internal encoding forces transcoding); a readable one reports
-		// Encoding.default_external.
-		if o.writable && object.IsNil(vm.send(vm.cEncoding, "default_internal", nil, nil)) {
+		// rb_io_external_encoding: with no converter and no encoding recorded, a
+		// WRITABLE stream reports nil, while a readable one falls back to
+		// Encoding.default_external (io_read_encoding). Once #set_encoding has
+		// resolved the pair (encSet) the empty name IS the answer; otherwise the
+		// open-time resolution is reproduced lazily, and a default internal
+		// encoding is what would have forced a converter into place.
+		if ioFmodeWritable(o) && (o.encSet || object.IsNil(vm.send(vm.cEncoding, "default_internal", nil, nil))) {
 			return object.NilV
 		}
 		return vm.send(vm.cEncoding, "default_external", nil, nil)
@@ -1021,9 +1122,49 @@ func defIOWrite(cls *RClass) {
 		if o.intEnc == o.extEnc {
 			o.intEnc = ""
 		}
+		if object.IsNil(pos[0]) {
+			o.extEnc, o.intEnc = vm.extIntToEnc(o.intEnc)
+		}
+		o.encSet = true
 		return self
 	})
 }
+
+// extIntToEnc resolves a #set_encoding whose external argument was nil, which
+// io.c io_encoding_set passes to rb_io_ext_int_to_enc with a NULL external: the
+// external becomes Encoding.default_external (default_ext), and an internal that
+// was not named becomes Encoding.default_internal. When there is no internal left
+// — or it equals the external — no converter is needed, and the recorded encoding
+// is NULL precisely when the external was defaulted and differs from the
+// internal; otherwise the pair is kept and drives the converter.
+//
+// The consequence the specs pin down is that the answer is FROZEN here: a stream
+// reset with `set_encoding nil, nil` while the defaults are UTF-8 / nil reports
+// nil for both afterwards even once the defaults change, whereas one reset while
+// they are IBM437 / IBM866 reports that pair.
+func (vm *VM) extIntToEnc(named string) (ext, intn string) {
+	if vm.defExternalEnc != nil {
+		ext = vm.defExternalEnc.name
+	}
+	intn = named
+	if intn == "" && ext != "ASCII-8BIT" && vm.defInternalEnc != nil {
+		intn = vm.defInternalEnc.name
+	}
+	if intn == "" || intn == ext {
+		if intn != ext { // a defaulted external with no internal records nothing
+			return "", ""
+		}
+		return ext, ""
+	}
+	return ext, intn
+}
+
+// ioFmodeWritable reports MRI's FMODE_WRITABLE for a stream: a file opened for
+// writing, a pipe write end, or one of the writer-backed standard streams
+// ($stdout / $stderr, whose bytes go straight to an io.Writer). It is the
+// predicate rb_io_external_encoding branches on, and is deliberately not
+// o.wrClosed: a pipe READ end leaves that false while being read-only.
+func ioFmodeWritable(o *IOObj) bool { return o.writable || o.w != nil }
 
 // ioReadEnc returns the (external, internal) encoding names in effect for a
 // whole-stream read, filling the unset sides from Encoding.default_external and
@@ -1725,7 +1866,7 @@ func enumSizeNil(*VM) object.Value { return object.NilV }
 // side effect per line. A successful (non-nil) read advances #lineno.
 func (vm *VM) ioGetsResolved(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 	o.pipeRefresh()
-	v := ioGetsLine(o, sep, limit, chomp)
+	v := vm.ioGetsLine(o, sep, limit, chomp)
 	if v != object.NilV {
 		o.lineno++
 		// A line is read in the external encoding (the separator is matched on those
@@ -1824,7 +1965,7 @@ type getsSep struct {
 
 // ioGetsLine reads one line honouring the separator, an optional byte limit
 // (negative for none) and chomp, advancing the cursor. It returns nil at EOF.
-func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
+func (vm *VM) ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 	if o.pos >= len(o.buf) {
 		return object.NilV
 	}
@@ -1839,7 +1980,8 @@ func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 		}
 	}
 	if limit >= 0 && o.pos+limit < end {
-		end = o.pos + limit
+		ext, _ := vm.ioReadEnc(o)
+		end = vm.relaxGetsLimit(o.buf, o.pos, o.pos+limit, end, ext)
 	}
 	line := o.buf[o.pos:end]
 	o.pos = end
@@ -1847,6 +1989,51 @@ func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 		line = getsChomp(line, sep.s)
 	}
 	return object.NewString(string(line))
+}
+
+// relaxGetsLimit returns the end offset a byte-limited gets should actually stop
+// at. io.c rb_io_getline_0 does not cut a line in the middle of a character: when
+// the limit is exhausted and the trailing character is still incomplete
+// (MBCLEN_NEEDMORE_P on the last character), it relaxes the limit by one byte and
+// reads again, up to an extra_limit of 16 bytes. The trailing character is
+// re-anchored on every pass (rb_enc_prev_char), which is what makes a run of
+// truncated leads consume the full 16 rather than stopping at the first invalid
+// sequence. hardEnd caps the relaxation at the separator (or end of stream), as
+// appendline's newline check does.
+func (vm *VM) relaxGetsLimit(buf []byte, start, end, hardEnd int, enc string) int {
+	switch enc {
+	case "", "ASCII-8BIT", "US-ASCII", "ISO-8859-1":
+		return end // a single-byte encoding has no character to split
+	}
+	anchor := start
+	for extra := 16; extra > 0 && end < hardEnd && anchor < end; extra-- {
+		anchor += lastCharStart(vm, buf[anchor:end], enc)
+		if _, _, _, st := vm.decodeCharFrom(buf[anchor:end], enc); st != stepIncomplete {
+			return end
+		}
+		end++
+	}
+	return end
+}
+
+// lastCharStart returns the offset within s at which its final character begins,
+// walking the characters forward from the start of the slice (MRI's
+// rb_enc_prev_char scans backwards from the end, but only ever to find the same
+// boundary). An invalid sequence is stepped over by its maximal valid subpart, so
+// a run of truncated leads re-anchors on the last of them.
+func lastCharStart(vm *VM, s []byte, enc string) int {
+	last := 0
+	for i := 0; i < len(s); {
+		last = i
+		_, n, _, st := vm.decodeCharFrom(s[i:], enc)
+		if st == stepIncomplete {
+			return last
+		}
+		// Every codec consumes at least one byte once it has decided (an invalid
+		// lead reports a one-byte subpart), so the floor is a guard, not a branch.
+		i += max(n, 1)
+	}
+	return last
 }
 
 // getsChomp removes a single trailing separator run from line (the "\n" default

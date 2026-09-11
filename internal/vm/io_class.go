@@ -140,7 +140,7 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 			// block when iterated. io.c: rb_io_s_foreach returns enum_for(:foreach).
 			return enumForSized(self, "foreach", enumSizeNil, args...)
 		}
-		o := openFileIO(cFile, pathArg(vm, pos[0]), "r")
+		o := vm.ioOpenForeach(pos[0], opts)
 		sep, limit, chomp := vm.resolveGetsArgs(pos[1:])
 		chomp = optChomp(opts, chomp)
 		checkResolvedLimit(limit, "foreach")
@@ -159,7 +159,7 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		if len(pos) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
-		o := openFileIO(cFile, pathArg(vm, pos[0]), "r")
+		o := vm.ioOpenForeach(pos[0], opts)
 		sep, limit, chomp := vm.resolveGetsArgs(pos[1:])
 		chomp = optChomp(opts, chomp)
 		checkResolvedLimit(limit, "readlines")
@@ -169,6 +169,40 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		}
 		return object.NewArrayFromSlice(lines)
 	})
+}
+
+// ioOpenForeach opens the file IO.foreach / IO.readlines will read — io.c
+// open_key_args, which does NOT force O_RDONLY when options are given: an
+// :open_args Array supplies the mode (superseding the sibling options), otherwise
+// the :mode option does, and only a call with no options at all defaults to
+// O_RDONLY. Opening with a write mode therefore creates the file and the read
+// that follows raises IOError, where forcing "r" raised Errno::ENOENT instead.
+// rb_io_getline_0 opens with rb_io_check_char_readable, so the check is made here
+// — nothing happens between the open and the first line.
+func (vm *VM) ioOpenForeach(path object.Value, opts *object.Hash) *IOObj {
+	cFile := vm.consts["File"].(*RClass)
+	o := openFileIO(cFile, pathArg(vm, path), modeBase(ioForeachMode(opts)))
+	ioCheckReadable(o)
+	return o
+}
+
+// ioForeachMode returns the access mode IO.foreach / IO.readlines open with: the
+// mode inside :open_args if that option is present, else the :mode option, else
+// "r" (io.c open_key_args ⇒ rb_io_open ⇒ rb_io_extract_modeenc).
+func ioForeachMode(opts *object.Hash) string {
+	if opts == nil {
+		return "r"
+	}
+	if oa, ok := opts.Get(object.Symbol("open_args")); ok {
+		if m := ioOpenArgsMode(oa); m != "" {
+			return m
+		}
+		return "r"
+	}
+	if m := ioOptMode(opts); m != "" {
+		return m
+	}
+	return "r"
 }
 
 // ioAdoptDescriptor makes o wrap the descriptor src under the mode/encoding

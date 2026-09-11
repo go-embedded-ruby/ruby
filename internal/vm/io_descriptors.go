@@ -7,6 +7,7 @@ package vm
 import (
 	"math/big"
 	"os"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -171,10 +172,27 @@ func defIOReadExtra(cls *RClass) {
 		o.lineno = vm.ioCIntArg(args[0])
 		return args[0]
 	})
+	// #close_read / #close_write shut one half of a DUPLEX stream — which, on a
+	// real IO, only IO.popen in a "+" mode makes. io.c rb_io_close_read raises
+	// "closing non-duplex IO for reading" when a non-duplex stream is WRITABLE
+	// (so File.open(p, "w") and File.open(p, "w+") both raise) and otherwise
+	// closes the whole stream; rb_io_close_write is the mirror image. Both answer
+	// nil on an already-closed stream before any of that (fptr->fd < 0).
 	cls.define("close_read", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		if o.rdModeOff { // a StringIO opened write-only has no read half to close (MRI)
 			raise("IOError", "not opened for reading")
+		}
+		if !ioIsStringIO(o) && !o.duplex {
+			if o.closed {
+				return object.NilV
+			}
+			if !o.wrClosed {
+				raise("IOError", "closing non-duplex IO for reading")
+			}
+			o.rdClosed, o.closed = true, true
+			o.pipeEndClosed()
+			return object.NilV
 		}
 		o.rdClosed = true
 		if o.wrClosed { // both halves shut ⇒ the stream is fully closed
@@ -186,6 +204,18 @@ func defIOReadExtra(cls *RClass) {
 		o := self.(*IOObj)
 		if o.wrModeOff { // a StringIO opened read-only has no write half to close (MRI)
 			raise("IOError", "not opened for writing")
+		}
+		if !ioIsStringIO(o) && !o.duplex {
+			if o.closed {
+				return object.NilV
+			}
+			if !o.rdClosed {
+				raise("IOError", "closing non-duplex IO for writing")
+			}
+			ioFlush(o)
+			o.wrClosed, o.closed = true, true
+			o.pipeEndClosed()
+			return object.NilV
 		}
 		ioFlush(o)
 		o.wrClosed = true
@@ -235,9 +265,10 @@ func defIOSeekable(cls *RClass) {
 				if !raiseOnBlock {
 					return object.Symbol("wait_writable")
 				}
-				raise("Errno::EAGAIN", "Resource temporarily unavailable - write would block")
+				raise("IO::EAGAINWaitWritable", "Resource temporarily unavailable - write would block")
 			}
 		}
+		o.nonblock = true // io_write_nonblock leaves the descriptor non-blocking
 		return object.IntValue(vm.ioWriteAll(o, pos[:1]))
 	})
 	cls.define("pread", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
@@ -436,4 +467,299 @@ func ioReadResult(data []byte, buf *object.String) object.Value {
 		return buf
 	}
 	return object.NewStringBytes(append([]byte(nil), data...))
+}
+
+// defIOReopen installs IO#reopen and IO#fcntl — the two descriptor-rebinding
+// methods MRI implements on top of dup2()/freopen()/fcntl(), modelled here on the
+// buffered IOObj the VM uses in place of real file descriptors.
+func defIOReopen(cls *RClass) {
+	// IO#reopen(other_io) / #reopen(path, mode = nil, **opts) -> self
+	//
+	// io.c rb_io_reopen: with exactly one positional argument that converts to an
+	// IO (rb_io_check_io, i.e. #to_io), the receiver adopts that stream
+	// (io_reopen); otherwise the argument is a path (FilePathValue, i.e. #to_path)
+	// and the receiver is re-bound to a freshly opened stream on it. Either way the
+	// receiver object itself is mutated — #object_id is unchanged — and self is
+	// returned.
+	cls.define("reopen", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		pos, opts := splitIOOpts(args)
+		if len(pos) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		// rb_scan_args(argc, argv, "11:") reports one argument only when no second
+		// positional mode was given; the IO form is tried only then.
+		if len(pos) == 1 {
+			if other, ok := ioConvertIO(vm, pos[0], false); ok {
+				return ioReopenIO(vm, o, other)
+			}
+		}
+		return ioReopenPath(vm, o, pos, opts)
+	})
+
+	// IO#fcntl(cmd, arg = 0) — io.c rb_io_fcntl. rbgo has no real descriptors, so
+	// the answer is derived from the stream's own recorded state rather than from
+	// the host: F_GETFL reports the access mode and O_APPEND the stream was opened
+	// with, and F_GETFD reports FD_CLOEXEC from the close-on-exec flag. The two
+	// setters are accepted and ignored (there is no descriptor to change), and any
+	// other command is refused the way MRI refuses an unsupported one.
+	cls.define("fcntl", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		switch intArg(args[0]) {
+		case fcntlFGetFD:
+			if o.closeOnExecOff {
+				return object.IntValue(0)
+			}
+			return object.IntValue(fdCloexec)
+		case fcntlFGetFL:
+			return object.IntValue(ioOflags(o))
+		case fcntlFSetFD, fcntlFSetFL:
+			return object.IntValue(0)
+		}
+		raise("Errno::EINVAL", "Invalid argument - fcntl(2)")
+		return object.NilV
+	})
+}
+
+// fcntl(2) command numbers and the FD_CLOEXEC descriptor flag. As with the
+// File::Constants open flags (fO_RDONLY and friends), the canonical POSIX values
+// are fixed here so behaviour does not drift with the host's <fcntl.h>.
+const (
+	fcntlFGetFD = 1
+	fcntlFSetFD = 2
+	fcntlFGetFL = 3
+	fcntlFSetFL = 4
+	fdCloexec   = 1
+)
+
+// ioStdioStream reports whether o is one of the three streams MRI keeps a FILE*
+// for ($stdin / $stdout / $stderr), which #reopen freopen()s rather than
+// rb_sysopen()ing — the two take different open flags.
+func ioStdioStream(o *IOObj) bool {
+	switch o.label {
+	case "STDIN", "STDOUT", "STDERR":
+		return true
+	}
+	return false
+}
+
+// ioOflags rebuilds the open-flag set (the answer fcntl(F_GETFL) gives) from a
+// stream's recorded access mode: io.c rb_io_fmode_oflags maps FMODE_READWRITE to
+// O_RDWR, a write-only mode to O_WRONLY and FMODE_APPEND to O_APPEND. O_CREAT and
+// O_TRUNC are deliberately absent — they act at open(2) time and a real
+// fcntl(F_GETFL) never reports them.
+func ioOflags(o *IOObj) int64 {
+	var fl int64
+	switch {
+	case !o.rdClosed && !o.wrClosed:
+		fl = fO_RDWR
+	case o.rdClosed:
+		fl = fO_WRONLY
+	default:
+		fl = fO_RDONLY
+	}
+	if o.appendMode {
+		fl |= fO_APPEND
+	}
+	return fl
+}
+
+// ioConvertIO converts v to an IO through #to_io. It is the one body behind
+// io.c's pair of conversions, which differ only in what a missing #to_io means:
+// rb_io_check_io (strict false, rb_check_convert_type_with_id) reports "not an
+// IO" so the caller can treat v as something else — IO#reopen treats it as a
+// path — while rb_io_get_io (strict true, rb_convert_type_with_id) raises. Both
+// raise when #to_io answers something that is not an IO, nil included.
+func ioConvertIO(vm *VM, v object.Value, strict bool) (*IOObj, bool) {
+	if o, ok := v.(*IOObj); ok {
+		return o, true
+	}
+	if !vm.respondsToDynamic(v, "to_io") {
+		if strict {
+			raise("TypeError", "no implicit conversion of %s into IO", vm.classOf(v).name)
+		}
+		return nil, false
+	}
+	r := vm.send(v, "to_io", nil, nil)
+	if o, ok := r.(*IOObj); ok {
+		return o, true
+	}
+	if object.IsNil(r) && !strict {
+		return nil, false
+	}
+	raise("TypeError", "can't convert %s to IO (%s#to_io gives %s)",
+		vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	return nil, false
+}
+
+// ioGetIO is the strict conversion (rb_io_get_io): IO.select takes every element
+// of its argument arrays through it, so a non-IO raises rather than being
+// silently skipped.
+func ioGetIO(vm *VM, v object.Value) *IOObj {
+	o, _ := ioConvertIO(vm, v, true)
+	return o
+}
+
+// ioReopenIO re-binds o onto other's stream — io.c io_reopen, which dup2()s
+// other's descriptor over o's and copies the mode, encodings, pid, lineno and
+// path across, then sets o's class to other's. Both streams must be open.
+//
+// A standard stream keeps its identity instead of adopting the target wholesale:
+// MRI dup2()s onto descriptor 0/1/2 and leaves the FILE* in place, so STDOUT stays
+// STDOUT and only its destination moves. That is also the shape the rest of this
+// VM relies on — Kernel#fork snapshots and restores exactly this redirection
+// around a forked block (spawn.go runForkBlock), which a wholesale copy could not
+// express.
+func ioReopenIO(vm *VM, o, other *IOObj) object.Value {
+	if o.closed {
+		raise("IOError", "closed stream")
+	}
+	if other.closed {
+		raise("IOError", "closed stream")
+	}
+	if o == other {
+		return o
+	}
+	// Buffered writes reach the old destination before the descriptor moves
+	// (io.c calls io_fflush on both streams first).
+	ioFlush(o)
+	ioFlush(other)
+	// close-on-exec is always set afresh on the reopened stream, whatever either
+	// side carried (rb_io_reopen ends with rb_fd_fix_cloexec on the new fd).
+	o.closeOnExecOff = false
+	if ioStdioStream(o) {
+		o.reopened = other
+		return o
+	}
+	o.buf, o.pos, o.lineno = other.buf, other.pos, other.lineno
+	o.rdClosed, o.wrClosed, o.writable = other.rdClosed, other.wrClosed, other.writable
+	o.appendMode, o.openMode, o.binmode = other.appendMode, other.openMode, other.binmode
+	o.extEnc, o.intEnc = other.extEnc, other.intEnc
+	o.isStr, o.w, o.pipe, o.isWriteEnd = other.isStr, other.w, other.pipe, other.isWriteEnd
+	o.pipeSynced, o.reopened = other.pipeSynced, other.reopened
+	// "if (RTEST(orig->pathv)) fptr->pathv = orig->pathv; else … fptr->pathv = Qnil"
+	o.path = other.path
+	o.cls = other.cls // RBASIC_SET_CLASS(io, rb_obj_class(nfile))
+	return o
+}
+
+// ioReopenPath re-binds o onto a freshly opened stream on the given path — the
+// second half of io.c rb_io_reopen. With no mode argument the stream keeps the
+// access mode it was opened with ("oflags = rb_io_fmode_oflags(fptr->mode)"), so
+// a writable stream re-creates (and truncates) the new file while a read-only one
+// raises Errno::ENOENT for a path that does not exist. A closed stream reopens.
+// A stream that was never opened from a path has no mode to carry over, and the
+// two branches below say what MRI does for each kind of those.
+func ioReopenPath(vm *VM, o *IOObj, pos []object.Value, opts *object.Hash) object.Value {
+	name := pathArg(vm, pos[0])
+	mode, keepHalves := o.openMode, false
+	explicit := (len(pos) > 1 && !object.IsNil(pos[1])) || opts != nil
+	switch {
+	case explicit:
+		if len(pos) > 1 && !object.IsNil(pos[1]) {
+			mode = vm.vmodeString(pos[1])
+		} else if m, ok := opts.Get(object.Symbol("mode")); ok && !object.IsNil(m) {
+			mode = vm.vmodeString(m)
+		}
+	case mode != "":
+		// The mode the stream was opened with carries over unchanged.
+	case ioStdioStream(o):
+		// A standard stream has a FILE* behind it, which rb_io_reopen freopen()s
+		// with the modestr its fmode maps to (rb_io_oflags_modestr) — so a write
+		// mode CREATES the file. $stdin is read-only, $stdout and $stderr
+		// write-only. MRI 4.0.5 on this host: $stdout.reopen(a missing path)
+		// succeeds and writes it.
+		mode = "r"
+		if o.rdClosed {
+			mode = "w"
+		}
+	default:
+		// Every other stream with no path behind it — a pipe end, a bare
+		// descriptor wrapper — is rb_sysopen()ed with the RAW oflags of
+		// rb_io_fmode_oflags, which carry the access half but neither O_CREAT nor
+		// O_TRUNC. So the file must already exist and its content survives, and
+		// the stream keeps its own halves. MRI 4.0.5 on this host:
+		// IO.pipe[1].reopen(a missing path) raises Errno::ENOENT, and onto a file
+		// holding "0123456789" a following write of "AB" leaves "AB23456789".
+		mode, keepHalves = "r+", true
+	}
+	// The old destination receives whatever is still buffered before the stream
+	// moves (io.c io_fflush), and the read buffer is dropped (rbuf.off = len = 0).
+	if !o.closed {
+		ioFlush(o)
+	}
+	fresh := openFileIO(o.cls, name, modeBase(mode))
+	o.buf, o.pos, o.path = fresh.buf, fresh.pos, fresh.path
+	if keepHalves {
+		o.writable, o.appendMode, o.openMode = !o.wrClosed, false, ""
+	} else {
+		o.rdClosed, o.wrClosed, o.writable = fresh.rdClosed, fresh.wrClosed, fresh.writable
+		o.appendMode, o.openMode = fresh.appendMode, fresh.openMode
+	}
+	o.isStr, o.closed, o.lineno = true, false, 0
+	o.w, o.pipe, o.isWriteEnd, o.pipeSynced, o.reopened = nil, nil, false, 0, nil
+	o.closeOnExecOff = false
+	if explicit {
+		ms := vm.ioResolveModeEnc(pos, opts)
+		o.extEnc, o.intEnc, o.binmode = ms.extEnc, ms.intEnc, ms.binmode
+	}
+	return o
+}
+
+// The fcntl and io/nonblock standard-library extensions are supplied by the VM
+// rather than by a Ruby file, so `require "fcntl"` / `require "io/nonblock"` must
+// succeed without finding one. Registering them here (rather than in require.go's
+// table) keeps each feature beside the IO surface that implements it.
+func init() {
+	providedFeatures["fcntl"] = true
+	providedFeatures["io/nonblock"] = true
+}
+
+// installFcntl creates the Fcntl module — ext/fcntl/fcntl.c, which defines
+// nothing but constants. Only the commands IO#fcntl above actually answers are
+// defined (with FD_CLOEXEC, the flag F_GETFD reports), together with the open
+// flags, whose values mirror File::Constants so `io.fcntl(Fcntl::F_GETFL) &
+// File::APPEND` compares like with like.
+func (vm *VM) installFcntl() {
+	mod := newClass("Fcntl", nil)
+	mod.isModule = true
+	vm.consts["Fcntl"] = mod
+	for name, val := range map[string]int64{
+		"F_GETFD": fcntlFGetFD, "F_SETFD": fcntlFSetFD,
+		"F_GETFL": fcntlFGetFL, "F_SETFL": fcntlFSetFL,
+		"FD_CLOEXEC": fdCloexec,
+	} {
+		mod.consts[name] = object.IntValue(val)
+	}
+	for name, val := range fileFlagConsts {
+		mod.consts["O_"+name] = object.IntValue(val)
+	}
+	for name, val := range fileExtraConsts {
+		if strings.HasPrefix(name, "LOCK_") {
+			continue // flock(2) operations are File::Constants only, not Fcntl
+		}
+		mod.consts["O_"+name] = object.IntValue(val)
+	}
+}
+
+// installIONonblock adds IO#nonblock? / #nonblock= — ext/io/nonblock/nonblock.c,
+// which reads and writes O_NONBLOCK on the descriptor with fcntl(2). rbgo has no
+// descriptors, so the flag lives on the stream: a file starts blocking and a pipe
+// end starts non-blocking, which is what MRI 4.0.5 reports on this host
+// ([false, true, true] for a File and the two ends of IO.pipe). The accessors are
+// installed on the first `require "io/nonblock"`, as MRI installs them.
+func installIONonblock(cls *RClass) {
+	cls.define("nonblock?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*IOObj).nonblock)
+	})
+	cls.define("nonblock=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		self.(*IOObj).nonblock = args[0].Truthy()
+		return args[0]
+	})
 }
