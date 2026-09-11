@@ -5,6 +5,7 @@
 package vm
 
 import (
+	"math"
 	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -161,29 +162,42 @@ func (vm *VM) registerSpawn() {
 	// below snapshots and restores around a forked block.
 	defIOReopen(cIO)
 
-	// IO.select reports readiness. A reader is ready when it has buffered bytes or
-	// its write end is closed (so a subsequent read returns EOF rather than
-	// blocking). Writers and exception sets are always reported ready, matching the
-	// non-blocking, fully-synchronous model.
-	cIO.smethods["select"] = &Method{name: "select", owner: cIO, native: func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	// IO.select(read, write, except, timeout) reports readiness. io.c rb_f_select
+	// converts the timeout first (rb_time_interval), then select_internal type-
+	// checks each of the three sets with Check_Type(T_ARRAY) and puts every element
+	// through rb_io_get_io (#to_io) — so a non-Array set, a non-IO element and a
+	// bad timeout all raise before any readiness is examined. The SUPPLIED object
+	// is what comes back in the result, not its #to_io conversion.
+	//
+	// Readiness itself follows this VM's synchronous model: a regular (buffer-
+	// backed) stream is always ready, as select(2) reports a regular file; a pipe
+	// reader is ready when it has buffered bytes or its write end is closed (so a
+	// subsequent read returns EOF rather than blocking) and a pipe writer is never
+	// read-ready; writers and exception sets are always reported ready.
+	cIO.smethods["select"] = &Method{name: "select", owner: cIO, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..4)")
+		}
+		if len(args) > 3 && !object.IsNil(args[3]) {
+			if f := mutexSleepDur(args[3]); math.IsNaN(f) {
+				raise("RangeError", "NaN out of Time range")
+			}
+		}
 		readReady := object.NewArray()
-		if len(args) > 0 {
-			if rs, ok := args[0].(*object.Array); ok {
-				for _, v := range rs.Elems {
-					if o, ok := v.(*IOObj); ok {
-						o.pipeRefresh()
-						if o.pos < len(o.buf) || o.pipeWriterClosed() {
-							readReady.Elems = append(readReady.Elems, o)
-						}
-					}
-				}
+		for _, v := range selectSet(vm, args, 0) {
+			o := ioGetIO(vm, v)
+			o.pipeRefresh()
+			if ioSelectReadable(o) {
+				readReady.Elems = append(readReady.Elems, v)
 			}
 		}
 		writeReady := object.NewArray()
-		if len(args) > 1 {
-			if ws, ok := args[1].(*object.Array); ok {
-				writeReady.Elems = append(writeReady.Elems, ws.Elems...)
-			}
+		for _, v := range selectSet(vm, args, 1) {
+			ioGetIO(vm, v)
+			writeReady.Elems = append(writeReady.Elems, v)
+		}
+		for _, v := range selectSet(vm, args, 2) { // type-checked, never reported ready
+			ioGetIO(vm, v)
 		}
 		if len(readReady.Elems) == 0 && len(writeReady.Elems) == 0 {
 			return object.NilV
@@ -193,6 +207,32 @@ func (vm *VM) registerSpawn() {
 
 	vm.registerProcessSpawn()
 	vm.registerKernelExec()
+}
+
+// selectSet returns the elements of IO.select's i-th argument set. A missing or
+// nil set is empty; anything that is not an Array is the TypeError
+// select_internal's Check_Type(T_ARRAY) raises.
+func selectSet(vm *VM, args []object.Value, i int) []object.Value {
+	if i >= len(args) || object.IsNil(args[i]) {
+		return nil
+	}
+	arr, ok := args[i].(*object.Array)
+	if !ok {
+		raise("TypeError", "wrong argument type %s (expected Array)", vm.classOf(args[i]).name)
+	}
+	return arr.Elems
+}
+
+// ioSelectReadable reports whether a read on o would return without blocking. A
+// pipe end answers from the shared buffer (its write end never reads); anything
+// else is a regular, fully-buffered stream, which select(2) always reports
+// readable — including at end of file, where the read returns nil rather than
+// blocking.
+func ioSelectReadable(o *IOObj) bool {
+	if o.pipe != nil {
+		return !o.isWriteEnd && (o.pos < len(o.buf) || o.pipe.wClosed)
+	}
+	return true
 }
 
 // registerProcessSpawn adds spawn / waitpid2 / setsid / Status to the Process

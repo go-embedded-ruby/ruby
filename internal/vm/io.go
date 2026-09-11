@@ -1742,7 +1742,7 @@ func enumSizeNil(*VM) object.Value { return object.NilV }
 // side effect per line. A successful (non-nil) read advances #lineno.
 func (vm *VM) ioGetsResolved(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 	o.pipeRefresh()
-	v := ioGetsLine(o, sep, limit, chomp)
+	v := vm.ioGetsLine(o, sep, limit, chomp)
 	if v != object.NilV {
 		o.lineno++
 		// A line is read in the external encoding (the separator is matched on those
@@ -1841,7 +1841,7 @@ type getsSep struct {
 
 // ioGetsLine reads one line honouring the separator, an optional byte limit
 // (negative for none) and chomp, advancing the cursor. It returns nil at EOF.
-func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
+func (vm *VM) ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 	if o.pos >= len(o.buf) {
 		return object.NilV
 	}
@@ -1856,7 +1856,8 @@ func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 		}
 	}
 	if limit >= 0 && o.pos+limit < end {
-		end = o.pos + limit
+		ext, _ := vm.ioReadEnc(o)
+		end = vm.relaxGetsLimit(o.buf, o.pos, o.pos+limit, end, ext)
 	}
 	line := o.buf[o.pos:end]
 	o.pos = end
@@ -1864,6 +1865,52 @@ func ioGetsLine(o *IOObj, sep getsSep, limit int, chomp bool) object.Value {
 		line = getsChomp(line, sep.s)
 	}
 	return object.NewString(string(line))
+}
+
+// relaxGetsLimit returns the end offset a byte-limited gets should actually stop
+// at. io.c rb_io_getline_0 does not cut a line in the middle of a character: when
+// the limit is exhausted and the trailing character is still incomplete
+// (MBCLEN_NEEDMORE_P on the last character), it relaxes the limit by one byte and
+// reads again, up to an extra_limit of 16 bytes. The trailing character is
+// re-anchored on every pass (rb_enc_prev_char), which is what makes a run of
+// truncated leads consume the full 16 rather than stopping at the first invalid
+// sequence. hardEnd caps the relaxation at the separator (or end of stream), as
+// appendline's newline check does.
+func (vm *VM) relaxGetsLimit(buf []byte, start, end, hardEnd int, enc string) int {
+	switch enc {
+	case "", "ASCII-8BIT", "US-ASCII", "ISO-8859-1":
+		return end // a single-byte encoding has no character to split
+	}
+	anchor := start
+	for extra := 16; extra > 0 && end < hardEnd && anchor < end; extra-- {
+		anchor += lastCharStart(vm, buf[anchor:end], enc)
+		if _, _, _, st := vm.decodeCharFrom(buf[anchor:end], enc); st != stepIncomplete {
+			return end
+		}
+		end++
+	}
+	return end
+}
+
+// lastCharStart returns the offset within s at which its final character begins,
+// walking the characters forward from the start of the slice (MRI's
+// rb_enc_prev_char scans backwards from the end, but only ever to find the same
+// boundary). An invalid sequence is stepped over by its maximal valid subpart, so
+// a run of truncated leads re-anchors on the last of them.
+func lastCharStart(vm *VM, s []byte, enc string) int {
+	last := 0
+	for i := 0; i < len(s); {
+		last = i
+		_, n, readLen, st := vm.decodeCharFrom(s[i:], enc)
+		if st == stepIncomplete {
+			return last
+		}
+		if n <= 0 {
+			n = max(readLen, 1)
+		}
+		i += n
+	}
+	return last
 }
 
 // getsChomp removes a single trailing separator run from line (the "\n" default

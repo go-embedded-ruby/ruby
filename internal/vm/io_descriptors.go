@@ -552,6 +552,26 @@ func ioCheckIO(vm *VM, v object.Value) (*IOObj, bool) {
 	return o, true
 }
 
+// ioGetIO converts v to an IO the way io.c's rb_io_get_io does
+// (rb_convert_type_with_id to T_FILE through #to_io) — the strict sibling of
+// ioCheckIO: an object with no #to_io is a TypeError rather than a "not an IO"
+// answer. IO.select takes every element of its argument arrays through this.
+func ioGetIO(vm *VM, v object.Value) *IOObj {
+	if o, ok := v.(*IOObj); ok {
+		return o
+	}
+	if !vm.respondsToDynamic(v, "to_io") {
+		raise("TypeError", "no implicit conversion of %s into IO", vm.classOf(v).name)
+	}
+	r := vm.send(v, "to_io", nil, nil)
+	o, ok := r.(*IOObj)
+	if !ok {
+		raise("TypeError", "can't convert %s to IO (%s#to_io gives %s)",
+			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	}
+	return o
+}
+
 // ioReopenIO re-binds o onto other's stream — io.c io_reopen, which dup2()s
 // other's descriptor over o's and copies the mode, encodings, pid, lineno and
 // path across, then sets o's class to other's. Both streams must be open.
