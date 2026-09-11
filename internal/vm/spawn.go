@@ -86,7 +86,10 @@ func (vm *VM) registerSpawn() {
 		pair := object.NewArray(reader, writer)
 		if blk != nil {
 			// IO.pipe { |r, w| ... } yields the pair and closes both ends after.
-			defer func() { reader.closed, writer.closed, buf.wClosed = true, true, true }()
+			defer func() {
+				reader.closed, writer.closed = true, true
+				buf.wClosed, buf.rClosed = true, true
+			}()
 			return vm.callBlock(blk, []object.Value{reader, writer})
 		}
 		return pair

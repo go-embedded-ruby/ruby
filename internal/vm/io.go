@@ -122,11 +122,28 @@ type IOObj struct {
 	popen *popenProc
 }
 
-// pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair.
+// pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair. Each
+// end records its own closing: wClosed is EOF for the reader, and rClosed is the
+// broken pipe a further write reports (Errno::EPIPE).
 type pipeBuf struct {
 	data    []byte
 	rpos    int
 	wClosed bool
+	rClosed bool
+}
+
+// pipeEndClosed records the closing of one end of a pipe on the shared buffer, so
+// the other end sees what closing it means: a closed write end is end-of-file for
+// the reader, and a closed read end makes a further write a broken pipe.
+func (o *IOObj) pipeEndClosed() {
+	if o.pipe == nil {
+		return
+	}
+	if o.isWriteEnd {
+		o.pipe.wClosed = true
+		return
+	}
+	o.pipe.rClosed = true
 }
 
 func (o *IOObj) ToS() string {
@@ -151,6 +168,13 @@ func (o *IOObj) writeBytes(p []byte) int {
 		o = cur
 	}
 	if o.pipe != nil && o.isWriteEnd {
+		// Writing a pipe whose read end has gone is a broken pipe. MRI 4.0.5
+		// reports Errno::EPIPE "Broken pipe" and does not die from SIGPIPE, which
+		// is what core/io/shared/write.rb asserts for #write, #syswrite and
+		// #write_nonblock alike.
+		if o.pipe.rClosed {
+			raise("Errno::EPIPE", "Broken pipe")
+		}
 		o.pipe.data = append(o.pipe.data, p...)
 		return len(p)
 	}
@@ -1002,9 +1026,7 @@ func defIOWrite(cls *RClass) {
 	cls.define("close", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		ioFlush(o)
-		if o.pipe != nil && o.isWriteEnd {
-			o.pipe.wClosed = true // signal EOF to the read end
-		}
+		o.pipeEndClosed()
 		o.closed = true
 		return object.NilV
 	})

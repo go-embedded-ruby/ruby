@@ -628,3 +628,34 @@ p [r.closed?, w.closed?]`, "IOError\nIOError\n[true, true]\n"},
 // runtimeIsWasm reports whether the test binary runs on a target with no
 // subprocesses, where IO.popen raises instead of running anything.
 func runtimeIsWasm() bool { return runtime.GOARCH == "wasm" }
+
+// TestPipeBrokenPipeWave23 covers pipeEndClosed and the Errno::EPIPE a write to
+// a pipe whose read end has gone reports. core/io/shared/write.rb asserts it for
+// #write, #syswrite and #write_nonblock alike; MRI 4.0.5 on this host raises
+// Errno::EPIPE "Broken pipe" for all three, and does not die from SIGPIPE.
+func TestPipeBrokenPipeWave23(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`r,w=IO.pipe; r.close
+begin; w.write("x"); rescue => e; puts "#{e.class}: #{e.message}"; end`,
+			"Errno::EPIPE: Broken pipe\n"},
+		{`r,w=IO.pipe; r.close
+begin; w.syswrite("x"); rescue => e; puts e.class; end`, "Errno::EPIPE\n"},
+		{`r,w=IO.pipe; r.close
+begin; w.write_nonblock("x"); rescue => e; puts e.class; end`, "Errno::EPIPE\n"},
+		// #close_read on the read end breaks the pipe just as #close does.
+		{`r,w=IO.pipe; r.close_read
+begin; w.write("x"); rescue => e; puts e.class; end`, "Errno::EPIPE\n"},
+		// Closing the WRITE end is end-of-file for the reader, not a broken pipe.
+		{`r,w=IO.pipe; w.write("ok"); w.close; p r.read`, "\"ok\"\n"},
+		{`r,w=IO.pipe; w.write("ok"); w.close_write; p r.read`, "\"ok\"\n"},
+		// A block-form pipe closes both ends behind it.
+		{`r = nil; w = nil
+IO.pipe { |a, b| r, w = a, b }
+p [r.closed?, w.closed?]`, "[true, true]\n"},
+	}
+	for _, c := range cases {
+		if got := runFS(t, c.src); got != c.want {
+			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
+		}
+	}
+}

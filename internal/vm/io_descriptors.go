@@ -191,6 +191,7 @@ func defIOReadExtra(cls *RClass) {
 				raise("IOError", "closing non-duplex IO for reading")
 			}
 			o.rdClosed, o.closed = true, true
+			o.pipeEndClosed()
 			return object.NilV
 		}
 		o.rdClosed = true
@@ -213,6 +214,7 @@ func defIOReadExtra(cls *RClass) {
 			}
 			ioFlush(o)
 			o.wrClosed, o.closed = true, true
+			o.pipeEndClosed()
 			return object.NilV
 		}
 		ioFlush(o)
