@@ -108,6 +108,18 @@ type IOObj struct {
 	pipeSynced int // bytes of pipe.data already folded into this reader's buf
 	isWriteEnd bool
 	reopened   *IOObj
+
+	// duplex marks MRI's FMODE_DUPLEX: a stream with independent read and write
+	// halves, which only IO.popen in a "+" mode creates. It is what #close_read /
+	// #close_write mean by "duplexed" — a File opened "r+" is readable AND writable
+	// but NOT duplex, and shutting one of its halves is an error.
+	duplex bool
+
+	// popen marks a stream IO.popen created and records the child it ran. That
+	// child has already finished — the process model above is synchronous — so buf
+	// holds its whole output; bytes written to the stream are kept in popen.stdin,
+	// out of the buffer being read, and cannot reach a child that is already gone.
+	popen *popenProc
 }
 
 // pipeBuf is the shared byte channel behind an IO.pipe reader/writer pair.
@@ -140,6 +152,13 @@ func (o *IOObj) writeBytes(p []byte) int {
 	}
 	if o.pipe != nil && o.isWriteEnd {
 		o.pipe.data = append(o.pipe.data, p...)
+		return len(p)
+	}
+	// A stream from IO.popen buffers the child's whole output; a write must not
+	// land in it. See popenProc: the child has already finished, so the bytes are
+	// kept and counted but go nowhere.
+	if o.popen != nil {
+		o.popen.stdin = append(o.popen.stdin, p...)
 		return len(p)
 	}
 	if o.isStr {
@@ -264,6 +283,19 @@ func (vm *VM) registerIO() {
 	cIO.define("fileno", fileno)
 	cIO.methods["to_i"] = cIO.methods["fileno"] // #to_i is a true alias of #fileno
 
+	// IO#pid (rb_io_pid): the pid of the child a stream was opened onto — only
+	// IO.popen makes one — and nil for every other stream. A closed stream raises
+	// IOError, as GetOpenFile does.
+	cIO.define("pid", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		if o.popen == nil {
+			return object.NilV
+		}
+		return object.IntValue(o.popen.pid)
+	})
 	// IO#to_io returns the IO itself (rb_io_to_io), for open or closed streams.
 	cIO.define("to_io", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self

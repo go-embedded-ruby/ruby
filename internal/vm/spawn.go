@@ -77,9 +77,12 @@ func (vm *VM) registerSpawn() {
 		}
 		buf := &pipeBuf{}
 		// Both ends of a pipe come back with O_NONBLOCK already set, which is what
-		// MRI 4.0.5 reports through io/nonblock on this host.
-		reader := &IOObj{cls: cls, pipe: buf, label: "pipe-r", extEnc: ext, intEnc: intn, nonblock: true}
-		writer := &IOObj{cls: cls, pipe: buf, isWriteEnd: true, writable: true, label: "pipe-w", nonblock: true}
+		// MRI 4.0.5 reports through io/nonblock on this host. Each end carries one
+		// half of the access mode (rb_io_s_pipe opens FMODE_READABLE on the read end
+		// and FMODE_WRITABLE on the write end), so reading the write end or writing
+		// the read end raises, and #close_read/#close_write close the right one.
+		reader := &IOObj{cls: cls, pipe: buf, label: "pipe-r", extEnc: ext, intEnc: intn, nonblock: true, wrClosed: true}
+		writer := &IOObj{cls: cls, pipe: buf, isWriteEnd: true, writable: true, label: "pipe-w", nonblock: true, rdClosed: true}
 		pair := object.NewArray(reader, writer)
 		if blk != nil {
 			// IO.pipe { |r, w| ... } yields the pair and closes both ends after.
@@ -194,6 +197,32 @@ func (vm *VM) registerSpawn() {
 	// safe_posix_fork STDOUT.reopen(pipe_writer) rides on, and what runForkBlock
 	// below snapshots and restores around a forked block.
 	defIOReopen(cIO)
+
+	// IO.popen([env,] cmd, mode = "r", **opts) — io.c rb_io_s_popen, which peels a
+	// trailing options Hash and then a leading environment Hash before reading the
+	// command and the mode, and pipe_open, which gives back a stream whose
+	// readable/writable halves follow that mode (so "r" raises IOError on write and
+	// "w" raises IOError on read). With a block the stream is yielded and closed
+	// afterwards (popen_finish → pipe_close), and $? carries the child's status.
+	//
+	// The child runs TO COMPLETION here and its output is buffered, which is the
+	// process model this whole file is built on (see the header): there is no
+	// concurrent child, so nothing the parent writes afterwards can reach its
+	// standard input — the child is run with an empty one. Everything else about
+	// the stream is real: the write half accepts bytes and reports their count,
+	// close_write/close_read shut the halves, and the mode gates both.
+	cIO.smethods["popen"] = &Method{name: "popen", owner: cIO, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		cls := cIO
+		if c, ok := self.(*RClass); ok {
+			cls = c
+		}
+		o := vm.popenOpen(cls, args)
+		if blk == nil {
+			return o
+		}
+		defer func() { o.closed, o.rdClosed, o.wrClosed = true, true, true }()
+		return vm.callBlock(blk, []object.Value{o})
+	}}
 
 	// IO.select(read, write, except, timeout) reports readiness. io.c rb_f_select
 	// converts the timeout first (rb_time_interval), then select_internal type-
@@ -509,4 +538,56 @@ func shellish(cmd []string) (string, bool) {
 		return s, true
 	}
 	return s, false
+}
+
+// popenOpen builds the stream IO.popen hands back. It splits the arguments the
+// way io.c rb_io_s_popen does — a trailing options Hash, then a leading
+// environment Hash, then the command and an optional mode — runs the command,
+// and returns a buffered stream holding its output whose access halves follow
+// the mode (pipe_open passes fmode straight through). $? is set to the child's
+// status, and #pid reports it.
+func (vm *VM) popenOpen(cls *RClass, args []object.Value) *IOObj {
+	pos := args
+	if len(pos) > 1 {
+		if _, ok := pos[len(pos)-1].(*object.Hash); ok {
+			pos = pos[:len(pos)-1] // exec options; none of them are honoured here
+		}
+	}
+	if len(pos) > 1 {
+		if _, ok := pos[0].(*object.Hash); ok {
+			pos = pos[1:] // leading environment Hash — runCaptured takes no environment
+		}
+	}
+	if len(pos) < 1 || len(pos) > 2 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
+	}
+	mode := "r"
+	if len(pos) > 1 && !object.IsNil(pos[1]) {
+		mode = modeBase(vm.vmodeString(pos[1]))
+	}
+	// "-" asks pipe_open to fork the interpreter itself (is_popen_fork), which
+	// needs a working fork; MRI raises exactly this without one.
+	if s, ok := pos[0].(*object.String); ok && s.Str() == "-" {
+		raise("NotImplementedError", "fork() function is unimplemented on this machine")
+	}
+	out, code := runCaptured(spawnCommand(pos[:1]))
+	pid := vm.recordChild(code)
+	vm.globals["$?"] = vm.newProcessStatus(pid, code)
+	o := &IOObj{cls: cls, isStr: true, buf: []byte(out), label: "popen", nonblock: true,
+		popen: &popenProc{pid: pid}, openMode: mode}
+	// pipe_open hands back a stream whose halves are exactly the mode's: a bare
+	// "r" cannot be written and a bare "w" cannot be read, while any "+" mode is
+	// duplex (which is what IO#close_read / #close_write call a duplexed stream).
+	plus := strings.Contains(mode, "+")
+	o.rdClosed = !plus && mode != "r"
+	o.wrClosed = !plus && mode == "r"
+	o.duplex = plus // FMODE_DUPLEX: only a "+" popen has two independent halves
+	return o
+}
+
+// popenProc records the child IO.popen ran, so #pid can report it and writes to
+// the stream have somewhere to go that is not the buffer being read.
+type popenProc struct {
+	pid   int64
+	stdin []byte
 }

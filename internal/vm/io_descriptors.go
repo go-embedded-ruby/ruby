@@ -172,10 +172,26 @@ func defIOReadExtra(cls *RClass) {
 		o.lineno = vm.ioCIntArg(args[0])
 		return args[0]
 	})
+	// #close_read / #close_write shut one half of a DUPLEX stream — which, on a
+	// real IO, only IO.popen in a "+" mode makes. io.c rb_io_close_read raises
+	// "closing non-duplex IO for reading" when a non-duplex stream is WRITABLE
+	// (so File.open(p, "w") and File.open(p, "w+") both raise) and otherwise
+	// closes the whole stream; rb_io_close_write is the mirror image. Both answer
+	// nil on an already-closed stream before any of that (fptr->fd < 0).
 	cls.define("close_read", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
 		if o.rdModeOff { // a StringIO opened write-only has no read half to close (MRI)
 			raise("IOError", "not opened for reading")
+		}
+		if !ioIsStringIO(o) && !o.duplex {
+			if o.closed {
+				return object.NilV
+			}
+			if !o.wrClosed {
+				raise("IOError", "closing non-duplex IO for reading")
+			}
+			o.rdClosed, o.closed = true, true
+			return object.NilV
 		}
 		o.rdClosed = true
 		if o.wrClosed { // both halves shut ⇒ the stream is fully closed
@@ -187,6 +203,17 @@ func defIOReadExtra(cls *RClass) {
 		o := self.(*IOObj)
 		if o.wrModeOff { // a StringIO opened read-only has no write half to close (MRI)
 			raise("IOError", "not opened for writing")
+		}
+		if !ioIsStringIO(o) && !o.duplex {
+			if o.closed {
+				return object.NilV
+			}
+			if !o.rdClosed {
+				raise("IOError", "closing non-duplex IO for writing")
+			}
+			ioFlush(o)
+			o.wrClosed, o.closed = true, true
+			return object.NilV
 		}
 		ioFlush(o)
 		o.wrClosed = true
