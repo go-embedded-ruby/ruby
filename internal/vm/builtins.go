@@ -429,6 +429,18 @@ func (vm *VM) bootstrap() {
 		if len(args) > 0 && !args[0].Truthy() {
 			return vm.filterVisibility(self, vm.singletonMethodNames(self, false), keep)
 		}
+		if _, isClass := self.(*RClass); isClass {
+			// MRI's rb_obj_methods lists the instance methods of CLASS_OF(obj)
+			// (object.c). For a class or module that is its SINGLETON class, whose
+			// ancestry runs through the singleton classes of its superclasses and only
+			// then reaches Class/Module/Object — so `C.methods` carries C's class
+			// methods and the inherited ones as well as Class's instance methods.
+			// classOf answers Class/Module for an RClass and cannot see the singleton
+			// chain, so the two halves are gathered separately and merged.
+			return vm.filterVisibility(self, mergeMethodNames(
+				vm.singletonMethodNames(self, true),
+				vm.methodNames(vm.classOf(self), true)), keep)
+		}
 		c := vm.classOf(self)
 		if o, ok := self.(*RObject); ok && o.singleton != nil {
 			c = o.singleton // its super is the real class, so the walk picks up both
@@ -6209,6 +6221,10 @@ func (vm *VM) bootstrap() {
 	// Range edge methods (#reverse_each, #entries); runs after the prelude so the
 	// range-specific definitions win over any inherited Enumerable ones.
 	vm.registerRangeEdges()
+	// The Kernel global functions whose body forwards to ARGF / IO / Process:
+	// those objects must already exist, so this runs after them and before the
+	// module-function split that reflects their visibility.
+	vm.registerKernelDelegates()
 	// Split the Kernel module functions into a private instance method + a public
 	// Kernel-module method, as MRI does — runs last, once every listed method is
 	// defined above.
@@ -6275,12 +6291,14 @@ func (vm *VM) registerKernelPublicMethods() {
 func (vm *VM) registerKernelModuleFunctions() {
 	names := []string{
 		"Array", "Complex", "Float", "Hash", "Integer", "Rational", "String",
-		"__dir__", "abort", "at_exit", "autoload", "autoload?", "caller",
+		"__dir__", "`", "abort", "at_exit", "autoload", "autoload?", "caller",
 		"caller_locations",
-		"catch", "eval", "exec", "exit", "exit!", "fail", "fork", "format", "lambda",
+		"catch", "eval", "exec", "exit", "exit!", "fail", "fork", "format", "gets",
+		"global_variables", "lambda",
 		"load", "loop", "open", "p", "print", "printf", "proc", "putc", "puts",
-		"raise", "rand", "require", "require_relative", "sleep", "sprintf",
-		"srand", "system", "throw", "trap", "warn",
+		"raise", "rand", "readline", "readlines", "require", "require_relative",
+		"select", "sleep", "spawn", "sprintf",
+		"srand", "syscall", "system", "test", "throw", "trap", "warn",
 	}
 	// Two names that share ONE underlying Object record (a genuine built-in alias
 	// such as format/sprintf) must keep sharing after the mirror, or their mirrored
@@ -9124,6 +9142,31 @@ func (vm *VM) methodNames(c *RClass, all bool) []object.Value {
 	return out
 }
 
+// mergeMethodNames concatenates two already-sorted Symbol name lists into one
+// sorted, duplicate-free list. Both inputs come from methodNames /
+// singletonMethodNames, which sort and de-duplicate within themselves; a name can
+// still appear in both (a class method shadowing a Class instance method), and it
+// must be listed once.
+func mergeMethodNames(a, b []object.Value) []object.Value {
+	seen := make(map[object.Symbol]bool, len(a)+len(b))
+	names := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]object.Value{a, b} {
+		for _, n := range list {
+			sym := n.(object.Symbol)
+			if !seen[sym] {
+				seen[sym] = true
+				names = append(names, string(sym))
+			}
+		}
+	}
+	sort.Strings(names)
+	out := make([]object.Value, len(names))
+	for i, n := range names {
+		out[i] = object.Symbol(n)
+	}
+	return out
+}
+
 // reflectMethodNames backs #public_methods / #private_methods / #protected_methods:
 // it lists the receiver's applicable method names filtered to the target
 // visibility want. The candidate set is the receiver's singleton (class) methods
@@ -9727,6 +9770,13 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 			[]object.Value{object.NewString("")}, nil))))
 	default:
 		exc := vm.raiseExceptionObject(args)
+		// A third argument is the backtrace to raise with: MRI's make_exception
+		// ends `if (argc == 3) set_backtrace(mesg, argv[2])` (eval.c), applying it
+		// before the raise — so captureBacktrace below finds one already stamped and
+		// leaves it alone, exactly as it does for a re-raise.
+		if len(args) >= 3 {
+			vm.applyRaiseBacktrace(exc, args[2])
+		}
 		// A cause: that reaches the exception being raised through its own cause
 		// chain is a circular reference — MRI rejects it before linking. cause == exc
 		// itself is not circular (it is simply not set); the walk starts one link in.
@@ -9740,6 +9790,31 @@ func nativeRaise(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Va
 		vm.applyRaiseCause(exc, causeGiven, causeVal)
 		panic(vm.excError(vm.captureBacktrace(exc)))
 	}
+}
+
+// applyRaiseBacktrace stamps Kernel#raise's optional third argument onto the
+// exception as its backtrace. MRI routes it through set_backtrace (eval.c),
+// which calls the exception's own #set_backtrace — so a subclass override runs —
+// and which also accepts Thread::Backtrace::Location values, converting them with
+// rb_backtrace_to_str_ary when it cannot store the locations themselves. rbgo
+// never stores locations: a backtrace is an Array of String and
+// Exception#backtrace_locations re-derives Locations by parsing those strings
+// back, so a Location element is converted here the same way. Because a
+// Location's #to_s is the very line it was parsed from, the round trip is exact.
+// Elements of any other non-String type are passed through untouched, so
+// #set_backtrace raises MRI's TypeError for them.
+func (vm *VM) applyRaiseBacktrace(exc, bt object.Value) {
+	if a, ok := bt.(*object.Array); ok {
+		conv := make([]object.Value, len(a.Elems))
+		for i, e := range a.Elems {
+			conv[i] = e
+			if o, isObj := e.(*RObject); isObj && o.class == vm.backtraceLocationClass {
+				conv[i] = vm.send(e, "to_s", nil, nil)
+			}
+		}
+		bt = object.NewArrayFromSlice(conv)
+	}
+	vm.send(exc, "set_backtrace", []object.Value{bt}, nil)
 }
 
 // raiseExceptionObject builds the exception object for a raise from a non-empty
