@@ -953,6 +953,21 @@ func (c *Compiler) compileCall(v *ast.Call) {
 			return
 		}
 	}
+	// A compound assignment to an index or an attribute (`a[i] op= v`,
+	// `a.x op= v`) reaches the compiler as the parser's textual desugaring, whose
+	// receiver and index nodes are shared between the read and the write.
+	// Compiled literally that evaluates each of them twice; lower it so each is
+	// evaluated exactly once (see opassign.go).
+	if isSetterCall(v) {
+		if be, idx, ok := indexOpAssign(v); ok {
+			c.compileIndexOpAssign(v, be, idx)
+			return
+		}
+		if be, ok := attrOpAssign(v); ok {
+			c.compileAttrOpAssign(v, be)
+			return
+		}
+	}
 	// explicit marks a send written with an explicit receiver other than `self`,
 	// so the VM can enforce private-method visibility (private methods are
 	// callable only through an implicit — or `self.` — receiver). A bare `self.m`
@@ -1000,6 +1015,24 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		if blockPass != nil {
 			c.compileNode(blockPass)
 			sendFlags(b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0))
+			patchSafe()
+			return
+		}
+		// A setter written with a splatted argument list (`o[*x] = 1`) still
+		// evaluates to the assigned value, not to what `[]=` returns. The argument
+		// count is not known until run time, so the value is recovered as the last
+		// element of the built argument array — exactly MRI's `dup; putobject -1;
+		// send :[]` in compile.c's compile_attrasgn (ruby/ruby v3_4_0:10165).
+		if isSetterCall(v) && len(args) > 0 {
+			b.emit(bytecode.OpDup, 0, 0)
+			b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(-1)), 0)
+			b.emit(bytecode.OpSend, b.addName("[]"), 1)
+			tmp := b.localSlot("")
+			b.emit(bytecode.OpSetLocal, tmp, 0)
+			b.emit(bytecode.OpPop, 0, 0) // the argument array is on top again
+			sendFlags(b.emit(bytecode.OpSendArray, b.addName(v.Name), 0))
+			b.emit(bytecode.OpPop, 0, 0) // discard the setter's return value
+			b.emit(bytecode.OpGetLocal, tmp, 0)
 			patchSafe()
 			return
 		}
