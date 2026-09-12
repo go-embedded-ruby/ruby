@@ -47,6 +47,11 @@ type builder struct {
 	children    []*bytecode.ISeq
 	parent      *builder
 	isBlock     bool
+	// borrowed marks a scope whose locals belong to somebody else's already-built
+	// frame — the synthetic parent CompileWithLocals puts a Binding's locals in.
+	// Its slots may be read and written but no new one may be added: the frame
+	// that will back it has already been sized.
+	borrowed bool
 }
 
 func newBuilder(name string, params []string) *builder {
@@ -287,6 +292,7 @@ func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.I
 	c := &Compiler{}
 	parent := newBuilder("<binding>", nil)
 	parent.locals = append([]string(nil), localNames...)
+	parent.borrowed = true
 	c.push(parent)
 	child := newBuilder("(eval)", nil)
 	child.isBlock = true
@@ -1673,14 +1679,14 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 
 func (c *Compiler) compileIf(v *ast.If) {
 	b := c.cur()
-	c.compileNode(v.Cond)
+	c.compileCondition(v.Cond)
 	thisFalse := b.emit(bytecode.OpBranchUnless, 0, 0)
 	c.compileBody(v.Then)
 	endJumps := []int{b.emit(bytecode.OpJump, 0, 0)}
 
 	for _, ei := range v.Elsifs {
 		b.patch(thisFalse, b.here())
-		c.compileNode(ei.Cond)
+		c.compileCondition(ei.Cond)
 		thisFalse = b.emit(bytecode.OpBranchUnless, 0, 0)
 		c.compileBody(ei.Body)
 		endJumps = append(endJumps, b.emit(bytecode.OpJump, 0, 0))
@@ -2427,7 +2433,7 @@ func (c *Compiler) compileWhile(v *ast.While) {
 	}
 	b := c.cur()
 	start := b.here()
-	c.compileNode(v.Cond)
+	c.compileCondition(v.Cond)
 	exit := b.emit(bytecode.OpBranchUnless, 0, 0)
 	ctx := &loopCtx{kind: ctxLoop, contTarget: start}
 	c.ctxs = append(c.ctxs, ctx)
@@ -2460,7 +2466,7 @@ func (c *Compiler) compileDoWhile(v *ast.While, body *ast.Begin) {
 	for _, j := range ctx.contFixups { // `next` lands on the condition test
 		b.patch(j, cont)
 	}
-	c.compileNode(v.Cond)
+	c.compileCondition(v.Cond)
 	b.emit(bytecode.OpBranchIf, start, 0) // repeat while the condition holds
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
 	for _, j := range ctx.breaks { // break lands on the loop's nil value
