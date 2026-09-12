@@ -253,6 +253,7 @@ func (vm *VM) registerExceptionMethods(cException *RClass) {
 	})
 
 	vm.registerBacktraceLocation()
+	vm.registerThreadBacktrace()
 }
 
 // exceptionMessageArg coerces a #exception / #initialize message argument to its
@@ -430,4 +431,95 @@ func (vm *VM) backtraceLocation(line string) object.Value {
 	return &RObject{class: vm.backtraceLocationClass,
 		ivars:     iv,
 		ivarOrder: []string{"@path", "@lineno", "@label", "@__str"}}
+}
+
+// registerThreadBacktrace installs Thread#backtrace and Thread#backtrace_locations.
+// They report the frames of a thread rather than of the caller, so unlike
+// Kernel#caller they count from the frame that CALLED them: the first entry
+// describes the #backtrace call itself, and dropping it gives exactly
+// caller(0). A dead thread reports nil. Reference: ruby/ruby v3_4_0 vm_backtrace.c
+// rb_thread_backtrace_m / rb_thread_backtrace_locations_m → thread_backtrace_to_ary.
+func (vm *VM) registerThreadBacktrace() {
+	thread := vm.consts["Thread"].(*RClass)
+	thread.define("backtrace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		frames, ok := vm.threadBacktraceFrames(self, args, "backtrace")
+		if !ok {
+			return object.NilV
+		}
+		return object.NewArrayFromSlice(frames)
+	})
+	thread.define("backtrace_locations", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		frames, ok := vm.threadBacktraceFrames(self, args, "backtrace_locations")
+		if !ok {
+			return object.NilV
+		}
+		locs := make([]object.Value, len(frames))
+		for i, f := range frames {
+			locs[i] = vm.backtraceLocation(f.ToS())
+		}
+		return object.NewArrayFromSlice(locs)
+	})
+}
+
+// threadBacktraceFrames renders the receiver thread's backtrace, sliced by the
+// same argument forms Kernel#caller accepts (a start level, a start and a
+// length, or a Range), and reports whether anything is left to return: false
+// means nil — a dead thread, or a start past the top of the stack.
+//
+// The frame list starts with a synthetic entry for the call being served, which
+// is what makes `t.backtrace_locations(1..-1)` equal `caller_locations(0..-1)`
+// and the default start 0 rather than Kernel#caller's 1. Only the running
+// thread's own stack can be walked here, so another live thread reports the
+// empty backtrace MRI allows for a thread that has not started executing.
+func (vm *VM) threadBacktraceFrames(self object.Value, args []object.Value, label string) ([]object.Value, bool) {
+	t, ok := self.(*RThread)
+	if !ok || t.isDone() {
+		return nil, false
+	}
+	if t != vm.currentThread {
+		return nil, true
+	}
+	here := ""
+	if n := len(vm.frameNames); n > 0 {
+		here = vm.frameFileLabel(n - 1)
+	}
+	full := []object.Value{object.NewString(here + ":0:in '" + label + "'")}
+	full = append(full, vm.backtraceFrames(0)...)
+	return sliceBacktraceFrames(vm, full, args)
+}
+
+// sliceBacktraceFrames applies Thread#backtrace's start/length/range arguments to
+// a rendered frame list. It is Kernel#caller's slicing with a default start of 0
+// (a thread backtrace counts its own call), and reports false where MRI returns
+// nil — a start beyond the end of the stack.
+func sliceBacktraceFrames(vm *VM, full []object.Value, args []object.Value) ([]object.Value, bool) {
+	arr := object.NewArrayFromSlice(full)
+	if len(args) >= 1 {
+		if _, isRange := args[0].(*object.Range); isRange {
+			res := vm.send(arr, "[]", []object.Value{args[0]}, nil)
+			if object.IsNil(res) {
+				return nil, false
+			}
+			return res.(*object.Array).Elems, true
+		}
+	}
+	start := int64(0)
+	if len(args) >= 1 {
+		start = vm.toIntCoerce(args[0])
+	}
+	if start < 0 {
+		raise("ArgumentError", "negative level (%d)", start)
+	}
+	length := int64(len(full)) + 1
+	if len(args) >= 2 && !object.IsNil(args[1]) {
+		length = vm.toIntCoerce(args[1])
+		if length < 0 {
+			raise("ArgumentError", "negative size (%d)", length)
+		}
+	}
+	res := vm.send(arr, "[]", []object.Value{object.IntValue(start), object.IntValue(length)}, nil)
+	if object.IsNil(res) {
+		return nil, false
+	}
+	return res.(*object.Array).Elems, true
 }
