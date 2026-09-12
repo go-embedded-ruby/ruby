@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -48,6 +49,11 @@ type RThread struct {
 	// scheduler is this thread's Fiber scheduler (Fiber.set_scheduler), MRI's
 	// thread->scheduler; nil when none is installed.
 	scheduler object.Value
+
+	// priority is Thread#priority, inherited from the creating thread and clamped
+	// to MRI's [-3, 3]. rbgo's cooperative scheduler does not act on it, but the
+	// value round-trips because programs read it back.
+	priority int
 
 	// Eager-start handshake: a freshly spawned thread runs immediately (as in
 	// MRI) until its first blocking point or completion, at which moment it hands
@@ -106,6 +112,9 @@ func (vm *VM) serviceSafepoint(t *RThread) {
 		// Clear the flag before unwinding so ensure blocks that themselves reach a
 		// yield point are not re-killed mid-run; the killSignal carries the unwind.
 		t.killed = false
+		// MRI reports "aborting" for a thread that is unwinding a kill — the status
+		// its own ensure blocks observe, and what a peer sees until it is dead.
+		t.status = "aborting"
 		panic(killSignal{})
 	}
 	if exc := t.pendingRaise; exc != nil {
@@ -153,9 +162,38 @@ func (t *RThread) fiberLocals() map[object.Value]object.Value {
 	return f.locals
 }
 
-func (t *RThread) ToS() string     { return "#<Thread>" }
-func (t *RThread) Inspect() string { return "#<Thread:" + t.status + ">" }
+func (t *RThread) ToS() string     { return t.describe() }
+func (t *RThread) Inspect() string { return t.describe() }
 func (t *RThread) Truthy() bool    { return true }
+
+// describe renders MRI's Thread#to_s / #inspect (thread.c rb_thread_inspect):
+// "#<Thread:0xADDR[@name] [file:line ]status>". The file:line field is the
+// thread block's source location and is absent for a thread with no block (the
+// main thread); the status word is the live status, or "dead" once finished.
+func (t *RThread) describe() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "#<Thread:%p", t)
+	if n, ok := t.name.(*object.String); ok {
+		b.WriteString("@" + n.Str())
+	}
+	if t.blk != nil && t.blk.iseq != nil && t.blk.iseq.File != "" {
+		// rbgo tracks no per-instruction line, so the line field is 0 — the same
+		// value __LINE__ reports, so the two stay consistent.
+		fmt.Fprintf(&b, " %s:0", t.blk.iseq.File)
+	}
+	b.WriteString(" " + t.statusWord() + ">")
+	return b.String()
+}
+
+// statusWord is the word Thread#status, #to_s and #inspect print: a finished
+// thread is "dead" however it finished, otherwise the live status ("run",
+// "sleep", or "aborting" while a kill unwinds).
+func (t *RThread) statusWord() string {
+	if t.isDone() {
+		return "dead"
+	}
+	return t.status
+}
 
 // isDone reports whether the thread has finished (its done channel is closed).
 func (t *RThread) isDone() bool {
@@ -182,13 +220,30 @@ func (t *RThread) restoreCtx(vm *VM) {
 }
 
 // threadBlock releases the GVL, runs the blocking wait fn while other threads
-// run, then re-acquires the GVL and restores this thread's context. The caller
-// must currently hold the GVL.
-func (vm *VM) threadBlock(fn func()) {
+// run, then re-acquires the GVL and restores this thread's context. The thread
+// counts as asleep for the duration — that is what Thread#status and #stop?
+// report to a peer while it waits. The caller must currently hold the GVL.
+func (vm *VM) threadBlock(fn func()) { vm.threadRelease(fn, "sleep") }
+
+// threadPass releases the GVL around a bare scheduler yield (Thread.pass,
+// Thread#run). Unlike a blocking wait it leaves the status alone: MRI's
+// Thread.pass only offers the scheduler a switch, so the thread stays runnable —
+// a thread spinning in `loop { Thread.pass }` reports "run", not "sleep", and
+// #stop? stays false. Peers routinely spin on exactly that ("Thread.pass while
+// t.status != 'run'"), which never ends if a passing thread looks asleep.
+func (vm *VM) threadPass(fn func()) { vm.threadRelease(fn, "") }
+
+// threadRelease is the body shared by threadBlock and threadPass: save this
+// thread's context, optionally publish a status for the window in which it does
+// not hold the GVL, release it, run fn, then take the GVL back and restore both.
+// An empty status leaves the published one untouched.
+func (vm *VM) threadRelease(fn func(), status string) {
 	t := vm.currentThread
 	t.saveCtx(vm)
 	prev := t.status
-	t.status = "sleep"
+	if status != "" {
+		t.status = status
+	}
 	vm.gvl.Unlock()
 	t.firstPark() // hand control back to the spawner on this thread's first block
 	fn()
@@ -286,6 +341,7 @@ func (vm *VM) registerThreadClass() {
 		// storage, the way MRI seeds the new thread's execution context from the
 		// current one (thread.c thread_create_core via rb_fiber_inherit_storage).
 		t.rootFiber.storage = dupFiberStorage(vm.currentFiber.storage)
+		t.priority = vm.currentThread.priority // MRI: a new thread inherits its creator's priority
 		vm.threads = append(vm.threads, t)
 		go func() {
 			vm.gvl.Lock()
@@ -328,7 +384,7 @@ func (vm *VM) registerThreadClass() {
 		return object.NewArrayFromSlice(live)
 	})
 	sdef("pass", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		vm.threadBlock(runtime.Gosched)
+		vm.threadPass(runtime.Gosched)
 		vm.serviceSafepoint(vm.currentThread) // interrupt a running thread that yields via Thread.pass
 		return object.NilV
 	})
@@ -372,6 +428,43 @@ func (vm *VM) registerThreadClass() {
 		}
 		return object.NewString(t.status)
 	})
+	// Thread#to_s / #inspect. MRI builds the description in ASCII-8BIT and lets a
+	// non-ASCII thread name widen it, so a name outside ASCII yields a UTF-8
+	// string and everything else a BINARY one. They share one Method record, as
+	// MRI aliases them.
+	cThread.define("to_s", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		d := self.(*RThread).describe()
+		for i := 0; i < len(d); i++ {
+			if d[i] >= 0x80 {
+				return object.NewString(d)
+			}
+		}
+		return object.NewStringViewEnc(d, "ASCII-8BIT")
+	})
+	cThread.methods["inspect"] = cThread.methods["to_s"]
+	// Thread#priority / #priority=. MRI clamps an assignment to [-3, 3] and
+	// requires an Integer; a new thread inherits the creating thread's value.
+	cThread.define("priority", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Integer(self.(*RThread).priority)
+	})
+	cThread.define("priority=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		n, ok := args[0].(object.Integer)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into Integer", classNameOf(args[0]))
+		}
+		p := int(n)
+		if p > 3 {
+			p = 3
+		}
+		if p < -3 {
+			p = -3
+		}
+		self.(*RThread).priority = p
+		return args[0]
+	})
 	// wakeup marks a sleeping thread runnable, delivering to it if it is parked in
 	// a sleep; on a dead thread it raises ThreadError, as in MRI. Returns self.
 	cThread.define("wakeup", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -390,7 +483,7 @@ func (vm *VM) registerThreadClass() {
 			raise("ThreadError", "killed thread")
 		}
 		t.wakeParked()
-		vm.threadBlock(runtime.Gosched)
+		vm.threadPass(runtime.Gosched)
 		vm.serviceSafepoint(vm.currentThread) // a raise queued against the caller fires here
 		return t
 	})
@@ -538,6 +631,7 @@ func (vm *VM) registerThreadClass() {
 			return t
 		}
 		if t == vm.currentThread {
+			t.status = "aborting"
 			panic(killSignal{})
 		}
 		t.killed = true
