@@ -281,7 +281,7 @@ func (vm *VM) warnDeprecatedConst(scope *RClass, name string) {
 		return
 	}
 	vm.send(w, "warn", []object.Value{
-		object.NewString("warning: constant " + scopedNameFor(scope, name) + " is deprecated\n"),
+		object.NewString("warning: constant " + vm.qualifiedConstName(scope, name) + " is deprecated\n"),
 	}, nil)
 }
 

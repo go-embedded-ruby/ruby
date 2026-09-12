@@ -11595,3 +11595,25 @@ func (vm *VM) freshEvalVisibility(cls *RClass) func() {
 	cls.defaultVis, cls.funcMode = visPublic, false
 	return func() { cls.defaultVis, cls.funcMode = vis, mode }
 }
+
+// moduleDescription renders a class or module the way MRI names it in a
+// NameError: "module 'M'" or "class 'C'", with an anonymous receiver shown by
+// its "#<Module:0x…>" repr rather than as an empty name. Reference: ruby/ruby
+// v3_4_0 vm_method.c rb_print_undef -> rb_name_err_raise.
+func (vm *VM) moduleDescription(c *RClass) string {
+	noun := "class"
+	if c.isModule {
+		noun = "module"
+	}
+	return noun + " '" + vm.moduleToSStr(c) + "'"
+}
+
+// qualifiedConstName is the "Scope::NAME" form used in constant warnings, with
+// an anonymous scope shown by its repr — MRI builds the name from the scope's
+// class path, which for an anonymous module is "#<Module:0x…>".
+func (vm *VM) qualifiedConstName(scope *RClass, name string) string {
+	if scope == nil || (scope.name == "Object" && !scope.isModule) {
+		return name
+	}
+	return vm.moduleToSStr(scope) + "::" + name
+}
