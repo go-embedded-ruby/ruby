@@ -1868,6 +1868,7 @@ func (vm *VM) bootstrap() {
 			if len(args) != 0 {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 			}
+			defer vm.freshEvalVisibility(cls)()
 			return vm.classEval(cls, blk, nil)
 		}
 		// String form — class_eval("def m; end", file, line): 1..3 arguments, the
@@ -1881,6 +1882,7 @@ func (vm *VM) bootstrap() {
 		if len(args) >= 2 {
 			vm.coerceToString(args[1])
 		}
+		defer vm.freshEvalVisibility(cls)()
 		return vm.classEvalString(cls, src)
 	}
 	// Module#class_eval is an alias of Module#module_eval — a shared method record,
@@ -1891,7 +1893,9 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
-		return vm.classEval(self.(*RClass), blk, args)
+		cls := self.(*RClass)
+		defer vm.freshEvalVisibility(cls)()
+		return vm.classEval(cls, blk, args)
 	}
 	// Module#module_exec runs the block with the module as self and the given
 	// arguments; Module#class_exec is its alias (shared record).
@@ -11528,4 +11532,19 @@ func rangeStepSize(r *object.Range, step object.Value) object.Value {
 		return object.NilV
 	}
 	return stepSize(r.Lo, r.Hi, step, r.Exclusive)
+}
+
+// freshEvalVisibility gives a module_eval / class_eval / module_exec body its
+// own scope visibility and returns the function that puts the enclosing one
+// back. MRI keeps the visibility for subsequent `def`s in the frame's cref, not
+// in the class, and specific_eval pushes a fresh cref whose scope visibility
+// starts at public: a `private` written outside the block does not reach the
+// definitions inside it, and one written inside does not escape. rbgo records
+// the level on the class, so the same observable behaviour comes from saving
+// and restoring it around the body. Reference: ruby/ruby v3_4_0 vm_eval.c
+// specific_eval / eval_under -> vm_cref_push with METHOD_VISI_PUBLIC.
+func (vm *VM) freshEvalVisibility(cls *RClass) func() {
+	vis, mode := cls.defaultVis, cls.funcMode
+	cls.defaultVis, cls.funcMode = visPublic, false
+	return func() { cls.defaultVis, cls.funcMode = vis, mode }
 }

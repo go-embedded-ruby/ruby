@@ -51,7 +51,13 @@ func (vm *VM) registerModuleExtras() {
 	setVis := func(vm *VM, self object.Value, args []object.Value, vis visibility) object.Value {
 		mod := self.(*RClass)
 		if len(args) == 0 {
-			mod.defaultVis = vis
+			// A bare public/private/protected also cancels a module_function toggle:
+			// MRI keeps one scope visibility per frame, and rb_scope_visibility_set
+			// writes both halves of it — the level AND the module_function flag — so
+			// the later directive wins outright. Reference: ruby/ruby v3_4_0
+			// vm_method.c rb_scope_visibility_set / rb_mod_modfunc's
+			// SCOPE_SET(METHOD_VISI_PUBLIC | SCOPE_VISI_MODULE_FUNC).
+			mod.defaultVis, mod.funcMode = vis, false
 			return object.NilV
 		}
 		// `private [:a, :b]` (an Array argument) marks each element, returning the
