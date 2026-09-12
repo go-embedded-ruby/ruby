@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/compiler"
+	"github.com/go-embedded-ruby/ruby/internal/object"
 	"github.com/go-ruby-parser/parser"
 )
 
@@ -289,4 +290,23 @@ end
 p r
 p([1, 2, 3].each { |x| break x * 2 })
 `, ":loop\n2")
+}
+
+// warnAlreadyInitialized falls back to Object when it is asked about a nil
+// lexical scope — the defensive case assignConst has always had, reached here
+// directly since no compiled program produces a nil cref.
+func TestWarnAlreadyInitializedNilScope(t *testing.T) {
+	var buf bytes.Buffer
+	vm := New(&buf)
+	vm.globals["$VERBOSE"] = object.False
+	vm.cObject.consts["WAIN_TEST_CONST"] = object.IntValue(1)
+	vm.warnAlreadyInitialized(nil, "WAIN_TEST_CONST")
+	if got := buf.String(); got != "warning: already initialized constant WAIN_TEST_CONST\n" {
+		t.Fatalf("nil scope: got %q", got)
+	}
+	buf.Reset()
+	vm.warnAlreadyInitialized(nil, "WAIN_NEVER_SET")
+	if got := buf.String(); got != "" {
+		t.Fatalf("an unset constant must not warn: got %q", got)
+	}
 }

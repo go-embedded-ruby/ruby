@@ -3,6 +3,8 @@ package compiler
 import (
 	"testing"
 
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-ruby-parser/parser"
 	"github.com/go-ruby-parser/parser/ast"
 )
 
@@ -188,24 +190,6 @@ func TestHasFlipFlop(t *testing.T) {
 	}
 }
 
-// compileCondition's default arm: hasFlipFlop said yes for a node kind the
-// switch does not name. No parser produces that, so it is built by hand.
-func TestCompileConditionDefaultArm(t *testing.T) {
-	c := &Compiler{}
-	b := newBuilder("t", nil)
-	c.push(b)
-	// A `&&` whose operand is a flip-flop reaches the BinaryExpr arm, and the
-	// non-flip-flop operand reaches compileNode through the guard.
-	c.compileCondition(&ast.BinaryExpr{
-		Op:    "&&",
-		Left:  &ast.RangeLit{Lo: &ast.BoolLit{Value: true}, Hi: &ast.BoolLit{Value: true}},
-		Right: &ast.IntLit{Value: 1},
-	})
-	if len(b.insns) == 0 {
-		t.Fatal("compileCondition emitted nothing")
-	}
-}
-
 // flipFlopSlot stops at a borrowed scope: under CompileWithLocals the parent
 // holds a Binding's locals in a frame that is already sized, so the slot must
 // land in the eval's own scope at depth 0.
@@ -264,6 +248,80 @@ func TestIsEncNameByte(t *testing.T) {
 	for _, b := range []byte{' ', ',', ';', '*', ':', '"', '\t'} {
 		if isEncNameByte(b) {
 			t.Errorf("isEncNameByte(%q) = true, want false", b)
+		}
+	}
+}
+
+// mustCompile parses and compiles src, failing the test if either step does.
+// Compiling is enough to reach every lowering branch; the vm package's tests
+// check what the emitted sequences actually do.
+func mustCompile(t *testing.T, src string) *bytecode.ISeq {
+	t.Helper()
+	prog, err := parser.Parse(src)
+	if err != nil {
+		t.Fatalf("parse %q: %v", src, err)
+	}
+	iseq, err := CompileWithEncoding(prog, "")
+	if err != nil {
+		t.Fatalf("compile %q: %v", src, err)
+	}
+	return iseq
+}
+
+// Every lowering this wave added, compiled. Each line names a branch: the
+// splat and non-splat index forms, `||=` / `&&=` / an arithmetic operator, the
+// attribute form, the two scoped-constant forms, both flip-flop spellings in
+// each condition position, and a loop break with and without a value.
+func TestWave24LoweringsCompile(t *testing.T) {
+	for _, src := range []string{
+		// Compound assignment to an index.
+		"h = {}; h[:a] ||= 1",
+		"h = {}; h[:a] &&= 1",
+		"h = {}; h[:a] += 1",
+		"h = {}; h[:a] **= 2", // an operator with no fast-path opcode dispatches as a send
+		"h = {}; h[:a, :b] ||= 1",
+		"h = {}; h[*[:a]] ||= 1",
+		"h = {}; h[*[:a]] += 1",
+		"h = {}; self[*[:a]] ||= 1", // an implicit-self receiver takes no explicit-send flag
+		"h = {}; h[*[:a]] = 1",      // a plain splatted setter, not a compound assignment
+		// Compound assignment to an attribute.
+		"o = Object.new; o.v ||= 1",
+		"o = Object.new; o.v &&= 1",
+		"o = Object.new; o.v += 1",
+		"o = Object.new; o.v <<= 1",
+		"self.v ||= 1",
+		// Compound assignment to a qualified constant.
+		"module M; end; M::C ||= 1",
+		"module M; end; M::C &&= 1",
+		"module M; end; M::C += 1",
+		"C ||= 1",   // bare: no module part
+		"::C ||= 1", // toplevel-qualified: no module part
+		// Flip-flops, in each condition position and both spellings.
+		"10.times { |i| i if (i == 1)..(i == 2) }",
+		"10.times { |i| i if (i == 1)...(i == 2) }",
+		"10.times { |i| i unless (i == 1)..(i == 2) }",
+		"10.times { |i| i if (i == 1)..(i == 2) or (i == 3)..(i == 4) }",
+		"10.times { |i| i if (i == 1)..(i == 2) and i.odd? }",
+		"10.times { |i| (i == 1)..(i == 2) ? :a : :b }",
+		"i = 0; while (i == 1)..(i == 2); i += 1; end",
+		"i = 0; until (i == 1)..(i == 2); i += 1; end",
+		"i = 0; begin; i += 1; end while (i == 1)..(i == 2)",
+		"if false then 1 elsif (1 == 1)..(2 == 2) then 2 else 3 end",
+		"x = (1..2); x = (1..); x = (..2)", // ordinary Ranges, untouched
+		"1 if 1 == 1 or 2 == 2",            // an ordinary logical condition, untouched
+		"1 unless 1 == 1",                  // an ordinary negated condition, untouched
+		// Loop break, with and without a value.
+		"while true; break; end",
+		"while true; break 1; end",
+		"while true; break *[1, 2]; end",
+		"until false; break 1; end",
+		"i = 0; begin; i += 1; break 2; end while true",
+		"i = 0; while i < 3; i += 1; end", // no break at all
+		"[1].each { break 1 }",            // a block break, not a loop break
+		"i = 0; while i < 3; i += 1; next; end",
+	} {
+		if iseq := mustCompile(t, src); len(iseq.Insns) == 0 {
+			t.Errorf("compiled %q to nothing", src)
 		}
 	}
 }

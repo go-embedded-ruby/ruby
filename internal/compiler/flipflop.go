@@ -44,34 +44,39 @@ func hasFlipFlop(node ast.Node) bool {
 // compileNode; with one, the logical operators around it are re-emitted here so
 // each operand is itself compiled in condition position (`a...b or c...d`).
 func (c *Compiler) compileCondition(node ast.Node) {
-	if !hasFlipFlop(node) {
-		c.compileNode(node)
-		return
-	}
 	b := c.cur()
 	switch v := node.(type) {
 	case *ast.RangeLit:
-		c.compileFlipFlop(v)
+		if v.Lo != nil && v.Hi != nil {
+			c.compileFlipFlop(v)
+			return
+		}
 	case *ast.BinaryExpr:
 		// `&&` / `||`, short-circuiting on the left operand's value, as
-		// compileLogical does for the ordinary case.
-		c.compileCondition(v.Left)
-		b.emit(bytecode.OpDup, 0, 0)
-		var short int
-		if v.Op == "&&" {
-			short = b.emit(bytecode.OpBranchUnless, 0, 0)
-		} else {
-			short = b.emit(bytecode.OpBranchIf, 0, 0)
+		// compileLogical does for the ordinary case. Only re-emitted here when an
+		// operand really is a flip-flop; otherwise the ordinary path handles it.
+		if (v.Op == "&&" || v.Op == "||") && (hasFlipFlop(v.Left) || hasFlipFlop(v.Right)) {
+			c.compileCondition(v.Left)
+			b.emit(bytecode.OpDup, 0, 0)
+			var short int
+			if v.Op == "&&" {
+				short = b.emit(bytecode.OpBranchUnless, 0, 0)
+			} else {
+				short = b.emit(bytecode.OpBranchIf, 0, 0)
+			}
+			b.emit(bytecode.OpPop, 0, 0)
+			c.compileCondition(v.Right)
+			b.patch(short, b.here())
+			return
 		}
-		b.emit(bytecode.OpPop, 0, 0)
-		c.compileCondition(v.Right)
-		b.patch(short, b.here())
 	case *ast.UnaryExpr: // `!cond`, which is also how `unless` and `until` arrive
-		c.compileCondition(v.Operand)
-		b.emit(bytecode.OpNot, 0, 0)
-	default:
-		c.compileNode(node)
+		if v.Op == "!" && hasFlipFlop(v.Operand) {
+			c.compileCondition(v.Operand)
+			b.emit(bytecode.OpNot, 0, 0)
+			return
+		}
 	}
+	c.compileNode(node)
 }
 
 // flipFlopSlot allocates this occurrence's state slot in the nearest enclosing
