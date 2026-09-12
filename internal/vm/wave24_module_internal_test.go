@@ -283,6 +283,11 @@ p Module.new.name
 	if !modulePermanentlyNamed(ring) {
 		t.Error("a named module that is its own lexical parent is permanently named")
 	}
+	// The path walk stops on the same ring rather than qualifying R with itself
+	// forever.
+	if got := vm.moduleClassPath(ring); got != "R" {
+		t.Errorf("moduleClassPath of a self-nested module = %q want \"R\"", got)
+	}
 }
 
 // TestSetTemporaryName covers the permanence rule, the constant-path refusal and
@@ -345,8 +350,11 @@ func TestClearNestedClassPathsStopsAtARing(t *testing.T) {
 	outer.isModule, outer.named = true, false
 	inner := newClass("Inner", nil)
 	inner.isModule, inner.named, inner.lexParent = true, true, outer
-	outer.consts = map[string]object.Value{"Inner": inner, "Self": outer, "Num": object.IntValue(1)}
-	inner.consts = map[string]object.Value{"Back": outer}
+	// Ring: outer holds inner, and inner holds outer back as a constant whose
+	// lexical home is inner — the walk must stop rather than recurse forever.
+	outer.lexParent = inner
+	outer.consts = map[string]object.Value{"Inner": inner, "Num": object.IntValue(1)}
+	inner.consts = map[string]object.Value{"Outer": outer}
 	clearNestedClassPaths(outer, map[*RClass]bool{})
 	if inner.named || inner.name != "" {
 		t.Errorf("nested module not cleared: name=%q named=%v", inner.name, inner.named)
@@ -388,6 +396,37 @@ p C.protected_instance_methods(false), C.public_instance_methods(false)
 		if class != "NameError" || !strings.HasPrefix(msg, tc.msg) {
 			t.Errorf("%s: got %s: %q, want NameError starting %q", tc.src, class, msg, tc.msg)
 		}
+	}
+}
+
+// TestAutoloadPathOfALoadedFeature covers autoload? reporting nil once the file
+// it names has been loaded: MRI's check_autoload_required consults
+// rb_feature_provided, so an autoload whose feature is already provided is
+// settled even though the constant it named was never defined.
+func TestAutoloadPathOfALoadedFeature(t *testing.T) {
+	f := writeRB(t, "silent.rb", "$w24 = 1\n")
+	src := `module M; autoload :A, "` + f + `"; end
+p M.autoload?(:A).nil?
+require "` + f + `"
+p M.autoload?(:A), $w24
+`
+	if got, want := eval(t, src), "false\nnil\n1\n"; got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+// TestClassPathOfADeeplyNestedModule covers the middle of the lexical walk: a
+// module three scopes deep takes its qualification from each enclosing scope in
+// turn, and only the outermost contributes its whole name.
+func TestClassPathOfADeeplyNestedModule(t *testing.T) {
+	src := `module A; module B; module C; end; end; end
+p A::B::C.name, A::B::C.to_s
+m = Module.new
+module m::Q; end
+p m::Q.name
+`
+	if got, want := eval(t, src), "\"A::B::C\"\n\"A::B::C\"\n\"Q\"\n"; got != want {
+		t.Errorf("got %q want %q", got, want)
 	}
 }
 
