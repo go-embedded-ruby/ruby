@@ -47,6 +47,11 @@ type builder struct {
 	children    []*bytecode.ISeq
 	parent      *builder
 	isBlock     bool
+	// borrowed marks a scope whose locals belong to somebody else's already-built
+	// frame — the synthetic parent CompileWithLocals puts a Binding's locals in.
+	// Its slots may be read and written but no new one may be added: the frame
+	// that will back it has already been sized.
+	borrowed bool
 }
 
 func newBuilder(name string, params []string) *builder {
@@ -236,12 +241,21 @@ func MagicSourceEncoding(src string) string {
 	}
 	name := magicEncodingName(line)
 	switch strings.ToLower(name) {
+	case "", "utf-8", "utf8":
+		// UTF-8 is the default: leave literals untagged so they compare equal to
+		// every other untagged String.
+		return ""
 	case "binary", "ascii-8bit":
 		return "ASCII-8BIT"
 	case "us-ascii", "ascii":
 		return "US-ASCII"
 	}
-	return ""
+	// Any other declared encoding is passed through as written. The compiler has
+	// no encoding registry — that table lives in the vm — but the vm's lookup is
+	// case-insensitive over every name and alias, so `# encoding: big5` tags
+	// literals with a name that resolves to the canonical Big5 object and reports
+	// itself as "Big5".
+	return name
 }
 
 // magicEncodingName extracts the value of a `coding:`/`encoding:` field from a
@@ -258,19 +272,30 @@ func magicEncodingName(line string) string {
 	}
 	rest := line[i+len("coding"):]
 	rest = strings.TrimLeft(rest, ":= \t")
-	// The value ends at the first whitespace or a `-*-` terminator.
+	// The name runs while the bytes can belong to an encoding name — letters,
+	// digits, `-` and `_` — which is how MRI's set_file_encoding (parse.y
+	// v3_4_0) reads the value of a `coding` field it finds in a top-of-file
+	// comment. That is what lets the vim form work, where the value is followed
+	// by a comma: `# vim: filetype=ruby, fileencoding=big5, tabsize=3`. A `-*-`
+	// still terminates it even though `-` is a name byte, so the Emacs form
+	// closes without a space (`# coding:binary-*-`).
 	end := len(rest)
-	for j, r := range rest {
-		if r == ' ' || r == '\t' || r == ';' {
-			end = j
-			break
-		}
-		if strings.HasPrefix(rest[j:], "-*-") {
+	for j := 0; j < len(rest); j++ {
+		if strings.HasPrefix(rest[j:], "-*-") || !isEncNameByte(rest[j]) {
 			end = j
 			break
 		}
 	}
-	return strings.TrimSpace(rest[:end])
+	return rest[:end]
+}
+
+// isEncNameByte reports whether b may appear in an encoding name.
+func isEncNameByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	}
+	return b == '-' || b == '_'
 }
 
 // CompileWithLocals lowers prog for a Binding eval: it compiles in a child scope
@@ -287,6 +312,7 @@ func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.I
 	c := &Compiler{}
 	parent := newBuilder("<binding>", nil)
 	parent.locals = append([]string(nil), localNames...)
+	parent.borrowed = true
 	c.push(parent)
 	child := newBuilder("(eval)", nil)
 	child.isBlock = true
@@ -499,6 +525,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpSend, b.addName(v.Op), 0)
 		}
 	case *ast.BinaryExpr:
+		if sc, rhs, ok := scopedConstOrAssign(v); ok {
+			c.compileScopedConstOrAssign(sc, rhs)
+			return
+		}
 		if v.Op == "&&" || v.Op == "||" {
 			c.compileLogical(v)
 			return
@@ -549,6 +579,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileNode(v.Value)
 		b.emit(bytecode.OpSetConst, b.addName(v.Name), 0)
 	case *ast.ScopedConstAssign:
+		if sc, be, ok := scopedConstOpAssign(v); ok {
+			c.compileScopedConstOpAssign(sc, be)
+			break
+		}
 		// `Scope::NAME = value`: evaluate the scope, set its constant, yield the
 		// value. Target is the *ScopedConst naming the constant.
 		sc, ok := v.Target.(*ast.ScopedConst)
@@ -927,10 +961,19 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		b.emit(bytecode.OpBinding, 0, 0)
 		return
 	}
-	// __ENCODING__ is the source encoding keyword; rbgo scripts are UTF-8, so it is
-	// Encoding::UTF_8.
+	// __ENCODING__ is the source encoding keyword: the encoding a `# encoding:`
+	// magic comment declared for this file, or Encoding::UTF_8, the default source
+	// encoding, when it declared none.
 	if v.Recv == nil && v.Block == nil && v.Name == "__ENCODING__" && len(v.Args) == 0 {
-		c.compileNode(&ast.ScopedConst{Recv: &ast.ConstRef{Name: "Encoding"}, Name: "UTF_8"})
+		if c.srcEnc == "" {
+			c.compileNode(&ast.ScopedConst{Recv: &ast.ConstRef{Name: "Encoding"}, Name: "UTF_8"})
+			return
+		}
+		c.compileNode(&ast.Call{
+			Recv: &ast.ConstRef{Name: "Encoding"},
+			Name: "find",
+			Args: []ast.Node{&ast.StringLit{Value: c.srcEnc}},
+		})
 		return
 	}
 	// A bare eval(str) with no explicit binding evaluates against the caller's
@@ -950,6 +993,21 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	if v.Recv == nil && v.Block == nil && len(v.Args) == 0 {
 		if depth, slot, ok := b.resolve(v.Name); ok {
 			b.emit(bytecode.OpGetLocal, slot, depth)
+			return
+		}
+	}
+	// A compound assignment to an index or an attribute (`a[i] op= v`,
+	// `a.x op= v`) reaches the compiler as the parser's textual desugaring, whose
+	// receiver and index nodes are shared between the read and the write.
+	// Compiled literally that evaluates each of them twice; lower it so each is
+	// evaluated exactly once (see opassign.go).
+	if isSetterCall(v) {
+		if be, idx, ok := indexOpAssign(v); ok {
+			c.compileIndexOpAssign(v, be, idx)
+			return
+		}
+		if be, ok := attrOpAssign(v); ok {
+			c.compileAttrOpAssign(v, be)
 			return
 		}
 	}
@@ -1000,6 +1058,24 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		if blockPass != nil {
 			c.compileNode(blockPass)
 			sendFlags(b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0))
+			patchSafe()
+			return
+		}
+		// A setter written with a splatted argument list (`o[*x] = 1`) still
+		// evaluates to the assigned value, not to what `[]=` returns. The argument
+		// count is not known until run time, so the value is recovered as the last
+		// element of the built argument array — exactly MRI's `dup; putobject -1;
+		// send :[]` in compile.c's compile_attrasgn (ruby/ruby v3_4_0:10165).
+		if isSetterCall(v) && len(args) > 0 {
+			b.emit(bytecode.OpDup, 0, 0)
+			b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(-1)), 0)
+			b.emit(bytecode.OpSend, b.addName("[]"), 1)
+			tmp := b.localSlot("")
+			b.emit(bytecode.OpSetLocal, tmp, 0)
+			b.emit(bytecode.OpPop, 0, 0) // the argument array is on top again
+			sendFlags(b.emit(bytecode.OpSendArray, b.addName(v.Name), 0))
+			b.emit(bytecode.OpPop, 0, 0) // discard the setter's return value
+			b.emit(bytecode.OpGetLocal, tmp, 0)
 			patchSafe()
 			return
 		}
@@ -1632,14 +1708,14 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 
 func (c *Compiler) compileIf(v *ast.If) {
 	b := c.cur()
-	c.compileNode(v.Cond)
+	c.compileCondition(v.Cond)
 	thisFalse := b.emit(bytecode.OpBranchUnless, 0, 0)
 	c.compileBody(v.Then)
 	endJumps := []int{b.emit(bytecode.OpJump, 0, 0)}
 
 	for _, ei := range v.Elsifs {
 		b.patch(thisFalse, b.here())
-		c.compileNode(ei.Cond)
+		c.compileCondition(ei.Cond)
 		thisFalse = b.emit(bytecode.OpBranchUnless, 0, 0)
 		c.compileBody(ei.Body)
 		endJumps = append(endJumps, b.emit(bytecode.OpJump, 0, 0))
@@ -1670,7 +1746,12 @@ type loopCtx struct {
 	kind       ctxKind
 	contTarget int   // loop: jump here on `next` (re-evaluate the condition)
 	contFixups []int // loop: `next` OpJump placeholders when contTarget is not yet known (a do…end post-loop compiles its condition after the body)
-	breaks     []int // loop: OpJump placeholders patched to the loop exit
+	breaks     []int // loop: OpJump placeholders patched to the loop's break exit
+	// breakSlot holds a loop `break`'s argument, which is the value of the whole
+	// loop expression (MRI compile.c compile_loop, v3_4_0:8143: the normal exit
+	// pushes nil and falls into break_label, where a break arrives with its own
+	// value instead). Allocated on the first break in this loop, else -1.
+	breakSlot int
 }
 
 func (c *Compiler) innerCtx() *loopCtx {
@@ -1691,7 +1772,30 @@ func (c *Compiler) compileBreak(v *ast.Break) {
 		b.emit(bytecode.OpBreak, 0, 0)
 		return
 	}
+	// A loop `break` carries its argument out as the loop expression's value.
+	if ctx.breakSlot < 0 {
+		ctx.breakSlot = b.localSlot("")
+	}
+	c.compileBreakValue(v.Value)
+	b.emit(bytecode.OpSetLocal, ctx.breakSlot, 0)
+	b.emit(bytecode.OpPop, 0, 0)
 	ctx.breaks = append(ctx.breaks, b.emit(bytecode.OpJump, 0, 0))
+}
+
+// finishLoopValue emits a loop's value once its body is compiled: nil when the
+// condition ended it, or the `break` argument when a break did.
+func (c *Compiler) finishLoopValue(ctx *loopCtx) {
+	b := c.cur()
+	b.emit(bytecode.OpPushNil, 0, 0)
+	if len(ctx.breaks) == 0 {
+		return
+	}
+	done := b.emit(bytecode.OpJump, 0, 0)
+	for _, j := range ctx.breaks {
+		b.patch(j, b.here())
+	}
+	b.emit(bytecode.OpGetLocal, ctx.breakSlot, 0)
+	b.patch(done, b.here())
 }
 
 func (c *Compiler) compileNext(v *ast.Next) {
@@ -2386,19 +2490,16 @@ func (c *Compiler) compileWhile(v *ast.While) {
 	}
 	b := c.cur()
 	start := b.here()
-	c.compileNode(v.Cond)
+	c.compileCondition(v.Cond)
 	exit := b.emit(bytecode.OpBranchUnless, 0, 0)
-	ctx := &loopCtx{kind: ctxLoop, contTarget: start}
+	ctx := &loopCtx{kind: ctxLoop, contTarget: start, breakSlot: -1}
 	c.ctxs = append(c.ctxs, ctx)
 	c.compileBody(v.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
 	b.emit(bytecode.OpPop, 0, 0) // discard each iteration's value
 	b.emit(bytecode.OpJump, start, 0)
 	b.patch(exit, b.here())
-	for _, j := range ctx.breaks { // break lands on the loop's nil value
-		b.patch(j, b.here())
-	}
-	b.emit(bytecode.OpPushNil, 0, 0) // while evaluates to nil
+	c.finishLoopValue(ctx)
 }
 
 // compileDoWhile lowers a `begin…end while/until cond` post-loop: the body runs
@@ -2410,7 +2511,7 @@ func (c *Compiler) compileWhile(v *ast.While) {
 func (c *Compiler) compileDoWhile(v *ast.While, body *ast.Begin) {
 	b := c.cur()
 	start := b.here()
-	ctx := &loopCtx{kind: ctxLoop, contTarget: -1} // condition PC not yet known
+	ctx := &loopCtx{kind: ctxLoop, contTarget: -1, breakSlot: -1} // condition PC not yet known
 	c.ctxs = append(c.ctxs, ctx)
 	c.compileNode(body)
 	b.emit(bytecode.OpPop, 0, 0) // discard each iteration's value
@@ -2419,13 +2520,10 @@ func (c *Compiler) compileDoWhile(v *ast.While, body *ast.Begin) {
 	for _, j := range ctx.contFixups { // `next` lands on the condition test
 		b.patch(j, cont)
 	}
-	c.compileNode(v.Cond)
+	c.compileCondition(v.Cond)
 	b.emit(bytecode.OpBranchIf, start, 0) // repeat while the condition holds
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
-	for _, j := range ctx.breaks { // break lands on the loop's nil value
-		b.patch(j, b.here())
-	}
-	b.emit(bytecode.OpPushNil, 0, 0) // the post-loop evaluates to nil
+	c.finishLoopValue(ctx)
 }
 
 // compileFor lowers `for VARS in ITER ... end` to `ITER.each { ... }`. Unlike a
