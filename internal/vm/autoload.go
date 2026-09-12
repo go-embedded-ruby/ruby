@@ -4,7 +4,12 @@
 
 package vm
 
-import "github.com/go-embedded-ruby/ruby/internal/object"
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/go-embedded-ruby/ruby/internal/object"
+)
 
 // registerAutoload installs Module#autoload / #autoload? and their Kernel
 // (top-level) forms. autoload records that resolving a still-undefined constant
@@ -14,67 +19,117 @@ func (vm *VM) registerAutoload() {
 	// Module#autoload(const, path): register a lazy load for const in self's
 	// constant table. If the constant is already defined the registration is a
 	// no-op (MRI: autoload? then reports nil). Returns nil.
+	//
+	// The argument contract follows MRI exactly (ruby/ruby v3_4_0 load.c
+	// rb_mod_autoload → variable.c rb_autoload_str): rb_to_id on the name first
+	// (TypeError for anything but a Symbol/String), then FilePathValue on the
+	// path (#to_path/#to_str, so a Pathname works), then the constant-name check
+	// (NameError "autoload must be constant name: x"), then the empty-feature
+	// check (ArgumentError), and finally const_set — whose rb_check_frozen is
+	// what makes a frozen module raise FrozenError, after all of the above.
 	autoloadFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		cls := self.(*RClass)
-		name := constNameArg(args[0])
-		path := autoloadPathArg(vm, args[1])
-		vm.registerAutoloadOn(cls, name, path)
+		sym := autoloadNameArg(args[0])
+		path := vm.filePathArg(args[1])
+		autoloadCheckConstName(sym)
+		if path == "" {
+			raise("ArgumentError", "empty feature name")
+		}
+		if cls.frozen {
+			vm.raiseFrozen(cls)
+		}
+		vm.registerAutoloadOn(cls, sym, path)
 		return object.NilV
 	}
 	vm.cModule.define("autoload", autoloadFn)
 
-	// Module#autoload?(const): the pending autoload path String, or nil. A const
-	// already defined in this class's table (not merely registered) reports nil.
+	// Module#autoload?(const, inherit=true): the pending autoload path String, or
+	// nil. With inherit (the default) the receiver's ancestors are searched too —
+	// MRI walks RCLASS_SUPER, so an autoload registered on a superclass or on an
+	// included module is reported by the heir. A const already defined in this
+	// class's table (not merely registered) reports nil, as does a name that is
+	// not a constant name at all (MRI's rb_check_id yields no id and returns nil
+	// rather than raising). Reference: ruby/ruby v3_4_0 load.c rb_mod_autoload_p →
+	// variable.c rb_autoload_at_p.
 	autoloadQFn := func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		cls := self.(*RClass)
-		name := constNameArg(args[0])
-		if _, defined := cls.consts[name]; defined {
-			return object.NilV
-		}
-		if cls.autoloads != nil {
-			if p, ok := cls.autoloads[name]; ok {
-				return object.NewString(p)
-			}
-		}
-		return object.NilV
+		name := autoloadNameArg(args[0])
+		inherit := len(args) < 2 || args[1].Truthy()
+		return vm.autoloadPathFor(cls, name, inherit)
 	}
 	vm.cModule.define("autoload?", autoloadQFn)
 
 	// Kernel#autoload / #autoload?: top-level forms registered on Object's table.
 	// A bare `autoload` at the top level (self = main) registers on Object.
 	vm.cObject.define("autoload", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		name := constNameArg(args[0])
-		path := autoloadPathArg(vm, args[1])
-		vm.registerAutoloadOn(vm.cObject, name, path)
-		return object.NilV
+		return autoloadFn(vm, vm.cObject, args, nil)
 	})
 	vm.cObject.define("autoload?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		name := constNameArg(args[0])
-		if _, defined := vm.cObject.consts[name]; defined {
-			return object.NilV
-		}
-		if vm.cObject.autoloads != nil {
-			if p, ok := vm.cObject.autoloads[name]; ok {
-				return object.NewString(p)
-			}
-		}
-		return object.NilV
+		return autoloadQFn(vm, vm.cObject, args, nil)
 	})
 }
 
-// autoloadPathArg coerces the second autoload argument to its file-name String,
-// raising TypeError otherwise — matching MRI's "no implicit conversion" error.
-func autoloadPathArg(vm *VM, v object.Value) string {
-	s, ok := v.(*object.String)
-	if !ok {
-		raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+// autoloadNameArg coerces an autoload constant-name argument to its string form
+// the way MRI's rb_to_id / rb_check_id does: a Symbol or String passes through,
+// anything else raises TypeError. Unlike constNameArg it does NOT validate the
+// shape of the name — autoload and autoload? diverge there (autoload raises its
+// own NameError, autoload? quietly reports nil).
+func autoloadNameArg(v object.Value) string {
+	switch n := v.(type) {
+	case object.Symbol:
+		return string(n)
+	case *object.String:
+		return n.Str()
+	default:
+		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
+		return ""
 	}
-	return s.Str()
+}
+
+// autoloadCheckConstName raises MRI's "autoload must be constant name" NameError
+// for a name that is not a well-formed constant (rb_is_const_id in
+// rb_autoload_str). The message differs from every other constant-name error in
+// the VM, so it gets its own check rather than reusing constNameArg.
+func autoloadCheckConstName(name string) {
+	if !constNameWellFormed(name) {
+		raise("NameError", "autoload must be constant name: %s", name)
+	}
+}
+
+// autoloadPathFor reports the pending autoload path for name on cls (searching
+// cls's ancestors when inherit is set), or nil. A constant that is already
+// defined, or one whose file has already been loaded — MRI's
+// check_autoload_required consults rb_feature_provided, so an autoload naming a
+// file that is already in $LOADED_FEATURES is considered settled — reports nil.
+func (vm *VM) autoloadPathFor(cls *RClass, name string, inherit bool) object.Value {
+	chain := []*RClass{cls}
+	if inherit {
+		chain = vm.ancestors(cls)
+	}
+	for _, c := range chain {
+		if _, defined := c.consts[name]; defined {
+			return object.NilV
+		}
+		if c.autoloads == nil {
+			continue
+		}
+		p, ok := c.autoloads[name]
+		if !ok {
+			continue
+		}
+		if vm.featureLoaded(p) {
+			return object.NilV
+		}
+		return object.NewString(p)
+	}
+	return object.NilV
 }
 
 // registerAutoloadOn records (or replaces) a pending autoload for name on cls.
 // When the constant is already defined in cls's own table the registration is
-// dropped, matching MRI where autoload of a defined constant is inert.
+// dropped, matching MRI where autoload of a defined constant is inert. A fresh
+// registration fires const_added, as MRI's rb_autoload_str does once
+// autoload_synchronized reports the constant was newly reserved.
 func (vm *VM) registerAutoloadOn(cls *RClass, name, path string) {
 	if _, defined := cls.consts[name]; defined {
 		return
@@ -82,14 +137,22 @@ func (vm *VM) registerAutoloadOn(cls *RClass, name, path string) {
 	if cls.autoloads == nil {
 		cls.autoloads = map[string]string{}
 	}
+	_, existed := cls.autoloads[name]
 	cls.autoloads[name] = path
+	if !existed {
+		vm.fireConstAdded(cls, name)
+	}
 }
 
 // tryAutoload checks whether name has a pending autoload registered directly on
 // cls; if so it consumes the entry, requires the recorded path, and reports
 // whether the require ran. The constant is NOT looked up here — the caller
 // re-resolves afterwards. A pending entry is cleared before the require so a
-// re-entrant resolution of the same constant does not loop.
+// re-entrant resolution of the same constant does not loop, and is PUT BACK if
+// the require raises: MRI keeps a failed autoload registered (the constant stays
+// in Module#constants and autoload? still reports the path), so a later
+// reference tries the file again. A require that completes without defining the
+// constant, by contrast, retires the entry — MRI does not load such a file twice.
 func (vm *VM) tryAutoload(cls *RClass, name string) bool {
 	if cls == nil || cls.autoloads == nil {
 		return false
@@ -99,8 +162,87 @@ func (vm *VM) tryAutoload(cls *RClass, name string) bool {
 		return false
 	}
 	delete(cls.autoloads, name)
-	vm.doRequire(path, false)
+	done := false
+	defer func() {
+		if !done {
+			vm.registerAutoloadOn(cls, name, path)
+		}
+	}()
+	// MRI loads the file through main.require, so a redefined (or mocked)
+	// Kernel#require is what runs — ruby/spec exercises exactly that.
+	vm.send(vm.main, "require", []object.Value{object.NewString(path)}, nil)
+	done = true
 	return true
+}
+
+// featureLoaded reports whether path names a file that has already been loaded,
+// resolved the way require would resolve it. $LOADED_FEATURES is the authority
+// (doRequire records each file there and featureDropped retires a cache entry
+// the program has deleted from $"), so a suite that saves and restores $" around
+// each example — ruby/spec does — is obeyed.
+func (vm *VM) featureLoaded(path string) bool {
+	abs := vm.featureAbsPath(path)
+	return abs != "" && vm.loaded[abs] && !vm.featureDropped(abs)
+}
+
+// featureAbsPath resolves a require argument to the absolute path doRequire
+// would load, or "" when no candidate exists. The .rb suffix is appended as
+// doRequire appends it.
+func (vm *VM) featureAbsPath(name string) string {
+	file := name
+	if filepath.Ext(file) != ".rb" {
+		file += ".rb"
+	}
+	for _, cand := range vm.requireCandidates(file, false) {
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			abs, err := filepath.Abs(cand)
+			if err != nil {
+				return ""
+			}
+			return abs
+		}
+	}
+	return ""
+}
+
+// noteLoadedFeature appends path to $LOADED_FEATURES (and its $" alias, the same
+// Array object) once, mirroring MRI's rb_provide_feature. Keeping that list
+// truthful is what lets a program which restores $" force a re-require.
+func (vm *VM) noteLoadedFeature(path string) {
+	arr, ok := vm.globals["$LOADED_FEATURES"].(*object.Array)
+	if !ok {
+		return
+	}
+	if featureListed(arr, path) {
+		return
+	}
+	arr.Elems = append(arr.Elems, object.NewString(path))
+}
+
+// featureDropped reports whether path was loaded by this VM but has since been
+// removed from $LOADED_FEATURES by the program. MRI decides "already required?"
+// by consulting $" alone, so dropping an entry there makes the next require run
+// the file again; rbgo caches the answer in vm.loaded, and this is the check
+// that keeps that cache honest.
+func (vm *VM) featureDropped(abs string) bool {
+	if !vm.loaded[abs] {
+		return false
+	}
+	arr, ok := vm.globals["$LOADED_FEATURES"].(*object.Array)
+	if !ok {
+		return false
+	}
+	return !featureListed(arr, abs)
+}
+
+// featureListed reports whether arr holds the String path.
+func featureListed(arr *object.Array, path string) bool {
+	for _, v := range arr.Elems {
+		if s, ok := v.(*object.String); ok && s.Str() == path {
+			return true
+		}
+	}
+	return false
 }
 
 // autoloadInLexical walks cref's lexical nesting then its ancestor chain looking

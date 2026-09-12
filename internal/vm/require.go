@@ -232,6 +232,13 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 			continue // not found / unreadable — try the next candidate
 		}
 		abs, _ := filepath.Abs(cand)
+		// $LOADED_FEATURES is the authority on what has been required (MRI's
+		// rb_feature_provided reads that list), so a program that removes an entry
+		// — ruby/spec saves and restores $" around every example — makes the next
+		// require run the file again.
+		if vm.featureDropped(abs) {
+			delete(vm.loaded, abs)
+		}
 		if vm.loaded[abs] {
 			return object.Bool(false)
 		}
@@ -245,6 +252,7 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		// called from.
 		setISeqFile(iseq, abs)
 		vm.loaded[abs] = true
+		vm.noteLoadedFeature(abs)
 		// Push the file's directory so a nested require_relative resolves against it.
 		vm.requireDirs = append(vm.requireDirs, filepath.Dir(abs))
 		defer func() { vm.requireDirs = vm.requireDirs[:len(vm.requireDirs)-1] }()

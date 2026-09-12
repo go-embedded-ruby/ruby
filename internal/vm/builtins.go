@@ -1724,8 +1724,18 @@ func (vm *VM) bootstrap() {
 		}
 		seen := map[string]bool{}
 		var names []string
+		// A pending autoload counts as a constant: MRI's rb_autoload_str reserves
+		// the name with an undefined value, so Module#constants lists it before the
+		// file is loaded. Reference: ruby/ruby v3_4_0 variable.c
+		// autoload_synchronized → const_set(module, name, Qundef).
 		add := func(c *RClass) {
 			for name := range c.consts {
+				if !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+			for name := range c.autoloads {
 				if !seen[name] {
 					seen[name] = true
 					names = append(names, name)
