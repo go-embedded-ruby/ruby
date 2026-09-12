@@ -5,7 +5,10 @@
 package vm_test
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -108,6 +111,20 @@ func TestWave24FiberThread(t *testing.T) {
 		{`done = false; begin; Thread.handle_interrupt(RuntimeError => :never) { cur = Thread.current; Thread.new { cur.raise "async" }.join; done = Thread.pending_interrupt?; raise "regular" }; rescue => e; p [e.message, done]; end`, "[\"async\", true]\n"},
 		{`Thread.handle_interrupt(RuntimeError => :never) { cur = Thread.current; Thread.new { cur.raise "im" }.join; begin; Thread.handle_interrupt(RuntimeError => :immediate) { :no }; rescue => e; p [e.message, Thread.pending_interrupt?]; end }`, "[\"im\", false]\n"},
 		{`begin; Thread.handle_interrupt(ArgumentError => :never) { cur = Thread.current; begin; Thread.new { cur.raise "unmatched" }.join; rescue; end; p :survived }; rescue => e; p [:outer, e.message]; end`, ":survived\n"},
+		{`p Fiber.new(storage: {a: 1}) { Fiber[:missing] }.resume`, "nil\n"},
+		{`f = Fiber.new { 1 }; f.resume; p f.alive?; p f.kill.class; p f.alive?`, "false\nFiber\nfalse\n"},
+		{`f = Fiber.new { Fiber.yield }; f.resume; begin; (begin; raise "e1"; rescue => a; (begin; raise "e2"; rescue => b; f.raise(a, cause: b); end); end); rescue => e; p e.message; end`, "\"circular causes\"\n"},
+		{`e1 = nil; e3 = nil; g = Fiber.new { Fiber.yield }; g.resume; begin; raise "E1"; rescue => e1; begin; raise "E2"; rescue; begin; raise "E3"; rescue => e3; begin; g.raise(e1, cause: e3); rescue => e; p [e.class, e.message]; end; end; end; end`, "[ArgumentError, \"circular causes\"]\n"},
+		{`out = []; go = false; th = Thread.new { begin; Thread.handle_interrupt(RuntimeError => :on_blocking) { begin; Thread.pass until STATE[0]; rescue RuntimeError; out << :inner; end }; rescue RuntimeError; out << :deferred; end }`, ""},
+		{`p Thread.start { :started }.value`, ":started\n"},
+		{`p Thread.current.send(:priority=, 1)`, "1\n"},
+		{`begin; Thread.current.send(:priority=); rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+		{`begin; Thread.send(:handle_interrupt) { 1 }; rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+		{`t = Thread.new {}; t.join; begin; t.join("bar"); rescue => e; p [e.class, e.message]; end`, "[TypeError, \"no implicit conversion to float from string\"]\n"},
+		{`q = Queue.new; t = Thread.new { q.pop; :done }; Thread.pass until t.stop?; q << 1; p t.join(5).equal?(t)`, "true\n"},
+		{`OUT = []; GO = []; q = Queue.new; th = Thread.new { begin; Thread.handle_interrupt(RuntimeError => :on_blocking) { begin; q << :in; Thread.pass until GO[0]; rescue RuntimeError; OUT << :inner; end }; rescue RuntimeError; OUT << :deferred; end }; q.pop; th.raise "i"; GO[0] = true; th.join; p OUT`, "[:deferred]\n"},
+		{`p [Thread.main.native_thread_id.is_a?(Integer), Thread.main.native_thread_id > 0]`, "[true, true]\n"},
+		{`t = Thread.new { sleep 0.05 }; ids = [Thread.main.native_thread_id, t.native_thread_id]; p [ids.all? { |i| i.is_a?(Integer) }, ids.uniq.size]; t.join; p t.native_thread_id`, "[true, 2]\nnil\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
@@ -167,5 +184,22 @@ p t.status
 	want := "\"run\"\nfalse\nfalse\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("Thread.pass status: got %q want %q", got, want)
+	}
+}
+
+// TestWave24ThreadDescribeFileField covers the file field of Thread#to_s: MRI
+// prints the source location of the thread's block, which only exists for a
+// thread created in a required file (rbgo tracks no per-instruction line, so the
+// line is 0 — the same value __LINE__ reports there). Asserted against MRI 4.0.5,
+// which prints "#<Thread:0xADDR FILE:LINE dead>" for the same program.
+func TestWave24ThreadDescribeFileField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spawner.rb")
+	if err := os.WriteFile(path, []byte("$TH = Thread.new { 1 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := eval(t, "require "+strconv.Quote(path)+"; $TH.join; p $TH.to_s")
+	if !strings.Contains(got, path+":0") || !strings.Contains(got, " dead>") {
+		t.Errorf("Thread#to_s file field: got %q, want it to name %q and end \" dead>\"", got, path+":0")
 	}
 }

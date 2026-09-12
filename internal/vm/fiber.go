@@ -98,12 +98,13 @@ const (
 // resume/transfer arguments (and, on termination, the single final value),
 // err carries an exception to re-raise in the fiber that receives control, exc
 // carries a Fiber#raise exception object (raised — and so backtraced — in the
-// receiving fiber, as MRI does), and kill carries a Fiber#kill.
+// receiving fiber, as MRI does). A Fiber#kill carries no payload: it sets the
+// target's killed flag and the switch-in check (fiber_check_killed, mirrored in
+// fiberSwitch) does the unwinding.
 type fiberMsg struct {
 	args []object.Value
 	err  *RubyError
 	exc  object.Value
-	kill bool
 }
 
 func (f *Fiber) ToS() string { return f.Inspect() }
@@ -472,7 +473,7 @@ func (vm *VM) fiberRaise(f *Fiber, exc object.Value) object.Value {
 	if f.resuming != nil {
 		return vm.fiberRaise(f.resuming, exc)
 	}
-	msg := fiberMsg{exc: exc, kill: exc == nil}
+	msg := fiberMsg{exc: exc}
 	if f.state == fibTransferred {
 		return vm.fiberTransferMsg(f, msg)
 	}
@@ -509,13 +510,11 @@ func (vm *VM) fiberSwitch(target *Fiber, msg fiberMsg) fiberMsg {
 }
 
 // fiberDeliver unpacks a message that has just switched control into the running
-// fiber: a Fiber#kill unwinds it, a Fiber#raise exception is raised here (so the
-// backtrace is this fiber's), an exception propagated from a finished fiber is
-// re-raised, and otherwise the arguments become the value of the switch.
+// fiber: a Fiber#raise exception is raised here (so the backtrace is this
+// fiber's), an exception propagated from a finished fiber is re-raised, and
+// otherwise the arguments become the value of the switch. A Fiber#kill never
+// reaches here — fiberSwitch's killed check fires first.
 func (vm *VM) fiberDeliver(msg fiberMsg) object.Value {
-	if msg.kill {
-		panic(killSignal{})
-	}
 	if msg.exc != nil {
 		panic(vm.excError(vm.captureBacktrace(msg.exc)))
 	}
@@ -551,9 +550,6 @@ func (vm *VM) fiberBegin(f *Fiber) {
 					}
 				}
 			}()
-			if f.killed {
-				panic(killSignal{})
-			}
 			result = vm.callBlock(f.blk, msg.args)
 		}()
 		vm.fiberTerminate(f, result, rerr)
@@ -578,7 +574,7 @@ func (vm *VM) fiberTransfer(target *Fiber, args []object.Value) object.Value {
 // a msg carrying a Fiber#raise exception additionally refuses an unborn fiber,
 // which has no suspension point to raise at (fiber_resume_kw, cont.c).
 func (vm *VM) fiberResumeMsg(f *Fiber, msg fiberMsg) object.Value {
-	if (msg.exc != nil || msg.kill) && f.state == fibCreated {
+	if msg.exc != nil && f.state == fibCreated {
 		raise("FiberError", "cannot raise exception on unborn fiber")
 	}
 	if f.thread != vm.currentThread {

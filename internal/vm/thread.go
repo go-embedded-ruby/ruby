@@ -55,6 +55,11 @@ type RThread struct {
 	// value round-trips because programs read it back.
 	priority int
 
+	// ntid is Thread#native_thread_id: a small distinct number handed out at
+	// creation. The main thread is built before any spawn and keeps the zero
+	// value, which reads back as 1.
+	ntid int
+
 	// interruptMasks is the stack of Thread.handle_interrupt configurations in
 	// effect for this thread, innermost last. An empty stack means every
 	// asynchronous exception is delivered as soon as the thread reaches a
@@ -405,6 +410,7 @@ func (vm *VM) registerThreadClass() {
 		// current one (thread.c thread_create_core via rb_fiber_inherit_storage).
 		t.rootFiber.storage = dupFiberStorage(vm.currentFiber.storage)
 		t.priority = vm.currentThread.priority // MRI: a new thread inherits its creator's priority
+		t.ntid = len(vm.threads) + 1
 		vm.threads = append(vm.threads, t)
 		go func() {
 			vm.gvl.Lock()
@@ -804,17 +810,15 @@ func (vm *VM) registerThreadClass() {
 	// and nil once it is dead. Goroutines have no stable OS thread, so rbgo hands
 	// out a small distinct integer per thread, which is what the specs pin (an
 	// Integer, different per thread, nil when not running).
-	cThread.define("native_thread_id", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	cThread.define("native_thread_id", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		t := self.(*RThread)
 		if t.isDone() {
 			return object.NilV
 		}
-		for i, o := range vm.threads {
-			if o == t {
-				return object.Integer(i + 2)
-			}
+		if t.ntid == 0 {
+			return object.Integer(1) // the main thread, created before any spawn
 		}
-		return object.Integer(1) // the main thread is not in vm.threads
+		return object.Integer(t.ntid)
 	})
 	// Thread.handle_interrupt(config) { ... } masks asynchronous exceptions for
 	// the duration of the block (rb_thread_s_handle_interrupt, thread.c). The
