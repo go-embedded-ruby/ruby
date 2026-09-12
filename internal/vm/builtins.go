@@ -9397,6 +9397,13 @@ func (vm *VM) moduleClassPath(c *RClass) string {
 		if !p.named {
 			return vm.moduleToSStr(p) + "::" + seg
 		}
+		// The outermost scope on record contributes its WHOLE name: a module
+		// opened compactly (module A::B) carries its qualification in its own name
+		// and records no lexical parent, so taking its base segment there would
+		// drop "A" from every path built through it.
+		if p.lexParent == nil || seen[p.lexParent] {
+			return p.name + "::" + seg
+		}
 		seg = moduleBaseName(p.name) + "::" + seg
 	}
 	return seg
