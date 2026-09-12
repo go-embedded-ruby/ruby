@@ -200,8 +200,11 @@ func TestWave24ThreadDescribeFileField(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := eval(t, "require "+strconv.Quote(path)+"; $TH.join; p $TH.to_s")
-	if !strings.Contains(got, path+":0") || !strings.Contains(got, " dead>") {
-		t.Errorf("Thread#to_s file field: got %q, want it to name %q and end \" dead>\"", got, path+":0")
+	// p inspects the String, and Ruby's String#inspect escapes a backslash, so on
+	// Windows every separator of the path comes back doubled in the output.
+	field := strings.ReplaceAll(path, `\`, `\\`) + ":0"
+	if !strings.Contains(got, field) || !strings.Contains(got, " dead>") {
+		t.Errorf("Thread#to_s file field: got %q, want it to name %q and end \" dead>\"", got, field)
 	}
 }
 
@@ -216,7 +219,9 @@ func TestWave24FiberDescribeLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := eval(t, "require "+strconv.Quote(path)+"; p $FIB.inspect")
-	if !strings.Contains(got, path) || !strings.Contains(got, "(created)") {
-		t.Errorf("Fiber#inspect label: got %q, want it to name %q and say (created)", got, path)
+	// Same escaping as above: the label is printed through String#inspect.
+	label := strings.ReplaceAll(path, `\`, `\\`)
+	if !strings.Contains(got, label) || !strings.Contains(got, "(created)") {
+		t.Errorf("Fiber#inspect label: got %q, want it to name %q and say (created)", got, label)
 	}
 }
