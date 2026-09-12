@@ -399,8 +399,18 @@ func (vm *VM) registerThreadClass() {
 		return object.NilV
 	})
 
-	cThread.define("join", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	// join(limit = nil) waits for the thread to finish and returns it; with a
+	// timeout it returns nil instead if the thread is still running when the
+	// timeout expires (thread.c thread_join_m). Either way an unhandled exception
+	// from the thread body is re-raised in the joiner.
+	cThread.define("join", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		t := self.(*RThread)
+		if len(args) > 0 && !object.IsNil(args[0]) {
+			if !vm.threadJoinLimit(t, threadTimeInterval(args[0])) {
+				return object.NilV
+			}
+			return t
+		}
 		vm.threadJoin(t)
 		return t
 	})
@@ -676,6 +686,42 @@ func (vm *VM) threadJoin(t *RThread) {
 	if t.err != nil {
 		panic(*t.err)
 	}
+}
+
+// threadJoinLimit waits at most secs for t to finish and reports whether it did.
+// A thread that finished with an unhandled exception re-raises it in the joiner,
+// exactly as an untimed join does; a timeout leaves the thread running and the
+// caller returns nil.
+func (vm *VM) threadJoinLimit(t *RThread, secs float64) bool {
+	if !t.isDone() {
+		vm.threadBlock(func() {
+			select {
+			case <-t.done:
+			case <-time.After(time.Duration(secs * float64(time.Second))):
+			}
+		})
+	}
+	if !t.isDone() {
+		return false
+	}
+	if t.err != nil {
+		panic(*t.err)
+	}
+	return true
+}
+
+// threadTimeInterval coerces a Thread#join timeout to seconds the way MRI's
+// rb_time_interval does: an Integer or Float is the number of seconds, anything
+// else is a TypeError.
+func threadTimeInterval(v object.Value) float64 {
+	switch n := v.(type) {
+	case object.Integer:
+		return float64(n)
+	case object.Float:
+		return float64(n)
+	}
+	raise("TypeError", "can't convert %s into time interval", classNameOf(v))
+	return 0
 }
 
 // threadLocalKey normalises a Thread#[] / #[]= / #key? / #fetch key to a Symbol,
