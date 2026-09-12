@@ -261,6 +261,9 @@ func (vm *VM) registerFiber() {
 	cFiber.define("alive?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Fiber).state != fibDead)
 	})
+	cFiber.define("blocking?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*Fiber).blocking)
+	})
 	// Fiber#raise raises in the fiber at the point it last suspended
 	// (rb_fiber_raise, cont.c). The exception object is built in the CALLER's
 	// context — so its constructor and its automatic cause chaining ($!) are the
@@ -298,6 +301,34 @@ func (vm *VM) registerFiber() {
 			return object.NilV
 		}
 		return dupFiberStorage(f.storage)
+	})
+	// Fiber.scheduler / Fiber.set_scheduler hold the current thread's fiber
+	// scheduler (MRI keeps it in thread->scheduler, rb_fiber_scheduler_set). rbgo
+	// runs every fiber blocking, so nothing consults the scheduler yet; setting
+	// one is validated and stored so the hook is observable, as ruby/spec pins.
+	sdef("scheduler", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		if s := vm.currentThread.scheduler; s != nil {
+			return s
+		}
+		return object.NilV
+	})
+	sdef("set_scheduler", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		if object.IsNil(args[0]) {
+			vm.currentThread.scheduler = nil
+			return object.NilV
+		}
+		// rb_fiber_scheduler_set verifies the whole interface up front, naming the
+		// first method the object is missing.
+		for _, m := range []string{"block", "unblock", "kernel_sleep", "io_wait"} {
+			if !vm.respondsTo(args[0], m) {
+				raise("ArgumentError", "Scheduler must implement #%s", m)
+			}
+		}
+		vm.currentThread.scheduler = args[0]
+		return args[0]
 	})
 	cFiber.define("storage=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		f := self.(*Fiber)

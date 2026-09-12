@@ -45,6 +45,10 @@ type RThread struct {
 	cur        *Fiber
 	curResumed *Fiber
 
+	// scheduler is this thread's Fiber scheduler (Fiber.set_scheduler), MRI's
+	// thread->scheduler; nil when none is installed.
+	scheduler object.Value
+
 	// Eager-start handshake: a freshly spawned thread runs immediately (as in
 	// MRI) until its first blocking point or completion, at which moment it hands
 	// control back to its spawner over handback. parked guards that one-shot
@@ -278,6 +282,10 @@ func (vm *VM) registerThreadClass() {
 			reportOnException: true,
 		}
 		t.initFibers()
+		// A new thread's root fiber starts from a copy of the CREATING fiber's
+		// storage, the way MRI seeds the new thread's execution context from the
+		// current one (thread.c thread_create_core via rb_fiber_inherit_storage).
+		t.rootFiber.storage = dupFiberStorage(vm.currentFiber.storage)
 		vm.threads = append(vm.threads, t)
 		go func() {
 			vm.gvl.Lock()
