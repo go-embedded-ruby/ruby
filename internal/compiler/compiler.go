@@ -241,12 +241,21 @@ func MagicSourceEncoding(src string) string {
 	}
 	name := magicEncodingName(line)
 	switch strings.ToLower(name) {
+	case "", "utf-8", "utf8":
+		// UTF-8 is the default: leave literals untagged so they compare equal to
+		// every other untagged String.
+		return ""
 	case "binary", "ascii-8bit":
 		return "ASCII-8BIT"
 	case "us-ascii", "ascii":
 		return "US-ASCII"
 	}
-	return ""
+	// Any other declared encoding is passed through as written. The compiler has
+	// no encoding registry — that table lives in the vm — but the vm's lookup is
+	// case-insensitive over every name and alias, so `# encoding: big5` tags
+	// literals with a name that resolves to the canonical Big5 object and reports
+	// itself as "Big5".
+	return name
 }
 
 // magicEncodingName extracts the value of a `coding:`/`encoding:` field from a
@@ -263,19 +272,30 @@ func magicEncodingName(line string) string {
 	}
 	rest := line[i+len("coding"):]
 	rest = strings.TrimLeft(rest, ":= \t")
-	// The value ends at the first whitespace or a `-*-` terminator.
+	// The name runs while the bytes can belong to an encoding name — letters,
+	// digits, `-` and `_` — which is how MRI's set_file_encoding (parse.y
+	// v3_4_0) reads the value of a `coding` field it finds in a top-of-file
+	// comment. That is what lets the vim form work, where the value is followed
+	// by a comma: `# vim: filetype=ruby, fileencoding=big5, tabsize=3`. A `-*-`
+	// still terminates it even though `-` is a name byte, so the Emacs form
+	// closes without a space (`# coding:binary-*-`).
 	end := len(rest)
-	for j, r := range rest {
-		if r == ' ' || r == '\t' || r == ';' {
-			end = j
-			break
-		}
-		if strings.HasPrefix(rest[j:], "-*-") {
+	for j := 0; j < len(rest); j++ {
+		if strings.HasPrefix(rest[j:], "-*-") || !isEncNameByte(rest[j]) {
 			end = j
 			break
 		}
 	}
-	return strings.TrimSpace(rest[:end])
+	return rest[:end]
+}
+
+// isEncNameByte reports whether b may appear in an encoding name.
+func isEncNameByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	}
+	return b == '-' || b == '_'
 }
 
 // CompileWithLocals lowers prog for a Binding eval: it compiles in a child scope
@@ -941,10 +961,19 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		b.emit(bytecode.OpBinding, 0, 0)
 		return
 	}
-	// __ENCODING__ is the source encoding keyword; rbgo scripts are UTF-8, so it is
-	// Encoding::UTF_8.
+	// __ENCODING__ is the source encoding keyword: the encoding a `# encoding:`
+	// magic comment declared for this file, or Encoding::UTF_8, the default source
+	// encoding, when it declared none.
 	if v.Recv == nil && v.Block == nil && v.Name == "__ENCODING__" && len(v.Args) == 0 {
-		c.compileNode(&ast.ScopedConst{Recv: &ast.ConstRef{Name: "Encoding"}, Name: "UTF_8"})
+		if c.srcEnc == "" {
+			c.compileNode(&ast.ScopedConst{Recv: &ast.ConstRef{Name: "Encoding"}, Name: "UTF_8"})
+			return
+		}
+		c.compileNode(&ast.Call{
+			Recv: &ast.ConstRef{Name: "Encoding"},
+			Name: "find",
+			Args: []ast.Node{&ast.StringLit{Value: c.srcEnc}},
+		})
 		return
 	}
 	// A bare eval(str) with no explicit binding evaluates against the caller's

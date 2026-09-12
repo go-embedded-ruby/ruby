@@ -16,7 +16,7 @@ func TestMagicSourceEncoding(t *testing.T) {
 		{"# encoding: us-ascii\n", "US-ASCII"},
 		{"# encoding: ascii\n", "US-ASCII"},
 		{"# encoding: utf-8\n", ""},                                        // UTF-8 is the default: no tag
-		{"# encoding: euc-jp\n", ""},                                       // unrecognised for tagging: no tag
+		{"# encoding: euc-jp\n", "euc-jp"},                                 // any other declared encoding passes through
 		{"x = 1\n", ""},                                                    // no magic comment
 		{"puts 1 # encoding: binary\n", ""},                                // must be a comment line, not trailing
 		{"# just a plain comment\n", ""},                                   // a comment without a coding: field
