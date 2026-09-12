@@ -55,6 +55,13 @@ type RThread struct {
 	// value round-trips because programs read it back.
 	priority int
 
+	// interruptMasks is the stack of Thread.handle_interrupt configurations in
+	// effect for this thread, innermost last. An empty stack means every
+	// asynchronous exception is delivered as soon as the thread reaches a
+	// safepoint, which is the behaviour of a program that never calls
+	// handle_interrupt.
+	interruptMasks []*object.Hash
+
 	// Eager-start handshake: a freshly spawned thread runs immediately (as in
 	// MRI) until its first blocking point or completion, at which moment it hands
 	// control back to its spawner over handback. parked guards that one-shot
@@ -107,7 +114,12 @@ type RThread struct {
 // raise can only be queued while t holds no GVL, i.e. while t is parked in exactly
 // one of these yield points; the raiser has no other window to run. Returns
 // normally (a no-op) when nothing is queued; panics to unwind when an event fires.
-func (vm *VM) serviceSafepoint(t *RThread) {
+func (vm *VM) serviceSafepoint(t *RThread) { vm.serviceSafepointAt(t, false) }
+
+// serviceSafepointAt is serviceSafepoint told whether the yield point it was
+// called from is a blocking one (a genuine wait, not a bare Thread.pass), which
+// is what Thread.handle_interrupt's :on_blocking timing keys on.
+func (vm *VM) serviceSafepointAt(t *RThread, blocking bool) {
 	if t.killed {
 		// Clear the flag before unwinding so ensure blocks that themselves reach a
 		// yield point are not re-killed mid-run; the killSignal carries the unwind.
@@ -117,10 +129,48 @@ func (vm *VM) serviceSafepoint(t *RThread) {
 		t.status = "aborting"
 		panic(killSignal{})
 	}
-	if exc := t.pendingRaise; exc != nil {
-		t.pendingRaise = nil
-		panic(vm.excError(vm.captureBacktrace(exc)))
+	exc := t.pendingRaise
+	if exc == nil {
+		return
 	}
+	switch vm.interruptTiming(t, exc) {
+	case "never":
+		return // deferred until the handle_interrupt block that masked it exits
+	case "on_blocking":
+		if !blocking {
+			return
+		}
+	}
+	t.pendingRaise = nil
+	panic(vm.excError(vm.captureBacktrace(exc)))
+}
+
+// interruptTiming reports how an asynchronous exception must be handled right
+// now — "immediate", "never" or "on_blocking" — following MRI's
+// rb_threadptr_pending_interrupt_check_mask (thread.c): the mask stack is
+// scanned from the innermost frame outwards and the first entry whose key is an
+// ancestor of the exception's class decides. With no match the interrupt is
+// immediate, which is the whole behaviour of a program that never masks.
+func (vm *VM) interruptTiming(t *RThread, exc object.Value) string {
+	if len(t.interruptMasks) == 0 {
+		return "immediate"
+	}
+	cls := vm.classOf(exc)
+	for i := len(t.interruptMasks) - 1; i >= 0; i-- {
+		h := t.interruptMasks[i]
+		for _, k := range h.Keys {
+			kc, ok := k.(*RClass)
+			if !ok || !classIsA(cls, kc) {
+				continue
+			}
+			if v, _ := h.Get(k); v != nil {
+				if sym, isSym := v.(object.Symbol); isSym {
+					return string(sym)
+				}
+			}
+		}
+	}
+	return "immediate"
 }
 
 // parkWake installs a fresh wakeup channel and returns it; the caller (holding
@@ -250,6 +300,13 @@ func (vm *VM) threadRelease(fn func(), status string) {
 	vm.gvl.Lock()
 	t.restoreCtx(vm)
 	t.status = prev
+	if status == "sleep" && len(t.interruptMasks) > 0 {
+		// A genuine wait is where an :on_blocking interrupt becomes deliverable, and
+		// the only place a Queue#pop or Mutex#lock learns of one. This is gated on a
+		// mask being in effect so a program that never calls Thread.handle_interrupt
+		// keeps exactly the delivery points it had.
+		vm.serviceSafepointAt(t, true)
+	}
 }
 
 // firstPark performs the one-shot eager-start handoff: the first time a spawned
@@ -327,6 +384,12 @@ func (vm *VM) registerThreadClass() {
 		cThread.smethods[name] = &Method{name: name, owner: cThread, native: fn}
 	}
 
+	// Class-level defaults MRI keeps as VM globals: the value a freshly created
+	// thread starts its #report_on_exception / #abort_on_exception with, and the
+	// deadlock-detector switch. They live here (one set per VM) because they are
+	// read only through these accessors and by spawn.
+	reportDefault, abortDefault, ignoreDeadlock := true, false, false
+
 	spawn := func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		if blk == nil {
 			raise("ThreadError", "must be called with a block")
@@ -334,7 +397,7 @@ func (vm *VM) registerThreadClass() {
 		t := &RThread{
 			blk: blk, args: append([]object.Value{}, args...),
 			done: make(chan struct{}), status: "run", handback: make(chan struct{}),
-			reportOnException: true,
+			reportOnException: reportDefault, abort: abortDefault,
 		}
 		t.initFibers()
 		// A new thread's root fiber starts from a copy of the CREATING fiber's
@@ -370,8 +433,17 @@ func (vm *VM) registerThreadClass() {
 		return t
 	}
 	sdef("new", spawn)
-	sdef("start", spawn)
-	sdef("fork", spawn)
+	// Thread.start / Thread.fork bypass #initialize, so MRI reports the missing
+	// block from rb_block_proc ("tried to create Proc object without a block")
+	// rather than Thread#initialize's ThreadError. They share one Method record,
+	// so Thread.method(:fork) == Thread.method(:start), as MRI aliases them.
+	sdef("start", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		if blk == nil {
+			raise("ArgumentError", "tried to create Proc object without a block")
+		}
+		return spawn(vm, self, args, blk)
+	})
+	cThread.smethods["fork"] = cThread.smethods["start"]
 	sdef("current", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return vm.currentThread })
 	sdef("main", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value { return vm.mainThread })
 	sdef("list", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -503,7 +575,23 @@ func (vm *VM) registerThreadClass() {
 		}
 		return object.NilV
 	})
-	cThread.define("name=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cThread.define("name=", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if !object.IsNil(args[0]) {
+			s, ok := args[0].(*object.String)
+			if !ok {
+				// MRI runs the argument through rb_check_string_type, i.e. #to_str.
+				if vm.respondsToDynamic(args[0], "to_str") {
+					s, ok = vm.send(args[0], "to_str", nil, nil).(*object.String)
+				}
+				if !ok {
+					raise("TypeError", "no implicit conversion of %s into String", classNameOf(args[0]))
+				}
+				args = append([]object.Value{s}, args[1:]...)
+			}
+			if strings.ContainsRune(s.Str(), 0) {
+				raise("ArgumentError", "string contains null byte")
+			}
+		}
 		self.(*RThread).name = args[0]
 		return args[0]
 	})
@@ -559,23 +647,30 @@ func (vm *VM) registerThreadClass() {
 	// thread_variable_get/set/? and thread_variables: thread-local storage that is
 	// distinct from Thread#[] (which is fiber-local in MRI). Keys are coerced to
 	// Symbols like the fiber-local accessors.
-	cThread.define("thread_variable_get", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cThread.define("thread_variable_get", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		t := self.(*RThread)
-		if v, ok := t.tvars[threadVarKey(args[0])]; ok {
+		if v, ok := t.tvars[vm.threadLocalKey(args[0])]; ok {
 			return v
 		}
 		return object.NilV
 	})
-	cThread.define("thread_variable_set", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cThread.define("thread_variable_set", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		t := self.(*RThread)
+		k := vm.threadLocalKey(args[0])
+		// MRI deletes the variable when the value is nil (thread.c
+		// rb_thread_variable_set), so #thread_variable? then reports false.
+		if object.IsNil(args[1]) {
+			delete(t.tvars, k)
+			return args[1]
+		}
 		if t.tvars == nil {
 			t.tvars = map[object.Value]object.Value{}
 		}
-		t.tvars[threadVarKey(args[0])] = args[1]
+		t.tvars[k] = args[1]
 		return args[1]
 	})
-	cThread.define("thread_variable?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		_, ok := self.(*RThread).tvars[threadVarKey(args[0])]
+	cThread.define("thread_variable?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		_, ok := self.(*RThread).tvars[vm.threadLocalKey(args[0])]
 		return object.Bool(ok)
 	})
 	cThread.define("thread_variables", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -675,6 +770,89 @@ func (vm *VM) registerThreadClass() {
 		self.(*RThread).abort = args[0].Truthy()
 		return args[0]
 	})
+	// The class-level forms of the two per-thread flags set the default a new
+	// thread starts with (MRI's rb_thread_s_abort_exc_set /
+	// rb_thread_s_report_exc_set); they do not change threads already running.
+	sdef("abort_on_exception", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(abortDefault)
+	})
+	sdef("abort_on_exception=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		abortDefault = args[0].Truthy()
+		return args[0]
+	})
+	sdef("report_on_exception", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(reportDefault)
+	})
+	sdef("report_on_exception=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		reportDefault = args[0].Truthy()
+		return args[0]
+	})
+	// Thread.ignore_deadlock switches off MRI's deadlock detector. rbgo has no
+	// detector to switch off, so the flag only round-trips.
+	sdef("ignore_deadlock", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(ignoreDeadlock)
+	})
+	sdef("ignore_deadlock=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		ignoreDeadlock = args[0].Truthy()
+		return args[0]
+	})
+	// Thread.allocate has no allocator in MRI: a Thread only exists with a block.
+	sdef("allocate", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return raise("TypeError", "allocator undefined for Thread")
+	})
+	// Thread#native_thread_id: MRI returns the OS thread id of a running thread
+	// and nil once it is dead. Goroutines have no stable OS thread, so rbgo hands
+	// out a small distinct integer per thread, which is what the specs pin (an
+	// Integer, different per thread, nil when not running).
+	cThread.define("native_thread_id", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		t := self.(*RThread)
+		if t.isDone() {
+			return object.NilV
+		}
+		for i, o := range vm.threads {
+			if o == t {
+				return object.Integer(i + 2)
+			}
+		}
+		return object.Integer(1) // the main thread is not in vm.threads
+	})
+	// Thread.handle_interrupt(config) { ... } masks asynchronous exceptions for
+	// the duration of the block (rb_thread_s_handle_interrupt, thread.c). The
+	// configuration is pushed before the block so an interrupt this frame makes
+	// deliverable fires immediately — before the block — and popped afterwards,
+	// where any interrupt deferred by the frame is delivered, including on the way
+	// out of an exception raised inside the block.
+	sdef("handle_interrupt", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		h, ok := args[0].(*object.Hash)
+		if !ok {
+			raise("TypeError", "no implicit conversion of %s into Hash", classNameOf(args[0]))
+		}
+		if blk == nil {
+			raise("ArgumentError", "block is needed")
+		}
+		t := vm.currentThread
+		t.interruptMasks = append(t.interruptMasks, h)
+		defer func() {
+			t.interruptMasks = t.interruptMasks[:len(t.interruptMasks)-1]
+			// Leaving the frame can make a deferred interrupt deliverable; raising
+			// here during an unwind replaces the exception on its way out, as MRI does.
+			vm.serviceSafepointAt(t, true)
+		}()
+		vm.serviceSafepointAt(t, true)
+		return vm.callBlock(blk, nil)
+	})
+	// Thread.pending_interrupt? / Thread#pending_interrupt? report whether an
+	// asynchronous exception is queued against the thread and has not been
+	// delivered yet.
+	sdef("pending_interrupt?", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(vm.currentThread.pendingRaise != nil)
+	})
+	cThread.define("pending_interrupt?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(self.(*RThread).pendingRaise != nil)
+	})
 }
 
 // threadJoin blocks the current thread until t finishes, then re-raises t's
@@ -740,22 +918,9 @@ func (vm *VM) threadLocalKey(k object.Value) object.Value {
 			return object.Symbol(s.Str())
 		}
 	}
-	raise("TypeError", "%s is not a symbol nor a string", k.Inspect())
-	return object.NilVal()
-}
-
-// threadVarKey coerces a thread-variable key to a Symbol, requiring a Symbol or
-// String as MRI does (anything else raises TypeError). Used by the
-// thread_variable_* accessors, which — unlike Thread#[] — do not accept other
-// key types.
-func threadVarKey(k object.Value) object.Value {
-	switch v := k.(type) {
-	case object.Symbol:
-		return v
-	case *object.String:
-		return object.Symbol(v.Str())
-	}
-	raise("TypeError", "%s is not a symbol nor a string", k.Inspect())
+	// MRI formats the offending key with its own #inspect, so an object that
+	// defines one is named the way the program would print it.
+	raise("TypeError", "%s is not a symbol nor a string", vm.send(k, "inspect", nil, nil).ToS())
 	return object.NilVal()
 }
 
