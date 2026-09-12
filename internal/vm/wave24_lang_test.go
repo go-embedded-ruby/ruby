@@ -245,3 +245,48 @@ func TestMagicCommentSourceEncoding(t *testing.T) {
 	checkSrc(t, "binary", "# encoding: binary\np __ENCODING__.name\np \"abc\".encoding.name\n",
 		`"ASCII-8BIT"`+"\n"+`"ASCII-8BIT"`)
 }
+
+// A `break` in a while/until loop carries its argument out as the whole loop
+// expression's value; a loop the condition ends is still nil. Expectations
+// from MRI 4.0.5.
+func TestLoopBreakValue(t *testing.T) {
+	checkSrc(t, "a value and a splat", `
+p(while true; break; end)
+p(while true; break nil; end)
+p(while true; break 1; end)
+p(while true; break []; end)
+p(while true; break [1]; end)
+p(while true; break *[1, 2]; end)
+p(while true; break *nil; end)
+p(while true; break *[]; end)
+p(while true; break *[nil]; end)
+p(while true; break *[[]]; end)
+p(while true; break *1; end)
+`, "nil\nnil\n1\n[]\n[1]\n[1, 2]\n[]\n[]\n[nil]\n[[]]\n[1]")
+
+	checkSrc(t, "until, next, and a loop with no break at all", `
+i = 0
+p(until false; i += 1; break i if i == 3; end)
+i = 0
+p(while i < 3; i += 1; end)
+n = 0
+p(while true; n += 1; next if n == 1; break n; end)
+i = 0
+a = begin; i += 1; break i * 10 if i == 3; end while true
+p a
+i = 0
+a = begin; i += 1; end while i < 5
+p a
+`, "3\nnil\n2\nnil\n5") // MRI gives nil for a `begin…end while` too: the modifier form has no value
+
+	// A `break` inside a block still belongs to the block, not to the loop it
+	// sits in: it makes the *call* return, and the loop keeps its own value.
+	checkSrc(t, "a block break is not a loop break", `
+r = while true
+  [1, 2, 3].each { |x| break x * 2 }
+  break :loop
+end
+p r
+p([1, 2, 3].each { |x| break x * 2 })
+`, ":loop\n2")
+}

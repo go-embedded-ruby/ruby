@@ -1746,7 +1746,12 @@ type loopCtx struct {
 	kind       ctxKind
 	contTarget int   // loop: jump here on `next` (re-evaluate the condition)
 	contFixups []int // loop: `next` OpJump placeholders when contTarget is not yet known (a do…end post-loop compiles its condition after the body)
-	breaks     []int // loop: OpJump placeholders patched to the loop exit
+	breaks     []int // loop: OpJump placeholders patched to the loop's break exit
+	// breakSlot holds a loop `break`'s argument, which is the value of the whole
+	// loop expression (MRI compile.c compile_loop, v3_4_0:8143: the normal exit
+	// pushes nil and falls into break_label, where a break arrives with its own
+	// value instead). Allocated on the first break in this loop, else -1.
+	breakSlot int
 }
 
 func (c *Compiler) innerCtx() *loopCtx {
@@ -1767,7 +1772,30 @@ func (c *Compiler) compileBreak(v *ast.Break) {
 		b.emit(bytecode.OpBreak, 0, 0)
 		return
 	}
+	// A loop `break` carries its argument out as the loop expression's value.
+	if ctx.breakSlot < 0 {
+		ctx.breakSlot = b.localSlot("")
+	}
+	c.compileBreakValue(v.Value)
+	b.emit(bytecode.OpSetLocal, ctx.breakSlot, 0)
+	b.emit(bytecode.OpPop, 0, 0)
 	ctx.breaks = append(ctx.breaks, b.emit(bytecode.OpJump, 0, 0))
+}
+
+// finishLoopValue emits a loop's value once its body is compiled: nil when the
+// condition ended it, or the `break` argument when a break did.
+func (c *Compiler) finishLoopValue(ctx *loopCtx) {
+	b := c.cur()
+	b.emit(bytecode.OpPushNil, 0, 0)
+	if len(ctx.breaks) == 0 {
+		return
+	}
+	done := b.emit(bytecode.OpJump, 0, 0)
+	for _, j := range ctx.breaks {
+		b.patch(j, b.here())
+	}
+	b.emit(bytecode.OpGetLocal, ctx.breakSlot, 0)
+	b.patch(done, b.here())
 }
 
 func (c *Compiler) compileNext(v *ast.Next) {
@@ -2464,17 +2492,14 @@ func (c *Compiler) compileWhile(v *ast.While) {
 	start := b.here()
 	c.compileCondition(v.Cond)
 	exit := b.emit(bytecode.OpBranchUnless, 0, 0)
-	ctx := &loopCtx{kind: ctxLoop, contTarget: start}
+	ctx := &loopCtx{kind: ctxLoop, contTarget: start, breakSlot: -1}
 	c.ctxs = append(c.ctxs, ctx)
 	c.compileBody(v.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
 	b.emit(bytecode.OpPop, 0, 0) // discard each iteration's value
 	b.emit(bytecode.OpJump, start, 0)
 	b.patch(exit, b.here())
-	for _, j := range ctx.breaks { // break lands on the loop's nil value
-		b.patch(j, b.here())
-	}
-	b.emit(bytecode.OpPushNil, 0, 0) // while evaluates to nil
+	c.finishLoopValue(ctx)
 }
 
 // compileDoWhile lowers a `begin…end while/until cond` post-loop: the body runs
@@ -2486,7 +2511,7 @@ func (c *Compiler) compileWhile(v *ast.While) {
 func (c *Compiler) compileDoWhile(v *ast.While, body *ast.Begin) {
 	b := c.cur()
 	start := b.here()
-	ctx := &loopCtx{kind: ctxLoop, contTarget: -1} // condition PC not yet known
+	ctx := &loopCtx{kind: ctxLoop, contTarget: -1, breakSlot: -1} // condition PC not yet known
 	c.ctxs = append(c.ctxs, ctx)
 	c.compileNode(body)
 	b.emit(bytecode.OpPop, 0, 0) // discard each iteration's value
@@ -2498,10 +2523,7 @@ func (c *Compiler) compileDoWhile(v *ast.While, body *ast.Begin) {
 	c.compileCondition(v.Cond)
 	b.emit(bytecode.OpBranchIf, start, 0) // repeat while the condition holds
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
-	for _, j := range ctx.breaks { // break lands on the loop's nil value
-		b.patch(j, b.here())
-	}
-	b.emit(bytecode.OpPushNil, 0, 0) // the post-loop evaluates to nil
+	c.finishLoopValue(ctx)
 }
 
 // compileFor lowers `for VARS in ITER ... end` to `ITER.each { ... }`. Unlike a
