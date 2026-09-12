@@ -229,3 +229,89 @@ func (c *Compiler) sendExplicit(at int, explicit bool) int {
 	}
 	return at
 }
+
+// scopedConstOrAssign recognises the parser's desugaring of `Mod::C ||= rhs`,
+// which is `(defined?(Mod::C) && Mod::C) || (Mod::C = rhs)` with the SAME
+// ScopedConst node in all three positions — so the module part `Mod` would be
+// evaluated up to three times. MRI evaluates it once and keeps it on the stack
+// (compile.c compile_op_cdecl, ruby/ruby v3_4_0:9657: the `cref` is compiled
+// once, then `dup`/`defined`/`getconstant`/`setconstant` all read that one
+// copy). Only a qualified constant has a module part to evaluate; a bare
+// `C ||= v` has none.
+func scopedConstOrAssign(v *ast.BinaryExpr) (*ast.ScopedConst, ast.Node, bool) {
+	if v.Op != "||" {
+		return nil, nil, false
+	}
+	asg, ok := v.Right.(*ast.ScopedConstAssign)
+	if !ok {
+		return nil, nil, false
+	}
+	sc, ok := asg.Target.(*ast.ScopedConst)
+	if !ok || sc.Recv == nil {
+		return nil, nil, false
+	}
+	guard, ok := v.Left.(*ast.BinaryExpr)
+	if !ok || guard.Op != "&&" || guard.Right != ast.Node(sc) {
+		return nil, nil, false
+	}
+	d, ok := guard.Left.(*ast.Call)
+	if !ok || d.Name != "defined?" || d.Recv != nil || len(d.Args) != 1 || d.Args[0] != ast.Node(sc) {
+		return nil, nil, false
+	}
+	return sc, asg.Value, true
+}
+
+// scopedConstOpAssign recognises `Mod::C op= rhs` for every operator but `||`
+// — the parser writes it as `Mod::C = (Mod::C op rhs)`, again sharing the
+// ScopedConst node and so the module part.
+func scopedConstOpAssign(v *ast.ScopedConstAssign) (*ast.ScopedConst, *ast.BinaryExpr, bool) {
+	sc, ok := v.Target.(*ast.ScopedConst)
+	if !ok || sc.Recv == nil {
+		return nil, nil, false
+	}
+	be, ok := v.Value.(*ast.BinaryExpr)
+	if !ok || be.Left != ast.Node(sc) {
+		return nil, nil, false
+	}
+	return sc, be, true
+}
+
+// compileScopedConstOrAssign lowers `Mod::C ||= rhs` with the module part
+// evaluated exactly once. The constant is read only when it is defined, so an
+// undefined one assigns without raising; the right-hand side is evaluated only
+// on the assigning path, so a module part that raises never reaches it.
+func (c *Compiler) compileScopedConstOrAssign(sc *ast.ScopedConst, rhs ast.Node) {
+	b := c.cur()
+	modSlot := c.stash(sc.Recv)
+	name := b.addName(sc.Name)
+	b.emit(bytecode.OpGetLocal, modSlot, 0)
+	b.emit(bytecode.OpDefinedScopedConst, name, 0)
+	assign := b.emit(bytecode.OpBranchUnless, 0, 0)
+	b.emit(bytecode.OpGetLocal, modSlot, 0)
+	b.emit(bytecode.OpGetScopedConst, name, 0)
+	b.emit(bytecode.OpDup, 0, 0)
+	keep := b.emit(bytecode.OpBranchIf, 0, 0) // already truthy: that value is the result
+	b.emit(bytecode.OpPop, 0, 0)
+	b.patch(assign, b.here())
+	valSlot := c.stash(rhs)
+	b.emit(bytecode.OpGetLocal, modSlot, 0)
+	b.emit(bytecode.OpGetLocal, valSlot, 0)
+	b.emit(bytecode.OpSetScopedConst, name, 0) // keeps the value as the result
+	b.patch(keep, b.here())
+}
+
+// compileScopedConstOpAssign lowers `Mod::C op= rhs` (including `&&=`) with the
+// module part evaluated exactly once.
+func (c *Compiler) compileScopedConstOpAssign(sc *ast.ScopedConst, be *ast.BinaryExpr) {
+	b := c.cur()
+	modSlot := c.stash(sc.Recv)
+	name := b.addName(sc.Name)
+	b.emit(bytecode.OpGetLocal, modSlot, 0)
+	b.emit(bytecode.OpGetScopedConst, name, 0)
+	c.finishOpAssign(be, func(valSlot int) {
+		b.emit(bytecode.OpGetLocal, modSlot, 0)
+		b.emit(bytecode.OpGetLocal, valSlot, 0)
+		b.emit(bytecode.OpSetScopedConst, name, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+	})
+}

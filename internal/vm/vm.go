@@ -1558,6 +1558,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				if !ok {
 					raise("TypeError", "%s is not a class/module", recv.Inspect())
 				}
+				vm.warnAlreadyInitialized(cls, iseq.Names[in.A])
 				vm.assignConstIn(cls, iseq.Names[in.A], val)
 				push(val)
 			case bytecode.OpSetConst:
@@ -1570,6 +1571,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// class_eval body finds it by the same lexical path (Puppet's file
 				// type defines CREATORS in its newtype block and a nested `validate`
 				// block reads it back this way).
+				vm.warnAlreadyInitialized(lexCref, iseq.Names[in.A])
 				vm.assignConst(lexCref, iseq.Names[in.A], stack[len(stack)-1])
 			case bytecode.OpGetGVar:
 				push(vm.gvar(iseq.Names[in.A]))
@@ -2306,6 +2308,26 @@ func (vm *VM) constTable(parent *RClass) map[string]object.Value {
 		return vm.consts
 	}
 	return parent.consts
+}
+
+// warnAlreadyInitialized emits MRI's "already initialized constant" warning when
+// a syntactic constant assignment overwrites a value already in scope's own
+// table. variable.c's const_tbl_update (ruby/ruby v3_4_0:3658) warns through
+// rb_warn — so `$VERBOSE = nil` silences it, which is what ruby/spec's
+// suppress_warning relies on — and qualifies the name with the module unless
+// that module is Object. (struct.go's warnRedefineConst writes the same text
+// through Kernel#warn, which `$VERBOSE = nil` does not silence; the syntactic
+// assignment needs rb_warn's behaviour, hence the separate helper. MRI also
+// prefixes file:line and follows with "previous definition ... was here"; rbgo
+// carries no source map yet, so neither is emitted, as elsewhere in this VM.)
+func (vm *VM) warnAlreadyInitialized(scope *RClass, name string) {
+	if scope == nil {
+		scope = vm.cObject
+	}
+	if _, exists := scope.consts[name]; !exists {
+		return
+	}
+	vm.rbWarn("warning: already initialized constant %s", scopedNameFor(scope, name))
 }
 
 // assignConst sets a bare constant assignment (`NAME = value`) into the current

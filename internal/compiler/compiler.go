@@ -499,6 +499,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpSend, b.addName(v.Op), 0)
 		}
 	case *ast.BinaryExpr:
+		if sc, rhs, ok := scopedConstOrAssign(v); ok {
+			c.compileScopedConstOrAssign(sc, rhs)
+			return
+		}
 		if v.Op == "&&" || v.Op == "||" {
 			c.compileLogical(v)
 			return
@@ -549,6 +553,10 @@ func (c *Compiler) compileNode(n ast.Node) {
 		c.compileNode(v.Value)
 		b.emit(bytecode.OpSetConst, b.addName(v.Name), 0)
 	case *ast.ScopedConstAssign:
+		if sc, be, ok := scopedConstOpAssign(v); ok {
+			c.compileScopedConstOpAssign(sc, be)
+			break
+		}
 		// `Scope::NAME = value`: evaluate the scope, set its constant, yield the
 		// value. Target is the *ScopedConst naming the constant.
 		sc, ok := v.Target.(*ast.ScopedConst)
