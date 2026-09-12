@@ -96,6 +96,7 @@ func TestWave24FiberThread(t *testing.T) {
 		{`begin; Fiber.current.raise(RuntimeError, "x", ["a"], cause: RuntimeError.new("y")); rescue => e; p [e.message, e.cause.message, e.backtrace]; end`, "[\"x\", \"y\", [\"a\"]]\n"},
 		{`e1 = RuntimeError.new("1"); e2 = RuntimeError.new("2"); f = Fiber.new { Fiber.yield }; f.resume; begin; f.raise(e1, cause: e1); rescue => e; p [e.message, e.cause]; end`, "[\"1\", nil]\n"},
 		{`begin; Fiber[]; rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
+		{`begin; sleep(-1); rescue => e; p [e.class, e.message]; end`, "[ArgumentError, \"time interval must not be negative\"]\n"},
 		{`begin; Fiber[:a, :b] = 1; rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
 		{`begin; Fiber.blocking; rescue => e; p e.class; end`, "LocalJumpError\n"},
 		{`begin; Fiber.set_scheduler; rescue ArgumentError => e; p e.class; end`, "ArgumentError\n"},
@@ -201,5 +202,21 @@ func TestWave24ThreadDescribeFileField(t *testing.T) {
 	got := eval(t, "require "+strconv.Quote(path)+"; $TH.join; p $TH.to_s")
 	if !strings.Contains(got, path+":0") || !strings.Contains(got, " dead>") {
 		t.Errorf("Thread#to_s file field: got %q, want it to name %q and end \" dead>\"", got, path+":0")
+	}
+}
+
+// TestWave24FiberDescribeLabel covers the label field of Fiber#inspect, which is
+// the source file of the fiber's block and so exists only for a fiber created in
+// a required file. MRI 4.0.5 prints "#<Fiber:0xADDR FILE:LINE (created)>" for the
+// same program.
+func TestWave24FiberDescribeLabel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fibspawner.rb")
+	if err := os.WriteFile(path, []byte("$FIB = Fiber.new { 1 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := eval(t, "require "+strconv.Quote(path)+"; p $FIB.inspect")
+	if !strings.Contains(got, path) || !strings.Contains(got, "(created)") {
+		t.Errorf("Fiber#inspect label: got %q, want it to name %q and say (created)", got, path)
 	}
 }
