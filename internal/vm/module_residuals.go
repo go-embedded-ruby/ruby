@@ -327,3 +327,30 @@ func constNameWellFormed(s string) bool {
 	}
 	return true
 }
+
+// isConstantPath reports whether s reads as a constant path — "A", "A::B", or a
+// leading-"::" form — every segment of which is a well-formed constant name. An
+// empty segment ("A::B::", "A::::B") or a segment that is not a constant ("a::B",
+// "A=") makes the whole string something other than a constant path. It is the
+// test Module#set_temporary_name uses to refuse a name that could be mistaken
+// for a real one. Reference: ruby/ruby v3_4_0 variable.c is_constant_path.
+func isConstantPath(s string) bool {
+	if s == "" {
+		return false
+	}
+	for len(s) > 0 {
+		if strings.HasPrefix(s, "::") {
+			s = s[2:]
+		}
+		seg := s
+		if i := strings.IndexByte(s, ':'); i >= 0 {
+			seg, s = s[:i], s[i:]
+		} else {
+			s = ""
+		}
+		if seg == "" || !constNameWellFormed(seg) {
+			return false
+		}
+	}
+	return true
+}

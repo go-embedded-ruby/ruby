@@ -1568,11 +1568,11 @@ func (vm *VM) bootstrap() {
 		}
 		return object.False
 	})
-	vm.cModule.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cModule.define("name", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		// A singleton class has no name (MRI returns nil), even though it carries an
 		// internal "#<Class:…>" label; an anonymous module/class is likewise nil.
 		if c := self.(*RClass); !c.isSingleton && c.name != "" {
-			return object.NewString(c.name)
+			return object.NewString(vm.moduleClassPath(c))
 		}
 		return object.NilV
 	})
@@ -9350,9 +9350,56 @@ func (vm *VM) moduleToSStr(c *RClass) string {
 		return "#<Class:" + inner + ">"
 	}
 	if c.name != "" {
-		return c.name
+		return vm.moduleClassPath(c)
 	}
 	return vm.anonClassOrModuleRepr(c)
+}
+
+// moduleClassPath is MRI's classpath for a named module or class: the name it
+// was given, qualified by the path of the scope it was defined in. When that
+// scope is anonymous the qualification is the scope's "#<Module:0x…>" repr, so
+// a module nested in an anonymous one reports "#<Module:0x…>::N" rather than a
+// bare "N" — and it starts reporting the real path as soon as the outer module
+// is bound to a constant, because the path is computed from the lexical parent
+// at each call rather than frozen at definition time. Reference: ruby/ruby
+// v3_4_0 variable.c rb_set_class_path_string → rb_tmp_class_path /
+// build_const_pathname, and set_namespace_path, which re-walks the children of
+// a module that has just become permanent.
+func (vm *VM) moduleClassPath(c *RClass) string {
+	if c.name == "" || modulePermanentlyNamed(c) {
+		return c.name
+	}
+	if !c.named || c.lexParent == nil {
+		// A temporary name (Module#set_temporary_name) stands on its own.
+		return c.name
+	}
+	return vm.moduleToSStr(c.lexParent) + "::" + moduleBaseName(c.name)
+}
+
+// moduleBaseName is the last segment of a qualified constant path.
+func moduleBaseName(name string) string {
+	if i := strings.LastIndex(name, "::"); i >= 0 {
+		return name[i+2:]
+	}
+	return name
+}
+
+// modulePermanentlyNamed reports whether c's name is permanent in MRI's sense:
+// it was bound to a constant, and so was every scope it is nested in, up to the
+// top level. A module nested inside an anonymous module is NOT permanent — its
+// path is recomputed on demand and it may still be given a temporary name — and
+// neither is a module carrying only a Module#set_temporary_name label. The walk
+// stops at a repeat, because a class bound to a constant inside its own body can
+// close the lexical chain into a ring.
+func modulePermanentlyNamed(c *RClass) bool {
+	seen := map[*RClass]bool{}
+	for ; c != nil && !seen[c]; c = c.lexParent {
+		seen[c] = true
+		if !c.named {
+			return false
+		}
+	}
+	return true
 }
 
 // checkModuleArgs validates the arguments of Module#include / #prepend: at least
