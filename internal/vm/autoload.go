@@ -282,3 +282,21 @@ func (vm *VM) autoloadInAncestors(cls *RClass, name string) bool {
 	}
 	return false
 }
+
+// forgetLoadedFeature undoes the bookkeeping of a require that did not finish:
+// the file is dropped from vm.loaded and from $LOADED_FEATURES, so requiring it
+// again runs it again. MRI does this when the loaded file raises — a failed
+// require is not a completed one.
+func (vm *VM) forgetLoadedFeature(abs string) {
+	delete(vm.loaded, abs)
+	arr, ok := vm.globals["$LOADED_FEATURES"].(*object.Array)
+	if !ok {
+		return
+	}
+	for i, v := range arr.Elems {
+		if s, ok := v.(*object.String); ok && s.Str() == abs {
+			arr.Elems = append(arr.Elems[:i], arr.Elems[i+1:]...)
+			return
+		}
+	}
+}

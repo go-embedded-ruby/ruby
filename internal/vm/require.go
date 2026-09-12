@@ -253,10 +253,21 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		setISeqFile(iseq, abs)
 		vm.loaded[abs] = true
 		vm.noteLoadedFeature(abs)
+		// A require whose file raises is NOT a completed require: MRI's
+		// require_internal unregisters the feature when the load unwinds, so the
+		// next require of the same file runs it again. Reference: ruby/ruby v3_4_0
+		// load.c require_internal / rb_provide_feature's rollback on exception.
+		ok := false
+		defer func() {
+			if !ok {
+				vm.forgetLoadedFeature(abs)
+			}
+		}()
 		// Push the file's directory so a nested require_relative resolves against it.
 		vm.requireDirs = append(vm.requireDirs, filepath.Dir(abs))
 		defer func() { vm.requireDirs = vm.requireDirs[:len(vm.requireDirs)-1] }()
 		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil, nil)
+		ok = true
 		return object.Bool(true)
 	}
 	return raise("LoadError", "cannot load such file -- %s", name)
