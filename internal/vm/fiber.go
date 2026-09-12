@@ -445,6 +445,11 @@ func (vm *VM) fiberRaiseException(args []object.Value) object.Value {
 			}
 		}
 	}
+	// A cause: that IS the exception being raised is not a cause at all — MRI
+	// leaves the link unset rather than pointing the exception at itself.
+	if causeGiven && causeVal == exc {
+		return exc
+	}
 	vm.applyRaiseCause(exc, causeGiven, causeVal)
 	return exc
 }

@@ -831,7 +831,7 @@ func (vm *VM) registerThreadClass() {
 			raise("TypeError", "no implicit conversion of %s into Hash", classNameOf(args[0]))
 		}
 		if blk == nil {
-			raise("ArgumentError", "block is needed")
+			raise("ArgumentError", "block is needed.")
 		}
 		t := vm.currentThread
 		t.interruptMasks = append(t.interruptMasks, h)
@@ -861,8 +861,20 @@ func (vm *VM) threadJoin(t *RThread) {
 	if !t.isDone() {
 		vm.threadBlock(func() { <-t.done })
 	}
+	vm.serviceMaskedSafepoint()
 	if t.err != nil {
 		panic(*t.err)
+	}
+}
+
+// serviceMaskedSafepoint is the safepoint a join reaches even when it never had
+// to wait (the joined thread had already finished). MRI checks for interrupts at
+// every such checkpoint; rbgo only needs to while a Thread.handle_interrupt mask
+// is in effect, which is where the timing of a delivery is observable — so a
+// program that never masks keeps exactly the delivery points it had.
+func (vm *VM) serviceMaskedSafepoint() {
+	if t := vm.currentThread; len(t.interruptMasks) > 0 {
+		vm.serviceSafepointAt(t, true)
 	}
 }
 
@@ -882,6 +894,7 @@ func (vm *VM) threadJoinLimit(t *RThread, secs float64) bool {
 	if !t.isDone() {
 		return false
 	}
+	vm.serviceMaskedSafepoint()
 	if t.err != nil {
 		panic(*t.err)
 	}
@@ -889,16 +902,20 @@ func (vm *VM) threadJoinLimit(t *RThread, secs float64) bool {
 }
 
 // threadTimeInterval coerces a Thread#join timeout to seconds the way MRI's
-// rb_time_interval does: an Integer or Float is the number of seconds, anything
-// else is a TypeError.
+// thread_join_m does — through rb_num2dbl, so the rejection names Float: an
+// Integer or Float is the number of seconds, a String has its own message
+// ("no implicit conversion to float from string"), and anything else is
+// "can't convert CLASS into Float".
 func threadTimeInterval(v object.Value) float64 {
 	switch n := v.(type) {
 	case object.Integer:
 		return float64(n)
 	case object.Float:
 		return float64(n)
+	case *object.String:
+		raise("TypeError", "no implicit conversion to float from string")
 	}
-	raise("TypeError", "can't convert %s into time interval", classNameOf(v))
+	raise("TypeError", "can't convert %s into Float", classNameOf(v))
 	return 0
 }
 
