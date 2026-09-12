@@ -477,7 +477,13 @@ func (vm *VM) threadBacktraceFrames(self object.Value, args []object.Value, labe
 		return nil, false
 	}
 	if t != vm.currentThread {
-		return nil, true
+		// rbgo keeps ONE frame stack, shared by every thread under the GVL, so the
+		// frames of a thread that is not the running one are simply not recorded
+		// anywhere. Refusing is the honest answer: returning an empty Array would
+		// assert that the thread is executing nothing, which ruby/spec's
+		// fixtures/code/concurrent.rb reads as a fact and spins on forever.
+		raise("NotImplementedError",
+			"Thread#%s of another thread is not supported: rbgo records one frame stack per VM, not per thread", label)
 	}
 	here := ""
 	if n := len(vm.frameNames); n > 0 {

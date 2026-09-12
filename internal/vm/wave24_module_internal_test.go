@@ -507,11 +507,15 @@ t = Thread.new {}
 t.join
 p t.backtrace, t.backtrace_locations
 live = Thread.new { sleep }
-p live.backtrace.class
+begin
+  live.backtrace
+rescue NotImplementedError => e
+  p e.message.start_with?("Thread#backtrace of another thread")
+end
 live.kill
 `
 	want := "Array\ntrue\ntrue\nnil\n[]\ntrue\ntrue\ntrue\nnil\n" +
-		"Thread::Backtrace::Location\ntrue\nnil\nnil\nArray\n"
+		"Thread::Backtrace::Location\ntrue\nnil\nnil\ntrue\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
