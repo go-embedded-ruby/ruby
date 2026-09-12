@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
@@ -6153,6 +6152,25 @@ func (vm *VM) bootstrap() {
 			}
 			return m
 		}}
+	// Module.used_refinements returns the Refinement modules imported into the
+	// CALLER's scope by `using` — the refinement modules themselves, not the
+	// modules that hold them (that is Module#used_modules). Like Module.nesting it
+	// reads the caller's cref, which is on top of frameCrefs because this native
+	// pushes no frame of its own, and it reports exactly the refinements method
+	// dispatch would consult there. Reference: ruby/ruby v3_4_0 eval.c
+	// rb_mod_s_used_refinements.
+	vm.cModule.smethods["used_refinements"] = &Method{name: "used_refinements", owner: vm.cModule,
+		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			var cref *RClass
+			if n := len(vm.frameCrefs); n > 0 {
+				cref = vm.frameCrefs[n-1]
+			}
+			arr := object.NewArray()
+			for _, r := range vm.activeRefinements(cref) {
+				arr.Elems = append(arr.Elems, r)
+			}
+			return arr
+		}}
 	// Module.nesting returns the list of Modules nested at the point of call,
 	// innermost first (MRI: the lexical cref chain, excluding Object). The caller's
 	// frame is on top of frameCrefs (this native pushes no frame of its own).
@@ -9319,9 +9337,6 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 	return out
 }
 
-// constNameArg coerces a const_get/const_set/const_defined? name (a Symbol or
-// String) to its text, rejecting a name that does not begin with an uppercase
-// letter — as Ruby does.
 // moduleToSStr builds Module#to_s / #inspect for c: a permanent name when named,
 // "#<refinement:Target@Holder>" for a refinement module, "#<Class:INNER>" for a
 // singleton class (INNER being the identity of the class/module or object it is
@@ -9366,14 +9381,25 @@ func (vm *VM) moduleToSStr(c *RClass) string {
 // build_const_pathname, and set_namespace_path, which re-walks the children of
 // a module that has just become permanent.
 func (vm *VM) moduleClassPath(c *RClass) string {
-	if c.name == "" || modulePermanentlyNamed(c) {
+	// A temporary name (Module#set_temporary_name) and a module with no recorded
+	// lexical home stand on their own — there is nothing to qualify them with.
+	if c.name == "" || !c.named || c.lexParent == nil {
 		return c.name
 	}
-	if !c.named || c.lexParent == nil {
-		// A temporary name (Module#set_temporary_name) stands on its own.
-		return c.name
+	// Rebuild the path from the lexical chain, so an outer module that has since
+	// been named (or is still anonymous) is reflected in the answer. The walk
+	// stops at a repeat: a class bound to a constant inside its own body can close
+	// the chain into a ring.
+	seg := moduleBaseName(c.name)
+	seen := map[*RClass]bool{c: true}
+	for p := c.lexParent; p != nil && !seen[p]; p = p.lexParent {
+		seen[p] = true
+		if !p.named {
+			return vm.moduleToSStr(p) + "::" + seg
+		}
+		seg = moduleBaseName(p.name) + "::" + seg
 	}
-	return vm.moduleToSStr(c.lexParent) + "::" + moduleBaseName(c.name)
+	return seg
 }
 
 // moduleBaseName is the last segment of a qualified constant path.
@@ -9500,22 +9526,6 @@ func (vm *VM) topLevelConstNames() []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func constNameArg(v object.Value) string {
-	var name string
-	switch n := v.(type) {
-	case object.Symbol:
-		name = string(n)
-	case *object.String:
-		name = n.Str()
-	default:
-		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
-	}
-	if r := []rune(name); len(r) == 0 || !unicode.IsUpper(r[0]) {
-		raise("NameError", "wrong constant name %s", name)
-	}
-	return name
 }
 
 // cvarNameArg coerces a class-variable name argument (Symbol or String) to its
