@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
@@ -1568,11 +1567,11 @@ func (vm *VM) bootstrap() {
 		}
 		return object.False
 	})
-	vm.cModule.define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cModule.define("name", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		// A singleton class has no name (MRI returns nil), even though it carries an
 		// internal "#<Class:…>" label; an anonymous module/class is likewise nil.
 		if c := self.(*RClass); !c.isSingleton && c.name != "" {
-			return object.NewString(c.name)
+			return object.NewString(vm.moduleClassPath(c))
 		}
 		return object.NilV
 	})
@@ -1724,8 +1723,18 @@ func (vm *VM) bootstrap() {
 		}
 		seen := map[string]bool{}
 		var names []string
+		// A pending autoload counts as a constant: MRI's rb_autoload_str reserves
+		// the name with an undefined value, so Module#constants lists it before the
+		// file is loaded. Reference: ruby/ruby v3_4_0 variable.c
+		// autoload_synchronized → const_set(module, name, Qundef).
 		add := func(c *RClass) {
 			for name := range c.consts {
+				if !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+			for name := range c.autoloads {
 				if !seen[name] {
 					seen[name] = true
 					names = append(names, name)
@@ -1858,6 +1867,7 @@ func (vm *VM) bootstrap() {
 			if len(args) != 0 {
 				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 			}
+			defer vm.freshEvalVisibility(cls)()
 			return vm.classEval(cls, blk, nil)
 		}
 		// String form — class_eval("def m; end", file, line): 1..3 arguments, the
@@ -1871,6 +1881,7 @@ func (vm *VM) bootstrap() {
 		if len(args) >= 2 {
 			vm.coerceToString(args[1])
 		}
+		defer vm.freshEvalVisibility(cls)()
 		return vm.classEvalString(cls, src)
 	}
 	// Module#class_eval is an alias of Module#module_eval — a shared method record,
@@ -1881,7 +1892,9 @@ func (vm *VM) bootstrap() {
 		if blk == nil {
 			raise("LocalJumpError", "no block given (yield)")
 		}
-		return vm.classEval(self.(*RClass), blk, args)
+		cls := self.(*RClass)
+		defer vm.freshEvalVisibility(cls)()
+		return vm.classEval(cls, blk, args)
 	}
 	// Module#module_exec runs the block with the module as self and the given
 	// arguments; Module#class_exec is its alias (shared record).
@@ -6139,6 +6152,25 @@ func (vm *VM) bootstrap() {
 			}
 			return m
 		}}
+	// Module.used_refinements returns the Refinement modules imported into the
+	// CALLER's scope by `using` — the refinement modules themselves, not the
+	// modules that hold them (that is Module#used_modules). Like Module.nesting it
+	// reads the caller's cref, which is on top of frameCrefs because this native
+	// pushes no frame of its own, and it reports exactly the refinements method
+	// dispatch would consult there. Reference: ruby/ruby v3_4_0 eval.c
+	// rb_mod_s_used_refinements.
+	vm.cModule.smethods["used_refinements"] = &Method{name: "used_refinements", owner: vm.cModule,
+		native: func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			var cref *RClass
+			if n := len(vm.frameCrefs); n > 0 {
+				cref = vm.frameCrefs[n-1]
+			}
+			arr := object.NewArray()
+			for _, r := range vm.activeRefinements(cref) {
+				arr.Elems = append(arr.Elems, r)
+			}
+			return arr
+		}}
 	// Module.nesting returns the list of Modules nested at the point of call,
 	// innermost first (MRI: the lexical cref chain, excluding Object). The caller's
 	// frame is on top of frameCrefs (this native pushes no frame of its own).
@@ -9305,9 +9337,6 @@ func (vm *VM) singletonMethodNames(self object.Value, all bool) []object.Value {
 	return out
 }
 
-// constNameArg coerces a const_get/const_set/const_defined? name (a Symbol or
-// String) to its text, rejecting a name that does not begin with an uppercase
-// letter — as Ruby does.
 // moduleToSStr builds Module#to_s / #inspect for c: a permanent name when named,
 // "#<refinement:Target@Holder>" for a refinement module, "#<Class:INNER>" for a
 // singleton class (INNER being the identity of the class/module or object it is
@@ -9336,9 +9365,74 @@ func (vm *VM) moduleToSStr(c *RClass) string {
 		return "#<Class:" + inner + ">"
 	}
 	if c.name != "" {
-		return c.name
+		return vm.moduleClassPath(c)
 	}
 	return vm.anonClassOrModuleRepr(c)
+}
+
+// moduleClassPath is MRI's classpath for a named module or class: the name it
+// was given, qualified by the path of the scope it was defined in. When that
+// scope is anonymous the qualification is the scope's "#<Module:0x…>" repr, so
+// a module nested in an anonymous one reports "#<Module:0x…>::N" rather than a
+// bare "N" — and it starts reporting the real path as soon as the outer module
+// is bound to a constant, because the path is computed from the lexical parent
+// at each call rather than frozen at definition time. Reference: ruby/ruby
+// v3_4_0 variable.c rb_set_class_path_string → rb_tmp_class_path /
+// build_const_pathname, and set_namespace_path, which re-walks the children of
+// a module that has just become permanent.
+func (vm *VM) moduleClassPath(c *RClass) string {
+	// A temporary name (Module#set_temporary_name) and a module with no recorded
+	// lexical home stand on their own — there is nothing to qualify them with.
+	if c.name == "" || !c.named || c.lexParent == nil {
+		return c.name
+	}
+	// Rebuild the path from the lexical chain, so an outer module that has since
+	// been named (or is still anonymous) is reflected in the answer. The walk
+	// stops at a repeat: a class bound to a constant inside its own body can close
+	// the chain into a ring.
+	seg := moduleBaseName(c.name)
+	seen := map[*RClass]bool{c: true}
+	for p := c.lexParent; p != nil && !seen[p]; p = p.lexParent {
+		seen[p] = true
+		if !p.named {
+			return vm.moduleToSStr(p) + "::" + seg
+		}
+		// The outermost scope on record contributes its WHOLE name: a module
+		// opened compactly (module A::B) carries its qualification in its own name
+		// and records no lexical parent, so taking its base segment there would
+		// drop "A" from every path built through it.
+		if p.lexParent == nil || seen[p.lexParent] {
+			return p.name + "::" + seg
+		}
+		seg = moduleBaseName(p.name) + "::" + seg
+	}
+	return seg
+}
+
+// moduleBaseName is the last segment of a qualified constant path.
+func moduleBaseName(name string) string {
+	if i := strings.LastIndex(name, "::"); i >= 0 {
+		return name[i+2:]
+	}
+	return name
+}
+
+// modulePermanentlyNamed reports whether c's name is permanent in MRI's sense:
+// it was bound to a constant, and so was every scope it is nested in, up to the
+// top level. A module nested inside an anonymous module is NOT permanent — its
+// path is recomputed on demand and it may still be given a temporary name — and
+// neither is a module carrying only a Module#set_temporary_name label. The walk
+// stops at a repeat, because a class bound to a constant inside its own body can
+// close the lexical chain into a ring.
+func modulePermanentlyNamed(c *RClass) bool {
+	seen := map[*RClass]bool{}
+	for ; c != nil && !seen[c]; c = c.lexParent {
+		seen[c] = true
+		if !c.named {
+			return false
+		}
+	}
+	return true
 }
 
 // checkModuleArgs validates the arguments of Module#include / #prepend: at least
@@ -9439,22 +9533,6 @@ func (vm *VM) topLevelConstNames() []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func constNameArg(v object.Value) string {
-	var name string
-	switch n := v.(type) {
-	case object.Symbol:
-		name = string(n)
-	case *object.String:
-		name = n.Str()
-	default:
-		raise("TypeError", "%s is not a symbol nor a string", v.Inspect())
-	}
-	if r := []rune(name); len(r) == 0 || !unicode.IsUpper(r[0]) {
-		raise("NameError", "wrong constant name %s", name)
-	}
-	return name
 }
 
 // cvarNameArg coerces a class-variable name argument (Symbol or String) to its
@@ -11518,4 +11596,41 @@ func rangeStepSize(r *object.Range, step object.Value) object.Value {
 		return object.NilV
 	}
 	return stepSize(r.Lo, r.Hi, step, r.Exclusive)
+}
+
+// freshEvalVisibility gives a module_eval / class_eval / module_exec body its
+// own scope visibility and returns the function that puts the enclosing one
+// back. MRI keeps the visibility for subsequent `def`s in the frame's cref, not
+// in the class, and specific_eval pushes a fresh cref whose scope visibility
+// starts at public: a `private` written outside the block does not reach the
+// definitions inside it, and one written inside does not escape. rbgo records
+// the level on the class, so the same observable behaviour comes from saving
+// and restoring it around the body. Reference: ruby/ruby v3_4_0 vm_eval.c
+// specific_eval / eval_under -> vm_cref_push with METHOD_VISI_PUBLIC.
+func (vm *VM) freshEvalVisibility(cls *RClass) func() {
+	vis, mode := cls.defaultVis, cls.funcMode
+	cls.defaultVis, cls.funcMode = visPublic, false
+	return func() { cls.defaultVis, cls.funcMode = vis, mode }
+}
+
+// moduleDescription renders a class or module the way MRI names it in a
+// NameError: "module 'M'" or "class 'C'", with an anonymous receiver shown by
+// its "#<Module:0x…>" repr rather than as an empty name. Reference: ruby/ruby
+// v3_4_0 vm_method.c rb_print_undef -> rb_name_err_raise.
+func (vm *VM) moduleDescription(c *RClass) string {
+	noun := "class"
+	if c.isModule {
+		noun = "module"
+	}
+	return noun + " '" + vm.moduleToSStr(c) + "'"
+}
+
+// qualifiedConstName is the "Scope::NAME" form used in constant warnings, with
+// an anonymous scope shown by its repr — MRI builds the name from the scope's
+// class path, which for an anonymous module is "#<Module:0x…>".
+func (vm *VM) qualifiedConstName(scope *RClass, name string) string {
+	if scope == nil || (scope.name == "Object" && !scope.isModule) {
+		return name
+	}
+	return vm.moduleToSStr(scope) + "::" + name
 }

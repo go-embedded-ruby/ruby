@@ -77,13 +77,27 @@ func (vm *VM) setInstanceVisibility(mod *RClass, name string, vis visibility) {
 		return
 	}
 	if vm.lookupForModuleOp(mod, name) == nil {
-		raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
+		// A module whose ancestors do not carry the method falls back to Object:
+		// MRI's rb_export_method searches rb_cObject when the receiver is a module,
+		// so `Module.new { private :some_object_method }` records the override on
+		// the module rather than raising. Reference: ruby/ruby v3_4_0 vm_method.c
+		// rb_export_method.
+		if !mod.isModule || vm.lookupForModuleOp(vm.cObject, name) == nil {
+			vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name)
+		}
 	}
 	if mod.visOverrides == nil {
 		mod.visOverrides = map[string]visibility{}
 	}
+	_, had := mod.visOverrides[name]
 	mod.visOverrides[name] = vis
 	bumpMethodSerial()
+	// Re-declaring an inherited method at a new visibility ADDS a method entry to
+	// the receiver in MRI (a ZSUPER entry), which fires Module#method_added —
+	// changing the visibility of a method the receiver already owns does not.
+	if !had {
+		vm.fireModuleMethodHook(mod, "method_added", name)
+	}
 }
 
 // setClassMethodVisibility records vis for the named class (singleton) method on
@@ -99,7 +113,7 @@ func (vm *VM) setClassMethodVisibility(mod *RClass, name string, vis visibility)
 	// `new` and friends are reachable as instance methods of Class rather than as
 	// inherited smethods; resolveClassMethod covers both.
 	if vm.resolveClassMethod(mod, name) == nil {
-		raise("NameError", "undefined method '%s' for class '%s'", name, mod.name)
+		vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name)
 	}
 	if mod.svisOverrides == nil {
 		mod.svisOverrides = map[string]visibility{}

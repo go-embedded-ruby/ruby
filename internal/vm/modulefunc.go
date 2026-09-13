@@ -51,7 +51,13 @@ func (vm *VM) registerModuleExtras() {
 	setVis := func(vm *VM, self object.Value, args []object.Value, vis visibility) object.Value {
 		mod := self.(*RClass)
 		if len(args) == 0 {
-			mod.defaultVis = vis
+			// A bare public/private/protected also cancels a module_function toggle:
+			// MRI keeps one scope visibility per frame, and rb_scope_visibility_set
+			// writes both halves of it — the level AND the module_function flag — so
+			// the later directive wins outright. Reference: ruby/ruby v3_4_0
+			// vm_method.c rb_scope_visibility_set / rb_mod_modfunc's
+			// SCOPE_SET(METHOD_VISI_PUBLIC | SCOPE_VISI_MODULE_FUNC).
+			mod.defaultVis, mod.funcMode = vis, false
 			return object.NilV
 		}
 		// `private [:a, :b]` (an Array argument) marks each element, returning the
@@ -222,11 +228,15 @@ func (vm *VM) registerModuleExtras() {
 	// (reads are not screened here), but MRI validates that every named constant is
 	// defined DIRECTLY on the receiver — an inherited or missing name is a NameError
 	// — before returning self. Each name is a String or Symbol.
+	// A pending autoload counts as defined: MRI's set_const_visibility finds it
+	// through rb_const_lookup, which returns the entry autoload_synchronized
+	// reserved with an undefined value. Reference: ruby/ruby v3_4_0 variable.c
+	// set_const_visibility / rb_mod_private_constant.
 	constVisibility := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
 		for _, a := range args {
 			name := nameArg(a)
-			if _, ok := mod.consts[name]; !ok {
+			if _, ok := mod.consts[name]; !ok && !hasAutoload(mod, name) {
 				raise("NameError", "constant %s not defined", scopedNameFor(mod, name))
 			}
 		}
@@ -242,7 +252,9 @@ func (vm *VM) registerModuleExtras() {
 		mod := self.(*RClass)
 		for _, a := range args {
 			name := nameArg(a)
-			if _, ok := mod.consts[name]; !ok {
+			// A pending autoload is a reserved (undefined-valued) constant entry in
+			// MRI, so deprecate_constant accepts it exactly as private_constant does.
+			if _, ok := mod.consts[name]; !ok && !hasAutoload(mod, name) {
 				raise("NameError", "constant %s not defined", scopedNameFor(mod, name))
 			}
 			if mod.deprecatedConsts == nil {
@@ -269,7 +281,7 @@ func (vm *VM) warnDeprecatedConst(scope *RClass, name string) {
 		return
 	}
 	vm.send(w, "warn", []object.Value{
-		object.NewString("warning: constant " + scopedNameFor(scope, name) + " is deprecated\n"),
+		object.NewString("warning: constant " + vm.qualifiedConstName(scope, name) + " is deprecated\n"),
 	}, nil)
 }
 
