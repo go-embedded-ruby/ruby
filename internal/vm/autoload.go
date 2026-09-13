@@ -195,11 +195,8 @@ func (vm *VM) featureAbsPath(name string) string {
 	}
 	for _, cand := range vm.requireCandidates(file, false) {
 		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
-			// filepath.Abs only fails when the process has no working directory;
-			// doRequire ignores that the same way, and both would be reporting about
-			// a file they just stat'ed successfully.
-			abs, _ := filepath.Abs(cand)
-			return abs
+			// featurePath names it the way Ruby does, forward slashes included.
+			return featurePath(cand)
 		}
 	}
 	return ""
