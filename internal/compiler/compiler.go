@@ -178,6 +178,24 @@ type Compiler struct {
 	// string literal is tagged with it (see newStrLit) so a literal in a
 	// `# encoding: binary` file is BINARY, matching MRI.
 	srcEnc string
+	// masgnPre maps a multiple-assignment target to the temporaries its receiver
+	// (and index arguments) were evaluated into before the right-hand side ran.
+	// See preEvalMasgnTarget.
+	masgnPre map[ast.Node]*masgnPreEval
+}
+
+// masgnPreEval holds the temporaries into which one multiple-assignment target's
+// receiver — and its index arguments — were evaluated BEFORE the right-hand side.
+// MRI compiles those into its `pre` anchor and concatenates pre, rhs, lhs in that
+// order (compile.c's compile_massign_lhs and compile_massign0, ruby/ruby
+// v3_4_0:5555, 5655 and 5848-5850), so `a.x, b.x = r1, r2` evaluates BOTH
+// receivers before either value. Only the two target kinds MRI moves into `pre`
+// are pre-evaluated here: an attribute/index setter (NODE_ATTRASGN) and a scoped
+// constant `expr::C` (NODE_CDECL carrying a receiver).
+type masgnPreEval struct {
+	recv    int   // local slot holding the evaluated receiver
+	args    []int // local slots holding the evaluated index arguments (static arity)
+	argsArr int   // local slot holding the prebuilt argument array (splat arity), else -1
 }
 
 // Compile lowers a Program into the top-level ISeq, treating string literals as
@@ -449,33 +467,7 @@ func (c *Compiler) compileNode(n ast.Node) {
 			b.emit(bytecode.OpSetLocal, b.localSlot(v.Name), 0)
 		}
 	case *ast.MultiAssign:
-		// Build the right-hand side as one Array (a single value is splatted into
-		// its elements; multiple values are collected, with any *splat spliced in).
-		switch {
-		case hasSplat(v.Values):
-			// `a, b = *x` / `a, b = *x, y`: splat-expand the operands into the value
-			// list, matching MRI.
-			c.compileSplatItems(v.Values)
-		case len(v.Values) == 1:
-			c.compileNode(v.Values[0])
-			b.emit(bytecode.OpSplatToArray, 0, 0)
-		default:
-			for _, val := range v.Values {
-				c.compileNode(val)
-			}
-			b.emit(bytecode.OpNewArray, len(v.Values), 0)
-		}
-		b.emit(bytecode.OpDup, 0, 0) // keep the array as the expression's value
-		if nested, ok := soleGroupTarget(v); ok {
-			// `(a, b) = rhs`: the whole RHS array flows into the single grouped
-			// target rather than being distributed element-wise. storeMultiTarget
-			// leaves the incoming value (like every store), so pop it; the first
-			// dup'd copy stays as the assignment's result.
-			c.storeMultiTarget(nested)
-			b.emit(bytecode.OpPop, 0, 0)
-			break
-		}
-		c.expandAndStore(v.Names, v.Targets, v.SplatIndex)
+		c.compileMultiAssign(v)
 	case *ast.Begin:
 		c.compileBegin(v)
 	case *ast.Case:
@@ -2318,6 +2310,116 @@ func (c *Compiler) expandAndStore(names []string, targets []ast.Node, splatIndex
 	}
 }
 
+// compileMultiAssign compiles `a, b = …`, leaving the right-hand side array as
+// the expression's value.
+func (c *Compiler) compileMultiAssign(v *ast.MultiAssign) {
+	b := c.cur()
+	// MRI evaluates every left-hand RECEIVER before the right-hand side: it
+	// compiles those into a separate `pre` anchor and concatenates pre, rhs, lhs
+	// in that order (compile.c's compile_massign0, ruby/ruby v3_4_0:5848-5850),
+	// so `a.x, b.x = r1, r2` calls a, b, r1, r2 in that order. Park them now; the
+	// store arms below reload them instead of re-evaluating.
+	saved := c.masgnPre
+	defer func() { c.masgnPre = saved }()
+	c.masgnPre = map[ast.Node]*masgnPreEval{}
+	nested, grouped := soleGroupTarget(v)
+	if grouped {
+		c.preEvalMasgnTarget(nested)
+	} else {
+		c.preEvalMasgnTargets(v.Targets)
+	}
+	// Build the right-hand side as one Array (a single value is splatted into
+	// its elements; multiple values are collected, with any *splat spliced in).
+	switch {
+	case hasSplat(v.Values):
+		// `a, b = *x` / `a, b = *x, y`: splat-expand the operands into the value
+		// list, matching MRI.
+		c.compileSplatItems(v.Values)
+	case len(v.Values) == 1:
+		c.compileNode(v.Values[0])
+		b.emit(bytecode.OpSplatToArray, 0, 0)
+	default:
+		for _, val := range v.Values {
+			c.compileNode(val)
+		}
+		b.emit(bytecode.OpNewArray, len(v.Values), 0)
+	}
+	b.emit(bytecode.OpDup, 0, 0) // keep the array as the expression's value
+	if grouped {
+		// `(a, b) = rhs`: the whole RHS array flows into the single grouped
+		// target rather than being distributed element-wise. storeMultiTarget
+		// leaves the incoming value (like every store), so pop it; the first
+		// dup'd copy stays as the assignment's result.
+		c.storeMultiTarget(nested)
+		b.emit(bytecode.OpPop, 0, 0)
+		return
+	}
+	c.expandAndStore(v.Names, v.Targets, v.SplatIndex)
+}
+
+// preEvalMasgnTargets evaluates, in source order and before the right-hand side
+// is built, the receiver and index arguments of every target that MRI compiles
+// into its `pre` anchor, stashing each in a temporary for storeMultiTarget to
+// reload. Targets MRI leaves in `lhs` (locals, ivars, gvars, cvars, a bare
+// constant, a nameless splat) evaluate nothing, so they are simply skipped.
+func (c *Compiler) preEvalMasgnTargets(targets []ast.Node) {
+	for _, t := range targets {
+		c.preEvalMasgnTarget(t)
+	}
+}
+
+func (c *Compiler) preEvalMasgnTarget(target ast.Node) {
+	b := c.cur()
+	// stash evaluates one expression and parks it in a fresh temporary, leaving
+	// the stack as it found it.
+	stash := func(n ast.Node) int {
+		slot := b.localSlot("")
+		c.compileNode(n)
+		b.emit(bytecode.OpSetLocal, slot, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		return slot
+	}
+	switch t := target.(type) {
+	case *ast.MultiAssign:
+		// A nested group `(a.x, b)` — MRI recurses through compile_massign0 with
+		// the same `pre` anchor (compile.c v3_4_0:5642), so its receivers are
+		// pre-evaluated too, in place.
+		c.preEvalMasgnTargets(t.Targets)
+	case *ast.ScopedConst:
+		c.masgnPre[target] = &masgnPreEval{recv: stash(t.Recv), argsArr: -1}
+	case *ast.Call:
+		if t.Recv == nil {
+			return // storeMultiTarget reports the receiver-less call
+		}
+		p := &masgnPreEval{recv: stash(t.Recv), argsArr: -1}
+		if hasSplat(t.Args) {
+			// Dynamic arity: the whole argument array is built once, up front.
+			slot := b.localSlot("")
+			c.compileSplatItems(t.Args)
+			b.emit(bytecode.OpSetLocal, slot, 0)
+			b.emit(bytecode.OpPop, 0, 0)
+			p.argsArr = slot
+		} else {
+			for _, a := range t.Args {
+				p.args = append(p.args, stash(a))
+			}
+		}
+		c.masgnPre[target] = p
+	}
+}
+
+// pushMasgnRecv pushes a store target's receiver: the value parked before the
+// right-hand side ran when this target was pre-evaluated, else the receiver
+// expression compiled in place. A `rescue => Foo::E` clause reuses these store
+// arms without being a multiple assignment, and evaluates its receiver here.
+func (c *Compiler) pushMasgnRecv(target ast.Node, recv ast.Node) {
+	if p := c.masgnPre[target]; p != nil {
+		c.cur().emit(bytecode.OpGetLocal, p.recv, 0)
+		return
+	}
+	c.compileNode(recv)
+}
+
 func (c *Compiler) storeMultiTarget(target ast.Node) {
 	b := c.cur()
 	switch t := target.(type) {
@@ -2342,7 +2444,7 @@ func (c *Compiler) storeMultiTarget(target ast.Node) {
 		tmp := b.localSlot("")
 		b.emit(bytecode.OpSetLocal, tmp, 0)
 		b.emit(bytecode.OpPop, 0, 0)
-		c.compileNode(t.Recv)
+		c.pushMasgnRecv(target, t.Recv)
 		b.emit(bytecode.OpGetLocal, tmp, 0)
 		b.emit(bytecode.OpSetScopedConst, b.addName(t.Name), 0)
 	case *ast.IvarRef:
@@ -2361,7 +2463,46 @@ func (c *Compiler) storeMultiTarget(target ast.Node) {
 		tmp := b.localSlot("")
 		b.emit(bytecode.OpSetLocal, tmp, 0)
 		b.emit(bytecode.OpPop, 0, 0)
-		c.compileNode(t.Recv)
+		pre := c.masgnPre[target]
+		c.pushMasgnRecv(target, t.Recv)
+		if pre != nil && pre.argsArr >= 0 {
+			// Dynamic arity, argument array already built before the RHS: append
+			// the assigned value and send. OpConcatArray always allocates a fresh
+			// array, which is MRI's `dupsplat` rule (compile.c v3_4_0:5595-5601) —
+			// the array the splat produced must not be mutated by the append.
+			b.emit(bytecode.OpGetLocal, pre.argsArr, 0)
+			b.emit(bytecode.OpGetLocal, tmp, 0)
+			b.emit(bytecode.OpNewArray, 1, 0)
+			b.emit(bytecode.OpConcatArray, 0, 0)
+			b.emit(bytecode.OpSendArray, b.addName(t.Name), 0)
+			return
+		}
+		if pre != nil {
+			for _, slot := range pre.args {
+				b.emit(bytecode.OpGetLocal, slot, 0)
+			}
+			b.emit(bytecode.OpGetLocal, tmp, 0)
+			b.emit(bytecode.OpSend, b.addName(t.Name), len(pre.args)+1)
+			return
+		}
+		if hasSplat(t.Args) {
+			// `a[*idx], b = 1, 2`: the argument count is not known until run time,
+			// so build the argument array and APPEND the assigned value to it rather
+			// than raising a fixed argc. This is what MRI does — compile.c's
+			// compile_massign_lhs, NODE_ATTRASGN (ruby/ruby v3_4_0:5588-5619):
+			// when the attrasgn send carries VM_CALL_ARGS_SPLAT it lowers argc by
+			// one and emits `pushtoarray 1` to append the assigned value.
+			// MRI also emits `splatarray true` first to dup the splatted array so
+			// the caller's array is not mutated by that append (its `dupsplat`
+			// branch, v3_4_0:5595-5601); compileSplatItems already accumulates into
+			// a fresh array, so that copy is structural here.
+			c.compileSplatItems(t.Args)
+			b.emit(bytecode.OpGetLocal, tmp, 0)
+			b.emit(bytecode.OpNewArray, 1, 0)
+			b.emit(bytecode.OpConcatArray, 0, 0)
+			b.emit(bytecode.OpSendArray, b.addName(t.Name), 0)
+			return
+		}
 		for _, a := range t.Args {
 			c.compileNode(a)
 		}
