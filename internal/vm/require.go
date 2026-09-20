@@ -187,16 +187,68 @@ func (vm *VM) doLoad(name string) object.Value {
 		vm.exec(iseq, vm.main, nil, vm.cObject, "", nil, nil, nil, nil, nil)
 		return object.Bool(true)
 	}
-	return raise("LoadError", "cannot load such file -- %s", name)
+	return vm.raiseLoadError(name)
 }
 
-// requireName extracts the String feature name, raising TypeError otherwise.
+// requireName coerces the feature argument to its path string exactly as MRI's
+// require/require_relative/load do: load.c v3_4_0 runs every one of them through
+// rb_get_path (file.c), which is rb_get_path_check_to_string followed by
+// rb_get_path_check_convert.
+//
+// rb_get_path_check_to_string takes a String as-is; otherwise it calls #to_path
+// through rb_check_funcall_default(obj, to_path, 0, 0, obj) — the default is the
+// object itself, so an object with no #to_path passes through unchanged — and
+// then runs StringValue over the RESULT. That second step is why a #to_path that
+// yields a non-String has #to_str called on THAT value rather than raising: the
+// conversion chain is #to_path then #to_str, not one or the other.
 func requireName(vm *VM, args []object.Value) string {
-	s, ok := args[0].(*object.String)
-	if !ok {
-		raise("TypeError", "no implicit conversion of %s into String", vm.classOf(args[0]).name)
+	s := vm.requirePathStr(args[0])
+	// rb_get_path_check_convert: an ASCII-incompatible encoding is a
+	// CompatibilityError and an embedded NUL an ArgumentError, before the name is
+	// ever looked at as a path.
+	vm.checkPathEncoding(s)
+	name := string(s.Bytes())
+	if strings.IndexByte(name, 0) >= 0 {
+		raise("ArgumentError", "path name contains null byte")
 	}
-	return string(s.Bytes())
+	return name
+}
+
+// requirePathStr is MRI's rb_get_path_check_to_string (file.c v3_4_0). It differs
+// from the File-side pathStr in the one case the require specs pin: when #to_path
+// returns a non-String, MRI feeds that result to StringValue (so #to_str runs on
+// it) instead of failing on the spot.
+func (vm *VM) requirePathStr(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if vm.respondsToDynamic(v, "to_path") {
+		v = vm.send(v, "to_path", nil, nil)
+		if s, ok := v.(*object.String); ok {
+			return s
+		}
+	}
+	// StringValue(tmp): #to_str, or TypeError.
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+	}
+	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+	return nil
+}
+
+// raiseLoadError raises the "cannot load such file" LoadError carrying the
+// unresolved name in @path, so LoadError#path reports it. MRI: load.c
+// load_failed -> rb_load_fail -> error.c raise_loaderror, which sets the
+// exception's path ivar to the fname as it was PASSED IN, not as expanded.
+func (vm *VM) raiseLoadError(name string) object.Value {
+	vm.raiseWithIvars("LoadError", "cannot load such file -- "+name,
+		map[string]object.Value{"@path": object.NewString(name)})
+	return object.NilV
 }
 
 func (vm *VM) doRequire(name string, relative bool) object.Value {
@@ -270,7 +322,7 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		ok = true
 		return object.Bool(true)
 	}
-	return raise("LoadError", "cannot load such file -- %s", name)
+	return vm.raiseLoadError(name)
 }
 
 // setISeqFile stamps path onto iseq and all of its nested children, so a method
@@ -294,15 +346,33 @@ func setISeqFile(iseq *bytecode.ISeq, path string) {
 func (vm *VM) requireCandidates(file string, relative bool) []string {
 	switch {
 	case relative:
-		// require_relative resolves against the directory of the file where the call
-		// is written — the executing ISeq's file — so a require_relative inside a
+		// rb_f_require_relative (load.c v3_4_0) is
+		// rb_require_string_internal(rb_file_absolute_path(fname, dirname(base))):
+		// rb_file_absolute_path IGNORES the base when fname is already absolute, so
+		// an absolute require_relative argument is used verbatim and must not be
+		// joined onto the requiring file's directory.
+		if filepath.IsAbs(file) {
+			return []string{file}
+		}
+		// Otherwise resolve against the directory of the file where the call is
+		// written — the executing ISeq's file — so a require_relative inside a
 		// method works even when that method is called from another file. Fall back
 		// to the require stack's directory when no file is stamped (e.g. a -e script).
 		if f := vm.currentFile(); f != "" {
 			return []string{filepath.Join(filepath.Dir(f), file)}
 		}
 		return []string{filepath.Join(vm.currentDir(), file)}
-	case filepath.IsAbs(file):
+	case strings.HasPrefix(file, "~"):
+		// rb_find_file (file.c v3_4_0) expands a leading ~ through HOME first and
+		// then takes the expanded name as the ONLY candidate: `if (!rb_file_load_ok(f))
+		// return 0;` returns before the $LOAD_PATH walk, so a ~ path is never
+		// searched on the load path.
+		return []string{expandTildePath(file)}
+	case filepath.IsAbs(file), isExplicitRelative(file):
+		// Same early return in rb_find_file for an absolute path and for an
+		// "explicitly relative" one — is_explicit_relative(f) is true for "./x" and
+		// "../x". Both resolve against the process working directory alone; neither
+		// is ever joined onto a $LOAD_PATH entry.
 		return []string{file}
 	default:
 		cands := []string{filepath.Join(vm.currentDir(), file), file}
@@ -311,6 +381,28 @@ func (vm *VM) requireCandidates(file string, relative bool) []string {
 		}
 		return cands
 	}
+}
+
+// isExplicitRelative reports whether a path is "explicitly relative" in MRI's
+// sense — is_explicit_relative (file.c v3_4_0):
+//
+//	if (*path++ != '.') return 0;
+//	if (*path == '.') path++;
+//	return isdirsep(*path);
+//
+// i.e. exactly a leading "./" or "../". A name that merely begins with a dot
+// ("..foo", ".hidden") is NOT explicitly relative and is still searched on
+// $LOAD_PATH. Windows treats a backslash as a separator too (isdirsep), and the
+// windows lane runs these same tests, so both separators count.
+func isExplicitRelative(p string) bool {
+	if len(p) == 0 || p[0] != '.' {
+		return false
+	}
+	p = p[1:]
+	if len(p) > 0 && p[0] == '.' {
+		p = p[1:]
+	}
+	return len(p) > 0 && (p[0] == '/' || p[0] == '\\')
 }
 
 // loadPathDirs returns the directory strings currently in $LOAD_PATH. Non-string

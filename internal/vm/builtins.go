@@ -917,6 +917,15 @@ func (vm *VM) bootstrap() {
 	vm.consts["NameError"].(*RClass).define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return getIvar(self, "@name")
 	})
+	// LoadError#path: the feature name that could not be loaded, stamped into
+	// @path when the LoadError is raised (vm.raiseLoadError in require.go). MRI
+	// declares it as a plain reader — error.c v3_4_0
+	// `rb_attr(rb_eLoadError, path, TRUE, FALSE, FALSE)` — and error.c
+	// raise_loaderror sets the ivar to the path AS PASSED, so a LoadError built by
+	// hand (LoadError.new("x").path) reports nil.
+	vm.consts["LoadError"].(*RClass).define("path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@path")
+	})
 	// full_message(highlight:, order:): the MRI-shaped multi-line report. order:
 	// :top (default) leads with the raise-site frame + detailed message then the
 	// "\tfrom <frame>" tail; order: :bottom prints a "Traceback (most recent call
