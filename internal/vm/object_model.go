@@ -222,6 +222,7 @@ type RClass struct {
 	isSingleton      bool            // true for a singleton class — a class metaclass or a per-object singleton (reported by Module#singleton_class?)
 	attached         object.Value    // for a per-object singleton class, the object it belongs to; drives the singleton_method_added/removed/undefined hooks. nil for a metaclass (use metaOf) and every non-singleton class.
 	deprecatedConsts map[string]bool // constants marked by Module#deprecate_constant; access warns
+	privateConsts    map[string]bool // constants marked by Module#private_constant; Recv::NAME cannot reach them
 	funcMode         bool            // module_function (no-arg) mode: subsequent instance defs are also copied as module/singleton methods
 	// defaultVis is the access level applied to subsequent `def`s in this body,
 	// set by a bare `private` / `protected` / `public` with no args. It resets to
@@ -520,6 +521,16 @@ func (vm *VM) lookupForModuleOp(mod *RClass, name string) *Method {
 // implicit Object ancestor — matching MRI, where Foo::Bar only inherits a
 // top-level constant when Foo itself is Object.
 func (vm *VM) constInAncestors(cls *RClass, name string) (object.Value, bool) {
+	_, v, ok := vm.constOwnerInAncestors(cls, name)
+	return v, ok
+}
+
+// constOwnerInAncestors is constInAncestors, additionally reporting WHICH
+// ancestor's table holds the constant. MRI needs the same distinction: on a
+// private hit it records that holder (not the class the lookup started from) in
+// ec->private_const_reference (variable.c rb_const_get_0, ruby/ruby
+// v3_4_0:3114-3116), and reports it as the NameError's #receiver.
+func (vm *VM) constOwnerInAncestors(cls *RClass, name string) (*RClass, object.Value, bool) {
 	for _, c := range vm.ancestors(cls) {
 		if c == vm.cObject || c == vm.cBasicObject {
 			if cls != vm.cObject && cls != vm.cBasicObject {
@@ -527,17 +538,20 @@ func (vm *VM) constInAncestors(cls *RClass, name string) (object.Value, bool) {
 			}
 		}
 		if v, ok := c.consts[name]; ok {
-			return v, true
+			return c, v, true
 		}
 	}
-	return object.NilVal(), false
+	return nil, object.NilVal(), false
 }
 
 // scopedConst resolves Recv::name (OpGetScopedConst, const_get): the class or
 // module's own constant table, then its ancestors. It no longer falls back to
 // the flat top-level table, so M::File is distinct from the top-level File.
 func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
-	if v, ok := vm.constInAncestors(cls, name); ok {
+	if owner, v, ok := vm.constOwnerInAncestors(cls, name); ok {
+		if owner.privateConsts[name] {
+			return vm.privateConstReferenced(cls, owner, name)
+		}
 		if cls.deprecatedConsts != nil && cls.deprecatedConsts[name] {
 			vm.warnDeprecatedConst(cls, name)
 		}
@@ -553,6 +567,31 @@ func (vm *VM) scopedConst(cls *RClass, name string) object.Value {
 	// default (Module#const_missing) raises NameError. A user override may return a
 	// value or raise a different error.
 	return vm.constMissing(cls, name)
+}
+
+// scopedConstIsPrivate reports whether Recv::name resolves to a constant that
+// Module#private_constant marked, without reading it.
+func (vm *VM) scopedConstIsPrivate(cls *RClass, name string) bool {
+	owner, _, ok := vm.constOwnerInAncestors(cls, name)
+	return ok && owner.privateConsts[name]
+}
+
+// privateConstReferenced handles `Recv::NAME` naming a constant that
+// Module#private_constant marked. MRI does not raise at the lookup itself:
+// rb_const_get_0 records the holding module in ec->private_const_reference and
+// returns Qundef (variable.c, ruby/ruby v3_4_0:3114-3116), so the reference
+// routes through #const_missing exactly like an unresolved one. Only the
+// DEFAULT Module#const_missing turns it into
+// `NameError: private constant Owner::NAME referenced`, carrying the HOLDER as
+// #receiver and the bare constant as #name (rb_mod_const_missing,
+// v3_4_0:2341-2351). An override therefore intercepts a private reference first
+// and may return a value instead of raising.
+func (vm *VM) privateConstReferenced(recv, owner *RClass, name string) object.Value {
+	if vm.findMethod(recv, "const_missing") == vm.cModule.methods["const_missing"] {
+		vm.raiseWithIvars("NameError", "private constant "+scopedNameFor(owner, name)+" referenced",
+			map[string]object.Value{"@name": object.SymVal(name), "@receiver": owner})
+	}
+	return vm.constMissing(recv, name)
 }
 
 // nesting returns the lexical nesting list for a cref (Module.nesting): the cref

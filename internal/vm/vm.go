@@ -1985,7 +1985,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				name := iseq.Names[in.A]
 				recv := pop()
 				cls, ok := recv.(*RClass)
-				if ok && vm.hasScopedConst(cls, name) {
+				// `defined?(A::B)` screens constant visibility: MRI answers it with
+				// rb_public_const_defined_from, the visibility-checking form
+				// (vm_insnhelper.c, ruby/ruby v3_4_0:1139-1141), so a
+				// private_constant is not `defined?` by its qualified path.
+				if ok && vm.hasScopedConst(cls, name) && !vm.scopedConstIsPrivate(cls, name) {
 					push(definedTag("constant"))
 				} else {
 					push(object.NilV)
@@ -2143,7 +2147,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpSplatToArray:
 				push(vm.splatToArray(pop()))
 			case bytecode.OpExpandArray:
-				elems := pop().(*object.Array).Elems
+				elems := vm.masgnExpandOperand(pop())
 				n := len(elems)
 				pre, post, hasSplat := in.A, in.B, in.C == 1
 				vals := make([]object.Value, 0, pre+post+1)
@@ -2407,6 +2411,7 @@ func scopedNameFor(scope *RClass, name string) string {
 // class body with self = the class, and returns the body's value.
 func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, superExpr object.Value, scoped bool) object.Value {
 	table := vm.constTable(parent)
+	vm.checkScopedReopenVisibility(parent, name, scoped)
 	var class *RClass
 	if existing, ok := table[name]; ok {
 		var isClass bool
@@ -2474,6 +2479,7 @@ func adoptReopenLexParent(c, parent *RClass, scoped bool) {
 // the module, and returns the body's value.
 func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, scoped bool) object.Value {
 	table := vm.constTable(parent)
+	vm.checkScopedReopenVisibility(parent, name, scoped)
 	var mod *RClass
 	if existing, ok := table[name]; ok {
 		var isClass bool
@@ -2492,6 +2498,64 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 	mod.defaultVis, mod.funcMode = visPublic, false
 	adoptReopenLexParent(mod, parent, scoped)
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil, nil)
+}
+
+// respondsToConversion reports whether v answers a conversion method, honouring
+// an OVERRIDDEN #respond_to?. MRI reaches a conversion method through
+// rb_check_funcall, which consults the object's own #respond_to? whenever that
+// is not the default one (vm_eval.c check_funcall_respond_to) — which is what
+// ruby/spec's "does not call #to_ary if #respond_to? returns false" pins down.
+// With the default #respond_to? the plain method lookup answers, and no Ruby
+// call is made.
+func (vm *VM) respondsToConversion(v object.Value, name string) bool {
+	if m := vm.findMethod(v, "respond_to?"); m != vm.cObject.methods["respond_to?"] {
+		return vm.send(v, "respond_to?", []object.Value{object.SymVal(name)}, nil).Truthy()
+	}
+	return vm.findMethod(v, name) != nil
+}
+
+// masgnExpandOperand converts the value a multiple assignment is destructuring
+// into the element list to distribute. MRI's expandarray instruction does this
+// inline: a non-Array goes through rb_check_array_type, which consults #to_ary
+// ONLY — never #to_a — and only when the object answers respond_to?; an object
+// that declines (no #to_ary, or one returning nil) is destructured as the
+// ONE-element list [obj] (vm_insnhelper.c, vm_expandarray, ruby/ruby
+// v3_4_0:1933-1942). A #to_ary returning a non-Array is a TypeError, from
+// rb_check_array_type's conversion check.
+func (vm *VM) masgnExpandOperand(v object.Value) []object.Value {
+	// asArray, not a bare type assertion: MRI tests RB_TYPE_P(ary, T_ARRAY),
+	// which an Array SUBCLASS instance satisfies, so no conversion is attempted
+	// on one — ruby/spec's "does not call #to_ary on an Array subclass instance".
+	if a, ok := asArray(v); ok {
+		return a.Elems
+	}
+	if vm.respondsToConversion(v, "to_ary") {
+		r := vm.send(v, "to_ary", nil, nil)
+		if a, ok := r.(*object.Array); ok {
+			return a.Elems
+		}
+		if !object.IsNil(r) {
+			raise("TypeError", "can't convert %s to Array (%s#to_ary gives %s)",
+				vm.convErrName(v), vm.convErrName(v), vm.classOf(r).name)
+		}
+	}
+	return []object.Value{v}
+}
+
+// checkScopedReopenVisibility enforces MRI's rule that a COMPACT definition
+// (`class A::B` / `module A::B`) fetches the existing constant through
+// rb_public_const_get_at — the visibility-screening lookup — while a bare
+// nested definition uses rb_const_get_at and screens nothing
+// (vm_insnhelper.c, vm_const_get_under, ruby/ruby v3_4_0:5707-5717). So a
+// private constant cannot be reopened by its qualified path, but the same
+// module can still be reopened from a scope where the name is not private.
+func (vm *VM) checkScopedReopenVisibility(parent *RClass, name string, scoped bool) {
+	if !scoped || parent == nil || !parent.privateConsts[name] {
+		return
+	}
+	if _, ok := vm.constTable(parent)[name]; ok {
+		vm.privateConstReferenced(parent, parent, name)
+	}
 }
 
 // asModuleParent coerces a popped value to the class/module that a scoped
