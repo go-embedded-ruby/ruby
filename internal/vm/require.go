@@ -236,9 +236,11 @@ func (vm *VM) requirePathStr(v object.Value) *object.String {
 			return s
 		}
 		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
-			vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+			vm.builtinClassName(v), vm.builtinClassName(v), vm.builtinClassName(r))
 	}
-	raise("TypeError", "no implicit conversion of %s into String", vm.classOf(v).name)
+	// rb_builtin_class_name spells nil/true/false as those words: MRI answers
+	// `require nil` with "no implicit conversion of nil into String".
+	raise("TypeError", "no implicit conversion of %s into String", vm.builtinClassName(v))
 	return nil
 }
 
