@@ -101,18 +101,39 @@ func BigOf(v Value) (*big.Int, bool) {
 type Float float64
 
 func (f Float) ToS() string {
-	if math.IsInf(float64(f), 1) {
+	v := float64(f)
+	if math.IsInf(v, 1) {
 		return "Infinity"
 	}
-	if math.IsInf(float64(f), -1) {
+	if math.IsInf(v, -1) {
 		return "-Infinity"
 	}
-	if math.IsNaN(float64(f)) {
+	if math.IsNaN(v) {
 		return "NaN"
 	}
-	// Ruby always shows a decimal point for floats (1.0 not 1).
-	s := strconv.FormatFloat(float64(f), 'g', -1, 64)
-	if !strings.ContainsAny(s, ".eE") {
+	// MRI's flo_to_s (numeric.c) lays the shortest round-tripping digits out in
+	// fixed notation when the decimal point falls within -3..DBL_DIG (15), and in
+	// exponential notation otherwise. Go's 'g' verb decides differently — it
+	// compares the exponent against the number of significant digits — so 1e6
+	// rendered as "1e+06" where Ruby prints "1000000.0", and 1e15 as
+	// "1e+15" where Ruby prints "1.0e+15".
+	//
+	// 'e' with precision -1 gives the shortest digits plus the exponent, which is
+	// what decides the layout. Atoi cannot fail on an exponent Go just produced.
+	e := strconv.FormatFloat(v, 'e', -1, 64)
+	at := strings.IndexByte(e, 'e')
+	exp, _ := strconv.Atoi(e[at+1:])
+	if decpt := exp + 1; decpt < -3 || decpt > 15 {
+		// Ruby always shows a fractional digit in the mantissa: 1.0e-06, not 1e-06.
+		mant := e[:at]
+		if !strings.ContainsRune(mant, '.') {
+			mant += ".0"
+		}
+		return mant + e[at:]
+	}
+	s := strconv.FormatFloat(v, 'f', -1, 64)
+	// And a decimal point in fixed notation: 1.0, not 1.
+	if !strings.ContainsRune(s, '.') {
 		s += ".0"
 	}
 	return s
