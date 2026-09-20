@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,8 +27,10 @@ func TestIsExplicitRelative(t *testing.T) {
 	}{
 		{"./x", true},
 		{"../x", true},
-		{`.\x`, true},  // isdirsep counts a backslash; the windows lane runs this too
-		{`..\x`, true}, //
+		// isdirsep accepts a backslash only on Windows, so MRI's answer for these
+		// two differs by platform and so must rbgo's.
+		{`.\x`, runtime.GOOS == "windows"},
+		{`..\x`, runtime.GOOS == "windows"},
 		{".", false},
 		{"..", false},
 		{"...", false},

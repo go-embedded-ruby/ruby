@@ -471,8 +471,12 @@ func (vm *VM) requireCandidates(file string, relative bool) []string {
 //
 // i.e. exactly a leading "./" or "../". A name that merely begins with a dot
 // ("..foo", ".hidden") is NOT explicitly relative and is still searched on
-// $LOAD_PATH. Windows treats a backslash as a separator too (isdirsep), and the
-// windows lane runs these same tests, so both separators count.
+// $LOAD_PATH.
+//
+// isdirsep is PLATFORM-DEPENDENT in MRI: on POSIX it is `(x) == '/'`, and only
+// on Windows does it also accept a backslash. os.IsPathSeparator draws exactly
+// that line, so ".\x" is explicitly relative on the windows lane and an ordinary
+// $LOAD_PATH name everywhere else -- as it is under MRI on each.
 func isExplicitRelative(p string) bool {
 	if len(p) == 0 || p[0] != '.' {
 		return false
@@ -481,7 +485,7 @@ func isExplicitRelative(p string) bool {
 	if len(p) > 0 && p[0] == '.' {
 		p = p[1:]
 	}
-	return len(p) > 0 && (p[0] == '/' || p[0] == '\\')
+	return len(p) > 0 && os.IsPathSeparator(p[0])
 }
 
 // loadPathDirs returns the directory strings currently in $LOAD_PATH, coercing
