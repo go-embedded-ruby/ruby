@@ -100,15 +100,73 @@ p Process.getrlimit(o) == Process.getrlimit(:CORE)`, "true\n"},
 	}
 }
 
-// TestProcessRlimitInfinityPromotes drives the seam with a limit that does not
-// fit in an int64 — RLIM_INFINITY is ~0 on Linux — and asserts it comes back as
-// a Bignum rather than wrapping negative.
-func TestProcessRlimitInfinityPromotes(t *testing.T) {
-	withGetrlimit(t, func(int) (uint64, uint64, error) { return 1, ^uint64(0), nil }, func() {
-		if got := eval(t, `p Process.getrlimit(:CORE)`); got != "[1, 18446744073709551615]\n" {
-			t.Errorf("getrlimit with an out-of-int64 limit: got %q", got)
+// TestProcessRlimitInfinityRoundTrip pins the LINUX representation of
+// RLIM_INFINITY on every platform. rlim_t is unsigned and 64 bits wide, so on
+// Linux RLIM_INFINITY is ~0, which exceeds LONG_MAX and therefore crosses into
+// Ruby as a BIGNUM — process.c's own example is
+//
+//	Process.getrlimit(:CORE) # => [0, 18446744073709551615]
+//
+// Darwin's RLIM_INFINITY is 0x7fff_ffff_ffff_ffff, which fits an int64, so no
+// test that only runs there can see this: the seam supplies the Linux value
+// instead. What must hold on both is that the pair comes back as two Integers
+// and that setrlimit takes the very same 64 bits back — which is exactly what
+// Process.setrlimit(:CORE, *Process.getrlimit(:CORE)) asserts, and what failed
+// on the two Linux arch lanes with "can't convert Object to Integer".
+func TestProcessRlimitInfinityRoundTrip(t *testing.T) {
+	var applied [][2]uint64
+	origSet := procSetrlimit
+	procSetrlimit = func(_ int, cur, max uint64) error {
+		applied = append(applied, [2]uint64{cur, max})
+		return nil
+	}
+	defer func() { procSetrlimit = origSet }()
+
+	withGetrlimit(t, func(int) (uint64, uint64, error) { return 0, ^uint64(0), nil }, func() {
+		// Both halves are Integers, and the big one prints in full rather than
+		// wrapping negative.
+		if got := eval(t, `r = Process.getrlimit(:CORE)
+p r
+p r.map { |v| v.is_a?(Integer) }`); got != "[0, 18446744073709551615]\n[true, true]\n" {
+			t.Errorf("getrlimit with the Linux RLIM_INFINITY: got %q", got)
+		}
+		// The round trip is a no-op: every bit that came out goes back in.
+		if got := eval(t, `p Process.setrlimit(:CORE, *Process.getrlimit(:CORE))`); got != "nil\n" {
+			t.Errorf("round trip: got %q", got)
+		}
+		if len(applied) != 1 || applied[0] != [2]uint64{0, ^uint64(0)} {
+			t.Errorf("round trip applied %v want [[0 %d]]", applied, uint64(1<<64-1))
 		}
 	})
+}
+
+// TestProcessRlimitRangeErrors: an integer too wide even for rlim_t is a
+// RangeError, and so is one too wide for the int a resource number or a pid is.
+// MRI 4.0.5 names the C type in both messages.
+func TestProcessRlimitRangeErrors(t *testing.T) {
+	for _, tc := range []struct{ src, msg string }{
+		{`Process.setrlimit(:CORE, 2 ** 70, 0)`, "bignum too big to convert into 'unsigned long long'"},
+		{`Process.getrlimit(2 ** 70)`, "bignum too big to convert into 'long'"},
+		{`Process.kill(0, 2 ** 70)`, "bignum too big to convert into 'long'"},
+	} {
+		class, msg := evalErr(t, tc.src)
+		if class != "RangeError" || msg != tc.msg {
+			t.Errorf("%s: got %s/%q want RangeError/%q", tc.src, class, msg, tc.msg)
+		}
+	}
+	// A negative limit wraps rather than raising, as NUM2ULL's cast does: MRI
+	// hands setrlimit(:CORE, -1, -1) to the kernel, which answers EPERM.
+	var applied [][2]uint64
+	orig := procSetrlimit
+	procSetrlimit = func(_ int, cur, max uint64) error {
+		applied = append(applied, [2]uint64{cur, max})
+		return nil
+	}
+	defer func() { procSetrlimit = orig }()
+	eval(t, `Process.setrlimit(:CORE, -1, -1)`)
+	if len(applied) != 1 || applied[0] != [2]uint64{^uint64(0), ^uint64(0)} {
+		t.Errorf("negative limit: got %v want it wrapped to ~0", applied)
+	}
 }
 
 // TestProcessSysFailFallback: an errno with no registered Errno::Exxx class
@@ -395,5 +453,26 @@ func TestKernelSystemEnvHash(t *testing.T) {
 	eval(t, `system({"A" => "1"}, "/bin/echo", "hi", {:exception => false})`)
 	if len(got) != 1 || got[0] != "/bin/echo hi" {
 		t.Errorf("system with an env Hash: got %v", got)
+	}
+}
+
+// TestProcessRlimitSymbolicMatchesTable: on THIS host, the symbolic limit names
+// and the numbers getrlimit reports are the same values — the check the faked
+// Linux round trip above cannot make, because it replaces only one of the two.
+func TestProcessRlimitSymbolicMatchesTable(t *testing.T) {
+	var applied [][2]uint64
+	orig := procSetrlimit
+	procSetrlimit = func(_ int, cur, max uint64) error {
+		applied = append(applied, [2]uint64{cur, max})
+		return nil
+	}
+	defer func() { procSetrlimit = orig }()
+	eval(t, `Process.setrlimit(:CORE, 0, :INFINITY)
+Process.setrlimit(:CORE, 0, Process::RLIM_INFINITY)`)
+	if len(applied) != 2 || applied[0] != applied[1] {
+		t.Errorf(":INFINITY and Process::RLIM_INFINITY disagree: %v", applied)
+	}
+	if applied[0][1] != rlimitValues["INFINITY"] {
+		t.Errorf("symbolic INFINITY = %d want the platform's %d", applied[0][1], rlimitValues["INFINITY"])
 	}
 }

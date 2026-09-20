@@ -355,7 +355,7 @@ func (vm *VM) rlimitResourceType(v object.Value) int {
 func (vm *VM) rlimitResourceValue(v object.Value) uint64 {
 	name, named := vm.rlimitName(v)
 	if !named {
-		return uint64(vm.procToInt(v))
+		return vm.rlimToUint(v)
 	}
 	if lim, ok := rlimitValues[name]; ok {
 		return lim
@@ -393,6 +393,12 @@ func (vm *VM) procToInt(v object.Value) int64 {
 	if i, ok := v.(object.Integer); ok {
 		return int64(i)
 	}
+	if _, big := v.(*object.Bignum); big {
+		// Any Bignum reaching here is out of int64 range by construction —
+		// object.NormInt demotes everything that fits — and NUM2INT reports that as
+		// a RangeError, never as the TypeError a non-integer gets.
+		raise("RangeError", "bignum too big to convert into 'long'")
+	}
 	if object.IsNil(v) {
 		raise("TypeError", "no implicit conversion from nil to integer")
 	}
@@ -406,6 +412,29 @@ func (vm *VM) procToInt(v object.Value) int64 {
 			classNameOf(v), classNameOf(v), classNameOf(r))
 	}
 	return int64(i)
+}
+
+// rlimToUint is NUM2RLIM. rlim_t is UNSIGNED and 64 bits wide on every platform
+// MRI builds for — configure.ac's RUBY_REPLACE_TYPE(rlim_t, ...) resolves it to
+// "unsigned long long", so RLIM2NUM is ULL2NUM and NUM2RLIM is NUM2ULL — and
+// ULL2NUM of a value above LONG_MAX is a BIGNUM, not a Fixnum. That is not a
+// corner case: RLIM_INFINITY is ~0 on Linux, so process.c's own example reads
+//
+//	Process.getrlimit(:CORE) # => [0, 18446744073709551615]
+//
+// and the getrlimit -> setrlimit round trip the specs make (and that
+// Process.setrlimit(:CORE, *Process.getrlimit(:CORE)) is) hands this function a
+// Bignum on Linux where it hands it a Fixnum on Darwin. Both have to arrive as
+// the same 64 bits. A negative limit wraps, as NUM2ULL's cast does — MRI takes
+// setrlimit(:CORE, -1, -1) all the way to the kernel, which answers EPERM.
+func (vm *VM) rlimToUint(v object.Value) uint64 {
+	if b, ok := v.(*object.Bignum); ok {
+		if !b.I.IsUint64() {
+			raise("RangeError", "bignum too big to convert into 'unsigned long long'")
+		}
+		return b.I.Uint64()
+	}
+	return uint64(vm.procToInt(v))
 }
 
 // errnoClasses inverts errnoNumbers so a failed syscall can name its Errno::Exxx
