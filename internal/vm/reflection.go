@@ -2,7 +2,6 @@ package vm
 
 import (
 	"reflect"
-	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -114,22 +113,30 @@ func (vm *VM) registerReflection() {
 	// (or clears it with nil) without making it permanent, so a later constant
 	// assignment can still name it. A permanently-named module, a constant path,
 	// or an empty string is rejected the way MRI does.
-	vm.cModule.define("set_temporary_name", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cModule.define("set_temporary_name", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
-		if mod.named {
+		if modulePermanentlyNamed(mod) {
 			raise("RuntimeError", "can't change permanent name")
 		}
 		if object.IsNil(args[0]) {
-			mod.name = ""
+			// Back to anonymous, as if the module had never been named: a later
+			// constant assignment may name it again, and the modules nested in it
+			// lose their path too — MRI's set_namespace_path walks the children of a
+			// module whose classpath changes. Reference: ruby/ruby v3_4_0 variable.c
+			// rb_mod_set_temporary_name → RCLASS_SET_CLASSPATH(mod, 0, FALSE).
+			mod.name, mod.named, mod.lexParent = "", false, nil
+			clearNestedClassPaths(mod, map[*RClass]bool{})
 			return mod
 		}
 		name := strArg(args[0])
 		switch {
 		case name == "":
 			raise("ArgumentError", "empty class/module name")
-		case strings.Contains(name, "::") || constNameWellFormed(name):
-			// A name that reads as a constant (or a constant path) is rejected, so a
-			// temporary name is never mistaken for a real, permanently-assigned one.
+		case isConstantPath(name):
+			// A name that reads as a constant path is rejected, so a temporary name is
+			// never mistaken for a real, permanently-assigned one. Only a WELL-FORMED
+			// path counts: "a::B", "A::B::" and "A::::B" all have a segment that is not
+			// a constant, so MRI accepts them as temporary names.
 			raise("ArgumentError", "the temporary name must not be a constant path to avoid confusion")
 		}
 		mod.name = name
@@ -262,4 +269,24 @@ func (vm *VM) checkBindable(u *UnboundMethod, recv object.Value) {
 		return
 	}
 	raise("TypeError", "bind argument must be an instance of %s", u.owner.name)
+}
+
+// clearNestedClassPaths makes every module nested in mod anonymous again, as
+// MRI's set_namespace_path does when an outer module's classpath is cleared: a
+// path built on a name that no longer exists cannot be reported. Only children
+// whose lexical home is mod itself are touched, and a module that has a
+// permanent name of its own keeps it.
+func clearNestedClassPaths(mod *RClass, seen map[*RClass]bool) {
+	if seen[mod] {
+		return
+	}
+	seen[mod] = true
+	for _, v := range mod.consts {
+		child, ok := v.(*RClass)
+		if !ok || child.lexParent != mod || modulePermanentlyNamed(child) {
+			continue
+		}
+		child.name, child.named, child.lexParent = "", false, nil
+		clearNestedClassPaths(child, seen)
+	}
 }
