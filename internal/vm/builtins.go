@@ -2238,7 +2238,7 @@ func (vm *VM) bootstrap() {
 		return strEncOf(self, vm.chompSep(strOf(self), args))
 	})
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, chopStr(strOf(self)))
+		return strEncOf(self, chopStr(strOf(self), self.(*object.String).Enc))
 	})
 	vm.cString.define("chars", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		enc := self.(*object.String).Enc // each character keeps the receiver's encoding
@@ -2388,6 +2388,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("split", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		args = vm.splitCheckArgs(self.(*object.String), args)
 		res := vm.stringSplit(strOf(self), self.(*object.String).Enc, args)
 		if blk == nil {
 			return res
@@ -2893,7 +2894,8 @@ func (vm *VM) bootstrap() {
 		return vm.strBang(self, func(s string) string { return vm.chompSep(s, args) })
 	})
 	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, chopStr)
+		enc := self.(*object.String).Enc
+		return vm.strBang(self, func(s string) string { return chopStr(s, enc) })
 	})
 	vm.cString.define("squeeze!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.strBang(self, func(s string) string { return stringSqueeze(s, args) })
@@ -6682,6 +6684,48 @@ func (vm *VM) coerceStrIndexArgs(args []object.Value) []object.Value {
 	}
 }
 
+// splitCheckArgs applies the two guards MRI's rb_str_split_m (string.c v3_4_0)
+// runs before it splits anything.
+//
+// mustnot_broken raises ArgumentError "invalid byte sequence in <encoding>" for a
+// string whose bytes are not valid in its own encoding. MRI calls it on the
+// pattern when the pattern is a String (string.c:9237) and on the receiver in the
+// string and chars paths (9317, 9337); the awk and regexp paths reach the same
+// refusal through rb_enc_check and the regexp engine, so every split form rejects
+// a broken receiver -- witnessed against MRI 4.0.5 for the awk, " ", "", Regexp,
+// String and nil patterns alike. A binary (ASCII-8BIT) string is never broken.
+//
+// The limit is read with NUM2INT, an int (not long) conversion, so a value
+// outside the 32-bit range is a RangeError naming which end it overflowed.
+func (vm *VM) splitCheckArgs(self *object.String, args []object.Value) []object.Value {
+	mustNotBeBroken := func(s *object.String) {
+		if !validInEncoding(s.Bytes(), s.EncName()) {
+			raise("ArgumentError", "invalid byte sequence in %s", s.EncName())
+		}
+	}
+	mustNotBeBroken(self)
+	if len(args) > 0 {
+		if pat, ok := args[0].(*object.String); ok {
+			mustNotBeBroken(pat)
+		}
+	}
+	if len(args) > 1 && !object.IsNil(args[1]) {
+		lim := vm.toIntCoerce(args[1])
+		if lim > math.MaxInt32 {
+			raise("RangeError", "integer %d too big to convert to 'int'", lim)
+		}
+		if lim < math.MinInt32 {
+			raise("RangeError", "integer %d too small to convert to 'int'", lim)
+		}
+		// NUM2INT runs once in MRI, so the coerced value replaces the argument
+		// rather than leaving stringSplit to call #to_int a second time -- the
+		// split specs count the calls with a mock.
+		args = append(append([]object.Value(nil), args...), nil)[:len(args)]
+		args[1] = object.IntValue(lim)
+	}
+	return args
+}
+
 // rngKwarg returns the object passed as the random: keyword of a shuffle/sample
 // call, or nil when absent (then the VM's default generator is used).
 func (vm *VM) rngKwarg(args []object.Value) object.Value {
@@ -7128,16 +7172,28 @@ func chompStr(s string) string {
 	return s
 }
 
-// chopStr removes the last character (\r\n counts as one), as in Ruby.
-func chopStr(s string) string {
+// chopStr removes the last character of s in the encoding named by enc (a
+// trailing "\r\n" counting as one), as String#chop and String#chop! do.
+//
+// MRI's chopped_length (string.c v3_4_0) walks back with rb_enc_prev_char, so
+// "the last character" is a question the ENCODING answers: in ASCII-8BIT every
+// byte is a character and chop removes exactly one byte. Decoding as UTF-8
+// regardless -- which is what building a []rune does -- took two bytes off a
+// binary string, and on a UTF-8 string holding invalid bytes it was worse than
+// wrong about the length: []rune replaces each invalid byte with U+FFFD, so
+// re-encoding the prefix rewrote bytes chop never touched.
+func chopStr(s, enc string) string {
 	if strings.HasSuffix(s, "\r\n") {
 		return s[:len(s)-2]
 	}
-	r := []rune(s)
-	if len(r) == 0 {
+	if s == "" {
 		return ""
 	}
-	return string(r[:len(r)-1])
+	if enc == "ASCII-8BIT" {
+		return s[:len(s)-1]
+	}
+	_, size := utf8.DecodeLastRuneInString(s)
+	return s[:len(s)-size]
 }
 
 // stringToInt mimics String#to_i(base): optional whitespace and sign, an optional
