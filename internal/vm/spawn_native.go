@@ -8,6 +8,9 @@ package vm
 
 import (
 	"os/exec"
+	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // runCaptured runs cmd, returning its combined stdout+stderr and exit code. A
@@ -65,4 +68,98 @@ func exitCodeOf(err error) int {
 		return ee.ExitCode()
 	}
 	return 127
+}
+
+// ---------------------------------------------------------------------------
+// POSIX process seams
+//
+// Everything below is the thin, platform-bound half of the Process module: the
+// resource-limit table this host's kernel uses, and one-line wrappers over the
+// syscalls. All of the argument peeling, coercion and error shaping lives in the
+// shared process.go, so the build-tagged variants (spawn_windows.go /
+// spawn_wasm.go) stay empty and the POSIX lanes can cover every branch.
+//
+// Reference: ruby/ruby v3_4_0 process.c — rlimit_resource_name2int (the RLIMIT_
+// name table), proc_getrlimit / proc_setrlimit, proc_getpgid / proc_setpgid /
+// proc_getsid, proc_getpriority / proc_setpriority; signal.c rb_f_kill.
+
+// procPosix reports that this build has the POSIX process surface (resource
+// limits, process groups, sessions, priorities, kill). Process defines those
+// methods only when it is true — on Windows MRI compiles them out entirely, and
+// the ruby/spec expectation there is Process.respond_to?(:getrlimit) == false.
+const procPosix = true
+
+// rlimitResources is the host's RLIMIT_<name> table, keyed by the bare name
+// process.c's rlimit_resource_name2int accepts. The numbers differ per OS
+// (RLIMIT_NPROC is 6 on Linux and 7 on Darwin), so they come from the kernel
+// headers via x/sys/unix rather than being written out here.
+var rlimitResources = map[string]int{
+	"AS":      unix.RLIMIT_AS,
+	"CORE":    unix.RLIMIT_CORE,
+	"CPU":     unix.RLIMIT_CPU,
+	"DATA":    unix.RLIMIT_DATA,
+	"FSIZE":   unix.RLIMIT_FSIZE,
+	"MEMLOCK": unix.RLIMIT_MEMLOCK,
+	"NOFILE":  unix.RLIMIT_NOFILE,
+	"NPROC":   unix.RLIMIT_NPROC,
+	"RSS":     unix.RLIMIT_RSS,
+	"STACK":   unix.RLIMIT_STACK,
+}
+
+// rlimitValues is the symbolic limit table process.c's rlimit_resource_value
+// consults (:INFINITY / :SAVED_MAX / :SAVED_CUR). POSIX only guarantees
+// RLIM_INFINITY; the two saved-limit names are aliases of it on the platforms
+// MRI ships them on, which is what Process::RLIM_SAVED_MAX reports on Darwin.
+var rlimitValues = map[string]uint64{
+	"INFINITY":  uint64(unix.RLIM_INFINITY),
+	"SAVED_MAX": uint64(unix.RLIM_INFINITY),
+	"SAVED_CUR": uint64(unix.RLIM_INFINITY),
+}
+
+// prioTargets is the PRIO_<name> table for getpriority(2)/setpriority(2).
+var prioTargets = map[string]int{
+	"PROCESS": unix.PRIO_PROCESS,
+	"PGRP":    unix.PRIO_PGRP,
+	"USER":    unix.PRIO_USER,
+}
+
+// The seams themselves. Each is a package var so a whitebox test can drive the
+// failure branch of the shared code without needing a kernel that fails.
+var (
+	procGetrlimit = func(res int) (cur, max uint64, err error) {
+		var rl unix.Rlimit
+		if err := unix.Getrlimit(res, &rl); err != nil {
+			return 0, 0, err
+		}
+		return uint64(rl.Cur), uint64(rl.Max), nil
+	}
+	procSetrlimit = func(res int, cur, max uint64) error {
+		rl := unix.Rlimit{Cur: cur, Max: max}
+		return unix.Setrlimit(res, &rl)
+	}
+	procGetpriority = unix.Getpriority
+	procSetpriority = unix.Setpriority
+	procGetpgid     = unix.Getpgid
+	procSetpgid     = unix.Setpgid
+	procGetsid      = unix.Getsid
+	// procKill takes a plain int signal number so the shared caller never has to
+	// name syscall.Signal (which is spelt differently on the non-POSIX targets).
+	procKill = func(pid, sig int) error { return unix.Kill(pid, syscall.Signal(sig)) }
+	// procRusage reports this process's accumulated user and system CPU time in
+	// seconds, the two fields Process.times fills that Go's runtime does not
+	// expose (getrusage(RUSAGE_SELF)).
+	procRusage = func() (utime, stime float64) {
+		var ru unix.Rusage
+		if err := unix.Getrusage(unix.RUSAGE_SELF, &ru); err != nil {
+			return 0, 0
+		}
+		return timevalSeconds(ru.Utime), timevalSeconds(ru.Stime)
+	}
+)
+
+// timevalSeconds converts a struct timeval to fractional seconds. The field
+// widths differ per architecture (int32 on 32-bit Linux, int64 elsewhere), so
+// the conversion goes through int64 rather than naming a concrete type.
+func timevalSeconds(tv unix.Timeval) float64 {
+	return float64(tv.Sec) + float64(tv.Usec)/1e6
 }
