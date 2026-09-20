@@ -343,6 +343,25 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		ok = true
 		return object.Bool(true)
 	}
+	// Nothing on disk. MRI still returns false when the feature is ALREADY
+	// PROVIDED under the bare name: search_required (load.c v3_4_0) consults
+	// rb_feature_p before rb_find_file_ext, and for a name carrying no extension
+	// an entry in $LOADED_FEATURES equal to that name answers 'u' --
+	//
+	//	if (!*(e = f + len)) { if (ext) continue; return 'u'; }
+	//
+	// -- whereupon `case 0: if (ft) goto feature_present;` returns with *path == 0
+	// and require_internal reports false rather than failing to load. Only the
+	// verbatim form is matched here; MRI also accepts an entry spelled
+	// "<$LOAD_PATH entry>/<name>", and its loaded-features index carries a
+	// "distractor" rule for entries with an unusable extension, neither of which
+	// this check reproduces -- it can only turn a LoadError into false, never the
+	// other way round, so it cannot hide a require that would otherwise work.
+	if !relative && !strings.Contains(filepath.Base(name), ".") {
+		if arr, ok := vm.globals["$LOADED_FEATURES"].(*object.Array); ok && featureListed(arr, name) {
+			return object.Bool(false)
+		}
+	}
 	return vm.raiseLoadError(errName)
 }
 

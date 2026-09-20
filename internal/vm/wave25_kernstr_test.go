@@ -209,6 +209,39 @@ func TestRequireResolutionRules(t *testing.T) {
 	}
 }
 
+// TestRequireAlreadyProvidedBareName covers the last branch of doRequire: a
+// require whose name carries no extension and that finds nothing on disk still
+// returns false when $LOADED_FEATURES already lists that exact name.
+// search_required (load.c v3_4_0) asks rb_feature_p before rb_find_file_ext, and
+// a no-extension entry answers 'u', which reaches `case 0: if (ft) goto
+// feature_present;` -- so require_internal reports false instead of failing.
+// Witnessed against MRI 4.0.5, including the cases that must still raise.
+func TestRequireAlreadyProvidedBareName(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`$LOADED_FEATURES << "no_such_feature_abc"
+		  p require("no_such_feature_abc")`, `false`},
+		{`$LOADED_FEATURES << "dir/other_missing"
+		  p require("dir/other_missing")`, `false`},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want+"\n" {
+			t.Errorf("src=%q got %q, want %q", c.src, got, c.want+"\n")
+		}
+	}
+	// An extensioned name is NOT matched by a bare entry, and a name that is not
+	// listed at all still raises -- both branches of the guard.
+	bad := []string{
+		`$LOADED_FEATURES << "no_such_feature_abc"` + "\n" + `require("no_such_feature_abc.rb")`,
+		`require("totally_absent_zz")`,
+		`$LOADED_FEATURES << "no_such_feature_abc"` + "\n" + `require_relative("no_such_feature_abc")`,
+	}
+	for _, src := range bad {
+		if cls, _ := evalErr(t, src); cls != "LoadError" {
+			t.Errorf("src=%q got %s, want LoadError", src, cls)
+		}
+	}
+}
+
 // TestRequireRelativeBase covers the expansion rb_f_require_relative applies
 // before require_internal runs: an already-absolute name is left alone (only
 // cleaned), a relative one is joined onto the requiring file's directory.
