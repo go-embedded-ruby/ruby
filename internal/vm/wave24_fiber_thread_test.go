@@ -200,9 +200,11 @@ func TestWave24ThreadDescribeFileField(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := eval(t, "require "+strconv.Quote(path)+"; $TH.join; p $TH.to_s")
-	// p inspects the String, and Ruby's String#inspect escapes a backslash, so on
-	// Windows every separator of the path comes back doubled in the output.
-	field := strings.ReplaceAll(path, `\`, `\\`) + ":0"
+	// require names the file the way Ruby does — featurePath expands it and turns
+	// the separators into forward slashes, as MRI's rb_file_expand_path does — so
+	// the field holds the ToSlash form, whatever the platform separator is. There
+	// is then nothing for String#inspect to escape.
+	field := filepath.ToSlash(path) + ":0"
 	if !strings.Contains(got, field) || !strings.Contains(got, " dead>") {
 		t.Errorf("Thread#to_s file field: got %q, want it to name %q and end \" dead>\"", got, field)
 	}
@@ -219,8 +221,8 @@ func TestWave24FiberDescribeLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := eval(t, "require "+strconv.Quote(path)+"; p $FIB.inspect")
-	// Same escaping as above: the label is printed through String#inspect.
-	label := strings.ReplaceAll(path, `\`, `\\`)
+	// Same naming as above: the label is the forward-slash form of the path.
+	label := filepath.ToSlash(path)
 	if !strings.Contains(got, label) || !strings.Contains(got, "(created)") {
 		t.Errorf("Fiber#inspect label: got %q, want it to name %q and say (created)", got, label)
 	}
