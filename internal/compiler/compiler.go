@@ -2336,8 +2336,12 @@ func (c *Compiler) compileMultiAssign(v *ast.MultiAssign) {
 		// list, matching MRI.
 		c.compileSplatItems(v.Values)
 	case len(v.Values) == 1:
+		// No conversion here: MRI compiles the right-hand side AS IS, dups it —
+		// that dup is the assignment's value, so `a, b = 1` evaluates to 1, not
+		// [1] — and lets expandarray do the destructuring conversion, which is
+		// #to_ary and never #to_a (compile.c compile_massign0, ruby/ruby
+		// v3_4_0:5804-5810). See masgnExpandOperand.
 		c.compileNode(v.Values[0])
-		b.emit(bytecode.OpSplatToArray, 0, 0)
 	default:
 		for _, val := range v.Values {
 			c.compileNode(val)
@@ -2432,7 +2436,6 @@ func (c *Compiler) storeMultiTarget(target ast.Node) {
 		// the sub-targets, recursively (splat-aware). Keep a copy so, like every
 		// other store target, this one leaves a value for the caller's OpPop.
 		b.emit(bytecode.OpDup, 0, 0)
-		b.emit(bytecode.OpSplatToArray, 0, 0)
 		c.expandAndStore(t.Names, t.Targets, t.SplatIndex)
 	case *ast.VarRef:
 		c.storeLocal(t.Name)

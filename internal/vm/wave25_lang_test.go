@@ -237,3 +237,49 @@ puts "ok"`, "ok")
 require "rspec"
 p include().class`, "RSpec::Matchers::BuiltIn::BaseMatcher")
 }
+
+// The value of a multiple assignment is the right-hand side AS THE EXPRESSION
+// PRODUCED IT: MRI dups it before expandarray (compile.c compile_massign0,
+// ruby/ruby v3_4_0:5804-5810), so a single right-hand value is returned
+// unwrapped.
+func TestMasgnValueIsTheRightHandSide(t *testing.T) {
+	checkSrc(t, "single value", "p((a, b, c = 1))", "1")
+	checkSrc(t, "single value with a splat target", "p((*a = 1))", "1")
+	checkSrc(t, "leading splat target", "p((a, *b = 1))", "1")
+	checkSrc(t, "several values", "p((a, b = 1, 2))", "[1, 2]")
+	checkSrc(t, "array value", "p((a, b = [1, 2]))", "[1, 2]")
+	checkSrc(t, "splatted value", "p((a, b = *[1, 2]))", "[1, 2]")
+}
+
+// Destructuring converts with #to_ary and never #to_a, an object that declines
+// is destructured as a one-element list, and a #to_ary returning a non-Array is
+// a TypeError — MRI's expandarray via rb_check_array_type (vm_insnhelper.c
+// vm_expandarray, ruby/ruby v3_4_0:1933-1942).
+func TestMasgnDestructuringUsesToAry(t *testing.T) {
+	checkSrc(t, "to_ary converts", "class A; def to_ary; [1, 2]; end; end\na, b = A.new\np [a, b]", "[1, 2]")
+	checkSrc(t, "to_a is not consulted",
+		"class O; def to_a; [1, 2]; end; end\na, b = O.new\np [a.class, b]", "[O, nil]")
+	checkSrc(t, "to_ary returning nil declines",
+		"class N; def to_ary; nil; end; end\na, b = N.new\np [a.class, b]", "[N, nil]")
+	checkSrc(t, "a plain object is a one-element list", "a, b = 1\np [a, b]", "[1, nil]")
+	checkSrc(t, "to_ary returning a non-Array is a TypeError", `
+class Bad; def to_ary; 5; end; end
+begin; a, b = Bad.new; rescue TypeError => e; p e.message; end`,
+		`"can't convert Bad to Array (Bad#to_ary gives Integer)"`)
+	// An Array SUBCLASS instance is already T_ARRAY, so no conversion is tried.
+	checkSrc(t, "an Array subclass is not converted", `
+class MyAry < Array; def to_ary; raise "forbidden"; end; end
+a, b = MyAry.new([1, 2])
+p [a, b]`, "[1, 2]")
+	// An overridden #respond_to? is honoured, as MRI's rb_check_funcall does.
+	checkSrc(t, "an overridden respond_to? is honoured", `
+class NoRt
+  def to_ary; [1, 2]; end
+  def respond_to?(n, p = false); n == :to_ary ? false : super; end
+end
+a, b = NoRt.new
+p [a.class, b]`, "[NoRt, nil]")
+	// A nested group destructures its incoming value the same way.
+	checkSrc(t, "a nested group converts too",
+		"class M; def to_ary; [1, 2]; end; end\na, (b, c), d = 1, M.new, 4\np [a, b, c, d]", "[1, 1, 2, 4]")
+}

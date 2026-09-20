@@ -2147,7 +2147,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpSplatToArray:
 				push(vm.splatToArray(pop()))
 			case bytecode.OpExpandArray:
-				elems := pop().(*object.Array).Elems
+				elems := vm.masgnExpandOperand(pop())
 				n := len(elems)
 				pre, post, hasSplat := in.A, in.B, in.C == 1
 				vals := make([]object.Value, 0, pre+post+1)
@@ -2498,6 +2498,48 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 	mod.defaultVis, mod.funcMode = visPublic, false
 	adoptReopenLexParent(mod, parent, scoped)
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil, nil)
+}
+
+// respondsToConversion reports whether v answers a conversion method, honouring
+// an OVERRIDDEN #respond_to?. MRI reaches a conversion method through
+// rb_check_funcall, which consults the object's own #respond_to? whenever that
+// is not the default one (vm_eval.c check_funcall_respond_to) — which is what
+// ruby/spec's "does not call #to_ary if #respond_to? returns false" pins down.
+// With the default #respond_to? the plain method lookup answers, and no Ruby
+// call is made.
+func (vm *VM) respondsToConversion(v object.Value, name string) bool {
+	if m := vm.findMethod(v, "respond_to?"); m != vm.cObject.methods["respond_to?"] {
+		return vm.send(v, "respond_to?", []object.Value{object.SymVal(name)}, nil).Truthy()
+	}
+	return vm.findMethod(v, name) != nil
+}
+
+// masgnExpandOperand converts the value a multiple assignment is destructuring
+// into the element list to distribute. MRI's expandarray instruction does this
+// inline: a non-Array goes through rb_check_array_type, which consults #to_ary
+// ONLY — never #to_a — and only when the object answers respond_to?; an object
+// that declines (no #to_ary, or one returning nil) is destructured as the
+// ONE-element list [obj] (vm_insnhelper.c, vm_expandarray, ruby/ruby
+// v3_4_0:1933-1942). A #to_ary returning a non-Array is a TypeError, from
+// rb_check_array_type's conversion check.
+func (vm *VM) masgnExpandOperand(v object.Value) []object.Value {
+	// asArray, not a bare type assertion: MRI tests RB_TYPE_P(ary, T_ARRAY),
+	// which an Array SUBCLASS instance satisfies, so no conversion is attempted
+	// on one — ruby/spec's "does not call #to_ary on an Array subclass instance".
+	if a, ok := asArray(v); ok {
+		return a.Elems
+	}
+	if vm.respondsToConversion(v, "to_ary") {
+		r := vm.send(v, "to_ary", nil, nil)
+		if a, ok := r.(*object.Array); ok {
+			return a.Elems
+		}
+		if !object.IsNil(r) {
+			raise("TypeError", "can't convert %s to Array (%s#to_ary gives %s)",
+				vm.convErrName(v), vm.convErrName(v), vm.classOf(r).name)
+		}
+	}
+	return []object.Value{v}
 }
 
 // checkScopedReopenVisibility enforces MRI's rule that a COMPACT definition
