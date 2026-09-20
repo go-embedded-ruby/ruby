@@ -1985,7 +1985,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				name := iseq.Names[in.A]
 				recv := pop()
 				cls, ok := recv.(*RClass)
-				if ok && vm.hasScopedConst(cls, name) {
+				// `defined?(A::B)` screens constant visibility: MRI answers it with
+				// rb_public_const_defined_from, the visibility-checking form
+				// (vm_insnhelper.c, ruby/ruby v3_4_0:1139-1141), so a
+				// private_constant is not `defined?` by its qualified path.
+				if ok && vm.hasScopedConst(cls, name) && !vm.scopedConstIsPrivate(cls, name) {
 					push(definedTag("constant"))
 				} else {
 					push(object.NilV)
@@ -2407,6 +2411,7 @@ func scopedNameFor(scope *RClass, name string) string {
 // class body with self = the class, and returns the body's value.
 func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, superExpr object.Value, scoped bool) object.Value {
 	table := vm.constTable(parent)
+	vm.checkScopedReopenVisibility(parent, name, scoped)
 	var class *RClass
 	if existing, ok := table[name]; ok {
 		var isClass bool
@@ -2474,6 +2479,7 @@ func adoptReopenLexParent(c, parent *RClass, scoped bool) {
 // the module, and returns the body's value.
 func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, scoped bool) object.Value {
 	table := vm.constTable(parent)
+	vm.checkScopedReopenVisibility(parent, name, scoped)
 	var mod *RClass
 	if existing, ok := table[name]; ok {
 		var isClass bool
@@ -2492,6 +2498,22 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 	mod.defaultVis, mod.funcMode = visPublic, false
 	adoptReopenLexParent(mod, parent, scoped)
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil, nil)
+}
+
+// checkScopedReopenVisibility enforces MRI's rule that a COMPACT definition
+// (`class A::B` / `module A::B`) fetches the existing constant through
+// rb_public_const_get_at — the visibility-screening lookup — while a bare
+// nested definition uses rb_const_get_at and screens nothing
+// (vm_insnhelper.c, vm_const_get_under, ruby/ruby v3_4_0:5707-5717). So a
+// private constant cannot be reopened by its qualified path, but the same
+// module can still be reopened from a scope where the name is not private.
+func (vm *VM) checkScopedReopenVisibility(parent *RClass, name string, scoped bool) {
+	if !scoped || parent == nil || !parent.privateConsts[name] {
+		return
+	}
+	if _, ok := vm.constTable(parent)[name]; ok {
+		vm.privateConstReferenced(parent, parent, name)
+	}
 }
 
 // asModuleParent coerces a popped value to the class/module that a scoped
