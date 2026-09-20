@@ -114,6 +114,29 @@ func (vm *VM) registerModuleExtras() {
 			native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 				return vm.send(vm.cObject, "define_method", args, blk)
 			}}
+		// Bare `include M` at the top level mixes M into Object, so its constants
+		// and methods become globally visible. MRI defines this as a PRIVATE
+		// singleton method on main that forwards to Module#include on Object —
+		// eval.c top_include (ruby/ruby v3_4_0:1862-1866) and its registration
+		// at :2152-2154 — and it returns Object, rb_mod_include's return.
+		// It has to live on main's singleton because this VM also publishes an
+		// RSpec `include(...)` MATCHER as an Object instance method, which
+		// otherwise shadows the real one for every receiver, main included, and
+		// made `include M` a silent no-op returning a matcher. A singleton method
+		// wins over Object's, so the two are told apart by their arguments: a
+		// non-empty list of modules is the language construct, anything else is
+		// the matcher, reached directly since this method now hides it from main.
+		// The two only collide for main — inside an example self is the spec
+		// context, not main — and the arguments never overlap, because MRI's
+		// top-level include takes modules and nothing else (a non-module is a
+		// TypeError, and no argument at all an ArgumentError).
+		sc.methods["include"] = &Method{name: "include", owner: sc, vis: visPrivate,
+			native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+				if len(args) > 0 && allModuleArgs(args) {
+					return vm.send(vm.cObject, "include", args, nil)
+				}
+				return vm.invoke(vm.cObject.methods["include"], self, args, blk)
+			}}
 	}
 
 	// private_class_method / public_class_method: set the named class methods'
@@ -537,4 +560,16 @@ func (vm *VM) resolveSingletonHook(recv object.Value, name string) *Method {
 		c = sc
 	}
 	return lookupMethod(c, name)
+}
+
+// allModuleArgs reports whether every argument is a Module or Class — what MRI's
+// top-level include accepts, and what the RSpec include matcher is never called
+// with. It tells the two apart on main; see the singleton `include` above.
+func allModuleArgs(args []object.Value) bool {
+	for _, a := range args {
+		if _, ok := a.(*RClass); !ok {
+			return false
+		}
+	}
+	return true
 }
