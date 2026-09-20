@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -277,6 +278,14 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 	if !strings.HasSuffix(file, ".rb") {
 		file += ".rb"
 	}
+	// rb_f_require_relative (load.c v3_4_0) expands the name against the requiring
+	// file's directory BEFORE handing it to require_internal, so the failing name
+	// load_failed reports -- and the @path it stamps -- is the expanded, cleaned
+	// absolute path of the name AS PASSED, with no ".rb" appended.
+	errName := name
+	if relative {
+		errName = vm.requireRelativeBase(name)
+	}
 	// Try each candidate by reading it directly — the read is the existence test.
 	for _, cand := range vm.requireCandidates(file, relative) {
 		src, err := os.ReadFile(cand)
@@ -292,6 +301,13 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 			delete(vm.loaded, abs)
 		}
 		if vm.loaded[abs] {
+			// A require of a feature whose own load has not finished yet is MRI's
+			// circular require: load_lock (load.c v3_4_0) finds the feature in the
+			// loading table, warns when the caller asked for warnings, then lets the
+			// second require return without running the file again.
+			if vm.loaded[vm.requireLoadingKey(abs)] {
+				vm.warnCircularRequire(abs)
+			}
 			return object.Bool(false)
 		}
 		iseq, cerr := parseCompileFn(string(src))
@@ -304,6 +320,9 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		// called from.
 		setISeqFile(iseq, abs)
 		vm.loaded[abs] = true
+		loadingKey := vm.requireLoadingKey(abs)
+		vm.loaded[loadingKey] = true
+		defer delete(vm.loaded, loadingKey)
 		vm.noteLoadedFeature(abs)
 		// A require whose file raises is NOT a completed require: MRI's
 		// require_internal unregisters the feature when the load unwinds, so the
@@ -322,7 +341,31 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		ok = true
 		return object.Bool(true)
 	}
-	return vm.raiseLoadError(name)
+	return vm.raiseLoadError(errName)
+}
+
+// requireLoadingKey names the vm.loaded entry marking a feature whose load is
+// still running ON THIS THREAD. MRI keeps that in a loading table (load.c
+// get_loading_table) holding a thread shield per feature, and load_lock warns
+// only when rb_thread_shield_owned says the CURRENT thread already holds it --
+// another thread arriving at a feature mid-load is not a circular require, it is
+// a concurrent one, and it waits instead of warning. Keying the marker by thread
+// reproduces that test; the entry goes in vm.loaded as the "feature:" entries for
+// built-in features already do, so no VM field is needed.
+func (vm *VM) requireLoadingKey(abs string) string {
+	return fmt.Sprintf("loading:%p:%s", vm.currentThread, abs)
+}
+
+// warnCircularRequire emits MRI's circular-require warning. load_lock issues it
+// through rb_warning, not rb_warn, so it appears only in verbose mode ($VERBOSE
+// true) -- `require_internal(ec, fname, 1, RTEST(ruby_verbose))` passes the
+// verbose flag down as load_lock's `warn` argument. It goes to the current
+// $stderr so a reassigned $stderr (mspec's `complain` matcher) captures it.
+func (vm *VM) warnCircularRequire(path string) {
+	if v, ok := vm.globals["$VERBOSE"].(object.Bool); !ok || !bool(v) {
+		return
+	}
+	vm.curStderr().writeStr("warning: loading in progress, circular require considered harmful - " + path + "\n")
 }
 
 // setISeqFile stamps path onto iseq and all of its nested children, so a method
@@ -337,6 +380,21 @@ func setISeqFile(iseq *bytecode.ISeq, path string) {
 	for _, c := range iseq.Children {
 		setISeqFile(c, path)
 	}
+}
+
+// requireRelativeBase expands name the way rb_f_require_relative does --
+// rb_file_absolute_path(fname, dirname(rb_current_realfilepath())) -- leaving an
+// already-absolute name alone and cleaning the result, which is what MRI names in
+// the LoadError of a require_relative that finds nothing.
+func (vm *VM) requireRelativeBase(name string) string {
+	if filepath.IsAbs(name) {
+		return featurePath(name)
+	}
+	dir := vm.currentDir()
+	if f := vm.currentFile(); f != "" {
+		dir = filepath.Dir(f)
+	}
+	return featurePath(filepath.Join(dir, name))
 }
 
 // requireCandidates lists the paths to try for file. require_relative resolves
@@ -405,9 +463,8 @@ func isExplicitRelative(p string) bool {
 	return len(p) > 0 && (p[0] == '/' || p[0] == '\\')
 }
 
-// loadPathDirs returns the directory strings currently in $LOAD_PATH. Non-string
-// entries are skipped (MRI coerces them, but the embedded load path holds plain
-// strings).
+// loadPathDirs returns the directory strings currently in $LOAD_PATH, coercing
+// each entry through MRI's rb_get_path as rb_find_file does.
 func (vm *VM) loadPathDirs() []string {
 	lp, ok := vm.globals["$LOAD_PATH"].(*object.Array)
 	if !ok {
@@ -415,9 +472,10 @@ func (vm *VM) loadPathDirs() []string {
 	}
 	dirs := make([]string, 0, len(lp.Elems))
 	for _, e := range lp.Elems {
-		if s, ok := e.(*object.String); ok {
-			dirs = append(dirs, string(s.Bytes()))
-		}
+		// rb_find_file (file.c v3_4_0) runs every $LOAD_PATH entry through
+		// rb_get_path(str) as it walks the list, so an entry that is not a String
+		// but answers #to_path (a Pathname, say) is a usable load-path directory.
+		dirs = append(dirs, string(vm.requirePathStr(e).Bytes()))
 	}
 	return dirs
 }
