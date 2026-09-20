@@ -8,6 +8,7 @@ package vm
 
 import (
 	"bytes"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -26,7 +27,21 @@ func runSpawn(t *testing.T, src string, fake func([]string) (string, int)) strin
 	t.Helper()
 	orig := runCaptured
 	runCaptured = fake
-	defer func() { runCaptured = orig }()
+	// Process.spawn / Process.exec go through the richer runSpawnProc seam and
+	// resolve their program before running it; both are driven from the same fake
+	// so these tests stay independent of what the host has in PATH.
+	origProc, origResolve := runSpawnProc, spawnResolve
+	runSpawnProc = func(r *spawnReq) int {
+		cmd := r.argv
+		if r.shell != "" {
+			cmd = []string{r.shell}
+		}
+		out, code := fake(cmd)
+		_, _ = io.WriteString(r.stdout, out)
+		return code
+	}
+	spawnResolve = func(prog string, _ []string) (string, string, string, bool) { return prog, "", "", true }
+	defer func() { runCaptured, runSpawnProc, spawnResolve = orig, origProc, origResolve }()
 
 	prog, err := parser.Parse(src)
 	if err != nil {
