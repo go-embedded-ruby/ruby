@@ -68,14 +68,17 @@ func (vm *VM) registerProcess() {
 		}
 		return object.NewArrayFromSlice(elems)
 	})
-	// maxgroups is a platform tunable; reading it returns the conventional 16 cap
-	// and assigning it is accepted but ignored (the kernel limit is fixed), which
-	// matches MRI on the platforms we target. Puppet sets it inside a rescue.
+	// maxgroups is a process-local tunable MRI keeps in a static (process.c
+	// maxgroups / proc_setmaxgroups): it caps how many gids Process.groups= will
+	// accept, and reading it back returns whatever was last assigned. It starts at
+	// the conventional 16. Puppet sets it inside a rescue.
+	maxgroups := int64(processMaxGroups)
 	def("maxgroups", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(processMaxGroups)
+		return object.IntValue(maxgroups)
 	})
-	def("maxgroups=", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return args[0] // accepted-and-ignored; returns the assigned value
+	def("maxgroups=", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		maxgroups = vm.procToInt(args[0])
+		return args[0]
 	})
 
 	def("clock_gettime", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
@@ -97,6 +100,7 @@ func (vm *VM) registerProcess() {
 	vm.consts["Process::CLOCK_MONOTONIC"] = object.IntValue(clockMonotonic)
 
 	vm.registerProcessPosix(mod, def)
+	vm.registerProcessResiduals(mod, def)
 }
 
 // Clock identifiers match the Linux/macOS values MRI exposes (CLOCK_REALTIME=0,
@@ -429,6 +433,9 @@ func sysFail(err error, op string) {
 	cls, msg := "SystemCallError", errnoMessage(err)
 	var eno syscall.Errno
 	if errors.As(err, &eno) {
+		// The errno's own text, not the wrapper's: an os.PathError would otherwise
+		// repeat the operation and the path that op already names.
+		msg = errnoMessage(eno)
 		if name, ok := errnoClasses[int64(eno)]; ok {
 			cls = "Errno::" + name
 		}
@@ -507,4 +514,137 @@ func errnoMessage(err error) string {
 		msg[0] = byte(unicode.ToUpper(rune(msg[0])))
 	}
 	return string(msg)
+}
+
+// ---------------------------------------------------------------------------
+// Process identity modules, CPU times, clock resolution and the small residuals
+//
+// Read for this: ruby/ruby v3_4_0 process.c — rb_proc_times and the
+// rb_cProcessTms Struct, rb_clock_getres (the documented
+// GETTIMEOFDAY_BASED_CLOCK_REALTIME / TIME_BASED_CLOCK_REALTIME /
+// GETRUSAGE_BASED_CLOCK_PROCESS_CPUTIME_ID resolutions), proc_setproctitle and
+// rb_proc_warmup, proc_setmaxgroups / proc_setgroups, and the
+// Process::UID / Process::GID / Process::Sys module definitions at the foot of
+// InitVM_process.
+
+// registerProcessResiduals installs the rest of the Process surface: the
+// identity modules MRI defines beside Process itself, Process.times and its
+// Process::Tms, Process.clock_getres, Process.argv0, and the small accessors.
+func (vm *VM) registerProcessResiduals(mod *RClass, def func(string, NativeFn)) {
+	vm.registerProcessIdentityModules(mod)
+	vm.registerProcessTms(mod, def)
+
+	// clock_getres(clock, unit = :float_second). The three documented symbolic
+	// clocks have fixed resolutions; the numeric clocks report the 1µs this
+	// host's clock_getres(2) does, which is what MRI answers on Linux and Darwin.
+	def("clock_getres", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		res := time.Microsecond
+		if sym, ok := args[0].(object.Symbol); ok && string(sym) == "TIME_BASED_CLOCK_REALTIME" {
+			res = time.Second
+		}
+		return clockGettimeUnit(res, args)
+	})
+
+	// argv0 is the name the main script was given, frozen, and the SAME object on
+	// every call — process.c keeps rb_progname in a single VALUE.
+	var argv0 object.Value
+	def("argv0", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		if argv0 == nil {
+			argv0 = object.NewFrozenStringView(vm.scriptName)
+		}
+		return argv0
+	})
+
+	// setproctitle records the title and answers with it. Rewriting the real
+	// process title needs the argv area the C runtime owns, which a Go program
+	// cannot reach, so `ps` keeps showing the original command — the return value
+	// and the fact that $0 is left alone are what this reproduces.
+	def("setproctitle", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1)")
+		}
+		return args[0]
+	})
+
+	// warmup asks the VM to prepare for a steady-state workload; every part of it
+	// (a compaction, a heap preallocation) is implementation-specific, and MRI
+	// documents other implementations making it a no-op that answers true.
+	def("warmup", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.Bool(true)
+	})
+}
+
+// registerProcessIdentityModules installs Process::UID, Process::GID and
+// Process::Sys — the three modules MRI defines beside Process for the same
+// identity queries under their POSIX names. Only the queries are provided: the
+// privilege switches they also carry would change this interpreter's own
+// credentials, which a spec run must never do to the shell it was started from.
+func (vm *VM) registerProcessIdentityModules(mod *RClass) {
+	sub := func(name string, methods map[string]func() int) *RClass {
+		m := newClass("Process::"+name, nil)
+		m.isModule = true
+		m.named = true
+		mod.consts[name] = m
+		vm.consts["Process::"+name] = m
+		for mname, fn := range methods {
+			get := fn
+			m.smethods[mname] = &Method{name: mname, owner: m,
+				native: func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+					return object.IntValue(int64(get()))
+				}}
+		}
+		return m
+	}
+	sub("UID", map[string]func() int{"rid": processUID, "eid": processEUID})
+	sub("GID", map[string]func() int{"rid": processGID, "eid": processEGID})
+	sub("Sys", map[string]func() int{
+		"getuid": processUID, "geteuid": processEUID,
+		"getgid": processGID, "getegid": processEGID,
+	})
+}
+
+// registerProcessTms installs Process::Tms and Process.times. Tms is a Struct in
+// MRI (rb_struct_define "utime", "stime", "cutime", "cstime"); here it is a
+// plain class with the same four readers and writers, built so
+// Process::Tms.new(a, b, c, d) and Process::Tms.new both work.
+func (vm *VM) registerProcessTms(mod *RClass, def func(string, NativeFn)) {
+	tms := newClass("Tms", vm.cObject)
+	tms.name, tms.named = "Process::Tms", true
+	mod.consts["Tms"] = tms
+	vm.consts["Process::Tms"] = tms
+	fields := []string{"utime", "stime", "cutime", "cstime"}
+	tms.smethods["new"] = &Method{name: "new", owner: tms, native: func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		o := &RObject{class: self.(*RClass), ivars: map[string]object.Value{}}
+		for i, f := range fields {
+			o.ivars["@"+f] = object.NilV
+			if i < len(args) {
+				o.ivars["@"+f] = args[i]
+			}
+		}
+		return o
+	}}
+	for _, f := range fields {
+		name := f
+		tms.define(name, func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+			return self.(*RObject).ivars["@"+name]
+		})
+		tms.define(name+"=", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			self.(*RObject).ivars["@"+name] = args[0]
+			return args[0]
+		})
+	}
+
+	// times reports this process's accumulated CPU time. The child fields are
+	// zero: a child of this VM runs inside it, so its CPU time is already in the
+	// process's own utime/stime rather than credited separately.
+	def("times", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+		utime, stime := procRusage()
+		o := &RObject{class: tms, ivars: map[string]object.Value{}}
+		o.ivars["@utime"], o.ivars["@stime"] = object.Float(utime), object.Float(stime)
+		o.ivars["@cutime"], o.ivars["@cstime"] = object.Float(0), object.Float(0)
+		return o
+	})
 }

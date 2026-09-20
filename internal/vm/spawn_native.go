@@ -163,3 +163,25 @@ var (
 func timevalSeconds(tv unix.Timeval) float64 {
 	return float64(tv.Sec) + float64(tv.Usec)/1e6
 }
+
+// runSpawnProc runs one prepared child to completion, writing its two output
+// streams to the request's sinks and returning its exit code. It is the richer
+// counterpart of runCaptured: Process.spawn needs the child's environment, its
+// working directory and its two streams kept apart, none of which a combined
+// capture can express. A package var so tests drive every caller without real
+// processes.
+var runSpawnProc = func(r *spawnReq) int {
+	var c *exec.Cmd
+	if r.shell != "" {
+		c = exec.Command("/bin/sh", "-c", r.shell)
+	} else {
+		// The program was already resolved against the CHILD's PATH; os/exec would
+		// otherwise look it up in the parent's, which is a different search.
+		c = exec.Command(r.path, r.argv[1:]...)
+		// The [prog, argv0] command-array form tells the child a name other than
+		// the file that was executed, so argv[0] is set apart from the path.
+		c.Args[0] = r.argv[0]
+	}
+	c.Dir, c.Env, c.Stdout, c.Stderr = r.dir, r.env, r.stdout, r.stderr
+	return exitCodeOf(c.Run())
+}

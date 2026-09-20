@@ -301,3 +301,99 @@ func TestProcessLimitConstants(t *testing.T) {
 		t.Errorf("constants: got %q want %q", got, want)
 	}
 }
+
+// TestProcessResiduals covers Process::Tms and Process.times, clock_getres,
+// argv0, setproctitle, warmup, maxgroups= and the Process::UID / GID / Sys
+// identity modules.
+func TestProcessResiduals(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		// Process::Tms: four readers and four writers, with and without arguments.
+		{`t = Process::Tms.new(1, 2, 3, 4); p [t.utime, t.stime, t.cutime, t.cstime]`, "[1, 2, 3, 4]\n"},
+		{`t = Process::Tms.new; p [t.utime, t.stime, t.cutime, t.cstime]`, "[nil, nil, nil, nil]\n"},
+		{`t = Process::Tms.new
+t.utime, t.stime, t.cutime, t.cstime = 1, 2, 3, 4
+p [t.utime, t.stime, t.cutime, t.cstime]`, "[1, 2, 3, 4]\n"},
+		{`p Process::Tms.name`, "\"Process::Tms\"\n"},
+		// Process.times reports this process's own CPU time, with no child time.
+		{`t = Process.times
+p [t.is_a?(Process::Tms), t.utime.is_a?(Float), t.utime >= 0.0, t.cutime, t.cstime]`,
+			"[true, true, true, 0.0, 0.0]\n"},
+		{`u = Process.times.utime
+1 until Process.times.utime > u
+p Process.times.utime > u`, "true\n"},
+		// clock_getres: the documented symbolic clocks and the numeric ones.
+		{`p Process.clock_getres(:GETTIMEOFDAY_BASED_CLOCK_REALTIME, :nanosecond)`, "1000\n"},
+		{`p Process.clock_getres(:TIME_BASED_CLOCK_REALTIME, :nanosecond)`, "1000000000\n"},
+		{`p Process.clock_getres(:GETRUSAGE_BASED_CLOCK_PROCESS_CPUTIME_ID, :nanosecond)`, "1000\n"},
+		{`p Process.clock_getres(Process::CLOCK_REALTIME, :nanosecond)`, "1000\n"},
+		// 1e-06 second, the same value MRI reports; the spelling differs only
+		// because this VM's Float#inspect drops the ".0" before the exponent
+		// (`p 0.000001` prints 1e-06 here and 1.0e-06 in MRI) — a core
+		// Float-formatting divergence, not a clock one.
+		{`p Process.clock_getres(Process::CLOCK_MONOTONIC)`, "1e-06\n"},
+		// argv0 is frozen and is the same object every time.
+		{`p [Process.argv0.is_a?(String), Process.argv0.frozen?, Process.argv0.equal?(Process.argv0)]`,
+			"[true, true, true]\n"},
+		{`p Process.setproctitle("a-title")`, "\"a-title\"\n"},
+		{`p Process.warmup`, "true\n"},
+		// maxgroups is a tunable that remembers what was assigned.
+		{`n = Process.maxgroups
+Process.maxgroups = n - 1
+p Process.maxgroups == n - 1
+Process.maxgroups = n
+p Process.maxgroups == n`, "true\ntrue\n"},
+		// The identity modules answer with the same numbers Process does.
+		{`p [Process::UID.rid == Process.uid, Process::UID.eid == Process.euid]`, "[true, true]\n"},
+		{`p [Process::GID.rid == Process.gid, Process::GID.eid == Process.egid]`, "[true, true]\n"},
+		{`p [Process::Sys.getuid == Process.uid, Process::Sys.geteuid == Process.euid,
+    Process::Sys.getgid == Process.gid, Process::Sys.getegid == Process.egid]`,
+			"[true, true, true, true]\n"},
+		{`p [Process::UID.name, Process::Sys.name]`, "[\"Process::UID\", \"Process::Sys\"]\n"},
+	} {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("%s\n got %q want %q", tc.src, got, tc.want)
+		}
+	}
+	for _, tc := range []struct{ src, class, msg string }{
+		{`Process.clock_getres`, "ArgumentError", "wrong number of arguments (given 0, expected 1..2)"},
+		{`Process.setproctitle`, "ArgumentError", "wrong number of arguments (given 0, expected 1)"},
+	} {
+		class, msg := evalErr(t, tc.src)
+		if class != tc.class || msg != tc.msg {
+			t.Errorf("%s: got %s/%q want %s/%q", tc.src, class, msg, tc.class, tc.msg)
+		}
+	}
+}
+
+// TestMergeEnv covers every branch of the environment merge: a name the base
+// carries and the Hash overrides, one the Hash removes, one the Hash adds, and
+// one the base carries untouched.
+func TestMergeEnv(t *testing.T) {
+	got := mergeEnv([]string{"KEEP=1", "OVER=old", "DROP=1"},
+		map[string]string{"OVER": "new", "ADD": "2"}, []string{"DROP"})
+	want := []string{"KEEP=1", "OVER=new", "ADD=2"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("mergeEnv: got %v want %v", got, want)
+	}
+	if got := mergeEnv(nil, map[string]string{"B": "2", "A": "1"}, nil); strings.Join(got, " ") != "A=1 B=2" {
+		t.Errorf("mergeEnv(nil base): got %v want deterministic A=1 B=2", got)
+	}
+}
+
+// TestKernelSystemEnvHash keeps Kernel#system's own (older, combined-capture)
+// argument peeling exercised: a leading environment Hash and a trailing options
+// Hash are both stripped off the command.
+func TestKernelSystemEnvHash(t *testing.T) {
+	var got []string
+	fake := func(cmd []string) (string, int, bool) {
+		got = append(got, strings.Join(cmd, " "))
+		return "", 0, true
+	}
+	orig := systemCommand
+	systemCommand = fake
+	defer func() { systemCommand = orig }()
+	eval(t, `system({"A" => "1"}, "/bin/echo", "hi", {:exception => false})`)
+	if len(got) != 1 || got[0] != "/bin/echo hi" {
+		t.Errorf("system with an env Hash: got %v", got)
+	}
+}

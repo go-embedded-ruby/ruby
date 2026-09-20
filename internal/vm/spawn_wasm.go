@@ -49,3 +49,10 @@ var (
 	procKill        func(pid, sig int) error
 	procRusage      func() (utime, stime float64)
 )
+
+// runSpawnProc has no meaning under wasm (no subprocesses), so Process.spawn
+// raises NotImplementedError there rather than silently succeeding.
+var runSpawnProc = func(*spawnReq) int {
+	raise("NotImplementedError", "subprocess execution is not supported on wasm")
+	return 127
+}

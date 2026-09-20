@@ -89,3 +89,17 @@ var (
 	procKill        func(pid, sig int) error
 	procRusage      func() (utime, stime float64)
 )
+
+// runSpawnProc runs one prepared child to completion (see spawn_native.go for
+// the shape and why it is a package var); the shell wrapper is cmd.exe here.
+var runSpawnProc = func(r *spawnReq) int {
+	var c *exec.Cmd
+	if r.shell != "" {
+		c = exec.Command("cmd", "/c", r.shell)
+	} else {
+		c = exec.Command(r.path, r.argv[1:]...)
+		c.Args[0] = r.argv[0]
+	}
+	c.Dir, c.Env, c.Stdout, c.Stderr = r.dir, r.env, r.stdout, r.stderr
+	return exitCodeOf(c.Run())
+}
