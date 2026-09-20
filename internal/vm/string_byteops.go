@@ -6,7 +6,6 @@ package vm
 
 import (
 	"strings"
-	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -36,6 +35,47 @@ func stringConv(v object.Value) *object.String {
 	return s
 }
 
+// builtinClassName names a value the way MRI's error messages do --
+// rb_builtin_class_name (error.c v3_4_0), which spells nil, true and false as
+// those words and otherwise reports the object's class. The package-level
+// classNameOf collapses every object to "Object", which is right for a bare
+// Object but wrong for the true/false literals and for any user class (the
+// byte_index_common specs pin both).
+func (vm *VM) builtinClassName(v object.Value) string {
+	switch t := v.(type) {
+	case object.Nil:
+		return "nil"
+	case object.Bool:
+		if bool(t) {
+			return "true"
+		}
+		return "false"
+	}
+	return vm.classOf(v).name
+}
+
+// strValueArg is MRI's StringValue (rb_str_to_str, string.c v3_4_0): a String
+// passes through, anything else is converted with #to_str, and a value that has
+// no #to_str -- or whose #to_str yields a non-String -- raises TypeError.
+// String#byteindex/#byterindex reach their pattern argument through it
+// (rb_str_byteindex_m / rb_str_byterindex_m call StringValue(sub) once the
+// Regexp branch is ruled out), so an object answering #to_str is accepted.
+func (vm *VM) strValueArg(v object.Value) *object.String {
+	if s, ok := v.(*object.String); ok {
+		return s
+	}
+	if vm.respondsToDynamic(v, "to_str") {
+		r := vm.send(v, "to_str", nil, nil)
+		if s, ok := r.(*object.String); ok {
+			return s
+		}
+		raise("TypeError", "can't convert %s to String (%s#to_str gives %s)",
+			vm.builtinClassName(v), vm.builtinClassName(v), vm.builtinClassName(r))
+	}
+	raise("TypeError", "no implicit conversion of %s into String", vm.builtinClassName(v))
+	return nil
+}
+
 // strByteindex implements String#byteindex(pattern, offset=0): the byte index of
 // the first match of a String or Regexp at or after offset, or nil.
 func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Value {
@@ -43,7 +83,9 @@ func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Valu
 	n := len(s)
 	off := 0
 	if len(args) > 1 {
-		off = int(toInt(args[1]))
+		// rb_str_byteindex_m reads the offset with NUM2LONG, which accepts an
+		// Integer or anything answering #to_int.
+		off = int(vm.toIntCoerce(args[1]))
 		if off < 0 {
 			off += n
 		}
@@ -64,7 +106,7 @@ func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Valu
 		vm.lastMatch = &MatchData{md: md, subject: s, re: needle, byteOff: off}
 		return object.IntValue(int64(off + md.Begin(0)))
 	default:
-		ns := stringConv(args[0])
+		ns := vm.strValueArg(args[0])
 		vm.combinedEncName(self, ns) // raises Encoding::CompatibilityError if incompatible
 		idx := strings.Index(s[off:], ns.Str())
 		if idx < 0 {
@@ -82,7 +124,8 @@ func (vm *VM) strByterindex(self *object.String, args []object.Value) object.Val
 	n := len(s)
 	off := n
 	if len(args) > 1 {
-		off = int(toInt(args[1]))
+		// rb_str_byterindex_m likewise reads the offset with NUM2LONG.
+		off = int(vm.toIntCoerce(args[1]))
 		if off < 0 {
 			off += n
 		}
@@ -100,7 +143,7 @@ func (vm *VM) strByterindex(self *object.String, args []object.Value) object.Val
 	case *Regexp:
 		return vm.byterindexRegexp(s, needle, off)
 	default:
-		ns := stringConv(args[0])
+		ns := vm.strValueArg(args[0])
 		vm.combinedEncName(self, ns) // raises Encoding::CompatibilityError if incompatible
 		return byterindexString(s, ns.Str(), off, n)
 	}
@@ -121,40 +164,28 @@ func byterindexString(s, needle string, off, n int) object.Value {
 	return object.IntValue(int64(idx))
 }
 
-// byterindexRegexp finds the greatest match start at or before off by scanning
-// forward (advancing one character past each match start so overlapping matches
-// are seen) and keeping the last start not exceeding off. It records the winning
-// match as $~.
+// byterindexRegexp returns the greatest byte offset p <= off at which re matches
+// starting exactly at p, recording that match as $~. MRI reaches it through
+// rb_reg_search(sub, str, pos, 1) (string.c rb_str_byterindex_m) -- the trailing
+// 1 is onig_search's reverse flag, so the search runs backwards from pos over the
+// WHOLE subject.
+//
+// Probing anchored matches from off downwards is what keeps the whole subject
+// visible: the previous scan matched re against the tail slice s[p:], which makes
+// every slice start look like the start of the string, so /\A/ reported the last
+// offset instead of 0 and \G could not see the real start offset. The character-
+// indexed String#rindex (strRindexRegexp in regexp.go) already uses this shape;
+// this is its byte-indexed twin.
 func (vm *VM) byterindexRegexp(s string, re *Regexp, off int) object.Value {
-	best := -1
-	for p := 0; p <= len(s); {
-		md := re.re.Match(s[p:])
-		if md == nil {
-			break
+	for p := off; p >= 0; p-- {
+		md := re.matcher().MatchAt(s, p)
+		if md != nil && md.Begin(0) == p {
+			vm.lastMatch = &MatchData{md: md, subject: s, re: re}
+			return object.IntValue(int64(p))
 		}
-		begin := p + md.Begin(0)
-		if begin > off {
-			break
-		}
-		best = begin
-		vm.lastMatch = &MatchData{md: md, subject: s, re: re, byteOff: p}
-		p = begin + runeLenAt(s, begin)
 	}
-	if best < 0 {
-		vm.lastMatch = object.NilV
-		return object.NilV
-	}
-	return object.IntValue(int64(best))
-}
-
-// runeLenAt returns the byte length of the UTF-8 rune beginning at s[i], or 1 at
-// the end of s or on an invalid lead byte, so a scan always advances.
-func runeLenAt(s string, i int) int {
-	if i >= len(s) {
-		return 1
-	}
-	_, sz := utf8.DecodeRuneInString(s[i:])
-	return sz
+	vm.lastMatch = object.NilV
+	return object.NilV
 }
 
 // strBytesplice implements String#bytesplice, replacing a byte range of the
