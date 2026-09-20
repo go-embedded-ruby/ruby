@@ -174,9 +174,12 @@ func TestLoadErrorPath(t *testing.T) {
 			t.Errorf("src=%q got %q, want %q", c.src, got, c.want+"\n")
 		}
 	}
+
 	// require_relative names the EXPANDED path, because rb_f_require_relative
-	// expands before require_internal sees the name.
-	got := eval(t, `begin; require_relative "nope_xyz"; rescue LoadError => e; p e.path.end_with?("nope_xyz"), e.path.start_with?("/"); end`)
+	// expands before require_internal sees the name. "Is it expanded?" is asked
+	// with File.expand_path rather than a leading "/", which only holds on POSIX:
+	// featurePath yields "C:/Users/..." on Windows, absolute but not "/"-rooted.
+	got := eval(t, `begin; require_relative "nope_xyz"; rescue LoadError => e; p e.path.end_with?("nope_xyz"), e.path == File.expand_path(e.path); end`)
 	if got != "true\ntrue\n" {
 		t.Errorf("require_relative LoadError#path got %q", got)
 	}
