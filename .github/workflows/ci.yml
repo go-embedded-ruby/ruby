@@ -41,8 +41,10 @@ jobs:
           # -race roughly doubles wall-clock, and the windows runner is the slowest
           # of the three OS lanes; the growing vm suite tips it past go test's 10m
           # default. macOS/ubuntu finish ~20m; windows runs ~2x so needs more room.
-          # Bumped 30m->50m as the vm binding set keeps growing (Puppet ecosystem wave).
-          go test -timeout=50m -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
+          # Bumped 30m->50m (Puppet ecosystem wave), then 50m->90m: the windows
+          # binary hit the 50m alarm at 3007s with the running test at 0s — the
+          # budget ran out, nothing hung — and each conformance wave adds to it.
+          go test -timeout=90m -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
           echo "--- functions below 100% (empty = all covered) ---"
           go tool cover -func=cover.out | grep -vE '100\.0%$' || true
           echo "---------------------------------------------------"
