@@ -535,6 +535,7 @@ class SpecContext
   attr_reader :desc, :examples, :before_each, :after_each, :before_all
   def initialize(desc, parent)
     @desc = desc
+    @parent = parent
     @examples = []
     @before_each = parent ? parent.before_each.dup : []
     @after_each = parent ? parent.after_each.dup : []
@@ -556,6 +557,19 @@ class SpecContext
   def after(scope = :each, &blk); @after_each << blk if scope == :each; end
   def describe(d, *a, &blk)
     child = SpecContext.new("#{@desc} #{d}", self)
+    # Carry helpers written with `def` in THIS block down to the child. The block
+    # is instance_eval'd, so a `def` lands on this object's singleton, and a
+    # nested describe runs on a different object — which is how
+    # core/string/valid_encoding/utf_8_spec lost all 28 of its examples: they call
+    # an outer `def utf8`. Forward each EXISTING helper explicitly rather than
+    # adding a method_missing, because a genuinely missing method must still raise
+    # from the caller with no shim frame in the backtrace — language/send_spec
+    # asserts precisely that, and a method_missing here broke it.
+    parent = self
+    sc = singleton_class
+    (sc.instance_methods(false) + sc.private_instance_methods(false)).each do |m|
+      child.define_singleton_method(m) { |*ar, &bl| parent.send(m, *ar, &bl) }
+    end
     $ctx_stack.push(child)
     begin
       child.instance_eval(&blk) if blk
