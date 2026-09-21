@@ -114,6 +114,29 @@ func (vm *VM) registerModuleExtras() {
 			native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 				return vm.send(vm.cObject, "define_method", args, blk)
 			}}
+		// Bare `include M` at the top level mixes M into Object, so its constants
+		// and methods become globally visible. MRI defines this as a PRIVATE
+		// singleton method on main that forwards to Module#include on Object —
+		// eval.c top_include (ruby/ruby v3_4_0:1862-1866) and its registration
+		// at :2152-2154 — and it returns Object, rb_mod_include's return.
+		// It has to live on main's singleton because this VM also publishes an
+		// RSpec `include(...)` MATCHER as an Object instance method, which
+		// otherwise shadows the real one for every receiver, main included, and
+		// made `include M` a silent no-op returning a matcher. A singleton method
+		// wins over Object's, so the two are told apart by their arguments: a
+		// non-empty list of modules is the language construct, anything else is
+		// the matcher, reached directly since this method now hides it from main.
+		// The two only collide for main — inside an example self is the spec
+		// context, not main — and the arguments never overlap, because MRI's
+		// top-level include takes modules and nothing else (a non-module is a
+		// TypeError, and no argument at all an ArgumentError).
+		sc.methods["include"] = &Method{name: "include", owner: sc, vis: visPrivate,
+			native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+				if len(args) > 0 && allModuleArgs(args) {
+					return vm.send(vm.cObject, "include", args, nil)
+				}
+				return vm.invoke(vm.cObject.methods["include"], self, args, blk)
+			}}
 	}
 
 	// private_class_method / public_class_method: set the named class methods'
@@ -224,26 +247,37 @@ func (vm *VM) registerModuleExtras() {
 		return mod
 	})
 
-	// Constant-visibility directives: the access control itself is not enforced
-	// (reads are not screened here), but MRI validates that every named constant is
-	// defined DIRECTLY on the receiver — an inherited or missing name is a NameError
-	// — before returning self. Each name is a String or Symbol.
+	// Constant-visibility directives. MRI validates that every named constant is
+	// defined DIRECTLY on the receiver — an inherited or missing name is a
+	// NameError — then flips the entry's CONST_VISIBILITY_MASK bits and returns
+	// self. Each name is a String or Symbol.
 	// A pending autoload counts as defined: MRI's set_const_visibility finds it
 	// through rb_const_lookup, which returns the entry autoload_synchronized
 	// reserved with an undefined value. Reference: ruby/ruby v3_4_0 variable.c
-	// set_const_visibility / rb_mod_private_constant.
-	constVisibility := func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		mod := self.(*RClass)
-		for _, a := range args {
-			name := nameArg(a)
-			if _, ok := mod.consts[name]; !ok && !hasAutoload(mod, name) {
-				raise("NameError", "constant %s not defined", scopedNameFor(mod, name))
+	// set_const_visibility (:3749-3786) / rb_mod_private_constant (:3815) /
+	// rb_mod_public_constant (:3829).
+	// The flag is enforced on the qualified `Recv::NAME` path only — see
+	// scopedConst and privateConstReferenced. An unqualified (lexical) read from
+	// inside the module, or from a class that includes it, still resolves, which
+	// is why MRI screens visibility in rb_public_const_get_from alone.
+	constVisibility := func(private bool) NativeFn {
+		return func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			mod := self.(*RClass)
+			for _, a := range args {
+				name := nameArg(a)
+				if _, ok := mod.consts[name]; !ok && !hasAutoload(mod, name) {
+					raise("NameError", "constant %s not defined", scopedNameFor(mod, name))
+				}
+				if mod.privateConsts == nil {
+					mod.privateConsts = map[string]bool{}
+				}
+				mod.privateConsts[name] = private
 			}
+			return self
 		}
-		return self
 	}
-	vm.cModule.define("private_constant", constVisibility)
-	vm.cModule.define("public_constant", constVisibility)
+	vm.cModule.define("private_constant", constVisibility(true))
+	vm.cModule.define("public_constant", constVisibility(false))
 
 	// Module#deprecate_constant(*names): mark existing constants so that reading
 	// them warns (when Warning[:deprecated] is on). An undefined name is a
@@ -526,4 +560,16 @@ func (vm *VM) resolveSingletonHook(recv object.Value, name string) *Method {
 		c = sc
 	}
 	return lookupMethod(c, name)
+}
+
+// allModuleArgs reports whether every argument is a Module or Class — what MRI's
+// top-level include accepts, and what the RSpec include matcher is never called
+// with. It tells the two apart on main; see the singleton `include` above.
+func allModuleArgs(args []object.Value) bool {
+	for _, a := range args {
+		if _, ok := a.(*RClass); !ok {
+			return false
+		}
+	}
+	return true
 }
