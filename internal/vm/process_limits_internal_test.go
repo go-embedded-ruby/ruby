@@ -384,11 +384,10 @@ p Process.times.utime > u`, "true\n"},
 		{`p Process.clock_getres(:TIME_BASED_CLOCK_REALTIME, :nanosecond)`, "1000000000\n"},
 		{`p Process.clock_getres(:GETRUSAGE_BASED_CLOCK_PROCESS_CPUTIME_ID, :nanosecond)`, "1000\n"},
 		{`p Process.clock_getres(Process::CLOCK_REALTIME, :nanosecond)`, "1000\n"},
-		// 1e-06 second, the same value MRI reports; the spelling differs only
-		// because this VM's Float#inspect drops the ".0" before the exponent
-		// (`p 0.000001` prints 1e-06 here and 1.0e-06 in MRI) — a core
-		// Float-formatting divergence, not a clock one.
-		{`p Process.clock_getres(Process::CLOCK_MONOTONIC)`, "1e-06\n"},
+		// 1e-06 second, the same value and now the same spelling as MRI: the
+		// Float#inspect divergence this case used to document (1e-06 here,
+		// 1.0e-06 in MRI) is fixed in internal/object.
+		{`p Process.clock_getres(Process::CLOCK_MONOTONIC)`, "1.0e-06\n"},
 		// argv0 is frozen and is the same object every time.
 		{`p [Process.argv0.is_a?(String), Process.argv0.frozen?, Process.argv0.equal?(Process.argv0)]`,
 			"[true, true, true]\n"},
