@@ -256,9 +256,25 @@ func TestLoadPathRequire(t *testing.T) {
 	if cls, _ := evalErr(t, "$LOAD_PATH.unshift "+q+"\nrequire \"nope\""); cls != "LoadError" {
 		t.Errorf("missing require: got %s, want LoadError", cls)
 	}
-	// A non-string $LOAD_PATH entry is skipped, and a valid one after it works.
-	got = eval(t, "$LOAD_PATH.unshift "+q+"\n$LOAD_PATH.unshift 123\nrequire \"greet\"\nputs GREETING\n")
+	// A $LOAD_PATH entry that is not a String and answers neither #to_path nor
+	// #to_str is a TypeError, not an entry to skip: rb_find_file (file.c v3_4_0)
+	// runs rb_get_path over the load path, and rb_get_expanded_load_path coerces
+	// the WHOLE list before the search begins -- so the position of the bad entry
+	// does not matter. Witnessed against MRI 4.0.5 with 123 unshifted before and
+	// pushed after a directory that does hold the feature: both raise
+	// TypeError "no implicit conversion of Integer into String". This test
+	// previously pinned rbgo's older behaviour of silently skipping such an entry.
+	for _, src := range []string{
+		"$LOAD_PATH.unshift " + q + "\n$LOAD_PATH.unshift 123\nrequire \"greet\"\n",
+		"$LOAD_PATH.push 123\n$LOAD_PATH.unshift " + q + "\nrequire \"greet\"\n",
+	} {
+		if cls, msg := evalErr(t, src); cls != "TypeError" || msg != "no implicit conversion of Integer into String" {
+			t.Errorf("non-String $LOAD_PATH entry: got %s: %s, want TypeError", cls, msg)
+		}
+	}
+	// An entry that answers #to_path is a usable directory (rb_get_path).
+	got = eval(t, "o = Object.new\ndef o.to_path; "+q+"; end\n$LOAD_PATH.unshift o\nrequire \"greet\"\nputs GREETING\n")
 	if !strings.Contains(got, "hi from lib") {
-		t.Errorf("require skipping a non-string entry got %q", got)
+		t.Errorf("require via a #to_path $LOAD_PATH entry got %q", got)
 	}
 }

@@ -917,6 +917,15 @@ func (vm *VM) bootstrap() {
 	vm.consts["NameError"].(*RClass).define("name", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return getIvar(self, "@name")
 	})
+	// LoadError#path: the feature name that could not be loaded, stamped into
+	// @path when the LoadError is raised (vm.raiseLoadError in require.go). MRI
+	// declares it as a plain reader — error.c v3_4_0
+	// `rb_attr(rb_eLoadError, path, TRUE, FALSE, FALSE)` — and error.c
+	// raise_loaderror sets the ivar to the path AS PASSED, so a LoadError built by
+	// hand (LoadError.new("x").path) reports nil.
+	vm.consts["LoadError"].(*RClass).define("path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, "@path")
+	})
 	// full_message(highlight:, order:): the MRI-shaped multi-line report. order:
 	// :top (default) leads with the raise-site frame + detailed message then the
 	// "\tfrom <frame>" tail; order: :bottom prints a "Traceback (most recent call
@@ -1959,6 +1968,29 @@ func (vm *VM) bootstrap() {
 	vm.cSymbol.define("intern", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return self // MRI: Symbol#intern is an alias of Symbol#to_sym (returns self)
 	})
+	// Symbol#encoding: the encoding of the symbol's string (symbol.c v3_4_0
+	// sym_encoding is rb_obj_encoding(rb_sym2str(sym))). rb_str_intern re-tags an
+	// ASCII-only string as US-ASCII before interning it, whatever encoding it
+	// arrived in, and otherwise keeps the string's own encoding -- so :foobar is
+	// US-ASCII whether it came from a UTF-8 or a binary String.
+	//
+	// rbgo's Symbol is an untagged Go string, so the non-ASCII answer has to be
+	// derived from the bytes: valid UTF-8 is UTF-8 (the VM's default source
+	// encoding), and bytes that are not reports ASCII-8BIT. A symbol interned from
+	// a UTF-16LE or from a binary non-ASCII String therefore still reports UTF-8 /
+	// ASCII-8BIT by shape rather than by provenance; carrying the tag would mean
+	// widening object.Symbol itself.
+	vm.cSymbol.define("encoding", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		b := []byte(string(self.(object.Symbol)))
+		switch {
+		case asciiOnly(b):
+			return vm.internEncoding("US-ASCII")
+		case utf8.Valid(b):
+			return vm.internEncoding("UTF-8")
+		default:
+			return vm.internEncoding("ASCII-8BIT")
+		}
+	})
 	symStr := func(self object.Value) string { return string(self.(object.Symbol)) }
 	vm.cSymbol.define("<=>", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o, ok := args[0].(object.Symbol)
@@ -2229,20 +2261,21 @@ func (vm *VM) bootstrap() {
 		return strEncOf(self, vm.chompSep(strOf(self), args))
 	})
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, chopStr(strOf(self)))
+		return strEncOf(self, chopStr(strOf(self), self.(*object.String).Enc))
 	})
 	vm.cString.define("chars", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
 		enc := self.(*object.String).Enc // each character keeps the receiver's encoding
+		pieces := strCharPieces(strOf(self), enc)
 		if blk != nil {
 			// The block form yields each character and returns the receiver (MRI).
-			for _, r := range strOf(self) {
-				vm.callBlock(blk, []object.Value{object.NewStringViewEnc(string(r), enc)})
+			for _, c := range pieces {
+				vm.callBlock(blk, []object.Value{object.NewStringViewEnc(c, enc)})
 			}
 			return self
 		}
-		var out []object.Value
-		for _, r := range strOf(self) {
-			out = append(out, object.NewStringViewEnc(string(r), enc))
+		out := make([]object.Value, 0, len(pieces))
+		for _, c := range pieces {
+			out = append(out, object.NewStringViewEnc(c, enc))
 		}
 		return object.NewArrayFromSlice(out)
 	})
@@ -2302,8 +2335,8 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each_char")
 		}
 		enc := self.(*object.String).Enc // each character keeps the receiver's encoding
-		for _, r := range strOf(self) {
-			vm.callBlock(blk, []object.Value{object.NewStringViewEnc(string(r), enc)})
+		for _, c := range strCharPieces(strOf(self), enc) {
+			vm.callBlock(blk, []object.Value{object.NewStringViewEnc(c, enc)})
 		}
 		return self
 	})
@@ -2379,6 +2412,7 @@ func (vm *VM) bootstrap() {
 		return object.NewArrayFromSlice(out)
 	})
 	vm.cString.define("split", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		args = vm.splitCheckArgs(self.(*object.String), args)
 		res := vm.stringSplit(strOf(self), self.(*object.String).Enc, args)
 		if blk == nil {
 			return res
@@ -2884,7 +2918,8 @@ func (vm *VM) bootstrap() {
 		return vm.strBang(self, func(s string) string { return vm.chompSep(s, args) })
 	})
 	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, chopStr)
+		enc := self.(*object.String).Enc
+		return vm.strBang(self, func(s string) string { return chopStr(s, enc) })
 	})
 	vm.cString.define("squeeze!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.strBang(self, func(s string) string { return stringSqueeze(s, args) })
@@ -6673,6 +6708,48 @@ func (vm *VM) coerceStrIndexArgs(args []object.Value) []object.Value {
 	}
 }
 
+// splitCheckArgs applies the two guards MRI's rb_str_split_m (string.c v3_4_0)
+// runs before it splits anything.
+//
+// mustnot_broken raises ArgumentError "invalid byte sequence in <encoding>" for a
+// string whose bytes are not valid in its own encoding. MRI calls it on the
+// pattern when the pattern is a String (string.c:9237) and on the receiver in the
+// string and chars paths (9317, 9337); the awk and regexp paths reach the same
+// refusal through rb_enc_check and the regexp engine, so every split form rejects
+// a broken receiver -- witnessed against MRI 4.0.5 for the awk, " ", "", Regexp,
+// String and nil patterns alike. A binary (ASCII-8BIT) string is never broken.
+//
+// The limit is read with NUM2INT, an int (not long) conversion, so a value
+// outside the 32-bit range is a RangeError naming which end it overflowed.
+func (vm *VM) splitCheckArgs(self *object.String, args []object.Value) []object.Value {
+	mustNotBeBroken := func(s *object.String) {
+		if !validInEncoding(s.Bytes(), s.EncName()) {
+			raise("ArgumentError", "invalid byte sequence in %s", s.EncName())
+		}
+	}
+	mustNotBeBroken(self)
+	if len(args) > 0 {
+		if pat, ok := args[0].(*object.String); ok {
+			mustNotBeBroken(pat)
+		}
+	}
+	if len(args) > 1 && !object.IsNil(args[1]) {
+		lim := vm.toIntCoerce(args[1])
+		if lim > math.MaxInt32 {
+			raise("RangeError", "integer %d too big to convert to 'int'", lim)
+		}
+		if lim < math.MinInt32 {
+			raise("RangeError", "integer %d too small to convert to 'int'", lim)
+		}
+		// NUM2INT runs once in MRI, so the coerced value replaces the argument
+		// rather than leaving stringSplit to call #to_int a second time -- the
+		// split specs count the calls with a mock.
+		args = append(append([]object.Value(nil), args...), nil)[:len(args)]
+		args[1] = object.IntValue(lim)
+	}
+	return args
+}
+
 // rngKwarg returns the object passed as the random: keyword of a shuffle/sample
 // call, or nil when absent (then the VM's default generator is used).
 func (vm *VM) rngKwarg(args []object.Value) object.Value {
@@ -7119,16 +7196,57 @@ func chompStr(s string) string {
 	return s
 }
 
-// chopStr removes the last character (\r\n counts as one), as in Ruby.
-func chopStr(s string) string {
+// strCharPieces splits s into its characters in the encoding named by enc,
+// returning SLICES of s so every byte survives exactly as it was.
+//
+// "What is a character" is the encoding's question -- MRI steps through a string
+// with rb_enc_mbclen (string.c rb_str_each_char / rb_str_chars), which in
+// ASCII-8BIT is one byte per character and in UTF-8 returns 1 for a byte that
+// begins no valid sequence. Ranging over a Go string instead decodes it as UTF-8
+// unconditionally and hands back U+FFFD for each invalid byte, so "\xA4" in a
+// UTF-8 string came back as a three-byte replacement character and a binary
+// string was split on UTF-8 boundaries that mean nothing in it.
+//
+// utf8.DecodeRuneInString reports size 1 for an invalid byte, which is the same
+// fallback rb_enc_mbclen makes, so the loop advances identically.
+func strCharPieces(s, enc string) []string {
+	out := make([]string, 0, len(s))
+	if enc == "ASCII-8BIT" {
+		for i := 0; i < len(s); i++ {
+			out = append(out, s[i:i+1])
+		}
+		return out
+	}
+	for i := 0; i < len(s); {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		out = append(out, s[i:i+size])
+		i += size
+	}
+	return out
+}
+
+// chopStr removes the last character of s in the encoding named by enc (a
+// trailing "\r\n" counting as one), as String#chop and String#chop! do.
+//
+// MRI's chopped_length (string.c v3_4_0) walks back with rb_enc_prev_char, so
+// "the last character" is a question the ENCODING answers: in ASCII-8BIT every
+// byte is a character and chop removes exactly one byte. Decoding as UTF-8
+// regardless -- which is what building a []rune does -- took two bytes off a
+// binary string, and on a UTF-8 string holding invalid bytes it was worse than
+// wrong about the length: []rune replaces each invalid byte with U+FFFD, so
+// re-encoding the prefix rewrote bytes chop never touched.
+func chopStr(s, enc string) string {
 	if strings.HasSuffix(s, "\r\n") {
 		return s[:len(s)-2]
 	}
-	r := []rune(s)
-	if len(r) == 0 {
+	if s == "" {
 		return ""
 	}
-	return string(r[:len(r)-1])
+	if enc == "ASCII-8BIT" {
+		return s[:len(s)-1]
+	}
+	_, size := utf8.DecodeLastRuneInString(s)
+	return s[:len(s)-size]
 }
 
 // stringToInt mimics String#to_i(base): optional whitespace and sign, an optional
