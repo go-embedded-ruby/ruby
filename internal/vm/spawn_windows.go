@@ -58,3 +58,48 @@ func exitCodeOf(err error) int {
 	}
 	return 127
 }
+
+// ---------------------------------------------------------------------------
+// Non-POSIX process seams
+//
+// This target has no getrlimit/setrlimit, no process groups, no sessions and no
+// kill(2), so the shared process.go defines none of the methods that need them
+// (procPosix is false) and the seams below exist only to satisfy the compiler.
+// MRI compiles the same methods out here, which is why ruby/spec expects
+// Process.respond_to?(:getrlimit) to be false on Windows.
+//
+// Reference: ruby/ruby v3_4_0 process.c — the HAVE_SETRLIMIT / HAVE_SETPGID /
+// HAVE_GETPRIORITY guards around proc_setrlimit, proc_setpgid and friends,
+// each falling back to rb_f_notimplement.
+
+const procPosix = false
+
+var (
+	rlimitResources = map[string]int{}
+	rlimitValues    = map[string]uint64{}
+	prioTargets     = map[string]int{}
+
+	procGetrlimit   func(res int) (cur, max uint64, err error)
+	procSetrlimit   func(res int, cur, max uint64) error
+	procGetpriority func(which, who int) (int, error)
+	procSetpriority func(which, who, prio int) error
+	procGetpgid     func(pid int) (int, error)
+	procSetpgid     func(pid, pgid int) error
+	procGetsid      func(pid int) (int, error)
+	procKill        func(pid, sig int) error
+	procRusage      func() (utime, stime float64)
+)
+
+// runSpawnProc runs one prepared child to completion (see spawn_native.go for
+// the shape and why it is a package var); the shell wrapper is cmd.exe here.
+var runSpawnProc = func(r *spawnReq) int {
+	var c *exec.Cmd
+	if r.shell != "" {
+		c = exec.Command("cmd", "/c", r.shell)
+	} else {
+		c = exec.Command(r.path, r.argv[1:]...)
+		c.Args[0] = r.argv[0]
+	}
+	c.Dir, c.Env, c.Stdout, c.Stderr = r.dir, r.env, r.stdout, r.stderr
+	return exitCodeOf(c.Run())
+}
