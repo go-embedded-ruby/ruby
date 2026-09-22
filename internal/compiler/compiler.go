@@ -47,6 +47,10 @@ type builder struct {
 	children    []*bytecode.ISeq
 	parent      *builder
 	isBlock     bool
+	// forScope marks the each-block a `for` loop is compiled into. It is a block
+	// iseq, but `for` opens no Ruby scope: a variable first assigned inside the
+	// body belongs to the scope AROUND the loop, so declarations hop out of it.
+	forScope bool
 	// borrowed marks a scope whose locals belong to somebody else's already-built
 	// frame — the synthetic parent CompileWithLocals puts a Binding's locals in.
 	// Its slots may be read and written but no new one may be added: the frame
@@ -81,6 +85,19 @@ func (b *builder) resolve(name string) (depth, index int, ok bool) {
 		}
 	}
 	return 0, 0, false
+}
+
+// declOwner returns the scope a variable first assigned in b belongs to, and
+// how many block hops away it is. `for` opens no scope of its own, so a name
+// introduced in a `for` body is declared in the nearest enclosing scope that is
+// not itself a `for` body — the surrounding block when there is one, else the
+// method or top level. For any other builder the answer is b itself, at depth 0.
+func (b *builder) declOwner() (owner *builder, depth int) {
+	owner, depth = b, 0
+	for owner.forScope && owner.parent != nil {
+		owner, depth = owner.parent, depth+1
+	}
+	return owner, depth
 }
 
 func (b *builder) emit(op bytecode.Op, a, bb int) int {
@@ -460,12 +477,9 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.Assign:
 		c.compileNode(v.Value)
 		// Assign to an enclosing local if one is visible; otherwise create a
-		// new local in the current scope.
-		if depth, slot, ok := b.resolve(v.Name); ok {
-			b.emit(bytecode.OpSetLocal, slot, depth)
-		} else {
-			b.emit(bytecode.OpSetLocal, b.localSlot(v.Name), 0)
-		}
+		// new local in the current scope (or, inside a `for` body, in the scope
+		// around the loop — see declOwner).
+		c.storeLocal(v.Name)
 	case *ast.MultiAssign:
 		c.compileMultiAssign(v)
 	case *ast.Begin:
@@ -498,10 +512,7 @@ func (c *Compiler) compileNode(n ast.Node) {
 	case *ast.OpAssign:
 		// Allocate the slot before the read so a fresh `x ||= v` sees nil
 		// rather than failing to resolve.
-		depth, slot, ok := b.resolve(v.Name)
-		if !ok {
-			slot, depth = b.localSlot(v.Name), 0
-		}
+		slot, depth := c.bindLocal(v.Name)
 		c.compileNode(&ast.BinaryExpr{Op: v.Op, Left: &ast.VarRef{Name: v.Name}, Right: v.Value})
 		b.emit(bytecode.OpSetLocal, slot, depth)
 	case *ast.UnaryExpr:
@@ -799,7 +810,8 @@ func (c *Compiler) compileForwardCall(v *ast.Call, fwdAt int) {
 	}
 	c.emitForwardArgsArray(v.Args[:fwdAt], v.Args[fwdAt+1:])
 	// Forward the block (&...blk; nil ⇒ no block) and send.
-	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdBlockName), 0)
+	blkSlot, blkDepth := c.mustResolve(fwdBlockName)
+	b.emit(bytecode.OpGetLocal, blkSlot, blkDepth)
 	b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
 }
 
@@ -819,14 +831,16 @@ func (c *Compiler) emitForwardArgsArray(leading, trailing []ast.Node) {
 	for _, a := range leading {
 		appendOne(a)
 	}
-	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdRestName), 0)
+	restSlot, restDepth := c.mustResolve(fwdRestName)
+	b.emit(bytecode.OpGetLocal, restSlot, restDepth)
 	b.emit(bytecode.OpSplatToArray, 0, 0)
 	b.emit(bytecode.OpConcatArray, 0, 0)
 	for _, a := range trailing {
 		appendOne(a)
 	}
 	// Append **...kw as a trailing hash, but only when it has entries.
-	b.emit(bytecode.OpGetLocal, c.mustResolve(fwdKwName), 0)
+	kwSlot, kwDepth := c.mustResolve(fwdKwName)
+	b.emit(bytecode.OpGetLocal, kwSlot, kwDepth)
 	b.emit(bytecode.OpDup, 0, 0)
 	b.emit(bytecode.OpSend, b.addName("empty?"), 0)
 	skip := b.emit(bytecode.OpBranchIf, 0, 0)
@@ -839,14 +853,18 @@ func (c *Compiler) emitForwardArgsArray(leading, trailing []ast.Node) {
 }
 
 // mustResolve resolves a (compiler-synthesised) local that is guaranteed to
-// exist in scope, returning its slot. It panics via fail otherwise, which only
-// happens on a compiler bug.
-func (c *Compiler) mustResolve(name string) int {
-	_, slot, ok := c.cur().resolve(name)
+// exist in scope, returning its slot AND its block depth. The depth matters:
+// `def f(...)` parks the forwarded arguments in the method's own locals, so a
+// `g(...)` written inside a block — including the each-block a `for` compiles
+// into — reads them from an enclosing frame, and a depth of 0 would index the
+// block's own frame instead. It panics via fail when the name is out of scope,
+// which only happens on a compiler bug.
+func (c *Compiler) mustResolve(name string) (slot, depth int) {
+	depth, slot, ok := c.cur().resolve(name)
 	if !ok {
 		c.fail("argument forwarding outside a def(...) method")
 	}
-	return slot
+	return slot, depth
 }
 
 // anonLocal returns a VarRef reading the enclosing method's anonymous-forward
@@ -1292,10 +1310,7 @@ func (c *Compiler) compileMatchWithCaptures(v *ast.BinaryExpr, names []string) {
 	b.emit(bytecode.OpSend, b.addName("=~"), 1) // leaves the match position (or nil)
 	for _, name := range names {
 		// Reuse an existing local of this name, else declare it here.
-		depth, slot, ok := b.resolve(name)
-		if !ok {
-			slot, depth = b.localSlot(name), 0
-		}
+		slot, depth := c.bindLocal(name)
 		b.emit(bytecode.OpGetConst, b.addName("Regexp"), 0)
 		b.emit(bytecode.OpPushConst, b.addConst(object.SymVal(name)), 0)
 		b.emit(bytecode.OpSend, b.addName("last_match"), 1) // $~[:name], nil if unmatched
@@ -1672,7 +1687,8 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 	// built args array (with the captured &...blk overriding the frame block).
 	if fwdAt := forwardIndex(v.Args); fwdAt >= 0 {
 		c.emitForwardArgsArray(v.Args[:fwdAt], v.Args[fwdAt+1:])
-		b.emit(bytecode.OpGetLocal, c.mustResolve(fwdBlockName), 0)
+		blkSlot, blkDepth := c.mustResolve(fwdBlockName)
+		b.emit(bytecode.OpGetLocal, blkSlot, blkDepth)
 		at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
 		b.insns[at].C = 1
 		return
@@ -2480,6 +2496,19 @@ func (c *Compiler) storeMultiTarget(target ast.Node) {
 		b.emit(bytecode.OpPop, 0, 0)
 		pre := c.masgnPre[target]
 		c.pushMasgnRecv(target, t.Recv)
+		// `for o&.x in …`: a nil receiver skips the setter and leaves nil as this
+		// arm's value. MRI reaches the same store arm for a safe-navigation for-var
+		// (prism_compile.c v3_4_0:4862 routes PM_CALL_TARGET_NODE through
+		// pm_compile_target_node, which honours PM_CALL_NODE_FLAGS_SAFE_NAVIGATION);
+		// a multiple assignment cannot get here, since `a&.x, b = …` is a
+		// SyntaxError. OpBranchNil pops its tested copy, so the receiver left
+		// underneath is the nil result, matching the ordinary `o&.x = v` lowering.
+		safeSkip := -1
+		if t.Safe {
+			b.emit(bytecode.OpDup, 0, 0)
+			safeSkip = b.emit(bytecode.OpBranchNil, 0, 0)
+			defer func() { b.patch(safeSkip, b.here()) }()
+		}
 		if pre != nil && pre.argsArr >= 0 {
 			// Dynamic arity, argument array already built before the RHS: append
 			// the assigned value and send. OpConcatArray always allocates a fresh
@@ -2528,15 +2557,23 @@ func (c *Compiler) storeMultiTarget(target ast.Node) {
 	}
 }
 
+// bindLocal returns the slot and block depth to write name at: an existing
+// visible local if there is one, else a freshly declared slot in the scope
+// declOwner names (the current builder, unless it is a `for` body).
+func (c *Compiler) bindLocal(name string) (slot, depth int) {
+	b := c.cur()
+	if depth, slot, ok := b.resolve(name); ok {
+		return slot, depth
+	}
+	owner, depth := b.declOwner()
+	return owner.localSlot(name), depth
+}
+
 // storeLocal emits a SetLocal for name, resolving an existing local or
 // allocating a fresh slot, mirroring ast.Assign.
 func (c *Compiler) storeLocal(name string) {
-	b := c.cur()
-	if depth, slot, ok := b.resolve(name); ok {
-		b.emit(bytecode.OpSetLocal, slot, depth)
-	} else {
-		b.emit(bytecode.OpSetLocal, b.localSlot(name), 0)
-	}
+	slot, depth := c.bindLocal(name)
+	c.cur().emit(bytecode.OpSetLocal, slot, depth)
 }
 
 // compileBegin compiles begin/rescue/else/ensure. When an ensure clause is
@@ -2604,11 +2641,7 @@ func (c *Compiler) compileBeginRescue(v *ast.Begin) {
 		}
 		switch {
 		case clause.Var != "": // bind the exception to a local (reusing an existing slot)
-			if depth, slot, ok := b.resolve(clause.Var); ok {
-				b.emit(bytecode.OpSetLocal, slot, depth)
-			} else {
-				b.emit(bytecode.OpSetLocal, b.localSlot(clause.Var), 0)
-			}
+			c.storeLocal(clause.Var)
 		case clause.VarTarget != nil: // `rescue => @e` / `=> $g` / `=> Foo::E`: a non-local target
 			c.storeMultiTarget(clause.VarTarget)
 		}
@@ -2694,27 +2727,42 @@ func (c *Compiler) compileFor(v *ast.For) {
 	// The loop variables live in the enclosing scope; ensure each has a slot
 	// there now (before compiling the block) so the block resolves them by depth.
 	// A `for` does not open a scope, so an absent variable is created in the
-	// nearest method/top-level scope (the first non-block ancestor), making it
-	// leak past the whole construct — including out of any enclosing blocks, e.g.
-	// an outer `for` — exactly as MRI does.
+	// nearest scope that is not itself a `for` body, making it leak past the whole
+	// construct — including out of an enclosing `for`, but NOT out of an enclosing
+	// block, which is a scope. That is what declOwner walks.
 	parent := c.cur()
-	owner := parent
-	for owner.isBlock && owner.parent != nil {
-		owner = owner.parent
-	}
-	for _, name := range v.Vars {
+	owner, _ := parent.declOwner()
+	declare := func(name string) {
+		if name == "" {
+			return // the nameless `*` in `for i, * in …` binds nothing
+		}
 		if _, _, ok := parent.resolve(name); !ok {
 			owner.localSlot(name)
 		}
 	}
+	for _, name := range v.Vars {
+		declare(name)
+	}
+	declareForTargetLocals(v.Target, declare)
 	// Receiver: the iterable.
 	c.compileNode(v.Iter)
-	// Synthesize the each-block as a child ISeq with one hidden parameter.
+	// Synthesize the each-block as a child ISeq with one hidden parameter. MRI
+	// shapes that parameter by the kind of loop variable (prism_compile.c
+	// v3_4_0:6293-6301): a lone local target bumps lead_num, so the block takes
+	// ONE required argument and gets the yielded value as it stands; anything
+	// else sets has_rest, so the block collects ALL the yielded values into an
+	// Array and the destructuring below works from that.
 	c.push(newBlockBuilder("<for>", []string{"...for"}, parent))
 	b := c.cur()
-	b.numRequired = 1
+	b.forScope = true
+	if forTakesOneValue(v) {
+		b.numRequired = 1
+	} else {
+		b.numRequired = 0
+		b.splatIndex = 0
+	}
 	c.ctxs = append(c.ctxs, &loopCtx{kind: ctxBlock})
-	c.compileForVars(v.Vars)
+	c.compileForTarget(v)
 	c.compileBody(v.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
 	b.emit(bytecode.OpReturn, 0, 0)
@@ -2725,25 +2773,104 @@ func (c *Compiler) compileFor(v *ast.For) {
 	parent.insns[at].C = idx + 1 // C-1 indexes Children
 }
 
-// compileForVars binds the yielded value (the hidden first block local) to the
-// `for` loop variables, which resolve to enclosing-scope locals. A single
-// variable takes the value directly; multiple variables destructure it like a
-// MultiAssign (the value is splatted into an Array and expanded).
-func (c *Compiler) compileForVars(vars []string) {
+// forTakesOneValue reports whether the loop variable is a single plain local
+// (`for i in …`), the one shape whose each-block takes a required parameter
+// rather than collecting the yielded values into a rest Array.
+func forTakesOneValue(v *ast.For) bool {
+	return v.Target == nil && len(v.Vars) == 1
+}
+
+// declareForTargetLocals calls declare for every plain local name a For.Target
+// assigns, so the name exists in the enclosing scope before the loop body is
+// compiled — `for a, *b in […]` leaves both a and b visible after the loop, like
+// any other `for` variable. Non-local targets (ivars, globals, constants, setter
+// calls) declare nothing.
+func declareForTargetLocals(target ast.Node, declare func(string)) {
+	switch t := target.(type) {
+	case *ast.VarRef:
+		declare(t.Name)
+	case *ast.MultiAssign:
+		if len(t.Targets) != len(t.Names) {
+			// All-locals form (`for i, in …`): Names carries every binding.
+			for _, name := range t.Names {
+				declare(name)
+			}
+			return
+		}
+		for _, sub := range t.Targets {
+			declareForTargetLocals(sub, declare)
+		}
+	}
+}
+
+// compileForTarget binds the values yielded to the each-block to the `for` loop
+// variable, which resolves to enclosing-scope locals (or to whatever else the
+// target names). MRI emits this inside the block iseq, before the body and
+// before the B_CALL event: prism_compile.c v3_4_0:6489-6494 calls
+// pm_compile_for_node_index, whose three arms (v3_4_0:4844-4924) are the three
+// below.
+func (c *Compiler) compileForTarget(v *ast.For) {
 	b := c.cur()
-	if len(vars) == 1 {
-		b.emit(bytecode.OpGetLocal, 0, 0) // the hidden parameter
-		c.storeLocal(vars[0])
+	// A lone local: the block took the value as a required parameter, so it is
+	// already the value to bind (PM_LOCAL_VARIABLE_TARGET_NODE: getlocal, write).
+	if forTakesOneValue(v) {
+		b.emit(bytecode.OpGetLocal, 0, 0)
+		c.storeLocal(v.Vars[0])
 		b.emit(bytecode.OpPop, 0, 0)
 		return
 	}
-	b.emit(bytecode.OpGetLocal, 0, 0)
-	b.emit(bytecode.OpSplatToArray, 0, 0)
-	b.emit(bytecode.OpExpandArray, len(vars), 0)
-	for _, name := range vars {
-		c.storeLocal(name)
+	names, targets, splatIndex := v.Vars, []ast.Node(nil), -1
+	switch t := v.Target.(type) {
+	case nil:
+		// Several plain locals (`for a, b in …`): MRI's multi-target arm.
+	case *ast.MultiAssign:
+		names, splatIndex = t.Names, t.SplatIndex
+		if len(t.Targets) == len(t.Names) {
+			targets = t.Targets
+		}
+	default:
+		// A single non-local target (`for @v in …`, `for a[0] in …`): MRI pushes
+		// the rest Array and runs `expandarray 1, 0` on it, taking the first
+		// yielded value and discarding the rest, then performs the write.
+		b.emit(bytecode.OpGetLocal, 0, 0)
+		b.emit(bytecode.OpExpandArray, 1, 0)
+		c.storeMultiTarget(v.Target)
 		b.emit(bytecode.OpPop, 0, 0)
+		return
 	}
+	c.pushForMasgnOperand()
+	c.expandAndStore(names, targets, splatIndex)
+}
+
+// pushForMasgnOperand pushes the value a multi-target `for` destructures, from
+// the rest Array of yielded values held in the block's hidden parameter.
+//
+// MRI's sequence (compile.c compile_for_masgn, ruby/ruby v3_4_0:8302-8329, and
+// the identical prism arm at prism_compile.c v3_4_0:4881-4919) is
+//
+//	(args.length == 1 && Array.try_convert(args[0])) || args
+//
+// followed by expandarray. The try_convert half is redundant in front of an
+// expandarray that already performs it: when args holds exactly one element,
+// expanding args[0] gives the converted Array if args[0] has one, and otherwise
+// the one-element list [args[0]] — which is what expanding args itself would
+// have given. So the same lowering is `args.length == 1 ? args[0] : args`, with
+// the conversion left where it always was, in expandarray. Both halves use the
+// same sends MRI uses (idLength and idAREF), so a redefined Array#length or
+// Array#[] is honoured here exactly as it is there.
+func (c *Compiler) pushForMasgnOperand() {
+	b := c.cur()
+	b.emit(bytecode.OpGetLocal, 0, 0) // the hidden *rest parameter
+	b.emit(bytecode.OpDup, 0, 0)
+	b.emit(bytecode.OpSend, b.addName("length"), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(1)), 0)
+	b.emit(bytecode.OpEq, 0, 0)
+	notSingle := b.emit(bytecode.OpBranchUnless, 0, 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(0)), 0)
+	b.emit(bytecode.OpSend, b.addName("[]"), 1)
+	done := b.emit(bytecode.OpJump, 0, 0)
+	b.patch(notSingle, b.here())
+	b.patch(done, b.here())
 }
 
 // Reserved local names for argument forwarding (`def f(...)`): they capture the
