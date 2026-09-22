@@ -1535,6 +1535,18 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 	if blk.BlockParam != "" {
 		b.blockSlot = b.localSlot(blk.BlockParam)
 	}
+	// Block-local variables (`{ |a; b, c| … }`) take slots of their own right
+	// after the parameters, and are NOT parameters: they start nil and shadow any
+	// enclosing binding of the same name, so an assignment inside the block cannot
+	// reach the outer one. MRI builds exactly this table — prism_compile.c
+	// v3_4_0:6325-6334 walks the block-parameters node's `locals` list and calls
+	// pm_insert_local_index for each, after the requireds/optionals/rest/posts and
+	// before "fill in any locals we missed" — and the parser rejects a name that
+	// collides with a parameter (parse.y v3_4_0:13621 new_bv → shadowing_lvar_0),
+	// so no dedup is needed here.
+	for _, name := range blk.Locals {
+		b.localSlot(name)
+	}
 	// Optional keyword params: the VM binds the supplied ones natively, so the
 	// prologue only fills in defaults for the absent ones.
 	for i, kp := range kwParams {
