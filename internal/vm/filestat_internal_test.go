@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,8 +64,10 @@ func TestFileStatPredicates(t *testing.T) {
 			"[false, false, false, false]\n"},
 		// File::Stat.new is File.stat.
 		{`s=File::Stat.new("` + f + `"); p s.file?`, "true\n"},
-		// inspect renders the marker.
-		{`p File.stat("` + f + `").inspect`, "\"#<File::Stat>\"\n"},
+		// inspect renders MRI's member list (rb_stat_inspect); its layout and
+		// values are pinned in TestFileStatInspect, so here only the shape that
+		// distinguishes it from the old placeholder is asserted.
+		{`p File.stat("` + f + `").inspect.start_with?("#<File::Stat dev=0x")`, "true\n"},
 		// <=> against a non-stat is nil; against an equal-mtime stat is 0.
 		{`s=File.stat("` + f + `"); p [(s <=> 1), (s <=> s)]`, "[nil, 0]\n"},
 		// size?/zero? for an empty file: size? is nil, zero? true.
@@ -198,10 +201,15 @@ func (f fakeInfo) IsDir() bool        { return f.mode&fs.ModeDir != 0 }
 func (f fakeInfo) Sys() any           { return nil }
 
 // TestFileStatToS covers the display markers and Truthy of a FileStat value.
+// #to_s keeps the bare marker (MRI's File::Stat defines no #to_s), while
+// #inspect is rb_stat_inspect's member list — see TestFileStatInspect.
 func TestFileStatToS(t *testing.T) {
 	st := &FileStat{fi: fakeInfo{}}
-	if st.ToS() != "#<File::Stat>" || st.Inspect() != "#<File::Stat>" || !st.Truthy() {
-		t.Errorf("display: ToS=%q Inspect=%q Truthy=%v", st.ToS(), st.Inspect(), st.Truthy())
+	if st.ToS() != "#<File::Stat>" || !st.Truthy() {
+		t.Errorf("display: ToS=%q Truthy=%v", st.ToS(), st.Truthy())
+	}
+	if !strings.HasPrefix(st.Inspect(), "#<File::Stat dev=0x") {
+		t.Errorf("Inspect=%q", st.Inspect())
 	}
 }
 

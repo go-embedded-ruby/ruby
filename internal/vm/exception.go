@@ -253,9 +253,14 @@ func (vm *VM) exceptionMessageArg(v object.Value) string {
 }
 
 // exceptionInspect renders Exception#inspect (see the method comment above).
+// The message is taken through rb_obj_as_string(exc) — MRI's exc_inspect
+// (ruby/ruby v3_4_0 error.c:1838) dispatches #to_s rather than reading the
+// stored message, so a subclass that overrides #to_s changes what #inspect
+// reports; a #to_s that does not return a String falls back to the object's own
+// identity representation, as rb_any_to_s does.
 func (vm *VM) exceptionInspect(self object.Value) string {
 	cls := vm.classOf(self).name
-	msg := vm.exceptionMessageText(self)
+	msg := vm.objAsString(self)
 	if msg == "" {
 		return cls
 	}
