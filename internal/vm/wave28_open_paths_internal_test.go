@@ -198,7 +198,7 @@ func TestWave28FlockDescriptorReuse(t *testing.T) {
 func TestWave28FlockClosedWhileWaiting(t *testing.T) {
 	p := flockScratch(t)
 	restore := swapFlockSeam(func(string) (int, error) { return 7, nil },
-		func(int, int) error { return syscall.EWOULDBLOCK },
+		func(int, int) error { return syscall.EAGAIN },
 		func(int) error { return nil })
 	defer restore()
 	src := `

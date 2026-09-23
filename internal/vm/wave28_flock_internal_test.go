@@ -67,7 +67,7 @@ func TestWave28FlockRetriesWithoutLockNB(t *testing.T) {
 		func(fd, op int) error {
 			calls++
 			if calls < 3 {
-				return syscall.EWOULDBLOCK
+				return syscall.EAGAIN
 			}
 			return nil
 		},
@@ -148,8 +148,10 @@ func swapFlockSeam(open func(string) (int, error), lock func(int, int) error, cl
 	oOpen, oLock, oClose, oAgain := lockFdFn, flockFn, closeFdFn, flockAgainErrs
 	lockFdFn, flockFn, closeFdFn = open, lock, closeFd
 	// The retry list is per platform and empty where there is no flock(2); the
-	// stub speaks EWOULDBLOCK, so give every platform that one entry.
-	flockAgainErrs = []error{syscall.EWOULDBLOCK}
+	// stub speaks EAGAIN, so give every platform that one entry. EAGAIN rather
+	// than EWOULDBLOCK because wasip1 defines no EWOULDBLOCK at all, and on unix
+	// the real list already carries EAGAIN beside it.
+	flockAgainErrs = []error{syscall.EAGAIN}
 	return func() { lockFdFn, flockFn, closeFdFn, flockAgainErrs = oOpen, oLock, oClose, oAgain }
 }
 
