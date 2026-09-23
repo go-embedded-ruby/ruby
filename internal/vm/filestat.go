@@ -72,7 +72,7 @@ func (s *FileStat) Inspect() string {
 		{"rdev", "0x" + strconv.FormatInt(s.sys.rdev, 16)},
 		{"size", strconv.FormatInt(s.fi.Size(), 10)},
 		{"blksize", strconv.FormatInt(s.sys.blksize, 10)},
-		{"blocks", strconv.FormatInt(s.sys.blocks, 10)},
+		{"blocks", s.blocksValue().Inspect()},
 		{"atime", statTime(s.sys.atime).Inspect()},
 		{"mtime", statTime(s.fi.ModTime().Unix()).Inspect()},
 		{"ctime", statTime(s.sys.ctime).Inspect()},
@@ -195,6 +195,21 @@ func (s *FileStat) modeBits() int64 {
 		bits |= 0o1000
 	}
 	return bits | int64(s.ifmt())
+}
+
+// blocksValue is File::Stat#blocks: the number of 512-byte blocks allocated, or
+// nil on a platform with no POSIX stat behind it (Windows), which is what MRI
+// reports where HAVE_STRUCT_STAT_ST_BLOCKS is undefined.
+//
+// It exists so the accessor and #inspect read ONE rule. They had already
+// drifted: #inspect formatted the raw field and printed "blocks=0" on Windows
+// where #blocks answers nil, which is the kind of disagreement a member-by-member
+// comparison catches and a smoke test does not.
+func (s *FileStat) blocksValue() object.Value {
+	if !s.sys.hasSys {
+		return object.NilV
+	}
+	return object.IntValue(s.sys.blocks)
 }
 
 // ifmt returns the POSIX S_IFMT type bits for the file's kind (the high-order
@@ -524,11 +539,7 @@ func (vm *VM) registerFileStat() {
 	// blocks is the number of 512-byte blocks allocated; nil where the platform
 	// cannot report it (Windows), a non-negative Integer otherwise.
 	d("blocks", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self(v)
-		if !s.sys.hasSys {
-			return object.NilV
-		}
-		return object.IntValue(s.sys.blocks)
+		return self(v).blocksValue()
 	})
 	// dev_major / dev_minor / rdev_major / rdev_minor decompose dev / rdev; nil on
 	// platforms without the POSIX device model (Windows), an Integer otherwise.

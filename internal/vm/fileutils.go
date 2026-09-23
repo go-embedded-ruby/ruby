@@ -249,13 +249,21 @@ func fuWalk(root string) []string {
 const realpathResolving = "\x00resolving"
 
 // realpathWalk carries the state realpath_rec threads through its recursion: the
-// path resolved so far, the loop-check table mapping an already-resolved
-// component to its answer, and whether an absent final component is an error
-// (strict, i.e. File.realpath) or the answer (File.realdirpath).
+// path resolved so far, the length of its ROOT (MRI's prefixlen — 1 for "/", 3
+// for "C:/", longer for a UNC share), the loop-check table mapping an
+// already-resolved component to its answer, and whether an absent final
+// component is an error (strict, i.e. File.realpath) or the answer
+// (File.realdirpath).
+//
+// prefixLen is not decoration: MRI threads `*prefixlenp` through realpath_rec
+// for exactly one reason — ".." must not be able to walk above the root, and on
+// a platform where the root is more than one character ("C:/"), truncating to
+// the last separator would eat the volume.
 type realpathWalk struct {
-	resolved string
-	loop     map[string]string
-	strict   bool
+	resolved  string
+	prefixLen int
+	loop      map[string]string
+	strict    bool
 }
 
 // realpathErr is the failure realpath_rec reports: an errno class, MRI's message
@@ -279,11 +287,31 @@ func (e *realpathErr) Error() string { return e.message + " - " + e.path }
 // It is a separate argument because expanding the path (which the caller must do
 // first, to apply the base directory) drops the separator.
 func realpathResolve(p string, strict, trailingSep bool) (string, *realpathErr) {
-	w := &realpathWalk{resolved: "/", loop: map[string]string{}, strict: strict}
-	if err := w.walk(splitPathNames(p), "", !trailingSep); err != nil {
+	root, rest := realpathRoot(p)
+	w := &realpathWalk{resolved: root, prefixLen: len(root), loop: map[string]string{}, strict: strict}
+	if err := w.walk(splitPathNames(rest), "", !trailingSep); err != nil {
 		return "", err
 	}
 	return w.resolved, nil
+}
+
+// realpathRoot splits an absolute path into the root the walk starts from and
+// the names that follow it — MRI's skipprefixroot (file.c), which is why
+// realpath_rec carries a prefixlen at all. On POSIX the root is always "/" and
+// nothing is consumed; on Windows it is the volume ("C:/") or the UNC share
+// ("//host/share/"), and starting the walk at "/" instead would build "/C:" and
+// then fail against a path no such filesystem has.
+func realpathRoot(p string) (root, rest string) {
+	vol := toSlash(filepath.VolumeName(filepath.FromSlash(p)))
+	return vol + "/", p[len(vol):]
+}
+
+// realpathRooted reports whether a symlink target names a root of its own, so
+// resolving it restarts from there rather than continuing under the path
+// resolved so far. A leading separator is the POSIX form; a volume name is the
+// Windows one ("C:\dir", "\\host\share\dir").
+func realpathRooted(link string) bool {
+	return strings.HasPrefix(link, "/") || filepath.VolumeName(filepath.FromSlash(link)) != ""
 }
 
 // splitPathNames splits an absolute path into its non-empty components, dropping
@@ -310,7 +338,7 @@ func (w *realpathWalk) walk(names []string, fallback string, last bool) *realpat
 			continue
 		}
 		if name == ".." {
-			w.resolved = realpathParent(w.resolved)
+			w.resolved = realpathParent(w.resolved, w.prefixLen)
 			continue
 		}
 		testpath := realpathJoin(w.resolved, name)
@@ -347,10 +375,12 @@ func (w *realpathWalk) walk(names []string, fallback string, last bool) *realpat
 			return realpathSyscallErr(lerr, testpath)
 		}
 		w.loop[testpath] = realpathResolving
-		if strings.HasPrefix(link, "/") {
-			w.resolved = "/"
+		names := link
+		if realpathRooted(link) {
+			root, rest := realpathRoot(toSlash(link))
+			w.resolved, w.prefixLen, names = root, len(root), rest
 		}
-		if err := w.walk(splitPathNames(link), testpath, isLast); err != nil {
+		if err := w.walk(splitPathNames(toSlash(names)), testpath, isLast); err != nil {
 			return err
 		}
 		w.loop[testpath] = w.resolved
@@ -375,20 +405,22 @@ func realpathSyscallErr(err error, testpath string) *realpathErr {
 
 // realpathParent drops the last component of an already-resolved absolute path,
 // the way realpath_rec handles "..": it truncates back to the previous separator
-// and never past the root.
-func realpathParent(resolved string) string {
+// and never above the root, which prefixLen delimits (MRI's
+// `if (*prefixlenp < RSTRING_LEN(*resolvedp))` guard).
+func realpathParent(resolved string, prefixLen int) string {
 	i := strings.LastIndexByte(resolved, '/')
-	if i <= 0 {
-		return "/"
+	if i < prefixLen {
+		return resolved[:prefixLen]
 	}
 	return resolved[:i]
 }
 
 // realpathJoin appends one component to an already-resolved absolute path without
-// doubling the root's separator.
+// doubling the separator the root already ends with ("/" on POSIX, "C:/" on
+// Windows).
 func realpathJoin(resolved, name string) string {
-	if resolved == "/" {
-		return "/" + name
+	if strings.HasSuffix(resolved, "/") {
+		return resolved + name
 	}
 	return resolved + "/" + name
 }

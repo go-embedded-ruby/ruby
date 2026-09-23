@@ -157,8 +157,15 @@ func TestRealpathReadlinkFailure(t *testing.T) {
 // an errno with a registered class, an errno without one, and an error that is
 // not a syscall.Errno at all.
 func TestRealpathSyscallErr(t *testing.T) {
-	if e := realpathSyscallErr(syscall.ENOTDIR, "/p"); e.class != "Errno::ENOTDIR" || e.message != "Not a directory" {
-		t.Errorf("ENOTDIR: got %s/%q", e.class, e.message)
+	// The CLASS is portable; the MESSAGE is the platform's strerror, and Windows
+	// words it "The system cannot find the path specified." There is no Windows
+	// MRI on this host to witness what MRI prints there, so the text is asserted
+	// only where it was witnessed (MRI 4.0.5 on darwin) rather than relaxed to
+	// whatever the lane happens to return.
+	if e := realpathSyscallErr(syscall.ENOTDIR, "/p"); e.class != "Errno::ENOTDIR" {
+		t.Errorf("ENOTDIR: got class %s", e.class)
+	} else if runtime.GOOS == "darwin" && e.message != "Not a directory" {
+		t.Errorf("ENOTDIR: got message %q, want %q", e.message, "Not a directory")
 	}
 	if e := realpathSyscallErr(syscall.Errno(1<<20), "/p"); e.class != "SystemCallError" {
 		t.Errorf("unregistered errno: got %s", e.class)
@@ -172,20 +179,69 @@ func TestRealpathSyscallErr(t *testing.T) {
 }
 
 // TestRealpathParentAndJoin pins the two path primitives at the root, where the
-// separator handling differs from every other position.
+// separator handling differs from every other position — INCLUDING a root longer
+// than one character, which is what a Windows volume ("C:/") is. Those cases are
+// driven by passing the prefix length directly, so the Windows-shaped behaviour
+// is covered on the POSIX lanes rather than only where filepath.VolumeName
+// returns something.
 func TestRealpathParentAndJoin(t *testing.T) {
-	for _, c := range []struct{ in, want string }{
-		{"/a/b", "/a"}, {"/a", "/"}, {"/", "/"}, {"", "/"},
+	for _, c := range []struct {
+		in     string
+		prefix int
+		want   string
+	}{
+		{"/a/b", 1, "/a"},
+		{"/a", 1, "/"},
+		{"/", 1, "/"},
+		// A multi-character root: ".." must stop at the volume, not eat it.
+		{"C:/Users/x", 3, "C:/Users"},
+		{"C:/Users", 3, "C:/"},
+		{"C:/", 3, "C:/"},
+		// A UNC share root is longer still.
+		{"//host/share/dir", 13, "//host/share/"},
 	} {
-		if got := realpathParent(c.in); got != c.want {
-			t.Errorf("realpathParent(%q) = %q, want %q", c.in, got, c.want)
+		if got := realpathParent(c.in, c.prefix); got != c.want {
+			t.Errorf("realpathParent(%q, %d) = %q, want %q", c.in, c.prefix, got, c.want)
 		}
 	}
-	if got := realpathJoin("/", "a"); got != "/a" {
-		t.Errorf("realpathJoin at root = %q", got)
+	for _, c := range []struct{ resolved, name, want string }{
+		{"/", "a", "/a"},
+		{"/a", "b", "/a/b"},
+		{"C:/", "a", "C:/a"},
+		{"C:/a", "b", "C:/a/b"},
+	} {
+		if got := realpathJoin(c.resolved, c.name); got != c.want {
+			t.Errorf("realpathJoin(%q, %q) = %q, want %q", c.resolved, c.name, got, c.want)
+		}
 	}
-	if got := realpathJoin("/a", "b"); got != "/a/b" {
-		t.Errorf("realpathJoin = %q", got)
+}
+
+// TestRealpathRoot covers the skipprefixroot split the walk starts from, and the
+// test that decides whether a symlink target restarts it. On POSIX there is no
+// volume, so the root is always "/" and nothing is consumed — which is exactly
+// the property that has to hold for the Windows change to be a no-op here.
+func TestRealpathRoot(t *testing.T) {
+	for _, in := range []string{"/", "/a/b", "/a"} {
+		root, rest := realpathRoot(in)
+		if root != "/" || rest != in {
+			t.Errorf("realpathRoot(%q) = %q,%q — a POSIX path has no volume to consume", in, root, rest)
+		}
+	}
+	if realpathRooted("/abs") != true {
+		t.Errorf("a leading separator names a root")
+	}
+	if realpathRooted("rel/path") != false {
+		t.Errorf("a relative link does not name a root")
+	}
+	if runtime.GOOS != "windows" {
+		return
+	}
+	root, rest := realpathRoot("C:/Users/x")
+	if root != "C:/" || rest != "/Users/x" {
+		t.Errorf("realpathRoot on a volume path = %q,%q", root, rest)
+	}
+	if !realpathRooted(`C:\dir`) {
+		t.Errorf("a volume-qualified link names a root")
 	}
 }
 

@@ -133,11 +133,10 @@ e << ", blocks=#{st.blocks.inspect}, atime=#{st.atime.inspect}, mtime=#{st.mtime
 has_birthtime = begin; st.birthtime; true; rescue NotImplementedError; false; end
 e << ", birthtime=#{st.birthtime.inspect}" if has_birthtime
 e << ">"
-p st.inspect == e
-p st.inspect == "#{st}".sub("#<File::Stat>", st.inspect)
+puts st.inspect == e ? "match" : "GOT #{st.inspect}\nWANT #{e}"
 `)
-	if !strings.HasPrefix(out, "true\n") {
-		t.Errorf("File::Stat#inspect does not match the member-by-member expectation: %s", out)
+	if out != "match\n" {
+		t.Errorf("File::Stat#inspect does not match the member-by-member expectation:\n%s", out)
 	}
 	// Kernel#p reaches the same rendering, so the two cannot drift.
 	st, err := os.Stat(f)
