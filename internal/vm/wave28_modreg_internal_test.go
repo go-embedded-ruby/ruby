@@ -166,6 +166,12 @@ func TestSearchFromScriptSemantics(t *testing.T) {
 		{`p "a1b2".gsub(/\b/, "|")`, "\"|a1b2|\"\n"},
 		{`p "ab".gsub(/(?<=a)/, "-")`, "\"a-b\"\n"},
 		{`p "abc".scan(/\A./)`, "[\"a\"]\n"},
+		// Regexp#match?(str, pos) searches from a cursor too.
+		{`p(/\A/.match?("hello", 2))`, "false\n"},
+		{`p(/\A/.match?("hello", 0))`, "true\n"},
+		{`p(/\b\w/.match?("ab cd", 1))`, "true\n"},
+		{`p(/l/.match?("hello", 4))`, "false\n"},
+		{`p(/o/.match?("hello", 9))`, "false\n"},
 		// The Hash form of gsub goes through the same loop.
 		{`p "ab cd".gsub(/\b/, "" => "|")`, "\"|ab| |cd|\"\n"},
 		// And the ordinary, context-free patterns must be untouched.

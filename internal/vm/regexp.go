@@ -2422,7 +2422,10 @@ func (vm *VM) installRegexp() {
 			if pos < 0 || pos > nChars {
 				return object.False
 			}
-			return object.Bool(re.matcher().MatchString(subject[charToByte(subject, int(pos)):]))
+			// Search from the cursor with the WHOLE subject visible, as
+			// rb_reg_search does — /\A/.match?("hello", 2) is false, not true.
+			md, _ := re.searchFrom(subject, charToByte(subject, int(pos)))
+			return object.Bool(md != nil)
 		}
 		return object.Bool(re.matcher().MatchString(subject))
 	})
