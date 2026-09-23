@@ -76,7 +76,17 @@ puts a.get("/files/etc/hosts/1/ipaddr")
 puts a.get("/files/etc/hosts/1/canonical")
 puts a.text_retrieve("Hosts", "/files/etc/hosts").inspect
 `)
-	want := "127.0.0.1\nlocalhost\n" + `"127.0.0.1 localhost\n"`
+	// The separator comes back as a TAB, not as the space that went in, and that
+	// is real augeas behaviour rather than a round-trip bug: hosts.aug's record
+	// joins ipaddr and canonical with `Sep.tab` (lenses/dist/hosts.aug:8), and
+	// sep.aug defines `let tab = del Rx.space "\t"` (lenses/dist/sep.aug:35). In
+	// augeas a `del RE VALUE` matches RE on get and REGENERATES VALUE on put, so
+	// any run of whitespace parses and a tab is written back.
+	//
+	// The previous expectation of a space recorded an incomplete put: the
+	// dependency bump that wired put for interpreted lenses
+	// (go-augeas/augeas#11) is what surfaced it.
+	want := "127.0.0.1\nlocalhost\n" + `"127.0.0.1\tlocalhost\n"`
 	if got != want {
 		t.Fatalf("text lens:\n got=%q\nwant=%q", got, want)
 	}
