@@ -417,6 +417,7 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 	// the original source) and, when needed, rewrite named groups to synthetic
 	// ASCII names — both no-ops for sources that do not use those features.
 	engineSrc := translateUnicodeEscapes(prefix+source, source)
+	engineSrc = translateCharEscapes(engineSrc)
 	engineSrc, nameMap := rewriteNamedGroups(engineSrc)
 	engineSrc = rewriteBeginLineAnchor(engineSrc)
 	re, err := onig.Compile(engineSrc)
@@ -2967,4 +2968,144 @@ func namedKey(name string, symbolize bool) object.Value {
 		return object.Symbol(name)
 	}
 	return object.NewString(name)
+}
+
+// onigMeaningfulEscapeLetters are the ASCII letters that carry a meaning after
+// a backslash in a Ruby (Onigmo) pattern: the character types and properties
+// (d D h H p P s S w W R X), the anchors and assertions (A b B G K z Z), the
+// character escapes (a c C e f M n r t u v x o), and the group references
+// (g k). Every OTHER letter is, in MRI, simply that letter — "\y" matches "y",
+// "\Q" matches "Q" — which is what escapes_spec's "allows any character to be
+// escaped" pins. The engine this VM links rejects them instead, so
+// translateCharEscapes drops the backslash.
+const onigMeaningfulEscapeLetters = "abcdefghknoprstuvwxzABCDGHKMPRSWXZ"
+
+// controlEscapeValue applies Onigmo's control-character rule to one byte: "?"
+// denotes DEL and every other byte is masked with 0x9F, so \cA, \ca and \cc all
+// give 0x01/0x03 exactly as the corresponding String escapes do ("\cA".ord == 1,
+// "\c#".ord == 3). A byte at or above 0x80 is not a control escape MRI accepts
+// here, and is reported as unusable.
+func controlEscapeValue(c byte) (byte, bool) {
+	if c >= 0x80 {
+		return 0, false
+	}
+	if c == '?' {
+		return 0x7F, true
+	}
+	return c & 0x9F, true
+}
+
+// controlEscapePayload reads the character a \c / \C- escape controls from the
+// text that follows it, returning its control value and how many bytes it
+// spanned. The payload may itself be backslash-escaped — /\c\\/ controls a
+// backslash, giving 0x1C — which is why it is not simply the next byte.
+func controlEscapePayload(rest string) (value byte, width int, ok bool) {
+	if len(rest) == 0 {
+		return 0, 0, false
+	}
+	if rest[0] == '\\' {
+		if len(rest) < 2 {
+			return 0, 0, false
+		}
+		v, good := controlEscapeValue(rest[1])
+		return v, 2, good
+	}
+	v, good := controlEscapeValue(rest[0])
+	return v, 1, good
+}
+
+// hexEscape renders a byte as the \xHH escape the engine accepts in and out of
+// a character class.
+func hexEscape(v byte) string {
+	const hexDigits = "0123456789abcdef"
+	return `\x` + string([]byte{hexDigits[v>>4], hexDigits[v&0xf]})
+}
+
+// translateCharEscapes rewrites the Ruby escape sequences that denote a single
+// CHARACTER but that the linked engine does not parse, into the \xHH escape it
+// does parse, and drops the backslash from an escape that is just a letter:
+//
+//	\cX and \C-X   control characters  — /\c#\cc\cC/, /\C-*\C-J\C-j/
+//	\0, \0nn       octal, and any \nnn INSIDE a character class — /[\000-\b]/
+//	\y \Q \j …     a letter with no meaning after a backslash — /\y/ matches "y"
+//
+// Outside a character class a backslash followed by 1-9 is left untouched: that
+// is a back-reference, which the engine handles. Inside one it cannot be, so
+// Onigmo reads it as octal there (/[\1]/ matches "\x01"), and so does this.
+//
+// A value above 0x7F is left as written: MRI turns such a pattern into a binary
+// (ASCII-8BIT) regexp, which is a different matter from spelling one character.
+//
+// Character-class nesting is tracked by depth, as in rewriteBeginLineAnchor, so
+// POSIX brackets and nested classes are counted correctly. A source with no
+// backslash is returned unchanged.
+//
+// Reference: ruby/ruby v3_4_0 regparse.c fetch_escaped_value (the \c / \C- /
+// \M- cases) and fetch_token's ONIG_SYN_OP_ESC_OCTAL3 branch.
+func translateCharEscapes(src string) string {
+	if !strings.ContainsRune(src, '\\') {
+		return src
+	}
+	var b strings.Builder
+	b.Grow(len(src))
+	depth := 0 // character-class nesting depth
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		if c == '[' {
+			depth++
+			b.WriteByte(c)
+			continue
+		}
+		if c == ']' {
+			if depth > 0 {
+				depth--
+			}
+			b.WriteByte(c)
+			continue
+		}
+		if c != '\\' || i+1 >= len(src) {
+			b.WriteByte(c)
+			continue
+		}
+		n := src[i+1]
+		switch {
+		case n == 'c' && i+2 < len(src):
+			if payload, width, ok := controlEscapePayload(src[i+2:]); ok {
+				b.WriteString(hexEscape(payload))
+				i += 1 + width
+				continue
+			}
+		case n == 'C' && i+3 < len(src) && src[i+2] == '-':
+			if payload, width, ok := controlEscapePayload(src[i+3:]); ok {
+				b.WriteString(hexEscape(payload))
+				i += 2 + width
+				continue
+			}
+		case n >= '0' && n <= '7' && (depth > 0 || n == '0'):
+			digits := 1
+			for digits < 3 && i+1+digits < len(src) && src[i+1+digits] >= '0' && src[i+1+digits] <= '7' {
+				digits++
+			}
+			v, err := strconv.ParseUint(src[i+1:i+1+digits], 8, 16)
+			if err == nil && v <= 0x7F {
+				b.WriteString(hexEscape(byte(v)))
+				i += digits
+				continue
+			}
+		case isASCIILetter(n) && !strings.ContainsRune(onigMeaningfulEscapeLetters, rune(n)):
+			b.WriteByte(n)
+			i++
+			continue
+		}
+		// Not one of the rewritten forms: copy the escape through untouched.
+		b.WriteByte(c)
+		b.WriteByte(n)
+		i++
+	}
+	return b.String()
+}
+
+// isASCIILetter reports whether c is an ASCII letter.
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
