@@ -416,3 +416,84 @@ func hasOp(iseq *bytecode.ISeq, op bytecode.Op) bool {
 	}
 	return false
 }
+
+// `A ||= v` is not an assignment NODE: the parser desugars it to
+// `(defined?(A) && A) || A = v`, with the constant read shared between the
+// probe, the `&&`'s right operand and (for the scoped form) the assignment's
+// target. MRI still calls it an assignment. A hand-written expression of the
+// same shape has three distinct reads and stays "expression".
+func TestDefinedTagsDesugaredConstantOrAssign(t *testing.T) {
+	for _, src := range []string{"defined?(A ||= 1)", "defined?(Object::A ||= 1)"} {
+		if iseq := compileSrc(t, src); !hasDefinedTag(iseq, "assignment") {
+			t.Errorf("%s: tags %v, want assignment", src, definedTags(iseq))
+		}
+	}
+	for _, src := range []string{
+		"X = 5; defined?((defined?(X) && X) || X = 1)",
+		"defined?(1 || 2)",
+		"defined?(1 && 2)",
+		"y = 3; defined?(y || 4)",
+	} {
+		if iseq := compileSrc(t, src); hasDefinedTag(iseq, "assignment") {
+			t.Errorf("%s: tagged assignment; MRI says expression", src)
+		}
+	}
+}
+
+// Every way the recogniser must say no. The parser builds none of these shapes
+// for a `||=`, so they are synthesized; each one leaves the expression an
+// ordinary `||`, which defined? tags "expression".
+func TestConstOrAssignRejectsOtherShapes(t *testing.T) {
+	read := &ast.ConstRef{Name: "A"}
+	probe := func(arg ast.Node) *ast.Call { return &ast.Call{Name: "defined?", Args: []ast.Node{arg}} }
+	guard := func(l, r ast.Node) *ast.BinaryExpr { return &ast.BinaryExpr{Op: "&&", Left: l, Right: r} }
+	one := &ast.IntLit{Value: 1}
+	cases := []struct {
+		name string
+		expr *ast.BinaryExpr
+	}{
+		{"not ||", &ast.BinaryExpr{Op: "&&", Left: guard(probe(read), read), Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"left is not a binary expression", &ast.BinaryExpr{Op: "||", Left: read, Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"left is not &&", &ast.BinaryExpr{Op: "||", Left: &ast.BinaryExpr{Op: "+", Left: probe(read), Right: read},
+			Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"guard's left is not a call", &ast.BinaryExpr{Op: "||", Left: guard(read, read), Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"probe is not defined?", &ast.BinaryExpr{Op: "||", Left: guard(&ast.Call{Name: "frozen?", Args: []ast.Node{read}}, read),
+			Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"probe has a receiver", &ast.BinaryExpr{Op: "||", Left: guard(&ast.Call{Recv: read, Name: "defined?", Args: []ast.Node{read}}, read),
+			Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"probe takes no argument", &ast.BinaryExpr{Op: "||", Left: guard(&ast.Call{Name: "defined?"}, read),
+			Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"probe reads a different node", &ast.BinaryExpr{Op: "||", Left: guard(probe(&ast.ConstRef{Name: "A"}), read),
+			Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"right is not an assignment", &ast.BinaryExpr{Op: "||", Left: guard(probe(read), read), Right: one}},
+		{"assigns a different constant", &ast.BinaryExpr{Op: "||", Left: guard(probe(read), read),
+			Right: &ast.ConstAssign{Name: "B", Value: one}}},
+		{"read is not a plain constant", func() *ast.BinaryExpr {
+			sc := &ast.ScopedConst{Recv: &ast.ConstRef{Name: "Object"}, Name: "A"}
+			return &ast.BinaryExpr{Op: "||", Left: guard(probe(sc), sc), Right: &ast.ConstAssign{Name: "A", Value: one}}
+		}()},
+		{"scoped assignment targets another node", func() *ast.BinaryExpr {
+			sc := &ast.ScopedConst{Recv: &ast.ConstRef{Name: "Object"}, Name: "A"}
+			return &ast.BinaryExpr{Op: "||", Left: guard(probe(sc), sc),
+				Right: &ast.ScopedConstAssign{Target: &ast.ScopedConst{Recv: &ast.ConstRef{Name: "Object"}, Name: "A"}, Value: one}}
+		}()},
+	}
+	for _, tc := range cases {
+		if constOrAssign(tc.expr) {
+			t.Errorf("%s: recognised as a constant ||=", tc.name)
+		}
+	}
+	// …and the two shapes it must say yes to.
+	sc := &ast.ScopedConst{Recv: &ast.ConstRef{Name: "Object"}, Name: "A"}
+	for _, tc := range []struct {
+		name string
+		expr *ast.BinaryExpr
+	}{
+		{"A ||= 1", &ast.BinaryExpr{Op: "||", Left: guard(probe(read), read), Right: &ast.ConstAssign{Name: "A", Value: one}}},
+		{"Object::A ||= 1", &ast.BinaryExpr{Op: "||", Left: guard(probe(sc), sc), Right: &ast.ScopedConstAssign{Target: sc, Value: one}}},
+	} {
+		if !constOrAssign(tc.expr) {
+			t.Errorf("%s: not recognised", tc.name)
+		}
+	}
+}

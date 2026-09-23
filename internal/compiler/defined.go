@@ -128,10 +128,52 @@ func (c *Compiler) compileDefinedCall(v *ast.Call) {
 // every other binary operator is a method on the left operand.
 func (c *Compiler) compileDefinedBinary(v *ast.BinaryExpr) {
 	if v.Op == "&&" || v.Op == "||" {
+		// `A ||= v` and `A::B ||= v` are not written as an assignment node: the
+		// parser desugars them to `(defined?(A) && A) || A = v`, so they arrive
+		// here as a `||`. MRI still calls them assignments — PM_CONSTANT_OR_WRITE
+		// and PM_CONSTANT_PATH_OR_WRITE are in the DEFINED_ASGN group
+		// (prism_compile.c v3_4_0:4059 and 4063; compile.c's NODE_OP_CDECL at
+		// v3_4_0:6162 says the same) — and ruby/spec pins it.
+		if constOrAssign(v) {
+			c.pushDefinedTag("assignment")
+			return
+		}
 		c.pushDefinedTag("expression")
 		return
 	}
 	c.compileDefinedReceiverMethod(v.Left, v.Op)
+}
+
+// constOrAssign recognises the parser's desugaring of `A ||= v` / `A::B ||= v`:
+// `(defined?(A) && A) || A = v`, with the constant READ shared (same AST
+// pointer) between the `defined?` probe, the `&&`'s right operand and — for the
+// scoped form — the assignment's target. That identity is what tells the
+// desugaring apart from a hand-written `(defined?(A) && A) || A = v`, whose
+// three reads are distinct nodes; it is the same test opassign.go uses for the
+// index and attribute compound assignments.
+func constOrAssign(v *ast.BinaryExpr) bool {
+	if v.Op != "||" {
+		return false
+	}
+	guard, ok := v.Left.(*ast.BinaryExpr)
+	if !ok || guard.Op != "&&" {
+		return false
+	}
+	probe, ok := guard.Left.(*ast.Call)
+	if !ok || probe.Name != "defined?" || probe.Recv != nil || len(probe.Args) != 1 {
+		return false
+	}
+	if probe.Args[0] != guard.Right {
+		return false
+	}
+	switch w := v.Right.(type) {
+	case *ast.ConstAssign:
+		read, ok := guard.Right.(*ast.ConstRef)
+		return ok && read.Name == w.Name
+	case *ast.ScopedConstAssign:
+		return w.Target == guard.Right
+	}
+	return false
 }
 
 // compileDefinedReceiverMethod emits, under the guard, the response probe for
