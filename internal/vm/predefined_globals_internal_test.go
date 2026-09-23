@@ -420,3 +420,59 @@ func TestRubyReleaseConstants(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// TestKernelComplexConvert covers makeComplex, the nucomp_convert port, step by
+// step. Every expectation was witnessed on ruby 4.0.5 in one probe run.
+func TestKernelComplexConvert(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"complex_complex", `p Complex(Complex(3, 4), Complex(5, 6))`, "(-3+9i)"},
+		{"complex_complex_float", `p Complex(Complex(1.5, 2), Complex(-5, 6.3))`, "(-4.8-3.0i)"},
+		{"lone_complex", `p Complex(Complex(1, 2))`, "(1+2i)"},
+		{"complex_exact_zero_imag", `p Complex(Complex(1, 0), 2)`, "(1+2i)"},
+		{"complex_zero_second", `p Complex(Complex(1, 2), 0)`, "(1+2i)"},
+		{"string_string", `p Complex("1", "2")`, "(1+2i)"},
+		{"to_c", `o = Object.new; def o.to_c; Complex(0, 1); end; p Complex(o)`, "(0+1i)"},
+		{"non_real_numeric", "class NR < Numeric; def real?; false; end; end; p Complex(NR.new).class", "NR"},
+		{"rational_parts", `p Complex(Rational(1, 2), 1)`, "((1/2)+1i)"},
+		// f_real_p calls Complex(1, 0.0) real (f_zero_p), so the f_add path is NOT
+		// taken and nucomp_real_check unwraps it to the Integer 1 — the imaginary
+		// part stays an Integer. Complex(1, 0.0) + Complex(0, 2) is (1+2.0i) by
+		// contrast, and both were witnessed on 4.0.5.
+		{"float_zero_imag", `p Complex(Complex(1, 0.0), 2)`, "(1+2i)"},
+		{"float_zero_imag_add", `p(Complex(1, 0.0) + Complex(0, 2))`, "(1+2.0i)"},
+		{"nonzero_imag_adds", `p Complex(Complex(1, 0.5), 2)`, "(1+2.5i)"},
+		{"complex_imag_arg", `p Complex(1, Complex(2, 3))`, "(-2+2i)"},
+		{"exc_false_string", `p Complex("123", exception: false)`, "(123+0i)"},
+		{"exc_false_nonnumeric", `p Complex(Object.new, exception: false)`, "nil"},
+		{"exc_false_nil", `p Complex(nil, exception: false)`, "nil"},
+		{"exc_false_second_nonnumeric", `p Complex(0, :sym, exception: false)`, "nil"},
+		{"exc_false_second_string", `p Complex(0, "b", exception: false)`, "nil"},
+		{"exc_false_nullbyte", `p Complex("1-2i\0", exception: false)`, "nil"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runGvar(t, tc.src); got != tc.want {
+				t.Fatalf("src=%q got=%q want=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+	errs := []struct{ name, src, want string }{
+		{"nil_first", `Complex(nil)`, "TypeError: can't convert nil into Complex"},
+		{"nil_second", `Complex(0, nil)`, "TypeError: can't convert nil into Complex"},
+		{"nil_first_of_two", `Complex(nil, 0)`, "TypeError: can't convert nil into Complex"},
+		{"nullbyte", "Complex(\"1-2i\\0\")", "ArgumentError: string contains null byte"},
+		{"bad_string", `Complex("zz")`, `ArgumentError: invalid value for convert(): "zz"`},
+		{"no_to_c", `Complex(Object.new)`, "TypeError: can't convert Object into Complex"},
+		{"to_c_wrong_type", `o = Object.new; def o.to_c; 1; end; Complex(o)`, "TypeError: can't convert Object to Complex (Object#to_c gives Integer)"},
+		{"not_a_real_exc_false", `Complex(:sym, 0, exception: false)`, "TypeError: not a real"},
+		{"not_a_real", `Complex(:sym, 0)`, "TypeError: not a real"},
+	}
+	for _, tc := range errs {
+		t.Run(tc.name, func(t *testing.T) {
+			src := gvarProbe + "t(\"x\") { " + tc.src + " }"
+			if got := runGvar(t, src); got != "x: "+tc.want {
+				t.Fatalf("got %q want %q", got, "x: "+tc.want)
+			}
+		})
+	}
+}
