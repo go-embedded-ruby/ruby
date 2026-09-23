@@ -156,6 +156,13 @@ func (r *Regexp) encodingName() string {
 		if r.fixedEnc && r.srcEnc != "" {
 			return r.srcEnc
 		}
+		// MRI measures the code range of the PREPROCESSED pattern, not of the
+		// source text: /\xFF/n is four ASCII characters as written, but the byte
+		// it denotes is 0xFF, so the pattern is not 7-bit and a /n regexp reports
+		// BINARY (re.c rb_reg_preprocess → rb_reg_initialize).
+		if r.noEnc && sourceHasNonASCIIByteEscape(r.source) {
+			return "ASCII-8BIT"
+		}
 		return "US-ASCII"
 	}
 	if r.noEnc {
@@ -183,6 +190,27 @@ func (r *Regexp) isFixedEncoding() bool {
 		return true
 	}
 	return !asciiOnly([]byte(r.source)) && !r.noEnc
+}
+
+// sourceHasNonASCIIByteEscape reports whether the pattern source contains a
+// \xHH escape denoting a byte at or above 0x80. Such an escape makes the
+// preprocessed pattern non-7-bit even though every character of the source text
+// is ASCII, which is what decides a /n regexp's encoding (see encodingName). A
+// backslash that is itself escaped (\\x41) does not begin an escape, so the scan
+// skips two bytes after every backslash it does not consume.
+func sourceHasNonASCIIByteEscape(src string) bool {
+	for i := 0; i+1 < len(src); i++ {
+		if src[i] != '\\' {
+			continue
+		}
+		if src[i+1] == 'x' && i+3 < len(src) && allHex(src[i+2:i+4]) {
+			if v, err := strconv.ParseUint(src[i+2:i+4], 16, 16); err == nil && v >= 0x80 {
+				return true
+			}
+		}
+		i++
+	}
+	return false
 }
 
 // sourceHasNonASCIIUnicodeEscape reports whether the pattern source contains a
@@ -420,7 +448,24 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 	engineSrc = translateCharEscapes(engineSrc)
 	engineSrc, nameMap := rewriteNamedGroups(engineSrc)
 	engineSrc = rewriteBeginLineAnchor(engineSrc)
-	re, err := onig.Compile(engineSrc)
+	// A /n pattern is ARG_ENCODING_NONE — ASCII-8BIT — so its input-advancing
+	// atoms step ONE BYTE, not one UTF-8 character: /./n.match("\303\251")
+	// captures just "\303" (re.c char_to_option, rb_reg_initialize). Everything
+	// else compiles in the engine's UTF-8 mode.
+	//
+	// KNOWN GAP: MRI does not stop there. rb_reg_prepare_re RE-COMPILES the
+	// pattern in the SUBJECT's encoding whenever the two differ, so the same
+	// /./n matched against a UTF-8 string steps a whole character again (and
+	// rb_reg_prepare_enc emits its "historical binary regexp match /.../n
+	// against UTF-8 string" warning for exactly that case). A Regexp here holds
+	// one compiled program, so the binary form is used for every subject. The
+	// binary-subject case — the one ruby/spec measures — is now right; the
+	// re-compilation is tracked separately.
+	engineEnc := onig.UTF8
+	if strings.ContainsRune(flags, 'n') {
+		engineEnc = onig.ASCII8BIT
+	}
+	re, err := onig.CompileEnc(engineSrc, engineEnc)
 	if err != nil {
 		raise("RegexpError", "%s: /%s/", mapRegexpEngineError(err.Error()), source)
 	}
@@ -1035,13 +1080,81 @@ func strMatchRegexp(v object.Value) *Regexp {
 	}
 }
 
-// checkSubjectEncoding raises ArgumentError when the match subject is a String
-// whose bytes are not valid in its own encoding, matching MRI's
-// rb_reg_prepare_enc ("invalid byte sequence in <enc>"). A non-String subject
-// (Symbol, or an object coerced via #to_str) is left to the caller's coercion.
-func (vm *VM) checkSubjectEncoding(v object.Value) {
-	if s, ok := v.(*object.String); ok && !validInEncoding(s.Bytes(), s.EncName()) {
-		raise("ArgumentError", "invalid byte sequence in %s", s.EncName())
+// encInspectName renders an encoding the way MRI's rb_enc_inspect_name does in
+// the regexp-match incompatibility message, where ASCII-8BIT is shown under
+// both of its names.
+func encInspectName(name string) string {
+	if name == "ASCII-8BIT" {
+		return "BINARY (ASCII-8BIT)"
+	}
+	return name
+}
+
+// raiseRegexpEncError is re.c reg_enc_error: the Encoding::CompatibilityError a
+// match between a regexp and a string of irreconcilable encodings raises.
+//
+//	rb_raise(rb_eEncCompatError,
+//	         "incompatible encoding regexp match (%s regexp with %s string)",
+//	         rb_enc_inspect_name(rb_enc_get(re)), rb_enc_inspect_name(rb_enc_get(str)));
+func raiseRegexpEncError(reEnc, strEnc string) {
+	raise("Encoding::CompatibilityError", "incompatible encoding regexp match (%s regexp with %s string)",
+		encInspectName(reEnc), encInspectName(strEnc))
+}
+
+// checkSubjectEncoding decides whether re may be matched against the subject v
+// at all, reproducing ruby/ruby v3_4_0 re.c rb_reg_prepare_enc:
+//
+//	if (cr == ENC_CODERANGE_BROKEN)
+//	    rb_raise(rb_eArgError, "invalid byte sequence in %s", …);
+//	enc = rb_enc_get(str);
+//	if (RREGEXP_PTR(re)->enc == enc) { }
+//	else if (cr == ENC_CODERANGE_7BIT && RREGEXP_PTR(re)->enc == rb_usascii_encoding())
+//	    enc = RREGEXP_PTR(re)->enc;
+//	else if (!rb_enc_asciicompat(enc))            reg_enc_error(re, str);
+//	else if (rb_reg_fixed_encoding_p(re)) {
+//	    if (!rb_enc_asciicompat(RREGEXP_PTR(re)->enc) || cr != ENC_CODERANGE_7BIT)
+//	        reg_enc_error(re, str);
+//	}
+//	else if (warn && (RBASIC(re)->flags & REG_ENCODING_NONE) &&
+//	         enc != rb_ascii8bit_encoding() && cr != ENC_CODERANGE_7BIT)
+//	    rb_warn("historical binary regexp match /.../n against %s string", …);
+//
+// The last clause is rb_warn, so $VERBOSE == nil silences it but false does
+// not. A non-String subject (a Symbol, or an object coerced through #to_str) is
+// left to the caller's coercion, and a nil re only performs the broken-bytes
+// check.
+func (vm *VM) checkSubjectEncoding(re *Regexp, v object.Value) {
+	str, ok := v.(*object.String)
+	if !ok {
+		return
+	}
+	bytes, strEnc := str.Bytes(), str.EncName()
+	if !validInEncoding(bytes, strEnc) {
+		raise("ArgumentError", "invalid byte sequence in %s", strEnc)
+	}
+	reEnc := re.encodingName()
+	if reEnc == strEnc {
+		return
+	}
+	// ENC_CODERANGE_7BIT is only ever reported for an ASCII-COMPATIBLE encoding
+	// (coderange_scan short-circuits otherwise), so a UTF-16LE string of ASCII
+	// code points is VALID, not 7BIT — which is what makes it incompatible with
+	// a US-ASCII regexp rather than silently promoted.
+	sevenBit := asciiOnly(bytes) && encIsASCIICompat(strEnc)
+	if sevenBit && reEnc == "US-ASCII" {
+		return
+	}
+	if !encIsASCIICompat(strEnc) {
+		raiseRegexpEncError(reEnc, strEnc)
+	}
+	if re.isFixedEncoding() {
+		if !encIsASCIICompat(reEnc) || !sevenBit {
+			raiseRegexpEncError(reEnc, strEnc)
+		}
+		return
+	}
+	if re.noEnc && strEnc != "ASCII-8BIT" && !sevenBit {
+		vm.rbWarn("warning: historical binary regexp match /.../n against %s string", strEnc)
 	}
 }
 
@@ -2295,8 +2408,8 @@ func (vm *VM) installRegexp() {
 		if _, isNil := args[0].(object.Nil); isNil {
 			return object.False
 		}
-		vm.checkSubjectEncoding(args[0])
 		re := reArg(self)
+		vm.checkSubjectEncoding(re, args[0])
 		subject := strArg(args[0])
 		// match?(str, pos): probe from character offset pos, without touching $~
 		// (the predicate form has no match-data side effect).
@@ -2321,7 +2434,7 @@ func (vm *VM) installRegexp() {
 			vm.lastMatch = object.NilV
 			return object.NilV
 		}
-		vm.checkSubjectEncoding(args[0])
+		vm.checkSubjectEncoding(re, args[0])
 		// The subject is coerced like any Regexp operand: a Symbol yields its name,
 		// anything else is taken via #to_str (Integer/Exception raise TypeError).
 		subject := vm.regexpOperandStr(args[0])
@@ -2681,6 +2794,7 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(subject))
 	}
+	vm.checkSubjectEncoding(re, subject)
 	md := re.matcher().Match(s)
 	if md == nil {
 		vm.lastMatch = object.NilV

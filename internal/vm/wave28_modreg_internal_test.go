@@ -553,7 +553,8 @@ func TestInstanceMethodHonoursRefinements(t *testing.T) {
 		  end
 		  module S
 		    using R
-		    p K.instance_method(:bar).owner == R.refinements[R.refinements.index(R.refinements.find { |m| m.target == K })]
+		    owner = K.instance_method(:bar).owner
+		    p(R.refinements.include?(owner) && owner.target == K)
 		    begin; K.instance_method(:nope); rescue NameError; p :none; end
 		  end`, "true\n:none\n"},
 	}
@@ -664,4 +665,134 @@ func TestWarnAutoloadDidNotDefineSkipsWhenDefined(t *testing.T) {
 	// The constant IS defined, so nothing is written even in verbose mode.
 	vm.globals["$VERBOSE"] = object.Bool(true)
 	vm.warnAutoloadDidNotDefine(mod, "K", "feature.rb")
+}
+
+func TestRegexpPrepareEncoding(t *testing.T) {
+	tests := []struct{ name, src, want string }{
+		{"broken_subject", `
+		  s = "\x80".dup.force_encoding("UTF-8")
+		  begin; s =~ /./; rescue ArgumentError => e; p e.message; end`,
+			"\"invalid byte sequence in UTF-8\"\n"},
+		{"match_incompatible", `
+		  begin
+		    /\A[[:space:]]*\z/.match(" ".encode("UTF-16LE"))
+		  rescue Encoding::CompatibilityError => e
+		    p e.message
+		  end`,
+			"\"incompatible encoding regexp match (US-ASCII regexp with UTF-16LE string)\"\n"},
+		{"match_p_incompatible", `
+		  begin
+		    /\A[[:space:]]*\z/.match?(" ".encode("UTF-16LE"))
+		  rescue Encoding::CompatibilityError
+		    p :raised
+		  end`, ":raised\n"},
+		{"tilde_incompatible", `
+		  begin
+		    /\A[[:space:]]*\z/ =~ " ".encode("UTF-16LE")
+		  rescue Encoding::CompatibilityError
+		    p :raised
+		  end`, ":raised\n"},
+		{"fixed_non_ascii_compatible_regexp", `
+		  begin
+		    Regexp.new("".dup.force_encoding("UTF-16LE"), Regexp::FIXEDENCODING) =~ " ".encode("UTF-8")
+		  rescue Encoding::CompatibilityError => e
+		    p e.message
+		  end`,
+			"\"incompatible encoding regexp match (UTF-16LE regexp with UTF-8 string)\"\n"},
+		{"fixed_regexp_non_seven_bit_string", `
+		  begin
+		    Regexp.new("".dup.force_encoding("US-ASCII"), Regexp::FIXEDENCODING) =~ "\303\251".dup.force_encoding("UTF-8")
+		  rescue Encoding::CompatibilityError => e
+		    p e.message
+		  end`,
+			"\"incompatible encoding regexp match (US-ASCII regexp with UTF-8 string)\"\n"},
+		{"binary_name_in_message", `
+		  begin
+		    /é/ =~ "\xC3\xA9".dup.force_encoding("BINARY")
+		  rescue Encoding::CompatibilityError => e
+		    p e.message
+		  end`,
+			"\"incompatible encoding regexp match (UTF-8 regexp with BINARY (ASCII-8BIT) string)\"\n"},
+		// The historical-binary warning, and its two silencing conditions. It goes
+		// through rbWarn, which this VM keeps quiet until $VERBOSE is assigned.
+		{"historical_binary_warning", `
+		  $VERBOSE = true
+		  p(/a/n =~ "\xC3\xA9".dup.force_encoding("UTF-8"))`,
+			"warning: historical binary regexp match /.../n against UTF-8 string\nnil\n"},
+		{"no_warning_for_binary_subject", `
+		  $VERBOSE = true
+		  p(/a/n =~ "\xC3\xA9".dup.force_encoding("BINARY"))`, "nil\n"},
+		{"no_warning_for_seven_bit", `
+		  $VERBOSE = true
+		  p(/a/n =~ "abc")`, "0\n"},
+		// Same encoding on both sides is accepted without any of the above.
+		{"same_encoding", `p(/é/ =~ "é")`, "0\n"},
+		{"symbol_subject_is_left_to_coercion", `p(/a/ =~ :abc)`, "0\n"},
+		// A FIXEDENCODING regexp whose own encoding is ASCII-compatible accepts a
+		// 7-bit string in another encoding without raising.
+		{"fixed_regexp_accepts_seven_bit", `
+		  re = Regexp.new("a".dup.force_encoding("UTF-8"), Regexp::FIXEDENCODING)
+		  p(re =~ "abc".dup.force_encoding("US-ASCII"))`, "0\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRegexpBinaryEncodingFlag(t *testing.T) {
+	tests := []struct{ src, want string }{
+		// /n steps one BYTE (the subject here is binary, as ruby/spec's
+		// encoding_spec is, so MRI does the same).
+		{`p(/./n.match("\xC3\xA9".dup.force_encoding("BINARY")).to_a.map(&:bytes))`, "[[195]]\n"},
+		{`p(/#{/./}/n.match("\xC3\xA9".dup.force_encoding("BINARY")).to_a.map(&:bytes))`, "[[195]]\n"},
+		// Without /n the dot is a whole character.
+		{`p(/./.match("é").to_a.map(&:bytes))`, "[[195, 169]]\n"},
+		// A \xHH escape above 0x7F makes a /n pattern BINARY even though every
+		// character of the source text is ASCII.
+		{`p(/\xFF/n.encoding)`, "#<Encoding:BINARY (ASCII-8BIT)>\n"},
+		{`p(/\xFF#{/./}/n.encoding)`, "#<Encoding:BINARY (ASCII-8BIT)>\n"},
+		// An all-7-bit /n pattern stays US-ASCII.
+		{`p(/.#{/./}/n.encoding)`, "#<Encoding:US-ASCII>\n"},
+		{`p(/\x41/n.encoding)`, "#<Encoding:US-ASCII>\n"},
+	}
+	for _, tc := range tests {
+		if got := eval(t, tc.src); got != tc.want {
+			t.Errorf("%s => %q, want %q", tc.src, got, tc.want)
+		}
+	}
+}
+
+func TestSourceHasNonASCIIByteEscape(t *testing.T) {
+	tests := []struct {
+		src  string
+		want bool
+	}{
+		{"abc", false},
+		{`\x41`, false},  // below 0x80
+		{`\xFF`, true},   //
+		{`\x80`, true},   // the boundary
+		{`\\xFF`, false}, // the backslash is itself escaped
+		{`\x`, false},    // truncated
+		{`\xZZ`, false},  // not hex
+		{`a\xff`, true},  // lower case hex
+		{`\`, false},     // a lone trailing backslash
+	}
+	for _, tc := range tests {
+		if got := sourceHasNonASCIIByteEscape(tc.src); got != tc.want {
+			t.Errorf("sourceHasNonASCIIByteEscape(%q) = %v, want %v", tc.src, got, tc.want)
+		}
+	}
+}
+
+func TestEncInspectName(t *testing.T) {
+	if got := encInspectName("ASCII-8BIT"); got != "BINARY (ASCII-8BIT)" {
+		t.Errorf("encInspectName(ASCII-8BIT) = %q", got)
+	}
+	if got := encInspectName("UTF-8"); got != "UTF-8" {
+		t.Errorf("encInspectName(UTF-8) = %q", got)
+	}
 }
