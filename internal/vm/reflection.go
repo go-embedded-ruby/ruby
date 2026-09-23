@@ -65,6 +65,47 @@ func (u *UnboundMethod) ToS() string {
 func (u *UnboundMethod) Inspect() string { return u.ToS() }
 func (u *UnboundMethod) Truthy() bool    { return true }
 
+// callerRefinedInstanceMethod returns the method a refinement active at the CALL
+// SITE contributes for instances of mod, or nil when ordinary lookup should
+// answer. It is the module-level counterpart of refinedMethod (which keys on a
+// receiver): MRI's *_with_refinements entry points read the refinements off the
+// current cref, which for a native that pushes no frame of its own is the cref
+// on top of frameCrefs — the same read Module.used_refinements performs.
+//
+// A refinement only wins at the exact class it refines and only ahead of that
+// class's OWN definition, so the ancestor chain is walked and the search stops
+// at the first level that defines the name itself.
+//
+// Reference: ruby/ruby v3_4_0 proc.c mnew_unbound →
+// rb_method_entry_with_refinements(klass, id, &iclass).
+func (vm *VM) callerRefinedInstanceMethod(mod *RClass, name string) *Method {
+	if !vm.anyRefinements || mod == nil {
+		return nil
+	}
+	n := len(vm.frameCrefs)
+	if n == 0 || vm.frameCrefs[n-1] == nil {
+		return nil
+	}
+	refs := vm.activeRefinements(vm.frameCrefs[n-1])
+	if len(refs) == 0 {
+		return nil
+	}
+	for _, k := range vm.ancestors(mod) {
+		for _, r := range refs {
+			if r.refinedClass != k {
+				continue
+			}
+			if m := lookupOwnOrIncluded(r, name); m != nil && !m.undefined {
+				return m
+			}
+		}
+		if m, ok := k.methods[name]; ok && !m.undefined {
+			return nil
+		}
+	}
+	return nil
+}
+
 // registerReflection installs the reflection API: Module#instance_method,
 // Object#method/#singleton_class, the UnboundMethod class, and Method#unbind. It
 // also teaches define_method to accept a Method/UnboundMethod body.
@@ -72,11 +113,18 @@ func (vm *VM) registerReflection() {
 	cUnbound := newClass("UnboundMethod", vm.cObject)
 	vm.consts["UnboundMethod"] = cUnbound
 
-	// Module#instance_method(:m) → UnboundMethod resolved up the ancestor chain.
+	// Module#instance_method(:m) → UnboundMethod resolved up the ancestor chain,
+	// with the refinements active at the CALL SITE consulted first: MRI's
+	// rb_mod_instance_method goes through mnew_unbound, which resolves the entry
+	// with rb_method_entry_with_refinements(klass, id, &iclass) (ruby/ruby
+	// v3_4_0 proc.c), so `using R; C.instance_method(:m)` hands back R's method.
 	vm.cModule.define("instance_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
 		name := vm.coerceNameArg(args[0])
-		m := vm.lookupForModuleOp(mod, name)
+		m := vm.callerRefinedInstanceMethod(mod, name)
+		if m == nil {
+			m = vm.lookupForModuleOp(mod, name)
+		}
 		if m == nil || m.undefined {
 			vm.raiseNameError("undefined method '"+name+"' for class '"+mod.name+"'", name)
 		}

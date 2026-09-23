@@ -53,6 +53,9 @@ func (vm *VM) registerRefinements() {
 		return self.(*RClass).refinedClass
 	})
 
+	// Refinement#import_methods (see refinement_import.go).
+	vm.installRefinementImport()
+
 	// Module#refinements returns this module's own refinement modules (not those
 	// of included modules).
 	vm.cModule.define("refinements", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
