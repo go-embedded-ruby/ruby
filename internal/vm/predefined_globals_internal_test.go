@@ -7,6 +7,7 @@ package vm
 import (
 	"bytes"
 	"math/big"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -309,6 +310,26 @@ func TestLoadPathDirsNonArray(t *testing.T) {
 // spelled like the feature, an entry under a $LOAD_PATH prefix, the extension
 // rules, and the shapes that must NOT match.
 func TestFeatureProvided(t *testing.T) {
+	// The prefixed cases need a directory THIS HOST calls absolute. Both sides of
+	// MRI's comparison are expanded — $LOADED_FEATURES entries come from
+	// rb_file_expand_path and the load path from get_expanded_load_path — and
+	// featureProvided mirrors that by running each $LOAD_PATH entry through
+	// featurePath (filepath.Abs + ToSlash). A hard-coded "/lib" is absolute on
+	// POSIX but NOT on Windows, where a path with no volume name is merely rooted:
+	// filepath.Abs then joins it onto the working directory and it no longer
+	// prefixes the fixture's entry, so every prefixed case collapses — the three
+	// expecting a match fail outright, and the five expecting none passed for the
+	// wrong reason, never reaching the rule they name. A real temporary directory
+	// keeps all eight exercising the matching on every platform, which a
+	// runtime.GOOS skip would not.
+	dir := filepath.ToSlash(t.TempDir())
+	// The fixture's whole premise: expandedLoadPath must leave this directory
+	// alone, or the prefixed cases below are testing nothing. Asserted here so a
+	// platform where it does not hold says so in one line, instead of surfacing as
+	// eight confusing mismatches further down.
+	if got := featurePath(dir); got != dir {
+		t.Fatalf("temp dir is not a fixed point of featurePath: %q -> %q", dir, got)
+	}
 	cases := []struct {
 		name     string
 		features []string
@@ -324,17 +345,28 @@ func TestFeatureProvided(t *testing.T) {
 		{"rb_asked_so_stored", []string{"foo.so"}, nil, "foo.rb", false},
 		{"so_asked_rb_stored", []string{"foo.rb"}, nil, "foo.so", false},
 		{"unknown_ext_is_part_of_name", []string{"foo.conf"}, nil, "foo.conf", true},
-		{"load_path_prefix", []string{"/lib/foo.rb"}, []string{"/lib"}, "foo", true},
-		{"load_path_prefix_dotted", []string{"/lib/a.b.rb"}, []string{"/lib"}, "a.b.rb", true},
-		{"prefix_not_on_load_path", []string{"/other/foo.rb"}, []string{"/lib"}, "foo", false},
-		{"no_dot_in_last_segment", []string{"/lib/foo"}, []string{"/lib"}, "foo", false},
-		{"partial_segment", []string{"/lib/barfoo.rb"}, []string{"/lib"}, "foo", false},
+		{"load_path_prefix", []string{dir + "/foo.rb"}, []string{dir}, "foo", true},
+		{"load_path_prefix_dotted", []string{dir + "/a.b.rb"}, []string{dir}, "a.b.rb", true},
+		// The entry sits one level BELOW the load-path entry, so its prefix is not
+		// on the load path (loaded_feature_path's `n != plen` arm).
+		{"prefix_not_on_load_path", []string{dir + "/sub/foo.rb"}, []string{dir}, "foo", false},
+		{"no_dot_in_last_segment", []string{dir + "/foo"}, []string{dir}, "foo", false},
+		{"partial_segment", []string{dir + "/barfoo.rb"}, []string{dir}, "foo", false},
+		// load.c decides the boundary with a bare `name[plen-1] != '/'` and carries
+		// no separator conditional ANYWHERE — no isdirsep, no FILE_ALT_SEPARATOR, no
+		// _WIN32 (a grep over load.c v3_4_0 finds none), unlike file.c, whose
+		// isdirsep macro does accept a backslash on Windows and drives
+		// is_explicit_relative. So a backslash never separates a loaded-features
+		// prefix, on any platform, and this case asserts the same answer on both.
+		// Read from the source rather than witnessed: there is no Windows MRI on
+		// this host to run it against.
+		{"backslash_is_not_a_separator", []string{dir + `\foo.rb`}, []string{dir}, "foo", false},
 		{"shorter_than_feature", []string{"fo"}, nil, "foo", false},
 		{"same_length_other_name", []string{"bar"}, nil, "foo", false},
 		{"stem_is_prefix_of_entry", []string{"foobar"}, nil, "foo", false},
-		{"dotted_stem_no_ext", []string{"/lib/a.b"}, []string{"/lib"}, "a.b", true},
-		{"prefixed_rb_asked_so_stored", []string{"/lib/foo.so"}, []string{"/lib"}, "foo.rb", false},
-		{"prefixed_so_asked_rb_stored", []string{"/lib/foo.rb"}, []string{"/lib"}, "foo.so", false},
+		{"dotted_stem_no_ext", []string{dir + "/a.b"}, []string{dir}, "a.b", true},
+		{"prefixed_rb_asked_so_stored", []string{dir + "/foo.so"}, []string{dir}, "foo.rb", false},
+		{"prefixed_so_asked_rb_stored", []string{dir + "/foo.rb"}, []string{dir}, "foo.so", false},
 		{"nothing_loaded", nil, nil, "foo", false},
 	}
 	for _, tc := range cases {
