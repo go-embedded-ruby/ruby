@@ -116,12 +116,20 @@ func TestEmptyKwSplatDrop(t *testing.T) {
 	}
 }
 
-// TestDefinedOperatorMethod covers defined?(recv op arg) routing an operator name
-// with no method-table entry (a plain object) through operatorOpcode, including %.
+// TestDefinedOperatorMethod covers defined?(recv op arg) for an operator name
+// with no method-table entry, including %.
+//
+// A PLAIN object answers nil, not "method". The two cases below asserted
+// "method" while defined? took rbgo's operator fast path for every receiver;
+// MRI is the witness that this was wrong — `class Plain; end;
+// p defined?(Plain.new + 1)` prints nil under ruby 4.0.5, because
+// DEFINED_METHOD finds no method entry and Object#respond_to_missing? answers
+// false (vm_insnhelper.c v3_4_0:5476-5498). `!=` differs: it is a real
+// BasicObject method, so it is found and reported.
 func TestDefinedOperatorMethod(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{`class Plain; end; p defined?(Plain.new % 1)`, "\"method\"\n"},
-		{`class Plain; end; p defined?(Plain.new + 1)`, "\"method\"\n"},
+		{`class Plain; end; p defined?(Plain.new % 1)`, "nil\n"},
+		{`class Plain; end; p defined?(Plain.new + 1)`, "nil\n"},
 		{`class Plain; end; p defined?(Plain.new != 1)`, "\"method\"\n"},
 		// Unary ~/+@/-@ resolve as real numeric methods, so defined? reports them.
 		{`p defined?(5.~)`, "\"method\"\n"},
