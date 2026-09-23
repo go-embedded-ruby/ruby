@@ -973,6 +973,98 @@ func (vm *VM) checkSubjectEncoding(v object.Value) {
 	}
 }
 
+// patternNeedsLeftContext reports whether matching src from a byte offset can
+// depend on the text BEFORE that offset — i.e. whether handing the engine only
+// the tail subject[pos:] would change the answer. That is the case for the
+// beginning-of-line/string anchors (^, \A), the word-boundary assertions (\b,
+// \B), the keep operator (\K) and look-behind ((?<=…), (?<!…)); the
+// end-anchored forms ($, \z, \Z) and everything else read only at or after the
+// cursor, so a tail slice is equivalent for them.
+//
+// The scan is deliberately conservative: it over-reports (a "^" inside a
+// character class that is not the negation slot, a "\\b" that is really an
+// escaped backslash followed by b) because a false positive costs only the
+// slower per-position search path, while a false negative would silently keep
+// the wrong answer. A "^" is treated as the class-negation slot — and so
+// ignored — only when it directly follows a "[".
+//
+// \G is deliberately NOT listed. MRI binds \G to onig_search's start position,
+// whereas the per-position probe this predicate selects would rebind it to
+// every candidate; the tail-slice path already pins \G to the search cursor,
+// which is the behaviour to keep.
+func patternNeedsLeftContext(src string) bool {
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '\\':
+			if i+1 < len(src) {
+				switch src[i+1] {
+				case 'A', 'b', 'B', 'K':
+					return true
+				}
+				i++
+			}
+		case '^':
+			if i == 0 || src[i-1] != '[' {
+				return true
+			}
+		case '(':
+			if strings.HasPrefix(src[i:], "(?<=") || strings.HasPrefix(src[i:], "(?<!") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// searchFrom finds the leftmost match of r in s at or after byte offset pos and
+// returns it together with the byte offset its group offsets are relative to
+// (so a caller reads absolute positions as base+md.Begin(i), and builds its
+// MatchData with byteOff: base).
+//
+// MRI's reg_onig_search hands Onigmo the WHOLE string — onig_search(reg, ptr,
+// ptr+len, ptr+pos, ptr+range, …) — so the search start is a cursor INSIDE a
+// fully visible subject and ^, \A, \b, \B, \K and look-behind see the real
+// prefix s[:pos]. Matching the tail slice s[pos:] instead makes every such
+// assertion believe the string begins at the cursor, which turned
+// "Text\n".gsub(/^/, " ") into " T e x t \n " (/^/ re-matching at every
+// iteration's slice start) and "ab cd".scan(/\b\w/) into every character.
+//
+// When the pattern cannot read left of the cursor (patternNeedsLeftContext),
+// the tail slice IS equivalent and is used unchanged — that keeps the engine's
+// own leftmost scan, with its prefilter, for the overwhelmingly common case.
+// Otherwise the search is the anchored probe onig_search performs: try a match
+// anchored exactly at each candidate start, left to right, over the full
+// string. Candidates advance one character at a time under a UTF-8 pattern and
+// one byte at a time under a binary (/n) one, as Onigmo's
+// onigenc_get_right_adjust_char_head does.
+//
+// Reference: ruby/ruby v3_4_0 re.c reg_onig_search / rb_reg_search0.
+func (r *Regexp) searchFrom(s string, pos int) (md *onig.MatchData, base int) {
+	if pos < 0 || pos > len(s) {
+		return nil, pos
+	}
+	m := r.matcher()
+	if !patternNeedsLeftContext(r.source) {
+		return m.Match(s[pos:]), pos
+	}
+	byteAtATime := m.Encoding() == onig.ASCII8BIT
+	for p := pos; p <= len(s); {
+		if hit := m.MatchAt(s, p); hit != nil {
+			return hit, 0
+		}
+		if p == len(s) {
+			break
+		}
+		if byteAtATime {
+			p++
+			continue
+		}
+		_, w := utf8.DecodeRuneInString(s[p:])
+		p += w
+	}
+	return nil, 0
+}
+
 // runMatch matches re against subject, returning a MatchData value or nil. It
 // also records the result as $~ (the last match).
 func (vm *VM) runMatch(re *Regexp, subject string) object.Value {
@@ -1001,12 +1093,12 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 		return object.NilV
 	}
 	byteOff := charToByte(subject, int(pos))
-	md := re.matcher().Match(subject[byteOff:])
+	md, base := re.searchFrom(subject, byteOff)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	m := &MatchData{md: md, subject: subject, re: re, byteOff: byteOff}
+	m := &MatchData{md: md, subject: subject, re: re, byteOff: base}
 	vm.lastMatch = m
 	return m
 }
@@ -1017,13 +1109,13 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 // index of the match start, or nil. off may equal the character count.
 func (vm *VM) strIndexRegexp(re *Regexp, subject string, off int) object.Value {
 	byteOff := charToByte(subject, off)
-	md := re.matcher().Match(subject[byteOff:]) // leftmost match in the tail; \G pins to its start
+	md, base := re.searchFrom(subject, byteOff) // leftmost match at or after the cursor
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	vm.lastMatch = &MatchData{md: md, subject: subject, re: re, byteOff: byteOff}
-	return object.IntValue(int64(byteToChar(subject, byteOff+md.Begin(0))))
+	vm.lastMatch = &MatchData{md: md, subject: subject, re: re, byteOff: base}
+	return object.IntValue(int64(byteToChar(subject, base+md.Begin(0))))
 }
 
 // lastRegexpMatch returns the match of re that begins at the largest byte offset
@@ -1389,7 +1481,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when none
 	pos := 0
 	for pos <= len(subject) {
-		md := re.matcher().Match(subject[pos:])
+		md, base := re.searchFrom(subject, pos)
 		if md == nil {
 			break
 		}
@@ -1398,7 +1490,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 		// absolute byteOff so MatchData#string, #begin and #offset are correct).
 		// MRI leaves $~ set to the last match after scan returns, even if a block
 		// reassigned it, so re-set it after the block runs.
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: pos}
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
 		vm.lastMatch = cur
 		last = cur
 		if blk != nil {
@@ -1407,17 +1499,17 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 		} else {
 			results = append(results, elem)
 		}
-		matchEnd := md.End(0) // byte offset within subject[pos:]
-		if matchEnd == md.Begin(0) {
+		matchEnd := base + md.End(0) // absolute byte offset into subject
+		if md.End(0) == md.Begin(0) {
 			// Empty match: emit here, then step one character forward.
-			pos += matchEnd
+			pos = matchEnd
 			if pos >= len(subject) {
 				break
 			}
 			_, w := utf8.DecodeRuneInString(subject[pos:])
 			pos += w
 		} else {
-			pos += matchEnd
+			pos = matchEnd
 		}
 	}
 	// $~ is the last match (or nil when there was none), as MRI leaves it.
@@ -1555,12 +1647,12 @@ func splitRegexp(re *Regexp, subject string, limit int, enc string) object.Value
 		if limit > 0 && pieces+1 == limit {
 			break
 		}
-		md := re.matcher().Match(subject[search:])
+		md, base := re.searchFrom(subject, search)
 		if md == nil {
 			break
 		}
-		mBegin := search + md.Begin(0)
-		mEnd := search + md.End(0)
+		mBegin := base + md.Begin(0)
+		mEnd := base + md.End(0)
 		if mEnd == mBegin {
 			// Empty match: an empty match at the very start is skipped; otherwise
 			// it ends the current character field. Advance one character.
@@ -1685,18 +1777,19 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 	search := 0                       // byte cursor where the next search begins
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
-		md := re.matcher().Match(subject[search:])
+		md, base := re.searchFrom(subject, search)
 		if md == nil {
 			break
 		}
-		mBegin := search + md.Begin(0)
-		mEnd := search + md.End(0)
+		mBegin := base + md.Begin(0)
+		mEnd := base + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
 		// Expose this match through $~ / $1.. so a replacement block sees the
-		// captures. md's offsets are relative to the searched slice, so carry the
-		// FULL subject with byteOff=search — then MatchData#string is the whole
-		// receiver and #offset/#begin are absolute, as MRI reports inside the block.
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: search}
+		// captures. md's offsets are relative to base (the offset searchFrom
+		// matched from), so carry the FULL subject with byteOff=base — then
+		// MatchData#string is the whole receiver and #offset/#begin are absolute,
+		// as MRI reports inside the block.
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
 		vm.lastMatch = cur
 		last = cur
 		if blk != nil {
@@ -1740,16 +1833,16 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 	search := 0                       // byte cursor where the next search begins
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
-		md := re.matcher().Match(subject[search:])
+		md, base := re.searchFrom(subject, search)
 		if md == nil {
 			break
 		}
-		mBegin := search + md.Begin(0)
-		mEnd := search + md.End(0)
+		mBegin := base + md.Begin(0)
+		mEnd := base + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
-		// Carry the FULL subject with byteOff=search so $~ reports absolute
+		// Carry the FULL subject with byteOff=base so $~ reports absolute
 		// offsets and the whole receiver (see gsub).
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: search}
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
 		vm.lastMatch = cur
 		last = cur
 		// Look the match up with Hash#[] (not a bare Get) so a missing key runs the

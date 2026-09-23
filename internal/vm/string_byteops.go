@@ -98,13 +98,13 @@ func (vm *VM) strByteindex(self *object.String, args []object.Value) object.Valu
 	}
 	switch needle := args[0].(type) {
 	case *Regexp:
-		md := needle.re.Match(s[off:])
+		md, base := needle.searchFrom(s, off)
 		if md == nil {
 			vm.lastMatch = object.NilV
 			return object.NilV
 		}
-		vm.lastMatch = &MatchData{md: md, subject: s, re: needle, byteOff: off}
-		return object.IntValue(int64(off + md.Begin(0)))
+		vm.lastMatch = &MatchData{md: md, subject: s, re: needle, byteOff: base}
+		return object.IntValue(int64(base + md.Begin(0)))
 	default:
 		ns := vm.strValueArg(args[0])
 		vm.combinedEncName(self, ns) // raises Encoding::CompatibilityError if incompatible
