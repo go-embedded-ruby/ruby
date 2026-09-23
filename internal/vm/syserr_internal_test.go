@@ -111,6 +111,20 @@ func TestErrnoClassLookup(t *testing.T) {
 	if got := vm.errnoClass(1 << 40); got != nil {
 		t.Errorf("errnoClass of an unclaimed number = %v, want nil", got)
 	}
+	// The lookup walks whatever the Errno module holds, so it has to survive a
+	// constant that is not a class, and a class with no Errno constant of its own
+	// — both of which a Ruby program can put there.
+	mod := vm.consts["Errno"].(*RClass)
+	mod.consts["NOT_A_CLASS"] = object.NewString("interloper")
+	mod.consts["NO_ERRNO"] = newClass("Errno::NO_ERRNO", nil)
+	if got := vm.errnoClass(errnoNumbers["EINVAL"]); got != vm.consts["Errno::EINVAL"] {
+		t.Errorf("a foreign constant must not disturb the lookup: got %v", got)
+	}
+	if got := vm.errnoClass(1 << 41); got != nil {
+		t.Errorf("errnoClass past the foreign constants = %v, want nil", got)
+	}
+	delete(mod.consts, "NOT_A_CLASS")
+	delete(mod.consts, "NO_ERRNO")
 	vm.consts["Errno"] = object.NewString("not a class")
 	if got := vm.errnoClass(2); got != nil {
 		t.Errorf("errnoClass with no Errno module = %v, want nil", got)

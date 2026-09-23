@@ -5,6 +5,8 @@
 package vm
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -88,5 +90,38 @@ begin; ` + recv + `.` + m + `; rescue ArgumentError => e; puts e.message; end`
 				t.Errorf("%s.%s with 0 args: got %q, want %q", recv, m, out, want)
 			}
 		}
+	}
+}
+
+// TestStatPathArg covers rb_stat's argument resolution: an open stream, an
+// object converted through #to_io, a #to_io that answers something other than an
+// IO (MRI's conversion TypeError), and a plain path, which is the only shape the
+// eaccess-based predicates accept. Expectations are MRI 4.0.5's.
+func TestStatPathArg(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "f")
+	if err := os.WriteFile(f, []byte("rubinius"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := runFS(t, `
+io = File.open(`+rq(f)+`, "r")
+o = Object.new; o.define_singleton_method(:to_io) { io }
+p [File.size(io), File.size(o), File.file?(io), File.directory?(io), File.zero?(io)]
+p [File.directory?(STDIN), FileTest.directory?(STDIN)]
+bad = Object.new; def bad.to_io; 42; end
+begin; File.directory?(bad); rescue TypeError => e; puts e.message; end
+# The eaccess family does not go through rb_stat, but File#to_path means an
+# open File still resolves there — MRI 4.0.5 answers true, not a TypeError.
+p File.readable?(io)
+p File.size(`+rq(f)+`)
+io.close
+`)
+	want := "[8, 8, true, false, false]\n" +
+		"[false, false]\n" +
+		"can't convert Object to IO (Object#to_io gives Integer)\n" +
+		"true\n" +
+		"8\n"
+	if got != want {
+		t.Errorf("got %q\nwant %q", got, want)
 	}
 }

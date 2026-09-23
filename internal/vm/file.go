@@ -192,17 +192,17 @@ func (vm *VM) registerFile() {
 
 	def("exist?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		oneArg(args)
-		_, err := os.Stat(pathArg(vm, args[0]))
+		_, err := os.Stat(vm.statPathArg(args[0]))
 		return object.Bool(err == nil)
 	})
 	def("file?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		oneArg(args)
-		fi, err := os.Stat(pathArg(vm, args[0]))
+		fi, err := os.Stat(vm.statPathArg(args[0]))
 		return object.Bool(err == nil && fi.Mode().IsRegular())
 	})
 	def("directory?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		oneArg(args)
-		fi, err := os.Stat(pathArg(vm, args[0]))
+		fi, err := os.Stat(vm.statPathArg(args[0]))
 		return object.Bool(err == nil && fi.IsDir())
 	})
 	// File.symlink? reports whether the path is a symbolic link. Like MRI it uses
@@ -245,7 +245,7 @@ func (vm *VM) registerFile() {
 	// methods as IO's, installed on both tables by registerIOClassMethods once the
 	// IO class exists (registerIO runs after registerFile).
 	def("size", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := pathArg(vm, args[0])
+		p := vm.statPathArg(args[0])
 		fi, err := os.Stat(p)
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
@@ -420,7 +420,7 @@ func (vm *VM) registerFile() {
 	// File.size, which raises Errno::ENOENT).
 	def("size?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		oneArg(args)
-		fi, err := os.Stat(pathArg(vm, args[0]))
+		fi, err := os.Stat(vm.statPathArg(args[0]))
 		if err != nil || fi.Size() == 0 {
 			return object.NilV
 		}
@@ -428,7 +428,7 @@ func (vm *VM) registerFile() {
 	})
 	zero := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		oneArg(args)
-		fi, err := os.Stat(pathArg(vm, args[0]))
+		fi, err := os.Stat(vm.statPathArg(args[0]))
 		return object.Bool(err == nil && fi.Size() == 0)
 	}
 	def("zero?", zero)
@@ -441,7 +441,7 @@ func (vm *VM) registerFile() {
 	statTest := func(pred func(*FileStat) bool) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			oneArg(args)
-			p := pathArg(vm, args[0])
+			p := vm.statPathArg(args[0])
 			fi, err := os.Stat(p)
 			if err != nil {
 				return object.Bool(false)
@@ -470,7 +470,7 @@ func (vm *VM) registerFile() {
 	worldPerm := func(bit int64) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 			oneArg(args)
-			fi, err := os.Stat(pathArg(vm, args[0]))
+			fi, err := os.Stat(vm.statPathArg(args[0]))
 			if err != nil {
 				return object.NilV
 			}
@@ -489,8 +489,8 @@ func (vm *VM) registerFile() {
 		if len(args) != 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
-		fi1, err1 := os.Stat(pathArg(vm, args[0]))
-		fi2, err2 := os.Stat(pathArg(vm, args[1]))
+		fi1, err1 := os.Stat(vm.statPathArg(args[0]))
+		fi2, err2 := os.Stat(vm.statPathArg(args[1]))
 		return object.Bool(err1 == nil && err2 == nil && os.SameFile(fi1, fi2))
 	})
 
@@ -1039,4 +1039,40 @@ func (vm *VM) errnoClass(n int64) *RClass {
 		}
 	}
 	return nil
+}
+
+// statPathArg resolves an argument of the stat-predicate family the way MRI's
+// rb_stat does (ruby/ruby v3_4_0 file.c:1304): an OPEN STREAM is accepted as
+// well as a path, and any object that answers #to_io is converted first —
+//
+//	tmp = rb_check_convert_type_with_id(file, T_FILE, "IO", idTo_io);
+//	if (!NIL_P(tmp)) { ... fstat_without_gvl(fptr, st); }
+//	else { FilePathValue(file); ... stat_without_gvl(...); }
+//
+// so File.directory?(io), File.size(io) and FileTest.directory?(to_io_object)
+// all work. MRI fstats the descriptor; rbgo's File streams are buffered by
+// path, so the stream's path is what gets stated — the same answer except for a
+// stream whose file has since been unlinked.
+//
+// Only the rb_stat family takes this: File.readable?/writable?/executable? and
+// the *_real? predicates go through rb_eaccess, which calls FilePathValue
+// directly and so rejects an IO, and symlink?/ftype lstat a path.
+func (vm *VM) statPathArg(v object.Value) string {
+	if o, ok := v.(*IOObj); ok {
+		return o.path
+	}
+	if vm.respondsToDynamic(v, "to_io") {
+		// rb_check_convert_type_with_id does not silently ignore a #to_io that
+		// answers something that is not an IO: it is the "can't convert X to IO
+		// (X#to_io gives Y)" TypeError, the same shape every rb_convert_type
+		// failure takes.
+		r := vm.send(v, "to_io", nil, nil)
+		o, ok := r.(*IOObj)
+		if !ok {
+			raise("TypeError", "can't convert %s to IO (%s#to_io gives %s)",
+				vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+		}
+		return o.path
+	}
+	return pathArg(vm, v)
 }
