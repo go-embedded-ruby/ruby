@@ -57,9 +57,14 @@ func TestKernelPrint(t *testing.T) {
 		{"no_arg_no_lastline", `print`, ""},
 		{"multi_no_separator", `print "a", "b"`, "ab"},
 		{"separators", `$, = "-"; $\ = "!"; print "a", "b"`, "a-b!"},
-		// A $stdout that answers no #write falls back to the underlying stream (MRI
-		// rejects such a $stdout at assignment; rbgo tolerates it).
-		{"fallback_no_write", `$stdout = Object.new; print "x"`, "x"},
+		// A $stdout that answers no #write falls back to the underlying stream. MRI
+		// rejects such a $stdout AT ASSIGNMENT (io.c v3_4_0 stdout_setter ->
+		// must_respond_to), which rbgo now does too, so the state is reached the
+		// only way that remains: bind an object that answers #write, then take the
+		// method away. MRI raises NoMethodError from #print at that point; rbgo
+		// tolerates it and writes to the underlying stream, which is the branch
+		// under test.
+		{"fallback_no_write", `class Foo; def write(*a); end; end; $stdout = Foo.new; class Foo; undef_method :write; end; print "x"`, "x"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,8 +90,10 @@ func TestKernelPutc(t *testing.T) {
 	if got := runSrc(t, `r = putc ""; print r.inspect`); got != `""` {
 		t.Fatalf(`putc(""): got %q want %q`, got, `""`)
 	}
-	// A $stdout that answers no #write falls back to the underlying stream.
-	if got := runSrc(t, `$stdout = Object.new; putc 65`); got != "A" {
+	// A $stdout that answers no #write falls back to the underlying stream; the
+	// object is bound while it still answers #write, since io.c's stdout_setter
+	// rejects one that never did.
+	if got := runSrc(t, `class Foo; def write(*a); end; end; $stdout = Foo.new; class Foo; undef_method :write; end; putc 65`); got != "A" {
 		t.Fatalf("putc fallback: got %q want %q", got, "A")
 	}
 	// Wrong argument count raises ArgumentError with MRI's message, and nothing is
@@ -127,10 +134,13 @@ func TestKernelOutputToReassignedStdout(t *testing.T) {
 }
 
 // TestKernelPutsFallbackNoWrite covers nativePuts' branch for a $stdout that
-// answers no #write: MRI rejects such a $stdout at assignment, but rbgo tolerates
-// it and writes to the underlying stream rather than raising.
+// answers no #write. io.c v3_4_0 stdout_setter runs must_respond_to, so such an
+// object cannot be ASSIGNED to $stdout (rbgo raises the same TypeError); the
+// branch is reached by binding an object that answers #write and then removing
+// the method. MRI raises NoMethodError from #puts there, while rbgo tolerates it
+// and writes to the underlying stream.
 func TestKernelPutsFallbackNoWrite(t *testing.T) {
-	if got := runSrc(t, `$stdout = Object.new; puts "x"`); got != "x" {
+	if got := runSrc(t, `class Foo; def write(*a); end; end; $stdout = Foo.new; class Foo; undef_method :write; end; puts "x"`); got != "x" {
 		t.Fatalf("puts fallback: got %q want %q", got, "x")
 	}
 }

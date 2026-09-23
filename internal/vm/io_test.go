@@ -68,10 +68,13 @@ func TestIO(t *testing.T) {
 		}
 	}
 
-	// Coverage of the curStdout fallback: a $stdout rebound to a non-IO still
-	// writes (to the underlying stream) rather than crashing. MRI raises here, so
-	// this is an implementation behavior, not a differential case.
-	if got := eval(t, `$stdout = Object.new; puts "fallback"`); got != "fallback\n" {
+	// Coverage of the curStdout fallback: a $stdout bound to an object that has
+	// since lost its #write still writes (to the underlying stream) rather than
+	// crashing. An object that never answered #write cannot be assigned at all —
+	// io.c v3_4_0 stdout_setter runs must_respond_to — so the state is reached by
+	// removing the method afterwards. MRI raises NoMethodError here, so this is an
+	// implementation behavior, not a differential case.
+	if got := eval(t, `class Foo; def write(*a); end; end; $stdout = Foo.new; class Foo; undef_method :write; end; puts "fallback"`); got != "fallback\n" {
 		t.Errorf("curStdout fallback = %q, want %q", got, "fallback\n")
 	}
 

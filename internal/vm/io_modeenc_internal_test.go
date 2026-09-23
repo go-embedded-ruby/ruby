@@ -216,12 +216,16 @@ func TestIOOpenBlock(t *testing.T) {
 	}
 }
 
-// TestIORbWarnSilentByDefault confirms rbWarn's $VERBOSE gate: with $VERBOSE nil
-// (the default) the ignored-encoding override is silent, yet still resolves the
-// external encoding to the winning option.
+// TestIORbWarnSilentByDefault confirms rbWarn's $VERBOSE gate: with no warning
+// level set the ignored-encoding override is silent, yet still resolves the
+// external encoding to the winning option. $VERBOSE itself READS false, not nil
+// — ruby.c v3_4_0 ruby_prog_init binds it to ruby_verbose, which the interpreter
+// starts at Qfalse and only -W0 moves to nil (`ruby -e "p $VERBOSE"` prints
+// false on 4.0.5). rbgo's rb_warn gate still keys on the raw, unset slot, which
+// is why nothing is printed here.
 func TestIORbWarnSilentByDefault(t *testing.T) {
 	got := eval(t, ioFdProg(`io = IO.new(wo, "w", external_encoding: "ibm866", encoding: "utf-8"); p [$VERBOSE, io.external_encoding.to_s]`))
-	if want := fmt.Sprintf("[nil, %q]\n", "IBM866"); got != want {
+	if want := fmt.Sprintf("[false, %q]\n", "IBM866"); got != want {
 		t.Errorf("silent warn: got %q want %q", got, want)
 	}
 }

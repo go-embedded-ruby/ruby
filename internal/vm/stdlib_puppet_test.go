@@ -76,8 +76,16 @@ func TestStdlibProvidedModules(t *testing.T) {
 		{"gvar_pid_class", `p $$.class`, "Integer\n"},
 		{"program_name_assign", `$PROGRAM_NAME = "prog"; p $0`, "\"prog\"\n"},
 		{"program_name_assign_via0", `$0 = "z"; p $PROGRAM_NAME`, "\"z\"\n"},
-		{"error_info_assign", `$ERROR_INFO = nil; p $!`, "nil\n"},
-		{"error_info_assign_value", `require "English"; $ERROR_INFO = RuntimeError.new("boom"); p $!.message`, "\"boom\"\n"},
+		// $! is read-only (eval.c v3_4_0 rb_define_virtual_variable("$!",
+		// errinfo_getter, 0), whose NULL setter variable.c turns into
+		// rb_gvar_readonly_setter), and English's $ERROR_INFO is an alias of it, so
+		// assigning either raises NameError naming the spelling written through —
+		// witnessed on ruby 4.0.5. rbgo resolves the English aliases whether or not
+		// "English" has been required, which is why both spellings behave alike
+		// here.
+		{"error_info_assign", `require "English"; begin; $ERROR_INFO = nil; rescue NameError => e; puts e.message; end`, "$ERROR_INFO is a read-only variable\n"},
+		{"error_info_assign_value", `require "English"; begin; $ERROR_INFO = RuntimeError.new("boom"); rescue NameError => e; puts e.message; end`, "$ERROR_INFO is a read-only variable\n"},
+		{"error_info_bang_assign", `begin; $! = 1; rescue NameError => e; puts e.message; end`, "$! is a read-only variable\n"},
 
 		// --- OpenStruct ---------------------------------------------------------
 		{"ostruct_read", `require "ostruct"; p OpenStruct.new(name: "Bob").name`, "\"Bob\"\n"},

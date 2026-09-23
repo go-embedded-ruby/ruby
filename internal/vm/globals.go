@@ -207,14 +207,18 @@ func (vm *VM) setGVar(name string, v object.Value) {
 // storeGVar is setGVar without the Kernel#trace_var hooks: the checks and the
 // store itself.
 func (vm *VM) storeGVar(name string, v object.Value) {
-	if target, ok := englishAlias[name]; ok {
-		name = target
+	target := name
+	if t, ok := englishAlias[name]; ok {
+		target = t
 	}
-	if readOnlyGvars[name] {
-		// The message names the spelling assigned through, as MRI's
-		// rb_gvar_readonly_setter does (QUOTE_ID of the assigned id).
+	if readOnlyGvars[target] {
+		// Read-only-ness follows the alias, but the message names the spelling
+		// assigned THROUGH — MRI's rb_gvar_readonly_setter quotes the id it was
+		// called with, so `require "English"; $ERROR_INFO = nil` reports
+		// "$ERROR_INFO is a read-only variable", not "$!".
 		vm.raiseNameError(name+" is a read-only variable", name)
 	}
+	name = target
 	switch name {
 	case "$@":
 		// eval.c v3_4_0 errat_setter: no rescued exception is an ArgumentError,
