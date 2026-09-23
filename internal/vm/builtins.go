@@ -1936,6 +1936,7 @@ func (vm *VM) bootstrap() {
 				cm.origName = methodOriginalName(src.m)
 				cm.name, cm.owner, cm.vis = name, cls, vis
 				cls.methods[name] = &cm
+				vm.mirrorModuleFunction(cls, name)
 				bumpMethodSerial()
 				vm.fireMethodDefined(cls, name)
 				return object.Symbol(name)
@@ -1945,6 +1946,7 @@ func (vm *VM) bootstrap() {
 				cm.origName = methodOriginalName(src.m)
 				cm.name, cm.owner, cm.vis = name, cls, vis
 				cls.methods[name] = &cm
+				vm.mirrorModuleFunction(cls, name)
 				bumpMethodSerial()
 				vm.fireMethodDefined(cls, name)
 				return object.Symbol(name)
@@ -1965,6 +1967,7 @@ func (vm *VM) bootstrap() {
 			raise("ArgumentError", "tried to create a method without a block")
 		}
 		cls.methods[name] = &Method{name: name, proc: body, owner: cls, vis: vis}
+		vm.mirrorModuleFunction(cls, name)
 		bumpMethodSerial()
 		vm.fireMethodDefined(cls, name)
 		return object.Symbol(name)
@@ -9373,14 +9376,16 @@ func (vm *VM) filterVisibility(self object.Value, candidates []object.Value, kee
 		} else {
 			m = undefAsNil(lookupMethod(vm.dispatchClass(self), name))
 		}
-		// A candidate whose Method cannot be resolved counts as public (defensive:
-		// the candidate sets only carry resolvable, non-undef names, so m is set in
-		// practice — the default just keeps the walk nil-safe).
-		vis := visPublic
-		if m != nil {
-			vis = vm.sendVisibilityOf(self, name, m)
+		// A candidate that resolves to nothing is NOT listed. It happens when a
+		// nearer `undef` tombstone hides a name an outer class still carries —
+		// Class undefines Module#module_function, so :module_function reaches this
+		// walk from Module's table and then resolves to nothing on the receiver.
+		// MRI lists what the receiver can actually be sent, so the name is dropped
+		// rather than defaulting to public.
+		if m == nil {
+			continue
 		}
-		if keep(vis) {
+		if keep(vm.sendVisibilityOf(self, name, m)) {
 			out = append(out, n)
 		}
 	}

@@ -6,6 +6,7 @@ package vm
 
 import (
 	"bytes"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -472,6 +473,71 @@ func TestKernelComplexConvert(t *testing.T) {
 			src := gvarProbe + "t(\"x\") { " + tc.src + " }"
 			if got := runGvar(t, src); got != "x: "+tc.want {
 				t.Fatalf("got %q want %q", got, "x: "+tc.want)
+			}
+		})
+	}
+}
+
+// TestModuleFunctionResidues covers the module_function arms this branch adds:
+// the T_MODULE guard, the Object fallback in the named-method search, Class's
+// undef tombstone, and define_method honouring the toggle. Each expectation was
+// witnessed on ruby 4.0.5.
+func TestModuleFunctionResidues(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"class_undefines_it", `p Class.private_instance_methods(true).include?(:module_function)`, "false"},
+		{"module_keeps_it", `p Module.private_instance_methods(false).include?(:module_function)`, "true"},
+		{"not_listed_on_a_module", `module MFM; def self.cm; end; end; p [MFM.methods.include?(:cm), MFM.methods.include?(:module_function)]`, "[true, false]"},
+		{"object_fallback", `p Module.new { module_function :require }.respond_to?(:require)`, "true"},
+		{"define_method_block", `m = Module.new { module_function; define_method(:t1) {} }; p [m.respond_to?(:t1), m.private_instance_methods(false), m.singleton_methods(false)]`, "[true, [:t1], [:t1]]"},
+		{"define_method_from_method", `mm = Module.new { def t1; end }; c = Class.new { extend mm }; m = Module.new { module_function; define_method :t2, c.method(:t1) }; p m.respond_to?(:t2)`, "true"},
+		{"define_method_from_unbound", `mm = Module.new { def t1; end }; m = Module.new { module_function; define_method :t2, mm.instance_method(:t1) }; p m.respond_to?(:t2)`, "true"},
+		{"define_method_without_toggle", `m = Module.new { define_method(:t1) {} }; p m.respond_to?(:t1)`, "false"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runGvar(t, tc.src); got != tc.want {
+				t.Fatalf("src=%q got=%q want=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+	errs := []struct{ name, src, want string }{
+		{"bound_to_class", `Module.instance_method(:module_function).bind(Class.new).call`, "TypeError: module_function must be called for modules"},
+		{"bound_to_class_with_name", `Module.instance_method(:module_function).bind(Class.new).call :foo`, "TypeError: module_function must be called for modules"},
+		{"unknown_name", `Module.new { module_function :no_such_method_anywhere }`, "NameError: undefined method 'no_such_method_anywhere' for module ''"},
+	}
+	for _, tc := range errs {
+		t.Run(tc.name, func(t *testing.T) {
+			src := gvarProbe + "t(\"x\") { " + tc.src + " }"
+			if got := runGvar(t, src); got != "x: "+tc.want {
+				t.Fatalf("got %q want %q", got, "x: "+tc.want)
+			}
+		})
+	}
+}
+
+// TestExactZeroValue covers k_exact_zero_p on every numeric shape a Complex
+// component can take. A Bignum zero and a Rational zero are unreachable from
+// Ruby (both normalise to the Integer 0 before they could reach a component),
+// so they are exercised directly.
+func TestExactZeroValue(t *testing.T) {
+	cases := []struct {
+		name string
+		v    object.Value
+		want bool
+	}{
+		{"integer_zero", object.IntValue(0), true},
+		{"integer_one", object.IntValue(1), false},
+		{"float_zero_is_inexact", object.Float(0), false},
+		{"bignum_zero", &object.Bignum{I: big.NewInt(0)}, true},
+		{"bignum_nonzero", &object.Bignum{I: big.NewInt(1)}, false},
+		{"rational_zero", &object.Rational{R: big.NewRat(0, 1)}, true},
+		{"rational_nonzero", &object.Rational{R: big.NewRat(1, 2)}, false},
+		{"not_a_number", object.NewString("0"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := exactZeroValue(tc.v); got != tc.want {
+				t.Fatalf("exactZeroValue(%#v) = %v, want %v", tc.v, got, tc.want)
 			}
 		})
 	}
