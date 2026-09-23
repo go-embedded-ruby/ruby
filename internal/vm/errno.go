@@ -170,6 +170,12 @@ var errnoAliases = map[string]string{"EWOULDBLOCK": "EAGAIN"}
 // Go's "errno N" placeholder form, which is replaced by the one the C library
 // produces. Witnessed against MRI 4.0.5 on darwin: 22 -> "Invalid argument",
 // 0 -> "Undefined error: 0", 2**28 -> "Unknown error: 268435456".
+//
+// The placeholder wording is darwin's. glibc words the same two "Unknown error
+// 268435456" (no colon) and "Success" for errno 0, so rbgo reports darwin's
+// phrasing on Linux; no spec asserts the text (ruby/spec only requires it to be
+// [[:graph:]]+), and settling it properly needs a Linux MRI witness — see the
+// per-platform errno issue.
 func errnoStrerror(n int64) string {
 	if s, ok := errnoUnknownText(syscall.Errno(n).Error(), n); ok {
 		return s

@@ -5,7 +5,9 @@
 package vm
 
 import (
+	"runtime"
 	"strconv"
+	"syscall"
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -17,23 +19,62 @@ import (
 func errnoLit(n int64) string { return strconv.FormatInt(n, 10) }
 
 // TestErrnoStrerror pins the message text MRI's syserr_initialize builds from
-// strerror(). The expectations are the host MRI 4.0.5's own output on darwin
-// (SystemCallError.new(n).message), which is where the conformance gate runs.
+// strerror(). Two things are under test, and only one of them is portable.
+//
+// The RULE is portable: for an errno the platform's own table names,
+// errnoStrerror is that text with its leading letter restored. Asserting it
+// against syscall.Errno's table is not circular — the table is the input, and
+// what is checked is that nothing else is done to it.
+//
+// The TEXTS are not portable, because the errno NUMBERS are not: 92 is EILSEQ
+// on darwin and ENOPROTOOPT on Linux, and glibc and the BSDs word several
+// messages differently. The literals below are MRI 4.0.5's own output on
+// darwin, which is where the conformance gate runs and the only platform with
+// an MRI witness on this host.
 func TestErrnoStrerror(t *testing.T) {
+	for name, n := range errnoNumbers {
+		go_ := syscall.Errno(n).Error()
+		if _, unknown := errnoUnknownText(go_, n); unknown {
+			continue // the placeholder form is checked separately below
+		}
+		if got, want := errnoStrerror(n), capitalizeASCII(go_); got != want {
+			t.Errorf("errnoStrerror(%s=%d) = %q, want %q", name, n, got, want)
+		}
+	}
+	// The "unknown errno" wording is rbgo's own, and applies wherever the
+	// platform's table leaves Go's "errno N" placeholder — which is everywhere
+	// but Windows, whose FormatMessage names every number. It matches darwin's
+	// libc; glibc words the same two "Unknown error 268435456" (no colon) and
+	// "Success" for errno 0, a divergence noted in the per-platform errno issue.
 	for _, c := range []struct {
 		n    int64
 		want string
 	}{
-		{1, "Operation not permitted"},
-		{2, "No such file or directory"},
-		{22, "Invalid argument"},
-		{92, "Illegal byte sequence"},
 		{0, "Undefined error: 0"},
 		{1 << 28, "Unknown error: 268435456"},
 		{-1, "Unknown error: -1"},
 	} {
+		if _, unknown := errnoUnknownText(syscall.Errno(c.n).Error(), c.n); !unknown {
+			continue
+		}
 		if got := errnoStrerror(c.n); got != c.want {
 			t.Errorf("errnoStrerror(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+	if runtime.GOOS != "darwin" {
+		t.Skip("the exact strerror texts are witnessed against MRI 4.0.5 on darwin only")
+	}
+	for _, c := range []struct {
+		name string
+		want string
+	}{
+		{"EPERM", "Operation not permitted"},
+		{"ENOENT", "No such file or directory"},
+		{"EINVAL", "Invalid argument"},
+		{"EILSEQ", "Illegal byte sequence"},
+	} {
+		if got := errnoStrerror(errnoNumbers[c.name]); got != c.want {
+			t.Errorf("errnoStrerror(%s) = %q, want %q", c.name, got, c.want)
 		}
 	}
 }
@@ -199,6 +240,13 @@ p Errno::EINVAL === Mute.new
 // branch of MRI's syserr_initialize from Ruby. Each expectation is the host MRI
 // 4.0.5's own output, captured with the same expression.
 func TestSyserrInitializeShapes(t *testing.T) {
+	// The message texts are the platform's strerror. darwin and glibc agree on
+	// all three used here (EPERM, ENOENT, EINVAL); Windows does not have POSIX
+	// errno numbers at all — Go's syscall spells them APPLICATION_ERROR+n — so
+	// there is no text to assert and no MRI on this host to witness one.
+	if runtime.GOOS == "windows" {
+		t.Skip("errno numbers and strerror texts are not POSIX on Windows, and there is no Windows MRI witness here")
+	}
 	einval := errnoLit(errnoNumbers["EINVAL"])
 	for _, c := range []struct{ src, want string }{
 		// Generic receiver: a lone Integer is the errno and rewrites the class.
