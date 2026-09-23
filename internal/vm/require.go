@@ -351,25 +351,10 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		ok = true
 		return object.Bool(true)
 	}
-	// Nothing on disk. MRI still returns false when the feature is ALREADY
-	// PROVIDED under the bare name: search_required (load.c v3_4_0) consults
-	// rb_feature_p before rb_find_file_ext, and for a name carrying no extension
-	// an entry in $LOADED_FEATURES equal to that name answers 'u' --
-	//
-	//	if (!*(e = f + len)) { if (ext) continue; return 'u'; }
-	//
-	// -- whereupon `case 0: if (ft) goto feature_present;` returns with *path == 0
-	// and require_internal reports false rather than failing to load. Only the
-	// verbatim form is matched here; MRI also accepts an entry spelled
-	// "<$LOAD_PATH entry>/<name>", and its loaded-features index carries a
-	// "distractor" rule for entries with an unusable extension, neither of which
-	// this check reproduces -- it can only turn a LoadError into false, never the
-	// other way round, so it cannot hide a require that would otherwise work.
-	if !relative && !strings.Contains(filepath.Base(name), ".") {
-		if arr, ok := vm.globals["$LOADED_FEATURES"].(*object.Array); ok && featureListed(arr, name) {
-			return object.Bool(false)
-		}
-	}
+	// Nothing on disk, and featureProvided already answered for every feature
+	// $LOADED_FEATURES vouches for (it subsumes the narrower "an entry spelled
+	// exactly like the bare name" check this path used to carry), so the require
+	// genuinely failed.
 	return vm.raiseLoadError(errName)
 }
 
@@ -615,10 +600,7 @@ func (vm *VM) featureProvided(name string) bool {
 			if p < 0 {
 				continue
 			}
-			f = f[p+1:]
-			if len(f) < len(stem) || !strings.HasPrefix(f, stem) {
-				continue
-			}
+			f = f[p:]
 		}
 		e := f[len(stem):]
 		if e == "" {
@@ -643,10 +625,11 @@ func (vm *VM) featureProvided(name string) bool {
 }
 
 // loadedFeaturePath is load.c v3_4_0 loaded_feature_path: it reports the length
-// of the $LOAD_PATH prefix of entry that makes it "#{prefix}/#{stem}#{e}" for an
-// extension e acceptable to the requested type, or -1 when the entry has no such
-// shape or its prefix is not on the load path. MRI returns the matching load-path
-// String; the length is all the caller needs.
+// of the leading "#{load_path_entry}/" that makes entry "#{prefix}/#{stem}#{e}"
+// for an extension e acceptable to the requested type, or -1 when the entry has
+// no such shape or its prefix is not on the load path. MRI returns the matching
+// load-path String and its caller then steps over the separator itself; counting
+// the separator in here says the same thing without the off-by-one.
 func loadedFeaturePath(entry, stem, ext string, loadPath []string) int {
 	if len(entry) < len(stem)+1 {
 		return -1
@@ -685,11 +668,13 @@ func loadedFeaturePath(entry, stem, ext string, loadPath []string) int {
 	case extIn(ext, rbExts) && !extIn(tail, rbExts):
 		return -1
 	}
-	if plen > 0 {
-		plen--
+	// The load-path entry itself is the prefix WITHOUT its trailing separator.
+	dirLen := plen
+	if dirLen > 0 {
+		dirLen--
 	}
 	for _, p := range loadPath {
-		if len(p) == plen && (plen == 0 || entry[:plen] == p) {
+		if len(p) == dirLen && (dirLen == 0 || entry[:dirLen] == p) {
 			return plen
 		}
 	}

@@ -509,10 +509,8 @@ func (vm *VM) gvarTraces(create bool) *object.Hash {
 	if !create {
 		return nil
 	}
+	// newClass always allocates the ivar table, so cKernel's is never nil.
 	h := object.NewHash()
-	if vm.cKernel.ivars == nil {
-		vm.cKernel.ivars = map[string]object.Value{}
-	}
 	vm.cKernel.ivars[gvarTraceIvar] = h
 	return h
 }
@@ -608,10 +606,18 @@ func (vm *VM) registerGvarTracing() {
 			}
 		}
 		if elems == nil {
+			// No hooks: a global with no entry at all is rb_find_global_entry's
+			// NameError, while a defined-but-untraced one yields the empty Array
+			// rb_f_untrace_var builds from an empty trace list (witnessed:
+			// `$tv = nil; p untrace_var(:$tv)` prints [] on ruby 4.0.5). With a
+			// command to remove, the walk finds nothing and the answer is nil.
 			if _, defined := vm.globals[canonicalGvar(name)]; !defined {
 				vm.raiseNameError("undefined global variable "+name, name)
 			}
-			return object.NilV
+			if len(args) == 2 && !object.IsNil(args[1]) {
+				return object.NilV
+			}
+			return object.NewArray()
 		}
 		if len(args) == 2 && !object.IsNil(args[1]) {
 			for i, cmd := range elems {
