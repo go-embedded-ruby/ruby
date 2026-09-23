@@ -147,7 +147,11 @@ puts st.inspect == e ? "match" : "GOT #{st.inspect}\nWANT #{e}"
 	if got := runFS(t, `puts File.stat(`+rq(f)+`).inspect`); got != native+"\n" {
 		t.Errorf("Ruby #inspect %q differs from the native one %q", got, native)
 	}
-	if !regexp.MustCompile(`^#<File::Stat dev=0x[0-9a-f]+, ino=\d+, mode=0\d+, nlink=\d+, uid=\d+, gid=\d+, rdev=0x[0-9a-f]+, size=8, blksize=\d+, blocks=\d+, atime=.*, mtime=.*, ctime=.*>$`).
+	// blocks and blksize come from the POSIX stat that Windows does not have:
+	// MRI answers nil for #blocks where HAVE_STRUCT_STAT_ST_BLOCKS is undefined,
+	// and rb_stat_inspect prints that nil. So the layout accepts either shape
+	// rather than asserting a number that only POSIX can produce.
+	if !regexp.MustCompile(`^#<File::Stat dev=0x[0-9a-f]+, ino=\d+, mode=0\d+, nlink=\d+, uid=\d+, gid=\d+, rdev=0x[0-9a-f]+, size=8, blksize=(?:\d+|nil), blocks=(?:\d+|nil), atime=.*, mtime=.*, ctime=.*>$`).
 		MatchString(strings.TrimSuffix(regexp.MustCompile(`, birthtime=[^>]*`).ReplaceAllString(native, ""), "")) {
 		t.Errorf("unexpected layout: %s", native)
 	}
