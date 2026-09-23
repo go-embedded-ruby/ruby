@@ -1556,9 +1556,15 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 	// reach the outer one. MRI builds exactly this table — prism_compile.c
 	// v3_4_0:6325-6334 walks the block-parameters node's `locals` list and calls
 	// pm_insert_local_index for each, after the requireds/optionals/rest/posts and
-	// before "fill in any locals we missed" — and the parser rejects a name that
-	// collides with a parameter (parse.y v3_4_0:13621 new_bv → shadowing_lvar_0),
-	// so no dedup is needed here.
+	// before "fill in any locals we missed".
+	//
+	// A block-local that repeats a parameter name (`{ |foo; foo| }`) is a
+	// SyntaxError in MRI, raised by the PARSER (parse.y v3_4_0:13621 new_bv →
+	// shadowing_lvar_0), and go-ruby-parser does not raise it yet — which is the
+	// one ruby/spec example in "Block-local variables" still failing. Nothing is
+	// forced here on its behalf: localLookup answers with the first slot of a
+	// name, so the repeated declaration is simply dead and the name keeps meaning
+	// the parameter. Raising belongs where MRI raises it.
 	for _, name := range blk.Locals {
 		b.localSlot(name)
 	}
