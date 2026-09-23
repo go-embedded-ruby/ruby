@@ -542,3 +542,28 @@ func TestExactZeroValue(t *testing.T) {
 		})
 	}
 }
+
+// TestKernelOpenToOpen covers rb_f_open's redirect arm: an argument answering
+// #to_open is called with the remaining arguments and its result handed back,
+// with a block yielded the result and closing it afterwards through a CHECKED
+// #close. Witnessed against ruby 4.0.5.
+func TestKernelOpenToOpen(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"returns_value", `o = Object.new; def o.to_open; :value; end; p open(o)`, ":value"},
+		{"passes_arguments", `o = Object.new; def o.to_open(*a); a; end; p open(o, 1, 2, 3)`, "[1, 2, 3]"},
+		{"passes_keywords", `o = Object.new; def o.to_open(*a, **k); [a, k]; end; p open(o, 1, a: "b")`, `[[1], {a: "b"}]`},
+		{"yields_to_block", `o = Object.new; def o.to_open; :v; end; p(open(o) { |x| [x, :block] })`, "[:v, :block]"},
+		{"closes_what_it_can", `class OC; def to_open; self; end; def close; $closed = true; end; end; open(OC.new) { |x| }; p $closed`, "true"},
+		{"not_closed_when_uncloseable", `o = Object.new; def o.to_open; :v; end; open(o) { |x| }; p :ok`, ":ok"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runGvar(t, tc.src); got != tc.want {
+				t.Fatalf("src=%q got=%q want=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+	if got := runGvar(t, gvarProbe+`t("x") { open }`); got != "x: ArgumentError: wrong number of arguments (given 0, expected 1+)" {
+		t.Fatalf("no args: got %q", got)
+	}
+}

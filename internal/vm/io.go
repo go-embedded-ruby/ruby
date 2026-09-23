@@ -592,6 +592,25 @@ func (vm *VM) registerIO() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
 		}
+		// io.c v3_4_0 rb_f_open tests `rb_respond_to(argv[0], to_open)` FIRST, before
+		// it ever looks at the argument as a path: an object that answers #to_open is
+		// REDIRECTED — open calls it with the remaining arguments (keywords included,
+		// RB_PASS_CALLED_KEYWORDS) and hands back whatever it returns, whatever that
+		// is. With a block, `rb_ensure(rb_yield, io, io_close, io)` yields the result
+		// and closes it afterwards, and io_close is a CHECKED call, so a value that
+		// does not answer #close (the specs return a Symbol) is left alone.
+		if vm.respondsToDynamic(args[0], "to_open") {
+			io := vm.send(args[0], "to_open", args[1:], nil)
+			if blk == nil {
+				return io
+			}
+			defer func() {
+				if vm.respondsToDynamic(io, "close") {
+					vm.send(io, "close", nil, nil)
+				}
+			}()
+			return vm.callBlock(blk, []object.Value{io})
+		}
 		if name := pathArg(vm, args[0]); strings.HasPrefix(name, "|") {
 			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", name)
 		}
