@@ -1063,16 +1063,13 @@ func raiseFlockErrno(err error, p string) {
 }
 
 // raiseOpenErrno turns a Go open/read failure into the Errno MRI's rb_sysopen
-// reports, message and all. Anything unrecognised falls back to ENOENT, which is
-// what this code raised for every failure before.
+// reports, message and all. Only the permission failure is distinguished:
+// openFileSpec raises EEXIST and EISDIR itself, from the flags and the stat,
+// before any of these calls can report them. Anything else falls back to ENOENT,
+// which is what this code raised for every failure before.
 func raiseOpenErrno(err error, p string) {
-	switch {
-	case errors.Is(err, fs.ErrPermission):
+	if errors.Is(err, fs.ErrPermission) {
 		raise("Errno::EACCES", "Permission denied @ rb_sysopen - %s", p)
-	case errors.Is(err, syscall.EISDIR):
-		raise("Errno::EISDIR", "Is a directory @ rb_sysopen - %s", p)
-	case errors.Is(err, fs.ErrExist):
-		raise("Errno::EEXIST", "File exists @ rb_sysopen - %s", p)
 	}
 	raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
 }
@@ -1210,12 +1207,6 @@ func ioFlush(o *IOObj) {
 	if err != nil {
 		raiseOpenErrno(err, o.path)
 	}
-}
-
-// ioFlushClose flushes then marks the stream closed (the File.open block exit).
-func ioFlushClose(o *IOObj) {
-	ioFlush(o)
-	o.closed = true
 }
 
 // curStdout / curStderr / curStdin return the IO currently bound to the global,

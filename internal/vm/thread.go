@@ -1074,18 +1074,14 @@ func (vm *VM) timeInterval(v object.Value) float64 {
 // with NUM2LONG, i.e. truncated to whole nanoseconds — which is why a Rational
 // interval loses everything below a nanosecond rather than rounding.
 func (vm *VM) timeIntervalFromDivmod(q, rem object.Value) float64 {
-	var sec int64
-	switch n := q.(type) {
-	case object.Integer:
-		sec = int64(n)
-	case object.Float:
-		// NUM2TIMET reaches rb_num2long, which truncates a Float rather than
-		// refusing it — so #divmod may answer with one and keep its fraction in the
-		// remainder, as `[0.5, 0]` does.
-		sec = int64(float64(n))
-	default:
-		raise("TypeError", "can't convert %s into time interval", vm.timeIntervalClassName(q))
+	// NUM2TIMET is rb_num2long, which TRUNCATES a Float rather than refusing it —
+	// so #divmod may answer with one and keep the fraction in the remainder, as
+	// `[0.5, 0]` does — and which names nil differently from everything else it
+	// cannot convert.
+	if object.IsNil(q) {
+		raise("TypeError", "no implicit conversion from nil to integer")
 	}
+	sec := vm.repeatLong(q)
 	if sec < 0 {
 		raise("ArgumentError", "time interval must not be negative")
 	}
@@ -1096,9 +1092,10 @@ func (vm *VM) timeIntervalFromDivmod(q, rem object.Value) float64 {
 
 // timeIntervalRangeCheck is time_timespec's `if (f != t.tv_sec)` guard: the
 // integral part of the duration has to survive the trip through a time_t (an
-// int64 here), so NaN and the infinities land in the same RangeError as a finite
-// value that is simply too large. The number is formatted the way MRI's own
-// vsnprintf renders `%f` — "NaN", "Inf", "-Inf", and six decimals otherwise.
+// int64 here), so NaN and Infinity land in the same RangeError as a finite value
+// that is simply too large. The number is formatted the way MRI's own vsnprintf
+// renders `%f` — "NaN", "Inf", and six decimals otherwise. Negative infinity
+// never reaches here: arg_range_check refuses a negative interval first.
 func timeIntervalRangeCheck(x float64) {
 	i, _ := math.Modf(x)
 	if !math.IsNaN(i) && i >= -9223372036854775808.0 && i < 9223372036854775808.0 {
@@ -1115,8 +1112,6 @@ func timeIntervalFormat(x float64) string {
 		return "NaN"
 	case math.IsInf(x, 1):
 		return "Inf"
-	case math.IsInf(x, -1):
-		return "-Inf"
 	}
 	return strconv.FormatFloat(x, 'f', 6, 64)
 }
@@ -1125,11 +1120,10 @@ func timeIntervalFormat(x float64) string {
 // rb_obj_class, which knows Rational and Complex apart from a plain Object; the
 // VM-less caller falls back to the static table.
 func (vm *VM) timeIntervalClassName(v object.Value) string {
-	if vm == nil {
-		return classNameOf(v)
-	}
-	if c := vm.classOf(v); c != nil {
-		return c.name
+	if vm != nil {
+		if c := vm.classOf(v); c != nil {
+			return c.name
+		}
 	}
 	return classNameOf(v)
 }

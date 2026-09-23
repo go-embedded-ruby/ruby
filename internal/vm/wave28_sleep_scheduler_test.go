@@ -78,6 +78,12 @@ Fiber.set_scheduler(S.new)
 		{`o = Object.new; def o.divmod(*); [0.5, 0]; end; p sleep(o)`, "0\n"},
 		// arg_range_check applies to the whole-seconds half only.
 		{`begin; sleep(Rational(-1, 2)); rescue => e; p [e.class, e.message]; end`, "[ArgumentError, \"time interval must not be negative\"]\n"},
+		// The quotient goes through NUM2TIMET, which is rb_num2long: it names nil
+		// differently from everything else it cannot convert.
+		{`o = Object.new; def o.divmod(*); [nil, 0]; end; begin; sleep(o); rescue => e; p [e.class, e.message]; end`,
+			"[TypeError, \"no implicit conversion from nil to integer\"]\n"},
+		{`o = Object.new; def o.divmod(*); ["a", 0]; end; begin; sleep(o); rescue => e; p [e.class, e.message]; end`,
+			"[TypeError, \"no implicit conversion of String into Integer\"]\n"},
 		// A #divmod that does not answer with an Array is no conversion at all.
 		{`o = Object.new; def o.divmod(*); 5; end; begin; sleep(o); rescue => e; p [e.class, e.message]; end`, "[TypeError, \"can't convert Object into time interval\"]\n"},
 		// Nothing to send #divmod to: a String has none.
