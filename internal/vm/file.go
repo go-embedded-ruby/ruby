@@ -233,12 +233,13 @@ func (vm *VM) registerFile() {
 	// Errno::ENOENT is raised. An optional second argument is the base directory
 	// a relative path is resolved against.
 	def("realpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := vm.fileExpand(vm.filePathArg(args[0]), args[1:], true)
-		resolved, err := filepath.EvalSymlinks(p)
+		raw := vm.filePathArg(args[0])
+		p := vm.fileExpand(raw, args[1:], true)
+		resolved, err := realpathResolve(p, true, strings.HasSuffix(raw, "/"))
 		if err != nil {
-			raiseRealpathErr(p)
+			raiseRealpathErr(err, p)
 		}
-		return object.NewString(toSlash(resolved))
+		return object.NewString(resolved)
 	})
 	// File.read / File.write / File.binread / File.binwrite are the same class
 	// methods as IO's, installed on both tables by registerIOClassMethods once the
@@ -566,7 +567,14 @@ func (vm *VM) registerFile() {
 	// symlink is resolved where possible, and an absent leaf is joined onto the
 	// resolved directory. A missing intermediate directory raises Errno::ENOENT.
 	def("realdirpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(realdirpath(vm.fileExpand(vm.filePathArg(args[0]), args[1:], true)))
+		raw := vm.filePathArg(args[0])
+		resolved, err := realpathResolve(vm.fileExpand(raw, args[1:], true), false, strings.HasSuffix(raw, "/"))
+		if err != nil {
+			// realdirpath IS the emulation, so every failure keeps realpath_rec's
+			// own name and the component that failed.
+			raise(err.class, "%s @ realpath_rec - %s", err.message, err.path)
+		}
+		return object.NewString(resolved)
 	})
 	// File.path returns the string (or #to_path) form of its argument unchanged —
 	// no expansion, matching MRI.
@@ -594,45 +602,19 @@ func raiseLinkErr(err error, marker, src string) {
 	raise("Errno::ENOENT", "No such file or directory @ %s - %s", marker, src)
 }
 
-// realdirpath resolves an already-expanded absolute path's symlinks, tolerating a
-// non-existent leaf: if the whole path resolves it is returned, otherwise the
-// parent directory is resolved and the leaf re-joined. A missing parent raises
-// Errno::ENOENT.
-func realdirpath(p string) string {
-	resolved, err := filepath.EvalSymlinks(filepath.FromSlash(p))
-	if err == nil {
-		return toSlash(resolved)
+// raiseRealpathErr reports a File.realpath failure with MRI's wording. MRI does
+// NOT reach its own emulation first there: rb_check_realpath_internal
+// (ruby/ruby v3_4_0 file.c:4554) calls realpath(3) and, when that fails with
+// anything but ENOTDIR (or an ENOENT on a path that does exist), raises
+// rb_sys_fail_path against the WHOLE argument under its own function name. Only
+// ENOTDIR falls through to the emulation, which is why a path that walks through
+// a regular file is the one File.realpath error that names realpath_rec and the
+// offending component instead.
+func raiseRealpathErr(err *realpathErr, arg string) {
+	if err.class == "Errno::ENOTDIR" {
+		raise(err.class, "%s @ realpath_rec - %s", err.message, err.path)
 	}
-	// A symlink loop is Errno::ELOOP even though realdirpath tolerates an absent
-	// leaf — the loop is a hard resolution failure, not a missing final component.
-	if isSymlinkLoop(p) {
-		raise("Errno::ELOOP", "Too many levels of symbolic links @ realpath_rec - %s", p)
-	}
-	dir, base := rubyDirname(p), rubyBasename(p)
-	resolvedDir, err := filepath.EvalSymlinks(filepath.FromSlash(dir))
-	if err != nil {
-		raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", dir)
-	}
-	return toSlash(filepath.Join(resolvedDir, base))
-}
-
-// isSymlinkLoop reports whether resolving p fails with ELOOP (a symlink cycle).
-// filepath.EvalSymlinks returns a bare "too many links" error that does NOT wrap
-// syscall.ELOOP, so the real errno is recovered by re-stating the path (os.Stat
-// follows the link and surfaces the kernel's ELOOP).
-func isSymlinkLoop(p string) bool {
-	_, err := osStat(filepath.FromSlash(p))
-	return errors.Is(err, syscall.ELOOP)
-}
-
-// raiseRealpathErr maps a File.realpath EvalSymlinks failure to the MRI errno: a
-// symbolic-link loop is Errno::ELOOP, anything else (a missing component) is
-// Errno::ENOENT.
-func raiseRealpathErr(p string) {
-	if isSymlinkLoop(p) {
-		raise("Errno::ELOOP", "Too many levels of symbolic links @ realpath_rec - %s", p)
-	}
-	raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
+	raise(err.class, "%s @ rb_check_realpath_internal - %s", err.message, arg)
 }
 
 // oneArg enforces the single-argument arity MRI's one-path File predicates check

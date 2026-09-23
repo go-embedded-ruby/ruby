@@ -208,11 +208,13 @@ func devPart(s *FileStat, dev int64, part func(int64) int64) object.Value {
 // the rest of rbgo's Time surface).
 func statTime(unix int64) *Time { return unixTime(unix) }
 
-// osStat / osLstat are seams over os.Stat / os.Lstat so the missing-path error
-// branch is reachable without depending on real filesystem state.
+// osStat / osLstat / osReadlink are seams over os.Stat / os.Lstat / os.Readlink
+// so the missing-path and unreadable-link error branches are reachable without
+// depending on real filesystem state.
 var (
-	osStat  = os.Stat
-	osLstat = os.Lstat
+	osStat     = os.Stat
+	osLstat    = os.Lstat
+	osReadlink = os.Readlink
 )
 
 // statOrRaise stats path (following symlinks when follow is true), raising
