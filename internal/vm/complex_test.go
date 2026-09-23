@@ -69,7 +69,12 @@ func TestComplex(t *testing.T) {
 func TestComplexErrors(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
 		{`Complex("a")`, "ArgumentError"}, // an unparseable String is ArgumentError (MRI's "invalid value for convert()")
-		{`Complex(1, "b")`, "TypeError"},  // a non-real second argument is still a TypeError
+		// A String in EITHER position is parsed with the strict complex grammar
+		// (complex.c v3_4_0 nucomp_convert runs string_to_c_strict on a1 AND a2),
+		// so an unparseable one is the same ArgumentError there as in the first
+		// position — `Complex(1, "b")` on ruby 4.0.5 says
+		// `invalid value for convert(): "b"`.
+		{`Complex(1, "b")`, `ArgumentError`},
 		{`Complex(1, 2) + "x"`, "TypeError"},
 		{`true + Complex(1, 1)`, "TypeError"},
 		{`Complex(1, 2) % 1`, "NoMethodError"},

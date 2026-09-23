@@ -276,6 +276,14 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		}
 	}
 
+	// load.c v3_4_0 search_required asks rb_feature_p BEFORE it touches the
+	// filesystem: a feature $LOADED_FEATURES already carries — under the name as
+	// written, or under a $LOAD_PATH prefix — is provided, and require reports
+	// false without looking for a file at all.
+	if !relative && vm.featureProvided(name) {
+		return object.Bool(false)
+	}
+
 	file := name
 	if !strings.HasSuffix(file, ".rb") {
 		file += ".rb"
@@ -343,25 +351,10 @@ func (vm *VM) doRequire(name string, relative bool) object.Value {
 		ok = true
 		return object.Bool(true)
 	}
-	// Nothing on disk. MRI still returns false when the feature is ALREADY
-	// PROVIDED under the bare name: search_required (load.c v3_4_0) consults
-	// rb_feature_p before rb_find_file_ext, and for a name carrying no extension
-	// an entry in $LOADED_FEATURES equal to that name answers 'u' --
-	//
-	//	if (!*(e = f + len)) { if (ext) continue; return 'u'; }
-	//
-	// -- whereupon `case 0: if (ft) goto feature_present;` returns with *path == 0
-	// and require_internal reports false rather than failing to load. Only the
-	// verbatim form is matched here; MRI also accepts an entry spelled
-	// "<$LOAD_PATH entry>/<name>", and its loaded-features index carries a
-	// "distractor" rule for entries with an unusable extension, neither of which
-	// this check reproduces -- it can only turn a LoadError into false, never the
-	// other way round, so it cannot hide a require that would otherwise work.
-	if !relative && !strings.Contains(filepath.Base(name), ".") {
-		if arr, ok := vm.globals["$LOADED_FEATURES"].(*object.Array); ok && featureListed(arr, name) {
-			return object.Bool(false)
-		}
-	}
+	// Nothing on disk, and featureProvided already answered for every feature
+	// $LOADED_FEATURES vouches for (it subsumes the narrower "an entry spelled
+	// exactly like the bare name" check this path used to carry), so the require
+	// genuinely failed.
 	return vm.raiseLoadError(errName)
 }
 
@@ -528,4 +521,173 @@ func (vm *VM) currentDir() string {
 func featurePath(cand string) string {
 	abs, _ := filepath.Abs(cand)
 	return filepath.ToSlash(abs)
+}
+
+// rbExts and soExts are MRI's IS_RBEXT / IS_SOEXT|IS_DLEXT sets as far as the
+// loaded-features bookkeeping is concerned. rbgo only ever executes Ruby source,
+// but an entry in $LOADED_FEATURES carrying a native extension still SATISFIES a
+// require in MRI, so the match has to recognise those spellings.
+var (
+	rbExts = []string{".rb"}
+	soExts = []string{".so", ".o", ".bundle", ".dylib", ".dll"}
+)
+
+func extIn(e string, set []string) bool {
+	for _, x := range set {
+		if strings.EqualFold(e, x) {
+			return true
+		}
+	}
+	return false
+}
+
+// featureExt returns the extension of a required name the way search_required
+// picks it: the last '.' of the name, and only when no '/' follows it (so
+// "a.b/c" has no extension). An empty result means the name carries none.
+func featureExt(name string) string {
+	i := strings.LastIndex(name, ".")
+	if i < 0 || strings.ContainsAny(name[i:], "/") {
+		return ""
+	}
+	return name[i:]
+}
+
+// featureProvided is load.c v3_4_0 rb_feature_p with expanded = FALSE: it reports
+// whether $LOADED_FEATURES already carries an entry that satisfies a require of
+// name, WITHOUT touching the filesystem. MRI looks for an entry equal either to
+//
+//	"#{name}#{e}"                       or
+//	"#{load_path[j]}/#{name}#{e}"
+//
+// for an acceptable (possibly empty) extension e, which is why a feature stays
+// loaded once when $LOAD_PATH is rearranged under it, and why an entry a program
+// pushed by hand — ruby/spec pushes "./load_fixture.rb" — suppresses the require
+// of that same spelling even though nothing expanded it.
+//
+// rbgo's own "have I run this file?" cache is keyed by absolute path, which
+// answers neither question: two different spellings of one file share an
+// absolute path (so the cache catches them) but one spelling of a feature
+// recorded under another prefix does not.
+func (vm *VM) featureProvided(name string) bool {
+	arr, ok := vm.globals["$LOADED_FEATURES"].(*object.Array)
+	if !ok {
+		return false
+	}
+	ext := featureExt(name)
+	rb := extIn(ext, rbExts)
+	if ext != "" && !rb && !extIn(ext, soExts) {
+		// An unrecognised extension is not one search_required dispatches on: it
+		// falls through to the extension-less form, where the whole name (dot and
+		// all) is the feature.
+		ext = ""
+	}
+	stem := name[:len(name)-len(ext)]
+	var loadPath []string
+	for _, v := range arr.Elems {
+		s, isStr := v.(*object.String)
+		if !isStr {
+			continue
+		}
+		f := s.Str()
+		if len(f) < len(stem) {
+			continue
+		}
+		if !strings.HasPrefix(f, stem) {
+			if loadPath == nil {
+				loadPath = vm.expandedLoadPath()
+			}
+			p := loadedFeaturePath(f, stem, ext, loadPath)
+			if p < 0 {
+				continue
+			}
+			f = f[p:]
+		}
+		e := f[len(stem):]
+		if e == "" {
+			// An entry spelled exactly like the feature answers 'u' (already
+			// provided) only when the require carried no extension of its own.
+			if ext == "" {
+				return true
+			}
+			continue
+		}
+		if e[0] != '.' {
+			continue
+		}
+		if (!rb || ext == "") && extIn(e, soExts) {
+			return true
+		}
+		if (rb || ext == "") && extIn(e, rbExts) {
+			return true
+		}
+	}
+	return false
+}
+
+// loadedFeaturePath is load.c v3_4_0 loaded_feature_path: it reports the length
+// of the leading "#{load_path_entry}/" that makes entry "#{prefix}/#{stem}#{e}"
+// for an extension e acceptable to the requested type, or -1 when the entry has
+// no such shape or its prefix is not on the load path. MRI returns the matching
+// load-path String and its caller then steps over the separator itself; counting
+// the separator in here says the same thing without the off-by-one.
+func loadedFeaturePath(entry, stem, ext string, loadPath []string) int {
+	if len(entry) < len(stem)+1 {
+		return -1
+	}
+	var plen int
+	if strings.Contains(stem, ".") && strings.HasSuffix(entry, stem) {
+		plen = len(entry) - len(stem)
+	} else {
+		// Scan back from the end for the dot of the entry's own extension,
+		// stopping at a directory separator. The C loop starts ON the terminating
+		// NUL (which is neither '.' nor '/'), so an entry whose last segment has
+		// no dot cannot match here.
+		e := len(entry)
+		for e != 0 {
+			c := byte(0)
+			if e < len(entry) {
+				c = entry[e]
+			}
+			if c == '.' || c == '/' {
+				break
+			}
+			e--
+		}
+		if e >= len(entry) || entry[e] != '.' || e < len(stem) || entry[e-len(stem):e] != stem {
+			return -1
+		}
+		plen = e - len(stem)
+	}
+	if plen > 0 && entry[plen-1] != '/' {
+		return -1
+	}
+	tail := entry[plen+len(stem):]
+	switch {
+	case extIn(ext, soExts) && !extIn(tail, soExts):
+		return -1
+	case extIn(ext, rbExts) && !extIn(tail, rbExts):
+		return -1
+	}
+	// The load-path entry itself is the prefix WITHOUT its trailing separator.
+	dirLen := plen
+	if dirLen > 0 {
+		dirLen--
+	}
+	for _, p := range loadPath {
+		if len(p) == dirLen && (dirLen == 0 || entry[:dirLen] == p) {
+			return plen
+		}
+	}
+	return -1
+}
+
+// expandedLoadPath is MRI's get_expanded_load_path: each $LOAD_PATH entry as an
+// absolute, cleaned path, which is the form the loaded-features entries carry.
+func (vm *VM) expandedLoadPath() []string {
+	dirs := vm.loadPathDirs()
+	out := make([]string, len(dirs))
+	for i, d := range dirs {
+		out[i] = featurePath(d)
+	}
+	return out
 }

@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/big"
 	"math/cmplx"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -293,43 +294,199 @@ func complexFloat(v object.Value) float64 {
 	return f
 }
 
-// makeComplex builds the Complex for a validated Kernel#Complex() call. A single
-// String argument is parsed with String#to_c's grammar (an invalid one is an
-// ArgumentError, matching MRI's "invalid value for convert()"). Otherwise the
-// first argument is the real part and an optional second the imaginary part, each
-// required to be a real number (a non-real part is a TypeError). Every failure
-// path raises, so the constructor can wrap it for exception: false.
-func (vm *VM) makeComplex(args []object.Value) object.Value {
-	if s, ok := args[0].(*object.String); ok && len(args) == 1 {
-		c, ok := stringToC(s.Str(), true)
-		if !ok {
-			return raise("ArgumentError", "invalid value for convert(): %s", s.Inspect())
+// makeComplex is complex.c v3_4_0 nucomp_convert, the body behind Kernel#Complex
+// and Complex(). It is deliberately written in that function's order, because
+// each step depends on the previous one having rewritten its argument:
+//
+//  1. a nil argument (either position) is a TypeError naming nil, not its class;
+//  2. a String argument is parsed STRICTLY (string_to_c_strict), in either
+//     position, and with exception: false a bad one yields nil rather than
+//     raising;
+//  3. a Complex argument whose imaginary part is an exact zero contributes its
+//     real part, which is what lets Complex(Complex(1, 0), 2) mean Complex(1, 2);
+//  4. a Complex real part with no imaginary argument (or an exactly zero one) IS
+//     the answer;
+//  5. with one argument: a non-real Numeric is returned unchanged, and a
+//     non-Numeric goes through #to_c (rb_convert_type);
+//  6. with two arguments, both Numeric and at least one non-real: the answer is
+//     a1 + a2 * Complex(0, 1), dispatched through the objects' own operators —
+//     which is how Complex(Complex(3, 4), Complex(5, 6)) becomes (-3+9i);
+//  7. otherwise Complex.new, whose nucomp_real_check rejects a non-real part.
+//
+// doRaise is the exception: false switch, and it is NOT a blanket rescue: MRI
+// applies it at three specific points (the nil check, the String parse, and a
+// second argument that is not an Integer/Float/Rational), and lets everything
+// else — notably nucomp_real_check's "not a real" — propagate. `Complex(:sym, 0,
+// exception: false)` really does raise TypeError on 4.0.5.
+func (vm *VM) makeComplex(args []object.Value, doRaise bool) object.Value {
+	a1 := args[0]
+	var a2 object.Value
+	hasA2 := len(args) > 1
+	if hasA2 {
+		a2 = args[1]
+	}
+	if object.IsNil(a1) || (hasA2 && object.IsNil(a2)) {
+		if !doRaise {
+			return object.NilV
 		}
+		raise("TypeError", "can't convert nil into Complex")
+	}
+	var parsed bool
+	if a1, parsed = vm.complexFromString(a1, doRaise); !parsed {
+		return object.NilV
+	}
+	if hasA2 {
+		if a2, parsed = vm.complexFromString(a2, doRaise); !parsed {
+			return object.NilV
+		}
+	}
+	if c, ok := a1.(*object.Complex); ok && exactZeroValue(c.Im) {
+		a1 = c.Re
+	}
+	if hasA2 {
+		if c, ok := a2.(*object.Complex); ok && exactZeroValue(c.Im) {
+			a2 = c.Re
+		}
+	}
+	if c, ok := a1.(*object.Complex); ok && (!hasA2 || exactZeroValue(a2)) {
 		return c
 	}
-	// A lone Complex argument is returned unchanged (MRI's Complex(Complex(1,2))).
-	if c, ok := args[0].(*object.Complex); ok && len(args) == 1 {
-		return c
-	}
-	re, ok := vm.realComponent(args[0])
-	if !ok {
-		return raise("TypeError", "can't convert %s into Complex", vm.classOf(args[0]).name)
+	if !hasA2 {
+		if vm.valueIsNumeric(a1) {
+			if !vm.fRealP(a1) {
+				return a1
+			}
+		} else if doRaise {
+			return vm.toComplex(a1)
+		} else {
+			// rb_protect(to_complex, a1) + rb_set_errinfo(Qnil): the conversion is
+			// attempted and its failure discarded.
+			return vm.numericCtor(false, func() object.Value { return vm.toComplex(a1) })
+		}
+	} else if vm.valueIsNumeric(a1) && vm.valueIsNumeric(a2) && (!vm.fRealP(a1) || !vm.fRealP(a2)) {
+		i := &object.Complex{Re: object.IntValue(0), Im: object.IntValue(1)}
+		return vm.send(a1, "+", []object.Value{vm.send(a2, "*", []object.Value{i}, nil)}, nil)
 	}
 	im := object.Value(object.IntValue(0))
-	if len(args) > 1 {
-		im, ok = vm.realComponent(args[1])
-		if !ok {
-			return raise("TypeError", "not a real")
+	if hasA2 {
+		switch a2.(type) {
+		case object.Integer, object.Float, *object.Bignum, *object.Rational:
+		default:
+			if !doRaise {
+				return object.NilV
+			}
+		}
+		im = vm.complexRealCheck(a2)
+	}
+	return &object.Complex{Re: vm.complexRealCheck(a1), Im: im}
+}
+
+// complexFromString is complex.c v3_4_0 string_to_c_strict: a String argument is
+// parsed with the strict complex grammar, an embedded NUL is rejected by
+// StringValueCStr before the parse is even attempted, and with exception: false
+// either failure yields nil instead of raising. A non-String is returned
+// untouched. ok is false when the caller must answer nil.
+func (vm *VM) complexFromString(v object.Value, doRaise bool) (object.Value, bool) {
+	s, isStr := v.(*object.String)
+	if !isStr {
+		return v, true
+	}
+	if strings.ContainsRune(s.Str(), 0) {
+		if !doRaise {
+			return object.NilV, false
+		}
+		raise("ArgumentError", "string contains null byte")
+	}
+	c, ok := stringToC(s.Str(), true)
+	if !ok {
+		if !doRaise {
+			return object.NilV, false
+		}
+		raise("ArgumentError", "invalid value for convert(): %s", s.Inspect())
+	}
+	return c, true
+}
+
+// toComplex is complex.c's to_complex, i.e. rb_convert_type(val, T_COMPLEX,
+// "Complex", "to_c"): the object is asked for #to_c, a missing one is "can't
+// convert X into Complex" and a #to_c that answers something other than a
+// Complex is "can't convert X to Complex (X#to_c gives Y)".
+func (vm *VM) toComplex(v object.Value) object.Value {
+	name := vm.classOf(v).name
+	if !vm.respondsToDynamic(v, "to_c") {
+		raise("TypeError", "can't convert %s into Complex", name)
+	}
+	r := vm.send(v, "to_c", nil, nil)
+	if c, ok := r.(*object.Complex); ok {
+		return c
+	}
+	raise("TypeError", "can't convert %s to Complex (%s#to_c gives %s)", name, name, vm.classOf(r).name)
+	return object.NilV
+}
+
+// complexRealCheck is complex.c v3_4_0 nucomp_real_check: a Complex component
+// must be an Integer, Float or Rational; a Complex whose imaginary part is zero
+// contributes its real part; anything else must be a Numeric answering #real?
+// with true, or it is TypeError "not a real".
+func (vm *VM) complexRealCheck(v object.Value) object.Value {
+	switch n := v.(type) {
+	case object.Integer, object.Float, *object.Bignum, *object.Rational:
+		return v
+	case *object.Complex:
+		if imagNumericZero(n.Im) {
+			return n.Re
 		}
 	}
-	return &object.Complex{Re: re, Im: im}
+	if !vm.valueIsNumeric(v) || !vm.fRealP(v) {
+		raise("TypeError", "not a real")
+	}
+	return v
+}
+
+// fRealP is complex.c's INTERNAL f_real_p, which is not the same predicate as
+// Complex#real?: an Integer, Float or Rational is real, a Complex is real when
+// f_zero_p says its imaginary part is zero — INCLUDING a Float 0.0, where
+// k_exact_zero_p (which drives the unwrapping steps) says no — and anything else
+// is asked #real?. The gap between the two is exactly why
+// Complex(Complex(1, 0.0), 2) is (1+2i) with an INTEGER imaginary part while
+// Complex(1, 0.0) + Complex(0, 2) is (1+2.0i): the former never takes the f_add
+// path, because f_real_p calls Complex(1, 0.0) real although Complex#real? does
+// not. Witnessed both ways on ruby 4.0.5.
+func (vm *VM) fRealP(v object.Value) bool {
+	switch n := v.(type) {
+	case object.Integer, object.Float, *object.Bignum, *object.Rational:
+		return true
+	case *object.Complex:
+		return imagNumericZero(n.Im)
+	}
+	return vm.send(v, "real?", nil, nil).Truthy()
+}
+
+// exactZeroValue is complex.c's k_exact_zero_p: zero AND exact, so an Integer or
+// Rational zero qualifies and a Float 0.0 does not. It decides whether a second
+// argument of zero is "no imaginary part at all".
+func exactZeroValue(v object.Value) bool {
+	switch n := v.(type) {
+	case object.Integer:
+		return n == 0
+	case *object.Bignum:
+		return n.I.Sign() == 0
+	case *object.Rational:
+		return n.R.Sign() == 0
+	}
+	return false
 }
 
 // registerComplex installs Kernel#Complex and the Complex instance methods.
 func (vm *VM) registerComplex() {
 	vm.cObject.define("Complex", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
-		return vm.numericCtor(doRaise, func() object.Value { return vm.makeComplex(args) })
+		// nucomp_f_complex: a lone argument that is EXACTLY a Complex is returned
+		// as it stands, before nucomp_convert ever sees it.
+		if c, ok := args[0].(*object.Complex); ok && len(args) == 1 {
+			return c
+		}
+		return vm.makeComplex(args, doRaise)
 	})
 
 	// Integer#to_c / Float#to_c wrap a real number as Complex(self, 0); String#to_c

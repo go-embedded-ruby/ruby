@@ -455,27 +455,52 @@ func (vm *VM) registerIO() {
 	vm.cObject.define("warn", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		var category object.Value = object.NilV
 		pos := args
+		var uplevel object.Value = object.NilV
 		if kw := trailingKwHash(args); kw != nil {
 			pos = args[:len(args)-1]
 			if v, ok := kw.Get(object.SymVal("category")); ok {
 				category = v
 			}
-			if v, ok := kw.Get(object.SymVal("uplevel")); ok && !object.IsNil(v) {
-				n, isInt := v.(object.Integer)
-				if !isInt {
-					raise("TypeError", "no implicit conversion of %s into Integer", vm.classOf(v).name)
-				}
-				if int64(n) < 0 {
-					raise("ArgumentError", "negative level (%d)", int64(n))
-				}
+			if v, ok := kw.Get(object.SymVal("uplevel")); ok {
+				uplevel = v
 			}
 		}
+		// error.c v3_4_0 rb_warn_m wraps its WHOLE body in
+		// `if (!NIL_P(ruby_verbose) && argc > 0)`, so a $VERBOSE of nil (the -W0
+		// level) makes Kernel#warn a no-op — nothing is written, nothing is
+		// validated and Warning.warn is not called. $VERBOSE false still warns.
+		if object.IsNil(vm.verboseSlot("$VERBOSE")) || len(pos) == 0 {
+			return object.NilV
+		}
+		if !object.IsNil(uplevel) {
+			// rb_warn_m runs the level through NUM2LONG, so a Float or a Rational
+			// truncates and anything with no integer conversion is a TypeError.
+			if int64(vm.toIntCoerce(uplevel)) < 0 {
+				raise("ArgumentError", "negative level (%d)", vm.toIntCoerce(uplevel))
+			}
+		}
+		// rb_warn_m keeps a lone message that already ends in a newline VERBATIM
+		// (`if (argc > 1 || !NIL_P(uplevel) || !end_with_asciichar(str, '\n'))`
+		// guards the rewrite); everything else is assembled by rb_io_puts, which is
+		// why `warn(["a", "b"])` writes two lines rather than an inspected Array,
+		// and why an empty Array writes nothing at all.
 		var b strings.Builder
-		for _, a := range pos {
-			s := vm.displayStr(a)
-			b.WriteString(s)
-			if !strings.HasSuffix(s, "\n") {
-				b.WriteByte('\n')
+		first, lone := pos[0].(*object.String)
+		if lone && len(pos) == 1 && object.IsNil(uplevel) && strings.HasSuffix(first.Str(), "\n") {
+			b.WriteString(first.Str())
+		} else {
+			if !object.IsNil(uplevel) {
+				// With a level, rb_warn_m prefixes "path:lineno: warning: " taken from
+				// rb_ec_backtrace_location_ary — and, when that yields no location (a
+				// level past the bottom of the stack), the bare "warning: ". rbgo
+				// records no line numbers at all, so no frame can ever supply a path:
+				// the no-location prefix is the truthful answer for every level, not a
+				// choice. Fixing it means line tracking in internal/compiler.
+				b.WriteString("warning: ")
+			}
+			write := func(s string) { b.WriteString(s) }
+			for _, a := range pos {
+				vm.ioPutsValueRec(write, a, nil)
 			}
 		}
 		if b.Len() == 0 {
@@ -494,9 +519,17 @@ func (vm *VM) registerIO() {
 				return object.NilV
 			}
 		}
+		// error.c rb_warn_category consults rb_warning_warn_arity(): a Warning.warn
+		// that takes exactly one argument is called WITHOUT the category keyword,
+		// so a program that overrides it with `def Warning.warn(message)` is not
+		// handed an argument it cannot take.
+		msg := object.NewString(b.String())
+		if m := vm.resolveClassMethod(vm.consts["Warning"].(*RClass), "warn"); m != nil && methodArity(m) == 1 {
+			return vm.send(vm.consts["Warning"], "warn", []object.Value{msg}, nil)
+		}
 		kw := object.NewHash()
 		kw.Set(object.SymVal("category"), category)
-		return vm.send(vm.consts["Warning"], "warn", []object.Value{object.NewString(b.String()), kw}, nil)
+		return vm.send(vm.consts["Warning"], "warn", []object.Value{msg, kw}, nil)
 	})
 
 	// File streams: File.open returns a buffered, file-backed IO carrying the
@@ -558,6 +591,25 @@ func (vm *VM) registerIO() {
 	vm.cObject.define("open", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		// io.c v3_4_0 rb_f_open tests `rb_respond_to(argv[0], to_open)` FIRST, before
+		// it ever looks at the argument as a path: an object that answers #to_open is
+		// REDIRECTED — open calls it with the remaining arguments (keywords included,
+		// RB_PASS_CALLED_KEYWORDS) and hands back whatever it returns, whatever that
+		// is. With a block, `rb_ensure(rb_yield, io, io_close, io)` yields the result
+		// and closes it afterwards, and io_close is a CHECKED call, so a value that
+		// does not answer #close (the specs return a Symbol) is left alone.
+		if vm.respondsToDynamic(args[0], "to_open") {
+			io := vm.send(args[0], "to_open", args[1:], nil)
+			if blk == nil {
+				return io
+			}
+			defer func() {
+				if vm.respondsToDynamic(io, "close") {
+					vm.send(io, "close", nil, nil)
+				}
+			}()
+			return vm.callBlock(blk, []object.Value{io})
 		}
 		if name := pathArg(vm, args[0]); strings.HasPrefix(name, "|") {
 			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", name)

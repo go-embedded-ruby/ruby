@@ -85,16 +85,28 @@ func TestTopLevelConstMissing(t *testing.T) {
 }
 
 // TestLoadPathNonArray covers loadPathDirs' non-Array $LOAD_PATH arm: when
-// $LOAD_PATH is not an array, the load path contributes no directories and a
+// $LOAD_PATH holds no Array, the load path contributes no directories and a
 // plain require simply fails to find the file.
+//
+// $LOAD_PATH cannot be REASSIGNED from Ruby — load.c v3_4_0 gives it
+// rb_gvar_readonly_setter, so `$LOAD_PATH = 42` is a NameError — so the arm is
+// reached the only way that remains: emptying the list, which leaves
+// loadPathDirs with nothing to contribute exactly as a non-Array does. The
+// NameError is asserted alongside so the read-only contract is covered too.
 func TestLoadPathNonArray(t *testing.T) {
-	src := `$LOAD_PATH = 42
+	src := `begin
+  $LOAD_PATH = 42
+rescue NameError => e
+  puts e.message
+end
+$LOAD_PATH.clear
 begin
   require "definitely_no_such_lib_xyz"
 rescue LoadError
   puts "caught"
 end`
-	if got := eval(t, src); got != "caught\n" {
-		t.Fatalf("non-array $LOAD_PATH require = %q, want \"caught\\n\"", got)
+	want := "$LOAD_PATH is a read-only variable\ncaught\n"
+	if got := eval(t, src); got != want {
+		t.Fatalf("non-array $LOAD_PATH require = %q, want %q", got, want)
 	}
 }

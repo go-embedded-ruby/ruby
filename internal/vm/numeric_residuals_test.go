@@ -103,7 +103,10 @@ end
 	cases := []struct{ name, src, want string }{
 		{"ctor_symbol", `Complex(:sym)`, "TypeError"},
 		{"ctor_imag_symbol", `Complex(1, :sym)`, "TypeError"},
-		{"ctor_not_real_numeric", prelude + `Complex(NotReal.new)`, "TypeError"},
+		// A lone non-real Numeric is NOT an error: nucomp_convert returns it
+		// unchanged ("if (k_numeric_p(a1) && !f_real_p(a1)) return a1;"), which
+		// ruby 4.0.5 confirms — Complex(NotReal.new).class is NotReal. Covered as a
+		// value case below instead.
 		{"ctor_invalid_string", `Complex("not a number!")`, "ArgumentError"},
 		{"rect_nonzero_imag_complex", `Complex.rectangular(Complex(1, 1), 2)`, "TypeError"},
 		{"rect_imag_nonzero_complex", `Complex.rectangular(1, Complex(2, 3))`, "TypeError"},
@@ -116,5 +119,10 @@ end
 				t.Errorf("src=%q: got err=%v, want containing %q", tc.src, err, tc.want)
 			}
 		})
+	}
+	// The non-error counterpart: Kernel#Complex hands a non-real Numeric straight
+	// back, and Complex#real? is what decides it.
+	if got := eval(t, prelude+`p Complex(NotReal.new).class`); got != "NotReal\n" {
+		t.Errorf("non-real Numeric: got %q want %q", got, "NotReal\n")
 	}
 }

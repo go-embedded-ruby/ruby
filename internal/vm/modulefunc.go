@@ -16,6 +16,14 @@ func (vm *VM) registerModuleExtras() {
 	// arg list, matching MRI.
 	vm.cModule.define("module_function", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		mod := self.(*RClass)
+		// vm_method.c v3_4_0 rb_mod_modfunc opens with
+		// `if (!RB_TYPE_P(mod, T_MODULE)) rb_raise(rb_eTypeError,
+		// "module_function must be called for modules");` — reachable by binding
+		// the UnboundMethod to a Class, since Class#module_function is undefined
+		// rather than absent.
+		if !mod.isModule {
+			raise("TypeError", "module_function must be called for modules")
+		}
 		if len(args) == 0 {
 			mod.funcMode = true
 			return object.NilV
@@ -23,6 +31,13 @@ func (vm *VM) registerModuleExtras() {
 		for _, a := range args {
 			name := vm.defineMethodName(a)
 			m := vm.lookupForModuleOp(mod, name)
+			if m == nil || m.undefined {
+				// rb_mod_modfunc's search is `me = search_method(m, id, 0); if (!me)
+				// me = search_method(rb_cObject, id, 0);` — a name the module itself
+				// does not carry is looked up on Object, which is how
+				// `Module.new { module_function :require }` reaches Kernel#require.
+				m = vm.lookupForModuleOp(vm.cObject, name)
+			}
 			if m == nil || m.undefined {
 				raise("NameError", "undefined method '%s' for module '%s'", name, mod.name)
 			}
@@ -305,6 +320,33 @@ func (vm *VM) registerModuleExtras() {
 	for _, n := range []string{"module_function", "private", "public", "protected"} {
 		vm.cModule.methods[n].vis = visPrivate
 	}
+	// Class UNDEFINES module_function (MRI: rb_undef_method(rb_cClass,
+	// "module_function") in Init_eval), so it does not appear in
+	// Class.private_instance_methods(true) although Module still carries it.
+	vm.cClass.methods["module_function"] = &Method{
+		name: "module_function", owner: vm.cClass, vis: visPrivate, undefined: true}
+}
+
+// mirrorModuleFunction applies a module body's module_function toggle to a
+// method that Module#define_method just installed: the instance copy becomes
+// private and a public copy lands on the module's singleton, exactly as a `def`
+// in the same body would. vm_method.c v3_4_0 rb_mod_define_method reads the same
+// scope visibility a def does — `if (scope_visi->module_func)
+// rb_method_entry_set(rb_singleton_class(mod), id, me, METHOD_VISI_PUBLIC);`
+// with the instance entry taking scope_visi->method_visi, which the toggle set
+// to private. Witnessed on 4.0.5: a define_method'd name shows up in both
+// private_instance_methods(false) and singleton_methods(false).
+func (vm *VM) mirrorModuleFunction(cls *RClass, name string) {
+	if !cls.funcMode {
+		return
+	}
+	// Every call site invokes this immediately after storing the method, so the
+	// entry is always there.
+	m := cls.methods[name]
+	m.vis = visPrivate
+	sm := *m
+	sm.vis = visPublic
+	cls.smethods[name] = &sm
 }
 
 // warnDeprecatedConst emits MRI's "constant X::Y is deprecated" warning when a
