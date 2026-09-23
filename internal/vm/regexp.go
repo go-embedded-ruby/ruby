@@ -418,6 +418,7 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 	// ASCII names — both no-ops for sources that do not use those features.
 	engineSrc := translateUnicodeEscapes(prefix+source, source)
 	engineSrc, nameMap := rewriteNamedGroups(engineSrc)
+	engineSrc = rewriteBeginLineAnchor(engineSrc)
 	re, err := onig.Compile(engineSrc)
 	if err != nil {
 		raise("RegexpError", "%s: /%s/", mapRegexpEngineError(err.Error()), source)
@@ -425,6 +426,76 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 	r := &Regexp{re: re, source: source, flags: flags, nameMap: nameMap}
 	applyRegexpEncodingFlags(r, flags)
 	return r
+}
+
+// beginLineEquivalent is the engine pattern that reproduces Onigmo's
+// OP_BEGIN_LINE exactly: a "^" matches at the start of the string, or right
+// after a newline PROVIDED that is not the end of the string. The engine this
+// VM links drops that second condition and so fires "^" once more, at the very
+// end of a string that ends in a newline:
+//
+//	"Text\n".gsub(/^/, " ")   =>  " Text\n "     (MRI: " Text\n")
+//	"a\nb\n".gsub(/^/, "-")   =>  "-a\n-b\n-"    (MRI: "-a\n-b\n")
+//
+// The engine's own "^" is kept (so its anchor optimisation still applies) and
+// guarded with (?!\z); the \A alternative restores the one case the guard
+// would otherwise remove, the empty string, whose start IS its end.
+//
+// Reference: ruby/ruby v3_4_0 regexec.c OP_BEGIN_LINE —
+//
+//	if (ON_STR_BEGIN(s)) { if (IS_NOTBOL(...)) goto fail; ... }
+//	else if (ONIGENC_IS_MBC_NEWLINE(encode, sprev, end) && !ON_STR_END(s)) ...
+//	goto fail;
+const beginLineEquivalent = `(?:^(?!\z)|\A)`
+
+// rewriteBeginLineAnchor replaces every "^" that is a line anchor with
+// beginLineEquivalent, leaving alone the "^" that are not anchors: one escaped
+// with a backslash, one inside a character class (whether the negation slot of
+// "[^…]" or a literal "[a^b]"), and one inside a "(?#…)" comment — a comment
+// runs to its first ")", which the replacement text contains.
+//
+// Character-class nesting is tracked by depth so Onigmo's POSIX brackets and
+// nested classes ("[[:alpha:]]", "[a-z&&[^b]]") keep their inner "^" literal.
+// A source with no "^" at all is returned unchanged.
+func rewriteBeginLineAnchor(src string) string {
+	if !strings.ContainsRune(src, '^') {
+		return src
+	}
+	var b strings.Builder
+	b.Grow(len(src) + 16)
+	depth := 0 // character-class nesting depth
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		switch {
+		case c == '\\':
+			b.WriteByte(c)
+			if i+1 < len(src) {
+				i++
+				b.WriteByte(src[i])
+			}
+		case depth == 0 && c == '(' && strings.HasPrefix(src[i:], "(?#"):
+			if j := strings.IndexByte(src[i:], ')'); j >= 0 {
+				b.WriteString(src[i : i+j+1])
+				i += j
+			} else {
+				b.WriteString(src[i:])
+				i = len(src)
+			}
+		case c == '[':
+			depth++
+			b.WriteByte(c)
+		case c == ']':
+			if depth > 0 {
+				depth--
+			}
+			b.WriteByte(c)
+		case c == '^' && depth == 0:
+			b.WriteString(beginLineEquivalent)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // applyRegexpEncodingFlags sets a literal regexp's FIXEDENCODING / NOENCODING
@@ -952,7 +1023,7 @@ func strMatchRegexp(v object.Value) *Regexp {
 	case *Regexp:
 		return x
 	case *object.String:
-		re, err := onig.Compile(x.Str())
+		re, err := onig.Compile(rewriteBeginLineAnchor(x.Str()))
 		if err != nil {
 			raise("RegexpError", "%s: /%s/", err.Error(), x.Str())
 		}
