@@ -217,6 +217,7 @@ func (vm *VM) registerFile() {
 		return object.Bool(err == nil && fi.Mode().IsRegular())
 	})
 	def("directory?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		oneArg(args)
 		fi, err := os.Stat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.IsDir())
 	})
@@ -224,6 +225,7 @@ func (vm *VM) registerFile() {
 	// lstat (does not follow the link) and returns false for a missing path or a
 	// non-symlink, rather than raising.
 	def("symlink?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		oneArg(args)
 		fi, err := os.Lstat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.Mode()&os.ModeSymlink != 0)
 	})
@@ -398,6 +400,7 @@ func (vm *VM) registerFile() {
 	// false for a missing path rather than raising (MRI's File.<predicate>).
 	access := func(want int) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			oneArg(args)
 			p := pathArg(vm, args[0])
 			fi, err := osStat(p)
 			if err != nil {
@@ -412,6 +415,7 @@ func (vm *VM) registerFile() {
 	// The *_real? predicates consult the process's real (not effective) identity.
 	realAccess := func(want int) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			oneArg(args)
 			p := pathArg(vm, args[0])
 			fi, err := osStat(p)
 			if err != nil {
@@ -430,6 +434,7 @@ func (vm *VM) registerFile() {
 	// return their falsey value for a missing path rather than raising (unlike
 	// File.size, which raises Errno::ENOENT).
 	def("size?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		oneArg(args)
 		fi, err := os.Stat(pathArg(vm, args[0]))
 		if err != nil || fi.Size() == 0 {
 			return object.NilV
@@ -437,6 +442,7 @@ func (vm *VM) registerFile() {
 		return object.IntValue(fi.Size())
 	})
 	zero := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		oneArg(args)
 		fi, err := os.Stat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.Size() == 0)
 	}
@@ -449,6 +455,7 @@ func (vm *VM) registerFile() {
 	// missing path (MRI's File.pipe?/socket?/…). statTest wraps the stat-and-test.
 	statTest := func(pred func(*FileStat) bool) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			oneArg(args)
 			p := pathArg(vm, args[0])
 			fi, err := os.Stat(p)
 			if err != nil {
@@ -477,6 +484,7 @@ func (vm *VM) registerFile() {
 	// filestat_windows.go), so world_writable? is nil on Windows as MRI reports.
 	worldPerm := func(bit int64) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			oneArg(args)
 			fi, err := os.Stat(pathArg(vm, args[0]))
 			if err != nil {
 				return object.NilV

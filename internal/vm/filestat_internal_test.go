@@ -345,8 +345,11 @@ func TestFileTest(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{`p [FileTest.directory?("` + dir + `"), FileTest.file?("` + dir + `"), FileTest.exist?("` + dir + `")]`,
 			"[true, false, true]\n"},
-		{`p [FileTest.file?("` + f + `"), FileTest.directory?("` + f + `"), FileTest.exists?("` + f + `")]`,
+		{`p [FileTest.file?("` + f + `"), FileTest.directory?("` + f + `"), FileTest.exist?("` + f + `")]`,
 			"[true, false, true]\n"},
+		// MRI 4.0 removed the deprecated FileTest.exists? spelling (4.0.5 reports
+		// FileTest.respond_to?(:exists?) == false), so calling it is a NoMethodError.
+		{`begin; FileTest.exists?("` + f + `"); rescue NoMethodError; puts "gone"; end`, "gone\n"},
 		{`p [FileTest.zero?("` + empty + `"), FileTest.zero?("` + f + `")]`, "[true, false]\n"},
 		{`p [FileTest.size?("` + f + `"), FileTest.size?("` + empty + `"), FileTest.size("` + f + `")]`,
 			"[4, nil, 4]\n"},

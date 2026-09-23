@@ -452,72 +452,44 @@ func (vm *VM) registerFileStat() {
 	vm.includeDirEnumerable()
 }
 
+// fileTestFunctions is MRI's define_filetest_function list (ruby/ruby v3_4_0
+// file.c Init_File): every name there is installed on BOTH FileTest and File as
+// one and the same C function, so File.exist? and FileTest.exist? are the same
+// method. rbgo defines them on File (registerFile); registerFileTest re-exports
+// the very same Method records on FileTest rather than reimplementing them, so
+// the two surfaces cannot drift and an alias pair such as zero?/empty? stays a
+// genuine alias on both.
+var fileTestFunctions = []string{
+	"directory?", "exist?", "readable?", "readable_real?", "world_readable?",
+	"writable?", "writable_real?", "world_writable?", "executable?",
+	"executable_real?", "file?", "zero?", "empty?", "size?", "size", "owned?",
+	"grpowned?", "pipe?", "symlink?", "socket?", "blockdev?", "chardev?",
+	"setuid?", "setgid?", "sticky?", "identical?",
+}
+
+// reexportSingletons installs src's singleton methods named in names onto dst,
+// sharing the very same *Method record. Sharing is what makes an alias pair
+// survive the copy: two names that resolve to one record on src still resolve to
+// one record on dst, so File.method(:zero?) == File.method(:empty?) holds on
+// FileTest too. A name src does not define is skipped rather than installing nil,
+// which would turn a missing method into a crash at call time.
+func reexportSingletons(dst, src *RClass, names []string) {
+	for _, name := range names {
+		if m, ok := src.smethods[name]; ok && m != nil {
+			dst.smethods[name] = m
+		}
+	}
+}
+
 // registerFileTest installs the FileTest module — the predicate surface Puppet
-// reaches for widely (directory?/file?/exist?/readable?/…). Each predicate is a
-// thin stat-and-test that returns false for a missing path rather than raising,
-// matching MRI's FileTest.
+// reaches for widely (directory?/file?/exist?/readable?/…) and that ruby/spec
+// exercises through core/filetest. Each predicate is File's own method record
+// (see fileTestFunctions), so the arity and #to_path coercion checks, the
+// missing-path-is-false degradation and the alias identities are shared rather
+// than duplicated.
 func (vm *VM) registerFileTest() {
 	mod := newClass("FileTest", nil)
 	mod.isModule = true
 	vm.consts["FileTest"] = mod
-	sdef := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
-
-	// statOf stats path (following symlinks) returning nil for a missing path, so
-	// each predicate degrades to false rather than raising.
-	statOf := func(p string) *FileStat {
-		fi, err := osStat(p)
-		if err != nil {
-			return nil
-		}
-		return newFileStat(fi, p)
-	}
-
-	sdef("exist?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		_, err := osStat(pathArg(vm, args[0]))
-		return object.Bool(err == nil)
-	})
-	mod.smethods["exists?"] = mod.smethods["exist?"]
-	sdef("directory?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Mode()&fs.ModeDir != 0)
-	})
-	sdef("file?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Mode().IsRegular())
-	})
-	sdef("symlink?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fi, err := osLstat(pathArg(vm, args[0]))
-		return object.Bool(err == nil && fi.Mode()&fs.ModeSymlink != 0)
-	})
-	sdef("zero?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Size() == 0)
-	})
-	sdef("size", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := pathArg(vm, args[0])
-		s := statOf(p)
-		if s == nil {
-			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
-		}
-		return object.IntValue(s.fi.Size())
-	})
-	sdef("size?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		if s == nil || s.fi.Size() == 0 {
-			return object.NilV
-		}
-		return object.IntValue(s.fi.Size())
-	})
-	sdef("readable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(4))
-	})
-	sdef("writable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(2))
-	})
-	sdef("executable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(1))
-	})
+	reexportSingletons(mod, vm.consts["File"].(*RClass), fileTestFunctions)
 }
