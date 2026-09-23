@@ -2733,9 +2733,6 @@ func (c *Compiler) compileFor(v *ast.For) {
 	parent := c.cur()
 	owner, _ := parent.declOwner()
 	declare := func(name string) {
-		if name == "" {
-			return // the nameless `*` in `for i, * in …` binds nothing
-		}
 		if _, _, ok := parent.resolve(name); !ok {
 			owner.localSlot(name)
 		}
@@ -2791,7 +2788,10 @@ func declareForTargetLocals(target ast.Node, declare func(string)) {
 		declare(t.Name)
 	case *ast.MultiAssign:
 		if len(t.Targets) != len(t.Names) {
-			// All-locals form (`for i, in …`): Names carries every binding.
+			// All-locals form: Names carries every binding. The parser only builds
+			// it for a list of plain locals — `for i, in …` — so no entry is the
+			// empty name a nameless `*` would carry; every shape that HAS one (`for
+			// i, * in …`) comes with a parallel Targets list holding a nil there.
 			for _, name := range t.Names {
 				declare(name)
 			}
