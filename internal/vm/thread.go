@@ -1163,6 +1163,25 @@ func (vm *VM) mutexUnlock(m *RMutex) {
 	m.owner = nil
 }
 
+// threadWaitFor is rb_thread_wait_for (thread.c): park the current thread for
+// d, releasing the GVL so other threads run, and deliver whatever asynchronous
+// event woke it. It is the wait a blocking operation polls on — File#flock's
+// 0.1 s retry, which MRI spells the same way — so the thread reports "sleep"
+// while it waits and a Thread#kill or Thread#raise reaches it at the safepoint
+// rather than after the whole operation.
+func (vm *VM) threadWaitFor(d time.Duration) {
+	t := vm.currentThread
+	ch := t.parkWake()
+	vm.threadBlock(func() {
+		select {
+		case <-ch:
+		case <-time.After(d):
+		}
+	})
+	t.unpark()
+	vm.serviceSafepoint(t)
+}
+
 // registerSleep adds a GVL-aware Kernel#sleep that releases the lock while
 // sleeping, so other threads run. It follows rb_f_sleep (process.c): a fiber
 // scheduler, when one is installed and the running fiber is non-blocking, takes

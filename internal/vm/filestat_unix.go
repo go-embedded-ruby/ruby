@@ -63,3 +63,23 @@ func statSys(fi fs.FileInfo) statFields {
 		hasSys:  true,
 	}
 }
+
+// lockFdFn, flockFn and closeFdFn are the POSIX seam behind File#flock. A
+// buffer-backed stream has no descriptor of its own, but flock(2) is a property
+// of an open file description, so one is opened on the file's path and held for
+// as long as the lock is. They are function variables so a whitebox test can
+// drive the retry and Errno mapping without taking a real lock.
+//
+// File::LOCK_SH/EX/NB/UN carry the same values on Linux and BSD as the constants
+// rbgo defines, so the operation is passed through unchanged.
+var (
+	lockFdFn  = func(path string) (int, error) { return unix.Open(path, unix.O_RDONLY, 0) }
+	flockFn   = func(fd, op int) error { return unix.Flock(fd, op) }
+	closeFdFn = func(fd int) error { return unix.Close(fd) }
+)
+
+// flockAgainErrs are the errno values flock(2) reports for "another open file
+// description holds this lock", which rb_file_flock retries on rather than
+// raising. EACCES is in the list because some systems report it in place of
+// EWOULDBLOCK.
+var flockAgainErrs = []error{syscall.EWOULDBLOCK, syscall.EAGAIN, syscall.EACCES}

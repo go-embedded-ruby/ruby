@@ -46,3 +46,16 @@ func statSys(fi fs.FileInfo) statFields {
 func statOwned(*FileStat) bool      { return true }
 func statGrpowned(*FileStat) bool   { return false }
 func statPerm(fi fs.FileInfo) int64 { return int64(fi.Mode().Perm()) &^ 0o022 }
+
+// lockFdFn / flockFn / closeFdFn are unsupported on Windows: there is no flock(2), so
+// File#flock reports the operation as unsupported. They exist only to satisfy the
+// seam the shared io.go code references.
+var (
+	lockFdFn  = func(string) (int, error) { return 0, errors.ErrUnsupported }
+	flockFn   = func(int, int) error { return errors.ErrUnsupported }
+	closeFdFn = func(int) error { return nil }
+)
+
+// flockAgainErrs is empty here: with no flock(2) there is no "would block" to
+// retry on, and every call reports the operation as unsupported instead.
+var flockAgainErrs []error

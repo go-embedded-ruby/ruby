@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -87,6 +88,14 @@ type IOObj struct {
 	// close-on-exec defaults to set (#close_on_exec? is true), so the flag records
 	// only its clearing — a zero-value IOObj reports close-on-exec, as MRI does.
 	closeOnExecOff bool
+
+	// lockFd is the real descriptor File#flock holds on path while a lock is
+	// taken. A buffer-backed stream has no descriptor of its own (see ioFd), but
+	// flock(2) is a property of an open file description and cannot be emulated,
+	// so one is opened on demand and closed when the lock is released or the
+	// stream is. hasLockFd distinguishes "not opened" from the valid fd 0.
+	lockFd    int
+	hasLockFd bool
 
 	// strObj is the live String object backing a StringIO — MRI's StringIO holds
 	// (and mutates in place) the very String passed to it, so #string returns that
@@ -583,6 +592,26 @@ func (vm *VM) registerIO() {
 		}
 		return object.IntValue(0)
 	})
+	// File#size is rb_file_size: an fstat on the OPEN descriptor, so it reports
+	// what the file is now — including a change another stream made since this one
+	// was opened — and keeps reporting the size the descriptor still holds after
+	// the path has been unlinked. The buffer is flushed first so this stream's own
+	// unwritten bytes are counted, and the buffer's length is the answer once the
+	// path is gone, which is the descriptor MRI still has.
+	cFile.define("size", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		o := self.(*IOObj)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		ioFlush(o)
+		if st, err := os.Stat(o.path); err == nil {
+			return object.IntValue(st.Size())
+		}
+		return object.IntValue(int64(len(o.buf)))
+	})
+	cFile.define("flock", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.fileFlock(self.(*IOObj), int(vm.toIntCoerce(args[0])))
+	})
 	// IO.read/binread/write/binwrite/foreach/readlines, installed identically on IO
 	// and File (File.readlines/foreach included) now that both classes exist.
 	vm.registerIOClassMethods(cIO, cFile)
@@ -885,6 +914,115 @@ func writableCheck(p string) error {
 		return err
 	}
 	return f.Close()
+}
+
+// flock operations, the values File::LOCK_SH and friends carry. BSD and Linux
+// agree on all four, so they are also what flock(2) is handed unchanged.
+const (
+	flockSH = 0x1
+	flockEX = 0x2
+	flockNB = 0x4
+	flockUN = 0x8
+)
+
+// fileFlock is rb_file_flock (file.c). MRI flushes a writable stream first, then
+// calls flock(2) in a loop: with LOCK_NB a refusal is `false`, and WITHOUT it the
+// call is retried every 0.1 s — MRI polls here rather than blocking in the
+// syscall, which is what makes the wait interruptible, and is why this VM's
+// cooperative threads can reproduce it exactly (the wait is rb_thread_wait_for,
+// so the waiting thread reports "sleep" and a Thread#kill reaches it).
+//
+// The descriptor is opened on demand: this VM's streams are buffer-backed and
+// have no descriptor of their own, but an flock belongs to an open file
+// description and cannot be faked, so a real one is held for as long as the lock
+// is. LOCK_UN, and closing the stream, let it go.
+func (vm *VM) fileFlock(o *IOObj, op int) object.Value {
+	if o.closed {
+		raise("IOError", "closed stream")
+	}
+	if o.writable {
+		ioFlush(o)
+	}
+	if op&flockUN != 0 {
+		if o.hasLockFd {
+			if err := flockFn(o.lockFd, flockUN); err != nil {
+				raiseFlockErrno(err, o.path)
+			}
+			o.releaseLockFd()
+		}
+		return object.IntValue(0)
+	}
+	fd, err := o.lockDescriptor()
+	if err != nil {
+		raiseOpenErrno(err, o.path)
+	}
+	for {
+		err := flockFn(fd, op)
+		if err == nil {
+			return object.IntValue(0)
+		}
+		if !flockWouldBlock(err) {
+			raiseFlockErrno(err, o.path)
+		}
+		if op&flockNB != 0 {
+			return object.False
+		}
+		vm.threadWaitFor(100 * time.Millisecond)
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+	}
+}
+
+// lockDescriptor opens (once) the real descriptor this stream's flocks are taken
+// on, and hands it back on every later call so the lock is upgraded or downgraded
+// in place rather than taken twice.
+func (o *IOObj) lockDescriptor() (int, error) {
+	if o.hasLockFd {
+		return o.lockFd, nil
+	}
+	fd, err := lockFdFn(o.path)
+	if err != nil {
+		return 0, err
+	}
+	o.lockFd, o.hasLockFd = fd, true
+	return fd, nil
+}
+
+// releaseLockFd closes the descriptor lockDescriptor opened, which is itself what
+// drops any lock still held on it.
+func (o *IOObj) releaseLockFd() {
+	if !o.hasLockFd {
+		return
+	}
+	_ = closeFdFn(o.lockFd)
+	o.lockFd, o.hasLockFd = 0, false
+}
+
+// flockWouldBlock reports the "someone else holds it" errors rb_file_flock
+// retries on: EWOULDBLOCK/EAGAIN, and the EACCES some systems report instead.
+// The list itself is per platform (flockAgainErrs), because not every target
+// names all three — wasip1 has no EWOULDBLOCK at all.
+func flockWouldBlock(err error) bool {
+	for _, e := range flockAgainErrs {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
+}
+
+// raiseFlockErrno reports a flock failure the way rb_syserr_fail_path does, naming
+// the file. An unsupported platform reports ENOTSUP, which is what a system
+// without flock(2) gives.
+func raiseFlockErrno(err error, p string) {
+	switch {
+	case errors.Is(err, syscall.EBADF):
+		raise("Errno::EBADF", "Bad file descriptor @ rb_file_flock - %s", p)
+	case errors.Is(err, syscall.EINVAL):
+		raise("Errno::EINVAL", "Invalid argument @ rb_file_flock - %s", p)
+	}
+	raise("Errno::ENOTSUP", "Operation not supported @ rb_file_flock - %s", p)
 }
 
 // raiseOpenErrno turns a Go open/read failure into the Errno MRI's rb_sysopen
@@ -1245,6 +1383,7 @@ func defIOWrite(cls *RClass) {
 		o := self.(*IOObj)
 		ioFlush(o)
 		o.pipeEndClosed()
+		o.releaseLockFd() // close(2) drops any flock this stream still holds
 		o.closed = true
 		return object.NilV
 	})
@@ -1564,6 +1703,11 @@ func defStringIORead(cls *RClass) {
 	})
 	cls.define("truncate", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		o := self.(*IOObj)
+		// rb_io_truncate goes through GetOpenFile then rb_io_check_writable, in
+		// that order: a closed stream is "closed stream" whichever mode it had.
+		if o.closed && !ioIsStringIO(o) {
+			raise("IOError", "closed stream")
+		}
 		if o.wrClosed { // a read-only stream cannot be truncated
 			raise("IOError", "not opened for writing")
 		}
@@ -1577,6 +1721,14 @@ func defStringIORead(cls *RClass) {
 			o.buf = append(o.buf, make([]byte, n-len(o.buf))...)
 		}
 		o.syncStr()
+		// rb_io_truncate is ftruncate(2) on the descriptor: the file on disk is
+		// that size at once, not at the next flush, which is what File.size and a
+		// second stream opened on the same path see straight afterwards.
+		if o.path != "" && !ioIsStringIO(o) {
+			if err := os.Truncate(o.path, int64(n)); err != nil {
+				raiseOpenErrno(err, o.path)
+			}
+		}
 		return object.IntValue(0)
 	})
 	cls.define("read", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
