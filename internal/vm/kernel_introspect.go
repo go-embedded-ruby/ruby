@@ -16,7 +16,11 @@ import (
 // compatibility goal, a real version string so guards like
 // `if RUBY_VERSION >= "3.0"` pass.
 func (vm *VM) registerVersionConstants() {
-	const version = "3.4.1"
+	const (
+		version     = "3.4.1"
+		releaseDate = "2024-12-25"
+		revision    = "48d4efcb85000e1ebae42004e963b5d0cedddcf2"
+	)
 	vm.consts["RUBY_VERSION"] = object.NewString(version)
 	vm.consts["RUBY_ENGINE"] = object.NewString("ruby")
 	vm.consts["RUBY_ENGINE_VERSION"] = object.NewString(version)
@@ -24,6 +28,14 @@ func (vm *VM) registerVersionConstants() {
 	vm.consts["RUBY_PLATFORM"] = object.NewString(rubyPlatform())
 	vm.consts["RUBY_DESCRIPTION"] = object.NewString("ruby " + version + " [" + rubyPlatform() + "]")
 	vm.consts["RUBY_COPYRIGHT"] = object.NewString("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto")
+	// RUBY_RELEASE_DATE and RUBY_REVISION describe the MRI release this runtime
+	// targets, and both are frozen Strings (core/builtin_constants asserts the
+	// class and the frozen-ness of each). version.h at tag v3_4_1 builds
+	// RUBY_RELEASE_DATE out of RUBY_RELEASE_YEAR/MONTH/DAY and takes RUBY_REVISION
+	// from the generated revision.h, i.e. the tagged commit: ruby/ruby v3_4_1 is
+	// 48d4efcb85000e1ebae42004e963b5d0cedddcf2, committed 2024-12-25.
+	vm.consts["RUBY_RELEASE_DATE"] = object.NewFrozenStringView(releaseDate)
+	vm.consts["RUBY_REVISION"] = object.NewFrozenStringView(revision)
 	vm.registerRbConfig(version)
 }
 

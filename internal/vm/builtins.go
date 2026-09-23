@@ -903,10 +903,18 @@ func (vm *VM) bootstrap() {
 	})
 	// set_backtrace: replace the backtrace with a String, an Array of String, or
 	// nil (clearing it). Anything else is a TypeError, as MRI.
-	cException.define("set_backtrace", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	cException.define("set_backtrace", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		var v object.Value = object.NilV
 		if len(args) > 0 {
 			v = args[0]
+		}
+		// error.c v3_4_0 exc_set_backtrace tries rb_location_ary_to_backtrace
+		// FIRST: an Array of Thread::Backtrace::Location is taken as the frames it
+		// describes, and only a value that is not such an array goes through
+		// rb_check_backtrace's String-or-Array-of-String rules.
+		if bt := vm.locationArrayToBacktrace(v); bt != nil {
+			setIvar(self, backtraceIvar, bt)
+			return getIvar(self, backtraceIvar)
 		}
 		setIvar(self, backtraceIvar, normalizeBacktrace(v))
 		return getIvar(self, backtraceIvar)
@@ -10076,6 +10084,29 @@ func (vm *VM) captureBacktrace(exc object.Value) object.Value {
 // backtrace (an Array of String, or absent when never raised / explicitly
 // cleared). Its leading underscores keep it out of casual user introspection.
 const backtraceIvar = "@__backtrace__"
+
+// locationArrayToBacktrace mirrors vm_backtrace.c v3_4_0
+// rb_location_ary_to_backtrace: a non-empty Array whose every element is a
+// Thread::Backtrace::Location converts to the frame list those locations
+// describe, and anything else reports nil so the caller falls back to the
+// String rules of rb_check_backtrace. Each frame is the location's own rendered
+// line (its @__str), so backtrace_locations re-parses to the same path, label
+// and lineno the source location carried.
+func (vm *VM) locationArrayToBacktrace(v object.Value) object.Value {
+	a, ok := v.(*object.Array)
+	if !ok || len(a.Elems) == 0 {
+		return nil
+	}
+	out := make([]object.Value, len(a.Elems))
+	for i, e := range a.Elems {
+		o, isObj := e.(*RObject)
+		if !isObj || o.class != vm.backtraceLocationClass {
+			return nil
+		}
+		out[i] = object.NewString(getIvar(o, "@__str").ToS())
+	}
+	return object.NewArrayFromSlice(out)
+}
 
 // normalizeBacktrace coerces a #set_backtrace argument into the stored value:
 // nil clears it, a single String becomes a one-element Array, and an Array of
