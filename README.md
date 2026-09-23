@@ -5,7 +5,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
-[![Phase](https://img.shields.io/badge/phases-0--7%20done%20%C2%B7%208%20active-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
+[![Phase](https://img.shields.io/badge/phases-6%20%2B%208%20in%20progress-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
 
 **A pure-Go implementation of Ruby — one static binary, full dynamism, zero cgo.**
 
@@ -37,7 +37,9 @@ reusable, tested and 6-arch by any Go program — no interpreter required.
 
 The `go-ruby-*` family is a growing set of **standalone pure-Go modules — all
 CI-green, 100% coverage, 6-arch** — each its own org. The `go.mod` currently
-**binds 181 of them into rbgo** as native modules:
+**binds 178 such modules across 176 orgs** into rbgo as native modules (count:
+`grep -oE 'github\.com/go-ruby-[a-z0-9-]*/[a-z0-9-]*' go.mod | sort -u | wc -l`;
+`go-ruby-widgets` contributes three):
 
 | Library | Role | Org · landing |
 | --- | --- | --- |
@@ -73,11 +75,17 @@ The full bound family (alphabetical, all native modules in `go.mod`):
 `railties`, `rake`, `ransack`, `rdoc`, `redis`, `regexp`, `reline`, `resolv`,
 `resque`, `rexml`, `roda`, `rolify`, `rouge`, `rqrcode`, `rspec`, `rss`,
 `rubocop`, `rubygems`, `saml`, `sass`, `scanf`, `securerandom`,
-`semantic-puppet`, `sequel`, `set`, `shellwords`, `shrine`, `sidekiq`,
+`semantic-puppet`, `sequel`, `shellwords`, `shrine`, `sidekiq`,
 `simplecov`, `sinatra`, `slim`, `sodium`, `sqlite3`, `strscan`, `thor`,
 `timecop`, `toml`, `tsort`, `typhoeus`, `tzinfo`, `unicode-normalize`, `uri`,
-`vcr`, `warden`, `webauthn`, `webmock`, `webrick`, `widgets`, `xslt`, `yaml`,
-`zeitwerk`, `zlib` — each at `github.com/go-ruby-<name>/<name>`.
+`vcr`, `warden`, `webauthn`, `webmock`, `webrick`, `widgets`, `yaml`,
+`zeitwerk`, `zlib`, plus `activeldap`, `ldap` and `fast-gettext-locale` — each at
+`github.com/go-ruby-<name>/<name>`.
+
+Seven more are bound from **outside** the `go-ruby-*` naming convention, at
+`github.com/go-<name>/<name>`: `commonmark`, `kramdown`, `liquid`, `mustache`,
+`nokogiri`, `rouge` and `xslt`. (`set` is not bound at all — see *Set* under
+*Supported today*: it is implemented in-tree.)
 
 Beyond the `go-ruby-*` family, the scientific / container stack binds the
 pure-Go [go-ndarray](https://github.com/go-ndarray/ndarray),
@@ -99,13 +107,89 @@ GUI toolkit), `require "tui"` (terminal-cell toolkit) and `require "mvvm"`
 
 ## Status
 
-### Conformance & performance (campaign final, 2026-06-27)
+### Runtime conformance — ruby/spec (measured 2026-09-23)
+
+Since July the work has been **runtime** conformance: making the VM behave as
+Ruby does, measured against [ruby/spec](https://github.com/ruby/spec)'s
+`language/` and `core/` suites. Measured with
+`scripts/conformance/rubyspec/run.sh` on darwin/arm64 against the pinned corpus
+at `SPEC_SHA=87b1631992bd00cf0c4934474766d54dad088191`, on `d498ddc` — the tip
+of `main` at the time, including
+[#629](https://github.com/go-embedded-ruby/ruby/pull/629). `main` has since
+advanced to `2200e17`, whose only change is the `FLOOR` file
+([#638](https://github.com/go-embedded-ruby/ruby/pull/638)); the interpreter
+built from it is byte-identical, so these figures stand unchanged.
+
+| | |
+| --- | --- |
+| **passing examples** | **21,982** — four consecutive runs, all four identical |
+| fail / error | 1,321 / 740 |
+| skipped | 473 |
+| pass rate of examples that ran | **91.4 %** (21,983 of 24,044) |
+| spec files | 2,191 of 2,206 produce a result; 15 produce none |
+| **CI floor** (`FLOOR`) | **21,970** |
+
+(The ratchet reports 21,982; a separate sweep capturing `fail`/`error`/`skip` as
+well read 21,983. The one-example difference is the `#615` noise below.)
+
+**The floor is not the score, and the two are close on purpose.** `FLOOR` says
+*"no run may come in below this"* — a shrink-only ratchet, raised in its own PR
+after a wave lands. The measured total sits **above** it, but only just: 21,982
+against 21,970 is a margin of **12**. That is deliberate. The floor is set a
+handful of examples below the **lowest observed run** — enough to absorb the
+run-to-run jitter of [#615](https://github.com/go-embedded-ruby/ruby/issues/615),
+and no more, because a floor slack enough to hide the loss of a whole spec file
+would defeat the thing the ratchet exists to catch. So a small gap is the ratchet
+working; a large one would mean it had gone slack.
+
+They remain different claims. The floor is the **guarantee CI enforces**; the
+measured total is **what rbgo does** on a given run. Quoting the floor as the
+conformance figure understates rbgo by the margin; quoting the measured total as
+a guarantee overstates it by the same amount.
+
+**Run-to-run spread is possible and is a known bug, not noise in the method.**
+`core/module/autoload_spec.rb` crashes intermittently while popping a frame
+([#615](https://github.com/go-embedded-ruby/ruby/issues/615)), and the whole
+file's examples are lost when it does — an earlier set of four runs on `68cb53a`
+spread 21,845–21,903 for exactly that reason. The four runs above happened not to
+hit it; the issue is open, so run it more than once and take the *low* run as the
+guaranteed figure.
+
+> **Not every gain is VM conformance.** Two of the recent jumps came from fixing
+> the **measurement**, not the interpreter, and it is worth keeping them apart:
+>
+> - **The mspec shim** ([#624](https://github.com/go-embedded-ruby/ruby/pull/624),
+>   refs [#621](https://github.com/go-embedded-ruby/ruby/issues/621)) ran each
+>   example under `instance_eval`, so a helper defined in an outer `describe` was
+>   unreachable from a nested one. `core/string/valid_encoding/utf_8_spec.rb`
+>   scored **0 of 28 — and 0 of 28 under MRI 4.0.5 too**, through the same shim.
+>   Fixing the shim moved the corpus 20,905 → 20,936, of which **28 are
+>   attributable**.
+> - **The parser upgrade to v0.2.0**
+>   ([#625](https://github.com/go-embedded-ruby/ruby/pull/625)) made **13
+>   `language/*_spec.rb` files parseable that had never parsed at all**. They had
+>   been contributing zero to *both* columns — not failing, invisible. `language/`
+>   went 1,443 → 1,776 passing (+333), while `fail+error` rose 283 → 436, because
+>   those files brought their own failures with them.
+>
+> Both are gains in what the measurement can **see**, not in what the VM can
+> **do**. The rest of the climb — the floor went from **6,000** when the ratchet
+> landed on 2026-08-03 ([#263](https://github.com/go-embedded-ruby/ruby/pull/263))
+> to **21,970** today, across 27 conformance waves — is the VM.
+
+There is no honest denominator for "percent of Ruby". 91.1 % is the share of the
+examples *this shim actually ran*; the shim is not mspec, it stubs some matchers
+(so their examples are **skipped**, not passed), and 473 skips and 15 unreadable
+files sit outside the ratio entirely.
+
+### Front-end conformance & performance (campaign final, 2026-06-27)
 
 A major conformance + performance campaign measured rbgo's pure-Go **front-end
 (parse + compile)** against the MRI 4.0.5 oracle on the two largest real-world
 Ruby codebases and a suite of popular libraries. All figures are
 **front-end acceptance**, not whole-application execution (see the honesty note
-below).
+below). **These figures date from 2026-06-27 and have not been re-measured
+since**; reproduce them with `scripts/conformance/heavyweight/sweep.sh`.
 
 - **Parse: 99.96 % of Rails + Puppet** (5577 / 5579 `.rb` files). The only 2
   misses are intentional syntax-error fixtures **MRI itself rejects** — i.e.
@@ -238,13 +322,25 @@ JRuby**):
   `case`/`when`, statement modifiers (incl. modifier `rescue`,
   `expr rescue fallback`), `begin`/`rescue`/`else`/`ensure`/`retry`,
   `break`/`next`, `Kernel#loop`, and **`Fiber`** (cooperative coroutines —
-  `Fiber.new`/`resume`/`Fiber.yield`/`alive?`).
+  `Fiber.new`/`resume`/`Fiber.yield`/`alive?`/`transfer`, plus **`Fiber#raise`**
+  (raising into a suspended fiber), **`Fiber#kill`**, **fiber storage**
+  (`Fiber[]`/`Fiber[]=`) and `Fiber#blocking?`).
 - **Concurrency:** **`Thread`** (`new`/`start`/`join`/`value`/`status`/`current`/
   `main`/`list`/`pass`, thread-locals via `[]`/`[]=`, exception propagation on
   join), **`Mutex`** (`lock`/`unlock`/`try_lock`/`synchronize`/`owned?`) and
   **`Queue`** (blocking `push`/`pop`, `close`), on an **emulated GVL** — one Ruby
   thread runs at a time, matching MRI's memory model (race-free under the Go
-  race detector).
+  race detector). `Thread#backtrace` answers for the **current** thread;
+  asking another thread for its backtrace raises `NotImplementedError`, because
+  rbgo keeps one frame stack per VM rather than one per thread.
+- **Processes:** **`Process`** — `spawn`/`exec` (argv and shell forms),
+  the wait family (`wait`/`wait2`/`waitpid`/`waitpid2`, `Process::Status` through
+  `$?`), `kill`, process groups (`getpgid`/`setpgid`/`getpgrp`), scheduling
+  priorities (`getpriority`/`setpriority`) and resource limits
+  (`getrlimit`/`setrlimit` with the `RLIMIT_*` constants), plus
+  `pid`/`ppid`/`uid`/`gid`/`euid`/`egid`. There is **no `Process.fork`**
+  (`Process.respond_to?(:fork)` is `false`) — Go's runtime cannot be forked
+  safely; `spawn` is the supported way to start a child.
 - **Pattern matching (`case`/`in`):** value, variable-binding, class/constant,
   array (incl. splat and nested), hash (`deconstruct_keys`, `**rest`/`**nil`),
   find (`[*pre, x, *post]`), pin (`^x`) and alternative (`a | b`) patterns;
@@ -272,7 +368,10 @@ JRuby**):
 - **Metaprogramming:** dynamic dispatch via mutable method tables,
   `method_missing`, `send`/`public_send`, `respond_to?`, **`define_method`**,
   **`instance_eval`/`instance_exec`**, **`class_eval`/`module_eval`/`class_exec`**,
-  `instance_variable_get`/`set`/`defined?`, **string `eval`** (the embedded
+  `instance_variable_get`/`set`/`defined?`, **`defined?`** over every form it
+  takes — including **`defined?(super)`**, which answers `"super"` only when an
+  ancestor actually defines the method — **`module_function`**, **string `eval`**
+  (the embedded
   front-end compiling Ruby at runtime), **`Binding`** (`binding`,
   `Binding#eval`, `eval(str, binding)`, `local_variable_get`/`set`/`defined?`,
   `local_variables`, `receiver` — capturing a frame's locals so eval'd code
@@ -280,7 +379,19 @@ JRuby**):
   `inherited`/`included`/`prepended`/`method_added`/`extended`.
 - **Runtime loading:** **`require`/`require_relative`** load, compile and run a
   `.rb` file once (relative + search-path resolution, `LoadError` on miss,
-  `true`/`false` return) — the embedded front-end loading code at runtime.
+  `true`/`false` return) — the embedded front-end loading code at runtime — and
+  **`autoload`**/`autoload?` on both `Object` and any `Module`, registering a
+  constant that loads its file on first reference.
+- **Predefined globals**, each with the setter MRI's variable table gives it
+  rather than one untyped slot: the separators `$;` (`$-F`), `$,` and `$/`
+  (`$-0`); `$0`/`$PROGRAM_NAME`; the match globals `$~`, `` $` ``, `$'`, `$&`,
+  `$+` and `$1`–`$9`; `$!` and `$@`; `$stdout`/`$stderr`/`$stdin` and `$>`;
+  `$:`/`$LOAD_PATH`/`$-I` and `$"`/`$LOADED_FEATURES`; `$?`; `$.` and `$_`;
+  `$VERBOSE` (`$-v`/`$-w`) and `$DEBUG` (`$-d`) — both reading `false`, not
+  `nil`, as MRI does. The read-only ones raise on assignment
+  (`$LOAD_PATH = []` → `NameError`), the checked ones enforce their type
+  (`$stdout = nil` → `TypeError: $stdout must have write method, NilClass
+  given`), and **`trace_var`**/`untrace_var` hook assignment to a global.
 - **Strings:** mutable (reference semantics) with `<<`/concat/replace/prepend/
   insert/`[]=`/slice!/the bang methods and `freeze`/`FrozenError`;
   interpolation, heredocs (`<<`/`<<-`/`<<~`), `%w`/`%i` and `%q`/`%Q`/`%W`/`%I`
@@ -321,6 +432,23 @@ JRuby**):
 - **`Dir`:** `entries`/`children`/`glob`/`[]`, `exist?`/`empty?`, `pwd`/`home`,
   `mkdir`/`rmdir`/`chdir` (block-scoped), `each_child`/`foreach`, raising
   `Errno::ENOENT`/`Errno::EEXIST` as MRI does.
+- **Process-facing IO:** **`IO.popen`** (running a child and reading/writing its
+  pipe, block form included), **`IO#fcntl`**, **`IO.select`**,
+  **`IO#read_nonblock`**/`write_nonblock`, `IO#reopen` and
+  `set_encoding`/`external_encoding`.
+- **Filesystem predicates and canonical paths:** **`File.realpath`** and
+  **`File.realdirpath`** (symlink and `..` resolution), and **`FileTest`** —
+  **all 26** of MRI's predicates, name for name: `exist?`, `file?`,
+  `directory?`, `empty?`, `zero?`, `size`, `size?`, `symlink?`, `blockdev?`,
+  `chardev?`, `pipe?`, `socket?`, `identical?`, `owned?`, `grpowned?`,
+  `setuid?`, `setgid?`, `sticky?`, `readable?`, `writable?`, `executable?`,
+  the `*_real?` family and `world_readable?`/`world_writable?`. Differentially
+  tested against MRI 4.0.5 over a temp tree of regular files, an empty file, a
+  directory, a symlink, an executable, a FIFO, a missing path, `/dev/null` and
+  `/dev/disk0`: **252 assertions, 0 disagreements**.
+- **`Errno`:** MRI's **full 158-constant table**, with the same class-per-number
+  identity — `Errno.constants.size` is 158 under both rbgo and MRI 4.0.5. See
+  the limitations below for the 32 constants whose *numbers* differ on darwin.
 - **Collections:** Array / Hash / Range with `Enumerable` (map/select/reduce/
   `minmax`/…) and `Comparable`, both written once in embedded Ruby; Array **bang
   methods** (`map!`/`sort!`/`select!`/`reject!`/`compact!`/`uniq!`/`reverse!`),
@@ -368,9 +496,10 @@ JRuby**):
   with **no cgo / no FFTW**, returning `Complex` spectra.
 - **Set:** Ruby's `Set` — `new`/`[]`, `add`(`<<`)/`add?`/`delete`/`merge`/`clear`,
   `include?`/`member?`/`size`/`length`/`count`/`empty?`, `subset?`/`superset?`,
-  `union`(`|`)/`intersection`(`&`)/`difference`(`-`), `each`/`to_a`/`to_set` —
-  binding the pure-Go
-  [go-composites/set](https://github.com/go-composites/set) library.
+  `union`(`|`)/`intersection`(`&`)/`difference`(`-`), `each`/`to_a`/`to_set`.
+  Implemented **in-tree** (`internal/vm/set.go` + the prelude) as a shell over
+  rbgo's own `object.Hash`, exactly as MRI's `set.rb` is Hash-backed, so members
+  key by the same `#hash`/`#eql?` semantics Hash keys use.
 - **Time:** Ruby's `Time` — `now`/`at`/`parse`, arithmetic (`+`/`-`/`<=>`),
   `strftime`/`strptime`, `year`/`month`/`mday`/`hour`/`min`/`sec`/`wday`, weekday
   predicates (`monday?`…`sunday?`), `utc`/`getutc`/`zone`, `to_i`/`to_f` —
@@ -378,10 +507,11 @@ JRuby**):
 - **Date:** Ruby's `Date` — `new`/`parse`, `+`/`-`/`<<`/`>>` and
   `next_day`/`prev_day`/`next_month`/`prev_month`,
   `year`/`month`/`mday`/`wday`/`yday`/`cwday`, `leap?`, comparisons — binding
-  [go-composites/date](https://github.com/go-composites/date).
+  [go-ruby-date](https://github.com/go-ruby-date/date).
 - **BigDecimal:** arbitrary-precision decimal — `+ - * / **`,
   `sqrt`/`abs`/`ceil`/`floor`/`round`/`pow`, `to_f`/`to_i`, `zero?`, comparisons
-  — binding [go-composites/bigfloat](https://github.com/go-composites/bigfloat).
+  — binding
+  [go-ruby-bigdecimal](https://github.com/go-ruby-bigdecimal/bigdecimal).
 - **Bag:** a multiset / counter (element → multiplicity) — `add`(`<<`)/`delete`,
   `count`/`size`/`distinct`/`most_common`, `union`/`difference`/`intersection`,
   `include?`/`each`/`to_a` — binding
@@ -472,11 +602,68 @@ throughput tracks the underlying driver rather than the interpreter:
   the page's DOM/Canvas through the built-in `JS` module
   (`JS.document`/`JS.log`/`JS::Ref#call`/`JS.raf`).
 
-**100% coverage** is enforced in CI across all six 64-bit targets (amd64, arm64,
-riscv64, loong64, ppc64le, s390x) and three OSes. Phase 8 (conformance and
-representation/perf tuning) is well advanced: the conformance campaign above
-brought the front-end to ~100 % parse / 99.82 % parse+compile on real-world Ruby,
-and on the performance side small-integer interning and capture-tracked
+### Not implemented — the limitations worth naming
+
+Measured on `main` (`d498ddc`), darwin/arm64, against MRI 4.0.5 on the same host.
+
+**rbgo carries no line map, so `__LINE__` is always `0`.** This is the single
+widest gap, because three separate features are built on source positions and all
+three are lost:
+
+```ruby
+# probe.rb, line 1 is the puts
+puts __LINE__                      # rbgo: 0            MRI: 1
+def f; warn "msg", uplevel: 0; end
+f                                  # rbgo: "warning: msg"
+                                   # MRI:  "probe.rb:2: warning: msg"
+begin; raise "boom"; rescue => e; puts e.backtrace.first; end
+                                   # rbgo: "probe.rb:0:in '<main>'"
+                                   # MRI:  "probe.rb:4:in '<main>'"
+p Object.const_source_location(:Comparable)   # rbgo: nil   MRI: []
+```
+
+Every backtrace frame reports line `0`; `warn(uplevel:)` emits the message with
+no `file:line:` prefix; `const_source_location` answers `nil`. Nothing here is a
+partial implementation to be tuned — the information is not recorded.
+
+Otherwise, and each with an open issue that states it precisely:
+
+| | |
+| --- | --- |
+| `Errno` carries all **158** of MRI's constants, but **32** of them report errno `0` on darwin where MRI has a real number (`EAUTH` 0 vs 80, `EBADRPC` 0 vs 72, `EDEVERR` 0 vs 83, …). Go's portable `syscall` package does not expose the platform-only names. Nothing else about the table disagrees: all 158 names are present under both, and the other 126 numbers match exactly | [#633](https://github.com/go-embedded-ruby/ruby/issues/633) |
+| `Numeric#to_int` is **not defined**, so `Complex(2.9, 0).to_int` raises `NoMethodError` where MRI returns `2` | [#631](https://github.com/go-embedded-ruby/ruby/issues/631) |
+| `File::Stat#==` answers identity: `a.==(b)` is `true` (Comparable) while `a == b` is `false` | [#632](https://github.com/go-embedded-ruby/ruby/issues/632) |
+| `File#stat` cannot answer for a file unlinked while open — rbgo's streams are buffered by path and hold no descriptor | [#635](https://github.com/go-embedded-ruby/ruby/issues/635) |
+| **Windows:** no text-mode newline translation — CRLF reaches the reader as written | [#610](https://github.com/go-embedded-ruby/ruby/issues/610) |
+| **Windows:** `File::Stat#atime`/`#ctime` fall back to mtime; `#birthtime` raises | [#635](https://github.com/go-embedded-ruby/ruby/issues/635) |
+| **Windows:** `File.realpath` does not expand 8.3 short names (`RUNNER~1`) | [#636](https://github.com/go-embedded-ruby/ruby/issues/636) |
+| `core/module/autoload_spec.rb` crashes intermittently popping a frame, costing its whole file from the measurement | [#615](https://github.com/go-embedded-ruby/ruby/issues/615) |
+| **`Process.fork` does not exist** — Go's runtime cannot be forked safely | — |
+| `BEGIN { }` / `END { }` blocks do not parse (the one construct of 41 probed where MRI accepts and the front-end refuses) | front-end |
+
+Two further entries are **harness**, not interpreter, and are listed here only so
+that nobody reads them as VM gaps: the conformance shim's `SPEC_TMP_BASE` is
+`/tmp`, a symlink on darwin, which fails 11 `realpath`/`realdirpath` examples on a
+path that is correct ([#630](https://github.com/go-embedded-ruby/ruby/issues/630));
+**MRI 4.0.5 fails them the same way through the same shim**. And the shim's
+`instance_eval` rebinding ([#621](https://github.com/go-embedded-ruby/ruby/issues/621))
+is largely fixed but not closed.
+
+**100% coverage** is enforced in CI on the two **POSIX** lanes — ubuntu and
+macOS. The full `-race` suite also runs on **windows**, but the coverage gate is
+not applied there: a few POSIX-only paths (opening `/dev/null` as a character
+device) are unreachable, so its measured coverage is structurally below 100 %.
+Per-PR architecture cover is the two **native** lanes, `amd64` and `arm64`, which
+run `go test ./...` (not the coverage gate); the four exotic 64-bit targets
+(`riscv64`/`loong64`/`ppc64le`/`s390x`) are validated **off** the per-PR path —
+nightly under QEMU and on scheduled real hardware. A `wasip1/wasm` lane builds and
+runs the interpreter under wazero. `.github/workflows/ci.yml` is the authority.
+Phase 8 (conformance and
+representation/perf tuning) is well advanced. The 2026-06 campaign brought the
+**front-end** to ~100 % parse / 99.82 % parse+compile on real-world Ruby; since
+July the work has been **runtime** conformance, and the ruby/spec ratchet has
+gone from a floor of 6,000 to 21,970 across 27 waves, measuring **21,982**
+passing examples today. On the performance side small-integer interning and capture-tracked
 frame-environment recycling have cut call-path allocations (a small-int loop from
 ~245k allocations to 1; recursion's call allocations halved, ~14% faster), with
 the 6-runtime benchmark suite ([BENCHMARKS.md](BENCHMARKS.md)) tracking rbgo vs
@@ -613,13 +800,24 @@ runs the ruby/spec **language + core** suites through rbgo under a minimal
 MSpec-compatible shim and sums the passing examples; a per-PR CI lane fails if
 that total drops below the frozen floor in
 [`FLOOR`](scripts/conformance/rubyspec/FLOOR), so language + core conformance is
-measured on every change and can only go up (**15,400+** passing examples and
-climbing). It complements the differential oracle below: the ratchet is the
-absolute floor, the oracle catches divergences the specs don't cover.
+measured on every change and can only go up. It complements the differential
+oracle below: the ratchet is the absolute floor, the oracle catches divergences
+the specs don't cover.
+
+**The floor and the measurement are two different numbers.** `FLOOR` is
+**21,970** — the level CI refuses to fall below, raised there in
+[#638](https://github.com/go-embedded-ruby/ruby/pull/638) after wave 27. A run
+measures **21,982** passing, four consecutive runs all identical: a margin of 12,
+which is the size it is meant to be (see *Runtime conformance* for why). See
+*Runtime conformance* above for the full breakdown, the run-to-run spread
+([#615](https://github.com/go-embedded-ruby/ruby/issues/615)) and what the ratio
+does and does not mean.
 
 ```bash
 scripts/conformance/rubyspec/run.sh          # measure vs the floor
 UPDATE_FLOOR=1 scripts/conformance/rubyspec/run.sh   # print the new floor after a win
+# point it at an existing corpus instead of cloning:
+SPECDIR=/path/to/ruby-spec CACHE=/path/to/ruby-spec scripts/conformance/rubyspec/run.sh
 ```
 
 ### CI layering
@@ -660,8 +858,11 @@ On top of the front-end sweeps, a **ruby/spec ratchet** runs the `language/` and
 specification of the language — through `rbgo` under a minimal MSpec-compatible
 shim, and gates CI on a **shrink-only floor** of passing examples
 ([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), floor in
-`FLOOR`). The floor can only be raised, so measured language conformance moves in
-one direction. Run it with `scripts/conformance/rubyspec/run.sh`.
+`FLOOR`, currently **21,970**). The floor can only be raised, so measured
+language conformance moves in one direction — but the floor is a *gate*, not the
+result: the measured total is **21,982**. Run it with
+`scripts/conformance/rubyspec/run.sh`, and see *Runtime conformance* under
+*Status* for the full breakdown.
 
 ## Design & roadmap
 
