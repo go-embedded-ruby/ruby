@@ -491,3 +491,138 @@ func (vm *VM) runAtExitOne(blk *Proc) {
 	}()
 	vm.callBlock(blk, nil)
 }
+
+// gvarTraceIvar names the Kernel-module ivar holding the Kernel#trace_var hook
+// table (a Hash of Symbol global name -> Array of commands, most recent first).
+// Parking it on the module rather than in a VM field keeps the cost at zero for
+// the overwhelming majority of programs: the ivar is created by the first
+// trace_var call and never exists otherwise.
+const gvarTraceIvar = "@__gvar_traces"
+
+// gvarTraces returns the trace table, creating it when create is set. A read
+// with no table yet reports nil, which is the fast path every ordinary global
+// assignment takes.
+func (vm *VM) gvarTraces(create bool) *object.Hash {
+	if h, ok := vm.cKernel.ivars[gvarTraceIvar].(*object.Hash); ok {
+		return h
+	}
+	if !create {
+		return nil
+	}
+	h := object.NewHash()
+	if vm.cKernel.ivars == nil {
+		vm.cKernel.ivars = map[string]object.Value{}
+	}
+	vm.cKernel.ivars[gvarTraceIvar] = h
+	return h
+}
+
+// fireGvarTraces runs the hooks registered for name, most recently added first,
+// passing the newly assigned value. variable.c v3_4_0 rb_gvar_set_entry runs the
+// trace list AFTER the variable's setter has stored the value, and trace_ev
+// walks entry->var->trace from the head — which rb_f_trace_var pushes onto — so
+// the last hook registered is the first to run. A command that is not callable
+// is a String of Ruby source, which rb_trace_eval hands to rb_eval_cmd_kw.
+func (vm *VM) fireGvarTraces(name string, v object.Value) {
+	h := vm.gvarTraces(false)
+	if h == nil {
+		return
+	}
+	cmds, ok := h.Get(object.Symbol(name))
+	if !ok {
+		return
+	}
+	arr, ok := cmds.(*object.Array)
+	if !ok {
+		return
+	}
+	for _, cmd := range append([]object.Value(nil), arr.Elems...) {
+		if s, isStr := cmd.(*object.String); isStr {
+			vm.send(vm.main, "eval", []object.Value{s}, nil)
+			continue
+		}
+		vm.send(cmd, "call", []object.Value{v}, nil)
+	}
+}
+
+// registerGvarTracing installs Kernel#trace_var and Kernel#untrace_var, the
+// hooks that fire when a global is assigned. Reference: ruby/ruby v3_4_0
+// variable.c rb_f_trace_var / rb_f_untrace_var / rb_gvar_set_entry.
+func (vm *VM) registerGvarTracing() {
+	// trace_var(name, cmd = nil, &block): register cmd (or the block) to run on
+	// every assignment to the named global, and return nil. rb_f_trace_var takes
+	// the block through rb_block_proc() when no command is given, so a call with
+	// neither raises ArgumentError "tried to create Proc object without a block";
+	// an explicit nil command means untrace_var instead. The name is not
+	// validated (MRI runs it through rb_to_id, which accepts any symbol/string).
+	vm.cObject.define("trace_var", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
+		name := nameArg(args[0])
+		var cmd object.Value = object.NilV
+		if len(args) == 2 {
+			cmd = args[1]
+		}
+		if object.IsNil(cmd) {
+			if blk == nil {
+				if len(args) == 2 {
+					// An explicit nil command: rb_f_trace_var delegates to
+					// rb_f_untrace_var with the same arguments.
+					return vm.send(vm.main, "untrace_var", args[:1], nil)
+				}
+				raise("ArgumentError", "tried to create Proc object without a block")
+			}
+			cmd = blk
+		}
+		h := vm.gvarTraces(true)
+		key := object.Symbol(name)
+		var elems []object.Value
+		if prev, ok := h.Get(key); ok {
+			if a, isArr := prev.(*object.Array); isArr {
+				elems = a.Elems
+			}
+		}
+		h.Set(key, object.NewArrayFromSlice(append([]object.Value{cmd}, elems...)))
+		return object.NilV
+	})
+
+	// untrace_var(name, cmd = nil): remove the hooks registered for the global and
+	// return them as an Array — all of them, or just the one equal to cmd. A name
+	// that is neither traced nor a defined global is a NameError, as
+	// rb_f_untrace_var's rb_find_global_entry failure is. Removing a command that
+	// was never registered returns nil.
+	vm.cObject.define("untrace_var", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 1 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
+		}
+		name := nameArg(args[0])
+		key := object.Symbol(name)
+		h := vm.gvarTraces(false)
+		var elems []object.Value
+		if h != nil {
+			if prev, ok := h.Get(key); ok {
+				if a, isArr := prev.(*object.Array); isArr {
+					elems = a.Elems
+				}
+			}
+		}
+		if elems == nil {
+			if _, defined := vm.globals[canonicalGvar(name)]; !defined {
+				vm.raiseNameError("undefined global variable "+name, name)
+			}
+			return object.NilV
+		}
+		if len(args) == 2 && !object.IsNil(args[1]) {
+			for i, cmd := range elems {
+				if cmd == args[1] {
+					h.Set(key, object.NewArrayFromSlice(append(append([]object.Value(nil), elems[:i]...), elems[i+1:]...)))
+					return object.NewArray(cmd)
+				}
+			}
+			return object.NilV
+		}
+		h.Delete(key)
+		return object.NewArrayFromSlice(append([]object.Value(nil), elems...))
+	})
+}

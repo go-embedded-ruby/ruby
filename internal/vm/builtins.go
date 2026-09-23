@@ -103,6 +103,7 @@ func (vm *VM) bootstrap() {
 	vm.registerProcMethods()
 	vm.registerModuleReflect()
 	vm.registerVersionConstants()
+	vm.registerGvarTracing()
 	vm.registerKernelIntrospection()
 	vm.registerEncoding()
 	vm.registerStringEncoding()
@@ -6373,7 +6374,8 @@ func (vm *VM) registerKernelModuleFunctions() {
 		"load", "loop", "open", "p", "print", "printf", "proc", "putc", "puts",
 		"raise", "rand", "readline", "readlines", "require", "require_relative",
 		"select", "sleep", "spawn", "sprintf",
-		"srand", "syscall", "system", "test", "throw", "trap", "warn",
+		"srand", "syscall", "system", "test", "throw", "trace_var", "trap",
+		"untrace_var", "warn",
 	}
 	// Two names that share ONE underlying Object record (a genuine built-in alias
 	// such as format/sprintf) must keep sharing after the mirror, or their mirrored

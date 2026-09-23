@@ -197,6 +197,16 @@ func (vm *VM) warnDeprecatedGvar(msg string) {
 // writes through to the rescued exception's backtrace. Anything else is a plain
 // slot, stored under its canonical name so the aliased spellings agree.
 func (vm *VM) setGVar(name string, v object.Value) {
+	vm.storeGVar(name, v)
+	// variable.c v3_4_0 rb_gvar_set_entry runs the entry's trace list after its
+	// setter, so a hook sees the value the setter accepted and never runs at all
+	// when the setter raised.
+	vm.fireGvarTraces(name, v)
+}
+
+// storeGVar is setGVar without the Kernel#trace_var hooks: the checks and the
+// store itself.
+func (vm *VM) storeGVar(name string, v object.Value) {
 	if target, ok := englishAlias[name]; ok {
 		name = target
 	}
