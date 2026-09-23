@@ -5,10 +5,12 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// definedTag returns the canonical (frozen) String for a `defined?` tag. The
-// String is freshly built each call to match MRI, which returns a new String
-// object from defined?; callers never mutate it.
-func definedTag(tag string) object.Value { return object.NewString(tag) }
+// definedTag returns the canonical String for a `defined?` tag, through the one
+// constructor the compiler half uses too (bytecode.DefinedTag). It is FROZEN:
+// MRI builds every defined? answer with rb_iseq_defined_string, which returns
+// rb_fstring_cstr(...) (iseq.c v3_4_0:3692), and language/defined_spec.rb
+// asserts `.frozen?` on the tags it names.
+func definedTag(tag string) object.Value { return bytecode.DefinedTag(tag) }
 
 // hasScopedConst reports whether cls or its ancestors define name — the
 // non-raising form of scopedConst (used by defined?(A::B)). A pending autoload on

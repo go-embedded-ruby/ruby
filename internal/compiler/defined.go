@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
-	"github.com/go-embedded-ruby/ruby/internal/object"
 	"github.com/go-ruby-parser/parser/ast"
 )
 
@@ -17,15 +16,36 @@ func (c *Compiler) compileDefined(operand ast.Node) {
 	c.declareDefinedLocals(operand)
 	switch v := operand.(type) {
 	case *ast.NilLit:
-		c.pushDefinedTag("nil")
+		c.pushDefinedTag(bytecode.DefinedNil)
 	case *ast.BoolLit:
 		if v.Value {
-			c.pushDefinedTag("true")
+			c.pushDefinedTag(bytecode.DefinedTrue)
 		} else {
-			c.pushDefinedTag("false")
+			c.pushDefinedTag(bytecode.DefinedFalse)
 		}
 	case *ast.SelfLit:
-		c.pushDefinedTag("self")
+		c.pushDefinedTag(bytecode.DefinedSelf)
+	case *ast.Super:
+		// NODE_SUPER and NODE_ZSUPER are both DEFINED_ZSUPER (compile.c
+		// v3_4_0:6139-6143): a `putnil` then `defined ZSUPER`, which means the
+		// super ARGUMENTS are never evaluated — only the existence of the method
+		// `super` would reach is tested. The VM half answers it (vm_defined's
+		// DEFINED_ZSUPER, vm_insnhelper.c v3_4_0:5505-5518).
+		b.emit(bytecode.OpDefinedSuper, 0, 0)
+	case *ast.ArrayLit:
+		c.compileDefinedElements(v.Elems)
+	case *ast.HashLit:
+		// NODE_HASH walks its nd_head, a flat LIST of key, value, key, value…
+		// (compile.c v3_4_0:5975-5993), so keys are probed like values.
+		pairs := make([]ast.Node, 0, len(v.Keys)+len(v.Values))
+		for i, k := range v.Keys {
+			pairs = append(pairs, k, v.Values[i])
+		}
+		c.compileDefinedElements(pairs)
+	case *ast.SplatArg:
+		// NODE_SPLAT probes the splatted expression, then reports "expression"
+		// (compile.c v3_4_0:6011-6019).
+		c.compileDefinedElements([]ast.Node{v.Value})
 	case *ast.Yield:
 		b.emit(bytecode.OpDefinedYield, 0, 0)
 	case *ast.IvarRef:
@@ -38,12 +58,12 @@ func (c *Compiler) compileDefined(operand ast.Node) {
 		b.emit(bytecode.OpDefinedConst, b.addName(v.Name), 0)
 	case *ast.VarRef:
 		// The parser already classified this as a known local read.
-		c.pushDefinedTag("local-variable")
+		c.pushDefinedTag(bytecode.DefinedLvar)
 	case *ast.ScopedConst:
 		c.compileDefinedScopedConst(v)
 	case *ast.Assign, *ast.OpAssign, *ast.MultiAssign, *ast.ConstAssign,
 		*ast.ScopedConstAssign, *ast.IvarAssign, *ast.CVarAssign, *ast.GVarAssign:
-		c.pushDefinedTag("assignment")
+		c.pushDefinedTag(bytecode.DefinedAsgn)
 	case *ast.Call:
 		// A compound assignment to an attribute or an index (`a.b += 1`,
 		// `a[:b] ||= 1`) reaches the compiler as the parser's textual desugaring
@@ -57,11 +77,11 @@ func (c *Compiler) compileDefined(operand ast.Node) {
 		// the two apart; see opassign.go for why identity is the test.
 		if isSetterCall(v) {
 			if _, _, ok := indexOpAssign(v); ok {
-				c.pushDefinedTag("assignment")
+				c.pushDefinedTag(bytecode.DefinedAsgn)
 				return
 			}
 			if _, ok := attrOpAssign(v); ok {
-				c.pushDefinedTag("assignment")
+				c.pushDefinedTag(bytecode.DefinedAsgn)
 				return
 			}
 		}
@@ -73,10 +93,54 @@ func (c *Compiler) compileDefined(operand ast.Node) {
 		// all of them "method" once the operand is defined.
 		c.compileDefinedReceiverMethod(v.Operand, unaryMethodName(v.Op))
 	default:
-		// Literals (numbers, strings, arrays, ranges, regexps, hashes, …) and any
-		// other expression are "expression".
-		c.pushDefinedTag("expression")
+		// Literals (numbers, strings, ranges, regexps, …) and any other expression
+		// are "expression" — compile.c's `default:` arm (v3_4_0:6003-6008).
+		c.pushDefinedTag(bytecode.DefinedExprTag)
 	}
+}
+
+// isSourceKeyword reports whether name is one of the three source-position
+// pseudo-variables the parser hands over as a bare call. They are keywords in
+// MRI's grammar (parse.y v3_4_0: `keyword__FILE__`, `keyword__LINE__`,
+// `keyword__ENCODING__` in `var_ref`), never method calls, so defined? must not
+// probe self for a method of that name.
+func isSourceKeyword(name string) bool {
+	switch name {
+	case "__FILE__", "__LINE__", "__ENCODING__":
+		return true
+	}
+	return false
+}
+
+// compileDefinedElements lowers the container forms — an array literal, a hash
+// literal, a splat — whose answer is "expression" but only once EVERY part is
+// itself defined. MRI probes each element with defined_expr0 and branches to the
+// whole expression's nil label on the first undefined one (compile.c
+// v3_4_0:5975-6019); `defined?([NonExistentConstant, Array])` is nil, not
+// "expression". An empty container has nothing to probe and is plain
+// "expression" (NODE_ZLIST).
+//
+// Each probe is a full defined? of the element, so nothing is evaluated for its
+// value and a raising sub-expression is already guarded by the element's own
+// lowering.
+func (c *Compiler) compileDefinedElements(elems []ast.Node) {
+	if len(elems) == 0 {
+		c.pushDefinedTag(bytecode.DefinedExprTag)
+		return
+	}
+	b := c.cur()
+	undef := make([]int, 0, len(elems))
+	for _, e := range elems {
+		c.compileDefined(e)
+		undef = append(undef, b.emit(bytecode.OpBranchNil, 0, 0))
+	}
+	c.pushDefinedTag(bytecode.DefinedExprTag)
+	done := b.emit(bytecode.OpJump, 0, 0)
+	for _, at := range undef {
+		b.patch(at, b.here())
+	}
+	b.emit(bytecode.OpPushNil, 0, 0)
+	b.patch(done, b.here())
 }
 
 // unaryMethodName maps a unary operator to the method name MRI checks for. Only
@@ -88,10 +152,14 @@ func unaryMethodName(op string) string {
 	return op
 }
 
-// pushDefinedTag pushes a constant tag String.
+// pushDefinedTag pushes a constant tag String. The tag comes from
+// bytecode.DefinedTag, the one constructor the VM half uses too, so it is
+// FROZEN: MRI answers defined? with rb_iseq_defined_string, an fstring
+// (iseq.c v3_4_0:3692), and language/defined_spec.rb asserts `.frozen?` on
+// every tag it names.
 func (c *Compiler) pushDefinedTag(tag string) {
 	b := c.cur()
-	b.emit(bytecode.OpPushConst, b.addConst(object.NewString(tag)), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(bytecode.DefinedTag(tag)), 0)
 }
 
 // compileDefinedScopedConst handles `defined?(A::B)` and `defined?(::B)`.
@@ -117,7 +185,15 @@ func (c *Compiler) compileDefinedCall(v *ast.Call) {
 	b := c.cur()
 	if v.Recv == nil && v.Block == nil && len(v.Args) == 0 {
 		if _, _, ok := b.resolve(v.Name); ok {
-			c.pushDefinedTag("local-variable")
+			c.pushDefinedTag(bytecode.DefinedLvar)
+			return
+		}
+		// __FILE__, __LINE__ and __ENCODING__ are keywords, not methods: the
+		// parser hands them over as bare calls, but MRI parses them to
+		// NODE_FILE / NODE_LINE / NODE_ENCODING, which are listed with the
+		// literals that fall through to DEFINED_EXPR (compile.c v3_4_0:5996-6008).
+		if isSourceKeyword(v.Name) {
+			c.pushDefinedTag(bytecode.DefinedExprTag)
 			return
 		}
 	}
@@ -135,10 +211,10 @@ func (c *Compiler) compileDefinedBinary(v *ast.BinaryExpr) {
 		// (prism_compile.c v3_4_0:4059 and 4063; compile.c's NODE_OP_CDECL at
 		// v3_4_0:6162 says the same) — and ruby/spec pins it.
 		if constOrAssign(v) {
-			c.pushDefinedTag("assignment")
+			c.pushDefinedTag(bytecode.DefinedAsgn)
 			return
 		}
-		c.pushDefinedTag("expression")
+		c.pushDefinedTag(bytecode.DefinedExprTag)
 		return
 	}
 	c.compileDefinedReceiverMethod(v.Left, v.Op)
@@ -269,6 +345,17 @@ func (c *Compiler) declareDefinedLocals(n ast.Node) {
 		c.declareDefinedLocals(v.Right)
 	case *ast.UnaryExpr:
 		c.declareDefinedLocals(v.Operand)
+	case *ast.ArrayLit:
+		for _, e := range v.Elems {
+			c.declareDefinedLocals(e)
+		}
+	case *ast.HashLit:
+		for i, k := range v.Keys {
+			c.declareDefinedLocals(k)
+			c.declareDefinedLocals(v.Values[i])
+		}
+	case *ast.SplatArg:
+		c.declareDefinedLocals(v.Value)
 	}
 }
 

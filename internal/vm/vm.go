@@ -1448,7 +1448,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// A string literal evaluates to a fresh mutable object each time
 				// (Ruby semantics), so clone string constants on push; every other
 				// constant is immutable and can be shared.
-				if s, ok := iseq.Consts[in.A].(*object.String); ok {
+				//
+				// A FROZEN String constant is shared, not cloned. It cannot be
+				// mutated, so nothing can tell the sharing apart — and cloning would
+				// hand back an unfrozen copy (String.Dup drops Frozen), which is
+				// exactly what MRI does not do: it pushes a frozen literal with
+				// `putobject` over the shared fstring, and only a mutable one with
+				// `putstring`, which duplicates. `defined?` tags are built that way
+				// (rb_iseq_defined_string, iseq.c v3_4_0:3692), so a clone here made
+				// `defined?(nil).frozen?` false.
+				if s, ok := iseq.Consts[in.A].(*object.String); ok && !s.Frozen {
 					push(s.Dup())
 				} else {
 					push(iseq.Consts[in.A])
@@ -1971,13 +1980,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// reports "constant" without requiring the file.
 				name := iseq.Names[in.A]
 				if _, ok := vm.resolveConstNoAutoload(lexCref, name); ok || vm.autoloadPending(lexCref, name) {
-					push(definedTag("constant"))
+					push(definedTag(bytecode.DefinedConst))
 				} else {
 					push(object.NilV)
 				}
 			case bytecode.OpDefinedConstTop:
 				if _, ok := vm.cObject.consts[iseq.Names[in.A]]; ok {
-					push(definedTag("constant"))
+					push(definedTag(bytecode.DefinedConst))
 				} else {
 					push(object.NilV)
 				}
@@ -1990,7 +1999,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// (vm_insnhelper.c, ruby/ruby v3_4_0:1139-1141), so a
 				// private_constant is not `defined?` by its qualified path.
 				if ok && vm.hasScopedConst(cls, name) && !vm.scopedConstIsPrivate(cls, name) {
-					push(definedTag("constant"))
+					push(definedTag(bytecode.DefinedConst))
 				} else {
 					push(object.NilV)
 				}
@@ -1998,7 +2007,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				name := iseq.Names[in.A]
 				if t := ivarTable(self); t != nil {
 					if _, ok := t[name]; ok {
-						push(definedTag("instance-variable"))
+						push(definedTag(bytecode.DefinedIvar))
 						break
 					}
 				}
@@ -2006,26 +2015,38 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			case bytecode.OpDefinedCVar:
 				name := iseq.Names[in.A]
 				if definee != vm.cObject && cvarOwner(definee, name) != nil {
-					push(definedTag("class variable"))
+					push(definedTag(bytecode.DefinedCvar))
 				} else {
 					push(object.NilV)
 				}
 			case bytecode.OpDefinedGVar:
 				if vm.gvarDefined(iseq.Names[in.A]) {
-					push(definedTag("global-variable"))
+					push(definedTag(bytecode.DefinedGvar))
 				} else {
 					push(object.NilV)
 				}
 			case bytecode.OpDefinedMethod:
 				recv := pop()
 				if vm.respondsTo(recv, iseq.Names[in.A]) {
-					push(definedTag("method"))
+					push(definedTag(bytecode.DefinedMethod))
 				} else {
 					push(object.NilV)
 				}
 			case bytecode.OpDefinedYield:
 				if block != nil {
-					push(definedTag("yield"))
+					push(definedTag(bytecode.DefinedYield))
+				} else {
+					push(object.NilV)
+				}
+			case bytecode.OpDefinedSuper:
+				// DEFINED_ZSUPER: MRI takes the frame's method entry, finds the normal
+				// superclass of its defined_class and asks rb_method_boundp for the
+				// method's ORIGINAL id (vm_insnhelper.c v3_4_0:5505-5518). A frame with
+				// no method entry — the top level, a class body — answers nil.
+				// homeSuperName/homeSuperDefinee are the same pair the super CALL uses,
+				// so a block and a define_method body answer for their home method.
+				if homeSuperName != "" && vm.superMethod(self, homeSuperDefinee, homeSuperName) != nil {
+					push(definedTag(bytecode.DefinedZSuper))
 				} else {
 					push(object.NilV)
 				}
@@ -2575,14 +2596,47 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 	if methodName == "" {
 		raise("RuntimeError", "super called outside of method")
 	}
+	if found := vm.superMethod(self, definee, methodName); found != nil {
+		return vm.invoke(found, self, args, blk)
+	}
+	// No callable superclass method. MRI routes a failed super through
+	// method_missing: a user-defined one handles it, while the default (on
+	// BasicObject) reports the super-specific message below. Dispatch only a
+	// genuine override so the default path keeps that exact message.
+	//
+	// A refinement method's super has no method_missing fallback in MRI — it is
+	// resolved in the refined class alone — so it reports straight away.
+	if !definee.isRefinement {
+		if mm := lookupMethod(vm.classOf(self), "method_missing"); mm != nil && !mm.undefined && mm.owner != vm.cBasicObject {
+			mmArgs := append([]object.Value{object.SymVal(methodName)}, args...)
+			return vm.invoke(mm, self, mmArgs, blk)
+		}
+	}
+	raise("NoMethodError", "super: no superclass method '%s'", methodName)
+	return object.NilV
+}
+
+// superMethod resolves the method a `super` written in methodName (defined in
+// definee, running on receiver self) would call, WITHOUT calling it. It returns
+// nil when no callable definition exists above definee.
+//
+// It is the single resolution shared by the super CALL (OpInvokeSuper) and by
+// `defined?(super)` (OpDefinedSuper): MRI answers DEFINED_ZSUPER with
+// rb_method_boundp over vm_search_normal_superclass of the frame's
+// defined_class (vm_insnhelper.c v3_4_0:5505-5518), i.e. the same search the
+// call performs, so the two must not drift apart.
+func (vm *VM) superMethod(self object.Value, definee *RClass, methodName string) *Method {
+	if methodName == "" || definee == nil {
+		return nil
+	}
 	// super inside a refinement method resolves in the refined class only — its
 	// own method and normal ancestor chain — skipping every other active
 	// refinement (MRI: "looks only in the refined class").
 	if definee.isRefinement {
 		if m := lookupMethod(definee.refinedClass, methodName); m != nil && !m.undefined {
-			return vm.invoke(m, self, args, blk)
+			return m
 		}
-		raise("NoMethodError", "super: no superclass method '%s'", methodName)
+		return nil
 	}
 	// super resolves to the next definition of methodName after the current
 	// method's owner (definee) in the receiver's ancestor chain — so it walks
@@ -2634,16 +2688,7 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 		found = lookupSMethod(definee.super, methodName)
 	}
 	if found != nil && !found.undefined {
-		return vm.invoke(found, self, args, blk)
+		return found
 	}
-	// No callable superclass method. MRI routes a failed super through
-	// method_missing: a user-defined one handles it, while the default (on
-	// BasicObject) reports the super-specific message below. Dispatch only a
-	// genuine override so the default path keeps that exact message.
-	if mm := lookupMethod(vm.classOf(self), "method_missing"); mm != nil && !mm.undefined && mm.owner != vm.cBasicObject {
-		mmArgs := append([]object.Value{object.SymVal(methodName)}, args...)
-		return vm.invoke(mm, self, mmArgs, blk)
-	}
-	raise("NoMethodError", "super: no superclass method '%s'", methodName)
-	return object.NilV
+	return nil
 }
