@@ -199,6 +199,10 @@ type Compiler struct {
 	// (and index arguments) were evaluated into before the right-hand side ran.
 	// See preEvalMasgnTarget.
 	masgnPre map[ast.Node]*masgnPreEval
+	// patCache is the local slot holding the current `case/in` statement's
+	// deconstructed-subject cache, or -1 outside one (the zero value is fixed up
+	// in compilePattern, which never sees slot 0 as a cache). See compileCaseIn.
+	patCache int
 }
 
 // masgnPreEval holds the temporaries into which one multiple-assignment target's
@@ -232,7 +236,7 @@ func CompileWithEncoding(prog *ast.Program, srcEnc string) (iseq *bytecode.ISeq,
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{srcEnc: srcEnc}
+	c := &Compiler{srcEnc: srcEnc, patCache: -1}
 	c.push(newBuilder("<main>", nil))
 	c.compileBody(prog.Body)
 	c.cur().emit(bytecode.OpReturn, 0, 0)
@@ -344,7 +348,7 @@ func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.I
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{}
+	c := &Compiler{patCache: -1}
 	parent := newBuilder("<binding>", nil)
 	parent.locals = append([]string(nil), localNames...)
 	parent.borrowed = true
@@ -1945,9 +1949,26 @@ func (c *Compiler) compileCaseIn(v *ast.CaseIn) {
 	b.emit(bytecode.OpSetLocal, subj, 0)
 	b.emit(bytecode.OpPop, 0, 0)
 
+	// One deconstructed-subject cache for the whole statement. MRI keeps it on
+	// the stack beside the subject and threads `use_deconstructed_cache` into the
+	// TOP-LEVEL patterns only (iseq_compile_array_deconstruct, compile.c
+	// v3_4_0:7055+); the clauses of one `case` share a subject, so the first
+	// #deconstruct answers for all of them, and ruby/spec pins the single call.
+	//
+	// Three states, as in MRI: nil = not tried, false = the subject does not
+	// answer #deconstruct, an Array = the deconstruction. It is reset here rather
+	// than relying on frame-entry zeroing, because a `case` inside a loop runs
+	// again in the same frame with a different subject.
+	cache := b.localSlot("")
+	b.emit(bytecode.OpPushNil, 0, 0)
+	b.emit(bytecode.OpSetLocal, cache, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+
 	var endJumps []int
 	for _, clause := range v.Clauses {
+		c.patCache = cache
 		c.compilePattern(clause.Pattern, subj)
+		c.patCache = -1
 		if clause.Guard != nil {
 			// Pattern match AND guard: only evaluate the guard when the pattern
 			// matched (the pattern's bindings are visible to the guard).
@@ -1991,6 +2012,15 @@ func (c *Compiler) compileCaseIn(v *ast.CaseIn) {
 // bindings as a side effect.
 func (c *Compiler) compilePattern(pat ast.Pattern, subj int) {
 	b := c.cur()
+	// The deconstructed-subject cache reaches a TOP-LEVEL array/find pattern and
+	// its alternatives, and nothing nested inside one: a nested pattern is
+	// matched against an ELEMENT, not the subject. MRI expresses the same by
+	// passing use_deconstructed_cache = false down every recursive call but the
+	// alternative arms'.
+	cache := c.patCache
+	if _, isAlt := pat.(*ast.AltPattern); !isAlt {
+		c.patCache = -1
+	}
 	switch p := pat.(type) {
 	case *ast.BindPattern:
 		// Bind the whole subject; always matches.
@@ -2005,10 +2035,13 @@ func (c *Compiler) compilePattern(pat ast.Pattern, subj int) {
 		b.emit(bytecode.OpSend, b.addName("==="), 1)
 		b.emit(bytecode.OpTruthy, 0, 0)
 	case *ast.ConstPattern:
-		// subject.is_a?(Const)
-		b.emit(bytecode.OpGetLocal, subj, 0)
+		// Const === subject, not subject.is_a?(Const): a bare constant pattern is
+		// compiled like a value pattern, `checkmatch VM_CHECKMATCH_TYPE_CASE`
+		// (compile.c v3_4_0, iseq_compile_pattern_each's default arm), so a
+		// redefined — or refined — #=== decides the match.
 		c.compileNode(p.Const)
-		b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+		b.emit(bytecode.OpGetLocal, subj, 0)
+		b.emit(bytecode.OpSend, b.addName("==="), 1)
 		b.emit(bytecode.OpTruthy, 0, 0)
 	case *ast.BindingPattern:
 		// Match the sub-pattern, then bind the subject to name on success.
@@ -2023,11 +2056,11 @@ func (c *Compiler) compilePattern(pat ast.Pattern, subj int) {
 		b.emit(bytecode.OpPushFalse, 0, 0)
 		b.patch(end, b.here())
 	case *ast.ArrayPattern:
-		c.compileArrayPattern(p, subj)
+		c.compileArrayPattern(p, subj, cache)
 	case *ast.HashPattern:
 		c.compileHashPattern(p, subj)
 	case *ast.FindPattern:
-		c.compileFindPattern(p, subj)
+		c.compileFindPattern(p, subj, cache)
 	case *ast.AltPattern:
 		// Alternative: true if any branch matches (short-circuit on the first).
 		var hits []int
@@ -2050,29 +2083,15 @@ func (c *Compiler) compilePattern(pat ast.Pattern, subj int) {
 // compileArrayPattern emits the deconstruct-protocol match for an array pattern.
 // It checks the optional constant, that the subject responds to :deconstruct,
 // the resulting Array's length, then each element against its sub-pattern.
-func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
+func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj, cache int) {
 	b := c.cur()
 	arr := b.localSlot("") // the deconstructed Array
 	// Result accumulator: start true, AND each test, short-circuiting via jumps
 	// to a shared failure label.
 	var fails []int
-	// Optional constant guard: subject.is_a?(Const).
-	if p.Const != nil {
-		b.emit(bytecode.OpGetLocal, subj, 0)
-		c.compileNode(p.Const)
-		b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
-		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
-	}
-	// respond_to?(:deconstruct)
-	b.emit(bytecode.OpGetLocal, subj, 0)
-	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct")), 0)
-	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
-	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
-	// arr = subject.deconstruct
-	b.emit(bytecode.OpGetLocal, subj, 0)
-	b.emit(bytecode.OpSend, b.addName("deconstruct"), 0)
-	b.emit(bytecode.OpSetLocal, arr, 0)
-	b.emit(bytecode.OpPop, 0, 0)
+	// Optional constant guard, FIRST and before any protocol call.
+	fails = append(fails, c.patternConstantGuard(p.Const, subj)...)
+	fails = append(fails, c.deconstructInto(arr, subj, cache)...)
 	// Length check: == (pre+post) without splat, >= (pre+post) with.
 	b.emit(bytecode.OpGetLocal, arr, 0)
 	b.emit(bytecode.OpSend, b.addName("length"), 0)
@@ -2141,25 +2160,12 @@ func (c *Compiler) compileArrayPattern(p *ast.ArrayPattern, subj int) {
 // compileFindPattern emits the array find pattern `[*pre, mid…, *post]`: it
 // deconstructs the subject, then scans for the first window where every Mid
 // matches, binding pre/post. It leaves a boolean (matched) on the stack.
-func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj int) {
+func (c *Compiler) compileFindPattern(p *ast.FindPattern, subj, cache int) {
 	b := c.cur()
 	arr := b.localSlot("")
 	var fails []int
-	if p.Const != nil {
-		b.emit(bytecode.OpGetLocal, subj, 0)
-		c.compileNode(p.Const)
-		b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
-		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
-	}
-	// respond_to?(:deconstruct), then arr = subject.deconstruct.
-	b.emit(bytecode.OpGetLocal, subj, 0)
-	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct")), 0)
-	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
-	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
-	b.emit(bytecode.OpGetLocal, subj, 0)
-	b.emit(bytecode.OpSend, b.addName("deconstruct"), 0)
-	b.emit(bytecode.OpSetLocal, arr, 0)
-	b.emit(bytecode.OpPop, 0, 0)
+	fails = append(fails, c.patternConstantGuard(p.Const, subj)...)
+	fails = append(fails, c.deconstructInto(arr, subj, cache)...)
 	// n = arr.length
 	n := b.localSlot("")
 	b.emit(bytecode.OpGetLocal, arr, 0)
@@ -2251,22 +2257,134 @@ func (c *Compiler) setLocalInt(slot int, v int64) {
 	b.emit(bytecode.OpPop, 0, 0)
 }
 
+// deconstructInto emits the #deconstruct protocol for an array-shaped pattern,
+// leaving the deconstructed Array in slot arr. It returns the branch sites to
+// patch to the pattern's failure label.
+//
+// It mirrors iseq_compile_array_deconstruct (compile.c v3_4_0:7055+):
+// respond_to?(:deconstruct), the call, and `unless Array === d` -> TypeError,
+// because a #deconstruct answering with something else is an error, not a
+// failed match. When cache >= 0 the result is memoised in that slot for the
+// rest of the `case`, with MRI's three states — nil not tried, false does not
+// answer #deconstruct, else the Array.
+func (c *Compiler) deconstructInto(arr, subj, cache int) []int {
+	b := c.cur()
+	var fails []int
+	reuse := -1
+	if cache >= 0 {
+		b.emit(bytecode.OpGetLocal, cache, 0)
+		fresh := b.emit(bytecode.OpBranchNil, 0, 0) // nil: not tried yet
+		b.emit(bytecode.OpGetLocal, cache, 0)
+		fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0)) // false: no #deconstruct
+		b.emit(bytecode.OpGetLocal, cache, 0)
+		b.emit(bytecode.OpSetLocal, arr, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		reuse = b.emit(bytecode.OpJump, 0, 0)
+		b.patch(fresh, b.here())
+	}
+	// respond_to?(:deconstruct)
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct")), 0)
+	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
+	if cache >= 0 {
+		// Remember the answer. A false stays; a true is overwritten by the Array
+		// below. OpSetLocal leaves the value, which the branch then consumes.
+		b.emit(bytecode.OpSetLocal, cache, 0)
+	}
+	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
+	// arr = subject.deconstruct
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpSend, b.addName("deconstruct"), 0)
+	b.emit(bytecode.OpSetLocal, arr, 0)
+	b.emit(bytecode.OpPop, 0, 0)
+	c.patternTypeCheck(arr, "Array", "deconstruct must return Array")
+	if cache >= 0 {
+		b.emit(bytecode.OpGetLocal, arr, 0)
+		b.emit(bytecode.OpSetLocal, cache, 0)
+		b.emit(bytecode.OpPop, 0, 0)
+		b.patch(reuse, b.here()) // the cached path rejoins past the type check
+	}
+	return fails
+}
+
+// patternConstantGuard emits the optional constant test a container pattern
+// carries (`in Point[x, y]`, `in Point(x:, y:)`). It returns the branch sites to
+// patch to the pattern's failure label.
+//
+// The test is `Const === subject`, not `subject.is_a?(Const)`: MRI compiles it
+// to `checkmatch VM_CHECKMATCH_TYPE_CASE` over the constant
+// (iseq_compile_pattern_constant, compile.c v3_4_0:7054+), which is Module#===
+// — so a constant whose #=== is redefined decides the match, and ruby/spec pins
+// that ("does not match object if Constant === object returns false").
+//
+// It is emitted BEFORE the deconstruct protocol, which is what
+// "checks Constant === object before calling #deconstruct_keys" pins.
+func (c *Compiler) patternConstantGuard(konst ast.Node, subj int) []int {
+	if konst == nil {
+		return nil
+	}
+	b := c.cur()
+	c.compileNode(konst)
+	b.emit(bytecode.OpGetLocal, subj, 0)
+	b.emit(bytecode.OpSend, b.addName("==="), 1)
+	return []int{b.emit(bytecode.OpBranchUnless, 0, 0)}
+}
+
+// patternTypeCheck emits MRI's type_error arm: the value a deconstruct protocol
+// method returned must be of the expected class, and a wrong one is a TypeError
+// (compile.c v3_4_0:7224 and 7587), not a failed match that would let the next
+// `in` clause run. rbgo has no raw type-check opcode, so the test is
+// `value.is_a?(Class)` where MRI uses `checktype`; the two differ only for an
+// object that redefines #is_a?.
+func (c *Compiler) patternTypeCheck(slot int, className, msg string) {
+	b := c.cur()
+	b.emit(bytecode.OpGetLocal, slot, 0)
+	b.emit(bytecode.OpGetConst, b.addName(className), 0)
+	b.emit(bytecode.OpSend, b.addName("is_a?"), 1)
+	ok := b.emit(bytecode.OpBranchIf, 0, 0)
+	b.emit(bytecode.OpPushSelf, 0, 0)
+	b.emit(bytecode.OpGetConst, b.addName("TypeError"), 0)
+	b.emit(bytecode.OpPushConst, b.addConst(object.NewString(msg)), 0)
+	b.emit(bytecode.OpSend, b.addName("raise"), 2)
+	b.emit(bytecode.OpPop, 0, 0)
+	b.patch(ok, b.here())
+}
+
 func (c *Compiler) compileHashPattern(p *ast.HashPattern, subj int) {
 	b := c.cur()
 	h := b.localSlot("") // the deconstructed Hash
 	var fails []int
+	// Optional constant guard (`in Point(x:, y:)`), FIRST: MRI screens the
+	// constant before it asks anything of the subject, so a subject the constant
+	// rejects is never sent #deconstruct_keys at all.
+	fails = append(fails, c.patternConstantGuard(p.Const, subj)...)
 	// respond_to?(:deconstruct_keys)
 	b.emit(bytecode.OpGetLocal, subj, 0)
 	b.emit(bytecode.OpPushConst, b.addConst(object.Symbol("deconstruct_keys")), 0)
 	b.emit(bytecode.OpSend, b.addName("respond_to?"), 1)
 	fails = append(fails, b.emit(bytecode.OpBranchUnless, 0, 0))
-	// h = subject.deconstruct_keys(nil) — we pass nil (full hash) for simplicity,
-	// which is always a valid request under the protocol.
+	// h = subject.deconstruct_keys(keys)
+	//
+	// The argument tells the subject which keys the pattern will ask for, so it
+	// may build only those. It is the pattern's key list, EXCEPT when the pattern
+	// has a named `**rest` or a `**nil` — then the whole hash is wanted and MRI
+	// passes nil. An anonymous `**` still gets the key list. Witnessed against
+	// ruby 4.0.5 for all four shapes, and pinned by ruby/spec's three
+	// "passes keys …" examples.
 	b.emit(bytecode.OpGetLocal, subj, 0)
-	b.emit(bytecode.OpPushNil, 0, 0)
+	if p.RestNil || p.RestName != "" {
+		b.emit(bytecode.OpPushNil, 0, 0)
+	} else {
+		for _, key := range p.Keys {
+			b.emit(bytecode.OpPushConst, b.addConst(object.Symbol(key)), 0)
+		}
+		b.emit(bytecode.OpNewArray, len(p.Keys), 0)
+	}
 	b.emit(bytecode.OpSend, b.addName("deconstruct_keys"), 1)
 	b.emit(bytecode.OpSetLocal, h, 0)
 	b.emit(bytecode.OpPop, 0, 0)
+	// `unless Hash === d: goto type_error`.
+	c.patternTypeCheck(h, "Hash", "deconstruct_keys must return Hash")
 	// `**nil`, or the empty pattern `{}`: the hash must have exactly the named
 	// keys and no extras (an empty `{}` thus matches only an empty hash).
 	if p.RestNil || (len(p.Keys) == 0 && !p.HasRest) {
