@@ -2026,8 +2026,11 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					push(object.NilV)
 				}
 			case bytecode.OpDefinedMethod:
+				// B == 1 is MRI's DEFINED_METHOD (an explicit receiver, so visibility
+				// applies); B == 0 is DEFINED_FUNC (an implicit self receiver, where
+				// every visibility counts). See definedResponds.
 				recv := pop()
-				if vm.respondsTo(recv, iseq.Names[in.A]) {
+				if vm.definedResponds(self, recv, iseq.Names[in.A], in.B == 1) {
 					push(definedTag(bytecode.DefinedMethod))
 				} else {
 					push(object.NilV)

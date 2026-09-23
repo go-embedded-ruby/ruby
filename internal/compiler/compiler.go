@@ -380,11 +380,33 @@ func (c *Compiler) compileBody(body []ast.Node) {
 		return
 	}
 	for i, n := range body {
+		if i < len(body)-1 && c.compileDiscarded(n) {
+			continue
+		}
 		c.compileNode(n)
 		if i < len(body)-1 {
 			c.cur().emit(bytecode.OpPop, 0, 0)
 		}
 	}
+}
+
+// compileDiscarded emits n in a position where its value is thrown away, and
+// reports whether it handled n (the caller emits it normally otherwise).
+//
+// Only `defined?` is special here. MRI compiles NODE_DEFINED to NOTHING when
+// its result is popped — `case NODE_DEFINED: if (!popped) …` (compile.c
+// v3_4_0:11332-11336) — and ruby/spec pins the consequence: a bare
+// `defined?(DefinedSpecs.side_effects / 2)` statement must not run the
+// receiver, even though the value-returning form does. The operand's LOCALS are
+// still declared, because MRI declares them in the parser, which walks the
+// operand whatever the context does with the answer.
+func (c *Compiler) compileDiscarded(n ast.Node) bool {
+	v, ok := n.(*ast.Call)
+	if !ok || v.Recv != nil || v.Block != nil || v.Name != "defined?" || len(v.Args) != 1 {
+		return false
+	}
+	c.declareDefinedLocals(v.Args[0])
+	return true
 }
 
 func (c *Compiler) compileNode(n ast.Node) {

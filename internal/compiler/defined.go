@@ -183,6 +183,16 @@ func (c *Compiler) compileDefinedScopedConst(v *ast.ScopedConst) {
 // implicit) receiver, with the receiver and arguments evaluated.
 func (c *Compiler) compileDefinedCall(v *ast.Call) {
 	b := c.cur()
+	// A nested `defined?` is not a method call on self: MRI parses it to
+	// NODE_DEFINED, which is not among the cases defined_expr0 names and so
+	// falls through to its `default:` arm — "expression" (compile.c
+	// v3_4_0:6003-6008). The operand's locals are still declared, as compiling it
+	// normally would do.
+	if v.Recv == nil && v.Block == nil && v.Name == "defined?" && len(v.Args) == 1 {
+		c.declareDefinedLocals(v.Args[0])
+		c.pushDefinedTag(bytecode.DefinedExprTag)
+		return
+	}
 	if v.Recv == nil && v.Block == nil && len(v.Args) == 0 {
 		if _, _, ok := b.resolve(v.Name); ok {
 			c.pushDefinedTag(bytecode.DefinedLvar)
@@ -260,6 +270,9 @@ func constOrAssign(v *ast.BinaryExpr) bool {
 func (c *Compiler) compileDefinedReceiverMethod(recv ast.Node, name string) {
 	c.guarded(func(gb *builder) {
 		if recv == nil {
+			// No receiver written: MRI's DEFINED_FUNC, which tests the response at
+			// ANY visibility (rb_ec_obj_respond_to with the include-private flag),
+			// so a private method called bare is still "method". B = 0 says so.
 			gb.emit(bytecode.OpPushSelf, 0, 0)
 			gb.emit(bytecode.OpDefinedMethod, gb.addName(name), 0)
 			return
@@ -268,7 +281,11 @@ func (c *Compiler) compileDefinedReceiverMethod(recv ast.Node, name string) {
 		c.compileDefined(recv)
 		recvUndef := gb.emit(bytecode.OpBranchNil, 0, 0)
 		c.compileNode(recv)
-		gb.emit(bytecode.OpDefinedMethod, gb.addName(name), 0)
+		// A receiver was written: MRI's DEFINED_METHOD, which screens the method
+		// entry's visibility — private is not defined?, protected only for a kin
+		// self (compile.c v3_4_0:6099-6111 picks the tag; vm_insnhelper.c
+		// v3_4_0:5476-5498 applies the rule). B = 1 says so.
+		gb.emit(bytecode.OpDefinedMethod, gb.addName(name), 1)
 		done := gb.emit(bytecode.OpJump, 0, 0)
 		gb.patch(recvUndef, gb.here())
 		gb.emit(bytecode.OpPushNil, 0, 0)
