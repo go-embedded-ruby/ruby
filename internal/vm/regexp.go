@@ -1064,10 +1064,11 @@ func (vm *VM) gvar(name string) object.Value {
 		return v
 	}
 	// English match-data aliases ($MATCH -> $&, …) rewrite to the cryptic form so
-	// the match-data resolution below applies; specialGvar reported them unhandled.
-	if target, ok := englishAlias[name]; ok {
-		name = target
-	}
+	// the match-data resolution below applies (specialGvar reported them
+	// unhandled), and the shared-slot spellings ($-0 for $/, $-I for $LOAD_PATH,
+	// $> for $stdout, …) rewrite to the slot that actually holds the value, so a
+	// read through either spelling sees what a write through the other stored.
+	name = canonicalGvar(name)
 	last := vm.lastMatch
 	if object.IsNil(last) {
 		last = object.NilV
