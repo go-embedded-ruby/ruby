@@ -549,22 +549,34 @@ func (vm *VM) registerIO() {
 	// flushes and closes afterwards, returning the block's value.
 	cFile := vm.consts["File"].(*RClass)
 	cFile.super = cIO // File < IO, inheriting the read+write protocol; is_a?(IO) holds
-	cFile.smethods["open"] = &Method{name: "open", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		o := vm.openFileArgs(cFile, args) // openFileArgs rejects a missing path
-		if blk != nil {
-			defer ioFlushClose(o)
-			return vm.callBlock(blk, []object.Value{o})
+	cFile.smethods["open"] = &Method{name: "open", owner: cFile, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		o := vm.openFileArgs(fileRecvClass(self, cFile), args) // openFileArgs rejects a missing path
+		if blk == nil {
+			return o
 		}
-		return o
+		// rb_io_s_open closes through the Ruby-level #close, so a subclass that
+		// overrides it runs and an exception it raises propagates — except the
+		// IOError "closed stream" of a block that closed the file itself. When the
+		// block raises too, the block's exception is the one that escapes.
+		return vm.ioYieldAndClose(o, blk)
 	}}
 	// File.new opens a file-backed IO like File.open, but never takes a block (it
 	// always returns the open stream). A missing path argument is an ArgumentError.
-	cFile.smethods["new"] = &Method{name: "new", owner: cFile, native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	cFile.smethods["new"] = &Method{name: "new", owner: cFile, native: func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		if len(args) == 0 {
-			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..3)")
 		}
-		return vm.openFileArgs(cFile, args)
+		// rb_io_s_new warns when handed a block it will not call: File.new always
+		// returns the open stream, and only File.open yields it.
+		if blk != nil {
+			vm.rbWarn("warning: File::new() does not take block; use File::open() instead")
+		}
+		return vm.openFileArgs(fileRecvClass(self, cFile), args)
 	}}
+
+	// fileRecvClass is declared below; File.open and File.new both build an
+	// instance of the class they were CALLED on, so a File subclass yields its own
+	// instances (and its own #close override runs at the end of the block).
 	// File instance metadata operations. Puppet's replace_file writes to a
 	// Uniquefile (a DelegateClass(File)) and then chmod/chowns it before renaming
 	// it into place, so the open File needs path/chmod/chown that act on its
@@ -778,6 +790,16 @@ func (vm *VM) openFileArgs(cls *RClass, args []object.Value) *IOObj {
 	if len(pos) == 0 || len(pos) > 3 {
 		raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(pos))
 	}
+	// rb_file_initialize (io.c): with fewer than three positional arguments, a
+	// first argument that converts through #to_int is a DESCRIPTOR rather than a
+	// path, and the call is IO#initialize on it. The permission argument is what
+	// rules that out — it is meaningless for an already-open descriptor, which is
+	// why File.new(fd, mode, perm) is a TypeError about the path instead.
+	if len(pos) < 3 {
+		if fd, ok := vm.ioFdArg(pos[0]); ok {
+			return vm.ioAdoptFd(cls, fd, pos, opts)
+		}
+	}
 	path := pathArg(vm, pos[0])
 	ms := vm.ioResolveModeEnc(pos, opts)
 	// rb_io_extract_modeenc's *vperm_p: the third positional argument, which the
@@ -856,7 +878,23 @@ func openFileSpec(cls *RClass, p string, ms *ioModeSpec, perm int64, permGiven b
 	if !permGiven {
 		perm = 0o666
 	}
+	// Anything that is not a regular file is handled by the notRegular branch
+	// below and by nothing else: truncating a fifo is meaningless, and probing it
+	// for writability by opening it would BLOCK until a reader appeared — an open
+	// that never returns, which is how an earlier wave's File.mkfifo cost this
+	// project 55 examples. A directory would refuse both as well.
+	special := exists && notRegular(p)
 	switch {
+	case special:
+		// Nothing that is not a regular file can be read whole, because some of
+		// them do not end: File.open("/dev/zero") allocated 83 GB here and killed a
+		// CI runner before the open returned. A character device, a fifo, a socket
+		// or a directory opens with an empty buffer instead, so the position
+		// arithmetic works — which is all core/io/seek_spec.rb asks of /dev/zero —
+		// and a read sees end-of-file rather than the machine going away.
+		//
+		// That reads see nothing is a limit of a buffer-backed IO rather than a
+		// decision: see IOObj, whose whole model is the file's bytes in memory.
 	case !exists:
 		// O_CREAT: materialise the file now, as MRI's open does, so File.exist?
 		// and File.stat see it (with its permissions) before any write is flushed.
@@ -869,16 +907,6 @@ func openFileSpec(cls *RClass, p string, ms *ioModeSpec, perm int64, permGiven b
 		if err := os.Truncate(p, 0); err != nil {
 			raiseOpenErrno(err, p)
 		}
-	case notRegular(p):
-		// Nothing that is not a regular file can be read whole, because some of
-		// them do not end: File.open("/dev/zero") allocated 83 GB here and killed a
-		// CI runner before the open returned. A character device, a fifo, a socket
-		// or a directory opens with an empty buffer instead, so the position
-		// arithmetic works — which is all core/io/seek_spec.rb asks of /dev/zero —
-		// and a read sees end-of-file rather than the machine going away.
-		//
-		// That reads see nothing is a limit of a buffer-backed IO rather than a
-		// decision: see IOObj, whose whole model is the file's bytes in memory.
 	default:
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -889,7 +917,7 @@ func openFileSpec(cls *RClass, p string, ms *ioModeSpec, perm int64, permGiven b
 	// A write-only stream must still be able to reopen the path for writing; a
 	// read-only one must not, so a permission failure shows up at open, not at
 	// close. os.ReadFile above already reported an unreadable file.
-	if ms.writable && exists && !ms.trunc {
+	if ms.writable && exists && !ms.trunc && !special {
 		if err := writableCheck(p); err != nil {
 			raiseOpenErrno(err, p)
 		}
@@ -903,6 +931,15 @@ func openFileSpec(cls *RClass, p string, ms *ioModeSpec, perm int64, permGiven b
 	o.wrClosed = !ms.writable
 	o.appendMode = ms.appendMode
 	return o
+}
+
+// fileRecvClass is the class a File.open / File.new call must instantiate: the
+// receiver when it is a class (File itself, or a subclass), falling back to File.
+func fileRecvClass(self object.Value, fallback *RClass) *RClass {
+	if c, ok := self.(*RClass); ok {
+		return c
+	}
+	return fallback
 }
 
 // writableCheck reports the error opening p for writing would give, without

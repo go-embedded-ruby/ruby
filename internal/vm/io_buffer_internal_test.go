@@ -68,7 +68,14 @@ func TestIOBuffer(t *testing.T) {
 		{`p(IO::Buffer.new(2) ? "truthy" : "falsy")`, `"truthy"`},
 		// set_string coerces its argument via #to_str.
 		{`class T; def to_str; "hi"; end; end; b = IO::Buffer.new(4); b.set_string(T.new); p b.get_string(0, 2)`, `"hi"`},
-		{`p IO::Buffer.new(4, IO::Buffer::READONLY).readonly?`, `true`},
+		// READONLY alone names no way to obtain the memory, so io_buffer_initialize
+		// never allocates and raises instead. This line asserted `true` until wave 28
+		// measured MRI 4.0.5, which answers with the AllocationError: the assertion
+		// was wrong, not the reference. INTERNAL|READONLY is the read-only buffer
+		// that was meant.
+		{`begin; IO::Buffer.new(4, IO::Buffer::READONLY); rescue => e; p [e.class, e.message]; end`,
+			`[IO::Buffer::AllocationError, "Could not allocate buffer!"]`},
+		{`p IO::Buffer.new(4, IO::Buffer::INTERNAL | IO::Buffer::READONLY).readonly?`, `true`},
 		{`b = IO::Buffer.new(6); b.set_string("abcdef", 0, 3); p b.get_string(0, 3)`, `"abc"`},
 		{`b = IO::Buffer.new(6); b.set_string("abcdef", 0, 2, 2); p b.get_string(0, 2)`, `"cd"`},
 		{`begin; IO::Buffer.new(2).set_value(:U32, 0, 1); rescue ArgumentError => e; p e.class; end`, `ArgumentError`},

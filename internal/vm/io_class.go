@@ -31,17 +31,7 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		if len(pos) < 1 || len(pos) > 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
 		}
-		fd := int(vm.repeatLong(pos[0]))
-		src, ok := vm.fdTable[fd]
-		if !ok {
-			raise("Errno::EBADF", "Bad file descriptor - fd %d", fd)
-		}
-		if src.closed {
-			raise("IOError", "closed stream")
-		}
-		res := &IOObj{cls: cIO}
-		vm.ioAdoptDescriptor(res, src, pos, opts)
-		return res
+		return vm.ioAdoptFd(cIO, int(vm.repeatLong(pos[0])), pos, opts)
 	}
 	cIO.smethods["for_fd"] = &Method{name: "for_fd", owner: cIO, native: forFd}
 	cIO.smethods["new"] = &Method{name: "new", owner: cIO, native: forFd}
@@ -57,19 +47,7 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		if !ok || blk == nil {
 			return oVal
 		}
-		var ret object.Value
-		blockRec := recoverAny(func() { ret = vm.callBlock(blk, []object.Value{o}) })
-		closeRec := recoverAny(func() { vm.send(o, "close", nil, nil) })
-		if re, isRE := closeRec.(RubyError); isRE && re.Class == "IOError" && re.Message == "closed stream" {
-			closeRec = nil // MRI ignores a "closed stream" IOError from the ensure close
-		}
-		if blockRec != nil {
-			panic(blockRec) // the block's exception (or break/return) is primary
-		}
-		if closeRec != nil {
-			panic(closeRec)
-		}
-		return ret
+		return vm.ioYieldAndClose(o, blk)
 	}}
 	// IO.sysopen(path, mode = "r", perm = 0666) opens path and returns its raw
 	// descriptor (io.c rb_io_s_sysopen → rb_sysopen). rbgo has no OS fds, so the
@@ -211,6 +189,66 @@ func ioForeachMode(opts *object.Hash) string {
 // the descriptor's), the append position, and IO.new's optional path: override
 // (an explicit nil clears the inherited path). Shared by IO.for_fd/new and
 // IO#initialize so the two decode a descriptor identically (io.c io_initialize).
+// ioYieldAndClose is the block form of IO.open and File.open — io.c rb_io_s_open
+// with io_close in its ensure. The stream is closed through the RUBY-level
+// #close, so a subclass that overrides it runs.
+//
+// A #close that raises propagates, EXCEPT an IOError "closed stream", which is
+// what a block that closed the file itself leaves behind. When BOTH the block
+// and #close raise, the one from #close is the one that escapes: it is raised
+// from an ensure, and an ensure's exception supersedes the one it was unwinding.
+// Measured on MRI 4.0.5 for File.open, for IO.open and for a bare
+// begin/raise/ensure/raise alike — all three answer with the ensure's.
+func (vm *VM) ioYieldAndClose(o *IOObj, blk *Proc) object.Value {
+	var ret object.Value
+	blockRec := recoverAny(func() { ret = vm.callBlock(blk, []object.Value{o}) })
+	closeRec := recoverAny(func() { vm.send(o, "close", nil, nil) })
+	if re, isRE := closeRec.(RubyError); isRE && re.Class == "IOError" && re.Message == "closed stream" {
+		closeRec = nil
+	}
+	if closeRec != nil {
+		panic(closeRec)
+	}
+	if blockRec != nil {
+		panic(blockRec)
+	}
+	return ret
+}
+
+// ioFdArg is rb_check_to_int on a File.open/File.new first argument: an Integer,
+// or an object that converts to one with #to_int, is a descriptor. Everything
+// else — a String, a Pathname, anything answering only #to_path — is a path, and
+// the bool says so rather than raising, because the caller has a path to try.
+func (vm *VM) ioFdArg(v object.Value) (int, bool) {
+	if i, ok := v.(object.Integer); ok {
+		return int(i), true
+	}
+	if vm.respondsToDynamic(v, "to_int") {
+		return int(vm.repeatLong(v)), true
+	}
+	return 0, false
+}
+
+// ioAdoptFd builds a stream of class cls over the descriptor fd — io_initialize,
+// which IO.new, IO.for_fd and the File.new(fd) form all reach. rbgo has no real
+// descriptors (see ioFd), so fd is looked up in the synthetic table #fileno
+// fills; one that is not there is the EBADF an unknown descriptor gives.
+func (vm *VM) ioAdoptFd(cls *RClass, fd int, pos []object.Value, opts *object.Hash) *IOObj {
+	src, ok := vm.fdTable[fd]
+	if !ok {
+		raise("Errno::EBADF", "Bad file descriptor - fd %d", fd)
+	}
+	if src.closed {
+		raise("IOError", "closed stream")
+	}
+	res := &IOObj{cls: cls}
+	vm.ioAdoptDescriptor(res, src, pos, opts)
+	// The wrapper answers #fileno with the descriptor it wraps, as dup-free
+	// io_initialize does — File.open(f.fileno).fileno == f.fileno.
+	res.fd = fd
+	return res
+}
+
 func (vm *VM) ioAdoptDescriptor(o, src *IOObj, pos []object.Value, opts *object.Hash) {
 	ms := vm.ioResolveModeEnc(pos, opts)
 	o.isStr, o.buf, o.path = true, src.buf, src.path
