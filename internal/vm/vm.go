@@ -2048,7 +2048,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// no method entry — the top level, a class body — answers nil.
 				// homeSuperName/homeSuperDefinee are the same pair the super CALL uses,
 				// so a block and a define_method body answer for their home method.
-				if homeSuperName != "" && vm.superMethod(self, homeSuperDefinee, homeSuperName) != nil {
+				if vm.superMethod(self, homeSuperDefinee, homeSuperName) != nil {
 					push(definedTag(bytecode.DefinedZSuper))
 				} else {
 					push(object.NilV)
@@ -2635,7 +2635,10 @@ func (vm *VM) invokeSuper(self object.Value, definee *RClass, methodName string,
 // defined_class (vm_insnhelper.c v3_4_0:5505-5518), i.e. the same search the
 // call performs, so the two must not drift apart.
 func (vm *VM) superMethod(self object.Value, definee *RClass, methodName string) *Method {
-	if methodName == "" || definee == nil {
+	// A frame with no method entry — the top level, a class body — has no super
+	// to find. MRI's DEFINED_ZSUPER asks the same question of
+	// rb_vm_frame_method_entry before searching (vm_insnhelper.c v3_4_0:5507).
+	if methodName == "" {
 		return nil
 	}
 	// super inside a refinement method resolves in the refined class only — its
