@@ -117,12 +117,12 @@ corpus at `SPEC_SHA=87b1631992bd00cf0c4934474766d54dad088191`, darwin/arm64,
 
 | | |
 | --- | --- |
-| **passing examples** | **21,901** (four consecutive runs: 21 845 · 21 903 · 21 901 · 21 902) |
-| fail / error | 1 349 / 794 |
+| **passing examples** | **21,901** (four consecutive runs: 21,845 · 21,903 · 21,901 · 21,902) |
+| fail / error | 1,349 / 794 |
 | skipped | 473 |
-| pass rate of examples that ran | **91.1 %** (21 901 of 24 044) |
-| spec files | 2 191 of 2 206 produce a result; 15 produce none |
-| **CI floor** (`FLOOR`) | **21 740** |
+| pass rate of examples that ran | **91.1 %** (21,901 of 24,044) |
+| spec files | 2,191 of 2,206 produce a result; 15 produce none |
+| **CI floor** (`FLOOR`) | **21,740** |
 
 **The floor is not the score.** `FLOOR` says *"no run may come in below this"* —
 it is a shrink-only ratchet, raised deliberately in its own PR after a win. The
@@ -144,19 +144,19 @@ guaranteed figure.
 >   example under `instance_eval`, so a helper defined in an outer `describe` was
 >   unreachable from a nested one. `core/string/valid_encoding/utf_8_spec.rb`
 >   scored **0 of 28 — and 0 of 28 under MRI 4.0.5 too**, through the same shim.
->   Fixing the shim moved the corpus 20 905 → 20 936, of which **28 are
+>   Fixing the shim moved the corpus 20,905 → 20,936, of which **28 are
 >   attributable**.
 > - **The parser upgrade to v0.2.0**
 >   ([#625](https://github.com/go-embedded-ruby/ruby/pull/625)) made **13
 >   `language/*_spec.rb` files parseable that had never parsed at all**. They had
 >   been contributing zero to *both* columns — not failing, invisible. `language/`
->   went 1 443 → 1 776 passing (+333), while `fail+error` rose 283 → 436, because
+>   went 1,443 → 1,776 passing (+333), while `fail+error` rose 283 → 436, because
 >   those files brought their own failures with them.
 >
 > Both are gains in what the measurement can **see**, not in what the VM can
-> **do**. The rest of the climb — the floor went from **6 000** when the ratchet
+> **do**. The rest of the climb — the floor went from **6,000** when the ratchet
 > landed on 2026-08-03 ([#263](https://github.com/go-embedded-ruby/ruby/pull/263))
-> to **21 740** today, across 26 conformance waves — is the VM.
+> to **21,740** today, across 26 conformance waves — is the VM.
 
 There is no honest denominator for "percent of Ruby". 91.1 % is the share of the
 examples *this shim actually ran*; the shim is not mspec, it stubs some matchers
@@ -637,7 +637,7 @@ Phase 8 (conformance and
 representation/perf tuning) is well advanced. The 2026-06 campaign brought the
 **front-end** to ~100 % parse / 99.82 % parse+compile on real-world Ruby; since
 July the work has been **runtime** conformance, and the ruby/spec ratchet has
-gone from a floor of 6 000 to 21 740 across 26 waves, measuring **21 901**
+gone from a floor of 6,000 to 21,740 across 26 waves, measuring **21,901**
 passing examples today. On the performance side small-integer interning and capture-tracked
 frame-environment recycling have cut call-path allocations (a small-int loop from
 ~245k allocations to 1; recursion's call allocations halved, ~14% faster), with
@@ -780,8 +780,8 @@ oracle below: the ratchet is the absolute floor, the oracle catches divergences
 the specs don't cover.
 
 **The floor and the measurement are two different numbers.** `FLOOR` is
-**21 740** — the level CI refuses to fall below. A run on `main` today measures
-**21 901** passing (low run of four: 21 845), i.e. normally ~160 above the floor;
+**21,740** — the level CI refuses to fall below. A run on `main` today measures
+**21,901** passing (low run of four: 21,845), i.e. normally ~160 above the floor;
 the floor is raised to meet it in a deliberate PR after each wave. See
 *Runtime conformance* above for the full breakdown, the run-to-run spread
 ([#615](https://github.com/go-embedded-ruby/ruby/issues/615)) and what the ratio
@@ -832,9 +832,9 @@ On top of the front-end sweeps, a **ruby/spec ratchet** runs the `language/` and
 specification of the language — through `rbgo` under a minimal MSpec-compatible
 shim, and gates CI on a **shrink-only floor** of passing examples
 ([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), floor in
-`FLOOR`, currently **21 740**). The floor can only be raised, so measured
+`FLOOR`, currently **21,740**). The floor can only be raised, so measured
 language conformance moves in one direction — but the floor is a *gate*, not the
-result: the measured total today is **21 901**. Run it with
+result: the measured total today is **21,901**. Run it with
 `scripts/conformance/rubyspec/run.sh`, and see *Runtime conformance* under
 *Status* for the full breakdown.
 
