@@ -6,6 +6,7 @@ import (
 	"os/user"
 	"path"          // always '/'-separated, as Ruby's File is — not path/filepath
 	"path/filepath" // OS-native, only for symlink resolution (File.realpath)
+	"sort"
 	"strings"
 	"syscall"
 	stdtime "time"
@@ -40,24 +41,7 @@ func (vm *VM) registerFile() {
 	errno := newClass("Errno", nil)
 	errno.isModule = true
 	vm.consts["Errno"] = errno
-	// Each Errno::Exxx is a SystemCallError subclass, registered both scoped (for
-	// `rescue Errno::ENOENT`) and flat (so an internal raise resolves the name).
-	// The set covers the common POSIX errnos that file/IO code and libraries such
-	// as Puppet rescue; an internal raise still uses the name string directly.
-	for _, name := range []string{
-		"ENOENT", "EEXIST", "EACCES", "ENOTDIR", "EISDIR", "EPERM", "EINVAL",
-		"EAGAIN", "EBADF", "ESRCH", "EIO", "ENOSPC", "EROFS", "ENXIO", "ENOTEMPTY",
-		"ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EPIPE", "ELOOP", "ENAMETOOLONG",
-		"EADDRINUSE", "EINTR", "ECHILD", "ENOMEM", "EXDEV", "EMFILE", "ENFILE",
-	} {
-		c := newClass("Errno::"+name, syscallErr)
-		// Each Errno::Exxx carries its platform errno number as the class constant
-		// Errno::ENOENT::Errno (2 on this host), which SystemCallError#errno reads
-		// back. Values come from the host syscall table so they match the host MRI.
-		c.consts["Errno"] = object.IntValue(errnoNumbers[name])
-		errno.consts[name] = c
-		vm.consts["Errno::"+name] = c
-	}
+	vm.registerErrnoClasses(syscallErr, errno)
 
 	cFile := newClass("File", vm.cObject)
 	vm.consts["File"] = cFile
@@ -208,22 +192,24 @@ func (vm *VM) registerFile() {
 
 	def("exist?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		oneArg(args)
-		_, err := os.Stat(pathArg(vm, args[0]))
+		_, err := os.Stat(vm.statPathArg(args[0]))
 		return object.Bool(err == nil)
 	})
 	def("file?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		oneArg(args)
-		fi, err := os.Stat(pathArg(vm, args[0]))
+		fi, err := os.Stat(vm.statPathArg(args[0]))
 		return object.Bool(err == nil && fi.Mode().IsRegular())
 	})
 	def("directory?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fi, err := os.Stat(pathArg(vm, args[0]))
+		oneArg(args)
+		fi, err := os.Stat(vm.statPathArg(args[0]))
 		return object.Bool(err == nil && fi.IsDir())
 	})
 	// File.symlink? reports whether the path is a symbolic link. Like MRI it uses
 	// lstat (does not follow the link) and returns false for a missing path or a
 	// non-symlink, rather than raising.
 	def("symlink?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		oneArg(args)
 		fi, err := os.Lstat(pathArg(vm, args[0]))
 		return object.Bool(err == nil && fi.Mode()&os.ModeSymlink != 0)
 	})
@@ -247,18 +233,19 @@ func (vm *VM) registerFile() {
 	// Errno::ENOENT is raised. An optional second argument is the base directory
 	// a relative path is resolved against.
 	def("realpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := vm.fileExpand(vm.filePathArg(args[0]), args[1:], true)
-		resolved, err := filepath.EvalSymlinks(p)
+		raw := vm.filePathArg(args[0])
+		p := vm.fileExpand(raw, args[1:], true)
+		resolved, err := realpathResolve(p, true, strings.HasSuffix(raw, "/"))
 		if err != nil {
-			raiseRealpathErr(p)
+			raiseRealpathErr(err, p)
 		}
-		return object.NewString(toSlash(resolved))
+		return object.NewString(resolved)
 	})
 	// File.read / File.write / File.binread / File.binwrite are the same class
 	// methods as IO's, installed on both tables by registerIOClassMethods once the
 	// IO class exists (registerIO runs after registerFile).
 	def("size", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := pathArg(vm, args[0])
+		p := vm.statPathArg(args[0])
 		fi, err := os.Stat(p)
 		if err != nil {
 			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
@@ -398,6 +385,7 @@ func (vm *VM) registerFile() {
 	// false for a missing path rather than raising (MRI's File.<predicate>).
 	access := func(want int) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			oneArg(args)
 			p := pathArg(vm, args[0])
 			fi, err := osStat(p)
 			if err != nil {
@@ -412,6 +400,7 @@ func (vm *VM) registerFile() {
 	// The *_real? predicates consult the process's real (not effective) identity.
 	realAccess := func(want int) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+			oneArg(args)
 			p := pathArg(vm, args[0])
 			fi, err := osStat(p)
 			if err != nil {
@@ -430,14 +419,16 @@ func (vm *VM) registerFile() {
 	// return their falsey value for a missing path rather than raising (unlike
 	// File.size, which raises Errno::ENOENT).
 	def("size?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fi, err := os.Stat(pathArg(vm, args[0]))
+		oneArg(args)
+		fi, err := os.Stat(vm.statPathArg(args[0]))
 		if err != nil || fi.Size() == 0 {
 			return object.NilV
 		}
 		return object.IntValue(fi.Size())
 	})
 	zero := func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fi, err := os.Stat(pathArg(vm, args[0]))
+		oneArg(args)
+		fi, err := os.Stat(vm.statPathArg(args[0]))
 		return object.Bool(err == nil && fi.Size() == 0)
 	}
 	def("zero?", zero)
@@ -449,7 +440,8 @@ func (vm *VM) registerFile() {
 	// missing path (MRI's File.pipe?/socket?/…). statTest wraps the stat-and-test.
 	statTest := func(pred func(*FileStat) bool) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			p := pathArg(vm, args[0])
+			oneArg(args)
+			p := vm.statPathArg(args[0])
 			fi, err := os.Stat(p)
 			if err != nil {
 				return object.Bool(false)
@@ -477,7 +469,8 @@ func (vm *VM) registerFile() {
 	// filestat_windows.go), so world_writable? is nil on Windows as MRI reports.
 	worldPerm := func(bit int64) NativeFn {
 		return func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-			fi, err := os.Stat(pathArg(vm, args[0]))
+			oneArg(args)
+			fi, err := os.Stat(vm.statPathArg(args[0]))
 			if err != nil {
 				return object.NilV
 			}
@@ -496,8 +489,8 @@ func (vm *VM) registerFile() {
 		if len(args) != 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 2)", len(args))
 		}
-		fi1, err1 := os.Stat(pathArg(vm, args[0]))
-		fi2, err2 := os.Stat(pathArg(vm, args[1]))
+		fi1, err1 := os.Stat(vm.statPathArg(args[0]))
+		fi2, err2 := os.Stat(vm.statPathArg(args[1]))
 		return object.Bool(err1 == nil && err2 == nil && os.SameFile(fi1, fi2))
 	})
 
@@ -574,7 +567,14 @@ func (vm *VM) registerFile() {
 	// symlink is resolved where possible, and an absent leaf is joined onto the
 	// resolved directory. A missing intermediate directory raises Errno::ENOENT.
 	def("realdirpath", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.NewString(realdirpath(vm.fileExpand(vm.filePathArg(args[0]), args[1:], true)))
+		raw := vm.filePathArg(args[0])
+		resolved, err := realpathResolve(vm.fileExpand(raw, args[1:], true), false, strings.HasSuffix(raw, "/"))
+		if err != nil {
+			// realdirpath IS the emulation, so every failure keeps realpath_rec's
+			// own name and the component that failed.
+			raise(err.class, "%s @ realpath_rec - %s", err.message, err.path)
+		}
+		return object.NewString(resolved)
 	})
 	// File.path returns the string (or #to_path) form of its argument unchanged —
 	// no expansion, matching MRI.
@@ -602,45 +602,19 @@ func raiseLinkErr(err error, marker, src string) {
 	raise("Errno::ENOENT", "No such file or directory @ %s - %s", marker, src)
 }
 
-// realdirpath resolves an already-expanded absolute path's symlinks, tolerating a
-// non-existent leaf: if the whole path resolves it is returned, otherwise the
-// parent directory is resolved and the leaf re-joined. A missing parent raises
-// Errno::ENOENT.
-func realdirpath(p string) string {
-	resolved, err := filepath.EvalSymlinks(filepath.FromSlash(p))
-	if err == nil {
-		return toSlash(resolved)
+// raiseRealpathErr reports a File.realpath failure with MRI's wording. MRI does
+// NOT reach its own emulation first there: rb_check_realpath_internal
+// (ruby/ruby v3_4_0 file.c:4554) calls realpath(3) and, when that fails with
+// anything but ENOTDIR (or an ENOENT on a path that does exist), raises
+// rb_sys_fail_path against the WHOLE argument under its own function name. Only
+// ENOTDIR falls through to the emulation, which is why a path that walks through
+// a regular file is the one File.realpath error that names realpath_rec and the
+// offending component instead.
+func raiseRealpathErr(err *realpathErr, arg string) {
+	if err.class == "Errno::ENOTDIR" {
+		raise(err.class, "%s @ realpath_rec - %s", err.message, err.path)
 	}
-	// A symlink loop is Errno::ELOOP even though realdirpath tolerates an absent
-	// leaf — the loop is a hard resolution failure, not a missing final component.
-	if isSymlinkLoop(p) {
-		raise("Errno::ELOOP", "Too many levels of symbolic links @ realpath_rec - %s", p)
-	}
-	dir, base := rubyDirname(p), rubyBasename(p)
-	resolvedDir, err := filepath.EvalSymlinks(filepath.FromSlash(dir))
-	if err != nil {
-		raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", dir)
-	}
-	return toSlash(filepath.Join(resolvedDir, base))
-}
-
-// isSymlinkLoop reports whether resolving p fails with ELOOP (a symlink cycle).
-// filepath.EvalSymlinks returns a bare "too many links" error that does NOT wrap
-// syscall.ELOOP, so the real errno is recovered by re-stating the path (os.Stat
-// follows the link and surfaces the kernel's ELOOP).
-func isSymlinkLoop(p string) bool {
-	_, err := osStat(filepath.FromSlash(p))
-	return errors.Is(err, syscall.ELOOP)
-}
-
-// raiseRealpathErr maps a File.realpath EvalSymlinks failure to the MRI errno: a
-// symbolic-link loop is Errno::ELOOP, anything else (a missing component) is
-// Errno::ENOENT.
-func raiseRealpathErr(p string) {
-	if isSymlinkLoop(p) {
-		raise("Errno::ELOOP", "Too many levels of symbolic links @ realpath_rec - %s", p)
-	}
-	raise("Errno::ENOENT", "No such file or directory @ realpath_rec - %s", p)
+	raise(err.class, "%s @ rb_check_realpath_internal - %s", err.message, arg)
 }
 
 // oneArg enforces the single-argument arity MRI's one-path File predicates check
@@ -993,4 +967,112 @@ func timeArgUnixOrNow(v object.Value) int64 {
 		return stdtime.Now().Unix()
 	}
 	return timeArgUnix(v)
+}
+
+// registerErrnoClasses installs the Errno::Exxx hierarchy under the Errno module
+// the way MRI's Init_syserr does (ruby/ruby v3_4_0 error.c:4204, set_syserr at
+// error.c:3064): one SystemCallError subclass PER ERRNO NUMBER, and a constant
+// per name — so several names can denote one class. Each class carries its number
+// as its own Errno constant (Errno::ENOENT::Errno), which SystemCallError#errno
+// and SystemCallError.=== read back. Every class is registered under the flat
+// "Errno::ENOENT" key too, so the internal raise() resolves it by name.
+//
+// Registration order fixes which name a shared class takes (MRI names it after
+// the first constant registered for the number), so the numbered names are
+// installed in sorted order before the aliases, matching MRI's alphabetically
+// generated known_errors.inc.
+func (vm *VM) registerErrnoClasses(syscallErr, errno *RClass) {
+	byNumber := make(map[int64]*RClass, len(errnoNumbers))
+	bind := func(name string, c *RClass) {
+		errno.consts[name] = c
+		vm.consts["Errno::"+name] = c
+	}
+	names := make([]string, 0, len(errnoNumbers))
+	for name := range errnoNumbers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		n := errnoNumbers[name]
+		c, seen := byNumber[n]
+		if !seen {
+			c = newClass("Errno::"+name, syscallErr)
+			c.consts["Errno"] = object.IntValue(n)
+			byNumber[n] = c
+		}
+		bind(name, c)
+	}
+	// A name the platform spells differently for an errno it already has (only
+	// EWOULDBLOCK today) becomes a second constant on that very class, which is
+	// what makes Errno::EWOULDBLOCK.equal?(Errno::EAGAIN) hold.
+	for name, of := range errnoAliases {
+		if c, ok := errno.consts[of].(*RClass); ok {
+			bind(name, c)
+		}
+	}
+	// MRI's undefined_error: a name with no number on this platform is still a
+	// constant, naming Errno::NOERROR.
+	noerror := errno.consts["NOERROR"].(*RClass)
+	for _, name := range errnoUndefinedNames {
+		bind(name, noerror)
+	}
+}
+
+// errnoClass returns the Errno::Exxx class registered for errno number n, or nil
+// when no class claims it — MRI's st_lookup(syserr_tbl, n) (ruby/ruby v3_4_0
+// error.c:3080), which is what decides whether SystemCallError.new(n) becomes a
+// specific Errno subclass or stays a generic SystemCallError. The lookup reads
+// the classes' own Errno constants rather than a parallel table, so it cannot
+// fall out of step with the constants Ruby code sees.
+func (vm *VM) errnoClass(n int64) *RClass {
+	mod, ok := vm.consts["Errno"].(*RClass)
+	if !ok {
+		return nil
+	}
+	for _, v := range mod.consts {
+		c, ok := v.(*RClass)
+		if !ok {
+			continue
+		}
+		if e, ok := c.consts["Errno"].(object.Integer); ok && int64(e) == n {
+			return c
+		}
+	}
+	return nil
+}
+
+// statPathArg resolves an argument of the stat-predicate family the way MRI's
+// rb_stat does (ruby/ruby v3_4_0 file.c:1304): an OPEN STREAM is accepted as
+// well as a path, and any object that answers #to_io is converted first —
+//
+//	tmp = rb_check_convert_type_with_id(file, T_FILE, "IO", idTo_io);
+//	if (!NIL_P(tmp)) { ... fstat_without_gvl(fptr, st); }
+//	else { FilePathValue(file); ... stat_without_gvl(...); }
+//
+// so File.directory?(io), File.size(io) and FileTest.directory?(to_io_object)
+// all work. MRI fstats the descriptor; rbgo's File streams are buffered by
+// path, so the stream's path is what gets stated — the same answer except for a
+// stream whose file has since been unlinked.
+//
+// Only the rb_stat family takes this: File.readable?/writable?/executable? and
+// the *_real? predicates go through rb_eaccess, which calls FilePathValue
+// directly and so rejects an IO, and symlink?/ftype lstat a path.
+func (vm *VM) statPathArg(v object.Value) string {
+	if o, ok := v.(*IOObj); ok {
+		return o.path
+	}
+	if vm.respondsToDynamic(v, "to_io") {
+		// rb_check_convert_type_with_id does not silently ignore a #to_io that
+		// answers something that is not an IO: it is the "can't convert X to IO
+		// (X#to_io gives Y)" TypeError, the same shape every rb_convert_type
+		// failure takes.
+		r := vm.send(v, "to_io", nil, nil)
+		o, ok := r.(*IOObj)
+		if !ok {
+			raise("TypeError", "can't convert %s to IO (%s#to_io gives %s)",
+				vm.classOf(v).name, vm.classOf(v).name, vm.classOf(r).name)
+		}
+		return o.path
+	}
+	return pathArg(vm, v)
 }

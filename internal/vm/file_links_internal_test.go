@@ -7,6 +7,7 @@ package vm
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -72,8 +73,19 @@ func TestFileRealdirpath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := runFS(t, `p File.realdirpath("`+slash(f)+`")`); got != "\""+slash(canon)+"\"\n" {
-		t.Errorf("realdirpath(existing): got %q want %q", got, slash(canon))
+	// Go's filepath.EvalSymlinks is the oracle for symlink resolution, but on
+	// Windows it also expands an 8.3 short name (C:/Users/RUNNER~1 ->
+	// C:/Users/runneradmin) and realpath_rec does not. Whether MRI expands it
+	// there is unwitnessed — there is no Windows MRI on this host — so the two
+	// canonicalisers are only compared where they agree by construction, and
+	// Windows asserts the properties that hold either way. See issue #636.
+	res := strings.TrimSpace(runFS(t, `p File.realdirpath("`+slash(f)+`")`))
+	if runtime.GOOS == "windows" {
+		if !strings.HasPrefix(res, `"`) || !strings.HasSuffix(res, `/file"`) || strings.Contains(res, `\`) {
+			t.Errorf("realdirpath(existing) on windows: got %s, want a forward-slashed path naming the file", res)
+		}
+	} else if want := "\"" + slash(canon) + "\""; res != want {
+		t.Errorf("realdirpath(existing): got %s want %s", res, want)
 	}
 	// Leaf missing: the parent resolves and the leaf is rejoined.
 	leaf := slash(real) + "/newleaf"

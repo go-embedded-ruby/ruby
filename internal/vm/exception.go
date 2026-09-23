@@ -237,20 +237,7 @@ func (vm *VM) registerExceptionMethods(cException *RClass) {
 		return getIvar(self, "@value")
 	})
 
-	// SystemCallError#errno: the platform errno of the Errno::* subclass — its
-	// class-level Errno constant (Errno::ENOENT::Errno). nil for a bare
-	// SystemCallError with no errno.
-	vm.consts["SystemCallError"].(*RClass).define("errno", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		// Walk the class ancestry up to (but not including) Object, whose constant
-		// table is the top level and holds the unrelated Errno *module*. Each
-		// Errno::Exxx carries its own integer Errno constant.
-		for c := vm.classOf(self); c != nil && c != vm.cObject; c = c.super {
-			if e, ok := c.consts["Errno"]; ok {
-				return e
-			}
-		}
-		return object.NilV
-	})
+	vm.registerSystemCallError()
 
 	vm.registerBacktraceLocation()
 	vm.registerThreadBacktrace()
@@ -266,9 +253,14 @@ func (vm *VM) exceptionMessageArg(v object.Value) string {
 }
 
 // exceptionInspect renders Exception#inspect (see the method comment above).
+// The message is taken through rb_obj_as_string(exc) — MRI's exc_inspect
+// (ruby/ruby v3_4_0 error.c:1838) dispatches #to_s rather than reading the
+// stored message, so a subclass that overrides #to_s changes what #inspect
+// reports; a #to_s that does not return a String falls back to the object's own
+// identity representation, as rb_any_to_s does.
 func (vm *VM) exceptionInspect(self object.Value) string {
 	cls := vm.classOf(self).name
-	msg := vm.exceptionMessageText(self)
+	msg := vm.objAsString(self)
 	if msg == "" {
 		return cls
 	}
@@ -528,4 +520,160 @@ func sliceBacktraceFrames(vm *VM, full []object.Value, args []object.Value) ([]o
 		return nil, false
 	}
 	return res.(*object.Array).Elems, true
+}
+
+// errnoIvar holds a SystemCallError's error number. MRI stores it under the
+// hidden id_errno (no @), so it does not show up in #instance_variables; rbgo has
+// no hidden-ivar slot, so it follows the @__name__ convention used for the
+// backtrace and cause.
+const errnoIvar = "@__errno__"
+
+// registerSystemCallError installs SystemCallError's own protocol: #initialize
+// (which both builds the message and decides which Errno::Exxx class the object
+// ends up being), #errno and the .=== that makes `rescue Errno::EINVAL` match by
+// error number rather than by class. Sources: ruby/ruby v3_4_0 error.c —
+// syserr_initialize (error.c:3104), syserr_errno (error.c:3153) and syserr_eqq
+// (error.c:3168).
+func (vm *VM) registerSystemCallError() {
+	cls := vm.consts["SystemCallError"].(*RClass)
+
+	cls.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		vm.syserrInitialize(self, args)
+		return object.NilV
+	})
+
+	// SystemCallError#errno is MRI's rb_attr_get(self, id_errno): the value
+	// #initialize stored, which is the argument AS GIVEN (SystemCallError.new("x",
+	// 2.9).errno is 2.9, even though the class lookup truncated it to 2). It is
+	// nil for a generic SystemCallError built with no error number. An Errno::Exxx
+	// raised internally never ran #initialize, so its class's own Errno constant
+	// is the fallback.
+	cls.define("errno", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		if e := getIvar(self, errnoIvar); e != object.NilV {
+			return e
+		}
+		return vm.classErrno(vm.classOf(self))
+	})
+
+	// SystemCallError.=== matches by ERROR NUMBER, not by class: a generic
+	// SystemCallError matches any SystemCallError, and an Errno::Exxx matches
+	// anything whose #errno equals its own Errno constant. That is what lets a
+	// `rescue Errno::EINVAL` catch a SystemCallError.new("foo", EINVAL) that was
+	// never given EINVAL's class.
+	cls.smethods["==="] = &Method{name: "===", owner: cls, native: func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1)", len(args))
+		}
+		return object.Bool(vm.syserrEqq(self.(*RClass), args[0]))
+	}}
+}
+
+// classErrno reads the Errno constant a class carries (Errno::ENOENT::Errno),
+// walking up the ancestry — so a user subclass of Errno::ENOENT inherits it — and
+// stopping before Object, whose constant table is the top level and holds the
+// unrelated Errno *module*. It returns nil when no ancestor carries one.
+func (vm *VM) classErrno(c *RClass) object.Value {
+	for ; c != nil && c != vm.cObject; c = c.super {
+		if e, ok := c.consts["Errno"]; ok {
+			return e
+		}
+	}
+	return object.NilV
+}
+
+// syserrEqq is MRI's syserr_eqq (ruby/ruby v3_4_0 error.c:3168): a non-
+// SystemCallError that does not even answer #errno never matches; a generic
+// SystemCallError receiver matches every SystemCallError; otherwise the
+// argument's #errno is compared with the receiver's own Errno constant.
+func (vm *VM) syserrEqq(recv *RClass, exc object.Value) bool {
+	generic := vm.consts["SystemCallError"].(*RClass)
+	if !classIsA(vm.classOf(exc), generic) {
+		if !vm.respondsTo(exc, "errno") {
+			return false
+		}
+	} else if recv == generic {
+		return true
+	}
+	num := getIvar(exc, errnoIvar)
+	if num == object.NilV {
+		num = vm.send(exc, "errno", nil, nil)
+	}
+	e := vm.classErrno(recv)
+	if a, ok := num.(object.Integer); ok {
+		b, ok := e.(object.Integer)
+		return ok && a == b
+	}
+	return vm.send(num, "==", []object.Value{e}, nil).Truthy()
+}
+
+// syserrInitialize is MRI's syserr_initialize (ruby/ruby v3_4_0 error.c:3104).
+// Two shapes share one method:
+//
+//   - On SystemCallError itself: (msg, errno = nil, func = nil), except that a
+//     lone Integer argument IS the errno. When the number has a registered class
+//     the object BECOMES an instance of it — MRI rewrites the receiver's class in
+//     place (RBASIC_SET_CLASS), which is why SystemCallError.new(Errno::EINVAL::
+//     Errno).instance_of?(Errno::EINVAL) holds.
+//   - On a subclass (Errno::EINVAL, or a user subclass of one): (msg = nil,
+//     func = nil), with the error number taken from the class's Errno constant.
+//
+// The message is then strerror(errno) — "unknown error" when there is no number —
+// with " @ <func>" and " - <msg>" appended when those were given, so
+// Errno::EINVAL.new("custom", "loc").message is
+// "Invalid argument @ loc - custom".
+func (vm *VM) syserrInitialize(self object.Value, args []object.Value) {
+	var mesg, errVal, fn object.Value = object.NilV, object.NilV, object.NilV
+	if vm.classOf(self) == vm.consts["SystemCallError"].(*RClass) {
+		if len(args) < 1 || len(args) > 3 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(args))
+		}
+		mesg, errVal, fn = args[0], argAt(args, 1), argAt(args, 2)
+		// A single Integer argument is the errno, not the message. MRI tests
+		// FIXNUM_P, so a Float or a String stays the message (and a Float then
+		// fails StringValue below, as it does in MRI).
+		if i, ok := args[0].(object.Integer); ok && len(args) == 1 {
+			mesg, errVal = object.NilV, i
+		}
+		if !object.IsNil(errVal) {
+			vm.becomeErrnoClass(self, coerceInt(vm, errVal))
+		}
+	} else {
+		if len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..2)", len(args))
+		}
+		mesg, fn = argAt(args, 0), argAt(args, 1)
+		errVal = vm.classErrno(vm.classOf(self))
+	}
+
+	msg := "unknown error"
+	if !object.IsNil(errVal) {
+		msg = errnoStrerror(coerceInt(vm, errVal))
+	}
+	if !object.IsNil(mesg) {
+		// StringValue(mesg) first: a Symbol message is a TypeError even though the
+		// location is appended before it in the result.
+		text := vm.coerceFormatString(mesg)
+		if !object.IsNil(fn) {
+			msg += " @ " + vm.send(fn, "to_s", nil, nil).ToS()
+		}
+		msg += " - " + text
+	}
+	setIvar(self, "@message", object.NewString(msg))
+	setIvar(self, errnoIvar, errVal)
+}
+
+// becomeErrnoClass rewrites self's class to the Errno::Exxx registered for errno
+// number n, the way MRI's syserr_initialize does with RBASIC_SET_CLASS. A number
+// no class claims leaves the object a generic SystemCallError, and a receiver
+// that is not a plain object is MRI's "invalid instance type" TypeError.
+func (vm *VM) becomeErrnoClass(self object.Value, n int64) {
+	c := vm.errnoClass(n)
+	if c == nil {
+		return
+	}
+	o, ok := self.(*RObject)
+	if !ok {
+		raise("TypeError", "invalid instance type")
+	}
+	o.class = c
 }

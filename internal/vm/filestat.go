@@ -7,6 +7,9 @@ package vm
 import (
 	"io/fs"
 	"os"
+	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -20,6 +23,14 @@ type statFields struct {
 	uid, gid, ino, dev, nlink, blksize int64
 	rdev, blocks                       int64
 	hasSys                             bool
+	// atime/ctime/btime are the stat struct's access, status-change and birth
+	// times in whole seconds, filled by statTimestamps rather than by the
+	// build-tagged statSys: the FIELDS are spelled differently per platform
+	// (Linux's Atim vs the BSDs' Atimespec) but reading them is one shared rule,
+	// so it lives in the shared file where the POSIX lanes can cover it.
+	// hasBtime is false where the platform has no creation time at all.
+	atime, ctime, btime int64
+	hasBtime            bool
 }
 
 // FileStat is the Ruby File::Stat value: a thin shell over Go's fs.FileInfo plus
@@ -31,9 +42,52 @@ type FileStat struct {
 	path string
 }
 
-func (s *FileStat) ToS() string     { return "#<File::Stat>" }
-func (s *FileStat) Inspect() string { return "#<File::Stat>" }
-func (s *FileStat) Truthy() bool    { return true }
+func (s *FileStat) ToS() string  { return "#<File::Stat>" }
+func (s *FileStat) Truthy() bool { return true }
+
+// Inspect renders File::Stat#inspect, MRI's rb_stat_inspect (ruby/ruby v3_4_0
+// file.c:1080): the member list in that exact order, dev and rdev in
+// hexadecimal, mode in octal with a leading zero, and the rest through their
+// own inspect form. birthtime appears only where the platform has a creation
+// time, which is MRI's HAVE_STRUCT_STAT_ST_BIRTHTIMESPEC guard.
+//
+// It is the NATIVE form rather than a dispatch through the Ruby accessors
+// because rb_stat_inspect calls the C member functions directly: a subclass
+// that overrides #uid does not change what #inspect prints. One implementation
+// also means Kernel#p, which reaches this method, prints exactly what
+// stat.inspect returns.
+func (s *FileStat) Inspect() string {
+	var b strings.Builder
+	b.WriteString("#<File::Stat ")
+	for _, m := range []struct {
+		name string
+		val  string
+	}{
+		{"dev", "0x" + strconv.FormatInt(s.sys.dev, 16)},
+		{"ino", strconv.FormatInt(s.sys.ino, 10)},
+		{"mode", "0" + strconv.FormatInt(s.modeBits(), 8)},
+		{"nlink", strconv.FormatInt(s.sys.nlink, 10)},
+		{"uid", strconv.FormatInt(s.sys.uid, 10)},
+		{"gid", strconv.FormatInt(s.sys.gid, 10)},
+		{"rdev", "0x" + strconv.FormatInt(s.sys.rdev, 16)},
+		{"size", strconv.FormatInt(s.fi.Size(), 10)},
+		{"blksize", strconv.FormatInt(s.sys.blksize, 10)},
+		{"blocks", s.blocksValue().Inspect()},
+		{"atime", statTime(s.sys.atime).Inspect()},
+		{"mtime", statTime(s.fi.ModTime().Unix()).Inspect()},
+		{"ctime", statTime(s.sys.ctime).Inspect()},
+	} {
+		if b.Len() > len("#<File::Stat ") {
+			b.WriteString(", ")
+		}
+		b.WriteString(m.name + "=" + m.val)
+	}
+	if s.sys.hasBtime {
+		b.WriteString(", birthtime=" + statTime(s.sys.btime).Inspect())
+	}
+	b.WriteString(">")
+	return b.String()
+}
 
 // sysExtract is the seam over the build-tagged statSys, so a test can swap in a
 // stub and drive both the real-Sys and missing-Sys branches identically on every
@@ -62,7 +116,67 @@ var (
 
 // newFileStat builds a FileStat from an fs.FileInfo, extracting the POSIX fields.
 func newFileStat(fi fs.FileInfo, path string) *FileStat {
-	return &FileStat{fi: fi, sys: sysExtract(fi), path: path}
+	return &FileStat{fi: fi, sys: statTimestamps(fi, sysExtract(fi)), path: path}
+}
+
+// statTimestamps fills the access/status-change/birth times of a stat struct
+// that statSys cannot name portably. MRI reads st_atime, st_ctime and
+// st_birthtime straight off struct stat (ruby/ruby v3_4_0 file.c
+// rb_file_s_atime / stat_atime), but Go's syscall.Stat_t spells them
+// differently on each platform — Atim/Ctim/Mtim on Linux, Atimespec/Ctimespec/
+// Birthtimespec on the BSDs and macOS, and Windows has no such struct at all —
+// so naming a field in shared code does not compile. Reflection reads whichever
+// one the platform provides, and leaves the value at the modification time when
+// there is none, which is what rbgo reported for every platform before.
+func statTimestamps(fi fs.FileInfo, sf statFields) statFields {
+	mtime := fi.ModTime().Unix()
+	sys := fi.Sys()
+	sf.atime, sf.ctime = mtime, mtime
+	if sec, ok := statTimeField(sys, "Atim", "Atimespec"); ok {
+		sf.atime = sec
+	}
+	if sec, ok := statTimeField(sys, "Ctim", "Ctimespec"); ok {
+		sf.ctime = sec
+	}
+	// The creation time exists on the BSDs and macOS (Birthtimespec) and on
+	// Windows; Linux's struct stat has none without statx, and MRI raises
+	// NotImplementedError there, so its absence is recorded rather than faked.
+	if sec, ok := statTimeField(sys, "Birthtimespec", "Btim", "CreationTime"); ok {
+		sf.btime, sf.hasBtime = sec, true
+	}
+	return sf
+}
+
+// statTimeField reads the whole seconds of the first timespec field of sys (a
+// pointer to the platform's stat struct) that carries one of the given names. It
+// works by reflection because the field names are platform-specific; a field
+// that is not a struct with an integer Sec member is ignored, so a platform
+// whose Sys() is some unrelated value simply reports nothing.
+func statTimeField(sys any, names ...string) (int64, bool) {
+	if sys == nil {
+		return 0, false
+	}
+	v := reflect.ValueOf(sys)
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return 0, false
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return 0, false
+	}
+	for _, name := range names {
+		f := v.FieldByName(name)
+		if !f.IsValid() || f.Kind() != reflect.Struct {
+			continue
+		}
+		sec := f.FieldByName("Sec")
+		if sec.IsValid() && sec.CanInt() {
+			return sec.Int(), true
+		}
+	}
+	return 0, false
 }
 
 // modeBits returns the full MRI-style st_mode: the permission and setuid/setgid/
@@ -81,6 +195,21 @@ func (s *FileStat) modeBits() int64 {
 		bits |= 0o1000
 	}
 	return bits | int64(s.ifmt())
+}
+
+// blocksValue is File::Stat#blocks: the number of 512-byte blocks allocated, or
+// nil on a platform with no POSIX stat behind it (Windows), which is what MRI
+// reports where HAVE_STRUCT_STAT_ST_BLOCKS is undefined.
+//
+// It exists so the accessor and #inspect read ONE rule. They had already
+// drifted: #inspect formatted the raw field and printed "blocks=0" on Windows
+// where #blocks answers nil, which is the kind of disagreement a member-by-member
+// comparison catches and a smoke test does not.
+func (s *FileStat) blocksValue() object.Value {
+	if !s.sys.hasSys {
+		return object.NilV
+	}
+	return object.IntValue(s.sys.blocks)
 }
 
 // ifmt returns the POSIX S_IFMT type bits for the file's kind (the high-order
@@ -208,11 +337,13 @@ func devPart(s *FileStat, dev int64, part func(int64) int64) object.Value {
 // the rest of rbgo's Time surface).
 func statTime(unix int64) *Time { return unixTime(unix) }
 
-// osStat / osLstat are seams over os.Stat / os.Lstat so the missing-path error
-// branch is reachable without depending on real filesystem state.
+// osStat / osLstat / osReadlink are seams over os.Stat / os.Lstat / os.Readlink
+// so the missing-path and unreadable-link error branches are reachable without
+// depending on real filesystem state.
 var (
-	osStat  = os.Stat
-	osLstat = os.Lstat
+	osStat     = os.Stat
+	osLstat    = os.Lstat
+	osReadlink = os.Readlink
 )
 
 // statOrRaise stats path (following symlinks when follow is true), raising
@@ -340,14 +471,17 @@ func (vm *VM) registerFileStat() {
 	d("mtime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return statTime(self(v).fi.ModTime().Unix())
 	})
-	// ctime/atime: Go's fs.FileInfo exposes only ModTime portably, so both report
-	// the modification time (whole-second). Puppet reads mtime; ctime/atime are
-	// provided for completeness and never raise.
+	// File::Stat#inspect — see FileStat.Inspect, which Kernel#p reaches too.
+	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		return object.NewString(self(v).Inspect())
+	})
+	// ctime/atime are the stat struct's own st_ctime / st_atime (statTimestamps),
+	// falling back to the modification time on a platform that reports neither.
 	d("ctime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return statTime(self(v).fi.ModTime().Unix())
+		return statTime(self(v).sys.ctime)
 	})
 	d("atime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return statTime(self(v).fi.ModTime().Unix())
+		return statTime(self(v).sys.atime)
 	})
 	d("<=>", func(_ *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
 		other, ok := args[0].(*FileStat)
@@ -364,10 +498,6 @@ func (vm *VM) registerFileStat() {
 			return object.IntValue(0)
 		}
 	})
-	d("inspect", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(self(v).Inspect())
-	})
-
 	// Special mode bits, read straight off the file mode.
 	d("setuid?", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self(v).fi.Mode()&fs.ModeSetuid != 0)
@@ -409,11 +539,7 @@ func (vm *VM) registerFileStat() {
 	// blocks is the number of 512-byte blocks allocated; nil where the platform
 	// cannot report it (Windows), a non-negative Integer otherwise.
 	d("blocks", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
-		s := self(v)
-		if !s.sys.hasSys {
-			return object.NilV
-		}
-		return object.IntValue(s.sys.blocks)
+		return self(v).blocksValue()
 	})
 	// dev_major / dev_minor / rdev_major / rdev_minor decompose dev / rdev; nil on
 	// platforms without the POSIX device model (Windows), an Integer otherwise.
@@ -429,12 +555,16 @@ func (vm *VM) registerFileStat() {
 	d("rdev_minor", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
 		return devPart(self(v), self(v).sys.rdev, devMinor)
 	})
-	// birthtime: Go's portable stat surface (fs.FileInfo) does not expose the
-	// creation time, and it is unavailable on Linux without statx, so — as MRI does
-	// on unsupported platforms/filesystems — it raises NotImplementedError.
-	d("birthtime", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		raise("NotImplementedError", "birthtime() function is unimplemented")
-		return object.NilV
+	// birthtime is the stat struct's creation time where the platform has one (the
+	// BSDs and macOS spell it st_birthtime). Linux's struct stat has none without
+	// statx, and MRI raises NotImplementedError there with exactly this message,
+	// so the absence is reported rather than faked.
+	d("birthtime", func(_ *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		s := self(v)
+		if !s.sys.hasBtime {
+			raise("NotImplementedError", "birthtime() function is unimplemented")
+		}
+		return statTime(s.sys.btime)
 	})
 
 	// File.stat / File.lstat class methods on the File class.
@@ -445,6 +575,30 @@ func (vm *VM) registerFileStat() {
 		return statOrRaise(pathArg(vm, args[0]), false)
 	}}
 
+	// File#stat / File#lstat: the stat of the open stream's own path. MRI's
+	// rb_file_stat (ruby/ruby v3_4_0 file.c) fstats the descriptor, so it still
+	// answers for a file that has been unlinked while open; rbgo's File streams
+	// are buffered by path rather than held open on a descriptor, so the stat goes
+	// through the path and an unlinked file is Errno::ENOENT — the one case the
+	// two differ, tracked as a known gap rather than papered over.
+	statOfStream := func(follow bool) NativeFn {
+		return func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+			if len(args) != 0 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+			}
+			o := self.(*IOObj)
+			// Only the CLOSED check applies: MRI's rb_io_stat works on a
+			// read-only stream, so ioCheckOpen (which also refuses one whose
+			// write half is shut) is the wrong guard here.
+			if o.closed {
+				raise("IOError", "closed stream")
+			}
+			return statOrRaise(o.path, follow)
+		}
+	}
+	cFile.define("stat", statOfStream(true))
+	cFile.define("lstat", statOfStream(false))
+
 	vm.registerFileTest()
 
 	// Dir includes Enumerable — deferred here because registerDir runs before the
@@ -452,72 +606,44 @@ func (vm *VM) registerFileStat() {
 	vm.includeDirEnumerable()
 }
 
+// fileTestFunctions is MRI's define_filetest_function list (ruby/ruby v3_4_0
+// file.c Init_File): every name there is installed on BOTH FileTest and File as
+// one and the same C function, so File.exist? and FileTest.exist? are the same
+// method. rbgo defines them on File (registerFile); registerFileTest re-exports
+// the very same Method records on FileTest rather than reimplementing them, so
+// the two surfaces cannot drift and an alias pair such as zero?/empty? stays a
+// genuine alias on both.
+var fileTestFunctions = []string{
+	"directory?", "exist?", "readable?", "readable_real?", "world_readable?",
+	"writable?", "writable_real?", "world_writable?", "executable?",
+	"executable_real?", "file?", "zero?", "empty?", "size?", "size", "owned?",
+	"grpowned?", "pipe?", "symlink?", "socket?", "blockdev?", "chardev?",
+	"setuid?", "setgid?", "sticky?", "identical?",
+}
+
+// reexportSingletons installs src's singleton methods named in names onto dst,
+// sharing the very same *Method record. Sharing is what makes an alias pair
+// survive the copy: two names that resolve to one record on src still resolve to
+// one record on dst, so File.method(:zero?) == File.method(:empty?) holds on
+// FileTest too. A name src does not define is skipped rather than installing nil,
+// which would turn a missing method into a crash at call time.
+func reexportSingletons(dst, src *RClass, names []string) {
+	for _, name := range names {
+		if m, ok := src.smethods[name]; ok && m != nil {
+			dst.smethods[name] = m
+		}
+	}
+}
+
 // registerFileTest installs the FileTest module — the predicate surface Puppet
-// reaches for widely (directory?/file?/exist?/readable?/…). Each predicate is a
-// thin stat-and-test that returns false for a missing path rather than raising,
-// matching MRI's FileTest.
+// reaches for widely (directory?/file?/exist?/readable?/…) and that ruby/spec
+// exercises through core/filetest. Each predicate is File's own method record
+// (see fileTestFunctions), so the arity and #to_path coercion checks, the
+// missing-path-is-false degradation and the alias identities are shared rather
+// than duplicated.
 func (vm *VM) registerFileTest() {
 	mod := newClass("FileTest", nil)
 	mod.isModule = true
 	vm.consts["FileTest"] = mod
-	sdef := func(name string, fn NativeFn) { mod.smethods[name] = &Method{name: name, owner: mod, native: fn} }
-
-	// statOf stats path (following symlinks) returning nil for a missing path, so
-	// each predicate degrades to false rather than raising.
-	statOf := func(p string) *FileStat {
-		fi, err := osStat(p)
-		if err != nil {
-			return nil
-		}
-		return newFileStat(fi, p)
-	}
-
-	sdef("exist?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		_, err := osStat(pathArg(vm, args[0]))
-		return object.Bool(err == nil)
-	})
-	mod.smethods["exists?"] = mod.smethods["exist?"]
-	sdef("directory?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Mode()&fs.ModeDir != 0)
-	})
-	sdef("file?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Mode().IsRegular())
-	})
-	sdef("symlink?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		fi, err := osLstat(pathArg(vm, args[0]))
-		return object.Bool(err == nil && fi.Mode()&fs.ModeSymlink != 0)
-	})
-	sdef("zero?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.fi.Size() == 0)
-	})
-	sdef("size", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		p := pathArg(vm, args[0])
-		s := statOf(p)
-		if s == nil {
-			raise("Errno::ENOENT", "No such file or directory @ rb_file_s_stat - %s", p)
-		}
-		return object.IntValue(s.fi.Size())
-	})
-	sdef("size?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		if s == nil || s.fi.Size() == 0 {
-			return object.NilV
-		}
-		return object.IntValue(s.fi.Size())
-	})
-	sdef("readable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(4))
-	})
-	sdef("writable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(2))
-	})
-	sdef("executable?", func(_ *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		s := statOf(pathArg(vm, args[0]))
-		return object.Bool(s != nil && s.accessible(1))
-	})
+	reexportSingletons(mod, vm.consts["File"].(*RClass), fileTestFunctions)
 }

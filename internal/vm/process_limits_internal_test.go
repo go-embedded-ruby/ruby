@@ -179,10 +179,19 @@ func TestProcessSysFailFallback(t *testing.T) {
 		}
 	})
 	// An errno that IS a syscall.Errno but is not one of the registered names
-	// takes the same fallback (the errno lookup misses).
-	withGetrlimit(t, func(int) (uint64, uint64, error) { return 0, 0, syscall.Errno(0) }, func() {
+	// takes the same fallback (the errno lookup misses). It has to be a number no
+	// name claims: errno 0 is not one, since MRI registers Errno::NOERROR for it
+	// (ruby/ruby v3_4_0 error.c:4206, and 4.0.5 reports
+	// SystemCallError.new(0).class == Errno::NOERROR), and so does rbgo.
+	withGetrlimit(t, func(int) (uint64, uint64, error) { return 0, 0, syscall.Errno(1 << 20) }, func() {
 		if class, _ := evalErr(t, `Process.getrlimit(:CORE)`); class != "SystemCallError" {
-			t.Errorf("errno 0: got class %s want SystemCallError", class)
+			t.Errorf("unclaimed errno: got class %s want SystemCallError", class)
+		}
+	})
+	// errno 0 now resolves to Errno::NOERROR, as it does in MRI.
+	withGetrlimit(t, func(int) (uint64, uint64, error) { return 0, 0, syscall.Errno(0) }, func() {
+		if class, _ := evalErr(t, `Process.getrlimit(:CORE)`); class != "Errno::NOERROR" {
+			t.Errorf("errno 0: got class %s want Errno::NOERROR", class)
 		}
 	})
 }

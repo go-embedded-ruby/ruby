@@ -41,20 +41,38 @@ func TestRaiseRmdirErrClassification(t *testing.T) {
 	}
 }
 
-// TestRaiseRealpathErrClassification covers raiseRealpathErr and isSymlinkLoop by
-// stubbing the osStat seam to surface a synthetic ELOOP / ENOENT, so both
-// branches are exercised without creating a real symlink cycle.
+// TestRaiseRealpathErrClassification covers raiseRealpathErr's relabelling: MRI
+// reports a File.realpath ENOENT or ELOOP against the WHOLE argument under
+// rb_check_realpath_internal, because realpath(3) failed before its emulation
+// ran, and only ENOTDIR keeps realpath_rec's name and the failing component
+// (ruby/ruby v3_4_0 file.c:4554).
 func TestRaiseRealpathErrClassification(t *testing.T) {
-	old := osStat
-	defer func() { osStat = old }()
-
-	osStat = func(string) (os.FileInfo, error) { return nil, &os.PathError{Err: syscall.ELOOP} }
-	if got := expectRaise(t, func() { raiseRealpathErr("x") }); got != "Errno::ELOOP" {
-		t.Errorf("realpath loop raised %q, want Errno::ELOOP", got)
-	}
-	osStat = func(string) (os.FileInfo, error) { return nil, &os.PathError{Err: syscall.ENOENT} }
-	if got := expectRaise(t, func() { raiseRealpathErr("x") }); got != "Errno::ENOENT" {
-		t.Errorf("realpath missing raised %q, want Errno::ENOENT", got)
+	for _, c := range []struct {
+		err                *realpathErr
+		wantClass, wantMsg string
+	}{
+		{&realpathErr{"Errno::ELOOP", "Too many levels of symbolic links", "/comp"},
+			"Errno::ELOOP", "Too many levels of symbolic links @ rb_check_realpath_internal - /arg"},
+		{&realpathErr{"Errno::ENOENT", "No such file or directory", "/comp"},
+			"Errno::ENOENT", "No such file or directory @ rb_check_realpath_internal - /arg"},
+		{&realpathErr{"Errno::ENOTDIR", "Not a directory", "/comp"},
+			"Errno::ENOTDIR", "Not a directory @ realpath_rec - /comp"},
+	} {
+		var msg string
+		got := expectRaise(t, func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if e, ok := r.(RubyError); ok {
+						msg = e.Message
+					}
+					panic(r)
+				}
+			}()
+			raiseRealpathErr(c.err, "/arg")
+		})
+		if got != c.wantClass || msg != c.wantMsg {
+			t.Errorf("%v: raised %s/%q, want %s/%q", c.err.class, got, msg, c.wantClass, c.wantMsg)
+		}
 	}
 }
 
