@@ -1106,9 +1106,11 @@ func patternNeedsLeftContext(src string) bool {
 // own leftmost scan, with its prefilter, for the overwhelmingly common case.
 // Otherwise the search is the anchored probe onig_search performs: try a match
 // anchored exactly at each candidate start, left to right, over the full
-// string. Candidates advance one character at a time under a UTF-8 pattern and
-// one byte at a time under a binary (/n) one, as Onigmo's
-// onigenc_get_right_adjust_char_head does.
+// string, advancing one character at a time as Onigmo's
+// onigenc_get_right_adjust_char_head does. Every pattern this VM compiles goes
+// to the engine in UTF-8 mode (compileRegexp calls onig.Compile, and the /n
+// flag is recorded for #encoding/#options without changing how the engine
+// steps), so "one character" is always one UTF-8 rune here.
 //
 // Reference: ruby/ruby v3_4_0 re.c reg_onig_search / rb_reg_search0.
 func (r *Regexp) searchFrom(s string, pos int) (md *onig.MatchData, base int) {
@@ -1119,17 +1121,12 @@ func (r *Regexp) searchFrom(s string, pos int) (md *onig.MatchData, base int) {
 	if !patternNeedsLeftContext(r.source) {
 		return m.Match(s[pos:]), pos
 	}
-	byteAtATime := m.Encoding() == onig.ASCII8BIT
 	for p := pos; p <= len(s); {
 		if hit := m.MatchAt(s, p); hit != nil {
 			return hit, 0
 		}
 		if p == len(s) {
 			break
-		}
-		if byteAtATime {
-			p++
-			continue
 		}
 		_, w := utf8.DecodeRuneInString(s[p:])
 		p += w
