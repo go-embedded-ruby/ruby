@@ -6,6 +6,7 @@ import (
 	"os/user"
 	"path"          // always '/'-separated, as Ruby's File is — not path/filepath
 	"path/filepath" // OS-native, only for symlink resolution (File.realpath)
+	"sort"
 	"strings"
 	"syscall"
 	stdtime "time"
@@ -40,24 +41,7 @@ func (vm *VM) registerFile() {
 	errno := newClass("Errno", nil)
 	errno.isModule = true
 	vm.consts["Errno"] = errno
-	// Each Errno::Exxx is a SystemCallError subclass, registered both scoped (for
-	// `rescue Errno::ENOENT`) and flat (so an internal raise resolves the name).
-	// The set covers the common POSIX errnos that file/IO code and libraries such
-	// as Puppet rescue; an internal raise still uses the name string directly.
-	for _, name := range []string{
-		"ENOENT", "EEXIST", "EACCES", "ENOTDIR", "EISDIR", "EPERM", "EINVAL",
-		"EAGAIN", "EBADF", "ESRCH", "EIO", "ENOSPC", "EROFS", "ENXIO", "ENOTEMPTY",
-		"ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EPIPE", "ELOOP", "ENAMETOOLONG",
-		"EADDRINUSE", "EINTR", "ECHILD", "ENOMEM", "EXDEV", "EMFILE", "ENFILE",
-	} {
-		c := newClass("Errno::"+name, syscallErr)
-		// Each Errno::Exxx carries its platform errno number as the class constant
-		// Errno::ENOENT::Errno (2 on this host), which SystemCallError#errno reads
-		// back. Values come from the host syscall table so they match the host MRI.
-		c.consts["Errno"] = object.IntValue(errnoNumbers[name])
-		errno.consts[name] = c
-		vm.consts["Errno::"+name] = c
-	}
+	vm.registerErrnoClasses(syscallErr, errno)
 
 	cFile := newClass("File", vm.cObject)
 	vm.consts["File"] = cFile
@@ -1001,4 +985,76 @@ func timeArgUnixOrNow(v object.Value) int64 {
 		return stdtime.Now().Unix()
 	}
 	return timeArgUnix(v)
+}
+
+// registerErrnoClasses installs the Errno::Exxx hierarchy under the Errno module
+// the way MRI's Init_syserr does (ruby/ruby v3_4_0 error.c:4204, set_syserr at
+// error.c:3064): one SystemCallError subclass PER ERRNO NUMBER, and a constant
+// per name — so several names can denote one class. Each class carries its number
+// as its own Errno constant (Errno::ENOENT::Errno), which SystemCallError#errno
+// and SystemCallError.=== read back. Every class is registered under the flat
+// "Errno::ENOENT" key too, so the internal raise() resolves it by name.
+//
+// Registration order fixes which name a shared class takes (MRI names it after
+// the first constant registered for the number), so the numbered names are
+// installed in sorted order before the aliases, matching MRI's alphabetically
+// generated known_errors.inc.
+func (vm *VM) registerErrnoClasses(syscallErr, errno *RClass) {
+	byNumber := make(map[int64]*RClass, len(errnoNumbers))
+	bind := func(name string, c *RClass) {
+		errno.consts[name] = c
+		vm.consts["Errno::"+name] = c
+	}
+	names := make([]string, 0, len(errnoNumbers))
+	for name := range errnoNumbers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		n := errnoNumbers[name]
+		c, seen := byNumber[n]
+		if !seen {
+			c = newClass("Errno::"+name, syscallErr)
+			c.consts["Errno"] = object.IntValue(n)
+			byNumber[n] = c
+		}
+		bind(name, c)
+	}
+	// A name the platform spells differently for an errno it already has (only
+	// EWOULDBLOCK today) becomes a second constant on that very class, which is
+	// what makes Errno::EWOULDBLOCK.equal?(Errno::EAGAIN) hold.
+	for name, of := range errnoAliases {
+		if c, ok := errno.consts[of].(*RClass); ok {
+			bind(name, c)
+		}
+	}
+	// MRI's undefined_error: a name with no number on this platform is still a
+	// constant, naming Errno::NOERROR.
+	noerror := errno.consts["NOERROR"].(*RClass)
+	for _, name := range errnoUndefinedNames {
+		bind(name, noerror)
+	}
+}
+
+// errnoClass returns the Errno::Exxx class registered for errno number n, or nil
+// when no class claims it — MRI's st_lookup(syserr_tbl, n) (ruby/ruby v3_4_0
+// error.c:3080), which is what decides whether SystemCallError.new(n) becomes a
+// specific Errno subclass or stays a generic SystemCallError. The lookup reads
+// the classes' own Errno constants rather than a parallel table, so it cannot
+// fall out of step with the constants Ruby code sees.
+func (vm *VM) errnoClass(n int64) *RClass {
+	mod, ok := vm.consts["Errno"].(*RClass)
+	if !ok {
+		return nil
+	}
+	for _, v := range mod.consts {
+		c, ok := v.(*RClass)
+		if !ok {
+			continue
+		}
+		if e, ok := c.consts["Errno"].(object.Integer); ok && int64(e) == n {
+			return c
+		}
+	}
+	return nil
 }
