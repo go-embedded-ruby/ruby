@@ -2167,7 +2167,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					continue
 				}
 			case bytecode.OpXStr:
-				push(object.NewString(vm.runShellCommand(iseq.Names[in.A])))
+				// A backtick / %x{} literal is not a builtin operation: MRI compiles
+				// it to a CALL of the method `` ` `` on self with the command String
+				// (NODE_XSTR -> putself, putobject, send :`), so a redefined
+				// Kernel#` — or a singleton `` ` `` on the object the literal is
+				// evaluated against — receives it. The String is an fstring, hence
+				// frozen; language/execution_spec.rb asserts both.
+				push(vm.send(self, "`", []object.Value{object.NewFrozenStringView(iseq.Names[in.A])}, nil))
 			case bytecode.OpSplatToArray:
 				push(vm.splatToArray(pop()))
 			case bytecode.OpExpandArray:
