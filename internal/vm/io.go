@@ -1,10 +1,13 @@
 package vm
 
 import (
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -740,21 +743,163 @@ func stringIOModeFlags(mode string) (read, write, trunc, appnd bool) {
 // it. A trailing Hash mode argument is thus no longer mistaken for a mode String.
 func (vm *VM) openFileArgs(cls *RClass, args []object.Value) *IOObj {
 	pos, opts := splitIOOpts(args)
-	if len(pos) == 0 {
-		raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+	// rb_scan_args "12:" — path, an optional mode and an optional permission,
+	// and nothing else. A fourth positional argument is not an options Hash, so
+	// MRI counts it and refuses.
+	if len(pos) == 0 || len(pos) > 3 {
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 1..3)", len(pos))
 	}
-	mode := "r"
-	if len(pos) > 1 && !object.IsNil(pos[1]) {
-		mode = vm.vmodeString(pos[1])
-	} else if opts != nil {
-		if m, ok := opts.Get(object.Symbol("mode")); ok && !object.IsNil(m) {
-			mode = vm.vmodeString(m)
+	path := pathArg(vm, pos[0])
+	ms := vm.ioResolveModeEnc(pos, opts)
+	// rb_io_extract_modeenc's *vperm_p: the third positional argument, which the
+	// :perm option may supply instead but never as well.
+	perm, permGiven := int64(0o666), false
+	if len(pos) > 2 && !object.IsNil(pos[2]) {
+		perm, permGiven = vm.repeatLong(pos[2]), true
+	}
+	if opts != nil {
+		if v, ok := opts.Get(object.Symbol("perm")); ok && !object.IsNil(v) {
+			if permGiven {
+				raise("ArgumentError", "perm specified twice")
+			}
+			perm, permGiven = vm.repeatLong(v), true
 		}
 	}
-	o := openFileIO(cls, pathArg(vm, pos[0]), mode)
-	ms := vm.ioResolveModeEnc(pos, opts)
+	o := openFileSpec(cls, path, &ms, perm, permGiven)
 	o.extEnc, o.intEnc, o.binmode = ms.extEnc, ms.intEnc, ms.binmode
 	return o
+}
+
+// modeString renders the fopen-style mode a stream reports and #reopen replays.
+// It is derived from the fmode rather than remembered, so an integer mode and
+// the :flags option produce the same spelling as the equivalent mode string.
+func (ms *ioModeSpec) modeString() string {
+	var base string
+	switch {
+	case ms.appendMode:
+		base = "a"
+	case ms.trunc && ms.writable:
+		base = "w"
+	case ms.writable && !ms.readable:
+		base = "w"
+	default:
+		base = "r"
+	}
+	if ms.readable && ms.writable {
+		base += "+"
+	}
+	if ms.binmode {
+		base += "b"
+	}
+	return base
+}
+
+// openFileSpec is rb_file_open_generic (file.c) for this VM's buffer-backed
+// streams: it applies the open(2) flag set ms describes to path, and builds the
+// IOObj whose buffer stands in for the descriptor.
+//
+// The flags decide, in MRI's order, what open(2) itself would do:
+//   - O_CREAT|O_EXCL on an existing path is EEXIST — the whole of what the 'x'
+//     mode flag and File::EXCL mean;
+//   - no O_CREAT on a missing path is ENOENT;
+//   - O_CREAT creates the file with perm (0666 before the umask when none was
+//     given), so File.stat sees it before the first flush;
+//   - O_TRUNC empties it.
+//
+// The access bits then set the halves the stream refuses: a read-only stream
+// raises "not opened for writing" on write and a write-only one "not opened for
+// reading" on read, and O_APPEND alone does not make a stream writable.
+func openFileSpec(cls *RClass, p string, ms *ioModeSpec, perm int64, permGiven bool) *IOObj {
+	o := &IOObj{cls: cls, isStr: true, path: p, openMode: ms.modeString()}
+	st, statErr := os.Stat(p)
+	exists := statErr == nil
+	switch {
+	case ms.create && ms.excl && exists:
+		raise("Errno::EEXIST", "File exists @ rb_sysopen - %s", p)
+	case !exists && !ms.create:
+		raiseOpenErrno(statErr, p)
+	}
+	if exists && st.IsDir() && ms.writable {
+		// open(2) refuses a directory for writing whatever the rest of the flags
+		// say; opening one for reading succeeds, which is what File.open(dir) is.
+		raise("Errno::EISDIR", "Is a directory @ rb_sysopen - %s", p)
+	}
+	if !permGiven {
+		perm = 0o666
+	}
+	switch {
+	case !exists:
+		// O_CREAT: materialise the file now, as MRI's open does, so File.exist?
+		// and File.stat see it (with its permissions) before any write is flushed.
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, os.FileMode(perm&0o7777))
+		if err != nil {
+			raiseOpenErrno(err, p)
+		}
+		_ = f.Close()
+	case ms.trunc:
+		if err := os.Truncate(p, 0); err != nil {
+			raiseOpenErrno(err, p)
+		}
+	case notRegular(p):
+		// Nothing that is not a regular file can be read whole, because some of
+		// them do not end: File.open("/dev/zero") allocated 83 GB here and killed a
+		// CI runner before the open returned. A character device, a fifo, a socket
+		// or a directory opens with an empty buffer instead, so the position
+		// arithmetic works — which is all core/io/seek_spec.rb asks of /dev/zero —
+		// and a read sees end-of-file rather than the machine going away.
+		//
+		// That reads see nothing is a limit of a buffer-backed IO rather than a
+		// decision: see IOObj, whose whole model is the file's bytes in memory.
+	default:
+		b, err := os.ReadFile(p)
+		if err != nil {
+			raiseOpenErrno(err, p)
+		}
+		o.buf = b
+	}
+	// A write-only stream must still be able to reopen the path for writing; a
+	// read-only one must not, so a permission failure shows up at open, not at
+	// close. os.ReadFile above already reported an unreadable file.
+	if ms.writable && exists && !ms.trunc {
+		if err := writableCheck(p); err != nil {
+			raiseOpenErrno(err, p)
+		}
+	}
+	// The read cursor starts at 0 even in append mode: O_APPEND moves only WRITES
+	// to the end (writeBytes does that), so `File.open(p, "a+").read` returns the
+	// whole file, as it does in MRI, and `#pos` on a freshly opened "a" stream is
+	// 0 rather than the file's size.
+	o.writable = ms.writable
+	o.rdClosed = !ms.readable
+	o.wrClosed = !ms.writable
+	o.appendMode = ms.appendMode
+	return o
+}
+
+// writableCheck reports the error opening p for writing would give, without
+// disturbing its contents — the permission failure MRI's open(2) raises at
+// File.open time but a buffer-backed stream would otherwise only meet at flush.
+func writableCheck(p string) error {
+	f, err := os.OpenFile(p, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// raiseOpenErrno turns a Go open/read failure into the Errno MRI's rb_sysopen
+// reports, message and all. Anything unrecognised falls back to ENOENT, which is
+// what this code raised for every failure before.
+func raiseOpenErrno(err error, p string) {
+	switch {
+	case errors.Is(err, fs.ErrPermission):
+		raise("Errno::EACCES", "Permission denied @ rb_sysopen - %s", p)
+	case errors.Is(err, syscall.EISDIR):
+		raise("Errno::EISDIR", "Is a directory @ rb_sysopen - %s", p)
+	case errors.Is(err, fs.ErrExist):
+		raise("Errno::EEXIST", "File exists @ rb_sysopen - %s", p)
+	}
+	raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", p)
 }
 
 // vmodeString reduces a File.open mode argument to the fopen-style base mode
@@ -861,11 +1006,34 @@ func notRegular(p string) bool {
 }
 
 // ioFlush writes a writable file stream's buffer back to disk.
+//
+// The write happens at flush rather than at open, which is where this model
+// differs from a descriptor: in MRI the permission to write was granted when the
+// file was opened, and a later chmod — even the `File.new(path, "w", 0444)` that
+// creates a read-only file and then writes through the descriptor it returns —
+// cannot take it back. Reopening the path would, so a flush that is refused for
+// permission puts the owner-write bit back for the length of the write and
+// restores the file's mode afterwards. That is the descriptor's grant, replayed;
+// it never widens a file this stream was not already entitled to write.
 func ioFlush(o *IOObj) {
-	if o.writable && o.path != "" {
-		if err := os.WriteFile(o.path, o.buf, 0o644); err != nil {
-			raise("Errno::ENOENT", "No such file or directory @ rb_sysopen - %s", o.path)
+	if !o.writable || o.path == "" {
+		return
+	}
+	err := os.WriteFile(o.path, o.buf, 0o644)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		if st, sterr := os.Stat(o.path); sterr == nil {
+			mode := st.Mode().Perm()
+			if chmodErr := os.Chmod(o.path, mode|0o200); chmodErr == nil {
+				err = os.WriteFile(o.path, o.buf, 0o644)
+				_ = os.Chmod(o.path, mode)
+			}
 		}
+	}
+	if err != nil {
+		raiseOpenErrno(err, o.path)
 	}
 }
 
