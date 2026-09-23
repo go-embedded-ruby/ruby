@@ -8,6 +8,8 @@ import (
 	binpkg "encoding/binary"
 	"math"
 	"math/big"
+	"os"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -28,6 +30,18 @@ type ioBuffer struct {
 	parent   *ioBuffer // for a slice, the buffer it was sliced from (nil for a non-slice)
 	sliceOff int       // this slice's offset within parent (only meaningful when parent != nil)
 	sliceLen int       // this slice's length within parent (only meaningful when parent != nil)
+
+	// mapped, shared and priv are RB_IO_BUFFER_MAPPED / _SHARED / _PRIVATE
+	// (include/ruby/io/buffer.h). IO::Buffer.new takes a MAPPED buffer for
+	// anything from a page upwards, and IO::Buffer.map takes one over a file —
+	// shared with it by default, or a private copy that the file never sees.
+	mapped, shared, priv bool
+
+	// null is a buffer with no memory at all, which is what a zero size gives:
+	// io_buffer_initialize leaves base NULL, and #null? is true while #free has
+	// never been called. It is distinct from freed, which is a buffer that HAD
+	// memory.
+	null bool
 }
 
 // sliceValid reports IO::Buffer#valid?. A non-slice is always valid (freeing it
@@ -114,6 +128,60 @@ func bufInt(v object.Value) int64 {
 }
 
 func bufUint(v object.Value) uint64 { return uint64(bufInt(v)) }
+
+// The IO::Buffer allocation/state flags, as include/ruby/io/buffer.h numbers
+// them. They are also the values the IO::Buffer:: constants carry.
+const (
+	bufFlagEXTERNAL = 1
+	bufFlagINTERNAL = 2
+	bufFlagMAPPED   = 4
+	bufFlagSHARED   = 8
+	bufFlagLOCKED   = 32
+	bufFlagPRIVATE  = 64
+	bufFlagREADONLY = 128
+)
+
+// bufDefaultFlags is io_flags_for_size (io_buffer.c): with no flags given,
+// IO::Buffer.new allocates internally below a page and maps from a page upwards.
+func bufDefaultFlags(size int64) int64 {
+	if size >= 16384 {
+		return bufFlagMAPPED
+	}
+	return bufFlagINTERNAL
+}
+
+// bufFlagsArg is io_buffer_extract_flags: a negative flag set is an ArgumentError
+// before anything else, a non-Integer is "not an Integer" as every other
+// IO::Buffer number is, and unknown bits are deliberately ignored.
+func bufFlagsArg(v object.Value) int64 {
+	n, ok := v.(object.Integer)
+	if !ok {
+		raise("TypeError", "not an Integer")
+	}
+	if int64(n) < 0 {
+		raise("ArgumentError", "Flags can't be negative!")
+	}
+	mask := int64(bufFlagEXTERNAL | bufFlagINTERNAL | bufFlagMAPPED | bufFlagSHARED |
+		bufFlagLOCKED | bufFlagPRIVATE | bufFlagREADONLY)
+	return int64(n) & mask
+}
+
+// bufOffsetArg is io_buffer_extract_offset. Unlike a size it goes through
+// NUM2OFFT, so a non-Integer is rb_num2long's "no implicit conversion from X"
+// rather than "not an Integer".
+func bufOffsetArg(v object.Value) int64 {
+	n, ok := v.(object.Integer)
+	if !ok {
+		if object.IsNil(v) {
+			raise("TypeError", "no implicit conversion from nil")
+		}
+		raise("TypeError", "no implicit conversion from %s", strings.ToLower(classNameOf(v)))
+	}
+	if int64(n) < 0 {
+		raise("ArgumentError", "Offset can't be negative!")
+	}
+	return int64(n)
+}
 
 // bufSizeArg validates an IO::Buffer size (.new / #resize): a non-Integer raises
 // TypeError "not an Integer" and a negative value raises ArgumentError "Size
@@ -222,16 +290,113 @@ func (vm *VM) registerIOBuffer() {
 	sm := func(name string, fn NativeFn) { cBuf.smethods[name] = &Method{name: name, owner: cBuf, native: fn} }
 	dm := func(name string, fn NativeFn) { cBuf.define(name, fn) }
 
+	// IO::Buffer.new(size = DEFAULT_SIZE, flags = io_flags_for_size(size)) —
+	// rb_io_buffer_initialize + io_buffer_initialize (io_buffer.c). Given no flags
+	// MRI chooses them by size: anything below a page is allocated internally, and
+	// a page or more is MAPPED. Given flags, one of INTERNAL or MAPPED has to be
+	// among them or there is no way to get the memory, which is the
+	// AllocationError. A zero size allocates nothing at all and the flags are not
+	// even consulted — the buffer is null.
 	sm("new", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..2)", len(args))
+		}
 		size := int64(65536)
 		if len(args) > 0 {
 			size = bufSizeArg(args[0])
 		}
-		flags := int64(0)
+		flags := bufDefaultFlags(size)
 		if len(args) > 1 {
-			flags = intArg(args[1])
+			flags = bufFlagsArg(args[1])
 		}
-		return &ioBuffer{data: make([]byte, size), readonly: flags&128 != 0}
+		b := &ioBuffer{}
+		if size == 0 {
+			// io_buffer_initialize never looks at the flags on this path: with no
+			// memory to get there is nothing for them to describe, so even READONLY
+			// is dropped.
+			b.null = true
+			return b
+		}
+		// INTERNAL and MAPPED are the two ways to obtain the memory and one of them
+		// must be present; every other bit is simply recorded, so INTERNAL|SHARED is
+		// an internally allocated buffer that also reports #shared?.
+		switch {
+		case flags&bufFlagINTERNAL != 0:
+			// allocated internally: internal? is the absence of the other three
+		case flags&bufFlagMAPPED != 0:
+			b.mapped = true
+		default:
+			raise("IO::Buffer::AllocationError", "Could not allocate buffer!")
+		}
+		b.readonly = flags&bufFlagREADONLY != 0
+		b.shared = flags&bufFlagSHARED != 0
+		b.priv = flags&bufFlagPRIVATE != 0
+		b.external = flags&bufFlagEXTERNAL != 0
+		b.data = make([]byte, size)
+		return b
+	})
+	// IO::Buffer.map(io, size = nil, offset = 0, flags = 0) — io_buffer_map +
+	// io_buffer_map_file (io_buffer.c). The mapping is MAP_SHARED unless PRIVATE
+	// was asked for, and PROT_READ|PROT_WRITE unless READONLY was: a shared
+	// writable mapping of a stream that was not opened for writing is the EACCES
+	// mmap(2) gives, which is the "SystemCallError unless read-only" the spec
+	// names.
+	//
+	// This VM's file streams are their bytes in memory (see IOObj), so a shared
+	// mapping IS that byte slice — writes through the buffer are the stream's
+	// writes, which is the sharing mmap provides — while a private mapping takes a
+	// copy the file can never see.
+	sm("map", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) < 1 || len(args) > 4 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..4)", len(args))
+		}
+		o := ioGetIO(vm, args[0])
+		if o.closed {
+			raise("IOError", "closed stream")
+		}
+		ioFlush(o)
+		fileSize := int64(len(o.buf))
+		if st, err := os.Stat(o.path); err == nil {
+			fileSize = st.Size()
+		}
+		var size int64
+		if len(args) >= 2 && !object.IsNil(args[1]) {
+			if size = bufSizeArg(args[1]); size == 0 {
+				raise("ArgumentError", "Size can't be zero!")
+			}
+		} else {
+			if fileSize <= 0 {
+				raise("ArgumentError", "Invalid negative or zero file size!")
+			}
+			size = fileSize
+		}
+		var offset int64
+		if len(args) >= 3 {
+			offset = bufOffsetArg(args[2])
+		}
+		if size > fileSize {
+			raise("ArgumentError", "Size can't be larger than file size!")
+		}
+		if offset+size > fileSize {
+			raise("ArgumentError", "Offset too large!")
+		}
+		flags := int64(0)
+		if len(args) >= 4 {
+			flags = bufFlagsArg(args[3])
+		}
+		b := &ioBuffer{mapped: true, readonly: flags&bufFlagREADONLY != 0}
+		switch {
+		case flags&bufFlagPRIVATE != 0:
+			b.priv = true
+			b.data = append([]byte(nil), o.buf[offset:offset+size]...)
+		default:
+			if !b.readonly && !ioFmodeWritable(o) {
+				raise("Errno::EACCES", "Permission denied - io_buffer_map_file:mmap")
+			}
+			b.external, b.shared = true, true
+			b.data = o.buf[offset : offset+size : offset+size]
+		}
+		return b
 	})
 	sm("for", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		// io_buffer.c io_buffer_for: without a block the buffer is always a
@@ -276,14 +441,21 @@ func (vm *VM) registerIOBuffer() {
 			return object.Bool(fn(self.(*ioBuffer)))
 		})
 	}
-	pred("null?", func(b *ioBuffer) bool { return b.freed })
+	pred("null?", func(b *ioBuffer) bool { return b.freed || b.null })
 	pred("empty?", func(b *ioBuffer) bool { return !b.freed && len(b.data) == 0 })
 	pred("valid?", func(b *ioBuffer) bool { return b.sliceValid() })
 	pred("external?", func(b *ioBuffer) bool { return !b.freed && b.external })
-	pred("internal?", func(b *ioBuffer) bool { return !b.freed && !b.external && !b.borrowed })
-	pred("mapped?", func(b *ioBuffer) bool { return false })
-	pred("shared?", func(b *ioBuffer) bool { return false })
-	pred("private?", func(b *ioBuffer) bool { return false })
+	// The four allocation flags are exclusive in practice: a buffer is internal,
+	// external, mapped-and-shared or mapped-and-private, and io_buffer.c keeps them
+	// as separate bits rather than deriving one from the absence of the others — a
+	// private mapping is neither internal nor external, which is why internal? has
+	// to exclude the mapped forms explicitly.
+	pred("internal?", func(b *ioBuffer) bool {
+		return !b.freed && !b.null && !b.external && !b.borrowed && !b.mapped
+	})
+	pred("mapped?", func(b *ioBuffer) bool { return !b.freed && !b.null && b.mapped })
+	pred("shared?", func(b *ioBuffer) bool { return !b.freed && b.shared })
+	pred("private?", func(b *ioBuffer) bool { return !b.freed && b.priv })
 	pred("locked?", func(b *ioBuffer) bool { return b.locked })
 	pred("readonly?", func(b *ioBuffer) bool { return b.readonly })
 
