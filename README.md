@@ -594,7 +594,7 @@ throughput tracks the underlying driver rather than the interpreter:
 
 ### Not implemented — the limitations worth naming
 
-Measured on `main` (68cb53a), darwin/arm64, against MRI 4.0.5 on the same host.
+Measured on `main` (`d498ddc`), darwin/arm64, against MRI 4.0.5 on the same host.
 
 **rbgo carries no line map, so `__LINE__` is always `0`.** This is the single
 widest gap, because three separate features are built on source positions and all
