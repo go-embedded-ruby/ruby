@@ -120,7 +120,43 @@ const (
 	OpGetConstTop     // A = Names index; leading `::Name` — top-level (Object) constant only, ignoring lexical nesting
 	OpDefinedConstTop // A = Names index; "constant" if the top-level `::Name` exists, else nil
 	OpRegexpOnce      // A = target pc past the interpolation build; guards a /o literal: if the occurrence's Regexp is already memoised, push it and jump to A, else fall through to (re)build once
+	OpDefinedSuper    // "super" if the method `super` would reach from the current frame exists, else nil; never evaluates the super arguments
 )
+
+// Defined tag Strings.
+//
+// MRI builds every `defined?` answer with rb_iseq_defined_string (iseq.c
+// v3_4_0:3692), which returns rb_fstring_cstr(...) — a FROZEN, deduplicated
+// String. ruby/spec pins that: language/defined_spec.rb asserts
+// `defined?(nil).frozen?.should == true` for every tag it names.
+//
+// The tags live here, in the package both halves of the implementation import,
+// because both halves must agree: the compiler bakes a tag into the literal
+// pool for the syntactically-decided cases (nil/self/expression/…), while the
+// VM builds one at run time for the cases only it can decide
+// (constant/method/yield/…). One table, one constructor, so the two cannot
+// drift apart and leave defined? half-frozen.
+const (
+	DefinedNil     = "nil"
+	DefinedIvar    = "instance-variable"
+	DefinedLvar    = "local-variable"
+	DefinedGvar    = "global-variable"
+	DefinedCvar    = "class variable"
+	DefinedConst   = "constant"
+	DefinedMethod  = "method"
+	DefinedYield   = "yield"
+	DefinedZSuper  = "super"
+	DefinedSelf    = "self"
+	DefinedTrue    = "true"
+	DefinedFalse   = "false"
+	DefinedAsgn    = "assignment"
+	DefinedExprTag = "expression"
+)
+
+// DefinedTag returns the frozen String a `defined?` answer is made of. It
+// mirrors rb_iseq_defined_string: the result is frozen, so a caller may share
+// it freely, and `defined?(nil).frozen?` is true as in MRI.
+func DefinedTag(tag string) *object.String { return object.NewFrozenStringView(tag) }
 
 var opNames = map[Op]string{
 	OpNop: "nop", OpPushConst: "push_const", OpPushNil: "push_nil",
@@ -159,6 +195,7 @@ var opNames = map[Op]string{
 	OpDefinedGuard:       "defined_guard",
 	OpGetConstTop:        "get_const_top",
 	OpDefinedConstTop:    "defined_const_top",
+	OpDefinedSuper:       "defined_super",
 }
 
 func (o Op) String() string {

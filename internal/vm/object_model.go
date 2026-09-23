@@ -2171,9 +2171,16 @@ func (vm *VM) bindBlockArgs(p *Proc, args []object.Value) []object.Value {
 func (vm *VM) bindBlockPositionals(p *Proc, args []object.Value) []object.Value {
 	np := len(p.iseq.Params)
 	if np > 1 && len(args) == 1 {
-		if arr, ok := args[0].(*object.Array); ok {
-			args = arr.Elems
-		}
+		// The auto-splat is not a type test on the lone argument: MRI runs it
+		// through rb_check_array_type (args_check_block_arg0, vm_args.c
+		// v3_4_0:97-119), which converts a non-Array with #to_ary, consulting an
+		// OVERRIDDEN #respond_to? first, raising TypeError when #to_ary answers
+		// with a non-Array, and declining — leaving the object whole — when there
+		// is no #to_ary or it returns nil. masgnExpandOperand is that same
+		// rb_check_array_type, already written for expandarray: it yields the
+		// elements on a successful conversion and the one-element list [v] on a
+		// decline, which is exactly "do not splat".
+		args = vm.masgnExpandOperand(args[0])
 	}
 	if p.iseq.SplatIndex >= 0 {
 		// A *rest block param has variable arity: pad up to the required
