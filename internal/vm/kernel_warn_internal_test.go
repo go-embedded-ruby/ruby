@@ -33,7 +33,33 @@ func TestKernelWarn(t *testing.T) {
 		// uplevel is validated: negative raises ArgumentError, non-Integer TypeError.
 		{`begin; warn("x", uplevel: -1); rescue ArgumentError => e; p e.message; end`, `"negative level (-1)"`},
 		{`begin; warn("x", uplevel: "a"); rescue TypeError => e; p e.message; end`, `"no implicit conversion of String into Integer"`},
-		{cap + `warn("x", uplevel: 0); p $c`, `["x\n", nil]`},
+		// With a level, error.c v3_4_0 rb_warn_m prefixes the message —
+		// "path:lineno: warning: " from rb_ec_backtrace_location_ary, or the bare
+		// "warning: " when that yields no location. rbgo records no line numbers,
+		// so no frame can supply a path and the no-location form is what every
+		// level produces; MRI would say "<file>:<line>: warning: x\n" here. Closing
+		// that gap needs line tracking in internal/compiler.
+		{cap + `warn("x", uplevel: 0); p $c`, `["warning: x\n", nil]`},
+		// A level too large for the stack is exactly the no-location case, and
+		// there rbgo and MRI agree byte for byte.
+		{cap + `warn("x", uplevel: 100); p $c`, `["warning: x\n", nil]`},
+		// $VERBOSE nil makes Kernel#warn a no-op: rb_warn_m wraps its whole body
+		// in `if (!NIL_P(ruby_verbose) && argc > 0)`, so nothing is written and
+		// Warning.warn is never called.
+		{cap + `$VERBOSE = nil; warn("x"); p $c`, `nil`},
+		// rb_io_puts assembles the message, so an Array argument writes one line
+		// per element and an empty Array writes nothing.
+		{cap + `warn(["line 1", "line 2"]); p $c`, `["line 1\nline 2\n", nil]`},
+		// A lone String that already ends in a newline is kept VERBATIM — rb_warn_m
+		// skips rb_io_puts entirely for it (end_with_asciichar(str, '\n')).
+		{cap + `warn("x\n"); p $c`, `["x\n", nil]`},
+		{cap + `warn("a\n", "b"); p $c`, `["a\nb\n", nil]`},
+		{cap + `warn([]); p $c`, `nil`},
+		// NUM2LONG takes the level, so a Float or Rational truncates.
+		{cap + `warn("x", uplevel: 0.9); p $c`, `["warning: x\n", nil]`},
+		// A Warning.warn that takes exactly one argument is called without the
+		// category keyword (rb_warn_category's rb_warning_warn_arity() == 1).
+		{`$c = nil; Warning.singleton_class.send(:define_method, :warn) { |m| $c = m }; warn("x"); p $c`, `"x\n"`},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want+"\n" {
