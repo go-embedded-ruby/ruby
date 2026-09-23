@@ -14,6 +14,7 @@ import (
 // sub-expression maps to nil rather than propagating.
 func (c *Compiler) compileDefined(operand ast.Node) {
 	b := c.cur()
+	c.declareDefinedLocals(operand)
 	switch v := operand.(type) {
 	case *ast.NilLit:
 		c.pushDefinedTag("nil")
@@ -44,6 +45,26 @@ func (c *Compiler) compileDefined(operand ast.Node) {
 		*ast.ScopedConstAssign, *ast.IvarAssign, *ast.CVarAssign, *ast.GVarAssign:
 		c.pushDefinedTag("assignment")
 	case *ast.Call:
+		// A compound assignment to an attribute or an index (`a.b += 1`,
+		// `a[:b] ||= 1`) reaches the compiler as the parser's textual desugaring
+		// into a setter Call, but MRI tags it "assignment", not "method":
+		// PM_CALL_OPERATOR_WRITE_NODE / PM_CALL_OR_WRITE_NODE /
+		// PM_CALL_AND_WRITE_NODE and their PM_INDEX_* counterparts are all in the
+		// DEFINED_ASGN group (prism_compile.c v3_4_0:4052-4093, matching
+		// compile.c's NODE_OP_ASGN1/NODE_OP_ASGN2 at v3_4_0:6151-6164). A PLAIN
+		// `a[0] = 1` is not in that group — it is an ordinary attrasgn call, and
+		// stays "method". The same shared-node recognisers compileCall uses tell
+		// the two apart; see opassign.go for why identity is the test.
+		if isSetterCall(v) {
+			if _, _, ok := indexOpAssign(v); ok {
+				c.pushDefinedTag("assignment")
+				return
+			}
+			if _, ok := attrOpAssign(v); ok {
+				c.pushDefinedTag("assignment")
+				return
+			}
+		}
 		c.compileDefinedCall(v)
 	case *ast.BinaryExpr:
 		c.compileDefinedBinary(v)
@@ -107,10 +128,52 @@ func (c *Compiler) compileDefinedCall(v *ast.Call) {
 // every other binary operator is a method on the left operand.
 func (c *Compiler) compileDefinedBinary(v *ast.BinaryExpr) {
 	if v.Op == "&&" || v.Op == "||" {
+		// `A ||= v` and `A::B ||= v` are not written as an assignment node: the
+		// parser desugars them to `(defined?(A) && A) || A = v`, so they arrive
+		// here as a `||`. MRI still calls them assignments — PM_CONSTANT_OR_WRITE
+		// and PM_CONSTANT_PATH_OR_WRITE are in the DEFINED_ASGN group
+		// (prism_compile.c v3_4_0:4059 and 4063; compile.c's NODE_OP_CDECL at
+		// v3_4_0:6162 says the same) — and ruby/spec pins it.
+		if constOrAssign(v) {
+			c.pushDefinedTag("assignment")
+			return
+		}
 		c.pushDefinedTag("expression")
 		return
 	}
 	c.compileDefinedReceiverMethod(v.Left, v.Op)
+}
+
+// constOrAssign recognises the parser's desugaring of `A ||= v` / `A::B ||= v`:
+// `(defined?(A) && A) || A = v`, with the constant READ shared (same AST
+// pointer) between the `defined?` probe, the `&&`'s right operand and — for the
+// scoped form — the assignment's target. That identity is what tells the
+// desugaring apart from a hand-written `(defined?(A) && A) || A = v`, whose
+// three reads are distinct nodes; it is the same test opassign.go uses for the
+// index and attribute compound assignments.
+func constOrAssign(v *ast.BinaryExpr) bool {
+	if v.Op != "||" {
+		return false
+	}
+	guard, ok := v.Left.(*ast.BinaryExpr)
+	if !ok || guard.Op != "&&" {
+		return false
+	}
+	probe, ok := guard.Left.(*ast.Call)
+	if !ok || probe.Name != "defined?" || probe.Recv != nil || len(probe.Args) != 1 {
+		return false
+	}
+	if probe.Args[0] != guard.Right {
+		return false
+	}
+	switch w := v.Right.(type) {
+	case *ast.ConstAssign:
+		read, ok := guard.Right.(*ast.ConstRef)
+		return ok && read.Name == w.Name
+	case *ast.ScopedConstAssign:
+		return w.Target == guard.Right
+	}
+	return false
 }
 
 // compileDefinedReceiverMethod emits, under the guard, the response probe for
@@ -150,4 +213,75 @@ func (c *Compiler) guarded(body func(gb *builder)) {
 	idx := len(parent.children)
 	parent.children = append(parent.children, child)
 	parent.emit(bytecode.OpDefinedGuard, idx, 0)
+}
+
+// declareDefinedLocals declares the locals an operand of `defined?` introduces.
+//
+// `defined?` inspects its operand's syntactic kind instead of compiling it, so
+// the assignments inside it emit no code — but they still DECLARE. MRI builds
+// its local table in the parser, which walks the operand like any other code,
+// so `defined?(a += 1)` leaves `a` as a (nil) local of the enclosing scope and a
+// later bare `a` is a local-variable read rather than a method call. rbgo
+// declares locals as it compiles, so without this walk the name has no slot and
+// the next mention of it fails to compile — which is where
+// language/defined_spec.rb stopped.
+//
+// Only assignment targets are declared; nothing is evaluated. The walk descends
+// through the value and receiver/argument positions an assignment can hide in,
+// which is what the parser's own walk amounts to.
+func (c *Compiler) declareDefinedLocals(n ast.Node) {
+	switch v := n.(type) {
+	case *ast.Assign:
+		c.declareLocal(v.Name)
+		c.declareDefinedLocals(v.Value)
+	case *ast.OpAssign:
+		c.declareLocal(v.Name)
+		c.declareDefinedLocals(v.Value)
+	case *ast.MultiAssign:
+		for _, name := range v.Names {
+			c.declareLocal(name)
+		}
+		for _, t := range v.Targets {
+			c.declareDefinedLocals(t) // a nested group declares its own names
+		}
+		for _, val := range v.Values {
+			c.declareDefinedLocals(val)
+		}
+	case *ast.IvarAssign:
+		c.declareDefinedLocals(v.Value)
+	case *ast.CVarAssign:
+		c.declareDefinedLocals(v.Value)
+	case *ast.GVarAssign:
+		c.declareDefinedLocals(v.Value)
+	case *ast.ConstAssign:
+		c.declareDefinedLocals(v.Value)
+	case *ast.ScopedConstAssign:
+		c.declareDefinedLocals(v.Value)
+	case *ast.Call:
+		if v.Recv != nil {
+			c.declareDefinedLocals(v.Recv)
+		}
+		for _, a := range v.Args {
+			c.declareDefinedLocals(a)
+		}
+	case *ast.BinaryExpr:
+		c.declareDefinedLocals(v.Left)
+		c.declareDefinedLocals(v.Right)
+	case *ast.UnaryExpr:
+		c.declareDefinedLocals(v.Operand)
+	}
+}
+
+// declareLocal gives name a slot if it does not already have one, without
+// emitting anything. An empty name is the nameless `*` of `a, * = …`.
+func (c *Compiler) declareLocal(name string) {
+	if name == "" {
+		return
+	}
+	b := c.cur()
+	if _, _, ok := b.resolve(name); ok {
+		return
+	}
+	owner, _ := b.declOwner()
+	owner.localSlot(name)
 }
