@@ -25,7 +25,7 @@ func (vm *VM) hasScopedConst(cls *RClass, name string) bool {
 				continue
 			}
 		}
-		if _, ok := c.autoloads[name]; ok {
+		if vm.autoloadVisible(c, name) {
 			return true
 		}
 	}
@@ -37,19 +37,18 @@ func (vm *VM) hasScopedConst(cls *RClass, name string) bool {
 // require — used by defined? to report a registered-but-unloaded constant.
 func (vm *VM) autoloadPending(cref *RClass, name string) bool {
 	for _, c := range vm.nesting(cref) {
-		if _, ok := c.autoloads[name]; ok {
+		if vm.autoloadVisible(c, name) {
 			return true
 		}
 	}
 	if cref != nil {
 		for _, c := range vm.ancestors(cref) {
-			if _, ok := c.autoloads[name]; ok {
+			if vm.autoloadVisible(c, name) {
 				return true
 			}
 		}
 	}
-	_, ok := vm.cObject.autoloads[name]
-	return ok
+	return vm.autoloadVisible(vm.cObject, name)
 }
 
 // gvarDefined reports whether a global variable is set. User globals live in

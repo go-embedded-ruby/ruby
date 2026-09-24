@@ -156,6 +156,13 @@ func (r *Regexp) encodingName() string {
 		if r.fixedEnc && r.srcEnc != "" {
 			return r.srcEnc
 		}
+		// MRI measures the code range of the PREPROCESSED pattern, not of the
+		// source text: /\xFF/n is four ASCII characters as written, but the byte
+		// it denotes is 0xFF, so the pattern is not 7-bit and a /n regexp reports
+		// BINARY (re.c rb_reg_preprocess → rb_reg_initialize).
+		if r.noEnc && sourceHasNonASCIIByteEscape(r.source) {
+			return "ASCII-8BIT"
+		}
 		return "US-ASCII"
 	}
 	if r.noEnc {
@@ -183,6 +190,27 @@ func (r *Regexp) isFixedEncoding() bool {
 		return true
 	}
 	return !asciiOnly([]byte(r.source)) && !r.noEnc
+}
+
+// sourceHasNonASCIIByteEscape reports whether the pattern source contains a
+// \xHH escape denoting a byte at or above 0x80. Such an escape makes the
+// preprocessed pattern non-7-bit even though every character of the source text
+// is ASCII, which is what decides a /n regexp's encoding (see encodingName). A
+// backslash that is itself escaped (\\x41) does not begin an escape, so the scan
+// skips two bytes after every backslash it does not consume.
+func sourceHasNonASCIIByteEscape(src string) bool {
+	for i := 0; i+1 < len(src); i++ {
+		if src[i] != '\\' {
+			continue
+		}
+		if src[i+1] == 'x' && i+3 < len(src) && allHex(src[i+2:i+4]) {
+			if v, err := strconv.ParseUint(src[i+2:i+4], 16, 16); err == nil && v >= 0x80 {
+				return true
+			}
+		}
+		i++
+	}
+	return false
 }
 
 // sourceHasNonASCIIUnicodeEscape reports whether the pattern source contains a
@@ -417,14 +445,103 @@ func (vm *VM) compileRegexp(source, flags string) object.Value {
 	// the original source) and, when needed, rewrite named groups to synthetic
 	// ASCII names — both no-ops for sources that do not use those features.
 	engineSrc := translateUnicodeEscapes(prefix+source, source)
+	engineSrc = translateCharEscapes(engineSrc)
 	engineSrc, nameMap := rewriteNamedGroups(engineSrc)
-	re, err := onig.Compile(engineSrc)
+	engineSrc = rewriteBeginLineAnchor(engineSrc)
+	// A /n pattern is ARG_ENCODING_NONE — ASCII-8BIT — so its input-advancing
+	// atoms step ONE BYTE, not one UTF-8 character: /./n.match("\303\251")
+	// captures just "\303" (re.c char_to_option, rb_reg_initialize). Everything
+	// else compiles in the engine's UTF-8 mode.
+	//
+	// KNOWN GAP: MRI does not stop there. rb_reg_prepare_re RE-COMPILES the
+	// pattern in the SUBJECT's encoding whenever the two differ, so the same
+	// /./n matched against a UTF-8 string steps a whole character again (and
+	// rb_reg_prepare_enc emits its "historical binary regexp match /.../n
+	// against UTF-8 string" warning for exactly that case). A Regexp here holds
+	// one compiled program, so the binary form is used for every subject. The
+	// binary-subject case — the one ruby/spec measures — is now right; the
+	// re-compilation is tracked separately.
+	engineEnc := onig.UTF8
+	if strings.ContainsRune(flags, 'n') {
+		engineEnc = onig.ASCII8BIT
+	}
+	re, err := onig.CompileEnc(engineSrc, engineEnc)
 	if err != nil {
 		raise("RegexpError", "%s: /%s/", mapRegexpEngineError(err.Error()), source)
 	}
 	r := &Regexp{re: re, source: source, flags: flags, nameMap: nameMap}
 	applyRegexpEncodingFlags(r, flags)
 	return r
+}
+
+// beginLineEquivalent is the engine pattern that reproduces Onigmo's
+// OP_BEGIN_LINE exactly: a "^" matches at the start of the string, or right
+// after a newline PROVIDED that is not the end of the string. The engine this
+// VM links drops that second condition and so fires "^" once more, at the very
+// end of a string that ends in a newline:
+//
+//	"Text\n".gsub(/^/, " ")   =>  " Text\n "     (MRI: " Text\n")
+//	"a\nb\n".gsub(/^/, "-")   =>  "-a\n-b\n-"    (MRI: "-a\n-b\n")
+//
+// The engine's own "^" is kept (so its anchor optimisation still applies) and
+// guarded with (?!\z); the \A alternative restores the one case the guard
+// would otherwise remove, the empty string, whose start IS its end.
+//
+// Reference: ruby/ruby v3_4_0 regexec.c OP_BEGIN_LINE —
+//
+//	if (ON_STR_BEGIN(s)) { if (IS_NOTBOL(...)) goto fail; ... }
+//	else if (ONIGENC_IS_MBC_NEWLINE(encode, sprev, end) && !ON_STR_END(s)) ...
+//	goto fail;
+const beginLineEquivalent = `(?:^(?!\z)|\A)`
+
+// rewriteBeginLineAnchor replaces every "^" that is a line anchor with
+// beginLineEquivalent, leaving alone the "^" that are not anchors: one escaped
+// with a backslash, one inside a character class (whether the negation slot of
+// "[^…]" or a literal "[a^b]"), and one inside a "(?#…)" comment — a comment
+// runs to its first ")", which the replacement text contains.
+//
+// Character-class nesting is tracked by depth so Onigmo's POSIX brackets and
+// nested classes ("[[:alpha:]]", "[a-z&&[^b]]") keep their inner "^" literal.
+// A source with no "^" at all is returned unchanged.
+func rewriteBeginLineAnchor(src string) string {
+	if !strings.ContainsRune(src, '^') {
+		return src
+	}
+	var b strings.Builder
+	b.Grow(len(src) + 16)
+	depth := 0 // character-class nesting depth
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		switch {
+		case c == '\\':
+			b.WriteByte(c)
+			if i+1 < len(src) {
+				i++
+				b.WriteByte(src[i])
+			}
+		case depth == 0 && c == '(' && strings.HasPrefix(src[i:], "(?#"):
+			if j := strings.IndexByte(src[i:], ')'); j >= 0 {
+				b.WriteString(src[i : i+j+1])
+				i += j
+			} else {
+				b.WriteString(src[i:])
+				i = len(src)
+			}
+		case c == '[':
+			depth++
+			b.WriteByte(c)
+		case c == ']':
+			if depth > 0 {
+				depth--
+			}
+			b.WriteByte(c)
+		case c == '^' && depth == 0:
+			b.WriteString(beginLineEquivalent)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // applyRegexpEncodingFlags sets a literal regexp's FIXEDENCODING / NOENCODING
@@ -952,7 +1069,7 @@ func strMatchRegexp(v object.Value) *Regexp {
 	case *Regexp:
 		return x
 	case *object.String:
-		re, err := onig.Compile(x.Str())
+		re, err := onig.Compile(rewriteBeginLineAnchor(x.Str()))
 		if err != nil {
 			raise("RegexpError", "%s: /%s/", err.Error(), x.Str())
 		}
@@ -963,14 +1080,171 @@ func strMatchRegexp(v object.Value) *Regexp {
 	}
 }
 
-// checkSubjectEncoding raises ArgumentError when the match subject is a String
-// whose bytes are not valid in its own encoding, matching MRI's
-// rb_reg_prepare_enc ("invalid byte sequence in <enc>"). A non-String subject
-// (Symbol, or an object coerced via #to_str) is left to the caller's coercion.
-func (vm *VM) checkSubjectEncoding(v object.Value) {
-	if s, ok := v.(*object.String); ok && !validInEncoding(s.Bytes(), s.EncName()) {
-		raise("ArgumentError", "invalid byte sequence in %s", s.EncName())
+// encInspectName renders an encoding the way MRI's rb_enc_inspect_name does in
+// the regexp-match incompatibility message, where ASCII-8BIT is shown under
+// both of its names.
+func encInspectName(name string) string {
+	if name == "ASCII-8BIT" {
+		return "BINARY (ASCII-8BIT)"
 	}
+	return name
+}
+
+// raiseRegexpEncError is re.c reg_enc_error: the Encoding::CompatibilityError a
+// match between a regexp and a string of irreconcilable encodings raises.
+//
+//	rb_raise(rb_eEncCompatError,
+//	         "incompatible encoding regexp match (%s regexp with %s string)",
+//	         rb_enc_inspect_name(rb_enc_get(re)), rb_enc_inspect_name(rb_enc_get(str)));
+func raiseRegexpEncError(reEnc, strEnc string) {
+	raise("Encoding::CompatibilityError", "incompatible encoding regexp match (%s regexp with %s string)",
+		encInspectName(reEnc), encInspectName(strEnc))
+}
+
+// checkSubjectEncoding decides whether re may be matched against the subject v
+// at all, reproducing ruby/ruby v3_4_0 re.c rb_reg_prepare_enc:
+//
+//	if (cr == ENC_CODERANGE_BROKEN)
+//	    rb_raise(rb_eArgError, "invalid byte sequence in %s", …);
+//	enc = rb_enc_get(str);
+//	if (RREGEXP_PTR(re)->enc == enc) { }
+//	else if (cr == ENC_CODERANGE_7BIT && RREGEXP_PTR(re)->enc == rb_usascii_encoding())
+//	    enc = RREGEXP_PTR(re)->enc;
+//	else if (!rb_enc_asciicompat(enc))            reg_enc_error(re, str);
+//	else if (rb_reg_fixed_encoding_p(re)) {
+//	    if (!rb_enc_asciicompat(RREGEXP_PTR(re)->enc) || cr != ENC_CODERANGE_7BIT)
+//	        reg_enc_error(re, str);
+//	}
+//	else if (warn && (RBASIC(re)->flags & REG_ENCODING_NONE) &&
+//	         enc != rb_ascii8bit_encoding() && cr != ENC_CODERANGE_7BIT)
+//	    rb_warn("historical binary regexp match /.../n against %s string", …);
+//
+// The last clause is rb_warn, so $VERBOSE == nil silences it but false does
+// not. A non-String subject (a Symbol, or an object coerced through #to_str) is
+// left to the caller's coercion, and a nil re only performs the broken-bytes
+// check.
+func (vm *VM) checkSubjectEncoding(re *Regexp, v object.Value) {
+	str, ok := v.(*object.String)
+	if !ok {
+		return
+	}
+	bytes, strEnc := str.Bytes(), str.EncName()
+	if !validInEncoding(bytes, strEnc) {
+		raise("ArgumentError", "invalid byte sequence in %s", strEnc)
+	}
+	reEnc := re.encodingName()
+	if reEnc == strEnc {
+		return
+	}
+	// ENC_CODERANGE_7BIT is only ever reported for an ASCII-COMPATIBLE encoding
+	// (coderange_scan short-circuits otherwise), so a UTF-16LE string of ASCII
+	// code points is VALID, not 7BIT — which is what makes it incompatible with
+	// a US-ASCII regexp rather than silently promoted.
+	sevenBit := asciiOnly(bytes) && encIsASCIICompat(strEnc)
+	if sevenBit && reEnc == "US-ASCII" {
+		return
+	}
+	if !encIsASCIICompat(strEnc) {
+		raiseRegexpEncError(reEnc, strEnc)
+	}
+	if re.isFixedEncoding() {
+		if !encIsASCIICompat(reEnc) || !sevenBit {
+			raiseRegexpEncError(reEnc, strEnc)
+		}
+		return
+	}
+	if re.noEnc && strEnc != "ASCII-8BIT" && !sevenBit {
+		vm.rbWarn("warning: historical binary regexp match /.../n against %s string", strEnc)
+	}
+}
+
+// patternNeedsLeftContext reports whether matching src from a byte offset can
+// depend on the text BEFORE that offset — i.e. whether handing the engine only
+// the tail subject[pos:] would change the answer. That is the case for the
+// beginning-of-line/string anchors (^, \A), the word-boundary assertions (\b,
+// \B), the keep operator (\K) and look-behind ((?<=…), (?<!…)); the
+// end-anchored forms ($, \z, \Z) and everything else read only at or after the
+// cursor, so a tail slice is equivalent for them.
+//
+// The scan is deliberately conservative: it over-reports (a "^" inside a
+// character class that is not the negation slot, a "\\b" that is really an
+// escaped backslash followed by b) because a false positive costs only the
+// slower per-position search path, while a false negative would silently keep
+// the wrong answer. A "^" is treated as the class-negation slot — and so
+// ignored — only when it directly follows a "[".
+//
+// \G is deliberately NOT listed. MRI binds \G to onig_search's start position,
+// whereas the per-position probe this predicate selects would rebind it to
+// every candidate; the tail-slice path already pins \G to the search cursor,
+// which is the behaviour to keep.
+func patternNeedsLeftContext(src string) bool {
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '\\':
+			if i+1 < len(src) {
+				switch src[i+1] {
+				case 'A', 'b', 'B', 'K':
+					return true
+				}
+				i++
+			}
+		case '^':
+			if i == 0 || src[i-1] != '[' {
+				return true
+			}
+		case '(':
+			if strings.HasPrefix(src[i:], "(?<=") || strings.HasPrefix(src[i:], "(?<!") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// searchFrom finds the leftmost match of r in s at or after byte offset pos and
+// returns it together with the byte offset its group offsets are relative to
+// (so a caller reads absolute positions as base+md.Begin(i), and builds its
+// MatchData with byteOff: base).
+//
+// MRI's reg_onig_search hands Onigmo the WHOLE string — onig_search(reg, ptr,
+// ptr+len, ptr+pos, ptr+range, …) — so the search start is a cursor INSIDE a
+// fully visible subject and ^, \A, \b, \B, \K and look-behind see the real
+// prefix s[:pos]. Matching the tail slice s[pos:] instead makes every such
+// assertion believe the string begins at the cursor, which turned
+// "Text\n".gsub(/^/, " ") into " T e x t \n " (/^/ re-matching at every
+// iteration's slice start) and "ab cd".scan(/\b\w/) into every character.
+//
+// When the pattern cannot read left of the cursor (patternNeedsLeftContext),
+// the tail slice IS equivalent and is used unchanged — that keeps the engine's
+// own leftmost scan, with its prefilter, for the overwhelmingly common case.
+// Otherwise the search is the anchored probe onig_search performs: try a match
+// anchored exactly at each candidate start, left to right, over the full
+// string, advancing one character at a time as Onigmo's
+// onigenc_get_right_adjust_char_head does. Every pattern this VM compiles goes
+// to the engine in UTF-8 mode (compileRegexp calls onig.Compile, and the /n
+// flag is recorded for #encoding/#options without changing how the engine
+// steps), so "one character" is always one UTF-8 rune here.
+//
+// Reference: ruby/ruby v3_4_0 re.c reg_onig_search / rb_reg_search0.
+func (r *Regexp) searchFrom(s string, pos int) (md *onig.MatchData, base int) {
+	if pos < 0 || pos > len(s) {
+		return nil, pos
+	}
+	m := r.matcher()
+	if !patternNeedsLeftContext(r.source) {
+		return m.Match(s[pos:]), pos
+	}
+	for p := pos; p <= len(s); {
+		if hit := m.MatchAt(s, p); hit != nil {
+			return hit, 0
+		}
+		if p == len(s) {
+			break
+		}
+		_, w := utf8.DecodeRuneInString(s[p:])
+		p += w
+	}
+	return nil, 0
 }
 
 // runMatch matches re against subject, returning a MatchData value or nil. It
@@ -1001,12 +1275,12 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 		return object.NilV
 	}
 	byteOff := charToByte(subject, int(pos))
-	md := re.matcher().Match(subject[byteOff:])
+	md, base := re.searchFrom(subject, byteOff)
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	m := &MatchData{md: md, subject: subject, re: re, byteOff: byteOff}
+	m := &MatchData{md: md, subject: subject, re: re, byteOff: base}
 	vm.lastMatch = m
 	return m
 }
@@ -1017,13 +1291,13 @@ func (vm *VM) runMatchFrom(re *Regexp, subject string, pos int64) object.Value {
 // index of the match start, or nil. off may equal the character count.
 func (vm *VM) strIndexRegexp(re *Regexp, subject string, off int) object.Value {
 	byteOff := charToByte(subject, off)
-	md := re.matcher().Match(subject[byteOff:]) // leftmost match in the tail; \G pins to its start
+	md, base := re.searchFrom(subject, byteOff) // leftmost match at or after the cursor
 	if md == nil {
 		vm.lastMatch = object.NilV
 		return object.NilV
 	}
-	vm.lastMatch = &MatchData{md: md, subject: subject, re: re, byteOff: byteOff}
-	return object.IntValue(int64(byteToChar(subject, byteOff+md.Begin(0))))
+	vm.lastMatch = &MatchData{md: md, subject: subject, re: re, byteOff: base}
+	return object.IntValue(int64(byteToChar(subject, base+md.Begin(0))))
 }
 
 // lastRegexpMatch returns the match of re that begins at the largest byte offset
@@ -1389,7 +1663,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when none
 	pos := 0
 	for pos <= len(subject) {
-		md := re.matcher().Match(subject[pos:])
+		md, base := re.searchFrom(subject, pos)
 		if md == nil {
 			break
 		}
@@ -1398,7 +1672,7 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 		// absolute byteOff so MatchData#string, #begin and #offset are correct).
 		// MRI leaves $~ set to the last match after scan returns, even if a block
 		// reassigned it, so re-set it after the block runs.
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: pos}
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
 		vm.lastMatch = cur
 		last = cur
 		if blk != nil {
@@ -1407,17 +1681,17 @@ func (vm *VM) scan(re *Regexp, subject string, self object.Value, blk *Proc) obj
 		} else {
 			results = append(results, elem)
 		}
-		matchEnd := md.End(0) // byte offset within subject[pos:]
-		if matchEnd == md.Begin(0) {
+		matchEnd := base + md.End(0) // absolute byte offset into subject
+		if md.End(0) == md.Begin(0) {
 			// Empty match: emit here, then step one character forward.
-			pos += matchEnd
+			pos = matchEnd
 			if pos >= len(subject) {
 				break
 			}
 			_, w := utf8.DecodeRuneInString(subject[pos:])
 			pos += w
 		} else {
-			pos += matchEnd
+			pos = matchEnd
 		}
 	}
 	// $~ is the last match (or nil when there was none), as MRI leaves it.
@@ -1555,12 +1829,12 @@ func splitRegexp(re *Regexp, subject string, limit int, enc string) object.Value
 		if limit > 0 && pieces+1 == limit {
 			break
 		}
-		md := re.matcher().Match(subject[search:])
+		md, base := re.searchFrom(subject, search)
 		if md == nil {
 			break
 		}
-		mBegin := search + md.Begin(0)
-		mEnd := search + md.End(0)
+		mBegin := base + md.Begin(0)
+		mEnd := base + md.End(0)
 		if mEnd == mBegin {
 			// Empty match: an empty match at the very start is skipped; otherwise
 			// it ends the current character field. Advance one character.
@@ -1685,18 +1959,19 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 	search := 0                       // byte cursor where the next search begins
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
-		md := re.matcher().Match(subject[search:])
+		md, base := re.searchFrom(subject, search)
 		if md == nil {
 			break
 		}
-		mBegin := search + md.Begin(0)
-		mEnd := search + md.End(0)
+		mBegin := base + md.Begin(0)
+		mEnd := base + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
 		// Expose this match through $~ / $1.. so a replacement block sees the
-		// captures. md's offsets are relative to the searched slice, so carry the
-		// FULL subject with byteOff=search — then MatchData#string is the whole
-		// receiver and #offset/#begin are absolute, as MRI reports inside the block.
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: search}
+		// captures. md's offsets are relative to base (the offset searchFrom
+		// matched from), so carry the FULL subject with byteOff=base — then
+		// MatchData#string is the whole receiver and #offset/#begin are absolute,
+		// as MRI reports inside the block.
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
 		vm.lastMatch = cur
 		last = cur
 		if blk != nil {
@@ -1740,16 +2015,16 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 	search := 0                       // byte cursor where the next search begins
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
 	for search <= len(subject) {
-		md := re.matcher().Match(subject[search:])
+		md, base := re.searchFrom(subject, search)
 		if md == nil {
 			break
 		}
-		mBegin := search + md.Begin(0)
-		mEnd := search + md.End(0)
+		mBegin := base + md.Begin(0)
+		mEnd := base + md.End(0)
 		b.WriteString(subject[pos:mBegin]) // literal text before the match
-		// Carry the FULL subject with byteOff=search so $~ reports absolute
+		// Carry the FULL subject with byteOff=base so $~ reports absolute
 		// offsets and the whole receiver (see gsub).
-		cur := &MatchData{md: md, subject: subject, re: re, byteOff: search}
+		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
 		vm.lastMatch = cur
 		last = cur
 		// Look the match up with Hash#[] (not a bare Get) so a missing key runs the
@@ -2133,8 +2408,8 @@ func (vm *VM) installRegexp() {
 		if _, isNil := args[0].(object.Nil); isNil {
 			return object.False
 		}
-		vm.checkSubjectEncoding(args[0])
 		re := reArg(self)
+		vm.checkSubjectEncoding(re, args[0])
 		subject := strArg(args[0])
 		// match?(str, pos): probe from character offset pos, without touching $~
 		// (the predicate form has no match-data side effect).
@@ -2147,7 +2422,10 @@ func (vm *VM) installRegexp() {
 			if pos < 0 || pos > nChars {
 				return object.False
 			}
-			return object.Bool(re.matcher().MatchString(subject[charToByte(subject, int(pos)):]))
+			// Search from the cursor with the WHOLE subject visible, as
+			// rb_reg_search does — /\A/.match?("hello", 2) is false, not true.
+			md, _ := re.searchFrom(subject, charToByte(subject, int(pos)))
+			return object.Bool(md != nil)
 		}
 		return object.Bool(re.matcher().MatchString(subject))
 	})
@@ -2159,7 +2437,7 @@ func (vm *VM) installRegexp() {
 			vm.lastMatch = object.NilV
 			return object.NilV
 		}
-		vm.checkSubjectEncoding(args[0])
+		vm.checkSubjectEncoding(re, args[0])
 		// The subject is coerced like any Regexp operand: a Symbol yields its name,
 		// anything else is taken via #to_str (Integer/Exception raise TypeError).
 		subject := vm.regexpOperandStr(args[0])
@@ -2519,6 +2797,7 @@ func (vm *VM) regexpMatchIndex(re *Regexp, subject object.Value) object.Value {
 	if !ok {
 		raise("TypeError", "no implicit conversion of %s into String", classNameOf(subject))
 	}
+	vm.checkSubjectEncoding(re, subject)
 	md := re.matcher().Match(s)
 	if md == nil {
 		vm.lastMatch = object.NilV
@@ -2803,4 +3082,144 @@ func namedKey(name string, symbolize bool) object.Value {
 		return object.Symbol(name)
 	}
 	return object.NewString(name)
+}
+
+// onigMeaningfulEscapeLetters are the ASCII letters that carry a meaning after
+// a backslash in a Ruby (Onigmo) pattern: the character types and properties
+// (d D h H p P s S w W R X), the anchors and assertions (A b B G K z Z), the
+// character escapes (a c C e f M n r t u v x o), and the group references
+// (g k). Every OTHER letter is, in MRI, simply that letter — "\y" matches "y",
+// "\Q" matches "Q" — which is what escapes_spec's "allows any character to be
+// escaped" pins. The engine this VM links rejects them instead, so
+// translateCharEscapes drops the backslash.
+const onigMeaningfulEscapeLetters = "abcdefghknoprstuvwxzABCDGHKMPRSWXZ"
+
+// controlEscapeValue applies Onigmo's control-character rule to one byte: "?"
+// denotes DEL and every other byte is masked with 0x9F, so \cA, \ca and \cc all
+// give 0x01/0x03 exactly as the corresponding String escapes do ("\cA".ord == 1,
+// "\c#".ord == 3). A byte at or above 0x80 is not a control escape MRI accepts
+// here, and is reported as unusable.
+func controlEscapeValue(c byte) (byte, bool) {
+	if c >= 0x80 {
+		return 0, false
+	}
+	if c == '?' {
+		return 0x7F, true
+	}
+	return c & 0x9F, true
+}
+
+// controlEscapePayload reads the character a \c / \C- escape controls from the
+// text that follows it, returning its control value and how many bytes it
+// spanned. The payload may itself be backslash-escaped — /\c\\/ controls a
+// backslash, giving 0x1C — which is why it is not simply the next byte.
+func controlEscapePayload(rest string) (value byte, width int, ok bool) {
+	if len(rest) == 0 {
+		return 0, 0, false
+	}
+	if rest[0] == '\\' {
+		if len(rest) < 2 {
+			return 0, 0, false
+		}
+		v, good := controlEscapeValue(rest[1])
+		return v, 2, good
+	}
+	v, good := controlEscapeValue(rest[0])
+	return v, 1, good
+}
+
+// hexEscape renders a byte as the \xHH escape the engine accepts in and out of
+// a character class.
+func hexEscape(v byte) string {
+	const hexDigits = "0123456789abcdef"
+	return `\x` + string([]byte{hexDigits[v>>4], hexDigits[v&0xf]})
+}
+
+// translateCharEscapes rewrites the Ruby escape sequences that denote a single
+// CHARACTER but that the linked engine does not parse, into the \xHH escape it
+// does parse, and drops the backslash from an escape that is just a letter:
+//
+//	\cX and \C-X   control characters  — /\c#\cc\cC/, /\C-*\C-J\C-j/
+//	\0, \0nn       octal, and any \nnn INSIDE a character class — /[\000-\b]/
+//	\y \Q \j …     a letter with no meaning after a backslash — /\y/ matches "y"
+//
+// Outside a character class a backslash followed by 1-9 is left untouched: that
+// is a back-reference, which the engine handles. Inside one it cannot be, so
+// Onigmo reads it as octal there (/[\1]/ matches "\x01"), and so does this.
+//
+// A value above 0x7F is left as written: MRI turns such a pattern into a binary
+// (ASCII-8BIT) regexp, which is a different matter from spelling one character.
+//
+// Character-class nesting is tracked by depth, as in rewriteBeginLineAnchor, so
+// POSIX brackets and nested classes are counted correctly. A source with no
+// backslash is returned unchanged.
+//
+// Reference: ruby/ruby v3_4_0 regparse.c fetch_escaped_value (the \c / \C- /
+// \M- cases) and fetch_token's ONIG_SYN_OP_ESC_OCTAL3 branch.
+func translateCharEscapes(src string) string {
+	if !strings.ContainsRune(src, '\\') {
+		return src
+	}
+	var b strings.Builder
+	b.Grow(len(src))
+	depth := 0 // character-class nesting depth
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		if c == '[' {
+			depth++
+			b.WriteByte(c)
+			continue
+		}
+		if c == ']' {
+			if depth > 0 {
+				depth--
+			}
+			b.WriteByte(c)
+			continue
+		}
+		if c != '\\' || i+1 >= len(src) {
+			b.WriteByte(c)
+			continue
+		}
+		n := src[i+1]
+		switch {
+		case n == 'c' && i+2 < len(src):
+			if payload, width, ok := controlEscapePayload(src[i+2:]); ok {
+				b.WriteString(hexEscape(payload))
+				i += 1 + width
+				continue
+			}
+		case n == 'C' && i+3 < len(src) && src[i+2] == '-':
+			if payload, width, ok := controlEscapePayload(src[i+3:]); ok {
+				b.WriteString(hexEscape(payload))
+				i += 2 + width
+				continue
+			}
+		case n >= '0' && n <= '7' && (depth > 0 || n == '0'):
+			digits := 1
+			for digits < 3 && i+1+digits < len(src) && src[i+1+digits] >= '0' && src[i+1+digits] <= '7' {
+				digits++
+			}
+			v, err := strconv.ParseUint(src[i+1:i+1+digits], 8, 16)
+			if err == nil && v <= 0x7F {
+				b.WriteString(hexEscape(byte(v)))
+				i += digits
+				continue
+			}
+		case isASCIILetter(n) && !strings.ContainsRune(onigMeaningfulEscapeLetters, rune(n)):
+			b.WriteByte(n)
+			i++
+			continue
+		}
+		// Not one of the rewritten forms: copy the escape through untouched.
+		b.WriteByte(c)
+		b.WriteByte(n)
+		i++
+	}
+	return b.String()
+}
+
+// isASCIILetter reports whether c is an ASCII letter.
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
