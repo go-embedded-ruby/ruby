@@ -81,18 +81,63 @@ func (vm *VM) registerPackUnpack() {
 		}
 		return object.NewStringBytesEnc(out, enc)
 	})
-	vm.cString.define("unpack", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("unpack", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := self.(*object.String).Bytes()
-		return object.NewArrayFromSlice(unpackElems(data, vm.packFormat(args)))
+		fmtStr := vm.packFormat(args)
+		return object.NewArrayFromSlice(unpackElems(data[vm.unpackOffset(args, len(data)):], fmtStr))
 	})
-	vm.cString.define("unpack1", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("unpack1", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		data := self.(*object.String).Bytes()
-		elems := unpackElems(data, vm.packFormat(args))
+		fmtStr := vm.packFormat(args)
+		elems := unpackElems(data[vm.unpackOffset(args, len(data)):], fmtStr)
 		if len(elems) == 0 {
 			return object.NilV
 		}
 		return elems[0]
 	})
+}
+
+// unpackOffset reads the `offset:` keyword of String#unpack / #unpack1 and
+// returns the BYTE offset unpacking starts from, validating it the way MRI's
+// pack_unpack_internal does (ruby/ruby v3_4_0 pack.c):
+//
+//	if (offset < 0) rb_raise(rb_eArgError, "offset can't be negative");
+//	len = RSTRING_LEN(str);
+//	if (offset > len) rb_raise(rb_eArgError, "offset outside of string");
+//
+// The bound is EXCLUSIVE of the error only at offset == len: that is accepted
+// and leaves nothing to unpack, so "a".unpack("C", offset: 1) is [nil] and
+// "a".unpack1("C", offset: 1) is nil, while offset 2 raises. The offset counts
+// BYTES, not characters, so "\u0608".unpack1("C", offset: 1) reads the second
+// byte of the two-byte character.
+//
+// No keyword at all yields 0. Any keyword other than :offset is rejected the
+// way rb_get_kwargs does.
+func (vm *VM) unpackOffset(args []object.Value, byteLen int) int {
+	h, ok := trailingHash(args)
+	if !ok || len(args) < 2 {
+		return 0
+	}
+	off := object.Value(nil)
+	for _, k := range h.Keys {
+		sym, isSym := k.(object.Symbol)
+		if isSym && string(sym) == "offset" {
+			off, _ = h.Get(k)
+			continue
+		}
+		raise("ArgumentError", "unknown keyword: %s", k.Inspect())
+	}
+	if off == nil || object.IsNil(off) {
+		return 0
+	}
+	n := vm.toIntCoerce(off)
+	if n < 0 {
+		raise("ArgumentError", "offset can't be negative")
+	}
+	if n > int64(byteLen) {
+		raise("ArgumentError", "offset outside of string")
+	}
+	return int(n)
 }
 
 // packFormat extracts the mandatory format argument, which is a String or any

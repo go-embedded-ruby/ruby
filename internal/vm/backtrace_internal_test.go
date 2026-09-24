@@ -6,6 +6,7 @@ package vm
 import (
 	"testing"
 
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -93,13 +94,26 @@ func TestUncaughtBacktraceFallsBackToLiveStack(t *testing.T) {
 	vm := New(nil)
 	vm.frameNames = []string{"top", "inner"}
 	vm.frameFiles = []string{"/p.rb", "/p.rb"}
+	// A frame is a (name, file, iseq, pc) tuple now, so a hand-built stack has to
+	// build all four. Leaving the code stacks as the VM's boot left them does not
+	// give these frames NO line — it gives them the PRELUDE's, at whatever pc the
+	// boot last wrote, which is how this test first failed: it reported line 109
+	// for a frame that has no source at all. Two ISeqs with a line apiece say
+	// what is meant, and say it in the shape the product uses.
+	vm.frameCode = []frameCode{
+		{iseq: &bytecode.ISeq{Name: "top", Lines: []bytecode.LineEntry{{PC: 0, Line: 7}}}},
+		{iseq: &bytecode.ISeq{Name: "inner", Lines: []bytecode.LineEntry{{PC: 0, Line: 12}}}},
+	}
 	exc := &RObject{class: vm.consts["RuntimeError"].(*RClass), ivars: map[string]object.Value{}}
 	bt := vm.uncaughtBacktrace(RubyError{Obj: exc})
 	if len(bt) != 2 {
 		t.Fatalf("expected 2 live frames, got %v", bt)
 	}
-	if bt[0].ToS() != "/p.rb:0:in 'inner'" {
+	if bt[0].ToS() != "/p.rb:12:in 'inner'" {
 		t.Fatalf("got %q", bt[0].ToS())
+	}
+	if bt[1].ToS() != "/p.rb:7:in 'top'" {
+		t.Fatalf("got %q", bt[1].ToS())
 	}
 }
 

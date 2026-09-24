@@ -101,6 +101,8 @@ func (f *freezer) writeISeq(b *strings.Builder, s *bytecode.ISeq) {
 	fmt.Fprintf(b, "BlockSlot: %d,\n", s.BlockSlot)
 	fmt.Fprintf(b, "NumLocals: %d,\n", s.NumLocals)
 	writeStrings(b, "Locals", s.Locals)
+	writeLines(b, s.Lines)
+	fmt.Fprintf(b, "FirstLine: %d,\n", s.FirstLine)
 	f.writeChildren(b, s.Children)
 	fmt.Fprintf(b, "Super: %s,\n", strconv.Quote(s.Super))
 	b.WriteString("}")
@@ -189,6 +191,22 @@ func (f *freezer) writeChildren(b *strings.Builder, kids []*bytecode.ISeq) {
 	for _, k := range kids {
 		f.writeISeq(b, k)
 		b.WriteString(",\n")
+	}
+	b.WriteString("},\n")
+}
+
+// writeLines emits the ISeq's source map. It has to be frozen with the rest: an
+// AOT-compiled program has no source to recompile from, so a map dropped here is
+// a backtrace that reports line 0 for every frame in the frozen half — the exact
+// state this VM was in before there was a map at all, reintroduced silently and
+// only on the AOT path.
+func writeLines(b *strings.Builder, lines []bytecode.LineEntry) {
+	if lines == nil {
+		return // zero value is a nil slice
+	}
+	b.WriteString("Lines: []bytecode.LineEntry{")
+	for _, l := range lines {
+		fmt.Fprintf(b, "{PC: %d, Line: %d}, ", l.PC, l.Line)
 	}
 	b.WriteString("},\n")
 }

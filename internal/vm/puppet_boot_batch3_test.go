@@ -35,14 +35,22 @@ func TestClassEvalString(t *testing.T) {
 	}
 }
 
-// TestLineKeyword covers Kernel#__LINE__. This VM does not track per-instruction
-// source lines (backtraces and #caller report line 0), so __LINE__ is 0 — enough
-// to feed a line offset to class_eval(str, file, line).
+// TestLineKeyword covers the __LINE__ keyword, which the compiler substitutes
+// with the source line of the statement it appears in.
+//
+// The three expectations used to be 0, 0 and 1: this VM had no line map, so
+// __LINE__ was a Kernel method answering 0 whatever the source said. Each value
+// below was re-measured against ruby 4.0.5 (+PRISM) by writing the same source
+// to a file and running it:
+//
+//	p __LINE__                    → 1
+//	class C\n  p __LINE__\nend     → 2
+//	p(__LINE__ + 1)               → 2   (__LINE__ is 1; MRI adds the 1)
 func TestLineKeyword(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{"p __LINE__", "0\n"},
-		{"class C\n  p __LINE__\nend", "0\n"},
-		{"p(__LINE__ + 1)", "1\n"},
+		{"p __LINE__", "1\n"},
+		{"class C\n  p __LINE__\nend", "2\n"},
+		{"p(__LINE__ + 1)", "2\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
