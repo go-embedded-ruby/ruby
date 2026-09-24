@@ -254,7 +254,7 @@ func (vm *VM) constSegDefined(mod *RClass, name string, inherit, isFirst bool) (
 		if v, ok := mod.consts[name]; ok {
 			return v, true
 		}
-		return object.NilVal(), hasAutoload(mod, name)
+		return object.NilVal(), vm.autoloadVisible(mod, name)
 	}
 	if v, ok := vm.constInAncestors(mod, name); ok {
 		return v, true
@@ -266,7 +266,7 @@ func (vm *VM) constSegDefined(mod *RClass, name string, inherit, isFirst bool) (
 		if v, ok := vm.cObject.consts[name]; ok {
 			return v, true
 		}
-		if hasAutoload(vm.cObject, name) {
+		if vm.autoloadVisible(vm.cObject, name) {
 			return object.NilVal(), true
 		}
 	}
@@ -296,7 +296,7 @@ func (vm *VM) autoloadPendingInAncestors(mod *RClass, name string) bool {
 		if (c == vm.cObject || c == vm.cBasicObject) && mod != vm.cObject && mod != vm.cBasicObject {
 			continue
 		}
-		if hasAutoload(c, name) {
+		if vm.autoloadVisible(c, name) {
 			return true
 		}
 	}

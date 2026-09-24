@@ -125,6 +125,35 @@ func (vm *VM) autoloadPathFor(cls *RClass, name string, inherit bool) object.Val
 	return object.NilV
 }
 
+// autoloadVisible reports whether a pending autoload of name on c makes the
+// constant answer "defined" to `defined?` and #const_defined?. It does NOT,
+// while the registered feature is already loaded or is being loaded right now:
+// MRI resolves an autoload entry through check_autoload_required, which calls
+// rb_feature_provided(file, &loading) and treats an entry whose feature is
+// loading as having no autoload left to run (ruby/ruby v3_4_0 variable.c
+// check_autoload_required / autoload_defined_p / rb_autoload_at_p). That is
+// what makes a file required DIRECTLY, while an autoload for it is registered,
+// see its own constant as undefined:
+//
+//	MZ.autoload :K, path
+//	require path        # inside the file: defined?(MZ::K) is nil,
+//	                    # MZ.const_defined?(:K) is false, MZ.autoload?(:K) is nil,
+//	                    # but MZ.constants(false) still includes :K
+//
+// The constant list is deliberately NOT filtered this way — MRI keeps the
+// reserved entry in Module#constants throughout — so only the two "is it
+// defined?" questions consult this.
+func (vm *VM) autoloadVisible(c *RClass, name string) bool {
+	if c == nil || c.autoloads == nil {
+		return false
+	}
+	path, ok := c.autoloads[name]
+	if !ok {
+		return false
+	}
+	return !vm.featureLoaded(path)
+}
+
 // registerAutoloadOn records (or replaces) a pending autoload for name on cls.
 // When the constant is already defined in cls's own table the registration is
 // dropped, matching MRI where autoload of a defined constant is inert. A fresh
@@ -172,7 +201,43 @@ func (vm *VM) tryAutoload(cls *RClass, name string) bool {
 	// Kernel#require is what runs — ruby/spec exercises exactly that.
 	vm.send(vm.main, "require", []object.Value{object.NewString(path)}, nil)
 	done = true
+	vm.warnAutoloadDidNotDefine(cls, name, path)
 	return true
+}
+
+// warnAutoloadDidNotDefine emits MRI's diagnostic for an autoload whose file
+// completed without defining the constant in the module the autoload was
+// registered on — the case where lookup then carries on into the enclosing
+// lexical and ancestor scopes. ruby/ruby v3_4_0 variable.c autoload_try_load:
+//
+//	// After we loaded the feature, if the constant is not defined, we remove
+//	// it completely:
+//	rb_const_entry_t *ce = rb_const_lookup(arguments->module, arguments->name);
+//	if (!ce || UNDEF_P(ce->value)) {
+//	    result = Qfalse;
+//	    rb_const_remove(arguments->module, arguments->name);
+//	    if (arguments->module == rb_cObject) {
+//	        rb_warning("Expected %"PRIsVALUE" to define %"PRIsVALUE" but it didn't", …);
+//	    } else {
+//	        rb_warning("Expected %"PRIsVALUE" to define %"PRIsVALUE"::%"PRIsVALUE" but it didn't", …);
+//	    }
+//	}
+//
+// It goes through rb_warning, not rb_warn, so only $VERBOSE == true shows it —
+// the same gate warnCircularRequire applies — and it is emitted at most once
+// per registration because the caller has already retired the entry.
+func (vm *VM) warnAutoloadDidNotDefine(cls *RClass, name, path string) {
+	if _, defined := cls.consts[name]; defined {
+		return
+	}
+	if v, ok := vm.globals["$VERBOSE"].(object.Bool); !ok || !bool(v) {
+		return
+	}
+	qualified := name
+	if cls != vm.cObject {
+		qualified = vm.moduleToSStr(cls) + "::" + name
+	}
+	vm.curStderr().writeStr("warning: Expected " + path + " to define " + qualified + " but it didn't\n")
 }
 
 // featureLoaded reports whether path names a file that has already been loaded,
