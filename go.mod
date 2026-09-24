@@ -4,11 +4,11 @@ go 1.26.4
 
 require (
 	github.com/alicebob/miniredis/v2 v2.39.0
-	github.com/beevik/etree v1.8.0
+	github.com/beevik/etree v1.8.1
 	github.com/dolthub/go-mysql-server v0.20.0
 	github.com/glauth/ldap v0.0.0-20260718202943-34c5f9b3cbf1
 	github.com/go-commonmark/commonmark v0.1.0
-	github.com/go-composites/bag v0.0.0-20260918234742-44e295491716
+	github.com/go-composites/bag v0.0.0-20260923203350-0140c174beaf
 	github.com/go-composites/result v0.0.0-20260920235032-53e0a08ef62b
 	github.com/go-composites/time v0.0.0-20260923000420-0a04dcfd543c
 	github.com/go-fft/fft v0.0.0-20260831114610-598cacbd5c9a
@@ -23,12 +23,12 @@ require (
 	github.com/go-ruby-abbrev/abbrev v0.0.0-20260916090008-ac08b8471830
 	github.com/go-ruby-acme/acme v0.0.0-20260910083506-2c4b2786f606
 	github.com/go-ruby-actioncable/actioncable v0.0.0-20260916090125-dc336dcdde77
-	github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260916090203-87173114028e
+	github.com/go-ruby-actionmailer/actionmailer v0.0.0-20260923211205-26d6286e26bf
 	github.com/go-ruby-actionpack/actionpack v0.0.0-20260916090236-b987dbf76b25
-	github.com/go-ruby-actionview/actionview v0.0.0-20260916090312-73677dcf3f1f
+	github.com/go-ruby-actionview/actionview v0.0.0-20260923211214-d926f1a7e0a5
 	github.com/go-ruby-activejob/activejob v0.0.0-20260916090346-271f6f8a2a0f
 	github.com/go-ruby-activeldap/activeldap v0.0.0-20260916090418-6bcd3576fdda
-	github.com/go-ruby-activemodel/activemodel v0.0.0-20260916090451-933be59280fd
+	github.com/go-ruby-activemodel/activemodel v0.0.0-20260923211229-79f6029378bf
 	github.com/go-ruby-activerecord/activerecord v0.0.0-20260916090523-27a767d9d502
 	github.com/go-ruby-activestorage/activestorage v0.0.0-20260916090555-d36e120608b9
 	github.com/go-ruby-activesupport/activesupport v0.0.0-20260916090626-10f09966f037
@@ -44,7 +44,7 @@ require (
 	github.com/go-ruby-bigdecimal/bigdecimal v0.0.0-20260916091144-b31c0a1caac2
 	github.com/go-ruby-bleve/bleve v0.0.0-20260825110136-02ab15b86bd5
 	github.com/go-ruby-builder/builder v0.0.0-20260916091257-7850ebb53ff7
-	github.com/go-ruby-bundler/bundler v0.0.0-20260916091330-b625142e4812
+	github.com/go-ruby-bundler/bundler v0.0.0-20260923211304-8585fc1ac0ac
 	github.com/go-ruby-cancancan/cancancan v0.0.0-20260916091405-8fac9e430552
 	github.com/go-ruby-capistrano/capistrano v0.0.0-20260903192711-c466694b6746
 	github.com/go-ruby-capybara/capybara v0.0.0-20260910084630-0731c9ea8d6d
@@ -57,16 +57,16 @@ require (
 	github.com/go-ruby-csv/csv v0.0.0-20260916092014-f49077ac37dd
 	github.com/go-ruby-date/date v0.0.0-20260916092103-cf7111f88dea
 	github.com/go-ruby-deep-merge/deep-merge v0.0.0-20260825131041-0389f358e6cf
-	github.com/go-ruby-devise/devise v0.0.0-20260916092233-d1cdc2463e85
+	github.com/go-ruby-devise/devise v0.0.0-20260923211402-b658b97dbfef
 	github.com/go-ruby-did-you-mean/did-you-mean v0.0.0-20260916092307-ddd074d76c3c
 	github.com/go-ruby-digest/digest v0.0.0-20260916092355-76988b665a30
 	github.com/go-ruby-dotenv/dotenv v0.0.0-20260916092517-652b01333e00
-	github.com/go-ruby-dry-struct/dry-struct v0.0.0-20260917092939-fa99b4e2045b
+	github.com/go-ruby-dry-struct/dry-struct v0.0.0-20260923203755-f9de2d043c8d
 	github.com/go-ruby-dry-types/dry-types v0.0.0-20260917093022-4ace620129fe
-	github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260917093106-b412ab1ce544
+	github.com/go-ruby-dry-validation/dry-validation v0.0.0-20260923203804-e8968bd489d4
 	github.com/go-ruby-erb/erb v0.0.0-20260916092736-2b6ca70e94b1
 	github.com/go-ruby-erubi/erubi v0.0.0-20260916092808-e08929a3f546
-	github.com/go-ruby-etcd/etcd v0.0.0-20260826125744-599673ae1904
+	github.com/go-ruby-etcd/etcd v0.0.0-20260923210448-a14e302251b1
 	github.com/go-ruby-excon/excon v0.0.0-20260916092904-2d7d3ea939bd
 	github.com/go-ruby-facter/facter v0.0.0-20260831125504-d8bb19e1e317
 	github.com/go-ruby-factory-bot/factory-bot v0.0.0-20260717064748-e60c0663ca83
@@ -81,21 +81,21 @@ require (
 	github.com/go-ruby-graphql/graphql v0.0.0-20260717065229-c0355095acc2
 	github.com/go-ruby-grpc/grpc v0.0.0-20260727143307-befa80ff22df
 	github.com/go-ruby-haml/haml v0.0.0-20260916093627-8783fea9fe40
-	github.com/go-ruby-hanami/hanami v0.0.0-20260916093700-925446e81d08
+	github.com/go-ruby-hanami/hanami v0.0.0-20260923211533-24f30a036b61
 	github.com/go-ruby-hcl2/hcl2 v0.0.0-20260717065417-6b99e6076938
 	github.com/go-ruby-hiera/hiera v0.0.0-20260831115655-7a9d33419f3e
 	github.com/go-ruby-hocon/hocon v0.0.0-20260901145201-d484ec155199
 	github.com/go-ruby-http/http v0.0.0-20260916093911-fc825633cf27
 	github.com/go-ruby-httparty/httparty v0.0.0-20260916093943-2584adf002b1
 	github.com/go-ruby-i18n/i18n v0.0.0-20260916094015-15d33383fb6e
-	github.com/go-ruby-images/images v0.0.0-20260910090834-a8380353fc61
+	github.com/go-ruby-images/images v0.0.0-20260923211542-bdb183a4050c
 	github.com/go-ruby-ipaddr/ipaddr v0.0.0-20260916094116-8c16b4082722
 	github.com/go-ruby-irb/irb v0.0.0-20260916094148-b11dd34a8d63
 	github.com/go-ruby-jbuilder/jbuilder v0.0.0-20260916094222-db456ca7e642
 	github.com/go-ruby-jekyll/jekyll v0.0.0-20260907185853-82fc8b8e7b41
 	github.com/go-ruby-json/json v0.0.0-20260916094324-3ddd0f57b467
 	github.com/go-ruby-jwt/jwt v0.0.0-20260717065943-0bba2f39bf81
-	github.com/go-ruby-kafka/kafka v0.0.0-20260920093233-3f8d23307cce
+	github.com/go-ruby-kafka/kafka v0.0.0-20260923211608-11947663b174
 	github.com/go-ruby-kaminari/kaminari v0.0.0-20260717070041-898c0896ede4
 	github.com/go-ruby-ldap/ldap v0.0.0-20260808195309-d90a141d64f9
 	github.com/go-ruby-logger/logger v0.0.0-20260916094709-0005da481f56
@@ -118,17 +118,17 @@ require (
 	github.com/go-ruby-net-smtp/net-smtp v0.0.0-20260916095659-4ce00c942d53
 	github.com/go-ruby-oauth2/oauth2 v0.0.0-20260916095803-9bbe291c2c47
 	github.com/go-ruby-observer/observer v0.0.0-20260820220157-5e26c6317a28
-	github.com/go-ruby-oidc/oidc v0.0.0-20260825131247-3eec65e55886
-	github.com/go-ruby-omniauth/omniauth v0.0.0-20260825131256-b260ffb4a332
+	github.com/go-ruby-oidc/oidc v0.0.0-20260923211633-65f2c6985066
+	github.com/go-ruby-omniauth/omniauth v0.0.0-20260923203916-25cee0673a57
 	github.com/go-ruby-openbao/openbao v0.0.0-20260717071447-328a091965dd
-	github.com/go-ruby-openstack/openstack v0.0.0-20260825110720-3d2b49913552
+	github.com/go-ruby-openstack/openstack v0.0.0-20260923203924-9000c374d63c
 	github.com/go-ruby-opentelemetry/opentelemetry v0.0.0-20260826125821-3371d170a93c
 	github.com/go-ruby-opentype/opentype v0.2.0
 	github.com/go-ruby-optparse/optparse v0.0.0-20260917100925-33b18da76c37
 	github.com/go-ruby-ostruct/ostruct v0.0.0-20260820220107-4de11f016237
 	github.com/go-ruby-pagy/pagy v0.0.0-20260717071719-997d15eee011
 	github.com/go-ruby-paper-trail/paper-trail v0.0.0-20260717071745-42a249656e5a
-	github.com/go-ruby-parquet/parquet v0.0.0-20260910092837-7cd4d869494f
+	github.com/go-ruby-parquet/parquet v0.0.0-20260923211642-bc75bcb9031e
 	github.com/go-ruby-parser/parser v0.3.0
 	github.com/go-ruby-pathname/pathname v0.0.0-20260916100446-0824484b665f
 	github.com/go-ruby-pg/pg v0.0.0-20260916100523-3831ec811a67
@@ -141,10 +141,10 @@ require (
 	github.com/go-ruby-puma/puma v0.0.0-20260717072346-1d0625916636
 	github.com/go-ruby-pundit/pundit v0.0.0-20260916100927-31bbe9228061
 	github.com/go-ruby-puppet-resource-api/puppet-resource-api v0.0.0-20260901145207-1f42f39276b6
-	github.com/go-ruby-puppet/puppet v0.0.0-20260901145212-6718ec34c276
+	github.com/go-ruby-puppet/puppet v0.0.0-20260923211650-6955c245474b
 	github.com/go-ruby-racc/racc v0.0.0-20260916101058-25c21ceace36
 	github.com/go-ruby-rack/rack v0.0.0-20260916101131-d86b924dd331
-	github.com/go-ruby-rails/rails v0.0.0-20260831132647-16f9e724102e
+	github.com/go-ruby-rails/rails v0.0.0-20260923204112-21b35dca661b
 	github.com/go-ruby-railties/railties v0.0.0-20260916101326-3a999a032a06
 	github.com/go-ruby-rake/rake v0.0.0-20260916101401-3a87d07573fb
 	github.com/go-ruby-ransack/ransack v0.0.0-20260717072959-06ca1d7c6829
@@ -155,11 +155,11 @@ require (
 	github.com/go-ruby-resolv/resolv v0.0.0-20260916101809-a2b1b027ae6d
 	github.com/go-ruby-resque/resque v0.0.0-20260903192756-dc5f8e3f2e80
 	github.com/go-ruby-rexml/rexml v0.0.0-20260916101905-c8e846bf8b6e
-	github.com/go-ruby-roda/roda v0.0.0-20260916101938-799a8dd05735
+	github.com/go-ruby-roda/roda v0.0.0-20260923204143-337fa1a774a7
 	github.com/go-ruby-rolify/rolify v0.0.0-20260717073459-4d2e717bab13
 	github.com/go-ruby-rqrcode/rqrcode v0.0.0-20260916102108-c0062622e02f
 	github.com/go-ruby-rspec/rspec v0.0.0-20260916102141-613d88c1871f
-	github.com/go-ruby-rss/rss v0.0.0-20260916102214-23ed5b37565e
+	github.com/go-ruby-rss/rss v0.0.0-20260923204152-16e2242a2336
 	github.com/go-ruby-rubocop/rubocop v0.0.0-20260907185859-f69aff2b309d
 	github.com/go-ruby-rubygems/rubygems v0.0.0-20260916102314-9bd0bf6a00e5
 	github.com/go-ruby-saml/saml v0.0.0-20260907185858-d117cd8757c6
@@ -172,7 +172,7 @@ require (
 	github.com/go-ruby-shrine/shrine v0.0.0-20260717074136-96ee44b6c6c8
 	github.com/go-ruby-sidekiq/sidekiq v0.0.0-20260916102813-4c8927cd45b5
 	github.com/go-ruby-simplecov/simplecov v0.0.0-20260717074233-00faa55e2495
-	github.com/go-ruby-sinatra/sinatra v0.0.0-20260916102909-27d2245a08cd
+	github.com/go-ruby-sinatra/sinatra v0.0.0-20260923204248-301a06b96ca0
 	github.com/go-ruby-slim/slim v0.0.0-20260916102940-76e23809c696
 	github.com/go-ruby-sodium/sodium v0.0.0-20260910094952-712708ed6e8d
 	github.com/go-ruby-sqlite3/sqlite3 v0.0.0-20260917103921-b9e613e0720e
@@ -202,7 +202,7 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/sirupsen/logrus v1.10.2
-	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260918165059-79db0ce448c6
+	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260923172636-a5c3af0cdb3d
 	go.etcd.io/etcd/server/v3 v3.7.2
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
@@ -279,12 +279,13 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-augeas/augeas v0.0.0-20260830115849-a0db83a6594a // indirect
-	github.com/go-composites/array v0.0.0-20260915000710-d4141b5e607e // indirect
+	github.com/go-composites/array v0.0.0-20260922235702-4fc43dd1da2c // indirect
 	github.com/go-composites/error v0.0.0-20260918235114-2990a9d33571 // indirect
 	github.com/go-composites/null v0.0.0-20260903220223-c1d743488d23 // indirect
 	github.com/go-crdt/collab v0.25.0 // indirect
 	github.com/go-crdt/crdt v0.31.0 // indirect
 	github.com/go-datetime/dates v0.1.0 // indirect
+	github.com/go-encryptions/unixcrypt v0.1.0 // indirect
 	github.com/go-facter/facter v0.0.0-20260830120958-454b72e642ab // indirect
 	github.com/go-gfx/gfx v0.26.0 // indirect
 	github.com/go-hiera/hiera v0.0.0-20260830144306-f9304f6bec92 // indirect
@@ -300,7 +301,7 @@ require (
 	github.com/go-opentype/opentype v0.12.0 // indirect
 	github.com/go-opentype/shape v0.5.0 // indirect
 	github.com/go-pcore/pcore v0.0.0-20260831114716-f9c3e7f59eaa // indirect
-	github.com/go-puppet/puppet v0.0.0-20260831064218-ab6e40079f54 // indirect
+	github.com/go-puppet/puppet v0.0.0-20260918012035-fc6b0424cdbd // indirect
 	github.com/go-regexp/engine v0.1.3 // indirect
 	github.com/go-richdoc/richdoc v0.2.0 // indirect
 	github.com/go-ruby-fast-gettext-locale/fast-gettext-locale v0.0.0-20260825110154-a53e0e3a41a7 // indirect
@@ -327,7 +328,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gophercloud/gophercloud/v2 v2.14.0 // indirect
+	github.com/gophercloud/gophercloud/v2 v2.15.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/graphql-go/graphql v0.8.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.1.0 // indirect
@@ -429,9 +430,9 @@ require (
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/grpc v1.83.2 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/src-d/go-errors.v1 v1.0.0 // indirect
