@@ -2,8 +2,10 @@ package vm
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -994,7 +996,7 @@ func (vm *VM) registerMutex() {
 		var secs float64
 		hasDur := false
 		if len(args) > 0 && !object.IsNil(args[0]) {
-			secs = mutexSleepDur(args[0])
+			secs = vm.timeInterval(args[0])
 			hasDur = true
 		}
 		vm.mutexUnlock(m) // ownership check + release (ThreadError if not held)
@@ -1018,22 +1020,112 @@ func (vm *VM) registerMutex() {
 	})
 }
 
-// mutexSleepDur coerces a Mutex#sleep / Kernel#sleep duration to seconds,
-// rejecting a negative interval with ArgumentError as MRI does.
-func mutexSleepDur(v object.Value) float64 {
-	var f float64
+// mutexSleepDur coerces a duration to seconds without a *VM in hand. It is the
+// numeric part of (*VM).timeInterval and nothing more: with no VM there is no
+// way to send #divmod, so an object that would convert that way is refused here.
+// IO.select's timeout (spawn.go) is the one caller that arrives this way.
+func mutexSleepDur(v object.Value) float64 { return (*VM)(nil).timeInterval(v) }
+
+// timeInterval is MRI's rb_time_interval — time.c's time_timespec(num, TRUE),
+// the coercion Kernel#sleep, Mutex#sleep and IO.select put a duration through.
+//
+//   - an Integer or a Float is a number of seconds, and a negative one is an
+//     ArgumentError ("time interval must not be negative");
+//   - a Float whose integral part does not fit a time_t — which covers NaN and
+//     both infinities — is a RangeError, MRI's `"%f out of Time range"`;
+//   - anything else is offered #divmod(1), and a two-element Array answer is
+//     read as [whole seconds, fraction]: that is how a Rational, and any object
+//     that defines #divmod, becomes an interval. Only the whole-seconds half is
+//     range-checked, exactly as arg_range_check is placed in time_timespec.
+//   - anything that does not convert is a TypeError naming its class.
+func (vm *VM) timeInterval(v object.Value) float64 {
 	switch n := v.(type) {
 	case object.Integer:
-		f = float64(n)
+		if n < 0 {
+			raise("ArgumentError", "time interval must not be negative")
+		}
+		return float64(n)
 	case object.Float:
-		f = float64(n)
-	default:
-		raise("TypeError", "can't convert %s into time interval", classNameOf(v))
+		f := float64(n)
+		if f < 0 {
+			raise("ArgumentError", "time interval must not be negative")
+		}
+		timeIntervalRangeCheck(f)
+		return f
+	case *object.Bignum:
+		// time_timespec sends a Bignum through NUM2TIMET as well; rbgo only ever
+		// builds a Bignum for a value that does not fit an int64, so every one of
+		// them overflows the time_t the interval is kept in.
+		raise("RangeError", "bignum too big to convert into 'long'")
 	}
-	if f < 0 {
+	if vm != nil && vm.respondsToDynamic(v, "divmod") {
+		d := vm.send(v, "divmod", []object.Value{object.IntValue(1)}, nil)
+		if a, ok := vm.checkArrayType(d); ok && len(a.Elems) >= 2 {
+			return vm.timeIntervalFromDivmod(a.Elems[0], a.Elems[1])
+		}
+	}
+	raise("TypeError", "can't convert %s into time interval", vm.timeIntervalClassName(v))
+	return 0
+}
+
+// timeIntervalFromDivmod turns the [quotient, remainder] pair #divmod(1) gives
+// back into seconds. MRI reads the quotient with NUM2TIMET (so a non-integral
+// quotient is a TypeError) and the remainder as `rem * 1_000_000_000` narrowed
+// with NUM2LONG, i.e. truncated to whole nanoseconds — which is why a Rational
+// interval loses everything below a nanosecond rather than rounding.
+func (vm *VM) timeIntervalFromDivmod(q, rem object.Value) float64 {
+	// NUM2TIMET is rb_num2long, which TRUNCATES a Float rather than refusing it —
+	// so #divmod may answer with one and keep the fraction in the remainder, as
+	// `[0.5, 0]` does — and which names nil differently from everything else it
+	// cannot convert.
+	if object.IsNil(q) {
+		raise("TypeError", "no implicit conversion from nil to integer")
+	}
+	sec := vm.repeatLong(q)
+	if sec < 0 {
 		raise("ArgumentError", "time interval must not be negative")
 	}
-	return f
+	nsec := vm.send(vm.send(rem, "*", []object.Value{object.IntValue(1000000000)}, nil), "to_i", nil, nil)
+	n, _ := nsec.(object.Integer)
+	return float64(sec) + float64(n)/1e9
+}
+
+// timeIntervalRangeCheck is time_timespec's `if (f != t.tv_sec)` guard: the
+// integral part of the duration has to survive the trip through a time_t (an
+// int64 here), so NaN and Infinity land in the same RangeError as a finite value
+// that is simply too large. The number is formatted the way MRI's own vsnprintf
+// renders `%f` — "NaN", "Inf", and six decimals otherwise. Negative infinity
+// never reaches here: arg_range_check refuses a negative interval first.
+func timeIntervalRangeCheck(x float64) {
+	i, _ := math.Modf(x)
+	if !math.IsNaN(i) && i >= -9223372036854775808.0 && i < 9223372036854775808.0 {
+		return
+	}
+	raise("RangeError", "%s out of Time range", timeIntervalFormat(x))
+}
+
+// timeIntervalFormat renders a duration for the RangeError above with C's `%f`
+// as Ruby's vsnprintf spells the non-finite cases.
+func timeIntervalFormat(x float64) string {
+	switch {
+	case math.IsNaN(x):
+		return "NaN"
+	case math.IsInf(x, 1):
+		return "Inf"
+	}
+	return strconv.FormatFloat(x, 'f', 6, 64)
+}
+
+// timeIntervalClassName names a value's class for the TypeError above. MRI uses
+// rb_obj_class, which knows Rational and Complex apart from a plain Object; the
+// VM-less caller falls back to the static table.
+func (vm *VM) timeIntervalClassName(v object.Value) string {
+	if vm != nil {
+		if c := vm.classOf(v); c != nil {
+			return c.name
+		}
+	}
+	return classNameOf(v)
 }
 
 func (vm *VM) mutexLock(m *RMutex) {
@@ -1065,29 +1157,62 @@ func (vm *VM) mutexUnlock(m *RMutex) {
 	m.owner = nil
 }
 
+// threadWaitFor is rb_thread_wait_for (thread.c): park the current thread for
+// d, releasing the GVL so other threads run, and deliver whatever asynchronous
+// event woke it. It is the wait a blocking operation polls on — File#flock's
+// 0.1 s retry, which MRI spells the same way — so the thread reports "sleep"
+// while it waits and a Thread#kill or Thread#raise reaches it at the safepoint
+// rather than after the whole operation.
+func (vm *VM) threadWaitFor(d time.Duration) {
+	t := vm.currentThread
+	ch := t.parkWake()
+	vm.threadBlock(func() {
+		select {
+		case <-ch:
+		case <-time.After(d):
+		}
+	})
+	t.unpark()
+	vm.serviceSafepoint(t)
+}
+
 // registerSleep adds a GVL-aware Kernel#sleep that releases the lock while
-// sleeping, so other threads run. With no argument it would sleep forever in
-// MRI; here it requires a duration.
+// sleeping, so other threads run. It follows rb_f_sleep (process.c): a fiber
+// scheduler, when one is installed and the running fiber is non-blocking, takes
+// the whole operation over through #kernel_sleep; otherwise no argument (or an
+// explicit nil) sleeps until woken and anything else is a duration.
 func (vm *VM) registerSleep() {
 	vm.cObject.define("sleep", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		// rb_f_sleep asks rb_fiber_scheduler_current first and hands the arguments
+		// on verbatim with rb_fiber_scheduler_kernel_sleepv — so `sleep` with no
+		// argument calls #kernel_sleep with no argument, not with nil. The
+		// scheduler owns the waiting from there (the usual implementation yields
+		// the fiber), and none of the argument checks below run: MRI does not look
+		// at the duration at all on this path.
+		//
+		// The result on every path is `time(0) - beg`: rb_f_sleep brackets the wait
+		// with a clock of whole seconds, so what it counts is the number of second
+		// boundaries crossed, not the duration rounded. sleep(1.5) therefore
+		// answers 1 or 2 depending on where the call falls inside a second.
+		beg := time.Now().Unix()
+		if sched := vm.fiberSchedulerCurrent(); sched != nil {
+			vm.send(sched, "kernel_sleep", args, nil)
+			return object.IntValue(time.Now().Unix() - beg)
+		}
 		hasDur := len(args) > 0 && !object.IsNil(args[0])
 		var secs float64
 		if hasDur {
-			switch n := args[0].(type) {
-			case object.Integer:
-				secs = float64(n)
-			case object.Float:
-				secs = float64(n)
-			default:
-				raise("TypeError", "can't convert %s into time interval", classNameOf(args[0]))
+			// rb_check_arity(argc, 0, 1) guards the duration branch only, so a
+			// second argument is refused here but tolerated by a scheduler above.
+			if len(args) > 1 {
+				raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
 			}
-			if secs < 0 {
-				raise("ArgumentError", "time interval must not be negative")
-			}
+			secs = vm.timeInterval(args[0])
+		} else if len(args) > 1 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..1)", len(args))
 		}
 		t := vm.currentThread
 		ch := t.parkWake()
-		start := time.Now()
 		if hasDur {
 			vm.threadBlock(func() {
 				select {
@@ -1101,6 +1226,6 @@ func (vm *VM) registerSleep() {
 		}
 		t.unpark()
 		vm.serviceSafepoint(t) // a Thread#raise that woke the park fires here
-		return object.IntValue(int64(time.Since(start).Seconds() + 0.5))
+		return object.IntValue(time.Now().Unix() - beg)
 	})
 }

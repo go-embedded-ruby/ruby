@@ -6,7 +6,6 @@ package vm
 
 import (
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -247,10 +246,11 @@ func (vm *VM) registerSpawn() {
 		if len(args) == 0 {
 			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..4)")
 		}
+		// No NaN guard here: mutexSleepDur is rb_time_interval, and it RAISES
+		// RangeError("NaN out of Time range") itself for a NaN or an infinity
+		// rather than returning one. A second check after it could never run.
 		if len(args) > 3 && !object.IsNil(args[3]) {
-			if f := mutexSleepDur(args[3]); math.IsNaN(f) {
-				raise("RangeError", "NaN out of Time range")
-			}
+			mutexSleepDur(args[3])
 		}
 		readReady := object.NewArray()
 		for _, v := range selectSet(vm, args, 0) {

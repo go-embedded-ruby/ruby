@@ -304,9 +304,11 @@ func (vm *VM) registerFiber() {
 		return dupFiberStorage(f.storage)
 	})
 	// Fiber.scheduler / Fiber.set_scheduler hold the current thread's fiber
-	// scheduler (MRI keeps it in thread->scheduler, rb_fiber_scheduler_set). rbgo
-	// runs every fiber blocking, so nothing consults the scheduler yet; setting
-	// one is validated and stored so the hook is observable, as ruby/spec pins.
+	// scheduler (MRI keeps it in thread->scheduler, rb_fiber_scheduler_set).
+	// Fiber.scheduler is rb_fiber_scheduler_get (scheduler.c): it hands back
+	// whatever was installed, whichever fiber asks. It is fiberSchedulerCurrent
+	// (rb_fiber_scheduler_current) that the blocking-operation hooks consult, and
+	// that one answers only while a non-blocking fiber is running.
 	sdef("scheduler", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		if s := vm.currentThread.scheduler; s != nil {
 			return s
@@ -339,6 +341,25 @@ func (vm *VM) registerFiber() {
 		f.storage = dupFiberStorage(h)
 		return args[0]
 	})
+}
+
+// fiberSchedulerCurrent is rb_fiber_scheduler_current
+// (rb_fiber_scheduler_current_for_threadptr, scheduler.c): the thread's
+// scheduler, but only while the running fiber is non-blocking. MRI keeps a
+// counter th->blocking that fiber_switch raises on entering a blocking fiber and
+// lowers on leaving one (cont.c), so `th->blocking == 0` is exactly "the fiber
+// running right now is non-blocking" — which is what this reads directly.
+// A nil result means "no scheduler for this operation", and the caller must then
+// take its ordinary blocking path.
+func (vm *VM) fiberSchedulerCurrent() object.Value {
+	t := vm.currentThread
+	if t == nil || t.scheduler == nil {
+		return nil
+	}
+	if f := vm.currentFiber; f == nil || f.blocking {
+		return nil
+	}
+	return t.scheduler
 }
 
 // fiberKwargs returns the trailing Hash of a Fiber.new call — its keyword

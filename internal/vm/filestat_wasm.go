@@ -42,3 +42,16 @@ func statSys(fi fs.FileInfo) statFields {
 		hasSys: true,
 	}
 }
+
+// lockFdFn / flockFn / closeFdFn are unsupported on wasm: there is no flock(2), so
+// File#flock reports the operation as unsupported. They exist only to satisfy the
+// seam the shared io.go code references.
+var (
+	lockFdFn  = func(string) (int, error) { return 0, errors.ErrUnsupported }
+	flockFn   = func(int, int) error { return errors.ErrUnsupported }
+	closeFdFn = func(int) error { return nil }
+)
+
+// flockAgainErrs is empty here: with no flock(2) there is no "would block" to
+// retry on, and every call reports the operation as unsupported instead.
+var flockAgainErrs []error

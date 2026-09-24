@@ -31,17 +31,7 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		if len(pos) < 1 || len(pos) > 2 {
 			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(pos))
 		}
-		fd := int(vm.repeatLong(pos[0]))
-		src, ok := vm.fdTable[fd]
-		if !ok {
-			raise("Errno::EBADF", "Bad file descriptor - fd %d", fd)
-		}
-		if src.closed {
-			raise("IOError", "closed stream")
-		}
-		res := &IOObj{cls: cIO}
-		vm.ioAdoptDescriptor(res, src, pos, opts)
-		return res
+		return vm.ioAdoptFd(cIO, int(vm.repeatLong(pos[0])), pos, opts)
 	}
 	cIO.smethods["for_fd"] = &Method{name: "for_fd", owner: cIO, native: forFd}
 	cIO.smethods["new"] = &Method{name: "new", owner: cIO, native: forFd}
@@ -57,19 +47,7 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 		if !ok || blk == nil {
 			return oVal
 		}
-		var ret object.Value
-		blockRec := recoverAny(func() { ret = vm.callBlock(blk, []object.Value{o}) })
-		closeRec := recoverAny(func() { vm.send(o, "close", nil, nil) })
-		if re, isRE := closeRec.(RubyError); isRE && re.Class == "IOError" && re.Message == "closed stream" {
-			closeRec = nil // MRI ignores a "closed stream" IOError from the ensure close
-		}
-		if blockRec != nil {
-			panic(blockRec) // the block's exception (or break/return) is primary
-		}
-		if closeRec != nil {
-			panic(closeRec)
-		}
-		return ret
+		return vm.ioYieldAndClose(o, blk)
 	}}
 	// IO.sysopen(path, mode = "r", perm = 0666) opens path and returns its raw
 	// descriptor (io.c rb_io_s_sysopen → rb_sysopen). rbgo has no OS fds, so the
@@ -211,6 +189,66 @@ func ioForeachMode(opts *object.Hash) string {
 // the descriptor's), the append position, and IO.new's optional path: override
 // (an explicit nil clears the inherited path). Shared by IO.for_fd/new and
 // IO#initialize so the two decode a descriptor identically (io.c io_initialize).
+// ioYieldAndClose is the block form of IO.open and File.open — io.c rb_io_s_open
+// with io_close in its ensure. The stream is closed through the RUBY-level
+// #close, so a subclass that overrides it runs.
+//
+// A #close that raises propagates, EXCEPT an IOError "closed stream", which is
+// what a block that closed the file itself leaves behind. When BOTH the block
+// and #close raise, the one from #close is the one that escapes: it is raised
+// from an ensure, and an ensure's exception supersedes the one it was unwinding.
+// Measured on MRI 4.0.5 for File.open, for IO.open and for a bare
+// begin/raise/ensure/raise alike — all three answer with the ensure's.
+func (vm *VM) ioYieldAndClose(o *IOObj, blk *Proc) object.Value {
+	var ret object.Value
+	blockRec := recoverAny(func() { ret = vm.callBlock(blk, []object.Value{o}) })
+	closeRec := recoverAny(func() { vm.send(o, "close", nil, nil) })
+	if re, isRE := closeRec.(RubyError); isRE && re.Class == "IOError" && re.Message == "closed stream" {
+		closeRec = nil
+	}
+	if closeRec != nil {
+		panic(closeRec)
+	}
+	if blockRec != nil {
+		panic(blockRec)
+	}
+	return ret
+}
+
+// ioFdArg is rb_check_to_int on a File.open/File.new first argument: an Integer,
+// or an object that converts to one with #to_int, is a descriptor. Everything
+// else — a String, a Pathname, anything answering only #to_path — is a path, and
+// the bool says so rather than raising, because the caller has a path to try.
+func (vm *VM) ioFdArg(v object.Value) (int, bool) {
+	if i, ok := v.(object.Integer); ok {
+		return int(i), true
+	}
+	if vm.respondsToDynamic(v, "to_int") {
+		return int(vm.repeatLong(v)), true
+	}
+	return 0, false
+}
+
+// ioAdoptFd builds a stream of class cls over the descriptor fd — io_initialize,
+// which IO.new, IO.for_fd and the File.new(fd) form all reach. rbgo has no real
+// descriptors (see ioFd), so fd is looked up in the synthetic table #fileno
+// fills; one that is not there is the EBADF an unknown descriptor gives.
+func (vm *VM) ioAdoptFd(cls *RClass, fd int, pos []object.Value, opts *object.Hash) *IOObj {
+	src, ok := vm.fdTable[fd]
+	if !ok {
+		raise("Errno::EBADF", "Bad file descriptor - fd %d", fd)
+	}
+	if src.closed {
+		raise("IOError", "closed stream")
+	}
+	res := &IOObj{cls: cls}
+	vm.ioAdoptDescriptor(res, src, pos, opts)
+	// The wrapper answers #fileno with the descriptor it wraps, as dup-free
+	// io_initialize does — File.open(f.fileno).fileno == f.fileno.
+	res.fd = fd
+	return res
+}
+
 func (vm *VM) ioAdoptDescriptor(o, src *IOObj, pos []object.Value, opts *object.Hash) {
 	ms := vm.ioResolveModeEnc(pos, opts)
 	o.isStr, o.buf, o.path = true, src.buf, src.path
@@ -658,6 +696,44 @@ type ioModeSpec struct {
 	extEnc, intEnc                                                 string
 	hasEnc                                                         bool // the mode STRING carried a ":enc" suffix
 	explicit                                                       bool // a mode argument (or :mode option) was given
+
+	// create, trunc and excl are the rest of MRI's fmode: FMODE_CREATE,
+	// FMODE_TRUNC and FMODE_EXCL. A wrapper around an existing descriptor has no
+	// use for them, but File.open's open(2) does — "w" is O_WRONLY|O_CREAT|O_TRUNC
+	// and "wx" adds O_EXCL, which is the whole of what the 'x' flag means.
+	create, trunc, excl bool
+
+	// newline is the :newline option's decorator, "" when none was asked for. MRI
+	// turns it into an ECONV_*_NEWLINE_DECORATOR bit and then refuses the
+	// combination with binmode (validate_enc_binmode, io.c).
+	newline string
+}
+
+// oflags is rb_io_fmode_oflags (io.c): the open(2) flag set this fmode asks for.
+// It is the form File.open needs, and the form the :flags option merges into.
+func (ms *ioModeSpec) oflags() int64 {
+	var f int64
+	switch {
+	case ms.readable && ms.writable:
+		f = fO_RDWR
+	case ms.writable:
+		f = fO_WRONLY
+	default:
+		f = fO_RDONLY
+	}
+	if ms.appendMode {
+		f |= fO_APPEND
+	}
+	if ms.trunc {
+		f |= fO_TRUNC
+	}
+	if ms.create {
+		f |= fO_CREAT
+	}
+	if ms.excl {
+		f |= fO_EXCL
+	}
+	return f
 }
 
 // ioResolveModeEnc decodes the (fd, mode, **opts) arguments of IO.new / IO.open
@@ -687,7 +763,18 @@ func (vm *VM) ioResolveModeEnc(pos []object.Value, opts *object.Hash) ioModeSpec
 		ms.readable = true // no explicit mode ⇒ the wrapper inherits the fd's mode
 	}
 	if opts != nil {
+		// rb_io_extract_modeenc reads :flags right after the mode and re-derives
+		// the fmode from the merged open flags, so `File.open(p, "w", flags:
+		// File::EXCL)` is exactly `File.open(p, File::WRONLY|File::CREAT|
+		// File::TRUNC|File::EXCL)`. The encoding fields survive because
+		// flagsModeSpec does not touch them — MRI resolves the encoding before this
+		// point for the same reason.
+		if v, ok := opts.Get(object.Symbol("flags")); ok && !object.IsNil(v) {
+			flagsModeSpec(ms.oflags()|vm.repeatLong(v), &ms)
+			ms.explicit = true
+		}
 		extractBinmode(opts, &ms)
+		extractNewline(opts, &ms)
 	}
 	// A binary stream defaults to ASCII-8BIT external encoding unless the mode
 	// string already named one (a later :encoding option may still override it).
@@ -727,20 +814,29 @@ func (vm *VM) resolveVmode(v object.Value, ms *ioModeSpec) {
 	vm.parseModeString(s.Str(), ms)
 }
 
-// flagsModeSpec fills the read/write/append intent of ms from an integer open-flag
-// set (a bitwise OR of File::RDONLY/WRONLY/RDWR/APPEND).
+// flagsModeSpec is rb_io_oflags_fmode (io.c): it REPLACES the access half of ms
+// from an integer open-flag set (a bitwise OR of File::RDONLY/WRONLY/RDWR/APPEND/
+// TRUNC/CREAT/EXCL), leaving the encoding fields alone — which is what lets the
+// :flags option re-derive the fmode after OR-ing into the flags without losing an
+// encoding the mode string already named.
+//
+// O_APPEND does NOT imply writability here, any more than it does in MRI: the
+// access bits alone decide, so File::RDONLY|File::APPEND is a READ-ONLY stream
+// and writing to it is an IOError.
 func flagsModeSpec(flags int64, ms *ioModeSpec) {
+	ms.readable, ms.writable = false, false
 	switch flags & 0x3 {
-	case fO_RDONLY:
-		ms.readable = true
 	case fO_WRONLY:
 		ms.writable = true
-	default: // RDWR
+	case fO_RDWR:
 		ms.readable, ms.writable = true, true
+	default: // fO_RDONLY (and the invalid 0x3, which open(2) rejects)
+		ms.readable = true
 	}
-	if flags&fO_APPEND != 0 {
-		ms.writable, ms.appendMode = true, true
-	}
+	ms.appendMode = flags&fO_APPEND != 0
+	ms.trunc = flags&fO_TRUNC != 0
+	ms.create = flags&fO_CREAT != 0
+	ms.excl = flags&fO_EXCL != 0
 }
 
 // parseModeString fills ms from an fopen-style mode string ("r"/"w"/"a" with an
@@ -760,9 +856,12 @@ func (vm *VM) parseModeString(mode string, ms *ioModeSpec) {
 	case 'r':
 		ms.readable = true
 	case 'w':
-		ms.writable = true
+		// rb_io_modestr_fmode: 'w' is FMODE_WRITABLE|FMODE_TRUNC|FMODE_CREATE and
+		// 'a' is FMODE_WRITABLE|FMODE_APPEND|FMODE_CREATE — the create and truncate
+		// halves are part of the letter, not something File.open adds later.
+		ms.writable, ms.trunc, ms.create = true, true, true
 	case 'a':
-		ms.writable, ms.appendMode = true, true
+		ms.writable, ms.appendMode, ms.create = true, true, true
 	default:
 		raise("ArgumentError", "invalid access mode %s", mode)
 	}
@@ -780,7 +879,14 @@ func (vm *VM) parseModeString(mode string, ms *ioModeSpec) {
 				raise("ArgumentError", "invalid access mode %s", mode)
 			}
 			ms.textmode = true
-		case 'x': // exclusive-create flag; no effect on the fmode intent
+		case 'x':
+			// FMODE_EXCL, and only on a 'w' base: rb_io_modestr_fmode checks
+			// modestr[0] itself, so "rx" and "ax" are an invalid access mode rather
+			// than an exclusive open.
+			if base[0] != 'w' {
+				raise("ArgumentError", "invalid access mode %s", mode)
+			}
+			ms.excl = true
 		default:
 			raise("ArgumentError", "invalid access mode %s", mode)
 		}
@@ -803,6 +909,27 @@ func (vm *VM) parseEncPart(enc string, ms *ioModeSpec) {
 		if ms.intEnc == ms.extEnc {
 			ms.intEnc = ""
 		}
+	}
+}
+
+// extractNewline applies the :newline option, which names one of MRI's newline
+// decorators. rb_econv_prepare_options refuses anything else by name, and
+// validate_enc_binmode (io.c) then refuses any decorator at all on a binary
+// stream — there is no newline to translate in bytes.
+func extractNewline(opts *object.Hash, ms *ioModeSpec) {
+	v, ok := opts.Get(object.Symbol("newline"))
+	if !ok || object.IsNil(v) {
+		return
+	}
+	sym, isSym := v.(object.Symbol)
+	switch {
+	case isSym && (sym == "universal" || sym == "crlf" || sym == "cr" || sym == "lf"):
+		ms.newline = string(sym)
+	default:
+		raise("ArgumentError", "unexpected value for newline option: %s", v.ToS())
+	}
+	if ms.binmode {
+		raise("ArgumentError", "newline decorator with binary mode")
 	}
 }
 

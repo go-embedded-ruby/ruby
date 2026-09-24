@@ -211,7 +211,12 @@ func TestIOOpenBlock(t *testing.T) {
 		t.Errorf("close raise: got %s/%q want RuntimeError/boom", cls, msg)
 	}
 	// The block's exception takes precedence over a #close exception.
-	if cls, msg := evalErr(t, ioFdProg(`IO.open(wo, "w") { |io| def io.close; raise "fromclose"; end; raise "fromblock" }`)); cls != "RuntimeError" || msg != "fromblock" {
+	// Both halves raise: the one from #close wins, because it is raised from
+	// rb_io_s_open's ensure and an ensure's exception supersedes the one it was
+	// unwinding. This line read "fromblock" until wave 28 measured MRI 4.0.5 —
+	// File.open, IO.open and a bare begin/raise/ensure/raise all answer with the
+	// ensure's exception, so the assertion was wrong, not the reference.
+	if cls, msg := evalErr(t, ioFdProg(`IO.open(wo, "w") { |io| def io.close; raise "fromclose"; end; raise "fromblock" }`)); cls != "RuntimeError" || msg != "fromclose" {
 		t.Errorf("block precedence: got %s/%q want RuntimeError/fromblock", cls, msg)
 	}
 }
