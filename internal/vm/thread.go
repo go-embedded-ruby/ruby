@@ -463,6 +463,55 @@ func (vm *VM) registerThreadClass() {
 		}
 		return object.NewArrayFromSlice(live)
 	})
+	// Thread.each_caller_location(start = 1, length = nil) { |loc| ... } -> nil:
+	// yields each frame of the CURRENT execution stack as a
+	// Thread::Backtrace::Location, nearest-first, and answers nil.
+	//
+	// vm_backtrace.c v3_4_0:1401 each_caller_location selects the range with
+	// ec_backtrace_range(ec, argc, argv, 1, 1, &n) — the SAME lev_default and
+	// lev_plus that rb_f_caller_locations passes to ec_backtrace_to_ary — so the
+	// argument handling is Kernel#caller_locations' exactly, down to the Range
+	// form and the nil-for-overshoot case. That is why callerSlice serves both:
+	// the two must not drift, and one of them owning the rule is how they cannot.
+	//
+	// It was unimplementable before the line map: every Location it yields is
+	// compared to caller_locations' by #to_s, which is "path:lineno:in 'label'".
+	sdef("each_caller_location", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
+		// rb_scan_args(argc, argv, "02:") followed by rb_get_kwargs(opts, (ID[]){0},
+		// 0, 0, NULL): the keyword table is EMPTY, so every keyword is unknown.
+		if kw := trailingKwHash(args); kw != nil {
+			args = args[:len(args)-1]
+			if len(kw.Keys) > 0 {
+				word, names := "keyword", make([]string, 0, len(kw.Keys))
+				if len(kw.Keys) > 1 {
+					word = "keywords"
+				}
+				for _, k := range kw.Keys {
+					names = append(names, k.Inspect())
+				}
+				raise("ArgumentError", "unknown %s: %s", word, strings.Join(names, ", "))
+			}
+		}
+		if len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0..2)", len(args))
+		}
+		frames, present := vm.callerSlice(args)
+		if !present {
+			return object.NilV
+		}
+		// The LocalJumpError comes from the rb_yield inside the iteration, not from
+		// a guard before it: a range that selects NO frame never yields, so a
+		// block-less call over an empty selection is not an error. Hence the check
+		// is on "about to yield at least once", not on the block alone.
+		if blk == nil && len(frames) > 0 {
+			raise("LocalJumpError", "no block given")
+		}
+		for _, f := range frames {
+			vm.callBlock(blk, []object.Value{vm.backtraceLocation(f.ToS())})
+		}
+		return object.NilV
+	})
+
 	sdef("pass", func(vm *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 		vm.threadPass(runtime.Gosched)
 		vm.serviceSafepoint(vm.currentThread) // interrupt a running thread that yields via Thread.pass
