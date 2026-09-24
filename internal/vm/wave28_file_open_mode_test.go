@@ -7,6 +7,7 @@ package vm_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -59,10 +60,6 @@ func TestWave28FileOpenModeContract(t *testing.T) {
 		{`File.open`, "[ArgumentError, \"wrong number of arguments (given 0, expected 1..3)\"]\n"},
 		{`File.open("f.txt", "r", mode: "w")`, "[ArgumentError, \"mode specified twice\"]\n"},
 		{`File.open("p3.txt", "w", 0744, perm: 0755) {}`, "[ArgumentError, \"perm specified twice\"]\n"},
-
-		// --- the permission argument reaches the creation, in both spellings.
-		{`File.open("p2.txt", File::CREAT | File::RDWR, 0744) { |f| f.write "z" }; File.stat("p2.txt").mode.to_s(8)`, "\"100744\"\n"},
-		{`File.open("p4.txt", "w", perm: 0745) {}; File.stat("p4.txt").mode.to_s(8)`, "\"100745\"\n"},
 
 		// --- the :newline decorator.
 		{`File.open("f.txt", "rb", newline: :universal) {}`, "[ArgumentError, \"newline decorator with binary mode\"]\n"},
@@ -138,4 +135,30 @@ func openModeScratch(t *testing.T) string {
 		t.Fatalf("fixture: %v", err)
 	}
 	return dir
+}
+
+// TestWave28FileOpenPerm covers the permission argument in both spellings —
+// positional (File.open(path, flags, 0744)) and keyword (perm: 0745).
+//
+// It is POSIX-only. Windows has no mode bits: its file security model is
+// ACL-based and Go maps perm to nothing but a read-only flag, so a created file
+// reads back 0666 there whatever perm was asked for. MRI on Windows cannot
+// honour 0744 either, but there is no Windows MRI on this host to witness what
+// it DOES report — so rather than pin the assertion to whatever Windows
+// currently returns, the case is left to issue #644.
+func TestWave28FileOpenPerm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits; see issue #644 for what MRI reports on Windows")
+	}
+	cases := []struct{ src, want string }{
+		{`File.open("p2.txt", File::CREAT | File::RDWR, 0744) { |f| f.write "z" }; File.stat("p2.txt").mode.to_s(8)`, "\"100744\"\n"},
+		{`File.open("p4.txt", "w", perm: 0745) {}; File.stat("p4.txt").mode.to_s(8)`, "\"100745\"\n"},
+	}
+	for _, c := range cases {
+		dir := openModeScratch(t)
+		src := "Dir.chdir(" + rubyString(dir) + ")\nbegin\n  p(begin\n" + c.src + "\nend)\nrescue => e\n  p [e.class, e.message]\nend\n"
+		if got := eval(t, src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
 }

@@ -94,7 +94,20 @@ func TestWave28FileNewWarnsOnBlock(t *testing.T) {
 // fdOpenScratch builds a directory holding "f.txt" with "hello file\n".
 func fdOpenScratch(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	// Not t.TempDir(): these cases deliberately leave a File open when the
+	// snippet ends — `File.open(fh.fileno)` needs fh alive — and rbgo closes no
+	// IO at interpreter shutdown, where MRI closes every one. On POSIX nothing
+	// notices; on Windows the open handle makes t.TempDir()'s RemoveAll fail and
+	// the test errors on cleanup rather than on its assertion.
+	//
+	// So remove the directory on a best-effort basis and let the VM gap be
+	// tracked where it belongs, in issue #643, instead of being reported here as
+	// a failure of these cases.
+	dir, err := os.MkdirTemp("", "rbgo-fdopen-")
+	if err != nil {
+		t.Fatalf("scratch: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("hello file\n"), 0o644); err != nil {
 		t.Fatalf("fixture: %v", err)
 	}
