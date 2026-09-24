@@ -127,7 +127,7 @@ p File.read("wro.txt")
 // holding "f.txt" (contents "hello file\n") and an empty directory "adir".
 func openModeScratch(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := ioScratchDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("hello file\n"), 0o644); err != nil {
 		t.Fatalf("fixture: %v", err)
 	}
