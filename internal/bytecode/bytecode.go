@@ -228,9 +228,17 @@ const (
 	FlagSendExplicit = 1 << iota
 )
 
+// LineEntry maps the first instruction of a run to the source line that run
+// came from. It is one half of MRI's pair: insns_info[i].line_no beside
+// positions[i], the instruction index the entry starts at (iseq.c v3_4_0:673,
+// rb_iseq_insns_info_encode_positions).
+type LineEntry struct {
+	PC   int // first instruction index this line covers
+	Line int // 1-based source line
+}
+
 // ISeq is a compiled instruction sequence: a method body, or the program top
-// level. Catch tables, full arity, and source maps (plan §6) arrive with the
-// later phases.
+// level. Catch tables and full arity arrive with the later phases.
 type ISeq struct {
 	Name string
 	// File is the source-file path this ISeq (and its nested children) was loaded
@@ -253,6 +261,32 @@ type ISeq struct {
 	Children    []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
 	Super       string         // for a class body: the superclass name ("" → Object)
 
+	// Lines is the source map: which source line each instruction came from,
+	// COMPRESSED to one entry per line CHANGE and kept sorted by PC.
+	//
+	// That compression is MRI's, not a shortcut. MRI records a line for every
+	// instruction while compiling and then encodes the result as an
+	// insns_info[] of distinct entries beside a positions[] of the instruction
+	// index each one starts at (iseq.c v3_4_0:673), because a line spans a run
+	// of instructions and storing it per instruction would multiply every ISeq
+	// for nothing. Reading it back is a search for the last entry at or before
+	// the pc — get_insn_info_binary_search (iseq.c v3_4_0:2160), which is the
+	// implementation MRI ships as VM_INSN_INFO_TABLE_IMPL == 1. LineAt is that
+	// search.
+	//
+	// Empty for an ISeq compiled from a source with no position information
+	// (the AOT-frozen prelude of an older build); LineAt then answers 0, exactly
+	// as rb_iseq_line_no does when get_insn_info finds no entry
+	// (iseq.c v3_4_0:2314).
+	Lines []LineEntry
+
+	// FirstLine is the line the ISeq's defining construct sits on — MRI's
+	// body->location.first_lineno. rb_vm_get_sourceline (vm_backtrace.c
+	// v3_4_0:105) falls back to it when the per-instruction lookup yields 0, so
+	// a frame that has not reached a mapped instruction still reports where it
+	// was defined rather than line 0.
+	FirstLine int
+
 	// Caches backs the per-call-site inline method caches, one slot per
 	// instruction (only OpSend slots are ever used). It is opaque to this package
 	// — the vm package allocates it and gives it meaning — so the field is typed
@@ -265,6 +299,31 @@ type ISeq struct {
 	// skip the per-frame recover defer for the common no-rescue method. Lazily
 	// filled under the GVL via the accessors below.
 	handlerState uint8
+}
+
+// LineAt returns the 1-based source line the instruction at pc came from, or 0
+// when this ISeq carries no line covering it.
+//
+// It is MRI's get_insn_info_binary_search (iseq.c v3_4_0:2160) over the pair
+// (positions, insns_info): find the last entry whose position is at or before
+// pc. A pc before the first entry has no line — MRI's search likewise starts at
+// index 1 and can only return an entry it has passed — and answers 0, which is
+// what rb_iseq_line_no returns for an unplaceable pc (iseq.c v3_4_0:2314).
+func (s *ISeq) LineAt(pc int) int {
+	if len(s.Lines) == 0 || pc < s.Lines[0].PC {
+		return 0
+	}
+	// Invariant: Lines[lo].PC <= pc. Halve until lo is the last such entry.
+	lo, hi := 0, len(s.Lines)
+	for hi-lo > 1 {
+		mid := int(uint(lo+hi) >> 1)
+		if s.Lines[mid].PC <= pc {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return s.Lines[lo].Line
 }
 
 // HandlerState reports the memoised rescue-handler flag (0/1/2; see the field).

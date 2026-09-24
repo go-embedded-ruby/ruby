@@ -56,6 +56,17 @@ type builder struct {
 	// Its slots may be read and written but no new one may be added: the frame
 	// that will back it has already been sized.
 	borrowed bool
+
+	// lines is the compressed source map under construction: one entry per line
+	// CHANGE, as MRI encodes insns_info (iseq.c v3_4_0:673). curLine is the line
+	// the NEXT instruction will be attributed to, set by compileNode from the
+	// statement map; lastLine is the line the last entry recorded, so a run of
+	// instructions from one statement costs one entry. firstLine is the line the
+	// construct that opened this scope sits on (MRI's location.first_lineno).
+	lines     []bytecode.LineEntry
+	curLine   int
+	lastLine  int
+	firstLine int
 }
 
 func newBuilder(name string, params []string) *builder {
@@ -100,7 +111,19 @@ func (b *builder) declOwner() (owner *builder, depth int) {
 	return owner, depth
 }
 
+// emit appends one instruction and, when the source line has moved since the
+// last entry, opens a new run in the source map.
+//
+// Recording here rather than where the line is SET is what keeps the table
+// compressed the way MRI's is: a statement that emits nothing (a `defined?`
+// whose value is discarded) contributes no entry, and a statement that emits
+// twenty contributes one. The line is only ever written down because an
+// instruction exists to carry it.
 func (b *builder) emit(op bytecode.Op, a, bb int) int {
+	if b.curLine != b.lastLine {
+		b.lines = append(b.lines, bytecode.LineEntry{PC: len(b.insns), Line: b.curLine})
+		b.lastLine = b.curLine
+	}
 	b.insns = append(b.insns, bytecode.Instr{Op: op, A: a, B: bb})
 	return len(b.insns) - 1
 }
@@ -182,6 +205,8 @@ func (b *builder) build() *bytecode.ISeq {
 		NumLocals:   len(b.locals),
 		Locals:      b.locals,
 		Children:    b.children,
+		Lines:       b.lines,
+		FirstLine:   b.firstLine,
 	}
 }
 
@@ -203,6 +228,12 @@ type Compiler struct {
 	// deconstructed-subject cache, or -1 outside one (the zero value is fixed up
 	// in compilePattern, which never sees slot 0 as a cache). See compileCaseIn.
 	patCache int
+	// lines is ast.Program.Lines: the source line each STATEMENT node began on.
+	// Nil when the program was built without one (a hand-assembled AST in a
+	// test), in which case every ISeq comes out with an empty source map and
+	// every lookup answers line 0 — the behaviour this VM had before there was a
+	// map at all.
+	lines map[ast.Node]int
 }
 
 // masgnPreEval holds the temporaries into which one multiple-assignment target's
@@ -236,7 +267,7 @@ func CompileWithEncoding(prog *ast.Program, srcEnc string) (iseq *bytecode.ISeq,
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{srcEnc: srcEnc, patCache: -1}
+	c := &Compiler{srcEnc: srcEnc, patCache: -1, lines: prog.Lines}
 	c.push(newBuilder("<main>", nil))
 	c.compileBody(prog.Body)
 	c.cur().emit(bytecode.OpReturn, 0, 0)
@@ -348,7 +379,7 @@ func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.I
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{patCache: -1}
+	c := &Compiler{patCache: -1, lines: prog.Lines}
 	parent := newBuilder("<binding>", nil)
 	parent.locals = append([]string(nil), localNames...)
 	parent.borrowed = true
@@ -413,7 +444,22 @@ func (c *Compiler) compileDiscarded(n ast.Node) bool {
 	return true
 }
 
+// compileNode emits n, first moving the current source line to n's own when the
+// parser recorded one for it.
+//
+// Only statements carry an entry, which is the point: an expression inside a
+// statement inherits the statement's line, so every instruction the statement
+// emits — receiver, arguments, the send itself — lands on one line, and the
+// table gets one entry for the lot. That is the shape MRI's insns_info has,
+// because MRI's nd_line for those inner nodes is the same line too.
 func (c *Compiler) compileNode(n ast.Node) {
+	if l, ok := c.lines[n]; ok {
+		c.cur().curLine = l
+	}
+	c.compileNode1(n)
+}
+
+func (c *Compiler) compileNode1(n ast.Node) {
 	b := c.cur()
 	switch v := n.(type) {
 	case *ast.IntLit:
