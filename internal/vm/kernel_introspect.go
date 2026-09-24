@@ -181,15 +181,12 @@ func (vm *VM) registerKernelIntrospection() {
 		return object.NewString(filepath.Dir(f))
 	})
 
-	// __LINE__: MRI's parser substitutes the current source line as an integer
-	// literal at compile time. This VM does not track per-instruction source lines
-	// (backtraces and #caller likewise report line 0), so __LINE__ is a Kernel
-	// method returning 0 — self-consistent with the rest of the line reporting and
-	// sufficient for the common use of feeding a line offset to
-	// eval/class_eval(str, file, line), where it only steers error messages.
-	vm.cObject.define("__LINE__", func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.IntValue(0)
-	})
+	// __LINE__ is deliberately NOT defined here. It is a keyword in MRI, not a
+	// method: the compiler substitutes the current source line as an Integer
+	// literal (see compileCall). Defining a Kernel method of that name as well
+	// would answer `self.__LINE__` and `1.send(:__LINE__)`, which raise
+	// NoMethodError in ruby 4.0.5 — the method that used to stand in for the
+	// missing line map made both of those silently return 0.
 
 	// at_exit: register a block to run when the program finishes normally, in
 	// LIFO order. Returns the block as a Proc, as MRI does.

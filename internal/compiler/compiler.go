@@ -403,6 +403,24 @@ func (c *Compiler) pop() *builder {
 	return b
 }
 
+// refuseKeywordAssign rejects an assignment to one of the three pseudo-variable
+// KEYWORDS. MRI refuses them in the grammar — ruby 4.0.5 answers `__LINE__ = 1`
+// with `Can't assign to __LINE__` (and the same for __FILE__ and __ENCODING__),
+// a SyntaxError — and ruby/spec pins it: language/line_spec.rb asserts
+// `eval("__LINE__ = 1")` raises SyntaxError.
+//
+// The refusal also protects the substitution. `__LINE__` compiles to an Integer
+// literal only while it is a bareword CALL; letting an assignment through would
+// declare a local of that name, and every later `__LINE__` in the scope would
+// parse as a read of that local instead — the keyword would quietly stop being
+// one.
+func (c *Compiler) refuseKeywordAssign(name string) {
+	switch name {
+	case "__LINE__", "__FILE__", "__ENCODING__":
+		c.fail("Can't assign to %s", name)
+	}
+}
+
 func (c *Compiler) fail(format string, args ...any) {
 	panic(compileError{msg: "compile error: " + fmt.Sprintf(format, args...)})
 }
@@ -547,6 +565,7 @@ func (c *Compiler) compileNode1(n ast.Node) {
 		}
 		b.emit(bytecode.OpGetLocal, slot, depth)
 	case *ast.Assign:
+		c.refuseKeywordAssign(v.Name)
 		c.compileNode(v.Value)
 		// Assign to an enclosing local if one is visible; otherwise create a
 		// new local in the current scope (or, inside a `for` body, in the scope
@@ -1033,6 +1052,18 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		return
 	}
 	callArgs := c.rewriteAnonArgs(v.Args)
+	// __LINE__ is a KEYWORD, not a method. MRI's grammar turns it into an
+	// Integer literal at parse time (parse.y v3_4_0: `keyword__LINE__` yields
+	// NEW_INTEGER of the current line), which is why `self.__LINE__` and
+	// `1.send(:__LINE__)` both raise NoMethodError there and `__LINE__()` is a
+	// syntax error — all three verified against ruby 4.0.5. Substituting the
+	// literal here is that same substitution one layer down, and confining it to
+	// the receiverless, argumentless, blockless bareword is what reproduces the
+	// three refusals: nothing else in the language answers to the name.
+	if v.Recv == nil && v.Block == nil && v.Name == "__LINE__" && len(callArgs) == 0 {
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(b.curLine))), 0)
+		return
+	}
 	// block_given? is a frame intrinsic, not a real dispatch.
 	if v.Recv == nil && v.Block == nil && v.Name == "block_given?" && len(callArgs) == 0 {
 		b.emit(bytecode.OpBlockGiven, 0, 0)
