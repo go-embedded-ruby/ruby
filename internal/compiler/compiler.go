@@ -56,6 +56,17 @@ type builder struct {
 	// Its slots may be read and written but no new one may be added: the frame
 	// that will back it has already been sized.
 	borrowed bool
+
+	// lines is the compressed source map under construction: one entry per line
+	// CHANGE, as MRI encodes insns_info (iseq.c v3_4_0:673). curLine is the line
+	// the NEXT instruction will be attributed to, set by compileNode from the
+	// statement map; lastLine is the line the last entry recorded, so a run of
+	// instructions from one statement costs one entry. firstLine is the line the
+	// construct that opened this scope sits on (MRI's location.first_lineno).
+	lines     []bytecode.LineEntry
+	curLine   int
+	lastLine  int
+	firstLine int
 }
 
 func newBuilder(name string, params []string) *builder {
@@ -64,6 +75,37 @@ func newBuilder(name string, params []string) *builder {
 		b.localSlot(p) // params occupy slots 0..n-1, in order
 	}
 	return b
+}
+
+// blockLabel names a block ISeq the way MRI labels a block FRAME.
+//
+// It is calculate_iseq_label's ISEQ_TYPE_BLOCK arm (vm_backtrace.c v3_4_0:229),
+// moved to compile time because the answer is a purely lexical fact: walk out
+// through the enclosing scopes counting the block ones until a real scope (a
+// method, a class body, the top level) is reached, then "block in NAME" for one
+// level and "block (N levels) in NAME" beyond. MRI walks the parent_iseq chain
+// at backtrace time and counts exactly the same hops.
+//
+// `for` scopes are skipped in the count, not followed as blocks: `for` opens no
+// Ruby scope (see builder.forScope), so a block inside a `for` body is one
+// level deep, not two.
+func blockLabel(parent *builder) string {
+	level := 1
+	b := parent
+	for b != nil && b.isBlock {
+		if !b.forScope {
+			level++
+		}
+		b = b.parent
+	}
+	name := "<main>"
+	if b != nil {
+		name = b.name
+	}
+	if level <= 1 {
+		return "block in " + name
+	}
+	return fmt.Sprintf("block (%d levels) in %s", level, name)
 }
 
 func newBlockBuilder(name string, params []string, parent *builder) *builder {
@@ -100,7 +142,19 @@ func (b *builder) declOwner() (owner *builder, depth int) {
 	return owner, depth
 }
 
+// emit appends one instruction and, when the source line has moved since the
+// last entry, opens a new run in the source map.
+//
+// Recording here rather than where the line is SET is what keeps the table
+// compressed the way MRI's is: a statement that emits nothing (a `defined?`
+// whose value is discarded) contributes no entry, and a statement that emits
+// twenty contributes one. The line is only ever written down because an
+// instruction exists to carry it.
 func (b *builder) emit(op bytecode.Op, a, bb int) int {
+	if b.curLine != b.lastLine {
+		b.lines = append(b.lines, bytecode.LineEntry{PC: len(b.insns), Line: b.curLine})
+		b.lastLine = b.curLine
+	}
 	b.insns = append(b.insns, bytecode.Instr{Op: op, A: a, B: bb})
 	return len(b.insns) - 1
 }
@@ -182,6 +236,8 @@ func (b *builder) build() *bytecode.ISeq {
 		NumLocals:   len(b.locals),
 		Locals:      b.locals,
 		Children:    b.children,
+		Lines:       b.lines,
+		FirstLine:   b.firstLine,
 	}
 }
 
@@ -203,6 +259,12 @@ type Compiler struct {
 	// deconstructed-subject cache, or -1 outside one (the zero value is fixed up
 	// in compilePattern, which never sees slot 0 as a cache). See compileCaseIn.
 	patCache int
+	// lines is ast.Program.Lines: the source line each STATEMENT node began on.
+	// Nil when the program was built without one (a hand-assembled AST in a
+	// test), in which case every ISeq comes out with an empty source map and
+	// every lookup answers line 0 — the behaviour this VM had before there was a
+	// map at all.
+	lines map[ast.Node]int
 }
 
 // masgnPreEval holds the temporaries into which one multiple-assignment target's
@@ -236,8 +298,12 @@ func CompileWithEncoding(prog *ast.Program, srcEnc string) (iseq *bytecode.ISeq,
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{srcEnc: srcEnc, patCache: -1}
+	c := &Compiler{srcEnc: srcEnc, patCache: -1, lines: prog.Lines}
 	c.push(newBuilder("<main>", nil))
+	// MRI's top-level ISeq has first_lineno 1 (iseq.c v3_4_0 rb_iseq_new_top
+	// passes a location starting at line 1), so an empty or unplaceable <main>
+	// frame reports line 1 rather than nothing.
+	c.cur().firstLine = 1
 	c.compileBody(prog.Body)
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	return c.pop().build(), nil
@@ -348,7 +414,7 @@ func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.I
 			iseq, err = nil, r.(compileError)
 		}
 	}()
-	c := &Compiler{patCache: -1}
+	c := &Compiler{patCache: -1, lines: prog.Lines}
 	parent := newBuilder("<binding>", nil)
 	parent.locals = append([]string(nil), localNames...)
 	parent.borrowed = true
@@ -364,12 +430,51 @@ func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.I
 	return out, nil
 }
 
-func (c *Compiler) cur() *builder   { return c.stack[len(c.stack)-1] }
-func (c *Compiler) push(b *builder) { c.stack = append(c.stack, b) }
+func (c *Compiler) cur() *builder { return c.stack[len(c.stack)-1] }
+
+// push makes b the current scope, stamping it with the line its DEFINING
+// construct sits on — the line the enclosing scope is compiling, since that is
+// precisely the `def` / `class` / `{` being compiled when the child opens.
+//
+// This is MRI's body->location.first_lineno, and it is stamped in one place
+// here rather than at each of the eight sites that open a scope, so a new kind
+// of scope cannot be added without one. It matters twice over: it is what
+// rb_vm_get_sourceline falls back to for a frame whose pc the map cannot place
+// (vm_backtrace.c v3_4_0:105), and it is the line Proc#source_location and
+// Method#source_location report for a body that has not run at all.
+//
+// It also seeds curLine, so instructions a body emits BEFORE its first
+// statement — parameter defaults, the implicit nil of an empty body — are
+// attributed to the definition line rather than inheriting the caller's.
+func (c *Compiler) push(b *builder) {
+	if len(c.stack) > 0 {
+		b.firstLine = c.cur().curLine
+		b.curLine = b.firstLine
+	}
+	c.stack = append(c.stack, b)
+}
 func (c *Compiler) pop() *builder {
 	b := c.stack[len(c.stack)-1]
 	c.stack = c.stack[:len(c.stack)-1]
 	return b
+}
+
+// refuseKeywordAssign rejects an assignment to one of the three pseudo-variable
+// KEYWORDS. MRI refuses them in the grammar — ruby 4.0.5 answers `__LINE__ = 1`
+// with `Can't assign to __LINE__` (and the same for __FILE__ and __ENCODING__),
+// a SyntaxError — and ruby/spec pins it: language/line_spec.rb asserts
+// `eval("__LINE__ = 1")` raises SyntaxError.
+//
+// The refusal also protects the substitution. `__LINE__` compiles to an Integer
+// literal only while it is a bareword CALL; letting an assignment through would
+// declare a local of that name, and every later `__LINE__` in the scope would
+// parse as a read of that local instead — the keyword would quietly stop being
+// one.
+func (c *Compiler) refuseKeywordAssign(name string) {
+	switch name {
+	case "__LINE__", "__FILE__", "__ENCODING__":
+		c.fail("Can't assign to %s", name)
+	}
 }
 
 func (c *Compiler) fail(format string, args ...any) {
@@ -413,7 +518,22 @@ func (c *Compiler) compileDiscarded(n ast.Node) bool {
 	return true
 }
 
+// compileNode emits n, first moving the current source line to n's own when the
+// parser recorded one for it.
+//
+// Only statements carry an entry, which is the point: an expression inside a
+// statement inherits the statement's line, so every instruction the statement
+// emits — receiver, arguments, the send itself — lands on one line, and the
+// table gets one entry for the lot. That is the shape MRI's insns_info has,
+// because MRI's nd_line for those inner nodes is the same line too.
 func (c *Compiler) compileNode(n ast.Node) {
+	if l, ok := c.lines[n]; ok {
+		c.cur().curLine = l
+	}
+	c.compileNode1(n)
+}
+
+func (c *Compiler) compileNode1(n ast.Node) {
 	b := c.cur()
 	switch v := n.(type) {
 	case *ast.IntLit:
@@ -501,6 +621,7 @@ func (c *Compiler) compileNode(n ast.Node) {
 		}
 		b.emit(bytecode.OpGetLocal, slot, depth)
 	case *ast.Assign:
+		c.refuseKeywordAssign(v.Name)
 		c.compileNode(v.Value)
 		// Assign to an enclosing local if one is visible; otherwise create a
 		// new local in the current scope (or, inside a `for` body, in the scope
@@ -987,6 +1108,18 @@ func (c *Compiler) compileCall(v *ast.Call) {
 		return
 	}
 	callArgs := c.rewriteAnonArgs(v.Args)
+	// __LINE__ is a KEYWORD, not a method. MRI's grammar turns it into an
+	// Integer literal at parse time (parse.y v3_4_0: `keyword__LINE__` yields
+	// NEW_INTEGER of the current line), which is why `self.__LINE__` and
+	// `1.send(:__LINE__)` both raise NoMethodError there and `__LINE__()` is a
+	// syntax error — all three verified against ruby 4.0.5. Substituting the
+	// literal here is that same substitution one layer down, and confining it to
+	// the receiverless, argumentless, blockless bareword is what reproduces the
+	// three refusals: nothing else in the language answers to the name.
+	if v.Recv == nil && v.Block == nil && v.Name == "__LINE__" && len(callArgs) == 0 {
+		b.emit(bytecode.OpPushConst, b.addConst(object.IntValue(int64(b.curLine))), 0)
+		return
+	}
 	// block_given? is a frame intrinsic, not a real dispatch.
 	if v.Recv == nil && v.Block == nil && v.Name == "block_given?" && len(callArgs) == 0 {
 		b.emit(bytecode.OpBlockGiven, 0, 0)
@@ -1531,7 +1664,7 @@ func splitBlockParams(blk *ast.Block) (positionals []string, posDefaults []ast.N
 func (c *Compiler) compileBlock(blk *ast.Block) int {
 	parent := c.cur()
 	positionals, posDefaults, kwParams, kwRest := splitBlockParams(blk)
-	c.push(newBlockBuilder("<block>", positionals, parent))
+	c.push(newBlockBuilder(blockLabel(parent), positionals, parent))
 	b := c.cur()
 	// Block/lambda params lower exactly like a method's positionals: a top-level
 	// *rest and anything after it are not required, and each optional param gets a

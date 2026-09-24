@@ -391,11 +391,30 @@ func (vm *VM) registerBacktraceLocation() {
 	loc.define("absolute_path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return getIvar(self, "@path")
 	})
-	// #base_label is the label without the "block in "/"<...> in " qualifier; the
-	// captured label carries no qualifier here, so it equals #label.
+	// #base_label is the label WITHOUT the block qualifier. MRI reads it from a
+	// different field than #label does — location.base_label beside
+	// location.label (vm_backtrace.c v3_4_0:331) — and the difference is exactly
+	// the decoration calculate_iseq_label adds for a block frame: #label says
+	// "block (2 levels) in foo" where #base_label says "foo". Stripping that
+	// prefix reconstructs the same answer from the one label we carry.
 	loc.define("base_label", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return getIvar(self, "@label")
+		return object.NewString(stripBlockQualifier(getIvar(self, "@label").ToS()))
 	})
+}
+
+// stripBlockQualifier removes the "block in " / "block (N levels) in " prefix a
+// block frame's label carries, yielding the label of the scope the block was
+// written in. A label without the prefix is returned unchanged.
+func stripBlockQualifier(label string) string {
+	if rest, ok := strings.CutPrefix(label, "block in "); ok {
+		return rest
+	}
+	if strings.HasPrefix(label, "block (") {
+		if i := strings.Index(label, " levels) in "); i >= 0 {
+			return label[i+len(" levels) in "):]
+		}
+	}
+	return label
 }
 
 // backtraceLocation builds a Thread::Backtrace::Location from one captured
@@ -477,11 +496,16 @@ func (vm *VM) threadBacktraceFrames(self object.Value, args []object.Value, labe
 		raise("NotImplementedError",
 			"Thread#%s of another thread is not supported: rbgo records one frame stack per VM, not per thread", label)
 	}
-	here := ""
+	here, line := "", 0
 	if n := len(vm.frameNames); n > 0 {
-		here = vm.frameFileLabel(n - 1)
+		here, line = vm.frameFileLabel(n-1), vm.frameLine(n-1)
 	}
-	full := []object.Value{object.NewString(here + ":0:in '" + label + "'")}
+	// Thread#backtrace counts its own call as the innermost frame, and that frame
+	// is the caller's: the line is where #backtrace was WRITTEN, which is the
+	// innermost recorded frame's current pc. ruby/spec pins exactly that —
+	// core/thread/backtrace_locations_spec.rb matches the first location against
+	// the line of the `backtrace_locations` call itself.
+	full := []object.Value{object.NewString(formatBacktraceEntry(here, line, label))}
 	full = append(full, vm.backtraceFrames(0)...)
 	return sliceBacktraceFrames(vm, full, args)
 }

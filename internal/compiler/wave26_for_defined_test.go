@@ -250,7 +250,12 @@ func TestForwardingCallInsideABlockReadsTheMethodFrame(t *testing.T) {
 func blockISeqs(iseq *bytecode.ISeq) []*bytecode.ISeq {
 	var out []*bytecode.ISeq
 	for _, ch := range iseq.Children {
-		if ch.Name == "<block>" || ch.Name == "<for>" {
+		// A block ISeq is named for the FRAME it will be — "block in foo",
+		// "block (2 levels) in foo" — since that name is the backtrace label
+		// (calculate_iseq_label, vm_backtrace.c v3_4_0:229). It used to be the
+		// literal "<block>"; matching on the prefix keeps this helper finding
+		// them whatever the enclosing scope is called.
+		if strings.HasPrefix(ch.Name, "block in ") || strings.HasPrefix(ch.Name, "block (") || ch.Name == "<for>" {
 			out = append(out, ch)
 		}
 		out = append(out, blockISeqs(ch)...)
