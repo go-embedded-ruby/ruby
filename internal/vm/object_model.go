@@ -1858,6 +1858,13 @@ func (vm *VM) callNative(m *Method, self object.Value, args []object.Value, blk 
 			panic(r)
 		}
 	}()
+	// A native body never reads the call site's keyword/positional verdict (it
+	// takes Ruby's last-hash convention), so clear it here: otherwise a verdict
+	// set for THIS call would still be standing when the native yields to a block
+	// or dispatches a method of its own, and would be read by the wrong frame.
+	// Together with exec's consume-and-clear this bounds the field's lifetime to
+	// exactly one dispatch. See VM.sendNoKW.
+	vm.sendNoKW = false
 	return m.native(vm, self, args, blk)
 }
 

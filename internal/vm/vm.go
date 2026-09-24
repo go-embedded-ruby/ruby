@@ -614,6 +614,25 @@ type VM struct {
 	// at the top of exec, consumed synchronously before any nested call. GVL-guarded.
 	pendingEvalMethodDefinee *RClass
 
+	// sendNoKW carries one call site's keyword/positional verdict to the frame it
+	// is about to enter: true means "the last argument of this call is a
+	// POSITIONAL value", so a trailing Hash must not be re-read as keywords. It is
+	// bytecode.FlagSendNoKW in flight — MRI keeps the same fact on the call info
+	// (the absence of VM_CALL_KWARG / VM_CALL_KW_SPLAT), which
+	// setup_parameters_complex reads to decide whether `keyword_hash` exists at all
+	// (vm_args.c v3_4_0:591).
+	//
+	// It rides the VM rather than exec's parameter list because exec is reached
+	// through send / invoke / invokeInPlace / callBlock, whose signatures are
+	// shared with every built-in method file. Like the two pending fields above it
+	// is set immediately before a dispatch and consumed synchronously: exec reads
+	// and clears it before running any user code, and callNative clears it, so a
+	// call that lands on a native body cannot leave a verdict behind for the next
+	// frame. Unset (false) means "decide as rbgo always did" — peel a trailing
+	// Hash — which is what every path that cannot answer (Object#send, Proc#call,
+	// a define_method body) still gets. GVL-guarded.
+	sendNoKW bool
+
 	// children records finished synthetic child processes (Process.spawn /
 	// Kernel.fork), so Process.waitpid2 can report each one's exit status.
 	// childPidSeq assigns the next synthetic pid. GVL-guarded.
@@ -1078,9 +1097,15 @@ func (vm *VM) Run(iseq *bytecode.ISeq) (result object.Value, err error) {
 // convention), validates it against the method's keyword params (raising on
 // unknown/missing keywords), and returns it (never nil). It shortens *args by
 // the consumed hash so positional arity is checked on the remaining args.
-func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Hash {
+func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value, noKW bool) *object.Hash {
 	kwargs := object.NewHash()
-	if a := *args; len(a) > 0 {
+	// noKW is the call site's answer, and it is the whole of MRI's rule: with
+	// neither VM_CALL_KWARG nor VM_CALL_KW_SPLAT set, setup_parameters_complex
+	// never assigns `keyword_hash`, so the trailing Hash stays positional and the
+	// keyword parameters are filled from nothing — which then makes the arity
+	// check below count it (vm_args.c v3_4_0:591, and the `args->rest = Qfalse`
+	// arm at :783 that only looks at the last argument `if (kw_flag & VM_CALL_KW_SPLAT)`).
+	if a := *args; len(a) > 0 && !noKW {
 		if h, ok := a[len(a)-1].(*object.Hash); ok {
 			kwargs = h
 			*args = a[:len(a)-1]
@@ -1118,6 +1143,41 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value) *object.Ha
 	}
 	return kwargs
 }
+
+// applyKWSplat is the VM half of a `**kw` call site: it drops an EMPTY keyword
+// splat from the argument list and returns the list to pass together with the
+// call's keyword/positional verdict for what is left.
+//
+// It is ignore_keyword_hash_p (vm_args.c v3_4_0:506): an empty keyword hash is
+// removed and the call's VM_CALL_KW_SPLAT bit cleared, so `f(**{})` passes no
+// argument at all. Clearing that bit is the part that matters beyond the count —
+// with no keyword flag left, whatever is now last is an ORDINARY positional
+// argument, which is why this returns noKW == true in that case. `f(x, **{})`
+// therefore passes one positional x, even when x is itself a Hash.
+//
+// MRI keeps an empty hash when the callee has a **kwrest parameter; rbgo does
+// not need to, because bindKeywords gives a kwrest an empty Hash when no keyword
+// hash arrives, which is the same binding.
+//
+// With no FlagSendKWSplat the list is untouched and the verdict is the compiled
+// FlagSendNoKW.
+func applyKWSplat(elems []object.Value, flags int) ([]object.Value, bool) {
+	if flags&bytecode.FlagSendKWSplat == 0 {
+		return elems, flags&bytecode.FlagSendNoKW != 0
+	}
+	if n := len(elems); n > 0 {
+		if h, ok := elems[n-1].(*object.Hash); ok && h.Len() == 0 {
+			return elems[:n-1], true
+		}
+	}
+	return elems, false
+}
+
+// setSendNoKW records the keyword/positional verdict of the call site about to
+// dispatch (see the sendNoKW field). It exists as a method so AOT-lowered Go
+// code (internal/aot/level2.go) can state the same fact its interpreted
+// counterpart states through bytecode.FlagSendNoKW.
+func (vm *VM) setSendNoKW(v bool) { vm.sendNoKW = v }
 
 // alwaysPrivateMethodName reports whether a method name is one MRI defines with
 // private visibility unconditionally (the object-initialization and
@@ -1216,9 +1276,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	default:
 		fm = frameMethod{orig: methodName, callee: methodName}
 	}
+	// Consume the call site's keyword/positional verdict before anything below can
+	// run user code and start a nested frame that would read it (see sendNoKW).
+	noKW := vm.sendNoKW
+	vm.sendNoKW = false
 	var kwargs *object.Hash
 	if len(iseq.KwNames) > 0 || iseq.KwRestSlot >= 0 {
-		kwargs = vm.bindKeywords(iseq, &args)
+		kwargs = vm.bindKeywords(iseq, &args, noKW)
 	}
 	// minReq is the true minimum arity: the leading required params plus any
 	// required "post" params after a *splat (def m(a,*b,c) requires 2, not 1).
@@ -1234,6 +1298,26 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			expected = fmt.Sprintf("%d..%d", minReq, len(iseq.Params))
 		}
 		raise("ArgumentError", "wrong number of arguments (given %d, expected %s)", len(args), expected)
+	}
+	// nPosGiven is how many of the supplied positional arguments are available to
+	// the LEADING and OPTIONAL parameters — the total minus the "post" parameters
+	// that bind from the tail.
+	//
+	// MRI sets the parameters in that order, not left to right:
+	// setup_parameters_complex runs args_setup_lead_parameters, then
+	// args_setup_post_parameters, which MEMCPYs the last post_num arguments and
+	// SHRINKS the argument list, and only then args_setup_opt_parameters over what
+	// is left (vm_args.c v3_4_0:878-892). So in `def m(a, b=9, *c, d)` called as
+	// m(1, 2), the 2 belongs to d and b falls back to its default — an optional is
+	// supplied only if an argument survives the post reservation.
+	//
+	// This is the number OpArgGiven answers against. Reading len(args) instead
+	// (which is what rbgo did) makes every optional before a post parameter look
+	// supplied, and it is then left nil because the default-filling prologue is
+	// skipped.
+	nPosGiven := len(args)
+	if iseq.SplatIndex >= 0 {
+		nPosGiven -= len(iseq.Params) - iseq.SplatIndex - 1
 	}
 	env := vm.getEnv()
 	env.parent, env.kwargs, env.captured = parentEnv, kwargs, false
@@ -1774,6 +1858,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 							if in.Flags&bytecode.FlagSendExplicit != 0 {
 								vm.checkVisibility(recv, name, rm, self)
 							}
+							vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 							res := vm.invokeInPlace(rm, recv, stack[base:], nil)
 							stack = stack[:base-1]
 							stack = append(stack, res)
@@ -1783,6 +1868,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					}
 					if _, isClass := recv.(*RClass); !isClass {
 						if m := vm.lookupCached(&caches[pc], recv, name); m != nil {
+							vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 							// An explicit-receiver send enforces method visibility
 							// (private/protected); an implicit or `self.` send does not. A
 							// blocked call routes to #method_missing (or raises).
@@ -1814,6 +1900,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// passed directly here — no per-call args copy. The region is read
 					// (and copied into the callee's env by exec, or defensively by
 					// invokeInPlace) before this frame truncates the stack below.
+					vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 					res, done := vm.enforceSendVisRoute(in.Flags, recv, name, stack[base:], nil, self)
 					if !done {
 						res = vm.send(recv, name, stack[base:], nil)
@@ -1828,6 +1915,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
 					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 					if res, done := vm.enforceSendVisRoute(in.Flags, recv, name, callArgs, blk, self); done {
 						push(res)
 						pc++
@@ -1852,6 +1940,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
 				bname := iseq.Names[in.A]
 				bblk := vm.toBlock(blockVal)
+				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 				if vm.anyRefinements {
 					if rm := vm.refinedMethod(definee, recv, bname); rm != nil {
 						push(vm.invokeInPlace(rm, recv, callArgs, bblk))
@@ -2016,6 +2105,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					copy(superArgs, stack[len(stack)-in.A:])
 					stack = stack[:len(stack)-in.A]
 				}
+				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, superArgs, superBlk))
 			case bytecode.OpInvokeSuperArray:
 				superBlk := block
@@ -2027,7 +2117,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				argsArr := pop().(*object.Array)
-				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, argsArr.Elems, superBlk))
+				suElems, suNoKW := applyKWSplat(argsArr.Elems, in.Flags)
+				vm.sendNoKW = suNoKW // MRI: the call info decides, not the callee
+				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, suElems, superBlk))
 			case bytecode.OpInvokeBlock:
 				if block == nil {
 					raise("LocalJumpError", "no block given (yield)")
@@ -2035,12 +2127,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				yargs := make([]object.Value, in.A)
 				copy(yargs, stack[len(stack)-in.A:])
 				stack = stack[:len(stack)-in.A]
+				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 				push(vm.callBlock(block, yargs))
 			case bytecode.OpInvokeBlockArray:
 				if block == nil {
 					raise("LocalJumpError", "no block given (yield)")
 				}
-				push(vm.callBlock(block, pop().(*object.Array).Elems))
+				yaargs, yaNoKW := applyKWSplat(pop().(*object.Array).Elems, in.Flags)
+				vm.sendNoKW = yaNoKW // MRI: the call info decides, not the callee
+				push(vm.callBlock(block, yaargs))
 			case bytecode.OpExcMatchAny:
 				classes := pop().(*object.Array)
 				exc := pop()
@@ -2159,7 +2254,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				markEnvCaptured(env)
 				push(&Binding{env: env, self: self, definee: definee, file: iseq.File, names: append([]string(nil), iseq.Locals...)})
 			case bytecode.OpArgGiven:
-				push(object.Bool(in.A < len(args)))
+				push(object.Bool(in.A < nPosGiven))
 			case bytecode.OpKwGiven:
 				_, ok := env.kwargs.Get(object.SymVal(iseq.KwNames[in.A]))
 				push(object.Bool(ok))
@@ -2335,13 +2430,20 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					markEnvCaptured(env)
 					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
-				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, blk))
+				saElems, saNoKW := applyKWSplat(argsArr.Elems, in.Flags)
+				vm.sendNoKW = saNoKW // MRI: the call info decides, not the callee
+				push(vm.dispatchSend(recv, iseq.Names[in.A], saElems, blk))
 			case bytecode.OpSendArrayBlockArg:
 				blockVal := pop()
 				argsArr := pop().(*object.Array)
 				recv := pop()
 				vm.enforceSendVis(in.Flags, recv, iseq.Names[in.A], self)
-				push(vm.dispatchSend(recv, iseq.Names[in.A], argsArr.Elems, vm.toBlock(blockVal)))
+				// toBlock first: a user-defined #to_proc runs a frame of its own, which
+				// would consume the verdict set below.
+				abblk := vm.toBlock(blockVal)
+				abElems, abNoKW := applyKWSplat(argsArr.Elems, in.Flags)
+				vm.sendNoKW = abNoKW // MRI: the call info decides, not the callee
+				push(vm.dispatchSend(recv, iseq.Names[in.A], abElems, abblk))
 			default:
 				raise("VMError", "unknown opcode %s", in.Op)
 			}

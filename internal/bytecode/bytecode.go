@@ -226,6 +226,51 @@ const (
 	// permits private calls through an explicit self), so the compiler does NOT
 	// set this flag when the receiver is `self`.
 	FlagSendExplicit = 1 << iota
+
+	// FlagSendNoKW marks a send whose LAST argument is syntactically a POSITIONAL
+	// value, so a Hash arriving there must NOT be turned into keyword arguments.
+	//
+	// MRI decides this at the call site, not in the callee: setup_parameters_complex
+	// (vm_args.c v3_4_0:591) only ever peels a trailing hash when the call info
+	// carries VM_CALL_KWARG (literal `k: v` arguments) or VM_CALL_KW_SPLAT (`**h`).
+	// With neither flag, `keyword_hash` stays Qnil and the hash counts as an
+	// ordinary positional argument — which is why, since Ruby 3.0,
+	//
+	//	def foo(a, b, c, **hsh); end
+	//	h = {key: 42}
+	//	foo(1, 2, 3, h)     # ArgumentError (given 4, expected 3)
+	//	foo(1, 2, 3, **h)   # hsh == {key: 42}
+	//
+	// rbgo materialises keyword arguments into a trailing Hash in the compiler, so
+	// by the time the VM binds parameters the two forms look identical. This flag
+	// carries the call site's answer through. It is NEGATIVE on purpose: it is set
+	// only where the compiler can PROVE the last argument is positional, so every
+	// path that cannot say (a native re-dispatch such as Object#send, Proc#call, or
+	// a call site whose last argument is a Hash LITERAL — see below) keeps the
+	// older "peel a trailing hash" behaviour rather than silently losing keywords.
+	//
+	// The one shape it cannot yet decide is a braced hash literal: go-ruby-parser
+	// v0.3.0 parses `foo(1, 2, 3, {key: 42})` and `foo(1, 2, 3, key: 42)` into the
+	// SAME *ast.HashLit, with no record of the braces, so the compiler cannot tell
+	// them apart. Those sites are left unflagged (keywords), which is what rbgo
+	// did before. Distinguishing them needs a `Braced` bit on ast.HashLit upstream.
+	FlagSendNoKW
+
+	// FlagSendKWSplat marks an array-dispatch send (OpSendArray, OpSendArrayBlockArg,
+	// OpInvokeBlockArray, OpInvokeSuperArray) whose LAST written argument is a
+	// keyword splat — `**h`, or a keyword list containing one — so the last element
+	// of the argument Array is that keyword Hash and nothing else is.
+	//
+	// It is MRI's VM_CALL_KW_SPLAT, and it exists because the hash may have to
+	// disappear: ignore_keyword_hash_p (vm_args.c v3_4_0:506) drops an EMPTY
+	// keyword splat from the argument list entirely, so `f(**{})` passes no
+	// argument at all and `f(x, **{})` passes exactly one — a POSITIONAL x, even
+	// when x is itself a Hash. rbgo used to make that decision in the compiler, by
+	// emitting an `empty?` test that skipped the concatenation; but a call site
+	// that drops its own last argument can no longer say whether what is now last
+	// was written as keywords, which is what FlagSendNoKW has to answer. So the
+	// hash is always appended and the VM drops it, exactly where MRI does.
+	FlagSendKWSplat
 )
 
 // LineEntry maps the first instruction of a run to the source line that run

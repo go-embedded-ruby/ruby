@@ -807,15 +807,26 @@ func (c *Compiler) compileNode1(n ast.Node) {
 		// Bare anonymous `*` / `**` in `yield(*, **)` forward the enclosing method's
 		// anonymous parameters, exactly as in a call, so resolve them the same way.
 		yieldArgs := c.rewriteAnonArgs(v.Args)
+		// A yield carries the same call-site keyword verdict as any other call:
+		// MRI compiles `yield` through the ordinary argument path and the block is
+		// bound by setup_parameters_complex with arg_setup_block, reading the very
+		// same VM_CALL_KWARG / VM_CALL_KW_SPLAT flags (vm_args.c v3_4_0:591).
+		yieldNoKW := 0
+		if lastArgIsPositional(yieldArgs) {
+			yieldNoKW = bytecode.FlagSendNoKW
+		}
 		if hasSplat(yieldArgs) || hasTrailingKwSplat(yieldArgs) { // dynamic count: build an Array and yield it splatted
-			c.compileSplatItems(yieldArgs)
-			b.emit(bytecode.OpInvokeBlockArray, 0, 0)
+			c.compileSplatItemsMode(yieldArgs, true)
+			if hasTrailingKwSplat(yieldArgs) {
+				yieldNoKW |= bytecode.FlagSendKWSplat
+			}
+			b.insns[b.emit(bytecode.OpInvokeBlockArray, 0, 0)].Flags |= yieldNoKW
 			break
 		}
 		for _, a := range yieldArgs {
 			c.compileNode(a)
 		}
-		b.emit(bytecode.OpInvokeBlock, len(yieldArgs), 0)
+		b.insns[b.emit(bytecode.OpInvokeBlock, len(yieldArgs), 0)].Flags |= yieldNoKW
 	case *ast.If:
 		c.compileIf(v)
 	case *ast.While:
@@ -946,8 +957,9 @@ func forwardIndex(args []ast.Node) int {
 
 // compileForwardCall lowers a call carrying `...` (g(..., ...)): it splices the
 // enclosing `def f(...)` method's captured positionals (*...rest), keywords
-// (**...kw) and block (&...blk). The captured keywords are appended only when
-// non-empty, matching MRI — a `**{}` kwsplat passes no argument.
+// (**...kw) and block (&...blk). The captured keywords ride as a trailing hash
+// that the VM drops when empty, so a `**{}` kwsplat passes no argument and the
+// argument before it stays positional (bytecode.FlagSendKWSplat).
 func (c *Compiler) compileForwardCall(v *ast.Call, fwdAt int) {
 	b := c.cur()
 	if v.Recv != nil {
@@ -959,14 +971,16 @@ func (c *Compiler) compileForwardCall(v *ast.Call, fwdAt int) {
 	// Forward the block (&...blk; nil ⇒ no block) and send.
 	blkSlot, blkDepth := c.mustResolve(fwdBlockName)
 	b.emit(bytecode.OpGetLocal, blkSlot, blkDepth)
-	b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+	at := b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+	b.insns[at].Flags |= bytecode.FlagSendKWSplat
 }
 
 // emitForwardArgsArray builds, on top of the stack, the argument Array for a
 // `...` forwarding call: the leading explicit args, then the captured `*...rest`
 // positionals, then the trailing explicit args, then the captured `**...kw`
-// hash appended as a trailing element only when it has entries (matching MRI —
-// a `**{}` kwsplat passes no argument). It does not emit the block or the send.
+// hash as a trailing element — always, even when empty, because the send that
+// follows carries bytecode.FlagSendKWSplat and the VM drops an empty keyword
+// splat where MRI does. It does not emit the block or the send.
 func (c *Compiler) emitForwardArgsArray(leading, trailing []ast.Node) {
 	b := c.cur()
 	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
@@ -985,18 +999,14 @@ func (c *Compiler) emitForwardArgsArray(leading, trailing []ast.Node) {
 	for _, a := range trailing {
 		appendOne(a)
 	}
-	// Append **...kw as a trailing hash, but only when it has entries.
+	// Append **...kw as a trailing hash. It is appended even when empty: the send
+	// that follows carries bytecode.FlagSendKWSplat, so the VM drops an empty one
+	// where MRI does (ignore_keyword_hash_p) and can then tell that whatever is
+	// left last was forwarded as a positional argument.
 	kwSlot, kwDepth := c.mustResolve(fwdKwName)
 	b.emit(bytecode.OpGetLocal, kwSlot, kwDepth)
-	b.emit(bytecode.OpDup, 0, 0)
-	b.emit(bytecode.OpSend, b.addName("empty?"), 0)
-	skip := b.emit(bytecode.OpBranchIf, 0, 0)
 	b.emit(bytecode.OpNewArray, 1, 0) // wrap the kw hash
 	b.emit(bytecode.OpConcatArray, 0, 0)
-	done := b.emit(bytecode.OpJump, 0, 0)
-	b.patch(skip, b.here())
-	b.emit(bytecode.OpPop, 0, 0) // drop the empty kw hash
-	b.patch(done, b.here())
 }
 
 // mustResolve resolves a (compiler-synthesised) local that is guaranteed to
@@ -1193,9 +1203,19 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	} else {
 		b.emit(bytecode.OpPushSelf, 0, 0) // implicit receiver: self
 	}
+	// noKW is the call site's keyword/positional verdict for its last argument
+	// (see lastArgIsPositional): it travels on the send instruction so the VM
+	// binds a trailing Hash the way MRI's VM_CALL_KWARG / VM_CALL_KW_SPLAT flags
+	// make it. It is read from the whole written argument list, before the
+	// block-pass is pulled out below, because the pull-out is an implementation
+	// detail of how the value is stacked, not a change to what was written.
+	noKW := lastArgIsPositional(callArgs)
 	sendFlags := func(at int) int {
 		if explicit {
 			b.insns[at].Flags |= bytecode.FlagSendExplicit
+		}
+		if noKW {
+			b.insns[at].Flags |= bytecode.FlagSendNoKW
 		}
 		return at
 	}
@@ -1223,7 +1243,17 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	// hash (k: v) is never empty, and a braced positional hash carries no `**`
 	// entry, so neither is affected.
 	if hasSplat(args) || hasTrailingKwSplat(args) {
-		c.compileSplatItems(args)
+		c.compileSplatItemsMode(args, true)
+		if hasTrailingKwSplat(args) {
+			// The VM, not the compiler, drops an empty `**kw` — and it is then the
+			// VM that knows the new last argument is positional.
+			kwSplatFlag := func(at int) int {
+				b.insns[at].Flags |= bytecode.FlagSendKWSplat
+				return at
+			}
+			prev := sendFlags
+			sendFlags = func(at int) int { return kwSplatFlag(prev(at)) }
+		}
 		if blockPass != nil {
 			c.compileNode(blockPass)
 			sendFlags(b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0))
@@ -1535,6 +1565,18 @@ func hasSplat(items []ast.Node) bool {
 // runtime, so an empty `**kw` passes no argument — matching MRI's keyword
 // separation.
 func (c *Compiler) compileSplatItems(items []ast.Node) {
+	c.compileSplatItemsMode(items, false)
+}
+
+// compileSplatItemsMode is compileSplatItems with the argument-list rule made
+// explicit. keepEmptyKwSplat is set for a CALL's argument array (a call, a
+// yield, a super, a `...` forward): there the trailing `**kw` hash is appended
+// unconditionally and the VM drops it when it is empty, because only the VM can
+// then say what the new last argument is (see bytecode.FlagSendKWSplat). It is
+// clear for the non-call uses — an array literal, a masgn right-hand side, an
+// index-target argument list — which keep the older "an empty `**kw` contributes
+// nothing" lowering they were written for.
+func (c *Compiler) compileSplatItemsMode(items []ast.Node, keepEmptyKwSplat bool) {
 	b := c.cur()
 	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
 	for i, it := range items {
@@ -1545,7 +1587,7 @@ func (c *Compiler) compileSplatItems(items []ast.Node) {
 			continue
 		}
 		if h, ok := it.(*ast.HashLit); ok && i == len(items)-1 && isKwSplatHash(h) {
-			c.appendKwSplatIfPresent(h)
+			c.appendKwSplat(h, keepEmptyKwSplat)
 			continue
 		}
 		c.compileNode(it)
@@ -1554,12 +1596,22 @@ func (c *Compiler) compileSplatItems(items []ast.Node) {
 	}
 }
 
-// appendKwSplatIfPresent builds the keyword hash h and concatenates it onto the
-// argument-array accumulator on top of the stack, but only when the hash is
-// non-empty — an empty keyword splat contributes no argument.
-func (c *Compiler) appendKwSplatIfPresent(h *ast.HashLit) {
+// appendKwSplat builds the keyword hash h and concatenates it onto the
+// argument-array accumulator on top of the stack.
+//
+// keepEmpty says who decides about an EMPTY keyword splat. In a call argument
+// list it is true and the hash is always appended, leaving the drop to the VM,
+// which is where MRI makes it (ignore_keyword_hash_p, vm_args.c v3_4_0:506) and
+// the only place that can also say whether what is left behind is positional.
+// Everywhere else it is false and an empty hash is skipped here, as before.
+func (c *Compiler) appendKwSplat(h *ast.HashLit, keepEmpty bool) {
 	b := c.cur()
 	c.compileNode(h)
+	if keepEmpty {
+		b.emit(bytecode.OpNewArray, 1, 0) // wrap the kw hash as a single element
+		b.emit(bytecode.OpConcatArray, 0, 0)
+		return
+	}
 	b.emit(bytecode.OpDup, 0, 0)
 	b.emit(bytecode.OpSend, b.addName("empty?"), 0)
 	skip := b.emit(bytecode.OpBranchIf, 0, 0)
@@ -1569,6 +1621,38 @@ func (c *Compiler) appendKwSplatIfPresent(h *ast.HashLit) {
 	b.patch(skip, b.here())
 	b.emit(bytecode.OpPop, 0, 0) // drop the empty kw hash, leaving the accumulator
 	b.patch(done, b.here())
+}
+
+// lastArgIsPositional reports whether the LAST argument of a call is
+// syntactically a positional value — so a Hash arriving there must stay a
+// positional argument and must not be re-read as keyword arguments.
+//
+// It is the compile-time half of MRI's call-site decision: setup_parameters_complex
+// (vm_args.c v3_4_0:591) peels a trailing hash into `keyword_hash` only when the
+// call info carries VM_CALL_KWARG or VM_CALL_KW_SPLAT, which the compiler sets
+// only for `k: v` arguments and for `**h` (compile.c v3_4_0, setup_args_core).
+// Every other last argument — a local, a method call, an index, a splat, a
+// literal of any other kind — leaves both flags clear, and the hash it may
+// evaluate to is positional.
+//
+// A `&block-pass` is not an argument for this purpose (the parser may park it
+// anywhere in the list), so it is skipped. An empty list has no last argument
+// and answers false: there is nothing to protect.
+//
+// It answers false for an *ast.HashLit because go-ruby-parser v0.3.0 gives
+// `f(k: 1)` and `f({k: 1})` the SAME node with no record of the braces. Both are
+// therefore left to the older behaviour — keywords — which is what `f(k: 1)`
+// needs and what `f({k: 1})` got before. Fixing that shape needs a `Braced` bit
+// on ast.HashLit upstream; see FlagSendNoKW.
+func lastArgIsPositional(args []ast.Node) bool {
+	for i := len(args) - 1; i >= 0; i-- {
+		if _, isBP := args[i].(*ast.BlockPass); isBP {
+			continue
+		}
+		_, isHash := args[i].(*ast.HashLit)
+		return !isHash
+	}
+	return false
 }
 
 // hasTrailingKwSplat reports whether the last argument is a keyword-splat hash
@@ -1855,6 +1939,7 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 		blkSlot, blkDepth := c.mustResolve(fwdBlockName)
 		b.emit(bytecode.OpGetLocal, blkSlot, blkDepth)
 		at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+		b.insns[at].Flags |= bytecode.FlagSendKWSplat
 		b.insns[at].C = 1
 		return
 	}
@@ -1862,18 +1947,29 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 	// value (if any) lands on top of the args array. It may sit before a trailing
 	// keyword hash, so extractBlockPass scans anywhere; bare anonymous `&`/`*`/`**`
 	// are rewritten to reads of the enclosing method's anonymous params first.
-	args, blockPass := extractBlockPass(c.rewriteAnonArgs(v.Args))
+	rewritten := c.rewriteAnonArgs(v.Args)
+	// An explicit-argument `super(...)` is an ordinary call site, so it carries
+	// the same keyword/positional verdict for its last argument as one.
+	superNoKW := 0
+	if lastArgIsPositional(rewritten) {
+		superNoKW = bytecode.FlagSendNoKW
+	}
+	args, blockPass := extractBlockPass(rewritten)
 	// A splat (or a block-pass) means a dynamic argument count: build the args as
 	// an Array and dispatch super from it (kwargs ride along as the trailing hash,
 	// exactly as in a normal call).
-	if blockPass != nil || hasSplat(args) {
-		c.compileSplatItems(args)
+	if blockPass != nil || hasSplat(args) || hasTrailingKwSplat(args) {
+		c.compileSplatItemsMode(args, true)
+		if hasTrailingKwSplat(args) {
+			superNoKW |= bytecode.FlagSendKWSplat
+		}
 		cFlag := 0
 		if blockPass != nil {
 			c.compileNode(blockPass) // block-pass value sits above the args array
 			cFlag = 1
 		}
 		at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+		b.insns[at].Flags |= superNoKW
 		switch {
 		case cFlag == 1:
 			b.insns[at].C = 1
@@ -1886,6 +1982,7 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 		c.compileNode(a)
 	}
 	at := b.emit(bytecode.OpInvokeSuper, len(args), 0)
+	b.insns[at].Flags |= superNoKW
 	if v.Block != nil {
 		b.insns[at].C = c.compileBlock(v.Block) + 1
 	}
