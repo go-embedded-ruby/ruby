@@ -480,8 +480,8 @@ func (vm *VM) frameLabel(i int) string {
 	if name := vm.frameNames[i]; name != "" {
 		return name
 	}
-	if i < len(vm.frameISeqs) && vm.frameISeqs[i] != nil {
-		switch n := vm.frameISeqs[i].Name; {
+	if i < len(vm.frameCode) && vm.frameCode[i].iseq != nil {
+		switch n := vm.frameCode[i].iseq.Name; {
 		case n == "<singleton class>":
 			return "singleton class"
 		case strings.HasPrefix(n, "<class:"), strings.HasPrefix(n, "<module:"),

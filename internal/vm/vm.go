@@ -195,14 +195,11 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 // it — a misalignment that would report another frame's line, which is worse
 // than reporting none.
 func (vm *VM) setFrameCode(i int, iseq *bytecode.ISeq) {
-	for len(vm.framePCs) <= i {
-		vm.frameISeqs = append(vm.frameISeqs, nil)
-		vm.framePCs = append(vm.framePCs, 0)
+	for len(vm.frameCode) <= i {
+		vm.frameCode = append(vm.frameCode, frameCode{})
 	}
-	vm.frameISeqs = vm.frameISeqs[:i+1]
-	vm.framePCs = vm.framePCs[:i+1]
-	vm.frameISeqs[i] = iseq
-	vm.framePCs[i] = 0
+	vm.frameCode = vm.frameCode[:i+1]
+	vm.frameCode[i] = frameCode{iseq: iseq}
 }
 
 // frameLine returns the 1-based source line frame i is executing, or 0 when it
@@ -214,17 +211,24 @@ func (vm *VM) setFrameCode(i int, iseq *bytecode.ISeq) {
 // frozen AOT output built before the map existed — fall back to the ISeq's
 // first_lineno rather than reporting nothing.
 func (vm *VM) frameLine(i int) int {
-	if i < 0 || i >= len(vm.frameISeqs) {
+	if i < 0 || i >= len(vm.frameCode) {
 		return 0
 	}
-	iseq := vm.frameISeqs[i]
-	if iseq == nil {
+	fc := vm.frameCode[i]
+	if fc.iseq == nil {
 		return 0
 	}
-	if line := iseq.LineAt(vm.framePCs[i]); line != 0 {
+	if line := fc.iseq.LineAt(fc.pc); line != 0 {
 		return line
 	}
-	return iseq.FirstLine
+	return fc.iseq.FirstLine
+}
+
+// frameCode is one frame's code position: the ISeq it runs and the instruction
+// it has reached. It is MRI's (cfp->iseq, cfp->pc).
+type frameCode struct {
+	iseq *bytecode.ISeq
+	pc   int
 }
 
 func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
@@ -553,16 +557,27 @@ type VM struct {
 	// here so the two stacks stay aligned. GVL-guarded.
 	frameFiles []string
 
-	// frameISeqs and framePCs mirror frameNames one-for-one, recording WHICH ISeq
-	// each frame is running and HOW FAR it has got. Together they are MRI's
-	// cfp->iseq and cfp->pc, and they exist for the same reason: a line is not
-	// stored per frame, it is COMPUTED from the pair when somebody asks —
+	// frameCode mirrors frameNames one-for-one, recording WHICH ISeq each frame
+	// is running and HOW FAR it has got. The pair is MRI's cfp->iseq and
+	// cfp->pc, and it exists for the same reason: a line is not stored per
+	// frame, it is COMPUTED from the pair when somebody asks —
 	// calc_lineno(loc->iseq, loc->pc) (vm_backtrace.c v3_4_0:87). Storing the
-	// line instead would mean recomputing it on every instruction; storing the pc
-	// means one integer store, and the search runs once per backtrace entry
-	// actually rendered. GVL-guarded.
-	frameISeqs []*bytecode.ISeq
-	framePCs   []int
+	// line instead would mean recomputing it on every instruction; storing the
+	// pc means one integer store, and the search runs once per backtrace entry
+	// actually rendered.
+	//
+	// The two halves share ONE slice rather than sitting in two because a frame
+	// push touches both, so one bounds check and one store serve for both.
+	//
+	// It did NOT buy the speed it was reached for, and the number is recorded
+	// here so nobody re-derives it: bench/blocks.rb — millions of tiny block
+	// calls, the worst case for anything paid per frame — costs about +7%
+	// whichever layout is used. A best-of-5 pass appeared to show the merge
+	// taking it from +8.7% to -0.2%; 15 interleaved runs of each put it at +7.5%
+	// best-of-15 and +6.8% by median, i.e. the -0.2% was noise and the merge is
+	// worth roughly nothing here. The cost is the per-instruction pc store and
+	// the per-frame push, not the slice count. GVL-guarded.
+	frameCode []frameCode
 
 	// frameCrefs mirrors frameNames one-for-one (every frame pushes), recording
 	// the lexical scope (cref) each frame runs under so Module.nesting can report
@@ -1523,8 +1538,8 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			// next push, so they are exactly as consistent as the name and file
 			// stacks they sit beside — which is the bar, rather than an invariant
 			// of their own that the rest of the machinery does not keep.
-			if myFrame < len(vm.framePCs) {
-				vm.framePCs[myFrame] = pc
+			if myFrame < len(vm.frameCode) {
+				vm.frameCode[myFrame].pc = pc
 			}
 			in := iseq.Insns[pc]
 			switch in.Op {

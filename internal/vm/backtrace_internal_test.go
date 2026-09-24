@@ -100,11 +100,10 @@ func TestUncaughtBacktraceFallsBackToLiveStack(t *testing.T) {
 	// boot last wrote, which is how this test first failed: it reported line 109
 	// for a frame that has no source at all. Two ISeqs with a line apiece say
 	// what is meant, and say it in the shape the product uses.
-	vm.frameISeqs = []*bytecode.ISeq{
-		{Name: "top", Lines: []bytecode.LineEntry{{PC: 0, Line: 7}}},
-		{Name: "inner", Lines: []bytecode.LineEntry{{PC: 0, Line: 12}}},
+	vm.frameCode = []frameCode{
+		{iseq: &bytecode.ISeq{Name: "top", Lines: []bytecode.LineEntry{{PC: 0, Line: 7}}}},
+		{iseq: &bytecode.ISeq{Name: "inner", Lines: []bytecode.LineEntry{{PC: 0, Line: 12}}}},
 	}
-	vm.framePCs = []int{0, 0}
 	exc := &RObject{class: vm.consts["RuntimeError"].(*RClass), ivars: map[string]object.Value{}}
 	bt := vm.uncaughtBacktrace(RubyError{Obj: exc})
 	if len(bt) != 2 {

@@ -26,13 +26,12 @@ func TestFormatBacktraceEntryOmitsZeroLine(t *testing.T) {
 // (vm_backtrace.c v3_4_0:105).
 func TestFrameLineFallbacks(t *testing.T) {
 	vm := New(nil)
-	vm.frameISeqs = []*bytecode.ISeq{
-		nil,
-		{Lines: []bytecode.LineEntry{{PC: 0, Line: 31}}},
-		{FirstLine: 8}, // no map at all: falls back
-		{FirstLine: 8, Lines: []bytecode.LineEntry{{PC: 4, Line: 40}}},
+	vm.frameCode = []frameCode{
+		{},
+		{iseq: &bytecode.ISeq{Lines: []bytecode.LineEntry{{PC: 0, Line: 31}}}},
+		{iseq: &bytecode.ISeq{FirstLine: 8}}, // no map at all: falls back
+		{iseq: &bytecode.ISeq{FirstLine: 8, Lines: []bytecode.LineEntry{{PC: 4, Line: 40}}}},
 	}
-	vm.framePCs = []int{0, 0, 0, 0}
 
 	if got := vm.frameLine(-1); got != 0 {
 		t.Errorf("negative index: got %d, want 0", got)
@@ -54,7 +53,7 @@ func TestFrameLineFallbacks(t *testing.T) {
 	if got := vm.frameLine(3); got != 8 {
 		t.Errorf("unplaceable pc: got %d, want the FirstLine 8", got)
 	}
-	vm.framePCs[3] = 4
+	vm.frameCode[3].pc = 4
 	if got := vm.frameLine(3); got != 40 {
 		t.Errorf("placeable pc: got %d, want 40", got)
 	}
@@ -70,24 +69,24 @@ func TestSetFrameCodeSizesToDepth(t *testing.T) {
 	b := &bytecode.ISeq{Name: "b"}
 
 	vm.setFrameCode(3, a)
-	if len(vm.frameISeqs) != 4 || len(vm.framePCs) != 4 {
-		t.Fatalf("grew to %d/%d, want 4/4", len(vm.frameISeqs), len(vm.framePCs))
+	if len(vm.frameCode) != 4 {
+		t.Fatalf("grew to %d, want 4", len(vm.frameCode))
 	}
-	if vm.frameISeqs[3] != a {
+	if vm.frameCode[3].iseq != a {
 		t.Error("slot 3 does not hold the pushed ISeq")
 	}
-	vm.framePCs[3] = 17
+	vm.frameCode[3].pc = 17
 
-	// A shallower push must SHRINK them, discarding the abandoned entry.
+	// A shallower push must SHRINK it, discarding the abandoned entry.
 	vm.setFrameCode(1, b)
-	if len(vm.frameISeqs) != 2 || len(vm.framePCs) != 2 {
-		t.Fatalf("shrank to %d/%d, want 2/2", len(vm.frameISeqs), len(vm.framePCs))
+	if len(vm.frameCode) != 2 {
+		t.Fatalf("shrank to %d, want 2", len(vm.frameCode))
 	}
-	if vm.frameISeqs[1] != b {
+	if vm.frameCode[1].iseq != b {
 		t.Error("slot 1 does not hold the pushed ISeq")
 	}
-	if vm.framePCs[1] != 0 {
-		t.Errorf("pc not reset on push: %d", vm.framePCs[1])
+	if vm.frameCode[1].pc != 0 {
+		t.Errorf("pc not reset on push: %d", vm.frameCode[1].pc)
 	}
 }
 
@@ -96,15 +95,14 @@ func TestSetFrameCodeSizesToDepth(t *testing.T) {
 func TestFrameLabelFromISeq(t *testing.T) {
 	vm := New(nil)
 	vm.frameNames = []string{"foo", "", "", "", "", ""}
-	vm.frameISeqs = []*bytecode.ISeq{
-		{Name: "foo"},
-		{Name: "<class:K>"},
-		{Name: "<singleton class>"},
-		{Name: "block in foo"},
-		{Name: ""},
-		nil,
+	vm.frameCode = []frameCode{
+		{iseq: &bytecode.ISeq{Name: "foo"}},
+		{iseq: &bytecode.ISeq{Name: "<class:K>"}},
+		{iseq: &bytecode.ISeq{Name: "<singleton class>"}},
+		{iseq: &bytecode.ISeq{Name: "block in foo"}},
+		{iseq: &bytecode.ISeq{Name: ""}},
+		{},
 	}
-	vm.framePCs = make([]int, 6)
 	want := []string{"foo", "<class:K>", "singleton class", "block in foo", "<main>", "<main>"}
 	for i, w := range want {
 		if got := vm.frameLabel(i); got != w {
@@ -112,7 +110,7 @@ func TestFrameLabelFromISeq(t *testing.T) {
 		}
 	}
 	// A frame whose index outruns the ISeq stack falls back too.
-	vm.frameISeqs = nil
+	vm.frameCode = nil
 	if got := vm.frameLabel(1); got != "<main>" {
 		t.Errorf("no ISeq stack: got %q", got)
 	}
