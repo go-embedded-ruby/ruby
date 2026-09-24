@@ -477,6 +477,68 @@ func (c *Compiler) refuseKeywordAssign(name string) {
 	}
 }
 
+// paramCheckName reduces one parser parameter entry to the local name it
+// declares, or "" when that entry declares no name a duplicate check applies to.
+//
+// It strips the sigils the parser keeps on a block's folded entries (`**rest`,
+// `name:`) and on an anonymous parameter, and it drops the three kinds MRI
+// exempts or never sees here:
+//
+//   - the anonymous forms `*`, `**`, `&`, which declare no name at all —
+//     `def m(*, **, &)` is legal;
+//   - a name beginning with `_` (and `_` itself), which is
+//     is_private_local_id (parse.y v3_4_0:13578): shadowing_lvar_0 returns
+//     without complaining for those, so `def m(_, _)` and `|_x; _x|` are legal;
+//   - the parser's `(N)` placeholder for a destructuring parameter, whose real
+//     names it does not expose.
+func paramCheckName(p string) string {
+	switch {
+	case strings.HasPrefix(p, "**"):
+		p = p[2:]
+	case strings.HasPrefix(p, "*"), strings.HasPrefix(p, "&"):
+		p = p[1:]
+	}
+	p = strings.TrimSuffix(p, ":")
+	if p == "" || p[0] == '_' || p[0] == '(' {
+		return ""
+	}
+	return p
+}
+
+// checkDuplicateParams refuses a parameter list that declares the same name
+// twice, as MRI's parser does.
+//
+// Every formal goes through shadowing_lvar_0 (parse.y v3_4_0:13589), which
+// yyerror0s "duplicated argument name" when the name is already in the CURRENT
+// scope's table — so `def m(a, *a)`, `def m(a, a:)`, `def m(a, &a)` and
+// `proc { |x, x| }` are all SyntaxErrors, and so is a block-local that repeats
+// one of its own block's parameters (`proc { |x; x| }`, the dvar_curr arm),
+// because new_bv routes block-locals through the same check. A block-local that
+// shadows a name from an ENCLOSING scope is not a duplicate — that is the
+// dvar_defined/local_id arm, which merely records it — so only names declared
+// by this one list are compared.
+//
+// go-ruby-parser v0.3.0 does not raise it (it has no scope table), and rbgo has
+// no other place that sees a whole parameter list, so the compiler raises it.
+// The observable behaviour is MRI's: the error surfaces where the code is
+// compiled — a SyntaxError from eval/require, a refusal to run a script.
+func (c *Compiler) checkDuplicateParams(names []string) {
+	var seen map[string]bool
+	for _, raw := range names {
+		n := paramCheckName(raw)
+		if n == "" {
+			continue
+		}
+		if seen[n] {
+			c.fail("duplicated argument name")
+		}
+		if seen == nil {
+			seen = make(map[string]bool, len(names))
+		}
+		seen[n] = true
+	}
+}
+
 func (c *Compiler) fail(format string, args ...any) {
 	panic(compileError{msg: "compile error: " + fmt.Sprintf(format, args...)})
 }
@@ -1747,6 +1809,9 @@ func splitBlockParams(blk *ast.Block) (positionals []string, posDefaults []ast.N
 // reach the enclosing locals by depth.
 func (c *Compiler) compileBlock(blk *ast.Block) int {
 	parent := c.cur()
+	// A block's parameters, its &block parameter and its block-locals share one
+	// declaration list for the duplicate check (see checkDuplicateParams).
+	c.checkDuplicateParams(append(append(append([]string(nil), blk.Params...), blk.BlockParam), blk.Locals...))
 	positionals, posDefaults, kwParams, kwRest := splitBlockParams(blk)
 	c.push(newBlockBuilder(blockLabel(parent), positionals, parent))
 	b := c.cur()
@@ -3261,6 +3326,16 @@ const (
 func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	// `def f(...)` collects the forwarded positionals into a synthetic *splat
 	// after the explicit params; the keyword-rest and block are added below.
+	// Duplicate formals are a SyntaxError, checked on what was WRITTEN — before
+	// `def f(...)` splices in its synthetic forwarding locals below.
+	{
+		names := append([]string(nil), v.Params...)
+		for _, kp := range v.KwParams {
+			names = append(names, kp.Name)
+		}
+		names = append(names, v.KwRest, v.BlockParam)
+		c.checkDuplicateParams(names)
+	}
 	params := v.Params
 	splatIndex := v.SplatIndex
 	if v.Forward {
