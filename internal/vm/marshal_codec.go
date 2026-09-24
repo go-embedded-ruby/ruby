@@ -63,14 +63,35 @@ func (d *mDumper) newID() { d.nextID++ }
 // link records v under a fresh object id and returns false, or, if v was seen
 // before, emits the '@' link to its id and returns true.
 func (d *mDumper) link(v object.Value) bool {
+	if d.linkRef(v) {
+		return true
+	}
+	d.remember(v)
+	return false
+}
+
+// linkRef emits the '@' back-reference when v is already in the objects table
+// and reports whether it did. Unlike link it never allocates an id, so a caller
+// that must register v at a later point (MRI's w_remember position) can.
+func (d *mDumper) linkRef(v object.Value) bool {
 	if id, ok := d.objs[v]; ok {
 		d.buf = append(d.buf, '@')
 		d.writeLong(id)
 		return true
 	}
+	return false
+}
+
+// remember assigns v the next object-link id, as MRI's w_remember does. Where
+// that call sits decides the id every later object gets: the #_dump ('u')
+// container registers its object only after writing its instance variables, so
+// those variables index BEFORE the object itself.
+func (d *mDumper) remember(v object.Value) {
+	if _, ok := d.objs[v]; ok {
+		return
+	}
 	d.objs[v] = d.nextID
 	d.nextID++
-	return false
 }
 
 func (d *mDumper) writeValue(v object.Value) {
@@ -112,6 +133,7 @@ func (d *mDumper) writeValue(v object.Value) {
 		if d.link(x) {
 			return
 		}
+		d.writeExtended(x)
 		d.buf = append(d.buf, '[')
 		d.writeLong(len(x.Elems))
 		for _, e := range x.Elems {
@@ -126,6 +148,7 @@ func (d *mDumper) writeValue(v object.Value) {
 		if d.link(x) {
 			return
 		}
+		d.writeExtended(x)
 		d.buf = append(d.buf, 'o')
 		d.writeSymbol("Range")
 		d.writeLong(3)
@@ -198,38 +221,104 @@ func (d *mDumper) writeBignumBody(b *big.Int) {
 	d.buf = append(d.buf, le...)
 }
 
+// marshalEncIvar is the encoding instance variable Marshal records for an
+// encoding-capable value: either the short :E form (true for UTF-8, false for
+// US-ASCII) or the long :encoding form naming the encoding.
+type marshalEncIvar struct {
+	sym  string // "E" (short form) or "encoding" (long form)
+	tf   byte   // 'T' or 'F' for the short form; 0 when name is used
+	name string // encoding name, for the long form only
+}
+
+// marshalEncodingIvar mirrors MRI's encoding_name (marshal.c): US-ASCII maps to
+// the short :E => false, UTF-8 to the short :E => true, and any other encoding
+// to :encoding => "<name>". ASCII-8BIT is encoding index 0, for which
+// encoding_name returns Qnil, so a binary value carries no encoding ivar at all
+// (and, having no other ivar, no 'I' wrapper either) — hence the nil result.
+func marshalEncodingIvar(enc string) *marshalEncIvar {
+	switch enc {
+	case "ASCII-8BIT", "BINARY":
+		return nil
+	case "", "UTF-8":
+		return &marshalEncIvar{sym: "E", tf: 'T'}
+	case "US-ASCII":
+		return &marshalEncIvar{sym: "E", tf: 'F'}
+	}
+	return &marshalEncIvar{sym: "encoding", name: enc}
+}
+
+// writeEncodingIvar emits one encoding ivar pair (name then value), as MRI's
+// w_encoding does. It writes only the pair; the caller has already written the
+// ivar count that covers it.
+func (d *mDumper) writeEncodingIvar(e *marshalEncIvar) {
+	d.writeSymbol(e.sym)
+	if e.tf != 0 {
+		d.buf = append(d.buf, e.tf)
+		return
+	}
+	d.writeValue(object.NewStringBytesEnc([]byte(e.name), "ASCII-8BIT"))
+}
+
+// writeExtended emits the 'e' (TYPE_EXTENDED) prefix naming each module
+// singleton-extended into v, mirroring MRI's w_extended (marshal.c) called with
+// check=TRUE: the singleton class is stepped over and every module between it
+// and the real class is named, most-recently-extended first. A singleton that
+// carries methods or instance variables of its own is not reconstructible from
+// the stream, so MRI refuses it (SINGLETON_DUMP_UNABLE_P).
+//
+// MRI passes check=FALSE for the #marshal_dump ('U') and #_dump ('u')
+// containers, where w_extended then emits nothing at all — those callers must
+// not call this.
+func (d *mDumper) writeExtended(v object.Value) {
+	sc := d.vm.objSingleton(v)
+	if sc == nil {
+		return
+	}
+	if len(sc.methods) > 0 || len(sc.ivars) > 0 {
+		raise("TypeError", "singleton can't be dumped")
+	}
+	inc := sc.includes
+	for i := len(inc) - 1; i >= 0; i-- {
+		if inc[i].name == "" {
+			raise("TypeError", "can't dump anonymous class %s", inc[i].ToS())
+		}
+		d.buf = append(d.buf, 'e')
+		d.writeSymbol(inc[i].name)
+	}
+}
+
 func (d *mDumper) writeString(s *object.String) {
 	if d.link(s) {
 		return
 	}
-	enc := s.EncName()
-	if enc == "ASCII-8BIT" {
-		d.buf = append(d.buf, '"')
-		d.writeBytes(s.Str())
-		return
+	// MRI writes the 'I' ivar wrapper first, then w_uclass's 'e'/'C' prefixes,
+	// then the payload, then the ivar list (w_object in marshal.c). A binary
+	// string has no encoding ivar and so needs no wrapper.
+	enc := marshalEncodingIvar(s.EncName())
+	if enc != nil {
+		d.buf = append(d.buf, 'I')
 	}
-	d.buf = append(d.buf, 'I', '"')
+	d.writeExtended(s)
+	d.writeStringPayload(s)
+	if enc != nil {
+		d.writeLong(1)
+		d.writeEncodingIvar(enc)
+	}
+}
+
+// writeStringPayload emits just the TYPE_STRING tag and bytes, with no 'I'
+// wrapper, extend prefix or ivar list. The caller owns those, so a built-in
+// subclass's 'C' container can fold the payload's encoding ivar into its own.
+func (d *mDumper) writeStringPayload(s *object.String) {
+	d.buf = append(d.buf, '"')
 	d.writeBytes(s.Str())
-	switch enc {
-	case "UTF-8":
-		d.writeLong(1)
-		d.writeSymbol("E")
-		d.buf = append(d.buf, 'T')
-	case "US-ASCII":
-		d.writeLong(1)
-		d.writeSymbol("E")
-		d.buf = append(d.buf, 'F')
-	default:
-		d.writeLong(1)
-		d.writeSymbol("encoding")
-		d.writeValue(object.NewStringBytesEnc([]byte(enc), "ASCII-8BIT"))
-	}
 }
 
 func (d *mDumper) writeHash(h *object.Hash) {
 	if !object.IsNil(h.DefaultProc) {
 		raise("TypeError", "can't dump hash with default proc")
 	}
+	d.writeExtended(h)
 	// A Hash put into compare_by_identity mode carries no inline flag in the
 	// stream, so MRI wraps it in a 'C' container naming the Hash class; loading
 	// that container re-applies compare_by_identity.
@@ -296,6 +385,33 @@ func regexpMarshalEnc(r *Regexp) string {
 }
 
 func (d *mDumper) writeRegexp(r *Regexp) {
+	opt := regexpMarshalOpts(r)
+	// As for a String: the 'I' wrapper, then w_uclass's 'e'/'C' prefixes, then the
+	// payload, then the ivar list. A binary (ASCII-8BIT) Regexp carries no
+	// encoding ivar, so it is emitted bare.
+	enc := marshalEncodingIvar(regexpMarshalEnc(r))
+	if enc != nil {
+		d.buf = append(d.buf, 'I')
+	}
+	d.writeExtended(r)
+	d.writeRegexpPayload(r, opt)
+	if enc != nil {
+		d.writeLong(1)
+		d.writeEncodingIvar(enc)
+	}
+}
+
+// writeRegexpPayload emits just the TYPE_REGEXP tag, source and option byte —
+// the Regexp counterpart of writeStringPayload.
+func (d *mDumper) writeRegexpPayload(r *Regexp, opt int) {
+	d.buf = append(d.buf, '/')
+	d.writeBytes(r.source)
+	d.buf = append(d.buf, byte(opt))
+}
+
+// regexpMarshalOpts returns the Regexp option byte Marshal records: the
+// inline flags plus the ARG_ENCODING_FIXED / ARG_ENCODING_NONE bits.
+func regexpMarshalOpts(r *Regexp) int {
 	opt := 0
 	if strings.ContainsRune(r.flags, 'i') {
 		opt |= reIgnoreCase
@@ -312,29 +428,35 @@ func (d *mDumper) writeRegexp(r *Regexp) {
 	if r.noEnc {
 		opt |= reNoEncoding
 	}
-	enc := regexpMarshalEnc(r)
-	if enc == "ASCII-8BIT" {
-		// A binary (ASCII-8BIT) Regexp carries no encoding ivar, so it is emitted
-		// bare — no 'I' wrapper.
-		d.buf = append(d.buf, '/')
-		d.writeBytes(r.source)
-		d.buf = append(d.buf, byte(opt))
-		return
+	return opt
+}
+
+// marshalPayloadEnc returns the encoding ivar of a built-in payload value, or
+// nil when that kind of value carries none.
+func marshalPayloadEnc(v object.Value) *marshalEncIvar {
+	switch x := v.(type) {
+	case *object.String:
+		return marshalEncodingIvar(x.EncName())
+	case *Regexp:
+		return marshalEncodingIvar(regexpMarshalEnc(x))
 	}
-	d.buf = append(d.buf, 'I', '/')
-	d.writeBytes(r.source)
-	d.buf = append(d.buf, byte(opt))
-	d.writeLong(1)
-	switch enc {
-	case "UTF-8":
-		d.writeSymbol("E")
-		d.buf = append(d.buf, 'T')
-	case "US-ASCII":
-		d.writeSymbol("E")
-		d.buf = append(d.buf, 'F')
+	return nil
+}
+
+// writeBuiltinPayload emits the bare payload of a built-in subclass's 'C'
+// container. String and Regexp take the payload writers, so their encoding ivar
+// folds into the container's single ivar list instead of opening a nested 'I'
+// wrapper; every other built-in has no encoding ivar and writes normally. The
+// payload is the same Ruby object as its wrapper, so it must not take an
+// object-link id of its own.
+func (d *mDumper) writeBuiltinPayload(v object.Value) {
+	switch x := v.(type) {
+	case *object.String:
+		d.writeStringPayload(x)
+	case *Regexp:
+		d.writeRegexpPayload(x, regexpMarshalOpts(x))
 	default:
-		d.writeSymbol("encoding")
-		d.writeValue(object.NewStringBytesEnc([]byte(enc), "ASCII-8BIT"))
+		d.writeValue(v)
 	}
 }
 
@@ -397,7 +519,7 @@ func (d *mDumper) writeTime(t *Time) {
 // writeObject dispatches an ordinary instance: the #marshal_dump hook (U), the
 // class _dump hook (u), a Struct (S), or the generic ivar object (o).
 func (d *mDumper) writeObject(o *RObject) {
-	if d.link(o) {
+	if d.linkRef(o) {
 		return
 	}
 	// Every path below names o.class; an instance of an anonymous class cannot be
@@ -406,42 +528,29 @@ func (d *mDumper) writeObject(o *RObject) {
 	if o.class.name == "" {
 		raise("TypeError", "can't dump anonymous class %s", o.class.ToS())
 	}
-	// An object singleton-extended by one or more modules is prefixed with an 'e'
-	// container per module (last-extended first, matching MRI's ancestry order).
-	if o.singleton != nil {
-		inc := o.singleton.includes
-		for i := len(inc) - 1; i >= 0; i-- {
-			if inc[i].name == "" {
-				raise("TypeError", "can't dump anonymous class %s", inc[i].ToS())
-			}
-			d.buf = append(d.buf, 'e')
-			d.writeSymbol(inc[i].name)
-		}
-	}
+	// The #marshal_dump and #_dump containers are the two MRI writes with
+	// w_class(..., check=FALSE): w_extended then emits nothing, so a module
+	// extended into the object is NOT recorded and a singleton with its own
+	// methods is not refused. Neither calls writeExtended for that reason.
 	if d.vm.respondsTo(o, "marshal_dump") {
+		// USRMARSHAL registers the object BEFORE calling the hook, so a reference
+		// back to it from inside the dumped value links rather than recursing.
+		d.remember(o)
 		val := d.vm.send(o, "marshal_dump", nil, nil)
 		d.emitUserMarshal(o.class.name, val)
 		return
 	}
 	if d.vm.respondsTo(o, "_dump") {
-		s := d.vm.send(o, "_dump", []object.Value{object.Integer(-1)}, nil)
-		str, ok := s.(*object.String)
-		if !ok {
-			raise("TypeError", "_dump() must return String")
-		}
-		d.buf = append(d.buf, 'u')
-		d.writeSymbol(o.class.name)
-		d.writeBytes(str.Str())
+		d.writeUserDef(o)
 		return
 	}
+	// From here on MRI passes check=TRUE, so each branch calls writeExtended:
+	// extended modules are recorded and a singleton carrying its own methods or
+	// ivars is refused. The call sits inside the branches because the 'I' ivar
+	// wrapper, which only some of them take, is written before the 'e' prefixes.
+	d.remember(o)
 	if sd := structDefOf(o.class); sd != nil {
-		d.buf = append(d.buf, 'S')
-		d.writeSymbol(o.class.name)
-		d.writeLong(len(sd.names))
-		for i, name := range sd.names {
-			d.writeSymbol(name)
-			d.writeValue(o.structVals[i])
-		}
+		d.writeStructLike(o, sd.names)
 		return
 	}
 	// A Data (Ruby 3.2+ immutable value object, minted by Data.define) marshals
@@ -449,13 +558,7 @@ func (d *mDumper) writeObject(o *RObject) {
 	// member name/value pair — because MRI stores a Data's members the same way it
 	// stores a Struct's. The real class name is used (never a #name override).
 	if dd := dataDefOf(o.class); dd != nil {
-		d.buf = append(d.buf, 'S')
-		d.writeSymbol(o.class.name)
-		d.writeLong(len(dd.names))
-		for i, name := range dd.names {
-			d.writeSymbol(name)
-			d.writeValue(o.structVals[i])
-		}
+		d.writeStructLike(o, dd.names)
 		return
 	}
 	// An instance of a user subclass of a built-in value type (Array/Hash/
@@ -463,29 +566,36 @@ func (d *mDumper) writeObject(o *RObject) {
 	// built-in value. Any instance variables are carried by an outer 'I' wrapper,
 	// as MRI does for objects whose payload type has no inline ivar slot.
 	if o.builtin != nil {
+		// The payload is the same Ruby object as its wrapper, so its encoding ivar
+		// belongs to the container's ONE ivar list — not to a nested 'I' wrapper of
+		// its own — and, per MRI's w_ivar, it is written before the object's own
+		// variables. The 'e' extend prefix was already emitted above, and the 'I'
+		// comes before it (w_object writes TYPE_IVAR, then w_uclass).
 		names := o.liveIvarNames()
-		if len(names) > 0 {
+		enc := marshalPayloadEnc(o.builtin)
+		n := len(names)
+		if enc != nil {
+			n++
+		}
+		if n > 0 {
 			d.buf = append(d.buf, 'I')
 		}
+		d.writeExtended(o)
 		d.buf = append(d.buf, 'C')
 		d.writeSymbol(o.class.name)
-		d.writeValue(o.builtin)
-		if len(names) > 0 {
-			d.writeLong(len(names))
-			for _, name := range names {
-				d.writeSymbol(name)
-				d.writeValue(o.ivars[name])
+		d.writeBuiltinPayload(o.builtin)
+		if n > 0 {
+			d.writeLong(n)
+			if enc != nil {
+				d.writeEncodingIvar(enc)
 			}
+			d.writeIvarPairs(o, names)
 		}
 		return
 	}
-	// A plain object (no marshal_dump / _dump / Struct / builtin payload) whose
-	// singleton class carries per-object methods (def obj.foo) or its own ivars
-	// (class << obj; @v = …) cannot be marshaled. A singleton that only holds
-	// extend-ed modules has no own methods or ivars and is emitted via 'e' above.
-	if o.singleton != nil && (len(o.singleton.methods) > 0 || len(o.singleton.ivars) > 0) {
-		raise("TypeError", "singleton can't be dumped")
-	}
+	// A plain object is MRI's T_OBJECT: its instance variables live in the 'o'
+	// body itself (has_ivars counts them "elsewhere"), so there is no 'I' wrapper.
+	d.writeExtended(o)
 	if d.vm.marshalIsException(o.class) {
 		d.writeException(o)
 		return
@@ -494,10 +604,76 @@ func (d *mDumper) writeObject(o *RObject) {
 	d.writeSymbol(o.class.name)
 	names := o.liveIvarNames()
 	d.writeLong(len(names))
+	d.writeIvarPairs(o, names)
+}
+
+// writeIvarPairs writes each named instance variable as a symbol/value pair.
+// The count belongs to the caller, which may be covering an encoding ivar too.
+func (d *mDumper) writeIvarPairs(o *RObject, names []string) {
 	for _, name := range names {
 		d.writeSymbol(name)
 		d.writeValue(o.ivars[name])
 	}
+}
+
+// writeStructLike emits the 'S' container shared by Struct and Data: the class
+// name and each member name/value pair. Unlike a plain object, MRI treats a
+// Struct as a payload type whose instance variables cannot live in the body, so
+// any it carries go in an outer 'I' wrapper (has_ivars's generic branch in
+// marshal.c reaches T_STRUCT, while T_OBJECT is "counted elsewhere").
+func (d *mDumper) writeStructLike(o *RObject, members []string) {
+	names := o.liveIvarNames()
+	if len(names) > 0 {
+		d.buf = append(d.buf, 'I')
+	}
+	d.writeExtended(o)
+	d.buf = append(d.buf, 'S')
+	d.writeSymbol(o.class.name)
+	d.writeLong(len(members))
+	for i, m := range members {
+		d.writeSymbol(m)
+		d.writeValue(o.structVals[i])
+	}
+	if len(names) > 0 {
+		d.writeLong(len(names))
+		d.writeIvarPairs(o, names)
+	}
+}
+
+// writeUserDef emits the #_dump ('u', TYPE_USERDEF) container. MRI (w_object in
+// marshal.c) computes the ivar set from the object AND from the String #_dump
+// returned, and the String's set WINS when it is non-empty — so a _dump payload
+// in a non-UTF-8 encoding carries its :encoding ivar here even though the object
+// itself has none. The object is registered in the objects table only AFTER its
+// instance variables are written, so those variables take the lower link ids.
+func (d *mDumper) writeUserDef(o *RObject) {
+	s := d.vm.send(o, "_dump", []object.Value{object.Integer(-1)}, nil)
+	str, ok := s.(*object.String)
+	if !ok {
+		raise("TypeError", "_dump() must return String")
+	}
+	// The object's own ivars, then the payload String's encoding, which displaces
+	// them when present (hasiv2 overwrites hasiv).
+	names := o.liveIvarNames()
+	enc := marshalEncodingIvar(str.EncName())
+	n := len(names)
+	if enc != nil {
+		names, n = nil, 1
+	}
+	if n > 0 {
+		d.buf = append(d.buf, 'I')
+	}
+	d.buf = append(d.buf, 'u')
+	d.writeSymbol(o.class.name)
+	d.writeBytes(str.Str())
+	if n > 0 {
+		d.writeLong(n)
+		if enc != nil {
+			d.writeEncodingIvar(enc)
+		}
+		d.writeIvarPairs(o, names)
+	}
+	d.remember(o)
 }
 
 // writeException emits an Exception (or subclass) instance. MRI leads with the
