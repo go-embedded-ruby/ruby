@@ -77,6 +77,37 @@ func newBuilder(name string, params []string) *builder {
 	return b
 }
 
+// blockLabel names a block ISeq the way MRI labels a block FRAME.
+//
+// It is calculate_iseq_label's ISEQ_TYPE_BLOCK arm (vm_backtrace.c v3_4_0:229),
+// moved to compile time because the answer is a purely lexical fact: walk out
+// through the enclosing scopes counting the block ones until a real scope (a
+// method, a class body, the top level) is reached, then "block in NAME" for one
+// level and "block (N levels) in NAME" beyond. MRI walks the parent_iseq chain
+// at backtrace time and counts exactly the same hops.
+//
+// `for` scopes are skipped in the count, not followed as blocks: `for` opens no
+// Ruby scope (see builder.forScope), so a block inside a `for` body is one
+// level deep, not two.
+func blockLabel(parent *builder) string {
+	level := 1
+	b := parent
+	for b != nil && b.isBlock {
+		if !b.forScope {
+			level++
+		}
+		b = b.parent
+	}
+	name := "<main>"
+	if b != nil {
+		name = b.name
+	}
+	if level <= 1 {
+		return "block in " + name
+	}
+	return fmt.Sprintf("block (%d levels) in %s", level, name)
+}
+
 func newBlockBuilder(name string, params []string, parent *builder) *builder {
 	b := newBuilder(name, params)
 	b.parent = parent
@@ -1633,7 +1664,7 @@ func splitBlockParams(blk *ast.Block) (positionals []string, posDefaults []ast.N
 func (c *Compiler) compileBlock(blk *ast.Block) int {
 	parent := c.cur()
 	positionals, posDefaults, kwParams, kwRest := splitBlockParams(blk)
-	c.push(newBlockBuilder("<block>", positionals, parent))
+	c.push(newBlockBuilder(blockLabel(parent), positionals, parent))
 	b := c.cur()
 	// Block/lambda params lower exactly like a method's positionals: a top-level
 	// *rest and anything after it are not required, and each optional param gets a

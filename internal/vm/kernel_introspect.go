@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -449,13 +450,46 @@ func (vm *VM) backtraceFrames(skip int) []object.Value {
 	}
 	out := make([]object.Value, 0, top+1)
 	for i := top; i >= 0; i-- {
-		where := "<main>"
-		if name := vm.frameNames[i]; name != "" {
-			where = name
-		}
+		where := vm.frameLabel(i)
 		out = append(out, object.NewString(formatBacktraceEntry(vm.frameFileLabel(i), vm.frameLine(i), where)))
 	}
 	return out
+}
+
+// frameLabel is the label frame i reports — MRI's calculate_iseq_label
+// (vm_backtrace.c v3_4_0:229) for the cases this VM can answer.
+//
+// A method frame carries its name in frameNames. Every other kind carries "",
+// and used to render "<main>" whatever it was: a class body, a module body, a
+// singleton-class body and a block all claimed to be the top level. The ISeq
+// knows which it is — the compiler already names it — so the label comes from
+// there, which is where MRI reads it too (body->location.label).
+//
+// The one rewrite is the singleton-class body. The compiler calls that scope
+// "<singleton class>", while MRI's label for it is "singleton class" without
+// the brackets; core/thread/backtrace/location/base_label_spec.rb accepts
+// either spelling, but MRI prints the bare one, so that is what is printed.
+//
+// The recognised names are a WHITELIST, not a fallthrough, and that is the
+// whole of the care needed here: an ISeq's Name is not always a label. A
+// required file's top-level ISeq is named by its PATH, so taking any name
+// turned "/x/prog.rb:9:in '<main>'" into "/x/prog.rb:9:in '/x/prog.rb'" — a
+// frame labelled with its own file. Anything not on the list is the top level
+// by another name, and reports "<main>".
+func (vm *VM) frameLabel(i int) string {
+	if name := vm.frameNames[i]; name != "" {
+		return name
+	}
+	if i < len(vm.frameISeqs) && vm.frameISeqs[i] != nil {
+		switch n := vm.frameISeqs[i].Name; {
+		case n == "<singleton class>":
+			return "singleton class"
+		case strings.HasPrefix(n, "<class:"), strings.HasPrefix(n, "<module:"),
+			strings.HasPrefix(n, "block in "), strings.HasPrefix(n, "block ("):
+			return n
+		}
+	}
+	return "<main>"
 }
 
 // formatBacktraceEntry renders one backtrace line.
