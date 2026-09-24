@@ -477,11 +477,16 @@ func (vm *VM) threadBacktraceFrames(self object.Value, args []object.Value, labe
 		raise("NotImplementedError",
 			"Thread#%s of another thread is not supported: rbgo records one frame stack per VM, not per thread", label)
 	}
-	here := ""
+	here, line := "", 0
 	if n := len(vm.frameNames); n > 0 {
-		here = vm.frameFileLabel(n - 1)
+		here, line = vm.frameFileLabel(n-1), vm.frameLine(n-1)
 	}
-	full := []object.Value{object.NewString(here + ":0:in '" + label + "'")}
+	// Thread#backtrace counts its own call as the innermost frame, and that frame
+	// is the caller's: the line is where #backtrace was WRITTEN, which is the
+	// innermost recorded frame's current pc. ruby/spec pins exactly that —
+	// core/thread/backtrace_locations_spec.rb matches the first location against
+	// the line of the `backtrace_locations` call itself.
+	full := []object.Value{object.NewString(formatBacktraceEntry(here, line, label))}
 	full = append(full, vm.backtraceFrames(0)...)
 	return sliceBacktraceFrames(vm, full, args)
 }

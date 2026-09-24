@@ -184,6 +184,49 @@ func (vm *VM) exceptionObject(e RubyError) object.Value {
 // It prefers the backtrace stamped on the exception object at its raise site
 // (preserved across re-raises); when none is stored — an internal raise whose
 // object is built only now — it snapshots the still-intact live frame stack.
+// setFrameCode records the ISeq frame i is running and resets its pc.
+//
+// It sizes the two stacks to exactly i+1 rather than appending, which is what
+// lets them stay aligned with frameNames without any unwind bookkeeping of
+// their own. frameNames is truncated back to a saved depth in four places when
+// a rescue swallows frames that unwound; anchoring on ITS depth here means an
+// abandoned deeper entry is overwritten by the next frame to occupy that depth,
+// instead of leaving these stacks one too long and shifting every index after
+// it — a misalignment that would report another frame's line, which is worse
+// than reporting none.
+func (vm *VM) setFrameCode(i int, iseq *bytecode.ISeq) {
+	for len(vm.framePCs) <= i {
+		vm.frameISeqs = append(vm.frameISeqs, nil)
+		vm.framePCs = append(vm.framePCs, 0)
+	}
+	vm.frameISeqs = vm.frameISeqs[:i+1]
+	vm.framePCs = vm.framePCs[:i+1]
+	vm.frameISeqs[i] = iseq
+	vm.framePCs[i] = 0
+}
+
+// frameLine returns the 1-based source line frame i is executing, or 0 when it
+// cannot be placed.
+//
+// This is rb_vm_get_sourceline (vm_backtrace.c v3_4_0:105) exactly: resolve the
+// pc against the ISeq's line map, and when that yields 0 — a pc the map does not
+// cover, or an ISeq compiled with no map at all, such as one restored from
+// frozen AOT output built before the map existed — fall back to the ISeq's
+// first_lineno rather than reporting nothing.
+func (vm *VM) frameLine(i int) int {
+	if i < 0 || i >= len(vm.frameISeqs) {
+		return 0
+	}
+	iseq := vm.frameISeqs[i]
+	if iseq == nil {
+		return 0
+	}
+	if line := iseq.LineAt(vm.framePCs[i]); line != 0 {
+		return line
+	}
+	return iseq.FirstLine
+}
+
 func (vm *VM) uncaughtBacktrace(e RubyError) []object.Value {
 	if !object.IsNil(e.Obj) {
 		if bt, ok := getIvar(e.Obj, backtraceIvar).(*object.Array); ok {
@@ -509,6 +552,17 @@ type VM struct {
 	// (which only tracks required-file frames for __FILE__), every frame pushes
 	// here so the two stacks stay aligned. GVL-guarded.
 	frameFiles []string
+
+	// frameISeqs and framePCs mirror frameNames one-for-one, recording WHICH ISeq
+	// each frame is running and HOW FAR it has got. Together they are MRI's
+	// cfp->iseq and cfp->pc, and they exist for the same reason: a line is not
+	// stored per frame, it is COMPUTED from the pair when somebody asks —
+	// calc_lineno(loc->iseq, loc->pc) (vm_backtrace.c v3_4_0:87). Storing the
+	// line instead would mean recomputing it on every instruction; storing the pc
+	// means one integer store, and the search runs once per backtrace entry
+	// actually rendered. GVL-guarded.
+	frameISeqs []*bytecode.ISeq
+	framePCs   []int
 
 	// frameCrefs mirrors frameNames one-for-one (every frame pushes), recording
 	// the lexical scope (cref) each frame runs under so Module.nesting can report
@@ -1247,6 +1301,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// frameFiles mirrors frameNames one-for-one (every frame pushes, even with an
 	// empty file) so backtraces can pair each frame's label with its source file.
 	vm.frameFiles = append(vm.frameFiles, iseq.File)
+	// frameISeqs/framePCs mirror them too: the ISeq this frame runs and the
+	// instruction it has reached, which is what a backtrace resolves to a line.
+	myFrame := len(vm.frameNames) - 1
+	vm.setFrameCode(myFrame, iseq)
 	// frameCrefs mirrors frameNames too; the cref is filled in below once lexCref
 	// is known (a nil placeholder keeps the stacks aligned until then).
 	vm.frameCrefs = append(vm.frameCrefs, nil)
@@ -1441,6 +1499,33 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// begin/rescue — fib, dispatch, attr accessors — pays no per-frame defer).
 	runChunk := func() {
 		for pc < len(iseq.Insns) {
+			// Publish the pc so a backtrace taken from anywhere below — a raise in
+			// this very instruction, a Kernel#caller several frames down — can place
+			// this frame. MRI does the same thing and calls it saving the pc: its
+			// interpreter keeps the pc in a register and writes it back to cfp->pc
+			// before anything that can raise or call, because rb_vm_get_sourceline
+			// reads cfp->pc and nothing else (vm_backtrace.c v3_4_0:105).
+			//
+			// The bounds check is NOT belt-and-braces: myFrame can legitimately
+			// outrun the stack. Run resets frameNames to :0 at its boundary
+			// (four sites), and a thread body runs through such a boundary while
+			// the frame that started it is still live and will resume this loop
+			// afterwards. Writing unconditionally indexed past the end there and
+			// panicked inside the interpreter — which surfaced not as a crash but
+			// as TestConditionVariable HANGING for nine minutes, the panic having
+			// been swallowed by a recover on the way out while the thread it
+			// belonged to never signalled.
+			//
+			// Skipping the write is also the right answer, not merely a safe one:
+			// a frame no longer present in frameNames is a frame no backtrace
+			// reports, because every entry is rendered from frameNames[i]. These
+			// two stacks are re-sized to frameNames' depth by setFrameCode on the
+			// next push, so they are exactly as consistent as the name and file
+			// stacks they sit beside — which is the bar, rather than an invariant
+			// of their own that the rest of the machinery does not keep.
+			if myFrame < len(vm.framePCs) {
+				vm.framePCs[myFrame] = pc
+			}
 			in := iseq.Insns[pc]
 			switch in.Op {
 			case bytecode.OpNop:

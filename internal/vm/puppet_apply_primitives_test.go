@@ -124,9 +124,11 @@ p [A.public_method_defined?(:a), A.private_method_defined?(:b), A.protected_meth
 			t.Errorf("src=%q got=%q want=%q", c.src, got, c.want)
 		}
 	}
-	// Proc#source_location reports [file, 0] when the block was written in a file
-	// with a known path (here the script path the VM was given).
-	if got, err := runScript(t, `p proc { }.source_location`, "/scripts/main.rb"); err != nil || got != "[\"/scripts/main.rb\", 0]\n" {
+	// Proc#source_location reports [file, line] for where the block was written,
+	// the file being the script path the VM was given. The line was pinned at 0
+	// while the VM had no source map; ruby 4.0.5 on `p proc { }.source_location`
+	// as the first line of a file prints ["<file>", 1].
+	if got, err := runScript(t, `p proc { }.source_location`, "/scripts/main.rb"); err != nil || got != "[\"/scripts/main.rb\", 1]\n" {
 		t.Errorf("Proc#source_location got=%q err=%v", got, err)
 	}
 	// ObjectSpace.start aliases garbage_collect; both no-ops.

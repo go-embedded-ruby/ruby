@@ -269,6 +269,10 @@ func CompileWithEncoding(prog *ast.Program, srcEnc string) (iseq *bytecode.ISeq,
 	}()
 	c := &Compiler{srcEnc: srcEnc, patCache: -1, lines: prog.Lines}
 	c.push(newBuilder("<main>", nil))
+	// MRI's top-level ISeq has first_lineno 1 (iseq.c v3_4_0 rb_iseq_new_top
+	// passes a location starting at line 1), so an empty or unplaceable <main>
+	// frame reports line 1 rather than nothing.
+	c.cur().firstLine = 1
 	c.compileBody(prog.Body)
 	c.cur().emit(bytecode.OpReturn, 0, 0)
 	return c.pop().build(), nil
@@ -395,8 +399,29 @@ func CompileWithLocals(prog *ast.Program, localNames []string) (iseq *bytecode.I
 	return out, nil
 }
 
-func (c *Compiler) cur() *builder   { return c.stack[len(c.stack)-1] }
-func (c *Compiler) push(b *builder) { c.stack = append(c.stack, b) }
+func (c *Compiler) cur() *builder { return c.stack[len(c.stack)-1] }
+
+// push makes b the current scope, stamping it with the line its DEFINING
+// construct sits on — the line the enclosing scope is compiling, since that is
+// precisely the `def` / `class` / `{` being compiled when the child opens.
+//
+// This is MRI's body->location.first_lineno, and it is stamped in one place
+// here rather than at each of the eight sites that open a scope, so a new kind
+// of scope cannot be added without one. It matters twice over: it is what
+// rb_vm_get_sourceline falls back to for a frame whose pc the map cannot place
+// (vm_backtrace.c v3_4_0:105), and it is the line Proc#source_location and
+// Method#source_location report for a body that has not run at all.
+//
+// It also seeds curLine, so instructions a body emits BEFORE its first
+// statement — parameter defaults, the implicit nil of an empty body — are
+// attributed to the definition line rather than inheriting the caller's.
+func (c *Compiler) push(b *builder) {
+	if len(c.stack) > 0 {
+		b.firstLine = c.cur().curLine
+		b.curLine = b.firstLine
+	}
+	c.stack = append(c.stack, b)
+}
 func (c *Compiler) pop() *builder {
 	b := c.stack[len(c.stack)-1]
 	c.stack = c.stack[:len(c.stack)-1]

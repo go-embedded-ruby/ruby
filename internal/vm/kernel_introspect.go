@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -428,11 +429,18 @@ func (vm *VM) callerSlice(args []object.Value) ([]object.Value, bool) {
 
 // backtraceFrames renders the current frame stack as an MRI-shaped backtrace
 // (innermost-first), skipping the `skip` innermost frames. Each entry is
-// "<file>:0:in '<label>'": the file is the frame's recorded ISeq file (falling
-// back to the executing script name, then "(rbgo)"/"-e" when none is known), the
-// label is the frame's method name (or "<main>" for top-level / block bodies).
-// The line is always 0 because the parser AST carries no source positions. It
-// generalises both Kernel#caller (skip 1, dropping its own native caller's
+// "<file>:<line>:in '<label>'": the file is the frame's recorded ISeq file
+// (falling back to the executing script name, then "(rbgo)"/"-e" when none is
+// known), the line is where that frame has got to, and the label is the frame's
+// method name (or "<main>" for top-level / block bodies).
+//
+// The line used to be the literal 0, because the parser AST carried no source
+// positions; it is now frameLine(i), which is MRI's calc_lineno over the
+// frame's (iseq, pc) pair. A frame that still cannot be placed renders 0, and
+// location_format (vm_backtrace.c v3_4_0:446) omits the ":0" entirely in that
+// case — so the line is only in the string when there is one to report.
+//
+// It generalises both Kernel#caller (skip 1, dropping its own native caller's
 // frame) and exception capture at raise time (skip 0). GVL-guarded via the VM.
 func (vm *VM) backtraceFrames(skip int) []object.Value {
 	top := len(vm.frameNames) - 1 - skip
@@ -445,9 +453,22 @@ func (vm *VM) backtraceFrames(skip int) []object.Value {
 		if name := vm.frameNames[i]; name != "" {
 			where = name
 		}
-		out = append(out, object.NewString(vm.frameFileLabel(i)+":0:in '"+where+"'"))
+		out = append(out, object.NewString(formatBacktraceEntry(vm.frameFileLabel(i), vm.frameLine(i), where)))
 	}
 	return out
+}
+
+// formatBacktraceEntry renders one backtrace line.
+//
+// It is MRI's location_format (vm_backtrace.c v3_4_0:446), including the part
+// that is easy to miss: the ":%d" is appended only `if (lineno != 0)`. A frame
+// with no line reports "path:in 'label'", not "path:0:in 'label'" — so an
+// unplaceable frame says nothing about its line rather than claiming line zero.
+func formatBacktraceEntry(file string, line int, label string) string {
+	if line == 0 {
+		return file + ":in '" + label + "'"
+	}
+	return file + ":" + strconv.Itoa(line) + ":in '" + label + "'"
 }
 
 // frameFileLabel returns the file portion of a backtrace entry for frame i: the

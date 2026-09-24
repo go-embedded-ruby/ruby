@@ -162,18 +162,25 @@ func (vm *VM) bootstrap() {
 	vm.cProc.define("lambda?", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.Bool(self.(*Proc).isLambda)
 	})
-	// Proc#source_location returns [file, line] for where the block was written,
+	// Proc#source_location returns [file, line] for where the block was WRITTEN,
 	// or nil when no source is known (a synthesized/native Proc, or compiled-in
-	// code such as the prelude whose ISeq carries no File). The VM does not track
-	// per-instruction line numbers, so the line is reported as 0 — the array
-	// shape ([String, Integer]) is what callers (e.g. Puppet building a type URI)
-	// depend on.
+	// code such as the prelude whose ISeq carries no File).
+	//
+	// The line is the block ISeq's FirstLine — MRI's location.first_lineno,
+	// which rb_proc_location reads (proc.c v3_4_0 uses iseq_location, i.e.
+	// body->location.first_lineno, NOT the pc). That distinction is the whole
+	// of this method: source_location answers where the block was written, so a
+	// proc that has never run, or that is halfway through its body, reports the
+	// same line — the `do`/`{`. ruby/spec pins it both ways in
+	// core/proc/source_location_spec.rb: "returns the first line of a
+	// multi-line proc (i.e. the line containing 'proc do')" and "works even if
+	// the proc was created on the same line".
 	vm.cProc.define("source_location", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		p := self.(*Proc)
 		if p.iseq == nil || p.iseq.File == "" {
 			return object.NilV
 		}
-		return object.NewArray(object.NewString(p.iseq.File), object.IntValue(0))
+		return object.NewArray(object.NewString(p.iseq.File), object.IntValue(int64(p.iseq.FirstLine)))
 	})
 	vm.cProc.define("curry", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		p := self.(*Proc)

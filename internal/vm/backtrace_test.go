@@ -59,10 +59,13 @@ end
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// The lines used to be 0 (no source map). Each is the MRI answer for this
+	// exact source, written to a file and run under ruby 4.0.5: the raise at 3,
+	// the call to foo at 6, the call to bar at 9.
 	want := strings.Join([]string{
-		script + ":0:in 'foo'",
-		script + ":0:in 'bar'",
-		script + ":0:in '<main>'",
+		script + ":3:in 'foo'",
+		script + ":6:in 'bar'",
+		script + ":9:in '<main>'",
 	}, "\n") + "\n"
 	if out != want {
 		t.Fatalf("backtrace\n got %q\nwant %q", out, want)
@@ -120,7 +123,8 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "/x/p.rb:0:in 'deep'\n" {
+	// ruby 4.0.5 on this source reports the raise inside deep at line 3.
+	if out != "/x/p.rb:3:in 'deep'\n" {
 		t.Fatalf("got %q", out)
 	}
 }
@@ -196,8 +200,9 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "/x/p.rb:0:in 'foo': boom (ArgumentError)\n" +
-		"\tfrom /x/p.rb:0:in '<main>'\n"
+	// ruby 4.0.5 on this source: the raise inside foo at 3, the call at 6.
+	want := "/x/p.rb:3:in 'foo': boom (ArgumentError)\n" +
+		"\tfrom /x/p.rb:6:in '<main>'\n"
 	if out != want {
 		t.Fatalf("\n got %q\nwant %q", out, want)
 	}
@@ -253,7 +258,8 @@ boom
 		t.Fatalf("want RubyError, got %#v", err)
 	}
 	bt := re.Backtrace()
-	want := []string{"/x/p.rb:0:in 'boom'", "/x/p.rb:0:in '<main>'"}
+	// ruby 4.0.5 on this source: the raise inside boom at 3, the call at 5.
+	want := []string{"/x/p.rb:3:in 'boom'", "/x/p.rb:5:in '<main>'"}
 	if strings.Join(bt, "|") != strings.Join(want, "|") {
 		t.Fatalf("Backtrace()\n got %v\nwant %v", bt, want)
 	}
@@ -291,7 +297,8 @@ a
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "/x/p.rb:0:in 'a'\n" {
+	// ruby 4.0.5 on this source reports a's call to b at line 3.
+	if out != "/x/p.rb:3:in 'a'\n" {
 		t.Fatalf("got %q", out)
 	}
 }
@@ -311,7 +318,8 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "-e:0:in '<main>'\n" {
+	// ruby 4.0.5 on this source reports the raise at line 6.
+	if out != "-e:6:in '<main>'\n" {
 		t.Fatalf("got %q", out)
 	}
 }

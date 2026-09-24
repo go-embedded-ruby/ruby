@@ -514,8 +514,23 @@ rescue NotImplementedError => e
 end
 live.kill
 `
-	want := "Array\ntrue\ntrue\nnil\n[]\ntrue\ntrue\ntrue\nnil\n" +
-		"Thread::Backtrace::Location\ntrue\nnil\nnil\ntrue\n"
+	// The 3rd and 11th answers were `true` while every backtrace line was 0: two
+	// backtraces taken on DIFFERENT lines stringified identically, so comparing
+	// them compared nothing. With real lines they differ, and ruby 4.0.5 answers
+	// false to both — verified by running the two comparisons on their own:
+	//
+	//	def w24
+	//	  a = Thread.current.backtrace
+	//	  p a[1..-1] == Thread.current.backtrace(1)          # => false
+	//	  l = Thread.current.backtrace_locations
+	//	  p l[1..-1].map(&:to_s) == caller_locations(0..-1).map(&:to_s)  # => false
+	//	end
+	//	w24
+	//
+	// The innermost frame is w24 itself, and it has MOVED a line between the two
+	// captures. This is the assertion getting its teeth back, not losing them.
+	want := "Array\ntrue\nfalse\nnil\n[]\ntrue\ntrue\ntrue\nnil\n" +
+		"Thread::Backtrace::Location\nfalse\nnil\nnil\ntrue\n"
 	if got := eval(t, src); got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
