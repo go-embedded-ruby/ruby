@@ -27,6 +27,13 @@ var nowUnix = func() int64 { return stdtime.Now().Unix() }
 // Time time.Local. Timecop still drives Time.now through vm.clock (nowInstant),
 // so the clock seam is preserved.
 type Time struct {
+	// methodValueState makes a Time a boxed value: it carries the instance
+	// variables (in assignment order) and the frozen flag that every Ruby object
+	// has but a bare Go struct does not. Without it `t.instance_variable_set(:@a, 1)`
+	// reported success and then read back nil, and Marshal could neither dump nor
+	// restore a Time's variables — MRI's time_mdump copies them onto the payload
+	// String (rb_copy_generic_ivar) and time_mload reads them back.
+	methodValueState
 	t stdtime.Time
 	// zoneObj is the Ruby timezone object a Time.new(..., zone) / Time.now(in: zone)
 	// was built with, or nil for a plain offset/UTC/local Time. When set, #zone
@@ -126,6 +133,60 @@ func (t *Time) zoneValue() object.Value {
 		return object.NilV
 	}
 	return object.NewString(name)
+}
+
+// copy returns an independent Time with the same instant, zone and exact
+// sub-second, and a copy of the instance variables. The frozen flag is dropped:
+// #dup never carries it, and #clone re-applies it afterwards.
+func (t *Time) copy() *Time {
+	cp := *t
+	cp.methodValueState = copyMethodState(t.methodValueState)
+	if t.frac != nil {
+		cp.frac = new(big.Rat).Set(t.frac)
+	}
+	return &cp
+}
+
+// timeCloneFreezeArg reads Time#clone's freeze: keyword, reporting whether it
+// was given. Only true, false and nil are accepted, as for Object#clone.
+func (vm *VM) timeCloneFreezeArg(args []object.Value) (object.Value, bool) {
+	if len(args) == 0 {
+		return object.NilV, false
+	}
+	h, ok := args[len(args)-1].(*object.Hash)
+	if !ok {
+		return object.NilV, false
+	}
+	val, given := object.Value(object.NilV), false
+	for _, k := range h.Keys {
+		if sym, isSym := k.(object.Symbol); isSym && sym == object.Symbol("freeze") {
+			val, _ = h.Get(k)
+			given = true
+			continue
+		}
+		raise("ArgumentError", "unknown keyword: %s", k.Inspect())
+	}
+	if given {
+		switch val.(type) {
+		case object.Bool, object.Nil:
+		default:
+			raise("ArgumentError", "unexpected value for freeze: %s", vm.classOf(val).name)
+		}
+	}
+	return val, given
+}
+
+// setFixedZone re-displays the Time's instant in a fixed zone with the given
+// name and UTC offset in seconds. The instant itself does not move; only the
+// zone it is rendered and compared in does. An empty name is a bare numeric
+// offset, for which #zone reports nil; "UTC" at offset zero uses time.UTC so the
+// Time reports as a UTC time rather than a zero-offset fixed zone.
+func (t *Time) setFixedZone(name string, off int) {
+	if name == "UTC" && off == 0 {
+		t.t = t.t.UTC()
+		return
+	}
+	t.t = t.t.In(stdtime.FixedZone(name, off))
 }
 
 // timeDeconstructKeys is the field set Time#deconstruct_keys(nil) returns, in
@@ -289,6 +350,40 @@ func (vm *VM) registerTime() {
 
 	d := func(name string, fn NativeFn) { vm.cTime.define(name, fn) }
 	self := func(v object.Value) *Time { return v.(*Time) }
+
+	// Time#dup / #clone. The generic Object#dup and #clone are correct, but they
+	// build their copy with dupValue, whose default branch returns the receiver
+	// itself for a Time — so `t.dup.equal?(t)` was true and a Time could not be
+	// copied at all. Specialising the copy here keeps the rest of the contract
+	// (the initialize_dup / initialize_clone hooks, the singleton class, and
+	// clone's freeze: keyword) exactly as Object defines it.
+	d("dup", func(vm *VM, v object.Value, _ []object.Value, _ *Proc) object.Value {
+		cp := self(v).copy()
+		vm.send(cp, "initialize_dup", []object.Value{v}, nil)
+		return cp
+	})
+	d("clone", func(vm *VM, v object.Value, args []object.Value, _ *Proc) object.Value {
+		freezeVal, freezeGiven := vm.timeCloneFreezeArg(args)
+		cp := self(v).copy()
+		vm.cloneSingleton(v, cp)
+		if freezeGiven {
+			kw := object.NewHash()
+			kw.Set(object.Symbol("freeze"), freezeVal)
+			vm.send(cp, "initialize_clone", []object.Value{v, kw}, nil)
+		} else {
+			vm.send(cp, "initialize_clone", []object.Value{v}, nil)
+		}
+		// freeze: true/false wins; freeze: nil or no keyword copies the original's
+		// frozen state — #clone keeps it where #dup always drops it.
+		doFreeze := self(v).frozen
+		if b, ok := freezeVal.(object.Bool); ok {
+			doFreeze = bool(b)
+		}
+		if doFreeze {
+			vm.send(cp, "freeze", nil, nil)
+		}
+		return cp
+	})
 
 	// Time#_dump / Time._load are the private Marshal hooks: _dump packs the 8-byte
 	// form, _load rebuilds a Time from it.

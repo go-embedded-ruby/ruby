@@ -176,10 +176,14 @@ func (d *mDumper) writeValue(v object.Value) {
 		den := object.NormInt(new(big.Int).Set(x.R.Denom()))
 		d.emitUserMarshal("Rational", object.NewArray(num, den))
 	case *Time:
-		if d.link(x) {
+		// Time dumps through the 'u' (USERDEF) container, whose w_remember sits at
+		// the END of that branch in MRI's w_object — so the Time takes a HIGHER
+		// object-link id than its own instance variables and its :zone string.
+		if d.linkRef(x) {
 			return
 		}
 		d.writeTime(x)
+		d.remember(x)
 	case *RClass:
 		if d.link(x) {
 			return
@@ -495,25 +499,54 @@ func timeDumpBytes(t *Time) []byte {
 	return payload[:]
 }
 
+// writeTime emits Time's 'u' (USERDEF) container. MRI's time_mdump builds the
+// payload String, copies the Time's own instance variables onto it
+// (rb_copy_generic_ivar), then appends :offset — only when the Time is not UTC —
+// and :zone, which is written ALWAYS, nil included. Marshal then writes that
+// String's variables as the container's, so the order here is the order there.
 func (d *mDumper) writeTime(t *Time) {
 	utc := t.t.Location() == stdtime.UTC
-	payload := timeDumpBytes(t)
-
+	names := marshalLiveIvars(&t.methodValueState)
+	n := len(names) + 1 // :zone is always written
+	if !utc {
+		n++ // :offset
+	}
 	d.buf = append(d.buf, 'I', 'u')
 	d.writeSymbol("Time")
-	d.writeBytes(string(payload))
-	if utc {
-		d.writeLong(1)
-		d.writeSymbol("zone")
-		d.writeValue(object.NewStringBytesEnc([]byte("UTC"), "US-ASCII"))
-		return
+	d.writeBytes(string(timeDumpBytes(t)))
+	d.writeLong(n)
+	d.writeIvarPairs(names, t.ivars)
+	if !utc {
+		_, off := t.t.Zone()
+		d.writeSymbol("offset")
+		d.writeValue(object.Integer(off))
 	}
-	_, off := t.t.Zone()
-	d.writeLong(2)
-	d.writeSymbol("offset")
-	d.writeValue(object.Integer(off))
 	d.writeSymbol("zone")
-	d.buf = append(d.buf, '0')
+	d.writeValue(d.timeZoneIvar(t))
+}
+
+// timeZoneIvar returns the value of a Time's :zone marshal variable: the zone's
+// name, or nil for a Time on a bare numeric offset (which has no name). MRI
+// records the abbreviation the zone is displayed with — "UTC", "AST", "CEST" —
+// as a US-ASCII String, and calls #name on a Timezone object. A name that is not
+// pure ASCII keeps the encoding Ruby gave it.
+func (d *mDumper) timeZoneIvar(t *Time) object.Value {
+	z := t.zoneValue()
+	if object.IsNil(z) {
+		return object.NilV
+	}
+	s, ok := z.(*object.String)
+	if !ok {
+		// A Timezone object: MRI dumps its #name, not the object.
+		z = d.vm.send(z, "name", nil, nil)
+		if s, ok = z.(*object.String); !ok {
+			return object.NilV
+		}
+	}
+	if marshalIsASCII(s.Str()) {
+		return object.NewStringBytesEnc([]byte(s.Str()), "US-ASCII")
+	}
+	return s
 }
 
 // writeObject dispatches an ordinary instance: the #marshal_dump hook (U), the
@@ -589,7 +622,7 @@ func (d *mDumper) writeObject(o *RObject) {
 			if enc != nil {
 				d.writeEncodingIvar(enc)
 			}
-			d.writeIvarPairs(o, names)
+			d.writeIvarPairs(names, o.ivars)
 		}
 		return
 	}
@@ -604,16 +637,29 @@ func (d *mDumper) writeObject(o *RObject) {
 	d.writeSymbol(o.class.name)
 	names := o.liveIvarNames()
 	d.writeLong(len(names))
-	d.writeIvarPairs(o, names)
+	d.writeIvarPairs(names, o.ivars)
 }
 
 // writeIvarPairs writes each named instance variable as a symbol/value pair.
 // The count belongs to the caller, which may be covering an encoding ivar too.
-func (d *mDumper) writeIvarPairs(o *RObject, names []string) {
+func (d *mDumper) writeIvarPairs(names []string, ivars map[string]object.Value) {
 	for _, name := range names {
 		d.writeSymbol(name)
-		d.writeValue(o.ivars[name])
+		d.writeValue(ivars[name])
 	}
+}
+
+// marshalLiveIvars returns a boxed value's instance-variable names in
+// first-assignment order, dropping any since removed — the methodValueState
+// counterpart of RObject.liveIvarNames.
+func marshalLiveIvars(s *methodValueState) []string {
+	out := make([]string, 0, len(s.ivarOrder))
+	for _, n := range s.ivarOrder {
+		if _, live := s.ivars[n]; live {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // writeStructLike emits the 'S' container shared by Struct and Data: the class
@@ -636,7 +682,7 @@ func (d *mDumper) writeStructLike(o *RObject, members []string) {
 	}
 	if len(names) > 0 {
 		d.writeLong(len(names))
-		d.writeIvarPairs(o, names)
+		d.writeIvarPairs(names, o.ivars)
 	}
 }
 
@@ -671,7 +717,7 @@ func (d *mDumper) writeUserDef(o *RObject) {
 		if enc != nil {
 			d.writeEncodingIvar(enc)
 		}
-		d.writeIvarPairs(o, names)
+		d.writeIvarPairs(names, o.ivars)
 	}
 	d.remember(o)
 }
@@ -1053,6 +1099,29 @@ func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 			if s, ok := val.(*object.String); ok {
 				b.srcEnc = s.Str()
 			}
+		}
+	case *Time:
+		// MRI's time_mload deletes :offset and :zone from the payload String
+		// (rb_attr_delete) and turns them into the Time's zone, copying only what is
+		// left back as real instance variables. The packed payload always holds the
+		// UTC wall clock (time_mdump calls gmtimew), so re-displaying the same
+		// instant in the recorded zone is what restores #utc_offset and #zone.
+		switch name {
+		// :offset always precedes :zone in the stream, so at this point the Time
+		// carries no zone name yet and the offset alone is set — which is exactly
+		// MRI's time_fixoff, after which a Time on a bare numeric offset reports
+		// #zone as nil.
+		case "offset":
+			if off, ok := val.(object.Integer); ok {
+				b.setFixedZone("", int(off))
+			}
+		case "zone":
+			if s, ok := val.(*object.String); ok {
+				_, off := b.t.Zone()
+				b.setFixedZone(s.Str(), off)
+			}
+		default:
+			setIvar(base, name, val)
 		}
 	default:
 		setIvar(base, name, val)
