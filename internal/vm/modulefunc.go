@@ -75,17 +75,7 @@ func (vm *VM) registerModuleExtras() {
 			mod.defaultVis, mod.funcMode = vis, false
 			return object.NilV
 		}
-		// `private [:a, :b]` (an Array argument) marks each element, returning the
-		// array — MRI accepts a single Array as well as a varargs name list.
-		if len(args) == 1 {
-			if arr, ok := args[0].(*object.Array); ok {
-				for _, a := range arr.Elems {
-					vm.setInstanceVisibility(mod, nameArg(a), vis)
-				}
-				return args[0]
-			}
-		}
-		for _, a := range args {
+		for _, a := range visNameList(args) {
 			vm.setInstanceVisibility(mod, nameArg(a), vis)
 		}
 		if len(args) == 1 {
@@ -159,7 +149,7 @@ func (vm *VM) registerModuleExtras() {
 	// per-receiver override (see setClassMethodVisibility). Returns self, as MRI.
 	classMethodVisibility := func(vm *VM, self object.Value, args []object.Value, vis visibility) object.Value {
 		mod := self.(*RClass)
-		for _, a := range args {
+		for _, a := range visNameList(args) {
 			vm.setClassMethodVisibility(mod, nameArg(a), vis)
 		}
 		return self
@@ -614,4 +604,22 @@ func allModuleArgs(args []object.Value) bool {
 		}
 	}
 	return true
+}
+
+// visNameList expands the argument list of a visibility directive into the
+// method names it names. MRI's set_method_visibility (ruby/ruby v3_4_0
+// vm_method.c:2400) treats a SINGLE Array argument as the list itself —
+// `private [:a, :b]` and `private_class_method [:foo]` mark each element —
+// and any other shape as a varargs name list. It is one rule serving every
+// directive that routes through set_method_visibility: private / public /
+// protected (through set_visibility) and private_class_method /
+// public_class_method (rb_mod_private_method / rb_mod_public_method), so it
+// lives here once rather than at each call site.
+func visNameList(args []object.Value) []object.Value {
+	if len(args) == 1 {
+		if arr, ok := args[0].(*object.Array); ok {
+			return arr.Elems
+		}
+	}
+	return args
 }
