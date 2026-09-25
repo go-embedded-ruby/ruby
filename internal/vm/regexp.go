@@ -1108,18 +1108,18 @@ func (vm *VM) regexpMatchP(re *Regexp, args []object.Value) object.Value {
 // that is not a String is offered #to_str first, and only then reported as
 // "wrong argument type X (expected Regexp)".
 func (vm *VM) getPat(v object.Value) object.Value {
-	if _, ok := v.(*Regexp); ok {
-		return v
-	}
-	if _, ok := v.(*object.String); !ok {
+	switch v.(type) {
+	case *Regexp, *object.String:
+		// Handled by strMatchRegexp below: a Regexp comes back as the SAME object
+		// (so #match dispatches on a subclass), a String is compiled.
+	default:
 		if vm.respondsToDynamic(v, "to_str") {
 			if str, isStr := vm.send(v, "to_str", nil, nil).(*object.String); isStr {
 				v = str
 			}
 		}
-		if _, ok := v.(*object.String); !ok {
-			raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
-		}
+		// Anything still not a String falls through to strMatchRegexp's own
+		// Check_Type arm, which raises get_pat's TypeError.
 	}
 	return strMatchRegexp(v)
 }

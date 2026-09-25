@@ -2387,7 +2387,13 @@ func (vm *VM) defaultGetsSep() getsSep {
 	if s, ok := vm.gvar("$/").(*object.String); ok {
 		return getsSep{s: s.Str(), set: true}
 	}
-	return getsSep{s: "\n"}
+	// $/ is a String or nil and nothing else (deprecated_str_setter refuses the
+	// rest), so the only way here is a nil $/. io.c v3_4_0 rb_io_getline_1 takes
+	// `rs = rb_rs` when no separator is passed, and a NIL rs leaves rsptr/rslen at
+	// zero so appendline never stops — the whole remainder comes back as one
+	// line, exactly as an explicit gets(nil) does. Falling back to "\n" here read
+	// one line instead.
+	return getsSep{s: "", set: true, nilSep: true}
 }
 
 // checkResolvedLimit raises ArgumentError for an explicit limit of 0 on a
