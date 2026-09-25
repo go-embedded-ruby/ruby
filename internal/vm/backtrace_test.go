@@ -63,8 +63,8 @@ end
 	// exact source, written to a file and run under ruby 4.0.5: the raise at 3,
 	// the call to foo at 6, the call to bar at 9.
 	want := strings.Join([]string{
-		script + ":3:in 'foo'",
-		script + ":6:in 'bar'",
+		script + ":3:in 'Object#foo'",
+		script + ":6:in 'Object#bar'",
 		script + ":9:in '<main>'",
 	}, "\n") + "\n"
 	if out != want {
@@ -123,8 +123,9 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ruby 4.0.5 on this source reports the raise inside deep at line 3.
-	if out != "/x/p.rb:3:in 'deep'\n" {
+	// ruby 4.0.5 on this source reports the raise inside deep at line 3, under
+	// the owner-qualified label rb_gen_method_name builds: 'Object#deep'.
+	if out != "/x/p.rb:3:in 'Object#deep'\n" {
 		t.Fatalf("got %q", out)
 	}
 }
@@ -201,7 +202,7 @@ end
 		t.Fatal(err)
 	}
 	// ruby 4.0.5 on this source: the raise inside foo at 3, the call at 6.
-	want := "/x/p.rb:3:in 'foo': boom (ArgumentError)\n" +
+	want := "/x/p.rb:3:in 'Object#foo': boom (ArgumentError)\n" +
 		"\tfrom /x/p.rb:6:in '<main>'\n"
 	if out != want {
 		t.Fatalf("\n got %q\nwant %q", out, want)
@@ -259,7 +260,7 @@ boom
 	}
 	bt := re.Backtrace()
 	// ruby 4.0.5 on this source: the raise inside boom at 3, the call at 5.
-	want := []string{"/x/p.rb:3:in 'boom'", "/x/p.rb:5:in '<main>'"}
+	want := []string{"/x/p.rb:3:in 'Object#boom'", "/x/p.rb:5:in '<main>'"}
 	if strings.Join(bt, "|") != strings.Join(want, "|") {
 		t.Fatalf("Backtrace()\n got %v\nwant %v", bt, want)
 	}
@@ -297,8 +298,8 @@ a
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ruby 4.0.5 on this source reports a's call to b at line 3.
-	if out != "/x/p.rb:3:in 'a'\n" {
+	// ruby 4.0.5 on this source reports a's call to b at line 3, owner-qualified.
+	if out != "/x/p.rb:3:in 'Object#a'\n" {
 		t.Fatalf("got %q", out)
 	}
 }

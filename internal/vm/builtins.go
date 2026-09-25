@@ -364,6 +364,15 @@ func (vm *VM) bootstrap() {
 		fileStackDepth := len(vm.fileStack)
 		frameNamesDepth := len(vm.frameNames)
 		frameFilesDepth := len(vm.frameFiles)
+		// frameCrefs and frameMethods mirror frameNames one-for-one and have to be
+		// restored WITH it. Restoring only frameNames left the three at different
+		// depths for the rest of the program, so frameCrefs[i] and frameMethods[i]
+		// stopped describing frame i. Nothing noticed while a backtrace read
+		// frameNames alone; frameLabel now reads all three — the owner prefix comes
+		// from the cref and an aliased method's original name from frameMethods —
+		// and one leaked catch made every later label some other frame's.
+		frameCrefsDepth := len(vm.frameCrefs)
+		frameMethodsDepth := len(vm.frameMethods)
 		requireDirsDepth := len(vm.requireDirs)
 		// Register this catch's tag so a Kernel#throw can tell a matched throw (an
 		// unwind to here) from an unmatched one (an UncaughtThrowError). The depth
@@ -380,6 +389,8 @@ func (vm *VM) bootstrap() {
 					vm.fileStack = vm.fileStack[:fileStackDepth]
 					vm.frameNames = vm.frameNames[:frameNamesDepth]
 					vm.frameFiles = vm.frameFiles[:frameFilesDepth]
+					vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth]
+					vm.frameMethods = vm.frameMethods[:frameMethodsDepth]
 					vm.requireDirs = vm.requireDirs[:requireDirsDepth]
 					result = sig.value
 					return

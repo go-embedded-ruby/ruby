@@ -478,18 +478,152 @@ func (vm *VM) backtraceFrames(skip int) []object.Value {
 // by another name, and reports "<main>".
 func (vm *VM) frameLabel(i int) string {
 	if name := vm.frameNames[i]; name != "" {
-		return name
+		// MRI's label for a method frame is the ISeq's location.label — the name
+		// the body was DEFINED under — so an aliased method reports the ORIGINAL
+		// name, not the alias it was reached through. frameNames carries the
+		// called name (__callee__); frameMethods carries both, and orig is the
+		// half MRI prints.
+		if vm.frameStacksAligned() && vm.frameMethods[i].orig != "" {
+			name = vm.frameMethods[i].orig
+		}
+		return vm.qualifiedFrameLabel(i, "", name)
 	}
 	if i < len(vm.frameCode) && vm.frameCode[i].iseq != nil {
 		switch n := vm.frameCode[i].iseq.Name; {
 		case n == "<singleton class>":
 			return "singleton class"
-		case strings.HasPrefix(n, "<class:"), strings.HasPrefix(n, "<module:"),
-			strings.HasPrefix(n, "block in "), strings.HasPrefix(n, "block ("):
+		case strings.HasPrefix(n, "<class:"), strings.HasPrefix(n, "<module:"):
 			return n
+		case strings.HasPrefix(n, "block in "), strings.HasPrefix(n, "block ("):
+			// calculate_iseq_label recurses THROUGH the block decoration: the owner
+			// prefix belongs to the method the block was written in, and the
+			// "block in " / "block (N levels) in " it carries is re-attached in
+			// front of the qualified name.
+			qual, base := splitBlockQualifier(n)
+			return vm.qualifiedFrameLabel(i, qual, base)
 		}
 	}
 	return "<main>"
+}
+
+// qualifiedFrameLabel puts MRI's owner prefix in front of a frame's method name
+// and re-attaches the block decoration qual in front of the result.
+//
+// This is rb_gen_method_name (vm_backtrace.c v3_4_0:205) reached through
+// calculate_iseq_label (:229), which every backtrace label goes through:
+// location_label (:285) and location_to_str (:460) both call it, so the prefix
+// is on Thread::Backtrace::Location#label, on Kernel#caller and on the lines of
+// an exception's backtrace alike. `def foo` at the top level does not report
+// "foo", it reports "Object#foo".
+//
+// Only a METHOD label takes a prefix. A class or module body ("<class:C>"), the
+// top level ("<main>"), a required file's top level and a singleton-class body
+// are ISEQ_TYPE_CLASS/TOP in MRI, whose branch of calculate_iseq_label returns
+// location.label untouched — so a base that is not a method name is returned as
+// it came, with its decoration.
+func (vm *VM) qualifiedFrameLabel(i int, qual, base string) string {
+	if base == "" || strings.HasPrefix(base, "<") {
+		return qual + base
+	}
+	owner, singleton, ok := vm.frameOwner(i, base)
+	if !ok {
+		return qual + base
+	}
+	return qual + genMethodName(owner, singleton, base)
+}
+
+// frameOwner works out the module a frame's method is defined on, and whether it
+// is a singleton (class) method, so qualifiedFrameLabel can pick between the "#"
+// and "." forms. It reports ok == false when the frame has no owner to name, in
+// which case the label keeps the bare method name — which is also MRI's answer
+// whenever rb_gen_method_name cannot resolve one.
+//
+// MRI reads the owner off the frame's callable method entry (loc->cme->owner).
+// rbgo records no cme per frame; what it records is frameCrefs[i], the lexical
+// scope the frame runs under, which for a `def` IS the class the method landed
+// on — exec is handed m.owner as its definee and stores that as the cref. The
+// two part company only for a method defined under class_eval / module_exec,
+// where the def target and the textual nesting differ and the cref follows the
+// nesting; such a frame finds no matching entry below and keeps its bare name
+// rather than claiming a wrong owner.
+//
+// The `def self.foo` case needs the second return value rather than
+// owner.isSingleton: rbgo files a class method under the CLASS (C.smethods),
+// with owner == C, where MRI files it under C's singleton class. Which of the
+// two tables holds the name is therefore what says "#" from "." — and looking
+// it up is also what makes an aliased or module_function'd name resolve, since
+// both tables are keyed by the name the label already carries.
+func (vm *VM) frameOwner(i int, base string) (*RClass, bool, bool) {
+	if !vm.frameStacksAligned() {
+		return nil, false, false
+	}
+	cref := vm.frameCrefs[i]
+	if cref == nil {
+		return nil, false, false
+	}
+	// A `class << X` body's definee IS the singleton class, which is the shape
+	// MRI always has. rb_gen_method_name unwraps it to the attached object and
+	// uses the "." form, but ONLY when that object is itself a class or module.
+	//
+	// In rbgo that condition is exactly metaOf. A class's or module's singleton
+	// records its subject there; `attached` holds the object of a PER-OBJECT
+	// singleton, and ensureSingleton refuses to make one of those for a class
+	// (`case *RClass: return nil, false` — classes use metaClass() instead), so
+	// attached is never a class or module and a second branch testing for one
+	// would be unreachable. A per-object singleton has no owner to name and its
+	// methods report the bare name — rb_gen_method_name's own fallthrough.
+	if cref.isSingleton {
+		if t := cref.metaOf; t != nil {
+			return t, true, true
+		}
+		return nil, false, false
+	}
+	// The instance table is consulted first because the singleton entry can be a
+	// COPY of it: module_function files one Method in both, so a name present in
+	// both is a module function, whose two call paths rbgo cannot tell apart from
+	// the frame alone (MRI distinguishes them by the cme the call resolved to).
+	// The instance form is the one the definition itself created.
+	if _, ok := cref.methods[base]; ok {
+		return cref, false, true
+	}
+	if _, ok := cref.smethods[base]; ok {
+		return cref, true, true
+	}
+	return nil, false, false
+}
+
+// frameStacksAligned reports whether frameCrefs and frameMethods still mirror
+// frameNames one-for-one, which is what makes index i mean the same frame in all
+// three. exec pushes and pops them together, and every unwind that restores one
+// restores the others — except at three sites outside this wave's files that
+// truncate frameNames ALONE (internal/vm/find.go, irb_bind.go and pstore.go,
+// each a catch/throw-style depth restore; the fourth, Kernel#catch in this file,
+// is fixed here). A frame index is not meaningful across such a drift, so the
+// label falls back to the bare method name rather than reporting SOME OTHER
+// frame's owner: losing the prefix is a visible, honest degradation where
+// printing a wrong owner would not be.
+func (vm *VM) frameStacksAligned() bool {
+	return len(vm.frameCrefs) == len(vm.frameNames) && len(vm.frameMethods) == len(vm.frameNames)
+}
+
+// genMethodName is rb_gen_method_name (vm_backtrace.c v3_4_0:205): a method
+// label is qualified by its owner's name — "Owner#name" for an instance method,
+// "Owner.name" for a singleton one — but ONLY when that name is permanent.
+//
+// Permanence is not a detail. MRI takes the name through rb_mod_name0, which
+// reports classname() together with RCLASS_EXT(klass)->permanent_classpath
+// (variable.c v3_4_0:104), and drops the prefix entirely when the path is
+// missing or not permanent. An anonymous class therefore labels its methods
+// with the bare name rather than with a name that would change the moment the
+// class were bound to a constant. rbgo's RClass.named is that flag.
+func genMethodName(owner *RClass, singleton bool, name string) string {
+	if owner == nil || !owner.named || owner.name == "" {
+		return name
+	}
+	if singleton {
+		return owner.name + "." + name
+	}
+	return owner.name + "#" + name
 }
 
 // formatBacktraceEntry renders one backtrace line.

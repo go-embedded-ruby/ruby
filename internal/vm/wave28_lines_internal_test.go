@@ -116,22 +116,53 @@ func TestFrameLabelFromISeq(t *testing.T) {
 	}
 }
 
-// TestStripBlockQualifier covers the three shapes base_label has to undo. MRI
-// keeps label and base_label in separate fields (vm_backtrace.c v3_4_0:331);
-// the difference between them is exactly this decoration.
-func TestStripBlockQualifier(t *testing.T) {
-	cases := map[string]string{
-		"block in foo":             "foo",
-		"block (2 levels) in foo":  "foo",
-		"block (17 levels) in C#m": "C#m",
-		"foo":                      "foo",
-		"<class:K>":                "<class:K>",
+// TestSplitBlockQualifier covers the three shapes the block decoration takes.
+// MRI keeps label and base_label in separate fields (vm_backtrace.c
+// v3_4_0:331); this decoration is one half of the difference between them.
+func TestSplitBlockQualifier(t *testing.T) {
+	cases := map[string][2]string{
+		"block in foo":             {"block in ", "foo"},
+		"block (2 levels) in foo":  {"block (2 levels) in ", "foo"},
+		"block (17 levels) in C#m": {"block (17 levels) in ", "C#m"},
+		"foo":                      {"", "foo"},
+		"<class:K>":                {"", "<class:K>"},
 		// "block (" without the levels marker is not a qualifier we made.
-		"block (weird": "block (weird",
+		"block (weird": {"", "block (weird"},
 	}
 	for in, want := range cases {
-		if got := stripBlockQualifier(in); got != want {
-			t.Errorf("stripBlockQualifier(%q) = %q, want %q", in, got, want)
+		qual, base := splitBlockQualifier(in)
+		if qual != want[0] || base != want[1] {
+			t.Errorf("splitBlockQualifier(%q) = %q,%q, want %q,%q", in, qual, base, want[0], want[1])
+		}
+	}
+}
+
+// TestStripOwnerPrefix covers the OTHER half of the difference: the "Owner#" /
+// "Owner." that rb_gen_method_name puts in front of a method label and that
+// base_label does not carry. The prefix comes off only when what precedes the
+// separator is a constant path, the one shape rb_mod_name0 can produce.
+func TestStripOwnerPrefix(t *testing.T) {
+	cases := map[string]string{
+		"C#m":                    "m",
+		"C.m":                    "m",
+		"Outer::Inner#deep":      "deep",
+		"ThreadBacktraceSpecs.x": "x",
+		"C#<=>":                  "<=>",
+		// No owner: unchanged.
+		"foo":       "foo",
+		"<main>":    "<main>",
+		"<class:K>": "<class:K>",
+		// A separator whose left side is not a constant path is not an owner —
+		// which is how `main.label_sdef_method_of_main` keeps its whole label.
+		"main.label_sdef_method": "main.label_sdef_method",
+		"a::B#m":                 "a::B#m",
+		// Degenerate placements: nothing before the separator, nothing after.
+		"#m": "#m",
+		"C#": "C#",
+	}
+	for in, want := range cases {
+		if got := stripOwnerPrefix(in); got != want {
+			t.Errorf("stripOwnerPrefix(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

@@ -461,9 +461,8 @@ func (vm *VM) registerIO() {
 	// reads the category) sees it, as in MRI. A String category is converted to a
 	// Symbol (anything else is a TypeError); a category whose warnings are disabled
 	// (Warning[category] is false) is dropped, and an unknown category raises. The
-	// uplevel: keyword is validated (a negative or non-Integer value raises) but not
-	// acted on, as rbgo has no caller line to prepend. With no message it does
-	// nothing.
+	// uplevel: keyword names a caller frame whose "path:lineno: " is prepended to
+	// the message (see warnUplevelPrefix). With no message it does nothing.
 	vm.cObject.define("warn", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		var category object.Value = object.NilV
 		pos := args
@@ -484,11 +483,14 @@ func (vm *VM) registerIO() {
 		if object.IsNil(vm.verboseSlot("$VERBOSE")) || len(pos) == 0 {
 			return object.NilV
 		}
+		lev := int64(0)
 		if !object.IsNil(uplevel) {
 			// rb_warn_m runs the level through NUM2LONG, so a Float or a Rational
-			// truncates and anything with no integer conversion is a TypeError.
-			if int64(vm.toIntCoerce(uplevel)) < 0 {
-				raise("ArgumentError", "negative level (%d)", vm.toIntCoerce(uplevel))
+			// truncates and anything with no integer conversion is a TypeError. The
+			// conversion runs ONCE: a to_int that counts its calls must not see two.
+			lev = int64(vm.toIntCoerce(uplevel))
+			if lev < 0 {
+				raise("ArgumentError", "negative level (%d)", lev)
 			}
 		}
 		// rb_warn_m keeps a lone message that already ends in a newline VERBATIM
@@ -502,13 +504,7 @@ func (vm *VM) registerIO() {
 			b.WriteString(first.Str())
 		} else {
 			if !object.IsNil(uplevel) {
-				// With a level, rb_warn_m prefixes "path:lineno: warning: " taken from
-				// rb_ec_backtrace_location_ary — and, when that yields no location (a
-				// level past the bottom of the stack), the bare "warning: ". rbgo
-				// records no line numbers at all, so no frame can ever supply a path:
-				// the no-location prefix is the truthful answer for every level, not a
-				// choice. Fixing it means line tracking in internal/compiler.
-				b.WriteString("warning: ")
+				b.WriteString(vm.warnUplevelPrefix(lev))
 			}
 			write := func(s string) { b.WriteString(s) }
 			for _, a := range pos {
@@ -519,12 +515,24 @@ func (vm *VM) registerIO() {
 			return object.NilV
 		}
 		if !object.IsNil(category) {
-			switch c := category.(type) {
-			case object.Symbol:
-			case *object.String:
-				category = object.Symbol(c.Str())
-			default:
-				raise("TypeError", "no implicit conversion of %s into Symbol", vm.classOf(category).name)
+			// rb_warn_m runs the category through rb_to_symbol_type, which is
+			// rb_convert_type_with_id(val, T_SYMBOL, "Symbol", idTo_sym): anything
+			// that answers #to_sym converts, and only a value that does not (or
+			// whose #to_sym returns a non-Symbol) is the TypeError. A String
+			// converts through its own String#to_sym, so it needs no case of its
+			// own here.
+			if _, isSym := category.(object.Symbol); !isSym {
+				cls := vm.classOf(category).name
+				if !vm.respondsToConversion(category, "to_sym") {
+					raise("TypeError", "no implicit conversion of %s into Symbol", cls)
+				}
+				conv := vm.send(category, "to_sym", nil, nil)
+				sym, isSym := conv.(object.Symbol)
+				if !isSym {
+					raise("TypeError", "can't convert %s to Symbol (%s#to_sym gives %s)",
+						cls, cls, vm.classOf(conv).name)
+				}
+				category = sym
 			}
 			// Warning[category] filters the message (and raises for an unknown one).
 			if !vm.send(vm.consts["Warning"], "[]", []object.Value{category}, nil).Truthy() {
@@ -660,6 +668,41 @@ func (vm *VM) registerIO() {
 		}
 		return vm.send(cFile, "open", args, blk)
 	})
+}
+
+// warnUplevelPrefix is the "path:lineno: warning: " that Kernel#warn prepends
+// when a uplevel: level is given — error.c v3_4_0 rb_warn_m, which takes the
+// location from rb_ec_backtrace_location_ary(ec, lev + 1, 1, TRUE) and formats
+// it as rb_sprintf("%s:%ld: warning: ", path, lineno); when that call yields no
+// location (a level past the bottom of the stack) the prefix is the bare
+// "warning: ".
+//
+// The `+ 1` in MRI skips the frame of the `warn` cfunc itself, so level 0 names
+// the frame that CALLED warn. rbgo pushes no frame for a native method, so that
+// frame is already the top of frameNames and the level indexes straight down
+// from it: level 0 is len(frameNames)-1, level n is n frames further out. A
+// level that walks off the bottom reports no location, which is what makes
+// `warn "x", uplevel: 100` print "warning: x" rather than a fabricated frame.
+//
+// This used to be unconditionally "warning: ", because the parser's AST carried
+// no source positions and no frame could supply a line. PR #645 built MRI's
+// compressed insns_info/positions table on go-ruby-parser v0.3.0's
+// ast.Program.Lines, so frameLine is now calc_lineno over the frame's
+// (iseq, pc) pair and there IS a caller line to prepend.
+func (vm *VM) warnUplevelPrefix(lev int64) string {
+	// len(frameNames) is an int, so a level that cannot even be held in one is
+	// past the bottom of any stack — checked before the conversion narrows it.
+	if lev > int64(len(vm.frameNames)) {
+		return "warning: "
+	}
+	i := len(vm.frameNames) - 1 - int(lev)
+	if i < 0 {
+		return "warning: "
+	}
+	// MRI formats the location unconditionally once it HAS one, so a frame whose
+	// line is unknown reports ":0:" rather than dropping to the bare prefix — the
+	// path is still the truth about where the caller is.
+	return vm.frameFileLabel(i) + ":" + strconv.Itoa(vm.frameLine(i)) + ": warning: "
 }
 
 // File open-mode flag constants (File::RDWR etc.). The values are the canonical
