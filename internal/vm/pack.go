@@ -1179,6 +1179,13 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 					break
 				}
 				r, sz := utf8.DecodeRune(data[pos:])
+				// utf8.DecodeRune reports a malformed sequence as U+FFFD and consumes
+				// one byte; MRI's utf8_to_uv raises instead, so "\xE3".unpack('U')
+				// gave [65533] where MRI raises ArgumentError. The '*' form raises on
+				// the same byte rather than carrying on past it.
+				if r == utf8.RuneError && sz <= 1 {
+					raise("ArgumentError", "malformed UTF-8 character")
+				}
 				out = append(out, object.IntValue(int64(r)))
 				pos += sz
 			}
@@ -1192,7 +1199,13 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			}
 			pos += n
 		case d.code == 'X':
-			n := d.count // 'X*' backs up one byte, like a bare 'X'
+			// 'X*' backs up by the number of bytes REMAINING (MRI sets len = send - s
+			// before the bounds check), which is why "abcd".unpack("CX*C") raises
+			// rather than backing up a single byte: 3 remaining against 1 consumed.
+			n := d.count
+			if d.star {
+				n = len(data) - pos
+			}
 			if n > pos {
 				raise("ArgumentError", "X outside of string")
 			}
@@ -1210,10 +1223,27 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			}
 		case d.code == 'a' || d.code == 'A' || d.code == 'Z':
 			var seg []byte
-			if d.star {
+			switch {
+			case d.code == 'Z' && d.star:
+				// MRI's 'Z' with '*' advances to just PAST the terminating NUL
+				// (`s = star ? t : s+len` in pack.c, after `if (t < send) t++`), not to
+				// the end of the data — so a repeated Z* walks successive
+				// NUL-terminated strings. Consuming everything made
+				// "a\0\0 b \0".unpack("Z*Z*Z*Z*") give ["a", "", "", ""] where MRI
+				// gives ["a", "", " b ", ""].
+				end := pos
+				for end < len(data) && data[end] != 0 {
+					end++
+				}
+				seg = data[pos:end]
+				if end < len(data) {
+					end++ // step over the NUL terminator
+				}
+				pos = end
+			case d.star:
 				seg = data[pos:]
 				pos = len(data)
-			} else {
+			default:
 				end := pos + d.count
 				if end > len(data) {
 					end = len(data)
@@ -1221,14 +1251,18 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 				seg = data[pos:end]
 				pos = end
 			}
-			out = append(out, object.NewString(unpackString(seg, d.code)))
+			// a/A/Z build their result with rb_str_new, which tags ASCII-8BIT: the
+			// bytes came out of a byte string and carry no character semantics.
+			out = append(out, object.NewStringBytesEnc([]byte(unpackString(seg, d.code)), "ASCII-8BIT"))
 		case d.code == 'H' || d.code == 'h':
 			n := d.count
 			avail := (len(data) - pos) * 2
 			if d.star || n > avail {
 				n = avail
 			}
-			out = append(out, object.NewString(unpackHex(data[pos:], d.code, n)))
+			// The hex and bit directives build their result with
+			// rb_usascii_str_new: every byte is a digit, so US-ASCII, not binary.
+			out = append(out, object.NewStringBytesEnc([]byte(unpackHex(data[pos:], d.code, n)), "US-ASCII"))
 			pos += (n + 1) / 2
 		case d.code == 'B' || d.code == 'b':
 			n := d.count
@@ -1236,7 +1270,7 @@ func unpackElems(data []byte, fmtStr string) []object.Value {
 			if d.star || n > avail {
 				n = avail
 			}
-			out = append(out, object.NewString(unpackBits(data[pos:], d.code, n)))
+			out = append(out, object.NewStringBytesEnc([]byte(unpackBits(data[pos:], d.code, n)), "US-ASCII"))
 			pos += (n + 7) / 8
 		case d.code == 'm':
 			var dec []byte

@@ -63,14 +63,36 @@ func (d *mDumper) newID() { d.nextID++ }
 // link records v under a fresh object id and returns false, or, if v was seen
 // before, emits the '@' link to its id and returns true.
 func (d *mDumper) link(v object.Value) bool {
+	if d.linkRef(v) {
+		return true
+	}
+	d.remember(v)
+	return false
+}
+
+// linkRef emits the '@' back-reference when v is already in the objects table
+// and reports whether it did. Unlike link it never allocates an id, so a caller
+// that must register v at a later point (MRI's w_remember position) can.
+func (d *mDumper) linkRef(v object.Value) bool {
 	if id, ok := d.objs[v]; ok {
 		d.buf = append(d.buf, '@')
 		d.writeLong(id)
 		return true
 	}
+	return false
+}
+
+// remember assigns v the next object-link id, as MRI's w_remember does. Where
+// that call sits decides the id every later object gets: the #_dump ('u')
+// container registers its object only after writing its instance variables, so
+// those variables index BEFORE the object itself.
+//
+// There is deliberately no already-present guard: every caller reaches this only
+// after linkRef reported v absent, and nothing registers v in between, so such a
+// guard would be unreachable.
+func (d *mDumper) remember(v object.Value) {
 	d.objs[v] = d.nextID
 	d.nextID++
-	return false
 }
 
 func (d *mDumper) writeValue(v object.Value) {
@@ -112,6 +134,7 @@ func (d *mDumper) writeValue(v object.Value) {
 		if d.link(x) {
 			return
 		}
+		d.writeExtended(x)
 		d.buf = append(d.buf, '[')
 		d.writeLong(len(x.Elems))
 		for _, e := range x.Elems {
@@ -126,6 +149,7 @@ func (d *mDumper) writeValue(v object.Value) {
 		if d.link(x) {
 			return
 		}
+		d.writeExtended(x)
 		d.buf = append(d.buf, 'o')
 		d.writeSymbol("Range")
 		d.writeLong(3)
@@ -153,10 +177,14 @@ func (d *mDumper) writeValue(v object.Value) {
 		den := object.NormInt(new(big.Int).Set(x.R.Denom()))
 		d.emitUserMarshal("Rational", object.NewArray(num, den))
 	case *Time:
-		if d.link(x) {
+		// Time dumps through the 'u' (USERDEF) container, whose w_remember sits at
+		// the END of that branch in MRI's w_object — so the Time takes a HIGHER
+		// object-link id than its own instance variables and its :zone string.
+		if d.linkRef(x) {
 			return
 		}
 		d.writeTime(x)
+		d.remember(x)
 	case *RClass:
 		if d.link(x) {
 			return
@@ -198,38 +226,104 @@ func (d *mDumper) writeBignumBody(b *big.Int) {
 	d.buf = append(d.buf, le...)
 }
 
+// marshalEncIvar is the encoding instance variable Marshal records for an
+// encoding-capable value: either the short :E form (true for UTF-8, false for
+// US-ASCII) or the long :encoding form naming the encoding.
+type marshalEncIvar struct {
+	sym  string // "E" (short form) or "encoding" (long form)
+	tf   byte   // 'T' or 'F' for the short form; 0 when name is used
+	name string // encoding name, for the long form only
+}
+
+// marshalEncodingIvar mirrors MRI's encoding_name (marshal.c): US-ASCII maps to
+// the short :E => false, UTF-8 to the short :E => true, and any other encoding
+// to :encoding => "<name>". ASCII-8BIT is encoding index 0, for which
+// encoding_name returns Qnil, so a binary value carries no encoding ivar at all
+// (and, having no other ivar, no 'I' wrapper either) — hence the nil result.
+func marshalEncodingIvar(enc string) *marshalEncIvar {
+	switch enc {
+	case "ASCII-8BIT", "BINARY":
+		return nil
+	case "", "UTF-8":
+		return &marshalEncIvar{sym: "E", tf: 'T'}
+	case "US-ASCII":
+		return &marshalEncIvar{sym: "E", tf: 'F'}
+	}
+	return &marshalEncIvar{sym: "encoding", name: enc}
+}
+
+// writeEncodingIvar emits one encoding ivar pair (name then value), as MRI's
+// w_encoding does. It writes only the pair; the caller has already written the
+// ivar count that covers it.
+func (d *mDumper) writeEncodingIvar(e *marshalEncIvar) {
+	d.writeSymbol(e.sym)
+	if e.tf != 0 {
+		d.buf = append(d.buf, e.tf)
+		return
+	}
+	d.writeValue(object.NewStringBytesEnc([]byte(e.name), "ASCII-8BIT"))
+}
+
+// writeExtended emits the 'e' (TYPE_EXTENDED) prefix naming each module
+// singleton-extended into v, mirroring MRI's w_extended (marshal.c) called with
+// check=TRUE: the singleton class is stepped over and every module between it
+// and the real class is named, most-recently-extended first. A singleton that
+// carries methods or instance variables of its own is not reconstructible from
+// the stream, so MRI refuses it (SINGLETON_DUMP_UNABLE_P).
+//
+// MRI passes check=FALSE for the #marshal_dump ('U') and #_dump ('u')
+// containers, where w_extended then emits nothing at all — those callers must
+// not call this.
+func (d *mDumper) writeExtended(v object.Value) {
+	sc := d.vm.objSingleton(v)
+	if sc == nil {
+		return
+	}
+	if len(sc.methods) > 0 || len(sc.ivars) > 0 {
+		raise("TypeError", "singleton can't be dumped")
+	}
+	inc := sc.includes
+	for i := len(inc) - 1; i >= 0; i-- {
+		if inc[i].name == "" {
+			raise("TypeError", "can't dump anonymous class %s", inc[i].ToS())
+		}
+		d.buf = append(d.buf, 'e')
+		d.writeSymbol(inc[i].name)
+	}
+}
+
 func (d *mDumper) writeString(s *object.String) {
 	if d.link(s) {
 		return
 	}
-	enc := s.EncName()
-	if enc == "ASCII-8BIT" {
-		d.buf = append(d.buf, '"')
-		d.writeBytes(s.Str())
-		return
+	// MRI writes the 'I' ivar wrapper first, then w_uclass's 'e'/'C' prefixes,
+	// then the payload, then the ivar list (w_object in marshal.c). A binary
+	// string has no encoding ivar and so needs no wrapper.
+	enc := marshalEncodingIvar(s.EncName())
+	if enc != nil {
+		d.buf = append(d.buf, 'I')
 	}
-	d.buf = append(d.buf, 'I', '"')
+	d.writeExtended(s)
+	d.writeStringPayload(s)
+	if enc != nil {
+		d.writeLong(1)
+		d.writeEncodingIvar(enc)
+	}
+}
+
+// writeStringPayload emits just the TYPE_STRING tag and bytes, with no 'I'
+// wrapper, extend prefix or ivar list. The caller owns those, so a built-in
+// subclass's 'C' container can fold the payload's encoding ivar into its own.
+func (d *mDumper) writeStringPayload(s *object.String) {
+	d.buf = append(d.buf, '"')
 	d.writeBytes(s.Str())
-	switch enc {
-	case "UTF-8":
-		d.writeLong(1)
-		d.writeSymbol("E")
-		d.buf = append(d.buf, 'T')
-	case "US-ASCII":
-		d.writeLong(1)
-		d.writeSymbol("E")
-		d.buf = append(d.buf, 'F')
-	default:
-		d.writeLong(1)
-		d.writeSymbol("encoding")
-		d.writeValue(object.NewStringBytesEnc([]byte(enc), "ASCII-8BIT"))
-	}
 }
 
 func (d *mDumper) writeHash(h *object.Hash) {
 	if !object.IsNil(h.DefaultProc) {
 		raise("TypeError", "can't dump hash with default proc")
 	}
+	d.writeExtended(h)
 	// A Hash put into compare_by_identity mode carries no inline flag in the
 	// stream, so MRI wraps it in a 'C' container naming the Hash class; loading
 	// that container re-applies compare_by_identity.
@@ -296,6 +390,33 @@ func regexpMarshalEnc(r *Regexp) string {
 }
 
 func (d *mDumper) writeRegexp(r *Regexp) {
+	opt := regexpMarshalOpts(r)
+	// As for a String: the 'I' wrapper, then w_uclass's 'e'/'C' prefixes, then the
+	// payload, then the ivar list. A binary (ASCII-8BIT) Regexp carries no
+	// encoding ivar, so it is emitted bare.
+	enc := marshalEncodingIvar(regexpMarshalEnc(r))
+	if enc != nil {
+		d.buf = append(d.buf, 'I')
+	}
+	d.writeExtended(r)
+	d.writeRegexpPayload(r, opt)
+	if enc != nil {
+		d.writeLong(1)
+		d.writeEncodingIvar(enc)
+	}
+}
+
+// writeRegexpPayload emits just the TYPE_REGEXP tag, source and option byte —
+// the Regexp counterpart of writeStringPayload.
+func (d *mDumper) writeRegexpPayload(r *Regexp, opt int) {
+	d.buf = append(d.buf, '/')
+	d.writeBytes(r.source)
+	d.buf = append(d.buf, byte(opt))
+}
+
+// regexpMarshalOpts returns the Regexp option byte Marshal records: the
+// inline flags plus the ARG_ENCODING_FIXED / ARG_ENCODING_NONE bits.
+func regexpMarshalOpts(r *Regexp) int {
 	opt := 0
 	if strings.ContainsRune(r.flags, 'i') {
 		opt |= reIgnoreCase
@@ -312,29 +433,35 @@ func (d *mDumper) writeRegexp(r *Regexp) {
 	if r.noEnc {
 		opt |= reNoEncoding
 	}
-	enc := regexpMarshalEnc(r)
-	if enc == "ASCII-8BIT" {
-		// A binary (ASCII-8BIT) Regexp carries no encoding ivar, so it is emitted
-		// bare — no 'I' wrapper.
-		d.buf = append(d.buf, '/')
-		d.writeBytes(r.source)
-		d.buf = append(d.buf, byte(opt))
-		return
+	return opt
+}
+
+// marshalPayloadEnc returns the encoding ivar of a built-in payload value, or
+// nil when that kind of value carries none.
+func marshalPayloadEnc(v object.Value) *marshalEncIvar {
+	switch x := v.(type) {
+	case *object.String:
+		return marshalEncodingIvar(x.EncName())
+	case *Regexp:
+		return marshalEncodingIvar(regexpMarshalEnc(x))
 	}
-	d.buf = append(d.buf, 'I', '/')
-	d.writeBytes(r.source)
-	d.buf = append(d.buf, byte(opt))
-	d.writeLong(1)
-	switch enc {
-	case "UTF-8":
-		d.writeSymbol("E")
-		d.buf = append(d.buf, 'T')
-	case "US-ASCII":
-		d.writeSymbol("E")
-		d.buf = append(d.buf, 'F')
+	return nil
+}
+
+// writeBuiltinPayload emits the bare payload of a built-in subclass's 'C'
+// container. String and Regexp take the payload writers, so their encoding ivar
+// folds into the container's single ivar list instead of opening a nested 'I'
+// wrapper; every other built-in has no encoding ivar and writes normally. The
+// payload is the same Ruby object as its wrapper, so it must not take an
+// object-link id of its own.
+func (d *mDumper) writeBuiltinPayload(v object.Value) {
+	switch x := v.(type) {
+	case *object.String:
+		d.writeStringPayload(x)
+	case *Regexp:
+		d.writeRegexpPayload(x, regexpMarshalOpts(x))
 	default:
-		d.writeSymbol("encoding")
-		d.writeValue(object.NewStringBytesEnc([]byte(enc), "ASCII-8BIT"))
+		d.writeValue(v)
 	}
 }
 
@@ -373,31 +500,65 @@ func timeDumpBytes(t *Time) []byte {
 	return payload[:]
 }
 
+// writeTime emits Time's 'u' (USERDEF) container. MRI's time_mdump builds the
+// payload String, copies the Time's own instance variables onto it
+// (rb_copy_generic_ivar), then appends :offset — only when the Time is not UTC —
+// and :zone, which is written ALWAYS, nil included. Marshal then writes that
+// String's variables as the container's, so the order here is the order there.
 func (d *mDumper) writeTime(t *Time) {
 	utc := t.t.Location() == stdtime.UTC
-	payload := timeDumpBytes(t)
-
+	names := marshalLiveIvars(&t.methodValueState)
+	n := len(names) + 1 // :zone is always written
+	if !utc {
+		n++ // :offset
+	}
 	d.buf = append(d.buf, 'I', 'u')
 	d.writeSymbol("Time")
-	d.writeBytes(string(payload))
-	if utc {
-		d.writeLong(1)
-		d.writeSymbol("zone")
-		d.writeValue(object.NewStringBytesEnc([]byte("UTC"), "US-ASCII"))
-		return
+	d.writeBytes(string(timeDumpBytes(t)))
+	d.writeLong(n)
+	d.writeIvarPairs(names, t.ivars)
+	if !utc {
+		_, off := t.t.Zone()
+		d.writeSymbol("offset")
+		d.writeValue(object.Integer(off))
 	}
-	_, off := t.t.Zone()
-	d.writeLong(2)
-	d.writeSymbol("offset")
-	d.writeValue(object.Integer(off))
 	d.writeSymbol("zone")
-	d.buf = append(d.buf, '0')
+	d.writeValue(d.timeZoneIvar(t))
+}
+
+// timeZoneIvar returns the value of a Time's :zone marshal variable: the zone's
+// name, or nil for a Time on a bare numeric offset, which has none. The two
+// sources differ in encoding, and time_mdump treats them differently — a
+// Timezone object's #name is stored exactly as that method returned it, while a
+// zone the Time carries as a location contributes the tz database's
+// abbreviation, which MRI builds US-ASCII.
+func (d *mDumper) timeZoneIvar(t *Time) object.Value {
+	if z := t.zoneObj; z != nil {
+		// A Timezone object contributes its #name (maybe_tzobj_p in time_mdump),
+		// and MRI stores the String that method returned AS IS — so its encoding is
+		// whatever Ruby gave it. Re-tagging an ASCII-only name US-ASCII here made a
+		// tzobj Time dump ":\tzoneI\"\bXYZ\x06:\x06EF" where MRI writes ":\x06ET".
+		n := d.vm.send(z, "name", nil, nil)
+		if s, ok := n.(*object.String); ok {
+			return s
+		}
+		return object.NilV
+	}
+	// A zone the Time carries only as a location: the abbreviation Go reports,
+	// which is the tz database's and always ASCII. MRI builds these US-ASCII, so
+	// "UTC" / "AST" / "CEST" dump with :E => false. A bare numeric offset has no
+	// name and dumps nil.
+	name, _ := t.t.Zone()
+	if name == "" {
+		return object.NilV
+	}
+	return object.NewStringBytesEnc([]byte(name), "US-ASCII")
 }
 
 // writeObject dispatches an ordinary instance: the #marshal_dump hook (U), the
 // class _dump hook (u), a Struct (S), or the generic ivar object (o).
 func (d *mDumper) writeObject(o *RObject) {
-	if d.link(o) {
+	if d.linkRef(o) {
 		return
 	}
 	// Every path below names o.class; an instance of an anonymous class cannot be
@@ -406,42 +567,29 @@ func (d *mDumper) writeObject(o *RObject) {
 	if o.class.name == "" {
 		raise("TypeError", "can't dump anonymous class %s", o.class.ToS())
 	}
-	// An object singleton-extended by one or more modules is prefixed with an 'e'
-	// container per module (last-extended first, matching MRI's ancestry order).
-	if o.singleton != nil {
-		inc := o.singleton.includes
-		for i := len(inc) - 1; i >= 0; i-- {
-			if inc[i].name == "" {
-				raise("TypeError", "can't dump anonymous class %s", inc[i].ToS())
-			}
-			d.buf = append(d.buf, 'e')
-			d.writeSymbol(inc[i].name)
-		}
-	}
+	// The #marshal_dump and #_dump containers are the two MRI writes with
+	// w_class(..., check=FALSE): w_extended then emits nothing, so a module
+	// extended into the object is NOT recorded and a singleton with its own
+	// methods is not refused. Neither calls writeExtended for that reason.
 	if d.vm.respondsTo(o, "marshal_dump") {
+		// USRMARSHAL registers the object BEFORE calling the hook, so a reference
+		// back to it from inside the dumped value links rather than recursing.
+		d.remember(o)
 		val := d.vm.send(o, "marshal_dump", nil, nil)
 		d.emitUserMarshal(o.class.name, val)
 		return
 	}
 	if d.vm.respondsTo(o, "_dump") {
-		s := d.vm.send(o, "_dump", []object.Value{object.Integer(-1)}, nil)
-		str, ok := s.(*object.String)
-		if !ok {
-			raise("TypeError", "_dump() must return String")
-		}
-		d.buf = append(d.buf, 'u')
-		d.writeSymbol(o.class.name)
-		d.writeBytes(str.Str())
+		d.writeUserDef(o)
 		return
 	}
+	// From here on MRI passes check=TRUE, so each branch calls writeExtended:
+	// extended modules are recorded and a singleton carrying its own methods or
+	// ivars is refused. The call sits inside the branches because the 'I' ivar
+	// wrapper, which only some of them take, is written before the 'e' prefixes.
+	d.remember(o)
 	if sd := structDefOf(o.class); sd != nil {
-		d.buf = append(d.buf, 'S')
-		d.writeSymbol(o.class.name)
-		d.writeLong(len(sd.names))
-		for i, name := range sd.names {
-			d.writeSymbol(name)
-			d.writeValue(o.structVals[i])
-		}
+		d.writeStructLike(o, sd.names)
 		return
 	}
 	// A Data (Ruby 3.2+ immutable value object, minted by Data.define) marshals
@@ -449,13 +597,7 @@ func (d *mDumper) writeObject(o *RObject) {
 	// member name/value pair — because MRI stores a Data's members the same way it
 	// stores a Struct's. The real class name is used (never a #name override).
 	if dd := dataDefOf(o.class); dd != nil {
-		d.buf = append(d.buf, 'S')
-		d.writeSymbol(o.class.name)
-		d.writeLong(len(dd.names))
-		for i, name := range dd.names {
-			d.writeSymbol(name)
-			d.writeValue(o.structVals[i])
-		}
+		d.writeStructLike(o, dd.names)
 		return
 	}
 	// An instance of a user subclass of a built-in value type (Array/Hash/
@@ -463,29 +605,43 @@ func (d *mDumper) writeObject(o *RObject) {
 	// built-in value. Any instance variables are carried by an outer 'I' wrapper,
 	// as MRI does for objects whose payload type has no inline ivar slot.
 	if o.builtin != nil {
+		// The payload is the same Ruby object as its wrapper, so its encoding ivar
+		// belongs to the container's ONE ivar list — not to a nested 'I' wrapper of
+		// its own — and, per MRI's w_ivar, it is written before the object's own
+		// variables. The 'e' extend prefix was already emitted above, and the 'I'
+		// comes before it (w_object writes TYPE_IVAR, then w_uclass).
 		names := o.liveIvarNames()
-		if len(names) > 0 {
+		enc := marshalPayloadEnc(o.builtin)
+		n := len(names)
+		if enc != nil {
+			n++
+		}
+		if n > 0 {
 			d.buf = append(d.buf, 'I')
 		}
+		d.writeExtended(o)
 		d.buf = append(d.buf, 'C')
 		d.writeSymbol(o.class.name)
-		d.writeValue(o.builtin)
-		if len(names) > 0 {
-			d.writeLong(len(names))
-			for _, name := range names {
-				d.writeSymbol(name)
-				d.writeValue(o.ivars[name])
+		d.writeBuiltinPayload(o.builtin)
+		if n > 0 {
+			d.writeLong(n)
+			if enc != nil {
+				d.writeEncodingIvar(enc)
 			}
+			d.writeIvarPairs(names, o.ivars)
 		}
 		return
 	}
-	// A plain object (no marshal_dump / _dump / Struct / builtin payload) whose
-	// singleton class carries per-object methods (def obj.foo) or its own ivars
-	// (class << obj; @v = …) cannot be marshaled. A singleton that only holds
-	// extend-ed modules has no own methods or ivars and is emitted via 'e' above.
-	if o.singleton != nil && (len(o.singleton.methods) > 0 || len(o.singleton.ivars) > 0) {
-		raise("TypeError", "singleton can't be dumped")
-	}
+	// There is deliberately no 'd' (TYPE_DATA) dump branch here. MRI reaches it
+	// from `case T_DATA`, not from responding to #_dump_data: a pure-Ruby class
+	// that defines #_dump_data is still a T_OBJECT and dumps as 'o'. Keying the
+	// branch on the method instead turned `Marshal.dump(W.new)` into "\x04\bd:\x06W…"
+	// where MRI writes "\x04\bo:\x06W\x00". rbgo has no user-reachable T_DATA, so
+	// the 'd' container is load-only (readUserData), for streams MRI wrote.
+	//
+	// A plain object is MRI's T_OBJECT: its instance variables live in the 'o'
+	// body itself (has_ivars counts them "elsewhere"), so there is no 'I' wrapper.
+	d.writeExtended(o)
 	if d.vm.marshalIsException(o.class) {
 		d.writeException(o)
 		return
@@ -494,10 +650,84 @@ func (d *mDumper) writeObject(o *RObject) {
 	d.writeSymbol(o.class.name)
 	names := o.liveIvarNames()
 	d.writeLong(len(names))
+	d.writeIvarPairs(names, o.ivars)
+}
+
+// writeIvarPairs writes each named instance variable as a symbol/value pair.
+// The count belongs to the caller, which may be covering an encoding ivar too.
+func (d *mDumper) writeIvarPairs(names []string, ivars map[string]object.Value) {
 	for _, name := range names {
 		d.writeSymbol(name)
-		d.writeValue(o.ivars[name])
+		d.writeValue(ivars[name])
 	}
+}
+
+// marshalLiveIvars returns a boxed value's instance-variable names in
+// first-assignment order, dropping any since removed — the methodValueState
+// counterpart of RObject.liveIvarNames.
+func marshalLiveIvars(s *methodValueState) []string {
+	out := make([]string, 0, len(s.ivarOrder))
+	for _, n := range s.ivarOrder {
+		if _, live := s.ivars[n]; live {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// writeStructLike emits the 'S' container shared by Struct and Data: the class
+// name and each member name/value pair. Unlike a plain object, MRI treats a
+// Struct as a payload type whose instance variables cannot live in the body, so
+// any it carries go in an outer 'I' wrapper (has_ivars's generic branch in
+// marshal.c reaches T_STRUCT, while T_OBJECT is "counted elsewhere").
+func (d *mDumper) writeStructLike(o *RObject, members []string) {
+	names := o.liveIvarNames()
+	if len(names) > 0 {
+		d.buf = append(d.buf, 'I')
+	}
+	d.writeExtended(o)
+	d.buf = append(d.buf, 'S')
+	d.writeSymbol(o.class.name)
+	d.writeLong(len(members))
+	for i, m := range members {
+		d.writeSymbol(m)
+		d.writeValue(o.structVals[i])
+	}
+	if len(names) > 0 {
+		d.writeLong(len(names))
+		d.writeIvarPairs(names, o.ivars)
+	}
+}
+
+// writeUserDef emits the #_dump ('u', TYPE_USERDEF) container. MRI (w_object in
+// marshal.c) computes the ivar set from the object AND from the String #_dump
+// returned, and the String's set WINS when it is non-empty — so a _dump payload
+// in a non-UTF-8 encoding carries its :encoding ivar here even though the object
+// itself has none. The object is registered in the objects table only AFTER its
+// instance variables are written, so those variables take the lower link ids.
+func (d *mDumper) writeUserDef(o *RObject) {
+	s := d.vm.send(o, "_dump", []object.Value{object.Integer(-1)}, nil)
+	str, ok := s.(*object.String)
+	if !ok {
+		raise("TypeError", "_dump() must return String")
+	}
+	// The ivar set comes from the payload String alone. has_ivars is called on the
+	// object first, but an ordinary instance is T_OBJECT, which that function
+	// skips as "counted elsewhere" — and for a USERDEF container there is no
+	// elsewhere, so the object's own variables are never written. Only the
+	// String's contribute: its encoding, and any variable #_dump set on it.
+	enc := marshalEncodingIvar(str.EncName())
+	if enc != nil {
+		d.buf = append(d.buf, 'I')
+	}
+	d.buf = append(d.buf, 'u')
+	d.writeSymbol(o.class.name)
+	d.writeBytes(str.Str())
+	if enc != nil {
+		d.writeLong(1)
+		d.writeEncodingIvar(enc)
+	}
+	d.remember(o)
 }
 
 // writeException emits an Exception (or subclass) instance. MRI leads with the
@@ -755,7 +985,9 @@ func (r *mReader) readObject() (object.Value, bool) {
 	case 'U':
 		return r.freezeValue(r.readUserMarshal()), true
 	case 'u':
-		return r.freezeValue(r.readUserDef()), true
+		return r.freezeValue(r.readUserDef(false)), true
+	case 'd':
+		return r.freezeValue(r.readUserData()), true
 	case '/':
 		return r.freezeValue(r.readRegexp(false)), true
 	case '@':
@@ -835,9 +1067,18 @@ func (r *mReader) readHash(withDefault bool) object.Value {
 
 // readIvarWrapped reads the 'I' container: a base object followed by its ivars.
 // String/Regexp encoding ivars (:E, :encoding) are folded into the encoding;
-// every other ivar is set as a real instance variable (Time's cosmetic
-// :zone / :offset are read and discarded).
+// every other ivar is set as a real instance variable, and Time's :zone /
+// :offset become its zone.
 func (r *mReader) readIvarWrapped() object.Value {
+	// MRI's r_object0 passes an `ivp` flag down into the TYPE_USERDEF branch, so
+	// that branch reads its OWN instance variables and only then calls r_entry.
+	// The object therefore takes a HIGHER object-link id than its variables —
+	// mirroring where w_remember sits on the dump side. Every other container
+	// registers itself first, so only 'u' needs the hand-over.
+	if r.pos < len(r.buf) && r.buf[r.pos] == 'u' {
+		r.pos++
+		return r.readUserDef(true)
+	}
 	base, _ := r.readObject()
 	n := r.long()
 	for i := 0; i < n; i++ {
@@ -878,9 +1119,71 @@ func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 				b.srcEnc = s.Str()
 			}
 		}
+	case *RObject:
+		// A built-in subclass loaded from a 'C' container is ONE Ruby object: the
+		// wrapper and the payload it holds. Its encoding ivar therefore describes
+		// the payload, not the wrapper. Storing :E / :encoding as a real instance
+		// variable made a re-dump emit the encoding twice — once from the payload
+		// and once as a stray ivar literally named "E".
+		if b.builtin != nil && (name == "E" || name == "encoding") {
+			r.applyIvar(b.builtin, name, val)
+			return
+		}
+		setIvar(base, name, val)
+	case *Time:
+		// MRI's time_mload deletes :offset and :zone from the payload String
+		// (rb_attr_delete) and turns them into the Time's zone, copying only what is
+		// left back as real instance variables. The packed payload always holds the
+		// UTC wall clock (time_mdump calls gmtimew), so re-displaying the same
+		// instant in the recorded zone is what restores #utc_offset and #zone.
+		switch name {
+		// :offset always precedes :zone in the stream, so at this point the Time
+		// carries no zone name yet and the offset alone is set — which is exactly
+		// MRI's time_fixoff, after which a Time on a bare numeric offset reports
+		// #zone as nil.
+		case "offset":
+			if off, ok := val.(object.Integer); ok {
+				b.setFixedZone("", int(off))
+			}
+		case "zone":
+			if s, ok := val.(*object.String); ok {
+				_, off := b.t.Zone()
+				b.setFixedZone(s.Str(), off)
+			}
+		default:
+			setIvar(base, name, val)
+		}
 	default:
 		setIvar(base, name, val)
 	}
+}
+
+// marshalNonObjectBases names the core classes whose instances are not MRI
+// T_OBJECTs. MRI's TYPE_OBJECT branch allocates an instance (obj_alloc_by_klass)
+// and raises "dump format error" when what comes back is not a T_OBJECT, which
+// is what stops an 'o' stream naming File, IO or Array from building one. rbgo
+// has no allocation that can report a built-in type, so the class itself is
+// asked instead — by ancestry, so a subclass is caught too. A user class of the
+// same short name is not: a namespaced one is "My::File", and a top-level
+// redefinition of File IS the class this rejects.
+var marshalNonObjectBases = map[string]bool{
+	"String": true, "Array": true, "Hash": true, "Regexp": true, "Time": true,
+	"IO": true, "File": true, "Dir": true, "Struct": true, "Proc": true,
+	"Method": true, "UnboundMethod": true, "Symbol": true, "Integer": true,
+	"Float": true, "NilClass": true, "TrueClass": true, "FalseClass": true,
+	"Module": true, "Class": true, "MatchData": true, "Thread": true,
+	"Mutex": true, "Binding": true,
+}
+
+// marshalPlainObjectClass reports whether an 'o' container may rebuild an
+// instance of cls — that is, whether its instances are plain objects.
+func (vm *VM) marshalPlainObjectClass(cls *RClass) bool {
+	for _, a := range vm.ancestors(cls) {
+		if marshalNonObjectBases[a.name] {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *mReader) readObj() object.Value {
@@ -889,6 +1192,9 @@ func (r *mReader) readObj() object.Value {
 		return r.readRange()
 	}
 	cls := r.vm.marshalClass(className)
+	if !r.vm.marshalPlainObjectClass(cls) {
+		raise("ArgumentError", "dump format error")
+	}
 	o := &RObject{class: cls, ivars: map[string]object.Value{}}
 	r.register(o)
 	isExc := r.vm.marshalIsException(cls)
@@ -1060,15 +1366,69 @@ func (r *mReader) readUserMarshal() object.Value {
 	return o
 }
 
-func (r *mReader) readUserDef() object.Value {
+// readUserDef reads the 'u' (TYPE_USERDEF) container. hasIvars says the caller
+// was an 'I' wrapper that handed its ivar list over: MRI reads those variables
+// here, before r_entry, so the object takes a higher link id than they do.
+//
+// MRI applies them to the PAYLOAD STRING and then calls _load with it, which is
+// how :E / :encoding decide the encoding _load sees. Time is the exception in
+// rbgo: it is rebuilt directly rather than through Time._load, so the variables
+// time_mload would have read off that String are applied to the Time itself.
+func (r *mReader) readUserDef(hasIvars bool) object.Value {
 	className := r.readSymbol()
 	data := r.bytes(r.long())
+	type ivar struct {
+		name string
+		val  object.Value
+	}
+	var ivars []ivar
+	if hasIvars {
+		n := r.long()
+		for i := 0; i < n; i++ {
+			name := r.readSymbol()
+			ivars = append(ivars, ivar{name, r.readValue()})
+		}
+	}
 	if className == "Time" {
-		return r.register(marshalLoadTime(data))
+		t := marshalLoadTime(data)
+		for _, iv := range ivars {
+			r.applyIvar(t, iv.name, iv.val)
+		}
+		return r.register(t)
+	}
+	str := object.NewStringBytesEnc(append([]byte(nil), data...), "ASCII-8BIT")
+	for _, iv := range ivars {
+		r.applyIvar(str, iv.name, iv.val)
 	}
 	cls := r.vm.marshalClass(className)
-	str := object.NewStringBytesEnc(append([]byte(nil), data...), "ASCII-8BIT")
 	return r.register(r.vm.send(cls, "_load", []object.Value{str}, nil))
+}
+
+// readUserData reads the 'd' (TYPE_DATA) container that carries an object
+// wrapping a C pointer: a class name, then the value its #_load_data rebuilds
+// the object from. Following MRI's r_object0, the instance is registered in the
+// objects table BEFORE the payload is read, so a reference back to it links; the
+// #_load_data check comes before the payload too, so a class missing that method
+// raises TypeError without consuming it.
+func (r *mReader) readUserData() object.Value {
+	name := r.readSymbol()
+	cls := r.vm.marshalClass(name)
+	o := &RObject{class: cls, ivars: map[string]object.Value{}}
+	// MRI separates the two failures by the ALLOCATED object's type: not a T_DATA
+	// is "dump format error" (ArgumentError), a T_DATA without #_load_data is a
+	// TypeError. rbgo has no T_DATA to test, so the discriminator here is whether
+	// the class takes part in the _dump_data / _load_data protocol at all — which
+	// is the property that makes a class 'd'-dumpable in the first place. A class
+	// that does neither is a regular object and gets the ArgumentError.
+	if !r.vm.respondsTo(o, "_dump_data") && !r.vm.respondsTo(o, "_load_data") {
+		raise("ArgumentError", "dump format error")
+	}
+	r.register(o)
+	if !r.vm.respondsTo(o, "_load_data") {
+		raise("TypeError", "class %s needs to have instance method '_load_data'", name)
+	}
+	r.vm.send(o, "_load_data", []object.Value{r.readValue()}, nil)
+	return o
 }
 
 func (r *mReader) readRegexp(_ bool) object.Value {
