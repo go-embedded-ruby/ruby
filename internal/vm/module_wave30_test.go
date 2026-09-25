@@ -6,6 +6,9 @@ package vm_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -583,5 +586,44 @@ p out.include?("can only set in method defining module")`
 		if err := runErr(t, tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want %s", tc.src, err, tc.want)
 		}
+	}
+}
+
+// TestModuleWave30AutoloadRetiredByDirectRequire covers an autoload entry that
+// is settled by a DIRECT require of its file rather than by the autoload
+// itself. MRI's const_tbl_update replaces the autoload entry the moment the
+// constant gets a value, so Module#autoload? answers nil for good; rbgo retires
+// the entry at the first read that finds the constant defined. Asserted against
+// MRI 4.0.
+func TestModuleWave30AutoloadRetiredByDirectRequire(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "w30_autoload_direct.rb")
+	if err := os.WriteFile(path, []byte("W30Direct::K = :loaded\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lit := strconv.Quote(path)
+	// Before the require the entry is pending; after it, and after $" is
+	// restored and the constant removed, a FRESH autoload for the same file is
+	// live again — the settled entry did not linger to mask it.
+	src := `module W30Direct; end
+saved = $".dup
+W30Direct.autoload(:K, ` + lit + `)
+a = W30Direct.autoload?(:K)
+require ` + lit + `
+b = W30Direct.autoload?(:K)
+$".replace saved
+W30Direct.send(:remove_const, :K)
+W30Direct.autoload(:K, ` + lit + `)
+p [a == ` + lit + `, b, W30Direct.autoload?(:K) == ` + lit + `]`
+	if got := eval(t, src); got != "[true, nil, true]\n" {
+		t.Errorf("direct require of an autoload's file: got %q", got)
+	}
+	// Reading it back through the retired entry does not re-run the file, and
+	// Module#constants keeps listing a pending name.
+	src2 := `module W30Direct2; end
+W30Direct2.autoload(:K, ` + lit + `)
+p [W30Direct2.constants(false), W30Direct2.const_defined?(:K, false)]`
+	if got := eval(t, src2); got != "[[:K], true]\n" {
+		t.Errorf("pending autoload listing: got %q", got)
 	}
 }
