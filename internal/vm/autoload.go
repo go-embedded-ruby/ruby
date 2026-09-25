@@ -147,9 +147,6 @@ func (vm *VM) autoloadVisible(c *RClass, name string) bool {
 	if c == nil || c.autoloads == nil {
 		return false
 	}
-	if retireSettledAutoload(c, name) {
-		return false
-	}
 	path, ok := c.autoloads[name]
 	if !ok {
 		return false
@@ -174,10 +171,13 @@ func (vm *VM) autoloadVisible(c *RClass, name string) bool {
 // (tryAutoload only clears the entries it runs itself), and rbgo then answered
 // "settled" from $LOADED_FEATURES alone — so restoring $", as ruby/spec does
 // after every example, resurrected an autoload that had already fired.
+//
+// autoloadPathFor is the ONLY caller, and that is not an oversight: it is the
+// one read that reaches a class whose constant table already holds the name.
+// autoloadVisible and tryAutoload are both reached only after a constant lookup
+// has MISSED on the same class, so the entry they see can never be a settled
+// one, and a guard there would be an arm no argument list can take.
 func retireSettledAutoload(c *RClass, name string) bool {
-	if c == nil {
-		return false
-	}
 	if _, defined := c.consts[name]; !defined {
 		return false
 	}
@@ -215,9 +215,6 @@ func (vm *VM) registerAutoloadOn(cls *RClass, name, path string) {
 // constant, by contrast, retires the entry — MRI does not load such a file twice.
 func (vm *VM) tryAutoload(cls *RClass, name string) bool {
 	if cls == nil || cls.autoloads == nil {
-		return false
-	}
-	if retireSettledAutoload(cls, name) {
 		return false
 	}
 	path, ok := cls.autoloads[name]

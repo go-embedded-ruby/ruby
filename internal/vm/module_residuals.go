@@ -80,12 +80,13 @@ func (vm *VM) registerModuleResiduals() {
 		if topLevel {
 			mod = vm.cObject
 		}
-		for i, seg := range segs {
+		// Every segment but the last names the module to look in next, and only
+		// the FIRST of them is resolved with inherit (MRI sets recur = Qfalse at
+		// the foot of its loop). constPathSegs never yields an empty list, so the
+		// last segment always exists and always answers.
+		for i, seg := range segs[:len(segs)-1] {
 			if !constNameWellFormed(seg) {
 				raise("NameError", "wrong constant name %s", orig)
-			}
-			if i == len(segs)-1 {
-				return vm.constLocation(mod, seg, !recur, recur)
 			}
 			v, ok := vm.constSegGet(mod, seg, recur, i == 0)
 			if !ok {
@@ -97,7 +98,11 @@ func (vm *VM) registerModuleResiduals() {
 			}
 			mod, recur = nc, false
 		}
-		return object.NilV
+		last := segs[len(segs)-1]
+		if !constNameWellFormed(last) {
+			raise("NameError", "wrong constant name %s", orig)
+		}
+		return vm.constLocation(mod, last, !recur, recur)
 	})
 
 	// Module#const_missing(sym): the default hook, raising a NameError naming the
@@ -175,7 +180,10 @@ func (vm *VM) registerModuleResiduals() {
 		cp.isModule = src.isModule
 		return cp
 	}
-	vm.cModule.define("dup", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cModule.define("dup", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if len(args) != 0 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
+		}
 		src := self.(*RClass)
 		cp := allocCopy(src)
 		vm.send(cp, "initialize_dup", []object.Value{src}, nil)
@@ -563,12 +571,10 @@ func copyModuleTables(dst, src *RClass) {
 	bumpMethodSerial()
 }
 
-// copyValueTable returns a fresh map with the same entries, or nil for a nil
-// source (the tables on RClass are created lazily and nil is meaningful).
+// copyValueTable returns a fresh map with the same entries. It takes no nil
+// guard: newClass is the only *RClass constructor and it always creates the
+// consts, cvars and ivars tables, which are the only maps handed to it.
 func copyValueTable(src map[string]object.Value) map[string]object.Value {
-	if src == nil {
-		return nil
-	}
 	out := make(map[string]object.Value, len(src))
 	for k, v := range src {
 		out[k] = v
@@ -620,8 +626,10 @@ func cloneFreezeArg(vm *VM, args []object.Value) (object.Value, bool) {
 		return object.NilV, false
 	}
 	h, ok := args[len(args)-1].(*object.Hash)
-	if !ok {
-		return object.NilV, false
+	if !ok || len(args) != 1 {
+		// clone takes no positional argument, only the freeze: keyword, which
+		// arrives as a single trailing Hash.
+		raise("ArgumentError", "wrong number of arguments (given %d, expected 0)", len(args))
 	}
 	var val object.Value = object.NilV
 	given := false

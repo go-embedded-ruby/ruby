@@ -281,6 +281,15 @@ p m.send(:initialize_copy, m).equal?(m)`, "true\n"},
 		!strings.Contains(err.Error(), "FrozenError") {
 		t.Errorf("frozen receiver: got %v, want FrozenError", err)
 	}
+	// Neither takes a positional argument (MRI: "wrong number of arguments
+	// (given 1, expected 0)").
+	for _, src := range []string{`Class.new.dup(1)`, `Class.new.clone(1)`, `Class.new.clone(1, freeze: true)`} {
+		if err := runErr(t, src); err == nil ||
+			!strings.Contains(err.Error(), "wrong number of arguments (given 1, expected 0)") &&
+				!strings.Contains(err.Error(), "wrong number of arguments (given 2, expected 0)") {
+			t.Errorf("%s: got %v, want ArgumentError", src, err)
+		}
+	}
 	// clone rejects an unknown keyword and a non-boolean freeze:.
 	if err := runErr(t, `Class.new.clone(nope: 1)`); err == nil ||
 		!strings.Contains(err.Error(), "unknown keyword") {
@@ -369,6 +378,12 @@ p W30Str.const_source_location(n)`, "[]\n"},
 		if got := eval(t, c.src); got != c.want {
 			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
 		}
+	}
+	// An intermediate segment that resolves to nothing goes through
+	// #const_missing, whose default raises NameError.
+	if err := runErr(t, `Object.const_source_location("W30NoSuchMod::X")`); err == nil ||
+		!strings.Contains(err.Error(), "NameError") {
+		t.Errorf("unresolvable segment: got %v, want NameError", err)
 	}
 	// A leading segment that names a non-module is a TypeError, as in
 	// rb_mod_const_source_location's "does not refer to class/module".

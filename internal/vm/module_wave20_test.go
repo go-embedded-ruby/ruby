@@ -169,18 +169,23 @@ p r`, "true\n"},
 	}
 }
 
-// TestModuleWave20ConstSourceLocation covers Module#const_source_location: rbgo
-// does not track constant source positions, so it returns nil for a resolvable
-// name, but still enforces MRI's name validation (NameError for a malformed name
-// or a Symbol carrying a scope path; TypeError for a failed #to_str). Asserted
-// against MRI 4.0.
+// TestModuleWave20ConstSourceLocation covers Module#const_source_location's name
+// validation: NameError for a malformed name or a Symbol carrying a scope path,
+// TypeError for a failed #to_str. Asserted against MRI 4.0. Which names RESOLVE
+// is covered by TestModuleWave30ConstSourceLocation; wave 30 gave the method
+// MRI's search, so a name that resolves now answers [] rather than nil.
 func TestModuleWave20ConstSourceLocation(t *testing.T) {
 	cases := []struct{ src, want string }{
-		// A well-formed name (resolvable or not) yields nil (no location tracked).
-		{`class C20; K = 1; end; p C20.const_source_location(:K)`, "nil\n"},
+		// A name that resolves to nothing is nil …
 		{`p Object.const_source_location(:CS_ABSENT_20)`, "nil\n"},
-		// A String or Symbol both accepted; a valid scoped path is well-formed.
-		{`p Module.const_source_location("Object")`, "nil\n"},
+		// … and one that resolves answers []. MRI says ["file", 1] for a constant
+		// defined in Ruby and [] for one defined in C; rbgo records no definition
+		// site yet (a Ruby-level assignment lands in vm.assignConstIn, which has
+		// no place to stamp one), so it answers [] for both — right for every
+		// constant this VM defines in Go, a known gap for the rest. See the note
+		// on Module#const_source_location in module_residuals.go.
+		{`class C20; K = 1; end; p C20.const_source_location(:K)`, "[]\n"},
+		{`p Module.const_source_location("Object")`, "[]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {
