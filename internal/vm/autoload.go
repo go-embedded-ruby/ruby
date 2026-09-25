@@ -107,7 +107,7 @@ func (vm *VM) autoloadPathFor(cls *RClass, name string, inherit bool) object.Val
 		chain = vm.ancestors(cls)
 	}
 	for _, c := range chain {
-		if _, defined := c.consts[name]; defined {
+		if retireSettledAutoload(c, name) {
 			return object.NilV
 		}
 		if c.autoloads == nil {
@@ -152,6 +152,37 @@ func (vm *VM) autoloadVisible(c *RClass, name string) bool {
 		return false
 	}
 	return !vm.featureLoaded(path)
+}
+
+// retireSettledAutoload drops c's pending autoload for name once the constant
+// it reserves is DEFINED, and reports whether the constant is defined.
+//
+// An autoload entry is settled the moment its constant gets a value: MRI's
+// const_tbl_update replaces the autoload entry with an ordinary one, so
+// Module#autoload? answers nil and the name never triggers a load again, even
+// if the constant is removed afterwards and the feature dropped from $".
+// rbgo cannot see that instant — a constant assignment lands in
+// vm.assignConstIn, which this file does not own — so it retires the entry at
+// the first read that finds the constant defined. That is the same rule applied
+// lazily; the window it leaves is a read-free stretch between the definition
+// and a remove_const, where a re-registered autoload would still look settled.
+//
+// Without it a DIRECT require of an autoload's file left the entry behind
+// (tryAutoload only clears the entries it runs itself), and rbgo then answered
+// "settled" from $LOADED_FEATURES alone — so restoring $", as ruby/spec does
+// after every example, resurrected an autoload that had already fired.
+//
+// autoloadPathFor is the ONLY caller, and that is not an oversight: it is the
+// one read that reaches a class whose constant table already holds the name.
+// autoloadVisible and tryAutoload are both reached only after a constant lookup
+// has MISSED on the same class, so the entry they see can never be a settled
+// one, and a guard there would be an arm no argument list can take.
+func retireSettledAutoload(c *RClass, name string) bool {
+	if _, defined := c.consts[name]; !defined {
+		return false
+	}
+	delete(c.autoloads, name)
+	return true
 }
 
 // registerAutoloadOn records (or replaces) a pending autoload for name on cls.

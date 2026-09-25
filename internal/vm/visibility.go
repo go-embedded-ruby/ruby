@@ -71,20 +71,35 @@ func (vm *VM) setInstanceVisibility(mod *RClass, name string, vis visibility) {
 		vm.setClassMethodVisibility(mod.metaOf, name, vis)
 		return
 	}
+	// rb_export_method wraps everything after its lookup in
+	// `if (METHOD_ENTRY_VISI(me) != visi)`: a directive that asks for the level
+	// the method ALREADY has does nothing at all — it neither rewrites the entry
+	// nor adds a ZSUPER entry to the receiver. That is why
+	// `child.private_instance_methods(false)` does NOT list a method an included
+	// module had already made private. Reference: ruby/ruby v3_4_0 vm_method.c
+	// rb_export_method.
 	if own, ok := mod.methods[name]; ok && !own.undefined {
+		if own.vis == vis {
+			return
+		}
 		own.vis = vis
 		bumpMethodSerial()
 		return
 	}
-	if vm.lookupForModuleOp(mod, name) == nil {
+	inherited := vm.lookupForModuleOp(mod, name)
+	if inherited == nil && mod.isModule {
 		// A module whose ancestors do not carry the method falls back to Object:
 		// MRI's rb_export_method searches rb_cObject when the receiver is a module,
 		// so `Module.new { private :some_object_method }` records the override on
 		// the module rather than raising. Reference: ruby/ruby v3_4_0 vm_method.c
 		// rb_export_method.
-		if !mod.isModule || vm.lookupForModuleOp(vm.cObject, name) == nil {
-			vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name)
-		}
+		inherited = vm.lookupForModuleOp(vm.cObject, name)
+	}
+	if inherited == nil {
+		vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name)
+	}
+	if !inherited.undefined && instanceVisibility(mod, name, inherited) == vis {
+		return
 	}
 	if mod.visOverrides == nil {
 		mod.visOverrides = map[string]visibility{}

@@ -75,17 +75,7 @@ func (vm *VM) registerModuleExtras() {
 			mod.defaultVis, mod.funcMode = vis, false
 			return object.NilV
 		}
-		// `private [:a, :b]` (an Array argument) marks each element, returning the
-		// array — MRI accepts a single Array as well as a varargs name list.
-		if len(args) == 1 {
-			if arr, ok := args[0].(*object.Array); ok {
-				for _, a := range arr.Elems {
-					vm.setInstanceVisibility(mod, nameArg(a), vis)
-				}
-				return args[0]
-			}
-		}
-		for _, a := range args {
+		for _, a := range visNameList(args) {
 			vm.setInstanceVisibility(mod, nameArg(a), vis)
 		}
 		if len(args) == 1 {
@@ -159,7 +149,7 @@ func (vm *VM) registerModuleExtras() {
 	// per-receiver override (see setClassMethodVisibility). Returns self, as MRI.
 	classMethodVisibility := func(vm *VM, self object.Value, args []object.Value, vis visibility) object.Value {
 		mod := self.(*RClass)
-		for _, a := range args {
+		for _, a := range visNameList(args) {
 			vm.setClassMethodVisibility(mod, nameArg(a), vis)
 		}
 		return self
@@ -170,6 +160,71 @@ func (vm *VM) registerModuleExtras() {
 	vm.cModule.define("public_class_method", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		return classMethodVisibility(vm, self, args, visPublic)
 	})
+
+	// Module#ruby2_keywords(name, ...) marks the named methods so a trailing
+	// keyword hash passed to them flows through their *rest as a flagged hash.
+	// MRI's rb_mod_ruby2_keywords (ruby/ruby v3_4_0 vm_method.c:2568) checks the
+	// arity (1+), the receiver's frozen state, then for each name: coerce it
+	// (rb_check_id — TypeError for anything but a Symbol/String/#to_str),
+	// resolve it on the receiver, falling back to Object for a module receiver,
+	// and raise NameError when it resolves nowhere. A name the receiver does not
+	// itself define, one whose body is not Ruby, and one whose parameters cannot
+	// carry the flag each WARN instead of raising, through rb_warn — so the
+	// warning shows at $VERBOSE == false and is silenced only by nil. It returns
+	// nil whatever happened.
+	//
+	// The flag itself is not carried yet: MRI writes
+	// ISEQ_BODY(...)->param.flags.ruby2_keywords, which rbgo's bytecode.ISeq has
+	// no field for, and honouring it belongs to the splat binding. So a markable
+	// method is accepted silently and behaves as it did before — the same
+	// partial contract Proc#ruby2_keywords already ships in this VM. What IS
+	// decided here is every observable that does not depend on the flag: the
+	// method exists (a program guarded by `respond_to?(:ruby2_keywords, true)`
+	// no longer dies on NoMethodError), the arity/TypeError/NameError contract,
+	// and the four warnings.
+	vm.cModule.define("ruby2_keywords", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		mod := self.(*RClass)
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1+)")
+		}
+		if mod.frozen {
+			vm.raiseFrozen(mod)
+		}
+		skip := func(name, why string) {
+			vm.rbWarn("warning: Skipping set of ruby2_keywords flag for %s (%s)", name, why)
+		}
+		for _, a := range args {
+			name := vm.coerceNameArg(a)
+			m := vm.lookupForModuleOp(mod, name)
+			if m == nil && mod.isModule {
+				m = vm.lookupForModuleOp(vm.cObject, name)
+			}
+			if m == nil || m.undefined {
+				vm.raiseNameError("undefined method '"+name+"' for "+vm.moduleDescription(mod), name)
+			}
+			// An own entry that is an `undef` tombstone never reaches here: the
+			// lookup above finds it first and the UNDEFINED_METHOD_ENTRY_P check
+			// has already raised.
+			switch own, isOwn := mod.methods[name]; {
+			case !isOwn:
+				// MRI compares the resolved entry's defined_class with the receiver
+				// (and its origin): a method reached through an ancestor cannot be
+				// marked from here.
+				skip(name, "can only set in method defining module")
+			case methodISeq(own) == nil:
+				skip(name, "method not defined in Ruby")
+			case !procRuby2KeywordsMarkable(methodISeq(own)):
+				// has_rest and neither has_kw nor has_kwrest — and, since Ruby 4.0,
+				// no post-splat positional either, which is also why 4.0 names post
+				// arguments in the text where 3.4 did not.
+				skip(name, "method accepts keywords or post arguments or method does not accept argument splat")
+			}
+		}
+		return object.NilV
+	})
+	// rb_define_private_method(rb_cModule, "ruby2_keywords", ...): it is written
+	// as a directive in a class or module body, never through a receiver.
+	vm.setInstanceVisibility(vm.cModule, "ruby2_keywords", visPrivate)
 
 	// alias_method: the method form of `alias new old`, returning the new name as
 	// a Symbol (MRI returns a Symbol since 3.0).
@@ -614,4 +669,22 @@ func allModuleArgs(args []object.Value) bool {
 		}
 	}
 	return true
+}
+
+// visNameList expands the argument list of a visibility directive into the
+// method names it names. MRI's set_method_visibility (ruby/ruby v3_4_0
+// vm_method.c:2400) treats a SINGLE Array argument as the list itself —
+// `private [:a, :b]` and `private_class_method [:foo]` mark each element —
+// and any other shape as a varargs name list. It is one rule serving every
+// directive that routes through set_method_visibility: private / public /
+// protected (through set_visibility) and private_class_method /
+// public_class_method (rb_mod_private_method / rb_mod_public_method), so it
+// lives here once rather than at each call site.
+func visNameList(args []object.Value) []object.Value {
+	if len(args) == 1 {
+		if arr, ok := args[0].(*object.Array); ok {
+			return arr.Elems
+		}
+	}
+	return args
 }
