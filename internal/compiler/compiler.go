@@ -40,6 +40,7 @@ type builder struct {
 	params      []string
 	numRequired int
 	splatIndex  int
+	postCount   int
 	kwNames     []string
 	kwRequired  []bool
 	kwRestSlot  int
@@ -229,6 +230,7 @@ func (b *builder) build() *bytecode.ISeq {
 		Params:      b.params,
 		NumRequired: b.numRequired,
 		SplatIndex:  b.splatIndex,
+		PostCount:   b.postCount,
 		KwNames:     b.kwNames,
 		KwRequired:  b.kwRequired,
 		KwRestSlot:  b.kwRestSlot,
@@ -537,6 +539,37 @@ func (c *Compiler) checkDuplicateParams(names []string) {
 		}
 		seen[n] = true
 	}
+}
+
+// postCountNoSplat counts the trailing REQUIRED positional parameters of a
+// parameter list that has no *splat — the "post" parameters of `def m(a=1, b)`.
+//
+// defaults is parallel to the positionals, non-nil where one carries a default.
+// Everything after the LAST defaulted parameter is required and binds from the
+// tail (args_setup_post_parameters, vm_args.c v3_4_0:887), so the count is the
+// distance from that last optional to the end. With no optional at all there is
+// nothing in front of the required run and the answer is 0 — the ordinary shape,
+// already described by NumRequired alone. A list WITH a splat gets 0 too: its
+// post parameters are the slots after SplatIndex, and the arity helpers already
+// read them there.
+//
+// Ruby has no third arrangement to worry about: an optional parameter after a
+// post one (`def m(a=1, b, c=2)`) is a SyntaxError, so the optionals form one
+// contiguous run.
+func postCountNoSplat(nparams int, defaults []ast.Node, splatIndex int) int {
+	if splatIndex >= 0 {
+		return 0
+	}
+	last := -1
+	for i, d := range defaults {
+		if d != nil && i < nparams {
+			last = i
+		}
+	}
+	if last < 0 {
+		return 0
+	}
+	return nparams - last - 1
 }
 
 func (c *Compiler) fail(format string, args ...any) {
@@ -1838,6 +1871,7 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 		b.patch(skip, b.here())
 	}
 	b.numRequired = nreq
+	b.postCount = postCountNoSplat(len(positionals), posDefaults, blk.SplatIndex)
 	// Keyword params take local slots right after the positionals (matching the
 	// VM's keyword binding in exec), so the body resolves them by name; record
 	// their names/required flags for the VM.
@@ -3385,6 +3419,7 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 		b.patch(skip, b.here())
 	}
 	b.numRequired = nreq
+	b.postCount = postCountNoSplat(len(params), v.Defaults, splatIndex)
 	// Optional keyword params: the VM binds the supplied ones natively, so the
 	// prologue only fills in defaults for the absent ones.
 	for i, kp := range v.KwParams {

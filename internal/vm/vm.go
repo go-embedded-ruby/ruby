@@ -1144,6 +1144,17 @@ func (vm *VM) bindKeywords(iseq *bytecode.ISeq, args *[]object.Value, noKW bool)
 	return kwargs
 }
 
+// iseqPostCount reports how many positional parameters bind from the TAIL of the
+// argument list: the ones after a *splat, or — when there is none — the trailing
+// required run recorded as bytecode.ISeq.PostCount. It is MRI's param.post_num
+// (vm_core.h), which exists in both shapes.
+func iseqPostCount(is *bytecode.ISeq) int {
+	if is.SplatIndex >= 0 {
+		return len(is.Params) - is.SplatIndex - 1
+	}
+	return is.PostCount
+}
+
 // applyKWSplat is the VM half of a `**kw` call site: it drops an EMPTY keyword
 // splat from the argument list and returns the list to pass together with the
 // call's keyword/positional verdict for what is left.
@@ -1286,7 +1297,14 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	}
 	// minReq is the true minimum arity: the leading required params plus any
 	// required "post" params after a *splat (def m(a,*b,c) requires 2, not 1).
-	minReq := iseqRequiredPositional(iseq)
+	// iseqPostCount is the number of positional parameters that bind from the TAIL
+	// of the argument list: the slots after a *splat, or — with no splat —
+	// iseq.PostCount, the trailing required run of `def m(a=1, b)`.
+	npost := iseqPostCount(iseq)
+	// MRI's min_argc is lead_num + post_num whether or not there is a rest
+	// parameter (setup_parameters_complex, vm_args.c v3_4_0:595), so a post
+	// parameter with no splat is required too: `def m(a=1, b)` rejects m().
+	minReq := iseqRequiredPositional(iseq) + iseq.PostCount
 	if len(args) < minReq || (iseq.SplatIndex < 0 && len(args) > len(iseq.Params)) {
 		var expected string
 		switch {
@@ -1315,10 +1333,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// (which is what rbgo did) makes every optional before a post parameter look
 	// supplied, and it is then left nil because the default-filling prologue is
 	// skipped.
-	nPosGiven := len(args)
-	if iseq.SplatIndex >= 0 {
-		nPosGiven -= len(iseq.Params) - iseq.SplatIndex - 1
-	}
+	nPosGiven := len(args) - npost
 	env := vm.getEnv()
 	env.parent, env.kwargs, env.captured = parentEnv, kwargs, false
 	if iseq.NumLocals <= len(env.inline) {
@@ -1353,6 +1368,20 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			if srcIdx := len(args) - npost + j; srcIdx >= 0 && srcIdx < len(args) {
 				env.slots[si+1+j] = args[srcIdx]
 			}
+		}
+	} else if npost > 0 {
+		// Post parameters with no splat (`def m(a=1, b)`). MRI binds them from the
+		// TAIL first and shrinks the argument list, so the optionals in front see
+		// only what is left (args_setup_post_parameters then
+		// args_setup_opt_parameters, vm_args.c v3_4_0:887-892). nPosGiven above is
+		// that remainder, which is what the default-filling prologue reads.
+		npre := len(iseq.Params) - npost
+		if nPosGiven < npre {
+			npre = nPosGiven
+		}
+		copy(env.slots[:npre], args[:npre])
+		for j := 0; j < npost; j++ {
+			env.slots[len(iseq.Params)-npost+j] = args[len(args)-npost+j]
 		}
 	} else {
 		copy(env.slots, args)

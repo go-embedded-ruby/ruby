@@ -1943,9 +1943,11 @@ func (p *Proc) arityVal() int {
 		return p.nativeArity
 	}
 	is := p.iseq
-	// Required count: the leading required positionals, plus one when any keyword
-	// is mandatory (a single required-keyword group counts as one required arg).
-	req := is.NumRequired
+	// Required count: the leading required positionals PLUS the trailing post ones
+	// (rb_iseq_min_max_arity returns lead_num + post_num, proc.c v3_4_0), plus one
+	// when any keyword is mandatory (a single required-keyword group counts as one
+	// required arg).
+	req := is.NumRequired + is.PostCount
 	hasReqKw, hasOptKw := false, is.KwRestSlot >= 0
 	for _, r := range is.KwRequired {
 		if r {
@@ -2213,9 +2215,17 @@ func (vm *VM) bindBlockPositionals(p *Proc, args []object.Value) []object.Value 
 		// (capped at np, dropping extras), leaving len(args) reflecting how many
 		// were actually supplied so the default-filling prologue (OpArgGiven) fires
 		// for the absent ones.
+		//
+		// The required count is the leading requireds PLUS any post parameters
+		// (`{ |a=5, b, c, d| }`), because MRI's min_argc is lead_num + post_num and
+		// arg_setup_block extends a short argument list to it before binding
+		// (vm_args.c v3_4_0:858). The padding nils land at the tail, where the post
+		// parameters bind — which is how `{ |a=5, b, c, d| }` yielded [1, 2] gives
+		// [5, 1, 2, nil].
+		minArgs := p.iseq.NumRequired + p.iseq.PostCount
 		n := len(args)
-		if n < p.iseq.NumRequired {
-			n = p.iseq.NumRequired
+		if n < minArgs {
+			n = minArgs
 		}
 		if n > np {
 			n = np

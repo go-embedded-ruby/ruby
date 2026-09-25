@@ -297,14 +297,32 @@ type ISeq struct {
 	Params      []string       // parameter names
 	NumRequired int            // count of required (non-defaulted) leading params
 	SplatIndex  int            // index of the *splat param, or -1
-	KwNames     []string       // keyword-param names; slots follow the positionals
-	KwRequired  []bool         // parallel to KwNames; true = required (no default)
-	KwRestSlot  int            // slot of the **rest keyword-splat param, or -1
-	BlockSlot   int            // slot of the &block param, or -1
-	NumLocals   int            // total local slots (params first, then assigns)
-	Locals      []string       // local-variable names by slot (for Binding); "" for anonymous slots
-	Children    []*ISeq        // nested ISeqs (method bodies / class bodies defined here)
-	Super       string         // for a class body: the superclass name ("" → Object)
+
+	// PostCount is the number of trailing REQUIRED positional parameters when
+	// there is NO *splat — the post parameters of `def m(a=1, b)` or
+	// `{ |a=5, b, c, d| }`. It is 0 whenever SplatIndex >= 0, where the post
+	// parameters are already derivable as len(Params)-SplatIndex-1, and 0 for the
+	// ordinary shape where every required parameter leads.
+	//
+	// MRI keeps post_num beside lead_num and opt_num in every iseq
+	// (rb_iseq_param, vm_core.h), independent of has_rest, because the two counts
+	// answer different questions: min_argc is lead_num + post_num, and post
+	// parameters bind from the TAIL before the optionals are filled from what is
+	// left (setup_parameters_complex, vm_args.c v3_4_0:878-892). With only
+	// NumRequired and SplatIndex the no-splat case cannot be said at all: rbgo
+	// read `def m(a=1, b)` as two optionals and bound b from the front.
+	//
+	// NumRequired stays the LEADING required count, so a reader that predates this
+	// field keeps the meaning it had.
+	PostCount  int
+	KwNames    []string // keyword-param names; slots follow the positionals
+	KwRequired []bool   // parallel to KwNames; true = required (no default)
+	KwRestSlot int      // slot of the **rest keyword-splat param, or -1
+	BlockSlot  int      // slot of the &block param, or -1
+	NumLocals  int      // total local slots (params first, then assigns)
+	Locals     []string // local-variable names by slot (for Binding); "" for anonymous slots
+	Children   []*ISeq  // nested ISeqs (method bodies / class bodies defined here)
+	Super      string   // for a class body: the superclass name ("" → Object)
 
 	// Lines is the source map: which source line each instruction came from,
 	// COMPRESSED to one entry per line CHANGE and kept sorted by PC.
