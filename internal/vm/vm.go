@@ -1691,15 +1691,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				}
 				// Truncate one past this frame's own entries: this frame's normal
 				// pop never ran, and the deeper frames that unwound left theirs too.
-				vm.frameNames = vm.frameNames[:frameNamesDepth-1]
-				vm.frameFiles = vm.frameFiles[:frameFilesDepth-1]
-				vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth-1]
-				vm.frameMethods = vm.frameMethods[:frameCrefsDepth-1]
-				vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+				vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth-1)
+				vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth-1)
+				vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth-1)
+				vm.frameMethods = truncFrames(vm.frameMethods, frameCrefsDepth-1)
+				vm.requireDirs = truncFrames(vm.requireDirs, requireDirsDepth)
 				if pushedFile {
-					vm.fileStack = vm.fileStack[:fileStackDepth-1]
+					vm.fileStack = truncFrames(vm.fileStack, fileStackDepth-1)
 				} else {
-					vm.fileStack = vm.fileStack[:fileStackDepth]
+					vm.fileStack = truncFrames(vm.fileStack, fileStackDepth)
 				}
 				execResult = sig.value
 			}
@@ -2655,12 +2655,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// would otherwise leak into __FILE__, require_relative resolution, caller
 					// and backtraces taken from the rescue/ensure body.
 					restoreFrameStacks := func() {
-						vm.frameNames = vm.frameNames[:frameNamesDepth]
-						vm.frameFiles = vm.frameFiles[:frameFilesDepth]
-						vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth]
-						vm.frameMethods = vm.frameMethods[:frameCrefsDepth]
-						vm.fileStack = vm.fileStack[:fileStackDepth]
-						vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+						vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth)
+						vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth)
+						vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth)
+						vm.frameMethods = truncFrames(vm.frameMethods, frameCrefsDepth)
+						vm.fileStack = truncFrames(vm.fileStack, fileStackDepth)
+						vm.requireDirs = truncFrames(vm.requireDirs, requireDirsDepth)
 					}
 					rerr, ok := r.(RubyError)
 					if !ok {
@@ -2736,14 +2736,49 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// skips recycling and leaves both to the GC — correct, just not pooled.
 	vm.putEnv(env)
 	vm.putStack(stack)
-	vm.frameNames = vm.frameNames[:len(vm.frameNames)-1]
-	vm.frameFiles = vm.frameFiles[:len(vm.frameFiles)-1]
-	vm.frameCrefs = vm.frameCrefs[:len(vm.frameCrefs)-1]
-	vm.frameMethods = vm.frameMethods[:len(vm.frameMethods)-1]
+	// Pop by truncating to the depth this frame recorded when it pushed, not by
+	// subtracting one from whatever the stack is NOW. Normally the two are the
+	// same number — every deeper frame popped its own entry — so this is the same
+	// pop it always was. They part company when a SECOND goroutine has been
+	// through these stacks in the meantime, which is exactly what
+	// `core/module/autoload_spec.rb` does: its `(concurrently)` and `during the
+	// autoload` describes run Ruby on a Thread.new while the main thread is
+	// inside require, and the thread body runs through Run's frameNames[:0] reset
+	// (four sites) while the frame that started it is still live. The old form
+	// then evaluated frameNames[:-1] and the process died with
+	// `slice bounds out of range [:-1]`, taking the whole file's score to 0 — a
+	// 63-example phantom regression on about one run in ten (issue #615).
+	//
+	// Anchoring on the frame's own depth is the rule these stacks already keep
+	// elsewhere: setFrameCode sizes frameCode to the pushing frame's index, and
+	// the rescue path above truncates to frameNamesDepth-1 for the same reason.
+	// truncFrames leaves a stack that is ALREADY shorter alone, so a peer's reset
+	// is never undone by re-extending into stale entries. That makes the pop
+	// exactly as best-effort as the pc write in the interpreter loop, which is
+	// bounds-checked for this same reason and documents it there.
+	vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth-1)
+	vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth-1)
+	vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth-1)
+	vm.frameMethods = truncFrames(vm.frameMethods, frameCrefsDepth-1)
 	if pushedFile {
-		vm.fileStack = vm.fileStack[:len(vm.fileStack)-1]
+		vm.fileStack = truncFrames(vm.fileStack, fileStackDepth-1)
 	}
 	return result
+}
+
+// truncFrames shortens a per-frame tracking stack to n entries, and leaves it
+// alone when it is already at or below n. Both halves matter: it never slices to
+// a negative length, and it never re-extends a stack another goroutine has
+// already shortened (a slice expression may grow back into stale entries up to
+// cap, which would resurrect frames that are gone).
+func truncFrames[T any](s []T, n int) []T {
+	if n < 0 {
+		n = 0
+	}
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 // constTable returns the constant table a const name is defined into for the
