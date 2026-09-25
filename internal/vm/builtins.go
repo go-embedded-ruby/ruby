@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"golang.org/x/text/encoding/charmap"
+
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -2372,9 +2374,18 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cString.define("grapheme_clusters", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("grapheme_clusters", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		// rb_str_grapheme_clusters passes WANTARRAY(…), which is 0 when a block is
+		// given — so the block form yields each cluster and returns the receiver,
+		// exactly as #each_grapheme_cluster does.
 		s := self.(*object.String)
-		pieces := graphemeClusters(s.Str())
+		pieces := vm.stringGraphemePieces(s)
+		if blk != nil {
+			for _, g := range pieces {
+				vm.callBlock(blk, []object.Value{graphemePiece(g, s.Enc)})
+			}
+			return self
+		}
 		out := make([]object.Value, len(pieces))
 		for i, g := range pieces {
 			out[i] = graphemePiece(g, s.Enc)
@@ -2386,7 +2397,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each_grapheme_cluster")
 		}
 		s := self.(*object.String)
-		for _, g := range graphemeClusters(s.Str()) {
+		for _, g := range vm.stringGraphemePieces(s) {
 			vm.callBlock(blk, []object.Value{graphemePiece(g, s.Enc)})
 		}
 		return self
@@ -7339,18 +7350,93 @@ func chompStr(s string) string {
 // fallback rb_enc_mbclen makes, so the loop advances identically.
 func strCharPieces(s, enc string) []string {
 	out := make([]string, 0, len(s))
-	if enc == "ASCII-8BIT" {
-		for i := 0; i < len(s); i++ {
-			out = append(out, s[i:i+1])
-		}
-		return out
-	}
 	for i := 0; i < len(s); {
-		_, size := utf8.DecodeRuneInString(s[i:])
-		out = append(out, s[i:i+size])
-		i += size
+		n := encCharLen(s[i:], enc)
+		out = append(out, s[i:i+n])
+		i += n
 	}
 	return out
+}
+
+// encCharLen is rb_enc_mbclen for the head of s in encoding enc: how many bytes
+// the next character occupies.
+//
+//   - A single-byte encoding gives 1. That is ASCII-8BIT and US-ASCII by
+//     definition, every set whose x/text codec is a charmap.Charmap (the
+//     256-entry byte<->rune table: the ISO-8859-*, Windows-*, KOI8-* and IBM
+//     code pages), and the two DUMMY BOM encodings, which carry no character
+//     structure at all — which is why "abc".encode("UTF-16").length is 8.
+//
+//   - UTF-16 is two bytes, or four for a high surrogate followed by a low one.
+//
+//   - UTF-32 is four.
+//
+//   - UTF-8 decodes, with an invalid byte its own one-byte character (MRI's
+//     rb_enc_mbclen returns 1 for a byte that begins no valid sequence).
+//
+//   - Shift_JIS/Windows-31J and the EUC-JP family are split by their lead-byte
+//     tables (Oniguruma's enc/shift_jis.c and enc/euc_jp.c).
+//
+// The remaining legacy multibyte sets — ISO-2022-JP and friends, which are
+// STATEFUL and so cannot be measured one character at a time — are left on the
+// UTF-8 walk they already had.
+func encCharLen(s, enc string) int {
+	switch enc {
+	case "", "UTF-8":
+		_, n := utf8.DecodeRuneInString(s)
+		return n
+	case "ASCII-8BIT", "US-ASCII", "ISO-8859-1", "UTF-16", "UTF-32":
+		return 1
+	case "UTF-16LE", "UTF-16BE":
+		if len(s) < 2 {
+			return len(s)
+		}
+		hi := uint16(s[1])<<8 | uint16(s[0])
+		if enc == "UTF-16BE" {
+			hi = uint16(s[0])<<8 | uint16(s[1])
+		}
+		if hi >= 0xD800 && hi <= 0xDBFF && len(s) >= 4 {
+			return 4
+		}
+		return 2
+	case "UTF-32LE", "UTF-32BE":
+		if len(s) < 4 {
+			return len(s)
+		}
+		return 4
+	case "Shift_JIS", "Windows-31J":
+		// enc/shift_jis.c mbc_enc_len: 0x81–0x9F and 0xE0–0xFC are lead bytes of a
+		// two-byte character; 0xA1–0xDF are the single-byte half-width katakana,
+		// and 0x00–0x80, 0xA0 and 0xFD–0xFF stand alone.
+		c := s[0]
+		if (c >= 0x81 && c <= 0x9F) || (c >= 0xE0 && c <= 0xFC) {
+			if len(s) < 2 {
+				return len(s)
+			}
+			return 2
+		}
+		return 1
+	case "EUC-JP", "eucJP-ms", "EUC-JP-2004":
+		// enc/euc_jp.c: SS2 (0x8E) introduces two bytes, SS3 (0x8F) three, and
+		// 0xA1–0xFE is a two-byte lead. Everything else is one byte.
+		c := s[0]
+		n := 1
+		switch {
+		case c == 0x8F:
+			n = 3
+		case c == 0x8E || (c >= 0xA1 && c <= 0xFE):
+			n = 2
+		}
+		if n > len(s) {
+			return len(s)
+		}
+		return n
+	}
+	if _, single := xtextEncodings[enc].(*charmap.Charmap); single {
+		return 1
+	}
+	_, n := utf8.DecodeRuneInString(s)
+	return n
 }
 
 // chopStr removes the last character of s in the encoding named by enc (a
