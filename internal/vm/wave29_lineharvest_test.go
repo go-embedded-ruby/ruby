@@ -40,6 +40,12 @@ func TestWarnUplevelPastBottom(t *testing.T) {
 	if got := eval(t, "$VERBOSE = true\nwarn(\"x\", uplevel: 9223372036854775807)\n"); got != "warning: x\n" {
 		t.Errorf("uplevel maxint: got %q, want %q", got, "warning: x\n")
 	}
+	// The level EXACTLY one past the outermost frame: at the top level there is
+	// one frame, so uplevel 1 already has no location. ruby 4.0.5 on the same two
+	// lines prints "warning: x" too.
+	if got := eval(t, "$VERBOSE = true\nwarn(\"x\", uplevel: 1)\n"); got != "warning: x\n" {
+		t.Errorf("uplevel one past the top: got %q, want %q", got, "warning: x\n")
+	}
 }
 
 // The uplevel level is converted ONCE. A #to_int that counts its calls must not

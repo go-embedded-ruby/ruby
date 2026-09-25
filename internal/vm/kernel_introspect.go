@@ -563,14 +563,17 @@ func (vm *VM) frameOwner(i int, base string) (*RClass, bool, bool) {
 	}
 	// A `class << X` body's definee IS the singleton class, which is the shape
 	// MRI always has. rb_gen_method_name unwraps it to the attached object and
-	// uses the "." form, but ONLY when that object is itself a class or module:
-	// a method on a plain object's singleton (`def obj.foo`) has no owner to
-	// name and reports the bare name.
+	// uses the "." form, but ONLY when that object is itself a class or module.
+	//
+	// In rbgo that condition is exactly metaOf. A class's or module's singleton
+	// records its subject there; `attached` holds the object of a PER-OBJECT
+	// singleton, and ensureSingleton refuses to make one of those for a class
+	// (`case *RClass: return nil, false` — classes use metaClass() instead), so
+	// attached is never a class or module and a second branch testing for one
+	// would be unreachable. A per-object singleton has no owner to name and its
+	// methods report the bare name — rb_gen_method_name's own fallthrough.
 	if cref.isSingleton {
 		if t := cref.metaOf; t != nil {
-			return t, true, true
-		}
-		if t, isClass := cref.attached.(*RClass); isClass {
 			return t, true, true
 		}
 		return nil, false, false
