@@ -626,6 +626,13 @@ func (d *mDumper) writeObject(o *RObject) {
 		}
 		return
 	}
+	// There is deliberately no 'd' (TYPE_DATA) dump branch here. MRI reaches it
+	// from `case T_DATA`, not from responding to #_dump_data: a pure-Ruby class
+	// that defines #_dump_data is still a T_OBJECT and dumps as 'o'. Keying the
+	// branch on the method instead turned `Marshal.dump(W.new)` into "\x04\bd:\x06W…"
+	// where MRI writes "\x04\bo:\x06W\x00". rbgo has no user-reachable T_DATA, so
+	// the 'd' container is load-only (readUserData), for streams MRI wrote.
+	//
 	// A plain object is MRI's T_OBJECT: its instance variables live in the 'o'
 	// body itself (has_ivars counts them "elsewhere"), so there is no 'I' wrapper.
 	d.writeExtended(o)
@@ -698,26 +705,21 @@ func (d *mDumper) writeUserDef(o *RObject) {
 	if !ok {
 		raise("TypeError", "_dump() must return String")
 	}
-	// The object's own ivars, then the payload String's encoding, which displaces
-	// them when present (hasiv2 overwrites hasiv).
-	names := o.liveIvarNames()
+	// The ivar set comes from the payload String alone. has_ivars is called on the
+	// object first, but an ordinary instance is T_OBJECT, which that function
+	// skips as "counted elsewhere" — and for a USERDEF container there is no
+	// elsewhere, so the object's own variables are never written. Only the
+	// String's contribute: its encoding, and any variable #_dump set on it.
 	enc := marshalEncodingIvar(str.EncName())
-	n := len(names)
 	if enc != nil {
-		names, n = nil, 1
-	}
-	if n > 0 {
 		d.buf = append(d.buf, 'I')
 	}
 	d.buf = append(d.buf, 'u')
 	d.writeSymbol(o.class.name)
 	d.writeBytes(str.Str())
-	if n > 0 {
-		d.writeLong(n)
-		if enc != nil {
-			d.writeEncodingIvar(enc)
-		}
-		d.writeIvarPairs(names, o.ivars)
+	if enc != nil {
+		d.writeLong(1)
+		d.writeEncodingIvar(enc)
 	}
 	d.remember(o)
 }
@@ -977,7 +979,9 @@ func (r *mReader) readObject() (object.Value, bool) {
 	case 'U':
 		return r.freezeValue(r.readUserMarshal()), true
 	case 'u':
-		return r.freezeValue(r.readUserDef()), true
+		return r.freezeValue(r.readUserDef(false)), true
+	case 'd':
+		return r.freezeValue(r.readUserData()), true
 	case '/':
 		return r.freezeValue(r.readRegexp(false)), true
 	case '@':
@@ -1057,9 +1061,18 @@ func (r *mReader) readHash(withDefault bool) object.Value {
 
 // readIvarWrapped reads the 'I' container: a base object followed by its ivars.
 // String/Regexp encoding ivars (:E, :encoding) are folded into the encoding;
-// every other ivar is set as a real instance variable (Time's cosmetic
-// :zone / :offset are read and discarded).
+// every other ivar is set as a real instance variable, and Time's :zone /
+// :offset become its zone.
 func (r *mReader) readIvarWrapped() object.Value {
+	// MRI's r_object0 passes an `ivp` flag down into the TYPE_USERDEF branch, so
+	// that branch reads its OWN instance variables and only then calls r_entry.
+	// The object therefore takes a HIGHER object-link id than its variables —
+	// mirroring where w_remember sits on the dump side. Every other container
+	// registers itself first, so only 'u' needs the hand-over.
+	if r.pos < len(r.buf) && r.buf[r.pos] == 'u' {
+		r.pos++
+		return r.readUserDef(true)
+	}
 	base, _ := r.readObject()
 	n := r.long()
 	for i := 0; i < n; i++ {
@@ -1128,12 +1141,43 @@ func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 	}
 }
 
+// marshalNonObjectBases names the core classes whose instances are not MRI
+// T_OBJECTs. MRI's TYPE_OBJECT branch allocates an instance (obj_alloc_by_klass)
+// and raises "dump format error" when what comes back is not a T_OBJECT, which
+// is what stops an 'o' stream naming File, IO or Array from building one. rbgo
+// has no allocation that can report a built-in type, so the class itself is
+// asked instead — by ancestry, so a subclass is caught too. A user class of the
+// same short name is not: a namespaced one is "My::File", and a top-level
+// redefinition of File IS the class this rejects.
+var marshalNonObjectBases = map[string]bool{
+	"String": true, "Array": true, "Hash": true, "Regexp": true, "Time": true,
+	"IO": true, "File": true, "Dir": true, "Struct": true, "Proc": true,
+	"Method": true, "UnboundMethod": true, "Symbol": true, "Integer": true,
+	"Float": true, "NilClass": true, "TrueClass": true, "FalseClass": true,
+	"Module": true, "Class": true, "MatchData": true, "Thread": true,
+	"Mutex": true, "Binding": true,
+}
+
+// marshalPlainObjectClass reports whether an 'o' container may rebuild an
+// instance of cls — that is, whether its instances are plain objects.
+func (vm *VM) marshalPlainObjectClass(cls *RClass) bool {
+	for _, a := range vm.ancestors(cls) {
+		if marshalNonObjectBases[a.name] {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *mReader) readObj() object.Value {
 	className := r.readSymbol()
 	if className == "Range" {
 		return r.readRange()
 	}
 	cls := r.vm.marshalClass(className)
+	if !r.vm.marshalPlainObjectClass(cls) {
+		raise("ArgumentError", "dump format error")
+	}
 	o := &RObject{class: cls, ivars: map[string]object.Value{}}
 	r.register(o)
 	isExc := r.vm.marshalIsException(cls)
@@ -1305,15 +1349,69 @@ func (r *mReader) readUserMarshal() object.Value {
 	return o
 }
 
-func (r *mReader) readUserDef() object.Value {
+// readUserDef reads the 'u' (TYPE_USERDEF) container. hasIvars says the caller
+// was an 'I' wrapper that handed its ivar list over: MRI reads those variables
+// here, before r_entry, so the object takes a higher link id than they do.
+//
+// MRI applies them to the PAYLOAD STRING and then calls _load with it, which is
+// how :E / :encoding decide the encoding _load sees. Time is the exception in
+// rbgo: it is rebuilt directly rather than through Time._load, so the variables
+// time_mload would have read off that String are applied to the Time itself.
+func (r *mReader) readUserDef(hasIvars bool) object.Value {
 	className := r.readSymbol()
 	data := r.bytes(r.long())
+	type ivar struct {
+		name string
+		val  object.Value
+	}
+	var ivars []ivar
+	if hasIvars {
+		n := r.long()
+		for i := 0; i < n; i++ {
+			name := r.readSymbol()
+			ivars = append(ivars, ivar{name, r.readValue()})
+		}
+	}
 	if className == "Time" {
-		return r.register(marshalLoadTime(data))
+		t := marshalLoadTime(data)
+		for _, iv := range ivars {
+			r.applyIvar(t, iv.name, iv.val)
+		}
+		return r.register(t)
+	}
+	str := object.NewStringBytesEnc(append([]byte(nil), data...), "ASCII-8BIT")
+	for _, iv := range ivars {
+		r.applyIvar(str, iv.name, iv.val)
 	}
 	cls := r.vm.marshalClass(className)
-	str := object.NewStringBytesEnc(append([]byte(nil), data...), "ASCII-8BIT")
 	return r.register(r.vm.send(cls, "_load", []object.Value{str}, nil))
+}
+
+// readUserData reads the 'd' (TYPE_DATA) container that carries an object
+// wrapping a C pointer: a class name, then the value its #_load_data rebuilds
+// the object from. Following MRI's r_object0, the instance is registered in the
+// objects table BEFORE the payload is read, so a reference back to it links; the
+// #_load_data check comes before the payload too, so a class missing that method
+// raises TypeError without consuming it.
+func (r *mReader) readUserData() object.Value {
+	name := r.readSymbol()
+	cls := r.vm.marshalClass(name)
+	o := &RObject{class: cls, ivars: map[string]object.Value{}}
+	// MRI separates the two failures by the ALLOCATED object's type: not a T_DATA
+	// is "dump format error" (ArgumentError), a T_DATA without #_load_data is a
+	// TypeError. rbgo has no T_DATA to test, so the discriminator here is whether
+	// the class takes part in the _dump_data / _load_data protocol at all — which
+	// is the property that makes a class 'd'-dumpable in the first place. A class
+	// that does neither is a regular object and gets the ArgumentError.
+	if !r.vm.respondsTo(o, "_dump_data") && !r.vm.respondsTo(o, "_load_data") {
+		raise("ArgumentError", "dump format error")
+	}
+	r.register(o)
+	if !r.vm.respondsTo(o, "_load_data") {
+		raise("TypeError", "class %s needs to have instance method '_load_data'", name)
+	}
+	r.vm.send(o, "_load_data", []object.Value{r.readValue()}, nil)
+	return o
 }
 
 func (r *mReader) readRegexp(_ bool) object.Value {
