@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
+	"github.com/go-ruby-parser/parser"
 	"github.com/go-ruby-parser/parser/ast"
 )
 
@@ -262,4 +263,119 @@ func TestPostCountIsCompiled(t *testing.T) {
 	if got := blk.Children[0].PostCount; got != 3 {
 		t.Errorf("{ |a=5, b, c, d| }: PostCount=%d, want 3", got)
 	}
+}
+
+// TestNumberedParameterNameIsReserved pins the reserved set exactly: `_1`..`_9`
+// cannot be BOUND as a local anywhere, while `_0`, `_10` and `@_1` are ordinary
+// identifiers. Every expectation was run against MRI 4.0.5.
+func TestNumberedParameterNameIsReserved(t *testing.T) {
+	for _, tc := range []struct {
+		src    string
+		refuse bool
+	}{
+		{"_1 = 0", true},
+		{"_9 = 0", true},
+		{"proc { _1 = 0 }", true},
+		{"x = 1; _1 = 2", true},
+		{"_1, x = 1, 2", true},
+		{"for _1 in [1]; end", true},
+		{"begin; rescue => _1; end", true},
+		{"_0 = 0", false},
+		{"_10 = 0", false},
+		{"@_1 = 1", false},
+		{"_ = 1", false},
+		{"_1a = 1", false},
+		{"proc { _1 }", false}, // the parameter itself, synthesised by the parser
+	} {
+		_, err := compileString(tc.src)
+		refused := err != nil && strings.Contains(err.Error(), "reserved for numbered parameters")
+		if refused != tc.refuse {
+			t.Errorf("%q: refused = %v (err %v), want %v", tc.src, refused, err, tc.refuse)
+		}
+	}
+	if !isNumberedParamName("_1") || !isNumberedParamName("_9") {
+		t.Error("_1/_9 must be reserved")
+	}
+	for _, n := range []string{"_0", "_10", "_", "_a", "", "a1", "_1_"} {
+		if isNumberedParamName(n) {
+			t.Errorf("%q must not be reserved", n)
+		}
+	}
+}
+
+// TestImplicitBlockParamsAreHidden pins both halves: the discriminator that
+// tells a SYNTHESISED parameter list from a written one, and what is blanked.
+//
+// The discriminator is an artefact of go-ruby-parser v0.3.0 — a written list
+// pads Defaults to one entry per parameter, a synthesised one leaves it empty —
+// so it is pinned here on purpose: if the parser ever pads a synthesised list,
+// this fails rather than letting `it` quietly become a visible local again.
+func TestImplicitBlockParamsAreHidden(t *testing.T) {
+	blockOf := func(t *testing.T, src string) *bytecode.ISeq {
+		t.Helper()
+		iseq, err := compileString(src)
+		if err != nil {
+			t.Fatalf("compile %q: %v", src, err)
+		}
+		return iseq.Children[0]
+	}
+
+	// The discriminator, over every parameter shape the parser writes out.
+	implicit := func(src string) bool {
+		prog := mustBlock(t, src)
+		return blockParamsAreImplicit(prog)
+	}
+	for src, want := range map[string]bool{
+		"f { }":         false,
+		"f { |a| }":     false,
+		"f { |a, b| }":  false,
+		"f { |a=1| }":   false,
+		"f { |*a| }":    false,
+		"f { |it| it }": false,
+		"f { |x| it }":  false,
+		"f { it }":      true,
+		"f { _1 }":      true,
+		"f { _1 + _3 }": true,
+	} {
+		if got := implicit(src); got != want {
+			t.Errorf("blockParamsAreImplicit(%q) = %v, want %v", src, got, want)
+		}
+	}
+
+	// `it` loses its name in BOTH tables: #parameters reads Params, a Binding
+	// reads Locals.
+	itBlk := blockOf(t, "f { it }")
+	if len(itBlk.Params) != 1 || itBlk.Params[0] != "" {
+		t.Errorf("f { it }: Params = %q, want one empty name", itBlk.Params)
+	}
+	if len(itBlk.Locals) != 1 || itBlk.Locals[0] != "" {
+		t.Errorf("f { it }: Locals = %q, want one empty name", itBlk.Locals)
+	}
+	// A WRITTEN |it| keeps its name.
+	writtenIt := blockOf(t, "f { |it| it }")
+	if len(writtenIt.Params) != 1 || writtenIt.Params[0] != "it" {
+		t.Errorf("f { |it| it }: Params = %q, want [\"it\"]", writtenIt.Params)
+	}
+	// The numbered parameters keep theirs, in both tables.
+	np := blockOf(t, "f { _1 + _2 }")
+	if len(np.Params) != 2 || np.Params[0] != "_1" || np.Params[1] != "_2" {
+		t.Errorf("f { _1 + _2 }: Params = %q, want [\"_1\" \"_2\"]", np.Params)
+	}
+	if len(np.Locals) < 2 || np.Locals[0] != "_1" || np.Locals[1] != "_2" {
+		t.Errorf("f { _1 + _2 }: Locals = %q, want the numbered names kept", np.Locals)
+	}
+}
+
+// mustBlock parses src (one call carrying one block) and returns that block.
+func mustBlock(t *testing.T, src string) *ast.Block {
+	t.Helper()
+	prog, err := parser.Parse(src)
+	if err != nil {
+		t.Fatalf("parse %q: %v", src, err)
+	}
+	call, ok := prog.Body[0].(*ast.Call)
+	if !ok || call.Block == nil {
+		t.Fatalf("%q did not parse as a call carrying a block", src)
+	}
+	return call.Block
 }

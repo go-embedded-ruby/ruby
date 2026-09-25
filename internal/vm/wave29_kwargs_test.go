@@ -248,3 +248,53 @@ func TestPostParametersWithoutASplat(t *testing.T) {
 		}
 	}
 }
+
+// TestImplicitItIsInvisible runs the `it` parameter's visibility end to end,
+// against MRI 4.0.5. `it` resolves lexically inside the block and is invisible
+// to every reflective route out of it; a WRITTEN |it| is an ordinary parameter.
+func TestImplicitItIsInvisible(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"a lambda's it is nameless", "p(-> { it }.parameters)", "[[:req]]"},
+		{"a proc's it is nameless", "p(proc { it }.parameters)", "[[:opt]]"},
+		{"a written |it| keeps its name", "p(proc { |it| it }.parameters)", "[[:opt, :it]]"},
+		{"it is not a binding local", `p(-> { it; binding.local_variables }.call("a"))`, "[]"},
+		{
+			"binding.local_variable_get cannot reach it",
+			`begin
+			   proc { a = it; binding.local_variable_get(:it) }.call(1)
+			 rescue NameError => e
+			   puts "NameError"
+			 end`,
+			"NameError",
+		},
+		{
+			"binding.local_variable_set cannot reach it",
+			`p(-> { a = it; binding.local_variable_set(:it, :b); [a, it] }.call(:a))`,
+			"[:a, :a]",
+		},
+		{"defined?(it) is still resolved lexically", `p(-> { it; defined?(it) }.call(1))`, `"local-variable"`},
+		{"it still binds the argument", `p(-> { it }.call(7))`, "7"},
+		{"it affects arity", "p(-> { it }.arity)", "1"},
+		// The numbered parameters are NOT hidden: they are named in #parameters,
+		// and for the Ruby version rbgo reports they are visible to a Binding.
+		{"_1 keeps its name", "p(proc { _1 }.parameters)", "[[:opt, :_1]]"},
+		{"_1 is a binding local", `p(-> { _1; binding.local_variables }.call("a"))`, "[:_1]"},
+	} {
+		if got := runSrc(t, tc.src); got != tc.want {
+			t.Errorf("%s:\ngot  %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestNumberedParameterNameIsReservedAtRuntime: the refusal reaches Ruby as a
+// SyntaxError, which is the shape ruby/spec asks the question in.
+func TestNumberedParameterNameIsReservedAtRuntime(t *testing.T) {
+	src := `begin
+	          eval("_1 = 0")
+	        rescue SyntaxError => e
+	          puts e.message.include?("reserved for numbered parameters")
+	        end`
+	if got := runSrc(t, src); got != "true" {
+		t.Errorf("eval(\"_1 = 0\"): got %q, want a SyntaxError naming the reservation", got)
+	}
+}

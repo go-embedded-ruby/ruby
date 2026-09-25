@@ -1927,10 +1927,60 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 	c.compileBody(blk.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
 	c.cur().emit(bytecode.OpReturn, 0, 0)
+	hideImplicitBlockParams(b, blk, positionals)
 	child := c.pop().build()
 	idx := len(parent.children)
 	parent.children = append(parent.children, child)
 	return idx
+}
+
+// blockParamsAreImplicit reports whether the parser SYNTHESISED this block's
+// parameter list from `it` / `_1`..`_9` in its body, rather than reading a
+// written `|...|`.
+//
+// go-ruby-parser v0.3.0 records no flag for it, but it does leave a reliable
+// trace: for a written parameter list it pads Defaults to one entry per
+// parameter (nil where there is no default), and for a synthesised one it
+// leaves Defaults empty. `proc { |it| }` therefore arrives with Params ["it"]
+// and one nil Default, while `proc { it }` arrives with Params ["it"] and none
+// — the only thing that tells the two apart, since the names are identical.
+func blockParamsAreImplicit(blk *ast.Block) bool {
+	return len(blk.Defaults) < len(blk.Params)
+}
+
+// hideImplicitBlockParams takes the name off an `it` parameter the parser
+// synthesised, so the block's own frame is the only thing that can see it.
+//
+// MRI's `it` is not an entry in the local table the program can reach:
+// `-> { it }.parameters` is [[:req]] — NAMELESS — and `it` appears in no
+// `binding.local_variables`, answers no `binding.local_variable_get`, cannot be
+// set through `binding.local_variable_set` and cannot be reached by
+// `eval("it")`, while `defined?(it)` inside the block is still "local-variable"
+// because the compiler resolved it lexically. rbgo gets there by blanking the
+// name AFTER the body is compiled: resolution during the body used the real
+// name, and the ISeq that remains carries none.
+//
+// The numbered parameters `_1`..`_9` are deliberately NOT hidden. They are named
+// in #parameters ([[:opt, :_1]]) and, for the Ruby version rbgo reports
+// (RUBY_VERSION 3.4.1), they are visible to a Binding too — ruby/spec pins that
+// under `ruby_version_is ""..."4.0"` and pins the hiding only from 4.0. Hiding
+// them here would be answering a question rbgo has not yet said it is answering;
+// it belongs with the RUBY_VERSION bump.
+func hideImplicitBlockParams(b *builder, blk *ast.Block, positionals []string) {
+	if !blockParamsAreImplicit(blk) {
+		return
+	}
+	for i, name := range positionals {
+		if name != "it" {
+			continue
+		}
+		if i < len(b.locals) {
+			b.locals[i] = ""
+		}
+		if i < len(b.params) {
+			b.params[i] = ""
+		}
+	}
 }
 
 // scopeParent inspects a ClassDef/ModuleDef NamePath. It returns the parent
