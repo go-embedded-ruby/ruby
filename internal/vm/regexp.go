@@ -1896,6 +1896,127 @@ func captureFields(md *onig.MatchData, enc string) []object.Value {
 	return out
 }
 
+// Coderange states, ruby/ruby v3_4_0 include/ruby/encoding.h
+// ENC_CODERANGE_7BIT / _VALID / _BROKEN. ENC_CODERANGE_UNKNOWN is not modelled:
+// subEncBuilder always knows the bytes it appended, so it scans eagerly where
+// MRI defers.
+type coderange int
+
+const (
+	cr7Bit coderange = iota
+	crValid
+	crBroken
+)
+
+// scanCoderange is string.c v3_4_0 coderange_scan: 7BIT for ASCII-only bytes in
+// an ASCII-compatible encoding, VALID when the bytes decode in enc, BROKEN
+// otherwise. A non-ASCII-compatible encoding never reports 7BIT (coderange_scan
+// short-circuits to the mbclen walk), which is what keeps a UTF-16LE run of
+// ASCII code points from being promoted into another encoding's buffer.
+func scanCoderange(b []byte, enc string) coderange {
+	if encIsASCIICompat(enc) && asciiOnly(b) {
+		return cr7Bit
+	}
+	if validInEncoding(b, enc) {
+		return crValid
+	}
+	return crBroken
+}
+
+// subEncBuilder accumulates the output of String#sub/#gsub while negotiating the
+// result's encoding the way MRI does, append by append.
+//
+// str_gsub (string.c v3_4_0) seeds dest with the RECEIVER's encoding and a 7BIT
+// coderange, then appends the literal runs between matches with
+// rb_enc_str_buf_cat(dest, cp, len, str_enc) and every replacement with
+// rb_str_buf_append(dest, val). Both land in rb_enc_cr_str_buf_cat, which is the
+// only place the result's encoding is decided:
+//
+//	if (str_encindex != ptr_encindex && str_cr != 7BIT && ptr_cr != 7BIT) → incompatible
+//	if (str_cr == 7BIT)  res = (ptr_cr == 7BIT) ? str_enc : ptr_enc
+//	if (str_cr == VALID) res = str_enc
+//
+// so a buffer that is still ASCII-only ADOPTS the encoding of the first non-ASCII
+// piece appended to it, a buffer that already carries non-ASCII bytes KEEPS its
+// encoding and accepts only ASCII-only pieces, and any other pairing raises
+// Encoding::CompatibilityError. That is why "hello".gsub(/l/){195.chr} comes back
+// BINARY and "hllëllo".gsub(/l/){iso8859_5} raises.
+type subEncBuilder struct {
+	b   strings.Builder
+	enc string    // ENCODING_GET(dest)
+	cr  coderange // ENC_CODERANGE(dest), 7BIT while dest is empty
+}
+
+// newSubEncBuilder seeds the buffer from the receiver, as str_gsub's
+// rb_enc_associate(dest, str_enc) + ENC_CODERANGE_SET does.
+func newSubEncBuilder(enc string) *subEncBuilder {
+	return &subEncBuilder{enc: enc, cr: cr7Bit}
+}
+
+// cat appends len bytes tagged with encoding enc, applying
+// rb_enc_cr_str_buf_cat's negotiation. It is the single place the buffer's
+// encoding can change or an incompatibility can be raised.
+func (sb *subEncBuilder) cat(s, enc string) {
+	if enc == "" {
+		enc = "UTF-8"
+	}
+	if enc == sb.enc {
+		// Same encoding: only the coderange can move (7BIT → VALID/BROKEN).
+		if sb.cr == cr7Bit {
+			sb.cr = scanCoderange([]byte(s), enc)
+		}
+		sb.b.WriteString(s)
+		return
+	}
+	dstCompat, srcCompat := encIsASCIICompat(sb.enc), encIsASCIICompat(enc)
+	if !dstCompat || !srcCompat {
+		// rb_enc_cr_str_buf_cat: with either side not ASCII-compatible the only
+		// legal cases are an empty append (no-op) and an empty buffer, which
+		// simply takes the appended bytes' encoding.
+		if s == "" {
+			return
+		}
+		if sb.b.Len() == 0 {
+			sb.b.WriteString(s)
+			sb.enc, sb.cr = enc, scanCoderange([]byte(s), enc)
+			return
+		}
+		raiseSubEncIncompat(sb.enc, enc)
+	}
+	ptrCR := scanCoderange([]byte(s), enc)
+	strCR := sb.cr
+	if sb.b.Len() == 0 {
+		strCR = cr7Bit // str_cr = RSTRING_LEN(str) ? ENC_CODERANGE(str) : 7BIT
+	}
+	if strCR != cr7Bit && ptrCR != cr7Bit {
+		raiseSubEncIncompat(sb.enc, enc)
+	}
+	sb.b.WriteString(s)
+	switch {
+	case strCR == cr7Bit && ptrCR == cr7Bit:
+		sb.cr = cr7Bit
+	case strCR == cr7Bit:
+		sb.enc, sb.cr = enc, ptrCR
+	default: // strCR is VALID or BROKEN: res_encindex = str_encindex
+		sb.cr = strCR
+	}
+}
+
+// raiseSubEncIncompat is rb_enc_cr_str_buf_cat's `incompatible:` label.
+func raiseSubEncIncompat(dst, src string) {
+	raise("Encoding::CompatibilityError", "incompatible character encodings: %s and %s",
+		encInspectName(dst), encInspectName(src))
+}
+
+// catStr appends a replacement String, which carries its own encoding —
+// str_gsub's rb_str_buf_append(dest, val).
+func (sb *subEncBuilder) catStr(v *object.String) { sb.cat(v.Str(), v.EncName()) }
+
+// result is the finished buffer as a String in the negotiated encoding.
+func (sb *subEncBuilder) result() *object.String {
+	return object.NewStringViewEnc(sb.b.String(), sb.enc)
+}
+
 // stringSub backs String#sub (global=false) and String#gsub (global=true). The
 // first argument is the pattern (a Regexp, or a String matched literally). A
 // replacement is given as a second String argument (with backref templates), a
@@ -1903,19 +2024,31 @@ func captureFields(md *onig.MatchData, enc string) []object.Value {
 // or a block (yielded each match). With neither a replacement nor a block,
 // gsub returns an Enumerator over the matches; sub raises ArgumentError, as MRI
 // does.
-func (vm *VM) stringSub(subject string, args []object.Value, blk *Proc, global bool) object.Value {
+func (vm *VM) stringSub(self *object.String, args []object.Value, blk *Proc, global bool) object.Value {
 	re := vm.subRegexp(args[0])
+	// str_gsub reaches the engine through rb_pat_search, which splits on the
+	// pattern's type: a T_STRING pattern is looked up with rb_str_byteindex and
+	// never sees rb_reg_prepare_enc, while a Regexp goes through rb_reg_search →
+	// rb_reg_prepare_re. Only the Regexp arm rejects a subject whose bytes are
+	// BROKEN in its own encoding (ArgumentError) or whose encoding the regexp
+	// cannot match at all (Encoding::CompatibilityError) — which is why
+	// "\xC3\xC0\xC3".gsub("\xC0") { … } is legal though the literal pattern
+	// would compile to a UTF-8 regexp here.
+	if _, isRe := args[0].(*Regexp); isRe {
+		vm.checkSubjectEncoding(re, self)
+	}
+	subject := self.Str()
 	// A replacement argument takes precedence over a block: MRI ignores the block
 	// when a String or Hash replacement is also supplied.
 	if len(args) >= 2 {
 		if h, ok := args[1].(*object.Hash); ok {
-			return vm.gsubHash(re, subject, h, global)
+			return vm.gsubHash(re, self, h, global)
 		}
-		repl, _ := vm.strCoerceArg(args[1]) // a non-String replacement converts via #to_str
-		return vm.gsub(re, subject, repl, nil, global)
+		_, replObj := vm.strCoerceArg(args[1]) // a non-String replacement converts via #to_str
+		return vm.gsub(re, self, replObj, nil, global)
 	}
 	if blk != nil {
-		return vm.gsub(re, subject, "", blk, global)
+		return vm.gsub(re, self, nil, blk, global)
 	}
 	if !global {
 		raise("ArgumentError", "wrong number of arguments (given 1, expected 2)")
@@ -1953,8 +2086,14 @@ func (vm *VM) subRegexp(v object.Value) *Regexp {
 //
 // Empty matches advance one character (Ruby semantics); a non-empty match
 // advances past its end. With global=false only the first match is replaced.
-func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) object.Value {
-	var b strings.Builder
+func (vm *VM) gsub(re *Regexp, self *object.String, replObj *object.String, blk *Proc, global bool) object.Value {
+	subject, srcEnc := self.Str(), self.EncName()
+	repl := ""
+	replEnc := srcEnc
+	if replObj != nil {
+		repl, replEnc = replObj.Str(), replObj.EncName()
+	}
+	b := newSubEncBuilder(srcEnc)
 	pos := 0                          // byte cursor into subject (start of the not-yet-emitted tail)
 	search := 0                       // byte cursor where the next search begins
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
@@ -1965,7 +2104,7 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 		}
 		mBegin := base + md.Begin(0)
 		mEnd := base + md.End(0)
-		b.WriteString(subject[pos:mBegin]) // literal text before the match
+		b.cat(subject[pos:mBegin], srcEnc) // literal text before the match
 		// Expose this match through $~ / $1.. so a replacement block sees the
 		// captures. md's offsets are relative to base (the offset searchFrom
 		// matched from), so carry the FULL subject with byteOff=base — then
@@ -1975,12 +2114,15 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 		vm.lastMatch = cur
 		last = cur
 		if blk != nil {
-			res := vm.callBlock(blk, []object.Value{object.NewString(md.Str(0))})
-			b.WriteString(vm.send(res, "to_s", nil, nil).ToS())
+			// str_gsub: val = rb_obj_as_string(rb_yield(match0)) — the block's
+			// result is a String (or its #to_s), and rb_str_buf_append carries
+			// THAT string's encoding into the negotiation.
+			res := vm.callBlock(blk, []object.Value{object.NewStringViewEnc(md.Str(0), srcEnc)})
+			b.catStr(vm.objAsStringVal(res))
 		} else {
 			// Prematch/postmatch are taken from the whole subject so \` and \'
 			// span text already consumed by earlier matches (Ruby semantics).
-			b.WriteString(expandReplacement(repl, md, subject[:mBegin], subject[mEnd:]))
+			b.cat(expandReplacement(repl, md, subject[:mBegin], subject[mEnd:]), replEnc)
 		}
 		pos = mEnd
 		if mEnd == mBegin { // empty match: emit one char, step forward
@@ -1989,7 +2131,7 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 				break
 			}
 			_, w := utf8.DecodeRuneInString(subject[mEnd:])
-			b.WriteString(subject[mEnd : mEnd+w])
+			b.cat(subject[mEnd:mEnd+w], srcEnc)
 			pos = mEnd + w
 			search = mEnd + w
 		} else {
@@ -2002,15 +2144,16 @@ func (vm *VM) gsub(re *Regexp, subject, repl string, blk *Proc, global bool) obj
 	// MRI leaves $~ as the last match (or nil when there was none) after the call,
 	// even if a block reassigned $~ via its own match.
 	vm.lastMatch = last
-	b.WriteString(subject[pos:]) // remaining tail
-	return object.NewString(b.String())
+	b.cat(subject[pos:], srcEnc) // remaining tail
+	return b.result()
 }
 
 // gsubHash implements the Hash-replacement form of String#sub/#gsub: each
 // matched substring m is replaced by hash[m], or the empty string when the hash
 // has no such key. $~ / $1.. are updated per match, as in the block form.
-func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) object.Value {
-	var b strings.Builder
+func (vm *VM) gsubHash(re *Regexp, self *object.String, h *object.Hash, global bool) object.Value {
+	subject, srcEnc := self.Str(), self.EncName()
+	b := newSubEncBuilder(srcEnc)
 	pos := 0                          // byte cursor into subject (start of the not-yet-emitted tail)
 	search := 0                       // byte cursor where the next search begins
 	last := object.Value(object.NilV) // $~ after the call: last match, or nil when there is none
@@ -2021,7 +2164,7 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 		}
 		mBegin := base + md.Begin(0)
 		mEnd := base + md.End(0)
-		b.WriteString(subject[pos:mBegin]) // literal text before the match
+		b.cat(subject[pos:mBegin], srcEnc) // literal text before the match
 		// Carry the FULL subject with byteOff=base so $~ reports absolute
 		// offsets and the whole receiver (see gsub).
 		cur := &MatchData{md: md, subject: subject, re: re, byteOff: base}
@@ -2031,9 +2174,9 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 		// hash's default value / default_proc, exactly as MRI does. A nil result
 		// (no matching key and no default) contributes nothing; any other value is
 		// coerced with #to_s.
-		v := vm.send(h, "[]", []object.Value{object.NewString(md.Str(0))}, nil)
+		v := vm.send(h, "[]", []object.Value{object.NewStringViewEnc(md.Str(0), srcEnc)}, nil)
 		if _, isNil := v.(object.Nil); !isNil {
-			b.WriteString(vm.send(v, "to_s", nil, nil).ToS())
+			b.catStr(vm.objAsStringVal(v))
 		}
 		pos = mEnd
 		if mEnd == mBegin { // empty match: emit one char, step forward
@@ -2042,7 +2185,7 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 				break
 			}
 			_, w := utf8.DecodeRuneInString(subject[mEnd:])
-			b.WriteString(subject[mEnd : mEnd+w])
+			b.cat(subject[mEnd:mEnd+w], srcEnc)
 			pos = mEnd + w
 			search = mEnd + w
 		} else {
@@ -2054,8 +2197,8 @@ func (vm *VM) gsubHash(re *Regexp, subject string, h *object.Hash, global bool) 
 	}
 	// $~ is the last match (or nil when none), even after a default_proc reset it.
 	vm.lastMatch = last
-	b.WriteString(subject[pos:]) // remaining tail
-	return object.NewString(b.String())
+	b.cat(subject[pos:], srcEnc) // remaining tail
+	return b.result()
 }
 
 // expandReplacement expands a sub/gsub replacement template against a match:

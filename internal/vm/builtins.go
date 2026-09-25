@@ -2608,10 +2608,10 @@ func (vm *VM) bootstrap() {
 		return vm.scan(vm.subRegexp(args[0]), strOf(self), self, blk)
 	})
 	vm.cString.define("sub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return vm.stringSub(strOf(self), args, blk, false)
+		return vm.stringSub(self.(*object.String), args, blk, false)
 	})
 	vm.cString.define("gsub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return vm.stringSub(strOf(self), args, blk, true)
+		return vm.stringSub(self.(*object.String), args, blk, true)
 	})
 	vm.cString.define("to_i", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		base := 10
@@ -7908,11 +7908,15 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 		// MRI reports this enumerator's #size as nil (the match count is unknown).
 		return enumForSized(s, "gsub!", func(*VM) object.Value { return object.NilV }, args[0])
 	}
-	res := vm.stringSub(s.Str(), args, blk, global).(*object.String)
-	if res.Str() == s.Str() {
+	res := vm.stringSub(s, args, blk, global).(*object.String)
+	if res.Str() == s.Str() && res.EncName() == s.EncName() {
 		return object.NilV
 	}
+	// str_gsub's bang arm ends in str_shared_replace(str, dest), which carries
+	// dest's ENCODING as well as its bytes — so a replacement that promoted the
+	// buffer's encoding promotes the receiver too.
 	s.TakeFrom(res)
+	s.Enc = res.Enc
 	return s
 }
 
@@ -9072,14 +9076,20 @@ func (vm *VM) inspectElement(e object.Value, path map[*object.Array]bool) []byte
 // other value is passed through #to_s (whose exception propagates), and if that
 // is still not a String the value's default #<Class:0x…> identity is used. #to_str
 // is never consulted.
-func (vm *VM) objAsString(v object.Value) string {
+func (vm *VM) objAsString(v object.Value) string { return vm.objAsStringVal(v).Str() }
+
+// objAsStringVal is objAsString keeping the String OBJECT rather than its bytes,
+// for callers that need the encoding MRI's rb_obj_as_string result carries — the
+// replacement appends in str_gsub go through rb_str_buf_append, which negotiates
+// against exactly that encoding.
+func (vm *VM) objAsStringVal(v object.Value) *object.String {
 	if s, ok := v.(*object.String); ok {
-		return s.Str()
+		return s
 	}
 	if s, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
-		return s.Str()
+		return s
 	}
-	return vm.objectIdentityRepr(v)
+	return object.NewString(vm.objectIdentityRepr(v))
 }
 
 // joinElement converts one array element to its String piece for Array#join: a
