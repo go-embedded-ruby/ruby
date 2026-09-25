@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"golang.org/x/text/encoding/charmap"
+
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -1123,6 +1125,7 @@ func (vm *VM) bootstrap() {
 	aliasBuiltin(vm.cObject, "fail", "raise")
 	vm.cObject.define("Integer", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
+		vm.mustASCIICompat(args[0]) // rb_str_to_inum, before any parsing
 		// fail either raises (the default) or, under `exception: false`, yields nil.
 		fail := func(class, format string, a ...interface{}) object.Value {
 			if doRaise {
@@ -1216,6 +1219,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cObject.define("Float", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
+		vm.mustASCIICompat(args[0]) // rb_str_to_dbl, before any parsing
 		fail := func(class, format string, a ...interface{}) object.Value {
 			if doRaise {
 				raise(class, format, a...)
@@ -2288,7 +2292,7 @@ func (vm *VM) bootstrap() {
 		return strEncOf(self, strings.TrimRight(strOf(self), wsCutset))
 	})
 	vm.cString.define("chomp", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return strEncOf(self, vm.chompSep(strOf(self), args))
+		return strEncOf(self, vm.chompSep(strOf(self), self.(*object.String).EncName(), args))
 	})
 	vm.cString.define("chop", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return strEncOf(self, chopStr(strOf(self), self.(*object.String).Enc))
@@ -2370,9 +2374,18 @@ func (vm *VM) bootstrap() {
 		}
 		return self
 	})
-	vm.cString.define("grapheme_clusters", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("grapheme_clusters", func(vm *VM, self object.Value, _ []object.Value, blk *Proc) object.Value {
+		// rb_str_grapheme_clusters passes WANTARRAY(…), which is 0 when a block is
+		// given — so the block form yields each cluster and returns the receiver,
+		// exactly as #each_grapheme_cluster does.
 		s := self.(*object.String)
-		pieces := graphemeClusters(s.Str())
+		pieces := vm.stringGraphemePieces(s)
+		if blk != nil {
+			for _, g := range pieces {
+				vm.callBlock(blk, []object.Value{graphemePiece(g, s.Enc)})
+			}
+			return self
+		}
 		out := make([]object.Value, len(pieces))
 		for i, g := range pieces {
 			out[i] = graphemePiece(g, s.Enc)
@@ -2384,7 +2397,7 @@ func (vm *VM) bootstrap() {
 			return enumFor(self, "each_grapheme_cluster")
 		}
 		s := self.(*object.String)
-		for _, g := range graphemeClusters(s.Str()) {
+		for _, g := range vm.stringGraphemePieces(s) {
 			vm.callBlock(blk, []object.Value{graphemePiece(g, s.Enc)})
 		}
 		return self
@@ -2588,32 +2601,59 @@ func (vm *VM) bootstrap() {
 		return strRindexString(s, needle, limit)
 	})
 	vm.cString.define("=~", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		re, ok := args[0].(*Regexp)
-		if !ok {
-			raise("TypeError", "type mismatch: %s given", classNameOf(args[0]))
+		// string.c v3_4_0 rb_str_match:
+		//     case T_STRING: rb_raise(rb_eTypeError, "type mismatch: String given");
+		//     case T_REGEXP: return rb_reg_match(y, x);
+		//     default:       return rb_funcall(y, idEqTilde, 1, x);
+		// so any object that is neither is asked to match the string ITSELF; only a
+		// String operand is refused.
+		switch y := args[0].(type) {
+		case *object.String:
+			raise("TypeError", "type mismatch: String given")
+		case *Regexp:
+			return vm.regexpMatchIndex(y, self)
 		}
-		return vm.regexpMatchIndex(re, self)
+		return vm.send(args[0], "=~", []object.Value{self}, nil)
 	})
-	vm.cString.define("match?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(strMatchRegexp(args[0]).re.MatchString(strOf(self)))
-	})
-	vm.cString.define("match", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		// match(pattern, pos): start scanning at character offset pos (default 0).
-		if len(args) >= 2 {
-			return vm.runMatchFrom(strMatchRegexp(args[0]), strOf(self), intArg(args[1]))
+	vm.cString.define("match?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		// string.c v3_4_0 rb_str_match_m_p: get_pat, then rb_reg_match_p(re, str,
+		// argc > 1 ? NUM2LONG(argv[1]) : 0). The position argument is honoured, and
+		// the call goes straight to the engine rather than dispatching #match?.
+		if len(args) == 0 || len(args) > 2 {
+			raise("ArgumentError", "wrong number of arguments (given %d, expected 1..2)", len(args))
 		}
-		return vm.runMatch(strMatchRegexp(args[0]), strOf(self))
+		probe := append([]object.Value{self}, args[1:]...)
+		return vm.regexpMatchP(vm.getPat(args[0]).(*Regexp), probe)
+	})
+	vm.cString.define("match", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
+		// string.c v3_4_0 rb_str_match_m:
+		//     re = argv[0]; argv[0] = str;
+		//     result = rb_funcallv(get_pat(re), rb_intern("match"), argc, argv);
+		//     if (!NIL_P(result) && rb_block_given_p()) return rb_yield(result);
+		// The match is DISPATCHED on the pattern object, so a Regexp subclass that
+		// overrides #match is called, and the block receives the MatchData and its
+		// value becomes the result — only when the match succeeded.
+		if len(args) == 0 {
+			raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
+		}
+		fwd := append([]object.Value{self}, args[1:]...)
+		result := vm.send(vm.getPat(args[0]), "match", fwd, nil)
+		if blk != nil && !object.IsNil(result) {
+			return vm.callBlock(blk, []object.Value{result})
+		}
+		return result
 	})
 	vm.cString.define("scan", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		return vm.scan(vm.subRegexp(args[0]), strOf(self), self, blk)
 	})
 	vm.cString.define("sub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return vm.stringSub(strOf(self), args, blk, false)
+		return vm.stringSub(self.(*object.String), args, blk, false)
 	})
 	vm.cString.define("gsub", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
-		return vm.stringSub(strOf(self), args, blk, true)
+		return vm.stringSub(self.(*object.String), args, blk, true)
 	})
 	vm.cString.define("to_i", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		vm.mustASCIICompat(self) // rb_str_to_inum's first act
 		base := 10
 		if len(args) > 0 {
 			// The base is coerced through #to_int (MRI's rb_num2long), so a Float
@@ -2622,7 +2662,8 @@ func (vm *VM) bootstrap() {
 		}
 		return stringToInt(strOf(self), base)
 	})
-	vm.cString.define("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("to_f", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		vm.mustASCIICompat(self) // rb_str_to_dbl's first act
 		return object.Float(parseLeadingFloat(strOf(self)))
 	})
 	vm.cString.define("oct", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -2945,7 +2986,8 @@ func (vm *VM) bootstrap() {
 		return vm.strBang(self, func(x string) string { return strings.TrimRight(x, wsCutset) })
 	})
 	vm.cString.define("chomp!", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		return vm.strBang(self, func(s string) string { return vm.chompSep(s, args) })
+		enc := self.(*object.String).EncName()
+		return vm.strBang(self, func(s string) string { return vm.chompSep(s, enc, args) })
 	})
 	vm.cString.define("chop!", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		enc := self.(*object.String).Enc
@@ -7182,7 +7224,7 @@ func reverseStr(s string) string {
 //     remove one trailing \r\n, \n, or \r.
 //   - "" (empty): paragraph mode — remove ALL trailing newlines (\r\n / \n).
 //   - any other string (converted with #to_str): remove that exact suffix once.
-func (vm *VM) chompSep(s string, args []object.Value) string {
+func (vm *VM) chompSep(s, enc string, args []object.Value) string {
 	sep := "\n"
 	if len(args) == 0 {
 		// No argument → use $/ (the record separator); a non-String $/ (nil default
@@ -7197,7 +7239,7 @@ func (vm *VM) chompSep(s string, args []object.Value) string {
 		sep, _ = vm.strCoerceArg(args[0])
 	}
 	if sep == "\n" {
-		return chompStr(s) // smart mode: one trailing \r\n, \n, or \r
+		return chompSmart(s, enc) // smart mode: one trailing \r\n, \n, or \r
 	}
 	if sep == "" {
 		// Paragraph mode: strip every trailing \n (treating \r\n as one), so a run
@@ -7217,6 +7259,72 @@ func (vm *VM) chompSep(s string, args []object.Value) string {
 }
 
 // chompStr removes one trailing line ending (\r\n, \n, or \r), as in Ruby.
+// chompSmart is chompped_length's smart_chomp arm (string.c v3_4_0), the branch
+// taken when the separator is the default "\n" — either because $/ still holds
+// rb_default_rs or because the given separator is the single byte '\n'
+// ("if (rslen == 1 && newline == '\n') goto smart_chomp;"). It removes ONE
+// trailing newline character and then a '\r' character before it, both read as
+// CHARACTERS of the receiver's encoding:
+//
+//	if (rb_enc_mbminlen(enc) > 1) {
+//	    pp = rb_enc_left_char_head(p, e-rb_enc_mbminlen(enc), e, enc);
+//	    if (rb_enc_is_newline(pp, e, enc)) e = pp;
+//	    pp = e - rb_enc_mbminlen(enc);
+//	    if (pp >= p) { pp = rb_enc_left_char_head(p, pp, e, enc);
+//	                   if (rb_enc_ascget(pp, e, 0, enc) == '\r') e = pp; }
+//	    return e - p;
+//	}
+//
+// so "abc\r\n".encode("utf-32be").chomp drops EIGHT bytes, not two. Byte-level
+// chomping happened to be right for every ASCII-compatible encoding and wrong
+// for the fixed-width ones, where it left half a character behind.
+func chompSmart(s, enc string) string {
+	if encMinLen(enc) == 1 {
+		return chompStr(s)
+	}
+	if nl := encASCIIChar('\n', enc); strings.HasSuffix(s, nl) {
+		s = s[:len(s)-len(nl)]
+	}
+	if cr := encASCIIChar('\r', enc); strings.HasSuffix(s, cr) {
+		s = s[:len(s)-len(cr)]
+	}
+	return s
+}
+
+// encMinLen is rb_enc_mbminlen: the smallest byte width a character can have in
+// enc. Among the encodings rbgo models only the UTF-16 and UTF-32 families
+// exceed one byte; every ASCII-compatible set (US-ASCII, UTF-8, ASCII-8BIT, the
+// ISO-8859-* and Windows-* single-byte sets, EUC-JP, Shift_JIS) has minlen 1.
+func encMinLen(enc string) int {
+	switch enc {
+	case "UTF-16LE", "UTF-16BE", "UTF-16":
+		return 2
+	case "UTF-32LE", "UTF-32BE", "UTF-32":
+		return 4
+	}
+	return 1
+}
+
+// encASCIIChar returns the bytes the 7-bit character c occupies in enc. For the
+// fixed-width UTF-16/UTF-32 forms that is the zero-padded code unit in the
+// encoding's byte order; everywhere else (every ASCII-compatible encoding) it is
+// the byte itself. A suffix match against these bytes is always
+// character-aligned, because such a string's length is a multiple of the unit
+// width and no surrogate half or continuation unit can hold a value below 0x80.
+func encASCIIChar(c byte, enc string) string {
+	switch enc {
+	case "UTF-16BE", "UTF-16":
+		return string([]byte{0, c})
+	case "UTF-16LE":
+		return string([]byte{c, 0})
+	case "UTF-32BE", "UTF-32":
+		return string([]byte{0, 0, 0, c})
+	case "UTF-32LE":
+		return string([]byte{c, 0, 0, 0})
+	}
+	return string([]byte{c})
+}
+
 func chompStr(s string) string {
 	if strings.HasSuffix(s, "\r\n") {
 		return s[:len(s)-2]
@@ -7242,18 +7350,93 @@ func chompStr(s string) string {
 // fallback rb_enc_mbclen makes, so the loop advances identically.
 func strCharPieces(s, enc string) []string {
 	out := make([]string, 0, len(s))
-	if enc == "ASCII-8BIT" {
-		for i := 0; i < len(s); i++ {
-			out = append(out, s[i:i+1])
-		}
-		return out
-	}
 	for i := 0; i < len(s); {
-		_, size := utf8.DecodeRuneInString(s[i:])
-		out = append(out, s[i:i+size])
-		i += size
+		n := encCharLen(s[i:], enc)
+		out = append(out, s[i:i+n])
+		i += n
 	}
 	return out
+}
+
+// encCharLen is rb_enc_mbclen for the head of s in encoding enc: how many bytes
+// the next character occupies.
+//
+//   - A single-byte encoding gives 1. That is ASCII-8BIT and US-ASCII by
+//     definition, every set whose x/text codec is a charmap.Charmap (the
+//     256-entry byte<->rune table: the ISO-8859-*, Windows-*, KOI8-* and IBM
+//     code pages), and the two DUMMY BOM encodings, which carry no character
+//     structure at all — which is why "abc".encode("UTF-16").length is 8.
+//
+//   - UTF-16 is two bytes, or four for a high surrogate followed by a low one.
+//
+//   - UTF-32 is four.
+//
+//   - UTF-8 decodes, with an invalid byte its own one-byte character (MRI's
+//     rb_enc_mbclen returns 1 for a byte that begins no valid sequence).
+//
+//   - Shift_JIS/Windows-31J and the EUC-JP family are split by their lead-byte
+//     tables (Oniguruma's enc/shift_jis.c and enc/euc_jp.c).
+//
+// The remaining legacy multibyte sets — ISO-2022-JP and friends, which are
+// STATEFUL and so cannot be measured one character at a time — are left on the
+// UTF-8 walk they already had.
+func encCharLen(s, enc string) int {
+	switch enc {
+	case "", "UTF-8":
+		_, n := utf8.DecodeRuneInString(s)
+		return n
+	case "ASCII-8BIT", "US-ASCII", "ISO-8859-1", "UTF-16", "UTF-32":
+		return 1
+	case "UTF-16LE", "UTF-16BE":
+		if len(s) < 2 {
+			return len(s)
+		}
+		hi := uint16(s[1])<<8 | uint16(s[0])
+		if enc == "UTF-16BE" {
+			hi = uint16(s[0])<<8 | uint16(s[1])
+		}
+		if hi >= 0xD800 && hi <= 0xDBFF && len(s) >= 4 {
+			return 4
+		}
+		return 2
+	case "UTF-32LE", "UTF-32BE":
+		if len(s) < 4 {
+			return len(s)
+		}
+		return 4
+	case "Shift_JIS", "Windows-31J":
+		// enc/shift_jis.c mbc_enc_len: 0x81–0x9F and 0xE0–0xFC are lead bytes of a
+		// two-byte character; 0xA1–0xDF are the single-byte half-width katakana,
+		// and 0x00–0x80, 0xA0 and 0xFD–0xFF stand alone.
+		c := s[0]
+		if (c >= 0x81 && c <= 0x9F) || (c >= 0xE0 && c <= 0xFC) {
+			if len(s) < 2 {
+				return len(s)
+			}
+			return 2
+		}
+		return 1
+	case "EUC-JP", "eucJP-ms", "EUC-JP-2004":
+		// enc/euc_jp.c: SS2 (0x8E) introduces two bytes, SS3 (0x8F) three, and
+		// 0xA1–0xFE is a two-byte lead. Everything else is one byte.
+		c := s[0]
+		n := 1
+		switch {
+		case c == 0x8F:
+			n = 3
+		case c == 0x8E || (c >= 0xA1 && c <= 0xFE):
+			n = 2
+		}
+		if n > len(s) {
+			return len(s)
+		}
+		return n
+	}
+	if _, single := xtextEncodings[enc].(*charmap.Charmap); single {
+		return 1
+	}
+	_, n := utf8.DecodeRuneInString(s)
+	return n
 }
 
 // chopStr removes the last character of s in the encoding named by enc (a
@@ -7908,11 +8091,15 @@ func (vm *VM) strSubBang(self object.Value, args []object.Value, blk *Proc, glob
 		// MRI reports this enumerator's #size as nil (the match count is unknown).
 		return enumForSized(s, "gsub!", func(*VM) object.Value { return object.NilV }, args[0])
 	}
-	res := vm.stringSub(s.Str(), args, blk, global).(*object.String)
-	if res.Str() == s.Str() {
+	res := vm.stringSub(s, args, blk, global).(*object.String)
+	if res.Str() == s.Str() && res.EncName() == s.EncName() {
 		return object.NilV
 	}
+	// str_gsub's bang arm ends in str_shared_replace(str, dest), which carries
+	// dest's ENCODING as well as its bytes — so a replacement that promoted the
+	// buffer's encoding promotes the receiver too.
 	s.TakeFrom(res)
+	s.Enc = res.Enc
 	return s
 }
 
@@ -8402,6 +8589,24 @@ func charBoundary(b []byte, pos int, enc string) bool {
 func (vm *VM) checkCodepointEncoding(s *object.String) {
 	if !validInEncoding(s.Bytes(), s.EncName()) {
 		raise("ArgumentError", "invalid byte sequence in %s", s.EncName())
+	}
+}
+
+// mustASCIICompat is encoding.c v3_4_0 rb_must_asciicompat:
+//
+//	rb_encoding *enc = rb_enc_get(str);
+//	if (!rb_enc_asciicompat(enc))
+//	    rb_raise(rb_eEncCompatError, "ASCII incompatible encoding: %s", rb_enc_name(enc));
+//
+// Every string-to-number entry point runs it before it looks at a single byte —
+// rb_str_to_dbl (String#to_f, Kernel#Float), rb_str_to_inum (String#to_i,
+// Kernel#Integer), rb_str_to_c (String#to_c, Kernel#Complex) — because a
+// UTF-16 or UTF-32 string's bytes are not digits even when they look like them.
+// It fires even under `exception: false`, which suppresses only the parse
+// failure, not the encoding one.
+func (vm *VM) mustASCIICompat(v object.Value) {
+	if s, ok := v.(*object.String); ok && !encIsASCIICompat(s.EncName()) {
+		raise("Encoding::CompatibilityError", "ASCII incompatible encoding: %s", s.EncName())
 	}
 }
 
@@ -9072,14 +9277,20 @@ func (vm *VM) inspectElement(e object.Value, path map[*object.Array]bool) []byte
 // other value is passed through #to_s (whose exception propagates), and if that
 // is still not a String the value's default #<Class:0x…> identity is used. #to_str
 // is never consulted.
-func (vm *VM) objAsString(v object.Value) string {
+func (vm *VM) objAsString(v object.Value) string { return vm.objAsStringVal(v).Str() }
+
+// objAsStringVal is objAsString keeping the String OBJECT rather than its bytes,
+// for callers that need the encoding MRI's rb_obj_as_string result carries — the
+// replacement appends in str_gsub go through rb_str_buf_append, which negotiates
+// against exactly that encoding.
+func (vm *VM) objAsStringVal(v object.Value) *object.String {
 	if s, ok := v.(*object.String); ok {
-		return s.Str()
+		return s
 	}
 	if s, ok := vm.send(v, "to_s", nil, nil).(*object.String); ok {
-		return s.Str()
+		return s
 	}
-	return vm.objectIdentityRepr(v)
+	return object.NewString(vm.objectIdentityRepr(v))
 }
 
 // joinElement converts one array element to its String piece for Array#join: a
@@ -10440,24 +10651,34 @@ func (vm *VM) stringLineSegs(self object.Value, args []object.Value) []object.Va
 	str := self.(*object.String)
 	s := str.Str()
 	enc := str.Enc
+	// string.c v3_4_0 rb_str_enumerate_lines resolves the separator ONCE, before
+	// it looks at chomp:
+	//     if (rb_scan_args(argc, argv, "01:", &rs, &opts) == 0) rs = rb_rs;
+	//     ...
+	//     if (NIL_P(rs)) { ENUM_ELEM(ary, str); return …; }
+	// so an absent argument reads $/ — including a $/ that has been set to nil —
+	// and the nil case yields the WHOLE receiver, never chomped: the early return
+	// happens before any chomping code runs.
+	sepArg := object.Value(nil)
+	if len(pos) > 0 {
+		sepArg = pos[0]
+	} else {
+		sepArg = vm.gvar("$/")
+	}
 	var segs []string
 	switch {
+	case object.IsNil(sepArg):
+		if s != "" {
+			segs = []string{s}
+		}
 	case s == "":
 		// no segments
-	case len(pos) > 0 && object.IsNil(pos[0]):
-		// A nil separator yields the whole string as a single line.
-		whole := s
-		if chomp {
-			whole = chompSeg(whole, "\n")
-		}
-		segs = []string{whole}
 	default:
-		sep := "\n"
-		if len(pos) > 0 {
-			sep = vm.coerceFormatString(pos[0])
-		} else if rs, ok := vm.gvar("$/").(*object.String); ok {
-			// With no separator argument the record separator $/ is used (default "\n").
-			sep = rs.Str()
+		sep := vm.coerceFormatString(sepArg)
+		if sepArg == object.Value(defaultRecordSeparator) && !encIsASCIICompat(str.EncName()) {
+			// The separator is re-encoded into a non-ASCII-compatible receiver's
+			// encoding before the search (see transcodeDefaultSeparator).
+			sep = vm.transcodeDefaultSeparator(sep, str.EncName())
 		}
 		if sep == "" {
 			segs = splitParagraphs(s, chomp)

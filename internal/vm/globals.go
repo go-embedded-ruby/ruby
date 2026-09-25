@@ -140,6 +140,19 @@ func (vm *VM) specialGvar(name string) (object.Value, bool) {
 		return object.NewString(vm.scriptName), true
 	case "$$":
 		return object.IntValue(int64(os.Getpid())), true
+	case "$/", "$-0":
+		// io.c v3_4_0 Init_IO seeds the input record separator BEFORE hooking it
+		// up, so an un-assigned $/ reads "\n", not nil:
+		//     rb_default_rs = rb_fstring_lit("\n");
+		//     rb_rs = rb_default_rs;
+		//     rb_define_hooked_variable("$/",  &rb_rs, 0, deprecated_str_setter);
+		//     rb_define_hooked_variable("$-0", &rb_rs, 0, deprecated_str_setter);
+		// $-0 shares rb_rs, so both spellings read the same object until one is
+		// assigned — which is why $-0.equal?($/) holds.
+		if v, set := vm.globals["$/"]; set {
+			return v, true
+		}
+		return defaultRecordSeparator, true
 	case "$VERBOSE", "$-v", "$-w", "$DEBUG", "$-d":
 		return vm.verboseSlot(canonicalGvar(name)), true
 	case "$-W":
@@ -161,6 +174,20 @@ func (vm *VM) specialGvar(name string) (object.Value, bool) {
 	// $~, $&, $`, $' and $N fall through so the match-data resolver in gvar
 	// handles them — englishAlias only rewrote the name to the cryptic form.
 	return object.NilVal(), false
+}
+
+// defaultRecordSeparator is rb_default_rs: the one frozen US-ASCII "\n" every
+// unassigned read of $/ and $-0 returns. It is a single object because MRI's two
+// hooked variables share the rb_rs slot, so $/.equal?($-0) is true before either
+// is written; it is frozen because rb_fstring_lit interns a frozen literal.
+var defaultRecordSeparator = newFrozenUSASCII("\n")
+
+// newFrozenUSASCII builds the frozen, US-ASCII String an rb_fstring_lit of an
+// ASCII-only literal produces.
+func newFrozenUSASCII(s string) *object.String {
+	v := object.NewFrozenStringView(s)
+	v.Enc = "US-ASCII"
+	return v
 }
 
 // verboseSlot reads $VERBOSE / $DEBUG, defaulting an unset slot to false. MRI

@@ -2387,7 +2387,13 @@ func (vm *VM) defaultGetsSep() getsSep {
 	if s, ok := vm.gvar("$/").(*object.String); ok {
 		return getsSep{s: s.Str(), set: true}
 	}
-	return getsSep{s: "\n"}
+	// $/ is a String or nil and nothing else (deprecated_str_setter refuses the
+	// rest), so the only way here is a nil $/. io.c v3_4_0 rb_io_getline_1 takes
+	// `rs = rb_rs` when no separator is passed, and a NIL rs leaves rsptr/rslen at
+	// zero so appendline never stops — the whole remainder comes back as one
+	// line, exactly as an explicit gets(nil) does. Falling back to "\n" here read
+	// one line instead.
+	return getsSep{s: "", set: true, nilSep: true}
 }
 
 // checkResolvedLimit raises ArgumentError for an explicit limit of 0 on a
@@ -2499,15 +2505,25 @@ func getsChomp(line []byte, sep string) []byte {
 // more newlines that terminates it (or end of input) is returned. A non-negative
 // limit caps the number of bytes returned. A StringIO keeps the whole terminating
 // newline run in the result, whereas a real IO/File keeps only the two newlines
-// that close the paragraph (the rest are skipped as leading blanks on the next
-// read) — matching MRI, whose StringIO and IO differ here.
+// that close the paragraph — matching MRI, whose StringIO and IO differ here.
+//
+// io.c v3_4_0 rb_io_getline_1 brackets a paragraph read with TWO swallow(fptr,
+// '\n') calls: one before the read ("rspara = 1; swallow(fptr, '\n');") and one
+// after it ("if (rspara && c != EOF) swallow(fptr, '\n');"). The trailing one is
+// the reason the STREAM advances past the whole newline run even though the
+// returned string keeps only the two separator newlines — and it runs whether or
+// not the read was cut short by a limit, so gets("", 3) on "a\nb\n\n\n\nc" leaves
+// the stream at "c". Only the post-read swallow is conditional on the stream not
+// being a StringIO: stringio.c has no equivalent, so a StringIO leaves the extra
+// newlines in place for the next read.
 func ioGetsParagraph(o *IOObj, limit int, chomp bool) object.Value {
-	for o.pos < len(o.buf) && o.buf[o.pos] == '\n' { // skip leading blank lines
+	for o.pos < len(o.buf) && o.buf[o.pos] == '\n' { // swallow(fptr, '\n') before the read
 		o.pos++
 	}
 	if o.pos >= len(o.buf) {
 		return object.NilV
 	}
+	stringIO := o.cls != nil && o.cls.name == "StringIO"
 	start := o.pos
 	end := len(o.buf)
 	sepFound := false
@@ -2517,7 +2533,7 @@ func ioGetsParagraph(o *IOObj, limit int, chomp bool) object.Value {
 		for end < len(o.buf) && o.buf[end] == '\n' { // consume the whole newline run
 			end++
 		}
-		if !(o.cls != nil && o.cls.name == "StringIO") { // real IO keeps only two
+		if !stringIO { // real IO keeps only two
 			if two := start + idx + 2; two < end {
 				end = two
 			}
@@ -2527,6 +2543,11 @@ func ioGetsParagraph(o *IOObj, limit int, chomp bool) object.Value {
 		end = start + limit
 	}
 	o.pos = end
+	if !stringIO { // swallow(fptr, '\n') after the read
+		for o.pos < len(o.buf) && o.buf[o.pos] == '\n' {
+			o.pos++
+		}
+	}
 	line := o.buf[start:end]
 	if chomp && sepFound { // chomp strips the terminating newline run (the paragraph
 		for len(line) > 0 && line[len(line)-1] == '\n' { // separator), not a lone EOF "\n"
