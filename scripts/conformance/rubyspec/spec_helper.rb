@@ -262,12 +262,34 @@ def max_long; 0x7fff_ffff_ffff_ffff; end
 def min_long; -0x8000_0000_0000_0000; end
 
 # ---------------- should proxy ----------------
-class ShouldProxy
+# The proxy must inherit as LITTLE as possible.
+#
+# `x.should.equal?(y)` is mspec's spelling of an identity assertion. If the
+# proxy answers `equal?` ITSELF the assertion is never made: Object#equal?
+# compares the PROXY with y, returns false, and the example passes whatever the
+# two values are (go-embedded-ruby/ruby#655 -- 765 `.should.equal?` uses across
+# 328 files of language/ + core/, not one of which could fail). The same holds
+# for every other predicate Object already answers: eql?, nil?, is_a?,
+# kind_of?, instance_of?, frozen?, respond_to?, instance_variable_defined?.
+#
+# Upstream mspec is immune by construction: its operator matchers subclass
+# BasicObject (mspec/lib/mspec/matchers/base.rb --
+# `class SpecPositiveOperatorMatcher < BasicObject`). BasicObject answers only
+# ==, !=, !, equal?, __send__, __id__, instance_eval, instance_exec and
+# method_missing, so mspec spells out ==, != and equal? explicitly and EVERY
+# other predicate falls through #method_missing onto the real receiver, where
+# mspec checks its truthiness (`SpecExpectation.fail_predicate`, see
+# mspec/lib/mspec/expectations/expectations.rb).
+#
+# Subclassing BasicObject here reproduces that, and keeps reproducing it for
+# spellings the corpus has not used yet: a predicate is broken exactly when the
+# proxy already answers it, so the proxy must answer as little as possible.
+class ShouldProxy < BasicObject
   def initialize(o, neg); @o = o; @neg = neg; end
   def _chk(cond, desc)
     cond = !cond if @neg
     unless cond
-      ::Kernel.raise(SpecFail, "expected #{@o.inspect} #{@neg ? 'not ' : ''}to #{desc}")
+      ::Kernel.raise(::SpecFail, "expected #{@o.inspect} #{@neg ? 'not ' : ''}to #{desc}")
     end
     @o
   end
@@ -278,29 +300,54 @@ class ShouldProxy
   def <=(x); _chk(@o <= x, "<= #{x.inspect}"); end
   def >=(x); _chk(@o >= x, ">= #{x.inspect}"); end
   def =~(x); _chk((@o =~ x) ? true : false, "=~ #{x.inspect}"); end
+  # `x.should !~ /re/` -- 11 sites in core/exception/full_message_spec.rb.
+  # Object#!~ is defined as `!(x =~ y)`, so before this commit the spelling ran
+  # the proxy's POSITIVE `=~` assertion and threw the result away: it asserted
+  # the exact INVERSE of what the spec wrote. Spelling it out asserts the right
+  # thing and prints the right message.
+  #
+  # Measured caveat: rbgo does not dispatch !~ as a method at all -- it compiles
+  # `a !~ b` into `!(a =~ b)` (it inlines `!` the same way), where MRI 4.0.5
+  # sends :!~ and reaches this definition. So under rbgo those 11 sites still
+  # run the positive `=~` assertion and this definition is dead code until the
+  # VM sends :!~. The shim cannot paper over that from here; it is an rbgo/MRI
+  # divergence of its own, and it is why this line moves no number.
+  def !~(x); _chk(!(@o =~ x), "!~ #{x.inspect}"); end
+  # BasicObject defines ==, != and equal?, so those three -- and only those
+  # three -- have to be spelled out; every other predicate reaches
+  # #method_missing and is asserted there.
+  def equal?(x); _chk(@o.equal?(x), "equal? #{x.inspect}"); end
+  # `equal` and `eql` without the question mark are mspec's deprecated MATCHER
+  # spellings (mspec/lib/mspec/matchers/equal.rb); the receiver has no such
+  # method to forward to, so they stay explicit.
   def equal(x); _chk(@o.equal?(x), "equal #{x.inspect}"); end
   def eql(x); _chk(@o.eql?(x), "eql #{x.inspect}"); end
+  # Every constant in this class is ::-qualified: from inside a BasicObject
+  # subclass MRI does NOT reach the top-level (Object) constants, so a bare
+  # `Exception` here raises NameError: uninitialized constant ShouldProxy::Exception. rbgo
+  # happens to resolve it, which is exactly why the shim has to be run under
+  # MRI as well -- an unqualified constant would work here and break the judge.
   def raise(*args, &blk)
     raised = nil
     begin
       @o.call
-    rescue Exception => e
+    rescue ::Exception => e
       raised = e
     end
     if @neg
-      ::Kernel.raise(SpecFail, "expected no exception, got #{raised.class}: #{raised.message}") if raised
+      ::Kernel.raise(::SpecFail, "expected no exception, got #{raised.class}: #{raised.message}") if raised
       return nil
     end
-    ::Kernel.raise(SpecFail, "expected to raise #{args[0]}, nothing raised") if raised.nil?
+    ::Kernel.raise(::SpecFail, "expected to raise #{args[0]}, nothing raised") if raised.nil?
     if args[0]
       unless raised.is_a?(args[0])
-        ::Kernel.raise(SpecFail, "expected #{args[0]}, got #{raised.class}: #{raised.message}")
+        ::Kernel.raise(::SpecFail, "expected #{args[0]}, got #{raised.class}: #{raised.message}")
       end
     end
     if args[1]
       m = args[1]
-      ok = m.is_a?(Regexp) ? !!(raised.message =~ m) : (raised.message == m)
-      ::Kernel.raise(SpecFail, "wrong message: got #{raised.message.inspect}, want #{m.inspect}") unless ok
+      ok = m.is_a?(::Regexp) ? !!(raised.message =~ m) : (raised.message == m)
+      ::Kernel.raise(::SpecFail, "wrong message: got #{raised.message.inspect}, want #{m.inspect}") unless ok
     end
     # `-> { ... }.should.raise(Klass) { |e| ... }` inspects the captured exception.
     blk.call(raised) if blk
@@ -310,7 +357,10 @@ class ShouldProxy
     res = @o.__send__(name, *args, &blk)
     _chk(res, "#{name}(#{args.map { |a| a.inspect }.join(', ')})")
   end
-  def respond_to_missing?(*); true; end
+  # No #respond_to_missing? here: under BasicObject the proxy does not answer
+  # #respond_to? at all, so `x.should.respond_to?(:foo)` now forwards to x --
+  # which is the assertion the spec is making. Defining respond_to_missing?
+  # would only re-introduce a method the proxy answers itself.
 end
 
 class Object
@@ -320,7 +370,7 @@ class Object
       ShouldProxy.new(self, false)
     else
       unless matcher.matches?(self)
-        ::Kernel.raise(SpecFail, matcher.respond_to?(:failure_message) ? matcher.failure_message : "matcher failed")
+        ::Kernel.raise(::SpecFail, matcher.respond_to?(:failure_message) ? matcher.failure_message : "matcher failed")
       end
       self
     end
@@ -330,7 +380,7 @@ class Object
       ShouldProxy.new(self, true)
     else
       if matcher.matches?(self)
-        ::Kernel.raise(SpecFail, "expected not to match")
+        ::Kernel.raise(::SpecFail, "expected not to match")
       end
       self
     end
@@ -446,7 +496,7 @@ class MockExpect
   def invoke(*a, &b)
     @count += 1
     if @forbidden
-      ::Kernel.raise(SpecFail, "mock received forbidden #{@sym}")
+      ::Kernel.raise(::SpecFail, "mock received forbidden #{@sym}")
     end
     ::Kernel.raise(@raise) if @raise
     if @yield && b; b.call(*@yield); end
