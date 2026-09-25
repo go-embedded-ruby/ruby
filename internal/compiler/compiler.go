@@ -3046,7 +3046,24 @@ func (c *Compiler) bindLocal(name string) (slot, depth int) {
 
 // storeLocal emits a SetLocal for name, resolving an existing local or
 // allocating a fresh slot, mirroring ast.Assign.
+// isNumberedParamName reports whether name is one of the nine names Ruby
+// reserves for a block's numbered parameters: `_1` through `_9`, and nothing
+// else — `_0` and `_10` are ordinary identifiers, and so is `@_1`.
+func isNumberedParamName(name string) bool {
+	return len(name) == 2 && name[0] == '_' && name[1] >= '1' && name[1] <= '9'
+}
+
 func (c *Compiler) storeLocal(name string) {
+	// Binding `_1`..`_9` as a local is a SyntaxError in MRI wherever the binding
+	// is written — a plain assignment, an op-assign, a multiple-assignment target,
+	// a `for` variable, a pattern binder — because the name belongs to the
+	// numbered-parameter mechanism and a local of that name would shadow it
+	// (parse.y v3_4_0, the numparam checks around assignable_gen). storeLocal is
+	// the single place rbgo creates or writes a named local, so it is the one
+	// place that has to say so.
+	if isNumberedParamName(name) {
+		c.fail("%s is reserved for numbered parameters", name)
+	}
 	slot, depth := c.bindLocal(name)
 	c.cur().emit(bytecode.OpSetLocal, slot, depth)
 }
