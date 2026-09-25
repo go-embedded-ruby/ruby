@@ -150,11 +150,13 @@ func (t *Time) copy() *Time {
 // timeCloneFreezeArg reads Time#clone's freeze: keyword, reporting whether it
 // was given. Only true, false and nil are accepted, as for Object#clone.
 func (vm *VM) timeCloneFreezeArg(args []object.Value) (object.Value, bool) {
-	if len(args) == 0 {
-		return object.NilV, false
+	// No arguments and a trailing argument that is not a Hash both mean the same
+	// thing here — no freeze: keyword was given — so they share one exit.
+	var h *object.Hash
+	if len(args) > 0 {
+		h, _ = args[len(args)-1].(*object.Hash)
 	}
-	h, ok := args[len(args)-1].(*object.Hash)
-	if !ok {
+	if h == nil {
 		return object.NilV, false
 	}
 	val, given := object.Value(object.NilV), false

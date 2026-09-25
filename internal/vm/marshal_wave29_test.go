@@ -173,3 +173,55 @@ p Marshal.load("\x04\bd:\bDOKI\"\babc\x06:\x06ET").v`
 		t.Errorf("got=%q want=%q", got, "\"abc\"\n")
 	}
 }
+
+// TestMarshalWave29Coverage pins paths the ruby/spec corpus does not reach but
+// the coverage gate does. Each of these found a real defect: the 'C' container
+// stored its encoding ivar as a literal variable named "E" (so a re-dump emitted
+// the encoding twice), and a Timezone object's #name was re-tagged US-ASCII when
+// MRI keeps the String that method returned. Expected values are MRI 4.0.5's.
+func TestMarshalWave29Coverage(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		// A Timezone object's #name is stored as-is, so an ASCII-only name from a
+		// UTF-8 literal dumps :E => true, NOT the :E => false a tz abbreviation gets.
+		{"tzobj_zone_name", `class TZ9
+  def name; "XYZ"; end
+  def local_to_utc(t); t - 3600; end
+  def utc_to_local(t); t + 3600; end
+end
+p Marshal.dump(Time.new(2000,1,1,0,0,0, TZ9.new)).bytes`,
+			"[4, 8, 73, 117, 58, 9, 84, 105, 109, 101, 13, 247, 239, 24, 128, 0, 0, 0, 0, 7, 58, 11, 111, 102, 102, 115, 101, 116, 105, 2, 16, 14, 58, 9, 122, 111, 110, 101, 73, 34, 8, 88, 89, 90, 6, 58, 6, 69, 84]\n"},
+		// A zone carried only as a location keeps the tz database's US-ASCII.
+		{"time_zone_abbrev_usascii", `p Marshal.dump(Time.utc(2000,1,1)).bytes`,
+			"[4, 8, 73, 117, 58, 9, 84, 105, 109, 101, 13, 32, 0, 25, 192, 0, 0, 0, 0, 6, 58, 9, 122, 111, 110, 101, 73, 34, 8, 85, 84, 67, 6, 58, 6, 69, 70]\n"},
+		// Re-dumping a Regexp subclass loaded from a 'C' container must emit ONE
+		// encoding ivar, from the payload — not a second one named "E".
+		{"regexp_subclass_container", `class URx < Regexp; end
+r = Marshal.load("\x04\bIC:\bURx/\x00\x00\x06:\x06EF")
+p [r.class.to_s, Marshal.dump(r).bytes]`,
+			"[\"URx\", [4, 8, 73, 67, 58, 8, 85, 82, 120, 47, 0, 0, 6, 58, 6, 69, 70]]\n"},
+		// The same for a String subclass, whose own @foo does stay an ivar.
+		{"string_subclass_container", `class USx < String; end
+s = Marshal.load("\x04\bIC:\bUSx\"\aab\a:\x06ET:\t@fooi\x06")
+p [s.class.to_s, s.encoding.to_s, s.instance_variable_get(:@foo), Marshal.dump(s).bytes]`,
+			"[\"USx\", \"UTF-8\", 1, [4, 8, 73, 67, 58, 8, 85, 83, 120, 34, 7, 97, 98, 7, 58, 6, 69, 84, 58, 9, 64, 102, 111, 111, 105, 6]]\n"},
+		// Time#dup / #clone carry the exact sub-nanosecond fraction.
+		{"subnano_dup", `t = Time.at(Rational(1,3)); p [t.dup.subsec, t.clone.subsec]`,
+			"[(1/3), (1/3)]\n"},
+		// A Timezone object whose #name is not a String contributes no zone, so
+		// :zone dumps nil (the trailing 48 == '0').
+		{"tzobj_nil_name", `class TZN
+  def name; nil; end
+  def local_to_utc(t); t; end
+  def utc_to_local(t); t; end
+end
+p Marshal.dump(Time.new(2000,1,1,0,0,0, TZN.new)).bytes`,
+			"[4, 8, 73, 117, 58, 9, 84, 105, 109, 101, 13, 32, 0, 25, 128, 0, 0, 0, 0, 7, 58, 11, 111, 102, 102, 115, 101, 116, 105, 0, 58, 9, 122, 111, 110, 101, 48]\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := eval(t, c.src); got != c.want {
+				t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+			}
+		})
+	}
+}

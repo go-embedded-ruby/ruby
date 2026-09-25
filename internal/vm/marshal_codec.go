@@ -86,10 +86,11 @@ func (d *mDumper) linkRef(v object.Value) bool {
 // that call sits decides the id every later object gets: the #_dump ('u')
 // container registers its object only after writing its instance variables, so
 // those variables index BEFORE the object itself.
+//
+// There is deliberately no already-present guard: every caller reaches this only
+// after linkRef reported v absent, and nothing registers v in between, so such a
+// guard would be unreachable.
 func (d *mDumper) remember(v object.Value) {
-	if _, ok := d.objs[v]; ok {
-		return
-	}
 	d.objs[v] = d.nextID
 	d.nextID++
 }
@@ -526,27 +527,32 @@ func (d *mDumper) writeTime(t *Time) {
 }
 
 // timeZoneIvar returns the value of a Time's :zone marshal variable: the zone's
-// name, or nil for a Time on a bare numeric offset (which has no name). MRI
-// records the abbreviation the zone is displayed with — "UTC", "AST", "CEST" —
-// as a US-ASCII String, and calls #name on a Timezone object. A name that is not
-// pure ASCII keeps the encoding Ruby gave it.
+// name, or nil for a Time on a bare numeric offset, which has none. The two
+// sources differ in encoding, and time_mdump treats them differently — a
+// Timezone object's #name is stored exactly as that method returned it, while a
+// zone the Time carries as a location contributes the tz database's
+// abbreviation, which MRI builds US-ASCII.
 func (d *mDumper) timeZoneIvar(t *Time) object.Value {
-	z := t.zoneValue()
-	if object.IsNil(z) {
+	if z := t.zoneObj; z != nil {
+		// A Timezone object contributes its #name (maybe_tzobj_p in time_mdump),
+		// and MRI stores the String that method returned AS IS — so its encoding is
+		// whatever Ruby gave it. Re-tagging an ASCII-only name US-ASCII here made a
+		// tzobj Time dump ":\tzoneI\"\bXYZ\x06:\x06EF" where MRI writes ":\x06ET".
+		n := d.vm.send(z, "name", nil, nil)
+		if s, ok := n.(*object.String); ok {
+			return s
+		}
 		return object.NilV
 	}
-	s, ok := z.(*object.String)
-	if !ok {
-		// A Timezone object: MRI dumps its #name, not the object.
-		z = d.vm.send(z, "name", nil, nil)
-		if s, ok = z.(*object.String); !ok {
-			return object.NilV
-		}
+	// A zone the Time carries only as a location: the abbreviation Go reports,
+	// which is the tz database's and always ASCII. MRI builds these US-ASCII, so
+	// "UTC" / "AST" / "CEST" dump with :E => false. A bare numeric offset has no
+	// name and dumps nil.
+	name, _ := t.t.Zone()
+	if name == "" {
+		return object.NilV
 	}
-	if marshalIsASCII(s.Str()) {
-		return object.NewStringBytesEnc([]byte(s.Str()), "US-ASCII")
-	}
-	return s
+	return object.NewStringBytesEnc([]byte(name), "US-ASCII")
 }
 
 // writeObject dispatches an ordinary instance: the #marshal_dump hook (U), the
@@ -1113,6 +1119,17 @@ func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 				b.srcEnc = s.Str()
 			}
 		}
+	case *RObject:
+		// A built-in subclass loaded from a 'C' container is ONE Ruby object: the
+		// wrapper and the payload it holds. Its encoding ivar therefore describes
+		// the payload, not the wrapper. Storing :E / :encoding as a real instance
+		// variable made a re-dump emit the encoding twice — once from the payload
+		// and once as a stray ivar literally named "E".
+		if b.builtin != nil && (name == "E" || name == "encoding") {
+			r.applyIvar(b.builtin, name, val)
+			return
+		}
+		setIvar(base, name, val)
 	case *Time:
 		// MRI's time_mload deletes :offset and :zone from the payload String
 		// (rb_attr_delete) and turns them into the Time's zone, copying only what is
