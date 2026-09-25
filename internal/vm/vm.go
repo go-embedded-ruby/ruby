@@ -2167,6 +2167,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// inside a class/module body. Using self (not the definee) is what
 				// keeps a top-level `def self.foo` off Object and on main only.
 				name := iseq.Names[in.A]
+				// A `def self.x` records NO lexical scope, unlike the instance `def`
+				// above, so its body's bare constants resolve from the owner. MRI
+				// would have it carry the cref it was written under, which matters
+				// for a `def self.x` inside a module_eval / Class.new BLOCK — but
+				// recording it costs exactly what it gains until frameOwner
+				// (kernel_introspect.go) stops using the frame's cref as a PROXY for
+				// the method's owner. Measured over the whole core+language suite:
+				// +1 in language/class_spec.rb ("for named classes in a module") and
+				// -1 in core/thread/backtrace/location/label_spec.rb. The two halves
+				// have to land together, and frameOwner is not in this wave's files.
 				vm.defineSingletonMethod(self, name, iseq.Children[in.B])
 				push(object.SymVal(name))
 			case bytecode.OpDefineSingletonMethod:
@@ -2211,10 +2221,24 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				vm.undefMethod(methodDefinee, iseq.Names[in.A])
 				push(object.NilV)
 			case bytecode.OpDefineClass:
-				// Bare `class B` nests into the current lexical scope (definee).
-				push(vm.defineClassIn(definee, iseq.Names[in.A], iseq.Children[in.B], nil, false))
+				// Bare `class B` nests into the current LEXICAL scope, not into the
+				// definee. The compiler feeds MRI's defineclass its cbase from
+				// `putspecialobject VM_SPECIAL_OBJECT_CONST_BASE`, i.e.
+				// vm_get_const_base (vm_insnhelper.c:1027) — the cref, skipping the
+				// ones an eval pushed. The two are the same class in a method or
+				// class body and part company under class_eval/module_eval/
+				// instance_eval with a BLOCK, where the definee is the eval receiver:
+				//
+				//	Class.new do
+				//	  class CS_CONST_CLASS_SPECS; end   # TOP LEVEL in MRI
+				//	end
+				//
+				// rbgo nested it in the anonymous class instead, so ::CS_CONST_CLASS_SPECS
+				// did not exist. This is the rule OpSetConst already follows for
+				// `CONST = value` a few cases above.
+				push(vm.defineClassIn(lexCref, iseq.Names[in.A], iseq.Children[in.B], nil, false))
 			case bytecode.OpDefineModule:
-				push(vm.defineModuleIn(definee, iseq.Names[in.A], iseq.Children[in.B], false))
+				push(vm.defineModuleIn(lexCref, iseq.Names[in.A], iseq.Children[in.B], false))
 			case bytecode.OpDefineClassScoped:
 				// C flags: bit 0 = parent on stack, bit 1 = super-expr on stack.
 				// They were pushed parent-then-super, so pop super first.
@@ -2227,7 +2251,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// == [A::B], not [A::B, A]), so bare constants in the body do NOT see
 				// the parent namespace. A bare `class B` (bit 0 clear) still nests into
 				// the current lexical scope.
-				parent, scoped := definee, false
+				parent, scoped := lexCref, false
 				if in.C&1 != 0 {
 					parent, scoped = vm.asModuleParent(pop()), true
 				}
@@ -3130,6 +3154,14 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			sc, ok := superExpr.(*RClass)
 			if !ok || sc.isModule {
 				raise("TypeError", "superclass must be a Class (%s given)", vm.classOf(superExpr).name)
+			}
+			// rb_check_inheritable (ruby/ruby v3_4_0 class.c:344) refuses two more
+			// classes after the type test: a SINGLETON class, and Class itself.
+			if sc.isSingleton {
+				raise("TypeError", "can't make subclass of singleton class")
+			}
+			if sc == vm.cClass {
+				raise("TypeError", "can't make subclass of Class")
 			}
 			super = sc
 		case body.Super != "":
