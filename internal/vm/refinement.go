@@ -56,6 +56,50 @@ func (vm *VM) registerRefinements() {
 	// Refinement#import_methods (see refinement_import.go).
 	vm.installRefinementImport()
 
+	// MRI UNDEFINES the three module hooks on Refinement, so a refinement is
+	// never asked to graft itself into a class: Init_eval calls
+	// rb_undef_method(rb_cRefinement, …) for append_features, prepend_features
+	// and extend_object (ruby/ruby v3_4_0 eval.c:2140-2142). An `undefined`
+	// entry rather than a deletion is what keeps the name out of
+	// Refinement.private_instance_methods(true) while Module keeps its own — the
+	// same shape bootstrap already uses to undefine them on Class.
+	for _, n := range []string{"append_features", "prepend_features", "extend_object"} {
+		vm.cRefinement.methods[n] = &Method{name: n, owner: vm.cRefinement, undefined: true}
+	}
+
+	// Module#include / Module#prepend refuse outright when the RECEIVER is a
+	// refinement: rb_mod_include raises TypeError "Refinement#include has been
+	// removed" and rb_mod_prepend "Refinement#prepend has been removed" before
+	// they even look at their arguments (ruby/ruby v3_4_0 eval.c:1212 and
+	// eval.c:1266). Refinement overriding Module's methods is where that
+	// receiver check lands for a Refinement receiver.
+	for _, n := range []string{"include", "prepend"} {
+		msg := "Refinement#" + n + " has been removed"
+		vm.cRefinement.define(n, func(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
+			raise("TypeError", "%s", msg)
+			return object.NilV
+		})
+	}
+
+	// Refinement#ancestors stops AT the refined class. A refinement's superclass
+	// is the class it refines (see refinementFor), which is what lets `alias`,
+	// #instance_methods and #method_defined? inside a refine block reach the
+	// refined class's methods — but MRI does not report that link in #ancestors:
+	// rb_mod_ancestors breaks out of the walk when it reaches the refined class
+	// (ruby/ruby v3_4_0 class.c:1584-1597), so `refine(Array) { ancestors }`
+	// answers just [#<refinement:Array@…>].
+	vm.cRefinement.define("ancestors", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		r := self.(*RClass)
+		arr := object.NewArray()
+		for _, k := range vm.ancestors(r) {
+			if k == r.refinedClass {
+				break
+			}
+			arr.Elems = append(arr.Elems, k)
+		}
+		return arr
+	})
+
 	// Module#refinements returns this module's own refinement modules (not those
 	// of included modules).
 	vm.cModule.define("refinements", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -80,6 +124,7 @@ func (vm *VM) registerRefinements() {
 		}
 		scope := vm.refinementScope(self)
 		vm.anyRefinements = true
+		vm.adoptRefinementCref(scope)
 		// Record in call order, de-duplicating so a repeated using is a no-op for
 		// used_modules ordering while still being harmless.
 		for _, m := range scope.usedModules {
@@ -119,7 +164,17 @@ func (holder *RClass) refinementFor(target *RClass) *RClass {
 	if r, ok := holder.refinements[target]; ok {
 		return r
 	}
-	r := newClass("", nil)
+	// The refinement's SUPERCLASS is the class it refines: MRI's rb_mod_refine
+	// does `RCLASS_SET_SUPER(refinement, refinement_superclass(klass))`
+	// (ruby/ruby v3_4_0 eval.c:1497-1500). That link is what makes the refined
+	// class's methods reachable from inside the refine block, so
+	// `refine(Array) { alias :orig_count :count }` finds Array#count and
+	// `refine(Array) { instance_methods }` answers Array's list. It does NOT
+	// widen dispatch: refinedMethod resolves through lookupOwnOrIncluded, which
+	// walks own + included modules and never the superclass, so a refinement
+	// still only answers for methods actually written in it. #ancestors hides
+	// the link, exactly as MRI's does (see the Refinement#ancestors override).
+	r := newClass("", target)
 	r.isModule = true
 	r.isRefinement = true
 	r.refinedClass = target
@@ -140,6 +195,33 @@ func (vm *VM) refinementScope(self object.Value) *RClass {
 		return c
 	}
 	return vm.cObject
+}
+
+// adoptRefinementCref points the CALLING frame's cref entry at the scope that
+// just recorded a `using`, so a native called from that frame reads the scope
+// the activation landed on.
+//
+// MRI's `using` does not merely record the module: it REPLACES the calling
+// frame's cref with a duplicate and hangs the refinements off that duplicate —
+// rb_vm_cref_replace_with_duplicated_cref (ruby/ruby v3_4_0 vm.c:1931) →
+// vm_cref_replace_with_duplicated_cref (vm_insnhelper.c:912), called from both
+// mod_using (eval.c:1547) and top_using (eval.c:1890). Every later reader —
+// rb_mod_s_used_refinements, rb_method_entry_with_refinements — then finds them
+// by walking that frame's cref chain.
+//
+// rbgo keeps the activation on the scope OBJECT (refinementScope) rather than
+// on a per-frame cref record, and a frame's cref entry is its TEXTUAL lexical
+// scope, which is not the same class inside a Module.new / Class.new /
+// class_eval body: there the block's cref is where the block was written while
+// `using` records on the body's definee. Pointing the entry at the scope is the
+// narrowest equivalent of MRI's replacement — the entry is popped with the
+// frame, so it activates nothing outside the body that called `using`, and for
+// a class/module body or the top level (where the two already agree) it is a
+// no-op.
+func (vm *VM) adoptRefinementCref(scope *RClass) {
+	if n := len(vm.frameCrefs); n > 0 && vm.frameCrefs[n-1] != scope {
+		vm.frameCrefs[n-1] = scope
+	}
 }
 
 // inMethodScope reports whether the innermost interpreted frame (the caller of a
