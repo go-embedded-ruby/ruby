@@ -158,12 +158,16 @@ func (g *gen) emit(pc int) (string, bool) {
 			argList[i] = fmt.Sprintf("s%d", recvSlot+1+i)
 		}
 		argsExpr := "[]object.Value{" + strings.Join(argList, ", ") + "}"
+		// State the call site's keyword/positional verdict, exactly as the
+		// interpreter's OpSend handler does, so a lowered call binds a trailing
+		// Hash the same way the interpreted one would. See bytecode.FlagSendNoKW.
+		noKW := fmt.Sprintf("\tvm.setSendNoKW(%t)\n", in.Flags&bytecode.FlagSendNoKW != 0)
 		if g.isSelf[recvSlot] && name == g.rubyName {
 			// Self-send to the method being compiled → direct recursive call (a
 			// plain send carries no block).
-			return line("s%d = vm.%s(self, %s, nil)", recvSlot, g.goName, argsExpr), true
+			return noKW + line("s%d = vm.%s(self, %s, nil)", recvSlot, g.goName, argsExpr), true
 		}
-		return line("s%d = vm.dispatchSend(s%d, %q, %s, nil)", recvSlot, recvSlot, name, argsExpr), true
+		return noKW + line("s%d = vm.dispatchSend(s%d, %q, %s, nil)", recvSlot, recvSlot, name, argsExpr), true
 	case bytecode.OpNewArray:
 		return line("s%d = &object.Array{Elems: []object.Value{%s}}", d-in.A, slotRange(d-in.A, in.A)), true
 	case bytecode.OpNewHash:

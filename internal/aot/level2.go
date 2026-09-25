@@ -234,17 +234,24 @@ func (s *mscope) emitSend(pc, d int) (string, bool) {
 		argList[i] = s.sv(recvSlot + 1 + i)
 	}
 	argsExpr := "[]object.Value{" + strings.Join(argList, ", ") + "}"
+	// The call site's keyword/positional verdict is part of the call, not of the
+	// callee, so lowered code has to state it exactly as the interpreter's OpSend
+	// handler does — otherwise an AOT-built binary would bind `f(1, 2, h)` as
+	// keywords where the interpreter binds it positionally. aotSend takes the raw
+	// flags for the visibility check only, so the verdict is set alongside it.
+	// See bytecode.FlagSendNoKW and VM.sendNoKW.
+	noKW := fmt.Sprintf("\tvm.setSendNoKW(%t)\n", in.Flags&bytecode.FlagSendNoKW != 0)
 	if in.C == 0 {
 		cache := s.g.nCaches
 		s.g.nCaches++
-		return fmt.Sprintf("\t%s = vm.aotSend(&aotic%d, %s, %q, %s, %d, self, nil)\n",
+		return noKW + fmt.Sprintf("\t%s = vm.aotSend(&aotic%d, %s, %q, %s, %d, self, nil)\n",
 			s.sv(recvSlot), cache, s.sv(recvSlot), name, argsExpr, in.Flags), true
 	}
 	closure, ok := s.g.emitClosure(s.iseq.Children[in.C-1], s)
 	if !ok {
 		return "", false
 	}
-	return fmt.Sprintf("\t%s = vm.dispatchSend(%s, %q, %s, &Proc{native: %s})\n",
+	return noKW + fmt.Sprintf("\t%s = vm.dispatchSend(%s, %q, %s, &Proc{native: %s})\n",
 		s.sv(recvSlot), s.sv(recvSlot), name, argsExpr, closure), true
 }
 

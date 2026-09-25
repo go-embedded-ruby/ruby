@@ -40,6 +40,7 @@ type builder struct {
 	params      []string
 	numRequired int
 	splatIndex  int
+	postCount   int
 	kwNames     []string
 	kwRequired  []bool
 	kwRestSlot  int
@@ -229,6 +230,7 @@ func (b *builder) build() *bytecode.ISeq {
 		Params:      b.params,
 		NumRequired: b.numRequired,
 		SplatIndex:  b.splatIndex,
+		PostCount:   b.postCount,
 		KwNames:     b.kwNames,
 		KwRequired:  b.kwRequired,
 		KwRestSlot:  b.kwRestSlot,
@@ -475,6 +477,99 @@ func (c *Compiler) refuseKeywordAssign(name string) {
 	case "__LINE__", "__FILE__", "__ENCODING__":
 		c.fail("Can't assign to %s", name)
 	}
+}
+
+// paramCheckName reduces one parser parameter entry to the local name it
+// declares, or "" when that entry declares no name a duplicate check applies to.
+//
+// It strips the sigils the parser keeps on a block's folded entries (`**rest`,
+// `name:`) and on an anonymous parameter, and it drops the three kinds MRI
+// exempts or never sees here:
+//
+//   - the anonymous forms `*`, `**`, `&`, which declare no name at all —
+//     `def m(*, **, &)` is legal;
+//   - a name beginning with `_` (and `_` itself), which is
+//     is_private_local_id (parse.y v3_4_0:13578): shadowing_lvar_0 returns
+//     without complaining for those, so `def m(_, _)` and `|_x; _x|` are legal;
+//   - the parser's `(N)` placeholder for a destructuring parameter, whose real
+//     names it does not expose.
+func paramCheckName(p string) string {
+	switch {
+	case strings.HasPrefix(p, "**"):
+		p = p[2:]
+	case strings.HasPrefix(p, "*"), strings.HasPrefix(p, "&"):
+		p = p[1:]
+	}
+	p = strings.TrimSuffix(p, ":")
+	if p == "" || p[0] == '_' || p[0] == '(' {
+		return ""
+	}
+	return p
+}
+
+// checkDuplicateParams refuses a parameter list that declares the same name
+// twice, as MRI's parser does.
+//
+// Every formal goes through shadowing_lvar_0 (parse.y v3_4_0:13589), which
+// yyerror0s "duplicated argument name" when the name is already in the CURRENT
+// scope's table — so `def m(a, *a)`, `def m(a, a:)`, `def m(a, &a)` and
+// `proc { |x, x| }` are all SyntaxErrors, and so is a block-local that repeats
+// one of its own block's parameters (`proc { |x; x| }`, the dvar_curr arm),
+// because new_bv routes block-locals through the same check. A block-local that
+// shadows a name from an ENCLOSING scope is not a duplicate — that is the
+// dvar_defined/local_id arm, which merely records it — so only names declared
+// by this one list are compared.
+//
+// go-ruby-parser v0.3.0 does not raise it (it has no scope table), and rbgo has
+// no other place that sees a whole parameter list, so the compiler raises it.
+// The observable behaviour is MRI's: the error surfaces where the code is
+// compiled — a SyntaxError from eval/require, a refusal to run a script.
+func (c *Compiler) checkDuplicateParams(names []string) {
+	var seen map[string]bool
+	for _, raw := range names {
+		n := paramCheckName(raw)
+		if n == "" {
+			continue
+		}
+		if seen[n] {
+			c.fail("duplicated argument name")
+		}
+		if seen == nil {
+			seen = make(map[string]bool, len(names))
+		}
+		seen[n] = true
+	}
+}
+
+// postCountNoSplat counts the trailing REQUIRED positional parameters of a
+// parameter list that has no *splat — the "post" parameters of `def m(a=1, b)`.
+//
+// defaults is parallel to the positionals, non-nil where one carries a default.
+// Everything after the LAST defaulted parameter is required and binds from the
+// tail (args_setup_post_parameters, vm_args.c v3_4_0:887), so the count is the
+// distance from that last optional to the end. With no optional at all there is
+// nothing in front of the required run and the answer is 0 — the ordinary shape,
+// already described by NumRequired alone. A list WITH a splat gets 0 too: its
+// post parameters are the slots after SplatIndex, and the arity helpers already
+// read them there.
+//
+// Ruby has no third arrangement to worry about: an optional parameter after a
+// post one (`def m(a=1, b, c=2)`) is a SyntaxError, so the optionals form one
+// contiguous run.
+func postCountNoSplat(nparams int, defaults []ast.Node, splatIndex int) int {
+	if splatIndex >= 0 {
+		return 0
+	}
+	last := -1
+	for i, d := range defaults {
+		if d != nil && i < nparams {
+			last = i
+		}
+	}
+	if last < 0 {
+		return 0
+	}
+	return nparams - last - 1
 }
 
 func (c *Compiler) fail(format string, args ...any) {
@@ -807,15 +902,26 @@ func (c *Compiler) compileNode1(n ast.Node) {
 		// Bare anonymous `*` / `**` in `yield(*, **)` forward the enclosing method's
 		// anonymous parameters, exactly as in a call, so resolve them the same way.
 		yieldArgs := c.rewriteAnonArgs(v.Args)
+		// A yield carries the same call-site keyword verdict as any other call:
+		// MRI compiles `yield` through the ordinary argument path and the block is
+		// bound by setup_parameters_complex with arg_setup_block, reading the very
+		// same VM_CALL_KWARG / VM_CALL_KW_SPLAT flags (vm_args.c v3_4_0:591).
+		yieldNoKW := 0
+		if lastArgIsPositional(yieldArgs) {
+			yieldNoKW = bytecode.FlagSendNoKW
+		}
 		if hasSplat(yieldArgs) || hasTrailingKwSplat(yieldArgs) { // dynamic count: build an Array and yield it splatted
-			c.compileSplatItems(yieldArgs)
-			b.emit(bytecode.OpInvokeBlockArray, 0, 0)
+			c.compileSplatItemsMode(yieldArgs, true)
+			if hasTrailingKwSplat(yieldArgs) {
+				yieldNoKW |= bytecode.FlagSendKWSplat
+			}
+			b.insns[b.emit(bytecode.OpInvokeBlockArray, 0, 0)].Flags |= yieldNoKW
 			break
 		}
 		for _, a := range yieldArgs {
 			c.compileNode(a)
 		}
-		b.emit(bytecode.OpInvokeBlock, len(yieldArgs), 0)
+		b.insns[b.emit(bytecode.OpInvokeBlock, len(yieldArgs), 0)].Flags |= yieldNoKW
 	case *ast.If:
 		c.compileIf(v)
 	case *ast.While:
@@ -946,8 +1052,9 @@ func forwardIndex(args []ast.Node) int {
 
 // compileForwardCall lowers a call carrying `...` (g(..., ...)): it splices the
 // enclosing `def f(...)` method's captured positionals (*...rest), keywords
-// (**...kw) and block (&...blk). The captured keywords are appended only when
-// non-empty, matching MRI — a `**{}` kwsplat passes no argument.
+// (**...kw) and block (&...blk). The captured keywords ride as a trailing hash
+// that the VM drops when empty, so a `**{}` kwsplat passes no argument and the
+// argument before it stays positional (bytecode.FlagSendKWSplat).
 func (c *Compiler) compileForwardCall(v *ast.Call, fwdAt int) {
 	b := c.cur()
 	if v.Recv != nil {
@@ -959,14 +1066,16 @@ func (c *Compiler) compileForwardCall(v *ast.Call, fwdAt int) {
 	// Forward the block (&...blk; nil ⇒ no block) and send.
 	blkSlot, blkDepth := c.mustResolve(fwdBlockName)
 	b.emit(bytecode.OpGetLocal, blkSlot, blkDepth)
-	b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+	at := b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0)
+	b.insns[at].Flags |= bytecode.FlagSendKWSplat
 }
 
 // emitForwardArgsArray builds, on top of the stack, the argument Array for a
 // `...` forwarding call: the leading explicit args, then the captured `*...rest`
 // positionals, then the trailing explicit args, then the captured `**...kw`
-// hash appended as a trailing element only when it has entries (matching MRI —
-// a `**{}` kwsplat passes no argument). It does not emit the block or the send.
+// hash as a trailing element — always, even when empty, because the send that
+// follows carries bytecode.FlagSendKWSplat and the VM drops an empty keyword
+// splat where MRI does. It does not emit the block or the send.
 func (c *Compiler) emitForwardArgsArray(leading, trailing []ast.Node) {
 	b := c.cur()
 	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
@@ -985,18 +1094,14 @@ func (c *Compiler) emitForwardArgsArray(leading, trailing []ast.Node) {
 	for _, a := range trailing {
 		appendOne(a)
 	}
-	// Append **...kw as a trailing hash, but only when it has entries.
+	// Append **...kw as a trailing hash. It is appended even when empty: the send
+	// that follows carries bytecode.FlagSendKWSplat, so the VM drops an empty one
+	// where MRI does (ignore_keyword_hash_p) and can then tell that whatever is
+	// left last was forwarded as a positional argument.
 	kwSlot, kwDepth := c.mustResolve(fwdKwName)
 	b.emit(bytecode.OpGetLocal, kwSlot, kwDepth)
-	b.emit(bytecode.OpDup, 0, 0)
-	b.emit(bytecode.OpSend, b.addName("empty?"), 0)
-	skip := b.emit(bytecode.OpBranchIf, 0, 0)
 	b.emit(bytecode.OpNewArray, 1, 0) // wrap the kw hash
 	b.emit(bytecode.OpConcatArray, 0, 0)
-	done := b.emit(bytecode.OpJump, 0, 0)
-	b.patch(skip, b.here())
-	b.emit(bytecode.OpPop, 0, 0) // drop the empty kw hash
-	b.patch(done, b.here())
 }
 
 // mustResolve resolves a (compiler-synthesised) local that is guaranteed to
@@ -1193,9 +1298,19 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	} else {
 		b.emit(bytecode.OpPushSelf, 0, 0) // implicit receiver: self
 	}
+	// noKW is the call site's keyword/positional verdict for its last argument
+	// (see lastArgIsPositional): it travels on the send instruction so the VM
+	// binds a trailing Hash the way MRI's VM_CALL_KWARG / VM_CALL_KW_SPLAT flags
+	// make it. It is read from the whole written argument list, before the
+	// block-pass is pulled out below, because the pull-out is an implementation
+	// detail of how the value is stacked, not a change to what was written.
+	noKW := lastArgIsPositional(callArgs)
 	sendFlags := func(at int) int {
 		if explicit {
 			b.insns[at].Flags |= bytecode.FlagSendExplicit
+		}
+		if noKW {
+			b.insns[at].Flags |= bytecode.FlagSendNoKW
 		}
 		return at
 	}
@@ -1223,7 +1338,17 @@ func (c *Compiler) compileCall(v *ast.Call) {
 	// hash (k: v) is never empty, and a braced positional hash carries no `**`
 	// entry, so neither is affected.
 	if hasSplat(args) || hasTrailingKwSplat(args) {
-		c.compileSplatItems(args)
+		c.compileSplatItemsMode(args, true)
+		if hasTrailingKwSplat(args) {
+			// The VM, not the compiler, drops an empty `**kw` — and it is then the
+			// VM that knows the new last argument is positional.
+			kwSplatFlag := func(at int) int {
+				b.insns[at].Flags |= bytecode.FlagSendKWSplat
+				return at
+			}
+			prev := sendFlags
+			sendFlags = func(at int) int { return kwSplatFlag(prev(at)) }
+		}
 		if blockPass != nil {
 			c.compileNode(blockPass)
 			sendFlags(b.emit(bytecode.OpSendArrayBlockArg, b.addName(v.Name), 0))
@@ -1535,6 +1660,18 @@ func hasSplat(items []ast.Node) bool {
 // runtime, so an empty `**kw` passes no argument — matching MRI's keyword
 // separation.
 func (c *Compiler) compileSplatItems(items []ast.Node) {
+	c.compileSplatItemsMode(items, false)
+}
+
+// compileSplatItemsMode is compileSplatItems with the argument-list rule made
+// explicit. keepEmptyKwSplat is set for a CALL's argument array (a call, a
+// yield, a super, a `...` forward): there the trailing `**kw` hash is appended
+// unconditionally and the VM drops it when it is empty, because only the VM can
+// then say what the new last argument is (see bytecode.FlagSendKWSplat). It is
+// clear for the non-call uses — an array literal, a masgn right-hand side, an
+// index-target argument list — which keep the older "an empty `**kw` contributes
+// nothing" lowering they were written for.
+func (c *Compiler) compileSplatItemsMode(items []ast.Node, keepEmptyKwSplat bool) {
 	b := c.cur()
 	b.emit(bytecode.OpNewArray, 0, 0) // accumulator
 	for i, it := range items {
@@ -1545,7 +1682,7 @@ func (c *Compiler) compileSplatItems(items []ast.Node) {
 			continue
 		}
 		if h, ok := it.(*ast.HashLit); ok && i == len(items)-1 && isKwSplatHash(h) {
-			c.appendKwSplatIfPresent(h)
+			c.appendKwSplat(h, keepEmptyKwSplat)
 			continue
 		}
 		c.compileNode(it)
@@ -1554,12 +1691,22 @@ func (c *Compiler) compileSplatItems(items []ast.Node) {
 	}
 }
 
-// appendKwSplatIfPresent builds the keyword hash h and concatenates it onto the
-// argument-array accumulator on top of the stack, but only when the hash is
-// non-empty — an empty keyword splat contributes no argument.
-func (c *Compiler) appendKwSplatIfPresent(h *ast.HashLit) {
+// appendKwSplat builds the keyword hash h and concatenates it onto the
+// argument-array accumulator on top of the stack.
+//
+// keepEmpty says who decides about an EMPTY keyword splat. In a call argument
+// list it is true and the hash is always appended, leaving the drop to the VM,
+// which is where MRI makes it (ignore_keyword_hash_p, vm_args.c v3_4_0:506) and
+// the only place that can also say whether what is left behind is positional.
+// Everywhere else it is false and an empty hash is skipped here, as before.
+func (c *Compiler) appendKwSplat(h *ast.HashLit, keepEmpty bool) {
 	b := c.cur()
 	c.compileNode(h)
+	if keepEmpty {
+		b.emit(bytecode.OpNewArray, 1, 0) // wrap the kw hash as a single element
+		b.emit(bytecode.OpConcatArray, 0, 0)
+		return
+	}
 	b.emit(bytecode.OpDup, 0, 0)
 	b.emit(bytecode.OpSend, b.addName("empty?"), 0)
 	skip := b.emit(bytecode.OpBranchIf, 0, 0)
@@ -1569,6 +1716,38 @@ func (c *Compiler) appendKwSplatIfPresent(h *ast.HashLit) {
 	b.patch(skip, b.here())
 	b.emit(bytecode.OpPop, 0, 0) // drop the empty kw hash, leaving the accumulator
 	b.patch(done, b.here())
+}
+
+// lastArgIsPositional reports whether the LAST argument of a call is
+// syntactically a positional value — so a Hash arriving there must stay a
+// positional argument and must not be re-read as keyword arguments.
+//
+// It is the compile-time half of MRI's call-site decision: setup_parameters_complex
+// (vm_args.c v3_4_0:591) peels a trailing hash into `keyword_hash` only when the
+// call info carries VM_CALL_KWARG or VM_CALL_KW_SPLAT, which the compiler sets
+// only for `k: v` arguments and for `**h` (compile.c v3_4_0, setup_args_core).
+// Every other last argument — a local, a method call, an index, a splat, a
+// literal of any other kind — leaves both flags clear, and the hash it may
+// evaluate to is positional.
+//
+// A `&block-pass` is not an argument for this purpose (the parser may park it
+// anywhere in the list), so it is skipped. An empty list has no last argument
+// and answers false: there is nothing to protect.
+//
+// It answers false for an *ast.HashLit because go-ruby-parser v0.3.0 gives
+// `f(k: 1)` and `f({k: 1})` the SAME node with no record of the braces. Both are
+// therefore left to the older behaviour — keywords — which is what `f(k: 1)`
+// needs and what `f({k: 1})` got before. Fixing that shape needs a `Braced` bit
+// on ast.HashLit upstream; see FlagSendNoKW.
+func lastArgIsPositional(args []ast.Node) bool {
+	for i := len(args) - 1; i >= 0; i-- {
+		if _, isBP := args[i].(*ast.BlockPass); isBP {
+			continue
+		}
+		_, isHash := args[i].(*ast.HashLit)
+		return !isHash
+	}
+	return false
 }
 
 // hasTrailingKwSplat reports whether the last argument is a keyword-splat hash
@@ -1663,6 +1842,9 @@ func splitBlockParams(blk *ast.Block) (positionals []string, posDefaults []ast.N
 // reach the enclosing locals by depth.
 func (c *Compiler) compileBlock(blk *ast.Block) int {
 	parent := c.cur()
+	// A block's parameters, its &block parameter and its block-locals share one
+	// declaration list for the duplicate check (see checkDuplicateParams).
+	c.checkDuplicateParams(append(append(append([]string(nil), blk.Params...), blk.BlockParam), blk.Locals...))
 	positionals, posDefaults, kwParams, kwRest := splitBlockParams(blk)
 	c.push(newBlockBuilder(blockLabel(parent), positionals, parent))
 	b := c.cur()
@@ -1689,6 +1871,7 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 		b.patch(skip, b.here())
 	}
 	b.numRequired = nreq
+	b.postCount = postCountNoSplat(len(positionals), posDefaults, blk.SplatIndex)
 	// Keyword params take local slots right after the positionals (matching the
 	// VM's keyword binding in exec), so the body resolves them by name; record
 	// their names/required flags for the VM.
@@ -1744,10 +1927,60 @@ func (c *Compiler) compileBlock(blk *ast.Block) int {
 	c.compileBody(blk.Body)
 	c.ctxs = c.ctxs[:len(c.ctxs)-1]
 	c.cur().emit(bytecode.OpReturn, 0, 0)
+	hideImplicitBlockParams(b, blk, positionals)
 	child := c.pop().build()
 	idx := len(parent.children)
 	parent.children = append(parent.children, child)
 	return idx
+}
+
+// blockParamsAreImplicit reports whether the parser SYNTHESISED this block's
+// parameter list from `it` / `_1`..`_9` in its body, rather than reading a
+// written `|...|`.
+//
+// go-ruby-parser v0.3.0 records no flag for it, but it does leave a reliable
+// trace: for a written parameter list it pads Defaults to one entry per
+// parameter (nil where there is no default), and for a synthesised one it
+// leaves Defaults empty. `proc { |it| }` therefore arrives with Params ["it"]
+// and one nil Default, while `proc { it }` arrives with Params ["it"] and none
+// — the only thing that tells the two apart, since the names are identical.
+func blockParamsAreImplicit(blk *ast.Block) bool {
+	return len(blk.Defaults) < len(blk.Params)
+}
+
+// hideImplicitBlockParams takes the name off an `it` parameter the parser
+// synthesised, so the block's own frame is the only thing that can see it.
+//
+// MRI's `it` is not an entry in the local table the program can reach:
+// `-> { it }.parameters` is [[:req]] — NAMELESS — and `it` appears in no
+// `binding.local_variables`, answers no `binding.local_variable_get`, cannot be
+// set through `binding.local_variable_set` and cannot be reached by
+// `eval("it")`, while `defined?(it)` inside the block is still "local-variable"
+// because the compiler resolved it lexically. rbgo gets there by blanking the
+// name AFTER the body is compiled: resolution during the body used the real
+// name, and the ISeq that remains carries none.
+//
+// The numbered parameters `_1`..`_9` are deliberately NOT hidden. They are named
+// in #parameters ([[:opt, :_1]]) and, for the Ruby version rbgo reports
+// (RUBY_VERSION 3.4.1), they are visible to a Binding too — ruby/spec pins that
+// under `ruby_version_is ""..."4.0"` and pins the hiding only from 4.0. Hiding
+// them here would be answering a question rbgo has not yet said it is answering;
+// it belongs with the RUBY_VERSION bump.
+func hideImplicitBlockParams(b *builder, blk *ast.Block, positionals []string) {
+	if !blockParamsAreImplicit(blk) {
+		return
+	}
+	for i, name := range positionals {
+		if name != "it" {
+			continue
+		}
+		if i < len(b.locals) {
+			b.locals[i] = ""
+		}
+		if i < len(b.params) {
+			b.params[i] = ""
+		}
+	}
 }
 
 // scopeParent inspects a ClassDef/ModuleDef NamePath. It returns the parent
@@ -1855,6 +2088,7 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 		blkSlot, blkDepth := c.mustResolve(fwdBlockName)
 		b.emit(bytecode.OpGetLocal, blkSlot, blkDepth)
 		at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+		b.insns[at].Flags |= bytecode.FlagSendKWSplat
 		b.insns[at].C = 1
 		return
 	}
@@ -1862,18 +2096,29 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 	// value (if any) lands on top of the args array. It may sit before a trailing
 	// keyword hash, so extractBlockPass scans anywhere; bare anonymous `&`/`*`/`**`
 	// are rewritten to reads of the enclosing method's anonymous params first.
-	args, blockPass := extractBlockPass(c.rewriteAnonArgs(v.Args))
+	rewritten := c.rewriteAnonArgs(v.Args)
+	// An explicit-argument `super(...)` is an ordinary call site, so it carries
+	// the same keyword/positional verdict for its last argument as one.
+	superNoKW := 0
+	if lastArgIsPositional(rewritten) {
+		superNoKW = bytecode.FlagSendNoKW
+	}
+	args, blockPass := extractBlockPass(rewritten)
 	// A splat (or a block-pass) means a dynamic argument count: build the args as
 	// an Array and dispatch super from it (kwargs ride along as the trailing hash,
 	// exactly as in a normal call).
-	if blockPass != nil || hasSplat(args) {
-		c.compileSplatItems(args)
+	if blockPass != nil || hasSplat(args) || hasTrailingKwSplat(args) {
+		c.compileSplatItemsMode(args, true)
+		if hasTrailingKwSplat(args) {
+			superNoKW |= bytecode.FlagSendKWSplat
+		}
 		cFlag := 0
 		if blockPass != nil {
 			c.compileNode(blockPass) // block-pass value sits above the args array
 			cFlag = 1
 		}
 		at := b.emit(bytecode.OpInvokeSuperArray, 0, 0)
+		b.insns[at].Flags |= superNoKW
 		switch {
 		case cFlag == 1:
 			b.insns[at].C = 1
@@ -1886,6 +2131,7 @@ func (c *Compiler) compileSuper(v *ast.Super) {
 		c.compileNode(a)
 	}
 	at := b.emit(bytecode.OpInvokeSuper, len(args), 0)
+	b.insns[at].Flags |= superNoKW
 	if v.Block != nil {
 		b.insns[at].C = c.compileBlock(v.Block) + 1
 	}
@@ -2850,7 +3096,24 @@ func (c *Compiler) bindLocal(name string) (slot, depth int) {
 
 // storeLocal emits a SetLocal for name, resolving an existing local or
 // allocating a fresh slot, mirroring ast.Assign.
+// isNumberedParamName reports whether name is one of the nine names Ruby
+// reserves for a block's numbered parameters: `_1` through `_9`, and nothing
+// else — `_0` and `_10` are ordinary identifiers, and so is `@_1`.
+func isNumberedParamName(name string) bool {
+	return len(name) == 2 && name[0] == '_' && name[1] >= '1' && name[1] <= '9'
+}
+
 func (c *Compiler) storeLocal(name string) {
+	// Binding `_1`..`_9` as a local is a SyntaxError in MRI wherever the binding
+	// is written — a plain assignment, an op-assign, a multiple-assignment target,
+	// a `for` variable, a pattern binder — because the name belongs to the
+	// numbered-parameter mechanism and a local of that name would shadow it
+	// (parse.y v3_4_0, the numparam checks around assignable_gen). storeLocal is
+	// the single place rbgo creates or writes a named local, so it is the one
+	// place that has to say so.
+	if isNumberedParamName(name) {
+		c.fail("%s is reserved for numbered parameters", name)
+	}
 	slot, depth := c.bindLocal(name)
 	c.cur().emit(bytecode.OpSetLocal, slot, depth)
 }
@@ -3164,6 +3427,16 @@ const (
 func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 	// `def f(...)` collects the forwarded positionals into a synthetic *splat
 	// after the explicit params; the keyword-rest and block are added below.
+	// Duplicate formals are a SyntaxError, checked on what was WRITTEN — before
+	// `def f(...)` splices in its synthetic forwarding locals below.
+	{
+		names := append([]string(nil), v.Params...)
+		for _, kp := range v.KwParams {
+			names = append(names, kp.Name)
+		}
+		names = append(names, v.KwRest, v.BlockParam)
+		c.checkDuplicateParams(names)
+	}
 	params := v.Params
 	splatIndex := v.SplatIndex
 	if v.Forward {
@@ -3213,6 +3486,7 @@ func (c *Compiler) compileMethodDef(v *ast.MethodDef) {
 		b.patch(skip, b.here())
 	}
 	b.numRequired = nreq
+	b.postCount = postCountNoSplat(len(params), v.Defaults, splatIndex)
 	// Optional keyword params: the VM binds the supplied ones natively, so the
 	// prologue only fills in defaults for the absent ones.
 	for i, kp := range v.KwParams {

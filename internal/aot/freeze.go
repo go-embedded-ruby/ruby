@@ -95,6 +95,7 @@ func (f *freezer) writeISeq(b *strings.Builder, s *bytecode.ISeq) {
 	writeStrings(b, "Params", s.Params)
 	fmt.Fprintf(b, "NumRequired: %d,\n", s.NumRequired)
 	fmt.Fprintf(b, "SplatIndex: %d,\n", s.SplatIndex)
+	fmt.Fprintf(b, "PostCount: %d,\n", s.PostCount)
 	writeStrings(b, "KwNames", s.KwNames)
 	writeBools(b, "KwRequired", s.KwRequired)
 	fmt.Fprintf(b, "KwRestSlot: %d,\n", s.KwRestSlot)
