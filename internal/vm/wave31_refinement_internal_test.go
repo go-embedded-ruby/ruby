@@ -180,3 +180,30 @@ end
 		t.Errorf("used_refinements after the using body returned =\n%s\nwant\n%s", got, want)
 	}
 }
+
+// TestRefineAndUsingAreModulePrivate pins the declaration MRI gives them:
+// rb_define_private_method for Module#refine and Module#using
+// (ruby/ruby v3_4_0 eval.c:2130-2131), so both are callable only with an
+// implicit receiver — and rb_undef_method(rb_cClass, "refine") (eval.c:2137),
+// so a class cannot hold a refinement at all.
+func TestRefineAndUsingAreModulePrivate(t *testing.T) {
+	got := runSrc(t, `
+p Module.private_instance_methods(true).include?(:refine)
+p Module.private_instance_methods(true).include?(:using)
+p Class.private_instance_methods(true).include?(:refine)
+begin
+  Module.new.public_send(:refine, String) { }
+rescue NoMethodError => e
+  p :refine_is_private
+end
+begin
+  Class.new.send(:refine, String) { }
+rescue NoMethodError => e
+  p :class_refine_undefined
+end
+`)
+	want := "true\ntrue\nfalse\n:refine_is_private\n:class_refine_undefined"
+	if got != want {
+		t.Errorf("refine/using declarations =\n%s\nwant\n%s", got, want)
+	}
+}

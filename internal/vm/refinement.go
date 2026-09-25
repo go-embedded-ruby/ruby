@@ -140,6 +140,22 @@ func (vm *VM) registerRefinements() {
 	vm.cObject.methods["using"] = &Method{name: "using", native: usingFn, owner: vm.cObject, vis: visPrivate}
 	vm.cModule.define("using", usingFn)
 
+	// refine and using are PRIVATE instance methods of Module — Init_eval uses
+	// rb_define_private_method for both (ruby/ruby v3_4_0 eval.c:2130-2131) — so
+	// they are callable only with an implicit receiver, from inside the body
+	// they affect. Witnessed on 4.0.5:
+	// `Module.private_instance_methods(true).include?(:refine)` is true.
+	for _, n := range []string{"refine", "using"} {
+		vm.cModule.methods[n].vis = visPrivate
+	}
+	// Class UNDEFINES refine (rb_undef_method(rb_cClass, "refine"), eval.c:2137):
+	// a refinement is held by a module, never by a class, and MRI answers
+	// NoMethodError rather than scoping one to a class body. An `undefined`
+	// entry (as for Class#module_function) is what keeps the name out of
+	// Class.private_instance_methods(true) while Module keeps its own.
+	vm.cClass.methods["refine"] = &Method{
+		name: "refine", owner: vm.cClass, vis: visPrivate, undefined: true}
+
 	// Module#used_modules lists the modules activated by `using` reachable from
 	// this scope. Called as an instance method, self is the scope module.
 	vm.cModule.define("used_modules", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
