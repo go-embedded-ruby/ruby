@@ -633,6 +633,49 @@ type VM struct {
 	// a define_method body) still gets. GVL-guarded.
 	sendNoKW bool
 
+	// traceEvents is the union of the event masks of every ENABLED TracePoint,
+	// narrowed to the events rbgo raises. It is the one word the interpreter loop
+	// tests, and it is zero for every program that never builds a TracePoint — so
+	// the whole of the tracing machinery costs an untraced program a single field
+	// load and a not-taken branch per instruction.
+	//
+	// It stands for MRI's ruby_vm_event_enabled_global_flags, but it is asked a
+	// different question. MRI does not test a flag per instruction at all: its
+	// compiler emits distinct `trace` instructions and rb_iseq_trace_set (iseq.c
+	// v3_4_0:3981) rewrites their encodings when a hook turns an event on, so an
+	// untraced program executes no trace instruction whatsoever. rbgo has no such
+	// instruction to rewrite (its ISeqs are plain []Instr, shared and reachable
+	// from AOT-frozen output), so the gate is a test instead of a rewrite. Keeping
+	// it a SINGLE word — rather than "is the hook list empty", which would be a
+	// slice header and a length — is what keeps that test to one load.
+	// GVL-guarded.
+	traceEvents traceEvents
+
+	// tracePoints is the enabled hook list, in the order the hooks were enabled,
+	// which is the order they are called in (MRI appends to rb_hook_list_t and
+	// walks it forwards). GVL-guarded.
+	tracePoints []*tracePoint
+
+	// traceArg is the event currently being delivered, or nil. It is MRI's
+	// ec->trace_arg and carries both of that field's jobs: it is what every
+	// TracePoint accessor reads (and whose absence is the RuntimeError "access
+	// from outside"), and it is the REENTRY GUARD — while it is set, fireTrace
+	// delivers nothing, so a handler's own line, call and return events do not
+	// re-enter it (rb_exec_event_hooks, vm_trace.c v3_4_0:434).
+	// GVL-guarded.
+	traceArg *traceArg
+
+	// cTracePoint is the TracePoint class, kept so TracePoint.new on the class
+	// itself does not have to go back through the constant table.
+	cTracePoint *RClass
+
+	// pendingClassBody marks the next exec frame as a class/module body, so it
+	// raises MRI's :class and :end events rather than being taken for the
+	// top-level or an eval. Like pendingMethodCtx it is set immediately before the
+	// dispatch and read-and-cleared at the top of exec, before any user code runs.
+	// GVL-guarded.
+	pendingClassBody bool
+
 	// children records finished synthetic child processes (Process.spawn /
 	// Kernel.fork), so Process.waitpid2 can report each one's exit status.
 	// childPidSeq assigns the next synthetic pid. GVL-guarded.
@@ -962,6 +1005,7 @@ func New(out io.Writer) *VM {
 	vm.registerOstruct()           // OpenStruct data ops (to_h/inspect/dig/delete_field/==), backed by go-ruby-ostruct; after the prelude so it reopens the prelude-defined class
 	vm.registerLogger()            // Logger (require "logger"), backed by go-ruby-logger; after the prelude so Logger::Error etc. can subclass the exception hierarchy
 	vm.registerPStore()            // PStore (require "pstore"), backed by go-ruby-pstore; after the prelude so PStore::Error < StandardError
+	vm.registerTracePoint()        // TracePoint (see tracepoint.go); after the prelude so it subclasses the prelude-visible Object
 	vm.includeMySQLEnumerable()    // Mysql2::Result mixes in Enumerable; after the prelude so the module exists
 	vm.includeWeakMapEnumerable()  // ObjectSpace::WeakMap mixes in Enumerable; after the prelude so the module exists
 	vm.includeStringIOEnumerable() // StringIO mixes in Enumerable; after the prelude so the module exists
@@ -1285,6 +1329,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// (self's singleton class), applied to methodDefinee once the frame is set up.
 	pendEvalDef := vm.pendingEvalMethodDefinee
 	vm.pendingEvalMethodDefinee = nil
+	// Consumed here for the same reason: the flag says THIS frame is a class or
+	// module body (see pendingClassBody), and it must not survive into a nested
+	// frame that argument binding might start.
+	pendClassBody := vm.pendingClassBody
+	vm.pendingClassBody = false
+	// This frame's TracePoint description, built lazily: nil unless tracing is on
+	// (see the entry-event site below). Declared here because the exit-event
+	// defers registered further down close over it.
+	var tf *traceFrame
 	var fm frameMethod
 	switch {
 	case selfBlock != nil:
@@ -1589,6 +1642,34 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		methodDefinee = pendEvalDef
 	}
 
+	// TracePoint's exit event (:return / :b_return / :end) for a frame that does
+	// NOT finish: an exception, a throw, or a non-local return passing through.
+	//
+	// MRI raises it there too — hook_before_rewind fires RETURN as it rewinds the
+	// frames an exception is unwinding past — and reports #return_value as nil,
+	// because the frame produced none. `def a2; raise; end` called from a1 under
+	// a :return TracePoint reports [:return, :a2, nil] then [:return, :a1, nil],
+	// and rbgo reported neither until this defer existed.
+	//
+	// It is registered BEFORE the returnSignal recover below so that it RUNS
+	// AFTER it (defers are LIFO): the recover raises the event itself, with the
+	// returned value, and sets exitFired so this one stays quiet. exitFired is
+	// likewise set at the two sites that raise the event before panicking on
+	// purpose — OpBreak, which carries the break value, and a non-local OpReturn,
+	// which does not.
+	// Conditional on purpose: registering it is free for an untraced program
+	// (an open-coded defer is a bit in a mask, not a call), and NOT registering
+	// it keeps exec's frame free of a closure it would never run.
+	if vm.traceEvents != 0 {
+		defer func() {
+			if tf == nil || tf.exit == 0 || tf.exitFired || vm.traceEvents&tf.exit == 0 {
+				return
+			}
+			tf.exitFired = true
+			vm.traceExitEvent(tf, object.NilV)
+		}()
+	}
+
 	// Every frame catches a returnSignal aimed at its own selfTarget (a local
 	// return/next routed through an ensure, or a non-local return whose home is
 	// this frame). A signal for some other target passes through. On a catch the
@@ -1600,6 +1681,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				sig, ok := r.(returnSignal)
 				if !ok || sig.target != selfTarget {
 					panic(r)
+				}
+				// The frame IS returning, with sig.value: raise its exit event before
+				// the truncation below takes this frame's own stack entries away,
+				// since the event reports its path and line.
+				if tf != nil && tf.exit != 0 && !tf.exitFired && vm.traceEvents&tf.exit != 0 {
+					tf.exitFired = true
+					vm.traceExitEvent(tf, sig.value)
 				}
 				// Truncate one past this frame's own entries: this frame's normal
 				// pop never ran, and the deeper frames that unwound left theirs too.
@@ -1616,6 +1704,21 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				execResult = sig.value
 			}
 		}()
+	}
+
+	// TracePoint: describe this frame once, and raise its entry event (:call,
+	// :b_call or :class) before the first instruction runs. tf stays nil — and
+	// nothing below is allocated or computed — for every program with no enabled
+	// TracePoint, which is the gate traceEvents exists to be.
+	//
+	// The entry event is raised HERE, after the frame's name/file/code/cref
+	// stacks are pushed and lexCref is settled, because a handler may take a
+	// backtrace or ask for #binding, and both read that state.
+	if vm.traceEvents != 0 {
+		tf = newTraceFrame(iseq, myFrame, self, fm, definee, env, iseq.File, selfBlock, methodName, pendClassBody)
+		if tf.entry&vm.traceEvents != 0 {
+			vm.traceEntryEvent(tf)
+		}
 	}
 
 	pc := 0
@@ -1660,6 +1763,25 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			// of their own that the rest of the machinery does not keep.
 			if myFrame < len(vm.frameCode) {
 				vm.frameCode[myFrame].pc = pc
+			}
+			// TracePoint's :line event. This is the ONE per-instruction cost the
+			// whole subsystem adds to an untraced program: a load of vm.traceEvents
+			// and a not-taken branch. Everything past it — the line-map search, the
+			// event record, the hook walk — is behind the gate. It is deliberately
+			// the first thing after the pc is published, because a handler placed
+			// here reads that pc for its #lineno.
+			if vm.traceEvents&evLine != 0 {
+				// tf is nil when this frame started before any TracePoint was
+				// enabled and one was enabled from inside it — `trace.enable` with
+				// no block, whose very next line must already be traced. Building it
+				// here rather than per-frame is what keeps the untraced cost to the
+				// branch above.
+				if tf == nil {
+					tf = newTraceFrame(iseq, myFrame, self, fm, definee, env, iseq.File, selfBlock, methodName, pendClassBody)
+				}
+				if iseq.IsLineStart(pc) {
+					vm.traceLineEvent(tf, pc)
+				}
 			}
 			in := iseq.Insns[pc]
 			switch in.Op {
@@ -2078,6 +2200,9 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// reopened one. MRI resets scope visibility to public on every class
 				// frame push (vm_insnhelper.c), mirroring defineClassIn/defineModuleIn.
 				sc.defaultVis, sc.funcMode = visPublic, false
+				// A class/module body raises MRI's :class and :end events; the flag is
+				// consumed at the top of exec (see pendingClassBody).
+				vm.pendingClassBody = true
 				push(vm.exec(iseq.Children[in.A], sc, nil, sc, "", nil, nil, nil, nil, nil))
 			case bytecode.OpAlias:
 				vm.aliasMethod(methodDefinee, iseq.Names[in.A], iseq.Names[in.B])
@@ -2315,6 +2440,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						vm.raiseWithIvars("LocalJumpError", "unexpected return",
 							map[string]object.Value{"@reason": object.Symbol("return"), "@exit_value": val})
 					}
+					// This block frame is leaving for good. MRI reports its :b_return with
+					// nil — the value belongs to the method the return reaches, which
+					// reports it as its own :return.
+					if tf != nil && tf.exit != 0 && !tf.exitFired && vm.traceEvents&tf.exit != 0 {
+						tf.exitFired = true
+						vm.traceExitEvent(tf, object.NilV)
+					}
 					panic(returnSignal{target: t, value: val})
 				}
 				// An explicit return from this frame with a live ensure handler must
@@ -2345,6 +2477,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// letting the signal escape and crash the VM.
 				if selfBlock == nil || !selfBlock.breakLive {
 					raise("LocalJumpError", "break from proc-closure")
+				}
+				// Unlike a non-local return, MRI reports a broken-out-of block's
+				// :b_return WITH the break value.
+				if tf != nil && tf.exit != 0 && !tf.exitFired && vm.traceEvents&tf.exit != 0 {
+					tf.exitFired = true
+					vm.traceExitEvent(tf, val)
 				}
 				panic(breakSignal{owner: selfBlock, value: val})
 			case bytecode.OpPushHandler:
@@ -2550,6 +2688,21 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					vm.curExc = exc
 					push(exc)
 					pc = h.pc
+					// TracePoint's :rescue event: MRI raises it as the rescue clause
+					// takes over, with the exception as #raised_exception
+					// (rb_tracearg_raised_exception accepts RAISE and RESCUE alike,
+					// vm_trace.c v3_4_0:1021). The pc is published first so a handler
+					// asking for #lineno is answered with the clause's line, not the
+					// abandoned raise site.
+					if vm.traceEvents&evRescue != 0 {
+						if myFrame < len(vm.frameCode) {
+							vm.frameCode[myFrame].pc = pc
+						}
+						if tf == nil {
+							tf = newTraceFrame(iseq, myFrame, self, fm, definee, env, iseq.File, selfBlock, methodName, pendClassBody)
+						}
+						vm.traceRescueEvent(tf, exc)
+					}
 				}()
 				runChunk()
 			}()
@@ -2562,6 +2715,21 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		// to an enclosing frame's handler (or the Run boundary) with no per-frame
 		// defer — the common case (fib, dispatch, accessors) skips that overhead.
 		runChunk()
+	}
+	// TracePoint's exit event (:return, :b_return or :end), raised on NORMAL
+	// completion only — an exception unwinds straight past here, and MRI likewise
+	// does not report a return for a frame that raised. It runs before the frame
+	// stacks are popped so #lineno, #path and a handler's backtrace still see this
+	// frame, and before putEnv so a handler asking for #binding pins an Env that
+	// is still this frame's.
+	if vm.traceEvents != 0 {
+		if tf == nil {
+			tf = newTraceFrame(iseq, myFrame, self, fm, definee, env, iseq.File, selfBlock, methodName, pendClassBody)
+		}
+		if tf.exit&vm.traceEvents != 0 {
+			tf.exitFired = true
+			vm.traceExitEvent(tf, result)
+		}
 	}
 	// Recycle this frame's env and operand stack on normal completion (putEnv is
 	// a no-op if a closure captured the env). An exception unwinding past here
@@ -2728,6 +2896,9 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 	// module_function mode (MRI resets these on every (re)open).
 	class.defaultVis, class.funcMode = visPublic, false
 	adoptReopenLexParent(class, parent, scoped)
+	// A class body raises MRI's :class and :end events; the flag is consumed at
+	// the top of exec (see pendingClassBody).
+	vm.pendingClassBody = true
 	return vm.exec(body, class, nil, class, "", nil, nil, nil, nil, nil)
 }
 
@@ -2771,6 +2942,9 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 	}
 	mod.defaultVis, mod.funcMode = visPublic, false
 	adoptReopenLexParent(mod, parent, scoped)
+	// A module body raises MRI's :class and :end events; the flag is consumed at
+	// the top of exec (see pendingClassBody).
+	vm.pendingClassBody = true
 	return vm.exec(body, mod, nil, mod, "", nil, nil, nil, nil, nil)
 }
 

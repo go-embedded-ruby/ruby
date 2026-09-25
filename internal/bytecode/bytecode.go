@@ -396,3 +396,49 @@ func (s *ISeq) HandlerState() uint8 { return s.handlerState }
 // the exported field set so the AOT freeze emitter (which writes only the
 // source-level fields) is unaffected.
 func (s *ISeq) SetHandlerState(v uint8) { s.handlerState = v }
+
+// IsLineStart reports whether pc is the FIRST instruction of a line run — the
+// place a `line` trace event belongs.
+//
+// MRI does not answer this at run time at all: its compiler emits a distinct
+// `trace` instruction wherever a new line begins (iseq_compile_each keeps
+// last_line and only adds one when the line changes), and rb_iseq_trace_set
+// (iseq.c v3_4_0:3981) flips those encodings on when a hook wants
+// ISEQ_TRACE_EVENTS, so a program with no TracePoint executes no trace
+// instruction and pays nothing. rbgo has no trace instruction to flip, so the
+// same question is asked of the line map instead — and the map already holds
+// exactly the same information, because Lines carries one entry per line CHANGE
+// (see the field comment), which is the set of positions MRI would have marked.
+//
+// The search is LineAt's, narrowed to an exact hit: the entry found must start
+// at pc, not merely cover it. Callers gate this on tracing being enabled, so
+// the binary search never runs for an untraced program.
+func (s *ISeq) IsLineStart(pc int) bool {
+	if len(s.Lines) == 0 || pc < s.Lines[0].PC {
+		return false
+	}
+	lo, hi := 0, len(s.Lines)
+	for hi-lo > 1 {
+		mid := int(uint(lo+hi) >> 1)
+		if s.Lines[mid].PC <= pc {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return s.Lines[lo].PC == pc
+}
+
+// HasLine reports whether any instruction in this ISeq is mapped to the given
+// 1-based source line. It is what decides MRI's "can not enable any hooks"
+// ArgumentError for a `target_line:` that names no line of the target's code
+// (rb_tracepoint_enable_for_target, vm_trace.c v3_4_0:1234, whose count n stays
+// 0 when rb_iseq_add_local_tracepoint_recursively matches nothing).
+func (s *ISeq) HasLine(line int) bool {
+	for _, e := range s.Lines {
+		if e.Line == line {
+			return true
+		}
+	}
+	return false
+}
