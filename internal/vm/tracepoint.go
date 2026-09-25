@@ -451,9 +451,10 @@ func (vm *VM) tracePointEnableM(tp *tracePoint, args []object.Value, blk *Proc) 
 
 	// target_thread: defaults to the CURRENT thread, but only for the block form
 	// with neither target: nor target_line:; every other shape defaults to no
-	// filter at all.
+	// filter at all. MRI tests NIL_P, not "was the keyword written", so an
+	// explicit `target: nil` counts as no target here too.
 	if !threadGiven {
-		if blk != nil && target == nil && targetLine == nil {
+		if blk != nil && object.IsNil(target) && object.IsNil(targetLine) {
 			targetThread = vm.currentThread
 		} else {
 			targetThread = nil

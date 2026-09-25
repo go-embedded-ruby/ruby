@@ -9,18 +9,10 @@ import (
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
-// tpRun runs a Ruby program and returns its trimmed stdout, failing the test on
-// an uncaught exception. It is runSrc with the error surfaced as the test
-// failure message rather than a bare "run:" so a TracePoint mistake reads.
-func tpRun(t *testing.T, src string) string {
-	t.Helper()
-	return runSrc(t, src)
-}
-
 // TestTracePointLineEvents pins the shape the whole subsystem rests on: a :line
 // event per line of the enabled block, reporting the line about to run.
 func TestTracePointLineEvents(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 lines = []
 TracePoint.new(:line) { |tp| lines << tp.lineno }.enable do
   a = 1
@@ -38,7 +30,7 @@ p lines
 // tracing the frame it was enabled from — which is the branch that builds the
 // traceFrame lazily, because that frame started untraced.
 func TestTracePointEnableWithoutBlock(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 called = false
 t = TracePoint.new(:line) { called = true }
 p t.enable
@@ -57,7 +49,7 @@ p t.disable
 // TestTracePointNewValidation covers tracepoint_new_s's three refusals and its
 // no-argument default (every event).
 func TestTracePointNewValidation(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 begin; TracePoint.new(:nope) {}; rescue ArgumentError => e; puts e.message; end
 begin; TracePoint.new(:line); rescue ArgumentError => e; puts e.message; end
 begin; TracePoint.new(Object.new) {}; rescue TypeError; puts "TypeError"; end
@@ -73,7 +65,7 @@ p TracePoint.new {}.enabled?
 // String (which answers #to_sym with a Symbol) and an object whose #to_sym
 // answers something else, which is a TypeError.
 func TestTracePointEventCoercion(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 p TracePoint.new("line") {}.enabled?
 class Bad; def to_sym; 1; end; end
 begin; TracePoint.new(Bad.new) {}; rescue TypeError; puts "TypeError"; end
@@ -88,7 +80,7 @@ begin; TracePoint.new(Bad.new) {}; rescue TypeError; puts "TypeError"; end
 // only those events answer: method_id, callee_id (which differ under an alias),
 // defined_class, return_value and parameters.
 func TestTracePointCallReturn(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 class Holder
   def m(a, b = 1); a; end
   alias_method :m2, :m
@@ -113,7 +105,7 @@ seen.each { |s| p s }
 // TestTracePointBlockEvents covers :b_call/:b_return and the non-lambda
 // #parameters rule (a proc reports its positionals as :opt, a lambda as :req).
 func TestTracePointBlockEvents(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 seen = []
 pr = proc { |x| }
 la = ->(y) { }
@@ -130,7 +122,7 @@ p seen
 // TestTracePointClassEnd covers the :class/:end pair for a class body, a module
 // body and a singleton-class body — the three sites that mark a frame as one.
 func TestTracePointClassEnd(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 seen = []
 TracePoint.new(:class, :end) { |tp| seen << [tp.event, tp.self.to_s] }.enable do
   class TPC; end
@@ -149,7 +141,7 @@ p seen[0][1]
 
 // TestTracePointRescue covers the :rescue event and #raised_exception.
 func TestTracePointRescue(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 seen = nil
 TracePoint.new(:rescue) { |tp| seen = tp.raised_exception.class.to_s }.enable do
   begin
@@ -167,7 +159,7 @@ p seen
 // TestTracePointAccessorsOutside covers get_trace_arg's refusal and the two
 // accessors that refuse an event that does not carry their datum.
 func TestTracePointAccessorsOutside(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 tp = TracePoint.new(:line) {}
 begin; tp.lineno; rescue RuntimeError => e; puts e.message; end
 TracePoint.new(:line) do |t|
@@ -192,7 +184,7 @@ end.enable { x = 1 }
 // enabled/disabled form, the bare event form, the "in 'method'" form a :line
 // inside a method takes, and the quoted-method form of :call.
 func TestTracePointInspectShapes(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 t = TracePoint.new(:line) {}
 p t.inspect
 t.enable
@@ -218,7 +210,7 @@ puts seen.map { |s| s.sub(/:\d+>/, ':N>').sub(/ [^ ]*:N>/, ' F:N>') }.uniq
 // TestTracePointBinding covers rb_tracearg_binding: a frame event hands back a
 // Binding over that frame's locals.
 func TestTracePointBinding(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 def tp_binding_probe; secret = 42; end
 names = nil
 TracePoint.new(:return) { |tp| names = tp.binding.local_variables }.enable { tp_binding_probe }
@@ -232,7 +224,7 @@ p names
 // TestTracePointTargetErrors covers every refusal of
 // rb_tracepoint_enable_for_target and of the nesting rules around it.
 func TestTracePointTargetErrors(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 def msg
   yield
   "no raise"
@@ -274,7 +266,7 @@ p msg { t.enable(target: -> {}) { t.disable {} } }
 // UnboundMethod and a Proc — and the rule that a target does NOT reach the
 // methods it calls.
 func TestTracePointTargetScoping(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 seen = []
 o = Object.new
 def o.foo; bar; end
@@ -301,7 +293,7 @@ p seen
 // TestTracePointTargetLine covers the target_line: filter: only that line is
 // delivered, and a value that answers #to_int is accepted.
 func TestTracePointTargetLine(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 target = lambda do
   x = 1
   y = 2
@@ -327,7 +319,7 @@ p seen == [mid]
 // states: inside a handler it lifts the reentry guard for its block, and
 // outside one it refuses.
 func TestTracePointAllowReentry(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 begin
   TracePoint.allow_reentry {}
 rescue RuntimeError => e
@@ -352,7 +344,7 @@ p n > 1
 // an already-enabled TracePoint) and the target_thread: default, which confines
 // the block form of enable to the thread that called it.
 func TestTracePointTraceAndThreadFilter(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 t = TracePoint.trace(:line) {}
 p t.enabled?
 t.disable
@@ -688,7 +680,7 @@ func TestTraceFrameKlassValue(t *testing.T) {
 // TestTracePointDefinedClassNil covers the accessor's nil rendering, which a
 // non-method event reaches.
 func TestTracePointDefinedClassNil(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 seen = 1
 TracePoint.new(:line) { |tp| seen = tp.defined_class }.enable { x = 1 }
 p seen
@@ -702,7 +694,7 @@ p seen
 // the targeting ones, each most-recently-enabled first — which is the one
 // property registration order alone cannot produce.
 func TestTracePointHookOrder(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 target = -> {}
 out = []
 outer = TracePoint.new(:b_call) { out << :outer }
@@ -722,7 +714,7 @@ p out.last(2)
 // TestTracePointPathAndNilMethodID covers the #path accessor and the nil
 // #method_id / #callee_id a line event outside any method reports.
 func TestTracePointPathAndNilMethodID(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 seen = nil
 TracePoint.new(:line) { |tp| seen = [tp.path, tp.method_id, tp.callee_id] }.enable { x = 1 }
 p seen[1..2]
@@ -737,7 +729,7 @@ p seen[0].is_a?(String)
 // in BOTH directions: a scoped disable on an enabled TracePoint leaves it
 // enabled, and a scoped enable on a disabled one leaves it disabled.
 func TestTracePointScopedRestore(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 t = TracePoint.new(:line) {}
 t.enable
 p t.disable { t.enabled? }
@@ -757,7 +749,7 @@ p t.disable { |*a| a }
 // does NOT finish: an exception rewinding past two methods, a non-local return
 // out of a block, and a break out of one (whose :b_return carries the value).
 func TestTracePointUnwindExit(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 def a2; raise "x"; end
 def a1; a2; end
 ev = []
@@ -792,7 +784,7 @@ p ev
 // which reaches the frame's own returnSignal recover rather than the normal
 // exit — the value must still be the returned one.
 func TestTracePointEnsureReturn(t *testing.T) {
-	got := tpRun(t, `
+	got := runSrc(t, `
 def ens; begin; return 5; ensure; end; end
 ev = []
 TracePoint.new(:return) { |tp| ev << [tp.method_id, tp.return_value] }.enable { ens }
@@ -838,5 +830,43 @@ func TestScriptLabel(t *testing.T) {
 	vm.SetScriptName("prog.rb")
 	if got := vm.scriptLabel(); got != "prog.rb" {
 		t.Errorf("scriptLabel = %q, want %q", got, "prog.rb")
+	}
+}
+
+// TestTracePointEnabledMidFrame covers the lazy traceFrame rebuild at the
+// rescue and normal-exit sites: a TracePoint enabled from INSIDE a frame must
+// still raise that frame's own events, and the frame started with no
+// description because nothing was tracing when it began.
+//
+// MRI gets there by rewriting the running ISeq's trace instructions when the
+// hook is enabled; rbgo gets there by building the description on first need.
+func TestTracePointEnabledMidFrame(t *testing.T) {
+	got := runSrc(t, `
+seen = nil
+t = TracePoint.new(:rescue) { |tp| seen = tp.raised_exception.class }
+t.enable
+begin
+  raise ArgumentError
+rescue
+end
+t.disable
+p seen
+
+$ev = []
+$t = TracePoint.new(:return) { |tp| $ev << [tp.method_id, tp.return_value] if tp.method_id == :turn_on }
+def turn_on; $t.enable; 7; end
+turn_on
+$t.disable
+p $ev
+
+$ev2 = []
+$t2 = TracePoint.new(:b_return) { |tp| $ev2 << tp.return_value }
+[1].each { $t2.enable; 9 }
+$t2.disable
+p $ev2
+`)
+	want := "ArgumentError\n[[:turn_on, 7]]\n[9]"
+	if got != want {
+		t.Errorf("mid-frame enable = %q, want %q", got, want)
 	}
 }
