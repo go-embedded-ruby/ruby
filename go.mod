@@ -162,7 +162,7 @@ require (
 	github.com/go-ruby-rss/rss v0.0.0-20260923204152-16e2242a2336
 	github.com/go-ruby-rubocop/rubocop v0.0.0-20260907185859-f69aff2b309d
 	github.com/go-ruby-rubygems/rubygems v0.0.0-20260916102314-9bd0bf6a00e5
-	github.com/go-ruby-saml/saml v0.0.0-20260907185858-d117cd8757c6
+	github.com/go-ruby-saml/saml v0.0.0-20260925100912-118142122e06
 	github.com/go-ruby-sass/sass v0.0.0-20260906100410-777830f19847
 	github.com/go-ruby-scanf/scanf v0.0.0-20260916102437-76341a9284aa
 	github.com/go-ruby-securerandom/securerandom v0.0.0-20260916102518-8f55919c115b
@@ -202,7 +202,7 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/sirupsen/logrus v1.10.2
-	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260923172636-a5c3af0cdb3d
+	github.com/twmb/franz-go/pkg/kfake v0.0.0-20260925040417-67711bad7b74
 	go.etcd.io/etcd/server/v3 v3.7.2
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
