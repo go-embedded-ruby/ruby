@@ -1123,6 +1123,7 @@ func (vm *VM) bootstrap() {
 	aliasBuiltin(vm.cObject, "fail", "raise")
 	vm.cObject.define("Integer", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
+		vm.mustASCIICompat(args[0]) // rb_str_to_inum, before any parsing
 		// fail either raises (the default) or, under `exception: false`, yields nil.
 		fail := func(class, format string, a ...interface{}) object.Value {
 			if doRaise {
@@ -1216,6 +1217,7 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cObject.define("Float", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
+		vm.mustASCIICompat(args[0]) // rb_str_to_dbl, before any parsing
 		fail := func(class, format string, a ...interface{}) object.Value {
 			if doRaise {
 				raise(class, format, a...)
@@ -2640,6 +2642,7 @@ func (vm *VM) bootstrap() {
 		return vm.stringSub(self.(*object.String), args, blk, true)
 	})
 	vm.cString.define("to_i", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		vm.mustASCIICompat(self) // rb_str_to_inum's first act
 		base := 10
 		if len(args) > 0 {
 			// The base is coerced through #to_int (MRI's rb_num2long), so a Float
@@ -2648,7 +2651,8 @@ func (vm *VM) bootstrap() {
 		}
 		return stringToInt(strOf(self), base)
 	})
-	vm.cString.define("to_f", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("to_f", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		vm.mustASCIICompat(self) // rb_str_to_dbl's first act
 		return object.Float(parseLeadingFloat(strOf(self)))
 	})
 	vm.cString.define("oct", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
@@ -8502,6 +8506,24 @@ func (vm *VM) checkCodepointEncoding(s *object.String) {
 	}
 }
 
+// mustASCIICompat is encoding.c v3_4_0 rb_must_asciicompat:
+//
+//	rb_encoding *enc = rb_enc_get(str);
+//	if (!rb_enc_asciicompat(enc))
+//	    rb_raise(rb_eEncCompatError, "ASCII incompatible encoding: %s", rb_enc_name(enc));
+//
+// Every string-to-number entry point runs it before it looks at a single byte —
+// rb_str_to_dbl (String#to_f, Kernel#Float), rb_str_to_inum (String#to_i,
+// Kernel#Integer), rb_str_to_c (String#to_c, Kernel#Complex) — because a
+// UTF-16 or UTF-32 string's bytes are not digits even when they look like them.
+// It fires even under `exception: false`, which suppresses only the parse
+// failure, not the encoding one.
+func (vm *VM) mustASCIICompat(v object.Value) {
+	if s, ok := v.(*object.String); ok && !encIsASCIICompat(s.EncName()) {
+		raise("Encoding::CompatibilityError", "ASCII incompatible encoding: %s", s.EncName())
+	}
+}
+
 // strIs7bit reports MRI's ENC_CODERANGE_7BIT for s: an empty string qualifies in
 // any encoding, otherwise the bytes must all be 7-bit ASCII in an
 // ASCII-compatible encoding (UTF-16/32 content is never 7-bit).
@@ -10567,6 +10589,11 @@ func (vm *VM) stringLineSegs(self object.Value, args []object.Value) []object.Va
 		// no segments
 	default:
 		sep := vm.coerceFormatString(sepArg)
+		if sepArg == object.Value(defaultRecordSeparator) && !encIsASCIICompat(str.EncName()) {
+			// The separator is re-encoded into a non-ASCII-compatible receiver's
+			// encoding before the search (see transcodeDefaultSeparator).
+			sep = vm.transcodeDefaultSeparator(sep, str.EncName())
+		}
 		if sep == "" {
 			segs = splitParagraphs(s, chomp)
 		} else {

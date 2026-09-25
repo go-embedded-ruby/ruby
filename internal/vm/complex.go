@@ -481,6 +481,9 @@ func exactZeroValue(v object.Value) bool {
 func (vm *VM) registerComplex() {
 	vm.cObject.define("Complex", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		args, doRaise := popExceptionKwarg(args)
+		// rb_str_to_c refuses a non-ASCII-compatible String outright, before the
+		// literal is read and regardless of `exception: false`.
+		vm.mustASCIICompat(args[0])
 		// nucomp_f_complex: a lone argument that is EXACTLY a Complex is returned
 		// as it stands, before nucomp_convert ever sees it.
 		if c, ok := args[0].(*object.Complex); ok && len(args) == 1 {
@@ -496,7 +499,8 @@ func (vm *VM) registerComplex() {
 	}
 	vm.cInteger.define("to_c", realToC)
 	vm.cFloat.define("to_c", realToC)
-	vm.cString.define("to_c", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+	vm.cString.define("to_c", func(vm *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		vm.mustASCIICompat(self) // rb_str_to_c's first act
 		c, _ := stringToC(self.(*object.String).Str(), false)
 		return c
 	})

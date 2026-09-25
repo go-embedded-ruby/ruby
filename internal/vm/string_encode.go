@@ -255,6 +255,18 @@ func (vm *VM) decodeToUTF8(src []byte, from string, o transcodeOpts, repl string
 		return vm.decodeUTF16(src, from == "UTF-16BE", o, repl)
 	case "UTF-32LE", "UTF-32BE":
 		return vm.decodeUTF32(src, from == "UTF-32BE", o, repl)
+	case "UTF-16", "UTF-32":
+		body, be := splitBOM(src, from)
+		if body == nil {
+			// transcode.c's BOM converters (from_UTF-16 / from_UTF-32) have no
+			// fallback endianness: a string with no byte-order mark cannot be
+			// read at all, and rb_econv reports the offending bytes.
+			raise("Encoding::InvalidByteSequenceError", "%s on %s", bomErrorBytes(src, from), from)
+		}
+		if from == "UTF-16" {
+			return vm.decodeUTF16(body, be, o, repl)
+		}
+		return vm.decodeUTF32(body, be, o, repl)
 	}
 	if u, ok := xtextDecode(src, from); ok {
 		return u
@@ -349,6 +361,10 @@ func (vm *VM) encodeFromUTF8(u, to string, o transcodeOpts, repl string) []byte 
 		return encodeUTF16(u, to == "UTF-16BE")
 	case "UTF-32LE", "UTF-32BE":
 		return encodeUTF32(u, to == "UTF-32BE")
+	case "UTF-16":
+		return append(bomFor("UTF-16", true), encodeUTF16(u, true)...)
+	case "UTF-32":
+		return append(bomFor("UTF-32", true), encodeUTF32(u, true)...)
 	}
 	return xtextEncode(u, to, o.undefReplace, repl)
 }
@@ -369,6 +385,85 @@ func (vm *VM) encodeByteRange(u, to string, limit rune, o transcodeOpts, repl st
 		b = append(b, []byte(repl)...)
 	}
 	return b
+}
+
+// transcodeDefaultSeparator is the conversion rb_str_enumerate_lines applies
+// when the receiver's encoding is not ASCII-compatible and the separator is
+// still the default one (string.c v3_4_0):
+//
+//	if ((rs == rb_default_rs) && !rb_enc_asciicompat(enc)) {
+//	    rs = rb_str_new(rsptr, rslen);
+//	    rs = rb_str_encode(rs, rb_enc_from_encoding(enc), 0, Qnil);
+//	    rsptr = RSTRING_PTR(rs); rslen = RSTRING_LEN(rs);
+//	}
+//
+// so "\n" is re-encoded into the receiver's encoding before the byte search —
+// which is why a dummy UTF-16 string is never split (the search is for the
+// four bytes FE FF 00 0A, which the body does not contain) and why a dummy
+// UTF-7 one raises instead. rb_str_new makes the copy ASCII-8BIT, so that is
+// the source encoding the missing-converter message names.
+func (vm *VM) transcodeDefaultSeparator(sep, to string) string {
+	if !encodingSupported(to) && !isBOMEncoding(to) {
+		raise("Encoding::ConverterNotFoundError", "code converter not found (ASCII-8BIT to %s)", to)
+	}
+	return string(vm.encodeFromUTF8(sep, to, transcodeOpts{}, defaultReplacement(to)))
+}
+
+// isBOMEncoding reports whether name is one of Ruby's two BOM-carrying Unicode
+// encodings. They are DUMMY encodings (Encoding::UTF_16.dummy? is true), so
+// nothing may be matched, indexed or split in them, but transcode.c does define
+// converters both ways: to_UTF-16 writes a big-endian byte-order mark and then
+// UTF-16BE, and from_UTF-16 reads the mark to choose the endianness.
+func isBOMEncoding(name string) bool { return name == "UTF-16" || name == "UTF-32" }
+
+// bomFor returns the byte-order mark Ruby's UTF-16 / UTF-32 encoder emits.
+// String#encode always produces the big-endian form ("abc".encode("UTF-16") is
+// FE FF 00 61 …), which is what transcode.c's to_UTF-16 does.
+func bomFor(name string, be bool) []byte {
+	if name == "UTF-32" {
+		if be {
+			return []byte{0x00, 0x00, 0xFE, 0xFF}
+		}
+		return []byte{0xFF, 0xFE, 0x00, 0x00}
+	}
+	if be {
+		return []byte{0xFE, 0xFF}
+	}
+	return []byte{0xFF, 0xFE}
+}
+
+// splitBOM strips the byte-order mark from src and reports the endianness it
+// names. A string with no mark returns a nil body: transcode.c's from_UTF-16 /
+// from_UTF-32 converters start in a state that only a BOM can leave, so such a
+// string is an invalid byte sequence rather than a big-endian default.
+//
+// UTF-32 is tested before UTF-16 within its own family only — the two families
+// never share a name — but the UTF-32 little-endian mark FF FE 00 00 begins with
+// the UTF-16 little-endian mark, which is why the four-byte forms are matched
+// whole.
+func splitBOM(src []byte, name string) ([]byte, bool) {
+	for _, be := range []bool{true, false} {
+		m := bomFor(name, be)
+		if len(src) >= len(m) && string(src[:len(m)]) == string(m) {
+			return src[len(m):], be
+		}
+	}
+	return nil, false
+}
+
+// bomErrorBytes renders the leading bytes rb_econv names in the "… on UTF-16"
+// InvalidByteSequenceError: one code unit of the encoding (two bytes for UTF-16,
+// four for UTF-32), inspected as a String literal so a printable byte shows as
+// itself and anything else as \xNN.
+func bomErrorBytes(src []byte, name string) string {
+	n := 2
+	if name == "UTF-32" {
+		n = 4
+	}
+	if len(src) < n {
+		n = len(src)
+	}
+	return object.NewStringBytesEnc(append([]byte(nil), src[:n]...), "ASCII-8BIT").Inspect()
 }
 
 func encodeUTF16(u string, be bool) []byte {
@@ -466,7 +561,7 @@ func (vm *VM) stringEncode(s *object.String, args []object.Value) *object.String
 	// or an unregistered name) has no converter. MRI still succeeds when the whole
 	// string is 7-bit ASCII and both encodings are ASCII-compatible — the bytes are
 	// identical — and otherwise raises Encoding::ConverterNotFoundError.
-	if !encodingSupported(to) {
+	if !encodingSupported(to) && !isBOMEncoding(to) {
 		if asciiOnly(s.Bytes()) && vm.encAsciiCompat(to) && vm.encAsciiCompat(from) {
 			return object.NewStringBytesEnc(append([]byte(nil), s.Bytes()...), to)
 		}
