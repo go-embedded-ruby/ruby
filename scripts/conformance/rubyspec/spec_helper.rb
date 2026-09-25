@@ -300,6 +300,19 @@ class ShouldProxy < BasicObject
   def <=(x); _chk(@o <= x, "<= #{x.inspect}"); end
   def >=(x); _chk(@o >= x, ">= #{x.inspect}"); end
   def =~(x); _chk((@o =~ x) ? true : false, "=~ #{x.inspect}"); end
+  # `x.should !~ /re/` -- 11 sites in core/exception/full_message_spec.rb.
+  # Object#!~ is defined as `!(x =~ y)`, so before this commit the spelling ran
+  # the proxy's POSITIVE `=~` assertion and threw the result away: it asserted
+  # the exact INVERSE of what the spec wrote. Spelling it out asserts the right
+  # thing and prints the right message.
+  #
+  # Measured caveat: rbgo does not dispatch !~ as a method at all -- it compiles
+  # `a !~ b` into `!(a =~ b)` (it inlines `!` the same way), where MRI 4.0.5
+  # sends :!~ and reaches this definition. So under rbgo those 11 sites still
+  # run the positive `=~` assertion and this definition is dead code until the
+  # VM sends :!~. The shim cannot paper over that from here; it is an rbgo/MRI
+  # divergence of its own, and it is why this line moves no number.
+  def !~(x); _chk(!(@o =~ x), "!~ #{x.inspect}"); end
   # BasicObject defines ==, != and equal?, so those three -- and only those
   # three -- have to be spelled out; every other predicate reaches
   # #method_missing and is asserted there.
@@ -309,9 +322,9 @@ class ShouldProxy < BasicObject
   # method to forward to, so they stay explicit.
   def equal(x); _chk(@o.equal?(x), "equal #{x.inspect}"); end
   def eql(x); _chk(@o.eql?(x), "eql #{x.inspect}"); end
-  # Every constant below is ::-qualified: from inside a BasicObject subclass,
-  # MRI does NOT reach the top-level (Object) constants, so a bare `Exception`
-  # here raises NameError: uninitialized constant ShouldProxy::Exception. rbgo
+  # Every constant in this class is ::-qualified: from inside a BasicObject
+  # subclass MRI does NOT reach the top-level (Object) constants, so a bare
+  # `Exception` here raises NameError: uninitialized constant ShouldProxy::Exception. rbgo
   # happens to resolve it, which is exactly why the shim has to be run under
   # MRI as well -- an unqualified constant would work here and break the judge.
   def raise(*args, &blk)
