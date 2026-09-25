@@ -450,17 +450,6 @@ func TestTracePointEventNameUnknown(t *testing.T) {
 	}
 }
 
-// TestTracePointEventsNamed covers the diagnostic renderer, which must list
-// single bits only — an aggregate would double-count its members.
-func TestTracePointEventsNamed(t *testing.T) {
-	if got := traceEventsNamed(evLine | evBReturn); got != "line,b_return" {
-		t.Errorf("traceEventsNamed = %q, want %q", got, "line,b_return")
-	}
-	if got := traceEventsNamed(0); got != "" {
-		t.Errorf("traceEventsNamed(0) = %q, want empty", got)
-	}
-}
-
 // TestTracePointClassOf covers tpClassOf's fallback: TracePoint.new reached
 // with a non-class receiver still makes a TracePoint.
 func TestTracePointClassOf(t *testing.T) {
@@ -482,37 +471,20 @@ func TestTraceArgBindingNoFrame(t *testing.T) {
 	}
 }
 
-// TestTraceArgParametersEdges covers the two #parameters answers Ruby cannot
-// currently reach: a frame event with no ISeq, and the C-call events, which
-// answer nil rather than raising.
-func TestTraceArgParametersEdges(t *testing.T) {
+// TestTraceArgParametersNoISeq covers the one #parameters answer Ruby cannot
+// reach: a frame event with no ISeq behind it.
+func TestTraceArgParametersNoISeq(t *testing.T) {
 	if got := traceArgParameters(&traceArg{event: evCall}); !object.IsNil(got) {
 		t.Errorf("parameters with no iseq = %v, want nil", got)
 	}
-	if got := traceArgParameters(&traceArg{event: evCCall}); !object.IsNil(got) {
-		t.Errorf("parameters for c_call = %v, want nil", got)
-	}
 }
 
-// TestTracePointInspectThreadEvent covers tracepoint_inspect's thread shape,
-// which rbgo does not raise (thread_begin/thread_end are not in
-// supportedTraceEvents) but whose rendering is defined.
-func TestTracePointInspectThreadEvent(t *testing.T) {
+// TestTracePointInspectReturnShape covers the quoted-method inspect shape
+// directly, with a synthetic event so the path and line are fixed.
+func TestTracePointInspectReturnShape(t *testing.T) {
 	vm := New(&bytes.Buffer{})
-	tp := &tracePoint{events: evThreadBegin}
-	vm.traceArg = &traceArg{event: evThreadBegin, self: vm.mainThread}
-	got := vm.tracePointInspect(tp)
-	if !strings.HasPrefix(got, "#<TracePoint:thread_begin ") {
-		t.Errorf("inspect = %q, want a thread_begin shape", got)
-	}
-}
-
-// TestTracePointInspectCReturn covers the quoted-method inspect shape for the
-// C-call events, which share tracepoint_inspect's branch with :call/:return.
-func TestTracePointInspectCReturn(t *testing.T) {
-	vm := New(&bytes.Buffer{})
-	vm.traceArg = &traceArg{event: evCReturn, methodID: "max", path: "a.rb", line: 3}
-	want := "#<TracePoint:c_return 'max' a.rb:3>"
+	vm.traceArg = &traceArg{event: evReturn, methodID: "max", path: "a.rb", line: 3}
+	want := "#<TracePoint:return 'max' a.rb:3>"
 	if got := vm.tracePointInspect(&tracePoint{}); got != want {
 		t.Errorf("inspect = %q, want %q", got, want)
 	}

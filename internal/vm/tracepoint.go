@@ -39,7 +39,6 @@ package vm
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
@@ -194,8 +193,8 @@ type traceArg struct {
 	iseq   *bytecode.ISeq // the code the event came from; also the local-hook key
 	isProc bool           // a non-lambda block frame: #parameters reports :opt
 
-	hasData bool
-	data    object.Value // return_value / raised_exception
+	// data is #return_value or #raised_exception, for the events that carry one.
+	data object.Value
 
 	env     *Env
 	definee *RClass
@@ -401,6 +400,10 @@ func (vm *VM) traceArgBinding(a *traceArg) object.Value {
 // return events (and their block forms) report the running ISeq's parameters,
 // with a non-lambda block reporting its positionals as :opt; every other event
 // raises.
+//
+// MRI's C-call arm (rb_unnamed_parameters over the method's arity) is NOT
+// transcribed: rbgo raises no :c_call, so that answer could never be checked
+// against anything. Add it with the event, not before.
 func traceArgParameters(a *traceArg) object.Value {
 	switch a.event {
 	case evCall, evReturn, evBCall, evBReturn:
@@ -408,16 +411,18 @@ func traceArgParameters(a *traceArg) object.Value {
 			return object.NilV
 		}
 		return procParameters(a.iseq, !a.isProc)
-	case evCCall, evCReturn:
-		return object.NilV
 	}
 	raise("RuntimeError", "not supported by this event")
 	return object.NilV
 }
 
 // tracePointInspect is tracepoint_inspect (vm_trace.c:1521). Outside a handler
-// it says only whether the TracePoint is on; inside one it describes the event,
-// in four shapes MRI distinguishes by event.
+// it says only whether the TracePoint is on; inside one it describes the event.
+//
+// MRI distinguishes four shapes; the two here are the ones rbgo can reach. Its
+// C-call shape is the same as :call/:return's, and its thread shape belongs to
+// :thread_begin/:thread_end — neither of which rbgo raises, so neither is
+// transcribed. Add each with its event.
 func (vm *VM) tracePointInspect(tp *tracePoint) string {
 	a := vm.traceArg
 	if a == nil {
@@ -433,10 +438,8 @@ func (vm *VM) tracePointInspect(tp *tracePoint) string {
 		if a.methodID != "" {
 			return fmt.Sprintf("#<TracePoint:line %s:%d in '%s'>", a.path, a.line, a.methodID)
 		}
-	case evCall, evCCall, evReturn, evCReturn:
+	case evCall, evReturn:
 		return fmt.Sprintf("#<TracePoint:%s '%s' %s:%d>", eventName(a.event), a.methodID, a.path, a.line)
-	case evThreadBegin, evThreadEnd:
-		return fmt.Sprintf("#<TracePoint:%s %s>", eventName(a.event), a.self.Inspect())
 	}
 	return fmt.Sprintf("#<TracePoint:%s %s:%d>", eventName(a.event), a.path, a.line)
 }
@@ -886,7 +889,6 @@ func (vm *VM) traceExitEvent(f *traceFrame, result object.Value) {
 		klass:    f.klassValue(),
 		iseq:     f.iseq,
 		isProc:   f.isProc,
-		hasData:  f.exit != evEnd,
 		data:     result,
 		env:      f.env,
 		definee:  f.definee,
@@ -908,24 +910,10 @@ func (vm *VM) traceRescueEvent(f *traceFrame, exc object.Value) {
 		calleeID: f.calleeID,
 		iseq:     f.iseq,
 		isProc:   f.isProc,
-		hasData:  true,
 		data:     exc,
 		env:      f.env,
 		definee:  f.definee,
 		locals:   f.locals,
 		file:     f.file,
 	})
-}
-
-// traceEventsNamed renders an event mask for a diagnostic. It exists for the
-// tests, which assert the name table round-trips rather than re-listing it.
-func traceEventsNamed(e traceEvents) string {
-	var names []string
-	for _, ev := range traceEventNames {
-		// Single bits only: the aggregates would double-count.
-		if ev.bits&(ev.bits-1) == 0 && e&ev.bits != 0 {
-			names = append(names, ev.name)
-		}
-	}
-	return strings.Join(names, ",")
 }
