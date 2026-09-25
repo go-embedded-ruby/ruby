@@ -1233,8 +1233,16 @@ type frameMethod struct {
 // in the body, a filled-in optional or keyword default, and splat/post
 // rebinding are all reflected. Positional params contribute their slot value
 // (the splat slice is spliced in place); keyword params and any **kwrest are
-// gathered into a trailing hash, appended only when non-empty.
-func zsuperArgs(iseq *bytecode.ISeq, env *Env) []object.Value {
+// gathered into a trailing hash.
+//
+// kwSplat reports that the trailing hash is there because the method HAS
+// keyword parameters — MRI compiles such a zsuper with VM_CALL_KW_SPLAT
+// (compile.c v3_4_0, the NODE_ZSUPER arm), so the hash is a keyword argument and
+// an EMPTY one is dropped by ignore_keyword_hash_p, leaving whatever precedes it
+// positional. That is why the hash is appended even when empty and the drop is
+// left to applyKWSplat: `def go(*a, **k); super; end` called with one positional
+// Hash must forward it as a POSITIONAL, not turn it back into keywords.
+func zsuperArgs(iseq *bytecode.ISeq, env *Env) (args []object.Value, kwSplat bool) {
 	out := make([]object.Value, 0, len(iseq.Params)+1)
 	for i := 0; i < len(iseq.Params); i++ {
 		if i == iseq.SplatIndex {
@@ -1259,11 +1267,10 @@ func zsuperArgs(iseq *bytecode.ISeq, env *Env) []object.Value {
 				}
 			}
 		}
-		if h.Len() > 0 {
-			out = append(out, h)
-		}
+		out = append(out, h)
+		return out, true
 	}
-	return out
+	return out, false
 }
 
 func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, definee *RClass, methodName string, parentEnv *Env, block, selfBlock, blockArg *Proc, methodLexScope *RClass) (execResult object.Value) {
@@ -2110,6 +2117,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				var superArgs []object.Value
+				zsuperKW := false
 				if in.B == 1 { // bare super forwards the home method's arguments
 					if homeDmBody {
 						// MRI forbids implicit-argument super from a define_method body.
@@ -2120,7 +2128,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						// parameters, not the original argument list. This reflects any
 						// reassignment in the body, filled-in optional/keyword defaults,
 						// and splat/post rebinding.
-						superArgs = zsuperArgs(iseq, env)
+						superArgs, zsuperKW = zsuperArgs(iseq, env)
 					} else {
 						// A bare super inside a block forwards the home method's arguments
 						// as captured when the block was created (a block is transparent to
@@ -2134,8 +2142,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					copy(superArgs, stack[len(stack)-in.A:])
 					stack = stack[:len(stack)-in.A]
 				}
-				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
-				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, superArgs, superBlk))
+				isFlags := in.Flags
+				if zsuperKW {
+					isFlags |= bytecode.FlagSendKWSplat
+				}
+				isElems, isNoKW := applyKWSplat(superArgs, isFlags)
+				vm.sendNoKW = isNoKW // MRI: the call info decides, not the callee
+				push(vm.invokeSuper(self, homeSuperDefinee, homeSuperName, isElems, superBlk))
 			case bytecode.OpInvokeSuperArray:
 				superBlk := block
 				switch {
