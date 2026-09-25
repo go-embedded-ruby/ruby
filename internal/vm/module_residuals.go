@@ -691,9 +691,12 @@ func (vm *VM) constLocation(cls *RClass, name string, exclude, recurse bool) obj
 // rb_const_location before the walk. Keeping the arm would be a branch no
 // argument list can take.
 //
-// The location itself is always the empty array here: see the note on
-// Module#const_source_location. The second result distinguishes "found" from
-// "no such constant", which is the difference between [] and nil.
+// The location is the one recorded when the constant was assigned (RClass
+// .constLocs, MRI's ce->file / ce->line), or the EMPTY array when there is none
+// — MRI's `if (NIL_P(ce->file)) return rb_ary_new()`, which is the answer for a
+// constant defined from C and so for every constant this VM defines in Go. The
+// second result distinguishes "found" from "no such constant", which is the
+// difference between [] and nil.
 func (vm *VM) constLocationFrom(cls *RClass, name string, recurse bool) (object.Value, bool) {
 	chain := []*RClass{cls}
 	if recurse {
@@ -701,10 +704,19 @@ func (vm *VM) constLocationFrom(cls *RClass, name string, recurse bool) (object.
 	}
 	for _, k := range chain {
 		if constEntryPresent(k, name) {
-			return object.NewArrayFromSlice(nil), true
+			return constLocationValue(k, name), true
 		}
 	}
 	return nil, false
+}
+
+// constLocationValue renders k's recorded definition site for name as MRI's
+// [file, line] pair, or the empty array when nothing was recorded.
+func constLocationValue(k *RClass, name string) object.Value {
+	if loc, ok := k.constLocs[name]; ok && loc.file != "" {
+		return object.NewArray(object.NewString(loc.file), object.IntValue(int64(loc.line)))
+	}
+	return object.NewArrayFromSlice(nil)
 }
 
 // constEntryPresent reports whether k's own constant table holds an entry for
