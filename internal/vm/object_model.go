@@ -245,6 +245,20 @@ type RClass struct {
 	// Kernel#autoload; consumed (and cleared) when the constant is first resolved
 	// through this class's table. nil until first use.
 	autoloads map[string]string
+	// constLocs records where each constant in consts was last assigned FROM RUBY:
+	// the file and line of the assignment, which Module#const_source_location
+	// reports. It is MRI's per-entry rb_const_entry_t.file / .line, written by
+	// setup_const_entry from rb_source_location() on every const_tbl_update
+	// (ruby/ruby v3_4_0 variable.c:3717) — so a re-assignment MOVES the recorded
+	// location, which is what "returns path to the updated value of a constant"
+	// pins down.
+	//
+	// A missing entry is MRI's NIL_P(ce->file), the answer for a constant defined
+	// from C with no Ruby frame beneath it, which rb_const_location_from reports
+	// as the EMPTY array rather than nil. Every constant this VM defines in Go is
+	// one of those, so the map stays nil on the core classes. nil until this
+	// class's first Ruby-level constant definition.
+	constLocs map[string]constSrcLoc
 	// frozen records Object#freeze on the class/module object itself, reported by
 	// Object#frozen? and enforced by structural mutators (e.g. attr_*).
 	frozen bool
@@ -279,6 +293,15 @@ type RClass struct {
 	// through the superclass chain (dataDefOf) so a `class Foo < SomeData` subclass
 	// shares its parent's members. nil for every non-Data class. See data.go.
 	dataDef *dataDef
+}
+
+// constSrcLoc is where one constant was defined: MRI's rb_const_entry_t.file and
+// .line, the pair Module#const_source_location answers with. A zero value means
+// the definition had no Ruby frame under it (MRI's nil ce->file), which reads as
+// the empty array.
+type constSrcLoc struct {
+	file string
+	line int
 }
 
 func newClass(name string, super *RClass) *RClass {

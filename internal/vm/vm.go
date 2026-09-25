@@ -1691,15 +1691,15 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				}
 				// Truncate one past this frame's own entries: this frame's normal
 				// pop never ran, and the deeper frames that unwound left theirs too.
-				vm.frameNames = vm.frameNames[:frameNamesDepth-1]
-				vm.frameFiles = vm.frameFiles[:frameFilesDepth-1]
-				vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth-1]
-				vm.frameMethods = vm.frameMethods[:frameCrefsDepth-1]
-				vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+				vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth-1)
+				vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth-1)
+				vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth-1)
+				vm.frameMethods = truncFrames(vm.frameMethods, frameCrefsDepth-1)
+				vm.requireDirs = truncFrames(vm.requireDirs, requireDirsDepth)
 				if pushedFile {
-					vm.fileStack = vm.fileStack[:fileStackDepth-1]
+					vm.fileStack = truncFrames(vm.fileStack, fileStackDepth-1)
 				} else {
-					vm.fileStack = vm.fileStack[:fileStackDepth]
+					vm.fileStack = truncFrames(vm.fileStack, fileStackDepth)
 				}
 				execResult = sig.value
 			}
@@ -1910,7 +1910,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					raise("TypeError", "%s is not a class/module", recv.Inspect())
 				}
 				vm.warnAlreadyInitialized(cls, iseq.Names[in.A])
-				vm.assignConstIn(cls, iseq.Names[in.A], val)
+				vm.setConstant(cls, iseq.Names[in.A], val)
 				push(val)
 			case bytecode.OpSetConst:
 				// Assignment is an expression: set the constant in the current
@@ -2167,6 +2167,16 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// inside a class/module body. Using self (not the definee) is what
 				// keeps a top-level `def self.foo` off Object and on main only.
 				name := iseq.Names[in.A]
+				// A `def self.x` records NO lexical scope, unlike the instance `def`
+				// above, so its body's bare constants resolve from the owner. MRI
+				// would have it carry the cref it was written under, which matters
+				// for a `def self.x` inside a module_eval / Class.new BLOCK — but
+				// recording it costs exactly what it gains until frameOwner
+				// (kernel_introspect.go) stops using the frame's cref as a PROXY for
+				// the method's owner. Measured over the whole core+language suite:
+				// +1 in language/class_spec.rb ("for named classes in a module") and
+				// -1 in core/thread/backtrace/location/label_spec.rb. The two halves
+				// have to land together, and frameOwner is not in this wave's files.
 				vm.defineSingletonMethod(self, name, iseq.Children[in.B])
 				push(object.SymVal(name))
 			case bytecode.OpDefineSingletonMethod:
@@ -2211,10 +2221,24 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				vm.undefMethod(methodDefinee, iseq.Names[in.A])
 				push(object.NilV)
 			case bytecode.OpDefineClass:
-				// Bare `class B` nests into the current lexical scope (definee).
-				push(vm.defineClassIn(definee, iseq.Names[in.A], iseq.Children[in.B], nil, false))
+				// Bare `class B` nests into the current LEXICAL scope, not into the
+				// definee. The compiler feeds MRI's defineclass its cbase from
+				// `putspecialobject VM_SPECIAL_OBJECT_CONST_BASE`, i.e.
+				// vm_get_const_base (vm_insnhelper.c:1027) — the cref, skipping the
+				// ones an eval pushed. The two are the same class in a method or
+				// class body and part company under class_eval/module_eval/
+				// instance_eval with a BLOCK, where the definee is the eval receiver:
+				//
+				//	Class.new do
+				//	  class CS_CONST_CLASS_SPECS; end   # TOP LEVEL in MRI
+				//	end
+				//
+				// rbgo nested it in the anonymous class instead, so ::CS_CONST_CLASS_SPECS
+				// did not exist. This is the rule OpSetConst already follows for
+				// `CONST = value` a few cases above.
+				push(vm.defineClassIn(lexCref, iseq.Names[in.A], iseq.Children[in.B], nil, false))
 			case bytecode.OpDefineModule:
-				push(vm.defineModuleIn(definee, iseq.Names[in.A], iseq.Children[in.B], false))
+				push(vm.defineModuleIn(lexCref, iseq.Names[in.A], iseq.Children[in.B], false))
 			case bytecode.OpDefineClassScoped:
 				// C flags: bit 0 = parent on stack, bit 1 = super-expr on stack.
 				// They were pushed parent-then-super, so pop super first.
@@ -2227,7 +2251,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// == [A::B], not [A::B, A]), so bare constants in the body do NOT see
 				// the parent namespace. A bare `class B` (bit 0 clear) still nests into
 				// the current lexical scope.
-				parent, scoped := definee, false
+				parent, scoped := lexCref, false
 				if in.C&1 != 0 {
 					parent, scoped = vm.asModuleParent(pop()), true
 				}
@@ -2655,12 +2679,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					// would otherwise leak into __FILE__, require_relative resolution, caller
 					// and backtraces taken from the rescue/ensure body.
 					restoreFrameStacks := func() {
-						vm.frameNames = vm.frameNames[:frameNamesDepth]
-						vm.frameFiles = vm.frameFiles[:frameFilesDepth]
-						vm.frameCrefs = vm.frameCrefs[:frameCrefsDepth]
-						vm.frameMethods = vm.frameMethods[:frameCrefsDepth]
-						vm.fileStack = vm.fileStack[:fileStackDepth]
-						vm.requireDirs = vm.requireDirs[:requireDirsDepth]
+						vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth)
+						vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth)
+						vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth)
+						vm.frameMethods = truncFrames(vm.frameMethods, frameCrefsDepth)
+						vm.fileStack = truncFrames(vm.fileStack, fileStackDepth)
+						vm.requireDirs = truncFrames(vm.requireDirs, requireDirsDepth)
 					}
 					rerr, ok := r.(RubyError)
 					if !ok {
@@ -2736,14 +2760,49 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// skips recycling and leaves both to the GC — correct, just not pooled.
 	vm.putEnv(env)
 	vm.putStack(stack)
-	vm.frameNames = vm.frameNames[:len(vm.frameNames)-1]
-	vm.frameFiles = vm.frameFiles[:len(vm.frameFiles)-1]
-	vm.frameCrefs = vm.frameCrefs[:len(vm.frameCrefs)-1]
-	vm.frameMethods = vm.frameMethods[:len(vm.frameMethods)-1]
+	// Pop by truncating to the depth this frame recorded when it pushed, not by
+	// subtracting one from whatever the stack is NOW. Normally the two are the
+	// same number — every deeper frame popped its own entry — so this is the same
+	// pop it always was. They part company when a SECOND goroutine has been
+	// through these stacks in the meantime, which is exactly what
+	// `core/module/autoload_spec.rb` does: its `(concurrently)` and `during the
+	// autoload` describes run Ruby on a Thread.new while the main thread is
+	// inside require, and the thread body runs through Run's frameNames[:0] reset
+	// (four sites) while the frame that started it is still live. The old form
+	// then evaluated frameNames[:-1] and the process died with
+	// `slice bounds out of range [:-1]`, taking the whole file's score to 0 — a
+	// 63-example phantom regression on about one run in ten (issue #615).
+	//
+	// Anchoring on the frame's own depth is the rule these stacks already keep
+	// elsewhere: setFrameCode sizes frameCode to the pushing frame's index, and
+	// the rescue path above truncates to frameNamesDepth-1 for the same reason.
+	// truncFrames leaves a stack that is ALREADY shorter alone, so a peer's reset
+	// is never undone by re-extending into stale entries. That makes the pop
+	// exactly as best-effort as the pc write in the interpreter loop, which is
+	// bounds-checked for this same reason and documents it there.
+	vm.frameNames = truncFrames(vm.frameNames, frameNamesDepth-1)
+	vm.frameFiles = truncFrames(vm.frameFiles, frameFilesDepth-1)
+	vm.frameCrefs = truncFrames(vm.frameCrefs, frameCrefsDepth-1)
+	vm.frameMethods = truncFrames(vm.frameMethods, frameCrefsDepth-1)
 	if pushedFile {
-		vm.fileStack = vm.fileStack[:len(vm.fileStack)-1]
+		vm.fileStack = truncFrames(vm.fileStack, fileStackDepth-1)
 	}
 	return result
+}
+
+// truncFrames shortens a per-frame tracking stack to n entries, and leaves it
+// alone when it is already at or below n. Both halves matter: it never slices to
+// a negative length, and it never re-extends a stack another goroutine has
+// already shortened (a slice expression may grow back into stale entries up to
+// cap, which would resurrect frames that are gone).
+func truncFrames[T any](s []T, n int) []T {
+	if n < 0 {
+		n = 0
+	}
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 // constTable returns the constant table a const name is defined into for the
@@ -2773,7 +2832,11 @@ func (vm *VM) warnAlreadyInitialized(scope *RClass, name string) {
 	if _, exists := scope.consts[name]; !exists {
 		return
 	}
-	vm.rbWarn("warning: already initialized constant %s", scopedNameFor(scope, name))
+	// constPathUnder, not scopedNameFor: MRI qualifies the warned name with
+	// rb_class_name(klass) for every scope but Object, and an ANONYMOUS module
+	// renders as its "#<Module:0x…>" path there rather than dropping out of the
+	// message ("already initialized constant #<Module:0x…>::TEST").
+	vm.rbWarn("warning: already initialized constant %s", vm.constPathUnder(scope, name))
 }
 
 // assignConst sets a bare constant assignment (`NAME = value`) into the current
@@ -2783,19 +2846,90 @@ func (vm *VM) assignConst(definee *RClass, name string, val object.Value) {
 	if scope == nil {
 		scope = vm.cObject
 	}
-	vm.assignConstIn(scope, name, val)
+	vm.setConstant(scope, name, val)
 }
 
-// assignConstIn sets name in scope's constant table and, if val is an anonymous
-// class/module, gives it the qualified name of the constant it is bound to
-// (Ruby's "assign a permanent name on first constant binding" rule).
+// setConstant is MRI's rb_const_set (ruby/ruby v3_4_0 variable.c:3634): the
+// assignment itself, then the Module#const_added hook, unconditionally and in
+// that order — so the hook sees the constant already in place, and for a `class`
+// keyword it runs BEFORE Class#inherited.
+//
+// Module#const_set (builtins.go) and Module#autoload (autoload.go) open-code the
+// same pair; neither file belongs to this wave, which is why this is a third
+// caller of fireConstAdded rather than a hook inside assignConstIn — putting it
+// there would make const_set fire TWICE.
+func (vm *VM) setConstant(scope *RClass, name string, val object.Value) {
+	vm.assignConstIn(scope, name, val)
+	vm.fireConstAdded(scope, name)
+}
+
+// assignConstIn sets name in scope's constant table, records where the
+// assignment was written (Module#const_source_location) and, when val is a
+// class or module, decides the classpath it takes from being bound here.
 func (vm *VM) assignConstIn(scope *RClass, name string, val object.Value) {
 	scope.consts[name] = val
-	if c, ok := val.(*RClass); ok && !c.named {
-		c.name = scopedNameFor(scope, name)
-		c.named = true
-		// Unless that would make c its own lexical ancestor. A class bound to a
-		// constant inside its own body does exactly that:
+	vm.recordConstLoc(scope, name)
+	if c, ok := val.(*RClass); ok {
+		vm.nameNamespaceUnder(scope, name, c)
+	}
+}
+
+// nameNamespaceUnder is the classpath half of MRI's const_set (variable.c:3604,
+// "Resolve and cache class name immediately"), for a class or module c that has
+// just been bound to scope::name.
+//
+// MRI decides from the PERMANENCE of the two classpaths, not from whether c has
+// a name at all. A classpath is permanent when no component of it is anonymous,
+// and the rule is that a permanent path overwrites anything while a temporary
+// one is only ever written over an absent path:
+//
+//   - c already has a permanent path: nothing happens. That is why reopening or
+//     re-binding a named class never renames it.
+//
+//   - the scope's path is permanent: c takes scope::name, permanently, and every
+//     namespace nested in c that is not itself permanent is re-pathed under the
+//     new name (MRI's set_namespace_path).
+//
+//   - the scope's path is temporary AND c has no path at all: c takes
+//     scope::name temporarily, so it can still be renamed later — by
+//     Module#set_temporary_name, or by the scope becoming permanent.
+//
+//   - the scope's path is temporary and c already has SOME path: nothing
+//     happens. This is the case rbgo used to get wrong, and it is observable:
+//
+//     outer = Module.new
+//     mm = Module.new
+//     mm.set_temporary_name "m"
+//     outer::M = mm
+//     mm.name           # "m" in MRI; rbgo answered "#<Module:0x…>::M"
+//
+// rbgo stores the pair as (c.name, modulePermanentlyNamed(c)) — the classpath,
+// and permanence computed from the lexical chain rather than cached — which is
+// the same two facts under different names.
+func (vm *VM) nameNamespaceUnder(scope *RClass, name string, c *RClass) {
+	valPath, valPerm := c.name, modulePermanentlyNamed(c)
+	if valPath != "" && valPerm {
+		return
+	}
+	// classname() reports Object's path as permanent, so a top-level assignment
+	// always takes the permanent branch; a nil scope is this VM's top level too.
+	parentPerm := scope == nil || modulePermanentlyNamed(scope)
+	switch {
+	case parentPerm:
+		vm.setNamespacePath(c, vm.constPathUnder(scope, name), lexParentFor(scope), map[*RClass]bool{})
+	case valPath == "":
+		// A TEMPORARY path, written out in full and marked non-permanent. Writing
+		// it out is what lets Module#set_temporary_name replace it afterwards: that
+		// method assigns the label and nothing else (reflection.go), so a path this
+		// VM would otherwise re-derive from the lexical parent would keep
+		// re-qualifying the new label — "#<Module:0x…>::m" where MRI answers "m".
+		// The scope becoming permanent later is handled by setNamespacePath, which
+		// walks its constant table and re-paths exactly the entries left temporary
+		// here, which is how MRI keeps them up to date too.
+		c.name, c.named = vm.constPathUnder(scope, name), false
+		// The lexical link is still recorded, for constant resolution — unless that
+		// would make c its own lexical ancestor. A class bound to a constant inside
+		// its own body does exactly that:
 		//
 		//	class << o
 		//	  CONST = self    # scope and value are the same singleton class
@@ -2807,6 +2941,140 @@ func (vm *VM) assignConstIn(scope *RClass, name string, val object.Value) {
 			c.lexParent = p
 		}
 	}
+}
+
+// setNamespacePath gives c a PERMANENT classpath and, as MRI's
+// set_namespace_path does (variable.c:3539), re-paths every namespace nested in
+// c that does not already have a permanent path of its own. That recursion is
+// what makes this work:
+//
+//	m = Module.new
+//	module m::N; end     # N is "#<Module:0x…>::N", temporarily
+//	X = m                # m becomes permanent …
+//	m::N.name            # … and so does N, as "X::N"
+//
+// lexParent is recorded alongside so rbgo's own path rebuilder keeps agreeing
+// with the stored name; a nested namespace opened COMPACTLY (`module m::N`) has
+// no lexical parent to walk, which is exactly why the name must be written out
+// here rather than left to be derived. seen stops a cycle — a module reachable
+// from its own constant table is a ring MRI does not guard against and rbgo can
+// be handed.
+func (vm *VM) setNamespacePath(c *RClass, path string, lexParent *RClass, seen map[*RClass]bool) {
+	if seen[c] {
+		return
+	}
+	seen[c] = true
+	c.name, c.named = path, true
+	if lexParent != nil && !lexicallyReaches(lexParent, c) {
+		c.lexParent = lexParent
+	}
+	for childName, v := range c.consts {
+		child, ok := v.(*RClass)
+		if !ok || modulePermanentlyNamed(child) {
+			continue
+		}
+		vm.setNamespacePath(child, path+"::"+childName, c, seen)
+	}
+}
+
+// constPathUnder is MRI's build_const_path(rb_tmp_class_path(scope), name): the
+// classpath a class or module takes from being bound to scope::name. Unlike
+// scopedNameFor it never DROPS an anonymous scope — MRI qualifies with that
+// scope's temporary "#<Module:0x…>" path (variable.c rb_set_class_path_string →
+// rb_tmp_class_path → make_temporary_path), so
+//
+//	m = Module.new
+//	module m::N; end
+//	m::N.name        # "#<Module:0x…>::N", not "N"
+func (vm *VM) constPathUnder(scope *RClass, name string) string {
+	if scope == nil || (scope.name == "Object" && !scope.isModule) {
+		return name
+	}
+	return vm.moduleToSStr(scope) + "::" + name
+}
+
+// recordConstLoc stamps scope::name with the file and line of the Ruby frame
+// that is defining it, which is MRI's setup_const_entry writing
+// rb_source_location() into the constant entry on every const_tbl_update
+// (variable.c:3717). It OVERWRITES, because MRI does: re-assigning a constant
+// moves its reported location to the new assignment.
+//
+// A definition with no Ruby frame under it — everything this VM defines in Go —
+// records nothing, which reads back as MRI's empty array rather than as a
+// location.
+func (vm *VM) recordConstLoc(scope *RClass, name string) {
+	file, line := vm.sourceLocation()
+	if scope.constLocs == nil {
+		if file == "" {
+			return
+		}
+		scope.constLocs = map[string]constSrcLoc{}
+	}
+	scope.constLocs[name] = constSrcLoc{file: file, line: line}
+}
+
+// sourceLocation is MRI's rb_source_location() / rb_source_line() pair: the file
+// and line of the innermost Ruby frame. A native method pushes no frame here (as
+// a C function pushes no ISeq frame in MRI), so Module#const_set and Struct.new
+// report their CALLER's line, which is what they do in MRI. An empty file means
+// there is no Ruby frame to report — MRI's Qnil.
+// The frame index comes from frameNames, NOT from len(frameCode): frameCode is
+// re-sized only by setFrameCode on a PUSH, so after a nested frame returns its
+// entry is still there, one past the live top. Reading that entry reported the
+// last line of the previous sibling body for every definition after it — a
+// constant written under a `class Foo; end` claimed the class's line, and a
+// `module` keyword claimed the last line of the module before it.
+func (vm *VM) sourceLocation() (string, int) {
+	i := len(vm.frameNames) - 1
+	if i < 0 || i >= len(vm.frameCode) || vm.frameCode[i].iseq == nil {
+		return "", 0
+	}
+	return vm.frameCode[i].iseq.File, vm.frameLine(i)
+}
+
+// constScope is the class whose tables a constant declared under parent belongs
+// to: parent itself, or Object at the top level. constTable answers with the MAP
+// for the same question; this answers with the CLASS, which is what the
+// per-class bookkeeping beside that map (constLocs, the const_added hook) needs.
+// vm.consts IS vm.cObject.consts (builtins.go), so the two agree.
+func (vm *VM) constScope(parent *RClass) *RClass {
+	if parent == nil {
+		return vm.cObject
+	}
+	return parent
+}
+
+// loadPendingAutoload runs a pending autoload registered for name directly on
+// parent, so a `class`/`module` keyword opening an autoloaded constant reopens
+// what the file defines instead of shadowing it. This is MRI's rb_autoload_load
+// (variable.c:2998), which likewise consults the module's OWN entry only — no
+// ancestor walk — and returns immediately when the constant already has a value.
+func (vm *VM) loadPendingAutoload(parent *RClass, name string) {
+	vm.tryAutoload(vm.constScope(parent), name)
+}
+
+// namedSuper is the superclass a `class` keyword NAMES, or nil when it names
+// none or when the name does not resolve to a class. It is the lenient form used
+// on a REOPEN, where rbgo has always resolved a bare superclass name lazily (and
+// so never raised for one that is missing); the declaration path keeps its own
+// resolution, with MRI's errors.
+func (vm *VM) namedSuper(parent *RClass, body *bytecode.ISeq, superExpr object.Value) *RClass {
+	v := superExpr
+	if v == nil {
+		if body.Super == "" {
+			return nil
+		}
+		resolved, ok := vm.resolveConst(parent, body.Super)
+		if !ok {
+			return nil
+		}
+		v = resolved
+	}
+	sc, ok := v.(*RClass)
+	if !ok || sc.isModule {
+		return nil
+	}
+	return sc
 }
 
 // lexicallyReaches reports whether c is start or one of its lexical parents —
@@ -2853,6 +3121,14 @@ func scopedNameFor(scope *RClass, name string) string {
 // class body with self = the class, and returns the body's value.
 func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, superExpr object.Value, scoped bool) object.Value {
 	table := vm.constTable(parent)
+	// MRI's vm_define_class runs rb_autoload_load(cbase, id) BEFORE looking the
+	// name up (vm_insnhelper.c:5810), so `class MA::E` where E is a pending
+	// autoload on MA loads the file and REOPENS what it defined, rather than
+	// declaring a fresh class beside it. rbgo read the table directly and so
+	// silently shadowed the autoload. vm_define_module has no such call because
+	// its lookup goes through rb_const_get_at, which triggers the autoload itself;
+	// defineModuleIn reaches this same helper for the same reason.
+	vm.loadPendingAutoload(parent, name)
 	vm.checkScopedReopenVisibility(parent, name, scoped)
 	var class *RClass
 	if existing, ok := table[name]; ok {
@@ -2860,6 +3136,16 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 		class, isClass = existing.(*RClass)
 		if !isClass || class.isModule {
 			raise("TypeError", "%s is not a class", name)
+		}
+		// A reopen that NAMES a superclass must name the one the class already
+		// has: MRI's vm_check_if_class compares rb_class_real(RCLASS_SUPER(klass))
+		// with it and raises "superclass mismatch for class X"
+		// (vm_insnhelper.c:5726). rbgo reached this only now because the pending
+		// autoload above is what puts the other definition of the class in the
+		// table first — `class ModuleSpecs::Autoload::Z < ModuleSpecs::Autoload::ZZ`
+		// over an autoload file that gives Z a different parent.
+		if sc := vm.namedSuper(parent, body, superExpr); sc != nil && class.super != sc {
+			raise("TypeError", "superclass mismatch for class %s", name)
 		}
 	} else {
 		super := vm.cObject
@@ -2869,6 +3155,14 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			if !ok || sc.isModule {
 				raise("TypeError", "superclass must be a Class (%s given)", vm.classOf(superExpr).name)
 			}
+			// rb_check_inheritable (ruby/ruby v3_4_0 class.c:344) refuses two more
+			// classes after the type test: a SINGLETON class, and Class itself.
+			if sc.isSingleton {
+				raise("TypeError", "can't make subclass of singleton class")
+			}
+			if sc == vm.cClass {
+				raise("TypeError", "can't make subclass of Class")
+			}
 			super = sc
 		case body.Super != "":
 			sc, ok := vm.resolveConst(parent, body.Super)
@@ -2877,7 +3171,14 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			}
 			super = sc.(*RClass)
 		}
-		class = newClass(scopedNameFor(parent, name), super)
+		class = newClass(vm.constPathUnder(parent, name), super)
+		// The path is permanent only when the scope's is — MRI's
+		// rb_set_class_path_string takes its `permanent` from rb_tmp_class_path of
+		// the scope, so a class declared under an anonymous module carries a
+		// TEMPORARY "#<Module:0x…>::N" path that set_temporary_name may still
+		// replace. rbgo derives permanence from the lexical chain, so this only
+		// has to be written out for a compact definition, which records no chain.
+		class.named = parent == nil || modulePermanentlyNamed(parent)
 		vm.registerLiveClass(class) // so super.subclasses (and ObjectSpace) can find it
 		// A compact (scoped) definition's lexical nesting is only itself, so its
 		// lexParent terminates the chain (nil); a bare nested definition records its
@@ -2886,6 +3187,12 @@ func (vm *VM) defineClassIn(parent *RClass, name string, body *bytecode.ISeq, su
 			class.lexParent = lexParentFor(parent)
 		}
 		table[name] = class
+		vm.recordConstLoc(vm.constScope(parent), name)
+		// MRI's declare_under runs rb_const_set — hence Module#const_added — and
+		// only THEN rb_class_inherited (vm_insnhelper.c vm_declare_class:5763), so
+		// const_added observes a class whose superclass is already in place and
+		// runs before #inherited.
+		vm.fireConstAdded(vm.constScope(parent), name)
 		// Hook: superclass.inherited(subclass), fired when the class is created
 		// (before its body runs) if the superclass defines the hook.
 		if hook := lookupSMethod(super, "inherited"); hook != nil {
@@ -2924,6 +3231,10 @@ func adoptReopenLexParent(c, parent *RClass, scoped bool) {
 // the module, and returns the body's value.
 func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, scoped bool) object.Value {
 	table := vm.constTable(parent)
+	// MRI's vm_define_module looks the name up through rb_const_get_at, which
+	// RUNS a pending autoload before answering; rbgo reads the table directly, so
+	// the load has to be asked for (see defineClassIn).
+	vm.loadPendingAutoload(parent, name)
 	vm.checkScopedReopenVisibility(parent, name, scoped)
 	var mod *RClass
 	if existing, ok := table[name]; ok {
@@ -2933,12 +3244,15 @@ func (vm *VM) defineModuleIn(parent *RClass, name string, body *bytecode.ISeq, s
 			raise("TypeError", "%s is not a module", name)
 		}
 	} else {
-		mod = newClass(scopedNameFor(parent, name), nil)
+		mod = newClass(vm.constPathUnder(parent, name), nil)
+		mod.named = parent == nil || modulePermanentlyNamed(parent)
 		mod.isModule = true
 		if !scoped {
 			mod.lexParent = lexParentFor(parent)
 		}
 		table[name] = mod
+		vm.recordConstLoc(vm.constScope(parent), name)
+		vm.fireConstAdded(vm.constScope(parent), name)
 	}
 	mod.defaultVis, mod.funcMode = visPublic, false
 	adoptReopenLexParent(mod, parent, scoped)
