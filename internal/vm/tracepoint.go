@@ -188,7 +188,7 @@ type traceArg struct {
 	line     int
 	methodID string // "" renders as nil
 	calleeID string
-	klass    object.Value // defined_class; NilV when the event has none
+	klass    object.Value // defined_class; nil for an event that has none
 
 	iseq   *bytecode.ISeq // the code the event came from; also the local-hook key
 	isProc bool           // a non-lambda block frame: #parameters reports :opt
@@ -816,6 +816,14 @@ type traceFrame struct {
 	// raises neither (top level, eval).
 	entry traceEvents
 	exit  traceEvents
+
+	// exitFired records that the exit event has been raised, so the four sites
+	// that can raise it — the normal end of exec, the returnSignal recover, a
+	// non-local OpReturn and OpBreak — produce exactly one between them. It lives
+	// here rather than beside them in exec because exec's closures would then
+	// capture one more variable per frame, which bench/blocks.rb (millions of
+	// tiny block calls) can measure.
+	exitFired bool
 }
 
 // klassValue renders defined_class: the owner of a method frame, nil elsewhere.
