@@ -718,3 +718,125 @@ p out.last(2)
 		t.Errorf("hook order = %q, want %q", got, want)
 	}
 }
+
+// TestTracePointPathAndNilMethodID covers the #path accessor and the nil
+// #method_id / #callee_id a line event outside any method reports.
+func TestTracePointPathAndNilMethodID(t *testing.T) {
+	got := tpRun(t, `
+seen = nil
+TracePoint.new(:line) { |tp| seen = [tp.path, tp.method_id, tp.callee_id] }.enable { x = 1 }
+p seen[1..2]
+p seen[0].is_a?(String)
+`)
+	if got != "[nil, nil]\ntrue" {
+		t.Errorf("path/method_id = %q, want %q", got, "[nil, nil]\ntrue")
+	}
+}
+
+// TestTracePointScopedRestore covers traceScopedBlock's previous-state restore
+// in BOTH directions: a scoped disable on an enabled TracePoint leaves it
+// enabled, and a scoped enable on a disabled one leaves it disabled.
+func TestTracePointScopedRestore(t *testing.T) {
+	got := tpRun(t, `
+t = TracePoint.new(:line) {}
+t.enable
+p t.disable { t.enabled? }
+p t.enabled?
+t.disable
+p t.enable { t.enabled? }
+p t.enabled?
+p t.disable { |*a| a }
+`)
+	want := "false\ntrue\ntrue\nfalse\n[]"
+	if got != want {
+		t.Errorf("scoped restore = %q, want %q", got, want)
+	}
+}
+
+// TestTracePointUnwindExit covers the exit events MRI raises for a frame that
+// does NOT finish: an exception rewinding past two methods, a non-local return
+// out of a block, and a break out of one (whose :b_return carries the value).
+func TestTracePointUnwindExit(t *testing.T) {
+	got := tpRun(t, `
+def a2; raise "x"; end
+def a1; a2; end
+ev = []
+TracePoint.new(:return) { |tp| ev << [tp.method_id, tp.return_value] }.enable do
+  begin; a1; rescue; end
+end
+p ev
+
+def early; [1, 2, 3].each { |i| return i if i == 2 }; :no; end
+ev = []
+TracePoint.new(:return, :b_return) { |tp| ev << [tp.event, tp.method_id, tp.return_value] }.enable { early }
+p ev
+
+def brk; [1, 2, 3].each { |i| break i if i == 2 }; end
+ev = []
+TracePoint.new(:b_return) { |tp| ev << tp.return_value }.enable { brk }
+p ev
+`)
+	want := strings.Join([]string{
+		`[[:a2, nil], [:a1, nil]]`,
+		// The trailing entry of each is the `enable` block's own b_return, which
+		// MRI raises too: the hook is installed before the block is yielded.
+		`[[:b_return, :early, nil], [:b_return, :early, nil], [:return, :early, 2], [:b_return, nil, 2]]`,
+		`[nil, 2, 2]`,
+	}, "\n")
+	if got != want {
+		t.Errorf("unwind exits =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestTracePointEnsureReturn covers the local-return-through-an-ensure route,
+// which reaches the frame's own returnSignal recover rather than the normal
+// exit — the value must still be the returned one.
+func TestTracePointEnsureReturn(t *testing.T) {
+	got := tpRun(t, `
+def ens; begin; return 5; ensure; end; end
+ev = []
+TracePoint.new(:return) { |tp| ev << [tp.method_id, tp.return_value] }.enable { ens }
+p ev
+`)
+	if got != "[[:ens, 5]]" {
+		t.Errorf("ensure return = %s, want [[:ens, 5]]", got)
+	}
+}
+
+// TestFireTraceSkipsOtherEvents covers the per-hook event filter inside the
+// walk: a hook registered for another event is stepped over rather than called.
+func TestFireTraceSkipsOtherEvents(t *testing.T) {
+	vm := New(&bytes.Buffer{})
+	var order []string
+	mk := func(name string, ev traceEvents) *tracePoint {
+		tp := &tracePoint{events: ev, tracing: true, self: object.NilV}
+		tp.blk = &Proc{native: func(*VM, []object.Value) object.Value { order = append(order, name); return object.NilV }}
+		return tp
+	}
+	other := mk("other", evCall)
+	wanted := mk("wanted", evLine)
+	stale := mk("stale", evLine)
+	stale.tracing = false
+	vm.tracePoints = []*tracePoint{other, wanted, stale}
+	vm.fireTrace(&traceArg{event: evLine})
+	if len(order) != 1 || order[0] != "wanted" {
+		t.Errorf("fireTrace called %v, want only [wanted]", order)
+	}
+}
+
+// TestScriptLabel covers the two fallbacks frameFileLabel names when a frame
+// carries no file of its own and there is no frame to ask.
+func TestScriptLabel(t *testing.T) {
+	vm := New(&bytes.Buffer{})
+	if got := vm.scriptLabel(); got != "(rbgo)" {
+		t.Errorf("scriptLabel with no script = %q, want %q", got, "(rbgo)")
+	}
+	vm.SetScriptName("-e")
+	if got := vm.scriptLabel(); got != "-e" {
+		t.Errorf("scriptLabel for -e = %q, want %q", got, "-e")
+	}
+	vm.SetScriptName("prog.rb")
+	if got := vm.scriptLabel(); got != "prog.rb" {
+		t.Errorf("scriptLabel = %q, want %q", got, "prog.rb")
+	}
+}

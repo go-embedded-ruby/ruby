@@ -1334,6 +1334,10 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// frame that argument binding might start.
 	pendClassBody := vm.pendingClassBody
 	vm.pendingClassBody = false
+	// This frame's TracePoint description, built lazily: nil unless tracing is on
+	// (see the entry-event site below). Declared here because the exit-event
+	// defers registered further down close over it.
+	var tf *traceFrame
 	var fm frameMethod
 	switch {
 	case selfBlock != nil:
@@ -1638,6 +1642,30 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 		methodDefinee = pendEvalDef
 	}
 
+	// TracePoint's exit event (:return / :b_return / :end) for a frame that does
+	// NOT finish: an exception, a throw, or a non-local return passing through.
+	//
+	// MRI raises it there too — hook_before_rewind fires RETURN as it rewinds the
+	// frames an exception is unwinding past — and reports #return_value as nil,
+	// because the frame produced none. `def a2; raise; end` called from a1 under
+	// a :return TracePoint reports [:return, :a2, nil] then [:return, :a1, nil],
+	// and rbgo reported neither until this defer existed.
+	//
+	// It is registered BEFORE the returnSignal recover below so that it RUNS
+	// AFTER it (defers are LIFO): the recover raises the event itself, with the
+	// returned value, and sets exitFired so this one stays quiet. exitFired is
+	// likewise set at the two sites that raise the event before panicking on
+	// purpose — OpBreak, which carries the break value, and a non-local OpReturn,
+	// which does not.
+	exitFired := false
+	defer func() {
+		if tf == nil || tf.exit == 0 || exitFired || vm.traceEvents&tf.exit == 0 {
+			return
+		}
+		exitFired = true
+		vm.traceExitEvent(tf, object.NilV)
+	}()
+
 	// Every frame catches a returnSignal aimed at its own selfTarget (a local
 	// return/next routed through an ensure, or a non-local return whose home is
 	// this frame). A signal for some other target passes through. On a catch the
@@ -1649,6 +1677,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				sig, ok := r.(returnSignal)
 				if !ok || sig.target != selfTarget {
 					panic(r)
+				}
+				// The frame IS returning, with sig.value: raise its exit event before
+				// the truncation below takes this frame's own stack entries away,
+				// since the event reports its path and line.
+				if tf != nil && tf.exit != 0 && !exitFired && vm.traceEvents&tf.exit != 0 {
+					exitFired = true
+					vm.traceExitEvent(tf, sig.value)
 				}
 				// Truncate one past this frame's own entries: this frame's normal
 				// pop never ran, and the deeper frames that unwound left theirs too.
@@ -1675,7 +1710,6 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// The entry event is raised HERE, after the frame's name/file/code/cref
 	// stacks are pushed and lexCref is settled, because a handler may take a
 	// backtrace or ask for #binding, and both read that state.
-	var tf *traceFrame
 	if vm.traceEvents != 0 {
 		tf = newTraceFrame(iseq, myFrame, self, fm, definee, env, iseq.File, selfBlock, methodName, pendClassBody)
 		if tf.entry&vm.traceEvents != 0 {
@@ -2402,6 +2436,13 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						vm.raiseWithIvars("LocalJumpError", "unexpected return",
 							map[string]object.Value{"@reason": object.Symbol("return"), "@exit_value": val})
 					}
+					// This block frame is leaving for good. MRI reports its :b_return with
+					// nil — the value belongs to the method the return reaches, which
+					// reports it as its own :return.
+					if tf != nil && tf.exit != 0 && !exitFired && vm.traceEvents&tf.exit != 0 {
+						exitFired = true
+						vm.traceExitEvent(tf, object.NilV)
+					}
 					panic(returnSignal{target: t, value: val})
 				}
 				// An explicit return from this frame with a live ensure handler must
@@ -2432,6 +2473,12 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				// letting the signal escape and crash the VM.
 				if selfBlock == nil || !selfBlock.breakLive {
 					raise("LocalJumpError", "break from proc-closure")
+				}
+				// Unlike a non-local return, MRI reports a broken-out-of block's
+				// :b_return WITH the break value.
+				if tf != nil && tf.exit != 0 && !exitFired && vm.traceEvents&tf.exit != 0 {
+					exitFired = true
+					vm.traceExitEvent(tf, val)
 				}
 				panic(breakSignal{owner: selfBlock, value: val})
 			case bytecode.OpPushHandler:
@@ -2676,6 +2723,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 			tf = newTraceFrame(iseq, myFrame, self, fm, definee, env, iseq.File, selfBlock, methodName, pendClassBody)
 		}
 		if tf.exit&vm.traceEvents != 0 {
+			exitFired = true
 			vm.traceExitEvent(tf, result)
 		}
 	}
