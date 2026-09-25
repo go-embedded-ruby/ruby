@@ -7,6 +7,7 @@ package vm
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
@@ -419,18 +420,57 @@ func hasAutoload(c *RClass, name string) bool {
 	return ok
 }
 
-// validConstName reports whether s is a well-formed constant name: an uppercase
-// first letter followed by letters, digits or underscores. Used to reject names
-// like "name", "__X__", "X=" or "X?" as MRI's const_get/const_defined? do.
+// constNameWellFormed reports whether s is a well-formed constant name, as MRI
+// decides it in rb_enc_symname_type (ruby/ruby v3_4_0 symbol.c): a leading
+// character rb_sym_constant_char_p calls a constant character, followed by
+// is_identchar characters up to the end of the string. Used to reject "name",
+// "__X__", "X=" or "X?" in const_get / const_defined? / const_set / autoload.
+//
+// The two rules are NOT "letters, digits and underscores", which is what rbgo
+// had:
+//
+//   - The leading character is ASCII-uppercase, or — for a multi-byte one —
+//     uppercase or TITLECASE in its encoding (rb_sym_constant_char_p falls
+//     through to the titlecase ctype for Unicode). So "Ǆx" (U+01C4) and "ǅx"
+//     (U+01C5, titlecase) are constants while "ǆx" (U+01C6) is not.
+//   - Every LATER byte passes is_identchar, which is
+//     `ISALNUM(*p) || *p == '_' || !ISASCII(*p)`: any non-ASCII byte is an
+//     identifier byte, with no character test at all. That is why "A€" and
+//     "A\u00A0B" are constant names in MRI, and why a name in a non-UTF-8
+//     ASCII-compatible encoding — ruby/spec sets one with
+//     "CS_CONSTλ".encode("euc-jp") — is one too. Testing the decoded RUNE, as
+//     rbgo did, rejected all three: bytes that are not valid UTF-8 decode to
+//     U+FFFD, which is not a letter.
+//
+// Known divergence: MRI raises EncodingError for a string whose bytes are
+// invalid in its OWN encoding ("X\xFF" tagged UTF-8). rbgo sees only the bytes
+// here — EUC-JP text is invalid UTF-8 too — so it cannot tell the two apart and
+// accepts both.
 func constNameWellFormed(s string) bool {
-	r := []rune(s)
-	if len(r) == 0 || !unicode.IsUpper(r[0]) {
+	if s == "" {
 		return false
 	}
-	for _, c := range r[1:] {
-		if c != '_' && !unicode.IsLetter(c) && !unicode.IsDigit(c) {
+	lead, size := utf8.DecodeRuneInString(s)
+	switch {
+	case size == 1 && s[0] < utf8.RuneSelf:
+		if s[0] < 'A' || s[0] > 'Z' {
 			return false
 		}
+	case lead == utf8.RuneError && size == 1:
+		// A byte that starts no UTF-8 character: the name is in some other
+		// ASCII-compatible encoding, whose multi-byte characters are neither
+		// uppercase nor titlecase for rb_sym_constant_char_p.
+		return false
+	case !unicode.IsUpper(lead) && !unicode.IsTitle(lead):
+		return false
+	}
+	for i := size; i < len(s); i++ {
+		c := s[i]
+		if c >= utf8.RuneSelf || c == '_' || ('0' <= c && c <= '9') ||
+			('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') {
+			continue
+		}
+		return false
 	}
 	return true
 }

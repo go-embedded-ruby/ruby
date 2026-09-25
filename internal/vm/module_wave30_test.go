@@ -5,8 +5,10 @@
 package vm_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestModuleWave30VisibilityArrayArgument covers MRI's single-Array form of
@@ -397,6 +399,189 @@ Object.const_source_location("W30NOTMOD::X")`); err == nil ||
 	for _, src := range []string{`Module.const_source_location`, `Module.const_source_location(:K, true, 3)`} {
 		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "ArgumentError") {
 			t.Errorf("%s: got %v, want ArgumentError", src, err)
+		}
+	}
+}
+
+// TestModuleWave30ConstantNameShape covers the constant-name test every
+// constant entry point shares — const_set / const_get / const_defined? /
+// remove_const / autoload / const_source_location. It is MRI's
+// rb_enc_symname_type (ruby/ruby v3_4_0 symbol.c): rb_sym_constant_char_p for
+// the leading character, is_identchar for every byte after it. Asserted against
+// MRI 4.0.
+func TestModuleWave30ConstantNameShape(t *testing.T) {
+	// Names MRI accepts. Each is const_set on a fresh module and read back.
+	for _, name := range []string{
+		`CS_A`, // the ordinary shape
+		`A`,    // one character
+		`A1_b`, // digits, underscore and lowercase after the lead
+		"Aλ",   // a non-ASCII LETTER after the lead
+		"A€",   // a non-ASCII non-letter: is_identchar takes any non-ASCII byte
+		"A B",  // including a non-breaking space
+		"ΛX",   // an uppercase multi-byte lead
+		"Ǆx",   // U+01C4 DŽ, uppercase
+		"ǅx",   // U+01C5 Dž, TITLECASE — rb_sym_constant_char_p's titlecase arm
+	} {
+		src := "m = Module.new\nm.const_set(" + rubyStringLit(name) + ", 7)\np m.const_get(" + rubyStringLit(name) + ")\n"
+		if got := eval(t, src); got != "7\n" {
+			t.Errorf("const_set(%q): got %q, want 7", name, got)
+		}
+	}
+	// A name in a non-UTF-8 ASCII-compatible encoding is a name too: its bytes
+	// are not valid UTF-8, and MRI never decodes them.
+	if got := eval(t, `m = Module.new
+s = "CS_CONSTλ".encode("euc-jp")
+m.const_set(s, 7)
+p [m.const_get(s), m.const_defined?(s)]`); got != "[7, true]\n" {
+		t.Errorf("EUC-JP constant name: got %q", got)
+	}
+	// Names MRI refuses.
+	for _, name := range []string{
+		`name`, // lowercase lead
+		`_A`,   // underscore lead
+		`A b`,  // a space after the lead
+		`A-`,   // punctuation after the lead
+		`A=`,   // the attrset shape is not a constant
+		`A?`,
+		"λX", // a LOWERCASE multi-byte lead
+		"ǆx", // U+01C6 dž, lowercase
+	} {
+		src := "Module.new.const_set(" + rubyStringLit(name) + ", 7)"
+		if err := runErr(t, src); err == nil || !strings.Contains(err.Error(), "NameError") {
+			t.Errorf("const_set(%q): got %v, want NameError", name, err)
+		}
+	}
+	// A multi-byte lead in a non-UTF-8 encoding is not a constant character
+	// either — nothing MRI calls uppercase lives in those tables.
+	if err := runErr(t, `Module.new.const_set("λX".encode("euc-jp"), 7)`); err == nil ||
+		!strings.Contains(err.Error(), "NameError") {
+		t.Errorf("EUC-JP lowercase lead: got %v, want NameError", err)
+	}
+	// The empty name.
+	if err := runErr(t, `Module.new.const_set("", 7)`); err == nil ||
+		!strings.Contains(err.Error(), "NameError") {
+		t.Errorf("empty name: got %v, want NameError", err)
+	}
+}
+
+// rubyStringLit renders s as a Ruby double-quoted string literal with every
+// non-ASCII byte escaped, so a test source stays plain ASCII whatever the name
+// under test contains.
+func rubyStringLit(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < utf8.RuneSelf && c != '"' && c != '\\' {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, `\x%02X`, c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// TestModuleWave30Ruby2Keywords covers Module#ruby2_keywords' MRI-visible
+// contract — rb_mod_ruby2_keywords, ruby/ruby v3_4_0 vm_method.c:2568, with
+// 4.0's wording for the parameter-shape warning. The flag itself is not carried
+// yet (bytecode.ISeq has no param.flags.ruby2_keywords), so what is asserted
+// here is everything that does not depend on it. Asserted against MRI 4.0.
+func TestModuleWave30Ruby2Keywords(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// It returns nil, and is silent for a method it could mark.
+		{`o = Object.new
+o.singleton_class.class_exec do
+  def foo(*a) end
+  p ruby2_keywords(:foo)
+end`, "nil\n"},
+		// It is a PRIVATE instance method of Module.
+		{`p Module.private_instance_methods(false).include?(:ruby2_keywords)`, "true\n"},
+		{`p (Module.new.ruby2_keywords(:x) rescue $!.class)`, "NoMethodError\n"},
+		// A String name is accepted as well as a Symbol.
+		{`o = Object.new
+o.singleton_class.class_exec do
+  def foo(*a) end
+  p ruby2_keywords("foo")
+end`, "nil\n"},
+		// Several names in one call.
+		{`c = Class.new do
+  def a(*x) end
+  def b(*x) end
+  p ruby2_keywords(:a, :b)
+end`, "nil\n"},
+	}
+	for _, c := range cases {
+		if got := eval(t, c.src); got != c.want {
+			t.Errorf("src=%q\n got=%q\nwant=%q", c.src, got, c.want)
+		}
+	}
+	// Each shape MRI warns about, with its own wording. $VERBOSE is assigned so
+	// rb_warn's gate is open, and $stderr is captured.
+	for _, w := range []struct{ def, want string }{
+		// has_rest missing …
+		{`def foo(a, b, c) end`, "method accepts keywords or post arguments or method does not accept argument splat"},
+		// … a required keyword …
+		{`def foo(*a, b:) end`, "method accepts keywords or post arguments or method does not accept argument splat"},
+		// … a keyword splat …
+		{`def foo(*a, **b) end`, "method accepts keywords or post arguments or method does not accept argument splat"},
+		// … and, since 4.0, a post-splat positional.
+		{`def foo(*a, b) end`, "method accepts keywords or post arguments or method does not accept argument splat"},
+	} {
+		src := `$VERBOSE = false
+require "stringio"
+$stderr = StringIO.new
+c = Class.new do
+  ` + w.def + `
+  ruby2_keywords :foo
+end
+out = $stderr.string
+$stderr = STDERR
+p out.include?("Skipping set of ruby2_keywords flag for foo (` + w.want + `)")`
+		if got := eval(t, src); got != "true\n" {
+			t.Errorf("warning for %q: got %q", w.def, got)
+		}
+	}
+	// A method whose body is not Ruby (an attr reader) …
+	if got := eval(t, `$VERBOSE = false
+require "stringio"
+$stderr = StringIO.new
+c = Class.new do
+  attr_reader :a
+  ruby2_keywords :a
+end
+out = $stderr.string
+$stderr = STDERR
+p out.include?("Skipping set of ruby2_keywords flag for a (method not defined in Ruby)")`); got != "true\n" {
+		t.Errorf("non-Ruby method warning: got %q", got)
+	}
+	// … and one the receiver does not define itself, reached through the
+	// superclass or (for a module) through Object.
+	for _, src := range []string{
+		`class W30R2KBase; def sp(*a) end; end
+class W30R2KSub < W30R2KBase; end
+W30R2KSub.class_exec { ruby2_keywords :sp }`,
+		`Module.new.class_exec { ruby2_keywords :puts }`,
+	} {
+		full := `$VERBOSE = false
+require "stringio"
+$stderr = StringIO.new
+` + src + `
+out = $stderr.string
+$stderr = STDERR
+p out.include?("can only set in method defining module")`
+		if got := eval(t, full); got != "true\n" {
+			t.Errorf("inherited-name warning (%s): got %q", src, got)
+		}
+	}
+	// No argument, a bad name, an unknown name and a frozen receiver all raise.
+	for _, tc := range []struct{ src, want string }{
+		{`Module.new.send(:ruby2_keywords)`, "ArgumentError"},
+		{`Class.new { ruby2_keywords Object.new }`, "is not a symbol nor a string"},
+		{`Class.new { ruby2_keywords :not_existing_w30 }`, "undefined method 'not_existing_w30'"},
+		{`Module.new.freeze.send(:ruby2_keywords, :x)`, "FrozenError"},
+	} {
+		if err := runErr(t, tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %s", tc.src, err, tc.want)
 		}
 	}
 }
