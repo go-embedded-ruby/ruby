@@ -35,11 +35,12 @@ func TestKernelWarn(t *testing.T) {
 		{`begin; warn("x", uplevel: "a"); rescue TypeError => e; p e.message; end`, `"no implicit conversion of String into Integer"`},
 		// With a level, error.c v3_4_0 rb_warn_m prefixes the message —
 		// "path:lineno: warning: " from rb_ec_backtrace_location_ary, or the bare
-		// "warning: " when that yields no location. rbgo records no line numbers,
-		// so no frame can supply a path and the no-location form is what every
-		// level produces; MRI would say "<file>:<line>: warning: x\n" here. Closing
-		// that gap needs line tracking in internal/compiler.
-		{cap + `warn("x", uplevel: 0); p $c`, `["warning: x\n", nil]`},
+		// "warning: " when that yields no location. The location is now real: the
+		// frame that called warn, at the line it has reached. These cases run from
+		// a source with no file, so frameFileLabel's last fallback names the path
+		// "(rbgo)"; run from a file, MRI and rbgo agree byte for byte (checked on
+		// ruby 4.0.5, which prints "<file>:2: warning: x" for the same shape).
+		{cap + `warn("x", uplevel: 0); p $c`, `["(rbgo):1: warning: x\n", nil]`},
 		// A level too large for the stack is exactly the no-location case, and
 		// there rbgo and MRI agree byte for byte.
 		{cap + `warn("x", uplevel: 100); p $c`, `["warning: x\n", nil]`},
@@ -55,8 +56,9 @@ func TestKernelWarn(t *testing.T) {
 		{cap + `warn("x\n"); p $c`, `["x\n", nil]`},
 		{cap + `warn("a\n", "b"); p $c`, `["a\nb\n", nil]`},
 		{cap + `warn([]); p $c`, `nil`},
-		// NUM2LONG takes the level, so a Float or Rational truncates.
-		{cap + `warn("x", uplevel: 0.9); p $c`, `["warning: x\n", nil]`},
+		// NUM2LONG takes the level, so a Float or Rational truncates: 0.9 is the
+		// level-0 frame, not level 1 and not a TypeError.
+		{cap + `warn("x", uplevel: 0.9); p $c`, `["(rbgo):1: warning: x\n", nil]`},
 		// A Warning.warn that takes exactly one argument is called without the
 		// category keyword (rb_warn_category's rb_warning_warn_arity() == 1).
 		{`$c = nil; Warning.singleton_class.send(:define_method, :warn) { |m| $c = m }; warn("x"); p $c`, `"x\n"`},

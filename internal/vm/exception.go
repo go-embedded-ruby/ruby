@@ -391,30 +391,55 @@ func (vm *VM) registerBacktraceLocation() {
 	loc.define("absolute_path", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return getIvar(self, "@path")
 	})
-	// #base_label is the label WITHOUT the block qualifier. MRI reads it from a
+	// #base_label is the label with NO decoration at all. MRI reads it from a
 	// different field than #label does — location.base_label beside
-	// location.label (vm_backtrace.c v3_4_0:331) — and the difference is exactly
-	// the decoration calculate_iseq_label adds for a block frame: #label says
-	// "block (2 levels) in foo" where #base_label says "foo". Stripping that
-	// prefix reconstructs the same answer from the one label we carry.
+	// location.label (vm_backtrace.c v3_4_0:331) — and that field is the plain
+	// name the ISeq was compiled under, so it carries neither the "block in "
+	// that calculate_iseq_label adds for a block frame nor the "Owner#" that
+	// rb_gen_method_name adds for a method one. #label says
+	// "block (2 levels) in C#foo" where #base_label says "foo". Removing both
+	// decorations reconstructs the same answer from the one label we carry.
 	loc.define("base_label", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
-		return object.NewString(stripBlockQualifier(getIvar(self, "@label").ToS()))
+		_, base := splitBlockQualifier(getIvar(self, "@label").ToS())
+		return object.NewString(stripOwnerPrefix(base))
 	})
 }
 
-// stripBlockQualifier removes the "block in " / "block (N levels) in " prefix a
-// block frame's label carries, yielding the label of the scope the block was
-// written in. A label without the prefix is returned unchanged.
-func stripBlockQualifier(label string) string {
+// splitBlockQualifier splits the "block in " / "block (N levels) in " decoration
+// a block frame's label carries from the label of the scope the block was
+// written in. A label without the decoration comes back with an empty qualifier.
+func splitBlockQualifier(label string) (qual, base string) {
 	if rest, ok := strings.CutPrefix(label, "block in "); ok {
-		return rest
+		return "block in ", rest
 	}
 	if strings.HasPrefix(label, "block (") {
 		if i := strings.Index(label, " levels) in "); i >= 0 {
-			return label[i+len(" levels) in "):]
+			cut := i + len(" levels) in ")
+			return label[:cut], label[cut:]
 		}
 	}
-	return label
+	return "", label
+}
+
+// stripOwnerPrefix removes the "Owner#" / "Owner." that genMethodName puts in
+// front of a method label, yielding the bare name MRI keeps in
+// location.base_label.
+//
+// It removes a prefix only when what precedes the separator is a CONSTANT PATH,
+// which is the only shape rb_mod_name0 can produce: a run of "::"-joined
+// segments each starting with an upper-case letter. That test is what keeps it
+// from eating part of a label that merely contains the separator — a method name
+// cannot hold a "#" or a ".", but "<main>" and the other bracketed labels reach
+// here too, and an undecorated label must come back untouched.
+func stripOwnerPrefix(label string) string {
+	cut := strings.LastIndexAny(label, "#.")
+	if cut <= 0 || cut == len(label)-1 {
+		return label
+	}
+	if !isConstantPath(label[:cut]) {
+		return label
+	}
+	return label[cut+1:]
 }
 
 // backtraceLocation builds a Thread::Backtrace::Location from one captured
