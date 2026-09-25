@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-embedded-ruby/ruby/internal/bytecode"
 	"github.com/go-embedded-ruby/ruby/internal/object"
 )
 
@@ -229,5 +230,57 @@ p MA31::F.v
 `
 	if got, want := eval(t, src), ":from_file\n:mod_from_file\n"; got != want {
 		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+// TestNamedSuperDeclinesWhatItCannotCompare covers namedSuper's two "no
+// superclass to compare" arms directly, rather than through Ruby source. Both
+// shapes are ones rbgo answers DIFFERENTLY from MRI at the Ruby level — MRI
+// raises NameError for an unresolvable superclass and TypeError for a module,
+// from the superclass expression, before defineclass runs — so asserting a
+// program's output here would pin a divergence instead of the helper's
+// contract, which is that a reopen only raises "superclass mismatch" when it
+// actually names a class.
+func TestNamedSuperDeclinesWhatItCannotCompare(t *testing.T) {
+	vm := New(os.Stderr)
+	mod := newClass("SMod31", nil)
+	mod.isModule = true
+	cls := newClass("SCls31", vm.cObject)
+	for _, tc := range []struct {
+		name      string
+		body      *bytecode.ISeq
+		superExpr object.Value
+		want      *RClass
+	}{
+		{"names nothing", &bytecode.ISeq{}, nil, nil},
+		{"names something that does not resolve", &bytecode.ISeq{Super: "NoSuchConst31"}, nil, nil},
+		{"names a module", &bytecode.ISeq{}, mod, nil},
+		{"names a non-class value", &bytecode.ISeq{}, object.IntValue(1), nil},
+		{"names a class", &bytecode.ISeq{}, cls, cls},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := vm.namedSuper(vm.cObject, tc.body, tc.superExpr); got != tc.want {
+				t.Errorf("namedSuper = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestModuleClassPathQualifiesWithAnAnonymousScope covers moduleClassPath's
+// anonymous-parent arm. It is reached from Ruby only through the reopen path
+// that adopts a lexical parent after the fact, so it is pinned here as the
+// contract it is: a module whose recorded lexical home has no permanent name of
+// its own is qualified with that home's "#<Module:0x…>" repr, which is
+// rb_tmp_class_path's answer for an anonymous scope.
+func TestModuleClassPathQualifiesWithAnAnonymousScope(t *testing.T) {
+	vm := New(os.Stderr)
+	anon := newClass("", nil)
+	anon.isModule = true
+	child := newClass("Q31", nil)
+	child.isModule = true
+	child.lexParent = anon
+	got := vm.moduleClassPath(child)
+	if !strings.HasPrefix(got, "#<Module:0x") || !strings.HasSuffix(got, ">::Q31") {
+		t.Errorf("moduleClassPath under an anonymous scope = %q, want \"#<Module:0x…>::Q31\"", got)
 	}
 }
