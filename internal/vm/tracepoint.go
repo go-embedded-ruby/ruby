@@ -745,7 +745,30 @@ func (vm *VM) frameTracePath(iseq *bytecode.ISeq, frame int) string {
 	if iseq != nil && iseq.File != "" {
 		return iseq.File
 	}
+	// frameFileLabel indexes the frame stacks unguarded, and exec can legitimately
+	// outrun them (see the bounds note at the pc publication in exec): a frame no
+	// longer covered reports the script, which is what frameFileLabel itself falls
+	// back to for a frame with no file.
+	if frame < 0 || frame >= len(vm.frameFiles) {
+		frame = len(vm.frameFiles) - 1
+	}
+	if frame < 0 {
+		return vm.scriptLabel()
+	}
 	return vm.frameFileLabel(frame)
+}
+
+// scriptLabel is frameFileLabel's answer for a frame with no file of its own,
+// reached directly when there is no frame at all to ask.
+func (vm *VM) scriptLabel() string {
+	switch vm.scriptName {
+	case "":
+		return "(rbgo)"
+	case "-e":
+		return "-e"
+	default:
+		return vm.scriptName
+	}
 }
 
 // traceLineEvent fires :line. MRI reports the CURRENT source line here (the
