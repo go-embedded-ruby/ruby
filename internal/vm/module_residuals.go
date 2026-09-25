@@ -86,7 +86,7 @@ func (vm *VM) registerModuleResiduals() {
 		// last segment always exists and always answers.
 		for i, seg := range segs[:len(segs)-1] {
 			if !constNameWellFormed(seg) {
-				raise("NameError", "wrong constant name %s", orig)
+				raise("NameError", "wrong constant name %s", seg)
 			}
 			v, ok := vm.constSegGet(mod, seg, recur, i == 0)
 			if !ok {
@@ -100,7 +100,7 @@ func (vm *VM) registerModuleResiduals() {
 		}
 		last := segs[len(segs)-1]
 		if !constNameWellFormed(last) {
-			raise("NameError", "wrong constant name %s", orig)
+			raise("NameError", "wrong constant name %s", last)
 		}
 		return vm.constLocation(mod, last, !recur, recur)
 	})
@@ -237,7 +237,7 @@ func (vm *VM) moduleConstGet(cls *RClass, arg object.Value, inherit bool) object
 	var result object.Value
 	for i, seg := range segs {
 		if !constNameWellFormed(seg) {
-			raise("NameError", "wrong constant name %s", orig)
+			raise("NameError", "wrong constant name %s", seg)
 		}
 		v, ok := vm.constSegGet(mod, seg, inherit, i == 0)
 		if !ok {
@@ -266,7 +266,7 @@ func (vm *VM) moduleConstDefined(cls *RClass, arg object.Value, inherit bool) bo
 	}
 	for i, seg := range segs {
 		if !constNameWellFormed(seg) {
-			raise("NameError", "wrong constant name %s", orig)
+			raise("NameError", "wrong constant name %s", seg)
 		}
 		v, ok := vm.constSegDefined(mod, seg, inherit, i == 0)
 		if !ok {
@@ -287,6 +287,12 @@ func (vm *VM) moduleConstDefined(cls *RClass, arg object.Value, inherit bool) bo
 // String, or an object with #to_str) into its path segments, reporting whether a
 // leading "::" selected the top level. A Symbol may not carry a scope path or
 // qualifier — MRI treats "::" inside a Symbol name as a malformed constant name.
+//
+// It also returns the name as given, for the errors that report the WHOLE path:
+// MRI's wrong_name names the offending SEGMENT when a segment is not a constant
+// name (`name = part` in rb_mod_const_get and its siblings) and the whole string
+// only for a path that is malformed as a path — a bare "::", a trailing one, or
+// two in a row — where there is no one segment to blame.
 func (vm *VM) constPathSegs(arg object.Value) (segs []string, topLevel bool, orig string) {
 	name, isSym := vm.constArgToString(arg)
 	orig = name

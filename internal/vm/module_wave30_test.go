@@ -392,6 +392,23 @@ Object.const_source_location("W30NOTMOD::X")`); err == nil ||
 		!strings.Contains(err.Error(), "does not refer to class/module") {
 		t.Errorf("non-module segment: got %v, want TypeError", err)
 	}
+	// A malformed SEGMENT inside a path names the segment, as MRI's wrong_name
+	// does (`name = part`); a path malformed as a PATH names the whole string,
+	// because no single segment is to blame. Same rule for const_get and
+	// const_defined?, which share the walk.
+	for _, tc := range []struct{ src, want string }{
+		{`Module.const_source_location("lower30::X")`, "wrong constant name lower30"},
+		{`Module.const_source_location("A=::X")`, "wrong constant name A="},
+		{`Module.const_source_location("Object::lower30")`, "wrong constant name lower30"},
+		{`Module.const_source_location("::name30")`, "wrong constant name name30"},
+		{`Module.const_source_location("Object::::B")`, "wrong constant name Object::::B"},
+		{`Module.const_get("lower30::X")`, "wrong constant name lower30"},
+		{`Module.const_defined?("lower30::X")`, "wrong constant name lower30"},
+	} {
+		if err := runErr(t, tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", tc.src, err, tc.want)
+		}
+	}
 	// Every malformed name MRI rejects.
 	for _, src := range []string{
 		`Module.const_source_location "name"`,
