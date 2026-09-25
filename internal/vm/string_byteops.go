@@ -199,6 +199,7 @@ func (vm *VM) strBytesplice(self *object.String, args []object.Value) object.Val
 	vm.checkFrozen(self)
 	var dstBeg, dstLen int
 	var repl string
+	var src *object.String
 	switch len(args) {
 	case 2:
 		r, ok := args[0].(*object.Range)
@@ -206,11 +207,12 @@ func (vm *VM) strBytesplice(self *object.String, args []object.Value) object.Val
 			raise("TypeError", "wrong argument type %s (expected Range)", classNameOf(args[0]))
 		}
 		dstBeg, dstLen = bytespliceRange(self, r)
-		repl = stringConv(args[1]).Str()
+		src = stringConv(args[1])
+		repl = src.Str()
 	case 3:
 		if r, ok := args[0].(*object.Range); ok {
 			dstBeg, dstLen = bytespliceRange(self, r)
-			src := stringConv(args[1])
+			src = stringConv(args[1])
 			sr, ok := args[2].(*object.Range)
 			if !ok {
 				raise("TypeError", "wrong argument type %s (expected Range)", classNameOf(args[2]))
@@ -218,14 +220,26 @@ func (vm *VM) strBytesplice(self *object.String, args []object.Value) object.Val
 			repl = bytespliceSrcRange(src, sr)
 		} else {
 			dstBeg, dstLen = bytespliceIndexLen(self, args[0], args[1])
-			repl = stringConv(args[2]).Str()
+			src = stringConv(args[2])
+			repl = src.Str()
 		}
 	case 5:
 		dstBeg, dstLen = bytespliceIndexLen(self, args[0], args[1])
-		src := stringConv(args[2])
+		src = stringConv(args[2])
 		repl = bytespliceSrcIndexLen(src, args[3], args[4])
 	default:
 		raise("ArgumentError", "wrong number of arguments (given %d, expected 2, 3, or 5)", len(args))
+	}
+	// string.c v3_4_0 rb_str_bytesplice, between the bounds checks and the
+	// update:
+	//     if (RB_UNLIKELY(ENCODING_GET_INLINED(str) != ENCODING_GET_INLINED(val)))
+	//         rb_enc_associate(str, rb_enc_check(str, val));
+	// The negotiation reads the WHOLE of both strings, not just the spliced
+	// range, so a 7-bit receiver adopts the source's encoding (and an
+	// irreconcilable pair raises Encoding::CompatibilityError) before any byte
+	// moves.
+	if self.EncName() != src.EncName() {
+		self.Enc = vm.combinedEncName(self, src)
 	}
 	b := self.Bytes()
 	nb := make([]byte, 0, len(b)-dstLen+len(repl))

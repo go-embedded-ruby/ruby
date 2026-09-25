@@ -1064,6 +1064,66 @@ func sortIMX(flags string) string {
 // strMatchRegexp coerces the argument of String#match / String#match? into a
 // Regexp: a Regexp passes through; a String is compiled (no flags); anything
 // else raises TypeError.
+// regexpMatchP is re.c v3_4_0 rb_reg_match_p, the engine behind Regexp#match?
+// and — because rb_str_match_m_p calls it directly rather than dispatching
+// #match? — behind String#match? as well. args is the (subject[, pos]) list.
+// The predicate never touches $~.
+func (vm *VM) regexpMatchP(re *Regexp, args []object.Value) object.Value {
+	if _, isNil := args[0].(object.Nil); isNil {
+		return object.False
+	}
+	vm.checkSubjectEncoding(re, args[0])
+	subject := strArg(args[0])
+	// match?(str, pos): probe from character offset pos, without touching $~
+	// (the predicate form has no match-data side effect).
+	if len(args) >= 2 {
+		nChars := int64(utf8.RuneCountInString(subject))
+		pos := intArg(args[1])
+		if pos < 0 {
+			pos += nChars
+		}
+		if pos < 0 || pos > nChars {
+			return object.False
+		}
+		// Search from the cursor with the WHOLE subject visible, as
+		// rb_reg_search does — /\A/.match?("hello", 2) is false, not true.
+		md, _ := re.searchFrom(subject, charToByte(subject, int(pos)))
+		return object.Bool(md != nil)
+	}
+	return object.Bool(re.matcher().MatchString(subject))
+}
+
+// getPat is string.c v3_4_0 get_pat, the pattern coercion String#match and
+// String#match? share:
+//
+//	case T_REGEXP: return pat;
+//	case T_STRING: break;
+//	default: val = rb_check_string_type(pat);
+//	         if (NIL_P(val)) Check_Type(pat, T_REGEXP);
+//	         pat = val;
+//	return rb_reg_regcomp(pat);
+//
+// A Regexp comes back UNCHANGED — as the object, not as its compiled form — so
+// String#match's rb_funcallv reaches a subclass's overridden #match. Anything
+// that is not a String is offered #to_str first, and only then reported as
+// "wrong argument type X (expected Regexp)".
+func (vm *VM) getPat(v object.Value) object.Value {
+	if _, ok := v.(*Regexp); ok {
+		return v
+	}
+	if _, ok := v.(*object.String); !ok {
+		if vm.respondsToDynamic(v, "to_str") {
+			if str, isStr := vm.send(v, "to_str", nil, nil).(*object.String); isStr {
+				v = str
+			}
+		}
+		if _, ok := v.(*object.String); !ok {
+			raise("TypeError", "wrong argument type %s (expected Regexp)", classNameOf(v))
+		}
+	}
+	return strMatchRegexp(v)
+}
+
 func strMatchRegexp(v object.Value) *Regexp {
 	switch x := v.(type) {
 	case *Regexp:
@@ -2547,30 +2607,8 @@ func (vm *VM) installRegexp() {
 	vm.cRegexp.define("inspect", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return object.NewString(reArg(self).Inspect())
 	})
-	vm.cRegexp.define("match?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		if _, isNil := args[0].(object.Nil); isNil {
-			return object.False
-		}
-		re := reArg(self)
-		vm.checkSubjectEncoding(re, args[0])
-		subject := strArg(args[0])
-		// match?(str, pos): probe from character offset pos, without touching $~
-		// (the predicate form has no match-data side effect).
-		if len(args) >= 2 {
-			nChars := int64(utf8.RuneCountInString(subject))
-			pos := intArg(args[1])
-			if pos < 0 {
-				pos += nChars
-			}
-			if pos < 0 || pos > nChars {
-				return object.False
-			}
-			// Search from the cursor with the WHOLE subject visible, as
-			// rb_reg_search does — /\A/.match?("hello", 2) is false, not true.
-			md, _ := re.searchFrom(subject, charToByte(subject, int(pos)))
-			return object.Bool(md != nil)
-		}
-		return object.Bool(re.matcher().MatchString(subject))
+	vm.cRegexp.define("match?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		return vm.regexpMatchP(reArg(self), args)
 	})
 	vm.cRegexp.define("match", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		re := reArg(self)
