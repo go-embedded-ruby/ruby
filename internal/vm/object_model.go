@@ -414,16 +414,49 @@ func (vm *VM) objSingleton(v object.Value) *RClass {
 	return vm.extSingletons[v]
 }
 
+// specialSingletonClass is MRI's special_singleton_class_of (class.c v3_4_0:2199):
+// nil, true and false are immediates with no room for a per-object singleton, so
+// Ruby answers their CLASS instead — NilClass, TrueClass, FalseClass. It is not a
+// stand-in but the real thing: singleton_class_of returns it directly for T_NIL /
+// T_TRUE / T_FALSE (class.c v3_4_0:2237-2242), which is why `def nil.foo` and
+// `class << nil` define an instance method on NilClass, `nil.singleton_class`
+// equal?s NilClass, and `nil.extend(M)` includes M into NilClass.
+//
+// The three classes are ordinary (non-singleton) classes, so #singleton_class?
+// is false for them and their #superclass is Object — both of which MRI reports
+// and neither of which a fabricated singleton class would.
+//
+// nil is returned for every other value, including Integer/Float/Symbol, which
+// raise TypeError ("can't define singleton") rather than answering a class.
+func (vm *VM) specialSingletonClass(v object.Value) *RClass {
+	switch t := v.(type) {
+	case object.Nil:
+		return vm.cNilClass
+	case object.Bool:
+		if bool(t) {
+			return vm.cTrueClass
+		}
+		return vm.cFalseClass
+	}
+	return nil
+}
+
 // ensureSingleton returns v's singleton class, creating it on first use. It
 // handles *RObject (inline field) and other reference values (side table). A
-// second bool reports success; immediate values (Integer/Symbol/true/false/nil)
-// and classes/modules (which use a metaclass instead) are not eligible here.
+// second bool reports success; immediate values (Integer/Symbol) and
+// classes/modules (which use a metaclass instead) are not eligible here.
+// nil/true/false answer their special singleton class (see
+// specialSingletonClass), so a method defined "on" them lands on
+// NilClass/TrueClass/FalseClass exactly as in MRI.
 func (vm *VM) ensureSingleton(v object.Value) (*RClass, bool) {
 	switch t := v.(type) {
 	case *RObject:
 		return vm.singletonClass(t), true
 	case *RClass:
 		return nil, false // classes use metaClass()
+	}
+	if sc := vm.specialSingletonClass(v); sc != nil {
+		return sc, true
 	}
 	if !hasIdentitySingleton(v) {
 		return nil, false
@@ -465,6 +498,17 @@ func (c *RClass) metaClass() *RClass {
 		// The metaclass superclass is the superclass's metaclass, so a class-method
 		// `super` (def self.foo / class << self) walks to the inherited class method:
 		// #<Class:Child> -> #<Class:Base> -> ... This mirrors MRI's metaclass chain.
+		//
+		// The chain has to END somewhere, and MRI ends it at Class:
+		//
+		//     RCLASS_SET_SUPER(metaclass, super ? ENSURE_EIGENCLASS(super) : rb_cClass)
+		//                                              (make_metaclass, class.c v3_4_0:786)
+		//
+		// The only class with no superclass is BasicObject, so that last link is
+		// wired once at boot by closeMetaclassChain rather than here, where cClass
+		// is not reachable. Without it `#<Class:BasicObject>.superclass` is nil,
+		// every singleton class of a class fails `.ancestors.include?(Class)`, and
+		// the instance and class methods of Class are invisible from one.
 		if c.super != nil {
 			mc.super = c.super.metaClass()
 		}
