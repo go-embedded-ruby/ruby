@@ -5,9 +5,19 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs--material-9B1C2E)](https://go-embedded-ruby.github.io/docs/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
-[![Phase](https://img.shields.io/badge/phases-6%20%2B%208%20in%20progress-1a7f37)](https://go-embedded-ruby.github.io/docs/roadmap/)
+[![ruby/spec](https://img.shields.io/badge/ruby%2Fspec-22%2C488%20examples%20passing-1a7f37)](#runtime-conformance--rubyspec)
 
-**A pure-Go implementation of Ruby — one static binary, full dynamism, zero cgo.**
+**A Ruby interpreter written in pure Go, with cgo disabled** — so you can embed it
+in a Go program with `import "github.com/go-embedded-ruby/ruby"`, or ship it as a
+single static binary that cross-compiles wherever Go does, with no C toolchain and
+no libruby.
+
+**How complete is it?** It runs **22,488** of ruby/spec's `language/` + `core/`
+examples ([what that counts](#runtime-conformance--rubyspec)) — a large and growing
+subset of the language, and **not** a drop-in replacement for CRuby. Read
+[What does not work yet](#what-does-not-work-yet) before you depend on it; the
+embedding API is currently **one function**, and the browser WebAssembly target
+does not build today.
 
 This repository is the interpreter: a compiler that lowers Ruby to bytecode, and
 a stack VM (mruby/YARV lineage) that runs it. The Ruby **front-end** (lexer,
@@ -107,81 +117,62 @@ GUI toolkit), `require "tui"` (terminal-cell toolkit) and `require "mvvm"`
 
 ## Status
 
-### Runtime conformance — ruby/spec (measured 2026-09-23)
+### Runtime conformance — ruby/spec
 
-Since July the work has been **runtime** conformance: making the VM behave as
-Ruby does, measured against [ruby/spec](https://github.com/ruby/spec)'s
-`language/` and `core/` suites. Measured with
-`scripts/conformance/rubyspec/run.sh` on darwin/arm64 against the pinned corpus
-at `SPEC_SHA=87b1631992bd00cf0c4934474766d54dad088191`, on `d498ddc` — the tip
-of `main` at the time, including
-[#629](https://github.com/go-embedded-ruby/ruby/pull/629). `main` has since
-advanced to `2200e17`, whose only change is the `FLOOR` file
-([#638](https://github.com/go-embedded-ruby/ruby/pull/638)); the interpreter
-built from it is byte-identical, so these figures stand unchanged.
+The honest summary: **rbgo runs a large and growing subset of Ruby, and is not a
+drop-in replacement for CRuby.** The number below is the best evidence available,
+and it is worth understanding exactly what it counts.
+
+**What is measured.** The `language/` and `core/` suites of
+[ruby/spec](https://github.com/ruby/spec) — the executable specification of the
+Ruby language and its core library — run through rbgo by
+`scripts/conformance/rubyspec/run.sh`. Each spec file runs in its own `rbgo`
+process under a minimal MSpec-compatible shim that ships with this repo.
 
 | | |
 | --- | --- |
-| **passing examples** | **21,982** — four consecutive runs, all four identical |
-| fail / error | 1,321 / 740 |
-| skipped | 473 |
-| pass rate of examples that ran | **91.4 %** (21,983 of 24,044) |
-| spec files | 2,191 of 2,206 produce a result; 15 produce none |
-| **CI floor** (`FLOOR`) | **21,970** |
+| **passing examples** | **22,488** |
+| failing / erroring examples | 1,090 / 538 |
+| skipped (a matcher our shim does not implement) | 477 |
+| examples that actually ran (pass + fail + error) | 24,116 |
+| share of those that passed | **93.3 %** |
+| spec files | 2,196 of 2,206 produced a result; 10 produced none |
+| **floor enforced by CI** (`FLOOR`) | **22,475** |
 
-(The ratchet reports 21,982; a separate sweep capturing `fail`/`error`/`skip` as
-well read 21,983. The one-example difference is the `#615` noise below.)
+Measured 2026-09-26 on `3e8e3cc`, darwin/arm64, against the corpus pinned at
+`SPEC_SHA=87b1631992bd00cf0c4934474766d54dad088191`. Three independent runs — two
+through `run.sh` (at different per-file timeouts and different parallelism) and
+one through a separate sweep that tallies all four counters — each reported
+exactly **22,488**, with the same 10 files producing no result.
 
-**The floor is not the score, and the two are close on purpose.** `FLOOR` says
-*"no run may come in below this"* — a shrink-only ratchet, raised in its own PR
-after a wave lands. The measured total sits **above** it, but only just: 21,982
-against 21,970 is a margin of **12**. That is deliberate. The floor is set a
-handful of examples below the **lowest observed run** — enough to absorb the
-run-to-run jitter of [#615](https://github.com/go-embedded-ruby/ruby/issues/615),
-and no more, because a floor slack enough to hide the loss of a whole spec file
-would defeat the thing the ratchet exists to catch. So a small gap is the ratchet
-working; a large one would mean it had gone slack.
+**What this number is *not*.** It is *not* "rbgo implements 93 % of Ruby", and
+there is no honest way to turn it into a percentage of the language:
 
-They remain different claims. The floor is the **guarantee CI enforces**; the
-measured total is **what rbgo does** on a given run. Quoting the floor as the
-conformance figure understates rbgo by the margin; quoting the measured total as
-a guarantee overstates it by the same amount.
+- **Only `language/` and `core/` are swept.** ruby/spec's `library/`, `optional/`
+  and `security/` trees are **not run at all**. Most of what people mean by "the
+  standard library" is outside this measurement. (rbgo does bind a large set of
+  stdlib and gem replacements — see *Supported today* — but their conformance is
+  not what this figure reports.)
+- **The shim is not MSpec.** A few matchers (`be_computed_by`, `ruby_exe`, some
+  `argf`/IO helpers) are stubbed, so the examples that need them are counted as
+  **skipped**, not passed. That makes the total a conservative lower bound.
+- **Skips are outside the ratio.** The 93.3 % divides passes by the examples that
+  ran; the 477 skips and the 10 unreadable files are in neither column.
+- **An "example" is not a feature.** Examples are not weighted, so a heavily
+  specified method contributes far more than a rarely used one.
 
-**Run-to-run spread is possible and is a known bug, not noise in the method.**
-`core/module/autoload_spec.rb` crashes intermittently while popping a frame
-([#615](https://github.com/go-embedded-ruby/ruby/issues/615)), and the whole
-file's examples are lost when it does — an earlier set of four runs on `68cb53a`
-spread 21,845–21,903 for exactly that reason. The four runs above happened not to
-hit it; the issue is open, so run it more than once and take the *low* run as the
-guaranteed figure.
+**The floor and the score are different claims.** `FLOOR` is a shrink-only
+ratchet: CI fails if a run comes in below it, so conformance is tracked and can
+only go up. The floor is therefore the level **CI guarantees**; the measured total
+is **what rbgo did on a given run**. Quoting the floor understates rbgo by the
+margin between them; quoting the measured total as a guarantee overstates it by
+the same amount.
 
-> **Not every gain is VM conformance.** Two of the recent jumps came from fixing
-> the **measurement**, not the interpreter, and it is worth keeping them apart:
->
-> - **The mspec shim** ([#624](https://github.com/go-embedded-ruby/ruby/pull/624),
->   refs [#621](https://github.com/go-embedded-ruby/ruby/issues/621)) ran each
->   example under `instance_eval`, so a helper defined in an outer `describe` was
->   unreachable from a nested one. `core/string/valid_encoding/utf_8_spec.rb`
->   scored **0 of 28 — and 0 of 28 under MRI 4.0.5 too**, through the same shim.
->   Fixing the shim moved the corpus 20,905 → 20,936, of which **28 are
->   attributable**.
-> - **The parser upgrade to v0.2.0**
->   ([#625](https://github.com/go-embedded-ruby/ruby/pull/625)) made **13
->   `language/*_spec.rb` files parseable that had never parsed at all**. They had
->   been contributing zero to *both* columns — not failing, invisible. `language/`
->   went 1,443 → 1,776 passing (+333), while `fail+error` rose 283 → 436, because
->   those files brought their own failures with them.
->
-> Both are gains in what the measurement can **see**, not in what the VM can
-> **do**. The rest of the climb — the floor went from **6,000** when the ratchet
-> landed on 2026-08-03 ([#263](https://github.com/go-embedded-ruby/ruby/pull/263))
-> to **21,970** today, across 27 conformance waves — is the VM.
+**Reproduce it yourself:**
 
-There is no honest denominator for "percent of Ruby". 91.1 % is the share of the
-examples *this shim actually ran*; the shim is not mspec, it stubs some matchers
-(so their examples are **skipped**, not passed), and 473 skips and 15 unreadable
-files sit outside the ratio entirely.
-
+```sh
+scripts/conformance/rubyspec/run.sh     # clones the pinned corpus on first run
+```
 ### Front-end conformance & performance (campaign final, 2026-06-27)
 
 A major conformance + performance campaign measured rbgo's pure-Go **front-end
@@ -593,177 +584,220 @@ throughput tracks the underlying driver rather than the interpreter:
   `eval`/`require` calls (if any) would raise in the closed binary, since there
   is no front-end left to compile source at runtime.
 
-- **WebAssembly (`GOOS=js GOARCH=wasm`) is a supported target.** rbgo runs in the
-  browser two ways: the **playground** ships the full interpreter (front-end +
-  VM + numeric/image stack) as a wasm module that evaluates arbitrary Ruby in the
-  page (see [Run in the browser](#run-in-the-browser--webassembly)); and
-  **`rbgo build --closed --target wasm app.rb`** cross-compiles a closed-world
-  wasm module that runs *that one program* (no front-end linked) and can drive
-  the page's DOM/Canvas through the built-in `JS` module
-  (`JS.document`/`JS.log`/`JS::Ref#call`/`JS.raf`).
+- **WebAssembly:** the **WASI** target (`GOOS=wasip1 GOARCH=wasm`) builds and runs,
+  and is gated in CI. The **browser** target (`GOOS=js GOARCH=wasm`) does **not**
+  currently build — the playground under `cmd/wasm`, the `JS` bridge and
+  `rbgo build --closed --target wasm` are all blocked behind one compile error in
+  `internal/vm`. See [WebAssembly](#webassembly) and *What does not work yet*.
 
-### Not implemented — the limitations worth naming
+### What does not work yet
 
-Measured on `main` (`d498ddc`), darwin/arm64, against MRI 4.0.5 on the same host.
+Every entry below was re-checked on `3e8e3cc` (darwin/arm64, 2026-09-26) by running
+it against **MRI 4.0.5 on the same host**. Entries that no longer reproduced have
+been removed.
 
-**rbgo carries no line map, so `__LINE__` is always `0`.** This is the single
-widest gap, because three separate features are built on source positions and all
-three are lost:
+**The browser WebAssembly target does not currently build.** `GOOS=js GOARCH=wasm`
+fails to compile, because `internal/vm/errno.go` references three `syscall`
+constants that the `js` port does not define:
 
-```ruby
-# probe.rb, line 1 is the puts
-puts __LINE__                      # rbgo: 0            MRI: 1
-def f; warn "msg", uplevel: 0; end
-f                                  # rbgo: "warning: msg"
-                                   # MRI:  "probe.rb:2: warning: msg"
-begin; raise "boom"; rescue => e; puts e.backtrace.first; end
-                                   # rbgo: "probe.rb:0:in '<main>'"
-                                   # MRI:  "probe.rb:4:in '<main>'"
-p Object.const_source_location(:Comparable)   # rbgo: nil   MRI: []
+```console
+$ CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./cmd/rbgo
+# github.com/go-embedded-ruby/ruby/internal/vm
+internal/vm/errno.go:101:35: undefined: syscall.ENOTRECOVERABLE
+internal/vm/errno.go:108:35: undefined: syscall.EOWNERDEAD
+internal/vm/errno.go:120:35: undefined: syscall.ETXTBSY
 ```
 
-Every backtrace frame reports line `0`; `warn(uplevel:)` emits the message with
-no `file:line:` prefix; `const_source_location` answers `nil`. Nothing here is a
-partial implementation to be tuned — the information is not recorded.
+This affects the playground (`./cmd/wasm`) and the closed-world browser build
+(`rbgo build --closed --target wasm`) alike, since both link `internal/vm`. It is a
+recent regression — the same build succeeded at `68cb53a`, the commit before the
+Errno subsystem landed — and no CI lane catches it, because only the **`wasip1`**
+wasm target is gated. **`GOOS=wasip1 GOARCH=wasm` does build and run** (see
+*Platforms*), so server-side/WASI WebAssembly is unaffected.
 
-Otherwise, and each with an open issue that states it precisely:
+**`$stderr` is not a separate stream.** The VM is constructed with a single output
+writer, and `$stderr`/`STDERR` are wired to it, so anything a Ruby program sends to
+`$stderr` — including `warn` — arrives on **stdout**:
 
-| | |
+```console
+$ rbgo -e '$stdout.print "O"; $stderr.print "E"' >out.txt 2>err.txt
+$ cat out.txt; echo "[err: $(cat err.txt)]"
+OE[err: ]
+```
+
+Uncaught exceptions are the exception to this: the CLI prints those to real stderr
+itself. Redirecting `2>` to separate diagnostics from program output therefore does
+not work as it does under MRI.
+
+Otherwise:
+
+| | how it differs from MRI 4.0.5 |
 | --- | --- |
-| `Errno` carries all **158** of MRI's constants, but **32** of them report errno `0` on darwin where MRI has a real number (`EAUTH` 0 vs 80, `EBADRPC` 0 vs 72, `EDEVERR` 0 vs 83, …). Go's portable `syscall` package does not expose the platform-only names. Nothing else about the table disagrees: all 158 names are present under both, and the other 126 numbers match exactly | [#633](https://github.com/go-embedded-ruby/ruby/issues/633) |
-| `Numeric#to_int` is **not defined**, so `Complex(2.9, 0).to_int` raises `NoMethodError` where MRI returns `2` | [#631](https://github.com/go-embedded-ruby/ruby/issues/631) |
-| `File::Stat#==` answers identity: `a.==(b)` is `true` (Comparable) while `a == b` is `false` | [#632](https://github.com/go-embedded-ruby/ruby/issues/632) |
-| `File#stat` cannot answer for a file unlinked while open — rbgo's streams are buffered by path and hold no descriptor | [#635](https://github.com/go-embedded-ruby/ruby/issues/635) |
-| **Windows:** no text-mode newline translation — CRLF reaches the reader as written | [#610](https://github.com/go-embedded-ruby/ruby/issues/610) |
-| **Windows:** `File::Stat#atime`/`#ctime` fall back to mtime; `#birthtime` raises | [#635](https://github.com/go-embedded-ruby/ruby/issues/635) |
-| **Windows:** `File.realpath` does not expand 8.3 short names (`RUNNER~1`) | [#636](https://github.com/go-embedded-ruby/ruby/issues/636) |
-| `core/module/autoload_spec.rb` crashes intermittently popping a frame, costing its whole file from the measurement | [#615](https://github.com/go-embedded-ruby/ruby/issues/615) |
-| **`Process.fork` does not exist** — Go's runtime cannot be forked safely | — |
-| `BEGIN { }` / `END { }` blocks do not parse (the one construct of 41 probed where MRI accepts and the front-end refuses) | front-end |
+| `RUBY_VERSION` | rbgo reports `"3.4.1"`; the differential oracle it is developed against is MRI 4.0.5 |
+| `Numeric#to_int` | not defined — `Complex(2.9, 0).to_int` raises `NoMethodError`; MRI returns `2` |
+| `File::Stat#==` | `a == b` is `false` for two stats of the same file (MRI: `true`); `a.==(b)` answers `true` |
+| `File#stat` on a file unlinked while open | raises `Errno::ENOENT`; MRI answers from the open descriptor. rbgo's streams are buffered by path and hold no descriptor |
+| `Errno` | all **158** of MRI's constant names are present, but **32** report errno `0` where MRI has a real number (`EAUTH`, `EBADRPC`, `EDEVERR`, …). Measured by set difference on darwin: 81 names are zero-valued under rbgo, 49 under MRI, and every MRI zero is also zero under rbgo. Go's portable `syscall` package does not expose the platform-only names |
+| magic encoding comments | `# encoding: ascii-8bit` is not honoured — a literal still reports `UTF-8`, where MRI reports `ASCII-8BIT` |
+| `pp` | neither `Kernel#pp` nor `require "pp"` exists (`require "prettyprint"` does work) |
+| `Process.fork` | does not exist — Go's runtime cannot be forked safely |
+| `BEGIN { }` / `END { }` | do not parse (`parse error: unexpected "{" after statement`). Everything else the front-end was known to refuse now parses — see [go-ruby-parser](https://github.com/go-ruby-parser/parser) |
+| `Thread#backtrace` for another thread | raises `NotImplementedError`; rbgo keeps one frame stack per VM, not per thread |
 
-Two further entries are **harness**, not interpreter, and are listed here only so
-that nobody reads them as VM gaps: the conformance shim's `SPEC_TMP_BASE` is
-`/tmp`, a symlink on darwin, which fails 11 `realpath`/`realdirpath` examples on a
-path that is correct ([#630](https://github.com/go-embedded-ruby/ruby/issues/630));
-**MRI 4.0.5 fails them the same way through the same shim**. And the shim's
-`instance_eval` rebinding ([#621](https://github.com/go-embedded-ruby/ruby/issues/621))
-is largely fixed but not closed.
+## Platforms
 
-**100% coverage** is enforced in CI on the two **POSIX** lanes — ubuntu and
-macOS. The full `-race` suite also runs on **windows**, but the coverage gate is
-not applied there: a few POSIX-only paths (opening `/dev/null` as a character
-device) are unreachable, so its measured coverage is structurally below 100 %.
-Per-PR architecture cover is the two **native** lanes, `amd64` and `arm64`, which
-run `go test ./...` (not the coverage gate); the four exotic 64-bit targets
-(`riscv64`/`loong64`/`ppc64le`/`s390x`) are validated **off** the per-PR path —
-nightly under QEMU and on scheduled real hardware. A `wasip1/wasm` lane builds and
-runs the interpreter under wazero. `.github/workflows/ci.yml` is the authority.
-Phase 8 (conformance and
-representation/perf tuning) is well advanced. The 2026-06 campaign brought the
-**front-end** to ~100 % parse / 99.82 % parse+compile on real-world Ruby; since
-July the work has been **runtime** conformance, and the ruby/spec ratchet has
-gone from a floor of 6,000 to 21,970 across 27 waves, measuring **21,982**
-passing examples today. On the performance side small-integer interning and capture-tracked
-frame-environment recycling have cut call-path allocations (a small-int loop from
-~245k allocations to 1; recursion's call allocations halved, ~14% faster), with
-the 6-runtime benchmark suite ([BENCHMARKS.md](BENCHMARKS.md)) tracking rbgo vs
-MRI / YJIT / JRuby / TruffleRuby. The road from "parses + compiles" to "runs whole
-applications" — the runtime stdlib + C-extension surface — is now well underway:
-**the real `puppet apply` CLI runs end-to-end** (see *Running Puppet* above),
-converging `notify`, `file` and `exec` resources and exiting cleanly, with the
-broader resource providers (`package` / `service`) the active next milestone.
-See the
-[roadmap](https://go-embedded-ruby.github.io/docs/roadmap/).
+`.github/workflows/ci.yml` is the authority; this is what it actually runs.
+
+**On every pull request:**
+
+| Lane | What runs |
+| --- | --- |
+| **linux, macOS, windows** | the full suite under `-race`. The **100 % coverage gate** is enforced on linux and macOS only — a few POSIX-only paths (opening `/dev/null` as a character device) are unreachable on windows, so its coverage is structurally below 100 % |
+| **amd64, arm64** | `go test ./...` on native runners |
+| **wasip1/wasm** | built with `CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm` and **run** under [wazero](https://wazero.io), a pure-Go runtime — verified here: `wazero run rbgo.wasm -e 'puts (1..10).sum'` prints `55` |
+
+**Not on the pull-request path** — validated on a nightly schedule instead:
+`riscv64`, `loong64`, `ppc64le` and `s390x`, under QEMU
+(`arch-qemu-nightly.yml`) and natively on real hardware (`native-arch.yml`: the
+GCC Compile Farm, plus an IBM LinuxONE s390x host).
+
+**`GOOS=js GOARCH=wasm` (the browser) has no CI lane and does not currently
+build** — see *What does not work yet*.
+
+## Try it in one command
+
+No checkout, no toolchain beyond Go itself:
+
+```console
+$ go run github.com/go-embedded-ruby/ruby/cmd/rbgo@latest -e 'puts "hello from rbgo"; puts (1..10).sum'
+hello from rbgo
+55
+```
+
+(The first run compiles the interpreter, which takes a while and produces a large
+binary. There are no version tags yet, so `@latest` resolves to the tip of `main`.)
 
 ## Quick start
 
-Requires **Go 1.26.4+**.
+Requires **Go 1.26.4+**. From a checkout:
 
-```bash
-# run a one-liner
-go run ./cmd/rbgo run -e 'puts 1 + 2'        # => 3
+```console
+$ go build -o rbgo ./cmd/rbgo          # CGO_ENABLED=0 is the default here
+$ ./rbgo -e 'puts 1 + 2'
+3
+```
 
-# run a file
-cat > fib.rb <<'RB'
+Run a file:
+
+```console
+$ cat > fib.rb <<'RB'
 def fib(n)
-  if n < 2
-    n
-  else
-    fib(n - 1) + fib(n - 2)
-  end
+  n < 2 ? n : fib(n - 1) + fib(n - 2)
 end
 puts fib(20)
 RB
-go run ./cmd/rbgo run fib.rb                  # => 6765
-
-# build the CLI
-go build -o rbgo ./cmd/rbgo
-./rbgo fib.rb
-
-# AOT-compile a program's methods to native code and link a specialised binary
-./rbgo build -o fib fib.rb                    # fib (the method) becomes native int64
-./fib fib.rb                                  # => 6765
-
-# closed-world: bake the program in as bytecode and drop the front-end
-./rbgo build --closed -o fib fib.rb           # no lexer/parser/compiler linked
-./fib                                          # => 6765  (runs with no source file)
-
-# WebAssembly: cross-compile a closed-world program to a browser wasm module
-./rbgo build --closed --target wasm -o app.wasm app.rb   # GOOS=js GOARCH=wasm
+$ ./rbgo fib.rb
+6765
 ```
 
-## Run in the browser — WebAssembly
+`rbgo build` compiles a program's lowerable methods to native Go and links a
+specialised binary. **It must be run from a checkout of this repository**, because
+it shells out to `go build` against this module — run elsewhere it fails with
+`stat .../cmd/rbgo: directory not found`:
 
-**`GOOS=js GOARCH=wasm` is a first-class target.** Everything is pure Go with cgo
-disabled, so the interpreter, the numeric stack and the cgo-free image pipeline
-compile to a single wasm module and run **entirely in the browser** — there is no
-server-side code. There are two ways to ship Ruby to the browser:
-
-> **js/wasm excludes the network/OS gem backends.** A browser has no TCP sockets
-> and no cgo, so the gems whose backends open real sockets or use OS facilities
-> are compiled out of the `GOOS=js GOARCH=wasm` build (they carry a
-> `//go:build !(js && wasm)` tag, which also keeps ~90 MB of driver code out of
-> the module). On wasm, `require` of any of them raises a clean Ruby `LoadError`
-> (`cannot load such file -- kafka (not available in the wasm build)`):
-> **`grpc`**, **`nats`**, **`kafka`**, **`mysql2`/`mysql`**, **`mongo`/`bson`**,
-> **`arrow`**, **`parquet`**, **`openstack`**, **`sidekiq`**, **`resque`** (the
-> last two are the `redis`-backed job queues). A second tier —
-> **`sqlite3`**, **`sequel`**, **`activerecord`**, **`bolt`**, **`bleve`**,
-> **`etcd`** — still `require`s successfully but raises when a connection/handle
-> is constructed (e.g. `SQLite3::Database.new`), because their drivers do not
-> build for wasm. The **native build is unchanged**: every gem is present, loads
-> and conforms exactly as before. Plain Ruby, the numeric/image stack and the
-> `JS` DOM/Canvas bridge are fully available in the browser.
-
-**1. The playground — full interpreter in wasm.** A self-contained page (Ruby
-REPL + a load→`gaussian_blur`/`sobel`/`canny`→render image demo) lives in
-[`web/`](web). It builds `cmd/wasm`, which links the whole front-end (lexer,
-parser, compiler) and VM, so the page can evaluate *arbitrary* Ruby typed by the
-user:
-
-```bash
-./web/build.sh serve        # build web/rbgo.wasm and serve http://localhost:8080
+```console
+$ ./rbgo build -o fib fib.rb
+rbgo build: fib (1 method(s) AOT-compiled: Object#fib)
+$ ./fib fib.rb
+6765
 ```
 
-The module publishes `rbgoEval(src)` and `rbgoImage(src, bytes)` on the JS global
-object; see [web/README.md](web/README.md) for the bridge.
+Add `--closed` to bake the program in as bytecode and drop the front-end entirely,
+giving a binary that needs no source file:
 
-**2. `rbgo build --target wasm` — a closed-world wasm app.** To ship *one* Ruby
-program (not a REPL), AOT-bake it into a closed-world wasm module that drops the
-front-end:
-
-```bash
-./rbgo build --closed --target wasm -o app.wasm app.rb
+```console
+$ ./rbgo build --closed -o fib fib.rb
+rbgo build: fib (1 method(s) AOT-compiled: Object#fib)
+rbgo build: closed-world — front-end dropped (no lexer/parser/compiler linked)
+rbgo build: binary size 172.5 MiB
+$ ./fib
+6765
 ```
 
-`--target wasm` requires `--closed` (the wasm entry runs the embedded program,
-then parks the Go runtime with `select{}` so JS callbacks keep firing). The
-program can reach the page through the built-in **`JS` module** — `JS.global`,
-`JS.window`, `JS.document`, `JS.log`, `JS::Ref#get`/`set`/`call`/`[]`/`on` for
-DOM and Canvas, and `JS.raf { |t| … }` for an animation loop — so a closed-world
-wasm app can render and handle events with no JavaScript of its own. Serve the
-emitted `app.wasm` next to Go's `wasm_exec.js` loader.
+## Embedding in a Go program
 
+The public API is deliberately tiny — **one function**:
+
+```go
+package ruby // github.com/go-embedded-ruby/ruby
+
+func Run(src string, out io.Writer) error
+```
+
+`Run` parses, compiles and executes `src` on a **fresh VM**, writing the program's
+output to `out`. Everything else in this repository is under `internal/`, so this
+is the whole embedding surface today.
+
+```go
+package main
+
+import (
+	"bytes"
+	"fmt"
+
+	"github.com/go-embedded-ruby/ruby"
+)
+
+func main() {
+	var out bytes.Buffer
+	if err := ruby.Run(`puts "hello from Ruby"`, &out); err != nil {
+		panic(err)
+	}
+	fmt.Printf("%q\n", out.String()) // "hello from Ruby\n"
+}
+```
+
+The contract, as measured rather than intended:
+
+- **One writer, both streams.** There is no separate stderr. `$stdout`, `$stderr`
+  and `warn` all land in `out`: running
+  `$stdout.print "O"; $stderr.print "E"; warn "W"` fills the buffer with `"OEW\n"`.
+  If you need the two apart, you cannot get it through this API.
+- **A Ruby exception becomes a Go `error`.** Running `raise ArgumentError, "bad"`
+  returns an error whose message is `ArgumentError: bad`, and writes nothing to
+  `out`. A syntax error comes back the same way, with a line number:
+  `parse error at line 1: ...`.
+- **Every call is a fresh VM.** A global set in one `Run` is gone in the next, and
+  nothing is shared between calls. There is no exported way to hold a VM open,
+  pre-load code into it, call a Ruby method from Go, or pass Go values in.
+- **`require_relative` resolves against the process working directory**, not
+  against a script, because `Run` has no file to anchor to. From a different
+  working directory the same program fails with
+  `LoadError: cannot load such file -- /tmp/lib`.
+
+The VM stays alive after `Run` returns as long as something still references it —
+which is what lets an event-driven embedded program keep running.
+
+## WebAssembly
+
+**WASI (`GOOS=wasip1 GOARCH=wasm`) works and is gated in CI.** The interpreter
+builds with cgo disabled and runs under any WASI runtime:
+
+```console
+$ CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm go build -o rbgo.wasm ./cmd/rbgo
+$ wazero run rbgo.wasm -e 'puts (1..10).sum'
+55
+```
+
+**The browser target (`GOOS=js GOARCH=wasm`) does not currently build** — see
+*What does not work yet*. The playground under `./cmd/wasm`, the `JS` bridge and
+`rbgo build --closed --target wasm` are all blocked behind that compile error, so
+treat the browser story as unavailable until it is fixed.
+
+On any wasm target the gem backends that need real sockets or OS facilities are
+compiled out (`grpc`, `nats`, `kafka`, `mysql2`, `mongo`/`bson`, `arrow`,
+`parquet`, `openstack`, `sidekiq`, `resque`, …); `require` of one raises a clean
+Ruby `LoadError` rather than failing to link.
 ## Layout
 
 ```
@@ -805,13 +839,10 @@ oracle below: the ratchet is the absolute floor, the oracle catches divergences
 the specs don't cover.
 
 **The floor and the measurement are two different numbers.** `FLOOR` is
-**21,970** — the level CI refuses to fall below, raised there in
-[#638](https://github.com/go-embedded-ruby/ruby/pull/638) after wave 27. A run
-measures **21,982** passing, four consecutive runs all identical: a margin of 12,
-which is the size it is meant to be (see *Runtime conformance* for why). See
-*Runtime conformance* above for the full breakdown, the run-to-run spread
-([#615](https://github.com/go-embedded-ruby/ruby/issues/615)) and what the ratio
-does and does not mean.
+**22,475** — the level CI refuses to fall below. A run measured here on `3e8e3cc`
+reports **22,488** passing. The floor is the guarantee; the measured total is what
+one run did. See *Runtime conformance* above for the full breakdown, the method, and
+what the ratio does and does not mean.
 
 ```bash
 scripts/conformance/rubyspec/run.sh          # measure vs the floor
@@ -858,9 +889,9 @@ On top of the front-end sweeps, a **ruby/spec ratchet** runs the `language/` and
 specification of the language — through `rbgo` under a minimal MSpec-compatible
 shim, and gates CI on a **shrink-only floor** of passing examples
 ([`scripts/conformance/rubyspec/`](scripts/conformance/rubyspec/), floor in
-`FLOOR`, currently **21,970**). The floor can only be raised, so measured
+`FLOOR`, currently **22,475**). The floor can only be raised, so measured
 language conformance moves in one direction — but the floor is a *gate*, not the
-result: the measured total is **21,982**. Run it with
+result: the measured total is **22,488**. Run it with
 `scripts/conformance/rubyspec/run.sh`, and see *Runtime conformance* under
 *Status* for the full breakdown.
 
