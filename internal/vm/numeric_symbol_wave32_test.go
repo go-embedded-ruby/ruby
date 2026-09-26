@@ -235,3 +235,155 @@ func TestDeadBlockWarnings(t *testing.T) {
 		})
 	}
 }
+
+// TestIntegerCeilFloorPrecision pins numeric.c v3_4_0's rb_int_ceil /
+// rb_int_floor (and rb_float_ceil / rb_float_floor, which route a negative
+// ndigits through them) to their arbitrary-precision arm. rbgo raised 10 to
+// the precision in an int64 and answered 0 on overflow, so 123.ceil(-20) was
+// 0 and 123.0.ceil(-50) came back with a double's worth of noise in it.
+func TestIntegerCeilFloorPrecision(t *testing.T) {
+	tests := []struct{ name, src, want string }{
+		{"int_ceil_beyond_digits", `p 123.ceil(-20)`, "100000000000000000000\n"},
+		{"int_ceil_far_beyond", `p 123.ceil(-50)`,
+			"100000000000000000000000000000000000000000000000000\n"},
+		{"int_ceil_negative", `p((-123).ceil(-20))`, "0\n"},
+		{"int_ceil_within", `p [123.ceil(-3), (-123).ceil(-3), 100.ceil(-3), (-100).ceil(-3)]`,
+			"[1000, 0, 1000, 0]\n"},
+		{"int_floor_beyond_digits", `p((-123).floor(-20))`, "-100000000000000000000\n"},
+		{"int_floor_far_beyond", `p((-123).floor(-50))`,
+			"-100000000000000000000000000000000000000000000000000\n"},
+		{"int_floor_positive", `p 123.floor(-20)`, "0\n"},
+		{"int_floor_within", `p [123.floor(-3), (-123).floor(-3), 100.floor(-3), (-100).floor(-3)]`,
+			"[0, -1000, 0, -1000]\n"},
+		{"int_zero", `p [0.ceil(-20), 0.floor(-20)]`, "[0, 0]\n"},
+		{"bignum_receiver", `p (10 ** 30 + 7).ceil(-20)`, "1000000000100000000000000000000\n"},
+		// The Float forms convert to an Integer first, so they are exact too.
+		{"float_ceil", `p [123.0.ceil(-20), 123.0.ceil(-50)]`,
+			"[100000000000000000000, 100000000000000000000000000000000000000000000000000]\n"},
+		{"float_floor", `p [(-123.0).floor(-20), (-123.0).floor(-50)]`,
+			"[-100000000000000000000, -100000000000000000000000000000000000000000000000000]\n"},
+		{"float_ceil_result_is_integer", `p 123.0.ceil(-20).class`, "Integer\n"},
+		// A positive or zero precision is untouched by this path.
+		{"float_positive_precision", `p 1.234.ceil(2)`, "1.24\n"},
+		{"float_zero_precision", `p [1.2.ceil, 1.2.floor]`, "[2, 1]\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q got=%q want=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFloatSpaceshipEdges pins numeric.c v3_4_0's flo_cmp: NaN makes the
+// comparison unordered on EITHER side, an infinite receiver asks a non-numeric
+// operand for #infinite? before it coerces, and a #coerce that answers
+// something other than a two-element Array is a TypeError (rb_num_coerce_cmp
+// -> do_coerce), not a quiet nil.
+func TestFloatSpaceshipEdges(t *testing.T) {
+	const prelude = `
+nan = 0.0 / 0.0
+inf = 1.0 / 0.0
+class Inf1; def infinite? = 1; end
+class InfM; def infinite? = -1; end
+class Fin
+  def infinite? = nil
+  def coerce(o) = [o, 0.0]
+end
+`
+	tests := []struct{ name, src, want string }{
+		{"nan_vs_float", `p [(nan <=> 1.0), (1.0 <=> nan)]`, "[nil, nil]\n"},
+		{"nan_vs_integer", `p [(nan <=> 42), (42 <=> nan)]`, "[nil, nil]\n"},
+		{"nan_vs_bignum", `p [(nan <=> 2 ** 64), ((2 ** 64) <=> nan)]`, "[nil, nil]\n"},
+		{"infinity_vs_same_direction", `p(inf <=> Inf1.new)`, "0\n"},
+		{"infinity_vs_other_direction", `p(inf <=> InfM.new)`, "1\n"},
+		{"infinity_vs_finite", `p(inf <=> Fin.new)`, "1\n"},
+		{"neg_infinity_vs_positive", `p(-inf <=> Inf1.new)`, "-1\n"},
+		{"neg_infinity_vs_same_direction", `p(-inf <=> InfM.new)`, "0\n"},
+		{"neg_infinity_vs_finite", `p(-inf <=> Fin.new)`, "-1\n"},
+		// rb_cmpint's fallback arm: #infinite? answering something that is not a
+		// number is asked #> 0 and #< 0.
+		{"infinite_reports_non_numeric", `
+class InfObj
+  def infinite?
+    o = Object.new
+    def o.>(x) = true
+    def o.<(x) = false
+    o
+  end
+end
+p(inf <=> InfObj.new)`, "0\n"},
+		{"infinite_reports_zeroish", `
+class InfZero
+  def infinite?
+    o = Object.new
+    def o.>(x) = false
+    def o.<(x) = false
+    o
+  end
+end
+p(inf <=> InfZero.new)`, "1\n"},
+		// A finite receiver still coerces.
+		{"finite_coerces", `p(2.33 <=> Fin.new)`, "1\n"},
+		{"no_coerce_is_nil", `p(1.0 <=> Object.new)`, "nil\n"},
+		{"ordinary_floats", `p [(1.5 <=> 5), (2.45 <=> 2.45), (5.0 <=> 1)]`, "[-1, 0, 1]\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, prelude+tc.src); got != tc.want {
+				t.Errorf("src=%q got=%q want=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+	bad := `
+class Bad
+  def coerce(o) = :incorrect
+end
+`
+	for _, tc := range []struct{ name, src string }{
+		{"float_bad_coerce", bad + `1.0 <=> Bad.new`},
+		{"integer_bad_coerce", bad + `1 <=> Bad.new`},
+		{"bignum_bad_coerce", bad + `(2 ** 70) <=> Bad.new`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			class, msg := evalErr(t, tc.src)
+			if class != "TypeError" || !strings.Contains(msg, "coerce must return [x, y]") {
+				t.Fatalf("got %s: %q", class, msg)
+			}
+		})
+	}
+}
+
+// TestStringUminusDeduplicates pins string.c v3_4_0's str_uminus / rb_fstring:
+// String#-@ answers the ONE canonical frozen String for its content, whatever
+// object it was called on, so two equal strings deduplicate to the same object.
+func TestStringUminusDeduplicates(t *testing.T) {
+	tests := []struct{ name, src, want string }{
+		{"frozen_receiver_is_itself", `
+input = "foo".freeze
+p [(-input).equal?(input), (-input).frozen?]`, "[true, true]\n"},
+		{"unfrozen_gives_a_frozen_copy", `
+input = "bar-unfrozen"
+out = -input
+p [out.frozen?, out.equal?(input), out == "bar-unfrozen"]`, "[true, false, true]\n"},
+		{"equal_unfrozen_strings_share", `
+origin = "this is a string"
+dynamic = %w(this is a string).join(' ')
+p [origin.equal?(dynamic), (-origin).equal?(-dynamic)]`, "[false, true]\n"},
+		{"same_literal_shares", `p [(-"unfrozen string").equal?(-"unfrozen string"), (-"unfrozen string").equal?(-"another unfrozen string")]`,
+			"[true, false]\n"},
+		// The table is keyed by encoding as well as bytes.
+		{"encoding_is_part_of_the_key", `
+a = "dedupe-enc"
+b = "dedupe-enc".dup.force_encoding(Encoding::BINARY)
+p (-a).equal?(-b)`, "false\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eval(t, tc.src); got != tc.want {
+				t.Errorf("src=%q got=%q want=%q", tc.src, got, tc.want)
+			}
+		})
+	}
+}

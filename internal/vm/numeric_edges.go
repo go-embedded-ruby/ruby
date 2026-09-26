@@ -842,3 +842,51 @@ func coerceName(v object.Value) string {
 	}
 	return classNameOf(v)
 }
+
+// intFloorPrecision and intCeilPrecision are numeric.c v3_4_0's rb_int_floor
+// and rb_int_ceil, taken in their arbitrary-precision arm so the result is
+// exact for any digits:
+//
+//	rb_int_floor: f = 10**-ndigits; neg -> num = (-num + f) - 1;
+//	              num = (num / f) * f; neg -> num = -num
+//	rb_int_ceil:  f = 10**-ndigits; neg -> num = -num
+//	                                else -> num = num + (f - 1);
+//	              num = (num / f) * f; neg -> num = -num
+//
+// rbgo computed 10**digits in an int64 and answered 0 when it overflowed, so
+// 123.ceil(-20) was 0 where MRI gives 100000000000000000000, and a Bignum
+// receiver was truncated to int64 first. digits is the ABSOLUTE value of the
+// (negative) precision; the caller has already handled precision >= 0.
+func intFloorPrecision(num *big.Int, digits int64) object.Value {
+	f := pow10Big(digits)
+	n := new(big.Int).Set(num)
+	neg := n.Sign() < 0
+	if neg {
+		n.Neg(n)
+		n.Add(n, f)
+		n.Sub(n, big.NewInt(1))
+	}
+	// n is non-negative here, so a truncating quotient is the floored one.
+	n.Mul(n.Quo(n, f), f)
+	if neg {
+		n.Neg(n)
+	}
+	return object.NormInt(n)
+}
+
+func intCeilPrecision(num *big.Int, digits int64) object.Value {
+	f := pow10Big(digits)
+	n := new(big.Int).Set(num)
+	neg := n.Sign() < 0
+	if neg {
+		n.Neg(n)
+	} else {
+		n.Add(n, f)
+		n.Sub(n, big.NewInt(1))
+	}
+	n.Mul(n.Quo(n, f), f)
+	if neg {
+		n.Neg(n)
+	}
+	return object.NormInt(n)
+}

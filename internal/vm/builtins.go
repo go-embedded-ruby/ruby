@@ -2757,13 +2757,25 @@ func (vm *VM) bootstrap() {
 	// -@ returns a frozen copy (self when already frozen); +@ returns a mutable copy
 	// (self when already mutable), matching MRI's String#-@ / #+@.
 	vm.cString.define("-@", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		// string.c v3_4_0 str_uminus is
+		//     if (!BARE_STRING_P(str) && !rb_obj_frozen_p(str)) str = rb_str_dup(str);
+		//     return rb_fstring(str);
+		// and rb_fstring DEDUPLICATES through the process-wide fstring table, so
+		// -"a string" is the same object however it was built. rbgo only froze a
+		// copy, so core/string/uminus_spec's "returns the same object for equal
+		// unfrozen strings" and "… on the same String literal" both failed.
 		s := self.(*object.String)
-		if s.Frozen {
-			return s
+		if len(ivarTable(s)) != 0 {
+			// BARE_STRING_P is false for a string carrying instance variables, and
+			// such a string is never deduplicated.
+			if s.Frozen {
+				return s
+			}
+			d := s.Dup()
+			d.Frozen = true
+			return d
 		}
-		d := s.Dup()
-		d.Frozen = true
-		return d
+		return internFString(s)
 	})
 	vm.cString.define("+@", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		s := self.(*object.String)
@@ -6128,16 +6140,12 @@ func (vm *VM) bootstrap() {
 	})
 	vm.cInteger.define("floor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// floor(n>=0) is self; floor(n<0) rounds toward negative infinity to the
-		// nearest multiple of 10**(-n).
+		// nearest multiple of 10**(-n) — exactly, see intFloorPrecision.
 		n := intArgOr(args, 0)
 		if n >= 0 {
 			return self
 		}
-		pow, ok := pow10(-n)
-		if !ok {
-			return object.IntValue(0) // 10**(-n) exceeds int64; the result is not int64-representable
-		}
-		return object.IntValue(floorDiv(intOf(self), pow) * pow)
+		return intFloorPrecision(bigVal(self), -n)
 	})
 	vm.cInteger.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		// ceil(n>=0) is self; ceil(n<0) rounds toward positive infinity.
@@ -6145,11 +6153,7 @@ func (vm *VM) bootstrap() {
 		if n >= 0 {
 			return self
 		}
-		pow, ok := pow10(-n)
-		if !ok {
-			return object.IntValue(0)
-		}
-		return object.IntValue(-floorDiv(-intOf(self), pow) * pow)
+		return intCeilPrecision(bigVal(self), -n)
 	})
 	vm.cInteger.define("digits", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		n := intOf(self)
@@ -6240,10 +6244,24 @@ func (vm *VM) bootstrap() {
 	vm.cFloat.define("to_int", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		return floatToInt(floatOf(self))
 	})
+	// numeric.c v3_4_0 rb_float_ceil / rb_float_floor round the double to an
+	// integer FIRST and then apply the integer rule:
+	//     num = dbl2ival(ceil(number));
+	//     if (ndigits < 0) num = rb_int_ceil(num, ndigits);
+	// so a large negative ndigits stays exact. Scaling the double by 10**ndigits
+	// instead gave 123.0.ceil(-50) as 1.00000000000000007629...e+50.
 	vm.cFloat.define("ceil", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if n := intArgOr(args, 0); n < 0 {
+			iv, _ := object.BigOf(floatToInt(math.Ceil(floatOf(self))))
+			return intCeilPrecision(iv, -n)
+		}
 		return floatRound(floatOf(self), args, math.Ceil)
 	})
 	vm.cFloat.define("floor", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+		if n := intArgOr(args, 0); n < 0 {
+			iv, _ := object.BigOf(floatToInt(math.Floor(floatOf(self))))
+			return intFloorPrecision(iv, -n)
+		}
 		return floatRound(floatOf(self), args, math.Floor)
 	})
 	// Float#round is defined (with the half: keyword) in registerNumericEdges,
@@ -11431,16 +11449,62 @@ func spaceshipNumeric(vm *VM, self object.Value, args []object.Value, _ *Proc) o
 	}
 	a, _ := toFloat(self)
 	if b, ok := toFloat(other); ok {
+		// numeric.c v3_4_0 flo_cmp opens with `if (isnan(a)) return Qnil;` and ends
+		// in rb_dbl_cmp, which is `if (isnan(a) || isnan(b)) return Qnil;`. cmpFloat
+		// cannot say "unordered", so the NaN cases have to be caught here — a plain
+		// three-way compare answered 0 for NaN <=> 1.0.
+		if math.IsNaN(a) || math.IsNaN(b) {
+			return object.NilV
+		}
 		return object.IntValue(int64(cmpFloat(a, b)))
 	}
+	// An INFINITE Float receiver asks a non-numeric operand for #infinite? before
+	// it coerces (flo_cmp):
+	//
+	//	if (isinf(a) && !UNDEF_P(i = rb_check_funcall(y, rb_intern("infinite?"), 0, 0))) {
+	//	    if (RTEST(i)) {
+	//	        int j = rb_cmpint(i, x, y);
+	//	        j = (a > 0.0) ? (j > 0 ? 0 : +1) : (j < 0 ? 0 : -1);
+	//	        return INT2FIX(j);
+	//	    }
+	//	    if (a > 0.0) return INT2FIX(1);
+	//	    return INT2FIX(-1);
+	//	}
+	//
+	// so an object that claims to be infinite in the same direction compares
+	// EQUAL to the infinity, and a finite one is simply smaller (or larger).
+	if vm != nil && math.IsInf(a, 0) {
+		if _, isFloat := self.(object.Float); isFloat && vm.respondsToDynamic(other, "infinite?") {
+			i := vm.send(other, "infinite?", nil, nil)
+			if !i.Truthy() {
+				return object.IntValue(int64(signOfFloat(a)))
+			}
+			j := vm.cmpIntValue(i)
+			if a > 0 {
+				if j > 0 {
+					j = 0
+				} else {
+					j = 1
+				}
+			} else if j < 0 {
+				j = 0
+			} else {
+				j = -1
+			}
+			return object.IntValue(int64(j))
+		}
+	}
 	// Non-numeric argument: MRI runs the numeric coercion protocol — other.coerce(self)
-	// — and re-dispatches <=> on the returned pair. Any exception raised by #coerce
-	// propagates; a missing #coerce or a non-Array result yields nil (not an error).
+	// — and re-dispatches <=> on the returned pair (rb_num_coerce_cmp -> do_coerce).
+	// Any exception raised by #coerce propagates; a missing #coerce yields nil, but
+	// a #coerce that does NOT answer a two-element Array is a TypeError.
 	if vm != nil && vm.respondsToDynamic(other, "coerce") {
 		pair := vm.send(other, "coerce", []object.Value{self}, nil)
-		if arr, ok := pair.(*object.Array); ok && len(arr.Elems) == 2 {
-			return vm.send(arr.Elems[0], "<=>", []object.Value{arr.Elems[1]}, nil)
+		arr, ok := pair.(*object.Array)
+		if !ok || len(arr.Elems) != 2 {
+			raise("TypeError", "coerce must return [x, y]")
 		}
+		return vm.send(arr.Elems[0], "<=>", []object.Value{arr.Elems[1]}, nil)
 	}
 	return object.NilV
 }
@@ -12224,3 +12288,56 @@ func symbolNameString(sym object.Value) *object.String {
 // TestPrawnGenerateRoundTrip calls #rstrip on it — so the guard fires on a
 // string that is only invalid because of that mis-tagging. Install it once
 // render carries the right encoding.
+
+// fstrings is the process-wide deduplication table behind String#-@, MRI's
+// fstring table (string.c v3_4_0 rb_fstring / register_fstring). It is keyed by
+// encoding and bytes together, since two strings only deduplicate when both
+// match; every value in it is frozen, which is what makes sharing one across
+// VMs in a process safe — and MRI's table is equally process-wide.
+var fstrings sync.Map // enc + "\x00" + bytes -> *object.String
+
+// internFString returns the canonical frozen String for s's content. An
+// already-frozen receiver becomes the canonical one itself when nothing is
+// registered yet, so `input = "foo".freeze; (-input).equal?(input)` holds.
+func internFString(s *object.String) *object.String {
+	key := s.EncName() + "\x00" + s.Str()
+	if v, ok := fstrings.Load(key); ok {
+		return v.(*object.String)
+	}
+	fs := s
+	if !fs.Frozen {
+		fs = object.NewStringBytesEnc(append([]byte(nil), s.Bytes()...), s.Enc)
+		fs.Frozen = true
+	}
+	actual, _ := fstrings.LoadOrStore(key, fs)
+	return actual.(*object.String)
+}
+
+// signOfFloat is the sign of a non-zero double as a three-way comparison result.
+func signOfFloat(f float64) int {
+	if f > 0 {
+		return 1
+	}
+	return -1
+}
+
+// cmpIntValue is compar.c v3_4_0's rb_cmpint over an already-non-nil value: a
+// numeric answers its sign, and anything else is asked #> 0 then #< 0.
+func (vm *VM) cmpIntValue(v object.Value) int {
+	if f, ok := toFloat(v); ok {
+		switch {
+		case f > 0:
+			return 1
+		case f < 0:
+			return -1
+		}
+		return 0
+	}
+	if vm.send(v, ">", []object.Value{object.IntValue(0)}, nil).Truthy() {
+		return 1
+	}
+	if vm.send(v, "<", []object.Value{object.IntValue(0)}, nil).Truthy() {
+		return -1
+	}
+	return 0
+}
