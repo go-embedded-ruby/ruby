@@ -160,6 +160,11 @@ func (vm *VM) registerIOClassMethods(cIO, cFile *RClass) {
 func (vm *VM) ioOpenForeach(path object.Value, opts *object.Hash) *IOObj {
 	cFile := vm.consts["File"].(*RClass)
 	o := openFileIO(cFile, pathArg(vm, path), modeBase(ioForeachMode(opts)))
+	// open_key_args reaches rb_io_open, so the stream is subject to the same
+	// opening `rb_io_ext_int_to_encs(NULL, NULL, …)` as File.open: the lines
+	// IO.readlines hands back are transcoded to Encoding.default_internal when one
+	// is set, not merely tagged with default_external.
+	o.extEnc, o.intEnc = vm.ioExtIntToEncs("", "", encUnset)
 	ioCheckReadable(o)
 	return o
 }
@@ -697,6 +702,16 @@ type ioModeSpec struct {
 	hasEnc                                                         bool // the mode STRING carried a ":enc" suffix
 	explicit                                                       bool // a mode argument (or :mode option) was given
 
+	// encResolved records that extEnc/intEnc have already been through
+	// rb_io_ext_int_to_encs. MRI runs that resolution FIRST, from
+	// rb_io_extract_modeenc's opening `rb_io_ext_int_to_encs(NULL, NULL, …)`, and
+	// lets a mode suffix or an :encoding option replace the result; rbgo fills the
+	// fields only when something names an encoding, so the defaulted resolution is
+	// applied at the END instead — but only if nothing else claimed them. Without
+	// the flag an `internal_encoding: nil` (which legitimately resolves to the
+	// empty pair) would be indistinguishable from "nobody said anything".
+	encResolved bool
+
 	// create, trunc and excl are the rest of MRI's fmode: FMODE_CREATE,
 	// FMODE_TRUNC and FMODE_EXCL. A wrapper around an existing descriptor has no
 	// use for them, but File.open's open(2) does — "w" is O_WRONLY|O_CREAT|O_TRUNC
@@ -779,7 +794,8 @@ func (vm *VM) ioResolveModeEnc(pos []object.Value, opts *object.Hash) ioModeSpec
 	// A binary stream defaults to ASCII-8BIT external encoding unless the mode
 	// string already named one (a later :encoding option may still override it).
 	if ms.binmode && !ms.hasEnc && ms.extEnc == "" {
-		ms.extEnc = "ASCII-8BIT"
+		ms.extEnc, ms.intEnc = vm.ioExtIntToEncs("ASCII-8BIT", "", encUnset)
+		ms.encResolved = true
 	}
 	if opts != nil {
 		if vm.extractEncodingOption(opts, &ms) && ms.hasEnc {
@@ -788,6 +804,16 @@ func (vm *VM) ioResolveModeEnc(pos []object.Value, opts *object.Hash) ioModeSpec
 		if v, ok := opts.Get(object.Symbol("autoclose")); ok {
 			ms.noAutoclose = !v.Truthy()
 		}
+	}
+	// rb_io_extract_modeenc opens with `rb_io_ext_int_to_encs(NULL, NULL, &enc,
+	// &enc2, 0)`: a stream that names no encoding still SNAPSHOTS the defaults in
+	// force at open. That is invisible while Encoding.default_internal is nil
+	// (the resolution records nothing and the stream keeps tracking
+	// default_external), and decisive once it is set — the stream then reports
+	// that internal encoding for the rest of its life, whatever the defaults do
+	// afterwards.
+	if !ms.encResolved {
+		ms.extEnc, ms.intEnc = vm.ioExtIntToEncs("", "", encUnset)
 	}
 	return ms
 }
@@ -898,18 +924,27 @@ func (vm *VM) parseModeString(mode string, ms *ioModeSpec) {
 // leaves the internal encoding unset (no transcoding).
 func (vm *VM) parseEncPart(enc string, ms *ioModeSpec) {
 	ext, intn := enc, ""
+	hasInt := false
 	if j := strings.IndexByte(enc, ':'); j >= 0 {
-		ext, intn = enc[:j], enc[j+1:]
+		ext, intn, hasInt = enc[:j], enc[j+1:], true
 	}
+	extName := ""
 	if ext != "" {
-		ms.extEnc = vm.lookupEncodingName(ext).name
+		extName = vm.lookupEncodingName(ext).name
 	}
-	if intn != "" && intn != "-" {
-		ms.intEnc = vm.lookupEncodingName(intn).name
-		if ms.intEnc == ms.extEnc {
-			ms.intEnc = ""
+	// parse_mode_enc: a trailing ":-" — or an internal name equal to the external
+	// one — is Qnil, "no transcoding"; anything else names the internal encoding.
+	intName, intState := "", encUnset
+	if hasInt {
+		intState = encNone
+		if intn != "" && intn != "-" {
+			if n := vm.lookupEncodingName(intn).name; n != extName {
+				intName, intState = n, encNamed
+			}
 		}
 	}
+	ms.extEnc, ms.intEnc = vm.ioExtIntToEncs(extName, intName, intState)
+	ms.encResolved = true
 }
 
 // extractNewline applies the :newline option, which names one of MRI's newline
@@ -975,6 +1010,11 @@ func (vm *VM) extractEncodingOption(opts *object.Hash, ms *ioModeSpec) bool {
 	if hasEnc && object.IsNil(encV) {
 		hasEnc = false
 	}
+	// rb_io_extract_encoding_option reads :external_encoding with a Qnil test but
+	// :internal_encoding with a Qundef one, so `external_encoding: nil` is the
+	// same as not passing it at all while `internal_encoding: nil` REFUSES an
+	// internal encoding. The asymmetry is deliberate in the C and load-bearing
+	// here: only the second suppresses the default_internal snapshot.
 	extV, hasExt := opts.Get(object.Symbol("external_encoding"))
 	if hasExt && object.IsNil(extV) {
 		hasExt = false
@@ -988,41 +1028,39 @@ func (vm *VM) extractEncodingOption(opts *object.Hash, ms *ioModeSpec) bool {
 		vm.rbWarn("Ignoring encoding parameter '%s': %s_encoding is used", vm.displayStr(encV), which)
 		hasEnc = false
 	}
+	extName := ""
 	if hasExt {
 		// A "BOM|" marker is accepted only on the :encoding option (and mode
 		// strings), not on :external_encoding / :internal_encoding — MRI resolves
 		// these as plain encoding names.
-		ms.extEnc = vm.encodingArg(extV).name
+		extName = vm.encodingArg(extV).name
 	}
+	intName, intState := "", encUnset
 	if hasInt {
-		switch {
-		case object.IsNil(intV), isDashString(intV):
-			ms.intEnc = ""
-		default:
-			ms.intEnc = vm.encodingArg(intV).name
-		}
-		if ms.intEnc != "" && ms.intEnc == ms.extEnc {
-			ms.intEnc = ""
+		intState = encNone
+		if !object.IsNil(intV) && !isDashString(intV) {
+			if n := vm.encodingArg(intV).name; n != extName {
+				intName, intState = n, encNamed
+			}
 		}
 	}
-	if hasEnc {
+	switch {
+	case hasEnc:
 		if s, ok := encV.(*object.String); ok {
-			name := stripBOMPrefix(s.Str())
-			if j := strings.IndexByte(name, ':'); j >= 0 {
-				ms.extEnc = vm.lookupEncodingName(name[:j]).name
-				ms.intEnc = vm.lookupEncodingName(name[j+1:]).name
-				if ms.intEnc == ms.extEnc {
-					ms.intEnc = ""
-				}
-				return true
-			}
-			ms.extEnc = vm.lookupEncodingName(name).name
+			// A String :encoding goes through parse_mode_enc, which is the same
+			// "ext[:int]" grammar a mode suffix uses.
+			vm.parseEncPart(stripBOMPrefix(s.Str()), ms)
 			return true
 		}
-		ms.extEnc = vm.encodingArg(encV).name
+		ms.extEnc, ms.intEnc = vm.ioExtIntToEncs(vm.encodingArg(encV).name, "", encUnset)
+		ms.encResolved = true
+		return true
+	case hasExt, hasInt:
+		ms.extEnc, ms.intEnc = vm.ioExtIntToEncs(extName, intName, intState)
+		ms.encResolved = true
 		return true
 	}
-	return hasExt || hasInt
+	return false
 }
 
 // recoverAny runs fn and returns whatever it panics with (a RubyError, or a
