@@ -193,6 +193,17 @@ func TestIvarStoreOfAllocatesOwnTables(t *testing.T) {
 	if len(names) != 1 || names[0] != object.Value(object.Symbol("@only")) {
 		t.Fatalf("class ivar names = %v, want [:@only]", names)
 	}
+	// The two template-context kinds allocate their map on FIRST TOUCH, read
+	// included, since a template reads an @ivar the controller may never have set.
+	for _, v := range []object.Value{&SinatraCtx{}, &ActionViewBase{}} {
+		if tbl := ivarTable(v); tbl == nil {
+			t.Errorf("%T: ivarTable did not lazily allocate the ivars map", v)
+		}
+		setIvar(v, "@ctx", object.Integer(3))
+		if got := getIvar(v, "@ctx"); got != object.Value(object.Integer(3)) {
+			t.Errorf("%T: getIvar = %v, want 3", v, got)
+		}
+	}
 }
 
 // Find.prune unwinds the block's frames straight to findYield's recover, which
