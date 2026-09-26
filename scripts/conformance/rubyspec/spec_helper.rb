@@ -24,6 +24,74 @@ PLATFORMS = [:darwin, :bsd, :unix]
 WORDSIZE = 64
 ENDIAN = :little
 
+# mspec/lib/mspec/utils/warnings.rb turns deprecation warnings ON and
+# experimental warnings OFF for every spec run, because ruby/spec asserts the
+# deprecation texts. Without this, a `complain(/is deprecated/)` example cannot
+# pass on an engine that honours Warning[:deprecated] — MRI 4.0.5 printed
+# nothing and lost ten examples in language/predefined_spec.rb alone, while rbgo
+# (which warns unconditionally) passed them. That is the judge favouring us, so
+# it is the gap this exists to close.
+if Object.const_defined?(:Warning) && Warning.respond_to?(:[]=)
+  begin
+    Warning[:deprecated] = true
+    Warning[:experimental] = false
+  rescue StandardError, NotImplementedError
+  end
+end
+
+# mspec/lib/mspec/guards/platform.rb. Only the entry points the corpus reaches
+# are provided; PLATFORMS/WORDSIZE above stay the single source of truth so the
+# guard helpers and this class cannot disagree.
+class PlatformGuard
+  PLATFORM = RUBY_PLATFORM
+  C_LONG_SIZE = WORDSIZE
+  POINTER_SIZE = WORDSIZE
+
+  def self.implementation?(*args)
+    args.any? { |name| RUBY_ENGINE.start_with?(name == :rubinius ? 'rbx' : name.to_s) }
+  end
+  def self.standard?; implementation?(:ruby); end
+  def self.os?(*oses); oses.any? { |os| os == :windows ? !!(PLATFORM =~ /(mswin|mingw)/) : PLATFORM.include?(os.to_s) }; end
+  def self.windows?; os?(:windows); end
+  def self.wasi?; os?(:wasi); end
+  def self.wsl?; false; end
+  def self.c_long_size?(size); size == C_LONG_SIZE; end
+  def self.pointer_size?(size); size == POINTER_SIZE; end
+  def self.wordsize?(size); size == WORDSIZE; end
+  # Build-time darwin version, exactly as mspec/lib/mspec/guards/version.rb reads
+  # it, so kernel_version_is needs no subprocess on this platform.
+  def self.kernel_version
+    @kernel_version ||= (RUBY_PLATFORM[/darwin(\d+)/, 1] || `uname -r`.chomp)
+  end
+end
+
+# mspec/lib/mspec/helpers/io.rb. A write-only stand-in for an IO that collects
+# what was written and then behaves like the resulting String. The corpus uses it
+# directly (core/string/modulo_spec.rb, core/thread/abort_on_exception_spec.rb,
+# core/io/*), and mspec's own complain/output matchers capture through it.
+class IOStub
+  def initialize; @buffer = []; @output = +''; end
+  def write(*str); self << str.join(''); end
+  def <<(str); @buffer << str; self; end
+  def print(*str); write(str.join('') + $\.to_s); end
+  def method_missing(name, *args, &block); to_s.send(name, *args, &block); end
+  def respond_to_missing?(name, include_private = false); to_s.respond_to?(name, include_private); end
+  def ==(other); to_s == other; end
+  def =~(other); to_s =~ other; end
+  def puts(*str)
+    if str.empty?
+      write "\n"
+    else
+      write(str.collect { |s| s.to_s.chomp }.concat([nil]).join("\n"))
+    end
+  end
+  def printf(format, *args); self << sprintf(format, *args); end
+  def flush; @output += @buffer.join(''); @buffer.clear; self; end
+  def to_s; flush; @output; end
+  alias_method :to_str, :to_s
+  def inspect; to_s.inspect; end
+end
+
 def _ver_cmp(a, b)
   pa = a.to_s.split('.').map { |x| x.to_i }
   pb = b.to_s.split('.').map { |x| x.to_i }
@@ -38,8 +106,7 @@ def _ver_cmp(a, b)
   0
 end
 
-def _version_in_range(range)
-  cur = CUR_VERSION
+def _version_in_range(range, cur = CUR_VERSION)
   if range.is_a?(String)
     return true if range.empty?
     _ver_cmp(cur, range) >= 0
@@ -113,8 +180,9 @@ def be_computed_by(sym, *extra); BeComputedByMatcher.new(sym, *extra); end
 class ComplainMatcher
   def initialize(pat, verbose); @pat, @verbose = pat, verbose; end
   def matches?(callable)
-    require "stringio"
-    old_err, $stderr = $stderr, StringIO.new
+    # mspec captures through IOStub, not StringIO (mspec/matchers/complain.rb).
+    err = IOStub.new
+    old_err, $stderr = $stderr, err
     # mspec runs the block under $VERBOSE = false by default, or the given
     # verbose: value; it never leaves the ambient level in place.
     old_v = $VERBOSE
@@ -123,8 +191,9 @@ class ComplainMatcher
       callable.call
     ensure
       $VERBOSE = old_v
-      out = $stderr.string
       $stderr = old_err
+      out = err.to_s
+      @out = out
     end
     # A constraining pattern must match, but a warning is still required: mspec
     # ends on `warning.empty? ? false : true` even after a successful match.
@@ -137,7 +206,9 @@ class ComplainMatcher
     end
     !out.empty?
   end
-  def failure_message; "expected a warning#{@pat ? " matching #{@pat.inspect}" : ''}"; end
+  def failure_message
+    "expected a warning#{@pat ? " matching #{@pat.inspect}" : ''}, got #{@out.inspect}"
+  end
 end
 def complain(pat = nil, verbose: nil); ComplainMatcher.new(pat, verbose); end
 
@@ -147,14 +218,16 @@ def complain(pat = nil, verbose: nil); ComplainMatcher.new(pat, verbose); end
 class OutputMatcher
   def initialize(out, err); @out, @err = out, err; end
   def matches?(callable)
-    require "stringio"
-    oo, $stdout = $stdout, StringIO.new
-    oe, $stderr = $stderr, StringIO.new
+    # mspec/matchers/output.rb captures through IOStub.
+    so_io, se_io = IOStub.new, IOStub.new
+    oo, $stdout = $stdout, so_io
+    oe, $stderr = $stderr, se_io
     begin
       callable.call
     ensure
-      so, se = $stdout.string, $stderr.string
       $stdout, $stderr = oo, oe
+      so, se = so_io.to_s, se_io.to_s
+      @got_out, @got_err = so, se
     end
     ok = true
     ok &&= match_stream(@out, so) unless @out.nil?
@@ -162,18 +235,61 @@ class OutputMatcher
     ok
   end
   def match_stream(pat, s); pat.is_a?(Regexp) ? !!(s =~ pat) : (s == pat); end
-  def failure_message; "output did not match"; end
+  def failure_message
+    "output did not match: stdout #{@got_out.inspect} (want #{@out.inspect}), " \
+      "stderr #{@got_err.inspect} (want #{@err.inspect})"
+  end
 end
 def output(out = nil, err = nil); OutputMatcher.new(out, err); end
 def output_to_fd(*a); raise SpecSkip, "output_to_fd matcher unsupported"; end
+
+# mspec/lib/mspec/matchers/block_caller.rb: run the proc in a thread and decide
+# from Thread#status whether it blocked.
+class BlockingMatcher
+  def matches?(block)
+    t = Thread.new { block.call }
+    loop do
+      case t.status
+      when "sleep"   # blocked
+        t.kill
+        t.join
+        return true
+      when false     # terminated normally, so it never blocked
+        t.join
+        return false
+      when nil       # terminated exceptionally
+        t.value
+      else
+        Thread.pass
+      end
+    end
+  end
+  def failure_message; "expected the given Proc to block the caller"; end
+end
+def block_caller; BlockingMatcher.new; end
+
+# mspec/lib/mspec/matchers/signed_zero.rb
+class SignedZeroMatcher
+  def initialize(sign); @sign = sign; end
+  def matches?(actual); @actual = actual; (1.0 / actual).infinite? == @sign; end
+  def failure_message; "expected #{@actual.inspect} to be #{'-' if @sign == -1}0.0"; end
+end
+def be_positive_zero; SignedZeroMatcher.new(1); end
+def be_negative_zero; SignedZeroMatcher.new(-1); end
+
+# mspec/lib/mspec/matchers/skip.rb: `skip` inside an example aborts it as skipped.
+class SkippedSpecError < SpecSkip; end
+def skip(reason = 'no reason'); ::Kernel.raise(SkippedSpecError, reason); end
 
 class RaiseMatcher
   def initialize(exc, msg); @exc = exc || Exception; @msg = msg; end
   def matches?(callable)
     begin
-      callable.call
+      @result = callable.call
+      @raised = nil
       return false
     rescue Exception => e
+      @raised = e
       return false unless e.is_a?(@exc)
       if @msg
         return @msg.is_a?(Regexp) ? !!(e.message =~ @msg) : (e.message == @msg)
@@ -181,10 +297,29 @@ class RaiseMatcher
       return true
     end
   end
-  def failure_message; "expected block to raise #{@exc}"; end
+  # mspec's RaiseErrorMatcher#failure_message names what actually happened. Ours
+  # said only "expected block to raise TypeError", which made 48 examples across
+  # 25 files indistinguishable between "raised nothing" and "raised the right
+  # class with a different message" — the census could not classify them.
+  def failure_message
+    want = "#{@exc}#{@msg ? " (#{@msg.inspect})" : ''}"
+    if @raised
+      "expected #{want}, but got: #{@raised.class} (#{@raised.message.inspect})"
+    else
+      "expected #{want}, but nothing was raised (#{@result.inspect} returned)"
+    end
+  end
 end
 def raise_error(exc = Exception, msg = nil, &b); RaiseMatcher.new(exc, msg); end
-def raise_consistent_error(exc, msg = nil, **k); RaiseMatcher.new(exc, msg); end
+# mspec/lib/mspec/matchers/raise_error.rb:127 — raise_consistent_error IGNORES the
+# message on CRuby below 4.1, because CRuby's coercion errors are inconsistent
+# there (https://bugs.ruby-lang.org/issues/21864). We asserted the message anyway,
+# which is why MRI 4.0.5 itself failed these examples: the strictness was ours,
+# not the corpus's, and it made the examples unscoreable for either engine.
+def raise_consistent_error(exc = Exception, msg = nil, opts = nil, &b)
+  msg = nil if RUBY_ENGINE == "ruby" && _version_in_range(""..."4.1")
+  RaiseMatcher.new(exc, msg)
+end
 
 # ---- mspec helper singletons/constants ----
 module ScratchPad
@@ -196,14 +331,26 @@ module ScratchPad
 end
 
 SPEC_TMP_BASE = "/tmp/rbgo_spec_tmp"
-Dir.mkdir(SPEC_TMP_BASE) rescue nil
+SPEC_TEMP_DIR = SPEC_TMP_BASE
 $tmp_counter = 0
+# mspec/lib/mspec/helpers/tmp.rb. Two details of the upstream contract were
+# missing and both cost examples:
+#   * `tmp("")` must return the temp DIRECTORY itself, not a uniquified file
+#     inside it. DirSpecs.mock_dir is `File.join(tmp(""), 'dir_specs_mock')`
+#     (core/dir/fixtures/common.rb), so ours pointed at .../file/dir_specs_mock.
+#   * the uniquifier goes before the BASENAME, so `tmp("a/b")` stays inside the
+#     directory the caller asked for instead of inventing a sibling name.
+# The directory is created on demand, as upstream does, because a spec that only
+# builds a path and then writes to it must not depend on load order.
 def tmp(name, uniquify = true)
+  Dir.mkdir(SPEC_TMP_BASE) unless File.directory?(SPEC_TMP_BASE)
   base = name.to_s
-  base = "file" if base.empty?
-  if uniquify
+  if uniquify && !base.empty?
+    slash = base.rindex("/")
+    index = slash ? slash + 1 : 0
     $tmp_counter += 1
-    base = base + "-#{$tmp_counter}-#{rand(1000000)}"
+    base = base.dup
+    base.insert(index, "#{$tmp_counter}-")
   end
   File.join(SPEC_TMP_BASE, base)
 end
@@ -533,18 +680,67 @@ class MockObject
 end
 
 def mock(name, opts = {}); MockObject.new(name); end
-def mock_int(val)
-  o = mock("fixnum #{val}")
-  o.should_receive(:to_int).any_number_of_times.and_return(val)
-  o
+
+# mspec/lib/mspec/mocks/proxy.rb: NumericMockObject IS a Numeric. The C coercion
+# paths check for that before calling anything, so a plain mock made MRI itself
+# raise TypeError "not a real" and lose 21 examples across core/complex/* and
+# core/kernel/Complex_spec.rb. singleton_method_added must be a no-op because
+# Numeric forbids singleton methods and every expectation installs one.
+class NumericMockObject < Numeric
+  def initialize(name, opts = {}); @__name = name; end
+  def method_missing(sym, *a, &b)
+    ::Kernel.raise(NoMethodError, "mock '#{@__name}' got unexpected #{sym}")
+  end
+  def singleton_method_added(val); end
+  def inspect; "#<mock #{@__name}>"; end
 end
-def mock_numeric(name, &b); o = mock(name); b.call(o) if b; o; end
+def mock_numeric(name, opts = {}); NumericMockObject.new(name, opts); end
+
+# mspec/lib/mspec/mocks/proxy.rb: MockIntObject defines a real #to_int, counts the
+# calls and registers itself as a mock with count [:at_least, 1] — so an example
+# that never converts the object FAILS. Ours installed
+# `should_receive(:to_int).any_number_of_times`, which can never fail: that made
+# the assertion vacuous.
+class MockIntObject
+  def initialize(val)
+    @value = val
+    @calls = 0
+    $mock_registry << self if $mock_registry
+  end
+  attr_reader :calls
+  def to_int; @calls += 1; @value.to_int; end
+  def verify; @calls >= 1; end
+  def desc; "to_int (expected at least 1, got #{@calls})"; end
+  def inspect; "#<mock_int #{@value.inspect}>"; end
+end
+def mock_int(val); MockIntObject.new(val); end
 def mock_to_int(val); mock_int(val); end
 
 # ---------------- guards ----------------
-def ruby_version_is(range); yield if _version_in_range(range) && block_given?; end
-def ruby_bug(*a); yield if block_given?; end   # assume bug fixed
-def platform_is(*args)
+# mspec's SpecGuard#run_if / #run_unless (mspec/lib/mspec/guards/guard.rb) YIELD
+# when a block is given and otherwise RETURN the guard's truth value. The corpus
+# relies on the second form throughout:
+#
+#   expected = ruby_version_is("3.4") ? "{a: 1}" : "{:a=>1}"   core/hash/inspect_spec.rb
+#
+# and mspec's own raise_consistent_error asks `ruby_version_is ""..."4.1"` that
+# way too. Our guards returned nil with no block, so every such ternary silently
+# picked the OLDER branch — wording that neither MRI 4.0.5 nor rbgo produces, so
+# the example could not be scored by either engine. Route every guard through
+# this helper so the no-block form answers.
+def _guard_run(match)
+  return match unless block_given?
+  yield if match
+  nil
+end
+
+def ruby_version_is(range, &b); _guard_run(_version_in_range(range), &b); end
+# mspec's version_is / kernel_version_is (mspec/lib/mspec/guards/version.rb)
+# compare an arbitrary base version against the requirement, not RUBY_VERSION.
+def version_is(base, range, &b); _guard_run(_version_in_range(range, base.to_s), &b); end
+def kernel_version_is(range, &b); _guard_run(_version_in_range(range, PlatformGuard.kernel_version), &b); end
+def ruby_bug(*a, &b); _guard_run(true, &b); end   # assume bug fixed
+def platform_is(*args, &b)
   opts = args.last.is_a?(Hash) ? args.pop : {}
   match = args.empty? ? true : args.any? { |s| PLATFORMS.include?(s) }
   match &&= (opts[:wordsize].nil? || opts[:wordsize] == WORDSIZE)
@@ -554,35 +750,43 @@ def platform_is(*args)
   # "abc" * ((2 ** 31) - 1) is a legal six-gigabyte string on a 64-bit platform,
   # and building it took 6.5 GB out of a CI runner's sixteen.
   match &&= (opts[:c_long_size].nil? || opts[:c_long_size] == WORDSIZE)
-  yield if match && block_given?
+  _guard_run(match, &b)
 end
-def platform_is_not(*args)
+def platform_is_not(*args, &b)
   opts = args.last.is_a?(Hash) ? args.pop : {}
   match = args.any? { |s| PLATFORMS.include?(s) }
   match ||= (!opts[:wordsize].nil? && opts[:wordsize] != WORDSIZE)
   match ||= (!opts[:c_long_size].nil? && opts[:c_long_size] != WORDSIZE)
-  yield if !match && block_given?
+  _guard_run(!match, &b)
 end
-def not_supported_on(*engines); yield if !engines.include?(:ruby) && block_given?; end
-def not_compliant_on(*engines); yield if !engines.include?(:ruby) && block_given?; end
-def compliant_on(*engines); yield if engines.include?(:ruby) && block_given?; end
-def deviates_on(*engines); yield if false; end
-def conflicts_with(*consts); yield if block_given?; end
+def not_supported_on(*engines, &b); _guard_run(!engines.include?(:ruby), &b); end
+def not_compliant_on(*engines, &b); _guard_run(!engines.include?(:ruby), &b); end
+def compliant_on(*engines, &b); _guard_run(engines.include?(:ruby), &b); end
+def deviates_on(*engines, &b); _guard_run(false, &b); end
+def conflicts_with(*consts, &b); _guard_run(true, &b); end
 def guard(cond = nil); run = cond.respond_to?(:call) ? cond.call : !!cond; yield if run && block_given?; end
 def guard_not(cond = nil); run = cond.respond_to?(:call) ? cond.call : !!cond; yield if !run && block_given?; end
 def quarantine!(*a); end
-def big_endian; yield if ENDIAN == :big && block_given?; end
-def little_endian; yield if ENDIAN == :little && block_given?; end
-def as_user; yield if block_given?; end
-def as_superuser; end   # not root
-def with_feature(*a); yield if block_given?; end
-def without_feature(*a); end
+def big_endian(&b); _guard_run(ENDIAN == :big, &b); end
+def little_endian(&b); _guard_run(ENDIAN == :little, &b); end
+# mspec/lib/mspec/guards/superuser.rb: as_user is `run_unless` the effective uid
+# is root; as_superuser and as_real_superuser are `run_if` on euid/uid == 0.
+def as_user(&b); _guard_run(Process.euid != 0, &b); end
+def as_superuser(&b); _guard_run(Process.euid == 0, &b); end
+def as_real_superuser(&b); _guard_run(Process.uid == 0, &b); end
+# mspec/lib/mspec/guards/block_device.rb
+def with_block_device(&b)
+  $__have_block_device = !`find /dev /devices -type b 2> /dev/null`.to_s.empty? if $__have_block_device.nil?
+  _guard_run($__have_block_device, &b)
+end
+def with_feature(*a, &b); _guard_run(true, &b); end
+def without_feature(*a, &b); _guard_run(false, &b); end
 def ruby_exe(*a, **k); ::Kernel.raise(SpecSkip, "ruby_exe subprocess unsupported"); end
 def ruby_cmd(*a, **k); ::Kernel.raise(SpecSkip, "ruby_cmd unsupported"); end
 
 # ---------------- example runner ----------------
 class SpecContext
-  attr_reader :desc, :examples, :before_each, :after_each, :before_all
+  attr_reader :desc, :examples, :before_each, :after_each, :before_all, :after_all
   def initialize(desc, parent)
     @desc = desc
     @parent = parent
@@ -598,13 +802,25 @@ class SpecContext
     # before(:all) per descendant is idempotent; mspec likewise makes before(:all)
     # state visible to nested groups.
     @before_all = parent ? parent.before_all.dup : []
+    # `after :all` was DROPPED entirely, and the corpus's Dir specs are built on
+    # it: core/dir/shared/glob.rb chdir's into the fixture tree in `before :all`
+    # and chdir's BACK in `after :all`. With the restore missing, the first
+    # describe left the process inside a directory the next describe's
+    # `DirSpecs.create_mock_dirs` then deleted, so `Dir.pwd` raised
+    # "Errno::ENOENT - getcwd" for every remaining example: 81 in
+    # core/dir/glob_spec.rb and 48 in core/dir/element_reference_spec.rb, for MRI
+    # as much as for rbgo. mspec's ContextState#post(:all) is inherited from the
+    # parents in REVERSE order (mspec/lib/mspec/runner/context.rb).
+    @after_all = parent ? parent.after_all.dup : []
   end
   def it(d, &blk); @examples << [d, blk]; end
   def specify(d = nil, &blk); @examples << [d, blk]; end
   def before(scope = :each, &blk)
     if scope == :all; @before_all << blk; else; @before_each << blk; end
   end
-  def after(scope = :each, &blk); @after_each << blk if scope == :each; end
+  def after(scope = :each, &blk)
+    if scope == :all; @after_all.unshift(blk); else; @after_each << blk; end
+  end
   def describe(d, *a, &blk)
     child = SpecContext.new("#{@desc} #{d}", self)
     # Carry helpers written with `def` in THIS block down to the child. The block
@@ -633,7 +849,16 @@ class SpecContext
   alias_method :context, :describe
 
   def run
-    @before_all.each { |b| begin; instance_eval(&b); rescue Exception; end }
+    # A before(:all)/after(:all) that raises is still swallowed — mspec would skip
+    # the whole group instead — but it is now RECORDED, because an invisible setup
+    # failure is what let the missing `after :all` above go unnoticed for 36 waves.
+    @before_all.each do |b|
+      begin
+        instance_eval(&b)
+      rescue Exception => e
+        $RB_FAILS << ["hookerror", @desc, "(before :all)", e.class.to_s, e.message.to_s[0, 200]]
+      end
+    end
     @examples.each do |d, blk|
       if blk.nil?
         $RB_SKIP += 1
@@ -657,6 +882,9 @@ class SpecContext
         $RB_FAILS << ["fail", @desc, d, "SpecFail", e.message.to_s[0, 200]]
       rescue SpecSkip => e
         $RB_SKIP += 1
+        # Skips are invisible to the ratchet too: they can never be scored by
+        # either engine, so the census needs to see what they cost and why.
+        $RB_FAILS << ["skip", @desc, d, e.class.to_s, e.message.to_s[0, 200]]
       rescue Exception => e
         $RB_ERROR += 1
         $RB_FAILS << ["error", @desc, d, e.class.to_s, e.message.to_s[0, 200]]
@@ -677,6 +905,13 @@ class SpecContext
         end
         $mock_registry = nil
         $mock_installs = nil
+      end
+    end
+    @after_all.each do |b|
+      begin
+        instance_eval(&b)
+      rescue Exception => e
+        $RB_FAILS << ["hookerror", @desc, "(after :all)", e.class.to_s, e.message.to_s[0, 200]]
       end
     end
   end
@@ -742,6 +977,56 @@ def it_behaves_like(desc, meth = nil, obj = nil)
   ctx.run
 end
 def it_should_behave_like(desc, meth = nil, obj = nil); it_behaves_like(desc, meth, obj); end
+
+# mspec/lib/mspec/runner/evaluate.rb: `evaluate <<-ruby ... ruby do ... end`
+# defines ONE example that first evaluates the Ruby source against the evaluator
+# and then runs the assertion block against the same object, so a method or
+# constant the source defines is visible to the assertions. Its absence was a
+# LOAD error (uninitialized constant SpecEvaluate), which cost whole describe
+# blocks: 7 collections across core/{method,proc,unboundmethod}/arity_spec.rb and
+# language/{lambda,method}_spec.rb.
+class SpecEvaluate
+  def self.desc=(d); @desc = d; end
+  def self.desc; @desc ||= "evaluates "; end
+
+  def initialize(ruby, desc)
+    @ruby = ruby.rstrip
+    @desc = desc || self.class.desc
+  end
+
+  def format(ruby)
+    if ruby.include?("\n")
+      lines = ruby.each_line.to_a
+      if /( *)/ =~ lines.first
+        if $1.size > 4
+          dedent = $1.size - 4
+          ruby = lines.map { |l| l[dedent..-1] }.join
+        else
+          indent = " " * (4 - $1.size)
+          ruby = lines.map { |l| "#{indent}#{l}" }.join
+        end
+      end
+      "\n#{ruby}"
+    else
+      "'#{ruby.lstrip}'"
+    end
+  end
+
+  def define(ctx, &block)
+    ruby = @ruby
+    evaluator = self
+    ctx.specify("#{@desc} #{format ruby}") do
+      evaluator.instance_eval(ruby)
+      evaluator.instance_eval(&block)
+    end
+  end
+end
+
+def evaluate(str, desc = nil, &block)
+  ctx = $ctx_stack.last
+  ::Kernel.raise("evaluate outside a describe block") if ctx.nil?
+  SpecEvaluate.new(str, desc).define(ctx, &block)
+end
 
 # some specs call these at top level
 def before(*a); end
