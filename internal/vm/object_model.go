@@ -2448,9 +2448,25 @@ func setIvar(self object.Value, name string, v object.Value) {
 		return
 	}
 	if _, exists := st.tbl[name]; !exists && st.order != nil {
-		*st.order = append(*st.order, name)
+		// A remove_instance_variable took the name out of the map and left it in the
+		// order list. MRI takes it out of the SHAPE (rb_shape_transition_shape_remove_ivar,
+		// variable.c rb_ivar_delete), so a re-assignment appends at the END — and
+		// appears once. Without the drop, `set @a; set @b; remove @a; set @a` reported
+		// [:@a, :@b, :@a] where MRI reports [:@b, :@a].
+		*st.order = append(dropName(*st.order, name), name)
 	}
 	st.tbl[name] = v
+}
+
+// dropName removes the first occurrence of name from names, in place, and is a
+// no-op when it is absent (the common case: a name assigned for the first time).
+func dropName(names []string, name string) []string {
+	for i, n := range names {
+		if n == name {
+			return append(names[:i], names[i+1:]...)
+		}
+	}
+	return names
 }
 
 // ivarNamesInOrder returns self's instance-variable names as Symbols. Every kind

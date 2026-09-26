@@ -284,3 +284,32 @@ func TestIRBEvalExceptionKeepsFrameStacksAligned(t *testing.T) {
 		t.Errorf("frame depths before=%+v after=%+v, want equal and aligned", before, after)
 	}
 }
+
+// A name taken out by remove_instance_variable and assigned again appears ONCE,
+// at the END. MRI removes it from the shape (variable.c rb_ivar_delete through
+// rb_shape_transition_shape_remove_ivar), so the re-assignment is a fresh one;
+// rbgo kept the name in the order list and appended a second copy, which
+// reported [:@a, :@b, :@a] where MRI reports [:@b, :@a]. The defect predates
+// #672 for a plain object and would have reached every natively-backed kind
+// with it.
+func TestIvarReassignedAfterRemovalAppearsOnceAtTheEnd(t *testing.T) {
+	var buf bytes.Buffer
+	src := `
+o = Object.new
+o.instance_variable_set(:@a, 1)
+o.instance_variable_set(:@b, 2)
+o.remove_instance_variable(:@a)
+o.instance_variable_set(:@a, 3)
+p o.instance_variables
+s = "str"
+s.instance_variable_set(:@a, 1)
+s.remove_instance_variable(:@a)
+s.instance_variable_set(:@a, 3)
+p s.instance_variables
+`
+	// MRI 4.0.5's own output for this program.
+	want := "[:@b, :@a]\n[:@a]"
+	if got := runOnVM(t, New(&buf), &buf, src); got != want {
+		t.Errorf("re-assignment after removal:\n got %s\nwant %s", got, want)
+	}
+}
