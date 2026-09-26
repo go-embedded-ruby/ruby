@@ -431,4 +431,85 @@ func (vm *VM) registerEncodingErrors() {
 		vm.cEncoding.consts[n] = c
 		vm.consts["Encoding::"+n] = c
 	}
+	undef := vm.consts["Encoding::UndefinedConversionError"].(*RClass)
+	invalid := vm.consts["Encoding::InvalidByteSequenceError"].(*RClass)
+	// transcode.c: every accessor is a plain rb_attr_get of the ivar
+	// make_econv_exception stored, so an exception built any other way (a bare
+	// .new) reports nil rather than raising.
+	for _, cls := range []*RClass{undef, invalid} {
+		for _, name := range []string{
+			"source_encoding", "source_encoding_name",
+			"destination_encoding", "destination_encoding_name",
+		} {
+			cls.define(name, econvAttrReader("@"+name))
+		}
+	}
+	undef.define("error_char", econvAttrReader("@error_char"))
+	invalid.define("error_bytes", econvAttrReader("@error_bytes"))
+	invalid.define("readagain_bytes", econvAttrReader("@readagain_bytes"))
+	invalid.define("incomplete_input?", econvAttrReader("@incomplete_input"))
+}
+
+// raiseEconvError raises the very exception object the converter recorded as its
+// #last_error. rb_econv_check_error (transcode.c) passes make_econv_exception's
+// result straight to rb_exc_raise, so the raised object and #last_error are one
+// object carrying one set of attributes; rebuilding a second exception from the
+// message alone would raise something that answers nil to every accessor.
+func (vm *VM) raiseEconvError(exc object.Value) object.Value {
+	panic(vm.excError(exc))
+}
+
+// econvAttrReader is the ecerr_* accessor shape from transcode.c: each of
+// #source_encoding, #error_char, #incomplete_input? and their siblings is
+// rb_attr_get of one ivar, so an unset one reads as nil (the spec for
+// `Encoding::InvalidByteSequenceError.new.incomplete_input?` asserts exactly
+// that) instead of raising NameError.
+func econvAttrReader(ivar string) NativeFn {
+	return func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
+		return getIvar(self, ivar)
+	}
+}
+
+// setEconvErrorAttrs attaches the transcoding-error attributes MRI's
+// make_econv_exception (transcode.c) stores on the exception it builds, from the
+// converter's last_error state: srcEnc/dstEnc are the encodings of the *hop that
+// failed* (not the converter's own endpoints), errBytes the discarded bytes and
+// readAgain the bytes to be read again.
+//
+//   - undefined_conversion sets @error_char: the error bytes tagged with the
+//     failing hop's source encoding, so it is the one character that could not be
+//     converted (rb_enc_associate_index on the source encoding index).
+//   - invalid_byte_sequence / incomplete_input set @error_bytes and
+//     @readagain_bytes as BINARY strings — rb_str_new leaves them ASCII-8BIT —
+//     with @readagain_bytes nil when readagain_len is 0, plus @incomplete_input.
+//
+// Both then fall through to set_encs, which records the names unconditionally and
+// the Encoding objects only when the name resolves to a registered encoding.
+func (vm *VM) setEconvErrorAttrs(exc object.Value, status string, errBytes, readAgain []byte, srcEnc, dstEnc string) {
+	switch status {
+	case "undefined_conversion":
+		ec := object.NewStringBytes(append([]byte(nil), errBytes...))
+		if _, ok := vm.findEncoding(srcEnc); ok {
+			ec.Enc = srcEnc
+		}
+		setIvar(exc, "@error_char", ec)
+	case "invalid_byte_sequence", "incomplete_input":
+		setIvar(exc, "@error_bytes", binStr(errBytes))
+		if len(readAgain) > 0 {
+			setIvar(exc, "@readagain_bytes", binStr(readAgain))
+		} else {
+			setIvar(exc, "@readagain_bytes", object.NilV)
+		}
+		setIvar(exc, "@incomplete_input", object.Bool(status == "incomplete_input"))
+	default:
+		return
+	}
+	setIvar(exc, "@source_encoding_name", object.NewString(srcEnc))
+	setIvar(exc, "@destination_encoding_name", object.NewString(dstEnc))
+	if e, ok := vm.findEncoding(srcEnc); ok {
+		setIvar(exc, "@source_encoding", e)
+	}
+	if e, ok := vm.findEncoding(dstEnc); ok {
+		setIvar(exc, "@destination_encoding", e)
+	}
 }

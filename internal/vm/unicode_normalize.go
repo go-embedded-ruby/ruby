@@ -62,16 +62,77 @@ func normSource(self object.Value) string {
 	return string(s.Bytes())
 }
 
+// unicodeNormalizeVia is the UNICODE_ENCODINGS list of
+// lib/unicode_normalize/normalize.rb: the encodings whose strings are normalized
+// by round-tripping through UTF-8. UCS-2BE and UCS-4BE are aliases of UTF-16BE and
+// UTF-32BE, so they arrive here under their canonical names.
+func unicodeNormalizeVia(enc string) bool {
+	switch enc {
+	case "UTF-16BE", "UTF-16LE", "UTF-32BE", "UTF-32LE", "GB18030":
+		return true
+	}
+	return false
+}
+
+// normTarget performs the encoding dispatch at the head of
+// UnicodeNormalize.normalize and .normalized?
+// (lib/unicode_normalize/normalize.rb): UTF-8 is normalized directly, US-ASCII is
+// already normalized in every form, the other Unicode encodings are normalized
+// through UTF-8 and encoded back, and every other encoding is an
+// Encoding::CompatibilityError — normalization is not defined for it.
+//
+// The encoding decides BEFORE the bytes are looked at, which is why an
+// ISO-8859-1 string of one high byte reports the incompatibility rather than
+// "invalid byte sequence in UTF-8": in MRI that ArgumentError can only come from
+// the UTF-8 branch's gsub.
+//
+// back is the encoding the normalized text must be encoded into again ("" when the
+// receiver was already UTF-8); done reports a receiver that needs no normalizing
+// at all.
+func (vm *VM) normTarget(self object.Value) (src, back string, done bool) {
+	s := self.(*object.String)
+	switch enc := vm.canonicalEncName(s.EncName()); enc {
+	case "UTF-8":
+		return normSource(self), "", false
+	case "US-ASCII":
+		return string(s.Bytes()), "", true
+	default:
+		if !unicodeNormalizeVia(enc) {
+			raise("Encoding::CompatibilityError", "Unicode Normalization not appropriate for %s", enc)
+		}
+		return vm.stringEncode(s, []object.Value{object.NewString("UTF-8")}).Str(), enc, false
+	}
+}
+
+// normResult encodes a normalized UTF-8 result back into the receiver's encoding
+// when it was one of the non-UTF-8 Unicode encodings (`.encode(encoding)` at the
+// tail of UnicodeNormalize.normalize).
+func (vm *VM) normResult(out, back string) *object.String {
+	u := object.NewString(out)
+	if back == "" {
+		return u
+	}
+	return vm.stringEncode(u, []object.Value{object.NewString(back)})
+}
+
 // registerStringUnicodeNormalize adds the unicode_normalize core-ext String
 // methods. (Called from the String setup so it shares cString.)
 func (vm *VM) registerStringUnicodeNormalize() {
-	vm.cString.define("unicode_normalize", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("unicode_normalize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		form := normForm(args)
-		return object.NewString(norm.Normalize(normSource(self), form))
+		src, back, done := vm.normTarget(self)
+		if done {
+			return object.NewStringBytesEnc([]byte(src), self.(*object.String).Enc)
+		}
+		return vm.normResult(norm.Normalize(src, form), back)
 	})
-	vm.cString.define("unicode_normalized?", func(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+	vm.cString.define("unicode_normalized?", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		form := normForm(args)
-		return object.Bool(norm.IsNormalized(normSource(self), form))
+		src, _, done := vm.normTarget(self)
+		if done {
+			return object.Bool(true)
+		}
+		return object.Bool(norm.IsNormalized(src, form))
 	})
 	// unicode_normalize! normalizes the receiver in place and returns self (even
 	// when already normalized). The form argument is validated before the frozen
@@ -79,8 +140,11 @@ func (vm *VM) registerStringUnicodeNormalize() {
 	vm.cString.define("unicode_normalize!", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 		form := normForm(args)
 		s := self.(*object.String)
+		src, back, done := vm.normTarget(self)
 		vm.checkFrozen(s)
-		s.SetBytes([]byte(norm.Normalize(normSource(self), form)))
+		if !done {
+			s.SetBytes(append([]byte(nil), vm.normResult(norm.Normalize(src, form), back).Bytes()...))
+		}
 		return self
 	})
 }

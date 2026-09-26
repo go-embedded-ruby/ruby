@@ -330,10 +330,10 @@ func (vm *VM) converterConvert(c *converterObj, v object.Value) object.Value {
 	case "invalid_byte_sequence":
 		vm.setConvError(c, "invalid_byte_sequence", errBytes, readAgain, false)
 		c.readAgain = append([]byte(nil), readAgain...)
-		raise("Encoding::InvalidByteSequenceError", "%s", c.invalidMessage(errBytes, readAgain))
+		vm.raiseEconvError(c.lastErrExc)
 	case "undefined_conversion":
 		vm.setConvError(c, "undefined_conversion", errBytes, nil, true)
-		raise("Encoding::UndefinedConversionError", "%s", c.undefMessage(errBytes))
+		vm.raiseEconvError(c.lastErrExc)
 	case "incomplete_input":
 		// Hold the incomplete tail; #finish reports it. #convert itself succeeds.
 		c.pendingIncomplete = errBytes
@@ -355,8 +355,7 @@ func (vm *VM) converterFinish(c *converterObj) object.Value {
 		errBytes := c.pendingIncomplete
 		c.pendingIncomplete = nil
 		vm.setConvError(c, "incomplete_input", errBytes, nil, false)
-		raise("Encoding::InvalidByteSequenceError", "incomplete %s on %s",
-			binStr(errBytes).Inspect(), c.src)
+		vm.raiseEconvError(c.lastErrExc)
 	}
 	c.finished = true
 	return object.NewStringBytesEnc(nil, c.dst)
@@ -561,6 +560,12 @@ func (vm *VM) setConvError(c *converterObj, status string, errBytes, readAgain [
 	case "undefined_conversion":
 		c.lastErrExc = vm.buildException("Encoding::UndefinedConversionError", c.undefMessage(errBytes))
 	}
+	// make_econv_exception (transcode.c) does not only pick the class and the
+	// message: it attaches the error attributes in the same breath, so
+	// #source_encoding and friends can never disagree with #primitive_errinfo. A
+	// status that is not one of the three failures leaves setEconvErrorAttrs with
+	// nothing to attach and it returns without touching the exception.
+	vm.setEconvErrorAttrs(c.lastErrExc, status, c.errBytes, c.errReadAgain, c.errSrcEnc, c.errDstEnc)
 }
 
 // errinfo builds the #primitive_errinfo tuple [status, src_enc, dst_enc,
