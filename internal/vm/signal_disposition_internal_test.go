@@ -241,6 +241,26 @@ func TestSignalExceptionConstruction(t *testing.T) {
 		// The name branch takes exactly one argument (argnum stays 1).
 		{"a name with a second argument", `begin; SignalException.new("TERM", "x"); rescue ArgumentError => e; puts e.message; end`,
 			"wrong number of arguments (given 2, expected 1)\n"},
+		// The NUMBER branch takes 1..2 (argnum becomes 2), so three is the error.
+		{"a number with two extra arguments",
+			`begin; SignalException.new(15, "x", "y"); rescue ArgumentError => e; puts e.message; end`,
+			"wrong number of arguments (given 3, expected 1..2)\n"},
+		// rb_check_to_integer consults #to_int, so an object that answers it takes
+		// the NUMBER branch and gets the default message from rb_signo2signm.
+		{"an object with #to_int", `o = Object.new
+def o.to_int; 15; end
+e = SignalException.new(o); puts "#{e.message} #{e.signo}"`, "SIGTERM 15\n"},
+		// ...and one whose #to_int hands back a non-Integer falls through to the
+		// NAME branch, where its #to_str (absent) makes it a bad signal type.
+		{"an object whose #to_int is not an Integer", `o = Object.new
+def o.to_int; "nope"; end
+begin; SignalException.new(o); rescue ArgumentError => e; puts e.message; end`,
+			"bad signal type Object\n"},
+		{"an object that is neither a number nor a name", `begin
+  SignalException.new(Object.new)
+rescue ArgumentError => e
+  puts e.message
+end`, "bad signal type Object\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, out, err := runSrcErr(t, tc.src)
@@ -328,12 +348,6 @@ func TestSignoToSignmFallback(t *testing.T) {
 		if got := withSIG(tc.in); got != tc.want {
 			t.Errorf("withSIG(%q) = %q, want %q", tc.in, got, tc.want)
 		}
-	}
-	if got := signalName(object.IntValue(15)); got != "TERM" {
-		t.Errorf("signalName(15) = %q, want TERM", got)
-	}
-	if got := signalName(object.IntValue(9999)); got != "9999" {
-		t.Errorf("signalName(9999) = %q, want the number itself", got)
 	}
 	if _, ok := signalNumberOf("NOPE"); ok {
 		t.Error("signalNumberOf(NOPE) reported a number")
@@ -514,6 +528,71 @@ rescue Interrupt => e
   p e.message, e.signo
 end`
 	want := "\"Interrupt\"\n\"Interrupt\"\n2\n\"x\"\n\"\"\n2\n"
+	_, out, err := runSrcErr(t, src)
+	if err != nil {
+		t.Fatalf("run: %v (output %q)", err, out)
+	}
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+// stubValue is an object.Value of a type classOf cannot place, which is the only
+// way to reach objClassName's fallback: classOf ends in classOfPlatform, whose
+// Windows form is a plain `return nil`. No Ruby expression can produce one, so
+// the branch is reachable only from Go — and leaving it uncovered would leave a
+// nil dereference in an error path untested.
+type stubValue struct{}
+
+func (stubValue) ToS() string     { return "stub" }
+func (stubValue) Inspect() string { return "stub" }
+func (stubValue) Truthy() bool    { return true }
+
+func TestObjClassNameFallsBackWhenClassOfCannotPlaceTheValue(t *testing.T) {
+	machine, _, _ := runSrcErr(t, `1`)
+	if got := machine.objClassName(object.NilV); got != "NilClass" {
+		t.Errorf("objClassName(nil) = %q, want NilClass", got)
+	}
+	if got := machine.objClassName(stubValue{}); got == "" {
+		t.Error("objClassName gave no name for an unplaceable value")
+	}
+}
+
+// TestSelfSignalOnSIGCHLDRaisesNothing covers the one member of
+// default_handler's managed set that rb_signal_exec has NO cmd == 0 case for:
+// Init_signal installs a handler for SIGCHLD to reap children, so the signal is
+// consumed at a safe point, but nothing is raised. A reading that treated "MRI
+// installs a handler" as "MRI raises" would raise SignalException here.
+func TestSelfSignalOnSIGCHLDRaisesNothing(t *testing.T) {
+	orig := procKill
+	t.Cleanup(func() { procKill = orig })
+	calls := 0
+	procKill = func(int, int) error { calls++; return nil }
+	_, out, err := runSrcErr(t, `Process.kill(:CHLD, Process.pid); puts "nothing raised"`)
+	if err != nil {
+		t.Fatalf("run: %v (output %q)", err, out)
+	}
+	if out != "nothing raised\n" {
+		t.Errorf("output = %q, want %q", out, "nothing raised\n")
+	}
+	if calls != 0 {
+		t.Errorf("procKill called %d times; SIGCHLD must be consumed at the safe point", calls)
+	}
+}
+
+// TestTrapPreviousReportsEveryDisposition walks every arm of trap()'s oldcmd
+// switch. SYSTEM_DEFAULT and EXIT are only observable through this return value —
+// their DISPOSITIONS are "let the OS have it" and "raise SystemExit", neither of
+// which names itself — so a test of behaviour alone leaves both unwitnessed.
+func TestTrapPreviousReportsEveryDisposition(t *testing.T) {
+	src := `p Signal.trap(:TERM, "SYSTEM_DEFAULT")
+p Signal.trap(:TERM, "EXIT")
+p Signal.trap(:TERM, "SIG_DFL")
+p Signal.trap(:TERM, ->(s) {})
+p Signal.trap(:TERM, "IGNORE").class
+p Signal.trap(:TERM, "command string")
+p Signal.trap(:TERM, "DEFAULT")`
+	want := "\"DEFAULT\"\n\"SYSTEM_DEFAULT\"\n\"EXIT\"\n\"DEFAULT\"\nProc\n\"IGNORE\"\n\"command string\"\n"
 	_, out, err := runSrcErr(t, src)
 	if err != nil {
 		t.Fatalf("run: %v (output %q)", err, out)

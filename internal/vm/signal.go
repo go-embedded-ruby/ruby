@@ -102,19 +102,17 @@ func (vm *VM) registerSignal() {
 	vm.trapList = map[int]trapCmd{}
 
 	trap := func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		if len(args) == 0 && blk == nil {
-			return raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
-		}
 		if len(args) == 0 {
 			return raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 		}
 		sig := vm.trapSignm(args[0])
 		// sig_trap refuses a reserved signal before it looks at the handler.
 		if signalReserved(sig) {
-			if name, ok := signalNameOf(sig); ok {
-				return raise("ArgumentError", "can't trap reserved signal: SIG%s", name)
-			}
-			return raise("ArgumentError", "can't trap reserved signal: %d", sig)
+			// Every signal signalReserved names has a siglist entry, so unlike
+			// sig_trap (whose NSIG table can be sparser than its handler set) there
+			// is no numeric spelling of this message to fall back to.
+			name, _ := signalNameOf(sig)
+			return raise("ArgumentError", "can't trap reserved signal: SIG%s", name)
 		}
 		// SIGKILL and SIGSTOP cannot be caught or ignored: sigaction(2) fails
 		// EINVAL, which trap() turns into Errno::EINVAL through rb_sys_fail_str.
@@ -176,10 +174,10 @@ func (vm *VM) registerSignal() {
 // (esignal_signo) and aliases #signm to #message; Interrupt overrides
 // #initialize (interrupt_init) to fix the signal at SIGINT.
 func (vm *VM) registerSignalException() {
-	cSig, ok := vm.consts["SignalException"].(*RClass)
-	if !ok {
-		return
-	}
+	// A hard assertion: builtins.go builds the exception hierarchy before it calls
+	// registerSignal, so an absent SignalException is a broken registration order,
+	// not a state to carry on from quietly.
+	cSig := vm.consts["SignalException"].(*RClass)
 	// esignal_init(sig) / esignal_init(signo, message = signo2signm(signo)):
 	// the first argument is tried as an Integer through #to_int; if it converts,
 	// a second argument may supply the message and arity is 1..2, otherwise the
@@ -188,10 +186,7 @@ func (vm *VM) registerSignalException() {
 	// matched prefix length differs from signame_prefix_len), which is why
 	// SignalException.new("TERM").message is "SIGTERM".
 	cSig.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-		o, isObj := self.(*RObject)
-		if !isObj {
-			return object.NilV
-		}
+		o := self.(*RObject)
 		if len(args) == 0 {
 			return raise("ArgumentError", "wrong number of arguments (given 0, expected 1..2)")
 		}
@@ -242,12 +237,10 @@ func (vm *VM) registerSignalException() {
 	// Interrupt.new carries signo 2 and an EMPTY message (MRI passes no name, and
 	// esignal_init's message argument defaults to "" rather than "SIGINT" here
 	// because interrupt_init supplies argv[1] itself).
-	if cInt, okI := vm.consts["Interrupt"].(*RClass); okI {
+	cInt := vm.consts["Interrupt"].(*RClass)
+	{
 		cInt.define("initialize", func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
-			o, isObj := self.(*RObject)
-			if !isObj {
-				return object.NilV
-			}
+			o := self.(*RObject)
 			// Interrupt.new with no argument leaves the message UNSET, so
 			// Exception#message falls back to the class name and #signm reads
 			// "Interrupt" (core/exception/interrupt_spec.rb). The Interrupt that
@@ -355,13 +348,9 @@ func (vm *VM) trapHandler(v object.Value) trapCmd {
 // the OS — rather than nil, and an installed Proc or command comes back as
 // itself.
 func (vm *VM) trapPrevious(sig int) object.Value {
-	prev, had := vm.trapList[sig]
-	if !had {
-		if vm.signalManaged(sig) {
-			return object.NewString("DEFAULT")
-		}
-		return object.NewString("SYSTEM_DEFAULT")
-	}
+	// An absent entry IS trapDefault (MRI's trap_list.cmd[sig] == 0), so the
+	//zero value of trapCmd already says what to report.
+	prev := vm.trapList[sig]
 	switch prev.kind {
 	case trapDefault:
 		if vm.signalManaged(sig) {
@@ -475,16 +464,11 @@ func (vm *VM) runTrapCommand(cmd object.Value, sig int) {
 // @signo, so a rescuer sees #signo and #signm without the class having to
 // re-derive them.
 func (vm *VM) raiseSignalException(class string, signo int, message string) {
-	c, ok := vm.consts[class].(*RClass)
-	if !ok {
-		raise(class, "%s", message)
-		return
-	}
+	c := vm.consts[class].(*RClass)
 	exc := vm.send(c, "new", []object.Value{object.NewString(message)}, nil)
-	if o, isObj := exc.(*RObject); isObj {
-		o.ivars["@signo"] = object.IntValue(int64(signo))
-		o.ivars["@message"] = object.NewString(message)
-	}
+	o := exc.(*RObject)
+	o.ivars["@signo"] = object.IntValue(int64(signo))
+	o.ivars["@message"] = object.NewString(message)
 	panic(vm.excError(vm.captureBacktrace(exc)))
 }
 
@@ -596,23 +580,20 @@ func stripSIG(name string) string {
 	return name
 }
 
-// signalName normalises a signal designator to its bare name (no "SIG" prefix),
-// accepting a Symbol, a String ("INT"/"SIGINT") or an Integer. Kept for callers
-// that want a name rather than a number.
-func signalName(v object.Value) string {
-	switch s := v.(type) {
-	case object.Symbol:
-		return stripSIG(string(s))
-	case *object.String:
-		return stripSIG(string(s.Bytes()))
-	case object.Integer:
-		if name, ok := signalNameOf(int(s)); ok {
-			return name
-		}
-		return v.ToS()
-	default:
-		return v.ToS()
+// objClassName is MRI's rb_obj_classname: the name of the object's CLASS, which
+// for nil is "NilClass" and not "nil". classNameOf answers the type name a format
+// string wants, which differs for exactly the values signm2signo's error message
+// is most likely to be handed (nil, true, false) — core/signal/trap_spec.rb reads
+// the difference.
+func (vm *VM) objClassName(v object.Value) string {
+	if c := vm.classOf(v); c != nil {
+		return c.name
 	}
+	// classOf ends in classOfPlatform, which answers nil for a value type this
+	// platform does not place (it is a plain `return nil` on Windows). Nothing a
+	// Ruby expression can produce reaches that, but a nil dereference in an error
+	// path is a poor way to find out, so fall back to the type name.
+	return classNameOf(v)
 }
 
 // toIntMaybe is signal.c's rb_check_to_integer(v, "to_int"): it reports whether
@@ -636,16 +617,4 @@ func (vm *VM) toIntMaybe(v object.Value) (int64, bool) {
 		}
 	}
 	return 0, false
-}
-
-// objClassName is MRI's rb_obj_classname: the name of the object's CLASS, which
-// for nil is "NilClass" and not "nil". classNameOf answers the type name a format
-// string wants, which differs for exactly the values signm2signo's error message
-// is most likely to be handed (nil, true, false) — core/signal/trap_spec.rb reads
-// the difference.
-func (vm *VM) objClassName(v object.Value) string {
-	if c := vm.classOf(v); c != nil {
-		return c.name
-	}
-	return classNameOf(v)
 }

@@ -4,7 +4,11 @@
 
 package vm
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/go-embedded-ruby/ruby/internal/object"
+)
 
 // TestExitingSplitClassification is eval_error.c exiting_split, table-driven.
 // It is the decision the rbgo CLI turns into the process's disposition, and it
@@ -258,3 +262,31 @@ func TestExitStatusAndSignoOfMissingObject(t *testing.T) {
 		t.Errorf("objectless SignalException -> %+v, want the plain-failure fallback", d)
 	}
 }
+
+// TestExitStatusAndSignoOfANonIntegerIvar covers the last arm of exitStatusOf and
+// signoOf: the ivar is present but not an Integer, or the object has no ivars at
+// all. eval_error.c's sysexit_status is a bare rb_ivar_get with no type check, so
+// a value that is not a number has to mean 0 rather than crash — and a program
+// CAN put one there (`e.instance_variable_set(:@status, "x")`).
+func TestExitStatusAndSignoOfANonIntegerIvar(t *testing.T) {
+	machine, _, _ := runSrcErr(t, `1`)
+	// A value with no ivar table at all.
+	if got := machine.exitStatusOf(objectOne()); got != 0 {
+		t.Errorf("exitStatusOf(1) = %d, want 0", got)
+	}
+	if got := machine.signoOf(objectOne()); got != 0 {
+		t.Errorf("signoOf(1) = %d, want 0", got)
+	}
+	// And one whose @status a Ruby program replaced with a String.
+	_, out, err := runSrcErr(t, `e = SystemExit.new
+e.instance_variable_set(:@status, "x")
+p e.status`)
+	if err != nil {
+		t.Fatalf("run: %v (output %q)", err, out)
+	}
+}
+
+// objectOne is an object.Value with no instance-variable table, which is what
+// exitStatusOf and signoOf see when a SystemExit or SignalException was raised
+// with a class name rather than an object.
+func objectOne() object.Value { return object.IntValue(1) }
