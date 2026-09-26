@@ -8,9 +8,9 @@ require (
 	github.com/dolthub/go-mysql-server v0.20.0
 	github.com/glauth/ldap v0.0.0-20260718202943-34c5f9b3cbf1
 	github.com/go-commonmark/commonmark v0.1.0
-	github.com/go-composites/bag v0.0.0-20260923203350-0140c174beaf
+	github.com/go-composites/bag v0.0.0-20260926001757-20f4f02fb493
 	github.com/go-composites/result v0.0.0-20260920235032-53e0a08ef62b
-	github.com/go-composites/time v0.0.0-20260923000420-0a04dcfd543c
+	github.com/go-composites/time v0.0.0-20260926002416-df21e116dba5
 	github.com/go-fft/fft v0.0.0-20260831114610-598cacbd5c9a
 	github.com/go-images/images v0.0.0-20260923074905-cdcee44e3c7e
 	github.com/go-kramdown/kramdown v0.1.0
@@ -129,7 +129,7 @@ require (
 	github.com/go-ruby-pagy/pagy v0.0.0-20260717071719-997d15eee011
 	github.com/go-ruby-paper-trail/paper-trail v0.0.0-20260717071745-42a249656e5a
 	github.com/go-ruby-parquet/parquet v0.0.0-20260923211642-bc75bcb9031e
-	github.com/go-ruby-parser/parser v0.3.0
+	github.com/go-ruby-parser/parser v0.4.0
 	github.com/go-ruby-pathname/pathname v0.0.0-20260916100446-0824484b665f
 	github.com/go-ruby-pg/pg v0.0.0-20260916100523-3831ec811a67
 	github.com/go-ruby-prawn/prawn v0.0.0-20260829111617-4a543d91acca
