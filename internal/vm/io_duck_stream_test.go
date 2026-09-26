@@ -61,12 +61,16 @@ const duckClass = `class Duck; def initialize; @b = +""; @log = []; end; def wri
 // the raw descriptor whenever $stderr / $stdout held anything that was not an
 // *IOObj, and MRI sends #write to whatever the global holds.
 //
-// Each name says WITNESS or GUARD, measured by running this exact file against
-// the parent commit rather than assumed: eight cases fail there, two pass. The
-// two GUARDs are the shapes rb_io_puts already got right (a line that already
-// ends in a newline, and an empty line), and they are here because the fix
-// rewrote the piece-splitting that produces all three shapes — a change that
-// could easily have made "always two pieces" out of a rule that is not.
+// Each name says WITNESS or GUARD, and the label is MEASURED by running this exact
+// file against `origin/main` rather than assumed. Across this file's three tests:
+// 11 WITNESS cases, all of which fail there, and 6 GUARD cases, all of which pass.
+// Nothing is mislabelled in either direction.
+//
+// The GUARDs here cover the two shapes rb_io_puts already got right (a line that
+// already ends in a newline, and an empty line) and the default-off :deprecated
+// gate. They are present because the fix rewrote the piece-splitting that produces
+// all three shapes — a change that could easily have made "always two pieces" out
+// of a rule that is not.
 //
 // Every case asserts BOTH streams. That is not decoration: the old code did not
 // lose the text, it wrote it to the raw descriptor, so an assertion on one buffer
