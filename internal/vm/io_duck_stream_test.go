@@ -229,6 +229,28 @@ print err.collected`,
 			wantOut: "duck.rb:8: warning: One#write is outdated interface which accepts just one argument\n",
 			wantErr: "",
 		},
+		// …and the same setup with :deprecated left at its DEFAULT draws no notice at
+		// all. rb_category_warning checks rb_warning_category_enabled_p, and
+		// :deprecated is off by default in Ruby 3+, which is why the line above is
+		// almost never seen in practice. This case is what makes that gate a
+		// measured claim rather than a comment.
+		{
+			name: "GUARD the outdated-interface notice stays silent with :deprecated off",
+			src: duckClass + `err = Duck.new
+out = Object.new
+def out.write(x); 1; end
+$VERBOSE = true
+$stdout = out
+$stderr = err
+puts "hi"
+$stdout = STDOUT
+$stderr = STDERR
+print err.collected.inspect
+print " "
+print Warning[:deprecated].inspect`,
+			wantOut: `"" false`,
+			wantErr: "",
+		},
 		// The same notice when #write lives on the object's SINGLETON: MRI switches
 		// the separator to '.' and names the object rather than its class
 		// (`RCLASS_SINGLETON_P(klass) ? (klass = io, '.') : '#'`). The name is

@@ -1363,10 +1363,11 @@ func (vm *VM) ioWrite(sink object.Value, s string) {
 // arguments — while a `def write(x)` stream sees write("hi") then write("\n").
 // Joining the pieces into one "hi\n" argument, as this file used to, is visible
 // to any stream that records what it was handed.
+// It takes at least one piece, and deliberately carries no guard for zero: MRI's
+// rb_io_writev is never reached with argc 0 either (rb_io_puts always builds n >= 1,
+// and its no-argument case goes through rb_io_write), so a guard here would be a
+// branch no test could reach honestly.
 func (vm *VM) ioWritev(sink object.Value, strs ...string) {
-	if len(strs) == 0 {
-		return
-	}
 	if len(strs) > 1 && vm.writeArityIsOne(sink) {
 		vm.warnOutdatedWrite(sink)
 		for _, s := range strs {
