@@ -187,6 +187,24 @@ jobs:
   # node is installed because TestClosedWasmBuildIntegration now RUNS the module it
   # builds, and it fails rather than skips if node is missing. A gate that steps
   # aside when a dependency is absent is the failure this lane exists to correct.
+  #
+  # THIS LANE IS RED ON ARRIVAL, and that is the finding, not a mistake. Turning the
+  # env var on is what a gate nobody ran was hiding: both closed-world tests fail
+  # their "the front-end must not be linked" assertion, on this branch and equally
+  # on the commit it branched from. `rbgo build --closed` prints "closed-world —
+  # front-end dropped (no lexer/parser/compiler linked)" and then ships a 172.9 MiB
+  # binary carrying 255 github.com/go-ruby-parser/parser.(*Parser).* text symbols.
+  # The cause is a single edge: internal/vm/rubocop.go and rubocop_bind.go have NO
+  # build tags, and github.com/go-ruby-rubocop/rubocop imports the parser, so the
+  # front-end re-enters the closed dep graph through the RuboCop binding
+  # (`go list -deps -tags rbgo_closed ./cmd/rbgo` shows it).
+  #
+  # The fix is deliberately NOT in this PR: it is a scope decision about what
+  # --closed supports (does a closed-world build still answer `require "rubocop"`,
+  # or degrade to a LoadError the way the network backends do on wasm?), and it
+  # touches internal/vm, not this cluster. Neither assertion was weakened to get a
+  # green tick -- the whole point of the exercise was that a check nobody runs is
+  # documentation.
   build-integration:
     name: rbgo build integration (RBGO_BUILD_IT)
     runs-on: ubuntu-latest

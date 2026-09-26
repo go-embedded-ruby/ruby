@@ -123,8 +123,15 @@ func TestClosedWasmBuildIntegration(t *testing.T) {
 	}
 	run := exec.Command(node, glue, wasmOut)
 	out, err := run.CombinedOutput()
-	if err != nil {
-		t.Fatalf("running the closed wasm module under node failed: %v\n%s", err, out)
+	// A non-zero exit is EXPECTED here, and only for one reason. closed_main_wasm.go
+	// ends in select{} on purpose, to keep the runtime alive for the JS event and
+	// animation callbacks a baked program may have registered; this program
+	// registers none, so once it returns every goroutine is parked and Go's
+	// deadlock detector aborts the module. The assertion is therefore on the REASON:
+	// that exact abort is the documented design, and any other failure — a trap, a
+	// link error, a Ruby exception — still fails the test.
+	if err != nil && !strings.Contains(string(out), "all goroutines are asleep - deadlock!") {
+		t.Fatalf("running the closed wasm module under node failed for an unexpected reason: %v\n%s", err, out)
 	}
 	if !strings.Contains(string(out), "closed wasm ruby ran") {
 		t.Errorf("the baked program's JS.log did not reach the JS console; node said:\n%s", out)
