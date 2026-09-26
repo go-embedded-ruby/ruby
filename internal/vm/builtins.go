@@ -11502,6 +11502,17 @@ func spaceshipNumeric(vm *VM, self object.Value, args []object.Value, _ *Proc) o
 		pair := vm.send(other, "coerce", []object.Value{self}, nil)
 		arr, ok := pair.(*object.Array)
 		if !ok || len(arr.Elems) != 2 {
+			// do_coerce with err = FALSE (which is what rb_num_coerce_cmp passes):
+			//     if (!RB_TYPE_P(ary, T_ARRAY) || RARRAY_LEN(ary) != 2) {
+			//         if (err) rb_raise(rb_eTypeError, "coerce must return [x, y]");
+			//         else if (!NIL_P(ary)) rb_raise(rb_eTypeError, "coerce must return [x, y]");
+			//         return FALSE;
+			//     }
+			// so a #coerce answering nil declines quietly and the comparison is
+			// nil; anything else that is not a pair is a TypeError.
+			if object.IsNil(pair) {
+				return object.NilV
+			}
 			raise("TypeError", "coerce must return [x, y]")
 		}
 		return vm.send(arr.Elems[0], "<=>", []object.Value{arr.Elems[1]}, nil)

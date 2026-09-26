@@ -53,7 +53,9 @@ func TestPuppetBatch(t *testing.T) {
 		// Integer#floor / #ceil (no-arg and negative-digits).
 		{`p [7.floor, 7.ceil, 7.floor(1), 7.ceil(2)]`, "[7, 7, 7, 7]\n"},
 		{`p [73.floor(-1), 73.ceil(-1), (-73).floor(-1), (-73).ceil(-1), 0.floor(-1)]`, "[70, 80, -80, -70, 0]\n"},
-		{`p [7.floor(-30), 7.ceil(-30)]`, "[0, 0]\n"}, // beyond int64: 0
+		// rb_int_ceil is exact: 10**30 does not fit an int64, but the answer is
+		// still 10**30 (MRI 4.0.5 agrees).
+		{`p [7.floor(-30), 7.ceil(-30)]`, "[0, 1000000000000000000000000000000]\n"},
 
 		// String#each_codepoint / #codepoints.
 		{`r = []; "abç".each_codepoint { |c| r << c }; p r`, "[97, 98, 231]\n"},

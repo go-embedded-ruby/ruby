@@ -155,7 +155,12 @@ func binary(op bytecode.Op, a, b object.Value) object.Value {
 		return floatOp(op, af, bf)
 	}
 
-	return raise("TypeError", "%s can't be coerced for %s", b.Inspect(), op)
+	// numeric.c v3_4_0 coerce_failed names the OPERAND by value when it is an
+	// immediate or a Float and by class otherwise, and the RECEIVER by class:
+	//     rb_raise(rb_eTypeError, "%"PRIsVALUE" can't be coerced into %"PRIsVALUE, y, rb_obj_class(x));
+	// so `13 + "x"` is "String can't be coerced into Integer". rbgo inspected the
+	// operand and named the internal opcode ("\"x\" can't be coerced for add").
+	return raise("TypeError", "%s can't be coerced into %s", coerceFailedName(b), coerceClassName(a))
 }
 
 // isCompareOp reports whether op is one of the four ordering comparisons.
@@ -1575,6 +1580,23 @@ func coerceFailedName(v object.Value) string {
 	switch v.(type) {
 	case object.Nil, object.Bool, object.Symbol, object.Integer, object.Float:
 		return v.Inspect()
+	}
+	return coerceClassName(v)
+}
+
+// coerceClassName is rb_obj_class(v).name for the operands coerce_failed sees.
+// It is classNameOf with the two cases that table (a value-SHAPE table, not an
+// object-model one) cannot name: a Bignum is an Integer, and a class or module
+// object is a Class or a Module — both of which it reports as "Object".
+func coerceClassName(v object.Value) string {
+	switch t := v.(type) {
+	case *object.Bignum:
+		return "Integer"
+	case *RClass:
+		if t.isModule {
+			return "Module"
+		}
+		return "Class"
 	}
 	return classNameOf(v)
 }

@@ -387,3 +387,35 @@ p (-a).equal?(-b)`, "false\n"},
 		})
 	}
 }
+
+// TestCoerceFailedNaming pins numeric.c v3_4_0's coerce_failed:
+//
+//	if (SPECIAL_CONST_P(y) || SYMBOL_P(y) || RB_FLOAT_TYPE_P(y)) y = rb_inspect(y);
+//	else y = rb_obj_class(y);
+//	rb_raise(rb_eTypeError, "%"PRIsVALUE" can't be coerced into %"PRIsVALUE, y, rb_obj_class(x));
+//
+// so the immediates and Float are shown by VALUE and everything else by CLASS,
+// and the receiver by class. rbgo inspected the operand and then named the
+// internal opcode: `13 + "x"` said `"x" can't be coerced for add`.
+func TestCoerceFailedNaming(t *testing.T) {
+	cases := []struct{ name, src, msg string }{
+		{"string", `13 + "x"`, "String can't be coerced into Integer"},
+		{"symbol", `13 + :symbol`, ":symbol can't be coerced into Integer"},
+		{"nil", `13 + nil`, "nil can't be coerced into Integer"},
+		{"true", `13 + true`, "true can't be coerced into Integer"},
+		{"false", `13 - false`, "false can't be coerced into Integer"},
+		{"object", `13 * Object.new`, "Object can't be coerced into Integer"},
+		{"class", `13 + Float`, "Class can't be coerced into Integer"},
+		{"module", `13 + Comparable`, "Module can't be coerced into Integer"},
+		{"float_receiver", `1.5 + "x"`, "String can't be coerced into Float"},
+		{"bignum_receiver", `(2 ** 70) + "x"`, "String can't be coerced into Integer"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			class, msg := evalErr(t, tc.src)
+			if class != "TypeError" || !strings.Contains(msg, tc.msg) {
+				t.Fatalf("src=%q got %s: %q want TypeError: %q", tc.src, class, msg, tc.msg)
+			}
+		})
+	}
+}
