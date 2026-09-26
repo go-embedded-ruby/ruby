@@ -1641,6 +1641,75 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 	// (a native, which pushes no frame of its own) can read the call site's cref.
 	vm.frameCrefs[frameCrefsDepth-1] = lexCref
 
+	// frameCref is THIS frame's live cref: the scope a refinement lookup resolves
+	// against, and the cref a block literal created here captures.
+	//
+	// It is normally lexCref. But `using` does not merely record a module: it
+	// REPLACES the calling frame's cref with a duplicate that carries the
+	// refinements — rb_vm_cref_replace_with_duplicated_cref (vm.c v3_4_0:1931) →
+	// vm_cref_replace_with_duplicated_cref (vm_insnhelper.c v3_4_0:912), called
+	// from mod_using (eval.c:1547) and top_using (eval.c:1890). A block created
+	// AFTER that `using`, in the same frame, therefore captures the replacement,
+	// and so does every scope that chains to it.
+	//
+	// rbgo's adoptRefinementCref performs that replacement on the frame's cref
+	// ENTRY, which is why `1.foo` directly inside a `Module.new { using R; … }`
+	// body already worked. The block literals did not: they read the lexCref
+	// LOCAL, settled before `using` ran and frozen at where the block was
+	// written — top level, for a `Module.new` body. So a refinement activated in
+	// such a body reached no nested block at all: not `Module.new {}`, not
+	// `Class.new {}`, not #instance_eval / #instance_exec / #class_eval, not even
+	// a plain `each`.
+	//
+	// Reading the entry instead of the local is the whole fix, and it is read at
+	// block-CREATION time, as MRI captures it. Guarded by anyRefinements, so a
+	// program with no refinement pays a bool test on the hot block-literal path
+	// and the entry always equals the local anyway.
+	frameCref := func() *RClass {
+		if vm.anyRefinements && frameCrefsDepth-1 < len(vm.frameCrefs) {
+			if c := vm.frameCrefs[frameCrefsDepth-1]; c != nil {
+				return c
+			}
+		}
+		return lexCref
+	}
+
+	// refinedFor resolves a send against the refinements active HERE.
+	//
+	// MRI keeps a cref CHAIN and looks in every link: a frame that eval'd into
+	// another scope has a cref pushed on top of the one it was written under —
+	// vm_cref_push(..., pushed_by_eval=TRUE) for class_eval / instance_eval, and
+	// the same for a `refine` block, whose pushed cref's klass is the refinement
+	// module itself (rb_yield_refine_block, eval.c v3_4_0). Both links can carry
+	// refinements, and rb_method_entry_with_refinements walks them all.
+	//
+	// rbgo records one *RClass per frame, so the chain is these two ends: the
+	// DEFINEE is the pushed link (the refinement inside a `refine` block, the
+	// eval target inside a class_eval) and frameCref is the textual one it was
+	// pushed onto. Innermost first, as MRI pushes them.
+	//
+	// Consulting only the definee lost every refinement activated in an
+	// enclosing Module.new / Class.new / class_eval body; consulting only the
+	// cref lost the ones a `refine` block sees from its own holder.
+	refinedFor := func(recv object.Value, name string) *Method {
+		if m := vm.refinedMethod(definee, recv, name); m != nil {
+			return m
+		}
+		if c := frameCref(); c != definee {
+			if m := vm.refinedMethod(c, recv, name); m != nil {
+				return m
+			}
+		}
+		// The third link: when this frame is a block, the scope its literal was
+		// created UNDER — a `using` in a Class.new body reaches a lambda written
+		// in a method of that class only through this.
+		if selfBlock != nil && selfBlock.refDefinee != nil &&
+			selfBlock.refDefinee != definee && selfBlock.refDefinee != frameCref() {
+			return vm.refinedMethod(selfBlock.refDefinee, recv, name)
+		}
+		return nil
+	}
+
 	// methodDefinee is the class a `def` (and `alias`/`undef`) in this frame lands
 	// on. It is the definee, except under instance_eval/instance_exec, where the
 	// method-def target is switched to the receiver's singleton class while the
@@ -2030,7 +2099,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					base := len(stack) - argc
 					recv := stack[base-1]
 					if vm.anyRefinements {
-						if rm := vm.refinedMethod(definee, recv, name); rm != nil {
+						if rm := refinedFor(recv, name); rm != nil {
 							if in.Flags&bytecode.FlagSendExplicit != 0 {
 								vm.checkVisibility(recv, name, rm, self)
 							}
@@ -2090,7 +2159,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					recv := pop()
 					// A literal block: capture this frame's env, self, block.
 					markEnvCaptured(env)
-					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					blk := &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 					vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 					if res, done := vm.enforceSendVisRoute(in.Flags, recv, name, callArgs, blk, self); done {
 						push(res)
@@ -2098,7 +2167,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 						continue
 					}
 					if vm.anyRefinements {
-						if rm := vm.refinedMethod(definee, recv, name); rm != nil {
+						if rm := refinedFor(recv, name); rm != nil {
 							push(vm.invokeInPlace(rm, recv, callArgs, blk))
 							pc++
 							continue
@@ -2118,7 +2187,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				bblk := vm.toBlock(blockVal)
 				vm.sendNoKW = in.Flags&bytecode.FlagSendNoKW != 0 // MRI: the call info decides, not the callee
 				if vm.anyRefinements {
-					if rm := vm.refinedMethod(definee, recv, bname); rm != nil {
+					if rm := refinedFor(recv, bname); rm != nil {
 						push(vm.invokeInPlace(rm, recv, callArgs, bblk))
 						pc++
 						continue
@@ -2281,7 +2350,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				superBlk := block
 				if in.C > 0 { // an explicit `super(...) { … }` literal block overrides the frame block
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					superBlk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				var superArgs []object.Value
 				zsuperKW := false
@@ -2323,7 +2392,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 					superBlk = vm.toBlock(pop())
 				case in.C > 1: // a literal `super(*a) { … }` block, from child C-2
 					markEnvCaptured(env)
-					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					superBlk = &Proc{iseq: iseq.Children[in.C-2], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				argsArr := pop().(*object.Array)
 				suElems, suNoKW := applyKWSplat(argsArr.Elems, in.Flags)
@@ -2650,7 +2719,7 @@ func (vm *VM) exec(iseq *bytecode.ISeq, self object.Value, args []object.Value, 
 				var blk *Proc
 				if in.C > 0 {
 					markEnvCaptured(env)
-					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: lexCref, home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
+					blk = &Proc{iseq: iseq.Children[in.C-1], env: env, defLocals: iseq.Locals, self: self, block: block, cref: frameCref(), refDefinee: refDefineeOf(definee, frameCref()), home: homeTarget(), superName: homeSuperName, superDefinee: homeSuperDefinee, superArgs: homeSuperArgs, dmBody: homeDmBody, methodCtx: fm}
 				}
 				saElems, saNoKW := applyKWSplat(argsArr.Elems, in.Flags)
 				vm.sendNoKW = saNoKW // MRI: the call info decides, not the callee

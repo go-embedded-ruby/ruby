@@ -82,6 +82,18 @@ type Proc struct {
 	// was written, so a bare constant inside the block resolves by the same
 	// lexical nesting as the surrounding method/class body. nil means top level.
 	cref *RClass
+	// refDefinee is the OTHER end of the cref chain at block-creation time: the
+	// creating frame's definee, when it differs from cref. MRI keeps a chain and
+	// a frame that eval'd into another scope has a cref pushed on top of the one
+	// it was written under (vm_cref_push with pushed_by_eval), so BOTH links can
+	// carry refinements and rb_method_entry_with_refinements walks both. rbgo
+	// records one *RClass per frame, so a block has to carry the second end
+	// itself or a refinement activated in a Class.new / Module.new / class_eval
+	// body stops at the first block written inside it.
+	//
+	// It feeds refinement lookup ONLY. Constant resolution still follows cref
+	// alone, because MRI SKIPS a pushed_by_eval cref when resolving a constant.
+	refDefinee *RClass
 	// home identifies the method (or top-level) activation a non-local `return`
 	// inside this block unwinds to — the activation where the block literal was
 	// written. nil for synthesized procs that never carry an explicit return.
@@ -2505,4 +2517,14 @@ func ivarTable(self object.Value) map[string]object.Value {
 		return st.ivars
 	}
 	return nil
+}
+
+// refDefineeOf picks the second end of the cref chain to record on a block
+// literal: the creating frame's definee when it differs from the frame's cref,
+// else nil (the two ends coincide and one pointer says it). See Proc.refDefinee.
+func refDefineeOf(definee, cref *RClass) *RClass {
+	if definee == cref {
+		return nil
+	}
+	return definee
 }
