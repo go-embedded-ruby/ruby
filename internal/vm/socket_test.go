@@ -410,8 +410,11 @@ func TestSocketFeatureRequire(t *testing.T) {
 // TestSocketThroughRbgoBinary is the literal "through the rbgo binary" proof: it
 // builds the cmd/rbgo executable and runs a script file that TCPSocket.new's to
 // an in-process httptest server, asserting the HTTP body on the binary's stdout.
-// It is skipped (not failed) if the binary cannot be built, so the unrelated
-// pre-existing cmd/rbgo codegen issue never blocks this suite.
+//
+// A build failure FAILS this test. It used to skip, justified by an "unrelated
+// pre-existing cmd/rbgo codegen issue" that no longer exists -- the premise
+// expired and left a skip that would have swallowed any future compile break,
+// reporting green. Same defect class as issue #682.
 func TestSocketThroughRbgoBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping binary build in -short")
@@ -424,7 +427,7 @@ func TestSocketThroughRbgoBinary(t *testing.T) {
 	build.Dir = repoRoot(t)
 	build.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Skipf("cannot build cmd/rbgo (%v): %s", err, out)
+		t.Fatalf("cannot build cmd/rbgo (%v): %s", err, out)
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

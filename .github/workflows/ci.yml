@@ -126,3 +126,112 @@ jobs:
           GOOS=wasip1 GOARCH=wasm go test -c -o vm.test.wasm ./internal/vm
           "$(go env GOPATH)/bin/wazero" run -mount=/tmp:/tmp -env TMPDIR=/tmp \
             vm.test.wasm -test.run 'TestStatSysExtract|TestRunsAProgramOnThisHost' -test.v
+
+  # WebAssembly (BROWSER) gate: GOOS=js GOARCH=wasm, the target behind the
+  # playground (cmd/wasm + web/) and `rbgo build --closed --target wasm`.
+  #
+  # It is a SEPARATE target from the wasip1 lane above, not a variation of it, and
+  # that is the whole reason this lane exists. GOOS=js and GOOS=wasip1 have
+  # different syscall packages: js/wasm has no ENOTRECOVERABLE, EOWNERDEAD or
+  # ETXTBSY, so internal/vm stopped compiling for the browser for three days
+  # (#629 -> #682) while the wasip1 lane above stayed green the entire time. One
+  # wasm lane is not wasm coverage.
+  #
+  # The lane does not stop at the compiler either. It loads the module into node
+  # with Go's own lib/wasm/wasm_exec.js — the same glue web/index.html loads — and
+  # asserts Ruby ran: see web/smoke.mjs. On the runner that includes the bucket rule
+  # witnessed inside a JS host on Linux — Errno::ETXTBSY::Errno is 0 there,
+  # Errno::ETXTBSY.equal?(Errno::NOERROR) is true, Errno.constants.size is 158 —
+  # which is the half of #682 no compile-only check could have reached. Measured on an M-series host with a cold
+  # GOCACHE, so these are build-from-scratch numbers, not warm ones: build ./...
+  # 14s, vet 18s, the module 97 MB, the node run a few seconds. MEASURED ON A RUNNER:
+  # 1.9 min end to end on ubuntu-latest, all nine smoke checks green -- the cheapest
+  # lane in this file bar none, and cheaper than the `wasm (wasip1)` lane beside it
+  # (2.0 min). Nothing here is -race-priced and it runs in parallel with the others.
+  wasm-js:
+    name: wasm (js, browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: go version && node --version
+      # ./... and not just ./cmd/wasm: #682 was in internal/vm, a package the
+      # playground reaches only transitively, and the breakage was three names in
+      # a table no browser-specific file mentions.
+      - name: Build everything for js/wasm (the #682 regression)
+        run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...
+      - name: Vet the js/wasm packages
+        run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go vet ./cmd/wasm ./cmd/rbgo ./internal/vm
+      - name: Build the playground module
+        run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -o web/rbgo.wasm ./cmd/wasm
+      - name: Run Ruby in a real JS host (node + Go's wasm_exec.js)
+        run: node web/smoke.mjs web/rbgo.wasm
+
+  # The RBGO_BUILD_IT lane. Three integration tests in cmd/rbgo drive `rbgo build`
+  # end to end — native, --closed, and --closed --target wasm — and every one of
+  # them was behind `if os.Getenv("RBGO_BUILD_IT") == ""` with no workflow anywhere
+  # in this repo setting it. TestClosedWasmBuildIntegration fails on the #682
+  # regression with exactly its three errors: the guard was correct, complete, and
+  # unreachable for three days.
+  #
+  # The choice made here is to WIRE IT IN rather than delete the claim, because the
+  # three tests cover what no other lane does: the nested `go build` the rbgo
+  # command performs, that --closed really drops the front-end from the binary, and
+  # that a baked program runs. The cost is what makes it its own lane rather than a
+  # step in `test`: these are full cross-compiles of a ~97 MB module, 35s cold for
+  # all three on an M-series host (they share the build cache, so the third is
+  # nearly free) and MEASURED ON A RUNNER at 141s of test time, 5.3 min for the
+  # whole job. That is the honest frame: it lands BETWEEN two lanes this file
+  # already pays for — `arch arm64` at 5.9 min and `arch amd64` at 9.4 min on the
+  # same commit — and well under the 20-90 min -race coverage lane. Keeping it in
+  # its own lane is about staying off that lane's critical path, not about price.
+  #
+  # node is installed because TestClosedWasmBuildIntegration now RUNS the module it
+  # builds, and it fails rather than skips if node is missing. A gate that steps
+  # aside when a dependency is absent is the failure this lane exists to correct.
+  #
+  # THIS LANE IS RED ON ARRIVAL, and that is the finding, not a mistake. Turning the
+  # env var on is what a gate nobody ran was hiding: both closed-world tests fail
+  # their "the front-end must not be linked" assertion, on this branch and equally
+  # on the commit it branched from. `rbgo build --closed` prints "closed-world —
+  # front-end dropped (no lexer/parser/compiler linked)" and then ships a 172.9 MiB
+  # binary carrying 255 github.com/go-ruby-parser/parser.(*Parser).* text symbols.
+  # The cause is a single edge: internal/vm/rubocop.go and rubocop_bind.go have NO
+  # build tags, and github.com/go-ruby-rubocop/rubocop imports the parser, so the
+  # front-end re-enters the closed dep graph through the RuboCop binding
+  # (`go list -deps -tags rbgo_closed ./cmd/rbgo` shows it).
+  #
+  # Confirmed on a GitHub ubuntu runner, not only locally, and it fails for EXACTLY
+  # that one reason: TestBuildIntegration, TestBuildEnv and
+  # TestRunSendsWarningsToTheRealStderr pass, and the only lines in the failure are
+  # the two "still links the front-end" assertions. The node run of the closed wasm
+  # module and both of its JS.log assertions pass there too, so the leak is
+  # platform-independent and nothing else in the lane is broken.
+  #
+  # The fix is deliberately NOT in this PR: it is a scope decision about what
+  # --closed supports (does a closed-world build still answer `require "rubocop"`,
+  # or degrade to a LoadError the way the network backends do on wasm?), and it
+  # touches internal/vm, not this cluster. Neither assertion was weakened to get a
+  # green tick -- the whole point of the exercise was that a check nobody runs is
+  # documentation.
+  build-integration:
+    name: rbgo build integration (RBGO_BUILD_IT)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: go version && node --version
+      - name: go test ./cmd/rbgo with the integration tests enabled
+        env:
+          RBGO_BUILD_IT: '1'
+        run: go test -count=1 -timeout=30m -v ./cmd/rbgo

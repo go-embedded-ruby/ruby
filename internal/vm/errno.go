@@ -31,18 +31,42 @@ import (
 //     the whole known_errors list on every platform — 158 entries — and only the
 //     numbers differ.
 
-// errnoNumbers maps an Errno::Exxx name to its platform errno number. The values
-// come from the host's syscall table rather than being fixed here, because they
-// genuinely differ across platforms (EAGAIN is 11 on Linux and 35 on the
-// BSDs/macOS) and Errno::EAGAIN::Errno must match the host MRI's.
+// THE BUCKET RULE, stated once, here. Every name of MRI's known_errors list is in
+// exactly one of three buckets, and which bucket a name is in can depend on the
+// GOOS being built for:
 //
-// The set is the names Go's portable syscall package defines on EVERY GOOS rbgo
-// builds for (darwin, linux, windows, wasip1). Go exposes the rest only under a
-// build tag, so from rbgo's point of view they are undefined names and take
-// MRI's undefined_error treatment below. On a platform whose libc does define
-// one — macOS has EAUTH at 80 — rbgo reports 0 where MRI reports the real
-// number; see issue: per-platform errno tables need a per-platform MRI witness.
-var errnoNumbers = map[string]int64{
+//  1. errnoNumbers — a number from this target's syscall package.
+//  2. errnoAliases — a second spelling of a number bucket 1 already has.
+//  3. errnoUndefinedNames — no number on this target, so MRI's undefined_error
+//     treatment: still a constant, naming Errno::NOERROR (errno 0).
+//
+// The buckets' union is errnoKnownNameCount names on EVERY target: a name that
+// leaves bucket 1 because this GOOS lacks it MUST arrive in bucket 3, or
+// Errno.constants silently shrinks. errnoNumbers and errnoUndefinedNames are
+// therefore assembled from a universal part plus a per-target part
+// (errno_native.go / errno_wasm.go), and TestErrnoBucketsPartitionKnownNames
+// checks the partition on whichever target it runs on.
+
+// errnoUniversalNumbers maps an Errno::Exxx name to its errno number for the
+// names EVERY GOOS rbgo builds for defines. The values come from the host's
+// syscall table rather than being fixed here, because they genuinely differ
+// across platforms (EAGAIN is 11 on Linux and 35 on the BSDs/macOS) and
+// Errno::EAGAIN::Errno must match the host MRI's.
+//
+// "Universal" is measured, not assumed: a probe compiled this set for
+// darwin/{amd64,arm64}, linux/{amd64,386,arm64,riscv64,loong64,ppc64le,s390x},
+// windows/{amd64,arm64}, wasip1/wasm and js/wasm. The names js/wasm alone lacks
+// (ENOTRECOVERABLE, EOWNERDEAD, ETXTBSY) are NOT here — they live in the
+// per-target files, which is what issue #682 was about.
+//
+// The names outside this set are in errnoUndefinedNames, where rbgo reports 0.
+// That is a DECLARED conformance gap, not an absence: the same probe found that
+// Go's portable syscall package does define many of them per-GOOS with no build
+// tag at all (57 of the 81 on linux/amd64, 56 on windows, 31 on darwin/amd64, 2
+// on wasip1 — macOS EAUTH at 80 is only the best-known one). Closing it needs a
+// per-platform MRI witness for each number, which is the open per-platform errno
+// issue and deliberately not done here.
+var errnoUniversalNumbers = map[string]int64{
 	"E2BIG":           int64(syscall.E2BIG),
 	"EACCES":          int64(syscall.EACCES),
 	"EADDRINUSE":      int64(syscall.EADDRINUSE),
@@ -98,14 +122,12 @@ var errnoNumbers = map[string]int64{
 	"ENOTCONN":        int64(syscall.ENOTCONN),
 	"ENOTDIR":         int64(syscall.ENOTDIR),
 	"ENOTEMPTY":       int64(syscall.ENOTEMPTY),
-	"ENOTRECOVERABLE": int64(syscall.ENOTRECOVERABLE),
 	"ENOTSOCK":        int64(syscall.ENOTSOCK),
 	"ENOTSUP":         int64(syscall.ENOTSUP),
 	"ENOTTY":          int64(syscall.ENOTTY),
 	"ENXIO":           int64(syscall.ENXIO),
 	"EOPNOTSUPP":      int64(syscall.EOPNOTSUPP),
 	"EOVERFLOW":       int64(syscall.EOVERFLOW),
-	"EOWNERDEAD":      int64(syscall.EOWNERDEAD),
 	"EPERM":           int64(syscall.EPERM),
 	"EPIPE":           int64(syscall.EPIPE),
 	"EPROTO":          int64(syscall.EPROTO),
@@ -117,20 +139,70 @@ var errnoNumbers = map[string]int64{
 	"ESRCH":           int64(syscall.ESRCH),
 	"ESTALE":          int64(syscall.ESTALE),
 	"ETIMEDOUT":       int64(syscall.ETIMEDOUT),
-	"ETXTBSY":         int64(syscall.ETXTBSY),
 	"EXDEV":           int64(syscall.EXDEV),
 	// NOERROR is errno 0. MRI registers it first, so every name the platform does
 	// not define (errnoUndefinedNames) binds to this very class.
 	"NOERROR": 0,
 }
 
-// errnoUndefinedNames are the remaining Errno constants of MRI's known_errors
-// list. Go's portable syscall package carries no number for them, so they are
-// registered the way MRI's undefined_error does it: as extra constants naming
-// Errno::NOERROR. Keeping them means Errno.constants has MRI's full 158 entries,
-// which core/exception/errno_spec.rb and system_call_error_spec.rb both lean on
-// (the latter takes Errno.constants.size as an errno number no class can claim).
-var errnoUndefinedNames = []string{
+// errnoPlatformNames are the MRI known_errors names Go's portable syscall package
+// defines on SOME of rbgo's targets and not others — bucket 1 on one GOOS and
+// bucket 3 on another. js/wasm is the whole reason this bucket exists: Go's
+// js/wasm syscall package has no ENOTRECOVERABLE, EOWNERDEAD or ETXTBSY, while
+// darwin, linux, windows and wasip1 all define the three (measured, see
+// errnoUniversalNumbers).
+//
+// This list is the canonical statement of WHICH names are per-target. The numbers
+// (or their absence) come from errnoPlatformNumbers / errnoPlatformUndefined in
+// errno_native.go and errno_wasm.go, and the partition test asserts those two
+// exactly cover this list with no overlap — so a future name added to one file
+// and forgotten in the other is a test failure, not a silently shorter
+// Errno.constants.
+var errnoPlatformNames = []string{"ENOTRECOVERABLE", "EOWNERDEAD", "ETXTBSY"}
+
+// errnoKnownNameCount is the size of MRI's known_errors list (ruby/ruby v3_4_0
+// known_errors.inc), which Errno.constants must have on EVERY target. It is
+// pinned as a literal on purpose: comparing the registered constants against the
+// tables' own lengths — as TestErrnoClassRegistration does — cannot see a name
+// that fell out of every bucket, because the expectation shrinks with the
+// subject. This number does not.
+const errnoKnownNameCount = 158
+
+// errnoNumbers maps an Errno::Exxx name to this target's errno number: bucket 1
+// of the rule above, assembled from the universal set plus whatever of
+// errnoPlatformNames this GOOS defines.
+var errnoNumbers = mergeErrnoNumbers(errnoUniversalNumbers, errnoPlatformNumbers)
+
+// mergeErrnoNumbers returns the union of the two number tables. It takes them as
+// arguments rather than reading the package vars so the merge is exercised
+// directly by a test on every lane, including the js-shaped case (an empty
+// platform table) that no POSIX lane builds.
+func mergeErrnoNumbers(universal, platform map[string]int64) map[string]int64 {
+	m := make(map[string]int64, len(universal)+len(platform))
+	for name, n := range universal {
+		m[name] = n
+	}
+	for name, n := range platform {
+		m[name] = n
+	}
+	return m
+}
+
+// errnoUndefinedNames are the Errno constants of MRI's known_errors list that
+// have no number on THIS target: bucket 3 of the rule above. They are registered
+// the way MRI's undefined_error does it — as extra constants naming Errno::NOERROR
+// — so Errno.constants keeps MRI's full errnoKnownNameCount entries, which
+// core/exception/errno_spec.rb and system_call_error_spec.rb both lean on (the
+// latter takes Errno.constants.size as an errno number no class can claim).
+//
+// It is the names undefined on every target plus the per-target remainder, which
+// is empty everywhere except js/wasm.
+var errnoUndefinedNames = append(append([]string{}, errnoUndefinedEverywhere...), errnoPlatformUndefined...)
+
+// errnoUndefinedEverywhere are the known_errors names rbgo has no number for on
+// any target it builds for. See errnoUniversalNumbers on why some of these are a
+// declared conformance gap rather than a genuine absence.
+var errnoUndefinedEverywhere = []string{
 	"EADV", "EAUTH", "EBADARCH", "EBADE",
 	"EBADEXEC", "EBADFD", "EBADMACHO", "EBADR",
 	"EBADRPC", "EBADRQC", "EBADSLT", "EBFONT",

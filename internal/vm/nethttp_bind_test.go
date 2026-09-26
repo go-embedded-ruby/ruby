@@ -370,8 +370,12 @@ puts h.port`)
 
 // TestNetHTTPThroughRbgoBinary is the literal "through the rbgo binary" proof: it
 // builds cmd/rbgo and runs a script that does Net::HTTP.get against in-process
-// HTTP and HTTPS servers, asserting each body on the binary's stdout. Skipped
-// (not failed) if the binary cannot be built, mirroring the socket suite.
+// HTTP and HTTPS servers, asserting each body on the binary's stdout.
+//
+// A build failure FAILS this test. It used to skip, which made a broken
+// cmd/rbgo indistinguishable from a passing run -- the same defect class as issue
+// #682, where the only guard that caught a three-day compile break was itself
+// unreachable. A test that cannot build its subject has not tested it.
 func TestNetHTTPThroughRbgoBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping binary build in -short")
@@ -384,7 +388,7 @@ func TestNetHTTPThroughRbgoBinary(t *testing.T) {
 	build.Dir = repoRoot(t)
 	build.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Skipf("cannot build cmd/rbgo (%v): %s", err, out)
+		t.Fatalf("cannot build cmd/rbgo (%v): %s", err, out)
 	}
 
 	httpSrv := httptest.NewServer(nethttpTestMux())
