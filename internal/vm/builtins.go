@@ -7167,16 +7167,6 @@ func nativePrintf(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.V
 	return object.NilV
 }
 
-// stdoutValue returns the object currently bound to $stdout (an IOObj, a
-// StringIO, or a host-supplied object), falling back to the default stdout IO
-// when the global is unset.
-func (vm *VM) stdoutValue() object.Value {
-	if v, ok := vm.globals["$stdout"]; ok {
-		return v
-	}
-	return vm.curStdout()
-}
-
 // coerceFormatString returns the format string for Kernel#sprintf/#format/#printf:
 // a String directly, otherwise the result of the argument's #to_str (MRI coerces
 // the format argument with #to_str, never #to_s). A missing #to_str or a
@@ -7205,13 +7195,10 @@ func (vm *VM) coerceFormatString(v object.Value) string {
 // terminated by the output record separator $\ when those globals are set.
 // Reference: ruby/ruby v3_4_0 io.c (rb_f_print -> rb_io_print).
 func nativePrint(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+	// stdoutValue already applies the "lost its #write" fallback, so #print needs no
+	// test of its own — the rule lives in stdSink.
 	out := vm.stdoutValue()
-	// A $stdout that answers no #write (one MRI would have rejected at assignment)
-	// falls back to the underlying stream rather than raising.
-	if !vm.respondsToDynamic(out, "write") {
-		out = vm.curStdout()
-	}
-	write := func(s string) { vm.send(out, "write", []object.Value{object.NewString(s)}, nil) }
+	write := func(s string) { vm.ioWrite(out, s) }
 	if len(args) == 0 {
 		if lastLine := vm.gvar("$_"); !object.IsNil(lastLine) {
 			write(vm.displayStr(lastLine))
@@ -7263,10 +7250,17 @@ func (vm *VM) pInspect(v object.Value) string {
 	return v.Inspect()
 }
 
+// nativeP implements Kernel#p — io.c rb_f_p (io.c:9089) → rb_p_write (io.c:9018),
+// which writes the inspected form and rb_default_rs to $stdout as TWO pieces
+// through rb_io_writev. rb_p_write's `RB_TYPE_P(r_stdout, T_FILE) &&
+// rb_method_basic_definition_p(…)` branch is not a semantic fork — both arms
+// produce the same bytes and the same #write dispatch for a non-IO — so rbgo takes
+// the general one. Writing through curStdout() instead, as this used to, dropped
+// every `p` aimed at a $stdout that only answers #write.
 func nativeP(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-	o := vm.curStdout()
+	out := vm.stdoutValue()
 	for _, a := range args {
-		o.writeStr(vm.pInspect(a) + "\n")
+		vm.ioWritev(out, vm.pInspect(a), "\n")
 	}
 	switch len(args) {
 	case 0:
@@ -12225,26 +12219,34 @@ func (vm *VM) qualifiedConstName(scope *RClass, name string) string {
 	return vm.moduleToSStr(scope) + "::" + name
 }
 
-// rbWarn1 is error.c's rb_warn at tag v3_4_0: the message is written to stderr
-// with the CALLING frame's "path:lineno: warning: " in front (rb_warn builds it
-// through rb_warning_string, which starts at the current frame), and it is
-// silenced only under -W0, where $VERBOSE is nil. `ruby -e 'p [1].index(1){}'`
-// prints "-e:1: warning: given block not used".
+// rbWarn1 is error.c's rb_warn at tag v3_4_0 (error.c:466): the message gets the
+// CALLING frame's "path:lineno: warning: " in front (rb_warn builds it through
+// rb_warning_string, which starts at the current frame), it is silenced only
+// under -W0 where $VERBOSE is nil (`if (!NIL_P(ruby_verbose))`), and it is then
+// handed to rb_write_warning_str. `ruby -e 'p [1].index(1){}'` prints
+// "-e:1: warning: given block not used".
+//
+// It emits through writeWarningStr — Warning.warn — and NOT to curStderr(), which
+// was the defect: rb_warn reaches $stderr only via the default Warning.warn's
+// `$stderr.write(message)`, so an overridden Warning.warn intercepts it and a
+// $stderr that merely answers #write collects it. See writeWarningStr in io.go
+// for the C chain and for why a StringIO double could witness neither.
 func (vm *VM) rbWarn1(msg string) {
 	if object.IsNil(vm.gvar("$VERBOSE")) {
 		return
 	}
-	vm.curStderr().writeStr(vm.warnUplevelPrefix(0) + msg + "\n")
+	vm.writeWarningStr(vm.warnUplevelPrefix(0) + msg + "\n")
 }
 
-// rbWarning1 is error.c's rb_warning, the quieter sibling of rb_warn: it prints
-// only when $VERBOSE is TRUE (ruby -w), which is why the specs that assert one
-// of these pass `verbose: true` to `complain`.
+// rbWarning1 is error.c's rb_warning (error.c:497), the quieter sibling of
+// rb_warn: it prints only when $VERBOSE is TRUE (ruby -w), which is why the specs
+// that assert one of these pass `verbose: true` to `complain`. Same sink as
+// rbWarn1 — rb_warning also ends in rb_write_warning_str.
 func (vm *VM) rbWarning1(msg string) {
 	if v := vm.gvar("$VERBOSE"); v != object.True {
 		return
 	}
-	vm.curStderr().writeStr(vm.warnUplevelPrefix(0) + msg + "\n")
+	vm.writeWarningStr(vm.warnUplevelPrefix(0) + msg + "\n")
 }
 
 // symbolNames interns the frozen String that Symbol#name answers. MRI's symbol
