@@ -120,7 +120,7 @@ func TestIOWave18ClosedAndSeekPaths(t *testing.T) {
 		// gets at EOF returns nil (setLineGlobals' nil branch).
 		{`require "stringio"; p StringIO.new("").gets`, "nil\n"},
 		// gets with more than a separator and a limit raises ArgumentError.
-		{`require "stringio"; p(StringIO.new("a").gets("x", 5, 9) rescue $!.class)`, "ArgumentError\n"},
+		{`require "stringio"; p((StringIO.new("a").gets("x", 5, 9) rescue $!.class))`, "ArgumentError\n"},
 		// IO.binread with a negative offset raises Errno::EINVAL (not ArgumentError).
 		{seed + "p(IO.binread(" + q(p) + ", 1, -1) rescue $!.class)", "Errno::EINVAL\n"},
 	}

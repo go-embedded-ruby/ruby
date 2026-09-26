@@ -24,7 +24,7 @@ func TestRescueModifierCommandCall(t *testing.T) {
 		// so foo is defined and callable.
 		{"def_end_rescue_defines", `def foo; 1; end rescue nil; p foo`, "1\n"},
 		// Positive control: the bare modifier DOES catch a StandardError.
-		{"standard_error_caught", `p(raise(StandardError, "x") rescue :caught)`, ":caught\n"},
+		{"standard_error_caught", `p((raise(StandardError, "x") rescue :caught))`, ":caught\n"},
 		// Negative: a non-StandardError (bare Exception) is NOT caught by the
 		// modifier rescue and propagates past it; the outer rescue Exception
 		// clause catches it, proving `:caught` never bound.
