@@ -336,7 +336,13 @@ end
 # DirSpecs' fixture tree at the same fixed path delete each other's files.
 # core/dir/foreach_spec.rb reads 8 alone and 7 under a 2-way sweep for MRI, which
 # is one concrete case of the "a parallel sweep is not reproducible" problem.
-SPEC_TMP_ROOT = "/tmp/rbgo_spec_tmp"
+# The path must be CANONICAL. mspec builds SPEC_TEMP_DIR from
+# File.realpath(Dir.pwd) (or File.realdirpath of $SPEC_TEMP_DIR), and on macOS
+# /tmp is a symlink to /private/tmp — so File.realpath of a path under an
+# uncanonical root comes back with the other prefix and the assertion compares
+# two spellings of the same file. That cost 15 examples for MRI across
+# core/file/real{,dir}path_spec.rb and core/dir/chdir_spec.rb.
+SPEC_TMP_ROOT = (File.realpath("/tmp") rescue "/tmp") + "/rbgo_spec_tmp"
 SPEC_TMP_BASE = File.join(SPEC_TMP_ROOT, Process.pid.to_s)
 SPEC_TEMP_DIR = SPEC_TMP_BASE
 SPEC_TMP_OWNER_PID = Process.pid
@@ -529,10 +535,28 @@ class ShouldProxy < BasicObject
         ::Kernel.raise(::SpecFail, "expected #{args[0]}, got #{raised.class}: #{raised.message}")
       end
     end
-    if args[1]
-      m = args[1]
+    # mspec's RaiseErrorMatcher takes (exception, message = nil, options = nil) and
+    # treats a Hash in the MESSAGE position as the options, whose only key is
+    # :cause (mspec/lib/mspec/matchers/raise_error.rb). We compared the Hash to
+    # the message, so `should.raise(RuntimeError, cause: err)` could never pass:
+    # core/exception/cause_spec.rb and core/kernel/raise_spec.rb lost 5 examples
+    # that way, MRI included.
+    m = args[1]
+    opts = args[2]
+    if m.is_a?(::Hash)
+      opts = m
+      m = nil
+    end
+    if m
       ok = m.is_a?(::Regexp) ? !!(raised.message =~ m) : (raised.message == m)
       ::Kernel.raise(::SpecFail, "wrong message: got #{raised.message.inspect}, want #{m.inspect}") unless ok
+    end
+    if opts.is_a?(::Hash) && opts.key?(:cause)
+      want = opts[:cause]
+      got = raised.cause
+      unless want == got
+        ::Kernel.raise(::SpecFail, "wrong cause: got #{got.inspect}, want #{want.inspect}")
+      end
     end
     # `-> { ... }.should.raise(Klass) { |e| ... }` inspects the captured exception.
     blk.call(raised) if blk
@@ -1010,30 +1034,41 @@ def after(scope = :each, &blk)
   ctx.after(scope, &blk)
 end
 
+# mspec/lib/mspec/runner/shared.rb, verbatim in shape:
+#
+#   def it_behaves_like(desc, meth, obj = nil)
+#     before :all do  @method = meth; @object = obj end
+#     after  :all do  @method = nil;  @object = nil  end
+#     it_should_behave_like desc.to_s
+#   end
+#
+# Both assignments are UNCONDITIONAL, on the ENCLOSING context, and the after
+# hook clears them. `obj` is very often `false` (the three
+# core/kernel/*_methods_spec.rb files pass `nil, false` right after `nil, true`),
+# so an `if obj` guard leaves the previous shared block's value in place and the
+# spec then asks for methods WITH ancestors — which, with one object per file,
+# returns this shim's own top-level private methods. That cost 2 examples each in
+# private_methods/protected_methods/public_methods, for MRI as well as rbgo.
 def it_behaves_like(desc, meth = nil, obj = nil)
+  ctx = $ctx_stack.last
+  if ctx
+    ctx.before(:all) { @method = meth; @object = obj }
+    ctx.after(:all) { @method = nil; @object = nil }
+  end
+  it_should_behave_like(desc)
+end
+
+# A bare `it_should_behave_like :name` splices a shared block into the current
+# context and inherits @method/@object from whatever registered them.
+def it_should_behave_like(desc)
   blk = $shared[desc]
-  parent = $ctx_stack.last
   if blk.nil?
     $RB_ERROR += 1
     $RB_FAILS << ["error", "shared #{desc}", "(missing)", "SharedNotFound", "no shared spec :#{desc}"]
     return
   end
-  ctx = SpecContext.new("shared #{desc}", parent)
-  # meth/obj are optional: a nested `it_should_behave_like :name` (no args) runs a
-  # shared block INSIDE another and must inherit @method/@object from the enclosing
-  # context's before hooks — setting them here (to nil) would clobber the inherited
-  # values. Only install the re-assert when they are actually provided.
-  if meth || obj
-    $world.instance_variable_set(:@method, meth) if meth
-    $world.instance_variable_set(:@object, obj) if obj
-    ctx.before(:each) do
-      @method = meth if meth
-      @object = obj if obj
-    end
-  end
-  ctx.parse_and_run(blk)
+  SpecContext.new("shared #{desc}", $ctx_stack.last).parse_and_run(blk)
 end
-def it_should_behave_like(desc, meth = nil, obj = nil); it_behaves_like(desc, meth, obj); end
 
 # mspec/lib/mspec/runner/evaluate.rb: `evaluate <<-ruby ... ruby do ... end`
 # defines ONE example that first evaluates the Ruby source against the evaluator
