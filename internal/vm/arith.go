@@ -1240,15 +1240,33 @@ func valueEqlRec(vm *VM, a, b object.Value, seen map[eqPair]struct{}) bool {
 		b = o.builtin
 	}
 	switch av := a.(type) {
-	case object.Integer:
-		bv, ok := b.(object.Integer)
-		return ok && av == bv
+	case object.Integer, *object.Bignum:
+		// Integer and Bignum are two representations of ONE Ruby class, so #eql?
+		// must compare their values and not their Go types: -9223372036854775808
+		// reaches the VM as an un-normalised Bignum from the compiler's literal
+		// path and as an Integer from (-2) ** 63, and MRI answers true for
+		// ((-2) ** 63).eql?(-9223372036854775808).
+		ai, _ := object.BigOf(a)
+		bi, ok := object.BigOf(b)
+		return ok && ai.Cmp(bi) == 0
 	case object.Float:
 		bv, ok := b.(object.Float)
 		return ok && av == bv
-	case *object.Bignum:
-		bv, ok := b.(*object.Bignum)
-		return ok && av.I.Cmp(bv.I) == 0
+	case *object.Rational:
+		// numeric.c's num_eql at tag v3_4_0 is
+		//     if (TYPE(x) != TYPE(y)) return Qfalse;
+		//     ... return rb_equal(x, y);
+		// so two T_RATIONALs fall through to nurat_eqeq_p and compare by value —
+		// Rational defines no #eql? of its own. Without this case Object#eql?
+		// reached plain identity and (1/1).eql?((1/1)) was false.
+		bv, ok := b.(*object.Rational)
+		return ok && av.R.Cmp(bv.R) == 0
+	case *object.Complex:
+		// Same rule for T_COMPLEX, with the components compared by #eql? in turn
+		// (so Complex(1, 0) is not eql? Complex(1.0, 0)) — Complex#eql? itself
+		// does this, but Array/Hash members reach valueEqlRec directly.
+		bv, ok := b.(*object.Complex)
+		return ok && valueEqlRec(vm, av.Re, bv.Re, seen) && valueEqlRec(vm, av.Im, bv.Im, seen)
 	case *object.String:
 		bv, ok := b.(*object.String)
 		return ok && string(av.Bytes()) == string(bv.Bytes())
@@ -1349,4 +1367,206 @@ func floorMod(a, b int64) int64 {
 		m += b
 	}
 	return m
+}
+
+// intPowBitLimit is bignum.c's BIGLEN_LIMIT at tag v3_4_0 for a 64-bit build.
+// rb_big_pow refuses a power whose exact result would need more bits than this
+// rather than attempt the allocation:
+//
+//	const size_t BIGLEN_LIMIT = 1ULL << 34; // 16 GB
+//	if (xbits == (size_t)-1 || (xbits > BIGLEN_LIMIT) ||
+//	    MUL_OVERFLOW_LONG_P(yy, xbits) || (xbits * yy > BIGLEN_LIMIT))
+//	    rb_raise(rb_eArgError, "exponent is too large");
+//
+// where xbits is the bit length of |x|. Without the check `100000000 **
+// 1000000000` never returns, which is why core/integer/pow_spec.rb and
+// core/integer/exponent_spec.rb used to time out and contribute nothing.
+const intPowBitLimit = int64(1) << 34
+
+// integerPow implements Integer#** and the one-argument Integer#pow, following
+// numeric.c's fix_pow and bignum.c's rb_big_pow at tag v3_4_0. Integer and
+// Float exponents are handled here; every other operand (Rational included)
+// goes through the coerce protocol, exactly as rb_num_coerce_bin does.
+func (vm *VM) integerPow(self, exp object.Value) object.Value {
+	base, _ := object.BigOf(self)
+	if e, ok := object.BigOf(exp); ok {
+		return integerPowInt(base, e)
+	}
+	if fy, ok := exp.(object.Float); ok {
+		// fix_pow's Float arm, in its own order: a zero exponent is 1.0 whatever
+		// the base, 0 ** negative is +Infinity, 1 ** anything is 1.0, and a
+		// negative base raised to a non-integral power leaves the reals.
+		dy := float64(fy)
+		if dy == 0 {
+			return object.Float(1)
+		}
+		if base.Sign() == 0 {
+			if dy < 0 {
+				return object.Float(math.Inf(1))
+			}
+			return object.Float(0)
+		}
+		if base.IsInt64() && base.Int64() == 1 {
+			return object.Float(1)
+		}
+		dx, _ := new(big.Float).SetInt(base).Float64()
+		if dx < 0 && dy != math.Round(dy) {
+			return dblComplexNewPolarPi(math.Pow(-dx, dy), dy)
+		}
+		return object.Float(math.Pow(dx, dy))
+	}
+	if res, ok := vm.tryNumericCoerce("**", self, exp); ok {
+		return res
+	}
+	return raise("TypeError", "%s can't be coerced into Integer", coerceFailedName(exp))
+}
+
+// integerPowInt raises an exact integer base to an exact integer exponent.
+// fix_pow settles the ±1 bases before it looks at the exponent's sign, so
+// `1 ** -5` is the Integer 1 and not a Rational; a negative exponent on any
+// other base takes fix_pow_inverted, which is `rb_rational_raw(INT2FIX(1), x)`
+// over x = base ** -e — a Rational, where rbgo used to return a Float.
+func integerPowInt(base, e *big.Int) object.Value {
+	switch {
+	case base.IsInt64() && base.Int64() == 1:
+		return object.IntValue(1)
+	case base.IsInt64() && base.Int64() == -1:
+		if e.Bit(0) == 0 {
+			return object.IntValue(1)
+		}
+		return object.IntValue(-1)
+	}
+	if e.Sign() < 0 {
+		if base.Sign() == 0 {
+			return raise("ZeroDivisionError", "divided by 0")
+		}
+		den := integerPowInt(base, new(big.Int).Neg(e))
+		d, _ := object.BigOf(den)
+		return &object.Rational{R: new(big.Rat).SetFrac(big.NewInt(1), d)}
+	}
+	switch {
+	case e.Sign() == 0:
+		return object.IntValue(1)
+	case base.Sign() == 0:
+		return object.IntValue(0)
+	}
+	if !e.IsInt64() {
+		return raise("ArgumentError", "exponent is too large")
+	}
+	// xbits*yy > BIGLEN_LIMIT, written as a division so it cannot overflow —
+	// which also subsumes rb_big_pow's separate `xbits > BIGLEN_LIMIT` test,
+	// since yy is at least 1 here and the quotient is then 0.
+	xbits := int64(new(big.Int).Abs(base).BitLen())
+	if e.Int64() > intPowBitLimit/xbits {
+		return raise("ArgumentError", "exponent is too large")
+	}
+	return object.NormInt(new(big.Int).Exp(base, e, nil))
+}
+
+// floatPow implements Float#** / Float#pow, following numeric.c's rb_float_pow
+// at tag v3_4_0: an integral exponent is just widened to a double (with x**2
+// spelled out as a multiplication), and only a Float exponent can push a
+// negative base off the real line.
+func (vm *VM) floatPow(self, exp object.Value) object.Value {
+	dx, _ := toFloat(self)
+	if e, ok := object.BigOf(exp); ok {
+		if e.IsInt64() && e.Int64() == 2 {
+			return object.Float(dx * dx)
+		}
+		dy, _ := new(big.Float).SetInt(e).Float64()
+		return object.Float(math.Pow(dx, dy))
+	}
+	if fy, ok := exp.(object.Float); ok {
+		dy := float64(fy)
+		if dx < 0 && dy != math.Round(dy) {
+			return dblComplexNewPolarPi(math.Pow(-dx, dy), dy)
+		}
+		return object.Float(math.Pow(dx, dy))
+	}
+	if res, ok := vm.tryNumericCoerce("**", self, exp); ok {
+		return res
+	}
+	return raise("TypeError", "%s can't be coerced into Float", coerceFailedName(exp))
+}
+
+// dblComplexNewPolarPi is complex.c's rb_dbl_complex_new_polar_pi at tag
+// v3_4_0: abs·e^(i·π·ang), with the half-turn and whole-turn angles special
+// cased so they come out exact —
+//
+//	const double fr = modf(ang, &fi);
+//	int pos = fr == +0.5;
+//	if (pos || fr == -0.5) { if ((modf(fi/2.0, &fi) != fr) ^ pos) abs = -abs;
+//	                         return rb_complex_new(RFLOAT_0, DBL2NUM(abs)); }
+//	else if (fr == 0.0)    { if (modf(fi/2.0, &fi) != 0.0) abs = -abs;
+//	                         return DBL2NUM(abs); }
+//	else                   { real = abs*cospi(ang); imag = abs*sinpi(ang); }
+//
+// which is why (-2.0) ** 0.5 is exactly (0.0+1.4142135623730951i) and not a
+// complex with a 1e-16 real part.
+//
+// The C function's third arm (`fr == 0.0`, a whole number of half turns, which
+// answers a bare Float) is left out: both callers reach here only from
+// `dy != round(dy)`, so ang always has a fractional part and that arm is dead
+// code here.
+func dblComplexNewPolarPi(abs, ang float64) object.Value {
+	fi, fr := math.Modf(ang)
+	pos := fr == 0.5
+	if pos || fr == -0.5 {
+		_, half := math.Modf(fi / 2)
+		if (half != fr) != pos {
+			abs = -abs
+		}
+		return &object.Complex{Re: object.Float(0), Im: object.Float(abs)}
+	}
+	s, c := sincospi(ang)
+	return &object.Complex{Re: object.Float(abs * c), Im: object.Float(abs * s)}
+}
+
+// piLo is π − math.Pi: math.Pi is the nearest double to π, and the remainder is
+// needed to form π·x to more than double precision.
+const piLo = 1.2246467991473532e-16
+
+// sincospi returns sin(π·x) and cos(π·x). Darwin's libm — the one MRI links
+// against here — provides __sinpi/__cospi, which reduce the argument before
+// multiplying by π and so return the correctly rounded result; computing
+// math.Sin(math.Pi*x) instead rounds π·x first and loses the last bit
+// (cos(π/3) comes out 0.5000000000000001 rather than 0.5). The quarter-turn
+// reduction plus a double-double product of π and the residue recovers it.
+func sincospi(x float64) (sin, cos float64) {
+	// k = nearest multiple of a half turn; f = the residue, |f| <= 0.25.
+	k := math.RoundToEven(x * 2)
+	f := x - k/2
+	// π·f to roughly twice double precision: hi is the rounded product, lo
+	// collects both the rounding error of that product and π's own residue.
+	hi := math.Pi * f
+	lo := math.FMA(math.Pi, f, -hi) + piLo*f
+	s, c := math.Sincos(hi)
+	// First-order correction for the lo limb: sin(hi+lo) ≈ s + c·lo and
+	// cos(hi+lo) ≈ c − s·lo, which is exact to well under an ulp for |lo| ~ 1e-17.
+	s, c = s+c*lo, c-s*lo
+	switch int64(math.Mod(k, 4)+4) % 4 {
+	case 0:
+		return s, c
+	case 1:
+		return c, -s
+	case 2:
+		return -s, -c
+	}
+	return -c, s
+}
+
+// coerceFailedName renders the right operand of a failed numeric coercion the
+// way numeric.c's coerce_failed does at tag v3_4_0:
+//
+//	if (SPECIAL_CONST_P(y) || SYMBOL_P(y) || RB_FLOAT_TYPE_P(y)) y = rb_inspect(y);
+//	else y = rb_obj_class(y);
+//
+// i.e. the immediates (nil, true, false, Symbol, Integer) and Float are shown
+// by value and everything else — String included — by class name.
+func coerceFailedName(v object.Value) string {
+	switch v.(type) {
+	case object.Nil, object.Bool, object.Symbol, object.Integer, object.Float:
+		return v.Inspect()
+	}
+	return classNameOf(v)
 }

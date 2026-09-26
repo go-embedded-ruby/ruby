@@ -23,13 +23,19 @@ func (vm *VM) registerVersionConstants() {
 		releaseDate = "2024-12-25"
 		revision    = "48d4efcb85000e1ebae42004e963b5d0cedddcf2"
 	)
-	vm.consts["RUBY_VERSION"] = object.NewString(version)
-	vm.consts["RUBY_ENGINE"] = object.NewString("ruby")
-	vm.consts["RUBY_ENGINE_VERSION"] = object.NewString(version)
+	// Every RUBY_* String constant is frozen. version.c's Init_version at tag
+	// v3_4_0 builds each one through
+	//     #define MKSTR(name) rb_obj_freeze(rb_usascii_str_new_static(ruby_##name, sizeof(ruby_##name)-1))
+	//     rb_define_global_const("RUBY_VERSION", MKSTR(version));
+	// so core/builtin_constants asserts `.should.frozen?` on all nine; rbgo only
+	// froze RUBY_RELEASE_DATE and RUBY_REVISION.
+	vm.consts["RUBY_VERSION"] = object.NewFrozenStringView(version)
+	vm.consts["RUBY_ENGINE"] = object.NewFrozenStringView("ruby")
+	vm.consts["RUBY_ENGINE_VERSION"] = object.NewFrozenStringView(version)
 	vm.consts["RUBY_PATCHLEVEL"] = object.IntValue(0)
-	vm.consts["RUBY_PLATFORM"] = object.NewString(rubyPlatform())
-	vm.consts["RUBY_DESCRIPTION"] = object.NewString("ruby " + version + " [" + rubyPlatform() + "]")
-	vm.consts["RUBY_COPYRIGHT"] = object.NewString("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto")
+	vm.consts["RUBY_PLATFORM"] = object.NewFrozenStringView(rubyPlatform())
+	vm.consts["RUBY_DESCRIPTION"] = object.NewFrozenStringView("ruby " + version + " [" + rubyPlatform() + "]")
+	vm.consts["RUBY_COPYRIGHT"] = object.NewFrozenStringView("ruby - Copyright (C) 1993-2025 Yukihiro Matsumoto")
 	// RUBY_RELEASE_DATE and RUBY_REVISION describe the MRI release this runtime
 	// targets, and both are frozen Strings (core/builtin_constants asserts the
 	// class and the frozen-ness of each). version.h at tag v3_4_1 builds

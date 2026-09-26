@@ -4672,9 +4672,22 @@ func (vm *VM) bootstrap() {
 			stringInit(vm, s, args, blk)
 			return s
 		}}
+	// Hash.[] allocates through hash_alloc(klass) in hash.c's rb_hash_s_create at
+	// tag v3_4_0, so on a subclass it answers an instance of THAT class and never
+	// runs its #initialize — core/hash/constructor_spec asserts both. rbgo always
+	// returned a plain Hash.
 	vm.cHash.smethods["[]"] = &Method{name: "[]", owner: vm.cHash,
-		native: func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
+		native: func(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 			h := object.NewHash()
+			ret := func(built *object.Hash) object.Value {
+				recv, ok := self.(*RClass)
+				if !ok || recv == vm.cHash {
+					return built
+				}
+				obj := &RObject{class: recv, ivars: map[string]object.Value{}, builtin: built}
+				vm.registerLiveObject(obj)
+				return obj
+			}
 			// Hash[[[k,v],…]] / Hash[existing_hash] / Hash[k1,v1,k2,v2,…].
 			if len(args) == 1 {
 				a0 := args[0]
@@ -4710,13 +4723,13 @@ func (vm *VM) bootstrap() {
 						}
 						h.Set(pair.Elems[0], v)
 					}
-					return h
+					return ret(h)
 				case *object.Hash:
 					for _, k := range a.Keys {
 						v, _ := a.Get(k)
 						h.Set(k, v)
 					}
-					return h
+					return ret(h)
 				}
 			}
 			if len(args)%2 != 0 {
@@ -4725,7 +4738,7 @@ func (vm *VM) bootstrap() {
 			for i := 0; i < len(args); i += 2 {
 				h.Set(args[i], args[i+1])
 			}
-			return h
+			return ret(h)
 		}}
 	// Hash.ruby2_keywords_hash(hash) returns a copy of hash flagged as a keyword
 	// hash for `*args` forwarding; Hash.ruby2_keywords_hash? reports that flag.
@@ -5945,7 +5958,11 @@ func (vm *VM) bootstrap() {
 		if base < 2 || base > 36 {
 			raise("ArgumentError", "invalid radix %d", base)
 		}
-		return object.NewString(bigVal(self).Text(int(base)))
+		// numeric.c's rb_fix2str at tag v3_4_0 ends in `rb_usascii_str_new(b, e-b)`
+		// (and `rb_usascii_str_new2("0")` for zero), and bignum.c's rb_big2str does
+		// the same, so every Integer#to_s is US-ASCII — core/integer/to_s_spec
+		// asserts it. rbgo tagged the digits UTF-8.
+		return object.NewStringBytesEnc([]byte(bigVal(self).Text(int(base))), "US-ASCII")
 	})
 	// Bitwise / shift operators (arbitrary precision via big.Int, so a left shift
 	// promotes to a Bignum and bitwise ops work on Bignums too).
@@ -10597,42 +10614,44 @@ func makePad(pad string, n int) string {
 	return string(out)
 }
 
-// powNumeric implements ** / pow: integer base and non-negative integer
-// exponent stay integer; a negative integer exponent or any float yields a
-// float (no Rational in this phase).
-func powNumeric(_ *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
+// powNumeric implements ** / pow. The one-argument form is numeric.c's fix_pow
+// (via integerPow) or rb_float_pow (via floatPow) at tag v3_4_0; the
+// two-argument Integer#pow(exp, mod) is bignum.c's rb_int_powm.
+func powNumeric(vm *VM, self object.Value, args []object.Value, _ *Proc) object.Value {
 	// Integer#pow(exp, mod) is modular exponentiation: base**exp mod m.
 	if len(args) > 1 {
-		base, ok1 := object.BigOf(self)
-		e, ok2 := object.BigOf(args[0])
-		m, ok3 := object.BigOf(args[1])
-		if !ok1 || !ok2 || !ok3 {
-			raise("TypeError", "Integer#pow with a modulus requires integer arguments")
+		// bignum.c's rb_int_powm at tag v3_4_0 checks in this order, with two
+		// distinct messages: the exponent first, then its sign, then the modulus.
+		base, _ := object.BigOf(self)
+		e, ok := object.BigOf(args[0])
+		if !ok {
+			raise("TypeError", "Integer#pow() 2nd argument not allowed unless a 1st argument is integer")
 		}
 		if e.Sign() < 0 {
 			raise("RangeError", "Integer#pow() 1st argument cannot be negative when 2nd argument specified")
 		}
+		m, ok := object.BigOf(args[1])
+		if !ok {
+			raise("TypeError", "Integer#pow() 2nd argument not allowed unless all arguments are integers")
+		}
 		if m.Sign() == 0 {
 			raise("ZeroDivisionError", "divided by 0")
 		}
-		return object.NormInt(new(big.Int).Exp(base, e, m))
-	}
-	if base, ok := object.BigOf(self); ok {
-		if ei, ok := args[0].(object.Integer); ok {
-			if ei < 0 {
-				bf, _ := toFloat(self)
-				return object.Float(math.Pow(bf, float64(ei)))
-			}
-			// Arbitrary-precision exponentiation, demoting if it fits int64.
-			return object.NormInt(new(big.Int).Exp(base, big.NewInt(int64(ei)), nil))
+		// rb_int_powm ends in int_pow_tmpl's `if (v < 0) v += m`, i.e. the result
+		// takes the modulus' sign the way Integer#% does ("handles sign like
+		// #divmod does" in core/integer/shared/exponent). big.Int.Exp reduces
+		// modulo |m| and is always non-negative, so a negative modulus needs the
+		// extra step.
+		r := new(big.Int).Exp(base, e, new(big.Int).Abs(m))
+		if m.Sign() < 0 && r.Sign() != 0 {
+			r.Add(r, m)
 		}
+		return object.NormInt(r)
 	}
-	a, _ := toFloat(self)
-	b, ok := toFloat(args[0])
-	if !ok {
-		raise("TypeError", "%s can't be coerced for **", args[0].Inspect())
+	if _, ok := object.BigOf(self); ok {
+		return vm.integerPow(self, args[0])
 	}
-	return object.Float(math.Pow(a, b))
+	return vm.floatPow(self, args[0])
 }
 
 // stringLineSegs splits the receiver into line segments for String#lines /
