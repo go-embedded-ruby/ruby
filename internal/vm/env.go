@@ -70,7 +70,7 @@ func (vm *VM) registerENV() {
 	def("fetch", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
 		key := vm.envStr(args[0])
 		if blk != nil && len(args) > 1 {
-			vm.rbWarn("warning: block supersedes default value argument")
+			vm.rbWarn("block supersedes default value argument")
 		}
 		if v, ok := envLookup(key); ok {
 			return envStrV(v)

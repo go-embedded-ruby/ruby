@@ -169,12 +169,15 @@ g = GetoptLong.new(["-a",GetoptLong::NO_ARGUMENT])
 ARGV.replace(["-a","z"])
 r=[]; g.each{|o,a| r<<[o,a]}; p r; p ARGV`,
 			"[[\"-a\", \"\"]]\n[\"z\"]\n"},
-		// A non-Array ARGV (reassigned) is treated as empty: nothing to scan.
+		// A non-Array ARGV (reassigned) is treated as empty: nothing to scan. The
+		// reassignment warns: ARGV is already initialised, and MRI warns there too
+		// (`ruby -e 'ARGV = "x"'` prints "-e:1: warning: already initialized constant
+		// ARGV"), with no "previous definition" line because ARGV is defined natively.
 		{golReq + `
 ARGV = "notarray"
 g = GetoptLong.new(["-a",GetoptLong::NO_ARGUMENT])
 p g.get`,
-			"[nil, nil]\n"},
+			"(rbgo):2: warning: already initialized constant ARGV\n[nil, nil]\n"},
 	}
 	for _, c := range cases {
 		if got := eval(t, c.src); got != c.want {

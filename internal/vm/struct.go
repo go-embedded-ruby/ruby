@@ -132,7 +132,7 @@ func setupStruct(vm *VM) {
 				raise("NameError", "identifier %s needs to be constant", name)
 			}
 			if _, exists := base.consts[name]; exists {
-				vm.warnRedefineConst(base, name)
+				vm.warnStructRedefineConst(base, name)
 			}
 			vm.assignConstIn(base, name, sub)
 		}
@@ -808,8 +808,18 @@ func validConstName(s string) bool {
 	return true
 }
 
-// warnRedefineConst emits MRI's "already initialized constant" warning to
-// $stderr when Struct.new(name, …) overwrites an existing constant.
-func (vm *VM) warnRedefineConst(scope *RClass, name string) {
-	vm.send(vm.main, "warn", []object.Value{object.NewString("warning: already initialized constant " + scopedNameFor(scope, name))}, nil)
+// warnStructRedefineConst is struct.c's new_struct (ruby/ruby v3_4_0 struct.c:273)
+// — the ONE place in MRI that warns about a constant being taken over with a
+// different message and no companion line:
+//
+//	rb_warn("redefining constant %"PRIsVALUE"::%"PRIsVALUE, super, name);
+//
+// It is rb_warn, so it carries the file:lineno prefix and obeys $VERBOSE the same
+// way; it is NOT const_tbl_update's "already initialized constant …", because
+// new_struct removes the old constant itself (rb_mod_remove_const) before defining
+// the new one, so rb_const_set never sees a live entry to complain about. Measured
+// against MRI 4.0.5: `Struct.new("Dup1", :a); Struct.new("Dup1", :b)` prints
+// "-e:1: warning: redefining constant Struct::Dup1".
+func (vm *VM) warnStructRedefineConst(scope *RClass, name string) {
+	vm.rbWarnf("redefining constant %s::%s", vm.moduleToSStr(scope), name)
 }

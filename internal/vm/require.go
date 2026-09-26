@@ -373,13 +373,13 @@ func (vm *VM) requireLoadingKey(abs string) string {
 // warnCircularRequire emits MRI's circular-require warning. load_lock issues it
 // through rb_warning, not rb_warn, so it appears only in verbose mode ($VERBOSE
 // true) -- `require_internal(ec, fname, 1, RTEST(ruby_verbose))` passes the
-// verbose flag down as load_lock's `warn` argument. It goes to the current
-// $stderr so a reassigned $stderr (mspec's `complain` matcher) captures it.
+// verbose flag down as load_lock's `warn` argument. It reaches $stderr the way
+// every internal warning does — through Warning.warn, whose default body writes
+// there — so mspec's `complain` matcher captures it whether it replaced $stderr or
+// Warning.warn. The gate was reading vm.globals["$VERBOSE"] out of the map, which
+// is unset until a program assigns it.
 func (vm *VM) warnCircularRequire(path string) {
-	if v, ok := vm.globals["$VERBOSE"].(object.Bool); !ok || !bool(v) {
-		return
-	}
-	vm.curStderr().writeStr("warning: loading in progress, circular require considered harmful - " + path + "\n")
+	vm.rbWarning("loading in progress, circular require considered harmful - " + path)
 }
 
 // setISeqFile stamps path onto iseq and all of its nested children, so a method

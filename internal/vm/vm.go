@@ -2957,16 +2957,33 @@ func (vm *VM) constTable(parent *RClass) map[string]object.Value {
 	return parent.consts
 }
 
-// warnAlreadyInitialized emits MRI's "already initialized constant" warning when
-// a syntactic constant assignment overwrites a value already in scope's own
-// table. variable.c's const_tbl_update (ruby/ruby v3_4_0:3658) warns through
-// rb_warn — so `$VERBOSE = nil` silences it, which is what ruby/spec's
-// suppress_warning relies on — and qualifies the name with the module unless
-// that module is Object. (struct.go's warnRedefineConst writes the same text
-// through Kernel#warn, which `$VERBOSE = nil` does not silence; the syntactic
-// assignment needs rb_warn's behaviour, hence the separate helper. MRI also
-// prefixes file:line and follows with "previous definition ... was here"; rbgo
-// carries no source map yet, so neither is emitted, as elsewhere in this VM.)
+// warnAlreadyInitialized is variable.c's const_tbl_update redefinition arm
+// (ruby/ruby v3_4_0 variable.c:3694-3706) in full. It warns when a constant
+// assignment overwrites a value already in scope's own table, and MRI emits TWO
+// lines there, not one:
+//
+//	-e:1: warning: already initialized constant X
+//	-e:1: warning: previous definition of X was here
+//
+// The first goes through rb_warn — so `$VERBOSE = nil` silences it, which is what
+// ruby/spec's suppress_warning relies on — and qualifies the name with the module
+// unless that module is Object. The second goes through rb_compile_warn with the
+// OLD entry's own ce->file / ce->line, so it points at the original definition and
+// not at the line doing the overwriting; when the two live in different files the
+// two lines carry different paths, which is measurable and is measured. Its name
+// is the BARE one (QUOTE_ID(id)), unqualified even when the first line is
+// qualified: MRI prints "already initialized constant MM::K" and then "previous
+// definition of K was here".
+//
+// MRI guards the second line with `if (!NIL_P(ce->file) && ce->line)`, so a
+// constant this VM defined natively — no Ruby frame, hence no recorded location —
+// gets the first line alone, exactly as in MRI.
+//
+// Both constant-assignment opcodes and Module#const_set come here; they went
+// through two helpers with two different behaviours before. Struct.new's named
+// form is the one genuine exception — struct.c:273 warns "redefining constant
+// Struct::Foo" instead, and with no second line — and it says so at its own call
+// site.
 func (vm *VM) warnAlreadyInitialized(scope *RClass, name string) {
 	if scope == nil {
 		scope = vm.cObject
@@ -2978,7 +2995,13 @@ func (vm *VM) warnAlreadyInitialized(scope *RClass, name string) {
 	// rb_class_name(klass) for every scope but Object, and an ANONYMOUS module
 	// renders as its "#<Module:0x…>" path there rather than dropping out of the
 	// message ("already initialized constant #<Module:0x…>::TEST").
-	vm.rbWarn("warning: already initialized constant %s", vm.constPathUnder(scope, name))
+	vm.rbWarnf("already initialized constant %s", vm.constPathUnder(scope, name))
+	// The location must be read BEFORE the assignment that follows overwrites it
+	// (recordConstLoc stamps the new site), which is why this helper runs ahead of
+	// the store rather than beside it.
+	if loc, ok := scope.constLocs[name]; ok && loc.file != "" && loc.line != 0 {
+		vm.rbCompileWarn(loc.file, loc.line, "previous definition of "+name+" was here")
+	}
 }
 
 // assignConst sets a bare constant assignment (`NAME = value`) into the current

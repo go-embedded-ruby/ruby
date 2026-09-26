@@ -10,7 +10,11 @@ func TestConstantAssignment(t *testing.T) {
 		{"int", "X = 5\np X", "5\n"},
 		{"float", "PI = 3.14\np PI", "3.14\n"},
 		{"expr", "X = 5\nY = X + 1\np Y", "6\n"},
-		{"reassign", "X = 1\nX = 2\np X", "2\n"},
+		// The reassignment warns, as it does in MRI (variable.c const_tbl_update).
+		// One line, not two: eval() compiles a path-less ISeq, so no location is
+		// recorded for X and MRI's ce->file guard suppresses "previous definition".
+		{"reassign", "X = 1\nX = 2\np X",
+			"(rbgo):2: warning: already initialized constant X\n2\n"},
 		{"string", "NAME = \"ruby\"\np NAME", "\"ruby\"\n"},
 	}
 	for _, tc := range tests {

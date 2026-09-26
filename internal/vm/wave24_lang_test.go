@@ -166,15 +166,28 @@ p ::TOPC
 
 // Reassigning an already-initialized constant warns, qualified by the module
 // unless that module is Object, and `$VERBOSE = nil` silences it — MRI's
-// rb_warn behaviour. (rbgo leaves $VERBOSE unset, where MRI starts it at false,
-// so these set it explicitly to reach the warning at all.)
+// rb_warn behaviour. MRI emits TWO lines, both carrying a position: the
+// "already initialized" one at the overwriting site and "previous definition of
+// X was here" at the original. Measured on MRI 4.0.5:
+//
+//	$ ruby -e 'A = 1; A = 2'
+//	-e:1: warning: already initialized constant A
+//	-e:1: warning: previous definition of A was here
+//
+// These rows used to assert a bare "warning: …", which was rbgo's own divergence;
+// the $VERBOSE = false prologue is kept only so the silenced row below still
+// contrasts with them. They show ONE line, not two, because runSrcEnc compiles a
+// path-less ISeq: recordConstLoc stores nothing without a file, and MRI's
+// `if (!NIL_P(ce->file) && ce->line)` then suppresses the second line — the same
+// reason a natively defined constant gets one line. The two-line form is measured
+// against MRI in verbose_gate_wave45_test.go, which stamps a path.
 func TestAlreadyInitializedConstantWarning(t *testing.T) {
 	checkSrc(t, "toplevel constant", "$VERBOSE = false\nX = 1\nX = 2\np X\n",
-		"warning: already initialized constant X\n2")
+		"(rbgo):3: warning: already initialized constant X\n2")
 	checkSrc(t, "qualified constant", "$VERBOSE = false\nmodule M; end\nM::Y = 1\nM::Y = 2\np M::Y\n",
-		"warning: already initialized constant M::Y\n2")
+		"(rbgo):4: warning: already initialized constant M::Y\n2")
 	checkSrc(t, "inside a class body", "$VERBOSE = false\nclass K; Z = 1; Z = 2; end\np K::Z\n",
-		"warning: already initialized constant K::Z\n2")
+		"(rbgo):2: warning: already initialized constant K::Z\n2")
 	checkSrc(t, "silenced by $VERBOSE = nil", "$VERBOSE = nil\nX = 1\nX = 2\np X\n", "2")
 	checkSrc(t, "a first assignment does not warn", "$VERBOSE = false\nmodule M; end\nM::Q = 1\np M::Q\n", "1")
 }
@@ -301,6 +314,9 @@ func TestWarnAlreadyInitializedNilScope(t *testing.T) {
 	vm.globals["$VERBOSE"] = object.False
 	vm.cObject.consts["WAIN_TEST_CONST"] = object.IntValue(1)
 	vm.warnAlreadyInitialized(nil, "WAIN_TEST_CONST")
+	// No frame is on the stack (the helper is called directly), so warnUplevelPrefix
+	// falls back to the bare "warning: " — err_vcatf's `if (file)` arm — and there is
+	// no recorded location either, so no second line.
 	if got := buf.String(); got != "warning: already initialized constant WAIN_TEST_CONST\n" {
 		t.Fatalf("nil scope: got %q", got)
 	}

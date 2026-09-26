@@ -191,7 +191,7 @@ func (vm *VM) registerModuleExtras() {
 			vm.raiseFrozen(mod)
 		}
 		skip := func(name, why string) {
-			vm.rbWarn("warning: Skipping set of ruby2_keywords flag for %s (%s)", name, why)
+			vm.rbWarnf("Skipping set of ruby2_keywords flag for %s (%s)", name, why)
 		}
 		for _, a := range args {
 			name := vm.coerceNameArg(a)

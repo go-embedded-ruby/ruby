@@ -406,7 +406,7 @@ func TestRefinementImportMethods(t *testing.T) {
 			M1 = Module.new
 			M2 = Module.new { include M1 }
 			R = Module.new { refine(String) { import_methods M2 } }
-			p :done`, "warning: M2 has ancestors, but Refinement#import_methods doesn't import their methods\n:done\n"},
+			p :done`, "(rbgo):5: warning: M2 has ancestors, but Refinement#import_methods doesn't import their methods\n:done\n"},
 		{"undefined_entries_are_skipped", `
 			su = Module.new do
 			  def gone; end
@@ -724,7 +724,7 @@ func TestRegexpPrepareEncoding(t *testing.T) {
 		{"historical_binary_warning", `
 		  $VERBOSE = true
 		  p(/a/n =~ "\xC3\xA9".dup.force_encoding("UTF-8"))`,
-			"warning: historical binary regexp match /.../n against UTF-8 string\nnil\n"},
+			"(rbgo):3: warning: historical binary regexp match /.../n against UTF-8 string\nnil\n"},
 		{"no_warning_for_binary_subject", `
 		  $VERBOSE = true
 		  p(/a/n =~ "\xC3\xA9".dup.force_encoding("BINARY"))`, "nil\n"},

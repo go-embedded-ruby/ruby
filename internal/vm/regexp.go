@@ -1026,7 +1026,13 @@ func (vm *VM) regexpOptionFlags(v object.Value) string {
 		// Any other object is the legacy form: MRI warns (verbose) "expected true
 		// or false as ignorecase: <inspect>" without calling #to_int. A non-nil,
 		// non-false object is always truthy, so it selects IGNORECASE.
-		vm.rbWarn("warning: expected true or false as ignorecase: %s", vm.inspectStr(v))
+		// object.c ruby_4_0:3493 rb_bool_expected warns through rb_warning, not
+		// rb_warn, so a DEFAULT $VERBOSE stays silent. Measured on MRI 4.0.5:
+		// `ruby -e 'Regexp.new("a", Object.new)'` prints nothing, while
+		// `ruby -e '$VERBOSE=true; Regexp.new("a", Object.new)'` prints
+		// "-e:1: warning: expected true or false as ignorecase: #<Object:0x…>".
+		// This was rb_warn here, which only looked right while the gate was broken.
+		vm.rbWarningf("expected true or false as ignorecase: %s", vm.inspectStr(v))
 		return "i"
 	}
 }
@@ -1237,7 +1243,7 @@ func (vm *VM) checkSubjectEncoding(re *Regexp, v object.Value) {
 		return
 	}
 	if re.noEnc && strEnc != "ASCII-8BIT" && !sevenBit {
-		vm.rbWarn("warning: historical binary regexp match /.../n against %s string", strEnc)
+		vm.rbWarnf("historical binary regexp match /.../n against %s string", strEnc)
 	}
 }
 

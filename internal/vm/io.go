@@ -511,7 +511,7 @@ func (vm *VM) registerIO() {
 		// `if (!NIL_P(ruby_verbose) && argc > 0)`, so a $VERBOSE of nil (the -W0
 		// level) makes Kernel#warn a no-op — nothing is written, nothing is
 		// validated and Warning.warn is not called. $VERBOSE false still warns.
-		if object.IsNil(vm.verboseSlot("$VERBOSE")) || len(pos) == 0 {
+		if !vm.warnEnabled() || len(pos) == 0 {
 			return object.NilV
 		}
 		lev := int64(0)
@@ -608,7 +608,7 @@ func (vm *VM) registerIO() {
 		// rb_io_s_new warns when handed a block it will not call: File.new always
 		// returns the open stream, and only File.open yields it.
 		if blk != nil {
-			vm.rbWarn("warning: File::new() does not take block; use File::open() instead")
+			vm.rbWarn("File::new() does not take block; use File::open() instead")
 		}
 		return vm.openFileArgs(fileRecvClass(self, cFile), args)
 	}}
@@ -1413,7 +1413,7 @@ func (vm *VM) writeArityIsOne(sink object.Value) bool {
 // whatever that #to_s returns. Measured — the first version of this function used
 // #to_s and printed the overridden value.
 func (vm *VM) warnOutdatedWrite(sink object.Value) {
-	if sink == vm.stderrValue() || vm.gvar("$VERBOSE") != object.True {
+	if sink == vm.stderrValue() || !vm.warningEnabled() {
 		return
 	}
 	if !vm.send(vm.consts["Warning"], "[]", []object.Value{object.SymVal("deprecated")}, nil).Truthy() {

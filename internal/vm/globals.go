@@ -202,12 +202,41 @@ func (vm *VM) verboseSlot(name string) object.Value {
 	return object.Bool(false)
 }
 
+// $VERBOSE has THREE states in MRI, not two, and the two warning families split
+// on exactly that (error.c v3_4_0):
+//
+//	nil   (-W0)          every rb_warn and rb_warning is silent
+//	false (the default)  rb_warn speaks, rb_warning stays quiet
+//	true  (-w / -W2)     both speak
+//
+// verbose_setter (ruby.c v3_4_0) coerces anything truthy to Qtrue, so these are
+// the only three values a slot can hold, and `$VERBOSE = 1` reads back as true.
+//
+// warnEnabled and warningEnabled are the ONLY two places that decide. Every gate
+// in this VM asks one of them, because the defect they replace was a second
+// representation of one value: four call sites read vm.globals["$VERBOSE"]
+// straight out of the map, which is unset until a program assigns it, while every
+// Ruby-level read went through verboseSlot and answered false. The gate read the
+// representation nobody writes, so `$VERBOSE.nil?` agreed on both engines and no
+// Ruby-level probe could see it. Reading the slot through verboseSlot here
+// removes the second representation rather than seeding it, so a future `delete`
+// or a fresh VM cannot re-open the same hole.
+func (vm *VM) warnEnabled() bool {
+	return !object.IsNil(vm.verboseSlot("$VERBOSE"))
+}
+
+// warningEnabled is rb_warning's stricter gate, `RTEST(ruby_verbose)`: only a
+// TRUE $VERBOSE. It is what ruby/spec's `complain(verbose: true)` arranges.
+func (vm *VM) warningEnabled() bool {
+	return truthyValue(vm.verboseSlot("$VERBOSE"))
+}
+
 // warnDeprecatedGvar emits a special-variable deprecation warning through
 // Warning.warn, but only while Warning[:deprecated] is enabled — error.c v3_4_0
 // deprecation_warning_enabled() requires both a non-nil $VERBOSE and the
 // category, and the category is off by default, so an ordinary run is silent.
 func (vm *VM) warnDeprecatedGvar(msg string) {
-	if object.IsNil(vm.verboseSlot("$VERBOSE")) {
+	if !vm.warnEnabled() {
 		return
 	}
 	w := vm.consts["Warning"]
