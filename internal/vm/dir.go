@@ -531,6 +531,12 @@ func dirPwd(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 	return object.NewString(toSlash(getwdOrFail()))
 }
 
+// osGetwd is a seam over os.Getwd so getwdOrFail's failure branch is testable.
+// The real call does not fail on darwin even when the working directory has been
+// removed (see cwdStillNamed), so there is no platform here on which to exercise
+// it otherwise. It joins osStat / osLstat in filestat.go as a filesystem seam.
+var osGetwd = os.Getwd
+
 // getwdOrFail is util.c ruby_getcwd(): it returns the working directory or
 // raises, never both. The errno is getcwd(2)'s own and the operation MRI names
 // is "getcwd", so the message is "<strerror> - getcwd" (rb_syserr_fail in
@@ -538,7 +544,7 @@ func dirPwd(_ *VM, _ object.Value, _ []object.Value, _ *Proc) object.Value {
 // directory, Errno::EACCES for a parent that became unsearchable, and a
 // rescuable SystemCallError for anything with no registered class.
 func getwdOrFail() string {
-	wd, err := os.Getwd()
+	wd, err := osGetwd()
 	if err != nil {
 		sysFail(err, "getcwd")
 	}
@@ -564,11 +570,11 @@ func getwdOrFail() string {
 // directory reached through a symlink still passes: os.Getwd names the physical
 // path, which is the same file.
 func cwdStillNamed(wd string) error {
-	dot, err := os.Stat(".")
+	dot, err := osStat(".")
 	if err != nil {
 		return err
 	}
-	named, err := os.Stat(wd)
+	named, err := osStat(wd)
 	if err != nil {
 		return err
 	}
