@@ -44,6 +44,20 @@ type ioBuffer struct {
 	null bool
 }
 
+// baseNull is io_buffer.c's `buffer->base == NULL`, which #null? reports and
+// #resize branches on: a buffer that never had memory (a zero-size
+// IO::Buffer.new) or has given it up (#free, #resize(0), #transfer).
+//
+// A slice takes its base ONCE, when it is cut — `parent->base + offset`, which
+// is NULL only if the parent's base was NULL then. Freeing the parent
+// afterwards does NOT make the slice null; it makes it DANGLE, which is what
+// #valid? reports and what free_spec pins:
+//
+//	buffer.free
+//	slice.null?.should == false
+//	slice.valid?.should == false
+func (b *ioBuffer) baseNull() bool { return b.freed || b.null }
+
 // sliceValid reports IO::Buffer#valid?. A non-slice is always valid (freeing it
 // does not invalidate it — io_buffer.c io_buffer_valid_p). A slice becomes
 // invalid when its source has been freed or reallocated so the slice no longer
@@ -148,6 +162,25 @@ func bufDefaultFlags(size int64) int64 {
 		return bufFlagMAPPED
 	}
 	return bufFlagINTERNAL
+}
+
+// bufReinit is io_buffer_initialize applied to an EXISTING buffer object, which
+// is what rb_io_buffer_resize does on the two paths that cannot resize in
+// place: a NULL-base buffer, and (without mremap) a mapped one. The leading
+// bytes are preserved; everything about the buffer's KIND is recomputed from
+// the new flags, so a mapped buffer shrunk below a page really does become
+// internal.
+func bufReinit(b *ioBuffer, size, flags int64) *ioBuffer {
+	old := b.data
+	*b = ioBuffer{}
+	if size == 0 {
+		b.null = true
+		return b
+	}
+	b.mapped = flags&bufFlagMAPPED != 0
+	b.data = make([]byte, size)
+	copy(b.data, old)
+	return b
 }
 
 // bufFlagsArg is io_buffer_extract_flags: a negative flag set is an ArgumentError
@@ -416,16 +449,35 @@ func (vm *VM) registerIOBuffer() {
 		defer func() { buf.freed = true; buf.data = nil }()
 		return vm.callBlock(blk, []object.Value{buf})
 	})
+	// IO::Buffer.string(length) — io_buffer.c rb_io_buffer_type_string. The
+	// string is built FIRST, with `rb_str_new(NULL, RB_NUM2LONG(length))`, so its
+	// two argument errors come before the block is ever looked for: RB_NUM2LONG
+	// refuses a bignum with RangeError, and rb_str_new refuses a negative length
+	// with ArgumentError. Only then does the yield raise LocalJumpError — and
+	// with "no block given", not rb_yield's usual "no block given (yield)",
+	// because the block is called through rb_ensure.
 	sm("string", func(vm *VM, _ object.Value, args []object.Value, blk *Proc) object.Value {
-		if blk == nil {
-			raise("LocalJumpError", "no block given (yield)")
+		if _, isBig := args[0].(*object.Bignum); isBig {
+			raise("RangeError", "bignum too big to convert into 'long'")
 		}
 		size := intArg(args[0])
-		buf := &ioBuffer{data: make([]byte, size), external: true}
+		if size < 0 {
+			raise("ArgumentError", "negative string size (or size too big)")
+		}
+		if blk == nil {
+			raise("LocalJumpError", "no block given")
+		}
+		// The STRING is the object that survives: rb_io_buffer_type_string builds
+		// it first and the buffer only aliases its bytes, so a #free inside the
+		// block detaches the buffer and leaves everything already written in place.
+		// Copying out of the buffer afterwards instead loses it — `.string(4) { |b|
+		// b.set_string("meat"); b.free }` came back "" rather than "meat".
+		out := object.NewStringBytesEnc(make([]byte, size), "ASCII-8BIT")
+		buf := &ioBuffer{data: out.MutableBytes(), external: true}
+		// io_buffer_for_yield_instance_ensure frees the instance however the block
+		// leaves — including by raising.
+		defer func() { buf.freed = true; buf.data = nil }()
 		vm.callBlock(blk, []object.Value{buf})
-		out := object.NewStringBytesEnc(append([]byte(nil), buf.data...), "ASCII-8BIT")
-		buf.freed = true
-		buf.data = nil
 		return out
 	})
 
@@ -441,8 +493,12 @@ func (vm *VM) registerIOBuffer() {
 			return object.Bool(fn(self.(*ioBuffer)))
 		})
 	}
-	pred("null?", func(b *ioBuffer) bool { return b.freed || b.null })
-	pred("empty?", func(b *ioBuffer) bool { return !b.freed && len(b.data) == 0 })
+	// rb_io_buffer_null_p is `base == NULL` and rb_io_buffer_empty_p is
+	// `size == 0`. They are DIFFERENT questions that happen to answer alike for
+	// a buffer that has given up its memory — #free, #resize(0) and #transfer all
+	// leave base NULL and size 0 — so neither may exclude the other's case.
+	pred("null?", func(b *ioBuffer) bool { return b.baseNull() })
+	pred("empty?", func(b *ioBuffer) bool { return b.freed || len(b.data) == 0 })
 	pred("valid?", func(b *ioBuffer) bool { return b.sliceValid() })
 	pred("external?", func(b *ioBuffer) bool { return !b.freed && b.external })
 	// The four allocation flags are exclusive in practice: a buffer is internal,
@@ -478,7 +534,12 @@ func (vm *VM) registerIOBuffer() {
 		if off < 0 || length < 0 || off+length > len(data) {
 			raise("ArgumentError", "Specified offset+length is bigger than the buffer size!")
 		}
-		return &ioBuffer{data: data[off : off+length : off+length], readonly: b.readonly, borrowed: true, parent: b, sliceOff: off, sliceLen: length}
+		return &ioBuffer{
+			data: data[off : off+length : off+length], readonly: b.readonly,
+			borrowed: true, parent: b, sliceOff: off, sliceLen: length,
+			// base = parent->base + offset, taken now: NULL plus zero is NULL.
+			null: b.baseNull(),
+		}
 	})
 	// resize(size) reallocates the buffer to the new size, preserving the leading
 	// bytes (a larger buffer is zero-filled). An external buffer (from .for /
@@ -489,11 +550,28 @@ func (vm *VM) registerIOBuffer() {
 			raise("IO::Buffer::LockedError", "Cannot resize locked buffer!")
 		}
 		size := bufSizeArg(args[0])
-		// A live external buffer (.for/.string) cannot be resized; a *freed*
-		// (null) one may be, reallocating into a fresh internal buffer.
-		if b.external && !b.freed {
+		// rb_io_buffer_resize takes the NULL-base case first, before the external
+		// check: a buffer with no memory is re-initialized from scratch, which is
+		// why `IO::Buffer.for("x").free.resize(10)` is allowed and why
+		// `IO::Buffer.new(0).resize(PAGE_SIZE)` comes back MAPPED rather than
+		// internal — io_flags_for_size decides, exactly as it does for
+		// IO::Buffer.new.
+		if b.baseNull() {
+			return bufReinit(b, size, bufDefaultFlags(size))
+		}
+		if b.external {
 			raise("IO::Buffer::AccessError", "Cannot resize external buffer!")
 		}
+		if b.mapped {
+			// mremap is a Linux extension; without it io_buffer_resize_copy runs,
+			// allocating a fresh buffer whose flags come from the NEW size. rbgo has
+			// no mremap on any platform (there is no mapping to remap — see
+			// ioBuffer), so this is the only branch, and the shim pins the platform
+			// to darwin, where MRI takes it too.
+			return bufReinit(b, size, bufDefaultFlags(size))
+		}
+		// RB_IO_BUFFER_INTERNAL: realloc in place, keeping the kind. A resize to
+		// zero is io_buffer_free.
 		if size == 0 {
 			b.data = nil
 			b.freed = true
@@ -502,15 +580,20 @@ func (vm *VM) registerIOBuffer() {
 		nd := make([]byte, size)
 		copy(nd, b.data)
 		b.data = nd
-		b.freed = false
-		b.external = false
 		b.borrowed = false
 		b.parent = nil
 		return b
 	})
 
+	// free (io_buffer.c rb_io_buffer_free) releases the memory and leaves a NULL
+	// buffer. It refuses while the buffer is locked — the block form of #locked
+	// is the only way in, and rb_io_buffer_free_locked (which unlocks first) is
+	// reserved for the C API's own teardown.
 	dm("free", func(_ *VM, self object.Value, _ []object.Value, _ *Proc) object.Value {
 		b := self.(*ioBuffer)
+		if b.locked {
+			raise("IO::Buffer::LockedError", "Buffer is locked!")
+		}
 		b.freed = true
 		b.data = nil
 		return b

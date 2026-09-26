@@ -422,3 +422,134 @@ func TestDirEntryEncoding(t *testing.T) {
 		})
 	}
 }
+
+// TestIOBufferNullEmptyAndResize pins the parts of io_buffer.c that turn on
+// what `buffer->base` and `buffer->size` are:
+//
+//   - rb_io_buffer_null_p is `base == NULL` and rb_io_buffer_empty_p is
+//     `size == 0`. They are different questions, and a buffer that gave up its
+//     memory (#free, #resize(0), #transfer) answers true to BOTH;
+//   - a slice takes `parent->base + offset` ONCE, when it is cut, so a slice of
+//     a null buffer is null while a slice whose parent is freed afterwards is
+//     not null, only invalid;
+//   - rb_io_buffer_resize re-initializes a NULL-base buffer with
+//     io_flags_for_size(size), which is why a resized 0-sized buffer can come
+//     back MAPPED, and (without mremap) copies a mapped one into a buffer whose
+//     kind is likewise recomputed from the new size.
+//
+// Every expectation was taken from MRI ruby 4.0.5 running the same source.
+func TestIOBufferNullEmptyAndResize(t *testing.T) {
+	for _, c := range []struct{ name, body, want string }{
+		{"freed", `b = IO::Buffer.new(4); b.free; p [b.null?, b.empty?, b.size]`, "[true, true, 0]\n"},
+		{"resized_to_zero", `b = IO::Buffer.new(4); b.resize(0); p [b.null?, b.empty?, b.size]`, "[true, true, 0]\n"},
+		{"transferred", `b = IO::Buffer.new(4); b.transfer; p [b.null?, b.empty?, b.size]`, "[true, true, 0]\n"},
+		{"slice_of_a_null_buffer", `s = IO::Buffer.new(0).slice(0, 0); p [s.null?, s.empty?, s.size]`, "[true, true, 0]\n"},
+		{
+			// The slice's base was taken while the parent still had memory, so
+			// freeing the parent leaves it DANGLING, not null.
+			"slice_of_a_freed_parent_dangles",
+			`b = IO::Buffer.new(4); s = b.slice(0, 2); b.free; p [s.null?, s.valid?]`,
+			"[false, false]\n",
+		},
+		{
+			// io_flags_for_size on the NEW size: a page or more is mapped.
+			"resizing_a_null_buffer_reinitializes_it",
+			`b = IO::Buffer.new(0); b.resize(IO::Buffer::PAGE_SIZE)
+			 p [b.size, b.internal?, b.mapped?, b.null?, b.empty?]`,
+			"[16384, false, true, false, false]\n",
+		},
+		{
+			// …and shrinking a mapped buffer below a page makes it internal.
+			"resizing_a_mapped_buffer_recomputes_its_kind",
+			`b = IO::Buffer.new(IO::Buffer::PAGE_SIZE, IO::Buffer::MAPPED); b.resize(4)
+			 p [b.size, b.internal?, b.mapped?]`,
+			"[4, true, false]\n",
+		},
+		{
+			// An internal buffer is realloc'd in place and keeps its kind, even
+			// when it grows past a page.
+			"resizing_an_internal_buffer_keeps_its_kind",
+			`b = IO::Buffer.new(4); b.resize(IO::Buffer::PAGE_SIZE)
+			 p [b.size, b.internal?, b.mapped?]`,
+			"[16384, true, false]\n",
+		},
+		{
+			// The NULL-base test comes BEFORE the external one, so a freed
+			// String-backed buffer can be resized into a fresh internal one.
+			"resizing_a_freed_external_buffer_is_allowed",
+			`b = IO::Buffer.for("test"); b.free; b.resize(10)
+			 p [b.size, b.internal?, b.external?]`,
+			"[10, true, false]\n",
+		},
+		{
+			// io_flags_for_size(0) is INTERNAL, but io_buffer_initialize takes no
+			// memory for a zero size, so the buffer stays null.
+			"resizing_a_null_buffer_to_zero_keeps_it_null",
+			`b = IO::Buffer.new(0); b.resize(0); p [b.null?, b.empty?, b.size, b.internal?]`,
+			"[true, true, 0, false]\n",
+		},
+		{
+			"resizing_a_freed_buffer_to_zero_keeps_it_null",
+			`b = IO::Buffer.new(4); b.free; b.resize(0); p [b.null?, b.empty?, b.size]`,
+			"[true, true, 0]\n",
+		},
+		{
+			"resizing_a_live_external_buffer_is_refused",
+			`b = IO::Buffer.for("test")
+			 begin; b.resize(10); rescue IO::Buffer::AccessError => e; p e.message; end`,
+			"\"Cannot resize external buffer!\"\n",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := eval(t, c.body+"\n"); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestIOBufferStringAndFree pins rb_io_buffer_type_string and
+// rb_io_buffer_free. The string form builds the String FIRST —
+// `rb_str_new(NULL, RB_NUM2LONG(length))` — and the buffer only aliases it, so
+// both of the size errors precede the block lookup and a #free inside the block
+// cannot lose what was already written. #free itself refuses a locked buffer.
+func TestIOBufferStringAndFree(t *testing.T) {
+	for _, c := range []struct{ name, body, want string }{
+		{
+			"string_survives_a_free_inside_the_block",
+			`p(IO::Buffer.string(4) { |b| b.set_string("meat"); b.free })`,
+			"\"meat\"\n",
+		},
+		{
+			// rb_str_new's own refusal, reached before the block is looked for.
+			"negative_size",
+			`begin; IO::Buffer.string(-1) {}; rescue ArgumentError => e; p e.message; end`,
+			"\"negative string size (or size too big)\"\n",
+		},
+		{
+			// RB_NUM2LONG's refusal, likewise before the block.
+			"bignum_size",
+			`begin; IO::Buffer.string(2 ** 232) {}; rescue RangeError => e; p e.message; end`,
+			"\"bignum too big to convert into 'long'\"\n",
+		},
+		{
+			// The block is reached through rb_ensure, so the message is the bare
+			// "no block given" rather than rb_yield's "no block given (yield)".
+			"no_block",
+			`begin; IO::Buffer.string(7); rescue LocalJumpError => e; p e.message; end`,
+			"\"no block given\"\n",
+		},
+		{
+			"free_is_refused_while_locked",
+			`b = IO::Buffer.new(4)
+			 begin; b.locked { b.free }; rescue IO::Buffer::LockedError => e; p e.message; end`,
+			"\"Buffer is locked!\"\n",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := eval(t, c.body+"\n"); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
