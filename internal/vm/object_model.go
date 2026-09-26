@@ -82,6 +82,18 @@ type Proc struct {
 	// was written, so a bare constant inside the block resolves by the same
 	// lexical nesting as the surrounding method/class body. nil means top level.
 	cref *RClass
+	// refDefinee is the OTHER end of the cref chain at block-creation time: the
+	// creating frame's definee, when it differs from cref. MRI keeps a chain and
+	// a frame that eval'd into another scope has a cref pushed on top of the one
+	// it was written under (vm_cref_push with pushed_by_eval), so BOTH links can
+	// carry refinements and rb_method_entry_with_refinements walks both. rbgo
+	// records one *RClass per frame, so a block has to carry the second end
+	// itself or a refinement activated in a Class.new / Module.new / class_eval
+	// body stops at the first block written inside it.
+	//
+	// It feeds refinement lookup ONLY. Constant resolution still follows cref
+	// alone, because MRI SKIPS a pushed_by_eval cref when resolving a constant.
+	refDefinee *RClass
 	// home identifies the method (or top-level) activation a non-local `return`
 	// inside this block unwinds to — the activation where the block literal was
 	// written. nil for synthesized procs that never carry an explicit return.
@@ -414,16 +426,49 @@ func (vm *VM) objSingleton(v object.Value) *RClass {
 	return vm.extSingletons[v]
 }
 
+// specialSingletonClass is MRI's special_singleton_class_of (class.c v3_4_0:2199):
+// nil, true and false are immediates with no room for a per-object singleton, so
+// Ruby answers their CLASS instead — NilClass, TrueClass, FalseClass. It is not a
+// stand-in but the real thing: singleton_class_of returns it directly for T_NIL /
+// T_TRUE / T_FALSE (class.c v3_4_0:2237-2242), which is why `def nil.foo` and
+// `class << nil` define an instance method on NilClass, `nil.singleton_class`
+// equal?s NilClass, and `nil.extend(M)` includes M into NilClass.
+//
+// The three classes are ordinary (non-singleton) classes, so #singleton_class?
+// is false for them and their #superclass is Object — both of which MRI reports
+// and neither of which a fabricated singleton class would.
+//
+// nil is returned for every other value, including Integer/Float/Symbol, which
+// raise TypeError ("can't define singleton") rather than answering a class.
+func (vm *VM) specialSingletonClass(v object.Value) *RClass {
+	switch t := v.(type) {
+	case object.Nil:
+		return vm.cNilClass
+	case object.Bool:
+		if bool(t) {
+			return vm.cTrueClass
+		}
+		return vm.cFalseClass
+	}
+	return nil
+}
+
 // ensureSingleton returns v's singleton class, creating it on first use. It
 // handles *RObject (inline field) and other reference values (side table). A
-// second bool reports success; immediate values (Integer/Symbol/true/false/nil)
-// and classes/modules (which use a metaclass instead) are not eligible here.
+// second bool reports success; immediate values (Integer/Symbol) and
+// classes/modules (which use a metaclass instead) are not eligible here.
+// nil/true/false answer their special singleton class (see
+// specialSingletonClass), so a method defined "on" them lands on
+// NilClass/TrueClass/FalseClass exactly as in MRI.
 func (vm *VM) ensureSingleton(v object.Value) (*RClass, bool) {
 	switch t := v.(type) {
 	case *RObject:
 		return vm.singletonClass(t), true
 	case *RClass:
 		return nil, false // classes use metaClass()
+	}
+	if sc := vm.specialSingletonClass(v); sc != nil {
+		return sc, true
 	}
 	if !hasIdentitySingleton(v) {
 		return nil, false
@@ -465,6 +510,17 @@ func (c *RClass) metaClass() *RClass {
 		// The metaclass superclass is the superclass's metaclass, so a class-method
 		// `super` (def self.foo / class << self) walks to the inherited class method:
 		// #<Class:Child> -> #<Class:Base> -> ... This mirrors MRI's metaclass chain.
+		//
+		// The chain has to END somewhere, and MRI ends it at Class:
+		//
+		//     RCLASS_SET_SUPER(metaclass, super ? ENSURE_EIGENCLASS(super) : rb_cClass)
+		//                                              (make_metaclass, class.c v3_4_0:786)
+		//
+		// The only class with no superclass is BasicObject, so that last link is
+		// wired once at boot by closeMetaclassChain rather than here, where cClass
+		// is not reachable. Without it `#<Class:BasicObject>.superclass` is nil,
+		// every singleton class of a class fails `.ancestors.include?(Class)`, and
+		// the instance and class methods of Class are invisible from one.
 		if c.super != nil {
 			mc.super = c.super.metaClass()
 		}
@@ -1816,6 +1872,95 @@ func (vm *VM) findMethod(recv object.Value, name string) *Method {
 	return nil
 }
 
+// defaultNegation returns the BasicObject definition of "!" or "!=" — the ones
+// rbgo installs for rb_obj_not and rb_obj_not_equal (object.c v3_4_0:264, :280;
+// rb_define_method at :4265-4266). Memoised, because overriddenNegation asks on
+// every unary `!`.
+//
+// A user who REDEFINES BasicObject#! installs a different *Method, which no
+// longer matches the memo, so overriddenNegation reports it as an override and
+// it gets dispatched — which is what MRI does, since vm_opt_not then finds a
+// cfunc other than rb_obj_not.
+func (vm *VM) defaultNegation(name string) *Method {
+	if m, ok := vm.defaultNeg[name]; ok {
+		return m
+	}
+	m := lookupMethod(vm.cBasicObject, name)
+	if m == nil {
+		// Asked before the bootstrap installed it: do not memoise nil, or every
+		// later `!` would see an "override".
+		return nil
+	}
+	if vm.defaultNeg == nil {
+		vm.defaultNeg = map[string]*Method{}
+	}
+	vm.defaultNeg[name] = m
+	return m
+}
+
+// overriddenNegation resolves name ("!" or "!=") through recv's FULL dispatch
+// chain — its singleton class and extended modules first, then its class
+// ancestry — and returns the method only when it is NOT the BasicObject
+// default. nil means "nobody redefined it", so the caller may compute the
+// answer inline.
+//
+// This is vm_method_cfunc_is(iseq, cd, recv, rb_obj_not) (vm_insnhelper.c
+// v3_4_0:7019): MRI's opt_not and opt_neq are SPECIALISATIONS of an ordinary
+// send, and they fall back to that send whenever the receiver's method is not
+// the built-in cfunc. The negation is never simply inlined by the compiler.
+//
+// Resolving through the whole chain is the part rbgo's previous `!=` check
+// missed: it walked vm.classOf(a).super only, so a singleton `def o.!=` and a
+// module-supplied `!=` (o.extend M) were both invisible and the opcode inverted
+// #== instead.
+func (vm *VM) overriddenNegation(recv object.Value, name string) *Method {
+	m := vm.findMethod(recv, name)
+	if m == nil || m == vm.defaultNegation(name) {
+		return nil
+	}
+	return m
+}
+
+// notValue is `!recv`: MRI's opt_not, which dispatches a redefined #! and
+// otherwise negates truthiness in place (vm_insnhelper.c v3_4_0:7019-7027).
+// The interpreter uses notValueCached; this uncached form is what AOT-lowered
+// bodies call.
+func (vm *VM) notValue(recv object.Value) object.Value {
+	if m := vm.overriddenNegation(recv, "!"); m != nil {
+		return vm.invoke(m, recv, nil, nil)
+	}
+	return object.Bool(!recv.Truthy())
+}
+
+// notValueCached is notValue with the per-instruction inline cache MRI's
+// opt_not carries as its CALL_DATA, so the common case — nobody has redefined
+// #! for this receiver's class — costs a class-pointer compare rather than an
+// ancestry walk on every negation.
+//
+// ic.method here means "the OVERRIDE to dispatch", and nil means "negate in
+// place" — not lookupCached's "no method at all". The two readers never meet:
+// an OpNot instruction is never an OpSend site, so its cache slot belongs to
+// this one alone. That is the same argument ic.regexp rests on.
+func (vm *VM) notValueCached(ic *inlineCache, recv object.Value) object.Value {
+	if _, isClass := recv.(*RClass); isClass || vm.objSingleton(recv) != nil {
+		// A per-object method cannot be cached against a shared class.
+		return vm.notValue(recv)
+	}
+	c := vm.classOf(recv)
+	serial := methodSerial()
+	if ic.class != c || ic.serial != serial {
+		m := undefAsNil(lookupMethod(c, "!"))
+		if m == vm.defaultNegation("!") {
+			m = nil // still rb_obj_not, so opt_not stays inline
+		}
+		ic.class, ic.method, ic.serial = c, m, serial
+	}
+	if ic.method != nil {
+		return vm.invoke(ic.method, recv, nil, nil)
+	}
+	return object.Bool(!recv.Truthy())
+}
+
 func (vm *VM) send(recv object.Value, name string, args []object.Value, blk *Proc) object.Value {
 	// A class receiver consults its singleton-method chain (def self.foo, and
 	// inherited class methods) before the generic Class instance methods.
@@ -1966,11 +2111,16 @@ func (p *Proc) arityVal() int {
 		return p.nativeArity
 	}
 	is := p.iseq
-	// Required count: the leading required positionals PLUS the trailing post ones
-	// (rb_iseq_min_max_arity returns lead_num + post_num, proc.c v3_4_0), plus one
-	// when any keyword is mandatory (a single required-keyword group counts as one
-	// required arg).
-	req := is.NumRequired + is.PostCount
+	// Required count: the leading required positionals PLUS the post ones
+	// (rb_iseq_min_max_arity returns lead_num + post_num, proc.c v3_4_0:1079),
+	// plus one when any keyword is mandatory (a single required-keyword group
+	// counts as one required arg).
+	//
+	// param.post_num is the count in BOTH shapes — after a splat and, with no
+	// splat, the trailing required run — which is what iseqPostCount reports.
+	// Reading is.PostCount directly saw only the second: PostCount is 0 whenever
+	// there IS a splat, so `proc { |a, *b, c| }.arity` answered -2 for MRI's -3.
+	req := is.NumRequired + iseqPostCount(is)
 	hasReqKw, hasOptKw := false, is.KwRestSlot >= 0
 	for _, r := range is.KwRequired {
 		if r {
@@ -1985,13 +2135,13 @@ func (p *Proc) arityVal() int {
 	// A *splat is always variadic. For a lambda, an optional positional, an
 	// optional keyword or a keyword-rest also makes it variadic; a non-lambda proc
 	// stays fixed on those and reports the positive required count.
-	end := len(is.Params)
-	if is.SplatIndex >= 0 {
-		end = is.SplatIndex
-	}
+	//
+	// "Has an optional positional" is opt_num > 0, which iseqHasOptional answers
+	// for both shapes; counting every slot past NumRequired would count a post
+	// parameter as an optional.
 	variadic := is.SplatIndex >= 0
 	if p.isLambda {
-		variadic = variadic || end > is.NumRequired || hasOptKw
+		variadic = variadic || iseqHasOptional(is) || hasOptKw
 	}
 	if variadic {
 		return -(req + 1)
@@ -2367,4 +2517,14 @@ func ivarTable(self object.Value) map[string]object.Value {
 		return st.ivars
 	}
 	return nil
+}
+
+// refDefineeOf picks the second end of the cref chain to record on a block
+// literal: the creating frame's definee when it differs from the frame's cref,
+// else nil (the two ends coincide and one pointer says it). See Proc.refDefinee.
+func refDefineeOf(definee, cref *RClass) *RClass {
+	if definee == cref {
+		return nil
+	}
+	return definee
 }

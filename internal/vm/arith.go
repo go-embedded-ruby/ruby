@@ -237,12 +237,13 @@ func bigOp(op bytecode.Op, a, b *big.Int) object.Value {
 // anywhere below BasicObject (whose default `!=` returns !(self == other)). When
 // it does, the OpNeq opcode must dispatch that method rather than invert `==`.
 func (vm *VM) hasCustomNeq(a object.Value) bool {
-	for c := vm.classOf(a); c != nil && c != vm.cBasicObject; c = c.super {
-		if lookupOwnOrIncluded(c, "!=") != nil {
-			return true
-		}
-	}
-	return false
+	// overriddenNegation resolves through the FULL dispatch chain — the receiver's
+	// singleton class and extended modules first, then its class ancestry — which
+	// is what vm_method_cfunc_is asks of the resolved method (vm_insnhelper.c
+	// v3_4_0:7019). Walking vm.classOf(a).super alone, as this did, could not see
+	// a `def o.!=` or an `o.extend M` that supplies one, and the opcode inverted
+	// #== for both.
+	return vm.overriddenNegation(a, "!=") != nil
 }
 
 func (vm *VM) binaryOp(op bytecode.Op, a, b object.Value) object.Value {

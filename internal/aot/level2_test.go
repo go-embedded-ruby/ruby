@@ -35,7 +35,7 @@ func TestCompileMainSupported(t *testing.T) {
 		{"cmp", "a=1;b=2;puts((a<b)==(a>=b))", "bytecode.OpLt"},
 		{"cmp2", "a=1;b=2;puts((a>b)!=(a<=b))", "bytecode.OpGt"},
 		{"neg", "x=5; puts(-x)", "negate("},
-		{"not", "puts(!true)", "object.Bool(!s0_1.Truthy())"},
+		{"not", "puts(!true)", "vm.notValue(s0_1)"},
 		{"whileloop", "i=0; i+=1 while i<3; puts i", "goto L"},
 		{"ifbranch", "x=1; puts(x>0 ? :a : :b)", "if !s0_1.Truthy() { goto"},
 		{"or_dup", "a=nil; puts(a || 7)", "if s0_2.Truthy() { goto"},

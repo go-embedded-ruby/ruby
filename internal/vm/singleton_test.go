@@ -99,12 +99,20 @@ func TestSingletonClassOfExpression(t *testing.T) {
 }
 
 // TestSingletonClassErrors covers `class << target` for a target with no
-// singleton class (an immediate value), which MRI rejects with a TypeError.
+// singleton class, which MRI rejects with a TypeError.
+//
+// The set is exactly singleton_class_of's `rb_raise(rb_eTypeError, "can't
+// define singleton")` arm — T_FIXNUM, T_BIGNUM, T_FLOAT and T_SYMBOL (class.c
+// v3_4_0:2228-2234). nil/true/false are NOT in it: they fall to the arm just
+// below, which answers special_singleton_class_of (class.c v3_4_0:2236-2242),
+// so `class << nil` opens NilClass. TestSpecialSingletonClass pins that side;
+// the `class << nil` case that used to sit here pinned the divergence.
 func TestSingletonClassErrors(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
 		{"x = 5\nclass << x; def z; 1; end; end", "can't define singleton"},
 		{"class << :sym; def z; 1; end; end", "can't define singleton"},
-		{"class << nil; def z; 1; end; end", "can't define singleton"},
+		{"x = 1.5\nclass << x; def z; 1; end; end", "can't define singleton"},
+		{"x = 10**40\nclass << x; def z; 1; end; end", "can't define singleton"},
 	} {
 		if err := runErr(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("src=%q got=%v want %q", c.src, err, c.want)

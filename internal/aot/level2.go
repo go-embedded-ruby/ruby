@@ -170,7 +170,10 @@ func (s *mscope) emit(pc int) (string, bool) {
 	case bytecode.OpNeg:
 		return line("%s = negate(%s)", s.sv(d-1), s.sv(d-1)), true
 	case bytecode.OpNot:
-		return line("%s = object.Bool(!%s.Truthy())", s.sv(d-1), s.sv(d-1)), true
+		// vm.notValue, not an inline negation: MRI's opt_not dispatches a redefined
+		// #! (vm_insnhelper.c v3_4_0:7019), and a lowered body must answer the same
+		// as the interpreter it replaces.
+		return line("%s = vm.notValue(%s)", s.sv(d-1), s.sv(d-1)), true
 	case bytecode.OpTruthy:
 		return line("%s = object.Bool(%s.Truthy())", s.sv(d-1), s.sv(d-1)), true
 	case bytecode.OpJump:

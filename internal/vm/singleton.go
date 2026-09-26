@@ -2,11 +2,33 @@ package vm
 
 import "github.com/go-embedded-ruby/ruby/internal/object"
 
+// closeMetaclassChain wires the LAST link of the metaclass chain, which
+// RClass.metaClass cannot reach on its own: the metaclass of a class with no
+// superclass takes Class as its superclass —
+//
+//	RCLASS_SET_SUPER(metaclass, super ? ENSURE_EIGENCLASS(super) : rb_cClass)
+//	                                     (make_metaclass, class.c v3_4_0:786)
+//
+// BasicObject is the only such class, so one link closes the whole chain:
+// #<Class:A> -> #<Class:Object> -> #<Class:BasicObject> -> Class -> Module ->
+// Object -> BasicObject. Every singleton class of a class then answers
+// `.ancestors.include?(Class)`, inherits Class's instance methods, and responds
+// to Class's class methods, none of which it could before.
+//
+// It runs once at boot, before any metaclass has been asked for, so the eager
+// `mc.super = c.super.metaClass()` recursion inside metaClass finds the link
+// already in place rather than building a chain that stops at nil.
+func (vm *VM) closeMetaclassChain() {
+	vm.cBasicObject.metaClass().super = vm.cClass
+}
+
 // registerSingleton installs the per-object singleton-method API:
 // define_singleton_method and extend. Both work on ordinary objects (via a
 // lazily-created singleton class) and on classes/modules (via their class
 // methods). The `extended` hook fires when a module is mixed into an object.
 func (vm *VM) registerSingleton() {
+	vm.closeMetaclassChain()
+
 	vm.cObject.define("define_singleton_method", func(vm *VM, self object.Value, args []object.Value, blk *Proc) object.Value {
 		body := blk
 		if body == nil {
