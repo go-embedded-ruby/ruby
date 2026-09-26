@@ -76,7 +76,10 @@ func run(src, name string) error {
 		return err
 	}
 	iseq.Name = name
-	machine := vm.New(os.Stdout)
+	// Program output goes to stdout; every diagnostic MRI puts on fd 2 — warnings,
+	// $stderr/STDERR writes, Kernel#abort's message — goes to stderr, so a
+	// redirected or piped stdout carries only the program's data (#667).
+	machine := vm.NewWithStderr(os.Stdout, os.Stderr)
 	if name == "-e" {
 		// A -e one-liner has no file on disk; record "-e" as the program name so
 		// backtraces label its frames "-e" the way MRI does (require_relative still
