@@ -186,8 +186,14 @@ func (vm *VM) registerFile() {
 	def("absolute_path", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
 		return vm.fileExpandValue(args, false)
 	})
+	// absolute_path? (file.c rb_file_s_absolute_path_p) asks whether the path is
+	// already rooted. It has to be isAbsPath rather than path.IsAbs: rbgo keeps
+	// paths forward-slashed, so a Windows drive-letter root ("C:/x") — which is
+	// what File.realpath hands back there — reads as RELATIVE to path.IsAbs alone.
+	// That is the same reason File.expand_path uses isAbsPath, and the two must
+	// agree or `File.absolute_path?(File.expand_path(p))` is false on Windows.
 	def("absolute_path?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
-		return object.Bool(path.IsAbs(toSlash(pathArg(vm, args[0]))))
+		return object.Bool(isAbsPath(toSlash(pathArg(vm, args[0]))))
 	})
 
 	def("exist?", func(vm *VM, _ object.Value, args []object.Value, _ *Proc) object.Value {
