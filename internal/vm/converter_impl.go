@@ -559,12 +559,12 @@ func (vm *VM) setConvError(c *converterObj, status string, errBytes, readAgain [
 			fmt.Sprintf("incomplete %s on %s", binStr(errBytes).Inspect(), c.src))
 	case "undefined_conversion":
 		c.lastErrExc = vm.buildException("Encoding::UndefinedConversionError", c.undefMessage(errBytes))
-	default:
-		return
 	}
 	// make_econv_exception (transcode.c) does not only pick the class and the
 	// message: it attaches the error attributes in the same breath, so
-	// #source_encoding and friends can never disagree with #primitive_errinfo.
+	// #source_encoding and friends can never disagree with #primitive_errinfo. A
+	// status that is not one of the three failures leaves setEconvErrorAttrs with
+	// nothing to attach and it returns without touching the exception.
 	vm.setEconvErrorAttrs(c.lastErrExc, status, c.errBytes, c.errReadAgain, c.errSrcEnc, c.errDstEnc)
 }
 

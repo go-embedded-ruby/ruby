@@ -2,6 +2,15 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+// Wave-34 encoding conformance tests.
+//
+// TestEconvErrorAttributes, TestEncodeSameEncoding,
+// TestValidInEncodingUsesTheScanner and TestUnicodeNormalizeEncodingDispatch are
+// WITNESSES: each was run against the unfixed product (the behaviour reverted while
+// the new symbols stayed, so the mutation still compiled) and each failed. The
+// remaining tests in this file cover helpers that only exist with the fix, so they
+// are GUARDS against future drift rather than witnesses of it.
+
 package vm
 
 import (
