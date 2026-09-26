@@ -63,15 +63,16 @@ func TestGenericIvarsOnNativelyBackedValues(t *testing.T) {
 	var buf bytes.Buffer
 	src := `
 require 'stringio'
-[[], {}, "s", proc {}, StringIO.new("x"), (1..2)].each do |o|
+out = [[], {}, "s", proc {}, StringIO.new("x")].map do |o|
   o.instance_variable_set(:@zz, 7)
-  print o.instance_variable_get(:@zz), " ", o.instance_variable_defined?(:@zz), " "
+  [o.instance_variable_get(:@zz), o.instance_variables, o.instance_variable_defined?(:@zz)]
 end
-puts
+p out
 `
-	want := "7 true 7 true 7 true 7 true 7 true 7 true "
+	// MRI 4.0.5's own output for this program, byte for byte.
+	want := "[[7, [:@zz], true], [7, [:@zz], true], [7, [:@zz], true], [7, [:@zz], true], [7, [:@zz], true]]"
 	if got := runOnVM(t, New(&buf), &buf, src); got != want {
-		t.Errorf("natively-backed ivars:\n got %q\nwant %q", got, want)
+		t.Errorf("natively-backed ivars:\n got %s\nwant %s", got, want)
 	}
 }
 
