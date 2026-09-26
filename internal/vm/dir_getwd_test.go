@@ -8,9 +8,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// skipIfCwdCannotBeRemoved skips a test that has to construct a process whose
+// working directory no longer exists. Windows REFUSES to unlink a directory that
+// is any process's current directory, so the state under test cannot be built
+// there at all — and MRI takes a different implementation on that platform
+// (rb_w32_ugetcwd, dir.c line 140), so there is no witness here for what it would
+// report. The 100% coverage gate runs on the POSIX lanes, so this costs no
+// coverage.
+func skipIfCwdCannotBeRemoved(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("a process's current directory cannot be removed on Windows, and MRI uses rb_w32_ugetcwd there")
+	}
+}
 
 // chdirTo changes the process working directory to dir for the duration of the
 // test and restores the original afterwards. The original is captured BEFORE the
@@ -40,6 +55,7 @@ func chdirTo(t *testing.T, dir string) {
 // first; the message text ("- getcwd", with no "@ func" part) is
 // rb_syserr_fail's, not rb_sys_fail_path's.
 func TestDirPwdWorkingDirectoryRemoved(t *testing.T) {
+	skipIfCwdCannotBeRemoved(t)
 	// The removed directory must NOT be the one t.TempDir will try to clean up,
 	// so make a child of it and remove only that.
 	parent := t.TempDir()
@@ -101,6 +117,7 @@ func TestDirPwdWorkingDirectoryRemoved(t *testing.T) {
 // before #681 too — and they are kept so a later "fix the other Getwd calls too"
 // sweep has to justify itself against MRI rather than against a rule.
 func TestDirChdirOutOfRemovedWorkingDirectory(t *testing.T) {
+	skipIfCwdCannotBeRemoved(t)
 	parent := t.TempDir()
 	gone := filepath.Join(parent, "gone")
 	if err := os.Mkdir(gone, 0o755); err != nil {
@@ -141,6 +158,12 @@ func TestDirChdirOutOfRemovedWorkingDirectory(t *testing.T) {
 // Errno::ENOTDIR in MRI 4.0.5, where rbgo used to assert Errno::ENOENT for every
 // failure; the "@ chdir_path" label is MRI's too (it was "@ dir_chdir" here).
 func TestDirChdirErrnoKeepsTheRealError(t *testing.T) {
+	// Windows reports its own error for a chdir into a regular file and MRI maps
+	// it through rb_w32_* rather than through this errno table, so there is no
+	// witness here for what it should say on that platform.
+	if runtime.GOOS == "windows" {
+		t.Skip("the chdir errno mapping is asserted against MRI on POSIX")
+	}
 	dir := filepath.ToSlash(t.TempDir())
 	reg := dir + "/regular.txt"
 	if err := os.WriteFile(filepath.FromSlash(reg), []byte("x"), 0o644); err != nil {
@@ -172,6 +195,7 @@ func TestDirChdirErrnoKeepsTheRealError(t *testing.T) {
 // name then resolves to a DIFFERENT inode from ".". MRI 4.0.5 raises
 // Errno::ENOENT there, because getcwd(3) cannot find "." under that name.
 func TestDirPwdWorkingDirectoryRecreated(t *testing.T) {
+	skipIfCwdCannotBeRemoved(t)
 	parent := t.TempDir()
 	gone := filepath.Join(parent, "gone")
 	if err := os.Mkdir(gone, 0o755); err != nil {
