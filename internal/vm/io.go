@@ -1401,9 +1401,15 @@ func (vm *VM) writeArityIsOne(sink object.Value) bool {
 //   - the :deprecated category is enabled, which it is NOT by default in Ruby 3+,
 //     which is why this line is almost never seen.
 //
-// The separator names how #write was reached: '.' with the object itself when it
+// The separator names how #write was reached: '.' with the OBJECT itself when it
 // lives on the object's singleton, '#' with the class otherwise
 // (RCLASS_SINGLETON_P(klass) ? (klass = io, '.') : '#').
+//
+// The name is rendered with INSPECT, not #to_s. The directive is `%+"PRIsVALUE"`
+// and the '+' flag means rb_inspect, which is observable: an object carrying
+// @marker and its own #to_s is named `#<Object:0x… @marker=42>` by MRI, not by
+// whatever that #to_s returns. Measured — the first version of this function used
+// #to_s and printed the overridden value.
 func (vm *VM) warnOutdatedWrite(sink object.Value) {
 	if sink == vm.stderrValue() || vm.gvar("$VERBOSE") != object.True {
 		return
@@ -1413,7 +1419,7 @@ func (vm *VM) warnOutdatedWrite(sink object.Value) {
 	}
 	name, sep := vm.moduleToSStr(vm.classOf(sink)), "#"
 	if sc := vm.objSingleton(sink); sc != nil && lookupMethod(sc, "write") != nil {
-		name, sep = vm.displayStr(sink), "."
+		name, sep = vm.pInspect(sink), "."
 	}
 	vm.writeWarningStr(vm.warnUplevelPrefix(0) + name + sep +
 		"write is outdated interface which accepts just one argument\n")

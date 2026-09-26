@@ -229,6 +229,39 @@ print err.collected`,
 			wantOut: "duck.rb:8: warning: One#write is outdated interface which accepts just one argument\n",
 			wantErr: "",
 		},
+		// The same notice when #write lives on the object's SINGLETON: MRI switches
+		// the separator to '.' and names the object rather than its class
+		// (`RCLASS_SINGLETON_P(klass) ? (klass = io, '.') : '#'`). The name is
+		// rendered with rb_inspect -- the format's '+' flag -- which is why the
+		// object carries an ivar and an overridden #to_s here: MRI shows
+		// `#<Object:0x… @marker=42>` and ignores the #to_s, and the first version of
+		// warnOutdatedWrite used #to_s and printed "TO_S_CALLED" instead.
+		//
+		// Only the prefix and suffix are asserted, because the middle is a heap
+		// address; pinning it would be pinning the allocator.
+		{
+			name: "WITNESS a singleton write is named with '.' and its inspect form",
+			src: duckClass + `err = Duck.new
+out = Object.new
+out.instance_variable_set(:@marker, 42)
+def out.write(x); 1; end
+def out.to_s; "TO_S_CALLED"; end
+$VERBOSE = true
+Warning[:deprecated] = true
+$stdout = out
+$stderr = err
+puts "hi"
+$stdout = STDOUT
+$stderr = STDERR
+c = err.collected
+print c.start_with?("duck.rb:11: warning: #<Object:0x")
+print " "
+print c.end_with?(" @marker=42>.write is outdated interface which accepts just one argument\n")
+print " "
+print c.include?("TO_S_CALLED")`,
+			wantOut: "true true false",
+			wantErr: "",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
