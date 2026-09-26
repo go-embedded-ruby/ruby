@@ -122,7 +122,7 @@ func TestIOWave18ClosedAndSeekPaths(t *testing.T) {
 		// gets with more than a separator and a limit raises ArgumentError.
 		{`require "stringio"; p((StringIO.new("a").gets("x", 5, 9) rescue $!.class))`, "ArgumentError\n"},
 		// IO.binread with a negative offset raises Errno::EINVAL (not ArgumentError).
-		{seed + "p(IO.binread(" + q(p) + ", 1, -1) rescue $!.class)", "Errno::EINVAL\n"},
+		{seed + "p((IO.binread(" + q(p) + ", 1, -1) rescue $!.class))", "Errno::EINVAL\n"},
 	}
 	for _, c := range cases {
 		if got := runFS(t, c.src); got != c.want {
