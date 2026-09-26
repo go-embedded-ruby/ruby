@@ -7129,14 +7129,10 @@ func nativePuts(vm *VM, self object.Value, args []object.Value, _ *Proc) object.
 	}
 	// The receiver already IS $stdout (a custom object whose #puts resolves to this
 	// method): write straight to it, as MRI's rb_io_puts(argc, argv, recv) does, so
-	// the object's own #write receives the bytes. A $stdout that answers no #write
-	// (one MRI would have rejected at assignment) falls back to the underlying
-	// stream instead of raising.
-	if vm.respondsToDynamic(self, "write") {
-		vm.ioPuts(self, args)
-	} else {
-		vm.ioPuts(vm.curStdout(), args)
-	}
+	// the object's own #write receives the bytes. out came from stdoutValue, which
+	// has already applied the "lost its #write" fallback, so there is no second
+	// test of it here — the rule lives in stdSink alone.
+	vm.ioPuts(out, args)
 	return object.NilV
 }
 
