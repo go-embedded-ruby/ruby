@@ -139,13 +139,15 @@ jobs:
   #
   # The lane does not stop at the compiler either. It loads the module into node
   # with Go's own lib/wasm/wasm_exec.js — the same glue web/index.html loads — and
-  # asserts Ruby ran: see web/smoke.mjs. Measured on an M-series host with a cold
+  # asserts Ruby ran: see web/smoke.mjs. On the runner that includes the bucket rule
+  # witnessed inside a JS host on Linux — Errno::ETXTBSY::Errno is 0 there,
+  # Errno::ETXTBSY.equal?(Errno::NOERROR) is true, Errno.constants.size is 158 —
+  # which is the half of #682 no compile-only check could have reached. Measured on an M-series host with a cold
   # GOCACHE, so these are build-from-scratch numbers, not warm ones: build ./...
-  # 14s, vet 18s, the module 97 MB, the node run a few seconds. This lane has not
-  # yet had a runner of its own to time, so treat the sibling `wasm (wasip1)` lane
-  # as the scale to expect: 2.0 min end to end on ubuntu-latest, and it does strictly
-  # more (it also installs wazero and runs a test binary). Nothing here is
-  # -race-priced and the lane runs in parallel with the others.
+  # 14s, vet 18s, the module 97 MB, the node run a few seconds. MEASURED ON A RUNNER:
+  # 1.9 min end to end on ubuntu-latest, all nine smoke checks green -- the cheapest
+  # lane in this file bar none, and cheaper than the `wasm (wasip1)` lane beside it
+  # (2.0 min). Nothing here is -race-priced and it runs in parallel with the others.
   wasm-js:
     name: wasm (js, browser)
     runs-on: ubuntu-latest
