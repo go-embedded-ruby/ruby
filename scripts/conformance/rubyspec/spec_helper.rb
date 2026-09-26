@@ -330,8 +330,26 @@ module ScratchPad
   def self.inspect; "ScratchPad(#{@record.inspect})"; end
 end
 
-SPEC_TMP_BASE = "/tmp/rbgo_spec_tmp"
+# mspec's SPEC_TEMP_DIR is per-PROCESS (".../rubyspec_temp/#{Process.pid}",
+# mspec/lib/mspec/helpers/tmp.rb). Ours was one fixed directory shared by every
+# spec process, and the ratchet runs files in parallel: two Dir specs building
+# DirSpecs' fixture tree at the same fixed path delete each other's files.
+# core/dir/foreach_spec.rb reads 8 alone and 7 under a 2-way sweep for MRI, which
+# is one concrete case of the "a parallel sweep is not reproducible" problem.
+SPEC_TMP_ROOT = "/tmp/rbgo_spec_tmp"
+SPEC_TMP_BASE = File.join(SPEC_TMP_ROOT, Process.pid.to_s)
 SPEC_TEMP_DIR = SPEC_TMP_BASE
+SPEC_TMP_OWNER_PID = Process.pid
+at_exit do
+  if Process.pid == SPEC_TMP_OWNER_PID
+    begin
+      require 'fileutils'
+      FileUtils.rm_rf(SPEC_TMP_BASE)
+    rescue Exception
+      system("rm -rf '#{SPEC_TMP_BASE}'")
+    end
+  end
+end
 $tmp_counter = 0
 # mspec/lib/mspec/helpers/tmp.rb. Two details of the upstream contract were
 # missing and both cost examples:
@@ -343,7 +361,10 @@ $tmp_counter = 0
 # The directory is created on demand, as upstream does, because a spec that only
 # builds a path and then writes to it must not depend on load order.
 def tmp(name, uniquify = true)
-  Dir.mkdir(SPEC_TMP_BASE) unless File.directory?(SPEC_TMP_BASE)
+  unless File.directory?(SPEC_TMP_BASE)
+    Dir.mkdir(SPEC_TMP_ROOT) unless File.directory?(SPEC_TMP_ROOT)
+    Dir.mkdir(SPEC_TMP_BASE)
+  end
   base = name.to_s
   if uniquify && !base.empty?
     slash = base.rindex("/")
@@ -384,11 +405,28 @@ def mock_to_path(path)
   o.should_receive(:to_path).any_number_of_times.and_return(path)
   o
 end
+# mspec/lib/mspec/helpers/io.rb. The mode may be a HASH of open options, which
+# the corpus uses heavily: IOSpecs.io_fixture passes `mode: "r:euc-jp:utf-8"` and
+# `{mode:, internal_encoding:, external_encoding:}` straight through
+# (core/io/fixtures/classes.rb:150). Passing it positionally raised TypeError "no
+# implicit conversion of Hash into String" and cost 30 examples in
+# core/io/{read,readchar,write}_spec.rb for MRI as well as rbgo.
 def new_io(name, mode = "w:utf-8")
-  File.open(name, mode)
+  if Hash === mode
+    File.new(name, **mode)
+  else
+    File.new(name, mode)
+  end
 end
+# Upstream returns a BARE descriptor via IO.sysopen, deliberately not aliased by
+# any Ruby object — ours handed out `File.open(...).fileno`, so the File stayed
+# reachable and could close the fd from under the spec's own IO.
 def new_fd(name, mode = "w:utf-8")
-  File.open(name, mode).fileno
+  if Hash === mode
+    raise ArgumentError, "new_fd options Hash must include :mode" unless mode.key?(:mode)
+    mode = mode[:mode]
+  end
+  IO.sysopen name, mode
 end
 # mspec's ARGF helper: bind @argf to a fresh ARGF reading the given files for the
 # duration of the block.
@@ -785,6 +823,31 @@ def ruby_exe(*a, **k); ::Kernel.raise(SpecSkip, "ruby_exe subprocess unsupported
 def ruby_cmd(*a, **k); ::Kernel.raise(SpecSkip, "ruby_cmd unsupported"); end
 
 # ---------------- example runner ----------------
+# mspec evaluates EVERY block in a spec file — describe bodies, example bodies,
+# before/after hooks — with `self` bound to ONE object for the whole file.
+# mspec/lib/mspec/runner/object.rb defines describe/it as private methods on
+# Object and mspec/lib/mspec/runner/context.rb CALLS the blocks (MSpec.protect)
+# rather than instance_eval'ing them, so `self` stays the spec file's top-level
+# object throughout and every instance variable is shared by the whole file.
+#
+# We gave each describe its own object, and the corpus relies on the upstream
+# arrangement in both directions:
+#
+#   * core/array/fill_spec.rb sets @never_passed in the `before :all` of its FIRST
+#     top-level describe and uses it in the second and third — 9 examples, and
+#     with @never_passed nil the `&@never_passed` block simply vanished, so
+#     `[1,2,3,4,5].fill(5, &nil)` filled the array and the assertion failed for
+#     MRI too.
+#   * core/enumerator/with_index_spec.rb sets @enum in a SHARED block pulled in by
+#     `it_behaves_like`, then uses it in the enclosing describe's own examples —
+#     10 examples, all "undefined method 'with_index' for nil".
+#
+# One object per file also removes the reason the old code had to copy every
+# `def` helper from a describe into its children: a `def` inside a block
+# instance_eval'd on this object lands on its singleton class, which is exactly
+# where upstream's lands (on Object), so it is visible to every later block.
+$world = Object.new
+
 class SpecContext
   attr_reader :desc, :examples, :before_each, :after_each, :before_all, :after_all
   def initialize(desc, parent)
@@ -793,14 +856,9 @@ class SpecContext
     @examples = []
     @before_each = parent ? parent.before_each.dup : []
     @after_each = parent ? parent.after_each.dup : []
-    # Inherit ancestor `before :all` blocks so their instance variables are set on
-    # THIS context object too. Each shim context is a distinct object that its
-    # examples instance_eval against, and a nested describe (or an it_behaves_like
-    # shared context) runs its examples on its own object — so without inheriting
-    # the enclosing describe's before(:all) (e.g. numeric/step's `@step = ->...`),
-    # those ivars would be nil in the nested examples. Replaying an ivar-setup
-    # before(:all) per descendant is idempotent; mspec likewise makes before(:all)
-    # state visible to nested groups.
+    # mspec's ContextState#pre(:all) is inherited from the parents
+    # (mspec/lib/mspec/runner/context.rb), so a nested describe replays the
+    # enclosing describe's `before :all` — e.g. numeric/step's `@step = ->...`.
     @before_all = parent ? parent.before_all.dup : []
     # `after :all` was DROPPED entirely, and the corpus's Dir specs are built on
     # it: core/dir/shared/glob.rb chdir's into the fixture tree in `before :all`
@@ -821,32 +879,20 @@ class SpecContext
   def after(scope = :each, &blk)
     if scope == :all; @after_all.unshift(blk); else; @after_each << blk; end
   end
-  def describe(d, *a, &blk)
-    child = SpecContext.new("#{@desc} #{d}", self)
-    # Carry helpers written with `def` in THIS block down to the child. The block
-    # is instance_eval'd, so a `def` lands on this object's singleton, and a
-    # nested describe runs on a different object — which is how
-    # core/string/valid_encoding/utf_8_spec lost all 28 of its examples: they call
-    # an outer `def utf8`. Forward each EXISTING helper explicitly rather than
-    # adding a method_missing, because a genuinely missing method must still raise
-    # from the caller with no shim frame in the backtrace — language/send_spec
-    # asserts precisely that, and a method_missing here broke it.
-    parent = self
-    sc = singleton_class
-    (sc.instance_methods(false) + sc.private_instance_methods(false)).each do |m|
-      child.define_singleton_method(m) { |*ar, &bl| parent.send(m, *ar, &bl) }
-    end
-    $ctx_stack.push(child)
+  # Evaluate this context's body (and then run it). The body is evaluated on
+  # $world, the file's single evaluation object, exactly as mspec evaluates it on
+  # the spec file's top-level object.
+  def parse_and_run(blk)
+    $ctx_stack.push(self)
     begin
-      child.instance_eval(&blk) if blk
+      $world.instance_eval(&blk) if blk
     rescue Exception => e
-      _record_load_error(child.desc, e)
+      _record_load_error(@desc, e)
     ensure
       $ctx_stack.pop
     end
-    child.run
+    run
   end
-  alias_method :context, :describe
 
   def run
     # A before(:all)/after(:all) that raises is still swallowed — mspec would skip
@@ -854,7 +900,7 @@ class SpecContext
     # failure is what let the missing `after :all` above go unnoticed for 36 waves.
     @before_all.each do |b|
       begin
-        instance_eval(&b)
+        $world.instance_eval(&b)
       rescue Exception => e
         $RB_FAILS << ["hookerror", @desc, "(before :all)", e.class.to_s, e.message.to_s[0, 200]]
       end
@@ -867,8 +913,8 @@ class SpecContext
       $mock_registry = []
       $mock_installs = []
       begin
-        @before_each.each { |b| instance_eval(&b) }
-        instance_eval(&blk)
+        @before_each.each { |b| $world.instance_eval(&b) }
+        $world.instance_eval(&blk)
         # verify mocks
         bad = $mock_registry.reject { |m| m.verify }
         if bad.empty?
@@ -889,7 +935,7 @@ class SpecContext
         $RB_ERROR += 1
         $RB_FAILS << ["error", @desc, d, e.class.to_s, e.message.to_s[0, 200]]
       ensure
-        @after_each.each { |b| begin; instance_eval(&b); rescue Exception; end }
+        @after_each.each { |b| begin; $world.instance_eval(&b); rescue Exception; end }
         # Restore any receiver whose real method a mock intercepted (mspec's
         # Mock.cleanup): drop the singleton override and alias the saved original
         # back (or leave it removed when the receiver had no original method).
@@ -909,7 +955,7 @@ class SpecContext
     end
     @after_all.each do |b|
       begin
-        instance_eval(&b)
+        $world.instance_eval(&b)
       rescue Exception => e
         $RB_FAILS << ["hookerror", @desc, "(after :all)", e.class.to_s, e.message.to_s[0, 200]]
       end
@@ -932,18 +978,37 @@ def describe(d, *a, &blk)
     $shared[d] = blk
     return
   end
-  root = SpecContext.new(d.to_s, nil)
-  $ctx_stack.push(root)
-  begin
-    root.instance_eval(&blk) if blk
-  rescue Exception => e
-    _record_load_error(root.desc, e)
-  ensure
-    $ctx_stack.pop
-  end
-  root.run
+  # One entry point for both the top level and a nested block: with a context open
+  # this is its child (mspec's ContextState#parent chain), otherwise a new root.
+  parent = $ctx_stack.last
+  SpecContext.new(parent ? "#{parent.desc} #{d}" : d.to_s, parent).parse_and_run(blk)
 end
 def context(d, *a, &blk); describe(d, *a, &blk); end
+
+# Dispatchers for what a describe body registers. They have to live at the top
+# level now that every body is evaluated on $world rather than on the context —
+# which is where mspec puts them too (private Object methods dispatching to
+# MSpec.current, mspec/lib/mspec/runner/object.rb).
+def it(d, &blk)
+  ctx = $ctx_stack.last
+  ::Kernel.raise("`it` outside a describe block: #{d}") if ctx.nil?
+  ctx.it(d, &blk)
+end
+def specify(d = nil, &blk)
+  ctx = $ctx_stack.last
+  ::Kernel.raise("`specify` outside a describe block") if ctx.nil?
+  ctx.specify(d, &blk)
+end
+def before(scope = :each, &blk)
+  ctx = $ctx_stack.last
+  return if ctx.nil?   # some specs call these at the very top of a file
+  ctx.before(scope, &blk)
+end
+def after(scope = :each, &blk)
+  ctx = $ctx_stack.last
+  return if ctx.nil?
+  ctx.after(scope, &blk)
+end
 
 def it_behaves_like(desc, meth = nil, obj = nil)
   blk = $shared[desc]
@@ -959,22 +1024,14 @@ def it_behaves_like(desc, meth = nil, obj = nil)
   # context's before hooks — setting them here (to nil) would clobber the inherited
   # values. Only install the re-assert when they are actually provided.
   if meth || obj
-    ctx.instance_variable_set(:@method, meth)
-    ctx.instance_variable_set(:@object, obj)
+    $world.instance_variable_set(:@method, meth) if meth
+    $world.instance_variable_set(:@object, obj) if obj
     ctx.before(:each) do
       @method = meth if meth
       @object = obj if obj
     end
   end
-  $ctx_stack.push(ctx)
-  begin
-    ctx.instance_eval(&blk)
-  rescue Exception => e
-    _record_load_error(ctx.desc, e)
-  ensure
-    $ctx_stack.pop
-  end
-  ctx.run
+  ctx.parse_and_run(blk)
 end
 def it_should_behave_like(desc, meth = nil, obj = nil); it_behaves_like(desc, meth, obj); end
 
@@ -1028,9 +1085,6 @@ def evaluate(str, desc = nil, &block)
   SpecEvaluate.new(str, desc).define(ctx, &block)
 end
 
-# some specs call these at top level
-def before(*a); end
-def after(*a); end
 
 at_exit do
   $stdout.puts "RBGO_RESULT pass=#{$RB_PASS} fail=#{$RB_FAIL} error=#{$RB_ERROR} skip=#{$RB_SKIP}"
