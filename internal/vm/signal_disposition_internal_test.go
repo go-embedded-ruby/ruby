@@ -453,9 +453,18 @@ func TestTrapSignalArgumentCoercion(t *testing.T) {
 		{"a prefixed name", `p Signal.trap("SIGHUP", "IGNORE")`, "\"DEFAULT\"\n"},
 		{"a Symbol name", `p Signal.trap(:HUP, "IGNORE")`, "\"DEFAULT\"\n"},
 		{"an Integer", `p Signal.trap(Signal.list["HUP"], "IGNORE")`, "\"DEFAULT\"\n"},
-		// EXIT / 0 is legal for trap (signm2signo's exit = TRUE) ...
-		{"EXIT is a trappable name", `p Signal.trap(:EXIT, "IGNORE")`, "\"SYSTEM_DEFAULT\"\n"},
-		{"signal 0 is trappable", `p Signal.trap(0, "IGNORE")`, "\"SYSTEM_DEFAULT\"\n"},
+		// EXIT / 0 is legal for trap (signm2signo's exit = TRUE), and it reports its
+		// PREVIOUS handler as nil rather than as a disposition name, because trap()
+		// forces oldfunc = SIG_ERR for signal 0 and SIG_ERR matches none of the
+		// oldcmd switch's three arms. MEASURED on MRI 4.0.5.
+		{"EXIT is a trappable name", `p Signal.trap(:EXIT, "IGNORE")`, "nil\n"},
+		{"signal 0 is trappable", `p Signal.trap(0, "IGNORE")`, "nil\n"},
+		{"signal 0 with a block", `p Signal.trap(:EXIT) { }`, "nil\n"},
+		// ...but an installed handler for signal 0 still comes back as itself.
+		{"signal 0 reports an installed handler", `Signal.trap(:EXIT, "cmd")
+p Signal.trap(:EXIT, "IGNORE")`, "\"cmd\"\n"},
+		{"signal 0 reports an installed Proc", `Signal.trap(:EXIT) { }
+p Signal.trap(:EXIT, "IGNORE").class`, "Proc\n"},
 		// ... but NOT for SignalException, whose esignal_init passes exit = FALSE.
 		{"EXIT is not a SignalException name",
 			`begin; SignalException.new("EXIT"); rescue ArgumentError => e; puts e.message; end`,

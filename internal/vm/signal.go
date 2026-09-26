@@ -348,8 +348,18 @@ func (vm *VM) trapHandler(v object.Value) trapCmd {
 // the OS — rather than nil, and an installed Proc or command comes back as
 // itself.
 func (vm *VM) trapPrevious(sig int) object.Value {
+	// Signal 0 (Signal.trap(:EXIT)) reports nil, not a disposition name: trap()
+	// starts with `if (sig == 0) oldfunc = SIG_ERR;`, and SIG_ERR matches none of
+	// the three arms of the oldcmd switch's `case 0`, so it falls to Qnil.
+	// Measured on MRI 4.0.5: Signal.trap(:EXIT) {} => nil.
+	if sig == 0 {
+		if prev, had := vm.trapList[0]; had && prev.kind == trapCommand {
+			return prev.cmd
+		}
+		return object.NilV
+	}
 	// An absent entry IS trapDefault (MRI's trap_list.cmd[sig] == 0), so the
-	//zero value of trapCmd already says what to report.
+	// zero value of trapCmd already says what to report.
 	prev := vm.trapList[sig]
 	switch prev.kind {
 	case trapDefault:
