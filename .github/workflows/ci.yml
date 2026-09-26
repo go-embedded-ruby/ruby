@@ -126,3 +126,80 @@ jobs:
           GOOS=wasip1 GOARCH=wasm go test -c -o vm.test.wasm ./internal/vm
           "$(go env GOPATH)/bin/wazero" run -mount=/tmp:/tmp -env TMPDIR=/tmp \
             vm.test.wasm -test.run 'TestStatSysExtract|TestRunsAProgramOnThisHost' -test.v
+
+  # WebAssembly (BROWSER) gate: GOOS=js GOARCH=wasm, the target behind the
+  # playground (cmd/wasm + web/) and `rbgo build --closed --target wasm`.
+  #
+  # It is a SEPARATE target from the wasip1 lane above, not a variation of it, and
+  # that is the whole reason this lane exists. GOOS=js and GOOS=wasip1 have
+  # different syscall packages: js/wasm has no ENOTRECOVERABLE, EOWNERDEAD or
+  # ETXTBSY, so internal/vm stopped compiling for the browser for three days
+  # (#629 -> #682) while the wasip1 lane above stayed green the entire time. One
+  # wasm lane is not wasm coverage.
+  #
+  # The lane does not stop at the compiler either. It loads the module into node
+  # with Go's own lib/wasm/wasm_exec.js — the same glue web/index.html loads — and
+  # asserts Ruby ran: see web/smoke.mjs. Measured on an M-series host with a cold
+  # GOCACHE, so these are build-from-scratch numbers, not warm ones: build ./...
+  # 14s, vet 18s, the module 97 MB, the node run a few seconds. A GitHub runner is
+  # slower than that host, so budget a handful of minutes; nothing here is
+  # -race-priced and the lane runs in parallel with the others.
+  wasm-js:
+    name: wasm (js, browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: go version && node --version
+      # ./... and not just ./cmd/wasm: #682 was in internal/vm, a package the
+      # playground reaches only transitively, and the breakage was three names in
+      # a table no browser-specific file mentions.
+      - name: Build everything for js/wasm (the #682 regression)
+        run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go build ./...
+      - name: Vet the js/wasm packages
+        run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go vet ./cmd/wasm ./cmd/rbgo ./internal/vm
+      - name: Build the playground module
+        run: CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -o web/rbgo.wasm ./cmd/wasm
+      - name: Run Ruby in a real JS host (node + Go's wasm_exec.js)
+        run: node web/smoke.mjs web/rbgo.wasm
+
+  # The RBGO_BUILD_IT lane. Three integration tests in cmd/rbgo drive `rbgo build`
+  # end to end — native, --closed, and --closed --target wasm — and every one of
+  # them was behind `if os.Getenv("RBGO_BUILD_IT") == ""` with no workflow anywhere
+  # in this repo setting it. TestClosedWasmBuildIntegration fails on the #682
+  # regression with exactly its three errors: the guard was correct, complete, and
+  # unreachable for three days.
+  #
+  # The choice made here is to WIRE IT IN rather than delete the claim, because the
+  # three tests cover what no other lane does: the nested `go build` the rbgo
+  # command performs, that --closed really drops the front-end from the binary, and
+  # that a baked program runs. The cost is what makes it its own lane rather than a
+  # step in `test`: these are full cross-compiles of a ~97 MB module, measured at
+  # 35s cold for all three on an M-series host (they share the build cache, so the
+  # third is nearly free) — cheap next to the 20-90 min -race coverage lane, but
+  # not something to add to its critical path.
+  #
+  # node is installed because TestClosedWasmBuildIntegration now RUNS the module it
+  # builds, and it fails rather than skips if node is missing. A gate that steps
+  # aside when a dependency is absent is the failure this lane exists to correct.
+  build-integration:
+    name: rbgo build integration (RBGO_BUILD_IT)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: go version && node --version
+      - name: go test ./cmd/rbgo with the integration tests enabled
+        env:
+          RBGO_BUILD_IT: '1'
+        run: go test -count=1 -timeout=30m -v ./cmd/rbgo
