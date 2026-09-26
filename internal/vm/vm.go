@@ -261,8 +261,12 @@ type VM struct {
 	// MRI's rb_exec_recursive_paired guard in cmp_equal.
 	objcmpPath map[[2]object.Value]bool
 
-	out    io.Writer
-	errOut io.Writer // $stderr/STDERR sink; defaults to out (no separate stream)
+	out io.Writer
+	// errOut is the fallback $stderr/STDERR sink, MRI's fd 2. It is only a
+	// fallback: diagnostics resolve through curStderr(), which prefers the
+	// Ruby-level $stderr global. New merges it into out; NewWithStderr splits them,
+	// which is what the CLI does so warnings stay out of the program's data stream.
+	errOut io.Writer
 	main   object.Value
 	consts map[string]object.Value // top-level constants (classes live here)
 
@@ -964,9 +968,33 @@ func (vm *VM) putEnv(e *Env) {
 	vm.envFree = append(vm.envFree, e)
 }
 
-// New returns a VM writing program output to out.
-func New(out io.Writer) *VM {
-	vm := &VM{out: out, errOut: out, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
+// New returns a VM writing program output to out, with diagnostics merged into
+// the same writer. An embedder that captures a program's whole output in one
+// buffer wants them together; a command-line front-end does not, and calls
+// NewWithStderr(os.Stdout, os.Stderr) instead — see there for why.
+func New(out io.Writer) *VM { return NewWithStderr(out, out) }
+
+// NewWithStderr returns a VM writing program output to out and everything MRI
+// sends to its fd 2 — $stderr/STDERR writes, Kernel#warn, rb_warn/rb_warning,
+// the deprecation warnings, Kernel#abort's message — to errOut.
+//
+// The two have to be separable because MRI separates them at the descriptor:
+// io.c v3_4_0 Init_IO builds rb_stdout from rb_io_prep_stdout() (the C stdout
+// FILE*) and rb_stderr from rb_io_prep_stderr() (the C stderr FILE*, opened
+// FMODE_WRITABLE|FMODE_SYNC), and every warning reaches the second one —
+// error.c rb_warn calls rb_write_warning_str → Warning.warn →
+// rb_write_error_str, which io.c writes to rb_ractor_stderr(), falling back to
+// fwrite(..., stderr) while $stderr is still the original stream. Merging the
+// two put warnings in a program's *data* stream, so `rbgo gen.rb > out.json`
+// got warning text in the payload (#667).
+//
+// errOut is only the fallback sink: every diagnostic in rbgo goes through
+// vm.curStderr(), which prefers the Ruby-level $stderr global, exactly as
+// rb_write_error_str prefers rb_ractor_stderr(). Reassigning $stderr therefore
+// still captures warnings — which is what mspec's `complain` matcher does, and
+// why the conformance suite could not observe this defect at all.
+func NewWithStderr(out, errOut io.Writer) *VM {
+	vm := &VM{out: out, errOut: errOut, main: object.NewMain(), consts: map[string]object.Value{}, loaded: map[string]bool{}, globals: map[string]object.Value{}}
 	// The controllable clock reads the real wall clock through nowUnix (the same
 	// whole-second determinism seam Time.now/Date.today already honour) until a
 	// require "timecop" program freezes/travels/scales it. Unmocked, Current()

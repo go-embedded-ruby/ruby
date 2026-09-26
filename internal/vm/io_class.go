@@ -426,6 +426,9 @@ func (vm *VM) copyStreamRead(src object.Value, length int, hasLen bool, srcOffse
 		return strBytesOrEmpty(vm.send(o, "read", ra, nil))
 	}
 	if _, isStr := src.(*object.String); isStr || vm.respondsToDynamic(src, "to_path") {
+		if o, ok := vm.copyStreamCheckIO(src); ok {
+			return vm.copyStreamRead(o, length, hasLen, srcOffset, hasOff)
+		}
 		ra := []object.Value{object.NewString(pathArg(vm, src))}
 		if hasLen || hasOff {
 			if hasLen {
@@ -509,10 +512,44 @@ func (vm *VM) copyStreamWrite(dst object.Value, data []byte) {
 		return
 	}
 	if _, isStr := dst.(*object.String); isStr || vm.respondsToDynamic(dst, "to_path") {
+		if o, ok := vm.copyStreamCheckIO(dst); ok {
+			vm.copyStreamWrite(o, data)
+			return
+		}
 		vm.ioWriteFile([]object.Value{object.NewString(pathArg(vm, dst)), s})
 		return
 	}
 	vm.send(dst, "write", []object.Value{s}, nil)
+}
+
+// copyStreamCheckIO is io.c copy_stream_body's rb_io_check_io step, which runs
+// on both arguments BEFORE the "open the named file" branch:
+//
+//	VALUE tmp_io = rb_io_check_io(dst_io);
+//	if (!NIL_P(tmp_io)) dst_io = GetWriteIO(tmp_io);
+//	else if (!RB_TYPE_P(dst_io, T_FILE)) { ... rb_class_new_instance(..., rb_cFile) }
+//
+// An object that is not itself an IO but answers #to_io IS that IO, and
+// copy_stream works through the handle — writing at its current position and
+// leaving the position at the last write. Only when the conversion yields
+// nothing is the path opened.
+//
+// The order is the whole point. A Tempfile answers BOTH #to_io and #to_path
+// (both delegate to the File it wraps), and taking the path first wrote the file
+// behind the handle's back: the handle's position never moved (#pos stayed 0),
+// a preceding #write was ignored, and the handle's own buffer overwrote the
+// copied bytes on the next flush. Three examples of the "to a Tempfile" block of
+// core/io/copy_stream_spec.rb say so.
+//
+// The check stays inside the String / #to_path branch because that is where MRI
+// puts it: an object answering #to_io but NOT #to_path gets dst_fptr == NULL and
+// goes to copy_stream_fallback's duck-typed #read / #write instead.
+func (vm *VM) copyStreamCheckIO(v object.Value) (*IOObj, bool) {
+	if _, isStr := v.(*object.String); isStr || !vm.respondsToDynamic(v, "to_io") {
+		return nil, false
+	}
+	o, ok := vm.send(v, "to_io", nil, nil).(*IOObj)
+	return o, ok
 }
 
 // strBytesOrEmpty returns v's bytes when it is a String, else an empty slice

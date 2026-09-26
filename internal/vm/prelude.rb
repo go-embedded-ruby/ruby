@@ -2431,7 +2431,24 @@ class Tempfile
     @counter = (@counter || 0) + 1
   end
 
-  def initialize(basename = "", tmpdir = nil, mode: "w+", **_opts)
+  # mode: is an INTEGER flag set that is OR'd with the flags that create the
+  # file, not an fopen-style String. lib/tempfile.rb v3_4_0 Tempfile#initialize
+  # defaults it to 0 and does
+  #
+  #     @mode = mode|File::RDWR|File::CREAT|File::EXCL
+  #
+  # so `Tempfile.new("x", mode: File::RDONLY)` — RDONLY being 0 — still creates a
+  # readable-and-writable file. Passing the argument straight to File.open instead
+  # opened read-only on a path that does not exist yet and raised ENOENT, which
+  # took out the whole `before :each` of core/io/copy_stream_spec's "to a
+  # Tempfile" block (#670). A String mode now raises NoMethodError on #| , as it
+  # does in MRI (library/tempfile/create_spec asserts exactly that).
+  #
+  # The remaining keywords reach File.open, as they do in MRI: Tempfile passes
+  # them to Dir::Tmpname.create, which consumes max_try: and yields the rest back
+  # for the open, with perm: forced to 0600 — the temporary file is the caller's
+  # alone. anonymous: belongs to Tempfile.create and is consumed there.
+  def initialize(basename = "", tmpdir = nil, mode: 0, **opts)
     require "tmpdir"
     prefix, suffix = basename.is_a?(Array) ? basename : [basename.to_s, ""]
     dir = tmpdir || Dir.tmpdir
@@ -2444,7 +2461,11 @@ class Tempfile
         break
       end
     end
-    @file = File.open(@path, mode)
+    @mode = mode | File::RDWR | File::CREAT | File::EXCL
+    fopts = {}
+    opts.each { |k, v| fopts[k] = v unless k == :max_try }
+    fopts[:perm] = 0600
+    @file = File.open(@path, @mode, **fopts)
     if block_given?
       begin
         yield self
@@ -2468,8 +2489,15 @@ class Tempfile
     new(*args, &block)
   end
 
+  # anonymous: is Tempfile.create's own keyword (lib/tempfile.rb v3_4_0 splits on
+  # it between create_anonymous and create_with_filename); #initialize does not
+  # take it, so it is consumed here rather than forwarded to File.open. The
+  # unlinked-file variant it selects is not implemented — this keeps the keyword
+  # from turning into an open error.
   def self.create(basename = "", tmpdir = nil, **opts)
-    t = new(basename, tmpdir, **opts)
+    fwd = {}
+    opts.each { |k, v| fwd[k] = v unless k == :anonymous }
+    t = new(basename, tmpdir, **fwd)
     if block_given?
       begin
         return yield(t)
