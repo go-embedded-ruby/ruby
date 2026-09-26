@@ -243,19 +243,36 @@ func num2dblName(v object.Value) string {
 // reports whether the wait ended on the timeout rather than a wake. fn runs in
 // the calling goroutine, so timedOut is written and read without a data race.
 func (vm *VM) queueBlock(ch chan struct{}, timeout float64, hasTimeout bool) (timedOut bool) {
+	// The wait must be interruptible: MRI's queue_do_pop sleeps through
+	// rb_thread_sleep_deadly_allow_spurious_wakeup (thread_sync.c queue_sleep),
+	// which is the general interrupt-aware thread sleep, and the surrounding
+	// rb_ensure (queue_sleep_done) unlinks the waiter on the way out. A plain
+	// channel receive has neither property, so a Thread#kill on a thread blocked
+	// in Queue#pop never landed and a join on it never returned.
 	if !hasTimeout {
-		vm.threadBlock(func() { <-ch })
+		vm.interruptibleWait(ch)
 		return false
 	}
-	vm.threadBlock(func() {
-		t := time.NewTimer(time.Duration(timeout * float64(time.Second)))
-		defer t.Stop()
-		select {
-		case <-ch:
-		case <-t.C:
-			timedOut = true
-		}
-	})
+	_, timedOut = vm.interruptibleWaitFor(ch, time.Duration(timeout*float64(time.Second)))
+	return timedOut
+}
+
+// queueWait registers a waiter on *waiters, blocks interruptibly on it, and
+// unlinks it again — the unlink through a defer, because an interrupt leaves the
+// wait by panicking and a waiter left behind would swallow the wake meant for a
+// live thread. MRI spells that defer as the rb_ensure around queue_sleep whose
+// cleanup, queue_sleep_done, is exactly this ccan_list_del.
+func (vm *VM) queueWait(waiters *[]chan struct{}, timeout float64, hasTimeout bool) (timedOut bool) {
+	ch := make(chan struct{})
+	*waiters = append(*waiters, ch)
+	defer func() { *waiters = removeChan(*waiters, ch) }()
+	timedOut = vm.queueBlock(ch, timeout, hasTimeout)
+	// sleep_forever runs RUBY_VM_CHECK_INTS_BLOCKING around its sleep (thread.c),
+	// so an interrupt that ended the wait fires HERE. Without this the caller's
+	// `while the queue is empty` loop simply went back to sleep and the interrupt
+	// was never delivered — the wait had become interruptible without becoming
+	// interrupted. The deferred unlink above still runs as this raise unwinds.
+	vm.serviceSafepointAt(vm.currentThread, true)
 	return timedOut
 }
 
@@ -271,10 +288,7 @@ func (vm *VM) queuePush(q *RQueue, args []object.Value) object.Value {
 		if nonBlock {
 			raise("ThreadError", "queue full")
 		}
-		ch := make(chan struct{})
-		q.pushq = append(q.pushq, ch)
-		timedOut := vm.queueBlock(ch, timeout, hasTimeout)
-		q.pushq = removeChan(q.pushq, ch)
+		timedOut := vm.queueWait(&q.pushq, timeout, hasTimeout)
 		if q.closed {
 			raise("ClosedQueueError", "queue closed")
 		}
@@ -298,11 +312,7 @@ func (vm *VM) queuePop(q *RQueue, nonBlock bool, timeout float64, hasTimeout boo
 		if nonBlock {
 			raise("ThreadError", "queue empty")
 		}
-		ch := make(chan struct{})
-		q.waitq = append(q.waitq, ch)
-		timedOut := vm.queueBlock(ch, timeout, hasTimeout)
-		q.waitq = removeChan(q.waitq, ch)
-		if timedOut {
+		if vm.queueWait(&q.waitq, timeout, hasTimeout) {
 			return object.NilV
 		}
 	}
