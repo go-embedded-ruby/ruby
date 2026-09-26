@@ -134,12 +134,7 @@ func (d *mDumper) writeValue(v object.Value) {
 		if d.link(x) {
 			return
 		}
-		d.writeExtended(x)
-		d.buf = append(d.buf, '[')
-		d.writeLong(len(x.Elems))
-		for _, e := range x.Elems {
-			d.writeValue(e)
-		}
+		d.writeArray(x)
 	case *object.Hash:
 		if d.link(x) {
 			return
@@ -264,6 +259,64 @@ func (d *mDumper) writeEncodingIvar(e *marshalEncIvar) {
 	d.writeValue(object.NewStringBytesEnc([]byte(e.name), "ASCII-8BIT"))
 }
 
+// marshalIvars returns v's instance variables in first-assignment order and the
+// table to read their values from, or nil when it has none to dump.
+//
+// It answers for the kinds with no ivar field of their own — String, Array,
+// Hash, Regexp — whose variables live in the VM-wide generic table, MRI's
+// generic_iv_tbl_. That table is what #674 added; before it, a write to one of
+// those kinds was discarded in silence (#672), so Marshal had nothing to
+// serialise and emitting nothing was indistinguishable from correct. It is
+// correct no longer: MRI's has_ivars reaches every one of these kinds through
+// its `default: generic:` label and counts what rb_ivar_foreach reports.
+//
+// The order pointer is non-nil for every kind routed here (genericIvars records
+// the assignment order), so a nil one means there is nothing to report.
+func marshalIvars(v object.Value) ([]string, map[string]object.Value) {
+	st := ivarStoreOf(v, false)
+	if len(st.tbl) == 0 || st.order == nil {
+		return nil, nil
+	}
+	names := make([]string, 0, len(*st.order))
+	for _, n := range *st.order {
+		if _, live := st.tbl[n]; live {
+			names = append(names, n)
+		}
+	}
+	return names, st.tbl
+}
+
+// writeIvarWrapped emits one value that may carry instance variables, an
+// encoding, or both, in MRI's w_object order: the 'I' (TYPE_IVAR) byte, then
+// w_uclass's 'e'/'C' prefixes, then the payload, then ONE ivar list covering
+// both the encoding ivar and the object's own variables.
+//
+// TYPE_IVAR WRAPS the object; it is not a field of it. The count and the pairs
+// come after the payload, and the encoding ivar comes first within them
+// (w_ivar subtracts what w_encoding wrote from the count it already emitted).
+// The 'I' byte takes no object-link id of its own: on the dump side w_remember
+// runs before it, and on the load side r_object0 registers the wrapped object,
+// so the wrapper is transparent to every back-reference.
+func (d *mDumper) writeIvarWrapped(v object.Value, enc *marshalEncIvar, payload func()) {
+	names, tbl := marshalIvars(v)
+	n := len(names)
+	if enc != nil {
+		n++
+	}
+	if n > 0 {
+		d.buf = append(d.buf, 'I')
+	}
+	d.writeExtended(v)
+	payload()
+	if n > 0 {
+		d.writeLong(n)
+		if enc != nil {
+			d.writeEncodingIvar(enc)
+		}
+		d.writeIvarPairs(names, tbl)
+	}
+}
+
 // writeExtended emits the 'e' (TYPE_EXTENDED) prefix naming each module
 // singleton-extended into v, mirroring MRI's w_extended (marshal.c) called with
 // check=TRUE: the singleton class is stepped over and every module between it
@@ -296,18 +349,25 @@ func (d *mDumper) writeString(s *object.String) {
 	if d.link(s) {
 		return
 	}
-	// MRI writes the 'I' ivar wrapper first, then w_uclass's 'e'/'C' prefixes,
-	// then the payload, then the ivar list (w_object in marshal.c). A binary
-	// string has no encoding ivar and so needs no wrapper.
-	enc := marshalEncodingIvar(s.EncName())
-	if enc != nil {
-		d.buf = append(d.buf, 'I')
-	}
-	d.writeExtended(s)
-	d.writeStringPayload(s)
-	if enc != nil {
-		d.writeLong(1)
-		d.writeEncodingIvar(enc)
+	// A binary string with no instance variables has no encoding ivar either, so
+	// it needs no wrapper at all; one with either takes the 'I' container.
+	d.writeIvarWrapped(s, marshalEncodingIvar(s.EncName()), func() { d.writeStringPayload(s) })
+}
+
+// writeArray emits an Array: the 'I' wrapper when it carries instance
+// variables (an Array is not encoding-capable, so it never has an encoding
+// ivar), then the 'e' prefixes, then the elements, then the ivar list.
+func (d *mDumper) writeArray(a *object.Array) {
+	d.writeIvarWrapped(a, nil, func() { d.writeArrayPayload(a) })
+}
+
+// writeArrayPayload emits just the TYPE_ARRAY tag and elements — the Array
+// counterpart of writeStringPayload, so a 'C' container can own the wrapper.
+func (d *mDumper) writeArrayPayload(a *object.Array) {
+	d.buf = append(d.buf, '[')
+	d.writeLong(len(a.Elems))
+	for _, e := range a.Elems {
+		d.writeValue(e)
 	}
 }
 
@@ -323,7 +383,15 @@ func (d *mDumper) writeHash(h *object.Hash) {
 	if !object.IsNil(h.DefaultProc) {
 		raise("TypeError", "can't dump hash with default proc")
 	}
-	d.writeExtended(h)
+	// A Hash is not encoding-capable, so the wrapper is the ivar list alone. It
+	// opens BEFORE the compare_by_identity 'C' container below, because MRI
+	// writes TYPE_IVAR before w_uclass and before that container.
+	d.writeIvarWrapped(h, nil, func() { d.writeHashPayload(h) })
+}
+
+// writeHashPayload emits the Hash body: the compare_by_identity 'C' container
+// when it applies, then the entries and the default value.
+func (d *mDumper) writeHashPayload(h *object.Hash) {
 	// A Hash put into compare_by_identity mode carries no inline flag in the
 	// stream, so MRI wraps it in a 'C' container naming the Hash class; loading
 	// that container re-applies compare_by_identity.
@@ -393,17 +461,10 @@ func (d *mDumper) writeRegexp(r *Regexp) {
 	opt := regexpMarshalOpts(r)
 	// As for a String: the 'I' wrapper, then w_uclass's 'e'/'C' prefixes, then the
 	// payload, then the ivar list. A binary (ASCII-8BIT) Regexp carries no
-	// encoding ivar, so it is emitted bare.
-	enc := marshalEncodingIvar(regexpMarshalEnc(r))
-	if enc != nil {
-		d.buf = append(d.buf, 'I')
-	}
-	d.writeExtended(r)
-	d.writeRegexpPayload(r, opt)
-	if enc != nil {
-		d.writeLong(1)
-		d.writeEncodingIvar(enc)
-	}
+	// encoding ivar, so one with no variables of its own is emitted bare.
+	d.writeIvarWrapped(r, marshalEncodingIvar(regexpMarshalEnc(r)), func() {
+		d.writeRegexpPayload(r, opt)
+	})
 }
 
 // writeRegexpPayload emits just the TYPE_REGEXP tag, source and option byte —
@@ -716,16 +777,29 @@ func (d *mDumper) writeUserDef(o *RObject) {
 	// skips as "counted elsewhere" — and for a USERDEF container there is no
 	// elsewhere, so the object's own variables are never written. Only the
 	// String's contribute: its encoding, and any variable #_dump set on it.
+	//
+	// writeIvarWrapped is not used here: this container writes no 'e' prefix
+	// (MRI calls w_class with check=FALSE, so w_extended emits nothing), and the
+	// object must be remembered AFTER its variables, which is the reverse of
+	// every other container.
 	enc := marshalEncodingIvar(str.EncName())
+	names, tbl := marshalIvars(str)
+	n := len(names)
 	if enc != nil {
+		n++
+	}
+	if n > 0 {
 		d.buf = append(d.buf, 'I')
 	}
 	d.buf = append(d.buf, 'u')
 	d.writeSymbol(o.class.name)
 	d.writeBytes(str.Str())
-	if enc != nil {
-		d.writeLong(1)
-		d.writeEncodingIvar(enc)
+	if n > 0 {
+		d.writeLong(n)
+		if enc != nil {
+			d.writeEncodingIvar(enc)
+		}
+		d.writeIvarPairs(names, tbl)
 	}
 	d.remember(o)
 }
@@ -1092,6 +1166,10 @@ func (r *mReader) readIvarWrapped() object.Value {
 func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 	switch b := base.(type) {
 	case *object.String:
+		// Only :E and :encoding are the encoding; MRI's r_ivar sends everything
+		// sym2encidx does not recognise to rb_ivar_set. Without the default below
+		// each of those was dropped on the floor, so a String round-tripped
+		// through rbgo lost every variable MRI had written for it.
 		switch name {
 		case "E":
 			if val.Truthy() {
@@ -1103,6 +1181,8 @@ func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 			if s, ok := val.(*object.String); ok {
 				b.Enc = s.Str()
 			}
+		default:
+			setIvar(base, name, val)
 		}
 	case *Regexp:
 		// The encoding ivar records the Regexp's source encoding, which #encoding
@@ -1118,6 +1198,8 @@ func (r *mReader) applyIvar(base object.Value, name string, val object.Value) {
 			if s, ok := val.(*object.String); ok {
 				b.srcEnc = s.Str()
 			}
+		default:
+			setIvar(base, name, val)
 		}
 	case *RObject:
 		// A built-in subclass loaded from a 'C' container is ONE Ruby object: the
