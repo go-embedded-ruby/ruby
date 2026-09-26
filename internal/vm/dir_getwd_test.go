@@ -221,6 +221,23 @@ func TestDirPwdWorkingDirectoryRecreated(t *testing.T) {
 // passes against the code from before #681 as well — and its job is to fail if
 // that confirmation ever starts rejecting a live directory.
 func TestDirPwdIntact(t *testing.T) {
+	// Not runnable on Windows, for two reasons that are both about the PLATFORM's
+	// idea of a canonical path and neither of which has an MRI witness on this
+	// development host (MRI uses rb_w32_ugetcwd there, dir.c line 140):
+	//
+	//   - the 8.3 short name. t.TempDir hands back
+	//     C:/Users/runneradmin/..., GetCurrentDirectory answers
+	//     C:/Users/RUNNER~1/..., and the two denote the same directory. That is
+	//     open issue #636, which these three assertions are the first thing in the
+	//     repo to reproduce on a runner rather than reason about;
+	//   - GetCurrentDirectory does not resolve a symlink or junction in the path,
+	//     so the symlink case answers the link and not its target.
+	//
+	// Canonicalising the EXPECTED path to match would bake both behaviours into a
+	// test and make #636 harder to find later, so this skips instead.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows reports the 8.3 short name and does not resolve a symlinked cwd; see #636, and MRI's rb_w32_ugetcwd is unwitnessed here")
+	}
 	real := t.TempDir()
 	// On darwin the per-test temp directory sits under /var, itself a symlink to
 	// /private/var, so the PHYSICAL path is what Dir.pwd must report: MRI's

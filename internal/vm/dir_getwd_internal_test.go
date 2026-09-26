@@ -8,6 +8,8 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -48,11 +50,8 @@ func TestGetwdOrFailSeams(t *testing.T) {
 	// rb_syserr_fail(errno, "getcwd") does. EACCES is what getcwd(3) reports when
 	// a parent directory has become unsearchable.
 	osGetwd = func() (string, error) { return "", syscall.EACCES }
-	if got := caughtRaise(t, func() { getwdOrFail() }); got.Class != "Errno::EACCES" ||
-		got.Message != "Permission denied - getcwd" {
-		t.Errorf("osGetwd failing: got %q / %q, want Errno::EACCES / %q",
-			got.Class, got.Message, "Permission denied - getcwd")
-	}
+	checkGetcwdFailure(t, "osGetwd failing", caughtRaise(t, func() { getwdOrFail() }),
+		"Errno::EACCES", "Permission denied")
 
 	// stat(".") failing: the confirmation cannot be made, so the stat's own errno
 	// is reported — the same one getcwd(3) would have failed with.
@@ -63,10 +62,32 @@ func TestGetwdOrFailSeams(t *testing.T) {
 		}
 		return os.Stat(name)
 	}
-	if got := caughtRaise(t, func() { getwdOrFail() }); got.Class != "Errno::ENOENT" ||
-		got.Message != "No such file or directory - getcwd" {
-		t.Errorf(`stat(".") failing: got %q / %q, want Errno::ENOENT / %q`,
-			got.Class, got.Message, "No such file or directory - getcwd")
+	checkGetcwdFailure(t, `stat(".") failing`, caughtRaise(t, func() { getwdOrFail() }),
+		"Errno::ENOENT", "No such file or directory")
+}
+
+// checkGetcwdFailure asserts what rb_syserr_fail(errno, "getcwd") guarantees on
+// every platform — the Errno::Exxx class, and a message ending in the OPERATION
+// name "- getcwd" — and, on POSIX only, the strerror sentence in front of it.
+//
+// The sentence is the C library's, not Ruby's: Windows maps syscall.ENOENT onto
+// ERROR_FILE_NOT_FOUND, so errnoStrerror renders it "The system cannot find the
+// file specified." there. Asserting the POSIX wording everywhere was an
+// assertion about libc rather than about rbgo; narrowing it is not the same as
+// loosening a correct one, and the POSIX lane still pins the text exactly.
+func checkGetcwdFailure(t *testing.T, label string, got RubyError, wantClass, wantStrerror string) {
+	t.Helper()
+	if got.Class != wantClass {
+		t.Errorf("%s: class %q, want %q", label, got.Class, wantClass)
+	}
+	if !strings.HasSuffix(got.Message, " - getcwd") {
+		t.Errorf("%s: message %q, want it to end in %q", label, got.Message, " - getcwd")
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if want := wantStrerror + " - getcwd"; got.Message != want {
+		t.Errorf("%s: message %q, want %q", label, got.Message, want)
 	}
 }
 
