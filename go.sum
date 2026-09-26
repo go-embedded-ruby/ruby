@@ -527,8 +527,8 @@ github.com/go-ruby-paper-trail/paper-trail v0.0.0-20260717071745-42a249656e5a h1
 github.com/go-ruby-paper-trail/paper-trail v0.0.0-20260717071745-42a249656e5a/go.mod h1:z370KNJcUH8n39yLdlT0Y1QvHukxjsq1XjGpIzvfqWE=
 github.com/go-ruby-parquet/parquet v0.0.0-20260923211642-bc75bcb9031e h1:pxhP3nIRxTpj99e74JAVpGj7JQtRSNqLb+B5x2WT5N4=
 github.com/go-ruby-parquet/parquet v0.0.0-20260923211642-bc75bcb9031e/go.mod h1:wC+J6qfQ8C0aKgi5qsbR03DYrLLuXXezUBHl967am/E=
-github.com/go-ruby-parser/parser v0.5.0 h1:ew+1IHpmvYbo7T0Gu1+gFpTHmj1jabwU9Uis3zSQUrk=
-github.com/go-ruby-parser/parser v0.5.0/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
+github.com/go-ruby-parser/parser v0.6.0 h1:bjEZP8wJDiNVQbIoxD6ehqFZvjakDUHB5Wc0cCUkdWg=
+github.com/go-ruby-parser/parser v0.6.0/go.mod h1:NRbX4dYcQ6CgcaSaMmu1dh95QuKGq+RdenUoWU73214=
 github.com/go-ruby-pathname/pathname v0.0.0-20260916100446-0824484b665f h1:9pt89wlAp12vbCNGFYmbSqp/PJTHRwUx1yNDXW5hWRI=
 github.com/go-ruby-pathname/pathname v0.0.0-20260916100446-0824484b665f/go.mod h1:IvW5q5Kyl5l3hrYwiHylOEmk5hpGSo7XqcmUXBHF5H0=
 github.com/go-ruby-pg/pg v0.0.0-20260916100523-3831ec811a67 h1:X9MKhEAV60oYoL94tqb11lfLw3yW097mVqfjDdy5PK0=
